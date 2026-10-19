@@ -55,6 +55,7 @@ type decode_error =
   | Empty_task_ids
   | Duplicate_task_id of string
   | Invalid_tool_name of string
+  | Invalid_composition_execution_id
   | Invalid_nested_composition_scope of string
   | Invalid_turn_ref of string
   | Turn_ref_session_mismatch
@@ -133,6 +134,7 @@ let decode_error_code = function
   | Empty_task_ids -> "empty_task_ids"
   | Duplicate_task_id _ -> "duplicate_task_id"
   | Invalid_tool_name _ -> "invalid_tool_name"
+  | Invalid_composition_execution_id -> "invalid_composition_execution_id"
   | Invalid_nested_composition_scope _ -> "invalid_nested_composition_scope"
   | Invalid_turn_ref _ -> "invalid_turn_ref"
   | Turn_ref_session_mismatch -> "turn_ref_session_mismatch"
@@ -226,7 +228,7 @@ let store_error_to_string = function
     "event log failed: " ^ Fs_compat.private_jsonl_transaction_error_to_string error
 ;;
 
-let schema = "masc.skill-activations/v7"
+let schema = "masc.skill-activations/v8"
 let activations ledger = ledger.activations
 let transition_rejections ledger = ledger.transition_rejections
 let async_result_deliveries ledger = ledger.async_result_deliveries
@@ -343,8 +345,10 @@ let make_activation_evidence
     match invocation with
     | Instruction_invocation { served_content; _ } ->
       validate_served_content served_content
-    | Composition_invocation { tool_name; _ } ->
-      if Safe_identifier.is_portable_name tool_name then Ok () else Error (Invalid_tool_name tool_name)
+    | Composition_invocation { tool_name; execution_id; _ } ->
+      if not (Safe_identifier.is_portable_name tool_name) then Error (Invalid_tool_name tool_name)
+      else if String.trim (Ids.Execution_id.to_string execution_id) = "" then Error Invalid_composition_execution_id
+      else Ok ()
     | Nested_composition_invocation { tool_name; scope; _ } ->
       let* () = if Safe_identifier.is_portable_name tool_name then Ok () else Error (Invalid_tool_name tool_name) in
       validate_nested_scope ~skill_tool_use_id scope
@@ -511,10 +515,11 @@ let invocation_to_yojson = function
       ; "origin", instruction_origin_to_yojson origin
       ; "served_content", served_content_to_yojson served_content
       ]
-  | Composition_invocation { origin; tool_name } ->
+  | Composition_invocation { origin; tool_name; execution_id } ->
     `Assoc
       [ "kind", `String "composition"
       ; "origin", composition_origin_to_yojson origin
+      ; "execution_id", Ids.Execution_id.to_yojson execution_id
       ; "tool_name", `String tool_name
       ]
   | Nested_composition_invocation { origin; tool_name; scope } ->
@@ -1034,7 +1039,7 @@ let decode_invocation json =
     | "composition" ->
       exact_fields
         ~object_name:"invocation"
-        ~allowed:[ "kind"; "origin"; "tool_name" ]
+        ~allowed:[ "kind"; "origin"; "tool_name"; "execution_id" ]
         fields
     | "nested_composition" ->
       exact_fields ~object_name:"invocation" ~allowed:[ "kind"; "origin"; "tool_name"; "scope" ] fields
@@ -1059,7 +1064,9 @@ let decode_invocation json =
     let* origin = decode_composition_origin origin_json in
     let* tool_name = string_field "tool_name" fields in
     if Safe_identifier.is_portable_name tool_name
-    then Ok (Composition_invocation { origin; tool_name })
+    then (let* execution_id = string_field "execution_id" fields in
+      if String.trim execution_id = "" then Error Invalid_composition_execution_id
+      else Ok (Composition_invocation { origin; tool_name; execution_id = Ids.Execution_id.of_string execution_id }))
     else Error (Invalid_tool_name tool_name)
   | "nested_composition" ->
     let* origin = decode_composition_origin origin_json in

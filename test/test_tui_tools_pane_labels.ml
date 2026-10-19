@@ -24,7 +24,7 @@ let activation =
 let ledger_json revision =
   `Assoc
     [ "status", `String "available"; "keeper_name", `String "imp"
-    ; "ledger", `Assoc [ "schema", `String "masc.skill-activations/v7"; "workspace_key", `String hex64; "session_id", `String trace_id; "revision", `String revision; "activations", `List [ activation ]; "transition_rejections", `List []; "async_result_deliveries", `List []; "async_actions", `List [] ] ]
+    ; "ledger", `Assoc [ "schema", `String "masc.skill-activations/v8"; "workspace_key", `String hex64; "session_id", `String trace_id; "revision", `String revision; "activations", `List [ activation ]; "transition_rejections", `List []; "async_result_deliveries", `List []; "async_actions", `List [] ] ]
 
 let async_json =
   `Assoc

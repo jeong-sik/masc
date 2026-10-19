@@ -170,11 +170,12 @@ let test_held_only_and_session_origins_are_derived_from_exact_refs () =
    with
    | Ok _ -> ()
    | Error error -> fail (Recorder.error_to_string error));
+  let composition_invocation = invocation "call-composition" in
   (match
      Recorder.record_composition
        ~config
        context
-       ~invocation:(invocation "call-composition")
+       ~invocation:composition_invocation
        ~tool_name:"keeper_compose_global"
        session_reference
    with
@@ -190,12 +191,15 @@ let test_held_only_and_session_origins_are_derived_from_exact_refs () =
      | [ Ledger.Instruction_invocation
            { origin = Ledger.Task_instruction { task_ids }; _ }
        ; Ledger.Composition_invocation
-           { origin = Ledger.Session_composition; tool_name }
+           { origin = Ledger.Session_composition; tool_name; execution_id }
        ] ->
        check (list string) "held Task origin" [ "task-held" ]
          (Ledger.task_id_set_to_list task_ids
           |> List.map Keeper_id.Task_id.to_string);
        check string "composition origin" "keeper_compose_global" tool_name;
+       check string "sealed original opaque invocation execution"
+         (Ids.Execution_id.to_string (Keeper_tool_call_log.invocation_execution_id ~invocation:composition_invocation))
+         (Ids.Execution_id.to_string execution_id);
        let summary = Ledger.summarize ledger in
        check int "one instruction body" 1 summary.skill_bodies_served;
        check int "composition is not a body" 1 summary.composition_invocations;

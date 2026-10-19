@@ -75,6 +75,7 @@ type invocation =
   | Composition_invocation of
       { origin : composition_origin
       ; tool_name : string
+      ; execution_id : Ids.Execution_id.t
       }
 
   | Nested_composition_invocation of
@@ -187,6 +188,7 @@ type decode_error =
   | Empty_task_ids
   | Duplicate_task_id of string
   | Invalid_tool_name of string
+  | Invalid_composition_execution_id
   | Invalid_nested_composition_scope of string
   | Invalid_turn_ref of string
   | Turn_ref_session_mismatch

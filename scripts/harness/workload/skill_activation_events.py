@@ -7,7 +7,7 @@ event: an activation recorded, deliveries observed, an action observed, or a
 transition rejected. Each row ends with a newline; text after the last newline
 is a row the server is still appending.
 
-The ledger the Dashboard serves under ``masc.skill-activations/v7`` is those
+The ledger the Dashboard serves under ``masc.skill-activations/v8`` is those
 events applied in order. ``fold_event_log`` applies them with the rules of
 ``Keeper_skill_activation_ledger.apply_event`` and returns that projection, so
 a reader can compare the file with what the server reports.
@@ -30,7 +30,7 @@ from typing import TypeAlias, Union, assert_never
 
 EVENTS_FILENAME = "skill-activation-events.jsonl"
 EVENTS_SCHEMA = "masc.skill-activation-events/v1"
-LEDGER_SCHEMA = "masc.skill-activations/v7"
+LEDGER_SCHEMA = "masc.skill-activations/v8"
 
 JsonValue: TypeAlias = Union[
     None, bool, int, float, str, list["JsonValue"], dict[str, "JsonValue"]
@@ -412,19 +412,16 @@ def _invocation(value: JsonValue, row: int) -> None:
         raise _malformed("unknown invocation kind", row)
     if kind == "nested_composition":
         _exact_object(invocation, ("kind", "origin", "tool_name", "scope"), "invocation", row)
-        _invocation({"kind": "composition", "origin": invocation["origin"], "tool_name": invocation["tool_name"]}, row)
-        scope = _exact_object(invocation["scope"], ("parent_tool_use_id", "composition_run_id", "alias"), "nested scope", row)
-        _nonblank(scope, "parent_tool_use_id", "nested scope", row)
-        _uuid_v7(scope, "composition_run_id", row)
-        if _string(scope, "alias", "nested scope", row) == "":
-            raise _malformed("empty child alias", row)
-        return
-    payload = "served_content" if kind == "instruction" else "tool_name"
-    _exact_object(invocation, ("kind", "origin", payload,), "invocation", row)
+    elif kind == "composition":
+        _exact_object(invocation, ("kind", "origin", "tool_name", "execution_id"), "invocation", row)
+        _nonblank(invocation, "execution_id", "invocation", row)
+    else:
+        _exact_object(invocation, ("kind", "origin", "served_content"), "invocation", row)
+    origin_kind = "instruction" if kind == "instruction" else "composition"
     origin = _object(invocation["origin"], "origin", row)
-    if origin.get("kind") == f"session_{kind}":
+    if origin.get("kind") == f"session_{origin_kind}":
         _exact_object(origin, ("kind",), "origin", row)
-    elif origin.get("kind") == f"task_{kind}":
+    elif origin.get("kind") == f"task_{origin_kind}":
         _exact_object(origin, ("kind", "task_ids",), "origin", row)
         ids = origin["task_ids"]
         if (not isinstance(ids, list) or not ids
@@ -434,6 +431,14 @@ def _invocation(value: JsonValue, row: int) -> None:
             raise _malformed("origin.task_ids is not a nonempty unique Task id set", row)
     else:
         raise _malformed("origin kind does not match invocation", row)
+    if kind == "nested_composition":
+        _portable(invocation, "tool_name", "invocation", row)
+        scope = _exact_object(invocation["scope"], ("parent_tool_use_id", "composition_run_id", "alias"), "nested scope", row)
+        _nonblank(scope, "parent_tool_use_id", "nested scope", row)
+        _uuid_v7(scope, "composition_run_id", row)
+        if _string(scope, "alias", "nested scope", row) == "":
+            raise _malformed("empty child alias", row)
+        return
     if kind == "composition":
         _portable(invocation, "tool_name", "invocation", row)
         return
@@ -589,8 +594,8 @@ def _uuid_v7(value: JsonObject, name: str, row: int) -> None:
 
 def _sdk_invocation(value: JsonValue, row: int) -> JsonObject:
     invocation = _exact_object(value, ("tool_use_id", "turn", "schedule", "completion"), "SDK occurrence", row)
-    tool_id = _nonblank(invocation, "tool_use_id", "SDK occurrence", row)
-    turn = _natural(invocation, "turn", "SDK occurrence", row)
+    _nonblank(invocation, "tool_use_id", "SDK occurrence", row)
+    _natural(invocation, "turn", "SDK occurrence", row)
     schedule = _exact_object(invocation["schedule"], ("planned_index", "batch_index", "batch_size", "execution_mode"), "SDK schedule", row)
     for name in ("planned_index", "batch_index", "batch_size"):
         _natural(schedule, name, "SDK schedule", row)

@@ -349,7 +349,7 @@ event/projection replay compare that frame before accepting the handoff. A
 changed or unavailable original ledger refuses the write with a structured log.
 It does not dispatch another worker or create a substitute activation.
 
-`masc.skill-activations/v7` exposes these facts as `async_result_deliveries`, with
+`masc.skill-activations/v8` exposes these facts as `async_result_deliveries`, with
 separate original/physical turn references, status SDK occurrence, receiving
 runtime, canonical request, raw transport receipt, presentation and child frame
 digests. Re-observing an identical physical handoff retains its first durable

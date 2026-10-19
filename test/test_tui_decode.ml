@@ -4107,7 +4107,7 @@ let skill_activation_projection_json activations =
     ; "keeper_name", `String "codex-mcp-client"
     ; ( "ledger"
       , `Assoc
-          [ "schema", `String "masc.skill-activations/v7"
+          [ "schema", `String "masc.skill-activations/v8"
           ; "workspace_key", `String workspace_key
           ; "session_id", `String session_id
           ; "revision", `String revision
@@ -4195,7 +4195,7 @@ let test_decode_skill_activations_keeps_exact_receipt_and_origin () =
       let sao_task_ids, sao_tool_name =
         match first.invocation with
         | Keeper_skill_activation_ledger.Composition_invocation
-            { origin = Task_composition { task_ids }; tool_name } ->
+            { origin = Task_composition { task_ids }; tool_name; _ } ->
           ( Keeper_skill_activation_ledger.task_id_set_to_list task_ids
           , tool_name )
         | _ -> Alcotest.fail "expected task composition origin"
@@ -4203,7 +4203,7 @@ let test_decode_skill_activations_keeps_exact_receipt_and_origin () =
       let session_tool =
         match second.invocation with
         | Keeper_skill_activation_ledger.Composition_invocation
-            { origin = Session_composition; tool_name } ->
+            { origin = Session_composition; tool_name; _ } ->
           tool_name
         | _ -> Alcotest.fail "expected session composition origin"
       in

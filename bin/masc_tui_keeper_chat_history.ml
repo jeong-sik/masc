@@ -985,7 +985,7 @@ let fusion_conclusions_of fields =
         blocks
   | Some _ | None -> []
 
-let skill_projection_schema = "masc.keeper_chat.skill_activations.v1"
+let skill_projection_schema = "masc.keeper_chat.skill_activations.v2"
 
 type skill_projection =
   { activities : Transcript.skill_activity list
@@ -1042,18 +1042,36 @@ let decode_skill_activation = function
       (* The ledger's own closed kinds ([Keeper_skill_activation_ledger.
          invocation_to_yojson]): a kind it does not write is a row this
          build cannot read, not a read. *)
-      let* invocation =
+      let* invocation, execution_id =
         match assoc_opt "invocation" fields with
         | Some (`Assoc invocation) -> (
             match string_field invocation "kind" with
-            | Some "instruction" -> Ok Transcript.Instruction_read
+            | Some "instruction" -> Ok (Transcript.Instruction_read, None)
             | Some "composition" ->
                 let* tool_name = required_string invocation "tool_name" in
-                Ok (Transcript.Composition_run { tool_name })
+                let* execution_id = required_string invocation "execution_id" in
+                Ok (Transcript.Composition_run { tool_name }, Some execution_id)
+            | Some "nested_composition" ->
+                let* tool_name = required_string invocation "tool_name" in
+                Ok (Transcript.Composition_run { tool_name }, None)
             | Some other -> Error ("Skill activation invocation kind is unknown: " ^ other)
             | None -> Error "Skill activation invocation has no kind")
         | Some _ | None -> Error "Skill activation invocation is not an object"
       in
+      let* execution = match invocation with
+        | Transcript.Instruction_read -> Ok None
+        | Transcript.Composition_run _ ->
+          (match assoc_opt "execution" fields with
+           | None -> Error "Composition execution evidence is missing"
+           | Some json ->
+             let* execution = Masc.Keeper_skill_execution_projection.of_yojson json in
+             match execution with
+             | Masc.Keeper_skill_execution_projection.Recorded { execution_id = observed; _ }
+                 when execution_id <> Some observed ->
+               Error "Composition execution differs from its original invocation"
+             | Masc.Keeper_skill_execution_projection.Recorded _
+             | Masc.Keeper_skill_execution_projection.Unrecorded
+             | Masc.Keeper_skill_execution_projection.Unavailable _ -> Ok (Some execution)) in
       let state =
         match delivered, actions with
         | false, _ -> Transcript.Skill_served_only
@@ -1062,7 +1080,7 @@ let decode_skill_activation = function
       in
       Ok
         (Transcript.make_skill_activity ~invocation ~skill_tool_use_id ~turn_ref
-           ~content_revision ~runtime_id ~skill_name ~state ~actions ())
+           ~content_revision ~runtime_id ?execution_id ?execution ~skill_name ~state ~actions ())
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
       Error "Skill activation is not an object"
 
@@ -1083,7 +1101,11 @@ let skill_projection_of_fields fields =
          | Some "available" ->
              (match assoc_opt "activations" projection with
               | Some (`List activations) ->
-                  let decoded = List.map decode_skill_activation activations in
+                  let decoded = List.map (fun json ->
+                    let ( let* ) = Result.bind in
+                    let* activity = decode_skill_activation json in
+                    if activity.Transcript.turn_ref = explicit_turn_id_of_fields fields then Ok activity
+                    else Error "Skill activation belongs to another exact turn") activations in
                   let activities =
                     List.map
                       (function
@@ -1140,36 +1162,53 @@ let skill_projection_of_fields fields =
       ; replaces_raw_skill_tools = false
       }
 
-let without_raw_skill_tools summary =
-  { summary with
-    tools =
-      List.filter
-        (fun activity -> Option.is_none (Transcript.skill_activity_of_tool activity))
-        summary.tools
-  }
+(* Only a projection for the same original invocation can replace a raw
+   call. Equal counts and repeated tool names carry no execution authority. *)
+let skill_matches_tool (skill : Transcript.skill_activity) (tool : Transcript.tool_activity) =
+  match Transcript.skill_activity_of_tool tool, skill.invocation with
+  | Some raw_skill, Some Transcript.Instruction_read ->
+    Option.is_some tool.call_id && skill.skill_tool_use_id = tool.call_id
+    && raw_skill.invocation = Some Transcript.Instruction_read
+  | Some _, Some (Transcript.Composition_run { tool_name }) ->
+    String.equal tool_name tool.tool_name
+    && Option.is_some skill.execution_id && skill.execution_id = tool.execution_id
+    && (match tool.call_id with None -> true | Some id -> skill.skill_tool_use_id = Some id)
+  | Some _, None | None, _ -> false
+
+let skill_projection_covers_tool projection (tool : Transcript.tool_activity) =
+  List.exists (fun (skill : Transcript.skill_activity) ->
+    skill_matches_tool skill tool &&
+    match skill.invocation with
+    | Some Transcript.Instruction_read -> tool.outcome = Transcript.Returned
+    | Some (Transcript.Composition_run _) ->
+      (match skill.execution with
+       | Some (Masc.Keeper_skill_execution_projection.Recorded _) -> true
+       | None | Some (Masc.Keeper_skill_execution_projection.Unrecorded
+                    | Masc.Keeper_skill_execution_projection.Unavailable _) -> false)
+    | None -> false) projection.activities
+
+let without_raw_skill_tools summary projection =
+  { summary with tools = List.filter
+      (fun tool -> not (skill_projection_covers_tool projection tool)) summary.tools }
 
 let reconcile_skill_projection_with_trace summary projection =
+  let projection = { projection with activities = List.map
+    (fun (skill : Transcript.skill_activity) ->
+      let call_failed = skill.call_failed || List.exists (fun (tool : Transcript.tool_activity) ->
+        tool.outcome = Transcript.Failed && skill_matches_tool skill tool) summary.tools in
+      Transcript.make_skill_activity ?invocation:skill.invocation
+        ?skill_tool_use_id:skill.skill_tool_use_id ?turn_ref:skill.turn_ref
+        ?content_revision:skill.content_revision ?runtime_id:skill.runtime_id
+        ?execution_id:skill.execution_id ?execution:skill.execution ?detail:skill.detail
+        ~call_failed ~skill_name:skill.skill_name ~state:skill.state ~actions:skill.actions ()) projection.activities } in
   if not projection.replaces_raw_skill_tools then projection
-  else
-    let raw_skill_count =
-      List.fold_left
-        (fun count activity ->
-          if Option.is_some (Transcript.skill_activity_of_tool activity) then
-            count + 1
-          else count)
-        0 summary.tools
-    in
-    let exact_count = List.length projection.activities in
-    if raw_skill_count = 0 || raw_skill_count = exact_count then projection
-    else
-      { activities =
-          projection.activities
-          @ [ skill_problem Transcript.Skill_evidence_unavailable
-                (Printf.sprintf
-                   "Skill evidence count mismatch: %d exact activation(s), %d raw call(s); raw calls retained"
-                   exact_count raw_skill_count) ]
-      ; replaces_raw_skill_tools = false
-      }
+  else if List.exists (fun tool ->
+    Option.is_some (Transcript.skill_activity_of_tool tool)
+    && not (skill_projection_covers_tool projection tool)) summary.tools then
+    { projection with activities = projection.activities @
+        [ skill_problem Transcript.Skill_evidence_unavailable
+            "Unmatched Skill execution evidence retained in raw calls" ] }
+  else projection
 
 (* One row for the turn's skill work, as the trace's tool steps are one
    block: the pane counts the invocations on the row and unfolds them under
@@ -1438,14 +1477,12 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
               (fusion_conclusions_of fields)
           in
           let skill_rows, trace_rows =
+            let summary = trace_summary_of fields in
+            let skill_projection = reconcile_skill_projection_with_trace summary skill_projection in
             if autonomous then
-              let summary = trace_summary_of fields in
-              let skill_projection =
-                reconcile_skill_projection_with_trace summary skill_projection
-              in
               let summary =
                 if skill_projection.replaces_raw_skill_tools then
-                  without_raw_skill_tools summary
+                  without_raw_skill_tools summary skill_projection
                 else summary
               in
               ( rows_of_skill_projection ~source_id ~turn_sequence ~turn_id

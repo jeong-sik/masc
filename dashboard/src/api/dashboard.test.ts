@@ -1286,7 +1286,7 @@ function validSkillActivationProjectionFixture() {
       action_runtime_counts: [{ runtime_id: 'anthropic.claude', count: 1 }],
     }],
     ledger: {
-      schema: 'masc.skill-activations/v7',
+      schema: 'masc.skill-activations/v8',
         async_result_deliveries: [],
         async_actions: [],
       workspace_key: 'c'.repeat(64),
@@ -1334,6 +1334,23 @@ function validSkillActivationProjectionFixture() {
 }
 
 describe('fetchDashboardTools', () => {
+  it('requires the original physical execution anchor on composition activations', () => {
+    const fixture = validSkillActivationProjectionFixture()
+    const invocation = {kind: 'composition', origin: {kind: 'session_composition'},
+      tool_name: 'keeper_compose_review', execution_id: 'physical-original'}
+    const projection = {...fixture, ledger: {...fixture.ledger, activations: [
+      {...fixture.ledger.activations[0], invocation},
+    ]}}
+    const normalized = normalizeSkillActivationProjection(projection)
+    expect(normalized?.status).toBe('available')
+    for (const execution_id of [undefined, '', ' ']) {
+      const malformed = {...projection, ledger: {...projection.ledger, activations: [
+        {...projection.ledger.activations[0], invocation: {...invocation, execution_id}},
+      ]}}
+      expect(() => normalizeSkillActivationProjection(malformed)).toThrow()
+    }
+  })
+
   it('receives typed SDK results and native starts with verified causal delivery links', async () => {
     const projection = { ...validSkillActivationProjectionFixture(), ledger: sharedAsyncActionLedger }
     globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({skill_activations: projection}),

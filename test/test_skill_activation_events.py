@@ -90,7 +90,7 @@ STEP_ZERO = {
 
 def ledger():
     value = {
-        "schema": "masc.skill-activations/v7",
+        "schema": "masc.skill-activations/v8",
         "workspace_key": WORKSPACE,
         "session_id": SESSION,
         "revision": "",
@@ -642,6 +642,7 @@ class SkillActivationEventsTest(unittest.TestCase):
                     }
                 else:
                     invocation["tool_name"] = "keeper_status"
+                    invocation["execution_id"] = "physical-original"
                 recorded["invocation"] = invocation
                 recorded["identity"]["name"] = "한글-é"
                 recorded["identity"]["package_id"] = "Review package"
@@ -671,7 +672,7 @@ class SkillActivationEventsTest(unittest.TestCase):
         composition = copy.deepcopy(recorded)
         composition["activation"]["invocation"] = {
             "kind": "composition", "origin": {"kind": "session_composition"},
-            "tool_name": "keeper_status"}
+            "tool_name": "keeper_status", "execution_id": "execution-status"}
         cases = [
             (log_fixture.rejection_row(order), ("rejection", "activation_agent_core_turn"), -1),
             (log_fixture.rejection_row(before), ("rejection", "action_identity", "step_index"), -1),

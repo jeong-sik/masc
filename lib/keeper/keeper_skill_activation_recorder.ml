@@ -303,7 +303,8 @@ let record_composition ~config context ~invocation ~tool_name reference =
     ~config
     context
     ~tool_invocation:invocation
-    ~invocation:(Ledger.Composition_invocation { origin; tool_name })
+    ~invocation:(Ledger.Composition_invocation { origin; tool_name;
+      execution_id = Keeper_tool_call_log.invocation_execution_id ~invocation })
     reference
 ;;
 
@@ -315,11 +316,15 @@ let find_bound_composition ~config bound ~tool_use_id ~source_turn ~tool_name re
   match existing with
   | None -> Ok None
   | Some existing ->
+    let* execution_id = match existing.Ledger.invocation with
+      | Ledger.Composition_invocation { execution_id; _ } -> Ok execution_id
+      | Ledger.Instruction_invocation _ | Ledger.Nested_composition_invocation _ ->
+        Error (Invalid_bound_context "original activation is not a standalone composition") in
     let* expected = Ledger.make_activation
         ~identity:reference.Skill_reference.identity ~content_revision:reference.content_revision
         ~snapshot_revision:bound.context.snapshot_revision ~turn_ref:bound.context.turn_ref ~runtime_id:bound.runtime
         ~skill_tool_use_id:tool_use_id ~agent_core_turn:source_turn
-        ~invocation:(Ledger.Composition_invocation {origin=composition_origin bound.context reference;tool_name})
+        ~invocation:(Ledger.Composition_invocation {origin=composition_origin bound.context reference;tool_name;execution_id})
         ~activated_at:existing.activated_at |> Result.map_error (fun error -> Activation_rejected error) in
     if String.equal (Ledger.activation_frame_sha256 expected) (Ledger.activation_frame_sha256 existing)
     then Ok (Some existing) else Error (Invalid_bound_context "original composition differs from its sealed recorder")

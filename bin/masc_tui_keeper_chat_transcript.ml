@@ -83,6 +83,9 @@ type skill_activity = Masc_tui_keeper_chat_activity_projection.skill_activity =
   ; turn_ref : string option
   ; content_revision : string option
   ; runtime_id : string option
+  ; execution_id : string option
+  ; execution : Masc.Keeper_skill_execution_projection.t option
+  ; call_failed : bool
   ; state : skill_state
   ; actions : string list
   ; detail : string option
@@ -391,7 +394,7 @@ type t =
            moment when it covered a span, and a turn that ran twenty minutes
            sits under rows typed during it carrying an opening clock (the
            2026-09-10 msx-retro-mania misread). *)
-  ; mutable noted_skills : ((string * string * string option) * skill_activity) list
+  ; mutable noted_skills : ((string * string * string option * string option) * skill_activity) list
         (* The exact delivery records [note_skill_activity] took, keyed by
            the read call's (turn_ref, tool-use id), in first-noted order.
            Not a trail node: the stream has no event for a delivery, so
@@ -2185,12 +2188,13 @@ let note_tool_outcome t ~execution_id ~outcome ~duration =
    replaces the earlier one, as a later page replaces the loaded row. *)
 let skill_identity (skill : skill_activity) =
   match skill.turn_ref, skill.skill_tool_use_id with
-  | Some turn_ref, Some use_id -> Some (turn_ref, use_id, skill.runtime_id)
+  | Some turn_ref, Some use_id -> Some (turn_ref, use_id, skill.runtime_id, skill.execution_id)
   | (None, _) | (_, None) -> None
 
-let compatible_skill_identity (left_turn, left_use, left_runtime)
-    (right_turn, right_use, right_runtime) =
+let compatible_skill_identity (left_turn, left_use, left_runtime, left_execution)
+    (right_turn, right_use, right_runtime, right_execution) =
   String.equal left_turn right_turn && String.equal left_use right_use
+  && left_execution = right_execution
   && (match left_runtime, right_runtime with
       | Some left, Some right -> String.equal left right
       | None, _ | _, None -> true)
@@ -2201,24 +2205,24 @@ let matching_skill_note ?(runtime_inventory=[]) key notes =
   match List.find_opt (fun (noted_key, _) -> noted_key = key) notes with
   | Some _ as exact -> exact
   | None ->
-      let turn_ref, use_id, runtime = key in
+      let turn_ref, use_id, runtime, execution_id = key in
       let identities = key :: List.map fst notes
         @ List.filter_map skill_identity runtime_inventory in
-      let runtimes = List.filter_map (fun (turn, use, runtime) ->
-        if turn=turn_ref && use=use_id then runtime else None) identities
+      let runtimes = List.filter_map (fun (turn, use, runtime, execution) ->
+        if turn=turn_ref && use=use_id && execution=execution_id then runtime else None) identities
         |> List.sort_uniq String.compare in
       match runtimes with
       | _ :: _ :: _ -> None
       | [] | [_] ->
           match List.filter (fun (noted_key, _) -> compatible_skill_identity noted_key
-              (turn_ref,use_id,runtime)) notes with
+              (turn_ref,use_id,runtime,execution_id)) notes with
           | [note] -> Some note
           | [] | _ :: _ :: _ -> None
 
 let complete_skill_runtime (known : skill_activity) (incoming : skill_activity) =
-  match incoming.runtime_id with
-  | Some _ -> incoming
-  | None -> {incoming with runtime_id=known.runtime_id}
+  { incoming with
+    runtime_id = (match incoming.runtime_id with Some _ as runtime -> runtime | None -> known.runtime_id);
+    call_failed = known.call_failed || incoming.call_failed }
 
 let note_skill_activity ?(runtime_inventory=[]) t (evidence : skill_activity) =
   match evidence.state with
@@ -2233,8 +2237,8 @@ let note_skill_activity ?(runtime_inventory=[]) t (evidence : skill_activity) =
             | None -> t.noted_skills @ [key,evidence]
             | Some (previous_key, previous) ->
                 let evidence = complete_skill_runtime previous evidence in
-                let turn_ref, use_id, _ = key in
-                let key = turn_ref, use_id, evidence.runtime_id in
+                let turn_ref, use_id, _, execution_id = key in
+                let key = turn_ref, use_id, evidence.runtime_id, execution_id in
                 List.map (fun (noted_key, noted) ->
                   if noted_key = previous_key then key,evidence else noted_key,noted)
                   t.noted_skills) in
@@ -2325,7 +2329,10 @@ let with_noted_skills noted items =
                 (* A unique receipt can complete runtime provenance, never
                    turn an observed failure into successful delivery. *)
                 match skill.state with
-                | Skill_failed -> complete_skill_runtime note skill
+                | Skill_failed ->
+                    (match skill.invocation with
+                     | Some (Composition_run _) -> complete_skill_runtime skill note
+                     | Some Instruction_read | None -> complete_skill_runtime note skill)
                 | Skill_calling | Skill_served_pending | Skill_served_only
                 | Skill_delivered | Skill_used | Skill_evidence_missing
                 | Skill_evidence_unavailable -> complete_skill_runtime skill note

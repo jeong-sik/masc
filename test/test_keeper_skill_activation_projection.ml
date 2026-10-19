@@ -256,10 +256,10 @@ let chat_row turn_ref =
     ]
 ;;
 
-let attached_skill_projection config turn_ref =
+let attached_skill_projection config ~keeper_name turn_ref =
   let open Yojson.Safe.Util in
   Server_dashboard_http_keeper_api.attach_keeper_chat_skill_activations
-    ~config (`List [ chat_row turn_ref ])
+    ~config ~keeper_name (`List [ chat_row turn_ref ])
   |> to_list |> List.hd |> member "skill_activations"
 ;;
 
@@ -268,10 +268,10 @@ let test_chat_history_attaches_the_exact_activation () =
   let keeper_name = "chat-projection-keeper" in
   let meta = persist_session config keeper_name in
   record_one config meta;
-  let projection = attached_skill_projection config "trace-projection#1" in
+  let projection = attached_skill_projection config ~keeper_name "trace-projection#1" in
   let open Yojson.Safe.Util in
   check string "typed chat projection schema"
-    "masc.keeper_chat.skill_activations.v1"
+    "masc.keeper_chat.skill_activations.v2"
     (projection |> member "schema" |> to_string);
   check string "the exact activation is available" "available"
     (projection |> member "status" |> to_string);
@@ -287,7 +287,7 @@ let test_chat_history_marks_an_unmatched_raw_skill_call () =
   let keeper_name = "chat-missing-projection-keeper" in
   let meta = persist_session config keeper_name in
   record_one config meta;
-  let projection = attached_skill_projection config "trace-projection#2" in
+  let projection = attached_skill_projection config ~keeper_name "trace-projection#2" in
   let open Yojson.Safe.Util in
   check string "same trace but another turn is not borrowed" "missing"
     (projection |> member "status" |> to_string);
@@ -372,11 +372,99 @@ let test_absent_keeper_is_not_found_not_warming () =
     (surface |> member "keeper_name" |> to_string)
 ;;
 
+let composition_fixture config meta =
+  record_one config meta;
+  let ledger = match Ledger.load ~config ~trace_id:meta.Keeper_meta_contract.runtime.trace_id with
+    | Ok ledger -> ledger | Error error -> fail (Ledger.store_error_to_string error) in
+  let seed = List.hd (Ledger.activations ledger) in
+  let activation = match Ledger.make_activation
+      ~identity:seed.identity ~content_revision:seed.content_revision
+      ~snapshot_revision:seed.snapshot_revision ~turn_ref:seed.turn_ref
+      ~runtime_id:seed.runtime_id ~skill_tool_use_id:"composition-call" ~agent_core_turn:0
+      ~invocation:(Ledger.Composition_invocation { origin = Ledger.Session_composition;
+        tool_name = "keeper_compose_review"; execution_id = Ids.Execution_id.of_string "physical-original" })
+      ~activated_at:seed.activated_at with
+    | Ok value -> value | Error _ -> fail "composition fixture rejected" in
+  (match Ledger.record ~config ~trace_id:meta.runtime.trace_id activation with
+   | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error));
+  activation
+
+let composition_execution_row keeper_name disposition =
+  `Assoc [ "ts", `Float 1.; "keeper", `String keeper_name;
+    "record_kind", `String "tool_call"; "execution_id", `String "physical-original";
+    "trace_id", `String "trace-projection"; "session_id", `String "trace-projection";
+    "keeper_turn_id", `Int 1; "turn", `Int 0; "runtime_profile", `String "test.runtime";
+    "tool_use_id", `String "composition-call"; "tool", `String "keeper_compose_review";
+    "disposition", `String disposition; "wire_outcome", `String "ok" ]
+
+let replace_field key value = function
+  | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+  | _ -> fail "fixture is not an object"
+
+let test_composition_joins_only_its_original_execution () =
+  with_workspace @@ fun config ->
+  let keeper_name = "execution-projection-keeper" in
+  let meta = persist_session config keeper_name in
+  let activation = composition_fixture config meta in
+  let row = composition_execution_row keeper_name "failed" in
+  let project rows = Keeper_skill_execution_projection.of_rows ~keeper_name ~rows:(Ok rows) activation
+    |> Keeper_skill_execution_projection.to_yojson in
+  let status rows = Yojson.Safe.Util.(project rows |> member "status" |> to_string) in
+  List.iter (fun disposition ->
+    check string "original typed disposition remains distinct" disposition
+      (status [ composition_execution_row keeper_name disposition ])) ["completed";"deferred";"failed"];
+  check string "assignment profile is not the actual failover runtime" "failed"
+    (status [replace_field "runtime_profile" (`String "assignment-before-failover") row]);
+  let later = replace_field "execution_id" (`String "physical-later")
+      (composition_execution_row keeper_name "completed") in
+  check string "later same-provider-id success cannot replace original failure" "failed" (status [row;later]);
+  check string "later execution cannot supply missing original" "unrecorded" (status [later]);
+  check string "duplicate canonical execution is not selected" "unavailable" (status [row;row]);
+  List.iter (fun (field, value) ->
+    check string ("source coordinate refused: " ^ field) "unavailable"
+      (status [ replace_field field value row ]))
+    ["keeper", `String "other"; "trace_id", `String "other"; "session_id", `String "other";
+     "keeper_turn_id", `Int 2; "turn", `Int 1;
+     "tool_use_id", `String "other"; "tool", `String "keeper_compose_other";
+     "record_kind", `String "composition_run"; "disposition", `String "unknown"];
+  let without_disposition = match row with `Assoc fields -> `Assoc (List.remove_assoc "disposition" fields)
+    | _ -> fail "fixture is not an object" in
+  check string "wire ok alone cannot establish execution completion" "unrecorded" (status [without_disposition])
+
+let test_chat_history_reads_execution_beyond_the_trace () =
+  with_workspace @@ fun config ->
+  let keeper_name = "execution-chat-keeper" in
+  let meta = persist_session config keeper_name in
+  let activation = composition_fixture config meta in
+  let content = "composition failure" in
+  (match Ledger.observe_delivery ~config ~trace_id:meta.runtime.trace_id
+    ~turn_ref:activation.turn_ref
+    ~tool_results:[ { Ledger.tool_use_id = "composition-call"; content_bytes = String.length content;
+      content_sha256 = Digestif.SHA256.(digest_string content |> to_hex) } ]
+    ~boundary:(Ledger.Model_response { agent_core_turn = 1 })
+    ~runtime_id:"test.runtime" ~delivered_at:"2026-08-26T00:00:01Z" with
+   | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error));
+  let store = Dated_jsonl.open_store (Dated_jsonl.Store.at (Workspace.dated_store_root config)
+      Dated_jsonl.Store.Root.Tool_calls) in
+  Dated_jsonl.append store (composition_execution_row keeper_name "failed");
+  let projection = attached_skill_projection config ~keeper_name "trace-projection#1" in
+  let open Yojson.Safe.Util in
+  let activation = projection |> member "activations" |> to_list
+    |> List.find (fun row -> row |> member "skill_tool_use_id" |> to_string = "composition-call") in
+  check string "exact canonical result survives a trace with no composition step" "failed"
+    (activation |> member "execution" |> member "status" |> to_string);
+  check string "physical anchor is preserved" "physical-original"
+    (activation |> member "execution" |> member "execution_id" |> to_string);
+  check bool "the error result remains delivered despite failed execution" true
+    (activation |> member "delivery" <> `Null)
+
 let () =
   run
     "keeper Skill activation projection"
     [ ( "projection"
-      , [ test_case "missing Keeper is no_session" `Quick
+      , [ test_case "composition exact execution authority" `Quick test_composition_joins_only_its_original_execution
+        ; test_case "chat reads exact execution without trace membership" `Quick test_chat_history_reads_execution_beyond_the_trace
+        ; test_case "missing Keeper is no_session" `Quick
             test_missing_keeper_is_no_session
         ; test_case "dashboard attachment bypasses inventory cache" `Quick
             test_dashboard_projection_is_live_outside_inventory_cache

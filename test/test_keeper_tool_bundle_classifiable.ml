@@ -720,7 +720,7 @@ let test_composition_activation_is_durable ?expected_failure ~skill_name tool_na
         activation;
       (match activation.invocation with
        | Keeper_skill_activation_ledger.Composition_invocation
-           { origin = Session_composition; tool_name = observed } ->
+           { origin = Session_composition; tool_name = observed; _ } ->
          check string "exact composition origin" tool_name observed
        | Keeper_skill_activation_ledger.Composition_invocation
            { origin = Task_composition _; _ }

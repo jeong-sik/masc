@@ -160,6 +160,15 @@ type skill_activity = private
           arrives; a later continuation never supplies it. *)
   ; content_revision : string option
   ; runtime_id : string option
+  ; execution_id : string option
+      (** Original physical composition execution. Never completed from a
+          later call with the same provider ID. *)
+  ; execution : Masc.Keeper_skill_execution_projection.t option
+      (** Separate execution disposition; delivery and later actions do not
+          supply it. None on instruction reads and unobserved live results. *)
+  ; call_failed : bool
+      (** The live tool result reported an error. Kept separately when a
+          durable execution and delivery record completes this activity. *)
   ; state : skill_state
   ; actions : string list
   ; detail : string option
@@ -171,6 +180,9 @@ val make_skill_activity :
   ?turn_ref:string ->
   ?content_revision:string ->
   ?runtime_id:string ->
+  ?execution_id:string ->
+  ?execution:Masc.Keeper_skill_execution_projection.t ->
+  ?call_failed:bool ->
   ?detail:string ->
   skill_name:string ->
   state:skill_state ->

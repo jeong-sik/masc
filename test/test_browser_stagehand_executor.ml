@@ -63,7 +63,8 @@ let call fake request =
        Ok (`Assoc [ "page", `Assoc [ "page_id", `String page_id; "url", `String url ]; "response", `Null ])
      | Wire.Act _ | Wire.Observe _ | Wire.Extract _ ->
        Ok (`Assoc [ "data", `Assoc [ "success", `Bool true ]; "metadata", `Assoc [ "cache", `Assoc [] ] ])
-     | Wire.Page_hover _ | Wire.Page_click _ | Wire.Page_scroll _ | Wire.Page_drag_and_drop _ -> Ok (`Assoc [ "ok", `Bool true ])
+     | Wire.Page_hover _ | Wire.Page_click _ | Wire.Page_scroll _ | Wire.Page_drag_and_drop _
+     | Wire.Page_double_click _ | Wire.Page_type _ | Wire.Page_key_press _ -> Ok (`Assoc [ "ok", `Bool true ])
      | Wire.Close -> failf "the executor sent %s" (Wire.method_name request))
 ;;
 

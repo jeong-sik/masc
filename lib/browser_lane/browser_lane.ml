@@ -16,6 +16,7 @@
 open Time_compat
 module Pointer = Browser_pointer
 module Action = Browser_action
+module Keyboard = Browser_keyboard
 module Upload_lease = Browser_upload_lease
 module Document = Browser_document
 module Lane_name = Browser_lane_name

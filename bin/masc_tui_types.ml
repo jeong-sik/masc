@@ -5684,6 +5684,14 @@ module Browser_lane_view = struct
     | Browser_missing -> "Browser not connected"
   let busy t = match t.load with Loading _ -> true | Idle | No_browser | Failed _ -> false
   let listed_clients t = Option.value t.clients ~default:[]
+  (* Activity changes during a connection; it is not the connection's identity. *)
+  let same_client (left : client) (right : client) =
+    left.client_id = right.client_id && left.browser = right.browser
+    && left.transport = right.transport
+  let same_selected_client left right = match left, right with
+    | None, None -> true
+    | Some left, Some right -> same_client left right
+    | None, Some _ | Some _, None -> false
   type browser_choice = Automatic_browser | Work_browser | Connected_browser of client | Stagehand_browser | Automation_browser
   let browser_choices t =
     [Automatic_browser; Work_browser]
@@ -5692,7 +5700,7 @@ module Browser_lane_view = struct
   let browser_choice_selected t = function
     | Automatic_browser -> t.selection = Unbound || t.selection = Bound_automatic
     | Work_browser -> t.selection = Work_unbound
-    | Connected_browser client -> t.source = Live && t.selected_client = Some client
+    | Connected_browser client -> t.source = Live && same_selected_client t.selected_client (Some client)
     | Stagehand_browser -> t.source = Stagehand
     | Automation_browser -> t.source = Automation
   let transport_label = function
@@ -6283,7 +6291,7 @@ module Browser_lane_view = struct
     | (Unbound | Work_unbound | Live_unbound), _, _ -> false
     | (Bound_automatic | Bound_explicit), (Automation | Stagehand), _ -> true
     | (Bound_automatic | Bound_explicit), Live, None -> false
-    | (Bound_automatic | Bound_explicit), Live, Some selected -> List.exists (fun (client : client) -> client = selected) (listed_clients t)
+    | (Bound_automatic | Bound_explicit), Live, Some selected -> List.exists (same_client selected) (listed_clients t)
   let cadence_operation ?(viewport : screenshot option) t =
     if busy t || awaiting_browser t || Option.is_some t.refresh_pending || Option.is_some t.client_picker || Option.is_some t.url_draft
        || not (selected_client_available t) then None
@@ -6325,7 +6333,7 @@ module Browser_lane_view = struct
   let choose_browser choice t =
     match choice with
     | Connected_browser client when browser_choice_selected t choice ->
-        { t with client_picker = None; selection = Bound_explicit; pending_open = false }
+        { t with selected_client = Some client; client_picker = None; selection = Bound_explicit; pending_open = false }
     | Automatic_browser when browser_choice_selected t choice -> { t with client_picker = None }
     | (Stagehand_browser | Automation_browser) when browser_choice_selected t choice ->
         { t with client_picker=None; selection=Bound_explicit; pending_open=false }
@@ -6366,7 +6374,11 @@ module Browser_lane_view = struct
              { t with clients = None; bidi_host = Host_not_reported; automatic = None;
                client_picker = Some 0; pending_open = false; load = Failed detail }, false
          | Ok { listed = clients; bidi_host; automatic } ->
-             let next = { t with clients = Some clients; bidi_host; automatic; load = Idle } in
+             let selected_client = Option.map (fun selected ->
+               match List.find_opt (same_client selected) clients with
+               | Some current -> current
+               | None -> selected) t.selected_client in
+             let next = { t with clients = Some clients; selected_client; bidi_host; automatic; load = Idle } in
              if purpose = Choose_client then { next with client_picker = Some 0 }, false
              else match t.selection with
              | Live_unbound -> {next with client_picker=Some 0;
@@ -10292,7 +10304,7 @@ let retain_operation_observation state = function
       (match state.browser_lane with
        | Some current when generation = state.browser_lane_generation
            && prior.source = current.source
-           && prior.selected_client = current.selected_client
+           && Browser_lane_view.same_selected_client prior.selected_client current.selected_client
            && prior.selected_tab = current.selected_tab ->
              state.browser_lane_read_resume <- Some (generation, current, operation);
              true

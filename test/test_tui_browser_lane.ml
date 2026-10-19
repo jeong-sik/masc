@@ -347,6 +347,44 @@ let test_screenshot_ownership_and_draft () =
     (failed.selected_tab = Some 2 && failed.load = Failed "selected tab closed" && preview = None);
   expect "non-PNG payload rejected" (Result.is_error (decode_screenshot (screenshot_response ~mime:"image/jpeg" ())))
 
+let test_client_activity_preserves_connection () =
+  let initial = { (loaded ()) with scroll = 8 } in
+  let queued : Browser_lane.interaction_activity =
+    { request_id="0199c0de-0000-4000-8000-0000000000a1"; actor=Some "fixture-keeper";
+      action="hover_at"; tab_id=2; phase=Browser_lane.Interaction_queued } in
+  let discover selected = { selected with load=Loading (24, Discover Read_after_discovery) } in
+  let refresh selected interactions =
+    let current = { firefox with interactions } in
+    let next, read = accept_clients ~generation:24 (Ok (found [current;zen])) (discover selected) in
+    expect "transient activity retains the connection and authorizes its read"
+      (read && next.selected_client=Some current && selected_client_available next);
+    expect "activity refresh preserves tab, scroll and reading"
+      (next.selected_tab=selected.selected_tab && next.scroll=selected.scroll
+       && next.reading=selected.reading && next.selection=selected.selection);
+    expect "cadence and requests retain their exact owner"
+      (cadence_operation next=Some Read_refresh && request_body next=request_body initial);
+    expect "current browser picker uses immutable connection identity"
+      (browser_choice_selected selected (Connected_browser current));
+    let pinned = choose_browser (Connected_browser current) {selected with client_picker=Some 0} in
+    expect "pinning same connection refreshes activity without clearing content"
+      (pinned.selection=Bound_explicit && pinned.selected_client=Some current
+       && pinned.selected_tab=selected.selected_tab && pinned.scroll=selected.scroll
+       && pinned.reading=selected.reading
+       && browser_choice_operation (Connected_browser current) ~before:selected pinned=None);
+    next in
+  let queued_view = refresh initial [queued] in
+  let running_view = refresh queued_view [{queued with phase=Browser_lane.Interaction_running}] in
+  ignore (refresh running_view []);
+  ignore (refresh {initial with selection=Bound_automatic} [queued]);
+  List.iter (fun replacement ->
+    let lost, read = accept_clients ~generation:24 (Ok (found [replacement])) (discover running_view) in
+    expect "changed connection identity never reuses a tab or authorizes input"
+      (not read && not (selected_client_available lost) && lost.selected_tab=None
+       && lost.reading=None && lost.scroll=0 && lost.selected_client=running_view.selected_client
+       && not (browser_choice_selected running_view (Connected_browser replacement))))
+    [{firefox with client_id=zen.client_id}; {firefox with browser=Zen};
+     {firefox with transport=Browser_lane.Webdriver_bidi}]
+
 let test_client_connection_ownership () =
   let discover t = { t with load = Loading (20, Discover Read_after_discovery) } in
   let empty, read = accept_clients ~generation:20 (Ok (found [])) (discover (create ())) in
@@ -1041,7 +1079,8 @@ let test_automatic_work_requests () =
 
 let () =
   List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" name)
-    ["automatic browser binding", test_automatic_browser_binding;
+    ["client activity keeps connection", test_client_activity_preserves_connection;
+     "automatic browser binding", test_automatic_browser_binding;
      "automatic work requests", test_automatic_work_requests;
      "unified browser picker", test_unified_browser_picker;
      "the picker says where the BiDi host stands", test_bidi_host_rows;

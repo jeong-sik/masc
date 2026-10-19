@@ -14817,7 +14817,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
      | Some (generation, prior, operation), Some current
        when generation = state.browser_lane_generation
          && prior.source = current.source
-         && prior.selected_client = current.selected_client
+         && Browser_lane_view.same_selected_client prior.selected_client current.selected_client
          && prior.selected_tab = current.selected_tab ->
            launch_browser_lane state ~mailbox operation
      | _ -> ());

@@ -86,6 +86,54 @@ let test_unreadable_tab_does_not_hide_other_tabs () =
       (List.map (fun row -> row |> member "id" |> to_int) unavailable);
     check string "browser's refusal survives" "BiDi command rejected: unsupported operation"
       (List.hd unavailable |> member "error" |> to_string)
+
+let test_active_tab_after_unreadable_tab () =
+  let peer = peer_of (fun method_ args -> match method_ with
+    | "browsingContext.getTree" ->
+      Ok (obj ["contexts", `List [obj ["context", `String "protected"];
+                                   obj ["context", `String "work"]]])
+    | "script.callFunction" ->
+      (match Yojson.Safe.Util.(args |> member "target" |> member "context" |> to_string) with
+       | "protected" -> Error (Peer.Rejected (Peer.error_code_of_wire "unsupported operation"))
+       | "work" -> Ok (script_value (obj ["url", `String "https://example.test/work";
+           "title", `String "Work"; "active", `Bool true; "text", `String "readable"]))
+       | _ -> fail "unknown context")
+    | _ -> fail "unexpected command") in
+  match Peer.dispatch peer ~verb:Peer.Page_read (obj []) with
+  | Ok data ->
+    let open Yojson.Safe.Util in
+    check int "implicit read reaches the readable active tab" 2 (data |> member "tabId" |> to_int);
+    check string "the selected tab is read" "readable" (data |> member "text" |> to_string)
+  | Error (Peer.Before_effect detail) | Error (Peer.Outcome_unknown detail) -> fail detail
+
+let test_capture_guards () =
+  let viewport document = obj ["documentId", `String document; "width", `Int 800;
+    "height", `Int 600; "scrollX", `Int 0; "scrollY", `Int 0] in
+  let state url document = obj ["url", `String url; "title", `String "Work";
+    "viewport", viewport document] in
+  let url = "https://example.test/work" in
+  List.iter (fun (name, after, accepted) ->
+    let captured = ref false in
+    let peer = peer_of (fun method_ _ -> match method_ with
+      | "browsingContext.getTree" -> Ok (obj ["contexts", `List [obj ["context", `String "work"]]])
+      | "script.callFunction" -> Ok (script_value (if !captured then after else state url "before"))
+      | "browsingContext.captureScreenshot" -> captured := true; Ok (obj ["data", `String "png"])
+      | _ -> fail "unexpected capture command") in
+    match Peer.dispatch peer ~verb:Peer.Page_capture (obj ["tabId", `Int 1]), accepted with
+    | Ok data, true ->
+      let open Yojson.Safe.Util in
+      check string name "png" (data |> member "data" |> to_string);
+      check bool "capture retains the document guard" true (member "viewport" data = viewport "before")
+    | Error (Peer.Before_effect detail), false ->
+      check string name "viewport_changed_during_capture" detail
+    | Ok _, false -> failf "%s accepted a stale screenshot" name
+    | Error (Peer.Before_effect detail), true | Error (Peer.Outcome_unknown detail), _ -> fail detail)
+    ["stable capture", state url "before", true;
+     "navigation", state "https://example.test/elsewhere" "before", false;
+     "same-URL document replacement", state url "after", false;
+     "scroll during capture", obj ["url", `String url; "title", `String "Work";
+        "viewport", obj ["documentId", `String "before"; "width", `Int 800;
+          "height", `Int 600; "scrollX", `Int 0; "scrollY", `Int 100]], false]
 (* A document-source read is the automation lane's document helper, which
    reports HTML it had to leave out instead of cutting it. *)
 let test_document_source () =
@@ -697,7 +745,7 @@ let test_peer_serves_what_the_lane_table_says () =
       match method_ with
       | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
       | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://example.test/";
-          "title",`String "fixture";"active",`Bool true]))
+          "title",`String "fixture";"active",`Bool true;"viewport",obj []]))
       | "browsingContext.captureScreenshot" -> Ok (obj ["data",`String "png"])
       | "input.performActions" | "input.releaseActions" -> Ok `Null
       | other -> failf "unexpected protocol command: %s" other in
@@ -745,6 +793,7 @@ let test_an_error_code_is_read_once_and_written_back () =
     [ "session not created"; "invalid session id"; "no such frame"; "" ]
 let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick test_context_identity;
     test_case "one unreadable tab leaves other tabs visible" `Quick test_unreadable_tab_does_not_hide_other_tabs;
+    test_case "implicit read skips an unreadable tab" `Quick test_active_tab_after_unreadable_tab;
     test_case "an error code is read once and written back" `Quick test_an_error_code_is_read_once_and_written_back;
     test_case "a session runs the expected profile" `Quick test_a_session_runs_the_expected_profile];
   "lifetime",[test_case "normal callback closes held socket" `Quick (test_held_open_completion (Ok ()) );
@@ -769,6 +818,7 @@ let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick te
     test_case "malformed JSON ends a pending command" `Quick test_malformed_json_ends_a_pending_command;
     test_case "invalid websocket frame reaches the error path" `Quick test_invalid_websocket_frame_ends_a_pending_command];
   "effect",[test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "element inventory is the shared page script" `Quick test_element_inventory;
+    test_case "capture retains URL and document/viewport guards" `Quick test_capture_guards;
     test_case "document source is the shared document helper" `Quick test_document_source;
     test_case "a document still loading is not answered for" `Quick test_document_still_loading;
     test_case "an answer too large for the socket is refused in the page" `Quick test_answer_too_large_for_the_socket; test_case "parsed pointer boundary" `Quick test_pointer_validation;

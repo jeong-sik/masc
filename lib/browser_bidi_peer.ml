@@ -127,10 +127,12 @@ let evaluate t context body args =
   | _ -> Error "invalid BiDi script result"
 let script t context body args = evaluate t context ("arguments[0]=JSON.parse(arguments[0]);\n" ^ body) args
 let scene t context args = script t context "return browserScene(arguments[0]);" args
-let page t context = script t context
-  "return {url:location.href,title:document.title,text:document.body?.innerText ?? '',active:document.visibilityState==='visible',scrollX,scrollY};" (obj [])
 let tab_metadata t context = script t context
   "return {url:location.href,title:document.title,active:document.visibilityState==='visible'};" (obj [])
+(* Capture guards need document identity and geometry, never page text. Read
+   the URL and viewport in the same script on each side of the screenshot. *)
+let capture_state t context = script t context
+  "return {url:location.href,title:document.title,viewport:browserScene({mode:'viewport'})};" (obj [])
 (* A read that answers for the whole document. The extension runs its reads
    once the parser is done; nothing waits for the parser here, so a document
    still being parsed is refused instead of answered with the part that
@@ -160,10 +162,15 @@ let resolve t args =
   | Some (`Int id) -> (match List.find_opt (fun (_,n) -> n=id) current with
       | Some (context,_) -> Ok (context,id) | None -> Error "browser tab is no longer present")
   | None ->
-    let rec active = function
-      | [] -> Error "no active browser context"
-      | (context,id)::rest -> let* p = page t context in
-        (match field "active" p with Some (`Bool true) -> Ok (context,id) | _ -> active rest) in active current
+    let rec active unavailable = function
+      | [] -> Error (String.concat "; " ("no active browser context" :: List.rev unavailable))
+      | (context,id)::rest ->
+        (match tab_metadata t context with
+         | Error detail -> active (Printf.sprintf "tab %d: %s" id detail :: unavailable) rest
+         | Ok p -> match field "active" p with
+           | Some (`Bool true) -> Ok (context,id)
+           | _ -> active unavailable rest) in
+    active [] current
   | _ -> Error "invalid tabId"
 let with_tab id = function `Assoc fields -> Ok (obj (("tabId",`Int id)::fields)) | _ -> Error "invalid page object"
 let read t context args =
@@ -210,7 +217,7 @@ let pointer t context args ~(viewport : Browser_lane.Pointer.viewport) ~start mo
     command t "input.performActions" (obj ["context",str context;"actions",`List [source]])) in
   let* _=unknown applied in
   let* ()=unknown !released in
-  let* after = unknown (page t context) in
+  let* after = unknown (script t context Browser_interaction.pointer_receipt_script (obj [])) in
   let* old_url = unknown (string "url" observed) in
   let action=match motion with Hover_pointer->"hover_at"|Click_pointer->"click_at"|Drag_pointer _->"drag"|Wheel_pointer _->"scroll_at" in
   match after with `Assoc fields -> Ok (obj (("action",str action)::("urlBefore",str old_url)::fields))
@@ -253,9 +260,9 @@ let dispatch t ~verb args =
   | Page_scene -> on_tab (fun context id -> pre (let* fields=match args with `Assoc xs->Ok xs|_->Error "invalid scene arguments" in
         let* p=scene t context (obj (("mode",str "read")::fields)) in with_tab id p))
   | Page_capture -> on_tab (fun context id -> pre (
-        let* p=page t context in let* viewport=scene t context (obj ["mode",str "viewport"]) in
+        let* p=capture_state t context in let* viewport=required "viewport" p in
         let* png=command t "browsingContext.captureScreenshot" (obj ["context",str context]) in
-        let* after=page t context in let* after_viewport=scene t context (obj ["mode",str "viewport"]) in
+        let* after=capture_state t context in let* after_viewport=required "viewport" after in
         let* url=string "url" p in let* after_url=string "url" after in
         if url<>after_url || viewport<>after_viewport then Error "viewport_changed_during_capture" else
         let* title=required "title" after in let* data=string "data" png in

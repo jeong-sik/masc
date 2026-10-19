@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Real Gecko scene contract probe; needs existing geckodriver/browser binaries."""
-import argparse,base64,hashlib,http.server,json,socket,subprocess,threading,time,urllib.request,urllib.error
+import argparse,base64,hashlib,http.server,json,re,socket,subprocess,threading,time,urllib.request,urllib.error
 from pathlib import Path
 p=argparse.ArgumentParser();p.add_argument('--driver',required=True);p.add_argument('--browser',required=True);p.add_argument('--out',type=Path,required=True);a=p.parse_args();a.out.mkdir(parents=True,exist_ok=True)
 root=Path(__file__).resolve().parents[1]
@@ -439,6 +439,29 @@ try:
  form_png=call('GET','/session/'+sid+'/screenshot')
  assert isinstance(form_png,str)
  (a.out/'form-controls.png').write_bytes(base64.b64decode(form_png,validate=True))
+ # A screenshot guard must work even when a whole-page text read cannot.
+ peer=(root/'lib/browser_bidi_peer.ml').read_text()
+ capture=re.search(r'let capture_state t context = script t context\s*("(?:[^"\\]|\\.)*")',peer)
+ assert capture,'capture guard source missing'
+ capture_body=json.loads(capture.group(1))
+ js("document.body.style.minHeight='2000px';scrollTo(0,0);Object.defineProperty(document.body,'innerText',{configurable:true,get(){throw new Error('whole-page text must not be read for capture')}});")
+ try:
+  capture_before=js(scene+'\n'+capture_body)
+  capture_png=base64.b64decode(call('GET','/session/'+sid+'/screenshot'),validate=True)
+  capture_after=js(scene+'\n'+capture_body)
+  check('screenshot guards never read whole-page text',capture_before==capture_after and capture_png.startswith(b'\x89PNG'))
+  receipt=re.search(r'let pointer_receipt_script = ("(?:[^"\\]|\\.)*")',
+   (root/'lib/browser_interaction.ml').read_text())
+  assert receipt,'pointer receipt source missing'
+  pointer_after=js(json.loads(receipt.group(1)))
+  check('pointer receipt never reads whole-page text',pointer_after['url']==capture_after['url']
+   and pointer_after['scrollY']==capture_after['viewport']['scrollY'])
+  js('scrollBy(0,100);')
+  capture_scrolled=js(scene+'\n'+capture_body)
+  check('capture guard detects a scroll',capture_before['viewport']!=capture_scrolled['viewport'])
+  (a.out/'capture-without-text.png').write_bytes(capture_png)
+ finally:
+  js("delete document.body.innerText;")
  png=base64.b64decode(call('GET','/session/'+sid+'/screenshot'),validate=True);(a.out/'fixture.png').write_bytes(png)
  report={'checks':checks,'scene_elapsed_ms':elapsed,'scene_json_utf8_bytes':len(json.dumps(s,ensure_ascii=False,separators=(',',':')).encode()),'png_bytes':len(png),'png_sha256':hashlib.sha256(png).hexdigest(),'scene_runtime_sha256':hashlib.sha256(scene.encode()).hexdigest(),'browser_capabilities':caps['capabilities'],'scope':'real Gecko executes shared scripts; OCaml HTTP/TUI binary not measured by this probe'}
  (a.out/'proof.json').write_text(json.dumps(report,indent=2));print(json.dumps({k:v for k,v in report.items() if k!='browser_capabilities'}))

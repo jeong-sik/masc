@@ -516,8 +516,22 @@ share the existing host command deadline; connection setup has that same bound.
 Protected pointer-release cleanup can additionally run up to one transport
 deadline after the outer command deadline. A timeout is not an instantaneous
 release guarantee.
+Screenshot guards read URL, title and document/viewport identity together before
+and after capture, without reading or serializing the document's text. A text
+read that is slow or too large is therefore not a prerequisite for a screenshot.
+The element inventory shares computed styles and ancestor display/opacity checks
+within one synchronous observation; later observations recompute them.
+Pointer receipts use the shared URL/title/scroll observation, also without a
+whole-document text read after input.
 Ending the host issues `session.end` and neither browser.close nor
 browsingContext.close.
+
+A tab whose metadata cannot be read is retained in `unavailableTabs` alongside
+`complete: false`; readable tabs keep their IDs. This partial listing does not
+prevent an explicit read or capture of a readable tab. Implicit active-tab
+selection also continues past unreadable tabs using metadata only, and includes
+their refusal details when no readable active tab is found. Closing an unreadable
+tab is not required to use another tab.
 
 This initial peer does not implement live activate_tab, uploads, download
 collection, or the extension's navigation commit barrier. The server refuses

@@ -25,6 +25,30 @@ const effectiveRole = element => (element.getAttribute('role') || '').split(/\s+
   .find(role => ariaRoles.has(role)) || null;
 const actionRoles = new Set('button link checkbox radio switch menuitem menuitemcheckbox menuitemradio tab option combobox'.split(' '));
 const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,summary,label,[contenteditable=true],[onclick],[role~=button],[role~=link],[role~=checkbox],[role~=radio],[role~=switch],[role~=menuitem],[role~=menuitemcheckbox],[role~=menuitemradio],[role~=tab],[role~=option],[role~=combobox]'));
+// A single synchronous observation shares styles and ancestor visibility.
+// Large feeds have many controls under the same ancestors; walking and
+// restyling that chain for every control repeats the same work.
+const styles = new WeakMap(), displayedAncestors = new WeakMap();
+const styleOf = element => {
+  if (!styles.has(element)) styles.set(element, getComputedStyle(element));
+  return styles.get(element);
+};
+const displayed = element => {
+  const pending = [];
+  let node = element;
+  while (node && !displayedAncestors.has(node)) {
+    const style = styleOf(node);
+    if (style.display === 'none' || Number(style.opacity) === 0) {
+      displayedAncestors.set(node, false);
+      break;
+    }
+    pending.push(node);
+    node = node.parentElement;
+  }
+  const result = node === null || displayedAncestors.get(node);
+  for (const ancestor of pending) displayedAncestors.set(ancestor, result);
+  return result;
+};
 function selector(el) {
   const parts=[];
   for (let node=el; node && node.nodeType===1; node=node.parentElement) {
@@ -39,24 +63,16 @@ const labelTextRects = (element, admit = rects => Array.from(rects)) => {
   const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT), rects = [];
   while (walker.nextNode()) {
     const text = walker.currentNode, parent = text.parentElement;
-    if (!text.textContent.trim() || !parent || getComputedStyle(parent).visibility !== 'visible') continue;
-    let hidden = false;
-    for (let node = parent; node; node = node.parentElement) {
-      const style = getComputedStyle(node);
-      if (style.display === 'none' || Number(style.opacity) === 0) { hidden = true; break; }
-    }
-    if (hidden) continue;
+    if (!text.textContent.trim() || !parent || styleOf(parent).visibility !== 'visible'
+        || !displayed(parent)) continue;
     const range = document.createRange(); range.selectNodeContents(text);
     rects.push(...admit(range.getClientRects(), parent).filter(r => r.width > 0 && r.height > 0));
   }
   return rects;
 };
-const observable = el => (el.getClientRects().length || labelTextRects(el).length) && getComputedStyle(el).visibility !== 'hidden'
-  && getComputedStyle(el).visibility !== 'collapse'
-  && (() => { for (let parent=el;parent;parent=parent.parentElement) {
-    const style=getComputedStyle(parent);
-    if (style.display === 'none' || Number(style.opacity) === 0) return false;
-  } return true; })();
+const observable = el => (el.getClientRects().length || labelTextRects(el).length)
+  && styleOf(el).visibility !== 'hidden' && styleOf(el).visibility !== 'collapse'
+  && displayed(el);
 const visible = nodes.filter(el=>observable(el)
   && (!el.getAttribute('role') || actionRoles.has(effectiveRole(el))
     || ['a','button','input','textarea','select','summary','label'].includes(el.localName)

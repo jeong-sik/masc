@@ -4,7 +4,7 @@
 
 import { get, type AbortableRequestOptions } from './core'
 import { ensureDevToken } from './dev-token'
-import { isRecord, asBoolean, asNumber, asString, asRecordArray } from '../components/common/normalize'
+import { isRecord, asBoolean, asNumber } from '../components/common/normalize'
 import { type TelemetryFreshnessMetadata } from './dashboard-shared'
 
 // The type is derived from the list, and the decoder reads the list, so a

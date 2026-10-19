@@ -398,8 +398,9 @@ input/output channels must match. Playback also requires the measured output
 UID, sample rate and native render quantum. To choose different channels or a
 manual value, use `:capture-offset 0` (or another manual offset) first.
 
-The portable document embeds the inspected clock/pulse summary and all evidence
-content hashes, with no external pathname dependency. SaveAs/reopen therefore
+The portable document embeds the original measurement record, inspected
+clock/pulse summary and all evidence content hashes. Its hash and device/pulse
+fields must still agree on reopen, with no external pathname dependency. SaveAs/reopen therefore
 retain the adoption decision even if the original experiment is moved. Keep the
 original experiment for full PCM reanalysis. A saved decision is historical
 measurement evidence, not a promise that cable paths, input hardware settings or

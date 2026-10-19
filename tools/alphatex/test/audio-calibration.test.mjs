@@ -98,10 +98,16 @@ test('worker-inspected measured audio placement is explicit, undoable, portable 
   assert.deepEqual(plan.umpRegions,baseline.umpRegions)
   assert.deepEqual(plan.umpRegions.sources[0].timeline.packets,packets)
   for(const change of [{input:{...profile.input,id:'other'}},{input:{...profile.input,sampleRate:44100}},{input:{...profile.input,channel:1}}]) {
-   assert.throws(()=>arrangementCalibrated(editor,{profile:{...profile,...change},match:0,output:'output'}),/match/)
+   assert.throws(()=>arrangementCalibrated(editor,{profile:{...profile,...change},match:0,output:'output'}))
   }
   assert.throws(()=>arrangementCalibrated(editor,{profile,match:0,output:'other'}),/match/)
   assert.throws(()=>arrangementCalibrated(editor,{profile,match:2,output:'output'}),/pulse/)
+  const forged=structuredClone(profile);forged.output.id='other'
+  assert.throws(()=>arrangementCalibrated(editor,{profile:forged,match:0,output:'other'}))
+  const forgedSaved=structuredClone(applied.project);forgedSaved.clips[0].placement.profile.output.id='other'
+  assert.throws(()=>arrangementEditor(forgedSaved))
+  const changedPulse=structuredClone(applied.project);changedPulse.clips[0].placement.profile.pulses[0].blockHostTime=String(BigInt(profile.pulses[0].blockHostTime)+1n)
+  assert.throws(()=>arrangementEditor(changedPulse))
   assert.throws(()=>arrangementCommand(applied,'capture-channel 1 2'),/match/)
   assert.throws(()=>editArrangement(applied.project,{kind:'region-change',id:clip.id,placement:{...clip.placement,advanceNanoseconds:{numerator:'1',denominator:'1'}}}),/disagrees/)
   const manual=arrangementCommand(applied,'capture-offset 0').editor

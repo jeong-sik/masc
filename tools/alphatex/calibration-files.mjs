@@ -34,6 +34,7 @@ export async function inspectCalibration(directory, { signal } = {}) {
   } finally { await rm(snapshot, { recursive: true, force: true }) }
   signal?.throwIfAborted()
   return validateCalibrationProfile({ schemaVersion: 1, kind: 'audio-calibration-profile', maxLagMs: candidate.maxLagMs,
+    measurement: bytes.measurement.toString('utf8'),
     experiment: Object.fromEntries(Object.entries(bytes).map(([role, value]) => [role, hash(value)])),
     input: { id: manifest.input.id, channel: selection.inputChannel, sampleRate: manifest.sampleRate, monitoring: 'off' },
     output: { id: playback.device.id, channel: selection.outputChannel, sampleRate: playback.clock.sampleRate, renderQuantum: playback.clock.renderQuantum },

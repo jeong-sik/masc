@@ -1790,7 +1790,10 @@ let test_local_cache_cancel_releases_source_for_followup () =
       Eio.Promise.await finished;
       Alcotest.(check bool) "original cancellation propagated" true !propagated;
       let seen_failure =
-        try Masc_tui_loader.with_local_read_mutex mutex (fun () -> raise (Sys_error "source failure")); false
+        try
+          Masc_tui_loader.with_local_read_mutex mutex
+            (fun () -> (raise (Sys_error "source failure") : unit));
+          false
         with Sys_error _ -> true in
       Alcotest.(check bool) "read failure is still observable" true seen_failure;
       let next = Masc_tui_loader.with_local_read_mutex mutex (fun () -> 42) in

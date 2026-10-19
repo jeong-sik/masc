@@ -4,16 +4,59 @@ import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { nativeJob, loadSelection, saveSelection, presetDirectory } from './vst.mjs'
 
+// A selection is a plug-in plus an optional saved sound. The state line and the
+// picker both read these names so the two never disagree about what is chosen.
+export function presetLabel(presetPath) {
+  return presetPath ? basename(presetPath).replace(/\.vstpreset$/i, '') : 'default state'
+}
+
+export function selectionLabel(selection) {
+  return selection ? `${selection.name} · ${presetLabel(selection.preset_path)}` : 'SoundFont'
+}
+
+// The picker's own actions as data: the footer renders them and the tests read
+// the same source, so an action is advertised only where the keys reach it.
+export function pickerActions(view) {
+  if (!view) return []
+  if (view.kind === 'loading') return [{ key: 'Esc', label: 'cancel' }]
+  if (view.kind === 'preset_path') {
+    return [{ key: 'Enter', label: 'load preset file' }, { key: 'Esc', label: 'cancel' }]
+  }
+  const actions = [{ key: '↑↓/j k', label: 'choose' }, { key: '/', label: 'search' },
+    { key: 'Enter', label: view.kind === 'presets' ? 'play' : 'select' }]
+  if (view.kind === 'presets') {
+    actions.push({ key: 'e', label: 'native sound browser' }, { key: 'p', label: 'preset file' })
+  }
+  actions.push({ key: 'Esc', label: 'cancel' }, { key: 's', label: 'stop' })
+  return actions
+}
+
+export function pickerFooter(view) {
+  return pickerActions(view).map(({ key, label }) => `${key}:${label}`).join('  ')
+}
+
 // Owns native loading and selection, independently of score rendering and
 // playback. Leaving the menu retires every pending load/editor/read result.
 export class InstrumentPicker {
-  constructor({ directory, notify, selected, soundfont, failed, run = nativeJob }) {
-    Object.assign(this, { directory, notify, selected, soundfont, failed, run })
+  constructor({ directory, notify, selected, soundfont, failed, active = () => null, run = nativeJob }) {
+    Object.assign(this, { directory, notify, selected, soundfont, failed, active, run })
     this.view = null
     this.epoch = 0
     this.job = null
     this.jobs = new Map()
     this.recent = null
+  }
+
+  // Whether a menu row is the live selection, so the picker can mark it. The
+  // SoundFont row is active only while no native instrument is loaded.
+  isActive(item) {
+    const active = typeof this.active === 'function' ? this.active() : null
+    if (item?.kind === 'soundfont') return active === null
+    if (!active || !item) return false
+    if (item.plugin_path !== undefined && item.plugin_path !== active.plugin_path) return false
+    if (item.plugin_name !== undefined && item.plugin_name !== active.plugin_name) return false
+    if (item.preset_path !== undefined) return item.preset_path === active.preset_path
+    return true
   }
 
   close() {
@@ -97,11 +140,12 @@ export class InstrumentPicker {
     try { files = await readdir(folder, { withFileTypes: true }) }
     catch (error) { if (error.code !== 'ENOENT') throw error; files = [] }
     if (epoch !== this.epoch) return
-    const items = [{ name: 'Default instrument state', preset_path: null },
+    const identity = { plugin_path: instrument.plugin_path, plugin_name: instrument.plugin_name ?? null }
+    const items = [{ ...identity, name: 'Default instrument state', preset_path: null },
       ...files.filter(file => file.isFile() && file.name.endsWith('.vstpreset'))
-        .map(file => ({ name: file.name, preset_path: join(folder, file.name) }))]
+        .map(file => ({ ...identity, name: file.name, preset_path: join(folder, file.name) }))]
     if (preferred && !items.some(item => item.preset_path === preferred)) {
-      items.push({ name: basename(preferred), preset_path: preferred })
+      items.push({ ...identity, name: basename(preferred), preset_path: preferred })
     }
     this.view = { kind: 'presets', title: `${instrument.name} · choose a sound`,
       instrument, items, cursor: Math.max(0, items.findIndex(item => item.preset_path === preferred)),

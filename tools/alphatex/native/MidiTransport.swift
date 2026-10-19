@@ -499,11 +499,12 @@ struct Timeline: Decodable {
                     mutations.formUnion(region.endTouched)
                 }
             }
+            let scopes = try regions.map { try cycle?.window($0).scope ?? $0.addresses }
             for (index, first) in regions.enumerated() {
                 let cycleStart = Int64(((cycle?.start ?? 0) * 1e9).rounded())
                 let cycleEnd = Int64(((cycle?.end ?? duration) * 1e9).rounded())
-                for second in regions.dropFirst(index + 1) where max(first.startNanoseconds, second.startNanoseconds, cycleStart) < min(first.endNanoseconds, second.endNanoseconds, cycleEnd) {
-                    guard first.addresses.isDisjoint(with: second.addresses) else { throw MidiFailure("overlapping MIDI regions own the same destination/channel") }
+                for (other, second) in regions.enumerated().dropFirst(index + 1) where max(first.startNanoseconds, second.startNanoseconds, cycleStart) < min(first.endNanoseconds, second.endNanoseconds, cycleEnd) {
+                    guard scopes[index].isDisjoint(with: scopes[other]) else { throw MidiFailure("overlapping MIDI regions own the same destination/channel") }
                 }
             }
             return
@@ -564,6 +565,12 @@ enum Command: Decodable {
 // streams, expressed in nanoseconds. Original MIDI regions remain in project
 // time; only the repeating clock is normalized. Deadlines always derive from
 // the common epoch, never from the previous (possibly late) callback.
+struct MidiCycleRegion {
+    let scope: Set<Int>
+    let entry: MidiRegionEntry
+    let repeated: Bool
+    let touched: Set<ChaseField>
+}
 struct MidiCycle {
     let start: Double, end: Double, duration: Double
     let period: UInt128, divisor: UInt128
@@ -612,31 +619,32 @@ struct MidiCycle {
               timeline.regions.allSatisfy({ $0.end > start && $0.spec.startSeconds < end }) else {
             throw MidiFailure("common cycle requires intersecting original MIDI regions")
         }
-        var entries: [(MidiRegion, MidiRegionEntry, Bool)] = [], mutations = Set<ChaseField>()
-        for region in timeline.regions {
-            let from = max(start, region.spec.startSeconds), to = min(end, region.end)
-            var copy = min(region.spec.repeatCount - 1, max(0, Int(floor((from - region.spec.startSeconds) / region.duration))))
-            func position(_ value: Int) -> Double { region.spec.startSeconds + Double(value) * region.duration }
-            if position(copy) > from { copy -= 1 }
-            if copy + 1 < region.spec.repeatCount && position(copy + 1) <= from { copy += 1 }
-            guard copy >= 0, position(copy) <= from, position(copy + 1) > from else { throw MidiFailure("common MIDI source loses repeat precision") }
-            let source = min(region.spec.sourceEnd, region.spec.sourceStart + (from - position(copy)))
-            let repeated = to > position(copy + 1)
-            let limit = to >= position(copy + 1) ? region.spec.sourceEnd : min(region.spec.sourceEnd, region.spec.sourceStart + (to - position(copy)))
-            var touched = SourceChase()
-            for event in region.events where event.seconds < limit || event.seconds == limit && limit == region.sourceDuration {
-                touched.observe(event.bytes, port: event.port)
-            }
-            guard touched.obstacles.isEmpty else { throw MidiFailure("common MIDI reconstruction requires support for " + touched.obstacles.map(\.rawValue).sorted().joined(separator: ", ")) }
-            mutations.formUnion(touched.touched)
-            entries.append((region, midiRegionEntry(region.events, at: source), repeated))
-        }
-        for (region, entry, repeated) in entries {
-            let previous = mutations.filter { region.addresses.contains($0.port << 8 | Int($0.channel)) }
-            guard previous.isSubset(of: entry.safeKnown), !repeated || previous.isSubset(of: region.startKnown) else {
+        let windows = try timeline.regions.map { try window($0) }
+        let mutations = windows.reduce(into: Set<ChaseField>()) { $0.formUnion($1.touched) }
+        for (region, window) in zip(timeline.regions, windows) {
+            let previous = mutations.filter { window.scope.contains($0.port << 8 | Int($0.channel)) }
+            guard previous.isSubset(of: window.entry.safeKnown), !window.repeated || previous.isSubset(of: region.startKnown) else {
                 throw MidiFailure("common cycle needs an explicit source baseline before sounding keys")
             }
         }
+    }
+    func window(_ region: MidiRegion) throws -> MidiCycleRegion {
+        let from = max(start, region.spec.startSeconds), to = min(end, region.end)
+        var copy = min(region.spec.repeatCount - 1, max(0, Int(floor((from - region.spec.startSeconds) / region.duration))))
+        func position(_ value: Int) -> Double { region.spec.startSeconds + Double(value) * region.duration }
+        if position(copy) > from { copy -= 1 }
+        if copy + 1 < region.spec.repeatCount && position(copy + 1) <= from { copy += 1 }
+        guard copy >= 0, position(copy) <= from, position(copy + 1) > from else { throw MidiFailure("common MIDI source loses repeat precision") }
+        let source = min(region.spec.sourceEnd, region.spec.sourceStart + (from - position(copy)))
+        let repeated = to > position(copy + 1)
+        let limit = to >= position(copy + 1) ? region.spec.sourceEnd : min(region.spec.sourceEnd, region.spec.sourceStart + (to - position(copy)))
+        var touched = SourceChase()
+        for event in region.events where event.seconds < limit || event.seconds == limit && limit == region.sourceDuration {
+            touched.observe(event.bytes, port: event.port)
+        }
+        guard touched.obstacles.isEmpty else { throw MidiFailure("common MIDI reconstruction requires support for " + touched.obstacles.map(\.rawValue).sorted().joined(separator: ", ")) }
+        return MidiCycleRegion(scope: Set(touched.channels.keys), entry: midiRegionEntry(region.events, at: source),
+                               repeated: repeated, touched: touched.touched)
     }
 }
 
@@ -649,9 +657,11 @@ final class MidiTransport {
     let groupZeroUMP: Bool
     let coordinated: Bool
     let cycle: MidiCycle?
+    let regionScopes: [Set<Int>]
     var cycleIndex: UInt128 = 0
     var cycleHost: UInt64?
     var cycleLive: [Int: (copy: Int, attacks: Set<Int>)] = [:]
+    var cycleAcquired: [Int: Set<Int>] = [:]
     var onCoordinatedFailure: ((String, Error?) -> Void)?
     var onCoordinatedEnd: (() -> Void)?
     var terminalFailure: Error?
@@ -688,6 +698,7 @@ final class MidiTransport {
         guard cycle == nil || coordinated && loop else { throw MidiFailure("a shared cycle requires coordinated MIDI looping") }
         guard !coordinated || !loop || cycle != nil else { throw MidiFailure("coordinated MIDI looping requires the authored common clock") }
         self.cycle = cycle
+        regionScopes = try timeline.regions.map { try cycle?.window($0).scope ?? $0.addresses }
         selectedUID = uid; self.loop = loop
         regionCursors = timeline.regions.map { _ in MidiRegionCursor() }
     }
@@ -846,6 +857,8 @@ final class MidiTransport {
             for bytes in messages { do { try sourceSend(bytes, port: binding.port) } catch { failure = failure ?? error } }
         }
         if let failure { throw failure }
+        if let addresses { for address in addresses { cycleAcquired.removeValue(forKey: address) } }
+        else { cycleAcquired.removeAll() }
     }
     func apply(_ event: Event) throws {
         // A failed send cannot prove the destination missed the Note On, so the
@@ -962,19 +975,37 @@ final class MidiTransport {
         return attacks
     }
     func regionActionDue(_ action: MidiRegionAction, at seconds: Double, cut: Double?) throws -> Bool {
-        if action.seconds <= seconds { return true }
-        guard cut == nil, let cycle, let host = cycleHost, action.seconds < cycle.end else { return false }
-        return try cycle.deadline(position: action.seconds, index: cycleIndex, offset: offset - cycle.start, anchor: anchor) <= host
+        if cut == nil, let cycle, let host = cycleHost {
+            guard action.seconds < cycle.end else { return false }
+            return try cycle.deadline(position: action.seconds, index: cycleIndex, offset: offset - cycle.start, anchor: anchor) <= host
+        }
+        return action.seconds <= seconds
     }
     func beginRegion(_ index: Int, at sourceSeconds: Double) throws {
-        let region = timeline.regions[index]
         let entry = try regionEntry(index, at: sourceSeconds), prefix = entry.model, next = entry.next
-        let prior = sourceModel.scoped(to: region.addresses)
+        let prior = sourceModel.scoped(to: regionScopes[index])
         guard prior.touched.isSubset(of: entry.safeKnown) else { throw MidiFailure("MIDI region seek needs a source baseline before sounding keys on a previously changed channel") }
         var permitted = prior; permitted.touched.formIntersection(prefix.known)
         for (port, bytes) in try prefix.bootstrap(replacing: permitted) { try sourceSend(bytes, port: port) }
-        sourceModel.replace(prefix, addresses: region.addresses)
+        if cycle != nil {
+            for address in regionScopes[index] {
+                cycleAcquired[address] = Set((prefix.channels[address]?.notes ?? []).filter(\.held).compactMap(\.origin))
+            }
+        }
+        sourceModel.replace(prefix, addresses: regionScopes[index])
         regionCursors[index].active = true; regionCursors[index].index = next
+    }
+    func applyCycleEvent(_ event: WireEvent, origin: Int, attackAllowed: Bool) throws {
+        let type = event.bytes[0] & 0xf0, address = event.port << 8 | Int(event.bytes[0] & 15)
+        let attack = type == 0x90 && event.bytes[2] > 0
+        let release = type == 0x80 || type == 0x90 && event.bytes[2] == 0
+        let released = release ? sourceModel.channels[address]?.notes.first(where: { $0.pitch == event.bytes[1] && $0.held })?.origin : nil
+        sourceModel.observe(event.bytes, port: event.port, origin: origin)
+        if attack && !attackAllowed { return }
+        if release && !(released.map { cycleAcquired[address]?.contains($0) == true } ?? false) { return }
+        if attack { cycleAcquired[address, default: []].insert(origin) }
+        try sourceSend(event.bytes, port: event.port)
+        if let released, release { cycleAcquired[address]?.remove(released) }
     }
     func reconcileRegions(at seconds: Double, reconstruct: Bool, observedAt: Double? = nil, cut: Double? = nil) throws {
         if !reconstruct {
@@ -992,25 +1023,29 @@ final class MidiTransport {
                 if old.active {
                     while regionCursors[index].index < region.events.count && region.includes(region.events[regionCursors[index].index].seconds) {
                         let event = region.events[regionCursors[index].index]
-                        sourceModel.observe(event.bytes, port: event.port)
                         // Past attacks belong to an expired loop copy.
-                        // Existing acquired notes form the FIFO prefix for each
-                        // key: preserve only their original releases, along with
-                        // the ordered expression/pedal history. sourceSend keeps
-                        // uncertain ownership if a release fails.
+                        // Shared cycles match releases to the original source
+                        // FIFO identity, including when older attacks were
+                        // skipped. Ordered expression/pedal history and
+                        // uncertain-send cleanup ownership remain intact.
                         let type = event.bytes[0] & 0xf0
                         let attack = type == 0x90 && event.bytes[2] > 0
                         let release = type == 0x80 || type == 0x90 && event.bytes[2] == 0
                         let key = UInt16(event.bytes[0] & 15) << 8 | UInt16(event.bytes[1])
                         let deadline = regionStart(region, copy: old.copy) + (event.seconds - region.spec.sourceStart)
                         let expired = loop && deadline < (observedAt ?? seconds)
-                        if !loop || (attack ? !expired : !release || (sourceHeld[event.port]?[key] ?? 0) > 0) {
-                            try sourceSend(event.bytes, port: event.port)
+                        if cycle != nil {
+                            try applyCycleEvent(event, origin: regionCursors[index].index, attackAllowed: !expired)
+                        } else {
+                            sourceModel.observe(event.bytes, port: event.port)
+                            if !loop || (attack ? !expired : !release || (sourceHeld[event.port]?[key] ?? 0) > 0) {
+                                try sourceSend(event.bytes, port: event.port)
+                            }
                         }
                         regionCursors[index].index += 1
                     }
-                    try sourceSilence(addresses: region.addresses)
-                    for address in region.addresses { sourceModel.channels[address]?.notes.removeAll() }
+                    try sourceSilence(addresses: regionScopes[index])
+                    for address in regionScopes[index] { sourceModel.channels[address]?.notes.removeAll() }
                 }
                 regionCursors[index] = MidiRegionCursor(copy: copy)
                 if cut == nil && copy < region.spec.repeatCount && !(old.active && copy == old.copy + 1) {
@@ -1040,25 +1075,29 @@ final class MidiTransport {
                 if cut != nil { regionCursors[action.region] = MidiRegionCursor(copy: region.spec.repeatCount) }
                 else { try beginRegion(action.region, at: region.spec.sourceStart) }
             case .end:
-                try sourceSilence(addresses: region.addresses)
-                for address in region.addresses { sourceModel.channels[address]?.notes.removeAll() }
+                try sourceSilence(addresses: regionScopes[action.region])
+                for address in regionScopes[action.region] { sourceModel.channels[address]?.notes.removeAll() }
                 regionCursors[action.region].active = false; regionCursors[action.region].copy += 1
             case .event, .endpointEvent:
                 let event = region.events[regionCursors[action.region].index]
                 if cut == nil || action.seconds < cut! || action.kind == .endpointEvent {
-                    sourceModel.observe(event.bytes, port: event.port)
                     let type = event.bytes[0] & 0xf0
                     let attack = type == 0x90 && event.bytes[2] > 0
                     let release = type == 0x80 || type == 0x90 && event.bytes[2] == 0
                     let key = UInt16(event.bytes[0] & 15) << 8 | UInt16(event.bytes[1])
                     var send = true
-                    if cut != nil { send = attack ? action.seconds >= (observedAt ?? seconds) : !release || (sourceHeld[event.port]?[key] ?? 0) > 0 }
-                    else if let cycle, let host = cycleHost {
-                        let deadline = try cycle.deadline(position: action.seconds, index: cycleIndex, offset: offset - cycle.start, anchor: anchor)
-                        if attack && deadline < host { send = try liveRegionAttacks(action.region).contains(regionCursors[action.region].index) }
-                        if release { send = (sourceHeld[event.port]?[key] ?? 0) > 0 }
+                    if cycle != nil {
+                        if cut != nil { send = !attack || action.seconds >= (observedAt ?? seconds) }
+                        else if let cycle, let host = cycleHost {
+                            let deadline = try cycle.deadline(position: action.seconds, index: cycleIndex, offset: offset - cycle.start, anchor: anchor)
+                            if attack && deadline < host { send = try liveRegionAttacks(action.region).contains(regionCursors[action.region].index) }
+                        }
+                        try applyCycleEvent(event, origin: regionCursors[action.region].index, attackAllowed: send)
+                    } else {
+                        sourceModel.observe(event.bytes, port: event.port)
+                        if cut != nil { send = attack ? action.seconds >= (observedAt ?? seconds) : !release || (sourceHeld[event.port]?[key] ?? 0) > 0 }
+                        if send { try sourceSend(event.bytes, port: event.port) }
                     }
-                    if send { try sourceSend(event.bytes, port: event.port) }
                 }
                 regionCursors[action.region].index += 1
             }
@@ -1165,10 +1204,10 @@ final class MidiTransport {
         try checkDestination(); try silence(); cycleIndex = 0
         let seconds = seconds + (cycle?.start ?? 0)
         offset = seconds
-        for region in timeline.regions where seconds >= region.spec.startSeconds && seconds < region.end {
+        for (index, region) in timeline.regions.enumerated() where seconds >= region.spec.startSeconds && seconds < region.end {
             let copy = min(region.spec.repeatCount - 1, max(0, Int(floor((seconds - region.spec.startSeconds) / region.duration))))
             let source = min(region.spec.sourceEnd, region.spec.sourceStart + seconds - regionStart(region, copy: copy))
-            let entry = midiRegionEntry(region.events, at: source), previous = sourceModel.scoped(to: region.addresses)
+            let entry = midiRegionEntry(region.events, at: source), previous = sourceModel.scoped(to: regionScopes[index])
             guard previous.touched.isSubset(of: entry.safeKnown) else { throw MidiFailure("coordinated MIDI seek needs a known source baseline before sounding keys") }
             var permitted = previous; permitted.touched.formIntersection(entry.model.known)
             _ = try entry.model.bootstrap(replacing: permitted)

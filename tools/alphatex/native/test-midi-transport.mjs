@@ -706,6 +706,51 @@ seekZero.prepared=true;seekZero.destination=zeroBase.destination;seekZero.source
 reset(0);reviewWire=[];try seekZero.stageCoordinated(at:0.1);try seekZero.runCoordinated(anchorNanoseconds:1_000_000_000)
 reviewClock=1_000_000_000;seekZero.tick()
 precondition(reviewWire.map(\.1).contains([0x90,74,80]) && reviewWire.map(\.1).contains([0x80,74,77]),"seek boundary swallowed exactly-due zero pair")
+let fifoSource=asset("fifoCommon",[
+    ["seconds":0,"port":2,"bytes":[0xc0,0]],
+    ["seconds":0.1,"port":2,"bytes":[0x90,60,100]],
+    ["seconds":0.2,"port":2,"bytes":[0x90,60,90]],
+    ["seconds":0.3,"port":2,"bytes":[0x80,60,45]],
+    ["seconds":0.8,"port":2,"bytes":[0x80,60,77]]])
+let fifoBase=try arrangement([fifoSource],[clip("fifoCommon","fifoCommon",from:0,to:1,repeatCount:1)],duration:1)
+for fail in [false,true] {
+    let owner=try MidiTransport(timeline:fifoBase.timeline,uid:"1",loop:true,coordinated:true,cycle:endpointCycle)
+    owner.prepared=true;owner.destination=fifoBase.destination;owner.sourceDestinations=fifoBase.sourceDestinations
+    reset(0);reviewWire=[];try owner.stageCoordinated(at:0);try owner.runCoordinated(anchorNanoseconds:1_000_000_000)
+    reviewClock=1_000_000_000;owner.tick();reviewWire=[]
+    reviewClock=1_400_000_000;owner.tick()
+    precondition(reviewWire.map(\.1)==[[0x90,60,90]] && owner.sourceHeld[0]?[60]==1,"expired A release stole live B")
+    reviewClock=1_800_000_000;reviewWireFail=fail;owner.tick()
+    if fail {
+        precondition(owner.state == .stopped && owner.terminalFailure != nil)
+        precondition(Array(reviewWire.suffix(2)).map(\.1)==[[0x80,60,77],[0x80,60,0]] && owner.sourceHeld[0]?[60]==0,"uncertain B release lost cleanup ownership")
+    } else { precondition(reviewWire.map(\.1)==[[0x90,60,90],[0x80,60,77]] && owner.sourceHeld[0]?[60]==0) }
+}
+let scopeA=asset("scopeA",[
+    ["seconds":0.3,"port":2,"bytes":[0x90,60,100]], ["seconds":0.5,"port":2,"bytes":[0x80,60,45]],
+    ["seconds":0.8,"port":2,"bytes":[0x91,62,90]], ["seconds":0.9,"port":2,"bytes":[0x81,62,77]]])
+let scopeB=asset("scopeB",[["seconds":0.3,"port":2,"bytes":[0x91,64,90]],["seconds":0.5,"port":2,"bytes":[0x81,64,77]]])
+let scopePath=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString+".json")
+try JSONSerialization.data(withJSONObject:["schemaVersion":3,"duration":1,"sources":[scopeA,scopeB],"regions":[clip("scopeA","scopeA",from:0,to:1,repeatCount:1),clip("scopeB","scopeB",from:0,to:1,repeatCount:1)]]).write(to:scopePath)
+let scopeTimeline=try JSONDecoder().decode(Timeline.self,from:Data(contentsOf:scopePath));try FileManager.default.removeItem(at:scopePath)
+mustReject { try scopeTimeline.validate() }
+let scoped=try MidiTransport(timeline:scopeTimeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+precondition(scoped.regionScopes==[Set([0]),Set([1])])
+scoped.prepared=true;scoped.destination=fifoBase.destination;scoped.sourceDestinations=fifoBase.sourceDestinations
+reset(0);reviewWire=[];try scoped.stageCoordinated(at:0);try scoped.runCoordinated(anchorNanoseconds:1_000_000_000)
+reviewClock=1_100_000_000;scoped.tick()
+precondition(scoped.sourceHeld[0]?[60]==1 && scoped.sourceHeld[0]?[UInt16(1<<8|64)]==1)
+reviewWire=[];try scoped.sourceSilence(addresses:scoped.regionScopes[0])
+precondition(reviewWire.map(\.1)==[[0x80,60,0]] && scoped.sourceHeld[0]?[UInt16(1<<8|64)]==1,"one window scope silenced a disjoint owner")
+let earlyBase=try arrangement([asset("early",[["seconds":0,"port":2,"bytes":[0xc0,0]],["seconds":0.2+0.1,"port":2,"bytes":[0x90,74,80,0x80,74,77]]])],[clip("early","early",from:0,to:1,repeatCount:1)],duration:1)
+let early=try MidiTransport(timeline:earlyBase.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+early.prepared=true;early.destination=earlyBase.destination;early.sourceDestinations=earlyBase.sourceDestinations
+reset(0);reviewWire=[];try early.stageCoordinated(at:0);try early.runCoordinated(anchorNanoseconds:1_000_000_000)
+reviewClock=1_000_000_000;early.tick();reviewWire=[]
+let exact=try commonClock.deadline(position:0.2+0.1,index:0,offset:0,anchor:1_000_000_000)
+reviewClock=exact-1;early.tick();precondition(reviewWire.isEmpty,"floating phase overrode future native deadline")
+reviewClock=exact;early.tick();precondition(reviewWire.map(\.1)==[[0x90,74,80],[0x80,74,77]])
+print("COMMON_MIDI_OWNERSHIP_PASS: skipped A/live B keeps FIFO source-origin release and uncertain cleanup; effective window scopes drive admission and silence; native deadline is sole due authority")
 let fractional=try MidiCycle(start:0,end:48.0/247,duration:48.0/247,period:48_000_000_000,divisor:247)
 for index in UInt128(0)..<10_000 {
     let expected=(index+1)*48_000_000_000/247+(((index+1)*48_000_000_000)%247==0 ? 0:1)

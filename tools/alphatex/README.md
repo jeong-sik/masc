@@ -579,6 +579,26 @@ If an experiment moves or replaces its only initial controller/bend event, inser
 the intended initial value at zero (for example, `:cc 1 0 0` or `:bend 8192 0`),
 before its first note, or choose an independent output. Insertions follow existing
 events at the same tick: when the first note is already at zero, edit an existing
-initial event or use an independent output. Explicit same-tick insertion ordering
-is not available yet. An unspecified initial state is refused rather than
-replaced with an assumed instrument setting.
+initial event or explicitly order the inserted event before that note. An
+unspecified initial state is refused rather than replaced with an assumed
+instrument setting.
+
+Use `:event-before first-note` to put the selected expression before the first
+NoteOn at its exact source tick, track and channel. `:event-before EVENT_ID`
+instead places it before a specific same-tick event, including another controller
+or program message. This changes wire order without shifting source ticks, notes
+or tempo. For example:
+
+```
+cc 1 0 0
+event-before first-note
+bend 8192 0
+event-before first-note
+```
+
+Only expression events move. Notes, metadata and SysEx keep their mutual order;
+an order that changes a source port is refused. `:event-order-reset` restores
+natural order for the selected event's entire track/tick group. The stored group
+is reconciled when events are inserted, retimed or removed, so there are no
+dangling event anchors. Save/reopen, source export and arrangement variants retain
+the explicit order; undo/redo restores the complete document revision.

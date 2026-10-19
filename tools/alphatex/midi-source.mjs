@@ -123,6 +123,19 @@ function original(source) {
 }
 function materialize(source) {
   const parsed = original(source)
+  const orders = source.orders === undefined ? [] : source.orders
+  if (!Array.isArray(orders)) throw new Error('Invalid MIDI event orders')
+  const orderedGroups = new Map()
+  for (const order of orders) {
+    integer(order?.track, 'ordered MIDI track', 0, parsed.tracks.length - 1); integer(order.tick, 'ordered MIDI tick')
+    if (Object.keys(order).some(key => !['track', 'tick', 'events'].includes(key)) || !Array.isArray(order.events)
+        || order.events.length < 2 || order.events.some(id => typeof id !== 'string') || new Set(order.events).size !== order.events.length) {
+      throw new Error('MIDI order requires a unique event permutation')
+    }
+    const key = `${order.track}:${order.tick}`
+    if (orderedGroups.has(key)) throw new Error('Duplicate MIDI event order')
+    orderedGroups.set(key, order)
+  }
   const byID = new Map(parsed.tracks.flat().map(event => [event.id, event]))
   const changed = new Map()
   for (const patch of source.changes) {
@@ -147,19 +160,45 @@ function materialize(source) {
   }
   // Stable ordering retains original same-tick controller/note order. Inserted
   // events follow existing events at that tick and precede the end marker.
-  for (const track of tracks) {
+  for (const [trackIndex, track] of tracks.entries()) {
     const end = track.find(event => event.kind === 'meta' && event.type === 0x2f)
     for (const event of track) end.tick = Math.max(end.tick, event.tick)
     track.sort((a, b) => a.tick - b.tick || Number(a === end) - Number(b === end))
-    let port = 0
+    const baselinePorts = new Map(); let baselinePort = 0
     for (const event of track) {
+      if (event.kind === 'meta' && event.type === 0x21) baselinePort = event.data[0]
+      baselinePorts.set(event.id, baselinePort)
+    }
+    const ordered = []
+    for (let start = 0; start < track.length;) {
+      let finish = start + 1
+      while (finish < track.length && track[finish].tick === track[start].tick) finish++
+      const group = track.slice(start, finish), key = `${trackIndex}:${track[start].tick}`, order = orderedGroups.get(key)
+      if (order) {
+        const movable = group.filter(event => event !== end), byID = new Map(movable.map(event => [event.id, event]))
+        if (order.events.length !== movable.length || order.events.some(id => !byID.has(id))) throw new Error('MIDI order must name every non-end event at its track and tick')
+        const reordered = order.events.map(id => byID.get(id))
+        const protectedIDs = values => values.filter(event => !expressionEvent(event)).map(event => event.id)
+        const expected = protectedIDs(movable), actual = protectedIDs(reordered)
+        if (expected.length !== actual.length || expected.some((id, index) => id !== actual[index])) throw new Error('MIDI expression order cannot reorder notes, metadata or SysEx')
+        for (const event of reordered) ordered.push(event)
+        if (group.includes(end)) ordered.push(end)
+        orderedGroups.delete(key)
+      } else for (const event of group) ordered.push(event)
+      start = finish
+    }
+    tracks[trackIndex] = ordered
+    let port = 0
+    for (const event of ordered) {
       if (event.kind === 'meta' && event.type === 0x21) port = event.data[0]
       event.port = port
+      if (event.kind === 'channel' && event.port !== baselinePorts.get(event.id)) throw new Error('MIDI event order changes its source port')
       if (changed.has(event.id) && event.port !== byID.get(event.id).port) {
         throw new Error('MIDI edit changes the original source port; explicit route edits are not supported')
       }
     }
   }
+  if (orderedGroups.size) throw new Error('MIDI order has no matching source events')
   return { ...parsed, tracks }
 }
 export function importMidiSource(bytes, { name = 'Imported MIDI' } = {}) {
@@ -196,8 +235,8 @@ function encodeTrack(events) {
 }
 export function exportMidiSource(source) {
   const parsed = materialize(source)
-  if (!source.changes.length && !source.insertions.length) return Uint8Array.from(parsed.bytes)
-  const touched = new Set(source.insertions.map(event => event.track))
+  if (!source.changes.length && !source.insertions.length && !source.orders?.length) return Uint8Array.from(parsed.bytes)
+  const touched = new Set([...source.insertions.map(event => event.track), ...(source.orders ?? []).map(order => order.track)])
   for (const patch of source.changes) touched.add(Number(patch.id.split(':')[0]))
   let index = 0
   const parts = parsed.parts.map(part => {
@@ -285,7 +324,7 @@ export function editMidiSourceNote(source, edit = {}) { return editMidiSourceNot
 export function editMidiSourceNotes(source, edits, { pattern } = {}) {
   const performance = midiSourcePattern(source, { pattern }), info = midiSourceInfo(source)
   const notes = new Map(performance.notes.map(note => [note.id, note]))
-  const { next, insert, place } = sourcePatch(source)
+  const { next, insert, place, finish } = sourcePatch(source)
   const events = new Map(performance.events.map(event => [event.id, event]))
   const targets = new Map()
   for (const edit of edits) {
@@ -318,7 +357,7 @@ export function editMidiSourceNotes(source, edits, { pattern } = {}) {
   }
   // Reject unrepresentable deltas and edits that would silently pair the changed
   // key with a different source note-off or move it across a source port change.
-  exportMidiSource(next)
+  finish(); exportMidiSource(next)
   const pairs = new Map(midiSourcePattern(next, { pattern }).notes.map(note => [note.id, note]))
   for (const [on, expected] of targets) {
     if (expected !== null && (pairs.get(on)?.off !== expected.off || pairs.get(on)?.port !== expected.port)) {
@@ -331,12 +370,25 @@ export function editMidiSourceNotes(source, edits, { pattern } = {}) {
 function sourcePatch(source) {
   const next = structuredClone(source), used = new Set(next.insertions.map(event => event.id))
   let number = 1
+  const detach = id => {
+    if (!next.orders) return
+    next.orders = next.orders.map(order => ({ ...order, events: order.events.filter(event => event !== id) })).filter(order => order.events.length > 1)
+    if (!next.orders.length) delete next.orders
+  }
+  const append = (id, track, tick) => {
+    const order = next.orders?.find(order => order.track === track && order.tick === tick)
+    if (order) order.events.push(id)
+  }
   const insert = (track, tick, bytes) => {
     while (used.has(`new:${number}`)) number++
     const id = `new:${number++}`; used.add(id)
-    next.insertions.push({ id, track, tick, bytes }); return id
+    next.insertions.push({ id, track, tick, bytes }); append(id, track, tick); return id
   }
   const place = (event, value) => {
+    if (value.removed || value.tick !== event.tick) {
+      detach(event.id)
+      if (!value.removed) append(event.id, event.track, value.tick)
+    }
     const added = next.insertions.findIndex(item => item.id === event.id)
     if (added >= 0) {
       if (value.removed) next.insertions.splice(added, 1)
@@ -346,13 +398,46 @@ function sourcePatch(source) {
       next.changes.push({ id: event.id, ...value })
     }
   }
-  return { next, insert, place }
+  const finish = () => {
+    if (!next.orders) return
+    // Retimed/inserted notes and metadata retain their natural mutual order.
+    // Expressions keep the explicit slots in the reconciled permutation.
+    const natural = materialize({ ...next, orders: undefined })
+    for (const order of next.orders) {
+      const group = natural.tracks[order.track].filter(event => event.tick === order.tick && !(event.kind === 'meta' && event.type === 0x2f))
+      const byID = new Map(group.map(event => [event.id, event]))
+      const protectedIDs = group.filter(event => !expressionEvent(event)).map(event => event.id)
+      let index = 0
+      order.events = order.events.map(id => expressionEvent(byID.get(id)) ? id : protectedIDs[index++])
+    }
+  }
+  return { next, insert, place, finish }
+}
+
+// A complete same-tick permutation has no dangling anchors or cycles. Edits
+// reconcile membership; only this explicit operation changes relative order.
+export function orderMidiSourceExpression(source, { id, before }, { pattern } = {}) {
+  const performance = midiSourcePattern(source, { pattern }), selected = performance.events.find(event => event.id === id)
+  if (!expressionEvent(selected)) throw new Error('Select an expression event in this MIDI pattern')
+  const group = performance.events.filter(event => event.track === selected.track && event.tick === selected.tick && !(event.kind === 'meta' && event.type === 0x2f))
+  const next = structuredClone(source), remaining = (next.orders ?? []).filter(order => order.track !== selected.track || order.tick !== selected.tick)
+  if (before !== null) {
+    const target = group.find(event => event.id === before)
+    if (!target || target.id === id) throw new Error('Choose another non-end event at the same track and tick')
+    const events = group.filter(event => event.id !== id).map(event => event.id)
+    events.splice(events.indexOf(before), 0, id)
+    remaining.push({ track: selected.track, tick: selected.tick, events })
+  }
+  if (remaining.length) next.orders = remaining
+  else delete next.orders
+  exportMidiSource(next)
+  return next
 }
 
 export function editMidiSourceExpressions(source, edits, { pattern } = {}) {
   const performance = midiSourcePattern(source, { pattern }), info = midiSourceInfo(source)
   const events = new Map(performance.events.map(event => [event.id, event]))
-  const { next, insert, place } = sourcePatch(source), targets = new Map()
+  const { next, insert, place, finish } = sourcePatch(source), targets = new Map()
   for (const edit of edits) {
     const { id, kind } = edit
     if (kind === 'insert') {
@@ -368,7 +453,7 @@ export function editMidiSourceExpressions(source, edits, { pattern } = {}) {
       targets.set(id, event.port)
     } else throw new Error('Unknown MIDI expression edit')
   }
-  exportMidiSource(next)
+  finish(); exportMidiSource(next)
   const changed = new Map(midiSourcePattern(next, { pattern }).events.map(event => [event.id, event]))
   for (const [id, port] of targets) {
     if (port !== null && changed.get(id)?.port !== port) {

@@ -1,5 +1,5 @@
 import { Chord, Note } from 'tonal'
-import { midiSourceInfo, midiSourcePattern, editMidiSourceNotes, editMidiSourceExpressions } from './midi-source.mjs'
+import { midiSourceInfo, midiSourcePattern, editMidiSourceNotes, editMidiSourceExpressions, orderMidiSourceExpression } from './midi-source.mjs'
 import { expressionEvent } from './midi-expression.mjs'
 import { pitch, chordVoicing } from './sequencer-project.mjs'
 
@@ -141,6 +141,16 @@ export function sourceCommand(editor,line) {
     case 'event-value': count(1); return { editor: sourceAction(editor, { kind: 'expression-value', value: Number(args[0]) }) }
     case 'event-move': count(1); return { editor: sourceAction(editor, { kind: 'expression-move', ticks: units(args[0]) - expressionSelection(editor).tick }) }
     case 'event-remove': count(0); return { editor: sourceAction(editor, { kind: 'expression-remove' }) }
+    case 'event-before': case 'event-order-reset': {
+      count(command === 'event-before' ? 1 : 0)
+      const event = expressionSelection(editor)
+      const before = command === 'event-order-reset' ? null : args[0] === 'first-note'
+        ? editor.performance.events.find(value => value.track === event.track && value.tick === event.tick
+          && value.kind === 'channel' && value.bytes[0] === (0x90 | event.channel) && value.bytes[2] > 0)?.id
+        : args[0]
+      const project = orderMidiSourceExpression(editor.project, { id: event.id, before }, { pattern: editor.pattern })
+      return { editor: sourceEditor(project, { ...editor, undo: [...editor.undo,editor.project], redo: [] }) }
+    }
     case 'event-set': {
       count(2,3);const event=expressionSelection(editor)
       return {editor:applyExpressions(editor,[{kind:'change',id:event.id,message:message(args[0],args.slice(1),event.channel)}])}

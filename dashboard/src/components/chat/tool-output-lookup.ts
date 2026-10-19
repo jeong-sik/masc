@@ -1,61 +1,34 @@
 import { createContext } from 'preact'
-import { useContext, useEffect, useState } from 'preact/hooks'
+import { useContext, useEffect } from 'preact/hooks'
 import { html } from 'htm/preact'
-import { ApiRequestError, currentStoredTokenRevision } from '../../api/core'
 import { storedTokenRevision } from '../../api/token-revision'
-import { ADMIN_REQUIRED_MESSAGE, isAdminRequired } from '../../api/admin-required'
-import { fetchKeeperToolCall, type ToolCallEntry } from '../../api/dashboard-keeper-tool-calls'
-import { recordToolCallOutputs, toolCallOutputHydrationContract } from '../../tool-call-output-store'
+import { ADMIN_REQUIRED_MESSAGE } from '../../api/admin-required'
+import { exactToolOutputResetRevision, lookupExactToolOutput, retryExactToolOutput,
+  subscribeExactToolOutput, toolCallOutputHydrationContract } from '../../tool-call-output-store'
 import { useInViewOnce } from '../common/use-in-view'
 
 // Scope comes from the selected Keeper, never its mutable display label.
 export const KeeperToolOutputScope = createContext<string | null>(null)
-type State = { kind: 'idle' } | { kind: 'loading' }
-  | { kind: 'loaded'; entry: ToolCallEntry }
-  | { kind: 'missing' } | { kind: 'ambiguous' } | { kind: 'failed' } | { kind: 'admin-required' }
 
 export function useToolOutputLookup(executionId: string | null | undefined) {
   const keeper = useContext(KeeperToolOutputScope)
   const authRevision = storedTokenRevision.value
   const [ref, inView] = useInViewOnce<HTMLDivElement>()
-  const [attempt, retry] = useState(0)
-  const [result, setResult] = useState<{ keeper: string; executionId: string; authRevision: number; state: State } | null>(null)
-  const state: State = result?.keeper === keeper && result?.executionId === executionId && result?.authRevision === authRevision
-    ? result.state : { kind: 'idle' }
-  // A recent-tail cache cannot prove uniqueness across the complete ledger.
-  // Only the exact endpoint may supply evidence, including a cached identity.
-  const needsFetch = state.kind !== 'loaded'
+  const state = lookupExactToolOutput(keeper, executionId)
+  const resetRevision = exactToolOutputResetRevision.value
   // A bulk hydration that succeeds is new ledger evidence, so a row that has
-  // not loaded asks again once per success; `needsFetch` already keeps a loaded
-  // row from re-reading. This value must not read `state`: the effect below
-  // writes `loading` itself, so a state-gated value would flip on every
-  // attempt and re-run the effect without end.
+  // not loaded asks again once per success. State changes themselves do not
+  // restart the subscription, so publishing loading cannot create a retry loop.
   // `coveredThroughMs` only grows on success, unlike `completedAtMs`, which
   // also moves on a failed hydration and on every tool call of a live turn.
   const hydratedThrough = keeper ? toolCallOutputHydrationContract(keeper).coveredThroughMs : null
   useEffect(() => {
-    if (!keeper || !executionId || !inView || !needsFetch) return
-    const controller = new AbortController()
-    const set = (state: State) => {
-      if (!controller.signal.aborted && authRevision === currentStoredTokenRevision()) setResult({ keeper, executionId, authRevision, state })
-    }
-    set({ kind: 'loading' })
-    void fetchKeeperToolCall(keeper, executionId, { signal: controller.signal }).then(entry => {
-      if (controller.signal.aborted || authRevision !== currentStoredTokenRevision()) return
-      set({ kind: 'loaded', entry })
-      recordToolCallOutputs([entry])
-    }, error => {
-      if (controller.signal.aborted || authRevision !== currentStoredTokenRevision()) return
-      if (isAdminRequired(error)) set({ kind: 'admin-required' })
-      else if (error instanceof ApiRequestError && error.status === 404) set({ kind: 'missing' })
-      else if (error instanceof ApiRequestError && error.status === 409) set({ kind: 'ambiguous' })
-      else set({ kind: 'failed' })
-    })
-    return () => controller.abort()
-  }, [keeper, executionId, inView, needsFetch, attempt, authRevision, hydratedThrough])
+    if (!keeper || !executionId || !inView) return
+    return subscribeExactToolOutput(keeper, executionId, authRevision, hydratedThrough)
+  }, [keeper, executionId, inView, authRevision, hydratedThrough, resetRevision])
   return { ref, output: state.kind === 'loaded' ? state.entry : null,
     state,
-    retry: () => retry(value => value + 1) }
+    retry: () => retryExactToolOutput(keeper, executionId) }
 }
 
 export function ToolOutputLookupNotice({ lookup }: { lookup: ReturnType<typeof useToolOutputLookup> }) {

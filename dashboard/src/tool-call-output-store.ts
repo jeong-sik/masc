@@ -9,7 +9,9 @@
 // it may be blank or reused and never identifies a dashboard row or output.
 import { signal } from '@preact/signals'
 import type { ToolCallEntry } from './api/dashboard'
-import { subscribeStoredTokenChanges } from './api/core'
+import { ApiRequestError, currentStoredTokenRevision, subscribeStoredTokenChanges } from './api/core'
+import { isAdminRequired } from './api/admin-required'
+import { fetchKeeperToolCall } from './api/dashboard-keeper-tool-calls'
 
 export function nonBlankToolCallId(
   toolCallId: string | null | undefined,
@@ -27,6 +29,99 @@ export const toolCallOutputsByIdentity = signal<Map<string, ToolCallEntry>>(new 
 
 function outputKey(keeper: string, executionId: string): string {
   return JSON.stringify([keeper, executionId])
+}
+
+export type ExactToolOutputState =
+  | { kind: 'idle' } | { kind: 'loading' }
+  | { kind: 'loaded'; entry: ToolCallEntry }
+  | { kind: 'missing' } | { kind: 'ambiguous' } | { kind: 'failed' } | { kind: 'admin-required' }
+
+const idleExactOutput: ExactToolOutputState = { kind: 'idle' }
+const exactOutputs = signal(new Map<string, ExactToolOutputState>())
+export const exactToolOutputResetRevision = signal(0)
+interface ExactOutputSubscription {
+  keeper: string
+  executionId: string
+  authRevision: number
+  resetRevision: number
+  subscribers: Set<symbol>
+  hydratedThrough: number | null
+  controller: AbortController | null
+}
+const exactSubscriptions = new Map<string, ExactOutputSubscription>()
+
+export function lookupExactToolOutput(
+  keeper: string | null | undefined,
+  executionId: string | null | undefined,
+): ExactToolOutputState {
+  return keeper?.trim() && executionId?.trim()
+    ? exactOutputs.value.get(outputKey(keeper, executionId)) ?? idleExactOutput
+    : idleExactOutput
+}
+
+function setExactOutput(key: string, state: ExactToolOutputState): void {
+  exactOutputs.value = new Map(exactOutputs.peek()).set(key, state)
+}
+
+function requestExactOutput(key: string, subscription: ExactOutputSubscription): void {
+  subscription.controller?.abort()
+  const controller = new AbortController()
+  subscription.controller = controller
+  const current = () => exactSubscriptions.get(key) === subscription
+    && subscription.controller === controller && !controller.signal.aborted
+    && subscription.authRevision === currentStoredTokenRevision()
+    && subscription.resetRevision === exactToolOutputResetRevision.peek()
+  setExactOutput(key, { kind: 'loading' })
+  void fetchKeeperToolCall(subscription.keeper, subscription.executionId, { signal: controller.signal }).then(entry => {
+    if (!current()) return
+    subscription.controller = null
+    setExactOutput(key, { kind: 'loaded', entry })
+    recordToolCallOutputs([entry])
+  }, error => {
+    if (!current()) return
+    subscription.controller = null
+    let kind: 'admin-required' | 'missing' | 'ambiguous' | 'failed' = 'failed'
+    if (isAdminRequired(error)) kind = 'admin-required'
+    else if (error instanceof ApiRequestError && error.status === 404) kind = 'missing'
+    else if (error instanceof ApiRequestError && error.status === 409) kind = 'ambiguous'
+    setExactOutput(key, { kind })
+  })
+}
+
+/** One request per identity; each visible row owns only its subscription. */
+export function subscribeExactToolOutput(
+  keeper: string, executionId: string, authRevision: number, hydratedThrough: number | null,
+): () => void {
+  if (authRevision !== currentStoredTokenRevision()) return () => {}
+  const key = outputKey(keeper, executionId)
+  let subscription = exactSubscriptions.get(key)
+  if (!subscription) {
+    subscription = { keeper, executionId, authRevision, hydratedThrough,
+      resetRevision: exactToolOutputResetRevision.peek(), subscribers: new Set(), controller: null }
+    exactSubscriptions.set(key, subscription)
+  }
+  const owner = Symbol()
+  subscription.subscribers.add(owner)
+  const newHydration = subscription.hydratedThrough !== hydratedThrough
+  subscription.hydratedThrough = hydratedThrough
+  if (lookupExactToolOutput(keeper, executionId).kind !== 'loaded'
+    && (!subscription.controller || newHydration)) requestExactOutput(key, subscription)
+  const held = subscription
+  return () => {
+    if (exactSubscriptions.get(key) !== held) return
+    held.subscribers.delete(owner)
+    if (held.subscribers.size !== 0) return
+    held.controller?.abort()
+    exactSubscriptions.delete(key)
+    if (exactOutputs.peek().get(key)?.kind === 'loading') setExactOutput(key, idleExactOutput)
+  }
+}
+
+export function retryExactToolOutput(keeper: string | null, executionId: string | null | undefined): void {
+  if (!keeper || !executionId) return
+  const key = outputKey(keeper, executionId)
+  const subscription = exactSubscriptions.get(key)
+  if (subscription && subscription.authRevision === currentStoredTokenRevision()) requestExactOutput(key, subscription)
 }
 
 interface ToolCallOutputHydrationState {
@@ -211,6 +306,10 @@ export function lookupToolCallOutput(
 
 /** Test/teardown helper: drop all recorded outputs. */
 export function resetToolCallOutputs(): void {
+  for (const subscription of exactSubscriptions.values()) subscription.controller?.abort()
+  exactSubscriptions.clear()
+  exactOutputs.value = new Map()
+  exactToolOutputResetRevision.value++
   toolCallOutputsByIdentity.value = new Map()
   toolCallOutputHydrationByKeeper.value = {}
 }

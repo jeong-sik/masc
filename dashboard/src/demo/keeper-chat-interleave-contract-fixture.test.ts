@@ -117,7 +117,7 @@ describe('Keeper Chat interleave contract fixture', () => {
     expect(ordered[3]?.getAttribute('data-chat-trace-tool-call-id')).toBe('tc-missing')
     expect(ordered[3]?.getAttribute('data-chat-trace-entry-id')).toBeNull()
     expect(ordered[3]?.getAttribute('data-chat-trace-link-state')).toBe('trace-only')
-    expect(ordered[3]?.getAttribute('data-chat-trace-output-state')).toBe('pending')
+    expect(ordered[3]?.getAttribute('data-chat-trace-output-state')).toBe('unavailable')
     expect(ordered[4]?.getAttribute('data-chat-trace-entry-id')).toBe('assistant-interleave')
 
     const joinedToolRow = ordered[1]

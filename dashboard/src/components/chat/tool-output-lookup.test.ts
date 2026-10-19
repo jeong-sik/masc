@@ -58,6 +58,94 @@ describe('historical autonomous tool outputs', () => {
     expect(view.queryByLabelText('편집 변경 기록')).toBeNull()
     expect(get).toHaveBeenCalledTimes(1)
   })
+  it.each([404, 409, 503, 401, 403])(
+    'uses exact HTTP %i for both row state and completed-turn counts despite bulk output', async status => {
+      const bulk = response().entry
+      recordToolCallOutputs([{ ...bulk, wire_outcome: 'error', duration_ms: 9000 }])
+      markToolCallOutputsHydrated('writer', Date.now())
+      vi.mocked(get).mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/tool-calls', status }))
+      const view = render(transcript()); openTurn(view)
+      await waitFor(() => expect(view.getByRole('alert')).toBeTruthy())
+      const step = view.container.querySelector('[data-chat-trace-step="tool"]')!
+      expect(step.getAttribute('data-chat-trace-output-state')).toBe(status === 404 ? 'missing' : 'unavailable')
+      const header = view.container.querySelector('[data-chat-work-trace] .chat-block-trace-meta')!
+      expect(header.textContent).toContain(status === 404 ? '결과 누락 1' : '결과 확인 불가 1')
+      expect(header.textContent).not.toContain('실패 1')
+      expect(header.querySelector('.tnum')).toBeNull()
+      if (status !== 404) expect(header.textContent).not.toContain('결과 누락')
+      expect(get).toHaveBeenCalledTimes(1)
+    },
+  )
+  it('retains exact completion and duration when a later bulk row disagrees', async () => {
+    vi.mocked(get).mockResolvedValue(response())
+    const reportedFailure = entries.map(entry => ({ ...entry,
+      traceSteps: [{ kind: 'tool' as const, name: 'Edit', executionId: id, status: 'err' as const, dur: '9s' }],
+    }))
+    const view = render(html`<${ChatTranscript} keeperName="writer" entries=${reportedFailure} emptyText="empty" />`); openTurn(view)
+    await waitFor(() => expect(view.getByText('writer.md · 1곳 편집')).toBeTruthy())
+    await act(async () => {
+      recordToolCallOutputs([{ ...response().entry, wire_outcome: 'error', duration_ms: 9000 }])
+    })
+    const step = view.container.querySelector('[data-chat-trace-step="tool"]')!
+    expect(step.getAttribute('data-chat-trace-output-state')).toBe('ok')
+    const header = view.container.querySelector('[data-chat-work-trace] .chat-block-trace-meta')!
+    expect(header.textContent).not.toContain('실패 1')
+    expect(header.querySelector('.tnum')?.textContent).toBe('3ms')
+    expect(get).toHaveBeenCalledTimes(1)
+  })
+  it('counts an exact 404 as missing only after the owning turn finishes', async () => {
+    vi.mocked(get).mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/tool-calls', status: 404 }))
+    const ongoing = entries.map(entry => ({ ...entry, source: 'direct_assistant' as const, turnRef: 'trace-writer#428', streamState: 'streaming' as const }))
+    const finished = ongoing.map(entry => ({ ...entry, streamState: null }))
+    const show = (messages: typeof finished | typeof ongoing) => html`<${ChatTranscript} keeperName="writer" entries=${messages} emptyText="empty" groupToolCalls=${true} variant="messenger" />`
+    const view = render(show(ongoing))
+    if (!view.container.querySelector('[data-chat-trace-step="tool"]')) openTurn(view)
+    await waitFor(() => expect(view.getByRole('alert')).toBeTruthy())
+    expect(view.container.querySelector('[data-chat-trace-step="tool"]')?.getAttribute('data-chat-trace-output-state')).toBe('pending')
+    expect(view.container.querySelector('[data-chat-work-trace]')?.textContent).not.toContain('결과 누락')
+    view.rerender(show(finished))
+    await waitFor(() => expect(view.container.querySelector('[data-chat-trace-step="tool"]')?.getAttribute('data-chat-trace-output-state')).toBe('missing'))
+    expect(view.container.querySelector('[data-chat-work-trace] .chat-block-trace-meta')?.textContent).toContain('결과 누락 1')
+    expect(get).toHaveBeenCalledTimes(1)
+  })
+  it('shares an in-flight exact lookup and keeps it alive when one subscriber unmounts', async () => {
+    let finish!: (value: unknown) => void
+    let requestSignal: AbortSignal | undefined
+    vi.mocked(get).mockImplementation((_path, options) => {
+      requestSignal = options?.signal
+      return new Promise(resolve => { finish = resolve })
+    })
+    const panels = (first: boolean) => html`<div>
+      ${first ? html`<section key="first" data-testid="first">${transcript()}</section>` : null}
+      <section key="second" data-testid="second">${transcript()}</section>
+    </div>`
+    const view = render(panels(true))
+    for (const section of [view.getByTestId('first'), view.getByTestId('second')]) {
+      if (!section.querySelector('[data-chat-trace-step="tool"]')) openTurn({ container: section })
+    }
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(1))
+    view.rerender(panels(false))
+    expect(requestSignal?.aborted).toBe(false)
+    await act(async () => { finish(response()); await Promise.resolve() })
+    await waitFor(() => expect(within(view.getByTestId('second')).getByText('writer.md · 1곳 편집')).toBeTruthy())
+    expect(get).toHaveBeenCalledTimes(1)
+  })
+  it('rejects a late response after an explicit store reset in the same credential session', async () => {
+    let finishOld!: (value: unknown) => void
+    vi.mocked(get).mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+      .mockResolvedValueOnce(response())
+    const view = render(transcript()); openTurn(view)
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(1))
+    await act(async () => { resetToolCallOutputs() })
+    await waitFor(() => expect(view.getByText('writer.md · 1곳 편집')).toBeTruthy())
+    const late = response()
+    await act(async () => {
+      finishOld({ ...late, entry: { ...late.entry, wire_outcome: 'error', duration_ms: 9000 } })
+      await Promise.resolve()
+    })
+    expect(view.container.querySelector('[data-chat-trace-step="tool"]')?.getAttribute('data-chat-trace-output-state')).toBe('ok')
+    expect(get).toHaveBeenCalledTimes(2)
+  })
   it('keeps ordinary activity without an execution ID readable without a lookup', () => {
     const text = 'Unlinked activity result'
     const ordinary = entries.map(entry => ({ ...entry, source: 'direct_assistant' as const,

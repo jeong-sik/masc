@@ -614,6 +614,7 @@ final class ArrangementTransport {
             if let loop = plan.loop {
                 clock["cycle"] = ["kind": "project", "start": loop.start, "end": loop.end, "ppq": loop.ppq, "tempo": loop.tempo]
             }
+            if kind == "stopped" { clock["end"] = String(mach_absolute_time()) }
             if let midi {
                 clock["midiAnchorNanoseconds"] = String(AudioConvertHostTimeToNanos(musicalAnchor))
                 clock["midiPosition"] = max(0, midi.position(at: DispatchTime.now().uptimeNanoseconds)

@@ -181,7 +181,26 @@ let resource_notifications=`Assoc ["resourceSubscriptions",`List [`String resour
 let filter notifications=Protocol.subscription_filter_of_params
   (Some (`Assoc ["notifications",notifications])) |> Subs.honoured_filter
 
-let subscribe ?(notifications=tools_notifications) client ~port id =
+(* The stateful protocol revision scopes a subscription to a session: the
+   client initializes first and presents the session id it was given. *)
+let initialize_session client ~port =
+  let body=Yojson.Safe.to_string (`Assoc ["jsonrpc",`String "2.0";"id",`String "initialize";
+    "method",`String "initialize";
+    "params",`Assoc ["protocolVersion",`String Protocol.default_protocol_version;
+      "capabilities",`Assoc [];
+      "clientInfo",`Assoc ["name",`String "resource-fixture";"version",`String "0"]]]) in
+  let exchange=request client ~port "/mcp" ~body ~headers:[
+    "accept","application/json, text/event-stream";"content-type","application/json";
+    "mcp-protocol-version",Protocol.default_protocol_version] in
+  let init_response=response exchange in
+  check int "initialize opens a session" 200 (H2.Status.to_code init_response.response.status);
+  let session_id=match H2.Headers.get init_response.response.headers "mcp-session-id" with
+    | Some value -> value
+    | None -> fail "initialize returned no mcp-session-id header" in
+  ignore (read_complete response);
+  session_id
+
+let subscribe ?(notifications=tools_notifications) ~session_id client ~port id =
   let params=`Assoc [
     "notifications",notifications;
     "_meta",`Assoc [Protocol.protocol_version_meta_key,`String Protocol.default_protocol_version;
@@ -190,7 +209,8 @@ let subscribe ?(notifications=tools_notifications) client ~port id =
     "method",`String "subscriptions/listen";"params",params]) in
   request client ~port "/mcp" ~body ~headers:[
     "accept","application/json, text/event-stream";"content-type","application/json";
-    "mcp-protocol-version",Protocol.default_protocol_version;"mcp-method","subscriptions/listen"]
+    "mcp-protocol-version",Protocol.default_protocol_version;"mcp-method","subscriptions/listen";
+    "mcp-session-id",session_id]
 
 let rec until predicate = if not (predicate ()) then (Eio.Fiber.yield ();until predicate)
 
@@ -202,7 +222,8 @@ let test_actual_subscription_route () =
     Fun.protect ~finally:Subs.reset_for_test (fun () ->
       let blocked=connect ~window:1024l () and healthy=connect ~window:1024l () in
       let blocked_id=`String "blocked" in
-      let held=subscribe blocked ~port blocked_id in
+      let blocked_session=initialize_session blocked ~port in
+      let held=subscribe ~session_id:blocked_session blocked ~port blocked_id in
       let held_response=response held in
       check int "actual MCP route opens a subscription" 200
         (H2.Status.to_code held_response.response.status);
@@ -213,7 +234,8 @@ let test_actual_subscription_route () =
          mutex. Its distinct filter lets the unread tools subscriber fill
          capacity without offering that same burst to the healthy stream. *)
       let healthy_id=`String "healthy" in
-      let live=subscribe ~notifications:resource_notifications healthy ~port healthy_id in
+      let healthy_session=initialize_session healthy ~port in
+      let live=subscribe ~session_id:healthy_session ~notifications:resource_notifications healthy ~port healthy_id in
       let live_response=response live in
       check int "healthy sibling was admitted before overflow" 200
         (H2.Status.to_code live_response.response.status);

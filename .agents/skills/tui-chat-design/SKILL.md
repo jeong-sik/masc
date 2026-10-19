@@ -122,15 +122,24 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인�
 - 공용 JSON 조회는 `fork_workspace_job`의 기존 observation 취소 registry에 등록한다.
   읽기 epoch 철회 시 병렬 child에도 취소를 요청하고 실제 cleanup까지 원래 owner를 유지한다.
   취소 요청·UI의 대기 해제·worker 종료를 같은 시점으로 기록하지 않는다. Connector의
-  시작 실패는 원래 authority의 inflight를 즉시 해제하고 source 실패를 한 번 전달한다.
+  시작 실패는 원래 요청의 활성 상태를 즉시 해제하고 source 실패를 한 번 전달한다.
   일반 요청·효과의 observation 기본값은 바꾸지 않는다.
 - 정상 Error 결과는 해당 체인의 앞서 받은 페이지·형제 결과와 함께 남긴다. 예외·부모 취소는
   structured scope를 따르고, 모든 체인을 합친 결과를 기존 UI handler가 받는다. 빠른 child가
   먼저 끝났다는 사실을 즉시 UI 반영·paint로 부르지 않는다. 순수 snapshot/page 해석과 이름
   projection만 공용 CPU 경로를 사용한다. `connectors.snapshot.decode_wait`·
   `connectors.names.decode_wait`·`connectors.names.project_wait`는 pool 대기와 반환도 포함한다.
-  같은 authority에서 write 뒤에 요구한 후속 조회와 읽기 철회 사이의 수요 보존 잔여 항목은
-  `docs/audits/2026-10-19-tui-connectors-composed-workspace-reads.md`에 구분해 둔다.
+- Connector 조회 제어는 `Connector_read`의 불변 상태와 opaque 원래 요청을 사용한다.
+  바인딩 write 뒤 재조회 수요는 이미 진행 중인 read와 합치되, 그 read의 응답으로 소비하지
+  않는다. 후속 read 자체가 철회되어도 시작 당시의 수요와 나중 write의 수요를 보존한다.
+  같은 workspace 재확인 시 숨겨진 화면의 수요도 다시 시작하고, 확정된 다른 workspace는
+  지운다. 이전 요청의 응답·시작 실패 callback은 새 요청의 상태를 정리할 수 없다.
+  시작 실패·재조회 실패는 수요를 보존하되 즉시 반복 실행하지 않는다. 명시/기존 조회 경로가
+  다시 시작한다. 조회 중·재조회 대기·시작 실패와 마지막 정상 관측을 화면에서 구분한다.
+  이 상태는 UI가 소유한 요청/수요이며 실제 worker 종료·paint 완료 증거가 아니다.
+  원래 composition 경계는 `docs/audits/2026-10-19-tui-connectors-composed-workspace-reads.md`,
+  후속 수요의 As-Is/To-Be와 미실행 시나리오는
+  `docs/audits/2026-10-19-tui-connectors-held-reread-owner.md`를 따른다.
 
 ## 에디터 준비 조회
 

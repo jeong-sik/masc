@@ -412,6 +412,7 @@ let render_connectors (state : state) =
           snapshot.Masc.Tui_decode_connectors.cs_active snapshot.Masc.Tui_decode_connectors.cs_total
           timestamp (connection_badge state)
   in
+  let read_notice = connectors_read_notice state in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     (* Names the exit, which this row did not. Esc leaves for the selected
        Keeper (masc_tui.ml reads it under [Connectors]) and the key sheet
@@ -425,13 +426,16 @@ let render_connectors (state : state) =
         ("  " ^ Masc_tui_table.header_row
           (cells ~name:"" ~configured:"" ~reachable:"" ~status:"" ~channel:""));
       c.push_divider ();
+      Option.iter (fun notice ->
+        c.push_styled ~style:(Theme.info ()) ("  " ^ notice)) read_notice;
       (match state.connectors_error with
        | None -> ()
        | Some detail ->
            c.push_styled ~style:(Theme.bad ())
              ("  " ^ Keeper_chat.terminal_safe_text detail);
            c.push_divider ());
-      let fixed = 2 + (if Option.is_some state.connectors_error then 2 else 0) in
+      let fixed = 2 + (if Option.is_some read_notice then 1 else 0)
+        + (if Option.is_some state.connectors_error then 2 else 0) in
       let room = max 1 (budget - fixed) in
       let overflowing = shown > room in
       let content_height = if overflowing then max 1 (room - 1) else room in

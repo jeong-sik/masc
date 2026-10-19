@@ -110,6 +110,179 @@ let test_slack_bind_persists_binding_and_audit () =
         check string "audit actor" "dashboard"
           (List.hd audit |> U.member "actor_name" |> U.to_string))
 
+module Tui = Masc_tui_types
+module Connector_read = Tui.Connector_read
+
+let connector_read_ready state base_path =
+  let identity : Masc.Tui_decode.server_identity =
+    { sid_version = "read-ownership-fixture"
+    ; sid_binary_commit = "fixture"
+    ; sid_binary_commit_age_s = None
+    ; sid_base_path = base_path
+    ; sid_masc_root = Filename.concat base_path ".masc"
+    ; sid_executable_in_worktree = None
+    ; sid_state_ready = Some true
+    ; sid_uptime = None; sid_sse_clients = None; sid_gc = None; sid_scheduler = None
+    }
+  in
+  state.Tui.server_identity <- Some identity;
+  state.workspace_identity <-
+    Tui.workspace_identity_of_refresh ~local_base_path:state.local_base_path (Ok identity)
+
+let connector_read_uncertain state =
+  state.Tui.workspace_identity <- Tui.next_workspace_identity
+      ~previous:state.workspace_identity ~local_base_path:state.local_base_path
+      (Error "identity observation interrupted");
+  Tui.suspend_workspace_readings state
+
+let begin_connector_read state =
+  match Tui.begin_connectors_read state with
+  | Some request -> request
+  | None -> fail "a fresh owned Connector read was required"
+
+let finish_connector_read state request result expected =
+  match Tui.complete_connectors_read state request result with
+  | Some actual -> check bool "causal follow-up decision" true (actual = expected)
+  | None -> fail "the original current Connector request was rejected"
+
+let reject_connector_read state request result =
+  check bool "retired request cannot settle its successor" true
+    (Option.is_none (Tui.complete_connectors_read state request result))
+
+let connector_owner json channel_id =
+  json |> U.member "configured_bindings" |> U.to_list
+  |> List.find_map (fun row ->
+       if String.equal (row |> U.member "channel_id" |> U.to_string) channel_id
+       then Some (row |> U.member "keeper_name" |> U.to_string)
+       else None)
+
+let connector_fixture_write result =
+  match result with Ok _ -> () | Error detail -> fail detail
+
+(* Actual binding-store writes and its production descriptor are carried
+   through the same request/demand transitions the UI uses. These scenarios
+   do not run the private UI loop, HTTP transport, model or terminal. *)
+let test_connector_write_demand_survives_repeated_read_withdrawal () =
+  with_temp_dir @@ fun dir ->
+  with_sidecar_paths "slack" dir @@ fun () ->
+  Unix.mkdir (Filename.concat dir ".masc") 0o700;
+  let state = Tui.create_state ~workspace:"connector-read"
+      ~local_base_path:dir ~port:0 ~refresh_interval:0. () in
+  connector_read_ready state dir;
+  connector_fixture_write
+    (Channel_gate_slack_state.bind ~channel_id:"C123" ~keeper_name:"first"
+       ~actor_name:"tui-read-test");
+  connector_fixture_write
+    (Channel_gate_slack_state.bind ~channel_id:"C456" ~keeper_name:"other"
+       ~actor_name:"tui-read-test");
+  let old_request = begin_connector_read state in
+  let before_write = Channel_gate_slack_state.connector_json () in
+  check (option string) "original member exists before the write" (Some "first")
+    (connector_owner before_write "C123");
+  connector_fixture_write
+    (Channel_gate_slack_state.unbind_if_keeper ~channel_id:"C123"
+       ~expected_keeper_name:"first" ~actor_name:"tui-read-test");
+  Tui.queue_connectors_after_write state;
+  connector_read_uncertain state;
+  check bool "held demand does not dispatch against uncertain identity" true
+    (Option.is_none (Tui.begin_connectors_read state));
+  connector_read_ready state dir;
+  let interrupted_followup = begin_connector_read state in
+  reject_connector_read state old_request (Ok before_write);
+  check bool "replacement starts after the original write" true
+    (Connector_read.view state.connectors_read =
+       Connector_read.Reading (After_write, No_follow_up));
+  (* The replacement itself may retire before it receives the written state. *)
+  connector_read_uncertain state;
+  connector_read_ready state dir;
+  let fresh_request = begin_connector_read state in
+  reject_connector_read state interrupted_followup (Error "read interrupted");
+  let after_write = Channel_gate_slack_state.connector_json () in
+  check (option string) "original removal is observed" None
+    (connector_owner after_write "C123");
+  check (option string) "unrelated original member survives" (Some "other")
+    (connector_owner after_write "C456");
+  (* A second write after this request began still requires a later read. *)
+  connector_fixture_write
+    (Channel_gate_slack_state.bind ~channel_id:"C456" ~keeper_name:"rebound"
+       ~actor_name:"tui-read-test");
+  Tui.queue_connectors_after_write state;
+  finish_connector_read state fresh_request (Ok after_write)
+    Connector_read.Read_after_write;
+  let latest_request = begin_connector_read state in
+  reject_connector_read state fresh_request (Ok after_write);
+  let latest = Channel_gate_slack_state.connector_json () in
+  check (option string) "later write has its own fresh observation" (Some "rebound")
+    (connector_owner latest "C456");
+  finish_connector_read state latest_request (Ok latest) Connector_read.No_follow_up;
+  check bool "only the latest owned observation settles demand" true
+    (Connector_read.view state.connectors_read = Connector_read.Quiet)
+
+let test_connector_held_read_start_failure_and_scope_reset () =
+  with_temp_dir @@ fun dir ->
+  with_sidecar_paths "slack" dir @@ fun () ->
+  Unix.mkdir (Filename.concat dir ".masc") 0o700;
+  let state = Tui.create_state ~workspace:"connector-read"
+      ~local_base_path:dir ~port:0 ~refresh_interval:0. () in
+  connector_read_ready state dir;
+  connector_read_uncertain state;
+  connector_fixture_write
+    (Channel_gate_slack_state.bind ~channel_id:"C123" ~keeper_name:"written"
+       ~actor_name:"tui-read-test");
+  Tui.queue_connectors_after_write state;
+  check bool "a write received while unread is held" true
+    (Connector_read.view state.connectors_read = Connector_read.Waiting_after_write);
+  connector_read_ready state dir;
+  let no_start = begin_connector_read state in
+  Tui.connector_read_not_started state no_start;
+  check bool "start failure immediately releases active status" true
+    (Connector_read.view state.connectors_read = Connector_read.Failed_to_start);
+  finish_connector_read state no_start (Error "switch unavailable")
+    Connector_read.No_follow_up;
+  check bool "start failure keeps demand without an immediate retry" true
+    (Connector_read.view state.connectors_read = Connector_read.Waiting_after_write);
+  let retry = begin_connector_read state in
+  Tui.connector_read_not_started state no_start;
+  reject_connector_read state no_start (Error "late start failure");
+  finish_connector_read state retry (Error "status read failed")
+    Connector_read.No_follow_up;
+  let received = begin_connector_read state in
+  let written = Channel_gate_slack_state.connector_json () in
+  check (option string) "real written member remains after failed reads" (Some "written")
+    (connector_owner written "C123");
+  finish_connector_read state received (Ok written) Connector_read.No_follow_up;
+  Tui.queue_connectors_after_write state;
+  let retiring = begin_connector_read state in
+  connector_read_uncertain state;
+  (* This is the production control reset used for a different workspace;
+     the private Main root-classification path is inspected, not mirrored. *)
+  Tui.clear_connectors_read state;
+  with_temp_dir (fun other_dir ->
+    with_sidecar_paths "slack" other_dir (fun () ->
+      Unix.mkdir (Filename.concat other_dir ".masc") 0o700;
+      connector_read_ready state other_dir;
+      connector_fixture_write
+        (Channel_gate_slack_state.bind ~channel_id:"C123" ~keeper_name:"different"
+           ~actor_name:"tui-read-test");
+      let successor = begin_connector_read state in
+      reject_connector_read state retiring (Ok written);
+      check bool "scope reset cannot lend the old write demand" true
+        (Connector_read.view state.connectors_read =
+           Connector_read.Reading (Refresh, No_follow_up));
+      let different = Channel_gate_slack_state.connector_json () in
+      check (option string) "same member ID has a different actual scope value"
+        (Some "different") (connector_owner different "C123");
+      finish_connector_read state successor (Ok different) Connector_read.No_follow_up;
+      Tui.clear_connectors_read state;
+      connector_read_ready state dir;
+      let returned = begin_connector_read state in
+      reject_connector_read state successor (Ok different);
+      let original = with_sidecar_paths "slack" dir
+          (fun () -> Channel_gate_slack_state.connector_json ()) in
+      check (option string) "returning to A reads A's durable binding" (Some "written")
+        (connector_owner original "C123");
+      finish_connector_read state returned (Ok original) Connector_read.No_follow_up))
+
 let test_slack_binding_store_error_is_typed () =
   with_temp_dir @@ fun dir ->
   with_sidecar_paths "slack" dir (fun () ->
@@ -629,6 +802,10 @@ let () =
             test_connector_capability_wire_contract;
           test_case "slack bind persists binding and audit" `Quick
             test_slack_bind_persists_binding_and_audit;
+          test_case "Connector write demand survives repeated read withdrawal" `Quick
+            test_connector_write_demand_survives_repeated_read_withdrawal;
+          test_case "Connector held read handles failed starts and scope reset" `Quick
+            test_connector_held_read_start_failure_and_scope_reset;
           test_case "slack binding read errors are typed" `Quick
             test_slack_binding_store_error_is_typed;
           test_case "slack status surfaces binding read failure" `Quick

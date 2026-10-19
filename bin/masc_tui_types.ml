@@ -52,6 +52,115 @@ end = struct
   let in_flight state = Option.is_some state.pending
 end
 
+(* Original read ownership and a fresh observation owed after a binding write.
+   Tokens are supplied by the UI edge; these transitions do not launch work. *)
+module Connector_read : sig
+  type t
+  type request
+  type cause = Refresh | After_write
+  type follow_up = No_follow_up | Read_after_write
+  type view =
+    | Quiet
+    | Reading of cause * follow_up
+    | Waiting_after_write
+    | Failed_to_start
+
+  val empty : t
+  val view : t -> view
+  val begin_read : authority:unit ref -> owner:unit ref -> t -> (t * request) option
+  (** [None] shares the active request for this authority. A supplied owner is
+      fresh for this attempt; an older authority cannot lend its active slot. *)
+  val after_write : t -> t
+  val suspend : t -> t
+  (** Retire the request, retaining both demand it began with and later writes. *)
+  val not_started : authority:unit ref -> t -> request -> t
+  (** Release active status synchronously, retaining the exact failed request
+      until its failure can be admitted. Stale callbacks leave the state alone. *)
+  val complete : authority:unit ref -> t -> request -> ('a, 'b) result ->
+    (t * follow_up) option
+  (** [None] rejects an old request. Only a write observed after an active read
+      began requests an immediate follow-up. A failed after-write read or start
+      retains demand for the next explicit/existing read, without a retry loop. *)
+end = struct
+  type cause = Refresh | After_write
+  type follow_up = No_follow_up | Read_after_write
+  type request = { authority : unit ref; owner : unit ref; cause : cause }
+  type t =
+    | Empty
+    | Held
+    | Pending of request * follow_up
+    | Not_started of request * follow_up
+  type view =
+    | Quiet
+    | Reading of cause * follow_up
+    | Waiting_after_write
+    | Failed_to_start
+
+  let empty = Empty
+
+  let view = function
+    | Empty -> Quiet
+    | Held -> Waiting_after_write
+    | Pending (request, follow_up) -> Reading (request.cause, follow_up)
+    | Not_started _ -> Failed_to_start
+
+  let owes_read request follow_up =
+    match request.cause, follow_up with
+    | Refresh, No_follow_up -> false
+    | Refresh, Read_after_write
+    | After_write, No_follow_up
+    | After_write, Read_after_write -> true
+
+  let held = function
+    | Empty -> false
+    | Held -> true
+    | Pending (request, follow_up) | Not_started (request, follow_up) ->
+        owes_read request follow_up
+
+  let begin_read ~authority ~owner state =
+    match state with
+    | Pending (request, _) when request.authority == authority -> None
+    | Empty | Held | Pending _ | Not_started _ ->
+        let cause = if held state then After_write else Refresh in
+        let request = { authority; owner; cause } in
+        Some (Pending (request, No_follow_up), request)
+
+  let after_write = function
+    | Empty | Held -> Held
+    | Pending (request, _) -> Pending (request, Read_after_write)
+    | Not_started (request, _) -> Not_started (request, Read_after_write)
+
+  let suspend state = if held state then Held else Empty
+
+  let owns ~authority current request =
+    current.authority == authority && request.authority == authority
+    && current.owner == request.owner
+
+  let not_started ~authority state request =
+    match state with
+    | Pending (current, follow_up) when owns ~authority current request ->
+        Not_started (current, follow_up)
+    | Empty | Held | Pending _ | Not_started _ -> state
+
+  let complete ~authority state request result =
+    match state with
+    | Pending (current, follow_up) when owns ~authority current request ->
+        (match follow_up with
+         | Read_after_write -> Some (Held, Read_after_write)
+         | No_follow_up ->
+             let next = match current.cause, result with
+               | After_write, Error _ -> Held
+               | After_write, Ok _ | Refresh, (Ok _ | Error _) -> Empty
+             in
+             Some (next, No_follow_up))
+    | Not_started (current, follow_up) when owns ~authority current request ->
+        (match result with
+         | Ok _ -> None
+         | Error _ ->
+             Some ((if owes_read current follow_up then Held else Empty), No_follow_up))
+    | Empty | Held | Pending _ | Not_started _ -> None
+end
+
 (* In-process source ordering keeps one active read and accumulated refresh demand.
    Local files and the shared Runtime catalogue use this same effect-free order.
    Revisions order source demands; they are neither timeouts nor action limits. *)
@@ -8454,10 +8563,7 @@ type state = {
   mutable browser_lane_read_resume: (int * Browser_lane_view.t * Browser_lane_view.operation) option;
   mutable connectors: Masc.Tui_decode_connectors.connector_snapshot option;
   mutable connectors_error: string option;
-  mutable connectors_inflight: bool;
-  (* A binding write landed while a load was in flight; read once more when
-     that load answers. *)
-  mutable connectors_reload_after_inflight: bool;
+  mutable connectors_read: Connector_read.t;
   mutable connectors_scroll: int;
   mutable connectors_cursor: int;
   mutable connectors_binding_cursor: int;
@@ -9698,6 +9804,51 @@ let take_task_followups state ~ready =
   state.pending_task_followups <- List.rev waiting;
   List.rev run, List.rev withdrawn
 
+let begin_connectors_read state =
+  if not (server_authority_ready state) then None
+  else match Connector_read.begin_read ~authority:state.detail_read_authority
+      ~owner:(ref ()) state.connectors_read with
+    | None -> None
+    | Some (reading, request) -> state.connectors_read <- reading; Some request
+
+let queue_connectors_after_write state =
+  state.connectors_read <- Connector_read.after_write state.connectors_read
+
+let connector_read_not_started state request =
+  state.connectors_read <- Connector_read.not_started
+      ~authority:state.detail_read_authority state.connectors_read request
+
+let complete_connectors_read state request result =
+  if not (server_authority_ready state) then None
+  else match Connector_read.complete ~authority:state.detail_read_authority
+      state.connectors_read request result with
+    | None -> None
+    | Some (reading, follow_up) ->
+        state.connectors_read <- reading;
+        Some follow_up
+
+let clear_connectors_read state =
+  state.connectors_read <- Connector_read.empty
+
+let connectors_read_notice state =
+  match Connector_read.view state.connectors_read with
+  | Connector_read.Quiet -> None
+  | Reading (cause, follow_up) ->
+      let activity = match cause, follow_up with
+        | Connector_read.Refresh, No_follow_up -> "Reading connectors"
+        | After_write, No_follow_up -> "Rechecking bindings"
+        | Refresh, Read_after_write | After_write, Read_after_write ->
+            "Reading connectors; recheck queued"
+      in
+      Some (activity ^ (match state.connectors with
+        | None -> "…"
+        | Some _ -> " · last observation"))
+  | Waiting_after_write ->
+      Some (if server_authority_ready state
+        then "Binding recheck pending · r:retry"
+        else "Binding recheck pending · waiting for workspace confirmation")
+  | Failed_to_start -> Some "Connector read could not start"
+
 let workspace_reply_admitted state ~authority ~reading ~kind =
   authority = state.workspace_authority
   && match kind with
@@ -10335,8 +10486,7 @@ let suspend_workspace_readings state =
     state.keeper_lanes_resume || state.keeper_lanes_inflight || state.keeper_lanes_reread_pending;
   state.keeper_lanes_inflight <- false;
   state.keeper_lanes_reread_pending <- false;
-  state.connectors_inflight <- false;
-  state.connectors_reload_after_inflight <- false;
+  state.connectors_read <- Connector_read.suspend state.connectors_read;
   state.memory_health_inflight <- false;
   suspend_runtime_catalog_read state;
   state.runtime_config_read <- `Idle;
@@ -14011,8 +14161,7 @@ let create_state
   browser_lane_read_resume = None;
   connectors = None;
   connectors_error = None;
-  connectors_inflight = false;
-  connectors_reload_after_inflight = false;
+  connectors_read = Connector_read.empty;
   connectors_scroll = 0;
   connectors_cursor = 0;
   connectors_binding_cursor = 0;
@@ -17635,10 +17784,13 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
     when state.repository_changes_open -> repository_changes_listing ()
   | Connectors when Option.is_some (browser_lane_on_screen state) -> None
   | Connectors ->
-      listing ~error:state.connectors_error
-        (match state.connectors with
-         | None -> 0
-         | Some s -> List.length s.Masc.Tui_decode_connectors.cs_connectors)
+      Option.map (fun rows ->
+        { rows with sc_chrome = rows.sc_chrome
+            + (if Option.is_some (connectors_read_notice state) then 1 else 0) })
+        (listing ~error:state.connectors_error
+          (match state.connectors with
+           | None -> 0
+           | Some s -> List.length s.Masc.Tui_decode_connectors.cs_connectors))
   (* The authority row above the list is wrapped to the terminal width, which
      this arm does not read. [Masc_tui.scrolled_surface] answers Runtime from
      [runtime_scrolled] with the width, as it does for the Memory overview. *)

@@ -1324,7 +1324,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
           | Some _ | None -> [ tab_loading_row "loading" ])
     in
     let channel_lines () =
-      match state.connectors_error, state.connectors with
+      let rows = match state.connectors_error, state.connectors with
       | Some detail, None ->
           [ (Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail
             ^ Ansi.reset ]
@@ -1597,6 +1597,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                    ^ Terminal_text.single_line detail ^ Ansi.reset
                  ])
           @ transport_rows @ refused_rows @ selected_lines
+      in
+      match connectors_read_notice state with
+      | None -> rows
+      | Some notice -> (Theme.info () ^ "  " ^ notice ^ Ansi.reset) :: rows
     in
     let automation_lines () =
       (* This tab reads the Keeper's own page from the server rather than

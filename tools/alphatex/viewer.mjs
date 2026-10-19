@@ -27,6 +27,7 @@ const { values, positionals } = parseArgs({
     session: { type: 'string' },
     'session-root': { type: 'string' },
     input: { type: 'string' },
+    output: { type: 'string' },
     midi: { type: 'string' },
     'state-dir': { type: 'string' },
     sequence: { type: 'boolean' },
@@ -42,6 +43,7 @@ if (values.help) {
     + '  i chooses instrument/preset, e opens its native sound browser, l toggles repeat.\n'
     + '  --state-dir stores native selection, saved presets, renders and Lane snapshot.\n'
     + '  --sequence opens a new phrase editor; --project song.json reopens one; --project-root sets its folder.\n'
+    + '  --output UID selects sequencer audio output; :output UID changes it in the editor.\n'
     + '  --record opens audio/MIDI input selection; r begins recording, s saves WAV and UMP.\n'
     + '  --session directory opens a saved waveform/MIDI timeline; --session-root sets the take folder.\n'
     + '  --devices lists CoreAudio/CoreMIDI inputs on macOS.\n'
@@ -53,7 +55,7 @@ try {
   if (values.sequence || values.project) {
     const { viewSequencer } = await import('./sequencer-tui.mjs')
     await viewSequencer({ path: values.project, root: values['project-root'], soundfontPath: values.soundfont,
-      sessionRoot: values['session-root'], input: values.input, midi: values.midi })
+      sessionRoot: values['session-root'], input: values.input, midi: values.midi, output: values.output })
   } else if (values.devices) {
     const { devices } = await import('./capture.mjs')
     console.log(JSON.stringify(await devices()))
@@ -418,7 +420,7 @@ async function viewScores(sources, initialIndex) {
             if (key.name === 'p') {
               const { viewSequencer } = await import('./sequencer-tui.mjs')
               if (!closed) await viewSequencer({ root: values['project-root'], sessionRoot: values['session-root'],
-                soundfontPath: values.soundfont, input: values.input, midi: values.midi, embedded: true, signal: sessionAbort.signal })
+                soundfontPath: values.soundfont, input: values.input, midi: values.midi, output: values.output, embedded: true, signal: sessionAbort.signal })
             } else {
               const { viewSession } = await import('./music-session.mjs')
               if (!closed) await viewSession({ root: values['session-root'], input: values.input, midi: values.midi, embedded: true, signal: sessionAbort.signal })

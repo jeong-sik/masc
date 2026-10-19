@@ -150,10 +150,16 @@ screen and returns to the same phrase. It does not yet overdub into the project.
 Move the cursor with arrows; Enter inserts or removes a note. Shift+arrows moves
 the selected note. `[`/`]` changes its length, `+`/`-` changes velocity, and `g`
 cycles the musical grid. Tab changes track, `n` adds one, `m` mutes it and `o`
-solos it. `u`/`y` undo/redo. Space previews the audible tracks with the bundled
-SoundFont; `l` toggles repetition of the loop region. This WAV preview restarts the
-system player between passes and does not provide sample-continuous external MIDI
-transport. `s` saves, and q/Esc saves edits before returning. If the original file
+solos it. `u`/`y` undo/redo. On macOS, Space starts, pauses or resumes a preview of
+the audible tracks with the bundled SoundFont; `:stop` ends playback. `l` toggles
+repetition of the loop region inside one native AVAudioEngine/PlayerNode. `:seek 4` moves to
+quarter-note beat 4. Select an audio output with `--output UID` or `:output UID`;
+`--devices` lists CoreAudio device identities. An explicit output is pinned and
+read back, and unavailable outputs fail without substituting another device.
+The decoded WAV must fit the native PCM buffer resources. See the
+[transport protocol](native/TRANSPORT.md) for lifecycle and resource limits.
+This transport plays rendered WAV; it does not yet send external MIDI. `s` saves,
+and q/Esc saves edits before returning. If the original file
 changed externally, closing retains edits in a private recovery document and prints
 its path rather than replacing the changed file.
 

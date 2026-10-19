@@ -152,7 +152,7 @@ let apply_catalog (state : state) request result =
                 (Masc_tui_fetched.request_key request) ->
       state.code_catalog <- Masc_tui_fetched.complete ~equal:code_scope_path_equal
           state.code_catalog request result
-  | Palette_files _ | Palette_jump | Palette_choice _ -> ()
+  | Palette_files _ | Palette_locations _ | Palette_jump | Palette_choice _ -> ()
 
 let apply_open_file ~preserve_view (state : state) request result = (
   let path = Masc_tui_fetched.request_key request in
@@ -311,7 +311,7 @@ let take_ready_found_file (state : state) ~input_pending =
                 state.code_file <- file;
                 apply_file state file_request (Ok content);
                 true)
-  | (Palette_files _ | Palette_jump | Palette_choice _),
+  | (Palette_files _ | Palette_locations _ | Palette_jump | Palette_choice _),
     (None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
      | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))) -> false
 
@@ -326,7 +326,7 @@ let apply_found_file ?(input_pending = false) (state : state) request result =
       state.code_finder_file <- Masc_tui_fetched.complete ~equal:code_scope_path_equal
           state.code_finder_file request result;
       take_ready_found_file state ~input_pending
-  | Palette_files _ | Palette_jump | Palette_choice _ -> false
+  | Palette_files _ | Palette_locations _ | Palette_jump | Palette_choice _ -> false
 
 let apply_blame (state : state) request result =
   (* An answer that arrives after the operator moved on describes bytes

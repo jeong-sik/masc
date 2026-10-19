@@ -931,6 +931,46 @@ let offered_locations state locations =
 let location path line : Decode.lsp_location =
   {ll_path=path; ll_line=line; ll_inside=true}
 
+let test_location_picker_survives_finder_idle_and_late_replies () =
+  List.iter (fun late_result ->
+    let state, origin = finder_fixture () in
+    let catalog, catalog_request = start_read ~equal:code_scope_path_equal
+        state.code_catalog (origin.cfo_scope, origin.cfo_dir) in
+    state.code_catalog <- catalog;
+    let finder_request = finder_select state "lib/new.ml" in
+    close_code_finder state;
+    let source = state.code_file and history = state.code_jump_back in
+    let _, offer = offered_locations state [location "one.ml" 1; location "two.ml" 2] in
+    Alcotest.(check bool) "idle opens the multiple-location offer" true
+      (Code_results.take_ready_lsp_locations state ~input_pending:false = Code_results.Choose_location);
+    (* The main loop consumes these three sources in this order, even when
+       the first source has just opened a location picker. *)
+    Alcotest.(check bool) "finder idle refuses the newly opened location picker" false
+      (Code_results.take_ready_found_file state ~input_pending:false);
+    Alcotest.(check bool) "navigation idle has no destination to commit" false
+      (Code_results.take_ready_navigation_file state ~input_pending:false);
+    state.palette_query <- "two";
+    let current_catalog = state.code_catalog and current_finder = state.code_finder_file in
+    Code_results.apply_catalog state catalog_request
+      (Result.map (fun _ -> {Decode.wfc_root=""; wfc_files=["lib/new.ml"]}) late_result);
+    Alcotest.(check bool) "late finder success or failure cannot navigate from locations" false
+      (Code_results.apply_found_file state finder_request late_result);
+    Alcotest.(check bool) "late finder callbacks cannot publish into location selection" true
+      (state.code_catalog == current_catalog && state.code_finder_file == current_finder);
+    Alcotest.(check bool) "callbacks retain the offer, its filter and the source reading" true
+      (state.palette_open && state.palette_query="two"
+       && code_location_offer_current state offer
+       && (match state.palette_mode with
+           | Palette_locations current -> current == offer
+           | Palette_files _ | Palette_jump | Palette_choice _ -> false)
+       && state.code_file == source && state.code_jump_back == history
+       && state.code_file_cursor=2 && state.code_file_scroll=2
+       && state.code_dir="src" && Option.is_none state.code_navigation);
+    Alcotest.(check bool) "later idle keeps selection pending without automatic navigation" true
+      (Code_results.take_ready_lsp_locations state ~input_pending:false = Code_results.No_followup
+       && not (Code_results.take_ready_found_file state ~input_pending:false)))
+    [Ok "late finder bytes"; Error "late finder failure"]
+
 let test_multiple_locations_choose_the_filtered_destination () =
   let state, _ = finder_fixture () in
   close_code_finder state;
@@ -1093,7 +1133,9 @@ let () =
   Alcotest.run
     "masc-tui-workspace-entries"
     [ ( "location choices"
-      , [ Alcotest.test_case "filter chooses a non-first location and retains B history" `Quick
+      , [ Alcotest.test_case "location picker survives finder idle and late callbacks" `Quick
+            test_location_picker_survives_finder_idle_and_late_replies
+        ; Alcotest.test_case "filter chooses a non-first location and retains B history" `Quick
             test_multiple_locations_choose_the_filtered_destination
         ; Alcotest.test_case "single same-file answer waits for queued input" `Quick
             test_single_location_yields_before_moving_the_reading

@@ -24,10 +24,6 @@ type return_followup =
   | Return_committed
   | Read_navigation_file of code_navigation_owner * string Masc_tui_fetched.request
 
-let navigation_owner_current state owner =
-  code_finder_current state owner.cno_origin
-  && state.code_jump_back == owner.cno_history
-
 let restore_position state target =
   let last_line = match Masc_tui_fetched.current state.code_file with
     | Some (_, (Masc_tui_fetched.Ready rows | Masc_tui_fetched.Stale (rows, _))) ->
@@ -76,7 +72,7 @@ let start_return state =
     state.code_lsp_note <- Some "Cannot return until the workspace is confirmed";
     No_return
   end else match state.code_navigation with
-  | Some reading when navigation_owner_current state reading.cnr_owner
+  | Some reading when code_navigation_owner_current state reading.cnr_owner
       && reading.cnr_owner.cno_action = Return_to_history -> No_return
   | Some _ | None ->
     state.code_navigation <- None;
@@ -109,14 +105,11 @@ let start_return state =
                          | Masc_tui_fetched.Failed _)) ->
           match start_navigation state ~action:Return_to_history ~target ~path with
           | None -> No_return
-          | Some (owner, request) ->
-              state.code_lsp_note <- Some ("Returning to "
-                ^ Masc.Tui_terminal_text.sanitize_terminal_text path);
-              Read_navigation_file (owner, request)
+          | Some (owner, request) -> Read_navigation_file (owner, request)
 
 let apply_navigation_file state owner request result =
   match state.code_navigation with
-  | Some reading when reading.cnr_owner == owner && navigation_owner_current state owner
+  | Some reading when reading.cnr_owner == owner && code_navigation_owner_current state owner
       && Masc_tui_fetched.is_current ~equal:String.equal reading.cnr_file request ->
       (match result with
        | Error detail ->
@@ -263,7 +256,7 @@ let apply_file ?(intent = Open_code_file) state request result =
 let take_ready_navigation_file state ~input_pending =
   if input_pending then false
   else match state.code_navigation with
-  | Some reading when navigation_owner_current state reading.cnr_owner ->
+  | Some reading when code_navigation_owner_current state reading.cnr_owner ->
       (match Masc_tui_fetched.current reading.cnr_file with
        | Some (path, Masc_tui_fetched.Ready content) ->
          let history = match reading.cnr_owner.cno_action, reading.cnr_owner.cno_history with

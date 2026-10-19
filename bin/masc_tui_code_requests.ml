@@ -61,7 +61,7 @@ let open_found_file state ~host ~deliver ~path =
              ~deliver:(fun result -> deliver (Code_finder_file_loaded (request, result)))
              (fun () -> Masc_tui_http.fetch_workspace_file ?keeper ?repo
                  ~expected_workspace ~host ~port ~path ()))
-  | (Palette_files _ | Palette_jump | Palette_choice _),
+  | (Palette_files _ | Palette_locations _ | Palette_jump | Palette_choice _),
     (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Ready _
     | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _), (Some _ | None) -> ()
 

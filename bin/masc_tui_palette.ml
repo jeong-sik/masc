@@ -56,6 +56,7 @@ type palette_action =
      entries so one keypress can also be a choice among several names. *)
   | Palette_lsp of string * string
   | Palette_code_file of string
+  | Palette_code_location of code_location_offer * Masc.Tui_decode.lsp_location
 
 (* The identifier names on the file pane's cursor line, in reading order,
    first occurrence only. The open file already carries its lexed segments,
@@ -271,6 +272,7 @@ let palette_action_words = function
   | Palette_chat _ | Palette_task _ | Palette_board_hearth _
   | Palette_board_post _ | Palette_lsp _ | Palette_code_file _ ->
       []
+  | Palette_code_location (_, location) -> [location.Masc.Tui_decode.ll_path]
 
 let palette_matches (state : state) =
   let needle = String.trim state.palette_query in
@@ -290,7 +292,8 @@ let palette_matches (state : state) =
                    | Palette_dos | Palette_lane_addons | Palette_goto _
                    | Palette_usage_scope _ | Palette_config _ | Palette_gate_mode _ | Palette_chat _
                    | Palette_task _ | Palette_board_hearth _
-                   | Palette_board_post _ | Palette_code_file _ ) ) -> false) entries
+                   | Palette_board_post _ | Palette_code_file _
+                   | Palette_code_location _ ) ) -> false) entries
          | Some (_, Some _) -> [])
     | Palette_choice { choice_question; _ } ->
         List.map
@@ -302,6 +305,13 @@ let palette_matches (state : state) =
              List.map (fun path -> path, Palette_code_file path) catalog.Tui_decode.wfc_files
          | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
          | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ -> [])
+    | Palette_locations offer ->
+        if not (code_location_offer_current state offer) then []
+        else List.map (fun location ->
+          let open Masc.Tui_decode in
+          Printf.sprintf "%s:%d%s" location.ll_path location.ll_line
+            (if location.ll_inside then "" else " (outside workspace)"),
+          Palette_code_location (offer, location)) offer.clo_locations
   in
   (* Three ranks, entry order kept inside each: a label that starts with the
      query, then one that contains it, then one that only has its characters
@@ -328,5 +338,18 @@ let selected_file state =
   | Some (_, (Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
     | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_goto _
     | Palette_usage_scope _ | Palette_config _ | Palette_gate_mode _ | Palette_chat _
-    | Palette_task _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _))
+    | Palette_task _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
+    | Palette_code_location _))
+  | None -> None
+
+let selected_location state =
+  let matches = palette_matches state in
+  let cursor = max 0 (min state.palette_cursor (List.length matches - 1)) in
+  match List.nth_opt matches cursor with
+  | Some (_, Palette_code_location (offer, location)) -> Some (offer, location)
+  | Some (_, (Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
+    | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_goto _
+    | Palette_usage_scope _ | Palette_config _ | Palette_gate_mode _ | Palette_chat _
+    | Palette_task _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
+    | Palette_code_file _))
   | None -> None

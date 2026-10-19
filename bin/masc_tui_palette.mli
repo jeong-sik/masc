@@ -29,6 +29,7 @@ type palette_action =
      entries so one keypress can also be a choice among several names. *)
   | Palette_lsp of string * string
   | Palette_code_file of string
+  | Palette_code_location of Masc_tui_types.code_location_offer * Masc.Tui_decode.lsp_location
 
 val gate_lane_label : gate_lane -> string
 val gate_mode_label : Masc.Keeper_gate_mode.t -> string
@@ -37,6 +38,8 @@ val lsp_question_prefixes : (string * string) list
 val palette_entries : Masc_tui_types.state -> (string * palette_action) list
 val palette_matches : Masc_tui_types.state -> (string * palette_action) list
 val selected_file : Masc_tui_types.state -> string option
+val selected_location : Masc_tui_types.state ->
+  (Masc_tui_types.code_location_offer * Masc.Tui_decode.lsp_location) option
 val palette_starts_with : needle:string -> string -> bool
 val palette_subsequence : needle:string -> string -> bool
 

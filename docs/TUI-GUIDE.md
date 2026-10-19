@@ -2119,6 +2119,12 @@ component's last reading and leaves the sibling component available. `r`
 refreshes both; `Esc` returns to the original request. This is read-only
 inspection and does not declare the Task complete or resume the Composition.
 
+Task documents keep their complete text while scrolling. When their source or
+pane width changes, the new display is prepared separately. An earlier display
+is retained only for the same source at the same width and is marked as earlier
+content. Read/refresh failures and progress continue to reflect the current
+reading; a prepared display does not make that reading fresh or complete.
+
 The Skill Usage pane opens with a summary box: observed catalog entries,
 distinct Keepers, and separate `TRIGGERED`, `DELIVERED`, and `ACTIONS` totals.
 These are observations from current Keeper sessions at exact Skill revisions,

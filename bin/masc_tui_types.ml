@@ -5026,6 +5026,24 @@ let equal_tools_async_task_source a b =
   Masc.Tui_decode_async_request.equal_source a.ats_request b.ats_request
   && a.ats_run_id=b.ats_run_id && a.ats_task_id=b.ats_task_id
 
+type task_document_target = Work_task_document of string | Async_task_document of tools_async_task_source
+type task_document_key = { tdk_target : task_document_target; tdk_input : Masc_tui_task_document.input }
+type task_document_request =
+  { tdr_ticket : task_document_key Masc_tui_fetched.request
+  ; tdr_reading : unit ref; tdr_job : unit ref }
+type task_document_slot =
+  { tds_reading : (task_document_key,string list) Masc_tui_fetched.t
+  ; tds_request : task_document_request option
+  ; tds_previous : (task_document_key * string list) option }
+let initial_task_document_slot = {tds_reading=Masc_tui_fetched.initial;tds_request=None;tds_previous=None}
+let equal_task_document_target a b = match a,b with
+   | Work_task_document a,Work_task_document b -> a=b
+   | Async_task_document a,Async_task_document b -> equal_tools_async_task_source a b
+   | Work_task_document _,Async_task_document _ | Async_task_document _,Work_task_document _ -> false
+let equal_task_document_key a b =
+  equal_task_document_target a.tdk_target b.tdk_target
+  && Masc_tui_task_document.equal_input a.tdk_input b.tdk_input
+
 type tools_read_inflight =
   { tri_generation : int
   ; tri_keeper : string option
@@ -8336,6 +8354,8 @@ type state = {
      alone cannot reject an older response after refreshing the same item. *)
   mutable goal_timeline: (string, Tui_decode.goal_timeline_event list) Masc_tui_fetched.t;
   mutable task_history: (string, Tui_decode.task_history_event list) Masc_tui_fetched.t;
+  mutable task_document_body: task_document_slot;
+  mutable task_document_history: task_document_slot;
   mutable verification_evidence:
     (string * (Masc_tui_evidence_picture.evidence, Verification_evidence_read.failure) result) option;
   (* One cache is shared by the calls surface and chat full-detail mode. The
@@ -10569,6 +10589,25 @@ let clear_runtime_catalog_read state =
   state.runtime_catalog <- []; state.runtime_lanes <- []; state.runtime_assignments <- [];
   state.runtime_catalog_default_route <- None
 
+let task_document_slot state = function
+  | Masc_tui_task_document.Body -> state.task_document_body
+  | History -> state.task_document_history
+let set_task_document_slot state part slot = match part with
+  | Masc_tui_task_document.Body -> state.task_document_body <- slot
+  | History -> state.task_document_history <- slot
+let clear_task_documents state =
+  List.iter (fun part -> let slot=task_document_slot state part in
+    set_task_document_slot state part {tds_reading=Masc_tui_fetched.clear slot.tds_reading;tds_request=None;tds_previous=None})
+    [Masc_tui_task_document.Body;History]
+let suspend_task_documents state =
+  List.iter (fun part -> let slot=task_document_slot state part in
+    (* A cancelled preparation has no replacement result. Preserve completed
+       rows; clear only its unfinished owner so this input can be prepared again. *)
+    let reading=if Masc_tui_fetched.in_flight slot.tds_reading then Masc_tui_fetched.clear slot.tds_reading
+      else slot.tds_reading in
+    set_task_document_slot state part {slot with tds_reading=reading;tds_request=None})
+    [Masc_tui_task_document.Body;History]
+
 let suspend_tools_async_task state =
   state.tools_async_task_body <- Masc_tui_fetched.suspend state.tools_async_task_body;
   state.tools_async_task_history <- Masc_tui_fetched.suspend state.tools_async_task_history;
@@ -10724,6 +10763,7 @@ let complete_tools_async_detail state request result =
   end
 
 let suspend_workspace_readings state =
+  suspend_task_documents state;
   suspend_tools_async_detail state;
   retire_keeper_settings_editor state;
   suspend_keeper_logs state;
@@ -13970,6 +14010,7 @@ let complete_task_history_read (state : state) request result =
   state.task_history <- Masc_tui_fetched.complete ~equal:String.equal state.task_history request result
 
 let withdraw_detail_histories (state : state) =
+  clear_task_documents state;
   state.goal_timeline <- Masc_tui_fetched.clear state.goal_timeline;
   state.task_history <- Masc_tui_fetched.clear state.task_history
 
@@ -14310,6 +14351,8 @@ let create_state
   runtime_catalog_reading = Runtime_catalog_unread;
   goal_timeline = Masc_tui_fetched.initial;
   task_history = Masc_tui_fetched.initial;
+  task_document_body = initial_task_document_slot;
+  task_document_history = initial_task_document_slot;
   verification_evidence = None;
   keeper_calls = None;
   keeper_calls_error = None;
@@ -15734,6 +15777,100 @@ let task_goal_reading (state : state) ~task_id =
   | Goal_links_read_failed reason -> Masc_tui_agenda.Read_failed reason
   | Goal_links_read index ->
       Masc_tui_agenda.Read (Workspace_goal_index.goals_for_task index ~task_id)
+
+let task_document_columns state ~terminal_cols =
+  if state.view=Planning && terminal_cols >= Masc_tui_roster_pane.threshold_cols
+  then terminal_cols - Masc_tui_roster_pane.pane_cols else terminal_cols
+
+let task_document_inputs state ~cols =
+  let module Document = Masc_tui_task_document in
+  let make target input = {tdk_target=target;tdk_input=input} in
+  match state.view,state.planning_mode,state.task_detail_id,state.task_focus with
+  | Planning,Planning_list,Some id,Masc_tui_overview_tasks.Task_focus _ ->
+    (match List.find_opt (fun (task : Masc_domain.task) -> task.id=id) state.tasks_domain with
+     | None -> None,None
+     | Some task ->
+       let goals=match task_goal_reading state ~task_id:id with
+         | Masc_tui_agenda.Not_read -> Document.Unread
+         | Read_failed detail -> Document.Unavailable detail
+         | Read ids -> Document.Membership ids in
+       let history=Masc_tui_fetched.view_for ~equal:String.equal state.task_history ~key:id in
+       let target=Work_task_document id in
+       Some (make target (Document.body ~cols ~goals task)),
+       Option.map (fun events -> make target (Document.history ~cols events)) (Masc_tui_fetched.value history))
+  | Tools,_,_,_ when state.tools_pane=Tools_async && state.tools_async_detail_open ->
+    (match state.tools_async_task_source,state.tools_async_selection with
+     | Some source,Some selection when Masc.Tui_decode_async_request.equal_target selection source.ats_request.target ->
+       let body=Masc_tui_fetched.view_for ~equal:equal_tools_async_task_source state.tools_async_task_body ~key:source in
+       let history=Masc_tui_fetched.view_for ~equal:equal_tools_async_task_source state.tools_async_task_history ~key:source in
+       let target=Async_task_document source in
+       Option.map (fun (detail : Masc.Tui_decode_task_inspection.detail) ->
+         make target (Document.body ~cols ~goals:(Document.Canonical detail.canonical_goal_id) detail.task)) (Masc_tui_fetched.value body),
+       Option.map (fun events -> make target (Document.history ~cols events)) (Masc_tui_fetched.value history)
+     | Some _,Some _ | Some _,None | None,_ -> None,None)
+  | Planning,_,_,_ | Tools,_,_,_ -> None,None
+  | (Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board | Approvals
+    | Schedules | Verification | Harness | Fusion | Repositories | Changes | Code | Connectors
+    | Runtime | Config | Resources | System_logs),_,_,_ -> None,None
+
+let sync_task_documents state ~cols =
+  let body,history=task_document_inputs state ~cols in
+  List.filter_map (fun (part,key) ->
+    let slot=task_document_slot state part in
+    match key with
+    | None ->
+      if Option.is_some (Masc_tui_fetched.current_key slot.tds_reading)
+          || Option.is_some slot.tds_previous || Option.is_some slot.tds_request then
+        set_task_document_slot state part {tds_reading=Masc_tui_fetched.clear slot.tds_reading;tds_request=None;tds_previous=None};
+      None
+    | Some key ->
+      match Masc_tui_fetched.view_for ~equal:equal_task_document_key slot.tds_reading ~key with
+      | Masc_tui_fetched.Ready _ | Failed _ | Stale _ -> None
+      | Absent | Loading ->
+        match Masc_tui_fetched.start ~equal:equal_task_document_key slot.tds_reading ~key with
+        | Already_loading -> None
+        | Started (reading,tdr_ticket) ->
+          let request={tdr_ticket;tdr_reading=state.workspace_read_authority;tdr_job=ref ()} in
+          set_task_document_slot state part {slot with tds_reading=reading;tds_request=Some request};Some request)
+    [Masc_tui_task_document.Body,body;History,history]
+
+let complete_task_document state ~cols request result =
+  let key=Masc_tui_fetched.request_key request.tdr_ticket in
+  let part=Masc_tui_task_document.part key.tdk_input in
+  let body,history=task_document_inputs state ~cols in
+  let current=match part with Masc_tui_task_document.Body -> body | History -> history in
+  let slot=task_document_slot state part in
+  if request.tdr_reading==state.workspace_read_authority
+      && Option.exists (fun current -> current==request) slot.tds_request
+      && Option.exists (equal_task_document_key key) current then
+    set_task_document_slot state part {tds_request=None;
+      tds_previous=(match result with Ok rows -> Some (key,rows) | Error _ -> slot.tds_previous);
+      tds_reading=Masc_tui_fetched.complete ~equal:equal_task_document_key slot.tds_reading request.tdr_ticket result}
+
+let task_document_lines state ~cols part =
+  let body,history=task_document_inputs state ~cols in
+  let key=match part with Masc_tui_task_document.Body -> body | History -> history in
+  match key with
+  | None -> []
+  | Some key ->
+    let slot=task_document_slot state part in
+    let notice text = Masc_tui_text_block.rows
+      ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols)) text in
+    let previous=match slot.tds_previous with
+      | Some (old,rows) when equal_task_document_target old.tdk_target key.tdk_target
+          && Masc_tui_task_document.columns old.tdk_input=cols -> rows
+      | Some _ | None -> [] in
+    match Masc_tui_fetched.view_for ~equal:equal_task_document_key slot.tds_reading ~key with
+    | Masc_tui_fetched.Ready rows -> rows
+    | Stale (rows,detail) -> notice (" Task 표시 재확인 실패: " ^ detail) @ rows
+    | Failed detail -> notice (" Task 표시를 준비하지 못했습니다: " ^ detail
+        ^ if previous=[] then "" else " · 이전 표시 유지") @ previous
+    | Absent | Loading -> notice (if previous=[] then " Task 내용을 준비 중입니다"
+        else " 최신 Task 내용을 준비 중 · 이전 표시 유지") @ previous
+
+let task_documents_pending state =
+  Masc_tui_fetched.in_flight state.task_document_body.tds_reading
+  || Masc_tui_fetched.in_flight state.task_document_history.tds_reading
 
 (* The strip above the composer: what fires next, and who is blocked on the
    operator. Both are already in the state and neither was readable from the

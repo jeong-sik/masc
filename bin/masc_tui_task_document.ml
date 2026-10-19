@@ -3,9 +3,7 @@ module Tui_decode = Masc.Tui_decode
 module Message_layout = Masc_tui_message_layout
 module Planning_detail = Masc_tui_planning_detail
 
-let history_lines ~width ~view ~in_flight =
-  let header = "  HISTORY" in
-  let observed = function
+let history_rows = function
         | [] -> [ "    (no events recorded)" ]
         | events ->
             List.concat_map
@@ -30,14 +28,15 @@ let history_lines ~width ~view ~in_flight =
                     | Some note -> [ "      " ^ note ]
                     | None -> []))
               events
-  in
+
+let history_status_lines ~width ~view ~in_flight =
+  let header = "  HISTORY" in
   let rows =
     match view with
-    | Masc_tui_fetched.Ready events -> observed events
-    | Masc_tui_fetched.Stale (events, detail) ->
+    | Masc_tui_fetched.Ready _ -> []
+    | Masc_tui_fetched.Stale (_, detail) ->
         Masc_tui_text_block.rows ~max_cells:width
           ("    refresh failed; previous history: " ^ Terminal_text.single_line detail)
-        @ observed events
     | Masc_tui_fetched.Failed detail -> Masc_tui_text_block.rows ~max_cells:width
         ("    load failed: " ^ Terminal_text.single_line detail)
     | Masc_tui_fetched.Absent -> [ "    history not requested" ]
@@ -128,3 +127,39 @@ let body_lines ~cols ~goal_lines (task : Masc_domain.task) =
          @ list_lines "verification evidence" contract.Masc_domain.verify_gate_evidence)
   @ list_lines "file" task.files
 
+
+type goals = Unread | Unavailable of string | Membership of string list | Canonical of string option
+type part = Body | History
+type input = Body_input of int * goals * Masc_domain.task | History_input of int * Tui_decode.task_history_event list
+let body ~cols ~goals task = Body_input (cols,goals,task)
+let history ~cols events = History_input (cols,events)
+let part = function Body_input _ -> Body | History_input _ -> History
+let columns = function Body_input (cols,_,_) | History_input (cols,_) -> cols
+let equal_input a b = match a,b with
+  | Body_input (cols,goals,task),Body_input (other_cols,other_goals,other_task) ->
+      cols=other_cols && goals=other_goals && task==other_task
+  | History_input (cols,events),History_input (other_cols,other_events) -> cols=other_cols && events==other_events
+  | Body_input _,History_input _ | History_input _,Body_input _ -> false
+let prepare_input = function
+  | History_input (cols,events) ->
+      history_rows events |> List.concat_map (fun line ->
+        Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols)) line)
+  | Body_input (cols,goals,task) ->
+      let field label text =
+        let prefix="  " ^ label ^ ": " in
+        let inner=max 1 (framed_inner_width cols) in
+        let lead=Message_layout.display_width prefix in
+        if lead < inner then
+          Masc_tui_text_block.rows ~max_cells:(inner-lead) text
+          |> List.mapi (fun index line -> (if index=0 then prefix else String.make lead ' ') ^ line)
+        else Masc_tui_text_block.rows ~max_cells:inner (prefix ^ text) in
+      let goal_lines=match goals with
+        | Unread -> field "goal" "(membership unknown: links not read)"
+        | Unavailable detail -> field "goal" ("(membership unknown: " ^ detail ^ ")")
+        | Membership [] -> field "goal" "(not linked to a goal)"
+        | Membership ids -> List.concat_map (fun id -> field "goal" id
+            @ field "link" (Masc_tui_link.reference Masc_tui_link.Goal id)) ids
+        | Canonical goal -> field "canonical goal" (Option.fold ~none:"없음(기록)" ~some:Fun.id goal) in
+      body_lines ~cols ~goal_lines task
+
+let prepare input = Message_layout.with_isolated_pieces_cache (fun () -> prepare_input input)

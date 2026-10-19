@@ -994,6 +994,48 @@ let test_first_loss_retains_unproven_effects mode () =
          match Masc_tui_fetched.view_for ~equal:Ui.equal_tools_async_task_source ui.tools_async_task_history ~key:source with
          | Ready [_] -> true | _ -> false);
       Ui.complete_tools_async_task_body ui current_body (read_body source.ats_task_id);
+      let module Document = Masc_tui_task_document in
+      ui.view <- Ui.Tools;ui.tools_pane <- Ui.Tools_async;
+      let started=Ui.sync_task_documents ui ~cols:96 in
+      let find part requests = List.find (fun request ->
+        let key=Masc_tui_fetched.request_key request.Ui.tdr_ticket in
+        Document.part key.tdk_input=part) requests in
+      let prepare request =
+        let key=Masc_tui_fetched.request_key request.Ui.tdr_ticket in
+        Ok (Document.prepare key.tdk_input) in
+      let old_document=find Document.Body started in
+      let resized=Ui.sync_task_documents ui ~cols:72 in
+      Ui.complete_task_document ui ~cols:72 old_document (prepare old_document);
+      check bool "old-width preparation cannot settle the original Task's new width" true
+        (Masc_tui_fetched.in_flight ui.task_document_body.tds_reading);
+      let history_document=find Document.History resized in
+      Ui.complete_task_document ui ~cols:72 history_document (prepare history_document);
+      check bool "history preparation settles independently of body preparation" true
+        (Masc_tui_fetched.in_flight ui.task_document_body.tds_reading
+         && not (Masc_tui_fetched.in_flight ui.task_document_history.tds_reading));
+      let old_document=find Document.Body resized in
+      (* The same authoritative Task object, under another actual consumer,
+         cannot borrow an async-source preparation owner's late reply. *)
+      let original_detail=match Masc_tui_fetched.view_for ~equal:Ui.equal_tools_async_task_source ui.tools_async_task_body ~key:source with
+        | Ready detail | Stale (detail,_) -> detail
+        | _ -> fail "exact original Task body disappeared before consumer switch" in
+      ui.tasks_domain <- [original_detail.task];
+      ui.tasks <- Masc.Tui_decode.active_tasks_of_domain ui.tasks_domain;
+      ui.view <- Ui.Planning;ui.planning_mode <- Ui.Planning_list;
+      ui.task_detail_id <- Some source.ats_task_id;
+      ui.task_focus <- Masc_tui_overview_tasks.land_on ui.tasks ~task_id:source.ats_task_id;
+      let work=Ui.sync_task_documents ui ~cols:72 in
+      Ui.complete_task_document ui ~cols:72 old_document (prepare old_document);
+      check bool "an async-source reply cannot settle the same-ID Work document" true
+        (Masc_tui_fetched.in_flight ui.task_document_body.tds_reading);
+      let work_body=find Document.Body work in
+      Ui.suspend_workspace_readings ui;
+      let replacement_documents=Ui.sync_task_documents ui ~cols:72 in
+      Ui.complete_task_document ui ~cols:72 work_body (prepare work_body);
+      check bool "retired preparation cannot settle a reentered same-ID document" true
+        (Masc_tui_fetched.in_flight ui.task_document_body.tds_reading);
+      List.iter (fun request -> Ui.complete_task_document ui ~cols:72 request (prepare request)) replacement_documents;
+      ui.view <- Ui.Tools;ui.tasks_domain <- [];
       let refresh=Ui.begin_tools_async_task_body ui ~force:true |> Option.get in
       Ui.complete_tools_async_task_body ui refresh (Error "Task storage unavailable");
       check bool "body failure retains full original Task independently of list membership" true

@@ -15,8 +15,10 @@ import { devices, record, monitorInput } from './capture.mjs'
 import { openLiveMidi, backingMidiClaims, liveMidiPlan } from './live-midi.mjs'
 import { midiDestinations } from './playback.mjs'
 import { recordingEpoch } from './arrangement-recording.mjs'
+import { measureAudioCalibration } from './audio-calibration.mjs'
 
 const help = [
+  ':calibrate OUTPUT_UID IN_CH OUT_CH MAX_LAG_MS  audio loopback candidates; Esc/q cancels and returns',
   ':import-wave /path/take.wav     :import-midi /path/song.mid',
   ':import-take /path/session      :open-take [ASSET] (WAV + raw UMP)',
   ':place asset-1 0               full source at quarter-note beat 0',
@@ -76,12 +78,14 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   let liveMidi = null, liveRoutes = [], liveTransitions = Promise.resolve()
   const playerPlans = new Map(), planInspections = new Map()
   let recording = null, input = null, midiInput = 'all', transportPending = false, inputDevices = null, discoveryTicket = 0
+  let calibration = null
   const discovery = new AbortController()
   let complete
   const done = new Promise(resolve => { complete = resolve })
   function finish() {
     if (!accepting) return
     accepting = false
+    calibration?.abort()
     takeAbort?.abort()
     discovery.abort()
     // Recording owns finalization and source import through child close. Keep
@@ -237,6 +241,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     })
   }
   function fail(error) {
+    calibration?.abort()
     if (recording) recording.failure = error
     stop()
     workerFailure = error
@@ -387,6 +392,43 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   }
   async function effect(value) {
     switch (value.kind) {
+      case 'calibrate': {
+        if (workerFailure) throw workerFailure
+        if (!input) throw new Error('Select :input AUDIO_UID before calibration')
+        if (recording || transport.kind !== 'stopped' || players.size || preparations.size) throw new Error('Stop and drain arrangement playback before calibration')
+        const selectedInput = input, target = join(dirname(path), 'calibrations', randomUUID())
+        const owned = new AbortController(); calibration = owned
+        try {
+          await mkdir(dirname(target), { recursive: true, mode: 0o700 })
+          await settleMonitoring()
+          await transitionLiveMidi(() => settleLiveMidi())
+          owned.signal.throwIfAborted()
+          if (!accepting) return
+          if (workerFailure) throw workerFailure
+          status = 'Measuring selected audio loopback; Esc/q cancels and returns'; draw()
+          const result = await measureAudioCalibration({ ...value, input: selectedInput, directory: target, signal: owned.signal,
+            analyze: async ({ signal, ...job }) => {
+              signal.throwIfAborted()
+              let cancel
+              try {
+                return await request({ kind: 'analyze-calibration', ...job }, id => {
+                  cancel = () => { if (!workerFailure) worker.postMessage({ kind: 'cancel', request: id }) }
+                  signal.addEventListener('abort', cancel, { once: true })
+                })
+              } finally { signal.removeEventListener('abort', cancel) }
+            } })
+          owned.signal.throwIfAborted()
+          if (accepting) status = `Unapplied calibration: ${result.matches.map(m => `${m.residualMs.toFixed(3)} ms (correlation ${m.correlation.toFixed(3)})`).join(', ')}; saved ${result.directory}`
+        } finally {
+          // Keep ownership through cleanup and route restoration. Repeated
+          // cancel keys must not turn a draining measurement into a view exit.
+          try {
+            startMonitoring()
+            await transitionLiveMidi(async () => { const live = startLiveMidi(); if (live) await live.ready })
+          } finally { if (calibration === owned) calibration = null }
+        }
+        break
+      }
       case 'inputs': {
         const ticket = ++discoveryTicket
         if (inputDevices !== null) { inputDevices = null; break }
@@ -477,6 +519,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       } else if (text && !key.ctrl && !key.meta) prompt += safeText(text)
       draw(); return
     }
+    if (calibration && ['escape', 'q'].includes(key.name)) { calibration.abort(); return }
     if (['escape', 'q'].includes(key.name)) { finish(); return }
     if (text === ':') { prompt = ''; draw(); return }
     if (text === '?') { showHelp = !showHelp; draw(); return }

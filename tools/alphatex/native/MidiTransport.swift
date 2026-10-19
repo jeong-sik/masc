@@ -864,7 +864,19 @@ final class MidiTransport {
                 if old.active {
                     while regionCursors[index].index < region.events.count && region.includes(region.events[regionCursors[index].index].seconds) {
                         let event = region.events[regionCursors[index].index]
-                        sourceModel.observe(event.bytes, port: event.port); try sourceSend(event.bytes, port: event.port)
+                        sourceModel.observe(event.bytes, port: event.port)
+                        // The remaining attacks belong to an expired copy.
+                        // Existing acquired notes form the FIFO prefix for each
+                        // key: preserve only their original releases, along with
+                        // the ordered expression/pedal history. sourceSend keeps
+                        // uncertain ownership if a release fails.
+                        let type = event.bytes[0] & 0xf0
+                        let attack = type == 0x90 && event.bytes[2] > 0
+                        let release = type == 0x80 || type == 0x90 && event.bytes[2] == 0
+                        let key = UInt16(event.bytes[0] & 15) << 8 | UInt16(event.bytes[1])
+                        if !attack && (!release || (sourceHeld[event.port]?[key] ?? 0) > 0) {
+                            try sourceSend(event.bytes, port: event.port)
+                        }
                         regionCursors[index].index += 1
                     }
                     try sourceSilence(addresses: region.addresses)

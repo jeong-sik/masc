@@ -2750,7 +2750,7 @@ let test_judgment_lanes_join_the_priority_queue () =
   check
     (list (pair string string))
     "admission class per lane"
-    [ "librarian_exact", "standard"
+    [ "librarian_exact", "background"
     ; "hitl_auto_judge", "priority"
     ; "board_attention_exact", "priority"
     ; "workspace_curator_exact", "standard"

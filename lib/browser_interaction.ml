@@ -4,7 +4,7 @@ type request = { route : Browser_lane.route; tab_id : int;
 let ( let* ) = Result.bind
 let parse = function
   | `Assoc fields ->
-    let allowed = ["lane"; "clientId"; "tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"] in
+    let allowed = ["lane"; "clientId"; "tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "source"; "destination"] in
     let* () = if List.for_all (fun (key, _) -> List.mem key allowed) fields
       && List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields))
       then Ok () else Error "unknown or duplicate browser interaction argument" in
@@ -29,7 +29,20 @@ let parse = function
     let integer key = match List.assoc_opt key fields with
       | Some (`Int value) when Int64.abs (Int64.of_int value) <= 9007199254740991L -> Ok value
       | _ -> Error (key ^ " must be a JavaScript-safe integer") in
+    let pointer_target fields =
+      match fields with
+      | ["selector", `String selector] when String.trim selector <> "" ->
+        Ok (Browser_lane.Selector selector)
+      | fields when List.length fields = 2 ->
+        (match List.assoc_opt "documentId" fields, List.assoc_opt "nodeId" fields with
+         | Some (`String document_id), Some (`String node_id) when document_id <> "" && node_id <> "" ->
+           Ok (Browser_lane.Scene_node {document_id;node_id})
+         | _ -> Error "pointer target requires selector or documentId/nodeId")
+      | _ -> Error "pointer target requires selector or documentId/nodeId" in
     let excludes keys =
+      let keys = match List.assoc_opt "action" fields with
+        | Some (`String "drag_to") -> keys
+        | _ -> "source" :: "destination" :: keys in
       if List.exists (fun key -> List.mem_assoc key fields) keys
       then Error "arguments do not match the selected interaction action" else Ok () in
     let required key = match List.assoc_opt key fields with
@@ -39,6 +52,20 @@ let parse = function
       let* value = required key in
       parser value in
     let* action = match List.assoc_opt "action" fields with
+      | Some (`String "hover") ->
+        let* () = excludes ["text";"x";"y";"point";"from";"to";"viewport"] in
+        let* () = match expected_url with Some _ -> Ok () | None -> Error "hover requires expectedUrl" in
+        let* target = pointer_target (List.filter (fun (key,_) ->
+          List.mem key ["selector";"documentId";"nodeId"]) fields) in
+        Ok (Browser_lane.Hover target)
+      | Some (`String "drag_to") ->
+        let* () = excludes ["selector";"documentId";"nodeId";"text";"x";"y";"point";"from";"to";"viewport"] in
+        let* () = match expected_url with Some _ -> Ok () | None -> Error "drag_to requires expectedUrl" in
+        let target key = match List.assoc_opt key fields with
+          | Some (`Assoc fields) -> pointer_target fields
+          | _ -> Error ("drag_to requires " ^ key ^ " target") in
+        let* source = target "source" in let* destination = target "destination" in
+        Ok (Browser_lane.Drag_to {source;destination})
       | Some (`String "follow_link") ->
         let* () = excludes ["selector";"text";"x";"y";"point";"from";"to";"viewport"] in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "follow_link requires expectedUrl" in
@@ -92,7 +119,7 @@ let parse = function
           let* from = geometry Browser_lane.Pointer.point_of_json "from" in
           let* to_ = geometry Browser_lane.Pointer.point_of_json "to" in
           Ok (Browser_lane.Drag {from;to_;viewport})
-      | _ -> Error "action must be activate_tab, click, follow_link, fill, scroll, click_at, scroll_at, hover_at or drag" in
+      | _ -> Error "action must be activate_tab, click, follow_link, fill, scroll, click_at, scroll_at, hover, hover_at, drag or drag_to" in
     Ok { route = base.route; tab_id; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
 
@@ -319,3 +346,72 @@ return {url:location.href,title:document.title,scrollX,scrollY};
 
 (* What a pointer action reports once the browser has taken it. *)
 let pointer_receipt_script = "return {url:location.href,title:document.title,scrollX,scrollY};"
+
+let pointer_target_script = {js|
+const args = arguments[0];
+try {
+  if (args.expectedUrl !== location.href) throw new Error('page_url_changed');
+  const target = spec => {
+    let element;
+    if (spec.selector !== undefined) {
+      let found;
+      try { found = document.querySelectorAll(spec.selector); }
+      catch { throw new Error('invalid_css_selector'); }
+      if (found.length !== 1) throw new Error(found.length ? 'selector_is_ambiguous' : 'element_not_found');
+      element = found[0];
+    } else element = browserScene({...spec,mode:'resolve'});
+    if (!element.isConnected) throw new Error('element_detached');
+    if (getComputedStyle(element).visibility !== 'visible') throw new Error('element_not_visible');
+    for (let node = element; node; node = node.parentElement || node.getRootNode().host) {
+      const style = getComputedStyle(node);
+      if (style.display === 'none' || Number(style.opacity) === 0)
+        throw new Error('element_not_visible');
+    }
+    for (const rect of element.getClientRects()) {
+      const left = Math.max(0,rect.left), right = Math.min(innerWidth,rect.right);
+      const top = Math.max(0,rect.top), bottom = Math.min(innerHeight,rect.bottom);
+      if (right <= left || bottom <= top) continue;
+      const x = Math.floor((left+right)/2), y = Math.floor((top+bottom)/2);
+      let hit = document.elementFromPoint(x,y);
+      while (hit?.shadowRoot?.elementFromPoint) {
+        const next = hit.shadowRoot.elementFromPoint(x,y);
+        if (!next || next === hit) break;
+        hit = next;
+      }
+      for (let node = hit; node; node = node.parentElement || node.getRootNode().host)
+        if (node === element) return {x:x/innerWidth,y:y/innerHeight};
+    }
+    if (!Array.from(element.getClientRects()).some(rect =>
+      rect.right > 0 && rect.bottom > 0 && rect.left < innerWidth && rect.top < innerHeight))
+      throw new Error('element_outside_viewport');
+    throw new Error('element_pointer_obstructed');
+  };
+  const geometry = args.action === 'hover'
+    ? {point:target(args)}
+    : {from:target(args.source),to:target(args.destination)};
+  return {...geometry,viewport:browserScene({mode:'viewport'})};
+} catch (error) {
+  return {interactionFailure:{message:String(error?.message ?? error),effectStarted:false}};
+}
+|js}
+
+let resolve_pointer_action action = function
+  | `Assoc fields ->
+    let required key = match List.assoc_opt key fields with
+      | Some value -> Ok value | None -> Error ("pointer resolution missing " ^ key) in
+    let* () = match List.assoc_opt "interactionFailure" fields with
+      | Some (`Assoc failure) -> (match List.assoc_opt "message" failure with
+          | Some (`String message) -> Error message | _ -> Error "invalid pointer target refusal")
+      | None -> Ok () | Some _ -> Error "invalid pointer target refusal" in
+    let* raw_viewport = required "viewport" in
+    let* viewport = Browser_lane.Pointer.viewport_of_json raw_viewport in
+    let point key = let* raw = required key in Browser_lane.Pointer.point_of_json raw in
+    (match action with
+     | Browser_lane.Hover _ -> let* point = point "point" in Ok (Browser_lane.Hover_at {point;viewport})
+     | Browser_lane.Drag_to _ -> let* from = point "from" in let* to_ = point "to" in
+       Ok (Browser_lane.Drag {from;to_;viewport})
+     | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
+     | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
+     | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
+     | Browser_lane.Click_node _ | Browser_lane.Fill_node _ -> Error "semantic pointer action required")
+  | _ -> Error "invalid pointer target resolution"

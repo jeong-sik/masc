@@ -23,9 +23,12 @@ module Lane_token = Browser_lane_token
 
 type node_ref = { document_id : string; node_id : string }
 type scene_view = Content | Regions
+type pointer_target = Selector of string | Scene_node of node_ref
 
 type interaction = Activate_tab | Click of string | Fill of { selector : string; text : string }
   | Scroll of { x : int; y : int }
+  | Hover of pointer_target
+  | Drag_to of { source : pointer_target; destination : pointer_target }
   | Hover_at of { point : Pointer.point; viewport : Pointer.viewport }
   | Click_at of { point : Pointer.point; viewport : Pointer.viewport }
   | Scroll_at of { point : Pointer.point; viewport : Pointer.viewport; x : int; y : int }
@@ -82,6 +85,8 @@ let verb_to_string = function
 let interaction_verb = function
   | Activate_tab -> "activate_tab"
   | Scroll_at _ -> "scroll_at"
+  | Hover _ -> "hover"
+  | Drag_to _ -> "drag_to"
   | Hover_at _ -> "hover_at"
   | Click_at _ -> "click_at"
   | Drag _ -> "drag"
@@ -93,9 +98,14 @@ let interaction_verb = function
 
 let interaction_args ~tab_id ~expected_url action =
   let node_fields target = ["documentId",`String target.document_id; "nodeId",`String target.node_id] in
+  let target_fields = function Selector selector -> ["selector",`String selector]
+    | Scene_node target -> node_fields target in
   let verb = "action", `String (interaction_verb action) in
   let fields = match action with
     | Activate_tab -> [verb]
+    | Hover target -> verb :: target_fields target
+    | Drag_to {source;destination} -> [verb; "source",`Assoc (target_fields source);
+        "destination",`Assoc (target_fields destination)]
     | Scroll_at {point;viewport;x;y} -> [verb;
         "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport;
         "x",`Int x; "y",`Int y]
@@ -236,8 +246,8 @@ let live_capability_of_interaction = function
   | Click _ | Fill _ | Scroll _ | Follow_link _ | Click_node _ | Fill_node _ -> Dom_interaction
   | Click_at _ -> Point_click
   | Scroll_at _ -> Point_scroll
-  | Hover_at _ -> Trusted_hover
-  | Drag _ -> Trusted_drag
+  | Hover _ | Hover_at _ -> Trusted_hover
+  | Drag_to _ | Drag _ -> Trusted_drag
 ;;
 
 let live_capability = function

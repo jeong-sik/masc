@@ -85,6 +85,17 @@ struct CaptureAudioChannel: Decodable {
     let input: AVAudioChannelCount
     let output: AVAudioChannelCount
 }
+struct CalibrationOutput: Decodable {
+    let id: String
+    let sampleRate: Double
+    let renderQuantum: AVAudioFrameCount
+    func validate(deviceUID: String, rate: Double, quantum: AVAudioFrameCount) throws {
+        guard !id.isEmpty, sampleRate.isFinite, sampleRate > 0, renderQuantum > 0,
+              id == deviceUID, sampleRate == rate, renderQuantum == quantum else {
+            throw AudioFailure("calibration output device, sample rate or render quantum changed; remeasure or choose a manual offset")
+        }
+    }
+}
 struct Region: Decodable {
     let id: String
     let asset: String
@@ -95,7 +106,8 @@ struct Region: Decodable {
     let captureClock: CaptureAudioClock?
     var component: CaptureRegionComponent? = nil
     var audioChannel: CaptureAudioChannel? = nil
-    enum CodingKeys: String, CodingKey { case id, asset, startSeconds, offsetFrames, frameCount, captureClock, component, audioChannel; case repetitions = "repeat" }
+    var calibrationOutput: CalibrationOutput? = nil
+    enum CodingKeys: String, CodingKey { case id, asset, startSeconds, offsetFrames, frameCount, captureClock, component, audioChannel, calibrationOutput; case repetitions = "repeat" }
     func totalFrames() throws -> AVAudioFramePosition {
         let (total, overflow) = frameCount.multipliedReportingOverflow(by: repetitions)
         guard frameCount > 0, repetitions > 0, !overflow, total > 0 else { throw AudioFailure("region exceeds the native frame timeline") }
@@ -141,6 +153,10 @@ struct Plan: Decodable {
                 guard region.component == .audio, channel.input > 0, channel.input <= asset.channels, channel.output > 0 else {
                     throw AudioFailure("invalid captured audio channel routing")
                 }
+            }
+            if let calibrated = region.calibrationOutput {
+                guard region.component == .audio, region.audioChannel != nil else { throw AudioFailure("calibration requires a routed audio component") }
+                try calibrated.validate(deviceUID: calibrated.id, rate: calibrated.sampleRate, quantum: calibrated.renderQuantum)
             }
             let total: AVAudioFramePosition
             if let clock = region.captureClock {
@@ -400,6 +416,9 @@ final class ArrangementTransport {
         renderChannels = destinationFormat.channelCount
         guard renderChannels > 0, Int(renderChannels) <= device.channels else { throw AudioFailure("selected audio graph output channels are unavailable") }
         for region in plan.regions {
+            try region.calibrationOutput?.validate(deviceUID: device.uid, rate: destinationFormat.sampleRate, quantum: renderQuantum)
+        }
+        for region in plan.regions {
             guard let asset = plan.assets.first(where: { $0.id == region.asset }) else { throw AudioFailure("missing WAV source") }
             let voice = try Voice(region: region, asset: asset, capacity: capacity, outputChannels: renderChannels, outputLayout: destinationFormat.channelLayout)
             voices.append(voice); engine.attach(voice.player)
@@ -440,6 +459,10 @@ final class ArrangementTransport {
               engine.outputNode.outputFormat(forBus: 0).channelCount == renderChannels, try deviceString(device.object, kAudioDevicePropertyDeviceUID) == device.uid,
               engine.outputNode.auAudioUnit.deviceID == device.object else { throw AudioFailure("selected output is unavailable or changed") }
         if state == .playing && !engine.isRunning { throw AudioFailure("audio engine stopped after output configuration changed") }
+        for region in plan.regions {
+            try region.calibrationOutput?.validate(deviceUID: device.uid, rate: engine.outputNode.outputFormat(forBus: 0).sampleRate,
+                                                  quantum: engine.outputNode.auAudioUnit.maximumFramesToRender)
+        }
     }
     func currentTime() -> Double {
         guard state == .playing, let time = engine.outputNode.lastRenderTime, time.isHostTimeValid, time.hostTime > anchor else { return position }

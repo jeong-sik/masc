@@ -23773,7 +23773,8 @@ and is loaded on demand through keeper_skill.
                           pointer
                             (if row=start_row && column=start_column then
                                Browser_lane.Click_at {point=from;viewport=shot.viewport}
-                             else Browser_lane.Drag {from;to_={x;y};viewport=shot.viewport})
+                             else Browser_lane.Drag {from;to_={x;y};viewport=shot.viewport;
+                               via=[];duration_ms=0})
                       | None -> ())
                  | _ -> ())
             | Key ("esc" | "q") -> close ()

@@ -52,6 +52,8 @@ val resource_ordering
     Disjoint siblings share no ordering edge. These edges grant neither
     authorization nor replay and do not replace the plan's dependencies.
     Shared source reads do not conflict; overlapping target writes still do.
+    Within this call, comparisons reuse each original leaf's immutable scope
+    list. This does not change the physical checks at file consumption.
     The executor shares these already-built layers with scheduling instead of
     rebuilding the same graph. Each call returns its own ordering only after
     the original plan/member checks; an unused preparation does not build one. *)
@@ -109,7 +111,10 @@ module Ready : sig
   val bind : t -> node:Keeper_tool_plan.node -> input:Yojson.Safe.t -> binding
   (** Opens capabilities owned by the call switch through the original file
       producer. Unsupported preparation retains the ordinary handler and
-      conflicts conservatively with every other file operation. *)
+      conflicts conservatively with every other file operation. A prepared
+      binding retains that same operation and its immutable scope list after
+      input resolution/preparation; pair comparisons reuse it. The original
+      consumer still rechecks release, owner, input and physical confinement. *)
   val operation : binding -> operation option
   val ordering : binding -> binding -> ordering
   (** Real file conflicts and original Serial-to-Serial dependencies require

@@ -454,9 +454,12 @@ final class ArrangementTransport {
         // play(at:) before lastRenderTime as immediate playback, so reserve the
         // common lead beyond every active render frontier, not just wall time.
         var frontier = mach_absolute_time()
-        for node in [engine.outputNode as AVAudioNode] + voices.filter({ active.contains($0.region.id) }).map({ $0.player as AVAudioNode }) {
-            guard let time = node.lastRenderTime, time.isHostTimeValid else { throw AudioFailure("audio render clock is unavailable at start") }
-            frontier = max(frontier, time.hostTime)
+        let renderTimes = voices.filter({ active.contains($0.region.id) }).map({ $0.player.lastRenderTime })
+        if !renderTimes.isEmpty {
+            for candidate in [engine.outputNode.lastRenderTime] + renderTimes {
+                guard let time = candidate, time.isHostTimeValid else { throw AudioFailure("audio render clock is unavailable at start") }
+                frontier = max(frontier, time.hostTime)
+            }
         }
         let lead = Double(renderQuantum) / rate * Double(active.count + 1) + latency
         anchor = try futureHost(lead, from: frontier)

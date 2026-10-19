@@ -83,7 +83,7 @@ val profile_refusal_message : expected:string -> profile_refusal -> string
     {!session_end_window_sec}. *)
 val end_session : t -> (unit, session_end_failure) result
 val session_end_window_sec : float
-val dispatch : t -> verb:verb -> Yojson.Safe.t -> (Yojson.Safe.t, failure) result
+val dispatch : ?actor:string -> ?request_id:string -> t -> verb:verb -> Yojson.Safe.t -> (Yojson.Safe.t, failure) result
 (** One socket message carries at most this many bytes; a larger one ends the
     connection. *)
 val reply_limit_bytes : int

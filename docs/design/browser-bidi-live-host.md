@@ -584,8 +584,11 @@ Protocol references: [Mozilla direct connection](https://developer.mozilla.org/e
 ## Agent feedback and pointer observation
 
 BiDi interactions display a non-interactive MASC badge with the authenticated
-Keeper/calling-agent label and operation. It settles to Finished, Not performed,
-or Outcome unknown when the host completes or unwinds the request. A page refusing
+Keeper/calling-agent label and operation. While the page channel remains available it settles to Finished, Not performed,
+or Outcome unknown when the host completes or unwinds the request. A lost
+transport cannot update an existing badge; inspect the connection before treating
+a retained Working badge as current. Navigation does not create a new badge for
+an old request's cleanup. A page refusing
 feedback does not authorize a replay or prevent the interaction.
 
 The marker follows trusted browser pointer/wheel/drag events and displays CSS

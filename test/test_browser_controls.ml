@@ -278,10 +278,10 @@ let test_download_result_reaches_provider () =
       | Tool_output.Not_artifact_manifest | Tool_output.Invalid_artifact_manifest _ -> fail "invalid durable download manifest")))
 
 let test_interact_production_failure_phase () =
-  with_upload_context (fun config _meta -> Eio_main.run (fun env ->
+  with_upload_context (fun config meta -> Eio_main.run (fun env ->
     Time_compat.set_clock (Eio.Stdenv.clock env);
     Eio.Switch.run (fun sw ->
-    let invoke args = Masc.Keeper_tool_in_process_runtime.handle_browser_interact_with_outcome ~config ~args in
+    let invoke args = Masc.Keeper_tool_in_process_runtime.handle_browser_interact_with_outcome ~config ~meta ~args in
     let args = `Assoc ["lane",`String "automation";"tabId",`Int 1;
       "action",`String "click";"selector",`String "a";"expectedUrl",`String "https://example.org"] in
     let phase result = result.Masc.Keeper_tool_execution.failure_effect_disposition in

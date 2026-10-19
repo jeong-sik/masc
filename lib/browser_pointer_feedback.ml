@@ -2,6 +2,9 @@ let runtime = {js|function mascPointerFeedback(args) {
   const key = Symbol.for('masc.browser.pointer.feedback.v1');
   let state = window[key];
   if (!state || state.document !== document) {
+    // A receipt can arrive after navigation. Only a new operation installs
+    // feedback in this document; the old document's finish owns no badge here.
+    if (args.phase !== 'working') return null;
     const host = document.createElement('div');
     host.setAttribute('data-masc-browser-overlay', '');
     host.setAttribute('aria-hidden', 'true');

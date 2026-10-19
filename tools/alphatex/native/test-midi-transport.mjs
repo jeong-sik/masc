@@ -898,7 +898,7 @@ prefixCommon.prepared=true;prefixCommon.destination=prefixBase.destination;prefi
 reset(0);reviewWire=[];try prefixCommon.runCoordinated(anchorNanoseconds:1_000_000_000)
 reviewClock=1_000_000_000;reviewWire=[];prefixCommon.tick()
 reviewClock=1_500_000_000;prefixCommon.tick();reviewClock=1_600_000_000;prefixCommon.tick()
-precondition(reviewWire.map(\\.1).contains([0x90,60,100]),"normal start dropped the prefix note")
+precondition(reviewWire.map(\.1).contains([0x90,60,100]),"normal start dropped the prefix note")
 print("COMMON_MIDI_CYCLE_PASS: original absolute regions, half-open cuts, source phase, 10000 fractional deadlines without epoch drift, missed cycles, staged controls and audible-window baseline admission")
 
 print("SELECTED_MIDI_DESTINATION_PASS: unrelated enumeration failure/churn isolated; selected removal, UID reuse, source type, offline and noncanonical ID rejected")

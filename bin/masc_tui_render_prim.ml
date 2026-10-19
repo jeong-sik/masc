@@ -65,10 +65,7 @@ let runtime_assignment_label (assignment : runtime_assignment) =
       source
 ;;
 
-let runtime_assignment_targets assignment target =
-  match assignment.ra_resolution with
-  | Runtime_assignment_lane lane_id -> String.equal lane_id target
-  | Runtime_assignment_missing | Runtime_assignment_unavailable _ -> false
+let runtime_assignment_targets = Masc_tui_types.runtime_assignment_targets
 ;;
 
 let acting_pane_reserved_cols = ref 0

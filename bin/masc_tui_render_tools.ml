@@ -1300,6 +1300,10 @@ let tools_display_lines ?(cols = 80) (state : state) =
   in
   let catalog_lines =
     lazy begin
+    match state.tools_inventory with
+    | None ->
+        [ Theme.warn (), " Registered Catalog — no inventory reading" ]
+    | Some _ ->
     let registered_rows = Tool_tree.rows registered_tools in
     let heading =
       [ Ansi.bold,
@@ -1359,7 +1363,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
     | None ->
         [ Ansi.dim,
           (match state.skills_catalog_error with
-           | None -> " Skill Usage — loading workspace catalog…"
+           | None -> " Skill Usage — no workspace catalog reading"
            | Some _ -> " Skill Usage — unavailable (no catalog reading)") ]
     | Some { Masc.Tui_decode_tools.sc_state; _ }
       when sc_state <> Masc.Tui_decode_tools.Skills_ready ->
@@ -1605,12 +1609,43 @@ let tools_display_lines ?(cols = 80) (state : state) =
     | Masc_tui_types.Tools_usage -> Lazy.force usage_matrix_lines
     | Masc_tui_types.Tools_catalog -> Lazy.force catalog_lines
   in
+  (* Each pane follows its own independent read. Retained rows are still
+     useful during refresh; neither unread nor failed means a successful zero. *)
+  let part, source, observed, error = match state.tools_pane with
+    | Tools_surface | Tools_activations | Tools_catalog ->
+        Tools_inventory_read, "tool inventory", Option.is_some state.tools_inventory,
+        state.tools_error
+    | Tools_usage ->
+        Tools_catalog_read, "Skills catalog", Option.is_some state.skills_catalog,
+        state.skills_catalog_error
+    | Tools_async ->
+        Tools_async_read, "async broker", Option.is_some state.tools_async_observation,
+        state.tools_async_observation_error
+  in
+  let pending = match state.tools_read_inflight with
+    | Some request when request.tri_generation = state.tools_request_generation ->
+        List.mem part request.tri_pending
+    | Some _ | None -> false
+  in
+  let reading_lines = match pending, observed, error with
+    | true, _, Some _ ->
+        [ Theme.warn (), " Retrying " ^ source ^ " — previous failure retained" ]
+    | true, true, None ->
+        [ Ansi.dim, " Refreshing " ^ source ^ " — last reading retained" ]
+    | true, false, None ->
+        [ Ansi.dim, " Reading " ^ source ^ "…" ]
+    | false, true, Some _ ->
+        [ Theme.warn (), " Last " ^ source ^ " reading retained · r:refresh" ]
+    | false, false, None ->
+        [ Ansi.dim, " " ^ source ^ " not read · r:refresh" ]
+    | false, true, None | false, false, Some _ -> []
+  in
   let error_lines = match state.tools_error with
     | None -> []
     | Some detail -> [Theme.bad (), "Tools read failed: " ^ Terminal_text.single_line detail]
   in
   let width = max 1 (Masc_tui_frame.inner_width ~cols) in
-  tools_selection_document state @ error_lines @ explanation @ pane_lines
+  tools_selection_document state @ reading_lines @ error_lines @ explanation @ pane_lines
   |> List.concat_map (fun (style, text) ->
        (* Fitted tables and usage cards already own their alignment. Only
           overlong rows need physical wrapping; never render metadata as

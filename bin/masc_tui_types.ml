@@ -9825,7 +9825,11 @@ let runtime_assignment_target_key state =
         ksk_base_path=canonical_path workspace.sid_base_path;ksk_masc_root=canonical_path workspace.sid_masc_root;
         ksk_keeper=keeper;ksk_surface=state.view;ksk_tab=None}
   | Keepers Keeper_runtime_pick,_,_ -> None
-  | _,_,_ -> keeper_settings_target state
+  | (Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
+    | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
+    | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs
+    | Keepers (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message)),_,_ ->
+      keeper_settings_target state
 
 let begin_runtime_assignment_save state ~keeper_name ~runtime_id ~started_ns =
   match runtime_assignment_target_key state,state.server_identity with
@@ -10062,12 +10066,14 @@ let keeper_settings_save_notice state =
         | Settings_reading -> Some (label ^ ": reading current settings; navigation stays available")
         | Settings_posting _ -> Some (label ^ ": awaiting save receipt; navigation stays available")
         | Settings_finished (_, (Settings_applied _ | Settings_unchanged)) -> None
-        | Settings_finished (_,outcome) when attempt.ksa_recoverable ->
-            let recovery = match attempt.ksa_request.ksv_input with
-              | Settings_editor_input _ -> "e reloads current and restores changed values"
-              | Sandbox_shortcut_input _ -> "Sandbox d/m/s reads current and saves the selected profile" in
-            Some (label ^ " · " ^ keeper_settings_save_outcome_detail outcome ^ " · " ^ recovery)
-        | Settings_finished _ -> None
+        | Settings_finished (_,((Settings_not_sent _ | Settings_refused _
+            | Settings_observation_required _ | Settings_unconfirmed _) as outcome)) ->
+            if attempt.ksa_recoverable then
+              let recovery = match attempt.ksa_request.ksv_input with
+                | Settings_editor_input _ -> "e reloads current and restores changed values"
+                | Sandbox_shortcut_input _ -> "Sandbox d/m/s reads current and saves the selected profile" in
+              Some (label ^ " · " ^ keeper_settings_save_outcome_detail outcome ^ " · " ^ recovery)
+            else None
       else None) (Keeper_settings_saves.all state.keeper_settings_saves))
 
 let reconcile_keeper_settings_editor state ~available =
@@ -13276,7 +13282,7 @@ let board_post_on_screen (state : state) =
            if String.equal post.bp_id post_id then Some post else None
        | Absent | Loading | Failed _ ->
            List.find_opt (fun (post : board_post) -> String.equal post.bp_id post_id)
-             state.board_posts)
+             (board_posts state))
   | (Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Approvals
     | Planning | Schedules | Verification | Harness | Fusion | Repositories | Changes
     | Connectors | Runtime | Config | Resources | Tools | Code | System_logs), _

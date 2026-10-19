@@ -256,8 +256,9 @@ type async_msg =
   (** Verified questions may settle their own read before the full bundle. *)
   | Http_asks_loaded of early_asks_observation
   | Http_approvals_loaded of early_approval_observation
-  | Ask_answer_receipt_observed of
-      ask_submission * (Masc.Tui_decode_asks.ask_answer_receipt, string) result
+  | Ask_answer_receipt_ready of ask_submission
+      (** The original submission owns the published receipt; this message only
+          asks the loop to observe it. *)
   | Ask_followup_observed of Snapshot_read.request * ask_submission *
       Masc.Tui_decode_asks.ask_followup_event * int64
   | Ask_followup_finished of Snapshot_read.request * ask_submission * (unit, string) result
@@ -723,6 +724,20 @@ type 'a mailed = {
   ready_at_ns : int64;
   message : 'a;
 }
+
+val collect_owned_results : state -> async_msg mailed list
+(** Capture one finite observation of the pending owners. Newly published
+    results belong to a later round; original receipts remain request-owned. *)
+
+module Delivery_round : sig
+  type 'a t
+  val empty : 'a t
+  (** Drain the captured shared FIFO prefix before collecting a finite set of
+      owned results. A paused round retains that prefix or result remainder. *)
+  val take : 'a t -> can_take:(unit -> bool) -> queued:(unit -> int) ->
+    take_shared:(unit -> 'a option) -> collect_owned:(unit -> 'a list) ->
+    'a option * 'a t
+end
 
 val workspace_message_is_read : async_msg -> bool
 val workspace_message_admitted :

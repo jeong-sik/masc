@@ -94,6 +94,10 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인�
   세 GET 모두 원래 workspace의 expected root와 서버 receipt·cache 경계를 사용하며, 세 응답을
   동일 시점의 원자적 snapshot으로 부르지 않는다. 자동 재조회 공유·명시 재조회 supersession·
   선택한 Keeper·generation·workspace authority·read epoch의 적용 조건을 유지한다.
+- Tools의 각 pane은 자기 구성의 pending 슬롯과 관측·실패를 함께 표시한다. 최초 조회·이전 값이
+  있는 재조회·실패 뒤 재시도를 구분하고, 원래 진행 generation에서만 읽는 중이라고 표시한다.
+  등록 도구 수는 실제 inventory snapshot이 있을 때만 보이며 미조회를 0개로 바꾸지 않는다.
+  진행 표시는 요청·적용·선택·재조회 정책을 바꾸지 않는다.
 - 세 pending 구성은 기존 UI 처리에서 각각 정리한다. 한 구성의 지연·실패가 형제의 결과를
   덮거나 막지 않는다. 실패 중 마지막 정상 관측을 유지하고 warming·미초기화·관측 불가를
   정상 빈 값으로 바꾸지 않는다. switch 부재도 공유 launcher의 각 구성 실패로 정리한다.

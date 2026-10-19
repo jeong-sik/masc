@@ -100,13 +100,13 @@ let start_with intent ~equal state ~key =
   | Refresh, (Status_failed (current, error) | Status_retrying (current, error))
       when equal current.key key ->
     fresh (fun request -> Status_retrying (request, error))
-  | _, Status_ready (current, value) when equal current.key key ->
+  | (Poll | Refresh), Status_ready (current, value) when equal current.key key ->
     (* Revalidating what is already shown: keep the last good value on screen
        under a fresh generation. *)
     fresh (fun request -> Status_refreshing (request, value, None))
-  | _, Status_stale (current, value, error) when equal current.key key ->
+  | (Poll | Refresh), Status_stale (current, value, error) when equal current.key key ->
     fresh (fun request -> Status_refreshing (request, value, Some error))
-  | _, (Status_absent | Status_loading _ | Status_retrying _ | Status_ready _ | Status_refreshing _
+  | (Poll | Refresh), (Status_absent | Status_loading _ | Status_retrying _ | Status_ready _ | Status_refreshing _
        | Status_stale _ | Status_failed _) -> fresh (fun request -> Status_loading request)
 ;;
 

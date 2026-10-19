@@ -79,6 +79,35 @@ func audioDevices() throws -> [AudioDevice] {
     }
 }
 
+// AVAudioFormat.h: the channel-count initializers return nil above two
+// channels, so a wider stream carries a DiscreteInOrder layout. The mixer
+// copies discrete channel N to output channel N, but renders a discrete
+// source into an unlabelled mono/stereo output as silence. A monitor output
+// fed by a wider input is therefore discrete as well.
+let unlabelledChannelLimit = 2
+
+func floatStreamFormat(sampleRate: Double, channels: Int, discrete: Bool) -> AVAudioFormat? {
+    guard discrete else {
+        return AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate,
+                             channels: AVAudioChannelCount(channels), interleaved: false)
+    }
+    // DiscreteInOrder keeps its channel count in the low 16 bits of the tag.
+    guard let layout = AVAudioChannelLayout(layoutTag: kAudioChannelLayoutTag_DiscreteInOrder | AudioChannelLayoutTag(channels)),
+          layout.channelCount == AVAudioChannelCount(channels) else {
+        return nil
+    }
+    return AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, interleaved: false, channelLayout: layout)
+}
+
+func captureStreamFormat(sampleRate: Double, inputs: Int) -> AVAudioFormat? {
+    floatStreamFormat(sampleRate: sampleRate, channels: inputs, discrete: inputs > unlabelledChannelLimit)
+}
+
+func monitorStreamFormat(sampleRate: Double, inputs: Int, outputs: Int) -> AVAudioFormat? {
+    floatStreamFormat(sampleRate: sampleRate, channels: outputs,
+                      discrete: inputs > unlabelledChannelLimit || outputs > unlabelledChannelLimit)
+}
+
 struct MidiSource {
     let endpoint: MIDIEndpointRef
     let uid: Int32
@@ -346,9 +375,7 @@ final class Capture {
         }
         let hardware = node.inputFormat(forBus: 0)
         guard hardware.sampleRate > 0, hardware.channelCount > 0,
-              let captureFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
-                                               sampleRate: hardware.sampleRate,
-                                               channels: AVAudioChannelCount(input.inputs), interleaved: false) else {
+              let captureFormat = captureStreamFormat(sampleRate: hardware.sampleRate, inputs: input.inputs) else {
             throw SessionFailure("input device has no usable audio stream")
         }
         format = captureFormat
@@ -357,8 +384,8 @@ final class Capture {
                 throw SessionFailure("audio engine did not select the requested monitoring output")
             }
             engine.connect(node, to: engine.mainMixerNode, format: captureFormat)
-            guard let outputFormat = AVAudioFormat(standardFormatWithSampleRate: hardware.sampleRate,
-                                                   channels: AVAudioChannelCount(output.outputs)) else {
+            guard let outputFormat = monitorStreamFormat(sampleRate: hardware.sampleRate,
+                                                         inputs: input.inputs, outputs: output.outputs) else {
                 throw SessionFailure("monitor output has no usable audio stream")
             }
             engine.connect(engine.mainMixerNode, to: engine.outputNode, format: outputFormat)

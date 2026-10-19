@@ -28,6 +28,10 @@ The owner validates engine identity, channel maps and device availability, and
 destroys its private route on stop or failed start. A removed/changed route stops
 monitoring with an error; the editor does not silently choose another output.
 
+When the input or output has more than two channels, input channel N plays on
+output channel N. Input channels beyond the output's channel count are not heard.
+Mono and stereo inputs on mono or stereo outputs keep the system mixer's mapping.
+
 Use the intended monitor output for your instrument/interface. An audio interface
 may also provide hardware direct monitoring; choose the route appropriate to your
 setup to avoid hearing both paths. Software monitoring here is audio only.

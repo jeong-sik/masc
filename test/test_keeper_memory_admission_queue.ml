@@ -173,6 +173,97 @@ let test_removed_destination_cannot_consume () = with_store (fun keepers_dir ->
   check int "candidate remains pending for a fresh judgment" 1
     (List.length (Queue.candidates (batch keepers_dir))))
 
+let test_stale_retirement_after_source_reobservation () = with_store (fun keepers_dir ->
+  let keeper_id = "keeper" in
+  let original = fact "ordinary observation to retire" in
+  let retained = { (fact "unmentioned observation") with last_seen=175. } in
+  let seeded = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
+    ~now:100. ~source:{kind=Current.Explicit_write; trace_id="seed"}
+    ~facts:[original;retained] () |> require in
+  ignore (append keepers_dir "one" "judgment input");
+  let selected = Queue.candidate_ids (batch keepers_dir) in
+  let stale_drop : Types.dropped_statement =
+    {memory_id=Types.memory_id original; reason="the original claim is no longer useful"} in
+  let withdrawn = Current.replace ~keepers_dir ~keeper_id
+    ~expected_revision:(Some seeded.revision) ~now:200.
+    ~source:{kind=Current.Explicit_retract; trace_id="withdraw"}
+    ~facts:[retained] () |> require in
+  let reobserved = {original with last_seen=300.;
+    origin={kind=Types.Authored; trace_id="reobserved"}} in
+  let restored = Current.upsert_fact ~keepers_dir ~keeper_id ~now:300.
+    ~source:{kind=Current.Explicit_write; trace_id="reobserve"} reobserved
+    |> Result.map_error Current.upsert_error_to_string |> require in
+  check bool "reobservation is a new durable revision" true
+    (restored.revision > withdrawn.revision);
+  check bool "the exact reobserved source is current before the stale decision" true
+    (List.mem reobserved restored.facts);
+  let callbacks = ref 0 in
+  let committed = Current.apply_disposition ~keepers_dir ~keeper_id ~now:400.
+    ~on_committed:(fun _ -> incr callbacks) ~explicit_candidate_ids:selected
+    ~source:{kind=Current.Librarian; trace_id="stale-retirement"}
+    ~dropped_statements:[stale_drop] ~absorbed:[] ~revisions:[] ~new_claims:[] () |> require in
+  check int "only the successful publication invokes its callback" 1 !callbacks;
+  check bool "the unmentioned fact retains every stored field and basis" true
+    (committed.snapshot.facts = [retained]);
+  check bool "the published snapshot is the cold read authority" true
+    (Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require = Some committed.snapshot);
+  check bool "retirement does not invent revision or absorption edges" true
+    (committed.revisions_applied=[] && committed.absorbed_applied=[]);
+  (match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:1 with
+   | [Ok (Current.Journal_committed entry)] ->
+     check bool "the journal removes the exact restored fields and basis" true
+       (entry.change.removed = [reobserved]);
+     check bool "the original retirement reason remains attached" true
+       (entry.dropped = Some [stale_drop])
+   | _ -> fail "missing committed retirement journal");
+  check bool "retirement creates no absorbed rows" true
+    (Masc.Keeper_memory_absorbed.read ~keepers_dir ~keeper_id |> require = []);
+  let generation = (List.hd selected).Current.queue_generation in
+  check bool "the decision receipt is durable before acknowledgement" true
+    (Current.committed_explicit_candidates ~keepers_dir ~keeper_id ~queue_generation:generation
+      |> require = selected);
+  acknowledge keepers_dir;
+  check bool "only committed input is acknowledged" true (pending keepers_dir=None))
+
+let test_destination_lost_during_support_maintenance_preserves_publication () =
+  with_store (fun keepers_dir ->
+    let keeper_id = "keeper" in
+    let premise = fact "destination premise" in
+    let source = fact "absorption source" in
+    let destination = Types.derived ~claim:"derived destination" ~category:Types.Fact
+      ~now:100. ~origin:{kind=Types.Authored; trace_id="derived"}
+      ~derivations:[{rule_id="support"; premise_ids=[Types.memory_id premise]}] |> require in
+    let seeded = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None ~now:100.
+      ~source:{kind=Current.Explicit_write; trace_id="seed"}
+      ~facts:[premise;destination;source] () |> require in
+    ignore (append keepers_dir "one" "explicit input awaiting its representation");
+    let selected = Queue.candidate_ids (batch keepers_dir) in
+    let paths =
+      [Current.path_for_keepers_dir ~keepers_dir ~keeper_id;
+       Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id;
+       Current.durable_range_receipt_path ~keepers_dir ~keeper_id;
+       Current.publication_receipt_path ~keepers_dir ~keeper_id;
+       Masc.Keeper_memory_absorbed.path_for_keepers_dir ~keepers_dir ~keeper_id;
+       Queue.path ~keepers_dir ~keeper_id] in
+    let before = List.map Fs_compat.load_file_opt paths in
+    let callbacks = ref 0 in
+    (match Current.apply_disposition ~keepers_dir ~keeper_id ~now:200.
+      ~on_committed:(fun _ -> incr callbacks) ~explicit_candidate_ids:selected
+      ~required_memory_ids:[Types.memory_id destination]
+      ~source:{kind=Current.Librarian; trace_id="support-loss"}
+      ~dropped_statements:[{memory_id=Types.memory_id premise; reason="premise withdrawn"}]
+      ~absorbed:[{absorbed=Types.memory_id source; into=Types.memory_id destination}]
+      ~revisions:[] ~new_claims:[fact "would be a new current claim"] () with
+     | Error _ -> () | Ok _ -> fail "an unsupported required destination consumed input");
+    check int "refusal never invokes the commit observer" 0 !callbacks;
+    check bool "snapshot, journal, receipts, publication, absorbed rows and queue are byte-exact" true
+      (before = List.map Fs_compat.load_file_opt paths);
+    check bool "the original fields and support basis remain authoritative" true
+      (Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require = Some seeded);
+    acknowledge keepers_dir;
+    check bool "no consumption receipt can acknowledge the refused input" true
+      (Queue.candidate_ids (batch keepers_dir) = selected))
+
 let test_worker_recovers_before_judging () = with_store (fun keepers_dir ->
   ignore (append keepers_dir "one" "rule");
   ignore (commit keepers_dir (Queue.candidate_ids (batch keepers_dir)) []);
@@ -606,6 +697,8 @@ let () = run "durable explicit admission queue"
     test_case "commit then retirement recovers without losing new tail" `Quick test_recovery_preserves_new_tail;
     test_case "input digest mismatch retains candidates" `Quick test_wrong_digest_keeps_candidates;
     test_case "retired destination refuses consumption" `Quick test_removed_destination_cannot_consume;
+    test_case "stale retirement follows withdrawal and source reobservation" `Quick test_stale_retirement_after_source_reobservation;
+    test_case "same-settle support loss preserves required destination input" `Quick test_destination_lost_during_support_maintenance_preserves_publication;
     test_case "worker restores committed input before judging" `Quick test_worker_recovers_before_judging;
     test_case "worker retries size refusal without discarding tail" `Quick test_worker_size_refusal_preserves_tail;
     test_case "worker retains uncertainty and requires durable commit" `Quick test_worker_does_not_consume_uncertainty;

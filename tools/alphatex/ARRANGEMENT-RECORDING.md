@@ -52,7 +52,9 @@ tick at every wrap or accumulating a rounded period. Standalone MIDI backing
 publishes its actual binary64 cycle duration, including its existing outward
 silent tail. Common audio/MIDI backing publishes its authored project cycle.
 Audio correction is applied before choosing pass boundaries; MIDI keeps its
-original clock. The selected correction and all pass coordinates remain in the
+original clock. Audio and MIDI select the same last pass. If correction moves
+only one component into a new partial pass, the absent component stays silent;
+an earlier performance is not substituted. The selected correction and all pass coordinates remain in the
 recording alignment record. New takes become available after finalization;
 this is not live overdub monitoring or a comping editor.
 

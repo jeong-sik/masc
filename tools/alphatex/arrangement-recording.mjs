@@ -140,11 +140,13 @@ function attachLoopTake(project, result, asset, epoch, correction) {
     while (used[kind].has(`${kind}-${counters[kind]}`)) counters[kind]++
     const id = `${kind}-${counters[kind]++}`; used[kind].add(id); return id
   }
-  const latest = new Map()
-  for (const region of regions) latest.set(region.component, region.cycle)
+  // A corrected component may cross one more boundary than its paired stream.
+  // Select one performance, never the last audio from one pass and MIDI from
+  // another. A missing component in the latest partial pass stays silent.
+  const latest = regions.reduce((last, region) => BigInt(region.cycle) > last ? BigInt(region.cycle) : last, 0n)
   for (const region of regions) {
     const name = `${asset.name} · Take ${BigInt(region.cycle) + 1n}${region.component ? ' ' + region.component : ''}`
-    const lane = { id: fresh('lane'), name, kind: 'capture', muted: region.cycle !== latest.get(region.component), solo: false }
+    const lane = { id: fresh('lane'), name, kind: 'capture', muted: BigInt(region.cycle) !== latest, solo: false }
     next.lanes.push(lane)
     const { cycle, ...clip } = region
     next.clips.push({ ...clip, id: fresh('region'), name, lane: lane.id, asset: asset.id })

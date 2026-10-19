@@ -465,12 +465,14 @@ let live_references ~base_path ~board_posts_file =
       | Unix.S_DIR -> scan_directory path references
       | Unix.S_REG ->
         let basename = Filename.basename path in
-        (* Keeper_tool_call_index keeps its derived SQLite read index and WAL /
-           journal sidecars in [<ledger_dir>/] (which is [tool_calls/], a
-           registered durable consumer). The index is derived, holds no blob
-           references itself, and is rebuilt from the ledger; skip both the
-           database and its active SQLite sidecar files. *)
-        if Common.is_tool_call_read_index_file basename
+        (* Offline maintenance holds the exclusive BasePath writer lease.
+           Leftover [.atomic_*.tmp] staging bytes are unpublished, rather
+           than authoritative durable-source rows; an incomplete payload
+           must not fail their JSONL scan. This skip does not synchronize
+           online writers or rescan a target renamed after [read_directory]. *)
+        if Fs_compat.is_atomic_orphan_name basename
+        then Ok references
+        else if Common.is_tool_call_read_index_file basename
         then Ok references
         else if String.equal basename Common.chat_operation_store_basename
         then

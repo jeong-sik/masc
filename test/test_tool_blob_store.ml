@@ -1410,6 +1410,55 @@ let test_maintenance_skips_open_tool_call_read_index_and_wal_sidecars () =
             0
             observed.candidates_recorded))
 
+let test_maintenance_skips_atomic_staging_files () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let reference =
+        B.put
+          store
+          ~bytes:"tool-call output beside an atomic staging file"
+          ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let month_dir =
+        Filename.concat
+          (Filename.concat (Common.masc_dir_from_base_path ~base_path) "tool_calls")
+          "2026-07"
+      in
+      Fs_compat.mkdir_p month_dir;
+      let ledger_row = Filename.concat month_dir "29.jsonl" in
+      Fs_compat.save_file
+        ledger_row
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ "keeper", `String "keeper-tool-log"
+             ; "tool", `String "large_output"
+             ; ( "output"
+               , `Assoc
+                   [ ( "_blob"
+                     , `Assoc
+                         [ "sha256", `String reference.sha256
+                         ; "bytes", `Int reference.bytes
+                         ; "mime", `String reference.mime
+                         ; "preview", `String reference.preview
+                         ] ) ]
+             )])
+        ^ "\n");
+      (* An interrupted atomic replace can leave an incomplete staging
+         payload beside the authoritative ledger. Offline maintenance skips
+         the unpublished payload and still reads the ledger reference. *)
+      let staging_path = Filename.concat month_dir ".atomic_42.tmp" in
+      Fs_compat.save_file staging_path "{\"half-written\":";
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int)
+        "ledger reference survives a staging file in the scanned directory"
+        1
+        observed.live_references;
+      Alcotest.(check int)
+        "staging scan skips keep the referenced blob unmarked"
+        0
+        observed.candidates_recorded)
+
 let test_maintenance_reads_chat_operation_store_and_prepared_gate_checkpoint () =
   with_temp_dir (fun base_path ->
       let module Store = Keeper_chat_operation_store in
@@ -2293,6 +2342,10 @@ let () =
             "maintenance skips open tool-call read index and WAL sidecars"
             `Quick
             test_maintenance_skips_open_tool_call_read_index_and_wal_sidecars;
+          Alcotest.test_case
+            "maintenance skips atomic staging files in scanned directories"
+            `Quick
+            test_maintenance_skips_atomic_staging_files;
           Alcotest.test_case
             "maintenance reads chat operation store and prepared gate checkpoint"
             `Quick

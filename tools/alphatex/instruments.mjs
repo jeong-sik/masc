@@ -140,11 +140,12 @@ export class InstrumentPicker {
     try { files = await readdir(folder, { withFileTypes: true }) }
     catch (error) { if (error.code !== 'ENOENT') throw error; files = [] }
     if (epoch !== this.epoch) return
-    const items = [{ name: 'Default instrument state', preset_path: null },
+    const identity = { plugin_path: instrument.plugin_path, plugin_name: instrument.plugin_name ?? null }
+    const items = [{ ...identity, name: 'Default instrument state', preset_path: null },
       ...files.filter(file => file.isFile() && file.name.endsWith('.vstpreset'))
-        .map(file => ({ name: file.name, preset_path: join(folder, file.name) }))]
+        .map(file => ({ ...identity, name: file.name, preset_path: join(folder, file.name) }))]
     if (preferred && !items.some(item => item.preset_path === preferred)) {
-      items.push({ name: basename(preferred), preset_path: preferred })
+      items.push({ ...identity, name: basename(preferred), preset_path: preferred })
     }
     this.view = { kind: 'presets', title: `${instrument.name} · choose a sound`,
       instrument, items, cursor: Math.max(0, items.findIndex(item => item.preset_path === preferred)),

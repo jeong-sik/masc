@@ -520,6 +520,9 @@ def offline_counter_intervals(coordinator: Path) -> None:
         receipt = {"schema_version": 1, "case": "upstream_inline", "strategy": arm,
                    "outcome": "explicit_failure" if arm == "direct" else "unfinished", "clock_ref": clock_ref,
                    "turn_ref": "turn-" + arm, "fixture_sha256": fixture_hash,
+                   "skill_reference": {"revision": "original"}, "runtime": experiment["runtime"],
+                   "first_offered_tools_sha256": "reported-inventory",
+                   "common_instruction_sha256": "reported-instruction",
                    "input": {"_blob": {"sha256": "original-input"}},
                    "tool_commit_observation": {"boundary": "durable_tool_call_commit",
                        "mode": "scoped_synchronous_commit", "coverage": "complete", "delivery_failures": 0,
@@ -534,7 +537,9 @@ def offline_counter_intervals(coordinator: Path) -> None:
         attempts.append({"pair": 0, "strategy": arm, "path": relative})
         receipts[arm] = receipt
     write_json("manifest.json", {"schema_version": 1, "experiment_sha256": experiment_hash, "expected_attempts": attempts})
-    def report():
+    original_pair = {path.relative_to(root / "pair-0000").as_posix(): path.read_bytes()
+                     for path in (root / "pair-0000").rglob("*") if path.is_file()}
+    def capture_report(expected_pairs=1):
         before = {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
                   for p in root.rglob("*") if p.is_file()}
         result = subprocess.run([sys.executable, str(coordinator.resolve()), "--report-from", str(root)],
@@ -543,9 +548,13 @@ def offline_counter_intervals(coordinator: Path) -> None:
         require(before == {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
                            for p in root.rglob("*") if p.is_file()}, "counter report changed evidence")
         parsed = json.loads(result.stdout)
-        require(parsed["expected"] == 2 and parsed["outcomes"] == {"correct": 0, "explicit_failure": 1, "unfinished": 1},
+        require(parsed["expected"] == 2 * expected_pairs and parsed["outcomes"] == {
+            "correct": 0, "explicit_failure": expected_pairs, "unfinished": expected_pairs},
                 "failed/partial observations left the denominator")
         require(parsed["speedup"] is None and parsed["execution_verified"] is False, "reported intervals became execution proof")
+        return parsed
+    def report():
+        parsed = capture_report()
         return {r["declared_attempt"]["strategy"]: r["timing_report"] for r in parsed["attempts"]}
     for item in report().values():
         require(item["identity"]["state"] == "matched" and item["wall_clock_arithmetic"] is False,
@@ -576,6 +585,122 @@ def offline_counter_intervals(coordinator: Path) -> None:
     require(incomplete["identity"]["state"] == "missing" and incomplete["intervals"]["cycle"]["state"] == "available"
             and incomplete["intervals"]["enqueue_to_reported_useful_commit"]["state"] == "unavailable",
             "missing commit evidence erased valid cycle timing or fabricated useful work")
+
+    # Rebuild a declared three-pair capture from the original joined artifacts.
+    # These are controlled counter observations, not actual measured durations.
+    def counter_owner(value, owner, shift=0):
+        if isinstance(value, list):
+            return [counter_owner(item, owner, shift) for item in value]
+        if isinstance(value, dict):
+            return {key: owner if key == "clock_ref" else str(int(item) + shift)
+                    if key == "monotonic_ns" else counter_owner(item, owner, shift)
+                    for key, item in value.items()}
+        return value
+    def retag_arm(prefix, owner, shift=0):
+        for path in (root / prefix).iterdir():
+            if path.suffix in (".json", ".jsonl"):
+                write_json(path.relative_to(root).as_posix(), counter_owner(read(path), owner, shift))
+        receipt = read(root / prefix / "attempt.json")
+        receipt["tool_commit_observation"]["events_sha256"] = hashlib.sha256(
+            (root / prefix / "tool-commit-events.jsonl").read_bytes()).hexdigest()
+        receipt["timing"]["intake_turn_entry"]["manifest_sha256"] = hashlib.sha256(
+            (root / prefix / "turn-entry-manifest.json").read_bytes()).hexdigest()
+        return receipt
+    attempts = []
+    large = 2**53 + 23
+    for pair in range(3):
+        for relative, raw in original_pair.items():
+            target = root / f"pair-{pair:04d}" / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(raw)
+        for arm in (("direct", "exact_skill") if pair % 2 == 0 else ("exact_skill", "direct")):
+            prefix = f"pair-{pair:04d}/{arm}"
+            # Different absolute origins must not leak into duration differences.
+            receipt = retag_arm(prefix, f"counter-{pair}-{arm}", (pair + 1) * 100000 + (10000 if arm == "exact_skill" else 0))
+            entered = int(receipt["timing"]["cycle_entered"]["monotonic_ns"])
+            duration = (20 if arm == "direct" else 25) if pair == 0 else (large if arm == "direct" else 0) if pair == 1 else 0
+            receipt["timing"]["cycle_returned"]["monotonic_ns"] = str(entered + duration)
+            receipt["timing"]["validation_finished"]["monotonic_ns"] = str(entered + duration + 10)
+            receipt["pair"] = pair
+            relative = prefix + "/attempt.json"
+            write_json(relative, receipt)
+            attempts.append({"pair": pair, "strategy": arm, "path": relative})
+    experiment["pairs"] = 3
+    experiment_hash = write_json("experiment.json", experiment)
+    write_json("manifest.json", {"schema_version": 1, "experiment_sha256": experiment_hash, "expected_attempts": attempts})
+    cohort = capture_report(3)
+    pairs = {item["pair"]: item["reported_timing"] for item in cohort["pair_comparisons"]}
+    require([pairs[index]["intervals"]["cycle"]["exact_skill_minus_direct_ns"] for index in range(3)] == ["5", str(-large), "0"],
+            "strategy order, counter origin, integer precision or zero durations changed the signed comparison")
+    require(cohort["matching"] == [] and all(item["state"] == "incomplete" for item in cohort["pair_comparisons"]),
+            "available failed-attempt timing became a functional success")
+    require(all(item["baseline_strategy"] == "direct" and item["comparison_strategy"] == "exact_skill"
+                and item["cross_owner_counter_subtraction"] is False and item["execution_verified"] is False
+                and item["source_build_verified"] is False for item in pairs.values()),
+            "reported comparisons gained chronological, source or execution authority")
+    path = "pair-0001/exact_skill/attempt.json"
+    receipt = read(root / path)
+    del receipt["timing"]["validation_finished"]
+    write_json(path, receipt)
+    partial = capture_report(3)["pair_comparisons"][1]["reported_timing"]["intervals"]
+    require(partial["cycle"]["exact_skill_minus_direct_ns"] == str(-large)
+            and partial["cycle_to_validation"]["state"] == "unavailable"
+            and partial["cycle_to_validation"]["unavailable_arms"] == [{"strategy": "exact_skill", "reason": "endpoint_unobserved"}],
+            "one missing endpoint erased an independent valid comparison or lost its arm")
+    path = "pair-0000/exact_skill/attempt.json"
+    receipt = read(root / path)
+    receipt["input"]["_blob"]["sha256"] = "foreign-input"
+    write_json(path, receipt)
+    mismatch = capture_report(3)["pair_comparisons"][0]["reported_timing"]
+    require(mismatch["reported_input_agreement"]["state"] == "mismatch"
+            and all(item["exact_skill_minus_direct_ns"] is None for item in mismatch["intervals"].values()),
+            "different original input supplied a reported comparison")
+    receipt["input"]["_blob"]["sha256"] = "original-input"
+    write_json(path, receipt)
+    for arm in ("direct", "exact_skill"):
+        path = f"pair-0000/{arm}/attempt.json"
+        receipt = read(root / path)
+        receipt["case"] = "named_inline"
+        write_json(path, receipt)
+    foreign = capture_report(3)["pair_comparisons"][0]["reported_timing"]
+    require(foreign["reported_input_agreement"]["state"] == "matched"
+            and any(item["reason"] == "declared_case_mismatch" for item in foreign["blockers"])
+            and foreign["intervals"]["cycle"]["exact_skill_minus_direct_ns"] is None,
+            "agreement on another case supplied the declared experiment's comparison")
+    for arm in ("direct", "exact_skill"):
+        path = f"pair-0000/{arm}/attempt.json"
+        receipt = read(root / path)
+        receipt["case"] = "upstream_inline"
+        receipt["first_offered_tools_sha256"] = None
+        write_json(path, receipt)
+    unknown = capture_report(3)["pair_comparisons"][0]["reported_timing"]
+    require(unknown["reported_input_agreement"]["state"] == "matched"
+            and any(item["reason"] == "common_hash_unreported" and item["field"] == "first_offered_tools_sha256"
+                    for item in unknown["blockers"])
+            and unknown["intervals"]["cycle"]["direct"]["state"] == "available"
+            and unknown["intervals"]["cycle"]["exact_skill_minus_direct_ns"] is None,
+            "two unknown tool inventories became comparable or erased actual reported spans")
+    prefix = "pair-0002/exact_skill"
+    receipt = retag_arm(prefix, "counter-2-direct")
+    write_json(prefix + "/attempt.json", receipt)
+    shared = capture_report(3)["pair_comparisons"][2]["reported_timing"]
+    require({"reason": "shared_counter_owner"} in shared["blockers"]
+            and all(shared["intervals"]["cycle"][arm]["state"] == "available" for arm in ("direct", "exact_skill"))
+            and shared["intervals"]["cycle"]["exact_skill_minus_direct_ns"] is None,
+            "one reported invocation owner supplied an independent paired comparison")
+    receipt["outcome"] = "cancelled"
+    write_json(prefix + "/attempt.json", receipt)
+    cancelled = capture_report(3)["pair_comparisons"][2]["reported_timing"]
+    require(cancelled["arms"]["exact_skill"]["reported_outcome"] == "cancelled"
+            and cancelled["arms"]["exact_skill"]["receipt_state"] == "invalid"
+            and cancelled["intervals"]["cycle"]["exact_skill_minus_direct_ns"] is None,
+            "cancelled original evidence disappeared or supplied an admitted duration difference")
+    (root / prefix / "attempt.json").unlink()
+    missing = capture_report(3)["pair_comparisons"][2]["reported_timing"]
+    require(missing["arms"]["exact_skill"]["receipt_state"] == "missing"
+            and missing["reported_input_agreement"]["unadmitted_strategies"] == ["exact_skill"]
+            and missing["intervals"]["cycle"]["exact_skill_minus_direct_ns"] is None,
+            "missing declared arm disappeared or supplied a substitute comparison")
 
 
 def main():

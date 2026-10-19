@@ -384,6 +384,61 @@ def attempt_timing(root: Path, attempt: dict, receipt: dict) -> dict:
             "intervals": intervals, "wall_clock_arithmetic": False, "execution_verified": False}
 
 
+def reported_pair_timing(paired: list[dict], mismatched_fields: list[str], declared_case: str) -> dict:
+    """Compare reported durations, never absolute counters or verified latency."""
+    arms = {result["declared_attempt"]["strategy"]: result for result in paired}
+    before, after = arms["direct"], arms["exact_skill"]
+    unadmitted = [name for name, result in arms.items() if result["receipt_state"] != "read"]
+    blockers = [{"reason": "receipt_not_admitted", "strategy": name,
+                 "receipt_state": arms[name]["receipt_state"]} for name in unadmitted]
+    if not unadmitted and mismatched_fields:
+        blockers.append({"reason": "common_input_mismatch", "fields": mismatched_fields})
+    for name, result in arms.items():
+        if result["receipt_state"] != "read":
+            continue
+        if result.get("case") != declared_case:
+            blockers.append({"reason": "declared_case_mismatch", "strategy": name})
+        owner = result.get("clock_ref")
+        if type(owner) is not str or not owner.strip():
+            blockers.append({"reason": "counter_owner_unobserved", "strategy": name})
+        for field in ("fixture_sha256", "first_offered_tools_sha256", "common_instruction_sha256"):
+            value = result.get(field)
+            if type(value) is not str or not value.strip():
+                blockers.append({"reason": "common_hash_unreported", "strategy": name, "field": field})
+    owner = before.get("clock_ref")
+    if type(owner) is str and owner.strip() and owner == after.get("clock_ref"):
+        blockers.append({"reason": "shared_counter_owner"})
+    intervals = {}
+    for name, first in before["timing_report"]["intervals"].items():
+        second = after["timing_report"]["intervals"][name]
+        unavailable = [{"strategy": strategy, "reason": span["reason"]}
+                       for strategy, span in (("direct", first), ("exact_skill", second))
+                       if span["state"] == "unavailable"]
+        comparable = not blockers and not unavailable
+        intervals[name] = {
+            "state": "available" if comparable else "unavailable",
+            "direct": first, "exact_skill": second,
+            # Both durations were derived within their own validated counter.
+            # Signed integer strings retain precision and handle a zero baseline.
+            "exact_skill_minus_direct_ns":
+                str(int(second["duration_ns"]) - int(first["duration_ns"])) if comparable else None,
+            "unavailable_arms": unavailable}
+    return {"scope": "receipt_reported_duration_comparison",
+            "baseline_strategy": "direct", "comparison_strategy": "exact_skill",
+            "reported_input_agreement": {
+                "state": "unavailable" if unadmitted else "mismatch" if mismatched_fields else "matched",
+                "mismatched_fields": mismatched_fields if not unadmitted else [],
+                "unadmitted_strategies": unadmitted},
+            "arms": {name: {"receipt_state": result["receipt_state"],
+                            "reported_outcome": result["reported_outcome"],
+                            "receipt_sha256": result["receipt_sha256"],
+                            "clock_ref": result.get("clock_ref")}
+                     for name, result in arms.items()},
+            "blockers": blockers, "intervals": intervals,
+            "wall_clock_arithmetic": False, "cross_owner_counter_subtraction": False,
+            "execution_verified": False, "source_build_verified": False}
+
+
 def report_capture(directory: Path) -> dict:
     """Read a declared capture without invoking a driver or changing evidence."""
     root = directory.resolve(strict=True)
@@ -429,15 +484,17 @@ def report_capture(directory: Path) -> dict:
     matching, comparisons = [], []
     for pair in range(experiment["pairs"]):
         paired = by_pair[pair]
-        if not all(result["outcome"] == "correct" for result in paired):
-            comparisons.append({"pair": pair, "state": "incomplete", "mismatched_fields": []})
-            continue
         first, second = paired
         mismatch = [key for key in ("case", "fixture_sha256", "skill_reference", "input", "runtime",
                                    "first_offered_tools_sha256", "common_instruction_sha256")
                     if key not in first or key not in second or not same_json(first[key], second[key])]
+        timing = reported_pair_timing(paired, mismatch, experiment["case"])
+        if not all(result["outcome"] == "correct" for result in paired):
+            comparisons.append({"pair": pair, "state": "incomplete", "mismatched_fields": [],
+                                "reported_timing": timing})
+            continue
         comparisons.append({"pair": pair, "state": "mismatch" if mismatch else "matched",
-                            "mismatched_fields": mismatch})
+                            "mismatched_fields": mismatch, "reported_timing": timing})
         if mismatch:
             for result in paired:
                 result.update(outcome="explicit_failure", comparison_errors=mismatch)

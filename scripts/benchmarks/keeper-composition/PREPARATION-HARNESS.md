@@ -159,8 +159,8 @@ cycle-return to validation, and enqueue/cycle-entry to the native-reported usefu
 commit. Available intervals retain exact string endpoints and `duration_ns`;
 unavailable intervals carry a reason instead of zero or a guessed timestamp.
 Both endpoints must name the receipt's counter and must not regress. Wall-clock
-intake/replay observations are retained without arithmetic, and observations
-from separate driver invocations are never subtracted from one another.
+intake/replay observations are retained without arithmetic. Absolute counter
+endpoints from separate driver invocations are never subtracted from one another.
 
 Useful-commit intervals additionally require recorded metadata agreement:
 frozen fixture/hash and original Task/trace, canonical turn record, original
@@ -174,6 +174,33 @@ ownership, stdout content, first-successful-leaf semantics or physical execution
 No averages, percentiles, ratios or speedup verdicts are derived here. The
 additional native observation encoding and offline file reads have unmeasured
 overhead; matched actual cohorts and full protocol verification remain separate.
+
+Every `pair_comparisons` entry also has `reported_timing`. It selects the arms
+by declared strategy, even when physical execution order is reversed:
+`baseline_strategy: direct`, `comparison_strategy: exact_skill`. Each interval
+retains both original reported spans and either a signed exact integer string
+`exact_skill_minus_direct_ns` or null plus `unavailable_arms`. Positive means
+the reported `exact_skill` duration is longer; negative means shorter. Zero
+durations require no division. These strategies do not label source versions
+or the chronological first/second invocation.
+
+Differences require admitted receipts, agreement on the existing common input
+fields, the declared experiment case, reported nonblank fixture/inventory/common
+instruction hashes and distinct reported counter owners. `blockers` identifies
+an unmet pair prerequisite. Matching two null tool inventories does not supply
+inventory coverage. Per-interval failures remain separate: an unavailable useful
+commit or validation endpoint does not erase a valid cycle comparison. Each
+duration is derived inside its own counter before comparing durations; no wall
+or cross-owner absolute counter arithmetic is introduced.
+
+All declared pairs remain, including failed/unfinished/cancelled/invalid/missing
+arms. `reported_timing.arms` retains receipt state, original reported outcome,
+receipt hash and reported owner. Available partial durations of failed attempts
+can be compared without turning the functional pair into a success. Existing
+`matching`, coordinator assessments and original evidence files retain their
+meaning. Input agreement and differences of reported durations are still
+unverified observations: pair execution/source verdicts remain false, and the
+summary's speedup and latency percentiles remain null.
 
 Each arm actually creates an addressed Board post, verifies one exact durable
 queue selection, classifies lifecycle admission, and calls the explicit heartbeat

@@ -2,10 +2,10 @@
     a language server is asked at.
 
     One owner for the address arithmetic both askers share — the
-    [keeper_code_query] tool and the REST question route. Positions are
-    1-based at these seams, the way [Grep] and [Read] report them; the
-    0-based conversion the protocol wants stays with the caller that built
-    the request. *)
+    [keeper_code_query] tool and the REST question route. Requested lines and
+    occurrences are 1-based, the way [Grep] and [Read] report them. Callers
+    convert the line to zero-based; {!column_of} already returns the
+    zero-based UTF-16 character offset used by the protocol. *)
 
 val line_of_file : path:string -> line_index:int -> (string, string) result
 (** The line as the file holds it, so the column search is over the same
@@ -21,9 +21,11 @@ val column_of :
   occurrence:int ->
   line_number:int ->
   (int, string) result
-(** The [occurrence]-th (1-based) start of [symbol] on [line]; the errors
-    name what the line actually reads. [line_number] is only for the error
-    text. *)
+(** The [occurrence]-th (1-based) start of [symbol] on [line], expressed as a
+    zero-based UTF-16 code-unit offset for the question pool's LSP requests.
+    Unlike {!columns_of}, this is not a byte offset or terminal-cell column.
+    Invalid UTF-8 in the line or symbol is refused before dispatch. The errors
+    name what the line actually reads. [line_number] is only for error text. *)
 
 val language_of :
   path:string -> (Lsp_process_manager.language, string) result

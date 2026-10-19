@@ -56,6 +56,32 @@ let test_line_of_file_reads_the_file () =
           check Alcotest.bool "the error says the line is past the end" true
             (String.ends_with ~suffix:"line 10 is past its end" message))
 
+let test_unicode_columns_use_protocol_units () =
+  List.iter
+    (fun (line, symbol, occurrence, expected) ->
+      match Lsp_position.column_of ~line ~symbol ~occurrence ~line_number:3 with
+      | Ok column -> check int "UTF-16 request character" expected column
+      | Error message -> Alcotest.fail message)
+    [ ("label = \"한글 설명이 충분히 깁니다🙂\"; notes = bass_phrase()",
+       "bass_phrase", 1, 36)
+    ; ("label = \"한글🙂 é\"; target = target", "target", 1, 19)
+    ; ("label = \"한글🙂 é\"; target = target", "target", 2, 28)
+    ; ("한글🙂 한글🙂", "한글", 2, 5)
+    ; ("\t🙂 target", "target", 1, 4)
+    ]
+
+let test_invalid_unicode_is_not_a_request_position () =
+  List.iter
+    (fun (line, symbol) ->
+      Alcotest.(check bool) "invalid UTF-8 is refused" true
+        (Result.is_error
+           (Lsp_position.column_of ~line ~symbol ~occurrence:1 ~line_number:3)))
+    [ ("\255 target", "target")
+    ; ("target \255", "target")
+    ; ("target", "\255")
+    ; ("é", "\169")
+    ]
+
 let () =
   Alcotest.run "lsp_position"
     [ ( "positions",
@@ -65,5 +91,9 @@ let () =
             test_column_of_picks_the_occurrence;
           Alcotest.test_case "line_of_file reads the file" `Quick
             test_line_of_file_reads_the_file;
+          Alcotest.test_case "Unicode columns use protocol units" `Quick
+            test_unicode_columns_use_protocol_units;
+          Alcotest.test_case "invalid Unicode is not a request position" `Quick
+            test_invalid_unicode_is_not_a_request_position;
         ] );
     ]

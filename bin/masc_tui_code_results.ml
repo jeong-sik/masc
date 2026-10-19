@@ -7,6 +7,7 @@ module Message_layout = Masc_tui_message_layout
 type followup =
   | No_followup
   | Reveal_cursor
+  | Choose_location
   | Read_location_file of code_navigation_owner * string Masc_tui_fetched.request
 
 let push_code_jump state =
@@ -151,7 +152,7 @@ let apply_catalog (state : state) request result =
                 (Masc_tui_fetched.request_key request) ->
       state.code_catalog <- Masc_tui_fetched.complete ~equal:code_scope_path_equal
           state.code_catalog request result
-  | Palette_files _ | Palette_jump | Palette_choice _ -> ()
+  | Palette_files _ | Palette_locations _ | Palette_jump | Palette_choice _ -> ()
 
 let apply_open_file ~preserve_view (state : state) request result = (
   let path = Masc_tui_fetched.request_key request in
@@ -310,7 +311,7 @@ let take_ready_found_file (state : state) ~input_pending =
                 state.code_file <- file;
                 apply_file state file_request (Ok content);
                 true)
-  | (Palette_files _ | Palette_jump | Palette_choice _),
+  | (Palette_files _ | Palette_locations _ | Palette_jump | Palette_choice _),
     (None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
      | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))) -> false
 
@@ -325,7 +326,7 @@ let apply_found_file ?(input_pending = false) (state : state) request result =
       state.code_finder_file <- Masc_tui_fetched.complete ~equal:code_scope_path_equal
           state.code_finder_file request result;
       take_ready_found_file state ~input_pending
-  | Palette_files _ | Palette_jump | Palette_choice _ -> false
+  | Palette_files _ | Palette_locations _ | Palette_jump | Palette_choice _ -> false
 
 let apply_blame (state : state) request result =
   (* An answer that arrives after the operator moved on describes bytes
@@ -340,29 +341,95 @@ let apply_blame (state : state) request result =
 ;;
 
 let start_lsp_question ?line (state : state) ~question ~symbol =
+  (match state.palette_mode with
+   | Palette_locations _ -> close_code_finder state
+   | Palette_jump | Palette_choice _ | Palette_files _ -> state.code_location_offer <- None);
   state.code_navigation <- None;
+  (if state.code_file_resume_intent = Open_code_file then
+   match Masc_tui_fetched.current state.code_file with
+   | Some (_, (Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _)) ->
+       state.code_file <- Masc_tui_fetched.cancel_pending
+         ~reason:"File read cancelled by language-server question" state.code_file;
+       state.code_file_resume_intent <- Refresh_code_file
+   | None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+                   | Masc_tui_fetched.Failed _)) -> ());
   match Masc_tui_fetched.current_request state.code_file with
   | None -> None
   | Some file ->
-      let key = { clq_scope = state.code_scope; clq_file = file;
+      let key = { clq_workspace = state.workspace_authority;
+                  clq_reading = state.workspace_read_authority;
+                  clq_scope = state.code_scope; clq_dir = state.code_dir; clq_file = file;
                   clq_question = question; clq_symbol = symbol;
                   clq_line = Option.value ~default:(state.code_file_cursor + 1) line } in
       (match Masc_tui_fetched.start ~equal:code_lsp_query_equal state.code_lsp_query ~key with
        | Masc_tui_fetched.Already_loading -> None
        | Masc_tui_fetched.Started (next, request) ->
            state.code_lsp_query <- next;
+           state.code_lsp_note <- None;
            Some request)
+;;
+
+let follow_lsp_location (state : state) ~symbol (location : Masc.Tui_decode.lsp_location) =
+  let open Masc.Tui_decode in
+  if location.ll_inside then begin
+    state.code_lsp_note <-
+      Some
+        (Printf.sprintf "%s: %s:%d" symbol location.ll_path
+           location.ll_line);
+    match Masc_tui_fetched.current state.code_file with
+    | Some (open_path, Masc_tui_fetched.Ready rows)
+      when String.equal open_path location.ll_path ->
+        push_code_jump state;
+        state.code_file <- Masc_tui_fetched.cancel_pending
+            ~reason:"File read cancelled by location navigation" state.code_file;
+        state.code_file_resume_intent <- Refresh_code_file;
+        let cursor =
+          max 0
+            (min (location.ll_line - 1) (Array.length rows - 1))
+        in
+        state.code_file_cursor <- cursor;
+        state.code_file_hscroll <- 0;
+        state.code_focus_file <- Right_pane;
+        (* Follow the jump: a definition past the fold is a cursor
+           the operator cannot see otherwise. *)
+        Reveal_cursor
+    (* Keep the source while a separate navigation owner reads a different
+       or currently unreadable destination. Only its successful commit adds
+       the source history entry. *)
+    | Some
+        ( _
+        , ( Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+          | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _
+          | Masc_tui_fetched.Failed _ ) )
+    | None ->
+        let parent = Filename.dirname location.ll_path in
+        let target = { cj_scope = state.code_scope;
+          cj_dir = (if String.equal parent "." then "" else parent);
+          cj_file = Some location.ll_path;
+          cj_cursor = max 0 (location.ll_line - 1);
+          cj_scroll = max 0 (location.ll_line - 1);
+          cj_hscroll = 0; cj_tree_cursor = 0; cj_focus = Right_pane } in
+        (match start_navigation state ~action:Follow_location
+             ~target ~path:location.ll_path with
+         | Some (owner, request) -> Read_location_file (owner, request)
+         | None -> No_followup)
+  end
+  else begin
+    (* Outside the workspace (stdlib, a package): say where rather
+       than open a path the surface cannot serve. *)
+    state.code_lsp_note <-
+      Some
+        (Printf.sprintf "%s: outside the workspace at %s:%d" symbol
+           location.ll_path location.ll_line);
+    No_followup
+  end
 ;;
 
 let apply_lsp_answer (state : state) request result =
   let query = Masc_tui_fetched.request_key request in
-  let current_file = match Masc_tui_fetched.current_request state.code_file with
-    | None -> false
-    | Some current ->
-        Masc_tui_fetched.same_request ~equal:String.equal current query.clq_file in
   if not (Masc_tui_fetched.is_current ~equal:code_lsp_query_equal state.code_lsp_query request)
-     || query.clq_scope <> state.code_scope || not current_file
-  then No_followup
+     || not (code_lsp_query_current state query)
+  then ()
   else begin
   state.code_lsp_query <-
     Masc_tui_fetched.complete ~equal:code_lsp_query_equal state.code_lsp_query request
@@ -371,7 +438,7 @@ let apply_lsp_answer (state : state) request result =
   (match result with
    | Error detail ->
        state.code_lsp_note <- Some (symbol ^ ": " ^ detail);
-       No_followup
+       ()
    | Ok (Masc.Tui_decode.Lsp_hover text) ->
        state.code_lsp_note <-
          Some
@@ -379,67 +446,76 @@ let apply_lsp_answer (state : state) request result =
             | Some t ->
                 symbol ^ ": " ^ Masc.Tui_terminal_text.sanitize_terminal_text t
             | None -> symbol ^ ": the server has nothing to say here");
-       No_followup
+       ()
    | Ok (Masc.Tui_decode.Lsp_locations []) ->
        state.code_lsp_note <-
          Some (Printf.sprintf "no %s found for %S" question symbol);
-       No_followup
-   | Ok (Masc.Tui_decode.Lsp_locations (location :: _)) ->
-       let open Masc.Tui_decode in
-       if location.ll_inside then begin
-         state.code_lsp_note <-
-           Some
-             (Printf.sprintf "%s: %s:%d" symbol location.ll_path
-                location.ll_line);
-         match Masc_tui_fetched.current state.code_file with
-         | Some (open_path, Masc_tui_fetched.Ready rows)
-           when String.equal open_path location.ll_path ->
-             push_code_jump state;
-             state.code_file <- Masc_tui_fetched.cancel_pending
-                 ~reason:"File read cancelled by location navigation" state.code_file;
-             state.code_file_resume_intent <- Refresh_code_file;
-             let cursor =
-               max 0
-                 (min (location.ll_line - 1) (Array.length rows - 1))
-             in
-             state.code_file_cursor <- cursor;
-             state.code_file_hscroll <- 0;
-             state.code_focus_file <- Right_pane;
-             (* Follow the jump: a definition past the fold is a cursor
-                the operator cannot see otherwise. *)
-             Reveal_cursor
-         (* A different file, or this one not readable yet: ask for it.
-            [start] answers Already_loading if that is the read already in
-            flight, so a jump into the file being read does not double it. *)
-         | Some
-             ( _
-             , ( Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
-               | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _
-               | Masc_tui_fetched.Failed _ ) )
-         | None ->
-             let parent = Filename.dirname location.ll_path in
-             let target = { cj_scope = state.code_scope;
-               cj_dir = (if String.equal parent "." then "" else parent);
-               cj_file = Some location.ll_path;
-               cj_cursor = max 0 (location.ll_line - 1);
-               cj_scroll = max 0 (location.ll_line - 1);
-               cj_hscroll = 0; cj_tree_cursor = 0; cj_focus = Right_pane } in
-             (match start_navigation state ~action:Follow_location
-                  ~target ~path:location.ll_path with
-              | Some (owner, request) -> Read_location_file (owner, request)
-              | None -> No_followup)
-       end
-       else begin
-         (* Outside the workspace (stdlib, a package): say where rather
-            than open a path the surface cannot serve. *)
-         state.code_lsp_note <-
-           Some
-             (Printf.sprintf "%s: outside the workspace at %s:%d" symbol
-                location.ll_path location.ll_line);
-         No_followup
-       end)
+       ()
+   | Ok (Masc.Tui_decode.Lsp_locations locations) ->
+       state.code_file <- Masc_tui_fetched.cancel_pending
+         ~reason:"File read cancelled by location offer" state.code_file;
+       state.code_file_resume_intent <- Refresh_code_file;
+       let offer = { clo_origin = {
+           cfo_workspace = state.workspace_authority;
+           cfo_reading = state.workspace_read_authority;
+           cfo_scope = state.code_scope; cfo_dir = state.code_dir;
+           cfo_file = Masc_tui_fetched.current_request state.code_file };
+         clo_query = request; clo_locations = locations } in
+       state.code_location_offer <- Some offer;
+       ())
   end
+;;
 
+let retire_lsp_input state =
+  match state.palette_mode with
+  | Palette_locations offer when state.palette_open
+      && code_location_offer_current state offer -> ()
+  | Palette_locations _ | Palette_jump | Palette_choice _ | Palette_files _ ->
+      (* Workspace recovery reissues the current key, including settled ones. *)
+      state.code_lsp_query <- Masc_tui_fetched.clear state.code_lsp_query;
+      state.code_location_offer <- None
+;;
+
+let choose_lsp_location state offer location =
+  let owns_picker = match state.palette_mode with
+    | Palette_locations current -> state.palette_open && current == offer
+    | Palette_jump | Palette_choice _ | Palette_files _ -> false in
+  if not owns_picker || not (code_location_offer_current state offer)
+     || not (List.exists (fun candidate -> candidate == location) offer.clo_locations)
+  then No_followup
+  else begin
+    let query = Masc_tui_fetched.request_key offer.clo_query in
+    close_code_finder state;
+    follow_lsp_location state ~symbol:query.clq_symbol location
+  end
+;;
+
+let take_ready_lsp_locations state ~input_pending =
+  match state.code_location_offer with
+  | None -> No_followup
+  | Some offer when not (code_location_offer_current state offer) ->
+      state.code_location_offer <- None;
+      No_followup
+  | Some _ when input_pending -> No_followup
+  | Some offer ->
+      match state.palette_open, state.palette_mode with
+      | true, Palette_locations current when current == offer -> No_followup
+      | true, (Palette_jump | Palette_choice _ | Palette_files _ | Palette_locations _) ->
+          state.code_location_offer <- None;
+          No_followup
+      | false, (Palette_jump | Palette_choice _ | Palette_files _ | Palette_locations _) ->
+          match offer.clo_locations with
+          | [] -> state.code_location_offer <- None; No_followup
+          | [location] ->
+              let query = Masc_tui_fetched.request_key offer.clo_query in
+              state.code_location_offer <- None;
+              follow_lsp_location state ~symbol:query.clq_symbol location
+          | _ :: _ :: _ ->
+              state.palette_open <- true;
+              state.palette_mode <- Palette_locations offer;
+              state.palette_query <- "";
+              state.palette_cursor <- 0;
+              Choose_location
 ;;
 
 let apply_diff (state : state) request result =

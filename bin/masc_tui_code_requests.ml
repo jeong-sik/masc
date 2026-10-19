@@ -61,7 +61,7 @@ let open_found_file state ~host ~deliver ~path =
              ~deliver:(fun result -> deliver (Code_finder_file_loaded (request, result)))
              (fun () -> Masc_tui_http.fetch_workspace_file ?keeper ?repo
                  ~expected_workspace ~host ~port ~path ()))
-  | (Palette_files _ | Palette_jump | Palette_choice _),
+  | (Palette_files _ | Palette_locations _ | Palette_jump | Palette_choice _),
     (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Ready _
     | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _), (Some _ | None) -> ()
 
@@ -304,7 +304,6 @@ let start_lsp_question
      | None -> ()
      | Some request ->
        let query = Masc_tui_fetched.request_key request in
-       state.code_lsp_note <- Some (Printf.sprintf "asking %s about %S" question symbol);
        let port = state.port in
        let line = query.clq_line in
        let keeper, repo = code_scope_axes state in

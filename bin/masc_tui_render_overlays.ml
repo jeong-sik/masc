@@ -322,7 +322,8 @@ let render_palette (state : state) =
     match state.palette_mode with
     | Masc_tui_types.Palette_jump ->
         Masc_tui_palette.palette_typed_question state.palette_query
-    | Masc_tui_types.Palette_choice _ | Masc_tui_types.Palette_files _ -> None
+    | Masc_tui_types.Palette_choice _ | Masc_tui_types.Palette_files _
+    | Masc_tui_types.Palette_locations _ -> None
   in
   let explicit_question =
     match typed_question with
@@ -349,6 +350,10 @@ let render_palette (state : state) =
         , "filter:", "ask" )
     | Masc_tui_types.Palette_files _ ->
         (" MASC Find file", "filter:", "open")
+    | Masc_tui_types.Palette_locations offer ->
+        let query = Masc_tui_fetched.request_key offer.clo_query in
+        (Printf.sprintf " %s · %s" query.clq_question
+           (Terminal_text.single_line query.clq_symbol), "filter:", "open")
   in
   (* The title names the palette the way the key table does (":" command
      palette) and the prompt follows it. It was "Quick Jump & Navigation" with
@@ -384,6 +389,10 @@ let render_palette (state : state) =
   let finder_notes =
     match state.palette_mode with
     | Palette_jump | Palette_choice _ -> []
+    | Palette_locations offer ->
+        if code_location_offer_current state offer then
+          ["Choose a returned file and line · Esc keeps the current reading"]
+        else ["These locations are no longer current · Esc returns to Code"]
     | Palette_files _ ->
         let catalog_note = match code_finder_catalog state with
           | Masc_tui_fetched.Absent -> "File finder is no longer active; Esc returns to Code"
@@ -426,11 +435,12 @@ let render_palette (state : state) =
             ^ Terminal_text.single_line symbol);
           c.push "   Ask about this symbol in the file open on Code"
       | None ->
-          let files = match state.palette_mode with
-            | Palette_files _ -> true | Palette_jump | Palette_choice _ -> false in
+          let kind = match state.palette_mode with
+            | Palette_files _ -> "files" | Palette_locations _ -> "locations"
+            | Palette_jump | Palette_choice _ -> "commands" in
           c.push_styled ~style:(Theme.recede ())
             (Printf.sprintf "   %d %s · %d/%d · type to filter"
-              total (if files then "files" else "commands")
+              total kind
               (if total = 0 then 0 else cursor + 1) total);
           let list_rows = max 0 (budget - 2 - List.length finder_notes) in
           let first = max 0 (cursor - list_rows + 1) in
@@ -444,11 +454,10 @@ let render_palette (state : state) =
             (match state.palette_mode, code_finder_catalog state with
              | Palette_files _, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
                  | Masc_tui_fetched.Failed _ | Masc_tui_fetched.Stale _) -> ()
-             | (Palette_files _ | Palette_jump | Palette_choice _),
+             | (Palette_files _ | Palette_locations _ | Palette_jump | Palette_choice _),
                (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Ready _
                | Masc_tui_fetched.Failed _ | Masc_tui_fetched.Stale _) ->
-                 c.push (if files then "   No matching file · Ctrl-U clears the filter"
-                         else "   No matching command · Ctrl-U clears the filter")))
+                 c.push ("   No matching " ^ kind ^ " · Ctrl-U clears the filter")))
 
 (* The patch review overlay. [surface_chrome] owns the box, the fill and the
    footer's row, so the rows are not counted here and the keys on screen are

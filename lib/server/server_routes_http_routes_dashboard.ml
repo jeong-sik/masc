@@ -2341,6 +2341,20 @@ let add_routes ~sw ~clock router =
                 ~base_path:(Mcp_server.workspace_config state).base_path)
              reqd)
          request reqd)
+  |> Http.Router.get "/api/v1/async-requests/status" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           let query = Uri.query (Uri.of_string req.Httpun.Request.target) in
+           let values key = List.concat_map (fun (name,values) ->
+             if String.equal name key then values else []) query in
+           let payload = match values "submitted_by",values "request_id" with
+             | [submitted_by],[request_id] ->
+               Server_async_request_observability.project_request
+                 ~base_path:(Mcp_server.workspace_config state).base_path ~submitted_by ~request_id
+             | _ -> `Assoc ["schema",`String "masc.async-request-status/v1";
+                 "status",`String "rejected";"reason",`String "single_submitted_by_and_request_id_required"] in
+           Http.Response.json_value ~compress:true ~request:req payload reqd)
+         request reqd)
   |> Http.Router.post "/api/v1/skills/editor/create" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state agent_name req reqd ->

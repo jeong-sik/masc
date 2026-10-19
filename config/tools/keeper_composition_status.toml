@@ -6,12 +6,21 @@ Use the exact request id when a completion references its result or when more
 detail is needed. A completion that already carries usable selected exports
 does not require another status read. Submission and cancellation requests are
 distinct from completed and cancelled states.
-Check status and ok to determine the actual composition outcome.
+The top-level status and ok are the original physical worker outcome.
+Read continuation separately for the logical run: observed includes its original
+owner, source Task, journal version and observation time. A non-null resolution
+is an explicit terminal rejection/cancellation of further continuation. Preserve
+the original physical result and do not resume that resolved run. unavailable
+means the logical state could not be confirmed; it is not an unresolved run or
+permission to submit replacement work. not_composition carries no run claim.
 
 waiting_for_dependencies names original typed dependencies (owned_job or
 composition_result) and the retained execution result. Wait for the original
-completion, then resume the same prepared draft and
-composition_run_id. The released attempt is waiting and has not failed."""
+completion, then use the same prepared draft and composition_run_id only while
+its original logical run remains unresolved and normal admission succeeds.
+The released physical attempt is waiting and has not failed; an explicit logical
+resolution may subsequently terminate its continuation. A successful status read
+is not effect success or Task completion."""
 additional_properties = false
 
 

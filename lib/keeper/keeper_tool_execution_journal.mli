@@ -142,6 +142,20 @@ val resolution_to_json : resolution -> Yojson.Safe.t
 val resolution_observation_to_json : resolution_observation -> Yojson.Safe.t
 val resolution_report_to_json : resolution_report -> Yojson.Safe.t
 
+type request_observation
+val observe_request
+  : base_path:string -> composition_run_id:Keeper_tool_plan.Composition_run_id.t
+  -> Keeper_msg_async.entry -> (request_observation, error) result
+(** Read the logical run independently of the requested physical attempt.
+    Strict original source and admitted current/prior membership are required.
+    Dependency/artifact readiness grants no authority here. The physical record
+    is checked again before return; a changed record is an unavailable reading. *)
+val request_observation_to_json : request_observation -> Yojson.Safe.t
+val request_observation_resolution : request_observation -> resolution option
+val same_request_observation : request_observation -> request_observation -> bool
+(** Compare original request, workspace and exact journal version; observation
+    time is not authority. This does not authorize execution or delivery. *)
+
 val observe_resolution
   : base_path:string -> keeper_name:string
   -> composition_run_id:Keeper_tool_plan.Composition_run_id.t -> request_id:string

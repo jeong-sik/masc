@@ -189,3 +189,15 @@ let project ~base_path =
       ; "startup_recovery", startup_recovery
       ]
 ;;
+
+let project_request ~base_path ~submitted_by ~request_id =
+  let envelope fields = `Assoc (("schema",`String "masc.async-request-status/v1") :: fields) in
+  match Keeper_msg_async.load_canonical_request ~base_path ~caller:submitted_by request_id with
+  | Found entry ->
+    let snapshot = Keeper_composition_result_delivery.observe_status ~base_path entry in
+    envelope ["status",`String "observed";
+      "request",Keeper_composition_result_delivery.status_payload snapshot]
+  | Absent -> envelope ["status",`String "absent"]
+  | Unreadable detail -> envelope ["status",`String "unavailable";"detail",`String detail]
+  | Rejected rejection -> envelope ["status",`String "rejected";
+      "reason",`String (access_rejection_code rejection)]

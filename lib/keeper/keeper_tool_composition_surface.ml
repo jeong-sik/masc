@@ -728,20 +728,22 @@ let status_result_for_invocation
       request_id
   with
   | Keeper_msg_async.Found entry ->
+    let snapshot = Keeper_composition_result_delivery.observe_status
+        ~base_path:config.base_path ?invocation entry in
     let result =
       result_from_json
         ~tool_name
         ~start_time
         ~class_:Tool_result.Runtime_failure
         ~ok:true
-        (Keeper_composition_result_delivery.status_payload ?invocation entry)
+        (Keeper_composition_result_delivery.status_payload snapshot)
     in
     (match Tool_bridge.attach_artifact_manifest
              ~projection:Tool_output.Inline_with_reference ~base_path:config.base_path result with
      | Ok result ->
        (match delivery_registry,invocation with
         | Some registry,Some invocation ->
-          (match Keeper_composition_result_delivery.record_status registry ~entry ~invocation ~result with
+          (match Keeper_composition_result_delivery.record_status registry ~snapshot ~invocation ~result with
            | Ok () -> ()
            | Error error -> Log.Keeper.warn
                "Prepared composition status binding failed keeper=%s request_id=%s detail=%s"

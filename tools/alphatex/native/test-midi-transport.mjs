@@ -12,6 +12,7 @@ try {
   source = source.slice(0, source.lastIndexOf('\n_ = signal(SIGPIPE,'))
     .replaceAll('DispatchTime.now().uptimeNanoseconds', 'reviewClock')
     .replace('final class MidiTransport {', `
+var reviewPhraseFailure: UInt8?
 var reviewClock: UInt64 = 0, reviewSendCost: UInt64 = 0
 var reviewSent: [[UInt8]] = [], reviewExit: Int32?
 final class MidiTransport {`)
@@ -22,6 +23,9 @@ final class MidiTransport {`)
   }
   replaceEffect('    func send(', '    func apply(', `    func send(_ bytes: [UInt8]) throws {
         reviewSent.append(bytes); reviewClock += reviewSendCost
+        if bytes.first.map({ $0 & 0xf0 }) == reviewPhraseFailure {
+            reviewPhraseFailure = nil; throw MidiFailure("synthetic phrase send failure")
+        }
     }
 `)
   replaceEffect('    func schedule()', '    func tick()', '    func schedule() throws {}\n')
@@ -41,7 +45,7 @@ func transport(_ events: [[String: Any]], loop: Bool = true) throws -> MidiTrans
     return value
 }
 func reset(_ host: UInt64, cost: UInt64 = 0) {
-    reviewClock = host; reviewSendCost = cost; reviewSent = []; reviewExit = nil
+    reviewClock = host; reviewSendCost = cost; reviewSent = []; reviewExit = nil; reviewPhraseFailure = nil
 }
 func ons() -> [[UInt8]] { reviewSent.filter { $0[0] & 0xf0 == 0x90 } }
 func near(_ first: Double, _ second: Double) { precondition(abs(first - second) < 1e-8) }
@@ -98,6 +102,32 @@ near(paused.position(), 0.25)
 reset(1_250_000_000)
 let status = try transport(events); status.index = 1; status.receive("{\"kind\":\"status\"}")
 precondition(ons().isEmpty); near(status.snapshot("playing")["currentTime"] as! Double, 0.25)
+// The OS may deliver a Note On and still return failure. The failed tick's
+// finish must release it; pause/seek retry only the releases that failed.
+reset(0)
+let failedPhraseOn = try transport(heldEvents, loop: false)
+reviewPhraseFailure = 0x90; failedPhraseOn.tick()
+precondition(reviewSent == [[0xc0,0],[0x90,65,100],[0x80,65,0]])
+precondition(failedPhraseOn.held.isEmpty && failedPhraseOn.state == .stopped && reviewExit == 1)
+let twoHeldEvents = Array(heldEvents.prefix(2)) + [
+    ["kind":"on", "seconds":0.0, "channel":0, "pitch":67, "velocity":90],
+    ["kind":"off", "seconds":1.0, "channel":0, "pitch":65],
+    ["kind":"off", "seconds":1.0, "channel":0, "pitch":67]
+]
+for command in ["{\"kind\":\"pause\"}", "{\"kind\":\"seek\",\"seconds\":0.5}"] {
+    reset(0)
+    let owner = try transport(twoHeldEvents, loop: false); owner.tick()
+    precondition(owner.held.count == 2)
+    reviewSent = []; reviewPhraseFailure = 0x80
+    owner.receive(command)
+    precondition(reviewSent == [[0x80,65,0],[0x80,67,0],[0x80,65,0]])
+    precondition(owner.held.isEmpty && owner.state == .stopped && reviewExit == 1)
+}
+reset(0)
+let releasedOwner = try transport(twoHeldEvents, loop: false); releasedOwner.tick()
+reviewSent = []; releasedOwner.receive("{\"kind\":\"pause\"}")
+precondition(reviewSent == [[0x80,65,0],[0x80,67,0]] && releasedOwner.held.isEmpty && releasedOwner.state == .paused)
+print("PHRASE_FAILED_SEND_PASS: uncertain Note On cleanup and pause/seek failed release retry without repeating successful releases")
 reset(0)
 let pending = try transport(events); pending.destination = nil; pending.state = .prepared
 pending.destinationChanged(); pending.start()

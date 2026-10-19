@@ -69,12 +69,12 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
     | Unread | Browser_missing -> Theme.recede ()
   in
   let title = Printf.sprintf "%s  %s  %s[%s]%s"
-      (screen_title " MASC Browser Lane") (source_name view.source ^ " · "
+      (screen_title " MASC Browser Lane") (selection_label view ^ " · "
        ^ Option.value (connection_label view) ~default:"no browser")
       read_style (Browser_lane_view.read_status_label read_status) Ansi.reset in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     ~hints:(match view.client_picker, view.url_draft with
-      | Some _, _ -> "↑/↓:choose  Enter:use browser  r:reload connections  Esc:cancel"
+      | Some _, _ -> "↑/↓:choose  Enter:use browser  r:reload connections  A:advanced  Esc:cancel"
       | None, Some _ when busy view -> "Capture in flight • Enter after completion • Esc:cancel URL"
       | None, Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear  Ctrl-O:screenshot"
       | None, None when Option.is_some view.scene ->
@@ -97,9 +97,9 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
              | Some browser -> "Reading " ^ browser ^ "…"
              | None -> "Reading…"), Theme.info ()
         | Loading (_, Read_refresh) -> "Refreshing browser text…", Theme.info ()
-        | Loading (_, Open_session) -> "Opening " ^ source_name view.source ^ " browser…", Theme.info ()
-        | Loading (_, Close_session) -> "Closing " ^ source_name view.source ^ " browser…", Theme.info ()
-        | Loading (_, Goto _) -> "Navigating " ^ source_name view.source ^ " browser…", Theme.info ()
+        | Loading (_, Open_session) -> "Opening work browser…", Theme.info ()
+        | Loading (_, Close_session) -> "Closing work browser…", Theme.info ()
+        | Loading (_, Goto _) -> "Navigating selected browser…", Theme.info ()
         | Loading (_, Scene_regions _) -> "Reading page regions…", Theme.info ()
         | Loading (_, Scene_scroll _) -> "Scrolling page and refreshing scene…", Theme.info ()
         | Loading (_, Scene_focus _) -> "Reading selected page region…", Theme.info ()
@@ -180,10 +180,12 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
              says more is hidden, unless that would leave too few choices to
              choose from. *)
           let host_rows =
-            Browser_lane_view.bidi_host_rows ~width:(browser_host_row_cells ~cols) view in
+            (if view.advanced_choices then
+               Browser_lane_view.bidi_host_rows ~width:(browser_host_row_cells ~cols) view
+             else []) in
           let empty_line = browser_lane_picker_empty_line view in
           let extension_rows =
-            if Option.is_some empty_line && awaiting_browser view then
+            if view.advanced_choices && Option.is_some empty_line && awaiting_browser view then
               [ Theme.info (), "  The MASC extension and its registered native host connect a live browser."
               ; Theme.recede (), "  " ^ transport_setup_row [Browser_lane.Web_extension]
               ; Theme.recede (), "  Enable the extension in your Zen/Firefox profile, then r:refresh." ]
@@ -207,7 +209,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
              the cursor. *)
           c.push_styled ~style:(Theme.recede ())
             ("  " ^ Option.value ~default:""
-               (Option.bind (List.nth_opt choices cursor) browser_choice_detail));
+               (if view.advanced_choices then Option.bind (List.nth_opt choices cursor) browser_choice_detail
+                else None));
           Option.iter (c.push_styled ~style:(Theme.recede ())) empty_line;
           (* A terminal too short for everything loses rows from the end.
              With no host yet, the host's rows only say how one is started:
@@ -253,8 +256,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
               | None -> "  No observed elements in this viewport • Ctrl-O:image")
          | None -> match view.source with
              | Live -> live_connection_row view
-             | Automation -> "  Independent browser • b:choose browser • g:URL • o:open / x:close • l:live • c:stagehand"
-             | Stagehand -> "  Stagehand Chromium • b:choose browser • g:URL • o:open / x:close • l:live • a:automation");
+             | Automation -> "  Work browser • b:choose browser • g:URL • o:open / x:close • A:advanced"
+             | Stagehand -> "  Chromium work browser • b:choose browser • g:URL • o:open / x:close • A:advanced");
       let tabs, page = match view.reading with
         | None -> [], None
         | Some reading -> reading.tabs, reading.page

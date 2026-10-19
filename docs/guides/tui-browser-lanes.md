@@ -1,9 +1,13 @@
 # Browser Lane in the TUI
 
-Open `:` → `go Browser Lane`, or press `B` from Connectors. Browser starts with
-a live Firefox or Zen connection and lists its open tabs. Select any page by title and URL; websites
-have no dedicated views or filters. The reader occupies the full content width
-and shows the source in its context row. Keeper panels and the composer return
+Open `:` → `go Browser Lane`, or press `B` from Connectors. **Automatic** asks the
+server which available browser can supply the reader, then binds the concrete
+browser and lists its open tabs. Select any page by title and URL; websites have
+no dedicated views or filters. Entering the reader never opens a browser window.
+Only an explicit `no_available_browser` browse decision can offer a work-browser
+recommendation with `o:open`. Ambiguous browsers or other selection refusals keep
+their cause and require a choice; they never become a work-browser suggestion.
+The reader occupies the full content width and shows its selected browser. Keeper panels and the composer return
 when leaving the reader.
 
 Press `Ctrl-^` (Ctrl-Shift-6) to show or hide Browser. Hiding returns to the
@@ -15,8 +19,8 @@ including a transcript awaiting delivery. An existing Keeper draft is preserved.
 
 | Key | Action |
 | --- | --- |
-| `b` | Choose a connected Firefox/Zen, Stagehand Chromium, or independent automation browser with arrows and Enter |
-| `l` / `a` / `c` | Shortcuts for live / automation / stagehand browser |
+| `b` | Choose Automatic, Work browser, or a connected browser by its actual identity |
+| `A` | Show advanced browser overrides and transport diagnostics |
 | `[` / `]` | Previous / next tab and read its page |
 | `1` … `9` | Select the corresponding observed tab directly when it is listed |
 | `j` / `k`, arrows | Scroll page text |
@@ -26,17 +30,37 @@ including a transcript awaiting delivery. An existing Keeper draft is preserved.
 | `m` | Observe semantic landmarks, then focus the unique `main` (or fallback `article`) region |
 | `N` / `P` | Select the next / previous observed `article` region or article ancestor |
 | `Ctrl-O` | Open the selected tab screenshot; Esc or q returns |
-| `g` | Enter a URL in automation or stagehand; Enter opens it, Esc cancels |
-| `o` / `x` | Open / close the automation or stagehand session |
+| `g` | Enter a URL in the selected work browser; Enter navigates, Esc cancels |
+| `o` / `x` | Open a visible work browser / close the currently selected owned session |
 | Ctrl-^ / Esc / Left | Hide the reader and return to the previous surface |
 
-Browser belongs to Config. Its title shows the source, the browser and how a
-live browser is reached (`live · Firefox · BiDi`), then the latest HTTP request
-status. The browser picker explains which choices use the existing login and
-which have separate sessions. The current browser is marked; choosing it again
-retains the current tab and scroll. Switching to a different browser clears old
-page references. Server browser choices remain available even when no native
-browser is connected; after selecting one, use `o` to open its session if needed.
+Browser belongs to Config. Its title shows Automatic or an explicit selection,
+the actual connected browser identity (or the known work-browser identity), and
+the latest HTTP request status. Automatic uses the server's browse decision only
+while unbound. Once bound, reads, captures, navigation and gestures retain that
+concrete source, client and tab. A later recommendation, disconnect or unsupported
+gesture never switches browsers or replays an action. Select another browser
+explicitly to change that owner. A malformed automatic decision refuses automatic
+selection while preserving a validated connection list for manual selection.
+
+The picker keeps **Automatic**, **Work browser**, and connected browser identities
+in the primary choices. Work browser uses the server's work decision, with a
+separate login session. Merely selecting it does not launch a new window; `o`
+explicitly requests a visible window (`headless=false`). If the current selection
+already owns a work session, `o`, `g` and `x` keep that session's concrete source.
+Otherwise `o` discovers and binds the server's work choice before requesting one
+open. A stale discovery cannot consume that open continuation or replace a later
+manual selection.
+
+Press `A` in the picker for explicit Stagehand Chromium and native automation
+overrides used in troubleshooting. Within advanced mode, `l` / `a` / `c` select
+the live / automation / stagehand source directly. These are implementation
+choices, not additional browser brands. The native automation session remains
+labelled generically when the server does not report its browser brand. Safari
+is not currently an implemented browser choice.
+
+The current browser is marked; choosing it again retains the current tab and
+scroll. Switching to another browser clears old page and screenshot references.
 Coordinator connectivity and workspace warnings are labeled separately.
 Reads show latency, tab count, selected title, URL, character count and truncation.
 A failed or pending refresh retains content labeled as a previous read. Switching
@@ -48,8 +72,8 @@ and the two serve different work
 ([the table](../design/browser-lane.md#what-each-live-connection-serves)). The
 TUI reads that table in four places:
 
-- The connection row under the status: `Live Firefox · WebExtension: no hover,
-  drag`, or `Live Firefox · BiDi: no tab switch`.
+- The selected connection row names the actual browser and client identity.
+  Transport names and capability differences belong to advanced details.
 - The row under the picker, for the highlighted connection: `WebExtension: no
   hover, drag · BiDi serves them`.
 - The screenshot footer: `drag: move` when the connection the screenshot came

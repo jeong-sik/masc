@@ -5558,7 +5558,20 @@ module Browser_lane_view = struct
   }
   (* One answer of the connection list: the connections and the BiDi host
      are as of the same read. *)
-  type discovered = { listed : client list; bidi_host : bidi_host }
+  type automatic_reason = Explicit_browser | Existing_login | Existing_work_session
+    | Preferred_work_browser | Compatible_work_browser | Available_connected_browser
+  type recommendation = { lane : source; client_id : string option; reason : automatic_reason }
+  type selection_error_kind = No_available_browser | Ambiguous_browsers | Binding_required
+    | Automatic_unavailable | Invalid_automatic_response | Unrecognized_selection_error
+  type selection_error = { kind : selection_error_kind; code : string; message : string }
+  type automatic = {
+    browse : (recommendation, selection_error) result;
+    work : (recommendation, selection_error) result;
+  }
+  (* Automatic resolves only before binding. Once bound, even a disconnected
+     connection remains the owner until an explicit browser choice. *)
+  type selection = Unbound | Work_unbound | Live_unbound | Bound_automatic | Bound_explicit
+  type discovered = { listed : client list; bidi_host : bidi_host; automatic : automatic option }
   (* [clients] is what the last discovery answered, and [None] until one has:
      a discovery that failed leaves no list rather than an empty one, so the
      picker cannot tell an operator there is no browser when it could not ask.
@@ -5578,6 +5591,7 @@ module Browser_lane_view = struct
     read_continuation : read_continuation;
     unserved_gesture : unserved_gesture option;
     bidi_host : bidi_host;
+    automatic : automatic option; selection : selection; pending_open : bool; advanced_choices : bool;
   }
 
   let source_name = Browser_lane.Lane_name.to_wire
@@ -5599,8 +5613,25 @@ module Browser_lane_view = struct
       reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0; scene_scope = None;
       scene_guard = None; scene_delta = None; read_view = Text_view; refresh_pending = None;
       read_continuation = No_read_continuation; unserved_gesture = None;
-      bidi_host = Host_not_reported }
-  let switch_source source _t = { (create ()) with source }
+      bidi_host = Host_not_reported; automatic = None; selection = Unbound;
+      pending_open = false; advanced_choices = false }
+  let switch_source source _t = { (create ()) with source;
+    selection = (match source with Live -> Live_unbound | Automation | Stagehand -> Bound_explicit) }
+  let choose_automatic () = create ()
+  let choose_work t = { (create ()) with clients = t.clients; bidi_host = t.bidi_host;
+    automatic = t.automatic; selection = Work_unbound }
+  let prepare_open t =
+    match t.selection, t.source with
+    | (Bound_automatic | Bound_explicit), (Automation | Stagehand) -> t, Open_session
+    | (Unbound | Work_unbound | Live_unbound), (Live | Automation | Stagehand)
+    | (Bound_automatic | Bound_explicit), Live ->
+        { (choose_work t) with pending_open = true }, Discover Read_after_discovery
+  let discovery_continuation t = if t.pending_open then Open_session else Read
+  let finish_discovery t = { t with pending_open = false }
+  let selection_label t = match t.selection with
+    | Unbound | Bound_automatic -> "Automatic"
+    | Work_unbound -> "Work browser"
+    | Live_unbound | Bound_explicit -> "Selected browser"
   let refresh t = { t with selected_tab = None; scroll = 0; scene = None; scene_cursor = 0; scene_scope = None;
     scene_guard = None; scene_delta = None; read_view = Text_view }
   let after_action t =
@@ -5653,12 +5684,23 @@ module Browser_lane_view = struct
     | Browser_missing -> "Browser not connected"
   let busy t = match t.load with Loading _ -> true | Idle | No_browser | Failed _ -> false
   let listed_clients t = Option.value t.clients ~default:[]
-  type browser_choice = Connected_browser of client | Stagehand_browser | Automation_browser
+  (* Activity changes during a connection; it is not the connection's identity. *)
+  let same_client (left : client) (right : client) =
+    left.client_id = right.client_id && left.browser = right.browser
+    && left.transport = right.transport
+  let same_selected_client left right = match left, right with
+    | None, None -> true
+    | Some left, Some right -> same_client left right
+    | None, Some _ | Some _, None -> false
+  type browser_choice = Automatic_browser | Work_browser | Connected_browser of client | Stagehand_browser | Automation_browser
   let browser_choices t =
-    List.map (fun client -> Connected_browser client) (listed_clients t)
-    @ [Stagehand_browser; Automation_browser]
+    [Automatic_browser; Work_browser]
+    @ List.map (fun client -> Connected_browser client) (listed_clients t)
+    @ (if t.advanced_choices then [Stagehand_browser; Automation_browser] else [])
   let browser_choice_selected t = function
-    | Connected_browser client -> t.source = Live && t.selected_client = Some client
+    | Automatic_browser -> t.selection = Unbound || t.selection = Bound_automatic
+    | Work_browser -> t.selection = Work_unbound
+    | Connected_browser client -> t.source = Live && same_selected_client t.selected_client (Some client)
     | Stagehand_browser -> t.source = Stagehand
     | Automation_browser -> t.source = Automation
   let transport_label = function
@@ -5705,38 +5747,34 @@ module Browser_lane_view = struct
   (* Where attaching a connection of one of these transports is written. *)
   let transport_setup_row transports =
     "Setup: " ^ String.concat " or " (List.map Browser_lane.live_transport_setup_doc transports)
+  let browser_identity (client : client) = browser_name client.browser ^ " · " ^ client.client_id
   let connection_name (client : client) =
     browser_name client.browser ^ " · " ^ transport_label client.transport
   (* The title names the connection; the connection row adds what it leaves
      out. *)
   let connection_label t = match t.source, t.selected_client with
-    | Live, Some client -> Some (connection_name client)
+    | Live, Some client -> Some (browser_identity client)
     | Live, None | Automation, _ | Stagehand, _ -> browser_label t
   let connection_summary t = match t.source, t.selected_client with
-    | Live, Some client ->
-        (match transport_lacks client.transport with
-         | [] -> Some (connection_name client)
-         | lacking ->
-             Some (browser_name client.browser ^ " · "
-                   ^ lacking_clause client.transport lacking))
+    | Live, Some client -> Some (browser_identity client)
     | Live, None | Automation, _ | Stagehand, _ -> browser_label t
-  (* The Live connection row. It fits 80 columns up to the picker key; the
-     lane keys after that are in the footer too. *)
   let live_connection_row t =
     (match connection_summary t with
-     | Some connection -> "  Live " ^ connection
-     | None -> "  Live")
-    ^ " • b:choose browser • a:automation • c:stagehand"
+     | Some connection -> "  " ^ connection
+     | None -> "  Automatic browser")
+    ^ " • b:choose browser • o:work browser • A:advanced"
   let browser_choice_label = function
+    | Automatic_browser -> "Automatic · use an available browser"
+    | Work_browser -> "Work browser · separate session"
     | Connected_browser client ->
-        connection_name client ^ " · existing login · " ^ client.client_id
-    | Stagehand_browser -> "Stagehand Chromium · sentence actions · separate login"
-    | Automation_browser -> "Independent Firefox/Zen · automation · separate login"
+        browser_identity client ^ " · existing login"
+    | Stagehand_browser -> "Advanced: Stagehand Chromium · separate login"
+    | Automation_browser -> "Advanced: native automation · separate login"
   (* The row under the picker for the highlighted choice. A live connection
      says what its transport leaves out and which transport serves that; the
      server's own browsers are described by their row. *)
   let browser_choice_detail = function
-    | Stagehand_browser | Automation_browser -> None
+    | Automatic_browser | Work_browser | Stagehand_browser | Automation_browser -> None
     | Connected_browser client ->
         (match transport_lacks client.transport with
          | [] -> None
@@ -6236,12 +6274,26 @@ module Browser_lane_view = struct
     `Assoc ([ "lane", `String (source_name t.source) ]
             @ (match client_id t with None -> [] | Some id -> ["clientId", `String id])
             @ (match t.selected_tab with None -> [] | Some id -> ["tabId", `Int id]))
-  let selected_client_available t = match t.source, t.selected_client with
-    | (Automation | Stagehand), _ -> true
-    | Live, None -> false
-    | Live, Some selected -> List.exists (fun (client : client) -> client = selected) (listed_clients t)
+  let action_request ~source operation =
+    let lane = "lane", `String (Browser_lane.Lane_name.to_wire source) in
+    match operation with
+      | Discover _ | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> Error "read/screenshot requires its own browser endpoint"
+      | Open_session ->
+        let timeout_sec =
+          match source with
+          | Browser_lane.Lane_name.Stagehand -> Browser_lane.Stagehand_open_budget.http_timeout_s
+          | Browser_lane.Lane_name.Automation | Browser_lane.Lane_name.Live -> 65.0
+        in
+        Ok ("session", `Assoc ["action", `String "open"; "headless", `Bool false; lane], timeout_sec)
+      | Close_session -> Ok ("session", `Assoc ["action", `String "close"; lane], 65.0)
+      | Goto url -> Ok ("goto", `Assoc ["url", `String url; lane], 65.0)
+  let selected_client_available t = match t.selection, t.source, t.selected_client with
+    | (Unbound | Work_unbound | Live_unbound), _, _ -> false
+    | (Bound_automatic | Bound_explicit), (Automation | Stagehand), _ -> true
+    | (Bound_automatic | Bound_explicit), Live, None -> false
+    | (Bound_automatic | Bound_explicit), Live, Some selected -> List.exists (same_client selected) (listed_clients t)
   let cadence_operation ?(viewport : screenshot option) t =
-    if busy t || Option.is_some t.refresh_pending || Option.is_some t.client_picker || Option.is_some t.url_draft
+    if busy t || awaiting_browser t || Option.is_some t.refresh_pending || Option.is_some t.client_picker || Option.is_some t.url_draft
        || not (selected_client_available t) then None
     else match viewport with
       | Some shot when shot.source = t.source && shot.client_id = client_id t
@@ -6275,45 +6327,91 @@ module Browser_lane_view = struct
     | Scene_refresh {scene_view;scope;_} -> Scene_view {scene_view;scope}
     | Discover _ | Screenshot _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> previous
   let choose_client client t =
-    { t with source = Live; selected_client = Some client; selected_tab = None;
+    { t with source = Live; selected_client = Some client; selection = Bound_explicit; pending_open = false; selected_tab = None;
       reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None;
       scroll = 0; load = Idle; client_picker = None; read_view = Text_view; unserved_gesture = None }
   let choose_browser choice t =
-    if browser_choice_selected t choice then { t with client_picker = None }
-    else match choice with
-      | Connected_browser client -> choose_client client t
-      | Stagehand_browser -> switch_source Stagehand t
-      | Automation_browser -> switch_source Automation t
-  (* The picker shows nothing of the read before the one it is waiting on:
-     the list and the BiDi host report go together, as they came. *)
-  let withdraw_discovery t = { t with clients = None; bidi_host = Host_not_reported }
+    match choice with
+    | Connected_browser client when browser_choice_selected t choice ->
+        { t with selected_client = Some client; client_picker = None; selection = Bound_explicit; pending_open = false }
+    | Automatic_browser when browser_choice_selected t choice -> { t with client_picker = None }
+    | (Stagehand_browser | Automation_browser) when browser_choice_selected t choice ->
+        { t with client_picker=None; selection=Bound_explicit; pending_open=false }
+    | Work_browser -> choose_work t
+    | Automatic_browser -> choose_automatic ()
+    | Connected_browser client -> choose_client client t
+    | Stagehand_browser -> switch_source Stagehand t
+    | Automation_browser -> switch_source Automation t
+  let browser_choice_operation choice ~before after =
+    match after.selection with
+    | Unbound | Work_unbound -> Some (Discover Read_after_discovery)
+    | Live_unbound -> Some (Discover Choose_client)
+    | Bound_automatic | Bound_explicit ->
+        if browser_choice_selected before choice then None else Some Read
+  let withdraw_discovery t = { t with clients = None; bidi_host = Host_not_reported; automatic = None }
+  let bind_recommendation recommendation t =
+    match recommendation.lane, recommendation.client_id with
+    | Live, Some id ->
+        (match List.find_opt (fun (client : client) -> client.client_id = id) (listed_clients t) with
+         | None -> Error "Recommended browser is no longer connected; choose a browser"
+         | Some client -> Ok { (choose_client client t) with selection = Bound_automatic;
+             pending_open = t.pending_open })
+    | (Automation | Stagehand), None ->
+        Ok { t with source = recommendation.lane; selected_client = None;
+          selection = Bound_automatic; selected_tab = None; reading = None; scene = None;
+          scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None;
+          scroll = 0; client_picker = None; read_view = Text_view }
+    | Live, None | (Automation | Stagehand), Some _ -> Error "Invalid recommended browser identity"
+  let can_offer_work_browser = function
+    | No_available_browser -> true
+    | Ambiguous_browsers | Binding_required | Automatic_unavailable
+    | Invalid_automatic_response | Unrecognized_selection_error -> false
   let accept_clients ~generation result t =
     match t.load with
     | Loading (current, Discover purpose) when current = generation ->
         (match result with
-         | Error detail when t.source <> Live && purpose = Choose_client ->
-             { t with clients = None; bidi_host = Host_not_reported; client_picker = Some 0;
-               load = Failed detail }, false
-         | Error detail -> { t with clients = None; bidi_host = Host_not_reported; selected_tab = None; reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None;
-             scroll = 0; client_picker = Some 0; load = Failed detail }, false
-         | Ok { listed = clients; bidi_host } ->
-             let next = { t with clients = Some clients; bidi_host; load = Idle } in
-             if t.source <> Live && purpose = Choose_client then
-               { next with client_picker = Some 0 }, false
-             else
-             match t.selected_client, clients, purpose with
-             | None, [client], Read_after_discovery -> choose_client client next, true
-             | Some _, _, _ when selected_client_available next ->
-                 { next with client_picker = (match purpose with Choose_client -> Some 0 | Read_after_discovery -> None) },
-                 purpose = Read_after_discovery
-             | (_, _, Read_after_discovery) | (_, _, Choose_client) ->
-                 let load = match t.selected_client, clients with
-                   | _, [] -> No_browser
-                   | Some _, _ -> Failed "Selected browser disconnected; b:choose browser"
-                   | None, _ -> Idle
-                 in
-                 { next with selected_tab = None; reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None; scroll = 0;
-                   client_picker = Some 0; load }, false)
+         | Error detail ->
+             { t with clients = None; bidi_host = Host_not_reported; automatic = None;
+               client_picker = Some 0; pending_open = false; load = Failed detail }, false
+         | Ok { listed = clients; bidi_host; automatic } ->
+             let selected_client = Option.map (fun selected ->
+               match List.find_opt (same_client selected) clients with
+               | Some current -> current
+               | None -> selected) t.selected_client in
+             let next = { t with clients = Some clients; selected_client; bidi_host; automatic; load = Idle } in
+             if purpose = Choose_client then { next with client_picker = Some 0 }, false
+             else match t.selection with
+             | Live_unbound -> {next with client_picker=Some 0;
+                 load=(if clients=[] then No_browser else Idle)}, false
+             | Unbound | Work_unbound ->
+                 let chosen = match automatic with
+                   | None -> Error {kind=Automatic_unavailable;code="automatic_unavailable";
+                       message="This server does not report an automatic browser; choose a browser"}
+                   | Some recommendations ->
+                       (match t.selection, recommendations.browse with
+                        | Work_unbound, _ -> recommendations.work
+                        | Unbound, Ok choice -> Ok choice
+                        | Unbound, Error error ->
+                            if can_offer_work_browser error.kind then recommendations.work else Error error
+                        | (Live_unbound | Bound_automatic | Bound_explicit), _ -> recommendations.browse) in
+                 (match chosen with
+                  | Error detail -> {next with load=Failed detail.message; client_picker=Some 0;
+                      pending_open=false}, false
+                  | Ok recommendation ->
+                      (match bind_recommendation recommendation next with
+                       | Error detail -> {next with load=Failed detail; client_picker=Some 0;
+                           pending_open=false}, false
+                       | Ok bound ->
+                           let readable = recommendation.lane = Live
+                             || recommendation.reason = Existing_work_session in
+                           if t.pending_open || readable then bound, true
+                           else {bound with load=No_browser}, false))
+             | Bound_automatic | Bound_explicit ->
+                 if selected_client_available next then {next with client_picker=None}, true
+                 else {next with selected_tab=None; reading=None; scene=None; scene_cursor=0;
+                   scene_scope=None; scene_guard=None; scene_delta=None; scroll=0;
+                   client_picker=Some 0; load=(if clients=[] then No_browser
+                     else Failed "Selected browser disconnected; b:choose browser")}, false)
     | Loading
         ( _
         , ( Discover _ | Read | Open_session | Close_session | Goto _
@@ -6384,6 +6482,47 @@ module Browser_lane_view = struct
                     | Some _ | None -> None)
                | _ -> None in
              Host_report_unreadable { detail; message })
+  let decode_recommendation json =
+    let* ok = get boolean "ok" json in
+    if not ok then
+      let* error = field "error" json in
+      let* code = get string "code" error in
+      let* message = get string "message" error in
+      let kind = match code with
+        | "no_available_browser" -> No_available_browser
+        | "ambiguous_browsers" -> Ambiguous_browsers
+        | "browser_binding_required" -> Binding_required
+        | _ -> Unrecognized_selection_error in
+      Ok (Error {kind;code;message})
+    else
+      let* data = field "data" json in
+      let* lane = get parse_source "lane" data in
+      let* client_id = get (function
+        | `Null -> Ok None | `String id when String.trim id <> "" -> Ok (Some id)
+        | _ -> Error "invalid recommended client ID") "clientId" data in
+      let* reason = get (function
+        | `String "explicit_browser" -> Ok Explicit_browser
+        | `String "existing_login" -> Ok Existing_login
+        | `String "existing_work_session" -> Ok Existing_work_session
+        | `String "preferred_work_browser" -> Ok Preferred_work_browser
+        | `String "compatible_work_browser" -> Ok Compatible_work_browser
+        | `String "available_connected_browser" -> Ok Available_connected_browser
+        | _ -> Error "unknown automatic browser reason") "reason" data in
+      match lane, client_id with
+      | Live, Some _ | (Automation | Stagehand), None -> Ok (Ok {lane;client_id;reason})
+      | Live, None | (Automation | Stagehand), Some _ -> Error "recommended browser identity does not match lane"
+  let decode_automatic data =
+    match data with
+    | `Assoc fields ->
+        (match List.assoc_opt "automatic" fields with
+         | None -> Ok None
+         | Some json ->
+             let* browse = get decode_recommendation "browse" json in
+             let* work = get decode_recommendation "work" json in
+             (match work with
+              | Ok {lane=Live;_} -> Error "work browser recommendation must name an owned session"
+              | Ok {lane=(Automation | Stagehand);_} | Error _ -> Ok (Some {browse;work})))
+    | _ -> Error "expected object"
   let decode_discovery json =
     let* listed = decode_clients json in
     (* The same [data] the connections were read from. A server from before
@@ -6394,7 +6533,14 @@ module Browser_lane_view = struct
       | `Assoc fields -> Ok (List.assoc_opt "bidiHost" fields)
       | _ -> Error "expected object"
     in
-    Ok { listed; bidi_host = decode_bidi_host reported }
+    (* Invalid automatic policy refuses automatic work without hiding the
+       separately validated inventory used for an explicit browser choice. *)
+    let automatic = match decode_automatic data with
+      | Ok automatic -> automatic
+      | Error message ->
+          let refused = Error {kind=Invalid_automatic_response;code="invalid_automatic_response";message} in
+          Some {browse=refused;work=refused} in
+    Ok { listed; bidi_host = decode_bidi_host reported; automatic }
   let parse_client_id source json =
     let* value = field "clientId" json in
     match source, value with
@@ -10158,7 +10304,7 @@ let retain_operation_observation state = function
       (match state.browser_lane with
        | Some current when generation = state.browser_lane_generation
            && prior.source = current.source
-           && prior.selected_client = current.selected_client
+           && Browser_lane_view.same_selected_client prior.selected_client current.selected_client
            && prior.selected_tab = current.selected_tab ->
              state.browser_lane_read_resume <- Some (generation, current, operation);
              true

@@ -3,7 +3,9 @@
     official progress formats remain unchanged. A missing cursor starts at the
     beginning of the external log, favoring replay over dropping old evidence.
     A prepared read is acknowledged only after Memory commits its range; the
-    existing Memory WAL receipts repair interruption before acknowledgement. *)
+    existing Memory WAL receipts repair interruption before acknowledgement.
+    Receipt comparison includes exact unread coverage, whose verified records
+    are durably archived before acknowledgement can discard the pending ID. *)
 type token
 val read : memory_keepers_dir:string -> runtime_keepers_dir:string -> keeper_name:string ->
   (token, string) result

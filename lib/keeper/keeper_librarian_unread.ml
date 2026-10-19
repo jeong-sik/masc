@@ -136,10 +136,11 @@ let source_key {source;_} = match source with
     `Official (Ids.Turn_ref.trace_id turn_ref, Ids.Turn_ref.absolute_turn turn_ref,
       boundary_line, message_in_turn)
 
-module Source_keys = Set.Make (struct
+module Source_key = struct
   type t = [ `Atom of string * int * int * int | `Official of string * int * int * int ]
   let compare = compare
-end)
+end
+module Source_keys = Set.Make (Source_key)
 
 let validate_set values =
   let rec loop previous = function
@@ -186,3 +187,20 @@ let validate_atom_history ~trace_id ~history_start_boundary_line ~end_atom ~mess
        | Some _ | None -> Error "unread message does not match its exact checkpoint source")
     | Official_turn _ -> Error "official-turn unread message is not checkpoint coverage")
     (Ok ()) values
+
+module Source_map = Map.Make (Source_key)
+
+let merge previous added =
+  let* () = validate_set previous in
+  let* () = validate_set added in
+  let* indexed = List.fold_left (fun parsed value ->
+    let* indexed = parsed in
+    let key = source_key value in
+    match Source_map.find_opt key indexed with
+    | None -> Ok (Source_map.add key value indexed)
+    | Some prior ->
+      if prior.source <> value.source then Error "unread coordinates name conflicting original hashes"
+      else Ok (Source_map.add key
+        {prior with reasons=Refusal.union prior.reasons value.reasons} indexed))
+    (Ok Source_map.empty) (previous @ added) in
+  Ok (List.map snd (Source_map.bindings indexed))

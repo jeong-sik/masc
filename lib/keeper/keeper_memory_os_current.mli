@@ -460,6 +460,15 @@ val committed_official_coverage
     accounted coverage, never that every source message was read. Consumers
     must retain those records when advancing any external position. *)
 
+val unread_ledger_path : keepers_dir:string -> keeper_id:string -> string
+val committed_unread_messages : keepers_dir:string -> keeper_id:string ->
+  (Keeper_librarian_unread.t list, string) result
+(** Reconcile current receipt proof and durably accumulate verified holes under
+    the Memory aggregate lock. Earlier traces, generations and receipt scopes
+    remain recorded after newer intervals replace their receipts. A malformed
+    ledger or conflicting original hash fails without clearing the evidence.
+    This records coverage evidence; it does not advance either read position. *)
+
 type disposition =
   { snapshot : t
         (** the current snapshot after the pass: the one written, or for an

@@ -39,6 +39,8 @@ let durable_range_receipt_path ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ durable_range_receipt_suffix)
 ;;
 
+let unread_ledger_path = Keeper_librarian_unread_ledger.path
+
 let publication_receipt_path ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ ".memory-publication.json")
 ;;
@@ -707,6 +709,20 @@ let range_key = function
     binding.candidate_id.queue_generation, `Explicit_candidate binding.candidate_id.request_id
 ;;
 
+let receipt_holes = function
+  | Atom_range range -> range.unread_messages
+  | Official_range range -> range.unread_messages
+  | Explicit_candidate _ | Explicit_candidate_with_recall _ -> []
+;;
+
+let archive_verified_holes ~keepers_dir ~keeper_id receipts =
+  let* holes = List.fold_left (fun merged -> function
+    | Committed {range_id;_} ->
+      let* merged = merged in Keeper_librarian_unread.merge merged (receipt_holes range_id)
+    | Prepared _ -> merged) (Ok []) receipts in
+  Keeper_librarian_unread_ledger.archive ~keepers_dir ~keeper_id holes
+;;
+
 let upsert_durable_range_receipt receipts receipt =
   let key = range_key (receipt_range_id receipt) in
   receipt :: List.filter (fun prior ->
@@ -765,10 +781,11 @@ let reconcile_durable_range_receipts
     | Some { fixed_point = None; _ }, (Some _ | None)
     | None, (Some _ | None) -> false
   in
-  if covered then Ok receipts
+  if covered then
+    let+ _ = archive_verified_holes ~keepers_dir ~keeper_id receipts in receipts
   else
     let seen = Hashtbl.create 16 in
-    let reconciled =
+    let verified =
       List.filter_map
         (function
           | Prepared { range_id; snapshot_revision; snapshot_sha256 } ->
@@ -788,7 +805,19 @@ let reconcile_durable_range_receipts
                Some (Committed committed)
              | None | Some _ -> None))
         receipts
-      |> List.fold_left (fun kept receipt ->
+    in
+    (* Archive every verified source before de-duplicating a scope or replacing
+       its WAL entry. Even an otherwise redundant receipt can carry evidence. *)
+    let* _ = archive_verified_holes ~keepers_dir ~keeper_id verified in
+    let unverified_holes = List.filter_map (fun (index, receipt) ->
+      let range_id = receipt_range_id receipt in
+      if receipt_holes range_id = []
+         || List.exists (fun known -> receipt_range_id known = range_id) verified
+      then None else Some {index;reason="unread receipt lacks a matching Memory snapshot proof";
+        entry=durable_range_receipt_to_json receipt})
+      (List.mapi (fun index receipt -> index, receipt) receipts) in
+    let* () = quarantine_skipped_range_receipts ~keepers_dir ~keeper_id ~skipped:unverified_holes in
+    let reconciled = verified |> List.fold_left (fun kept receipt ->
            let key = range_key (receipt_range_id receipt) in
            if Hashtbl.mem seen key then kept
            else (Hashtbl.add seen key (); receipt :: kept)) []
@@ -1559,6 +1588,7 @@ let finalize_publication_journal ~keepers_dir ~keeper_id receipt =
 (* Caller owns aggregate and snapshot locks. Inspect the receipt before parsing
    or quarantining a snapshot: an unmatched publication must preserve all bytes. *)
 let recover_publication_locked ~keepers_dir ~keeper_id =
+  let* _ = Keeper_librarian_unread_ledger.read ~keepers_dir ~keeper_id in
   let* receipt = read_publication ~keepers_dir ~keeper_id in
   match receipt with
   | None -> Ok None
@@ -2067,6 +2097,8 @@ let update_locked_with_output
   else if not retraction_plan_is_valid
   then Error (store_error "retraction plan id must be non-empty and already trimmed")
   else (
+    let* _ = Keeper_librarian_unread_ledger.read ~keepers_dir ~keeper_id
+      |> Result.map_error store_error in
     Fs_compat.mkdir_p keepers_dir;
     let* () = recover_publication ~keepers_dir ~keeper_id |> Result.map_error store_error in
     let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
@@ -2085,6 +2117,8 @@ let update_locked_with_output
        (* File_lock_eio.with_lock appends ".lock" itself; a pre-suffixed path
           locked "<snapshot>.lock.lock" and left a stray file per keeper. *)
        File_lock_eio.with_lock ?clock snapshot_path (fun () ->
+         let* _ = Keeper_librarian_unread_ledger.read ~keepers_dir ~keeper_id
+           |> Result.map_error store_error in
          let* pending = read_publication ~keepers_dir ~keeper_id |> Result.map_error store_error in
          let* () = match pending with
            | None -> Ok ()
@@ -2141,6 +2175,13 @@ let update_locked_with_output
              ~snapshot
            |> Result.map_error store_error
          in
+         let* archived = Keeper_librarian_unread_ledger.read ~keepers_dir ~keeper_id
+           |> Result.map_error store_error in
+         let additions =
+           Option.fold ~none:[] ~some:(fun (range : durable_range_id) -> range.unread_messages) durable_range_id
+           @ Option.fold ~none:[] ~some:(fun (range : official_range_id) -> range.unread_messages) official_range_id in
+         let* _ = Keeper_librarian_unread.merge archived additions
+           |> Result.map_error store_error in
          let* () =
            let consumed = List.filter_map (function
              | Committed {range_id; _} -> consumed_candidate range_id
@@ -2537,6 +2578,7 @@ let preserved_committed_receipts ~keepers_dir ~keeper_id ~snapshot ~queue_genera
 ;;
 
 let with_receipt_status ?(strict_snapshot=false) ?(receipt_read=Reconcile_receipts) ~keepers_dir ~keeper_id select =
+  let* _ = Keeper_librarian_unread_ledger.read ~keepers_dir ~keeper_id in
   try
     Fs_compat.mkdir_p keepers_dir;
     let* () = recover_publication ~keepers_dir ~keeper_id in
@@ -2826,6 +2868,11 @@ let committed_official_range ~keepers_dir ~keeper_id ~receipt_scope =
   |> Result.map (function
     | Some (range : official_range_id) when range.unread_messages = [] -> Some range
     | Some _ | None -> None)
+;;
+
+let committed_unread_messages ~keepers_dir ~keeper_id =
+  with_committed_receipts ~keepers_dir ~keeper_id
+    (fun _snapshot _receipts -> Keeper_librarian_unread_ledger.read ~keepers_dir ~keeper_id)
 ;;
 
 (* Apply a librarian's disposition to whatever the snapshot holds when the

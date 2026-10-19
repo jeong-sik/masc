@@ -367,6 +367,10 @@ flowchart TD
 
   Memory WAL의 atom·공식 턴 영수증 ID도 스키마 2이며, 비어 있는 경우까지 `unread_messages`를 필수로 싣는다. atom 기록은 해당 trace·이력 세대의 선택 구간 안에 있어야 하고, 공식 턴 기록은 선택된 경계 줄과 턴 ID에 있어야 한다. 누락 기록도 원래의 `Prepared → snapshot → Committed` 영수증 전체에 포함되므로 snapshot 해시와 revision으로 함께 복구된다. 사실이 바뀌지 않는 Memory 커밋에서도 같은 영수증을 남긴다. 기존의 전부 읽음 조회는 누락 목록이 비어 있을 때만 영수증을 돌려주며, 별도의 coverage 조회는 누락 기록까지 돌려준다. 이 기록은 해당 커밋 구간의 증거이며, 나중 구간으로 위치를 옮기는 소비자는 이전 구멍도 별도로 보존해야 한다.
 
+  같은 scope의 다음 영수증으로 이전 구간을 대체하기 전에 검증된 구멍을 누적 원장 `<config keepers>/<keeper>.librarian-unread.json`에 보존한다. 이 원장은 별도 엄격 스키마 1이며 Memory aggregate·snapshot 잠금 안에서 합치고 fsync한다. 원장이 없는 첫 상태는 비어 있지만, 읽지 못하거나 필드가 맞지 않는 기존 원장을 빈 목록으로 바꾸지 않는다. 같은 좌표·원문이면 원인을 합치고, 원문 해시가 다르면 새 게시를 거절한다. snapshot에 맞는 Prepared 영수증도 먼저 확정·보존하고, 증명되지 않은 구멍 영수증은 committed로 올리지 않은 채 격리해 증거를 남긴다. 새 trace·이력 세대·scope와 뒤의 전부 읽은 구간은 이전 구멍을 지우지 않는다.
+
+  소비자는 누적 기록 저장을 확인한 뒤 외부 입력 읽음 확인과 atom·공식 턴 진행 위치를 쓴다. 중간에 끊기면 Memory WAL로 위치를 복구하되, atom은 원 체크포인트 메시지 해시, 공식 턴은 선택된 history fragment 메시지 해시를 대조한 뒤 위치를 옮긴다. 일반 체크포인트 purge는 누적 원장을 보존하며, Keeper 전체를 명시적으로 삭제하는 절차는 이 원장도 삭제한다. 현재 Memory를 디코딩하지 못한 경우의 기존 격리·다시 쓰기 경로는 유지한다. 이때 증명할 수 없는 구멍을 읽은 위치의 근거로 쓰지 않는다.
+
   이 저장·요청 계약만으로 건너뛰기를 켜지 않는다. Memory 영수증과 진행 위치의 원자적 복구, absorbed 요청, 대시보드·TUI, TLA 불변식이 같은 뜻을 갖춘 뒤 바닥의 실제 거절을 unread 기록에 연결한다. 전체 구현은 #37850에서 추적한다.
 
   이 사다리가 필요한 경우는 둘뿐이다. 자를 자리가 없는 구간과, 스냅숏을 atom 0 부터 다시 쓰는 회차다. 뒤엣것은 흔하지 않다. #37751 뒤로 purge 는 이 이력에 맞는 연속성 스냅숏이 덮은 앞부분을 바이트 그대로 두므로 `Librarian_continuity_snapshot` 의 `prefix_sha256` 이 살아남는다(`keeper_checkpoint_purge.ml` 의 `fitting_continuity` 갈래, `test_a_fitting_working_state_keeps_its_prefix` 가 고정). 0 부터 다시 쓰게 되는 길은 그 규칙 전에 지워진 이력(2026-09-22 goo-yang-bong 이 그것이다), 이미 이력과 맞지 않던 스냅숏, 이력 세대가 실제로 바뀌는 경우다. 새 도구를 만들지 않는다.

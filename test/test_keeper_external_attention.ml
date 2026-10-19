@@ -447,7 +447,7 @@ let test_counterpart_cursor_stops_at_range_end () =
   Alcotest.(check int) "the next range reaches the end of the log" 3 second_through
 ;;
 
-let test_external_cursor_recovers_memory_receipt () =
+let test_external_cursor_recovers_memory_receipt ~with_unread () =
   with_temp_base "keeper-external-cursor-recovery" @@ fun base_path ->
   let module Cursor = Masc.Keeper_external_read_cursor in
   let module Current = Masc.Keeper_memory_os_current in
@@ -462,6 +462,13 @@ let test_external_cursor_recovers_memory_receipt () =
     {unread_messages=[];receipt_scope=Filename.concat runtime_keepers_dir "continuity";
      trace_id="cursor-trace";history_start_boundary_line=1;start_atom=0;end_atom=1;
      last_atom_digest=String.make 64 'a';end_boundary_line=2;boundary_lines_seen=2} in
+  let range = if not with_unread then range else
+    let messages = [Agent_core.Types.make_message ~role:Agent_core.Types.User
+      [Agent_core.Types.Text "An unread external source"]] in
+    let hole = Masc.Keeper_librarian_unread.for_atom ~trace_id:range.trace_id
+      ~history_start_boundary_line:range.history_start_boundary_line ~atom:0 ~message_in_atom:0
+      ~messages ~reasons:[Masc.Keeper_librarian_input_refusal.Input_capacity] |> get in
+    {range with unread_messages=[hole]} in
   Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name initial ~through:2
     ~atom:(Some range) ~official:None |> get;
   Alcotest.(check int) "preparation without Memory commit does not consume" 0 (Cursor.offset (read ()));
@@ -470,8 +477,30 @@ let test_external_cursor_recovers_memory_receipt () =
     ~source:{kind=Current.Librarian;trace_id="cursor-trace"} ~new_claims:[] () |> get);
   (* No acknowledge call: simulate interruption after the real Memory WAL
      committed but before the external cursor and ordinary progress wrote. *)
+  let ledger_path = Current.unread_ledger_path ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name in
+  if with_unread then (
+    let cursor_path = Cursor.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name in
+    let pending = Fs_compat.load_file cursor_path in
+    let previous_ledger = Fs_compat.load_file_opt ledger_path in
+    Fs_compat.save_file ledger_path "{";
+    (match Cursor.read ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "external acknowledgement bypassed unread ledger failure");
+    Alcotest.(check string) "ledger failure preserves the pending cursor" pending
+      (Fs_compat.load_file cursor_path);
+    match previous_ledger with
+    | Some bytes -> Fs_compat.save_file ledger_path bytes
+    | None -> Sys.remove ledger_path);
   Alcotest.(check int) "continuity-scoped Memory receipt recovers exact cursor" 2
     (Cursor.offset (read ()));
+  if with_unread then (
+    (* Read raw bytes before invoking any API that could archive evidence. *)
+    let ledger = match Yojson.Safe.from_string (Fs_compat.load_file ledger_path) with
+      | `Assoc [("schema_version", `Int 1); ("unread_messages", entries)] ->
+        Masc.Keeper_librarian_unread.list_of_json entries |> get
+      | _ -> Alcotest.fail "acknowledgement left no strict unread ledger" in
+    Alcotest.(check bool) "acknowledged external read retains its unread source durably" true
+      (ledger = range.unread_messages));
   (match Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name (read ())
      ~through:3 ~atom:(Some range) ~official:None with
    | Error _ -> ()
@@ -500,7 +529,9 @@ let () =
       ( "store",
         [
           Alcotest.test_case "external cursor recovers only its committed Memory receipt" `Quick
-            test_external_cursor_recovers_memory_receipt;
+            (test_external_cursor_recovers_memory_receipt ~with_unread:false);
+          Alcotest.test_case "external cursor archives unread evidence before receipt acknowledgement" `Quick
+            (test_external_cursor_recovers_memory_receipt ~with_unread:true);
           Alcotest.test_case "counterpart cursor keeps admission order" `Quick
             test_counterpart_cursor_keeps_admission_order;
           Alcotest.test_case "counterpart cursor stops at the range end" `Quick

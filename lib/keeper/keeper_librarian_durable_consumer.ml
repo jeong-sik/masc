@@ -346,6 +346,9 @@ let is_committed_prefix
   && committed.end_boundary_line <= selected_end_boundary_line
   && committed.boundary_lines_seen <= selected_boundary_lines_seen
   && endpoint_is_present committed ~messages lines
+  && Result.is_ok (Keeper_librarian_unread.validate_atom_history
+       ~trace_id ~history_start_boundary_line:committed.history_start_boundary_line
+       ~end_atom:committed.end_atom ~messages committed.unread_messages)
 ;;
 
 (* Atoms the continuity round saved to Memory: a range of one trace's
@@ -668,14 +671,14 @@ let official_cursor_recorded_at ~lines (cursor : Keeper_librarian_official_progr
    official turns were saved. Repair this cursor before retry narrowing or
    checkpoint selection; a mixed pass can have saved only its atom cursor. *)
 let recover_official_progress
-      ~write ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name ~lines ~cursor
+      ~config ~write ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name ~lines ~cursor
   =
   let ( let* ) = Result.bind in
   if not (R.may_have_unread_official ~lines ~cursor)
   then Ok None
   else
   let* receipt =
-    Keeper_memory_os_current.committed_official_range
+    Keeper_memory_os_current.committed_official_coverage
       ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name
       ~receipt_scope:runtime_keepers_dir
     |> Result.map_error (fun detail -> Memory_snapshot_unreadable detail)
@@ -705,7 +708,27 @@ let recover_official_progress
             (List.map (fun (turn : R.official_line) -> turn.line, turn.turn_ref) selected)
         | R.Nothing_official | R.Official_stop _ -> false
       in
-      if current < start || not matches
+      let* source_matches = match receipt.unread_messages with
+        | [] -> Ok true
+        | holes ->
+          (match selected with
+           | R.Nothing_official | R.Official_stop _ -> Ok false
+           | R.Official_read selected ->
+             let* fragments = read_fragments ~config selected in
+             Ok (List.for_all (fun (hole : Keeper_librarian_unread.t) ->
+               match hole.source with
+               | Atom _ -> false
+               | Official_turn {turn_ref;boundary_line;message_in_turn;_} ->
+                 let lines = match String_map.find_opt (Ids.Turn_ref.trace_id turn_ref) fragments with
+                   | Some lines -> lines | None -> [] in
+                 let messages = Keeper_turn_fragments.of_turn turn_ref lines
+                   |> List.filter_map (function
+                     | Keeper_turn_fragments.Message {message;_} -> Some message
+                     | Keeper_turn_fragments.Tool_observation _ -> None) in
+                 Keeper_librarian_unread.for_official_turn ~turn_ref ~boundary_line
+                   ~message_in_turn ~messages ~reasons:hole.reasons = Ok hole) holes))
+      in
+      if current < start || not matches || not source_matches
       then Error Committed_official_range_mismatch
       else
         let official = { O.boundary_line = end_line } in
@@ -845,11 +868,15 @@ let consume_one_with_extent
   in
   let cursor_error detail = Counterpart_observations_unreadable
     (Keeper_librarian_input_sources.External_cursor_failed detail) in
+  let* _ = Domain_pool_ref.submit_io_or_inline (fun () ->
+    Keeper_memory_os_current.committed_unread_messages ~keepers_dir:memory_keepers_dir
+      ~keeper_id:keeper_name)
+    |> Result.map_error (fun detail -> Memory_snapshot_unreadable detail) in
   let* external_cursor = Domain_pool_ref.submit_io_or_inline (fun () ->
     Keeper_external_read_cursor.read ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name)
     |> Result.map_error cursor_error in
   let* recovered =
-    recover_official_progress ~write:write_official_progress_store
+    recover_official_progress ~config ~write:write_official_progress_store
       ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name ~lines ~cursor:official_cursor
   in
   match recovered with
@@ -1056,7 +1083,7 @@ let consume_one_with_extent
       | None -> Ok None
       | Some (range, boundary_lines_seen, end_boundary_line, _, _) ->
         let* committed_range =
-          Keeper_memory_os_current.committed_durable_range
+          Keeper_memory_os_current.committed_durable_coverage
             ~keepers_dir:memory_keepers_dir
             ~keeper_id:keeper_name
             ~receipt_scope:runtime_keepers_dir
@@ -1404,6 +1431,10 @@ let consume_one_with_extent
       match commit ~expected_revision ~range_id:atom_next ~official_range_id input with
       | Memory_refused reports -> Ok (Memory_not_committed reports)
       | Memory_committed ->
+        let* _ = Domain_pool_ref.submit_io_or_inline (fun () ->
+          Keeper_memory_os_current.committed_unread_messages
+            ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name)
+          |> Result.map_error (fun detail -> Memory_snapshot_unreadable detail) in
         let* () = Domain_pool_ref.submit_io_or_inline (fun () ->
           Keeper_external_read_cursor.acknowledge ~runtime_keepers_dir ~keeper_name)
           |> Result.map_error cursor_error in

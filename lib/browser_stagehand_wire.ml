@@ -150,6 +150,11 @@ type call =
   | Extract of { page_id : string; instruction : string; schema : Yojson.Safe.t option; timeout : sentence_timeout_ms }
   | Context_pages
   | Context_active_page
+  | Context_new_page
+  | Page_close of { page_id : string }
+  | Page_reload of { page_id : string }
+  | Page_go_back of { page_id : string }
+  | Page_go_forward of { page_id : string }
   | Page_goto of { page_id : string; url : string }
   | Page_screenshot of { page_id : string }
   | Page_evaluate of { page_id : string; expression : string }
@@ -168,6 +173,11 @@ let method_name = function
   | Extract _ -> "stagehand.extract"
   | Context_pages -> "context.pages"
   | Context_active_page -> "context.active_page"
+  | Context_new_page -> "context.new_page"
+  | Page_close _ -> "page.close"
+  | Page_reload _ -> "page.reload"
+  | Page_go_back _ -> "page.go_back"
+  | Page_go_forward _ -> "page.go_forward"
   | Page_goto _ -> "page.goto"
   | Page_screenshot _ -> "page.screenshot"
   | Page_evaluate _ -> "page.evaluate"
@@ -186,12 +196,14 @@ let sentence_options timeout = [ "options", `Assoc [ "timeout", `Int (timeout_ms
 
 let sentence_timeout_of_call = function
   | Act { timeout; _ } | Observe { timeout; _ } | Extract { timeout; _ } -> Some timeout
-  | Close | Context_pages | Context_active_page | Page_goto _ | Page_screenshot _ | Page_evaluate _ | Page_click _
+  | Close | Context_pages | Context_active_page | Context_new_page
+  | Page_close _ | Page_reload _ | Page_go_back _ | Page_go_forward _ | Page_goto _ | Page_screenshot _ | Page_evaluate _ | Page_click _
   | Page_hover _ | Page_scroll _ | Page_drag_and_drop _ | Page_double_click _ | Page_type _ | Page_key_press _ -> None
 ;;
 
 let call_params = function
-  | Close | Context_pages | Context_active_page -> `Assoc []
+  | Close | Context_pages | Context_active_page | Context_new_page -> `Assoc []
+  | Page_close {page_id} | Page_reload {page_id} | Page_go_back {page_id} | Page_go_forward {page_id} -> `Assoc (page page_id)
   | Act { page_id; instruction; timeout } ->
     `Assoc (page page_id @ [ "instruction", `String instruction ] @ sentence_options timeout)
   | Observe { page_id; instruction; timeout } ->
@@ -219,7 +231,8 @@ let call_params = function
 
 let uses_model = function
   | Act _ | Observe _ | Extract _ -> true
-  | Close | Context_pages | Context_active_page | Page_goto _ | Page_screenshot _ | Page_evaluate _ | Page_click _
+  | Close | Context_pages | Context_active_page | Context_new_page
+  | Page_close _ | Page_reload _ | Page_go_back _ | Page_go_forward _ | Page_goto _ | Page_screenshot _ | Page_evaluate _ | Page_click _
   | Page_hover _ | Page_scroll _ | Page_drag_and_drop _ | Page_double_click _ | Page_type _ | Page_key_press _ -> false
 ;;
 

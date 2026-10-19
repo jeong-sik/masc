@@ -90,6 +90,7 @@ let with_backend ?(configure = ignore) ?(call_hook = fun _ -> None) f =
               session.log (Session.Cancelled_call_answered
                 { method_ = "stagehand.act"; rejected = false });
             raise exn)
+       | Wire.Context_new_page | Wire.Page_close _ | Wire.Page_reload _ | Wire.Page_go_back _ | Wire.Page_go_forward _
        | Wire.Observe _ | Wire.Extract _ | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_hover _ | Wire.Page_click _
        | Wire.Page_scroll _ | Wire.Page_drag_and_drop _ | Wire.Page_double_click _ | Wire.Page_type _ | Wire.Page_key_press _ ->
          failf "the backend sent %s" (Wire.method_name request))
@@ -432,7 +433,8 @@ let test_pointer_guard_and_input_keep_the_verb_slot () =
       note "goto";
       Some (Ok (`Assoc [ "page", page ]))
     | Wire.Close | Wire.Act _ | Wire.Observe _ | Wire.Extract _ | Wire.Context_pages
-    | Wire.Context_active_page | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_evaluate _
+    | Wire.Context_active_page | Wire.Context_new_page
+    | Wire.Page_close _ | Wire.Page_reload _ | Wire.Page_go_back _ | Wire.Page_go_forward _ | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_evaluate _
     | Wire.Page_hover _ | Wire.Page_click _ | Wire.Page_scroll _ | Wire.Page_drag_and_drop _
     | Wire.Page_double_click _ | Wire.Page_type _ | Wire.Page_key_press _ -> None
   in

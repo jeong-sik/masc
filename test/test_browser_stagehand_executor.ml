@@ -21,11 +21,12 @@ type fake =
   ; mutable script_throws : string option  (* what the page script throws, as the expression answers it *)
   ; mutable failing : Wire.call -> Session.call_failure option
   ; mutable evaluated : Yojson.Safe.t option  (* what a page script answers, when set *)
+  ; mutable created_count : int
   ; mutable sent : Wire.call list
   }
 
 let fake pages ~active =
-  { pages; active; scroll_y = 0; scrolls_while_capturing = false; script_throws = None; failing = (fun _ -> None); evaluated = None; sent = [] }
+  { pages; active; scroll_y = 0; scrolls_while_capturing = false; script_throws = None; failing = (fun _ -> None); evaluated = None; created_count = 0; sent = [] }
 ;;
 
 let page_ref page = `Assoc [ "page_id", `String page.page_id; "url", `String page.url ]
@@ -42,6 +43,15 @@ let call fake request =
   | None ->
     (match request with
      | Wire.Context_pages -> Ok (`List (List.map page_ref fake.pages))
+     | Wire.Context_new_page ->
+       fake.created_count <- fake.created_count + 1;
+       let page = {page_id="NEW" ^ string_of_int fake.created_count;url="about:blank";title="New tab"} in
+       fake.pages <- fake.pages @ [page]; Ok (page_ref page)
+     | Wire.Page_close {page_id} ->
+       fake.pages <- List.filter (fun page -> page.page_id <> page_id) fake.pages;
+       Ok (`Assoc ["closed",`Bool true])
+     | Wire.Page_reload {page_id} | Wire.Page_go_back {page_id} | Wire.Page_go_forward {page_id} ->
+       Ok (`Assoc ["page",page_ref (find fake page_id);"response",`Null])
      | Wire.Context_active_page ->
        Ok (match fake.active with Some page_id -> page_ref (find fake page_id) | None -> `Null)
      | Wire.Page_evaluate { page_id; _ } ->
@@ -648,6 +658,113 @@ let test_native_keyboard_and_double_click () =
     (List.exists (function Wire.Page_type {text="\xee\x80\x89";_}->true|_->false) fake.sent)
 ;;
 
+let test_native_tab_actions () =
+  let tabs = Executor.Tabs.create () and fake = fake [blank;shop ()] ~active:(Some "P2") in
+  ignore (listed tabs fake);
+  let exec action = Executor.execute ~tabs ~call:(call fake) (Lane.Page_act action) in
+  let opened = served (exec (Lane.Action.Open_tab "https://example.org/new")) in
+  check int "returned new tab is owned by this map" 2 Yojson.Safe.Util.(member "tabId" opened |> to_int);
+  check (option string) "new page identity retained" (Some "NEW1") (Executor.Tabs.page_of_id tabs 2);
+  check int "native creation sends exactly once" 1 fake.created_count;
+  List.iter (fun (interaction,method_) ->
+    fake.sent <- [];
+    let action = Lane.Action.On_tab {tab_id=2;frame_path=[];interaction} in
+    check bool "served subset admitted by Lane" true (Lane.verb_allowed_on_stagehand (Lane.Page_act action));
+    ignore (served (exec action));
+    check (list string) "one native navigation then summary" [method_;"page.evaluate"]
+      (List.rev_map Wire.method_name fake.sent);
+    List.iter (fun call -> check bool "native calls never use model" false (Wire.uses_model call)) fake.sent)
+    [Lane.Action.Back,"page.go_back";Forward,"page.go_forward";Reload,"page.reload"];
+  fake.sent <- [];
+  ignore (served (exec (Lane.Action.On_tab {tab_id=2;frame_path=[];interaction=Close_tab})));
+  check (option string) "closed identity is retired" None (Executor.Tabs.page_of_id tabs 2);
+  check (list string) "close has no synthetic evaluation" ["page.close"] (List.rev_map Wire.method_name fake.sent);
+  fake.sent <- [];
+  check bool "retired identity cannot navigate another page" true
+    (rejected_before_effect (exec (Lane.Action.On_tab {tab_id=2;frame_path=[];interaction=Reload})));
+  check int "retired action dispatches nothing" 0 (List.length fake.sent);
+  let unknown_close = ref 0 in
+  let malformed_close request = match request with
+    | Wire.Page_close _ -> incr unknown_close; Ok (`Assoc ["closed",`Bool false])
+    | request -> call fake request in
+  check bool "unconfirmed close stays unknown" true (refused (Executor.execute ~tabs ~call:malformed_close
+    (Lane.Page_act (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Close_tab}))));
+  check int "unconfirmed close is never replayed" 1 !unknown_close;
+  check (option string) "unconfirmed close retains exact mapping" (Some "P2") (Executor.Tabs.page_of_id tabs 1);
+  let second = served (exec (Lane.Action.Open_tab "https://example.org/second")) in
+  check int "new page never receives retired tab id" 3 Yojson.Safe.Util.(member "tabId" second |> to_int);
+  List.iter (fun action ->
+    fake.sent <- [];
+    check bool "unsupported/frame action not admitted" false (Lane.verb_allowed_on_stagehand (Lane.Page_act action));
+    check bool "direct executor also fails before effect" true (rejected_before_effect (exec action));
+    check int "unsupported action makes no runtime call" 0 (List.length fake.sent))
+    (Lane.Action.On_tab {tab_id=1;frame_path=["iframe"];interaction=Reload} ::
+     List.map (fun interaction -> Lane.Action.On_tab {tab_id=1;frame_path=[];interaction})
+       [Click "#x";Fill {selector="#x";text="x"};Press {selector="#x";key=Enter};
+        Select {selector="#x";value="x"};Scroll {x=0;y=1};Upload {selector="#x";paths=["x"]};
+        Accept_dialog None;Dismiss_dialog]);
+  List.iter (fun call ->
+    let params = Wire.call_params call in
+    let expected = match call with Wire.Context_new_page -> `Assoc [] | _ -> `Assoc ["page_id",`String "P2"] in
+    check string "official native parameters" (to_s expected) (to_s params);
+    check bool "tab methods never request model" false (Wire.uses_model call);
+    check bool "tab methods have no sentence timeout" true (Wire.sentence_timeout_of_call call=None))
+    [Wire.Context_new_page;Page_close {page_id="P2"};Page_reload {page_id="P2"};
+     Page_go_back {page_id="P2"};Page_go_forward {page_id="P2"}]
+;;
+
+let test_created_tab_partial_failure () =
+  List.iter (fun failure ->
+    let tabs = Executor.Tabs.create () and fake = fake [blank] ~active:(Some "P1") in
+    ignore (listed tabs fake);
+    fake.sent <- [];
+    fake.failing <- (function Wire.Page_goto _ -> Some failure | _ -> None);
+    let answer = Executor.execute ~tabs ~call:(call fake)
+      (Lane.Page_act (Lane.Action.Open_tab "https://example.org/new")) in
+    (match answer with
+     | Lane.Answered (`Assoc fields) ->
+       check bool "creation then navigation failure is failed" true (List.assoc_opt "ok" fields=Some (`Bool false));
+       check bool "confirmed creation is post effect" true (List.assoc_opt "effectPhase" fields=Some (`String "partial"));
+       let receipt = List.assoc "data" fields in
+       check int "created id retained in failed receipt" 1 Yojson.Safe.Util.(member "tabId" receipt |> to_int);
+       check string "created owner lane retained" "stagehand" Yojson.Safe.Util.(member "lane" receipt |> to_string);
+       check bool "creation receipt is confirmed" true Yojson.Safe.Util.(member "created" receipt |> to_bool)
+     | _ -> fail "expected failed partial receipt");
+    check int "navigation failure never re-creates the tab" 1 fake.created_count;
+    check (list string) "create then navigate only" ["context.new_page";"page.goto"] (List.rev_map Wire.method_name fake.sent);
+    fake.failing <- (fun _ -> None);
+    ignore (listed tabs fake);
+    ignore (served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_read {tab_id=Some 1;max_chars=None})));
+    check int "subsequent observation never recreates" 1 fake.created_count)
+    [Session.Rejected {code = -32000;message="navigation rejected"};Session.Lost "unanswered";
+     Session.Not_delivered "navigation not written"];
+  let tabs = Executor.Tabs.create () and fake = fake [blank] ~active:(Some "P1") in
+  ignore (listed tabs fake);
+  fake.script_throws <- Some "summary unavailable";
+  (match Executor.execute ~tabs ~call:(call fake) (Lane.Page_act (Lane.Action.Open_tab "https://example.org/new")) with
+   | Lane.Answered (`Assoc fields) -> check bool "metadata failure retains partial receipt" true
+       (List.assoc_opt "effectPhase" fields=Some (`String "partial"))
+   | _ -> fail "metadata failure lost created receipt");
+  check int "metadata failure also creates once" 1 fake.created_count;
+  fake.script_throws <- None;
+  fake.evaluated <- Some (`Assoc ["url",`String "chrome-error://chromewebdata/";"title",`String "navigation failed"]);
+  (match Executor.execute ~tabs ~call:(call fake) (Lane.Page_act (Lane.Action.Open_tab "https://example.org/failed")) with
+   | Lane.Answered (`Assoc fields) -> check bool "native success on browser error page is partial" true
+       (List.assoc_opt "ok" fields=Some (`Bool false) && List.assoc_opt "effectPhase" fields=Some (`String "partial"))
+   | _ -> fail "browser error page became navigation success");
+  fake.evaluated <- None;
+  fake.sent <- [];
+  fake.failing <- (function Wire.Context_new_page -> Some (Session.Not_delivered "create not written") | _ -> None);
+  check bool "unsent create is proven before effect" true (rejected_before_effect
+    (Executor.execute ~tabs ~call:(call fake) (Lane.Page_act (Lane.Action.Open_tab "https://example.org/unsent"))));
+  check (list string) "unsent create never navigates" ["context.new_page"] (List.rev_map Wire.method_name fake.sent);
+  fake.sent <- [];
+  fake.failing <- (function Wire.Context_new_page -> Some (Session.Lost "create unanswered") | _ -> None);
+  check bool "unanswered create stays unknown without inventing tab identity" true (refused
+    (Executor.execute ~tabs ~call:(call fake) (Lane.Page_act (Lane.Action.Open_tab "https://example.org/unknown"))));
+  check (list string) "unanswered create never automatically recreates or navigates" ["context.new_page"] (List.rev_map Wire.method_name fake.sent)
+;;
+
 let test_evaluate_expression () =
   let args = `Assoc [ "mode", `String "viewport" ] in
   let expression = Executor.evaluate_expression ~runtime:Executor.No_runtime ~body:"return 1;" ~args in
@@ -665,6 +782,8 @@ let () =
       test_case "pages become tabs with ids that stay" `Quick test_tabs;
       test_case "ids are not given again in a later session" `Quick test_tabs_across_sessions;
     ];
+    "tab actions", [test_case "native subset, ownership and closed IDs" `Quick test_native_tab_actions;
+      test_case "created tab survives partial failure without replay" `Quick test_created_tab_partial_failure];
     "goto", [
       test_case "navigates a listed or the active tab" `Quick test_goto;
       test_case "a failure after the navigation is not before effect" `Quick test_goto_effect_boundary;

@@ -21,6 +21,9 @@ module Tabs : sig
 
   (** Forgets every page, for a new session, and keeps counting ids. *)
   val forget_pages : t -> unit
+
+  (** Retires a confirmed closed page's id; later pages never reuse it. *)
+  val forget_page : t -> string -> unit
 end
 
 type call =
@@ -42,6 +45,11 @@ val evaluate_expression : runtime:page_runtime -> body:string -> args:Yojson.Saf
 (** Serves [Tabs_list], [Page_goto], [Page_capture], the reads [Page_read],
     [Page_elements] and [Page_scene] (with the automation lane's page scripts,
     so observations have one shape), interactions, and the sentence verbs.
+    [Page_act] serves only [Open_tab] and top-level [Back], [Forward],
+    [Reload], and [Close_tab], through native runtime methods. A confirmed
+    creation followed by navigation or summary failure returns an [ok=false]
+    partial-effect receipt with the created tab id and owning lane. It never
+    creates another page to retry. Confirmed close retires that tab id.
     Semantic click, hover and drag resolve observed targets without scrolling, then
     recheck their URL and viewport before native Stagehand pointer input.
     Custom drag paths become CSS-pixel runtime routes; the default visits the

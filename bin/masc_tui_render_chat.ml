@@ -1296,8 +1296,13 @@ let keeper_message_tool_activity_details state ~keeper_name
       { Tool_detail.fold_rows = tool_document_rows_shown
       ; fold_note =
           (fun hidden ->
-            Printf.sprintf "\xe2\x80\xa6 +%d lines \xc2\xb7 Keeper Calls (%s)" hidden
-              Masc_tui_keys.keeper_calls_key)
+            let label = Printf.sprintf "\xe2\x80\xa6 +%d lines \xc2\xb7 open original result (/calls)" hidden in
+            match activity.execution_id with
+            | None -> label
+            | Some execution_id ->
+                Masc_tui_press.pressable
+                  (Masc_tui_press.Press_chat_call
+                    (state.workspace_authority,state.workspace_read_authority,keeper_name,execution_id)) label)
       }
     fields
 

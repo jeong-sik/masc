@@ -6105,6 +6105,12 @@
   masc_tui_types masc_tui_render_chat masc_tui_message_layout masc_tui_image_preview))
 
 (test
+ (name test_tui_chat_call_reader)
+ (modules test_tui_chat_call_reader)
+ (libraries alcotest masc masc_tui_types masc_tui_chat_call_reader masc_tui_detail_reading
+  masc_tui_message_input masc_tui_fetched masc_tui_command masc_tui_input_decoder uri))
+
+(test
  (name test_tui_detail_reading)
  (modules test_tui_detail_reading)
  (libraries alcotest masc_tui_types masc_tui_detail_reading))

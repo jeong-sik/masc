@@ -69,6 +69,7 @@ let describe = function
          | `Hidden -> "hidden"
          | `Folded -> "folded"
          | `Full -> "full")
+  | Command.Open_calls -> "calls"
   | Command.Set_tools mode ->
       "tools:"
       ^ (match mode with

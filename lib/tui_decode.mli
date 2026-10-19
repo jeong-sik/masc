@@ -322,6 +322,11 @@ type keeper_calls_snapshot = {
   kcs_mismatched : int;  (** rows naming another keeper, rejected *)
 }
 
+val decode_keeper_call_exact :
+  requested_keeper:string -> execution_id:string -> Yojson.Safe.t ->
+  (keeper_call, string) result
+(** Require both envelope and authoritative row to name the requested execution. *)
+
 val decode_keeper_calls_snapshot :
   requested_keeper:string -> Yojson.Safe.t -> (keeper_calls_snapshot, string) result
 

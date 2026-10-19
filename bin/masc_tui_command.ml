@@ -47,6 +47,7 @@ type t =
   | Steer_turn of string
   | Steer_missing_message
   | Set_thinking of [ `Cycle | `Hidden | `Folded | `Full ]
+  | Open_calls
   | Set_tools of [ `Toggle | `Compact | `Results | `Full ]
   | Cycle_memory
   | Open_fleet_memory
@@ -185,6 +186,11 @@ let catalog =
     ; aliases = []
     ; args = "[hidden|folded|full]"
     ; summary = "set or cycle reasoning visibility"
+    }
+  ; { word = "calls"
+    ; aliases = []
+    ; args = ""
+    ; summary = "choose an original conversation execution and read its entire result"
     }
   ; { word = "tools"
     ; aliases = []
@@ -472,6 +478,7 @@ let parse text =
     | "thinking", "hidden" -> Set_thinking `Hidden
     | "thinking", "folded" -> Set_thinking `Folded
     | "thinking", "full" -> Set_thinking `Full
+    | "calls", "" -> Open_calls
     | "tools", "" -> Set_tools `Toggle
     | "tools", "compact" -> Set_tools `Compact
     | "tools", "results" -> Set_tools `Results

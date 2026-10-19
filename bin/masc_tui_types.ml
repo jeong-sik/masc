@@ -7414,6 +7414,18 @@ type sandbox_logs_request = {
 
 (* Each read has a generation; overlapping reads retain the pending interval's
    start, but only the newest response may clear it or populate the view. *)
+type chat_call_origin = {
+  cco_authority : workspace_authority;
+  cco_reading : unit ref;
+  cco_workspace : Tui_decode.server_identity;
+  cco_keeper : string;
+}
+type chat_call_request = {
+  ccr_origin : chat_call_origin;
+  ccr_ticket : Masc_tui_chat_call_reader.request;
+  ccr_job : unit ref;
+}
+
 type detail_read_request = {
   drr_tab: keeper_detail_tab;
   drr_keeper: string;
@@ -7709,6 +7721,8 @@ type state = {
   mutable help_open: bool;
   (* A read-only capture, pinned to its workspace authority and surface. It
      never becomes an action target when selection or polling changes. *)
+  mutable chat_call_reader : (chat_call_origin * Masc_tui_chat_call_reader.t) option;
+  mutable chat_call_pending : chat_call_request option;
   mutable detail_reading: (workspace_authority * surface * Masc_tui_detail_reading.t) option;
   mutable keeper_deletions_open: bool;
   mutable keeper_deletions_loading: bool;
@@ -9938,6 +9952,43 @@ let server_authority_ready state =
       && not (String.equal identity.sid_masc_root "")
   | None -> false
 
+let chat_call_origin_current state origin =
+  origin.cco_authority = state.workspace_authority
+  && origin.cco_reading == state.workspace_read_authority
+  && server_authority_ready state
+  && (match state.server_identity with
+      | Some identity -> server_workspace_matches ~expected:(Some origin.cco_workspace) (Ok identity)
+      | None -> false)
+  && state.view = Keepers Keeper_message
+  && Option.equal String.equal state.msg_target_keeper_name (Some origin.cco_keeper)
+
+let current_chat_call_reader state =
+  match state.chat_call_reader with
+  | Some (origin, reader) when chat_call_origin_current state origin -> Some reader
+  | Some _ | None -> None
+
+let begin_chat_call_read state =
+  match state.chat_call_reader with
+  | Some (origin,reader) when chat_call_origin_current state origin ->
+      let reader,ticket = Masc_tui_chat_call_reader.start reader in
+      state.chat_call_reader <- Some (origin,reader);
+      Option.map (fun ccr_ticket ->
+        let request={ccr_origin=origin;ccr_ticket;ccr_job=ref ()} in
+        state.chat_call_pending <- Some request;
+        request) ticket
+  | Some _ | None -> None
+
+let complete_chat_call_read state request result =
+  match state.chat_call_reader, state.chat_call_pending with
+  | Some (origin, reader), Some pending
+    when origin == request.ccr_origin && pending == request
+         && chat_call_origin_current state origin ->
+      state.chat_call_reader <- Some (origin,
+        Masc_tui_chat_call_reader.complete reader request.ccr_ticket result);
+      state.chat_call_pending <- None;
+      true
+  | (Some _ | None), (Some _ | None) -> false
+
 let remember_task_followup state ~expected_workspace action =
   state.pending_task_followups <- state.pending_task_followups @
     [{tf_workspace = expected_workspace; tf_authority = state.workspace_authority;
@@ -10768,6 +10819,8 @@ let complete_tools_async_detail state request result =
   end
 
 let suspend_workspace_readings state =
+  state.chat_call_reader <- None;
+  state.chat_call_pending <- None;
   suspend_task_documents state;
   suspend_tools_async_detail state;
   retire_keeper_settings_editor state;
@@ -13894,7 +13947,8 @@ let open_detail_reading (state : state) reading =
   state.detail_reading <- Some (state.workspace_authority, state.view, reading)
 
 let modal_owns_keys (state : state) =
-  Option.is_some (current_detail_reading state)
+  Option.is_some (current_chat_call_reader state)
+  || Option.is_some (current_detail_reading state)
   || state.help_open || state.keeper_deletions_open || state.agenda_open
   || state.context_inspector_open || state.about_open
   || state.repository_changes_open
@@ -13981,6 +14035,7 @@ let close_repository_changes (state : state) =
    only closed when open: closing stops an inspector read in flight, and there
    is none to stop otherwise. *)
 let close_key_modals (state : state) =
+  state.chat_call_reader <- None;
   state.help_open <- false;
   state.help_scroll <- 0;
   state.detail_reading <- None;
@@ -14052,6 +14107,8 @@ let create_state
   task_focus = Masc_tui_overview_tasks.No_task_focus;
   task_reading = Masc_tui_overview_tasks.Rows_unread;
   help_open = false;
+  chat_call_reader = None;
+  chat_call_pending = None;
   detail_reading = None;
   keeper_deletions_open = false;
   keeper_deletions_loading = false;

@@ -121,6 +121,7 @@ type t =
       (** [/thinking [hidden|folded|full]] — set or cycle reasoning visibility.
           Replaces the earlier [Toggle_thinking]: two states could not say
           "keep the count but not the text". *)
+  | Open_calls
   | Set_tools of [ `Toggle | `Compact | `Results | `Full ]
       (** [/tools [compact|results|full]] — set or cycle tool-call detail. *)
   | Cycle_memory

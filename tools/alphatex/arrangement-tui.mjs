@@ -1,3 +1,4 @@
+import { practiceEnabled } from './arrangement-practice.mjs'
 import { viewSession } from './music-session.mjs'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { join, dirname, resolve } from 'node:path'
@@ -20,6 +21,7 @@ import { measureAudioCalibration } from './audio-calibration.mjs'
 import { calibrationMilliseconds, calibrationResidual, validateCalibrationCapture } from './calibration-profile.mjs'
 
 const help = [
+  ':practice BARS on|off   count-in bars and metronome; :record also starts stopped backing',
   ':record-calibration DIRECTORY   inspect next-take measurement; :record-correction pulse N | manual MS IN OUT | none',
   ':calibration-open DIRECTORY   inspect saved samples/clocks; :calibration-apply PULSE_NUMBER adopts one displayed residual',
   ':capture-channel IN_CH OUT_CH   route one captured audio channel; :capture-channel all restores every source channel',
@@ -83,7 +85,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   let monitoring = null, monitorOutput = null
   let liveMidi = null, liveRoutes = [], liveTransitions = Promise.resolve()
   const playerPlans = new Map(), planInspections = new Map()
-  let recording = null, input = null, midiInput = 'all', transportPending = false, inputDevices = null, discoveryTicket = 0
+  let recordStart = null, recording = null, input = null, midiInput = 'all', transportPending = false, inputDevices = null, discoveryTicket = 0
   let calibration = null
   let calibrationInspection = null, recordingInspection = null
   const discovery = new AbortController()
@@ -181,6 +183,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     return owned
   }
   async function settleRecording() {
+    if (recordStart) { stop(); return }
     const owned = recording
     if (!owned) return
     owned.phase = 'finalizing'; owned.controller.abort(); owned.handle?.stop(); draw()
@@ -280,6 +283,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   worker.on('exit', code => { if (!terminatingWorker) fail(new Error(`Arrangement worker exited ${code}`)) })
   function stop() {
     recording?.controller.abort(); recording?.handle?.stop()
+    recordStart = null
     generation++; transportPending = false
     if (preparing !== null && !workerFailure) worker.postMessage({ kind: 'cancel', request: preparing })
     preparing = null
@@ -298,11 +302,14 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     if (transport.kind === 'paused') { transportPending = true; transport.handle.resume(); return }
     if (transport.kind === 'preparing' || transport.kind === 'starting') { stop(); return }
     const selection = audioOnly ? { kind: 'prepare-audio', output: route.output } : arrangementPlaybackRequest(editor.project, route)
+    let resolveStart, rejectStart
+    const started = new Promise((yes, no) => { resolveStart = yes; rejectStart = no })
+    started.catch(() => {})
     const expected = ++generation, project = editor.project, output = selection.output
     transport = { kind: 'preparing' }; status = 'Preparing arrangement sources…'
     const prepared = request({ ...selection, project, sourceRoot, directory }, id => { preparing = id })
     const preparation = (async () => {
-      let result
+      let result, playbackCompletion, playbackHandle
       try {
         result = await prepared
         if (generation === expected) preparing = null
@@ -332,6 +339,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
               transport = { ...transport, kind: event.kind, event }
               draw()
             } })
+          playbackHandle = handle
           transport = { ...transport, handle }
           playerPlans.set(handle, result)
           const completion = handle.completion.then(event => {
@@ -344,10 +352,20 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
           players.set(handle, completion)
           return { handle, completion }
         })
-        if (admitted) await admitted.completion
+        if (admitted) {
+          playbackCompletion = admitted.completion
+          await admitted.handle.ready
+          if (!accepting || generation !== expected || transport.handle !== admitted.handle || transport.kind !== 'playing') throw new Error('Playback start was cancelled')
+          resolveStart()
+          await admitted.completion
+        }
       } catch (error) {
+        rejectStart(error)
+        playbackHandle?.stop()
         if (generation === expected) { preparing = null; transport = { kind: 'stopped' }; status = error.message; draw() }
       } finally {
+        rejectStart(new Error('Playback start was cancelled'))
+        if (playbackCompletion) await playbackCompletion
         if (result) {
           await Promise.allSettled([...(planInspections.get(result) ?? [])])
           await rm(dirname(result.path), { recursive: true, force: true })
@@ -357,6 +375,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     preparations.add(preparation)
     preparation.catch(error => { if (accepting) { status = error.message; draw() } }).finally(() => preparations.delete(preparation))
     draw()
+    return started
   }
   function openTake(asset) {
     if (!accepting || takeTask) return
@@ -542,7 +561,20 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         break
       }
       case 'midi-input': midiInput = value.input; status = 'MIDI input selected'; break
-      case 'record': startRecording(); break
+      case 'record': {
+        if (recordStart) throw new Error('Recording backing is already opening')
+        if (transport.kind === 'stopped' && practiceEnabled(editor.project)) {
+          if (!input) throw new Error('Select :input AUDIO_UID first; :inputs lists devices')
+          const started = play(), owned = { generation }
+          recordStart = owned
+          started.then(() => {
+            if (recordStart !== owned || !accepting || generation !== owned.generation) return
+            recordStart = null; startRecording()
+          }).catch(error => { if (accepting && generation === owned.generation) { status = error.message; draw() } })
+            .finally(() => { if (recordStart === owned) recordStart = null })
+        } else startRecording()
+        break
+      }
       case 'record-stop': await settleRecording(); break
       case 'open-take': openTake(value.asset); break
       case 'help': inputDevices = null; discoveryTicket++; showHelp = !showHelp; break
@@ -648,7 +680,8 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     const residuals = profile?.pulses.map(pulse => calibrationMilliseconds(profile, pulse))
     const lines = [`Arrangement · ${project.title}${project !== saved ? ' *' : ''} · ${project.tempo} BPM · ${project.meter.join('/')}`,
       `Cursor ${editor.tick / project.ppq} beats · grid ${editor.step / project.ppq} · ${status}`,
-      `Playback ${transport.kind} · ${(transport.event?.currentTime ?? 0).toFixed(2)} s · ${transport.event?.device.name ?? route.output ?? route.midiOutput ?? 'default output'}`,
+      `Playback ${transport.kind}${transport.event?.practice?.phase === 'count-in' ? ' · count-in ' + transport.event.practice.remainingSeconds.toFixed(2) + ' s' : ''} · ${(transport.event?.currentTime ?? 0).toFixed(2)} s · ${transport.event?.device.name ?? route.output ?? route.midiOutput ?? 'default output'}`,
+      `Practice ${project.practice?.countInBars ?? 0} count-in bars · metronome ${project.practice?.metronome ? 'on' : 'off'}`,
       `Recording ${recording?.phase ?? 'idle'} · input ${input ?? 'choose :input'} · MIDI ${midiInput} · correction ${policy.kind === 'none' ? 'none' : policy.placement.kind + ' ' + Number(policy.placement.advanceNanoseconds.numerator) / Number(policy.placement.advanceNanoseconds.denominator) / 1e6 + ' ms'}`,
       `Monitor ${recording?.monitoring ? 'active to ' + recording.monitoring.output.id : monitoring ? monitoring.phase + ' to ' + monitorOutput : 'off'}${reportedLatency}`,
       `MIDI monitor ${liveMidi?.phase ?? 'off'}${liveMidi?.info ? ' · ' + liveMidi.info.bindings.map(binding => binding.device.name + ' ← ' + binding.source).join(', ') : ''}`]

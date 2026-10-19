@@ -438,4 +438,26 @@ available for later trimming. Undo/redo and SaveAs/reopen preserve both the chos
 next-take setting and each take's historical decision. Reattaching an already
 attached recorded asset is refused. This changes recorded-region placement;
 monitoring latency, physical interface timing and MIDI input timing still require
-separate measurement. Native-clock count-in/practice remains unfinished.
+separate measurement. Native-clock count-in and metronome are available as described below.
+
+
+### Count-in and metronome
+
+In the arrangement editor, `:practice 1 on` selects one count-in bar and a
+metronome during backing playback. `:practice 2 off` counts two bars, then stops
+the click while backing continues. `:practice 0 off` disables both. The setting
+is undoable and survives saving/reopening. Each meter denominator is one click;
+the first beat of every bar is accented. Tempo changes affect the next start.
+MIDI-only arrangements also require `:mixed-output AUDIO_UID` for the click.
+
+With practice enabled, `:record` from stopped starts backing and admits recording
+after its native playing acknowledgement. Count-in audio and backing share the
+native render clock. Musical position remains at zero during count-in; the
+recording's acknowledged future downbeat trims only the placed region's pre-roll.
+The complete recorded WAV/MIDI remains available. Pause/resume retains the
+remaining count-in; `:seek BEAT` goes directly to that musical position. Stop and
+a fresh play restart the count-in. Source notes, capture timestamps, offsets and
+calibration settings remain unchanged. The shared playback horizon rounds outward
+to contain exact MIDI ends; its final representable tail is silence. Physical input readiness still depends on
+the selected device; a short count-in cannot guarantee a slow interface opens
+before the downbeat.

@@ -104,10 +104,11 @@ struct Region: Decodable {
     let frameCount: AVAudioFramePosition
     let repetitions: AVAudioFramePosition
     let captureClock: CaptureAudioClock?
+    var pulseClock: PulseAudioClock? = nil
     var component: CaptureRegionComponent? = nil
     var audioChannel: CaptureAudioChannel? = nil
     var calibrationOutput: CalibrationOutput? = nil
-    enum CodingKeys: String, CodingKey { case id, asset, startSeconds, offsetFrames, frameCount, captureClock, component, audioChannel, calibrationOutput; case repetitions = "repeat" }
+    enum CodingKeys: String, CodingKey { case id, asset, startSeconds, offsetFrames, frameCount, captureClock, pulseClock, component, audioChannel, calibrationOutput; case repetitions = "repeat" }
     func totalFrames() throws -> AVAudioFramePosition {
         let (total, overflow) = frameCount.multipliedReportingOverflow(by: repetitions)
         guard frameCount > 0, repetitions > 0, !overflow, total > 0 else { throw AudioFailure("region exceeds the native frame timeline") }
@@ -123,11 +124,12 @@ struct Plan: Decodable {
     let midi: Timeline?
     let ump: UmpTimeline?
     let umpRegions: UmpArrangement?
+    var practice: PracticePlan? = nil
     var captured: Bool { kind == "capture-session" }
     var capturedAudio: Bool { kind == "capture-audio-arrangement" }
     var pairedRegions: Bool { kind == "capture-arrangement" }
     var hybrid: Bool { kind == "hybrid-arrangement" }
-    var clocked: Bool { capturedAudio || pairedRegions || hybrid }
+    var clocked: Bool { capturedAudio || pairedRegions || hybrid || practice != nil }
     var mixed: Bool { kind == "mixed-arrangement" }
     func validate() throws {
         guard (schemaVersion == 1 && kind == "wave-arrangement" && midi == nil && ump == nil && umpRegions == nil
@@ -137,6 +139,13 @@ struct Plan: Decodable {
                || schemaVersion == 5 && pairedRegions && midi == nil && ump == nil && umpRegions?.schemaVersion == 1
                || schemaVersion == 6 && hybrid && midi?.schemaVersion == 3 && ump == nil && umpRegions?.schemaVersion == 1), duration.isFinite, duration > 0,
               (!regions.isEmpty || (captured || clocked) && assets.isEmpty), Set(assets.map(\.id)).count == assets.count, Set(regions.map(\.id)).count == regions.count else { throw AudioFailure("invalid WAV arrangement plan") }
+        if let practice {
+            guard !captured, practice.countInSeconds.isFinite, practice.countInSeconds >= 0,
+                  practice.duration.isFinite, practice.duration > 0,
+                  abs(practice.countInSeconds + practice.duration - duration) <= duration.ulp else {
+                throw AudioFailure("invalid practice timeline")
+            }
+        }
         for asset in assets {
             guard !asset.id.isEmpty, !asset.path.isEmpty, asset.sampleRate.isFinite, asset.sampleRate > 0,
                   asset.channels > 0, asset.frames >= 0 else { throw AudioFailure("invalid WAV source identity or format") }
@@ -147,7 +156,7 @@ struct Plan: Decodable {
                   region.frameCount > 0, region.repetitions > 0,
                   let asset = assets.first(where: { $0.id == region.asset }),
                   region.frameCount <= asset.frames, region.offsetFrames <= asset.frames - region.frameCount else { throw AudioFailure("invalid region source bounds") }
-            guard region.captureClock == nil || clocked else { throw AudioFailure("captured audio clock requires an explicit captured audio plan") }
+            guard region.captureClock == nil || capturedAudio || pairedRegions || hybrid else { throw AudioFailure("captured audio clock requires an explicit captured audio plan") }
             guard region.component == nil || region.component == .audio && region.captureClock != nil else { throw AudioFailure("invalid captured audio component") }
             if let channel = region.audioChannel {
                 guard region.component == .audio, channel.input > 0, channel.input <= asset.channels, channel.output > 0 else {
@@ -159,7 +168,12 @@ struct Plan: Decodable {
                 try calibrated.validate(deviceUID: calibrated.id, rate: calibrated.sampleRate, frames: calibrated.bufferFrames)
             }
             let total: AVAudioFramePosition
-            if let clock = region.captureClock {
+            if let pulse = region.pulseClock {
+                guard practice != nil, region.captureClock == nil, region.component == nil, region.audioChannel == nil,
+                      region.calibrationOutput == nil, region.offsetFrames == 0, region.repetitions == 1,
+                      region.startSeconds == 0, pulse.duration <= duration else { throw AudioFailure("invalid practice pulse region") }
+                total = try pulse.layout(rate: asset.sampleRate, frameCount: region.frameCount).totalFrames
+            } else if let clock = region.captureClock {
                 total = try clock.layout(rate: asset.sampleRate, offsetFrames: region.offsetFrames,
                                          frameCount: region.frameCount, repetitions: region.repetitions).totalFrames
             } else { total = try region.totalFrames() }
@@ -174,7 +188,7 @@ struct Plan: Decodable {
         }
         // Float arithmetic may differ by a final ULP, never by a source sample.
         let sample = assets.map { 1 / $0.sampleRate }.min() ?? 0
-        if !clocked, let midi {
+        if mixed, let midi {
             try midi.validate()
             let midiEnd = midi.regions.map(\.end).max() ?? 0
             guard midi.duration == duration, abs(max(end, midiEnd) - duration) < sample else { throw AudioFailure("mixed duration does not match its source regions") }
@@ -229,6 +243,7 @@ final class Voice {
     let capacity: AVAudioFrameCount
     let total: AVAudioFramePosition
     let captureLayout: CaptureAudioLayout?
+    let pulseLayout: PulseAudioLayout?
     var generation: UInt64 = 0 // only the stream queue accesses these fields
     var cursor: AVAudioFramePosition = 0
     var origin: AVAudioFramePosition = 0
@@ -237,7 +252,8 @@ final class Voice {
         queue = DispatchQueue(label: "music.arrangement.stream.\(region.id)", qos: .userInitiated)
         captureLayout = try region.captureClock?.layout(rate: asset.sampleRate, offsetFrames: region.offsetFrames,
                                                        frameCount: region.frameCount, repetitions: region.repetitions)
-        total = try captureLayout?.totalFrames ?? region.totalFrames()
+        pulseLayout = try region.pulseClock?.layout(rate: asset.sampleRate, frameCount: region.frameCount)
+        total = try pulseLayout?.totalFrames ?? captureLayout?.totalFrames ?? region.totalFrames()
         file = try AVAudioFile(forReading: URL(fileURLWithPath: asset.path), commonFormat: .pcmFormatFloat32, interleaved: false)
         let sourceFormat = file.processingFormat
         guard file.length == asset.frames, sourceFormat.sampleRate == asset.sampleRate, sourceFormat.channelCount == asset.channels,
@@ -287,8 +303,9 @@ final class Voice {
         var written: AVAudioFrameCount = 0
         while written < capacity && cursor < total {
             let remaining = min(AVAudioFramePosition(capacity - written), total - cursor)
-            let span = captureLayout?.span(at: cursor, maximum: remaining)
+            let base = captureLayout?.span(at: cursor, maximum: remaining)
                 ?? (source: cursor % region.frameCount, count: min(remaining, region.frameCount - cursor % region.frameCount))
+            let span = pulseLayout?.span(at: cursor, maximum: remaining) ?? (source: base.source, count: base.count, gain: Float(1))
             var count = AVAudioFrameCount(span.count)
             guard count > 0 else { throw AudioFailure("captured audio clock did not advance") }
             guard let local = span.source else {
@@ -311,7 +328,11 @@ final class Voice {
                     if channel == Int(selected.output) - 1 {
                         memcpy(output[channel].advanced(by: Int(written)), samples[Int(selected.input) - 1].advanced(by: offset), Int(count) * MemoryLayout<Float>.size)
                     } else { memset(output[channel].advanced(by: Int(written)), 0, Int(count) * MemoryLayout<Float>.size) }
-                } else { memcpy(output[channel].advanced(by: Int(written)), samples[channel].advanced(by: offset), Int(count) * MemoryLayout<Float>.size) }
+                } else if span.gain == 1 {
+                    memcpy(output[channel].advanced(by: Int(written)), samples[channel].advanced(by: offset), Int(count) * MemoryLayout<Float>.size)
+                } else {
+                    for sample in 0..<Int(count) { output[channel][Int(written) + sample] = samples[channel][offset + sample] * span.gain }
+                }
             }
             written += count; cursor += AVAudioFramePosition(count)
         }
@@ -387,6 +408,7 @@ final class ArrangementTransport {
     var state = State.prepared
     var position: Double = 0
     var anchor: UInt64 = 0
+    var musicalAnchor: UInt64 = 0
     var generation: UInt64 = 0
     var listeners: [(AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
     var signals: [DispatchSourceSignal] = []
@@ -474,16 +496,23 @@ final class ArrangementTransport {
         return min(plan.duration, position + AVAudioTime.seconds(forHostTime: time.hostTime - anchor))
     }
     func snapshot(_ kind: String) -> [String: Any] {
-        var value: [String: Any] = ["kind": kind, "currentTime": currentTime(), "duration": plan.duration, "device": device.json,
+        var value: [String: Any] = ["kind": kind, "currentTime": max(0, currentTime() - (plan.practice?.countInSeconds ?? 0)), "duration": plan.practice?.duration ?? plan.duration, "device": device.json,
          "loop": false, "format": plan.kind, "streamBufferFrames": capacity, "regions": voices.count]
+        if let practice = plan.practice {
+            let remaining = max(0, practice.countInSeconds - currentTime())
+            value["practice"] = ["phase": remaining > 0 ? "count-in" : "backing", "remainingSeconds": remaining] as [String: Any]
+        }
         if let midi { value["bindings"] = midi.snapshot(kind)["bindings"] }
         do {
             var timebase = mach_timebase_info_data_t(); mach_timebase_info(&timebase)
-            var clock: [String: Any] = ["kind": "mach-host-time", "anchor": String(anchor), "position": position,
+            var clock: [String: Any] = ["kind": "mach-host-time", "anchor": String(musicalAnchor), "position": max(0, position - (plan.practice?.countInSeconds ?? 0)),
                 "numer": timebase.numer, "denom": timebase.denom,
                 "renderQuantum": renderQuantum, "bufferFrames": bufferFrames, "sampleRate": engine.outputNode.outputFormat(forBus: 0).sampleRate,
                 "presentationLatency": engine.outputNode.presentationLatency]
-            if let midi { clock["midiAnchorNanoseconds"] = String(midi.anchor); clock["midiPosition"] = midi.position(at: DispatchTime.now().uptimeNanoseconds) }
+            if let midi {
+                clock["midiAnchorNanoseconds"] = String(AudioConvertHostTimeToNanos(musicalAnchor))
+                clock["midiPosition"] = max(0, midi.position(at: DispatchTime.now().uptimeNanoseconds) - (plan.practice?.countInSeconds ?? 0))
+            }
             value["clock"] = clock
         }
         return value
@@ -532,6 +561,7 @@ final class ArrangementTransport {
         }
         let lead = Double(renderQuantum) / rate * Double(active.count + 1) + latency
         anchor = try futureHost(lead, from: frontier)
+        musicalAnchor = try futureHost(max(0, (plan.practice?.countInSeconds ?? 0) - position), from: anchor)
         _ = try futureHost(plan.duration - position, from: anchor)
         for voice in voices where active.contains(voice.region.id) {
             let when = try futureHost(max(0, voice.region.startSeconds - position), from: anchor)
@@ -597,9 +627,11 @@ final class ArrangementTransport {
                 }
                 case .resume: if state == .paused { try schedule(from: position, playing: true) }
                 case .seek(let seconds):
-                    guard seconds.isFinite, seconds >= 0, seconds <= plan.duration else { throw AudioFailure("seek outside arrangement duration") }
-                    if seconds == plan.duration { position = seconds; finish(reason: "finished"); return }
-                    try schedule(from: seconds, playing: state == .playing)
+                    let duration = plan.practice?.duration ?? plan.duration
+                    guard seconds.isFinite, seconds >= 0, seconds <= duration else { throw AudioFailure("seek outside arrangement duration") }
+                    let raw = seconds + (plan.practice?.countInSeconds ?? 0)
+                    if seconds == duration { position = plan.duration; finish(reason: "finished"); return }
+                    try schedule(from: raw, playing: state == .playing)
                 case .status: break
                 case .recordingEpoch(let request):
                     var event = snapshot(state == .playing ? "playing" : "paused")
@@ -614,14 +646,13 @@ final class ArrangementTransport {
                 if state != .stopped { publish() }
                 return
             }
-            }
             if state != .stopped { publish() }
         } catch { finish(reason: "command-failed", error: error) }
     }
     func finish(reason: String, error: Error? = nil, publish: Bool = true) {
         guard state != .stopped else { return }
         var event = snapshot("stopped"), finalError = error
-        if reason == "finished" { event["currentTime"] = plan.duration }
+        if reason == "finished" { event["currentTime"] = plan.practice?.duration ?? plan.duration }
         state = .stopped; stopVoices(); engine.stop()
         midi?.finish(reason: reason, error: finalError, publish: false)
         finalError = finalError ?? midi?.terminalFailure

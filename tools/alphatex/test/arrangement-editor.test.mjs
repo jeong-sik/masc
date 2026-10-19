@@ -12,6 +12,7 @@ import { mkdtemp, readFile, writeFile, rename, rm } from 'node:fs/promises'
 import { join, dirname, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
+import { emitKeypressEvents } from 'node:readline'
 import { newArrangement, editArrangement, arrangementSchedule } from '../arrangement.mjs'
 import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } from '../arrangement-playback.mjs'
 import * as editorAPI from '../arrangement-editor.mjs'
@@ -410,7 +411,7 @@ test('captured-region commands persist typed bounds and select paired preparatio
   const view=await controller()
   try {
     await primeWave(view);await primeCapture(view)
-    view.key('return','',{shift:true});await flush()
+    view.command('place capture-1 0');await flush()
     assert.equal(view.observed.takes.length,0)
     view.command('trim-time .0000001 .05');view.command('repeat 2000000');view.command('duplicate 8');view.command('undo');view.command('redo')
     view.command('save');await flush()
@@ -430,6 +431,19 @@ test('captured-region commands persist typed bounds and select paired preparatio
     const prepare=view.observed.requests.at(-1);assert.equal(prepare.kind,'prepare-wave')
     assert.equal(prepare.project.lanes.find(lane=>lane.kind==='capture').muted,true)
     view.worker.emit('message',{id:prepare.id,ok:false,cancelled:true,error:'Cancelled'});await flush()
+  } finally {await closeController(view)}
+})
+test('terminal Enter bytes open the selected captured source viewer',async()=>{
+  const view=await controller()
+  try {
+    // The harness stubs the TUI's decoder; the real one turns raw terminal bytes into its keypress events.
+    emitKeypressEvents(view.process.stdin)
+    await primeCapture(view)
+    view.process.stdin.emit('data',Buffer.from('\r'));await flush()
+    const job=view.observed.requests.find(job=>job.kind==='prepare-take')
+    assert.equal(job.asset,'capture-1')
+    view.worker.emit('message',{id:job.id,ok:true,result:{directory:'/owned-recovery/take-1'}});await flush()
+    assert.equal(view.observed.takes.length,1)
   } finally {await closeController(view)}
 })
 test('captured source viewer waits for playback, borrows input and returns ownership before removing its snapshot',async()=>{
@@ -533,7 +547,7 @@ test('already admitted take requests wait for the current leaf lifetime, includi
 test('ordinary paired capture play passes source bindings and drains native playback before removing its private snapshots',async()=>{
   const view=await controller()
   try {
-    await primeCapture(view);view.key('return','',{shift:true});view.command('mixed-output selected-audio');view.command('midi-source capture-1 keys -42');view.key('space');await flush()
+    await primeCapture(view);view.command('place capture-1 0');view.command('mixed-output selected-audio');view.command('midi-source capture-1 keys -42');view.key('space');await flush()
     const prepare=view.observed.requests.find(job=>job.kind==='prepare-capture');assert.ok(prepare)
     assert.deepEqual(prepare.sourceBindings,[{asset:'capture-1',source:'keys',destination:'-42'}])
     view.worker.emit('message',{id:prepare.id,ok:true,result:{path:'/owned-recovery/paired/plan.json',format:'capture-arrangement',midiOutput:'-42',bindings:[{port:0,destination:'-42'}]}});await flush()
@@ -548,7 +562,7 @@ test('ordinary paired capture play passes source bindings and drains native play
 test('ordinary hybrid TUI playback retains every audible lane and both selected stream protocols',async()=>{
   const view=await controller()
   try {
-    await primeMixed(view);await primeCapture(view);view.key('return','',{shift:true})
+    await primeMixed(view);await primeCapture(view);view.command('place capture-1 0')
     view.command('midi-output 42');view.command('mixed-output audio');view.command('midi-port asset-2 7 43');view.command('midi-source capture-1 keys 44');view.key('space');await flush()
     const prepare=view.observed.requests.find(job=>job.kind==='prepare-capture');assert.ok(prepare)
     assert.equal(prepare.project.clips.length,3);assert.equal(prepare.midiOutput,'42')

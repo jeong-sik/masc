@@ -724,7 +724,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         case 'a': action = { kind: 'asset' }; break
         case 'tab': action = { kind: 'lane' }; break
         case 'return':
-          if (!key.shift && editor.project.assets.find(asset => asset.id === editor.asset)?.kind === 'capture') { await settleRecording(); openTake(editor.asset); return }
+          if (editor.project.assets.find(asset => asset.id === editor.asset)?.kind === 'capture') { await settleRecording(); openTake(editor.asset); return }
           action = { kind: 'place' }; break
         case 'delete': case 'backspace': case 'x': action = { kind: 'remove' }; break
         case 'd': action = { kind: 'duplicate' }; break

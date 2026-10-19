@@ -26,7 +26,7 @@ func reviewProperty(_ object:MIDIObjectRef,_ key:CFString,_ value:UnsafeMutableP
 }
 func pump(until condition:()->Bool){let end=Date().addingTimeInterval(3);while !condition(){precondition(Date()<end,"owned lifecycle did not drain");RunLoop.main.run(until:Date().addingTimeInterval(0.001))}}
 func scope(_ group:UInt8,_ channel:UInt8)->UmpLiveScope{.channels([UmpLiveChannel(group:group,channel:channel)])}
-func plan(_ routes:[UmpLiveRoute],_ reserved:[UmpLiveClaim]=[])->UmpLivePlan{UmpLivePlan(schemaVersion:1,routes:routes,reserved:reserved)}
+func plan(_ routes:[UmpLiveRoute],_ reserved:[UmpLiveClaim]=[])->UmpLivePlan{UmpLivePlan(schemaVersion:1,routes:routes.enumerated().map{UmpLiveRoute(key:"k\\($0.offset)",source:$0.element.source,destination:$0.element.destination,scope:$0.element.scope)},reserved:reserved)}
 func route(_ source:String="10",_ destination:String="42",_ scope:UmpLiveScope = .endpoint)->UmpLiveRoute{UmpLiveRoute(key:"\(source):\(destination)",source:source,destination:destination,scope:scope)}
 let on:[UInt32]=[0x43953c03,0x90012345],off:[UInt32]=[0x43853c00,0x12340000],bend:[UInt32]=[0x43e50000,0x87654321]
 let pedal:[UInt32]=[0x43b54000,0xffffffff],sx:[UInt32]=[0x33120102,0]

@@ -5,6 +5,8 @@ open Alcotest
 module Backend = Masc.Browser_stagehand_backend
 module Wire = Masc.Browser_stagehand_wire
 module Session = Masc.Browser_stagehand_session
+module Executor = Masc.Browser_stagehand_executor
+module Feedback = Masc.Browser_pointer_feedback
 module Lane = Browser_lane
 
 (* Shorter than the backend's close wait, so the clock reaches it only after
@@ -328,6 +330,57 @@ let test_a_queued_caller_leaves_the_session_open () =
    input arrives. A navigation queued during the guard cannot run between
    that guard and the click. A sentence cancelled while queued must not
    retire the active session either. *)
+let test_actor_stays_with_queued_interaction () =
+  let entered, mark_entered = Eio.Promise.create () in
+  let released, release = Eio.Promise.create () in
+  let trace = ref [] and input_count = ref 0 in
+  let args_of body expression =
+    let sample = Executor.evaluate_expression ~runtime:Executor.No_runtime ~body ~args:`Null in
+    let prefix = String.sub sample 0 (String.length sample - String.length "null)") in
+    if String.starts_with ~prefix expression then
+      Some (Yojson.Safe.from_string (String.sub expression (String.length prefix)
+        (String.length expression - String.length prefix - 1))) else None in
+  let call_hook = function
+    | Wire.Page_evaluate {expression;_} ->
+      let feedback = match args_of Feedback.begin_script expression with
+        | Some args -> Some ("begin",args)
+        | None -> Option.map (fun args -> "finish",args) (args_of Feedback.finish_script expression) in
+      (match feedback with
+       | None -> None
+       | Some (phase,args) -> trace := (phase,args)::!trace;
+         Some (Ok (`Assoc ["value",`String "null"])))
+    | Wire.Page_hover _ ->
+      incr input_count;
+      if !input_count=1 then (Eio.Promise.resolve mark_entered ();Eio.Promise.await released);
+      Some (Ok (`Assoc []))
+    | _ -> None in
+  with_backend ~call_hook (fun h ->
+    ignore (data (Backend.execute h.backend open_));
+    ignore (data (Backend.execute h.backend Lane.Tabs_list));
+    let point = {Lane.Pointer.x=0.5;y=0.25} in
+    let viewport = {Lane.Pointer.document_id="d1";width=800.;height=600.;scroll_x=0.;scroll_y=0.} in
+    let verb = Lane.Page_interact {tab_id=0;expected_url=Some "http://127.0.0.1:1/";
+      action=Lane.Hover_at {point;viewport}} in
+    Eio.Switch.run (fun sw ->
+      let first=Eio.Fiber.fork_promise ~sw (fun () -> Backend.execute h.backend ~actor:"keeper-a" verb) in
+      Eio.Promise.await entered;
+      let second=Eio.Fiber.fork_promise ~sw (fun () -> Backend.execute h.backend ~actor:"keeper-b" verb) in
+      h.settle ();
+      check int "queued owner cannot replace the active badge" 1 (List.length !trace);
+      Eio.Promise.resolve release ();
+      ignore (data (Eio.Promise.await_exn first));ignore (data (Eio.Promise.await_exn second));
+      let trace=List.rev !trace in
+      check (list string) "each serialized operation retains its concrete owner"
+        ["begin:keeper-a";"finish:keeper-a";"begin:keeper-b";"finish:keeper-b"]
+        (List.map (fun (phase,args)->phase^":"^text "actor" args) trace);
+      (match trace with
+       | [_,a;_,a_end;_,b;_,b_end] ->
+         check string "first finish binds first request" (text "requestId" a) (text "requestId" a_end);
+         check string "second finish binds second request" (text "requestId" b) (text "requestId" b_end);
+         check bool "each operation has its own identity" false (String.equal (text "requestId" a) (text "requestId" b))
+       | _ -> fail "expected two complete serialized feedback operations")))
+;;
+
 let test_pointer_guard_and_input_keep_the_verb_slot () =
   let guard_entered, mark_guard = Eio.Promise.create () in
   let release_guard, allow_guard = Eio.Promise.create () in
@@ -480,7 +533,8 @@ let () =
         test_case "an answered sentence keeps the shared session" `Quick test_an_answered_sentence_keeps_the_session;
         test_case "an answer during cancellation keeps the shared session" `Quick
           test_answer_during_cancellation_keeps_the_session;
-        test_case "pointer guard and input exclude navigation" `Quick test_pointer_guard_and_input_keep_the_verb_slot
+        test_case "pointer guard and input exclude navigation" `Quick test_pointer_guard_and_input_keep_the_verb_slot;
+        test_case "actor stays bound through the serialized queue" `Quick test_actor_stays_with_queued_interaction
       ] );
   ]
 ;;

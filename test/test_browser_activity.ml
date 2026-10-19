@@ -65,7 +65,7 @@ let test_off_and_close () = with_lane (fun _ current ->
   let calls = ref [] in
   let execute verb = calls := verb :: !calls; answer in
   Lane.install_automation_executor (Some execute);
-  Lane.install_stagehand_executor (Some execute);
+  Lane.install_stagehand_executor (Some (fun ~actor:_ verb -> execute verb));
   Lane.install_automation_document_observer (Some (fun ~tab_id:_ -> execute (Lane.Page_document {tab_id=1})));
   current := Disabled;
   refused (Lane.issue_automation ~verb:Tabs_list ~timeout_sec:1.);
@@ -149,6 +149,15 @@ let test_live_retains_accepted () = with_lane (fun sw current ->
   (match Eio.Promise.await work with Ok (Ok (Answered value)) -> check bool "owned payload" true (value=payload) | _ -> fail "accepted live request lost");
   check bool "no new request queued" true (Lane.take_command ~client_info ~window_sec:0.001=Ok None))
 
+let test_stagehand_actor_route () = with_lane (fun _ _ ->
+  let owners = ref [] in
+  Lane.install_stagehand_executor (Some (fun ~actor _ -> owners:=actor::!owners;answer));
+  (match Lane.issue_for_actor ~actor:(Some "keeper-owner") ~target:Lane.Stagehand
+      ~verb:Lane.Tabs_list ~timeout_sec:1. with Ok value -> is_answer value | Error _ -> fail "actor route");
+  is_answer (Lane.issue_stagehand ~verb:Lane.Tabs_list ~timeout_sec:None);
+  check (list (option string)) "attributed and anonymous requests keep their own actor"
+    [Some "keeper-owner";None] (List.rev !owners))
+
 let () = run "Browser activity" [
   "configuration", test_case "paths retained and accepting locations" `Quick test_config
     :: List.map (fun (name,text) -> test_case name `Quick (fun () -> rejects text)) invalid;
@@ -156,5 +165,6 @@ let () = run "Browser activity" [
     test_case "off precedes preselected stale client" `Quick test_off_preselected_stale;
     test_case "off and unavailable keep status/close" `Quick test_off_and_close;
     test_case "accepted automation request finishes" `Quick test_accepted_finishes;
-    test_case "accepted live request survives off" `Quick test_live_retains_accepted];
+    test_case "accepted live request survives off" `Quick test_live_retains_accepted;
+    test_case "stagehand route retains explicit actor" `Quick test_stagehand_actor_route];
 ]

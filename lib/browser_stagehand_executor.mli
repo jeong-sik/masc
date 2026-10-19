@@ -57,4 +57,7 @@ val evaluate_expression : runtime:page_runtime -> body:string -> args:Yojson.Saf
     navigation or a sentence verb has been sent, a failure is [Refused]: it
     may have taken effect. An act Stagehand answers with
     [data.success = false] is such a failure, carrying Stagehand's message. *)
-val execute : tabs:Tabs.t -> call:call -> Browser_lane.verb -> Browser_lane.answer
+val execute : tabs:Tabs.t -> call:call -> ?actor:string -> Browser_lane.verb -> Browser_lane.answer
+(** An explicitly attributed interaction displays observational agent feedback.
+    Anonymous direct calls do not invent an owner. Overlay failures cannot
+    change the interaction result or trigger another input. *)

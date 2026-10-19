@@ -172,7 +172,7 @@ let () =
   in
   Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
   Eio.Switch.on_release sw (fun () -> Browser_lane.install_activity_observer None);
-  Browser_lane.install_stagehand_executor (Some (Backend.execute backend));
+  Browser_lane.install_stagehand_executor (Some (fun ~actor verb -> Backend.execute backend ?actor verb));
   let args fields = `Assoc fields in
   let lane = "lane", `String "stagehand" in
   let tabs () = tool "BrowserTabs" (Tools.handle_tabs ~base_path:out ~tool_name:"masc_browser_tabs" ~start_time:(Tool_timing.start ()) (args [ lane ])) in
@@ -180,7 +180,7 @@ let () =
   let instruct fields = tool "BrowserInstruct" (Tools.handle_instruct ~tool_name:"masc_browser_instruct" ~start_time:(Tool_timing.start ()) (args fields)) in
   let interact fields =
     tool "BrowserInteract"
-      (Tools.handle_interact ~base_path:out ~tool_name:"masc_browser_interact" ~start_time:(Tool_timing.start ()) (args (lane :: fields)))
+      (Tools.handle_interact ~actor:"stagehand-probe" ~base_path:out ~tool_name:"masc_browser_interact" ~start_time:(Tool_timing.start ()) (args (lane :: fields)))
   in
   let goto_fixture () =
     tool "BrowserGoto"
@@ -215,6 +215,29 @@ let () =
     match Yojson.Safe.Util.member "value" reply with
     | `Bool true -> Ok ()
     | _ -> Error "the fixture scroll event did not acknowledge its observation"
+  in
+  let observe_actor_feedback () =
+    let* opened = Option.to_result ~none:"the fixture session is not open" !opened_session in
+    let call request = Session.call opened request
+      |> Result.map_error Masc.Browser_stagehand_executor.failure_message in
+    let* active = call Wire.Context_active_page in
+    let* page_id = Option.to_result ~none:"the fixture has no active page" (string_at ["page_id"] active) in
+    let expression = {js|(() => {
+      const state=window[Symbol.for('masc.browser.pointer.feedback.v1')];
+      const host=document.querySelector('[data-masc-browser-overlay]');
+      return {actor:state?.actor,phase:state?.phase,action:state?.action,requestId:state?.requestId,
+        observedPointer:!!state?.pointer && Number.isFinite(state.pointer.x) && Number.isFinite(state.pointer.y),
+        inert:host?.inert === true,hidden:host?.getAttribute('aria-hidden') === 'true',
+        ignoresPointer:!!host && getComputedStyle(host).pointerEvents === 'none'};
+    })()|js} in
+    let* reply = call (Wire.Page_evaluate {page_id;expression}) in
+    let value = Yojson.Safe.Util.member "value" reply in
+    let flag name = Yojson.Safe.Util.member name value = `Bool true in
+    if string_at ["actor"] value = Some "stagehand-probe"
+      && string_at ["phase"] value = Some "finished" && string_at ["action"] value = Some "click"
+      && Option.is_some (string_at ["requestId"] value)
+      && List.for_all flag ["observedPointer";"inert";"hidden";"ignoresPointer"]
+    then Ok value else Error ("owned native pointer feedback was not observed: " ^ Yojson.Safe.to_string value)
   in
   record "open" (session "open");
   let pid =
@@ -283,6 +306,7 @@ let () =
             let* selected = read "text" in
             if contains ~sub:"Trusted menu selected" (Yojson.Safe.to_string selected) then Ok selected
             else Error "trusted menu selection was not observed");
+     record "owned agent badge and actual pointer are visible without taking input" (observe_actor_feedback ());
      record "reset after trusted hover menu" (goto_fixture ());
      (* A scope from another document makes the scene script throw
         scene_document_changed. Stagehand words an uncaught throw as

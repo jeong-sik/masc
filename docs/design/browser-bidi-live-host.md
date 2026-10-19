@@ -619,6 +619,14 @@ a retained Working badge as current. Navigation does not create a new badge for
 an old request's cleanup. A page refusing
 feedback does not authorize a replay or prevent the interaction.
 
+Stagehand Chromium also displays this feedback for an explicitly attributed
+Keeper interaction. The selected actor stays on the backend's queued request
+and owns the serialized guard/input/receipt operation. Each interaction gets
+its own request identity; cancellation-protected cleanup settles that same
+badge without changing the authoritative result. Anonymous direct calls do
+not invent an agent identity. Semantic click, hover and drag receipts preserve
+their originally requested action name.
+
 The marker follows trusted browser pointer/wheel/drag events and displays CSS
 viewport coordinates. Before any event its position is unknown; this is the browser
 input pointer, not the desktop mouse cursor. The inert shadow overlay receives no

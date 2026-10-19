@@ -50,4 +50,5 @@ val create :
       session one at a time, and are refused before effect when none is
       open. Tab ids count on across sessions: an id from a closed session
       reaches no page of a later one. *)
-val execute : 'session t -> Browser_lane.verb -> Browser_lane.answer
+val execute : 'session t -> ?actor:string -> Browser_lane.verb -> Browser_lane.answer
+(** The actor stays with this queued request through the serialized page verb. *)

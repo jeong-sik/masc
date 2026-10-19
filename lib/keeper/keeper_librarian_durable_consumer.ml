@@ -9,10 +9,14 @@ module Historical = Keeper_librarian_task_context
 
 module O = Keeper_librarian_official_progress
 
+type commit_result =
+  | Memory_committed
+  | Memory_refused of Keeper_librarian_runtime.not_committed list
+
 type outcome =
   | Nothing_to_read
   | Baseline_advanced of P.t
-  | Memory_not_committed
+  | Memory_not_committed of Keeper_librarian_runtime.not_committed list
   | Progress_advanced of P.t
   | Official_advanced of
       { atom : P.t option
@@ -1394,9 +1398,9 @@ let consume_one_with_extent
         ; counterpart_observations
         }
       in
-      if not (commit ~expected_revision ~range_id:atom_next ~official_range_id input)
-      then Ok Memory_not_committed
-      else
+      match commit ~expected_revision ~range_id:atom_next ~official_range_id input with
+      | Memory_refused reports -> Ok (Memory_not_committed reports)
+      | Memory_committed ->
         let* () = Domain_pool_ref.submit_io_or_inline (fun () ->
           Keeper_external_read_cursor.acknowledge ~runtime_keepers_dir ~keeper_name)
           |> Result.map_error cursor_error in
@@ -1435,7 +1439,7 @@ let consume_one_with_progress_writer
       the marker would narrow every later pass to one turn for good. *)
    | Error (Official_range_stopped _), _ -> clear_failed key
    | (Ok (Progress_advanced _ | Official_advanced _), R.To_first_cut_point)
-   | (Ok (Memory_not_committed), _) | (Error (Keeper_meta_absent), _)
+   | (Ok (Memory_not_committed _), _) | (Error (Keeper_meta_absent), _)
    | (Error (Keeper_meta_unreadable _), _) | (Error (Boundary_log_unreadable _), _)
    | (Error (Progress_unreadable _), _) | (Error (Checkpoint_unreadable _), _)
    | (Error (Position_in_other_trace _), _) | (Error (Position_not_in_history _), _)
@@ -1468,9 +1472,10 @@ let commit_with_runtime
       ~official_range_id
       input
   =
-  let committed = ref false in
+  let committed = ref false and reports = ref [] in
   Keeper_librarian_runtime.run_best_effort
     ~on_memory_committed:(fun () -> committed := true)
+    ~on_not_committed:(fun report -> reports := report :: !reports)
     ?durable_range_id:range_id
     ?official_range_id
     ~base_path
@@ -1478,7 +1483,7 @@ let commit_with_runtime
     ~keeper_id
     ~expected_revision
     input;
-  !committed
+  if !committed then Memory_committed else Memory_refused (List.rev !reports)
 ;;
 
 module For_testing = struct

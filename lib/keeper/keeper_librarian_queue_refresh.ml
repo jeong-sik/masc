@@ -195,8 +195,17 @@ let run_durable_with_commit ~config ~keeper_name ~commit =
       | Ok Keeper_librarian_durable_consumer.Nothing_to_read ->
         clear_reported_problem ~config ~keeper_name ~site:Durable_drain;
         Drained
-      | Ok Memory_not_committed ->
-        clear_reported_problem ~config ~keeper_name ~site:Durable_drain;
+      | Ok (Memory_not_committed reports) ->
+        (match reports with
+         | [] -> clear_reported_problem ~config ~keeper_name ~site:Durable_drain
+         | _ :: _ ->
+           let detail = String.concat "; " (List.map
+             (fun (report : Keeper_librarian_runtime.not_committed) ->
+               Printf.sprintf "%s; provider_input_refusals=[%s]" report.detail
+                 (String.concat "," (List.map Keeper_librarian_input_refusal.to_string
+                   report.provider_input_refusals))) reports) in
+           if should_report_problem ~config ~keeper_name ~site:Durable_drain detail then
+             Log.Keeper.warn ~keeper_name "durable Librarian pass not committed: %s" detail);
         uncommitted_pass ()
       | Ok (Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
         clear_reported_problem ~config ~keeper_name ~site:Durable_drain;

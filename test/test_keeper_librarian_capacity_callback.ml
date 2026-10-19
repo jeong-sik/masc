@@ -685,6 +685,49 @@ let test_continuity_only_run_fails_when_the_snapshot_is_refused ~base_path ~regi
   | [run] -> Alcotest.failf "the run was recorded as %s, not failed" (Runs.status_label run.status)
   | _ -> Alcotest.fail "expected one recorded Librarian run"
 
+let test_durable_runtime_returns_refusal_reports ~base_path () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs env#fs;
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
+  let start status = Fixture.start_server ~sw ~net:env#net ~clock:env#clock
+    (Fixture.Reply_with (fun _ _ -> status,
+      {|{"error":{"message":"fixture refusal","type":"invalid_request_error"}}|})) in
+  let size = start `Request_entity_too_large and quota = start `Too_many_requests in
+  ignore (Fixture.publish_registry ~lane_id:"librarian_exact"
+    ~slot_ids:["durable-size";"durable-quota"]
+    (Fixture.resolver_snapshot ~source:"durable-refusal-report"
+      [{Fixture.id="durable-size";base_url=size.base_url};
+       {Fixture.id="durable-quota";base_url=quota.base_url}]));
+  let keeper_id = "durable-refusal-report" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let input : Keeper_librarian.input =
+    {turn_ref=Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1;
+     historical_task_contexts=[];goal_context=Keeper_librarian.No_task;
+     keeper_id=Masc_test_deps.keeper_id_fixture keeper_id;
+     keeper_instructions="Preserve evidence.";current=None;
+     working_context=Keeper_librarian_context.empty;
+     messages=[Agent_core.Types.user_msg "Unread conversation."];
+     tool_observations=[];counterpart_observations=[]} in
+  (match Keeper_librarian_durable_consumer.commit_with_runtime
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:None
+    ~range_id:None ~official_range_id:None input with
+   | Keeper_librarian_durable_consumer.Memory_committed ->
+     Alcotest.fail "the failed walk claimed Memory committed"
+   | Memory_refused reports ->
+     Alcotest.(check bool) "the adapter retains classified reports" true (reports <> []);
+     Alcotest.(check bool) "provider size refusal and later quota both reach the durable edge" true
+       (List.exists (fun (report : Runtime.not_committed) ->
+         report.provider_input_refusals = [Keeper_librarian_input_refusal.Request_body_refused]
+         && report.smaller_range_meets_same_failure) reports));
+  Alcotest.(check int) "body-refusing provider called once" 1 (Fixture.post_count size);
+  Alcotest.(check int) "quota provider called once" 1 (Fixture.post_count quota);
+  match Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id with
+  | Ok None -> ()
+  | Ok (Some _) -> Alcotest.fail "failed walk published Memory"
+  | Error detail -> Alcotest.fail detail
+
 let () =
   let base_path = Filename.temp_dir "librarian-capacity-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
@@ -730,6 +773,8 @@ let () =
        Alcotest.test_case "a continuity-only run whose snapshot is refused is failed" `Quick
          (test_continuity_only_run_fails_when_the_snapshot_is_refused ~base_path ~registry)];
      "actual HTTP outcomes", [
+      Alcotest.test_case "durable runtime preserves refusal reports without publishing Memory" `Quick
+        (test_durable_runtime_returns_refusal_reports ~base_path);
       Alcotest.test_case "absorb evidence capacity preserves and recovers memory" `Quick
         (test_absorb_evidence_capacity_recovers ~base_path);
       (* An API slot states its limit in provider prose, which this process

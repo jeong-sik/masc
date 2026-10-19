@@ -129,7 +129,7 @@ module For_testing : sig
           -> range_id:Keeper_memory_os_current.durable_range_id option
           -> official_range_id:Keeper_memory_os_current.official_range_id option
           -> Keeper_librarian.input
-          -> bool)
+          -> Keeper_librarian_durable_consumer.commit_result)
     -> unit
   (** The production durable reader with a controlled Memory commit edge. *)
 

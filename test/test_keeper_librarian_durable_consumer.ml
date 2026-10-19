@@ -2703,11 +2703,13 @@ let test_refused_mixed_range_preserves_reports_and_both_cursors ~with_reports ()
       ; provider_input_refusals = [Masc.Keeper_librarian_input_refusal.Request_body_refused]
       ; detail = "provider refused the input"
       ; walk_shows_size = true
+      ; message_descent = Runtime.Smaller_input_may_help
       ; smaller_range_meets_same_failure = false }
     ; { Runtime.input_capacity_evidence = Runtime.No_input_capacity_refusal
       ; provider_input_refusals = []
       ; detail = "later slot did not report input size"
       ; walk_shows_size = false
+      ; message_descent = Runtime.No_descent_evidence
       ; smaller_range_meets_same_failure = true } ] in
   let atom_before = read_progress config and official_before = read_official config in
   let sent = ref [] in
@@ -2877,6 +2879,38 @@ let test_official_commit_recovers_without_resynthesis ?(through_queue = false) ?
    | Error detail -> fail detail)
 ;;
 
+type native_descent_case =
+  | Native_codex_capacity
+  | Native_claude_capacity
+  | Native_invalid_json_first
+  | Native_invalid_domain_last
+  | Native_codex_effect_started
+  | Native_claude_response_started
+  | Native_opaque_failure
+
+let native_capacity_failure ~claude ~tool_effect ~response =
+  if claude then Masc.Fusion_official_client.Claude_failure
+    (Runtime_claude_code.Context_window_exceeded
+      {message="fixture unmeasured native context refusal";
+       tool_effect_attempted=tool_effect;response_emitted=response})
+  else Masc.Fusion_official_client.Codex_failure
+    (Runtime_codex_app_server.Context_window_exceeded
+      {message="fixture unmeasured native context refusal";tool_effect_attempted=tool_effect})
+
+let native_descent_answers = function
+  | Native_codex_capacity -> [Error (native_capacity_failure ~claude:false ~tool_effect:false ~response:false)]
+  | Native_claude_capacity -> [Error (native_capacity_failure ~claude:true ~tool_effect:false ~response:false)]
+  | Native_invalid_json_first -> [Ok "not-json";Error (native_capacity_failure ~claude:false ~tool_effect:false ~response:false)]
+  | Native_invalid_domain_last -> [Error (native_capacity_failure ~claude:false ~tool_effect:false ~response:false);Ok "{}"]
+  | Native_codex_effect_started -> [Error (native_capacity_failure ~claude:false ~tool_effect:true ~response:false)]
+  | Native_claude_response_started -> [Error (native_capacity_failure ~claude:true ~tool_effect:false ~response:true)]
+  | Native_opaque_failure -> [Error (Masc.Fusion_official_client.Setup_failure "fixture opaque native failure")]
+
+let native_descent_succeeds = function
+  | Native_codex_capacity | Native_claude_capacity -> true
+  | Native_invalid_json_first | Native_invalid_domain_last | Native_codex_effect_started
+  | Native_claude_response_started | Native_opaque_failure -> false
+
 type checkpoint_memory_floor_case =
   | Partial_checkpoint_hole
   | Retired_checkpoint_hole
@@ -2894,7 +2928,7 @@ type checkpoint_memory_floor_case =
 (* The ordinary durable pass starts after a real stored atom position. A
    single completion cut spans two further atoms: its tool result shares the
    assistant's atom, so message coordinates cannot be a flattened index. *)
-let test_runtime_checkpoint_memory_floor case () =
+let test_runtime_checkpoint_memory_floor ?native case () =
   let open Masc in
   let module Progress = Keeper_librarian_progress in
   let module F = Exact_output_fixture in
@@ -2906,7 +2940,7 @@ let test_runtime_checkpoint_memory_floor case () =
   Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true") @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
-  let with_runtimes f = if case=Cli_tail_checkpoint_refusal then F.with_official_client_runtimes f else f () in
+  let with_runtimes f = if Option.is_some native || case=Cli_tail_checkpoint_refusal then F.with_official_client_runtimes f else f () in
   with_runtimes @@ fun () ->
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs env#fs;
@@ -2980,7 +3014,7 @@ let test_runtime_checkpoint_memory_floor case () =
     let atom,message_in_atom = List.nth coordinates message_in_source in
     Unread.for_atom ~trace_id ~history_start_boundary_line:1 ~atom ~message_in_atom
       ~messages:completed ~reasons:[Keeper_librarian_input_refusal.Request_body_refused] |> get in
-  let expected_holes = if all_holes then List.mapi (fun index _ -> hole index) source
+  let expected_holes = if Option.is_some native then [] else if all_holes then List.mapi (fun index _ -> hole index) source
     else if case=Partial_checkpoint_hole || case=Retired_checkpoint_hole || case=Interrupted_checkpoint_progress
     then [hole 0] else [] in
   let registry = Exact_lane_run_registry.create
@@ -3014,23 +3048,18 @@ let test_runtime_checkpoint_memory_floor case () =
        =Boundaries.Atom_history {end_atom;last_atom_digest}) in
   let before_steps = ref None and after_external_mutation = ref None and requests = ref [] in
   let cli_calls = ref 0 in
-  let cli_runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
-    incr cli_calls;
-    check string "the real API walk reaches its declared CLI tail" F.cli_primary_runtime runtime_id;
-    Error (Fusion_official_client.Setup_failure "opaque CLI tail cannot authorize skipping a source message") in
-  let answer index =
+  let selection index =
     let first_accepted = if expected_holes=[] then 1 else 2 in
     let new_claims = if not all_holes && index=first_accepted then
       [`Assoc ["claim",`String claim;"category",`String "fact";"board_post_id",`Null;
         "board_comment_id",`Null;"supersedes",`Null;"absorbs",`List []]] else [] in
-    F.openai_response (`Assoc ["new_claims",`List new_claims;"dropped",`List [];
-      "working_contexts",`List [];"working_state",`String "Only successfully judged checkpoint messages are represented."]) in
+    `Assoc ["new_claims",`List new_claims;"dropped",`List [];
+      "working_contexts",`List [];"working_state",`String "Only successfully judged checkpoint messages are represented."] in
   let refuse = `Request_entity_too_large,
     {|{"error":{"type":"invalid_request_error","message":"fixture checkpoint body refused"}}|} in
   let unknown = `Internal_server_error,
     {|{"error":{"type":"server_error","message":"fixture opaque checkpoint failure"}}|} in
-  let server = F.start_server ~sw ~net:env#net ~clock:env#clock
-    (F.Reply_with (fun index body ->
+  let before_request index body =
       requests := !requests @ [body];
       check_external_after 0;
       (* The initial whole-pass refusal has already written its ordinary
@@ -3072,7 +3101,10 @@ let test_runtime_checkpoint_memory_floor case () =
          | Late_checkpoint_failure | Interrupted_checkpoint_progress -> ());
         (* Any owner mutation is now the baseline. The response may complete
            inference, but publication must not change another store byte. *)
-        after_external_mutation := Some (bytes ()));
+        after_external_mutation := Some (bytes ())) in
+  let server = F.start_server ~sw ~net:env#net ~clock:env#clock
+    (F.Reply_with (fun index body ->
+      before_request index body;
       match case with
       | Unknown_checkpoint_refusal -> unknown
       | Cli_tail_checkpoint_refusal -> refuse
@@ -3085,12 +3117,30 @@ let test_runtime_checkpoint_memory_floor case () =
       | Restarted_checkpoint_history | Moved_checkpoint_progress when index=0 -> refuse
       | Partial_checkpoint_hole | Retired_checkpoint_hole | All_checkpoint_holes | Late_checkpoint_failure
       | Rewritten_checkpoint_source | Appended_checkpoint_suffix | Restarted_checkpoint_history
-      | Moved_checkpoint_progress | Interrupted_checkpoint_progress -> `OK,answer index)) in
-  ignore (F.publish_registry ~lane_id:"librarian_exact" ~slot_ids:["checkpoint-floor-api"]
-    ~cli_slot_ids:(if case=Cli_tail_checkpoint_refusal then [F.cli_primary_runtime] else [])
+      | Moved_checkpoint_progress | Interrupted_checkpoint_progress -> `OK,F.openai_response (selection index))) in
+  let native_answers = Option.fold ~none:[] ~some:native_descent_answers native in
+  let cli_runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt =
+    incr cli_calls;
+    match native with
+    | None ->
+      check string "the real API walk reaches its declared CLI tail" F.cli_primary_runtime runtime_id;
+      Error (Fusion_official_client.Setup_failure "opaque CLI tail cannot authorize skipping a source message")
+    | Some scenario ->
+      let index = List.length !requests in
+      if native_descent_succeeds scenario then before_request index prompt
+      else (requests := !requests @ [prompt];check_external_after 0);
+      check string "the native walk visits its actual declared slot in order"
+        (if index=1 && List.length native_answers=2 then F.cli_secondary_runtime else F.cli_primary_runtime) runtime_id;
+      if index<List.length native_answers then List.nth native_answers index
+      else if native_descent_succeeds scenario then Ok (Yojson.Safe.to_string (selection index))
+      else fail "invalid output or outward effects incorrectly permitted a smaller-message native request" in
+  ignore (F.publish_registry ~lane_id:"librarian_exact"
+    ~slot_ids:(if Option.is_some native then [] else ["checkpoint-floor-api"])
+    ~cli_slot_ids:(if List.length native_answers=2 then [F.cli_primary_runtime;F.cli_secondary_runtime]
+      else if Option.is_some native || case=Cli_tail_checkpoint_refusal then [F.cli_primary_runtime] else [])
     (F.resolver_snapshot ~source:"checkpoint-floor-fixture" [{F.id="checkpoint-floor-api";base_url=server.base_url}]));
   let run () = Consumer.consume_one_with_runtime
-    ?cli_runner:(if case=Cli_tail_checkpoint_refusal then Some cli_runner else None) ~config ~keeper_name () in
+    ?cli_runner:(if Option.is_some native || case=Cli_tail_checkpoint_refusal then Some cli_runner else None) ~config ~keeper_name () in
   let result = if case=Interrupted_checkpoint_progress then
       Consumer.For_testing.consume_one_with_runtime_and_progress_writers
         ~write_official_progress_store:Official.write
@@ -3103,21 +3153,25 @@ let test_runtime_checkpoint_memory_floor case () =
           Error (Progress.Write_failed {path="injected-checkpoint-progress";message="fixture interrupted after checkpoint Memory"}))
         ~config ~keeper_name ()
     else run () in
-  let expected_calls = match case with
+  let expected_calls = match native with
+    | Some scenario -> if native_descent_succeeds scenario then 4 else List.length native_answers
+    | None -> match case with
     | Unknown_checkpoint_refusal -> 1 | Cli_tail_checkpoint_refusal -> 2
     | Checkpoint_holes_without_observations -> 3 | All_checkpoint_holes -> 5
     | Partial_checkpoint_hole | Retired_checkpoint_hole | Late_checkpoint_failure
     | Rewritten_checkpoint_source | Appended_checkpoint_suffix | Restarted_checkpoint_history
     | Moved_checkpoint_progress | Interrupted_checkpoint_progress -> 4 in
   check int "one actual whole-cut failure precedes each exact-message attempt" expected_calls (List.length !requests);
+  check int "only declared API slots receive HTTP generation requests"
+    (if Option.is_some native then 0 else expected_calls) (F.post_count server);
   check int "only the declared CLI tail is dispatched and never treated as proven API exhaustion"
-    (if case=Cli_tail_checkpoint_refusal then 2 else 0) !cli_calls;
+    (if Option.is_some native then expected_calls else if case=Cli_tail_checkpoint_refusal then 2 else 0) !cli_calls;
   let contains ~sub text =
     let rec at index = index+String.length sub<=String.length text
       && (String.sub text index (String.length sub)=sub || at (index+1)) in
     at 0 in
   List.iter (fun body ->
-    List.iter (fun marker -> check bool "only selected source content reaches the actual HTTP request" false
+    List.iter (fun marker -> check bool "only selected source content reaches the actual transport request" false
       (contains ~sub:marker body))
       [prefix_marker;next_trace_marker;"checkpoint-private-argument";"checkpoint-private-result"]) !requests;
   let publications () = Current.read_journal_tail ~keepers_dir ~keeper_id:keeper_name ~limit:20
@@ -3125,11 +3179,27 @@ let test_runtime_checkpoint_memory_floor case () =
       | Current.Journal_committed {program=Some proof;_} -> Some proof
       | Current.Journal_committed {program=None;_} | Current.Journal_failed _
       | Current.Journal_quarantined _ -> None) in
-  match case with
-  | Unknown_checkpoint_refusal | Cli_tail_checkpoint_refusal | Late_checkpoint_failure
-  | Rewritten_checkpoint_source | Restarted_checkpoint_history | Moved_checkpoint_progress ->
+  let failed = match native with Some scenario -> not (native_descent_succeeds scenario) | None ->
+    match case with
+    | Unknown_checkpoint_refusal | Cli_tail_checkpoint_refusal | Late_checkpoint_failure
+    | Rewritten_checkpoint_source | Restarted_checkpoint_history | Moved_checkpoint_progress -> true
+    | Partial_checkpoint_hole | Retired_checkpoint_hole | All_checkpoint_holes
+    | Checkpoint_holes_without_observations | Appended_checkpoint_suffix | Interrupted_checkpoint_progress -> false in
+  if failed then (
     (match result with
-     | Ok (Consumer.Memory_not_committed (_::_)) -> ()
+     | Ok (Consumer.Memory_not_committed (_::_ as reports)) ->
+       (match native with
+        | None -> ()
+        | Some scenario ->
+          check bool "aggregate native evidence blocks message descent" false
+            (Keeper_librarian_runtime.may_descend_messages reports);
+          let invalid = match scenario with
+            | Native_invalid_json_first | Native_invalid_domain_last -> true
+            | Native_codex_capacity | Native_claude_capacity | Native_codex_effect_started
+            | Native_claude_response_started | Native_opaque_failure -> false in
+          check bool "invalid output remains an explicit absorbing descent veto" invalid
+            (List.exists (fun (report : Keeper_librarian_runtime.not_committed) ->
+              report.message_descent=Keeper_librarian_runtime.Invalid_output_blocks_descent) reports))
      | Error error -> fail (Consumer.error_to_string error)
      | Ok _ -> fail "refused or changed checkpoint source advanced");
     check bool "failed inference cannot create a Memory program, snapshot or unread authority" true
@@ -3141,9 +3211,8 @@ let test_runtime_checkpoint_memory_floor case () =
      | Some before,_ | None,Some before -> check bool "failure preserves every authoritative byte after any injected owner mutation"
          true (bytes ()=before)
      | None,None -> check bool "an opaque whole-cut failure preserves the original atom progress" true
-         (read_progress config=Some prior_progress))
-  | Partial_checkpoint_hole | Retired_checkpoint_hole | All_checkpoint_holes
-  | Checkpoint_holes_without_observations | Appended_checkpoint_suffix | Interrupted_checkpoint_progress ->
+         (read_progress config=Some prior_progress)))
+  else (
     let expected_range = {original_range with Current.unread_messages=expected_holes} in
     check bool "one receipt accounts for the exact original complete checkpoint cut" true
       (Current.committed_durable_coverage ~keepers_dir ~keeper_id:keeper_name
@@ -3222,7 +3291,7 @@ let test_runtime_checkpoint_memory_floor case () =
     else if case<>Retired_checkpoint_hole then (
       (match run () with Ok Consumer.Nothing_to_read -> ()
        | Error error -> fail (Consumer.error_to_string error) | Ok _ -> fail "accounted checkpoint cut was synthesized again");
-      check int "quiet wake never generates for accounted checkpoint holes" expected_calls (List.length !requests))
+      check int "quiet wake never generates for accounted checkpoint holes" expected_calls (List.length !requests)))
 ;;
 
 (* These cases exercise the official consumer's production Runtime boundary:
@@ -3238,7 +3307,7 @@ type official_memory_floor_case =
   | Appended_official_turn
   | Interrupted_official_progress
 
-let test_runtime_official_memory_floor case () =
+let test_runtime_official_memory_floor ?native case () =
   let open Masc in
   let module Progress = Keeper_librarian_progress in
   let module F = Exact_output_fixture in
@@ -3250,6 +3319,8 @@ let test_runtime_official_memory_floor case () =
   Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true") @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
+  let with_runtimes f = if Option.is_some native then F.with_official_client_runtimes f else f () in
+  with_runtimes @@ fun () ->
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs env#fs;
   Eio.Switch.run @@ fun sw ->
@@ -3316,14 +3387,13 @@ let test_runtime_official_memory_floor case () =
       | _ -> fail "official mutation fixture lacks its original record" in
     Out_channel.with_open_bin path (fun channel ->
       List.iter (fun row -> output_string channel (Yojson.Safe.to_string row ^ "\n")) changed) in
-  let answer = F.openai_response (`Assoc ["new_claims",`List [];"dropped",`List [];
-    "working_contexts",`List [];"working_state",`String "Only actually accepted messages were judged."]) in
+  let selection = `Assoc ["new_claims",`List [];"dropped",`List [];
+    "working_contexts",`List [];"working_state",`String "Only actually accepted messages were judged."] in
   let refuse = `Request_entity_too_large,
     {|{"error":{"type":"invalid_request_error","message":"fixture body refused"}}|} in
   let unknown = `Internal_server_error,
     {|{"error":{"type":"server_error","message":"fixture opaque failure"}}|} in
-  let server = F.start_server ~sw ~net:env#net ~clock:env#clock
-    (F.Reply_with (fun index body ->
+  let before_request index body =
       requests := !requests @ [body];
       check_external_after 0;
       if index=1 then before_steps := Some (bytes ());
@@ -3343,7 +3413,10 @@ let test_runtime_official_memory_floor case () =
             ~assistant:"A later official answer." ~tools:[];
           append_official_boundary config ~trace_id ~turn:2 ~recorded_at:1001.
         | Partial_official_hole | All_official_holes | All_official_holes_without_observations | Unknown_official_refusal
-        | Late_official_failure | Interrupted_official_progress -> ());
+        | Late_official_failure | Interrupted_official_progress -> ()) in
+  let server = F.start_server ~sw ~net:env#net ~clock:env#clock
+    (F.Reply_with (fun index body ->
+      before_request index body;
       match case with
       | Unknown_official_refusal -> unknown
       | All_official_holes_without_observations ->
@@ -3355,11 +3428,20 @@ let test_runtime_official_memory_floor case () =
       | Appended_official_turn when index=0 -> refuse
       | Partial_official_hole | All_official_holes | Late_official_failure
       | Rewritten_official_message | Rewritten_official_observation | Appended_official_turn
-      | Interrupted_official_progress -> `OK,answer)) in
-  ignore (F.publish_registry ~lane_id:"librarian_exact" ~slot_ids:["official-floor-api"]
-    ~cli_slot_ids:[] (F.resolver_snapshot ~source:"official-floor-fixture"
+      | Interrupted_official_progress -> `OK,F.openai_response selection)) in
+  let cli_runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt =
+    check string "the actual official native slot serves the whole turn and exact messages" F.cli_primary_runtime runtime_id;
+    let index = List.length !requests in
+    before_request index prompt;
+    if index=0 then List.hd (native_descent_answers (Option.get native))
+    else if index<=List.length source then Ok (Yojson.Safe.to_string selection)
+    else fail "official native descent repeated an already accounted message" in
+  ignore (F.publish_registry ~lane_id:"librarian_exact"
+    ~slot_ids:(if Option.is_some native then [] else ["official-floor-api"])
+    ~cli_slot_ids:(if Option.is_some native then [F.cli_primary_runtime] else []) (F.resolver_snapshot ~source:"official-floor-fixture"
       [{F.id="official-floor-api";base_url=server.base_url}]));
-  let run () = Consumer.consume_one_with_runtime ~config ~keeper_name () in
+  let run () = Consumer.consume_one_with_runtime
+    ?cli_runner:(Option.map (fun _ -> cli_runner) native) ~config ~keeper_name () in
   let result = match case with
     | Interrupted_official_progress ->
       Consumer.For_testing.consume_one_with_runtime_and_progress_writers
@@ -3382,6 +3464,8 @@ let test_runtime_official_memory_floor case () =
     | Partial_official_hole | All_official_holes_without_observations | Late_official_failure | Rewritten_official_message
     | Rewritten_official_observation | Appended_official_turn | Interrupted_official_progress -> 3 in
   check int "one whole-turn attempt precedes the exact-message floor" expected_calls (List.length !requests);
+  check int "official native descent dispatches no undeclared HTTP target"
+    (if Option.is_some native then 0 else expected_calls) (F.post_count server);
   let publications () = Current.read_journal_tail ~keepers_dir ~keeper_id:keeper_name ~limit:20
     |> List.map get |> List.filter_map (function
       | Current.Journal_committed {program=Some proof;_} -> Some proof
@@ -3405,7 +3489,7 @@ let test_runtime_official_memory_floor case () =
      | None -> ())
   | Partial_official_hole | All_official_holes | All_official_holes_without_observations | Appended_official_turn
   | Interrupted_official_progress ->
-    let holes = if case=Appended_official_turn then [] else
+    let holes = if Option.is_some native || case=Appended_official_turn then [] else
       List.init (if case=All_official_holes || not has_observations then 2 else 1) (fun message_in_turn ->
         Unread.for_official_turn ~turn_ref ~boundary_line:1 ~message_in_turn ~messages:source
           ~reasons:[Keeper_librarian_input_refusal.Request_body_refused] |> get) in
@@ -3428,10 +3512,10 @@ let test_runtime_official_memory_floor case () =
       (program.Program.sources=sources && program.unread=holes);
     check bool "only accepted messages receive source-bearing decisions" true
       (List.map (fun (stage : Program.stage) -> stage.decision.sources) program.stages =
-       if case=Appended_official_turn then List.map (fun source -> [source]) sources
+       if Option.is_some native || case=Appended_official_turn then List.map (fun source -> [source]) sources
        else if not has_observations then []
        else [if case=All_official_holes then [] else [List.nth sources 1]]);
-    let expected_messages = if case=Appended_official_turn then List.map (fun original -> [original]) source
+    let expected_messages = if Option.is_some native || case=Appended_official_turn then List.map (fun original -> [original]) source
       else if not has_observations then []
       else [if case=All_official_holes then [] else [List.nth source 1]] in
     check bool "accepted stage evidence preserves exact original bytes and excludes each hole" true
@@ -4159,7 +4243,23 @@ let () =
             test_new_unreadable_boundary_is_not_hidden_by_preflight
         ] )
     ; ( "checkpoint runtime message floor"
-      , [ test_case "actual runtime accounts a multi-atom checkpoint cut with one API hole" `Quick
+      , [ test_case "unmeasured native Codex capacity descends through the actual checkpoint producer without holes" `Quick
+            (test_runtime_checkpoint_memory_floor ~native:Native_codex_capacity Partial_checkpoint_hole)
+        ; test_case "unmeasured native Claude capacity descends through the actual checkpoint producer without holes" `Quick
+            (test_runtime_checkpoint_memory_floor ~native:Native_claude_capacity Partial_checkpoint_hole)
+        ; test_case "unmeasured native capacity finishes the retired checkpoint before current metadata" `Quick
+            (test_runtime_checkpoint_memory_floor ~native:Native_claude_capacity Retired_checkpoint_hole)
+        ; test_case "invalid JSON before native capacity vetoes checkpoint message descent" `Quick
+            (test_runtime_checkpoint_memory_floor ~native:Native_invalid_json_first Partial_checkpoint_hole)
+        ; test_case "invalid domain output after native capacity vetoes checkpoint message descent" `Quick
+            (test_runtime_checkpoint_memory_floor ~native:Native_invalid_domain_last Partial_checkpoint_hole)
+        ; test_case "native Codex refusal after a tool effect cannot descend checkpoint messages" `Quick
+            (test_runtime_checkpoint_memory_floor ~native:Native_codex_effect_started Partial_checkpoint_hole)
+        ; test_case "native Claude refusal after response emission cannot descend checkpoint messages" `Quick
+            (test_runtime_checkpoint_memory_floor ~native:Native_claude_response_started Partial_checkpoint_hole)
+        ; test_case "opaque native failure cannot descend checkpoint messages" `Quick
+            (test_runtime_checkpoint_memory_floor ~native:Native_opaque_failure Partial_checkpoint_hole)
+        ; test_case "actual runtime accounts a multi-atom checkpoint cut with one API hole" `Quick
             (test_runtime_checkpoint_memory_floor Partial_checkpoint_hole)
         ; test_case "actual runtime finishes the retired checkpoint before the metadata trace" `Quick
             (test_runtime_checkpoint_memory_floor Retired_checkpoint_hole)
@@ -4185,7 +4285,9 @@ let () =
             (test_runtime_checkpoint_memory_floor Interrupted_checkpoint_progress)
         ] )
     ; ( "official-client turns"
-      , [ test_case "actual runtime accounts an official turn with one proven API hole" `Quick
+      , [ test_case "unmeasured native Claude capacity descends the actual official turn without holes" `Quick
+            (test_runtime_official_memory_floor ~native:Native_claude_capacity Partial_official_hole)
+        ; test_case "actual runtime accounts an official turn with one proven API hole" `Quick
             (test_runtime_official_memory_floor Partial_official_hole)
         ; test_case "actual runtime judges host observations after all official messages are refused" `Quick
             (test_runtime_official_memory_floor All_official_holes)

@@ -112,13 +112,16 @@ let release_width ~config ~keeper_name =
 
 (* A pass can report more than once: the walk fails, then recording that
    failure raises and the handler around it reports the raise. Evidence of
-   size from any report stands; the latest cause is the one logged. *)
+   size from any report stands; the latest cause is the one logged. The
+   separate message-descent policy also retains any invalid-output veto. *)
 let merge_not_committed earlier (outcome : Keeper_librarian_runtime.not_committed) =
   match earlier with
   | None -> outcome
   | Some (earlier : Keeper_librarian_runtime.not_committed) ->
     { outcome with
-      Keeper_librarian_runtime.walk_shows_size =
+      Keeper_librarian_runtime.message_descent =
+        Keeper_librarian_runtime.merge_message_descent earlier.message_descent outcome.message_descent
+    ; Keeper_librarian_runtime.walk_shows_size =
         earlier.Keeper_librarian_runtime.walk_shows_size
         || outcome.Keeper_librarian_runtime.walk_shows_size
     ; smaller_range_meets_same_failure =
@@ -472,9 +475,10 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
         ~continuity:selected
         ?durable_range_id:(if memory_committed then None else Some range_id)
         ~on_cli_input_limit:(fun observed ->
-          cli_limit := Some observed;
-          remember_input_capacity ~config ~keeper_name observed;
-          capacity := Some observed)
+          (* Do not cache a failed walk's measurement until its complete
+             descent policy settles. An invalid-output veto must also hold
+             on the next wake, before pre-dispatch fitting. *)
+          cli_limit := Some observed)
         ~on_not_committed:(fun outcome -> cause := Some (merge_not_committed !cause outcome))
         ~on_continuity_committed:(fun ~served_by _ ->
           (* A CLI's reported limit is a fact about the CLI transport. The
@@ -510,19 +514,15 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
          the width stands. A pass can end without one -- a snapshot commit
          that failed on disk, a raise before any request was composed -- and
          reading less would answer a local failure by shrinking the source. *)
-      let shows_size =
-        match !cause with
-        | Some outcome -> outcome.Runtime.walk_shows_size
-        | None -> false in
+      let may_descend = Runtime.may_descend_messages (Option.to_list !cause) in
       match !cli_limit with
-      | None when not shows_size ->
-        (* Nothing the walk met could be answered by sending less. §4.3 waits
-           for the next signal: reading less here would answer a quota storm
-           or an expired credential by walking the source down toward a single
-           atom, and the width is only released when the backlog empties, so
-           it would stay there. *)
+      | (None | Some _) when not may_descend ->
+        (* The complete walk either has no descent evidence or contains an
+           invalid-output veto. Keep the source width unchanged for the next
+           signal rather than treating a quota or malformed output as a reason
+           to walk down toward one atom. *)
         report O.Not_committed O.No_smaller_range_evidence
-          (Printf.sprintf "no failure a smaller range would avoid; the width stands; cause=%s"
+          (Printf.sprintf "failed walk does not permit reading less; the width stands; cause=%s"
              (cause_detail ()))
       | None ->
         (* Something the walk met could have been answered by sending less, so
@@ -561,6 +561,8 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
               report O.Not_committed O.Indivisible_unit_uncommitted
                 (Printf.sprintf "one unit remains and the pass did not commit; cause=%s" (cause_detail ()))))
       | Some observed ->
+        remember_input_capacity ~config ~keeper_name observed;
+        capacity := Some observed;
         (* A CLI slot named the character limit it refused at, so the size
            that fits is computed rather than searched: this arm retries inside
            the pass and records no width, where the arm above, which only

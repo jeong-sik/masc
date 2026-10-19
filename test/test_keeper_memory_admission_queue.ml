@@ -659,6 +659,9 @@ let test_partially_lost_receipts_keep_queue_blocked () = with_store (fun keepers
 let test_size_with_a_same_failure_is_deferred_whole () =
   let reason ~capacity ~same : Masc.Keeper_librarian_runtime.not_committed =
     { detail = "walk"; walk_shows_size = capacity;
+      message_descent =
+        (if capacity then Masc.Keeper_librarian_runtime.Smaller_input_may_help
+         else Masc.Keeper_librarian_runtime.No_descent_evidence);
       input_capacity_evidence =
         (if capacity then Masc.Keeper_librarian_runtime.Input_capacity_refused
          else Masc.Keeper_librarian_runtime.No_input_capacity_refusal);

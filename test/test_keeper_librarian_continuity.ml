@@ -955,7 +955,43 @@ let tool_atoms =
 (* One assistant/tool atom cannot be cut at an atom boundary. Its Memory
    receipt already exists, but no continuity frontier exists. A body refusal
    must allow sequential inference without publishing either partial state. *)
-let test_volatile_message_floor ~failure () =
+type queue_native_descent =
+  | Queue_codex_native
+  | Queue_claude_native
+  | Queue_json_before_native
+  | Queue_native_before_domain
+  | Queue_measured_before_json
+  | Queue_effect_started
+  | Queue_opaque_failure
+
+let queue_native_failure ~claude ~tool_effect =
+  if claude then Masc.Fusion_official_client.Claude_failure
+    (Runtime_claude_code.Context_window_exceeded
+      {message="fixture unmeasured native refusal";tool_effect_attempted=tool_effect;response_emitted=false})
+  else Masc.Fusion_official_client.Codex_failure
+    (Runtime_codex_app_server.Context_window_exceeded
+      {message="fixture unmeasured native refusal";tool_effect_attempted=tool_effect})
+
+let queue_native_succeeds = function
+  | Queue_codex_native | Queue_claude_native -> true
+  | Queue_json_before_native | Queue_native_before_domain | Queue_measured_before_json
+  | Queue_effect_started | Queue_opaque_failure -> false
+
+let queue_native_answers ~prompt = function
+  | Queue_codex_native -> [Error (queue_native_failure ~claude:false ~tool_effect:false)]
+  | Queue_claude_native -> [Error (queue_native_failure ~claude:true ~tool_effect:false)]
+  | Queue_json_before_native -> [Ok "not-json";Error (queue_native_failure ~claude:false ~tool_effect:false)]
+  | Queue_native_before_domain -> [Error (queue_native_failure ~claude:false ~tool_effect:false);Ok "{}"]
+  | Queue_measured_before_json ->
+    let actual_chars = Runtime_codex_app_server.prompt_char_count prompt |> get in
+    [Error (Masc.Fusion_official_client.Codex_failure (Runtime_codex_app_server.Rpc_error
+      {method_="turn/start";code=Some (-32602);message="fixture measured capacity before invalid output";
+       data=Some (`Assoc ["input_error_code",`String "input_too_large";
+         "actual_chars",`Int actual_chars;"max_chars",`Int (actual_chars-1)])}));Ok "not-json"]
+  | Queue_effect_started -> [Error (queue_native_failure ~claude:false ~tool_effect:true)]
+  | Queue_opaque_failure -> [Error (Masc.Fusion_official_client.Setup_failure "fixture opaque native failure")]
+
+let test_volatile_message_floor ?native ~failure () =
   let module Registry = Masc.Exact_lane_run_registry in
   let requests = ref [] and before_answer = ref (fun () -> ()) in
   let atoms = List.take 2 (List.drop 1 tool_atoms) in
@@ -963,7 +999,18 @@ let test_volatile_message_floor ~failure () =
       (`Assoc ["working_state", `String state]) in
   let refusal status = status,
       {|{"error":{"type":"invalid_request_error","message":"fixture refusal"}}|} in
-  narrowing_fixture ~atoms ~slot_count:1
+  let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt =
+    check string "the native slot serves the real Memory-covered context pass" Exact_output_fixture.cli_primary_runtime runtime_id;
+    (!before_answer) ();
+    let position = List.length !requests in
+    requests := !requests @ [prompt];
+    if position=0 then List.hd (queue_native_answers ~prompt (Option.get native))
+    else if position<=2 then Ok (Yojson.Safe.to_string (`Assoc ["working_state",
+      `String (if position=1 then "remembered-call" else "remembered-call-and-result")]))
+    else fail "native context descent generated after the original atom was complete" in
+  narrowing_fixture ~atoms ~slot_count:(if Option.is_some native then 0 else 1)
+    ~cli_slot_ids:(if Option.is_some native then [Exact_output_fixture.cli_primary_runtime] else [])
+    ?cli_runner:(Option.map (fun _ -> runner) native)
     ~answer:(fun index body ->
       (!before_answer) ();
       requests := !requests @ [body];
@@ -1068,7 +1115,7 @@ type memory_floor_case =
 (* Drive the production Queue -> Runtime CLI lane -> parsed/gated Memory
    inference path. One assistant/tool exchange is one indivisible atom,
    so a whole-request refusal must stage each exact message before publishing. *)
-let test_uncommitted_memory_message_floor case () =
+let test_uncommitted_memory_message_floor ?native case () =
   let module Current = Masc.Keeper_memory_os_current in
   let module Program = Masc.Keeper_memory_os_program in
   let module Progress = Masc.Keeper_librarian_progress in
@@ -1095,19 +1142,23 @@ let test_uncommitted_memory_message_floor case () =
      "dropped", `List []; "working_contexts", `List [];
      "working_state", `String (if first then "volatile-call-read" else "complete-call-and-result")]) in
   let runner ~runtime_id ~system_prompt:_ ~output_schema ~prompt =
+    let blocked = Option.fold ~none:false ~some:(fun mode -> not (queue_native_succeeds mode)) native in
+    let native_answers = Option.fold ~none:[] ~some:(queue_native_answers ~prompt) native in
+    let position = if blocked then List.length !requests mod List.length native_answers else List.length !requests mod 3 in
     check string "the actual CLI fallback serves every stage"
-      Exact_output_fixture.cli_primary_runtime runtime_id;
+      (if blocked && position=1 then Exact_output_fixture.cli_secondary_runtime
+       else Exact_output_fixture.cli_primary_runtime) runtime_id;
     check bool "each stage uses the Memory output contract" true
       (U.member "new_claims" (U.member "properties" output_schema) <> `Null);
-    let position = List.length !requests mod 3 in
     requests := !requests @ [prompt];
-    (!before_answer) position;
+    if not blocked then (!before_answer) position;
     let actual_chars = Runtime_codex_app_server.prompt_char_count prompt |> get in
-    (if position<>0 then
+    (if Option.is_none native && position<>0 then
        check bool "each staged request fits the CLI's actual reported character bound" true
          (actual_chars <= Option.get !observed_limit));
-    match position with
-    | 0 ->
+    if blocked then List.nth native_answers position else match position,native with
+    | 0,Some _ -> List.hd native_answers
+    | 0,None ->
       (* This is the same measured CLI refusal boundary used by the existing
          Queue fitting fixture, rather than a native admission-only verdict. *)
       let max_chars = actual_chars-1 in
@@ -1116,12 +1167,17 @@ let test_uncommitted_memory_message_floor case () =
         {method_="turn/start";code=Some (-32602);message="fixture measured input capacity";
          data=Some (`Assoc ["input_error_code",`String "input_too_large";
            "actual_chars",`Int actual_chars;"max_chars",`Int max_chars])}))
-    | 1 -> Ok (stage_answer ~first:true)
-    | 2 when !fail_late -> Error (Masc.Fusion_official_client.Setup_failure
+    | 1,_ -> Ok (stage_answer ~first:true)
+    | 2,_ when !fail_late -> Error (Masc.Fusion_official_client.Setup_failure
         "fixture unavailable after the first accepted Memory step")
-    | 2 -> Ok (stage_answer ~first:false)
+    | 2,_ -> Ok (stage_answer ~first:false)
     | _ -> fail "unexpected message-floor phase" in
-  narrowing_fixture ~atoms:source ~cli_slot_ids:[Exact_output_fixture.cli_primary_runtime]
+  let cli_slots = match native with
+    | Some (Queue_json_before_native | Queue_native_before_domain | Queue_measured_before_json) ->
+      [Exact_output_fixture.cli_primary_runtime;Exact_output_fixture.cli_secondary_runtime]
+    | None | Some (Queue_codex_native | Queue_claude_native | Queue_effect_started | Queue_opaque_failure) ->
+      [Exact_output_fixture.cli_primary_runtime] in
+  narrowing_fixture ~atoms:source ~cli_slot_ids:cli_slots
     ~cli_runner:runner ~slot_count:0
     ~answer:(fun _ _ -> fail "a CLI-only fixture must not dispatch HTTP")
   @@ fun ~bodies:_ ~pass:_ ~coverage ~hide_source:_ ~restart:_ ~config ->
@@ -1180,6 +1236,26 @@ let test_uncommitted_memory_message_floor case () =
   let pass () = Queue.For_testing.run_continuity ~cli_runner:runner
     ~has_waiting:(fun () -> true) ~base_path ~keeper_name () in
   pass ();
+  let blocked = Option.fold ~none:false ~some:(fun mode -> not (queue_native_succeeds mode)) native in
+  if blocked then (
+    let visits_per_walk = List.length cli_slots in
+    let assert_uncommitted () =
+      check (option int) "a vetoed native walk publishes no continuation" None (coverage ());
+      check bool "a vetoed native walk cannot publish Memory or unread authority" true
+        ((Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get)=Some memory_before
+         && (Current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name |> get)=[]);
+      check bool "a vetoed walk cannot install a measured prefit capacity for a later wake" true
+        (Queue.For_testing.last_input_capacity ~config ~keeper_name=None);
+      check bool "a vetoed walk cannot certify the original atom as committed" false
+        (P.memory_committed ~config ~keeper_name prepared |> get) in
+    check int "the first failed native walk visits each declared slot only once" visits_per_walk (List.length !requests);
+    assert_uncommitted ();
+    pass ();
+    check int "the next wake retains the entire original input and visits the same walk" (2*visits_per_walk) (List.length !requests);
+    List.iter (fun index -> check string "no cached prefit may bypass the veto on the next wake"
+      (List.nth !requests index) (List.nth !requests (index+visits_per_walk))) (List.init visits_per_walk Fun.id);
+    assert_uncommitted ())
+  else (
   (match case with
    | Late_memory_failure ->
      check int "late opaque refusal stops after the exact second message" 3 (List.length !requests);
@@ -1269,7 +1345,7 @@ let test_uncommitted_memory_message_floor case () =
        check int "a concurrent suffix remains outside the committed prefix" 1 (P.start_atom remaining);
        check int "the next source still includes the newly completed suffix" 2 (P.end_atom remaining)
      | Complete_memory_floor | Late_memory_failure | Rewritten_memory_source -> ())
-  | _, _ -> fail "unexpected number of canonical Memory program publications"
+  | _, _ -> fail "unexpected number of canonical Memory program publications")
 
 (* Only a completely exhausted real API walk grants unread-hole authority.
    The Queue still judges the next exact message and publishes the original
@@ -1732,6 +1808,7 @@ let test_reports_in_one_pass_keep_any_size_verdict () =
   let merge = Masc.Keeper_librarian_queue_refresh.For_testing.merge_not_committed in
   let report ?(same = false) detail walk_shows_size =
     { R.detail; walk_shows_size; smaller_range_meets_same_failure = same;
+      message_descent=(if walk_shows_size then R.Smaller_input_may_help else R.No_descent_evidence);
       input_capacity_evidence = R.No_input_capacity_refusal; provider_input_refusals = [] } in
   List.iter
     (fun (name, earlier, (latest : R.not_committed), expected) ->
@@ -1812,6 +1889,24 @@ let () = run "production continuity pair"
       (test_volatile_message_floor ~failure:(Some `Request_entity_too_large));
     test_case "uncommitted Memory message floor publishes one complete program" `Quick
       (test_uncommitted_memory_message_floor Complete_memory_floor);
+    test_case "native Codex capacity descends through actual uncommitted Queue Memory without holes" `Quick
+      (test_uncommitted_memory_message_floor ~native:Queue_codex_native Complete_memory_floor);
+    test_case "native Claude capacity descends through actual uncommitted Queue Memory without holes" `Quick
+      (test_uncommitted_memory_message_floor ~native:Queue_claude_native Complete_memory_floor);
+    test_case "invalid JSON before native capacity blocks Queue descent across wakes" `Quick
+      (test_uncommitted_memory_message_floor ~native:Queue_json_before_native Complete_memory_floor);
+    test_case "invalid domain after native capacity blocks Queue descent across wakes" `Quick
+      (test_uncommitted_memory_message_floor ~native:Queue_native_before_domain Complete_memory_floor);
+    test_case "measured capacity followed by invalid JSON installs no Queue cache across two wakes" `Quick
+      (test_uncommitted_memory_message_floor ~native:Queue_measured_before_json Complete_memory_floor);
+    test_case "native refusal after a tool effect cannot descend Queue Memory" `Quick
+      (test_uncommitted_memory_message_floor ~native:Queue_effect_started Complete_memory_floor);
+    test_case "opaque native failure cannot descend Queue Memory" `Quick
+      (test_uncommitted_memory_message_floor ~native:Queue_opaque_failure Complete_memory_floor);
+    test_case "native Codex capacity descends actual Memory-covered Queue context without changing Memory" `Quick
+      (test_volatile_message_floor ~native:Queue_codex_native ~failure:None);
+    test_case "native Claude capacity descends actual Memory-covered Queue context without changing Memory" `Quick
+      (test_volatile_message_floor ~native:Queue_claude_native ~failure:None);
     test_case "uncommitted Memory late failure preserves all stores and retries source" `Quick
       (test_uncommitted_memory_message_floor Late_memory_failure);
     test_case "uncommitted Memory rejects a changed original source prefix" `Quick

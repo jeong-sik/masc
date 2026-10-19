@@ -687,12 +687,17 @@ let test_admission_worker_requires_actual_input_capacity () =
     check string "failure leaves current facts unchanged" current_before
       (Fs_compat.load_file (Current.path_for_keepers_dir ~keepers_dir ~keeper_id));
     !reports in
-  List.iter (fun answer ->
+  List.iter (fun (answer,expected_descent) ->
     let reports = attempt ~answers:[Fixture.cli_primary_runtime,answer] ~expected_calls:1 ~expected_partition_sizes:[4] in
     check bool "output and transport failure provide no admission capacity evidence" true
       (List.for_all (fun (r : Runtime.not_committed) ->
-        r.input_capacity_evidence=Runtime.No_input_capacity_refusal) reports))
-    [Ok "not-json"; Ok "{}"; Error (Masc.Fusion_official_client.Setup_failure "offline")];
+        r.input_capacity_evidence=Runtime.No_input_capacity_refusal
+        && r.message_descent=expected_descent) reports);
+    check bool "output and ordinary transport failures cannot descend messages" false
+      (Runtime.may_descend_messages reports))
+    [Ok "not-json",Runtime.Invalid_output_blocks_descent;
+     Ok "{}",Runtime.Invalid_output_blocks_descent;
+     Error (Masc.Fusion_official_client.Setup_failure "offline"),Runtime.No_descent_evidence];
   let capacity_answer = Error (Masc.Fusion_official_client.Codex_failure
     (Runtime_codex_app_server.Context_window_exceeded
       {message="fixture explicit input refusal"; tool_effect_attempted=false})) in
@@ -703,7 +708,10 @@ let test_admission_worker_requires_actual_input_capacity () =
       r.input_capacity_evidence=Runtime.Input_capacity_refused) reports);
   check bool "native context refusal is distinct from measured range-size evidence" true
     (List.for_all (fun (r : Runtime.not_committed) ->
-      not r.walk_shows_size && not r.smaller_range_meets_same_failure) reports);
+      not r.walk_shows_size && not r.smaller_range_meets_same_failure
+      && r.message_descent=Runtime.Smaller_input_may_help) reports);
+  check bool "native context refusal permits reading a smaller message input" true
+    (Runtime.may_descend_messages reports);
   List.iter (fun (first,second) ->
     let reports = attempt
         ~answers:[Fixture.cli_primary_runtime,first;Fixture.cli_secondary_runtime,second]
@@ -711,8 +719,70 @@ let test_admission_worker_requires_actual_input_capacity () =
     check bool "invalid output vetoes capacity evidence in either slot order" true
       (List.for_all (fun (r : Runtime.not_committed) ->
         r.input_capacity_evidence=Runtime.No_input_capacity_refusal
-        && not r.walk_shows_size) reports))
-    [Ok "{}",capacity_answer;capacity_answer,Ok "not-json"]
+        && not r.walk_shows_size
+        && r.message_descent=Runtime.Invalid_output_blocks_descent) reports);
+    check bool "invalid output blocks message descent in either slot order" false
+      (Runtime.may_descend_messages reports))
+    [Ok "{}",capacity_answer;capacity_answer,Ok "{}";
+     Ok "not-json",capacity_answer;capacity_answer,Ok "not-json"]
+;;
+
+type native_capacity_source = Native_codex | Native_claude
+
+let test_native_capacity_message_descent native () =
+  with_eio @@ fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    {Runtime_schema.default_typesafeai with lane_enabled=false;absorb_gate=false} @@ fun () ->
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  let capacity_answer = Error (match native with
+    | Native_codex -> Masc.Fusion_official_client.Codex_failure
+        (Runtime_codex_app_server.Context_window_exceeded
+          {message="fixture native input refusal";tool_effect_attempted=false})
+    | Native_claude -> Masc.Fusion_official_client.Claude_failure
+        (Runtime_claude_code.Context_window_exceeded
+          {message="fixture native input refusal";tool_effect_attempted=false;response_emitted=false})) in
+  let keeper_id = "cli-lane-keeper" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let paths =
+    [Current.path_for_keepers_dir ~keepers_dir ~keeper_id;
+     Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id;
+     Current.publication_receipt_path ~keepers_dir ~keeper_id;
+     Current.durable_range_receipt_path ~keepers_dir ~keeper_id;
+     Current.unread_ledger_path ~keepers_dir ~keeper_id;
+     Masc.Keeper_librarian_context.path ~keepers_dir ~keeper_id] in
+  let before = List.map Fs_compat.load_file_opt paths in
+  let attempt answers expected_descent =
+    publish_unreachable_lane ~cli_only:true ~cli_slot_ids:(List.map fst answers)
+      ~source:"native Memory message descent fixture" ();
+    let calls = ref [] in
+    let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+      calls := runtime_id :: !calls;
+      List.assoc runtime_id answers in
+    (match Runtime.infer_memory_step ~cli_runner:runner ~base_path ~keepers_dir ~keeper_id
+        ~previous_state:None ~unread_messages:[] (input ()) with
+     | Runtime.Memory_inferred _ -> fail "a native failure became an accepted Memory decision"
+     | Runtime.Memory_not_inferred failure ->
+       check bool "the actual native walk retains a failure report" true (failure.reports<>[]);
+       check bool "native failures never grant API-only unread-hole authority" true
+         (failure.exhausted_input_refusals=None);
+       check bool "actual native walk carries the closed message descent decision" true
+         (List.for_all (fun (report : Runtime.not_committed) ->
+           report.message_descent=expected_descent && not report.walk_shows_size) failure.reports);
+       check bool "native capacity can descend only while invalid output is absent"
+         (expected_descent=Runtime.Smaller_input_may_help)
+         (Runtime.may_descend_messages failure.reports));
+    check (list string) "every declared native slot is actually dispatched in order"
+      (List.map fst answers) (List.rev !calls);
+    check bool "failed native inference leaves every Memory store unchanged" true
+      (before=List.map Fs_compat.load_file_opt paths) in
+  attempt [Fixture.cli_primary_runtime,capacity_answer] Runtime.Smaller_input_may_help;
+  List.iter (fun invalid ->
+    attempt [Fixture.cli_primary_runtime,invalid;Fixture.cli_secondary_runtime,capacity_answer]
+      Runtime.Invalid_output_blocks_descent;
+    attempt [Fixture.cli_primary_runtime,capacity_answer;Fixture.cli_secondary_runtime,invalid]
+      Runtime.Invalid_output_blocks_descent)
+    [Ok "{}";Ok "not-json"]
 ;;
 
 (* The absorb gate refuses before any request when the pass's observations
@@ -1085,7 +1155,8 @@ let test_mixed_admission ~depends_on_deferred () =
 
 let test_a_later_report_without_capacity_evidence_keeps_the_refusal () =
   let report evidence : Runtime.not_committed =
-    { input_capacity_evidence = evidence; provider_input_refusals = []; detail = "fixture"; walk_shows_size = false;
+    { input_capacity_evidence = evidence; provider_input_refusals = []; message_descent=Runtime.No_descent_evidence;
+      detail = "fixture"; walk_shows_size = false;
       smaller_range_meets_same_failure = false } in
   let refused = report Runtime.Input_capacity_refused in
   let silent = report Runtime.No_input_capacity_refusal in
@@ -1752,6 +1823,10 @@ let () =
               ~kind:Current.Exact_execution_failure ~calls:1 ())
         ; test_case "admission worker partitions only actual input capacity refusals" `Quick
             test_admission_worker_requires_actual_input_capacity
+        ; test_case "native Codex capacity permits message descent without unread authority" `Quick
+            (test_native_capacity_message_descent Native_codex)
+        ; test_case "native Claude capacity permits message descent without unread authority" `Quick
+            (test_native_capacity_message_descent Native_claude)
         ; test_case "absorb gate capacity refusal splits the admission batch" `Quick
             test_absorb_gate_capacity_refusal_splits_the_admission_batch
         ; test_case "settled explicit candidates commit through exact lane and receipt" `Quick

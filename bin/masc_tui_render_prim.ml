@@ -1465,24 +1465,34 @@ let refresh_progress_badge (state : state) =
   in
   match state.http_refresh_progress with
   | Some (authority, progress) when authority = state.workspace_authority ->
-      let outcome_notice outcome label =
-        match Http_refresh_progress.settled_sources ~outcome progress with
+      let outcome_notice completion label =
+        match Http_refresh_progress.settled_sources ~completion progress with
         | [] -> ""
         | source :: rest -> " · " ^ Http_refresh_progress.source_name source ^ " " ^ label
             ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) in
-      let failures = outcome_notice Http_refresh_progress.Failed "read failed"
-        ^ outcome_notice Http_refresh_progress.Interrupted "interrupted" in
+      let partials = match Http_refresh_progress.partial_readings progress with
+        | [] -> ""
+        | (_,parts) :: rest ->
+            let names outcome = Http_refresh_progress.components parts
+              |> List.filter_map (fun (component,observed) -> if observed=outcome
+                then Some (Http_refresh_progress.component_name component) else None)
+              |> String.concat ", " in
+            " · partial: " ^ names Http_refresh_progress.Part_failed ^ " failed; "
+              ^ names Http_refresh_progress.Part_received ^ " received"
+              ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) in
+      let notices = outcome_notice Http_refresh_progress.Failed_read "read failed"
+        ^ outcome_notice Http_refresh_progress.Interrupted_read "interrupted" ^ partials in
       (match progress.Http_refresh_progress.phase with
-       | Http_refresh_progress.Finished _ -> failures ^ foreground
+       | Http_refresh_progress.Finished _ -> notices ^ foreground
        | Http_refresh_progress.In_flight ->
-           if foreground <> "" then failures ^ foreground else
+           if foreground <> "" then notices ^ foreground else
            let pending = match Http_refresh_progress.pending_sources progress with
              | [] -> (match progress.Http_refresh_progress.readings with
                  | [] -> "refreshing"
                  | _ :: _ -> "finishing refresh")
              | source :: rest -> "reading " ^ Http_refresh_progress.source_name source
                  ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) in
-           failures ^ " · " ^ pending)
+           notices ^ " · " ^ pending)
   | Some _ | None -> foreground
 
 let connection_badge (state : state) =

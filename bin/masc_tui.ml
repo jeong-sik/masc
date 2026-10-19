@@ -12150,7 +12150,7 @@ let launch_approvals_summary_load state ~mailbox =
                       ~prior_contact:Masc_tui_server_lifecycle.Server_reached () in
                     snapshot)
 
-let observe_http_reader ~on_progress source ~received read =
+let observe_http_reader ~on_progress source ~outcome read =
   match on_progress with
   | None -> read ()
   | Some publish ->
@@ -12159,7 +12159,7 @@ let observe_http_reader ~on_progress source ~received read =
         (Http_refresh_progress.Completed (source, Mtime_clock.elapsed_ns (), outcome)) in
       match read () with
       | result ->
-          settle (if received result then Http_refresh_progress.Received else Http_refresh_progress.Failed);
+          settle (outcome result);
           result
       | exception (Eio.Cancel.Cancelled _ as exn) ->
           settle Http_refresh_progress.Interrupted;
@@ -12186,7 +12186,7 @@ let load_http_keeper_surfaces ~on_progress ~on_asks ~on_roster ~ask_request ~ros
        if not needs.needs_asks then None
        else Option.map (fun asks_request ->
          observe_http_reader ~on_progress Http_refresh_progress.Questions
-           ~received:(fun observation -> Result.is_ok observation.asks_result) (fun () ->
+           ~outcome:(fun observation -> Http_refresh_progress.of_result observation.asks_result) (fun () ->
          let asks_result = match expected_workspace with
            | None -> Error "Server workspace identity is unavailable"
            | Some expected_workspace -> Masc_tui_http.fetch_keeper_asks ~expected_workspace ~host ~port () in
@@ -12200,8 +12200,7 @@ let load_http_keeper_surfaces ~on_progress ~on_asks ~on_roster ~ask_request ~ros
        if not needs.needs_keeper_roster then None
        else Option.map (fun roster_request ->
          observe_http_reader ~on_progress Http_refresh_progress.Keepers
-           ~received:(fun observation -> match observation.roster_result with
-             | Ok (_, Ok _) -> true | Ok (_, Error _) | Error _ -> false)
+           ~outcome:(fun observation -> Http_refresh_progress.of_keeper_roster observation.roster_result)
            (fun () ->
              let roster_result = match expected_workspace with
                | None -> Error (Keeper_control.Roster_malformed "Server workspace identity is unavailable")
@@ -12230,16 +12229,16 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
         result)
     | Error _, _, _ | Ok _, None, _ | Ok _, Some _, Fs_compat.Non_eio -> load ()
   in
-  let when_needed ~source ~dataset ~received wanted load =
+  let when_needed ~source ~dataset ~outcome wanted load =
     if wanted then Some (publish_bound ~source ~dataset (fun () ->
       observe_http_reader ~on_progress
-        (Http_refresh_progress.Surface_data source) ~received load))
+        (Http_refresh_progress.Surface_data source) ~outcome load))
     else None in
   (* Metrics draws the transport and the Overview reads its queue pressure,
      so a refresh on another surface does not spend a request on it. [None]
      leaves whatever the last read observed. *)
   let read_transport () =
-    when_needed ~source:Surface_read_order.Transport ~received:Result.is_ok
+    when_needed ~source:Surface_read_order.Transport ~outcome:Http_refresh_progress.of_result
       ~dataset:(fun result -> Dataset_transport result)
       needs.needs_transport (fun () ->
         load_transport_health ~host ~port)
@@ -12257,7 +12256,7 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
           ~dataset:(fun (board, hearths) -> Dataset_board (board, hearths)) (fun () ->
         observe_http_reader ~on_progress
           (Http_refresh_progress.Surface_data Surface_read_order.Board)
-          ~received:(fun (board, hearths) -> Result.is_ok board && Result.is_ok hearths)
+          ~outcome:Http_refresh_progress.of_board
           (fun () -> Masc_tui_loader.read_pair
             (fun () -> load_board_list ~host ~port ~sort_by:(board_sort_label board_sort)
               ~hearth:board_hearth)
@@ -12265,19 +12264,19 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
       Some board, Some hearths
   in
   let read_planning () =
-    when_needed ~source:Surface_read_order.Planning ~received:Result.is_ok
+    when_needed ~source:Surface_read_order.Planning ~outcome:Http_refresh_progress.of_result
       ~dataset:(fun result -> Dataset_planning result)
       needs.needs_planning (fun () -> load_planning ~host ~port)
   in
   let read_system_logs () =
-    when_needed ~source:Surface_read_order.System_logs ~received:Result.is_ok
+    when_needed ~source:Surface_read_order.System_logs ~outcome:Http_refresh_progress.of_result
       ~dataset:(fun result -> Dataset_system_logs result)
       needs.needs_system_logs (fun () ->
         load_system_logs ~host ~port ?level:system_log_level
           ~limit:system_log_page ())
   in
   let read_fleet_safety () =
-    when_needed ~source:Surface_read_order.Fleet_safety ~received:Result.is_ok
+    when_needed ~source:Surface_read_order.Fleet_safety ~outcome:Http_refresh_progress.of_result
       ~dataset:(fun result -> Dataset_fleet_safety result)
       needs.needs_fleet_safety (fun () -> load_fleet_safety ~host ~port)
   in
@@ -12288,7 +12287,7 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
   let read_runtime_quota () =
     when_needed ~source:Surface_read_order.Runtime_quota
       ~dataset:(fun (runtimes, quota) -> Dataset_runtime_quota (runtimes, quota))
-      ~received:(fun (runtimes, quota) -> Result.is_ok runtimes && Result.is_ok quota)
+      ~outcome:Http_refresh_progress.of_runtime_quota
       needs.needs_runtime_quota (fun () ->
         (* A raise here would fail the whole scoped refresh and drop the
            transport and ask readings it carries; the picker's loader maps
@@ -12301,7 +12300,7 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
             (Error reason, Error reason))
   in
   let read_keeper_usage () =
-    when_needed ~source:Surface_read_order.Keeper_usage ~received:Result.is_ok
+    when_needed ~source:Surface_read_order.Keeper_usage ~outcome:Http_refresh_progress.of_result
       ~dataset:(fun result -> Dataset_keeper_usage result)
       needs.needs_keeper_usage (fun () ->
       match Masc_tui_loader.load_keeper_usage ~host ~port with
@@ -12312,7 +12311,7 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
   let read_provider_history () =
     when_needed ~source:Surface_read_order.Provider_history
       ~dataset:(fun (days, result) -> Dataset_provider_history (days, result))
-      ~received:(fun (_, result) -> Result.is_ok result)
+      ~outcome:(fun (_, result) -> Http_refresh_progress.of_result result)
       needs.needs_provider_history (fun () ->
       match Masc_tui_loader.load_provider_usage_history ~host ~port
               ~days:provider_history_days with
@@ -12322,7 +12321,7 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
           provider_history_days, Error (Printexc.to_string exn))
   in
   let read_overview_goals () =
-    when_needed ~source:Surface_read_order.Overview_goals ~received:Result.is_ok
+    when_needed ~source:Surface_read_order.Overview_goals ~outcome:Http_refresh_progress.of_result
       ~dataset:(fun result -> Dataset_overview_goals result)
       needs.needs_overview_goals (fun () ->
         match Masc_tui_loader.load_overview_goals ~host ~port with
@@ -12331,7 +12330,7 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
         | exception exn -> Error (Printexc.to_string exn))
   in
   let read_account_emails () =
-    when_needed ~source:Surface_read_order.Account_emails ~received:Result.is_ok
+    when_needed ~source:Surface_read_order.Account_emails ~outcome:Http_refresh_progress.of_result
       ~dataset:(fun result -> Dataset_account_emails result)
       needs.needs_account_emails (fun () ->
         match Masc_tui_loader.load_account_emails ~host ~port with
@@ -12394,7 +12393,7 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
      first: a server still booting behind an open port says so here, and every
      surface asked of it would only wait out its timeout. *)
   let http_server_identity = observe_http_reader ~on_progress
-    Http_refresh_progress.Identity_before ~received:Result.is_ok
+    Http_refresh_progress.Identity_before ~outcome:Http_refresh_progress.of_result
     (fun () -> load_server_identity ~host ~port) in
   if Masc_tui_types.server_is_booting http_server_identity
   then Refresh_server_booting { refresh_ticket; identity = http_server_identity; approval_ticket }
@@ -12421,7 +12420,7 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
            Masc_tui_loader.read_pair
              (fun () ->
                 observe_http_reader ~on_progress Http_refresh_progress.Overview
-                  ~received:Result.is_ok (fun () ->
+                  ~outcome:Http_refresh_progress.of_result (fun () ->
                 let overview = load_overview ~host ~port in
                 (match on_overview, overview with
                  | Some publish, Ok snapshot ->
@@ -12437,7 +12436,7 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
                   (fun ao_ticket ->
                      observe_http_reader ~on_progress
                        Http_refresh_progress.Approvals
-                       ~received:(fun observation -> Result.is_ok observation.ao_result)
+                       ~outcome:(fun observation -> Http_refresh_progress.of_result observation.ao_result)
                        (fun () ->
                           let ao_result = match http_server_identity with
                             | Ok expected_workspace ->
@@ -12465,7 +12464,7 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
                   ~needs:{ needs with needs_asks = false; needs_keeper_roster = false }))
     in
     let identity_after = observe_http_reader ~on_progress
-      Http_refresh_progress.Identity_after ~received:Result.is_ok
+      Http_refresh_progress.Identity_after ~outcome:Http_refresh_progress.of_result
       (fun () -> load_server_identity ~host ~port) in
     if Masc_tui_types.server_is_booting identity_after then
       Refresh_server_booting { refresh_ticket; identity = identity_after; approval_ticket }

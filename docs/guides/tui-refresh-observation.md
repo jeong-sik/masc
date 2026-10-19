@@ -56,14 +56,19 @@ Each requested source starts once and settles once. The sources are:
 | workspace verification | Final identity probe after the independent reads join |
 
 Only requested dataset readers emit observations. A reader can contain multiple
-HTTP calls; the counts are not endpoint or network request counts. Board fails
-when either its list or hearth reading fails; provider windows fails when either
-its runtime or quota reading fails. A Keeper roster with a failed Candle read is
-also a failed group, even if the roster itself was received.
+HTTP calls; the counts are not endpoint or network request counts. Board tracks
+posts and hearths, provider windows tracks catalogue and usage, and an available
+Keeper roster tracks its roster response and Candle observation. A mixed pair
+settles as `partial`, retaining the received and failed component. Both declared
+successful results settle as `received`; both declared errors settle as `failed`.
+An outer roster error or exception without component results remains `failed`
+without inventing results for components the producer did not return.
 
 `received` means the reader returned its declared successful result. It does not
 mean the final workspace identity matched, the dataset was published, or a Tool
-effect succeeded. `failed` means a declared error or exception; `interrupted`
+effect succeeded. `partial` does not count as an entirely received reader.
+Receiving a typed roster response does not establish complete fleet coverage;
+its partial/invalid roster model still controls the data surface. `interrupted`
 means cancellation or a pending reader when the refresh ended. Old request and
 workspace observations cannot update the active ledger. An old ledger is hidden
 when its workspace authority is no longer current.
@@ -76,6 +81,18 @@ terminal application of a current full refresh. The JSON contains:
   to preserve integer precision. It is not a wall-clock timestamp.
 - `elapsed_ms`: dispatch to application of the terminal refresh message.
 - `sources`: each reader's name, outcome and execution `elapsed_ms`.
+- `counts`: pending, received, partial, failed and interrupted **logical readers**.
+- For a returned composed result, `components`: each typed component's name and
+  received/failed status. These receipts are co-observed when the reader returns;
+  they have no individual execution clocks. A reader interrupted before returning
+  its components retains no invented component successes or failures.
+
+The progress badge keeps the failed and received component names for a partial
+reader alongside pending readers. This is observation only: source admission,
+workspace authority and re-read ordering keep their own decisions. A partial
+receipt neither publishes a dataset nor completes a Task. For one mixed Runtime
+read, the source change is one failed-reader verdict with no component receipts
+to one partial-reader verdict with two component receipts; network work is unchanged.
 
 Reader durations end in the worker; total refresh duration ends in the UI loop,
 so it also includes mailbox delay. Neither measures the first painted frame or

@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 채팅·입력·로딩·진행 상태, Keeper·Work·로그·질문 원본의 비동기 조회, Runtime·Overview 목록/사용량의 공유 해석, Keeper 설정·Sandbox 단축키·Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
+description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회의 부분 수신 관측, Keeper·Work·로그·질문 원본의 비동기 조회, Runtime·Overview 목록/사용량의 공유 해석, Keeper 설정·Sandbox 단축키·Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -97,6 +97,19 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, Keeper·Work·�
 - workspace/read 철회는 원래 요청을 retire하고 필요한 중첩 조회 demand를 보존한다. 재확인 뒤
   새 요청 하나가 철회된 read와 후속 refresh를 대체한다. 다른 workspace로 전환하면 원래 목록과
   demand를 지운다. 요청 시작·worker 관측/중단·UI admission은 paint나 실제 속도 증거가 아니다.
+
+## 복합 조회의 부분 수신
+
+- 실제 반환한 Result에서 typed 관측을 만든다. Runtime 목록/사용량, Board 글/hearth,
+  Keeper 목록/Candle의 구성별 수신·실패를 보존한다. 혼합 결과는 partial로 기록하며 전체
+  수신·전체 실패로 누르지 않는다. 바깥 roster 오류처럼 구성 결과가 없는 경우는 만들어내지 않는다.
+- partial은 received와 별도로 집계한다. 수치는 논리 reader 단위이며 HTTP 호출·Task 완료
+  횟수가 아니다. roster 응답의 수신도 fleet 전수 관측이나 해당 데이터의 완전성을 뜻하지 않는다.
+- 구성 결과는 부모 reader가 반환할 때 함께 관측한다. 별도 구성 완료 시각·성공을 추정하지
+  않는다. 반환 전 중단·미완료는 interrupted로 남기며 이미 받은 다른 reader의 partial을 지우지 않는다.
+- header는 실패한 구성과 받은 구성을 함께 보인다. JSON/log에는 구성별 결과를 남기되 현재
+  workspace/read owner·dataset 반영·후속 조회 판단을 바꾸지 않는다. 화면 문구나 배치 검사 대신
+  receipt·구성·소유권·종단 상태의 연결을 확인한다.
 
 ## Runtime 폼 저장
 

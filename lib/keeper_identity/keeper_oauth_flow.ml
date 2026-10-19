@@ -251,3 +251,30 @@ let refresh
 
 let needs_renewal ~(provider : Provider.t) ~expires_at ~now =
   now +. float_of_int provider.Provider.renew_before_sec >= expires_at
+
+(* RFC 7009. Telling the authorization server to forget a token is a
+   different act from deleting our copy of it: a refresh token that is only
+   deleted here keeps working until it expires, from a client nobody can see
+   any more. It is best effort because the operator cannot make a provider
+   that publishes no revocation endpoint, or answers a failure, forget --
+   the local deletion has already happened and is reported separately. *)
+type revoke_error =
+  | Revoke_transport of string
+  | Revoke_rejected of { status : int; body : string }
+
+let revoke_error_to_string = function
+  | Revoke_transport detail ->
+    Printf.sprintf "the revoke request did not complete: %s" detail
+  | Revoke_rejected { status; body } ->
+    Printf.sprintf "the revoke request was refused with %d: %s" status
+      (String.trim body)
+
+let revoke ~post ?client_secret ~url ~client_id ~token ~token_type_hint () =
+  let parameters =
+    with_client_secret client_secret
+      [ "token", token; "token_type_hint", token_type_hint; "client_id", client_id ]
+  in
+  match post ~url ~headers:form_headers ~body:(query parameters) with
+  | Error detail -> Error (Revoke_transport detail)
+  | Ok (status, _) when status >= 200 && status < 300 -> Ok ()
+  | Ok (status, body) -> Error (Revoke_rejected { status; body })

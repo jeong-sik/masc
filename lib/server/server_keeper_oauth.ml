@@ -459,3 +459,176 @@ let reject_callback ~base_path ~state ~now =
   match Keeper_oauth_pending.take pending ~now ~state with
   | None -> ()
   | Some _ -> Keeper_oauth_pending.finish pending ~state (Error ())
+
+(* Detaching one Keeper from one provider. Three separate acts, reported
+   separately because they can disagree: the local token is deleted, the
+   tool catalog that made the attachment visible to the Keeper's runtime is
+   deleted, and the provider is asked to forget the token. The first two
+   always happen; the third is best effort and its outcome is carried, not
+   assumed. An operator told "the provider could not be reached" still has a
+   Keeper with no token, which is the part this process controls. *)
+
+type revocation =
+  | Revoke_not_published
+      (** the provider publishes no revocation endpoint, or there was no
+          token of ours to revoke (a GitHub CLI provider's credential belongs
+          to [gh]) *)
+  | Revoke_revoked  (** the endpoint answered a success *)
+  | Revoke_failed of string  (** the endpoint answered a refusal, or nothing *)
+
+let revocation_to_json = function
+  | Revoke_not_published -> `Assoc [ "kind", `String "not_published" ]
+  | Revoke_revoked -> `Assoc [ "kind", `String "revoked" ]
+  | Revoke_failed detail ->
+    `Assoc [ "kind", `String "failed"; "detail", `String detail ]
+;;
+
+let disconnect_receipt_path ~base_path ~keeper_name ~provider_id =
+  Filename.concat
+    (Filename.concat
+       (Filename.concat (identity_dir ~base_path) "disconnects")
+       (Workspace_utils.safe_filename keeper_name))
+    (provider_id ^ ".json")
+;;
+
+let rec ensure_dir path =
+  if String.equal path "" || String.equal path "." || String.equal path "/"
+     || Sys.file_exists path
+  then ()
+  else (
+    let parent = Filename.dirname path in
+    if not (String.equal parent path) then ensure_dir parent;
+    try Unix.mkdir path 0o700 with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+;;
+
+(* The receipt is the record an operator can read after the screen has moved
+   on: what was deleted, and what the provider said. Written after the local
+   deletion so a receipt never describes work that did not happen. *)
+let write_disconnect_receipt ~base_path ~keeper_name ~provider_id json =
+  let path = disconnect_receipt_path ~base_path ~keeper_name ~provider_id in
+  try
+    ensure_dir (Filename.dirname path);
+    let temp = path ^ ".tmp" in
+    Out_channel.with_open_bin temp (fun oc ->
+      Out_channel.output_string oc (Yojson.Safe.to_string json));
+    Unix.rename temp path;
+    Ok ()
+  with
+  | Unix.Unix_error (err, fn, arg) ->
+    Error (Printf.sprintf "%s: %s %s" (Unix.error_message err) fn arg)
+  | Sys_error message -> Error message
+;;
+
+let disconnect ?transports ~clock ~(config : Workspace.config) ~keeper ~provider_id
+    ~now () =
+  let base_path = config.Workspace.base_path in
+  let* provider = provider_of_id provider_id in
+  let keeper_name = keeper in
+  let scope = Keeper_secret_projection.Keeper_secret in
+  (* Read the refresh token before deleting it: it is the thing the provider
+     is asked to forget, and after the delete there is nothing left to send. *)
+  let* refresh_token =
+    Keeper_secret_projection.read_file_entry ~base_path ~keeper_name ~scope
+      ~container_path:provider.Provider.refresh_token_file
+  in
+  let* () =
+    Keeper_secret_projection.delete_file_entry ~base_path ~keeper_name ~scope
+      ~container_path:provider.Provider.refresh_token_file
+  in
+  let* () =
+    Keeper_secret_projection.delete_env_entry ~base_path ~keeper_name ~scope
+      ~name:provider.Provider.access_token_env
+  in
+  let* () =
+    Keeper_secret_projection.delete_env_entry ~base_path ~keeper_name ~scope
+      ~name:provider.Provider.expires_at_env
+  in
+  let* tools_removed =
+    Keeper_identity_tools.forget ~base_path ~keeper_name
+      ~provider_id:provider.Provider.id
+  in
+  let had_refresh_token =
+    match refresh_token with
+    | Some value -> not (String.equal (String.trim value) "")
+    | None -> false
+  in
+  let revocation =
+    match provider.Provider.credential_source with
+    | Provider.Github_cli _ ->
+      (* [gh] minted and holds this credential; masc never wrote a token of
+         its own and cannot revoke one it does not have. Clearing the account
+         store is the operator's act, in [gh]. *)
+      Revoke_not_published
+    | Provider.Oauth_exchange when not had_refresh_token -> Revoke_not_published
+    | Provider.Oauth_exchange ->
+      let transports =
+        match transports with
+        | Some transports -> transports
+        | None -> Keeper_identity_tools.http_transports ~clock
+      in
+      (match
+         transports.Keeper_identity_tools.discover
+           ~mcp_url:provider.Provider.mcp_url
+       with
+       | Error _ ->
+         (* Discovery is how the endpoint is found at all. Without it there
+            is nowhere to send the token, which is "not attempted", not
+            "failed". *)
+         Revoke_not_published
+       | Ok discovered ->
+         (match discovered.Keeper_oauth_discovery.revocation_endpoint with
+          | None -> Revoke_not_published
+          | Some url ->
+            (* A client id the provider does not recognise would be answered
+               as a refusal; sending none is the same act for a public
+               client. An unreadable store is read as none for the same
+               reason the deletion does not depend on it. *)
+            let configured =
+              match Store.load ~dir:(identity_dir ~base_path) ~provider with
+              | Ok configured -> configured
+              | Error _ -> None
+            in
+            let client_id, client_secret =
+              match configured with
+              | Some credentials ->
+                credentials.Store.client_id, credentials.Store.client_secret
+              | None -> "", None
+            in
+            (match
+               Keeper_oauth_flow.revoke
+                 ~post:transports.Keeper_identity_tools.token_post
+                 ?client_secret ~url ~client_id
+                 ~token:(Option.value refresh_token ~default:"")
+                 ~token_type_hint:"refresh_token" ()
+             with
+             | Ok () -> Revoke_revoked
+             | Error error ->
+               Revoke_failed (Keeper_oauth_flow.revoke_error_to_string error))))
+  in
+  let receipt =
+    `Assoc
+      [ "keeper", `String keeper_name
+      ; "provider", `String provider.Provider.id
+      ; "provider_label", `String provider.Provider.label
+      ; "at", `Float now
+      ; ( "deleted"
+        , `Assoc
+            [ "refresh_token", `Bool had_refresh_token
+            ; "tool_catalog", `Bool tools_removed
+            ] )
+      ; ( "cleared_env"
+        , `List
+            [ `String provider.Provider.access_token_env
+            ; `String provider.Provider.expires_at_env
+            ] )
+      ; "revocation", revocation_to_json revocation
+      ]
+  in
+  let* () =
+    write_disconnect_receipt ~base_path ~keeper_name
+      ~provider_id:provider.Provider.id receipt
+  in
+  Ok receipt
+;;
+

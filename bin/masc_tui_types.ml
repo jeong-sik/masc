@@ -8399,6 +8399,13 @@ type state = {
      until it is sent, and cleared with the form -- a field left filled is a
      credential sitting in the process for as long as the pane is up. *)
   mutable identity_app_form: identity_app_form option;
+  (* The Keeper and provider a second press would detach, held between the two
+     presses. Naming the Keeper too matters: without it, arming on one Keeper
+     and walking to another that happens to hold the same service would arm
+     the wrong row. The arm lives here rather than inside the request module
+     so that walking to another tab and back still shows the operator what is
+     armed, and so that a disconnect is never one keystroke from an accident. *)
+  mutable identity_disconnect_armed: (string * string) option;
   mutable task_detail_id: string option;
   mutable task_detail_scroll: int;
   mutable tasks_error: string option;
@@ -14552,6 +14559,7 @@ let create_state
   identity_attempt_error = None;
   identity_filter = None;
   identity_app_form = None;
+  identity_disconnect_armed = None;
   github_identity_view_error = None;
   task_detail_id = None;
   task_detail_scroll = 0;

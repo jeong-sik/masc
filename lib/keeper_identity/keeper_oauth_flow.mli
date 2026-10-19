@@ -136,3 +136,35 @@ val needs_renewal : provider:Keeper_oauth_provider.t -> expires_at:float -> now:
 (** Whether an access token is inside its declared renewal window. A turn
     that starts here should exchange first rather than begin a call that
     expires partway. *)
+
+type revoke_error =
+  | Revoke_transport of string  (** the request did not complete *)
+  | Revoke_rejected of { status : int; body : string }
+      (** the endpoint answered and said no, or answered something that is not
+          a success *)
+
+val revoke_error_to_string : revoke_error -> string
+
+val revoke :
+  post:post ->
+  ?client_secret:string ->
+  url:string ->
+      (** the server's revocation endpoint, from
+          {!Keeper_oauth_discovery.revocation_endpoint}. Taken as an argument
+          rather than read from the discovery record so a caller that has no
+          endpoint to offer says so itself instead of turning absence into a
+          failed call. *)
+  client_id:string ->
+  token:string ->
+  token_type_hint:string ->
+      (** RFC 7009 token_type_hint, refresh_token or access_token. A hint
+          only: a server that does not recognise it ignores it, so the wrong
+          one is a slowdown, not an error. *)
+  unit ->
+  (unit, revoke_error) result
+(** Ask the authorization server to forget one token (RFC 7009).
+
+    Best effort by construction: a provider that publishes no revocation
+    endpoint, or refuses the request, cannot be made to forget by this
+    process, and the caller reports that outcome rather than pretending the
+    local deletion was the whole act. *)

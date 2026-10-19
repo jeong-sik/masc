@@ -147,6 +147,36 @@ A tool the service does not mark read-only lands in the approval queue. A
 service that annotates nothing puts all of its tools there, so decide the
 Keeper's approval posture alongside attaching it.
 
+## Detaching a service
+
+Press `D` twice in the Identity tab of the Keeper detail pane. The first
+press arms the row under the cursor and says so; the second press on that
+same row detaches it. The pane then says what was removed and whether the
+service was asked to revoke what it still holds. The two are different
+facts:
+
+- **Stored tokens.** The refresh-token file entry and the access-token and
+  expiry environment entries are deleted, and the tool catalog for that
+  Keeper and service goes with them, so the next turn stops being handed
+  those tools.
+- **Provider revoke.** If the service publishes a revocation endpoint, masc
+  posts the refresh token to it, best effort. `revoke: taken` means the
+  service answered; `revoke: failed` means it refused or could not be
+  reached, and the local deletion still stands; `revoke: not offered` means
+  the service publishes no revocation endpoint, so the token is gone from
+  here but the service may keep honouring it until it expires or is revoked
+  from the service's own settings.
+
+Deleting locally and revoking at the service are not the same act. A detach
+always deletes; it can only *ask* the service. If the pane says `failed` or
+`not offered` and the service must forget the token now, revoke it from the
+service's own account settings.
+
+A detach is not the switch. The switch (`T`) turns a service off for a Keeper
+and keeps its token, so a later `T` brings it back without consenting again.
+Detaching forgets the token, and attaching the service again means a new
+consent.
+
 ## When it does not work
 
 The message names the cause.
@@ -168,6 +198,7 @@ The message names the cause.
 | refresh token | a file entry in that Keeper's secrets |
 | client id / secret | `.masc/identity/<client_group>/` -- shared by the whole masc |
 | tool catalog | `.masc/identity/catalogs/<keeper>/<service>.json` |
+| detach receipt | `.masc/identity/disconnects/<keeper>/<service>.json` |
 
 ## Adding one more service
 

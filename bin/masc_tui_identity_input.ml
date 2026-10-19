@@ -235,3 +235,54 @@ let paste_filter (state : state) text =
   state.identity_filter <- Some (Option.value state.identity_filter ~default:"" ^ text);
   state.identity_cursor <- 0
 ;;
+
+(* Detach one attached service: forget the stored token, drop the tools the
+   login attached, and ask the provider to revoke what it still holds. The
+   first press arms the row and says so in the pane; the second press on the
+   same row sends it. The arm lives on the state so the confirmation names
+   the row it would remove even if the cursor has moved since. *)
+let disconnect (state : state) ~unbind ~report =
+  match selected_keeper state, state.identity_view with
+  | Some keeper, Some (stamp, providers) when String.equal stamp keeper.k_name ->
+    (match
+       Masc_tui_identity_model.identity_cursor_provider
+         ~query:(current_query state)
+         ~providers
+         state.identity_cursor
+     with
+     | Some (provider_id, label) ->
+       let attached =
+         List.exists
+           (function
+             | Masc_tui_identity_model.Identity_declared
+                 { idp_id; idp_tools = Some _; _ } ->
+               String.equal idp_id provider_id
+             | Masc_tui_identity_model.Identity_declared _
+             | Masc_tui_identity_model.Identity_unreadable _ -> false)
+           providers
+       in
+       if not attached
+       then (
+         state.identity_disconnect_armed <- None;
+         report "system" "nothing is attached to disconnect here")
+       else if state.identity_disconnect_armed = Some (keeper.k_name, provider_id)
+       then (
+         state.identity_disconnect_armed <- None;
+         state.identity_attempt_error <- None;
+         unbind ~keeper_name:keeper.k_name ~provider_id)
+       else (
+         state.identity_disconnect_armed <- Some (keeper.k_name, provider_id);
+         (* The arm is written where the pane already shows its one notice, so
+            it stays on screen while the operator decides, instead of a status
+            line that has scrolled away by the time they press again. *)
+         state.identity_attempt_error
+         <- Some
+              ( Masc_tui_identity_model.Notice_ok
+              , Printf.sprintf
+                  "%s (%s): press D again to forget the stored token and drop the tools \
+                   it attached; nothing is sent yet"
+                  label
+                  provider_id ))
+     | None -> state.identity_disconnect_armed <- None)
+  | Some _, (Some _ | None) | None, _ -> ()
+;;

@@ -61,3 +61,12 @@ val launch_refresh
   -> keeper_name:string
   -> provider_ids:string list
   -> unit
+
+val launch_disconnect
+  :  Masc_tui_types.state
+  -> host:string
+  -> deliver:(Masc_tui_async_protocol.async_msg -> unit)
+  -> fork:(sw:Eio.Switch.t -> (unit -> unit) -> unit)
+  -> keeper_name:string
+  -> provider_id:string
+  -> unit

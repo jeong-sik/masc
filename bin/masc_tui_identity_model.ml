@@ -415,3 +415,46 @@ let decode_identity_login_status = function
        | Some (`String "unavailable") -> Ok Attempt_unavailable
        | _ -> Error "unknown login attempt state")
   | _ -> Error "login attempt response is not an object"
+
+let disconnect_receipt_text ~provider_id json =
+  let field key =
+    match json with
+    | `Assoc fields -> List.assoc_opt key fields
+    | _ -> None
+  in
+  let deleted =
+    match field "deleted" with
+    | Some (`Assoc items) ->
+      List.filter_map
+        (fun (name, value) ->
+           match value with
+           | `Bool true ->
+             Some
+               (match name with
+                | "refresh_token" -> "stored tokens"
+                | "tool_catalog" -> "attached tools"
+                | other -> other)
+           | `Bool false | `Null -> None
+           | _ -> Some name)
+        items
+    | _ -> []
+  in
+  let revoke =
+    match field "revocation" with
+    | Some (`Assoc fields) ->
+      (match List.assoc_opt "kind" fields with
+       | Some (`String "revoked") -> "provider revoke: taken"
+       | Some (`String "failed") ->
+         "provider revoke: failed"
+         ^ (match List.assoc_opt "detail" fields with
+            | Some (`String detail) -> " (" ^ detail ^ ")"
+            | _ -> "")
+       | Some (`String "not_published") | Some _ | None -> "provider revoke: not offered")
+    | _ -> "provider revoke: not offered"
+  in
+  let removed =
+    if deleted = [] then "nothing was still there to delete"
+    else "removed " ^ String.concat ", " deleted
+  in
+  Printf.sprintf "%s: %s; %s" provider_id removed revoke
+;;

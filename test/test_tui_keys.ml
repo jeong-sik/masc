@@ -1380,6 +1380,28 @@ let test_runtime_detail_routes_omits_model_settings_hint () =
       Alcotest.(check bool) "Runtime_routes help sheet omits e"
         false (List.exists (fun (k, _) -> String.equal k "e") entries)
   | [] -> Alcotest.fail "expected non-empty help sections"
+let substring needle text =
+  let n = String.length needle and len = String.length text in
+  let rec seek i =
+    i + n <= len && (String.equal (String.sub text i n) needle || seek (i + 1))
+  in
+  n = 0 || seek 0
+
+(* The help sheet is where an operator looks up a key they have not used yet.
+   A disconnect that runs on one press is the wrong thing to discover by
+   pressing it, so the tab has to carry the key and say it takes two. *)
+let test_the_identity_tab_advertises_disconnect () =
+  let bindings = Masc_tui_keys.keeper_detail_tab_bindings Detail_identity in
+  match List.find_opt (fun b -> String.equal b.Masc_tui_keys.label "disconnect") bindings with
+  | None -> Alcotest.fail "the Identity tab does not offer disconnect"
+  | Some binding ->
+    Alcotest.(check string) "the twice-pressed key" "D D" binding.Masc_tui_keys.key;
+    Alcotest.(check bool) "the help says what it removes" true
+      (match binding.Masc_tui_keys.help with
+       | Some help ->
+         substring "forget the stored token" help
+         && substring "revoke" help
+       | None -> false)
 
 let () =
   Alcotest.run "masc_tui_keys"
@@ -1501,4 +1523,7 @@ let () =
         ; Alcotest.test_case "Resources without a list answers nothing" `Quick
             test_resources_without_a_list_answers_nothing
         ] )
+    ; ( "identity tab"
+      , [ Alcotest.test_case "the Identity tab advertises disconnect" `Quick
+            test_the_identity_tab_advertises_disconnect ] )
     ]

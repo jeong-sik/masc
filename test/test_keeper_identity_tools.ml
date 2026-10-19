@@ -987,6 +987,7 @@ let test_an_expiring_token_is_exchanged_and_stored () =
         authorize_url = "https://auth.example.com/authorize";
         token_url = "https://auth.example.com/oauth/token";
         registration_url = None;
+        revocation_endpoint = None;
         scopes_supported = [];
         supports_pkce_s256 = true;
       }
@@ -1124,6 +1125,7 @@ let test_a_401_is_cleared_by_one_reactive_refresh () =
         authorize_url = "https://auth.example.com/authorize";
         token_url = "https://auth.example.com/oauth/token";
         registration_url = None;
+        revocation_endpoint = None;
         scopes_supported = [];
         supports_pkce_s256 = true;
       }

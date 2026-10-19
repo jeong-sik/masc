@@ -157,6 +157,18 @@ let load ~base_path ~keeper_name ~provider_id =
   | exception Sys_error message -> Error message
 ;;
 
+let forget ~base_path ~keeper_name ~provider_id =
+  let path = catalog_path ~base_path ~keeper_name ~provider_id in
+  if not (Sys.file_exists path)
+  then Ok false
+  else
+    try
+      Sys.remove path;
+      Ok true
+    with
+    | Sys_error message -> Error message
+;;
+
 let rec ensure_dir path =
   if String.equal path "" || String.equal path "." || String.equal path "/"
      || Sys.file_exists path

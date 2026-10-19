@@ -65,3 +65,15 @@ val refreshed
   -> report:(string -> string -> unit)
   -> (unit, string) result
   -> unit
+
+val disconnected
+  :  Masc_tui_types.state
+  -> keeper_name:string
+  -> provider_id:string
+  -> notice:
+       (keeper_name:string option
+        -> Masc_tui_identity_model.identity_notice_kind * string
+        -> unit)
+  -> refresh:(string -> unit)
+  -> (string, string) result
+  -> unit

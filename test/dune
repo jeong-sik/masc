@@ -4905,6 +4905,8 @@
 
 (include stanzas/test_server_keeper_oauth_client.inc)
 
+(include stanzas/test_server_keeper_oauth_disconnect.inc)
+
 ; RFC-0465: open pull requests of registered GitHub repositories.
 (include stanzas/test_server_repository_pulls.inc)
 
@@ -4938,7 +4940,7 @@
 (test
  (name test_tui_identity_tab)
  (modules test_tui_identity_tab)
- (libraries masc masc_tui_identity_model masc_tui_identity_updates alcotest masc_tui_pick_list masc_tui_types masc_tui_keys masc_tui_footer))
+ (libraries masc masc_tui_identity_model masc_tui_identity_updates alcotest masc_tui_pick_list masc_tui_types masc_tui_keys masc_tui_footer masc_tui_identity_input))
 
 (test
  (name test_tui_loading_notice)

@@ -716,6 +716,9 @@ type async_msg =
   | Identity_refreshed of string * (unit, string) result
   | Identity_app_saved of string option * string * (int, string) result
       (** presentation Keeper, provider id, then recorded scope count *)
+  | Identity_disconnected of string * string * (Yojson.Safe.t, string) result
+      (** keeper, provider, then the server's receipt: what was deleted, and
+          separately how the provider's revoke went. *)
   | Account_login_event of Masc_tui_account_login.t * int * Masc_tui_account_login.event
   | Account_login_json of Masc_tui_account_login.t * int * Masc_tui_account_login.action * (Yojson.Safe.t, string) result
   (* A removal's answer keeps what is known about its effect: removed, declined
@@ -1032,6 +1035,7 @@ let rec workspace_message_is_read = function
   | Identity_login_started _
   | Identity_refreshed _
   | Identity_app_saved _
+  | Identity_disconnected _
   | Account_login_event _
   | Account_login_removal _
   | Github_login_lines _
@@ -1159,6 +1163,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Github_identity_view_loaded (_, _) | Identity_providers_loaded (_, _, _)
     | Identity_switch_set (_, _, _, _) | Identity_login_started (_, _)
     | Identity_refreshed (_, _) | Identity_app_saved (_, _, _)
+    | Identity_disconnected (_, _, _)
     | Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
     | Account_login_removal (_, _, _, _, _) | Github_login_lines (_, _)
     | Github_login_finished (_, _) | Github_token_saved (_, _)
@@ -1294,6 +1299,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Github_identity_view_loaded (_, _) | Identity_providers_loaded (_, _, _)
   | Identity_switch_set (_, _, _, _) | Identity_login_started (_, _)
   | Identity_refreshed (_, _) | Identity_app_saved (_, _, _)
+  | Identity_disconnected (_, _, _)
   | Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
   | Account_login_removal (_, _, _, _, _) | Github_login_lines (_, _)
   | Github_login_finished (_, _) | Github_token_saved (_, _) | Observer_opened _

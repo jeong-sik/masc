@@ -34,6 +34,10 @@ type t = {
   registration_url : string option;
       (** RFC 7591 dynamic client registration, when the server offers it. A
           server that does is one no operator has to register an app with. *)
+  revocation_endpoint : string option;
+      (** RFC 7009 token revocation, when the server publishes one. Absent
+          means the provider offers no way to withdraw a token: a disconnect
+          then deletes the local copy and says the provider was not asked. *)
   scopes_supported : string list;
   supports_pkce_s256 : bool;
       (** Absent S256 is disqualifying rather than a weaker default: without

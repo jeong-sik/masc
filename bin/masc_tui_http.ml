@@ -2402,6 +2402,19 @@ let post_identity_switch ~(host : string) ~(port : int) ~(keeper_name : string)
           | Some _ | None -> Error "identity switch response does not say ok")
       | _ -> Error "identity switch response was not a JSON object")
 
+(** POST /api/v1/keepers/oauth/disconnect — forget one Keeper's stored token
+    for one provider: delete the refresh and access token entries, drop the
+    tools the login attached, and ask the provider to revoke what it still
+    holds. The receipt says what was deleted and whether the revoke was
+    published and taken, so the pane can say more than "done". *)
+let post_identity_disconnect ~(host : string) ~(port : int) ~(keeper_name : string)
+    ~(provider_id : string) : (Yojson.Safe.t, string) result =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc [ ("keeper", `String keeper_name); ("provider", `String provider_id) ])
+  in
+  post_json ~host ~port ~path:"/api/v1/keepers/oauth/disconnect" ~body
+
 (** GET /api/v1/dashboard/gate — the durable Gate: pending approvals that
     survive nobody watching, plus both lane modes. *)
 let fetch_dashboard_gate ~(host : string) ~(port : int) :

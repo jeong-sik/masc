@@ -206,3 +206,32 @@ let launch_refresh state ~host ~deliver ~fork ~keeper_name ~provider_ids =
   | Some sw -> fork ~sw run
   | None -> deliver (Identity_refreshed (keeper_name, Error "Eio switch is unavailable"))
 ;;
+
+(* Detach one attached service: forget the stored token, drop the catalog,
+   and ask the provider to revoke what it still holds. Unlike the switch,
+   this is not reversible from here -- the operator would have to consent
+   again -- so the key that calls it is armed on the first press. *)
+
+let launch_disconnect state ~host ~deliver ~fork ~keeper_name ~provider_id =
+  let authority = state.workspace_authority in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        match write_authority_refusal state authority with
+        | Some reason -> Error reason
+        | None ->
+          Masc_tui_http.post_identity_disconnect ~host ~port ~keeper_name ~provider_id
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    deliver (Identity_disconnected (keeper_name, provider_id, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> fork ~sw run
+  | None ->
+    deliver
+      (Identity_disconnected
+         (keeper_name, provider_id, Error "Eio switch is unavailable"))
+;;

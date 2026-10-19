@@ -698,6 +698,9 @@ type async_msg =
   | Identity_refreshed of string * (unit, string) result
   | Identity_app_saved of string option * string * (int, string) result
       (** presentation Keeper, provider id, then recorded scope count *)
+  | Identity_disconnected of string * string * (Yojson.Safe.t, string) result
+      (** keeper, provider, then the server's receipt: what was deleted, and
+          separately how the provider's revoke went. *)
   | Account_login_event of Masc_tui_account_login.t * int * Masc_tui_account_login.event
   | Account_login_json of Masc_tui_account_login.t * int * Masc_tui_account_login.action * (Yojson.Safe.t, string) result
   (* A removal's answer keeps what is known about its effect: removed, declined

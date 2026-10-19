@@ -43,6 +43,16 @@ let apply_entries (state : state) request result =
 
 ;;
 
+let apply_catalog (state : state) request result =
+  match state.palette_mode with
+  | Palette_files origin
+      when state.palette_open && code_finder_current state origin
+           && code_scope_path_equal (origin.cfo_scope, origin.cfo_dir)
+                (Masc_tui_fetched.request_key request) ->
+      state.code_catalog <- Masc_tui_fetched.complete ~equal:code_scope_path_equal
+          state.code_catalog request result
+  | Palette_files _ | Palette_jump | Palette_choice _ -> ()
+
 let apply_file ?(intent = Open_code_file) (state : state) request result = (
   let path = Masc_tui_fetched.request_key request in
   (* An answer for a file the operator has moved past describes bytes
@@ -145,6 +155,43 @@ let apply_file ?(intent = Open_code_file) (state : state) request result = (
           (Error detail))
 
 ;;
+
+let take_ready_found_file (state : state) ~input_pending =
+  if input_pending then false
+  else match state.palette_mode, Masc_tui_fetched.current state.code_finder_file with
+  | Palette_files origin, Some ((scope, path), Masc_tui_fetched.Ready content)
+      when state.palette_open && code_finder_current state origin
+           && scope = origin.cfo_scope ->
+           push_code_jump state;
+           close_code_finder state;
+           let parent = Filename.dirname path in
+           state.code_dir <- (if String.equal parent "." then "" else parent);
+           state.code_cursor <- 0;
+           state.code_listing <- Masc_tui_fetched.clear state.code_listing;
+           state.code_file <- Masc_tui_fetched.clear state.code_file;
+           state.code_target_line <- None;
+           (match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:path with
+            | Masc_tui_fetched.Already_loading -> false
+            | Masc_tui_fetched.Started (file, file_request) ->
+                state.code_file <- file;
+                apply_file state file_request (Ok content);
+                true)
+  | (Palette_files _ | Palette_jump | Palette_choice _),
+    (None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+     | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))) -> false
+
+let apply_found_file ?(input_pending = false) (state : state) request result =
+  let scope, _ = Masc_tui_fetched.request_key request in
+  match state.palette_mode with
+  | Palette_files origin
+      when state.palette_open && code_finder_current state origin
+           && scope = origin.cfo_scope
+           && Masc_tui_fetched.is_current ~equal:code_scope_path_equal
+                state.code_finder_file request ->
+      state.code_finder_file <- Masc_tui_fetched.complete ~equal:code_scope_path_equal
+          state.code_finder_file request result;
+      take_ready_found_file state ~input_pending
+  | Palette_files _ | Palette_jump | Palette_choice _ -> false
 
 let apply_blame (state : state) request result =
   (* An answer that arrives after the operator moved on describes bytes

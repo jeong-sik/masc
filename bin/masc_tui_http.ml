@@ -1239,7 +1239,7 @@ let fetch_workspace_entries ?keeper ?repo ~(host : string) ~(port : int)
       | json -> Masc.Tui_decode.decode_workspace_tree json)
 
 (** The whole file at [path] ([/api/v1/workspace/file]). *)
-let fetch_workspace_file ?keeper ?repo ~(host : string) ~(port : int)
+let fetch_workspace_file ?keeper ?repo ?expected_workspace ~(host : string) ~(port : int)
     ~(path : string) () : (string, string) result =
   let route =
     Printf.sprintf "/api/v1/workspace/file?path=%s%s%s"
@@ -1247,16 +1247,37 @@ let fetch_workspace_file ?keeper ?repo ~(host : string) ~(port : int)
       (keeper_query_suffix keeper)
       (repo_query_suffix repo)
   in
-  match http_get ~host ~port ~path:route with
-  | Error detail -> Error detail
-  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
-    ->
-      Error (named_refusal "workspace file" ~status ~body)
-  | Ok (_, body) -> (
-      match Yojson.Safe.from_string body with
-      | exception Yojson.Json_error detail ->
-          Error ("workspace file was not JSON: " ^ detail)
-      | json -> Masc.Tui_decode.decode_workspace_file json)
+  let reading = match expected_workspace with
+    | None ->
+        (match http_get ~host ~port ~path:route with
+         | Error detail -> Error detail
+         | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+             Error (named_refusal "workspace file" ~status ~body)
+         | Ok (_, body) ->
+             match Yojson.Safe.from_string body with
+             | exception Yojson.Json_error detail ->
+                 Error ("workspace file was not JSON: " ^ detail)
+             | json -> Ok json)
+    | Some expected ->
+        Masc_tui_workspace_read.with_binding ~host ~port ~expected
+          ~proof:Masc_tui_workspace_read.Request_precondition (fun () ->
+            get_json ~host ~port ~path:route)
+        |> Result.map_error (fun detail -> "workspace file: " ^ detail)
+  in
+  Result.bind reading Masc.Tui_decode.decode_workspace_file
+
+let fetch_workspace_file_catalog ?keeper ?repo ~expected_workspace ~host ~port ~path () =
+  let route =
+    "/api/v1/workspace/files?path=" ^ percent_encode_query_value path
+    ^ keeper_query_suffix keeper ^ repo_query_suffix repo
+  in
+  let reading =
+    Masc_tui_workspace_read.with_binding ~host ~port ~expected:expected_workspace
+      ~proof:Masc_tui_workspace_read.Request_precondition (fun () ->
+        get_json ~host ~port ~path:route)
+    |> Result.map_error (fun detail -> "file finder: " ^ detail)
+  in
+  Result.bind reading Masc.Tui_decode.decode_workspace_file_catalog
 
 (** The file's commit history ([/api/v1/git/log]), most recent first. *)
 let fetch_git_log ?keeper ?repo ~(host : string) ~(port : int)

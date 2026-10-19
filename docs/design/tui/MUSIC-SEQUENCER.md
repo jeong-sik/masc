@@ -33,6 +33,13 @@ history, not temporary files to remove automatically. A crash during the claim c
 leave the project pathname absent; recover from its sibling history. The lock only
 coordinates this application's writers and does not lock unrelated editors.
 
+Opening a phrase or imported MIDI positions the cursor at the earliest note in
+its first nonempty track, so a bass or high-register part is visible immediately.
+Empty documents keep the C4 insertion position. Choosing an independent MIDI
+pattern positions at that pattern's own first note. Later edits and undo/redo
+retain the user's valid position; overlapping notes on different channels still require
+an explicit channel or event selection. Opening a document does not change it.
+
 Chord recognition presents Tonal's candidate list for notes sounding at the cursor,
 including inversions; a candidate is not a harmonic certainty. Close and drop-2
 voicings use Tonal's chord intervals. Rootless voicings use its left-hand dictionary

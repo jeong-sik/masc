@@ -13,6 +13,7 @@ characters) and `native-tui-scenario`:
 | `detail-ownership` (default) | TUI and the three test executables | `test_tui_detail_reading`, `test_tui_board_successor`, `test_tui_usage_scope` |
 | `workspace-files` | TUI, server and the three test executables | `test_repo_git`, `test_tui_workspace_entries`, `test_workspace_file_confidentiality` |
 | `rich-workspace` | TUI, server and the six test executables | The `workspace-files` suites plus `test_lsp_position`, `test_tui_music_launcher`, `test_tui_alphatex` |
+| `rich-chat-workspace` | TUI, server and the seven test executables | The `rich-workspace` suites plus `test_tui_chat_call_reader` |
 
 The server target is `bin/main_eio.exe`; the TUI is `bin/masc_tui.exe`.
 Each test target is `test/<suite>.exe`. Unknown scenarios are refused before
@@ -24,6 +25,21 @@ checks Unicode LSP positions, music child-process handoff and AlphaTex parsing
 alongside file discovery and request ownership. It does not execute the Node
 music package, play audio or establish visible terminal behavior; record those
 checks separately against the same source commit.
+
+Use `rich-chat-workspace` when the selected integration source also includes
+chat original-call reading. It builds and runs `test_tui_chat_call_reader` in
+addition to all six `rich-workspace` suites and packages the matching server.
+The reader suite checks original execution selection, exact-response identity,
+read ownership, retries, retained result/scroll state and terminal Enter intent;
+it is not a visible-UI or actual Keeper tool-turn proof. A selected source
+without that test target fails the build instead of falling back to the older
+six-suite profile. For example:
+
+```sh
+gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
+  -f native-tui-source-sha=SOURCE_COMMIT_40_HEX \
+  -f native-tui-scenario=rich-chat-workspace
+```
 
 For a workspace file-finder candidate:
 

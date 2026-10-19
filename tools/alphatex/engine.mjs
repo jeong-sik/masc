@@ -114,6 +114,11 @@ export function midiForScore(source, { smf1Mode = false, tracks } = {}) {
 
 export function createAudioExporter(source, { soundfont, tracks, sampleRate = 44100 } = {}) {
   const { midi, generator } = midiForScore(source, { tracks })
+  return createMidiAudioExporter(midi, { soundfont, sampleRate,
+    syncPoints: generator.syncPoints, transpositionPitches: generator.transpositionPitches })
+}
+
+export function createMidiAudioExporter(midi, { soundfont, sampleRate = 44100, syncPoints = [], transpositionPitches = new Map() } = {}) {
   const options = new alphaTab.synth.AudioExportOptions()
   options.sampleRate = sampleRate
   options.soundFonts = [soundfont ?? readFileSync(fileURLToPath(import.meta.resolve('@coderline/alphatab/soundfont/sonivox.sf2')))]
@@ -126,5 +131,5 @@ export function createAudioExporter(source, { soundfont, tracks, sampleRate = 44
     sampleRate, ready: unusedEvent, sampleRequest: unusedEvent,
     samplesPlayed: unusedEvent, open() {},
   }, 0)
-  return synth.exportAudio(options, midi, generator.syncPoints, generator.transpositionPitches)
+  return synth.exportAudio(options, midi, syncPoints, transpositionPitches)
 }

@@ -113,6 +113,8 @@ let sections =
         ; description = "guitar tablature from a code block (Experimental)" }
       ; { opener = Command "score"
         ; description = "full alphaTex notation and playback in this terminal: /score [N]" }
+      ; { opener = Command "music"
+        ; description = "phrases, arrangements and takes: /music or Dashboard s; plain terminal supported" }
       ; (* The in-tool help surface the tool schema descriptions point at:
            lib/tool_surface/tool_help_registry.ml registers it by this name. *)
         { opener = Token "masc_tool_help"

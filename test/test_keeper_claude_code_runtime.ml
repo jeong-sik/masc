@@ -2126,8 +2126,19 @@ let test_keeper_shrinks_history_after_statusless_context_error
          (match raw with
           | None -> fail "native Gate fixture did not capture its resume input"
           | Some raw ->
-            check string "a Gate resume sends only its new input"
-              "SHRINK_HISTORY" (content_of_wire_message raw));
+            (* The seed had no history. Reading the supplied history now
+               yields a fresh known-empty unread observation, which replaces
+               the unavailable observation held by the native session. It
+               grants no history replay or Gate respawn authority. *)
+            let expected = attach_native_unread
+                ~unread:Keeper_librarian_request_unread.empty []
+              |> List.map (fun (message : Agent_core.Types.message) ->
+                   Keeper_official_client_host.history_role_label message.role
+                   ^ Keeper_official_client_host.encode_history_message message)
+            in
+            check string "a Gate resume sends its changed unread evidence and new input only"
+              (String.concat "\n\n" (expected @ ["SHRINK_HISTORY"]))
+              (content_of_wire_message raw));
          check bool "resume system file carries no canonical snapshot" false
            (String_util.contains_substring
               (In_channel.with_open_bin first_system_marker In_channel.input_all)

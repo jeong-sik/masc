@@ -73,7 +73,9 @@ try checkRestore(restore(sustainRows,0.3)==[on,pedal,off],"original pedal-held r
 let sostRows=[event(0,on),event(0.1,sost),event(0.2,off),event(0.3,zeroOn),event(0.4,[0x43853c00,0x45670000])]
 try checkRestore(restore(sostRows,0.5)==[on,sost,off],"sostenuto captures only held voices on its rising edge")
 let pnPrior=footprint([event(0,pn)])
-requireFailure{_ = try restore([event(0,reset)],0.5,pnPrior)}
+// Per-note pitch bend does not determine attack, so it is no longer part of the
+// baseline requirement and a bare CC121 reset is admitted (#43816(a)).
+_ = try restore([event(0,reset)],0.5,pnPrior)
 try checkRestore(restore([event(0,pn),event(0.1,reset),event(0.2,on)],0.5,pnPrior)==[pn,reset,on],"CC121 preserves known MIDI2 per-note pitch")
 let p0:[UInt32]=[0x43c50001,0x05000102],p1:[UInt32]=[0x43c50000,0x06000000]
 let programPrior=footprint([event(0,p0)])

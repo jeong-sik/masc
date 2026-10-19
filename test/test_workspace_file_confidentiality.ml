@@ -483,6 +483,11 @@ type lost_file_scope =
   | Repository_scope of [ `Registration | `Directory ]
   | Keeper_scope of [ `Metadata | `Directory ]
 
+let check_workspace_http_status label expected status body =
+  if status <> expected then
+    failf "%s: expected HTTP %d, received HTTP %d; body: %s"
+      label expected status (Yojson.Safe.to_string body)
+
 let test_file_read_rejects_lost_scope lost () =
   let old_state = Server_auth.For_testing.snapshot_server_state () in
   let old_startup = Masc.Server_startup_state.snapshot () in
@@ -532,8 +537,16 @@ let test_file_read_rejects_lost_scope lost () =
               | Keeper_scope removed ->
                   let meta = valid (Masc_test_deps.meta_of_json_fixture
                       (`Assoc ["name", `String "selected"])) in
-                  let meta = { meta with Masc.Keeper_meta_contract.sandbox_profile = Keeper_types_profile_sandbox.Docker } in
+                  let declaration = Config_dir_resolver.keeper_toml_path_for_base_path
+                      ~base_path meta.name in
+                  write_file declaration
+                    "[keeper]\ninstructions = \"Scoped file read fixture\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n";
                   valid (Masc.Keeper_meta_store.replace_snapshot config meta);
+                  let meta =
+                    match Masc.Keeper_meta_store.read_effective_meta config meta.name with
+                    | Ok (Some effective) -> effective
+                    | Ok None -> fail "fixture Keeper metadata is unavailable"
+                    | Error detail -> failf "fixture Keeper configuration: %s" detail in
                   let root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
                   mkdir_p root;
                   let withdraw () = match removed with
@@ -550,23 +563,23 @@ let test_file_read_rejects_lost_scope lost () =
             let request route path = workspace_http_response ~router
                 (route ^ "?path=" ^ encode path ^ "&" ^ scope ^ "&" ^ binding) in
             let status, catalog = request "/api/v1/workspace/files" "" in
-            check int "selected scope catalog succeeds" 200 status;
+            check_workspace_http_status "selected scope catalog succeeds" 200 status catalog;
             check (list string) "catalog preserves selected file path" [path]
               Yojson.Safe.Util.(catalog |> member "files" |> to_list |> List.map to_string);
             let status, body = request "/api/v1/workspace/file" path in
-            check int "selected scope file succeeds" 200 status;
+            check_workspace_http_status "selected scope file succeeds" 200 status body;
             check string "reads the selected scope, not its project namesake" selected_content
               Yojson.Safe.Util.(body |> member "content" |> to_string);
             withdraw ();
             let status, body = request "/api/v1/workspace/file" path in
-            check int "lost scope cannot read its project namesake" 404 status;
+            check_workspace_http_status "lost scope cannot read its project namesake" 404 status body;
             check bool "scope refusal carries no file content" true
               (Yojson.Safe.Util.member "content" body = `Null);
-            let status, _ = request "/api/v1/workspace/files" "" in
-            check int "catalog and selected file agree on unavailable scope" 404 status;
+            let status, body = request "/api/v1/workspace/files" "" in
+            check_workspace_http_status "catalog and selected file agree on unavailable scope" 404 status body;
             let status, body = workspace_http_response ~router
                 ("/api/v1/workspace/file?path=" ^ encode path ^ "&" ^ binding) in
-            check int "explicit project reading remains available" 200 status;
+            check_workspace_http_status "explicit project reading remains available" 200 status body;
             check string "the same-named project file really exists" project_content
               Yojson.Safe.Util.(body |> member "content" |> to_string)))))
 

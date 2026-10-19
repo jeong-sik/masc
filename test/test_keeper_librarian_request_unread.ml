@@ -136,7 +136,7 @@ let test_summary_fallback_and_resume () =
     let carried=range front in
     Window.project_with_drop ~measure_message_bytes:measure ~capacity_bytes:budget ~reserved_bytes:0 carried.messages
     |> Result.map_error Window.budget_error_to_core_error
-    |> Result.map (fun projection -> {Host.carried;sent=projection.messages;
+    |> Result.map (fun (projection : Window.projection) -> {Host.carried;sent=projection.messages;
       atoms_kept=projection.atom_count-projection.dropped_atoms}) in
   let composed=Host.compose_librarian_range ~keeper_name:"frozen-fixture" ~runtime_id:"fixture.native"
     ~compose front |> Result.map_error Agent_core.Error.to_string |> require in

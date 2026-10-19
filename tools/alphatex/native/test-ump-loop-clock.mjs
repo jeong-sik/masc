@@ -100,7 +100,7 @@ struct ClockCase:Decodable{let tempo:Double;let start:Int64;let end:Int64;let n:
 }}
 `
  await writeFile(join(root,'Probe.swift'),swift)
- const files=['WaveArrangement.swift','WaveLoopClock.swift','CaptureAudioClock.swift','PulseAudioClock.swift','MidiTransport.swift','UmpTransport.swift','UmpOutput.swift','UmpRegions.swift','HybridMidiTransport.swift','UmpState.swift'].map(n=>new URL(n,import.meta.url).pathname)
+ const files=['WaveArrangement.swift','WaveLoopClock.swift','CaptureAudioClock.swift','PulseAudioClock.swift','MidiTransport.swift','UmpTransport.swift','UmpOutput.swift','UmpRegions.swift','HybridMidiTransport.swift','UmpLoopTransport.swift','UmpState.swift'].map(n=>new URL(n,import.meta.url).pathname)
  let result=spawnSync('xcrun',['swiftc','-parse-as-library','-D','MIDI_LIBRARY','-D','ARRANGEMENT_LIBRARY',...files,join(root,'Probe.swift'),'-o',join(root,'probe'),'-framework','AVFoundation','-framework','CoreAudio','-framework','CoreMIDI'],{encoding:'utf8'})
  assert.equal(result.status,0,result.stderr)
  result=spawnSync(join(root,'probe'),[root],{encoding:'utf8'});assert.equal(result.status,0,result.stderr)

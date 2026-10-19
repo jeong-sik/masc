@@ -1,5 +1,10 @@
 import Foundation
 
+struct AudioFailure: Error, CustomStringConvertible {
+    let description: String
+    init(_ value: String) { description = value }
+}
+
 // A captured clip repeats in its original host-clock domain, including silent
 // pre-roll and tails. Sample boundaries are rounded once from each absolute
 // cycle position; rounding one period and accumulating it would drift.

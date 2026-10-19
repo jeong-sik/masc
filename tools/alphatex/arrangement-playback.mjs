@@ -10,7 +10,7 @@ import { projectCapturedPlacement } from './capture-placement.mjs'
 import { jsonLines, unpackMidi } from './session-data.mjs'
 
 import { practiceEnabled } from './arrangement-practice.mjs'
-import { arrangementLoop, loopMidiRegions, requireLoopTransport } from './arrangement-loop.mjs'
+import { arrangementLoop, loopMidiRegions } from './arrangement-loop.mjs'
 
 function requireRegionTransport(project) {
   const schedule = arrangementPlaybackSchedule(project)
@@ -240,9 +240,11 @@ export async function prepareArrangementAudio(project, { sourceRoot, directory, 
 }
 
 export async function prepareArrangementCaptureRegions(project, { sourceRoot, directory, signal, midiOutput, sourceBindings = [], portBindings = [] } = {}) {
-  requireLoopTransport(project)
   signal?.throwIfAborted()
-  const schedule = arrangementPlaybackSchedule(project), byID = new Map(project.assets.map(asset => [asset.id, asset]))
+  const loop = arrangementLoop(project)
+  if (loop && practiceEnabled(project)) throw new Error('Continuous looping with count-in or metronome is not connected yet; use :loop off for practice clicks')
+  const schedule = arrangementPlaybackSchedule(project).flatMap(clip => project.playbackLoop && project.assets.find(asset => asset.id === clip.asset).kind === 'capture' && !clip.startNanoseconds
+    ? projectCapturedPlacement(project, project.assets.find(asset => asset.id === clip.asset), clip) : [clip]), byID = new Map(project.assets.map(asset => [asset.id, asset]))
   if (!schedule.length) throw new Error('No audible arrangement regions')
   if (!schedule.some(clip => byID.get(clip.asset).kind === 'capture')) {
     throw new Error('Paired capture preparation requires captured lanes')
@@ -263,7 +265,8 @@ export async function prepareArrangementCaptureRegions(project, { sourceRoot, di
   const temporary = await mkdtemp(join(directory, 'capture-region-play-'))
   try {
     const { assets, regions, captures } = await snapshotAudio(project, schedule.filter(clip => byID.get(clip.asset).kind !== 'midi'), { sourceRoot, temporary, signal })
-    const duration = schedule.reduce((end, clip) => Math.max(end, clip.endSeconds), 0)
+    const sourceDuration = schedule.reduce((end, clip) => Math.max(end, clip.endSeconds), 0)
+    const duration = loop ? (project.playbackLoop.end - project.playbackLoop.start) / project.ppq * 60 / project.tempo : sourceDuration
     const sources = [], notes = []
     for (const [id, snapshot] of captures) {
       if (!schedule.some(clip => clip.asset === id && clip.component !== 'audio')) continue
@@ -287,17 +290,20 @@ export async function prepareArrangementCaptureRegions(project, { sourceRoot, di
     }
     let midi, smfBindings = []
     if (schedule.some(clip => byID.get(clip.asset).kind === 'midi')) {
-      const source = await prepareArrangementMidi({ ...project, clips: project.clips.filter(clip => byID.get(clip.asset).kind === 'midi') },
-        { directory: temporary, signal, midiOutput, portBindings })
-      midi = JSON.parse(await readFile(source.path, { encoding: 'utf8', signal })); midi.duration = duration; smfBindings = source.bindings
+      const midiProject = { ...project, clips: project.clips.filter(clip => byID.get(clip.asset).kind === 'midi' && schedule.some(active => active.id === clip.id)) }
+      delete midiProject.playbackLoop
+      const source = await prepareArrangementMidi(midiProject, { directory: temporary, signal, midiOutput, portBindings })
+      midi = JSON.parse(await readFile(source.path, { encoding: 'utf8', signal })); midi.duration = sourceDuration; smfBindings = source.bindings
     }
     const paired = bindings.length > 0 || midi !== undefined, format = midi ? 'hybrid-arrangement' : paired ? 'capture-arrangement' : 'capture-audio-arrangement', path = join(temporary, 'plan.json')
     const outputs = midi ? [...smfBindings.map(binding => ({ ...binding, protocol: 1 })), ...bindings.map(binding => ({ ...binding, protocol: 2 }))]
       .map((binding, port) => ({ ...binding, port })) : bindings
     signal?.throwIfAborted()
     await writeFile(path, JSON.stringify({ schemaVersion: midi ? 6 : paired ? 5 : 4, kind: format, duration, assets, regions, ...(midi ? { midi } : {}),
-      ...(paired ? { umpRegions: { schemaVersion: 1, duration, sources, regions: notes } } : {}) }), { flag: 'wx', mode: 0o600, signal })
+      ...(paired ? { umpRegions: { schemaVersion: 1, duration: sourceDuration, sources, regions: notes } } : {}),
+      ...(loop ? { loop: { ...project.playbackLoop, ppq: project.ppq, tempo: project.tempo } } : {}) }), { flag: 'wx', mode: 0o600, signal })
     signal?.throwIfAborted()
-    return { path, duration, format, ...(paired ? { bindings: outputs, midiOutput: outputs[0].destination } : {}) }
+    return { path, duration, format, ...(paired ? { bindings: outputs, midiOutput: outputs[0].destination } : {}),
+      ...(loop ? { loop: true, originSeconds: loop.start } : {}) }
   } catch (error) { await rm(temporary, { recursive: true, force: true }); throw error }
 }

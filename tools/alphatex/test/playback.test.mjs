@@ -233,6 +233,32 @@ test('hybrid playback binds each stream protocol independently, including one de
   assert.throws(()=>fixture({...options,midiBindings:options.midiBindings.map(binding=>({...binding,protocol:1}))}),/Invalid MIDI source bindings/)
 })
 
+test('paired and hybrid loops pin only selected acquired streams through controls and reject changed ownership',async()=>{
+ for(const hybrid of [false,true]){
+  const format=hybrid?'hybrid-arrangement':'capture-arrangement'
+  const selected=hybrid?[{port:0,destination:'42',protocol:1},{port:1,destination:'42',protocol:2},{port:2,destination:'43',protocol:2}]
+    :[{port:0,destination:'42'},{port:1,destination:'43'}]
+  const options={format,loop:true,midiOutput:'42',midiBindings:selected}
+  const binding=(id,protocol,port=0)=>({port,device:{id,protocol,kind:'midi',name:'Selected'}})
+  const bindings=hybrid?[binding('42',1),binding('42',2,1)]:[binding('43',2)]
+  const state={format,loop:true,clock:{kind:'mach-host-time'},bindings}
+  const f=fixture(options);assert.ok(f.args.includes('--loop'))
+  f.event('playing',state);await f.playback.ready
+  f.playback.pause();f.event('paused',state);f.playback.seek(.4);f.playback.resume();f.event('playing',state)
+  f.playback.stop();f.event('stopped',state);f.close();await f.playback.completion
+  assert.deepEqual(f.commands.map(c=>c.kind),['pause','seek','resume','stop'])
+  const silent=fixture(options);silent.event('playing',{...state,bindings:[]});await silent.playback.ready
+  silent.event('stopped',{...state,bindings:[]});silent.close();await silent.playback.completion
+  for(const wrong of [[binding('unselected',2)],[binding('43',1)],[binding('43',2),binding('43',2,1)]]){
+   const bad=fixture(options);bad.event('playing',{...state,bindings:wrong});bad.close(1)
+   await assert.rejects(bad.playback.completion,/unselected MIDI/)
+  }
+  const changed=fixture(options);changed.event('playing',state);await changed.playback.ready
+  changed.event('paused',{...state,bindings:[]});changed.close(1)
+  await assert.rejects(changed.playback.completion,/changed its acquired/)
+ }
+})
+
 test('SMF arrangement loop retains exact bindings, owns one child through control and refuses non-cycle-aware recording epochs',async()=>{
  const bindings=[{port:0,destination:'123'}],f=fixture({format:'midi-arrangement',midiOutput:'123',output:undefined,midiBindings:bindings,loop:true})
  assert.ok(f.args.includes('--loop'))

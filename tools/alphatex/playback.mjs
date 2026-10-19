@@ -44,7 +44,8 @@ export function openPlayback({ path, output, midiOutput, midiBindings, loop = fa
   const hybrid = format === 'hybrid-arrangement'
   const captured = ['capture-session', 'capture-arrangement'].includes(format), mixed = format === 'mixed-arrangement' || captured || hybrid
   if (!['wave', 'wave-arrangement', 'midi-arrangement', 'mixed-arrangement', 'capture-session', 'capture-arrangement', 'hybrid-arrangement', 'capture-audio-arrangement'].includes(format) || ['wave-arrangement', 'capture-audio-arrangement'].includes(format) && midiOutput !== undefined) throw new Error('Invalid arrangement playback route or loop')
-  if ((format === 'midi-arrangement' || mixed) && (midiOutput === undefined || midiBindings === undefined || mixed && format !== 'mixed-arrangement' && loop)) throw new Error('MIDI arrangement requires explicit bindings; captured looping is not connected yet')
+  if ((format === 'midi-arrangement' || mixed) && (midiOutput === undefined || midiBindings === undefined)) throw new Error('MIDI arrangement requires explicit bindings')
+  if (format === 'capture-session' && loop) throw new Error('Arrange the captured take before selecting a loop')
   if (mixed && !captured && output === undefined) throw new Error('Mixed arrangement requires an explicit audio output')
   if (typeof path !== 'string' || !path) throw new Error('A playback source path is required')
   if (output !== undefined && (typeof output !== 'string' || !output)) throw new Error('Invalid output UID')
@@ -65,7 +66,7 @@ export function openPlayback({ path, output, midiOutput, midiBindings, loop = fa
   const selection = mixed || midiOutput === undefined ? (output === undefined ? [] : ['--output', output]) : ['--destination', midiOutput]
   const args = ['play', '--file', path, ...selection, ...(loop ? ['--loop'] : [])]
   const child = spawnProcess(executable, args, { stdio: ['pipe', 'pipe', 'pipe'] })
-  let failure = null, final = null, current = null, firstDevice = null, started = false, closed = false, stopping = false, detail = ''
+  let failure = null, final = null, current = null, firstDevice = null, loopBindings = null, started = false, closed = false, stopping = false, detail = ''
   let resolveReady, rejectReady, resolveDone, rejectDone
   const epochs = new Map()
   function rejectEpochs(error) { for (const pending of epochs.values()) pending.reject(error); epochs.clear() }
@@ -101,7 +102,22 @@ export function openPlayback({ path, output, midiOutput, midiBindings, loop = fa
       if (mixed && (event.format !== format || event.clock?.kind !== 'mach-host-time')) throw new Error('Missing combined arrangement clock')
       if (format === 'capture-audio-arrangement' && (event.format !== format || event.clock?.kind !== 'mach-host-time')) throw new Error('Missing captured audio arrangement clock')
       if (midiBindings !== undefined) {
-        if (!Array.isArray(event.bindings) || event.bindings.length !== midiBindings.length
+        if (loop && ['capture-arrangement', 'hybrid-arrangement'].includes(format)) {
+          // Only reached raw-UMP effects open destinations. The native owner
+          // may omit silent/out-of-window outputs; every acquired protocol/UID
+          // must still come from the selection and remain fixed for this child.
+          const identity = binding => JSON.stringify([binding?.device?.id, binding?.device?.protocol])
+          if (!Array.isArray(event.bindings) || event.bindings.some((binding, index) => binding.port !== index
+              || binding.device?.kind !== 'midi' || typeof binding.device.name !== 'string'
+              || !midiBindings.some(selected => selected.destination === binding.device.id
+                && (hybrid ? selected.protocol : 2) === binding.device.protocol))
+              || new Set(event.bindings.map(identity)).size !== event.bindings.length) {
+            throw new Error('Playback loop acquired an unselected MIDI destination')
+          }
+          const identities = JSON.stringify(event.bindings.map(identity))
+          if (loopBindings !== null && loopBindings !== identities) throw new Error('Playback loop changed its acquired MIDI destinations')
+          loopBindings ??= identities
+        } else if (!Array.isArray(event.bindings) || event.bindings.length !== midiBindings.length
             || event.bindings.some((binding, index) => binding.port !== midiBindings[index].port
               || binding.device?.id !== midiBindings[index].destination || binding.device.kind !== 'midi'
               || binding.device.protocol !== (hybrid ? midiBindings[index].protocol : captured ? 2 : 1) || typeof binding.device.name !== 'string')) {

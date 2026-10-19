@@ -8,8 +8,9 @@ import { constants } from 'node:fs'
 import { arrangementRoute, selectArrangementRoute } from '../arrangement-playback.mjs'
 import { arrangementFromPhrase } from '../phrase-arrangement.mjs'
 import * as editor from '../sequencer-editor.mjs'
+import { sourceExpressions, selectedExpression } from '../midi-source-editor.mjs'
+import { importMidiSource, midiSourcePattern } from '../midi-source.mjs'
 import { harmonyAt, PPQ } from '../sequencer-project.mjs'
-import { importMidiSource } from '../midi-source.mjs'
 
 // Exercise actual controller decisions with owned IO substitutes. No terminal
 // output, layout, audio hardware or player behavior is asserted.
@@ -47,7 +48,7 @@ async function controller(options = {}) {
     copyFile: async (from, to) => { observed.copies.push([from, to]) },
     arrangementRoute, selectArrangementRoute, dirname, constants, join, resolve, tmpdir: () => '/synthetic', randomUUID, emitKeypressEvents() {},
     openPlayback(value) { observed.players++; if (options.playback) return options.playback(value); throw new Error('Unexpected playback') }, Worker,
-    Note: { fromMidi: String }, ...editor, harmonyAt, PPQ,
+    Note: { fromMidi: String }, ...editor, harmonyAt, PPQ, sourceExpressions, selectedExpression,
     loadProject: async () => { throw new Error('Unexpected load') },
     saveProject: async (path, project) => { observed.saved.push(structuredClone(project)); return 'revision' },
     projectMidi() { throw new Error('Unexpected MIDI export') }, safeText: String,
@@ -320,4 +321,23 @@ test('WAV export prepares the selected SMF2 pattern with the chosen VST', async 
   await flush()
   assert.deepEqual(view.observed.copies, [['/retained/pattern-2.wav', '/synthetic/pattern-2.wav']])
   assert.equal(view.observed.players, 0)
+})
+
+test('expression keyboard decisions edit the selected event, preserve notes, undo removal and save before closing',async()=>{
+ const bytes=Buffer.from('4d546864000000060000000101e04d54726b0000001d00b0014d00e0004000903c608360803c2d8360ff2f00','hex')
+ bytes.writeUInt32BE(bytes.length-22,18);const source=importMidiSource(bytes)
+ const view=await controller({initialDocument:source})
+ try {
+  view.command('events');await flush()
+  view.key(undefined,'+');await flush()
+  view.key('return');await flush()
+  view.key('backspace');view.key('backspace');view.key(undefined,'81');view.key('return');await flush()
+  view.key('down');await flush();view.key('x');view.key('u');view.key('s');await flush()
+  const saved=view.observed.saved.at(-1),events=midiSourcePattern(saved).events
+  assert.ok(events.some(e=>e.kind==='channel'&&e.bytes[0]===0xb0&&e.bytes[2]===81))
+  assert.ok(events.some(e=>e.kind==='channel'&&e.bytes[0]===0xe0))
+  assert.deepEqual(midiSourcePattern(saved).notes,midiSourcePattern(source).notes)
+  assert.equal(saved.original,source.original)
+ }finally{view.key('q');await view.done}
+ assert.equal(view.process.stdin.isRaw,false)
 })

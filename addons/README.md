@@ -9,6 +9,7 @@ step in other Keeper activity.
 
 | Package | Contribution | Resource and state ownership |
 | --- | --- | --- |
+| [vst-phrase](vst-phrase/README.md) | Retains the native score companion's latest instrument, render and player state. | Reads an explicit local snapshot; native VSTs, licenses and audio playback remain on the user's host. |
 | [web-project](web-project/) | Relates build expectations, deployment receipts, captured documents and feature probes. | Reads supplied observations; does not create or navigate a browser. |
 | [msx-machine](msx-machine/) | Owns MSX tools, screen context and play instructions. | Worker-owned emulator and persistent state volume; source candidate, image unverified. |
 | [dos-machine](dos-machine/) | Owns DOS tools, screen context and play instructions. | Worker-owned emulator and persistent state volume; source candidate, image unverified. |

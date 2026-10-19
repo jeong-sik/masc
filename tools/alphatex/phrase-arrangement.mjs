@@ -2,6 +2,7 @@ import { newProject, validateProject } from './sequencer-project.mjs'
 import { projectMidi } from './sequencer-files.mjs'
 import { importMidiSource, exportMidiSource, validateMidiSource, midiSourcePattern, tempoEvent } from './midi-source.mjs'
 import { newArrangement, validateArrangement, arrangementID, editArrangement } from './arrangement.mjs'
+import { isDeepStrictEqual } from 'node:util'
 
 // A generated phrase retains its editable draft beside its immutable wire
 // snapshot. IO/preparation boundaries verify the relationship off the UI path.
@@ -9,6 +10,7 @@ export function verifyPhraseSnapshot(asset) {
   if (asset.phrase === undefined) return
   if (asset.kind !== 'midi' || asset.phrase.kind !== undefined) throw new Error('Invalid editable phrase snapshot')
   validateProject(asset.phrase)
+  if (!isDeepStrictEqual(asset.phrase.sound, asset.source.sound)) throw new Error('Editable phrase and source sound disagree')
   if (!Buffer.from(projectMidi(asset.phrase)).equals(Buffer.from(exportMidiSource(asset.source)))) {
     throw new Error('Editable phrase and MIDI snapshot disagree')
   }
@@ -28,7 +30,7 @@ export function importPhraseDocument(project, document) {
   else {
     if (document?.kind !== undefined) throw new Error('Choose a phrase or original MIDI document')
     phrase = structuredClone(validateProject(document))
-    source = importMidiSource(projectMidi(phrase), { name: phrase.title })
+    source = importMidiSource(projectMidi(phrase), { name: phrase.title, sound: phrase.sound })
   }
   const asset = { kind: 'midi', id: arrangementID(project.assets, 'asset'), name: phrase ? phrase.title : source.name, source,
     ...(phrase ? { phrase } : {}) }

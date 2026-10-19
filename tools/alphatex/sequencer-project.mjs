@@ -1,4 +1,5 @@
 import { Chord, Note, Interval, Voicing, VoicingDictionary, VoiceLeading } from 'tonal'
+import { validateSound } from './project-sound.mjs'
 
 // Quarter-note ticks are the document authority. Wall time belongs to transport.
 export const PPQ = 960 // alphaSynth's native quarter-note resolution
@@ -21,6 +22,7 @@ export function beats(value) {
   return int(ticks, 'beat position (must resolve to whole ticks)')
 }
 export function validateProject(project) {
+  if (project?.sound !== undefined) validateSound(project.sound)
   if (project?.schemaVersion !== 1 || project.ppq !== PPQ) throw new Error('Unsupported sequencer document')
   text(project.title, 'title')
   int(project.tempo, 'tempo', 4, 60000000) // SMF's 24-bit microseconds/quarter field, minimum 1µs

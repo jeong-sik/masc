@@ -1,4 +1,5 @@
 import { Chord, Note } from 'tonal'
+import { validateSound } from './project-sound.mjs'
 import { expressionMessage, expressionEvent } from './midi-expression.mjs'
 
 // The original file is immutable provenance. Edits address source events, rather
@@ -133,6 +134,7 @@ function parse(bytes) {
   return { bytes, container, parts, format, timing, tracks }
 }
 function original(source) {
+  if (source?.sound !== undefined) validateSound(source.sound)
   if (source?.schemaVersion !== 1 || source.kind !== 'midi-source' || typeof source.name !== 'string' || !source.name.trim()
       || typeof source.original !== 'string' || !Array.isArray(source.changes) || !Array.isArray(source.insertions)) throw new Error('Invalid MIDI source document')
   if (source.notation !== undefined) {
@@ -232,9 +234,9 @@ function materialize(source) {
   if (orderedGroups.size) throw new Error('MIDI order has no matching source events')
   return { ...parsed, tracks }
 }
-export function importMidiSource(bytes, { name = 'Imported MIDI', notation } = {}) {
+export function importMidiSource(bytes, { name = 'Imported MIDI', notation, sound } = {}) {
   if (!(bytes instanceof Uint8Array)) throw new Error('MIDI import requires bytes')
-  const source = { schemaVersion: 1, kind: 'midi-source', name, original: Buffer.from(bytes).toString('base64'), changes: [], insertions: [], ...(notation === undefined ? {} : { notation: structuredClone(notation) }) }
+  const source = { schemaVersion: 1, kind: 'midi-source', name, original: Buffer.from(bytes).toString('base64'), changes: [], insertions: [], ...(notation === undefined ? {} : { notation: structuredClone(notation) }), ...(sound === undefined ? {} : { sound: structuredClone(sound) }) }
   materialize(source)
   return source
 }

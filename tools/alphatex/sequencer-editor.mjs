@@ -1,5 +1,13 @@
 import { newProject, validateProject, editProject, beats, pitch, PPQ, harmonyAt } from './sequencer-project.mjs'
 import { sourceEditor, sourceSelected, sourceAction, sourceCommand, sourceHarmony } from './midi-source-editor.mjs'
+import { validateSound } from './project-sound.mjs'
+
+export function editorSound(editor, sound) {
+  validateSound(sound)
+  const project = { ...editor.project, sound: structuredClone(sound) }
+  const previous = { ...editor, undo: [...editor.undo, editor.project], redo: [] }
+  return project.kind === 'midi-source' ? sourceEditor(project, previous) : { ...previous, project: validateProject(project) }
+}
 
 export function newEditor(project = newProject(), { pattern } = {}) {
   if (project?.kind === 'midi-source') return sourceEditor(project, {}, pattern)

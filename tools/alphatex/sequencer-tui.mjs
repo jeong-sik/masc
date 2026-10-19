@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { emitKeypressEvents } from 'node:readline'
 import { Worker } from 'node:worker_threads'
 import { Note } from 'tonal'
-import { newEditor, editorCommand, editorAction, selectedNote, editorView, editorAxis, editorHarmony } from './sequencer-editor.mjs'
+import { newEditor, editorCommand, editorAction, selectedNote, editorView, editorAxis, editorHarmony, editorSound } from './sequencer-editor.mjs'
 import { loadProject, saveProject, projectMidi } from './sequencer-files.mjs'
 import { sourceTickAtSeconds, sourceSecondsAtTick } from './midi-source-playback.mjs'
 import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo } from './midi-source-editor.mjs'
@@ -16,6 +16,7 @@ import { openPlayback } from './playback.mjs'
 import { InstrumentPicker } from './instruments.mjs'
 import { defaultStateDirectory, snapshotWriter } from './vst.mjs'
 import { renderVstPhrase } from './sequencer-vst.mjs'
+import { captureVstSound } from './project-sound-files.mjs'
 
 const help = [
   'Source :events toggles expression list; Up/Down selects, Enter edits value, +/- changes, x removes.',
@@ -76,7 +77,8 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   const worker = new Worker(new URL('./sequencer-worker.mjs', import.meta.url))
   const jobs = new Map(), players = new Map()
   const nativeRenders = new Set(), observations = new Set()
-  let audioInstrument = { kind: 'unselected' }, currentVstRender = null
+  const audioInstrument = () => editor.project.sound ?? { kind: 'unselected' }
+  let currentVstRender = null
   const writeSnapshot = snapshotWriter(stateDirectory)
   let jobNumber = 0, generation = 0, transport = { kind: 'stopped' }, workerFailure = null, pendingDraw = null
   const wasRaw = process.stdin.isRaw
@@ -91,9 +93,18 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       .finally(() => observations.delete(pending))
   }
   function chooseInstrument(choice) {
-    task = task.then(() => {
+    task = task.then(async () => {
       if (!accepting || closed || suspended) return
-      stop(); audioInstrument = choice; selectedMidiOutput = undefined; portBindings = []
+      stop()
+      let sound = choice
+      if (choice.kind === 'vst') {
+        const capture = captureVstSound(choice.selection)
+        nativeRenders.add(capture)
+        try { sound = await capture.promise } finally { nativeRenders.delete(capture) }
+      }
+      if (!accepting || closed || suspended) return
+      editor = editorSound(editor, sound)
+      selectedMidiOutput = undefined; portBindings = []
       status = choice.kind === 'vst' ? `Selected ${choice.selection.name}` : 'Selected SoundFont'
       play()
     }).catch(error => { status = error.message }).finally(draw)
@@ -186,7 +197,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         if (pitch === editor.pitch) cells[cursor] = current ? '◆' : '◇'
         lines.push(`${Note.fromMidi(pitch).padStart(5)}  ${cells.join('')}`)
       }
-      const instrument = audioInstrument.kind === 'vst' ? `VST ${audioInstrument.selection.name}` : audioInstrument.kind === 'soundfont' ? 'SoundFont' : 'choose instrument'
+      const instrument = audioInstrument().kind === 'vst' ? `VST ${audioInstrument().selection.name}` : audioInstrument().kind === 'soundfont' ? 'SoundFont' : 'choose instrument'
       const destination = portBindings.length ? portBindings.map(binding => `${binding.port}→${binding.destination}`).join(', ')
         : selectedMidiOutput === undefined ? selectedOutput ?? 'system default' : `MIDI ${selectedMidiOutput}`
       lines.push(`Playhead ${(playTick() / per).toFixed(2)} · loop ${project.loop.start / per}–${project.loop.end / per} · ${instrument} · output ${destination} · ${path}`)
@@ -204,7 +215,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     transport.native?.cancel()
     transport.handle?.stop()
     if (currentVstRender || transport.native) observe({ state: 'stop_requested',
-      selection: audioInstrument.kind === 'vst' ? audioInstrument.selection : null, render: currentVstRender })
+      selection: audioInstrument().kind === 'vst' ? audioInstrument().selection : null, render: currentVstRender })
     currentVstRender = null
     transport = { kind: 'stopped' }
   }
@@ -218,11 +229,11 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     return { promise, cancel }
   }
   function renderAudio(snapshot, options = {}) {
-    if (audioInstrument.kind === 'unselected') throw new Error('Choose an instrument with i before exporting audio')
-    if (audioInstrument.kind === 'soundfont') return render(snapshot, { ...options, format: 'wav' })
-    const selection = audioInstrument.selection
+    if (!snapshot.sound) throw new Error('Choose an instrument with i before exporting audio')
+    if (snapshot.sound.kind === 'soundfont') return render(snapshot, { ...options, format: 'wav' })
+    const sound = snapshot.sound, selection = sound.selection
     const preparation = render(snapshot, { ...options, format: 'vst-midi' })
-    const native = renderVstPhrase({ preparation, selection, outputPath: join(directory, `${jobNumber}.vst.wav`), stateDirectory, loop: options.loop })
+    const native = renderVstPhrase({ preparation, selection, sound, outputPath: join(directory, `${jobNumber}.vst.wav`), stateDirectory, loop: options.loop })
     nativeRenders.add(native)
     native.promise.finally(() => nativeRenders.delete(native)).catch(() => {})
     return { promise: native.promise, cancel: preparation.cancel, native }
@@ -270,14 +281,14 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     if (transport.kind === 'paused') { transport.handle.resume(); return }
     if (transport.kind !== 'stopped') { stop(); draw(); return }
     const midiRoute = selectedMidiOutput !== undefined || portBindings.length > 0
-    if (!midiRoute && audioInstrument.kind === 'unselected') { picker.open(); return }
+    if (!midiRoute && audioInstrument().kind === 'unselected') { picker.open(); return }
     const id = ++generation, options = { loop, pattern: editor.pattern, midiOutput: selectedMidiOutput, portBindings }
     const result = midiRoute ? render(editor.project, { ...options, format: 'midi' }) : renderAudio(editor.project, options)
     transport = { kind: 'rendering', cancel: result.cancel, native: result.native }
-    if (result.native) observe({ state: 'rendering', selection: audioInstrument.selection, render: null })
+    if (result.native) observe({ state: 'rendering', selection: audioInstrument().selection, render: null })
     result.promise.then(wave => startPlayer(wave, id)).catch(error => {
       if (!closed && id === generation) { transport = { kind: 'stopped' }; status = error.message;
-        if (result.native) observe({ state: 'failed', selection: audioInstrument.selection, render: null, error: error.message }); draw() }
+        if (result.native) observe({ state: 'failed', selection: audioInstrument().selection, render: null, error: error.message }); draw() }
     })
     draw()
   }

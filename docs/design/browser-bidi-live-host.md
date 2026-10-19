@@ -695,3 +695,16 @@ accepted a drop. Re-read the application result before reporting success or
 retrying. HTML5 `draggable`/`DataTransfer` requires separate verification from
 pointer-capture dragging; Firefox's upstream issue is
 [Bug 1515879](https://bugzilla.mozilla.org/show_bug.cgi?id=1515879).
+
+### Observing hover controls
+
+After hover, read the page again before selecting the newly visible control.
+Scene output uses the requested `maxChars` text budget and its existing 1 MiB
+response limit. Visible controls later in DOM order are not silently excluded
+by a separate 200-node quota. Nodes are admitted against the complete JSON's
+UTF-8 byte size, including their geometry and metadata. When the next node
+would exceed the byte ceiling, the result keeps the admitted nodes and full
+page identity with `truncated:true`. An identity envelope that cannot fit by
+itself is refused rather than shortened. Check `truncated` and use an observed
+region scope or the element inventory when a text or byte budget is exhausted.
+A missing control in a truncated observation is not evidence that hover failed.

@@ -120,16 +120,47 @@ assert.throws(() => vm.runInContext('browserScene(reference)',recycled.context),
 for (const [name, alter] of [
   ['UTF-8 title', f => { f.document.title = '🙂'.repeat(300000); }],
   ['JSON escaping', f => { f.document.title = '"'.repeat(600000); }],
-  ['observed href', f => { f.link.href = 'http://example.test/' + 'x'.repeat(9 * limit); }],
   ['complete URL', f => { f.context.location.href = 'http://example.test/' + 'x'.repeat(9 * limit); }],
-  ['node style metadata', f => { f.style.fontWeight = 'x'.repeat(2 * limit); }],
-  ['rectangle arrays', f => { f.link.getClientRects = () => Array(30000).fill(rect); }],
 ]) {
   const f = fixture();
   alter(f);
-  assert.throws(f.read, /scene_response_exceeds_1_mib/, `${name} must count toward full response bytes`);
+  assert.throws(f.read, /scene_response_exceeds_1_mib/, `${name} identity must remain complete`);
 }
-console.log('scene resources: shared-script parity, insecure-context identity, observed href, and 6 JSON/UTF-8 overflow cases passed');
+for (const [name, alter] of [
+  ['observed href', f => { f.link.href = 'http://example.test/' + 'x'.repeat(9 * limit); }],
+  ['node style metadata', f => { f.style.fontWeight = 'x'.repeat(2 * limit); }],
+  ['rectangle arrays', f => { f.link.getClientRects = () => Array(30000).fill(rect); }],
+]) {
+  const f = fixture(); alter(f);
+  const scene=f.read();
+  assert.equal(scene.truncated,true,`${name} cannot erase the identity envelope`);
+  assert.equal(scene.nodes.length,0,`${name} cannot cross the byte ceiling`);
+  assert.equal(scene.url,f.context.location.href);
+  assert.equal(scene.documentId,f.read().documentId);
+  assert.ok(Buffer.byteLength(JSON.stringify(scene),'utf8') <= limit);
+}
+const dense=fixture({extraNodes:document => Array.from({length:6000},() => ({
+  nodeType:1,localName:'a',innerText:'🙂"',parentElement:null,isConnected:true,
+  ownerDocument:document,childNodes:[],href:'http://example.test/item',
+  hasAttribute:name => name === 'href',getAttribute:() => null,
+  matches:selector => selector !== ':disabled',getClientRects:() => [rect],click:() => {},
+}))});
+const denseScene=vm.runInContext("browserScene({mode:'read',maxChars:100000})",dense.context);
+assert.equal(denseScene.truncated,true,'dense short nodes stop at the actual byte ceiling');
+assert.ok(denseScene.nodes.length > 0 && denseScene.nodes.length < 6001);
+assert.equal(denseScene.url,dense.context.location.href);
+assert.equal(denseScene.documentId,dense.read().documentId);
+const denseBytes=Buffer.byteLength(JSON.stringify(denseScene),'utf8');
+assert.ok(denseBytes <= limit,'partial result remains valid JSON within the actual ceiling');
+const nextNode=denseScene.nodes.at(-1);
+assert.ok(Buffer.byteLength(JSON.stringify({...denseScene,
+  nodes:[...denseScene.nodes,nextNode],chars:denseScene.chars+Array.from(nextNode.text).length}),'utf8') > limit,
+  'one more representative node exceeds the actual ceiling; there is no hidden node quota or reserve');
+const firstDense=denseScene.nodes[0];
+dense.context.reference={mode:'resolve_link',documentId:denseScene.documentId,nodeId:firstDense.nodeId};
+assert.equal(vm.runInContext('browserScene(reference)',dense.context),dense.link,
+  'partial payload retains usable observed node identity');
+console.log('scene resources: shared runtime parity, exact UTF-8 byte accounting, identity overflow refusal and partial usable dense-node payload passed');
 
 // Run the shipped scene text walk against explicit DOM boundaries. Geometry
 // fixtures expose every text node; actual browser innerText parity is exercised

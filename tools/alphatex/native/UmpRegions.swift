@@ -67,7 +67,7 @@ struct UmpRegionClip {
         let before = prefix(at: time, inclusive: false), through = prefix(at: time)
         let expired = Set(expiredNotes.filter { $0.value < through }.map(\.key))
         return try umpRestoration(events, prefixCount: before, followingCount: through - before,
-                                  excludingNotes: expired, replacing: previous)
+                                  preambleEndIndex: endIndex, excludingNotes: expired, replacing: previous)
     }
     func phase(at position: UInt64) -> (copy: UInt64, time: UInt128)? {
         guard position >= start, position < end else { return nil }

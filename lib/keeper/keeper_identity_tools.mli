@@ -42,6 +42,15 @@ val load :
     and unreadable, which is not the same thing and must not be read as
     "no tools". *)
 
+val forget :
+  base_path:string ->
+  keeper_name:string ->
+  provider_id:string ->
+  (bool, string) result
+(** Delete the catalog written down for this Keeper and provider, so the next
+    turn stops offering its tools. [Ok false] means there was nothing to
+    delete; [Error] means the file is there and could not be removed. *)
+
 (** How the provider is reached: the MCP session, and the two OAuth hops a
     renewal makes. Every production call goes through {!http_transports};
     tests inject their own, because a test that needs network is a test that

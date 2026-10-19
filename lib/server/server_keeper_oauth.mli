@@ -131,3 +131,35 @@ val attempt_status_json : base_path:string -> now:float -> keeper:string -> prov
 
 val reject_callback : base_path:string -> state:string -> now:float -> unit
 (** Only a still-awaiting consent is rejected. Replay cannot fail an admitted callback. *)
+
+type revocation =
+  | Revoke_not_published
+      (** the provider publishes no revocation endpoint, or there was no token
+          of ours to revoke (a GitHub CLI provider's credential belongs to
+          [gh], which masc never wrote) *)
+  | Revoke_revoked  (** the endpoint answered a success *)
+  | Revoke_failed of string  (** the endpoint answered a refusal, or nothing *)
+
+val disconnect :
+  ?transports:Keeper_identity_tools.transports ->
+      (** How the provider is reached. Production passes nothing and gets
+          {!Keeper_identity_tools.http_transports}; a test injects its own so
+          the best-effort revoke is exercised without the network. *)
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  config:Workspace.config ->
+  keeper:string ->
+  provider_id:string ->
+  now:float ->
+  unit ->
+  (Yojson.Safe.t, string) result
+(** Detach one Keeper from one declared provider.
+
+    Deletes the refresh token file entry, clears the access-token and expiry
+    env entries, and deletes the tool catalog that made the attachment
+    visible to the Keeper's runtime -- so the next turn stops offering its
+    tools. Then, best effort, asks the provider to forget the refresh token
+    (RFC 7009) when it publishes a revocation endpoint, and reports that
+    outcome separately: a local deletion and a provider revocation are not
+    the same act, and a provider that cannot be reached does not undo the
+    deletion. The returned object is also written as a receipt under
+    [.masc/identity/disconnects/<keeper>/<provider>.json]. *)

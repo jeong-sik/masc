@@ -33,6 +33,7 @@ type t = {
   authorize_url : string;
   token_url : string;
   registration_url : string option;
+  revocation_endpoint : string option;
   scopes_supported : string list;
   supports_pkce_s256 : bool;
 }
@@ -233,6 +234,7 @@ let discover ~get ~ask ~mcp_url () =
     ; authorize_url
     ; token_url
     ; registration_url = string_member server_pairs "registration_endpoint"
+    ; revocation_endpoint = string_member server_pairs "revocation_endpoint"
     ; scopes_supported = string_list_member resource_pairs "scopes_supported"
     ; supports_pkce_s256 =
         List.mem "S256"

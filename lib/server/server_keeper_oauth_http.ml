@@ -193,6 +193,41 @@ let handle_set_client request reqd =
     request reqd
 ;;
 
+(* Detaching one Keeper from one provider. The same authority as attaching
+   one: it deletes a credential the login route wrote, and an operator token
+   the TUI carries is the one allowed to begin that flow. Not scoped to the
+   install -- the token belongs to the Keeper the request names. *)
+let handle_disconnect ~clock request reqd =
+  Server_auth.with_token_permission_auth ~permission:Masc_domain.CanAdmin
+    (fun state _agent_name req reqd ->
+      let config = Mcp_server.workspace_config state in
+      Http.Request.read_body_async reqd (fun body_str ->
+        let answer =
+          match Yojson.Safe.from_string body_str with
+          | exception Yojson.Json_error detail -> Error detail
+          | `Assoc pairs ->
+            let field key =
+              match List.assoc_opt key pairs with
+              | Some (`String value) -> Some value
+              | Some _ | None -> None
+            in
+            (match field "keeper", field "provider" with
+             | Some keeper, Some provider_id ->
+               Server_keeper_oauth.disconnect ~clock ~config ~keeper ~provider_id
+                 ~now:(Time_compat.now ()) ()
+             | _ -> Error "keeper and provider are required")
+          | _ -> Error "the request body is not an object"
+        in
+        match answer with
+        | Error message ->
+          Http.Response.json_value ~status:`Bad_request ~compress:true ~request:req
+            (`Assoc [ "error", `String message ])
+            reqd
+        | Ok payload ->
+          Http.Response.json_value ~compress:true ~request:req payload reqd))
+    request reqd
+;;
+
 let add_routes ~clock router =
   router
   |> Http.Router.get Server_keeper_oauth.callback_path (handle_callback ~clock)
@@ -200,4 +235,5 @@ let add_routes ~clock router =
   |> Http.Router.get "/api/v1/keepers/oauth/attached-tools" handle_attached_tools
   |> Http.Router.get "/api/v1/keepers/oauth/attempt-status" handle_attempt_status
   |> Http.Router.post "/api/v1/keepers/oauth/client" handle_set_client
+  |> Http.Router.post "/api/v1/keepers/oauth/disconnect" (handle_disconnect ~clock)
 ;;

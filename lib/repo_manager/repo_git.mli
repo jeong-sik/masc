@@ -152,3 +152,11 @@ val status_files_at :
     same read-only, NUL-delimited status command as {!status_files}. The caller
     remains responsible for proving that [local_path] is the requested scope's
     repository root. *)
+
+val file_paths_at :
+  ?timeout_sec:float -> local_path:string -> unit -> (string list, string) result
+(** Enumerate tracked and nonignored untracked paths relative to the checkout
+    root, without changing the index. NUL framing preserves exact path bytes;
+    repeated index stages produce one path. Deleted tracked paths may still
+    appear: the caller checks availability and its own file access policy.
+    The caller must establish that [local_path] is its authorised Git root. *)

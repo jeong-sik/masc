@@ -359,6 +359,93 @@ let test_noise_dirs_not_confidential () =
     [ "node_modules"; "_build"; "dist"; "build"; ".worktrees"; ".cache" ]
 ;;
 
+let catalog_git ~cwd args =
+  match Repo_git.run_git ~cwd args with
+  | Ok _ -> ()
+  | Error detail -> Alcotest.fail detail
+
+let catalog_or_fail ~base ~path =
+  match W.For_testing.workspace_file_catalog ~base ~path with
+  | Ok catalog -> catalog
+  | Error W.Catalog_invalid_path -> Alcotest.fail "unexpected invalid catalog path"
+  | Error W.Catalog_directory_unavailable -> Alcotest.fail "catalog directory unavailable"
+  | Error W.Catalog_repository_unavailable -> Alcotest.fail "catalog repository unavailable"
+  | Error (W.Catalog_scan_failed detail) -> Alcotest.fail detail
+
+let test_catalog_lists_checkout_with_file_read_guards () =
+  with_temp_dir (fun base ->
+    with_temp_dir (fun outside ->
+      catalog_git ~cwd:base [ "init"; "-b"; "main" ];
+      write_file (Filename.concat base "src/selected.ml") "selected\n";
+      write_file (Filename.concat base "elsewhere/새 파일\n이름.ml") "other\n";
+      write_file (Filename.concat base ".gitignore") "*.ignored\n";
+      write_file (Filename.concat base "hidden.ignored") "ignored\n";
+      write_file (Filename.concat base "tracked.ignored") "tracked\n";
+      write_file (Filename.concat base "deleted.ml") "gone\n";
+      catalog_git ~cwd:base [ "add"; "--force"; "--"; "tracked.ignored"; "deleted.ml" ];
+      Sys.remove (Filename.concat base "deleted.ml");
+      write_file (Filename.concat base ".env") "secret\n";
+      write_file (Filename.concat base "keys/credentials.json") "secret\n";
+      write_file (Filename.concat base ".masc/state") "internal\n";
+      write_file (Filename.concat outside "secret") "outside\n";
+      Unix.symlink (Filename.concat outside "secret") (Filename.concat base "escape");
+      Unix.symlink ".env" (Filename.concat base "alias-secret");
+      Unix.symlink "src/selected.ml" (Filename.concat base "alias-source");
+      (* Both files exist: a POSIX backslash name must not open the slash name. *)
+      write_file (Filename.concat base "src\\selected.ml") "different\n";
+      let catalog = catalog_or_fail ~base ~path:"src" in
+      check string "root stays workspace relative" "" catalog.catalog_root;
+      check (list string) "whole checkout obeys file read policy"
+        (List.sort String.compare
+           [ ".gitignore"; "alias-source"; "elsewhere/새 파일\n이름.ml"
+           ; "src/selected.ml"; "tracked.ignored" ])
+        catalog.catalog_paths;
+      List.iter
+        (fun path ->
+          match W.For_testing.resolve_workspace_file base path with
+          | Error _ -> Alcotest.fail "catalog selection cannot resolve for file reading"
+          | Ok file ->
+              match W.For_testing.load_workspace_file_content file with
+              | Ok _ -> ()
+              | Error _ -> Alcotest.fail "catalog selection cannot be read")
+        catalog.catalog_paths))
+
+let test_catalog_never_searches_above_workspace () =
+  with_temp_dir (fun parent ->
+    catalog_git ~cwd:parent [ "init"; "-b"; "main" ];
+    let base = Filename.concat parent "keeper" in
+    mkdir_p base;
+    (match W.For_testing.workspace_file_catalog ~base ~path:"" with
+     | Error W.Catalog_repository_unavailable -> ()
+     | Ok _ -> Alcotest.fail "catalog borrowed the enclosing checkout"
+     | Error _ -> Alcotest.fail "expected absence of an owned repository");
+    let repo = Filename.concat base "repos/example" in
+    mkdir_p (Filename.concat repo "src");
+    catalog_git ~cwd:repo [ "init"; "-b"; "main" ];
+    write_file (Filename.concat repo "src/one.ml") "one\n";
+    write_file (Filename.concat repo "two.ml") "two\n";
+    let catalog = catalog_or_fail ~base ~path:"repos/example/src" in
+    check string "owning nested checkout" "repos/example" catalog.catalog_root;
+    check (list string) "paths retain Keeper bundle prefix"
+      [ "repos/example/src/one.ml"; "repos/example/two.ml" ] catalog.catalog_paths)
+
+let test_catalog_distinguishes_empty_from_unavailable () =
+  with_temp_dir (fun base ->
+    catalog_git ~cwd:base [ "init"; "-b"; "main" ];
+    let catalog = catalog_or_fail ~base ~path:"" in
+    check (list string) "a genuine empty checkout" [] catalog.catalog_paths;
+    (match W.For_testing.workspace_file_catalog ~base ~path:".env" with
+     | Error W.Catalog_invalid_path -> ()
+     | Ok _ | Error _ -> Alcotest.fail "confidential catalog directory was not rejected");
+    (match W.For_testing.workspace_file_catalog ~base ~path:"missing" with
+     | Error W.Catalog_directory_unavailable -> ()
+     | Ok _ | Error _ -> Alcotest.fail "missing directory became an empty catalog");
+    rm_rf (Filename.concat base ".git");
+    write_file (Filename.concat base ".git") "gitdir: missing-git-dir\n";
+    match W.For_testing.workspace_file_catalog ~base ~path:"" with
+    | Error (W.Catalog_scan_failed _) -> ()
+    | Ok _ | Error _ -> Alcotest.fail "Git failure became empty or missing checkout")
+
 let () =
   run
     "workspace_file_confidentiality"
@@ -394,6 +481,14 @@ let () =
             "file read enforces size cap"
             `Quick
             test_read_size_cap_rejects_large_file
+        ] )
+    ; ( "file catalog"
+      , [ test_case "whole checkout shares file read guards" `Quick
+            test_catalog_lists_checkout_with_file_read_guards
+        ; test_case "stops at selected workspace and retains nested scope" `Quick
+            test_catalog_never_searches_above_workspace
+        ; test_case "distinguishes empty checkout and unavailable directory" `Quick
+            test_catalog_distinguishes_empty_from_unavailable
         ] )
     ; ( "SSOT consistency"
       , [ test_case "denylist matches tree hidden" `Quick test_denylist_matches_tree_hidden

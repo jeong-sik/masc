@@ -849,7 +849,8 @@ let create_argument_source ~input_policy ~base_path ~keeper_name ~seed
     match seed,turn_start with
     | Some raw_seed,Keeper_carried_front.Turn_boundary {end_atom}
       when base_path<>"" && end_atom>0 ->
-      Some {base_path;keeper_name;raw_seed;replay_prefix;completed_before=end_atom;
+      Some {base_path;keeper_name;raw_seed;
+            replay_prefix=Keeper_replay_prefix.history_only replay_prefix;completed_before=end_atom;
             addresses=Keeper_model_input_demotion.create_address_memo ();
             binding=Arguments_unbound}
     | None,(Keeper_carried_front.Turn_boundary _ | Turn_boundary_unknown _)
@@ -908,10 +909,10 @@ type selected_start_range =
 
 (* Claude Code and a fresh Codex thread apply their capacity before choosing
    a carried front. The zero-history floor must survive that choice: a seed
-   would otherwise restore an atom the provider just refused. A resumed Codex
-   thread sends no history and never enters this function. Antigravity and
-   Muse Code cut nothing, so they compose with [carried_start_range] and
-   [compose_librarian_range] directly. *)
+   would otherwise restore an atom the provider just refused. Antigravity and
+   Muse Code use the same composition with unbounded capacity. Codex/Claude
+   Resume may compose per-turn context here, but send no history and must
+   omit [argument_projection]. *)
 let start_range_projection ?argument_projection
     ~measure_message_bytes ~capacity_bytes ~unbounded_capacity_bytes
     ~reserved_bytes ?on_model_input_window_observation ?carried_front_seed
@@ -1067,6 +1068,20 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
     | None -> messages
     | Some text -> messages @ [ extra_system_context_message text ]
   in
+  let* tools =
+    match turn_params.tool_choice with
+    | None | Some Auto -> Ok tools
+    | Some None_ -> Ok []
+    | Some ((Any | Tool _) as choice) ->
+      Error
+        (config_error
+           ~field:"tool_choice"
+           (Printf.sprintf
+              "%s official-client tools do not support forced tool choice %s"
+              runtime_label
+              (Yojson.Safe.to_string
+                 (Agent_core.Types.tool_choice_to_json choice))))
+  in
   let* messages =
     match model_input_projection with
     | None -> Ok messages
@@ -1076,7 +1091,7 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
             [InvalidConfig { field = "model_input_projection" }] renamed a
             per-candidate capacity bound into a request defect, and no reader
             of that field ever existed. *)
-         project messages
+         project ~tools messages
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
@@ -1137,20 +1152,6 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
     resolve_reasoning_effort
       ~enable_thinking:turn_params.enable_thinking
       ~reasoning_effort:turn_params.reasoning_effort
-  in
-  let* tools =
-    match turn_params.tool_choice with
-    | None | Some Auto -> Ok tools
-    | Some None_ -> Ok []
-    | Some ((Any | Tool _) as choice) ->
-      Error
-        (config_error
-           ~field:"tool_choice"
-           (Printf.sprintf
-              "%s official-client tools do not support forced tool choice %s"
-              runtime_label
-              (Yojson.Safe.to_string
-                 (Agent_core.Types.tool_choice_to_json choice))))
   in
   Ok
     { messages

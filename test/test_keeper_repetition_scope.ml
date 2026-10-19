@@ -237,7 +237,7 @@ let test_failed_scope_stops_official_provider_preparation () =
   let result = Masc.Keeper_official_client_host.prepare_turn
       ~runtime_label:"scope-test" ~keeper_name:"scope-owner" ~turn_count:1
       ~system_prompt:"system" ~tools:[] ~initial_messages:[]
-      ~model_input_projection:(Some (fun messages -> projected := true; Ok messages))
+      ~model_input_projection:(Some (fun ~tools:_ messages -> projected := true; Ok messages))
       ~hooks:(Some hooks) ~configured_reasoning_effort:None
   in
   (match result with

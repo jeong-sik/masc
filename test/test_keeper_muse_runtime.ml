@@ -623,7 +623,8 @@ if server is not None:
         "clientInfo": {"name": "muse-fixture", "version": "1"}}})
     post({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}, version)
     tools = post({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}, version)
-    assert [tool["name"] for tool in tools["result"]["tools"]] == ["masc_probe"], tools
+    expected_tools = ["masc_probe", "keeper_artifact_read"] if FIXTURE.get("argument_reader") else ["masc_probe"]
+    assert sorted(tool["name"] for tool in tools["result"]["tools"]) == sorted(expected_tools), tools
 
 def call_probe():
     called = post({"jsonrpc": "2.0", "id": "call-1", "method": "tools/call", "params": {
@@ -868,6 +869,10 @@ type observed_run =
 (* [on_stream_event] sees each Keeper stream event as it is emitted;
    [on_transmitted] sees the transmission report after it is recorded. *)
 let run_turn_with ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_input = false) ?model ?account_home ?workspace_root ?hooks ?tools ?on_official_client_tool_boundary ?on_tool_execution
+    ?argument_source ?librarian_front
+    ?model_input_projection ?on_model_input_window_observation ?on_carried_front
+    ?(initial_messages = [ user_message "MUSE_FIXTURE_HISTORY" ])
+    ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
     ?(admission_timeout_s = 20.) ?(idle_timeout_s = 20.)
     ?(on_stream_event = fun (_ : Agent_core.Types.sse_event) -> ())
     ?(on_transmitted = fun (_ : Keeper_official_client_host.transmitted_model_input) -> ())
@@ -889,6 +894,7 @@ let run_turn_with ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_inpu
   in
   let outcome =
     Keeper_muse_runtime.run
+      ?argument_source ?librarian_front
       ?composed_context
       ~configured_reasoning_effort:(Runtime_inference.resolve_reasoning_effort ~runtime_id)
       ~turn_timeout_s:(Runtime_inference.resolve_turn_timeout_s ~runtime_id)
@@ -903,15 +909,16 @@ let run_turn_with ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_inpu
       ~goal_blocks
       ~system_prompt:"MUSE_FIXTURE_SYSTEM_PROMPT"
       ~tools:(Option.value tools ~default:[ tool ])
-      ~initial_messages:[ user_message "MUSE_FIXTURE_HISTORY" ]
-      ~model_input_projection:None
+      ~initial_messages
+      ~model_input_projection
       ~on_transmitted_model_input:(fun input ->
         transmitted := input :: !transmitted;
         on_transmitted input)
       ~hooks
       ~context_injector:None
       ~context:(Some (Agent_core.Context.create ()))
-      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      ~turn_start
+      ?on_model_input_window_observation ?on_carried_front
       ?on_official_client_tool_boundary
       ~on_native_action:(fun ~official_turn ~identity ~tool_name ->
         match identity with
@@ -2679,6 +2686,152 @@ let test_attached_mcp_approvals_are_exact () =
       (Adapter.native_posture_note Runtime_native_tools.Native_read))
 ;;
 
+(* Exercise the actual adapter writer, then recover its serialized argument
+   through the same canonical reader tool that the prepared surface advertises. *)
+module Argument_start_fixture = struct
+  module T = Agent_core.Types
+  module Host = Keeper_official_client_host
+  let old_input = `Assoc ["command", `String (String.make 4000 'a')]
+  let current_input = `Assoc ["command", `String (String.make 4000 'c')]
+  let exchange id input =
+    [ T.make_message ~role:T.Assistant [T.ToolUse {id;name="record";input}]
+    ; T.tool_result_msg ~tool_use_id:id ~content:"done" () ]
+  let seed = T.make_message ~role:T.User [T.Text "Earlier completed work"]
+             :: exchange "historical-argument" old_input
+  let history = seed @ [T.make_message ~role:T.User [T.Text "Current work"]]
+                @ exchange "current-argument" current_input
+  let boundary messages = Keeper_carried_front.Turn_boundary
+      {end_atom=snd (Runtime_model_input_tail_window.annotate messages)}
+  let source ~base_path ~keeper_name seed =
+    Host.create_argument_source ~input_policy:Keeper_input_policy.Small ~base_path ~keeper_name
+      ~seed:(Some seed) ~replay_prefix:Keeper_replay_prefix.unchanged ~turn_start:(boundary seed)
+  let librarian_front _ : (Host.librarian_position, Agent_core.Error.t) result = Ok
+      {point=Keeper_turn_driver_try_provider.Librarian_progress {end_atom=1};
+       unread=Keeper_librarian_request_unread.empty}
+  let snapshot () = List.map Agent_core.Checkpoint.message_to_json history
+  let reader base_path =
+    let schema = Keeper_runtime_schemas_toml.artifact_read in
+    Tool_bridge.agent_core_tool_of_masc_with_execution_env ~base_path
+      ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
+      ~model_projection:(fun () -> Tool_output.bounded_inline_model_projection)
+      ~name:schema.name ~description:schema.description ~input_schema:schema.input_schema
+      (fun _ args ->
+        let execution = Keeper_artifact_read.handle ~base_path ~args in
+        match execution.disposition with
+        | Tool_result.Completed () -> Tool_result.make_ok ~tool_name:schema.name
+            ~start_time:(Tool_timing.start ()) ?data:execution.data ()
+        | Tool_result.Failed class_ -> Tool_result.make_err ~tool_name:schema.name ~class_
+            ~start_time:(Tool_timing.start ()) execution.raw_output
+        | Tool_result.Deferred () -> fail "canonical reader cannot defer")
+  let wire_input id envelopes =
+    let open Yojson.Safe.Util in
+    let blocks = List.concat_map (fun envelope ->
+      envelope |> member "message" |> member "content_blocks" |> to_list) envelopes in
+    match List.find_opt (fun block -> member "type" block=`String "tool_use"
+      && member "id" block=`String id) blocks with
+    | Some block -> member "input" block
+    | None -> fail ("actual wire omitted tool occurrence " ^ id)
+  let check_start ~enabled ~reader envelopes =
+    check bool "current-turn argument is exact on the actual wire" true
+      (wire_input "current-argument" envelopes=current_input);
+    let historical = wire_input "historical-argument" envelopes in
+    if not enabled then
+      check bool "without the actual reader the historical argument stays raw" true
+        (historical=old_input)
+    else match Tool_output.normalized_artifact_ref_of_json historical with
+      | Tool_output.Not_normalized_artifact_ref | Invalid_normalized_artifact_ref _ ->
+        fail "actual Start did not serialize a normalized argument reference"
+      | Tool_output.Decoded_normalized_artifact_ref reference ->
+        check string "argument MIME" "application/json" reference.mime;
+        let bytes = Buffer.create reference.bytes in
+        let rec read offset =
+          let result = match Agent_core.Tool.execute reader
+              (`Assoc ["sha256",`String reference.sha256;"offset",`Int offset]) with
+            | Ok result -> result | Error error -> fail error.message in
+          let page = Yojson.Safe.from_string result.content in
+          let open Yojson.Safe.Util in
+          let content = page |> member "content" |> to_string in
+          Buffer.add_string bytes (match page |> member "encoding" |> to_string with
+            | "utf-8" -> content | "base64" -> Base64.decode_exn content
+            | other -> fail ("unexpected page encoding " ^ other));
+          if not (page |> member "eof" |> to_bool) then
+            read (page |> member "next_offset" |> to_int) in
+        read 0;
+        check string "canonical tool reconstructs exact original JSON"
+          (Yojson.Safe.to_string old_input) (Buffer.contents bytes)
+  let check_resume_did_not_store base_path =
+    let sha256=Digestif.SHA256.(to_hex (digest_string (Yojson.Safe.to_string current_input))) in
+    match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256 with
+    | Ok None -> ()
+    | Ok (Some _) -> fail "Resume materialized the newly eligible argument"
+    | Error error -> fail (Tool_blob_store.fetch_error_to_string error)
+end
+
+let test_projection_refusal_emits_no_carried_observations () =
+  with_scripted_host ~fixture:(scenario "text_only") (fun ~base_path ->
+    let projected = ref 0 and observed = ref 0 in
+    let run = run_turn_with ~base_path ~tool:(masc_probe_tool (ref `Null)) ~tools:[]
+      ~initial_messages:Argument_start_fixture.history
+      ~turn_start:(Argument_start_fixture.boundary Argument_start_fixture.seed)
+      ~librarian_front:Argument_start_fixture.librarian_front
+      ~model_input_projection:(fun _ -> incr projected;
+        Error (Agent_core.Error.Internal "projection refused"))
+      ~on_model_input_window_observation:(fun _ -> incr observed)
+      ~on_carried_front:(fun _ ~transmitted_bytes:_ -> incr observed) () in
+    (match run.outcome.result with
+     | Error (Agent_core.Error.Internal "projection refused") -> ()
+     | Error error -> fail (Agent_core.Error.to_string error)
+     | Ok _ -> fail "source projection refusal was lost");
+    check int "source projection runs once" 1 !projected;
+    check int "a refused range publishes no continuity or window" 0 !observed;
+    check int "a refused range is never transmitted" 0 (List.length run.transmitted))
+;;
+
+let test_actual_start_demotes_arguments_but_resume_keeps_them_held () =
+  let module F = Argument_start_fixture in
+  List.iter (fun enabled ->
+    let fixture = if enabled then ["argument_reader",`Bool true] else scenario "text_only" in
+    with_scripted_host ~fixture (fun ~base_path ->
+      let before = F.snapshot () in
+      let reader = F.reader base_path in
+      let tool = masc_probe_tool (ref `Null) in
+      let hooks = if enabled then None else Some
+          {Agent_core.Hooks.empty with before_turn_params=Some (fun _ ->
+            Agent_core.Hooks.AdjustParams {Agent_core.Hooks.default_turn_params with
+              tool_choice=Some Agent_core.Types.None_})} in
+      let run seed =
+        let run = run_turn_with ~base_path ~tool ~tools:[tool;reader] ?hooks
+          ?argument_source:(F.source ~base_path ~keeper_name seed)
+          ~initial_messages:F.history ~turn_start:(F.boundary seed)
+          ~librarian_front:F.librarian_front () in
+        (match run.outcome.result with
+         | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+        run in
+      let first = run F.seed in
+      let envelopes = read_text (Filename.concat base_path "start-prompt.txt")
+        |> String.split_on_char '\n' |> List.filter_map (fun line ->
+          try match Yojson.Safe.from_string line with
+            | `Assoc fields as envelope when List.assoc_opt "schema" fields=
+                Some (`String Keeper_official_client_context_codec.schema) -> Some envelope
+            | _ -> None
+          with Yojson.Json_error _ -> None) in
+      F.check_start ~enabled ~reader envelopes;
+      F.check_resume_did_not_store base_path;
+      (* This exact raw history remains client-held. Only the new frozen
+         completed seed includes the last call's previously current input. *)
+      let resumed = run F.history in
+      (match first.transmitted,resumed.transmitted with
+       | [Keeper_official_client_host.Whole_input_transmitted _],
+         [Keeper_official_client_host.Held_by_client_session] -> ()
+       | _ -> fail "expected one Start and one client-held Resume");
+      check (list string) "actual serve transport resumes the same session" ["start";"resume"]
+        (read_text (Filename.concat base_path "sessions.log") |> String.split_on_char '\n'
+         |> List.filter (fun line -> line<>""));
+      F.check_resume_did_not_store base_path;
+      check bool "raw checkpoint source remains unchanged" true (F.snapshot ()=before)))
+    [true;false]
+;;
+
 let () =
   (* The Muse start prompt uses the shared Antigravity framing assets. Pin
      their source directory so selected cases also run outside Dune. *)
@@ -2721,7 +2874,9 @@ let () =
             test_start_prompt_frames_system_history_and_goal
         ] )
     ; ( "scripted host"
-      , [ test_case "start and resume through muse serve with a MASC tool" `Quick
+      , [ test_case "projection refusal publishes no range" `Quick test_projection_refusal_emits_no_carried_observations
+        ; test_case "actual argument Start and held Resume" `Quick test_actual_start_demotes_arguments_but_resume_keeps_them_held
+        ; test_case "start and resume through muse serve with a MASC tool" `Quick
             test_turn_through_scripted_host
         ; test_case "a MASC call reports its receipt after its block" `Quick
             test_scripted_host_reports_the_tool_receipt

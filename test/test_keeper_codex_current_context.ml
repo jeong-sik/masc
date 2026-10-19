@@ -141,7 +141,8 @@ default = "codex.context"
     write_catalog window;
     Runtime.init_default ~config_path |> require) catalog_context_window;
   let reports = ref [] in
-  let run ?official_task_reference ?model_input_projection ?prompt_blocks
+  let run ?argument_source ?official_task_reference ?model_input_projection ?prompt_blocks
+      ?(tools=[]) ?tool_choice
       ?carried_front_seed ?librarian_front ?on_model_input_window_observation
       ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"])
@@ -154,9 +155,10 @@ default = "codex.context"
            preparation would observe None and silently resend the carrier. *)
         composed_context := Option.map (fun blocks ->
           (Keeper_context_assembly.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None ~blocks)) prompt_blocks;
-        Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world}
+        Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world;tool_choice}
       | _ -> Agent_core.Hooks.Continue) } in
     Keeper_codex_runtime.run
+      ?argument_source
       ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
       ~composed_context:(fun () -> !composed_context)
         ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
@@ -165,7 +167,7 @@ default = "codex.context"
       ?carried_front_seed ?librarian_front
       ?on_model_input_window_observation
       ~pre_tool_rejects:(ref []) ~base_path:root ~goal ?official_task_reference ?official_client_continuation
-      ~goal_blocks:None ~system_prompt:instructions ~tools:[]
+      ~goal_blocks:None ~system_prompt:instructions ~tools
       ~initial_messages
       ~model_input_projection ~on_transmitted_model_input:(fun report -> reports := report :: !reports)
       ~hooks:(Some hooks) ~context_injector:None ~context:(Some (Agent_core.Context.create ()))
@@ -1073,7 +1075,149 @@ let test_resume_sends_no_history () =
     check bool "no history message is sent" false
       (String_util.contains_substring sent "xxxx")) wire
 
+let argument_exchange id input =
+  let open Agent_core.Types in
+  [make_message ~role:Assistant [ToolUse {id;name="record";input}];
+   make_message ~role:Tool ~tool_call_id:id
+     [ToolResult {tool_use_id=id;content="done";outcome=Tool_succeeded;json=None;content_blocks=None}]]
+
+let argument_reader base_path =
+  let schema = Keeper_runtime_schemas_toml.artifact_read in
+  Tool_bridge.agent_core_tool_of_masc_with_execution_env ~base_path
+    ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
+    ~model_projection:(fun () -> Tool_output.bounded_inline_model_projection)
+    ~name:schema.name ~description:schema.description ~input_schema:schema.input_schema
+    (fun _ args ->
+      let execution = Keeper_artifact_read.handle ~base_path ~args in
+      match execution.disposition with
+      | Tool_result.Completed () -> Tool_result.make_ok ~tool_name:schema.name
+          ~start_time:(Tool_timing.start ()) ?data:execution.data ()
+      | Tool_result.Failed class_ -> Tool_result.make_err ~tool_name:schema.name ~class_
+          ~start_time:(Tool_timing.start ()) execution.raw_output
+      | Tool_result.Deferred () -> fail "canonical reader cannot defer")
+
+let argument_input id rows =
+  let blocks = params_of "thread/inject_items" rows
+    |> List.concat_map (fun params -> params |> member "items" |> items)
+    |> List.concat_map (fun item -> item |> member "content" |> items)
+    |> List.concat_map (fun block -> block |> member "text" |> text
+      |> Yojson.Safe.from_string |> member "message" |> member "content_blocks" |> items) in
+  match List.find_opt (fun block -> member "type" block=`String "tool_use"
+    && member "id" block=`String id) blocks with
+  | Some block -> member "input" block
+  | None -> fail ("missing actual injected tool call " ^ id)
+
+let argument_fixture capture =
+  let old = `Assoc ["command",`String (String.make 4000 'a')] in
+  let current = `Assoc ["command",`String (String.make 4000 'c')] in
+  let seed = Agent_core.Types.user_msg "Earlier decision" :: argument_exchange "old" old in
+  let history = seed @ [Agent_core.Types.user_msg "Current decision"] @ argument_exchange "current" current in
+  let boundary = Keeper_carried_front.Turn_boundary
+    {end_atom=snd (Runtime_model_input_tail_window.annotate seed)} in
+  (* Official clients send this projected current goal separately. Requiring
+     it after the history prefix would disable otherwise valid arguments. *)
+  let replay_prefix = Keeper_replay_prefix.media_degraded_with_current_input
+    ~canonical_prefix:seed ~dispatch_prefix:seed
+    ~canonical_input:(Agent_core.Types.user_msg "Original media goal")
+    ~dispatch_input:(Agent_core.Types.user_msg "Projected media goal") in
+  check bool "full checkpoint authority still requires the current input" true
+    (Result.is_error (Keeper_replay_prefix.restore_messages replay_prefix history));
+  let base_path = Filename.dirname capture in
+  let source () = Keeper_official_client_host.create_argument_source
+    ~input_policy:Keeper_input_policy.Small ~base_path ~keeper_name:"context-fixture"
+    ~seed:(Some seed) ~replay_prefix ~turn_start:boundary in
+  let librarian_front _ = Ok (frozen_librarian_position
+    (Keeper_turn_driver_try_provider.Librarian_progress {end_atom=1})) in
+  old,current,history,boundary,source,librarian_front,argument_reader base_path
+
+let test_completed_arguments_cross_start_resume_and_reseed ~overflow_resume () =
+  with_fixture ~overflow_resume @@ fun ~run ~capture ~reports ->
+  let old,current,history,turn_start,source,librarian_front,reader = argument_fixture capture in
+  let raw = List.map Agent_core.Checkpoint.message_to_json history in
+  let send () = run ?argument_source:(source ()) ~tools:[reader]
+    ~initial_messages:history ~turn_start ~librarian_front
+    ~instructions:"Keeper instructions" ~world:"world" () in
+  successful (send ());
+  let input = argument_input "old" (read_requests capture) in
+  let reference = match Tool_output.normalized_artifact_ref_of_json input with
+    | Tool_output.Decoded_normalized_artifact_ref reference -> reference
+    | Tool_output.Not_normalized_artifact_ref | Invalid_normalized_artifact_ref _ ->
+      fail "actual Codex Start did not inject a normalized argument reference" in
+  check bool "current arguments remain exact on the actual writer" true
+    (argument_input "current" (read_requests capture)=current);
+  let recovered = Buffer.create reference.bytes in
+  let rec read offset =
+    let output = match Agent_core.Tool.execute reader
+      (`Assoc ["sha256",`String reference.sha256;"offset",`Int offset]) with
+      | Ok output -> output | Error error -> fail error.message in
+    let page = Yojson.Safe.from_string output.content in
+    let contents = page |> member "content" |> text in
+    let contents = match page |> member "encoding" |> text with
+      | "utf-8" -> contents | "base64" -> Base64.decode_exn contents
+      | other -> fail ("unknown reader encoding " ^ other) in
+    Buffer.add_string recovered contents;
+    if not (Yojson.Safe.Util.to_bool (member "eof" page)) then
+      read (Yojson.Safe.Util.to_int (member "next_offset" page)) in
+  read 0;
+  check string "actual canonical reader restores original JSON"
+    (Yojson.Safe.to_string old) (Buffer.contents recovered);
+  let store = Tool_blob_store.create ~base_path:(Filename.dirname capture) in
+  (match Tool_blob_store.delete store ~sha256:reference.sha256 with
+   | Ok true -> () | Ok false -> fail "Start blob was absent"
+   | Error _ -> fail "cannot remove fixture blob before Resume");
+  write capture "";
+  successful (send ());
+  let rows = read_requests capture in
+  check int "the next request really resumed" 1 (List.length (params_of "thread/resume" rows));
+  if overflow_resume then (
+    check bool "fresh overflow retry re-materializes the old input" true
+      (argument_input "old" rows=input);
+    match Tool_blob_store.fetch store ~sha256:reference.sha256 with
+    | Ok (Some bytes) -> check string "fresh retry restored the exact blob" (Yojson.Safe.to_string old) bytes
+    | Ok None | Error _ -> fail "fresh retry did not store its transmitted argument")
+  else (
+    check int "Resume injects no history" 0 (List.length (params_of "thread/inject_items" rows));
+    (match Tool_blob_store.fetch store ~sha256:reference.sha256 with
+     | Ok None -> () | Ok (Some _) | Error _ -> fail "Resume touched an unmaterialized argument");
+    check bool "history remains held by the client" true
+      (match !reports with Keeper_official_client_host.Held_by_client_session::_ -> true | _ -> false));
+  check bool "the canonical source stays unchanged" true
+    (List.map Agent_core.Checkpoint.message_to_json history=raw)
+
+let test_argument_projection_requires_the_prepared_reader ~disabled () =
+  with_fixture @@ fun ~run ~capture ~reports:_ ->
+  let old,_,history,turn_start,source,librarian_front,reader = argument_fixture capture in
+  successful (run ?argument_source:(source ()) ~tools:(if disabled then [reader] else [])
+    ?tool_choice:(if disabled then Some Agent_core.Types.None_ else None)
+    ~initial_messages:history ~turn_start ~librarian_front
+    ~instructions:"Keeper instructions" ~world:"world" ());
+  check bool "actual tool surface keeps the original input" true
+    (argument_input "old" (read_requests capture)=old);
+  check bool "ineligible arguments create no blob directory" false
+    (Sys.file_exists (Tool_blob_store.root_dir
+      (Tool_blob_store.create ~base_path:(Filename.dirname capture))))
+
+let test_argument_projection_keeps_exact_history_prefix_guards () =
+  with_fixture @@ fun ~run ~capture ~reports:_ ->
+  let old,_,history,turn_start,source,librarian_front,reader = argument_fixture capture in
+  let changed = Agent_core.Types.user_msg "Unrelated source" :: List.tl history in
+  successful (run ?argument_source:(source ()) ~tools:[reader]
+    ~initial_messages:changed ~turn_start ~librarian_front
+    ~instructions:"Keeper instructions" ~world:"world" ());
+  check bool "a mismatched history cannot borrow raw argument authority" true
+    (argument_input "old" (read_requests capture)=old)
+
 let () = run "Keeper current Codex context" ["native requests",[
+  test_case "completed arguments cross Start and held Resume" `Quick
+    (test_completed_arguments_cross_start_resume_and_reseed ~overflow_resume:false);
+  test_case "fresh overflow retry materializes its own Start" `Quick
+    (test_completed_arguments_cross_start_resume_and_reseed ~overflow_resume:true);
+  test_case "no canonical reader keeps original arguments" `Quick
+    (test_argument_projection_requires_the_prepared_reader ~disabled:false);
+  test_case "hook-disabled tools keep original arguments" `Quick
+    (test_argument_projection_requires_the_prepared_reader ~disabled:true);
+  test_case "history-only authority retains exact prefix guards" `Quick
+    test_argument_projection_keeps_exact_history_prefix_guards;
   test_case "selected context window survives catalog reload on start and resume" `Quick test_captured_context_window_survives_catalog_reload;
   test_case "compaction item invalidates recall without usage estimate" `Quick test_compaction_item_invalidates_recall_without_usage_estimate;
   test_case "compaction invalidates recall despite later request usage" `Quick test_compaction_receipt_survives_later_request_usage;

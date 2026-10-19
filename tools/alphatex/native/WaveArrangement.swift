@@ -131,6 +131,11 @@ struct Plan: Decodable {
             } else { total = try region.totalFrames() }
             let regionEnd = region.startSeconds + Double(total) / asset.sampleRate
             guard regionEnd.isFinite, regionEnd > region.startSeconds else { throw AudioFailure("region time is not representable") }
+            // The plan duration is the exact clock end. A captured end rounds up
+            // to a whole frame of its own source, never of another asset.
+            guard !capturedAudio || regionEnd <= duration || regionEnd - duration < 1 / asset.sampleRate else {
+                throw AudioFailure("captured audio exceeds its arrangement duration")
+            }
             end = max(end, regionEnd)
         }
         // Float arithmetic may differ by a final ULP, never by a source sample.
@@ -142,9 +147,7 @@ struct Plan: Decodable {
         } else if let ump {
             let events = try ump.events(), midiEnd = events.map(\.seconds).max() ?? 0
             guard ump.duration == duration, abs(max(end, midiEnd) - duration) < (sample > 0 ? sample : 1e-9) else { throw AudioFailure("capture duration does not match its source clocks") }
-        } else if capturedAudio {
-            guard end <= duration || end - duration < sample else { throw AudioFailure("captured audio exceeds its arrangement duration") }
-        } else {
+        } else if !capturedAudio {
             guard abs(end - duration) < sample else { throw AudioFailure("duration does not match region sources") }
         }
     }

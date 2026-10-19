@@ -64,7 +64,28 @@ refuses(CaptureAudioClock(origin:"0",offset:"0",extent:"340282366920938463463374
 refuses(clock,0,4800,Int64.max)
 let endpoint=try CaptureAudioClock(origin:String(UInt64.max),offset:"0",extent:"1",numer:1,denom:1,firstAudioHostTime:String(UInt64.max)).layout(rate:1_000_000_000,offsetFrames:0,frameCount:1,repetitions:1)
 precondition(endpoint.totalFrames==1)
-print("CAPTURE_AUDIO_CLOCK_PASS: 28801 stereo PCM frames, delayed starts, rational cycle gaps, 8 far/edge refill positions, 2M compressed repeats, WAV continuity, overflow and UInt64+1 endpoint")
+// A region may end inside its own final source frame. A 48 kHz WAV in the same
+// plan neither narrows the 44.1 kHz take's bound nor widens its own.
+// The plans are decoded like production input, so later Plan fields keep
+// their decoded defaults instead of changing this fixture.
+func mixedRates(_ duration:Double,loopStart:Double) throws -> Plan {
+  let plan:[String:Any]=["schemaVersion":4,"kind":"capture-audio-arrangement","duration":duration,
+    "assets":[["id":"take","path":"/take.wav","sha256":"","sampleRate":44100,"channels":1,"frames":132317],
+              ["id":"loop","path":"/loop.wav","sha256":"","sampleRate":48000,"channels":1,"frames":48000]],
+    "regions":[["id":"take","asset":"take","startSeconds":0,"offsetFrames":0,"frameCount":132317,"repeat":1,
+                "captureClock":["origin":"1000000","offset":"0","extent":"72009252","numer":125,"denom":3,"firstAudioHostTime":"1000000"]],
+               ["id":"loop","asset":"loop","startSeconds":loopStart,"offsetFrames":0,"frameCount":48000,"repeat":1]]]
+  return try JSONDecoder().decode(Plan.self,from:JSONSerialization.data(withJSONObject:plan))
+}
+// 72009252 ticks are 3.0003855 s, 132317.00055 frames at 44.1 kHz: the take's
+// final frame ends .99945 of its frame later, more than one 48 kHz frame.
+try mixedRates(3.0003855,loopStart:0).validate()
+// 1.02 take frames past the end; 1.056 loop frames (.97 take frames) past the end.
+for (duration,loopStart) in [(3.000385,0.0),(3.999978,3.0)] {
+  let plan=try mixedRates(duration,loopStart:loopStart)
+  do { try plan.validate();preconditionFailure("audio past its own final frame accepted") } catch {}
+}
+print("CAPTURE_AUDIO_CLOCK_PASS: 28801 stereo PCM frames, delayed starts, rational cycle gaps, 8 far/edge refill positions, 2M compressed repeats, WAV continuity, overflow and UInt64+1 endpoint, per-source final-frame duration bound at 44.1/48 kHz")
 }
 }
 `

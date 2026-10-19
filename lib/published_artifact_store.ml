@@ -114,7 +114,7 @@ let publish ~base_path ~author (request : request) =
             (match load ~base_path id with
              | Error Missing -> Ok []
              | Ok _ -> Error (Unavailable "generated artifact id already exists")
-             | Error error -> Error error)
+             | Error ((Invalid _ | Conflict _ | Unavailable _ | Commit_uncertain _) as error) -> Error error)
           | Revise { expected_revision; _ } ->
             let* artifact = load ~base_path id in
             let actual = List.length artifact.revisions in

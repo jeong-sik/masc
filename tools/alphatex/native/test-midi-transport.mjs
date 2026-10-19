@@ -315,6 +315,41 @@ chase.receive("{\"kind\":\"seek\",\"seconds\":0.25}")
 precondition(chase.state == .paused && reviewWire.isEmpty)
 chase.receive("{\"kind\":\"resume\"}")
 precondition(chase.state == .playing && reviewWire.map(\.1) == restored)
+// A held note keeps the patch of its attack. Exercise actual pause/resume, not
+// only the model's refusal predicate: nothing may be replayed before the error.
+let changedPrograms: [[[UInt8]]] = [
+    [[0xc0,1],[0x90,60,100],[0xc0,2]],
+    [[0x90,60,100],[0xc0,1]],
+    [[0xb0,0,4],[0xc0,1],[0x90,60,100],[0xb0,0,5],[0xc0,1],[0xb0,0,4]],
+    [[0xc0,1],[0xb0,64,127],[0x90,60,100],[0x80,60,42],[0xc0,2]],
+    [[0xc0,1],[0x90,60,100],[0xb0,66,127],[0x80,60,42],[0xc0,2]]
+]
+for messages in changedPrograms {
+    reset(0); reviewWire = []
+    let owner = try wire([["seconds":0,"port":0,"bytes":messages.flatMap { $0 }]])
+    owner.tick(); reviewClock = 300_000_000
+    owner.receive("{\"kind\":\"pause\"}"); precondition(owner.state == .paused)
+    reviewWire = []; owner.receive("{\"kind\":\"resume\"}")
+    precondition(owner.state == .stopped && reviewExit == 1 && reviewWire.isEmpty)
+}
+for messages: [[UInt8]] in [
+    [[0xc0,1],[0x90,60,100],[0xc0,2],[0xc0,1]],
+    [[0xc0,1],[0x90,60,100],[0xb0,0,5]],
+    [[0xc0,1],[0x90,60,100],[0xc1,2]],
+    [[0xc0,1],[0x90,60,100],[0xc0,2],[0x80,60,42]],
+    [[0xc0,1],[0xb0,64,127],[0x90,60,100],[0x80,60,42],[0xc0,2],[0xb0,64,0]]
+] {
+    var model = SourceChase()
+    for bytes in messages { model.observe(bytes, port: 0) }
+    _ = try model.bootstrap(replacing: model)
+}
+reset(0); reviewWire = []
+let sameProgram = try wire([["seconds":0,"port":0,"bytes":[0xc0,1,0x90,60,100,0xc0,2,0xc0,1]]])
+sameProgram.tick(); reviewClock = 300_000_000
+sameProgram.receive("{\"kind\":\"pause\"}"); reviewWire = []
+sameProgram.receive("{\"kind\":\"resume\"}")
+precondition(sameProgram.state == .playing && reviewWire.map(\.1) == [[0xc0,1],[0xc0,2],[0xc0,1],[0x90,60,100]])
+print("SOURCE_PROGRAM_RECONSTRUCTION_PASS: explicit refusal before replay for unknown/changed patches and pedal-held notes; bank latches, restored patches and released notes retained")
 var parameter = SourceChase()
 for bytes: [UInt8] in [[0xb0,101,0],[0xb0,100,0],[0xb0,6,12],[0xb0,38,0],[0xb0,96,0],[0xb0,97,0]] { parameter.observe(bytes, port: 0) }
 let parameters = try parameter.bootstrap(replacing: parameter)

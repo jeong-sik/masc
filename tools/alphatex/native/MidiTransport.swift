@@ -147,9 +147,14 @@ struct ChaseField: Hashable {
     let channel: UInt8
     let kind: Kind
 }
+struct ChaseProgram: Equatable {
+    let bankMSB: UInt8?, bankLSB: UInt8?
+    let number: UInt8
+}
 struct ChaseNote {
     let pitch: UInt8
     let velocity: UInt8
+    let program: ChaseProgram?
     var origin: Int? = nil
     var held = true
     var captured = false
@@ -158,6 +163,8 @@ struct ChaseNote {
 }
 struct ChaseChannel {
     var notes: [ChaseNote] = []
+    var bankMSB: UInt8?, bankLSB: UInt8?
+    var program: ChaseProgram?
     var sustain: UInt8 = 0, sostenuto: UInt8 = 0
     var pressure: UInt8?
     var poly: [UInt8: UInt8] = [:]
@@ -191,7 +198,7 @@ struct SourceChase {
         func mark(_ kind: ChaseField.Kind) { let value = field(kind); touched.insert(value); known.insert(value) }
         switch type {
         case 0x90 where bytes[2] > 0:
-            state.notes.append(ChaseNote(pitch: bytes[1], velocity: bytes[2], origin: origin))
+            state.notes.append(ChaseNote(pitch: bytes[1], velocity: bytes[2], program: state.program, origin: origin))
         case 0x80, 0x90:
             if let index = state.notes.firstIndex(where: { $0.pitch == bytes[1] && $0.held }) {
                 state.notes[index].held = false
@@ -204,6 +211,7 @@ struct SourceChase {
         case 0xd0:
             state.pressure = bytes[1]; mark(.pressure)
         case 0xc0:
+            state.program = ChaseProgram(bankMSB: state.bankMSB, bankLSB: state.bankLSB, number: bytes[1])
             history.append((port, bytes)); mark(.program)
         case 0xe0:
             history.append((port, bytes)); mark(.bend)
@@ -211,6 +219,9 @@ struct SourceChase {
             let cc = bytes[1], value = bytes[2]
             if cc < 120 && ![6, 38, 96, 97].contains(cc) { mark(.controller(cc)) }
             switch cc {
+            case 0, 32:
+                if cc == 0 { state.bankMSB = value } else { state.bankLSB = value }
+                history.append((port, bytes))
             case 64:
                 state.sustain = value; state.prune()
             case 66:
@@ -284,6 +295,12 @@ struct SourceChase {
         }
         guard previous.touched.isSubset(of: known) else {
             throw MidiFailure("source seek cannot restore an initial channel value absent from the source prefix")
+        }
+        // Replaying the final program before every held Note On would change
+        // voices that began under an earlier patch, including pedal-held notes.
+        // Refuse that reconstruction until per-note patch replay is supported.
+        guard channels.values.allSatisfy({ state in state.notes.allSatisfy { $0.program == state.program } }) else {
+            throw MidiFailure("source state reconstruction cannot restore held notes across program or bank changes")
         }
         var result = history
         for key in channels.keys.sorted() {
@@ -884,17 +901,19 @@ final class MidiTransport {
         else { cycleAcquired.removeAll() }
     }
     func apply(_ event: Event) throws {
-        try send(event.bytes())
         if event.kind == .on { held[event.key] = event }
+        try send(event.bytes())
         if event.kind == .off { held.removeValue(forKey: event.key) }
     }
     func silence() throws {
         if timeline.source { try sourceSilence(); return }
         var failure: Error?
         for event in held.values.sorted(by: { $0.key < $1.key }) {
-            do { try send([0x80 | event.channel, event.pitch!, 0]) } catch { failure = failure ?? error }
+            do {
+                try send([0x80 | event.channel, event.pitch!, 0])
+                held.removeValue(forKey: event.key)
+            } catch { failure = failure ?? error }
         }
-        held.removeAll()
         if let failure { throw failure }
     }
     func restore(at seconds: Double) throws {

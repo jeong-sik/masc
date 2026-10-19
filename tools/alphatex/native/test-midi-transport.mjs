@@ -13,6 +13,7 @@ try {
     .replaceAll('DispatchTime.now().uptimeNanoseconds', 'reviewClock')
     .replace('final class MidiTransport {', `
 var reviewClock: UInt64 = 0, reviewSendCost: UInt64 = 0
+var reviewPhraseFailure: UInt8?
 var reviewSent: [[UInt8]] = [], reviewWire: [(Int32, [UInt8])] = [], reviewWireFail = false, reviewExit: Int32?
 // Supply distinct property keys together with the synthetic property APIs;
 // this harness never initializes a CoreMIDI client or its resources.
@@ -63,6 +64,9 @@ final class MidiTransport {`)
 `)
   replaceEffect('    func send(', '    func sendWire(', `    func send(_ bytes: [UInt8]) throws {
         reviewSent.append(bytes); reviewClock += reviewSendCost
+        if bytes.first.map({ $0 & 0xf0 }) == reviewPhraseFailure {
+            reviewPhraseFailure = nil; throw MidiFailure("synthetic partial phrase send failure")
+        }
     }
 `)
   replaceEffect('    func sendWire(', '    func sourceApply(', `    func sendWire(_ bytes: [UInt8], to destination: Destination) throws {
@@ -91,7 +95,7 @@ func transport(_ events: [[String: Any]], loop: Bool = true) throws -> MidiTrans
     return value
 }
 func reset(_ host: UInt64, cost: UInt64 = 0) {
-    reviewClock = host; reviewSendCost = cost; reviewSent = []; reviewExit = nil
+    reviewClock = host; reviewSendCost = cost; reviewSent = []; reviewExit = nil; reviewPhraseFailure = nil
 }
 func ons() -> [[UInt8]] { reviewSent.filter { $0[0] & 0xf0 == 0x90 } }
 func near(_ first: Double, _ second: Double) { precondition(abs(first - second) < 1e-8) }
@@ -155,6 +159,28 @@ precondition(pending.state == .prepared && reviewExit == nil && reviewSent.isEmp
 precondition(pending.snapshot("prepared")["device"] == nil)
 pending.prepared = true; pending.destinationChanged()
 precondition(pending.state == .stopped && reviewExit == 1)
+// The OS may deliver a Note On and still return failure. Actual tick/finish
+// must release it; pause/seek must retry only the keys whose release failed.
+reset(0)
+let failedPhraseOn = try transport(heldEvents, loop: false)
+reviewPhraseFailure = 0x90; failedPhraseOn.tick()
+precondition(reviewSent == [[0xc0,0],[0x90,65,100],[0x80,65,0]])
+precondition(failedPhraseOn.held.isEmpty && failedPhraseOn.state == .stopped && reviewExit == 1)
+let twoHeldEvents = Array(heldEvents.prefix(2)) + [
+    ["kind":"on", "seconds":0.0, "channel":0, "pitch":67, "velocity":90],
+    ["kind":"off", "seconds":1.0, "channel":0, "pitch":65],
+    ["kind":"off", "seconds":1.0, "channel":0, "pitch":67]
+]
+for command in ["{\"kind\":\"pause\"}", "{\"kind\":\"seek\",\"seconds\":0.5}"] {
+    reset(0)
+    let owner = try transport(twoHeldEvents, loop:false); owner.tick()
+    reviewSent = []; reviewPhraseFailure = 0x80
+    owner.receive(command)
+    precondition(reviewSent == [[0x80,65,0],[0x80,67,0],[0x80,65,0]])
+    precondition(owner.held.isEmpty && owner.state == .stopped && reviewExit == 1)
+}
+print("PHRASE_FAILED_SEND_PASS: uncertain Note On cleanup and pause/seek failed release retry without repeating successful releases")
+
 // Full source wire decisions use the same native parser/scheduler/cleanup, with
 // only OS send, endpoint lookup, deadline and exit effects replaced above.
 func wire(_ events: [[String: Any]], duration: Double = 1, bindings: [[String: Any]] = [["port":0,"destination":"1"]]) throws -> MidiTransport {
@@ -264,6 +290,41 @@ chase.receive("{\"kind\":\"seek\",\"seconds\":0.25}")
 precondition(chase.state == .paused && reviewWire.isEmpty)
 chase.receive("{\"kind\":\"resume\"}")
 precondition(chase.state == .playing && reviewWire.map(\.1) == restored)
+// Exercise actual pause/resume, not only the model's refusal predicate.
+let changedPrograms: [[[UInt8]]] = [
+    [[0xc0,1],[0x90,60,100],[0xc0,2]],
+    [[0x90,60,100],[0xc0,1]],
+    [[0xb0,0,4],[0xc0,1],[0x90,60,100],[0xb0,0,5],[0xc0,1],[0xb0,0,4]],
+    [[0xc0,1],[0xb0,64,127],[0x90,60,100],[0x80,60,42],[0xc0,2]],
+    [[0xc0,1],[0x90,60,100],[0xb0,66,127],[0x80,60,42],[0xc0,2]]
+]
+for messages in changedPrograms {
+    reset(0); reviewWire = []
+    let owner = try wire([["seconds":0,"port":0,"bytes":messages.flatMap { $0 }]])
+    owner.tick(); reviewClock = 300_000_000
+    owner.receive("{\"kind\":\"pause\"}"); precondition(owner.state == .paused)
+    reviewWire = []; owner.receive("{\"kind\":\"resume\"}")
+    precondition(owner.state == .stopped && reviewExit == 1 && reviewWire.isEmpty)
+}
+for messages: [[UInt8]] in [
+    [[0xc0,1],[0x90,60,100],[0xc0,2],[0xc0,1]],
+    [[0xc0,1],[0x90,60,100],[0xb0,0,5]],
+    [[0xc0,1],[0x90,60,100],[0xc1,2]],
+    [[0xc0,1],[0x90,60,100],[0xc0,2],[0x80,60,42]],
+    [[0xc0,1],[0xb0,64,127],[0x90,60,100],[0x80,60,42],[0xc0,2],[0xb0,64,0]]
+] {
+    var model = SourceChase()
+    for bytes in messages { model.observe(bytes, port:0) }
+    _ = try model.bootstrap(replacing:model)
+}
+var scopedPrograms = SourceChase()
+for bytes: [UInt8] in [[0xc0,1],[0x90,60,100],[0xc0,2]] { scopedPrograms.observe(bytes,port:0) }
+var replacedPrograms = SourceChase()
+replacedPrograms.replace(scopedPrograms.scoped(to:[0]),addresses:[0])
+do { _ = try replacedPrograms.bootstrap(replacing:replacedPrograms); preconditionFailure("scoping lost held-note program context") } catch {}
+_ = try scopedPrograms.scoped(to:[1]).bootstrap(replacing:SourceChase())
+print("SOURCE_PROGRAM_RECONSTRUCTION_PASS: explicit refusal before replay for unknown/changed patches and pedal-held notes; bank latches, restored patches, released notes and region scoping retained")
+
 var parameter = SourceChase()
 for bytes: [UInt8] in [[0xb0,101,0],[0xb0,100,0],[0xb0,6,12],[0xb0,38,0],[0xb0,96,0],[0xb0,97,0]] { parameter.observe(bytes, port: 0) }
 let parameters = try parameter.bootstrap(replacing: parameter)

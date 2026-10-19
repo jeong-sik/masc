@@ -30,6 +30,17 @@ func paired(_ offset:String)->Plan {
 }
 try paired("0").validate()
 do { try paired("1").validate();preconditionFailure("mismatched paired source cut accepted") } catch {}
+var separateAudio = region; separateAudio.component = .audio
+var separateMidi = UmpRegion(id:"notes",source:"audio",startSeconds:0.01,offset:"1",extent:"4800001",repeatCount:3)
+separateMidi.component = .midi
+let separated = Plan(schemaVersion:5,kind:"capture-arrangement",duration:1,assets:[asset],regions:[separateAudio],midi:nil,ump:nil,umpRegions:UmpArrangement(schemaVersion:1,duration:1,sources:[source],regions:[separateMidi]))
+try separated.validate()
+var wrongWave = separateAudio; wrongWave.component = .midi
+do { try Plan(schemaVersion:5,kind:"capture-arrangement",duration:1,assets:[asset],regions:[wrongWave],midi:nil,ump:nil,umpRegions:separated.umpRegions).validate();preconditionFailure("MIDI component accepted as WAV") } catch {}
+var wrongNotes = separateMidi; wrongNotes.component = .audio
+do { _ = try UmpRegionTransport(timeline:UmpArrangement(schemaVersion:1,duration:1,sources:[source],regions:[wrongNotes]));preconditionFailure("audio component accepted as UMP") } catch {}
+wrongNotes = separateMidi; wrongNotes = UmpRegion(id:"clip",source:"audio",startSeconds:0,offset:"0",extent:"4800001",repeatCount:3);wrongNotes.component = .midi
+do { try Plan(schemaVersion:5,kind:"capture-arrangement",duration:1,assets:[asset],regions:[region],midi:nil,ump:nil,umpRegions:UmpArrangement(schemaVersion:1,duration:1,sources:[source],regions:[wrongNotes])).validate();preconditionFailure("paired WAV silently matched separated MIDI") } catch {}
 let voice = try Voice(region:region,asset:asset,capacity:257)
 let buffer = AVAudioPCMBuffer(pcmFormat:voice.file.processingFormat,frameCapacity:257)!
 var verified = 0

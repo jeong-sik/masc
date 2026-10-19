@@ -18,6 +18,7 @@ import { recordingEpoch } from './arrangement-recording.mjs'
 import { measureAudioCalibration } from './audio-calibration.mjs'
 
 const help = [
+  ':split-take   separate selected captured audio/MIDI; :capture-offset MS (positive advances, negative delays)',
   ':calibrate OUTPUT_UID IN_CH OUT_CH MAX_LAG_MS  audio loopback candidates; Esc/q cancels and returns',
   ':import-wave /path/take.wav     :import-midi /path/song.mid',
   ':import-take /path/session      :open-take [ASSET] (WAV + raw UMP)',
@@ -589,7 +590,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         lines.push(`${lane.id === editor.lane ? '>' : ' '} ${index + start + 1} ${lane.name.slice(0, 12).padEnd(12)} ${lane.muted ? 'm' : '-'}${lane.solo ? 's' : '-'} ${cells.join('')}`)
       }
       if (!project.lanes.length) lines.push('Import a source, then Enter or :place to add its first lane and region.')
-      lines.push(clip ? `${clip.id} · ${clip.name} · beat ${clip.position / project.ppq} · source ${clip.offset}+${clip.extent} ${project.assets.find(asset => asset.id === clip.asset).kind === 'capture' ? 'host ticks' : ''} · repeat ${clip.repeat}${clip.pattern === undefined ? '' : ` · pattern ${clip.pattern + 1}`}` : 'Up/Down selects a region on the current lane.')
+      lines.push(clip ? `${clip.id} · ${clip.name}${clip.component ? ` (${clip.component}${clip.placement ? `, manual advance ${Number(clip.placement.advanceNanoseconds.numerator) / Number(clip.placement.advanceNanoseconds.denominator) / 1e6} ms` : ''})` : ''} · beat ${clip.position / project.ppq} · source ${clip.offset}+${clip.extent} ${project.assets.find(asset => asset.id === clip.asset).kind === 'capture' ? 'host ticks' : ''} · repeat ${clip.repeat}${clip.pattern === undefined ? '' : ` · pattern ${clip.pattern + 1}`}` : 'Up/Down selects a region on the current lane.')
       lines.push(asset ? `${asset.id} · ${asset.name} · ${asset.kind === 'wave' ? `${asset.metadata.frames} frames / ${asset.metadata.sampleRate} Hz / ${asset.metadata.channels} channels` : asset.kind === 'capture' ? `${asset.manifest.audioFrames} frames + ${asset.manifest.midiPacketCount} UMP packets; Enter opens the take` : 'original MIDI ticks; format-2 patterns require explicit selection'}` : 'No imported asset. :import-wave FILE or :import-midi FILE')
       lines.push(`Library ${project.assets.length} sources · ${project.clips.length} regions · a cycles sources · ? help`, path)
     }

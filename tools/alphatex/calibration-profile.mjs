@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 function integer(value, minimum = 0) {
   if (!Number.isSafeInteger(value) || value < minimum) throw new Error('Invalid calibration sample or channel')
 }
@@ -21,9 +23,23 @@ export function calibrationMilliseconds(profile, pulse) {
 }
 export function validateCalibrationProfile(profile) {
   if (profile?.schemaVersion !== 1 || profile.kind !== 'audio-calibration-profile'
-      || Object.keys(profile).length !== 8 || !Number.isFinite(profile.maxLagMs) || profile.maxLagMs <= 0
+      || Object.keys(profile).length !== 9 || !Number.isFinite(profile.maxLagMs) || profile.maxLagMs <= 0
       || Object.keys(profile.experiment ?? {}).sort().join(',') !== 'blocks,manifest,measurement,midi,playback,reference,wave'
       || Object.values(profile.experiment).some(value => typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value))) throw new Error('Invalid calibration evidence identity')
+  if (typeof profile.measurement !== 'string' || createHash('sha256').update(profile.measurement).digest('hex') !== profile.experiment.measurement) throw new Error('Stored calibration measurement changed')
+  const measured = JSON.parse(profile.measurement)
+  if (measured?.schemaVersion !== 1 || measured.kind !== 'audio-calibration-candidate' || measured.status !== 'unapplied'
+      || measured.reference?.sha256 !== profile.experiment.reference || measured.capturedWave?.sha256 !== profile.experiment.wave
+      || measured.reference.file !== 'reference.wav' || measured.capturedWave.file !== 'capture/audio.wav'
+      || measured.input?.id !== profile.input?.id || measured.output?.id !== profile.output?.id
+      || measured.inputSampleRate !== profile.input?.sampleRate || measured.outputSampleRate !== profile.output?.sampleRate
+      || measured.inputChannel !== profile.input?.channel || measured.outputChannel !== profile.output?.channel
+      || measured.maxLagMs !== profile.maxLagMs || measured.playback?.device?.id !== profile.output?.id
+      || measured.playback?.clock?.sampleRate !== profile.output?.sampleRate
+      || measured.playback?.clock?.renderQuantum !== profile.output?.renderQuantum
+      || measured.playback?.clock?.anchor !== profile.clock?.anchor || measured.playback?.clock?.numer !== profile.clock?.numer
+      || measured.playback?.clock?.denom !== profile.clock?.denom || measured.matches?.length !== 2
+      || measured.reference?.pulseFrames?.length !== 2) throw new Error('Calibration context disagrees with its retained measurement')
   for (const side of [profile.input, profile.output]) {
     if (typeof side?.id !== 'string' || !side.id) throw new Error('Invalid calibration device identity')
     integer(side.channel, 1)
@@ -35,12 +51,19 @@ export function validateCalibrationProfile(profile) {
   if (profile.output.renderQuantum > 0xffffffff) throw new Error('Calibration render quantum exceeds the native frame range')
   integer(profile.clock?.numer, 1); integer(profile.clock.denom, 1); host(profile.clock.anchor)
   if (!Array.isArray(profile.pulses) || profile.pulses.length !== 2) throw new Error('Calibration requires both experiment pulses')
-  for (const pulse of profile.pulses) {
+  for (const [index, pulse] of profile.pulses.entries()) {
     if (!pulse || Object.keys(pulse).length !== 6) throw new Error('Invalid calibration pulse evidence')
     integer(pulse.pulseFrame); integer(pulse.frame); integer(pulse.localFrame)
     const offset = host(pulse.blockFrameOffset); host(pulse.blockHostTime)
     if (BigInt(pulse.frame) !== offset + BigInt(pulse.localFrame) || !Number.isFinite(pulse.correlation) || Math.abs(pulse.correlation) > 1) throw new Error('Invalid calibration pulse provenance')
-    calibrationResidual(profile, pulse)
+    const original = measured.matches[index]
+    if (measured.reference.pulseFrames[index] !== pulse.pulseFrame
+        || ['frame', 'blockHostTime', 'blockFrameOffset', 'localFrame', 'correlation'].some(key => original[key] !== pulse[key])) throw new Error('Calibration pulse disagrees with its retained measurement')
+    const value = original.residualNanoseconds
+    if (typeof value?.numerator !== 'string' || !/^(0|-?[1-9][0-9]*)$/.test(value.numerator)
+        || typeof value.denominator !== 'string' || !/^[1-9][0-9]*$/.test(value.denominator)) throw new Error('Invalid measured residual')
+    const residual = calibrationResidual(profile, pulse)
+    if (BigInt(value.numerator) * BigInt(residual.denominator) !== BigInt(residual.numerator) * BigInt(value.denominator)) throw new Error('Calibration residual disagrees with retained clocks')
   }
   return profile
 }

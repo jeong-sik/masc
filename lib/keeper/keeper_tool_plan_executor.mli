@@ -212,7 +212,12 @@ val execute
     executor reuses them for scheduling and stable ready binding order. Without
     Ready files, the executor constructs its own dependency layers. The value
     contains only the original immutable plan nodes, never inputs, resources,
-    settlements or permission to execute. An execution-local index points into
+    settlements or permission to execute. Ready layers directly retain their
+    concurrent static grouping without synthetic empty resource-edge rows or
+    pending-node scans. Actual binding conflicts, exclusive execution and
+    settlement ordering remain in the Ready runner. Descriptor-only and exact
+    prepared-file schedules retain their own ordering rules.
+    An execution-local index points into
     that same immutable order; earlier bindings are visited directly without
     reconstructing each node's predecessor list. Every earlier binding is still
     awaited and classified in topological order. Earlier opaque ordinary operations settle

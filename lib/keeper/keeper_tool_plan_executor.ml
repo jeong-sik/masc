@@ -14,6 +14,11 @@ type unscheduled_batch =
   | Unscheduled_serial of Keeper_tool_plan.node * Keeper_tool_plan.contract
   | Unscheduled_concurrent of (Keeper_tool_plan.node * Keeper_tool_plan.contract) list
 
+type resource_ordering =
+  | Descriptor_order
+  | Prepared_order of (Keeper_tool_plan.Node_id.t * Keeper_tool_plan.Node_id.t list) list
+  | Ready_order
+
 let contract_exn plan node =
   match Keeper_tool_plan.contract plan node.Keeper_tool_plan.id with
   | Some contract -> contract
@@ -65,7 +70,7 @@ let prepared_layer plan dependencies nodes =
   waves nodes
 ;;
 
-let schedule_layers ?resource_dependencies plan layers =
+let schedule_layers ~resource_ordering plan layers =
   let planned_indexes =
     Keeper_tool_plan.nodes plan
     |> List.mapi (fun index node -> node.Keeper_tool_plan.id, index)
@@ -77,9 +82,15 @@ let schedule_layers ?resource_dependencies plan layers =
     | None -> invalid_arg "validated composition plan lost a canonical node"
   in
   layers
-  |> List.concat_map (match resource_dependencies with
-    | None -> unscheduled_layer plan
-    | Some dependencies -> prepared_layer plan dependencies)
+  |> List.concat_map (match resource_ordering with
+    | Descriptor_order -> unscheduled_layer plan
+    | Prepared_order dependencies -> prepared_layer plan dependencies
+    | Ready_order -> (function
+        | [] -> []
+        | (_ :: _ as nodes) ->
+          (* Ready's original static group is concurrent. Its live bindings
+             supply actual resource/exclusive ordering in the runner below. *)
+          [Unscheduled_concurrent (List.map (fun node -> node, contract_exn plan node) nodes)]))
   |> List.mapi (fun batch_index batch ->
     let scheduled_node ~execution_mode ~batch_size (node, contract) =
       { node
@@ -102,7 +113,8 @@ let schedule_layers ?resource_dependencies plan layers =
         (scheduled_node ~execution_mode:Agent_core.Tool_contract.Concurrent ~batch_size) nodes))
 ;;
 
-let schedule plan = schedule_layers plan (Keeper_tool_plan.dependency_layers plan)
+let schedule plan = schedule_layers ~resource_ordering:Descriptor_order plan
+    (Keeper_tool_plan.dependency_layers plan)
 ;;
 
 let outer_completion plan =
@@ -574,14 +586,15 @@ let execute_with_tool_use_id
       ?observe_node_result
       ()
   =
-  let resource_dependencies = match ready_files with
-    | None -> Option.bind prepared_files
-        (Keeper_prepared_inline_files.resource_dependencies ~plan)
+  let resource_ordering = match ready_files with
+    | None ->
+      (match Option.bind prepared_files (Keeper_prepared_inline_files.resource_dependencies ~plan) with
+       | None -> Descriptor_order
+       | Some dependencies -> Prepared_order dependencies)
     | Some ready ->
       if not (Keeper_prepared_inline_files.Ready.plan ready.files == plan) then
         invalid_arg "ready Inline files belong to a different plan";
-      Some (List.map (fun (node : Keeper_tool_plan.node) -> node.id, [])
-        (Keeper_tool_plan.nodes plan)) in
+      Ready_order in
   let node_effect_disposition (result : node_result) =
     match result.result with
     | Tool_result.Deferred _ | Tool_result.Failed _ ->
@@ -669,9 +682,10 @@ let execute_with_tool_use_id
       | Some predecessor -> predecessor
       | None -> None
     in
-    let ordering_predecessors node_id = match resource_dependencies with
-      | Some dependencies -> predecessors dependencies node_id
-      | None -> Option.to_list (serial_predecessor node_id)
+    let ordering_predecessors node_id = match resource_ordering with
+      | Prepared_order dependencies -> predecessors dependencies node_id
+      | Descriptor_order -> Option.to_list (serial_predecessor node_id)
+      | Ready_order -> []
     in
     let outcomes =
       List.map
@@ -835,8 +849,9 @@ let execute_with_tool_use_id
               | Wave_settled (_, ticket) ->
                 max ticket latest, blocked_found || is_blocked dependency)
             (-1, false)
-            (dependency_outcomes @ (match resource_dependencies with
-              | Some _ -> predecessor_outcomes | None -> [])) in
+            (dependency_outcomes @ (match resource_ordering with
+              | Prepared_order _ | Ready_order -> predecessor_outcomes
+              | Descriptor_order -> [])) in
         (* Soft barriers contribute observed settlement tickets to Fail_fast
            ordering, but are not producer/data dependencies. *)
         let commit_ticket = match ready_files with
@@ -924,7 +939,7 @@ let execute_with_tool_use_id
        Error { settled; cause; additional_causes=List.map snd rest;
          effect_disposition = aggregate_effect_disposition settled })
   in
-  let batches = schedule_layers ?resource_dependencies plan dependency_layers in
+  let batches = schedule_layers ~resource_ordering plan dependency_layers in
   let journal_admission = match journal with
     | None -> Ok ()
     | Some worker -> Keeper_tool_execution_journal.validate_plan worker ~plan

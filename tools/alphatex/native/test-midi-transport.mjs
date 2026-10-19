@@ -636,6 +636,45 @@ let beforeResume=reviewWire.count;try common.runCoordinated(anchorNanoseconds:re
 precondition(reviewWire.count==beforeResume)
 mustReject { try common.stageCoordinated(at:0.4) }
 try common.silence()
+let lateCommon=try MidiTransport(timeline:commonBase.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+lateCommon.prepared=true;lateCommon.destination=commonBase.destination;lateCommon.sourceDestinations=commonBase.sourceDestinations
+reset(0);reviewWire=[];try lateCommon.stageCoordinated(at:0);try lateCommon.runCoordinated(anchorNanoseconds:1_000_000_000)
+reviewClock=1_250_000_000;lateCommon.tick()
+precondition(!reviewWire.map(\.1).contains { $0[0]&0xf0==0x90 },"expired first-callback interval replayed")
+let exactCommon=try MidiTransport(timeline:commonBase.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+exactCommon.prepared=true;exactCommon.destination=commonBase.destination;exactCommon.sourceDestinations=commonBase.sourceDestinations
+reset(0);reviewWire=[];try exactCommon.stageCoordinated(at:0.1);try exactCommon.runCoordinated(anchorNanoseconds:1_000_000_000)
+reviewClock=1_000_000_000;exactCommon.tick()
+precondition(reviewWire.map(\.1).contains([0x90,62,90]),"exactly due entry attack lost")
+reviewClock=1_050_000_000;exactCommon.tick()
+precondition(reviewWire.map(\.1).contains([0x80,62,73]),"owned entry release velocity lost")
+let outsideOpaque=asset("outsideOpaque",[
+    ["seconds":0.3,"port":2,"bytes":[0x90,60,100]],
+    ["seconds":0.4,"port":2,"bytes":[0x80,60,45]],
+    ["seconds":0.8,"port":2,"bytes":[0xf0,0x7d,1,0xf7]]])
+let opaquePath=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString+".json")
+try JSONSerialization.data(withJSONObject:["schemaVersion":3,"duration":1,"sources":[outsideOpaque],"regions":[clip("outsideOpaque","outsideOpaque",from:0,to:1,repeatCount:1)]]).write(to:opaquePath)
+let opaqueTimeline=try JSONDecoder().decode(Timeline.self,from:Data(contentsOf:opaquePath));try FileManager.default.removeItem(at:opaquePath)
+_ = try MidiTransport(timeline:opaqueTimeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+mustReject { try opaqueTimeline.validate() }
+let includesOpaque=try MidiCycle(start:0.2,end:0.9,duration:0.7,period:700_000_000,divisor:1)
+mustReject { _ = try MidiTransport(timeline:opaqueTimeline,uid:"1",loop:true,coordinated:true,cycle:includesOpaque) }
+print("COMMON_MIDI_REPAIR_PASS: unreachable after-cut opaque retained, reachable opaque refused; late entry chases current phase, due attack and owned original release preserved")
+let endpointSource=asset("endpoint",[
+    ["seconds":0,"port":2,"bytes":[0xc0,0]],
+    ["seconds":1,"port":2,"bytes":[0x90,72,80,0x80,72,77]]])
+let endpointBase=try arrangement([endpointSource],[clip("endpoint","endpoint",from:0,to:1,repeatCount:1)],duration:1)
+let endpointCycle=try MidiCycle(start:0,end:1,duration:1,period:1_000_000_000,divisor:1)
+for missed in [false,true] {
+    let owner=try MidiTransport(timeline:endpointBase.timeline,uid:"1",loop:true,coordinated:true,cycle:endpointCycle)
+    owner.prepared=true;owner.destination=endpointBase.destination;owner.sourceDestinations=endpointBase.sourceDestinations
+    reset(0);reviewWire=[];try owner.stageCoordinated(at:0);try owner.runCoordinated(anchorNanoseconds:1_000_000_000)
+    reviewClock=1_000_000_000;owner.tick();reviewWire=[]
+    reviewClock=missed ? 3_000_000_000:2_000_000_000;owner.tick()
+    precondition(reviewWire.map(\.1).contains([0x90,72,80]) == !missed,"past source endpoint acquired after missed whole cycles")
+    precondition(reviewWire.map(\.1).contains([0x80,72,77]) == !missed)
+}
+print("COMMON_MIDI_MULTICYCLE_PASS: exact next endpoint batch retained, stale endpoint attack skipped after multiple missed cycles")
 let fractional=try MidiCycle(start:0,end:48.0/247,duration:48.0/247,period:48_000_000_000,divisor:247)
 for index in UInt128(0)..<10_000 {
     let expected=(index+1)*48_000_000_000/247+(((index+1)*48_000_000_000)%247==0 ? 0:1)

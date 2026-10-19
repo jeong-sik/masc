@@ -362,6 +362,7 @@ struct MidiRegion {
     let events: [WireEvent]
     let addresses: Set<Int>
     let startKnown: Set<ChaseField>, endTouched: Set<ChaseField>
+    let obstacles: Set<ChaseObstacle>
     let sourceDuration: Double
     // Region boundaries are compared and scheduled on an exact integer-nanosecond
     // grid. A start taken from a project position and an end accumulated from a
@@ -389,7 +390,7 @@ struct MidiRegion {
             end.observe(event.bytes, port: event.port)
             if let status = event.bytes.first, status < 0xf0 { addresses.insert(event.port << 8 | Int(status & 15)) }
         }
-        guard end.obstacles.isEmpty else { throw MidiFailure("MIDI region reconstruction requires support for " + end.obstacles.map(\.rawValue).sorted().joined(separator: ", ")) }
+        obstacles = end.obstacles
         self.addresses = addresses; startKnown = midiRegionEntry(events, at: spec.sourceStart).safeKnown; endTouched = end.touched
     }
     func includes(_ seconds: Double) -> Bool { seconds < spec.sourceEnd || seconds == spec.sourceEnd && spec.sourceEnd == sourceDuration }
@@ -484,6 +485,8 @@ struct Timeline: Decodable {
         if arrangement {
             guard !regions.isEmpty, regions.allSatisfy({ $0.end <= duration }) else { throw MidiFailure("invalid MIDI arrangement duration") }
             if let cycle { try cycle.validate(timeline: self) } else {
+                let obstacles = regions.reduce(into: Set<ChaseObstacle>()) { $0.formUnion($1.obstacles) }
+                guard obstacles.isEmpty else { throw MidiFailure("MIDI region reconstruction requires support for " + obstacles.map(\.rawValue).sorted().joined(separator: ", ")) }
                 var mutations = Set<ChaseField>()
                 if looping { for region in regions { mutations.formUnion(region.endTouched) } }
                 for region in regions.sorted(by: { $0.spec.startSeconds < $1.spec.startSeconds }) {
@@ -619,6 +622,7 @@ struct MidiCycle {
             for event in region.events where event.seconds < limit || event.seconds == limit && limit == region.sourceDuration {
                 touched.observe(event.bytes, port: event.port)
             }
+            guard touched.obstacles.isEmpty else { throw MidiFailure("common MIDI reconstruction requires support for " + touched.obstacles.map(\.rawValue).sorted().joined(separator: ", ")) }
             mutations.formUnion(touched.touched)
             entries.append((region, midiRegionEntry(region.events, at: source), repeated))
         }
@@ -1070,12 +1074,18 @@ final class MidiTransport {
                 let now = min(cycle.end.nextDown, cycle.start + phase.seconds)
                 if phase.index != cycleIndex {
                     pendingRestore = false
-                    try reconcileRegions(at: cycle.end, reconstruct: false, observedAt: cycle.end + phase.seconds, cut: cycle.end)
+                    let observed = phase.index > cycleIndex && phase.index - cycleIndex == 1 ? cycle.end + phase.seconds : Double.infinity
+                    try reconcileRegions(at: cycle.end, reconstruct: false, observedAt: observed, cut: cycle.end)
                     try silence(); cycleIndex = phase.index
                     try restore(at: now)
                 } else {
-                    if pendingRestore { pendingRestore = false; try restorePending(at: now) }
-                    try reconcileRegions(at: now, reconstruct: false)
+                    if pendingRestore {
+                        pendingRestore = false
+                        // Entry is a phase reconstruction, not audible history.
+                        // A late first/resume callback must not replay notes
+                        // whose complete lifetime preceded the current phase.
+                        try restore(at: now)
+                    } else { try reconcileRegions(at: now, reconstruct: false) }
                 }
                 try schedule(); return
             }

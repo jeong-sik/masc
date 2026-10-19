@@ -391,11 +391,15 @@ let apply_lsp_answer (state : state) request result =
          | Some (open_path, Masc_tui_fetched.Ready rows)
            when String.equal open_path location.ll_path ->
              push_code_jump state;
+             state.code_file <- Masc_tui_fetched.cancel_refresh state.code_file;
+             state.code_file_resume_intent <- Refresh_code_file;
              let cursor =
                max 0
                  (min (location.ll_line - 1) (Array.length rows - 1))
              in
              state.code_file_cursor <- cursor;
+             state.code_file_hscroll <- 0;
+             state.code_focus_file <- Right_pane;
              (* Follow the jump: a definition past the fold is a cursor
                 the operator cannot see otherwise. *)
              Reveal_cursor

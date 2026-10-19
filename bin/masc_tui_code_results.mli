@@ -7,6 +7,17 @@ val push_code_jump : Masc_tui_types.state -> unit
 val apply_entries : Masc_tui_types.state ->
   (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request ->
   (Masc.Tui_decode.workspace_tree_node list, string) result -> unit
+val apply_catalog : Masc_tui_types.state ->
+  (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request ->
+  (Masc.Tui_decode.workspace_file_catalog, string) result -> unit
+val apply_found_file : ?input_pending:bool -> Masc_tui_types.state ->
+  (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request ->
+  (string, string) result -> bool
+(** [true] only when successful navigation was committed. Failure and stale
+    replies preserve the original file, sibling panes, cursor and directory. *)
+val take_ready_found_file : Masc_tui_types.state -> input_pending:bool -> bool
+(** Commit a deferred successful reading only after queued input, paste and
+    incomplete terminal sequences have had the opportunity to retire it. *)
 val apply_file : ?intent:Masc_tui_types.code_file_load_intent ->
   Masc_tui_types.state -> string Masc_tui_fetched.request ->
   (string, string) result -> unit

@@ -648,6 +648,12 @@ type async_msg =
      relative path, which two scopes can both have, and the handler had no
      way to tell a late answer for the scope just left from an answer for the
      scope now open (#33946). *)
+  | Code_catalog_loaded of
+      (code_workspace_scope * string) Masc_tui_fetched.request
+      * (Masc.Tui_decode.workspace_file_catalog, string) result
+  | Code_finder_file_loaded of
+      (code_workspace_scope * string) Masc_tui_fetched.request
+      * (string, string) result
   | Code_entries_loaded of
       (code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc.Tui_decode.workspace_tree_node list, string) result

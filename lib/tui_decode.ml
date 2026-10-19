@@ -6837,6 +6837,23 @@ let decode_workspace_tree json =
         (Printf.sprintf "workspace tree must be a list (received %s)"
            (Json_util.kind_name other))
 
+type workspace_file_catalog = {
+  wfc_root : string;
+  wfc_files : string list;
+}
+
+let decode_workspace_file_catalog json =
+  let* wfc_root = required_string_field json "root" in
+  let* files = required_list_field json "files" in
+  let* wfc_files =
+    decode_list "files"
+      (function
+        | `String path when not (String.equal path "") -> Ok path
+        | other -> Error ("catalog file must be a nonempty string (received "
+                          ^ Json_util.kind_name other ^ ")")) files
+  in
+  Ok { wfc_root; wfc_files }
+
 (* /api/v1/workspace/file answers {ok, content}; anything else is a decode
    failure, not an empty file. *)
 let decode_workspace_file json =

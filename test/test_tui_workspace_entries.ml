@@ -405,10 +405,170 @@ let test_interrupted_new_file_open_resets_old_readers () =
     (state.code_file_resume_intent = Refresh_code_file)
 ;;
 
+let finder_fixture () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.server_identity <- Some
+    { Decode.sid_version = "test"; sid_binary_commit = "test";
+      sid_binary_commit_age_s = None; sid_base_path = "/workspace";
+      sid_masc_root = "/workspace/.masc"; sid_executable_in_worktree = None;
+      sid_state_ready = Some true; sid_uptime = None; sid_sse_clients = None;
+      sid_gc = None; sid_scheduler = None };
+  state.view <- Code;
+  state.code_scope <- Code_scope_repo "example";
+  state.code_dir <- "src";
+  let file, request = start_read ~equal:String.equal state.code_file "src/old.ml" in
+  state.code_file <- file;
+  Code_results.apply_file state request (Ok "let a = 1\nlet b = 2\nlet c = 3");
+  state.code_file_cursor <- 2;
+  state.code_file_scroll <- 2;
+  let origin = {cfo_workspace=state.workspace_authority;
+    cfo_reading=state.workspace_read_authority;
+    cfo_scope=state.code_scope; cfo_dir=state.code_dir;
+    cfo_file=Fetched.current_request state.code_file} in
+  state.palette_open <- true;
+  state.palette_mode <- Palette_files origin;
+  let catalog, ticket = start_read ~equal:code_scope_path_equal state.code_catalog
+      (origin.cfo_scope, origin.cfo_dir) in
+  state.code_catalog <- catalog;
+  Code_results.apply_catalog state ticket
+    (Ok {Decode.wfc_root=""; wfc_files=["lib/new.ml"]});
+  state, origin
+
+let finder_select state path =
+  let reading, request = start_read ~equal:code_scope_path_equal state.code_finder_file
+      (state.code_scope, path) in
+  state.code_finder_file <- reading;
+  request
+
+let test_finder_commits_navigation_only_after_success () =
+  let state, _ = finder_fixture () in
+  let before = state.code_file in
+  let request = finder_select state "lib/new.ml" in
+  Alcotest.(check bool) "pending read retains original file" true (before == state.code_file);
+  Alcotest.(check int) "pending read retains cursor" 2 state.code_file_cursor;
+  Alcotest.(check bool) "successful owned read commits once" true
+    (Code_results.apply_found_file state request (Ok "let new_value = 4"));
+  Alcotest.(check (option string)) "new file" (Some "lib/new.ml")
+    (Fetched.current_key state.code_file);
+  check_string "new containing directory" "lib" state.code_dir;
+  Alcotest.(check bool) "successful selection closes finder" false state.palette_open;
+  Alcotest.(check bool) "jump back retains original scope, file and position" true
+    (state.code_jump_back = [(Code_scope_repo "example", "src", Some "src/old.ml", 2, 2)]);
+  Alcotest.(check bool) "duplicate completion cannot reopen" false
+    (Code_results.apply_found_file state request (Ok "different bytes"))
+
+let test_finder_failure_and_cancel_preserve_original () =
+  let state, origin = finder_fixture () in
+  let before = state.code_file in
+  let failed = finder_select state "lib/new.ml" in
+  Alcotest.(check bool) "failed read does not navigate" false
+    (Code_results.apply_found_file state failed (Error "file disappeared"));
+  Alcotest.(check bool) "failure retains file and cursor" true
+    (before == state.code_file && state.code_file_cursor = 2 && state.code_dir = "src");
+  let cancelled = finder_select state "lib/new.ml" in
+  close_code_finder state;
+  state.palette_open <- true;
+  state.palette_mode <- Palette_files origin;
+  let replacement = finder_select state "lib/new.ml" in
+  Alcotest.(check bool) "same-path reopen does not borrow cancelled generation" false
+    (Code_results.apply_found_file state cancelled (Ok "cancelled bytes"));
+  Alcotest.(check bool) "late cleanup did not retire replacement" true
+    (Fetched.is_current ~equal:code_scope_path_equal state.code_finder_file replacement);
+  Alcotest.(check bool) "cancel retained original file" true (before == state.code_file)
+
+let test_finder_does_not_borrow_changed_owners () =
+  List.iter
+    (fun change ->
+      let state, _ = finder_fixture () in
+      let request = finder_select state "lib/new.ml" in
+      change state;
+      let before = state.code_file in
+      Alcotest.(check bool) "late read cannot commit under a changed owner" false
+        (Code_results.apply_found_file state request (Ok "late bytes"));
+      Alcotest.(check bool) "current file and navigation untouched" true
+        (before == state.code_file && state.code_jump_back = []))
+    [ (fun state -> set_code_scope state (Code_scope_repo "other"))
+    ; (fun state -> state.server_identity <- None)
+    ; (fun state -> state.code_dir <- "another")
+    ; (fun state ->
+        let next, _ = start_read ~equal:String.equal state.code_file "src/old.ml" in
+        state.code_file <- next)
+    ; (fun state -> state.view <- Repositories)
+    ]
+
+let test_finder_success_yields_to_pending_input () =
+  let state, _ = finder_fixture () in
+  let before = state.code_file in
+  let request = finder_select state "lib/new.ml" in
+  Alcotest.(check bool) "publication yields to a queued key or paste" false
+    (Code_results.apply_found_file ~input_pending:true state request (Ok "let new_value = 4"));
+  Alcotest.(check bool) "original file remains while input is pending" true
+    (before == state.code_file && state.palette_open);
+  Alcotest.(check bool) "an incomplete terminal sequence also defers" false
+    (Code_results.take_ready_found_file state ~input_pending:true);
+  close_code_finder state;
+  Alcotest.(check bool) "Esc wins over already received success" false
+    (Code_results.take_ready_found_file state ~input_pending:false);
+  Alcotest.(check bool) "Esc retained original file" true (before == state.code_file);
+  let state, _ = finder_fixture () in
+  let request = finder_select state "lib/new.ml" in
+  ignore (Code_results.apply_found_file ~input_pending:true state request (Ok "let next = 4"));
+  Alcotest.(check bool) "success resumes after input has drained" true
+    (Code_results.take_ready_found_file state ~input_pending:false);
+  Alcotest.(check bool) "ready result is consumed once" false
+    (Code_results.take_ready_found_file state ~input_pending:false)
+
+let test_catalog_decoder_keeps_identity_and_rejects_missing_data () =
+  let path = "repos/example/새 파일\n이름.ml" in
+  (match Decode.decode_workspace_file_catalog
+      (`Assoc ["root", `String "repos/example"; "files", `List [`String path]]) with
+   | Error detail -> Alcotest.fail detail
+   | Ok catalog -> Alcotest.(check (list string)) "exact file identity" [path] catalog.wfc_files);
+  List.iter
+    (fun json -> match Decode.decode_workspace_file_catalog json with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "malformed response became a usable catalog")
+    [ `Assoc ["root", `String ""]
+    ; `Assoc ["root", `String ""; "files", `List [`Int 1]]
+    ; `Assoc ["root", `String ""; "files", `List [`String ""]]
+    ]
+
+let test_finder_ready_content_cannot_borrow_reconfirmed_authority () =
+  let state, _ = finder_fixture () in
+  let request = finder_select state "lib/new.ml" in
+  ignore (Code_results.apply_found_file ~input_pending:true state request (Ok "old authority bytes"));
+  let identity = state.server_identity in
+  suspend_workspace_readings state;
+  state.server_identity <- identity;
+  state.workspace_identity <- Workspace_identity_match;
+  Alcotest.(check bool) "same workspace has been confirmed again" true (server_authority_ready state);
+  let before = state.code_file in
+  Alcotest.(check bool) "ready old content cannot navigate after read authority loss" false
+    (Code_results.take_ready_found_file state ~input_pending:false);
+  Alcotest.(check bool) "original file is preserved" true (before == state.code_file);
+  match code_finder_catalog state with
+  | Fetched.Absent -> ()
+  | Fetched.Loading | Fetched.Ready _ | Fetched.Stale _ | Fetched.Failed _ ->
+      Alcotest.fail "old catalog borrowed the new read authority"
+
 let () =
   Alcotest.run
     "masc-tui-workspace-entries"
-    [ ( "count label"
+    [ ( "file finder"
+      , [ Alcotest.test_case "commits navigation only after successful file read" `Quick
+            test_finder_commits_navigation_only_after_success
+        ; Alcotest.test_case "failure and cancellation retain original reading" `Quick
+            test_finder_failure_and_cancel_preserve_original
+        ; Alcotest.test_case "scope, authority, source and view retain ownership" `Quick
+            test_finder_does_not_borrow_changed_owners
+        ; Alcotest.test_case "catalog decoder keeps identity and refuses malformed data" `Quick
+            test_catalog_decoder_keeps_identity_and_rejects_missing_data
+        ; Alcotest.test_case "received success yields to queued input" `Quick
+            test_finder_success_yields_to_pending_input
+        ; Alcotest.test_case "ready content cannot borrow reconfirmed read authority" `Quick
+            test_finder_ready_content_cannot_borrow_reconfirmed_authority
+        ] )
+    ; ( "count label"
       , [] )
     ; ( "activity"
       , [ Alcotest.test_case "refresh preserves the visible Enter target" `Quick

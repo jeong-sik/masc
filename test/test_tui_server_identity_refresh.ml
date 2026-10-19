@@ -1541,7 +1541,7 @@ let test_local_read_and_http_sources_progress_independently () =
      && Local_read_order.in_flight state.local_workspace_read_order);
   let reading : Masc_tui_loader.local_reading =
     { lr_agents = []; lr_rows = Masc_tui_overview_tasks.Rows_read []
-    ; lr_tasks_domain = []; lr_tasks_error = None; lr_task_flow = None
+    ; lr_task_payloads = Masc_tui_task_payloads.empty; lr_tasks_error = None; lr_task_flow = None
     ; lr_operator_stalled = Masc_tui_agenda.Read []; lr_goal_task_links = Goal_links_not_read
     ; lr_goals_to_confirm = Masc_tui_agenda.Read [] } in
   (match take_local_workspace_read state ~source:Local_work request (Ok reading) with
@@ -1890,7 +1890,7 @@ let test_keeper_metadata_admits_input_before_work_completes () =
      && state.http_refresh_started_ns = Some 0L);
   let work_reading : Masc_tui_loader.local_reading =
     { lr_agents = []; lr_rows = Masc_tui_overview_tasks.Rows_read []
-    ; lr_tasks_domain = []; lr_tasks_error = None; lr_task_flow = None
+    ; lr_task_payloads = Masc_tui_task_payloads.empty; lr_tasks_error = None; lr_task_flow = None
     ; lr_operator_stalled = Masc_tui_agenda.Read []; lr_goal_task_links = Goal_links_not_read
     ; lr_goals_to_confirm = Masc_tui_agenda.Read [] } in
   (match take_local_workspace_read state ~source:Local_work work (Ok work_reading) with

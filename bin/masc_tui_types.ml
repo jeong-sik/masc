@@ -5,6 +5,7 @@ module Tui_decode = Masc.Tui_decode
 module Memory_category = Masc.Keeper_memory_os_types
 module Metrics_tail = Masc_tui_metrics_tail
 module Rows = Masc_tui_rows
+module Task_payloads = Masc_tui_task_payloads
 
 (* A poll shares the current read; an explicit refresh owns a new one.
    Only the owning response can settle that source and publish its result. *)
@@ -4340,7 +4341,7 @@ type local_workspace_request = {
   lwr_base_path: string;
   lwr_request: Local_read_order.request;
   lwr_started_ns: int64;
-  lwr_previous_tasks: Masc_domain.task list;
+  lwr_previous_tasks: Task_payloads.t;
 }
 
 type keeper_creation_wait = {
@@ -7867,10 +7868,9 @@ type state = {
   mutable usage_scope_id: string option;
   mutable agents: agent list;
   mutable tasks: task list;
-  (* The full domain rows the Overview list is projected from, kept so the
-     detail view can show a task after it turns terminal -- the active list
-     drops exactly those rows. Replaced wholesale with [tasks] on each load. *)
-  mutable tasks_domain: Masc_domain.task list;
+  (* Full Task values and their original immutable producer snapshot are one
+     observation. Terminal Tasks remain available independently of active rows. *)
+  mutable task_payloads: Task_payloads.t;
   mutable goal_task_links: task_goal_links_reading;
   mutable task_flow: Masc_tui_task_flow.t option;
   (* Primary backlog authority, shared by Home and Agenda. Archive coverage
@@ -9888,6 +9888,8 @@ let take_early_keeper_roster_observation (state : state) early =
 
 (* Required metadata and optional work sources share identity rules, not a
    pending slot. No work result can settle a Keeper request or change its state. *)
+let task_domain_values (state : state) = Task_payloads.values state.task_payloads
+
 let local_source_order (state : state) = function
   | Local_keepers -> state.local_keeper_read_order
   | Local_work -> state.local_workspace_read_order
@@ -9931,7 +9933,7 @@ let begin_local_workspace_read (state : state) ~intent ~source ~base_path ~start
         { lwr_source = source; lwr_intent = actual_intent; lwr_authority = state.workspace_authority;
           lwr_base_path = base_path; lwr_request; lwr_started_ns = started_ns;
           lwr_previous_tasks = (match source with
-            | Local_work -> state.tasks_domain | Local_keepers -> []) }) request
+            | Local_work -> state.task_payloads | Local_keepers -> Task_payloads.empty) }) request
 
 let take_local_workspace_read (state : state) ~source request result =
   if source <> request.lwr_source
@@ -14303,7 +14305,7 @@ let create_state
   usage_scope_id = None;
   agents = [];
   tasks = [];
-  tasks_domain = [];
+  task_payloads = Task_payloads.empty;
   goal_task_links = Goal_links_not_read;
   task_flow = None;
   operator_stalled = Masc_tui_agenda.Not_read;
@@ -16070,7 +16072,7 @@ let task_document_inputs state ~cols =
   let make target input = {tdk_target=target;tdk_input=input} in
   match state.view,state.planning_mode,state.task_detail_id,state.task_focus with
   | Planning,Planning_list,Some id,Masc_tui_overview_tasks.Task_focus _ ->
-    (match List.find_opt (fun (task : Masc_domain.task) -> task.id=id) state.tasks_domain with
+    (match List.find_opt (fun (task : Masc_domain.task) -> task.id=id) (task_domain_values state) with
      | None -> None,None
      | Some task ->
        let goals=match task_goal_reading state ~task_id:id with

@@ -6,8 +6,9 @@ effectful descriptor and its filesystem authority. A Read output can supply
 the original content to Write in the same run; Write uses its ordinary Serial
 handler, Gate and publication recovery, including safe parent creation.
 
-Once a source-bound run is recorded, an eligible Read/Edit plan can prepare its
-real file capabilities for that invocation. An output-dependent node binds its
+A source-bound eligible Read/Edit/Write plan can prepare its real file
+capabilities for that invocation. Preparation records no Skill activation and
+grants no effect authority. An output-dependent node binds its
 resources only after upstream outputs validate its input. Independent leaves may run together.
 Conflicting resources follow their existing canonical predecessor ordering,
 alongside the plan's explicit `after` and input dependencies. The transient

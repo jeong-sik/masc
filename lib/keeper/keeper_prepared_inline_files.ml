@@ -17,16 +17,18 @@ type t =
 
 let eligible plan =
   let nodes = Plan.nodes plan in
-  let is_edit (node : Plan.node) =
+  let is_mutation (node : Plan.node) =
     Option.fold ~none:false ~some:(fun descriptor ->
-      descriptor.Keeper_tool_descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file)
+      descriptor.Keeper_tool_descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file
+      || descriptor.runtime_handler = Keeper_tool_descriptor.Tool_write_file)
       (Plan.descriptor plan node.id)
   in
-  List.exists is_edit nodes && List.for_all (fun (node : Plan.node) ->
+  List.exists is_mutation nodes && List.for_all (fun (node : Plan.node) ->
     match Plan.descriptor plan node.id with
     | None -> false
     | Some descriptor ->
-      (descriptor.Keeper_tool_descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file
+      ((descriptor.Keeper_tool_descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file
+        || descriptor.runtime_handler = Keeper_tool_descriptor.Tool_write_file)
        && descriptor.execution = Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial)
       || (descriptor.runtime_handler = Keeper_tool_descriptor.Tool_read_file
           && descriptor.execution = Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent)) nodes

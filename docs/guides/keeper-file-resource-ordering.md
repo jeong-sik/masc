@@ -1,8 +1,8 @@
-# File resources in Read/Edit Skills
+# File resources in Read/Edit/Write Skills
 
 Existing-file Edit calls on a shared-mount Keeper prepare their actual file
 resources before execution. Named Inline Skills also prepare their resources
-when every leaf is an ordinary Read or Edit, at least one leaf is Edit, and
+when every leaf is an ordinary Read, Edit or Write, at least one leaf is Edit or Write, and
 all validated inputs and the original call source are available before execution.
 Read preparation covers existing regular files in the Keeper's own shared-mount
 tree. Other read roots and endpoint-owned trees retain their ordinary admission
@@ -25,9 +25,20 @@ Distinct entries may overlap in the same directory or nested directories. Their
 shared directory is ancestry, not an occupied write resource. Each entry retains
 its parent and complete physical ancestry, so a producer that explicitly claims
 a whole directory still conflicts with its entries. Direct Edit and eligible
-named Inline Read/Edit Skills transfer their entry claims through
+named Inline Read/Edit/Write Skills transfer their producer-owned claims through
 `Tool.ordinary_descriptor_scoped`. Directory aliases of the same entry have the
 same physical identity.
+
+Write-only and mixed Read/Write Skills use the same aggregate transfer as Edit
+Skills. Each Write retains its existing producer's target/source entry and
+object claims, or physical parent/ancestor claims for missing targets and
+directories. Distinct prepared aggregate resources may overlap in the outer SDK
+batch; actual conflicts still order. No file or directory is created during
+preparation. A partial or unsupported aggregate releases its acquired resources
+and retains ordinary execution. Dynamic inputs still bind when ready inside
+their original plan; they are not guessed to enable aggregate preparation.
+Source Before/After and unexecuted scenarios are recorded in the
+[Write aggregate audit](../audits/2026-10-19-write-aggregate-resources.md).
 
 Each Edit also declares the lexical target object as Write and the source
 object as Read, identified by physical device/inode. A prepared Read claims

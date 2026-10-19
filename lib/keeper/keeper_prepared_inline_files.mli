@@ -7,10 +7,13 @@ type operation =
   | Write of Keeper_tool_filesystem_runtime.prepared_write
 
 val eligible : Keeper_tool_plan.t -> bool
-(** At least one leaf is Edit; every leaf is a canonical ordinary Read or Edit.
+(** At least one leaf is Edit or Write; every leaf is a canonical ordinary
+    Read, Edit or Write with its original execution contract.
     Fixed inline children flattened to such leaves are included. Read-only
     plans, synthetic child targets, other effects and terminal leaves retain
-    ordinary admission. *)
+    ordinary admission. Named inline Write plans can transfer their existing
+    producer-owned resource claims to the outer SDK batch, just as Edit plans
+    do; this changes neither async admission nor effect/replay authority. *)
 
 val prepare
   : sw:Eio.Switch.t

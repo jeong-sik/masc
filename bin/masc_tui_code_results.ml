@@ -365,6 +365,7 @@ let start_lsp_question ?line (state : state) ~question ~symbol =
        | Masc_tui_fetched.Already_loading -> None
        | Masc_tui_fetched.Started (next, request) ->
            state.code_lsp_query <- next;
+           state.code_lsp_note <- None;
            Some request)
 ;;
 
@@ -426,16 +427,8 @@ let follow_lsp_location (state : state) ~symbol (location : Masc.Tui_decode.lsp_
 
 let apply_lsp_answer (state : state) request result =
   let query = Masc_tui_fetched.request_key request in
-  let current_file = match Masc_tui_fetched.current_request state.code_file with
-    | None -> false
-    | Some current ->
-        Masc_tui_fetched.same_request ~equal:String.equal current query.clq_file in
   if not (Masc_tui_fetched.is_current ~equal:code_lsp_query_equal state.code_lsp_query request)
-     || not (server_authority_ready state) || state.view <> Code
-     || query.clq_workspace <> state.workspace_authority
-     || query.clq_reading != state.workspace_read_authority
-     || query.clq_scope <> state.code_scope
-     || not (String.equal query.clq_dir state.code_dir) || not current_file
+     || not (code_lsp_query_current state query)
   then ()
   else begin
   state.code_lsp_query <-

@@ -14719,6 +14719,27 @@ let code_finder_current (state : state) origin =
   && Option.equal (Masc_tui_fetched.same_request ~equal:String.equal)
        origin.cfo_file (Masc_tui_fetched.current_request state.code_file)
 
+let code_lsp_query_current (state : state) query =
+  server_authority_ready state && state.view = Code
+  && query.clq_workspace = state.workspace_authority
+  && query.clq_reading == state.workspace_read_authority
+  && query.clq_scope = state.code_scope
+  && String.equal query.clq_dir state.code_dir
+  && (match Masc_tui_fetched.current_request state.code_file with
+      | None -> false
+      | Some current ->
+          Masc_tui_fetched.same_request ~equal:String.equal current query.clq_file)
+
+(* Pending presentation and answer admission share the original source owner.
+   Settled queries keep a key for recovery, but are not pending work. *)
+let code_lsp_pending_query (state : state) =
+  if not (Masc_tui_fetched.in_flight state.code_lsp_query) then None
+  else match Masc_tui_fetched.current_request state.code_lsp_query with
+  | None -> None
+  | Some request ->
+      let query = Masc_tui_fetched.request_key request in
+      if code_lsp_query_current state query then Some query else None
+
 let code_location_offer_current (state : state) offer =
   code_finder_current state offer.clo_origin
   && Option.equal

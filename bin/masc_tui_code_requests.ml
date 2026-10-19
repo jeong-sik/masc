@@ -304,7 +304,6 @@ let start_lsp_question
      | None -> ()
      | Some request ->
        let query = Masc_tui_fetched.request_key request in
-       state.code_lsp_note <- Some (Printf.sprintf "asking %s about %S" question symbol);
        let port = state.port in
        let line = query.clq_line in
        let keeper, repo = code_scope_axes state in

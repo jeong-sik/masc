@@ -337,7 +337,7 @@ let test_live_read_pins_client_between_hops () =
         ignore (Browser_lane.disconnect_client ~client_id:info.Browser_lane.client_id))) [first;second];
       ignore (Browser_lane.take_command ~client_info:first ~window_sec:0.001);
       let pending = Eio.Fiber.fork_promise ~sw (fun () ->
-        Surface.read {route=Browser_selection.Exact (Browser_lane.Live_route None); tab_id=Some 1}) in
+        Surface.read {route=Browser_selection.Exact (Browser_lane.Live_route None); tab_id=None}) in
       let take info = match Browser_lane.take_command ~client_info:info ~window_sec:1. with
         | Ok (Some command) -> command | _ -> fail "selected client command missing" in
       let tabs_command = take first in
@@ -885,7 +885,7 @@ let test_keeper_hears_why_the_bidi_host_is_gone () =
       let host_client_id = match Lane.client_id_of_string host_id with
         | Ok id -> id | Error detail -> fail detail in
       let tabs () = Tools.handle_tabs ~base_path:workspace ~tool_name:"BrowserTabs"
-        ~start_time:(Tool_timing.start ()) (`Assoc []) in
+        ~start_time:(Tool_timing.start ()) (`Assoc ["lane",`String "live"]) in
       let selected = ["clientId",`String host_id] in
       let rejected result =
         match result with

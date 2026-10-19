@@ -62,6 +62,7 @@ module Connector_read : sig
   type stage = Status_pending | Names_pending
   type application = Full_snapshot | Names_only
   type completion = { follow_up : follow_up; application : application }
+  type retirement = No_retirement | Retire of request
   type view =
     | Quiet
     | Reading of cause * follow_up
@@ -75,15 +76,20 @@ module Connector_read : sig
   val begin_read : authority:unit ref -> owner:unit ref -> t -> (t * request) option
   (** [None] shares the active request for this authority. A supplied owner is
       fresh for this attempt; an older authority cannot lend its active slot. *)
-  val after_write : t -> t
+  val job_key : request -> unit ref
+  (** The original physical owner also keys its structured observation job. *)
+  val after_write : t -> t * retirement
+  (** Queue while status is outstanding; retire names-only work immediately.
+      The caller requests exact-job cancellation before admitting a new read. *)
   val suspend : t -> t
   (** Retire the request, retaining both demand it began with and later writes. *)
   val not_started : authority:unit ref -> t -> request -> t
   (** Release active status synchronously, retaining the exact failed request
       until its failure can be admitted. Stale callbacks leave the state alone. *)
-  val status_received : authority:unit ref -> t -> request -> t option
+  val status_received : authority:unit ref -> t -> request -> (t * retirement) option
   (** Admit the original status once, without settling read or write demand.
-      The remaining directory work and final result keep the same owner. *)
+      Names keep the same owner unless a later write already requires a fresh
+      status: then retain demand and retire this request's directory work. *)
   val complete : authority:unit ref -> t -> request -> ('a, 'b) result ->
     (t * completion) option
   (** [None] rejects an old request. Only a write observed after an active read
@@ -98,10 +104,12 @@ end = struct
   type application = Full_snapshot | Names_only
   type completion = { follow_up : follow_up; application : application }
   type request = { authority : unit ref; owner : unit ref; cause : cause }
+  type retirement = No_retirement | Retire of request
   type t =
     | Empty
     | Held
-    | Pending of request * follow_up * stage
+    | Pending_status of request * follow_up
+    | Pending_names of request
     | Not_started of request * follow_up
   type view =
     | Quiet
@@ -114,11 +122,13 @@ end = struct
   let view = function
     | Empty -> Quiet
     | Held -> Waiting_after_write
-    | Pending (request, follow_up, _) -> Reading (request.cause, follow_up)
+    | Pending_status (request, follow_up) -> Reading (request.cause, follow_up)
+    | Pending_names request -> Reading (request.cause, No_follow_up)
     | Not_started _ -> Failed_to_start
 
   let stage = function
-    | Pending (_, _, stage) -> Some stage
+    | Pending_status _ -> Some Status_pending
+    | Pending_names _ -> Some Names_pending
     | Empty | Held | Not_started _ -> None
 
   let owes_read request follow_up =
@@ -131,21 +141,27 @@ end = struct
   let held = function
     | Empty -> false
     | Held -> true
-    | Pending (request, follow_up, _) | Not_started (request, follow_up) ->
+    | Pending_status (request, follow_up) | Not_started (request, follow_up) ->
         owes_read request follow_up
+    | Pending_names request -> owes_read request No_follow_up
 
   let begin_read ~authority ~owner state =
     match state with
-    | Pending (request, _, _) when request.authority == authority -> None
-    | Empty | Held | Pending _ | Not_started _ ->
+    | Pending_status (request, _) | Pending_names request
+      when request.authority == authority -> None
+    | Empty | Held | Pending_status _ | Pending_names _ | Not_started _ ->
         let cause = if held state then After_write else Refresh in
         let request = { authority; owner; cause } in
-        Some (Pending (request, No_follow_up, Status_pending), request)
+        Some (Pending_status (request, No_follow_up), request)
+
+  let job_key request = request.owner
 
   let after_write = function
-    | Empty | Held -> Held
-    | Pending (request, _, stage) -> Pending (request, Read_after_write, stage)
-    | Not_started (request, _) -> Not_started (request, Read_after_write)
+    | Empty | Held -> Held, No_retirement
+    | Pending_status (request, _) ->
+        Pending_status (request, Read_after_write), No_retirement
+    | Pending_names request -> Held, Retire request
+    | Not_started (request, _) -> Not_started (request, Read_after_write), No_retirement
 
   let suspend state = if held state then Held else Empty
 
@@ -155,38 +171,41 @@ end = struct
 
   let not_started ~authority state request =
     match state with
-    | Pending (current, follow_up, Status_pending) when owns ~authority current request ->
+    | Pending_status (current, follow_up) when owns ~authority current request ->
         Not_started (current, follow_up)
-    | Empty | Held | Pending _ | Not_started _ -> state
+    | Empty | Held | Pending_status _ | Pending_names _ | Not_started _ -> state
 
   let status_received ~authority state request =
     match state with
-    | Pending (current, follow_up, Status_pending) when owns ~authority current request ->
-        Some (Pending (current, follow_up, Names_pending))
-    | Empty | Held | Pending _ | Not_started _ -> None
+    | Pending_status (current, follow_up) when owns ~authority current request ->
+        (match follow_up with
+         | No_follow_up -> Some (Pending_names current, No_retirement)
+         | Read_after_write -> Some (Held, Retire current))
+    | Empty | Held | Pending_status _ | Pending_names _ | Not_started _ -> None
+
+  let finish request result application =
+    let next = match request.cause, result with
+      | After_write, Error _ -> Held
+      | After_write, Ok _ | Refresh, (Ok _ | Error _) -> Empty
+    in
+    next, { follow_up = No_follow_up; application }
 
   let complete ~authority state request result =
     match state with
-    | Pending (current, follow_up, stage) when owns ~authority current request ->
-        let application = match stage with
-          | Status_pending -> Full_snapshot
-          | Names_pending -> Names_only
-        in
+    | Pending_status (current, follow_up) when owns ~authority current request ->
         (match follow_up with
-         | Read_after_write -> Some (Held, { follow_up = Read_after_write; application })
-         | No_follow_up ->
-             let next = match current.cause, result with
-               | After_write, Error _ -> Held
-               | After_write, Ok _ | Refresh, (Ok _ | Error _) -> Empty
-             in
-             Some (next, { follow_up = No_follow_up; application }))
+         | Read_after_write ->
+             Some (Held, { follow_up = Read_after_write; application = Full_snapshot })
+         | No_follow_up -> Some (finish current result Full_snapshot))
+    | Pending_names current when owns ~authority current request ->
+        Some (finish current result Names_only)
     | Not_started (current, follow_up) when owns ~authority current request ->
         (match result with
          | Ok _ -> None
          | Error _ ->
              Some ((if owes_read current follow_up then Held else Empty),
                { follow_up = No_follow_up; application = Full_snapshot }))
-    | Empty | Held | Pending _ | Not_started _ -> None
+    | Empty | Held | Pending_status _ | Pending_names _ | Not_started _ -> None
 end
 
 (* In-process source ordering keeps one active read and accumulated refresh demand.
@@ -9834,21 +9853,23 @@ let begin_connectors_read state =
     | Some (reading, request) -> state.connectors_read <- reading; Some request
 
 let queue_connectors_after_write state =
-  state.connectors_read <- Connector_read.after_write state.connectors_read
+  let reading, retirement = Connector_read.after_write state.connectors_read in
+  state.connectors_read <- reading;
+  retirement
 
 let connector_read_not_started state request =
   state.connectors_read <- Connector_read.not_started
       ~authority:state.detail_read_authority state.connectors_read request
 
 let receive_connectors_status state request snapshot =
-  if not (server_authority_ready state) then false
+  if not (server_authority_ready state) then None
   else match Connector_read.status_received ~authority:state.detail_read_authority
       state.connectors_read request with
-    | None -> false
-    | Some reading ->
+    | None -> None
+    | Some (reading, retirement) ->
         state.connectors_read <- reading;
         apply_connectors_snapshot state Connector_read.Full_snapshot snapshot;
-        true
+        Some retirement
 
 let complete_connectors_read state request result =
   if not (server_authority_ready state) then None

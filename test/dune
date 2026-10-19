@@ -1113,7 +1113,7 @@
  (name test_channel_gate_connector_routes)
  (modules test_channel_gate_connector_routes)
  (libraries
-  masc_test_deps masc_tui_types masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
+  masc_test_deps masc_tui_types masc_tui_workspace_job masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
   masc.skill_config masc.skill_reference masc.skill_snapshot masc.config))
 

@@ -5,6 +5,12 @@ Source comparison base: `d8505286bf5a7f26ad2cb549a10b832929391a4e`
 workspace read while removing directory completion as a prerequisite for
 delivering the already-received status and binding data.
 
+Follow-up: [write reactivation](2026-10-19-tui-connectors-write-reactivation.md)
+changes later-write behavior to retire the original names work. This document's
+write-during-names scenario describes the #43887 layer; its operation-preserving
+test now places the later write after enrichment, while a separate real-job
+scenario covers retirement during names and before delayed status application.
+
 ## As-Is / To-Be
 
 `load_connectors` decoded a valid status snapshot, then joined every Connector's

@@ -1874,49 +1874,11 @@ let run_machine_change ?(checkpoint_boundary=false) state ~mailbox ~refused ~unk
 (* Retire the cancellation context synchronously at the authority boundary,
    including while a request is connecting. Completion stamps also reject a
    reply already queued before withdrawal; admitted server effects remain. *)
-let fork_workspace_job ?(observation = false) ?(on_withdrawn = fun () -> ()) state ~sw run =
-  let exception Workspace_withdrawn in
-  let authority = state.workspace_authority in
-  let context = ref None in
-  let withdrawn = ref false in
-  let token = ref () in
-  let cancel () =
-    withdrawn := true;
-    Option.iter (fun context -> Eio.Cancel.cancel context Workspace_withdrawn) !context
-  in
-  state.workspace_cancellations <- (token, cancel) :: state.workspace_cancellations;
-  if observation then
-    state.workspace_observation_cancellations <-
-      (token, cancel) :: state.workspace_observation_cancellations;
-  match Eio.Fiber.fork_daemon ~sw (fun () ->
-    Fun.protect
-      ~finally:(fun () ->
-        context := None;
-        state.workspace_cancellations <-
-          List.filter (fun (held, _) -> held != token) state.workspace_cancellations;
-        state.workspace_observation_cancellations <-
-          List.filter (fun (held, _) -> held != token) state.workspace_observation_cancellations)
-      (fun () ->
-        try
-          Eio.Cancel.sub (fun cancellation ->
-            context := Some cancellation;
-            if not !withdrawn && authority = state.workspace_authority then run ()
-            else on_withdrawn ())
-        with Eio.Cancel.Cancelled Workspace_withdrawn -> ());
-    `Stop_daemon) with
-  | () -> ()
-  | exception exn ->
-    let backtrace = Printexc.get_raw_backtrace () in
-    state.workspace_cancellations <-
-      List.filter (fun (held, _) -> held != token) state.workspace_cancellations;
-    state.workspace_observation_cancellations <-
-      List.filter (fun (held, _) -> held != token) state.workspace_observation_cancellations;
-    Printexc.raise_with_backtrace exn backtrace
-
+let fork_workspace_job = Masc_tui_workspace_job.fork
 
 (* Dispatch owns cancellation, error conversion and the original completion
    envelope. Each caller supplies its own admission before doing its work. *)
-let launch_workspace_result ?(operation = false) ?(observation = false)
+let launch_workspace_result ?key ?(operation = false) ?(observation = false)
     ?(on_not_run = fun () -> ()) state ~mailbox ~boundary_error ~deliver perform =
   let enqueue_async = workspace_enqueue state in
   let deliver_result result =
@@ -1939,7 +1901,7 @@ let launch_workspace_result ?(operation = false) ?(observation = false)
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
-      (match fork_workspace_job ~observation state ~sw run with
+      (match fork_workspace_job ?key ~observation state ~sw run with
        | () -> ()
        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
        | exception exn ->
@@ -1978,9 +1940,9 @@ let capture_workspace_json_read state read =
           Masc_tui_workspace_read.with_binding ~host ~port ~expected
             ~proof:Masc_tui_workspace_read.Request_precondition read
 
-let launch_workspace_json_read ?on_not_run state ~mailbox ~deliver read =
+let launch_workspace_json_read ?key ?on_not_run state ~mailbox ~deliver read =
   let read = capture_workspace_json_read state read in
-  launch_workspace_result ~observation:true ?on_not_run state
+  launch_workspace_result ?key ~observation:true ?on_not_run state
     ~mailbox ~boundary_error:Fun.id ~deliver read
 
 (* A creation keeps its operation receipt even after its workspace withdraws.
@@ -4806,6 +4768,11 @@ let settle_connector_unbind_offers state
                   targets))
     pending
 
+let retire_connector_read state = function
+  | Connector_read.No_retirement -> ()
+  | Retire request ->
+      Masc_tui_workspace_job.cancel_observation state ~key:(Connector_read.job_key request)
+
 let launch_connectors_load state ~mailbox =
   match begin_connectors_read state with
   | None -> ()
@@ -4813,7 +4780,7 @@ let launch_connectors_load state ~mailbox =
     let enqueue_status = workspace_enqueue state in
     let host = server_peer_host in
     let port = state.port in
-    launch_workspace_json_read state ~mailbox
+    launch_workspace_json_read ~key:(Connector_read.job_key request) state ~mailbox
       ~on_not_run:(fun () -> connector_read_not_started state request)
       ~deliver:(fun result ->
         Connectors_loaded (request,
@@ -4823,11 +4790,11 @@ let launch_connectors_load state ~mailbox =
           enqueue_status mailbox (Connectors_status_loaded (request, snapshot))))
 
 (* A binding write changed what the server holds. A load already in flight
-   may have read before the write landed, so it cannot stand in for this
-   read: mark one more to run when it answers, and the pane does not keep
-   showing bindings that are gone. *)
+   may have read before the write landed. Coalesce while status is pending;
+   once status is known, retire its remaining names work and admit a fresh
+   observation without waiting for that metadata or claiming cleanup ended. *)
 let reload_connectors_after_write state ~mailbox =
-  queue_connectors_after_write state;
+  retire_connector_read state (queue_connectors_after_write state);
   launch_connectors_load state ~mailbox
 
 (* One fiber sends the unbinds in order and reports them together: each
@@ -20662,8 +20629,14 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
         (Masc_tui_connector_unbind.summary ~keeper_name results);
       reload_connectors_after_write state ~mailbox
   | Connectors_status_loaded (request, snapshot) ->
-      if receive_connectors_status state request snapshot then
-        settle_connector_unbind_offers state snapshot
+      (match receive_connectors_status state request snapshot with
+       | None -> ()
+       | Some retirement ->
+           settle_connector_unbind_offers state snapshot;
+           retire_connector_read state retirement;
+           (match retirement with
+            | Connector_read.No_retirement -> ()
+            | Retire _ -> launch_connectors_load state ~mailbox))
   | Connectors_loaded (request, result) ->
       (match complete_connectors_read state request result with
        | None -> ()

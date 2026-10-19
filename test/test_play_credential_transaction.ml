@@ -741,8 +741,8 @@ let test_worker_keeper_has_no_play_session () =
   check (option string) "handoff to the same-name Keeper moves the holder" (Some "player") (controller ());
   (* set_participation refuses a Worker, so this direct record only probes
      that [current] resolves the Worker role before touching any file. *)
-  auth_ok (Auth.with_credential_transaction config.base_path (fun _transaction ->
-    match Play_participation.write ~base_path:config.base_path worker Departed with
+  auth_ok (Auth.with_credential_transaction config.base_path (fun transaction ->
+    match Play_participation.write ~transaction ~base_path:config.base_path worker Departed with
     | Ok () -> () | Error detail -> fail detail));
   let participation = auth_ok (Auth.with_credential_transaction config.base_path (fun transaction ->
     Play_participation.current ~transaction ~base_path:config.base_path ~name:"player")) in
@@ -778,8 +778,8 @@ let test_independent_departure_recovers_damaged_participation () =
         | Ok meta -> meta | Error detail -> fail detail in
       match Keeper_meta_store.replace_snapshot config meta with
       | Ok () -> () | Error detail -> fail detail);
-    auth_ok (Auth.with_credential_transaction config.base_path (fun _transaction ->
-      match Play_participation.write ~base_path:config.base_path credential Connected with
+    auth_ok (Auth.with_credential_transaction config.base_path (fun transaction ->
+      match Play_participation.write ~transaction ~base_path:config.base_path credential Connected with
       | Ok () -> () | Error detail -> fail detail));
     let directory = Filename.concat (Common.masc_dir_from_base_path ~base_path:config.base_path) "play" in
     Array.iter (fun file -> Out_channel.with_open_bin (Filename.concat directory file)

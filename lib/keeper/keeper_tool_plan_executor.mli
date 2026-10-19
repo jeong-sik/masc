@@ -203,7 +203,12 @@ val execute
     down after a failed predecessor; explicit plan dependencies still apply.
     [ready_files] additionally binds producer resources after upstream outputs
     validate the actual input. Nodes publish binding before waiting for earlier
-    bindings in topological order; only conflicting bindings await settlement.
+    bindings in topological order. Earlier opaque ordinary operations settle
+    before a later file mutation captures its physical bindings. Real file
+    conflicts and original Serial-to-Serial chains require success; ordering
+    barriers alone do not propagate failure under Continue_independent.
+    Fail_fast still stops at a failed observed barrier. Ordinary Concurrent
+    leaves retain their sharing with other concurrent leaves and prepared reads.
     Pure child argument validation has no file effect. Unsupported preparation
     uses the ordinary handler alone, ordered against all earlier file effects.
     The call-owned switch releases every opened capability on cancellation.

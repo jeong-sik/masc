@@ -28,6 +28,8 @@ alongside the plan's explicit `after` and input dependencies. The transient
 | Input depends on an earlier Read output | Ordinary execution | Binds the actual file producer when the input resolves; independent ready leaves may overlap |
 | Exact inline child arguments depend on upstream output | Ordinary execution | Keeps the compiler-owned pure argument node and binds its original file leaves when ready |
 | A resource cannot be prepared | Ordinary execution | Runs its original file handler alone, ordered against earlier file operations |
+| Ordinary tools mixed with supported file leaves | The whole plan loses ready file preparation | Ordinary leaves keep their original handlers and modes; supported file leaves bind their own resources |
+| Failed concurrent lookup before independent writes, `Continue_independent` | Ordinary file scheduling | Lookup settlement orders later mutations without becoming a file/data success dependency |
 | Missing source or an unisolatable Gate callback | Ordinary execution | Retains ordinary node scheduling |
 | Edit in an async scope | Rejected | Still rejected: an ordinary file Edit has no durable replayable launch identity |
 | Write in an async scope | Rejected | Rejected through both catalog and nested admission; ordinary Write has no durable replayable launch identity |
@@ -42,17 +44,35 @@ file capability is transferred to a durable async worker.
 
 Ready nodes publish their resolved resource binding before waiting for earlier
 bindings in stable topological order. A later node cannot assume an unresolved
-earlier input targets a different file. Once identities are known, only actual
+earlier input targets a different file. Once identities are known, actual file
 conflicts await predecessor settlement. A failed or skipped conflicting owner
 prevents its successors from dispatching; independent branches follow the plan's
 existing failure policy. Pure child argument validation has no file footprint.
 Read/Edit/Write plans retain supported file capabilities. Overwrite/Append Write
 can bind existing physical parents or the deepest existing ancestor when child
 directories are missing; unsupported paths retain the original exclusive handler.
-Plans containing other tools or
-async child submission/result targets retain ordinary scheduling. Named calls
+Mixed ordinary Serial/Concurrent leaves retain their original handlers. Their
+unknown footprint supplies an ordering barrier, never an invented file claim.
+Before preparing a later file mutation, earlier opaque ordinary operations must
+settle so the file producer captures the current physical paths. An earlier
+ordinary Serial operation similarly precedes preparation of a later file read.
+The immutable preparation-order index is built once from the original plan;
+file-only plans have no opaque preparation predecessors. Ordinary Concurrent
+leaves and prepared reads retain their sharing.
+
+Real file conflicts, explicit plan dependencies and original Serial-to-Serial
+chains require success. A barrier alone only requires settlement under
+`Continue_independent`, so an unrelated concurrent lookup failure does not block
+independent writes. `Fail_fast` still stops at an observed failed barrier. Files
+without supported preparation retain the conservative exclusive fallback.
+Terminal leaves and async child submission/result targets retain ordinary
+scheduling. Named calls
 without whole-plan scoped admission and transient
 run calls retain their outer descriptor; only their inner ready file leaves overlap.
+Whole-plan resource transfer to the outer named-call SDK batch still requires
+only supported file leaves. A mixed ordinary/file plan keeps its Serial outer
+envelope even when its inner file leaves are ready. See the
+[mixed-plan source comparison](../audits/2026-10-19-mixed-ready-resources.md).
 
 ## Bind original Write resources when inputs become ready
 

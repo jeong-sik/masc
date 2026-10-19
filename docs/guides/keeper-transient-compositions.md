@@ -223,16 +223,24 @@ This needs no fresh discovery/read and records no activation. See
 [Task schema readiness](keeper-task-schema-readiness.md) for source identity,
 scope and Before/After measurement.
 
-Inline Skills and task recipes with at least one Edit or Write and only
-Read/Edit/Write leaves
-can bind producer-owned file claims with the original call source. Upstream
+Inline Skills and task recipes with at least one Edit or Write can bind
+producer-owned file claims with the original call source. Alongside canonical
+Read/Edit/Write leaves, inner ready plans accept ordinary Serial/Concurrent
+Tools and pure compiled child argument validation. Opaque ordinary leaves keep
+their handlers and execution modes; they order against file mutations without
+claiming a file. Later file capabilities are prepared after these opaque
+predecessors settle. Ordering alone does not propagate a concurrent lookup's
+failure under `Continue_independent`; real file/data dependencies and original
+Serial success chains remain. Terminal and async child submission/result
+targets are outside this ready path. Upstream
 inputs and exact inline child arguments bind when their values resolve. Read/Read
 sharing and disjoint ready files may overlap; conflicting effects retain
 topological order. Unprepared file operations use their ordinary handler alone.
 Missing source or unisolatable causal callbacks retain the ordinary schedule.
-Named fully resolved Write-only and mixed Read/Write Skills can also transfer
+Named fully resolved file-only Write and Read/Write Skills can also transfer
 their aggregate resource claims to the outer SDK batch. This uses existing Write
 preparation; it grants no new effect or durable async file-mutation admission.
+Mixed ordinary/file plans retain their Serial outer envelope.
 See [recipe file execution](keeper-recipe-file-execution.md) for supported dynamic
 and nested inputs and [file resource ordering](keeper-file-resource-ordering.md)
 for physical entry, ancestry and owned-tree Read behavior.

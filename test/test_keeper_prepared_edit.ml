@@ -121,6 +121,7 @@ let batch env config meta recovery inputs =
 ;;
 
 let public_bundle ?snapshot ?(sourceful = true) ?(with_read = false) ?(with_write = false)
+    ?(extra_descriptors = []) ?on_surface
     env sw config meta recovery operation =
   Masc_test_deps.with_process_env "MASC_BASE_PATH" (Some config.Workspace.base_path) @@ fun () ->
   Config_dir_resolver.reset ();
@@ -153,6 +154,7 @@ let public_bundle ?snapshot ?(sourceful = true) ?(with_read = false) ?(with_writ
     match Keeper_tool_descriptor.find_id "agent.write_file" with
     | Some write -> descriptors @ [write]
     | None -> fail "canonical public Write descriptor is absent" in
+  let descriptors = descriptors @ extra_descriptors in
   let snapshot = match snapshot with
     | Some snapshot -> snapshot
     | None -> Skill_catalog_snapshot.config_unreadable ~detail:"tool-only fixture has no shared Skill source" in
@@ -171,6 +173,7 @@ let public_bundle ?snapshot ?(sourceful = true) ?(with_read = false) ?(with_writ
       ~global_skill_catalog:catalog
       ~skill_inventory:(Keeper_skill_inventory.of_snapshot ~descriptors snapshot)
       ~task_skills:(Keeper_task_skill_turn.skills selection) in
+  Option.iter (fun observe -> observe surface) on_surface;
   let causal = Keeper_gate_causal_context.create ~origin:Keeper_approval_origin.unavailable ~turn_id:(Some 13)
       ~initial:(`Assoc ["task_id", `String task.task_id]) in
   let bundle = Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface ~config ~meta
@@ -694,6 +697,114 @@ let test_published_inline_write_alias_order_and_cancellation () =
   ignore (dispatch env bundle.tools (inline_write_calls ~prefix:"after-cancel-write" inputs));
   check string "later invocation reacquires the original target" "after" (read target);
   check string "later invocation reacquires the independent target" "other-after" (read other)
+;;
+
+let mixed_descriptor serial =
+  let id = if serial then "keeper.memory.write" else "keeper.tools_list" in
+  match Keeper_tool_descriptor.find_id id with
+  | Some descriptor -> descriptor | None -> fail "mixed ordinary descriptor is absent"
+;;
+
+let test_mixed_public_recipe_keeps_file_overlap () =
+  fixture @@ fun env sw config meta recovery root ->
+  let ordinary = mixed_descriptor false in
+  public_bundle ~with_write:true ~extra_descriptors:[ordinary] env sw config meta recovery
+  @@ fun meta task_id _cell causal bundle ->
+  let left = Filename.concat root "mixed-public/left" and right = Filename.concat root "mixed-public/right" in
+  write left "before";write right "before";
+  let nodes =
+    [`Assoc ["id",`String "a-inspect";"tool",`String "keeper_tools_list";"args",`Assoc []];
+     `Assoc ["id",`String "b-left";"tool",`String "Write";"args",public_write_args left "left-after"];
+     `Assoc ["id",`String "c-right";"tool",`String "Write";"args",public_write_args right "right-after"]] in
+  let both,resolve_both = Eio.Promise.create () and entered = ref 0 in
+  ignore (FS.For_testing.with_before_write_authorization (fun () ->
+    incr entered;if !entered=2 then Eio.Promise.resolve resolve_both ();
+    Eio.Promise.await both) (fun () -> dispatch env bundle.tools [recipe_call ~id:"mixed-public" nodes]));
+  check int "ordinary lookup does not disable real disjoint file overlap" 2 !entered;
+  check string "mixed recipe commits original left bytes" "left-after" (read left);
+  check string "mixed recipe commits original right bytes" "right-after" (read right);
+  let leaves = physical_leaves meta in
+  check int "ordinary and file results keep their own physical receipts" 3 (List.length leaves);
+  List.iter (fun row ->
+    check string "mixed leaf retains original Task" task_id Yojson.Safe.Util.(member "task_id" row |> to_string);
+    check string "mixed leaf retains original trace" (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      Yojson.Safe.Util.(member "trace_id" row |> to_string)) leaves;
+  check int "mixed results still join original Gate state" 3
+    Yojson.Safe.Util.(member "completed_tool_calls" (Keeper_gate_causal_context.snapshot causal).snapshot |> to_list |> List.length)
+;;
+
+let test_mixed_runtime_order_and_failure ~serial ~policy ~refuse ~replace_parent () =
+  fixture @@ fun env sw config meta recovery root ->
+  let module Plan = Keeper_tool_plan in
+  let module Executor = Keeper_tool_plan_executor in
+  let ordinary = mixed_descriptor serial in
+  let frozen = ref None in
+  public_bundle ~with_write:true ~extra_descriptors:[ordinary]
+    ~on_surface:(fun surface -> frozen := Some surface) env sw config meta recovery
+  @@ fun meta _task cell causal _bundle ->
+  let capability_surface = match !frozen with Some surface -> surface | None -> fail "frozen test surface missing" in
+  let write_descriptor = match Keeper_tool_descriptor.find_id "agent.write_file" with
+    | Some descriptor -> descriptor | None -> fail "Write descriptor absent" in
+  let id value = match Plan.Node_id.make value with Ok value -> value | Error _ -> fail "bad mixed node identity" in
+  let directory = Filename.concat root "mixed-runtime" in
+  let left = Filename.concat directory "left/file" and right = Filename.concat directory "right/file" in
+  write left "before";write right "before";
+  let ordinary_id = id "a-ordinary" in
+  let ordinary_name,input = if serial then "keeper_memory_write",`Assoc ["content",`String "isolated fixture"]
+    else "keeper_tools_list",`Assoc [] in
+  let nodes =
+    [Plan.node ~id:ordinary_id ~tool_name:ordinary_name ~input:(Plan.Json_template.literal input) ();
+     Plan.node ~id:(id "b-left") ~tool_name:"Write" ~input:(Plan.Json_template.literal (public_write_args left "left-after")) ();
+     Plan.node ~id:(id "c-right") ~tool_name:"Write" ~input:(Plan.Json_template.literal (public_write_args right "right-after")) ()] in
+  let plan = match Plan.create ~descriptors:[ordinary;write_descriptor] ~branch_failure_policy:policy nodes with
+    | Ok plan -> plan | Error error -> fail (Plan.error_to_string error) in
+  let source = Keeper_tool_call_log_context.get_turn_context_record ~cell () in
+  let ready_files = match Keeper_prepared_inline_files.Ready.create ~sw ~config ~meta ~source:(Some source) plan with
+    | Some files -> files | None -> fail "mixed ordinary/file plan lost resource readiness" in
+  let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:"mixed-runtime" ~turn:2
+      ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Agent_core.Tool_contract.Serial}
+      ~completion:Agent_core.Tool_contract.Continue_after_success in
+  let observed_ordinary = ref false in
+  let observe (node : Executor.node_result) =
+    if Plan.Node_id.equal node.node_id ordinary_id then begin
+      observed_ordinary := true;
+      if replace_parent then begin
+        (* An external binding change while the opaque settlement is still
+           unpublished: later file preparation must observe the new parents. *)
+        Eio.Fiber.yield ();
+        Unix.rename directory (directory ^ "-retained");
+        write left "replacement";write right "replacement"
+      end
+    end;
+    Ok () in
+  let admit ~node =
+    if refuse && Plan.Node_id.equal node.Plan.id ordinary_id then
+      Error {Executor.detail="original ordinary admission refused";data=`Assoc ["refused",`Bool true]}
+    else Ok () in
+  let execution = Executor.execute_keeper ~capability_surface ~plan ~run_id:(Plan.Run_id.fresh ())
+      ~composition_run_id:(Plan.Composition_run_id.fresh ()) ~parent_invocation:invocation
+      ~config ~meta ~publication_recovery:recovery
+      ~ctx_snapshot:(Keeper_context_runtime.create ~eio:false ~system_prompt:"mixed resource fixture")
+      ~keeper_turn_id:(fun () -> Some 13) ~source_context:source ~ready_files ~clock:env#clock
+      ~gate_context:(fun () -> Keeper_gate_causal_context.snapshot causal)
+      ~record_gate_result:(fun ~operation ~input result -> Keeper_gate_causal_context.record_tool_result causal ~operation ~input result)
+      ~admit_node:admit ~observe_node_result:observe () in
+  check bool "original opaque node settlement is retained" true !observed_ordinary;
+  let blocked = refuse && (serial || policy=Plan.Fail_fast) in
+  check string "left effect follows original barrier and failure policy" (if blocked then "before" else "left-after") (read left);
+  check string "right effect follows original barrier and failure policy" (if blocked then "before" else "right-after") (read right);
+  (match execution,refuse with
+   | Error failure,true ->
+     check bool "refusal remains the original plan cause" true
+       (List.exists (fun (node : Executor.node_result) -> Plan.Node_id.equal node.node_id ordinary_id
+         && match node.result with Tool_result.Failed _ -> true | Tool_result.Completed _ | Tool_result.Deferred _ -> false) failure.settled)
+   | Ok _,false -> ()
+   | Error _,false -> fail "mixed files lost their current physical binding"
+   | Ok _,true -> fail "ordinary refusal was converted into success");
+  if replace_parent then begin
+    check string "retired left parent receives no effect" "before" (read (Filename.concat (directory ^ "-retained") "left/file"));
+    check string "retired right parent receives no effect" "before" (read (Filename.concat (directory ^ "-retained") "right/file"))
+  end
 ;;
 
 let test_recipe_conflicts_consume_predecessor_bytes ?(dynamic = false) () =
@@ -1460,6 +1571,16 @@ let test_prepared_read_skips_a_long_line_and_stops_at_eof () =
 
 let () = run "prepared actual file resources"
   ["prepared Write and actual recipes", [
+    test_case "mixed public ordinary and file recipe retains real file overlap" `Quick
+      test_mixed_public_recipe_keeps_file_overlap;
+    test_case "failed concurrent lookup preserves independent file branches" `Quick
+      (test_mixed_runtime_order_and_failure ~serial:false ~policy:Keeper_tool_plan.Continue_independent ~refuse:true ~replace_parent:false);
+    test_case "failed lookup still stops Fail_fast file successors" `Quick
+      (test_mixed_runtime_order_and_failure ~serial:false ~policy:Keeper_tool_plan.Fail_fast ~refuse:true ~replace_parent:false);
+    test_case "original serial refusal retains its success dependency" `Quick
+      (test_mixed_runtime_order_and_failure ~serial:true ~policy:Keeper_tool_plan.Continue_independent ~refuse:true ~replace_parent:false);
+    test_case "file resource capture follows opaque settlement binding changes" `Quick
+      (test_mixed_runtime_order_and_failure ~serial:false ~policy:Keeper_tool_plan.Continue_independent ~refuse:false ~replace_parent:true);
     test_case "named Write aggregates overlap in the outer SDK batch" `Quick
       (test_published_inline_writes_share_outer_resources ~with_read:false ~create:false);
     test_case "named Read/Write aggregates keep original receipts while overlapping" `Quick

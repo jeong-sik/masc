@@ -1,12 +1,108 @@
 (** See [keeper_model_input_demotion.mli] for the contract (RFC-0363). *)
 
-(* Every demoted body is stored and previewed as opaque text. The provider
-   never sees these bytes again — it sees the marker — so the media type only
-   has to be the one [materialize] and the placeholder agree on, or the
-   placeholder stops bounding the marker it is standing in for. *)
-let demoted_mime = "text/plain"
-
 type occurrence = int * int
+
+module Occurrences = Map.Make (struct
+  type t = occurrence
+  let compare = Stdlib.compare
+end)
+
+type completed_arguments =
+  (Agent_core.Types.content_block * string) Occurrences.t
+
+type argument_binding_error =
+  | Invalid_argument_seed of Keeper_transcript_unit.structural_error
+  | Argument_seed_prefix_mismatch of Keeper_replay_prefix.prefix_mismatch
+  | Argument_replay_prefix_mismatch of Keeper_replay_prefix.restore_error
+  | Argument_occurrence_mismatch
+
+let tool_uses (message : Agent_core.Types.message) =
+  List.mapi (fun index block -> index, block) message.content
+  |> List.filter (fun (_, block) ->
+    match block with
+    | Agent_core.Types.ToolUse _ -> true
+    | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+    | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+    | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _
+    | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> false)
+;;
+
+let bind_completed_arguments ~completed_before ~seed ~replay_prefix messages =
+  let ( let* ) = Result.bind in
+  (* A cycle can span more than one atom when ordinary Assistant messages
+     occur between its ToolUse and final ToolResult. Restrict the source
+     before partitioning: an opener below the boundary is insufficient. *)
+  let labelled_seed, _ = Runtime_model_input_tail_window.annotate seed in
+  let rec completed_prefix = function
+    | [] -> []
+    | (message, Runtime_model_input_tail_window.Pinned) :: rest ->
+      message :: completed_prefix rest
+    | (message, Runtime_model_input_tail_window.Atom index) :: rest
+        when index < completed_before -> message :: completed_prefix rest
+    | (_, Runtime_model_input_tail_window.Atom _) :: _ -> []
+  in
+  let* partition =
+    Keeper_transcript_unit.partition ~quarantine:true (completed_prefix labelled_seed)
+    |> Result.map_error (fun error -> Invalid_argument_seed error)
+  in
+  let closed =
+    List.concat_map Keeper_transcript_unit.messages_of_closed_unit partition.closed_prefix
+  in
+  let* canonical =
+    Keeper_replay_prefix.restore_messages replay_prefix messages
+    |> Result.map_error (fun error -> Argument_replay_prefix_mismatch error)
+  in
+  let* _suffix =
+    Keeper_replay_prefix.split ~prefix:closed canonical
+    |> Result.map_error (fun error -> Argument_seed_prefix_mismatch error)
+  in
+  let labelled, _ = Runtime_model_input_tail_window.annotate closed in
+  let rec bind_blocks message_index arguments expected actual =
+    match expected, actual with
+    | [], [] -> Ok arguments
+    | (_, source) :: expected, (block_index, target) :: actual when source = target ->
+      let arguments =
+        match target with
+        | Agent_core.Types.ToolUse { input; _ } ->
+          (match Tool_output.normalized_artifact_ref_of_json input with
+           | Tool_output.Not_normalized_artifact_ref ->
+             Occurrences.add (message_index, block_index)
+               (target, Yojson.Safe.to_string input) arguments
+           | Tool_output.Invalid_normalized_artifact_ref _
+           | Tool_output.Decoded_normalized_artifact_ref _ -> arguments)
+        | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+        | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+        | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _
+        | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> arguments
+      in
+      bind_blocks message_index arguments expected actual
+    | [], _ :: _ | _ :: _, [] | _ :: _, _ :: _ ->
+      Error Argument_occurrence_mismatch
+  in
+  let rec bind_messages message_index arguments labelled actual =
+    match labelled, actual with
+    | [], _ -> Ok arguments
+    | _ :: _, [] -> Error Argument_occurrence_mismatch
+    | (source, label) :: rest, target :: actual ->
+      let* arguments =
+        match label with
+        | Runtime_model_input_tail_window.Pinned -> Ok arguments
+        | Runtime_model_input_tail_window.Atom index ->
+          if index < completed_before
+          then bind_blocks message_index arguments (tool_uses source) (tool_uses target)
+          else Ok arguments
+      in
+      bind_messages (message_index + 1) arguments rest actual
+  in
+  bind_messages 0 Occurrences.empty labelled messages
+;;
+
+type payload_kind = Result_body | Call_arguments
+
+let payload_mime = function
+  | Result_body -> "text/plain"
+  | Call_arguments -> "application/json"
+;;
 
 type pending =
   { occurrence : occurrence
@@ -14,6 +110,7 @@ type pending =
   ; placeholder : Agent_core.Types.content_block
   ; placeholder_sha256 : string
   ; bytes : string
+  ; kind : payload_kind
   }
 
 type plan_result =
@@ -52,36 +149,32 @@ let demotable_body (block : Agent_core.Types.content_block) =
   | Agent_core.Types.Audio _ -> None
 ;;
 
-let with_content (block : Agent_core.Types.content_block) replacement =
+let with_reference (block : Agent_core.Types.content_block) reference =
   match block with
   | Agent_core.Types.ToolResult fields ->
-    Agent_core.Types.ToolResult { fields with content = replacement }
-  | (Agent_core.Types.Text _ | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _) as other -> other
+    Agent_core.Types.ToolResult
+      { fields with content = Tool_output.encode_for_agent_core (Tool_output.Stored reference) }
+  | Agent_core.Types.ToolUse fields ->
+    Agent_core.Types.ToolUse
+      { fields with input = Tool_output.normalized_artifact_ref_to_json reference }
+  | (Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+    | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+    | Agent_core.Types.Image _ | Agent_core.Types.Document _
+    | Agent_core.Types.Audio _) as other -> other
 ;;
 
-(* Addressing uses this exact preview and byte count. SHA256 hex digits have
-   equal encoded width, so the digest placeholder needs no body hashing.
-   Measuring the store's real preview avoids rejecting useful demotions due
-   to a worst-case preview that this body will never produce. *)
-let planned_marker ~sha256 ~bytes =
-  match
-    Tool_output.make_artifact_ref
-      ~sha256
-      ~bytes:(String.length bytes)
-      ~preview:(Tool_blob_store.make_preview bytes)
-      ~mime:demoted_mime
-  with
-  | Ok reference -> Some (Tool_output.encode_for_agent_core (Tool_output.Stored reference))
-  | Error _ ->
-    (* Unreachable with the arguments above, but a total match keeps a future
-       validation rule in [make_artifact_ref] from silently disabling
-       demotion — [None] skips this body rather than demoting it unbounded. *)
-    None
+(* Addressing and planning use the same preview, MIME and byte count. Fixed
+   width hex digits give the planned reference the real address's wire size. *)
+let planned_reference ~kind ~sha256 ~bytes =
+  Tool_output.make_artifact_ref ~sha256 ~bytes:(String.length bytes)
+    ~preview:(Tool_blob_store.make_preview bytes) ~mime:(payload_mime kind)
+  |> Result.to_option
 ;;
 
-let plan ?(demote_from = 0) ~measure_message_bytes ~demote_before messages =
+let plan ?(completed_arguments = Occurrences.empty) ?(demote_from = 0)
+    ~measure_message_bytes ~demote_before messages =
   let labelled, _atom_count = Runtime_model_input_tail_window.annotate messages in
-  if demote_before <= demote_from
+  if demote_before <= demote_from && Occurrences.is_empty completed_arguments
   then { messages; pending = [] }
   else (
     let pending = ref [] in
@@ -95,9 +188,9 @@ let plan ?(demote_from = 0) ~measure_message_bytes ~demote_before messages =
              | Runtime_model_input_tail_window.Atom index ->
                demote_from <= index && index < demote_before
            in
-           if not aged
-           then message
-           else (
+           if not aged && Occurrences.is_empty completed_arguments then message
+           else
+           (
              (* Per-message staging: the candidate and the entries it would add
                 are decided together, so a candidate that is rejected leaves no
                 pending entry behind. *)
@@ -105,9 +198,16 @@ let plan ?(demote_from = 0) ~measure_message_bytes ~demote_before messages =
              let content =
                List.mapi
                  (fun block_index block ->
-                    match demotable_body block with
+                    let payload =
+                      match Occurrences.find_opt (message_index, block_index) completed_arguments with
+                      | Some (original, bytes) when original == block -> Some (Call_arguments, bytes)
+                      | Some _ | None ->
+                        if aged then Option.map (fun bytes -> Result_body, bytes) (demotable_body block)
+                        else None
+                    in
+                    match payload with
                     | None -> block
-                    | Some body ->
+                    | Some (kind, body) ->
                       (* A bounded, distinct lookup token for this plan, not a
                          content address. All digest hex digits encode with
                          equal width. Physical block identity remains the
@@ -115,14 +215,14 @@ let plan ?(demote_from = 0) ~measure_message_bytes ~demote_before messages =
                       let placeholder_sha256 =
                         Printf.sprintf "%032x%032x" message_index block_index
                       in
-                      (match planned_marker ~sha256:placeholder_sha256 ~bytes:body with
+                      (match planned_reference ~kind ~sha256:placeholder_sha256 ~bytes:body with
                        | None -> block
-                       | Some marker ->
-                         let placeholder = with_content block marker in
+                       | Some reference ->
+                         let placeholder = with_reference block reference in
                          staged :=
                            { occurrence = message_index, block_index
                            ; original = block; placeholder; placeholder_sha256
-                           ; bytes = body } :: !staged;
+                           ; bytes = body; kind } :: !staged;
                          placeholder))
                  message.content
              in
@@ -169,23 +269,27 @@ let materialize ~store ~addresses ~pending messages =
          Hashtbl.add placeholders entry.placeholder_sha256 entry)
       pending;
     let planned_entry (block : Agent_core.Types.content_block) =
-      match block with
-      | Agent_core.Types.ToolResult { content; content_blocks = None; _ } ->
-        (match Tool_output.decode_from_agent_core content with
-         | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> None
-         | Tool_output.Decoded reference ->
-           (match Hashtbl.find_opt placeholders reference.Tool_output.sha256 with
-            | Some entry when block == entry.placeholder -> Some entry
-            | Some _ | None -> None))
-      | Agent_core.Types.ToolResult { content_blocks = Some _; _ }
-      | Agent_core.Types.Text _
-      | Agent_core.Types.Thinking _
-      | Agent_core.Types.RedactedThinking _
-      | Agent_core.Types.ReasoningDetails _
-      | Agent_core.Types.ToolUse _
-      | Agent_core.Types.Image _
-      | Agent_core.Types.Document _
-      | Agent_core.Types.Audio _ -> None
+      let reference =
+        match block with
+        | Agent_core.Types.ToolResult { content; content_blocks = None; _ } ->
+          (match Tool_output.decode_from_agent_core content with
+           | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> None
+           | Tool_output.Decoded reference -> Some reference)
+        | Agent_core.Types.ToolUse { input; _ } ->
+          (match Tool_output.normalized_artifact_ref_of_json input with
+           | Tool_output.Not_normalized_artifact_ref
+           | Tool_output.Invalid_normalized_artifact_ref _ -> None
+           | Tool_output.Decoded_normalized_artifact_ref reference -> Some reference)
+        | Agent_core.Types.ToolResult { content_blocks = Some _; _ }
+        | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+        | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ReasoningDetails _
+        | Agent_core.Types.Image _ | Agent_core.Types.Document _
+        | Agent_core.Types.Audio _ -> None
+      in
+      Option.bind reference (fun reference ->
+        match Hashtbl.find_opt placeholders reference.Tool_output.sha256 with
+        | Some entry when block == entry.placeholder -> Some entry
+        | Some _ | None -> None)
     in
     let address_of (entry : pending) =
       match Hashtbl.find_opt addresses entry.occurrence with
@@ -218,7 +322,7 @@ let materialize ~store ~addresses ~pending messages =
              (fun (entry : pending) ->
                 entry.occurrence,
                 { original = entry.original
-                ; address = Tool_blob_store.address store ~bytes:entry.bytes ~mime:demoted_mime
+                ; address = Tool_blob_store.address store ~bytes:entry.bytes ~mime:(payload_mime entry.kind)
                 })
              to_address));
     let reverted = ref 0 in
@@ -237,8 +341,7 @@ let materialize ~store ~addresses ~pending messages =
                        entry.original
                      | Some address ->
                        (match Tool_blob_store.put_addressed address with
-                        | Tool_output.Stored _ as stored ->
-                          with_content block (Tool_output.encode_for_agent_core stored)
+                        | Tool_output.Stored reference -> with_reference block reference
                         | exception Sys_error _ ->
                           incr reverted;
                           entry.original)))

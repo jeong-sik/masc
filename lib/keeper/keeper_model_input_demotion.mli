@@ -1,5 +1,5 @@
-(** Keeper_model_input_demotion — replace aged tool-result bodies with their
-    blob marker in the provider-bound copy (RFC-0363).
+(** Keeper_model_input_demotion — replace aged tool-result bodies and verified
+    completed arguments with blob references in the provider-bound copy (RFC-0363).
 
     A tool result is externalized at creation only when it exceeds the inline
     ceiling of the projection it crosses ({!Tool_output.inline_ceiling_bytes}):
@@ -35,6 +35,38 @@ type pending
     placeholder. Tool IDs can recur in distinct closed protocol cycles and
     do not identify a payload. *)
 
+type completed_arguments
+(** Frozen argument occurrences from cycles already closed in the raw seed,
+    bound to the immutable blocks of one provider attempt's first request. *)
+
+type argument_binding_error =
+  | Invalid_argument_seed of Keeper_transcript_unit.structural_error
+  | Argument_seed_prefix_mismatch of Keeper_replay_prefix.prefix_mismatch
+  | Argument_replay_prefix_mismatch of Keeper_replay_prefix.restore_error
+  | Argument_occurrence_mismatch
+
+val bind_completed_arguments :
+  completed_before:int ->
+  seed:Agent_core.Types.message list ->
+  replay_prefix:Keeper_replay_prefix.projection ->
+  Agent_core.Types.message list ->
+  (completed_arguments, argument_binding_error) result
+(** Call once, before projecting the attempt's first request. [seed] must be
+    the raw history before this turn's Gate or provider-transcript admission;
+    a native continuation uses its retained initial seed, not its latest
+    checkpoint. Later synthesized or journal-replayed results cannot enlarge
+    this set. Only the seed's structurally closed prefix below the verified
+    completed-turn [completed_before] atom boundary is eligible.
+
+    The closed prefix must match the request's canonical replay view exactly.
+    A typed media projection may change other blocks; within each corresponding
+    message the complete ordered ToolUse sequence must still match exactly.
+    The returned set binds the actual dispatch blocks and positions, so native
+    deserialization and media projection do not depend on raw-seed pointer
+    identity. A later request may append history, but replacing a bound block
+    makes that occurrence ineligible. Failure disables argument demotion only;
+    it is not authority to repair, trim or reject the conversation. *)
+
 type plan_result =
   { messages : Agent_core.Types.message list
         (** [messages] with each planned demotion replaced by a saturating
@@ -44,7 +76,8 @@ type plan_result =
   }
 
 val plan
-  :  ?demote_from:int
+  :  ?completed_arguments:completed_arguments
+  -> ?demote_from:int
   -> measure_message_bytes:(Agent_core.Types.message -> int)
   -> demote_before:int
   -> Agent_core.Types.message list
@@ -86,7 +119,17 @@ val plan
 
     [measure_message_bytes] must be the encoder the window will use. The bound
     is obtained by measuring a real placeholder message through it rather than
-    by restating the marker's format here. *)
+    by restating the marker's format here.
+
+    When [completed_arguments] is supplied, eligible ToolUse inputs are replaced
+    with the existing normalized [_blob] JSON reference, preserving ID, name
+    and every other block. Original arguments are stored as [application/json]
+    bytes using [Yojson.Safe.to_string]. Existing or invalid normalized
+    references are left verbatim. Argument eligibility is independent of the
+    ToolResult [demote_from]/[demote_before] range, including a current-turn
+    result resend after capacity refusal. The same per-message encoded-size
+    comparison and two-phase materialization apply. Omitting the frozen set
+    preserves all arguments. *)
 
 type materialize_outcome =
   { messages : Agent_core.Types.message list

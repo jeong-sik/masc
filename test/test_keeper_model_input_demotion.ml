@@ -478,6 +478,223 @@ let failed_write_restores_each_original_block () =
     messages outcome.messages
 ;;
 
+(* Completed arguments use the real normalized-reference codec and reader. *)
+let argument_cycle ~id input =
+  [ { (assistant "") with
+      content = [Types.ToolUse {id; name = "execute"; input}] }
+  ; tool_message ~id "done"
+  ]
+;;
+
+let argument_inputs messages =
+  List.concat_map (fun (message : Types.message) ->
+    List.filter_map (function Types.ToolUse {input; _} -> Some input | _ -> None)
+      message.content) messages
+;;
+
+let bind_arguments ?(replay_prefix = Masc.Keeper_replay_prefix.unchanged)
+    ~completed_before ~seed messages =
+  match Demotion.bind_completed_arguments ~completed_before ~seed ~replay_prefix messages with
+  | Ok arguments -> arguments
+  | Error _ -> Alcotest.fail "completed seed failed to bind to the actual request"
+;;
+
+let argument_reference input =
+  match Tool_output.normalized_artifact_ref_of_json input with
+  | Tool_output.Decoded_normalized_artifact_ref reference -> reference
+  | Tool_output.Not_normalized_artifact_ref
+  | Tool_output.Invalid_normalized_artifact_ref _ -> Alcotest.fail "expected argument reference"
+;;
+
+let long_arguments suffix =
+  `Assoc ["command", `String (String.concat "" (List.init 1200 (fun _ -> "echo \"한글\"\n")) ^ suffix);
+          "path", `String "/tmp/argument-example"; "flags", `List [`Bool true; `Int 7]]
+;;
+
+let completed_arguments_restore_through_reader () =
+  let base_path = Filename.temp_dir "demote-arguments" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
+  let store = Tool_blob_store.create ~base_path in
+  let inputs = [long_arguments "first"; long_arguments "second"] in
+  let seed = List.concat_map (argument_cycle ~id:"reused") inputs in
+  let thought = Types.Thinking {signature = Some "exact-signature"; content = "compare earlier decisions"} in
+  let redacted = Types.RedactedThinking "opaque-reasoning" in
+  let details = Types.ReasoningDetails {reasoning_content = Some "retained reasoning"; details = []} in
+  let seed = match seed with
+    | first :: rest -> {first with content = thought :: redacted :: details :: first.content;
+        metadata = ["origin", `String "retained"]} :: rest
+    | [] -> Alcotest.fail "nonempty fixture" in
+  (* Core can deserialize the request separately from its retained raw seed. *)
+  let request = List.map (fun message ->
+    Masc.Keeper_context_core.message_of_json (Masc.Keeper_context_core.message_to_json message)) seed in
+  let completed_arguments = bind_arguments ~completed_before:2 ~seed request in
+  let planned = Demotion.plan ~completed_arguments ~measure_message_bytes ~demote_before:0 request in
+  Alcotest.(check int) "both repeated-ID argument occurrences are planned" 2 (List.length planned.pending);
+  let outcome = Demotion.materialize ~store ~addresses:(Demotion.create_address_memo ())
+      ~pending:planned.pending planned.messages in
+  let read input =
+    let reference = argument_reference input in
+    Alcotest.(check string) "argument MIME" "application/json" reference.mime;
+    let rec pages offset chunks count =
+      let _, page = Masc.Keeper_artifact_read.handle_with_page ~base_path
+          ~args:(`Assoc ["sha256", `String reference.sha256; "offset", `Int offset]) in
+      match page with
+      | None -> Alcotest.fail "existing reader did not return a page"
+      | Some page ->
+        let bytes = match page.encoding with
+          | Masc.Keeper_artifact_read.Utf_8 -> page.content
+          | Masc.Keeper_artifact_read.Base64 -> Base64.decode_exn page.content in
+        let chunks = bytes :: chunks in
+        if page.eof then String.concat "" (List.rev chunks), count + 1
+        else (
+          Alcotest.(check bool) "reader makes byte progress" true (page.next_offset > offset);
+          pages page.next_offset chunks (count + 1)) in
+    let bytes, count = pages 0 [] 0 in
+    Alcotest.(check bool) "large argument uses actual reader paging" true (count > 1);
+    Yojson.Safe.from_string bytes in
+  let restored = List.map read (argument_inputs outcome.messages) in
+  Alcotest.(check bool) "each repeated ID restores its exact argument JSON" true (restored = inputs);
+  Alcotest.(check bool) "durable raw inputs remain exact" true (argument_inputs seed = inputs);
+  List.iter2 (fun (before : Types.message) (after : Types.message) ->
+    Alcotest.(check bool) "all message metadata remains exact" true
+      (before.role = after.role && before.name = after.name
+       && before.tool_call_id = after.tool_call_id && before.metadata = after.metadata);
+    List.iter2 (fun original projected -> match original, projected with
+      | Types.ToolUse a, Types.ToolUse b ->
+        Alcotest.(check bool) "call ID and name preserved" true (a.id = b.id && a.name = b.name)
+      | _ -> Alcotest.(check bool) "nonargument blocks including signature are identical" true
+          (original == projected)) before.content after.content) request outcome.messages
+;;
+
+let argument_seed_never_expands_after_recovery () =
+  let input = long_arguments "closed" in
+  let old = argument_cycle ~id:"old" input in
+  let open_call = { (assistant "") with
+    content = [Types.ToolUse {id = "interrupted"; name = "execute"; input = long_arguments "open"}]} in
+  let seed = old @ [open_call] in
+  let admitted = match Masc.Keeper_transcript_unit.close_open_cycles seed with
+    | Ok closed -> closed.messages
+    | Error error -> Alcotest.fail (Masc.Keeper_transcript_unit.show_structural_error error) in
+  let completed_arguments = bind_arguments ~completed_before:10 ~seed admitted in
+  let later = admitted @ argument_cycle ~id:"new" (long_arguments "this turn") in
+  (* Even a result resend through the complete later history cannot promote
+     the interrupted seed or this turn's new arguments. *)
+  let planned = Demotion.plan ~completed_arguments ~measure_message_bytes ~demote_before:99 later in
+  match argument_inputs planned.messages with
+  | first :: rest ->
+    ignore (argument_reference first);
+    Alcotest.(check bool) "recovered and new input remain verbatim" true
+      (rest = [long_arguments "open"; long_arguments "this turn"])
+  | [] -> Alcotest.fail "missing tool uses"
+;;
+
+let arguments_require_the_complete_cycle_before_boundary () =
+  let input = long_arguments "cross-boundary" in
+  let seed =
+    [ { (assistant "") with content = [Types.ToolUse {id="spanning"; name="execute"; input}] }
+    ; assistant "still waiting for that call"
+    ; tool_message ~id:"spanning" "done"
+    ] in
+  (match Masc.Keeper_transcript_unit.validate_provider_transcript seed with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Masc.Keeper_transcript_unit.show_provider_transcript_error error));
+  let completed_arguments = bind_arguments ~completed_before:1 ~seed seed in
+  let planned = Demotion.plan ~completed_arguments ~measure_message_bytes ~demote_before:0 seed in
+  Alcotest.(check int) "opener before boundary is insufficient without closer" 0 (List.length planned.pending);
+  let completed_arguments = bind_arguments ~completed_before:2 ~seed seed in
+  let planned = Demotion.plan ~completed_arguments ~measure_message_bytes ~demote_before:0 seed in
+  Alcotest.(check int) "whole completed cycle is eligible" 1 (List.length planned.pending)
+;;
+
+let argument_binding_rejects_rewritten_seed () =
+  let seed = argument_cycle ~id:"old" (long_arguments "original") in
+  let rewritten = argument_cycle ~id:"old" (long_arguments "changed") in
+  let bound = Demotion.bind_completed_arguments ~completed_before:1 ~seed
+      ~replay_prefix:Masc.Keeper_replay_prefix.unchanged rewritten in
+  Alcotest.(check bool) "rewritten canonical prefix rejected" true
+    (match bound with
+     | Error (Demotion.Argument_seed_prefix_mismatch _) -> true
+     | Error (Demotion.Invalid_argument_seed _ | Demotion.Argument_replay_prefix_mismatch _
+             | Demotion.Argument_occurrence_mismatch) | Ok _ -> false)
+;;
+
+let media_projection_binds_actual_argument_positions () =
+  let input = long_arguments "media" in
+  let canonical = match argument_cycle ~id:"media" input with
+    | first :: rest -> {first with content =
+        Types.Image {media_type = "image/png"; data = "aW1hZ2U="; source_type = Types.Base64}
+        :: first.content} :: rest
+    | [] -> Alcotest.fail "nonempty fixture" in
+  let dispatch, dropped = Agent_core.Llm_provider.Api_common.degrade_image_messages
+      ~supports_image_input:false canonical in
+  Alcotest.(check int) "production media projection changes one block" 1 dropped;
+  let replay_prefix = Masc.Keeper_replay_prefix.media_degraded
+      ~canonical_prefix:canonical ~dispatch_prefix:dispatch in
+  let completed_arguments = bind_arguments ~replay_prefix ~completed_before:1 ~seed:canonical dispatch in
+  let planned = Demotion.plan ~completed_arguments ~measure_message_bytes ~demote_before:0 dispatch in
+  Alcotest.(check int) "verified media projection still demotes arguments" 1 (List.length planned.pending);
+  let caps = {Agent_core.Llm_provider.Capabilities.default_capabilities with supports_image_input = false} in
+  let stripped, _ = Runtime_agent.strip_unsupported_modality_messages caps canonical in
+  let replay_prefix = Masc.Keeper_replay_prefix.media_degraded
+      ~canonical_prefix:canonical ~dispatch_prefix:stripped in
+  let completed_arguments = bind_arguments ~replay_prefix ~completed_before:1 ~seed:canonical stripped in
+  let planned = Demotion.plan ~completed_arguments ~measure_message_bytes ~demote_before:0 stripped in
+  Alcotest.(check int) "removed preceding Image shifts ToolUse but retains eligibility" 1
+    (List.length planned.pending);
+  (* A later independently rebuilt value at the same position has no frozen
+     source identity, even if it happens to be structurally equal. *)
+  let rewritten = List.map (fun message -> Masc.Keeper_context_core.message_of_json
+      (Masc.Keeper_context_core.message_to_json message)) stripped in
+  let later = Demotion.plan ~completed_arguments ~measure_message_bytes ~demote_before:0 rewritten in
+  Alcotest.(check int) "replaced source cannot use frozen eligibility" 0 (List.length later.pending)
+;;
+
+let argument_cut_and_failed_store_preserve_occurrences () = with_demotion_store @@ fun store ->
+  let inputs = [long_arguments "first"; long_arguments "second"] in
+  let seed = List.concat_map (argument_cycle ~id:"reused") inputs in
+  let completed_arguments = bind_arguments ~completed_before:2 ~seed seed in
+  let planned = Demotion.plan ~completed_arguments ~measure_message_bytes ~demote_before:0 seed in
+  let projection, _ = Window.project_from_atom ~measure_message_bytes ~first_atom:1 planned.messages in
+  let outcome = Demotion.materialize ~store ~addresses:(Demotion.create_address_memo ())
+      ~pending:planned.pending projection.messages in
+  Alcotest.(check int) "only surviving argument is stored" 1 (List.length (Tool_blob_store.list_all store));
+  let reference = argument_reference (List.hd (argument_inputs outcome.messages)) in
+  (match Tool_blob_store.fetch store ~sha256:reference.sha256 with
+   | Ok (Some bytes) -> Alcotest.(check bool) "retained occurrence stores its own input" true
+       (Yojson.Safe.from_string bytes = List.nth inputs 1)
+   | Ok None | Error _ -> Alcotest.fail "retained argument not readable");
+  let base_path = Filename.temp_file "argument-store-blocked" "" in
+  Fun.protect ~finally:(fun () -> Sys.remove base_path) @@ fun () ->
+  let failed = Demotion.materialize ~store:(Tool_blob_store.create ~base_path)
+      ~addresses:(Demotion.create_address_memo ()) ~pending:planned.pending planned.messages in
+  Alcotest.(check int) "both failures counted" 2 failed.reverted;
+  List.iter2 (fun (before : Types.message) (after : Types.message) ->
+    List.iter2 (fun a b -> Alcotest.(check bool) "failed write restores exact source" true (a == b))
+      before.content after.content) seed failed.messages
+;;
+
+let arguments_obey_each_provider_wire_bound () = with_demotion_store @@ fun store ->
+  let open Agent_core.Llm_provider in
+  let seed = argument_cycle ~id:"escaped" (long_arguments "\"\\\n") in
+  let completed_arguments = bind_arguments ~completed_before:1 ~seed seed in
+  let codec kind build =
+    let config = Provider_config.make ~kind ~model_id:"argument-projection-fixture"
+        ~base_url:"http://localhost" ~max_tokens:4096 () in
+    let encode messages = build ~config ~messages () in
+    let measure_message_bytes message = String.length (encode [message]) in
+    let planned = Demotion.plan ~completed_arguments ~measure_message_bytes ~demote_before:0 seed in
+    Alcotest.(check int) "actual wire selects argument demotion" 1 (List.length planned.pending);
+    let outcome = Demotion.materialize ~store ~addresses:(Demotion.create_address_memo ())
+        ~pending:planned.pending planned.messages in
+    Alcotest.(check bool) "actual encoded request shrinks" true
+      (String.length (encode outcome.messages) < String.length (encode seed));
+    Alcotest.(check bool) "materialized wire fits planned wire bound" true
+      (String.length (encode outcome.messages) <= String.length (encode planned.messages)) in
+  codec Provider_config.OpenAI_compat (fun ~config ~messages () -> Backend_openai.build_request ~config ~messages ());
+  codec Provider_config.Anthropic (fun ~config ~messages () -> Backend_anthropic.build_request ~config ~messages ());
+  codec Provider_config.Gemini (fun ~config ~messages () -> Backend_gemini.build_request ~config ~messages ())
+;;
+
 (* Addressing a body is a sha256 over the whole of it; the write is skipped for
    an address this process already wrote, so on a long-lived keeper the hashing
    is all [materialize] does, and doing it on the calling fiber held the main
@@ -1390,6 +1607,21 @@ let () =
             "the measurement hash reads content"
             `Quick
             measurement_hash_reads_content
+        ] )
+    ; ( "completed_arguments"
+      , [ Alcotest.test_case "completed arguments restore through the existing paged reader" `Quick
+            completed_arguments_restore_through_reader
+        ; Alcotest.test_case "recovery and result resend cannot enlarge the frozen seed" `Quick
+            argument_seed_never_expands_after_recovery
+        ; Alcotest.test_case "complete cycle must precede completed boundary" `Quick
+            arguments_require_the_complete_cycle_before_boundary
+        ; Alcotest.test_case "rewritten seed is rejected" `Quick argument_binding_rejects_rewritten_seed
+        ; Alcotest.test_case "media projection binds actual request occurrences" `Quick
+            media_projection_binds_actual_argument_positions
+        ; Alcotest.test_case "window cut and write failure retain exact source occurrences" `Quick
+            argument_cut_and_failed_store_preserve_occurrences
+        ; Alcotest.test_case "OpenAI Anthropic and Gemini actual wire bounds" `Quick
+            arguments_obey_each_provider_wire_bound
         ] )
     ; ( "materialize"
       , [ Alcotest.test_case "reused IDs retain distinct exact payloads" `Quick

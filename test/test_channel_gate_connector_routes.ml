@@ -192,7 +192,7 @@ let test_connector_write_demand_survives_repeated_read_withdrawal () =
   connector_fixture_write
     (Channel_gate_slack_state.unbind_if_keeper ~channel_id:"C123"
        ~expected_keeper_name:"first" ~actor_name:"tui-read-test");
-  Tui.queue_connectors_after_write state;
+  ignore (Tui.queue_connectors_after_write state);
   connector_read_uncertain state;
   check bool "held demand does not dispatch against uncertain identity" true
     (Option.is_none (Tui.begin_connectors_read state));
@@ -216,7 +216,7 @@ let test_connector_write_demand_survives_repeated_read_withdrawal () =
   connector_fixture_write
     (Channel_gate_slack_state.bind ~channel_id:"C456" ~keeper_name:"rebound"
        ~actor_name:"tui-read-test");
-  Tui.queue_connectors_after_write state;
+  ignore (Tui.queue_connectors_after_write state);
   finish_connector_read state fresh_request (Ok after_write)
     Connector_read.Read_after_write;
   let latest_request = begin_connector_read state in
@@ -239,7 +239,7 @@ let test_connector_held_read_start_failure_and_scope_reset () =
   connector_fixture_write
     (Channel_gate_slack_state.bind ~channel_id:"C123" ~keeper_name:"written"
        ~actor_name:"tui-read-test");
-  Tui.queue_connectors_after_write state;
+  ignore (Tui.queue_connectors_after_write state);
   check bool "a write received while unread is held" true
     (Connector_read.view state.connectors_read = Connector_read.Waiting_after_write);
   connector_read_ready state dir;
@@ -261,7 +261,7 @@ let test_connector_held_read_start_failure_and_scope_reset () =
   check (option string) "real written member remains after failed reads" (Some "written")
     (connector_owner written "C123");
   finish_connector_read state received (Ok written) Connector_read.No_follow_up;
-  Tui.queue_connectors_after_write state;
+  ignore (Tui.queue_connectors_after_write state);
   let retiring = begin_connector_read state in
   connector_read_uncertain state;
   (* This is the production control reset used for a different workspace;
@@ -309,7 +309,7 @@ let test_connector_status_and_names_keep_original_binding_operation () =
   let request = begin_connector_read state in
   let status = connector_snapshot (Channel_gate_slack_state.connector_json ()) in
   check bool "original status arrives before names complete" true
-    (Tui.receive_connectors_status state request status);
+    (Option.is_some (Tui.receive_connectors_status state request status));
   let observed () = match state.connectors with
     | Some snapshot -> snapshot
     | None -> fail "received status must be usable before directory completion"
@@ -335,18 +335,14 @@ let test_connector_status_and_names_keep_original_binding_operation () =
   let enriched = { status with cs_connectors =
       [Masc.Tui_decode_connectors.connector_with_name_pages connector
          ~pages:[page] ~error:None] } in
-  connector_fixture_write
-    (Channel_gate_slack_state.bind ~channel_id:"C456" ~keeper_name:"rebound"
-       ~actor_name:"tui-read-test");
-  Tui.queue_connectors_after_write state;
   check bool "duplicate status cannot reset a prepared operation" false
-    (Tui.receive_connectors_status state request status);
+    (Option.is_some (Tui.receive_connectors_status state request status));
   Tui.connector_read_not_started state request;
   (match Tui.complete_connectors_read state request (Ok enriched) with
    | None -> fail "original names result must keep its request"
    | Some completion ->
-       check bool "earlier names cannot satisfy the later write" true
-         (completion.follow_up = Connector_read.Read_after_write));
+       check bool "names finish without inventing a write demand" true
+         (completion.follow_up = Connector_read.No_follow_up));
   check bool "names preserve the prepared binding operation" true
     (state.connector_unbind_armed = armed);
   let named = List.find (fun (row : Masc.Tui_decode_connectors.connector) ->
@@ -362,7 +358,10 @@ let test_connector_status_and_names_keep_original_binding_operation () =
        connector_fixture_write
          (Channel_gate_slack_state.unbind_if_keeper ~channel_id
             ~expected_keeper_name:keeper_name ~actor_name:"tui-read-test"));
-  Tui.queue_connectors_after_write state;
+  connector_fixture_write
+    (Channel_gate_slack_state.bind ~channel_id:"C456" ~keeper_name:"rebound"
+       ~actor_name:"tui-read-test");
+  ignore (Tui.queue_connectors_after_write state);
   let fresh = begin_connector_read state in
   let latest_json = Channel_gate_slack_state.connector_json () in
   check (option string) "prepared operation removed its original member" None
@@ -371,9 +370,9 @@ let test_connector_status_and_names_keep_original_binding_operation () =
     (connector_owner latest_json "C456");
   let latest = connector_snapshot latest_json in
   check bool "fresh write observation arrives while names remain pending" true
-    (Tui.receive_connectors_status state fresh latest);
+    (Option.is_some (Tui.receive_connectors_status state fresh latest));
   check bool "old status cannot restore a removed binding" false
-    (Tui.receive_connectors_status state request status);
+    (Option.is_some (Tui.receive_connectors_status state request status));
   check bool "old names cannot replace the newer status" true
     (Option.is_none (Tui.complete_connectors_read state request (Ok enriched)));
   check bool "fresh status remains after rejecting old stages" true
@@ -385,6 +384,128 @@ let test_connector_status_and_names_keep_original_binding_operation () =
          (completion.follow_up = Connector_read.No_follow_up));
   check bool "received status survives the remaining directory failure" true
     (observed () == latest)
+
+let test_connector_write_reactivates_before_retired_names_cleanup () =
+  List.iter (fun status_first ->
+    with_temp_dir @@ fun dir ->
+    with_sidecar_paths "slack" dir @@ fun () ->
+    Unix.mkdir (Filename.concat dir ".masc") 0o700;
+    let state = Tui.create_state ~workspace:"connector-retirement"
+        ~local_base_path:dir ~port:0 ~refresh_interval:0. () in
+    connector_read_ready state dir;
+    connector_fixture_write
+      (Channel_gate_slack_state.bind ~channel_id:"C123" ~keeper_name:"before"
+         ~actor_name:"tui-read-test");
+    let request = begin_connector_read state in
+    let original_key = Connector_read.job_key request in
+    let unrelated_key = ref () and effect_key = ref () in
+    let original_fd = ref None in
+    Eio_main.run (fun _env -> Eio.Switch.run (fun sw ->
+      let entered, enter = Eio.Promise.create () in
+      let cleanup_started, cleanup_start = Eio.Promise.create () in
+      let release_cleanup = Eio.Semaphore.make 0 in
+      let waiting, _ = Eio.Promise.create () in
+      Masc_tui_workspace_job.fork ~observation:true ~key:original_key state ~sw
+        (fun () ->
+          let fd = Unix.openfile (Filename.concat dir "original-read")
+              [Unix.O_CREAT; Unix.O_RDWR] 0o600 in
+          Fun.protect ~finally:(fun () ->
+            Eio.Cancel.protect (fun () ->
+              Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+                Eio.Promise.resolve cleanup_start ();
+                Eio.Semaphore.acquire release_cleanup))) (fun () ->
+            let status = connector_snapshot (Channel_gate_slack_state.connector_json ()) in
+            Eio.Promise.resolve enter (fd, status);
+            Eio.Promise.await waiting));
+      let fd, status = Eio.Promise.await entered in
+      original_fd := Some fd;
+      (* The same old status can be applied before or after a write receipt.
+         The worker owns a real resource while its directory wait is blocked. *)
+      Fun.protect ~finally:(fun () -> Eio.Semaphore.release release_cleanup) (fun () ->
+        let hold ~observation ~key name =
+          let entered, enter = Eio.Promise.create () in
+          Masc_tui_workspace_job.fork ~observation ~key state ~sw (fun () ->
+            let held = Unix.openfile (Filename.concat dir name)
+                [Unix.O_CREAT; Unix.O_RDWR] 0o600 in
+            Fun.protect ~finally:(fun () -> Unix.close held) (fun () ->
+              Eio.Promise.resolve enter held;
+              Eio.Promise.await waiting));
+          Eio.Promise.await entered
+        in
+        let unrelated = hold ~observation:true ~key:unrelated_key "other-read" in
+        let effect_fd = hold ~observation:false ~key:effect_key "effect" in
+        if status_first then
+          check bool "status is admitted before the write" true
+            (Option.is_some (Tui.receive_connectors_status state request status));
+        connector_fixture_write
+          (Channel_gate_slack_state.bind ~channel_id:"C123" ~keeper_name:"after"
+             ~actor_name:"tui-read-test");
+        let retirement = Tui.queue_connectors_after_write state in
+        let retirement =
+          if status_first then retirement
+          else begin
+            (match retirement with
+             | Connector_read.No_retirement -> ()
+             | Retire _ -> fail "status-pending writes must coalesce");
+            match Tui.receive_connectors_status state request status with
+            | None -> fail "the original delayed status must remain admissible"
+            | Some retirement -> retirement
+          end
+        in
+        let retired = match retirement with
+          | Connector_read.Retire original -> original
+          | No_retirement -> fail "later write must retire original names work"
+        in
+        check bool "retirement keeps the original physical job owner" true
+          (Connector_read.job_key retired == original_key);
+        Masc_tui_workspace_job.cancel_observation state ~key:(Connector_read.job_key retired);
+        Eio.Promise.await cleanup_started;
+        ignore (Unix.fstat fd);
+        ignore (Unix.fstat unrelated);
+        ignore (Unix.fstat effect_fd);
+        check bool "original registry owns unfinished actual cleanup" true
+          (List.exists (fun (key, _) -> key == original_key)
+             state.workspace_observation_cancellations);
+        check bool "unrelated observation remains registered" true
+          (List.exists (fun (key, _) -> key == unrelated_key)
+             state.workspace_observation_cancellations);
+        check bool "effect remains owned outside the observation registry" true
+          (List.exists (fun (key, _) -> key == effect_key) state.workspace_cancellations
+           && not (List.exists (fun (key, _) -> key == effect_key)
+                     state.workspace_observation_cancellations));
+        let fresh = begin_connector_read state in
+        let received, receive = Eio.Promise.create () in
+        Masc_tui_workspace_job.fork ~observation:true
+          ~key:(Connector_read.job_key fresh) state ~sw (fun () ->
+            Eio.Promise.resolve receive (Channel_gate_slack_state.connector_json ()));
+        let actual = Eio.Promise.await received in
+        check (option string) "fresh worker sees the actual post-write member"
+          (Some "after") (connector_owner actual "C123");
+        let latest = connector_snapshot actual in
+        check bool "fresh status is usable before retired cleanup finishes" true
+          (Option.is_some (Tui.receive_connectors_status state fresh latest));
+        check bool "retired status cannot overwrite the fresh observation" true
+          (Option.is_none (Tui.receive_connectors_status state retired status));
+        check bool "retired names cannot satisfy the replacement" true
+          (Option.is_none (Tui.complete_connectors_read state retired (Ok status)));
+        (match Tui.complete_connectors_read state fresh (Ok latest) with
+         | None -> fail "fresh result lost its original owner"
+         | Some completion ->
+             check bool "fresh post-write read settles without another retry" true
+               (completion.follow_up = Connector_read.No_follow_up));
+        check bool "old cleanup is still separately registered after fresh completion" true
+          (List.exists (fun (key, _) -> key == original_key)
+             state.workspace_observation_cancellations))));
+    (match !original_fd with
+     | None -> fail "original worker never acquired its actual resource"
+     | Some fd ->
+         check bool "actual original resource closes at worker cleanup" true
+           (match Unix.fstat fd with
+            | _ -> false
+            | exception Unix.Unix_error (Unix.EBADF, _, _) -> true));
+    check bool "original owner unregisters after actual cleanup" false
+      (List.exists (fun (key, _) -> key == original_key) state.workspace_cancellations))
+    [true; false]
 
 let test_slack_binding_store_error_is_typed () =
   with_temp_dir @@ fun dir ->
@@ -911,6 +1032,8 @@ let () =
             test_connector_held_read_start_failure_and_scope_reset;
           test_case "Connector status and names preserve the original binding operation" `Quick
             test_connector_status_and_names_keep_original_binding_operation;
+          test_case "Connector writes reactivate before retired names cleanup" `Quick
+            test_connector_write_reactivates_before_retired_names_cleanup;
           test_case "slack binding read errors are typed" `Quick
             test_slack_binding_store_error_is_typed;
           test_case "slack status surfaces binding read failure" `Quick

@@ -120,6 +120,9 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인�
   중간 페이지를 증명하거나 `current_workspace_id`를 filesystem workspace 증거로 쓰지 않는다.
   historical 이름의 provenance와 기존 인증 경계를 유지한다.
 - 공용 JSON 조회는 `fork_workspace_job`의 기존 observation 취소 registry에 등록한다.
+  실제 구현은 `Masc_tui_workspace_job.fork` 한 곳에 두고 기존 효과/조회 호출은 같은 기본
+  범위를 유지한다. Connector는 원래 request의 physical owner를 job key로도 사용한다.
+  `cancel_observation`은 정확히 그 key의 관측만 취소 요청하며 실제 정리까지 등록을 유지한다.
   읽기 epoch 철회 시 병렬 child에도 취소를 요청하고 실제 cleanup까지 원래 owner를 유지한다.
   취소 요청·UI의 대기 해제·worker 종료를 같은 시점으로 기록하지 않는다. Connector의
   시작 실패는 원래 요청의 활성 상태를 즉시 해제하고 source 실패를 한 번 전달한다.
@@ -136,8 +139,11 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인�
   projection만 공용 CPU 경로를 사용한다. `connectors.snapshot.decode_wait`·
   `connectors.names.decode_wait`·`connectors.names.project_wait`는 pool 대기와 반환도 포함한다.
 - Connector 조회 제어는 `Connector_read`의 불변 상태와 opaque 원래 요청을 사용한다.
-  바인딩 write 뒤 재조회 수요는 이미 진행 중인 read와 합치되, 그 read의 응답으로 소비하지
-  않는다. 후속 read 자체가 철회되어도 시작 당시의 수요와 나중 write의 수요를 보존한다.
+  상태가 아직 대기 중이면 바인딩 write 수요를 합치고, 그 상태 응답이 도착하면 원래 이름
+  작업을 철회하고 새 상태 조회를 시작한다. 이미 이름 조회 중이면 write 즉시 그 원래
+  관측만 철회한다. 이전 이름 완료나 실제 cleanup을 새 상태 조회의 선행조건으로 두지 않는다.
+  이전 응답은 나중 write의 수요를 소비하지 않는다. 후속 read 자체가 철회되어도 시작 당시의
+  수요와 나중 write의 수요를 보존한다. 다른 관측이나 효과를 함께 취소하지 않는다.
   같은 workspace 재확인 시 숨겨진 화면의 수요도 다시 시작하고, 확정된 다른 workspace는
   지운다. 이전 요청의 응답·시작 실패 callback은 새 요청의 상태를 정리할 수 없다.
   시작 실패·재조회 실패는 수요를 보존하되 즉시 반복 실행하지 않는다. 명시/기존 조회 경로가
@@ -148,6 +154,8 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인�
   `docs/audits/2026-10-19-tui-connectors-held-reread-owner.md`를 따른다.
   상태 우선 전달과 바인딩 조작 연속성은
   `docs/audits/2026-10-19-tui-connectors-early-status.md`를 따른다.
+  write 뒤 재활성과 실제 정리의 분리는
+  `docs/audits/2026-10-19-tui-connectors-write-reactivation.md`를 따른다.
 
 ## 에디터 준비 조회
 

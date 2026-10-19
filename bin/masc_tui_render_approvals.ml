@@ -322,13 +322,13 @@ let draw_ask_answer_feedback buf cols (state : state) =
       (match observed.fv_tools.fo_value with
        | Some (Decode.Ask_tools_observed {at_latest=Some latest;at_evidence_current;_}) ->
          let style = match latest.ata_outcome with
-           | Masc.Tool_result.Recorded_failed when at_evidence_current -> Theme.bad ()
+           | Tool_result.Recorded_failed when at_evidence_current -> Theme.bad ()
            | Recorded_succeeded | Recorded_deferred when at_evidence_current -> Theme.info ()
            | Recorded_failed | Recorded_succeeded | Recorded_deferred
            | Recorded_unsettled | Recorded_malformed -> Theme.warn () in
          box_wrapped_field buf cols ~head:"  " ~style
            (Printf.sprintf "Latest Tool result: %s · %s · turn #%d"
-             (Masc.Tool_result.recorded_call_outcome_to_string latest.ata_outcome)
+             (Tool_result.recorded_call_outcome_to_string latest.ata_outcome)
              (Terminal_text.single_line latest.ata_tool) latest.ata_keeper_turn_id)
        | None | Some Decode.Ask_tools_unavailable | Some (Ask_tools_observed {at_latest=None;_}) -> ());
       let task_text, task_style = match observed.fv_task.fo_value with

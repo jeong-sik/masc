@@ -126,11 +126,15 @@ starts the Firefox only while `[browser.live] enabled` is not `false`.
 - The operator still logs in once, in that Firefox, to the sites a Keeper
   works on; the profile keeps the login.
 - A Firefox that exits before its port answers, leaving nothing in its process
-  group, is reported as such: Firefox 157.0.1 exits with status 0 when another
-  Firefox has the profile open, so quit that Firefox first. One that goes on
-  in another process of its group is waited for. A Firefox applying an
-  update starts itself again; whether that process stays in the group was
-  not measured. The wait ends after 30 seconds.
+  group, is reported as such. A clean exit (status 0) keeps waiting within
+  the existing 30-second startup deadline: Firefox can replace its first
+  process during an update and open the port from another process group.
+  If that port answers, the host verifies the configured profile before
+  attaching. The replacement outside the recorded group is not claimed or
+  stopped as a process MASC owns. If no port answers, a clean exit is
+  reported at the deadline. Firefox 157.0.1 also exits with status 0 when
+  another Firefox has the profile open; in that case quit that Firefox
+  first. An unsuccessful exit ends the wait once its group is empty.
 - Write the table only once a server that reads it is installed:
   `runtime.toml` refuses a key it does not know.
 

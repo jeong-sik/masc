@@ -124,6 +124,8 @@ let merge_not_committed earlier (outcome : Keeper_librarian_runtime.not_committe
     ; smaller_range_meets_same_failure =
         earlier.Keeper_librarian_runtime.smaller_range_meets_same_failure
         || outcome.Keeper_librarian_runtime.smaller_range_meets_same_failure
+    ; provider_input_refusals =
+        Keeper_librarian_input_refusal.union earlier.provider_input_refusals outcome.provider_input_refusals
     }
 ;;
 
@@ -486,7 +488,11 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
       else
       let cause_detail () =
         match !cause with
-        | Some outcome -> outcome.Runtime.detail
+        | Some outcome ->
+          Printf.sprintf "%s; provider_input_refusals=[%s]" outcome.Runtime.detail
+            (String.concat "," (List.map
+              Keeper_librarian_input_refusal.to_string
+              outcome.provider_input_refusals))
         | None -> "no provider attempt settled the pass" in
       (* No verdict at all means nothing said the size was the problem, so
          the width stands. A pass can end without one -- a snapshot commit

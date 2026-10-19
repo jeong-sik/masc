@@ -7,6 +7,10 @@ type t = private
   ; invalid_output : bool
   ; size_independent_execution_failure : bool
   ; measured_cli_capacity : Keeper_lane_cli_oneshot.input_capacity option
+  ; provider_input_refusals : Keeper_librarian_input_refusal.t list
+      (** Distinct, canonically ordered named causes across the walk. These are
+          observations, not permission to consume any part of an unread range.
+          In particular, invalid output and uncertain execution remain separate. *)
   }
 
 val empty : t

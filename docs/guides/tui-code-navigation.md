@@ -19,6 +19,13 @@ Received content waits for queued input before navigating. Leaving Code,
 changing the source reading, or losing workspace authority retires old results.
 Positions are clamped if the destination content became shorter or narrower.
 
+The header shows return or location progress while the original navigation
+still owns the current reading, including received content waiting behind
+queued input. Cancelling or changing the source ends that activity. Pending
+navigation retains the last settled question or failure observation; cancelling
+does not replace it with a progress message. A failed read ends activity and
+leaves its failure available while a later retry is pending.
+
 Returning to an already readable current file or to a directory-only location
 does not need a file request. Jump history belongs to this TUI session.
 

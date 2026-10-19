@@ -1,7 +1,9 @@
 name = "keeper_artifact_read"
 description = """
-Restore the content of a [masc:blob ...] ToolResult by its sha256. The \
-marker's bytes= field is the artifact's total size. max_bytes defaults to \
+Restore a [masc:blob ...] ToolResult or a normalized _blob ToolUse input \
+by its sha256. Completed tool-call arguments are stored as application/json; \
+read and parse the original JSON to inspect, compare or reuse those arguments. \
+The reference's bytes field is the artifact's total size. max_bytes defaults to \
 the 16384 maximum, which is the largest page that never itself becomes an \
 unreadable spilled file; read whole artifacts by paging, not by small \
 slices. If the response has eof=false, continue from \
@@ -14,7 +16,7 @@ additional_properties = false
 name = "sha256"
 type = "string"
 required = true
-description = "Exact sha256 from a [masc:blob ...] ToolResult."
+description = "Exact sha256 from a [masc:blob ...] ToolResult or a ToolUse input _blob reference."
 
 [[params]]
 name = "offset"

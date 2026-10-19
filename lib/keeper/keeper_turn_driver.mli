@@ -286,6 +286,9 @@ val run_named :
   ?tool_requirement:Keeper_required_tools.t ->
   ?required_native_posture:Runtime_native_tools.posture ->
   ?initial_messages:Agent_core.Types.message list ->
+  ?argument_demotion_seed:Agent_core.Types.message list ->
+  (* Raw pre-admission history; native continuations supply their retained
+     initial seed. Absence leaves ToolUse inputs verbatim. *)
   ?model_input_projection:Agent_core.Agent.model_input_projection ->
   ?temperature:float ->
   ?accept:(Agent_core.Types.api_response -> bool) ->

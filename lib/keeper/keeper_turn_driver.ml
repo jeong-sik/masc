@@ -1805,6 +1805,7 @@ let run_named
     ?(tool_requirement = Keeper_required_tools.Optional)
     ?required_native_posture
     ?(initial_messages = [])
+    ?argument_demotion_seed
     ?model_input_projection
     ?temperature
     ?(accept = fun (_ : Agent_core.Types.api_response) -> true)
@@ -3188,6 +3189,8 @@ let run_named
             ; context_marks
             ; input_policy
             ; turn_boundary = Eio.Lazy.force turn_boundary
+            ; argument_demotion_seed
+            ; argument_replay_prefix = replay_prefix_projection
             ; continuity
             ; (* The range the newest response-observed turn record on this
                  history measured, whichever runtime ran it. Without a

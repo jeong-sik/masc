@@ -209,6 +209,12 @@ val content_block_of_json
 (* Internal metadata is retained while projecting an immediate ToolResult plus
    plain User follow-up into one provider user turn; metadata is not wire
    content. *)
+val merge_tool_result_followup_user_messages_with_source_indices
+  :  Types.message list -> (Types.message * int list) list
+(** The same merge, with each output's exact ordered input occurrence indices.
+    Assistant messages are never merged. Repeated identical input records keep
+    distinct coordinates. *)
+
 val merge_tool_result_followup_user_messages : Types.message list -> Types.message list
 val message_to_json : Types.message -> Yojson.Safe.t
 val kimi_message_to_json : Types.message -> Yojson.Safe.t

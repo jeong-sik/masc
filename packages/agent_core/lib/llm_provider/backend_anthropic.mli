@@ -19,6 +19,17 @@ val project_history
     which blocks survive. Pure — the diagnostic [observe] belongs to whoever
     dispatches. *)
 
+val retained_prefix_reasoning_indices
+  :  config:Provider_config.t
+  -> tools:Yojson.Safe.t list
+  -> Types.message list
+  -> (int list option, Reasoning_history_projection.error) result
+(** Pure observation of the exact project/merge/prefix-verification path used
+    by the serializer. [Some indices] identifies retained reasoning by its
+    original input message occurrence, before either projection or merging.
+    [None] means this provider kind does not bind reasoning to a request prefix.
+    This neither observes diagnostics nor changes stored provenance. *)
+
 
 val parse_response : Yojson.Safe.t -> Types.api_response
 

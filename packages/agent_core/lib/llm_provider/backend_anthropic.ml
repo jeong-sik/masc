@@ -576,6 +576,52 @@ let verify_prefix_binding ~head messages =
     messages
 ;;
 
+(* The serializer and read-only callers share both merge and prefix verification.
+   Source groups name input occurrences, including repeated identical records. *)
+let prefix_bound_history ~tools (config : Provider_config.t) projected_messages =
+  let merged =
+    Api_common.merge_tool_result_followup_user_messages_with_source_indices projected_messages
+  in
+  let messages = List.map fst merged in
+  let verdict =
+    match config.kind with
+    | Provider_config.Anthropic -> Some (verify_prefix_binding ~head:(prefix_head ~tools config) messages)
+    | Provider_config.Kimi | Provider_config.OpenAI_compat | Provider_config.Ollama
+    | Provider_config.Gemini | Provider_config.Glm -> None
+  in
+  merged, verdict
+;;
+
+module Message_indices = Set.Make (Int)
+
+let retained_prefix_reasoning_indices ~config ~tools messages =
+  Result.map
+    (fun (projection : Reasoning_history_projection.t) ->
+       let merged, verdict = prefix_bound_history ~tools config projection.messages in
+       Option.map
+         (fun (verdict : Reasoning_history_projection.prefix_verdict) ->
+            let removed = Message_indices.of_list projection.removed_empty_assistant_indices in
+            let dropped = Message_indices.of_list
+                (List.map (fun (drop : Reasoning_history_projection.prefix_drop) ->
+                   drop.message_index) verdict.prefix_drops) in
+            let original_indices =
+              List.mapi (fun index _ -> index) messages
+              |> List.filter (fun index ->
+                   not (Message_indices.mem index removed))
+              |> Array.of_list
+            in
+            List.mapi
+              (fun index ((message : Types.message), sources) ->
+                 if Types.content_has_reasoning_artifact message.content
+                    && not (Message_indices.mem index dropped)
+                 then List.map (Array.get original_indices) sources
+                 else [])
+              merged
+            |> List.concat)
+         verdict)
+    (project_history config messages)
+;;
+
 let build_request_payload
       ~request_mode
       ?anthropic_thinking_control
@@ -653,17 +699,15 @@ let build_request_payload
         projection;
       projection.messages
   in
-  let messages = Api_common.merge_tool_result_followup_user_messages projected_messages in
+  let merged, prefix_verdict = prefix_bound_history ~tools config projected_messages in
   (* Prefix binding runs on the merged list the wire serializes: only the
      Anthropic kind verifies here. Its thinking toggle always resolves
      Require_identical_source, while Kimi — the one other kind reaching
      serialization — carries rotation-tolerant reasoning this backend must
      not second-guess. *)
   let messages =
-    match config.kind with
-    | Provider_config.Anthropic -> (
-      let head = prefix_head ~tools config in
-      let verdict = verify_prefix_binding ~head messages in
+    match prefix_verdict with
+    | Some verdict -> (
       Reasoning_history_projection.observe_prefix_drops
         ~component:"backend_anthropic"
         ~stream:
@@ -672,11 +716,7 @@ let build_request_payload
            | Count_tokens -> false)
         verdict;
       verdict.Reasoning_history_projection.messages)
-    | Provider_config.Kimi
-    | Provider_config.OpenAI_compat
-    | Provider_config.Ollama
-    | Provider_config.Gemini
-    | Provider_config.Glm -> messages
+    | None -> List.map fst merged
   in
   (match config.kind, caps.supports_assistant_prefill, List.rev messages with
    | Provider_config.Anthropic, false, { role = Assistant; _ } :: _ ->

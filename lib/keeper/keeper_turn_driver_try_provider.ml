@@ -422,6 +422,8 @@ type try_provider_ctx =
   ; system_prompt : string
   ; tools : Agent_core.Tool.t list
   ; initial_messages : Agent_core.Types.message list
+  ; argument_demotion_seed : Agent_core.Types.message list option
+  ; argument_replay_prefix : Keeper_replay_prefix.projection
   ; model_input_projection : Agent_core.Agent.model_input_projection option
   ; stream_idle_timeout_s : float
     (* Bound on the silent gap between two streamed lines. It re-arms after
@@ -1061,11 +1063,12 @@ let applied_demote_before ~base_path ~demote_before =
   if String.equal base_path "" then 0 else demote_before
 ;;
 
-let demotion_plan ?(demote_from = 0) ~measure_message_bytes ~base_path ~demote_before messages =
-  match applied_demote_before ~base_path ~demote_before with
-  | 0 -> { Keeper_model_input_demotion.messages; pending = [] }
-  | demote_before ->
-    Keeper_model_input_demotion.plan ~demote_from ~measure_message_bytes ~demote_before messages
+let demotion_plan ?completed_arguments ?(demote_from = 0)
+    ~measure_message_bytes ~base_path ~demote_before messages =
+  if String.equal base_path ""
+  then { Keeper_model_input_demotion.messages; pending = [] }
+  else Keeper_model_input_demotion.plan ?completed_arguments
+      ~demote_from ~measure_message_bytes ~demote_before messages
 ;;
 
 (* Where a request's carried range opens (RFC keeper-context-window-in-tokens
@@ -1242,6 +1245,7 @@ let project_range_start ~unread ~measure_message_bytes ~atom_count start message
 let compose_carried_model_input
       ?(input_policy = Keeper_input_policy.Wide)
       ?continuity
+      ?completed_arguments
       ~measure_message_bytes
       ~(front : Keeper_carried_front.seed option)
       ~(accepted : Keeper_carried_front.seed option)
@@ -1300,7 +1304,7 @@ let compose_carried_model_input
       else turn_start, refused_atom_count
   in
   let planned =
-    demotion_plan ~demote_from ~measure_message_bytes ~base_path ~demote_before messages
+    demotion_plan ?completed_arguments ~demote_from ~measure_message_bytes ~base_path ~demote_before messages
   in
   (* A response-observed persisted seed is evidence for the range it names.
      Composition consumes that evidence; it does not reinterpret the prior
@@ -1354,6 +1358,8 @@ let current_turn_demotion ~(refused : composed) ~(demoted : composed) =
    [Keeper_carried_front.for_history] and start over from the turn start. *)
 type request_view =
   { composed : composed
+  ; completed_arguments : Keeper_model_input_demotion.completed_arguments option
+  ; argument_prefix_protected : bool
   ; carried : Agent_core.Types.message list
   ; wire :
       ( Agent_core.Types.message list
@@ -1361,9 +1367,10 @@ type request_view =
         result
   }
 
-let request_view
+let unchecked_request_view
       ?(input_policy = Keeper_input_policy.Wide)
       ?continuity
+      ?completed_arguments
       ~provider_config
       ~measure_message_bytes
       ~front
@@ -1379,7 +1386,7 @@ let request_view
   let composed =
     offload_model_input_cpu (fun () ->
       compose_carried_model_input
-        ~input_policy ?continuity
+        ~input_policy ?continuity ?completed_arguments
         ~measure_message_bytes
         ~front
         ~accepted
@@ -1401,7 +1408,105 @@ let request_view
         ~config:provider_config
         carried)
   in
-  { composed; carried; wire }
+  { composed; carried; wire; completed_arguments; argument_prefix_protected = false }
+;;
+
+module Message_indices = Set.Make (Int)
+
+(* Composition removes old unread carriers, retains pinned messages and the
+   selected atom suffix, and adds only prefix carriers (unread, working state,
+   omission preamble). This parallel vector follows occurrences, including
+   repeated identical records; it never searches by digest or tool ID. *)
+let carried_source_indices ~messages (view : request_view) =
+  let labelled, _ = Runtime_model_input_tail_window.annotate messages in
+  let retained =
+    List.mapi (fun index (message, label) -> index, message, label) labelled
+    |> List.filter_map (fun (index, message, label) ->
+      if Runtime_model_input_tail_window.is_unread_context message then None
+      else match label with
+        | Runtime_model_input_tail_window.Pinned -> Some (Some index)
+        | Runtime_model_input_tail_window.Atom atom ->
+          if atom >= view.composed.projection.dropped_atoms then Some (Some index) else None)
+  in
+  let synthetic_count = List.length view.carried - List.length retained in
+  if synthetic_count < 0 then None
+  else Some (Array.of_list (List.init synthetic_count (fun _ -> None) @ retained))
+;;
+
+let request_view
+      ?(input_policy = Keeper_input_policy.Wide) ?continuity ?completed_arguments
+      ?(tools = []) ~provider_config ~measure_message_bytes ~front ~accepted
+      ~history_digest_at ~current_turn_results ~base_path ~demote_before
+      ~turn_boundary ~materialize messages =
+  let build ?(materialize = materialize) completed_arguments =
+    unchecked_request_view ~input_policy ?continuity ?completed_arguments
+      ~provider_config ~measure_message_bytes ~front ~accepted ~history_digest_at
+      ~current_turn_results ~base_path ~demote_before ~turn_boundary ~materialize messages
+  in
+  let candidate = build completed_arguments in
+  match completed_arguments with
+  | None -> candidate
+  | Some arguments ->
+    let retained_reasoning view =
+      let ( let* ) = Result.bind in
+      let* retained =
+        Agent_core.Llm_provider.Complete_common.retained_prefix_reasoning_indices
+          ~config:provider_config ~tools view.carried
+        |> Result.map_error (fun _ -> ())
+      in
+      match retained with
+      | None -> Ok None
+      | Some indices ->
+        (match carried_source_indices ~messages view with
+         | None -> Error ()
+         | Some sources ->
+           let rec collect result = function
+             | [] -> Ok (Some result)
+             | index :: rest ->
+               if index < 0 || index >= Array.length sources then Error ()
+               else match sources.(index) with
+                 | None -> Error ()
+                 | Some source -> collect (Message_indices.add source result) rest
+           in
+           collect Message_indices.empty indices)
+    in
+    let candidate_reasoning = offload_model_input_cpu (fun () -> retained_reasoning candidate) in
+    match candidate_reasoning with
+    | Ok None -> candidate
+    | Ok (Some _) | Error () ->
+      let captured = offload_model_input_cpu (fun () -> Keeper_model_input_demotion.capture_materialized
+          ~pending:candidate.composed.planned.pending
+          ~before:candidate.composed.projection.messages ~after:candidate.carried) in
+      (match captured with
+       | None ->
+         (* A custom materializer broke slot correspondence. Return the
+            Result-only path outright; its new outcome is never an oracle
+            for re-enabling arguments. *)
+         { (build None) with argument_prefix_protected = true }
+       | Some _ ->
+      let replay ~pending messages = offload_model_input_cpu (fun () ->
+        Keeper_model_input_demotion.replay_materialized captured ~pending messages) in
+      let baseline = build ~materialize:replay None in
+      let baseline_reasoning = offload_model_input_cpu (fun () -> retained_reasoning baseline) in
+      let baseline_fallback () = { baseline with argument_prefix_protected = true } in
+      (match baseline_reasoning, candidate_reasoning with
+       | Ok (Some baseline_sources), Ok (Some candidate_sources) ->
+         let missing = Message_indices.diff baseline_sources candidate_sources in
+         if Message_indices.is_empty missing then candidate
+         else
+           let protected_arguments =
+             Keeper_model_input_demotion.protect_argument_prefix
+               ~through_message:(Message_indices.max_elt missing) arguments
+           in
+           let final = build ~materialize:replay (Some protected_arguments) in
+           (* Restoring an earlier argument changes the chain again. Verify
+              the actual final materialization, including failed blob writes. *)
+           (match offload_model_input_cpu (fun () -> retained_reasoning final) with
+            | Ok (Some final_sources) when Message_indices.subset baseline_sources final_sources ->
+              { final with argument_prefix_protected = true }
+            | Ok None | Ok (Some _) | Error () -> baseline_fallback ())
+       | (Ok None | Error ()), (Ok None | Ok (Some _) | Error ()) -> baseline_fallback ()
+       | Ok (Some _), (Ok None | Error ()) -> baseline_fallback ()))
 ;;
 
 (* Where the next request's range starts (RFC keeper-context-window-in-tokens
@@ -1470,9 +1575,25 @@ let carried_front ~ledger ~keeper_name ~runtime_id ~session_id ~digest_at ~after
    can be answered with a move of that very front; it hands this stage what
    to do with the current turn's tool results and takes back the probe that
    says whether demoting them would change the request. *)
+type argument_binding_state =
+  | Arguments_unbound
+  | Arguments_bound of Keeper_model_input_demotion.completed_arguments option
+
+let argument_binding_error_to_string = function
+  | Keeper_model_input_demotion.Invalid_argument_seed error ->
+    Keeper_transcript_unit.show_structural_error error
+  | Argument_seed_prefix_mismatch Keeper_replay_prefix.Prefix_longer_than_messages ->
+    "completed argument seed is longer than the canonical request"
+  | Argument_seed_prefix_mismatch Keeper_replay_prefix.Prefix_message_mismatch ->
+    "completed argument seed differs from the canonical request"
+  | Argument_replay_prefix_mismatch error -> Keeper_replay_prefix.restore_error_to_string error
+  | Argument_occurrence_mismatch -> "completed ToolUse sequence differs from the dispatch request"
+;;
+
 let bounded_model_input_projection
       (ctx : try_provider_ctx)
       ~(state : attempt_state)
+      ~agent_cell
       ~(provider_config : Llm_provider.Provider_config.t)
   : Agent_core.Agent.model_input_projection
   =
@@ -1526,6 +1647,35 @@ let bounded_model_input_projection
           | Keeper_carried_front.Turn_boundary_unknown _ -> false)
     | Keeper_input_policy.Wide -> false in
   let demotion_base_path = if references_enabled then ctx.base_path else "" in
+  (* Core may deserialize a retained native checkpoint after dispatch. Bind
+     once to its first actual request, while closure eligibility still comes
+     exclusively from the pre-admission seed. Result resends never rebind it. *)
+  let argument_binding = ref Arguments_unbound in
+  let argument_protection_reported = ref false in
+  let completed_arguments_for messages =
+    match !argument_binding with
+    | Arguments_bound arguments -> arguments
+    | Arguments_unbound ->
+      let arguments =
+        if not references_enabled || String.equal ctx.base_path "" then None
+        else match ctx.argument_demotion_seed, ctx.turn_boundary with
+          | Some seed, Keeper_carried_front.Turn_boundary { end_atom } ->
+            (match offload_model_input_cpu (fun () ->
+               Keeper_model_input_demotion.bind_completed_arguments
+                 ~completed_before:end_atom ~seed
+                 ~replay_prefix:ctx.argument_replay_prefix messages) with
+             | Ok arguments -> Some arguments
+             | Error error ->
+               Log.Keeper.warn ~keeper_name:ctx.keeper_name
+                 "input policy kept original tool arguments: %s"
+                 (argument_binding_error_to_string error);
+               None)
+          | None, (Keeper_carried_front.Turn_boundary _ | Turn_boundary_unknown _)
+          | Some _, Keeper_carried_front.Turn_boundary_unknown _ -> None
+      in
+      argument_binding := Arguments_bound arguments;
+      arguments
+  in
   (* The current turn's results leave as markers only for a Keeper that can
      open them again: the marker names a body [artifact_read] reads back. *)
   let current_turn_demotion_base_path = if reader_available then ctx.base_path else "" in
@@ -1554,11 +1704,19 @@ let bounded_model_input_projection
   let cold_seed = lazy (ctx.carried_front_seed ()) in
   fun messages ->
     state.request_range := None;
+    (* Discovery may widen the Agent's tools between provider rounds. The
+       binding head must use this request's live, ordered tool surface. *)
+    let prefix_tools =
+      Keeper_agent_tool_surface.on_the_wire ~agent_cell ~built:ctx.tools
+      |> Agent_core.Tool_set.of_list |> Agent_core.Tool_set.to_list
+      |> List.map Agent_core.Tool.schema_to_json
+    in
     let ( let* ) = Result.bind in
     let* () = match ctx.continuity with
       | None -> Ok ()
       | Some continuity -> offload_model_input_cpu (fun () -> validate_continuity ~messages continuity)
     in
+    let completed_arguments = completed_arguments_for messages in
     (* [messages] is the durable history, the checkpoint's messages, in which
        the ledger, the seed and the forecast count atoms; the range is
        composed in that vocabulary and the wire's projection runs afterwards
@@ -1640,7 +1798,8 @@ let bounded_model_input_projection
     in
     let view =
       request_view
-        ~input_policy:ctx.input_policy ?continuity:ctx.continuity
+        ~input_policy:ctx.input_policy ?continuity:ctx.continuity ?completed_arguments
+        ~tools:prefix_tools
         ~provider_config
         ~measure_message_bytes
         ~front
@@ -1677,6 +1836,14 @@ let bounded_model_input_projection
           outcome.Keeper_model_input_demotion.messages)
         messages
     in
+    (* A failed store can change the actual prefix a newly produced reasoning
+       block binds to. Recheck each request and only narrow the frozen set. *)
+    argument_binding := Arguments_bound view.completed_arguments;
+    let completed_arguments = view.completed_arguments in
+    if view.argument_prefix_protected && not !argument_protection_reported then (
+      argument_protection_reported := true;
+      Log.Keeper.info ~keeper_name:ctx.keeper_name
+        "input policy kept tool argument prefix to preserve signed reasoning replay");
     let composed = view.composed in
     Keeper_carried_front.warn_if_origin_is_unknown_start
       ~keeper_name:ctx.keeper_name composed.origin;
@@ -1688,7 +1855,7 @@ let bounded_model_input_projection
            offload_model_input_cpu (fun () ->
              let demoted =
                compose_carried_model_input
-                 ~input_policy:ctx.input_policy ?continuity:ctx.continuity
+                 ~input_policy:ctx.input_policy ?continuity:ctx.continuity ?completed_arguments
                  ~measure_message_bytes
                  ~front
                  ~accepted
@@ -2198,6 +2365,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
             (bounded_model_input_projection
                ctx
                ~state
+               ~agent_cell:attempt_agent_ref
                ~provider_config:config.Runtime_agent.provider_cfg)
       }
     in

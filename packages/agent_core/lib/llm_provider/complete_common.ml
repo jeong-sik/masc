@@ -714,6 +714,17 @@ let transmitted_history ~(config : Provider_config.t) messages =
     projected
 ;;
 
+(* [None] is a codec without prefix-bound reasoning, not a successful proof
+   for a binding codec. Use source occurrence coordinates, never digest lookup. *)
+let retained_prefix_reasoning_indices ~(config : Provider_config.t) ~tools messages =
+  match Provider_http_codec.of_config config with
+  | Provider_http_codec.Anthropic_messages ->
+    Backend_anthropic.retained_prefix_reasoning_indices ~config ~tools messages
+  | Provider_http_codec.Ollama_chat | Provider_http_codec.Openai_responses
+  | Provider_http_codec.Gemini_generate_content | Provider_http_codec.Openai_chat
+  | Provider_http_codec.Glm_chat -> Ok None
+;;
+
 let serialize_http_request_with_policy
       ~stream
       ~anthropic_serialization_policy

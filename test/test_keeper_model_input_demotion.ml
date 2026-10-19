@@ -695,6 +695,295 @@ let arguments_obey_each_provider_wire_bound () = with_demotion_store @@ fun stor
   codec Provider_config.Gemini (fun ~config ~messages () -> Backend_gemini.build_request ~config ~messages ())
 ;;
 
+(* Exercise the Keeper safety wrapper with provenance minted by the actual
+   Anthropic producer, real stored references, and the final provider wire. *)
+module Signed_provider = Masc.Keeper_turn_driver_try_provider
+
+let signed_argument_config () =
+  let open Agent_core.Llm_provider in
+  Provider_config.make ~kind:Provider_config.Anthropic
+    ~model_id:"claude-sonnet-5-5" ~base_url:"https://api.anthropic.com"
+    ~max_tokens:4096 ~system_prompt:"signed argument fixture"
+    ~model_capabilities_override:
+      { (Capabilities.capabilities_of_kind Provider_config.Anthropic) with
+        reasoning_replay_override = Capabilities.Force_latest_user_turn_tool_calls }
+    ()
+;;
+
+let signed_argument_tools =
+  [`Assoc ["name", `String "execute"; "description", `String "execute fixture";
+           "input_schema", `Assoc ["type", `String "object"]]]
+;;
+
+let signed_user text = { (assistant text) with role = Types.User }
+
+let stamp_signed_call ~config ~prefix ~id input =
+  let open Agent_core.Llm_provider in
+  let content =
+    [Types.Thinking {content = "signed argument reasoning"; signature = Some "sig-argument"};
+     Types.ToolUse {id; name = "execute"; input}] in
+  let reasoning_prefix = Backend_anthropic.transmitted_reasoning_prefix
+      ~config ~messages:prefix ~tools:signed_argument_tools ~response_content:content () in
+  Alcotest.(check bool) "actual producer minted prefix provenance" true
+    (Option.is_some reasoning_prefix);
+  let capability = match Reasoning_dialect.replay_capability_for_provider_config config with
+    | Ok capability -> capability
+    | Error detail -> Alcotest.fail detail in
+  let response : Types.api_response =
+    { id = "signed-argument-response"; model = "claude-sonnet-5-5"
+    ; stop_reason = Types.EndTurn; content; usage = None
+    ; telemetry = Some { Types.default_inference_telemetry with
+        reasoning_source = Some capability.target; reasoning_prefix } } in
+  match Types.assistant_message_of_response response with
+  | Ok message -> message
+  | Error _ -> Alcotest.fail "actual sourced response could not be recorded"
+;;
+
+let with_signed_argument_store f =
+  let base_path = Filename.temp_dir "demote-signed-arguments" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path)
+    (fun () -> f ~base_path (Tool_blob_store.create ~base_path))
+;;
+
+let signed_argument_view ?frozen_arguments ?materialize ~base_path ~store ~config messages =
+  let atom_count = snd (Window.annotate messages) in
+  let completed_arguments = match frozen_arguments with
+    | None -> Some (bind_arguments ~completed_before:atom_count ~seed:messages messages)
+    | Some arguments -> arguments in
+  let first_digest = match Window.atom_opening_digest messages 0 with
+    | Some digest -> digest
+    | None -> Alcotest.fail "signed fixture must open atom zero" in
+  let addresses = Demotion.create_address_memo () in
+  let materialize = match materialize with
+    | Some materialize -> materialize
+    | None -> fun ~pending projected ->
+      (Demotion.materialize ~store ~addresses ~pending projected).messages in
+  Signed_provider.For_testing.request_view
+    ~input_policy:Masc.Keeper_input_policy.Small ?completed_arguments
+    ~tools:signed_argument_tools ~provider_config:config ~measure_message_bytes
+    ~front:(Some { Masc.Keeper_carried_front.first_atom = 0
+      ; front = Model_input_front.At_atom first_digest
+      ; source = Masc.Keeper_carried_front.Ledger })
+    ~accepted:None ~history_digest_at:(Window.atom_opening_digest messages)
+    ~current_turn_results:Signed_provider.Current_turn_verbatim
+    ~base_path ~demote_before:atom_count
+    ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary {end_atom = atom_count})
+    ~materialize
+    messages
+;;
+
+let assert_signed_argument_wire ~config ~reasoning_index messages =
+  let open Agent_core.Llm_provider in
+  (match Backend_anthropic.retained_prefix_reasoning_indices
+      ~config ~tools:signed_argument_tools messages with
+   | Ok (Some indices) -> Alcotest.(check (list int))
+       "retained reasoning names the original message occurrence" [reasoning_index] indices
+   | Ok None | Error _ -> Alcotest.fail "Anthropic prefix projection failed");
+  let body = Backend_anthropic.build_request ~config ~messages ~tools:signed_argument_tools () in
+  let wire_blocks = Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "messages" |> to_list)
+    |> List.concat_map (fun message -> Yojson.Safe.Util.(member "content" message |> to_list)) in
+  let reasoning = List.filter (fun block ->
+      Yojson.Safe.Util.member "type" block = `String "thinking") wire_blocks in
+  Alcotest.(check int) "the actual provider wire retains one signed block" 1 (List.length reasoning);
+  let thought = List.hd reasoning in
+  Alcotest.(check string) "actual wire preserves signed thinking content" "signed argument reasoning"
+    Yojson.Safe.Util.(member "thinking" thought |> to_string);
+  Alcotest.(check string) "actual wire preserves the signature" "sig-argument"
+    Yojson.Safe.Util.(member "signature" thought |> to_string);
+  List.filter_map (fun block ->
+      if Yojson.Safe.Util.member "type" block = `String "tool_use"
+      then Some (Yojson.Safe.Util.member "input" block) else None) wire_blocks
+;;
+
+let assert_stored_argument store original input =
+  let reference = argument_reference input in
+  Alcotest.(check string) "signed-prefix argument reference MIME" "application/json" reference.mime;
+  match Tool_blob_store.fetch store ~sha256:reference.sha256 with
+  | Ok (Some bytes) -> Alcotest.(check string) "real reference stores the exact original argument"
+      (Yojson.Safe.to_string original) bytes
+  | Ok None | Error _ -> Alcotest.fail "signed-prefix argument reference has no stored payload"
+;;
+
+let signed_call_keeps_its_own_arguments () = with_signed_argument_store @@ fun ~base_path store ->
+  let config = signed_argument_config () in
+  let input = long_arguments "signed same-message input" in
+  let user = signed_user "perform the signed call" in
+  let signed = stamp_signed_call ~config ~prefix:[user] ~id:"signed" input in
+  let source = [user; signed; tool_message ~id:"signed" "done"] in
+  ignore (assert_signed_argument_wire ~config ~reasoning_index:1 source : Yojson.Safe.t list);
+  let view = signed_argument_view ~base_path ~store ~config source in
+  Alcotest.(check bool) "changing the signed message forces argument protection" true
+    view.argument_prefix_protected;
+  let inputs = assert_signed_argument_wire ~config ~reasoning_index:1 view.carried in
+  Alcotest.(check bool) "the signed ToolUse input remains exact on actual wire" true (inputs = [input])
+;;
+
+let signed_prefix_protects_only_earlier_argument_occurrences () =
+  with_signed_argument_store @@ fun ~base_path store ->
+  let config = signed_argument_config () in
+  let input = long_arguments "same immutable call before and after reasoning" in
+  let call = List.hd (argument_cycle ~id:"reused" input) in
+  let result = tool_message ~id:"reused" "done" in
+  let prefix = [signed_user "compare old work"; call; result] in
+  let signed = stamp_signed_call ~config ~prefix ~id:"signed" (`Assoc []) in
+  (* The very same immutable Assistant and Tool records occur on both sides
+     of reasoning. Protection must follow source occurrences, not identity. *)
+  let source = prefix @ [signed; tool_message ~id:"signed" "done"; call; result] in
+  let view = signed_argument_view ~base_path ~store ~config source in
+  Alcotest.(check bool) "the earlier creation prefix was protected" true view.argument_prefix_protected;
+  let inputs = assert_signed_argument_wire ~config ~reasoning_index:3 view.carried in
+  match inputs with
+  | [earlier; signed_input; later] ->
+    Alcotest.(check bool) "earlier argument remains exact" true (earlier = input);
+    Alcotest.(check bool) "signed call remains exact" true (signed_input = `Assoc []);
+    assert_stored_argument store input later
+  | _ -> Alcotest.fail "expected both occurrences and the signed call on actual wire"
+;;
+
+let signed_prefix_can_reproduce_already_demoted_arguments () =
+  with_signed_argument_store @@ fun ~base_path store ->
+  let config = signed_argument_config () in
+  let input = long_arguments "already transmitted as an argument artifact" in
+  let prefix = signed_user "inspect stored earlier work" :: argument_cycle ~id:"earlier" input in
+  let arguments = bind_arguments ~completed_before:2 ~seed:prefix prefix in
+  let planned = Demotion.plan ~completed_arguments:arguments ~measure_message_bytes ~demote_before:0 prefix in
+  let transmitted = (Demotion.materialize ~store ~addresses:(Demotion.create_address_memo ())
+      ~pending:planned.pending planned.messages).messages in
+  let original_reference = List.hd (argument_inputs transmitted) in
+  assert_stored_argument store input original_reference;
+  let signed = stamp_signed_call ~config ~prefix:transmitted ~id:"signed" (`Assoc []) in
+  let source = prefix @ [signed; tool_message ~id:"signed" "done"] in
+  let view = signed_argument_view ~base_path ~store ~config source in
+  Alcotest.(check bool) "an exact already-demoted creation prefix needs no fallback" false
+    view.argument_prefix_protected;
+  let inputs = assert_signed_argument_wire ~config ~reasoning_index:3 view.carried in
+  match inputs with
+  | [restored_reference; signed_input] ->
+    Alcotest.(check bool) "the actual stored reference is reproduced exactly" true
+      (restored_reference = original_reference);
+    Alcotest.(check bool) "the signed call remains exact" true (signed_input = `Assoc [])
+  | _ -> Alcotest.fail "expected the stored prefix and the signed call"
+;;
+
+let signed_prefix_tracks_replay_projection_and_tool_user_merge () =
+  with_signed_argument_store @@ fun ~base_path store ->
+  let config = signed_argument_config () in
+  let earlier_input = long_arguments "before empty removal and tool-user merge" in
+  let later_input = long_arguments "after signed message" in
+  let excluded = { (assistant "") with content =
+      [Types.Thinking {content = "unsourced earlier reasoning"; signature = Some "unproven"}] } in
+  let followup = "follow up immediately after the tool result" in
+  let prefix = [signed_user "first ask"; excluded]
+    @ argument_cycle ~id:"earlier" earlier_input
+    @ [signed_user followup] in
+  let signed = stamp_signed_call ~config ~prefix ~id:"signed" (`Assoc []) in
+  let source = prefix @ [signed; tool_message ~id:"signed" "done"]
+    @ argument_cycle ~id:"later" later_input in
+  let projection = match Agent_core.Llm_provider.Backend_anthropic.project_history config source with
+    | Ok projection -> projection
+    | Error _ -> Alcotest.fail "signed fixture projection failed" in
+  Alcotest.(check (list int)) "the actual replay projection removes the empty Assistant" [1]
+    projection.removed_empty_assistant_indices;
+  ignore (assert_signed_argument_wire ~config ~reasoning_index:5 source : Yojson.Safe.t list);
+  let wire_messages = Agent_core.Llm_provider.Backend_anthropic.build_request
+      ~config ~messages:source ~tools:signed_argument_tools ()
+    |> Yojson.Safe.from_string |> Yojson.Safe.Util.member "messages" |> Yojson.Safe.Util.to_list in
+  Alcotest.(check bool) "actual wire merges ToolResult and following User text" true
+    (List.exists (fun message ->
+       let blocks = Yojson.Safe.Util.(member "content" message |> to_list) in
+       List.exists (fun block -> Yojson.Safe.Util.member "type" block = `String "tool_result") blocks
+       && List.exists (fun block -> Yojson.Safe.Util.member "text" block = `String followup) blocks)
+       wire_messages);
+  let view = signed_argument_view ~base_path ~store ~config source in
+  Alcotest.(check bool) "source-index protection survives projection and merging" true
+    view.argument_prefix_protected;
+  let inputs = assert_signed_argument_wire ~config ~reasoning_index:5 view.carried in
+  match inputs with
+  | [earlier; signed_input; later] ->
+    Alcotest.(check bool) "the argument before shifted signed reasoning remains exact" true
+      (earlier = earlier_input);
+    Alcotest.(check bool) "the signed call remains exact" true (signed_input = `Assoc []);
+    assert_stored_argument store later_input later
+  | _ -> Alcotest.fail "expected all three call inputs after actual merging"
+;;
+
+let signed_prefix_revalidates_after_a_failed_store_write () =
+  with_signed_argument_store @@ fun ~base_path store ->
+  let config = signed_argument_config () in
+  let input = long_arguments "prefix restored after a real storage failure" in
+  let prefix = signed_user "inspect the earlier call" :: argument_cycle ~id:"earlier" input in
+  let first = signed_argument_view ~base_path ~store ~config prefix in
+  assert_stored_argument store input (List.hd (argument_inputs first.carried));
+  let first_signed = stamp_signed_call ~config ~prefix:first.carried ~id:"signed-one" (`Assoc []) in
+  ignore (assert_signed_argument_wire ~config ~reasoning_index:3
+    (first.carried @ [first_signed; tool_message ~id:"signed-one" "done"]) : Yojson.Safe.t list);
+  let second_source = prefix @ [first_signed; tool_message ~id:"signed-one" "done"] in
+  let blocked = Filename.temp_file "signed-argument-write-blocked" "" in
+  Fun.protect ~finally:(fun () -> Sys.remove blocked) @@ fun () ->
+  (* A regular file cannot host .masc/tool_blobs. Use the real materializer
+     with that store, rather than synthesizing a restored message list. *)
+  let failed = signed_argument_view ~frozen_arguments:first.completed_arguments
+      ~base_path ~store:(Tool_blob_store.create ~base_path:blocked) ~config second_source in
+  Alcotest.(check bool) "storage failure restored the exact earlier argument" true
+    (List.hd (argument_inputs failed.carried) = input);
+  let next_signed = stamp_signed_call ~config ~prefix:failed.carried ~id:"signed-two" (`Assoc []) in
+  let third_source = second_source @ [next_signed; tool_message ~id:"signed-two" "done"] in
+  let recovered = signed_argument_view ~frozen_arguments:failed.completed_arguments
+      ~base_path ~store ~config third_source in
+  Alcotest.(check bool) "a later successful write cannot invalidate the new raw-bound signature" true
+    recovered.argument_prefix_protected;
+  let inputs = assert_signed_argument_wire ~config ~reasoning_index:5 recovered.carried in
+  Alcotest.(check bool) "the newly signed raw prefix remains exact on real wire" true
+    (List.hd inputs = input);
+  let followup = signed_argument_view ~frozen_arguments:recovered.completed_arguments
+      ~base_path ~store ~config third_source in
+  let followup_inputs = assert_signed_argument_wire ~config ~reasoning_index:5 followup.carried in
+  Alcotest.(check bool) "the narrowed frozen set cannot re-enable the old argument" true
+    (List.hd followup_inputs = input)
+;;
+
+let signed_prefix_replays_the_first_mixed_storage_outcome () =
+  with_signed_argument_store @@ fun ~base_path store ->
+  let config = signed_argument_config () in
+  let input = long_arguments "argument storage succeeds while result storage fails" in
+  let result_body = "blocked result blob: " ^ String.make 4000 'r' in
+  let call = List.hd (argument_cycle ~id:"earlier" input) in
+  let prefix = [signed_user "preserve the actual result outcome"; call;
+                tool_message ~id:"earlier" result_body] in
+  let signed = stamp_signed_call ~config ~prefix ~id:"signed" (`Assoc []) in
+  let source = prefix @ [signed; tool_message ~id:"signed" "done"] in
+  let result_sha = Digestif.SHA256.(to_hex (digest_string result_body)) in
+  let result_target = Filename.concat
+      (Filename.concat (Tool_blob_store.root_dir store) (String.sub result_sha 0 2)) result_sha in
+  (* Only this result's exact blob filename is a directory. Other addresses,
+     including the argument in the same materialization, remain writable. *)
+  Fs_compat.mkdir_p result_target;
+  let calls = ref 0 in
+  let addresses = Demotion.create_address_memo () in
+  let materialize ~pending projected =
+    incr calls;
+    let outcome = Demotion.materialize ~store ~addresses ~pending projected in
+    if !calls = 1 then (
+      Alcotest.(check bool) "the first real materialization includes a failed write" true
+        (outcome.reverted > 0);
+      Alcotest.(check bool) "the failed result is restored byte-for-byte" true
+        (List.mem result_body (markers outcome.messages));
+      assert_stored_argument store input (List.hd (argument_inputs outcome.messages));
+      (* A forbidden second materialization would now store the result and
+         produce a different baseline. Comparisons must replay the first one. *)
+      Unix.rmdir result_target);
+    outcome.messages in
+  let view = signed_argument_view ~materialize ~base_path ~store ~config source in
+  Alcotest.(check int) "candidate, baseline and final share one materialization effect" 1 !calls;
+  Alcotest.(check bool) "the argument-induced signed-prefix loss is detected" true
+    view.argument_prefix_protected;
+  Alcotest.(check bool) "the final comparison retains the original failed-result outcome" true
+    (List.mem result_body (markers view.carried));
+  let inputs = assert_signed_argument_wire ~config ~reasoning_index:3 view.carried in
+  Alcotest.(check bool) "the protected original argument and signed call reach actual wire" true
+    (inputs = [input; `Assoc []])
+;;
+
 (* Addressing a body is a sha256 over the whole of it; the write is skipped for
    an address this process already wrote, so on a long-lived keeper the hashing
    is all [materialize] does, and doing it on the calling fiber held the main
@@ -1622,6 +1911,18 @@ let () =
             argument_cut_and_failed_store_preserve_occurrences
         ; Alcotest.test_case "OpenAI Anthropic and Gemini actual wire bounds" `Quick
             arguments_obey_each_provider_wire_bound
+        ; Alcotest.test_case "signed ToolUse retains its own exact arguments" `Quick
+            signed_call_keeps_its_own_arguments
+        ; Alcotest.test_case "signed prefix protects earlier occurrences and demotes later identical records" `Quick
+            signed_prefix_protects_only_earlier_argument_occurrences
+        ; Alcotest.test_case "signed prefix reproduces actual previously demoted arguments" `Quick
+            signed_prefix_can_reproduce_already_demoted_arguments
+        ; Alcotest.test_case "signed prefix follows empty-Assistant projection and Tool-User merge" `Quick
+            signed_prefix_tracks_replay_projection_and_tool_user_merge
+        ; Alcotest.test_case "signed prefix is revalidated after real write failure and later recovery" `Quick
+            signed_prefix_revalidates_after_a_failed_store_write
+        ; Alcotest.test_case "signed prefix comparisons replay the first mixed storage outcome" `Quick
+            signed_prefix_replays_the_first_mixed_storage_outcome
         ] )
     ; ( "materialize"
       , [ Alcotest.test_case "reused IDs retain distinct exact payloads" `Quick

@@ -357,6 +357,8 @@ type try_provider_ctx =
   ; system_prompt : string
   ; tools : Agent_core.Tool.t list
   ; initial_messages : Agent_core.Types.message list
+  ; argument_demotion_seed : Agent_core.Types.message list option
+  ; argument_replay_prefix : Keeper_replay_prefix.projection
   ; model_input_projection : Agent_core.Agent.model_input_projection option
   ; stream_idle_timeout_s : float
   ; first_event_timeout_s : float
@@ -777,6 +779,10 @@ type composed =
 
 type request_view =
   { composed : composed
+  ; completed_arguments : Keeper_model_input_demotion.completed_arguments option
+        (** Frozen eligibility, narrowed when exact signed reasoning replay
+            requires an earlier argument prefix to remain verbatim. *)
+  ; argument_prefix_protected : bool
   ; carried : Agent_core.Types.message list
         (** The composed messages with their demotions materialized: what the
             ledger and the turn record count, in atoms of the checkpoint
@@ -860,6 +866,7 @@ module For_testing : sig
   val compose_carried_model_input :
     ?input_policy:Keeper_input_policy.t ->
     ?continuity:continuity ->
+    ?completed_arguments:Keeper_model_input_demotion.completed_arguments ->
     measure_message_bytes:(Agent_core.Types.message -> int) ->
     front:Keeper_carried_front.seed option ->
     accepted:Keeper_carried_front.seed option ->
@@ -874,6 +881,8 @@ module For_testing : sig
   val request_view :
     ?input_policy:Keeper_input_policy.t ->
     ?continuity:continuity ->
+    ?completed_arguments:Keeper_model_input_demotion.completed_arguments ->
+    ?tools:Yojson.Safe.t list ->
     provider_config:Agent_core.Llm_provider.Provider_config.t ->
     measure_message_bytes:(Agent_core.Types.message -> int) ->
     front:Keeper_carried_front.seed option ->

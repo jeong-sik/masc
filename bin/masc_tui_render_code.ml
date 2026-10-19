@@ -430,11 +430,19 @@ let render_code (state : state) =
           (* The note (a language-server answer, a PR link) rides the title
              in every view: the history's Enter writes one too. *)
           let with_note =
-            let note = match code_lsp_pending_query state with
-              | Some query ->
-                  Some (Printf.sprintf "asking %s about %S"
-                    query.clq_question query.clq_symbol)
-              | None -> state.code_lsp_note in
+            let note = match code_pending_navigation state with
+              | Some (owner, path) ->
+                  let path = Terminal_text.sanitize_terminal_text path in
+                  Some (match owner.cno_action with
+                    | Return_to_history -> "Returning to " ^ path
+                    | Follow_location -> Printf.sprintf "Opening %s:%d" path
+                        (owner.cno_destination.cj_cursor + 1))
+              | None ->
+                  (match code_lsp_pending_query state with
+                   | Some query ->
+                       Some (Printf.sprintf "asking %s about %S"
+                         query.clq_question query.clq_symbol)
+                   | None -> state.code_lsp_note) in
             match note with
             | Some note ->
                 base ^ "  " ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)

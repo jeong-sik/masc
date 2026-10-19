@@ -790,6 +790,91 @@ let start_location_read state path line =
   | Code_results.No_followup | Code_results.Choose_location | Code_results.Reveal_cursor ->
       Alcotest.fail "expected an owned different-file location read"
 
+let test_navigation_activity_preserves_settled_observations () =
+  let state = return_fixture () in
+  state.code_lsp_note <- Some "last language-server observation";
+  let observation = state.code_lsp_note in
+  let source = state.code_file and history = state.code_jump_back in
+  let active owner request =
+    match code_pending_navigation state with
+    | Some (current, path) -> current == owner && path = Fetched.request_key request
+    | None -> false in
+  let owner, request = start_return_read state in
+  Alcotest.(check bool) "accepted return retains the settled observation and source" true
+    (active owner request && state.code_lsp_note == observation
+     && state.code_file == source && state.code_jump_back == history);
+  Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "received");
+  Alcotest.(check bool) "received navigation still yields to queued input" false
+    (Code_results.take_ready_navigation_file state ~input_pending:true);
+  Alcotest.(check bool) "activity remains owned until destination admission" true
+    (active owner request && state.code_lsp_note == observation);
+  state.code_navigation <- None;
+  Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Error "late cancellation");
+  Alcotest.(check bool) "cancellation retires activity without losing observed state" true
+    (Option.is_none (code_pending_navigation state) && state.code_lsp_note == observation
+     && state.code_file == source && state.code_jump_back == history);
+  let retry_owner, retry = start_return_read state in
+  Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "obsolete");
+  Alcotest.(check bool) "an old success cannot settle the replacement" true
+    (active retry_owner retry && state.code_lsp_note == observation);
+  Code_results.apply_file ~intent:(Navigate_code_file retry_owner) state retry (Error "unavailable");
+  let failure = state.code_lsp_note in
+  Alcotest.(check bool) "failure ends activity and preserves source and history" true
+    (Option.is_none (code_pending_navigation state) && Option.is_some failure
+     && failure != observation && state.code_file == source && state.code_jump_back == history);
+  let final_owner, final_request = start_return_read state in
+  Alcotest.(check bool) "retry retains the observed failure while pending" true
+    (active final_owner final_request && state.code_lsp_note == failure);
+  Code_results.apply_file ~intent:(Navigate_code_file final_owner) state final_request
+    (Ok "let a = 1\nlet b = 2\nlet c = 3");
+  Alcotest.(check bool) "idle admits the destination" true
+    (Code_results.take_ready_navigation_file state ~input_pending:false);
+  Alcotest.(check bool) "admission ends activity and settles the historical source" true
+    (Option.is_none (code_pending_navigation state) && Option.is_none state.code_lsp_note
+     && Fetched.current_key state.code_file = Some "src/old.ml" && state.code_jump_back = [])
+
+let test_navigation_activity_belongs_to_the_original_source () =
+  let changes =
+    [ (fun state -> state.code_navigation <- None)
+    ; (fun state -> state.view <- Repositories)
+    ; (fun state -> set_code_scope state Code_scope_project)
+    ; (fun state -> state.code_dir <- "elsewhere")
+    ; (fun state ->
+        let path = match Fetched.current_key state.code_file with
+          | Some path -> path | None -> Alcotest.fail "source file disappeared" in
+        let file, _ = start_read ~equal:String.equal state.code_file path in
+        state.code_file <- file)
+    ; (fun state -> state.code_jump_back <- List.map (fun target -> target) state.code_jump_back)
+    ; (fun state ->
+        let identity = state.server_identity in
+        suspend_workspace_readings state;
+        state.server_identity <- identity;
+        state.workspace_identity <- Workspace_identity_match)
+    ] in
+  List.iter (fun action -> List.iter (fun change ->
+    let state = return_fixture () in
+    let owner, request = match action with
+      | Return_to_history -> start_return_read state
+      | Follow_location -> start_location_read state "lib/target.ml" 3 in
+    Alcotest.(check bool) "original source owns the pending action" true
+      (match code_pending_navigation state with
+       | Some (current, path) -> current == owner && current.cno_action = action
+           && path = Fetched.request_key request
+       | None -> false);
+    Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "destination");
+    change state;
+    let source = state.code_file and history = state.code_jump_back in
+    let observation = state.code_lsp_note in
+    Alcotest.(check bool) "changed source cannot borrow pending activity" true
+      (Option.is_none (code_pending_navigation state));
+    Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Error "late failure");
+    Alcotest.(check bool) "changed source rejects the already received destination" false
+      (Code_results.take_ready_navigation_file state ~input_pending:false);
+    Alcotest.(check bool) "late work preserves current source, history and observation" true
+      (state.code_file == source && state.code_jump_back == history
+       && state.code_lsp_note == observation)) changes)
+    [Return_to_history; Follow_location]
+
 let test_location_commits_history_only_on_success () =
   let state, _ = finder_fixture () in
   close_code_finder state;
@@ -1365,6 +1450,10 @@ let () =
     ; ( "reading return"
       , [ Alcotest.test_case "owned success restores every reading position" `Quick
             test_return_restores_reading_after_success
+        ; Alcotest.test_case "navigation activity preserves settled observations" `Quick
+            test_navigation_activity_preserves_settled_observations
+        ; Alcotest.test_case "navigation activity belongs to its original source" `Quick
+            test_navigation_activity_belongs_to_the_original_source
         ; Alcotest.test_case "failure retry and cancellation preserve history" `Quick
             test_return_failure_retry_and_cancel
         ; Alcotest.test_case "return owners cannot be borrowed" `Quick

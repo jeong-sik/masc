@@ -14730,6 +14730,20 @@ let code_finder_current (state : state) origin =
   && Option.equal (Masc_tui_fetched.same_request ~equal:String.equal)
        origin.cfo_file (Masc_tui_fetched.current_request state.code_file)
 
+let code_navigation_owner_current state owner =
+  code_finder_current state owner.cno_origin
+  && state.code_jump_back == owner.cno_history
+
+(* A received file still belongs to the pending navigation until queued input
+   has had its turn and the destination commits. Retiring that owner removes
+   the activity without changing the last settled language-server observation. *)
+let code_pending_navigation (state : state) =
+  match state.code_navigation with
+  | Some reading when code_navigation_owner_current state reading.cnr_owner ->
+      Option.map (fun path -> reading.cnr_owner, path)
+        (Masc_tui_fetched.current_key reading.cnr_file)
+  | Some _ | None -> None
+
 let code_lsp_query_current (state : state) query =
   server_authority_ready state && state.view = Code
   && query.clq_workspace = state.workspace_authority

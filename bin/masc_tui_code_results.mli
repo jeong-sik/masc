@@ -16,7 +16,8 @@ type return_followup =
 val start_return : Masc_tui_types.state -> return_followup
 (** Keep history and the current reading until the destination is available.
     Repeated requests share the pending return. A readable current destination
-    or a tree-only destination commits immediately. *)
+    or a tree-only destination commits immediately. Pending activity belongs to
+    the navigation owner; starting a return does not overwrite the settled note. *)
 val take_ready_navigation_file : Masc_tui_types.state -> input_pending:bool -> bool
 (** Commit an owned return or different-file LSP location after queued input.
     Return consumes an entry; a location records the source only on success.

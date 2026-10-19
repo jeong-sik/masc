@@ -147,6 +147,75 @@ let persist_settled ~config operation ~settled_task_ids ~expected_backlog_versio
   | Error _ as error -> error
 ;;
 
+let shutdown_release_summary =
+  "Keeper stopped; task returned to the durable backlog"
+;;
+
+let shutdown_release_reason =
+  "Keeper shutdown operation completed lane join"
+;;
+
+let shutdown_release_next_step = "A live Keeper may reclaim this task"
+
+let non_empty_trimmed (value : string) : string option =
+  if String.trim value = "" then None else Some value
+;;
+
+let non_empty_trimmed_opt (value : string option) : string option =
+  Option.bind value non_empty_trimmed
+;;
+
+let append_unique_evidence_ref (refs : string list) (receipt_ref : string)
+  : string list
+  =
+  let non_empty =
+    List.filter (fun entry -> String.trim entry <> "") refs
+  in
+  if List.exists (String.equal receipt_ref) non_empty
+  then non_empty
+  else non_empty @ [ receipt_ref ]
+;;
+
+let release_handoff_context
+      operation
+      (previous : Masc_domain.task_handoff_context option)
+  : Masc_domain.task_handoff_context
+  =
+  let receipt_ref = operation_evidence_ref operation in
+  let now = Masc_domain.now_iso () in
+  match previous with
+  | None ->
+    { summary = shutdown_release_summary
+    ; reason = Some shutdown_release_reason
+    ; next_step = Some shutdown_release_next_step
+    ; failure_mode = None
+    ; reclaim_policy = Some Masc_domain.Allow_reclaim
+    ; evidence_refs = [ receipt_ref ]
+    ; updated_at = Some now
+    ; updated_by = Some operation.actor
+    }
+  | Some prev ->
+    let summary =
+      match non_empty_trimmed prev.summary with
+      | Some preserved -> preserved
+      | None -> shutdown_release_summary
+    in
+    let next_step =
+      match non_empty_trimmed_opt prev.next_step with
+      | Some _ as preserved -> preserved
+      | None -> Some shutdown_release_next_step
+    in
+    { summary
+    ; reason = Some shutdown_release_reason
+    ; next_step
+    ; failure_mode = non_empty_trimmed_opt prev.failure_mode
+    ; reclaim_policy = Some Masc_domain.Allow_reclaim
+    ; evidence_refs = append_unique_evidence_ref prev.evidence_refs receipt_ref
+    ; updated_at = Some now
+    ; updated_by = Some operation.actor
+    }
+;;
+
 let release_task ~config operation (owned : Keeper_current_task_reconcile.owned_active_task) =
   let assignee =
     match owned.task.task_status with
@@ -157,16 +226,8 @@ let release_task ~config operation (owned : Keeper_current_task_reconcile.owned_
     | Masc_domain.Done _
     | Masc_domain.Cancelled _ -> Error "snapshotted task is no longer actively owned"
   in
-  let handoff_context : Masc_domain.task_handoff_context =
-    { summary = "Keeper stopped; task returned to the durable backlog"
-    ; reason = Some "Keeper shutdown operation completed lane join"
-    ; next_step = Some "A live Keeper may reclaim this task"
-    ; failure_mode = None
-    ; reclaim_policy = Some Masc_domain.Allow_reclaim
-    ; evidence_refs = [ operation_evidence_ref operation ]
-    ; updated_at = Some (Masc_domain.now_iso ())
-    ; updated_by = Some operation.actor
-    }
+  let handoff_context =
+    release_handoff_context operation owned.task.handoff_context
   in
   match assignee with
   | Error _ as error -> error

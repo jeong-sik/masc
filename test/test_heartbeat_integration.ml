@@ -5183,6 +5183,162 @@ let test_keeper_shutdown_recovers_committed_task_receipt () =
       | Ok _ -> fail "task receipt recovery did not reach Finalized"
       | Error error -> fail (Shutdown_finalize.error_to_string error))
 
+let test_keeper_shutdown_release_preserves_task_handoff () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun owner_sw ->
+  let base_dir = temp_dir "shutdown-preserve-handoff" in
+  Fun.protect
+    ~finally:(fun () ->
+      Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
+      R.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "operator")
+      in
+      let meta = make_meta "shutdown-preserve-handoff-keeper" in
+      (match Keeper_meta_store.replace_snapshot config meta with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      install_owner_inventory_exn ~sw:owner_sw config;
+      Shutdown_finalize.register_remove_pending_confirms_by_target
+        (fun _config ~target_type:_ ~target_id:_ -> Ok 0);
+      let task_id_wire =
+        match
+          Masc.Workspace.add_task_with_result
+            config
+            ~title:"shutdown handoff preservation fixture"
+            ~priority:1
+            ~description:"preserve task-specific handoff fields across shutdown release"
+        with
+        | Ok created -> created.task_id
+        | Error error -> fail (Masc.Workspace.add_task_error_to_string error)
+      in
+      (match
+         Masc.Workspace.claim_task_r
+           config
+           ~agent_name:"prior-keeper"
+           ~task_id:task_id_wire
+           ()
+       with
+       | Ok _ -> ()
+       | Error error -> fail (Masc_domain.masc_error_to_string error));
+      let prior_handoff : Masc_domain.task_handoff_context =
+        { summary = "Halfway through migration; schema v2 applied"
+        ; reason = Some "Yielding turn before backfill"
+        ; next_step = Some "Run backfill script on shard 2"
+        ; failure_mode = Some "shard_2_lock_timeout"
+        ; reclaim_policy = Some Masc_domain.Allow_reclaim
+        ; evidence_refs = [ "masc://artifact/migration-v2" ]
+        ; updated_at = Some (Masc_domain.now_iso ())
+        ; updated_by = Some "prior-keeper"
+        }
+      in
+      (match
+         Masc.Workspace.release_task_r
+           config
+           ~agent_name:"prior-keeper"
+           ~task_id:task_id_wire
+           ~handoff_context:prior_handoff
+           ()
+       with
+       | Ok _ -> ()
+       | Error error -> fail (Masc_domain.masc_error_to_string error));
+      (match
+         Masc.Workspace.claim_task_r
+           config
+           ~agent_name:meta.name
+           ~task_id:task_id_wire
+           ()
+       with
+       | Ok _ -> ()
+       | Error error -> fail (Masc_domain.masc_error_to_string error));
+      let task_id =
+        match Keeper_id.Task_id.of_string task_id_wire with
+        | Ok task_id -> task_id
+        | Error detail -> fail detail
+      in
+      let backlog_version =
+        match Workspace_backlog.read_backlog_r config with
+        | Ok backlog -> backlog.version
+        | Error detail -> fail detail
+      in
+      let operation_id = Shutdown_types.Operation_id.generate () in
+      let operation : Shutdown_types.t =
+        { schema_version = Shutdown_types.schema_version
+        ; revision = 0
+        ; operation_id
+        ; keeper_name = meta.name
+        ; lane_ownership =
+            Shutdown_types.Registered_lane (Lane.id (Lane.create ()))
+        ; trace_id = meta.runtime.trace_id
+        ; actor = "operator"
+        ; cleanup_intent = retain_operator_cleanup
+        ; turn_disposition = Shutdown_types.No_inflight_turn
+        ; expected_backlog_version = backlog_version
+        ; owned_task_ids = [ task_id ]
+        ; join_evidence = None
+        ; phase = Shutdown_types.Joined_idle
+        ; created_at = Masc_domain.now_iso ()
+        ; updated_at = Masc_domain.now_iso ()
+        }
+      in
+      (match Shutdown_store.persist_new ~config operation with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      (match Shutdown_finalize.run ~config ~entry:None operation with
+       | Ok { phase = Shutdown_types.Finalized evidence; _ } ->
+         check int
+           "owned task settled during shutdown"
+           1
+           (List.length evidence.cleanup.settled_task_ids)
+       | Ok _ -> fail "shutdown finalization did not reach Finalized"
+       | Error error -> fail (Shutdown_finalize.error_to_string error));
+      let released_task =
+        match Workspace_backlog.read_backlog_r config with
+        | Error detail -> fail detail
+        | Ok backlog ->
+          (match
+             List.find_opt
+               (fun (task : Masc_domain.task) ->
+                  String.equal task.id task_id_wire)
+               backlog.tasks
+           with
+           | Some task -> task
+           | None -> fail "released task missing from backlog")
+      in
+      check bool "task returned to Todo" true
+        (released_task.task_status = Masc_domain.Todo);
+      match released_task.handoff_context with
+      | None -> fail "expected handoff_context on released task"
+      | Some handoff ->
+        check string "preserves task-specific summary"
+          "Halfway through migration; schema v2 applied"
+          handoff.summary;
+        check (option string) "records shutdown release reason"
+          (Some "Keeper shutdown operation completed lane join")
+          handoff.reason;
+        check (option string) "preserves task-specific next_step"
+          (Some "Run backfill script on shard 2")
+          handoff.next_step;
+        check (option string) "preserves task-specific failure_mode"
+          (Some "shard_2_lock_timeout")
+          handoff.failure_mode;
+        check bool "sets Allow_reclaim policy" true
+          (handoff.reclaim_policy = Some Masc_domain.Allow_reclaim);
+        let expected_receipt =
+          "masc://keeper-shutdown/"
+          ^ Shutdown_types.Operation_id.to_string operation_id
+        in
+        check (list string) "preserves prior evidence_refs and appends shutdown receipt"
+          [ "masc://artifact/migration-v2"; expected_receipt ]
+          handoff.evidence_refs;
+        check (option string) "updates actor attribution"
+          (Some "operator")
+          handoff.updated_by)
+
 (* I7: a Librarian unit running for a Keeper does not block that Keeper's
    launch. The launch goes through and its durable catch-up queues behind the
    running unit on the same lane. *)
@@ -5875,6 +6031,8 @@ let () =
         test_keeper_shutdown_rejects_stale_snapshot_delete;
       test_case "shutdown recovers committed task receipt" `Quick
         test_keeper_shutdown_recovers_committed_task_receipt;
+      test_case "shutdown release preserves task handoff" `Quick
+        test_keeper_shutdown_release_preserves_task_handoff;
       test_case "unresolved failing entry is preserved" `Quick
         test_start_keepalive_preserves_unresolved_failing_entry;
       test_case "finished failing entry is reclaimed" `Quick

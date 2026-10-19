@@ -52,6 +52,7 @@ export default defineConfig({
 					items: [
 						{ label: 'Overview', translations: { 'ko': 'MASC 개요' }, slug: 'getting-started/overview' },
 						{ label: 'Quickstart', translations: { 'ko': '빠른 시작' }, slug: 'getting-started/quickstart' },
+						{ label: 'Your first 30 minutes', translations: { 'ko': '처음 30분' }, slug: 'getting-started/first-30-minutes' },
 						{ label: 'Build from Source', translations: { 'ko': '소스에서 빌드하기' }, slug: 'getting-started/install-from-source' },
 						{ label: 'FAQ', translations: { 'ko': '자주 묻는 질문 (FAQ)' }, slug: 'getting-started/faq' },
 					],

@@ -30,6 +30,10 @@ Keepers. Keeper operations are reached from their parent only.
 Header clocks and ordinary row times use the terminal's timezone. Usage trends
 and Task completion days are explicitly labeled UTC.
 
+New here? The [first 30 minutes](../docs-site/src/content/docs/getting-started/first-30-minutes.md)
+chapter walks from install to your first Task and Board post, one signal at a
+time.
+
 ## What can I do here
 
 Type `/features` in any composer and the feature sheet lists what this TUI

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 const directory=await mkdtemp(join(tmpdir(),'masc-live-midi-reservations-'))
 try {
- const names=['MidiTransport','UmpTransport','UmpOutput','UmpState','UmpLiveInput','UmpRegions','HybridMidiTransport','LiveMidiReservations','LiveMidiMain']
+ const names=['MidiTransport','UmpTransport','UmpOutput','UmpState','UmpLiveInput','UmpRegions','HybridMidiTransport','UmpLoopTransport','CaptureAudioClock','WaveLoopClock','LiveMidiReservations','LiveMidiMain']
  let result=spawnSync('xcrun',['swiftc','-parse-as-library','-D','MIDI_LIBRARY',...names.map(name=>new URL(name+'.swift',import.meta.url).pathname),'-o',join(directory,'probe'),'-framework','CoreMIDI'],{encoding:'utf8'})
  assert.equal(result.status,0,result.stderr)
  let serial=0
@@ -37,5 +37,14 @@ try {
  const collision=structuredClone(ump);for(const row of collision.sources[0].timeline.packets)row.words[0]=(row.words[0]&0xf0f0ffff)|0x00020000
  await inspect({schemaVersion:6,kind:'hybrid-arrangement',duration:1,midi,umpRegions:collision},'hybrid-arrangement',true)
  const malformed=structuredClone(midi);malformed.regions[0].source='missing';await inspect(malformed,'midi-arrangement',true)
+ // A short authored cycle keeps the original arrangement horizon intact.
+ const loop={start:192,end:768,ppq:960,tempo:120},duration=(loop.end-loop.start)/960*60/120
+ const looping={schemaVersion:5,kind:'capture-arrangement',duration,loop,umpRegions:ump}
+ assert.deepEqual(await inspect(looping,'capture-arrangement'),[claim('42',3,5)])
+ assert.deepEqual(await inspect({...looping,schemaVersion:6,kind:'hybrid-arrangement',midi},'hybrid-arrangement'),[{destination:'42',scope:{kind:'channels',channels:[{group:0,channel:2},{group:3,channel:5}]}}])
+ const silent={...looping,loop:{...loop,start:2304,end:2880}}
+ assert.deepEqual(await inspect(silent,'capture-arrangement'),[])
+ await inspect({...looping,duration:1},'capture-arrangement',true)
+ await inspect({...looping,schemaVersion:6,kind:'hybrid-arrangement',midi,umpRegions:collision},'hybrid-arrangement',true)
  console.log('LIVE_MIDI_RESERVATIONS_PASS: actual MIDI/UMP prefix scopes, physical port/group/channel merge, trimmed future exclusion, hybrid collision, hidden/malformed backing refusal; no devices opened')
 } finally { await rm(directory,{recursive:true,force:true}) }

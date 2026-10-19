@@ -6,10 +6,6 @@ import AVFoundation
 import CoreAudio
 import CryptoKit
 
-struct AudioFailure: Error, CustomStringConvertible {
-    let description: String
-    init(_ value: String) { description = value }
-}
 func audioChecked(_ value: OSStatus, _ operation: String) throws {
     if value != noErr { throw AudioFailure("\(operation): OSStatus \(value)") }
 }
@@ -157,7 +153,7 @@ struct Plan: Decodable {
               (!regions.isEmpty || (captured || clocked) && assets.isEmpty), Set(assets.map(\.id)).count == assets.count, Set(regions.map(\.id)).count == regions.count else { throw AudioFailure("invalid WAV arrangement plan") }
         if let loop {
             try loop.validate()
-            guard (kind == "wave-arrangement" || mixed || capturedAudio), practice == nil, duration == loop.duration else { throw AudioFailure("audio looping requires a WAV, captured audio or mixed arrangement and its authored clock") }
+            guard (kind == "wave-arrangement" || mixed || capturedAudio || pairedRegions || hybrid), practice == nil, duration == loop.duration else { throw AudioFailure("audio looping requires an arrangement and its authored clock") }
         }
         if let practice {
             guard !captured, practice.countInSeconds.isFinite, practice.countInSeconds >= 0,
@@ -201,7 +197,7 @@ struct Plan: Decodable {
             guard regionEnd.isFinite, regionEnd > region.startSeconds else { throw AudioFailure("region time is not representable") }
             // The plan duration is the exact clock end. A captured end rounds up
             // to a whole frame of its own source, never of another asset.
-            guard !clocked || regionEnd <= duration || regionEnd - duration < 1 / asset.sampleRate else {
+            guard !clocked || loop != nil || regionEnd <= duration || regionEnd - duration < 1 / asset.sampleRate else {
                 throw AudioFailure("captured audio exceeds its arrangement duration")
             }
             if let loop {
@@ -211,28 +207,22 @@ struct Plan: Decodable {
         }
         // Float arithmetic may differ by a final ULP, never by a source sample.
         let sample = assets.map { 1 / $0.sampleRate }.min() ?? 0
-        if let loop {
-            if let midi {
-                guard !midi.bindings.isEmpty else { throw AudioFailure("missing mixed MIDI destination") }
-                try midi.validate(cycle: loop.midiCycle())
-            }
-            return
-        }
         if mixed, let midi {
-            try midi.validate()
+            try midi.validate(cycle: loop?.midiCycle())
             let midiEnd = midi.regions.map(\.end).max() ?? 0
-            guard midi.duration == duration, abs(max(end, midiEnd) - duration) < sample else { throw AudioFailure("mixed duration does not match its source regions") }
+            guard loop != nil || midi.duration == duration && abs(max(end, midiEnd) - duration) < sample else { throw AudioFailure("mixed duration does not match its source regions") }
         } else if let ump {
             let events = try ump.events(), midiEnd = events.map(\.seconds).max() ?? 0
             guard ump.duration == duration, abs(max(end, midiEnd) - duration) < (sample > 0 ? sample : 1e-9) else { throw AudioFailure("capture duration does not match its source clocks") }
         } else if clocked {
             if hybrid, let midi, let umpRegions {
-                guard midi.duration == duration else { throw AudioFailure("hybrid SMF duration differs from the common clock") }
-                _ = try HybridMidiTransport(midi: midi, ump: umpRegions)
+                guard loop != nil || midi.duration == duration else { throw AudioFailure("hybrid SMF duration differs from the common clock") }
+                _ = try HybridMidiTransport(midi: midi, ump: umpRegions, cycle: loop?.midiCycle())
             }
             if let umpRegions {
-                guard umpRegions.duration == duration else { throw AudioFailure("captured MIDI duration differs from the paired clock") }
-                _ = try UmpRegionTransport(timeline: umpRegions)
+                guard loop != nil || umpRegions.duration == duration else { throw AudioFailure("captured MIDI duration differs from the paired clock") }
+                if let loop { _ = try UmpLoopPlan(timeline: umpRegions, cycle: loop.midiCycle()) }
+                else { _ = try UmpRegionTransport(timeline: umpRegions) }
                 for region in regions {
                     guard let clock = region.captureClock else { continue }
                     if region.component == .audio {
@@ -252,11 +242,21 @@ struct Plan: Decodable {
                           source.timeline.clock.numer == clock.numer, source.timeline.clock.denom == clock.denom else {
                         throw AudioFailure("paired WAV and UMP regions disagree on their source identity or clock")
                     }
+                    if loop != nil {
+                        guard let audioStart = region.startNanoseconds, let midiStart = notes.startNanoseconds else {
+                            throw AudioFailure("paired loop requires exact shared placement")
+                        }
+                        let a = try audioStart.rational(displaySeconds: region.startSeconds)
+                        let b = try midiStart.rational(displaySeconds: notes.startSeconds)
+                        guard !umpRationalLess(a.0, a.1, b.0, b.1), !umpRationalLess(b.0, b.1, a.0, a.1) else {
+                            throw AudioFailure("paired WAV and UMP exact placements disagree")
+                        }
+                    }
                 }
                 guard !umpRegions.regions.contains(where: { notes in notes.component == .midi && regions.contains(where: { $0.id == notes.id }) }) else { throw AudioFailure("separated MIDI cannot silently pair with WAV") }
             }
         } else {
-            guard abs(end - duration) < sample else { throw AudioFailure("duration does not match region sources") }
+            guard loop != nil || abs(end - duration) < sample else { throw AudioFailure("duration does not match region sources") }
         }
     }
 }
@@ -490,12 +490,14 @@ final class ArrangementTransport {
             engine.connect(voice.player, to: engine.mainMixerNode, format: voice.format)
         }
         if plan.hybrid, let notes = plan.midi, let captured = plan.umpRegions {
-            let transport = try HybridMidiTransport(midi: notes, ump: captured)
+            let transport = try HybridMidiTransport(midi: notes, ump: captured, cycle: plan.loop?.midiCycle())
             midi = transport; try transport.prepare()
             transport.onCoordinatedFailure = { [weak self] reason, error in self?.finish(reason: reason, error: error) }
             transport.onCoordinatedEnd = { [weak self] in self?.midiReachedEnd() }
         } else if let timeline = plan.umpRegions {
-            let transport = try UmpRegionTransport(timeline: timeline)
+            let transport: any CoordinatedMidiTransport
+            if let loop = plan.loop { transport = try UmpLoopTransport(timeline: timeline, cycle: loop.midiCycle()) }
+            else { transport = try UmpRegionTransport(timeline: timeline) }
             midi = transport; try transport.prepare()
             transport.onCoordinatedFailure = { [weak self] reason, error in self?.finish(reason: reason, error: error) }
             transport.onCoordinatedEnd = { [weak self] in self?.midiReachedEnd() }

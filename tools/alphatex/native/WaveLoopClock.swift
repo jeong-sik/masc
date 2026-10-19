@@ -14,9 +14,12 @@ struct WaveLoopClock: Decodable {
     }
     func midiCycle() throws -> MidiCycle {
         let clock = try layout(rate: 1e9, projectTick: start, frameCount: 1, repetitions: 1)
+        let reduction = loopGCD(UInt128(start), clock.divisor)
+        let origin = try loopMultiply(UInt128(start) / reduction, clock.period / UInt128(end - start))
         return try MidiCycle(start: Double(start) / Double(ppq) * 60 / tempo,
                              end: Double(end) / Double(ppq) * 60 / tempo,
-                             duration: duration, period: clock.period, divisor: clock.divisor)
+                             duration: duration, period: clock.period, divisor: clock.divisor,
+                             exactStart: (origin, clock.divisor / reduction))
     }
     func layout(rate: Double, projectTick: Int64, frameCount: Int64, repetitions: Int64) throws -> WaveLoopLayout {
         try validate()

@@ -65,6 +65,127 @@ struct UmpArrangement: Decodable {
     let sources: [UmpRegionSource]
     let regions: [UmpRegion]
 }
+
+// A source packet keeps its original host ticks. This window places those
+// ticks on the authored master period without rounding either clock first.
+struct UmpLoopWindow {
+    let cycle: MidiCycle
+    let period: UInt128, divisor: UInt128, masterScale: UInt128
+    let sourcePeriod: UInt128, sourceEnd: UInt128, tick: UInt128
+    let offset: Int128
+    let repetitions: UInt64
+
+    init(cycle: MidiCycle, start: (numerator: UInt128, divisor: UInt128),
+         numer: UInt32, denom: UInt32, extent: UInt128, repetitions: UInt64) throws {
+        guard let authoredOrigin = cycle.exactStart, start.divisor > 0, numer > 0, denom > 0,
+              extent > 0, repetitions > 0 else { throw MidiFailure("captured looping requires exact original clocks") }
+        func gcd(_ a: UInt128, _ b: UInt128) -> UInt128 {
+            var a = a, b = b
+            while b > 0 { let remainder = a % b; a = b; b = remainder }
+            return a
+        }
+        func lcm(_ a: UInt128, _ b: UInt128) throws -> UInt128 { try umpMultiply(a / gcd(a, b), b) }
+        func reduced(_ value: (numerator: UInt128, divisor: UInt128)) -> (numerator: UInt128, divisor: UInt128) {
+            let factor = gcd(value.numerator, value.divisor)
+            return (value.numerator / factor, value.divisor / factor)
+        }
+        let origin = reduced(authoredOrigin), start = reduced(start)
+        let reduction = gcd(UInt128(numer), UInt128(denom))
+        let sourceD = UInt128(denom) / reduction
+        let first = try lcm(cycle.divisor, origin.divisor)
+        let second = try lcm(first, start.divisor)
+        let divisor = try lcm(second, sourceD)
+        let masterScale = divisor / cycle.divisor
+        let period = try umpMultiply(cycle.period, masterScale)
+        let tick = try umpMultiply(UInt128(numer) / reduction, divisor / sourceD)
+        let sourcePeriod = try umpMultiply(extent, tick)
+        let sourceEnd = try umpMultiply(sourcePeriod, UInt128(repetitions))
+        let a = origin.numerator / origin.divisor, b = start.numerator / start.divisor
+        let ar = try umpMultiply(origin.numerator % origin.divisor, divisor / origin.divisor)
+        let br = try umpMultiply(start.numerator % start.divisor, divisor / start.divisor)
+        let positive = a > b || a == b && ar >= br
+        var whole = positive ? a - b : b - a
+        let from = positive ? ar : br, to = positive ? br : ar
+        let part: UInt128
+        if from >= to { part = from - to }
+        else { whole -= 1; part = divisor - (to - from) }
+        let distance = try umpAdd(umpMultiply(whole, divisor), part), bound = UInt128(Int128.max)
+        guard period <= bound, sourceEnd <= bound, distance <= bound,
+              !positive || distance <= bound - period else { throw MidiFailure("captured loop exceeds the native rational clock range") }
+        self.cycle = cycle; self.period = period; self.divisor = divisor; self.masterScale = masterScale
+        self.sourcePeriod = sourcePeriod; self.sourceEnd = sourceEnd; self.tick = tick
+        self.offset = positive ? Int128(distance) : -Int128(distance); self.repetitions = repetitions
+    }
+    // Return original finite source-copy phase at an exact master remainder.
+    func phase(remainder: UInt128) throws -> (copy: UInt64, local: UInt128)? {
+        guard remainder < cycle.period else { throw MidiFailure("invalid captured master phase") }
+        let phase = try umpMultiply(remainder, masterScale)
+        return try sourcePhase(at: phase)
+    }
+    func sourcePhase(at phase: UInt128) throws -> (copy: UInt64, local: UInt128)? {
+        guard phase < period else { throw MidiFailure("invalid captured master phase") }
+        let position = Int128(phase) + offset
+        guard position >= 0, UInt128(position) < sourceEnd else { return nil }
+        return (UInt64(UInt128(position) / sourcePeriod), UInt128(position) % sourcePeriod)
+    }
+    func phase(elapsed: UInt64, initial: UInt128) throws -> (index: UInt128, remainder: UInt128) {
+        guard initial < period else { throw MidiFailure("invalid captured epoch phase") }
+        let product = UInt128(elapsed).multipliedFullWidth(by: divisor)
+        let low = product.low.addingReportingOverflow(initial)
+        let high = product.high.addingReportingOverflow(low.overflow ? 1 : 0)
+        guard !high.overflow, high.partialValue < period else { throw MidiFailure("captured phase exceeds the host clock range") }
+        let result = period.dividingFullWidth((high: high.partialValue, low: low.partialValue))
+        return (result.quotient, result.remainder)
+    }
+    // ceil(t)==host is the whole exact interval (host-1,host], which may
+    // cross a master boundary and many compressed original-copy boundaries.
+    func dueBatch(elapsed: UInt64, initial: UInt128) throws ->
+        (lower: (index: UInt128, remainder: UInt128), upper: (index: UInt128, remainder: UInt128), includesLower: Bool) {
+        let upper = try phase(elapsed: elapsed, initial: initial)
+        let lower = elapsed == 0 ? upper : try phase(elapsed: elapsed - 1, initial: initial)
+        return (lower, upper, elapsed == 0)
+    }
+    func copies(lower: UInt128, upper: UInt128) throws -> ClosedRange<UInt64>? {
+        guard lower <= upper, upper <= period else { throw MidiFailure("invalid captured batch interval") }
+        let from = Int128(lower) + offset, to = Int128(upper) + offset
+        guard to >= 0, from < Int128(sourceEnd) else { return nil }
+        let first = from <= 0 ? 0 : UInt128(from) / sourcePeriod
+        let last = min(UInt128(to), sourceEnd - 1) / sourcePeriod
+        guard first <= last else { return nil }
+        return UInt64(first)...UInt64(last)
+    }
+    // Exact half-open master membership is separate from its integer deadline.
+    func packetPhase(copy: UInt64, delta: UInt128) throws -> UInt128? {
+        guard copy < repetitions, delta < sourcePeriod else { throw MidiFailure("invalid captured packet source phase") }
+        let source = try umpAdd(umpMultiply(UInt128(copy), sourcePeriod), delta)
+        if offset >= 0 {
+            let start = UInt128(offset)
+            guard source >= start, source - start < period else { return nil }
+            return source - start
+        }
+        let start = UInt128(-offset)
+        guard start < period, source < period - start else { return nil }
+        return source + start
+    }
+    // Difference first, then one ceil. A large valid common denominator may
+    // make the absolute intermediate wider than UInt128 even for host UInt64.
+    func deadline(phase: UInt128, index: UInt128, initial: UInt128, anchor: UInt64) throws -> UInt64 {
+        guard phase <= period, initial < period else { throw MidiFailure("invalid captured loop deadline phase") }
+        var wide = index.multipliedFullWidth(by: period)
+        let sum = wide.low.addingReportingOverflow(phase)
+        let high = wide.high.addingReportingOverflow(sum.overflow ? 1 : 0)
+        guard !high.overflow, high.partialValue != 0 || sum.partialValue >= initial else {
+            throw MidiFailure("captured packet precedes the common epoch")
+        }
+        let low = sum.partialValue.subtractingReportingOverflow(initial)
+        wide = (high.partialValue - (low.overflow ? 1 : 0), low.partialValue)
+        guard wide.high < divisor else { throw MidiFailure("captured deadline exceeds the host clock range") }
+        let divided = divisor.dividingFullWidth(wide)
+        let delay = try umpAdd(divided.quotient, divided.remainder == 0 ? 0 : 1)
+        guard delay <= UInt128(UInt64.max - anchor) else { throw MidiFailure("captured deadline exceeds the host clock range") }
+        return anchor + UInt64(delay)
+    }
+}
 struct UmpRegionClip {
     let id: String
     let start: UInt64

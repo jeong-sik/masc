@@ -9,7 +9,6 @@ const directory = await mkdtemp(join(tmpdir(), 'masc-practice-clock-'))
 try {
   const main = join(directory, 'main.swift'), binary = join(directory, 'probe')
   await writeFile(main, `import Foundation
-struct AudioFailure: Error { let description:String;init(_ value:String){description=value} }
 let pulse = PulseAudioClock(period:.init(numerator:"60000000000",denominator:"137"),beatsPerBar:7,duration:1_000_000)
 let layout = try pulse.layout(rate:48000,frameCount:576)
 for copy in [Int64(0),1,6,7,1_000_000,2_000_000] {

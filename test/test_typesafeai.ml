@@ -485,7 +485,21 @@ let test_only_destinations_with_a_key_are_armed () =
           [ "https://fixture.invalid/typesafe|jev-latest|k-typesafe"
           ; "https://fixture.invalid/openrouter|~typesafe/jev-latest|k-openrouter"
           ]
-          (armed ()));
+          (armed ());
+        (* The same two armed under selection = random: the draw decides
+           the sequence, so this asserts the walk still carries both — the
+           in_order case above is the one that pins the sequence. *)
+        with_policy
+          {(policy ~destinations:(typesafe, [ openrouter ]) ()) with
+           Runtime_schema.selection = Runtime_schema.Random}
+          (fun () ->
+            Alcotest.(check (list string))
+              "random selection still walks both armed destinations"
+              (List.sort compare
+                 [ "https://fixture.invalid/typesafe|jev-latest|k-typesafe"
+                 ; "https://fixture.invalid/openrouter|~typesafe/jev-latest|k-openrouter"
+                 ])
+              (List.sort compare (armed ()))));
       with_second None (fun () ->
         Alcotest.(check (list string)) "only the destination whose variable holds a key"
           [ "https://fixture.invalid/typesafe|jev-latest|k-typesafe" ]

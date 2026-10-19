@@ -226,8 +226,27 @@ received. A missing terminal result/owned collector exit records unavailability
 and old cleanup cannot downgrade a successor. The separate last-emitted-error
 record preserves notification deduplication across internal terminal reservations.
 Workspace withdrawal clears the listing and its candidates. No generic empty-page
-state or other surface's rendering contract changes here. Query-origin provenance
-for retained rows after changing sort/hearth still requires separate inspection.
+state or other surface's rendering contract changes here.
+
+Each posts receipt now carries the immutable sort/hearth query captured at dispatch,
+through both early publication and terminal fallback. A successful observation
+stores that query with its rows, including empty results. Later filter changes,
+failed replacement reads and detail enrichment cannot rewrite its origin. The
+list/sidebar and palette identify a retained observation whose query differs from
+the requested controls, even when no posts slot is pending. The age column and
+sort explanation use the observed query; header/sidebar census totals select the
+observed hearth from the independently received census, rather than the newly
+requested hearth. A successfully empty old query is not absence under a new one.
+Census selection controls continue to describe the requested hearth.
+
+Query metadata does not grant admission: the original workspace, refresh and
+opaque dataset owners still decide whether a receipt can apply. Missing terminal
+results record unavailability without manufacturing a successful query. A new
+successful receipt replaces rows and origin together; workspace withdrawal removes
+both. Query equality compares the closed sort variant and exact optional hearth,
+not a formatted label or failure text. This adds no read, owner generation, timer,
+retry or screen row; query provenance and state scenarios do not prove paint,
+current runtime correctness or a measured performance improvement.
 
 The HTTP/1 TUI dataset reader binds each existing JSON GET to the confirmed
 canonical base path and MASC root. Public-read, read-auth, permission-auth and

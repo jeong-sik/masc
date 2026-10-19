@@ -216,11 +216,13 @@ let palette_entries (state : state) =
           (if retained then "; last observed" else ""), Palette_board_hearth (Some name)))
        (Masc_tui_types.board_census_values state))
   @ (let retained=match board_posts_reading state with
-       | Masc_tui_fetched.Ready _,false -> false
+       | Masc_tui_fetched.Ready _,false -> not (board_listing_matches_requested state)
        | (Absent | Loading | Ready _ | Stale _ | Failed _),_ -> true in
+     let suffix=if retained then
+       " (last observed: " ^ board_query_label (board_posts_query state) ^ ")" else "" in
      List.map
       (fun (p : board_post) ->
-        ("post " ^ p.bp_title ^ (if retained then " (last observed)" else ""), Palette_board_post p.bp_id))
+        ("post " ^ p.bp_title ^ suffix, Palette_board_post p.bp_id))
       (board_posts state))
   @ (* With a file focused on the Code surface, the cursor line's names are
        askable: K/D/R pre-fill the matching prefix, and [palette_matches]

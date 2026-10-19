@@ -11687,10 +11687,10 @@ let remember_surface_error state ~surface ~current_error ~set_error err =
     add_event state "error"
       (Printf.sprintf "%s data unreliable: %s" surface err)
 
-let apply_board_list_load state result =
+let apply_board_list_load state receipt =
   let previous=state.board_list_reported_error in
-  apply_board_posts_load state result;
-  match result with
+  apply_board_posts_load state receipt;
+  match receipt.bpr_result with
   | Ok _ -> ()
   | Error detail ->
       state.board_list_reported_error <- Some detail;
@@ -12241,8 +12241,8 @@ let load_http_keeper_surfaces ~on_progress ~on_asks ~on_roster ~ask_request ~ros
                Option.iter (fun identity -> publish identity observation) expected_workspace) on_roster;
              observation)) roster_request)
 
-let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~ask_request ~roster_request ~refresh_ticket ~server_identity ~host ~port ~approval_ticket ~board_sort
-    ~board_hearth ~system_log_level ~provider_history_days
+let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~ask_request ~roster_request ~refresh_ticket ~server_identity ~host ~port ~approval_ticket ~board_query
+    ~system_log_level ~provider_history_days
     ~(needs : Masc_tui_types.surface_needs) : unit http_scoped_surface_readings =
   let publish_bound ~source ~dataset load =
     match server_identity, on_dataset, Fs_compat.execution_context () with
@@ -12286,15 +12286,15 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
           ~outcome:Http_refresh_progress.of_board
           (fun () -> Masc_tui_loader.read_pair
             (fun () -> publish_bound ~source:Surface_read_order.Board
-              ~dataset:(fun result -> Dataset_board_posts result) (fun () ->
+              ~dataset:(fun result -> Dataset_board_posts {bpr_query=board_query;bpr_result=result}) (fun () ->
                 observe_http_component ~on_progress Http_refresh_progress.Board_posts
-                  (fun () -> load_board_list ~host ~port ~sort_by:(board_sort_label board_sort)
-                    ~hearth:board_hearth)))
+                  (fun () -> load_board_list ~host ~port ~sort_by:(board_sort_label board_query.bq_sort)
+                    ~hearth:board_query.bq_hearth)))
             (fun () -> publish_bound ~source:Surface_read_order.Board
               ~dataset:(fun result -> Dataset_board_hearths result) (fun () ->
                 observe_http_component ~on_progress Http_refresh_progress.Board_hearths
                   (fun () -> load_board_hearths ~host ~port)))) in
-      Some board, Some hearths
+      Some {bpr_query=board_query;bpr_result=board}, Some hearths
   in
   let read_planning () =
     when_needed ~source:Surface_read_order.Planning ~outcome:Http_refresh_progress.of_result
@@ -12417,8 +12417,8 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
   ; http_account_emails
   }
 
-let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_dataset ~on_overview ~on_asks ~on_approvals ~on_roster ~ask_request ~roster_request ~refresh_ticket ~host ~port ~approval_ticket ~board_sort
-    ~board_hearth ~system_log_level ~provider_history_days
+let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_dataset ~on_overview ~on_asks ~on_approvals ~on_roster ~ask_request ~roster_request ~refresh_ticket ~host ~port ~approval_ticket ~board_query
+    ~system_log_level ~provider_history_days
     ~(needs : Masc_tui_types.surface_needs) =
   (* A process can disappear and another bind the same endpoint between two
      successful ticks. The compact /health identity is therefore revalidated
@@ -12493,7 +12493,7 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
                 load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~ask_request:None ~roster_request:None ~refresh_ticket
                   ~server_identity:http_server_identity
                   ~host ~port ~approval_ticket:None
-                  ~board_sort ~board_hearth ~system_log_level ~provider_history_days
+                  ~board_query ~system_log_level ~provider_history_days
                   ~needs:{ needs with needs_asks = false; needs_keeper_roster = false }))
     in
     let identity_after = observe_http_reader ~on_progress
@@ -12530,7 +12530,7 @@ let apply_http_scoped_data state ~datasets results =
   if state.workspace_identity = Workspace_identity_match then begin
   Option.iter (apply_approval_observation state) results.http_approvals;
   Option.iter (apply_asks_observation state) results.http_asks;
-  apply Surface_read_order.Board_posts ~received:Result.is_ok (apply_board_list_load state)
+  apply Surface_read_order.Board_posts ~received:(fun receipt -> Result.is_ok receipt.bpr_result) (apply_board_list_load state)
     results.http_board;
   apply Surface_read_order.Board_hearths ~received:Result.is_ok (Masc_tui_types.apply_board_census_load state) results.http_board_hearths;
   apply Surface_read_order.Planning_data ~received:Result.is_ok (apply_planning_load state) results.http_planning;
@@ -13524,7 +13524,7 @@ let apply_http_surfaces state ~mailbox results =
   state.connection_status <-
     refresh_status
       ([ reached results.http_overview ]
-       @ reached_if_asked results.http_scoped.http_board
+       @ reached_if_asked (Option.map (fun receipt -> receipt.bpr_result) results.http_scoped.http_board)
        @ reached_if_asked results.http_scoped.http_planning
        @ (Option.map
             (fun observation -> reached observation.ao_result)
@@ -14283,7 +14283,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     let reads, surface_request = Surface_read_order.dispatch ~kind:Surface_read_order.Full ~needs
       ~started_ns:(Mtime_clock.elapsed_ns ()) state.http_surface_reads in
     state.http_surface_reads <- reads;
-    let board_sort = state.board_sort and board_hearth = state.board_hearth in
+    let board_query = board_query state in
     let provider_history_days = state.provider_history_days in
     let system_log_level = Option.map Masc.Tui_decode.system_log_level_query
       state.system_logs_min_level in
@@ -14360,8 +14360,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
           Http_refresh_done
              (load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_dataset ~on_overview ~on_asks ~on_approvals ~on_roster ~ask_request ~roster_request
                 ~refresh_ticket ~host ~port ~approval_ticket
-                ~board_sort
-                ~board_hearth
+                ~board_query
                 ~provider_history_days
                 ~system_log_level
                 ~needs)
@@ -14386,8 +14385,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
              apply_http_refresh_outcome state ~mailbox
                (load_http_surfaces ~surface_request ~on_initial_identity:None ~on_progress:None ~on_dataset:None ~on_overview:None ~on_asks:None ~on_approvals:None ~on_roster:None ~ask_request ~roster_request
                   ~refresh_ticket ~host ~port ~approval_ticket
-                  ~board_sort
-                ~board_hearth
+                  ~board_query
                 ~provider_history_days
                 ~system_log_level
                 ~needs))
@@ -14786,7 +14784,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
     let reads, surface_request = Surface_read_order.dispatch ~kind:Surface_read_order.Navigation ~needs
       ~started_ns:(Mtime_clock.elapsed_ns ()) state.http_surface_reads in
     state.http_surface_reads <- reads;
-    let board_sort = state.board_sort and board_hearth = state.board_hearth in
+    let board_query = board_query state in
     let provider_history_days = state.provider_history_days in
     let system_log_level = Option.map Masc.Tui_decode.system_log_level_query
       state.system_logs_min_level in
@@ -14836,8 +14834,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
              ed_identity;ed_dataset}) in
         let readings = load_http_scoped_surface_reads ~on_progress:None ~on_dataset:(Some on_dataset) ~surface_request ~ask_request ~roster_request ~refresh_ticket
               ~server_identity:(Ok server_identity) ~host ~port
-              ~approval_ticket ~board_sort
-              ~board_hearth
+              ~approval_ticket ~board_query
               ~provider_history_days
               ~system_log_level
               ~needs in

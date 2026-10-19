@@ -165,7 +165,11 @@ not read, received empty and failed are distinct. Refresh/failure retains posts,
 selected identity and compose input; list/sidebar and palette qualify retained
 posts as last observed. A detail response enriches one matching row while keeping
 the list's failure and pending ownership. Missing terminal results remain
-unavailable, and workspace withdrawal clears list candidates.
+unavailable, and workspace withdrawal clears list candidates. Changing sort/hearth
+keeps the old listing with its original query until a new one succeeds, even if the
+old result was empty. The listing/sidebar and palette qualify that observation;
+its sort explanation, age column and census total use the observed query. Requested
+controls stay separate, and detail enrichment does not relabel the list.
 
 ## Usage
 

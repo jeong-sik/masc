@@ -3414,6 +3414,23 @@ let board_sort_explanation = function
   | Board_discussed -> "most replies first; newer breaks ties"
 ;;
 
+(* The desired filter and the query that actually returned a list are distinct.
+   Keep the latter with even an empty successful listing, not in mutable controls. *)
+type board_query = { bq_sort : board_sort; bq_hearth : string option }
+type board_list_snapshot = { bl_query : board_query; bl_posts : board_post list }
+type board_posts_receipt = {
+  bpr_query : board_query;
+  bpr_result : (board_post list, string) result;
+}
+
+let board_query_equal left right =
+  left.bq_sort = right.bq_sort && Option.equal String.equal left.bq_hearth right.bq_hearth
+
+let board_query_label query =
+  Printf.sprintf "%s / %s"
+    (match query.bq_hearth with None -> "all hearths" | Some hearth -> "hearth:" ^ hearth)
+    (board_sort_label query.bq_sort)
+
 (** Which of a post's two times the sort put the rows in order by. Four of the
     five orders key or break ties on the moment the post appeared; only
     [Board_updated] keys on the moment it last changed.
@@ -7989,7 +8006,7 @@ type state = {
   mutable approval_detail_scroll: int;
   mutable approval_cursor: int;
   mutable pending_approval_action: pending_approval_action option;
-  mutable board_listing: board_post list Masc_tui_fetched.view;
+  mutable board_listing: board_list_snapshot Masc_tui_fetched.view;
   mutable board_list_reported_error: string option;
       (** Last emitted list-error notice, independent of availability. Internal
           missing-result observations must not reset notification deduplication. *)
@@ -8935,8 +8952,22 @@ let can_admit_early_http_read (state : state) ~ticket ~authority identity =
   Option.is_some state.http_refresh_started_ns
   && can_admit_http_read state ~ticket ~authority identity
 
+let board_query (state : state) = { bq_sort=state.board_sort; bq_hearth=state.board_hearth }
+
+let board_posts_snapshot (state : state) = Masc_tui_fetched.value state.board_listing
+
 let board_posts (state : state) =
-  match Masc_tui_fetched.value state.board_listing with Some posts -> posts | None -> []
+  match board_posts_snapshot state with Some snapshot -> snapshot.bl_posts | None -> []
+
+(* No rows have been observed before the first success, so controls describe the
+   requested query there. Once received, even empty results keep their origin. *)
+let board_posts_query (state : state) =
+  match board_posts_snapshot state with Some snapshot -> snapshot.bl_query | None -> board_query state
+
+let board_listing_matches_requested (state : state) =
+  match board_posts_snapshot state with
+  | Some snapshot -> board_query_equal snapshot.bl_query (board_query state)
+  | None -> false
 
 let board_posts_reading (state : state) =
   let pending=Surface_read_order.pending_dataset state.http_surface_reads Surface_read_order.Board_posts in
@@ -8950,7 +8981,13 @@ let board_listing_error (state : state) =
   | Masc_tui_fetched.Stale (_,detail) | Failed detail -> Some detail
   | Absent | Loading | Ready _ -> None
 
-let apply_board_posts_load (state : state) = function
+let fail_board_posts_load (state : state) detail =
+  state.board_listing <- (match board_posts_snapshot state with
+    | Some snapshot -> Masc_tui_fetched.Stale (snapshot,detail)
+    | None -> Masc_tui_fetched.Failed detail)
+
+let apply_board_posts_load (state : state) receipt =
+  match receipt.bpr_result with
   | Ok posts ->
       let source=match state.board_mode with
         | Board_list | Board_compose -> Masc_tui_board_selection.List_cursor
@@ -8958,21 +8995,18 @@ let apply_board_posts_load (state : state) = function
       let ids posts=List.map (fun post -> post.bp_id) posts in
       let cursor=Masc_tui_board_selection.reconcile_cursor
         ~current_ids:(ids (board_posts state)) ~cursor:state.board_cursor ~source ~next_ids:(ids posts) in
-      state.board_listing <- Masc_tui_fetched.Ready posts;
+      state.board_listing <- Masc_tui_fetched.Ready {bl_query=receipt.bpr_query;bl_posts=posts};
       state.board_list_reported_error <- None;
       state.board_cursor <- cursor
-  | Error detail ->
-      state.board_listing <- (match Masc_tui_fetched.value state.board_listing with
-        | Some posts -> Masc_tui_fetched.Stale (posts,detail)
-        | None -> Masc_tui_fetched.Failed detail)
+  | Error detail -> fail_board_posts_load state detail
 
 (* Detail receipt enriches a matching row without certifying the entire list,
    changing its rank, clearing its last failure or settling its pending slot. *)
 let enrich_board_list_post (state : state) post =
   let enrich=List.map (fun current -> if String.equal current.bp_id post.bp_id then post else current) in
   state.board_listing <- (match state.board_listing with
-    | Masc_tui_fetched.Ready posts -> Masc_tui_fetched.Ready (enrich posts)
-    | Stale (posts,detail) -> Stale (enrich posts,detail)
+    | Masc_tui_fetched.Ready snapshot -> Masc_tui_fetched.Ready {snapshot with bl_posts=enrich snapshot.bl_posts}
+    | Stale (snapshot,detail) -> Stale ({snapshot with bl_posts=enrich snapshot.bl_posts},detail)
     | (Absent | Loading | Failed _) as observation -> observation)
 
 let board_census_reading (state : state) =
@@ -8988,10 +9022,10 @@ let board_census_values (state : state) =
   match Masc_tui_fetched.value state.board_census with
   | Some census -> census | None -> []
 
-let board_census_holding (state : state) =
+let board_census_holding (state : state) ~hearth =
   match board_census_reading state with
   | Masc_tui_fetched.Ready census,false ->
-      (match state.board_hearth with
+      (match hearth with
        | Some hearth -> List.assoc_opt hearth census
        | None -> Some (List.fold_left (fun total (_,count) -> total+count) 0 census))
   | (Masc_tui_fetched.Absent | Loading | Ready _ | Stale _ | Failed _),_ -> None
@@ -9012,14 +9046,14 @@ let take_http_surface_datasets (state : state) request =
   if List.mem Surface_read_order.Board_hearths datasets then
     apply_board_census_load state (Error "Census result was not observed at terminal application");
   if List.mem Surface_read_order.Board_posts datasets then
-    apply_board_posts_load state (Error "Board posts result was not observed at terminal application");
+    fail_board_posts_load state "Board posts result was not observed at terminal application";
   datasets
 
 let finish_http_surface_read (state : state) request =
   if Surface_read_order.owns_dataset state.http_surface_reads request Surface_read_order.Board_hearths then
     apply_board_census_load state (Error "Census result was not observed before the read ended");
   if Surface_read_order.owns_dataset state.http_surface_reads request Surface_read_order.Board_posts then
-    apply_board_posts_load state (Error "Board posts result was not observed before the read ended");
+    fail_board_posts_load state "Board posts result was not observed before the read ended";
   state.http_surface_reads <- Surface_read_order.finish state.http_surface_reads request
 
 let take_early_surface_dataset (state : state) ~ticket ~authority ~identity ~request ~dataset =

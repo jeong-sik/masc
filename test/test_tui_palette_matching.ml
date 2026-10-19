@@ -94,7 +94,7 @@ let test_the_palette_lists_tasks_and_posts () =
       ; priority = 2
       ; goal_ids = []
       } ];
-  state.board_listing <- Masc_tui_fetched.Ready
+  apply_board_posts_load state {bpr_query=board_query state;bpr_result=Ok
     [ { bp_id = "p-1"
       ; bp_author = "alpha"
       ; bp_title = "release evidence sweep"
@@ -107,7 +107,7 @@ let test_the_palette_lists_tasks_and_posts () =
       ; bp_kind = None
       ; bp_closed = None
       ; bp_attachments = []
-      } ];
+      } ]};
   let labels = List.map fst (palette_entries state) in
   Alcotest.(check (list string)) "one Browser destination"
     ["go Browser Lane"]
@@ -337,8 +337,8 @@ let test_a_label_starting_with_the_query_leads () =
     ; bp_attachments = []
     }
   in
-  state.board_listing <- Masc_tui_fetched.Ready
-    [ post "p-1" "deferred wakeup evidence"; post "p-2" "head 7def9c review" ];
+  apply_board_posts_load state {bpr_query=board_query state;bpr_result=Ok
+    [ post "p-1" "deferred wakeup evidence"; post "p-2" "head 7def9c review" ]};
   state.code_file <-
     landed ~path:"lib/a.ml"
       [ [ ("open ", Masc_tui_code_lexer.kind_keyword);

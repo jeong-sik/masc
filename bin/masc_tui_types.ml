@@ -6891,6 +6891,7 @@ module Browser_lane_view = struct
                                           { action =
                                               Browser_lane.(
                                                 Activate_tab | Click _ | Fill _
+                                                | Hover _ | Drag_to _
                                                 | Scroll _ | Hover_at _
                                                 | Click_at _ | Drag _
                                                 | Follow_link _ | Click_node _

@@ -361,9 +361,10 @@ try {
       element = found[0];
     } else element = browserScene({...spec,mode:'resolve'});
     if (!element.isConnected) throw new Error('element_detached');
+    if (getComputedStyle(element).visibility !== 'visible') throw new Error('element_not_visible');
     for (let node = element; node; node = node.parentElement || node.getRootNode().host) {
       const style = getComputedStyle(node);
-      if (style.display === 'none' || style.visibility !== 'visible' || Number(style.opacity) === 0)
+      if (style.display === 'none' || Number(style.opacity) === 0)
         throw new Error('element_not_visible');
     }
     for (const rect of element.getClientRects()) {

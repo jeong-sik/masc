@@ -116,6 +116,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                 { action =
                     ( Browser_lane.Activate_tab | Browser_lane.Click _
                     | Browser_lane.Fill _ | Browser_lane.Scroll _
+                    | Browser_lane.Hover _ | Browser_lane.Drag_to _
                     | Browser_lane.Hover_at _ | Browser_lane.Click_at _
                     | Browser_lane.Drag _ | Browser_lane.Follow_link _
                     | Browser_lane.Click_node _ | Browser_lane.Fill_node _ )

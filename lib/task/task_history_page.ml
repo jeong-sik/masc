@@ -4,7 +4,8 @@ module Layout = Dated_jsonl.Layout
 type position = { file : string; device : int; inode : int; before : int; anchor : string }
 type cursor = { task : string; workspace : string; ceiling : string; inventory : string; position : position }
 type error = Invalid_request | Invalid_cursor | Source_changed
-  | Invalid_event of { file : string; offset : int } | Source_unavailable
+  | Invalid_event of { file : string; offset : int }
+  | Invalid_layout of { entry : string } | Source_unavailable
 type page = { task_id : string; cursor : cursor option; events : Yojson.Safe.t list; next_cursor : cursor option }
 let hash text = Digestif.SHA256.(digest_string text |> to_hex)
 let cursor_json cursor =
@@ -53,14 +54,17 @@ let inventory ~root ~held =
   let* months=Fs_compat.read_owned_directory ~inventory_root:held ~ownership_root:root events |> owned in
   let* files=List.fold_left (fun result month ->
     let* collected=result in
+    if Layout.entry_is_foreign_to_layout month then Ok collected else
     match Layout.year_and_month_of_directory_name month with
-    | None -> Ok collected
+    | None -> Error (Invalid_layout {entry="events/" ^ month})
     | Some (year,month_number) ->
       let directory=Filename.concat events month in
       let* names=Fs_compat.read_owned_directory ~inventory_root:held ~ownership_root:root directory |> owned in
       List.fold_left (fun result name ->
         let* collected=result in
-        if not (Layout.day_file_name_is_valid ~year ~month:month_number name) then Ok collected
+        if Layout.entry_is_foreign_to_layout name then Ok collected
+        else if not (Layout.day_file_name_is_valid ~year ~month:month_number name)
+        then Error (Invalid_layout {entry="events/" ^ month ^ "/" ^ name})
         else
           let path=Filename.concat directory name in
           let* observed=Fs_compat.load_owned_regular_file_range ~ownership_root:root ~offset:0 ~max_bytes:0 path |> owned in

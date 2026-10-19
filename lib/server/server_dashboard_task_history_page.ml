@@ -23,4 +23,6 @@ let read ~config ~task_id ~limit ~cursor : status * Yojson.Safe.t =
   | Error Source_changed -> `Conflict,error "task_history_source_changed"
   | Error (Invalid_event {file;offset}) -> `Service_unavailable,
     `Assoc ["error",`String "task_history_invalid_event";"file",`String file;"offset",`Int offset]
+  | Error (Invalid_layout {entry}) -> `Service_unavailable,
+    `Assoc ["error",`String "task_history_invalid_layout";"entry",`String entry]
   | Error Source_unavailable -> `Service_unavailable,error "task_history_unavailable"

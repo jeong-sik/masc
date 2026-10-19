@@ -6,6 +6,7 @@ type error =
   | Invalid_cursor
   | Source_changed
   | Invalid_event of { file : string; offset : int }
+  | Invalid_layout of { entry : string }
   | Source_unavailable
 val cursor_to_string : cursor -> string
 val cursor_of_string : string -> (cursor, error) result
@@ -21,6 +22,6 @@ val read : config:Workspace_core.config -> task_id:string -> max_events:int ->
     that deleted/retained-away history never existed. A continuation binds the
     Task, workspace, dated inventory and original physical row boundary.
     Appends above that boundary are excluded. Replacement, removal, a changed
-    anchor, or malformed data refuses advancement. This is an observed prefix,
+    anchor, malformed data or invalid dated layout refuses advancement. This is an observed prefix,
     not an atomic multi-file snapshot. Missing/unreadable stores are errors. *)
 val to_json : page -> Yojson.Safe.t

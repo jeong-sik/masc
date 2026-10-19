@@ -27,7 +27,10 @@ distinct. No compatibility fallback should turn a failed page into the old slice
 
 The request holds an owned inventory root. Directory names come through owned
 no-follow enumeration, and files are read through the existing owned regular
-range reader. The existing dated-layout module is exposed as the sole calendar
+range reader. Non-hidden invalid month, calendar day or rotation entries
+refuse the page with a typed invalid-layout error and relative entry. The shared
+layout authority alone classifies foreign dotfiles; corrupt membership is never
+silently removed from the observed inventory. The existing dated-layout module is exposed as the sole calendar
 and segment-order authority; no second filename grammar is introduced.
 
 The cursor records a dated ceiling and an inventory fingerprint. Files above
@@ -63,6 +66,10 @@ an original prefix over multiple pages, preserves older original events,
 excludes a later same-Task append, refuses a different Task borrowing its cursor,
 roundtrips the canonical producer cursor, reads the shared HTTP/H2 response and
 refuses a replacement event store instead of reporting an exhausted history.
+The scenario also refuses invalid month, calendar day and rotation entries
+beside valid history and in an otherwise empty replacement store, while allowing
+foreign dotfiles under the shared layout rules. The HTTP producer returns the
+typed failure rather than a successful exhausted prefix.
 These are resource/protocol assertions inside the original scenario, with no
 layout, wording, row-order, snapshot, PTY, helper-mirror or call-count assertions.
 The scenarios are authored and **unexecuted**.

@@ -1012,10 +1012,47 @@ let test_first_loss_retains_unproven_effects mode () =
         (status=`OK && Json_util.get_string json "cursor"=Some encoded
          && Json_util.get_string json "task_id"=Some source.ats_task_id);
       let events=Filename.concat (Workspace.masc_dir config) "events" in
+      (* Corrupt dated membership is an unavailable source, even beside valid
+         history. Only the shared layout authority's foreign entries are ignored. *)
+      let refuse_invalid expected =
+        let rejected = function
+          | Error (History.Invalid_layout {entry}) when entry=expected -> true
+          | Ok _ | Error _ -> false in
+        check bool "invalid dated layout refuses a fresh observed prefix" true
+          (rejected (History.read ~config ~task_id:source.ats_task_id ~max_events:1 ()));
+        check bool "invalid dated layout refuses an original continuation" true
+          (rejected (History.read ~config ~task_id:source.ats_task_id ~max_events:1 ~cursor ()));
+        let status,json=Server_dashboard_task_history_page.read ~config
+          ~task_id:(Some source.ats_task_id) ~limit:(Some "1") ~cursor:None in
+        check bool "both HTTP transports receive the typed corrupt-layout failure" true
+          (status=`Service_unavailable && Json_util.get_string json "error"=Some "task_history_invalid_layout") in
+      let invalid_month=Filename.concat events "2026-13" in
+      Unix.mkdir invalid_month 0o700;
+      Fun.protect ~finally:(fun () -> Unix.rmdir invalid_month)
+        (fun () -> refuse_invalid "events/2026-13");
+      let month=Filename.concat events "2096-02" in
+      Unix.mkdir month 0o700;
+      Fun.protect ~finally:(fun () -> Unix.rmdir month) (fun () ->
+        List.iter (fun name ->
+          let path=Filename.concat month name in
+          let oc=open_out_bin path in close_out oc;
+          Fun.protect ~finally:(fun () -> Sys.remove path)
+            (fun () -> refuse_invalid ("events/2096-02/" ^ name)))
+          ["32.jsonl";"29.0000.jsonl"];
+        let hidden=Filename.concat month ".DS_Store" in
+        let oc=open_out_bin hidden in close_out oc;
+        Fun.protect ~finally:(fun () -> Sys.remove hidden) (fun () ->
+          match History.read ~config ~task_id:source.ats_task_id ~max_events:1 () with
+          | Ok page when page.events<>[] -> ()
+          | Ok _ | Error _ -> fail "foreign dotfile changed the original history observation"));
       let parked=Filename.concat base_path "original-event-prefix" in
       Unix.rename events parked;
       Fun.protect ~finally:(fun () -> if Sys.file_exists events then Unix.rmdir events;Unix.rename parked events) (fun () ->
         Unix.mkdir events 0o700;
+        let invalid=Filename.concat events "2026-13" in
+        Unix.mkdir invalid 0o700;
+        Fun.protect ~finally:(fun () -> Unix.rmdir invalid)
+          (fun () -> refuse_invalid "events/2026-13");
         match History.read ~config ~task_id:source.ats_task_id ~max_events:1 ~cursor () with
         | Error History.Source_changed -> ()
         | _ -> fail "replacement event store became an exhausted original history");

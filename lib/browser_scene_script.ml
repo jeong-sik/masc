@@ -133,7 +133,6 @@ let runtime = {js|function browserScene(args) {
   // host's 8 MiB incoming reply bound. Text/node limits alone do not bound
   // page metadata or rectangle arrays; the complete payload is checked below.
   const responseByteLimit = 1024 * 1024;
-  const nodeLimit = 200;
   const nodes = [], styles = new WeakMap();
   let chars = 0, truncated = false;
   const css = element => {
@@ -309,7 +308,7 @@ let runtime = {js|function browserScene(args) {
   };
   const describe = (kind, element, rawText, rects, extra={}) => {
     if (!rects.length) return;
-    if (nodes.length >= nodeLimit || chars >= maxChars) { truncated=true; return; }
+    if (chars >= maxChars) { truncated=true; return; }
     const style=css(element), points=Array.from(rawText);
     const text=points.slice(0,maxChars-chars).join('');
     if (text.length !== rawText.length) truncated=true;

@@ -639,7 +639,10 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       case 'seek': {
         if (!['playing', 'paused'].includes(transport.kind)) throw new Error('Playback is not ready')
         transportPending = true
-        transport.handle.seek(value.tick / editor.project.ppq * 60 / editor.project.tempo - (transport.originSeconds ?? 0))
+        // The native horizon can round outward from the nominal beat span.
+        // The user's exact range end still means the next cycle's phase zero.
+        transport.handle.seek(value.tick === editor.project.playbackLoop?.end ? 0
+          : value.tick / editor.project.ppq * 60 / editor.project.tempo - (transport.originSeconds ?? 0))
         break
       }
       case 'midi-output': case 'midi-port': case 'midi-source': case 'output': case 'mixed-output':

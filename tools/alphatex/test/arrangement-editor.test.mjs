@@ -972,6 +972,7 @@ test('loop decisions preserve project range and source ticks, map global seek to
   const player=view.observed.players[0];assert.equal(player.options.loop,true)
   view.key('space');await flush();view.command('seek 2');await flush();view.key('space');await flush()
   assert.deepEqual(player.commands.slice(0,3),['pause',['seek',.6],'resume'])
+  view.command('seek 3');await flush();assert.deepEqual(player.commands.at(-1),['seek',0])
   view.command('input audio-in');view.command('record');await flush();assert.equal(view.observed.captures.length,0)
   view.command('loop off');await flush();assert.ok(player.commands.includes('stop'))
   view.command('undo');view.key('q');player.finish();await view.done

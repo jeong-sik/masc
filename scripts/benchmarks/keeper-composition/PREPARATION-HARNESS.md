@@ -147,6 +147,34 @@ Input agreement and artifact hashes are not source/build, independent physical
 execution, model identity, Task progress or speedup proof. `speedup` and latency
 percentiles remain null, and execution/source-build verdicts remain false.
 
+Each new native driver invocation owns an opaque `clock_ref`. Its counter
+observations use `clock_domain: driver_counter` and canonical unsigned 64-bit
+decimal `monotonic_ns` strings. `epoch` remains wall-clock metadata. The reader
+does not convert legacy floating-point or untagged observations into exact
+counter samples; their raw receipts remain in the denominator.
+
+Every admitted attempt has a `timing_report`, independently of its reported
+success/failure/unfinished outcome. `intervals` covers source enqueue, cycle,
+cycle-return to validation, and enqueue/cycle-entry to the native-reported useful
+commit. Available intervals retain exact string endpoints and `duration_ns`;
+unavailable intervals carry a reason instead of zero or a guessed timestamp.
+Both endpoints must name the receipt's counter and must not regress. Wall-clock
+intake/replay observations are retained without arithmetic, and observations
+from separate driver invocations are never subtracted from one another.
+
+Useful-commit intervals additionally require recorded metadata agreement:
+frozen fixture/hash and original Task/trace, canonical turn record, original
+admission/intake marker and marker digest, and complete Tool-commit journal
+hash/coverage with a unique full-identity join to the original selection read.
+The nominated commit must fall within the reported cycle. Missing or mismatched
+evidence withholds that useful interval while valid cycle spans remain visible.
+`timing_report.identity` retains artifact hashes and its join outcome. These are
+recorded metadata checks, not reexecution or independent verification of SDK
+ownership, stdout content, first-successful-leaf semantics or physical execution.
+No averages, percentiles, ratios or speedup verdicts are derived here. The
+additional native observation encoding and offline file reads have unmeasured
+overhead; matched actual cohorts and full protocol verification remain separate.
+
 Each arm actually creates an addressed Board post, verifies one exact durable
 queue selection, classifies lifecycle admission, and calls the explicit heartbeat
 cycle through its real Owner. Prompt construction, Runtime selection, streaming

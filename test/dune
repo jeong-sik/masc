@@ -6151,7 +6151,7 @@
  (name keeper_preparation_trial_driver)
  (modules keeper_preparation_trial_driver keeper_preparation_http_observation)
  (libraries masc_test_deps keeper_owned_job_fixture_transport
-  masc.skill_config masc.skill_reference masc.skill_snapshot_service mtime.clock.os))
+  masc.skill_config masc.skill_reference masc.skill_snapshot_service masc.masc_random_id mtime.clock.os))
 
 ; Explicit synthetic functional case. The coordinator invokes the real driver.
 (rule

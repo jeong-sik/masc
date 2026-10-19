@@ -270,8 +270,8 @@ def malformed_final_evidence(args, root, head):
                 receipt["verified_stdout_read_execution_ids"] and receipt["backend_calls_after_ready"] == 0,
                 "failure lost independently verified original source and physical work")
         require(timing["first_useful_leaf"]["state"] == "observed" and
-                timing["cycle_returned"]["monotonic_ns"] >= timing["cycle_entered"]["monotonic_ns"] and
-                timing["validation_finished"]["monotonic_ns"] >= timing["cycle_returned"]["monotonic_ns"],
+                int(timing["cycle_returned"]["monotonic_ns"]) >= int(timing["cycle_entered"]["monotonic_ns"]) and
+                int(timing["validation_finished"]["monotonic_ns"]) >= int(timing["cycle_returned"]["monotonic_ns"]),
                 "failed attempt lost its actual measurement clocks")
         turn = read((output / entry["path"]).parent / "turn-record.json")
         usage = receipt["provider_metrics"]["reported_usage"]
@@ -473,6 +473,111 @@ def offline_capture_comparison(coordinator: Path) -> None:
     require(refused.returncode == 2 and frozen_files() == before, "report mode accepted execution arguments")
 
 
+def offline_counter_intervals(coordinator: Path) -> None:
+    root = Path(tempfile.mkdtemp(prefix="masc-preparation-counter-")).resolve()
+    def write_json(relative, value):
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        raw = (json.dumps(value) + "\n").encode()
+        path.write_bytes(raw)
+        return hashlib.sha256(raw).hexdigest()
+    experiment = {"schema_version": 1, "case": "upstream_inline", "pairs": 1,
+                  "runtime": {"mode": "synthetic_streaming", "model_id": "counter-fixture",
+                              "max_context_tokens": 4096, "max_output_tokens": 1024}, "synthetic_outcome": "success"}
+    experiment_hash = write_json("experiment.json", experiment)
+    fixture = {"keeper": "preparation-harness", "task_id": "original-task", "trace_id": "original-trace",
+               "selection_sha256": "original-input"}
+    fixture_hash = write_json("pair-0000/snapshot/preparation-fixture.json", fixture)
+    write_json("pair-0000/common-inputs.json", {"files": {"preparation-fixture.json": {"sha256": fixture_hash}}})
+    attempts, receipts = [], {}
+    base = 2**53 + 17
+    for arm in ("direct", "exact_skill"):
+        prefix = "pair-0000/" + arm
+        clock_ref = "counter-" + arm
+        def stamp(offset):
+            return {"epoch": -float(offset), "clock_domain": "driver_counter", "clock_ref": clock_ref,
+                    "monotonic_ns": str(base + offset)}
+        admission = {"stimulus_id": "stimulus-" + arm, "source_snapshot_ref": "source-" + arm,
+                     "admitted_revision": "1", "first_admitted_at": 1000.0,
+                     "enqueue_entered": stamp(0), "enqueue_returned": stamp(1)}
+        sources = [{key: admission[key] for key in
+                    ("stimulus_id", "source_snapshot_ref", "admitted_revision", "first_admitted_at")}]
+        marker = {"event": "turn_started", "keeper_name": "preparation-harness", "trace_id": "original-trace", "keeper_turn_id": 1,
+                  "ts": "2026-10-19T00:00:00Z",
+                  "decision": {"intake_sources": sources, "clock_refs": {"source_clock": "wall"}}}
+        marker_hash = write_json(prefix + "/turn-entry-manifest.json", marker)
+        write_json(prefix + "/admission.json", admission)
+        write_json(prefix + "/turn-record.json", {"keeper": "preparation-harness", "turn_ref": "turn-" + arm,
+                   "trace_id": "original-trace", "absolute_turn": 1})
+        identity = {"keeper": "preparation-harness", "tool": "keeper_artifact_read", "execution_id": "exec-" + arm,
+                    "tool_use_id": "tool-" + arm, "trace_id": "original-trace", "task_id": "original-task",
+                    "keeper_turn_id": 1, "composition_node_id": None, "parent_tool_use_id": None}
+        event = dict(identity, schema_version=1, boundary="durable_tool_call_commit", observed=stamp(20))
+        event_hash = write_json(prefix + "/tool-commit-events.jsonl", event)
+        write_json(prefix + "/tool-calls.json", [dict(identity, record_kind="tool_call", input={"sha256": "original-input"})])
+        leaf = {key: value for key, value in identity.items() if key not in ("keeper", "tool")}
+        leaf.update(state="observed", boundary="durable_tool_call_commit", observed=stamp(20))
+        receipt = {"schema_version": 1, "case": "upstream_inline", "strategy": arm,
+                   "outcome": "explicit_failure" if arm == "direct" else "unfinished", "clock_ref": clock_ref,
+                   "turn_ref": "turn-" + arm, "fixture_sha256": fixture_hash,
+                   "input": {"_blob": {"sha256": "original-input"}},
+                   "tool_commit_observation": {"boundary": "durable_tool_call_commit",
+                       "mode": "scoped_synchronous_commit", "coverage": "complete", "delivery_failures": 0,
+                       "events": 1, "events_sha256": event_hash},
+                   "timing": {"admission": admission, "cycle_entered": stamp(10), "cycle_returned": stamp(30),
+                       "validation_finished": stamp(40), "first_useful_leaf": leaf,
+                       "intake_turn_entry": {"state": "observed", "trace_id": "original-trace", "keeper_turn_id": 1,
+                           "ts": marker["ts"], "sources": sources, "clock_refs": marker["decision"]["clock_refs"],
+                           "manifest_sha256": marker_hash}}}
+        relative = prefix + "/attempt.json"
+        write_json(relative, receipt)
+        attempts.append({"pair": 0, "strategy": arm, "path": relative})
+        receipts[arm] = receipt
+    write_json("manifest.json", {"schema_version": 1, "experiment_sha256": experiment_hash, "expected_attempts": attempts})
+    def report():
+        before = {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+                  for p in root.rglob("*") if p.is_file()}
+        result = subprocess.run([sys.executable, str(coordinator.resolve()), "--report-from", str(root)],
+                                capture_output=True, text=True, check=False)
+        require(result.returncode == 0, "counter report failed: " + result.stderr)
+        require(before == {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+                           for p in root.rglob("*") if p.is_file()}, "counter report changed evidence")
+        parsed = json.loads(result.stdout)
+        require(parsed["expected"] == 2 and parsed["outcomes"] == {"correct": 0, "explicit_failure": 1, "unfinished": 1},
+                "failed/partial observations left the denominator")
+        require(parsed["speedup"] is None and parsed["execution_verified"] is False, "reported intervals became execution proof")
+        return {r["declared_attempt"]["strategy"]: r["timing_report"] for r in parsed["attempts"]}
+    for item in report().values():
+        require(item["identity"]["state"] == "matched" and item["wall_clock_arithmetic"] is False,
+                "original source/Task/commit metadata did not join")
+        span = item["intervals"]["enqueue_to_reported_useful_commit"]
+        require(span["duration_ns"] == "20" and span["start_ns"] == str(base), "counter precision was rounded")
+    receipt = receipts["exact_skill"]
+    receipt["timing"]["first_useful_leaf"]["task_id"] = "foreign-task"
+    write_json("pair-0000/exact_skill/attempt.json", receipt)
+    require(report()["exact_skill"]["intervals"]["enqueue_to_reported_useful_commit"]["state"] == "unavailable",
+            "a foreign Task supplied a useful-work interval")
+    receipt["timing"]["first_useful_leaf"]["task_id"] = "original-task"
+    receipt["timing"]["cycle_returned"]["clock_ref"] = "foreign-counter"
+    write_json("pair-0000/exact_skill/attempt.json", receipt)
+    require(report()["exact_skill"]["intervals"]["cycle"]["state"] == "unavailable", "foreign clocks were subtracted")
+    receipt["timing"]["cycle_returned"]["clock_ref"] = receipt["clock_ref"]
+    receipt["timing"]["cycle_returned"]["monotonic_ns"] = str(base + 5)
+    write_json("pair-0000/exact_skill/attempt.json", receipt)
+    require(report()["exact_skill"]["intervals"]["cycle"]["reason"] == "counter_time_regression", "negative span was admitted")
+    receipt["timing"]["cycle_returned"] = {"epoch": 1.0, "monotonic_ns": float(base + 30)}
+    write_json("pair-0000/exact_skill/attempt.json", receipt)
+    require(report()["exact_skill"]["intervals"]["cycle"]["state"] == "unavailable", "legacy float gained exact counter identity")
+    receipt["timing"]["cycle_returned"] = {"epoch": -30.0, "clock_domain": "driver_counter",
+        "clock_ref": receipt["clock_ref"], "monotonic_ns": str(base + 30)}
+    write_json("pair-0000/exact_skill/attempt.json", receipt)
+    (root / "pair-0000/exact_skill/tool-commit-events.jsonl").unlink()
+    incomplete = report()["exact_skill"]
+    require(incomplete["identity"]["state"] == "missing" and incomplete["intervals"]["cycle"]["state"] == "available"
+            and incomplete["intervals"]["enqueue_to_reported_useful_commit"]["state"] == "unavailable",
+            "missing commit evidence erased valid cycle timing or fabricated useful work")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--driver", type=Path, required=True)
@@ -484,6 +589,7 @@ def main():
     parser.add_argument("--max-output-tokens", type=int, required=True)
     args = parser.parse_args()
     offline_capture_comparison(args.coordinator)
+    offline_counter_intervals(args.coordinator)
     # This is source identity, not a claim that an external binary was built
     # from it. The actual driver SHA is independently recorded by coordinator.
     head = subprocess.check_output(["git", "-C", str(args.repository_root.resolve()),
@@ -508,6 +614,11 @@ def main():
     require(summary["strategy_compliant"] == 2, "actual execution ignored an assigned strategy")
     require(summary["speedup"] is None and summary["latency_percentiles"] is None,
             "synthetic protocol case must not manufacture speedup")
+    for observed in summary["attempts"]:
+        timing_report = observed["timing_report"]
+        require(timing_report["identity"]["state"] == "matched"
+                and all(span["state"] == "available" for span in timing_report["intervals"].values()),
+                "actual native receipt lost its clock/source/Task/commit interval join")
     require({entry["strategy"] for entry in manifest["expected_attempts"]} == {"direct", "exact_skill"},
             "assigned arms changed")
     receipts = []
@@ -559,7 +670,7 @@ def main():
                 "canonical admission identity was not joined")
         require(isinstance(admission["first_admitted_at"], (float, int)) and
                 math.isfinite(admission["first_admitted_at"]), "durable admission clock is unknown")
-        start, end = admission["enqueue_entered"]["monotonic_ns"], useful["observed"]["monotonic_ns"]
+        start, end = int(admission["enqueue_entered"]["monotonic_ns"]), int(useful["observed"]["monotonic_ns"])
         require(math.isfinite(start) and math.isfinite(end) and end >= start,
                 "within-process admission/useful observations regress")
         require(read(directory / "process.json")["returncode"] == 0, "driver did not finish cleanly")
@@ -634,6 +745,8 @@ def main():
         require(receipts[0][field] == receipts[1][field], "paired common identity differs: " + field)
     require(receipts[0]["timing"]["admission"]["stimulus_id"] != receipts[1]["timing"]["admission"]["stimulus_id"],
             "second arm reused first arm's measured source")
+    require(receipts[0]["clock_ref"] != receipts[1]["clock_ref"],
+            "separate driver invocations reused one counter owner")
     print("PREPARATION_FUNCTIONAL_PASS " + json.dumps({"case": "upstream_inline", "expected": 2,
         "correct": 2, "unfinished": 0, "real_model": False, "speedup": None,
         "evidence": str(root), "summary_sha256": hashlib.sha256((output / "summary.json").read_bytes()).hexdigest()}))

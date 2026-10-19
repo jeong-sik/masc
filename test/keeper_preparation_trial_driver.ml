@@ -32,8 +32,15 @@ let sha bytes = Digestif.SHA256.(digest_string bytes |> to_hex)
 let field name value = member name value
 let string name value = field name value |> to_string
 let integer name value = field name value |> to_int
-let clock epoch counter = `Assoc ["epoch",`Float epoch;"monotonic_ns",`Float counter]
-let now counter = clock (Unix.gettimeofday ()) (Mtime.Span.to_float_ns (Mtime_clock.count counter))
+type trial_clock = { tc_counter : Mtime_clock.counter; tc_ref : string }
+
+let now counter =
+  (* Epoch is wall-clock metadata, never a counter endpoint. The opaque ref
+     names this driver invocation's counter; setup and each arm own new refs. *)
+  let elapsed = Mtime_clock.count counter.tc_counter |> Mtime.Span.to_uint64_ns in
+  `Assoc ["epoch",`Float (Unix.gettimeofday ());
+    "clock_domain",`String "driver_counter";"clock_ref",`String counter.tc_ref;
+    "monotonic_ns",`String (Printf.sprintf "%Lu" elapsed)]
 type preparation_stage =
   | Initialize_workspace | Publish_snapshot | Install_owner | Create_keeper
   | Register_keeper | Claim_task | Build_bundle | Start_job of int | Collect_job of int
@@ -1186,6 +1193,7 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
     else Some 0 in
   let synthetic = match runtime_mode runtime with Synthetic_streaming -> true | Configured_http _ -> false in
   let observations = ["schema_version",`Int 1;
+    "clock_ref",`String counter.tc_ref;
     "scope",`String (if synthetic then "synthetic_isolated_keeper_explicit_cycle_preparation"
       else "configured_http_isolated_keeper_explicit_cycle_preparation");
     "case",field "case" experiment;
@@ -1259,9 +1267,10 @@ let main () =
     (fun value -> failwith ("unexpected argument: " ^ value)) "keeper_preparation_trial_driver";
   require (!base<>"" && not (Filename.is_relative !base)) "--base must be explicit and absolute";
   require (!receipt<>"" && not (Filename.is_relative !receipt)) "--receipt must be explicit and absolute";
-  let counter = Mtime_clock.counter () in
+  (* NDT-OK: invocation-local observation owner; never scheduling or admission authority. *)
+  let counter = {tc_counter=Mtime_clock.counter ();tc_ref=Random_id.uuid_v7 ()} in
   let initial = `Assoc ["schema_version",`Int 1;"outcome",`String "unfinished";"mode",`String !mode;
-      "strategy",`String !strategy;"started",now counter] in
+      "strategy",`String !strategy;"clock_ref",`String counter.tc_ref;"started",now counter] in
   json !receipt initial;
   try
     let experiment = load !experiment_path in

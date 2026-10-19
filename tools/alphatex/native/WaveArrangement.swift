@@ -458,13 +458,15 @@ final class ArrangementTransport {
     }
     func checkOutput() throws {
         let alive = try deviceNumber(device.object, kAudioDevicePropertyDeviceIsAlive)
+        let currentBufferFrames = try deviceNumber(device.object, kAudioDevicePropertyBufferFrameSize)
+        guard currentBufferFrames == bufferFrames else { throw AudioFailure("output hardware buffer size changed during playback; restart or remeasure") }
         guard alive != 0, try outputChannels(device.object) >= Int(renderChannels),
               engine.outputNode.outputFormat(forBus: 0).channelCount == renderChannels, try deviceString(device.object, kAudioDevicePropertyDeviceUID) == device.uid,
               engine.outputNode.auAudioUnit.deviceID == device.object else { throw AudioFailure("selected output is unavailable or changed") }
         if state == .playing && !engine.isRunning { throw AudioFailure("audio engine stopped after output configuration changed") }
         for region in plan.regions {
             try region.calibrationOutput?.validate(deviceUID: device.uid, rate: engine.outputNode.outputFormat(forBus: 0).sampleRate,
-                                                  frames: try deviceNumber(device.object, kAudioDevicePropertyBufferFrameSize))
+                                                  frames: currentBufferFrames)
         }
     }
     func currentTime() -> Double {

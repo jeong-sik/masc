@@ -375,6 +375,8 @@ let durable_consumer_basenames =
      independently of a surviving Keeper transcript or tool-call row. *)
   ; "skill-composition-evidence-v1"
   ; "keeper_msg_requests"
+  (* Published reports own all revisions independently of chat/log retention. *)
+  ; "published_artifacts"
   ]
 ;;
 

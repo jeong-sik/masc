@@ -1,0 +1,107 @@
+# Report artifacts
+
+## Outcome
+
+A Keeper can publish a report, document or self-contained HTML result that the
+operator can reopen independently of the conversation. The dashboard has an
+Artifacts section with a searchable list and a reader. A conversation card and
+the list open the same stable artifact link. Revisions preserve previous bytes.
+
+This is the requested Claude Artifacts interaction applied to MASC's existing
+workspace, identity and dashboard. It does not require another hosting service.
+
+## User flow
+
+1. A Keeper calls `keeper_artifact_publish` with title, summary, format and
+   content. Markdown and HTML are explicit formats, not guessed from prose.
+2. Publication persists the exact body before publishing its metadata. The
+   author comes from the running Keeper identity. Task and Goal references are
+   optional explicit source references.
+3. The tool returns the artifact ID, revision and dashboard URL. The dashboard
+   renders a compact open card for the successful publication tool result in the
+   conversation. The Keeper includes the returned link in its report to users
+   of other channels.
+4. Work → Artifacts shows title, author, summary and update time. Selecting a
+   result opens the reader beside the list. Search filters title, summary and
+   author. Empty, loading, missing and failed states remain distinguishable.
+5. The reader provides rendered/source views, revision selection, copy-link and
+   exact-source download. It links to the author and any Task or Goal.
+6. Updating an artifact requires its ID and expected latest revision. A stale
+   revision produces a conflict without overwriting another publication. The
+   stable link follows the latest version; a version link is immutable.
+
+Existing files can be published by passing their body through the same API or
+tool. Runtime directories and private conversations are not recursively indexed.
+The report producer chooses which output is a standalone artifact.
+
+## Storage and authority
+
+- Root: `<base-path>/.masc/published_artifacts/`, resolved from workspace config.
+- One atomically replaced metadata file per artifact, with newest-first revision
+  metadata. A metadata file is the sole publication authority; there is no second
+  mutable index or separate latest pointer to reconcile.
+- Revision bodies use the existing durable content-addressed `Tool_blob_store`.
+  Metadata holds the digest, byte length, explicit format, title, summary, author,
+  timestamp and optional source references for every revision.
+- Publication takes the artifact transaction lock, checks the expected revision,
+  stores bytes durably, and commits metadata durably. Failure leaves the previous
+  revision authoritative. A blob without metadata is not a published artifact.
+- Listing reads only owned artifact metadata, sorts by update time and never
+  reads all bodies. A missing/corrupt entry is reported as a diagnostic, not
+  silently converted into an empty successful list.
+- Stored IDs, versions, formats and references are validated at boundaries.
+  JSON decoding rejects unknown formats or malformed metadata.
+- Published content has no automatic expiry. Existing offline blob maintenance
+  must preserve references from the artifact catalog.
+
+## HTTP and tool contracts
+
+- `GET /api/v1/published-artifacts`: metadata list plus per-entry diagnostics.
+- `GET /api/v1/published-artifacts/<id>?revision=<n>`: selected revision, exact
+  body and available revision metadata. Omitted revision means latest.
+- `POST /api/v1/published-artifacts`: same publication request as the tool;
+  author is the authenticated actor, never supplied in JSON.
+- Existing dashboard token authentication and admin permission apply to these
+  workspace report surfaces. Responses are private and uncached.
+- `keeper_artifact_publish`: the same store operation using the Keeper's own
+  identity. Publication is non-terminal: the Keeper can continue and report its
+  durable link. No automatic duplicate Board/chat post is sent by the tool.
+- Link: `/dashboard/#/workspace?section=artifacts&artifact=<id>`; append
+  `&revision=<n>` for a fixed revision.
+
+## Rendering
+
+Markdown uses the existing lazy Markdown renderer, including its sanitizer and
+diagram handling. HTML uses a sandboxed `srcdoc` frame with scripts allowed for
+self-contained interactive results, without same-origin, popup, form or parent
+navigation permissions. A prepended CSP blocks external subresource/fetch, object and nested
+frame loads; inline script/style and embedded data images remain available.
+The isolated document can navigate itself; this is not a general network
+sandbox. It cannot navigate the parent dashboard or read its storage.
+Source is displayed as text. Downloads contain the original stored bytes.
+Bearer tokens and dashboard credentials are never passed into artifact frames.
+
+## Implementation and evidence
+
+1. Durable catalog, publication tool and HTTP contract. Verify creation,
+   restart/read, two revisions, stale-update conflict and exact body integrity;
+   inspect auth, malformed input and failed-publication behavior.
+2. Navigation, list/reader and publication card. Verify through component tests
+   that exercise actual API responses, selection, revision/source views, search,
+   missing/error states and stale-request handling. Run dashboard typecheck/lint.
+3. Use the real HTTP service in an isolated workspace to publish Markdown and
+   interactive HTML, reload their links and capture desktop/mobile browser
+   evidence. Browser execution must show HTML interaction and isolation.
+4. Independent adversarial source review of the final change. Ordinary MASC
+   stacks follow the repository's source-review workflow; source checks do not
+   establish installed runtime behavior or deployment.
+
+## Design references
+
+- Claude Artifacts: https://support.claude.com/en/articles/17153992-what-are-artifacts-and-how-do-i-use-them
+- HTML iframe sandbox: https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/iframe#sandbox
+- Existing sources: `components/chat/artifact-panel.ts`,
+  `components/common/markdown.ts`, `Tool_blob_store`, workspace configuration.
+
+External references checked 2026-10-19 KST. These references establish the
+interaction and browser primitives; the checks above establish MASC behavior.

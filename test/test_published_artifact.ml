@@ -1,0 +1,281 @@
+module A = Masc.Published_artifact
+module S = Masc.Published_artifact_store
+
+let with_base f =
+  let base = Filename.temp_file "published_artifact" "" in
+  Sys.remove base;
+  Unix.mkdir base 0o700;
+  let rec remove path =
+    match (Unix.lstat path).Unix.st_kind with
+    | Unix.S_DIR ->
+      Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path
+    | Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
+      Unix.unlink path in
+  Fun.protect ~finally:(fun () -> remove base) (fun () -> f base)
+
+let store_ok = function
+  | Ok value -> value
+  | Error error -> Alcotest.fail (S.error_message error)
+
+let request_json ?id ?expected_revision ?(title = "보고서") ?(format = "markdown") content =
+  let update = match id, expected_revision with
+    | None, None -> []
+    | Some id, Some revision -> ["id", `String id; "expected_revision", `Int revision]
+    | None, Some _ | Some _, None -> Alcotest.fail "test update is incomplete" in
+  `Assoc (update @ ["title", `String title; "summary", `String "작업 결과";
+                   "format", `String format; "content", `String content;
+                   "task_id", `String "task-123"; "goal_id", `String "goal-456"])
+
+let request ?id ?expected_revision ?title ?format content =
+  match A.request_of_json (request_json ?id ?expected_revision ?title ?format content) with
+  | Ok request -> request
+  | Error message -> Alcotest.fail message
+
+let publish ~base_path request = S.publish ~base_path ~author:"keeper-연구" request |> store_ok
+let masc_dir base = Masc.Common.masc_dir_from_base_path ~base_path:base
+let catalog_dir base = Filename.concat (masc_dir base) "published_artifacts"
+let metadata_path base id = Filename.concat (catalog_dir base) (id ^ ".json")
+
+let check_unavailable = function
+  | Error (S.Unavailable _) -> ()
+  | Error error -> Alcotest.failf "expected unavailable, received %s" (S.error_message error)
+  | Ok _ -> Alcotest.fail "unsafe storage was accepted"
+
+let test_create_and_revise () = with_base (fun base_path ->
+  let empty = S.list ~base_path |> store_ok in
+  Alcotest.(check int) "fresh catalog is empty" 0 (List.length empty.artifacts);
+  let original = "\239\187\191# 관찰 보고서\r\n\r\n| 항목 | 결과 |\r\n|---|---|\r\n| 보존 | ✅ |\r\n" in
+  let artifact, first = publish ~base_path (request original) in
+  Alcotest.(check int) "first revision" 1 first.revision;
+  (* Read from durable metadata and a newly created blob store; no publisher
+     object or in-memory catalog is carried across this boundary. *)
+  Masc.Keeper_fs.clear_dir_cache ();
+  let recovered, _, content = S.read ~base_path ~id:artifact.id ~revision:None |> store_ok in
+  Alcotest.(check string) "fresh reader preserves exact source bytes" original content;
+  Alcotest.(check string) "identity recovered" artifact.id recovered.id;
+  let next = "<!doctype html><html><body><h1>두 번째 보고서</h1></body></html>\n" in
+  let _, second = publish ~base_path
+    (request ~id:artifact.id ~expected_revision:1 ~format:"html" next) in
+  Alcotest.(check int) "second revision" 2 second.revision;
+  (match S.publish ~base_path ~author:"keeper-연구"
+     (request ~id:artifact.id ~expected_revision:1 "stale update") with
+   | Error (S.Conflict { expected = 1; actual = 2 }) -> ()
+   | Error error -> Alcotest.fail (S.error_message error)
+   | Ok _ -> Alcotest.fail "stale revision overwrote current report");
+  let _, _, latest = S.read ~base_path ~id:artifact.id ~revision:None |> store_ok in
+  let _, _, prior = S.read ~base_path ~id:artifact.id ~revision:(Some 1) |> store_ok in
+  Alcotest.(check string) "latest body" next latest;
+  Alcotest.(check string) "first revision remains immutable" original prior;
+  let listing = S.list ~base_path |> store_ok in
+  Alcotest.(check int) "one report with two revisions" 1 (List.length listing.artifacts);
+  Alcotest.(check int) "healthy listing" 0 (List.length listing.diagnostics);
+  let maintenance mode =
+    match Tool_blob_maintenance.run ~base_path
+      ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~mode with
+    | Ok report -> report
+    | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error) in
+  let observed = maintenance Tool_blob_maintenance.Observe_only in
+  Alcotest.(check int) "both revision blobs are roots" 2 observed.live_references;
+  let swept = maintenance Tool_blob_maintenance.Delete_previous_candidates in
+  Alcotest.(check int) "no published body deleted" 0 swept.deleted;
+  List.iter (fun (revision, expected) ->
+    let _, _, actual = S.read ~base_path ~id:artifact.id ~revision:(Some revision) |> store_ok in
+    Alcotest.(check string) "revision survives offline retention" expected actual)
+    [1, original; 2, next])
+
+let test_utf8_boundaries () = with_base (fun base_path ->
+  List.iter (fun json -> match A.request_of_json json with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "malformed UTF-8 request was accepted")
+    [request_json "invalid \255"; request_json ~title:"invalid \192\128" "content"];
+  (match S.publish ~base_path ~author:"keeper\255" (request "valid content") with
+   | Error (S.Invalid _) -> ()
+   | Error error -> Alcotest.fail (S.error_message error)
+   | Ok _ -> Alcotest.fail "malformed UTF-8 author was accepted");
+  let artifact, revision = publish ~base_path (request "valid content") in
+  let bad_body = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path)
+    ~bytes:"invalid \255" ~mime:"text/markdown" in
+  let corrupt = { artifact with A.revisions = [{ revision with A.body = bad_body }] } in
+  Fs_compat.save_file (metadata_path base_path artifact.id)
+    (Yojson.Safe.to_string (A.to_json corrupt));
+  check_unavailable (S.read ~base_path ~id:artifact.id ~revision:None);
+  let corrupt_author = { artifact with A.revisions = [{ revision with A.author = "keeper\255" }] } in
+  Fs_compat.save_file (metadata_path base_path artifact.id)
+    (Yojson.Safe.to_string (A.to_json corrupt_author));
+  check_unavailable (S.read ~base_path ~id:artifact.id ~revision:None);
+  let listing = S.list ~base_path |> store_ok in
+  Alcotest.(check int) "corrupt metadata omitted" 0 (List.length listing.artifacts);
+  Alcotest.(check int) "corruption remains visible" 1 (List.length listing.diagnostics))
+
+let test_unsafe_directory () = with_base (fun base_path ->
+  ignore (publish ~base_path (request "owned report"));
+  let dir = catalog_dir base_path in
+  Unix.chmod dir 0o777;
+  Fun.protect ~finally:(fun () -> Unix.chmod dir 0o700) (fun () ->
+    check_unavailable (S.list ~base_path);
+    check_unavailable (S.publish ~base_path ~author:"keeper" (request "blocked")));
+  let held = dir ^ "-held" in
+  Unix.rename dir held;
+  Unix.symlink held dir;
+  Fun.protect ~finally:(fun () -> Unix.unlink dir; Unix.rename held dir) (fun () ->
+    check_unavailable (S.list ~base_path);
+    check_unavailable (S.publish ~base_path ~author:"keeper" (request "blocked")));
+  let missing_root = Filename.concat base_path "nonexistent-base" in
+  check_unavailable (S.list ~base_path:missing_root))
+
+let test_metadata_symlink () = with_base (fun base_path ->
+  let artifact, _ = publish ~base_path (request "owned report") in
+  let path = metadata_path base_path artifact.id in
+  let held = Filename.concat base_path "held.json" in
+  Unix.rename path held;
+  Unix.symlink held path;
+  check_unavailable (S.read ~base_path ~id:artifact.id ~revision:None);
+  let listing = S.list ~base_path |> store_ok in
+  Alcotest.(check int) "symlink metadata omitted" 0 (List.length listing.artifacts);
+  Alcotest.(check int) "symlink remains visible as diagnostic" 1 (List.length listing.diagnostics))
+
+let json_member name = function
+  | `Assoc fields ->
+    (match List.assoc_opt name fields with
+     | Some value -> value
+     | None -> Alcotest.failf "missing JSON field %s" name)
+  | _ -> Alcotest.failf "expected JSON object for field %s" name
+
+let json_string = function
+  | `String text -> text
+  | _ -> Alcotest.fail "expected JSON string"
+
+let check_json label expected actual =
+  Alcotest.(check bool) label true (Yojson.Safe.equal expected actual)
+
+let publication_data (result : Masc.Keeper_tool_execution.t) =
+  (match result.disposition with
+   | Tool_result.Completed () -> ()
+   | Tool_result.Deferred () -> Alcotest.fail "publication was deferred"
+   | Tool_result.Failed class_ ->
+     Alcotest.failf "publication failed: %s" (Tool_result.tool_failure_class_to_string class_));
+  match result.data with
+  | Some json -> json
+  | None -> Alcotest.fail "publication succeeded without typed data"
+
+let test_keeper_publication () = with_base (fun base_path ->
+  let content = "# Keeper 보고서\r\n\r\n정확한 원문 ✅\r\n" in
+  let author = "keeper-authenticated-연구" in
+  let result = Masc.Keeper_artifact_publish.handle ~base_path ~author
+    ~args:(request_json content) in
+  let data = publication_data result in
+  check_json "publication schema" (`String "masc.published_artifact.v1")
+    (json_member "schema" data);
+  let summary = json_member "artifact" data in
+  let id = json_member "id" summary |> json_string in
+  Alcotest.(check bool) "generated publication identity" true (A.valid_id id);
+  check_json "producer-owned author" (`String author) (json_member "author" summary);
+  check_json "first version" (`Int 1) (json_member "revision" summary);
+  check_json "open link" (`String (A.url id)) (json_member "url" summary);
+  check_json "immutable revision link" (`String (A.url ~revision:1 id))
+    (json_member "revision_url" data);
+  let _, stored_revision, actual = S.read ~base_path ~id ~revision:None |> store_ok in
+  Alcotest.(check string) "tool persisted exact body" content actual;
+  Alcotest.(check string) "durable author identity" author stored_revision.author;
+  (match result.retained_artifacts with
+   | [body] -> Alcotest.(check string) "execution retains persisted body"
+       stored_revision.body.sha256 body.sha256
+   | [] | _ :: _ :: _ -> Alcotest.fail "tool did not retain exactly one body");
+  let revised = Masc.Keeper_artifact_publish.handle ~base_path ~author
+    ~args:(request_json ~id ~expected_revision:1 "updated by Keeper") in
+  let second = publication_data revised |> json_member "artifact" in
+  check_json "revision identity" (`String id) (json_member "id" second);
+  check_json "version advances" (`Int 2) (json_member "revision" second);
+  let rejected = Masc.Keeper_artifact_publish.handle ~base_path ~author
+    ~args:(request_json ~id ~expected_revision:1 "stale Keeper content") in
+  (match rejected.disposition with
+   | Tool_result.Failed Tool_result.Workflow_rejection -> ()
+   | Tool_result.Completed () | Tool_result.Deferred () | Tool_result.Failed _ ->
+     Alcotest.fail "stale tool revision was not a Workflow_rejection");
+  let _, latest, actual = S.read ~base_path ~id ~revision:None |> store_ok in
+  Alcotest.(check int) "stale tool call created no revision" 2 latest.revision;
+  Alcotest.(check string) "stale tool call preserved committed body" "updated by Keeper" actual;
+  let spoofed_args = match request_json content with
+    | `Assoc fields -> `Assoc (("author", `String "spoofed-author") :: fields)
+    | _ -> assert false in
+  let spoofed = Masc.Keeper_artifact_publish.handle ~base_path ~author ~args:spoofed_args in
+  match spoofed.disposition with
+  | Tool_result.Failed Tool_result.Policy_rejection -> ()
+  | Tool_result.Completed () | Tool_result.Deferred () | Tool_result.Failed _ ->
+    Alcotest.fail "caller-supplied author was not refused")
+
+let test_publication_discovery () =
+  let module D = Masc.Keeper_tool_descriptor in
+  let descriptor = match D.find_id "keeper.artifact.publish" with
+    | Some descriptor -> descriptor
+    | None -> Alcotest.fail "artifact publication descriptor is missing" in
+  let canonical = Masc.Keeper_runtime_schemas_toml.artifact_publish in
+  Alcotest.(check string) "canonical tool name" "keeper_artifact_publish" canonical.name;
+  Alcotest.(check bool) "descriptor uses canonical registry" true
+    (descriptor.input_schema_source = D.Canonical_registry);
+  check_json "canonical schema preserved" canonical.input_schema descriptor.input_schema;
+  Alcotest.(check (list string)) "schema is model-projectable" []
+    (D.model_schema_errors descriptor);
+  Alcotest.(check (list string)) "Keeper discovery exposes publish tool"
+    [canonical.name] (D.keeper_model_names descriptor);
+  let projected = D.model_visible_schemas () |> List.find_opt (fun (schema : Masc_domain.tool_schema) ->
+    String.equal schema.name canonical.name) in
+  (match projected with
+   | Some schema -> check_json "model receives canonical schema"
+       canonical.input_schema schema.input_schema
+   | None -> Alcotest.fail "publication is absent from model-visible tools");
+  let input = request_json "new report" in
+  Alcotest.(check (option bool)) "publication is a mutation" (Some false)
+    (D.readonly_static_hint descriptor);
+  Alcotest.(check (option bool)) "real publication input is a mutation" (Some false)
+    (D.readonly_for_input descriptor ~input);
+  Alcotest.(check bool) "publication mutations execute serially" true
+    (descriptor.execution = D.Ordinary D.Serial);
+  Alcotest.(check bool) "publication dispatches to actual producer" true
+    (descriptor.runtime_handler = D.Tool_artifact_publish);
+  let discovery = `Assoc (D.discovery_fields descriptor) in
+  check_json "discovery identifies capability" (`String "keeper.artifact.publish")
+    (json_member "id" discovery);
+  check_json "discovery reports mutation policy" (`Bool false)
+    (json_member "policy" discovery |> json_member "readonly_hint")
+
+let test_http_publication_errors () =
+  let module Routes = Server_routes_http_routes_published_artifacts in
+  let check_error expected_status expected_code error =
+    let json, status = Routes.error_response error in
+    Alcotest.(check int) "HTTP status" expected_status (Httpun.Status.to_code status);
+    check_json "machine-readable error code" (`String expected_code) (json_member "code" json);
+    json in
+  ignore (check_error 404 "artifact_not_found" S.Missing);
+  let conflict = check_error 409 "artifact_revision_conflict"
+    (S.Conflict { expected = 1; actual = 2 }) in
+  check_json "conflict identifies caller version" (`Int 1)
+    (json_member "expected_revision" conflict);
+  check_json "conflict identifies durable version" (`Int 2)
+    (json_member "current_revision" conflict);
+  let id = "artifact-" ^ String.make 32 'a' in
+  let uncertain = check_error 503 "artifact_commit_uncertain"
+    (S.Commit_uncertain { id; revision = 3; message = "parent directory sync failed" }) in
+  check_json "uncertain create remains discoverable" (`String id) (json_member "id" uncertain);
+  check_json "uncertain version can be reread" (`Int 3) (json_member "revision" uncertain);
+  check_json "uncertain response links the exact revision" (`String (A.url ~revision:3 id))
+    (json_member "url" uncertain);
+  Alcotest.(check bool) "uncertain response explains reread before retry" true
+    (String.trim (json_member "recovery" uncertain |> json_string) <> "");
+  List.iter (fun path -> Alcotest.(check bool) "report routes require private reads" false
+    (Server_auth.is_public_read_path path))
+    ["/api/v1/published-artifacts"; "/api/v1/published-artifacts/" ^ id;
+     "/api/v1/published-artifacts/" ^ id ^ "?revision=3"]
+
+let () = Eio_main.run (fun _ ->
+  Alcotest.run "published reports"
+    ["durable catalog", [
+      Alcotest.test_case "create, reread, CAS revise and retain history" `Quick test_create_and_revise;
+      Alcotest.test_case "reject malformed UTF-8 at publication and read" `Quick test_utf8_boundaries;
+      Alcotest.test_case "unsafe directory is unavailable, not empty" `Quick test_unsafe_directory;
+      Alcotest.test_case "metadata symlink is unavailable" `Quick test_metadata_symlink];
+     "Keeper and HTTP publication", [
+      Alcotest.test_case "producer persists exact content, identity and CAS" `Quick test_keeper_publication;
+      Alcotest.test_case "publish discovery preserves schema and mutation policy" `Quick test_publication_discovery;
+      Alcotest.test_case "HTTP errors carry status and recovery identity" `Quick test_http_publication_errors]])

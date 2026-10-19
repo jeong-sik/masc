@@ -39,7 +39,8 @@ let metadata_path base id = Filename.concat (catalog_dir base) (id ^ ".json")
 
 let check_unavailable = function
   | Error (S.Unavailable _) -> ()
-  | Error error -> Alcotest.failf "expected unavailable, received %s" (S.error_message error)
+  | Error ((S.Invalid _ | S.Missing | S.Conflict _ | S.Commit_uncertain _) as error) ->
+    Alcotest.failf "expected unavailable, received %s" (S.error_message error)
   | Ok _ -> Alcotest.fail "unsafe storage was accepted"
 
 let test_create_and_revise () = with_base (fun base_path ->
@@ -61,7 +62,8 @@ let test_create_and_revise () = with_base (fun base_path ->
   (match S.publish ~base_path ~author:"keeper-연구"
      (request ~id:artifact.id ~expected_revision:1 "stale update") with
    | Error (S.Conflict { expected = 1; actual = 2 }) -> ()
-   | Error error -> Alcotest.fail (S.error_message error)
+   | Error ((S.Invalid _ | S.Missing | S.Conflict _ | S.Unavailable _ | S.Commit_uncertain _) as error) ->
+     Alcotest.fail (S.error_message error)
    | Ok _ -> Alcotest.fail "stale revision overwrote current report");
   let _, _, latest = S.read ~base_path ~id:artifact.id ~revision:None |> store_ok in
   let _, _, prior = S.read ~base_path ~id:artifact.id ~revision:(Some 1) |> store_ok in
@@ -91,7 +93,8 @@ let test_utf8_boundaries () = with_base (fun base_path ->
     [request_json "invalid \255"; request_json ~title:"invalid \192\128" "content"];
   (match S.publish ~base_path ~author:"keeper\255" (request "valid content") with
    | Error (S.Invalid _) -> ()
-   | Error error -> Alcotest.fail (S.error_message error)
+   | Error ((S.Missing | S.Conflict _ | S.Unavailable _ | S.Commit_uncertain _) as error) ->
+     Alcotest.fail (S.error_message error)
    | Ok _ -> Alcotest.fail "malformed UTF-8 author was accepted");
   let artifact, revision = publish ~base_path (request "valid content") in
   let bad_body = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path)
@@ -191,7 +194,9 @@ let test_keeper_publication () = with_base (fun base_path ->
     ~args:(request_json ~id ~expected_revision:1 "stale Keeper content") in
   (match rejected.disposition with
    | Tool_result.Failed Tool_result.Workflow_rejection -> ()
-   | Tool_result.Completed () | Tool_result.Deferred () | Tool_result.Failed _ ->
+   | Tool_result.Completed () | Tool_result.Deferred ()
+   | Tool_result.Failed (Tool_result.Dependency_unavailable | Tool_result.Policy_rejection
+                       | Tool_result.Runtime_failure | Tool_result.Operator_cancelled) ->
      Alcotest.fail "stale tool revision was not a Workflow_rejection");
   let _, latest, actual = S.read ~base_path ~id ~revision:None |> store_ok in
   Alcotest.(check int) "stale tool call created no revision" 2 latest.revision;
@@ -202,7 +207,9 @@ let test_keeper_publication () = with_base (fun base_path ->
   let spoofed = Masc.Keeper_artifact_publish.handle ~base_path ~author ~args:spoofed_args in
   match spoofed.disposition with
   | Tool_result.Failed Tool_result.Policy_rejection -> ()
-  | Tool_result.Completed () | Tool_result.Deferred () | Tool_result.Failed _ ->
+  | Tool_result.Completed () | Tool_result.Deferred ()
+  | Tool_result.Failed (Tool_result.Dependency_unavailable | Tool_result.Workflow_rejection
+                      | Tool_result.Runtime_failure | Tool_result.Operator_cancelled) ->
     Alcotest.fail "caller-supplied author was not refused")
 
 let test_publication_discovery () =

@@ -4,6 +4,7 @@ type row = Heading of string | Content of string | Note of string
 type movement = First | Last | By of int
 
 let create ~title sections = { title; sections; offset = 0 }
+let replace ~title sections reading = {reading with title;sections}
 let title reading = reading.title
 
 let rows ~width reading =

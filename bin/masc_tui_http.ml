@@ -1187,6 +1187,11 @@ let fetch_keeper_calls ~(host : string) ~(port : int) ~(keeper_name : string)
     |> Result.map_error (fun detail -> "tool calls: " ^ detail) in
   Masc.Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:keeper_name json
 
+let fetch_keeper_call ~host ~port ~keeper_name ~execution_id =
+  Result.bind (get_json ~host ~port ~path:(Masc_tui_chat_call_reader.path ~keeper:keeper_name ~execution_id))
+    (fun json -> Masc_tui_response_decode.run ~name:"keeper.original_call.decode_wait"
+      (fun () -> Masc.Tui_decode.decode_keeper_call_exact ~requested_keeper:keeper_name ~execution_id json))
+
 (** Fetch exact, previously retained bytes. This never talks to the browser. *)
 let fetch_browser_observation ~host ~port (reference : Tool_output.artifact_ref) =
   match http_get ~host ~port ~path:("/api/v1/artifacts/" ^ reference.sha256) with

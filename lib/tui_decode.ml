@@ -2536,6 +2536,18 @@ let decode_keeper_call json =
       ; kc_disposition
       } )
 
+let decode_keeper_call_exact ~requested_keeper ~execution_id json =
+  let* keeper = required_string_field json "keeper" in
+  let* echoed_id = required_string_field json "execution_id" in
+  if not (String.equal keeper requested_keeper && String.equal echoed_id execution_id)
+  then Error "Exact tool-call response identity mismatch"
+  else
+    let* row_keeper, row = decode_keeper_call (member "entry" json) in
+    if String.equal row_keeper requested_keeper
+       && Option.equal String.equal row.kc_execution_id (Some execution_id)
+    then Ok row
+    else Error "Exact tool-call row identity mismatch"
+
 let decode_keeper_calls_snapshot ~requested_keeper json =
   let* kcs_keeper = required_string_field json "keeper" in
   let* health_word = required_string_field json "health" in

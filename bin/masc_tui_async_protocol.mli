@@ -584,6 +584,7 @@ type async_msg =
   (* (message, noop): [noop = true] says the verdict already stood. *)
   | Verification_verdict_done of (string * bool, string) result
   | Harness_label_done of (string, string) result
+  | Chat_call_loaded of chat_call_request * (Masc.Tui_decode.keeper_call, string) result
   | Keeper_calls_loaded of
       int * string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Goal_timeline_loaded of

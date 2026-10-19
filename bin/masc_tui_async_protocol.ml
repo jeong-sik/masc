@@ -602,6 +602,7 @@ type async_msg =
   (* (message, noop): [noop = true] says the verdict already stood. *)
   | Verification_verdict_done of (string * bool, string) result
   | Harness_label_done of (string, string) result
+  | Chat_call_loaded of chat_call_request * (Masc.Tui_decode.keeper_call, string) result
   | Keeper_calls_loaded of
       int * string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Goal_timeline_loaded of
@@ -922,7 +923,7 @@ let rec workspace_message_is_read = function
   | Schedule_wake_history_loaded _
   | Keeper_schedules_loaded _
   | System_logs_loaded _
-  | Keeper_calls_loaded _
+  | Chat_call_loaded _ | Keeper_calls_loaded _
   | Goal_timeline_loaded _
   | Task_history_loaded _
   | Verification_evidence_loaded _
@@ -1132,7 +1133,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)
     | System_logs_loaded _ | Schedule_cancel_done (_, _)
     | Verification_verdict_done _ | Harness_label_done _
-    | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _)
+    | Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _)
     | Task_history_loaded (_, _) | Task_cancel_done (_, _, _)
     | Verification_evidence_loaded (_, _) | Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
     | Keeper_items_loaded (_, _) | Keeper_sandbox_view_loaded (_, _)
@@ -1267,7 +1268,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)
   | System_logs_loaded _ | Schedule_cancel_done (_, _)
   | Verification_verdict_done _ | Harness_label_done _
-  | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _)
+  | Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _)
   | Task_history_loaded (_, _) | Task_cancel_done (_, _, _)
   | Verification_evidence_loaded (_, _) | Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
   | Keeper_items_loaded (_, _) | Keeper_sandbox_view_loaded (_, _)

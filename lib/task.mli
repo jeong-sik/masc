@@ -1,4 +1,5 @@
 module Tool : module type of Masc_task_handlers.Tool_task
+module History_page : module type of Masc_task_handlers.Task_history_page
 module Anti_rationalization : module type of Masc_task_handlers.Anti_rationalization
 module Goal_assignment : module type of Masc_task_handlers.Task_goal_assignment
 module Schemas : module type of Masc_task_handlers.Tool_task_schemas

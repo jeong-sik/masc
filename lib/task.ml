@@ -8,6 +8,7 @@
     linkage unit. *)
 
 module Tool = Masc_task_handlers.Tool_task
+module History_page = Masc_task_handlers.Task_history_page
 module Goal_assignment = Masc_task_handlers.Task_goal_assignment
 module Schemas = Masc_task_handlers.Tool_task_schemas
 module Handlers = Masc_task_handlers.Tool_task_handlers

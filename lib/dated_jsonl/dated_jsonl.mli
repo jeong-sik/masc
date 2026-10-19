@@ -60,6 +60,8 @@ val read_error_to_string : read_error -> string
 
 module Store = Dated_jsonl_store
 (** The closed list of stores and where each one lives. *)
+module Layout = Dated_jsonl_layout
+(** Shared calendar and numeric rotation ordering for read continuations. *)
 
 val open_store :
   ?mutex:Eio.Mutex.t ->

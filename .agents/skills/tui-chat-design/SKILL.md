@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 원본 비동기 요청·Task·이력 상세와 소스별 표시 준비 단계·물리/논리 관측, 채팅·입력·로딩·진행 상태, 시작 키 인계와 늦은 터미널 응답, 비동기 조회·설정 저장·긴 질문의 요약과 전체 읽기·Ask 답변과 재조회를 바꿀 때 쓴다. Keeper·Work·로그·Board·Runtime·Overview·Tools·Connectors의 원본 요청·입력·revision·소유권, 준비 상세·현재 턴·이력·구성 조회·디렉터리 페이지의 workspace 검증과 캐시 영수증, 공유 조회와 부분 실패, worker·caller·UI 반영·취소·등록 해제와 paint 증거를 구분한다."
+description: "MASC TUI의 원본 비동기 요청·Task·이력 상세와 파일 경계 이어읽기, 소스별 표시 준비 단계·물리/논리 관측, 채팅·입력·로딩·진행 상태, 시작 키 인계와 늦은 터미널 응답, 비동기 조회·설정 저장·긴 질문의 요약과 전체 읽기·Ask 답변과 재조회를 바꿀 때 쓴다. Keeper·Work·로그·Board·Runtime·Overview·Tools·Connectors의 원본 요청·입력·revision·소유권, 준비 상세·현재 턴·이력·구성 조회·디렉터리 페이지의 workspace 검증과 캐시 영수증, 공유 조회와 부분 실패, worker·caller·UI 반영·취소·등록 해제와 paint 증거를 구분한다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -136,6 +136,11 @@ description: "MASC TUI의 원본 비동기 요청·Task·이력 상세와 소스
   행이나 충돌한 ID를 거절한다. 알려진 부분 필드 해석 실패도 숨기지 않는다. 두 관측은
   원자적 snapshot이나 Task 완료 증명이 아니다. 기존 완전한 Task 문서 렌더러를 실제 두
   consumer가 공유하며, 문구·배치·snapshot·PTY 검사를 새로 만들지 않는다.
+- Task 이력의 최근 배열을 전체 이력으로 부르지 않는다. 이어읽기는
+  `/api/v1/dashboard/tasks/history/page`의 원본 Task·요청 cursor echo·다음 cursor를 사용하고,
+  파일 교체·변경된 행 경계·해석 실패를 빈 이력이나 종결로 바꾸지 않는다. continuation을
+  다른 Task/workspace에 빌려주거나 실패 시 기존 slice로 조용히 대체하지 않는다. 서버 경로가
+  있어도 실제 TUI 소비자·재조회·소유권·이전 관측 연결 전에는 화면 개선 완료로 세지 않는다.
 - Tools 비동기 목록은 원래 `submitted_by`·request ID·대상 Keeper를 함께 보관한다.
   J/K 선택과 Enter 상세는 그 원본을 사용한다. 요청이 활성 목록에서 사라져도 선택이나
   열린 상세를 다른 행으로 바꾸지 않는다. `o`의 명시적 원본 ID 조회도 같은 경로를 쓰며

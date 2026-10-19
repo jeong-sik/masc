@@ -2,6 +2,7 @@
     pruning and strict layout validation. Filesystem effects stay here. *)
 open Dated_jsonl_layout
 module Store = Dated_jsonl_store
+module Layout = Dated_jsonl_layout
 
 (** Date-split JSONL storage.
 

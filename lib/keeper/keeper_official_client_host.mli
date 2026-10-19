@@ -540,7 +540,31 @@ val compose_librarian_range
     yet. A composition the position alone cannot carry is refused with its
     own error. Other positions are composed once, as given. *)
 
+type argument_source
+(** One official attempt's frozen raw completed argument authority and address
+    memo. It never authorizes changing a remote client-held conversation. *)
+
+val create_argument_source :
+  input_policy:Keeper_input_policy.t -> base_path:string -> keeper_name:string ->
+  seed:Agent_core.Types.message list option ->
+  replay_prefix:Keeper_replay_prefix.projection ->
+  turn_start:Keeper_carried_front.turn_start -> argument_source option
+(** [None] for Wide, missing raw seed, empty base path, or unknown/empty
+    completed boundary. Creation performs no blob I/O or occurrence binding. *)
+
+type argument_projection
+
+val argument_projection :
+  argument_source -> tools:Agent_core.Tool.t list ->
+  history_prefix:Agent_core.Types.message list -> argument_projection option
+(** Bind the actual prepared tool surface and caller-owned pinned prefix for a
+    Start/reseed. [None] when that surface cannot recover canonical references
+    or the prefix contains a conversation atom. The caller passes only the
+    exact context it prepended, before its append-only hooks. A Resume must
+    omit this projection; it transmits no MASC history. No I/O is performed. *)
+
 val start_range_projection :
+  ?argument_projection:argument_projection ->
   measure_message_bytes:(Agent_core.Types.message -> int) ->
   capacity_bytes:int ->
   unbounded_capacity_bytes:int ->
@@ -558,8 +582,15 @@ val start_range_projection :
     zero-history floor stays empty; otherwise the latest of the capacity,
     seed, Librarian, and turn-start fronts is composed and observed once.
     Source-specific projection runs after this range. Antigravity and Muse
-    Code cut nothing, so they compose with {!carried_start_range} and
-    {!compose_librarian_range} directly. *)
+    Code can use the same projection with unbounded capacity.
+
+    With [argument_projection], only verified closed raw-seed arguments are
+    planned before measuring capacity. Seed/Librarian validation and observation
+    still use the original source and atom coordinates. Summary selection is
+    pure with respect to blobs; only retained slots are materialized once.
+    Actual success/failure outcomes are replayed, every unmaterialized slot is
+    restored, and the full range/summary decision is repeated without I/O.
+    Custom source projection must run after this function returns. *)
 
 val prepare_turn :
   runtime_label:string ->

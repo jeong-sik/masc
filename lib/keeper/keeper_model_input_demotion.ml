@@ -10,6 +10,13 @@ end)
 type completed_arguments =
   (Agent_core.Types.content_block * string) Occurrences.t
 
+let prepend_argument_messages ~prefix arguments =
+  let offset = List.length prefix in
+  Occurrences.fold (fun (message_index, block_index) value shifted ->
+    Occurrences.add (message_index + offset, block_index) value shifted)
+    arguments Occurrences.empty
+;;
+
 let protect_argument_prefix ~through_message arguments =
   Occurrences.filter (fun (message_index, _) _ -> message_index > through_message) arguments
 ;;

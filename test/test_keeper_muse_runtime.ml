@@ -1885,7 +1885,8 @@ let test_an_operator_interrupt_keeps_the_settled_session () =
 ;;
 
 (* The same interrupt raised bare by a callback the turn runs leaves as
-   itself, not as an untyped exception turned into a provider error. *)
+   itself, not as an untyped exception turned into a provider error or
+   swallowed by the stream projection. *)
 let test_an_operator_interrupt_a_callback_raises_keeps_the_settled_session () =
   with_scripted_host (fun ~base_path ->
     let tool = masc_probe_tool (ref `Null) in
@@ -1900,6 +1901,23 @@ let test_an_operator_interrupt_a_callback_raises_keeps_the_settled_session () =
      | exception exn when Keeper_registry_types.is_operator_interrupt exn -> ()
      | exception exn -> fail (Printexc.to_string exn)
      | (_ : observed_run) -> fail "the operator interrupt became a provider result");
+    check_owner_stop ~base_path ~settled;
+    let stream_callback_reached = ref false in
+    (match
+       run_turn_with
+         ~on_stream_event:(function
+           | Agent_core.Types.MessageStart _ ->
+             stream_callback_reached := true;
+             raise Keeper_registry_types.Operator_interrupt
+           | _ -> ())
+         ~base_path
+         ~tool
+         ()
+     with
+     | exception exn when Keeper_registry_types.is_operator_interrupt exn -> ()
+     | exception exn -> fail (Printexc.to_string exn)
+     | (_ : observed_run) -> fail "the stream operator interrupt was swallowed");
+    check bool "stream callback was reached" true !stream_callback_reached;
     check_owner_stop ~base_path ~settled)
 ;;
 

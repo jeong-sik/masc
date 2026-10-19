@@ -606,6 +606,7 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
   let emit event =
     try emit event with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | exn ->
       Log.Runtime_agent.warn
         "Muse Code Keeper stream callback raised (error=%s)"
@@ -1039,6 +1040,7 @@ let run_without_lifecycle ~argument_source ~official_task_reference ~composed_co
           | Some project ->
             (try project prepared.messages with
              | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
              | exn -> Error (internal_error
                  (runtime_label ^ " runtime model input projection raised: "
                   ^ Printexc.to_string exn)))
@@ -1062,6 +1064,7 @@ let run_without_lifecycle ~argument_source ~official_task_reference ~composed_co
         let* messages =
           try project prepared.messages with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
           | exn ->
             Error
               (internal_error

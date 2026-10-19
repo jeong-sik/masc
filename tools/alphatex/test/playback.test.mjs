@@ -175,7 +175,14 @@ test('combined playback pins its audio device and every MIDI binding in one nati
     await assert.rejects(bad.playback.ready); await assert.rejects(bad.playback.completion)
   }
   assert.throws(() => fixture({ ...options, output: undefined }))
-  assert.throws(() => fixture({ ...options, loop: true }))
+  const loop = fixture({ ...options, loop: true })
+  assert.ok(loop.args.includes('--loop'))
+  loop.event('playing', { ...state, loop: true }); await loop.playback.ready
+  loop.playback.pause(); loop.event('paused', { ...state, loop: true })
+  loop.playback.seek(.4); loop.playback.resume()
+  await assert.rejects(loop.playback.recordingEpoch(), /cycle-aware/)
+  loop.playback.stop(); loop.event('stopped', { ...state, loop: true }); loop.close()
+  await loop.playback.completion
 })
 
 test('captured audio-only playback owns the native arrangement clock and refuses MIDI or whole-song loop selection', async () => {

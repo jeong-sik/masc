@@ -605,6 +605,216 @@ try failingLoop.silence()
 precondition(failingLoop.sourceHeld[0]?[60] == 0 && reviewWire.map(\.1) == [[0x80,60,77],[0x80,60,0]])
 print("MIDI_LOOP_DECISIONS_PASS: late wrap skips expired unacquired attacks, exact endpoints survive, FIFO releases retain velocity, pedals and uncertain release cleanup remain owned")
 
+// Shared audio/MIDI cycles retain original project/source regions, and their
+// fractional host deadlines derive from the original epoch even after a stall.
+let commonSource=asset("common",[
+    ["seconds":0,"port":2,"bytes":[0xc0,0]],
+    ["seconds":0.05,"port":2,"bytes":[0x90,60,100]],
+    ["seconds":0.1,"port":2,"bytes":[0x80,60,71]],
+    ["seconds":0.3,"port":2,"bytes":[0x90,62,90]],
+    ["seconds":0.35,"port":2,"bytes":[0x80,62,73]],
+    ["seconds":0.6,"port":2,"bytes":[0x90,65,110]],
+    ["seconds":0.8,"port":2,"bytes":[0x80,65,74]]])
+let commonBase=try arrangement([commonSource],[clip("common","common",from:0,to:1,repeatCount:1)],duration:1)
+let commonClock=try MidiCycle(start:0.2,end:0.6,duration:0.4,period:400_000_000,divisor:1)
+reset(0);reviewWire=[]
+let common=try MidiTransport(timeline:commonBase.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+common.prepared=true;common.destination=commonBase.destination;common.sourceDestinations=commonBase.sourceDestinations
+try common.stageCoordinated(at:0);try common.runCoordinated(anchorNanoseconds:1_000_000_000)
+reviewClock=1_000_000_000;common.tick()
+precondition(!reviewWire.map(\.1).contains { $0[0]&0xf0==0x90 })
+reviewClock=1_100_000_000;common.tick();precondition(reviewWire.map(\.1).contains([0x90,62,90]))
+reviewClock=1_150_000_000;common.tick();precondition(reviewWire.map(\.1).contains([0x80,62,73]))
+reviewWire=[];reviewClock=1_400_000_000;common.tick()
+precondition(common.cycleIndex==1 && common.state == .playing && common.anchor==1_000_000_000)
+precondition(!reviewWire.map(\.1).contains { $0[0]&0xf0==0x90 })
+reviewWire=[];reviewClock=4_001_100_000_000;common.tick()
+precondition(common.cycleIndex==10_000 && common.anchor==1_000_000_000)
+precondition(reviewWire.map(\.1).contains([0x90,62,90]) && !reviewWire.map(\.1).contains([0x90,65,110]))
+try common.stageCoordinated(at:0.15);precondition(common.state == .paused && abs(common.offset-0.35)<1e-12)
+let beforeResume=reviewWire.count;try common.runCoordinated(anchorNanoseconds:reviewClock+1_000_000_000)
+precondition(reviewWire.count==beforeResume)
+mustReject { try common.stageCoordinated(at:0.4) }
+try common.silence()
+let lateCommon=try MidiTransport(timeline:commonBase.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+lateCommon.prepared=true;lateCommon.destination=commonBase.destination;lateCommon.sourceDestinations=commonBase.sourceDestinations
+reset(0);reviewWire=[];try lateCommon.stageCoordinated(at:0);try lateCommon.runCoordinated(anchorNanoseconds:1_000_000_000)
+reviewClock=1_250_000_000;lateCommon.tick()
+precondition(!reviewWire.map(\.1).contains { $0[0]&0xf0==0x90 },"expired first-callback interval replayed")
+let exactCommon=try MidiTransport(timeline:commonBase.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+exactCommon.prepared=true;exactCommon.destination=commonBase.destination;exactCommon.sourceDestinations=commonBase.sourceDestinations
+reset(0);reviewWire=[];try exactCommon.stageCoordinated(at:0.1);try exactCommon.runCoordinated(anchorNanoseconds:1_000_000_000)
+reviewClock=1_000_000_000;exactCommon.tick()
+precondition(reviewWire.map(\.1).contains([0x90,62,90]),"exactly due entry attack lost")
+reviewClock=1_050_000_000;exactCommon.tick()
+precondition(reviewWire.map(\.1).contains([0x80,62,73]),"owned entry release velocity lost")
+let outsideOpaque=asset("outsideOpaque",[
+    ["seconds":0.3,"port":2,"bytes":[0x90,60,100]],
+    ["seconds":0.4,"port":2,"bytes":[0x80,60,45]],
+    ["seconds":0.8,"port":2,"bytes":[0xf0,0x7d,1,0xf7]]])
+let opaquePath=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString+".json")
+try JSONSerialization.data(withJSONObject:["schemaVersion":3,"duration":1,"sources":[outsideOpaque],"regions":[clip("outsideOpaque","outsideOpaque",from:0,to:1,repeatCount:1)]]).write(to:opaquePath)
+let opaqueTimeline=try JSONDecoder().decode(Timeline.self,from:Data(contentsOf:opaquePath));try FileManager.default.removeItem(at:opaquePath)
+_ = try MidiTransport(timeline:opaqueTimeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+mustReject { try opaqueTimeline.validate() }
+let includesOpaque=try MidiCycle(start:0.2,end:0.9,duration:0.7,period:700_000_000,divisor:1)
+mustReject { _ = try MidiTransport(timeline:opaqueTimeline,uid:"1",loop:true,coordinated:true,cycle:includesOpaque) }
+print("COMMON_MIDI_REPAIR_PASS: unreachable after-cut opaque retained, reachable opaque refused; late entry chases current phase, due attack and owned original release preserved")
+let endpointSource=asset("endpoint",[
+    ["seconds":0,"port":2,"bytes":[0xc0,0]],
+    ["seconds":1,"port":2,"bytes":[0x90,72,80,0x80,72,77]]])
+let endpointBase=try arrangement([endpointSource],[clip("endpoint","endpoint",from:0,to:1,repeatCount:1)],duration:1)
+let endpointCycle=try MidiCycle(start:0,end:1,duration:1,period:1_000_000_000,divisor:1)
+for missed in [false,true] {
+    let owner=try MidiTransport(timeline:endpointBase.timeline,uid:"1",loop:true,coordinated:true,cycle:endpointCycle)
+    owner.prepared=true;owner.destination=endpointBase.destination;owner.sourceDestinations=endpointBase.sourceDestinations
+    reset(0);reviewWire=[];try owner.stageCoordinated(at:0);try owner.runCoordinated(anchorNanoseconds:1_000_000_000)
+    reviewClock=1_000_000_000;owner.tick();reviewWire=[]
+    reviewClock=missed ? 3_000_000_000:2_000_000_000;owner.tick()
+    precondition(reviewWire.map(\.1).contains([0x90,72,80]) == !missed,"past source endpoint acquired after missed whole cycles")
+    precondition(reviewWire.map(\.1).contains([0x80,72,77]) == !missed)
+}
+print("COMMON_MIDI_MULTICYCLE_PASS: exact next endpoint batch retained, stale endpoint attack skipped after multiple missed cycles")
+let zeroBase=try arrangement([asset("zero",[
+    ["seconds":0,"port":2,"bytes":[0xc0,0]],
+    ["seconds":0.3,"port":2,"bytes":[0x90,74,80,0x80,74,77]]])],[clip("zero","zero",from:0,to:1,repeatCount:1)],duration:1)
+for initial in [true,false] {
+    let owner=try MidiTransport(timeline:zeroBase.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+    owner.prepared=true;owner.destination=zeroBase.destination;owner.sourceDestinations=zeroBase.sourceDestinations
+    reset(0);reviewWire=[];try owner.stageCoordinated(at:0);try owner.runCoordinated(anchorNanoseconds:1_000_000_000)
+    if !initial { reviewClock=1_000_000_000;owner.tick();reviewWire=[] }
+    reviewClock=try commonClock.deadline(position:0.3,index:initial ? 0:1,offset:0,anchor:1_000_000_000)
+    owner.tick()
+    precondition(reviewWire.map(\.1).contains([0x90,74,80]) && reviewWire.map(\.1).contains([0x80,74,77]),"native exactly-due zero pair consumed as floating history")
+}
+print("COMMON_MIDI_HOST_BOUNDARY_PASS: original zero pair retained at exact native deadlines for first entry and after a wrap without epsilon")
+let activeLate=try MidiTransport(timeline:commonBase.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+activeLate.prepared=true;activeLate.destination=commonBase.destination;activeLate.sourceDestinations=commonBase.sourceDestinations
+reset(0);reviewWire=[];try activeLate.stageCoordinated(at:0);try activeLate.runCoordinated(anchorNanoseconds:1_000_000_000)
+reviewClock=1_000_000_000;activeLate.tick();reviewWire=[]
+reviewClock=1_250_000_000;activeLate.tick()
+precondition(!reviewWire.map(\.1).contains { $0[0]&0xf0==0x90 },"active late callback replayed expired interval")
+let liveLate=try MidiTransport(timeline:commonBase.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+liveLate.prepared=true;liveLate.destination=commonBase.destination;liveLate.sourceDestinations=commonBase.sourceDestinations
+reset(0);reviewWire=[];try liveLate.stageCoordinated(at:0);try liveLate.runCoordinated(anchorNanoseconds:1_000_000_000)
+reviewClock=1_000_000_000;liveLate.tick();reviewWire=[]
+reviewClock=1_125_000_000;liveLate.tick();precondition(reviewWire.map(\.1).contains([0x90,62,90]),"still-live late note lost")
+reviewClock=1_150_000_000;liveLate.tick();precondition(reviewWire.map(\.1).contains([0x80,62,73]),"owned late note original release lost")
+print("COMMON_MIDI_ACTIVE_LATE_PASS: expired unacquired interval skipped, still-live attack and its original release retained")
+let seekZero=try MidiTransport(timeline:zeroBase.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+seekZero.prepared=true;seekZero.destination=zeroBase.destination;seekZero.sourceDestinations=zeroBase.sourceDestinations
+reset(0);reviewWire=[];try seekZero.stageCoordinated(at:0.1);try seekZero.runCoordinated(anchorNanoseconds:1_000_000_000)
+reviewClock=1_000_000_000;seekZero.tick()
+precondition(reviewWire.map(\.1).contains([0x90,74,80]) && reviewWire.map(\.1).contains([0x80,74,77]),"seek boundary swallowed exactly-due zero pair")
+let fifoSource=asset("fifoCommon",[
+    ["seconds":0,"port":2,"bytes":[0xc0,0]],
+    ["seconds":0.1,"port":2,"bytes":[0x90,60,100]],
+    ["seconds":0.2,"port":2,"bytes":[0x90,60,90]],
+    ["seconds":0.3,"port":2,"bytes":[0x80,60,45]],
+    ["seconds":0.8,"port":2,"bytes":[0x80,60,77]]])
+let fifoBase=try arrangement([fifoSource],[clip("fifoCommon","fifoCommon",from:0,to:1,repeatCount:1)],duration:1)
+for fail in [false,true] {
+    let owner=try MidiTransport(timeline:fifoBase.timeline,uid:"1",loop:true,coordinated:true,cycle:endpointCycle)
+    owner.prepared=true;owner.destination=fifoBase.destination;owner.sourceDestinations=fifoBase.sourceDestinations
+    reset(0);reviewWire=[];try owner.stageCoordinated(at:0);try owner.runCoordinated(anchorNanoseconds:1_000_000_000)
+    reviewClock=1_000_000_000;owner.tick();reviewWire=[]
+    reviewClock=1_400_000_000;owner.tick()
+    precondition(reviewWire.map(\.1)==[[0x90,60,90]] && owner.sourceHeld[0]?[60]==1,"expired A release stole live B")
+    reviewClock=1_800_000_000;reviewWireFail=fail;owner.tick()
+    if fail {
+        precondition(owner.state == .stopped && owner.terminalFailure != nil)
+        precondition(Array(reviewWire.suffix(2)).map(\.1)==[[0x80,60,77],[0x80,60,0]] && owner.sourceHeld[0]?[60]==0,"uncertain B release lost cleanup ownership")
+    } else { precondition(reviewWire.map(\.1)==[[0x90,60,90],[0x80,60,77]] && owner.sourceHeld[0]?[60]==0) }
+}
+let scopeA=asset("scopeA",[
+    ["seconds":0.3,"port":2,"bytes":[0x90,60,100]], ["seconds":0.5,"port":2,"bytes":[0x80,60,45]],
+    ["seconds":0.8,"port":2,"bytes":[0x91,62,90]], ["seconds":0.9,"port":2,"bytes":[0x81,62,77]]])
+let scopeB=asset("scopeB",[["seconds":0.3,"port":2,"bytes":[0x91,64,90]],["seconds":0.5,"port":2,"bytes":[0x81,64,77]]])
+let scopePath=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString+".json")
+try JSONSerialization.data(withJSONObject:["schemaVersion":3,"duration":1,"sources":[scopeA,scopeB],"regions":[clip("scopeA","scopeA",from:0,to:1,repeatCount:1),clip("scopeB","scopeB",from:0,to:1,repeatCount:1)]]).write(to:scopePath)
+let scopeTimeline=try JSONDecoder().decode(Timeline.self,from:Data(contentsOf:scopePath));try FileManager.default.removeItem(at:scopePath)
+mustReject { try scopeTimeline.validate() }
+let scoped=try MidiTransport(timeline:scopeTimeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+precondition(scoped.regionScopes==[Set([0]),Set([1])])
+scoped.prepared=true;scoped.destination=fifoBase.destination;scoped.sourceDestinations=fifoBase.sourceDestinations
+reset(0);reviewWire=[];try scoped.stageCoordinated(at:0);try scoped.runCoordinated(anchorNanoseconds:1_000_000_000)
+reviewClock=1_100_000_000;scoped.tick()
+precondition(scoped.sourceHeld[0]?[60]==1 && scoped.sourceHeld[0]?[UInt16(1<<8|64)]==1)
+reviewWire=[];try scoped.sourceSilence(addresses:scoped.regionScopes[0])
+precondition(reviewWire.map(\.1)==[[0x80,60,0]] && scoped.sourceHeld[0]?[UInt16(1<<8|64)]==1,"one window scope silenced a disjoint owner")
+// An ended prefix key has no restoration effect and must not reserve its
+// channel or erase the state of another, genuinely audible region owner.
+let deadPrefix=asset("deadPrefix",[
+    ["seconds":0.01,"port":2,"bytes":[0x91,62,90]], ["seconds":0.1,"port":2,"bytes":[0x81,62,45]],
+    ["seconds":0.25,"port":2,"bytes":[0x90,60,100]], ["seconds":0.35,"port":2,"bytes":[0x80,60,77]]])
+let deadPath=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString+".json")
+var delayedClip=clip("deadPrefix","deadPrefix",from:0.2,to:1,repeatCount:1);delayedClip["startSeconds"]=0.3
+let otherPrefix=asset("otherPrefix",[["seconds":0.25,"port":2,"bytes":[0x91,64,90]],["seconds":0.5,"port":2,"bytes":[0x81,64,77]]])
+try JSONSerialization.data(withJSONObject:["schemaVersion":3,"duration":1.1,"sources":[deadPrefix,otherPrefix],"regions":[delayedClip,clip("otherPrefix","otherPrefix",from:0,to:1,repeatCount:1)]]).write(to:deadPath)
+let deadTimeline=try JSONDecoder().decode(Timeline.self,from:Data(contentsOf:deadPath));try FileManager.default.removeItem(at:deadPath)
+let deadOwner=try MidiTransport(timeline:deadTimeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+precondition(deadOwner.regionScopes==[Set([0]),Set([1])])
+deadOwner.prepared=true;deadOwner.destination=fifoBase.destination;deadOwner.sourceDestinations=fifoBase.sourceDestinations
+reset(0);reviewWire=[];try deadOwner.stageCoordinated(at:0);try deadOwner.runCoordinated(anchorNanoseconds:1_000_000_000)
+reviewClock=1_060_000_000;deadOwner.tick();precondition(deadOwner.sourceModel.channels[1]?.notes.first?.pitch==64)
+reviewClock=1_150_000_000;deadOwner.tick()
+precondition(deadOwner.sourceModel.channels[1]?.notes.first?.pitch==64 && deadOwner.sourceHeld[0]?[UInt16(1<<8|64)]==1,"dead prefix replacement erased another region's state")
+// A range can span only the suffix and prefix of adjacent copies. Its absent
+// middle channel is not audible merely because the region repeats.
+let partialCopies=try arrangement([asset("partialCopies",[
+    ["seconds":0.05,"port":2,"bytes":[0x90,60,90]],["seconds":0.1,"port":2,"bytes":[0x80,60,77]],
+    ["seconds":0.4,"port":2,"bytes":[0x91,62,90]],["seconds":0.5,"port":2,"bytes":[0x81,62,77]],
+    ["seconds":0.85,"port":2,"bytes":[0x90,60,90]],["seconds":0.9,"port":2,"bytes":[0x80,60,77]]])],
+    [clip("partialCopies","partialCopies",from:0,to:1,repeatCount:2)],duration:2)
+let partialClock=try MidiCycle(start:0.8,end:1.2,duration:0.4,period:400_000_000,divisor:1)
+let partialWindow=try partialClock.window(partialCopies.timeline.regions[0])
+precondition(partialWindow.scope==Set([0]),"unreachable repeated-copy middle reserved a channel")
+// Original project mapping owns due membership; inverse source arithmetic
+// rounds .02 upward here and would wrongly discard the zero pair's channel.
+let boundarySource=asset("boundarySource",[
+    ["seconds":0.02,"port":2,"bytes":[0x91,64,90,0x81,64,77]],
+    ["seconds":0.04,"port":2,"bytes":[0x90,60,90,0x80,60,77]]])
+var boundaryClip=clip("boundarySource","boundarySource",from:0.01,to:0.2,repeatCount:1);boundaryClip["startSeconds"]=0.03
+let boundaryBase=try arrangement([boundarySource],[boundaryClip],duration:1)
+let boundaryCycle=try MidiCycle(start:0.04,end:0.1,duration:0.06,period:60_000_000,divisor:1)
+let boundaryWindow=try boundaryCycle.window(boundaryBase.timeline.regions[0])
+precondition(boundaryWindow.scope==Set([0,1]),"native-due channel disappeared through inverse source phase")
+let conflictSource=asset("conflict",[["seconds":0.04,"port":2,"bytes":[0x91,64,100]],["seconds":0.08,"port":2,"bytes":[0x81,64,77]]])
+let conflictPath=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString+".json")
+try JSONSerialization.data(withJSONObject:["schemaVersion":3,"duration":1,"sources":[boundarySource,conflictSource],"regions":[boundaryClip,clip("conflict","conflict",from:0,to:1,repeatCount:1)]]).write(to:conflictPath)
+let conflictTimeline=try JSONDecoder().decode(Timeline.self,from:Data(contentsOf:conflictPath));try FileManager.default.removeItem(at:conflictPath)
+mustReject { _ = try MidiTransport(timeline:conflictTimeline,uid:"1",loop:true,coordinated:true,cycle:boundaryCycle) }
+let earlyBase=try arrangement([asset("early",[["seconds":0,"port":2,"bytes":[0xc0,0]],["seconds":0.2+0.1,"port":2,"bytes":[0x90,74,80,0x80,74,77]]])],[clip("early","early",from:0,to:1,repeatCount:1)],duration:1)
+let early=try MidiTransport(timeline:earlyBase.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+early.prepared=true;early.destination=earlyBase.destination;early.sourceDestinations=earlyBase.sourceDestinations
+reset(0);reviewWire=[];try early.stageCoordinated(at:0);try early.runCoordinated(anchorNanoseconds:1_000_000_000)
+reviewClock=1_000_000_000;early.tick();reviewWire=[]
+let exact=try commonClock.deadline(position:0.2+0.1,index:0,offset:0,anchor:1_000_000_000)
+reviewClock=exact-1;early.tick();precondition(reviewWire.isEmpty,"floating phase overrode future native deadline")
+reviewClock=exact;early.tick();precondition(reviewWire.map(\.1)==[[0x90,74,80],[0x80,74,77]])
+print("COMMON_MIDI_OWNERSHIP_PASS: skipped A/live B keeps FIFO source-origin release and uncertain cleanup; effective window scopes drive admission and silence; native deadline is sole due authority")
+let fractional=try MidiCycle(start:0,end:48.0/247,duration:48.0/247,period:48_000_000_000,divisor:247)
+for index in UInt128(0)..<10_000 {
+    let expected=(index+1)*48_000_000_000/247+(((index+1)*48_000_000_000)%247==0 ? 0:1)
+    let deadline=try fractional.deadline(position:fractional.end,index:index,offset:0,anchor:0)
+    precondition(UInt128(deadline)==expected)
+    let earlier=try fractional.phase(elapsed:deadline-1,offset:0),due=try fractional.phase(elapsed:deadline,offset:0)
+    precondition(earlier.index==index && due.index==index+1)
+}
+// A controller outside the cut must not invent a cross-cycle baseline need.
+let outsideBase=try arrangement([asset("outside",[
+    ["seconds":0.3,"port":2,"bytes":[0x90,60,100]],
+    ["seconds":0.4,"port":2,"bytes":[0x80,60,45]],
+    ["seconds":0.8,"port":2,"bytes":[0xb0,1,70]]])],[clip("outside","outside",from:0,to:1,repeatCount:1)],duration:1)
+_ = try MidiTransport(timeline:outsideBase.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+let badCommon=try arrangement([asset("unknown",[
+    ["seconds":0.3,"port":2,"bytes":[0x90,60,100]],
+    ["seconds":0.4,"port":2,"bytes":[0x80,60,45]],
+    ["seconds":0.5,"port":2,"bytes":[0xb0,1,70]]])],[clip("unknown","unknown",from:0,to:1,repeatCount:1)],duration:1)
+mustReject { _ = try MidiTransport(timeline:badCommon.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock) }
+mustReject { _ = try MidiTransport(timeline:commonBase.timeline,uid:"1",loop:true,coordinated:true) }
+print("COMMON_MIDI_CYCLE_PASS: original absolute regions, half-open cuts, source phase, 10000 fractional deadlines without epoch drift, missed cycles, staged controls and audible-window baseline admission")
+
 print("SELECTED_MIDI_DESTINATION_PASS: unrelated enumeration failure/churn isolated; selected removal, UID reuse, source type, offline and noncanonical ID rejected")
 print("SOURCE_MIDI_DECISIONS_PASS: F7 running status/partial messages, realtime/SysEx order, expression/release velocity, overlapping held-key cleanup, pedals, zero duration, explicit ports, partial-send cleanup, failed note/pedal/reset/channel-mode release retry, successful release ownership")
 print("MIDI_DECISIONS_PASS: late cycles, expired intervals, live notes, send-time epoch, inclusive seek, retrigger, one-shot end, pause/status phase, startup admission")

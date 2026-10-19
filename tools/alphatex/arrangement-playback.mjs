@@ -88,13 +88,17 @@ export async function prepareArrangementMidi(project, { directory, signal, midiO
   }
   const bindings = [...new Set(sources.flatMap(source => source.timeline.bindings.map(binding => binding.destination)))]
     .map((destination, port) => ({ port, destination }))
-  const loop = arrangementLoop(project), selected = loopMidiRegions(regions, loop)
+  // Practice uses the common audio/MIDI master cycle after its one-shot intro.
+  // Preserve absolute SMF placements for that owner instead of cropping them
+  // into the separate MIDI-only transport's local cycle.
+  const loop = arrangementLoop(project), local = loop && !practiceEnabled(project) ? loop : null
+  const selected = loopMidiRegions(regions, local)
   const selectedSources = sources.filter(source => selected.some(region => region.source === source.id))
   // The cycle contains the native arithmetic endpoints of the selected spans.
   // Outward projection may add a representable silent tail; it never broadens
   // the source trims or admits events outside the requested loop window.
-  const duration = loop ? selected.reduce((end, region) => Math.max(end, region.startSeconds
-    + (region.sourceEnd - region.sourceStart) * region.repeatCount), loop.duration)
+  const duration = local ? selected.reduce((end, region) => Math.max(end, region.startSeconds
+    + (region.sourceEnd - region.sourceStart) * region.repeatCount), local.duration)
     : schedule.reduce((end, clip) => Math.max(end, clip.endSeconds), 0)
   if (!Number.isFinite(duration) || duration <= 0) throw new Error('Arrangement has no representable MIDI duration')
   const temporary = await mkdtemp(join(directory, 'play-'))
@@ -223,7 +227,6 @@ async function snapshotAudio(project, schedule, { sourceRoot, temporary, signal 
 export async function prepareArrangementAudio(project, { sourceRoot, directory, signal } = {}) {
   signal?.throwIfAborted()
   const loop = arrangementLoop(project)
-  if (loop && practiceEnabled(project)) throw new Error('Continuous looping with count-in or metronome is not connected yet; use :loop off for practice clicks')
   const schedule = arrangementPlaybackSchedule(project)
   if (!schedule.length) throw new Error('No audible arrangement regions')
   if (schedule.some(clip => project.assets.find(asset => asset.id === clip.asset).kind === 'midi')) throw new Error('Audio-only audition cannot synthesize MIDI assets; mute those lanes')
@@ -242,7 +245,6 @@ export async function prepareArrangementAudio(project, { sourceRoot, directory, 
 export async function prepareArrangementCaptureRegions(project, { sourceRoot, directory, signal, midiOutput, sourceBindings = [], portBindings = [] } = {}) {
   signal?.throwIfAborted()
   const loop = arrangementLoop(project)
-  if (loop && practiceEnabled(project)) throw new Error('Continuous looping with count-in or metronome is not connected yet; use :loop off for practice clicks')
   const schedule = arrangementPlaybackSchedule(project).flatMap(clip => project.playbackLoop && project.assets.find(asset => asset.id === clip.asset).kind === 'capture' && !clip.startNanoseconds
     ? projectCapturedPlacement(project, project.assets.find(asset => asset.id === clip.asset), clip) : [clip]), byID = new Map(project.assets.map(asset => [asset.id, asset]))
   if (!schedule.length) throw new Error('No audible arrangement regions')

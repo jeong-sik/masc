@@ -26,7 +26,15 @@ for(const [tempo,unit,beats,rate,start,end] of [
 const root=await mkdtemp(join(tmpdir(),'masc-pulse-loop-'))
 try{
  await writeFile(join(root,'cases.json'),JSON.stringify(cases))
+ for(const rate of [48000,44100]){
+  const bytes=Buffer.alloc(44+576*4);bytes.write('RIFF');bytes.writeUInt32LE(bytes.length-8,4);bytes.write('WAVEfmt ',8)
+  bytes.writeUInt32LE(16,16);bytes.writeUInt16LE(3,20);bytes.writeUInt16LE(1,22);bytes.writeUInt32LE(rate,24);bytes.writeUInt32LE(rate*4,28)
+  bytes.writeUInt16LE(4,32);bytes.writeUInt16LE(32,34);bytes.write('data',36);bytes.writeUInt32LE(576*4,40)
+  for(let i=0;i<576;i++)bytes.writeFloatLE((i+1)/1024,44+i*4)
+  await writeFile(join(root,rate+'.wav'),bytes)
+ }
  const swift=`import Foundation
+import AVFoundation
 struct Case:Decodable{let tempo:Double;let unit:Int64,beats:Int64,rate:Double,start:Int64,end:Int64;let period:PulseAudioClock.Period}
 @main enum Probe{static func main()throws{
  let root=CommandLine.arguments[1],cases=try JSONDecoder().decode([Case].self,from:Data(contentsOf:URL(fileURLWithPath:root+"/cases.json")))
@@ -42,7 +50,18 @@ struct Case:Decodable{let tempo:Double;let unit:Int64,beats:Int64,rate:Double,st
   let loop=WaveLoopClock(start:c.start,end:c.end,ppq:960,tempo:c.tempo)
   let pulse=PulseAudioClock(period:c.period,beatsPerBar:c.beats,duration:loop.duration)
   let layout=try PulseLoopLayout(loop:loop,pulse:pulse,unit:c.unit,rate:c.rate,frameCount:576)
+  var region=Region(id:"click",asset:"a",startSeconds:0,offsetFrames:0,frameCount:576,repetitions:1,captureClock:nil)
+  region.pulseClock=pulse;region.pulseLoopUnit=c.unit
+  let asset=Asset(id:"a",path:root+"/"+String(Int(c.rate))+".wav",sha256:"",sampleRate:c.rate,channels:1,frames:576)
+  var plan=Plan(schemaVersion:1,kind:"wave-arrangement",duration:loop.duration,assets:[asset],regions:[region],midi:nil,ump:nil,umpRegions:nil)
+  plan.loop=loop;plan.practice=PracticePlan(countInSeconds:0,duration:loop.duration,loop:LoopPracticePlan(period:c.period,countInBeats:"0",beatsPerBar:c.beats,unit:c.unit,metronome:true))
+  try plan.validate()
+  let voice=try Voice(region:region,asset:asset,capacity:257,outputChannels:1,loop:loop)
+  let buffer=AVAudioPCMBuffer(pcmFormat:voice.format,frameCapacity:257)!
   for base:Int64 in [0,1,4000000000,Int64.max-257]{
+   voice.cursor=base
+   let filled=try voice.fill(buffer);precondition(filled && buffer.frameLength==257 && voice.buffers.count==2)
+   try Data(bytes:buffer.floatChannelData![0],count:257*4).write(to:URL(fileURLWithPath:root+"/pcm-"+String(index)+"-"+String(base)))
    var frame=base
    while frame<base+257{
     let span=try layout.span(at:frame,maximum:base+257-frame)
@@ -79,5 +98,17 @@ struct Case:Decodable{let tempo:Double;let unit:Int64,beats:Int64,rate:Double,st
    checked++
   }
  }
- console.log(r.stdout.trim()+`: ${cases.length} original meter grids / ${checked} samples, partial bars, two rates, small loops, translated origin and far full-width phase`)
+ // Verify the actual retained Voice PCM separately from layout return values.
+ for(let i=0;i<cases.length;i++)for(const base of [0n,1n,4_000_000_000n,9223372036854775550n]){
+  const pcm=await readFile(join(root,`pcm-${i}-${base}`)),c=cases[i]
+  const quarter=div([60n,1n],ieee(c.tempo)),tick=div(quarter,[960n,1n]),period=mul(tick,[BigInt(c.end-c.start),1n])
+  const origin=mul(tick,[BigInt(c.start),1n]),beat=mul(quarter,[4n,BigInt(c.unit)])
+  const length=Math.min(576,Number(floor(mul(beat,[BigInt(c.rate),1n]))))
+  for(let offset=0;offset<257;offset++){
+   const time=[base+BigInt(offset),BigInt(c.rate)],phase=subtract(time,mul(period,[floor(div(time,period)),1n]))
+   const position=add(origin,phase),copy=floor(div(position,beat)),sample=Number(floor(mul(subtract(position,mul(beat,[copy,1n])),[BigInt(c.rate),1n])))
+   assert.equal(pcm.readFloatLE(offset*4),sample<length?(sample+1)/1024*(copy%BigInt(c.beats)===0n?1:.5):0,`PCM case${i} frame${base+BigInt(offset)}`)
+  }
+ }
+ console.log(r.stdout.trim()+`: ${cases.length} original meter grids / ${checked} rational span samples plus ${checked} actual Voice PCM samples, partial bars, two rates, small loops, translated origin and far full-width phase; five invalid clocks refused`)
 }finally{await rm(root,{recursive:true,force:true})}

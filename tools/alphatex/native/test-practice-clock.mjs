@@ -32,6 +32,12 @@ let fast=try PulseAudioClock(period:.init(numerator:"1000000",denominator:"1"),b
 precondition(fast.clock.frameCount==48 && fast.span(at:48,maximum:100).source==0)
 let last=layout.span(at:layout.totalFrames-1,maximum:100)
 precondition(last.count==1)
+// Count-in has an exact authored number of beats, even when a nearby Double
+// horizon would round above the last source sample. It never adds another tick.
+let counted=try PulseAudioClock(period:.init(numerator:"1000000000",denominator:"3"),beatsPerBar:3,duration:1.0000000000000002,beatCount:"3").layout(rate:48000,frameCount:576)
+precondition(counted.totalFrames==48000 && counted.clock.repetitions==3)
+let finalCount=counted.span(at:47999,maximum:113)
+precondition(finalCount.source==nil && finalCount.count==1)
 for fraction in [("0","1"),("01","1"),("2","2"),("1","1000000000"),(String(UInt128.max),"1")] {
  do {_ = try PulseAudioClock(period:.init(numerator:fraction.0,denominator:fraction.1),beatsPerBar:4,duration:1).layout(rate:48000,frameCount:576);preconditionFailure("invalid or unrepresentable pulse admitted")}catch{}
 }

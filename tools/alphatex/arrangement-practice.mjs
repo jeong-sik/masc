@@ -43,14 +43,46 @@ function clickWave() {
   return { bytes, sampleRate: rate, channels: 1, frames }
 }
 
+async function prepareLoopPractice(project, prepared, original, clock, signal) {
+  const beats = BigInt(project.practice.countInBars) * BigInt(clock.beatsPerBar)
+  let n = BigInt(clock.period.numerator) * beats, d = BigInt(clock.period.denominator)
+  const g = gcd(n, d); n /= g; d /= g
+  if (n > (1n << 128n) - 1n || d > (1n << 128n) - 1n) throw new Error('Count-in exceeds the native rational clock range')
+  const countIn = Number(n) / Number(d) / 1e9
+  const loop = { ...project.playbackLoop, ppq: project.ppq, tempo: project.tempo }
+  const backing = (loop.end - loop.start) / loop.ppq * 60 / loop.tempo, duration = countIn + backing
+  if (!Number.isFinite(duration) || duration <= countIn || countIn * 1e9 >= 2 ** 64
+    || Math.abs(duration - countIn - backing) >= 1 / 48000) throw new Error('Count-in loses the arrangement duration')
+  const plan = prepared.format === 'midi-arrangement'
+    ? { schemaVersion: 2, kind: 'mixed-arrangement', assets: [], regions: [], midi: original }
+    : { ...original }
+  plan.loop = loop
+  plan.practice = { countInSeconds: countIn, duration: backing, loop: { period: clock.period,
+    countInBeats: String(beats), beatsPerBar: clock.beatsPerBar, unit: project.meter[1], metronome: project.practice.metronome } }
+  plan.duration = duration
+  const { bytes, ...metadata } = clickWave(), id = randomUUID(), path = join(dirname(prepared.path), id + '.wav')
+  await writeFile(path, bytes, { flag: 'wx', mode: 0o600, signal })
+  plan.assets.push({ id, path, sha256: createHash('sha256').update(bytes).digest('hex'), ...metadata })
+  const pulse = seconds => ({ id: randomUUID(), asset: id, startSeconds: 0, offsetFrames: 0,
+    frameCount: metadata.frames, repeat: 1, pulseClock: { period: clock.period, beatsPerBar: clock.beatsPerBar, duration: seconds } })
+  if (countIn > 0) {
+    const intro = pulse(countIn); intro.pulseClock.beatCount = String(beats); plan.regions.push(intro)
+  }
+  if (project.practice.metronome) plan.regions.push({ ...pulse(backing), pulseLoopUnit: project.meter[1] })
+  signal?.throwIfAborted()
+  await writeFile(prepared.path, JSON.stringify(plan), { mode: 0o600, signal })
+  signal?.throwIfAborted()
+  return { ...prepared, duration: backing, format: plan.kind }
+}
+
 // Extend the already snapshotted plan, never its sources. Only region placement
 // moves: SMF bytes, UMP host timestamps, capture cuts and correction remain exact.
 export async function preparePractice(project, prepared, { signal } = {}) {
   if (!practiceEnabled(project)) return prepared
   try {
-    if (project.playbackLoop !== undefined) throw new Error('Continuous looping with count-in or metronome is not connected yet; use :loop off for practice clicks')
     signal?.throwIfAborted()
     const clock = practiceClock(project), original = JSON.parse(await readFile(prepared.path, { encoding: 'utf8', signal }))
+    if (project.playbackLoop !== undefined) return await prepareLoopPractice(project, prepared, original, clock, signal)
     const countIn = clock.countInSeconds
     let duration = original.duration + countIn
     if (!Number.isFinite(duration) || duration <= countIn || Math.abs(duration - countIn - original.duration) >= 1 / (original.assets ?? []).reduce((rate, asset) => Math.max(rate, asset.sampleRate), 48000)) throw new Error('Count-in loses the arrangement duration')

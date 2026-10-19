@@ -96,7 +96,7 @@ test('adjacent original clips share their normalized native boundary across diff
  }finally{await c.worker.terminate();await rm(directory,{recursive:true,force:true})}
 })
 
-test('invalid or silent loop ranges, capture-only routes, practice and recording keep their explicit admission',async()=>{
+test('invalid or silent loop ranges refuse admission while practice keeps original backing regions',async()=>{
  const p=project(),before=structuredClone(p),e=arrangementEditor(p),c=client(),directory=await mkdtemp(join(tmpdir(),'masc-loop-refusal-'))
  try{
   for(const command of ['loop -1 1','loop 1 1','loop 2 1','loop 0','loop 0 1 2'])assert.throws(()=>arrangementCommand(e,command))
@@ -110,7 +110,11 @@ test('invalid or silent loop ranges, capture-only routes, practice and recording
   const audio=await c.request({kind:'prepare-audio',project:selected,sourceRoot:directory,directory})
   assert.equal(audio.ok,false);assert.match(audio.error,/MIDI assets/)
   const clicks={...selected,practice:{countInBars:1,metronome:true}}
-  const r=await c.request({kind:'prepare-midi',project:clicks,directory,midiOutput:'123'});assert.equal(r.ok,false);assert.match(r.error,/count-in or metronome/)
+  const r=await c.request({kind:'prepare-midi',project:clicks,directory,midiOutput:'123'});assert.equal(r.ok,true,r.error)
+  const practiced=JSON.parse(await readFile(r.result.path,'utf8'))
+  assert.equal(practiced.practice.countInSeconds,2)
+  assert.deepEqual(practiced.loop,{...selected.playbackLoop,ppq:selected.ppq,tempo:selected.tempo})
+  assert.equal(practiced.midi.regions[0].startSeconds,0)
   const silent=arrangementCommand(e,'loop 100 101').editor.project
   assert.throws(()=>arrangementPlaybackRequest(silent,arrangementRoute({midiOutput:'123'})),/No audible/)
  }finally{await c.worker.terminate();await rm(directory,{recursive:true,force:true})}

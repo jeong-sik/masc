@@ -11,6 +11,7 @@ func liveMidiReservations(_ data: Data, format: String) throws -> [UmpLiveClaim]
         let midi: Timeline?
         let umpRegions: UmpArrangement?
         let loop: WaveLoopClock?
+        let practice: PracticePlan?
     }
     var notes: Timeline?, captured: UmpArrangement?, cycle: MidiCycle?
     if format == "midi-arrangement" {
@@ -23,7 +24,10 @@ func liveMidiReservations(_ data: Data, format: String) throws -> [UmpLiveClaim]
               plan.duration.isFinite, plan.duration > 0 else { throw MidiFailure("invalid backing ownership plan") }
         if let loop = plan.loop {
             try loop.validate()
-            guard plan.duration == loop.duration else { throw MidiFailure("backing loop differs from its authored clock") }
+            if let practice = plan.practice {
+                try practice.validate(loop: loop)
+                guard abs(practice.countInSeconds + practice.duration - plan.duration) <= plan.duration.ulp else { throw MidiFailure("invalid backing count-in duration") }
+            } else { guard plan.duration == loop.duration else { throw MidiFailure("backing loop differs from its authored clock") } }
             cycle = try loop.midiCycle()
         }
         switch format {

@@ -59,7 +59,7 @@ const help = [
   ':monitor AUDIO_OUTPUT_UID enables input monitoring; :monitor off disables it.',
   ':midi-monitor SOURCE_UID DEST_UID [GROUP CHANNEL ...] (1–16); omit pairs for all messages.',
   'Repeat for more routes; :midi-monitor remove SOURCE_UID DEST_UID; :midi-monitor off.',
-  'Channel scopes filter system/SysEx. Transport/edits finalize recording; practice-click looping and loop recording remain unfinished.',
+  'Channel scopes filter system/SysEx. Transport/edits finalize recording; count-in runs once before loops. Loop recording remains unfinished.',
 ]
 
 export async function viewArrangement({ path, loaded, initialDocument, root = resolve('music-projects'), embedded = false, signal, output, midiOutput, initialRoute, stateDirectory } = {}) {

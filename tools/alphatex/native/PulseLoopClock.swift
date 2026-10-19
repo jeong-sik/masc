@@ -1,5 +1,19 @@
 import Foundation
 
+extension PracticePlan {
+    func validate(loop backing: WaveLoopClock) throws {
+        try backing.validate()
+        guard let loop, duration == backing.duration, countInSeconds.isFinite, countInSeconds >= 0 else {
+            throw AudioFailure("practice loop differs from its backing clock")
+        }
+        let (n, d) = try loop.lead()
+        guard countInSeconds == Double(n) / Double(d) / 1e9,
+              loop.metronome || n > 0 else { throw AudioFailure("invalid loop count-in duration") }
+        _ = try PulseLoopLayout(loop: backing, pulse: PulseAudioClock(period: loop.period,
+            beatsPerBar: loop.beatsPerBar, duration: backing.duration), unit: loop.unit, rate: 48000, frameCount: 576)
+    }
+}
+
 // Sample the original song's notated beat grid inside an authored loop. A
 // partial bar is still a partial bar on every pass; neither beat rounding nor
 // source-buffer boundaries restart the meter or accumulate a new period.

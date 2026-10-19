@@ -308,7 +308,12 @@ module For_testing : sig
   (** The decoded snapshot is reused while the file it came from has not
       moved. A test asserts on these because the state being right does not
       say whether it was parsed again: an unchanged file must be a hit, and a
-      rewritten one must not. *)
+      rewritten one must not.
+
+      The reset drops that decoded snapshot and the hit/miss counters only. It
+      keeps the durable confirmations this process recorded: a reset re-reads
+      the file, it does not start a new process, so bytes this process already
+      confirmed stay confirmed and a same-binding replay stays a no-op. *)
 end
 
 val load_state_result :

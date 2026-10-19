@@ -1966,9 +1966,12 @@ module For_testing = struct
   let snapshot_cache_hits () = Atomic.get snapshot_cache_hit_counter
 
   let reset_snapshot_cache_for_testing () =
+    (* A reset re-reads the file; it does not start a new process. The durable
+       confirmations this process recorded stay, so a cold reload cannot make
+       an already confirmed binding look unconfirmed and re-publish it. The
+       unconfirmed path is exercised by a failed parent fsync, not by this
+       hook. *)
     Stdlib.Mutex.protect snapshot_cache_mutex (fun () -> Hashtbl.reset snapshot_cache);
-    Stdlib.Mutex.protect durable_confirmations_mutex (fun () ->
-      Hashtbl.reset durable_confirmations);
     Atomic.set snapshot_cache_read_counter 0;
     Atomic.set snapshot_cache_hit_counter 0
   ;;

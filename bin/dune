@@ -1845,6 +1845,8 @@
  (wrapped false)
  (modules masc_tui_render_tools)
  (libraries
+  masc_tui_fetched
+  masc_tui_text_block
   masc_tui_task_document
   masc_tui_press
   masc_tui_frame

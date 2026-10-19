@@ -639,7 +639,8 @@ let handler_activity_kind handler =
   | Tool_masc_file_dispatch
   | Tool_masc_wiki_dispatch
   | Tool_masc_local_runtime_dispatch
-  | Tool_analyze_image -> Tool_activity
+  | Tool_analyze_image
+  | Tool_read_image -> Tool_activity
 
 (* Delegation stands apart from the rest of the keeper family because it is
    the one call that moves work to another Keeper. [masc_keeper_status] and

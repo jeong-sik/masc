@@ -48,6 +48,13 @@ earlier input targets a different file. Once identities are known, actual file
 conflicts await predecessor settlement. A failed or skipped conflicting owner
 prevents its successors from dispatching; independent branches follow the plan's
 existing failure policy. Pure child argument validation has no file footprint.
+An execution computes its immutable dependency layers once and shares them
+between batch construction and ready binding order. The ready order is flattened
+once, rather than rebuilding the graph for each node. This reuses original node
+objects only; inputs, file preparation, Gate decisions and settlements still
+resolve at their original boundaries. It is not a cross-call result cache.
+See the [source comparison](../audits/2026-10-19-composition-dependency-order-reuse.md)
+for traversal counts and measurement limits.
 Read/Edit/Write plans retain supported file capabilities. Overwrite/Append Write
 can bind existing physical parents or the deepest existing ancestor when child
 directories are missing; unsupported paths retain the original exclusive handler.

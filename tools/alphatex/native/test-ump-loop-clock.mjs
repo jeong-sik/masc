@@ -75,6 +75,21 @@ struct ClockCase:Decodable{let tempo:Double;let start:Int64;let end:Int64;let n:
  let a=try UmpLoopWindow(cycle:normalized,start:(0,1),numer:125,denom:3,extent:4800001,repetitions:3)
  let b=try UmpLoopWindow(cycle:unreduced,start:(0,redundant),numer:125,denom:3,extent:4800001,repetitions:3)
  precondition(a.period==b.period && a.divisor==b.divisor && a.offset==b.offset && a.tick==b.tick && a.sourceEnd==b.sourceEnd)
+ // Equal master periods must not inflate the original source horizon.
+ let scaled=try MidiCycle(start:0,end:1,duration:1,period:1_000_000_000*redundant,divisor:redundant,exactStart:(0,1))
+ let simple=try MidiCycle(start:0,end:1,duration:1,period:1_000_000_000,divisor:1,exactStart:(0,1))
+ let wa=try UmpLoopWindow(cycle:simple,start:(0,1),numer:125,denom:3,extent:4800001,repetitions:2_000_000)
+ let wb=try UmpLoopWindow(cycle:scaled,start:(0,1),numer:125,denom:3,extent:4800001,repetitions:2_000_000)
+ precondition(wa.period==wb.period && wa.divisor==wb.divisor && wa.sourceEnd==wb.sourceEnd)
+ for elapsed:UInt64 in [0,1,2,100,UInt64.max-1]{
+  let a=try simple.phaseParts(elapsed:elapsed,offset:0),b=try scaled.phaseParts(elapsed:elapsed,offset:0)
+  precondition(a.index==b.index && a.remainder==b.remainder)
+  let sa=try wa.phase(remainder:a.remainder),sb=try wb.phase(remainder:b.remainder)
+  precondition(sa?.copy==sb?.copy && sa?.local==sb?.local)
+ }
+ let producer=try WaveLoopClock(start:0,end:65537,ppq:960,tempo:65537).midiCycle()
+ let legal=try UmpLoopWindow(cycle:producer,start:(0,1),numer:1,denom:4294967291,extent:UInt128(1)<<64,repetitions:9007199254740991)
+ precondition(legal.period==62_500_000*legal.divisor)
  // This legal shared cycle's elapsed product exceeds UInt128, while its
  // quotient and remainder are representable throughout the UInt64 host clock.
  let d:UInt128=(UInt128(1)<<110)-17,p:UInt128=(UInt128(1)<<115)+3

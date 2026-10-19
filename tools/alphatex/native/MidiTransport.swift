@@ -584,7 +584,9 @@ struct MidiCycle {
               duration.isFinite, duration > 0, duration * 1e9 < Double(UInt64.max),
               divisor > 0, period >= divisor, exactStart == nil || exactStart!.divisor > 0 else { throw MidiFailure("invalid common MIDI cycle") }
         self.start = start; self.end = end; self.duration = duration
-        self.period = period; self.divisor = divisor
+        var a = period, b = divisor
+        while b > 0 { let remainder = a % b; a = b; b = remainder }
+        self.period = period / a; self.divisor = divisor / a
         self.exactStart = exactStart
     }
     private func multiply(_ a: UInt128, _ b: UInt128) throws -> UInt128 {

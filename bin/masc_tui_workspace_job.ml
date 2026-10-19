@@ -1,4 +1,5 @@
-let fork ?(observation = false) ?(key = ref ()) ?(on_withdrawn = fun () -> ())
+type event = Cancellation_requested | Registration_released
+let fork ?(observation = false) ?(key = ref ()) ?(on_withdrawn = fun () -> ()) ?(observe = fun _ -> ())
     (state : Masc_tui_types.state) ~sw run =
   let exception Workspace_withdrawn in
   let authority = state.workspace_authority in
@@ -7,7 +8,9 @@ let fork ?(observation = false) ?(key = ref ()) ?(on_withdrawn = fun () -> ())
   let token = key in
   let cancel () =
     withdrawn := true;
-    Option.iter (fun context -> Eio.Cancel.cancel context Workspace_withdrawn) !context
+    Fun.protect
+      ~finally:(fun () -> Option.iter (fun context -> Eio.Cancel.cancel context Workspace_withdrawn) !context)
+      (fun () -> observe Cancellation_requested)
   in
   state.workspace_cancellations <- (token, cancel) :: state.workspace_cancellations;
   if observation then
@@ -20,7 +23,8 @@ let fork ?(observation = false) ?(key = ref ()) ?(on_withdrawn = fun () -> ())
         state.workspace_cancellations <-
           List.filter (fun (held, _) -> held != token) state.workspace_cancellations;
         state.workspace_observation_cancellations <-
-          List.filter (fun (held, _) -> held != token) state.workspace_observation_cancellations)
+          List.filter (fun (held, _) -> held != token) state.workspace_observation_cancellations;
+        observe Registration_released)
       (fun () ->
         try
           Eio.Cancel.sub (fun cancellation ->
@@ -36,6 +40,7 @@ let fork ?(observation = false) ?(key = ref ()) ?(on_withdrawn = fun () -> ())
       List.filter (fun (held, _) -> held != token) state.workspace_cancellations;
     state.workspace_observation_cancellations <-
       List.filter (fun (held, _) -> held != token) state.workspace_observation_cancellations;
+    observe Registration_released;
     Printexc.raise_with_backtrace exn backtrace
 
 

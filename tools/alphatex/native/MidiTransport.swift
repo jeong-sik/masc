@@ -629,6 +629,24 @@ struct MidiCycle {
             }
         }
     }
+    func entry(_ region: MidiRegion, copy: Int, sourceSeconds: Double, index: UInt128,
+               offset: Double, anchor: UInt64, host: UInt64) throws -> MidiRegionEntry {
+        let start = region.spec.startSeconds + Double(copy) * region.duration
+        var before = 0, through = 0
+        for event in region.events {
+            let position = start + (event.seconds - region.spec.sourceStart)
+            // Original trim/window prefixes are history even when their
+            // clamped deadline equals the first common epoch. For actual
+            // sounding events, classify the whole native host-deadline batch.
+            let beforeEntry = index == 0 ? try beforeOffset(position: position, offset: offset) : false
+            let history = event.seconds < region.spec.sourceStart || position < self.start || beforeEntry
+            let deadline = try deadline(position: position, index: index, offset: offset, anchor: anchor)
+            if history || deadline < host { before += 1; through += 1 }
+            else if deadline == host { through += 1 }
+            else { break }
+        }
+        return midiRegionEntry(region.events, at: sourceSeconds, boundary: (before, through))
+    }
     func window(_ region: MidiRegion) throws -> MidiCycleRegion {
         let from = max(start, region.spec.startSeconds), to = min(end, region.end)
         var copy = min(region.spec.repeatCount - 1, max(0, Int(floor((from - region.spec.startSeconds) / region.duration))))
@@ -638,28 +656,33 @@ struct MidiCycle {
         guard copy >= 0, position(copy) <= from, position(copy + 1) > from else { throw MidiFailure("common MIDI source loses repeat precision") }
         let source = min(region.spec.sourceEnd, region.spec.sourceStart + (from - position(copy)))
         let repeated = to > position(copy + 1)
-        let limit = to >= position(copy + 1) ? region.spec.sourceEnd : min(region.spec.sourceEnd, region.spec.sourceStart + (to - position(copy)))
-        var touched = SourceChase()
-        for event in region.events where event.seconds < limit || event.seconds == limit && limit == region.sourceDuration {
-            touched.observe(event.bytes, port: event.port)
-        }
-        guard touched.obstacles.isEmpty else { throw MidiFailure("common MIDI reconstruction requires support for " + touched.obstacles.map(\.rawValue).sorted().joined(separator: ", ")) }
-        let entry = midiRegionEntry(region.events, at: source)
-        // A pruned historical note leaves an empty channel dictionary entry.
-        // Reserve only actual reconstruction effects and reachable wire events.
+        let host = try deadline(position: from, index: 0, offset: 0, anchor: 0)
+        let entry = try entry(region, copy: copy, sourceSeconds: source, index: 0, offset: 0, anchor: 0, host: host)
+        // Use the same original-position and native-deadline classification as
+        // playback. Inverting a rounded source phase can swallow a due pair.
         var scope = Set(try entry.model.bootstrap(replacing: SourceChase()).map { $0.0 << 8 | Int($0.1[0] & 15) })
-        let laterLimit = repeated ? min(region.spec.sourceEnd, region.spec.sourceStart + to - position(copy + 1)) : region.spec.sourceStart
+        var through = entry.next
         if repeated {
             let restart = midiRegionEntry(region.events, at: region.spec.sourceStart)
             scope.formUnion(try restart.model.bootstrap(replacing: SourceChase()).map { $0.0 << 8 | Int($0.1[0] & 15) })
         }
-        for event in region.events {
-            let first = event.seconds >= source && (event.seconds < limit || event.seconds == limit && limit == region.sourceDuration)
-            let later = repeated && event.seconds >= region.spec.sourceStart && (event.seconds < laterLimit || event.seconds == laterLimit && laterLimit == region.sourceDuration)
-            if (first || later), event.bytes[0] < 0xf0 { scope.insert(event.port << 8 | Int(event.bytes[0] & 15)) }
+        for (eventIndex, event) in region.events.enumerated() where event.seconds >= region.spec.sourceStart && region.includes(event.seconds) {
+            let absolute = position(copy) + (event.seconds - region.spec.sourceStart)
+            let nativeDeadline = try deadline(position: absolute, index: 0, offset: 0, anchor: 0)
+            let endpoint = event.seconds == region.spec.sourceEnd && region.spec.sourceEnd == region.sourceDuration
+            let first = absolute >= start && (absolute < to || endpoint && absolute == to)
+                && nativeDeadline >= host
+            let laterPosition = position(copy + 1) + (event.seconds - region.spec.sourceStart)
+            let later = repeated && (laterPosition < to || endpoint && laterPosition == to)
+            if first || later {
+                through = max(through, eventIndex + 1)
+                if event.bytes[0] < 0xf0 { scope.insert(event.port << 8 | Int(event.bytes[0] & 15)) }
+            }
         }
-        return MidiCycleRegion(scope: scope, entry: entry,
-                               repeated: repeated, touched: touched.touched)
+        var touched = SourceChase()
+        for event in region.events.prefix(through) { touched.observe(event.bytes, port: event.port) }
+        guard touched.obstacles.isEmpty else { throw MidiFailure("common MIDI reconstruction requires support for " + touched.obstacles.map(\.rawValue).sorted().joined(separator: ", ")) }
+        return MidiCycleRegion(scope: scope, entry: entry, repeated: repeated, touched: touched.touched)
     }
 }
 
@@ -965,21 +988,8 @@ final class MidiTransport {
     func regionEntry(_ index: Int, at sourceSeconds: Double) throws -> MidiRegionEntry {
         let region = timeline.regions[index]
         guard let cycle, let host = cycleHost else { return midiRegionEntry(region.events, at: sourceSeconds) }
-        let start = regionStart(region, copy: regionCursors[index].copy)
-        var before = 0, through = 0
-        for event in region.events {
-            let position = start + (event.seconds - region.spec.sourceStart)
-            // Original trim/window prefixes are history even when their
-            // clamped deadline equals the first common epoch. For actual
-            // sounding events, classify the whole native host-deadline batch.
-            let beforeEntry = cycleIndex == 0 ? try cycle.beforeOffset(position: position, offset: offset - cycle.start) : false
-            let history = event.seconds < region.spec.sourceStart || position < cycle.start || beforeEntry
-            let deadline = try cycle.deadline(position: position, index: cycleIndex, offset: offset - cycle.start, anchor: anchor)
-            if history || deadline < host { before += 1; through += 1 }
-            else if deadline == host { through += 1 }
-            else { break }
-        }
-        return midiRegionEntry(region.events, at: sourceSeconds, boundary: (before, through))
+        return try cycle.entry(region, copy: regionCursors[index].copy, sourceSeconds: sourceSeconds,
+                               index: cycleIndex, offset: offset - cycle.start, anchor: anchor, host: host)
     }
     func liveRegionAttacks(_ index: Int) throws -> Set<Int> {
         let copy = regionCursors[index].copy

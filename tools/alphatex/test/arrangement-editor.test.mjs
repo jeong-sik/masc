@@ -491,3 +491,20 @@ test('ordinary paired capture play passes source bindings and drains native play
     player.finish();await flush();assert.ok(view.observed.removed.includes('/owned-recovery/paired'))
   } finally {await closeController(view)}
 })
+
+
+test('ordinary hybrid TUI playback retains every audible lane and both selected stream protocols',async()=>{
+  const view=await controller()
+  try {
+    await primeMixed(view);await primeCapture(view);view.key('return','',{shift:true})
+    view.command('midi-output 42');view.command('mixed-output audio');view.command('midi-port asset-2 7 43');view.command('midi-source capture-1 keys 44');view.key('space');await flush()
+    const prepare=view.observed.requests.find(job=>job.kind==='prepare-capture');assert.ok(prepare)
+    assert.equal(prepare.project.clips.length,3);assert.equal(prepare.midiOutput,'42')
+    assert.deepEqual(prepare.portBindings,[{asset:'asset-2',port:7,destination:'43'}])
+    const bindings=[{port:0,destination:'43',protocol:1},{port:1,destination:'44',protocol:2}]
+    view.worker.emit('message',{id:prepare.id,ok:true,result:{path:'/owned-recovery/hybrid/plan.json',format:'hybrid-arrangement',midiOutput:'43',bindings}});await flush()
+    const player=view.observed.players[0];assert.equal(player.options.format,'hybrid-arrangement');assert.deepEqual(player.options.midiBindings,bindings)
+    view.command('stop');await flush();assert.ok(player.commands.includes('stop'));assert.ok(!view.observed.removed.includes('/owned-recovery/hybrid'))
+    player.finish();await flush();assert.ok(view.observed.removed.includes('/owned-recovery/hybrid'))
+  }finally{await closeController(view)}
+})

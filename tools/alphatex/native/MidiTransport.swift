@@ -552,6 +552,7 @@ final class MidiTransport {
     let selectedUID: String
     let loop: Bool
     let queue: DispatchQueue
+    let groupZeroUMP: Bool
     let coordinated: Bool
     var onCoordinatedFailure: ((String, Error?) -> Void)?
     var onCoordinatedEnd: (() -> Void)?
@@ -576,8 +577,8 @@ final class MidiTransport {
         let timeline = try JSONDecoder().decode(Timeline.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
         try self.init(timeline: timeline, uid: uid, loop: loop)
     }
-    init(timeline: Timeline, uid: String, loop: Bool = false, coordinated: Bool = false) throws {
-        self.timeline = timeline; self.coordinated = coordinated
+    init(timeline: Timeline, uid: String, loop: Bool = false, coordinated: Bool = false, groupZeroUMP: Bool = false) throws {
+        self.timeline = timeline; self.coordinated = coordinated; self.groupZeroUMP = groupZeroUMP
         queue = coordinated ? .main : DispatchQueue(label: "masc.music.midi.transport", qos: .userInteractive)
         try timeline.validate()
         guard !coordinated || timeline.arrangement && !loop else { throw MidiFailure("coordinated playback requires a MIDI region arrangement") }
@@ -626,6 +627,12 @@ final class MidiTransport {
         guard let destination else { throw MidiFailure("MIDI destination has not been selected") }
         for selected in timeline.source ? Array(sourceDestinations.values) : [destination] {
             try checkPinnedDestination(selected)
+            if groupZeroUMP {
+                var groups: Int32 = 0
+                let status = MIDIObjectGetIntegerProperty(selected.endpoint, kMIDIPropertyUMPActiveGroupBitmap, &groups)
+                if status == noErr && groups & 1 == 0 { throw MidiFailure("selected hybrid SMF output does not support explicit group zero") }
+                if status != noErr && status != kMIDIUnknownProperty { try checked(status, "read hybrid SMF output groups") }
+            }
         }
     }
     func send(_ bytes: [UInt8]) throws {
@@ -633,6 +640,26 @@ final class MidiTransport {
         try sendWire(bytes, to: destination)
     }
     func sendWire(_ bytes: [UInt8], to destination: Destination) throws {
+        if groupZeroUMP {
+            guard let status = bytes.first, status >= 0x80, status < 0xf0,
+                  bytes.count == ([0xc0, 0xd0].contains(status & 0xf0) ? 2 : 3), bytes.dropFirst().allSatisfy({ $0 < 128 }) else {
+                throw MidiFailure("hybrid SMF requires complete MIDI1 channel messages")
+            }
+            // MIDI1 UMP retains the exact channel/data bytes with explicit
+            // group zero. CoreMIDI performs native endpoint protocol delivery.
+            var word = UInt32(0x20000000) | UInt32(status) << 16 | UInt32(bytes[1]) << 8
+            if bytes.count == 3 { word |= UInt32(bytes[2]) }
+            let capacity = MemoryLayout<MIDIEventList>.size
+            let storage = UnsafeMutableRawPointer.allocate(byteCount: capacity, alignment: MemoryLayout<MIDIEventList>.alignment)
+            defer { storage.deallocate() }
+            let list = storage.assumingMemoryBound(to: MIDIEventList.self), packet = MIDIEventListInit(list, ._1_0)
+            try withUnsafePointer(to: &word) { data in
+                let added = MIDIEventListAdd(list, capacity, packet, 0, 1, data)
+                guard UInt(bitPattern: added) != 0 else { throw MidiFailure("hybrid MIDI1 UMP does not fit its event list") }
+                try checked(MIDISendEventList(port, destination.endpoint, list), "send hybrid SMF MIDI1 UMP")
+            }
+            return
+        }
         // Apple limits each MIDIPacketList to 65536 bytes. Include actual ABI
         // header offsets, check every Add result, split only long SysEx data.
         let capacity = 65536

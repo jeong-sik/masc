@@ -57,3 +57,14 @@ test('cancellation and no audible regions create no playback artifacts',async()=
   await assert.rejects(prepareArrangementWave(newArrangement(),{sourceRoot:root,directory:root}),/No audible/)
   assert.deepEqual(await readdir(root),before)
 }))
+
+test('WAV range looping retains original integer source spans and private bytes with a shared authored tick clock',async()=>workspace(async({root,bytes,project})=>{
+  project=editArrangement(project,{kind:'loop',range:{start:984,end:1176}})
+  const original=structuredClone(project),prepared=await prepareArrangementWave(project,{sourceRoot:root,directory:root})
+  const plan=JSON.parse(await readFile(prepared.path,'utf8'))
+  assert.equal(prepared.loop,true);assert.equal(prepared.originSeconds,984/960*60/100)
+  assert.equal(prepared.duration,.12);assert.equal(plan.duration,.12)
+  assert.deepEqual(plan.loop,{start:984,end:1176,ppq:960,tempo:100})
+  assert.deepEqual(plan.regions,[{id:'region-1',asset:'asset-1',startSeconds:.6,offsetFrames:1200,frameCount:2400,repeat:3,projectTick:960}])
+  assert.deepEqual(await readFile(plan.assets[0].path),bytes);assert.deepEqual(project,original)
+}))

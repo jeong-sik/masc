@@ -644,19 +644,29 @@ and external MIDI clock editing are separate features.
 
 `:loop START END` stores an enabled loop range in arrangement beats; `:loop off`
 restores one-shot playback. These are immutable document edits with undo/redo and
-portable save/reopen. The current connected route is an SMF-only arrangement
-without count-in/metronome. WAV, captured audio/UMP and practice-click looping
-still require the shared audio-clock integration; those routes refuse the loop
-explicitly. Loop recording likewise requires cycle-aware take placement and is
+portable save/reopen. WAV-only and SMF-only arrangements can loop without
+count-in/metronome. Captured audio/UMP, mixed backing and practice-click looping
+still require their shared cycle-state integration; those routes refuse the
+loop explicitly. Loop recording likewise requires cycle-aware take placement and is
 not admitted yet. Disabling the loop restores their existing one-shot workflows.
 
-For example, `:loop 4 12` repeats that passage continuously on the selected MIDI
-outputs until stopped. It starts at beat 4. Pause/resume and `:seek BEAT` retain
+For example, `:loop 4 12` repeats that passage continuously on the selected audio
+or MIDI output until stopped. It starts at beat 4. Pause/resume and `:seek BEAT` retain
 one native owner; seek positions use original arrangement beats and must lie
 inside the range, with its end wrapping to its start. Editing the range stops
 the admitted playback before adopting the new document.
 
-Preparation clips regions to one cycle without rewriting source files or
+WAV playback retains original integer frame trims and finite clip repeats.
+Each source-rate stream samples the authored loop phase on one rational beat
+clock, including silence before/after its clip. The selected source frame is
+the frame containing that phase (rounded down); half-open source ends remain
+excluded. Cycle boundaries derive from absolute sample positions, so a
+nonintegral period alternates its frame boundaries instead of accumulating a
+rounded period. The same engine and two reusable buffers per voice continue
+through every wrap. Storage is independent of session length and clip repeat
+count, with an optional bounded cache for a short source period.
+
+SMF preparation clips regions to one cycle without rewriting source files or
 expanding repeated copies. A leading/trailing partial repeat and the compressed
 whole copies keep original source seconds, release messages and port bindings.
 All clips share projected loop boundaries; the native cycle may include a
@@ -668,5 +678,5 @@ Native admission checks controller/bend/program/pressure baselines across the
 last-to-first transition as well as between regions. An unspecified value is
 refused instead of leaking the previous cycle's state or guessing a device
 reset. Muted/solo lanes and assets outside the chosen range retain their source
-data. This is the SMF transport phase of whole-arrangement looping; mixed-source
+data. These are the separate WAV and SMF phases of whole-arrangement looping; mixed-source
 loop continuity and physical timing evidence remain separate work.

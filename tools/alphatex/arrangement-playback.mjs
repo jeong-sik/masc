@@ -22,7 +22,6 @@ function requireRegionTransport(project) {
 // One compressed region record retains whole source frames. Preparation owns
 // private copies, so editing/moving project files cannot change admitted audio.
 export async function prepareArrangementWave(project, { sourceRoot, directory, signal } = {}) {
-  requireLoopTransport(project)
   signal?.throwIfAborted()
   const schedule = requireRegionTransport(project)
   if (!schedule.length) throw new Error('No audible arrangement regions')
@@ -43,17 +42,20 @@ export async function prepareArrangementWave(project, { sourceRoot, directory, s
       }
       assets.push({ id, path: join(temporary, snapshot.file), sha256: snapshot.sha256, ...snapshot.metadata })
     }
+    const loop = arrangementLoop(project)
     const regions = schedule.map(clip => ({ id: clip.id, asset: clip.asset, startSeconds: clip.startSeconds,
-      offsetFrames: clip.offset, frameCount: clip.extent, repeat: clip.repeat }))
-    const duration = regions.reduce((end, clip) => Math.max(end, clip.startSeconds
-      + clip.frameCount / assets.find(asset => asset.id === clip.asset).sampleRate * clip.repeat), 0)
+      offsetFrames: clip.offset, frameCount: clip.extent, repeat: clip.repeat, ...(loop ? { projectTick: clip.position } : {}) }))
+    const duration = loop ? (project.playbackLoop.end - project.playbackLoop.start) / project.ppq * 60 / project.tempo
+      : regions.reduce((end, clip) => Math.max(end, clip.startSeconds
+        + clip.frameCount / assets.find(asset => asset.id === clip.asset).sampleRate * clip.repeat), 0)
     if (!Number.isFinite(duration) || duration <= 0) throw new Error('Arrangement has no representable audio duration')
-    const plan = { schemaVersion: 1, kind: 'wave-arrangement', duration, assets, regions }
+    const plan = { schemaVersion: 1, kind: 'wave-arrangement', duration, assets, regions,
+      ...(loop ? { loop: { ...project.playbackLoop, ppq: project.ppq, tempo: project.tempo } } : {}) }
     signal?.throwIfAborted()
     const path = join(temporary, 'plan.json')
     await writeFile(path, JSON.stringify(plan), { flag: 'wx', mode: 0o600, signal })
     signal?.throwIfAborted()
-    return { path, duration, format: 'wave-arrangement' }
+    return { path, duration, format: 'wave-arrangement', ...(loop ? { loop: true, originSeconds: loop.start } : {}) }
   } catch (error) { await rm(temporary, { recursive: true, force: true }); throw error }
 }
 

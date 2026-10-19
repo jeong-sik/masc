@@ -1,0 +1,75 @@
+import Foundation
+
+// The authored beat window is shared by every source-rate stream. Resolve each
+// absolute sample against its rational cycle, rather than accumulating rounded
+// frame counts at successive wraps. Source clips and finite repeats stay intact.
+struct WaveLoopClock: Decodable {
+    let start: Int64, end: Int64, ppq: Int64
+    let tempo: Double
+    var duration: Double { Double(end - start) / Double(ppq) * 60 / tempo }
+    func validate() throws {
+        guard start >= 0, end > start, end <= 9_007_199_254_740_991, ppq == 960,
+              tempo.isFinite, tempo > 0, duration.isFinite, duration > 0,
+              duration * 1e9 < Double(UInt64.max) else { throw AudioFailure("invalid audio loop clock") }
+    }
+    func layout(rate: Double, projectTick: Int64, frameCount: Int64, repetitions: Int64) throws -> WaveLoopLayout {
+        try validate()
+        guard projectTick >= 0, projectTick <= 9_007_199_254_740_991,
+              rate.isFinite, rate > 0, rate.rounded(.down) == rate, rate <= Double(UInt32.max),
+              frameCount > 0, repetitions > 0 else { throw AudioFailure("invalid audio loop source clock") }
+        // Decode the actual binary64 tempo; no decimal approximation or new
+        // user preference controls the clock.
+        let bits = tempo.bitPattern, exponent = Int((bits >> 52) & 2047)
+        var n = UInt128(bits & ((1 << 52) - 1)) + (exponent == 0 ? 0 : UInt128(1) << 52)
+        var shift = exponent == 0 ? -1074 : exponent - 1075
+        while n & 1 == 0 { n >>= 1; shift += 1 }
+        guard shift > -128, shift < 128, shift <= 0 || n <= UInt128.max >> shift else { throw AudioFailure("audio loop exceeds the native rational clock range") }
+        let d: UInt128
+        if shift < 0 { d = UInt128(1) << -shift } else { n <<= shift; d = 1 }
+        func gcd(_ a: UInt128, _ b: UInt128) -> UInt128 {
+            var x = a, y = b
+            while y > 0 { let r = x % y; x = y; y = r }
+            return x
+        }
+        var top: [UInt128] = [60, UInt128(rate), d], bottom: [UInt128] = [UInt128(ppq), n]
+        for i in top.indices { for j in bottom.indices {
+            let g = gcd(top[i], bottom[j]); top[i] /= g; bottom[j] /= g
+        } }
+        let factor = try top.reduce(UInt128(1)) { try loopMultiply($0, $1) }
+        let divisor = try bottom.reduce(UInt128(1)) { try loopMultiply($0, $1) }
+        let period = try loopMultiply(UInt128(end - start), factor)
+        let distance = try loopMultiply(UInt128(start >= projectTick ? start - projectTick : projectTick - start), factor)
+        let frames = frameCount.multipliedReportingOverflow(by: repetitions)
+        guard !frames.overflow, frames.partialValue > 0 else { throw AudioFailure("audio loop source exceeds the native frame range") }
+        let sourceEnd = try loopMultiply(UInt128(frames.partialValue), divisor)
+        let signedMax = UInt128(Int128.max)
+        guard period >= divisor, period <= signedMax, distance <= signedMax, sourceEnd <= signedMax,
+              start < projectTick || distance <= signedMax - period else { throw AudioFailure("audio loop is not representable at source sample precision") }
+        return WaveLoopLayout(period: period, divisor: divisor,
+            offset: start >= projectTick ? Int128(distance) : -Int128(distance), sourceEnd: sourceEnd, frameCount: frameCount)
+    }
+}
+private func loopMultiply(_ a: UInt128, _ b: UInt128) throws -> UInt128 {
+    let result = a.multipliedReportingOverflow(by: b)
+    guard !result.overflow else { throw AudioFailure("audio loop exceeds the native rational clock range") }
+    return result.partialValue
+}
+struct WaveLoopLayout {
+    let period: UInt128, divisor: UInt128
+    let offset: Int128
+    let sourceEnd: UInt128
+    let frameCount: Int64
+    func span(at frame: Int64, maximum: Int64) throws -> (source: Int64?, count: Int64) {
+        guard frame >= 0, maximum > 0 else { throw AudioFailure("invalid audio loop stream position") }
+        let phase = try loopMultiply(UInt128(frame), divisor) % period
+        func count(_ distance: UInt128) -> Int64 {
+            let frames = distance / divisor + (distance % divisor == 0 ? 0 : 1)
+            return Int64(min(UInt128(maximum), frames))
+        }
+        let untilWrap = count(period - phase), position = Int128(phase) + offset
+        if position < 0 { return (nil, min(untilWrap, count(UInt128(-position)))) }
+        if UInt128(position) >= sourceEnd { return (nil, untilWrap) }
+        let source = Int64(UInt128(position) / divisor) % frameCount
+        return (source, min(untilWrap, frameCount - source))
+    }
+}

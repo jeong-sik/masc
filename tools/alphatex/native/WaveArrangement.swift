@@ -216,7 +216,7 @@ final class Voice {
     var generation: UInt64 = 0 // only the stream queue accesses these fields
     var cursor: AVAudioFramePosition = 0
     var origin: AVAudioFramePosition = 0
-    init(region: Region, asset: Asset, capacity: AVAudioFrameCount, outputChannels: AVAudioChannelCount) throws {
+    init(region: Region, asset: Asset, capacity: AVAudioFrameCount, outputChannels: AVAudioChannelCount, outputLayout: AVAudioChannelLayout? = nil) throws {
         self.region = region; self.asset = asset; self.capacity = capacity
         queue = DispatchQueue(label: "music.arrangement.stream.\(region.id)", qos: .userInitiated)
         captureLayout = try region.captureClock?.layout(rate: asset.sampleRate, offsetFrames: region.offsetFrames,
@@ -231,11 +231,17 @@ final class Voice {
                   channel.output > 0, channel.output <= outputChannels else {
                 throw AudioFailure("selected captured channel is unavailable on source or output")
             }
-            // Count-only AVAudioFormat initializers support at most stereo.
-            // DiscreteInOrder encodes its channel count in the low UInt16 bits.
-            guard outputChannels <= UInt32(UInt16.max) else { throw AudioFailure("output channel count exceeds the native discrete layout range") }
-            let tag = outputChannels == 1 ? kAudioChannelLayoutTag_Mono : outputChannels == 2 ? kAudioChannelLayoutTag_Stereo : kAudioChannelLayoutTag_DiscreteInOrder | outputChannels
-            guard let layout = AVAudioChannelLayout(layoutTag: tag) else { throw AudioFailure("selected output channel layout is unavailable") }
+            let layout: AVAudioChannelLayout
+            if let actual = outputLayout { layout = actual }
+            else {
+                // Count-only AVAudioFormat initializers support at most stereo.
+                // DiscreteInOrder encodes its count in the low UInt16 bits.
+                guard outputChannels <= UInt32(UInt16.max) else { throw AudioFailure("output channel count exceeds the native discrete layout range") }
+                let tag = outputChannels == 1 ? kAudioChannelLayoutTag_Mono : outputChannels == 2 ? kAudioChannelLayoutTag_Stereo : kAudioChannelLayoutTag_DiscreteInOrder | outputChannels
+                guard let inferred = AVAudioChannelLayout(layoutTag: tag) else { throw AudioFailure("selected output channel layout is unavailable") }
+                layout = inferred
+            }
+            guard layout.channelCount == outputChannels else { throw AudioFailure("selected output channel layout disagrees with its format") }
             format = AVAudioFormat(standardFormatWithSampleRate: asset.sampleRate, channelLayout: layout)
         } else { format = sourceFormat }
         func buffer(_ count: AVAudioFrameCount, format: AVAudioFormat) throws -> AVAudioPCMBuffer {
@@ -356,6 +362,7 @@ final class ArrangementTransport {
     let engine = AVAudioEngine()
     let capacity: AVAudioFrameCount
     let renderQuantum: AVAudioFrameCount
+    let renderChannels: AVAudioChannelCount
     var voices: [Voice] = []
     var active = Set<String>()
     var horizon: DispatchSourceTimer?
@@ -389,10 +396,12 @@ final class ArrangementTransport {
             let digest = hash.finalize().map { String(format: "%02x", $0) }.joined()
             guard digest == asset.sha256 else { throw AudioFailure("WAV source changed before native admission") }
         }
-        guard let deviceChannels = AVAudioChannelCount(exactly: device.channels) else { throw AudioFailure("output channel count exceeds the native format range") }
+        let destinationFormat = engine.outputNode.outputFormat(forBus: 0)
+        renderChannels = destinationFormat.channelCount
+        guard renderChannels > 0, Int(renderChannels) <= device.channels else { throw AudioFailure("selected audio graph output channels are unavailable") }
         for region in plan.regions {
             guard let asset = plan.assets.first(where: { $0.id == region.asset }) else { throw AudioFailure("missing WAV source") }
-            let voice = try Voice(region: region, asset: asset, capacity: capacity, outputChannels: deviceChannels)
+            let voice = try Voice(region: region, asset: asset, capacity: capacity, outputChannels: renderChannels, outputLayout: destinationFormat.channelLayout)
             voices.append(voice); engine.attach(voice.player)
             engine.connect(voice.player, to: engine.mainMixerNode, format: voice.format)
         }
@@ -427,7 +436,8 @@ final class ArrangementTransport {
     }
     func checkOutput() throws {
         let alive = try deviceNumber(device.object, kAudioDevicePropertyDeviceIsAlive)
-        guard alive != 0, try outputChannels(device.object) > 0, try deviceString(device.object, kAudioDevicePropertyDeviceUID) == device.uid,
+        guard alive != 0, try outputChannels(device.object) >= Int(renderChannels),
+              engine.outputNode.outputFormat(forBus: 0).channelCount == renderChannels, try deviceString(device.object, kAudioDevicePropertyDeviceUID) == device.uid,
               engine.outputNode.auAudioUnit.deviceID == device.object else { throw AudioFailure("selected output is unavailable or changed") }
         if state == .playing && !engine.isRunning { throw AudioFailure("audio engine stopped after output configuration changed") }
     }

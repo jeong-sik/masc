@@ -635,6 +635,8 @@ struct MidiCycle {
         var before = 0, through = 0
         for event in region.events {
             let position = start + (event.seconds - region.spec.sourceStart)
+            let endpoint = event.seconds == region.spec.sourceEnd && region.spec.sourceEnd == region.sourceDuration
+            guard region.includes(event.seconds), position < end || endpoint && position == end else { break }
             // Original trim/window prefixes are history even when their
             // clamped deadline equals the first common epoch. For actual
             // sounding events, classify the whole native host-deadline batch.
@@ -1050,8 +1052,22 @@ final class MidiTransport {
                     // than the observed fractional phase. Drain it below.
                     continue
                 }
-                let copy = seconds >= region.end ? region.spec.repeatCount
+                var copy = seconds >= region.end ? region.spec.repeatCount
                     : min(region.spec.repeatCount - 1, max(0, Int(floor((seconds - region.spec.startSeconds) / region.duration))))
+                if let cycle, let host = cycleHost {
+                    // The latest virtual copy is not necessarily the first
+                    // copy in this integer host batch. Locate its earliest
+                    // intersecting end without visiting expired copies.
+                    var low = old.copy, high = copy
+                    while low < high {
+                        let middle = low + (high - low) / 2
+                        let end = regionStart(region, copy: middle) + region.duration
+                        if try cycle.deadline(position: end, index: cycleIndex,
+                            offset: offset - cycle.start, anchor: anchor) < host { low = middle + 1 }
+                        else { high = middle }
+                    }
+                    copy = low
+                }
                 guard copy > old.copy else { continue }
                 if old.active {
                     while regionCursors[index].index < region.events.count && region.includes(region.events[regionCursors[index].index].seconds) {

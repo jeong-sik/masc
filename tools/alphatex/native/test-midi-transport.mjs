@@ -701,6 +701,46 @@ for tiny in [false,true] {
     }}
 }
 print("COMMON_MIDI_OUTGOING_BATCH_PASS: ordinary fractional tempo and short cycles retain due outgoing pairs on initial/active callbacks and skip genuinely expired pairs")
+let lateOutside=asset("lateOutside",[
+ ["seconds":0,"port":2,"bytes":[0xc0,0]],
+ ["seconds":0.3,"port":2,"bytes":[0x90,80,100]],
+ ["seconds":0.4,"port":2,"bytes":[0x80,80,73]],
+ ["seconds":0.8,"port":2,"bytes":[0xf0,0x7d,1,0xf7]]])
+let lateOutsidePath=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString+".json")
+try JSONSerialization.data(withJSONObject:["schemaVersion":3,"duration":1,"sources":[lateOutside],"regions":[clip("lateOutside","lateOutside",from:0,to:1,repeatCount:1)]]).write(to:lateOutsidePath)
+let lateOutsideTimeline=try JSONDecoder().decode(Timeline.self,from:Data(contentsOf:lateOutsidePath))
+try FileManager.default.removeItem(at:lateOutsidePath)
+let lateOutsideBase=commonBase
+let lateOutsideCycle=try MidiCycle(start:0.2,end:0.6,duration:0.4,period:400_000_000,divisor:1)
+let lateOutsideOwner=try MidiTransport(timeline:lateOutsideTimeline,uid:"1",loop:true,coordinated:true,cycle:lateOutsideCycle)
+lateOutsideOwner.prepared=true;lateOutsideOwner.destination=lateOutsideBase.destination;lateOutsideOwner.sourceDestinations=lateOutsideBase.sourceDestinations
+reset(0);reviewWire=[];try lateOutsideOwner.stageCoordinated(at:0);try lateOutsideOwner.runCoordinated(anchorNanoseconds:1_000_000_000)
+reviewClock=1_450_000_001;lateOutsideOwner.tick()
+print("LATE_FIRST_WRAP_OUTSIDE_OPAQUE",lateOutsideOwner.state,"FAILURE",String(describing:lateOutsideOwner.terminalFailure),"WIRE",reviewWire.map(\.1))
+precondition(lateOutsideOwner.state == .playing && lateOutsideOwner.terminalFailure==nil && !reviewWire.map(\.1).contains { $0[0]==0xf0 },"late wrap included unreachable opaque suffix")
+
+
+let missedSource=asset("missedSource",[
+ ["seconds":0,"port":2,"bytes":[0xc0,0]],
+ ["seconds":0.1249999991,"port":2,"bytes":[0x90,81,100]],
+ ["seconds":0.1249999992,"port":2,"bytes":[0x80,81,79]]])
+let missedBase=try arrangement([missedSource],[clip("missedSource","missedSource",from:0,to:0.125,repeatCount:8)],duration:1)
+let missedCycle=try MidiCycle(start:0,end:0.625,duration:0.625,period:625_000_000,divisor:1)
+for initial in [false,true] { for late in [false,true] {
+ let owner=try MidiTransport(timeline:missedBase.timeline,uid:"1",loop:true,coordinated:true,cycle:missedCycle)
+ owner.prepared=true;owner.destination=missedBase.destination;owner.sourceDestinations=missedBase.sourceDestinations
+ reset(0);reviewWire=[];try owner.stageCoordinated(at:0);try owner.runCoordinated(anchorNanoseconds:1_000_000_000)
+ if !initial {reviewClock=1_000_000_000;owner.tick();reviewWire=[]}
+ reviewClock=1_625_000_000+(late ? 1:0);owner.tick()
+ let deadline=try missedCycle.deadline(position:0.5+0.1249999991,index:0,offset:0,anchor:1_000_000_000)
+ print("COMPRESSED_OLD_DUE_COPY_INITIAL",initial,"DEADLINE",deadline,"HOST",reviewClock,"WIRE",reviewWire.map(\.1))
+ precondition(deadline==1_625_000_000)
+ let notes=reviewWire.map(\.1).filter { $0[0]&0xe0==0x80 }
+ precondition(notes == (late ? []:[[0x90,81,100],[0x80,81,79]]),"compressed skip lost exactly-due old copy or replayed late history")
+ }
+}
+
+print("COMMON_MIDI_COMPRESSED_BATCH_PASS: arithmetic missed-copy lookup retains earliest native batch copy; late first wrap ignores unreachable opaque suffix")
 let zeroBase=try arrangement([asset("zero",[
     ["seconds":0,"port":2,"bytes":[0xc0,0]],
     ["seconds":0.3,"port":2,"bytes":[0x90,74,80,0x80,74,77]]])],[clip("zero","zero",from:0,to:1,repeatCount:1)],duration:1)

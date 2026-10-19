@@ -22,19 +22,37 @@ import { chatHistoryEntriesFromRest, appendThreadEntry, mergeServerHistoryEntrie
 import { parseTextToChatBlocks } from '../../lib/chat-blocks'
 import { operationDeliveryProvenance } from '../../keeper-delivery-provenance'
 import { collectAttachments } from './attachments'
-import { lookupToolCallOutput, recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
+import { lookupExactToolOutput, recordToolCallOutputs as recordBulkToolCallOutputs, resetToolCallOutputs, type ExactToolOutputState } from '../../tool-call-output-store'
 import { fetchBoardPost } from '../../api/board'
 import { normalizeFusionPanel } from '../../lib/fusion-meta'
 
-// Renderer fixtures supply already-resolved evidence. The real lookup's
+const { exactFixtureOutputs } = vi.hoisted(() => ({ exactFixtureOutputs: new Map<string, ExactToolOutputState>() }))
+vi.mock('../../tool-call-output-store', async importOriginal => {
+  const original = await importOriginal<typeof import('../../tool-call-output-store')>()
+  return { ...original,
+    lookupExactToolOutput: (keeper: string | null | undefined, executionId: string | null | undefined): ExactToolOutputState => {
+      // The fixture publisher updates this signal with its exact evidence.
+      // Reading it preserves the real store's reactive subscription contract.
+      void original.toolCallOutputsByIdentity.value
+      return exactFixtureOutputs.get(JSON.stringify([keeper, executionId])) ?? { kind: 'idle' }
+    },
+    resetToolCallOutputs: () => { exactFixtureOutputs.clear(); original.resetToolCallOutputs() },
+  }
+})
+function recordVerifiedToolCallOutputs(entries: ToolCallEntry[]): void {
+  for (const entry of entries) exactFixtureOutputs.set(JSON.stringify([entry.keeper, entry.execution_id]), { kind: 'loaded', entry })
+  recordBulkToolCallOutputs(entries)
+}
+
+// Renderer fixtures explicitly supply already-resolved exact evidence. The real lookup's
 // authorization, duplicate and async races run in tool-output-lookup.test.ts.
 vi.mock('./tool-output-lookup', async importOriginal => {
   const original = await importOriginal<typeof import('./tool-output-lookup')>()
   return { ...original, useToolOutputLookup: (executionId: string | null | undefined) => {
     const keeper = useContext(original.KeeperToolOutputScope)
-    const output = lookupToolCallOutput(keeper, executionId)
-    return { ref: { current: null }, output,
-      state: output ? { kind: 'loaded', entry: output } : { kind: 'idle' },
+    const state = lookupExactToolOutput(keeper, executionId)
+    const output = state.kind === 'loaded' ? state.entry : null
+    return { ref: { current: null }, output, state,
       retry: () => {},
     }
   } }
@@ -188,7 +206,7 @@ describe('ChatTranscript', () => {
   })
 
   it('surfaces tool output joined by execution_id in the collapsed preview', () => {
-    recordToolCallOutputs([toolCallOutput({ tool_use_id: 'toolu_x', output: 'context window 42%' })])
+    recordVerifiedToolCallOutputs([toolCallOutput({ tool_use_id: 'toolu_x', output: 'context window 42%' })])
     render(
       html`<${ChatTranscript} keeperName="sangsu"
         entries=${[toolEntry({ id: 'tool-toolu_x' })]}
@@ -1043,7 +1061,7 @@ describe('ChatTranscript', () => {
   })
 
   it('shows edit evidence for its execution without opening raw tool arguments', () => {
-    recordToolCallOutputs([toolCallOutput({
+    recordVerifiedToolCallOutputs([toolCallOutput({
       tool_use_id: 'edit-proof', tool: 'Edit',
       input: { old_string: 'before edit', new_string: 'after edit' },
       output: JSON.stringify({ ok: true, mode: 'patch', path: 'essay.md', occurrences: 1 }),
@@ -1062,7 +1080,7 @@ describe('ChatTranscript', () => {
 
   it('joins stored originals by execution even when provider call IDs repeat', () => {
     const blob = { _blob: { sha256: 'a'.repeat(64), bytes: 3, mime: 'application/octet-stream', preview: '' } }
-    recordToolCallOutputs([toolCallOutput({
+    recordVerifiedToolCallOutputs([toolCallOutput({
       execution_id: 'execution-snapshot', tool_use_id: 'repeated-provider-id', tool: 'Edit', input: {},
       output: JSON.stringify({ ok: true, mode: 'patch', path: 'original.md', occurrences: 1,
         edit_snapshots: { status: 'stored', before: blob, after: blob } }),
@@ -1080,7 +1098,7 @@ describe('ChatTranscript', () => {
 
   it('opens an autonomous Edit and joins original snapshots by its canonical execution', () => {
     const blob = { _blob: { sha256: 'a'.repeat(64), bytes: 3, mime: 'application/octet-stream', preview: '' } }
-    recordToolCallOutputs([toolCallOutput({
+    recordVerifiedToolCallOutputs([toolCallOutput({
       execution_id: 'autonomous-edit-execution', tool_use_id: 'same-provider-id', tool: 'Edit', input: {},
       output: JSON.stringify({ ok: true, mode: 'patch', path: 'story.md', occurrences: 1,
         edit_snapshots: { status: 'stored', before: blob, after: blob } }),
@@ -1111,7 +1129,7 @@ describe('ChatTranscript', () => {
   })
 
   it('marks a failed tool call with the error status glyph', () => {
-    recordToolCallOutputs([
+    recordVerifiedToolCallOutputs([
       toolCallOutput({ tool_use_id: 'toolu_y', wire_outcome: 'error', output: 'boom' }),
     ])
     render(
@@ -1142,7 +1160,7 @@ describe('ChatTranscript', () => {
   })
 
   it('renders args and output in labelled sections when expanded', async () => {
-    recordToolCallOutputs([toolCallOutput({ tool_use_id: 'toolu_z', output: 'EXPANDED OUTPUT' })])
+    recordVerifiedToolCallOutputs([toolCallOutput({ tool_use_id: 'toolu_z', output: 'EXPANDED OUTPUT' })])
     render(
       html`<${ChatTranscript} keeperName="sangsu"
         entries=${[toolEntry({ id: 'tool-toolu_z', text: '{"k":"v"}' })]}
@@ -1192,7 +1210,7 @@ describe('ChatTranscript', () => {
     let bubble = container.querySelector('[data-chat-variant="tool-call"]')
     expect(bubble?.textContent).not.toContain('late output here')
 
-    recordToolCallOutputs([toolCallOutput({ tool_use_id: 'toolu_late', output: 'late output here' })])
+    recordVerifiedToolCallOutputs([toolCallOutput({ tool_use_id: 'toolu_late', output: 'late output here' })])
     await flushUi()
 
     bubble = container.querySelector('[data-chat-variant="tool-call"]')
@@ -2929,7 +2947,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
   })
 
   it('folds consecutive tool calls into one turn timeline card when grouping is on', () => {
-    recordToolCallOutputs([
+    recordVerifiedToolCallOutputs([
       toolCallOutput({ tool_use_id: 't1', output: 'r1' }),
       toolCallOutput({ tool_use_id: 't2', output: 'r2' }),
     ])
@@ -3502,7 +3520,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
   })
 
   it('surfaces real failure status and result inside the card when expanded', async () => {
-    recordToolCallOutputs([
+    recordVerifiedToolCallOutputs([
       toolCallOutput({ tool_use_id: 't1', wire_outcome: 'error', output: 'BOOM' }),
     ])
     render(
@@ -3577,7 +3595,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(step?.textContent).not.toContain('출력 대기 중')
   })
 
-  it('marks an unjoined tool step as missing once the owning turn has settled', () => {
+  it('keeps a settled tool pending when only bulk coverage is known', () => {
     render(
       html`<${ChatTranscript}
         entries=${[
@@ -3605,18 +3623,18 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(trace?.getAttribute('data-chat-tool-output-covered-since')).toBe(`${Date.parse('2026-03-24T00:00:00.000Z')}`)
     expect(trace?.getAttribute('data-chat-tool-output-covered-through')).toBe(`${Date.parse('2026-03-24T00:00:01.000Z')}`)
     const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
-    // Settled turn + never-joined output is a real gap, not an indefinite pending.
-    expect(step?.querySelector('.chat-block-tstep-status.missing')).not.toBeNull()
-    expect(step?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
-    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('missing')
+    // Settled bulk coverage is not evidence of an exact 404.
+    expect(step?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('pending')
     expect(step?.getAttribute('data-chat-trace-output-coverage')).toBe('covered')
-    // The gap is surfaced in the card header so silent failures are visible.
-    expect(bundle?.textContent).toContain('결과 누락 1')
+    // The summary cannot invent a missing result from an unverified row.
+    expect(bundle?.textContent).not.toContain('결과 누락')
   })
 
   it.each([
     { executionId: null, streamState: null, status: 'unlinked', summary: '조인 불가 1' },
-    { executionId: 'exec-canonical', streamState: null, status: 'missing', summary: '결과 누락 1' },
+    { executionId: 'exec-canonical', streamState: null, status: 'pending', summary: null },
     { executionId: null, streamState: 'streaming' as const, status: 'pending', summary: null },
   ])('classifies provider delivery output as $status without inventing a result', ({ executionId, streamState, status, summary }) => {
     render(
@@ -3725,9 +3743,9 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(trace?.getAttribute('data-chat-turn-stream-contract-status')).toBe('backend_terminal_event')
     expect(trace?.getAttribute('data-chat-turn-stream-contract-event')).toBe('RUN_FINISHED')
     const step = bundle?.querySelector('[data-chat-trace-step="tool"]') as HTMLElement | null
-    expect(step?.querySelector('.chat-block-tstep-status.hydration-failed')).not.toBeNull()
-    expect(step?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
-    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('hydration-failed')
+    expect(step?.querySelector('.chat-block-tstep-status.hydration-failed')).toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('pending')
     expect(step?.getAttribute('data-chat-trace-output-coverage')).toBe('hydration-failed')
     expect(bundle?.textContent).toContain('출력 hydration 실패 1')
 
@@ -3764,10 +3782,10 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
 
     const bundle = container.querySelector('[data-chat-turn-bundle]')
     const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
-    expect(step?.querySelector('.chat-block-tstep-status.coverage-gap')).not.toBeNull()
-    expect(step?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.coverage-gap')).toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
     expect(step?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
-    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('coverage-gap')
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('pending')
     expect(step?.getAttribute('data-chat-trace-output-coverage')).toBe('coverage-gap')
     expect(bundle?.textContent).not.toContain('결과 누락')
     expect(bundle?.textContent).toContain('출력 범위 밖 1')
@@ -3802,10 +3820,10 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
 
     const bundle = container.querySelector('[data-chat-turn-bundle]')
     const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
-    expect(step?.querySelector('.chat-block-tstep-status.coverage-gap')).not.toBeNull()
-    expect(step?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.coverage-gap')).toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
     expect(step?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
-    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('coverage-gap')
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('pending')
     expect(step?.getAttribute('data-chat-trace-output-coverage')).toBe('coverage-gap')
     expect(bundle?.textContent).not.toContain('결과 누락')
     expect(bundle?.textContent).toContain('출력 범위 밖 1')

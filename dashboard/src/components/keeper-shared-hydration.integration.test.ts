@@ -318,7 +318,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
       const step = container.querySelector(
         '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-api-hydration"]',
       ) as HTMLElement
-      expect(step.getAttribute('data-chat-trace-output-state')).toBe('hydration-failed')
+      expect(step.getAttribute('data-chat-trace-output-state')).toBe('unlinked')
       expect(step.getAttribute('data-chat-trace-output-coverage')).toBe('hydration-failed')
       expect(container.textContent).toContain('출력 hydration 실패 1')
     })
@@ -329,7 +329,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
     fireEvent.click(failedStep.querySelector('.chat-block-tstep-row') as HTMLElement)
 
     await waitFor(() => {
-      expect(failedStep.textContent).toContain('출력 hydration 실패 — HTTP 502')
+      expect(failedStep.textContent).toContain('실행 ID 없음 — 출력 조인 불가')
     })
 
     consoleWarn.mockRestore()
@@ -373,7 +373,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
       tool_use_id: 'tc-api-success',
       execution_id: 'exec-api-success',
     } satisfies ToolCallEntry
-    fetchKeeperToolCalls.mockResolvedValueOnce({ entries: [toolCallEntry] })
+    fetchKeeperToolCalls.mockResolvedValueOnce({ entries: [{ ...toolCallEntry, output: 'unverified bulk output' }] })
     stubExactToolCallLookup(toolCallEntry)
 
     render(
@@ -415,7 +415,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
       expect(step.getAttribute('data-chat-trace-output-coverage')).toBe('covered')
       expect(step.querySelector('.chat-block-tstep-status.ok')).not.toBeNull()
       expect(step.querySelector('.chat-block-tstep-status.missing')).toBeNull()
-      expect(step.querySelector('.chat-block-tstep-status.hydration-failed')).toBeNull()
+      expect(step.querySelector('.chat-block-tstep-status.unavailable')).toBeNull()
       expect(container.textContent).not.toContain('결과 누락 1')
       expect(container.textContent).not.toContain('출력 범위 밖 1')
       expect(container.textContent).not.toContain('출력 hydration 실패 1')
@@ -581,9 +581,9 @@ describe('KeeperConversationPanel hydration wiring', () => {
         '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-beta-scope"]',
       ) as HTMLElement
       expect(betaStep.getAttribute('data-chat-trace-link-state')).toBe('joined')
-      expect(betaStep.getAttribute('data-chat-trace-output-state')).toBe('hydration-failed')
+      expect(betaStep.getAttribute('data-chat-trace-output-state')).toBe('unavailable')
       expect(betaStep.getAttribute('data-chat-trace-output-coverage')).toBe('hydration-failed')
-      expect(betaStep.querySelector('.chat-block-tstep-status.hydration-failed')).not.toBeNull()
+      expect(betaStep.querySelector('.chat-block-tstep-status.unavailable')).not.toBeNull()
       expect(betaStep.querySelector('.chat-block-tstep-status.ok')).toBeNull()
       expect(betaPanel.textContent).toContain('출력 hydration 실패 1')
       expect(betaPanel.textContent).not.toContain('alpha output joined from tool_calls_endpoint')
@@ -602,7 +602,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
     await waitFor(() => {
       expect(alphaStep.textContent).toContain('alpha output joined from tool_calls_endpoint')
       expect(alphaStep.textContent).not.toContain('HTTP 503 beta')
-      expect(betaStep.textContent).toContain('출력 hydration 실패 — HTTP 503 beta')
+      expect(betaStep.textContent).toContain('결과 확인 불가')
       expect(betaStep.textContent).not.toContain('alpha output joined from tool_calls_endpoint')
       expect(betaStep.textContent).not.toContain('result')
     })
@@ -660,9 +660,9 @@ describe('KeeperConversationPanel hydration wiring', () => {
     ) as HTMLElement
     fireEvent.click(step.querySelector('.chat-block-tstep-row') as HTMLElement)
     await waitFor(() => {
-      expect(step.getAttribute('data-chat-trace-output-state')).toBe('hydration-failed')
+      expect(step.getAttribute('data-chat-trace-output-state')).toBe('unavailable')
       expect(step.getAttribute('data-chat-trace-output-coverage')).toBe('hydration-failed')
-      expect(step.textContent).toContain('출력 hydration 실패 — HTTP 504 first refresh')
+      expect(step.textContent).toContain('결과 확인 불가')
       expect(container.textContent).toContain('출력 hydration 실패 1')
     })
 
@@ -713,7 +713,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
       expect(step.getAttribute('data-chat-trace-output-state')).toBe('ok')
       expect(step.getAttribute('data-chat-trace-output-coverage')).toBe('covered')
       expect(step.querySelector('.chat-block-tstep-status.ok')).not.toBeNull()
-      expect(step.querySelector('.chat-block-tstep-status.hydration-failed')).toBeNull()
+      expect(step.querySelector('.chat-block-tstep-status.unavailable')).toBeNull()
       expect(container.textContent).not.toContain('출력 hydration 실패 1')
       expect(container.textContent).not.toContain('HTTP 504 first refresh')
       expect(container.textContent).not.toContain('출력 대기 중')
@@ -782,9 +782,9 @@ describe('KeeperConversationPanel hydration wiring', () => {
     ) as HTMLElement
     fireEvent.click(step.querySelector('.chat-block-tstep-row') as HTMLElement)
     await waitFor(() => {
-      expect(step.getAttribute('data-chat-trace-output-state')).toBe('hydration-failed')
+      expect(step.getAttribute('data-chat-trace-output-state')).toBe('unavailable')
       expect(step.getAttribute('data-chat-trace-output-coverage')).toBe('hydration-failed')
-      expect(step.textContent).toContain('출력 hydration 실패 — HTTP 504 reconnect gap')
+      expect(step.textContent).toContain('결과 확인 불가')
       expect(container.textContent).toContain('출력 hydration 실패 1')
     })
 
@@ -835,7 +835,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
       expect(step.getAttribute('data-chat-trace-output-state')).toBe('ok')
       expect(step.getAttribute('data-chat-trace-output-coverage')).toBe('covered')
       expect(step.querySelector('.chat-block-tstep-status.ok')).not.toBeNull()
-      expect(step.querySelector('.chat-block-tstep-status.hydration-failed')).toBeNull()
+      expect(step.querySelector('.chat-block-tstep-status.unavailable')).toBeNull()
       expect(container.textContent).not.toContain('출력 hydration 실패 1')
       expect(container.textContent).not.toContain('HTTP 504 reconnect gap')
       expect(container.textContent).not.toContain('출력 대기 중')

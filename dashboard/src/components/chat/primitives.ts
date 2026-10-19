@@ -39,8 +39,8 @@ import type { KeeperApprovalLifecycle, KeeperConversationAttachment, KeeperConve
 import type { ToolCallEntry, ToolCallOutputBlob } from '../../api/dashboard'
 import { toolCallCompletion } from '../../api/dashboard-keeper-tool-calls'
 import { fetchBoardPost } from '../../api/board'
-import { lookupToolCallOutput, toolCallOutputsByIdentity } from '../../tool-call-output-store'
-import type { ToolCallOutputHydrationContract } from '../../tool-call-output-store'
+import { lookupExactToolOutput, lookupToolCallOutput, toolCallOutputsByIdentity } from '../../tool-call-output-store'
+import type { ExactToolOutputState, ToolCallOutputHydrationContract } from '../../tool-call-output-store'
 import { Sigil } from '../common/sigil-chip'
 import { SuggestionChip } from '../common/suggestion-chip'
 import { StatusDot } from '../common/status-dot'
@@ -3357,24 +3357,40 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   `
 }
 
-type ToolTraceDisplayStatus = 'pending' | 'missing' | 'coverage-gap' | 'hydration-failed' | 'unlinked' | 'ok' | 'bad'
+type ToolTraceDisplayStatus = 'pending' | 'missing' | 'unavailable' | 'unlinked' | 'ok' | 'bad'
 type ToolOutputCoverageState = 'not-hydrated' | 'hydrating' | 'hydration-failed' | 'covered' | 'coverage-gap' | 'not-applicable'
 
 const TOOL_STATUS_TITLE: Record<ToolTraceDisplayStatus, string> = {
   pending: TOOL_STATUS_TITLE_PENDING,
-  missing: '결과 누락 — 턴이 끝났는데 출력이 도착하지 않음',
-  'coverage-gap': '출력 tail 범위 밖 — 결과 누락 여부를 확정할 수 없음',
-  'hydration-failed': '출력 hydration 실패 — 결과 누락 여부를 확정할 수 없음',
+  missing: '결과 누락 — 저장된 실행 기록을 찾지 못함',
+  unavailable: '결과 확인 불가',
   unlinked: '실행 ID 없음 — 출력 조인 불가',
   ok: TOOL_STATUS_TITLE_OK,
   bad: TOOL_STATUS_TITLE_BAD,
 }
 
-// A tool call's output is legitimately "pending" while its turn is still
-// streaming, or before the separate tool-output hydration surface has loaded.
-// Once both have settled, an output that never joined is a gap (e.g. a call
-// whose canonical execution_id was absent and never joined), not indefinite
-// "pending".
+function toolTraceOutputStatus(
+  state: ExactToolOutputState, executionId: string | null | undefined,
+  reported: ChatTraceToolStep['status'], unlinked: boolean, turnComplete: boolean,
+): ToolTraceDisplayStatus {
+  if (!executionId?.trim()) {
+    if (reported === 'err') return 'bad'
+    if (reported === 'ok') return 'ok'
+    return unlinked ? 'unlinked' : 'pending'
+  }
+  switch (state.kind) {
+    case 'loaded': {
+      const completion = toolCallCompletion(state.entry)
+      return completion === false ? 'bad' : completion === true ? 'ok' : 'pending'
+    }
+    case 'missing': return turnComplete ? 'missing' : 'pending'
+    case 'failed': case 'ambiguous': case 'admin-required': return 'unavailable'
+    case 'idle': case 'loading': return 'pending'
+  }
+}
+
+// A turn's lifecycle and bulk coverage do not establish whether its exact
+// output exists. Only an exact 404 on a finished turn permits missing.
 function isTurnStreaming(state: KeeperConversationEntry['streamState']): boolean {
   return state === 'opening' || state === 'thinking' || state === 'streaming' || state === 'finalizing' || state === 'retrying'
 }
@@ -3427,17 +3443,17 @@ function toolTraceSourceBadge(entry: KeeperConversationEntry | null, traceStep?:
 function isUnlinkedTraceTool(
   entry: KeeperConversationEntry | null,
   traceStep?: ChatTraceToolStep,
-  canMarkMissing = false,
+  turnComplete = false,
 ): boolean {
   if (entry === null) return traceStep !== undefined && !traceStep.executionId?.trim()
   // Provider delivery rows can finish without a canonical execution binding.
   // That proves the output cannot be joined, not that execution lost a result.
-  return canMarkMissing && !entry.executionId?.trim() && !traceStep?.executionId?.trim()
+  return turnComplete && !entry.executionId?.trim() && !traceStep?.executionId?.trim()
 }
 
 function ToolTraceStep({
   entry,
-  canMarkMissing = false,
+  turnComplete = false,
   coverageState = 'not-applicable',
   hydrationFailureReason = null,
   traceStep,
@@ -3446,7 +3462,7 @@ function ToolTraceStep({
   structuralSummary = false,
 }: {
   entry: KeeperConversationEntry | null
-  canMarkMissing?: boolean
+  turnComplete?: boolean
   coverageState?: ToolOutputCoverageState
   hydrationFailureReason?: string | null
   traceStep?: ChatTraceToolStep
@@ -3465,38 +3481,22 @@ function ToolTraceStep({
   const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
   // Same reason as the trace-step row: the name repeats, the subject does not.
   const subject = isEmptyArgs ? null : toolSubject(displayArgs)
-  const unlinkedTraceTool = !structuralSummary && isUnlinkedTraceTool(entry, traceStep, canMarkMissing)
+  const unlinkedTraceTool = !structuralSummary && isUnlinkedTraceTool(entry, traceStep, turnComplete)
   const sourceBadge = structuralSummary && !(entry?.executionId ?? traceStep?.executionId)
     ? { label: 'activity', title: 'source: autonomous activity summary', tone: 'tool' as const }
     : toolTraceSourceBadge(entry, traceStep)
-  let status: ToolTraceDisplayStatus
-  if (output !== null) {
-    const completion = toolCallCompletion(output)
-    status = completion === false ? 'bad' : completion === true ? 'ok' : 'pending'
-  } else if (traceOnly && traceStep?.status === 'err') {
-    status = 'bad'
-  } else if (traceOnly && traceStep?.status === 'ok') {
-    status = 'ok'
-  } else if (unlinkedTraceTool) {
-    status = 'unlinked'
-  } else if (coverageState === 'hydration-failed') {
-    status = 'hydration-failed'
-  } else if (coverageState === 'coverage-gap') {
-    status = 'coverage-gap'
-  } else {
-    status = canMarkMissing ? 'missing' : 'pending'
-  }
+  const status = toolTraceOutputStatus(lookup.state, executionId, traceStep?.status, unlinkedTraceTool, turnComplete)
   // The trace still reports how execution ended. An unread/denied result
   // does not change that lifecycle, and the report does not verify output.
   const reportedExecution = traceStep?.status === 'ok' ? '성공'
     : traceStep?.status === 'err' ? '실패' : null
   const statusTitle = !traceOnly && output === null && reportedExecution
-    ? `실행 보고: ${reportedExecution} · ${lookup.state.kind === 'idle' || lookup.state.kind === 'loading' ? '결과 확인 전' : '결과 확인 불가'}`
+    ? `실행 보고: ${reportedExecution} · ${status === 'pending' ? '결과 확인 전' : TOOL_STATUS_TITLE[status]}`
     : TOOL_STATUS_TITLE[status]
   const durLabel =
     output?.duration_ms != null && output.duration_ms > 0
       ? formatMsCompact(output.duration_ms)
-      : traceStep?.dur ?? ''
+      : traceOnly ? traceStep?.dur ?? '' : ''
   // RFC-0358 keeps autonomous arguments/results off the transcript even when
   // its canonical execution hydrates. Edit evidence below is an independent,
   // typed receipt projection, not permission to expose the raw tool body.
@@ -3568,13 +3568,13 @@ function ToolTraceStep({
                     ? unlinkedTraceTool
                       ? null
                       : html`<div class="chat-block-tool-label">${
-                          coverageState === 'hydration-failed'
+                          status === 'missing' || status === 'unavailable'
+                            ? TOOL_STATUS_TITLE[status]
+                            : coverageState === 'hydration-failed'
                             ? `출력 hydration 실패${hydrationFailureReason ? ` — ${hydrationFailureReason}` : ''}`
                             : coverageState === 'coverage-gap'
                             ? '출력 tail 범위 밖 — 이 도구 시점을 덮는 결과 hydration이 아직 없음'
-                            : canMarkMissing
-                              ? '결과 없음 — 출력이 도착하지 않음'
-                              : '출력 대기 중…'
+                            : '출력 대기 중…'
                         }</div>`
                     : null}
               </div>
@@ -3784,8 +3784,6 @@ function ToolTraceCard({
       toolOutputsCoveredThroughMs,
       toolOutputHydrationContract?.status ?? null,
     )
-  const canMarkMissingForEntry = (entry: KeeperConversationEntry): boolean =>
-    turnComplete && coverageStateForEntry(entry) === 'covered'
   const hasChatResponse = assistant !== null
     && assistant.role === 'assistant'
     && assistant.delivery !== 'request_failure'
@@ -3801,34 +3799,36 @@ function ToolTraceCard({
     return `chat:${item.entry.id}`
   }).join('|')
   const orderedToolSteps = ordered.filter(isToolOrderItem)
+  const exactForStep = (item: typeof orderedToolSteps[number]) =>
+    lookupExactToolOutput(keeper, item.entry?.executionId ?? (item.kind === 'tool' ? item.step.executionId : null))
+  const statusForStep = (item: typeof orderedToolSteps[number]) => toolTraceOutputStatus(
+    exactForStep(item), item.entry?.executionId ?? (item.kind === 'tool' ? item.step.executionId : null),
+    item.kind === 'tool' ? item.step.status : undefined,
+    !structuralSummary && isUnlinkedTraceTool(item.entry, item.kind === 'tool' ? item.step : undefined,
+      turnComplete), turnComplete)
   const thinkN = traceSteps.filter((step) => step.kind === 'think' || step.kind === 'reason').length
   const progressN = traceSteps.filter((step) => step.kind === 'progress').length
   const failN = orderedToolSteps.filter(
     (s) =>
-      (s.output !== null && toolCallCompletion(s.output) === false)
-      || (s.kind === 'tool' && s.step.status === 'err'),
+      statusForStep(s) === 'bad',
   ).length
-  // Surface unjoined outputs as "missing" only once the turn and output
-  // hydration have both settled.
-  const missingN = orderedToolSteps.filter(
-    (s) => s.output === null && s.entry !== null && canMarkMissingForEntry(s.entry)
-      && !isUnlinkedTraceTool(s.entry, s.kind === 'tool' ? s.step : undefined, true),
-  ).length
+  const missingN = orderedToolSteps.filter(s => statusForStep(s) === 'missing').length
+  const unavailableN = orderedToolSteps.filter(s => statusForStep(s) === 'unavailable').length
   const coverageGapN = orderedToolSteps.filter(
-    (s) => s.output === null && s.entry !== null && turnComplete && coverageStateForEntry(s.entry) === 'coverage-gap',
+    (s) => exactForStep(s).kind !== 'loaded' && s.entry !== null && turnComplete && coverageStateForEntry(s.entry) === 'coverage-gap',
   ).length
   const hydrationFailedN = orderedToolSteps.filter(
-    (s) => s.output === null && s.entry !== null && turnComplete && coverageStateForEntry(s.entry) === 'hydration-failed',
+    (s) => exactForStep(s).kind !== 'loaded' && s.entry !== null && turnComplete && coverageStateForEntry(s.entry) === 'hydration-failed',
   ).length
   const unlinkedN = orderedToolSteps.filter(
-    (s) => !structuralSummary && s.output === null
-      && isUnlinkedTraceTool(s.entry, s.kind === 'tool' ? s.step : undefined,
-        s.entry !== null && canMarkMissingForEntry(s.entry)),
+    (s) => statusForStep(s) === 'unlinked',
   ).length
-  const totalMs = orderedToolSteps.reduce(
-    (sum, s) => sum + (s.output?.duration_ms ?? (s.kind === 'tool' ? traceStepDurationMs(s.step.dur) : 0)),
-    0,
-  )
+  const totalMs = orderedToolSteps.reduce((sum, s) => {
+    const exact = exactForStep(s)
+    const executionId = s.entry?.executionId ?? (s.kind === 'tool' ? s.step.executionId : null)
+    return sum + (exact.kind === 'loaded' ? exact.entry.duration_ms ?? 0
+      : !executionId?.trim() && s.kind === 'tool' ? traceStepDurationMs(s.step.dur) : 0)
+  }, 0)
   const durLabel = totalMs > 0 ? formatMsCompact(totalMs) : null
   const chatN = hasChatResponse ? 1 : 0
   const stepN = ordered.length
@@ -3872,6 +3872,7 @@ function ToolTraceCard({
           ${chatN > 0 ? html`<span>Chat ${chatN}</span>` : null}
           ${failN > 0 ? html`<span class="text-[var(--color-status-err)]">실패 ${failN}</span>` : null}
           ${missingN > 0 ? html`<span class="text-[var(--color-status-warn)]">결과 누락 ${missingN}</span>` : null}
+          ${unavailableN > 0 ? html`<span class="text-[var(--color-status-warn)]">결과 확인 불가 ${unavailableN}</span>` : null}
           ${coverageGapN > 0 ? html`<span class="text-[var(--color-status-warn)]">출력 범위 밖 ${coverageGapN}</span>` : null}
           ${hydrationFailedN > 0 ? html`<span class="text-[var(--color-status-warn)]">출력 hydration 실패 ${hydrationFailedN}</span>` : null}
           ${unlinkedN > 0 ? html`<span class="text-[var(--color-status-warn)]">조인 불가 ${unlinkedN}</span>` : null}
@@ -3895,7 +3896,7 @@ function ToolTraceCard({
                         return html`<${ToolTraceStep}
                           key=${`tool-trace-${item.entry?.id ?? item.step.toolCallId ?? item.step.name}-${index}`}
                           entry=${item.entry}
-                          canMarkMissing=${item.entry !== null && canMarkMissingForEntry(item.entry)}
+                          turnComplete=${turnComplete}
                           coverageState=${item.entry !== null ? coverageStateForEntry(item.entry) : 'not-applicable'}
                           hydrationFailureReason=${toolOutputHydrationContract?.failureReason ?? null}
                           traceStep=${item.step}
@@ -3908,7 +3909,7 @@ function ToolTraceCard({
                       ? html`<${ToolTraceStep}
                           key=${`tool-entry-${item.entry.id}`}
                           entry=${item.entry}
-                          canMarkMissing=${canMarkMissingForEntry(item.entry)}
+                          turnComplete=${turnComplete}
                           coverageState=${coverageStateForEntry(item.entry)}
                           hydrationFailureReason=${toolOutputHydrationContract?.failureReason ?? null}
                           orderIndex=${index}

@@ -42,6 +42,10 @@ val load :
     and unreadable, which is not the same thing and must not be read as
     "no tools". *)
 
+val save : base_path:string -> keeper_name:string -> catalog -> (unit, string) result
+(** Write down what a provider offers this Keeper, beside the workspace. The
+    pair of [save] and [forget] is what attach and detach do to the catalog. *)
+
 val forget :
   base_path:string ->
   keeper_name:string ->

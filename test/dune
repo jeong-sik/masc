@@ -4905,6 +4905,8 @@
 
 (include stanzas/test_server_keeper_oauth_client.inc)
 
+(include stanzas/test_server_keeper_oauth_disconnect.inc)
+
 ; RFC-0465: open pull requests of registered GitHub repositories.
 (include stanzas/test_server_repository_pulls.inc)
 

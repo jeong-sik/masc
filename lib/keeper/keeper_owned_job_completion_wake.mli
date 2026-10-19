@@ -18,7 +18,10 @@ val pulse : sw:Eio.Switch.t -> t -> (unit, Keeper_owned_job_store.error) result
     unchanged held owners; each owner checks its own private directory/CLI
     authority. The batch uses a separate empty CLI scope and never advances a
     job phase. Full inspection and new jobs remain independent of this read.
-    Single-domain Eio caller; reservations and hints are not effect authority. *)
+    Single-domain Eio caller; reservations and hints are not effect authority.
+    A cancelled or finished switch is rejected before discovery and again
+    before each new reservation. A declined [fork] must not leave an active
+    job with no worker to release it. Cancellation is not a store error. *)
 
 type report =
   { inspected : int; waiting : int; delivered : int; retired : int

@@ -1573,6 +1573,17 @@ let test_original_evidence_repair_reactivates_continuation ~skill_publication ()
   check bool "the original parent consumes its child's usable result" true parent_ok;
   check int "recovery consumes saved results without backend replay" backend_before (List.length (calls fixture))
 
+let reject_cancelled_recovery_scope invoke =
+  let exception Cancelled_recovery_scope in
+  let rejected = ref false in
+  (try Eio.Switch.run (fun sw -> Eio.Cancel.protect (fun () ->
+     Eio.Switch.fail sw Cancelled_recovery_scope;
+     match invoke sw with
+     | () -> ()
+     | exception (Eio.Cancel.Cancelled _) -> rejected := true))
+   with Cancelled_recovery_scope -> ());
+  check bool "cancelled recovery scope is refused even inside protected cleanup" true !rejected
+
 let test_continuation_pulse_shares_declarations ~invalid_initial () =
   with_fixture @@ fun env _initialize fixture ->
   with_environment ["MASC_CONFIG_DIR", None] @@ fun () ->
@@ -1624,6 +1635,9 @@ let test_continuation_pulse_shares_declarations ~invalid_initial () =
      clock=Eio.Stdenv.clock env; proc_mgr=Some (Eio.Stdenv.process_mgr env); net=None;
      publication_recovery_provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider} in
   let supervisor = Wake.create ~context () in
+  reject_cancelled_recovery_scope (fun sw ->
+    Wake.pulse ~sw supervisor |> require "cancelled continuation scope");
+  check (list string) "rejected scope retains both canonical original waits" original_requests (ready_ids ());
   let backend_before = List.length (calls fixture) in
   let pulse ~invalid ~instructions =
     let observed = ref [] in
@@ -5504,6 +5518,11 @@ let test_completion_pulse_does_not_join_blocked_backend () = with_fixture @@ fun
   let supervisor = Completion_wake.create ~config ~on_result_ready:(fun (record : Store.record) ->
       failed_observers := record.job_id :: !failed_observers;
       raise Fixture_result_observer_failed) () in
+  let authority_before = read (owner_path fixture blocked_id) in
+  reject_cancelled_recovery_scope (fun sw ->
+    Completion_wake.pulse ~sw supervisor |> store_value "cancelled original job recovery scope");
+  check string "rejected recovery leaves original owner journal unchanged"
+    authority_before (read (owner_path fixture blocked_id));
   let entered = Filename.concat fixture.base_path "inspect-entered" in
   let release = Filename.concat fixture.base_path "inspect-release" in
   control fixture (`Assoc ["mode", `String "inspect_blocked"; "blocked_job_id", `String blocked_id]);

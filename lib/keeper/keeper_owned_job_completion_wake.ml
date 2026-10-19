@@ -98,6 +98,7 @@ let create ~config ?(on_result_ready=ignore) () =
   {config;on_result_ready;active=Job_set.empty;held_absent=Job_map.empty}
 
 let pulse ~sw supervisor =
+  Eio.Switch.check sw;
   let base_path = supervisor.config.Workspace.base_path in
   let* pending = Store.pending_deliveries ~base_path in
   let presence_round = Keeper_owned_job_backend.create_presence_round () in
@@ -110,6 +111,7 @@ let pulse ~sw supervisor =
       identity (Store.error_to_string error)) pending.failures;
   List.iter (fun (marker : Store.pending_delivery) ->
     if not (Job_set.mem marker.job_id supervisor.active) then (
+      Eio.Switch.check sw;
       (* Single-domain Eio reservations do not yield. This set suppresses
          duplicate live workers; only the durable journal can authorize effects. *)
       supervisor.active <- Job_set.add marker.job_id supervisor.active;

@@ -639,6 +639,20 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       ; "args_json", `String "{}"
       ; "cdp_port", `Int 59999
       ]
+  | "keeper_artifact_publish" ->
+      (* Required params per config/tools/keeper_artifact_publish.toml.
+         A new artifact (no id) is the refusal-free default path. *)
+      `Assoc
+        [
+          ("title", `String "Tool Matrix Artifact");
+          ("summary", `String "tool matrix publish");
+          ("format", `String "markdown");
+          ("content", `String "# tool matrix publish\n");
+        ]
+  | "keeper_image_read" ->
+      (* Exactly one of path/artifact per config/tools/keeper_image_read.toml.
+         No required params; a missing path must refuse without falling over. *)
+      `Assoc [ ("path", `String "samples/tool-matrix-missing-image.png") ]
   | other -> failwith ("missing keeper arguments contract for " ^ other)
 
 (* Every keeper tool here may either do the work or refuse it when called with

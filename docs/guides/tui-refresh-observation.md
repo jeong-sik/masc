@@ -714,7 +714,25 @@ and final completion. Both phases share one typed submission with its original
 Keeper, Ask, dispatch authority and opaque request identity. A newer submission
 supersedes old observations. The same submission cannot log or replace its
 receipt twice; a later reread failure cannot downgrade an earlier admitted POST
-receipt. Workspace withdrawal clears it, and unread or changed authority hides it.
+receipt. Workspace withdrawal clears visible feedback; unread or changed
+authority hides it. Original request-owned Result facts remain in session state.
+
+The POST result is published immediately into the original request's atomic
+receipt cell, before observation logging or a shared mailbox wait. Pre-POST
+failure can publish its actual error through the same once-only cell. Canonical
+reread starts without publishing an early queue message. Worker cleanup closes
+an empty cell without inventing an answer outcome and leaves a returned result
+unchanged. Withdrawal before worker entry also closes its empty cell.
+
+The regular UI drain recovers pending cells after queued messages, preserving
+queued identity-withdrawal ordering. Final answer completion recovers its cell
+first too, so it cannot substitute a later projected Result for the original
+POST observation. Recovery consumes that pending delivery once; session owners
+keep the actual fact after consumption, supersession and withdrawal. Completed
+or closed owners leave the pending scan. This is process-local retention, not
+restart durability, immediate visibility under queue saturation or new read
+authority. Final completion still uses the existing bounded queue and operation
+admission. No extra POST, GET, retry, publication fiber or protected queue wait.
 
 Recorded, existing-winner, delivery-pending, append-without-confirmed-winner,
 refused and recording-unconfirmed outcomes remain distinct. Only a newly
@@ -723,8 +741,9 @@ describes the last response; automatic recovery may subsequently change delivery
 Observe Keeper activity to establish whether actual work has resumed.
 
 `tui_ask_answer_receipt` records `receipt_admitted` once, whether admitted early
-or as the terminal fallback, process-local monotonic `submission_started_ns` and
-`admitted_ns`, and a `receipt` object with `keeper`, `ask_id`, `recording`, and `delivery`.
+or as the terminal fallback, process-local monotonic `submission_started_ns`,
+`result_observed_ns` and `admitted_ns`, and a `receipt` object with `keeper`,
+`ask_id`, `recording`, and `delivery`. Missing worker observation is null.
 Delivery is null when no delivery fact was established. Choice/free-text bodies
 and server error details are excluded from that log. These are state-admission
 observations, not physical POST counts, first paint or Keeper action proof.

@@ -2964,9 +2964,38 @@ type ask_answer_mode =
   | Ask_browsing
   | Ask_answering of { aam_ask_id: string }
 
+module Ask_answer_receipt : sig
+  type observation = private {
+    result: (Masc.Tui_decode_asks.ask_answer_receipt, string) result;
+    observed_ns: int64;
+  }
+  type reading = Waiting | Returned of observation | Closed_without_result
+  type t
+  val create : unit -> t
+  val read : t -> reading
+  val publish : t -> observed_ns:int64 ->
+    (Masc.Tui_decode_asks.ask_answer_receipt, string) result -> bool
+  val close : t -> unit
+  (** One actual result survives worker closure. Closing without a result
+      makes no claim about whether a POST was sent or applied. *)
+end = struct
+  type observation = {
+    result: (Masc.Tui_decode_asks.ask_answer_receipt, string) result;
+    observed_ns: int64;
+  }
+  type reading = Waiting | Returned of observation | Closed_without_result
+  type t = reading Atomic.t
+  let create () = Atomic.make Waiting
+  let read = Atomic.get
+  let publish cell ~observed_ns result =
+    Atomic.compare_and_set cell Waiting (Returned {result; observed_ns})
+  let close cell = ignore (Atomic.compare_and_set cell Waiting Closed_without_result)
+end
+
 type ask_submission = {
   as_request: unit ref;
   as_started_ns: int64;
+  as_receipt: Ask_answer_receipt.t;
   as_authority: workspace_authority;
   as_keeper_name: string;
   as_ask_id: string;
@@ -8036,6 +8065,10 @@ type state = {
   (* Owns receipt observations only; it does not settle the original POST or
      release its draft/action gate before the canonical reread returns. *)
   mutable ask_submission_current: ask_submission option;
+  (* Session receipt owners survive workspace withdrawal; pending contains
+     only owners whose receipt/worker closure has not been drained. *)
+  mutable ask_answer_submissions: ask_submission list;
+  mutable ask_answer_receipt_pending: ask_submission list;
   (* A response receipt survives ordinary refreshes and transient notices.
      It belongs to its dispatch workspace and never proves Keeper action. *)
   mutable ask_answer_feedback:
@@ -8949,6 +8982,28 @@ let owns_ask_submission (state : state) submission =
   && submission.as_authority = state.workspace_authority
   && state.workspace_identity = Workspace_identity_match
 
+let pending_ask_answer_receipt state =
+  state.ask_answer_receipt_pending <- List.filter (fun submission ->
+    match Ask_answer_receipt.read submission.as_receipt with
+    | Ask_answer_receipt.Closed_without_result -> false
+    | Ask_answer_receipt.Waiting | Ask_answer_receipt.Returned _ -> true) state.ask_answer_receipt_pending;
+  List.find_map (fun submission ->
+    match Ask_answer_receipt.read submission.as_receipt with
+    | Ask_answer_receipt.Returned observation -> Some (submission, observation)
+    | Ask_answer_receipt.Waiting | Ask_answer_receipt.Closed_without_result -> None) state.ask_answer_receipt_pending
+
+let take_ask_answer_receipt state submission =
+  match List.find_opt (fun owner -> owner.as_request == submission.as_request)
+      state.ask_answer_receipt_pending with
+  | None -> None
+  | Some owner ->
+    (match Ask_answer_receipt.read owner.as_receipt with
+     | Ask_answer_receipt.Waiting | Ask_answer_receipt.Closed_without_result -> None
+     | Ask_answer_receipt.Returned observation ->
+       state.ask_answer_receipt_pending <- List.filter
+         (fun pending -> pending.as_request != owner.as_request) state.ask_answer_receipt_pending;
+       Some (owner, observation))
+
 let observe_ask_reread_completion (state : state) submission ~at_ns
     (result : (Masc.Tui_decode_asks.asks_snapshot, string) result) =
   if state.ask_submit_inflight && owns_ask_submission state submission then
@@ -9053,6 +9108,9 @@ let begin_ask_submission_state ?submission (state : state) =
   state.ask_followup <- None;
   state.ask_followup_error <- None;
   state.ask_submission_current <- submission;
+  Option.iter (fun owner ->
+    state.ask_answer_submissions <- owner :: state.ask_answer_submissions;
+    state.ask_answer_receipt_pending <- owner :: state.ask_answer_receipt_pending) submission;
   state.ask_submit_inflight <- true;
   retire_asks_read state
 
@@ -13612,6 +13670,8 @@ let create_state
   pending_ask_submit = None;
   ask_submit_inflight = false;
   ask_submission_current = None;
+  ask_answer_submissions = [];
+  ask_answer_receipt_pending = [];
   ask_answer_feedback = None;
   ask_followup_read = Snapshot_read.idle;
   ask_followup = None;

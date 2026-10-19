@@ -12,6 +12,11 @@ try {
   wave.writeUInt16LE(8, 32); wave.writeUInt16LE(32, 34); wave.write('data', 36); wave.writeUInt32LE(wave.length - 44, 40)
   for (let i = 0; i < 4800; i++) { wave.writeFloatLE(.25 + i / 32768, 44 + i * 8); wave.writeFloatLE(-.5, 48 + i * 8) }
   await writeFile(join(directory, 'audio.wav'), wave)
+  const mono = Buffer.alloc(44 + 4800 * 4); wave.copy(mono, 0, 0, 44)
+  mono.writeUInt32LE(mono.length - 8, 4); mono.writeUInt16LE(1, 22); mono.writeUInt32LE(192000, 28)
+  mono.writeUInt16LE(4, 32); mono.writeUInt32LE(4800 * 4, 40)
+  for (let i = 0; i < 4800; i++) mono.writeFloatLE(-.5, 44 + i * 4)
+  await writeFile(join(directory, 'mono.wav'), mono)
   const swift = `import Foundation
 import AVFoundation
 @main enum Probe {
@@ -41,7 +46,7 @@ var wrongNotes = separateMidi; wrongNotes.component = .audio
 do { _ = try UmpRegionTransport(timeline:UmpArrangement(schemaVersion:1,duration:1,sources:[source],regions:[wrongNotes]));preconditionFailure("audio component accepted as UMP") } catch {}
 wrongNotes = separateMidi; wrongNotes = UmpRegion(id:"clip",source:"audio",startSeconds:0,offset:"0",extent:"4800001",repeatCount:3);wrongNotes.component = .midi
 do { try Plan(schemaVersion:5,kind:"capture-arrangement",duration:1,assets:[asset],regions:[region],midi:nil,ump:nil,umpRegions:UmpArrangement(schemaVersion:1,duration:1,sources:[source],regions:[wrongNotes])).validate();preconditionFailure("paired WAV silently matched separated MIDI") } catch {}
-let voice = try Voice(region:region,asset:asset,capacity:257)
+let voice = try Voice(region:region,asset:asset,capacity:257,outputChannels:2)
 let buffer = AVAudioPCMBuffer(pcmFormat:voice.file.processingFormat,frameCapacity:257)!
 var verified = 0
 while try voice.fill(buffer) {
@@ -65,12 +70,53 @@ for position:Int64 in [0,4799,4800,9600,14400,14401,24003,28800] {
   let expected = starts.first(where:{position >= $0 && position < $0+4800}).map{Float(0.25+Double(position-$0)/32768)} ?? 0
   precondition(buffer.floatChannelData![0][0]==expected)
 }
+// Source cache/scratch stay in the recorded format, while routed output
+// buffers use the real destination channel count and silence every other bus.
+for (input,output,capacity,outputs) in [(1,2,257,2),(2,1,8192,2),(1,4,257,4)] {
+ var routed=separateAudio;routed.audioChannel=CaptureAudioChannel(input:UInt32(input),output:UInt32(output))
+ let selected=try Voice(region:routed,asset:asset,capacity:UInt32(capacity),outputChannels:UInt32(outputs))
+ let target=AVAudioPCMBuffer(pcmFormat:selected.format,frameCapacity:UInt32(capacity))!
+ precondition(selected.file.processingFormat.channelCount==2 && selected.format.channelCount==UInt32(outputs))
+ var count=0
+ while try selected.fill(target) {
+  let first=selected.cursor-Int64(target.frameLength)
+  for i in 0..<Int(target.frameLength) {
+   let frame=first+Int64(i),starts:[Int64]=[4800,14401,24001]
+   let local=starts.first(where:{frame >= $0 && frame < $0+4800}).map{frame-$0}
+   let expected:Float=local.map{input==1 ? Float(0.25+Double($0)/32768): -0.5} ?? 0
+   for channel in 0..<outputs {precondition(target.floatChannelData![channel][i]==(channel==output-1 ? expected:0),"selected source channel leaked or changed")}
+   count+=1
+  }
+ }
+ precondition(count==28801)
+}
+var invalid=separateAudio;invalid.audioChannel=CaptureAudioChannel(input:3,output:1)
+do {try Plan(schemaVersion:4,kind:"capture-audio-arrangement",duration:1,assets:[asset],regions:[invalid],midi:nil,ump:nil,umpRegions:nil).validate();preconditionFailure("missing input channel admitted")}catch{}
+invalid=region;invalid.audioChannel=CaptureAudioChannel(input:1,output:1)
+do {try Plan(schemaVersion:4,kind:"capture-audio-arrangement",duration:1,assets:[asset],regions:[invalid],midi:nil,ump:nil,umpRegions:nil).validate();preconditionFailure("paired source channel routing admitted")}catch{}
+invalid=separateAudio;invalid.audioChannel=CaptureAudioChannel(input:1,output:3)
+do {_ = try Voice(region:invalid,asset:asset,capacity:257,outputChannels:2);preconditionFailure("missing physical output channel admitted")}catch{}
+let monoAsset=Asset(id:"audio",path:CommandLine.arguments[2],sha256:"",sampleRate:48000,channels:1,frames:4800)
+for capacity:UInt32 in [257,8192] {
+ var routed=separateAudio;routed.audioChannel=CaptureAudioChannel(input:1,output:2)
+ let mono=try Voice(region:routed,asset:monoAsset,capacity:capacity,outputChannels:2)
+ let target=AVAudioPCMBuffer(pcmFormat:mono.format,frameCapacity:capacity)!
+ precondition(mono.file.processingFormat.channelCount==1 && mono.format.channelCount==2)
+ while try mono.fill(target) {
+  let first=mono.cursor-Int64(target.frameLength)
+  for i in 0..<Int(target.frameLength) {
+   let frame=first+Int64(i),starts:[Int64]=[4800,14401,24001]
+   let present=starts.contains{frame >= $0 && frame < $0+4800}
+   precondition(target.floatChannelData![0][i]==0 && target.floatChannelData![1][i]==(present ? -0.5:0),"mono input duplicated or routed to the wrong output")
+  }
+ }
+}
 let grain=CaptureAudioClock(origin:"0",offset:"0",extent:"751",numer:125,denom:3,firstAudioHostTime:"1")
 let large=try grain.layout(rate:48000,offsetFrames:0,frameCount:1,repetitions:2_000_000)
 precondition(large.totalFrames==3_004_000 && large.start(1_999_999)==3_003_999)
 precondition(large.span(at:3_003_999,maximum:100).source==0)
 let legacyJSON = #"{"id":"wave","asset":"audio","startSeconds":0,"offsetFrames":2,"frameCount":3,"repeat":2}"#
-let legacy=try Voice(region:JSONDecoder().decode(Region.self,from:Data(legacyJSON.utf8)),asset:asset,capacity:257)
+let legacy=try Voice(region:JSONDecoder().decode(Region.self,from:Data(legacyJSON.utf8)),asset:asset,capacity:257,outputChannels:2)
 let filled=try legacy.fill(buffer);precondition(filled);precondition(buffer.frameLength==6)
 for i in 0..<6 { precondition(buffer.floatChannelData![0][i]==Float(0.25+Double(2+i%3)/32768)) }
 func refuses(_ clock:CaptureAudioClock,_ offset:Int64=0,_ count:Int64=1,_ repeatCount:Int64=1) {
@@ -112,7 +158,7 @@ print("CAPTURE_AUDIO_CLOCK_PASS: 28801 stereo PCM frames, delayed starts, ration
   const files = ['WaveArrangement.swift','CaptureAudioClock.swift','MidiTransport.swift','UmpTransport.swift','UmpOutput.swift','UmpRegions.swift','HybridMidiTransport.swift','UmpState.swift'].map(file=>new URL(file,import.meta.url).pathname)
   let result = spawnSync('xcrun', ['swiftc','-parse-as-library','-D','MIDI_LIBRARY','-D','ARRANGEMENT_LIBRARY',...files,join(directory,'Probe.swift'),'-o',join(directory,'probe'),'-framework','AVFoundation','-framework','CoreAudio','-framework','CoreMIDI'], { encoding:'utf8' })
   assert.equal(result.status,0,result.stderr)
-  result=spawnSync(join(directory,'probe'),[join(directory,'audio.wav')],{encoding:'utf8'})
+  result=spawnSync(join(directory,'probe'),[join(directory,'audio.wav'),join(directory,'mono.wav')],{encoding:'utf8'})
   assert.equal(result.status,0,result.stderr)
   console.log(result.stdout.trim())
 } finally { await rm(directory,{recursive:true,force:true}) }

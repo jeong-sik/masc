@@ -360,3 +360,21 @@ Measured candidate adoption with compatible device/channel/sample-rate evidence,
 recording-wide correction settings and native-clock practice/count-in remain
 subsequent work. An audio loopback measurement must not silently shift paired
 MIDI or be reused across unmeasured channels/devices.
+
+### Captured input and output channels
+
+For a separated audio component, `:capture-channel INPUT OUTPUT` sends just that
+1-based original WAV input channel to the selected output channel. For example,
+`:capture-channel 2 1` sends input 2 to output 1 and silences every other output
+channel for that region. `:capture-channel all` restores original multi-channel
+playback. The chosen physical output must have the requested channel; an invalid
+route is refused before playback. MIDI remains a separate original component.
+
+Duplicate an audio region to route additional source channels, then give each
+region its own position/manual offset, lane, mute or solo setting. Routes survive
+save/load and undo/redo without changing WAV samples, raw UMP or original clocks.
+The complete source remains available when opening the take. Source and output
+buffers retain their own channel counts, so mono input can target a stereo
+output without duplicating the signal onto the other channel. This routing is
+the per-channel prerequisite for measured calibration adoption; measurement
+inspection/adoption and recording-wide calibration policy remain subsequent work.

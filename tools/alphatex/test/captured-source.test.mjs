@@ -17,19 +17,19 @@ import { once } from 'node:events'
 import { loadProject } from '../sequencer-files.mjs'
 import { createHash } from 'node:crypto'
 
-async function fixture(run) {
+async function fixture(run, { channels = 1 } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'masc-captured-source-')), input = join(root, 'Original take')
   try {
     const { mkdir } = await import('node:fs/promises'); await mkdir(input)
     const origin = 9007199254740993123n, at = seconds => String(origin + BigInt(Math.round(seconds * 24000000)))
     const manifest = { schemaVersion: 1, state: 'recorded', failure: null, audio: 'audio.wav', audioBlocks: 'audio-blocks.jsonl', midi: 'midi.ump.jsonl',
-      sampleRate: 48000, channels: 1, audioFrames: '4800', midiPacketCount: '3',
+      sampleRate: 48000, channels, audioFrames: '4800', midiPacketCount: '3',
       clock: { kind: 'mach-host-time', numer: 125, denom: 3, requestedStart: String(origin), firstAudioHostTime: at(.1) },
       input: { id: 'audio', name: 'Interface' }, midiSources: [{ id: 'A', name: 'Keys' }, { id: 'B', name: 'Pads' }] }
-    const wave = Buffer.alloc(44 + 4800 * 2)
+    const wave = Buffer.alloc(44 + 4800 * channels * 2)
     wave.write('RIFF'); wave.writeUInt32LE(wave.length - 8, 4); wave.write('WAVEfmt ', 8); wave.writeUInt32LE(16, 16)
-    wave.writeUInt16LE(1, 20); wave.writeUInt16LE(1, 22); wave.writeUInt32LE(48000, 24); wave.writeUInt32LE(96000, 28)
-    wave.writeUInt16LE(2, 32); wave.writeUInt16LE(16, 34); wave.write('data', 36); wave.writeUInt32LE(wave.length - 44, 40)
+    wave.writeUInt16LE(1, 20); wave.writeUInt16LE(channels, 22); wave.writeUInt32LE(48000, 24); wave.writeUInt32LE(96000 * channels, 28)
+    wave.writeUInt16LE(channels * 2, 32); wave.writeUInt16LE(16, 34); wave.write('data', 36); wave.writeUInt32LE(wave.length - 44, 40)
     const packet = (seconds, source, timestampOrigin, messages) => {
       const bytes = Buffer.from(messages.flatMap(message => [...message]))
       return { kind: 'midi', protocol: 2, hostTime: at(seconds), source, timestampOrigin,
@@ -38,7 +38,7 @@ async function fixture(run) {
     const rows = [packet(.05, 'A', 'packet', [JZZ.UMP.umpNoteOn(3, 5, 60, 0x9001), JZZ.UMP.umpPitchBend(3, 5, 0x87654321), JZZ.UMP.umpControl(3, 5, 74, 0xabcdef01)]),
       packet(.07, 'B', 'received', [JZZ.UMP.umpNoteOn(1, 2, 36, 0xffff)]), packet(.15, 'A', 'packet', [JZZ.UMP.umpNoteOff(3, 5, 60, 0x1234)])]
     const bytes = { manifest: Buffer.from(JSON.stringify(manifest, null, 2) + '\n'), audio: wave,
-      audioBlocks: Buffer.from(JSON.stringify({ kind: 'audio', hostTime: at(.1), deviceSampleTime: '-12', frameOffset: '0', frameCount: 4800, peaks: [[-.2, .3]] }) + '\n'),
+      audioBlocks: Buffer.from(JSON.stringify({ kind: 'audio', hostTime: at(.1), deviceSampleTime: '-12', frameOffset: '0', frameCount: 4800, peaks: Array.from({ length: channels }, () => [-.2, .3]) }) + '\n'),
       midi: Buffer.from(rows.map(row => JSON.stringify(row)).join('\n') + '\n') }
     for (const [role, filename] of Object.entries(capturePartNames)) await writeFile(join(input, filename), bytes[role])
     await run({ root, input, bytes, manifest })
@@ -478,3 +478,36 @@ test('a long decimal-tempo placement horizon covers its exact native final deadl
  assert.ok(BigInt(Math.ceil(plan.duration*1e9))>=deadline);assert.equal(plan.umpRegions.duration,plan.duration)
  assert.equal(clip.startSeconds,1200.05)
 }))
+
+
+test('captured channel routes preserve source bytes, independent placement and portable undoable component state',async()=>fixture(async({root,input,bytes})=>{
+ const imported=await importArrangementCapture(newArrangement(),input,{projectPath:join(root,'song.json')})
+ let editor=arrangementCommand(arrangementEditor(imported.project),'capture-region asset-1 0 0 .2 3').editor
+ assert.throws(()=>arrangementCommand(editor,'capture-channel 2 1'),/separated/)
+ editor=arrangementCommand(editor,'split-take').editor
+ const before=editor.project
+ editor=arrangementCommand(editor,'capture-channel 2 1').editor
+ const mapped=editor.project
+ assert.deepEqual(mapped.clips[0].audioChannel,{input:2,output:1});assert.equal(mapped.clips[1].audioChannel,undefined)
+ assert.equal(arrangementCommand(editor,'undo').editor.project,before)
+ assert.equal(arrangementCommand(arrangementCommand(editor,'undo').editor,'redo').editor.project,mapped)
+ for(const bad of ['0 1','3 1','1 0','1 1.5','1 4294967296','1 2 3'])assert.throws(()=>arrangementCommand(editor,'capture-channel '+bad))
+ const midi=arrangementCommand(editor,'select region-2').editor
+ assert.throws(()=>arrangementCommand(midi,'capture-channel 1 1'),/separated/)
+ assert.throws(()=>arrangementCommand(midi,'capture-channel all'),/separated/)
+ editor=arrangementCommand(editor,'capture-offset 50').editor
+ const prepared=JSON.parse(await readFile((await prepareArrangementCaptureRegions(editor.project,{sourceRoot:root,directory:root,midiOutput:'42'})).path,'utf8'))
+ assert.deepEqual(prepared.regions.map(c=>c.audioChannel),[{input:2,output:1},{input:2,output:1}])
+ assert.ok(prepared.umpRegions.regions.every(c=>c.audioChannel===undefined))
+ assert.deepEqual(prepared.umpRegions.sources[0].timeline.packets,bytes.midi.toString().trim().split('\n').map(JSON.parse))
+ const path=join(root,'portable','song.json');await saveArrangement(path,editor.project,null,{sourceRoot:root});const loaded=await loadArrangement(path)
+ assert.deepEqual(loaded.project,editor.project)
+ for(const [role,part]of Object.entries(editor.project.assets[0].parts))assert.deepEqual(await readFile(join(dirname(path),part.file)),bytes[role])
+ const cleared=arrangementCommand(editor,'capture-channel all').editor
+ assert.equal(Object.hasOwn(cleared.project.clips[0],'audioChannel'),false)
+ assert.deepEqual(cleared.project.clips[1],editor.project.clips[1]);assert.deepEqual(cleared.project.clips[0].placement,editor.project.clips[0].placement)
+ const duplicate=arrangementCommand(editor,'duplicate 1').editor.project.clips.at(-1)
+ assert.deepEqual(duplicate.audioChannel,{input:2,output:1})
+ const alias={input:1,output:2},copy=editArrangement(editor.project,{kind:'region-change',id:'region-1',audioChannel:alias});alias.input=99
+ assert.equal(copy.clips[0].audioChannel.input,1)
+},{channels:2}))

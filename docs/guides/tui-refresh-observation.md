@@ -285,6 +285,34 @@ with `tui_surface_read_finished`; full-refresh source execution and terminal
 refresh clocks remain separate. Native painted/actionable frames require their
 own observation.
 
+For admitted Board posts, `tui_dataset_early` adds `board_posts` JSON (schema 1).
+The same object appears in the Board posts entry of terminal
+`tui_surface_read_applied.sources`. It separates:
+
+- `delivery_query`: the receipt's frozen sort/hearth for received/failed results;
+  `null` for missing terminal data, never borrowed from current controls.
+- `requested_query`: the controls at this application observation, which can differ
+  from both the delivered query and the retained list.
+- `listing_query`: the last successful list after application; `null` before any
+  successful value, including after a first failure. A successful empty list has a
+  real query and is not `null`.
+
+Each non-null query stores `sort` and `hearth`; an object's `hearth: null` means
+all hearths and differs from a missing query object. `outcome` is received, failed
+or missing. The typed application returns an immutable projection after its state
+transition, so a later control change or successful replacement cannot rewrite the
+failure's diagnostic context. It contains no rows, body or failure text. These
+fields do not decide authorization, refresh order or received-data counts.
+
+A terminal Board posts slot still owned and admitted for the workspace but lacking
+its result adds one `missing` entry to that existing log line. Already consumed,
+superseded or workspace-rejected slots do not gain application entries. A collector
+ending without terminal application still uses its existing cleanup diagnostics;
+this does not manufacture an application receipt for it. Non-Board early lines and
+terminal entries retain their prior fields. No new log stream, HTTP, clock, request
+generation or UI row is introduced. The JSON projection/encoding has unmeasured
+runtime cost; the source-defined fields are not observed log, latency or paint proof.
+
 The source expectation changes a ready dataset's admission dependency from the
 slowest collector branch plus final probe to that dataset's own verified reply
 plus mailbox delivery. Overall refresh time need not decrease. Extra query and
@@ -449,8 +477,10 @@ record its own source clocks and received/failed UI application separately.
 whether a full pass was running and the admitted navigation collector count.
 `tui_surface_read_applied` records the same
 dataset request id and start clock, monotonic application clock, and each applied
-dataset's logical source, concrete dataset and received/failed outcome. A dataset
-whose owner was retired or consumed by early delivery is excluded.
+dataset's logical source, concrete dataset and received/failed outcome. Board posts
+also include the query projection above, and an owned workspace-admitted terminal
+slot without a result records `missing`. A dataset whose owner was retired or
+consumed by early delivery is excluded.
 These are UI state application observations, not physical request counts,
 successful operator actions or first paint. Empty source lists grant no usable
 screen claim. `tui_surface_read_finished` records the matching start and UI

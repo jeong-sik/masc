@@ -20,11 +20,12 @@ let dispatch state =
 
 (* Workspace/refresh admission has separate scenarios. These exercise the
    original opaque dataset owner and production snapshot transition. *)
-let deliver_receipt state request reading =
+let observe_delivery state request reading =
   let reads,accepted=Surface_read_order.take_dataset state.http_surface_reads request Surface_read_order.Board_posts in
   state.http_surface_reads <- reads;
-  if accepted then apply_board_posts_load state reading;
-  accepted
+  if accepted then Some (apply_board_posts_load state reading) else None
+
+let deliver_receipt state request reading = Option.is_some (observe_delivery state request reading)
 
 let deliver state request result = deliver_receipt state request (receipt result)
 
@@ -37,24 +38,31 @@ let test_initial_loading_empty_and_failure_are_distinct () =
     let request=dispatch current in
     Alcotest.(check bool) "initial owner projects loading without an empty result" true
       (board_posts_reading current=(Masc_tui_fetched.Loading,true));
-    Alcotest.(check bool) "owned result is admitted once" true (deliver current request result);
+    let application=match observe_delivery current request (receipt result) with
+      | Some application -> application | None -> Alcotest.fail "initial result not owned" in
+    Alcotest.(check bool) "owned application captures current request controls" true
+      (application.bpa_requested_query=initial_query);
     Alcotest.(check bool) "census remains pending independently after posts settle" true
       (Surface_read_order.pending_dataset current.http_surface_reads Surface_read_order.Board_hearths
        && not (Surface_read_order.pending_dataset current.http_surface_reads Surface_read_order.Board_posts));
     (match result with
      | Ok rows -> Alcotest.(check bool) "received empty is a real successful observation" true
          (board_posts_reading current=(Masc_tui_fetched.Ready (snapshot rows),false)
-          && board_listing_error current=None)
+          && board_listing_error current=None
+          && application.bpa_delivery=Board_posts_received initial_query
+          && application.bpa_listing_query=Some initial_query)
      | Error detail -> Alcotest.(check bool) "first failure has no invented empty observation" true
          (board_posts_reading current=(Masc_tui_fetched.Failed detail,false)
-          && board_listing_error current=Some detail));
+          && board_listing_error current=Some detail
+          && application.bpa_delivery=Board_posts_failed initial_query
+          && application.bpa_listing_query=None));
     Alcotest.(check bool) "duplicate cannot replace the settled dataset" false
       (deliver current request (Ok [post "late"]))) [Ok [];Error "network unavailable"]
 
 let test_retained_rows_detail_receipt_and_selection_keep_their_meaning () =
   let current=state () in
   let a=post "a" and b=post "b" and c=post "c" in
-  apply_board_posts_load current (receipt (Ok [a;b]));
+  ignore (apply_board_posts_load current (receipt (Ok [a;b])));
   current.board_cursor <- 1;
   current.board_mode <- Board_compose;
   Buffer.add_string current.board_draft "unsent draft";
@@ -88,7 +96,7 @@ let test_retained_rows_detail_receipt_and_selection_keep_their_meaning () =
 let test_missing_result_old_cleanup_and_workspace_withdrawal () =
   let current=state () in
   let a=post "a" in
-  apply_board_posts_load current (receipt (Ok [a]));
+  ignore (apply_board_posts_load current (receipt (Ok [a])));
   let old=dispatch current in
   let latest=dispatch current in
   finish_http_surface_read current old;
@@ -101,7 +109,7 @@ let test_missing_result_old_cleanup_and_workspace_withdrawal () =
      && match board_posts_reading current with
         | Masc_tui_fetched.Stale (retained,_),false -> retained=snapshot [a]
         | (Absent | Loading | Ready _ | Stale _ | Failed _),_ -> false);
-  apply_board_posts_load current (receipt (Ok []));
+  ignore (apply_board_posts_load current (receipt (Ok [])));
   finish_http_surface_read current latest;
   Alcotest.(check bool) "actual terminal empty restores received availability" true
     (board_posts_reading current=(Masc_tui_fetched.Ready (snapshot []),false));
@@ -131,8 +139,11 @@ let test_query_change_keeps_origin_detail_draft_and_empty_result () =
   let captured={bpr_query=board_query current;bpr_result=Ok [a;b]} in
   current.board_sort <- Board_updated;current.board_hearth <- Some "beta";
   let wanted=board_query current in
+  let first_application=match observe_delivery current first captured with
+    | Some application -> application | None -> Alcotest.fail "initial posts not owned" in
   Alcotest.(check bool) "early receipt settles its posts slot with its original query" true
-    (deliver_receipt current first captured
+    (first_application.bpa_delivery=Board_posts_received original
+     && first_application.bpa_requested_query=wanted && first_application.bpa_listing_query=Some original
      && board_posts_query current=original && not (board_listing_matches_requested current)
      && board_sort_time (board_posts_query current).bq_sort=Board_time_posted);
   let reads,taken=Surface_read_order.take_dataset current.http_surface_reads first Surface_read_order.Board_hearths in
@@ -146,10 +157,17 @@ let test_query_change_keeps_origin_detail_draft_and_empty_result () =
   Buffer.add_string current.board_draft "keep original draft";
   let reread=dispatch current in
   let failure={bpr_query=wanted;bpr_result=Error "new query failed"} in
-  Alcotest.(check bool) "failure does not reattribute retained rows to the failed query" true
-    (deliver_receipt current reread failure
+  current.board_sort <- Board_trending;current.board_hearth <- Some "third";
+  let requested_at_failure=board_query current in
+  let failed_application=match observe_delivery current reread failure with
+    | Some application -> application | None -> Alcotest.fail "replacement posts not owned" in
+  Alcotest.(check bool) "failure keeps delivered, requested and retained queries distinct" true
+    (failed_application.bpa_delivery=Board_posts_failed wanted
+     && failed_application.bpa_requested_query=requested_at_failure
+     && failed_application.bpa_listing_query=Some original
      && board_posts_query current=original && board_posts current=[a;b]
      && not (board_listing_matches_requested current) && current.board_cursor=1);
+  current.board_sort <- wanted.bq_sort;current.board_hearth <- wanted.bq_hearth;
   let retry=dispatch current in
   current.board_mode <- Board_read "b";
   enrich_board_list_post current {b with bp_body="detail enriched"};
@@ -157,8 +175,16 @@ let test_query_change_keeps_origin_detail_draft_and_empty_result () =
     (board_posts_query current=original && board_listing_error current=Some "new query failed"
      && Surface_read_order.pending_dataset current.http_surface_reads Surface_read_order.Board_posts
      && Buffer.contents current.board_draft="keep original draft");
-  Alcotest.(check bool) "a received empty new query replaces provenance without closing detail" true
-    (deliver_receipt current retry {bpr_query=wanted;bpr_result=Ok []}
+  let empty_application=match observe_delivery current retry {bpr_query=wanted;bpr_result=Ok []} with
+    | Some application -> application | None -> Alcotest.fail "empty replacement not owned" in
+  Alcotest.(check bool) "empty replacement updates its observation without rewriting earlier failure" true
+    (empty_application.bpa_delivery=Board_posts_received wanted
+     && empty_application.bpa_listing_query=Some wanted
+     && failed_application.bpa_delivery=Board_posts_failed wanted
+     && failed_application.bpa_requested_query=requested_at_failure
+     && failed_application.bpa_listing_query=Some original
+     && first_application.bpa_requested_query=wanted
+     && first_application.bpa_listing_query=Some original
      && board_posts_query current=wanted && board_listing_matches_requested current
      && board_posts current=[] && current.board_mode=Board_read "b"
      && board_sort_time (board_posts_query current).bq_sort=Board_time_changed
@@ -174,18 +200,23 @@ let test_superseded_query_and_terminal_fallback_keep_original_owner () =
   let latest=dispatch current in
   let newer={bpr_query=board_query current;bpr_result=Ok [post "newer"]} in
   current.board_sort <- Board_trending;current.board_hearth <- None;
-  Alcotest.(check bool) "navigation owner rejects old query even before its terminal cleanup" false
-    (deliver_receipt current old older);
+  Alcotest.(check bool) "superseded delivery has no application observation" true
+    (observe_delivery current old older=None);
   let old_datasets=take_http_surface_datasets current old in
   finish_http_surface_read current old;
   Alcotest.(check bool) "superseded terminal bundle cannot take successor posts" true
     (not (List.mem Surface_read_order.Board_posts old_datasets)
      && Surface_read_order.owns_dataset current.http_surface_reads latest Surface_read_order.Board_posts);
   let remaining=take_http_surface_datasets current latest in
-  if List.mem Surface_read_order.Board_posts remaining then apply_board_posts_load current newer;
+  let application=if List.mem Surface_read_order.Board_posts remaining then
+      Some (apply_board_posts_load current newer) else None in
   finish_http_surface_read current latest;
   Alcotest.(check bool) "terminal fallback preserves captured origin despite later controls" true
-    (board_posts_query current=newer.bpr_query && board_posts current=[post "newer"]
+    (Option.fold ~none:false ~some:(fun observation ->
+       observation.bpa_delivery=Board_posts_received newer.bpr_query
+       && observation.bpa_requested_query=board_query current
+       && observation.bpa_listing_query=Some newer.bpr_query) application
+     && board_posts_query current=newer.bpr_query && board_posts current=[post "newer"]
      && not (board_listing_matches_requested current)
      && not (deliver_receipt current latest older));
   current.board_sort <- newer.bpr_query.bq_sort;current.board_hearth <- newer.bpr_query.bq_hearth;
@@ -196,19 +227,28 @@ let test_empty_query_origin_survives_missing_result_and_is_withdrawn () =
   let current=state () in
   current.board_hearth <- Some "empty-origin";
   let original=board_query current in
-  apply_board_posts_load current {bpr_query=original;bpr_result=Ok []};
+  ignore (apply_board_posts_load current {bpr_query=original;bpr_result=Ok []});
   current.board_hearth <- Some "other";
   let missing=dispatch current in
+  let remaining=take_http_surface_datasets current missing in
+  let missing_application=if List.mem Surface_read_order.Board_posts remaining then
+      Some (observe_board_posts_application current Board_posts_missing) else None in
   finish_http_surface_read current missing;
-  Alcotest.(check bool) "missing replacement retains the successful empty query" true
-    (board_posts_snapshot current=Some {bl_query=original;bl_posts=[]}
+  Alcotest.(check bool) "owned missing data has no invented delivery query and retains empty origin" true
+    (Option.fold ~none:false ~some:(fun application ->
+       application.bpa_delivery=Board_posts_missing
+       && application.bpa_requested_query=board_query current
+       && application.bpa_listing_query=Some original) missing_application
+     && board_posts_snapshot current=Some {bl_query=original;bl_posts=[]}
      && not (board_listing_matches_requested current) && Option.is_some (board_listing_error current));
   let retired=dispatch current in
   suspend_workspace_readings current;
   finish_http_surface_read current retired;
-  Alcotest.(check bool) "withdrawal removes query and rows and refuses retired receipts" true
+  Alcotest.(check bool) "withdrawal removes origin and produces no observation for a retired receipt" true
     (board_posts_snapshot current=None && board_posts current=[]
-     && not (deliver_receipt current retired {bpr_query=original;bpr_result=Ok [post "late"]}))
+     && observe_delivery current retired {bpr_query=original;bpr_result=Ok [post "late"]}=None
+     && Option.fold ~none:false ~some:(fun application -> application.bpa_listing_query=Some original)
+       missing_application)
 
 let () = Alcotest.run "tui_board_list_reading"
   ["availability and continuity",

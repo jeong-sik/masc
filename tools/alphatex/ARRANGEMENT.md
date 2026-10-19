@@ -245,7 +245,8 @@ place asset-3 8
 `:phrase` creates a new editable experiment. `:edit-midi` chooses an asset (the
 selected asset when omitted) and optionally an SMF2 pattern number. Generated
 assets open their phrase draft; original SMF assets open the expressive source
-editor. After edits and `q`, a new asset is selected for explicit placement.
+editor. After edits and `q`, a new asset and the edited pattern are selected for
+placement with Enter. Explicit `:place` still names an SMF2 pattern when needed.
 Existing sources and clips remain unchanged. Parent undo removes that import as
 one transaction; redo restores it. Editing without changes adds no asset.
 

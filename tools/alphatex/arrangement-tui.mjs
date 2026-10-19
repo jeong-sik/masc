@@ -447,7 +447,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         if (!accepting || controller.signal.aborted || generation !== expected || editor.project !== project || !edited?.changed) return
         const imported = await request({ kind: 'import-phrase', project, document: edited.project })
         if (!accepting || controller.signal.aborted || generation !== expected || editor.project !== project) return
-        adopt(arrangementImported(editor, imported)); status = 'MIDI variant imported; Enter places the new asset'
+        adopt(arrangementImported(editor, { ...imported, pattern: edited.pattern })); status = 'MIDI variant imported; Enter places the new asset'
       } catch (error) { if (generation === expected) { preparing = null; transport = { kind: 'stopped' }; status = error.message } }
       finally {
         if (controller && takeAbort === controller) {

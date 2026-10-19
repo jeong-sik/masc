@@ -512,7 +512,7 @@ final class ArrangementTransport {
             transport.onCoordinatedEnd = { [weak self] in self?.midiReachedEnd() }
         }
     }
-    var completed: Bool { active.isEmpty && (midi == nil || midiEnded) && (!plan.clocked || horizonEnded) }
+    var completed: Bool { plan.loop == nil && active.isEmpty && (midi == nil || midiEnded) && (!plan.clocked || horizonEnded) }
     func midiReachedEnd() {
         guard state != .stopped else { return }
         midiEnded = true
@@ -614,7 +614,7 @@ final class ArrangementTransport {
         if let midi { try midi.runCoordinated(anchorNanoseconds: AudioConvertHostTimeToNanos(anchor)) }
         guard mach_absolute_time() < anchor else { throw AudioFailure("audio graph missed its common start deadline") }
         state = .playing; try checkOutput()
-        if plan.clocked {
+        if plan.clocked && plan.loop == nil {
             let expected = generation, end = try futureHost(plan.duration - position, from: anchor)
             let timer = DispatchSource.makeTimerSource(queue: .main); horizon = timer
             timer.schedule(deadline: DispatchTime(uptimeNanoseconds: AudioConvertHostTimeToNanos(end)), leeway: .nanoseconds(0))

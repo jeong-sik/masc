@@ -66,19 +66,31 @@ struct WaveLoopClock: Decodable {
         let divisor = try loopMultiply(pair / loopGCD(pair, placementDivisor), placementDivisor)
         let masterScale = divisor / masterDivisor, sourceScale = divisor / sourceDivisor
         let period = try loopMultiply(master.period / masterGCD, masterScale)
-        let loopStart = try loopMultiply(UInt128(master.offset) / masterGCD, masterScale)
-        let clipStart = try loopMultiply(placement, divisor / placementDivisor)
+        // Subtract whole positions before scaling: two large project origins
+        // can have a small, exactly representable relative placement.
+        let masterOffset = UInt128(master.offset) / masterGCD
+        let masterWhole = masterOffset / masterDivisor, clipWhole = placement / placementDivisor
+        let masterPart = try loopMultiply(masterOffset % masterDivisor, masterScale)
+        let clipPart = try loopMultiply(placement % placementDivisor, divisor / placementDivisor)
+        let positive = masterWhole > clipWhole || masterWhole == clipWhole && masterPart >= clipPart
+        var whole = positive ? masterWhole - clipWhole : clipWhole - masterWhole
+        let from = positive ? masterPart : clipPart, to = positive ? clipPart : masterPart
+        let part: UInt128
+        if from >= to { part = from - to }
+        else { whole -= 1; part = divisor - (to - from) }
+        let sum = try loopMultiply(whole, divisor).addingReportingOverflow(part)
+        guard !sum.overflow else { throw AudioFailure("captured audio loop placement exceeds the native rational clock range") }
+        let distance = sum.partialValue
         let sourcePeriod = try loopMultiply(capture.period / sourceGCD, sourceScale)
         let lead = try loopMultiply(capture.lead / sourceGCD, sourceScale)
         let sourceEnd = try loopMultiply(sourcePeriod, UInt128(capture.repetitions))
         let signedMax = UInt128(Int128.max)
-        let distance = loopStart >= clipStart ? loopStart - clipStart : clipStart - loopStart
         guard period >= divisor, period <= signedMax, distance <= signedMax, sourceEnd <= signedMax,
-              loopStart < clipStart || distance <= signedMax - period else {
+              !positive || distance <= signedMax - period else {
             throw AudioFailure("captured audio loop is not representable at source sample precision")
         }
         return WaveLoopLayout(period: period, divisor: divisor,
-            offset: loopStart >= clipStart ? Int128(distance) : -Int128(distance), sourceEnd: sourceEnd,
+            offset: positive ? Int128(distance) : -Int128(distance), sourceEnd: sourceEnd,
             sourcePeriod: sourcePeriod, lead: lead, frameCount: capture.frameCount)
     }
 }

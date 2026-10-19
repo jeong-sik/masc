@@ -8,6 +8,10 @@ on:
       source-sha:
         required: true
         type: string
+      scenario:
+        required: false
+        default: detail-ownership
+        type: string
 
 permissions:
   contents: read
@@ -20,8 +24,13 @@ jobs:
       - name: Validate exact source identity
         env:
           SOURCE_SHA: ${{ inputs.source-sha }}
+          PROOF_SCENARIO: ${{ inputs.scenario }}
         run: |
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'source-sha must be 40 lowercase hex characters' >&2; exit 1; }
+          case "$PROOF_SCENARIO" in
+            detail-ownership|workspace-files) ;;
+            *) echo 'unsupported native proof scenario' >&2; exit 1 ;;
+          esac
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source-sha }}
@@ -52,17 +61,29 @@ jobs:
           pin-flags: --with-compact-protocol --with-bisect
       - name: Install OCaml dependencies
         run: opam install ./masc.opam --deps-only --with-test -y
-      - name: Build TUI and focused ownership tests
+      - name: Build the selected native behavior scope
+        env:
+          PROOF_SCENARIO: ${{ inputs.scenario }}
         run: |
           set -euo pipefail
           mkdir -p proof
-          targets=(bin/masc_tui.exe test/test_tui_detail_reading.exe test/test_tui_board_successor.exe test/test_tui_usage_scope.exe)
+          targets=(bin/masc_tui.exe)
+          case "$PROOF_SCENARIO" in
+            detail-ownership)
+              targets+=(test/test_tui_detail_reading.exe test/test_tui_board_successor.exe test/test_tui_usage_scope.exe)
+              ;;
+            workspace-files)
+              targets+=(bin/main_eio.exe test/test_repo_git.exe test/test_tui_workspace_entries.exe test/test_workspace_file_confidentiality.exe)
+              ;;
+            *) echo 'unsupported native proof scenario' >&2; exit 1 ;;
+          esac
           printf '%s\n' "${targets[@]}" > proof/build-targets.txt
           opam exec -- dune build "${targets[@]}" 2>&1 | tee proof/build.log
       - name: Verify candidate and ownership behavior
         env:
           SOURCE_SHA: ${{ inputs.source-sha }}
           WORKFLOW_SHA: ${{ github.sha }}
+          PROOF_SCENARIO: ${{ inputs.scenario }}
         run: |
           set -euo pipefail
           while IFS= read -r target; do
@@ -79,6 +100,12 @@ jobs:
           cp _build/default/bin/masc_tui.exe proof/masc-tui
           chmod +x proof/masc-tui
           otool -L proof/masc-tui > proof/native-dependencies.txt
+          if [ "$PROOF_SCENARIO" = workspace-files ]; then
+            test "$(_build/default/bin/main_eio.exe build-commit)" = "$SOURCE_SHA"
+            cp _build/default/bin/main_eio.exe proof/masc
+            chmod +x proof/masc
+            otool -L proof/masc > proof/server-native-dependencies.txt
+          fi
           python3 - <<'PYCODE'
           import hashlib, json, os
           from pathlib import Path
@@ -86,8 +113,10 @@ jobs:
           Path('proof/receipt.json').write_text(json.dumps({
               'source_sha': os.environ['SOURCE_SHA'],
               'workflow_sha': os.environ['WORKFLOW_SHA'],
+              'scenario': os.environ['PROOF_SCENARIO'],
               'platform': 'macos-arm64',
               'sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
+              'server_sha256': hashlib.sha256(Path('proof/masc').read_bytes()).hexdigest() if os.environ['PROOF_SCENARIO'] == 'workspace-files' else None,
               'build_targets': Path('proof/build-targets.txt').read_text().splitlines(),
               'executed_tests': Path('proof/executed-tests.txt').read_text().splitlines(),
               'installed_runtime_verified': False,

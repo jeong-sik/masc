@@ -265,10 +265,13 @@ asset/port outputs. Mixed WAV/MIDI regions use the [shared native clock](ARRANGE
 [Captured takes](CAPTURED-SOURCES.md) attach their original WAV, raw UMP and clock
 files with `:import-take DIRECTORY`; Enter opens their waveform/MIDI viewer.
 Captured takes can be placed, trimmed in seconds, repeated and saved as paired
-regions. Native captured-region playback and arrangement overdubs remain unfinished.
+regions. `:play-audio` explicitly auditions the WAV portions on the captured
+clock, including delayed starts, silent tails and compressed repeats; it sends
+no MIDI. Regular paired captured-region playback and arrangement overdubs remain
+unfinished. See [captured audio timing](CAPTURE-AUDIO-CLOCK.md).
 
 Saved captures also have [paired original WAV/UMP playback](CAPTURE-PLAYBACK.md).
 Select MIDI and audio outputs in the take viewer; original MIDI 2.0 words and
 capture timing survive full-source audition. Native playback also pauses/resumes
 with `p` and seeks audio and supported UMP state together with `:seek SECONDS`.
-Captured-region placement and arrangement overdub remain subsequent work.
+Paired captured-region playback and arrangement overdub remain subsequent work.

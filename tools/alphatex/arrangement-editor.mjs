@@ -128,7 +128,7 @@ export function arrangementCommand(editor, line) {
       if (!editor.project.assets.some(item => item.id === asset && item.kind === 'capture')) throw new Error('Choose a captured take')
       return { editor, effect: { kind: 'open-take', asset } }
     }
-    case 'save': case 'help': case 'play': case 'stop': count(0); return { editor, effect: { kind: command } }
+    case 'save': case 'help': case 'play': case 'play-audio': case 'stop': count(0); return { editor, effect: { kind: command } }
     case 'seek': count(1); return { editor, effect: { kind: 'seek', tick: position(beats(args[0])) } }
     case 'midi-output': count(1); return { editor, effect: { kind: command, destination: args[0] } }
     case 'midi-port': {

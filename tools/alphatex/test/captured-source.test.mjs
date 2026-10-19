@@ -293,6 +293,18 @@ test('paired preparation snapshots all source parts once and keeps exact compres
   for (const audio of plan.assets) assert.deepEqual(await readFile(audio.path),bytes.audio)
 }))
 
+test('a default MIDI output selected after a captured source override keeps that override', async () => fixture(async ({ root, input }) => {
+  let project = (await importArrangementCapture(newArrangement(), input, { projectPath: join(root, 'song.json') })).project
+  project = (await importArrangementCapture(project, input, { projectPath: join(root, 'song.json') })).project
+  let editor = arrangementEditor(project), route = arrangementRoute()
+  for (const line of ['capture-region asset-1 0 .05 .1 1','capture-region asset-2 8 .1 .1 1']) editor = arrangementCommand(editor, line).editor
+  for (const line of ['mixed-output audio','midi-source asset-2 A -43','midi-output 42']) route = selectArrangementRoute(route, arrangementCommand(editor, line).effect)
+  assert.deepEqual(route.sourceBindings, [{ asset: 'asset-2', source: 'A', destination: '-43' }])
+  const request = arrangementPlaybackRequest(editor.project, route)
+  const plan = JSON.parse(await readFile((await prepareArrangementCaptureRegions(editor.project, { ...request, sourceRoot: root, directory: root })).path, 'utf8'))
+  assert.deepEqual(plan.umpRegions.sources.map(source => source.timeline.bindings), [[{source:'A',destination:'42'},{source:'B',destination:'42'}],[{source:'A',destination:'-43'},{source:'B',destination:'42'}]])
+}))
+
 test('paired preparation refuses missing or duplicate bindings, damaged source and cancellation without a partial root', async () => fixture(async ({root,input})=>{
   const project=arrangementCommand(arrangementEditor((await importArrangementCapture(newArrangement(),input,{projectPath:join(root,'song.json')})).project),'place asset-1 0').editor.project
   const before=await readdir(root), options={sourceRoot:root,directory:root}

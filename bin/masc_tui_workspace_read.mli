@@ -1,0 +1,25 @@
+(** Workspace-owned JSON reads. The caller fiber binds the expected root;
+    the concrete path is prepared before transport crosses an IO boundary. *)
+type proof = Request_precondition | Health_identity
+
+val with_binding
+  : host:string
+  -> port:int
+  -> expected:Masc.Tui_decode.server_identity
+  -> proof:proof
+  -> (unit -> 'a)
+  -> 'a
+
+val read_json
+  : kept_reads:Yojson.Safe.t Masc_tui_kept_reads.t
+  -> address_of:(path:string -> string)
+  -> send:(path:string -> headers:(string * string) list -> (Masc_http_client.response, string) result)
+  -> decode:(allow_empty:bool -> status_code:int -> body:string -> (Yojson.Safe.t, string) result)
+  -> host:string
+  -> port:int
+  -> path:string
+  -> (Yojson.Safe.t, string) result
+(** Bound reads reject endpoint changes and require a matching server admission
+    receipt, including for 304, before publishing or reusing JSON. Health proof
+    validates the returned identity instead. Unbound reads retain their existing
+    behavior. This authorizes observation only, never effects or replay. *)

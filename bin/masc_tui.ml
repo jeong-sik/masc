@@ -1947,6 +1947,19 @@ let launch_workspace_request ?(operation = false) state ~mailbox ~boundary_error
            deliver_result (Error (boundary_error (Printexc.to_string exn))))
   | None -> deliver_result (Error (boundary_error "Eio switch is unavailable"))
 
+(* Detail histories carry the expected root through the actual JSON read,
+   including the server's admission receipt. A health probe alone cannot bind
+   a later request if the same endpoint changes workspace in between. *)
+let launch_workspace_history_read state ~mailbox ~deliver read =
+  let expected = state.server_identity in
+  let host = server_peer_host and port = state.port in
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id ~deliver (fun () ->
+    match expected with
+    | None -> Error "Workspace identity is unavailable for this history read"
+    | Some expected ->
+        Masc_tui_workspace_read.with_binding ~host ~port ~expected
+          ~proof:Masc_tui_workspace_read.Request_precondition read)
+
 (* A creation keeps its operation receipt even after its workspace withdraws.
    Only the result handler may use current authority to refresh or open chat. *)
 let launch_keeper_creation state ~mailbox ~request ~declaration =
@@ -3561,7 +3574,6 @@ let launch_schedules_load ?(intent = Snapshot_read.Poll) state ~mailbox =
 
 let launch_keeper_calls_load ?(force = false) state ~mailbox keeper_name =
   if server_authority_ready state then begin
-  let enqueue_async = workspace_enqueue state in
   let same_scope =
     Option.equal String.equal state.keeper_calls_keeper (Some keeper_name)
   in
@@ -3579,25 +3591,9 @@ let launch_keeper_calls_load ?(force = false) state ~mailbox keeper_name =
     if not same_scope then state.keeper_calls_error <- None;
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let result =
-        try Masc_tui_http.fetch_keeper_calls ~host ~port ~keeper_name ~limit:100
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox
-        (Keeper_calls_loaded (generation, keeper_name, result))
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        enqueue_async mailbox
-          (Keeper_calls_loaded
-             (generation, keeper_name, Error "Eio switch is unavailable"))
+    launch_workspace_history_read state ~mailbox
+      ~deliver:(fun result -> Keeper_calls_loaded (generation, keeper_name, result))
+      (fun () -> Masc_tui_http.fetch_keeper_calls ~host ~port ~keeper_name ~limit:100)
   end
 
   end
@@ -3613,7 +3609,7 @@ let launch_goal_timeline_load state ~mailbox goal_id =
   | Some request ->
   let host = server_peer_host in
   let port = state.port in
-  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+  launch_workspace_history_read state ~mailbox
     ~deliver:(fun result -> Goal_timeline_loaded (request, result))
     (fun () -> Masc_tui_http.fetch_goal_timeline ~host ~port ~goal_id)
   end
@@ -3625,7 +3621,7 @@ let launch_task_history_load state ~mailbox task_id =
   | Some request ->
   let host = server_peer_host in
   let port = state.port in
-  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+  launch_workspace_history_read state ~mailbox
     ~deliver:(fun result -> Task_history_loaded (request, result))
     (fun () -> Masc_tui_http.fetch_task_history ~host ~port ~task_id)
 
@@ -12255,11 +12251,11 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
     match server_identity, on_dataset, Fs_compat.execution_context () with
     | Ok expected, Some publish, Fs_compat.Eio_fiber ->
       let proof = match source with
-        | Surface_read_order.Fleet_safety -> Masc_tui_http.Health_identity
+        | Surface_read_order.Fleet_safety -> Masc_tui_workspace_read.Health_identity
         | Transport | Board | Planning | System_logs | Runtime_quota
         | Keeper_usage | Provider_history | Overview_goals | Account_emails ->
-          Masc_tui_http.Request_precondition in
-      Masc_tui_http.with_workspace_read ~host ~port ~expected ~proof (fun () ->
+          Masc_tui_workspace_read.Request_precondition in
+      Masc_tui_workspace_read.with_binding ~host ~port ~expected ~proof (fun () ->
         let result = load () in
         publish expected (dataset result);
         result)

@@ -52,7 +52,10 @@ let commit_navigation_location state target rest =
 
 let start_navigation state ~action ~target ~path =
   if not (server_authority_ready state) || state.view <> Code then None
-  else
+  else begin
+    state.code_file <- Masc_tui_fetched.cancel_pending
+        ~reason:"File read cancelled by navigation" state.code_file;
+    state.code_file_resume_intent <- Refresh_code_file;
     let owner = { cno_origin = {
       cfo_workspace = state.workspace_authority;
       cfo_reading = state.workspace_read_authority;
@@ -65,6 +68,7 @@ let start_navigation state ~action ~target ~path =
     | Masc_tui_fetched.Started (file, request) ->
         state.code_navigation <- Some { cnr_owner = owner; cnr_file = file };
         Some (owner, request)
+  end
 
 let start_return state =
   if not (server_authority_ready state) then begin
@@ -391,7 +395,8 @@ let apply_lsp_answer (state : state) request result =
          | Some (open_path, Masc_tui_fetched.Ready rows)
            when String.equal open_path location.ll_path ->
              push_code_jump state;
-             state.code_file <- Masc_tui_fetched.cancel_refresh state.code_file;
+             state.code_file <- Masc_tui_fetched.cancel_pending
+                 ~reason:"File read cancelled by location navigation" state.code_file;
              state.code_file_resume_intent <- Refresh_code_file;
              let cursor =
                max 0

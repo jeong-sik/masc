@@ -208,6 +208,7 @@ func umpRestoration(_ events: [UmpEvent], prefixCount: Int, followingCount: Int 
     // original preamble establishes each field before an attack/relative use.
     // This is validation only: future messages are never added to replay.
     // Historical live voices still require their own pre-attack baselines below.
+    var attackSeen = false
     for event in events[prefixCount..<admissionEnd] {
         let message = UmpMessage(event)
         footprint.observe(message)
@@ -215,7 +216,16 @@ func umpRestoration(_ events: [UmpEvent], prefixCount: Int, followingCount: Int 
             let required = previous.touched.filter { field in
                 field.kind.determinesAttack && field.address == message.address && (field.kind.note == nil || field.kind.note == number)
             }
-            guard required.allSatisfy({ $0.covered(by: entryKnown) }) else { throw MidiFailure("captured UMP entry needs a source baseline before its Note On") }
+            guard required.allSatisfy({ $0.covered(by: entryKnown) }) else { throw MidiFailure("captured UMP entry needs a source baseline before its Note On") };attackSeen=true
+        }
+        // A pitch change after an attack cannot serve as that attack's baseline:
+        // the voice already sounded. Pedal and CC stay allowed because they do
+        // not re-voice the key, which keeps note-then-pedal material admissible.
+        if attackSeen, case .absolute(let kinds) = message.action, kinds.contains(.bend) {
+            throw MidiFailure("captured UMP attack is followed by a pitch change its baseline cannot repair")
+        }
+        if attackSeen, case .relative(.bend) = message.action {
+            throw MidiFailure("captured UMP attack is followed by a pitch change its baseline cannot repair")
         }
         if case .relative(let kind) = message.action, !UmpField(address: message.address, kind: kind).covered(by: entryKnown) {
             throw MidiFailure("captured UMP relative entry needs an absolute source baseline")

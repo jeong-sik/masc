@@ -980,10 +980,11 @@ let test_lsp_pending_status_includes_refresh_and_retry () =
       (Fetched.in_flight state.code_lsp_query && Option.is_some (code_lsp_pending_query state)
        && not (Fetched.same_request ~equal:code_lsp_query_equal settled refreshed)
        && Option.is_none state.code_lsp_note);
-    Alcotest.(check bool) "refresh and retry preserve their prior fetched observation" true
+    Alcotest.(check bool) "Ready refresh retains its value while failed Poll retry starts Loading" true
       (match Fetched.current state.code_lsp_query with
-       | Some (_, (Fetched.Ready () | Fetched.Failed _)) -> true
-       | None | Some (_, (Fetched.Absent | Fetched.Loading | Fetched.Stale _)) -> false);
+       | Some (_, Fetched.Ready ()) -> Result.is_ok result
+       | Some (_, Fetched.Loading) -> Result.is_error result
+       | None | Some (_, (Fetched.Absent | Fetched.Failed _ | Fetched.Stale _)) -> false);
     let note = Some "another observation" in
     state.code_lsp_note <- note;
     Alcotest.(check bool) "suppressed duplicate does not mutate an existing note" true

@@ -13,7 +13,7 @@ import { harmonyAt, PPQ } from '../sequencer-project.mjs'
 // Exercise actual controller decisions with owned IO substitutes. No terminal
 // output, layout, audio hardware or player behavior is asserted.
 async function controller(options = {}) {
-  const observed = { saved: [], workers: [], writes: [], copies: [], sessions: 0, players: 0, arrangements: [] }
+  const observed = { saved: [], workers: [], writes: [], copies: [], sessions: 0, players: 0, arrangements: [], pickers: [], native: [], snapshots: [] }
   const process = new EventEmitter()
   process.stdin = new EventEmitter()
   Object.assign(process.stdin, { isTTY: true, isRaw: false,
@@ -25,9 +25,23 @@ async function controller(options = {}) {
     postMessage(job) { this.requests.push(job) }
     async terminate() { this.terminated = true; return 0 }
   }
+  class InstrumentPicker {
+    constructor(callbacks) { Object.assign(this, callbacks); this.view = null; observed.pickers.push(this) }
+    open() {
+      this.view = { kind: 'plugins', cursor: 0, query: '' }
+      if (options.autoSoundfont !== false) { this.close(); this.soundfont() }
+    }
+    close() { this.view = null }
+    items() { return [] }
+    async settled() {}
+    async keypress(_text, key) { if (key.name === 'escape') this.close() }
+  }
   const slot = `sequencer-${randomUUID()}`
   globalThis[slot] = {
-    process, mkdtemp: async () => '/synthetic-temp', rm: async () => {},
+    process, InstrumentPicker, defaultStateDirectory: () => '/synthetic-vst',
+    snapshotWriter: () => async value => { observed.snapshots.push(value) },
+    renderVstPhrase(value) { observed.native.push(value); return options.native(value) },
+    mkdtemp: async () => '/synthetic-temp', rm: async () => {},
     writeFile: async path => { observed.writes.push(path) },
     copyFile: async (from, to) => { observed.copies.push([from, to]) },
     arrangementRoute, selectArrangementRoute, dirname, constants, join, resolve, tmpdir: () => '/synthetic', randomUUID, emitKeypressEvents() {},
@@ -81,9 +95,10 @@ test('accepted editor decisions drain without starting queued recording, preview
 
 test('close cancels a pending WAV job before draining edits waiting behind it', async () => {
   const view = await controller()
-  view.key('return'); view.command('wave /synthetic/export.wav')
+  view.key('return'); view.key('space'); await flush()
+  view.command('stop'); view.command('wave /synthetic/export.wav')
   await flush()
-  const [job] = view.observed.workers[0].requests
+  const job = view.observed.workers[0].requests.at(-1)
   assert.ok(job)
   view.key('up'); view.key('return'); view.key('q')
   await view.done
@@ -140,7 +155,7 @@ test('native playback owns pause, seek, resume, output identity and terminal tea
   assert.deepEqual(pitches(view), [60])
 })
 
-test('MIDI and audio route decisions fence obsolete jobs and drain the previous key owner', async () => {
+test('MIDI and audio route decisions fence obsolete jobs and drain the previous key owner', async t => {
   const requests = [], owners = []
   const view = await controller({ midiOutput: '-120', playback(value) {
     requests.push(value)
@@ -151,6 +166,7 @@ test('MIDI and audio route decisions fence obsolete jobs and drain the previous 
     return { ready: Promise.resolve(), completion,
       stop() { owner.stopRequested = true }, terminate() { finish() }, status() {} }
   } })
+  t.after(async () => { view.signal.abort(); for (const owner of owners) owner.finish(); await view.done })
   const worker = view.observed.workers[0]
   const deliver = job => worker.emit('message', { id: job.id, ok: true, result: { path: job.path, clippedSamples: 0 } })
   view.key('return'); view.key('space'); await flush()
@@ -214,4 +230,61 @@ test('parent shutdown aborts an active arrangement and waits for its child lifet
  let returned=false;view.done.then(()=>{returned=true});view.signal.abort();await flush()
  assert.equal(view.observed.arrangements[0].signal.aborted,true);assert.equal(returned,false)
  release();await view.done;assert.equal(view.process.stdin.isRaw,false)
+})
+
+test('phrase selection renders the chosen VST, pins audio output and publishes player acknowledgements', async () => {
+  const selection = { plugin_path: '/synth.vst3', plugin_name: 'Bass', preset_path: '/bass.vstpreset', name: 'Bass' }
+  const requests = []; let completeNative, finishPlayback
+  const nativeCompletion = new Promise(resolve => { completeNative = resolve })
+  const completion = new Promise(resolve => { finishPlayback = resolve })
+  const view = await controller({ autoSoundfont: false, output: 'speaker-UID',
+    native({ preparation }) { return { promise: preparation.promise.then(() => nativeCompletion), cancel() {} } },
+    playback(request) {
+      requests.push(request)
+      return { ready: Promise.resolve(), completion, status() {}, stop() {}, terminate() { finishPlayback() } }
+    } })
+  view.key('return'); view.key('l'); view.key('space'); await flush()
+  assert.equal(view.observed.workers[0].requests.length, 0)
+  const picker = view.observed.pickers[0]
+  picker.close(); picker.selected(selection); await flush()
+  const worker = view.observed.workers[0], job = worker.requests[0]
+  assert.equal(job.options.format, 'vst-midi')
+  assert.equal(job.options.loop, true)
+  assert.deepEqual(view.observed.native[0].selection, selection)
+  assert.equal(view.observed.native[0].loop, true)
+  worker.emit('message', { id: job.id, ok: true, result: { path: job.path, duration: 1 } })
+  const render = { output_path: '/retained/audio.wav', midi_path: '/retained/phrase.mid' }
+  completeNative({ path: render.output_path, duration: 1, phraseDuration: 1, vst: render, selection })
+  await flush()
+  assert.equal(requests[0].path, render.output_path)
+  assert.equal(requests[0].output, 'speaker-UID')
+  assert.equal(requests[0].midiOutput, undefined)
+  assert.equal(requests[0].loop, true)
+  requests[0].onEvent({ kind: 'playing', currentTime: 0, duration: 1 }); await flush()
+  requests[0].onEvent({ kind: 'playing', currentTime: 0.2, duration: 1 }); await flush()
+  assert.equal(view.observed.snapshots.filter(row => row.state === 'player_playing').length, 1)
+  assert.deepEqual(view.observed.snapshots.find(row => row.state === 'player_playing').selection, selection)
+  view.key('q'); await view.done
+  assert.equal(view.process.stdin.isRaw, false)
+})
+
+test('close cancels an owned VST and waits for its late completion without opening a player', async () => {
+  let complete, stops = 0
+  const nativeCompletion = new Promise(resolve => { complete = resolve })
+  const view = await controller({ autoSoundfont: false,
+    native({ preparation }) { return { promise: preparation.promise.then(() => nativeCompletion), cancel() { stops++ } } } })
+  view.key('return'); view.key('space'); await flush()
+  const picker = view.observed.pickers[0]
+  picker.close(); picker.selected({ plugin_path: '/chosen.vst3', plugin_name: null, preset_path: null, name: 'Chosen' })
+  await flush()
+  const worker = view.observed.workers[0], job = worker.requests[0]
+  worker.emit('message', { id: job.id, ok: true, result: { path: job.path } }); await flush()
+  let returned = false
+  view.done.then(() => { returned = true })
+  view.key('q'); await flush()
+  assert.ok(stops > 0)
+  assert.equal(returned, false)
+  complete({ path: '/late.wav', vst: {} }); await view.done
+  assert.equal(view.observed.players, 0)
+  assert.equal(view.process.stdin.isRaw, false)
 })

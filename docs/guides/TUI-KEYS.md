@@ -187,6 +187,9 @@ data and paint. A missing finish record remains an unfinished observation.
 |---|---|
 | `j/k` | scroll |
 | `p` | switch between quota and Keeper usage, and engine telemetry |
+| `f` | search quota accounts; selection follows Plan and Trend |
+| `a` | clear the quota account selection |
+| `x` | show or hide the accounts that cannot be used now |
 | `v` | cycle the Usage reading |
 | `w` | on Usage: cycle the exact UTC day window for provider report history |
 | `1 / 2 / 3` | on Telemetry: Engine, Work, or Tools |

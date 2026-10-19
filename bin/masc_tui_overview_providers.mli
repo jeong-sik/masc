@@ -135,6 +135,7 @@ val section :
   runtimes:Masc_tui_types.overview_quota_reading ->
   account_emails:Masc_tui_types.overview_account_emails_reading ->
   now:float ->
+  show_unusable:bool ->
   width:int ->
   section option
 (** [None] before the first read. Every known account is drawn under a
@@ -144,7 +145,10 @@ val section :
     first, then a row drops its reset clock and keeps the countdown, and only
     then does a detail move to a row of its own. Emails and catalogue observations are rows
     under their account. Window roles still decide which full values are
-    alarms. *)
+    alarms. When [show_unusable] is [false] the
+    [Unusable_now] block collapses to its heading row with a hidden note, so
+    an operator who only needs what can be used now is not scrolled past
+    what cannot; the header counts still cover every account. *)
 
 val clock_text : now:float -> float -> string
 (** A time of day in the terminal's zone; a time on another day than [now]

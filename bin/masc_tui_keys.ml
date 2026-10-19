@@ -470,6 +470,7 @@ let for_surface = function
           ~help:"switch between quota and Keeper usage, and engine telemetry"
       ; b Navigate "f" "account" ~help:"search quota accounts; selection follows Plan and Trend"
       ; b Navigate "a" "all accounts" ~help:"clear the quota account selection"
+      ; b Navigate "x" "hide/show unusable" ~help:"show or hide the accounts that cannot be used now"
       ; b Navigate "v" "Plan / Trend / Keepers" ~help:"cycle the Usage reading"
       ; b Navigate "w" "1d / 7d / 14d"
           ~help:"on Usage: cycle the exact UTC day window for provider report history"
@@ -1139,7 +1140,7 @@ let has_detail_scoped_keys surface =
 let footer_hints_metrics ~telemetry =
   for_surface Metrics
   |> List.filter (fun binding ->
-         if telemetry then not (List.mem binding.key [ "w"; "v"; "f"; "a" ])
+         if telemetry then not (List.mem binding.key [ "w"; "v"; "f"; "a"; "x" ])
          else not (String.equal binding.key "1 / 2 / 3"))
   |> hints_of_bindings
 

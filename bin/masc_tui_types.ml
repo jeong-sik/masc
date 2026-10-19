@@ -7866,6 +7866,7 @@ type state = {
   mutable usage_telemetry_open: bool;
   mutable usage_section: usage_section;
   mutable usage_scope_id: string option;
+  mutable usage_show_unusable: bool;
   mutable agents: agent list;
   mutable tasks: task list;
   (* Full Task values and their original immutable producer snapshot are one
@@ -14303,6 +14304,7 @@ let create_state
   usage_telemetry_open = false;
   usage_section = Usage_plan;
   usage_scope_id = None;
+  usage_show_unusable = false;
   agents = [];
   tasks = [];
   task_payloads = Task_payloads.empty;

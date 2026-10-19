@@ -611,14 +611,14 @@ let bidi_start_for verb (error : Browser_lane.selection_error) =
       Some (Browser_keeper_firefox_starter.bring_up ())
     else None
 
-let handle_interact_with_phase ~base_path ~tool_name ~start_time args =
+let handle_interact_with_phase ?actor ~base_path ~tool_name ~start_time args =
   match Browser_interaction.parse args with
   | Error error -> make_input_err ~tool_name ~start_time error, Tool_result.Proven_pre_effect
   | Ok request ->
     let verb = Browser_lane.Page_interact {tab_id=request.tab_id;
       expected_url=request.expected_url; action=request.action} in
     let issued = Result.bind (Browser_lane.resolve_target ~verb request.route) (fun target ->
-      Browser_lane.issue_for ~target ~verb
+      Browser_lane.issue_for_actor ~actor ~target ~verb
         ~timeout_sec:default_timeout_sec
       |> Result.map (fun answer -> target, answer)) in
     (match issued with
@@ -634,8 +634,8 @@ let handle_interact_with_phase ~base_path ~tool_name ~start_time args =
          | Browser_lane.Answered _ | Browser_lane.Refused _ | Browser_lane.Timed_out -> Tool_result.Effect_outcome_unknown in
        answer_to_result ~lane:(Browser_lane.target_lane target) ~tool_name ~start_time (add_client target answer), phase)
 ;;
-let handle_interact ~base_path ~tool_name ~start_time args =
-  fst (handle_interact_with_phase ~base_path ~tool_name ~start_time args)
+let handle_interact ?actor ~base_path ~tool_name ~start_time args =
+  fst (handle_interact_with_phase ?actor ~base_path ~tool_name ~start_time args)
 
 let instruct_arguments = [ "action"; "instruction"; "tabId"; "schema" ]
 

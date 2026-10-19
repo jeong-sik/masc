@@ -580,3 +580,32 @@ The latter requires the CI-built host and Firefox; no local build is needed.
 Protocol references: [Mozilla direct connection](https://developer.mozilla.org/en-US/docs/Web/WebDriver/How_to/Create_BiDi_connection),
 [BiDi input](https://developer.mozilla.org/en-US/docs/Web/WebDriver/Reference/BiDi/Modules/input/performActions),
 [Remote Agent security](https://firefox-source-docs.mozilla.org/remote/Security.html).
+
+## Agent feedback and pointer observation
+
+BiDi interactions display a non-interactive MASC badge with the authenticated
+Keeper/calling-agent label and operation. While the page channel remains available it settles to Finished, Not performed,
+or Outcome unknown when the host completes or unwinds the request. A lost
+transport cannot update an existing badge; inspect the connection before treating
+a retained Working badge as current. Navigation does not create a new badge for
+an old request's cleanup. A page refusing
+feedback does not authorize a replay or prevent the interaction.
+
+The marker follows trusted browser pointer/wheel/drag events and displays CSS
+viewport coordinates. Before any event its position is unknown; this is the browser
+input pointer, not the desktop mouse cursor. The inert shadow overlay receives no
+pointer input and does not add its text to the page read surface. A later command
+cannot be marked finished by cleanup belonging to an earlier request.
+
+Connection discovery reports queued/running interactions and their actors from
+the server's owned queue. The TUI labels these as the last connection observation;
+refresh the connection list to inspect a newer observation. It does not infer a
+remote agent's state from the local TUI loading indicator.
+
+Firefox internal start pages (`about:newtab`, `about:home`) can appear in the
+context tree while rejecting `script.callFunction` with `unsupported operation`.
+An inventory with only these pages has no readable tabs and reports them in
+`unavailableTabs`. Open a normal site in the dedicated Keeper Firefox profile and
+read the connection again. MASC does not expand Firefox system-page permissions.
+BiDi errors retain the rejected command name; fixed-script exceptions retain the
+browser's reason, including stale-document/viewport refusals.

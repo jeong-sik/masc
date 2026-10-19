@@ -170,7 +170,7 @@ val handle_browser_read_with_outcome : config:Workspace.config -> meta:keeper_me
 
 val handle_browser_session_with_outcome : args:Yojson.Safe.t -> Keeper_tool_execution.t
 
-val handle_browser_interact_with_outcome : config:Workspace.config -> args:Yojson.Safe.t -> Keeper_tool_execution.t
+val handle_browser_interact_with_outcome : config:Workspace.config -> meta:keeper_meta -> args:Yojson.Safe.t -> Keeper_tool_execution.t
 
 val handle_browser_goto_with_outcome : args:Yojson.Safe.t -> Keeper_tool_execution.t
 

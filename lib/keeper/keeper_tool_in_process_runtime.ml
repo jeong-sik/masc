@@ -503,9 +503,9 @@ let handle_browser_session_with_outcome ~args =
        ~start_time:(Tool_timing.start ()) args)
 ;;
 
-let handle_browser_interact_with_outcome ~(config : Workspace.config) ~args =
+let handle_browser_interact_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args =
   let result, failure_effect_disposition =
-    Tool_misc_browser_lane.handle_interact_with_phase ~base_path:config.base_path
+    Tool_misc_browser_lane.handle_interact_with_phase ~actor:meta.name ~base_path:config.base_path
       ~tool_name:"masc_browser_interact" ~start_time:(Tool_timing.start ()) args in
   Keeper_tool_execution.of_tool_result ~failure_effect_disposition result
 ;;

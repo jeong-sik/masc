@@ -13,7 +13,7 @@
 type verb = Masc.Browser_bidi_peer.verb =
   | Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact
 
-type command = { id : string; verb : verb; args : Yojson.Safe.t }
+type command = { id : string; verb : verb; args : Yojson.Safe.t; actor : string option }
 
 (** How one exchange with the extension ended. [Replied] carries the reply
     envelope, the extension's own or the host's failure for it; a frame the

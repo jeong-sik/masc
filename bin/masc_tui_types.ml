@@ -5393,7 +5393,8 @@ type palette_mode =
 module Browser_lane_view = struct
   type source = Browser_lane.Lane_name.t = Live | Automation | Stagehand
   type browser = Firefox | Zen
-  type client = { client_id : string; browser : browser; transport : Browser_lane.live_transport }
+  type client = { client_id : string; browser : browser; transport : Browser_lane.live_transport;
+    interactions : Browser_lane.interaction_activity list }
   type discovery = Read_after_discovery | Choose_client
   type tab = { id : int; title : string; url : string; active : bool }
   type page = {
@@ -6298,7 +6299,15 @@ module Browser_lane_view = struct
     let* transport = get string "transport" json in
     let* transport = Browser_lane.live_transport_of_string transport in
     if String.trim client_id = "" then Error "empty browser client ID"
-    else Ok { client_id; browser; transport }
+    else
+      let* interactions = get (function
+        | `List rows ->
+          let rec parse acc = function
+            | [] -> Ok (List.rev acc)
+            | row::rest -> let* work = Browser_lane.interaction_activity_of_json row in parse (work::acc) rest in
+          parse [] rows
+        | _ -> Error "expected browser interactions array") "interactions" json in
+      Ok { client_id; browser; transport; interactions }
   let decode_clients json =
     let* ok = get boolean "ok" json in
     if not ok then let* detail = get string "error" json in Error detail

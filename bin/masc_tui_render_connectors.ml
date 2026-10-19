@@ -161,6 +161,15 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       (* The global coordinator status is not the result of the browser HTTP
          request. Keep it labeled, including the existing workspace warning. *)
       c.push (coordinator_status_row state ~style status);
+      Option.iter (fun (client : Browser_lane_view.client) ->
+        List.iter (fun (work : Browser_lane.interaction_activity) ->
+          let phase = match work.phase with
+            | Browser_lane.Interaction_queued -> "queued"
+            | Browser_lane.Interaction_running -> "working" in
+          c.push_styled ~style:(Theme.info ()) ("  Agent "
+            ^ Terminal_text.single_line (Option.value work.actor ~default:"MASC") ^ " · " ^ phase
+            ^ " · " ^ Terminal_text.single_line work.action ^ " · tab " ^ string_of_int work.tab_id
+            ^ " (at last connection read)")) client.interactions) view.selected_client;
       match view.client_picker with
       | Some cursor ->
           c.push_styled ~style:(Theme.info ()) "  Choose browser · separate sessions do not share login";

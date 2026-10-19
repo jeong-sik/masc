@@ -49,7 +49,7 @@ type t = { ask : string -> Yojson.Safe.t -> (Yojson.Safe.t,refusal) result;
   mutable profile : string option }
 let create ~session_end ~command =
   {ask=command;session_end;session_may_exist=false;contexts=[];next_tab=0;version=None;profile=None}
-let command t method_ params = Result.map_error refusal_message (t.ask method_ params)
+let command t method_ params = Result.map_error (fun refusal -> method_ ^ ": " ^ refusal_message refusal) (t.ask method_ params)
 (* Firefox keeps a session whose socket closed and takes one session at a
    time, so one left behind refuses every later connection until that Firefox
    is restarted. Ending it closes no tab and leaves the browser running. *)
@@ -123,7 +123,11 @@ let evaluate t context body args =
        (try Ok (Yojson.Safe.from_string encoded) with Yojson.Json_error _ -> Error "invalid BiDi script JSON")
      | Some (`String "number"), Some (`Int units) -> Error (answer_too_large units)
      | _ -> Error "invalid BiDi script result")
-  | Some (`String "exception") -> Error "Firefox rejected the fixed page script"
+  | Some (`String "exception") ->
+    let detail = match field "exceptionDetails" result with
+      | Some details -> (match field "text" details with Some (`String text) -> Some text | _ -> None)
+      | None -> None in
+    Error ("Firefox rejected the fixed page script" ^ (match detail with Some text -> ": " ^ text | None -> ""))
   | _ -> Error "invalid BiDi script result"
 let script t context body args = evaluate t context ("arguments[0]=JSON.parse(arguments[0]);\n" ^ body) args
 let scene t context args = script t context "return browserScene(arguments[0]);" args
@@ -214,9 +218,27 @@ let pointer t context args ~(viewport : Browser_lane.Pointer.viewport) ~start mo
   let action=match motion with Hover_pointer->"hover_at"|Click_pointer->"click_at"|Drag_pointer _->"drag"|Wheel_pointer _->"scroll_at" in
   match after with `Assoc fields -> Ok (obj (("action",str action)::("urlBefore",str old_url)::fields))
   | _ -> Error (Outcome_unknown "invalid post-input observation")
-let dispatch t ~verb args =
+let dispatch ?actor ?request_id t ~verb args =
   let pre r = Result.map_error (fun e -> Before_effect e) r in
-  let on_tab use = let* context,id=pre (resolve t args) in use context id in
+  let on_tab use =
+    let* context,id=pre (resolve t args) in
+    match verb,request_id with
+    | Page_interact,Some request_id ->
+      let action = match field "action" args with Some (`String name) -> name | _ -> "interaction" in
+      let metadata = ["requestId",str request_id;"actor",(match actor with Some name->str name|None->`Null);"action",str action] in
+      (* Feedback is observational. A page refusing its overlay must not replay
+         or prevent the authoritative interaction. Cleanup cannot mask input. *)
+      let _ = script t context Browser_pointer_feedback.begin_script (obj metadata) in
+      Eio.Switch.run (fun sw ->
+        let phase = ref Browser_pointer_feedback.Unknown in
+        Eio.Switch.on_release sw (fun () ->
+          let _ = script t context Browser_pointer_feedback.finish_script
+            (obj (("phase",Browser_pointer_feedback.outcome_to_json !phase)::metadata)) in ());
+        let result = use context id in
+        phase := (match result with Ok _ -> Browser_pointer_feedback.Finished | Error (Before_effect _) -> Browser_pointer_feedback.Refused | Error (Outcome_unknown _) -> Browser_pointer_feedback.Unknown);
+        result)
+    | (Browser_info|Tabs_list|Page_read|Page_elements|Page_capture|Page_scene), (None|Some _)
+    | Page_interact,None -> use context id in
   match verb with
   | Browser_info ->
     (match t.version with Some version->Ok (obj ["name",str "Firefox";"version",str version])

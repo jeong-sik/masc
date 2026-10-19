@@ -394,9 +394,30 @@ let live_transport_setup transport =
 
 type client_info = { client_id : client_id; browser : browser; version : string; engine_version : string;
   transport : live_transport }
+type interaction_phase = Interaction_queued | Interaction_running
+type interaction_activity = { request_id : string; actor : string option;
+  action : string; tab_id : int; phase : interaction_phase }
+let interaction_activity_json work = `Assoc ["requestId",`String work.request_id;
+  "actor",(match work.actor with Some name -> `String name | None -> `Null);
+  "action",`String work.action;"tabId",`Int work.tab_id;
+  "phase",`String (match work.phase with Interaction_queued->"queued"|Interaction_running->"running")]
+let interaction_activity_of_json = function
+  | `Assoc fields ->
+    let actor = match List.assoc_opt "actor" fields with
+      | Some (`String name) -> Some (Some name) | Some `Null -> Some None | _ -> None in
+    let phase = match List.assoc_opt "phase" fields with
+      | Some (`String "queued") -> Some Interaction_queued
+      | Some (`String "running") -> Some Interaction_running | _ -> None in
+    (match List.assoc_opt "requestId" fields,actor,List.assoc_opt "action" fields,
+      List.assoc_opt "tabId" fields,phase with
+     | Some (`String request_id),Some actor,Some (`String action),Some (`Int tab_id),Some phase ->
+       Ok {request_id;actor;action;tab_id;phase}
+     | _ -> Error "invalid browser interaction activity")
+  | _ -> Error "invalid browser interaction activity"
 type client = { info : client_info; commands : issued Eio.Stream.t;
   mutex : Eio.Mutex.t;
   waiters : (string, Yojson.Safe.t Eio.Promise.u) Hashtbl.t;
+  interactions : (string, interaction_activity) Hashtbl.t;
   mutable last_delivered_result : (string * Yojson.Safe.t) option;
   mutable connected_until : Monotonic_deadline.t; mutable closed : bool }
 type target = Automation | Live_client of client | Stagehand
@@ -417,7 +438,7 @@ let retire_unlocked key client =
   Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
     Hashtbl.iter (fun _ resolver -> Eio.Promise.resolve resolver
       (`Assoc ["ok", `Bool false; "error", `String "client_disconnected"])) client.waiters;
-    Hashtbl.clear client.waiters);
+    Hashtbl.clear client.waiters; Hashtbl.clear client.interactions);
   while Option.is_some (Eio.Stream.take_nonblocking client.commands) do () done
 let prune_unlocked () =
   Hashtbl.fold (fun key client acc -> if connected client then acc else (key,client)::acc) clients []
@@ -428,10 +449,18 @@ let active_clients () =
     Hashtbl.fold (fun _ client acc -> client.info :: acc) clients [])
   |> List.sort (fun left right -> String.compare
        (client_id_to_string left.client_id) (client_id_to_string right.client_id))
+let client_interactions client = Eio.Mutex.use_ro client.mutex (fun () ->
+  Hashtbl.fold (fun _ work acc -> work::acc) client.interactions [])
+  |> List.sort (fun a b -> String.compare a.request_id b.request_id)
+let interactions_for info =
+  let client = Eio.Mutex.use_ro clients_mutex (fun () ->
+    Hashtbl.find_opt clients (client_id_to_string info.client_id)) in
+  match client with Some client when connected client -> client_interactions client | Some _ | None -> []
 let client_json info = `Assoc ["clientId", `String (client_id_to_string info.client_id);
   "browser", `String (browser_name info.browser); "version", `String info.version;
   "engineVersion", `String info.engine_version;
-  "transport", `String (live_transport_to_string info.transport)]
+  "transport", `String (live_transport_to_string info.transport);
+  "interactions",`List (List.map interaction_activity_json (interactions_for info))]
 let target_client_id = function Automation | Stagehand -> None | Live_client client -> Some client.info.client_id
 (* Where an answer came from, as every successful answer states it: a live
    connection's ID and how its browser is reached. The server's own browsers
@@ -605,7 +634,7 @@ let register info =
       Ok client
     | None ->
       let client = {info; commands=Eio.Stream.create 16; mutex=Eio.Mutex.create ();
-        waiters=Hashtbl.create 8; last_delivered_result=None; closed=false;
+        waiters=Hashtbl.create 8; interactions=Hashtbl.create 8; last_delivered_result=None; closed=false;
         connected_until=Monotonic_deadline.after ~seconds:lane_connected_window_sec} in
       Hashtbl.add clients key client; Ok client)
 let take_command ~client_info ~window_sec =
@@ -615,7 +644,13 @@ let take_command ~client_info ~window_sec =
     let rec take () =
       let issued = Eio.Stream.take client.commands in
       if not (connected client) then None
-      else if Eio.Mutex.use_ro client.mutex (fun () -> Hashtbl.mem client.waiters issued.id)
+      else if Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
+        match Hashtbl.find_opt client.waiters issued.id with
+        | None -> false
+        | Some _ ->
+          Option.iter (fun work -> Hashtbl.replace client.interactions issued.id
+            {work with phase=Interaction_running}) (Hashtbl.find_opt client.interactions issued.id);
+          true)
       then Some issued else take () in
     (* A command taken as the window passed is delivered, not dropped:
        [Fiber.first] would have consumed it from the stream and returned
@@ -632,6 +667,7 @@ let deliver_result ~client_id ~id ~payload =
       match Hashtbl.find_opt client.waiters id with
       | Some resolver ->
         Hashtbl.remove client.waiters id;
+        Hashtbl.remove client.interactions id;
         client.last_delivered_result <- Some (id, payload);
         Eio.Promise.resolve resolver payload;
         Ok ()
@@ -652,7 +688,7 @@ let disconnect_client ~client_id =
    answers both from one place. Work this connection's transport does not
    serve is a selection failure too: nothing is queued, and another
    connection is the remedy. *)
-let issue_live_with ~activity_check ?(only_if_idle = false) client ~verb ~timeout_sec =
+let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb ~timeout_sec =
   match activity_check verb with
   | Some refusal -> Ok refusal
   | None -> if not (connected client) then
@@ -673,13 +709,24 @@ let issue_live_with ~activity_check ?(only_if_idle = false) client ~verb ~timeou
         | None -> if only_if_idle &&
            (Hashtbl.length client.waiters <> 0 || Eio.Stream.length client.commands <> 0)
         then Error (Refused "optional_document_observation_busy")
-        else (Hashtbl.add client.waiters id resolver; Ok ())) in
+        else (Hashtbl.add client.waiters id resolver;
+          (match verb with
+           | Page_interact {tab_id;action;_} -> Hashtbl.add client.interactions id
+               {request_id=id;actor;action=interaction_verb action;tab_id;phase=Interaction_queued}
+           | Session_open _|Session_close|Session_status|Tabs_list|Page_read _|Page_document _
+           | Page_downloads _|Page_capture _|Page_scene _|Page_goto _|Page_elements _|Page_act _
+           | Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> ()); Ok ())) in
       Eio.Switch.on_release sw (fun () ->
-        Eio.Mutex.use_rw ~protect:true client.mutex (fun () -> Hashtbl.remove client.waiters id));
+        Eio.Mutex.use_rw ~protect:true client.mutex (fun () -> Hashtbl.remove client.waiters id; Hashtbl.remove client.interactions id));
       match accepted with
       | Error refusal -> refusal
       | Ok () -> Watched_work.run
-        (fun () -> Eio.Stream.add client.commands {id; verb_json=verb_json verb};
+        (fun () ->
+          let payload = match verb_json verb, actor with
+            | `Assoc fields, Some actor -> `Assoc (("actor",`String actor)::fields)
+            | payload, None -> payload
+            | payload, Some _ -> payload in
+          Eio.Stream.add client.commands {id; verb_json=payload};
           Answered (Eio.Promise.await promise))
         ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)))
 let issue_live ?only_if_idle client ~verb ~timeout_sec =
@@ -802,11 +849,14 @@ let issue_server_lane lane ~verb ~timeout_sec =
   | Server_stagehand -> issue_stagehand ~verb ~timeout_sec:(stagehand_server_deadline verb ~timeout_sec)
 ;;
 
-let issue_for ~target ~verb ~timeout_sec =
+let issue_for_actor ~actor ~target ~verb ~timeout_sec =
   match target with
-  | Live_client client -> issue_live client ~verb ~timeout_sec
+  | Live_client client -> issue_live_with ~activity_check:(activity_refusal Lane_name.Live) ?actor client ~verb ~timeout_sec
   | Automation -> Ok (issue_automation ~verb ~timeout_sec)
   | Stagehand -> Ok (issue_stagehand ~verb ~timeout_sec:(Some timeout_sec))
+
+let issue_for ~target ~verb ~timeout_sec =
+  issue_for_actor ~actor:None ~target ~verb ~timeout_sec
 
 (* A compound surface read owns one admission and one selected browser.
    The closed command type cannot authorize navigation or a new request. *)

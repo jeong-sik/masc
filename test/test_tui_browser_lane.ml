@@ -6,9 +6,9 @@ let success = function Ok value -> value | Error detail -> failwith detail
 let tab id title = `Assoc ["id", `Int id; "title", `String title;
                            "url", `String "https://example.org/"; "active", `Bool (id = 2)]
 let firefox = { client_id = "11111111-1111-4111-8111-111111111111"; browser = Firefox;
-                transport = Browser_lane.Web_extension }
+                transport = Browser_lane.Web_extension; interactions = [] }
 let zen = { client_id = "22222222-2222-4222-8222-222222222222"; browser = Zen;
-            transport = Browser_lane.Web_extension }
+            transport = Browser_lane.Web_extension; interactions = [] }
 let pinned () = choose_client firefox { (create ()) with clients = Some [firefox; zen] }
 (* A connection list that came with no word of the BiDi host. *)
 let found listed = { listed; bidi_host = Host_not_reported }
@@ -410,7 +410,7 @@ let test_picker_empty_row () =
 
 let test_clients_decode () =
   let row ?(transport="web_extension") id browser =
-    `Assoc ["clientId", `String id; "browser", `String browser; "transport", `String transport] in
+    `Assoc ["clientId", `String id; "browser", `String browser; "transport", `String transport; "interactions", `List []] in
   let envelope rows = `Assoc ["ok", `Bool true; "data", `Assoc ["clients", `List rows]] in
   expect "backend-normalized Zen identity preserved"
     (decode_clients (envelope [row zen.client_id "zen"]) = Ok [zen]);
@@ -589,7 +589,7 @@ let test_bidi_host_rows () =
      "If none appears, stop it and start it from a shell without them"; at] in
   says "an attached host this server does not list says what that costs"
     (host (Record.Running host_entry)) unlisted;
-  says ~clients:[{ bidi with transport = Browser_lane.Web_extension }]
+  says ~clients:[{ bidi with transport = Browser_lane.Web_extension; interactions = [] }]
     "the same ID over the extension is not that host" (host (Record.Running host_entry)) unlisted;
   (* A BiDi connection under another ID may be this host, and hover and drag
      are sent to it either way: nothing is said to be refused. *)
@@ -816,7 +816,7 @@ let test_bidi_host_rows () =
    kept with the list, and dropped with it. *)
 let test_bidi_host_discovery () =
   let row id = `Assoc ["clientId", `String id; "browser", `String "firefox";
-                       "transport", `String "web_extension"] in
+                       "interactions", `List []; "transport", `String "web_extension"] in
   let answer extra =
     `Assoc ["ok", `Bool true; "data", `Assoc (("clients", `List [row firefox.client_id]) :: extra)] in
   let ended = host_report (let ending = host_ending Record.Session_left in

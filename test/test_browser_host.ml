@@ -12,7 +12,7 @@
 open Alcotest
 module Host = Browser_host
 
-let command : Host.command = { id = "cmd-1"; verb = Host.Page_interact; args = `Assoc [] }
+let command : Host.command = { id = "cmd-1"; verb = Host.Page_interact; args = `Assoc []; actor = None }
 
 (* The extension's own verdict at its deadline: nothing was started. *)
 let reply_from_the_extension =

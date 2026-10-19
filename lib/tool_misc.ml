@@ -285,7 +285,7 @@ let dispatch ?ask_source_turn_ref ?dos_admission ?(lane_access = Lane_addon_sour
   | Some Tool_schemas_misc.Misc_browser_session ->
       Some (Tool_misc_browser_lane.handle_session ~tool_name:name ~start_time:start args)
   | Some Tool_schemas_misc.Misc_browser_interact ->
-      Some (Tool_misc_browser_lane.handle_interact ~base_path:ctx.config.base_path ~tool_name:name ~start_time:start args)
+      Some (Tool_misc_browser_lane.handle_interact ~actor:ctx.agent_name ~base_path:ctx.config.base_path ~tool_name:name ~start_time:start args)
   | Some Tool_schemas_misc.Misc_browser_goto ->
       Some (Tool_misc_browser_lane.handle_goto ~tool_name:name ~start_time:start args)
   | Some Tool_schemas_misc.Misc_browser_act ->

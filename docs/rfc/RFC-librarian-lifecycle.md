@@ -371,6 +371,10 @@ flowchart TD
 
   소비자는 누적 기록 저장을 확인한 뒤 외부 입력 읽음 확인과 atom·공식 턴 진행 위치를 쓴다. 중간에 끊기면 Memory WAL로 위치를 복구하되, atom은 원 체크포인트 메시지 해시, 공식 턴은 선택된 history fragment 메시지 해시를 대조한 뒤 위치를 옮긴다. 일반 체크포인트 purge는 누적 원장을 보존하며, Keeper 전체를 명시적으로 삭제하는 절차는 이 원장도 삭제한다. 현재 Memory를 디코딩하지 못한 경우의 기존 격리·다시 쓰기 경로는 유지한다. 이때 증명할 수 없는 구멍을 읽은 위치의 근거로 쓰지 않는다.
 
+  화면 관측은 `keeper.memory_os.current_health.v8`의 필수 `context_cycle.unread`로 전달한다. `snapshot`과 `memory`는 각기 `available`과 원문 좌표·SHA-256·명명된 크기 거절 원인 목록, 또는 `unavailable`이다. 두 저장소의 기록은 겹칠 수 있으며 한쪽 읽기 실패로 다른 쪽 기록을 숨기지 않는다. 원문 내용과 working state 본문은 보내지 않는다. Memory 항목은 이미 저장된 누적 원장을 관측할 뿐, 그 조회 자체가 영수증을 확정하거나 원장을 쓰지는 않는다. 따라서 0은 그 저장소에서 관측한 기록 수이지 전체 이력·요청을 전부 읽었다는 증명이 아니다. 기존 health 경로의 별도 Memory 복구 동작은 유지한다.
+
+  Memory가 아직 처리하지 않은 메시지는 별도 설계가 필요하다. context-only 프롬프트는 Memory 처리가 끝났다고 전제하고 `previous_working_state`를 Memory의 근거로 쓰지 않으므로 이를 축약 Memory 입력으로 재사용하지 않는다. 메시지별 Memory 판정은 원래의 사실·흡수·교정·삭제와 근거 관계를 보존해 원경계에서 한 번 게시하도록 합성해야 한다. 이 계약이 완성되기 전에는 부분 Memory나 읽은 위치를 게시하지 않는다.
+
   이 저장·요청 계약만으로 건너뛰기를 켜지 않는다. Memory 영수증과 진행 위치의 원자적 복구, absorbed 요청, 대시보드·TUI, TLA 불변식이 같은 뜻을 갖춘 뒤 바닥의 실제 거절을 unread 기록에 연결한다. 전체 구현은 #37850에서 추적한다.
 
   이 사다리가 필요한 경우는 둘뿐이다. 자를 자리가 없는 구간과, 스냅숏을 atom 0 부터 다시 쓰는 회차다. 뒤엣것은 흔하지 않다. #37751 뒤로 purge 는 이 이력에 맞는 연속성 스냅숏이 덮은 앞부분을 바이트 그대로 두므로 `Librarian_continuity_snapshot` 의 `prefix_sha256` 이 살아남는다(`keeper_checkpoint_purge.ml` 의 `fitting_continuity` 갈래, `test_a_fitting_working_state_keeps_its_prefix` 가 고정). 0 부터 다시 쓰게 되는 길은 그 규칙 전에 지워진 이력(2026-09-22 goo-yang-bong 이 그것이다), 이미 이력과 맞지 않던 스냅숏, 이력 세대가 실제로 바뀌는 경우다. 새 도구를 만들지 않는다.

@@ -32,7 +32,7 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Masc.Tui_decode_memor
   ; mkh_context_cycle =
       { mcc_saved = None; mcc_saved_unreadable = false; mcc_read_position = None;
         mcc_read_position_unreadable = false; mcc_rewriting_through = None;
-        mcc_prepared = None; mcc_synthesis = None }
+        mcc_prepared = None; mcc_synthesis = None; mcc_unread_snapshot = Ok []; mcc_unread_memory = Ok [] }
   ; mkh_librarian =
       { Masc.Tui_decode_memory_health.mlh_state = Some Masc.Tui_decode_memory_health.Pass_drained
       ; mlh_measured_at = Some 1_775_000_000.0

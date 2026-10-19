@@ -5,6 +5,7 @@
 
 import { get, type AbortableRequestOptions } from './core'
 import { asNumber, isRecord } from '../components/common/normalize'
+import { decodeUnreadEvidence, type UnreadEvidence } from './librarian-unread'
 
 // --- Keeper Memory Health ---
 
@@ -131,6 +132,7 @@ export interface ContextSynthesis {
   range: { start_atom: number; end_atom: number; completed_end_atom: number } | null
 }
 export interface ContextCycle {
+  unread: UnreadEvidence
   synthesis: ContextSynthesis | null
   saved: ContextFrontier | null
   saved_read_error: 'snapshot_unreadable' | null
@@ -180,7 +182,7 @@ export interface KeeperMemoryHealthKeeperEntry {
 }
 
 export interface KeeperMemoryHealthResponse {
-  schema: 'keeper.memory_os.current_health.v7'
+  schema: 'keeper.memory_os.current_health.v8'
   generated_at: number
   keepers: KeeperMemoryHealthKeeperEntry[]
   totals: {
@@ -466,7 +468,7 @@ function decodeContextSynthesis(raw: unknown): ContextSynthesis | null {
 
 function decodeContextCycle(raw: unknown): ContextCycle | null {
   if (!isRecord(raw) || !exactKeys(raw, ['saved', 'saved_read_error', 'read_position',
-    'read_position_read_error', 'rewriting_through', 'prepared', 'synthesis'])) return null
+    'read_position_read_error', 'rewriting_through', 'prepared', 'synthesis', 'unread'])) return null
   const saved = raw.saved === null ? null : decodeContextFrontier(raw.saved)
   if (raw.saved !== null && saved === null) return null
   if (raw.saved_read_error !== null && raw.saved_read_error !== 'snapshot_unreadable') return null
@@ -481,7 +483,15 @@ function decodeContextCycle(raw: unknown): ContextCycle | null {
   if (rewriting_through !== null && (saved === null || rewriting_through <= saved.end_atom)) return null
   const synthesis = raw.synthesis === null ? null : decodeContextSynthesis(raw.synthesis)
   if (raw.synthesis !== null && synthesis === null) return null
-  const result: ContextCycle = { saved, saved_read_error: raw.saved_read_error, read_position,
+  const unread = decodeUnreadEvidence(raw.unread)
+  if (unread === null) return null
+  if (raw.saved_read_error === 'snapshot_unreadable') {
+    if (unread.snapshot.kind !== 'unavailable') return null
+  } else {
+    if (unread.snapshot.kind !== 'available'
+      || (saved === null && unread.snapshot.messages.length !== 0)) return null
+  }
+  const result: ContextCycle = { unread, saved, saved_read_error: raw.saved_read_error, read_position,
     read_position_read_error: raw.read_position_read_error, rewriting_through, prepared: null, synthesis }
   if (raw.prepared === null) return result
   const p = raw.prepared
@@ -641,7 +651,7 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     'totals',
     'alert_summary',
   ])) return null
-  if (raw.schema !== 'keeper.memory_os.current_health.v7') return null
+  if (raw.schema !== 'keeper.memory_os.current_health.v8') return null
   const generated_at = finiteNumber(raw.generated_at)
   const keepers = Array.isArray(raw.keepers)
     ? raw.keepers.map(decodeKeeperMemoryHealthEntry)

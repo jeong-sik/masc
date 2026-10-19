@@ -390,6 +390,15 @@ let memory_context_lines ~cols ~detail ~unit ~input (k : Masc.Tui_decode_memory_
           | Some range -> Printf.sprintf " · last selected atoms [%d,%d) / observed completed %d"
               range.start_atom range.end_atom range.completed_end_atom in
         state ^ range ^ " · " ^ memory_updated_text (Some value.observed_at) in
+    let unread label = function
+      | Error () -> ["  " ^ label ^ " · unavailable"]
+      | Ok records ->
+        (Printf.sprintf "  %s · %d recorded unread message(s)" label (List.length records)) ::
+        List.map (fun record ->
+          "    " ^ Terminal_text.single_line (Yojson.Safe.to_string
+            (Masc.Keeper_librarian_unread.to_json record))) records in
+    unread "Snapshot unread evidence" cycle.mcc_unread_snapshot @
+    unread "Memory cumulative unread evidence" cycle.mcc_unread_memory @
     ["  Context synthesis · " ^ synthesis;
      "  Context saved · " ^ saved;
      "  Request prepared (not provider success) · " ^ prepared;

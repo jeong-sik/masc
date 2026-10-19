@@ -4815,10 +4815,14 @@ let memory_health_rejects json =
   | Error _ -> true
   | Ok snapshot -> snapshot.Masc.Tui_decode_memory_health.mhs_refused_keepers <> []
 
+let empty_memory_unread_evidence =
+  let available = `Assoc ["kind", `String "available"; "messages", `List []] in
+  `Assoc ["snapshot", available; "memory", available]
+
 let empty_memory_context_cycle =
   `Assoc ["saved", `Null; "saved_read_error", `Null; "read_position", `Null;
     "read_position_read_error", `Null; "rewriting_through", `Null;
-    "prepared", `Null; "synthesis", `Null]
+    "prepared", `Null; "synthesis", `Null; "unread", empty_memory_unread_evidence]
 
 let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   let keeper id present failures source_present =
@@ -4883,7 +4887,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   in
   let json =
     `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v7")
+      [ ("schema", `String "keeper.memory_os.current_health.v8")
       ; ("generated_at", `Float 1_775_000_000.0)
       ; ( "keepers"
         , `List
@@ -4955,8 +4959,20 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     "input", input; "request_bytes", `Int 2048] in
   let cycle = `Assoc ["saved", frontier; "saved_read_error", `Null;
     "read_position", `Int 4; "read_position_read_error", `Null;
-    "rewriting_through", `Null; "prepared", prepared; "synthesis", `Null] in
+    "rewriting_through", `Null; "prepared", prepared; "synthesis", `Null;
+    "unread", empty_memory_unread_evidence] in
   let context_payload cycle = map_keeper 0 (replace_field "context_cycle" cycle) json in
+  let official_hole = Keeper_librarian_unread.for_official_turn
+    ~turn_ref:(Ids.Turn_ref.make ~trace_id:"context-trace" ~absolute_turn:1)
+    ~boundary_line:1 ~message_in_turn:0
+    ~messages:[Agent_core.Types.make_message ~role:Agent_core.Types.User [Agent_core.Types.Text "unread"]]
+    ~reasons:[Keeper_librarian_input_refusal.Input_capacity]
+    |> Result.get_ok in
+  let wrong_snapshot = `Assoc ["snapshot", `Assoc ["kind", `String "available";
+      "messages", Keeper_librarian_unread.list_to_json [official_hole]];
+    "memory", `Assoc ["kind", `String "available"; "messages", `List []]] in
+  Alcotest.(check bool) "snapshot evidence cannot contain official-turn coordinates" true
+    (memory_health_rejects (context_payload (replace_field "unread" wrong_snapshot cycle)));
   let synthesis = `Assoc ["observed_at", `Float 1700000000.; "trace_id", `String "context-trace";
     "state", `String "not_committed"; "stop_reason", `String "no_smaller_range_evidence";
     "range", `Assoc ["start_atom", `Int 3;
@@ -5367,7 +5383,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
    that disagrees rather than trusting the string it was handed. *)
 let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target =
   `Assoc
-    [ ("schema", `String "keeper.memory_os.current_health.v7")
+    [ ("schema", `String "keeper.memory_os.current_health.v8")
     ; ("generated_at", `Float 1_775_000_000.0)
     ; ( "keepers"
       , `List
@@ -5499,7 +5515,7 @@ let test_decode_memory_alert_keeps_the_code_contract () =
 let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
   let snapshot_with context_cycle =
     `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v7")
+      [ ("schema", `String "keeper.memory_os.current_health.v8")
       ; ("generated_at", `Float 1_775_000_000.0)
       ; ( "keepers"
         , `List
@@ -5578,6 +5594,7 @@ let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
         , match rewriting_through with None -> `Null | Some value -> `Int value )
       ; ("prepared", `Null)
       ; ("synthesis", `Null)
+      ; ("unread", empty_memory_unread_evidence)
       ]
   in
   let cycle_of snapshot =

@@ -461,6 +461,12 @@ val committed_official_coverage
     must retain those records when advancing any external position. *)
 
 val unread_ledger_path : keepers_dir:string -> keeper_id:string -> string
+val read_unread_messages : keepers_dir:string -> keeper_id:string ->
+  (Keeper_librarian_unread.t list, string) result
+(** Observe only the already-persisted cumulative unread ledger. Atomic file
+    replacement permits a lock-free read; this never reconciles receipts,
+    archives evidence, or creates a file. Not proof of complete history. *)
+
 val committed_unread_messages : keepers_dir:string -> keeper_id:string ->
   (Keeper_librarian_unread.t list, string) result
 (** Reconcile current receipt proof and durably accumulate verified holes under

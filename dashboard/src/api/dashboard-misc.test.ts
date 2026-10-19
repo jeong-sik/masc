@@ -1,3 +1,4 @@
+import type { UnreadMessage } from './librarian-unread'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const getMock = vi.hoisted(() => vi.fn())
@@ -14,7 +15,7 @@ import {
 
 function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v7',
+    schema: 'keeper.memory_os.current_health.v8',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'healthy',
@@ -28,7 +29,7 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
       added: 1,
       removed: 2,
       snapshot_present: true,
-      context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, prepared: null, synthesis: null },
+      context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, unread: { snapshot: { kind: 'available', messages: [] }, memory: { kind: 'available', messages: [] } }, prepared: null, synthesis: null },
       librarian: {
         state: 'drained',
         detail: null,
@@ -63,7 +64,7 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
       added: 0,
       removed: 0,
       snapshot_present: false,
-      context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, prepared: null, synthesis: null },
+      context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, unread: { snapshot: { kind: 'available', messages: [] }, memory: { kind: 'available', messages: [] } }, prepared: null, synthesis: null },
       librarian: {
         state: 'drained',
         detail: null,
@@ -127,7 +128,7 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
 
 function starvingKeeperPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v7',
+    schema: 'keeper.memory_os.current_health.v8',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'starving',
@@ -141,7 +142,7 @@ function starvingKeeperPayload(): KeeperMemoryHealthResponse {
       added: 0,
       removed: 0,
       snapshot_present: false,
-      context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, prepared: null, synthesis: null },
+      context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, unread: { snapshot: { kind: 'available', messages: [] }, memory: { kind: 'available', messages: [] } }, prepared: null, synthesis: null },
       librarian: {
         state: 'drained',
         detail: null,
@@ -227,10 +228,10 @@ describe('fetchKeeperMemoryHealth', () => {
     const prepared = { prepared_at: 1_700_000_000, runtime_id: 'fixture.model',
       input: { kind: 'summarized' as const, frontier: { ...saved, end_atom: 8, boundary_line: 6 } },
       request_bytes: 4096 }
-    payload.keepers[0]!.context_cycle = { saved, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, prepared, synthesis: null }
+    payload.keepers[0]!.context_cycle = { saved, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, unread: { snapshot: { kind: 'available', messages: [] }, memory: { kind: 'available', messages: [] } }, prepared, synthesis: null }
     getMock.mockResolvedValue(payload)
     expect((await fetchKeeperMemoryHealth()).keepers[0]!.context_cycle).toEqual({
-      saved, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, prepared, synthesis: null,
+      saved, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, unread: { snapshot: { kind: 'available', messages: [] }, memory: { kind: 'available', messages: [] } }, prepared, synthesis: null,
     })
   })
 
@@ -319,7 +320,7 @@ describe('fetchKeeperMemoryHealth', () => {
     const prepared = { prepared_at: 1_700_000_000, runtime_id: 'fixture.model',
       input: { kind: 'absorbed' as const, frontier: { trace_id: 'trace-a', end_atom: 12719 } },
       request_bytes: 4096 }
-    payload.keepers[0]!.context_cycle = { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, prepared, synthesis: null }
+    payload.keepers[0]!.context_cycle = { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, unread: { snapshot: { kind: 'available', messages: [] }, memory: { kind: 'available', messages: [] } }, prepared, synthesis: null }
     getMock.mockResolvedValue(payload)
     expect((await fetchKeeperMemoryHealth()).keepers[0]!.context_cycle.prepared).toEqual(prepared)
   })
@@ -332,7 +333,7 @@ describe('fetchKeeperMemoryHealth', () => {
   ])('rejects a position in the wrong shape for its kind: %o', async input => {
     const payload = keeperMemoryHealthPayload()
     Object.assign(payload.keepers[0]!, { context_cycle: {
-      saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, synthesis: null,
+      saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, unread: { snapshot: { kind: 'available', messages: [] }, memory: { kind: 'available', messages: [] } }, synthesis: null,
       prepared: { prepared_at: 1, runtime_id: 'fixture.model', request_bytes: 5, input },
     } })
     getMock.mockResolvedValue(payload)
@@ -342,7 +343,7 @@ describe('fetchKeeperMemoryHealth', () => {
   it('rejects a summarized request without a frontier', async () => {
     const payload = keeperMemoryHealthPayload()
     Object.assign(payload.keepers[0]!, { context_cycle: {
-      saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, synthesis: null,
+      saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, unread: { snapshot: { kind: 'available', messages: [] }, memory: { kind: 'available', messages: [] } }, synthesis: null,
       prepared: { prepared_at: 1, runtime_id: 'fixture.model', request_bytes: 5,
         input: { kind: 'summarized', frontier: null } },
     } })
@@ -355,7 +356,7 @@ describe('fetchKeeperMemoryHealth', () => {
 
     const response = await fetchKeeperMemoryHealth()
 
-    expect(response.schema).toBe('keeper.memory_os.current_health.v7')
+    expect(response.schema).toBe('keeper.memory_os.current_health.v8')
     expect(response.keepers[0]).toMatchObject({
       keeper_id: 'healthy',
       revision: 7,
@@ -666,4 +667,46 @@ describe('fetchKeeperMemoryHealth', () => {
       '유효하지 않은 keeper memory health payload',
     )
   })
+  it('retains exact unread evidence and independent source failures', async () => {
+    const payload = keeperMemoryHealthPayload()
+    const cycle = payload.keepers[0]!.context_cycle
+    cycle.saved = { trace_id: 'evidence', end_atom: 1, boundary_line: 1 }
+    const atom: UnreadMessage = { source: { kind: 'atom', trace_id: 'evidence',
+      history_start_boundary_line: 1, atom: 0, message_in_atom: 0, message_sha256: 'a'.repeat(64) },
+      reasons: ['context_overflow', 'request_body_refused'] }
+    const official: UnreadMessage = { source: { kind: 'official_turn', turn_ref: 'earlier#trace#3',
+      boundary_line: 2, message_in_turn: 1, message_sha256: 'b'.repeat(64) }, reasons: ['input_capacity'] }
+    cycle.unread = { snapshot: { kind: 'available', messages: [atom] },
+      memory: { kind: 'available', messages: [atom, official] } }
+    getMock.mockResolvedValue(payload)
+    expect((await fetchKeeperMemoryHealth()).keepers[0]!.context_cycle.unread).toEqual(cycle.unread)
+    cycle.unread.memory = { kind: 'unavailable' }
+    expect((await fetchKeeperMemoryHealth()).keepers[0]!.context_cycle.unread).toEqual(cycle.unread)
+    cycle.unread.memory = { kind: 'available', messages: [official] }
+    cycle.unread.snapshot = { kind: 'unavailable' }
+    cycle.saved = null
+    cycle.saved_read_error = 'snapshot_unreadable'
+    expect((await fetchKeeperMemoryHealth()).keepers[0]!.context_cycle.unread).toEqual(cycle.unread)
+  })
+
+  it.each([
+    undefined,
+    { snapshot: { kind: 'available', messages: [] }, memory: { kind: 'unavailable', messages: [] } },
+    { snapshot: { kind: 'available', messages: [] }, memory: { kind: 'available', messages: [
+      { source: { kind: 'atom', trace_id: 't', history_start_boundary_line: 1, atom: 0,
+        message_in_atom: 0, message_sha256: 'a'.repeat(64) }, reasons: ['invalid_request'] },
+    ] } },
+    { snapshot: { kind: 'available', messages: [
+      { source: { kind: 'official_turn', turn_ref: 't#1', boundary_line: 1,
+        message_in_turn: 0, message_sha256: 'a'.repeat(64) }, reasons: ['input_capacity'] },
+    ] }, memory: { kind: 'available', messages: [] } },
+  ])('refuses missing or invalid unread evidence without inventing an empty reading', async unread => {
+    const payload = keeperMemoryHealthPayload()
+    Object.assign(payload.keepers[0]!.context_cycle, {
+      saved: { trace_id: 't', end_atom: 1, boundary_line: 1 }, unread,
+    })
+    getMock.mockResolvedValue(payload)
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow('유효하지 않은 keeper memory health payload')
+  })
+
 })

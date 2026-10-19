@@ -116,6 +116,11 @@ type memory_context_cycle = {
      request starts from it. [None] on a snapshot that is not being
      rewritten. *)
   mcc_rewriting_through : int option;
+  mcc_unread_snapshot : (Keeper_librarian_unread.t list, unit) result;
+  mcc_unread_memory : (Keeper_librarian_unread.t list, unit) result;
+      (** Independent stored evidence readings; errors never mean an empty
+          list. Snapshot and cumulative Memory records can overlap. Neither
+          certifies that the whole history or the current request was read. *)
   mcc_prepared : memory_context_prepared option;
   mcc_synthesis : Keeper_continuity_observation.synthesis option;
 }
@@ -368,7 +373,7 @@ let decode_memory_context_cycle keeper_json =
   let* json = required_member keeper_json "context_cycle" in
   let* () = require_exact_object_fields "context cycle"
     ["saved"; "saved_read_error"; "read_position"; "read_position_read_error";
-     "rewriting_through"; "prepared"; "synthesis"] json in
+     "rewriting_through"; "prepared"; "synthesis"; "unread"] json in
   let nullable decode = function `Null -> Ok None | value -> Result.map Option.some (decode value) in
   let frontier json =
     let* () = require_exact_object_fields "context frontier" ["trace_id"; "end_atom"; "boundary_line"] json in
@@ -431,12 +436,38 @@ let decode_memory_context_cycle keeper_json =
     | None, _ -> Ok ()
     | Some through, Some saved when through > saved.mcf_end_atom -> Ok ()
     | Some _, (Some _ | None) -> Error "context rewrite target disagrees with the saved cut" in
+  let* unread = required_member json "unread" in
+  let* () = require_exact_object_fields "unread evidence" ["snapshot"; "memory"] unread in
+  let reading name =
+    let* value = required_member unread name in
+    let* kind = required_string_field value "kind" in
+    match kind with
+    | "available" ->
+      let* () = require_exact_object_fields "unread reading" ["kind"; "messages"] value in
+      let* messages = required_member value "messages" in
+      let* messages = Keeper_librarian_unread.list_of_json messages in Ok (Ok messages)
+    | "unavailable" ->
+      let* () = require_exact_object_fields "unread reading" ["kind"] value in Ok (Error ())
+    | _ -> Error "invalid unread evidence reading" in
+  let* mcc_unread_snapshot = reading "snapshot" in
+  let* mcc_unread_memory = reading "memory" in
+  let* () = match mcc_unread_snapshot with
+    | Error () -> Ok ()
+    | Ok messages ->
+      if List.for_all (fun (entry : Keeper_librarian_unread.t) ->
+        match entry.source with Atom _ -> true | Official_turn _ -> false) messages
+      then Ok () else Error "snapshot contains an official-turn unread record" in
+  let* () = match mcc_unread_snapshot, mcc_saved_unreadable, mcc_saved with
+    | Error (), true, None | Ok [], false, None | Ok _, false, Some _ -> Ok ()
+    | Error (), false, (None | Some _) | Error (), true, Some _
+    | Ok _, true, (None | Some _) | Ok (_ :: _), false, None ->
+      Error "snapshot unread evidence disagrees with snapshot reading" in
   let* value = required_member json "prepared" in
   let* mcc_prepared = nullable prepared value in
   let* value = required_member json "synthesis" in
   let* mcc_synthesis = nullable Keeper_continuity_observation.synthesis_of_json value in
   Ok {mcc_saved; mcc_saved_unreadable; mcc_read_position; mcc_read_position_unreadable;
-      mcc_rewriting_through; mcc_prepared; mcc_synthesis}
+      mcc_rewriting_through; mcc_unread_snapshot; mcc_unread_memory; mcc_prepared; mcc_synthesis}
 
 let decode_memory_keeper_health json =
   let* () =
@@ -617,7 +648,7 @@ let decode_memory_health_snapshot json =
   in
   let* schema = required_string_field json "schema" in
   let* () =
-    if String.equal schema "keeper.memory_os.current_health.v7"
+    if String.equal schema "keeper.memory_os.current_health.v8"
     then Ok ()
     else Error ("unsupported memory health schema: " ^ schema)
   in

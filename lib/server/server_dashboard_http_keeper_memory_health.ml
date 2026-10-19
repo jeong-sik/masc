@@ -62,20 +62,22 @@ type context_cycle =
         (** [catch_up_end_atom] of a snapshot the Librarian is rewriting from
             atom 0: where a request starts until the rewrite reaches it. Absent
             on a snapshot that is not being rewritten. *)
+  ; unread_snapshot : (Keeper_librarian_unread.t list, unit) result
+  ; unread_memory : (Keeper_librarian_unread.t list, unit) result
   ; prepared : Keeper_continuity_observation.t option
   ; synthesis : Keeper_continuity_observation.synthesis option
   }
 
 let context_cycle ~config ~keeper_name =
-  let saved, saved_read_error, rewriting_through =
+  let saved, saved_read_error, rewriting_through, unread_snapshot =
     match Keeper_librarian_continuity.read ~config ~keeper_name with
-    | Ok None -> None, None, None
+    | Ok None -> None, None, None, Ok []
     | Ok (Some snapshot) ->
       ( Some { Keeper_continuity_observation.trace_id = snapshot.trace_id;
           end_atom = snapshot.end_atom; boundary_line = snapshot.end_boundary_line }
       , None
-      , snapshot.catch_up_end_atom )
-    | Error _ -> None, Some "snapshot_unreadable", None
+      , snapshot.catch_up_end_atom, Ok snapshot.unread_messages )
+    | Error _ -> None, Some "snapshot_unreadable", None, Error ()
   in
   (* The position lives under the runtime keepers dir, next to the snapshot
      read above, not under the config keepers dir this handler's other
@@ -92,7 +94,11 @@ let context_cycle ~config ~keeper_name =
     | Ok (Some progress) -> Some progress.position.end_atom, None
     | Error _ -> None, Some "progress_unreadable"
   in
+  let unread_memory = Keeper_memory_os_current.read_unread_messages
+      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path)
+      ~keeper_id:keeper_name |> Result.map_error (fun _ -> ()) in
   { saved; saved_read_error; read_position; read_position_read_error; rewriting_through;
+    unread_snapshot; unread_memory;
     prepared = Keeper_continuity_observation.latest ~config ~keeper_name;
     synthesis = Keeper_continuity_observation.latest_synthesis ~config ~keeper_name }
 ;;
@@ -114,7 +120,13 @@ let context_cycle_to_json cycle =
     `Assoc ["prepared_at", `Float value.prepared_at; "runtime_id", `String value.runtime_id;
       "request_bytes", `Int value.request_bytes;
       "input", `Assoc ["kind", `String kind; "frontier", input_frontier]] in
-  `Assoc ["saved", nullable frontier cycle.saved;
+  let unread = function
+    | Ok messages -> `Assoc ["kind", `String "available";
+        "messages", Keeper_librarian_unread.list_to_json messages]
+    | Error () -> `Assoc ["kind", `String "unavailable"] in
+  `Assoc ["unread", `Assoc ["snapshot", unread cycle.unread_snapshot;
+      "memory", unread cycle.unread_memory];
+    "saved", nullable frontier cycle.saved;
     "saved_read_error", nullable (fun value -> `String value) cycle.saved_read_error;
     "read_position", nullable (fun value -> `Int value) cycle.read_position;
     "read_position_read_error",
@@ -765,7 +777,7 @@ let keeper_memory_health_http_json ~base_path =
          all_alerts)
   in
   `Assoc
-    [ "schema", `String "keeper.memory_os.current_health.v7"
+    [ "schema", `String "keeper.memory_os.current_health.v8"
     ; "generated_at", `Float generated_at
     ; "keepers", `List (List.map keeper_health_entry_to_json entries)
     ; ( "totals"

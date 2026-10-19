@@ -112,6 +112,15 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
         <div><small>${entry.librarian.measured_at === null ? '측정 시각 없음'
           : `마지막 측정 ${new Date(entry.librarian.measured_at * 1000).toLocaleString()}`}</small></div>
         ${librarianStalledBadge(entry.librarian.stalled)}
+        ${(['snapshot', 'memory'] as const).map(source => {
+          const reading = entry.context_cycle.unread[source]
+          const label = source === 'snapshot' ? '스냅숏의 누락 기록' : 'Memory 누적 누락 기록'
+          if (reading.kind === 'unavailable') return html`<div class="kmh-badge kmh-badge--warn">${label} · 조회 불가</div>`
+          if (reading.messages.length === 0) return html`<div><small>${label} · 0</small></div>`
+          return html`<details><summary class="kmh-badge kmh-badge--warn">${label} · ${reading.messages.length}</summary>
+            <p>읽지 않은 원문과 크기 거절 원인입니다. 스냅숏과 누적 기록은 겹칠 수 있습니다.</p>
+            <pre>${JSON.stringify(reading.messages, null, 2)}</pre></details>`
+        })}
       </td>
       <td>
         ${starving

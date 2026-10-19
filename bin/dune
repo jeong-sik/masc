@@ -1867,7 +1867,7 @@
  (name masc_tui_render_memory)
  (wrapped false)
  (modules masc_tui_render_memory)
- (libraries masc_tui_memory_usage
+ (libraries yojson masc_tui_memory_usage
   masc_tui_roster_pane
   masc_tui_press
   masc

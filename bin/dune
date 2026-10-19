@@ -1633,7 +1633,6 @@
   masc_tui_runtime_config_snapshot
   masc_tui_runtime_account_form
   masc_tui_model_form
-  masc_tui_frame
   masc_tui_image_preview
   masc
   ;; [gs_phase] is Keeper_approval_lifecycle's closed sum.

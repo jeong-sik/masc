@@ -298,6 +298,29 @@ proof that no relevant policy exists. An optional positive `limit` applies after
 assessment and reports truncated selections separately. Calling the tool retrieves
 memory for that request; it does not turn on automatic prompt injection.
 
+## Inspect images directly
+
+`keeper_image_read` supplies original image pixels to the current model, without
+invoking a second model. Provide exactly one `artifact` handle from an image
+upload or browser screenshot, or a `path` in the Keeper's own sandbox. It uses
+the same path boundary as `Read`, verifies stored hashes and applies the existing
+image size and media-type limits. A successful read retains a rotating browser
+frame so its handle remains readable.
+
+The selected runtime must explicitly declare `supports-image-input = true`.
+An absent declaration remains disabled; the tool returns a model-visible
+rejection before reading pixels, and the turn can continue. Use
+`keeper_analyze_image` when the runtime cannot accept images or you deliberately
+want another model's text interpretation. That tool makes a separate inference
+through the configured media routes. Receiving an artifact handle alone does
+not mean the current model has seen its pixels.
+
+If a verified image-capable runtime still rejects direct reading, inspect its
+resolved model capability declaration. Use the existing runtime configuration
+preview/save flow with its current source revision, then check
+`/api/v1/runtime/resolved`; a provider catalog entry alone does not enable a
+missing runtime declaration. This tool does not rewrite live runtime settings.
+
 ## Publish a report as an artifact
 
 Ask a Keeper to publish a report when you want to reopen it outside the

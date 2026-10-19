@@ -66,7 +66,7 @@ let reader (handler : Keeper_tool_descriptor.runtime_handler) =
   | Tool_masc_file_dispatch
   | Tool_masc_wiki_dispatch
   | Tool_masc_local_runtime_dispatch
-  | Tool_analyze_image -> Whole_output
+  | Tool_analyze_image | Tool_read_image -> Whole_output
 ;;
 
 type resolution =

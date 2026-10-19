@@ -171,6 +171,7 @@ type runtime_handler =
   | Tool_masc_wiki_dispatch
   | Tool_masc_local_runtime_dispatch
   | Tool_analyze_image
+  | Tool_read_image
 
 type policy =
   { readonly_of_input : readonly_of_input

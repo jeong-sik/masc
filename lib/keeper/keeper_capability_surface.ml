@@ -205,7 +205,8 @@ let create_with_descriptors
                                          | Keeper_tool_descriptor.Tool_masc_file_dispatch
                                          | Keeper_tool_descriptor.Tool_masc_wiki_dispatch
                                          | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
-                                         | Keeper_tool_descriptor.Tool_analyze_image -> false in
+                                         | Keeper_tool_descriptor.Tool_analyze_image
+                                         | Keeper_tool_descriptor.Tool_read_image -> false in
            List.exists (Keeper_tool_deny.matches ~lane_addon ~name) tool_deny)
          (Keeper_tool_descriptor.keeper_model_names descriptor)
   in
@@ -289,7 +290,7 @@ let create_with_descriptors
       | Keeper_tool_descriptor.Tool_masc_file_dispatch
       | Keeper_tool_descriptor.Tool_masc_wiki_dispatch
       | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
-      | Keeper_tool_descriptor.Tool_analyze_image -> None
+      | Keeper_tool_descriptor.Tool_analyze_image | Keeper_tool_descriptor.Tool_read_image -> None
   in
   let off_turn_availability descriptor =
     match denied descriptor, sandbox_refusal descriptor with

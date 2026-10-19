@@ -83,6 +83,12 @@ val vision_store_dir : keeper_name:string -> string
 (** Per-keeper artifact store directory used by [analyze_image] and eager image
     eviction. *)
 
+val load_artifact :
+  dir:string -> Multimodal.Vision_artifact_store.handle ->
+  (string, Multimodal.Vision_artifact_store.load_error) result
+(** Load hash-verified bytes, including a rotated-frame lookup, with filesystem
+    I/O offloaded from the Eio domain. Callers choose their Keeper's store. *)
+
 val frames_dir : keeper_name:string -> string
 (** Per-keeper subdirectory for ephemeral screen captures (MSX, DOS, browser)
     subject to bounded retention/rotation. *)

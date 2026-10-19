@@ -167,7 +167,7 @@ let handle_filesystem ?prepared_read ?prepared_edit ?prepared_write ctx descript
   | Tool_masc_wiki_dispatch
   | Tool_masc_local_runtime_dispatch
   | Tool_lane_addon _
-  | Tool_analyze_image -> None
+  | Tool_analyze_image | Tool_read_image -> None
 ;;
 
 (* Shell IR mechanics live under the Execute owner; Grep workspace operations
@@ -257,7 +257,7 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_masc_wiki_dispatch
   | Tool_masc_local_runtime_dispatch
   | Tool_lane_addon _
-  | Tool_analyze_image -> None
+  | Tool_analyze_image | Tool_read_image -> None
 ;;
 
 let handle_in_process ctx descriptor args =
@@ -645,6 +645,10 @@ let handle_in_process ctx descriptor args =
          ~name
          ~args
          ())
+  | Tool_read_image ->
+    Some (Keeper_image_read.handle
+      ?turn_sandbox_factory:ctx.turn_sandbox_factory
+      ~config:ctx.config ~meta:ctx.meta ~args ())
   | Tool_analyze_image ->
     (* read-only vision sub-call; needs [net] (like masc_fusion), threaded from
        the turn-scoped dispatch context. The parent invocation identity rides

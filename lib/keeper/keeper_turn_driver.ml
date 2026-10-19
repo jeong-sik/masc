@@ -2368,6 +2368,18 @@ let run_named
         , Keeper_provider_attempt_effect.No_effect_observed
         , Keeper_attempt_dispatch.Rejected_before_dispatch )
       | Resolved_runtime runtime ->
+      (* Freeze admission with this selected candidate, including tools loaded
+         later in the loop. A text-only attempt can recover through the explicit
+         analysis tool without a provider error or a second implicit inference. *)
+      let image_hooks =
+        { Agent_core.Hooks.empty with pre_tool_use = Some
+            (Keeper_image_read.admission_hook
+               ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)) }
+      in
+      let hooks = Some (match hooks with
+        | None -> image_hooks
+        | Some hooks -> Agent_core.Hooks.compose ~outer:image_hooks ~inner:hooks)
+      in
       let agent_core_tools = match runtime.Runtime_instance.execution, agent_ref with
         | Runtime_execution.Agent_core _, Some agent_cell -> Keeper_agent_tool_surface.on_the_wire
             ~agent_cell ~built:agent_core_tools

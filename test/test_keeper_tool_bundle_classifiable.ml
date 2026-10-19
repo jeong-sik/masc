@@ -473,19 +473,15 @@ let test_the_bundle_is_the_model_visible_surface () =
     (List.mem "Read" names)
 ;;
 
-let check_stored_image_reader_is_callable_with_read_authority ~agent_core =
+let check_stored_image_reader_is_callable_with_read_authority ~agent_core ~name ~input ~handler =
   with_bundle_tools ~agent_core
   @@ fun _config _meta _snapshot _plan_index surface tools ->
-  let name = "keeper_analyze_image" in
   let tool =
     match
       List.find_opt (fun (tool : Agent_core.Tool.t) -> tool.schema.name = name) tools
     with
     | Some tool -> tool
     | None -> fail "the stored-image reader is absent from the production bundle"
-  in
-  let input =
-    `Assoc [ "artifact", `String "image-handle"; "query", `String "Read the chart" ]
   in
   let descriptor =
     match Keeper_tool_descriptor_resolution.validated_descriptor_and_input_for_tool_call
@@ -496,7 +492,7 @@ let check_stored_image_reader_is_callable_with_read_authority ~agent_core =
     | Some (Error _) | None -> fail "the model-visible reader call does not resolve"
   in
   check bool "the model call reaches the existing vision handler" true
-    (descriptor.runtime_handler = Keeper_tool_descriptor.Tool_analyze_image);
+    (descriptor.runtime_handler = handler);
   check bool "the reader is active in the frozen turn surface" true
     (List.exists
        (fun (capability : Keeper_capability_surface.tool_capability) ->
@@ -513,8 +509,16 @@ let check_stored_image_reader_is_callable_with_read_authority ~agent_core =
 ;;
 
 let test_stored_image_reader_is_callable_with_read_authority () =
-  check_stored_image_reader_is_callable_with_read_authority ~agent_core:true;
-  check_stored_image_reader_is_callable_with_read_authority ~agent_core:false
+  List.iter (fun agent_core ->
+    check_stored_image_reader_is_callable_with_read_authority ~agent_core
+      ~name:"keeper_analyze_image"
+      ~input:(`Assoc [ "artifact", `String "image-handle"; "query", `String "Read the chart" ])
+      ~handler:Keeper_tool_descriptor.Tool_analyze_image;
+    check_stored_image_reader_is_callable_with_read_authority ~agent_core
+      ~name:"keeper_image_read"
+      ~input:(`Assoc [ "artifact", `String "image-handle" ])
+      ~handler:Keeper_tool_descriptor.Tool_read_image)
+    [true; false]
 ;;
 
 (* The handler is the tool. Reading only its schema would let a tool that

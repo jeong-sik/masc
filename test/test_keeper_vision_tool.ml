@@ -2410,6 +2410,16 @@ let test_generated_sandbox_image_reaches_vision () =
         let invoke args = Masc.Keeper_tool_in_process_runtime.handle_analyze_image_with_outcome
             ~complete ~config ~sw ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
             ~meta ~args () in
+        let native args = Masc.Keeper_image_read.handle ~config ~meta ~args () in
+        let native_result = native (`Assoc ["path", `String "generated.png"]) in
+        assert (native_result.disposition = Tool_result.Completed ());
+        (match native_result.content_blocks with
+         | Some [Agent_core.Types.Text _; Agent_core.Types.Image {data; _}] ->
+           assert (Base64.decode_exn data = bytes)
+         | _ -> failwith "sandbox image pixels did not reach the native reader");
+        assert (!calls = 0);
+        assert ((native (`Assoc ["path", `String "/etc/passwd"])).disposition
+          <> Tool_result.Completed ());
         let result = invoke (`Assoc ["path", `String "generated.png"; "query", `String "read generated image"]) in
         if result.disposition <> Tool_result.Completed ()
         then failwith ("analyze_image did not complete: " ^ result.raw_output);
@@ -2432,6 +2442,8 @@ let test_generated_sandbox_image_reaches_vision () =
         Unix.symlink "/etc/passwd" (Filename.concat root "outside.png");
         let symlink = invoke (`Assoc ["path", `String "outside.png"; "query", `String "read generated image"]) in
         assert (symlink.disposition <> Tool_result.Completed ());
+        assert ((native (`Assoc ["path", `String "outside.png"])).disposition
+          <> Tool_result.Completed ());
         write_file source "not an image";
         let non_image = invoke (`Assoc ["path", `String "generated.png"; "query", `String "read generated image"]) in
         assert (assoc_string "error" (json_of_output non_image.raw_output) = "invalid_media_type");
@@ -2442,7 +2454,147 @@ let test_generated_sandbox_image_reaches_vision () =
         assert (!calls = 2)
       ))))))))
 
+let test_native_image_read_artifact_and_authority () =
+  (* No Eio net, provider callback or runtime configuration is available here:
+     successful reading consists only of loading and delivering original bytes. *)
+  with_temp_base (fun base_path ->
+    let config = Masc.Workspace.default_config base_path in
+    let meta = make_meta "native-image-owner" in
+    let encoded = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+    let bytes = Base64.decode_exn encoded in
+    let handle = Result.get_ok (Vt.store_frame ~keeper_name:meta.name bytes)
+      |> Store.to_string in
+    let invoke meta args = Masc.Keeper_image_read.handle ~config ~meta ~args () in
+    let args = `Assoc ["artifact", `String handle] in
+    let result = invoke meta args in
+    assert (result.disposition = Tool_result.Completed ());
+    (match result.content_blocks with
+     | Some [Agent_core.Types.Text _;
+         Agent_core.Types.Image {media_type="image/png"; data; source_type=Base64}] ->
+       assert (data = encoded)
+     | _ -> failwith "native read must deliver the original PNG pixels");
+    let output = json_of_output result.raw_output in
+    assert (Yojson.Safe.Util.member "visual_input" output = `Bool true);
+    assert (Yojson.Safe.Util.member "width" output = `Int 1);
+    assert (Yojson.Safe.Util.member "height" output = `Int 1);
+    (* Successful reads pin rotating frames in the stable owned image store. *)
+    Unix.unlink (Filename.concat (Vt.frames_dir ~keeper_name:meta.name) handle);
+    assert (Store.load ~dir:(Vt.vision_store_dir ~keeper_name:meta.name)
+      (Store.of_string handle) = Ok bytes);
+    assert ((invoke meta args).content_blocks = result.content_blocks);
+    let expect_error meta args code =
+      let rejected = invoke meta args in
+      assert (rejected.disposition <> Tool_result.Completed ());
+      assert (rejected.content_blocks = None);
+      let data = match rejected.data with
+        | Some data -> data
+        | None -> failwith "native read failure did not retain its typed data" in
+      assert (assoc_string "error" data = code)
+    in
+    expect_error (make_meta "other-image-owner") args "artifact_not_found";
+    expect_error meta (`Assoc ["artifact", `String "bad-reference"]) "invalid_artifact";
+    expect_error meta (`Assoc []) "invalid_args";
+    expect_error meta (`Assoc ["artifact", `String handle; "path", `String "image.png"]) "invalid_args";
+    expect_error meta (`Assoc ["artifact", `String handle; "artifact", `String handle]) "invalid_args";
+    expect_error meta (`Assoc ["path", `Int 7]) "invalid_args";
+    expect_error meta (`Assoc ["path", `String " "]) "invalid_args";
+    with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "32" (fun () ->
+      expect_error meta args "image_too_large");
+    let non_image = store_image meta "not an image" in
+    expect_error meta (`Assoc ["artifact", `String non_image]) "invalid_media_type";
+    (* WebP is supported by the MIME reader while dimensions are intentionally
+       unavailable. Metadata must not prevent delivery of supported pixels. *)
+    let webp = Base64.decode_exn "UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA" in
+    let webp_handle = store_image meta webp in
+    let webp_result = invoke meta (`Assoc ["artifact", `String webp_handle]) in
+    assert (webp_result.disposition = Tool_result.Completed ());
+    (match webp_result.content_blocks with
+     | Some [Agent_core.Types.Text _; Agent_core.Types.Image {media_type="image/webp";data;_}] ->
+       assert (Base64.decode_exn data = webp)
+     | _ -> failwith "supported WebP bytes must remain readable");
+    write_file (Filename.concat (Vt.vision_store_dir ~keeper_name:meta.name) handle) "tampered pixels";
+    expect_error meta args "artifact_load_failed")
+
+let test_native_image_admission () =
+  let invocation = Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:"native-image-test" ~turn:1
+      ~schedule:{planned_index=0; batch_index=0; batch_size=1; execution_mode=Serial}
+      ~completion:Continue_after_success in
+  let event tool_name = Agent_core.Hooks.PreToolUse
+      {invocation; tool_name; input=`Assoc ["artifact", `String "opaque"];
+       accumulated_cost_usd=0.} in
+  let admitted = Masc.Keeper_image_read.admission_hook ~accepts_image_input:true in
+  let rejected = Masc.Keeper_image_read.admission_hook ~accepts_image_input:false in
+  assert (admitted (event "keeper_image_read") = Agent_core.Hooks.Continue);
+  (match rejected (event "keeper_image_read") with
+   | Agent_core.Hooks.Block detail -> assert (String.length detail > 0)
+   | _ -> failwith "a text-only runtime must reject native pixels before execution");
+  assert (rejected (event "keeper_analyze_image") = Agent_core.Hooks.Continue)
+
+let test_native_image_admission_continues_turn () =
+  let module Core = Agent_core in
+  List.iter (fun accepts_image_input ->
+    with_temp_base (fun base_path ->
+      let config = Masc.Workspace.default_config base_path in
+      let meta = make_meta "native-image-loop" in
+      let encoded = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+      let handle = store_image meta (Base64.decode_exn encoded) in
+      let reads = ref 0 and analyses = ref 0 and requests = ref 0 in
+      let native = Core.Tool.create ~name:"keeper_image_read" ~description:"Read pixels" ~parameters:[]
+          (fun _ ->
+            incr reads;
+            let result = Masc.Keeper_image_read.handle ~config ~meta
+                ~args:(`Assoc ["artifact", `String handle]) () in
+            assert (result.disposition = Tool_result.Completed ());
+            Ok {Core.Types.content=result.raw_output; content_blocks=result.content_blocks; _meta=None}) in
+      let analysis = Core.Tool.create ~name:"keeper_analyze_image" ~description:"Delegated reading" ~parameters:[]
+          (fun _ -> incr analyses;
+            Ok {Core.Types.content="delegated reading";content_blocks=None;_meta=None}) in
+      let next () =
+        incr requests;
+        match !requests with
+        | 1 -> { (text_response "") with stop_reason=Core.Types.StopToolUse;
+            content=[Core.Types.ToolUse {id="read-image";name="keeper_image_read";input=`Assoc []}] }
+        | 2 when not accepts_image_input ->
+          { (text_response "") with stop_reason=Core.Types.StopToolUse;
+            content=[Core.Types.ToolUse {id="analyse-image";name="keeper_analyze_image";input=`Assoc []}] }
+        | _ -> text_response "inspection completed"
+      in
+      let transport : Llm_provider.Llm_transport.t =
+        { complete_sync=(fun _ -> {response=Ok (next ());latency_ms=None})
+        ; complete_stream=(fun ?on_telemetry:_ ~on_event:_ _ -> Ok (next ())) } in
+      let provider_config = Llm_provider.Provider_config.make
+          ~kind:Llm_provider.Provider_config.OpenAI_compat ~provider_id:"test"
+          ~api_key:"" ~base_url:"http://mock.local" ~request_path:"/v1/chat/completions"
+          ~model_id:"mock-model" () in
+      let hooks = {Core.Hooks.empty with pre_tool_use=Some
+          (Masc.Keeper_image_read.admission_hook ~accepts_image_input)} in
+      let options = {Core.Agent.default_options with hooks;
+          provider_config=Some provider_config;transport=Some transport} in
+      Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+        let agent = Core.Agent.create ~net:(Eio.Stdenv.net env)
+            ~config:(Core.Types.default_config ~model:"mock-model") ~options ~tools:[native;analysis] () in
+        Fun.protect ~finally:(fun () -> Core.Agent.close agent) (fun () ->
+          (match Core.Agent.run ~sw agent "inspect the screenshot" with
+           | Ok _ -> ()
+           | Error error -> failwith (Core.Error.to_string error));
+          assert (!reads = if accepts_image_input then 1 else 0);
+          assert (!analyses = if accepts_image_input then 0 else 1);
+          let checkpoint = Core.Agent.checkpoint ~session_id:"native-read" agent in
+          let blocks = List.concat_map (fun (message : Core.Types.message) -> message.content)
+              checkpoint.messages in
+          let saw_pixels = List.exists (function
+            | Core.Types.ToolResult {tool_use_id="read-image";content_blocks=Some nested;_} ->
+              List.exists (function
+                | Core.Types.Image {media_type="image/png";data;source_type=Base64} -> data=encoded
+                | _ -> false) nested
+            | _ -> false) blocks in
+          assert (saw_pixels = accepts_image_input)))))) [true; false]
+
 let () =
+  test_native_image_admission_continues_turn ();
+  test_native_image_read_artifact_and_authority ();
+  test_native_image_admission ();
   test_structured_response_states_never_accept_valid_vision_json ();
   test_generated_sandbox_image_reaches_vision ();
   test_artifact_failures_are_classified ();

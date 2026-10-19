@@ -830,7 +830,7 @@ let make_tool_bundle_for_descriptors_with_policy
     | Keeper_tool_descriptor.Tool_masc_file_dispatch
     | Keeper_tool_descriptor.Tool_masc_wiki_dispatch
     | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
-    | Keeper_tool_descriptor.Tool_analyze_image -> ()) descriptors;
+    | Keeper_tool_descriptor.Tool_analyze_image | Keeper_tool_descriptor.Tool_read_image -> ()) descriptors;
   { tools
   ; agent_core_tools =
       always_loaded

@@ -38,3 +38,7 @@ An answer arriving after another key, paste or mouse action cannot take over
 that newer input. A different source reading, question or workspace retires
 the original choices. A cancelled question or closed picker stays cancelled
 when the workspace reconnects.
+
+Definition, hover and references requests keep the selected name's position
+when Korean text, emoji or other Unicode characters precede it on the line.
+Malformed source encoding is reported as a failed question.

@@ -290,6 +290,63 @@ let test_the_connection_list_says_where_the_bidi_host_stands () =
   check bool "and the doctor does not vouch for the host" true
     (doctor () = Onboarding_status.Needs_verification)
 
+let test_owned_pointer_poll_retains_command_and_settles_waiter () =
+  Eio_main.run @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
+  Eio.Switch.run @@ fun sw ->
+  let id = match Browser_lane.client_id_of_string "50000000-0000-4000-8000-000000000008" with
+    | Ok id -> id | Error detail -> fail detail in
+  let info : Browser_lane.client_info = {client_id=id;browser=Firefox;version="158.0";
+    engine_version="158.0";transport=Webdriver_bidi} in
+  let client = match Browser_lane.register info with
+    | Ok client -> client | Error refusal -> fail (Browser_lane.registration_refusal_to_wire refusal) in
+  Eio.Switch.on_release sw (fun () -> ignore (Browser_lane.disconnect_client ~client_id:id));
+  let point x y : Browser_lane.Pointer.point = {x;y} in
+  let viewport : Browser_lane.Pointer.viewport = {document_id="fixture-document";
+    width=800.;height=600.;scroll_x=0.;scroll_y=0.} in
+  let hovered = Browser_lane.Page_interact {tab_id=4;expected_url=Some "https://example.test/";
+    action=Hover_at {point=point 0.3 0.4;viewport}} in
+  let dragged = Browser_lane.Page_interact {tab_id=4;expected_url=Some "https://example.test/";
+    action=Drag {from=point 0.3 0.4;to_=point 0.7 0.8;viewport}} in
+  List.iter (fun (actor,verb) ->
+    let waiting = Eio.Fiber.fork_promise ~sw (fun () ->
+      Browser_lane.issue_live_with ~activity_check:(fun _ -> None) ?actor client ~verb ~timeout_sec:1.) in
+    let issued = match Browser_lane.take_command ~client_info:info ~window_sec:1. with
+      | Ok (Some issued) -> issued
+      | Ok None -> fail "owned command was not queued"
+      | Error refusal -> fail (Browser_lane.registration_refusal_to_wire refusal) in
+    (* Field order is deliberately varied after exercising the real producer. *)
+    let expected = Yojson.Safe.Util.member "args" (Browser_lane.verb_json verb) in
+    List.iter (fun issued ->
+      let polled = Server_routes_http_routes_browser_lane.poll_answer_json issued in
+      let open Yojson.Safe.Util in
+      check string "poll preserves request ownership" issued.Browser_lane.id (polled |> member "id" |> to_string);
+      check string "poll forwards the real verb" (Browser_lane.verb_json verb |> member "verb" |> to_string)
+        (polled |> member "verb" |> to_string);
+      check bool "poll preserves pointer/read arguments" true (polled |> member "args" = expected);
+      check (option string) "poll forwards optional Keeper actor" actor
+        (match polled |> member "actor" with `Null -> None | value -> Some (to_string value)))
+      [issued;{issued with verb_json=(match issued.verb_json with
+        | `Assoc fields -> `Assoc (List.rev fields) | other -> other)}];
+    let payload = `Assoc ["ok",`Bool true;"data",`Assoc ["done",`Bool true]] in
+    (match Browser_lane.deliver_result ~client_id:id ~id:issued.id ~payload with
+     | Ok () -> () | Error detail -> fail detail);
+    (match Eio.Promise.await_exn waiting with
+     | Ok (Browser_lane.Answered result) -> check bool "owned waiter receives the host result" true (result=payload)
+     | Ok (Browser_lane.Timed_out | Browser_lane.Lane_absent | Browser_lane.Refused _ | Browser_lane.Rejected_before_effect _)
+     | Error _ -> fail "owned waiter was stranded after polling"))
+    [Some "fixture-keeper",hovered;Some "fixture-keeper",dragged;None,Browser_lane.Tabs_list]
+
+let test_malformed_poll_envelope_is_an_error () =
+  List.iter (fun verb_json ->
+    let issued : Browser_lane.issued = {id="malformed";verb_json} in
+    let answer = Server_routes_http_routes_browser_lane.poll_answer_json issued in
+    check bool "malformed envelope is not forwarded" true
+      Yojson.Safe.Util.(answer |> member "verb" = `Null);
+    check string "malformed envelope keeps its error" ("malformed verb envelope: " ^ Yojson.Safe.to_string verb_json)
+      Yojson.Safe.Util.(answer |> member "error" |> to_string))
+    [`Null;`Assoc [];`Assoc ["verb",`Int 1;"args",`Assoc []];`Assoc ["verb",`String "page.interact"]]
+
 let test_partial_failure_receipt_reaches_keeper_output () =
   Eio_main.run @@ fun env ->
   Time_compat.set_clock (Eio.Stdenv.clock env);
@@ -331,7 +388,10 @@ let () =
       , [ test_case "answers only the lane token and registers no client" `Quick
             test_ping_answers_only_the_lane_token_and_registers_no_client ] )
     ; ( "poll"
-      , [ test_case "a refused poll names its reason" `Quick test_a_refused_poll_names_its_reason ] )
+      , [ test_case "a refused poll names its reason" `Quick test_a_refused_poll_names_its_reason
+        ; test_case "owned pointer commands reach the host and settle their waiters" `Quick
+            test_owned_pointer_poll_retains_command_and_settles_waiter
+        ; test_case "malformed command envelopes remain errors" `Quick test_malformed_poll_envelope_is_an_error ] )
     ; ( "connection list"
       , [ test_case "says where the BiDi host stands" `Quick
             test_the_connection_list_says_where_the_bidi_host_stands ] ) ]

@@ -90,17 +90,23 @@ let client_of_request request =
 ;;
 
 (* A poll holds one command for the window. The answer is flat
-   {id, verb, args} — the exact shape the host consumes — so the lane
-   protocol has one wire form everywhere. *)
+   {id, verb, args, actor?} — the exact shape the host consumes. Optional
+   ownership metadata and JSON field order must not hide verb or args. *)
 let poll_answer_json (issued : Browser_lane.issued) : Yojson.Safe.t =
-  match issued.Browser_lane.verb_json with
-  | `Assoc (("verb", `String verb) :: ("args", args) :: _) ->
-    `Assoc [ ("id", `String issued.Browser_lane.id); ("verb", `String verb); ("args", args) ]
-  | other ->
+  let malformed () =
     `Assoc
       [ ("id", `String issued.Browser_lane.id)
-      ; ("error", `String ("malformed verb envelope: " ^ Yojson.Safe.to_string other))
-      ]
+      ; ("error", `String ("malformed verb envelope: " ^ Yojson.Safe.to_string issued.Browser_lane.verb_json))
+      ] in
+  match issued.Browser_lane.verb_json with
+  | `Assoc fields ->
+    (match List.assoc_opt "verb" fields, List.assoc_opt "args" fields with
+     | Some (`String verb), Some args ->
+       let actor = match List.assoc_opt "actor" fields with
+         | Some actor -> ["actor", actor] | None -> [] in
+       `Assoc (["id", `String issued.Browser_lane.id; "verb", `String verb; "args", args] @ actor)
+     | _ -> malformed ())
+  | _ -> malformed ()
 ;;
 
 (* Preserve only known effect receipts at the HTTP boundary. *)

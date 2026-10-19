@@ -103,7 +103,7 @@ test('invalid or silent loop ranges refuse and pending audio, UMP, click and rec
   for(const playbackLoop of [null,{start:0,end:960,unknown:true},{start:0,end:Infinity},{start:.5,end:960}])assert.throws(()=>validateArrangement({...p,playbackLoop}))
   assert.deepEqual(p,before)
   const selected=arrangementCommand(e,'loop 1 2').editor.project
-  for(const kind of ['prepare-audio','prepare-mixed','prepare-capture']){
+  for(const kind of ['prepare-audio','prepare-capture']){
    const r=await c.request({kind,project:selected,sourceRoot:directory,directory,midiOutput:'123'})
    assert.equal(r.ok,false);assert.match(r.error,/loop playback/)
   }

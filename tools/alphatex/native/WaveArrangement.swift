@@ -143,7 +143,7 @@ struct Plan: Decodable {
               (!regions.isEmpty || (captured || clocked) && assets.isEmpty), Set(assets.map(\.id)).count == assets.count, Set(regions.map(\.id)).count == regions.count else { throw AudioFailure("invalid WAV arrangement plan") }
         if let loop {
             try loop.validate()
-            guard kind == "wave-arrangement", practice == nil, duration == loop.duration else { throw AudioFailure("audio looping requires an original WAV arrangement and its authored clock") }
+            guard (kind == "wave-arrangement" || mixed), practice == nil, duration == loop.duration else { throw AudioFailure("audio looping requires an original WAV or mixed arrangement and its authored clock") }
         }
         if let practice {
             guard !captured, practice.countInSeconds.isFinite, practice.countInSeconds >= 0,
@@ -200,7 +200,13 @@ struct Plan: Decodable {
         }
         // Float arithmetic may differ by a final ULP, never by a source sample.
         let sample = assets.map { 1 / $0.sampleRate }.min() ?? 0
-        if loop != nil { return }
+        if let loop {
+            if let midi {
+                guard !midi.bindings.isEmpty else { throw AudioFailure("missing mixed MIDI destination") }
+                try midi.validate(cycle: loop.midiCycle())
+            }
+            return
+        }
         if mixed, let midi {
             try midi.validate()
             let midiEnd = midi.regions.map(\.end).max() ?? 0
@@ -490,7 +496,7 @@ final class ArrangementTransport {
             transport.onCoordinatedEnd = { [weak self] in self?.midiReachedEnd() }
         } else if let timeline = plan.midi {
             guard let uid = timeline.bindings.first?.destination else { throw AudioFailure("missing mixed MIDI destination") }
-            let transport = try MidiTransport(timeline: timeline, uid: uid, coordinated: true)
+            let transport = try MidiTransport(timeline: timeline, uid: uid, loop: plan.loop != nil, coordinated: true, cycle: try plan.loop?.midiCycle())
             midi = transport; try transport.prepare()
             transport.onCoordinatedFailure = { [weak self] reason, error in self?.finish(reason: reason, error: error) }
             transport.onCoordinatedEnd = { [weak self] in self?.midiReachedEnd() }

@@ -291,6 +291,17 @@ or refused markers stay visible as named discovery failures; an operator
 confirms the canonical request record and then removes the named file from
 the prepared_continuations directory. This discovery boundary returns sealed candidates; the
 maintenance supervisor schedules separate intake fibers for ready original runs.
+Validated ready candidates now reach that supervisor before later pending names
+are inspected. Private directory listing still completes first. Each candidate's
+original journal, canonical terminal and dependency reads precede publication;
+publication is not worker admission. The existing intake rechecks original owner,
+node/child snapshots and current authorization. Later discovery errors can
+coexist with earlier reservations, whose lifetime switch still owns cleanup.
+The report records observations made during the pass, even if callbacks have
+already made a candidate stale. Report-only discovery and guarded retirement
+keep their existing contracts. The
+[early intake comparison](../audits/2026-10-19-composition-early-intake.md)
+separates reservation from actual intake, execution and Task progress.
 
 The explicit typed continuation intake can submit the original prepared worker
 without a provider turn. A sealed continuation loads only its original

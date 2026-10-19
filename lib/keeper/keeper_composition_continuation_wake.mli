@@ -48,8 +48,11 @@ val create :
   ?on_result:(Keeper_tool_execution_journal.continuation ->
     (Tool_result.result, error) result -> unit) -> unit -> 'a t
 val pulse : sw:Eio.Switch.t -> 'a t -> (unit, Keeper_tool_execution_journal.error) result
-(** Schedule independent ready-run intake fibers and return without joining
-    them. Active intake and workers reporting held original authority suppress
+(** Schedule each validated ready-run intake before inspecting later pending
+    names and return without joining the intake workers. Directory listing
+    still completes first. A late discovery failure can coexist with earlier
+    reserved workers; their exact admission and switch cleanup remain in force.
+    Active intake and workers reporting held original authority suppress
     repeated automatic attempts for that exact canonical request. Before another
     intake, read-only probes can release [Original_run_unavailable] when its exact
     sealed run reads again, or [Task_skill_publication_unavailable] when a different

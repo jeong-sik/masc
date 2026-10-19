@@ -1590,19 +1590,20 @@ let continuation_lock_data_name name =
   let data_name = String.sub name 0 (String.length name - String.length suffix) in
   if continuation_data_name data_name then Some data_name else None
 
-let pending_continuations_with ~before_retire ~read_composition_result ~base_path = filesystem (fun () ->
-  let base_path = Fs_compat.realpath base_path in
+let pending_continuations_with ~before_retire ~on_ready ~read_composition_result ~base_path =
+  let* base_path = filesystem (fun () -> Ok (Fs_compat.realpath base_path)) in
   let root = Common.masc_dir_from_base_path ~base_path in
   let directory = continuation_directory ~base_path in
-  let* inspection = Fs_compat.inspect_owned_directory_chain ~ownership_root:root directory
-    |> Result.map_error (fun error -> Persistence_failed
-        (Fs_compat.owned_directory_chain_rejection_to_string error)) in
-  let* names = match inspection with
-    | Fs_compat.Owned_directory_missing -> Ok []
-    | Owned_directory _ -> Fs_compat.read_owned_directory ~owner_uid:(Unix.getuid ())
-        ~ownership_root:root directory
-        |> Result.map_error (fun error -> Persistence_failed
-            (Fs_compat.owned_regular_file_read_error_to_string error)) in
+  let* names = filesystem (fun () ->
+    let* inspection = Fs_compat.inspect_owned_directory_chain ~ownership_root:root directory
+      |> Result.map_error (fun error -> Persistence_failed
+          (Fs_compat.owned_directory_chain_rejection_to_string error)) in
+    match inspection with
+      | Fs_compat.Owned_directory_missing -> Ok []
+      | Owned_directory _ -> Fs_compat.read_owned_directory ~owner_uid:(Unix.getuid ())
+          ~ownership_root:root directory
+          |> Result.map_error (fun error -> Persistence_failed
+              (Fs_compat.owned_regular_file_read_error_to_string error))) in
   let inspect name = filesystem (fun () ->
     let path = Filename.concat directory name in
     match continuation_lock_data_name name with
@@ -1676,6 +1677,9 @@ let pending_continuations_with ~before_retire ~read_composition_result ~base_pat
     match inspect name with
     | Ok Lock_infrastructure -> report
     | Ok (Ready continuation) ->
+      (* The original reads have returned and released their authority scopes.
+         Scheduling exceptions are not journal/filesystem failures. *)
+      on_ready continuation;
       let report = {report with inspected=report.inspected+1} in
       {report with ready=continuation :: report.ready}
     | Ok Still_waiting ->
@@ -1690,13 +1694,17 @@ let pending_continuations_with ~before_retire ~read_composition_result ~base_pat
     | Error error ->
       let report = {report with inspected=report.inspected+1} in
       {report with failures=(name,error) :: report.failures}) empty names in
-  Ok {report with ready=List.rev report.ready;failures=List.rev report.failures})
+  Ok {report with ready=List.rev report.ready;failures=List.rev report.failures}
+
+let discover_pending_continuations ~on_ready ~read_composition_result ~base_path =
+  pending_continuations_with ~before_retire:(fun _ -> ()) ~on_ready ~read_composition_result ~base_path
 
 let pending_continuations ~read_composition_result ~base_path =
-  pending_continuations_with ~before_retire:(fun _ -> ()) ~read_composition_result ~base_path
+  discover_pending_continuations ~on_ready:ignore ~read_composition_result ~base_path
 
 module For_testing = struct
-  let pending_continuations = pending_continuations_with
+  let pending_continuations ~before_retire ~read_composition_result ~base_path =
+    pending_continuations_with ~before_retire ~on_ready:ignore ~read_composition_result ~base_path
 end
 
 let check_worker (worker : worker) (state : state) = if same_owner state.owner (Some worker.binding) then Ok () else Error Ownership_changed

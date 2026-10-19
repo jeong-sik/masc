@@ -68,6 +68,10 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
   owned-job pending marker는 검증된 행부터 caller 문맥에서 예약하되, filesystem 오류
   변환 안에 예약 callback을 넣지 않는다. 뒤쪽 discovery 실패에도 먼저 예약한 worker의
   원래 owner 검증·취소 정리를 지키고, held hint는 전체 스캔 성공 뒤에만 정리한다.
+  Composition은 원래 journal·종단 proof·의존 결과를 검증한 ready candidate부터
+  caller에 전달한다. callback 예약은 filesystem 오류 변환·marker transaction 밖에서
+  수행하고, 캡처된 candidate를 실제 intake의 최신 권한 검사로 바꾸어 쓰지 않는다.
+  선언 projection은 같은 pulse의 첫 실제 수요에서 공유하며 다음 pulse로 넘기지 않는다.
 
 - 원래 owned-job 결과가 durable해진 뒤의 Composition 알림은 controller의
   `notify_result_ready`로 요청한다. 알림 도착을 intake·Task 재개·효과 허가로 기록하지 않는다.

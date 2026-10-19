@@ -143,13 +143,27 @@ module Http_refresh_progress = struct
   type outcome = Received | Failed | Interrupted | Composed of composition
   type completion = Complete | Partial | Failed_read | Interrupted_read
   type counts = { pending : int; received : int; partial : int; failed : int; interrupted : int }
+  type component_outcome =
+    | Component_returned of part_outcome | Component_exception
+    | Component_interrupted | Component_unfinished
+  type component_status = Component_pending | Component_settled of int64 * component_outcome
+  type component_reading = {
+    cr_component : component;
+    cr_started_ns : int64;
+    cr_status : component_status;
+  }
   type status = Pending | Settled of { finished_ns : int64; outcome : outcome }
-  type reading = { source : source; started_ns : int64; status : status }
+  type reading = {
+    source : source; started_ns : int64; status : status;
+    component_reads : component_reading list;
+  }
   type phase = In_flight | Finished of int64
   type t = { started_ns : int64; phase : phase; readings : reading list }
   type event =
     | Started of source * int64
     | Completed of source * int64 * outcome
+    | Component_started of component * int64
+    | Component_completed of component * int64 * component_outcome
 
   let source_name = function
     | Identity_before -> "workspace"
@@ -200,22 +214,56 @@ module Http_refresh_progress = struct
 
   let part_name = function Part_received -> "received" | Part_failed -> "failed"
 
+  let component_source = function
+    | Runtime_catalogue | Provider_windows -> Surface_data Surface_read_source.Runtime_quota
+    | Board_posts | Board_hearths -> Surface_data Surface_read_source.Board
+    | Keeper_roster | Keeper_candle -> Keepers
+
+  let component_outcome_name = function
+    | Component_returned outcome -> part_name outcome
+    | Component_exception -> "failed"
+    | Component_interrupted -> "interrupted"
+    | Component_unfinished -> "unfinished"
+
+  let mark_unfinished_components ~finished_ns readings =
+    List.map (fun reading -> match reading.cr_status with
+      | Component_pending ->
+          {reading with cr_status=Component_settled (finished_ns,Component_unfinished)}
+      | Component_settled _ -> reading) readings
+
   let start ~started_ns = { started_ns; phase = In_flight; readings = [] }
+
+  let update_component state component update =
+    {state with readings=List.map (fun reading ->
+      if reading.source <> component_source component then reading else
+      match reading.status with
+      | Settled _ -> reading
+      | Pending -> {reading with component_reads=update reading.component_reads}) state.readings}
 
   let observe state event =
     match state.phase, event with
-    | Finished _, (Started _ | Completed _) -> state
+    | Finished _, (Started _ | Completed _ | Component_started _ | Component_completed _) -> state
     | In_flight, Started (source, started_ns) ->
         if List.exists (fun reading -> reading.source = source) state.readings
         then state
         else { state with readings =
-          state.readings @ [{ source; started_ns; status = Pending }] }
+          state.readings @ [{ source; started_ns; status = Pending; component_reads=[] }] }
     | In_flight, Completed (source, finished_ns, outcome) ->
         { state with readings = List.map (fun reading ->
             if reading.source = source then match reading.status with
-              | Pending -> { reading with status = Settled { finished_ns; outcome } }
+              | Pending -> { reading with status = Settled { finished_ns; outcome };
+                  component_reads=mark_unfinished_components ~finished_ns reading.component_reads }
               | Settled _ -> reading
             else reading) state.readings }
+    | In_flight, Component_started (component,started_ns) ->
+        update_component state component (fun readings ->
+          if List.exists (fun part -> part.cr_component=component) readings then readings
+          else readings @ [{cr_component=component;cr_started_ns=started_ns;cr_status=Component_pending}])
+    | In_flight, Component_completed (component,finished_ns,outcome) ->
+        update_component state component (List.map (fun part ->
+          if part.cr_component<>component then part else match part.cr_status with
+          | Component_pending -> {part with cr_status=Component_settled (finished_ns,outcome)}
+          | Component_settled _ -> part))
 
   let finish ~finished_ns state =
     match state.phase with
@@ -223,7 +271,8 @@ module Http_refresh_progress = struct
     | In_flight ->
         { state with phase = Finished finished_ns;
           readings = List.map (fun reading -> match reading.status with
-            | Pending -> { reading with status = Settled { finished_ns; outcome = Interrupted } }
+            | Pending -> { reading with status = Settled { finished_ns; outcome = Interrupted };
+                component_reads=mark_unfinished_components ~finished_ns reading.component_reads }
             | Settled _ -> reading) state.readings }
 
   let counts state =
@@ -256,9 +305,26 @@ module Http_refresh_progress = struct
            | Complete | Failed_read | Interrupted_read -> None)
       | Pending | Settled {outcome=(Received | Failed | Interrupted);_} -> None) state.readings
 
+  let unreturned_component_reads state =
+    List.concat_map (fun reading -> match reading.status with
+      | Pending | Settled {outcome=(Failed | Interrupted);_} -> reading.component_reads
+      | Settled {outcome=(Received | Composed _);_} -> []) state.readings
+
   let to_json state =
     let elapsed_ms start finish =
       Int64.to_float (Int64.max 0L (Int64.sub finish start)) /. 1_000_000. in
+    let component_to_json reading =
+      let status,elapsed = match reading.cr_status with
+        | Component_pending -> "pending",`Null
+        | Component_settled (finished_ns,outcome) -> component_outcome_name outcome,
+            `Float (elapsed_ms reading.cr_started_ns finished_ns) in
+      let failure = match reading.cr_status with
+        | Component_settled (_,Component_exception) -> ["failure_kind",`String "exception"]
+        | Component_pending
+        | Component_settled (_, (Component_returned _ | Component_interrupted | Component_unfinished)) -> [] in
+      `Assoc (["component",`String (component_name reading.cr_component);
+        "status",`String status;"started_ns",`String (Int64.to_string reading.cr_started_ns);
+        "elapsed_ms",elapsed] @ failure) in
     let reading_to_json reading =
       let status, elapsed, component_fields = match reading.status with
         | Pending -> "pending", `Null, []
@@ -271,6 +337,9 @@ module Http_refresh_progress = struct
                     (components parts))] in
             completion_name (completion outcome),
             `Float (elapsed_ms reading.started_ns finished_ns), component_fields in
+      let component_fields = match reading.component_reads with
+        | [] -> component_fields
+        | reads -> ["components",`List (List.map component_to_json reads)] in
       `Assoc (["source", `String (source_name reading.source);
         "status", `String status; "elapsed_ms", elapsed] @ component_fields) in
     let totals = counts state in
@@ -7687,6 +7756,7 @@ type state = {
   mutable connection_status: connection_status;
   mutable http_refresh_started_ns: int64 option;
   mutable http_refresh_progress: (workspace_authority * Http_refresh_progress.t) option;
+  mutable http_refresh_progress_events: http_progress_observation list Atomic.t;
   mutable http_refresh_order: Http_refresh_order.ticket;
   mutable http_surface_reads: Surface_read_order.t;
   (* Work/agent rows and required Keeper metadata have separate observations. *)
@@ -8633,6 +8703,7 @@ let begin_http_refresh_state (state : state) ~ticket ~started_ns =
   state.http_refresh_order <- ticket;
   state.overview_preview <- None;
   state.http_refresh_started_ns <- Some started_ns;
+  state.http_refresh_progress_events <- Atomic.make [];
   state.http_refresh_progress <- Some
     (state.workspace_authority, Http_refresh_progress.start ~started_ns)
 
@@ -8655,6 +8726,20 @@ let accept_http_progress (state : state) observation =
           (authority, Http_refresh_progress.observe progress observation.hp_event)
     | Some _ | None -> ()
 
+(* A producer records before returning or propagating cancellation. No bounded
+   mailbox wait can erase a completed read. Each refresh owns its inbox; retired
+   workers cannot write into a successor's inbox or borrow its authority. *)
+let rec publish_http_progress inbox observation =
+  let before = Atomic.get inbox in
+  if not (Atomic.compare_and_set inbox before (observation :: before))
+  then publish_http_progress inbox observation
+
+let drain_http_progress (state : state) =
+  let before = state.http_refresh_progress in
+  List.iter (accept_http_progress state)
+    (List.rev (Atomic.exchange state.http_refresh_progress_events []));
+  before != state.http_refresh_progress
+
 let accept_overview_preview (state : state) preview =
   if Option.is_some state.http_refresh_started_ns
      && Http_refresh_order.is_current state.http_refresh_order preview.op_ticket
@@ -8673,6 +8758,7 @@ let overview_refresh_reading (state : state) =
   | Some _ | None -> state.overview_error, state.overview
 
 let finish_http_refresh_state ?finished_ns (state : state) =
+  ignore (drain_http_progress state);
   let finished_ns = match finished_ns with
     | Some at -> at | None -> Mtime_clock.elapsed_ns () in
   state.http_refresh_progress <- Option.map
@@ -13176,6 +13262,7 @@ let create_state
   connection_status = Disconnected;
   http_refresh_started_ns = None;
   http_refresh_progress = None;
+  http_refresh_progress_events = Atomic.make [];
   http_refresh_order = Http_refresh_order.initial;
   http_surface_reads = Surface_read_order.initial;
   local_workspace = Local_workspace_unread;

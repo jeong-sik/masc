@@ -82,10 +82,24 @@ terminal application of a current full refresh. The JSON contains:
 - `elapsed_ms`: dispatch to application of the terminal refresh message.
 - `sources`: each reader's name, outcome and execution `elapsed_ms`.
 - `counts`: pending, received, partial, failed and interrupted **logical readers**.
-- For a returned composed result, `components`: each typed component's name and
-  received/failed status. These receipts are co-observed when the reader returns;
-  they have no individual execution clocks. A reader interrupted before returning
-  its components retains no invented component successes or failures.
+- `components`: typed component names and outcomes. Runtime and Keeper parts are
+  co-observed on parent return and have no individual execution clocks. Board's
+  independent posts/hearth readers report their own starts and terminal outcomes,
+  including while the parent is pending or interrupted. These entries include
+  `started_ns` and `elapsed_ms`; pending duration is null. An observed exception
+  has status `failed` and `failure_kind: exception`. A caught cancellation is
+  `interrupted`; a started child with no terminal observation when its parent or
+  refresh ends is `unfinished`. Its interval ends at that observation boundary,
+  not a proven worker exit. Children never observed to start are not invented.
+
+Progress producers append to a refresh-owned atomic inbox without waiting for the
+bounded dataset mailbox. The UI drains it during its ordinary pass, before terminal
+refresh application and before rebinding a cold initial identity. Each new refresh
+has a separate inbox; retired workers keep their old inbox. Ticket and workspace
+authority still guard every applied event. Completed child results and clocks
+survive parent failure/interruption; duplicates and post-terminal child events
+cannot replace them. Logical parent completion and counts retain their own meaning:
+an interrupted Board with received posts remains an interrupted logical reader.
 
 The progress badge keeps the failed and received component names for a partial
 reader alongside pending readers. This is observation only: source admission,
@@ -93,6 +107,10 @@ workspace authority and re-read ordering keep their own decisions. A partial
 receipt neither publishes a dataset nor completes a Task. For one mixed Runtime
 read, the source change is one failed-reader verdict with no component receipts
 to one partial-reader verdict with two component receipts; network work is unchanged.
+For Board before parent return, the badge can identify the completed component
+and its pending sibling. These child observations add no data publication rights,
+HTTP calls or screen rows. Successful returned Board reads do not keep redundant
+child notices in the header.
 
 Reader durations end in the worker; total refresh duration ends in the UI loop,
 so it also includes mailbox delay. Neither measures the first painted frame or

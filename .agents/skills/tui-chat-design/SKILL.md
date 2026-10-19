@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회의 부분 수신 관측, Keeper·Work·로그·질문 원본의 비동기 조회, Runtime·Overview 목록/사용량의 공유 해석, Keeper 설정·Sandbox 단축키·Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
+description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회의 부분 수신·하위 완료 관측, Keeper·Work·로그·질문 원본의 비동기 조회, Runtime·Overview 목록/사용량의 공유 해석, Keeper 설정·Sandbox 단축키·Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -105,8 +105,15 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회�
   수신·전체 실패로 누르지 않는다. 바깥 roster 오류처럼 구성 결과가 없는 경우는 만들어내지 않는다.
 - partial은 received와 별도로 집계한다. 수치는 논리 reader 단위이며 HTTP 호출·Task 완료
   횟수가 아니다. roster 응답의 수신도 fleet 전수 관측이나 해당 데이터의 완전성을 뜻하지 않는다.
-- 구성 결과는 부모 reader가 반환할 때 함께 관측한다. 별도 구성 완료 시각·성공을 추정하지
-  않는다. 반환 전 중단·미완료는 interrupted로 남기며 이미 받은 다른 reader의 partial을 지우지 않는다.
+- Runtime·Keeper의 구성 결과는 부모 reader가 반환할 때 함께 관측하며 별도 시각을 추정하지
+  않는다. Board 글/hearth는 실제 reader의 시작·반환·예외·취소에서 각각 기록한다. 부모가
+  반환하기 전에도 받은 구성을 남기고, 부모 중단이 이미 끝난 구성의 결과·시각을 덮지 않는다.
+  실제 취소를 받은 interrupted와 종료 시점까지 결과가 없는 unfinished를 구분한다.
+- 진행 이벤트는 각 refresh의 atomic 수신함에 먼저 기록한다. 공용 bounded mailbox를 기다리지
+  않으며 UI drain·종단 적용·초기 identity 재결속 전에 회수한다. 후속 refresh는 새 수신함을
+  소유하고 늦은 worker는 이전 수신함만 쓴다. ticket·authority 검증은 UI 반영 시 유지한다.
+  child 시간은 관측 구간이며 unfinished의 끝은 UI 종료 경계다. 실제 worker 종료·순수 HTTP
+  시간·paint·입력 가능·작업 완료 증거로 확대하지 않는다.
 - header는 실패한 구성과 받은 구성을 함께 보인다. JSON/log에는 구성별 결과를 남기되 현재
   workspace/read owner·dataset 반영·후속 조회 판단을 바꾸지 않는다. 화면 문구나 배치 검사 대신
   receipt·구성·소유권·종단 상태의 연결을 확인한다.

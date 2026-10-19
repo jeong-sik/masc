@@ -1482,16 +1482,31 @@ let refresh_progress_badge (state : state) =
               ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) in
       let notices = outcome_notice Http_refresh_progress.Failed_read "read failed"
         ^ outcome_notice Http_refresh_progress.Interrupted_read "interrupted" ^ partials in
+      let component_reads = Http_refresh_progress.unreturned_component_reads progress in
+      let component_notices = component_reads |> List.filter_map (fun part ->
+        match part.Http_refresh_progress.cr_status with
+        | Http_refresh_progress.Component_pending -> None
+        | Http_refresh_progress.Component_settled (_,outcome) ->
+            Some (Http_refresh_progress.component_name part.cr_component ^ " "
+              ^ Http_refresh_progress.component_outcome_name outcome)) |> String.concat "; " in
+      let notices = notices ^ (if component_notices="" then "" else " · " ^ component_notices) in
       (match progress.Http_refresh_progress.phase with
        | Http_refresh_progress.Finished _ -> notices ^ foreground
        | Http_refresh_progress.In_flight ->
            if foreground <> "" then notices ^ foreground else
-           let pending = match Http_refresh_progress.pending_sources progress with
-             | [] -> (match progress.Http_refresh_progress.readings with
-                 | [] -> "refreshing"
-                 | _ :: _ -> "finishing refresh")
-             | source :: rest -> "reading " ^ Http_refresh_progress.source_name source
-                 ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) in
+           let pending_components = List.filter (fun part ->
+             match part.Http_refresh_progress.cr_status with
+             | Http_refresh_progress.Component_pending -> true
+             | Http_refresh_progress.Component_settled _ -> false) component_reads in
+           let pending = match pending_components with
+             | part :: rest -> "reading " ^ Http_refresh_progress.component_name part.cr_component
+                 ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest))
+             | [] -> (match Http_refresh_progress.pending_sources progress with
+                 | [] -> (match progress.Http_refresh_progress.readings with
+                     | [] -> "refreshing"
+                     | _ :: _ -> "finishing refresh")
+                 | source :: rest -> "reading " ^ Http_refresh_progress.source_name source
+                     ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest))) in
            notices ^ " · " ^ pending)
   | Some _ | None -> foreground
 

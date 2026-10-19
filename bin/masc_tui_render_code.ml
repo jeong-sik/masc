@@ -432,7 +432,7 @@ let render_code (state : state) =
           let with_note =
             let note = match code_pending_navigation state with
               | Some (owner, path) ->
-                  let path = Terminal_text.sanitize_terminal_text path in
+                  let path = Terminal_text.single_line path in
                   Some (match owner.cno_action with
                     | Return_to_history -> "Returning to " ^ path
                     | Follow_location -> Printf.sprintf "Opening %s:%d" path

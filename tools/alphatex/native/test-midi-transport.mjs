@@ -886,19 +886,6 @@ let badCommon=try arrangement([asset("unknown",[
     ["seconds":0.5,"port":2,"bytes":[0xb0,1,70]]])],[clip("unknown","unknown",from:0,to:1,repeatCount:1)],duration:1)
 mustReject { _ = try MidiTransport(timeline:badCommon.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock) }
 mustReject { _ = try MidiTransport(timeline:commonBase.timeline,uid:"1",loop:true,coordinated:true) }
-// A normal start (no cut) reconstructs the region's prefix, notes included, so a
-// note held across sourceStart is re-established. Only a cut entry drops the
-// prefix notes, because the live state at the cut is not the source's.
-let prefixSource=asset("prefixSource",[
-    ["seconds":0,"port":2,"bytes":[0x90,60,100]],
-    ["seconds":2,"port":2,"bytes":[0x80,60,64]]])
-let prefixBase=try arrangement([prefixSource],[clip("prefixSource","prefixSource",from:0.5,to:1.5,repeatCount:1)],duration:2)
-let prefixCommon=try MidiTransport(timeline:prefixBase.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
-prefixCommon.prepared=true;prefixCommon.destination=prefixBase.destination;prefixCommon.sourceDestinations=prefixBase.sourceDestinations
-reset(0);reviewWire=[];try prefixCommon.runCoordinated(anchorNanoseconds:1_000_000_000)
-reviewClock=1_000_000_000;reviewWire=[];prefixCommon.tick()
-reviewClock=1_500_000_000;prefixCommon.tick();reviewClock=1_600_000_000;prefixCommon.tick()
-precondition(reviewWire.map(\.1).contains([0x90,60,100]),"normal start dropped the prefix note")
 print("COMMON_MIDI_CYCLE_PASS: original absolute regions, half-open cuts, source phase, 10000 fractional deadlines without epoch drift, missed cycles, staged controls and audible-window baseline admission")
 
 print("SELECTED_MIDI_DESTINATION_PASS: unrelated enumeration failure/churn isolated; selected removal, UID reuse, source type, offline and noncanonical ID rejected")

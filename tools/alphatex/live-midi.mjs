@@ -90,13 +90,13 @@ export async function openLiveMidi({ routes, reserved, signal, onEvent = () => {
     // `set`: atomically hand the owner a catalog (the plan's routes, keyed) and
     // the active key subset. Resolves with the `ack` event; the caller decides
     // whether `admitted` matches its target and re-queues the remainder.
-    function set(routes, active) {
+    function set(routes, active, reserved) {
       if (failure) return Promise.reject(failure)
       if (closed || stopping) return Promise.reject(new Error('Live MIDI owner is closing'))
       try {
         return new Promise((resolve, reject) => {
           setWaiters.push({ resolve, reject, routes })
-          child.stdin.write(`${JSON.stringify({ kind: 'set', routes, active })}\n`)
+          child.stdin.write(`${JSON.stringify({ kind: 'set', routes, active, reserved })}\n`)
         })
       } catch (error) { return Promise.reject(error) }
     }

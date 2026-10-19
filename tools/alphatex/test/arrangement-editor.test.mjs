@@ -105,8 +105,16 @@ async function controller(options={}){
       observed.liveAttempts.push(options);admitLive?.(options)
       let finish,reject;const completion=new Promise((yes,no)=>{finish=yes;reject=no})
       const info={kind:"monitoring",bindings:options.routes.map(route=>({source:route.source,device:{id:route.destination,name:"Instrument"},scope:route.scope}))}
-      const entry={options,finish,reject,stops:0};observed.live.push(entry);options.onEvent(info)
-      return {ready:Promise.resolve(info),completion,stop(){entry.stops++}}
+      const entry={options,finish,reject,stops:0,set:async(routes,active,reserved)=>{
+        observed.liveAttempts.push({routes,reserved,active,set:true})
+        const desired=routes.filter(route=>active.includes(route.key)),rejected=[],admitted=[]
+        for(const route of desired){
+          try{admitLive?.({routes:[route],reserved});admitted.push(route.key)}
+          catch{rejected.push(route.key)}
+        }
+        return {kind:'ack',admitted,rejected}
+      }};observed.live.push(entry);options.onEvent(info)
+      return {ready:Promise.resolve(info),completion,stop(){entry.stops++},set:entry.set}
     },
     mkdir:options.mkdir??(async()=>{}), devices:async()=>({audio:[],midi:[]}),
     monitorInput(options){
@@ -627,14 +635,17 @@ test('monitor output replacement waits for old close, cancellation opens no late
 })
 
 
-test('live route replacement and exit wait for child closure while preserving independent route selections',async()=>{
+test('live route replacement reconfigures one owner while preserving independent route selections',async()=>{
  const view=await controller()
  view.command('midi-monitor 10 42 4 6');await flush()
- const first=view.observed.live[0];assert.deepEqual(first.options.routes,[{source:'10',destination:'42',scope:{kind:'channels',channels:[{group:3,channel:5}]}}])
- view.command('midi-monitor 11 43');await flush();assert.ok(first.stops>0);assert.equal(view.observed.live.length,1)
- first.finish({});await flush();const second=view.observed.live[1];assert.equal(second.options.routes.length,2)
- let ended=false;view.done.then(()=>{ended=true});view.key('q');await flush();assert.ok(second.stops>0);assert.equal(ended,false)
- second.finish({});await view.done;assert.equal(view.process.stdin.isRaw,false)
+ const first=view.observed.live[0];assert.deepEqual(first.options.routes,[{key:'10:42',source:'10',destination:'42',scope:{kind:'channels',channels:[{group:3,channel:5}]}}])
+ view.command('midi-monitor 11 43');await flush()
+ // (A): the running owner is reconfigured in place; it is never settled and reopened.
+ assert.equal(first.stops,0);assert.equal(view.observed.live.length,1)
+ const change=view.observed.liveAttempts.at(-1)
+ assert.deepEqual(change.routes.map(route=>route.key),['10:42','11:43']);assert.deepEqual(change.active,['10:42','11:43'])
+ let ended=false;view.done.then(()=>{ended=true});view.key('q');await flush();assert.ok(first.stops>0);assert.equal(ended,false)
+ first.finish({});await view.done;assert.equal(view.process.stdin.isRaw,false)
 })
 test('new backing waits for live close and claims admission; live monitor changes do not finalize recording',async()=>{
  const claims=[{destination:'42',scope:{kind:'channels',channels:[{group:0,channel:0}]}}]
@@ -665,36 +676,32 @@ test('backing plan survives process closure while its native ownership inspectio
  view.key('q');await flush();view.observed.live[0].finish({});await view.done
 })
 
-for(const order of ['route-first','backing-first'])for(const conflict of [false,true])test(`concurrent ${order} admission ${conflict?'refuses overlapping':'preserves disjoint'} physical MIDI scopes`,async()=>{
+for(const conflict of [false,true])test(`live owner ${conflict?'refuses an overlapping route while keeping the rest':'admits a disjoint route in place'}`,async()=>{
  const claims=[{destination:'42',scope:{kind:'channels',channels:[{group:0,channel:0}]}}]
  const view=await controller({backingClaims:claims,admitLive({routes,reserved}){
   // The native admission seam refuses exactly the physical overlap supplied to it.
   if(reserved.length&&routes.some(route=>route.scope.channels.some(address=>address.channel===0)))throw new Error('Physical channel already reserved')
  }})
- view.command('import-midi /music/take.mid');await flush();const job=view.observed.requests.find(job=>job.kind==='import-midi')
- const asset={id:'asset-1',name:'Keys',kind:'midi',source:importMidiSource(midi())}
- view.worker.emit('message',{id:job.id,ok:true,result:{project:editArrangement(job.project,{kind:'asset-add',asset}),asset:asset.id}});await flush()
- view.command('place asset-1 0');view.command('midi-port asset-1 7 42');view.command('midi-monitor 10 42 1 2');await flush()
- const first=view.observed.live[0];view.key('space');await flush()
- const prepare=view.observed.requests.find(job=>job.kind==='prepare-midi')
- const deliver=()=>view.worker.emit('message',{id:prepare.id,ok:true,result:{path:'/owned/concurrent/plan.json',format:'midi-arrangement',midiOutput:'42',bindings:[{port:0,destination:'42'}]}})
- const replace=()=>view.command(`midi-monitor 10 42 1 ${conflict?1:3}`)
- if(order==='route-first'){replace();await flush();deliver()}else{deliver();await flush();replace()}
- await flush();assert.ok(first.stops>0);assert.equal(view.observed.players.length,0)
- first.finish({});await flush()
- // A queued successor must drain the first admitted replacement before combining scopes.
- const second=view.observed.live[1];assert.ok(second)
- assert.ok(second.stops>0);second.finish({});await flush()
- const combined=view.observed.liveAttempts.at(-1);assert.deepEqual(combined.reserved,claims)
- assert.equal(combined.routes[0].scope.channels[0].channel,conflict?0:2)
- assert.equal(view.observed.claims.at(-1).path,'/owned/concurrent/plan.json')
- // Backing-first may sound with the preceding, disjoint route; the new conflicting
- // live route must still be refused. Route-first must refuse the backing itself.
- assert.equal(view.observed.players.length,conflict&&order==='route-first'?0:1)
- assert.equal(view.observed.live.length,conflict?2:3)
+ await primeWave(view);view.key('space');await flush()
+ const prepare=view.observed.requests.find(job=>job.kind==='prepare-wave')
+ view.worker.emit('message',{id:prepare.id,ok:true,result:{path:'/owned/live/plan.json',format:'wave-arrangement'}});await flush()
+ // The backing owns group 0 / channel 0 on destination 42; the live owner opens
+ // with that reservation re-derived from the current backing plan.
+ view.command('midi-monitor 10 42 1 2');await flush()
+ const owner=view.observed.live[0];assert.ok(owner)
+ // (A): a route change reconfigures the running owner in place — it is never
+ // settled and reopened, so the routes already open are not blinked.
+ view.command(`midi-monitor 10 42 1 ${conflict?1:3}`);await flush()
+ assert.equal(owner.stops,0);assert.equal(view.observed.live.length,1)
+ const change=view.observed.liveAttempts.at(-1)
+ assert.deepEqual(change.reserved,claims)
+ assert.equal(change.routes[0].scope.channels[0].channel,conflict?0:2)
+ // The overlapping route is rejected (and the target re-queued without it); the
+ // disjoint route is admitted alongside the backing.
+ assert.deepEqual(change.active,conflict?[]:['10:42'])
  view.key('q');await flush()
  for(const entry of view.observed.live)entry.finish({})
- for(const player of view.observed.players)player.finish()
+ view.observed.players[0]?.finish()
  await view.done;assert.equal(view.process.stdin.isRaw,false)
 })
 

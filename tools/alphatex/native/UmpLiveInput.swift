@@ -125,6 +125,9 @@ final class UmpLiveInput {
     enum State { case idle, running, stopping, closed }
     struct Packet { let source: String; let host: UInt64; let ordinal: UInt64; let words: [UInt32] }
     var plan: UmpLivePlan
+    // The physical ownership declaration is re-derived by the monitor on every
+    // `set`, so a stale snapshot never gates a live route change.
+    var reserved: [UmpLiveClaim]
     // `activeRoutes` and `outputs` stay index-aligned: routing and snapshots
     // address an output by the position of its active route. `live-set` swaps
     // both arrays together and never closes a route that stays active.
@@ -148,7 +151,7 @@ final class UmpLiveInput {
     var now: () -> UInt64 = { mach_absolute_time() }
     let timebase: mach_timebase_info_data_t
     init(plan: UmpLivePlan) throws {
-        try plan.validate(); self.plan = plan
+        try plan.validate(); self.plan = plan; reserved = plan.reserved
         activeRoutes = plan.routes
         outputs = plan.routes.map { UmpOutput(bindings: [UmpBinding(source: $0.source, destination: $0.destination)]) }
         var clock = mach_timebase_info_data_t(); mach_timebase_info(&clock); timebase = clock
@@ -200,8 +203,9 @@ final class UmpLiveInput {
     // routes are opened and only removed routes are closed. A route that cannot
     // open is reported in `rejected` instead of stopping the owner, and the ACK
     // admits exactly the live set so the caller can judge a target match.
-    func set(routes: [UmpLiveRoute], active: [String]) throws {
+    func set(routes: [UmpLiveRoute], active: [String], reserved: [UmpLiveClaim]?) throws {
         guard Thread.isMainThread, state == .running else { throw MidiFailure("live MIDI set requires its running lifecycle") }
+        if let reserved { self.reserved = reserved }
         var catalog: [String: UmpLiveRoute] = [:]
         for route in routes {
             guard !route.key.isEmpty, catalog.updateValue(route, forKey: route.key) == nil else {
@@ -221,7 +225,7 @@ final class UmpLiveInput {
         }
         // The active subset, in catalog order, is itself a legal plan.
         let desired = routes.filter { activeKeys.contains($0.key) }
-        if !desired.isEmpty { try UmpLivePlan.validate(routes: desired, reserved: plan.reserved) }
+        if !desired.isEmpty { try UmpLivePlan.validate(routes: desired, reserved: self.reserved) }
         let kept = Dictionary(zip(activeRoutes, outputs).filter { activeKeys.contains($0.0.key) }.map { ($0.0.key, $0) },
                               uniquingKeysWith: { first, _ in first })
         var nextRoutes: [UmpLiveRoute] = [], nextOutputs: [UmpOutput] = [], rejected: [String] = []

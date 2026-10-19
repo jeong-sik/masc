@@ -2145,7 +2145,7 @@
  (name masc_tui_workspace_read)
  (wrapped false)
  (modules masc_tui_workspace_read)
- (libraries masc masc.masc_core masc.http_client masc_tui_types
+ (libraries masc masc.masc_core masc.http_client masc.fs_compat masc_tui_types
   masc_tui_kept_reads eio uri yojson))
 
 (executable

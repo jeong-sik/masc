@@ -174,6 +174,10 @@ Eio 는 협력형 스케줄러다. 취소와 시간 초과는 fiber 가 멈추�
   확인한 뒤 보관한 계약을 쓰며, 동적 입력의 실제 해석·검증과 consumer의 owner·경로 검사는
   유지한다. 충돌·실패·해제 순서를 map 순서로 바꾸거나 이 lookup 감소를 실행 시간으로
   환산하지 않는다. index는 해당 plan의 수명에만 속하며 재개·재구성한 plan에 넘기지 않는다.
+  Ready 실행의 선행 binding 순회는 같은 실행의 원래 위상 목록을 직접 방문한다.
+  typed ID로 보관한 suffix의 물리 비교는 그 불변 목록 안의 정지 위치만 뜻한다.
+  선언 순서의 index로 대체하거나 다른 목록·실행에 넘기지 않고, 실제 선행 binding 대기와
+  resource 분류는 모두 유지한다. prefix 할당 감소와 새 index의 선행 비용을 함께 기록한다.
 
 - Keeper 실행 setup·effective surface·Composition 재개는 `(selection, preparation)`을 함께 사용한다.
   기존 선택은 `Keeper_task_skill_turn.bind_surface`로 검증하고, 새 exact 참조는

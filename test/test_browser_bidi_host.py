@@ -226,6 +226,18 @@ dragSource.onpointerup=e=>{const box=dropTarget.getBoundingClientRect();
             assert moved["ok"] is True, moved
             after = call("page.read", {"tabId": first})
             assert "drag:true:true:" in after["data"]["text"], after
+            opened = call("page.act", {"action": "open_tab", "url": fixture_url})
+            assert opened["ok"] and opened["data"]["created"], opened
+            new_tab = opened["data"]["tabId"]
+            assert new_tab not in (first, second), opened
+            new_read = call("page.read", {"tabId": new_tab})
+            assert new_read["ok"] and new_read["data"]["url"] == fixture_url, new_read
+            new_frame = capture(new_tab)["data"]["viewport"]
+            revealed_new = call("page.interact", {"tabId": new_tab, "action": "hover_at", "expectedUrl": fixture_url,
+                "viewport": new_frame, "point": {"x": 880 / new_frame["width"], "y": 150 / new_frame["height"]}})
+            assert revealed_new["ok"], revealed_new
+            new_elements = call("page.elements", {"tabId": new_tab})
+            assert new_elements["ok"] and named(new_elements["data"]["elements"], "Add reaction"), new_elements
             other = call("page.read", {"tabId": second})
             assert other["ok"] and other["data"] == before["data"]
             bounded = call("page.read", {"tabId": first, "maxChars": 5})

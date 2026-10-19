@@ -29,15 +29,15 @@ type refusal = Rejected of error_code | Unanswered of string | Unsent of string
 let refusal_message = function
   | Rejected code -> "BiDi command rejected: " ^ error_code_to_wire code
   | Unanswered why | Unsent why -> why
-type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact
+type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact | Page_act
 let verb_to_wire = function
   | Browser_info -> "browser.info" | Tabs_list -> "tabs.list" | Page_read -> "page.read"
   | Page_scene -> "page.scene" | Page_elements -> "page.elements" | Page_capture -> "page.capture"
-  | Page_interact -> "page.interact"
+  | Page_interact -> "page.interact" | Page_act -> "page.act"
 let verb_of_wire = function
   | "browser.info" -> Some Browser_info | "tabs.list" -> Some Tabs_list | "page.read" -> Some Page_read
   | "page.scene" -> Some Page_scene | "page.elements" -> Some Page_elements
-  | "page.capture" -> Some Page_capture | "page.interact" -> Some Page_interact
+  | "page.capture" -> Some Page_capture | "page.interact" -> Some Page_interact | "page.act" -> Some Page_act
   | _ -> None
 type session_end_failure = Connection_gone of string | Not_confirmed of string
 let session_end_failure_message = function Connection_gone why | Not_confirmed why -> why
@@ -147,6 +147,39 @@ let parsed_document t context body args =
   if Option.is_some (field "documentLoading" answer)
   then Error "the document is still loading; read it again"
   else Ok answer
+let remember_context t context =
+  match List.assoc_opt context t.contexts with
+  | Some id -> id
+  | None -> t.next_tab <- t.next_tab + 1;
+    t.contexts <- (context,t.next_tab)::t.contexts; t.next_tab
+
+let open_tab t url =
+  let invalid () = Error (Before_effect "open_tab requires an absolute HTTP(S) URL") in
+  let* () = match Uri.of_string url with
+    | uri -> (match Uri.scheme uri,Uri.host uri with
+        | Some ("http"|"https"),Some host when host <> "" -> Ok ()
+        | _ -> invalid ())
+    | exception Failure _ -> invalid () in
+  (* Only a fresh context is navigated. A protected existing start page does
+     not need a script realm and is never replaced to make this work. *)
+  let* created = match t.ask "browsingContext.create" (obj ["type",str "tab";"background",`Bool true]) with
+    | Ok created -> Ok created
+    | Error (Rejected _ | Unsent _ as refusal) ->
+      Error (Before_effect ("browsingContext.create: " ^ refusal_message refusal))
+    | Error (Unanswered _ as refusal) ->
+      Error (Outcome_unknown ("browsingContext.create: " ^ refusal_message refusal ^ "; inspect this connection before opening another tab")) in
+  let* context = string "context" created |> Result.map_error (fun reason ->
+    Outcome_unknown (reason ^ "; tab creation was dispatched; inspect the connection before opening another tab")) in
+  let id = remember_context t context in
+  let after_creation result = Result.map_error (fun reason -> Outcome_unknown
+    (Printf.sprintf "New tab was created as tabId %d on this connection. %s. Do not open another tab to retry; re-list connections and inspect the created tab." id reason)) result in
+  let* _ = after_creation (command t "browsingContext.navigate"
+    (obj ["context",str context;"url",str url;"wait",str "complete"])) in
+  let* summary = after_creation (tab_metadata t context) in
+  match summary with
+  | `Assoc fields -> Ok (obj (("tabId",`Int id)::("action",str "open_tab")::("created",`Bool true)::fields))
+  | _ -> after_creation (Error "invalid new-tab summary")
+
 let tree t =
   let* result = command t "browsingContext.getTree" (obj []) in
   match field "contexts" result with
@@ -154,9 +187,7 @@ let tree t =
     let rec collect acc = function
       | [] -> Ok (List.rev acc)
       | row::rest -> let* context = string "context" row in
-        let id = match List.assoc_opt context t.contexts with Some id -> id | None ->
-          t.next_tab <- t.next_tab + 1;
-          t.contexts <- (context,t.next_tab)::t.contexts; t.next_tab in
+        let id = remember_context t context in
         collect ((context,id)::acc) rest in
     collect [] rows
   | _ -> Error "invalid BiDi context tree"
@@ -237,9 +268,14 @@ let dispatch ?actor ?request_id t ~verb args =
         let result = use context id in
         phase := (match result with Ok _ -> Browser_pointer_feedback.Finished | Error (Before_effect _) -> Browser_pointer_feedback.Refused | Error (Outcome_unknown _) -> Browser_pointer_feedback.Unknown);
         result)
-    | (Browser_info|Tabs_list|Page_read|Page_elements|Page_capture|Page_scene), (None|Some _)
+    | (Browser_info|Tabs_list|Page_read|Page_elements|Page_capture|Page_scene|Page_act), (None|Some _)
     | Page_interact,None -> use context id in
   match verb with
+  | Page_act ->
+    let* action = pre (Browser_lane.Action.parse args) in
+    (match action with
+     | Browser_lane.Action.Open_tab url -> open_tab t url
+     | Browser_lane.Action.On_tab _ -> Error (Before_effect "live BiDi page.act supports open_tab only"))
   | Browser_info ->
     (match t.version with Some version->Ok (obj ["name",str "Firefox";"version",str version])
      | None->Error (Before_effect "BiDi session metadata is unavailable"))

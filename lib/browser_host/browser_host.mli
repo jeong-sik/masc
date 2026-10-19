@@ -11,7 +11,7 @@
 
 (** The verbs the server may forward; the BiDi peer's own. *)
 type verb = Masc.Browser_bidi_peer.verb =
-  | Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact
+  | Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact | Page_act
 
 type command = { id : string; verb : verb; args : Yojson.Safe.t; actor : string option }
 

@@ -47,7 +47,7 @@ let parse = function
     let exact allowed =
       let keys = List.map fst fields in
       if List.length keys <> List.length (List.sort_uniq String.compare keys) then Error "duplicate browser argument"
-      else if List.for_all (fun key -> List.mem key ("action" :: "lane" :: allowed)) keys then Ok ()
+      else if List.for_all (fun key -> List.mem key ("action" :: "lane" :: "clientId" :: allowed)) keys then Ok ()
       else Error "argument is not valid for this browser action" in
     let on_tab allowed interaction =
       let* () = exact ("tabId" :: "framePath" :: allowed) in

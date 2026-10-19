@@ -732,12 +732,13 @@ let test_peer_serves_what_the_lane_table_says () =
       | Point_scroll -> interact (Scroll_at {point;viewport;x=0;y=120})
       | Trusted_hover -> interact (Hover_at {point;viewport})
       | Trusted_drag -> interact (Drag {from=point;to_={x=0.75;y=0.5};viewport})
-      | Tab_activation -> interact Activate_tab) in
+      | Tab_activation -> interact Activate_tab
+  | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new")) in
     (* The six names the native host forwards (Browser_host.decode_poll). *)
     let peer_verb = function
       | "tabs.list" -> Peer.Tabs_list | "page.read" -> Peer.Page_read | "page.scene" -> Peer.Page_scene
       | "page.elements" -> Peer.Page_elements | "page.capture" -> Peer.Page_capture
-      | "page.interact" -> Peer.Page_interact
+      | "page.interact" -> Peer.Page_interact | "page.act" -> Peer.Page_act
       | other -> failf "the lane put a verb on the wire that the host does not forward: %s" other in
     let calls = ref [] in
     let command method_ _ =
@@ -746,6 +747,8 @@ let test_peer_serves_what_the_lane_table_says () =
       | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
       | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://example.test/";
           "title",`String "fixture";"active",`Bool true;"viewport",obj []]))
+      | "browsingContext.create" -> Ok (obj ["context",`String "created"])
+      | "browsingContext.navigate" -> Ok `Null
       | "browsingContext.captureScreenshot" -> Ok (obj ["data",`String "png"])
       | "input.performActions" | "input.releaseActions" -> Ok `Null
       | other -> failf "unexpected protocol command: %s" other in
@@ -791,6 +794,68 @@ let test_an_error_code_is_read_once_and_written_back () =
   List.iter (fun code ->
       check string ("written back: " ^ code) code (Peer.error_code_to_wire (Peer.error_code_of_wire code)))
     [ "session not created"; "invalid session id"; "no such frame"; "" ]
+let test_open_tab_preserves_existing_context () =
+  let created = ref false and calls = ref [] in
+  let peer = peer_of (fun method_ args ->
+    calls := method_ :: !calls;
+    match method_ with
+    | "browsingContext.getTree" -> Ok (obj ["contexts",`List (List.map
+        (fun context -> obj ["context",`String context])
+        (if !created then ["existing";"new"] else ["existing"]))])
+    | "browsingContext.create" ->
+      check bool "new tab starts in background" true Yojson.Safe.Util.(args |> member "background" |> to_bool);
+      created := true; Ok (obj ["context",`String "new"])
+    | "browsingContext.navigate" ->
+      check string "only new context is navigated" "new" Yojson.Safe.Util.(args |> member "context" |> to_string);
+      Ok `Null
+    | "script.callFunction" ->
+      let context = Yojson.Safe.Util.(args |> member "target" |> member "context" |> to_string) in
+      Ok (script_value (obj ["url",`String ("https://example.test/"^context);
+        "title",`String context;"active",`Bool true;"text",`String context;"chars",`Int (String.length context);"truncated",`Bool false]))
+    | other -> failf "unexpected new-tab command %s" other) in
+  let succeeded = function Ok data -> data | Error _ -> fail "new tab failed" in
+  ignore (succeeded (Peer.dispatch peer ~verb:Peer.Tabs_list (obj [])));
+  let opened = succeeded (Peer.dispatch peer ~verb:Peer.Page_act
+    (obj ["action",`String "open_tab";"url",`String "https://example.test/new"])) in
+  check int "new context has its own stable tab ID" 2 Yojson.Safe.Util.(opened |> member "tabId" |> to_int);
+  List.iter (fun (id,name) ->
+    let page = succeeded (Peer.dispatch peer ~verb:Peer.Page_read (obj ["tabId",`Int id])) in
+    check string "reads stay with the requested context" name Yojson.Safe.Util.(page |> member "text" |> to_string))
+    [1,"existing";2,"new"];
+  check int "one creation" 1 (List.length (List.filter (String.equal "browsingContext.create") !calls))
+
+let test_open_tab_failure_does_not_replay () =
+  let input = obj ["action",`String "open_tab";"url",`String "https://example.test/new"] in
+  let refused = Peer.Rejected (Peer.error_code_of_wire "unsupported operation") in
+  List.iter (fun failure ->
+    let calls = ref [] in
+    let peer = peer_of (fun method_ _ -> calls := method_ :: !calls; Error failure) in
+    (match Peer.dispatch peer ~verb:Peer.Page_act input,failure with
+     | Error (Peer.Before_effect _), (Peer.Rejected _ | Peer.Unsent _)
+     | Error (Peer.Outcome_unknown _), Peer.Unanswered _ -> ()
+     | _ -> fail "incorrect create failure effect boundary");
+    check (list string) "creation is never replayed" ["browsingContext.create"] !calls)
+    [refused;Peer.Unsent "closed";Peer.Unanswered "lost reply"];
+  let calls = ref [] in
+  let peer = peer_of (fun method_ _ -> calls := method_ :: !calls;
+    match method_ with
+    | "browsingContext.create" -> Ok (obj ["context",`String "created"])
+    | "browsingContext.navigate" -> Error refused
+    | other -> failf "post-failure command %s" other) in
+  (match Peer.dispatch peer ~verb:Peer.Page_act input with
+   | Error (Peer.Outcome_unknown _) -> ()
+   | _ -> fail "creation followed by failed navigation is not pre-effect");
+  check (list string) "no second create or close after failed navigation"
+    ["browsingContext.navigate";"browsingContext.create"] !calls
+
+let test_live_act_rejects_other_actions_before_effect () =
+  let peer = peer_of (fun _ _ -> fail "invalid live action reached browser") in
+  List.iter (fun args -> match Peer.dispatch peer ~verb:Peer.Page_act args with
+    | Error (Peer.Before_effect _) -> () | _ -> fail "invalid action was not refused before input")
+    [obj ["action",`String "close_tab";"tabId",`Int 1];
+     obj ["action",`String "open_tab";"url",`String "about:newtab"];
+     obj ["action",`String "open_tab";"url",`String "javascript:alert(1)"]]
+
 let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick test_context_identity;
     test_case "one unreadable tab leaves other tabs visible" `Quick test_unreadable_tab_does_not_hide_other_tabs;
     test_case "implicit read skips an unreadable tab" `Quick test_active_tab_after_unreadable_tab;
@@ -817,7 +882,10 @@ let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick te
     test_case "close frame ends a pending command" `Quick test_peer_close_frame_ends_a_pending_command;
     test_case "malformed JSON ends a pending command" `Quick test_malformed_json_ends_a_pending_command;
     test_case "invalid websocket frame reaches the error path" `Quick test_invalid_websocket_frame_ends_a_pending_command];
-  "effect",[test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "element inventory is the shared page script" `Quick test_element_inventory;
+  "effect",[test_case "open tab preserves existing context" `Quick test_open_tab_preserves_existing_context;
+    test_case "open tab failure does not replay" `Quick test_open_tab_failure_does_not_replay;
+    test_case "live act rejects other actions" `Quick test_live_act_rejects_other_actions_before_effect;
+    test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "element inventory is the shared page script" `Quick test_element_inventory;
     test_case "capture retains URL and document/viewport guards" `Quick test_capture_guards;
     test_case "document source is the shared document helper" `Quick test_document_source;
     test_case "a document still loading is not answered for" `Quick test_document_still_loading;

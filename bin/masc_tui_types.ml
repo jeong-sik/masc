@@ -5638,6 +5638,7 @@ module Browser_lane_view = struct
     | Trusted_hover -> "hover"
     | Trusted_drag -> "drag"
     | Tab_activation -> "tab switch"
+    | Tab_creation -> "new tab"
   (* What a live connection of this transport leaves out, read from the lane's
      table, and the transports that serve all of it. *)
   let transport_lacks transport =

@@ -1,6 +1,6 @@
 name = "masc_browser_act"
 description = """
-Run one automation action in a Firefox/Zen tab.
+Run one automation action in a Firefox/Zen tab, or open a new tab on an explicitly selected live BiDi connection. Only open_tab supports live; use the returned tabId to read and interact. If creation succeeds but navigation fails, inspect that tab before opening another.
 Read elements in the same tab/frame for selectors; preserve decoded CSS escapes exactly. After no match, re-read. Actions can change external state: observe again after success or failure before retrying."""
 additional_properties = false
 # 2026-09-24 측정: agent-core 레인 요청 5,047건(09-23)이 이 정의
@@ -20,7 +20,7 @@ description = "fill replaces text; select uses exact option value."
 [[params]]
 name = "lane"
 type = "string"
-enum = ["automation"]
+enum = ["automation", "live"]
 default = "automation"
 
 [[params]]
@@ -76,3 +76,8 @@ name = "paths"
 type = "array"
 items = { type = "string" }
 description = "Keeper-readable playground-relative or visible absolute files, privately staged via sandbox before replacing input selection. Max 16 MiB/file."
+
+[[params]]
+name = "clientId"
+type = "string"
+description = "Required with lane=live for open_tab: exact observed BiDi connection ID. Not valid on automation."

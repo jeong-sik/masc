@@ -649,6 +649,10 @@ function validateKeeperCustomPayload(
     KEEPER_CONTINUATION_CHECKPOINT: ['message', 'request_id'],
     KEEPER_REPLY_DETAILS: ['reply', 'turn_outcome', 'turn_ref', 'terminal_stream_scope'],
     KEEPER_TOOL_TRANSCRIPT_COMMITTED: ['deliveryKey', 'executionId', 'ordinal'],
+    KEEPER_TOOL_CALL_ADMITTED: [
+      'toolStreamScope', 'toolCallBlockIndex', 'providerMessageId',
+      'toolCallId', 'providerToolName', 'toolCallName',
+    ],
     KEEPER_TOOL_RESULT_READY: [
       'toolStreamScope',
       'toolCallBlockIndex',
@@ -730,6 +734,12 @@ function validateKeeperCustomPayload(
       if (ownership.status !== 'valid') return fail('ag_ui_event.value.deliveryKey', 'Expected exact tool delivery identity')
       const execution = requiredString(value, 'executionId')
       return execution.success ? requiredInteger(value, 'ordinal') : execution
+    }
+    case 'KEEPER_TOOL_CALL_ADMITTED': {
+      const occurrence = validateToolStreamOccurrence(value, 'ag_ui_event.value')
+      if (!occurrence.success) return occurrence
+      const providerName = requiredString(value, 'providerToolName')
+      return providerName.success ? requiredString(value, 'toolCallName') : providerName
     }
     case 'KEEPER_TOOL_RESULT_READY': {
       const occurrence = validateToolStreamOccurrence(value, 'ag_ui_event.value')

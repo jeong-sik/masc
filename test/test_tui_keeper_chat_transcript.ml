@@ -2763,9 +2763,62 @@ let test_composition_note_preserves_delivery_execution_and_live_error () =
   Transcript.note_skill_activity t (evidence "physical-other");
   check int "same runtime and provider ID cannot conflate another execution" 2 (List.length (skills ()))
 
+
+let test_admitted_skill_uses_one_original_occurrence () =
+  let t = fresh () in
+  let call = occurrence ~scope:7 ~block_index:2 "reused-id" in
+  let admission = Live.Tool_admitted
+    {occurrence=call; provider_tool_name="keeper_skill1"; tool_name="keeper_skill"} in
+  feed t [Live.Run_started; Live.Tool_started {occurrence=call;tool_name="keeper_skill1"};
+    Live.Tool_args {occurrence=call;fragment=Live.Args_snapshot
+      {|{"identity":{"source_id":"local","package_id":"ops","name":"source-review"}}|}};
+    Live.Tool_ended {occurrence=call}; admission; admission;
+    Live.Tool_started {occurrence=call;tool_name="keeper_skill1"};
+    Live.Reply_details {reply="";turn_outcome=Continuation_checkpoint;
+      turn_ref="trace-1#3";terminal_stream_scope=None}];
+  Transcript.note_skill_activity t
+    (Transcript.make_skill_activity ~invocation:Transcript.Instruction_read
+      ~skill_name:"source-review" ~skill_tool_use_id:"reused-id" ~turn_ref:"trace-1#3"
+      ~state:Transcript.Skill_delivered ~actions:[] ());
+  check int "one physical call" 1 (List.length (Transcript.tool_calls t));
+  check bool "raw replay is still valid after admission" true (Transcript.unreadable t = None);
+  let drawn = Transcript.drawn t in
+  check bool "the admitted skill leaves no duplicate generic call" false
+    (List.exists (fun (item : Transcript.drawn_item) ->
+      match item.drawn with Transcript.Drawn_tools _ -> true | _ -> false) drawn);
+  let skills = List.concat_map (fun (item : Transcript.drawn_item) ->
+    match item.drawn with Transcript.Drawn_skill skills -> skills | _ -> []) drawn in
+  match skills with
+  | [skill] ->
+    check string "durable note belongs to admitted skill" "source-review" skill.skill_name;
+    check bool "delivery retained" true (skill.state = Transcript.Skill_delivered)
+  | _ -> fail "admitted skill duplicated or lost its durable note"
+;;
+
+let test_admitted_name_cannot_cross_occurrences () =
+  let t = fresh () in
+  let first = occurrence ~scope:1 ~block_index:0 "reused" in
+  let second = occurrence ~scope:2 ~block_index:0 "reused" in
+  feed t [Live.Run_started;Live.Tool_started {occurrence=first;tool_name="keeper_skill1"};
+    Live.Tool_ended {occurrence=first};
+    Live.Tool_started {occurrence=second;tool_name="keeper_skill1"};
+    Live.Tool_admitted {occurrence=second;provider_tool_name="keeper_skill1";tool_name="keeper_skill"}];
+  check (list string) "only exact server occurrence is renamed"
+    ["keeper_skill1";"keeper_skill"]
+    (List.map (fun (call : Transcript.tool_activity) -> call.tool_name) (Transcript.tool_calls t));
+  feed t [Live.Tool_admitted {occurrence=first;provider_tool_name="another_wire_name";tool_name="keeper_skill"}];
+  check (list string) "mismatched provider name changes nothing"
+    ["keeper_skill1";"keeper_skill"]
+    (List.map (fun (call : Transcript.tool_activity) -> call.tool_name) (Transcript.tool_calls t));
+  check bool "conflict remains explicit" true (Transcript.unreadable t <> None)
+;;
+
 let () =
   run "tui_keeper_chat_transcript"
-    [ ( "provider retry ownership", [test_case "retry progress requires current runtime attempt" `Quick test_provider_retry_progress_owner] )
+    [ ("admitted tool identity", [
+        test_case "skill retains one occurrence" `Quick test_admitted_skill_uses_one_original_occurrence;
+        test_case "reused provider IDs never select another occurrence" `Quick test_admitted_name_cannot_cross_occurrences])
+    ; ( "provider retry ownership", [test_case "retry progress requires current runtime attempt" `Quick test_provider_retry_progress_owner] )
     ; ( "response boundaries", [test_case "composition note keeps separate execution and delivery" `Quick test_composition_note_preserves_delivery_execution_and_live_error;
       test_case "Skill evidence retains runtime identity" `Quick test_skill_evidence_retains_invocation_runtime_identity;
       test_case "scoped details retire prior model activity" `Quick test_scoped_details_retire_prior_model_activity;

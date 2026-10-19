@@ -11,7 +11,10 @@ let default_max_rows = 8
 let name_pad_max = 16
 
 type call =
-  { name : string
+  { mutable name : string
+  ; provider_name : string
+  ; provider_call_id : string option
+  ; provider_message_id : string option
   ; mutable args : string
   }
 
@@ -37,14 +40,27 @@ let occurrence_key (occurrence : Keeper_chat_events.tool_stream_occurrence) =
 
 let on_event t (event : Keeper_chat_events.keeper_chat_event) =
   match event with
-  | Tool_call_start { occurrence; tool_call_name; _ } ->
+  | Tool_call_start { occurrence; tool_call_name; tool_call_id } ->
     let key = occurrence_key occurrence in
     if not (Occurrence_table.mem t.by_occurrence key)
     then begin
-      let call = { name = tool_call_name; args = "" } in
+      let call = { name = tool_call_name; provider_name = tool_call_name;
+        provider_call_id = tool_call_id; provider_message_id = occurrence.provider_message_id; args = "" } in
       Occurrence_table.replace t.by_occurrence key call;
       t.rev_order <- call :: t.rev_order
     end
+  | Tool_call_admitted { occurrence; tool_call_name; provider_tool_name; tool_call_id } ->
+    (match Occurrence_table.find_opt t.by_occurrence (occurrence_key occurrence) with
+     | None -> ()
+     | Some call ->
+       let correlation_matches expected received = match expected, received with
+         | Some expected, Some received -> String.equal expected received
+         | Some _, None | None, Some _ | None, None -> true in
+       if correlation_matches call.provider_call_id tool_call_id
+          && correlation_matches call.provider_message_id occurrence.provider_message_id
+          && String.equal call.provider_name provider_tool_name
+          && (String.equal call.name call.provider_name || String.equal call.name tool_call_name)
+       then call.name <- tool_call_name)
   | Tool_call_args { occurrence; delta; _ } ->
     (match Occurrence_table.find_opt t.by_occurrence (occurrence_key occurrence) with
      | None -> ()

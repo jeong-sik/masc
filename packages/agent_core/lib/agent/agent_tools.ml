@@ -268,8 +268,13 @@ let admit_tool_use_names tool_index blocks =
             | resolved, resolved_input, Some _ ->
               let planned_index = !next_planned_index in
               incr next_planned_index;
+              let name_resolution =
+                if String.equal name resolved then Hooks.Registered_name
+                else Hooks.Recovered_name
+                  { tool_call_id = id; provider_name = name; registered_name = resolved }
+              in
               admitted_tool_sources :=
-                { Hooks.planned_index; source_tool_use_ordinal }
+                { Hooks.planned_index; source_tool_use_ordinal; name_resolution }
                 :: !admitted_tool_sources;
               retain (Types.ToolUse { id; name = resolved; input = resolved_input })
             | _, _, None ->

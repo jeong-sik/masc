@@ -60,7 +60,7 @@ val seal_turn :
   t ->
   turn:int ->
   tool_source_map:Agent_core.Hooks.admitted_tool_source_map ->
-  (unit, string) result
+  (Keeper_chat_events.keeper_chat_event list, string) result
 (** Bind the current server stream scope to one Agent Core turn and its exact
     admission mapping. [source_tool_use_ordinal] enumerates the trusted streamed
     tool blocks in raw block-index order, including calls admission later
@@ -68,7 +68,10 @@ val seal_turn :
     inventory, including the all-rejected case. Neither fact is reconstructed
     from provider ids. Planned indices must be unique and contiguous. The
     resulting mapping is the authority later used by {!record_execution_id}.
-    Official producers use {!record_official_execution_id} with their explicit
+    Name recovery is validated against the same original occurrence and provider
+    identity before the seal commits. The returned admission events update that
+    occurrence's display name; durable rows use the admitted name. Repeated seals
+    emit no duplicate events. Official producers use {!record_official_execution_id} with their explicit
     active block and committed invocation instead. *)
 
 val close_turn_without_sources : t -> turn:int -> (unit, string) result

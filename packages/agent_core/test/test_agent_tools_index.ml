@@ -367,6 +367,20 @@ let test_admission_preserves_original_tool_indices () =
     sources
 ;;
 
+let test_admission_retains_name_recovery_authority () =
+  let admission = admit ["keeper_skill"]
+    [tool_use "same-id" "Unknown"; tool_use "same-id" "keeper_skill1";
+     tool_use "same-id" "keeper_skill"] in
+  match admission.tool_source_map.admitted_tool_sources with
+  | [{planned_index=0; source_tool_use_ordinal=1;
+      name_resolution=Hooks.Recovered_name {tool_call_id; provider_name; registered_name}};
+     {planned_index=1; source_tool_use_ordinal=2; name_resolution=Hooks.Registered_name}] ->
+    check string "provider correlation preserved" "same-id" tool_call_id;
+    check string "original wire name retained" "keeper_skill1" provider_name;
+    check string "dispatcher registered name" "keeper_skill" registered_name
+  | _ -> fail "admission lost the exact source and name recovery authority"
+;;
+
 let () =
   run
     "Agent_tools_index"
@@ -393,7 +407,8 @@ let () =
             test_user_tool_case_variant_does_not_dispatch_neighbor
         ] )
     ; ( "history admission"
-      , [ test_case "exact name survives" `Quick test_admission_keeps_exact_name
+      , [ test_case "name recovery authority" `Quick test_admission_retains_name_recovery_authority
+        ; test_case "exact name survives" `Quick test_admission_keeps_exact_name
         ; test_case "native replay retained positions" `Quick test_admission_preserves_native_replay_positions
         ; test_case
             "recovered call is stored under the registered name"

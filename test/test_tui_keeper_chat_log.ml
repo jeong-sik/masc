@@ -95,6 +95,8 @@ let delta_to_string : Live.delta -> string = function
       "native_tool_progress(" ^ occurrence_to_string occurrence ^ ")"
   | Live.Native_tool_ended { occurrence; _ } ->
       Printf.sprintf "native_tool_ended(%s)" (occurrence_to_string occurrence)
+  | Live.Tool_admitted { occurrence; provider_tool_name; tool_name } ->
+      Printf.sprintf "tool_admitted(%d/%d,%s,%s)" occurrence.stream_scope occurrence.block_index provider_tool_name tool_name
   | Live.Tool_started { occurrence; tool_name } ->
       Printf.sprintf "tool_started(%s,%s)" (occurrence_to_string occurrence) tool_name
   | Live.Tool_args { occurrence; fragment = Live.Args_delta delta } ->
@@ -446,6 +448,8 @@ let golden : E.keeper_chat_event list =
   ; E.Tool_call_start { occurrence; tool_call_id = Some "tc-1"; tool_call_name = "read_file" }
   ; E.Tool_call_args { occurrence; tool_call_id = Some "tc-1"; delta = "{\"path\":" }
   ; E.Tool_call_args_snapshot { occurrence; tool_call_id = Some "tc-1"; snapshot = "{\"path\":\"a.ml\"}" }
+  ; E.Tool_call_admitted { occurrence; tool_call_id = Some "tc-1";
+      provider_tool_name = "read_file"; tool_call_name = "registered_read_file" }
   ; E.Tool_call_end { occurrence; tool_call_id = Some "tc-1" }
   ; E.Tool_result_ready
       { occurrence; tool_call_id = Some "tc-1"; execution_id = Ids.Execution_id.of_string "exec-1" }
@@ -908,7 +912,7 @@ let test_golden_journal_equals_wire () =
     (wire_tagged_deltas failed) (journal_tagged_deltas failed);
   check bool "the failed turn ends in the public run_failed message" true
     (match List.rev (journal_tagged_deltas failed) with
-     | (Some 4, Live.Run_failed { message = E.public_error_message }) :: _ -> true
+     | (Some 4, Live.Run_failed { message }) :: _ -> String.equal message E.public_error_message
      | _ -> false)
 
 let test_golden_journal_equals_wire_in_chunks () =

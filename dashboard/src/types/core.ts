@@ -1077,6 +1077,10 @@ export interface KeeperConversationEntry {
   toolCallId?: string | null
   // Live lifecycle state for selecting the current provider occurrence.
   toolCallEnded?: boolean
+  /** Original wire identity is separate from the admitted display label. */
+  toolProviderName?: string
+  toolProviderMessageId?: string | null
+  toolAdmittedName?: string
   /** Server occurrence coordinates; row IDs and provider IDs are not ownership. */
   toolOccurrence?:
     | { readonly kind: 'identified'; readonly streamScope: number; readonly blockIndex: number }

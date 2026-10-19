@@ -24,6 +24,7 @@ type finalized_block = {
   stream_scope : int;
   provider_message_id : string option;
   raw_call_id : string;
+  raw_call_name : string;
   call : Keeper_chat_store.tool_call;
 }
 
@@ -31,6 +32,7 @@ type turn_binding =
   { stream_scope : int
   ; sources : (int * int) list
   ; source_tool_use_count : int
+  ; name_resolutions : Agent_core.Hooks.tool_name_resolution list
   }
 
 type execution_binding =
@@ -380,6 +382,7 @@ let finalize_block t index =
         ; stream_scope = block.stream_scope
         ; provider_message_id = block.provider_message_id
         ; raw_call_id = block.raw_call_id
+        ; raw_call_name = block.raw_call_name
         ; call
         } )
       :: t.finalized
@@ -441,6 +444,38 @@ let validate_closed_scope t ~stream_scope ~streamed_block_indices =
          "stream scope %d contains a quarantined tool occurrence"
          stream_scope)
   else Ok ()
+;;
+
+let recovered_tool_names t ~stream_scope ~sources admitted_tool_sources =
+  let ( let* ) = Result.bind in
+  List.fold_left
+    (fun result (source : Agent_core.Hooks.admitted_tool_use_source) ->
+      let* recovered = result in
+      match source.name_resolution with
+      | Agent_core.Hooks.Registered_name -> Ok recovered
+      | Agent_core.Hooks.Recovered_name { tool_call_id; provider_name; registered_name } ->
+        let* block_index =
+          match List.assoc_opt source.planned_index sources with
+          | Some index -> Ok index
+          | None -> Error "name recovery has no admitted source occurrence"
+        in
+        let* finalized =
+          match List.filter (fun (_, (block : finalized_block)) ->
+            block.stream_scope = stream_scope && block.block_index = block_index) t.finalized with
+          | [_, block] -> Ok block
+          | [] | _ :: _ -> Error "name recovery requires one finalized source occurrence"
+        in
+        if not (String.equal finalized.raw_call_id tool_call_id
+                && String.equal finalized.raw_call_name provider_name)
+        then Error "admitted name conflicts with its original provider occurrence"
+        else if String.trim registered_name = "" || String.equal registered_name provider_name
+        then Error "recovered tool name must name a distinct registered tool"
+        else
+          let occurrence : Keeper_chat_events.tool_stream_occurrence =
+            { stream_scope; block_index; provider_message_id = finalized.provider_message_id } in
+          Ok ((occurrence, tool_call_id, provider_name, registered_name) :: recovered))
+    (Ok []) admitted_tool_sources
+  |> Result.map List.rev
 ;;
 
 let seal_turn t ~turn ~(tool_source_map : Agent_core.Hooks.admitted_tool_source_map) =
@@ -525,14 +560,19 @@ let seal_turn t ~turn ~(tool_source_map : Agent_core.Hooks.admitted_tool_source_
     in
     let ( let* ) = Result.bind in
     let* sources = sources_result in
+    let* recovered = recovered_tool_names t ~stream_scope ~sources admitted_tool_sources in
+    let name_resolutions = List.map
+      (fun (source : Agent_core.Hooks.admitted_tool_use_source) -> source.name_resolution)
+      admitted_tool_sources in
     if List.mem_assoc turn t.unmapped_turns
     then Error (Printf.sprintf "Agent Core turn %d closed without source mapping" turn)
     else match List.assoc_opt turn t.turns with
     | Some recorded
       when recorded.stream_scope = stream_scope
            && List.equal ( = ) recorded.sources sources
-           && recorded.source_tool_use_count = source_tool_use_count ->
-      Ok ()
+           && recorded.source_tool_use_count = source_tool_use_count
+           && recorded.name_resolutions = name_resolutions ->
+      Ok []
     | Some _ ->
       Error (Printf.sprintf "Agent Core turn %d was already sealed differently" turn)
     | None ->
@@ -549,8 +589,16 @@ let seal_turn t ~turn ~(tool_source_map : Agent_core.Hooks.admitted_tool_source_
               stream_scope recorded_turn)
        | None ->
          t.turns <-
-           (turn, { stream_scope; sources; source_tool_use_count }) :: t.turns;
-         Ok ())
+           (turn, { stream_scope; sources; source_tool_use_count; name_resolutions }) :: t.turns;
+         t.finalized <- List.map (fun (opened_at, (block : finalized_block)) ->
+           match List.find_opt (fun ((occurrence : Keeper_chat_events.tool_stream_occurrence), _, _, _) ->
+             occurrence.stream_scope = block.stream_scope && occurrence.block_index = block.block_index) recovered with
+           | None -> opened_at, block
+           | Some (_, _, _, call_name) ->
+             opened_at, { block with call = { block.call with call_name } }) t.finalized;
+         Ok (List.map (fun (occurrence, tool_call_id, provider_tool_name, tool_call_name) ->
+           Keeper_chat_events.Tool_call_admitted
+             { occurrence; tool_call_id = Some tool_call_id; provider_tool_name; tool_call_name }) recovered))
 ;;
 
 let close_turn_without_sources t ~turn =

@@ -1157,6 +1157,7 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
                     "agent_core_block_stop"
                 | Keeper_chat_events.Agent_core_thinking_delta _ -> "agent_core_thinking"
                 | Keeper_chat_events.Tool_call_start _ -> "tool_start"
+                | Keeper_chat_events.Tool_call_admitted _ -> "tool_admitted"
                 | Keeper_chat_events.Tool_call_args _ -> "tool_args"
                 | Keeper_chat_events.Tool_call_args_snapshot _ ->
                     "tool_args_snapshot"
@@ -1265,6 +1266,7 @@ let test_keeper_stream_bridge_preserves_tool_args_snapshot () =
                     "agent_core_block_stop"
                 | Keeper_chat_events.Agent_core_thinking_delta _ -> "agent_core_thinking"
                 | Keeper_chat_events.Tool_call_start _ -> "tool_start"
+                | Keeper_chat_events.Tool_call_admitted _ -> "tool_admitted"
                 | Keeper_chat_events.Tool_call_args _ -> "tool_args"
                 | Keeper_chat_events.Tool_call_args_snapshot _ ->
                     "tool_args_snapshot"
@@ -2924,6 +2926,7 @@ let test_keeper_stream_bridge_rejects_non_tool_start_with_tool_identity () =
     List.exists
       (function
         | Keeper_chat_events.Tool_call_start _ -> true
+        | Keeper_chat_events.Tool_call_admitted _ -> false
         | _ -> false)
       events
   in
@@ -2963,7 +2966,7 @@ let test_keeper_stream_bridge_preserves_native_tool_origin () =
   let has_dynamic_tool_event =
     List.exists
       (function
-        | Keeper_chat_events.Tool_call_start _
+        | Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_admitted _
         | Keeper_chat_events.Tool_call_end _ -> true
         | _ -> false)
       events

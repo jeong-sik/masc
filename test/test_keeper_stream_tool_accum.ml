@@ -24,7 +24,7 @@ let seal_turn ?(turn = 0) ?source_tool_use_count t source_tool_use_ordinals =
   let admitted_tool_sources =
     List.mapi
       (fun planned_index source_tool_use_ordinal ->
-         { Agent_core.Hooks.planned_index; source_tool_use_ordinal })
+         { Agent_core.Hooks.planned_index; source_tool_use_ordinal; name_resolution = Agent_core.Hooks.Registered_name })
       source_tool_use_ordinals
   in
   let source_tool_use_count =
@@ -35,7 +35,7 @@ let seal_turn ?(turn = 0) ?source_tool_use_count t source_tool_use_ordinals =
     { admitted_tool_sources; source_tool_use_count }
   in
   match A.seal_turn t ~turn ~tool_source_map with
-  | Ok () -> ()
+  | Ok _ -> ()
   | Error detail -> fail detail
 ;;
 
@@ -298,6 +298,7 @@ let test_providerless_call_is_not_execution_authority () =
        ~tool_source_map:
          { admitted_tool_sources =
              [ { Agent_core.Hooks.planned_index = 0
+               ; name_resolution = Agent_core.Hooks.Registered_name
                ; source_tool_use_ordinal = 0
                }
              ]
@@ -305,7 +306,7 @@ let test_providerless_call_is_not_execution_authority () =
          }
    with
    | Error _ -> ()
-   | Ok () -> fail "providerless streamed ToolUse became execution authority");
+   | Ok _ -> fail "providerless streamed ToolUse became execution authority");
   check (list tool_call) "providerless call is omitted" [] (A.to_tool_calls t)
 ;;
 
@@ -350,6 +351,7 @@ let test_invalid_tool_start_poisons_the_provider_scope () =
        ~tool_source_map:
          { admitted_tool_sources =
              [ { Agent_core.Hooks.planned_index = 0
+               ; name_resolution = Agent_core.Hooks.Registered_name
                ; source_tool_use_ordinal = 0
                }
              ]
@@ -357,7 +359,7 @@ let test_invalid_tool_start_poisons_the_provider_scope () =
          }
    with
    | Error _ -> ()
-   | Ok () -> fail "a later call escaped the invalid provider scope");
+   | Ok _ -> fail "a later call escaped the invalid provider scope");
   check (list tool_call) "invalid scope persists no tool rows" [] (A.to_tool_calls t)
 ;;
 
@@ -428,7 +430,7 @@ let test_full_message_replay_is_quarantined () =
   (match A.seal_turn t ~turn:0 ~tool_source_map:{ admitted_tool_sources = [];
                                                    source_tool_use_count = 1 } with
    | Error _ -> ()
-   | Ok () -> fail "a block start after stop became execution authority");
+   | Ok _ -> fail "a block start after stop became execution authority");
   check (list tool_call) "closed occurrence replay is omitted" []
     (A.to_tool_calls t)
 ;;
@@ -468,7 +470,7 @@ let test_blank_message_id_replays_unsealed_scope () =
        ~tool_source_map:{ admitted_tool_sources = []; source_tool_use_count = 1 }
    with
    | Error _ -> ()
-   | Ok () -> fail "blank full replay became execution authority");
+   | Ok _ -> fail "blank full replay became execution authority");
   check int "blank full replay is quarantined" 0
     (List.length (A.to_tool_calls full_replay))
 ;;
@@ -581,7 +583,7 @@ let test_committed_message_replay_is_quarantined () =
        ~tool_source_map:{ admitted_tool_sources = []; source_tool_use_count = 1 }
    with
    | Error _ -> ()
-   | Ok () -> fail "committed replay became execution authority");
+   | Ok _ -> fail "committed replay became execution authority");
   check (list tool_call) "committed replay is quarantined" [] (A.to_tool_calls t)
 ;;
 
@@ -695,14 +697,14 @@ let test_pre_admission_tool_inventory_is_exact () =
   let missing = A.create () in
   (match A.seal_turn missing ~turn:0 ~tool_source_map:(source_map ~count:1 []) with
    | Error _ -> ()
-   | Ok () -> fail "a missing streamed ToolUse satisfied the typed inventory");
+   | Ok _ -> fail "a missing streamed ToolUse satisfied the typed inventory");
   let extra = A.create () in
   A.on_event extra
     (start ~index:0 ~tool_id:(Some "extra") ~tool_name:(Some "Read"));
   A.on_event extra (stop ~index:0);
   (match A.seal_turn extra ~turn:0 ~tool_source_map:(source_map ~count:0 []) with
    | Error _ -> ()
-   | Ok () -> fail "an extra streamed ToolUse satisfied an empty inventory");
+   | Ok _ -> fail "an extra streamed ToolUse satisfied an empty inventory");
   let all_rejected = A.create () in
   A.on_event all_rejected
     (start ~index:0 ~tool_id:(Some "rejected") ~tool_name:(Some "Unknown"));
@@ -711,7 +713,8 @@ let test_pre_admission_tool_inventory_is_exact () =
      A.seal_turn all_rejected ~turn:0
        ~tool_source_map:(source_map ~count:1 [])
    with
-   | Ok () -> ()
+   | Ok [] -> ()
+   | Ok (_ :: _) -> fail "all-rejected admission emitted a recovered name"
    | Error detail -> fail detail);
   check int "all-rejected delivery evidence remains exact" 1
     (List.length (A.to_tool_calls all_rejected))
@@ -768,13 +771,14 @@ let test_seal_rejects_unfinalized_tool_block () =
     (start ~index:0 ~tool_id:(Some "open-call") ~tool_name:(Some "Read"));
   let tool_source_map : Agent_core.Hooks.admitted_tool_source_map =
     { admitted_tool_sources =
-        [ { Agent_core.Hooks.planned_index = 0; source_tool_use_ordinal = 0 } ]
+        [ { Agent_core.Hooks.planned_index = 0; name_resolution = Agent_core.Hooks.Registered_name
+               ; source_tool_use_ordinal = 0 } ]
     ; source_tool_use_count = 1
     }
   in
   match A.seal_turn t ~turn:0 ~tool_source_map with
   | Error _ -> ()
-  | Ok () -> fail "an open stream block became execution authority"
+  | Ok _ -> fail "an open stream block became execution authority"
 ;;
 
 let test_failure_drops_finalized_unsealed_scope () =
@@ -1176,6 +1180,7 @@ let test_producer_and_keeper_reject_ambiguous_tool_inputs_together () =
        let tool_source_map : Agent_core.Hooks.admitted_tool_source_map =
          { admitted_tool_sources =
              [ { Agent_core.Hooks.planned_index = 0
+               ; name_resolution = Agent_core.Hooks.Registered_name
                ; source_tool_use_ordinal = 0
                }
              ]
@@ -1184,7 +1189,7 @@ let test_producer_and_keeper_reject_ambiguous_tool_inputs_together () =
        in
        match A.seal_turn keeper ~turn:0 ~tool_source_map with
        | Error _ -> ()
-       | Ok () -> fail (label ^ ": keeper accepted ambiguous tool input"))
+       | Ok _ -> fail (label ^ ": keeper accepted ambiguous tool input"))
     fixtures
 ;;
 
@@ -1231,6 +1236,169 @@ let test_official_receipt_does_not_certify_sibling_or_corrupt_scope () =
     (A.to_tool_calls_for_failure corrupt)
 ;;
 
+let recovered_source_map registered_names calls =
+  let tools = List.map (fun name ->
+    Agent_core.Tool.create ~name ~description:"admission fixture" ~parameters:[]
+      (fun _ -> Ok {Agent_core.Types.content="not executed"; content_blocks=None; _meta=None}))
+    registered_names in
+  let blocks = List.map (fun (id, name, input) ->
+    Agent_core.Types.ToolUse {id; name; input}) calls in
+  let admission = Agent_core.Agent_tools.admit_tool_use_names
+    (Agent_core.Agent_tools.build_index tools) blocks in
+  admission.tool_source_map
+;;
+
+let recovered_event ~stream_scope ~block_index ~provider_message_id
+    ~tool_call_id ~provider_tool_name ~tool_call_name =
+  let occurrence : Masc.Keeper_chat_events.tool_stream_occurrence =
+    {stream_scope; block_index; provider_message_id} in
+  Masc.Keeper_chat_events.Tool_call_admitted
+    {occurrence; tool_call_id=Some tool_call_id; provider_tool_name; tool_call_name}
+;;
+
+let seal_admitted t ~turn ~tool_source_map =
+  match A.seal_turn t ~turn ~tool_source_map with
+  | Ok events -> events
+  | Error detail -> fail detail
+;;
+
+let rec remove_chat_fixture path =
+  match (Unix.lstat path).Unix.st_kind with
+  | Unix.S_DIR ->
+    Array.iter (fun name -> remove_chat_fixture (Filename.concat path name))
+      (Sys.readdir path);
+    Unix.rmdir path
+  | Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
+    Unix.unlink path
+;;
+
+let test_recovered_name_seals_exact_event_and_durable_row () =
+  let t = A.create () in
+  let raw_name = "Execute1139645993.1" in
+  let input = `Assoc ["argv", `List [`String "printf"; `String "done"]] in
+  let args = {|{"argv":["printf","done"]}|} in
+  A.on_event t (message_start "recovered-message");
+  A.on_event t (start ~index:3 ~tool_id:(Some "provider-recovered") ~tool_name:(Some raw_name));
+  A.on_event t (json_snapshot ~index:3 args);
+  A.on_event t (stop ~index:3);
+  let tool_source_map = recovered_source_map ["Execute"]
+    ["provider-recovered", raw_name, input] in
+  let expected = [recovered_event ~stream_scope:0 ~block_index:3
+    ~provider_message_id:(Some "recovered-message") ~tool_call_id:"provider-recovered"
+    ~provider_tool_name:raw_name ~tool_call_name:"Execute"] in
+  check bool "admission emits the original occurrence and raw name" true
+    (seal_admitted t ~turn:0 ~tool_source_map = expected);
+  check bool "repeated seal emits no second admission" true
+    (seal_admitted t ~turn:0 ~tool_source_map = []);
+  let execution_id = Ids.Execution_id.of_string "execution-recovered" in
+  (match A.record_execution_id t ~turn:0 ~planned_index:0
+      ~tool_call_id:"provider-recovered" ~execution_id with
+   | Ok occurrence ->
+     check bool "canonical result binds that same raw occurrence" true
+       (occurrence = {Masc.Keeper_chat_events.stream_scope=0; block_index=3;
+         provider_message_id=Some "recovered-message"})
+   | Error detail -> fail detail);
+  let calls = A.to_tool_calls t in
+  check (list tool_call) "durable payload carries the admitted registered name"
+    [{call_id="provider-recovered"; execution_id=Some execution_id;
+      call_name="Execute"; args}] calls;
+  let base_dir = Filename.temp_file "keeper-recovered-admission" "" in
+  Sys.remove base_dir;
+  Unix.mkdir base_dir 0o700;
+  Fun.protect ~finally:(fun () -> remove_chat_fixture base_dir) (fun () ->
+    let module Store = Masc.Keeper_chat_store in
+    (match Store.append_tool_calls_result ~base_dir ~keeper_name:"recovered"
+        ~tool_calls:calls () with
+     | Ok () -> () | Error detail -> fail detail);
+    let rows = match Store.load_all_result ~base_dir ~keeper_name:"recovered" with
+      | Ok rows -> rows | Error detail -> fail detail in
+    match rows with
+    | [row] ->
+      check bool "reloaded durable row is a tool call" true
+        (Store.Role.equal row.role Store.Role.Tool);
+      check (option string) "durable provider id stays verbatim"
+        (Some "provider-recovered") row.tool_call_id;
+      check (option string) "durable name is the registered spelling"
+        (Some "Execute") row.tool_call_name;
+      check bool "durable canonical execution survives reload" true
+        (row.execution_id = Some execution_id);
+      check string "durable arguments remain unchanged" args row.content
+    | [] | _ :: _ :: _ -> fail "expected exactly one durable recovered call")
+;;
+
+let test_recovery_identity_mismatch_refuses_atomically () =
+  List.iter (fun mismatch ->
+    let t = A.create () in
+    A.on_event t (message_start "atomic-recovery");
+    List.iter (fun (index, id, name) ->
+      A.on_event t (start ~index ~tool_id:(Some id) ~tool_name:(Some name));
+      A.on_event t (json_snapshot ~index "{}");
+      A.on_event t (stop ~index))
+      [1, "raw-a", "Execute123.4"; 7, "raw-b", "Read567.8"];
+    let valid = recovered_source_map ["Execute"; "Read"]
+      ["raw-a", "Execute123.4", `Assoc []; "raw-b", "Read567.8", `Assoc []] in
+    let invalid : Agent_core.Hooks.admitted_tool_source_map =
+      {valid with admitted_tool_sources=List.mapi (fun index
+          (source : Agent_core.Hooks.admitted_tool_use_source) ->
+        if index = 0 then source else
+          let name_resolution = match source.name_resolution with
+            | Agent_core.Hooks.Registered_name -> fail "fixture was not recovered by admission"
+            | Agent_core.Hooks.Recovered_name {tool_call_id; provider_name; registered_name} ->
+              let tool_call_id, provider_name = match mismatch with
+                | `Raw_id -> "different-provider-id", provider_name
+                | `Raw_name -> tool_call_id, "Read999.9" in
+              Agent_core.Hooks.Recovered_name {tool_call_id; provider_name; registered_name} in
+          {source with name_resolution}) valid.admitted_tool_sources} in
+    let before = A.to_tool_calls t in
+    (match A.seal_turn t ~turn:0 ~tool_source_map:invalid with
+     | Error _ -> () | Ok _ -> fail "mismatched original identity was admitted");
+    check (list tool_call) "a later mismatch cannot partially rename an earlier source"
+      before (A.to_tool_calls t);
+    check bool "a refused seal cannot establish execution authority" false
+      (A.current_scope_is_sealed t);
+    (match A.record_execution_id t ~turn:0 ~planned_index:0 ~tool_call_id:"raw-a"
+        ~execution_id:(Ids.Execution_id.of_string "premature-execution") with
+     | Error _ -> () | Ok _ -> fail "failed seal left a usable source mapping");
+    let events = seal_admitted t ~turn:0 ~tool_source_map:valid in
+    check bool "the unchanged source can still seal with correct admission" true
+      (events = [
+        recovered_event ~stream_scope:0 ~block_index:1
+          ~provider_message_id:(Some "atomic-recovery") ~tool_call_id:"raw-a"
+          ~provider_tool_name:"Execute123.4" ~tool_call_name:"Execute";
+        recovered_event ~stream_scope:0 ~block_index:7
+          ~provider_message_id:(Some "atomic-recovery") ~tool_call_id:"raw-b"
+          ~provider_tool_name:"Read567.8" ~tool_call_name:"Read"]))
+    [`Raw_id; `Raw_name]
+;;
+
+let test_recovered_provider_id_reuse_stays_in_distinct_scopes () =
+  let t = A.create () in
+  List.iter (fun (turn, raw_name, registered_name, execution_name) ->
+    A.on_event t (message_start "reused-message");
+    A.on_event t (start ~index:2 ~tool_id:(Some "reused-id") ~tool_name:(Some raw_name));
+    A.on_event t (json_snapshot ~index:2 "{}");
+    A.on_event t (stop ~index:2);
+    let tool_source_map = recovered_source_map [registered_name]
+      ["reused-id", raw_name, `Assoc []] in
+    check bool "reused provider identity emits only its own scoped correction" true
+      (seal_admitted t ~turn ~tool_source_map = [
+        recovered_event ~stream_scope:turn ~block_index:2
+          ~provider_message_id:(Some "reused-message") ~tool_call_id:"reused-id"
+          ~provider_tool_name:raw_name ~tool_call_name:registered_name]);
+    match A.record_execution_id t ~turn ~planned_index:0 ~tool_call_id:"reused-id"
+        ~execution_id:(Ids.Execution_id.of_string execution_name) with
+    | Ok occurrence -> check int "result stays in its admitted scope" turn occurrence.stream_scope
+    | Error detail -> fail detail)
+    [0, "Execute123.4", "Execute", "execution-scope-a";
+     1, "Read567.8", "Read", "execution-scope-b"];
+  check (list tool_call) "same provider id retains both canonical names and executions"
+    [{call_id="reused-id"; execution_id=Some (Ids.Execution_id.of_string "execution-scope-a");
+      call_name="Execute"; args="{}"};
+     {call_id="reused-id"; execution_id=Some (Ids.Execution_id.of_string "execution-scope-b");
+      call_name="Read"; args="{}"}]
+    (A.to_tool_calls t)
+;;
+
 let () =
   run "Keeper_stream_tool_accum"
     [ ( "accumulation"
@@ -1273,7 +1441,13 @@ let () =
             test_producer_and_keeper_reject_ambiguous_tool_inputs_together
         ] )
     ; ( "execution identity"
-      , [ test_case "log commit attaches canonical id" `Quick
+      , [ test_case "recovered admission emits exact source and persists registered name" `Quick
+            test_recovered_name_seals_exact_event_and_durable_row
+        ; test_case "recovery identity mismatches refuse the whole seal" `Quick
+            test_recovery_identity_mismatch_refuses_atomically
+        ; test_case "recovered provider ids remain separate across scopes" `Quick
+            test_recovered_provider_id_reuse_stays_in_distinct_scopes
+        ; test_case "log commit attaches canonical id" `Quick
             test_log_commit_attaches_canonical_execution_identity
         ; test_case "unknown provider id is not positional" `Quick
             test_unknown_result_identity_is_not_attached_by_position

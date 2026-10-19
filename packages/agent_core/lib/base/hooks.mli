@@ -34,6 +34,16 @@ type tool_failure_stage =
   | Validation_before_execution
   | Execution
 
+(** Admission owns name recovery. Original provider identity is retained when
+    admission changed the name; consumers never repeat recovery. *)
+type tool_name_resolution =
+  | Registered_name
+  | Recovered_name of
+      { tool_call_id : string
+      ; provider_name : string
+      ; registered_name : string
+      }
+
 (** Exact mapping retained across tool-name admission. [planned_index] is the
     ordinal assigned to a surviving ToolUse; [source_tool_use_ordinal] is its ordinal
     among all well-formed ToolUse blocks before unroutable calls were removed.
@@ -42,6 +52,7 @@ type tool_failure_stage =
 type admitted_tool_use_source =
   { planned_index : int
   ; source_tool_use_ordinal : int
+  ; name_resolution : tool_name_resolution
   }
 
 type admitted_tool_source_map =

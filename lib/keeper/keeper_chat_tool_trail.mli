@@ -26,7 +26,9 @@ val on_event : t -> Keeper_chat_events.keeper_chat_event -> unit
 (** Feed one chat event. [Tool_call_start] opens a call, [Tool_call_args]
     appends an argument fragment to it, [Tool_call_args_snapshot] replaces the
     fragments accumulated so far (the provider sends a snapshot instead of, not
-    in addition to, its deltas), and every other event is ignored. Calls are
+    in addition to, its deltas). [Tool_call_admitted] updates the same call
+    after checking its original provider name and correlation. Other events
+    are ignored. Calls are
     keyed by the server-owned stream occurrence; provider ids are optional
     correlation data and may repeat. A fragment for an occurrence that never
     opened is dropped: a row with no tool name would say less than no row. *)

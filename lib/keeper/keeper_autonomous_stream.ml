@@ -144,7 +144,7 @@ let on_tool_stream_observation t observation =
         ~previous_scope t.bridge)
   | Keeper_hooks_agent_core.Turn_collected {turn; tool_source_map} ->
       (match Accum.seal_turn t.accum ~turn ~tool_source_map with
-       | Ok () -> () | Error detail -> mapping_failed t detail)
+       | Ok events -> List.iter (publish t) events | Error detail -> mapping_failed t detail)
   | Keeper_hooks_agent_core.Turn_closed_without_sources {turn} ->
       (match Accum.close_turn_without_sources t.accum ~turn with
        | Ok () -> () | Error detail -> mapping_failed t detail)

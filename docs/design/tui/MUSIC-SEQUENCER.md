@@ -53,10 +53,10 @@ This stack is one step toward the full destination. Further work remains:
 
 - Retain editable arrangements of MIDI clips and WAV regions with repeat/offset,
   recording into existing projects and overdubs; retain raw expression provenance.
-- Connect the MIDI source-asset editor to full-message audition and arrangements,
-  then support MIDI 2.0 source assets and expression/event editing. Source import
-  and note edit/export preserve controllers, program/tempo maps, SysEx and original
-  bytes; this is not yet an imported-performance playback path.
+- Extend one-shot full-message source audition into arrangement playback and
+  pause/resume/seek/loop with expression-state reconstruction; support MIDI 2.0
+  source assets and expression/event editing. Source import and note edit/export
+  retain controllers, program/tempo maps, SysEx and original bytes.
 - External MIDI clock and a shared sample clock for live scheduling, audio/MIDI
   arrangement playback, and low-latency monitoring/recording.
 - Connect the independently developed VST instrument/preset host (#43684) to project
@@ -96,3 +96,12 @@ A seek/resume implementation must define what it restores and report unsupported
 state reconstruction; silently using the phrase sender's volume/pan chase would
 lose the source performance. Source audition does not establish MIDI clock sync,
 audio/MIDI sample alignment, hardware latency or physical-device behavior.
+
+### Source audition delivery
+
+Imported source performances now have an ordered external MIDI 1.0 audition
+path: explicit source-port bindings, full channel expression, F0/F7 wire decode,
+tempo/SMPTE scheduling and held-key/hold-pedal stop cleanup. It is a one-shot
+play/stop path from the pattern beginning. The reconstruction requirements above
+remain planned for source pause/resume/seek/loop; WAV/VST arrangement, overdubs,
+shared clock and practice workflows remain separate unfinished units.

@@ -227,8 +227,29 @@ multi-channel track; `:select event-ID` chooses a specific paired note. Chord la
 use note-key intervals and do not infer sustain-pedal voice durations. Shared-key
 ambiguity and unmatched input events remain in the original source.
 
-Full-message source audition, controller/tempo editing and clip arrangement are
-being connected. Space and WAV export currently report that boundary instead of
-playing a note-only approximation. The existing phrase-project MIDI/WAV transport
+Source audition sends the complete ordered MIDI wire stream to explicitly selected
+outputs as described below. Controller/tempo editing, clip arrangement and source
+WAV synthesis remain unfinished. Existing phrase-project MIDI/WAV transport
 continues to work. See [MIDI source semantics](MIDI-SOURCE.md) for retained data,
 source-event identities and timing behavior.
+
+### Imported performance audition
+
+Use `--midi-file song.mid --midi-output=ID` (or `:midi-output ID` in the
+source editor), then Space to play the selected pattern from its beginning.
+Space during playback and `:stop` release its held keys and enabled hold pedals.
+`--devices` lists exact MIDI output IDs. An imported source with several
+MIDI ports requires `:midi-port PORT ID` for each used port; distinct source ports
+must bind distinct destinations. Bindings are session selections, not musical
+edits saved into the original performance.
+
+Source audition sends ordered MIDI 1.0 channel expression and F0/F7 wire data
+using the source tempo map or SMPTE clock. It plays once from the beginning.
+Pause/resume, arbitrary seek, clip looping and source WAV/VST synthesis require
+expression-state reconstruction and are not connected in this layer. Existing
+phrase projects retain their pause/resume/seek/loop and SoundFont routes. Stop
+closes an in-flight SysEx stream, releases each owned held key and disables hold
+controllers 64/66/69 that this source enabled. It never broadcasts all-notes-off.
+Use destinations/channels owned for this audition: pedal state is shared by a
+MIDI channel, and opaque vendor SysEx can have device-specific side effects that
+cannot be reversed generically. Playback does not synthesize MIDI clock.

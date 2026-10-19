@@ -185,10 +185,11 @@ readonly OCAML_DOS_SHA="323609dd3c4d9f4f9d678290b36e88a8b9b8f488"
 # malformed HTTP (answered, do not replay). Keep this pin until both changes
 # are in a release or the upstream branch.
 readonly COHTTP_EIO_SHA="9963da4c028b5681ff96eeeaa9b276d6be60c507"
-# H2 0.13.0 with typed body completion and connection credit recovery for
-# discarded request/response DATA. Keep core and Eio adapter on one source.
-# https://github.com/jeong-sik/ocaml-h2/pull/1
-readonly H2_SHA="38293f3bb2d79121a6d5c68bb472cee1f350af93"
+# H2 0.13.0 with typed body completion, discarded DATA credit recovery, and
+# balanced concurrent peer-stream accounting. Refused or server-pushed streams
+# must not release another request's slot. Keep core and Eio on one source.
+# https://github.com/jeong-sik/ocaml-h2/pull/2
+readonly H2_SHA="d7601f201da809857f3878172eea513aaea498ac"
 # ocaml-protoc-plugin 6.2.0 + one commit: protoc-gen-ocaml reads its request
 # until end of input. 6.2.0 stops at the first read shorter than its 1024-byte
 # buffer, and a macOS pipe hands over 512 bytes first, so every local build of

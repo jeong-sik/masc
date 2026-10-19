@@ -19,6 +19,7 @@
 # Data source: .masc/tool_calls/YYYY-MM/DD.jsonl (PR #5526)
 
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 BASE_PATH="${1:-.}"
 DAYS="${2:-1}"
@@ -51,6 +52,12 @@ if [ ${#FILES[@]} -eq 0 ]; then
   exit 0
 fi
 
+CALL_COUNT=$(jq -s '[.[] | select(.record_kind == "tool_call")] | length' "${FILES[@]}")
+if [ "$CALL_COUNT" -eq 0 ]; then
+  echo "No tool call records in the selected files."
+  exit 0
+fi
+
 echo "=== Tool Call Quality Analysis (Samchon Harness Metrics) ==="
 echo "Source: ${#FILES[@]} file(s), last ${DAYS} day(s)"
 echo ""
@@ -59,11 +66,16 @@ echo ""
 
 echo "[1/6] Overview"
 echo "─────────────────────────────────────────"
-jq -s '
+jq -L "$SCRIPT_DIR/lib" -rs '
+  include "recorded-tool-outcome";
+  map(select(.record_kind == "tool_call")) |
   {
     total_calls: length,
-    success: ([.[] | select(.success == true)] | length),
-    failure: ([.[] | select(.success == false)] | length),
+    success: ([.[] | select(recorded_call_outcome == "succeeded")] | length),
+    failure: ([.[] | select(recorded_call_outcome == "failed")] | length),
+    deferred: ([.[] | select(recorded_call_outcome == "deferred")] | length),
+    unsettled: ([.[] | select(recorded_call_outcome == "unsettled")] | length),
+    malformed: ([.[] | select(recorded_call_outcome == "malformed")] | length),
     unique_keepers: ([.[] | .keeper] | unique | length),
     unique_tools: ([.[] | .tool] | unique | length),
     avg_duration_ms: (([.[] | .duration_ms] | add) / length | . * 10 | floor / 10),
@@ -71,6 +83,9 @@ jq -s '
   "Total calls:     \(.total_calls)",
   "Success:         \(.success) (\(.success * 100 / .total_calls)%)",
   "Failure:         \(.failure) (\(.failure * 100 / .total_calls)%)",
+  "Deferred:        \(.deferred)",
+  "Unsettled:       \(.unsettled)",
+  "Malformed:       \(.malformed)",
   "Unique keepers:  \(.unique_keepers)",
   "Unique tools:    \(.unique_tools)",
   "Avg duration:    \(.avg_duration_ms)ms"
@@ -79,28 +94,35 @@ echo ""
 
 echo "[2/6] Per-Keeper Tool Call Quality"
 echo "─────────────────────────────────────────"
-jq -s '
+jq -L "$SCRIPT_DIR/lib" -rs '
+  include "recorded-tool-outcome";
+  map(select(.record_kind == "tool_call")) |
   group_by(.keeper) | map({
     keeper: .[0].keeper,
     total: length,
-    success: ([.[] | select(.success)] | length),
-    fail: ([.[] | select(.success | not)] | length),
+    success: ([.[] | select(recorded_call_outcome == "succeeded")] | length),
+    fail: ([.[] | select(recorded_call_outcome == "failed")] | length),
+    deferred: ([.[] | select(recorded_call_outcome == "deferred")] | length),
+    unsettled: ([.[] | select(recorded_call_outcome == "unsettled")] | length),
+    malformed: ([.[] | select(recorded_call_outcome == "malformed")] | length),
     tools_used: ([.[] | .tool] | unique | length),
     avg_ms: (([.[] | .duration_ms] | add) / length | . * 10 | floor / 10),
   }) | sort_by(-.total) | .[] |
-  "\(.keeper)\t\(.total)\t\(.success)/\(.fail)\t\(.tools_used) tools\t\(.avg_ms)ms"
-' "${FILES[@]}" | (echo -e "KEEPER\tCALLS\tOK/FAIL\tTOOLS\tAVG_MS"; cat) | column -t -s $'\t'
+  "\(.keeper)\t\(.total)\t\(.success)/\(.fail)/\(.deferred)/\(.unsettled)/\(.malformed)\t\(.tools_used) tools\t\(.avg_ms)ms"
+' "${FILES[@]}" | (echo -e "KEEPER\tCALLS\tOK/FAIL/DEFERRED/UNSETTLED/MALFORMED\tTOOLS\tAVG_MS"; cat) | column -t -s $'\t'
 echo ""
 
 echo "[3/6] Tool Success Rate (Top 20)"
 echo "─────────────────────────────────────────"
-jq -s '
+jq -L "$SCRIPT_DIR/lib" -rs '
+  include "recorded-tool-outcome";
+  map(select(.record_kind == "tool_call")) |
   group_by(.tool) | map({
     tool: .[0].tool,
     total: length,
-    ok: ([.[] | select(.success)] | length),
-    fail: ([.[] | select(.success | not)] | length),
-    rate: (([.[] | select(.success)] | length) * 100 / length),
+    ok: ([.[] | select(recorded_call_outcome == "succeeded")] | length),
+    fail: ([.[] | select(recorded_call_outcome == "failed")] | length),
+    rate: (([.[] | select(recorded_call_outcome == "succeeded")] | length) * 100 / length),
     avg_ms: (([.[] | .duration_ms] | add) / length | . * 10 | floor / 10),
   }) | sort_by(-.total) | .[:20] | .[] |
   "\(.tool)\t\(.total)\t\(.rate)%\t\(.avg_ms)ms"
@@ -109,7 +131,9 @@ echo ""
 
 echo "[4/6] Duration Distribution (Samchon: fast recovery = good harness)"
 echo "─────────────────────────────────────────"
-jq -s '
+jq -L "$SCRIPT_DIR/lib" -rs '
+  include "recorded-tool-outcome";
+  map(select(.record_kind == "tool_call")) |
   {
     fast: ([.[] | select(.duration_ms < 500)] | length),
     normal: ([.[] | select(.duration_ms >= 500 and .duration_ms < 2000)] | length),
@@ -126,12 +150,16 @@ echo ""
 
 echo "[5/6] Failed Calls Detail (Samchon: failures are loop inputs)"
 echo "─────────────────────────────────────────"
-FAIL_COUNT=$(jq -s '[.[] | select(.success == false)] | length' "${FILES[@]}")
+FAIL_COUNT=$(jq -L "$SCRIPT_DIR/lib" -rs '
+  include "recorded-tool-outcome";
+  map(select(.record_kind == "tool_call")) | [.[] | select(recorded_call_outcome == "failed")] | length' "${FILES[@]}")
 if [ "$FAIL_COUNT" -eq 0 ]; then
   echo "  No failures recorded."
 else
-  jq -s '
-    [.[] | select(.success == false)] | group_by(.tool) | map({
+  jq -L "$SCRIPT_DIR/lib" -rs '
+  include "recorded-tool-outcome";
+  map(select(.record_kind == "tool_call")) |
+    [.[] | select(recorded_call_outcome == "failed")] | group_by(.tool) | map({
       tool: .[0].tool,
       count: length,
       keepers: ([.[] | .keeper] | unique),
@@ -146,7 +174,9 @@ echo ""
 
 echo "[6/6] Tool Category Distribution"
 echo "─────────────────────────────────────────"
-jq -s '
+jq -L "$SCRIPT_DIR/lib" -rs '
+  include "recorded-tool-outcome";
+  map(select(.record_kind == "tool_call")) |
   def cat:
     if test("bash|shell") then "shell"
     elif test("github|git|worktree") then "git"
@@ -162,7 +192,7 @@ jq -s '
   group_by(.tool | cat) | map({
     category: (.[0].tool | cat),
     count: length,
-    ok: ([.[] | select(.success)] | length),
+    ok: ([.[] | select(recorded_call_outcome == "succeeded")] | length),
   }) | sort_by(-.count) | .[] |
   "  \(.category)\t\(.count) calls\t\(.ok * 100 / .count)% ok"
 ' "${FILES[@]}" | column -t -s $'\t'

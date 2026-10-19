@@ -154,6 +154,28 @@ describe('TelemetryUnified', () => {
     }
   })
 
+  it('renders recorded tool dispositions without borrowing another source success flag', async () => {
+    const entries = [
+      { source: 'tool_call_io', tool: 'completed-call', disposition: 'completed', wire_outcome: 'error', success: false },
+      { source: 'tool_call_io', tool: 'failed-call', disposition: 'failed', wire_outcome: 'ok', success: true },
+      { source: 'tool_call_io', tool: 'deferred-call', disposition: 'deferred', wire_outcome: 'ok' },
+      { source: 'tool_call_io', tool: 'unknown-call', wire_outcome: 'unknown', success: true },
+      { source: 'tool_call_io', tool: 'malformed-call', disposition: null, wire_outcome: 'ok' },
+      { source: 'tool_metric', tool_name: 'separate-metric', success: true },
+    ]
+    const fetchTelemetry = vi.fn().mockResolvedValue({ ...baseTelemetry, count: entries.length, entries })
+    const { TelemetryUnified } = await loadPanel(fetchTelemetry, vi.fn().mockResolvedValue(baseSummary))
+    await act(async () => { render(html`<${TelemetryUnified} />`, container) })
+    await flushUi()
+    for (const [tool, label] of [
+      ['completed-call', 'Succeeded'], ['failed-call', 'Failed'], ['deferred-call', 'Deferred'],
+      ['unknown-call', 'Unsettled'], ['malformed-call', 'Malformed'], ['separate-metric', 'Succeeded'],
+    ]) {
+      const preview = Array.from(container.querySelectorAll('[title]')).find(element => element.getAttribute('title')?.includes(tool!))
+      expect(preview?.parentElement?.querySelector('[data-telemetry-outcome]')?.getAttribute('aria-label')).toBe(label)
+    }
+  })
+
   it('polls automatically while the document is visible', async () => {
     const fetchTelemetry = vi.fn().mockResolvedValue(baseTelemetry)
     const fetchTelemetrySummary = vi.fn().mockResolvedValue(baseSummary)

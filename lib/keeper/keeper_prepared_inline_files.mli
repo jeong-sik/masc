@@ -39,8 +39,9 @@ type resource_ordering = private
   ; predecessors : (Keeper_tool_plan.Node_id.t * Keeper_tool_plan.Node_id.t list) list
   }
 (** Immutable original layers and the resource predecessor lists derived from
-    them. Only the producer constructs this value; it contains no capabilities,
-    resolved inputs, results or effect/replay permission. *)
+    them. Only the producer constructs this value. Nodes retain their original
+    plan templates; the record adds no capability, runtime input/result fields
+    or effect/replay permission. *)
 
 val resource_ordering
   : plan:Keeper_tool_plan.t

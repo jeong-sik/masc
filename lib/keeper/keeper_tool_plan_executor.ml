@@ -596,8 +596,8 @@ let execute_with_tool_use_id
   =
   (* Each preparation supplies its original immutable graph after checking
      plan identity. Share it with scheduling rather than rebuilding it after
-     resource ordering. Ordinary execution still builds its own graph. Inputs,
-     resources and outcomes resolve separately, never from these layers. *)
+     resource ordering. Ordinary execution still builds its own graph. Inputs
+     still resolve per node; run bindings/resources/results are not cached here. *)
   let resource_ordering, dependency_layers = match ready_files with
     | None ->
       (match Option.bind prepared_files (Keeper_prepared_inline_files.resource_ordering ~plan) with

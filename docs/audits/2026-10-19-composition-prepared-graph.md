@@ -38,8 +38,9 @@ checked by physical identity, before resource edges are collected. Missing or
 copied membership keeps its original invariant error. The record is returned
 only after all these checks and the original edge collection.
 
-The record contains original immutable node lists and predecessor ID lists,
-not prepared operations, capabilities, resolved inputs, outcomes or grants.
+The record retains original immutable nodes, including their plan templates,
+and predecessor ID lists. It adds no prepared operation/capability, separately
+captured runtime input/result or grant fields.
 Its private record representation permits reads while preventing construction
 or field replacement by the consumer. There is no caller-supplied graph option,
 new global cache, replay channel, timer, cap or public tool/provider parameter.

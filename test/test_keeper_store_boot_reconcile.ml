@@ -857,33 +857,65 @@ let test_a_bad_wal_over_a_good_snapshot_is_named_by_its_wal () =
   check_queue_starts_empty ~base_path
 ;;
 
-(* A move that stops between the two renames must not leave a pair the next
-   boot reads as a queue. The rejected file moves last, so it is the one that
-   stays, and boot refuses again at it; the error names the file already
-   moved. *)
+let quarantine_intent_path snapshot =
+  Filename.concat (Filename.dirname snapshot) "event-queue-quarantine-v1.json"
+;;
+
+let check_quarantine_refuses ~config ~snapshot =
+  let module Q = Keeper_event_queue_persistence in
+  let base_path = config.Workspace.base_path in
+  let intent = quarantine_intent_path snapshot in
+  let digest = file_digest intent in
+  (match Q.durable_state_exists_result ~base_path ~keeper_name:"sound" with
+   | Ok true -> () | Ok false -> fail "incomplete quarantine disappeared" | Error e -> fail e);
+  check bool "discovery includes incomplete quarantine" true
+    (List.mem "sound" (Q.discover_keeper_names_with_durable_state ~base_path).keeper_names);
+  (match Q.load_state_result ~base_path ~keeper_name:"sound" with
+   | Error _ -> () | Ok _ -> fail "incomplete quarantine loaded as a queue");
+  Q.For_testing.reset_snapshot_cache_for_testing ();
+  (match Q.load_state_result ~base_path ~keeper_name:"sound" with
+   | Error _ -> () | Ok _ -> fail "fresh cache bypassed incomplete quarantine");
+  (match Q.validate_existing_state_read_only_classified_result ~base_path ~keeper_name:"sound" with
+   | Error (Q.State_failed (Q.File_rejected {file=Q.Quarantine_intent; path; _})) ->
+     check string "typed refusal names the recovery record" intent path
+   | Error _ -> fail "incomplete quarantine lost its typed authority"
+   | Ok _ -> fail "read-only validation admitted incomplete quarantine");
+  let observed = Q.observe_snapshot_with_errors ~base_path ~keeper_name:"sound" in
+  check bool "lock-free observation reports unavailable" true (observed.read_errors <> []);
+  let transformed = ref false in
+  (match Q.update_result ~base_path ~keeper_name:"sound" (fun queue -> transformed := true; queue) with
+   | Error _ -> () | Ok () -> fail "mutation bypassed incomplete quarantine");
+  check bool "refused mutation never transforms state" false !transformed;
+  check string "refused accesses preserve the recovery record" digest (file_digest intent);
+  check (list string) "boot names the incomplete quarantine" [intent]
+    (List.map (fun (u : R.undecodable) -> u.R.path) (R.examine config).R.undecodable);
+  (match D.reader D.Id.Keeper_event_queue with
+   | D.Refuse_boot (_, scan) ->
+     (match D.run scan ~base_path with
+      | Ok {D.refused=1; _} -> ()
+      | Ok _ -> fail "preflight omitted incomplete quarantine"
+      | Error detail -> fail detail)
+   | D.Degrade_typed _ | D.Preflight_only _ -> fail "queue preflight must refuse")
+;;
+
 let test_a_half_finished_move_leaves_the_rejected_file_and_boot_refuses_again () =
-  with_workspace
-  @@ fun config ->
+  with_workspace @@ fun config ->
   let base_path = config.Workspace.base_path in
   let snapshot, wal = queue_files ~base_path in
   write_bytes snapshot "{\"schema\":\"keeper.event_queue.state.v18\"}";
   write_bytes wal "";
-  let unreachable = Filename.concat base_path "no-such-directory/rejected" in
+  let snapshot_digest = file_digest snapshot in
   let rejected_wal = wal ^ ".rejected-test" in
-  (match
-     Keeper_event_queue_persistence.move_aside_undecodable_result
-       ~base_path
-       ~keeper_name:"sound"
-       ~rejected_path_of:(fun path -> if path = snapshot then unreachable else rejected_wal)
-   with
-   | Ok _ -> fail "the snapshot cannot be renamed into a missing directory"
-   | Error detail ->
-     check bool "the error names the WAL already moved" true
-       (String_util.contains_substring detail rejected_wal));
+  let module Q = Keeper_event_queue_persistence in
+  (match Q.For_testing.move_aside_with_rename ~base_path ~keeper_name:"sound"
+      ~rejected_path_of:(fun p -> p ^ ".rejected-test") ~before_clear:ignore
+      ~rename:(fun source destination ->
+        if source = snapshot then raise (Sys_error "snapshot rename refused")
+        else Fs_compat.rename_noreplace source destination) with
+   | Error _ -> () | Ok () -> fail "snapshot rename failure admitted quarantine");
   check bool "the WAL moved first" true (Sys.file_exists rejected_wal);
-  check bool "the rejected snapshot stays" true (Sys.file_exists snapshot);
-  check (list string) "the next boot refuses again at the snapshot" [ snapshot ]
-    (List.map (fun (u : R.undecodable) -> u.R.path) (R.examine config).R.undecodable)
+  check string "the rejected snapshot stays intact" snapshot_digest (file_digest snapshot);
+  check_quarantine_refuses ~config ~snapshot
 ;;
 
 (* One WAL row this build replays, encoded the way the writer does, so the
@@ -926,13 +958,11 @@ let valid_transition_row ~base_path ~keeper_name =
   |> fun row -> row ^ "\n"
 ;;
 
-(* The WAL holds durable transitions: here one valid row before the bad one.
-   When the snapshot cannot move aside, the WAL is restored to its path, so
-   the next boot refuses again at it instead of reading the snapshot without
-   the WAL and silently discarding the transition. *)
-let test_a_half_finished_move_of_a_rejected_wal_restores_the_wal () =
-  with_workspace
-  @@ fun config ->
+(* A valid durable transition precedes a malformed row. Failure after moving
+   this WAL must never let the next load silently use only the good snapshot.
+   The guard also survives a transient obstruction at the old WAL path. *)
+let test_a_half_finished_move_of_a_rejected_wal_retains_recovery () =
+  with_workspace @@ fun config ->
   let base_path = config.Workspace.base_path in
   let snapshot, wal = queue_files ~base_path in
   write_bytes snapshot current_snapshot_bytes;
@@ -940,25 +970,179 @@ let test_a_half_finished_move_of_a_rejected_wal_restores_the_wal () =
   write_bytes wal wal_bytes;
   let snapshot_digest = file_digest snapshot in
   let wal_digest = file_digest wal in
-  check (list string) "boot names the WAL with a valid prefix" [ wal ]
-    (List.map (fun (u : R.undecodable) -> u.R.path) (R.examine config).R.undecodable);
-  let unreachable = Filename.concat base_path "no-such-directory/rejected" in
+  let module Q = Keeper_event_queue_persistence in
   let rejected_wal = wal ^ ".rejected-test" in
-  (match
-     Keeper_event_queue_persistence.move_aside_undecodable_result
-       ~base_path
-       ~keeper_name:"sound"
-       ~rejected_path_of:(fun path -> if path = snapshot then unreachable else rejected_wal)
-   with
-   | Ok _ -> fail "the snapshot cannot be renamed into a missing directory"
-   | Error detail ->
-     check bool "the error says the WAL was restored" true
-       (String_util.contains_substring detail "was restored"));
-  check string "the restored WAL keeps every byte" wal_digest (file_digest wal);
-  check bool "no rejected WAL is left behind" false (Sys.file_exists rejected_wal);
-  check string "the snapshot stays as it was" snapshot_digest (file_digest snapshot);
-  check (list string) "the next boot refuses again at the WAL" [ wal ]
-    (List.map (fun (u : R.undecodable) -> u.R.path) (R.examine config).R.undecodable)
+  (match Q.For_testing.move_aside_with_rename ~base_path ~keeper_name:"sound"
+      ~rejected_path_of:(fun p -> p ^ ".rejected-test") ~before_clear:ignore
+      ~rename:(fun source destination ->
+        if source = snapshot then (
+          Unix.mkdir wal 0o700;
+          raise (Sys_error "snapshot rename refused; original WAL path obstructed"))
+        else Fs_compat.rename_noreplace source destination) with
+   | Error _ -> () | Ok () -> fail "incomplete quarantine was admitted");
+  Unix.rmdir wal;
+  check string "the moved WAL retains every durable byte" wal_digest (file_digest rejected_wal);
+  check string "snapshot remains unchanged" snapshot_digest (file_digest snapshot);
+  check bool "no rollback silently reintroduced the WAL" false (Sys.file_exists wal);
+  check_quarantine_refuses ~config ~snapshot;
+  (match Q.move_aside_undecodable_result ~base_path ~keeper_name:"sound"
+      ~rejected_path_of:(fun _ -> fail "retry must reuse its recorded destinations") with
+   | Error detail -> fail detail
+   | Ok moved ->
+     check string "retry still names the rejected WAL" wal moved.path;
+     check string "retry preserves its destination" rejected_wal moved.rejected_path);
+  check string "retry retained the complete WAL" wal_digest (file_digest rejected_wal);
+  check string "retry retained the snapshot" snapshot_digest (file_digest (snapshot ^ ".rejected-test"));
+  check_queue_starts_empty ~base_path
+;;
+
+let test_intent_only_quarantine_is_discovered_and_resumed () =
+  List.iter (fun only ->
+    with_workspace @@ fun config ->
+    let base_path = config.Workspace.base_path in
+    let snapshot, wal = queue_files ~base_path in
+    (match only with
+     | `Snapshot -> write_bytes snapshot "{not-json"
+     | `Wal -> write_bytes wal "{not-json\n"
+     | `Both -> write_bytes snapshot "{not-json"; write_bytes wal "{not-json\n");
+    let originals = List.filter Sys.file_exists [snapshot;wal] in
+    let digests = List.map (fun p -> p, file_digest p) originals in
+    let module Q = Keeper_event_queue_persistence in
+    (match Q.For_testing.move_aside_with_rename ~base_path ~keeper_name:"sound"
+        ~rejected_path_of:(fun p -> p ^ ".rejected-test")
+        ~rename:Fs_compat.rename_noreplace
+        ~before_clear:(fun () -> raise (Sys_error "interrupted before intent removal")) with
+     | Error _ -> () | Ok () -> fail "pre-clear interruption did not stop quarantine");
+    List.iter (fun p -> check bool "both originals are absent" false (Sys.file_exists p)) [snapshot;wal];
+    check_quarantine_refuses ~config ~snapshot;
+    (match Q.move_aside_undecodable_result ~base_path ~keeper_name:"sound"
+        ~rejected_path_of:(fun _ -> fail "resume must use recorded destinations") with
+     | Ok _ -> () | Error detail -> fail detail);
+    List.iter (fun (p,digest) -> check string "resume preserves bytes" digest (file_digest (p ^ ".rejected-test"))) digests;
+    check_queue_starts_empty ~base_path)
+    [`Snapshot; `Wal; `Both]
+;;
+
+let test_quarantine_rejects_changed_entries () =
+  List.iter (fun changed ->
+    with_workspace @@ fun config ->
+    let base_path = config.Workspace.base_path in
+    let snapshot, wal = queue_files ~base_path in
+    write_bytes snapshot "{not-json";
+    (match changed with `Appeared_partner -> () | `Source | `Destination | `Both_paths -> write_bytes wal "original WAL");
+    let module Q = Keeper_event_queue_persistence in
+    (match Q.For_testing.move_aside_with_rename ~base_path ~keeper_name:"sound"
+        ~rejected_path_of:(fun p -> p ^ ".rejected-test") ~before_clear:ignore
+        ~rename:(fun source destination ->
+          if source = snapshot then raise (Sys_error "stop after WAL")
+          else Fs_compat.rename_noreplace source destination) with
+     | Error _ -> () | Ok () -> fail "fixture did not interrupt quarantine");
+    let evidence_path = match changed with
+      | `Source -> write_bytes snapshot "replacement snapshot"; snapshot
+      | `Destination -> write_bytes (wal ^ ".rejected-test") "edited WAL"; wal ^ ".rejected-test"
+      | `Both_paths -> write_bytes wal "replacement WAL"; wal
+      | `Appeared_partner -> write_bytes wal "new WAL after intent"; wal in
+    let digest = file_digest evidence_path in
+    (match Q.move_aside_undecodable_result ~base_path ~keeper_name:"sound"
+        ~rejected_path_of:(fun _ -> fail "retry recomputed a destination") with
+     | Error _ -> () | Ok _ -> fail "changed entry was treated as original authority");
+    check string "conflicting evidence retained" digest (file_digest evidence_path);
+    check_quarantine_refuses ~config ~snapshot)
+    [`Source; `Destination; `Both_paths; `Appeared_partner]
+;;
+
+let test_quarantine_never_overwrites_a_destination () =
+  with_workspace @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let snapshot, wal = queue_files ~base_path in
+  write_bytes snapshot current_snapshot_bytes;
+  write_bytes wal "{not-json\n";
+  let digest = file_digest wal in
+  let module Q = Keeper_event_queue_persistence in
+  let destination = wal ^ ".rejected-test" in
+  (match Q.For_testing.move_aside_with_rename ~base_path ~keeper_name:"sound"
+      ~rejected_path_of:(fun p -> p ^ ".rejected-test") ~before_clear:ignore
+      ~rename:(fun source target ->
+        write_bytes target "concurrent destination evidence";
+        Fs_compat.rename_noreplace source target) with
+   | Error _ -> () | Ok () -> fail "quarantine overwrote a new destination");
+  check string "conflicting destination retained" "concurrent destination evidence" (Fs_compat.load_file destination);
+  check string "original WAL retained" digest (file_digest wal);
+  check_quarantine_refuses ~config ~snapshot;
+  Unix.unlink destination;
+  (match Q.move_aside_undecodable_result ~base_path ~keeper_name:"sound"
+      ~rejected_path_of:(fun _ -> fail "retry changed its destination") with
+   | Ok _ -> () | Error detail -> fail detail);
+  check_queue_starts_empty ~base_path
+;;
+
+let test_quarantine_requires_confirmed_intent_before_moves () =
+  with_workspace @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let snapshot, wal = queue_files ~base_path in
+  write_bytes snapshot current_snapshot_bytes;
+  write_bytes wal "{not-json\n";
+  let originals = List.map (fun p -> p, file_digest p) [snapshot;wal] in
+  let module Q = Keeper_event_queue_persistence in
+  List.iter (fun _ ->
+    (match Q.For_testing.move_aside_with_sync ~base_path ~keeper_name:"sound"
+        ~rejected_path_of:(fun p -> p ^ ".rejected-test")
+        ~sync_intent:(fun _ -> Error "intent sync refused") with
+     | Error _ -> () | Ok () -> fail "unconfirmed intent authorized quarantine");
+    List.iter (fun (p,digest) ->
+      check string "sync refusal retains every original byte" digest (file_digest p);
+      check bool "sync refusal moves no entry" false (Sys.file_exists (p ^ ".rejected-test"))) originals;
+    check_quarantine_refuses ~config ~snapshot)
+    [`First_attempt; `Explicit_retry];
+  (match Q.move_aside_undecodable_result ~base_path ~keeper_name:"sound"
+      ~rejected_path_of:(fun _ -> fail "resume must use recorded destinations") with
+   | Ok _ -> () | Error detail -> fail detail);
+  check_queue_starts_empty ~base_path
+;;
+
+let test_quarantine_cancellation_retains_intent () =
+  with_workspace @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let snapshot, wal = queue_files ~base_path in
+  write_bytes snapshot current_snapshot_bytes;
+  write_bytes wal "{not-json\n";
+  let module Q = Keeper_event_queue_persistence in
+  (match Q.For_testing.move_aside_with_rename ~base_path ~keeper_name:"sound"
+      ~rejected_path_of:(fun p -> p ^ ".rejected-test") ~before_clear:ignore
+      ~rename:(fun source destination ->
+        Fs_compat.rename_noreplace source destination;
+        raise (Eio.Cancel.Cancelled (Failure "interrupted after WAL rename"))) with
+   | exception Eio.Cancel.Cancelled _ -> ()
+   | Error _ | Ok () -> fail "quarantine swallowed cancellation");
+  check_quarantine_refuses ~config ~snapshot;
+  (match Q.move_aside_undecodable_result ~base_path ~keeper_name:"sound"
+      ~rejected_path_of:(fun _ -> fail "cancelled recovery recomputed destinations") with
+   | Ok _ -> () | Error detail -> fail detail);
+  check_queue_starts_empty ~base_path
+;;
+
+let test_bad_quarantine_intent_refuses_without_touching_sources () =
+  List.iter (fun fixture ->
+    with_workspace @@ fun config ->
+    let base_path = config.Workspace.base_path in
+    let snapshot, _ = queue_files ~base_path in
+    let intent = quarantine_intent_path snapshot in
+    Fs_compat.mkdir_p (Filename.dirname snapshot);
+    (match fixture with
+     | `Malformed -> write_bytes intent "{not-json"; Unix.chmod intent 0o600
+     | `Link -> Unix.symlink "absent-intent-target" intent);
+    let module Q = Keeper_event_queue_persistence in
+    check bool "intent-only entry discovered" true
+      (List.mem "sound" (Q.discover_keeper_names_with_durable_state ~base_path).keeper_names);
+    (match Q.load_result ~base_path ~keeper_name:"sound" with
+     | Error _ -> () | Ok _ -> fail "bad intent loaded as an empty queue");
+    (match Q.move_aside_undecodable_result ~base_path ~keeper_name:"sound"
+        ~rejected_path_of:(fun _ -> fail "invalid intent must not plan moves") with
+     | Error _ -> () | Ok _ -> fail "invalid intent was silently discarded");
+    check bool "bad intent is retained as an entry" true
+      (match Fs_compat.exact_path_kind ~follow:false intent with
+       | Fs_compat.Exact_kind _ -> true | Fs_compat.Exact_missing | Fs_compat.Exact_unknown -> false))
+    [`Malformed; `Link]
 ;;
 
 (* State that reads by the time the lock is held is left where it is. *)
@@ -1284,8 +1468,20 @@ let () =
             test_a_bad_wal_over_a_good_snapshot_is_named_by_its_wal
         ; test_case "a half-finished move leaves the rejected file" `Quick
             test_a_half_finished_move_leaves_the_rejected_file_and_boot_refuses_again
-        ; test_case "a half-finished move of a rejected WAL restores the WAL" `Quick
-            test_a_half_finished_move_of_a_rejected_wal_restores_the_wal
+        ; test_case "a half-finished WAL quarantine retains recovery and resumes" `Quick
+            test_a_half_finished_move_of_a_rejected_wal_retains_recovery
+        ; test_case "intent-only and single-file quarantine resume" `Quick
+            test_intent_only_quarantine_is_discovered_and_resumed
+        ; test_case "changed quarantine entries remain refused" `Quick
+            test_quarantine_rejects_changed_entries
+        ; test_case "a destination created during rename is never overwritten" `Quick
+            test_quarantine_never_overwrites_a_destination
+        ; test_case "intent sync is mandatory before every attempted recovery" `Quick
+            test_quarantine_requires_confirmed_intent_before_moves
+        ; test_case "cancellation after rename keeps recovery authority" `Quick
+            test_quarantine_cancellation_retains_intent
+        ; test_case "malformed and indirect intent cannot disappear" `Quick
+            test_bad_quarantine_intent_refuses_without_touching_sources
         ; test_case "a queue that decodes is not moved" `Quick
             test_a_queue_that_decodes_is_not_moved
         ] )

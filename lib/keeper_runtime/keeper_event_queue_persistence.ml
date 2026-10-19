@@ -1,5 +1,6 @@
 module Owner_lock = Keeper_event_queue_owner_lock
 module State = Keeper_event_queue_state
+module Quarantine = Keeper_event_queue_quarantine
 
 let state_change_observer : (unit -> unit) Atomic.t = Atomic.make ignore
 let install_state_change_observer observer = Atomic.set state_change_observer observer
@@ -152,7 +153,8 @@ let durable_paths_exist snapshot wal =
   let ( let* ) = Result.bind in
   let* snapshot_exists = path_exists_exact snapshot in
   let* wal_exists = path_exists_exact wal in
-  Ok (snapshot_exists || wal_exists)
+  let* intent_exists = path_exists_exact (Quarantine.path ~snapshot) in
+  Ok (snapshot_exists || wal_exists || intent_exists)
 ;;
 
 let durable_state_exists_unlocked owner =
@@ -510,7 +512,11 @@ let read_primary_current_unlocked ?(after_read = fun () -> ()) owner =
         | Error message -> decode_error message))
 ;;
 
-let read_primary_unlocked = read_primary_current_unlocked
+let read_primary_unlocked ?after_read owner =
+  let ( let* ) = Result.bind in
+  let* () = Quarantine.guard ~snapshot:(snapshot_path_of_owner owner) in
+  read_primary_current_unlocked ?after_read owner
+;;
 
 let bump_revision state =
   if Int64.equal (State.revision state) Int64.max_int
@@ -743,6 +749,7 @@ let load_state_result ~base_path ~keeper_name =
 type durable_file =
   | Snapshot
   | Transition_wal
+  | Quarantine_intent
 
 type file_failure =
   { file : durable_file
@@ -768,18 +775,23 @@ let read_only_failure_to_string = function
   | State_failed failure -> state_failure_to_string failure
 ;;
 
-(* The one read-only read. A failure names the file it came from, so boot can
-   point at that file and move it last. *)
+(* The one read-only read. A failure names its file or incomplete quarantine
+   record, so boot and preflight share the same recovery authority. *)
 let read_state_read_only_classified_unlocked ~require_existing owner =
   let rejected file path detail = File_rejected { file; path; detail } in
   let wal_rejected detail =
     rejected Transition_wal (transition_wal_path_of_owner owner) detail
   in
-  match read_primary_unlocked owner with
-  | Error detail -> Error (rejected Snapshot (snapshot_path_of_owner owner) detail)
-  | Ok (Primary_current state) ->
+  let read () =
+    match Quarantine.guard ~snapshot:(snapshot_path_of_owner owner) with
+    | Error detail ->
+    Error (rejected Quarantine_intent (Quarantine.path ~snapshot:(snapshot_path_of_owner owner)) detail)
+    | Ok () ->
+  match read_primary_current_unlocked owner with
+    | Error detail -> Error (rejected Snapshot (snapshot_path_of_owner owner) detail)
+    | Ok (Primary_current state) ->
     replay_transition_wal_read_only_unlocked owner state |> Result.map_error wal_rejected
-  | Ok Primary_absent ->
+    | Ok Primary_absent ->
     (match path_exists_exact (transition_wal_path_of_owner owner) with
      | Error detail -> Error (wal_rejected detail)
      | Ok false when require_existing ->
@@ -796,6 +808,14 @@ let read_state_read_only_classified_unlocked ~require_existing owner =
          owner
          State.empty
        |> Result.map_error wal_rejected)
+  in
+  let result = read () in
+  (* Lock-free observers may overlap a quarantine beginning after the first
+     guard check. Do not publish that sample as ordinary queue authority. *)
+  match Quarantine.guard ~snapshot:(snapshot_path_of_owner owner) with
+  | Ok () -> result
+  | Error detail ->
+    Error (rejected Quarantine_intent (Quarantine.path ~snapshot:(snapshot_path_of_owner owner)) detail)
 ;;
 
 let read_state_read_only_unlocked ~require_existing owner =
@@ -890,104 +910,43 @@ type moved_aside =
   ; moved_with : (string * string) option
   }
 
-(* Boot quarantine (RFC every-durable-store-has-one-boot-policy): the snapshot
-   and the WAL carry one state, so they move together. Under the owner lock the
-   state is read again the way [validate_existing_state_read_only_result] reads
-   it; state that decodes now, or has no files, is left where it is.
+(* The durable intent is the refusal authority across every partial move,
+   including a crash after both originals disappeared. Only explicit quarantine
+   enters this recovery path; ordinary loaders never complete it implicitly. *)
+let move_aside_with ~sync_intent ~rename ~before_clear ~base_path ~keeper_name ~rejected_path_of =
+  let ( let* ) = Result.bind in
+  let* owner = resolve_owner ~base_path ~keeper_name in
+  let snapshot = snapshot_path_of_owner owner in
+  let wal = transition_wal_path_of_owner owner in
+  try
+    Owner_lock.with_durable_lock owner (fun () ->
+      let* existing = Quarantine.read ~snapshot ~wal in
+      let* intent = match existing with
+        | Some intent -> Ok intent
+        | None ->
+          match read_state_read_only_classified_unlocked ~require_existing:true owner with
+          | Ok (_ : State.t) -> Error "the event queue decodes now; it was left in place"
+          | Error (State_missing _) -> Error "the event queue has no durable state; nothing was moved"
+          | Error (File_rejected {file=Quarantine_intent; detail; _}) -> Error detail
+          | Error (File_rejected {file=Snapshot; _}) ->
+            Quarantine.start ~snapshot ~wal ~rejected:Quarantine.Snapshot ~rejected_path_of
+          | Error (File_rejected {file=Transition_wal; _}) ->
+            Quarantine.start ~snapshot ~wal ~rejected:Quarantine.Transition_wal ~rejected_path_of
+      in
+      forget_snapshot snapshot;
+      let* moved = Quarantine.finish ~sync_intent ~rename ~before_clear ~snapshot ~wal intent in
+      Ok {path=moved.path; rejected_path=moved.rejected_path; moved_with=moved.moved_with})
+    |> Result.map_error (fun detail -> Printf.sprintf "event queue quarantine keeper=%s intent=%s: %s"
+      keeper_name (Quarantine.path ~snapshot) detail)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printf.sprintf "event queue quarantine failed keeper=%s intent=%s: %s"
+      keeper_name (Quarantine.path ~snapshot) (Printexc.to_string exn))
+;;
 
-   The WAL always moves first. A move that stops after it leaves the snapshot
-   alone: a rejected snapshot refuses the next boot again, and a readable one
-   is the committed state the WAL was replayed on. The other order could leave
-   a WAL alone, and a WAL replays alone from its first row's pre-state, which
-   is how a WAL rejected only for disagreeing with its snapshot would come back
-   as the queue. The next load after a full move finds no durable state and
-   starts the empty queue. *)
-let move_aside_undecodable_result ~base_path ~keeper_name ~rejected_path_of =
-  match resolve_owner ~base_path ~keeper_name with
-  | Error _ as error -> error
-  | Ok owner ->
-    let rename path =
-      let rejected_path = rejected_path_of path in
-      match Fs_compat.rename path rejected_path with
-      | () -> Ok rejected_path
-      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-      | exception exn ->
-        Error
-          (Printf.sprintf
-             "%s could not be moved to %s: %s"
-             path
-             rejected_path
-             (Printexc.to_string exn))
-    in
-    (* The rejected file is renamed whatever it is, since reading it failed;
-       its partner whenever a directory entry exists, including a dangling
-       symbolic link that the no-follow reader rejected. *)
-    let rename_partner path =
-      match path_exists_exact path with
-      | Error _ as error -> error
-      | Ok true -> rename path |> Result.map (fun rejected_path -> Some (path, rejected_path))
-      | Ok false -> Ok None
-    in
-    (try
-       Owner_lock.with_durable_lock owner (fun () ->
-         match read_state_read_only_classified_unlocked ~require_existing:true owner with
-         | Ok (_ : State.t) -> Error "the event queue decodes now; it was left in place"
-         | Error (State_missing (_ : string)) ->
-           Error "the event queue has no durable state; nothing was moved"
-         | Error (File_rejected { file = Snapshot; path; detail = _ }) ->
-           (match rename_partner (transition_wal_path_of_owner owner) with
-            | Error _ as error -> error
-            | Ok moved_with ->
-              (match rename path, moved_with with
-               | Ok rejected_path, _ -> Ok { path; rejected_path; moved_with }
-               | Error detail, None -> Error detail
-               | Error detail, Some (wal, rejected_wal) ->
-                 Error
-                   (Printf.sprintf
-                      "%s; %s was already moved to %s and the rejected snapshot \
-                       stays, so the next boot refuses again"
-                      detail
-                      wal
-                      rejected_wal)))
-         | Error (File_rejected { file = Transition_wal; path; detail = _ }) ->
-           (match rename path with
-            | Error _ as error -> error
-            | Ok rejected_path ->
-              (match rename_partner (snapshot_path_of_owner owner) with
-               | Ok moved_with -> Ok { path; rejected_path; moved_with }
-               | Error detail ->
-                 (* The WAL is aside but its snapshot is not. Restoring the WAL
-                    leaves the pair as the read found it, so the next boot
-                    refuses again at the WAL instead of reading the snapshot
-                    without the WAL's durable transitions. *)
-                 (match Fs_compat.rename rejected_path path with
-                  | () ->
-                    Error
-                      (Printf.sprintf
-                         "%s; the snapshot could not be moved aside, so %s was \
-                          restored from %s and the next boot refuses again"
-                         detail
-                         path
-                         rejected_path)
-                  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-                  | exception exn ->
-                    Error
-                      (Printf.sprintf
-                         "%s; the snapshot could not be moved aside and %s could not \
-                          be restored from %s (%s): quarantine is incomplete"
-                         detail
-                         path
-                         rejected_path
-                         (Printexc.to_string exn))))))
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Error
-         (Printf.sprintf
-            "event queue move-aside raised keeper=%s path=%s: %s"
-            (keeper_name_of_owner owner)
-            (snapshot_path_of_owner owner)
-            (Printexc.to_string exn)))
+let move_aside_undecodable_result =
+  move_aside_with ~sync_intent:Fs_compat.sync_file_and_parent_strict
+    ~rename:Fs_compat.rename_noreplace ~before_clear:(fun () -> ())
 ;;
 
 let load_with_projection ~projection ~base_path ~keeper_name =
@@ -1944,6 +1903,18 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
 ;;
 
 module For_testing = struct
+  let move_aside_with_sync ~sync_intent ~base_path ~keeper_name ~rejected_path_of =
+    move_aside_with ~sync_intent ~rename:Fs_compat.rename_noreplace
+      ~before_clear:ignore ~base_path ~keeper_name ~rejected_path_of
+    |> Result.map (fun _ -> ())
+  ;;
+
+  let move_aside_with_rename ~rename ~before_clear ~base_path ~keeper_name ~rejected_path_of =
+    move_aside_with ~sync_intent:Fs_compat.sync_file_and_parent_strict
+      ~rename ~before_clear ~base_path ~keeper_name ~rejected_path_of
+    |> Result.map (fun _ -> ())
+  ;;
+
   let enqueue_stimulus_once_with_confirmation
         ~confirm_snapshot ~already_delivered ~base_path ~keeper_name stimulus =
     enqueue_stimulus_once_with ~confirm_snapshot ~already_delivered

@@ -183,7 +183,9 @@ let preparation_of_projection projection =
    turns about other Tasks, until that Task is released: no path re-pins a
    Task. The downgrade holds only for successfully scanned sources; a pin
    into an unreadable source or entry stops setup above instead. *)
-let resolve_requests ?descriptors ~snapshot requests =
+(* Select the required result shape at construction: ordinary resolution needs
+   only the selection; executable binding needs its coherent preparation too. *)
+let resolve_requests ?descriptors ~snapshot ~finish requests =
   let tool_descriptors = match descriptors with
     | Some descriptors -> descriptors
     | None -> Keeper_tool_descriptor.all_descriptors () in
@@ -193,8 +195,9 @@ let resolve_requests ?descriptors ~snapshot requests =
   let rec loop projection resolved unprojectable = function
     | [] ->
       let preparation = preparation_of_projection (prepare projection) in
-      Ok { selected = List.rev resolved; unprojectable = List.rev unprojectable;
-        descriptor_authority = descriptors; preparation = Some preparation }
+      let selection={ selected = List.rev resolved; unprojectable = List.rev unprojectable;
+        descriptor_authority = descriptors; preparation = Some preparation } in
+      Ok (finish selection preparation)
     | (reference, task_ids) :: rest ->
       (match Skill_catalog_snapshot.resolve_reference snapshot reference with
        | Error resolution ->
@@ -234,7 +237,7 @@ let resolve_requests ?descriptors ~snapshot requests =
 ;;
 
 let resolve_with_task_ids ?descriptors ~snapshot ~task_ids references =
-  resolve_requests ?descriptors ~snapshot
+  resolve_requests ?descriptors ~snapshot ~finish:(fun selection _ -> selection)
     (List.map (fun reference -> reference, task_ids) references)
 ;;
 
@@ -329,7 +332,7 @@ let resolve_observations_with_authority ~descriptor_authority ~snapshot ~current
         List.map (fun reference -> reference,[task_id]) references)
     |> merge_rows ~reference:fst ~task_ids:snd
         ~with_task_ids:(fun (reference,_) task_ids -> reference,task_ids) in
-  resolve_requests ?descriptors:descriptor_authority ~snapshot requests
+  resolve_requests ?descriptors:descriptor_authority ~snapshot ~finish:(fun selection _ -> selection) requests
 ;;
 
 let resolve_observations ~snapshot ~current_task ~held_task_skills =
@@ -338,25 +341,32 @@ let resolve_observations ~snapshot ~current_task ~held_task_skills =
 
 let descriptors selection = selection.descriptor_authority
 
-let with_descriptors ~descriptors ~snapshot selection =
+let retain_surface ~snapshot ~descriptors preparation =
+  Keeper_skill_preparation_observation.cache_access Keeper_skill_preparation_observation.Retained_turn_surface ~snapshot
+    ~descriptor_count:(fun () -> List.length descriptors) (fun observation ->
+      Keeper_skill_preparation_observation.decided observation Keeper_skill_preparation_observation.Reused;
+      preparation)
+
+let bind_surface ~descriptors ~snapshot selection =
+  let finish selection preparation =
+    selection,retain_surface ~snapshot ~descriptors preparation in
   match selection.preparation, selection.descriptor_authority with
   | Some original, Some bound when same_descriptors bound descriptors
       && Keeper_skill_catalog.prepared_matches original.projection ~descriptors snapshot ->
-      Ok selection
+      Ok (finish selection original)
   | None, _ | _, None | Some _, Some _ ->
     let requests = List.map (fun (row : selected) -> row.reference,row.task_ids) selection.selected
       @ List.map (fun (row : unprojectable) -> row.reference,row.task_ids) selection.unprojectable
       |> merge_rows ~reference:fst ~task_ids:snd
           ~with_task_ids:(fun (reference,_) task_ids -> reference,task_ids) in
-    resolve_requests ~descriptors ~snapshot requests
+    (* Resolution constructs the matching values together. Returning that product
+       requires no second validation or optional-field recovery after binding. *)
+    resolve_requests ~descriptors ~snapshot ~finish requests
 
 let prepare_surface ~snapshot ~descriptors selection =
   match selection.preparation with
   | Some preparation when Keeper_skill_catalog.prepared_matches preparation.projection ~descriptors snapshot ->
-    Keeper_skill_preparation_observation.cache_access Keeper_skill_preparation_observation.Retained_turn_surface ~snapshot
-      ~descriptor_count:(fun () -> List.length descriptors) (fun observation ->
-        Keeper_skill_preparation_observation.decided observation Keeper_skill_preparation_observation.Reused;
-        preparation)
+      retain_surface ~snapshot ~descriptors preparation
   | Some _ | None ->
     Keeper_skill_catalog.prepare_snapshot ~descriptors snapshot |> preparation_of_projection
 ;;

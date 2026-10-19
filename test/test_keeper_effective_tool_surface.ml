@@ -1219,9 +1219,9 @@ value = {}
     [ "machine-command", source
     ; "snapshot", composition_skill ~name:"snapshot" ~execution:"async" ] in
   let project_with descriptors =
-    let selection = match Keeper_task_skill_turn.with_descriptors ~descriptors
+    let selection = match Keeper_task_skill_turn.bind_surface ~descriptors
       ~snapshot Keeper_task_skill_turn.empty with
-      | Ok selection -> selection
+      | Ok (selection,_) -> selection
       | Error error -> fail (Keeper_task_skill_turn.error_to_string error) in
     match Keeper_effective_tool_surface.For_testing.project
       ~keeper_name:"fixture" ~runtime_id:"fixture.runtime" ~skills_left_out:[]

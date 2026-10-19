@@ -1,6 +1,6 @@
 ---
 name: ocaml-coding
-description: "masc 저장소에서 OCaml 5.5 + Eio 코드를 쓰기 전에 보는 점검표다. 오류를 Result 와 닫힌 합타입으로 다루는 법, 예외 잡기와 Eio 취소, executor의 실제 worker 정리와 실패 재실행 금지, Mutex·Lazy 선택, 자원 정리(Switch.on_release 와 Fun.protect), 막히는 I/O, .mli 먼저 고치기, 결정론 게이트와 CI lint 가 새 줄에서 잡는 모양을 다룬다. lib/·bin/·test/ 의 .ml/.mli 를 새로 쓰거나 고칠 때 쓴다."
+description: "masc 저장소에서 OCaml 5.5 + Eio 코드를 쓰기 전에 보는 점검표다. 오류를 Result 와 닫힌 합타입으로 다루는 법, 예외 잡기와 Eio 취소, executor의 실제 worker 정리와 실패 재실행 금지, Mutex·Lazy 선택, 자원 정리(Switch.on_release 와 Fun.protect), 막히는 I/O, Task Skill 선택·준비 쌍의 재사용, .mli 먼저 고치기, 결정론 게이트와 CI lint 가 새 줄에서 잡는 모양을 다룬다. lib/·bin/·test/ 의 .ml/.mli 를 새로 쓰거나 고칠 때 쓴다."
 ---
 
 # masc OCaml 점검표
@@ -149,6 +149,13 @@ Eio 는 협력형 스케줄러다. 취소와 시간 초과는 fiber 가 멈추�
   계산 실패도 취소도 조용히 사라진다(2절).
 
 ## 8. API 를 바꿀 때는 .mli 먼저
+
+- Keeper 실행 setup·effective surface·Composition 재개의 Task Skill 바인딩은
+  `Keeper_task_skill_turn.bind_surface`가 반환한 `(selection, preparation)`을 함께 사용한다.
+  이미 검증한 불변 입력의 준비를 바로 다시 검사하거나 optional 필드에서 추정해 꺼내지 않는다.
+  정확한 snapshot/descriptor 객체와 선택 authority 검증, 오류·Task 출처·retained-surface 관측을
+  유지한다. 표시용 `prepare_surface`는 Task 참조를 재해석하지 않는 별도 관측 경계다.
+  검사 호출 수의 감소를 준비 시간·모델 왕복·실제 실행 개선으로 바꾸어 말하지 않는다.
 
 - `.mli` 가 있으면 `.mli` 를 먼저 고치고 `.ml` 을 맞춘다. `.ml` 에만 인자를 더하면 인터페이스와
   안 맞아 컴파일이 실패한다.

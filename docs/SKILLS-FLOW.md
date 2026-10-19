@@ -112,6 +112,11 @@ sequenceDiagram
 묶어 서로 다른 참조마다 한 번 해석한다. 공유 참조에는 모든 Task ID가 남는다.
 `prepare_agent_setup`(`keeper_run_tools_setup.ml`)은 그 결과를 받는다. snapshot 객체와
 descriptor 객체들이 같으면 같은 불변 선택을 재사용하고, 입력이 바뀌면 원래 참조를 재해석한다.
+실행 setup·effective surface·Composition 재개는 `Keeper_task_skill_turn.bind_surface`에서
+선택과 그 입력에 맞는 catalog/diagnostic/inventory 준비 결과를 함께 받는다. 바인딩 직후
+같은 입력으로 준비를 다시 검증하지 않는다. 선택 authority 검증과 exact snapshot/descriptor
+객체 일치는 유지하며, 새로 해석한 경우에는 그 해석이 만든 선택·준비 쌍을 그대로 반환한다.
+표시용 `prepare_surface`는 이미 선택한 Task 참조를 다시 해석하지 않는 별도 관측 계약이다.
 설정이 정상인 snapshot에서 해소되지 않는 reference(pin한 Skill을 고치거나 지운 경우)와
 catalog가 투영하지 못하는 entry는 그 Task의 unavailable row이며 턴을 막지 않는다.
 이유(`error_code`, `detail`)는 prompt와 로그에 보인다. Skill 설정이 거절됐거나 읽히지 않은
@@ -145,6 +150,8 @@ Task Skill도 실행 projection과 prompt에서 unavailable이며 admission 전�
   - 스냅샷은 `Skill_reference.Identity_map`(`source_id`, `package_id`, `name`) 기반 exact 인덱스와 이름별 첫 source 유효 항목 인덱스를 불변 값으로 보유한다 (`O(log E)` 조회).
   - 스냅샷은 `Ephemeron.K1`, Tool descriptor 목록은 각 descriptor를 약한 키로 갖는 `Ephemeron.Kn`에 결속하여 살아 있는 입력에 대해서만 완성된 카탈로그·diagnostic·inventory 준비 결과를 공유한다.
   - Lane add-on worker는 backend 시작마다 고유 owner token을 발급하고 `Ephemeron.K2`/`K1`으로 동일 owner·Tool 객체의 export와 canonical descriptor를 재사용하되, 실제 호출 경계에서는 현재 가시성·phase·schema·owner 일치를 매번 다시 검증한다.
+  - `bind_surface`의 성공 결과는 `(selection, preparation)`이며, 재사용 경로는 기존 선택과 준비 객체를 그대로 공유한다. 재해석도 결과 생성 시 준비를 함께 돌려주며, selection만 필요한 해석은 그 형태를 바로 투영한다. 바인딩 뒤 별도의 `prepare_surface` 검사는 없다.
+  - 세 실행 소비 경로에서 입력이 그대로인 성공 바인딩의 `prepared_matches` 호출은 2회에서 1회로 줄었다(별도의 선택 authority 비교는 유지). `Retained_turn_surface` 관측은 성공 바인딩 뒤 기존 의미로 한 번 남고, config/source/pin 오류·Task 출처·실제 Tool 권한·자원 소유권 검증은 바꾸지 않는다. 이는 소스상 검사 호출 수이며 준비 시간·모델 왕복 감소 실측이 아니다.
 - **도구 이름 투영과 Skill 크기 관측 (`Keeper_run_tools_setup`, `Keeper_tool_composition_surface`)**:
   - official-client·Agent Core 표면의 검증은 공통 descriptor·Skill 이름 목록을 setup당 한 번 계산하고, 실제 지연 도구·대화에 유지된 스키마·연결 도구 목록은 각 표면에 맞춰 검증한다.
   - composition 이름 검증은 스키마와 같은 typed 행 선택을 사용하되 설명·입력 스키마·임시 Tool 객체를 만들지 않는다. Skill별 크기는 선언된 composition 스키마 하나만 만들며 공유 status·cancel·prepare·run 스키마를 덧붙이지 않는다. 실행 도구의 실제 생성·요청 바이트는 이 변경으로 줄었다고 주장하지 않는다.

@@ -83,8 +83,8 @@ actual endpoint timing and delivery require a separate runtime probe.
 
 `music-midi-live --plan LIVE_MIDI_JSON` opens selected CoreMIDI sources and
 forwards their delivered UMP messages to explicitly selected native MIDI 2.0
-destinations. This helper is a backend: the TUI and backing transport do not yet
-start it or derive its reservations. Its plan requires an explicit `reserved`
+destinations. The arrangement TUI starts this helper and derives reservations from the
+actual prepared backing plan using native playback parsers. Its plan requires an explicit `reserved`
 array, including `[]` for a standalone owner:
 
 ```json
@@ -106,9 +106,13 @@ the whole destination. No route rewrites a message's group or channel.
 
 Overlapping destination scopes across routes or against declared reservations
 are rejected before resources open. Disjoint channels can share a destination.
-The caller must supply authoritative backing claims before integrating this
-helper with playback; accepting a plan does not establish actual backing
-ownership. A destination must report protocol 2. Input delivery requests protocol
+The TUI obtains backing claims with `music-midi-live reservations --file PLAN
+--format FORMAT`, using the same MIDI region and UMP prefix ownership as playback.
+It retains the private plan during inspection and playback, closes an old live
+owner before a replacement, and admits the new live/backing combination only
+after the native live owner validates these claims. Standalone callers must
+supply their own authoritative reservations; the helper is not a process-global
+lease service. A destination must report protocol 2. Input delivery requests protocol
 2, so CoreMIDI may convert a source into that delivery protocol. Preservation
 here refers to the complete delivered UMP words, not the original physical wire
 representation or an unnegotiated end-to-end MIDI 2.0 instrument connection.
@@ -140,3 +144,9 @@ as the final acknowledgement.
 with controlled property/send effects, without registering devices. Actual
 selected-source/destination delivery, physical instruments, synth/audio output,
 measured roundtrip latency and visible TUI use require separate evidence.
+
+
+`node tools/alphatex/native/test-live-midi-reservations.mjs` runs the real
+read-only reservations command against source-derived plans. It checks trimmed
+MIDI and UMP prefix ownership, physical port remapping/group/channel union,
+hybrid collisions and malformed/hidden backing data without opening a device.

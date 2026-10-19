@@ -12,6 +12,8 @@ import { saveProject } from './sequencer-files.mjs'
 import { safeText } from './terminal.mjs'
 import { openPlayback } from './playback.mjs'
 import { devices, record, monitorInput } from './capture.mjs'
+import { openLiveMidi, backingMidiClaims, liveMidiPlan } from './live-midi.mjs'
+import { midiDestinations } from './playback.mjs'
 import { recordingEpoch } from './arrangement-recording.mjs'
 
 const help = [
@@ -43,7 +45,9 @@ const help = [
   ':inputs lists audio/MIDI inputs; :input AUDIO_UID; :midi-input all|none|UID',
   ':record starts simultaneous WAV + raw MIDI against playing backing; :record-stop',
   ':monitor AUDIO_OUTPUT_UID enables input monitoring; :monitor off disables it.',
-  'Transport/edits finalize recording first. MIDI input monitoring and whole looping remain unfinished.',
+  ':midi-monitor SOURCE_UID DEST_UID [GROUP CHANNEL ...] (1–16); omit pairs for all messages.',
+  'Repeat for more routes; :midi-monitor remove SOURCE_UID DEST_UID; :midi-monitor off.',
+  'Channel scopes filter system/SysEx. Transport/edits finalize recording; whole looping remains unfinished.',
 ]
 
 export async function viewArrangement({ path, loaded, initialDocument, root = resolve('music-projects'), embedded = false, signal, output, midiOutput } = {}) {
@@ -69,6 +73,8 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   const jobs = new Map(), players = new Map(), preparations = new Set(), wasRaw = process.stdin.isRaw
   let transport = { kind: 'stopped' }, generation = 0, preparing = null, route = arrangementRoute({ output, midiOutput })
   let monitoring = null, monitorOutput = null
+  let liveMidi = null, liveRoutes = [], liveTransitions = Promise.resolve()
+  const playerPlans = new Map(), planInspections = new Map()
   let recording = null, input = null, midiInput = 'all', transportPending = false, inputDevices = null, discoveryTicket = 0
   const discovery = new AbortController()
   let complete
@@ -86,7 +92,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       if (!workerFailure) worker.postMessage({ kind: 'cancel' })
       complete()
     }
-    if (recording || monitoring) Promise.allSettled([settleRecording(), settleMonitoring()]).finally(release)
+    if (recording || monitoring || liveMidi) Promise.allSettled([settleRecording(), settleMonitoring(), settleLiveMidi()]).finally(release)
     else release()
   }
   async function settleMonitoring() {
@@ -112,6 +118,56 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       }).finally(() => { if (monitoring === owned) monitoring = null; draw() })
     } catch (error) { monitoring = null; monitorOutput = null; status = error.message; draw() }
     draw()
+  }
+  function transitionLiveMidi(action) {
+    const pending = liveTransitions.then(action)
+    liveTransitions = pending.catch(() => {})
+    return pending
+  }
+  async function settleLiveMidi() {
+    const owned = liveMidi
+    if (!owned) return
+    owned.controller.abort(); owned.handle?.stop()
+    await owned.completion
+  }
+  function inspectMidiPlan(plan, signal) {
+    const pending = backingMidiClaims({ path: plan.path, format: plan.format, signal })
+    const readers = planInspections.get(plan) ?? new Set()
+    planInspections.set(plan, readers); readers.add(pending)
+    return pending.finally(() => { readers.delete(pending); if (!readers.size) planInspections.delete(plan) })
+  }
+  function startLiveMidi(extraPlan) {
+    if (!accepting || suspended || liveMidi || !liveRoutes.length) return null
+    const routes = liveRoutes, owned = { controller: new AbortController(), handle: null, info: null, phase: 'opening', completion: null, ready: null }
+    liveMidi = owned
+    let admit, refuse
+    owned.ready = new Promise((resolve, reject) => { admit = resolve; refuse = reject }); owned.ready.catch(() => {})
+    owned.completion = (async () => {
+      try {
+        const signal = owned.controller.signal, plans = [...playerPlans.values(), ...(extraPlan ? [extraPlan] : [])]
+        const reserved = (await Promise.all(plans.map(plan => inspectMidiPlan(plan, signal)))).flat()
+        signal.throwIfAborted()
+        owned.handle = await openLiveMidi({ routes, reserved, signal, directory, onEvent(event) {
+          if (liveMidi !== owned || signal.aborted) return
+          if (event.kind === 'monitoring') { owned.info = event; owned.phase = 'active' }
+          if (event.kind === 'error') { owned.failure = new Error(event.message); owned.phase = 'failed'; owned.info = null }
+          draw()
+        } })
+        const active = await owned.handle.ready
+        signal.throwIfAborted(); if (owned.failure) throw owned.failure
+        admit(active)
+        await owned.handle.completion
+      } catch (error) {
+        refuse(error)
+        if (!owned.controller.signal.aborted && liveMidi === owned) { status = error.message; liveRoutes = [] }
+      } finally {
+        owned.handle?.stop()
+        if (owned.handle) await owned.handle.completion.catch(() => {})
+        if (liveMidi === owned) liveMidi = null
+        draw()
+      }
+    })()
+    return owned
   }
   async function settleRecording() {
     const owned = recording
@@ -225,38 +281,50 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         if (generation === expected) preparing = null
         await Promise.allSettled([...players.values()])
         if (!accepting || generation !== expected) return
-        transport = { kind: 'starting' }
-        const handle = openPlayback({ path: result.path, format: result.format, output, midiOutput: result.midiOutput, midiBindings: result.bindings,
-          onEvent(event) {
-            if (generation !== expected) return
-            const captured = recording?.generation === expected ? recording : null
-            if (event.kind === 'error') {
-              if (captured) captured.failure = new Error(event.message)
-              captured?.controller.abort(); captured?.handle?.stop(); status = event.message; return
-            }
-            if (event.kind === 'stopped' && captured) {
-              if (captured.epoch) captured.epoch.duration = Math.min(captured.epoch.duration, event.currentTime)
-              captured.controller.abort(); captured.handle?.stop()
-            }
-            if (!accepting) return
-            transportPending = false
-            transport = { ...transport, kind: event.kind, event }
-            draw()
-          } })
-        transport = { ...transport, handle }
-        const completion = handle.completion.then(event => {
-          if (recording?.generation === expected) { recording.controller.abort(); recording.handle?.stop() }
-          if (generation === expected) { transport = { kind: 'stopped', event }; status = 'Playback stopped'; draw() }
-        }, error => {
-          if (recording?.generation === expected) { recording.failure = error; recording.controller.abort(); recording.handle?.stop() }
-          if (generation === expected) { transport = { kind: 'stopped' }; status = error.message; draw() }
-        }).finally(() => { players.delete(handle) })
-        players.set(handle, completion)
-        await completion
+        const admitted = await transitionLiveMidi(async () => {
+          await settleLiveMidi()
+          if (!accepting || generation !== expected) return
+          const live = startLiveMidi(result)
+          if (live) await live.ready
+          if (!accepting || generation !== expected || live && liveMidi !== live) return
+          transport = { kind: 'starting' }
+          const handle = openPlayback({ path: result.path, format: result.format, output, midiOutput: result.midiOutput, midiBindings: result.bindings,
+            onEvent(event) {
+              if (generation !== expected) return
+              const captured = recording?.generation === expected ? recording : null
+              if (event.kind === 'error') {
+                if (captured) captured.failure = new Error(event.message)
+                captured?.controller.abort(); captured?.handle?.stop(); status = event.message; return
+              }
+              if (event.kind === 'stopped' && captured) {
+                if (captured.epoch) captured.epoch.duration = Math.min(captured.epoch.duration, event.currentTime)
+                captured.controller.abort(); captured.handle?.stop()
+              }
+              if (!accepting) return
+              transportPending = false
+              transport = { ...transport, kind: event.kind, event }
+              draw()
+            } })
+          transport = { ...transport, handle }
+          playerPlans.set(handle, result)
+          const completion = handle.completion.then(event => {
+            if (recording?.generation === expected) { recording.controller.abort(); recording.handle?.stop() }
+            if (generation === expected) { transport = { kind: 'stopped', event }; status = 'Playback stopped'; draw() }
+          }, error => {
+            if (recording?.generation === expected) { recording.failure = error; recording.controller.abort(); recording.handle?.stop() }
+            if (generation === expected) { transport = { kind: 'stopped' }; status = error.message; draw() }
+          }).finally(() => { players.delete(handle); playerPlans.delete(handle) })
+          players.set(handle, completion)
+          return { handle, completion }
+        })
+        if (admitted) await admitted.completion
       } catch (error) {
         if (generation === expected) { preparing = null; transport = { kind: 'stopped' }; status = error.message; draw() }
       } finally {
-        if (result) await rm(dirname(result.path), { recursive: true, force: true })
+        if (result) {
+          await Promise.allSettled([...(planInspections.get(result) ?? [])])
+          await rm(dirname(result.path), { recursive: true, force: true })
+        }
       }
     })()
     preparations.add(preparation)
@@ -279,7 +347,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         transport = { kind: 'stopped' }
         controller = new AbortController(); takeAbort = controller; takeTask = preparation
         suspended = true; process.stdin.off('keypress', keypress)
-        await settleMonitoring()
+        await Promise.all([settleMonitoring(), settleLiveMidi()])
         if (!accepting || controller.signal.aborted) return
         await viewSession({ directory: result.directory, root: join(sourceRoot, 'recordings'),
           exportRoot: join(sourceRoot, 'exports'), output: route.output, midiOutput: route.midiOutput, embedded: true, signal: controller.signal })
@@ -293,7 +361,9 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         try { if (result) await rm(result.directory, { recursive: true, force: true }) }
         finally {
           if (takeTask === preparation) takeTask = null
-          startMonitoring(); draw()
+          startMonitoring()
+          transitionLiveMidi(async () => { await settleLiveMidi(); const live = startLiveMidi(); if (live) await live.ready }).catch(() => {})
+          draw()
         }
       }
     })()
@@ -321,10 +391,11 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         const ticket = ++discoveryTicket
         if (inputDevices !== null) { inputDevices = null; break }
         inputDevices = []; status = 'Discovering input devices; :inputs returns to arrangement'
-        const pending = devices({ signal: discovery.signal }).then(found => {
+        const pending = Promise.all([devices({ signal: discovery.signal }), midiDestinations({ signal: discovery.signal })]).then(([found, destinations]) => {
           if (!accepting || discovery.signal.aborted || ticket !== discoveryTicket) return
           inputDevices = [...found.audio.filter(device => device.inputs > 0).map(device => `Audio ${device.id}: ${device.name}`),
-            ...found.midi.map(device => `MIDI ${device.id}: ${device.name}`),
+            ...found.midi.map(device => `MIDI input ${device.id}: ${device.name}`),
+            ...destinations.map(device => `MIDI output ${device.id}: ${device.name}`),
             ...found.audio.filter(device => device.outputs > 0).map(device => `Monitor output ${device.id}: ${device.name}`)]
           status = 'Select :input AUDIO_UID and :midi-input all|none|MIDI_UID; :inputs returns'
           draw()
@@ -335,6 +406,21 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       case 'monitor':
         if (value.output && !input) throw new Error('Select :input AUDIO_UID before monitoring')
         await settleMonitoring(); monitorOutput = value.output; startMonitoring(); break
+      case 'midi-monitor': {
+        await transitionLiveMidi(async () => {
+          let next
+          switch (value.action) {
+            case 'clear': next = []; break
+            case 'remove': next = liveRoutes.filter(route => route.source !== value.source || route.destination !== value.destination); break
+            case 'set': next = [...liveRoutes.filter(route => route.source !== value.route.source || route.destination !== value.route.destination), value.route]; break
+            default: throw new Error('Unknown live MIDI route change')
+          }
+          if (next.length) next = liveMidiPlan(next, []).routes
+          await settleLiveMidi(); liveRoutes = next
+          const live = startLiveMidi(); if (live) await live.ready
+        })
+        break
+      }
       case 'midi-input': midiInput = value.input; status = 'MIDI input selected'; break
       case 'record': startRecording(); break
       case 'record-stop': await settleRecording(); break
@@ -383,7 +469,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         const line = prompt; prompt = null
         enqueue(async () => {
           let result = arrangementCommand(editor, line)
-          if (result.editor.project !== editor.project || result.effect && !['record', 'record-stop', 'inputs', 'input', 'midi-input', 'help'].includes(result.effect.kind)) {
+          if (result.editor.project !== editor.project || result.effect && !['record', 'record-stop', 'inputs', 'input', 'midi-input', 'midi-monitor', 'help'].includes(result.effect.kind)) {
             await settleRecording(); result = arrangementCommand(editor, line)
           }
           adopt(result.editor); if (result.effect) await effect(result.effect); else status = 'Edited'
@@ -440,7 +526,8 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       `Cursor ${editor.tick / project.ppq} beats · grid ${editor.step / project.ppq} · ${status}`,
       `Playback ${transport.kind} · ${(transport.event?.currentTime ?? 0).toFixed(2)} s · ${transport.event?.device.name ?? route.output ?? route.midiOutput ?? 'default output'}`,
       `Recording ${recording?.phase ?? 'idle'} · input ${input ?? 'choose :input'} · MIDI ${midiInput}`,
-      `Monitor ${recording?.monitoring ? 'active to ' + recording.monitoring.output.id : monitoring ? monitoring.phase + ' to ' + monitorOutput : 'off'}${reportedLatency}`]
+      `Monitor ${recording?.monitoring ? 'active to ' + recording.monitoring.output.id : monitoring ? monitoring.phase + ' to ' + monitorOutput : 'off'}${reportedLatency}`,
+      `MIDI monitor ${liveMidi?.phase ?? 'off'}${liveMidi?.info ? ' · ' + liveMidi.info.bindings.map(binding => binding.device.name + ' ← ' + binding.source).join(', ') : ''}`]
     if (inputDevices !== null) lines.push(...inputDevices)
     else if (showHelp) lines.push(...help)
     else {
@@ -504,7 +591,8 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.off(name, onSignal)
     try {
       await task
-      await settleMonitoring()
+      await Promise.allSettled([settleMonitoring(), settleLiveMidi()])
+      await liveTransitions
       await Promise.allSettled([...preparations])
       await Promise.allSettled([...players.values()])
       if (editor.project !== saved) {

@@ -342,6 +342,12 @@ let explicit_metadata : (string * metadata) list =
            ~allow_direct_call_when_hidden:false
            ~required_permission:Masc_domain.CanAdmin
            "Operator-profile-only exact owner/version recovery of one Task.")) );
+    ( "masc_operator_composition_resolution",
+      with_execution_policy ~readonly:false ~idempotent:true
+        (with_required_permission Masc_domain.CanAdmin
+           (hidden_active ~allow_direct_call_when_hidden:false
+              ~required_permission:Masc_domain.CanAdmin
+              "Operator-profile-only exact owner/version resolution of one Composition continuation.")) );
     ( "masc_set_param",
       with_required_permission
         Masc_domain.CanAdmin

@@ -1089,6 +1089,11 @@ module Private_jsonl_cursor : sig
 
   val equal : t -> t -> bool
   val is_missing : t -> bool
+
+  val fingerprint : t -> string
+  (** Opaque observation identity, including the file identity and end offset.
+      Comparing fingerprints grants no write or retirement authority; mutations
+      still require the original snapshot through the guarded transaction. *)
 end
 
 type private_jsonl_snapshot =

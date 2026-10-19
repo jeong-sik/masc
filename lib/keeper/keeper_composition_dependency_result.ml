@@ -4,6 +4,7 @@ open Result.Syntax
 
 type readiness = Dependency.readiness = Waiting | Ready
 type observed = Pending | Terminal of Async.entry
+  | Resolved of Async.entry * Keeper_tool_execution_journal.resolution
 
 let original_matches binding (entry : Async.entry) =
   match entry.request_context with
@@ -24,27 +25,28 @@ let rec observe ~after_owner_read ~base_path ~keeper_name binding =
   let* () = if String.equal entry.keeper_name keeper_name then Ok ()
     else Error "composition result belongs to a different Keeper lane" in
   let* () = original_matches binding entry in
-  let* journal = Keeper_tool_execution_journal.load ~base_path ~keeper_name
-      ~composition_run_id:binding.composition_run_id
-    |> Result.map_error Keeper_tool_execution_journal.error_to_string in
-  let* entry = Keeper_tool_execution_journal.named_result_owner journal binding
+  let* journal,entry,resolution = Keeper_tool_execution_journal.observe_named_result ~base_path ~keeper_name binding
     |> Result.map_error Keeper_tool_execution_journal.error_to_string in
   after_owner_read entry;
+  match resolution with
+  | Some resolution -> Ok (Resolved (entry,resolution))
+  | None ->
   match entry.status with
   | Queued | Running | Cancelling _ -> Ok Pending
   | Waiting_for_dependencies _ -> Ok Pending
   | Lost _ ->
     let* continuation = Keeper_tool_execution_journal.waiting_continuation journal
       |> Result.map_error Keeper_tool_execution_journal.error_to_string in
-    let* current = Keeper_tool_execution_journal.named_result_owner journal binding
+    let* _,current,resolution = Keeper_tool_execution_journal.observe_named_result ~base_path ~keeper_name binding
       |> Result.map_error Keeper_tool_execution_journal.error_to_string in
     if not (Async.same_entry_record entry current)
     then observe ~after_owner_read ~base_path ~keeper_name binding
-    else (match continuation with
-     | Some continuation when String.equal
+    else (match resolution,continuation with
+     | Some resolution,_ -> Ok (Resolved (current,resolution))
+     | None,Some continuation when String.equal
          (Keeper_tool_execution_journal.continuation_request_id continuation) entry.request_id -> Ok Pending
-     | Some _ -> Error "named result ownership changed during recovery observation"
-     | None -> Ok (Terminal entry))
+     | None,Some _ -> Error "named result ownership changed during recovery observation"
+     | None,None -> Ok (Terminal entry))
   | Done _ | Cancelled _ | Persistence_failed _ ->
     let* proof = Async.load_canonical_durable_terminal ~base_path ~caller:keeper_name entry.request_id
       |> Result.map_error Async.canonical_terminal_error_to_string in
@@ -58,7 +60,7 @@ let rec observe ~after_owner_read ~base_path ~keeper_name binding =
 
 let readiness ~base_path ~keeper_name binding =
   observe ~after_owner_read:(fun _ -> ()) ~base_path ~keeper_name binding
-  |> Result.map (function Pending -> Waiting | Terminal _ -> Ready)
+  |> Result.map (function Pending -> Waiting | Terminal _ | Resolved _ -> Ready)
 
 let read_with ~after_owner_read ~before_manifest_publication
     ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) ~args =
@@ -101,6 +103,14 @@ let read_with ~after_owner_read ~before_manifest_publication
       Ok (Keeper_tool_execution.deferred_composition_result ~binding
         (`Assoc ["binding", Dependency.composition_to_json binding;
                  "status", `String "waiting_for_composition_result"]))
+    | Ok (Resolved (entry,resolution)) ->
+      Tool_result.make_err ~tool_name:Tool_schemas_composition_control.result_schema.name
+        ~start_time:(Tool_timing.start ()) ~class_:Tool_result.Workflow_rejection
+        ~effect_disposition:Tool_result.Proven_pre_effect
+        ~data:(`Assoc ["binding",Dependency.composition_to_json binding;
+          "request",Async.entry_to_json entry;
+          "resolution",Keeper_tool_execution_journal.resolution_to_json resolution])
+        "composition continuation explicitly resolved; original physical outcomes are retained" |> publish
     | Ok (Terminal entry) ->
       match entry.status with
       | Async.Done {ok = true; data = Some (`Assoc fields as data); body = _} ->

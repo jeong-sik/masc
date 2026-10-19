@@ -52,6 +52,7 @@ val dispatch :
       confirm via separate call).
     - [masc_operator_board_attention_quarantine_requeue] — exact manual
       Board-attention quarantine recovery CAS.
+    - [masc_operator_composition_resolution] — exact original continuation owner/version
     - [masc_operator_task_recovery_resolve] — exact Task owner/version
       recovery CAS.
     - [masc_operator_confirm] — confirm a pending action.

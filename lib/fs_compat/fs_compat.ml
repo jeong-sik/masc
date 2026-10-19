@@ -2614,6 +2614,8 @@ module Private_jsonl_cursor = struct
         end_offset
   ;;
 
+  let fingerprint cursor = Digestif.SHA256.(digest_string (to_string cursor) |> to_hex)
+
   let prefix_end_offset cursor ~device ~inode ~file_length =
     match cursor with
     | Missing -> None

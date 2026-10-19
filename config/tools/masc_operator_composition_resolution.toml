@@ -1,0 +1,49 @@
+name = "masc_operator_composition_resolution"
+title = "Resolve Composition Continuation"
+description = """
+Observe or explicitly terminate future continuation of one original waiting/lost \
+Composition owner. First call command=observe with its exact keeper, run and \
+physical request ids. To reject or cancel, echo expected_version and give a reason. \
+The current owner, original source, journal and marker must match. The operator \
+identity is recorded from the operator call context. Original physical outcomes, \
+node results and artifacts remain; this command never reruns effects or closes \
+the original Task. A committed resolution with marker_retired=false leaves \
+retirement unconfirmed and reports its error; repeat the same decision to retry \
+exact marker retirement."""
+additional_properties = false
+
+[[params]]
+name = "command"
+type = "string"
+required = true
+enum = ["observe", "reject", "cancel"]
+
+[[params]]
+name = "keeper_name"
+type = "string"
+required = true
+min_length = 1
+
+[[params]]
+name = "composition_run_id"
+type = "string"
+required = true
+min_length = 1
+
+[[params]]
+name = "request_id"
+type = "string"
+required = true
+min_length = 1
+
+[[params]]
+name = "expected_version"
+type = "string"
+required = false
+min_length = 1
+
+[[params]]
+name = "reason"
+type = "string"
+required = false
+min_length = 1

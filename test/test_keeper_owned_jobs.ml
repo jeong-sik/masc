@@ -1856,6 +1856,79 @@ let test_temporary_keeper_refusal_keeps_named_run_open () =
   check bool "retry settles under a new physical request" true
     (retry_entry.request_id <> parked.binding.request_id)
 
+let test_operator_resolves_permanent_continuation_mismatch () = with_fixture @@ fun env _initialize fixture ->
+  let module Async = Masc.Keeper_msg_async in
+  with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
+  set_source fixture ~task_id:"original-resolution-task" ~turn:41;
+  Call_log.init ~base_path:fixture.base_path ();
+  let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
+  let blob = Tool_blob_store.create ~base_path:fixture.base_path in
+  let sibling = Tool_blob_store.put_durable blob ~bytes:"retained sibling before explicit resolution\n" ~mime:"text/plain" in
+  let literal value = `Assoc ["kind",`String "literal";"value",value] in
+  let recipe = `Assoc ["execution",`String "async";
+    "branch_failure_policy",`String "continue_independent";
+    "nodes",`List [
+      `Assoc ["id",`String "await";"tool",`String "keeper_job_result";"input",literal (argument id);"after",`List []];
+      `Assoc ["id",`String "sibling";"tool",`String "keeper_artifact_read";
+        "input",literal (`Assoc ["sha256",`String sibling.sha256]);"after",`List []]];
+    "exports",`List [`Assoc ["name",`String "job";"node",`String "await";"pointer",`String "/job_id"]]] in
+  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
+    ~tool_use_id:"prepare-permanent-resolution" ~turn:41 "keeper_composition_prepare" recipe) in
+  let draft = prepared |> member "draft" |> composition_reference "permanent resolution draft" in
+  let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle
+    ~tool_use_id:"run-permanent-resolution" ~turn:41 "keeper_composition_run" (`Assoc ["sha256",`String draft.sha256])) in
+  let _,_,entry = await_composition env fixture accepted in
+  let run_id = accepted |> member "composition_run_id" |> to_string in
+  let composition_run_id = Masc.Keeper_tool_plan.Composition_run_id.of_string run_id |> require "resolution run id" in
+  let journal = Journal.load ~base_path:fixture.base_path ~keeper_name:keeper ~composition_run_id
+    |> require "original journal before mismatch" in
+  let continuation = match Journal.waiting_continuation journal with
+    | Ok (Some continuation) -> continuation
+    | Ok None | Error _ -> fail "original job did not suspend the Composition" in
+  let terminal_path = Async.For_testing.terminal_record_path ~base_path:fixture.base_path ~request_id:entry.request_id
+    |> Option.get in
+  let foreign = Store.Job_id.fresh () |> Store.Job_id.to_string in
+  let malformed = read terminal_path |> Yojson.Safe.from_string |> to_assoc
+    |> List.map (fun (key,value) -> key, if key = "dependencies" then
+      `List [`Assoc ["kind",`String "owned_job";"job_id",`String foreign]] else value)
+    |> fun fields -> `Assoc fields |> Yojson.Safe.to_string in
+  write terminal_path malformed;
+  let pending () = Journal.pending_continuations
+    ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness ~base_path:fixture.base_path
+    |> require "permanent mismatch discovery" in
+  let report = pending () in
+  (match report.failures with [_,Journal.Invalid_result _] -> ()
+   | _ -> fail "canonical dependency mismatch was not retained as Invalid_result");
+  let module Command = Masc.Operator_composition_resolution_command in
+  let command name fields = Command.parse_tool_command (`Assoc
+    (["command",`String name;"keeper_name",`String keeper;"composition_run_id",`String run_id;
+      "request_id",`String entry.request_id] @ fields)) |> require "operator resolution command" in
+  let execute now command = Command.execute ~base_path:fixture.base_path ~actor:"operator-fixture" ~now command
+    |> require "operator resolution outcome" |> Command.outcome_to_json in
+  let observed = execute 100. (command "observe" []) in
+  let version = observed |> member "expected_version" |> to_string in
+  let decision = command "reject" ["expected_version",`String version;
+    "reason",`String "permanently mismatched original dependency"] in
+  let resolved = execute 101. decision in
+  check_json "explicit rejection retires the exact pending marker" (`Bool true) (member "marker_retired" resolved);
+  check string "operator preserves the original physical mismatch for audit" malformed (read terminal_path);
+  check (option string) "retained sibling remains available" (Some "retained sibling before explicit resolution\n")
+    (Tool_blob_store.fetch blob ~sha256:sibling.sha256 |> require "retained sibling after resolution");
+  check_json "resolution retry retains its original terminal decision" resolved (execute 200. decision);
+  (match Journal.continuation_readiness
+      ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness continuation with
+   | Error Journal.Ownership_changed -> ()
+   | Ok _ | Error _ -> fail "sealed continuation still admitted a dependency read");
+  let settled = pending () in
+  check bool "resolved mismatch has no pending work or failure" true
+    (settled.ready = [] && settled.waiting = 0 && settled.failures = []);
+  let refused = with_bundle fixture (fun bundle -> invoke_raw bundle
+    ~tool_use_id:"resume-resolved-original" ~turn:42 "keeper_composition_run"
+    (`Assoc ["sha256",`String draft.sha256;"resume_run_id",`String run_id])) in
+  (match refused with Error _ -> () | Ok _ -> fail "public resume accepted a logically terminal original run");
+  check string "refused resume preserves the original job record" id
+    (Store.Job_id.to_string (load fixture id).job_id)
+
 let test_public_composition_wait_and_resume () = with_fixture @@ fun env initialize fixture ->
   with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
   set_source fixture ~task_id:"task-A" ~turn:41;
@@ -6014,6 +6087,7 @@ let () = match Array.to_list Sys.argv with
       ; test_case "original invocation rejects request and source rebinding" `Quick test_original_invocation_rejects_rebinding
       ; test_case "corrupt invocation authority cannot launch" `Quick test_corrupt_invocation_binding_cannot_launch
       ; test_case "malformed whole source cannot publish a binding" `Quick test_malformed_source_cannot_publish_binding
+      ; test_case "explicit operator rejection resolves permanent continuation mismatch" `Quick test_operator_resolves_permanent_continuation_mismatch
       ; test_case "public Composition waits and resumes the original job result" `Quick test_public_composition_wait_and_resume
       ; test_case "public named async result parks and resumes its original parent" `Quick
           (test_named_async_result_parent ~child_fails:false)

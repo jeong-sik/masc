@@ -205,6 +205,10 @@ val execute
     Exact prepared leaves can overlap when their producer-owned resources do
     not conflict. Conflicting leaves follow dependency-layer order, standing
     down after a failed predecessor; explicit plan dependencies still apply.
+    Their original resource predecessor lists are indexed once per execution.
+    Static prepared waves partition the original node lists while checking
+    membership in an immutable pending-ID set local to each dependency layer;
+    index/set order never selects nodes, predecessors, batches or failures.
     [ready_files] additionally binds producer resources after upstream outputs
     validate the actual input. Nodes publish binding before waiting for earlier
     bindings in topological order. The original Ready producer retains its

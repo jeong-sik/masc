@@ -181,6 +181,10 @@ Eio 는 협력형 스케줄러다. 취소와 시간 초과는 fiber 가 멈추�
   병렬 정적 그룹을 만들려고 빈 자원 선행조건 표나 pending 전체 탐색을 만들지 않는다.
   일반 descriptor 스케줄로 대신 보내면 공유가 달라진다. 실제 binding의 충돌·배타 실행과
   Require_success 선행 settlement의 실패/ticket 반영은 Ready runner에 그대로 둔다.
+  실제 준비된 파일의 선행조건 목록은 실행별 typed-ID index에서 원래 목록 그대로 찾는다.
+  정적 wave의 pending-ID 집합은 원래 계층에서 만들고 ready partition만 제거한다.
+  노드·그룹·선행 결과를 순회하는 원래 목록을 집합/인덱스 순서로 대체하지 않으며,
+  이 자료구조의 생성·갱신 비용과 준비 후 거절된 실행도 Before/After 분모에 남긴다.
   Ready 실행의 선행 binding 순회는 같은 실행의 원래 위상 목록을 직접 방문한다.
   typed ID로 보관한 suffix의 물리 비교는 그 불변 목록 안의 정지 위치만 뜻한다.
   선언 순서의 index로 대체하거나 다른 목록·실행에 넘기지 않고, 실제 선행 binding 대기와

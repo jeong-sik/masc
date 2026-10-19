@@ -716,14 +716,24 @@ let test_inline_preparation_keeps_original_members ~ready () =
   let descriptor = match Keeper_tool_descriptor.find_id "agent.edit_file" with
     | Some value -> value | None -> fail "canonical Edit descriptor absent" in
   let path = Filename.concat root "original-members/file" in
+  let other = Filename.concat root "original-members/independent" in
   write path "before";
+  write other "before";
   let id value = match Plan.Node_id.make value with Ok value -> value | Error _ -> fail "invalid fixture node ID" in
   let first_input = public_args path "before" "middle" in
   let first = Plan.node ~id:(id "z-first") ~tool_name:"Edit"
       ~input:(Plan.Json_template.literal first_input) () in
   let second = Plan.node ~id:(id "a-second") ~tool_name:"Edit" ~after:[first.id]
       ~input:(Plan.Json_template.literal (public_args path "middle" "after")) () in
-  let make_plan () = match Plan.create ~descriptors:[descriptor] [first;second] with
+  let independent = Plan.node ~id:(id "m-independent") ~tool_name:"Edit"
+      ~input:(Plan.Json_template.literal (public_args other "before" "middle")) () in
+  let independent_after = Plan.node ~id:(id "b-independent-successor") ~tool_name:"Edit"
+      ~input:(Plan.Json_template.literal (public_args other "middle" "after")) () in
+  (* The first layer has a real resource-conflict edge on [other], while
+     [second] follows [first] in a later explicit dependency layer. Neither
+     map ID order nor a pending set spanning all layers is an execution order. *)
+  let make_plan () = match Plan.create ~descriptors:[descriptor]
+      [first;second;independent;independent_after] with
     | Ok plan -> plan | Error error -> fail (Plan.error_to_string error) in
   let plan = make_plan () in
   let source = Keeper_tool_call_log_context.get_turn_context_record ~cell () in
@@ -748,6 +758,7 @@ let test_inline_preparation_keeps_original_members ~ready () =
       Some files,None
     end in
   check string "rejected transfers leave original bytes intact" "before" (read path);
+  check string "rejected transfers leave the independent branch intact" "before" (read other);
   let parent = if ready then "original-ready-members" else "original-aggregate-members" in
   let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:parent ~turn:2
       ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Agent_core.Tool_contract.Serial}
@@ -771,13 +782,14 @@ let test_inline_preparation_keeps_original_members ~ready () =
   (match execute plan with
    | Ok _ -> () | Error _ -> fail "original plan failed after rejected transfers");
   check string "original successor consumes committed predecessor bytes" "after" (read path);
+  check string "resource-conflicting independent branch consumes its predecessor bytes" "after" (read other);
   let leaves = physical_leaves meta in
-  check int "only the two original effects have physical receipts" 2 (List.length leaves);
+  check int "all original effects retain physical receipts" 4 (List.length leaves);
   List.iter (fun row ->
     check string "original effects retain their Task" task_id Yojson.Safe.Util.(member "task_id" row |> to_string);
     check string "original effects retain their parent invocation" parent
       Yojson.Safe.Util.(member "parent_tool_use_id" row |> to_string)) leaves;
-  check int "only original results reach the original Gate state" 2
+  check int "only original results reach the original Gate state" 4
     Yojson.Safe.Util.(member "completed_tool_calls" (Keeper_gate_causal_context.snapshot causal).snapshot |> to_list |> List.length)
 ;;
 

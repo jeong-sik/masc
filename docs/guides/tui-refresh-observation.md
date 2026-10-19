@@ -1070,3 +1070,12 @@ freeze; abrupt process loss can prevent the snapshot. Existing frame/present
 timing remains separate. No key, paste, raw reply/refusal text or credential is
 added to these records. See the
 [lifecycle source comparison](../audits/2026-10-19-tui-startup-observation.md).
+
+Existing startup records can be read through the
+[offline packet report](../../scripts/harness/perf/README-tui-startup-report.md).
+Declare the full case denominator and each arm's exact artifacts/selector and
+conditions. The reader preserves missing, invalid, interrupted and partial cases,
+checks immutable facts rather than row order, and exposes descriptive intervals
+only when their endpoints and declared artifact conditions agree. File hashes
+and declaration equality do not verify source-to-binary identity or execution.
+The report does not claim a speedup, input acceptance, useful work or paint.

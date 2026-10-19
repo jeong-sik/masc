@@ -1,9 +1,12 @@
 import { html } from 'htm/preact'
-import { render, cleanup } from '@testing-library/preact'
-import { afterEach, describe, expect, it } from 'vitest'
+import { render, cleanup, fireEvent } from '@testing-library/preact'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ToolCallEntry } from '../../api/dashboard-keeper-tool-calls'
+import { fetchVerifiedToolBlobText } from '../../api/verified-tool-blob'
 import { PublishedArtifactCard } from './published-artifact-card'
 
+vi.mock('../../api/verified-tool-blob', () => ({ fetchVerifiedToolBlobText: vi.fn() }))
+beforeEach(() => vi.clearAllMocks())
 afterEach(cleanup)
 const id = `artifact-${'a'.repeat(32)}`
 const receipt: ToolCallEntry = {
@@ -30,5 +33,23 @@ describe('published report conversation card', () => {
     const view = render(html`<${PublishedArtifactCard} output=${{ ...receipt, output: '{truncated' }} />`)
     expect(view.getByRole('alert').textContent).toContain('문서 링크를 읽지 못했습니다')
     expect(view.queryByRole('link')).toBeNull()
+  })
+  it('restores a verified publication manifest instead of guessing from its preview', async () => {
+    const blob = { sha256: 'a'.repeat(64), bytes: 1000, mime: 'application/vnd.masc.tool-result-manifest+json', preview: 'truncated' }
+    vi.mocked(fetchVerifiedToolBlobText).mockResolvedValue(JSON.stringify({
+      schema: 'masc.tool-result-artifact-manifest.v1', structured_content: JSON.parse(receipt.output as string),
+    }))
+    const view = render(html`<${PublishedArtifactCard} output=${{ ...receipt, output: { _blob: blob } }} />`)
+    expect(await view.findByRole('link', { name: '아티팩트 열기: 연구 결과' })).toBeTruthy()
+    expect(fetchVerifiedToolBlobText).toHaveBeenCalledWith(blob, expect.any(AbortSignal))
+  })
+  it('shows a failed saved-receipt lookup and can retry it', async () => {
+    const blob = { sha256: 'b'.repeat(64), bytes: 1000, mime: 'application/json', preview: '' }
+    vi.mocked(fetchVerifiedToolBlobText).mockRejectedValueOnce(new Error('missing body'))
+    const view = render(html`<${PublishedArtifactCard} output=${{ ...receipt, output: { _blob: blob } }} />`)
+    const retry = await view.findByRole('button', { name: '다시 조회' })
+    vi.mocked(fetchVerifiedToolBlobText).mockResolvedValue(receipt.output as string)
+    fireEvent.click(retry)
+    expect(await view.findByRole('link', { name: '아티팩트 열기: 연구 결과' })).toBeTruthy()
   })
 })

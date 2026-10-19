@@ -478,9 +478,7 @@ let thinking_control_request_rejection
          | Some
              ( Capabilities.Anthropic_adaptive_default
              | Capabilities.Anthropic_adaptive_disabled_through_high
-             | Capabilities.Anthropic_adaptive_between_tools
-             | Capabilities.Anthropic_adaptive_preferred
-             | Capabilities.Anthropic_adaptive_only ) -> false
+             | Capabilities.Anthropic_adaptive_between_tools ) -> false
          | None ->
            caps.supports_reasoning
            && caps.thinking_control_format = Capabilities.No_thinking_control)

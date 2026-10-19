@@ -360,8 +360,6 @@ let anthropic_thinking_control_string = function
   | Some Caps.Anthropic_adaptive_default -> "adaptive_default"
   | Some Caps.Anthropic_adaptive_disabled_through_high -> "adaptive_disabled_through_high"
   | Some Caps.Anthropic_adaptive_between_tools -> "adaptive_between_tools"
-  | Some Caps.Anthropic_adaptive_preferred -> "adaptive_preferred"
-  | Some Caps.Anthropic_adaptive_only -> "adaptive_only"
   | Some Caps.Anthropic_always_adaptive -> "always_adaptive"
 ;;
 
@@ -415,8 +413,6 @@ let catalog_anthropic_thinking_control = function
   | Some Capability_vocab.Adaptive_default -> Some Caps.Anthropic_adaptive_default
   | Some Capability_vocab.Adaptive_disabled_through_high -> Some Caps.Anthropic_adaptive_disabled_through_high
   | Some Capability_vocab.Adaptive_between_tools -> Some Caps.Anthropic_adaptive_between_tools
-  | Some Capability_vocab.Adaptive_preferred -> Some Caps.Anthropic_adaptive_preferred
-  | Some Capability_vocab.Adaptive_only -> Some Caps.Anthropic_adaptive_only
   | Some Capability_vocab.Always_adaptive -> Some Caps.Anthropic_always_adaptive
 ;;
 
@@ -768,7 +764,7 @@ let%test "exact functional capability projection has a stable golden" =
   in
   functional_capability_projection
     fixture
-    ~anthropic_thinking_control:(Some Caps.Anthropic_adaptive_preferred)
+    ~anthropic_thinking_control:(Some Caps.Anthropic_adaptive_default)
   = [ "agent_core-exact-output-functional-capabilities-v2"
     ; "max_context=some:8"
     ; "serving_constraint=none"
@@ -785,7 +781,7 @@ let%test "exact functional capability projection has a stable golden" =
     ; "assistant_prefill=1"
     ; "task=none"
     ; "supported_models=some:model-a,model-b"
-    ; "anthropic_thinking=adaptive_preferred"
+    ; "anthropic_thinking=adaptive_default"
     ]
 ;;
 

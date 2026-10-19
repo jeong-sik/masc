@@ -137,16 +137,12 @@ type anthropic_thinking_control =
   | Adaptive_default
   | Adaptive_disabled_through_high
   | Adaptive_between_tools
-  | Adaptive_preferred
-  | Adaptive_only
   | Always_adaptive
 
 let anthropic_thinking_control_table =
   [ "adaptive_default", Adaptive_default
   ; "adaptive_disabled_through_high", Adaptive_disabled_through_high
   ; "adaptive_between_tools", Adaptive_between_tools
-  ; "adaptive_preferred", Adaptive_preferred
-  ; "adaptive_only", Adaptive_only
   ; "always_adaptive", Always_adaptive
   ]
 ;;

@@ -117,16 +117,12 @@ type anthropic_thinking_control =
   | Anthropic_adaptive_default
   | Anthropic_adaptive_disabled_through_high
   | Anthropic_adaptive_between_tools
-  | Anthropic_adaptive_preferred
-  | Anthropic_adaptive_only
   | Anthropic_always_adaptive
 
 let anthropic_thinking_control_of_vocab_value = function
   | Capability_vocab.Adaptive_default -> Anthropic_adaptive_default
   | Capability_vocab.Adaptive_disabled_through_high -> Anthropic_adaptive_disabled_through_high
   | Capability_vocab.Adaptive_between_tools -> Anthropic_adaptive_between_tools
-  | Capability_vocab.Adaptive_preferred -> Anthropic_adaptive_preferred
-  | Capability_vocab.Adaptive_only -> Anthropic_adaptive_only
   | Capability_vocab.Always_adaptive -> Anthropic_always_adaptive
 ;;
 
@@ -2136,19 +2132,20 @@ let%test "Anthropic thinking policy resolves from the model catalog declaration"
   Model_catalog.set_global
     (Model_catalog.of_model_entries
        [ { (test_catalog_entry "declared-anthropic-model") with
-           anthropic_thinking_control = Some Capability_vocab.Adaptive_preferred
+           anthropic_thinking_control = Some Capability_vocab.Adaptive_default
          }
        ]);
   Fun.protect ~finally:Model_catalog.clear_global (fun () ->
     anthropic_thinking_control_for_model_id "declared-anthropic-model"
-    = Some Anthropic_adaptive_preferred)
+    = Some Anthropic_adaptive_default)
 ;;
 
 let%test "Anthropic thinking policy falls back to manifest when catalog has no row" =
   Model_catalog.set_global Model_catalog.empty;
   Capability_manifest.set_global
     [ { (test_manifest_entry "manifest-anthropic-model") with
-        anthropic_thinking_control = Some Capability_vocab.Adaptive_only
+        anthropic_thinking_control =
+          Some Capability_vocab.Adaptive_disabled_through_high
       }
     ];
   Fun.protect
@@ -2157,7 +2154,7 @@ let%test "Anthropic thinking policy falls back to manifest when catalog has no r
       Capability_manifest.clear_global ())
     (fun () ->
        anthropic_thinking_control_for_model_id "manifest-anthropic-model"
-       = Some Anthropic_adaptive_only)
+       = Some Anthropic_adaptive_disabled_through_high)
 ;;
 
 (* Adversarial F1 (2026-09-06): a provider-qualified row — deepseek on the

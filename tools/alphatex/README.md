@@ -572,3 +572,13 @@ other controller sequences are not automatically combined or rewritten. Moving
 an existing event across a source port change is refused. Notes, unrelated
 patterns, SysEx and metadata remain in the original performance; export and
 arrangement variants carry the selected edits alongside the original bytes.
+
+When consecutive clips share an output/channel, the existing transport requires
+explicit source-start values for channel fields changed by the preceding clip.
+If an experiment moves or replaces its only initial controller/bend event, insert
+the intended initial value at zero (for example, `:cc 1 0 0` or `:bend 8192 0`),
+before its first note, or choose an independent output. Insertions follow existing
+events at the same tick: when the first note is already at zero, edit an existing
+initial event or use an independent output. Explicit same-tick insertion ordering
+is not available yet. An unspecified initial state is refused rather than
+replaced with an assumed instrument setting.

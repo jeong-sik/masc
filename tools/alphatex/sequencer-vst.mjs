@@ -17,7 +17,7 @@ export function projectVstMidi(project, options = {}) {
 
 // One owned preparation, native child and retention operation. A failed VST
 // never starts another instrument or a fallback player.
-export function renderVstPhrase({ preparation, selection, outputPath, stateDirectory, run = nativeJob }) {
+export function renderVstPhrase({ preparation, selection, outputPath, stateDirectory, loop = false, run = nativeJob }) {
   let cancelled = false, native = null
   const check = () => {
     if (cancelled) { const error = new Error('VST phrase cancelled'); error.code = 'ABORT_ERR'; throw error }
@@ -25,7 +25,8 @@ export function renderVstPhrase({ preparation, selection, outputPath, stateDirec
   const promise = (async () => {
     const midi = await preparation.promise
     check()
-    native = run({ operation: 'render', ...selection, midi_path: midi.path, output_path: outputPath })
+    native = run({ operation: 'render', ...selection, midi_path: midi.path, output_path: outputPath,
+      ...(loop ? { tail_seconds: 0 } : {}) })
     const result = await native.promise
     check()
     const retained = await retainRender(stateDirectory, result, midi.path)

@@ -145,14 +145,33 @@ screen and returns to the same phrase. It does not yet overdub into the project.
 Move the cursor with arrows; Enter inserts or removes a note. Shift+arrows moves
 the selected note. `[`/`]` changes its length, `+`/`-` changes velocity, and `g`
 cycles the musical grid. Tab changes track, `n` adds one, `m` mutes it and `o`
-solos it. `u`/`y` undo/redo. On macOS, Space starts, pauses or resumes a preview of
-the audible tracks with the bundled SoundFont; `:stop` ends playback. `l` toggles
+solos it. `u`/`y` undo/redo. On macOS, the first audio Space opens the existing
+instrument/preset picker. Choose a verified VST instrument or the explicit
+SoundFont entry; **i** stops playback and reopens the picker. In the preset view,
+**e** opens the native editor and **p** selects a preset file. The selected VST
+preset owns the sound; MIDI program/bank messages do not replace it. Instrument,
+sample-library or license failures remain visible without a SoundFont fallback.
+Subsequent Space starts, pauses or resumes the preview; `:stop` ends playback. `l` toggles
 repetition of the loop region inside one native AVAudioEngine/PlayerNode. `:seek 4` moves to
 quarter-note beat 4. Select an audio output with `--output UID` or `:output UID`;
 `--devices` lists CoreAudio device identities. An explicit output is pinned and
 read back, and unavailable outputs fail without substituting another device.
 The decoded WAV must fit the native PCM buffer resources. See the
 [transport protocol](native/TRANSPORT.md) for lifecycle and resource limits.
+VST playback retains its performed MIDI, WAV and render hashes under `--state-dir`
+(the same default as the score picker), and publishes the latest local state for
+the Lane observer. Player acknowledgement is not proof of audible output or a
+Lane action receipt. Loop rendering omits the release tail so repetition does
+not insert an extra tail interval. Nonloop playback includes the instrument tail;
+the musical playhead stays at the phrase end during that tail. `:wave PATH`
+exports the currently selected audio instrument.
+
+Imported single-port MIDI can use the same VST route, including the chosen SMF2
+pattern and SMPTE timing. The original source document is retained; a synchronous
+PPQ performance copy is rendered. Independent source ports require separate VST
+instances, which are not connected yet; use their explicit MIDI output bindings.
+Source clip looping still requires expression-state reconstruction. These
+remaining routes are part of the broader music/TUI work.
 For external MIDI, use `--midi-output=ID` or `:midi-output ID`; `--devices` lists
 CoreMIDI destinations separately from recording sources. Use the equals form
 for signed IDs, for example `--midi-output=-1234`. Space, pause/resume,

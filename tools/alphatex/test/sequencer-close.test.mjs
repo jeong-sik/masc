@@ -341,3 +341,13 @@ test('expression keyboard decisions edit the selected event, preserve notes, und
  }finally{view.key('q');await view.done}
  assert.equal(view.process.stdin.isRaw,false)
 })
+
+test('an admitted event-before command drains into the saved source on close without changing note time',async()=>{
+ const bytes=Buffer.from('4d546864000000060000000101e04d54726b0000000000903c608360803c2d00ff2f00','hex')
+ bytes.writeUInt32BE(bytes.length-22,18);const source=importMidiSource(bytes),view=await controller({initialDocument:source})
+ view.command('cc 1 0 0');view.command('event-before first-note');view.key('q');await view.done
+ const saved=view.observed.saved.at(-1),performance=midiSourcePattern(saved)
+ assert.deepEqual(performance.events.slice(0,2).map(event=>event.bytes),[[0xb0,1,0],[0x90,60,96]])
+ assert.deepEqual(performance.notes,midiSourcePattern(source).notes)
+ assert.equal(saved.original,source.original);assert.equal(view.process.stdin.isRaw,false)
+})

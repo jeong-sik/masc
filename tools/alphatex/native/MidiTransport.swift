@@ -176,16 +176,20 @@ final class MidiTransport {
         try checked(result, "send MIDI event")
     }
     func apply(_ event: Event) throws {
-        try send(event.bytes())
+        // A failed send cannot prove the destination missed the Note On, so the
+        // key is owned before sending. It is released only after a sent Note Off.
         if event.kind == .on { held[event.key] = event }
+        try send(event.bytes())
         if event.kind == .off { held.removeValue(forKey: event.key) }
     }
     func silence() throws {
         var failure: Error?
         for event in held.values.sorted(by: { $0.key < $1.key }) {
-            do { try send([0x80 | event.channel, event.pitch!, 0]) } catch { failure = failure ?? error }
+            do {
+                try send([0x80 | event.channel, event.pitch!, 0])
+                held.removeValue(forKey: event.key)
+            } catch { failure = failure ?? error }
         }
-        held.removeAll()
         if let failure { throw failure }
     }
     func restore(at seconds: Double) throws {

@@ -390,21 +390,23 @@ let execute_unlocked t = function
       let args = Browser_lane.interaction_args ~tab_id ~expected_url action in
       let action_name = Browser_lane.interaction_verb action in
       let native_action = match action with
-        | Browser_lane.Hover _ | Browser_lane.Drag_to _ ->
+        | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
           let* resolved = script t session (Browser_scene_script.runtime ^ Browser_interaction.pointer_target_script) [args] in
-          Result.map_error (fun message -> Protocol message)
-            (Browser_interaction.resolve_pointer_action action resolved)
-        | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
+          let* action = Result.map_error (fun message -> Protocol message)
+            (Browser_interaction.resolve_pointer_action action resolved) in
+          let* url = string_field "url" resolved in
+          Ok (Some url,action)
+        | Browser_lane.Activate_tab | Browser_lane.Fill _
         | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
         | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
-        | Browser_lane.Click_node _ | Browser_lane.Fill_node _ -> Ok action in
+        | Browser_lane.Fill_node _ -> Ok (expected_url,action) in
       let* result = match native_action with
         | Error error -> Ok (`Assoc ["interactionFailure",`Assoc
             ["message",`String (error_message error);"effectStarted",`Bool false]])
-        | Ok action ->
+        | Ok (expected_url,action) ->
         let args = Browser_lane.interaction_args ~tab_id ~expected_url action in
         match action with
-        | Browser_lane.Hover _ | Browser_lane.Drag_to _ ->
+        | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
           Error (Protocol "unresolved semantic pointer target")
         | Browser_lane.Hover_at {point;viewport}
         | Browser_lane.Click_at {point;viewport}
@@ -457,8 +459,8 @@ let execute_unlocked t = function
            | `Assoc fields -> Ok (`Assoc (("urlBefore",`String url_before) ::
                ("action",`String action_name) :: fields))
            | _ -> Error (Protocol "invalid pointer receipt")))
-        | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
-        | Browser_lane.Scroll _ | Browser_lane.Follow_link _ | Browser_lane.Click_node _
+        | Browser_lane.Activate_tab | Browser_lane.Fill _
+        | Browser_lane.Scroll _ | Browser_lane.Follow_link _
         | Browser_lane.Fill_node _ -> script t session (Browser_scene_script.runtime ^ Browser_interaction.script) [args]
       in
       match result with

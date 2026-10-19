@@ -647,3 +647,20 @@ A lost reply or broken session remains an unknown outcome and ends the
 connection. The host never creates another tab or closes the created context
 to recover. List current connections and observe their tabs again; old
 connection tab IDs must not be reused on a replacement connection.
+
+### Trusted semantic clicks
+
+On BiDi and automation, `click` with one observed selector or scene
+`documentId`/`nodeId` resolves a visible, unobstructed target and sends native
+pointer move/down/up. This supports menus that open on trusted `pointerdown`
+or `mousedown`, including a control exposed by hover. Re-observe the revealed
+controls before selecting one. Disabled controls, inherited `aria-disabled`,
+ambiguous selectors and stale scene references are refused before input.
+Labels retain their associated-control semantics, including visible text in a
+`display:contents` label. Targets outside the viewport require scrolling and a
+fresh observation first.
+
+`expectedUrl` remains optional for semantic click. If omitted, resolution
+captures the current URL and the native input guard checks that URL and the
+resolved viewport before dispatch. There is no DOM-click fallback or automatic
+replay after native input. The WebExtension's DOM-click behavior is unchanged.

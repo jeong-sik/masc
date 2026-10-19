@@ -348,6 +348,57 @@ let test_session_status_answers_while_closed () =
     check bool "status is not offered on the live lane" false
       (Lane.verb_allowed_on_live Lane.Session_status))
 
+let test_semantic_click_uses_native_pointer_input () =
+  Eio_main.run (fun _ ->
+    let inputs = ref 0 and releases = ref 0 and fail_guard = ref false in
+    let viewport = `Assoc ["documentId",`String "observed";"width",`Int 800;"height",`Int 600;
+      "scrollX",`Int 0;"scrollY",`Int 0] in
+    let request ~method_ ~path ~body = match method_,path with
+      | `POST,"/session" -> Ok (`Assoc ["sessionId",`String "owned";"capabilities",`Assoc
+          ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
+      | `GET,"/session/owned/window/handles" -> Ok (`List [`String "tab"])
+      | `GET,"/session/owned/window" -> Ok (`String "tab")
+      | `POST,"/session/owned/window" | `POST,"/session/owned/frame" -> Ok `Null
+      | `POST,"/session/owned/execute/sync" ->
+        let args = match body with
+          | Some value -> Yojson.Safe.Util.(value |> member "args" |> to_list)
+          | None -> fail "missing script arguments" in
+        (match args with
+         | [`Assoc fields] when List.assoc_opt "action" fields = Some (`String "click") ->
+           Ok (`Assoc ["url",`String "https://example.test/";"viewport",viewport;
+             "point",`Assoc ["x",`Float 0.25;"y",`Float 0.5]])
+         | [`Assoc fields] when List.assoc_opt "action" fields = Some (`String "click_at") ->
+           check bool "automation native guard uses captured URL" true
+             (List.assoc_opt "expectedUrl" fields = Some (`String "https://example.test/"));
+           if !fail_guard then Error (Driver.Protocol "observed_viewport_changed")
+           else Ok (`Assoc ["url",`String "https://example.test/"])
+         | [] -> Ok (`Assoc ["url",`String "https://example.test/";"title",`String "fixture"])
+         | _ -> fail "unexpected script path; no synthetic click fallback")
+      | `POST,"/session/owned/actions" ->
+        incr inputs;
+        let value = match body with Some value -> value | None -> fail "missing actions" in
+        let steps = Yojson.Safe.Util.(value |> member "actions" |> index 0 |> member "actions" |> to_list) in
+        check (list string) "automation dispatches native click" ["pointerMove";"pointerDown";"pointerUp"]
+          (List.map Yojson.Safe.Util.(fun step -> step |> member "type" |> to_string) steps);
+        Ok `Null
+      | `DELETE,"/session/owned/actions" -> incr releases; Ok `Null
+      | _ -> fail ("unexpected native semantic click request " ^ path) in
+    let driver = Driver.create ~start_downloads ~request () in
+    ignore (Driver.execute driver (Lane.Session_open {headless=None}));
+    ignore (Driver.execute driver Lane.Tabs_list);
+    List.iter (fun action ->
+      (match Driver.execute driver (Lane.Page_interact {tab_id=1;expected_url=None;action}) with
+       | Lane.Answered _ -> ()
+       | Lane.Refused _ | Lane.Rejected_before_effect _ | Lane.Lane_absent | Lane.Timed_out -> fail "native semantic click failed"))
+      [Lane.Click "#menu";Lane.Click_node {document_id="observed";node_id="menu"}];
+    check int "one dispatch per semantic click" 2 !inputs;
+    check int "each click releases native input" 2 !releases;
+    fail_guard := true;
+    (match Driver.execute driver (Lane.Page_interact {tab_id=1;expected_url=None;action=Lane.Click "#menu"}) with
+     | Lane.Rejected_before_effect _ -> ()
+     | Lane.Answered _ | Lane.Refused _ | Lane.Lane_absent | Lane.Timed_out -> fail "stale native guard must reject before input");
+    check int "failed guard sends no input or fallback" 2 !inputs)
+
 let test_pointer_release_recovery () =
   Eio_main.run (fun _ ->
     let release_fails = ref true and gestures = ref 0 and releases = ref 0 and wheels = ref 0 in
@@ -532,6 +583,7 @@ let test_remote_error_is_a_closed_sum () =
 let () = run "native Firefox lane" ["behavior", [
   test_case "optional document never selects or blocks owner" `Quick test_optional_document_never_selects_or_blocks_owner;
   test_case "download setup failure rolls back session" `Quick test_download_setup_rollback;
+  test_case "semantic clicks use native input" `Quick test_semantic_click_uses_native_pointer_input;
   test_case "pointer release failure recovery" `Quick test_pointer_release_recovery;
   test_case "pointer guard failure rejects before effect" `Quick test_pointer_guard_failure_rejects_before_effect;
   test_case "download setup cancellation rolls back session" `Quick test_download_setup_cancellation;

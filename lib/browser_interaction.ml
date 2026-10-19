@@ -350,7 +350,7 @@ let pointer_receipt_script = "return {url:location.href,title:document.title,scr
 let pointer_target_script = {js|
 const args = arguments[0];
 try {
-  if (args.expectedUrl !== location.href) throw new Error('page_url_changed');
+  if (args.expectedUrl !== undefined && args.expectedUrl !== location.href) throw new Error('page_url_changed');
   const target = spec => {
     let element;
     if (spec.selector !== undefined) {
@@ -361,13 +361,38 @@ try {
       element = found[0];
     } else element = browserScene({...spec,mode:'resolve'});
     if (!element.isConnected) throw new Error('element_detached');
+    if (args.action === 'click') {
+      const activationTarget = (element.localName === 'label' && element.control) || element;
+      if (activationTarget.matches(':disabled')) throw new Error('element_disabled');
+      for (const start of new Set([element,activationTarget]))
+        for (let node = start; node; node = node.parentElement || node.getRootNode().host)
+          if (node.getAttribute?.('aria-disabled') === 'true') throw new Error('element_disabled');
+    }
     if (getComputedStyle(element).visibility !== 'visible') throw new Error('element_not_visible');
     for (let node = element; node; node = node.parentElement || node.getRootNode().host) {
       const style = getComputedStyle(node);
       if (style.display === 'none' || Number(style.opacity) === 0)
         throw new Error('element_not_visible');
     }
-    for (const rect of element.getClientRects()) {
+    const rects = Array.from(element.getClientRects());
+    // display:contents labels have no box of their own. Their visible text
+    // still activates the associated control through native label behavior.
+    if (args.action === 'click' && element.localName === 'label') {
+      const walker = document.createTreeWalker(element,NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const text = walker.currentNode, parent = text.parentElement;
+        if (!text.textContent.trim() || !parent || getComputedStyle(parent).visibility !== 'visible') continue;
+        let hidden = false;
+        for (let node = parent; node; node = node.parentElement) {
+          const style = getComputedStyle(node);
+          if (style.display === 'none' || Number(style.opacity) === 0) { hidden = true; break; }
+        }
+        if (hidden) continue;
+        const range = document.createRange(); range.selectNodeContents(text);
+        rects.push(...Array.from(range.getClientRects()).filter(rect => rect.width > 0 && rect.height > 0));
+      }
+    }
+    for (const rect of rects) {
       const left = Math.max(0,rect.left), right = Math.min(innerWidth,rect.right);
       const top = Math.max(0,rect.top), bottom = Math.min(innerHeight,rect.bottom);
       if (right <= left || bottom <= top) continue;
@@ -381,15 +406,15 @@ try {
       for (let node = hit; node; node = node.parentElement || node.getRootNode().host)
         if (node === element) return {x:x/innerWidth,y:y/innerHeight};
     }
-    if (!Array.from(element.getClientRects()).some(rect =>
+    if (!rects.some(rect =>
       rect.right > 0 && rect.bottom > 0 && rect.left < innerWidth && rect.top < innerHeight))
       throw new Error('element_outside_viewport');
     throw new Error('element_pointer_obstructed');
   };
-  const geometry = args.action === 'hover'
+  const geometry = args.action === 'hover' || args.action === 'click'
     ? {point:target(args)}
     : {from:target(args.source),to:target(args.destination)};
-  return {...geometry,viewport:browserScene({mode:'viewport'})};
+  return {...geometry,url:location.href,viewport:browserScene({mode:'viewport'})};
 } catch (error) {
   return {interactionFailure:{message:String(error?.message ?? error),effectStarted:false}};
 }
@@ -408,10 +433,12 @@ let resolve_pointer_action action = function
     let point key = let* raw = required key in Browser_lane.Pointer.point_of_json raw in
     (match action with
      | Browser_lane.Hover _ -> let* point = point "point" in Ok (Browser_lane.Hover_at {point;viewport})
+     | Browser_lane.Click _ | Browser_lane.Click_node _ ->
+       let* point = point "point" in Ok (Browser_lane.Click_at {point;viewport})
      | Browser_lane.Drag_to _ -> let* from = point "from" in let* to_ = point "to" in
        Ok (Browser_lane.Drag {from;to_;viewport})
-     | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
+     | Browser_lane.Activate_tab | Browser_lane.Fill _
      | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
      | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
-     | Browser_lane.Click_node _ | Browser_lane.Fill_node _ -> Error "semantic pointer action required")
+     | Browser_lane.Fill_node _ -> Error "semantic pointer action required")
   | _ -> Error "invalid pointer target resolution"

@@ -345,22 +345,25 @@ let dispatch ?actor ?request_id t ~verb args =
   | Page_interact -> on_tab (fun context id ->
       let* fields=pre (match args with `Assoc xs->Ok xs|_->Error "invalid interaction") in
       let* request=pre (Browser_interaction.parse (obj (("lane",str Browser_lane.Lane_name.(to_wire Live))::fields))) in
-      let* action = match request.action with
-        | Browser_lane.Hover _ | Browser_lane.Drag_to _ ->
+      let* expected_url,action = match request.action with
+        | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
           let* resolved = pre (script t context Browser_interaction.pointer_target_script args) in
-          pre (Browser_interaction.resolve_pointer_action request.action resolved)
-        | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
+          let* action = pre (Browser_interaction.resolve_pointer_action request.action resolved) in
+          let* url = pre (string "url" resolved) in
+          Ok (Some url,action)
+        | Browser_lane.Activate_tab | Browser_lane.Fill _
         | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
         | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
-        | Browser_lane.Click_node _ | Browser_lane.Fill_node _ -> Ok request.action in
-      let args = Browser_lane.interaction_args ~tab_id:id ~expected_url:request.expected_url action in
+        | Browser_lane.Fill_node _ -> Ok (request.expected_url,request.action) in
+      let args = Browser_lane.interaction_args ~tab_id:id ~expected_url action in
       let* receipt = match action with
-      | Browser_lane.Hover _ | Browser_lane.Drag_to _ -> Error (Before_effect "unresolved semantic pointer target")
+      | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
+        Error (Before_effect "unresolved semantic pointer target")
       | Browser_lane.Hover_at {point;viewport} -> pointer t context args ~viewport ~start:point Hover_pointer
       | Browser_lane.Click_at {point;viewport} -> pointer t context args ~viewport ~start:point Click_pointer
       | Browser_lane.Scroll_at {point;viewport;x;y} -> pointer t context args ~viewport ~start:point (Wheel_pointer {x;y})
       | Browser_lane.Drag {from;to_;viewport} -> pointer t context args ~viewport ~start:from (Drag_pointer to_)
-      | Browser_lane.Click _ | Click_node _ | Fill _ | Fill_node _ | Scroll _ | Follow_link _ ->
+      | Browser_lane.Fill _ | Fill_node _ | Scroll _ | Follow_link _ ->
         (match script t context Browser_interaction.script args with
         | Error e -> Error (Outcome_unknown e)
         | Ok result -> (match field "interactionFailure" result with

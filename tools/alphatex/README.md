@@ -191,6 +191,16 @@ SoundFont entry; **i** stops playback and reopens the picker. In the preset view
 **e** opens the native editor and **p** selects a preset file. The selected VST
 preset owns the sound; MIDI program/bank messages do not replace it. Instrument,
 sample-library or license failures remain visible without a SoundFont fallback.
+Phrase and original MIDI documents save their selected sound. Choosing a VST
+captures its actual default or loaded preset bytes and instrument identifier/version
+without opening its editor. Save/reopen, undo/redo, Save As and phrase-to-backing
+snapshots retain that state. Playback loads a private copy of those bytes; changing
+or moving the original preset file does not change the saved sound. A different
+installed instrument/version is refused. Plug-in binaries, sample libraries and
+licenses still need to be installed separately. Project files containing user
+presets are local musical documents; consider the preset license before sharing.
+Backing MIDI assets retain this sound for reopening in the phrase editor; VST
+audio projection alongside backing still needs source-clock integration.
 Subsequent Space starts, pauses or resumes the preview; `:stop` ends playback. `l` toggles
 repetition of the loop region inside one native AVAudioEngine/PlayerNode. `:seek 4` moves to
 quarter-note beat 4. Select an audio output with `--output UID` or `:output UID`;

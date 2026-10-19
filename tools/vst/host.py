@@ -9,6 +9,7 @@ or plug-in editor is opened here.
 from __future__ import annotations
 
 import hashlib
+import base64
 import io
 import json
 import math
@@ -113,6 +114,21 @@ def edit(request):
             "preset_sha256": digest(data)}
 
 
+def snapshot(request):
+    """Capture an actual default/preset state without opening the native editor."""
+    plugin = load_instrument(request)
+    preset = request.get("preset_path")
+    if preset is not None:
+        data = Path(nonempty(preset, "preset_path")).read_bytes()
+        with tempfile.TemporaryDirectory(prefix="masc-vst-state-") as folder:
+            frozen = Path(folder) / "sound.vstpreset"
+            frozen.write_bytes(data)
+            plugin.load_preset(str(frozen))
+    data = plugin.preset_data
+    return {"instrument": description(plugin),
+            "preset": {"data": base64.b64encode(data).decode("ascii"), "sha256": digest(data)}}
+
+
 def render(request):
     from pedalboard.io import AudioFile
     import numpy as np
@@ -130,6 +146,11 @@ def render(request):
     if isinstance(tail, bool) or not isinstance(tail, (int, float)) or not math.isfinite(tail) or tail < 0:
         raise ValueError("tail_seconds must be finite and nonnegative")
     plugin = load_instrument(request)
+    expected = request.get("expected_instrument")
+    if expected is not None:
+        actual = description(plugin)
+        if not isinstance(expected, dict) or any(expected.get(key) != actual[key] for key in ("identifier", "version")):
+            raise ValueError("installed VST identity/version differs from the project sound")
     preset = request.get("preset_path")
     preset_hash = None
     if preset is not None:
@@ -192,6 +213,8 @@ def run(request):
             return edit(request)
         case "render":
             return render(request)
+        case "snapshot":
+            return snapshot(request)
         case _:
             raise ValueError("unknown VST job operation")
 

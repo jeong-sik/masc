@@ -40,6 +40,15 @@ for subsequent renders. This also supports instruments whose sample browser and
 factory sounds are available only inside their own editor. Saved presets are
 local user data and are never included in package distribution.
 
+`snapshot` takes the same identity and optional `preset_path`. It captures the
+actual loaded state, including the default sound, without opening an editor.
+Its result contains `instrument` and `preset: {data, sha256}` with base64 preset
+bytes. Phrase documents own these bytes, rather than depending on the original
+file. Bound playback materializes a private preset, supplies
+`expected_instrument: {identifier, version}` to `render`, checks its returned
+input hash, and removes the private preset after the native child closes.
+An installed identity/version mismatch fails before synthesis.
+
 `render` takes `plugin_path`, optional `plugin_name`, `midi_path`, `output_path`,
 optional `preset_path` (a `.vstpreset`), `sample_rate` (default 44100) and
 `tail_seconds` (default 1, an audible release tail rather than a job timeout).

@@ -5,10 +5,12 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+import base64
 
 import mido
 
-from host import midi_timeline
+from host import midi_timeline, snapshot
 
 
 def encode(midi):
@@ -59,6 +61,33 @@ class MidiPhraseTests(unittest.TestCase):
 
 
 class NativeBoundaryTests(unittest.TestCase):
+    def test_default_and_external_preset_are_captured_without_editor_or_mutable_path(self):
+        class Plugin:
+            name = 'Bass'
+            identifier = 'BassID'
+            manufacturer_name = 'Test'
+            version = '1.2'
+            is_instrument = True
+            preset_data = b'captured default'
+
+            def load_preset(self, path):
+                self.loaded_path = path
+                self.preset_data = Path(path).read_bytes()
+
+        plugin = Plugin()
+        with patch('host.load_instrument', return_value=plugin):
+            default = snapshot({})
+            self.assertEqual(base64.b64decode(default['preset']['data']), b'captured default')
+            self.assertEqual(default['instrument']['identifier'], 'BassID')
+            with tempfile.TemporaryDirectory() as folder:
+                source = Path(folder) / 'external.vstpreset'
+                source.write_bytes(b'external state')
+                result = snapshot({'preset_path': str(source)})
+                source.write_bytes(b'replaced state')
+                self.assertEqual(base64.b64decode(result['preset']['data']), b'external state')
+                self.assertNotEqual(plugin.loaded_path, str(source))
+                self.assertFalse(Path(plugin.loaded_path).exists())
+
     def job(self, request):
         result = subprocess.run([sys.executable, str(Path(__file__).with_name("host.py"))],
                                 input=json.dumps(request), capture_output=True, text=True)

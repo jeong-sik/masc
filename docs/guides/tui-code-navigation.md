@@ -21,3 +21,11 @@ Positions are clamped if the destination content became shorter or narrower.
 
 Returning to an already readable current file or to a directory-only location
 does not need a file request. Jump history belongs to this TUI session.
+
+Following an LSP location in another file also keeps the source on screen
+until reading succeeds. The containing directory changes with the destination,
+and B records the source position only after that success. A failed or
+cancelled location creates no extra history entry. B can replace an unfinished
+location read with a return. A new language-server question cancels pending
+navigation. Same-file locations move directly to their line and focus file
+content; B restores the source position and pan.

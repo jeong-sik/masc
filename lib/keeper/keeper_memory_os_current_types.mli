@@ -163,12 +163,24 @@ type recall_unresolved =
   ; reason : recall_unresolved_reason
   }
 
+type successor_program_relation = Program_revision | Program_absorption
+
+type successor_program_step =
+  { program_revision : int
+  ; transaction_id : string
+  ; stage_index : int
+  ; from_fact : fact
+  ; into_fact : fact
+  ; relation : successor_program_relation
+  }
+
 type successor_recall_candidate =
   { binding : admission_recall_binding
   ; born_revision : int
   ; original_target : fact
   ; target : fact
   ; path : revision_evidence list
+  ; program_steps : successor_program_step list
   }
 
 type successor_recall =

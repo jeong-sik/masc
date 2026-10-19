@@ -594,12 +594,26 @@ type recall_unresolved =
   ; reason : recall_unresolved_reason
   }
 
+type successor_program_relation = Program_revision | Program_absorption
+
+type successor_program_step =
+  { program_revision : int
+  ; transaction_id : string
+  ; stage_index : int
+  ; from_fact : Keeper_memory_os_types.fact
+  ; into_fact : Keeper_memory_os_types.fact
+  ; relation : successor_program_relation
+  }
+(** An actually applied edge in a canonical committed program. The stage index
+    is local to its transaction; it is never a fabricated durable revision. *)
+
 type successor_recall_candidate =
   { binding : admission_recall_binding
   ; born_revision : int
   ; original_target : Keeper_memory_os_types.fact
   ; target : Keeper_memory_os_types.fact
   ; path : revision_evidence list
+  ; program_steps : successor_program_step list
   }
 
 type successor_recall =
@@ -621,7 +635,13 @@ val read_successor_recall_for_keepers_dir :
     and no unverified aliases. Consumers must report incomplete lookup even
     when no candidate can be recovered. Only
     complete marked snapshot transitions and explicit applied revision edges
-    are followed, in revision order, with no depth limit. Split paths remain
+    are followed, in revision order, with no depth limit. Canonical programs
+    additionally follow applied revision and absorption edges in stage order.
+    [path] retains actual durable revisions once per traversed revision;
+    [program_steps] retains the exact intermediate endpoints and edge kinds.
+    Explicit A-to-B-to-A edges produce a candidate requiring semantic judgment,
+    never a revived direct binding. A drop without an edge stops that path.
+    Split paths remain
     separate evidence. A later same-identity addition cannot resurrect a dead
     path. Candidates have not passed semantic relevance/preservation judgment.
     Lineage failures are returned separately without discarding current facts.

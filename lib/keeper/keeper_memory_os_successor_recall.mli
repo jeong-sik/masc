@@ -18,6 +18,9 @@ val project :
 (** Bindings are paired with their birth revisions; history is chronological.
     Identical duplicate rewrites are replay evidence, while conflicting duplicate
     rewrites make the affected binding unresolved. Only declared edges present
-    at the retirement revision continue a path. A later re-addition cannot
-    revive one. A history error preserves the snapshot and bindings born at its
+    at the retirement revision continue a path. A canonical program traverses
+    its actual locked execution stages, using applied edges and exact endpoint
+    facts; intermediate revisions are never invented. A later re-addition
+    without a recorded edge cannot revive a dead path. A history error preserves
+    the snapshot and bindings born at its
     current revision, and reports older bindings as unavailable. *)

@@ -16,6 +16,7 @@ type lineage =
   | Following of
       { original : fact
       ; path_rev : revision_evidence list
+      ; program_steps_rev : successor_program_step list
       }
 
 type frontier =
@@ -90,20 +91,27 @@ let coverage ~current_revision ~born_revision history transitions =
       |> validate born_revision []
 ;;
 
-let follow row removed = function
-  | Direct -> Following { original = removed; path_rev = [ row.evidence ] }
-  | Following { original; path_rev } ->
-    Following { original; path_rev = row.evidence :: path_rev }
+let follow row removed ?program_step lineage =
+  let add_step steps = match program_step with
+    | None -> steps
+    | Some step -> step :: steps in
+  match lineage with
+  | Direct -> Following { original = removed; path_rev = [ row.evidence ];
+      program_steps_rev = add_step [] }
+  | Following { original; path_rev; program_steps_rev } ->
+    let path_rev = match path_rev with
+      | previous :: _ when previous = row.evidence -> path_rev
+      | [] | _ :: _ -> row.evidence :: path_rev in
+    Following { original; path_rev; program_steps_rev = add_step program_steps_rev }
 ;;
 
-let advance ~after_states ~binding (frontier, unresolved_rev) row =
+let advance_revision ~after_states ~binding (frontier, unresolved_rev) row =
   let note reason unresolved = { binding; reason } :: unresolved in
   let revision = row.evidence.snapshot_revision in
   let next_rev, unresolved_rev =
     List.fold_left
       (fun (next_rev, unresolved_rev) ({ identity; lineage } as path) ->
-        if List.mem identity row.recreated_memory_ids || Option.fold ~none:false ~some:(fun execution ->
-          List.mem identity (Keeper_memory_os_program.touched_ids execution.Keeper_memory_os_program_types.execution)) row.program
+        if List.mem identity row.recreated_memory_ids
         then next_rev, note (Unrecorded_lineage revision) unresolved_rev
         else if not (List.mem identity row.evidence.removed_memory_ids)
            || List.mem identity row.evidence.added_memory_ids
@@ -143,6 +151,48 @@ let advance ~after_states ~binding (frontier, unresolved_rev) row =
   List.sort_uniq compare next_rev, unresolved_rev
 ;;
 
+let advance_program ~binding row publication state =
+  let module P = Keeper_memory_os_program_types in
+  let revision = row.evidence.snapshot_revision in
+  let transaction_id = publication.P.execution.program.transaction_id in
+  let advance_stage (frontier, unresolved_rev) (stage : P.stage) =
+    let note reason unresolved = { binding; reason } :: unresolved in
+    let next_rev, unresolved_rev = List.fold_left
+      (fun (next_rev, unresolved_rev) ({identity;lineage} as path) ->
+        match List.find_opt (fun fact -> memory_id fact = identity) stage.before with
+        | None -> next_rev, note (Invalid_transition revision) unresolved_rev
+        | Some from_fact ->
+          if List.exists (fun fact -> memory_id fact = identity) stage.after
+          then path :: next_rev, unresolved_rev
+          else
+            let revisions = List.filter_map (fun (edge : revision) ->
+              if edge.superseded = identity then Some (edge.superseded_by, Program_revision)
+              else None) stage.revisions_applied in
+            let absorptions = List.filter_map (fun (edge : absorbed_statement) ->
+              if edge.absorbed = identity then Some (edge.into, Program_absorption)
+              else None) stage.absorbed_applied in
+            match revisions @ absorptions with
+            | [] -> next_rev, note (Retired_without_successor revision) unresolved_rev
+            | edges -> List.fold_left (fun (next_rev, unresolved_rev) (target,relation) ->
+                match List.find_opt (fun fact -> memory_id fact = target) stage.after with
+                | None -> next_rev, note (Invalid_transition revision) unresolved_rev
+                | Some into_fact ->
+                  let program_step : successor_program_step =
+                    { program_revision=revision; transaction_id; stage_index=stage.index;
+                      from_fact; into_fact; relation } in
+                  {identity=target;lineage=follow row from_fact ~program_step lineage} :: next_rev,
+                  unresolved_rev) (next_rev, unresolved_rev) edges)
+      ([], unresolved_rev) frontier in
+    List.sort_uniq compare next_rev, unresolved_rev in
+  List.fold_left advance_stage state publication.execution.stages
+;;
+
+let advance ~after_states ~binding state row =
+  match row.program with
+  | None -> advance_revision ~after_states ~binding state row
+  | Some publication -> advance_program ~binding row publication state
+;;
+
 let collect current ~binding ~born_revision acc { identity; lineage } =
   match List.find_opt (fun fact -> memory_id fact = identity) current.facts with
   | None ->
@@ -153,7 +203,7 @@ let collect current ~binding ~born_revision acc { identity; lineage } =
   | Some target ->
     (match lineage with
      | Direct -> { acc with direct_rev = binding :: acc.direct_rev }
-     | Following { original; path_rev } ->
+     | Following { original; path_rev; program_steps_rev } ->
        { acc with
          candidates_rev =
            { binding
@@ -161,6 +211,7 @@ let collect current ~binding ~born_revision acc { identity; lineage } =
            ; original_target = original
            ; target
            ; path = List.rev path_rev
+           ; program_steps = List.rev program_steps_rev
            }
            :: acc.candidates_rev
        })

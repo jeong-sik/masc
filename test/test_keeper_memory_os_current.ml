@@ -2844,39 +2844,302 @@ let test_successor_recall_rejects_raw_same_identity_incarnation () =
   check bool "restoring identical bytes cannot revive the old occurrence" true
     (restored.direct_bindings=[] && restored.successor_candidates=[] && restored.unresolved<>[])
 
-let test_successor_recall_rejects_ordered_net_zero_incarnation () =
-  with_temp_keepers @@ fun keepers_dir ->
-  let module Program=Masc.Keeper_memory_os_program in
+module Recall_program = Masc.Keeper_memory_os_program
+
+type recall_program_recipe =
+  { rp_current : Types.fact list
+  ; rp_claims : Types.fact list
+  ; rp_dropped : Types.dropped_statement list
+  ; rp_absorbed : Types.absorbed_statement list
+  ; rp_revisions : Types.revision list
+  }
+
+let recall_program_recipe ?(claims=[]) ?(dropped=[]) ?(absorbed=[]) ?(revisions=[]) current =
+  {rp_current=current;rp_claims=claims;rp_dropped=dropped;rp_absorbed=absorbed;rp_revisions=revisions}
+
+let recall_program_drop fact =
+  {Types.memory_id=Types.memory_id fact;reason="The next committed observation retires this claim."}
+
+let recall_program_revision from into =
+  {Types.superseded=Types.memory_id from;superseded_by=Types.memory_id into}
+
+let prepare_recall_program ~keepers_dir ~transaction_id ~initial recipes =
   let module Unread=Masc.Keeper_librarian_unread in
+  let anchor=Current.capture_program_anchor ~keepers_dir ~keeper_id:"keeper" |> require_ok in
+  let keeper_id=Masc_test_deps.keeper_id_fixture "keeper" in
+  let turn_ref=Ids.Turn_ref.make ~trace_id:"program-aware-recall" ~absolute_turn:3 in
+  let messages=List.mapi (fun index _ -> Agent_core.Types.make_message ~role:Agent_core.Types.User
+    [Agent_core.Types.Text (Printf.sprintf "Ordered recall observation %d." index)]) recipes in
+  let sources=List.mapi (fun message_in_turn message -> Unread.Official_turn
+    {turn_ref;boundary_line=1;message_in_turn;message_sha256=Unread.message_digest message}) messages in
+  let decisions=List.mapi (fun index recipe ->
+    {Recall_program.run_id=Printf.sprintf "%s-%d" transaction_id index;keeper_id;turn_ref;
+     input_current=Some recipe.rp_current;sources=[List.nth sources index];
+     input_evidence=`Null;gate_evidence=`Null;working_state="Accepted ordered continuation.";
+     new_claims=recipe.rp_claims;dropped=recipe.rp_dropped;absorbed=recipe.rp_absorbed;revisions=recipe.rp_revisions}) recipes in
+  (* Program.create computes every stage with the production disposition
+     calculus; the fixture supplies decisions, never fabricated outcomes. *)
+  let program=Recall_program.create ~transaction_id ~keeper_id ~turn_ref ~sources ~unread:[]
+    ~initial_current:(Some initial) ~decisions |> require_ok in
+  let range : Current.official_range_id = {receipt_scope="program-aware-recall:" ^ transaction_id;
+    after_boundary_line=0;turns=[1,turn_ref];unread_messages=[]} in
+  let source=Current.Official_program_source {range;selected_turns=[1,turn_ref,messages]} in
+  anchor,source,program
+
+let publish_recall_program ~keepers_dir ~transaction_id ~initial recipes =
+  let anchor,source,program=prepare_recall_program ~keepers_dir ~transaction_id ~initial recipes in
+  Current.apply_program ~keepers_dir ~keeper_id:"keeper" ~now:400. ~anchor ~source
+    ~validate_source:(fun () -> Ok ()) program |> require_ok
+
+let recall_program_step ?(program_revision=2) ~transaction_id stage_index relation from_fact into_fact : Current.successor_program_step =
+  {program_revision;transaction_id;stage_index;from_fact;into_fact;relation}
+
+let check_program_candidate ?(path_revisions=[2]) ~binding ~original ~target ~steps view =
+  check bool "program recall never silently retargets the historical binding" true (view.Current.direct_bindings=[]);
+  let candidate=match view.successor_candidates with
+    | [candidate] -> candidate | [] | _::_::_ -> fail "expected exactly one current program successor candidate" in
+  check bool "Following keeps the original source binding and exact retired fact" true
+    (candidate.binding=binding && candidate.original_target=original && candidate.born_revision=1);
+  check bool "Following names the exact surviving current payload" true (candidate.target=target);
+  check (list int) "virtual stages never become invented durable revisions" path_revisions
+    (List.map (fun (row : Current.revision_evidence) -> row.snapshot_revision) candidate.path);
+  check bool "every explicit applied program edge retains ordered occurrence evidence" true
+    (candidate.program_steps=steps)
+
+let test_successor_recall_follows_ordered_net_zero_incarnation () =
+  with_temp_keepers @@ fun keepers_dir ->
   let original=fact ~claim:"original ordered bound observation" () in
   let middle=fact ~claim:"virtual ordered successor" () in
   let binding=recall_binding 1 (fact ~claim:"original ordered input" ()) original in
   ignore (commit_recall ~keepers_dir binding [original] |> require_ok);
-  let anchor=Current.capture_program_anchor ~keepers_dir ~keeper_id:"keeper" |> require_ok in
-  let turn_ref=Ids.Turn_ref.make ~trace_id:"ordered-recall" ~absolute_turn:3 in
-  let messages=List.map (fun text -> Agent_core.Types.make_message ~role:Agent_core.Types.User
-    [Agent_core.Types.Text text]) ["intermediate observation";"restored observation"] in
-  let sources=List.mapi (fun message_in_turn message -> Unread.Official_turn
-    {turn_ref;boundary_line=1;message_in_turn;message_sha256=Unread.message_digest message}) messages in
-  let decide index held successor : Program.decision =
-    {run_id=string_of_int index;keeper_id=Masc_test_deps.keeper_id_fixture "keeper";turn_ref;
-     input_current=Some [held];sources=[List.nth sources index];input_evidence=`Null;gate_evidence=`Null;
-     working_state="ordered continuation";new_claims=[successor];absorbed=[];
-     dropped=[{Types.memory_id=Types.memory_id held;reason="The next observation revises this claim."}];
-     revisions=[{Types.superseded=Types.memory_id held;superseded_by=Types.memory_id successor}]} in
-  let program=Program.create ~transaction_id:"ordered-net-zero-recall"
-    ~keeper_id:(Masc_test_deps.keeper_id_fixture "keeper") ~turn_ref ~sources ~unread:[]
-    ~initial_current:(Some [original]) ~decisions:[decide 0 original middle;decide 1 middle original] |> require_ok in
-  let range : Current.official_range_id = {receipt_scope="ordered-net-zero";after_boundary_line=0;
-    turns=[1,turn_ref];unread_messages=[]} in
-  let committed=Current.apply_program ~keepers_dir ~keeper_id:"keeper" ~now:400. ~anchor
-    ~source:(Current.Official_program_source {range;selected_turns=[1,turn_ref,messages]})
-    ~validate_source:(fun () -> Ok ()) program |> require_ok in
+  let transaction_id="ordered-net-zero-recall" in
+  let committed=publish_recall_program ~keepers_dir ~transaction_id ~initial:[original]
+    [recall_program_recipe [original] ~claims:[middle] ~dropped:[recall_program_drop original]
+       ~revisions:[recall_program_revision original middle];
+     recall_program_recipe [middle] ~claims:[original] ~dropped:[recall_program_drop middle]
+       ~revisions:[recall_program_revision middle original]] in
   check bool "net-zero actual snapshot has no fake durable virtual fact" true
     (committed.snapshot.facts=[original] && committed.snapshot.change.added=[] && committed.snapshot.change.removed=[]);
   let recalled=successor_recall ~keepers_dir in
-  check bool "unsupported step-aware recall remains explicitly unresolved" true
-    (recalled.direct_bindings=[] && recalled.successor_candidates=[] && recalled.unresolved<>[])
+  check_program_candidate ~binding ~original ~target:original ~steps:
+    [recall_program_step ~transaction_id 0 Current.Program_revision original middle;
+     recall_program_step ~transaction_id 1 Current.Program_revision middle original] recalled;
+  check bool "two explicit edges resolve the occurrence without making it a direct alias" true (recalled.unresolved=[])
+
+let test_successor_recall_follows_program_revision_and_absorption () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let a=fact ~claim:"program original policy" () and b=fact ~claim:"program intermediate correction" ()
+  and c=fact ~claim:"program combined final policy" () in
+  let binding=recall_binding 1 (fact ~claim:"program source observation" ()) a in
+  ignore (commit_recall ~keepers_dir binding [a] |> require_ok);
+  let transaction_id="program-revision-then-absorption" in
+  let committed=publish_recall_program ~keepers_dir ~transaction_id ~initial:[a]
+    [recall_program_recipe [a] ~claims:[b] ~dropped:[recall_program_drop a] ~revisions:[recall_program_revision a b];
+     recall_program_recipe [b] ~claims:[c] ~absorbed:[{Types.absorbed=Types.memory_id b;into=Types.memory_id c}]] in
+  check bool "only the final conclusion is a durable current fact" true (committed.snapshot.facts=[c]);
+  let recalled=successor_recall ~keepers_dir in
+  check_program_candidate ~binding ~original:a ~target:c ~steps:
+    [recall_program_step ~transaction_id 0 Current.Program_revision a b;
+     recall_program_step ~transaction_id 1 Current.Program_absorption b c] recalled;
+  check bool "complete canonical program evidence is resolved" true (recalled.unresolved=[])
+
+let test_successor_recall_program_drop_readd_has_no_edge () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let a=fact ~claim:"same bytes return without any declared successor edge" () in
+  let binding=recall_binding 1 (fact ~claim:"source for retired occurrence" ()) a in
+  ignore (commit_recall ~keepers_dir binding [a] |> require_ok);
+  let committed=publish_recall_program ~keepers_dir ~transaction_id:"program-drop-readd" ~initial:[a]
+    [recall_program_recipe [a] ~dropped:[recall_program_drop a];recall_program_recipe [] ~claims:[a]] in
+  check bool "the store really returned to the exact original outer facts" true
+    (committed.snapshot.facts=[a] && committed.snapshot.change.added=[] && committed.snapshot.change.removed=[]);
+  let recalled=successor_recall ~keepers_dir in
+  check bool "current same-ID bytes cannot invent an edge or revive a direct binding" true
+    (recalled.direct_bindings=[] && recalled.successor_candidates=[]
+     && recalled.unresolved=[{Current.binding;reason=Current.Retired_without_successor 2}])
+
+let test_successor_recall_program_invalidation_cannot_revive_a_branch () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let a=fact ~claim:"source replaced by a supported intermediate" ()
+  and premise=fact ~claim:"premise later withdrawn inside the program" () in
+  let b=derived_fact ~claim:"intermediate conclusion requires its original premise"
+    [{Types.rule_id="program-recall-premise";premise_ids=[Types.memory_id premise]}] in
+  let binding=recall_binding 1 (fact ~claim:"original evidence for intermediate conclusion" ()) a in
+  ignore (commit_recall ~keepers_dir binding [a;premise] |> require_ok);
+  let committed=publish_recall_program ~keepers_dir ~transaction_id:"program-invalidated-readd" ~initial:[a;premise]
+    [recall_program_recipe [a;premise] ~claims:[b] ~dropped:[recall_program_drop a] ~revisions:[recall_program_revision a b];
+     recall_program_recipe [premise;b] ~dropped:[recall_program_drop premise];
+     recall_program_recipe [] ~claims:[premise;b]] in
+  (match committed.proof.execution.stages with
+   | [_;invalidating;_] -> check bool "the intermediate actually lost support before its later re-addition" true
+       (invalidating.invalidated=[{Recall_program.fact=b;missing_premise_ids=[Types.memory_id premise]}]
+        && invalidating.after=[])
+   | [] | [_] | [_;_] | _::_::_::_ -> fail "expected the real three-stage invalidation proof");
+  check bool "the supported same-ID conclusion really exists in final Memory" true (committed.snapshot.facts=[premise;b]);
+  let recalled=successor_recall ~keepers_dir in
+  check bool "re-adding the invalidated occurrence cannot revive its old incoming path" true
+    (recalled.direct_bindings=[] && recalled.successor_candidates=[]
+     && recalled.unresolved=[{Current.binding;reason=Current.Retired_without_successor 2}])
+
+let test_successor_recall_program_keeps_surviving_split_branch () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let a=fact ~claim:"program split original" () and b=fact ~claim:"program split retired branch" ()
+  and c=fact ~claim:"program split surviving branch" () in
+  let binding=recall_binding 1 (fact ~claim:"program split source" ()) a in
+  ignore (commit_recall ~keepers_dir binding [a] |> require_ok);
+  let transaction_id="program-split-retirement" in
+  let committed=publish_recall_program ~keepers_dir ~transaction_id ~initial:[a]
+    [recall_program_recipe [a] ~claims:[b;c] ~dropped:[recall_program_drop a]
+       ~revisions:[recall_program_revision a b;recall_program_revision a c];
+     recall_program_recipe [b;c] ~dropped:[recall_program_drop b]] in
+  check bool "only one branch actually survives in the final snapshot" true (committed.snapshot.facts=[c]);
+  let recalled=successor_recall ~keepers_dir in
+  check_program_candidate ~binding ~original:a ~target:c
+    ~steps:[recall_program_step ~transaction_id 0 Current.Program_revision a c] recalled;
+  check bool "the retired branch stays explicit without discarding its surviving sibling" true
+    (recalled.unresolved=[{Current.binding;reason=Current.Retired_without_successor 2}])
+
+let test_successor_recall_program_uses_applied_relationships ~revision () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let a=fact ~claim:"relationship source retained when its proposed destination loses support" ()
+  and premise=fact ~claim:"destination proof withdrawn by the accepted decision" () in
+  let b=derived_fact ~claim:"proposed destination requires a withdrawn premise"
+    [{Types.rule_id="program-veto-premise";premise_ids=[Types.memory_id premise]}] in
+  let initial=if revision then [a;premise] else [a;premise;b] in
+  let binding=recall_binding 1 (fact ~claim:"retained source evidence" ()) a in
+  ignore (commit_recall ~keepers_dir binding initial |> require_ok);
+  let recipe=if revision then recall_program_recipe initial ~claims:[b]
+      ~dropped:[recall_program_drop a;recall_program_drop premise] ~revisions:[recall_program_revision a b]
+    else recall_program_recipe initial ~dropped:[recall_program_drop premise]
+      ~absorbed:[{Types.absorbed=Types.memory_id a;into=Types.memory_id b}] in
+  let committed=publish_recall_program ~keepers_dir ~transaction_id:(if revision then "program-veto-revision" else "program-veto-absorption")
+    ~initial [recipe] in
+  (match committed.proof.execution.stages with
+   | [stage] -> check bool "the production disposition withdrew the requested relationship" true
+       (stage.revisions_applied=[] && stage.absorbed_applied=[]
+        && (stage.decision.revisions<>[] || stage.decision.absorbed<>[]))
+   | [] | _::_::_ -> fail "expected one actual disposition stage");
+  check bool "the source really remains current after the destination veto" true (committed.snapshot.facts=[a]);
+  let recalled=successor_recall ~keepers_dir in
+  check bool "a requested but unapplied relationship creates no Following authority" true
+    (recalled.direct_bindings=[binding] && recalled.successor_candidates=[] && recalled.unresolved=[])
+
+let test_successor_recall_program_canonical_reload () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let a=fact ~claim:"cold program original" () and b=fact ~claim:"cold program virtual middle" ()
+  and c=fact ~claim:"cold program current conclusion" () in
+  let binding=recall_binding 1 (fact ~claim:"cold program source" ()) a in
+  ignore (commit_recall ~keepers_dir binding [a] |> require_ok);
+  let transaction_id="program-canonical-reload" in
+  let committed=publish_recall_program ~keepers_dir ~transaction_id ~initial:[a]
+    [recall_program_recipe [a] ~claims:[b] ~dropped:[recall_program_drop a] ~revisions:[recall_program_revision a b];
+     recall_program_recipe [b] ~claims:[c] ~dropped:[recall_program_drop b] ~revisions:[recall_program_revision b c]] in
+  let warm=successor_recall ~keepers_dir in
+  check_program_candidate ~binding ~original:a ~target:c ~steps:
+    [recall_program_step ~transaction_id 0 Current.Program_revision a b;
+     recall_program_step ~transaction_id 1 Current.Program_revision b c] warm;
+  let journal=Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let bytes=Fs_compat.load_file journal in
+  let before=(Unix.stat journal).Unix.st_ino in
+  Fs_compat.invalidate_cached_writer journal;
+  Fs_compat.save_file_atomic_strict journal bytes |> require_ok;
+  check bool "a new journal inode forces canonical proof decoding rather than the warm cursor" true
+    ((Unix.stat journal).Unix.st_ino<>before);
+  check bool "canonical reload preserves the exact source, steps and current candidate" true
+    (successor_recall ~keepers_dir=warm);
+  check bool "recall does not rewrite the durable program result" true
+    (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require_ok=Some committed.snapshot)
+
+let test_successor_recall_program_pending_journal_recovers () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let a=fact ~claim:"pending program original" () and b=fact ~claim:"pending program middle" ()
+  and c=fact ~claim:"pending program final" () in
+  let binding=recall_binding 1 (fact ~claim:"pending program source" ()) a in
+  ignore (commit_recall ~keepers_dir binding [a] |> require_ok);
+  let transaction_id="program-pending-recall" in
+  let anchor,source,program=prepare_recall_program ~keepers_dir ~transaction_id ~initial:[a]
+    [recall_program_recipe [a] ~claims:[b] ~dropped:[recall_program_drop a] ~revisions:[recall_program_revision a b];
+     recall_program_recipe [b] ~claims:[c] ~dropped:[recall_program_drop b] ~revisions:[recall_program_revision b c]] in
+  let journal=Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let birth=Fs_compat.load_file journal and callbacks=ref 0 in
+  let committed=Current.For_testing.apply_program_with_publication_io ~keepers_dir ~keeper_id:"keeper" ~now:400.
+    ~anchor ~source ~validate_source:(fun () -> Ok ())
+    ~write_snapshot:Fs_compat.save_file_atomic_strict_staged ~sync_snapshot:(fun _ -> Error "fixture sync remains unconfirmed")
+    ~before_journal:(fun () -> Fs_compat.invalidate_cached_writer journal;Sys.remove journal;Unix.mkdir journal 0o700)
+    ~on_committed:(fun _ -> incr callbacks) program |> require_ok in
+  check int "the durable producer callback ran exactly once before journal delivery failed" 1 !callbacks;
+  check bool "the committed proof remains prepared for ordinary recovery" true
+    (Sys.file_exists (Current.publication_receipt_path ~keepers_dir ~keeper_id:"keeper"));
+  check bool "pending canonical evidence cannot produce a successor while finalization is unavailable" true
+    (Result.is_error (Current.read_successor_recall_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"));
+  Unix.rmdir journal;
+  Fs_compat.save_file journal birth;
+  let recalled=successor_recall ~keepers_dir in
+  check_program_candidate ~binding ~original:a ~target:c ~steps:
+    [recall_program_step ~transaction_id 0 Current.Program_revision a b;
+     recall_program_step ~transaction_id 1 Current.Program_revision b c] recalled;
+  check bool "normal read recovery clears the exact pending publication" false
+    (Sys.file_exists (Current.publication_receipt_path ~keepers_dir ~keeper_id:"keeper"));
+  check bool "recovery keeps the committed target bytes and revision" true (recalled.snapshot=Some committed.snapshot);
+  check int "recall recovery never repeats a producer callback" 1 !callbacks;
+  let program_rows=Current.read_journal_tail ~keepers_dir ~keeper_id:"keeper" ~limit:10
+    |> List.map require_ok |> List.filter_map (function
+      | Current.Journal_committed {program=Some proof;_} -> Some proof
+      | Current.Journal_committed {program=None;_} | Current.Journal_failed _ | Current.Journal_quarantined _ -> None) in
+  check int "WAL recovery records the canonical program exactly once" 1 (List.length program_rows);
+  check bool "the recovered publication is the exact committed stage evidence" true (program_rows=[committed.proof])
+
+let test_successor_recall_legacy_program_legacy_chronology () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let a=fact ~claim:"legacy birth target" () and b=fact ~claim:"legacy correction before the program" ()
+  and c=fact ~claim:"virtual absorption target" () and d=fact ~claim:"program final target" ()
+  and e=fact ~claim:"legacy correction after the program" () in
+  let binding=recall_binding 1 (fact ~claim:"original mixed-history source" ()) a in
+  ignore (commit_recall ~keepers_dir binding [a] |> require_ok);
+  ignore (revise_into ~keepers_dir a [b] : Current.t);
+  let transaction_id="legacy-program-legacy" in
+  let committed=publish_recall_program ~keepers_dir ~transaction_id ~initial:[b]
+    [recall_program_recipe [b] ~claims:[c] ~absorbed:[{Types.absorbed=Types.memory_id b;into=Types.memory_id c}];
+     recall_program_recipe [c] ~claims:[d] ~dropped:[recall_program_drop c] ~revisions:[recall_program_revision c d]] in
+  check int "the program occupies exactly one real revision between legacy writers" 3 committed.snapshot.revision;
+  ignore (revise_into ~keepers_dir d [e] : Current.t);
+  let recalled=successor_recall ~keepers_dir in
+  check_program_candidate ~binding ~original:a ~target:e ~path_revisions:[2;3;4] ~steps:
+    [recall_program_step ~program_revision:3 ~transaction_id 0 Current.Program_absorption b c;
+     recall_program_step ~program_revision:3 ~transaction_id 1 Current.Program_revision c d] recalled;
+  check bool "complete mixed chronology preserves one source and no unresolved gaps" true (recalled.unresolved=[])
+
+let test_successor_recall_program_convergence_keeps_both_paths () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let a=fact ~claim:"converging program original" () and b=fact ~claim:"first independently revised branch" ()
+  and c=fact ~claim:"second independently revised branch" () and d=fact ~claim:"combined final conclusion" () in
+  let binding=recall_binding 1 (fact ~claim:"converging original source" ()) a in
+  ignore (commit_recall ~keepers_dir binding [a] |> require_ok);
+  let transaction_id="program-converging-branches" in
+  let committed=publish_recall_program ~keepers_dir ~transaction_id ~initial:[a]
+    [recall_program_recipe [a] ~claims:[b;c] ~dropped:[recall_program_drop a]
+       ~revisions:[recall_program_revision a b;recall_program_revision a c];
+     recall_program_recipe [b;c] ~claims:[d] ~absorbed:
+       [{Types.absorbed=Types.memory_id b;into=Types.memory_id d};
+        {Types.absorbed=Types.memory_id c;into=Types.memory_id d}]] in
+  check bool "the current store contains one combined target" true (committed.snapshot.facts=[d]);
+  let recalled=successor_recall ~keepers_dir in
+  check int "two distinct explicit paths survive convergence onto one identity" 2 (List.length recalled.successor_candidates);
+  check bool "convergence neither revives a direct alias nor invents missing-history issues" true
+    (recalled.direct_bindings=[] && recalled.unresolved=[]);
+  List.iter (fun (candidate : Current.successor_recall_candidate) ->
+    check bool "each path preserves the exact original binding and surviving current fact" true
+      (candidate.binding=binding && candidate.original_target=a && candidate.target=d && candidate.born_revision=1);
+    check (list int) "converged virtual paths share their actual single durable revision" [2]
+      (List.map (fun (row : Current.revision_evidence) -> row.snapshot_revision) candidate.path)) recalled.successor_candidates;
+  let paths=List.map (fun (candidate : Current.successor_recall_candidate) -> candidate.program_steps)
+    recalled.successor_candidates in
+  let expected=
+    [[recall_program_step ~transaction_id 0 Current.Program_revision a b;
+      recall_program_step ~transaction_id 1 Current.Program_absorption b d];
+     [recall_program_step ~transaction_id 0 Current.Program_revision a c;
+      recall_program_step ~transaction_id 1 Current.Program_absorption c d]] in
+  check bool "convergence preserves both ordered from/into occurrence witnesses" true
+    (List.sort compare paths=List.sort compare expected)
 
 let test_successor_recall_tracks_multistep_split_incarnations () =
   with_temp_keepers @@ fun keepers_dir ->
@@ -4652,7 +4915,17 @@ let () =
     "keeper_memory_os_current"
     [ ("ordered identity recall", [
         test_case "raw same-ID replacement cannot revive bindings" `Quick test_successor_recall_rejects_raw_same_identity_incarnation;
-        test_case "ordered net-zero identities remain unresolved" `Quick test_successor_recall_rejects_ordered_net_zero_incarnation]);
+        test_case "explicit ordered net-zero edges remain Following rather than direct aliases" `Quick test_successor_recall_follows_ordered_net_zero_incarnation;
+        test_case "program revision and absorption preserve the exact ordered successor path" `Quick test_successor_recall_follows_program_revision_and_absorption;
+        test_case "program drop and re-add cannot invent a successor edge" `Quick test_successor_recall_program_drop_readd_has_no_edge;
+        test_case "program intermediate invalidation prevents later same-ID branch revival" `Quick test_successor_recall_program_invalidation_cannot_revive_a_branch;
+        test_case "program split keeps its surviving branch and records its retired sibling" `Quick test_successor_recall_program_keeps_surviving_split_branch;
+        test_case "program recall ignores a withdrawn absorption request" `Quick (test_successor_recall_program_uses_applied_relationships ~revision:false);
+        test_case "program recall ignores a withdrawn revision request" `Quick (test_successor_recall_program_uses_applied_relationships ~revision:true);
+        test_case "program successor evidence survives a cold canonical journal reload" `Quick test_successor_recall_program_canonical_reload;
+        test_case "program successor evidence recovers once after pending journal delivery" `Quick test_successor_recall_program_pending_journal_recovers;
+        test_case "converging program successors retain both distinct applied paths" `Quick test_successor_recall_program_convergence_keeps_both_paths;
+        test_case "legacy program legacy successor evidence retains actual revision chronology" `Quick test_successor_recall_legacy_program_legacy_chronology]);
       ("generic publication", [
         test_case "staged first and subsequent publication recovery" `Quick test_generic_publication_staged_recovery;
         test_case "journal failure and notification cancellation recovery" `Quick test_generic_publication_journal_and_notification_recovery;

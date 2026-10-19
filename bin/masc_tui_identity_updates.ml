@@ -198,3 +198,18 @@ let refreshed (state : state) ~keeper_name ~refresh ~report result =
        | Error detail ->
          Printf.sprintf "%s: identity refresh failed: %s" keeper_name detail)
 ;;
+
+(* What a detach answered. The receipt is the server's own words, and the
+   list is re-read either way: a detach that was refused still means the
+   pane was reading an attachment that is no longer the whole story. *)
+let disconnected (state : state) ~keeper_name ~provider_id ~notice ~refresh result =
+  state.identity_disconnect_armed <- None;
+  (match result with
+   | Ok text -> notice ~keeper_name:(Some keeper_name) (Masc_tui_identity_model.Notice_ok, text)
+   | Error detail ->
+     notice
+       ~keeper_name:(Some keeper_name)
+       ( Masc_tui_identity_model.Notice_bad
+       , Printf.sprintf "disconnect %s: %s" provider_id detail ));
+  if keeper_detail_target_matches state keeper_name then refresh keeper_name
+;;

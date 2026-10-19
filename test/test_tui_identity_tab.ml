@@ -1006,6 +1006,87 @@ let test_a_paste_keeps_what_is_not_a_control_character () =
   check Alcotest.string "unharmed" "\xed\x95\x9c\xea\xb8\x80"
     (Masc_tui_identity_model.identity_field_paste "\xed\x95\x9c\xea\xb8\x80")
 
+(* ── detaching a service takes two presses ──────────────────────────── *)
+
+let keeper_fixture name =
+  { Decode.k_origin = Decode.Persisted_keeper
+  ; k_name = name
+  ; k_paused = false
+  ; k_identity =
+      Ok
+        { k_trace_id = "trace-" ^ name
+        ; k_created_at = "2026-09-01T00:00:00Z"
+        ; k_updated_at = "2026-09-05T12:00:00Z"
+        }
+  ; k_activity = None
+  }
+
+let detach_state providers =
+  let state = identity_state () in
+  state.keepers <- [ keeper_fixture "A" ];
+  state.keeper_cursor <- 0;
+  state.detail_tab <- Masc_tui_types.Detail_identity;
+  state.identity_view <- Some ("A", providers);
+  state.identity_cursor <- 0;
+  state
+
+let test_detaching_takes_two_presses_on_the_same_row () =
+  (* One press that forgets a token is one keystroke away from an accident,
+     so the first press only arms the row and says so where the pane already
+     reads its notice; the second press on that row is what sends it. *)
+  let state = detach_state [ declared ~tools:[ "sendMessage" ] "slack" "Slack" ] in
+  let sent = ref [] in
+  let unbind ~keeper_name ~provider_id = sent := (keeper_name, provider_id) :: !sent in
+  let disconnect () =
+    Masc_tui_identity_input.disconnect state ~unbind ~report:(fun _ _ -> ())
+  in
+  disconnect ();
+  check (Alcotest.list Alcotest.string) "the first press sends nothing" [] (List.map snd !sent);
+  check (Alcotest.option Alcotest.string) "it arms the row" (Some "slack")
+    state.identity_disconnect_armed;
+  check Alcotest.bool "and says the second press is what sends it" true
+    (match state.identity_attempt_error with
+     | Some (_, detail) -> contains "press D again" detail
+     | None -> false);
+  disconnect ();
+  check (Alcotest.list Alcotest.string) "the second press detaches it" [ "slack" ]
+    (List.map snd !sent);
+  check (Alcotest.option Alcotest.string) "and leaves nothing armed" None
+    state.identity_disconnect_armed
+
+let test_detaching_a_service_that_is_not_attached_arms_nothing () =
+  (* A declared-but-unattached provider has no token and no tools; offering
+     to remove them would be a lie, so the press says so instead of arming. *)
+  let state = detach_state [ declared "slack" "Slack" ] in
+  let sent = ref [] in
+  Masc_tui_identity_input.disconnect state
+    ~unbind:(fun ~keeper_name ~provider_id -> sent := (keeper_name, provider_id) :: !sent)
+    ~report:(fun _ _ -> ());
+  check (Alcotest.option Alcotest.string) "nothing armed" None state.identity_disconnect_armed;
+  check (Alcotest.list Alcotest.string) "nothing sent" [] (List.map snd !sent)
+
+let test_the_arm_does_not_move_to_another_row () =
+  (* Arming Slack and then pressing over Atlassian must not detach Slack: the
+     confirmation compares the armed id with the row under the cursor, so the
+     moved cursor arms its own row instead of acting on the remembered one. *)
+  let state =
+    detach_state
+      [ declared ~tools:[ "getJiraIssue" ] "atlassian" "Atlassian";
+        declared ~tools:[ "sendMessage" ] "slack" "Slack" ]
+  in
+  let sent = ref [] in
+  let unbind ~keeper_name ~provider_id = sent := (keeper_name, provider_id) :: !sent in
+  state.identity_cursor <- 1;
+  Masc_tui_identity_input.disconnect state ~unbind ~report:(fun _ _ -> ());
+  check (Alcotest.option Alcotest.string) "slack armed" (Some "slack")
+    state.identity_disconnect_armed;
+  state.identity_cursor <- 0;
+  Masc_tui_identity_input.disconnect state ~unbind ~report:(fun _ _ -> ());
+  check (Alcotest.list Alcotest.string) "moving to another row detaches nothing" []
+    (List.map snd !sent);
+  check (Alcotest.option Alcotest.string) "and arms the row now under the cursor"
+    (Some "atlassian") state.identity_disconnect_armed
+
 let () =
   Alcotest.run "tui_identity_tab"
     [ ( "numbering",
@@ -1036,6 +1117,14 @@ let () =
             `Quick test_a_pasted_secret_loses_its_trailing_newline;
           Alcotest.test_case "a paste keeps what is not a control character"
             `Quick test_a_paste_keeps_what_is_not_a_control_character;
+        ] );
+      ( "detaching a service",
+        [ Alcotest.test_case "takes two presses on the same row" `Quick
+            test_detaching_takes_two_presses_on_the_same_row;
+          Alcotest.test_case "an unattached service arms nothing" `Quick
+            test_detaching_a_service_that_is_not_attached_arms_nothing;
+          Alcotest.test_case "the arm does not move to another row" `Quick
+            test_the_arm_does_not_move_to_another_row;
         ] );
       ( "the app form",
         [ Alcotest.test_case "the secret is never drawn" `Quick

@@ -1808,6 +1808,9 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
       ; b Act "T" "toggle" ~help:"turn the provider under the cursor on or off"
       ; b Act "A" "app"
           ~help:"open the app-registration form for it -- it asks for a Client ID"
+      ; b Act "D D" "disconnect"
+          ~help:
+            "twice: forget the stored token, drop the tools it attached, and ask \n             the provider to revoke what it still holds"
       ; b Search "/" "filter"
       ; b Meta "R" "refresh"
       ]

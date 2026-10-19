@@ -40,3 +40,9 @@ val refresh_attached
   :  Masc_tui_types.state
   -> refresh:(keeper_name:string -> provider_ids:string list -> unit)
   -> unit
+
+val disconnect
+  :  Masc_tui_types.state
+  -> unbind:(keeper_name:string -> provider_id:string -> unit)
+  -> report:(string -> string -> unit)
+  -> unit

@@ -133,3 +133,9 @@ type identity_login_status =
   | Credentials_published of (int, unit) result
   | Login_exchange_failed | Consent_expired | Consent_superseded | Attempt_unavailable
 val decode_identity_login_status : Yojson.Safe.t -> (identity_login_status, string) result
+
+(* The server answered a detach with a receipt. Say what was deleted and
+   whether the provider was asked to revoke what it still holds: the two are
+   different facts, and an operator told only "disconnected" cannot tell a
+   token gone everywhere from one the provider still honours. *)
+val disconnect_receipt_text : provider_id:string -> Yojson.Safe.t -> string

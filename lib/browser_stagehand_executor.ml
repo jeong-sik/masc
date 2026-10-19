@@ -322,6 +322,25 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
           page_id Browser_interaction.pointer_target_script |> guard_result in
       let* action = Browser_interaction.resolve_pointer_action action resolved
         |> Result.map_error (fun detail -> Browser_lane.Rejected_before_effect detail) in
+      let* action = match action with
+        | Browser_lane.Drag {from;to_;viewport;via;duration_ms} ->
+          let* arrival = match field "arrival" resolved with
+            | None -> Ok None
+            | Some value -> Browser_lane.Pointer.point_of_json value
+              |> Result.map Option.some
+              |> Result.map_error (fun detail -> Browser_lane.Rejected_before_effect detail) in
+          let via = match arrival with
+            | None -> via
+            | Some arrival ->
+              let path = match via with
+                | [] -> [Browser_lane.Pointer.{x=(from.x +. to_.x) /. 2.;y=(from.y +. to_.y) /. 2.}]
+                | _::_ -> via in
+              path @ [arrival] in
+          Ok (Browser_lane.Drag {from;to_;viewport;via;duration_ms})
+        | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
+        | Browser_lane.Scroll _ | Browser_lane.Hover _ | Browser_lane.Drag_to _
+        | Browser_lane.Hover_at _ | Browser_lane.Click_at _ | Browser_lane.Scroll_at _
+        | Browser_lane.Follow_link _ | Browser_lane.Click_node _ | Browser_lane.Fill_node _ -> Ok action in
       let* url = string_field ~method_:"page.evaluate" "url" resolved |> guard_result in
       Ok (action, Some url)
     | Browser_lane.Activate_tab | Browser_lane.Fill _

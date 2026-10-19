@@ -307,6 +307,16 @@ let test_semantic_pointer_input () =
       Wire.Page_drag_and_drop {page_id="P2";from_x=400.;from_y=150.;to_x=600.;to_y=300.;
         route=[{x=500.;y=225.}]};Wire.Page_evaluate _] -> ()
    | _ -> fail "resolved semantic drag must use one native runtime drag");
+  ignore (served (execute drag (`Assoc ["url",`String "http://127.0.0.1:1/shop";"from",resolved_point;
+    "to",Lane.Pointer.point_to_json {x=0.75;y=0.5};"arrival",Lane.Pointer.point_to_json {x=0.7;y=0.5};"viewport",viewport])));
+  check bool "semantic drag enters the hit-tested destination before its center" true
+    (List.exists (function Wire.Page_drag_and_drop {route=[{x=500.;y=225.};{x=560.;y=300.}];_}->true|_->false) fake.sent);
+  List.iter (fun arrival ->
+    check bool "malformed arrival is refused before native input" true
+      (rejected_before_effect (execute drag (`Assoc ["url",`String "http://127.0.0.1:1/shop";"from",resolved_point;
+        "to",Lane.Pointer.point_to_json {x=0.75;y=0.5};"arrival",arrival;"viewport",viewport])));
+    check int "bad arrival only performs target resolution" 1 (List.length fake.sent))
+    [`Null;`Assoc ["x",`Float 1.;"y",`Float 0.5]];
   List.iter (fun action ->
     ignore (served (execute ~expected_url:None action
       (`Assoc ["url",`String "http://127.0.0.1:1/shop";"point",resolved_point;"viewport",viewport])));
@@ -337,6 +347,10 @@ let test_semantic_pointer_input () =
    | [Wire.Page_evaluate _;Wire.Page_evaluate _;
       Wire.Page_drag_and_drop {route=[{x=480.;y=60.};{x=560.;y=240.}];_};Wire.Page_evaluate _] -> ()
    | _ -> fail "semantic custom path must reach the runtime in CSS pixels, in order");
+  ignore (served (execute custom (`Assoc ["url",`String "http://127.0.0.1:1/shop";"from",resolved_point;
+    "to",Lane.Pointer.point_to_json {x=0.75;y=0.5};"arrival",Lane.Pointer.point_to_json {x=0.7;y=0.5};"viewport",viewport])));
+  check bool "destination arrival follows the full explicit path" true
+    (List.exists (function Wire.Page_drag_and_drop {route=[{x=480.;y=60.};{x=560.;y=240.};{x=560.;y=300.}];_}->true|_->false) fake.sent);
   fake.sent <- [];
   let raw = Lane.Drag {from=point;to_={x=0.75;y=0.5};viewport=observed_viewport;via=path;duration_ms=0} in
   ignore (served (Executor.execute ~tabs ~call:(call fake)

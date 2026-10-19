@@ -542,7 +542,14 @@ selector and scene-node clicks resolve into native `page.click` with the
 resolver's current URL and viewport guarded before input. Custom drag
 paths are forwarded as CSS-pixel runtime routes. An omitted path visits the
 midpoint before the destination, so pointer-capture handlers can activate
-before the destination move. Nonzero `durationMs` is refused before input:
+before the destination move. For semantic `drag_to`, the resolver can provide
+an additional arrival point inside the observed destination rectangle. It is
+distinct from the destination center and independently hit-tested against the
+same element. Stagehand visits that point after the requested path and before
+the center, allowing native dragenter followed by dragover before release.
+An occluded or pixel-sized destination supplies no invented arrival point.
+Raw coordinate drags carry only their requested/default path; an input receipt
+does not establish HTML drop acceptance. Nonzero `durationMs` is refused before input:
 the runtime pause after a move does not express movement duration.
 This is not an atomic snapshot/input
 transaction: the operator can still change the page after validation. There is

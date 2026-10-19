@@ -45,7 +45,9 @@ val evaluate_expression : runtime:page_runtime -> body:string -> args:Yojson.Saf
     Semantic click, hover and drag resolve observed targets without scrolling, then
     recheck their URL and viewport before native Stagehand pointer input.
     Custom drag paths become CSS-pixel runtime routes; the default visits the
-    midpoint before the destination. Nonzero movement duration is refused
+    midpoint before the destination. Semantic drags also visit a distinct
+    hit-tested point inside the observed destination when one is available,
+    so native dragenter can precede dragover at the final point. Nonzero movement duration is refused
     before any input: the runtime's delay option is not movement duration.
     Every other verb, sessions included, is refused before any call: the
     backend answers sessions itself, and

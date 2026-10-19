@@ -207,8 +207,10 @@ val execute
     down after a failed predecessor; explicit plan dependencies still apply.
     [ready_files] additionally binds producer resources after upstream outputs
     validate the actual input. Nodes publish binding before waiting for earlier
-    bindings in topological order. One execution-local dependency-layer value
-    supplies both scheduling and the stable ready binding order. The value
+    bindings in topological order. The original Ready producer retains its
+    immutable dependency layers; after checking physical plan identity, the
+    executor reuses them for scheduling and stable ready binding order. Without
+    Ready files, the executor constructs its own dependency layers. The value
     contains only the original immutable plan nodes, never inputs, resources,
     settlements or permission to execute. An execution-local index points into
     that same immutable order; earlier bindings are visited directly without

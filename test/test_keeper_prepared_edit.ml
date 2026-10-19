@@ -752,14 +752,23 @@ let test_inline_preparation_keeps_original_members ~ready () =
   let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:parent ~turn:2
       ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Agent_core.Tool_contract.Serial}
       ~completion:Agent_core.Tool_contract.Continue_after_success in
-  (match Keeper_tool_plan_executor.execute_keeper ~capability_surface ~plan ~run_id:(Plan.Run_id.fresh ())
+  let execute plan = Keeper_tool_plan_executor.execute_keeper ~capability_surface ~plan ~run_id:(Plan.Run_id.fresh ())
       ~composition_run_id:(Plan.Composition_run_id.fresh ()) ~parent_invocation:invocation
       ~config ~meta ~publication_recovery:recovery
       ~ctx_snapshot:(Keeper_context_runtime.create ~eio:false ~system_prompt:"original member scenario")
       ~keeper_turn_id:(fun () -> Some 13) ~source_context:source ?prepared_files ?ready_files ~clock:env#clock
       ~gate_context:(fun () -> Keeper_gate_causal_context.snapshot causal)
       ~record_gate_result:(fun ~operation ~input result -> Keeper_gate_causal_context.record_tool_result causal ~operation ~input result)
-      ~observe_node_result:(fun _ -> Ok ()) () with
+      ~observe_node_result:(fun _ -> Ok ()) () in
+  if ready then begin
+    (* Even identical node objects in a newly constructed plan cannot borrow
+       the original Ready graph or its file preparation authority. *)
+    (match execute (make_plan ()) with
+     | _ -> fail "a different plan borrowed the original Ready preparation"
+     | exception Invalid_argument _ -> ());
+    check string "rejected plan transfer performs no file effect" "before" (read path)
+  end;
+  (match execute plan with
    | Ok _ -> () | Error _ -> fail "original plan failed after rejected transfers");
   check string "original successor consumes committed predecessor bytes" "after" (read path);
   let leaves = physical_leaves meta in

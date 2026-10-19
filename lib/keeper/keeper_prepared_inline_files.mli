@@ -77,6 +77,12 @@ module Ready : sig
       ineligible. This does not widen the plan's admission or replay authority. *)
 
   val plan : t -> Keeper_tool_plan.t
+  val dependency_layers : t -> Keeper_tool_plan.node list list
+  (** Original immutable topological layers retained during successful Ready
+      creation and used for its preparation barriers. The executor reuses them
+      only after checking physical equality with [plan t]. They contain the
+      original plan nodes, not resolved inputs, bindings, results or execution
+      authority. Creation of another Ready object builds its own order. *)
   type ordering = No_order | Wait_for_settlement | Require_success
   val preparation_predecessors : t -> node:Keeper_tool_plan.node ->
     (Keeper_tool_plan.Node_id.t * ordering) list

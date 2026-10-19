@@ -123,6 +123,17 @@ current revision; the old request never resends itself. A committed receipt prov
 configured assignment and the application results it reports, not which Runtime
 is executing a current Keeper turn. Execution and painted latency remain unmeasured.
 
+Runtime catalogue consumers share an in-flight catalogue read for the same
+workspace. Explicit refresh and post-save demand wait for one fresh follow-up
+after that read, rather than starting overlapping catalogue requests. Further
+refreshes during the follow-up may require another read. Last observed rows stay
+visible with refreshing/stale status and the latest refresh failure. A successful
+empty response completes the read; it does not keep saying loading. Exact slot
+replacement still waits for a fresh catalogue. Nested pickers and recent-context
+catalogue demand resume after workspace reconfirmation. A different workspace
+clears the old rows and demand. This sharing covers the catalogue launcher;
+Overview and the Runtime operator surface retain their separate readers.
+
 ## Usage
 
 | Keys | What it does |

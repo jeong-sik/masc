@@ -582,7 +582,9 @@ let test_nested_read_owners_retire_without_losing_selection () =
       ~provider:Voice_wizard.Elevenlabs ~revision:"saved" in
   state.voice_wizard <- Some {opened with vws_save=Wizard.Save_probing 7};
   state.runtime_catalog_reading <- Runtime_catalog_loading;
-  let generation = state.runtime_catalog_generation in
+  let order,owner = Local_read_order.start ~intent:Snapshot_read.Poll state.runtime_catalog_order in
+  state.runtime_catalog_order <- order;
+  let owner = match owner with Some (owner,_) -> owner | None -> Alcotest.fail "catalogue owner did not start" in
   state.context_inspector_open <- true;
   state.context_inspector_keeper <- Some "alpha";
   state.context_inspector_loading <- true;
@@ -598,8 +600,8 @@ let test_nested_read_owners_retire_without_losing_selection () =
   Alcotest.(check (option string)) "Librarian target survives retirement" (Some "librarian-input") state.prompts_librarian_input_requested;
   Alcotest.(check bool) "catalog owner can be restarted" true
     (state.runtime_catalog_reading = Runtime_catalog_unread);
-  Alcotest.(check bool) "catalog generation retired" true
-    (state.runtime_catalog_generation > generation);
+  Alcotest.(check bool) "catalog request retired" true
+    (Option.is_none (Local_read_order.settle state.runtime_catalog_order owner ~observed:true));
   Alcotest.(check bool) "context owner released" false state.context_inspector_loading;
   Alcotest.(check (option string)) "context selection retained" (Some "alpha") state.context_inspector_keeper;
   Alcotest.(check (option string)) "schedule owner released" None state.schedule_wake_history_inflight;
@@ -2825,6 +2827,85 @@ let test_assignment_serializes_same_keeper_config_intents () =
      && editor_state.runtime_pick_keeper=Some editor_keeper.k_name
      && editor_state.runtime_assignment_saves=[])
 
+let catalog_request state intent started_ns =
+  match Masc_tui_types.begin_runtime_catalog_read state ~intent ~started_ns with
+  | Some request -> request | None -> Alcotest.fail "catalogue read did not start"
+
+let test_catalog_demands_share_and_refresh_after_current_read () =
+  let open Masc_tui_types in
+  let state,_ = keeper_settings_fixture () in
+  let first = catalog_request state Snapshot_read.Poll 40L in
+  Alcotest.(check bool) "another consumer shares the in-flight catalogue owner" true
+    (Option.is_none (begin_runtime_catalog_read state ~intent:Snapshot_read.Poll ~started_ns:41L));
+  List.iter (fun started_ns ->
+    Alcotest.(check bool) "refresh demand queues without dispatching a parallel read" true
+      (Option.is_none (begin_runtime_catalog_read state ~intent:Snapshot_read.Refresh ~started_ns))) [42L;43L;44L];
+  Alcotest.(check bool) "current result cannot satisfy later refresh demand" true
+    (take_runtime_catalog_read state first (Ok ([],[],[],Some "old"))
+     && Local_read_order.has_followup state.runtime_catalog_order
+     && state.runtime_catalog_reading=Runtime_catalog_refreshing None);
+  let followup = catalog_request state Snapshot_read.Poll 45L in
+  Alcotest.(check bool) "one successor covers accumulated demand and rejects late original result" true
+    (not (Local_read_order.has_followup state.runtime_catalog_order)
+     && not (take_runtime_catalog_read state first (Ok ([],[],[],Some "late")))
+     && take_runtime_catalog_read state followup (Ok ([],[],[],Some "current"))
+     && state.runtime_catalog_default_route=Some "current"
+     && state.runtime_catalog_reading=Runtime_catalog_read
+     && not (Local_read_order.in_flight state.runtime_catalog_order))
+
+let test_catalog_refresh_retains_observation_and_empty_success () =
+  let open Masc_tui_types in
+  let state,_ = keeper_settings_fixture () in
+  let opening = catalog_request state Snapshot_read.Poll 40L in
+  ignore (take_runtime_catalog_read state opening (Ok ([],[],[],Some "original")));
+  let refresh = catalog_request state Snapshot_read.Refresh 41L in
+  Alcotest.(check bool) "refresh keeps the prior observation" true
+    (runtime_catalog_has_observation state && state.runtime_catalog_default_route=Some "original");
+  ignore (take_runtime_catalog_read state refresh (Error "server unavailable"));
+  Alcotest.(check bool) "failure preserves original data and explicit stale status" true
+    (state.runtime_catalog_default_route=Some "original"
+     && state.runtime_catalog_reading=Runtime_catalog_stale "server unavailable");
+  let retry = catalog_request state Snapshot_read.Refresh 42L in
+  Alcotest.(check bool) "pending retry retains the preceding failure" true
+    (state.runtime_catalog_reading=Runtime_catalog_refreshing (Some "server unavailable"));
+  ignore (take_runtime_catalog_read state retry (Ok ([],[],[],None)));
+  Alcotest.(check bool) "successful empty catalogue is a completed observation" true
+    (state.runtime_catalog_reading=Runtime_catalog_read && runtime_catalog_has_observation state
+     && state.runtime_catalog=[] && state.runtime_catalog_default_route=None
+     && not (Local_read_order.in_flight state.runtime_catalog_order))
+
+let test_catalog_withdrawal_folds_demand_into_reconfirmation () =
+  let open Masc_tui_types in
+  let state,_ = keeper_settings_fixture () in
+  let original = catalog_request state Snapshot_read.Poll 40L in
+  ignore (begin_runtime_catalog_read state ~intent:Snapshot_read.Refresh ~started_ns:41L);
+  state.workspace_read_authority <- ref ();
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "disconnected";
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "retirement preserves demand but denies old response and unconfirmed dispatch" true
+    (state.runtime_catalog_resume
+     && not (take_runtime_catalog_read state original (Ok ([],[],[],Some "old")))
+     && Option.is_none (begin_runtime_catalog_read state ~intent:Snapshot_read.Refresh ~started_ns:42L));
+  state.workspace_identity <- Workspace_identity_match;
+  let resumed = catalog_request state Snapshot_read.Poll 43L in
+  Alcotest.(check bool) "one fresh owner replaces both retired read and queued demand" true
+    (not state.runtime_catalog_resume && not (Local_read_order.has_followup state.runtime_catalog_order)
+     && not (take_runtime_catalog_read state original (Ok ([],[],[],Some "late")))
+     && take_runtime_catalog_read state resumed (Ok ([],[],[],Some "current")));
+  let pending = catalog_request state Snapshot_read.Poll 44L in
+  clear_runtime_catalog_read state;
+  Alcotest.(check bool) "a changed workspace cannot reuse the old catalogue or completion" true
+    (not (take_runtime_catalog_read state pending (Ok ([],[],[],Some "foreign")))
+     && state.runtime_catalog_reading=Runtime_catalog_unread && state.runtime_catalog_default_route=None);
+  let nested = catalog_request state Snapshot_read.Poll 45L in
+  ignore (take_runtime_catalog_read state nested (Ok ([],[],[],Some "observed")));
+  state.context_inspector_open <- true;
+  state.context_inspector_target <- Masc_tui_context_inspector.Recent 0;
+  suspend_runtime_catalog_read state;
+  Alcotest.(check bool) "a completed catalogue needed by a nested consumer also requests reconfirmation" true
+    (state.runtime_catalog_resume && runtime_catalog_has_observation state
+     && not (Local_read_order.in_flight state.runtime_catalog_order))
+
 let runtime_form_source = {|[providers.codex]
 protocol = "codex-app-server"
 command = "codex"
@@ -3145,7 +3226,13 @@ let test_runtime_snapshot_refresh_reuses_draft_without_changing_ownership () =
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "assignment receipt retains original choice after navigation and withdrawal" `Quick
+      , [ Alcotest.test_case "catalogue consumers share reads and accumulate fresh demand" `Quick
+            test_catalog_demands_share_and_refresh_after_current_read
+        ; Alcotest.test_case "catalogue refresh retains observation, failure and empty success" `Quick
+            test_catalog_refresh_retains_observation_and_empty_success
+        ; Alcotest.test_case "catalogue demand survives withdrawal without redundant rereads" `Quick
+            test_catalog_withdrawal_folds_demand_into_reconfirmation
+        ; Alcotest.test_case "assignment receipt retains original choice after navigation and withdrawal" `Quick
             test_assignment_receipt_keeps_original_choice_after_withdrawal
         ; Alcotest.test_case "assignment, editor and Sandbox saves serialize per Keeper" `Quick
             test_assignment_serializes_same_keeper_config_intents

@@ -74,6 +74,20 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, Keeper·Work·�
   시각도 실제 paint/입력 반응/속도 향상으로 부르지 않는다. 원래 작업의 늦은 영수증이 다른
   workspace의 catalog 갱신 권한을 빌리지 않도록 한다.
 
+## 공유 Runtime catalogue 조회
+
+- 같은 workspace/read owner의 진행 중 catalogue 조회는 소비 화면이 공유한다. 이미 비동기인
+  경로를 다시 감싸거나 GET을 추가하지 않는다. 기존 effect-free read-demand order를 사용하며,
+  명시적 refresh·저장 후 조회 요구는 진행 중 요청 뒤의 새 조회 한 번으로 모은다. 앞선 응답을
+  저장 후 최신 관측이라고 부르지 않는다. Overview/Runtime surface의 별도 reader까지 공유됐다고
+  확대해서 주장하지 않는다. ETag 재사용은 진행 중 요청 공유와 별개다.
+- 재조회·실패 중 마지막 정상 catalogue를 남기고 refreshing/stale과 마지막 실패를 함께
+  보여 준다. 정상 empty 결과는 loading이 아니다. 기존 exact replacement의 fresh-read 조건은
+  유지한다. 화면 문구 기대값 대신 요청·소유 상태·결정 시나리오를 작성한다.
+- workspace/read 철회는 원래 요청을 retire하고 필요한 중첩 조회 demand를 보존한다. 재확인 뒤
+  새 요청 하나가 철회된 read와 후속 refresh를 대체한다. 다른 workspace로 전환하면 원래 목록과
+  demand를 지운다. 요청 시작·worker 관측/중단·UI admission은 paint나 실제 속도 증거가 아니다.
+
 ## Runtime 폼 저장
 
 - 모델·계정 폼은 원래 입력과 opening revision으로 소유한 비동기 작업을 만든다.

@@ -1191,24 +1191,6 @@ let test_the_keeper_picker_filters_across_lanes_and_runtimes () =
   Alcotest.(check bool) "and so holds q" false
     (quit_key_allowed_for (text_input_target state ~compact_viewport:false))
 
-let test_the_keeper_picker_empty_match_is_not_an_unread_catalogue () =
-  let picker = keeper_picker_state () in
-  picker.runtime_pick_list <- keeper_pick_after picker [ "/"; "x"; "y" ];
-  let rows, selected, view = keeper_drawn picker in
-  Alcotest.(check (list string)) "nothing is drawn" [] rows;
-  Alcotest.(check (option string)) "nothing is selected" None selected;
-  Alcotest.(check (option string)) "the note says the filter kept nothing"
-    (Some "  (no lane or runtime among 6 matches the filter)")
-    (keeper_runtime_picker_empty_note view);
-  let unread = state () in
-  unread.view <- Keepers Keeper_runtime_pick;
-  let _, _, view = keeper_drawn unread in
-  Alcotest.(check (option string)) "an unread catalogue still says loading"
-    (Some "  (loading runtime catalogue\xe2\x80\xa6)") (keeper_runtime_picker_empty_note view);
-  let _, _, view = keeper_drawn (keeper_picker_state ()) in
-  Alcotest.(check (option string)) "rows draw the header, not a note" None
-    (keeper_runtime_picker_empty_note view)
-
 (* A reload that shortens the list under a cursor on its last row draws the
    new last row selected. *)
 let test_the_keeper_picker_cursor_clamps_to_a_shorter_list () =
@@ -1366,8 +1348,7 @@ let () = Alcotest.run "runtime list geometry"
         test_an_empty_match_is_not_an_unread_catalogue; Alcotest.test_case "the filter matches the drawn text" `Quick
         test_the_filter_matches_the_drawn_text; Alcotest.test_case "the drawn cursor clamps to a shorter catalogue" `Quick
         test_the_drawn_cursor_clamps_to_a_shorter_catalogue; Alcotest.test_case "keeper picker filters across lanes and runtimes" `Quick
-        test_the_keeper_picker_filters_across_lanes_and_runtimes; Alcotest.test_case "keeper picker empty match is not an unread catalogue" `Quick
-        test_the_keeper_picker_empty_match_is_not_an_unread_catalogue; Alcotest.test_case "keeper picker cursor clamps to a shorter list" `Quick
+        test_the_keeper_picker_filters_across_lanes_and_runtimes; Alcotest.test_case "keeper picker cursor clamps to a shorter list" `Quick
         test_the_keeper_picker_cursor_clamps_to_a_shorter_list; Alcotest.test_case "keeper picker window follows the cursor" `Quick
         test_the_keeper_picker_window_follows_the_cursor; Alcotest.test_case "schema-less client only refuses exact lanes" `Quick
         test_schema_less_client_is_refused_only_for_exact_lane

@@ -7484,19 +7484,41 @@ let launch_current_autonomous_journals state ~mailbox ~keeper_name =
       | Follow_read {started_at; since_seq} ->
           launch_keeper_chat_journal_loads state ~mailbox ~keeper_name [source, started_at, since_seq])
 
-let launch_runtime_catalog_load state ~mailbox =
-  if server_authority_ready state then begin
-  state.runtime_catalog_generation <- state.runtime_catalog_generation + 1;
-  let generation = state.runtime_catalog_generation in
-  state.runtime_catalog_reading <- Masc_tui_types.Runtime_catalog_loading;
-  let enqueue_async = workspace_enqueue state in
-  let host = server_peer_host in
-  let port = state.port in
-  Masc_tui_async_read.launch
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Runtime_catalog_loaded (generation, result)))
-    (fun () -> Masc_tui_loader.load_runtime_resolved ~host ~port)
-  end
+let launch_runtime_catalog_load ?(intent=Snapshot_read.Poll) state ~mailbox =
+  match begin_runtime_catalog_read state ~intent ~started_ns:(Mtime_clock.elapsed_ns ()) with
+  | None ->
+      Log.Transport.info "tui_runtime_catalog phase=shared_or_deferred followup=%b resume=%b"
+        (Local_read_order.has_followup state.runtime_catalog_order) state.runtime_catalog_resume
+  | Some request ->
+      let enqueue_async = workspace_enqueue state in
+      let host = server_peer_host and port = state.port in
+      let id = Local_read_order.request_id request.rcr_request in
+      let publish result =
+        Log.Transport.info "tui_runtime_catalog request=%d started_ns=%Ld observed_ns=%Ld phase=%s"
+          id request.rcr_started_ns (Mtime_clock.elapsed_ns ())
+          (match result with Ok _ -> "received" | Error _ -> "failed");
+        enqueue_async mailbox (Runtime_catalog_loaded (request,result)) in
+      let run () =
+        let result = try
+          if runtime_catalog_request_current state request then Masc_tui_loader.load_runtime_resolved ~host ~port
+          else Error "Runtime catalogue read authority withdrew before dispatch"
+        with
+        | Eio.Cancel.Cancelled _ as exn ->
+            Log.Transport.info "tui_runtime_catalog request=%d started_ns=%Ld observed_ns=%Ld phase=interrupted"
+              id request.rcr_started_ns (Mtime_clock.elapsed_ns ()); raise exn
+        | exn -> Error (Printexc.to_string exn) in
+        publish result in
+      Log.Transport.info "tui_runtime_catalog request=%d started_ns=%Ld revision=%s phase=started"
+        id request.rcr_started_ns (Local_read_order.revision_to_string (Local_read_order.request_revision request.rcr_request));
+      (match Eio_context.get_switch_opt () with
+       | None -> publish (Error "Eio switch is unavailable")
+       | Some sw ->
+           (match fork_workspace_job ~observation:true
+             ~on_withdrawn:(fun () -> publish (Error "Runtime catalogue workspace withdrew before worker entry"))
+             state ~sw run with
+            | () -> ()
+            | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+            | exception exn -> publish (Error (Printexc.to_string exn))))
 
 let launch_context_inspector_load ?forecast state ~mailbox ~keeper_name =
   if server_authority_ready state then begin
@@ -12829,12 +12851,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.ask_followup_error <- None;
   state.runtime_pick_keeper <- None;
   state.runtime_pick_list <- Masc_tui_pick_list.closed;
-  state.runtime_catalog <- [];
-  state.runtime_catalog_default_route <- None;
-  state.runtime_catalog_generation <- state.runtime_catalog_generation + 1;
-  state.runtime_catalog_reading <- Masc_tui_types.Runtime_catalog_unread;
-  state.runtime_assignments <- [];
-  state.runtime_lanes <- [];
+  clear_runtime_catalog_read state;
   state.keeper_yolo_names <- [];
   state.keeper_tool_modes_observed <- false;
   state.keeper_tool_modes_error <- None;
@@ -14540,6 +14557,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
          && prior.selected_tab = current.selected_tab ->
            launch_browser_lane state ~mailbox operation
      | _ -> ());
+    if state.runtime_catalog_resume then launch_runtime_catalog_load state ~mailbox;
     launch_surface_reads state ~mailbox state.view;
     refresh_acting_pane_changes state ~mailbox;
     if state.gate_receipt_refresh_pending then
@@ -17921,7 +17939,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
               launch_runtime_config_load ~force:true state ~mailbox;
               (match outcome with
                | Form_saved _ | Form_unconfirmed _ ->
-                   launch_runtime_catalog_load state ~mailbox;
+                   launch_runtime_catalog_load ~intent:Snapshot_read.Refresh state ~mailbox;
                    launch_runtime_surface_load state ~mailbox ~force:true;
                    launch_lanes_reread state ~mailbox
                | Form_not_sent _ | Form_invalid_account _ | Form_refused _ | Form_conflict _ -> ())
@@ -18847,7 +18865,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
              let active = Login.activated view saved result in
              if active then (
                launch_runtime_config_load ~force:true state ~mailbox;
-               launch_runtime_catalog_load state ~mailbox;
+               launch_runtime_catalog_load ~intent:Snapshot_read.Refresh state ~mailbox;
                launch_runtime_surface_load state ~mailbox ~force:true);
              launch_account_login_action state ~mailbox view (Login.Refresh_saved saved);
              Ok ()
@@ -20326,11 +20344,13 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                 launch_runtime_surface_load state ~mailbox ~force:true
             | Masc_tui_types.Standalone_lanes_list -> launch_lanes_reread state ~mailbox)
        | Error _ -> ())
-  | Runtime_catalog_loaded (generation, result) -> (
-      if generation = state.runtime_catalog_generation then
-      match result with
-      | Ok catalog -> apply_runtime_catalog state catalog
-      | Error detail -> state.runtime_catalog_reading <- Masc_tui_types.Runtime_catalog_failed detail)
+  | Runtime_catalog_loaded (request,result) ->
+      let admitted = take_runtime_catalog_read state request result in
+      Log.Transport.info "tui_runtime_catalog request=%d started_ns=%Ld admitted_ns=%Ld admitted=%b followup=%b"
+        (Local_read_order.request_id request.rcr_request) request.rcr_started_ns (Mtime_clock.elapsed_ns ())
+        admitted (Local_read_order.has_followup state.runtime_catalog_order);
+      if admitted && Local_read_order.has_followup state.runtime_catalog_order then
+        launch_runtime_catalog_load state ~mailbox
   | Runtime_assignment_changed (request,status,observed_ns) ->
       let current = runtime_assignment_current state request in
       if apply_runtime_assignment state request status then begin
@@ -20346,7 +20366,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                 ^ " · " ^ runtime_assignment_outcome_detail outcome);
             if current then match outcome with
               | Assignment_answered _ | Assignment_conflict _ | Assignment_unconfirmed _ ->
-                  launch_runtime_catalog_load state ~mailbox
+                  launch_runtime_catalog_load ~intent:Snapshot_read.Refresh state ~mailbox
               | Assignment_not_sent _ | Assignment_refused _ -> ()
       end
   | Browser_history_list_loaded (generation, result) ->
@@ -25543,7 +25563,7 @@ and is loaded on demand through keeper_skill.
                      (* Historical sources have no dependency on today's catalogue. *)
                      (match state.context_inspector_target with
                       | Masc_tui_context_inspector.Recent _ ->
-                          launch_runtime_catalog_load state ~mailbox:async_messages
+                          launch_runtime_catalog_load ~intent:Snapshot_read.Refresh state ~mailbox:async_messages
                       | Masc_tui_context_inspector.Pinned _ -> ());
                      launch_context_inspector_load state
                        ~mailbox:async_messages ~keeper_name)
@@ -29384,6 +29404,8 @@ and is loaded on demand through keeper_skill.
                  launch_clients_load state ~mailbox:async_messages
              | Lanes ->
                 launch_lanes_reread state ~mailbox:async_messages;
+                if Option.is_some state.runtime_lane_pick || Option.is_some state.slot_editor then
+                  launch_runtime_catalog_load ~intent:Snapshot_read.Refresh state ~mailbox:async_messages;
                 (match state.lanes_mode with
                  | Lanes_run_list lane ->
                      launch_lane_runs_load state ~mailbox:async_messages
@@ -29426,8 +29448,9 @@ and is loaded on demand through keeper_skill.
                  | None -> launch_connectors_load state ~mailbox:async_messages
                  | Some _ -> refresh_browser_lane state ~mailbox:async_messages)
             | Runtime ->
-                launch_runtime_surface_load state ~mailbox:async_messages
-                  ~force:true
+                launch_runtime_surface_load state ~mailbox:async_messages ~force:true;
+                if Option.is_some state.runtime_lane_pick || Option.is_some state.slot_editor then
+                  launch_runtime_catalog_load ~intent:Snapshot_read.Refresh state ~mailbox:async_messages
             | Tools -> launch_tools_load state ~mailbox:async_messages
             | Config -> (
                 (* Same per-pane dispatch as goto_surface: each Config pane
@@ -29448,7 +29471,7 @@ and is loaded on demand through keeper_skill.
                 Masc_tui_resources_requests.launch_list state ~host:server_peer_host ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id) ~check:(capture_workspace_check state ~mailbox:async_messages)
             | Schedules -> launch_schedules_load state ~mailbox:async_messages
             | Keepers Keeper_runtime_pick ->
-                launch_runtime_catalog_load state ~mailbox:async_messages
+                launch_runtime_catalog_load ~intent:Snapshot_read.Refresh state ~mailbox:async_messages
             | Metrics ->
                 launch_memory_health_load state ~mailbox:async_messages;
                 launch_keeper_tool_modes_load state ~mailbox:async_messages

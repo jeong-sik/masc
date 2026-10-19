@@ -337,10 +337,13 @@ let render_exact_lane_provider_editor (state : state) editor =
        ("  " ^ Masc_tui_types.runtime_picker_keys (snd action) picker.rlp_filter)
    | None ->
      let catalog = match state.runtime_catalog_reading with
-       | Runtime_catalog_read -> state.runtime_catalog
+       | Runtime_catalog_read | Runtime_catalog_refreshing _ | Runtime_catalog_stale _ -> state.runtime_catalog
        | Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_failed _ -> [] in
      (match state.runtime_catalog_reading with
       | Runtime_catalog_read -> ()
+      | Runtime_catalog_refreshing _ | Runtime_catalog_stale _ ->
+          box_line_styled buf cols ~style:(Theme.warn ())
+            ("  " ^ Terminal_text.single_line (Masc_tui_types.runtime_catalog_reading_suffix state.runtime_catalog_reading))
       | Runtime_catalog_unread ->
           box_line_styled buf cols ~style:(Theme.recede ()) "  runtime catalogue unread · showing slot IDs"
       | Runtime_catalog_loading ->

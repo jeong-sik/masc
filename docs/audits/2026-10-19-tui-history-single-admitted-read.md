@@ -4,6 +4,11 @@ Source comparison base: `99120744cb9b88c6b438bbb6e39daa23ff6d1ce8`
 (#43848). Applies to Goal timeline, Task history, Keeper Calls and retained-browser
 list reload. This is a source cost comparison, not a measured live Loading fix.
 
+The preparation-admission follow-up in
+`2026-10-19-tui-preparation-workspace-admission.md` renames this private history
+wrapper to `launch_workspace_json_read` and reuses it for selected preparation.
+The four history dispatches keep the same single admitted-read behavior.
+
 ## As-Is / To-Be
 
 The preceding layer binds all four dispatch sites through three actual HTTP

@@ -2344,13 +2344,10 @@ let fetch_keeper_turns ~(host : string) ~(port : int) ~preparation_details_for :
   get_json ~host ~port ~path
 
 let fetch_keeper_preparation_details ~host ~port target =
-  match http_get ~host ~port ~path:(Masc_tui_preparation_details.path target) with
-  | Error _ as error -> error
-  | Ok (status_code, body) ->
-    Eio_guard.run_in_systhread ~label:"tui-preparation-details-decode" (fun () ->
-      let ( let* ) = Result.bind in
-      let* json = decode_json ~allow_empty:false ~status_code ~body in
-      Masc_tui_preparation_details.decode ~target json)
+  let ( let* ) = Result.bind in
+  let* json = get_json ~host ~port ~path:(Masc_tui_preparation_details.path target) in
+  Masc_tui_response_decode.run ~name:"keeper.preparation.decode_wait" (fun () ->
+    Masc_tui_preparation_details.decode ~target json)
 
 (** POST /api/v1/keepers/<name>/identity-switch — turn one attached service
     on or off for this keeper without touching the consent. *)

@@ -1954,21 +1954,21 @@ let launch_workspace_request ?(operation = false) state ~mailbox ~boundary_error
 (* These read-only consumers carry their expected roots through the actual GET
    and require the server's admission receipt, including for cache reuse. Local
    ownership is checked before dispatch; a separate health GET adds no binding. *)
-let launch_workspace_history_read state ~mailbox ~deliver read =
+let launch_workspace_json_read state ~mailbox ~deliver read =
   let expected = state.server_identity in
   let authority = state.workspace_authority in
   let reading = state.workspace_read_authority in
   let host = server_peer_host and port = state.port in
   launch_workspace_result state ~mailbox ~boundary_error:Fun.id ~deliver (fun () ->
     match expected with
-    | None -> Error "Workspace identity is unavailable for this history read"
+    | None -> Error "Workspace identity is unavailable for this read"
     | Some expected ->
         if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
         else if reading != state.workspace_read_authority || not (server_authority_ready state)
         then Error "Workspace identity is unconfirmed"
         else if port <> state.port
           || not (same_workspace_identity (Some expected) state.server_identity)
-        then Error "Workspace identity changed before this history read"
+        then Error "Workspace identity changed before this read"
         else
           Masc_tui_workspace_read.with_binding ~host ~port ~expected
             ~proof:Masc_tui_workspace_read.Request_precondition read)
@@ -3109,7 +3109,7 @@ let launch_keeper_preparation_load state ~mailbox =
   Option.iter (fun request ->
     let target = Details.requested_target request in
     let host = server_peer_host and port = state.port in
-    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    launch_workspace_json_read state ~mailbox
       ~deliver:(fun result -> Keeper_preparation_loaded (request,result))
       (fun () -> Masc_tui_http.fetch_keeper_preparation_details ~host ~port target)) request;
   current != previous
@@ -3604,7 +3604,7 @@ let launch_keeper_calls_load ?(force = false) state ~mailbox keeper_name =
     if not same_scope then state.keeper_calls_error <- None;
     let host = server_peer_host in
     let port = state.port in
-    launch_workspace_history_read state ~mailbox
+    launch_workspace_json_read state ~mailbox
       ~deliver:(fun result -> Keeper_calls_loaded (generation, keeper_name, result))
       (fun () -> Masc_tui_http.fetch_keeper_calls ~host ~port ~keeper_name ~limit:100)
   end
@@ -3622,7 +3622,7 @@ let launch_goal_timeline_load state ~mailbox goal_id =
   | Some request ->
   let host = server_peer_host in
   let port = state.port in
-  launch_workspace_history_read state ~mailbox
+  launch_workspace_json_read state ~mailbox
     ~deliver:(fun result -> Goal_timeline_loaded (request, result))
     (fun () -> Masc_tui_http.fetch_goal_timeline ~host ~port ~goal_id)
   end
@@ -3634,7 +3634,7 @@ let launch_task_history_load state ~mailbox task_id =
   | Some request ->
   let host = server_peer_host in
   let port = state.port in
-  launch_workspace_history_read state ~mailbox
+  launch_workspace_json_read state ~mailbox
     ~deliver:(fun result -> Task_history_loaded (request, result))
     (fun () -> Masc_tui_http.fetch_task_history ~host ~port ~task_id)
 
@@ -5168,7 +5168,7 @@ let launch_browser_history state ~mailbox ~reload =
       state.browser_history <- Some history;
       let host = server_peer_host and port = state.port in
       if reload then
-        launch_workspace_history_read state ~mailbox
+        launch_workspace_json_read state ~mailbox
           ~deliver:(fun result -> Browser_history_list_loaded (generation, result))
           (fun () -> Masc_tui_http.fetch_keeper_calls ~host ~port
             ~keeper_name:history.keeper_name ~limit:100)

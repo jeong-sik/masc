@@ -96,6 +96,102 @@ let actual_source_to_selected_read () = with_source (fun config keeper_name turn
   check bool "cancelled autonomous evidence survives without a reply receipt" true
     (match reports with [report] -> report.boundary=Observation.Cancelled | _ -> false))
 
+let workspace_admission_preserves_selected_preparation () =
+  with_source (fun config keeper_name turn_ref _ selected response ->
+    let original = Details.decode ~target:selected response |> ok in
+    let original_report = List.hd original.reports in
+    let foreign_base = Filename.concat config.base_path "other-workspace" in
+    Unix.mkdir foreign_base 0o700;
+    let foreign = Workspace.default_config foreign_base in
+    let preview = Preview.reset ~keeper_name ~turn_ref:(Some turn_ref)
+        ~execution_scope:original_report.execution_scope ~now:10.
+        ~redaction:Keeper_secret_redaction.empty in
+    ignore (Observation.with_turn ~config:foreign ~keeper_name ~preview (fun () ->
+      Preview.with_preparation_result ~writer:(Some preview) ~turn_ref:(Some turn_ref)
+        ~phase:Preview.Context_preparation (fun () -> Error "foreign source failure")));
+    let _, foreign_response = Server_dashboard_http_keeper_api.keeper_runtime_trace_json
+        foreign keeper_name ~trace_id:(Ids.Turn_ref.trace_id turn_ref)
+        ~turn_id:(Ids.Turn_ref.absolute_turn turn_ref) () in
+    let foreign_snapshot = Details.decode ~target:selected foreign_response |> ok in
+    check bool "matching execution IDs alone can decode another workspace's evidence" true
+      (List.exists (fun (report : Observation.report) -> report.report_id<>original_report.report_id)
+         foreign_snapshot.reports);
+    let expected : Tui_decode.server_identity =
+      { sid_version="0.24.0"; sid_binary_commit="preparation-source"
+      ; sid_binary_commit_age_s=None; sid_base_path=Unix.realpath config.base_path
+      ; sid_masc_root=Unix.realpath (Workspace.masc_dir config)
+      ; sid_executable_in_worktree=None; sid_state_ready=Some true
+      ; sid_uptime=None; sid_sse_clients=None; sid_gc=None; sid_scheduler=None } in
+    let served = ref config and conditional = ref false in
+    let receipt = Workspace.read_precondition_admission_header in
+    let receipts = ref [receipt] in
+    let kept_reads = Masc_tui_kept_reads.create () in
+    let host = "127.0.0.1" and port = 8935 in
+    let send ~path ~headers =
+      let request = Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET path in
+      match Server_auth.validate_read_workspace_precondition ~config:!served request with
+      | Ok Server_auth.Workspace_read_matched ->
+          let status, body = if !conditional then 304, "" else
+            let trace_id = Server_utils.query_param request "trace_id" in
+            let turn_id = Option.bind (Server_utils.query_param request "turn_id") int_of_string_opt in
+            let status, json = Server_dashboard_http_keeper_api.keeper_runtime_trace_json
+                !served keeper_name ?trace_id ?turn_id () in
+            (match status with `OK -> 200 | `Not_found -> 404), Yojson.Safe.to_string json in
+          Ok { Masc_http_client.status; headers=("ETag", "\"preparation-original\"")::!receipts; body }
+      | Ok Server_auth.Workspace_read_unbound
+      | Error (Workspace.Invalid_workspace_precondition | Workspace.Workspace_precondition_failed) ->
+          Ok { Masc_http_client.status=409; headers=[]; body="{\"error\":\"workspace_precondition_failed\"}" }
+    in
+    let read () =
+      Masc_tui_workspace_read.with_binding ~host ~port ~expected
+        ~proof:Masc_tui_workspace_read.Request_precondition (fun () ->
+          let ( let* ) = Result.bind in
+          let* json = Masc_tui_workspace_read.read_json ~kept_reads
+              ~address_of:(fun ~path -> Printf.sprintf "http://%s:%d%s" host port path)
+              ~send ~decode:Tui_decode.decode_json_response_body ~host ~port
+              ~path:(Details.path selected) in
+          Details.decode ~target:selected json) in
+    let begin_read () =
+      let state, request = Details.select (Some selected) Details.empty in
+      match request with Some request -> state, request | None -> fail "no preparation read owner" in
+    let expect_original state =
+      match Details.view selected state with
+      | Details.Loaded snapshot ->
+          check bool "selected original report and failure survive admission/cache reuse" true
+            (List.exists (fun (report : Observation.report) ->
+               report.report_id=original_report.report_id && report.boundary=Observation.Returned
+               && List.for_all (fun (span : Preview.preparation_span) ->
+                    match span.preparation.state with
+                    | Preview.Preparation_finished {outcome=Preview.Rejected;_} -> true
+                    | Preparation_finished _ | Preparation_active -> false)
+                  (Preview.preparation_spans report.timeline)) snapshot.reports)
+      | Not_loaded | Loading | Failed _ -> fail "admitted original preparation did not settle its selection" in
+    let expect_failed state =
+      match Details.view selected state with
+      | Details.Failed _ -> ()
+      | Not_loaded | Loading | Loaded _ -> fail "unadmitted evidence became loaded or left its owner pending" in
+    let initial, initial_request = begin_read () in
+    let first = read () in
+    expect_original (Details.receive initial_request first initial);
+    conditional := true;
+    receipts := [];
+    let pending, request = begin_read () in
+    expect_failed (Details.receive request (read ()) pending);
+    receipts := [receipt];
+    let pending, request = begin_read () in
+    check bool "old completion cannot settle explicit retry" true
+      (Details.receive initial_request first pending==pending);
+    expect_original (Details.receive request (read ()) pending);
+    conditional := false;
+    served := foreign;
+    let pending, refused_request = begin_read () in
+    expect_failed (Details.receive refused_request (read ()) pending);
+    served := config;
+    let pending, recovered_request = begin_read () in
+    check bool "a retired foreign-attempt owner cannot settle recovered selection" true
+      (Details.receive refused_request first pending==pending);
+    expect_original (Details.receive recovered_request (read ()) pending))
+
 let protocol_gaps_are_not_absence () = with_source (fun config keeper_name turn_ref _ selected response ->
   let rows = Yojson.Safe.Util.(member "manifest_rows" response |> to_list) in
   let duplicated = response |> replace "manifest_rows" (`List (rows@rows))
@@ -307,6 +403,7 @@ let failed_owner_to_saved_preparation () =
 
 let () = run "selected-preparation-details"
   ["source and protocol", [test_case "original writer through actual runtime API" `Quick actual_source_to_selected_read;
+    test_case "workspace admission through selected original preparation" `Quick workspace_admission_preserves_selected_preparation;
     test_case "partial, missing and ambiguous evidence" `Quick protocol_gaps_are_not_absence];
    "read ownership", [test_case "selected revision and retired requests" `Quick selected_read_ownership;
      test_case "original Owner identity remains exact" `Quick original_identity_observations_are_owned];

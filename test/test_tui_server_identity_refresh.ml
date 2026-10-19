@@ -2256,9 +2256,11 @@ let test_answer_followup_retains_current_source_observations () =
     | Some reading -> Projection.followup_view reading | None -> Alcotest.fail "follow-up observation missing" in
   let reactions = Decode.Ask_reactions_observed {ar_turn_started_at=Some 201.;ar_turn_finished_at=None;
       ar_queue_settled_at=None;ar_queue_cancelled_at=None;ar_evidence_complete=true;ar_evidence_current=true}
-  and tools = Decode.Ask_tools_observed {at_count=1;at_first_recorded_at=Some 202.;at_latest=Some
+  and tools = Decode.Ask_tools_observed {at_count=1;
+      at_outcomes={ato_succeeded=1;ato_deferred=0;ato_failed=0;ato_unsettled=0;ato_malformed=0};
+      at_first_recorded_at=Some 202.;at_latest=Some
       {ata_execution_id="logical-one";ata_physical_execution_id="physical-one";ata_trace_id="original-trace";
-       ata_keeper_turn_id=17;ata_tool="Read";ata_recorded_at=202.};at_evidence_current=true} in
+       ata_keeper_turn_id=17;ata_tool="Read";ata_recorded_at=202.;ata_outcome=Masc.Tool_result.Recorded_succeeded};at_evidence_current=true} in
   let task status = Decode.Ask_task_observed {akt_task_id="task-original";akt_location=Ask_task_backlog;
       akt_status=status;akt_observed_at=203.;akt_evidence_current=true} in
   let round task_value tools_value reactions_value =
@@ -2305,7 +2307,9 @@ let test_answer_followup_retains_current_source_observations () =
       && partial.fv_tools.fo_state=Projection.Followup_received
       && partial.fv_reactions.fo_state=Projection.Followup_unconfirmed
       && (match partial.fv_tools.fo_value with
-          | Some (Decode.Ask_tools_observed {at_count=1;at_evidence_current=false;_}) -> true
+          | Some (Decode.Ask_tools_observed {at_count=1;at_evidence_current=false;
+              at_outcomes={ato_succeeded=1;ato_failed=0;_};
+              at_latest=Some {ata_outcome=Masc.Tool_result.Recorded_succeeded;_};_}) -> true
           | Some (Ask_tools_observed _ | Ask_tools_unavailable) | None -> false)
       && (match partial.fv_reactions.fo_value with
           | Some (Decode.Ask_reactions_observed {ar_turn_started_at=Some 201.;ar_evidence_current=false;_}) -> true
@@ -2313,7 +2317,9 @@ let test_answer_followup_retains_current_source_observations () =
   let absent_reactions = Decode.Ask_reactions_observed {ar_turn_started_at=None;ar_turn_finished_at=None;
       ar_queue_settled_at=None;ar_queue_cancelled_at=None;ar_evidence_complete=false;ar_evidence_current=true} in
   round (Decode.Ask_task_missing "task-original")
-    (Decode.Ask_tools_observed {at_count=0;at_first_recorded_at=None;at_latest=None;at_evidence_current=true})
+    (Decode.Ask_tools_observed {at_count=0;
+      at_outcomes={ato_succeeded=0;ato_deferred=0;ato_failed=0;ato_unsettled=0;ato_malformed=0};
+      at_first_recorded_at=None;at_latest=None;at_evidence_current=true})
     absent_reactions;
   let retained = view () in
   Alcotest.(check bool) "missing Task, regressed Tool count and incomplete clocks retain prior evidence" true
@@ -2321,7 +2327,9 @@ let test_answer_followup_retains_current_source_observations () =
       | Some (Decode.Ask_task_observed {akt_status=Masc_domain.InProgress _;akt_evidence_current=false;_}) -> true
       | Some (Ask_task_observed _ | Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _) | None -> false)
     && (match retained.fv_tools.fo_value with
-      | Some (Decode.Ask_tools_observed {at_count=1;at_evidence_current=false;_}) -> true
+      | Some (Decode.Ask_tools_observed {at_count=1;at_evidence_current=false;
+          at_outcomes={ato_succeeded=1;ato_failed=0;_};
+          at_latest=Some {ata_outcome=Masc.Tool_result.Recorded_succeeded;_};_}) -> true
       | Some (Ask_tools_observed _ | Ask_tools_unavailable) | None -> false)
     && (match retained.fv_reactions.fo_value with
       | Some (Decode.Ask_reactions_observed {ar_turn_started_at=Some 201.;_}) -> true

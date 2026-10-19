@@ -625,10 +625,12 @@ let test_followup_protocol_keeps_exact_identity_and_unknowns () =
        "assignee",`String "owner";"started_at",`String "2026-10-17T00:00:00Z";
        "submitted_at",`String "2026-10-17T00:00:00Z";"verification_id",`String ""])];
   let actions = `Assoc ["state", `String "observed"; "observed_count", `Int 1;
+    "outcomes", `Assoc ["succeeded",`Int 1;"deferred",`Int 0;"failed",`Int 0;
+      "unsettled",`Int 0;"malformed",`Int 0];
     "first_recorded_at", `Float 202.; "latest", `Assoc ["execution_id", `String "logical-one";
       "physical_execution_id", `String "physical-one";
       "trace_id", `String "original-trace"; "keeper_turn_id", `Int 17;
-      "tool", `String "Read"; "recorded_at", `Float 202.]] in
+      "tool", `String "Read"; "recorded_at", `Float 202.;"outcome",`String "succeeded"]] in
   let with_actions value = ("tool_actions", value)::List.remove_assoc "tool_actions" progress in
   let observed = match decode fields (with_actions actions) with
     | Ok value -> value | Error detail -> Alcotest.fail detail in
@@ -650,7 +652,33 @@ let test_followup_protocol_keeps_exact_identity_and_unknowns () =
          action.ata_execution_id="logical-one" && action.ata_physical_execution_id="physical-one"
          && action.ata_trace_id="original-trace"
          && action.ata_keeper_turn_id=17
+         && action.ata_outcome=Tool_result.Recorded_succeeded
      | Decode.Ask_tools_observed _ | Decode.Ask_tools_unavailable -> false);
+  let replace_field key value = function
+    | `Assoc fields -> `Assoc ((key,value)::List.remove_assoc key fields)
+    | _ -> Alcotest.fail "fixture was not an object" in
+  let outcomes = Yojson.Safe.Util.member "outcomes" actions in
+  List.iter (fun broken -> Alcotest.(check bool) "outcome cohorts reject omission, excess, negative and duplicate buckets" true
+      (Result.is_error (decode fields (with_actions (replace_field "outcomes" broken actions)))))
+    [replace_field "succeeded" (`Int 0) outcomes;
+     replace_field "failed" (`Int 1) outcomes;
+     replace_field "deferred" (`Int (-1)) outcomes;
+     (match outcomes with `Assoc values -> `Assoc (("succeeded",`Int 1)::values) | _ -> assert false)];
+  let latest = Yojson.Safe.Util.member "latest" actions in
+  let set_latest value = replace_field "latest" value actions in
+  List.iter (fun tag -> Alcotest.(check bool) "latest result must have a known nonempty outcome bucket" true
+      (Result.is_error (decode fields (with_actions (set_latest (replace_field "outcome" (`String tag) latest))))))
+    ["failed";"unknown"];
+  let failed = replace_field "outcomes"
+      (replace_field "failed" (`Int 1) (replace_field "succeeded" (`Int 0) outcomes))
+      (set_latest (replace_field "outcome" (`String "failed") latest)) in
+  let failed_partial = decode fields (("tool_actions",failed)::List.remove_assoc "tool_actions" partial_progress)
+      |> Result.get_ok in
+  Alcotest.(check bool) "a failed Tool receipt survives unavailable reactions beside an independently done original Task" true
+    (match failed_partial.af_tool_actions,failed_partial.af_linked_task,failed_partial.af_reactions with
+     | Decode.Ask_tools_observed {at_outcomes={ato_failed=1;_};at_latest=Some {ata_outcome=Tool_result.Recorded_failed;_};_},
+       Ask_task_observed {akt_status=Masc_domain.Done _;_}, Ask_reactions_unavailable -> true
+     | _ -> false);
   let malformed_physical value = match actions with
     | `Assoc fields -> `Assoc (List.map (fun (key,latest) ->
         if key<>"latest" then key,latest else match latest with
@@ -663,7 +691,7 @@ let test_followup_protocol_keeps_exact_identity_and_unknowns () =
      ["physical_execution_id",`String "first";"physical_execution_id",`String "second"]];
   Alcotest.(check bool) "a count without matching Tool identities cannot be accepted" true
     (Result.is_error (decode fields (with_actions (`Assoc ["state",`String "observed";
-       "observed_count",`Int 1; "first_recorded_at",`Null; "latest",`Null]))))
+       "observed_count",`Int 1; "outcomes",outcomes; "first_recorded_at",`Null; "latest",`Null]))))
 
 let test_followup_stream_requires_each_original_source () =
   let module Decode = Masc.Tui_decode_asks in

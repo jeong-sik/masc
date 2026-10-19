@@ -305,13 +305,26 @@ concurrent runs do not share a Keeper-name context or infer membership from time
 | Failed observation after a positive result | Reaction clocks retained | Tool result facts also remain, with the latest read marked unavailable |
 
 `tool_actions.state` is `observed` or `unavailable`. An observed summary has
-`observed_count`, `first_recorded_at` and nullable `latest`; the latest record
+`observed_count`, `outcomes`, `first_recorded_at` and nullable `latest`; the latest record
 names `execution_id`, `physical_execution_id`, `trace_id`, `keeper_turn_id`,
-`tool` and `recorded_at`. The first ID retains the original logical node;
+`tool`, `recorded_at` and `outcome`. The first ID retains the original logical node;
 the second names the actual invocation that supplied this result.
-The TUI shows the result count/latest Tool and turn alongside the retained
+`outcomes` contains five required nonnegative counts: `succeeded`, `deferred`,
+`failed`, `unsettled` and `malformed`. Their sum must equal `observed_count`;
+the latest `outcome` uses one of those tags and must have a nonempty bucket.
+All five counts are present even when zero. The existing recorded-call classifier
+reads typed execution `disposition` first, then `wire_outcome` only if no typed
+disposition exists. Thus typed completion with failed response delivery remains
+`succeeded`, and a typed deferral with failed delivery remains `deferred`.
+Missing/unknown wire outcome stays `unsettled`; an invalid outcome field stays
+`malformed`. These rows remain in the physical observation count. Invalid or
+ambiguous physical identity still makes the Tool source unavailable.
+
+The TUI shows the result count/outcome distribution and latest outcome/Tool/turn alongside the retained
 answer receipt. `tui_ask_followup` logs keep the same identity and observation
-clocks without question text, answers or Tool input/output bodies. The existing
+clocks and outcome counts without question text, answers or Tool input/output bodies.
+Failed, unsettled, malformed and retained earlier observations are distinguished
+from current known results. The existing
 drawn feedback block determines the remaining viewport space.
 
 These are positive result observations, including errors. They prove input

@@ -182,12 +182,19 @@ let followup_to_json reading =
     | Ask_tools_observed value -> `Assoc (["state", `String "observed";
         "evidence_current", `Bool value.at_evidence_current;
         "observed_tool_results", `Int value.at_count;
+        "tool_result_outcomes", `Assoc [
+          "succeeded", `Int value.at_outcomes.ato_succeeded;
+          "deferred", `Int value.at_outcomes.ato_deferred;
+          "failed", `Int value.at_outcomes.ato_failed;
+          "unsettled", `Int value.at_outcomes.ato_unsettled;
+          "malformed", `Int value.at_outcomes.ato_malformed];
         "first_tool_result_recorded_at", clock value.at_first_recorded_at]
         @ (match value.at_latest with None -> [] | Some action ->
           ["latest_execution_id", `String action.ata_execution_id;
            "latest_physical_execution_id", `String action.ata_physical_execution_id;
            "latest_trace_id", `String action.ata_trace_id;
            "latest_keeper_turn_id", `Int action.ata_keeper_turn_id;
+           "latest_outcome", `String (Masc.Tool_result.recorded_call_outcome_to_string action.ata_outcome);
            "latest_tool_result_recorded_at", `Float action.ata_recorded_at])) in
   let task = function
     | Decode.Ask_task_unlinked -> `Assoc ["state", `String "unlinked"]

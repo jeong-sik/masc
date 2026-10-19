@@ -147,6 +147,23 @@ let recorded_call_outcome = function
   | _ -> Recorded_malformed
 ;;
 
+let recorded_call_outcome_to_string = function
+  | Recorded_succeeded -> "succeeded"
+  | Recorded_deferred -> "deferred"
+  | Recorded_failed -> "failed"
+  | Recorded_unsettled -> "unsettled"
+  | Recorded_malformed -> "malformed"
+;;
+
+let recorded_call_outcome_of_string = function
+  | "succeeded" -> Result.Ok Recorded_succeeded
+  | "deferred" -> Result.Ok Recorded_deferred
+  | "failed" -> Result.Ok Recorded_failed
+  | "unsettled" -> Result.Ok Recorded_unsettled
+  | "malformed" -> Result.Ok Recorded_malformed
+  | _ -> Result.Error "unknown recorded tool outcome"
+;;
+
 type output_payload =
   { retained_artifacts : Tool_output.artifact_ref list
   ; data : Yojson.Safe.t

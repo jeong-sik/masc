@@ -2,6 +2,10 @@ open Alcotest
 module Response = Server_h2_gateway_helpers
 
 let wire_response ~handler ~headers target =
+  Eio.Switch.run (fun sw ->
+  let resources = Server_h2_response_resources.create
+    ~max_pending_bytes:H2_response_limits.default_max_pending_bytes in
+  Server_h2_response_resources.with_request resources ~sw (fun () ->
   let response = ref None in
   let body = Buffer.create 4096 in
   let complete = ref false in
@@ -53,7 +57,7 @@ let wire_response ~handler ~headers target =
   pump ();
   match !response with
   | Some (status, headers) -> status, headers, Buffer.contents body
-  | None -> fail "H2 JSON route omitted response headers"
+  | None -> fail "H2 JSON route omitted response headers"))
 
 let gunzip payload =
   let input = De.bigstring_create De.io_buffer_size in

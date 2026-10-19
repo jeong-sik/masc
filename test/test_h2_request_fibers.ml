@@ -32,8 +32,13 @@ let with_connection ?streams dispatch handler run =
               let error_handler = Server_h2_gateway.make_error_handler () in
               match dispatch with
               | Inline_reader ->
+                let resources = Server_h2_response_resources.create
+                  ~max_pending_bytes:H2_response_limits.default_max_pending_bytes in
                 H2_eio.Server.create_connection_handler ~sw:conn_sw
-                  ~request_handler:(handler ~request_sw:conn_sw) ~error_handler addr server_flow
+                  ~request_handler:(fun client_addr reqd ->
+                    Server_h2_response_resources.with_request resources ~sw:conn_sw
+                      (fun () -> handler ~request_sw:conn_sw client_addr reqd))
+                  ~error_handler addr server_flow
               | Request_fibers ->
                 Server_bootstrap_http.serve_h2_connection ?streams ~sw:conn_sw
                   ~h2_request_handler:handler ~h2_error_handler:error_handler addr server_flow)) in

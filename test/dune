@@ -5295,6 +5295,7 @@
 (include stanzas/test_dashboard_asset_worker.inc)
 
 (include stanzas/test_h2_response_window.inc)
+(include stanzas/test_h2_response_resources.inc)
 
 ; Log.Kv: a key=value line leaves out the fields whose value is None.
 (test

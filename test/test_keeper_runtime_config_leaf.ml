@@ -61,6 +61,30 @@ let test_resolve_overrides_keeps_env_precedence () =
     (List.assoc_opt "MASC_KEEPER_UNIFIED_TEMP" overrides)
 ;;
 
+let test_h2_listener_capacity_maps_from_toml () =
+  let count, overrides = K.resolve_overrides ~env_lookup:empty_env
+    ["transport.h2_max_concurrent_streams", T.Toml_int 100;
+     "transport.h2_max_pending_response_bytes", T.Toml_int 67108864] in
+  check int "both capacities reach the boot overlay" 2 count;
+  check (option string) "peer stream capacity" (Some "100")
+    (List.assoc_opt "MASC_H2_MAX_CONCURRENT_STREAMS" overrides);
+  check (option string) "listener payload capacity" (Some "67108864")
+    (List.assoc_opt "MASC_H2_MAX_PENDING_RESPONSE_BYTES" overrides)
+;;
+
+let test_h2_listener_capacity_rejects_invalid_env () =
+  let name="MASC_H2_MAX_CONCURRENT_STREAMS" in
+  let previous=Sys.getenv_opt name in
+  Fun.protect ~finally:(fun () -> match previous with
+    | Some value -> Unix.putenv name value | None -> Unix.unsetenv name)
+    (fun () -> List.iter (fun value ->
+      Unix.putenv name value;
+      match H2_response_limits.max_concurrent_streams () with
+      | _ -> failf "invalid transport capacity accepted: %S" value
+      | exception Env_config_core.Config_error _ -> ())
+      [""; "0"; "-1"; "not-an-integer"; "2147483648"])
+;;
+
 let test_vision_max_output_tokens_maps_from_toml () =
   let _, overrides =
     K.resolve_overrides
@@ -134,6 +158,10 @@ let () =
             test_resolve_overrides_keeps_env_precedence
         ; test_case "vision output budget maps from TOML" `Quick
             test_vision_max_output_tokens_maps_from_toml
+        ; test_case "H2 listener capacities map from TOML" `Quick
+            test_h2_listener_capacity_maps_from_toml
+        ; test_case "invalid H2 capacity fails startup" `Quick
+            test_h2_listener_capacity_rejects_invalid_env
         ] )
     ; ( "setting_registry"
       , [ test_case "registry identities and consumers are valid" `Quick

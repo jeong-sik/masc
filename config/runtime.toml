@@ -28,6 +28,15 @@ enabled = true
 # Precedence is MASC_JSONL_RETENTION_DAYS, then this key, then 30.
 jsonl_retention_days = 30
 
+[transport]
+# Restart-scoped H2 listener resources. Both H2-only and Auto use these.
+# Stream count is per connection; pending payload bytes are shared by all H2
+# connections of one listener, including streaming queues. These do not limit
+# process RSS, serialization temporaries, cache/source values or protocol frames.
+# Slow consumers within capacity retain whole responses without an idle timeout.
+h2_max_concurrent_streams = 100
+h2_max_pending_response_bytes = 67108864
+
 [skills]
 # The Skill resource read bound is not configured here: it is the shared
 # inline tool-result boundary (Common.max_tool_result_wire_bytes). An older

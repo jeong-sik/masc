@@ -1,4 +1,8 @@
-(** H2 gateway response helpers. *)
+(** H2 gateway response helpers. Application responses require the request
+    context installed by {!Server_bootstrap_http} or {!Server_h2_gateway}.
+    A whole payload that exceeds the listener's available capacity receives
+    an empty 503 before success headers are sent. Accepted payloads retain
+    their reservation until flush or request-scope cleanup. *)
 
 val dispatch_request :
   sw:Eio.Switch.t -> H2.Reqd.t -> (unit -> unit) -> unit

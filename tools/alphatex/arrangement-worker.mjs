@@ -22,7 +22,7 @@ parentPort.on('message', async job => {
       case 'analyze-calibration': result = await analyzeCalibration({ ...job, signal }); break
       case 'attach-recording': {
         const imported = await importArrangementCapture(job.project, job.path, { projectPath: job.projectPath, signal })
-        result = attachRecordedTake(job.project, imported, job.epoch); break
+        result = attachRecordedTake(job.project, imported, job.epoch, job.correction); break
       }
       case 'prepare-capture': result = await prepareArrangementCaptureRegions(job.project, { sourceRoot: job.sourceRoot, directory: job.directory, signal, midiOutput: job.midiOutput, sourceBindings: job.sourceBindings, portBindings: job.portBindings }); break
       case 'prepare-take': result = await prepareArrangementCapture(job.project, job.asset, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break

@@ -1,5 +1,6 @@
 import { captureRange, captureRegionTime } from './capture-time.mjs'
 import { editArrangement } from './arrangement.mjs'
+import { validateRecordingCorrection, recordingCorrectionCapture } from './recording-correction.mjs'
 
 // Decode the actual binary64 scheduling value, rather than rounding an absolute
 // clock through Number or pretending a decimal rendering is the original value.
@@ -60,13 +61,22 @@ export function recordedRegion(project, asset, epoch) {
     roundingHostTicks: { numerator: String((origin + offset) * targetD - targetN), denominator: String(targetD) } } }
 }
 
-export function attachRecordedTake(project, result, epoch) {
+export function attachRecordedTake(project, result, epoch, correction = { kind: 'none' }) {
+  validateRecordingCorrection(correction)
+  if (result.project.assets.find(asset => asset.id === result.asset)?.recording) throw new Error('Recorded take is already attached')
   const asset = result.project.assets.find(asset => asset.id === result.asset)
+  recordingCorrectionCapture(correction, asset.manifest)
   const region = recordedRegion(project, asset, epoch)
+  const alignment = { ...region.alignment, correction: structuredClone(correction) }
   // The import and its fresh lane/region form one undoable editor transaction.
-  const retained = { ...result.project, assets: result.project.assets.map(item => item === asset ? { ...item, recording: region.alignment } : item) }
+  const retained = { ...result.project, assets: result.project.assets.map(item => item === asset ? { ...item, recording: alignment } : item) }
   let next = editArrangement(retained, { kind: 'lane-add', sourceKind: 'capture', name: asset.name })
   next = editArrangement(next, { kind: 'region-add', asset: asset.id, lane: next.lanes.at(-1).id,
     name: asset.name, position: region.position, offset: region.offset, extent: region.extent, repeat: 1 })
-  return { project: next, asset: asset.id, alignment: region.alignment }
+  if (correction.kind === 'audio') {
+    const id = next.clips.at(-1).id
+    next = editArrangement(next, { kind: 'capture-split', id })
+    next = editArrangement(next, { kind: 'region-change', id, audioChannel: correction.audioChannel, placement: correction.placement })
+  }
+  return { project: next, asset: asset.id, alignment }
 }

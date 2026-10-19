@@ -180,7 +180,7 @@ let refresh ~keeper_name state =
     | Some (target, Ok snapshot) when String.equal keeper_name target.keeper_name ->
       None, Some (target,snapshot)
     | Some (target, Error _) when String.equal keeper_name target.keeper_name -> None, state.retained
-    | Some _ | None -> state.cached, state.retained in
+    | Some (_, (Ok _ | Error _)) | None -> state.cached, state.retained in
   if pending==state.pending && cached==state.cached && retained==state.retained then state
   else {state with pending; cached; retained}
 ;;
@@ -207,7 +207,7 @@ let requested_target request = request.target
 let last_observed target state =
   match state.cached with
   | Some (cached, Ok snapshot) when equal cached target -> Some snapshot
-  | Some _ | None ->
+  | Some (_, (Ok _ | Error _)) | None ->
     match state.retained with
     | Some (cached, snapshot) when equal cached target -> Some snapshot
     | Some _ | None -> None

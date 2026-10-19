@@ -14544,83 +14544,87 @@ let pending_delivery_of_position = function
 ;;
 
 let keeper_message_waiting_positions (state : state) ~keeper_name =
-  let module Executions = Set.Make (String) in
-  let remember_started executions log =
-    if not (String.equal (turn_log_keeper_name log) keeper_name) then executions
-    else
-      let started = Masc_tui_keeper_chat_log.run_started log.tl_log in
-      if started then Executions.add (turn_log_execution_id log) executions else executions
-  in
-  (* A batch's watchers receive its journal independently. A sibling's run
-     start (or retained terminal log) already proves this execution consumed
-     its bound inputs, even while another watcher is catching up. *)
-  let started = List.fold_left remember_started Executions.empty state.msg_settled_logs in
-  let started = List.fold_left (fun ids (entry : inflight) ->
-      remember_started ids entry.log) started state.msg_inflight in
   let local = Masc_tui_keeper_chat_queue.waiting_for_keeper
       state.msg_queued ~keeper_name in
-  let persisted_user request_id =
-    state.msg_loaded_keeper = Some keeper_name
-    && List.exists (fun (row : msg_entry) ->
-        row.me_keeper_name = keeper_name && row.me_request_id = request_id
-        && is_user_row row
-        && match row.me_identity with
-           | Persisted_row _ -> true
-           | Persisted_legacy_row _ | Session_row _ -> false) state.msg_loaded in
-  let submitted =
-    List.rev state.msg_inflight
-    |> List.filter_map (fun (entry : inflight) ->
-      if not (String.equal entry.sent_request.keeper_name keeper_name)
-         || Executions.mem (turn_log_execution_id entry.log) started
-         || persisted_user entry.sent_request.request_id
-         || List.exists (fun (item : Masc_tui_keeper_chat_queue.item) ->
-              Masc_tui_keeper_chat_projection.same_request_identity
-                item.request entry.sent_request) local
-      then None
+  let submitted = match state.msg_inflight with
+  | [] -> []
+  | _ :: _ ->
+    let module Executions = Set.Make (String) in
+    let module Request_ids = Set.Make (String) in
+    let module Requests = Masc_tui_keeper_chat_projection.Request_identity_set in
+    let remember_started executions log =
+      if not (String.equal (turn_log_keeper_name log) keeper_name) then executions
       else
-        let transcript = entry.log.tl_transcript in
-        let transcript_phase = Masc_tui_keeper_chat_transcript.phase transcript in
-        let stage =
-          match transcript_phase, entry.phase with
-          | Stream_failed _, (Turn_preflight _ | Turn_streaming | Turn_reconciling)
-          | (Waiting | Working | Stream_ended), Turn_reconciling ->
-              Reading_delivery_again
-          | (Waiting | Working | Stream_ended), Turn_preflight _ ->
-              Before_first_post
-          | (Waiting | Working | Stream_ended), Turn_streaming -> Stream_open in
-        match transcript_phase,
-              Masc_tui_keeper_chat_transcript.admission transcript with
-        | Waiting, None
-          when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
-            (match stage with
-             | Before_first_post -> Some (entry.sent_request, Undispatched)
-             | Stream_open -> Some (entry.sent_request, Posting)
-             | Reading_delivery_again -> Some (entry.sent_request, Rechecking))
-        | Waiting, Some (Masc_tui_keeper_chat_live.Queued, _)
-          when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
-            Some (entry.sent_request, Server_answered (Server_queued, stage))
-        | Waiting, Some (Masc_tui_keeper_chat_live.Running, _)
-          when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
-            Some (entry.sent_request, Server_answered (Server_started, stage))
-        (* A failure heard in the stream does not withdraw the server's last
-           answer. A POST the server refuses, as it does while the Keeper's
-           store is unavailable, ends with an error and no acceptance, and an
-           operation it had answered as queued is still queued. *)
-        | Stream_failed _, Some (Masc_tui_keeper_chat_live.Queued, _) ->
-            Some (entry.sent_request, Server_answered (Server_queued, stage))
-        | Stream_failed _, Some (Masc_tui_keeper_chat_live.Running, _) ->
-            Some (entry.sent_request, Server_answered (Server_started, stage))
-        (* On an open stream, [Settled] means the operation finished normally
-           and leaves the waiting list ([Waiting, Some (Settled, _)] below). On
-           a failed stream, the in-flight owner is still reconciling the
-           delivery outcome, so [Settled] stays in [Rechecking] until that
-           owner finishes. *)
-        | Stream_failed _, (None | Some (Masc_tui_keeper_chat_live.Settled, _)) ->
-            Some (entry.sent_request, Rechecking)
-        | Waiting,
-          (None | Some (Masc_tui_keeper_chat_live.(Queued | Running | Settled), _))
-        | (Working | Stream_ended), _ -> None)
-  in
+        let started = Masc_tui_keeper_chat_log.run_started log.tl_log in
+        if started then Executions.add (turn_log_execution_id log) executions else executions
+    in
+    (* A batch's watchers receive its journal independently. A sibling's run
+       start (or retained terminal log) already proves this execution consumed
+       its bound inputs, even while another watcher is catching up. *)
+    let started = List.fold_left remember_started Executions.empty state.msg_settled_logs in
+    let started = List.fold_left (fun ids (entry : inflight) ->
+        remember_started ids entry.log) started state.msg_inflight in
+    let local_requests = List.fold_left (fun ids (item : Masc_tui_keeper_chat_queue.item) ->
+        Requests.add item.request ids) Requests.empty local in
+    (* This is the existing confirmed persisted-user predicate, not a claim
+       that a legacy/session row or another Keeper consumed the input. *)
+    let persisted_users = if state.msg_loaded_keeper <> Some keeper_name then Request_ids.empty
+      else List.fold_left (fun ids (row : msg_entry) ->
+        if row.me_keeper_name = keeper_name && is_user_row row
+           && (match row.me_identity with
+               | Persisted_row _ -> true | Persisted_legacy_row _ | Session_row _ -> false)
+        then Request_ids.add row.me_request_id ids else ids) Request_ids.empty state.msg_loaded in
+      List.rev state.msg_inflight
+      |> List.filter_map (fun (entry : inflight) ->
+        if not (String.equal entry.sent_request.keeper_name keeper_name)
+           || Executions.mem (turn_log_execution_id entry.log) started
+           || Request_ids.mem entry.sent_request.request_id persisted_users
+           || Requests.mem entry.sent_request local_requests
+        then None
+        else
+          let transcript = entry.log.tl_transcript in
+          let transcript_phase = Masc_tui_keeper_chat_transcript.phase transcript in
+          let stage =
+            match transcript_phase, entry.phase with
+            | Stream_failed _, (Turn_preflight _ | Turn_streaming | Turn_reconciling)
+            | (Waiting | Working | Stream_ended), Turn_reconciling ->
+                Reading_delivery_again
+            | (Waiting | Working | Stream_ended), Turn_preflight _ ->
+                Before_first_post
+            | (Waiting | Working | Stream_ended), Turn_streaming -> Stream_open in
+          match transcript_phase,
+                Masc_tui_keeper_chat_transcript.admission transcript with
+          | Waiting, None
+            when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
+              (match stage with
+               | Before_first_post -> Some (entry.sent_request, Undispatched)
+               | Stream_open -> Some (entry.sent_request, Posting)
+               | Reading_delivery_again -> Some (entry.sent_request, Rechecking))
+          | Waiting, Some (Masc_tui_keeper_chat_live.Queued, _)
+            when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
+              Some (entry.sent_request, Server_answered (Server_queued, stage))
+          | Waiting, Some (Masc_tui_keeper_chat_live.Running, _)
+            when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
+              Some (entry.sent_request, Server_answered (Server_started, stage))
+          (* A failure heard in the stream does not withdraw the server's last
+             answer. A POST the server refuses, as it does while the Keeper's
+             store is unavailable, ends with an error and no acceptance, and an
+             operation it had answered as queued is still queued. *)
+          | Stream_failed _, Some (Masc_tui_keeper_chat_live.Queued, _) ->
+              Some (entry.sent_request, Server_answered (Server_queued, stage))
+          | Stream_failed _, Some (Masc_tui_keeper_chat_live.Running, _) ->
+              Some (entry.sent_request, Server_answered (Server_started, stage))
+          (* On an open stream, [Settled] means the operation finished normally
+             and leaves the waiting list ([Waiting, Some (Settled, _)] below). On
+             a failed stream, the in-flight owner is still reconciling the
+             delivery outcome, so [Settled] stays in [Rechecking] until that
+             owner finishes. *)
+          | Stream_failed _, (None | Some (Masc_tui_keeper_chat_live.Settled, _)) ->
+              Some (entry.sent_request, Rechecking)
+          | Waiting,
+            (None | Some (Masc_tui_keeper_chat_live.(Queued | Running | Settled), _))
+          | (Working | Stream_ended), _ -> None)
+    in
   submitted @ List.map (fun (item : Masc_tui_keeper_chat_queue.item) ->
     item.request, In_local_queue) local
 ;;
@@ -18125,13 +18129,19 @@ let keeper_message_diagnostic_activity_rows (state : state) =
    receipts remain separate facts inside that one row; detailed rows use the
    same Ctrl-D axis as tool diagnostics. *)
 let keeper_message_activity_rows (state : state) =
+  let module Requests = Masc_tui_keeper_chat_projection.Request_identity_set in
+  let provisional_requests () = List.fold_left (fun ids (_, control) ->
+      List.fold_left (fun ids request -> Requests.add request ids)
+        ids control.priority_requests) Requests.empty state.keeper_priority_controls in
   match state.msg_tool_visibility, state.msg_target_keeper_name with
   | Tools_full, _ ->
       let receipts = match state.msg_target_keeper_name with
         | None -> []
-        | Some name -> List.filter_map (fun (request, result) ->
+        | Some name ->
+          let provisional = provisional_requests () in
+          List.filter_map (fun (request, result) ->
             if request.Masc_tui_keeper_chat_projection.keeper_name <> name then None
-            else Some { Masc_tui_answering.lead = (if keeper_run_next_receipt_provisional state request then "Priority (control pending) "
+            else Some { Masc_tui_answering.lead = (if Requests.mem request provisional then "Priority (control pending) "
                 else match result with Ok _ -> "Priority " | Error _ -> "Priority confirmation unavailable ") ^ Masc_tui_keeper_chat_projection.terminal_safe_text request.request_id;
               rest = " · " ^ (match result with Ok detail | Error detail ->
                 Masc_tui_keeper_chat_projection.terminal_safe_text detail); keys = "" })
@@ -18140,6 +18150,10 @@ let keeper_message_activity_rows (state : state) =
   | (Tools_compact | Tools_results), None -> []
   | (Tools_compact | Tools_results), Some keeper_name ->
       let waiting = keeper_message_waiting_requests state ~keeper_name in
+      let waiting_requests, rechecking_requests = List.fold_left (fun (all, rechecking) (request, delivery) ->
+          Requests.add request all,
+          (if delivery = Rechecking_delivery then Requests.add request rechecking else rechecking))
+          (Requests.empty, Requests.empty) waiting in
       (* The progress row speaks for one execution. Only that execution's
          phase is a duplicate here; another request of this Keeper -- one that
          is still finalising while a newer one leads the progress row -- keeps
@@ -18163,10 +18177,7 @@ let keeper_message_activity_rows (state : state) =
         attention "요청 처리 실패";
       if List.exists (fun entry -> match entry.phase with
           | Turn_reconciling ->
-              not (List.exists (fun (request, delivery) ->
-                  delivery = Rechecking_delivery
-                  && Masc_tui_keeper_chat_projection.same_request_identity
-                    request entry.sent_request) waiting)
+              not (Requests.mem entry.sent_request rechecking_requests)
           | Turn_preflight _ | Turn_streaming -> false) own then
         attention "메시지 전송 확인 중";
       let has_working = any_phase (fun transcript ->
@@ -18214,23 +18225,23 @@ let keeper_message_activity_rows (state : state) =
           if n > 0 then add (Printf.sprintf "%d건 %s" n text))
           [Local_pending, "전송 대기"; Awaiting_receipt, "전송 중";
            Rechecking_delivery, "전송 확인 중"];
-        let requests = List.map fst waiting in
-        let holds request = List.exists
-          (Masc_tui_keeper_chat_projection.same_request_identity request) requests in
-        let pending = List.exists (fun (_, control) ->
-            List.exists holds control.priority_requests) state.keeper_priority_controls
+        let holds request = Requests.mem request waiting_requests in
+        let provisional = provisional_requests () in
+        let pending = List.exists (fun (request, _) -> Requests.mem request provisional) waiting
             || List.exists holds
             (state.keeper_run_next_pending @ state.keeper_run_next_ready @ state.keeper_run_next_inflight) in
-        let receipts = List.filter (fun (request, _) -> holds request
-            && not (keeper_run_next_receipt_provisional state request)) state.keeper_run_next_receipts in
-        if List.exists (fun (_, result) -> Result.is_error result) receipts then
+        let failed, received, successful = List.fold_left (fun (failed, received, successful) (request, result) ->
+            if not (holds request) || Requests.mem request provisional then failed, received, successful
+            else match result with
+              | Error _ -> true, true, successful
+              | Ok _ -> failed, true, Requests.add request successful)
+            (false, false, Requests.empty) state.keeper_run_next_receipts in
+        if failed then
           attention "다음 순서 확인 불가"
         else if pending then add "다음 순서 확인 중"
-        else if List.for_all (fun request -> List.exists (fun (received, result) ->
-            Masc_tui_keeper_chat_projection.same_request_identity request received
-            && Result.is_ok result) receipts) requests then
+        else if List.for_all (fun (request, _) -> Requests.mem request successful) waiting then
           add "다음 순서로 전달 대기"
-        else if receipts <> [] then add "일부 메시지 다음 순서로 전달 대기"
+        else if received then add "일부 메시지 다음 순서로 전달 대기"
         else if count Keeper_queued > 0 then add "처리 대기"
       end;
       if List.exists (fun (name, _, intervention) ->

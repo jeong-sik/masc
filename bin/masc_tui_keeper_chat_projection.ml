@@ -225,10 +225,24 @@ let request_to_yojson ?(admission_intent = Queue_only) ~since_seq request =
 let request_body ?admission_intent ~since_seq request =
   Yojson.Safe.to_string (request_to_yojson ?admission_intent ~since_seq request)
 
-let same_request_identity left right =
-  String.equal left.request_id right.request_id
-  && String.equal left.keeper_name right.keeper_name
-  && String.equal left.message right.message
+let compare_request_identity (left : request) (right : request) =
+  let order = String.compare left.request_id right.request_id in
+  if order <> 0 then order else
+  let order = String.compare left.keeper_name right.keeper_name in
+  if order <> 0 then order else String.compare left.message right.message
+
+let same_request_identity left right = compare_request_identity left right = 0
+
+module Request_identity_set = struct
+  module Keys = Set.Make (struct
+    type t = request
+    let compare = compare_request_identity
+  end)
+  type t = Keys.t
+  let empty = Keys.empty
+  let add = Keys.add
+  let mem = Keys.mem
+end
 
 let compact_request_id value =
   let length = String.length value in

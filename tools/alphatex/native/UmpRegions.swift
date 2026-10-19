@@ -24,6 +24,18 @@ struct UmpRegionSource: Decodable {
     let extent: String
     let timeline: UmpTimeline
 }
+struct CaptureStartNanoseconds: Decodable {
+    let numerator: String
+    let denominator: String
+    func rational(displaySeconds: Double) throws -> (UInt128, UInt128) {
+        let n = try umpUnsigned(numerator), d = try umpUnsigned(denominator)
+        guard d > 0 else { throw MidiFailure("invalid captured placement denominator") }
+        let secondsDenom = try umpMultiply(d, 1_000_000_000)
+        let displayed = Double(n / secondsDenom) + Double(n % secondsDenom) / Double(secondsDenom)
+        guard displayed == displaySeconds else { throw MidiFailure("captured placement display disagrees with exact start") }
+        return (n, d)
+    }
+}
 enum CaptureRegionComponent: String, Decodable { case audio, midi }
 struct UmpRegion: Decodable {
     let id: String
@@ -33,6 +45,7 @@ struct UmpRegion: Decodable {
     let extent: String
     let repeatCount: UInt64
     var component: CaptureRegionComponent? = nil
+    var startNanoseconds: CaptureStartNanoseconds? = nil
 }
 struct UmpArrangement: Decodable {
     let schemaVersion: Int
@@ -43,6 +56,10 @@ struct UmpArrangement: Decodable {
 struct UmpRegionClip {
     let id: String
     let start: UInt64
+    let origin: UInt64
+    let phaseOffset: UInt128
+    let lowerBound: UInt128
+    let upperBound: UInt128
     let end: UInt64
     let repeatCount: UInt64
     let cut: UInt128
@@ -73,15 +90,15 @@ struct UmpRegionClip {
     }
     func phase(at position: UInt64) -> (copy: UInt64, time: UInt128)? {
         guard position >= start, position < end else { return nil }
-        let value = UInt128(position - start) * denom
+        let value = UInt128(position - origin) * denom - phaseOffset
         let copy = value / period
         guard copy < UInt128(repeatCount) else { return nil }
         return (UInt64(copy), cut + value % period)
     }
     func deadline(copy: UInt64, delta: UInt128) -> UInt64 {
         // Admission proves every repeated deadline fits in end <= UInt64max.
-        let value = UInt128(copy) * period + delta
-        return start + UInt64(value / denom + (value % denom == 0 ? 0 : 1))
+        let value = phaseOffset + UInt128(copy) * period + delta
+        return origin + UInt64(value / denom + (value % denom == 0 ? 0 : 1))
     }
     func next(copy: UInt64, index: Int) -> UInt64 {
         if index < endIndex { return deadline(copy: copy, delta: UInt128(timed[index].ticks) * numer - cut) }
@@ -132,28 +149,42 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
         for region in timeline.regions {
             guard !region.id.isEmpty, region.component != .audio, let (source, timed) = sources[region.source], region.repeatCount > 0 else { throw MidiFailure("invalid captured region source or repetition") }
             let validStart = try umpNanoseconds(region.startSeconds)
-            let start = min(validStart, UInt64((region.startSeconds * 1e9).rounded(.down))), cut = try umpUnsigned(region.offset), length = try umpUnsigned(region.extent)
+            let startFraction = try region.startNanoseconds?.rational(displaySeconds: region.startSeconds)
+                ?? (UInt128(min(validStart, UInt64((region.startSeconds * 1e9).rounded(.down)))), 1)
+            let (startN, startD) = startFraction
+            guard startN / startD <= UInt128(UInt64.max) else { throw MidiFailure("captured placement exceeds native host timeline") }
+            let origin = UInt64(startN / startD), cut = try umpUnsigned(region.offset), length = try umpUnsigned(region.extent)
             let after = try umpAdd(cut, length), bound = try umpUnsigned(source.extent)
             guard length > 0, after <= bound else { throw MidiFailure("captured region exceeds its source bounds") }
-            let numer = UInt128(source.timeline.clock.numer), denom = UInt128(source.timeline.clock.denom)
+            let numer = try umpMultiply(UInt128(source.timeline.clock.numer), startD)
+            let denom = try umpMultiply(UInt128(source.timeline.clock.denom), startD)
+            let phaseOffset = try umpMultiply(startN % startD, UInt128(source.timeline.clock.denom))
+            let lowerBound = try umpAdd(umpMultiply(UInt128(origin), denom), phaseOffset)
+            let startWide = UInt128(origin) + (phaseOffset == 0 ? 0 : 1)
+            guard startWide <= UInt128(UInt64.max) else { throw MidiFailure("captured placement exceeds native host timeline") }
+            let start = UInt64(startWide)
             let period = try umpMultiply(length, numer), scaledCut = try umpMultiply(cut, numer)
             _ = try umpMultiply(after, numer)
             let total = try umpMultiply(period, UInt128(region.repeatCount))
-            let span = total / denom + (total % denom == 0 ? 0 : 1)
-            guard span > 0, span <= UInt128(duration), UInt128(start) + span <= UInt128(duration) else { throw MidiFailure("captured region exceeds arrangement duration") }
+            let upperBound = try umpAdd(lowerBound, total)
+            let end = upperBound / denom + (upperBound % denom == 0 ? 0 : 1)
+            guard end > UInt128(start), end <= UInt128(duration) else { throw MidiFailure("captured region exceeds arrangement duration") }
             let endIndex = timed.firstIndex { UInt128($0.ticks) >= after } ?? timed.count
             let events = timed.map(\.event), scope = Set(events.prefix(endIndex).map(UmpChannel.init))
             // Every replayed prefix is part of this physical scope, even when
             // its keys were originally acquired before the cut.
             for event in events.prefix(endIndex) { potential.observe(UmpMessage(event)) }
             let notes = try umpRestoration(events, prefixCount: endIndex, replacing: UmpFootprint())
-            admitted.append(UmpRegionClip(id: region.id, start: start, end: start + UInt64(span), repeatCount: region.repeatCount,
+            admitted.append(UmpRegionClip(id: region.id, start: start, origin: origin, phaseOffset: phaseOffset,
+                lowerBound: lowerBound, upperBound: upperBound, end: UInt64(end), repeatCount: region.repeatCount,
                 cut: scaledCut, period: period, numer: numer, denom: denom, timed: timed, events: events, endIndex: endIndex, scope: scope, releaseOwners: notes.releaseOwners, expiredNotes: notes.expiredNotes))
         }
         try potential.requireSupported()
         for (index, clip) in admitted.enumerated() {
-            for other in admitted.prefix(index) where clip.start < other.end && other.start < clip.end {
-                guard clip.scope.isDisjoint(with: other.scope) else { throw MidiFailure("overlapping captured regions share physical MIDI channels; select independent outputs") }
+            for other in admitted.prefix(index) where !clip.scope.isDisjoint(with: other.scope) {
+                let entersBeforeEnd = try umpMultiply(clip.lowerBound, other.denom) < umpMultiply(other.upperBound, clip.denom)
+                let otherEntersBeforeEnd = try umpMultiply(other.lowerBound, clip.denom) < umpMultiply(clip.upperBound, other.denom)
+                guard !entersBeforeEnd || !otherEntersBeforeEnd else { throw MidiFailure("overlapping captured regions share physical MIDI channels; select independent outputs") }
             }
             // The first copy enters an empty physical output, so it is admitted
             // with no previous state rather than with the source prefix footprint.

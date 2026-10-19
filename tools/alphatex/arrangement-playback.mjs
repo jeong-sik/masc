@@ -245,7 +245,8 @@ export async function prepareArrangementCaptureRegions(project, { sourceRoot, di
     }
     const bindings = [...new Set(sources.flatMap(source => source.timeline.bindings.map(binding => binding.destination)))].map((destination, port) => ({ port, destination }))
     for (const clip of schedule) if (byID.get(clip.asset).kind === 'capture' && clip.component !== 'audio') {
-      notes.push({ id: clip.id, source: clip.asset, startSeconds: clip.startSeconds, offset: clip.offset, extent: clip.extent, repeatCount: clip.repeat, ...(clip.component ? { component: clip.component } : {}) })
+      notes.push({ id: clip.id, source: clip.asset, startSeconds: clip.startSeconds, offset: clip.offset, extent: clip.extent, repeatCount: clip.repeat, ...(clip.component ? { component: clip.component } : {}),
+      ...(clip.startNanoseconds ? { startNanoseconds: clip.startNanoseconds } : {}) })
     }
     let midi, smfBindings = []
     if (schedule.some(clip => byID.get(clip.asset).kind === 'midi')) {

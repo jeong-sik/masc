@@ -393,7 +393,7 @@ test('split captured components retain raw sources, independent placement and on
  assert.equal(later.umpRegions.regions[0].startSeconds,0);assert.ok(later.duration>.6)
  editor=arrangementCommand(editor,'select region-2').editor;editor=arrangementCommand(editor,'capture-offset -25').editor
  const moved=JSON.parse(await readFile((await prepareArrangementCaptureRegions(editor.project,{sourceRoot:root,directory:root,midiOutput:'42'})).path,'utf8'))
- assert.equal(moved.umpRegions.regions[0].startSeconds,.025);assert.equal(moved.regions[0].startSeconds,0)
+ assert.equal(moved.umpRegions.regions[0].startSeconds,.025);assert.deepEqual(moved.umpRegions.regions[0].startNanoseconds,{numerator:'25000000',denominator:'1'});assert.equal(moved.regions[0].startSeconds,0)
 }))
 
 test('captured placement clips project-zero arithmetic without expanding millions of repeats or quantizing fractional host ticks',async()=>fixture(async({root,input})=>{
@@ -436,4 +436,17 @@ test('splitting a captured take preserves mute and solo audibility before indepe
   assert.deepEqual(editor.project.lanes.map(l=>[l.muted,l.solo]),[[muted,solo],[muted,solo]])
   assert.equal(arrangementSchedule(editor.project).length,before*2)
  }
+}))
+
+
+test('a cropped MIDI repeat carries exact absolute rational starts through the native preparation boundary',async()=>fixture(async({root,input})=>{
+ const imported=await importArrangementCapture(newArrangement(),input,{projectPath:join(root,'song.json')})
+ let editor=arrangementCommand(arrangementEditor(imported.project),'capture-region asset-1 0 0 .2 3').editor
+ editor=arrangementEditor(editArrangement(editor.project,{kind:'region-change',id:'region-1',extent:'4800001'}))
+ for(const line of ['split-take','select region-2','capture-offset 50'])editor=arrangementCommand(editor,line).editor
+ const plan=JSON.parse(await readFile((await prepareArrangementCaptureRegions(editor.project,{sourceRoot:root,directory:root,midiOutput:'42'})).path,'utf8'))
+ assert.deepEqual(plan.umpRegions.regions.map(c=>[c.offset,c.extent,c.repeatCount,c.startNanoseconds]),[
+  ['1200000','3600001',1,{numerator:'0',denominator:'1'}],
+  ['0','4800001',2,{numerator:'450000125',denominator:'3'}]])
+ assert.equal(editor.project.clips[1].extent,'4800001');assert.equal(editor.project.clips[1].repeat,3)
 }))

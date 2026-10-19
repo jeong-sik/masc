@@ -10,7 +10,8 @@ let label_class label : Admission_class.t =
   match label.[0] with
   | 'P' -> Priority
   | 'S' -> Standard
-  | _ -> invalid_arg ("waiter label must start with P or S: " ^ label)
+  | 'B' -> Background
+  | _ -> invalid_arg ("waiter label must start with P, S or B: " ^ label)
 ;;
 
 let check_counts scheduler ~what ~active ~queued =
@@ -142,6 +143,82 @@ let test_adding_a_limit_applies_to_requests_queued_after_it () =
        ~after:[ "P2" ])
 ;;
 
+let test_removing_the_limit_drains_old_background_before_the_shared_fifo () =
+  check
+    (list string)
+    "old priority, old background, then FIFO including new background"
+    [ "P1"; "P2"; "B1"; "B2"; "S1"; "P3"; "B3" ]
+    (grant_order
+       ~priority_run_limit:(Some 1)
+       ~before:[ "B1"; "S1"; "P1"; "B2"; "P2" ]
+       ~change:(fun scheduler ->
+         Slot_scheduler.reconfigure scheduler ~max_slots:1 ~priority_run_limit:None)
+       ~after:[ "P3"; "B3" ])
+;;
+
+let test_adding_the_limit_keeps_old_background_in_its_original_fifo () =
+  check
+    (list string)
+    "old background retains its shared queue; new background gets bounded service"
+    [ "P2"; "B2"; "B1"; "P1"; "S1" ]
+    (grant_order
+       ~priority_run_limit:None
+       ~before:[ "B1"; "P1"; "S1" ]
+       ~change:(fun scheduler ->
+         Slot_scheduler.reconfigure scheduler ~max_slots:1 ~priority_run_limit:(Some 1))
+       ~after:[ "B2"; "P2" ])
+;;
+
+let test_background_cancel_and_expiry_leave_original_queue_after_reconfigure () =
+  Eio_mock.Backend.run
+  @@ fun () ->
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 0.0;
+  let scheduler = Slot_scheduler.create ~max_slots:1 ~priority_run_limit:(Some 1) in
+  let granted = ref [] in
+  Eio.Switch.run (fun sw ->
+    let release, resolve_release = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      Slot_scheduler.with_permit ~admission_class:Standard scheduler (fun () ->
+        Eio.Promise.await release));
+    let stop, resolve_stop = Eio.Promise.create () in
+    let cancelled =
+      Eio.Fiber.fork_promise ~sw (fun () ->
+        Eio.Fiber.first
+          (fun () ->
+             Slot_scheduler.with_permit ~admission_class:Background scheduler (fun () ->
+               fail "cancelled background waiter ran"))
+          (fun () -> Eio.Promise.await stop))
+    in
+    let expired =
+      Eio.Fiber.fork_promise ~sw (fun () ->
+        Slot_scheduler.with_permit_until ~clock ~deadline_at:1.0
+          ~admission_class:Background scheduler (fun () ->
+            fail "expired background waiter ran"))
+    in
+    let enqueue label =
+      Eio.Fiber.fork ~sw (fun () ->
+        Slot_scheduler.with_permit ~admission_class:(label_class label) scheduler (fun () ->
+          granted := label :: !granted))
+    in
+    enqueue "B1";
+    enqueue "S1";
+    Slot_scheduler.reconfigure scheduler ~max_slots:1 ~priority_run_limit:None;
+    enqueue "B2";
+    check_counts scheduler ~what:"after limit removal" ~active:1 ~queued:5;
+    Eio.Promise.resolve resolve_stop ();
+    Eio.Promise.await_exn cancelled;
+    Eio_mock.Clock.set_time clock 1.0;
+    (match Eio.Promise.await_exn expired with
+     | Error `Permit_wait_expired -> ()
+     | Ok () -> fail "expired background waiter received a slot");
+    check_counts scheduler ~what:"both departed from their original queue" ~active:1 ~queued:3;
+    Eio.Promise.resolve resolve_release ());
+  check_counts scheduler ~what:"all slots returned" ~active:0 ~queued:0;
+  check (list string) "remaining original background precedes shared FIFO"
+    [ "B1"; "S1"; "B2" ] (List.rev !granted)
+;;
+
 let test_an_invalid_allowance_is_refused_and_changes_nothing () =
   let scheduler = Slot_scheduler.create ~max_slots:2 ~priority_run_limit:None in
   let refused ~max_slots ~priority_run_limit =
@@ -181,6 +258,18 @@ let () =
             "adding a limit applies to requests queued after it"
             `Quick
             test_adding_a_limit_applies_to_requests_queued_after_it
+        ; test_case
+            "removing a limit drains old background before shared FIFO"
+            `Quick
+            test_removing_the_limit_drains_old_background_before_the_shared_fifo
+        ; test_case
+            "adding a limit keeps old background in its original FIFO"
+            `Quick
+            test_adding_the_limit_keeps_old_background_in_its_original_fifo
+        ; test_case
+            "background cancellation and expiry keep queue ownership after reconfigure"
+            `Quick
+            test_background_cancel_and_expiry_leave_original_queue_after_reconfigure
         ; test_case
             "an invalid allowance is refused and changes nothing"
             `Quick

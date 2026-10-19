@@ -5,7 +5,7 @@
     outside an Eio fiber ({!reconfigure} from a config load). Each waiter
     is woken through its own [Eio.Promise], resolved after the mutex is
     released. Queued requests are granted slots in arrival order within
-    their class; see {!Slot_scheduler.create} for how the two classes share
+    their class; see {!Slot_scheduler.create} for how the classes share
     a freed slot.
 
     @since 0.96.0 *)
@@ -59,9 +59,13 @@ type t =
   ; mutable active : int
   ; mutable priority : waiter_queue
   ; mutable standard : waiter_queue
+  ; mutable background : waiter_queue
   ; mutable priority_run : int
-        (** Slots handed to [Priority] in a row while a [Standard] waiter
-            was queued. Back to 0 whenever no [Standard] waiter is queued. *)
+        (** Priority grants while [Standard] waits, reset by a standard
+            grant or an empty standard queue, never by a background grant. *)
+  ; mutable foreground_run : int
+        (** Foreground grants while [Background] waits, reset by a background
+            grant or an empty background queue. *)
   ; mutex : Stdlib.Mutex.t
   }
 
@@ -87,19 +91,22 @@ let create ~max_slots ~priority_run_limit =
   ; active = 0
   ; priority = empty_queue
   ; standard = empty_queue
+  ; background = empty_queue
   ; priority_run = 0
+  ; foreground_run = 0
   ; mutex = Stdlib.Mutex.create ()
   }
 ;;
 
-let queued t = t.priority.length + t.standard.length
+let queued t = t.priority.length + t.standard.length + t.background.length
 
 (* The queue a request of [admission_class] joins. A scheduler without a
-   run limit has one FIFO, so both classes wait in arrival order. *)
+   run limit has one FIFO, so all classes wait in arrival order. *)
 let queue_of t admission_class =
   match t.priority_run_limit, (admission_class : Admission_class.t) with
   | Some _, Priority -> Admission_class.Priority
-  | Some _, Standard | None, (Priority | Standard) -> Admission_class.Standard
+  | Some _, Background -> Admission_class.Background
+  | Some _, Standard | None, (Priority | Standard | Background) -> Admission_class.Standard
 ;;
 
 (* Takes a free slot, or joins its class's queue. Under the mutex so the
@@ -117,7 +124,8 @@ let request_slot t ~admission_class =
       let waiter = { resolver; state = Atomic.make Waiting; queue } in
       (match queue with
        | Priority -> t.priority <- enqueue waiter t.priority
-       | Standard -> t.standard <- enqueue waiter t.standard);
+       | Standard -> t.standard <- enqueue waiter t.standard
+       | Background -> t.background <- enqueue waiter t.background);
       `Wait (promise, waiter)))
 ;;
 
@@ -137,27 +145,35 @@ let rec take_waiting queue =
        else take_waiting rest)
 ;;
 
-(* Which queue a freed slot goes to. [Priority] goes first, except that once
-   it has taken [limit] slots in a row while a [Standard] waiter was queued,
-   the next slot goes to [Standard]. A scheduler without a limit queues
-   newcomers as [Standard]; waiters a removed limit left in the [Priority]
-   queue still go first. *)
+(* The existing Priority/Standard decision applies to foreground grants.
+   Background has its own bounded service, using the same declared limit.
+   Without a limit, old Priority then old Background queues drain before
+   the shared FIFO; newcomers cannot extend either finite old queue. *)
 let next_queue t =
-  if t.priority.length = 0
-  then Admission_class.Standard
-  else if t.standard.length = 0
-  then Admission_class.Priority
-  else (
-    match t.priority_run_limit with
-    | None -> Admission_class.Priority
-    | Some limit ->
-      if t.priority_run < limit then Admission_class.Priority else Admission_class.Standard)
+  match t.priority_run_limit with
+  | None ->
+    if t.priority.length > 0
+    then Admission_class.Priority
+    else if t.background.length > 0
+    then Admission_class.Background
+    else Admission_class.Standard
+  | Some limit ->
+    if t.background.length > 0
+       && (t.foreground_run >= limit || t.priority.length + t.standard.length = 0)
+    then Admission_class.Background
+    else if t.priority.length = 0
+    then Admission_class.Standard
+    else if t.standard.length = 0 || t.priority_run < limit
+    then Admission_class.Priority
+    else Admission_class.Standard
 ;;
 
 (* Hands one slot to the next live waiter, under the mutex, and returns its
    resolver; [None] when nobody live is queued. Cancelled waiters met on the
    way are dropped. *)
 let rec take_next t =
+  if t.standard.length = 0 then t.priority_run <- 0;
+  if t.background.length = 0 then t.foreground_run <- 0;
   if queued t = 0
   then None
   else (
@@ -168,6 +184,8 @@ let rec take_next t =
        | Some waiter, rest ->
          t.priority <- rest;
          t.priority_run <- (if standard_waiting then t.priority_run + 1 else 0);
+         t.foreground_run <-
+           (if t.background.length > 0 then t.foreground_run + 1 else 0);
          Some waiter.resolver
        | None, rest ->
          t.priority <- rest;
@@ -177,10 +195,22 @@ let rec take_next t =
        | Some waiter, rest ->
          t.standard <- rest;
          t.priority_run <- 0;
+         t.foreground_run <-
+           (if t.background.length > 0 then t.foreground_run + 1 else 0);
          Some waiter.resolver
        | None, rest ->
          t.standard <- rest;
          t.priority_run <- 0;
+         take_next t)
+    | Background ->
+      (match take_waiting t.background with
+       | Some waiter, rest ->
+         t.background <- rest;
+         t.foreground_run <- 0;
+         Some waiter.resolver
+       | None, rest ->
+         t.background <- rest;
+         t.foreground_run <- 0;
          take_next t))
 ;;
 
@@ -251,7 +281,10 @@ let leave_or_own t waiter =
       | Priority -> t.priority <- remove_waiter waiter t.priority
       | Standard ->
         t.standard <- remove_waiter waiter t.standard;
-        if t.standard.length = 0 then t.priority_run <- 0);
+        if t.standard.length = 0 then t.priority_run <- 0
+      | Background ->
+        t.background <- remove_waiter waiter t.background;
+        if t.background.length = 0 then t.foreground_run <- 0);
     `Left_queue)
   else (
     match Atomic.get waiter.state with

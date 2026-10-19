@@ -1,4 +1,4 @@
-(* How a freed slot is shared between the two admission classes. One slot is
+(* How a freed slot is shared between admission classes. One slot is
    held while the waiters queue in a stated order; releasing it lets each
    waiter run in turn, record itself and give the slot back, so the record
    is the order the scheduler granted. The mock backend runs every fiber
@@ -11,7 +11,8 @@ let label_class label : Admission_class.t =
   match label.[0] with
   | 'P' -> Priority
   | 'S' -> Standard
-  | _ -> invalid_arg ("waiter label must start with P or S: " ^ label)
+  | 'B' -> Background
+  | _ -> invalid_arg ("waiter label must start with P, S or B: " ^ label)
 ;;
 
 (* Grants the slot to [waiters] after they have all queued behind a holder
@@ -51,8 +52,26 @@ let test_without_a_limit_both_classes_share_arrival_order () =
   check
     (list string)
     "arrival order"
-    [ "S1"; "P1"; "S2"; "P2" ]
-    (grant_order ~priority_run_limit:None [ "S1"; "P1"; "S2"; "P2" ])
+    [ "B1"; "S1"; "P1"; "S2"; "B2"; "P2" ]
+    (grant_order ~priority_run_limit:None [ "B1"; "S1"; "P1"; "S2"; "B2"; "P2" ])
+;;
+
+let test_standard_precedes_background_with_bounded_service () =
+  check
+    (list string)
+    "standard goes first; background runs after two foreground grants"
+    [ "S1"; "S2"; "B1"; "S3"; "B2" ]
+    (grant_order ~priority_run_limit:(Some 2) [ "B1"; "B2"; "S1"; "S2"; "S3" ])
+;;
+
+let test_background_does_not_erase_priority_debt_to_standard () =
+  check
+    (list string)
+    "background interrupts priority grants without resetting standard's turn"
+    [ "P1"; "P2"; "B1"; "S1"; "P3"; "B2"; "P4"; "S2"; "B3"; "P5"; "P6"; "S3" ]
+    (grant_order
+       ~priority_run_limit:(Some 2)
+       [ "S1"; "S2"; "S3"; "P1"; "P2"; "P3"; "P4"; "P5"; "P6"; "B1"; "B2"; "B3" ])
 ;;
 
 let test_priority_goes_first_until_its_run_limit () =
@@ -214,6 +233,54 @@ let test_a_standard_waiter_that_expired_leaves_no_run_behind () =
        List.iter release [ "P1"; "P2"; "S2"; "P3" ]))
 ;;
 
+let test_a_late_background_waiter_starts_a_new_foreground_run () =
+  check
+    (list string)
+    "earlier foreground work is not charged to a new background waiter"
+    [ "S0"; "P1"; "P2"; "B1"; "P3" ]
+    (held_grant_order (fun ~hold ~release ~expire_at:_ ->
+       hold "S0";
+       hold "P1";
+       hold "P2";
+       release "S0";
+       hold "B1";
+       hold "P3";
+       List.iter release [ "P1"; "P2"; "B1"; "P3" ]))
+;;
+
+let test_an_expired_background_waiter_leaves_no_run_behind () =
+  check
+    (list string)
+    "expired background work does not promote its later replacement"
+    [ "S0"; "P1"; "P2"; "B2"; "P3" ]
+    (held_grant_order (fun ~hold ~release ~expire_at ->
+       hold "S0";
+       hold "P1";
+       hold ~deadline_at:5.0 "B1";
+       release "S0";
+       expire_at 5.0;
+       hold "P2";
+       hold "B2";
+       hold "P3";
+       List.iter release [ "P1"; "P2"; "B2"; "P3" ]))
+;;
+
+let test_both_lower_classes_progress_under_continuing_priority_arrivals () =
+  check
+    (list string)
+    "priority arrivals cannot starve either standard or background work"
+    [ "S0"; "P1"; "B1"; "S1"; "B2"; "P2"; "S2"; "P3"; "P4" ]
+    (held_grant_order (fun ~hold ~release ~expire_at:_ ->
+       List.iter hold [ "S0"; "S1"; "S2"; "B1"; "B2"; "P1" ];
+       release "S0";
+       hold "P2";
+       release "P1";
+       hold "P3";
+       release "B1";
+       hold "P4";
+       List.iter release [ "S1"; "B2"; "P2"; "S2"; "P3"; "P4" ]))
+;;
+
 (* Random arrivals, releases and clock steps over one to three slots, with
    and without a run limit, some waiters bounded by a deadline. However the
    steps interleave: no more than [max_slots] waiters hold a slot at once;
@@ -243,14 +310,18 @@ let test_random_interleavings_never_leak_or_overfill () =
     Eio.Switch.run (fun sw ->
       let arrive index =
         let admission_class : Admission_class.t =
-          if Random.State.bool rng then Priority else Standard
+          match Random.State.int rng 3 with
+          | 0 -> Priority
+          | 1 -> Standard
+          | _ -> Background
         in
         let label =
           Printf.sprintf
             "%c%d"
             (match admission_class with
              | Priority -> 'P'
-             | Standard -> 'S')
+             | Standard -> 'S'
+             | Background -> 'B')
             index
         in
         arrived := label :: !arrived;
@@ -338,7 +409,7 @@ let test_random_interleavings_never_leak_or_overfill () =
            (case_name ^ ": arrival order within " ^ Admission_class.to_string c)
            (in_class c granted_in_arrival_order)
            (in_class c (List.rev !granted)))
-      [ Admission_class.Priority; Admission_class.Standard ];
+      [ Admission_class.Priority; Admission_class.Standard; Admission_class.Background ];
     let snapshot = Slot_scheduler.snapshot scheduler in
     check int (case_name ^ ": every slot came back") 0 snapshot.active;
     check int (case_name ^ ": nobody is left queued") 0 snapshot.queue_length
@@ -391,6 +462,7 @@ let test_random_arrivals_keep_the_invariants () =
     List.iter
       (fun label ->
          match label_class label with
+         | Background -> fail "this case only generates priority and standard work"
          | Standard ->
            decr standard_left;
            run := 0
@@ -409,14 +481,87 @@ let test_random_arrivals_keep_the_invariants () =
   done
 ;;
 
+let test_mixed_arrivals_keep_both_service_bounds () =
+  let rng = Random.State.make [| 20261019 |] in
+  let classes = [ Admission_class.Priority; Admission_class.Standard; Admission_class.Background ] in
+  for _case = 1 to 200 do
+    let limit = 1 + Random.State.int rng 3 in
+    let counts = Array.make 3 0 in
+    let waiters =
+      List.init 18 (fun _ ->
+        let index = Random.State.int rng 3 in
+        counts.(index) <- counts.(index) + 1;
+        Printf.sprintf "%c%d" [| 'P'; 'S'; 'B' |].(index) counts.(index))
+    in
+    let order = grant_order ~priority_run_limit:(Some limit) waiters in
+    let name = String.concat " " waiters in
+    check int (name ^ ": every waiter granted once") (List.length waiters) (List.length order);
+    List.iter
+      (fun admission_class ->
+         let in_class = List.filter (fun label -> label_class label = admission_class) in
+         check (list string) (name ^ ": FIFO within " ^ Admission_class.to_string admission_class)
+           (in_class waiters) (in_class order))
+      classes;
+    let standard_left = ref counts.(1)
+    and background_left = ref counts.(2)
+    and priority_run = ref 0
+    and foreground_run = ref 0 in
+    let foreground_grant () =
+      if !background_left > 0 then (
+        incr foreground_run;
+        if !foreground_run > limit then
+          failf "%s: background passed by %d foreground grants (limit %d)"
+            name !foreground_run limit)
+    in
+    List.iter
+      (fun label ->
+         match label_class label with
+         | Priority ->
+           if !standard_left > 0 then (
+             incr priority_run;
+             if !priority_run > limit then
+               failf "%s: standard passed by %d priority grants (limit %d)"
+                 name !priority_run limit);
+           foreground_grant ()
+         | Standard ->
+           decr standard_left;
+           priority_run := 0;
+           foreground_grant ()
+         | Background ->
+           decr background_left;
+           foreground_run := 0)
+      order
+  done
+;;
+
 let () =
   run
     "slot_scheduler_priority"
     [ ( "grant order"
       , [ test_case
-            "without a limit both classes share arrival order"
+            "without a limit all classes share arrival order"
             `Quick
             test_without_a_limit_both_classes_share_arrival_order
+        ; test_case
+            "standard precedes background with bounded service"
+            `Quick
+            test_standard_precedes_background_with_bounded_service
+        ; test_case
+            "background preserves priority debt to standard"
+            `Quick
+            test_background_does_not_erase_priority_debt_to_standard
+        ; test_case
+            "late background starts a new foreground run"
+            `Quick
+            test_a_late_background_waiter_starts_a_new_foreground_run
+        ; test_case
+            "expired background leaves no foreground run"
+            `Quick
+            test_an_expired_background_waiter_leaves_no_run_behind
+        ; test_case
+            "both lower classes progress during priority arrivals"
+            `Quick
+            test_both_lower_classes_progress_under_continuing_priority_arrivals
         ; test_case
             "priority goes first until its run limit"
             `Quick
@@ -449,6 +594,10 @@ let () =
             "random arrivals keep the invariants"
             `Quick
             test_random_arrivals_keep_the_invariants
+        ; test_case
+            "mixed arrivals keep both service bounds"
+            `Quick
+            test_mixed_arrivals_keep_both_service_bounds
         ] )
     ]
 ;;

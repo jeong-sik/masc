@@ -21,7 +21,10 @@
     dropped. Waiters are granted in arrival order unless the endpoint also
     declares [admission_priority_run_limit]; then a request whose
     [admission_class] is [Priority] is granted ahead of [Standard] ones, up to
-    that many in a row while a [Standard] request waits. Retry policy remains
+    that many priority grants while a [Standard] request waits. Deferrable
+    [Background] requests receive a slot after that many foreground grants
+    while they wait, without erasing the priority debt owed to [Standard].
+    All classes share the endpoint's permit allowance. Retry policy remains
     the consumer's responsibility.
 
     Registry decisions are pure immutable transitions. Scheduler creation,

@@ -3,7 +3,12 @@ type detail =
   { task : Masc_domain.task
   ; canonical_goal_id : string option
   ; diagnostics : Masc_domain.task_decode_diagnostics }
-val detail : task_id:string -> Yojson.Safe.t -> (detail, string) result
+val detail : ?previous:detail -> task_id:string -> Yojson.Safe.t -> (detail, string) result
+(** Always validate and decode the new response. After exact typed Task equality,
+    reuse only the previous immutable Task object. Canonical Goal and diagnostics
+    come from the new response. The caller may supply a previous reading only
+    for the same captured original source and workspace; this is no
+    admission, freshness or authority cache. Run decoding/equality on the CPU path. *)
 val history : task_id:string -> Yojson.Safe.t -> (Tui_decode.task_history_event list, string) result
 (** History rows must name the captured Task through [task] or [task_id].
     Conflicting identities are rejected rather than shown under that Task. *)

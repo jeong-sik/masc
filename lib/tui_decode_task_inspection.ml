@@ -8,7 +8,7 @@ let validate json = Agent_core.Execution_json.validate ~context:"original Task i
 let nonblank = function
   | `String text when String.trim text <> "" && text=String.trim text -> Ok text
   | _ -> Error "expected an exact nonblank Task identity"
-let detail ~task_id json =
+let detail ?previous ~task_id json =
   let* () = validate json in
   let* envelope = Agent_core.Execution_json.object_fields ~context:"original Task detail"
       ~required:["task"] ~optional:[] json in
@@ -21,6 +21,9 @@ let detail ~task_id json =
     | Some json -> nonblank json |> Result.map Option.some
     | None -> Error "Task detail lacks its canonical Goal observation" in
   let* task,diagnostics = Masc_domain.task_of_yojson_with_diagnostics row in
+  let task=match previous with
+    | Some previous when Masc_domain.equal_task previous.task task -> previous.task
+    | Some _ | None -> task in
   Ok {task;canonical_goal_id;diagnostics}
 let history ~task_id json =
   let* () = validate json in

@@ -3504,7 +3504,7 @@ let launch_tools_async_task ?(force=false) state ~mailbox =
        let source=Masc_tui_fetched.request_key request.atr_ticket in
        launch_workspace_json_read ~key:request.atr_job state ~mailbox
          ~deliver:(fun result -> Tools_async_task_body_loaded (request,result))
-         (fun () -> Masc_tui_http.fetch_original_task_detail ~host ~port ~task_id:source.ats_task_id));
+         (fun () -> Masc_tui_http.fetch_original_task_detail ~host ~port ~task_id:source.ats_task_id ~previous:request.atr_previous));
     launch_tools_async_task_history ~force state ~mailbox
   end
 

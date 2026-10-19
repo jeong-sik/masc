@@ -120,7 +120,7 @@ type task_status =
           to the evidence record the authority reads. *)
   | Done of { assignee : string; completed_at : string; notes : string option }
   | Cancelled of { cancelled_by : string; cancelled_at : string; reason : string option }
-[@@deriving show]
+[@@deriving show, eq]
 
 (** A {!task_status} constructor without its payload: what a status filter
     names. *)
@@ -171,7 +171,7 @@ type task_execution_links =
   { operation_id : string option [@default None]
   ; session_id : string option [@default None]
   }
-[@@deriving show, yojson { strict = true }]
+[@@deriving show, yojson { strict = true }, eq]
 
 (** No producer has been linked yet. A task starts here and stays here until a
     runtime records the operation or session that carried it out. *)
@@ -184,12 +184,12 @@ type task_contract =
   ; inspect_gate_evidence : string list [@default []]
   ; verify_gate_evidence : string list [@default []]
   }
-[@@deriving show, yojson { strict = false }]
+[@@deriving show, yojson { strict = false }, eq]
 
 type task_reclaim_policy =
   | Allow_reclaim
   | Block_reclaim
-[@@deriving show]
+[@@deriving show, eq]
 
 val task_reclaim_policy_to_string : task_reclaim_policy -> string
 val task_reclaim_policy_of_string : string -> (task_reclaim_policy, string) result
@@ -203,7 +203,7 @@ type task_handoff_context =
   ; updated_at : string option [@default None]
   ; updated_by : string option [@default None]
   }
-[@@deriving show, yojson { strict = false }]
+[@@deriving show, yojson { strict = false }, eq]
 
 (** The "why" behind a transition that stopped work, from whichever argument
     carried it. [transition_task_r] takes an explicit [reason];
@@ -249,7 +249,7 @@ type task =
             durable fact throughout the Task lifecycle. Empty means the Task
             declares no Skill. *)
   }
-[@@deriving show]
+[@@deriving show, eq]
 
 (** When the Task last changed state, from the timestamp its status carries.
     [Todo] falls back to creation. Defined once: two byte-identical copies

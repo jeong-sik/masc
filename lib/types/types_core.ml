@@ -228,7 +228,7 @@ type task_status =
     }
   | Done of { assignee: string; completed_at: string; notes: string option }
   | Cancelled of { cancelled_by: string; cancelled_at: string; reason: string option }
-[@@deriving show]
+[@@deriving show, eq]
 
 (* The schema and parser share one generated vocabulary. Payload-bearing
    statuses map to it exhaustively; neither boundary needs placeholder tasks. *)
@@ -432,7 +432,7 @@ let task_status_of_yojson json =
 type task_execution_links = {
   operation_id : string option; [@default None]
   session_id : string option; [@default None]
-} [@@deriving show, yojson { strict = true }]
+} [@@deriving show, yojson { strict = true }, eq]
 
 (** No producer has been linked yet. A task starts here and stays here until a
     runtime records the operation or session that carried it out. *)
@@ -453,13 +453,13 @@ type task_contract = {
   required_evidence : string list; [@default []]
   inspect_gate_evidence : string list; [@default []]
   verify_gate_evidence : string list; [@default []]
-} [@@deriving show, yojson { strict = false }]
+} [@@deriving show, yojson { strict = false }, eq]
 
 (** Handoff context persisted across release/reclaim cycles *)
 type task_reclaim_policy =
   | Allow_reclaim
   | Block_reclaim
-[@@deriving show]
+[@@deriving show, eq]
 
 let task_reclaim_policy_to_string = function
   | Allow_reclaim -> "allow_reclaim"
@@ -486,7 +486,7 @@ type task_handoff_context = {
   evidence_refs : string list; [@default []]
   updated_at : string option; [@default None]
   updated_by : string option; [@default None]
-} [@@deriving show, yojson { strict = false }]
+} [@@deriving show, yojson { strict = false }, eq]
 
 (** The "why" behind a transition that stopped work, from whichever argument
     carried it. Two entry points supply it differently: [transition_task_r]
@@ -555,7 +555,7 @@ type task = {
      package, name, and content revision survive every state transition and do
      not depend on whichever catalog is current when the Task is later read. *)
   skills: Skill_reference.t list; [@default []]
-} [@@deriving show]
+} [@@deriving show, eq]
 
 (* RFC-0323 G-10: the typed reclaim claim gate is retired. #23661 removed its
    Todo producer; this change removes the Done producer, so nothing can be

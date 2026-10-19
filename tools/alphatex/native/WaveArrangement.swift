@@ -457,6 +457,11 @@ enum AudioCommand: Decodable {
         }
     }
 }
+enum PracticeLoopPosition {
+    case introduction(UInt64?)
+    case backing(Double)
+    var backing: Double { if case .backing(let phase) = self { return phase }; return 0 }
+}
 final class ArrangementTransport {
     enum State { case prepared, playing, paused, stopped }
     let plan: Plan
@@ -474,7 +479,7 @@ final class ArrangementTransport {
     var position: Double = 0
     var anchor: UInt64 = 0
     var musicalAnchor: UInt64 = 0
-    var introRemainingHost: UInt64? = nil
+    var loopPosition = PracticeLoopPosition.introduction(nil)
     var generation: UInt64 = 0
     var listeners: [(AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
     var signals: [DispatchSourceSignal] = []
@@ -560,30 +565,47 @@ final class ArrangementTransport {
                                                   frames: currentBufferFrames)
         }
     }
+    func backingTime() -> Double {
+        guard let loop = plan.loop, plan.practice?.loop != nil else { return currentTime() - (plan.practice?.countInSeconds ?? 0) }
+        guard state == .playing, let time = engine.outputNode.lastRenderTime, time.isHostTimeValid,
+              time.hostTime > musicalAnchor else { return loopPosition.backing }
+        return (loopPosition.backing + AVAudioTime.seconds(forHostTime: time.hostTime - musicalAnchor))
+            .truncatingRemainder(dividingBy: loop.duration)
+    }
+    func introRemaining() -> Double {
+        guard let practice = plan.practice else { return 0 }
+        guard practice.loop != nil else { return max(0, practice.countInSeconds - currentTime()) }
+        if state == .playing, let time = engine.outputNode.lastRenderTime, time.isHostTimeValid {
+            let frontier = max(anchor, time.hostTime)
+            return musicalAnchor > frontier ? AVAudioTime.seconds(forHostTime: musicalAnchor - frontier) : 0
+        }
+        switch loopPosition {
+        case .introduction(let remaining): return remaining.map { AVAudioTime.seconds(forHostTime: $0) } ?? practice.countInSeconds
+        case .backing: return 0
+        }
+    }
     func currentTime() -> Double {
         guard state == .playing, let time = engine.outputNode.lastRenderTime, time.isHostTimeValid, time.hostTime > anchor else { return position }
-        if let practice = plan.practice, practice.loop != nil, let loop = plan.loop {
+        if let practice = plan.practice, practice.loop != nil, plan.loop != nil {
             if time.hostTime < musicalAnchor {
                 return max(0, practice.countInSeconds - AVAudioTime.seconds(forHostTime: musicalAnchor - time.hostTime))
             }
-            let backing = max(0, position - practice.countInSeconds)
-                + AVAudioTime.seconds(forHostTime: time.hostTime - musicalAnchor)
-            return practice.countInSeconds + backing.truncatingRemainder(dividingBy: loop.duration)
+            return practice.countInSeconds + backingTime()
         }
         let elapsed = position + AVAudioTime.seconds(forHostTime: time.hostTime - anchor)
         return plan.loop == nil ? min(plan.duration, elapsed) : elapsed.truncatingRemainder(dividingBy: plan.duration)
     }
     func snapshot(_ kind: String) -> [String: Any] {
-        var value: [String: Any] = ["kind": kind, "currentTime": max(0, currentTime() - (plan.practice?.countInSeconds ?? 0)), "duration": plan.practice?.duration ?? plan.duration, "device": device.json,
+        var value: [String: Any] = ["kind": kind, "currentTime": max(0, backingTime()), "duration": plan.practice?.duration ?? plan.duration, "device": device.json,
          "loop": plan.loop != nil, "format": plan.kind, "streamBufferFrames": capacity, "regions": voices.count]
         if let practice = plan.practice {
-            let remaining = max(0, practice.countInSeconds - currentTime())
+            let remaining = introRemaining()
             value["practice"] = ["phase": remaining > 0 ? "count-in" : "backing", "remainingSeconds": remaining] as [String: Any]
         }
         if let midi { value["bindings"] = midi.snapshot(kind)["bindings"] }
         do {
             var timebase = mach_timebase_info_data_t(); mach_timebase_info(&timebase)
-            var clock: [String: Any] = ["kind": "mach-host-time", "anchor": String(musicalAnchor), "position": max(0, position - (plan.practice?.countInSeconds ?? 0)),
+            var clock: [String: Any] = ["kind": "mach-host-time", "anchor": String(musicalAnchor), "position": plan.practice?.loop != nil ? loopPosition.backing : max(0, position - (plan.practice?.countInSeconds ?? 0)),
                 "numer": timebase.numer, "denom": timebase.denom,
                 "renderQuantum": renderQuantum, "bufferFrames": bufferFrames, "sampleRate": engine.outputNode.outputFormat(forBus: 0).sampleRate,
                 "presentationLatency": engine.outputNode.presentationLatency]
@@ -603,13 +625,16 @@ final class ArrangementTransport {
     func stopVoices() { horizon?.cancel(); horizon = nil; horizonEnded = false; generation &+= 1; for voice in voices { voice.stop() }; active.removeAll() }
     func schedule(from seconds: Double, playing: Bool) throws {
         guard state != .stopped else { return }
-        if seconds >= plan.duration { position = plan.duration; finish(reason: "finished"); return }
+        if plan.loop == nil && seconds >= plan.duration { position = plan.duration; finish(reason: "finished"); return }
         engine.pause(); stopVoices(); position = seconds
-        let backing = plan.practice?.loop == nil ? seconds : max(0, seconds - (plan.practice?.countInSeconds ?? 0))
+        let backing = plan.practice?.loop == nil ? seconds : loopPosition.backing
         try midi?.stageCoordinated(at: backing); midiEnded = false
         let expected = generation
         for voice in voices {
             let intro = plan.practice?.loop != nil && voice.region.pulseClock != nil && voice.region.pulseLoopUnit == nil
+            // The intro ends at an exact fractional source frame. A generic
+            // floor seek at C can still admit its final ceil(C*rate) sample.
+            if intro, case .backing = loopPosition { continue }
             let admitted = try voice.prepare(from: intro ? seconds : backing, finished: { [weak self] in
                 guard let self, self.generation == expected, self.state == .playing else { return }
                 self.active.remove(voice.region.id)
@@ -625,7 +650,7 @@ final class ArrangementTransport {
     }
     func run() throws {
         guard state != .stopped else { return }
-        guard position < plan.duration, !active.isEmpty || midi != nil || plan.clocked else { position = plan.duration; finish(reason: "finished"); return }
+        guard (plan.loop != nil || position < plan.duration), !active.isEmpty || midi != nil || plan.clocked else { position = plan.duration; finish(reason: "finished"); return }
         try checkOutput(); engine.prepare(); try engine.start()
         let rate = engine.outputNode.outputFormat(forBus: 0).sampleRate, latency = engine.outputNode.presentationLatency
         guard rate.isFinite, rate > 0, latency.isFinite, latency >= 0 else { throw AudioFailure("output clock is unavailable") }
@@ -644,8 +669,11 @@ final class ArrangementTransport {
         anchor = try futureHost(lead, from: frontier)
         if let practice = plan.practice, let clock = practice.loop {
             var timebase = mach_timebase_info_data_t(); mach_timebase_info(&timebase)
-            let remaining = position < practice.countInSeconds
-                ? try introRemainingHost ?? clock.hostTicks(numer: timebase.numer, denom: timebase.denom) : 0
+            let remaining: UInt64
+            switch loopPosition {
+            case .introduction(let retained): remaining = try retained ?? clock.hostTicks(numer: timebase.numer, denom: timebase.denom)
+            case .backing: remaining = 0
+            }
             let future = anchor.addingReportingOverflow(remaining)
             guard !future.overflow else { throw AudioFailure("count-in exceeds the native host timeline") }
             musicalAnchor = future.partialValue
@@ -658,6 +686,7 @@ final class ArrangementTransport {
             let when = try futureHost(plan.loop == nil ? max(0, voice.region.startSeconds - position) : 0,
                 from: plan.practice?.loop != nil && !intro ? musicalAnchor : anchor)
             guard let render = voice.player.lastRenderTime, render.isHostTimeValid, render.hostTime < when else {
+                report("audio start missed: region=\(voice.region.id) render=\(voice.player.lastRenderTime?.hostTime.description ?? "unavailable") deadline=\(when) frontier=\(frontier) active=\(active.count) quantum=\(renderQuantum) rate=\(rate)")
                 throw AudioFailure("audio node passed its common start deadline")
             }
             voice.player.play(at: AVAudioTime(hostTime: when))
@@ -713,21 +742,24 @@ final class ArrangementTransport {
                 switch command {
                 case .pause: if state == .playing {
                     let time = currentTime()
-                    if time >= plan.duration { position = plan.duration; finish(reason: "finished"); return }
+                    if plan.loop == nil && time >= plan.duration { position = plan.duration; finish(reason: "finished"); return }
                     if plan.practice?.loop != nil {
+                        let backing = backingTime()
                         let render = engine.outputNode.lastRenderTime
                         let frontier = render?.isHostTimeValid == true ? max(anchor, render!.hostTime) : anchor
-                        introRemainingHost = musicalAnchor > frontier ? musicalAnchor - frontier : 0
+                        loopPosition = musicalAnchor > frontier ? .introduction(musicalAnchor - frontier) : .backing(backing)
                     }
                     engine.pause(); stopVoices(); position = time; state = .paused
-                    try midi?.stageCoordinated(at: plan.practice?.loop == nil ? time : max(0, time - (plan.practice?.countInSeconds ?? 0)))
+                    try midi?.stageCoordinated(at: plan.practice?.loop == nil ? time : loopPosition.backing)
                 }
                 case .resume: if state == .paused { try schedule(from: position, playing: true) }
                 case .seek(let seconds):
                     let duration = plan.practice?.duration ?? plan.duration
                     guard seconds.isFinite, seconds >= 0, seconds <= duration else { throw AudioFailure("seek outside arrangement duration") }
                     let raw = (seconds == duration && plan.loop != nil ? 0 : seconds) + (plan.practice?.countInSeconds ?? 0)
-                    if plan.practice?.loop != nil { introRemainingHost = 0 }
+                    if plan.practice?.loop != nil {
+                        loopPosition = .backing(seconds == duration && plan.loop != nil ? 0 : seconds)
+                    }
                     if seconds == duration && plan.loop == nil { position = plan.duration; finish(reason: "finished"); return }
                     try schedule(from: raw, playing: state == .playing)
                 case .status: break

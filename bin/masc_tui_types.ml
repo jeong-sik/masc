@@ -4340,6 +4340,7 @@ type local_workspace_request = {
   lwr_base_path: string;
   lwr_request: Local_read_order.request;
   lwr_started_ns: int64;
+  lwr_previous_tasks: Masc_domain.task list;
 }
 
 type keeper_creation_wait = {
@@ -9777,7 +9778,9 @@ let begin_local_workspace_read (state : state) ~intent ~source ~base_path ~start
     set_local_source_order state source reading;
     Option.map (fun (lwr_request, actual_intent) ->
         { lwr_source = source; lwr_intent = actual_intent; lwr_authority = state.workspace_authority;
-          lwr_base_path = base_path; lwr_request; lwr_started_ns = started_ns }) request
+          lwr_base_path = base_path; lwr_request; lwr_started_ns = started_ns;
+          lwr_previous_tasks = (match source with
+            | Local_work -> state.tasks_domain | Local_keepers -> []) }) request
 
 let take_local_workspace_read (state : state) ~source request result =
   if source <> request.lwr_source

@@ -134,6 +134,13 @@ description: "MASC TUI의 원본 비동기 요청·Task·이력 상세와 파일
   해석 진단은 항상 새 응답에서 가져온다. 이 불변 값 재사용은 이전 조회 권한·freshness를
   빌리지 않으며, UI frame에서 본문을 비교·해시하지 않는다. 같은 ID/status여도 본문·계약·
   handoff·실행 링크·정확한 Skill revision 등이 바뀌면 기존 표시 준비를 빌려주지 않는다.
+- 로컬 Work 읽기도 요청 시 이전 불변 Task 목록을 캡처한다. 실제 I/O 읽기와 cache 잠금을
+  반환한 뒤 공유 CPU에서 새 목록의 같은 ID·전체 typed 값만 이전 객체로 재사용한다.
+  새 읽기의 membership·순서·Goal·오류·복구 관측을 유지하고, 없어진 Task를 되살리지 않는다.
+  이전 중복 ID는 재사용 후보로 쓰지 않는다. Keeper 메타데이터 읽기는 이 비교를 기다리지
+  않으며 원래 workspace/source/요청 owner가 I/O·비교·최종 반영을 함께 소유한다.
+  cold read와 물리적으로 같은 목록은 CPU 제출을 생략한다. 안정화 목록과 원본 캐시 목록이
+  다르면 cache hit에서도 비교할 수 있으므로 그 비용을 숨기거나 속도 개선으로 단정하지 않는다.
 - Task 표시 준비는 원래 consumer/요청/run/Task·workspace·폭·ticket에 귀속해 시작, worker
   진입/반환, caller 관측, UI 적용/거절, 소유권 철회, 취소 요청과 실제 등록 해제를 별도로 남긴다.
   같은 요청의 원자적 사실만 준비 단계 안내에 쓰며, 미관측 단계는 null로 남긴다. worker 반환을

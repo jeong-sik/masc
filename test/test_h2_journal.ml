@@ -1185,11 +1185,49 @@ let test_first_loss_retains_unproven_effects mode () =
       ui.view <- Ui.Planning;ui.planning_mode <- Ui.Planning_list;
       ui.task_detail_id <- Some source.ats_task_id;
       ui.task_focus <- Masc_tui_overview_tasks.land_on ui.tasks ~task_id:source.ats_task_id;
+      ui.workspace_identity <- Ui.Workspace_identity_match;
+      let read_work () =
+        let request=Ui.begin_local_workspace_read ui ~intent:Ui.Snapshot_read.Refresh
+          ~source:Ui.Local_work ~base_path ~started_ns:0L |> Option.get in
+        let reading=Masc_tui_loader.read_local_workspace base_path
+          |> Masc_tui_loader.prepare_local_workspace request in
+        match Ui.take_local_workspace_read ui ~source:Ui.Local_work request (Ok reading) with
+        | Some (Ok reading) -> Masc_tui_loader.apply_local_workspace ui reading
+        | Some (Error _) | None -> fail "actual Work observation lost its original read owner" in
+      read_work ();
       let work=Ui.sync_task_documents ui ~cols:72 in
       Ui.complete_task_document ui ~cols:72 old_document (prepare old_document);
       check bool "an async-source reply cannot settle the same-ID Work document" true
         (Masc_tui_fetched.in_flight ui.task_document_body.tds_reading);
-      let work_body=find Document.Body work in
+      let unchanged_work=find Document.Body work in
+      (* A real write to another Task invalidates the whole backlog cache.
+         The unchanged selected Task must keep its pending preparation owner,
+         while the other Task's new facts land from the same actual read. *)
+      let backlog=Workspace_backlog.read_backlog_r config |> require "backlog before other Task update" in
+      Workspace_backlog.write_backlog config {backlog with tasks=List.map
+        (fun (task : Masc_domain.task) -> if task.id="different-current-task"
+          then {task with description="Other Task changed its authoritative evidence"} else task) backlog.tasks};
+      read_work ();
+      Ui.complete_task_document ui ~cols:72 unchanged_work (prepare unchanged_work);
+      check bool "another Task's actual write keeps original Work preparation admissible" true
+        (match (Observation.facts unchanged_work.tdr_observation).ui_disposition with
+         | Some (_,Observation.Applied) -> true | _ -> false);
+      check bool "the same read still applies the changed other Task" true
+        (List.exists (fun (task : Masc_domain.task) -> task.id="different-current-task"
+          && task.description="Other Task changed its authoritative evidence") ui.tasks_domain);
+      (* A change to the selected Task itself must not borrow that payload.
+         Its new pending owner continues through the existing scope replay. *)
+      let backlog=Workspace_backlog.read_backlog_r config |> require "backlog before Work Task update" in
+      let work_description=description ^ "\nWork source observed newer evidence" in
+      Workspace_backlog.write_backlog config {backlog with tasks=List.map
+        (fun (task : Masc_domain.task) -> if task.id=source.ats_task_id
+          then {task with description=work_description} else task) backlog.tasks};
+      read_work ();
+      check bool "selected Work Task content is newly observed under the same identity" true
+        (List.exists (fun (task : Masc_domain.task) -> task.id=source.ats_task_id
+          && task.description=work_description) ui.tasks_domain);
+      let changed_work=Ui.sync_task_documents ui ~cols:72 in
+      let work_body=find Document.Body changed_work in
       Ui.suspend_workspace_readings ui;
       let replacement_documents=Ui.sync_task_documents ui ~cols:72 in
       Ui.complete_task_document ui ~cols:72 work_body (prepare work_body);

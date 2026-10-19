@@ -13260,7 +13260,7 @@ let local_read_intent_name = function
   | Snapshot_read.Poll -> "poll"
   | Snapshot_read.Refresh -> "refresh"
 
-let launch_local_source state ~mailbox ~intent ~source ~read ~message base_path =
+let launch_local_source state ~mailbox ~intent ~source ~read ~prepare ~message base_path =
   match Masc_tui_types.begin_local_workspace_read state ~intent ~source ~base_path
           ~started_ns:(Mtime_clock.elapsed_ns ()) with
   | None ->
@@ -13289,7 +13289,8 @@ let launch_local_source state ~mailbox ~intent ~source ~read ~message base_path 
           (fun () -> Eio.Fiber.first
             (fun () ->
               let result = try
-                  Ok (Domain_pool_ref.submit_io_or_inline (fun () -> read request.lwr_base_path))
+                  let reading=Domain_pool_ref.submit_io_or_inline (fun () -> read request.lwr_base_path) in
+                  Ok (prepare request reading)
                 with
                 | Eio.Cancel.Cancelled _ as exn -> raise exn
                 | exn -> Error (Printexc.to_string exn) in
@@ -13316,13 +13317,13 @@ let launch_local_source state ~mailbox ~intent ~source ~read ~message base_path 
 
 let launch_local_keeper_read state ~mailbox ~intent base_path =
   launch_local_source state ~mailbox ~intent ~source:Local_keepers
-    ~read:Masc_tui_loader.read_local_keepers
+    ~read:Masc_tui_loader.read_local_keepers ~prepare:(fun _ reading -> reading)
     ~message:(fun request result -> Local_keepers_read (request, result)) base_path
 
 let launch_local_workspace_read state ~mailbox ~intent base_path =
   launch_local_keeper_read state ~mailbox ~intent base_path;
   launch_local_source state ~mailbox ~intent ~source:Local_work
-    ~read:Masc_tui_loader.read_local_workspace
+    ~read:Masc_tui_loader.read_local_workspace ~prepare:Masc_tui_loader.prepare_local_workspace
     ~message:(fun request result -> Local_workspace_read (request, result)) base_path
 
 let launch_local_source_followup state ~mailbox source =
@@ -13331,7 +13332,7 @@ let launch_local_source_followup state ~mailbox source =
     | Local_keepers -> launch_local_keeper_read state ~mailbox ~intent:Snapshot_read.Poll state.local_base_path
     | Local_work ->
         launch_local_source state ~mailbox ~intent:Snapshot_read.Poll ~source:Local_work
-          ~read:Masc_tui_loader.read_local_workspace
+          ~read:Masc_tui_loader.read_local_workspace ~prepare:Masc_tui_loader.prepare_local_workspace
           ~message:(fun request result -> Local_workspace_read (request, result)) state.local_base_path
 
 let observe_local_source state ~source request result =

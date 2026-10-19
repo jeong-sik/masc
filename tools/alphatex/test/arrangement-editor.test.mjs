@@ -1,5 +1,6 @@
 import { newProject, editProject, PPQ } from '../sequencer-project.mjs'
 import { importPhraseDocument } from '../phrase-arrangement.mjs'
+import { newEditor, editorCommand } from '../sequencer-editor.mjs'
 import { practiceEnabled } from '../arrangement-practice.mjs'
 import { liveMidiPlan } from '../live-midi.mjs'
 import { calibrationSelection } from '../audio-calibration.mjs'
@@ -15,7 +16,7 @@ import { newArrangement, editArrangement, arrangementSchedule } from '../arrange
 import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } from '../arrangement-playback.mjs'
 import * as editorAPI from '../arrangement-editor.mjs'
 import { loadArrangement } from '../arrangement-files.mjs'
-import { importMidiSource, exportMidiSource } from '../midi-source.mjs'
+import { importMidiSource, exportMidiSource, midiSourcePattern } from '../midi-source.mjs'
 import { recordingEpoch } from '../arrangement-recording.mjs'
 import { recordingCorrectionContext, recordingCorrectionCapture } from '../recording-correction.mjs'
 import { calibrationMilliseconds, calibrationResidual, validateCalibrationCapture } from '../calibration-profile.mjs'
@@ -913,6 +914,40 @@ test('closing an active MIDI edit waits for child cancellation and refuses its l
  child.finish({project:newProject(),changed:true});await view.done
  assert.equal(view.observed.requests.some(job=>job.kind==='import-phrase'),false)
  assert.equal(view.process.stdin.isRaw,false)
+})
+
+test('returning from SMF2 editing carries the edited pattern into Enter placement without changing other patterns',async()=>{
+ const track=pitch=>Buffer.from([0,0xb0,1,77,0,0x90,pitch,100,0x83,0x60,0x80,pitch,45,0,0xff,0x2f,0])
+ const chunk=bytes=>{const header=Buffer.alloc(8);header.write('MTrk');header.writeUInt32BE(bytes.length,4);return Buffer.concat([header,bytes])}
+ const bytes=Buffer.concat([Buffer.from('4d546864000000060002000201e0','hex'),chunk(track(60)),chunk(track(67))])
+ const source=importMidiSource(bytes),view=await controller()
+ try {
+  view.command('import-midi /music/patterns.mid');await flush()
+  const job=view.observed.requests.find(job=>job.kind==='import-midi')
+  const asset={id:'asset-1',kind:'midi',name:'Patterns',source}
+  view.worker.emit('message',{id:job.id,ok:true,result:{project:editArrangement(job.project,{kind:'asset-add',asset}),asset:asset.id}});await flush()
+  view.command('place asset-1 0 2');view.command('edit-midi');await flush()
+  const prep=view.observed.requests.find(job=>job.kind==='prepare-phrase')
+  view.worker.emit('message',{id:prep.id,ok:true,result:source});await flush()
+  const child=view.observed.phrases[0];assert.equal(child.options.pattern,1)
+  const edited=editorCommand(newEditor(source,{pattern:child.options.pattern}),'transpose 2').editor
+  child.finish({project:edited.project,pattern:edited.pattern,changed:true});await flush()
+  const imported=view.observed.requests.find(job=>job.kind==='import-phrase')
+  view.worker.emit('message',{id:imported.id,ok:true,result:importPhraseDocument(imported.project,imported.document)});await flush()
+  view.command('cursor 2');view.key('return');view.command('save');await flush()
+  const saved=view.observed.saved.at(-1).project
+  assert.equal(saved.clips.length,2);assert.equal(saved.clips[1].asset,'asset-2');assert.equal(saved.clips[1].pattern,1)
+  assert.equal(saved.clips[1].position,2*PPQ)
+  assert.deepEqual(Buffer.from(exportMidiSource(saved.assets[0].source)),bytes)
+  assert.deepEqual(midiSourcePattern(saved.assets[1].source,{pattern:0}),midiSourcePattern(source,{pattern:0}))
+  assert.equal(midiSourcePattern(saved.assets[1].source,{pattern:1}).notes[0].pitch,69)
+  // Selecting another source clears the child selection instead of inventing an SMF2 default.
+  let state=editorAPI.arrangementImported(editorAPI.arrangementEditor(),{project:saved,asset:'asset-2',pattern:1})
+  state=editorAPI.arrangementCommand(state,'asset asset-1').editor
+  assert.throws(()=>editorAPI.arrangementAction(state,{kind:'place'}),/format-2 MIDI pattern/)
+  state=editorAPI.arrangementCommand(state,'select '+saved.clips[0].id).editor
+  assert.equal(editorAPI.arrangementAction(state,{kind:'place'}).project.clips.at(-1).pattern,1)
+ }finally{await closeController(view)}
 })
 
 test('stop fences a late phrase preparation before child keyboard or input ownership transfers',async()=>{

@@ -117,6 +117,7 @@ let test_the_tuning_names_the_lines () =
 
 let documented_bass_score =
   {|\title "베이스 스케치 11/8"
+\subtitle "11/8 워밍업"
 \artist "Example Artist"
 \track "Bass" { instrument "Electric Bass Finger" }
 \staff { tabs }
@@ -144,6 +145,8 @@ let test_documented_bass_score () =
         [ "G"; "D"; "A"; "E" ] score.tuning;
       Alcotest.(check (option string)) "the title is retained"
         (Some "베이스 스케치 11/8") score.title;
+      Alcotest.(check (option string)) "the subtitle is retained"
+        (Some "11/8 워밍업") score.subtitle;
       Alcotest.(check (option int)) "tempo is retained" (Some 116) score.tempo;
       Alcotest.(check (option (pair int int))) "meter is retained"
         (Some (11, 8)) score.time_signature
@@ -239,6 +242,7 @@ let test_instrument_and_staff_do_not_guess () =
 
 let test_metadata_arguments_and_bar_boundaries () =
   check_failure "artist needs text" "\\artist :8 0.3" (Missing_argument Artist_text);
+  check_failure "subtitle needs text" "\\subtitle :8 0.3" (Missing_argument Subtitle_text);
   check_failure "section needs text" "\\section :8 0.3" (Missing_argument Section_text);
   check_failure "key signature needs a name" "\\ks \\ts 4 4 :8 0.3"
     (Missing_argument Key_signature_name);
@@ -486,9 +490,30 @@ let test_header_line_keeps_a_non_ascii_title () =
       Alcotest.(check bool) "the UTF-8 title bytes survive unescaped" true
         (List.exists (fun line -> contains_substring line "리프") lines)
 
+(* The subtitle is the author's text too, and the header draws it right
+   behind the title with the same [ · ] join the other header pieces use. *)
+let test_subtitle_rides_behind_the_title () =
+  match
+    Alphatex.render_tab ~max_width:80 "\\title \"Riff\" \\subtitle \"Warm-up\" :4 0.6"
+  with
+  | Error failure -> Alcotest.fail (Alphatex.failure_text failure)
+  | Ok lines ->
+      Alcotest.(check string) "the subtitle rides behind the title"
+        "\"Riff\" · \"Warm-up\"" (List.hd lines)
+
+(* A subtitle with no title still gets a header line, and a Korean subtitle
+   survives as UTF-8 the way a Korean title does. *)
+let test_subtitle_alone_keeps_non_ascii () =
+  match Alphatex.render_tab ~max_width:80 "\\subtitle \"한글 부제\" :4 0.6" with
+  | Error failure -> Alcotest.fail (Alphatex.failure_text failure)
+  | Ok lines ->
+      Alcotest.(check bool) "the UTF-8 subtitle bytes survive unescaped" true
+        (List.exists (fun line -> contains_substring line "한글 부제") lines)
+
 let test_directives_are_kept () =
-  let score = read_score "\\title \"Riff\" \\tempo 92 \\ts 6 8 :4 0.6" in
+  let score = read_score "\\title \"Riff\" \\subtitle \"Warm-up\" \\tempo 92 \\ts 6 8 :4 0.6" in
   Alcotest.(check (option string)) "the title" (Some "Riff") score.title;
+  Alcotest.(check (option string)) "the subtitle" (Some "Warm-up") score.subtitle;
   Alcotest.(check (option int)) "the tempo" (Some 92) score.tempo;
   Alcotest.(check (option (pair int int))) "the time signature" (Some (6, 8))
     score.time_signature
@@ -496,6 +521,7 @@ let test_directives_are_kept () =
 let test_directives_absent_are_none () =
   let score = read_score ":4 0.6" in
   Alcotest.(check (option string)) "no title" None score.title;
+  Alcotest.(check (option string)) "no subtitle" None score.subtitle;
   Alcotest.(check (option int)) "no tempo" None score.tempo;
   Alcotest.(check (option (pair int int))) "no time signature" None
     score.time_signature
@@ -756,6 +782,10 @@ let () =
             test_header_line_drawn
         ; Alcotest.test_case "a non-ascii title shows as written" `Quick
             test_header_line_keeps_a_non_ascii_title
+        ; Alcotest.test_case "the subtitle rides behind the title" `Quick
+            test_subtitle_rides_behind_the_title
+        ; Alcotest.test_case "a subtitle alone keeps non-ascii" `Quick
+            test_subtitle_alone_keeps_non_ascii
         ; Alcotest.test_case "no header line without directives" `Quick
             test_header_line_absent_when_no_directives
         ; Alcotest.test_case "measure numbers climb with the measures" `Quick

@@ -163,9 +163,10 @@ let draw_measure ~strings (measure : Score.measure) =
   rows
 
 (* The header ahead of the tab: what the directives said, and nothing when
-   none of them did. The title is the author's text, shown as written
-   between quotes -- %S is not used because it escapes every non-ASCII byte
-   into decimal numbers, and these titles are not ASCII. *)
+   none of them did. The title and subtitle are the author's text, shown as
+   written between quotes -- %S is not used because it escapes every
+   non-ASCII byte into decimal numbers, and these titles are not ASCII. The
+   subtitle rides right behind the title. *)
 let quoted_title title =
   let escaped = Buffer.create (String.length title) in
   String.iter
@@ -185,6 +186,9 @@ let header_line (score : Score.t) =
        | None -> [])
     @ (match score.title with
        | Some title -> [ quoted_title title ]
+       | None -> [])
+    @ (match score.subtitle with
+       | Some subtitle -> [ quoted_title subtitle ]
        | None -> [])
   in
   match pieces with

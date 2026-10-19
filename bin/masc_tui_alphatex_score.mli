@@ -4,10 +4,11 @@
     and the lone [.] that ends them; durations [:1] [:2] [:4] [:8] [:16];
     notes [fret.string] with an optional [.dur], the fret one or two digits or
     [x]; chords [(…).dur]; rests [r] and [r.dur]; and bars [|]. A beat that
-    says its own duration sets it for the beats after it. [\title], [\tempo]
-    and [\ts] are kept on the score: the pane draws them on the header line
-    ahead of the tab. A tempo or signature whose digits do not fit an int is
-    kept as [None] and the header omits it, the way an absent one is.
+    says its own duration sets it for the beats after it. [\title],
+    [\subtitle], [\tempo] and [\ts] are kept on the score: the pane draws them
+    on the header line ahead of the tab, with the subtitle behind the title. A
+    tempo or signature whose digits do not fit an int is kept as [None] and the
+    header omits it, the way an absent one is.
 
     Tuning accepts either bare note names or a parenthesized list, with every
     member checked. A single initial [\track] and [\staff] may describe the
@@ -58,6 +59,7 @@ type unclosed =
 
 type directive_argument =
   | Title_text
+  | Subtitle_text
   | Artist_text
   | Section_text
   | Key_signature_name
@@ -147,6 +149,7 @@ type t = {
   tuning : string list;  (** line names, highest string first; 1 to 12 *)
   measures : measure list;  (** never empty *)
   title : string option;  (** [\title]; [None] when none was said *)
+  subtitle : string option;  (** [\subtitle]; [None] when none was said *)
   tempo : int option;  (** [\tempo] in BPM; [None] when none fit an int *)
   time_signature : (int * int) option;  (** [\ts] numerator and denominator *)
 }

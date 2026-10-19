@@ -2445,6 +2445,8 @@
 
 ; Executables (benchmarks, distributed tests, tools)
 
+(include stanzas/keeper_argument_quality_cli.inc)
+
 (executable
  (name tool_call_quality_benchmark_cli)
  (modules tool_call_quality_benchmark_cli)

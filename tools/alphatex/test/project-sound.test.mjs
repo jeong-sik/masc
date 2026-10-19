@@ -57,6 +57,11 @@ test('saved phrase/source/portable backing and variants own sound without changi
   assert.throws(() => verifyPhraseSnapshot(reordered), /sound disagree/)
   const corrupt = structuredClone(reopened); corrupt.sound.preset.data = Buffer.from('changed').toString('base64')
   await assert.rejects(saveProject(join(root, 'bad.json'), corrupt), /preset content changed/)
+  const foreign = structuredClone(reopened); foreign.sound.selection.midi_path = '/different.mid'; foreign.sound.selection.output_path = '/foreign.wav'
+  const foreignPath = join(root, 'foreign.json')
+  await writeFile(foreignPath, JSON.stringify(foreign))
+  await assert.rejects(loadProject(foreignPath), /selection fields/)
+  await assert.rejects(saveProject(join(root, 'bad-selection.json'), foreign), /selection fields/)
 }))
 
 test('choosing default state captures bytes and identity through an owned native job', async () => {

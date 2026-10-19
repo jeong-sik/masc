@@ -143,15 +143,15 @@ let project
         config.resource_read_max_bytes
     | Config_rejected _ | Config_unreadable _ -> None
   in
-  let task_selection =
+  let bound =
     match task_selection with
-    | Some selection -> Ok selection
+    | Some selection ->
+      Keeper_task_skill_turn.bind_surface ~descriptors:tool_descriptors
+        ~snapshot:skill_snapshot selection
     | None ->
-      Keeper_task_skill_turn.resolve ~descriptors:tool_descriptors
+      Keeper_task_skill_turn.resolve_surface ~descriptors:tool_descriptors
         ~snapshot:skill_snapshot task_skill_references
   in
-  let bound = Result.bind task_selection
-    (Keeper_task_skill_turn.bind_surface ~descriptors:tool_descriptors ~snapshot:skill_snapshot) in
   match bound with
   | Error _ as error -> error
   | Ok (task_selection, preparation) ->

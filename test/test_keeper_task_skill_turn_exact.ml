@@ -1538,9 +1538,9 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
 ;;
 
 let preparation_for_cache_scenario ~snapshot ~descriptors =
-  match Selection.resolve ~descriptors ~snapshot [] with
+  match Selection.resolve_surface ~descriptors ~snapshot [] with
   | Error error -> fail (Selection.error_to_string error)
-  | Ok selection -> Selection.prepare_surface ~snapshot ~descriptors selection
+  | Ok (_, preparation) -> preparation
 ;;
 
 let cache_scenario_snapshot name =
@@ -1691,7 +1691,7 @@ let test_preparation_capture_isolates_nested_work_and_preserves_cancellation () 
       (sample.snapshot_revision = Snapshot.snapshot_revision outer && sample.outcome = O.Returned)) outside.samples;
   let unreadable = Snapshot.config_unreadable ~detail:"fixture unavailable" in
   let failed = O.capture_result ~on_report:(fun report -> reports := ("error",report)::!reports)
-      (fun () -> Selection.resolve ~snapshot:unreadable
+      (fun () -> Selection.resolve_surface ~descriptors ~snapshot:unreadable
         [(match Snapshot.entries outer with entry::_ -> Snapshot.entry_reference entry | [] -> fail "missing fixture entry")]) in
   check bool "a typed preparation error stays an error" true (Result.is_error failed);
   let error = List.assoc "error" !reports in

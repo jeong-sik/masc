@@ -347,6 +347,12 @@ let retain_surface ~snapshot ~descriptors preparation =
       Keeper_skill_preparation_observation.decided observation Keeper_skill_preparation_observation.Reused;
       preparation)
 
+let resolve_surface ~descriptors ~snapshot references =
+  resolve_requests ~descriptors ~snapshot
+    ~finish:(fun selection preparation ->
+      selection, retain_surface ~snapshot ~descriptors preparation)
+    (List.map (fun reference -> reference, []) references)
+
 let bind_surface ~descriptors ~snapshot selection =
   let finish selection preparation =
     selection,retain_surface ~snapshot ~descriptors preparation in

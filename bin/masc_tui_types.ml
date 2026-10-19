@@ -59,6 +59,9 @@ module Connector_read : sig
   type request
   type cause = Refresh | After_write
   type follow_up = No_follow_up | Read_after_write
+  type stage = Status_pending | Names_pending
+  type application = Full_snapshot | Names_only
+  type completion = { follow_up : follow_up; application : application }
   type view =
     | Quiet
     | Reading of cause * follow_up
@@ -67,6 +70,8 @@ module Connector_read : sig
 
   val empty : t
   val view : t -> view
+  val stage : t -> stage option
+  (** [None] means no active read; held demand and failed starts are separate. *)
   val begin_read : authority:unit ref -> owner:unit ref -> t -> (t * request) option
   (** [None] shares the active request for this authority. A supplied owner is
       fresh for this attempt; an older authority cannot lend its active slot. *)
@@ -76,19 +81,27 @@ module Connector_read : sig
   val not_started : authority:unit ref -> t -> request -> t
   (** Release active status synchronously, retaining the exact failed request
       until its failure can be admitted. Stale callbacks leave the state alone. *)
+  val status_received : authority:unit ref -> t -> request -> t option
+  (** Admit the original status once, without settling read or write demand.
+      The remaining directory work and final result keep the same owner. *)
   val complete : authority:unit ref -> t -> request -> ('a, 'b) result ->
-    (t * follow_up) option
+    (t * completion) option
   (** [None] rejects an old request. Only a write observed after an active read
       began requests an immediate follow-up. A failed after-write read or start
-      retains demand for the next explicit/existing read, without a retry loop. *)
+      retains demand for the next explicit/existing read, without a retry loop.
+      [Names_only] applies the original status with its directory enrichment
+      without resetting an action prepared after the status arrived. *)
 end = struct
   type cause = Refresh | After_write
   type follow_up = No_follow_up | Read_after_write
+  type stage = Status_pending | Names_pending
+  type application = Full_snapshot | Names_only
+  type completion = { follow_up : follow_up; application : application }
   type request = { authority : unit ref; owner : unit ref; cause : cause }
   type t =
     | Empty
     | Held
-    | Pending of request * follow_up
+    | Pending of request * follow_up * stage
     | Not_started of request * follow_up
   type view =
     | Quiet
@@ -101,8 +114,12 @@ end = struct
   let view = function
     | Empty -> Quiet
     | Held -> Waiting_after_write
-    | Pending (request, follow_up) -> Reading (request.cause, follow_up)
+    | Pending (request, follow_up, _) -> Reading (request.cause, follow_up)
     | Not_started _ -> Failed_to_start
+
+  let stage = function
+    | Pending (_, _, stage) -> Some stage
+    | Empty | Held | Not_started _ -> None
 
   let owes_read request follow_up =
     match request.cause, follow_up with
@@ -114,20 +131,20 @@ end = struct
   let held = function
     | Empty -> false
     | Held -> true
-    | Pending (request, follow_up) | Not_started (request, follow_up) ->
+    | Pending (request, follow_up, _) | Not_started (request, follow_up) ->
         owes_read request follow_up
 
   let begin_read ~authority ~owner state =
     match state with
-    | Pending (request, _) when request.authority == authority -> None
+    | Pending (request, _, _) when request.authority == authority -> None
     | Empty | Held | Pending _ | Not_started _ ->
         let cause = if held state then After_write else Refresh in
         let request = { authority; owner; cause } in
-        Some (Pending (request, No_follow_up), request)
+        Some (Pending (request, No_follow_up, Status_pending), request)
 
   let after_write = function
     | Empty | Held -> Held
-    | Pending (request, _) -> Pending (request, Read_after_write)
+    | Pending (request, _, stage) -> Pending (request, Read_after_write, stage)
     | Not_started (request, _) -> Not_started (request, Read_after_write)
 
   let suspend state = if held state then Held else Empty
@@ -138,26 +155,37 @@ end = struct
 
   let not_started ~authority state request =
     match state with
-    | Pending (current, follow_up) when owns ~authority current request ->
+    | Pending (current, follow_up, Status_pending) when owns ~authority current request ->
         Not_started (current, follow_up)
     | Empty | Held | Pending _ | Not_started _ -> state
 
+  let status_received ~authority state request =
+    match state with
+    | Pending (current, follow_up, Status_pending) when owns ~authority current request ->
+        Some (Pending (current, follow_up, Names_pending))
+    | Empty | Held | Pending _ | Not_started _ -> None
+
   let complete ~authority state request result =
     match state with
-    | Pending (current, follow_up) when owns ~authority current request ->
+    | Pending (current, follow_up, stage) when owns ~authority current request ->
+        let application = match stage with
+          | Status_pending -> Full_snapshot
+          | Names_pending -> Names_only
+        in
         (match follow_up with
-         | Read_after_write -> Some (Held, Read_after_write)
+         | Read_after_write -> Some (Held, { follow_up = Read_after_write; application })
          | No_follow_up ->
              let next = match current.cause, result with
                | After_write, Error _ -> Held
                | After_write, Ok _ | Refresh, (Ok _ | Error _) -> Empty
              in
-             Some (next, No_follow_up))
+             Some (next, { follow_up = No_follow_up; application }))
     | Not_started (current, follow_up) when owns ~authority current request ->
         (match result with
          | Ok _ -> None
          | Error _ ->
-             Some ((if owes_read current follow_up then Held else Empty), No_follow_up))
+             Some ((if owes_read current follow_up then Held else Empty),
+               { follow_up = No_follow_up; application = Full_snapshot }))
     | Empty | Held | Pending _ | Not_started _ -> None
 end
 
@@ -9804,6 +9832,33 @@ let take_task_followups state ~ready =
   state.pending_task_followups <- List.rev waiting;
   List.rev run, List.rev withdrawn
 
+let apply_connectors_snapshot state (application : Connector_read.application)
+    (snapshot : Masc.Tui_decode_connectors.connector_snapshot) =
+  (match application with
+   | Full_snapshot ->
+       let previous_id =
+         Option.bind state.connectors (fun previous ->
+           Option.map
+             (fun (connector : Masc.Tui_decode_connectors.connector) -> connector.cn_id)
+             (List.nth_opt previous.cs_connectors state.connectors_cursor))
+       in
+       state.connectors_cursor <-
+         (match previous_id with
+          | None -> 0
+          | Some id ->
+              let rec find index = function
+                | [] -> 0
+                | (connector : Masc.Tui_decode_connectors.connector) :: rest ->
+                    if String.equal connector.cn_id id then index
+                    else find (index + 1) rest
+              in
+              find 0 snapshot.cs_connectors);
+       state.connectors_binding_cursor <- 0;
+       state.connector_unbind_armed <- None
+   | Names_only -> ());
+  state.connectors <- Some snapshot;
+  state.connectors_error <- None
+
 let begin_connectors_read state =
   if not (server_authority_ready state) then None
   else match Connector_read.begin_read ~authority:state.detail_read_authority
@@ -9818,14 +9873,25 @@ let connector_read_not_started state request =
   state.connectors_read <- Connector_read.not_started
       ~authority:state.detail_read_authority state.connectors_read request
 
+let receive_connectors_status state request snapshot =
+  if not (server_authority_ready state) then false
+  else match Connector_read.status_received ~authority:state.detail_read_authority
+      state.connectors_read request with
+    | None -> false
+    | Some reading ->
+        state.connectors_read <- reading;
+        apply_connectors_snapshot state Connector_read.Full_snapshot snapshot;
+        true
+
 let complete_connectors_read state request result =
   if not (server_authority_ready state) then None
   else match Connector_read.complete ~authority:state.detail_read_authority
       state.connectors_read request result with
     | None -> None
-    | Some (reading, follow_up) ->
+    | Some (reading, completion) ->
         state.connectors_read <- reading;
-        Some follow_up
+        Result.iter (apply_connectors_snapshot state completion.Connector_read.application) result;
+        Some completion
 
 let clear_connectors_read state =
   state.connectors_read <- Connector_read.empty
@@ -9834,15 +9900,22 @@ let connectors_read_notice state =
   match Connector_read.view state.connectors_read with
   | Connector_read.Quiet -> None
   | Reading (cause, follow_up) ->
-      let activity = match cause, follow_up with
-        | Connector_read.Refresh, No_follow_up -> "Reading connectors"
-        | After_write, No_follow_up -> "Rechecking bindings"
-        | Refresh, Read_after_write | After_write, Read_after_write ->
-            "Reading connectors; recheck queued"
-      in
-      Some (activity ^ (match state.connectors with
-        | None -> "…"
-        | Some _ -> " · last observation"))
+      (match Connector_read.stage state.connectors_read with
+       | Some Connector_read.Names_pending ->
+           Some ("Connector status received; reading names"
+             ^ (match follow_up with
+                | No_follow_up -> ""
+                | Read_after_write -> " · recheck queued"))
+       | Some Status_pending | None ->
+           let activity = match cause, follow_up with
+             | Connector_read.Refresh, No_follow_up -> "Reading connectors"
+             | After_write, No_follow_up -> "Rechecking bindings"
+             | Refresh, Read_after_write | After_write, Read_after_write ->
+                 "Reading connectors; recheck queued"
+           in
+           Some (activity ^ (match state.connectors with
+             | None -> "…"
+             | Some _ -> " · last observation")))
   | Waiting_after_write ->
       Some (if server_authority_ready state
         then "Binding recheck pending · r:retry"

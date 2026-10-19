@@ -451,6 +451,7 @@ type async_msg =
       generation : int; image_generation : int;
       result : (Browser_lane_view.screenshot * string, string) result;
     }
+  | Connectors_status_loaded of Connector_read.request * Masc.Tui_decode_connectors.connector_snapshot
   | Connectors_loaded of Connector_read.request * (Masc.Tui_decode_connectors.connector_snapshot, string) result
   | Connector_unbind_all_done of {
       keeper_name : string;
@@ -890,6 +891,7 @@ let rec workspace_message_is_read = function
   | Browser_lane_loaded _
   | Browser_lane_scene_loaded _
   | Browser_lane_screenshot_ready _
+  | Connectors_status_loaded _
   | Connectors_loaded _
   | Runtime_surface_loaded _
   | Tools_loaded _
@@ -1097,7 +1099,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Browser_history_page_loaded (_, _) | Browser_lane_clients_loaded (_, _)
     | Browser_lane_loaded (_, _) | Browser_lane_action_done (_, _)
     | Browser_lane_scene_loaded (_, Error _) | Browser_lane_follow_loaded (_, _)
-    | Browser_lane_screenshot_ready _ | Connectors_loaded (_, _)
+    | Browser_lane_screenshot_ready _ | Connectors_status_loaded (_, _) | Connectors_loaded (_, _)
     | Connector_unbind_all_done _ | Runtime_surface_loaded (_, _)
     | Tools_loaded (_, _, _) | Skills_catalog_loaded (_, _)
     | Skill_evidence_loaded (_, _, _) | Tools_async_observation_loaded (_, _)
@@ -1231,7 +1233,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Git_diff_loaded (_, _) | Browser_history_list_loaded (_, _)
   | Browser_history_page_loaded (_, _) | Browser_lane_clients_loaded (_, _)
   | Browser_lane_loaded (_, _) | Browser_lane_action_done (_, _)
-  | Browser_lane_follow_loaded (_, Error _) | Connectors_loaded (_, _)
+  | Browser_lane_follow_loaded (_, Error _) | Connectors_status_loaded (_, _) | Connectors_loaded (_, _)
   | Connector_unbind_all_done _ | Runtime_surface_loaded (_, _)
   | Tools_loaded (_, _, _) | Skills_catalog_loaded (_, _)
   | Skill_evidence_loaded (_, _, _) | Tools_async_observation_loaded (_, _)

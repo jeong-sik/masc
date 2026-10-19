@@ -140,14 +140,24 @@ let begin_connector_read state =
   | Some request -> request
   | None -> fail "a fresh owned Connector read was required"
 
+let connector_snapshot descriptor =
+  let available = descriptor |> U.member "available" |> U.to_bool in
+  match Masc.Tui_decode_connectors.decode_connector_snapshot
+      (`Assoc [ "connectors", `List [descriptor]; "total", `Int 1;
+                "active_count", `Int (if available then 1 else 0) ]) with
+  | Ok snapshot -> snapshot
+  | Error detail -> fail detail
+
 let finish_connector_read state request result expected =
-  match Tui.complete_connectors_read state request result with
-  | Some actual -> check bool "causal follow-up decision" true (actual = expected)
+  match Tui.complete_connectors_read state request (Result.map connector_snapshot result) with
+  | Some actual -> check bool "causal follow-up decision" true
+      (actual.Connector_read.follow_up = expected)
   | None -> fail "the original current Connector request was rejected"
 
 let reject_connector_read state request result =
   check bool "retired request cannot settle its successor" true
-    (Option.is_none (Tui.complete_connectors_read state request result))
+    (Option.is_none
+       (Tui.complete_connectors_read state request (Result.map connector_snapshot result)))
 
 let connector_owner json channel_id =
   json |> U.member "configured_bindings" |> U.to_list
@@ -282,6 +292,99 @@ let test_connector_held_read_start_failure_and_scope_reset () =
       check (option string) "returning to A reads A's durable binding" (Some "written")
         (connector_owner original "C123");
       finish_connector_read state returned (Ok original) Connector_read.No_follow_up))
+
+let test_connector_status_and_names_keep_original_binding_operation () =
+  with_temp_dir @@ fun dir ->
+  with_sidecar_paths "slack" dir @@ fun () ->
+  Unix.mkdir (Filename.concat dir ".masc") 0o700;
+  let state = Tui.create_state ~workspace:"connector-stages"
+      ~local_base_path:dir ~port:0 ~refresh_interval:0. () in
+  connector_read_ready state dir;
+  connector_fixture_write
+    (Channel_gate_slack_state.bind ~channel_id:"C123" ~keeper_name:"first"
+       ~actor_name:"tui-read-test");
+  connector_fixture_write
+    (Channel_gate_slack_state.bind ~channel_id:"C456" ~keeper_name:"other"
+       ~actor_name:"tui-read-test");
+  let request = begin_connector_read state in
+  let status = connector_snapshot (Channel_gate_slack_state.connector_json ()) in
+  check bool "original status arrives before names complete" true
+    (Tui.receive_connectors_status state request status);
+  let observed () = match state.connectors with
+    | Some snapshot -> snapshot
+    | None -> fail "received status must be usable before directory completion"
+  in
+  let connector = List.find (fun (row : Masc.Tui_decode_connectors.connector) ->
+      String.equal row.cn_id "slack") (observed ()).cs_connectors in
+  let binding = List.find
+      (fun (row : Masc.Tui_decode_connectors.connector_binding) ->
+        String.equal row.cb_channel_id "C123") connector.cn_bindings in
+  let armed = Some (connector.cn_id, binding.cb_channel_id, binding.cb_keeper_name) in
+  state.connector_unbind_armed <- armed;
+  (* A protocol name-page fixture enriches real persisted binding IDs. *)
+  let page = match Masc.Tui_decode_connectors.decode_connector_name_page
+      (`Assoc [ "connector_id", `String connector.cn_id; "kind", `String "channel";
+                "mapping_scope", `String "historical";
+                "path", `String (Filename.concat dir "channel-names.json");
+                "total", `Int 1; "has_more", `Bool false;
+                "mappings", `List [`Assoc ["id", `String binding.cb_channel_id;
+                                           "name", `String "stored-channel-name"]] ]) with
+    | Ok page -> page
+    | Error detail -> fail detail
+  in
+  let enriched = { status with cs_connectors =
+      [Masc.Tui_decode_connectors.connector_with_name_pages connector
+         ~pages:[page] ~error:None] } in
+  connector_fixture_write
+    (Channel_gate_slack_state.bind ~channel_id:"C456" ~keeper_name:"rebound"
+       ~actor_name:"tui-read-test");
+  Tui.queue_connectors_after_write state;
+  check bool "duplicate status cannot reset a prepared operation" false
+    (Tui.receive_connectors_status state request status);
+  Tui.connector_read_not_started state request;
+  (match Tui.complete_connectors_read state request (Ok enriched) with
+   | None -> fail "original names result must keep its request"
+   | Some completion ->
+       check bool "earlier names cannot satisfy the later write" true
+         (completion.follow_up = Connector_read.Read_after_write));
+  check bool "names preserve the prepared binding operation" true
+    (state.connector_unbind_armed = armed);
+  let named = List.find (fun (row : Masc.Tui_decode_connectors.connector) ->
+      String.equal row.cn_id connector.cn_id) (observed ()).cs_connectors in
+  let named_binding = List.find
+      (fun (row : Masc.Tui_decode_connectors.connector_binding) ->
+        String.equal row.cb_channel_id binding.cb_channel_id) named.cn_bindings in
+  check (option string) "actual metadata projection accompanies the binding"
+    (Some "stored-channel-name") named_binding.cb_channel_name;
+  (match state.connector_unbind_armed with
+   | None -> fail "directory enrichment lost the original operation"
+   | Some (_, channel_id, keeper_name) ->
+       connector_fixture_write
+         (Channel_gate_slack_state.unbind_if_keeper ~channel_id
+            ~expected_keeper_name:keeper_name ~actor_name:"tui-read-test"));
+  Tui.queue_connectors_after_write state;
+  let fresh = begin_connector_read state in
+  let latest_json = Channel_gate_slack_state.connector_json () in
+  check (option string) "prepared operation removed its original member" None
+    (connector_owner latest_json "C123");
+  check (option string) "other member keeps its actual later write" (Some "rebound")
+    (connector_owner latest_json "C456");
+  let latest = connector_snapshot latest_json in
+  check bool "fresh write observation arrives while names remain pending" true
+    (Tui.receive_connectors_status state fresh latest);
+  check bool "old status cannot restore a removed binding" false
+    (Tui.receive_connectors_status state request status);
+  check bool "old names cannot replace the newer status" true
+    (Option.is_none (Tui.complete_connectors_read state request (Ok enriched)));
+  check bool "fresh status remains after rejecting old stages" true
+    (observed () == latest);
+  (match Tui.complete_connectors_read state fresh (Error "directory interrupted") with
+   | None -> fail "original directory failure must remain admissible"
+   | Some completion ->
+       check bool "directory failure does not immediately retry" true
+         (completion.follow_up = Connector_read.No_follow_up));
+  check bool "received status survives the remaining directory failure" true
+    (observed () == latest)
 
 let test_slack_binding_store_error_is_typed () =
   with_temp_dir @@ fun dir ->
@@ -806,6 +909,8 @@ let () =
             test_connector_write_demand_survives_repeated_read_withdrawal;
           test_case "Connector held read handles failed starts and scope reset" `Quick
             test_connector_held_read_start_failure_and_scope_reset;
+          test_case "Connector status and names preserve the original binding operation" `Quick
+            test_connector_status_and_names_keep_original_binding_operation;
           test_case "slack binding read errors are typed" `Quick
             test_slack_binding_store_error_is_typed;
           test_case "slack status surfaces binding read failure" `Quick

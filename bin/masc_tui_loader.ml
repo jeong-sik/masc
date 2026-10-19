@@ -1294,7 +1294,7 @@ let load_skills_catalog ~(host : string) ~(port : int) :
       Masc.Tui_decode_tools.decode_skills_catalog json))
 
 (** Load connector status from /api/v1/gate/connectors *)
-let load_connectors ~(host : string) ~(port : int) :
+let load_connectors ~(host : string) ~(port : int) ~on_status :
     (Masc.Tui_decode_connectors.connector_snapshot, string) result =
   match fetch_connectors ~host ~port with
   | Error err -> Error err
@@ -1303,6 +1303,9 @@ let load_connectors ~(host : string) ~(port : int) :
          Masc.Tui_decode_connectors.decode_connector_snapshot json) with
        | Error _ as error -> error
        | Ok snapshot ->
+           (* Publish useful status/bindings before optional names, on the
+              original read fiber and under its workspace/receipt scope. *)
+           on_status snapshot;
            let load_pages connector kind =
              let label = match kind with
                | Masc.Tui_decode_connectors.Connector_server_name -> "server"

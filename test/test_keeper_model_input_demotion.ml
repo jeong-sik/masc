@@ -634,7 +634,7 @@ let media_projection_binds_actual_argument_positions () =
   let planned = Demotion.plan ~completed_arguments ~measure_message_bytes ~demote_before:0 dispatch in
   Alcotest.(check int) "verified media projection still demotes arguments" 1 (List.length planned.pending);
   let caps = {Agent_core.Llm_provider.Capabilities.default_capabilities with supports_image_input = false} in
-  let stripped, _ = Masc.Runtime_agent.strip_unsupported_modality_messages caps canonical in
+  let stripped, _ = Runtime_agent.strip_unsupported_modality_messages caps canonical in
   let replay_prefix = Masc.Keeper_replay_prefix.media_degraded
       ~canonical_prefix:canonical ~dispatch_prefix:stripped in
   let completed_arguments = bind_arguments ~replay_prefix ~completed_before:1 ~seed:canonical stripped in

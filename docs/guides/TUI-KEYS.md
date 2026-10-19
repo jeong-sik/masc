@@ -294,6 +294,7 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `Ctrl-S` | unfold the running turn's status rows, or fold them back to the progress line |
 | `Ctrl-N` | cycle Memory journal summary / full / hidden |
 | `Ctrl-F` | cycle no clock / inline clock / full timestamp and request id |
+| `Ctrl-O` | preview the newest image or Mermaid diagram with Pele; any key returns |
 | `/approve /deny` | type a command and Enter to answer a tool approval |
 | `/copy` | send the selected Keeper's latest completed reply to the terminal clipboard via OSC 52 |
 | `Q / Ctrl-Q` | Q on an active turn with an empty draft or hidden composer; Ctrl-Q always leaves without interrupting |

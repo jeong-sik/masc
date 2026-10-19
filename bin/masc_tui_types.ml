@@ -6761,11 +6761,24 @@ type usage_section = Usage_plan | Usage_trend | Usage_keepers
 let next_usage_section = function
   | Usage_plan -> Usage_trend | Usage_trend -> Usage_keepers | Usage_keepers -> Usage_plan
 
+(* A staged image records what this pane had already observed. Journal text
+   can grow without adding a history row; exact source/origin snapshots let a
+   later closed diagram supersede the draft without comparing remote clocks. *)
+type image_observation = {
+  io_reading : unit ref;
+  io_keeper : string option;
+  io_history : msg_anchor option;
+  io_logs :
+    (Masc_tui_keeper_chat_log.journal_source
+     * (Masc_tui_keeper_chat_transcript.drawn_origin
+        * Masc_tui_image_preview.preview) list) list;
+}
+
 type keeper_composer_draft = {
   kcd_text : string;
   kcd_attachments : Masc_tui_keeper_chat_projection.attachment list;
   kcd_references : Masc_tui_keeper_chat_projection.image_reference list;
-  kcd_since : msg_anchor option;
+  kcd_since : image_observation option;
 }
 
 (* Home links identify destinations, never an inferred approval target. The
@@ -6802,7 +6815,7 @@ type message_draft = {
   draft_text : string;
   draft_attachments : Masc_tui_keeper_chat_projection.attachment list;
   draft_references : Masc_tui_keeper_chat_projection.image_reference list;
-  draft_attachments_since : msg_anchor option;
+  draft_attachments_since : image_observation option;
 }
 
 
@@ -8308,13 +8321,10 @@ type state = {
      or a Files-API id. Same lifecycle as [msg_attachments]: part of the unsent
      message, consumed by the send that consumes the draft. *)
   mutable msg_references: Masc_tui_keeper_chat_projection.image_reference list;
-  (* Ctrl-O weighs a staged image against a .png the conversation named by
-     which is newer, so the batch carries a recency marker: an anchor to the
-     session row that was newest when the newest attachment entered the
-     composer. [None] means staging preceded all observed session rows.
-     Loading historical rows alone does not supersede the draft. Meaningful
-     only while [msg_attachments] is non-empty and reset when it clears. *)
-  mutable msg_attachments_since: msg_anchor option;
+  (* Recency belongs to the draft and follows it across Keeper switches and
+     recall. [None] means there is no staging observation; historical loading
+     alone cannot establish a newer image. Reset when attachments clear. *)
+  mutable msg_attachments_since: image_observation option;
   mutable msg_target_keeper_name: string option;
   mutable msg_return: keeper_chat_return;
   mutable msg_drafts: ((workspace_input_identity option * string) * keeper_composer_draft) list;
@@ -8329,7 +8339,7 @@ type state = {
   mutable msg_recall_at: int option;
   mutable msg_recall_draft:
     string * Masc_tui_keeper_chat_projection.attachment list
-    * Masc_tui_keeper_chat_projection.image_reference list * msg_anchor option;
+    * Masc_tui_keeper_chat_projection.image_reference list * image_observation option;
   (* The waiting line the composer is editing, if the walk stepped onto one.
      [Some request_id] makes the next Enter replace that line instead of
      queueing a second copy of it -- the arrows copy, and a copy of something

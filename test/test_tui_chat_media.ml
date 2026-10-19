@@ -142,7 +142,36 @@ let test_remote_http_src_is_not_played () =
   check_playable "an external http source is out of scope for now"
     [ attach_media ~src:"https://example.com/x.mp3" "x.mp3" ] None
 
+let test_canonical_mermaid_preview () =
+  let source = "classDiagram\n  Keeper <|-- Librarian" in
+  let row = read_message (message ~role:"assistant" ~autonomous:false ~text:""
+    [ image; Blocks.Mermaid { source; caption = Some "Agents" } ]) in
+  (match Media.newest_image row.media with
+   | Some (Preview.Output_image { name = "Agents"; source = Preview.Inline_mermaid actual }) ->
+       check string "canonical block retains exact source" source actual
+   | _ -> fail "canonical diagram did not replace an older image");
+  let visible = Media.append_text ~text:row.text row.media in
+  check (list string) "canonical-only source is available even without Pele"
+    [source] (Masc_tui_markdown.mermaid_sources visible);
+  let prose = "Exact prose\n```mermaid\n" ^ source ^ "\n```\n" in
+  check string "canonical source already in prose is not duplicated" prose
+    (Media.append_text ~text:prose [Media.Mermaid { source; caption = None }]);
+  check_playable "diagram is not audio" row.media None;
+  match Media.newest_image (Media.of_json (Blocks.blocks_to_yojson
+    [ Blocks.Mermaid { source; caption = None }; image ])) with
+  | Some (Preview.Output_image { source = Preview.Inline_data _; _ }) -> ()
+  | _ -> fail "diagram displaced a later image output"
+
+let test_canonical_mermaid_fence_collision () =
+  let source = "flowchart TD\n A[\"```\"] --> B" in
+  let text = Media.append_text ~text:""
+    [Media.Mermaid { source; caption = None }] in
+  check (list string) "generated fence cannot close on a source line"
+    [source] (Masc_tui_markdown.mermaid_sources text)
+
 let () = run "TUI retained output and playback" [ "history", [
+  test_case "canonical diagram preserves producer order and source" `Quick test_canonical_mermaid_preview;
+  test_case "canonical source fence collision" `Quick test_canonical_mermaid_fence_collision;
   test_case "media-only autonomous turn" `Quick test_media_only_autonomous;
   test_case "failure retains completed outputs" `Quick test_failure_retains_outputs;
   test_case "prose and unknown block" `Quick test_prose_and_unknown_block;

@@ -3,6 +3,7 @@ type order = Named_is_newer | Staged_is_newer | Unordered
 type output_source =
   | Inline_data of string
   | Inline_svg of string
+  | Inline_mermaid of string
   | Server_path of string
   | Remote_uri of string
 
@@ -40,6 +41,7 @@ let output_image ~name ~src =
 ;;
 
 let inline_svg ~name svg = Output_image { name; source = Inline_svg svg }
+let mermaid ~name source = Output_image { name; source = Inline_mermaid source }
 
 let in_message ~text ~attachments =
   match List.find_opt (function
@@ -47,6 +49,9 @@ let in_message ~text ~attachments =
     | Named_path _ | Staged _ | Stored_attachment _ | Output_image _ | Unavailable_image _ -> true) (List.rev attachments) with
   | Some image -> image
   | None ->
+      match List.rev (Masc_tui_markdown.mermaid_sources text) with
+      | source :: _ -> mermaid ~name:"Mermaid" source
+      | [] ->
       match List.rev (Masc_tui_image_ref.paths text) with
       | last :: _ -> Named_path last
       | [] -> No_image

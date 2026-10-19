@@ -568,6 +568,8 @@ let for_surface = function
           ~help:"cycle Memory journal summary / full / hidden"
       ; b Act "Ctrl-F" "message metadata"
           ~help:"cycle no clock / inline clock / full timestamp and request id"
+      ; b Act "Ctrl-O" "image / diagram"
+          ~help:"preview the newest image or Mermaid diagram with Pele; any key returns"
       ; b Act "/approve /deny" "approval" ~help:"type a command and Enter to answer a tool approval"
       ; b Act "/copy" "copy reply"
           ~help:"send the selected Keeper's latest completed reply to the terminal clipboard via OSC 52"

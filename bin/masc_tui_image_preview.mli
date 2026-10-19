@@ -1,4 +1,4 @@
-(** Ctrl-O chooses the newest image in the current conversation or composer.
+(** Ctrl-O chooses the newest image or diagram in the conversation or composer.
     Sent attachments retain a typed content address; filenames are labels,
     never local paths. *)
 type order = Named_is_newer | Staged_is_newer | Unordered
@@ -6,6 +6,7 @@ type order = Named_is_newer | Staged_is_newer | Unordered
 type output_source = private
   | Inline_data of string
   | Inline_svg of string
+  | Inline_mermaid of string
   | Server_path of string
   | Remote_uri of string
 
@@ -28,8 +29,12 @@ val output_image : name:string -> src:string -> preview
 val inline_svg : name:string -> string -> preview
 (** SVG markup supplied by the canonical SVG block, never a local path. *)
 
+val mermaid : name:string -> string -> preview
+(** Exact source for the offline Pele renderer. No parsing or process work. *)
+
 val in_message : text:string -> attachments:preview list -> preview
-(** The last image attachment, otherwise the last path in the original text.
+(** The last image attachment, otherwise the last closed Mermaid fence, then
+    the last path in the original text.
     Attachment display labels must never be included in [text]. *)
 
 val choose_preview : conversation:preview -> staged:Masc_tui_keeper_chat_projection.attachment list -> order:order -> preview

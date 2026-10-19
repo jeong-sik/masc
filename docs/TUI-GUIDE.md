@@ -1632,6 +1632,17 @@ Install the companion with `scripts/install-alphatex.sh`; this view requires
 Node.js 22+ and Kitty graphics with reported cell geometry. The guide above
 describes controls, SoundFont selection and current limits.
 
+In Keeper chat, `Ctrl-O` previews the newest image or closed `mermaid` fence.
+Structured Mermaid outputs use the same action. Install Pele with
+`scripts/install-pele.sh` (Node.js 22+ and pnpm); the companion runs offline and
+renders charts, mindmaps, class diagrams and other Mermaid types as terminal
+images. The preview uses the available terminal width and observed colors;
+without a color observation it uses a standalone light canvas. Any key returns.
+The chat keeps its text diagram or source fallback, including when Pele is
+missing or rejects the syntax. An unfinished streaming fence is not opened.
+Image-capable terminal support is required, as for other `Ctrl-O` previews.
+See the [renderer installation and request contract](../tools/pele/README.md).
+
 A post's attachments are listed at the end of its body under `ATTACHMENTS`,
 each with a `[N]` number. On the read pane, pressing the number opens that
 attachment: audio plays locally (afplay or the next player on the chain),

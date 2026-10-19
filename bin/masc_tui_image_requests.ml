@@ -2,7 +2,7 @@ type source =
   | Retained of Tool_output.artifact_ref
   | Generated of Masc_tui_image_preview.output_source
 
-let load ~host ~port ~cache_dir source =
+let load ~host ~port ~cache_dir ~diagram_width ~diagram_colors source =
   let prepare bytes =
     Masc_tui_image_cache.prepare_payload ~run:Unix.system ~cache_dir:(cache_dir ()) bytes in
   let peer path =
@@ -25,6 +25,10 @@ let load ~host ~port ~cache_dir source =
       Result.bind (Masc_tui_image_preview.decode_payload data) prepare)
   | Generated (Masc_tui_image_preview.Inline_svg svg) ->
     Eio_guard.run_in_systhread ~label:"tui-output-svg-convert" (fun () -> prepare svg)
+  | Generated (Masc_tui_image_preview.Inline_mermaid source) ->
+    Eio_guard.run_in_systhread ~label:"tui-pele-render" (fun () ->
+      Masc_tui_pele.render ~cache_dir:(cache_dir ()) ~max_width:diagram_width
+        ~colors:diagram_colors source)
   | Generated (Masc_tui_image_preview.Remote_uri url) ->
     Eio_guard.run_in_systhread ~label:"tui-output-image-download" (fun () ->
       Masc_tui_image_cache.prepare_png ~run:Unix.system ~cache_dir:(cache_dir ()) url)

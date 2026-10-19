@@ -1177,14 +1177,14 @@ let closes_fence line ~opened =
   | Some _, None -> true
   | None, _ -> false
 
-let alphatex_sources text =
+let fenced_sources ~accept text =
   let rec walk opened body sources = function
     | [] -> List.rev sources
     | line :: rest ->
         match opened with
         | Some (marker, language) when closes_fence line ~opened:(Some marker) ->
             let sources = match language with
-              | Some tag when is_alphatex_tag tag -> String.concat "\n" (List.rev body) :: sources
+              | Some tag when accept tag -> String.concat "\n" (List.rev body) :: sources
               | Some _ | None -> sources in
             walk None [] sources rest
         | Some _ -> walk opened (line :: body) sources rest
@@ -1194,6 +1194,9 @@ let alphatex_sources text =
             | None -> walk None [] sources rest
   in
   walk None [] [] (String.split_on_char '\n' text)
+
+let alphatex_sources = fenced_sources ~accept:is_alphatex_tag
+let mermaid_sources = fenced_sources ~accept:(String.equal "mermaid")
 
 type generated_field = Fence_language | Mermaid_diagnostic | Alphatex_diagnostic
 

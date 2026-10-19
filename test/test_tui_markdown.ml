@@ -451,6 +451,13 @@ let test_alphatex_sources_preserve_closed_snapshots () =
   Alcotest.(check (list string)) "closed source snapshots in document order"
     [first; second] (Markdown.alphatex_sources text)
 
+let test_mermaid_sources_preserve_closed_snapshots () =
+  let source = "pie\n  \"완료\": 8\n\n  \"대기\": 2  " in
+  let text = "before\n~~~mermaid\n" ^ source ^ "\n~~~\n"
+    ^ "```ocaml\nlet x = 1\n```\n```mermaid\nflowchart TD" in
+  Alcotest.(check (list string)) "exact closed Mermaid source only"
+    [source] (Markdown.mermaid_sources text)
+
 let () =
   Alcotest.run "tui-markdown"
     [ ( "inline"
@@ -472,6 +479,8 @@ let () =
             test_streaming_boundary_keeps_only_closed_blocks
         ; Alcotest.test_case "score snapshots preserve closed source" `Quick
             test_alphatex_sources_preserve_closed_snapshots
+        ; Alcotest.test_case "diagram snapshots preserve closed source" `Quick
+            test_mermaid_sources_preserve_closed_snapshots
         ] )
     ; ( "fenced code"
       , [] )

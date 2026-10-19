@@ -3388,6 +3388,14 @@ let fetch_async_request_observation ~host ~port =
       Masc.Tui_decode.decode_async_request_observation json))
 ;;
 
+let fetch_async_request_detail ~host ~port ~(target : Masc.Tui_decode_async_request.target) =
+  let path = Uri.make ~path:"/api/v1/async-requests/status"
+      ~query:["submitted_by",[target.submitted_by];"request_id",[target.request_id]] () |> Uri.to_string in
+  Result.bind (get_json ~host ~port ~path) (fun json ->
+    Masc_tui_response_decode.run ~name:"tools.async_request.decode_wait" (fun () ->
+      Masc.Tui_decode_async_request.decode ~target json))
+;;
+
 (** GET /api/v1/prompts — every prompt the registry serves, with the file
     value, any override, and what is currently effective. *)
 let fetch_prompts ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =

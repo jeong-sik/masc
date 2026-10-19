@@ -182,16 +182,17 @@ let skill_action_lines actions =
          (Terminal_text.single_line action.observed_at))
     actions
 
-let async_request_observation_lines (state : state) =
-  match state.tools_async_observation_error, state.tools_async_observation with
-  | Some detail, _ ->
-    [ Theme.bad (), " Async broker — 읽기 실패: " ^ Terminal_text.single_line detail ]
-  | None, None -> [ Theme.warn (), " Async broker — not loaded" ]
-  | None, Some (Async_unavailable { kind; reason }) ->
+let async_request_inventory_lines (state : state) =
+  let errors = Option.to_list (Option.map (fun detail -> Theme.bad (),
+    " Async broker — 재확인 실패 · 이전 목록 유지: " ^ Terminal_text.single_line detail)
+    state.tools_async_observation_error) in
+  errors @ (match state.tools_async_observation with
+  | None -> if errors=[] then [ Theme.warn (), " Async broker — not loaded" ] else []
+  | Some (Async_unavailable { kind; reason }) ->
     [ Theme.bad (), " Async broker — durable inventory unavailable: "
         ^ Terminal_text.single_line kind
         ^ Option.fold ~none:"" ~some:(fun value -> ": " ^ Terminal_text.single_line value) reason ]
-  | None, Some (Async_ready { summary; requests; recovery }) ->
+  | Some (Async_ready { summary; requests; recovery }) ->
     let summary_lines =
       [ Ansi.bold,
         Printf.sprintf
@@ -216,7 +217,11 @@ let async_request_observation_lines (state : state) =
         | Some text -> text
         | None -> Masc_tui_theme.Glyph.no_value
       in
-      tone, Printf.sprintf "   %s · %s · %s · %s · %s"
+      let selected = Option.exists (fun (target : Masc.Tui_decode_async_request.target) ->
+        target.request_id=request.ar_request_id && target.submitted_by=request.ar_submitted_by
+        && target.keeper_name=request.ar_keeper_name) state.tools_async_selection in
+      tone, Printf.sprintf " %s %s · %s · %s · %s · %s"
+        (if selected then "›" else " ")
         (Terminal_text.single_line request.ar_request_id)
         (Terminal_text.single_line request.ar_keeper_name)
         status elapsed ownership) requests
@@ -231,7 +236,71 @@ let async_request_observation_lines (state : state) =
             report.arr_unreadable report.arr_failed report.arr_staging_inspected
             report.arr_staging_deleted report.arr_staging_preserved ]
     in
-    summary_lines @ request_lines @ recovery_lines
+    summary_lines @ request_lines @ recovery_lines)
+
+let async_logical_lines value =
+  let module Detail = Masc.Tui_decode_async_request in
+  let safe = Terminal_text.single_line in
+  match value with
+  | Detail.Not_composition -> [Ansi.dim," 논리: Composition 원본 없음"]
+  | Original_run run ->
+    [Theme.info ()," 원본 run: " ^ safe run.run_id;
+     Ansi.dim," 원본 Task: " ^ Option.fold ~none:"없음(기록)" ~some:safe run.source_task_id;
+     Ansi.dim,Printf.sprintf " 현재 run owner: %s · generation %d" (safe run.owner.request_id) run.owner.generation;
+     Ansi.dim,Printf.sprintf " 논리 관측 시각: %.3f · journal %s" run.observed_at (safe run.journal_version)]
+    @ (match run.resolution with
+      | None -> [Theme.warn ()," 논리: 명시적 종결 없음 · 실행 허가는 별도"]
+      | Some resolution ->
+        [Theme.warn ()," 논리: 재개 종결 — " ^ (match resolution.decision with
+            | Detail.Rejected -> "거절" | Cancelled_continuation -> "취소");
+         Ansi.dim,Printf.sprintf " 결정: %s · %.3f" (safe resolution.requested_by) resolution.resolved_at;
+         Theme.info ()," 사유: " ^ safe resolution.reason])
+
+let async_request_detail_lines state target =
+  let module Detail = Masc.Tui_decode_async_request in
+  let view = Masc_tui_fetched.view_for ~equal:Detail.equal_target state.tools_async_detail ~key:target in
+  let pending = Masc_tui_fetched.in_flight state.tools_async_detail in
+  let reading = match pending,view with
+    | true,(Masc_tui_fetched.Ready _ | Stale _) -> [Ansi.dim," 재조회 중 · 이전 관측 유지"]
+    | true,(Absent | Loading | Failed _) -> [Ansi.dim," 원본 요청 조회 중"]
+    | false,_ -> [] in
+  let failures = match view with
+    | Masc_tui_fetched.Absent -> [Ansi.dim," 미조회"]
+    | Loading -> []
+    | Failed detail -> [Theme.bad ()," 조회 실패: " ^ Terminal_text.single_line detail]
+    | Stale (_,detail) -> [Theme.warn ()," 마지막 관측 · 재확인 실패: " ^ Terminal_text.single_line detail]
+    | Ready _ -> [] in
+  let snapshot = match Masc_tui_fetched.value view with
+    | None -> []
+    | Some Detail.Absent -> [Theme.warn ()," 원본 요청이 관측되지 않습니다 · 재실행 허가가 아닙니다"]
+    | Some (Observed snapshot) ->
+      let phase = match snapshot.phase with
+        | Detail.Queued -> "queued" | Running -> "running" | Cancelling -> "cancelling"
+        | Waiting -> "waiting_for_dependencies · worker 해제됨"
+        | Lost -> "lost" | Cancelled -> "cancelled" | Persistence_failed -> "persistence_failed"
+        | Done true -> "done (물리 성공)" | Done false -> "error (물리 실패)" in
+      let physical = [Theme.info ()," 물리 상태: " ^ phase;
+        Ansi.dim,Printf.sprintf " 접수: %.3f · 종료: %s" snapshot.submitted_at
+          (Option.fold ~none:"미종료" ~some:(Printf.sprintf "%.3f") snapshot.completed_at)] in
+      let dependencies = List.map (fun dependency ->
+        Ansi.dim," 의존: " ^ Terminal_text.single_line
+          (Yojson.Safe.to_string (Masc.Keeper_composition_dependency.to_json dependency))) snapshot.dependencies in
+      let logical = match snapshot.logical with
+        | Detail.Confirmed value -> async_logical_lines value
+        | Unavailable detail ->
+          [Theme.bad ()," 논리 상태 조회 불가: " ^ Terminal_text.single_line detail]
+          @ (match state.tools_async_last_logical with
+            | Some (source,value) when Detail.equal_source source snapshot.source ->
+              [Theme.warn ()," 아래 논리는 마지막 관측이며 최신 확인이 아닙니다"] @ async_logical_lines value
+            | Some _ | None -> [Ansi.dim," 확인된 이전 논리 관측 없음"]) in
+      physical @ Option.to_list (Option.map (fun notice -> Theme.warn (),
+        " 물리 사유: " ^ Terminal_text.single_line notice) snapshot.notice) @ dependencies @ logical in
+  [Ansi.bold," 원본 비동기 요청 · o:원본 ID 조회 · r:재조회 · Esc:목록"] @ reading @ failures @ snapshot
+
+let async_request_observation_lines state =
+  match state.tools_async_detail_open,state.tools_async_selection with
+  | true,Some target -> async_request_detail_lines state target
+  | true,None | false,_ -> async_request_inventory_lines state
 
 (* The Tools sections, named where the reader is standing. Same shape as
    {!config_pane_strip}: a reader who has seen one has seen the other. *)
@@ -443,6 +512,12 @@ let skill_usage_box ~cols rows =
 ;;
 
 let tools_selection_line ~cols state =
+  if state.tools_pane=Tools_async then
+    (match state.tools_async_selection with
+     | None -> "Async request: none"
+     | Some target -> Masc_tui_message_layout.fit_middle
+         (Masc_tui_frame.inner_width ~cols) ("Request: " ^ Terminal_text.single_line target.request_id))
+  else
   let text = match selected_tools_skill_profile state with
     | None -> "Skill: none"
     | Some profile ->
@@ -456,6 +531,13 @@ let tools_selection_line ~cols state =
   text
 
 let tools_selection_document state =
+  if state.tools_pane=Tools_async then
+    (match state.tools_async_selection with
+     | None -> [Ansi.dim," 선택한 비동기 요청 없음"]
+     | Some target -> [Ansi.bold," 요청: " ^ Terminal_text.single_line target.request_id;
+         Ansi.dim," 원래 요청자: " ^ Terminal_text.single_line target.submitted_by
+           ^ " · 대상 Keeper: " ^ Terminal_text.single_line target.keeper_name])
+  else
   match selected_tools_skill_profile state with
   | None -> [Ansi.dim, "Action Skill: none"]
   | Some profile ->
@@ -1582,6 +1664,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
         ]
     | Masc_tui_types.Tools_async ->
         [ Theme.info (), " 워크스페이스의 비동기 요청·복구 상태입니다."
+        ; Theme.info (), "   J/K:요청 선택 · Enter:상세 · o:원본 ID 조회 · r:재조회 · Esc:목록"
         ; Ansi.dim, "   active=활성 원장 요청 수 · runtime-owned=현재 런타임 소유"
         ; Ansi.dim, "   ownership-unknown=소유 확인 안 됨 · 성공 여부는 개별 상태 확인"
         ]
@@ -1627,7 +1710,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
         List.mem part request.tri_pending
     | Some _ | None -> false
   in
-  let reading_lines = match pending, observed, error with
+  let reading_lines = if state.tools_pane=Tools_async && state.tools_async_detail_open then [] else match pending, observed, error with
     | true, _, Some _ ->
         [ Theme.warn (), " Retrying " ^ source ^ " — previous failure retained" ]
     | true, true, None ->

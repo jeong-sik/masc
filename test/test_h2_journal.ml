@@ -935,6 +935,18 @@ let test_first_loss_retains_unproven_effects mode () =
         check string "stale resolution retains the replacement marker" marker_bytes (read marker_path));
       let resolved = run ~now:102. resolve |> journal_value "explicit original resolution"
         |> Command.outcome_to_json in
+      let module Detail = Masc.Tui_decode_async_request in
+      let target : Detail.target={submitted_by=keeper;request_id;keeper_name=keeper} in
+      let projected = Masc.Server_async_request_observability.project_request ~base_path ~submitted_by:keeper ~request_id in
+      (match Detail.decode ~target projected with
+       | Ok (Detail.Observed {phase=Detail.Lost;logical=Detail.Confirmed (Detail.Original_run run);_}) ->
+         check (option string) "typed TUI observation keeps original Task" (Some "original-source-task") run.source_task_id;
+         (match run.resolution with
+          | Some resolution -> check bool "typed TUI logical decision is the original operator decision" true
+              (resolution.decision=(if mode="unknown" then Detail.Rejected else Detail.Cancelled_continuation))
+          | None -> fail "logical operator resolution disappeared in the TUI protocol")
+       | Ok _ -> fail "physical Lost and logical resolution were conflated"
+       | Error detail -> fail detail);
       check_json "exact marker retired after durable resolution" (`Bool true)
         (Yojson.Safe.Util.member "marker_retired" resolved);
       check bool "resolved marker no longer indexed" false (Sys.file_exists marker_path);

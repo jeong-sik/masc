@@ -672,11 +672,14 @@ count is drawn beyond the available space.
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
 | `p` | available / async runs / receipts / usage / all tools |
-| `J/K` | select a published Skill |
+| `J/K` | in async runs, select an original request; otherwise select a published Skill |
+| `Enter` | in async runs, read the selected original request |
+| `o / O` | in async runs, edit the original submitter, request ID and target Keeper for an exact lookup |
+| `r` | refresh the open original request detail, or reload Tools |
 | `[ / ]` | change the effective Keeper surface |
 | `c / C` | open $EDITOR on a template for a new Skill; c starts an instruction Skill, C starts a composition Skill |
 | `e` | open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish |
-| `Esc` | back to the System surface it hangs off |
+| `Esc` | close async request detail first; otherwise back to the System surface it hangs off |
 
 ## System / Logs
 

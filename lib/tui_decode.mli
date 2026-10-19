@@ -2431,6 +2431,7 @@ type async_request_ownership = Async_runtime_owned | Async_ownership_unknown
 
 type async_request_row =
   { ar_request_id : string
+  ; ar_submitted_by : string
   ; ar_keeper_name : string
   ; ar_phase : async_request_phase
   ; ar_elapsed_sec : float option

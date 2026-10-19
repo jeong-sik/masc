@@ -5003,6 +5003,10 @@ type tools_pane =
 
 type tools_read_part = Tools_inventory_read | Tools_catalog_read | Tools_async_read
 
+type tools_async_detail_request =
+  { tad_ticket : Masc.Tui_decode_async_request.target Masc_tui_fetched.request
+  ; tad_reading : unit ref; tad_job : unit ref }
+
 type tools_read_inflight =
   { tri_generation : int
   ; tri_keeper : string option
@@ -8659,6 +8663,11 @@ type state = {
   mutable tools_evidence_reference: Skill_reference.t option;
   mutable tools_async_observation: Tui_decode.async_request_observation option;
   mutable tools_async_observation_error: string option;
+  mutable tools_async_selection: Masc.Tui_decode_async_request.target option;
+  mutable tools_async_detail_open: bool;
+  mutable tools_async_detail: (Masc.Tui_decode_async_request.target, Masc.Tui_decode_async_request.reading) Masc_tui_fetched.t;
+  mutable tools_async_detail_request: tools_async_detail_request option;
+  mutable tools_async_last_logical: (Masc.Tui_decode_async_request.source * Masc.Tui_decode_async_request.logical_value) option;
   mutable lane_addons: Masc_tui_lane_addons.t option;
   mutable lane_addons_cached: Masc_tui_lane_addons.t;
   mutable lane_addons_generation: int;
@@ -10536,7 +10545,78 @@ let clear_runtime_catalog_read state =
   state.runtime_catalog <- []; state.runtime_lanes <- []; state.runtime_assignments <- [];
   state.runtime_catalog_default_route <- None
 
+let suspend_tools_async_detail state =
+  state.tools_async_detail <- Masc_tui_fetched.suspend state.tools_async_detail;
+  state.tools_async_detail_request <- None
+
+let withdraw_tools_async_details state =
+  state.tools_async_detail <- Masc_tui_fetched.clear state.tools_async_detail;
+  state.tools_async_detail_request <- None;
+  state.tools_async_selection <- None;
+  state.tools_async_detail_open <- false;
+  state.tools_async_last_logical <- None
+
+let tools_async_targets state = match state.tools_async_observation with
+  | Some (Tui_decode.Async_ready {requests;_}) -> List.map (fun (row : Tui_decode.async_request_row) ->
+      {Masc.Tui_decode_async_request.submitted_by=row.ar_submitted_by;
+       request_id=row.ar_request_id;keeper_name=row.ar_keeper_name}) requests
+  | Some (Tui_decode.Async_unavailable _) | None -> []
+
+let sync_tools_async_selection state =
+  if Option.is_none state.tools_async_selection then
+    state.tools_async_selection <- List.nth_opt (tools_async_targets state) 0
+
+let move_tools_async_selection state delta =
+  let targets = tools_async_targets state in
+  let current = Option.bind state.tools_async_selection (fun selected ->
+    List.find_index (Masc.Tui_decode_async_request.equal_target selected) targets) in
+  let count = List.length targets in
+  if count > 0 then begin
+    let index = match current with
+      | Some index -> (index + delta + count) mod count
+      | None -> if delta < 0 then count - 1 else 0 in
+    let target = List.nth targets index in
+    if not (Option.equal Masc.Tui_decode_async_request.equal_target state.tools_async_selection (Some target)) then
+      state.tools_async_last_logical <- None;
+    state.tools_async_selection <- Some target
+  end
+
+let begin_tools_async_detail state ~force =
+  match state.tools_async_selection with
+  | None -> None
+  | Some key ->
+    let begin_read = if force then Masc_tui_fetched.refresh else Masc_tui_fetched.start in
+    match begin_read ~equal:Masc.Tui_decode_async_request.equal_target state.tools_async_detail ~key with
+    | Masc_tui_fetched.Already_loading -> None
+    | Started (reading,tad_ticket) ->
+      state.tools_async_detail <- reading;
+      let request = {tad_ticket;tad_reading=state.workspace_read_authority;tad_job=ref ()} in
+      state.tools_async_detail_request <- Some request; Some request
+
+let complete_tools_async_detail state request result =
+  if request.tad_reading == state.workspace_read_authority
+      && Option.exists (fun current -> current == request) state.tools_async_detail_request
+      && Option.equal Masc.Tui_decode_async_request.equal_target state.tools_async_selection
+          (Some (Masc_tui_fetched.request_key request.tad_ticket))
+      && Masc_tui_fetched.is_current ~equal:Masc.Tui_decode_async_request.equal_target
+          state.tools_async_detail request.tad_ticket then begin
+    state.tools_async_detail_request <- None;
+    (match result with
+     | Error _ -> ()
+     | Ok Masc.Tui_decode_async_request.Absent -> state.tools_async_last_logical <- None
+     | Ok (Masc.Tui_decode_async_request.Observed snapshot) ->
+       (match snapshot.logical with
+        | Masc.Tui_decode_async_request.Confirmed value -> state.tools_async_last_logical <- Some (snapshot.source,value)
+        | Masc.Tui_decode_async_request.Unavailable _ ->
+          state.tools_async_last_logical <- (match state.tools_async_last_logical with
+            | Some (source,_) as previous when Masc.Tui_decode_async_request.equal_source source snapshot.source -> previous
+            | Some _ | None -> None)));
+    state.tools_async_detail <- Masc_tui_fetched.complete ~equal:Masc.Tui_decode_async_request.equal_target
+      state.tools_async_detail request.tad_ticket result
+  end
+
 let suspend_workspace_readings state =
+  suspend_tools_async_detail state;
   retire_keeper_settings_editor state;
   suspend_keeper_logs state;
   state.live_context <- Masc_tui_context_state.suspend state.live_context;
@@ -14316,6 +14396,11 @@ let create_state
   tools_evidence_reference = None;
   tools_async_observation = None;
   tools_async_observation_error = None;
+  tools_async_selection = None;
+  tools_async_detail_open = false;
+  tools_async_detail = Masc_tui_fetched.initial;
+  tools_async_detail_request = None;
+  tools_async_last_logical = None;
   lane_addons = None;
   lane_addons_cached = Masc_tui_lane_addons.initial;
   lane_addons_generation = 0;

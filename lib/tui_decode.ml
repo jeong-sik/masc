@@ -7451,6 +7451,7 @@ type async_request_ownership = Async_runtime_owned | Async_ownership_unknown
 
 type async_request_row =
   { ar_request_id : string
+  ; ar_submitted_by : string
   ; ar_keeper_name : string
   ; ar_phase : async_request_phase
   ; ar_elapsed_sec : float option
@@ -7509,6 +7510,7 @@ let decode_async_request_observation json =
     let summary = { ars_active; ars_runtime_owned; ars_ownership_unknown; ars_record_errors } in
     let decode_row json =
       let* ar_request_id = required_nonempty_string_field json "request_id" in
+      let* ar_submitted_by = required_nonempty_string_field json "submitted_by" in
       let* ar_keeper_name = required_nonempty_string_field json "keeper_name" in
       let* status = required_string_field json "status" in
       let* ar_phase = match status with
@@ -7528,7 +7530,7 @@ let decode_async_request_observation json =
         | Some value when not (Float.is_finite value) -> Error "elapsed_sec must be finite"
         | Some _ | None -> Ok ()
       in
-      Ok { ar_request_id; ar_keeper_name; ar_phase; ar_elapsed_sec; ar_ownership }
+      Ok { ar_request_id; ar_submitted_by; ar_keeper_name; ar_phase; ar_elapsed_sec; ar_ownership }
     in
     let* rows = required_list_field json "requests" in
     let* requests = decode_list "requests" decode_row rows in

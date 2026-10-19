@@ -36,18 +36,6 @@ struct UmpRegionSource: Decodable {
     let extent: String
     let timeline: UmpTimeline
 }
-struct CaptureStartNanoseconds: Decodable {
-    let numerator: String
-    let denominator: String
-    func rational(displaySeconds: Double) throws -> (UInt128, UInt128) {
-        let n = try umpUnsigned(numerator), d = try umpUnsigned(denominator)
-        guard d > 0 else { throw MidiFailure("invalid captured placement denominator") }
-        let secondsDenom = try umpMultiply(d, 1_000_000_000)
-        let displayed = Double(n / secondsDenom) + Double(n % secondsDenom) / Double(secondsDenom)
-        guard displayed == displaySeconds else { throw MidiFailure("captured placement display disagrees with exact start") }
-        return (n, d)
-    }
-}
 enum CaptureRegionComponent: String, Decodable { case audio, midi }
 struct UmpRegion: Decodable {
     let id: String
@@ -57,7 +45,7 @@ struct UmpRegion: Decodable {
     let extent: String
     let repeatCount: UInt64
     var component: CaptureRegionComponent? = nil
-    var startNanoseconds: CaptureStartNanoseconds? = nil
+    var startNanoseconds: ExactNanoseconds? = nil
 }
 struct UmpArrangement: Decodable {
     let schemaVersion: Int

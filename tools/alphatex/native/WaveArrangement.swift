@@ -106,7 +106,7 @@ struct Region: Decodable {
     var audioChannel: CaptureAudioChannel? = nil
     var calibrationOutput: CalibrationOutput? = nil
     var projectTick: Int64? = nil
-    var startNanoseconds: CaptureStartNanoseconds? = nil
+    var startNanoseconds: ExactNanoseconds? = nil
     enum CodingKeys: String, CodingKey { case id, asset, startSeconds, offsetFrames, frameCount, captureClock, pulseClock, pulseLoopUnit, component, audioChannel, calibrationOutput, projectTick, startNanoseconds; case repetitions = "repeat" }
     func loopLayout(_ loop: WaveLoopClock, rate: Double) throws -> WaveLoopLayout {
         guard pulseClock == nil else { throw AudioFailure("practice pulse looping is not connected") }

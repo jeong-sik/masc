@@ -510,7 +510,7 @@ test('a cropped MIDI repeat carries exact absolute rational starts through the n
 
 test('captured placement display seconds equal the native reading of their reduced exact start at fractional tempos',async()=>fixture(async({root,input})=>{
  const {projectCapturedPlacement,manualCapturePlacement}=await import('../capture-placement.mjs')
- // UmpRegions.swift CaptureStartNanoseconds.rational(displaySeconds:) refuses any other value.
+ // MidiTransport.swift ExactNanoseconds.rational(displaySeconds:) refuses any other value.
  const native=({numerator,denominator})=>{const n=BigInt(numerator),d=BigInt(denominator)*1_000_000_000n;return Number(n/d)+Number(n%d)/Number(d)}
  const project=(await importArrangementCapture(newArrangement(),input,{projectPath:join(root,'song.json')})).project,asset=project.assets[0]
  for(let hundredths=6033;hundredths<24000;hundredths+=71)for(const position of [240,961])for(const offset of ['0','-0.5','450']){

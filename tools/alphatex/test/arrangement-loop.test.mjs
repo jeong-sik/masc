@@ -11,6 +11,7 @@ import { arrangementRoute, arrangementPlaybackRequest } from '../arrangement-pla
 import { importMidiSource, exportMidiSource } from '../midi-source.mjs'
 import { arrangementLoop, loopMidiRegions } from '../arrangement-loop.mjs'
 import { loadArrangement } from '../arrangement-files.mjs'
+import { regionEdgeSeconds } from '../exact-time.mjs'
 function project(){
  const bytes=Buffer.from('4d546864000000060000000101e04d54726b0000000000b0010000903c608740803c2d00ff2f00','hex');bytes.writeUInt32BE(bytes.length-22,18)
  let p=newArrangement({tempo:120});p=editArrangement(p,{kind:'asset-add',asset:{id:'asset-1',kind:'midi',name:'Practice',source:importMidiSource(bytes)}})
@@ -19,6 +20,9 @@ function project(){
 }
 function client(){const worker=new Worker(new URL('../arrangement-worker.mjs',import.meta.url));let id=0;return{worker,async request(job){const reply=once(worker,'message');worker.postMessage({...job,id:++id});return(await reply)[0]}}}
 const ok=r=>{assert.equal(r.ok,true,r.error);return r.result}
+// Native region edges read only the exact start and period.
+const edge=(r,copy)=>regionEdgeSeconds(r.startNanoseconds,r.periodNanoseconds,copy)
+const ns=value=>({numerator:String(value),denominator:'1'})
 
 test('arrangement loop range is an immutable project decision and worker preparation preserves source clocks in compressed partial repeats',async()=>{
  const directory=await mkdtemp(join(tmpdir(),'masc-arrangement-loop-')),c=client()
@@ -26,7 +30,7 @@ test('arrangement loop range is an immutable project decision and worker prepara
   const initial=project(),original=Buffer.from(exportMidiSource(initial.assets[0].source));let e=arrangementEditor(initial)
   e=arrangementCommand(e,'loop 1.5 6.5').editor
   assert.deepEqual(e.project.playbackLoop,{start:1440,end:6240})
-  assert.deepEqual(arrangementLoop(e.project),{start:.75,end:3.25,duration:2.5})
+  assert.deepEqual(arrangementLoop(e.project),{start:.75,end:3.25,duration:2.5,startNanoseconds:ns(750_000_000),endNanoseconds:ns(3_250_000_000)})
   assert.equal(arrangementCommand(e,'undo').editor.project,initial)
   const off=arrangementCommand(e,'loop off').editor;assert.equal(off.project.playbackLoop,undefined);assert.deepEqual(arrangementCommand(off,'undo').editor.project,e.project)
   const path=join(directory,'song.json');ok(await c.request({kind:'save',path,project:e.project,revision:null,sourceRoot:directory}))
@@ -41,8 +45,8 @@ test('arrangement loop range is an immutable project decision and worker prepara
 })
 
 test('one loop window retains a compressed run even for a long finite source region and never selects outside assets',()=>{
- const region={id:'a',source:'s',startSeconds:0,sourceStart:0,sourceEnd:1,repeatCount:1000000000}
- const selected=loopMidiRegions([region],{start:.25,end:999999999.75})
+ const region={id:'a',source:'s',startSeconds:0,sourceStart:0,sourceEnd:1,repeatCount:1000000000,startNanoseconds:ns(0),periodNanoseconds:ns(1_000_000_000)}
+ const selected=loopMidiRegions([region],{start:.25,end:999999999.75,startNanoseconds:ns(250_000_000),endNanoseconds:ns(999_999_999_750_000_000n)})
  assert.deepEqual(selected.map(v=>v.repeatCount),[1,999999998,1]);assert.equal(selected[2].sourceEnd,.75)
  assert.equal(new Set(selected.map(v=>v.id)).size,3)
  let p=project();p=editArrangement(p,{kind:'lane-add',sourceKind:'wave',name:'Outside loop'})
@@ -50,8 +54,9 @@ test('one loop window retains a compressed run even for a long finite source reg
  p=editArrangement(p,{kind:'asset-add',asset});p=editArrangement(p,{kind:'region-add',lane:p.lanes[1].id,asset:'wave',name:'Outside',position:96000,offset:0,extent:48000,repeat:1})
  p=editArrangement(p,{kind:'loop',range:{start:0,end:960}})
  assert.equal(arrangementPlaybackRequest(p,arrangementRoute({midiOutput:'123'})).kind,'prepare-midi')
- const weird={...region,sourceEnd:1.12500025,repeatCount:1}
- assert.deepEqual(loopMidiRegions([weird],{start:.5,end:1})[0],{...weird,id:JSON.stringify(['a','leading']),startSeconds:0,sourceStart:.5,sourceEnd:1})
+ const weird={...region,sourceEnd:1.12500025,repeatCount:1,periodNanoseconds:ns(1_125_000_250)}
+ assert.deepEqual(loopMidiRegions([weird],{start:.5,end:1,startNanoseconds:ns(500_000_000),endNanoseconds:ns(1_000_000_000)})[0],
+  {...weird,id:JSON.stringify(['a','leading']),startSeconds:0,sourceStart:.5,sourceEnd:1,startNanoseconds:ns(0),periodNanoseconds:ns(500_000_000)})
 })
 
 test('decimal loop cuts prepare source-preserving regions inside the actual normalized native horizon',async()=>{
@@ -68,8 +73,8 @@ test('decimal loop cuts prepare source-preserving regions inside the actual norm
    assert.ok(plan.duration>=range.duration)
    let priorEnd=0
    for(const region of plan.regions){
-    const end=region.startSeconds+(region.sourceEnd-region.sourceStart)*region.repeatCount
-    assert.ok(region.startSeconds>=priorEnd);assert.ok(end<=plan.duration)
+    const end=edge(region,region.repeatCount)
+    assert.ok(edge(region,0)>=priorEnd);assert.ok(end<=plan.duration)
     assert.ok(region.sourceStart>=0&&region.sourceEnd<=extent/480*60/120)
     priorEnd=end
    }
@@ -79,7 +84,7 @@ test('decimal loop cuts prepare source-preserving regions inside the actual norm
  }finally{await c.worker.terminate();await rm(directory,{recursive:true,force:true})}
 })
 
-test('adjacent original clips share their normalized native boundary across different source periods',async()=>{
+test('adjacent original clips share their exact native boundary across different source periods',async()=>{
  const directory=await mkdtemp(join(tmpdir(),'masc-loop-adjacent-')),c=client()
  try{
   const initial=project(),p={...initial,clips:initial.clips.map(clip=>({...clip,extent:96,repeat:9}))}
@@ -87,9 +92,8 @@ test('adjacent original clips share their normalized native boundary across diff
   const selected=arrangementCommand(arrangementEditor(joined),'loop 0.5 2.2').editor.project
   const prepared=ok(await c.request({kind:'prepare-midi',project:selected,directory,midiOutput:'123'}))
   const plan=JSON.parse(await readFile(prepared.path,'utf8'))
-  const ends=plan.regions.map(r=>r.startSeconds+(r.sourceEnd-r.sourceStart)*r.repeatCount)
-  for(let n=1;n<plan.regions.length;n++)assert.ok(ends[n-1]<=plan.regions[n].startSeconds)
-  assert.equal(ends[1],plan.regions[2].startSeconds)
+  const ends=plan.regions.map(r=>edge(r,r.repeatCount))
+  for(let n=1;n<plan.regions.length;n++)assert.equal(ends[n-1],edge(plan.regions[n],0))
   assert.ok(ends.at(-1)<=plan.duration)
   assert.deepEqual(plan.regions.map(r=>r.repeatCount),[1,6,1])
   assert.deepEqual(selected.assets,initial.assets)

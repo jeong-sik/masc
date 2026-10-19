@@ -29,7 +29,7 @@ func owner(_ sources:[UmpRegionSource],_ clips:[UmpRegion],duration:Double=1)thr
 func exactClip(_ id:String,startN:String,startD:String,start:Double,offset:String,extent:String,repeats:UInt64=1)->UmpRegion {
  var region=clip(id,source:"adjacent",start:start,offset:offset,extent:extent,repeatCount:repeats)
  region.component = .midi
- region.startNanoseconds=CaptureStartNanoseconds(numerator:startN,denominator:startD)
+ region.startNanoseconds=ExactNanoseconds(numerator:startN,denominator:startD)
  return region
 }
 let adjacent=source("adjacent",[packet(0,on),packet(1,off)],numer:125,denom:3,extent:"4800001")

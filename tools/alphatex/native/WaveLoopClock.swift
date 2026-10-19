@@ -53,7 +53,7 @@ struct WaveLoopClock: Decodable {
             offset: start >= projectTick ? Int128(distance) : -Int128(distance), sourceEnd: sourceEnd,
             sourcePeriod: try loopMultiply(UInt128(frameCount), divisor), lead: 0, frameCount: frameCount)
     }
-    func layout(rate: Double, start: CaptureStartNanoseconds, startSeconds: Double, capture: CaptureAudioLayout) throws -> WaveLoopLayout {
+    func layout(rate: Double, start: ExactNanoseconds, startSeconds: Double, capture: CaptureAudioLayout) throws -> WaveLoopLayout {
         let master = try layout(rate: rate, projectTick: 0, frameCount: 1, repetitions: 1)
         let (startN, startD) = try start.rational(displaySeconds: startSeconds)
         var top = [startN, UInt128(rate)], bottom = [startD, UInt128(1_000_000_000)]

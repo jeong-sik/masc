@@ -20,7 +20,8 @@ try {
   {seconds:0,port:7,bytes:[0xc2,5]},{seconds:.01,port:7,bytes:[0xe2,0,64]},
   {seconds:.2,port:7,bytes:[0x92,60,100]},{seconds:.3,port:7,bytes:[0x82,60,77]},
   {seconds:.9,port:7,bytes:[0x93,61,100]},{seconds:1,port:7,bytes:[0x83,61,0]}]}}],
-  regions:[{id:'clip',source:'source',startSeconds:0,sourceStart:.1,sourceEnd:.5,repeatCount:2}]}
+  regions:[{id:'clip',source:'source',startSeconds:0,sourceStart:.1,sourceEnd:.5,repeatCount:2,
+    startNanoseconds:{numerator:'0',denominator:'1'},periodNanoseconds:{numerator:'400000000',denominator:'1'}}]}
  const claim=(destination,group,channel)=>({destination,scope:{kind:'channels',channels:[{group,channel}]}})
  assert.deepEqual(await inspect(midi,'midi-arrangement'),[claim('42',0,2)])
  const ump={schemaVersion:1,duration:1,sources:[{id:'take',extent:'1000000000',timeline:{schemaVersion:4,duration:1,clock:{origin:'0',numer:1,denom:1},bindings:[{source:'keys',destination:'42'}],packets:[

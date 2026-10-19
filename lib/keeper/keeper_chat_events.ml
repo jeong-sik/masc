@@ -144,6 +144,12 @@ type keeper_chat_event =
       ; tool_call_id : string option
       ; tool_call_name : string
       }
+  | Tool_call_admitted of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      ; provider_tool_name : string
+      ; tool_call_name : string
+      }
   | Tool_call_args of
       { occurrence : tool_stream_occurrence
       ; tool_call_id : string option
@@ -246,7 +252,7 @@ let map_content ~public_errors ~redact_text = function
     | Agent_core_stream_message_delta _ | Agent_core_stream_message_stop _
     | Agent_core_stream_ping | Agent_core_content_block_start _
     | Agent_core_content_block_stop _ | Model_content_activity _
-    | Agent_core_thinking_signature_delta _ | Tool_call_start _ | Tool_call_end _
+    | Agent_core_thinking_signature_delta _ | Tool_call_start _ | Tool_call_admitted _ | Tool_call_end _
     | Native_tool_start _ | Tool_approval_settled _ | Tool_result_ready _ | Tool_transcript_committed _ | Status_block _) as event -> event
 ;;
 

@@ -25,6 +25,7 @@ export const KEEPER_CHAT_CUSTOM_EVENT_NAMES = [
   // sends and the vocabulary does not name is dropped by the SSE decoder.
   'KEEPER_TOOL_APPROVAL_REQUESTED',
   'KEEPER_TOOL_APPROVAL_SETTLED',
+  'KEEPER_TOOL_CALL_ADMITTED',
   'KEEPER_TOOL_RESULT_READY',
   'KEEPER_TOOL_TRANSCRIPT_COMMITTED',
   'KEEPER_NATIVE_TOOL_START',
@@ -241,6 +242,8 @@ type KeeperChatCustomEvent =
       name: 'KEEPER_NATIVE_TOOL_PROGRESS'
       value: KeeperNativeToolObservation & { progress: KeeperNativeToolProgress }
     }
+  | { type: 'CUSTOM'; name: 'KEEPER_TOOL_CALL_ADMITTED';
+      value: KeeperToolStreamOccurrence & { providerToolName: string; toolCallName: string } }
   | {
       type: 'CUSTOM'
       name: 'KEEPER_TOOL_RESULT_READY'

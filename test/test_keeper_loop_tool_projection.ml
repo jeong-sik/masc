@@ -56,7 +56,7 @@ let turn_collected ordinals =
   let admitted_tool_sources =
     List.mapi
       (fun planned_index source_tool_use_ordinal ->
-         { Agent_core.Hooks.planned_index; source_tool_use_ordinal })
+         { Agent_core.Hooks.planned_index; source_tool_use_ordinal; name_resolution = Agent_core.Hooks.Registered_name })
       ordinals
   in
   H.Turn_collected

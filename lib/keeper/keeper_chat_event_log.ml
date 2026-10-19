@@ -285,6 +285,12 @@ let keeper_chat_event_to_json event =
        ; "tool_call_name", `String tool_call_name
        ]
        @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool_call_id))
+  | Tool_call_admitted { occurrence; tool_call_id; provider_tool_name; tool_call_name } ->
+    type_tag "tool_call_admitted"
+      ([ "occurrence", occurrence_to_json occurrence
+       ; "provider_tool_name", `String provider_tool_name
+       ; "tool_call_name", `String tool_call_name ]
+       @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool_call_id))
   | Tool_call_args { occurrence; tool_call_id; delta } ->
     type_tag
       "tool_call_args"
@@ -574,6 +580,15 @@ let keeper_chat_event_of_json json =
            ; tool_call_id = json |> member "tool_call_id" |> to_string_option
            ; tool_call_name = json |> member "tool_call_name" |> to_string
            })
+    | "tool_call_admitted" ->
+      let* occurrence = occurrence_of_json (json |> member "occurrence") in
+      let provider_tool_name = json |> member "provider_tool_name" |> to_string in
+      let tool_call_name = json |> member "tool_call_name" |> to_string in
+      if String.trim provider_tool_name = "" || String.trim tool_call_name = ""
+      then Error "admitted tool identity requires nonblank names"
+      else Ok (Tool_call_admitted
+        { occurrence; tool_call_id = json |> member "tool_call_id" |> to_string_option
+        ; provider_tool_name; tool_call_name })
     | "tool_call_args" ->
       let* occurrence = occurrence_of_json (json |> member "occurrence") in
       Ok
@@ -799,7 +814,7 @@ let journaled_envelope_of_json json =
     | Agent_core_thinking_signature_delta _
     | Agent_core_media_delta _
     | Agent_core_stream_protocol_error _
-    | Tool_call_start _
+    | Tool_call_start _ | Tool_call_admitted _
     | Tool_call_args _
     | Tool_call_args_snapshot _
     | Tool_call_end _
@@ -924,7 +939,7 @@ let event_floats_are_finite = function
   | Agent_core_thinking_signature_delta _
   | Agent_core_media_delta _
   | Agent_core_stream_protocol_error _
-  | Tool_call_start _
+  | Tool_call_start _ | Tool_call_admitted _
   | Tool_call_args _
   | Tool_call_args_snapshot _
   | Tool_call_end _
@@ -1139,7 +1154,7 @@ let sequence_after_complete_rows ~allow_torn_tail ~require_existing journal =
                  | Agent_core_thinking_signature_delta _
                  | Agent_core_media_delta _
                  | Agent_core_stream_protocol_error _
-                 | Tool_call_start _
+                 | Tool_call_start _ | Tool_call_admitted _
                  | Tool_call_args _
                  | Tool_call_args_snapshot _
                  | Tool_call_end _
@@ -1210,7 +1225,7 @@ let existing_restart_terminal settlement = function
             | Agent_core_thinking_signature_delta _
             | Agent_core_media_delta _
             | Agent_core_stream_protocol_error _
-            | Tool_call_start _
+            | Tool_call_start _ | Tool_call_admitted _
             | Tool_call_args _
             | Tool_call_args_snapshot _
             | Tool_call_end _
@@ -1286,7 +1301,7 @@ let record_terminal_error ?(segment = Existing_segment) journal ~ts ~message =
             | Agent_core_thinking_signature_delta _
             | Agent_core_media_delta _
             | Agent_core_stream_protocol_error _
-            | Tool_call_start _
+            | Tool_call_start _ | Tool_call_admitted _
             | Tool_call_args _
             | Tool_call_args_snapshot _
             | Tool_call_end _

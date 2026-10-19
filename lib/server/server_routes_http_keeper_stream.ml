@@ -2124,6 +2124,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       | Keeper_hooks_agent_core.Turn_collected { turn; tool_source_map } ->
         Keeper_stream_tool_accum.seal_turn worker_tool_accum ~turn
           ~tool_source_map
+        |> Result.map (List.iter (fun event -> push_worker_event (Stream_chat_event event)))
       | Keeper_hooks_agent_core.Child_content_observed {attempt; observation} ->
           (* Received child snapshots commit independently of worker queue,
              client disconnect and root lifecycle closure. No chat-bus publish. *)
@@ -2927,7 +2928,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
           | Keeper_chat_events.Agent_core_thinking_signature_delta _
           | Keeper_chat_events.Agent_core_media_delta _
           | Keeper_chat_events.Agent_core_stream_protocol_error _
-          | Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_args _
+          | Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_admitted _ | Keeper_chat_events.Tool_call_args _
           | Keeper_chat_events.Tool_call_args_snapshot _ | Keeper_chat_events.Tool_call_end _
           | Keeper_chat_events.Native_tool_start _ | Keeper_chat_events.Native_tool_end (_, _)
           | Keeper_chat_events.Native_tool_progress (_, _)
@@ -3363,7 +3364,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                       | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_thinking_signature_delta _)
                       | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_media_delta _)
                       | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_protocol_error _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_start _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_admitted _)
                       | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_args _)
                       | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_args_snapshot _)
                       | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_end _)
@@ -3442,7 +3443,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                    | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_thinking_signature_delta _)
                    | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_media_delta _)
                    | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_protocol_error _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_start _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_admitted _)
                    | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_args _)
                    | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_args_snapshot _)
                    | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_end _)

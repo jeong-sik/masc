@@ -25,6 +25,7 @@ type custom_event_name =
   | Reply_details
   | Tool_approval_requested
   | Tool_approval_settled
+  | Tool_call_admitted
   | Tool_result_ready
   | Tool_transcript_committed
   | Native_tool_start
@@ -68,6 +69,7 @@ let custom_event_name_to_string = function
   | Reply_details -> "KEEPER_REPLY_DETAILS"
   | Tool_approval_requested -> "KEEPER_TOOL_APPROVAL_REQUESTED"
   | Tool_approval_settled -> "KEEPER_TOOL_APPROVAL_SETTLED"
+  | Tool_call_admitted -> "KEEPER_TOOL_CALL_ADMITTED"
   | Tool_result_ready -> "KEEPER_TOOL_RESULT_READY"
   | Tool_transcript_committed -> "KEEPER_TOOL_TRANSCRIPT_COMMITTED"
   | Native_tool_start -> "KEEPER_NATIVE_TOOL_START"
@@ -260,6 +262,14 @@ let project ~timestamp ~redact_text state event =
              ~provider_message_id:occurrence.provider_message_id
              ~tool_call_block_index:(Some occurrence.block_index)
              Ag_ui.Tool_call_start) )
+  | Tool_call_admitted { occurrence; tool_call_id; provider_tool_name; tool_call_name } ->
+      state, Some (custom ~timestamp state Tool_call_admitted
+        (`Assoc ([ "toolStreamScope", `Int occurrence.stream_scope
+                 ; "toolCallBlockIndex", `Int occurrence.block_index
+                 ; "providerToolName", `String provider_tool_name
+                 ; "toolCallName", `String tool_call_name ]
+                 @ json_opt "providerMessageId" (Option.map (fun value -> `String value) occurrence.provider_message_id)
+                 @ json_opt "toolCallId" (Option.map (fun value -> `String value) tool_call_id))))
   | Tool_call_args { occurrence; tool_call_id; delta } ->
       ( state
       , Some
@@ -361,7 +371,7 @@ let is_terminal = function
   | Keeper_chat_events.Agent_core_thinking_delta _
   | Keeper_chat_events.Agent_core_thinking_signature_delta _
   | Keeper_chat_events.Agent_core_media_delta _
-  | Keeper_chat_events.Agent_core_stream_protocol_error _ | Keeper_chat_events.Tool_call_start _
+  | Keeper_chat_events.Agent_core_stream_protocol_error _ | Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_admitted _
   | Keeper_chat_events.Tool_call_args _ | Keeper_chat_events.Tool_call_args_snapshot _
   | Keeper_chat_events.Tool_call_end _ | Keeper_chat_events.Native_tool_start _
   | Keeper_chat_events.Native_tool_end (_, _) | Keeper_chat_events.Native_tool_progress (_, _)

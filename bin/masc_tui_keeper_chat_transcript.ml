@@ -144,6 +144,8 @@ type live_tool_call =
   ; occurrence : Live.tool_occurrence
   ; call_id : string option
   ; execution_id : string option
+  ; provider_tool_name : string
+  ; admitted_name : string option
   ; tool_name : string
   ; args : string
   ; ended : bool
@@ -1416,7 +1418,7 @@ let start_tool ~now t ~authority ~occurrence ~tool_name =
            t.reversed_tool_calls
        with
        | Some call
-         when call.authority = authority && String.equal call.tool_name tool_name
+         when call.authority = authority && String.equal call.provider_tool_name tool_name
               && not
                    (provider_correlation_conflicts
                       call.call_id occurrence.tool_call_id)
@@ -1442,6 +1444,8 @@ let start_tool ~now t ~authority ~occurrence ~tool_name =
            ; call_id = occurrence.tool_call_id
            ; execution_id = None
            ; tool_name
+           ; provider_tool_name = tool_name
+           ; admitted_name = None
            ; args = ""
            ; ended = false
            ; native_completion = None
@@ -1858,6 +1862,18 @@ let apply_delta ~now t (delta : Live.delta) =
       end
   | Live.Tool_started { occurrence; tool_name } ->
       start_tool ~now t ~authority:Masc_execution ~occurrence ~tool_name
+  | Live.Tool_admitted { occurrence; provider_tool_name; tool_name } ->
+      (match update_occurrence t occurrence (fun call ->
+         if call.authority <> Masc_execution || call.failed
+            || not (String.equal call.provider_tool_name provider_tool_name)
+            || String.trim tool_name = ""
+            || (match call.admitted_name with
+                | Some recorded -> not (String.equal recorded tool_name)
+                | None -> false)
+         then (note_unreadable t "admitted name conflicts with original tool occurrence"; call)
+         else {call with tool_name; admitted_name = Some tool_name}) with
+       | Call_updated | Call_ambiguous -> ()
+       | Call_missing | Call_conflicting -> note_unreadable t "admitted name has no exact tool occurrence")
   | Live.Native_tool_started { occurrence; tool_name } ->
       let tool_name = match tool_name with
         | Some name when String.trim name <> "" -> name
@@ -2049,7 +2065,7 @@ let apply ~now t delta =
    | Live.Stream_model_started _ | Live.Model_content_activity _ | Live.Stream_model_stopped _
    | Live.Stream_details _ | Live.Text _ | Live.Thinking _
    | Live.Native_tool_started _ | Live.Native_tool_progress _ | Live.Native_tool_ended _
-   | Live.Tool_started _ | Live.Tool_args _ | Live.Tool_ended _ | Live.Tool_result _
+   | Live.Tool_started _ | Live.Tool_admitted _ | Live.Tool_args _ | Live.Tool_ended _ | Live.Tool_result _
    | Live.Stream_protocol_error _ | Live.Approval_requested _ | Live.Approval_settled _
    | Live.Checkpoint | Live.External_effect_completed | Live.Reply_details _
    | Live.Run_failed _ | Live.Run_finished | Live.Undecodable _ ->

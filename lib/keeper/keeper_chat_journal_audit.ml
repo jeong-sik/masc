@@ -80,7 +80,7 @@ let is_terminal_event = function
   | Keeper_chat_events.Agent_core_thinking_delta _
   | Keeper_chat_events.Agent_core_thinking_signature_delta _
   | Keeper_chat_events.Agent_core_media_delta _
-  | Keeper_chat_events.Agent_core_stream_protocol_error _ | Keeper_chat_events.Tool_call_start _
+  | Keeper_chat_events.Agent_core_stream_protocol_error _ | Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_admitted _
   | Keeper_chat_events.Tool_call_args _ | Keeper_chat_events.Tool_call_args_snapshot _
   | Keeper_chat_events.Tool_call_end _ | Keeper_chat_events.Native_tool_start _
   | Keeper_chat_events.Native_tool_end (_, _) | Keeper_chat_events.Native_tool_progress (_, _)
@@ -123,7 +123,7 @@ let last_reply_details entries =
        | Keeper_chat_events.Agent_core_thinking_signature_delta _
        | Keeper_chat_events.Agent_core_media_delta _
        | Keeper_chat_events.Agent_core_stream_protocol_error _
-       | Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_args _
+       | Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_admitted _ | Keeper_chat_events.Tool_call_args _
        | Keeper_chat_events.Tool_call_args_snapshot _ | Keeper_chat_events.Tool_call_end _
        | Keeper_chat_events.Native_tool_start _ | Keeper_chat_events.Native_tool_end (_, _)
        | Keeper_chat_events.Native_tool_progress (_, _)
@@ -226,7 +226,7 @@ let terminal_outcome_mismatch ~terminal_event rows =
   | Keeper_chat_events.Agent_core_thinking_delta _
   | Keeper_chat_events.Agent_core_thinking_signature_delta _
   | Keeper_chat_events.Agent_core_media_delta _
-  | Keeper_chat_events.Agent_core_stream_protocol_error _ | Keeper_chat_events.Tool_call_start _
+  | Keeper_chat_events.Agent_core_stream_protocol_error _ | Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_admitted _
   | Keeper_chat_events.Tool_call_args _ | Keeper_chat_events.Tool_call_args_snapshot _
   | Keeper_chat_events.Tool_call_end _ | Keeper_chat_events.Native_tool_start _
   | Keeper_chat_events.Native_tool_end (_, _) | Keeper_chat_events.Native_tool_progress (_, _)
@@ -280,7 +280,7 @@ let tool_rows_mismatch entries rows =
          | Keeper_chat_events.Agent_core_thinking_signature_delta _
          | Keeper_chat_events.Agent_core_media_delta _
          | Keeper_chat_events.Agent_core_stream_protocol_error _
-         | Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_args _
+         | Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_admitted _ | Keeper_chat_events.Tool_call_args _
          | Keeper_chat_events.Tool_call_args_snapshot _ | Keeper_chat_events.Tool_call_end _
          | Keeper_chat_events.Native_tool_start _ | Keeper_chat_events.Native_tool_end (_, _)
          | Keeper_chat_events.Native_tool_progress (_, _)

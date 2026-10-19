@@ -2336,7 +2336,7 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_po
                 | Keeper_chat_live.Stream_model_stopped _ | Keeper_chat_live.Stream_details _
                 | Keeper_chat_live.Text _ | Keeper_chat_live.Thinking _
                 | Keeper_chat_live.Native_tool_started _ | Keeper_chat_live.Native_tool_progress _
-                | Keeper_chat_live.Native_tool_ended _ | Keeper_chat_live.Tool_started _
+                | Keeper_chat_live.Native_tool_ended _ | Keeper_chat_live.Tool_started _ | Keeper_chat_live.Tool_admitted _
                 | Keeper_chat_live.Tool_args _ | Keeper_chat_live.Tool_ended _
                 | Keeper_chat_live.Tool_result _ | Keeper_chat_live.Stream_protocol_error _
                 | Keeper_chat_live.Approval_requested _ | Keeper_chat_live.Approval_settled _
@@ -19335,7 +19335,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                           | Keeper_chat_live.Native_tool_started _
                           | Keeper_chat_live.Native_tool_progress _
                           | Keeper_chat_live.Native_tool_ended _
-                          | Keeper_chat_live.Tool_started _ | Keeper_chat_live.Tool_args _
+                          | Keeper_chat_live.Tool_started _ | Keeper_chat_live.Tool_admitted _ | Keeper_chat_live.Tool_args _
                           | Keeper_chat_live.Tool_ended _
                           | Keeper_chat_live.Stream_protocol_error _
                           | Keeper_chat_live.Approval_requested _
@@ -19358,7 +19358,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
              | Keeper_chat_live.Stream_details _ | Keeper_chat_live.Text _
              | Keeper_chat_live.Thinking _ | Keeper_chat_live.Native_tool_started _
              | Keeper_chat_live.Native_tool_progress _ | Keeper_chat_live.Native_tool_ended _
-             | Keeper_chat_live.Tool_started _ | Keeper_chat_live.Tool_args _
+             | Keeper_chat_live.Tool_started _ | Keeper_chat_live.Tool_admitted _ | Keeper_chat_live.Tool_args _
              | Keeper_chat_live.Tool_ended _ | Keeper_chat_live.Tool_result _
              | Keeper_chat_live.Stream_protocol_error _ | Keeper_chat_live.Approval_requested _
              | Keeper_chat_live.Approval_settled _ | Keeper_chat_live.Reply_details _
@@ -19377,7 +19377,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                 | Keeper_chat_live.Stream_model_stopped _ | Keeper_chat_live.Stream_details _
                 | Keeper_chat_live.Text _ | Keeper_chat_live.Thinking _
                 | Keeper_chat_live.Native_tool_started _ | Keeper_chat_live.Native_tool_progress _
-                | Keeper_chat_live.Native_tool_ended _ | Keeper_chat_live.Tool_started _
+                | Keeper_chat_live.Native_tool_ended _ | Keeper_chat_live.Tool_started _ | Keeper_chat_live.Tool_admitted _
                 | Keeper_chat_live.Tool_args _ | Keeper_chat_live.Tool_ended _
                 | Keeper_chat_live.Tool_result _ | Keeper_chat_live.Stream_protocol_error _
                 | Keeper_chat_live.Approval_requested _ | Keeper_chat_live.Approval_settled _
@@ -19445,7 +19445,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                                                    | Keeper_chat_live.Native_tool_started _
                                                    | Keeper_chat_live.Native_tool_progress _
                                                    | Keeper_chat_live.Native_tool_ended _
-                                                   | Keeper_chat_live.Tool_started _
+                                                   | Keeper_chat_live.Tool_started _ | Keeper_chat_live.Tool_admitted _
                                                    | Keeper_chat_live.Tool_args _
                                                    | Keeper_chat_live.Tool_ended _
                                                    | Keeper_chat_live.Tool_result _
@@ -20366,7 +20366,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                          | Keeper_chat_live.Native_tool_started _
                          | Keeper_chat_live.Native_tool_progress _
                          | Keeper_chat_live.Native_tool_ended _
-                         | Keeper_chat_live.Tool_started _ | Keeper_chat_live.Tool_args _
+                         | Keeper_chat_live.Tool_started _ | Keeper_chat_live.Tool_admitted _ | Keeper_chat_live.Tool_args _
                          | Keeper_chat_live.Tool_ended _
                          | Keeper_chat_live.Stream_protocol_error _
                          | Keeper_chat_live.Approval_requested _

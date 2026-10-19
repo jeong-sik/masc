@@ -759,6 +759,7 @@ type decoded_tool_call = {
   occurrence : tool_occurrence;
   tool_call_id : string option;
   tool_name : string;
+  admitted_name : string option;
   execution_id : string option;
   ended : bool;
 }
@@ -823,7 +824,7 @@ let current_custom_names =
   ; "KEEPER_CONTENT_BLOCK_STOP"; "KEEPER_THINKING_DELTA"; "KEEPER_MODEL_CONTENT_ACTIVITY"
   ; "KEEPER_THINKING_SIGNATURE_DELTA"; "KEEPER_MEDIA_DELTA"
   ; "KEEPER_STREAM_PROTOCOL_ERROR"; "KEEPER_CONTINUATION_CHECKPOINT"
-  ; "KEEPER_CHAT_BATCH_BOUND"; "KEEPER_EXTERNAL_EFFECT_COMPLETED"; "KEEPER_TOOL_RESULT_READY"
+  ; "KEEPER_TOOL_CALL_ADMITTED"; "KEEPER_CHAT_BATCH_BOUND"; "KEEPER_EXTERNAL_EFFECT_COMPLETED"; "KEEPER_TOOL_RESULT_READY"
   ; "KEEPER_TOOL_APPROVAL_REQUESTED"; "KEEPER_TOOL_APPROVAL_SETTLED"
   ; "KEEPER_NATIVE_TOOL_START"; "KEEPER_NATIVE_TOOL_END"; "KEEPER_NATIVE_TOOL_PROGRESS"
   ; "KEEPER_TOOL_TRANSCRIPT_COMMITTED"
@@ -854,11 +855,43 @@ let decode_provider_retry value =
   in
   decode () |> Result.map_error (fun detail -> Malformed_event detail)
 
+let decode_tool_occurrence ~surface fields =
+  let index field = match List.assoc_opt field fields with
+    | Some json ->
+        (match Runtime_json_integer.of_json json with
+         | Ok value when value >= 0 -> Ok value
+         | Ok _ | Error _ ->
+             Error (Printf.sprintf "%s.%s must be a nonnegative safe integer" surface field))
+    | None -> Error (Printf.sprintf "%s.%s is required" surface field) in
+  let* stream_scope = index "toolStreamScope" in
+  let* block_index = index "toolCallBlockIndex" in
+  let* provider_message_id = optional_string ~surface "providerMessageId" fields in
+  let* tool_call_id = optional_string ~surface "toolCallId" fields in
+  Ok ({ stream_scope; block_index; provider_message_id }, tool_call_id)
+;;
+
+let decode_tool_admission value =
+  let surface = "KEEPER_TOOL_CALL_ADMITTED.value" in
+  let* fields = exact_object_fields ~surface
+    ~allowed:["toolStreamScope"; "toolCallBlockIndex"; "providerMessageId";
+              "toolCallId"; "providerToolName"; "toolCallName"] value
+    |> Result.map_error (fun detail -> Malformed_event detail) in
+  let* occurrence, tool_call_id = decode_tool_occurrence ~surface fields
+    |> Result.map_error (fun detail -> Malformed_event detail) in
+  let* provider_name = required_string ~surface "providerToolName" fields
+    |> Result.map_error (fun detail -> Malformed_event detail) in
+  let* admitted_name = required_string ~surface "toolCallName" fields
+    |> Result.map_error (fun detail -> Malformed_event detail) in
+  Ok (occurrence, tool_call_id, provider_name, admitted_name)
+;;
+
 let validate_custom_value ~name value =
   if String.equal name "KEEPER_CHAT_OPERATION_ACCEPTED" then
     Result.map (fun _ -> ()) (decode_acceptance value)
   else if String.equal name "KEEPER_PROVIDER_RETRY" then
     decode_provider_retry value |> Result.map (fun _ -> ())
+  else if String.equal name "KEEPER_TOOL_CALL_ADMITTED" then
+    decode_tool_admission value |> Result.map (fun _ -> ())
   else if String.equal name "KEEPER_MODEL_CONTENT_ACTIVITY" then
     Masc.Keeper_chat_events.model_content_activity_of_json value
     |> Result.map (fun _ -> ())
@@ -925,21 +958,6 @@ let validate_custom_value ~name value =
 let validate_current_custom_name name =
   if List.mem name current_custom_names then Ok ()
   else Error (Unknown_custom_event name)
-
-let decode_tool_occurrence ~surface fields =
-  let index field = match List.assoc_opt field fields with
-    | Some json ->
-        (match Runtime_json_integer.of_json json with
-         | Ok value when value >= 0 -> Ok value
-         | Ok _ | Error _ ->
-             Error (Printf.sprintf "%s.%s must be a nonnegative safe integer" surface field))
-    | None -> Error (Printf.sprintf "%s.%s is required" surface field) in
-  let* stream_scope = index "toolStreamScope" in
-  let* block_index = index "toolCallBlockIndex" in
-  let* provider_message_id = optional_string ~surface "providerMessageId" fields in
-  let* tool_call_id = optional_string ~surface "toolCallId" fields in
-  Ok ({ stream_scope; block_index; provider_message_id }, tool_call_id)
-;;
 
 let same_tool_occurrence left right =
   left.stream_scope = right.stream_scope && left.block_index = right.block_index
@@ -1185,6 +1203,22 @@ let decode_custom_event ~request state fields =
       | None ->
           let* reply_details = decode_reply_details value in
           Ok { state with reply_details = Some reply_details }
+    else if String.equal name "KEEPER_TOOL_CALL_ADMITTED" then
+      let* occurrence, tool_call_id, provider_name, admitted_name =
+        decode_tool_admission value in
+      if List.exists (same_tool_occurrence occurrence) state.quarantined_tool_occurrences then
+        Error (Malformed_event "admission names a quarantined tool occurrence")
+      else
+        (match List.find_opt (fun call -> same_tool_occurrence call.occurrence occurrence) state.tool_calls with
+         | None -> Error (Tool_event_without_start {event_type = "KEEPER_TOOL_CALL_ADMITTED"; occurrence})
+         | Some call when not (String.equal call.tool_name provider_name)
+             || occurrence_correlation_conflicts call.occurrence occurrence
+             || provider_correlation_conflicts call.tool_call_id tool_call_id ->
+           Error (Malformed_event "admission conflicts with original provider identity")
+         | Some {admitted_name = Some recorded; _} when not (String.equal recorded admitted_name) ->
+           Error (Malformed_event "tool occurrence was already admitted under another name")
+         | Some _ -> Ok (update_decoded_tool_call state occurrence
+             (fun call -> {call with admitted_name = Some admitted_name})))
     else if String.equal name "KEEPER_TOOL_RESULT_READY" then
       let* occurrence, tool_call_id, execution_id = decode_tool_result_ready value in
       settle_tool_result state ~occurrence ~tool_call_id ~execution_id
@@ -1439,6 +1473,7 @@ let decode_data_event ~request state json =
                    { occurrence
                    ; tool_call_id
                    ; tool_name
+                   ; admitted_name = None
                    ; execution_id = None
                    ; ended = false
                    }

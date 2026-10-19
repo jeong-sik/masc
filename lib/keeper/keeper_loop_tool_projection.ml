@@ -31,7 +31,7 @@ let on_tool_stream_observation t
     t.rejection := None
   | Keeper_hooks_agent_core.Turn_collected { turn; tool_source_map } ->
     (match Keeper_stream_tool_accum.seal_turn t.accum ~turn ~tool_source_map with
-     | Ok () -> ()
+     | Ok _ -> ()
      | Error detail -> record_rejection t detail)
   | Keeper_hooks_agent_core.Child_content_observed _
   | Keeper_hooks_agent_core.Provider_retry_observed _

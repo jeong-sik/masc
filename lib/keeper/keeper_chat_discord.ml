@@ -472,7 +472,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
                 ^ Keeper_chat_events.stream_protocol_error_summary error)
             : (unit, error) result);
         continue ()
-    | Tool_call_start _ | Native_tool_start _ ->
+    | Tool_call_start _ | Tool_call_admitted _ | Native_tool_start _ ->
         refresh_activity ();
         continue ()
     | Tool_call_args _

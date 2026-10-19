@@ -61,6 +61,11 @@ type delta =
       { occurrence : tool_occurrence
       ; tool_name : string
       }
+  | Tool_admitted of
+      { occurrence : tool_occurrence
+      ; provider_tool_name : string
+      ; tool_name : string
+      }
   | Tool_args of
       { occurrence : tool_occurrence
       ; fragment : args_fragment
@@ -397,6 +402,17 @@ let custom_deltas_unvalidated fields =
        then []
        else [ Stream_details { generation; usage; stop_reason; stream_scope } ])
      | None -> [])
+  | Some "KEEPER_TOOL_CALL_ADMITTED" ->
+      (match object_field fields "value" with
+       | None -> [Undecodable "KEEPER_TOOL_CALL_ADMITTED value is not an object"]
+       | Some value ->
+         (match tool_occurrence ~event:"KEEPER_TOOL_CALL_ADMITTED" value,
+                string_field value "providerToolName", string_field value "toolCallName" with
+          | Ok occurrence, Some provider_tool_name, Some tool_name
+            when String.trim provider_tool_name <> "" && String.trim tool_name <> "" ->
+            [Tool_admitted {occurrence; provider_tool_name; tool_name}]
+          | Error detail, _, _ -> [Undecodable detail]
+          | Ok _, _, _ -> [Undecodable "KEEPER_TOOL_CALL_ADMITTED needs nonblank tool names"]))
   | Some "KEEPER_TOOL_RESULT_READY" -> (
       match object_field fields "value" with
       | None -> [ Undecodable "KEEPER_TOOL_RESULT_READY value is not an object" ]

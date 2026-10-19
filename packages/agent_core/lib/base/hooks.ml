@@ -52,9 +52,18 @@ type tool_failure_stage =
     an unroutable ToolUse, so [planned_index] is deliberately not inferred
     from [source_tool_use_ordinal]. Non-tool stream blocks may be omitted while the
     response is assembled, therefore a raw content-block index is not used. *)
+type tool_name_resolution =
+  | Registered_name
+  | Recovered_name of
+      { tool_call_id : string
+      ; provider_name : string
+      ; registered_name : string
+      }
+
 type admitted_tool_use_source =
   { planned_index : int
   ; source_tool_use_ordinal : int
+  ; name_resolution : tool_name_resolution
   }
 
 type admitted_tool_source_map =

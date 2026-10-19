@@ -47,6 +47,8 @@ let delta_to_string : Live.delta -> string = function
       Printf.sprintf "native_tool_progress(%d/%d)" occurrence.stream_scope occurrence.block_index
   | Live.Native_tool_ended { occurrence; _ } ->
       Printf.sprintf "native_tool_ended(%d/%d)" occurrence.stream_scope occurrence.block_index
+  | Live.Tool_admitted { occurrence; provider_tool_name; tool_name } ->
+      Printf.sprintf "tool_admitted(%d/%d,%s,%s)" occurrence.stream_scope occurrence.block_index provider_tool_name tool_name
   | Live.Tool_started { occurrence; tool_name } ->
       Printf.sprintf "tool_started(%d/%d,%s)" occurrence.stream_scope
         occurrence.block_index tool_name
@@ -497,6 +499,73 @@ let test_tool_result_requires_nonblank_canonical_identity () =
           (occurrence_fields ~call_id:(Some "call-9") ()
            @ [ "executionId", `String " " ])))
 
+let admitted_tool_fields =
+  occurrence_fields ~scope:4 ~block_index:7 ~call_id:(Some "raw-call-1") ()
+  @ [ "providerMessageId", `String "raw-message-1"
+    ; "providerToolName", `String "Read"
+    ; "toolCallName", `String "masc_file_read"
+    ]
+
+let admitted_tool_delta =
+  Live.Tool_admitted
+    { occurrence =
+        { (occurrence ~scope:4 ~block_index:7 ~call_id:(Some "raw-call-1") ()) with
+          provider_message_id = Some "raw-message-1" }
+    ; provider_tool_name = "Read"
+    ; tool_name = "masc_file_read"
+    }
+
+let test_tool_admission_preserves_raw_and_canonical_identity () =
+  let value = `Assoc admitted_tool_fields in
+  check bool "the shared structural validator accepts a valid admission" true
+    (Result.is_ok
+       (Masc_tui_keeper_chat_projection.validate_custom_value
+          ~name:"KEEPER_TOOL_CALL_ADMITTED" value));
+  let body = sse (custom "KEEPER_TOOL_CALL_ADMITTED" value) in
+  List.iter (fun decode ->
+    check (list delta) "incremental admission retains its exact identities"
+      [admitted_tool_delta] (decode body))
+    [feed_whole; feed_in_chunks ~size:1; feed_in_chunks ~size:7]
+
+let test_tool_admission_rejects_malformed_values_without_poisoning_next_frame () =
+  let replace name value =
+    `Assoc (List.map (fun (key, original) ->
+      key, if String.equal key name then value else original) admitted_tool_fields) in
+  let omit name =
+    `Assoc (List.filter (fun (key, _) -> not (String.equal key name)) admitted_tool_fields) in
+  let malformed =
+    [ "execution authority is not admission metadata",
+        `Assoc (("executionId", `String "forged-execution") :: admitted_tool_fields)
+    ; "control authority is not admission metadata",
+        `Assoc (("chat_control_token", `String "forged-control") :: admitted_tool_fields)
+    ; "provider name is required", omit "providerToolName"
+    ; "canonical name is required", omit "toolCallName"
+    ; "occurrence scope is required", omit "toolStreamScope"
+    ; "provider name is nonblank", replace "providerToolName" (`String " ")
+    ; "canonical name is a string", replace "toolCallName" (`Int 1)
+    ; "scope is an integer", replace "toolStreamScope" (`String "4")
+    ; "block index is nonnegative", replace "toolCallBlockIndex" (`Int (-1))
+    ; "a present provider message identity is nonblank", replace "providerMessageId" (`String " ")
+    ; "a present raw call identity is a string", replace "toolCallId" (`List [])
+    ; "duplicate names do not choose an authority",
+        `Assoc (("toolCallName", `String "other_tool") :: admitted_tool_fields)
+    ; "admission is an object", `Null
+    ] in
+  List.iter (fun (description, value) ->
+    check bool description true
+      (Result.is_error
+         (Masc_tui_keeper_chat_projection.validate_custom_value
+            ~name:"KEEPER_TOOL_CALL_ADMITTED" value));
+    let body = sse (custom "KEEPER_TOOL_CALL_ADMITTED" value)
+      ^ sse (custom "KEEPER_TOOL_CALL_ADMITTED" (`Assoc admitted_tool_fields)) in
+    List.iter (fun decode ->
+      match decode body with
+      | [Live.Undecodable _; admitted] ->
+          check delta "the next valid admission keeps its identities" admitted_tool_delta admitted
+      | other -> failf "%s: expected a rejected frame then a valid admission, got [%s]"
+          description (String.concat "; " (List.map delta_to_string other)))
+      [feed_whole; feed_in_chunks ~size:1; feed_in_chunks ~size:7]) malformed
+
 let test_tool_transcript_commit_reads_without_a_view () =
   (* The exact value Server_keeper_chat_agui_projection writes for
      Tool_transcript_committed, and the shapes it never writes. *)
@@ -933,7 +1002,9 @@ let test_duplicate_live_metadata_does_not_acquire_identity () =
 let () =
   run "tui_keeper_chat_live"
     [ ( "deltas"
-      , [ test_case "duplicate live metadata refuses authority" `Quick test_duplicate_live_metadata_does_not_acquire_identity
+      , [ test_case "admission preserves raw and canonical identity" `Quick test_tool_admission_preserves_raw_and_canonical_identity
+        ; test_case "malformed admission cannot acquire live authority" `Quick test_tool_admission_rejects_malformed_values_without_poisoning_next_frame
+        ; test_case "duplicate live metadata refuses authority" `Quick test_duplicate_live_metadata_does_not_acquire_identity
         ; test_case "interactive acceptance reports authority" `Quick test_interactive_acceptance_reports_authority
         ; test_case "coding turn, whole body" `Quick test_coding_turn_whole_body
         ; test_case "chunk size does not change the deltas" `Quick

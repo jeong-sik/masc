@@ -119,6 +119,8 @@ let all_events : E.keeper_chat_event list =
   ; E.Agent_core_stream_protocol_error protocol_error_sparse
   ; E.Tool_call_start
       { occurrence; tool_call_id = Some "tc-1"; tool_call_name = "read_file" }
+  ; E.Tool_call_admitted
+      { occurrence; tool_call_id = Some "tc-1"; provider_tool_name = "read_file1"; tool_call_name = "read_file" }
   ; E.Tool_call_args
       { occurrence = occurrence_anon; tool_call_id = None; delta = "{\"path\":" }
   ; E.Tool_call_args_snapshot
@@ -1335,7 +1337,7 @@ let test_native_activity_survives_bridge_journal_and_projection () =
       (List.map (fun (started, (tool : E.native_tool)) -> started, tool.occurrence.block_index) native);
     Alcotest.(check bool) "native activity never claims a MASC execution receipt" false
       (List.exists (fun (entry : L.journaled_event) -> match entry.event with
-         | E.Tool_call_start _ | E.Tool_call_end _ | E.Tool_result_ready _ -> true
+         | E.Tool_call_start _ | E.Tool_call_admitted _ | E.Tool_call_end _ | E.Tool_result_ready _ -> true
          | _ -> false) entries);
     let _, projected = List.fold_left (fun (projection, result) (entry : L.journaled_event) ->
       let projection, event = Projection.project ~timestamp:entry.ts ~redact_text:Fun.id

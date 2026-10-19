@@ -121,6 +121,11 @@ type delta =
       { occurrence : tool_occurrence
       ; tool_name : string
       }
+  | Tool_admitted of
+      { occurrence : tool_occurrence
+      ; provider_tool_name : string
+      ; tool_name : string
+      }
   | Tool_args of
       { occurrence : tool_occurrence
       ; fragment : args_fragment

@@ -553,7 +553,7 @@ function isToolObservation(event: KeeperChatStreamEvent): boolean {
     case 'TOOL_CALL_ARGS':
     case 'TOOL_CALL_END': return true
     case 'CUSTOM':
-      if (event.name === 'KEEPER_TOOL_RESULT_READY' || event.name === 'KEEPER_TOOL_TRANSCRIPT_COMMITTED') return true
+      if (event.name === 'KEEPER_TOOL_CALL_ADMITTED' || event.name === 'KEEPER_TOOL_RESULT_READY' || event.name === 'KEEPER_TOOL_TRANSCRIPT_COMMITTED') return true
       // An occurrence-scoped quarantine is authoritative evidence about one
       // tool occurrence; admitting it for a converged turn lets the
       // protocol-error handler mark that occurrence's trace and row errored
@@ -896,7 +896,7 @@ export function applyKeeperStreamEvent(
         const providerIdConflict = toolCallId
           && existingOccurrence.toolCallId
           && existingOccurrence.toolCallId !== toolCallId
-        if (existingOccurrence.label !== toolName || providerIdConflict) {
+        if ((existingOccurrence.toolProviderName ?? existingOccurrence.label) !== toolName || providerIdConflict) {
           recordStreamProtocolError(
             keeperName,
             assistantEntryId,
@@ -944,6 +944,8 @@ export function applyKeeperStreamEvent(
         timestamp: new Date().toISOString(),
         toolCallId,
         toolCallEnded: false,
+        toolProviderName: toolName,
+        toolProviderMessageId: event.providerMessageId,
         toolOccurrence: Object.freeze({ kind: 'identified' as const, streamScope: event.toolStreamScope, blockIndex: event.toolCallBlockIndex }),
         ...(toolOwnerKey ? { toolOwnerKey } : { toolParentEntryId: assistantEntryId }),
         deliveryProvenance: null,
@@ -1109,6 +1111,32 @@ export function applyKeeperStreamEvent(
           deliveryProvenance: { delivery_key: deliveryKey, transcript_slot: { kind: 'tool_call', execution_id: executionId, ordinal } },
         }))
         if (resource) convergeAcknowledgedTool(keeperName, parent, resource, { deliveryKey, executionId, ordinal })
+        return null
+      }
+      if (event.name === 'KEEPER_TOOL_CALL_ADMITTED') {
+        const value = event.value
+        const occurrenceId = streamedToolOccurrenceId(keeperName, assistantEntryId,
+          value.toolStreamScope, value.toolCallBlockIndex)
+        if (isToolOccurrenceQuarantined(keeperName, assistantEntryId, occurrenceId)) {
+          return 'Admission targets a quarantined tool occurrence'
+        }
+        const entries = keeperThreads.value[keeperName] ?? []
+        const tool = entries.find(entry => entry.id === occurrenceId)
+        if (!tool) return 'Admission names no streamed server occurrence'
+        if ((tool.toolProviderName ?? tool.label) !== value.providerToolName
+          || value.toolCallId && tool.toolCallId && value.toolCallId !== tool.toolCallId
+          || value.providerMessageId && tool.toolProviderMessageId && value.providerMessageId !== tool.toolProviderMessageId
+          || tool.toolAdmittedName !== undefined && tool.toolAdmittedName !== value.toolCallName) {
+          return 'Admission conflicts with original provider identity'
+        }
+        updateThreadEntry(keeperName, occurrenceId, entry => ({ ...entry,
+          toolProviderName: value.providerToolName, toolAdmittedName: value.toolCallName,
+          label: value.toolCallName,
+        }))
+        updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry,
+          traceSteps: entry.traceSteps?.map(step => step.kind === 'tool' && step.toolOccurrenceId === occurrenceId
+            ? { ...step, name: value.toolCallName } : step),
+        }))
         return null
       }
       if (event.name === 'KEEPER_TOOL_RESULT_READY') {

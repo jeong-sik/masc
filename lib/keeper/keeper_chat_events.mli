@@ -186,6 +186,15 @@ type keeper_chat_event =
       ; tool_call_id : string option
       ; tool_call_name : string
       }
+  | Tool_call_admitted of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      ; provider_tool_name : string
+      ; tool_call_name : string
+      }
+      (** Admission recovered the registered name of this exact streamed call.
+          This does not start another call or establish execution completion.
+          The provider name remains original wire evidence. *)
   | Tool_call_args of
       { occurrence : tool_stream_occurrence
       ; tool_call_id : string option

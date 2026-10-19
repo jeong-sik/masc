@@ -1573,3 +1573,23 @@ describe('provider retry observation transport', () => {
   })
 })
 
+
+
+describe('admitted tool identity', () => {
+  const event = { type: 'CUSTOM', threadId: 'thread', timestamp: 1712000000, name: 'KEEPER_TOOL_CALL_ADMITTED', value: {
+    toolStreamScope: 3, toolCallBlockIndex: 2, toolCallId: 'call',
+    providerToolName: 'keeper_skill1', toolCallName: 'keeper_skill',
+  } }
+  it('accepts the exact occurrence and both name authorities', () => {
+    expect(KeeperChatStreamEventSchema.safeParse(event).success).toBe(true)
+  })
+  it('rejects missing coordinates, names, and unexpected control fields', () => {
+    for (const field of ['toolStreamScope', 'toolCallBlockIndex', 'providerToolName', 'toolCallName']) {
+      const value: Record<string, unknown> = { ...event.value }
+      delete value[field]
+      expect(KeeperChatStreamEventSchema.safeParse({ ...event, value }).success).toBe(false)
+    }
+    expect(KeeperChatStreamEventSchema.safeParse({ ...event,
+      value: { ...event.value, executionId: 'not-a-result' } }).success).toBe(false)
+  })
+})

@@ -165,7 +165,7 @@ let add ?at t ~seq (delta : Live.delta) =
   | Live.Batch_bound _ | Live.Runtime_attempt_started _ | Live.Provider_retry_observed _
   | Live.Stream_model_started _ | Live.Model_content_activity _ | Live.Stream_model_stopped _
   | Live.Stream_details _ | Live.Text _ | Live.Thinking _ | Live.Native_tool_started _
-  | Live.Native_tool_progress _ | Live.Native_tool_ended _ | Live.Tool_started _ | Live.Tool_args _
+  | Live.Native_tool_progress _ | Live.Native_tool_ended _ | Live.Tool_started _ | Live.Tool_admitted _ | Live.Tool_args _
   | Live.Tool_ended _ | Live.Tool_result _ | Live.Stream_protocol_error _
   | Live.Approval_requested _ | Live.Approval_settled _ | Live.Reply_details _ | Live.Run_failed _
   | Live.Undecodable _ -> let duplicate =
@@ -182,7 +182,7 @@ let add ?at t ~seq (delta : Live.delta) =
      | Live.Provider_retry_observed _ | Live.Model_content_activity _
      | Live.Stream_details _ | Live.Stream_model_stopped _
      | Live.Native_tool_started _ | Live.Native_tool_ended _ | Live.Native_tool_progress _
-     | Live.Tool_started _ | Live.Tool_args _ | Live.Tool_ended _ | Live.Tool_result _
+     | Live.Tool_started _ | Live.Tool_admitted _ | Live.Tool_args _ | Live.Tool_ended _ | Live.Tool_result _
      | Live.Stream_protocol_error _ | Live.Approval_requested _
      | Live.Approval_settled _ | Live.Accepted _ | Live.Checkpoint
      | Live.External_effect_completed | Live.Reply_details _ | Live.Run_failed _
@@ -198,7 +198,7 @@ let add ?at t ~seq (delta : Live.delta) =
       | Live.Batch_bound _ | Runtime_attempt_started _ | Provider_retry_observed _
       | Stream_model_started _ | Model_content_activity _ | Stream_model_stopped _
       | Stream_details _ | Text _ | Thinking _ | Native_tool_started _ | Native_tool_progress _
-      | Native_tool_ended _ | Tool_started _ | Tool_args _ | Tool_ended _ | Tool_result _
+      | Native_tool_ended _ | Tool_started _ | Tool_admitted _ | Tool_args _ | Tool_ended _ | Tool_result _
       | Stream_protocol_error _ | Approval_requested _ | Approval_settled _ | Accepted _
       | Checkpoint | External_effect_completed | Reply_details _ | Run_failed _ | Run_finished
       | Undecodable _ -> ());
@@ -321,6 +321,9 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
     Some
       (Live.Tool_started
          { occurrence = occurrence o ~tool_call_id; tool_name = tool_call_name })
+  | E.Tool_call_admitted { occurrence = o; tool_call_id; provider_tool_name; tool_call_name } ->
+    Some (Live.Tool_admitted
+      { occurrence = occurrence o ~tool_call_id; provider_tool_name; tool_name = tool_call_name })
   | E.Tool_call_args { occurrence = o; tool_call_id; delta } ->
     Some
       (Live.Tool_args

@@ -59,7 +59,8 @@ val strip_registered_suffix : available:string list -> string -> string option
     [tool_source_map] preserves the exact pre-admission ToolUse ordinal for
     every surviving tool schedule entry and the complete pre-admission ToolUse
     inventory, so consumers never reconstruct either fact from a provider-owned
-    call id.
+    call id. Name recovery retains both the original provider identity and
+    registered name in that same source mapping.
 
     Dropping is the point. A name the index cannot answer is replayed to the
     model on every later request as a well-formed example of calling that

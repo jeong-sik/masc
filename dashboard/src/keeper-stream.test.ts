@@ -478,6 +478,44 @@ describe('Keeper operation stream projection', () => {
     }
   })
 
+  it('reconciles the admitted name on one exact occurrence while retaining the wire identity', () => {
+    assistantEntry()
+    const start: KeeperChatStreamEvent = { type: 'TOOL_CALL_START', ...toolOccurrence(2, 7),
+      toolCallId: 'same-provider-id', providerMessageId: 'message', toolCallName: 'keeper_skill1' }
+    const admission: KeeperChatStreamEvent = { type: 'CUSTOM', name: 'KEEPER_TOOL_CALL_ADMITTED',
+      value: { ...toolOccurrence(2, 7), toolCallId: 'same-provider-id', providerMessageId: 'message',
+        providerToolName: 'keeper_skill1', toolCallName: 'keeper_skill' } }
+    applyKeeperStreamEvent('sangsu', 'reply-1', start)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_END', ...toolOccurrence(2, 7) })
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', admission)).toBeNull()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', admission)).toBeNull()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', start)).toBeNull()
+    const tools = keeperThreads.value.sangsu?.filter(entry => entry.role === 'tool') ?? []
+    expect(tools).toHaveLength(1)
+    expect(tools[0]).toMatchObject({ label: 'keeper_skill', toolProviderName: 'keeper_skill1',
+      toolAdmittedName: 'keeper_skill', toolCallEnded: true })
+    const parent = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(parent?.traceSteps?.filter(step => step.kind === 'tool')).toMatchObject([{ name: 'keeper_skill' }])
+  })
+
+  it('uses server occurrence rather than reused provider IDs to admit a name', () => {
+    assistantEntry()
+    for (const scope of [1, 2]) applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START', ...toolOccurrence(0, scope), toolCallId: 'same', toolCallName: 'keeper_skill1',
+    })
+    const admit = (scope: number, providerName: string, toolCallId = 'same'): KeeperChatStreamEvent => ({
+      type: 'CUSTOM', name: 'KEEPER_TOOL_CALL_ADMITTED', value: {
+        ...toolOccurrence(0, scope), toolCallId, providerToolName: providerName, toolCallName: 'keeper_skill',
+      },
+    })
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', admit(2, 'keeper_skill1'))).toBeNull()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', admit(1, 'another-name'))).toBeTruthy()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', admit(1, 'keeper_skill1', 'other-id'))).toBeTruthy()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', admit(3, 'keeper_skill1'))).toBeTruthy()
+    const tools = keeperThreads.value.sangsu?.filter(entry => entry.role === 'tool') ?? []
+    expect(tools.map(entry => entry.label)).toEqual(['keeper_skill1', 'keeper_skill'])
+  })
+
   it('preserves current speech when an existing tool START is replayed', () => {
     assistantEntry()
     const start: KeeperChatStreamEvent = { type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallName: 'Read', toolCallId: 'provider-tool' }

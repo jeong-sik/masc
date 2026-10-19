@@ -18,7 +18,7 @@ type failure = Unselected of Browser_lane.selection_error | Unchosen of Browser_
 val failure_message : failure -> string
 
 val choose_browser : verb:Browser_lane.verb -> request -> (Browser_selection.selected, failure) result
-val resolve_target : verb:Browser_lane.verb -> request ->
+val resolve_target : ?required_actions:Browser_capabilities.operation list -> verb:Browser_lane.verb -> request ->
   (Browser_selection.selected * Browser_lane.target, failure) result
 (** Selection performs no browser command; resolution binds a concrete connection.
     An observed tab requires its original explicit browser identity. *)

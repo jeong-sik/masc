@@ -141,3 +141,19 @@ live 인증 화면을 연결 오류 때문에 automation이나 별도 API·수�
 참조는 `keeper_skill`에 **이 스킬의 동일한 identity**와 링크의 상대 `file`을 전달해
 필요한 것만 읽는다. file은 스킬 루트 기준이며, 참조 안의 상대 링크는 그 파일의
 디렉터리에서 해소한다. 현재 도구 스키마와 사용자의 요청 범위가 예시보다 우선한다.
+
+### 작업 기능으로 최초 브라우저 선택
+
+첫 BrowserTabs에 `requiredActions: ["hover", "type_text"]`를 주면 해당 기능을
+모두 구현한 연결/열린 브라우저를 찾는다. HTML5 드롭은 `html5_drop`, 프레임과
+다운로드는 `read_frames`, `list_downloads`, 실제 브라우저 확대는 `page_zoom`이다.
+작업 세션을 새로 열 때만 BrowserSession `action: "open"`에도 같은 배열을 쓴다.
+선택 과정은 브라우저를 열거나 탭을 이동하지 않는다. 불가능한 조합은 입력 전
+`required_browser_actions_unavailable`와 후보별 `missingActions`로 거절한다.
+
+응답 `browserCapabilities.operations`의 tool/action/mode와 constraints를 읽고
+`browserSelection`의 구체 lane/clientId를 이후 모든 호출에 유지한다. 이미 관측한
+탭에는 기능을 이유로 다른 브라우저를 선택하지 않는다. Conditional은 구현된
+기능의 조건이며 현재 포커스/권한/버전이나 효과 성공을 보장하지 않는다. Safari는
+현재 어댑터가 없고, 페이지 줌과 네이티브 타이핑을 한 브라우저에서 모두 요구하는
+조합은 현재 지원하지 않는다.

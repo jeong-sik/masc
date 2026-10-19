@@ -311,22 +311,41 @@ let read_failure ~base_path ~tool_name ~start_time = function
   | Browser_surface.Unavailable detail ->
     Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Dependency_unavailable detail
 
+let required_actions args = match args with
+  | `Assoc fields -> (match List.filter (fun (key,_) -> key="requiredActions") fields with
+      | [] -> Ok []
+      | [(_,value)] -> Browser_capabilities.parse_required_actions value
+      | _::_::_ -> Error "requiredActions must occur only once")
+  | _ -> Error "body must be a JSON object"
+let with_capabilities target required = function
+  | Browser_lane.Answered (`Assoc envelope) -> (match List.assoc_opt "data" envelope with
+      | Some (`Assoc fields) ->
+          let data = `Assoc (("browserCapabilities",Browser_capabilities.to_json (Browser_capabilities.backend_of_target target))
+            :: ("requiredActions",`List (List.map (fun operation -> `String (Browser_capabilities.operation_name operation)) required))
+            :: List.filter (fun (key,_) -> not (List.mem key ["browserCapabilities";"requiredActions"])) fields) in
+          Browser_lane.Answered (`Assoc (("data",data)::List.remove_assoc "data" envelope))
+      | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) | None ->
+          Browser_lane.Answered (`Assoc envelope))
+  | (Browser_lane.Answered _ | Browser_lane.Timed_out | Browser_lane.Rejected_before_effect _
+     | Browser_lane.Lane_absent | Browser_lane.Refused _) as answer -> answer
+
 let handle_tabs ~base_path ~tool_name ~start_time args : Tool_result.result =
-  match tool_request args with
-  | Error error -> make_input_err ~tool_name ~start_time error
-  | Ok request ->
-    match Browser_surface.resolve_target ~verb:Browser_lane.Tabs_list request with
+  match tool_request args, required_actions args with
+  | Error error, _ | _, Error error -> make_input_err ~tool_name ~start_time error
+  | Ok {tab_id=Some _;_}, Ok (_::_) -> make_input_err ~tool_name ~start_time "requiredActions applies only to initial discovery without tabId; retain the observed browser identity for bound tabs."
+  | Ok request, Ok required_actions ->
+    match Browser_surface.resolve_target ~required_actions ~verb:Browser_lane.Tabs_list request with
     | Error error -> read_failure ~base_path ~tool_name ~start_time error
     | Ok (selected, target) ->
       match Browser_lane.issue_for ~target ~verb:Browser_lane.Tabs_list ~timeout_sec:default_timeout_sec with
       | Error error -> selection_error ~base_path ~tool_name ~start_time error
       | Ok answer ->
-        answer_to_result ~lane:(Browser_lane.target_lane target) ~tool_name ~start_time (add_client ~selection:selected target answer)
+        answer_to_result ~lane:(Browser_lane.target_lane target) ~tool_name ~start_time (add_client ~selection:selected target answer |> with_capabilities target required_actions)
 ;;
 
 (* Initial work-session selection shares the discovery policy. Once a tab
    is observed, its concrete lane/client must accompany every later action. *)
-let issue_on_server_lane ~tool_name ~start_time args ~verb ~timeout_sec =
+let issue_on_server_lane ?(required_actions=[]) ~tool_name ~start_time args ~verb ~timeout_sec =
   match tool_request args with
   | Error detail -> make_input_err ~tool_name ~start_time detail
   | Ok request ->
@@ -338,7 +357,7 @@ let issue_on_server_lane ~tool_name ~start_time args ~verb ~timeout_sec =
       | Browser_lane.Page_elements _ | Browser_lane.Page_act _ | Browser_lane.Page_context _
       | Browser_lane.Page_instruct _ | Browser_lane.Page_locate _ | Browser_lane.Page_extract _ ->
         Option.is_some request.tab_id in
-    match Browser_selection.resolve ~verb ~bound request.route with
+    match Browser_selection.resolve ~required_actions ~verb ~bound request.route with
     | Error error ->
       browser_choice_error ~tool_name ~start_time error
     | Ok selected ->
@@ -350,22 +369,29 @@ let issue_on_server_lane ~tool_name ~start_time args ~verb ~timeout_sec =
       | None -> make_input_err ~tool_name ~start_time
           ("Use an owned work browser for session management or navigation; " ^ Browser_lane.server_lane_refused)
       | Some (lane, target) ->
-        answer_to_result ~lane:(Browser_lane.server_lane_name lane) ~tool_name ~start_time
-          (Browser_lane.issue_server_lane lane ~verb ~timeout_sec |> add_client ~selection:selected target)
+        match Browser_selection.require_target required_actions target with
+        | Error error -> browser_choice_error ~tool_name ~start_time error
+        | Ok () ->
+          answer_to_result ~lane:(Browser_lane.server_lane_name lane) ~tool_name ~start_time
+            (Browser_lane.issue_server_lane lane ~verb ~timeout_sec |> add_client ~selection:selected target
+              |> with_capabilities target required_actions)
 ;;
 
 let handle_session ~tool_name ~start_time args : Tool_result.result =
   let action = get_string args "action" "" in
-  match action with
-  | "open" ->
+  match action, required_actions args with
+  | _, Error error -> make_input_err ~tool_name ~start_time error
+  | ("close" | "status"), Ok _ when (match args with `Assoc fields -> List.mem_assoc "requiredActions" fields | _ -> false) ->
+      make_input_err ~tool_name ~start_time "requiredActions applies only to initial BrowserSession action=open."
+  | "open", Ok required_actions ->
     let headless = Some (get_bool args "headless" false) in
-    issue_on_server_lane ~tool_name ~start_time args ~verb:(Browser_lane.Session_open { headless }) ~timeout_sec:60.0
-  | "close" -> issue_on_server_lane ~tool_name ~start_time args ~verb:Browser_lane.Session_close ~timeout_sec:60.0
-  | "status" ->
+    issue_on_server_lane ~required_actions ~tool_name ~start_time args ~verb:(Browser_lane.Session_open { headless }) ~timeout_sec:60.0
+  | "close", Ok _ -> issue_on_server_lane ~tool_name ~start_time args ~verb:Browser_lane.Session_close ~timeout_sec:60.0
+  | "status", Ok _ ->
     (* Reads the backend's record rather than the browser, so the short timeout
        is the lane round trip, not a page load. *)
     issue_on_server_lane ~tool_name ~start_time args ~verb:Browser_lane.Session_status ~timeout_sec:10.0
-  | _ ->
+  | _, Ok _ ->
     make_input_err ~tool_name ~start_time
       "action must be one of: open, close, status"
 ;;

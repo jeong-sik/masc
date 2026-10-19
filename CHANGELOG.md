@@ -2,6 +2,524 @@
 
 ## [Unreleased]
 
+## [0.59.0] - 2026-10-19
+
+### Upgrade notes
+
+- Pending formats 12 and earlier are refused; an operator-selected matched queue, append-log and rules reset loses pending approvals, unconsumed grants and standing rules. Follow `docs/guides/APPROVAL-RULE-STORE-UPGRADE.md` before deployment (#43410).
+- Answered-Ask admission fingerprints now use `"ask-answer-v1:"` plus the SHA-256 of the canonical `(ask_id, answered_at, answers)` JSON instead of the rendered text hash. If an answered Ask turn was admitted into a checkpoint before upgrade but had not finished when the server restarted on the new build, re-delivery of that `ask_id` against the same checkpoint will be rejected with `"approval admission evidence conflicts with persisted input"`; re-ask the question or clear that checkpoint's admission marker to proceed (#43566)
+- Legacy Ask log entries that recorded only an unattributed integer `turn_id` (without a trace reference) decode with `source_turn_ref = None`; malformed `turn_id` or `source_turn_ref` values are rejected (#43576)
+- `/api/v1/keepers/:name/provider-input` now returns the `parts` list instead of inline `system_prompt`, `messages`, and `tool_schemas` bodies. Upgrade the server and `masc_tui` together from the same build; an older TUI binary cannot decode the `Ctrl-X` context inspector response from a newer server (and vice versa) (#43583).
+
+### Fresh state required
+
+- The IDE feed now requires producer-attributed canonical rows in `<base-path>/.masc/tool_calls/`; preserve these journal files, including older unattributed rows. Leave existing `.masc-ide/by-url/*/tool_events.jsonl` copies untouched: they are no longer read or migrated, and no deletion or rewrite is required (#43473).
+- Lane Add-on bindings now record `lifecycle` and `engine`, and old records are not read. Stop the server, delete `.masc/lane-addons/bindings`, then start the new build. Worker containers from the previous build carry no scope label, so the startup sweep leaves them alone and they are removed once by hand (#43548).
+
+### Added
+
+- Run canonical Write nodes and exact inline Skill children in task recipes. Read output can feed Write and a verification Read in one invocation, retaining the original file authorization, publication recovery and physical receipts. (#43445)
+- Ask answer follow-up can now show committed SDK Tool result records from the
+  turn input containing the exact canonical first answer, including physical
+  execution, trace and Keeper turn identities in observation logs. The TUI retains
+  prior positive facts when fresh action evidence is unavailable. Source lookup
+  uses a derived index over the original Tool ledger; queue admission, input
+  membership, successful effects and Task completion remain distinct observations.
+  See [Keeper Ask answer recovery](docs/guides/keeper-ask-answer-recovery.md). (#43462)
+- Record original-turn Skill preparation construction, reuse and lock-acquisition boundaries in runtime manifests and Runtime Lens, preserving missing, failed and cancelled observations without changing execution admission. (#43500)
+- Expose active context, Tool and executable Skill preparation in live turn previews, retaining original scope outcomes and preventing late completion from replacing newer provider or Tool activity. (#43503)
+- Show recently observed preparation for the exact chat or batch execution and autonomous turn, bind previews to the actual running Owner slot, and preserve later provider or Tool activity over delayed preparation reads. (#43504)
+- Observe Task and prompt preparation with the original running Keeper Owner and turn identity, including autonomous preparation before its journal exists. (#43505)
+- Observe the actual shared-input preparation as a world phase under the original running Owner and turn reference. (#43506)
+- Observe initial common prompt preparation through the original running turn's preview writer. (#43508)
+- Retain each running turn's preparation scope, outcome and elapsed time, with proven parentage for nested and parallel observations. Show this history in the exact execution's TUI details while preserving current provider activity. (#43518)
+- Observe Lane, shared-memory and Wiki submission waits under the original world preparation, retaining source outcomes and distinguishing lookup failures in TUI details. (#43524)
+- A request can carry `x-masc-expected-base-path` and `x-masc-expected-masc-root`; the server compares them with the workspace it serves before routing and answers 400 `invalid_workspace_precondition`, 409 `workspace_precondition_failed` or 503 `server_booting`, so a client no longer needs to read `/health` before each workspace-scoped request (#43586).
+- Look up canonical Keeper turn records by complete Turn_ref beyond the recent page, preserving readable absence, unavailable history and partial-history observations through an exact HTTP mode and a request-bound TUI decoder. Direct Ask inspector navigation and runtime performance remain unverified (#43611)
+- Open a question's immutable source turn with `O`, retaining the answer draft and independently publishing record, original-input and response observations. Keep pinned sources separate from recent navigation and preserve completed observations when partial results arrive late (#43613)
+- Record per-component monotonic start/observation receipts, including failed and unfinished reads, and document source-level Before/After boundaries and the remaining historical-response page limit (#43613)
+- Read all retained context-inspector response parts in a separate scrollable response tab; preserve the opened input/proof and its reading position when returning with Esc (#43617)
+- Wire `codex_subscription/<model>` (`codex-app-server`) into `benchmarks/terminal_bench` (`render_configs.py`, `driver/deps.sh`, `driver/collect_result.sh`, `run_matrix.sh`, `probe_keeper_tools.sh`) (#43624)
+- TUI `/score [N]` opens full official alphaTex notation and local synthesized playback in the terminal, with zoom, system paging, track selection and preserved source diagnostics. Install the pinned alphaTab/alphaSkia companion with `scripts/install-alphatex.sh` (Node.js 22+ and Kitty graphics required). (#43636)
+- Add an exact-answer follow-up SSE endpoint and typed receiver that deliver wake/turn, Tool and original Task observations as each settles, sharing one canonical answer capture. Reject duplicate, changed-identity and incomplete streams. The Questions pane still uses aggregate reads until its next integration layer; visible latency remains unmeasured (#43660)
+- Choose installed native VST3 instruments and saved presets for TUI score MIDI playback, remember the selected sound, and repeat or stop the same phrase. (#43684)
+- Observe native MIDI phrase instrument selection, render hashes and local player state through a snapshot-backed Lane Add-on. (#43685)
+- Add macOS simultaneous audio and MIDI capture with Float32 WAV, full UMP packets, shared device timestamps and durable take finalization. (#43687)
+- Record simultaneous audio and MIDI takes from the score viewer, inspect channel waveforms and MIDI tracks, reopen WAV sessions and export MIDI 2.0 Clips. (#43688)
+- Retain typed component receipts and a separate partial-reader count for full-refresh Runtime, Board and Keeper roster/Candle observations; expose received and failed components in the existing progress badge and diagnostic JSON without changing data admission or adding requests. (#43710)
+- Observe Board posts and hearth readers independently, retaining completed child results across parent interruption and distinguishing caught cancellation from unfinished reads; publish refresh progress through an owned atomic inbox without waiting for the bounded dataset mailbox. (#43720)
+- Open complete, scrollable repository and model detail readings with v while preserving workspace ownership. #43722
+- Read full Board resolution notes and follow explicit successor posts with S, returning to the original post with Esc. #43728
+- Add an offline Pele 1.6.0 companion that renders Mermaid source to themed, width-aware PNG previews, with a separate content-addressed installer and terminal-safe diagnostics (#43729).
+- Open closed Mermaid fences and structured Mermaid outputs with Pele through the TUI's asynchronous Ctrl-O image preview; preserve source, terminal palette and width, and newer staged attachments (#43730).
+- Select an exact Usage account with f across Plan and Trend, retaining the choice across refreshes and time windows; a restores all accounts. #43732
+- List all seven main TUI surfaces and their reading entrypoints in /features, including complete repository/model details, Board successors and Usage account selection. #43747
+- Keep code-fence names literal in the feature sheet instead of consuming their rows as diagram or tablature blocks. #43747
+- Add mandatory continuity snapshot schema 2 with exact unread message coordinates, original-message hashes and typed refusal causes. Preserve valid records in later summaries and summarized requests, refuse destructive purge when an unread source no longer fits, and keep hole-bearing snapshots from certifying wholly read Memory ranges. This foundation does not enable message skipping; the remaining lifecycle work is tracked in #37850. #43749
+- Record volatile per-message inference using the existing structured continuity status so TUI can decode its actual outcome. #43749
+- Preserve exact unread message records in mandatory schema 2 atom and official-turn Memory receipt identities, including Prepared recovery and unchanged-fact commits. Expose accounted coverage separately from wholly read range evidence; skip production and cumulative progress retention remain tracked in #37850. #43751
+- Attribute Board posts application logs to the immutable response query, current requested query and retained successful listing, distinguish owned terminal missing data, and preserve failure context across later updates without extra reads or UI rows. (#43759)
+- Keep immutable source request origin and planned Board conditions through cold identity rebinding, log full/navigation intent and owner links, and retain cleanup context without treating dispatch as HTTP start or inventing completion for unfinished reads. (#43761)
+- Show exact stored unread message identities and typed refusal causes independently for continuity snapshots and cumulative Memory evidence in Dashboard and TUI health diagnostics; use the mandatory v8 wire contract and preserve partial read failures. No message skip is enabled. #43762
+- Infer source-bound Librarian Memory decisions through the normal strict parser and absorption gate without publishing snapshots or receipts. Retain exact facts, retirement/revision relationships and gate evidence for later composition. #43772
+- Stage gated Librarian Memory decisions in order without storage effects, retaining exact source and fact fields and maintaining premise support after every step. Share the store's pure disposition calculation and reject mixed Keeper/batch or stale current inputs. #43780
+- Retain exact-source ordered Librarian Memory programs and strict replay proofs, preserving intermediate decisions, original prompt and gate evidence, and working state. Reject contradictory relationships, forged results and conflicting concurrent additions. Final atomic publication and message-floor skip activation remain separate work for #37850. #43786
+- Publish ordered Librarian Memory programs in one revision with exact source and snapshot incarnation binding, canonical intermediate evidence, and recovery before and after snapshot rename. Preserve concurrent facts, original retirement reasons and unresolved recall lineage. Message-floor production and skip activation remain separate work for #37850. #43790
+- Record original-capture TUI probe and first-input lifecycle facts, separating capture/caller/installation/capability/input boundaries and retaining interrupted or missing observations without logging input contents. (#43800)
+- Compare supplied TUI startup observations with the [offline reader](../scripts/harness/perf/README-tui-startup-report.md), explicit Before/After conditions, original capture ownership, full case counts and separate missing, invalid, interrupted and incomplete outcomes; retain descriptive intervals without claiming execution or speed verification. (#43805)
+- Report exact preparation counter intervals per attempt using invocation-owned clock references and ns strings, withholding useful-commit spans unless original fixture, Keeper, Task, turn, intake and commit metadata agree. Preserve failed/partial attempts, wall/legacy observations and unverified execution/performance verdicts. (#43828)
+- Keepers can publish Markdown reports and self-contained HTML results as durable, versioned dashboard artifacts. Work → Artifacts provides search, rendered/source views, revision links and exact-source downloads; successful publication tool calls expose document cards in chat. (#43872)
+- Add source-bound projection of completed tool-call arguments to recoverable JSON blob references, preserving the original protocol blocks and completed-cycle boundary. Provider-driver activation follows separately. ([#43873](https://github.com/jeong-sik/masc/pull/43873))
+- Keepers can publish standalone Markdown and HTML artifacts through an authenticated, durable catalog with immutable revisions, stale-update protection and stable document links. Published bodies remain retained independently of conversation history. (#43874)
+- Project verified completed tool-call arguments as recoverable JSON artifacts on Small Keeper lanes, preserving current-turn inputs and prefix-bound signed reasoning across resume, discovery and storage failures. ([#43882](https://github.com/jeong-sik/masc/pull/43882))
+- Add an explicit real-model paired runner for completed argument questions, comparison and nested request reuse, preserving original checkpoint prefixes and reporting retrieval, serialization and HTTP evidence separately. ([#43895](https://github.com/jeong-sik/masc/pull/43895))
+- Add an opt-in official-client Host projection that keeps raw history authority while measuring completed argument references, stores only retained arguments, and repeats range and summary selection after storage outcomes. Runtime adapter wiring remains separate. ([#43899](https://github.com/jeong-sik/masc/pull/43899))
+
+### Changed
+
+- Store typed logical approval origin while retaining its original turn witness (#43410).
+- Each autonomous Keeper wake input now ends with a line stating whether the
+  turn may end with an empty final answer, chosen from the same policy the
+  response check applies (#43419).
+- Active span payloads are immutable snapshots. Update span annotations through the tracer APIs; fiber scope stacks share private ancestor state cells. (#43421)
+- Keeper approvals retain the actual direct operation or admitted input context through turn setup and Gate requests, while resumed exact grants preserve their original source independently of new inputs. (#43422)
+- Approval cards and details show the original direct request or admitted Board context, turn reference and actual reply route from strict Queue projection; unavailable provenance remains explicit and lifecycle audit rows retain the same source. (#43423)
+- Document native TUI roster delivery before and after the refresh change, including normal and narrow captures, request/state timings, dependency provenance, and failed or non-demonstrating attempts. (#43425)
+- Admit the canonical owned-file Edit producer in inline task recipes and exact inline Skill children, preserving its effectful descriptor and durable async admission boundaries. (#43428)
+- Run independent resolved Read/Edit leaves in task recipes and fixed inline child Skills through the original file capabilities, with conflict ordering, invocation-owned cleanup, and Task/Gate/activation receipts. (#43429)
+- Bind inline Read/Edit file resources when upstream inputs and exact nested Skill arguments resolve, preserving conflict order, original source receipts and cancellation cleanup. (#43431)
+- Provide an exact current-Task Composition Skill and its declared ordinary Tool schemas before the first model request, avoiding redundant schema loading while retaining normal activation and unrelated deferral. (#43432)
+- Execute the upstream preparation scenario with one recipe and one physical input read; offer the current Task recipe control initially and join native leaf commit evidence through the original owner handoff. (#43438)
+- Bind TUI question reads to response workspace roots and actual readiness, removing extra health requests before early display and after answering while retaining original question and choice identities. (#43439)
+- Recheck unchanged absent owned jobs with a typed presence hint during background recovery. Late original containers still require full ownership and isolation checks, while changed cancellation intents and fresh supervisors use full reconciliation. (#43444)
+- Keep the last Ask answer receipt visible on Approvals after transient notices expire, and offer the POST result before its question reload. Preserve exact submission/workspace ownership, canonical-winner labels and recording/delivery distinctions; log only receipt metadata. (#43453)
+- Show exact-source Ask answer follow-up observations on Approvals separately from the original recording/wake receipt. Preserve observed facts across failed reads and reject late replies from replaced submissions or workspaces. (#43456)
+- Move the shared exact-source reaction ledger's native file reads and mutex wait off Eio callers through the existing system-thread guard, retaining direct non-Eio operation and the original cache/evidence semantics. (#43456)
+- Show each requested TUI full-refresh dataset's progress instead of one combined
+  view-data reading. Share dataset identities with publication ownership, name
+  failed/interrupted sources and distinguish actual full-reader progress from
+  navigation/filter ownership. Existing HTTP work and admission remain unchanged.
+  The refresh guide records source Before/After; native behavior is unmeasured. (#43486)
+- Index exact Skill identities and effective names inside immutable snapshots, and index retained prepared projections while preserving original-entry checks; this removes repeated whole-list lookup work without changing source precedence, ordered serialization, content revision checks or execution authority, and runtime speed and memory overhead remain unmeasured (#43491).
+- Publish each verified, owned TUI dataset as it settles during full and
+  navigation refreshes. Preserve paired datasets, reject stale or duplicate
+  replies, and keep sibling collectors pending. Bind existing reads to their
+  workspace with a server receipt, including conditional 304 responses, and
+  record dataset admission clocks. The refresh guide records source Before/After;
+  actual TUI latency and runtime behavior remain unmeasured. (#43496)
+- Admit ordinary resource-scoped Tool successors after their actual conflicting predecessors settle, allowing overlap with unrelated slow calls while preserving opaque boundaries, completed results and cancellation cleanup. (#43498)
+- Reuse Skill projections and derived Task catalog/inventory across interleaved Keeper turns under the exact snapshot and Tool object ownership, sharing concurrent preparation while allowing unowned inputs to be collected. (#43499)
+- Reuse dynamic Tool exports and canonical descriptors under the same worker start and Tool objects, preserving Skill preparation reuse while revalidating live generation, access and schema before invocation. (#43502)
+- Carry one preview writer through actual Task, Skill, context and Tool setup; preserve queued-request admission and reject stale preparation after later provider activity. (#43505)
+- Prepare independent Lane subscription, workspace memory and wiki inputs concurrently for direct and autonomous Keeper turns, retaining source authority and unavailable states. (#43506)
+- Give Domain pool blocking/async IO/CPU and shared executor adapters one per-invocation cancellation protocol; keep async ownership with its supplied Switch. (#43507)
+- Prepare an autonomous turn's common world layers and frame content/digests once, while reprojecting actual request access, recent actions and artifact transmission with fresh canonical offsets. (#43508)
+- Retain the original answered-Ask user input across request projections and capture new world inputs through a new preparation. (#43508)
+- Prepare a direct turn's common Task, held Skill, Lane and conversation context once, then project memory/wiki retrieval guidance from each request's actual Tools. Preserve original fragment bytes and work ownership without a global cache or effect-authority reuse. (#43509)
+- Request preparation history only for the expanded Keeper chat; ordinary turn polling leaves the timeline unrequested and avoids traversing its records. (#43518)
+- Retain one preparation report from the original direct/autonomous Task writer
+  in the existing runtime manifest after return, failure or cancellation. Reports
+  preserve actual scope states and identities without per-scope disk writes;
+  completed-turn TUI detail reads remain a follow-up (#43531).
+- Scope Bash parser token accounting to each public parse call while sharing it with nested command substitutions, and pass the child parser explicitly instead of installing a global hook (#43534).
+- Expanded completed Keeper chat details can read saved preparation reports
+  using the original turn and execution identity. Partial or unlinked evidence
+  stays explicit; same-journal reads are reused and stale selection responses
+  are rejected. Report decoding runs outside the TUI render domain (#43537).
+- Correct the standalone operation/scope module dependencies used by preparation
+  ownership joins and their source scenarios (#43537).
+- Split Verification/Harness, Repositories/Changes, and Work/Planning/Schedules screen families out of the 14,399-line `bin/masc_tui_render.ml` Godfile into dedicated `.mli`-first modules (`masc_tui_render_verification`, `masc_tui_render_repositories`, and `masc_tui_render_work`), reducing `bin/masc_tui_render.ml` by 3,966 lines (-27.5%). (#43545)
+- The `dos-machine` and `msx-machine` packages are published as `0.2.0` with the images `masc-lane-dos-machine:0.2.0` and `masc-lane-msx-machine:0.2.0`, so a host that carries the lane fixes never pairs with a `0.1.0` worker image. Run the `lane-addon-images.yml` workflow at the merged commit and load both images before starting the lanes (#43551).
+- Interpret common HTTP JSON/refusal bodies and the ten scoped TUI dataset
+  families on the installed shared CPU pool, including Overview and server
+  identity decoding. HTTP, credential refresh, conditional-cache publication
+  and dataset admission remain with their existing callers (#43554)
+- Label response interpretation waits in existing Eio runtime events. Added
+  worker handoff costs and actual input/refresh latency remain unmeasured (#43554)
+- Show the Task recorded on the original Ask question separately from answer, wake and Tool result evidence, including archived phases and explicitly retained observations after failed reads. Keep original answer and Task identities, and omit Task free text from response and runtime logs (#43560)
+- Read independent Tool and Task observations together under Eio using existing worker boundaries. Lookup, cache and latency costs remain unmeasured (#43560)
+- Preserve the complete original Ask question, choices, purpose and recorded Task/Goal/turn bindings with exact per-question answers in durable conversation input. Keep missing original bindings explicit and use the canonical Ask codecs (#43566)
+- Remove the duplicate transient Board answer and preview excerpt from model input, select speaker metadata without rendering answers again, and align Board affordance observations with the prompt partition. Clarify deferred Ask Tool usage. Runtime bytes, tokens and latency remain unmeasured (#43566)
+- Keep the original asking Turn_ref in TUI question state, frozen answer submissions, retained receipts and source/follow-up observations. Preserve explicit unobserved sources and reject ambiguous source fields (#43577)
+- Add `o` to inspect the recorded question source locally in browsing and the scrollable answer reader, with workspace ownership and shared viewport content. This is source visibility; exact original-turn navigation, painted UI, installed behavior and performance remain unverified (#43577)
+- `/api/v1/keepers/:name/provider-input` lists a turn's request parts (kind, bytes and SHA-256) without their text, and `/provider-input/part?turn_ref=&index=` returns one listed part; the TUI context inspector and the dashboard turn inspector read a part when it is shown or opened (#43583).
+- Split `Lanes` / `Clients` (`bin/masc_tui_render_lanes.{mli,ml}`), `Activity` / `System Logs` / `Keeper Calls` (`bin/masc_tui_render_activity.{mli,ml}`), and `System Config` (`bin/masc_tui_render_config.{mli,ml}`) out of `bin/masc_tui_render.ml`, reducing `bin/masc_tui_render.ml` from 10,434 to 5,740 lines (#43591)
+- Claude Code, Muse and Antigravity report the bytes they wrote for a Keeper turn the way Codex did: a content-free receipt per completed write (byte count, SHA-256, and the context slots inside it), kept in the turn's raw trace as `client_context_submission` (#43597).
+- Extracted `Masc_tui_render_keepers`, `Masc_tui_render_runtime`, and `Masc_tui_render_overlays` from `bin/masc_tui_render.ml` (`5,787 -> 1,200` lines, `-91.7%` cumulative reduction from `14,399` lines across stack) into dedicated `.mli`-first modules (#43598).
+- Extracted `Masc_tui_render_connectors` from `bin/masc_tui_render.ml` (`1,199 -> 729` lines, `-94.9%` cumulative reduction from `14,399` lines across stack) into a dedicated `.mli`-first module (#43601).
+- Replace full-response Markdown work in the request preview with a compact observation summary. Reuse the explicit reader projection across unchanged frame/scroll calculations and skip unrelated runtime-catalogue refreshes for pinned historical sources. Runtime and speed improvements remain unmeasured (#43617)
+- Bind `Runtime_provider_usage_window` interface types to `Runtime_provider_usage_types` via manifest type equations, document unconditional `Hashtbl.replace` on rejected usage observations, and add an out-of-order retraction convergence test in `test/test_provider_usage_snapshots.ml` (#43632, #43588).
+- Measure `Exec_dispatch` invocation timeout budgets on the monotonic clock (`Mtime_clock.elapsed_ns` via `Exec_dispatch.monotonic_now`), document single-site top-level `submitted_evidence` construction in `lib/completion_authority_agent.ml`, and wrap overlong lines in `docs/audits/ocaml-refactoring/README.md` (#43632, #43588).
+- Connect Questions to exact-answer source streaming so original Task, Tool and wake/turn observations enter TUI state independently. Keep pending peers separate from unavailable evidence, retain received sources after interrupted reads, and cancel withdrawn readers without consuming successor ownership. Record source receipt and admission clocks; runtime, painted UI and latency remain unmeasured (#43662)
+- Prepare Keeper settings edits with a workspace-owned asynchronous read instead of waiting for identity/config reads inside the `e` key handler. Share pending/ready intent, show preparation status, cancel withdrawn focus, and hand the original revision to one editor only after queued input is handled. Post-editor saves remain synchronous; runtime, painted UI and latency are unmeasured (#43663)
+- Save Runtime model/account forms through an owned asynchronous operation, retaining original input, opening revision and possible-dispatch outcomes. Share pending saves, restore detached forms, prevent unknown-outcome resubmission, and keep late receipts from replacing successor input. Runtime, painted responsiveness and speed remain unmeasured (#43665)
+- Save Config runtime.toml drafts through the shared asynchronous operation, retaining exact text/path/revision and protecting later edits from old receipts. Require a source read started after an uncertain commit or durability result and explicit revision selection before retrying. Editor time, runtime responsiveness and speed remain unmeasured (#43666)
+- Prepare Config source tokenization and model tables from one immutable reading through shared CPU submission before UI admission. Reuse matching source/draft projections without changing input or revision ownership, retain independent model/email failures, and record request/prepared/admission-decision clocks. Runtime, paint and speed remain unmeasured (#43668)
+- Share one selected client/login-file email observation across provider aliases within each inventory response. Preserve separate rows, typed missing/environment outcomes and client-specific interpretation, reread on the next response, and propagate cancellation without alias retry. Runtime, painted UI and latency remain unmeasured (#43671)
+- Parse `telemetry.outcome` in `Model_inference_metrics` using `Keeper_decision_outcome.of_string`, replace `raw_entry.outcome : string` and `raw_entry.is_error : bool` with `raw_entry.outcome : Keeper_decision_outcome.t`, and reject unknown or malformed outcome fields with `Invalid_outcome` (#43673, fixes #42997).
+- Reuse one Runtime/Keeper TOML syntax result only for identical exact inputs, preserving reader-specific newline interpretation and original editor/CAS bytes. Prepare raw Config JSON and environment-dependent client snapshots through shared IO jobs, keeping independent validation and commit/HTTP boundaries. Runtime, paint and speed remain unmeasured (#43676)
+- Trim duplicated `Server_dashboard_http_composite_claims` declarations from `server_dashboard_http_composite_recommendations.mli` and `server_dashboard_http_composite_enrich.mli`, and re-export `Server_dashboard_http_composite_enrich` in `server_dashboard_http_composite.mli` via `include module type of`. (#43079, #43678)
+- Move `Keeper_registry.restore_supervisor_state` into `Keeper_registry.For_testing` and update its docstring to reflect that production restarts update the replacement lane through `update_entry_exact_for_lifecycle`. (#43015, #43682)
+- Allow Lane image CI to build one explicitly selected package from the discovered package set. (#43683)
+- Build Config model rows from server-parsed Runtime declarations tied to the original source path and revision, removing client source reparsing while preserving repairable source and independent observation failures (#43690)
+- Derive `keeper_owner_stage` in one place in `keeper_message_waiting_positions`, document why `Settled` on a failed stream stays in `Rechecking`, and clarify the `/queue clear` left-waiting summary and guide table row to include operations the server already answered as ended. (#42811, #43693)
+- Save edited Keeper settings asynchronously with persistent progress, original input and write outcomes; explicit recovery reloads current settings and restores changed values for review (#43694)
+- Deliver workspace-verified Board posts and hearths independently under separate dataset slots in the same original request, retaining sibling ownership, pending Board state and terminal fallback without replaying early data or adding HTTP calls. (#43724)
+- Preserve Board census availability and failure evidence with retained values, qualify refreshing/stale counts in the census row and palette, and use totals only after receipt without a pending census; record missing terminal results and clear census candidates on workspace withdrawal without adding reads. (#43736)
+- Store Board posts and availability in one typed observation, distinguish initial loading from unread/empty/failure, retain rows and selected identity through rereads, preserve list failure during detail enrichment, and qualify retained list/sidebar/palette observations without extra reads. (#43746)
+- Return Task Skill selection and its matching preparation together for executable setup, effective surfaces and Composition continuation, removing the repeated post-binding validation while preserving exact authority, Task provenance, errors, weak reuse and preparation observations. (#43767)
+- Model exact per-message Librarian unread evidence without treating omissions as successful reads. Preserve the existing eight TLA bug witnesses and add recorded-message and refusal-authority counterexamples. #43768
+- Resolve fresh Task Skill references and their matching preparation together for effective Tool surfaces and Composition continuation, removing redundant post-resolution binding checks while preserving existing-selection authority, original provenance, typed errors and preparation observations. (#43770)
+- Derive stable Composition dependency layers with immutable dependency counts and successor edges, retaining original node order and compiler operands while removing repeated graph scans. (#43809)
+- Index original Composition ordinals, schedules, Serial predecessors and outcome/file-preparation promise owners within their existing execution scopes, retaining original order and independent run ownership while reducing repeated linear lookup. (#43811)
+- Prepare original Ask buffers only when needed by one compact render's fit or output, reuse those buffers for height and display, skip unusable reason construction, and pass explicit editor snapshots without sharing work across frames. (#43818)
+- Derive shared exact Task Skill availability and refusals once per frozen selection row and distribute them to observed Task owners in direct/unified prompts and dashboard preview, preserving policy, empty Tasks and original pin ownership. (#43822)
+- Index Task Skill reference merges by exact identity and content revision, accumulate repeated Task owners in immutable sets, and retain first original rows, reference order and Task provenance through observation grouping and frozen rebinding. (#43824)
+- Reuse one original Keeper status projection within each synchronous TUI chat draw for menu/history measurement, folded detail hints and actual status display; document conditional source Before/After counts without claiming measured responsiveness. (#43832)
+- Index original Keeper inflight batch groups by exact execution while retaining representative inputs and reconciliation counts, and share inflight/Activity/interrupt diagnostics within one synchronous TUI frame for budgeting and display. (#43833)
+- Index original waiting-delivery and priority-receipt membership by exact request ID, Keeper and message while retaining original input chronology, persisted-consumption rules and provisional/failure precedence. (#43835)
+- Coalesce durable owned-job result hints into controller-owned Composition discovery, retaining fresh follow-up demand and original authority; validate the notification switch and expose logical drain observations without claiming measured latency or Task progress. (#43837)
+- Reuse indexed original Composition file-preparation leaves, member contracts and predecessor lists while retaining exact plan/node/input authority, physical file checks and resource ordering. (#43840)
+- Bind original Composition plan nodes and contracts once during tool validation, reusing indexed contracts for preparation and execution while preserving first refusals, fresh reconstructed plans and exact output ownership. (#43841)
+- Remove the separate serial identity GET from Task, Goal, Keeper Calls and retained-browser list reads while preserving actual workspace admission and original response ownership. (#43849)
+- Tools panes show their own initial read, refresh and retry state while
+  preserving existing observations. The registered catalog reports a tool count
+  only after the inventory has been observed; unread data is no longer shown as
+  zero registered tools (#43875).
+- Project verified completed tool-call arguments through the official Codex, Claude, Antigravity and Muse Start/reseed paths using the prepared recovery-reader surface, while leaving Resume history held by its client. Preserve exact history authority when current goal media is projected and publish range observations only after successful source projection. ([#43909](https://github.com/jeong-sik/masc/pull/43909))
+
+### Removed
+
+- Retire the duplicate IDE tool-event writer and project committed canonical tool facts through the indexed IDE endpoint (#43473).
+
+### Fixed
+
+- Antigravity CLI turns now pass through a shared admission gate: at most 8 concurrent turns run at once (waiters hold no file descriptors and fail with a typed refusal after a 120s budget), every turn is observed under `Fd_accountant.Provider_cli`, and a child past 16,000 open files — or unobservable under fd pressure while alive — is failed with a dedicated `Child_fd_ceiling_exceeded` error instead of inviting blind retries. Tool phases carry a 2h idle backstop (typed `Timeout`) so a wedged tool cannot hold its spawn slot forever; silence there is the protocol, so the bound sits far above healthy tools. Bounds derive from the 2026-10-16 ENFILE incident: 7.5k files healthy, 26k-45k sick (#43362, #43259, #43256).
+- An autonomous Keeper wake that allows silence now settles a completed Muse
+  turn with no message as a quiet final instead of rejecting it as no
+  progress, and a Muse turn whose final message a view gap may have dropped
+  fails instead of reading as silence (#43418).
+- Keep overlapping fiber span scopes separate while preserving explicit ancestor annotations. Document and verify the shared synchronous Context boundary in Eio. (#43421)
+- Preserve typed provider refusal and content-free policy/truncation stops through Chat and Responses parsing, while retaining empty overflow, unknown-stop and missing-tool recovery classification (#43427).
+- Keep original saved questions visible and answerable while their Keeper is offline. Question inventories now use canonical durable logs and retain read failures instead of reporting an incomplete empty list. (#43442)
+- Keep Ask answer recording and wake-delivery state ahead of long choice labels in narrow terminal notices. Display human choice labels alongside their selection marks and keys while preserving original choice IDs in answer requests. (#43448)
+- Preserve the last successful Work Goal snapshot, selection, detail scroll and unfinished drop-reason input when planning refresh fails, while disarming pending lifecycle commands. (#43459)
+- Show snapshot provenance and refresh/workspace uncertainty on both Goal list and detail. Keep verifying counts unknown until authority and the planning read are confirmed. (#43459)
+- Clear the prior planning error with its workspace source and record retention metadata without Goal or draft text. (#43459)
+- Preserve original Ask answer inputs, trace and Keeper turn through async Composition continuation; distinguish fresh result rechecks from duplicate Tool records using physical invocation identity. (#43465)
+- Bind documented GLM thinking controls to exact provider/model capabilities and reject unsupported disable requests even when reasoning history is preserved (#43466).
+- When `EINTR` escapes the Eio scheduler loop (`clear_event_fd` in the locked eio 1.3 does not retry the wake-up pipe read), the server now logs a `[FATAL] scheduler EINTR` report — pending shutdown signal, pid, uptime, live sessions, versions, backtrace, plus pointers to the issue and the unreleased upstream fix — instead of dying with a bare uncaught-exception dump. The catch matches `EINTR` only and the fatal path never blocks (#43470, #43225).
+- Commit immutable tool attribution, physical turn references and canonical execution identities before downstream observers, with a rebuildable indexed uniqueness witness (#43472).
+- Require canonical execution IDs throughout the IDE API decoder and activity cards, preserving exact focus identity across refresh and reload (#43474).
+- Keep startup, periodic and individual dated-store age pruning within held no-follow physical directories while preserving configured BasePath aliases and existing retention declarations. Report and skip a leaf removal failure so later stores still prune (#43478).
+- Model separate committed HITL decisions, durable wake acceptance and process-local signals, with production correspondence and negative restart/early-signal checks (#43481).
+- Apply owned Ask, Keeper roster and operator-confirmation read failures before
+  unrelated full-refresh readers finish. Preserve existing failure and request
+  ownership rules, distinguish unavailable question inventory from an observed
+  empty list, and include received/failed outcomes in early application logs.
+  The refresh guide records source Before/After; native timing remains unmeasured. (#43484)
+- SearXNG catalog review leftovers: the settings directory is now host-global (`$XDG_DATA_HOME/masc-searxng`, else `~/.local/share/masc-searxng`) instead of per-workspace; the default `searxng_url` is `http://127.0.0.1:8888` instead of `localhost`; readiness requires the SearXNG search envelope and caps probe responses at 256 KiB; `docker run` carries `--cap-drop ALL --security-opt no-new-privileges:true`; decorative `server.bind_address`/`port` lines are gone and the script/catalog settings bodies are pinned equal (#43485, #43181).
+- `scripts/install-local-build.sh` now reads every durable store of the
+  workspace with the new build's `validate-stores` after `runtime.toml`
+  passes, and installs nothing when a store is refused, as the deploy
+  preflight does. A stored-format hard cut no longer installs past the
+  operator's "Fresh state required" step (#43487).
+- Display stored Board recipients against current effective Keeper addresses, including configured aliases and explicit unavailable readings after cached responses (#43488).
+- An autonomous Keeper wake that allows silence now settles a thinking lane's
+  reasoning-only `EndTurn` reply as a quiet final (`shape="thinking_only"`)
+  instead of rejecting it as no progress and rotating the lane. The
+  autonomous turn's replay persistence already drops that reply, so it never
+  reaches the next request (#43493).
+- A strict event queue replay of a state this server already wrote and
+  published writes nothing and publishes nothing. The Ask recovery pass
+  replayed 94 answered Asks of stopped Keepers on every maintenance tick,
+  about 5,500 snapshot rewrites, SSE broadcasts and Librarian jobs an hour
+  (#43495).
+- `masc setup` and the install wizard now run every `--base-path` child without the terminal's `MASC_BASE_PATH`/`MASC_CONFIG_DIR`, so wizard-spawned workspace commands open the same `runtime.toml` the started server reads instead of the override's. Children without `--base-path` keep the inherited environment (#43497, #43144).
+- Qualify the scheduler-EINTR handler's root-library modules in `bin/main_eio.ml` so `Main minimal build` compiles again (#43501).
+- Relay pool-submission cancellation to the accepted worker invocation and join entered cleanup before the caller finishes cancellation. (#43507)
+- Propagate shared executor failures without replaying effectful callbacks inline; retain strict work/infrastructure failure classification. (#43507)
+- Serialize schedule-note load, identity allocation and publication under the existing ledger lock, and report unreadable-store or persistence errors as runtime failures while preserving genuine schedule absence as a workflow refusal (#43510).
+- Preserve content-free refusal, filtering and truncation outcomes through sync, streaming and cached completion boundaries while retaining typed empty-turn recovery for other stops (#43512).
+- Preserve each native Responses message phase and multipart boundary through canonical assistant history, actual admission filtering and Keeper checkpoint normalization. (#43520)
+- Retain native Responses output grouping through streaming, validate completed function calls with the existing strict decoder, and compare repeated encrypted reasoning objects without treating JSON key order as identity. (#43521)
+- Report an invalid or unreadable Wiki root as unavailable instead of an empty listing, and return typed filesystem failures from Wiki tools. (#43524)
+- Memory facts split-pane rows fit the inner frame width without right-edge `…` clipping, align horizontal dividers and full-width selection bands across both panes, bound category previews by display cells, and omit the disabled `d:Category pane` footer hint on narrow terminals (#43525, #41246).
+- Resume a Keeper chat operation after an empty `MaxTokens` response only when its tool results were newly saved; preserve the original path and require MASC's typed live error at the Agent Core boundary. (#43527)
+- A Keeper's in-memory event queue is now one cell per Keeper, shared by
+  every registry entry the Keeper gets. A registration fills it under the
+  queue owner lock and every commit publishes to it under the same lock, so
+  a commit that landed between a registration's read and its install is no
+  longer missing from the entry until the Keeper's next commit (#43529).
+- Work/Planning summary counters (`Goals:`, `Backlog:`, `Baseline/Current snapshot`, and `Change from baseline`) pack as atomic clauses with 2-cell left indentation on narrow terminals, preserve `Change from baseline` when vertical rows are tight, and align `Work / Tasks` indentation, divider grouping, and overflow window indicator (#43530, #40947).
+- Keep the caller's original timeout budget and start epoch together across typed command substitutions, so elapsed time is charged once and valid child output is retained (#43532).
+- Preserve pending chat input delivery state across consecutive inputs, keep Korean delivery labels untruncated in narrow Origin_inline gutters, and retain the persisted execution source identity in /tools full diagnostics and /find search for batched turns. (#43536)
+- Extract `Masc_tui_message_layout.truncate_middle` to deduplicate unpadded middle truncation across TUI surfaces, restore the top border rule on Usage Trend and Workspace studio cards, remove inline right padding in Lanes quota scopes and Git Changes rows, and keep Tools `skill_usage_box` side borders from inheriting row content styles. (#43539)
+- Keeper queue receipt and event projections use fixed safe error messages, stable codes and correlation IDs while private operation diagnostics retain their original detail (#43540).
+- Redact Keeper-scoped exact secrets before public journal and receipt projection, and separate operation-control, replay and settlement errors from their correlated operator diagnostics (#43541).
+- Redact captured Keeper credentials before autonomous failure diagnostics enter the operator log, retaining their actual turn correlation. Redact settled-operation diagnostics with the current Keeper snapshot. (#43541)
+- Apply the safe public error projection before Discord and Slack delivery, and accept correlated interrupt errors in the Dashboard while rejecting contradictory control receipts (#43542).
+- Document that public replay persists the safe event copy while the original event and private operation failure retain diagnostics (#43542).
+- Redact captured Keeper credentials in interrupt-failure diagnostics and verify actual autonomous log/journal privacy across credential rotation (#43542).
+- Fix Task verification prompts so stored evidence bodies cannot bypass the existing transport omissions. Preserve the rich audit snapshot and frozen collaboration lookup while assembling reviewer input through one pure boundary (#43544).
+- Retain a direct failure's original turn reference after return, exception or
+  cancellation so expanded chat details can locate its saved preparation even
+  before a reply receipt exists. Conflicting or unobserved identity stays unknown (#43546).
+- Refresh only the selected unsettled operation on detail expansion and the
+  existing turns-observation cadence when the failure notification arrives before
+  durable settlement. Known terminal metadata ends this additional refresh (#43546).
+- A Lane Add-on no longer stays `failed` after a server exit or a Docker engine switch. The container engine is recorded before the first create, and a missing container is believed only when that engine says so. A container in the shared writer slot is cleared when it belongs to this base path (this run or a dead earlier run) and is named, not removed, when it belongs to anyone else (#43548).
+- Detach removes the declaration only after the container release is confirmed, and waits while a start that owns the create is still running (#43548).
+- The startup sweep removes worker containers a dead server left behind, found by the base path label. A removal the engine refused is tried again on the next beat (#43548).
+- Lane failures are typed, and one function decides from the cause whether to retry or wait (#43548).
+- DOS: `masc_dos_load` and `masc_dos_restore` refuse unless `discard_previous_autosave=true` is passed when `autosave` and `autosave-prev` both exist. A new incarnation's first autosave replaces `autosave-prev`, so two unconfirmed loads used to destroy the campaign. Restoring `autosave-prev`, or a lane with only one of the two files, never asks. The answer for a lane without a machine leads with `masc_dos_restore` when an autosave exists (#43549).
+- DOS: the previous autosave is kept by copying it, and a copy that fails is reported as `Autosave_failed`. Manual saves cannot target the lane's autosave slots. Checkpoint writes flush and close with the error raised instead of dropped (`Fs_compat.write_all_and_close`) (#43549).
+- DOS: a load whose boot makes the core raise is answered as a load with a faulted boot. Program images the loaders cannot place are refused up front: a `.com` image over 65,278 bytes, an image with the ZM signature, and an inventory file that is not `.exe` or `.com` (#43549).
+- DOS worker: handler exceptions are contained at the worker edge, and an unreadable program inventory is reported as a result. `masc_dos_peek` parses its address into a bounded type, `masc_dos_pass` refuses an empty recipient, and `masc_dos_click` accepts the whole mouse button mask (#43549).
+- MSX: a checkpoint refused before it had any effect settles as `Refused` instead of `Unknown`, so a refused save no longer leaves the terminal waiting. A failure whose effect is unknown still settles as `Unknown` (#43550).
+- MSX: the tick route and the terminal share one refusal codec, and the terminal shows a refusal as a sentence. A down worker is told apart from an empty inventory (#43550).
+- MSX worker: file errors and out-of-range addresses no longer end the worker, and a contained exception is logged with its backtrace. `masc_msx_peek` and `masc_msx_ram_diff` answer addresses in the hex spelling peek reads (#43550).
+- MSX: `masc_msx_load` requires an image, a machine without a BIOS refuses to boot one, and a cartridge resolves by inventory name only. The first disk export creates the disk catalog (#43550).
+- Refuse offline tool blob collection when a registered durable source cannot be decoded, with its path and line. Preserve the previous GC candidate snapshot and blob payloads on parse failure; keep canonical raw marker and JSON/JSONL references unchanged. Refs #26178. (#43557)
+- The TUI context inspector lines up its token columns on the stack and proof tabs, and the proof tab's drawing, j/k count and Enter read the same turn record (#43561).
+- Private structured-response failure evidence now records the exact parser invocation, candidate runtime and attempt, exposing a reference only after the 0600 record commits. Missing workspace and failed storage are explicitly unavailable. (#43567)
+- Vision retains bounded original-response evidence for every failed candidate, including failed attempts before a later success, with the supplied parent tool and trace identity. (#43568)
+- Fusion judge parse failures retain the original response before fence removal and preserve token usage, while public failures carry only the closed class and committed evidence reference. (#43569)
+- A permanent regression drives the actual public Fusion judge and seat walk through three controlled local CLI responses, checking that two earlier private evidence records and their exact failed-seat references survive the final answer and all usage is retained. (#43569)
+- Preserve the host-observed original asking Keeper turn through Tool dispatch, canonical question storage, operator HTTP and durable answered input. Keep related decision Task/Goal references independent and unobserved sources explicit (#43576)
+- Stop resumed Composition from filling missing original source coordinates with its current run, including nested source capture, and admit `masc_ask` in prepared compositions (#43576)
+- The resolved approval history reader accepts the origin and reply route that approval audit rows now carry, instead of rejecting every row written since #43423 (#43578).
+- Give MicroVM sandbox shim executions a writable guest `HOME` (`/tmp`) and forward the Keeper's derived `GIT_CONFIG_GLOBAL` credential helper configuration so `gh extension install` and `git push` work inside MicroVM guests (#43582).
+- Align `Keepers ▸ logs` non-overflowing frame height (`rows` instead of `rows - 1`), add connection badges to `Keepers ▸ logs` and `ACTING EVENT EVIDENCE`, wire `bindings_acting_evidence` into the footer and `?` help sheet, pass scroll window positions to `MASC Log detail` footers, and remove duplicate spaces on compact Dashboard candle health lines (#43589)
+- Framed the empty-selection fallbacks in `render_keeper_detail`, `render_keeper_logs`, and `render_keeper_message` (`state.keeper_cursor >= List.length state.keepers` / `state.msg_target_keeper_name = None`) with box chrome, screen title, `connection_badge`, receded `"  No keeper selected."`, and footer hints (#43594).
+- Omitted the `e:model settings` footer and help hint on the `Runtime_routes` (`v:routes`) detail view where `e` does not apply (#43594).
+- Standardized 2-cell indentation and `Theme.recede ()` styling across `keeper_detail_pane`, `render_runtime_detail`, `render_clients`, `render_metrics`, `render_memory`, `render_verification`, `render_repositories`, `render_connectors`, and `render_lane_run_list` scroll position / overflow rows, and factored `render_lane_scrollable_reading` in `bin/masc_tui_render_lanes.ml` (#43594).
+- Replaced hardcoded `max 1 (body_rows - 5)` in `browser_lane_visible_rows` and `browser_history_scroll_limit` with `framed_content_height ~rows:body_rows` and updated `render_browser_lane` and `render_browser_history` bottom text position rows to show `Masc_tui_scroll.window_text` ranges (`Text 1-30/500`) (#43601).
+- Added `~frame:Chrome_overlay` and `Masc_tui_scroll.normalize` to `render_lane_addons` and deduplicated all 5 `Lane Add-ons` scroll handlers into `scroll_lane_addons` in `bin/masc_tui.ml` so `J`/`K` and `PgUp`/`PgDn` clamp at `max 0 (count - height)` (#43601).
+- Re-export `Server_keeper_chat_public_error.t` record fields on `api_error` and annotate `For_testing.parse_mutation_body` in `lib/server/server_dashboard_http_keeper_chat_operations.ml` so `main` compiles cleanly after `#43540` (#43604).
+- Run the maintained native Kimi Code CLI (`2.2.0`) with verified `stream-json` execution evidence for the Terminal-Bench `kimi_coding` baseline instead of Harbor's retired PyPI `kimi-cli` package, preserve explicit same-model media input routes in `render_configs.py`, and isolate per-matrix job results while excluding tasks whose `allow_internet = false` policy the host Docker kernel cannot enforce (#43605).
+- Match recursive `#/$defs/template` `$ref` fields via `List.assoc_opt` in `Keeper_composition_draft.without_recursive_refs` so objects with sibling keywords in any key order are replaced by the non-recursive placeholder (#43606).
+- Handle SQLite files in durable blob-reference scans: skip the derived tool-call read index (`read-index.sqlite3` and `-wal`/`-shm`/`-journal` sidecars) and inspect authoritative Keeper chat-operation stores (`keepers/<keeper>/chat-operations.sqlite3`, including queued/running/terminal operations, frozen batch-member original inputs, semantic executions, and prepared Gate checkpoints) through `Keeper_chat_operation_store.inspect_durable_records` rather than raw JSONL parsing (#43610).
+- Bind inspector search, lazy parts, token scale and response counters to the inspected target; omit current next-request forecasts and runtime configuration from pinned historical turns (#43613)
+- Fix TUI chat acceptance decoding to require the current public interrupt error fields and validate their operation identity, preventing valid receipts from entering repeated reconciliation (#43615).
+- Read exact retained Keeper turn transcripts through the shared I/O pool beyond the recent history window, with descriptor-bound pages, one redaction snapshot and canonical delivery-key user joins. Preserve storage, identity and incomplete-read failures instead of returning empty transcripts (#43616)
+- Bind TUI and Dashboard transcript decoding to the requested Keeper, full Turn_ref and v2 schema; retain request failures as typed observations rather than Keeper speech. The request tab retains a response preview; full-response reading and measured runtime behavior remain follow-up (#43616)
+- Link `masc_core` in `masc.keeper_chat_operations` and match `Keeper_semantic_execution.recovery_origin` and `gate_preparation_source` exhaustively in `Tool_blob_maintenance` (#43618).
+- Schedule cold/reconfirmed TUI workspace directory reads on the shared I/O worker before releasing initial identity admission. Bind observations to workspace authority, base path and one source request; retire stale results and distinguish failed reads from unread/empty state (#43619)
+- Resume saved chat opening, retained Task followups and eligible queued input after admitted local metadata. Keep input authorization gated on an observed local directory, serialize the shared metadata cache, and record request-bound dispatch/observation receipts; runtime responsiveness and latency remain unmeasured (#43619)
+- Restore `bin/masc_tui.exe` compilation after `#43611`..`#43617` by linking `masc_tui_terminal_palette` in `masc_tui_render_prim`, disambiguating `provider_input`/`exact_reading` record fields in `bin/masc_tui_context_inspector.ml` and `bin/masc_tui_http.ml`, and making pattern matches in `inspected_record` and `context_response_summary` exhaustive under `-w +4`. (#43620)
+- Read required TUI Keeper metadata independently of agents, tasks, archive and goal observations, with separate pending tickets, immutable payloads, cache locks and failure states. Input availability, saved chat opening and retained Task handoff follow Keeper metadata rather than Work completion (#43621)
+- Bind local observation admission and diagnostics to source as well as workspace, path and request. Equal numeric tickets cannot cross source owners; late Work results cannot replace Keeper rows or replay metadata-dependent input wakeups. Runtime and latency effects remain unmeasured (#43621)
+- Read selected TUI live context on the shared I/O worker after metadata admission and Keeper navigation, with workspace, base-path, Keeper, trace and request ownership. Chat context follows the explicit conversation target; late, duplicate or suspended reads cannot overwrite a successor (#43622)
+- Preserve the last same-owner context observation during refresh and retain failed-refresh evidence. Source diagnostics distinguish dispatch, worker return, supersession and UI admission; runtime responsiveness and elapsed-time improvements remain unmeasured (#43622)
+- Link `masc_tui_fetched` into `masc_tui_context_state`, `masc_tui_render_chat`, and `test_tui_context_state`, and link `masc_tui_context_state` into `test_tui_server_identity_refresh` after `#43622`. (#43625)
+- Move explicit TUI local reloads after creation, Keeper actions, chat completion and refresh onto independently owned I/O jobs. Creation requests Keeper metadata only; stale pre-action completions and old worker cleanup cannot replace a new source owner. Last observations, creation drafts and metadata-dependent input continuation are retained (#43626)
+- Release local cache locks before propagating read failures and cancellation so Eio does not poison the source mutex for later reads. Diagnostics distinguish poll and explicit refresh; runtime recovery and latency effects remain unmeasured (#43626)
+- Unnest `response_source` pattern match in `context_response_summary` (`bin/masc_tui_render_prim.ml`) to eliminate `-w +4 [fragile-match]` warning. (#43627)
+- Coalesce TUI local refresh demands into one follow-up while the current read completes, retaining newer demand after success or failure. Track creation freshness per Keeper so earlier metadata cannot admit new input or close a pending created chat; separate creations retain independent barriers (#43628)
+- Scope metadata and archive caches to actual file paths, preventing equal-name or equal-stat entries from crossing workspaces. Diagnostics distinguish read demand coverage and queued follow-up; runtime effects and latency remain unmeasured (#43628)
+- Separate process-start admission windows (`window_outlasting_process_start_s`) from short post-init and timeout assertions in `test/test_runtime_antigravity.ml` so `no deadline starts after init`, `progress resets stream idle timeout`, and unread-prompt admission cases do not fail on macOS shell startup overhead (#43629, #43596).
+- Synchronize the unbounded-turn fixture with the observed init callback before starting silence longer than admission, so retaining the admission limit after init is still detected (#43629).
+- Document the inode-reuse (ABA) assumption on `durable_confirmation` and clear `durable_confirmations` alongside `snapshot_cache` in `forget_snapshot`, `read_primary_current_unlocked` (`Primary_absent`), and `For_testing.reset_snapshot_cache_for_testing` in `lib/keeper_runtime/keeper_event_queue_persistence.ml` (#43630, #43555).
+- Reuse the already-loaded `next-request` forecast when stepping between turns (`[` / `]`) in the TUI Context Inspector (`bin/masc_tui.ml`, `bin/masc_tui_http.ml`, `bin/masc_tui_context_inspector.ml`) so turn navigation does not re-fetch `/api/v1/keepers/:name/next-request` (#43634, #43592).
+- Preserve bootstrap credential I/O errors in `Auth_oauth.live_bootstrap_allows` (`load_credential_checked`) so transient read failures surface as `Store_error` / `IoError` instead of permanently revoking OAuth refresh families (#43637, #43338).
+- Run TUI Keeper creation identity checks and POST requests asynchronously, retaining original request outcomes and unresolved declarations across workspace withdrawal. Distinguish refusal from unconfirmed effects, preserve newer forms and input focus, and retain metadata coverage before enabling the new Keeper's input. Runtime responsiveness remains unmeasured (#43638)
+- Refuse `user:password@` userinfo credentials in `web_search.searxng_url` / `MASC_SEARXNG_URL` and redact any authority userinfo to `[REDACTED]@` when displaying `searxng_url` or refusal diagnostics in `masc web-search-setup` (#43640, #43143).
+- TUI alphaTex: 선택한 트랙만 MIDI로 생성하여 같은 MIDI 채널을 쓰는 드럼 파트도 각각 재생합니다. (#43641)
+- TUI: 새 Keeper 채팅의 메타데이터 대기를 판단할 때 모든 Keeper 모드를 명시해 엄격한 경고 설정에서 컴파일되도록 수정합니다. (#43641)
+- Surface retrying orphan container sweep refusals (`Lifecycle.Retry`) in `Lane_addon_runtime` configuration status with cause and first-refused timestamp, and deduplicate unchanged refusal `WARN` logs across beats (#43580, #43644).
+- Read selected Keeper metrics asynchronously for detail, Logs, refresh and cadence. Share active polls, coalesce requested follow-ups, retain same-source observations after failures and reject stale selection/workspace responses. Activity summaries distinguish missing, partial and failed observations; read-only setup no longer initializes writer directories. Runtime responsiveness remains unmeasured (#43646)
+- Sort `/api/v1/keepers/asks` fleet responses deterministically by `keeper_name`, include the unreadable file path in 503 responses, index `answer_sources(ledger_path, ledger_offset)`, and log `Task_unavailable` / missing `source_observation` details (#43585, #43647).
+- Revalidate original Composition continuations when their exact pre-intake run evidence is restored or a repaired Task Skill snapshot is published. Typed holds distinguish those read-only recovery hints from worker/journal uncertainty requiring explicit recovery; original run/Task ownership and admission remain authoritative. Runtime resumption remains unmeasured (#43650)
+- Preserve the full alphaTex pickup, grace, tempo and repeat timeline when soloing tracks, including percussion parts sharing a MIDI channel. (#43651)
+- Sweep Antigravity disposable HOME roots only after their creator and recorded foreground process group have exited; preserve surviving clients, same-group tools, and unconfirmed spawn ownership after a server crash (#43405, #43652).
+- Lane add-on action dispatch now explicitly identifies its worker connection, avoiding a compile failure caused by the shared `container_id` field on sweep retry records. (#43654)
+- Restore TUI compilation by resolving the Keeper record type before reading its log-cache identity. (#43655)
+- Read Ask follow-up wake/turn, Tool and original Task evidence independently. Reaction storage failure no longer hides available Tool/Task observations; typed source states retain earlier facts with explicit freshness, including after whole-refresh failure. Update the opt-in wire projection, TUI and skill guidance together. Runtime behavior remains unmeasured (#43657)
+- Render inline chat TAB for alphaTex scores that declare a fretted instrument with a standalone `\instrument` directive and explicit tuning. (#43659)
+- Resolve nested Ask follow-up constructors by typing reaction, Tool-action and original Task merge inputs. (#43664)
+- Deduplicate Librarian queue-refresh warnings (`durable_drain`, `unread_count`, `explicit_admission`, `memory_cleanup`) per runtime directory, Keeper, and site, skip the redundant `measure_unread` metadata lookup when durable drain just stopped with `Keeper_meta_absent`, and suppress repeated `answer wake durably pending; live hint deferred` logs on `Stimulus_already_present` maintenance sweeps (#43669, fixes #43350).
+- Fix TUI runtime configuration form compilation by making save/recovery matches exhaustive and qualifying the account declaration text field (#43675).
+- Fix fatal TUI compiler warnings by covering runtime form save messages and explicitly matching save statuses in key handling (#43679).
+- Restore the release note for Runtime source preparation after its implementation merged before the fragment push (#43676, #43680)
+- Clarify `Wiki_lint_report.Stale_cursor` error wording in `masc_wiki_lint` so it mentions both wiki changes and `kind`/`page` filter differences from the call that issued the cursor. (#42972, #43681)
+- Validate non-base-path folder/file flags (`--masc-root`, `--runtime-config`, `--store-dir`, `--config`) through `masc_base_path.require_subpath` so unexpanded leading tildes (`~`) and blank flag values are refused consistently. (#42818, #43691)
+- Sequence Apple volume deletions explicitly in `Keeper_sandbox_microvm.remove_apple_keeper_volumes`, use the `Io` shell timeout bucket for `remove_keeper_volumes_by_name`, and resolve `repo_path` via `Unix.realpath` when filtering the main checkout in `Keeper_bundle_worktrees.worktree_paths_of_porcelain` (#43696, fixes #42879).
+- Supply a freshly observed config revision for asynchronous Sandbox backend shortcuts, retain the selected profile and write outcome, and skip POST for an already observed matching profile (#43697)
+- Align `dashboard/src/sse.test.ts` and `dashboard/src/lib/keeper-response-state.test.ts` expectations with `KEEPER_STREAM_PROTOCOL_ERROR` (`sse_parse_failed`) diagnostic projection (#42634) and post-attempt floor stop handling (#42663) (#43698, fixes #43089).
+- Keeper Runtime picker assignments retain their original selection, snapshot, revision and owned progress/outcome through navigation or workspace withdrawal; same-Keeper Settings/Sandbox/assignment writes share pending ownership, and uncertain saves no longer imply a proven refusal or current-turn Runtime switch. (#43700)
+- Retain last observed Runtime catalogue rows and refresh failures during retry, resume nested catalogue demand after workspace reconfirmation, and distinguish successful empty Keeper catalogues from loading. (#43706)
+- Keep the Keeper turn transcript HTTP test in its dedicated Dune stanza, removing duplicate grouped registrations that prevented targeted tests from building. #43709
+- Preserve multiline Lane Addon documents and make long help pages scrollable in the TUI. #43721
+- Preserve named Librarian provider input refusals across slot fallback and later failure reports so continuity stop logs retain their actual causes. #43725
+- Preserve classified Librarian refusal reports through durable commit results while retaining Memory-only cursor advancement and restart recovery. #43733
+- Read oversized Memory-covered Librarian ranges one message at a time, retaining intermediate continuation state only in memory and publishing the original atom boundary after complete success. #43739
+- The TUI's journaled-turn decoder reads the journal's public-projection bytes like the server does, so a reloaded turn and a watched turn show the same protocol-error diagnostics (#43748).
+- Read-route workspace-precondition refusals carry the standard `code` field next to `error_code`, matching the documented refusal vocabulary (#43748).
+- Keep the original sort and hearth with Board list results, including empty and retained observations, so filter changes do not relabel older rows, age semantics or census totals; preserve dataset ownership, detail and compose continuity without extra reads. (#43750)
+- Retain exact unread-message evidence in a cumulative Memory sidecar before replacing receipts or acknowledging external reads, including interrupted recovery and source-hash validation. Message skipping remains disabled pending the remaining #37850 work. #43760
+- `dune build` on main again compiles the libraries: the cached-input and coverage folds enumerate every `Keeper_decision_outcome` constructor, the unread-count pass names every durable-consumer stop reason behind `Stopped`, and the stale panelist-HOME sweep binds its `Sys_error`/`Unix_error` handler through `try … with` (#43673, #43669, #43652 follow-ups). #43764
+- Keep inference failure/cancellation observation out of Memory publication recovery, and show successful, failed and cancelled inference runs with an explicit TUI scope rather than a stored-Memory result. #43772
+- Record Ask answer canonical reread admission independently of the once-retained POST receipt, and attribute workspace check, POST and reread observations to the original submission without changing answer effects, draft ownership or wake semantics. (#43779)
+- Preserve Ask answer Results in their original request before mailbox publication can block, let canonical reread proceed without an early queue wait, and recover each receipt through existing UI ownership while retaining cancellation and workspace-withdrawal facts. (#43782)
+- Keep Librarian absorption and revision sources when their destinations lose premise support. Recompute supported facts after withdrawing invalid removals, preserving stored fields and missing-source refusals without reactivating withdrawn removals. Use the same settled result for Memory publication and ordered staging. #43783
+- Cover stale retirement after withdrawal and reobservation, and refusal of explicit input consumption when its required destination loses support during the same commit. Check durable snapshots, journal, receipts, publication, absorbed rows and commit observers. #43783
+- Preserve final Ask receipt and reread outcomes before cancellable notification, recover them with their original workspace/read scope through the existing operation projection, and prevent duplicate terminal settlement without borrowing current read authority. (#43784)
+- Deliver retained Ask, Runtime and Keeper outcomes after finite FIFO prefixes so new shared traffic cannot indefinitely extend their wait; preserve the original request/authority guards and shared input-drain deadline across paused rounds. (#43787)
+- Preserve frozen Librarian unread evidence through request range selection, capacity floors, provider failover and custom projections. Native resumes explicitly update empty or unavailable observations and retain their acknowledged identity. Keep original source hashes in forecasts and request diagnostics. Message-floor skip activation remains separate work for #37850. #43793
+- Hand already-decided TUI input past startup capability waits while preserving the same decoder and late palette, theme, query graphics and cell-size observations; image, portrait, MSX and score consumers use current capabilities. (#43797)
+- Process a Memory-uncommitted atom one message at a time in the Librarian continuity Queue and publish its ordered decisions only at the original atom boundary. Preserve exact unread hashes and named causes from exhausted API walks, judge remaining host observations separately, and retain holes through source-locked publication, continuation recovery and durable progress. Official-client turn production remains separate work for #37850. #43798
+- Preserve exact unread messages and named causes in Memory-covered Context-only continuation too. Keep new holes volatile until original-source locking and snapshot CAS publish the complete range; retain the prior state or obtain a real empty-input continuation when every message is unread. Keep existing callers and continuity fixtures aligned with this producer. #43798
+- Read a refused official-client Librarian turn through exact, ordered message decisions and publish once at its original boundary. Retain proven unread messages without invented summaries, serialize real fragment writers with source revalidation, and preserve unread evidence through external acknowledgement and cursor recovery. #43801
+- Process a refused durable Agent Core checkpoint cut through ordered message decisions, including a prior trace. Preserve original atom-local source hashes and typed unread holes, reject rewritten message prefixes or changed history generations under the selected checkpoint lock, and recover the original boundary after a progress-write interruption. #43804
+- Let Librarian Queue and durable producers descend to smaller original messages after safe native Codex or Claude input refusals without inventing a measured limit. Preserve invalid-output vetoes across the failed walk and prevent vetoed capacity measurements from fitting input on a later wake. CLI refusals do not authorize unread holes. #43806
+- Preserve historical-source recall through committed Librarian program revision and absorption steps. Keep exact intermediate edge evidence for semantic judgment, retain distinct converging paths, and reject lineage revival after an unlinked retirement or support loss. #43810
+- Exercise exact Context-only unread evidence through real API exhaustion, including single-message and all-unread input, mixed refusals, source replacement, suffix append, prior holes and CLI vetoes ([#43813](https://github.com/jeong-sik/masc/pull/43813)).
+- Cover hole-bearing ordered Memory publication recovery together with external read acknowledgement across snapshot, journal and unread-ledger faults ([#43814](https://github.com/jeong-sik/masc/pull/43814)).
+- Keep a selected Keeper question identifiable when its full block cannot fit compact Approvals, budget hidden notices within actual space, and direct readers to the complete Ask without selecting or submitting an answer. (#43815)
+- Cover refusal bodies that never arrive through real Librarian API exhaustion, preserving unread sources across wakes unless another exhausted candidate names an input refusal ([#43817](https://github.com/jeong-sik/masc/pull/43817)).
+- Decode Librarian CLI inference runs through the actual HTTP detail projection and retain the complete wire envelope when checking invalid inference metadata ([#43820](https://github.com/jeong-sik/masc/pull/43820)).
+- Require both the original Ask and question identities before displaying a free-text editor in the full question reader, matching the shared question renderer while preserving the slot's original save destination. (#43821)
+- Compare preparation captures without rewriting original attempt receipts, retain invalid/missing attempts and reported outcomes, and admit matching pairs only after typed common inputs agree. Add read-only `--report-from` using the same summary reader as normal trials. (#43825)
+- Keep selected TUI preparation scan diagnostics separate from returned-row decoding issues and retain report rejection reasons in terminal-safe details; align Skill guidance and source Before/After documentation. (#43830)
+- Reject cancelled or finished owned-job and Composition recovery scopes before discovery and worker reservation, preventing silent declined forks from leaving original jobs/runs falsely active. (#43838)
+- Keep Task and Goal detail histories bound to the latest read, retain prior observations and failure causes through refresh, and retire their values and requests when workspace authority withdraws. (#43843)
+- Keep the known failure visible during a Task or Goal history retry without prior data, while showing the pending read separately and rejecting superseded completions. (#43845)
+- Bind Task, Goal and Keeper tool-call history reads to the original workspace, requiring server admission before publishing responses or reusing conditional results. (#43848)
+- Declare the workspace reader filesystem dependency explicitly so the extracted module can resolve its execution context with transitive dependencies disabled. (#43848)
+- Bind selected preparation detail to its original workspace and request, reuse admitted conditional JSON reads, and interpret reports through the shared CPU path without a separate identity GET. (#43852)
+- Bind current Keeper-turn polling to its original workspace while preserving asynchronous failure handling and control ownership, and interpret turn rows through the shared CPU path. (#43853)
+- Repair librarian unread-request test compilation, derive summary-fallback capacity with the native window contract, and verify changed, empty and unavailable observations in their complete encoded native carriers (#43855).
+- Start the Tools inventory, Skills catalog and async-request observation independently with their original workspace admission, remove their redundant identity preflights, and interpret each response through the shared CPU path. (#43856)
+- Keep each demoted tool result connected to its exact original payload when tool IDs repeat, the history window drops earlier occurrences, or an attempt replans its history (#43860).
+- Bind Connector status and every directory page to the original workspace, load independent name chains concurrently, validate page ownership, and interpret responses through the shared CPU path. (#43862)
+- Cancel shared JSON observation jobs with their retired read scope while preserving source attribution and synchronous Connector start-failure cleanup. (#43862)
+- Restore compilation after the TUI workspace-read stack merge: explicitly match
+  Inline file scheduling modes and operations, Runtime picker surfaces and Keeper
+  settings save outcomes under warning 4, and read Board fallback rows from the
+  retained listing snapshot instead of the removed state field. Update the Board
+  successor fixture to populate the same listing state. Also enumerate fetched
+  read intents, align the Ask receipt notification interface with its existing
+  implementation and expose its already-used delivery-round API, and use the
+  direct filesystem compatibility module (#43869).
+- Distinguish missing dashboard tool results from failed, denied, ambiguous, and pending exact lookups. Share exact evidence between rows and timeline counts and preserve request ownership across hydration, retries, and credential changes. ([#43920](https://github.com/jeong-sik/masc/pull/43920))
+- Keep the durable confirmations this process recorded when a test resets the event-queue snapshot cache, so a same-binding replay stays a no-op instead of re-publishing and notifying twice. (#44034)
+- Drop two unused imports from the dashboard turn-record reader so the dashboard typecheck passes again. (#44076)
+- Make the test tree compile again under `dune build @check` after the 2026-10-18 batch, including the `masc_tui_loader` library split, so the release type checks can run. (#43765)
+
+### Performance
+
+- A chat or turn events page reads the rows it serves, not the whole journal:
+  paging through a 36.1 MB journal the way the TUI loads a turn puts 151 MB
+  on the major heap instead of 6,086 MB and takes about 0.7 s instead of
+  1.05 s (#43417).
+- Remove a duplicate health request from full and scoped TUI refreshes. The enclosing request verifies workspace identity after all readers settle; collected readings remain separate from the verified result accepted by the UI. (#43447)
+- Let a warm TUI refresh apply workspace-attested operator confirmations before unrelated readers finish. Share the original listing receipt with final delivery, retain workspace/action checks, and record the early state-admission clock without another HTTP request. (#43451)
+- Share repeated node field definitions in composition prepare and run recipes while retaining each call shape. Correct negated required-group and anyOf exclusions in shared Tool input validation so mixed selectors are rejected by the presence check. (#43452)
+- Admit the first ready matching TUI workspace before unrelated surface readers finish. Issue fresh question, approval and Keeper roster requests under the admitted workspace, and open the saved Keeper chat on its owned roster response. Retain the final workspace check and add an initial-admission observation clock. (#43454)
+- Bind inline Overwrite/Append Write leaves to their original physical file resources so independent existing targets and new files under different existing parents can overlap. Preserve real parent creation conflicts, hard-link ordering, original Gate/publication paths and Task/parent receipts. Paths that need parent creation retain ordinary execution. (#43455)
+- Let navigation load its required TUI data while an unrelated full refresh is still running. Keep dataset-specific ownership so late full results and cleanup cannot replace or release newer navigation reads. (#43457)
+- Show the current surface's pending dataset and record source outcomes with request and UI application clocks for Before/After comparisons. (#43457)
+- Start a destination's TUI navigation reads while earlier navigation collectors are still pending. Track each collector independently so late or duplicate completion cannot release another request or restore older identity authority. (#43458)
+- Bind independent log-filter reads to the same dataset owner as full/navigation reads, preventing older pages from replacing the selected filter's result. (#43458)
+- Record navigation collector start, UI settlement, refused authority and remaining collector count separately from data application. (#43458)
+- Inline recipe Overwrite/Append nodes can now retain the deepest existing physical
+  ancestor when parent directories are missing, so writes under disjoint existing
+  ancestors can overlap while shared ancestors remain ordered. Preparation creates
+  nothing; the original Write boundary recomputes missing directories before Gate,
+  retains predecessor bytes for Append, and refuses redirects outside its claimed
+  ancestor. The original Task/leaf receipts, publication recovery and async replay
+  requirements remain authoritative. Feature scenarios are authored but unexecuted;
+  parser checks do not establish runtime performance. (#43461)
+- Share one complete presence inventory per frozen backend route among unchanged
+  held jobs in a maintenance pulse. Each job retains its original authority; a
+  fresh private read scope avoids borrowing another job's CLI. Large inventories
+  use complete pipe captures, and positive visibility still requires full
+  per-job inspection. Source comparison and authored scenarios are documented;
+  runtime speedup remains unmeasured. (#43467)
+- Resolve shared Task Skill references once under the captured Tool descriptors
+  and reuse the immutable selection for identical snapshot/descriptor objects.
+  Changed or mixed inputs reproject with existing stale/unreadable behavior.
+  The Skill flow guide records the source comparison; runtime timing remains
+  unmeasured. (#43476)
+- Share one immutable Skill catalog, diagnostics and inventory preparation across
+  Task prompt surfaces, executable setup, effective Tool projection and original
+  Composition continuation setup. Retained turns survive interleaved preparations;
+  inventory folds exact prepared entries without per-item whole-list searches.
+  Changed source or Tool objects still reproject. The guides record the source
+  Before/After comparison; runtime timing remains unmeasured. (#43480)
+- A checkpoint save returns what reading its own bytes gives, and a read can
+  fill the encoding memo with each message whose encoding is the document's
+  own JSON. The first save after a read then encodes only the new messages
+  and the ones this build writes differently (#43572).
+- A Keeper turn starts from the decode of the checkpoint the Keeper last wrote
+  or read while the file keeps its (device, inode, size, mtime), instead of
+  reading and decoding the whole canonical file. With four 113 MB checkpoints
+  and six turns each, later turns load in 0 ms instead of about 1 s and save
+  in 224-356 ms instead of about 1 s; the store holds about 2.3 times the
+  file size per Keeper (#43573).
+- The Librarian continuity prefix hash runs on the shared CPU pool, so the next-request forecast no longer re-encodes a Keeper's covered history on the main domain (1.2-1.8 s for a 107.7 MB prefix) while every other request waits (#43593).
+- Validate Keeper composition tool names without constructing schema-only Tools, and share the common descriptor/Skill name projection across both model surfaces. Per-Skill byte profiles construct only the declared composition schema; executable schemas and request bytes retain their contracts. Source operation counts decrease; runtime latency remains unmeasured (#43633)
+- Share one immutable Keeper declaration projection among eligible Composition continuation intakes in a maintenance pulse. Later pulses and explicit resumes read anew; per-run ownership checks and typed declaration failures remain separate. Declaration reads use the common I/O executor policy. Runtime speedup remains unmeasured (#43648)
+- Share pending Runtime catalogue reads across catalogue consumers and accumulate explicit refresh/post-save demand into a fresh follow-up, reducing overlapping catalogue requests without adding key-handler waits. (#43706)
+- Prepare Runtime catalogue rows, configured route and checked Keeper assignments from one validated snapshot instead of decoding the snapshot twice; run pure catalogue interpretation through the existing shared response-decode CPU path while preserving validation and independent usage errors. (#43707)
+- Share one response-owned provider-usage interpretation between Overview Runtime catalogue and quota observations while preserving independent early/late catalogue failures, usage errors and quota identity provenance. (#43708)
+- Poll only unresolved original configuration owners while retaining complete immutable histories, uncertainty and recovery gates; skip irrelevant form-footer and absent-focus history searches without changing visibility or input decisions. (#43788)
+- Transfer fully resolved named Inline Write and Read/Write resource claims through the existing outer SDK preparation path, preserving original source, Gate, physical conflict ordering, cancellation cleanup and async replay restrictions. (#43791)
+- Retain producer-owned ready file scheduling inside mixed ordinary Compositions, separating opaque settlement barriers from file/data success dependencies and preparing current physical bindings after those barriers. Preserve original Tool contracts, Gate, receipts and async replay restrictions. (#43794)
+- Reuse one execution-local Composition dependency-layer value for batch construction and ready binding order, avoiding repeated graph reconstruction while preserving original resource, failure, Gate and cancellation boundaries. (#43795)
+
+### Documentation
+
+- Add a reproducible OCaml source census and 24 evidence-backed refactoring candidates with invariants, consumers, scenarios and explicit review limits (#43363).
+- Extend the OCaml refactoring backlog with scoped TUI and Browser source evidence, a Board post completion investigation, and explicit separation of source reading from discovery-only searches (#43400).
+- Extend the OCaml refactoring audit with parser invocation ownership, typed substitution timeout investigation, and declared lane-edit design constraints, keeping source reads separate from discovery and execution evidence (#43414).
+- Publish matched native Ask question and answer-draft frames at normal and narrow terminal widths, with original binary identities, request clocks, retained failed attempts and reproducible collectors. Separate early question usability from full refresh completion. (#43446)
+- Extend the OCaml refactoring backlog with durable stream-media lifecycle evidence, five retained media boundaries and an explicit Board rearm ticket-ownership design, keeping source scope separate from execution proof (#43471).
+- Record the Schedule note transaction investigation and refine the provider usage history extraction boundary, with pinned source evidence and explicit validation limits (#43482).
+- Distinguish generated-media file creation from selective transcript attachment and refine the proposed accumulator state, diagnostic ordering and durable reload scenario (#43517).
+- The glossary now defines "Isolated Job": the Docker-backed work started by `keeper_job_start` with a private workspace, no network, Keeper or host identity, credentials or workspace mounts, only checksum-verified input artifacts, and a durable `job_id` read back by `keeper_job_status`, `keeper_job_cancel` and `keeper_job_result` (#43519).
+- Distinguish executed history/store suites from adjacent unexecuted checks in the OCaml refactoring inventory, and record the exact media validation request and its later focused result (#43528).
+- Refine the evidence refactoring candidate around the complete reviewer input, distinguish stored snapshot checks from transport projections, and specify the missing authority-loop reproduction before implementation (#43538).
+- Synchronize markdown documentation with v0.51.0-v0.58.0 runtime contracts and remove stale command, env, and configuration claims. (#43599)
+- The glossary now has an entry for the `가이드 없음(...)` guideless marker that release notes leave at the end of Added bullets: it names the target document when one is known (`가이드 없음(대상 문서: <path>)`) or says `가이드 없음(문서 없음)` when no document is planned, and `scripts/release/count-guideless-added.py` counts the marker into `guide-metrics-<tag>.md` so the gate decision has the number (#43850).
+
+### Internal
+
+- Separate Memory OS snapshot codecs and consistency validation from persistence, preserving the public API and stored bytes (#43347).
+- Give Memory OS journal encoding, decoding and dashboard row projection a private interface while preserving receipt recovery and append ordering (#43348).
+- Model Memory OS successor recall with immutable revision maps and typed lineage, preserving replay, retirement and provenance semantics; document the responsibility boundaries and remaining refactoring candidates (#43353).
+- Reduce provider usage reports into immutable per-account observations while preserving source-specific snapshot removal, sparse updates and observer delivery after publication (#43367).
+- Classify Librarian failures once into immutable evidence while preserving range sizing, input admission, invalid-output veto and measured CLI capacity callbacks (#43370).
+- Return explicit immutable Goal upsert commits instead of mutable result channels and physical-identity rejection; preserve revision, criterion and audit-outbox behavior. Remove the unused public `Goal_store.update_state` helper while retaining all upsert interfaces (#43374).
+- Extend the OCaml refactoring audit with a stream-error diagnostic boundary candidate, three retained Agent Core ownership boundaries and explicit partial-reading scope (#43377).
+- Separate pure stream-error projection from optional diagnostic file I/O; preserve full-frame redaction and terminal ordering through public HTTP streaming scenarios (#43386).
+- Return Task commit receipts with their verification notification obligations, preserving late projection errors, precommit compensation and cancellation behavior (#43399).
+- Isolate canonical child export selection behind a private pure typed boundary, preserving native async child authority, publication, export order and dependent artifact reads (#43411).
+- Preserve native preparation-stage entry/return evidence and check that exact Task plan Tools are available in the first actual model request without redundant loading. (#43433)
+- Expose opt-in durable Tool commit observations with original execution identities, isolated fiber scopes and explicit delivery failures. (#43437)
+- Record each accepted early question snapshot with its original read request and refresh clock, separating usable UI state from full refresh completion. (#43440)
+- The FIFO authority refusal test arms its 5 s alarm per attempt instead of once over both attempts, so slow runners no longer die by SIGALRM outside the FIFO open (#43463).
+- merge-guard reads single-object GitHub endpoints without `--paginate`, so a large main tip commit no longer yields two shas and a silent exit 1; check failures now name their reason on stderr (#43464).
+- Isolate declared runtime lane edit planning behind a private pure boundary, preserving locked reads, reference renames, HTTP/CLI slot order, refusal precedence and the separate typed CAS transaction (#43469).
+- Represent Board contention rearm ownership with a private immutable phase, preserving exact ticket identity, delay history, scheduler locking and callback/exception order (#43479).
+- Separate provider history encoding and immutable daily projection from journal traversal and diagnostics, preserving source replacement, empty-day meaning and the public history contract (#43489).
+- Move the production wake-clause Codex test beside its own comment, drop an orphaned test comment, and state what the next-request forecast and the cycle failure log measure about the completion line (#43492).
+- Specify Chat and Responses phase replay conformance and preserve original encrypted reasoning artifacts when only JSON object member order changes. (#43522)
+- Separate durable generated-media state transitions from diagnostics and persistence while preserving completion order, failed-attempt evidence and the public accumulator interface (#43526).
+- Isolate verification snapshot types, codecs and projections in one private
+  module while preserving the public Store interface and acquisition effects.
+  Add a persisted-request scenario covering consistent first-error handling
+  across authority inspection and dashboard listing (#43553).
+- Give Goal document types, codecs and schema rejection one private owner while
+  preserving the public Store interface, source authority and transaction effects.
+  Exercise ordered schema rejection and mutation refusal through real stored
+  documents and the public validator (#43556).
+- Centralize `GIT_CONFIG_GLOBAL` credential helper wiring in `Keeper_github_identity` so MicroVM endpoints inject it only when the Keeper has a configured GitHub identity, use `Keeper_microvm_backend.scratch_guest_root` in shim prefix tests, and backfill the #43582 changelog fragment (#43602, #43582).
+- Add an explicit manual macOS TUI artifact check with source identity, selected state-test execution, and a receipt that keeps runtime and visible UI verification separate. #43726
+- Exercise an admitted Librarian summary when restoring tool arguments, verify empty-history source coordinates separately from omission framing, and include changed unread evidence in native Gate resume expectations (#43925).
+- Drop the stray `---` frontmatter line from `changelog.d/43748.md`, which made `scripts/changelog-fragments.py check` exit 1 and would have stopped `scripts/bump-version.sh` before the next release (#43946).
+
 ## [0.58.0] - 2026-10-16
 
 ### Upgrade notes

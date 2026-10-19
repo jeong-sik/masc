@@ -210,11 +210,21 @@ let recovery_readiness ~base_path candidate cause =
      | Ok _ | Error _ -> Continue_holding cause)
   | Explicit_recovery_required _ -> Continue_holding cause
 
+type result_wake_boundary = Wake_unfinished | Wake_drained | Wake_cancelled | Wake_raised
+type result_wake =
+  { mutable follow_up : bool
+  ; mutable notifications : int
+  ; mutable discovery_started : int
+  ; mutable discovery_settled : int
+  ; mutable discovery_errors : int
+  ; mutable boundary : result_wake_boundary }
+
 type 'a t =
   { context : 'a Keeper_types_profile.context
   ; on_result : Journal.continuation -> (Tool_result.result,error) result -> unit
   ; mutable active : Run_set.t
-  ; mutable held : held_recovery Run_map.t }
+  ; mutable held : held_recovery Run_map.t
+  ; mutable result_wake : result_wake option }
 
 
 let log_result candidate outcome =
@@ -230,7 +240,8 @@ let log_result candidate outcome =
       | Failed _ -> "refused" in
     Log.Keeper.info ~keeper_name:source.keeper_name "prepared continuation intake run=%s state=%s" run_id state
 
-let create ~context ?(on_result=log_result) () = {context;on_result;active=Run_set.empty;held=Run_map.empty}
+let create ~context ?(on_result=log_result) () =
+  {context;on_result;active=Run_set.empty;held=Run_map.empty;result_wake=None}
 
 let pulse_with_resume ~resume ~sw supervisor =
   let* pending = Journal.pending_continuations ~read_composition_result:Keeper_composition_dependency_result.readiness ~base_path:supervisor.context.config.base_path in
@@ -300,6 +311,75 @@ let pulse ~sw supervisor =
   pulse_with_resume ~resume:(fun ~on_recovery_held ~profiles ~context candidate ->
     resume_with_profiles ~on_recovery_held ~profiles ~context candidate) ~sw supervisor
 
+let notify_result_ready_with_resume ~resume ~sw supervisor =
+  (* [fork] can decline a cancelled switch without entering its callback.
+     Do not reserve a notification owner that has no worker to release it. *)
+  Eio.Switch.check sw;
+  match supervisor.result_wake with
+  | Some request ->
+    request.notifications <- request.notifications + 1;
+    request.follow_up <- true
+  | None ->
+    let request = {follow_up=false;notifications=1;discovery_started=0;
+      discovery_settled=0;discovery_errors=0;boundary=Wake_unfinished} in
+    supervisor.result_wake <- Some request;
+    let release () = match supervisor.result_wake with
+      | Some current when current == request ->
+        supervisor.result_wake <- None;
+        let boundary = match request.boundary with
+          | Wake_unfinished -> "unfinished" | Wake_drained -> "drained"
+          | Wake_cancelled -> "cancelled" | Wake_raised -> "raised" in
+        Log.Server.debug
+          "prepared_continuation_result_wake boundary=%s notifications=%d discovery_started=%d discovery_settled=%d discovery_errors=%d follow_up=%b"
+          boundary request.notifications request.discovery_started request.discovery_settled
+          request.discovery_errors request.follow_up
+      | Some _ | None -> () in
+    let rec drain () =
+      (* Consume only the demand that preceded this read. A durable result
+         arriving while it yields must survive for a fresh subsequent pulse. *)
+      request.follow_up <- false;
+      request.discovery_started <- request.discovery_started + 1;
+      (try match pulse_with_resume ~resume ~sw supervisor with
+       | Ok () -> ()
+       | Error error ->
+         request.discovery_errors <- request.discovery_errors + 1;
+         Log.Server.warn "prepared continuation result notification discovery unavailable: %s"
+           (Journal.error_to_string error)
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         request.discovery_errors <- request.discovery_errors + 1;
+         Log.Server.warn "prepared continuation result notification failed: %s"
+           (Printexc.to_string exn));
+      request.discovery_settled <- request.discovery_settled + 1;
+      if request.follow_up then drain () in
+    (try Eio.Fiber.fork ~sw (fun () ->
+       Fun.protect ~finally:release (fun () ->
+         (* Even an inline filesystem implementation must not put discovery
+            in the durable result producer's acknowledgement path. *)
+         try
+           Eio.Fiber.yield ();
+           drain ();
+           request.boundary <- Wake_drained
+         with
+         | Eio.Cancel.Cancelled _ as exn -> request.boundary <- Wake_cancelled; raise exn
+         | exn ->
+           let backtrace = Printexc.get_raw_backtrace () in
+           request.boundary <- Wake_raised;
+           Printexc.raise_with_backtrace exn backtrace))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> request.boundary <- Wake_cancelled; release (); raise exn
+     | exn ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       request.boundary <- Wake_raised;
+       release ();
+       Printexc.raise_with_backtrace exn backtrace)
+
+let notify_result_ready ~sw supervisor =
+  notify_result_ready_with_resume ~resume:(fun ~on_recovery_held ~profiles ~context candidate ->
+    resume_with_profiles ~on_recovery_held ~profiles ~context candidate) ~sw supervisor
+
 module For_testing = struct
+  let notify_result_ready = notify_result_ready_with_resume
   let pulse = pulse_with_resume
 end

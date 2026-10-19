@@ -1,5 +1,13 @@
 # TUI refresh observations and before/after comparisons
 
+Automatic Composition recovery now accepts durable owned-job result hints
+through one controller-owned notification worker. Pre-read hints share a read;
+hints during discovery retain demand for a fresh follow-up. Original journal,
+Task/Skill and node admission remain authoritative. The
+[result notification comparison](../audits/2026-10-19-composition-result-wake-coalescing.md)
+separates notification demand from actual intake/Task progress and records
+source Before/After, independent maintenance and unmeasured runtime limits.
+
 Original waiting-delivery and priority-receipt observations use an immutable
 membership index with the existing exact request ID/Keeper/message identity.
 Original lists still supply chronology and multiplicity; persisted consumption

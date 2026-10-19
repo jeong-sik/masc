@@ -61,6 +61,12 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
 
 ## 3. 변경 검증
 
+- 원래 owned-job 결과가 durable해진 뒤의 Composition 알림은 controller의
+  `notify_result_ready`로 요청한다. 알림 도착을 intake·Task 재개·효과 허가로 기록하지 않는다.
+  첫 조회 전 알림은 공유하고 조회 중 알림은 후속 fresh pulse로 남긴다. 알림 worker의
+  identity·취소 정리를 지키고 supervisor 수명의 같은 switch를 쓴다. 직접 maintenance
+  pulse와 구분하며 timer·재시도 간격·결과/프로필 cache를 새로 만들지 않는다.
+
 소스 패턴이나 임의 개수 상한으로 구현을 제한하지 않는다. 타입 검사와 실제 동작 테스트로 변경을 검증하고, 로컬 빌드와 CI 실행 시점은 헌법의 실행 프로토콜을 따른다.
 
 ## 4. Mutex 고르기

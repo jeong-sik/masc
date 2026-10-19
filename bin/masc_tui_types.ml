@@ -3794,14 +3794,17 @@ module Surface_read_order : sig
   type kind = Full | Navigation | Independent
   type source = Surface_read_source.t = Transport | Board | Planning | System_logs | Fleet_safety
     | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
+  type dataset = Transport_data | Board_posts | Board_hearths | Planning_data
+    | System_logs_data | Fleet_safety_data | Runtime_quota_data | Keeper_usage_data
+    | Provider_history_data | Overview_goals_data | Account_emails_data
   type t
   type request
   val initial : t
   val dispatch : kind:kind -> needs:surface_needs -> started_ns:int64 -> t -> t * request
-  val take : t -> request -> t * source list
-  val take_source : t -> request -> source -> t * bool
+  val take : t -> request -> t * dataset list
+  val take_dataset : t -> request -> dataset -> t * bool
   (** Admit one owned dataset once without settling its sibling readers or
-      the enclosing collector. A superseded source leaves the state intact. *)
+      the enclosing collector. A superseded dataset leaves the state intact. *)
   val finish : t -> request -> t
   val invalidate : t -> t
   val pending : needs:surface_needs -> t -> source list
@@ -3809,6 +3812,8 @@ module Surface_read_order : sig
   (** Visible sources owned by navigation or independent reads. Full-refresh
       readers have their own execution progress, distinct from publication. *)
   val source_name : source -> string
+  val dataset_source : dataset -> source
+  val dataset_name : dataset -> string
   val request_id : request -> int
   val started_ns : request -> int64
   val request_kind : request -> kind
@@ -3820,10 +3825,13 @@ end = struct
   type kind = Full | Navigation | Independent
   type source = Surface_read_source.t = Transport | Board | Planning | System_logs | Fleet_safety
     | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
-  type request = { id: int; kind: kind; started_ns: int64; sources: source list; owner: unit ref }
+  type dataset = Transport_data | Board_posts | Board_hearths | Planning_data
+    | System_logs_data | Fleet_safety_data | Runtime_quota_data | Keeper_usage_data
+    | Provider_history_data | Overview_goals_data | Account_emails_data
+  type request = { id: int; kind: kind; started_ns: int64; datasets: dataset list; owner: unit ref }
   type t = {
     next: int;
-    owners: (source * request) list;
+    owners: (dataset * request) list;
     active_navigation: request list;
     latest_navigation: request option;
   }
@@ -3835,41 +3843,61 @@ end = struct
      Keeper_usage, needs.needs_keeper_usage; Provider_history, needs.needs_provider_history;
      Overview_goals, needs.needs_overview_goals; Account_emails, needs.needs_account_emails]
     |> List.filter_map (fun (source, wanted) -> if wanted then Some source else None)
+  let source_datasets = function
+    | Transport -> [Transport_data] | Board -> [Board_posts;Board_hearths]
+    | Planning -> [Planning_data] | System_logs -> [System_logs_data]
+    | Fleet_safety -> [Fleet_safety_data] | Runtime_quota -> [Runtime_quota_data]
+    | Keeper_usage -> [Keeper_usage_data] | Provider_history -> [Provider_history_data]
+    | Overview_goals -> [Overview_goals_data] | Account_emails -> [Account_emails_data]
+  let dataset_source = function
+    | Transport_data -> Transport | Board_posts | Board_hearths -> Board
+    | Planning_data -> Planning | System_logs_data -> System_logs
+    | Fleet_safety_data -> Fleet_safety | Runtime_quota_data -> Runtime_quota
+    | Keeper_usage_data -> Keeper_usage | Provider_history_data -> Provider_history
+    | Overview_goals_data -> Overview_goals | Account_emails_data -> Account_emails
+  let dataset_name = function
+    | Board_posts -> "Board posts" | Board_hearths -> "Board hearths"
+    | (Transport_data | Planning_data | System_logs_data | Fleet_safety_data
+      | Runtime_quota_data | Keeper_usage_data | Provider_history_data
+      | Overview_goals_data | Account_emails_data) as dataset ->
+        Surface_read_source.name (dataset_source dataset)
   let dispatch ~kind ~needs ~started_ns current =
-    let request = {id=current.next; kind; started_ns; sources=sources needs; owner=ref ()} in
-    let retained = List.filter (fun (source, _) -> not (List.mem source request.sources)) current.owners in
+    let request = {id=current.next; kind; started_ns;
+      datasets=List.concat_map source_datasets (sources needs); owner=ref ()} in
+    let retained = List.filter (fun (dataset, _) -> not (List.mem dataset request.datasets)) current.owners in
     let active_navigation, latest_navigation = match kind with
       | Full | Independent -> current.active_navigation, current.latest_navigation
       | Navigation -> request :: current.active_navigation, Some request in
-    {next=current.next+1; owners=List.map (fun source -> source,request) request.sources @ retained;
+    {next=current.next+1; owners=List.map (fun dataset -> dataset,request) request.datasets @ retained;
      active_navigation; latest_navigation}, request
   let owned current request =
-    List.filter (fun source ->
-      match List.assoc_opt source current.owners with
+    List.filter (fun dataset ->
+      match List.assoc_opt dataset current.owners with
       | Some latest -> latest.owner == request.owner
-      | None -> false) request.sources
-  let release_sources current request =
+      | None -> false) request.datasets
+  let release_datasets current request =
     {current with owners=List.filter (fun (_, latest) -> latest.owner != request.owner) current.owners}
   let finish current request =
-    let current = release_sources current request in
+    let current = release_datasets current request in
     {current with active_navigation=List.filter
       (fun active -> active.owner != request.owner) current.active_navigation}
   (* Taking data is distinct from settling its collector. Result application
      can schedule followups before the owning mailbox item finishes. *)
-  let take current request = release_sources current request, owned current request
-  let take_source current request source =
-    if List.mem source (owned current request) then
-      {current with owners=List.filter (fun (candidate, _) -> candidate <> source) current.owners}, true
+  let take current request = release_datasets current request, owned current request
+  let take_dataset current request dataset =
+    if List.mem dataset (owned current request) then
+      {current with owners=List.filter (fun (candidate, _) -> candidate <> dataset) current.owners}, true
     else current, false
   (* Withdrawal retires publication and identity authority. Actual collectors
      remain tracked until their own completion; they block no navigation. *)
   let invalidate current = {current with owners=[]; latest_navigation=None}
   let pending ~needs current =
-    List.filter (fun source -> List.mem_assoc source current.owners) (sources needs)
+    List.filter (fun source -> List.exists (fun dataset -> List.mem_assoc dataset current.owners)
+      (source_datasets source)) (sources needs)
   let pending_scoped ~needs current =
-    List.filter (fun source -> match List.assoc_opt source current.owners with
+    List.filter (fun source -> List.exists (fun dataset -> match List.assoc_opt dataset current.owners with
       | Some {kind = Navigation | Independent; _} -> true
-      | Some {kind = Full; _} | None -> false) (sources needs)
+      | Some {kind = Full; _} | None -> false) (source_datasets source)) (sources needs)
   let source_name = Surface_read_source.name
   let request_id request = request.id
   let started_ns request = request.started_ns
@@ -8918,9 +8946,9 @@ let can_admit_early_http_read (state : state) ~ticket ~authority identity =
   Option.is_some state.http_refresh_started_ns
   && can_admit_http_read state ~ticket ~authority identity
 
-let take_early_surface_read (state : state) ~ticket ~authority ~identity ~request ~source =
+let take_early_surface_dataset (state : state) ~ticket ~authority ~identity ~request ~dataset =
   if can_admit_http_read state ~ticket ~authority identity then
-    let readings, accepted = Surface_read_order.take_source state.http_surface_reads request source in
+    let readings, accepted = Surface_read_order.take_dataset state.http_surface_reads request dataset in
     state.http_surface_reads <- readings;
     accepted
   else false

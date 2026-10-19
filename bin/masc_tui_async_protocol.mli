@@ -35,12 +35,12 @@ type early_approval_observation = {
   eap_observation: approval_observation;
 }
 
-(* Each value settles one dataset. Board and runtime pairs keep their shared
-   source ownership; no sibling reader or collector is settled by delivery. *)
+(* Each value settles one independently owned dataset. Board's two datasets
+   share a logical source, while neither delivery consumes its sibling. *)
 type http_dataset =
   | Dataset_transport of (Masc.Tui_decode.transport_health, string) result
-  | Dataset_board of
-      (board_post list, string) result * ((string * int) list, string) result
+  | Dataset_board_posts of (board_post list, string) result
+  | Dataset_board_hearths of ((string * int) list, string) result
   | Dataset_planning of (planning_snapshot, string) result
   | Dataset_system_logs of (system_log_snapshot, string) result
   | Dataset_fleet_safety of (Masc.Tui_decode.fleet_safety_reading, string) result
@@ -61,7 +61,7 @@ type early_http_dataset = {
   ed_dataset: http_dataset;
 }
 
-val http_dataset_source : http_dataset -> Surface_read_order.source
+val http_dataset_key : http_dataset -> Surface_read_order.dataset
 val http_dataset_received : http_dataset -> bool
 
 (* Collection has no identity authority of its own. The enclosing full or
@@ -79,9 +79,9 @@ type 'identity http_scoped_surface_readings = {
      dropping it. *)
   http_asks: asks_observation option;
   http_board: (board_post list, string) result option;
-  (* The board's hearth census rides with its listing: the two are read for
-     one surface and a cycle keyed on a census the listing has outgrown walks
-     names that are no longer there. *)
+  (* Listing and census are requested together under one Board request. Early
+     delivery settles each dataset independently; the prior census remains
+     available while its fresh reader is pending or failed. *)
   http_board_hearths: ((string * int) list, string) result option;
   http_planning: (planning_snapshot, string) result option;
   http_system_logs: (system_log_snapshot, string) result option;

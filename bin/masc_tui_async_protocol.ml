@@ -32,12 +32,12 @@ type early_approval_observation = {
   eap_observation: approval_observation;
 }
 
-(* Each value settles one dataset. Board and runtime pairs keep their shared
-   source ownership; no sibling reader or collector is settled by delivery. *)
+(* Each value settles one independently owned dataset. Board's two datasets
+   share a logical source, while neither delivery consumes its sibling. *)
 type http_dataset =
   | Dataset_transport of (Masc.Tui_decode.transport_health, string) result
-  | Dataset_board of
-      (board_post list, string) result * ((string * int) list, string) result
+  | Dataset_board_posts of (board_post list, string) result
+  | Dataset_board_hearths of ((string * int) list, string) result
   | Dataset_planning of (planning_snapshot, string) result
   | Dataset_system_logs of (system_log_snapshot, string) result
   | Dataset_fleet_safety of (Masc.Tui_decode.fleet_safety_reading, string) result
@@ -58,21 +58,23 @@ type early_http_dataset = {
   ed_dataset: http_dataset;
 }
 
-let http_dataset_source = function
-  | Dataset_transport _ -> Surface_read_order.Transport
-  | Dataset_board _ -> Surface_read_order.Board
-  | Dataset_planning _ -> Surface_read_order.Planning
-  | Dataset_system_logs _ -> Surface_read_order.System_logs
-  | Dataset_fleet_safety _ -> Surface_read_order.Fleet_safety
-  | Dataset_runtime_quota _ -> Surface_read_order.Runtime_quota
-  | Dataset_keeper_usage _ -> Surface_read_order.Keeper_usage
-  | Dataset_provider_history _ -> Surface_read_order.Provider_history
-  | Dataset_overview_goals _ -> Surface_read_order.Overview_goals
-  | Dataset_account_emails _ -> Surface_read_order.Account_emails
+let http_dataset_key = function
+  | Dataset_transport _ -> Surface_read_order.Transport_data
+  | Dataset_board_posts _ -> Surface_read_order.Board_posts
+  | Dataset_board_hearths _ -> Surface_read_order.Board_hearths
+  | Dataset_planning _ -> Surface_read_order.Planning_data
+  | Dataset_system_logs _ -> Surface_read_order.System_logs_data
+  | Dataset_fleet_safety _ -> Surface_read_order.Fleet_safety_data
+  | Dataset_runtime_quota _ -> Surface_read_order.Runtime_quota_data
+  | Dataset_keeper_usage _ -> Surface_read_order.Keeper_usage_data
+  | Dataset_provider_history _ -> Surface_read_order.Provider_history_data
+  | Dataset_overview_goals _ -> Surface_read_order.Overview_goals_data
+  | Dataset_account_emails _ -> Surface_read_order.Account_emails_data
 
 let http_dataset_received = function
   | Dataset_transport result -> Result.is_ok result
-  | Dataset_board (board, hearths) -> Result.is_ok board && Result.is_ok hearths
+  | Dataset_board_posts result -> Result.is_ok result
+  | Dataset_board_hearths result -> Result.is_ok result
   | Dataset_planning result -> Result.is_ok result
   | Dataset_system_logs result -> Result.is_ok result
   | Dataset_fleet_safety result -> Result.is_ok result
@@ -97,9 +99,9 @@ type 'identity http_scoped_surface_readings = {
      dropping it. *)
   http_asks: asks_observation option;
   http_board: (board_post list, string) result option;
-  (* The board's hearth census rides with its listing: the two are read for
-     one surface and a cycle keyed on a census the listing has outgrown walks
-     names that are no longer there. *)
+  (* Listing and census are requested together under one Board request. Early
+     delivery settles each dataset independently; the prior census remains
+     available while its fresh reader is pending or failed. *)
   http_board_hearths: ((string * int) list, string) result option;
   http_planning: (planning_snapshot, string) result option;
   http_system_logs: (system_log_snapshot, string) result option;

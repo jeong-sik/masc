@@ -149,6 +149,11 @@ Board also reports its posts/hearth readers before the pair returns. A completed
 child remains visible when its parent fails or stops. A caught child cancellation
 is interrupted; a started child without a terminal observation is unfinished.
 Child intervals describe those observations, not proven worker exit or screen paint.
+Board posts and hearth data also arrive independently under their original request.
+Ready posts do not wait for the census; a pending or failed census retains its
+last successful value. One dataset does not consume its sibling's result, and a
+terminal bundle does not replay early data. Board remains pending while either
+dataset is outstanding. These are UI-state rules; actual paint latency is unmeasured.
 
 ## Usage
 

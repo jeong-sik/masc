@@ -271,6 +271,33 @@ let overlay_window_row ~scroll ~height count =
     (fun row -> Theme.recede () ^ row ^ Ansi.reset)
     (Masc_tui_scroll.position_row ~scroll ~height count)
 
+let detail_reading_document reading ~cols =
+  Masc_tui_detail_reading.rows ~width:(max 1 (framed_inner_width cols - 2)) reading
+
+let detail_reading_viewport (state : state) reading =
+  let terminal_rows, cols = get_terminal_size () in
+  let count = List.length (detail_reading_document reading ~cols) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  count, overlay_window_height ~rows ~count
+
+let render_detail_reading (state : state) reading =
+  let terminal_rows, cols = get_terminal_size () in
+  let document = detail_reading_document reading ~cols in
+  let count, height = detail_reading_viewport state reading in
+  let scroll = Masc_tui_detail_reading.scroll ~count ~height reading in
+  surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state
+    ~terminal_rows ~cols ~surface_key:"detail-reading"
+    ~title:(screen_title (" " ^ Terminal_text.single_line (Masc_tui_detail_reading.title reading)))
+    ~hints:"j/k:scroll  PgUp/PgDn:page  Home/End:edges  Esc:back"
+    ~body:(fun ~budget:_ c ->
+      List.iteri (fun index row ->
+        if index >= scroll && index < scroll + height then
+          match row with
+          | Masc_tui_detail_reading.Heading text -> c.push_styled ~style:Ansi.bold ("  " ^ text)
+          | Content text -> c.push ("  " ^ text)
+          | Note text -> c.push_styled ~style:(Theme.recede ()) ("  " ^ text)) document;
+      Option.iter c.push (overlay_window_row ~scroll ~height count))
+
 (* The sheet's rows and the viewport that shows them, at this width. One
    answer for the two readers -- the keypress that bounds the scroll and the
    frame that draws it -- so [G] cannot land the scroll a row past what the

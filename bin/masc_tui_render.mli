@@ -164,6 +164,7 @@ val frame_choice :
   | `Collab of Masc_tui_collab.t
   | `Account_login of Masc_tui_account_login.t
   | `Lane_addons of Masc_tui_lane_addons.t
+  | `Detail_reading of Masc_tui_detail_reading.t
   | `About | `Palette | `Context | `Keeper_deletions | `Help
   | `Agenda | `Answering | `Patch | `Link
   | `Client_detail of Masc.Tui_decode.client_row | `Surface ]

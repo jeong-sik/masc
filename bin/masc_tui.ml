@@ -6943,6 +6943,7 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
   state.keeper_navigation_open <- false;
   state.keeper_message_focus <- Right_pane;
   state.runtime_model_jump <- None;
+  state.detail_reading <- None;
   state.detail_focus_recovery <- None;
   (* The browser reader owns Connectors; refocusing it keeps the reader.
      The transport-list palette hides it explicitly before arriving here.
@@ -12428,6 +12429,7 @@ let apply_http_dataset state = function
    starts. Queued plain replies carry the old authority token; fetched reads
    and Sandbox logs have their own monotonic request generations. *)
 let revoke_detail_readings state =
+  state.detail_reading <- None;
   state.detail_reads <- [];
   state.detail_read_authority <- ref ();
   state.keeper_board_quarantines <- Masc_tui_fetched.clear state.keeper_board_quarantines;
@@ -23879,6 +23881,7 @@ and is loaded on demand through keeper_skill.
          keeps a field added to [text_input_target] from silently dropping
          pasted text the way the palette, row search and the preset name
          each did. *)
+      reconcile_detail_reading state;
       let text_target = text_input_target state ~compact_viewport in
       let recovered_paste = Option.is_some interrupted_paste in
       let machine_activity_on_screen () =
@@ -23929,6 +23932,7 @@ and is loaded on demand through keeper_skill.
           the composer under the card would put the link [y] just copied into a
           draft that goes to a Keeper on the next Enter. It is first, above the
           overlays the card is drawn over. *)
+       | Some (Pasted _) when Option.is_some (current_detail_reading state) -> ()
        | Some (Pasted _) when state.msx_open -> ()
        | Some (Pasted _) when Option.is_some (Masc_tui_types.play_card_shown state) -> ()
        | Some (Pasted paste) when Option.is_some state.collab ->
@@ -25609,6 +25613,37 @@ and is loaded on demand through keeper_skill.
        (* /about is modal for the help sheet's reason: Esc closes it, c turns
           the candle to its other style, and everything else is swallowed so
           no surface binding or global quit fires under it. *)
+       | Some k when Option.is_some (current_detail_reading state) ->
+           (match current_detail_reading state with
+            | None -> ()
+            | Some reading ->
+                if k="esc" || k="v" then state.detail_reading <- None
+                else
+                  let count, height = Masc_tui_render_overlays.detail_reading_viewport state reading in
+                  let movement = match k with
+                    | "j" | "down" | "wheel-down" -> Some (Masc_tui_detail_reading.By 1)
+                    | "k" | "up" | "wheel-up" -> Some (Masc_tui_detail_reading.By (-1))
+                    | "pagedown" -> Some (Masc_tui_detail_reading.By height)
+                    | "pageup" -> Some (Masc_tui_detail_reading.By (-height))
+                    | "home" | "g" -> Some Masc_tui_detail_reading.First
+                    | "end" | "G" -> Some Masc_tui_detail_reading.Last
+                    | _ -> None in
+                  Option.iter (fun movement ->
+                    open_detail_reading state
+                      (Masc_tui_detail_reading.move ~count ~height movement reading)) movement)
+       | Some "v"
+         when not compact_viewport && not state.composer_focused
+              && not (modal_owns_keys state) && not state.palette_open
+              && not state.answering_open && not state.patch_modal_open && not state.link_modal_open
+              && Option.is_none (text_input_target state ~compact_viewport)
+              && ((state.view=Repositories && Option.is_none state.workspace_activity_repo)
+                  || (state.view=Config && state.config_pane=Config_models)) ->
+           let reading = if state.view=Repositories then
+               Masc_tui_render_repositories.selected_repository_reading state
+             else Masc_tui_render_config.selected_model_reading state in
+           (match reading with
+            | Some reading -> open_detail_reading state reading
+            | None -> report_action state "info" "No selected reading is available")
        | Some k when state.about_open ->
            (match k with
             | "esc" -> state.about_open <- false
@@ -31909,6 +31944,7 @@ and is loaded on demand through keeper_skill.
                           (Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows - 1) in
                       let first, _ = Masc_tui_home.home_decision_window state ~budget in
                       state.home_decision_scroll <- first
+                  | Overview, `Detail_reading _ -> ()
                   | (Overview, (`Palette | (`Link | (`Help | (`About | (`Play_card _ | (`Client_detail _ | (`Account_login _ | (`Keeper_deletions | (`Agenda | (`Too_small _ | (`Collab _ | (`Context | (`Lane_addons _ | (`Answering | `Patch)))))))))))))))
                   | ((Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | (System_logs | Keepers _))))))))))))))))))))), _) -> ());
                  render state)

@@ -276,7 +276,7 @@ ambiguity and unmatched input events remain in the original source.
 Source audition can render a selected single-port performance through a VST or
 send the complete ordered MIDI wire stream to explicit outputs as described below.
 Choose a VST with `i`; `:wave PATH` exports its rendered performance. Source
-controller/tempo editing and SoundFont synthesis remain unfinished.
+SoundFont synthesis remains unfinished.
 See [MIDI source semantics](MIDI-SOURCE.md) for retained data,
 source-event identities and timing behavior.
 
@@ -602,3 +602,40 @@ natural order for the selected event's entire track/tick group. The stored group
 is reconciled when events are inserted, retimed or removed, so there are no
 dangling event anchors. Save/reopen, source export and arrangement variants retain
 the explicit order; undo/redo restores the complete document revision.
+
+
+### Imported MIDI tempo experiments
+
+`:tempos` opens the selected performance's tempo map. Up/Down selects an event,
+Enter edits its BPM, `+`/`-` changes it, Shift+Left/Right moves it by the current
+grid, and `x` removes it. `:tempos` returns to the piano roll. Each row reports
+its source ID, track, tick position, effective BPM and encoded microseconds per
+quarter note. On SMPTE sources these events are metadata; frame timing stays fixed.
+
+Use `:tempo BPM [AT]` to change the unique existing tempo event at that exact
+position, or insert one if none exists. AT uses source beats (PPQ) or frames
+(SMPTE), and defaults to the cursor. New tempo events go into the first track
+for SMF0/1, or the explicitly selected SMF2 pattern. The map includes existing
+tempo events on all tracks of the selected performance; original events keep
+their source track. If several events share the tick, select an exact ID with
+`:tempo-event ID` and use `:tempo-value BPM`, `:tempo-move AT` or `:tempo-remove`.
+The last tempo event in source playback order at a tick governs the next span;
+editing does not silently collapse simultaneous events.
+
+```
+tempos
+tempo 90 0
+tempo 120 4
+tempo-event new:1
+tempo-move 3
+undo
+```
+
+BPM is rounded to the nearest positive 24-bit microsecond value; the map shows
+the resulting effective BPM. Values outside that encoded range are refused.
+Removing every tempo event restores SMF's implicit 120 BPM. Edits preserve note
+ticks, release messages, expression order, MIDI ports, non-tempo metadata, SysEx,
+opaque chunks and the immutable original bytes. PPQ playback seconds and backing
+region duration follow the edited map. Undo/redo, source save/reopen, MIDI export
+and portable immutable arrangement variants retain the map. General metadata
+and external MIDI clock editing are separate features.

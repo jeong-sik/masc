@@ -44,8 +44,9 @@ export function projectCapturedPlacement(project, asset, clip) {
   const n = BigInt(numer), d = BigInt(denom), length = BigInt(clip.extent), count = BigInt(clip.repeat)
   const emit = (offset, extent, repeat, delta) => {
     const source = captureRegionTime(asset, { offset: String(offset), extent: String(extent) })
-    const startSeconds = seconds(startN * d + delta * n * startD, startD * d)
-    return { ...clip, offset: String(offset), extent: String(extent), repeat: Number(repeat), ...source, startSeconds,
+    const absoluteN = startN * d + delta * n * startD, absoluteD = startD * d
+    const startSeconds = seconds(absoluteN, absoluteD), startNanoseconds = fraction(absoluteN, absoluteD)
+    return { ...clip, offset: String(offset), extent: String(extent), repeat: Number(repeat), ...source, startSeconds, startNanoseconds,
       endSeconds: startSeconds + source.durationSeconds * Number(repeat) }
   }
   const offset = BigInt(clip.offset)

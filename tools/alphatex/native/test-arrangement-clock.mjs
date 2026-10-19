@@ -23,16 +23,17 @@ final class FakeTimer {
  func fire(){handler?()}
 }
 func reviewTimer()->FakeTimer{FakeTimer()}
-struct AudioFailure: Error { let description: String; init(_ value:String){description=value} }
+
 ${future}
 ${command}
-struct FakePractice {let countInSeconds:Double;let duration:Double}
-struct FakePlan { let duration=1.0;let captured=false;var clocked=false;var practice:FakePractice?=nil;var loop:Bool?=nil }
-struct FakeRegion { let id="region-1";var startSeconds=0.0 }
+struct FakePractice {let countInSeconds:Double;let duration:Double;var loop:LoopPracticePlan?=nil}
+struct FakeLoop {let duration=1.0}
+struct FakePlan { var duration=1.0;let captured=false;var clocked=false;var practice:FakePractice?=nil;var loop:FakeLoop?=nil }
+struct FakeRegion { var id="region-1";var startSeconds=0.0;var pulseClock:Bool?=nil;var pulseLoopUnit:Int64?=nil }
 final class FakePlayer { var lastRenderTime:AVAudioTime?=AVAudioTime(hostTime:reviewHost);var plays=0;var whens:[UInt64]=[];func play(at:AVAudioTime){plays+=1;whens.append(at.hostTime)} }
 final class FakeVoice {
- var region=FakeRegion();let player=FakePlayer();var end=1.0, prepares=0, stops=0;var completion:(()->Void)?
- func prepare(from seconds:Double,finished:@escaping()->Void,failed:@escaping(Error)->Void)throws->Bool{prepares+=1;completion=finished;return seconds<end}
+ var region=FakeRegion();let player=FakePlayer();var end=1.0, prepares=0, stops=0;var positions:[Double]=[];var completion:(()->Void)?
+ func prepare(from seconds:Double,finished:@escaping()->Void,failed:@escaping(Error)->Void)throws->Bool{prepares+=1;positions.append(seconds);completion=finished;return seconds<end}
  func stop(){stops+=1}
 }
 struct FakeFormat {let sampleRate=48000.0}
@@ -42,7 +43,7 @@ final class FakeMidi { var stages:[Double]=[], runs:[UInt64]=[];func stageCoordi
  enum State {case prepared,playing,paused,stopped}
  var plan=FakePlan();let engine=FakeEngine(),renderQuantum=1024
  var horizon:FakeTimer?;var horizonEnded=false
- var midi:FakeMidi?;var midiEnded=false\n var state=State.prepared,voices=[FakeVoice()],active=Set<String>(),position=0.0,anchor:UInt64=0,musicalAnchor:UInt64=0,generation:UInt64=0,finished=0,published=0
+ var midi:FakeMidi?;var midiEnded=false\n var state=State.prepared,voices=[FakeVoice()],active=Set<String>(),position=0.0,anchor:UInt64=0,musicalAnchor:UInt64=0,generation:UInt64=0,introRemainingHost:UInt64?=nil,finished=0,published=0
  func checkOutput()throws{}
  func publish(){published+=1}
  func snapshot(_ kind:String)->[String:Any]{["kind":kind,"clock":["anchor":String(anchor),"position":position]]}
@@ -90,7 +91,7 @@ waiting.midiReachedEnd();precondition(waiting.finished==1)
 let silent=Probe();silent.plan.clocked=true;silent.voices[0].end=0;silent.engine.outputNode.lastRenderTime=nil;silent.voices[0].player.lastRenderTime=nil
 try silent.schedule(from:0,playing:true);precondition(silent.state == .playing && silent.active.isEmpty && silent.finished==0)
 silent.horizon!.fire();precondition(silent.finished==1)
-let silentLoop=Probe();silentLoop.plan.clocked=true;silentLoop.plan.loop=true;silentLoop.voices=[]
+let silentLoop=Probe();silentLoop.plan.clocked=true;silentLoop.plan.loop=FakeLoop();silentLoop.voices=[]
 try silentLoop.schedule(from:0,playing:true)
 precondition(silentLoop.state == .playing && silentLoop.horizon==nil && !silentLoop.completed)
 silentLoop.engine.outputNode.lastRenderTime=AVAudioTime(hostTime:try futureHost(3.25,from:silentLoop.anchor))
@@ -125,7 +126,7 @@ beforePause();precondition(practice.finished==0)
 practice.receive(#"{"kind":"seek","seconds":0.1}"#)
 precondition(abs(practice.position-0.7)<1e-6 && practice.musicalAnchor==practice.anchor)
 practice.receive(#"{"kind":"stop"}"#);precondition(practice.finished==1)
-let looping=Probe();looping.plan.loop=true;looping.voices[0].region.startSeconds=0.8
+let looping=Probe();looping.plan.loop=FakeLoop();looping.voices[0].region.startSeconds=0.8
 try looping.schedule(from:0,playing:true)
 precondition(looping.voices[0].player.whens==[looping.anchor])
 looping.engine.outputNode.lastRenderTime=AVAudioTime(hostTime:try futureHost(3.25,from:looping.anchor))
@@ -134,12 +135,49 @@ looping.receive(#"{"kind":"pause"}"#);precondition(looping.state == .paused && a
 looping.receive(#"{"kind":"seek","seconds":1}"#);precondition(looping.position==0 && looping.finished==0)
 looping.receive(#"{"kind":"resume"}"#);precondition(looping.state == .playing)
 looping.receive(#"{"kind":"stop"}"#);precondition(looping.finished==1)
+let practiceLoop=Probe();practiceLoop.plan.clocked=true;practiceLoop.plan.loop=FakeLoop();practiceLoop.midi=FakeMidi()
+let loopClock=LoopPracticePlan(period:.init(numerator:"1000000000",denominator:"3"),countInBeats:"1",beatsPerBar:1,unit:4,metronome:true)
+// A sub-second introduction followed by the independent one-second backing.
+practiceLoop.plan.duration=4.0/3
+practiceLoop.plan.practice=FakePractice(countInSeconds:1.0/3,duration:1,loop:loopClock)
+let intro=FakeVoice();intro.region.pulseClock=true;intro.end=1.0/3
+let click=FakeVoice();click.region.pulseClock=true;click.region.pulseLoopUnit=4
+// The harness IDs are distinct just as admitted production regions are.
+intro.region.id="intro";click.region.id="click"
+practiceLoop.voices += [intro,click]
+try practiceLoop.schedule(from:0,playing:true)
+var tb=mach_timebase_info_data_t();mach_timebase_info(&tb)
+let ticks=try loopClock.hostTicks(numer:tb.numer,denom:tb.denom)
+precondition(practiceLoop.musicalAnchor==practiceLoop.anchor+ticks)
+precondition(practiceLoop.midi!.runs==[AudioConvertHostTimeToNanos(practiceLoop.musicalAnchor)])
+precondition(intro.player.whens==[practiceLoop.anchor] && click.player.whens==[practiceLoop.musicalAnchor] && practiceLoop.voices[0].player.whens==[practiceLoop.musicalAnchor])
+let introRender=practiceLoop.anchor+ticks/3
+practiceLoop.engine.outputNode.lastRenderTime=AVAudioTime(hostTime:introRender)
+practiceLoop.receive(#"{"kind":"pause"}"#)
+precondition(practiceLoop.introRemainingHost==ticks-ticks/3 && practiceLoop.midi!.stages.last==0)
+practiceLoop.receive(#"{"kind":"resume"}"#)
+precondition(practiceLoop.musicalAnchor-practiceLoop.anchor==ticks-ticks/3)
+practiceLoop.engine.outputNode.lastRenderTime=AVAudioTime(hostTime:try futureHost(3.25,from:practiceLoop.musicalAnchor))
+precondition(abs(practiceLoop.currentTime()-(1.0/3+0.25))<1e-6)
+practiceLoop.receive(#"{"kind":"pause"}"#)
+precondition(abs(practiceLoop.midi!.stages.last!-0.25)<1e-6)
+practiceLoop.receive(#"{"kind":"seek","seconds":1}"#)
+precondition(practiceLoop.position==1.0/3 && practiceLoop.introRemainingHost==0 && practiceLoop.midi!.stages.last==0)
+practiceLoop.receive(#"{"kind":"resume"}"#)
+precondition(practiceLoop.musicalAnchor==practiceLoop.anchor && !practiceLoop.active.contains("intro"))
+practiceLoop.receive(#"{"kind":"seek","seconds":0.4}"#)
+precondition(abs(practiceLoop.midi!.stages.last!-0.4)<1e-6 && practiceLoop.musicalAnchor==practiceLoop.anchor)
+practiceLoop.receive(#"{"kind":"stop"}"#);precondition(practiceLoop.finished==1)
+// A coarser native timebase requires a single outward projection, not ceil(ns)
+// followed by truncation to ticks (1/3ns on a125/3 clock is one host tick).
+let fine=LoopPracticePlan(period:.init(numerator:"1",denominator:"3"),countInBeats:"1",beatsPerBar:1,unit:4,metronome:true)
+let outward=try fine.hostTicks(numer:125,denom:3);precondition(outward==1)
 print("ARRANGEMENT_CLOCK_DECISIONS_PASS: clocked silent horizon, either-order audio/MIDI/horizon completion, cancelled timer isolation across pause/seek/resume/stop; either-part-first completion, WAV-only continuity, one stop, common anchor conversion, paired pause/seek/resume, stale callback isolation, MIDI tail without audio voices")
 `
 const dir=await mkdtemp(join(process.env.TMPDIR ?? '/tmp','masc-arrangement-clock-'))
 try {
-await writeFile(join(dir,'Probe.swift'),swift)
-let result=spawnSync('xcrun',['swiftc',join(dir,'Probe.swift'),'-module-cache-path',join(dir,'modules'),'-o',join(dir,'probe'),'-framework','AVFoundation'],{encoding:'utf8'})
+await writeFile(join(dir,'main.swift'),swift)
+let result=spawnSync('xcrun',['swiftc',join(dir,'main.swift'),new URL('CaptureAudioClock.swift',import.meta.url).pathname,new URL('PulseAudioClock.swift',import.meta.url).pathname,'-module-cache-path',join(dir,'modules'),'-o',join(dir,'probe'),'-framework','AVFoundation'],{encoding:'utf8'})
 assert.equal(result.status,0,result.stderr)
 result=spawnSync(join(dir,'probe'),[],{encoding:'utf8'})
 assert.equal(result.status,0,result.stderr)

@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인계와 늦은 터미널 응답, 비동기 조회·설정 저장·긴 질문의 요약과 전체 읽기·Ask 답변과 재조회를 바꿀 때 쓴다. Keeper·Work·로그·Board·Runtime·Overview의 원본 요청·입력·revision·소유권, 준비 상세·이력의 workspace 검증과 캐시 영수증, 공유 조회와 부분 실패, worker 관측·UI 반영·paint 증거를 구분한다."
+description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인계와 늦은 터미널 응답, 비동기 조회·설정 저장·긴 질문의 요약과 전체 읽기·Ask 답변과 재조회를 바꿀 때 쓴다. Keeper·Work·로그·Board·Runtime·Overview의 원본 요청·입력·revision·소유권, 준비 상세·현재 턴·이력의 workspace 검증과 캐시 영수증, 공유 조회와 부분 실패, worker 관측·UI 반영·paint 증거를 구분한다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -43,7 +43,7 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인�
   실행·소스 증명이나 속도 verdict로 올리지 않는다. 서로 다른 process의 monotonic 시각을
   빼거나 같은 capture를 여러 표본에 복제하지 않는다. 이 도구는 TUI/PTY/서버를 시작하지 않는다.
 
-## Task·Goal 이력 조회
+## workspace JSON 조회와 이력
 
 - Goal timeline·Task history·Keeper Calls·저장된 브라우저 이력 목록은
   `launch_workspace_json_read`에서 원래 workspace identity·endpoint·authority·read epoch를
@@ -62,6 +62,15 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인�
   identity+history 두 GET에서 history 한 GET으로 줄지만 auth 갱신·연결·재조회·화면 시간은
   별도이며 속도 50% 개선을 뜻하지 않는다. 후속 비교는
   `docs/audits/2026-10-19-tui-history-single-admitted-read.md`를 따른다.
+- `capture_workspace_json_read`는 UI 호출 시점에 원래 owner를 캡처해 기존 Eio child가
+  실행할 callback을 만든다. 현재 턴 조회도 이 callback을 기존 `Masc_tui_async_read.launch`에
+  넘긴다. source 오류 귀속·`on_not_run` inflight 해제·Fork_guard를 유지하고 launcher를
+  중복 실행하지 않는다. callback은 worker로 넘어가기 전 실제 GET 경로를 묶는다.
+  Keeper별 제어 generation과 workspace completion의 적용 조건은 UI가 계속 소유한다.
+  `load_keeper_turns`의 순수 row 해석만 공통 CPU 경로에 넘기며 `keeper.turns.decode_wait`는
+  pool 대기·해석·반환 관측이다. 조회는 여전히 명시적 GET 하나이고, 이 변경을 HTTP 감소나
+  paint·유용한 작업의 실측 개선으로 부르지 않는다. 비교는
+  `docs/audits/2026-10-19-tui-turns-workspace-admission.md`를 따른다.
 - 같은 항목 ID를 다시 열거나 새로 읽을 수 있으므로 ID만으로 응답을 적용하지 않는다.
   `begin_task_history_read`/`begin_goal_timeline_read`가 받은 원래 request를 완료까지 보관한다.
   명시 재조회는 `Masc_tui_fetched.refresh`로 이전 요청을 대체하고, 일반 `start`의 공유 정책은

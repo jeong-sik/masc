@@ -56,6 +56,39 @@ let body_of response =
   | _ -> Alcotest.failf "no body separator in response: %S" response
 ;;
 
+(* Decode the existing server fixture's actual wire with the HTTP client parser,
+   including framing and headers. No socket or custom response parser. *)
+let client_response request wire =
+  let client = Httpun.Client_connection.create () in
+  let result = ref None in
+  let writer = Httpun.Client_connection.request client request
+      ~error_handler:(fun _ -> Alcotest.fail "unexpected client response error")
+      ~response_handler:(fun response reader ->
+        let body = Buffer.create 512 in
+        let rec consume () = Httpun.Body.Reader.schedule_read reader
+            ~on_eof:(fun () -> result := Some
+              { Masc_http_client.status=Httpun.Status.to_code response.status
+              ; headers=Httpun.Headers.to_list response.headers; body=Buffer.contents body })
+            ~on_read:(fun chunk ~off ~len ->
+              Buffer.add_string body (Bigstringaf.substring chunk ~off ~len);
+              consume ()) in
+        consume ()) in
+  Httpun.Body.Writer.close writer;
+  let rec drain_request () =
+    match Httpun.Client_connection.next_write_operation client with
+    | `Write iovecs ->
+        let written = List.fold_left (fun n (iov : Bigstringaf.t Httpun.IOVec.t) -> n+iov.len) 0 iovecs in
+        Httpun.Client_connection.report_write_result client (`Ok written);
+        drain_request ()
+    | `Yield | `Close _ -> () in
+  drain_request ();
+  let input = Bigstringaf.of_string ~off:0 ~len:(String.length wire) wire in
+  (match Httpun.Client_connection.next_read_operation client with
+   | `Read -> ignore (Httpun.Client_connection.read_eof client input ~off:0 ~len:(Bigstringaf.length input))
+   | `Yield | `Close -> Alcotest.fail "HTTP client cannot read its response");
+  match !result with Some response -> response | None -> Alcotest.fail "incomplete HTTP response"
+;;
+
 let with_test_state f =
   let dir = Filename.temp_file "keeper-turns" ".dir" in
   Sys.remove dir;
@@ -174,6 +207,113 @@ let test_interrupt_rejects_invalid_or_conflicting_identity () =
       ; {|{"name":"alpha","request_id":"operation-1","interrupt_token":"bd985f83-b447-45ee-a638-2e2a71f4e144"}|} ])
 ;;
 
+let test_owned_turn_survives_bound_read_refusal_and_recovery () =
+  with_test_state (fun ~sw ~config ~state ->
+    let name = "workspace-bound-turn" in
+    let install config trace_id =
+      let meta = match Masc_test_deps.meta_of_json_fixture (`Assoc
+        ["name",`String name;"trace_id",`String trace_id;"activation_mode",`String "manual"]) with
+        | Ok value -> value | Error detail -> Alcotest.fail detail in
+      (match Keeper_meta_store.replace_snapshot config meta with
+       | Ok () -> () | Error detail -> Alcotest.fail detail);
+      (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None
+          ~on_turn_slot_released:None config with
+       | Ok _ -> () | Error error -> Alcotest.fail (Keeper_owner_registry.install_error_to_string error));
+      match Keeper_owner_registry.get ~base_path:config.base_path ~keeper_name:name with
+      | Ok owner -> owner | Error error -> Alcotest.fail (Keeper_owner_registry.lookup_error_to_string error) in
+    let owner = install config "original-owner" in
+    let foreign_base = Filename.concat config.base_path "foreign-workspace" in
+    Unix.mkdir foreign_base 0o700;
+    let foreign = Workspace_utils.default_config foreign_base in
+    ignore (Workspace.init foreign ~agent_name:None);
+    let foreign_state = Mcp_server_eio.For_testing.create_state ~base_path:foreign_base () in
+    ignore (install foreign "foreign-idle-owner");
+    let original = Ids.Turn_ref.make ~trace_id:"actual-original-turn" ~absolute_turn:7 in
+    let entered, enter = Eio.Promise.create () in
+    let release, allow_release = Eio.Promise.create () in
+    let finished, finish = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      let outcome = Keeper_owner.run_maintenance_if_idle owner (fun () ->
+        let writer = Some (Keeper_turn_preview.reset ~keeper_name:name
+          ~execution_scope:None ~turn_ref:(Some original) ~now:0.
+          ~redaction:Keeper_secret_redaction.empty) in
+        Keeper_turn_preview.with_preparation ~writer ~turn_ref:(Some original)
+          ~phase:Keeper_turn_preview.World_preparation (fun () ->
+            Eio.Promise.resolve enter ();
+            Eio.Promise.await release)) in
+      Eio.Promise.resolve finish outcome);
+    Eio.Promise.await entered;
+    let slot = match Keeper_owner.turn_in_flight owner with
+      | Some slot -> slot | None -> Alcotest.fail "original Owner did not hold its turn" in
+    let expected : Tui_decode.server_identity =
+      { sid_version="0.24.0"; sid_binary_commit="owned-turn-source"; sid_binary_commit_age_s=None
+      ; sid_base_path=Unix.realpath config.base_path; sid_masc_root=Unix.realpath (Workspace.masc_dir config)
+      ; sid_executable_in_worktree=None; sid_state_ready=Some true
+      ; sid_uptime=None; sid_sse_clients=None; sid_gc=None; sid_scheduler=None } in
+    let served = ref state in
+    let host = "localhost" and port = 8935 in
+    let kept_reads = Masc_tui_kept_reads.create () in
+    let send ~path ~headers =
+      let headers = ("host", "localhost:8935")::headers in
+      let request = Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET path in
+      let raw = Printf.sprintf "GET %s HTTP/1.1\r\n%s\r\n" path
+          (String.concat "" (List.map (fun (key,value) -> key ^ ": " ^ value ^ "\r\n") headers)) in
+      let wire = request_response ~request:raw ~handle:(fun request reqd ->
+        Server_auth.with_read_workspace_precondition !served
+          Server_routes_http_keeper_stream.handle_keeper_turns_list request reqd) in
+      Ok (client_response request wire) in
+    let poll () =
+      let reply, complete = Eio.Promise.create () in
+      Masc_tui_async_read.launch ~source:Masc_tui_async_read.Keeper_turns
+        ~deliver:(Eio.Promise.resolve complete) (fun () ->
+          Masc_tui_workspace_read.with_binding ~host ~port ~expected
+            ~proof:Masc_tui_workspace_read.Request_precondition (fun () ->
+              let ( let* ) = Result.bind in
+              let* json = Masc_tui_workspace_read.read_json ~kept_reads
+                  ~address_of:(fun ~path -> Printf.sprintf "http://%s:%d%s" host port path)
+                  ~send ~decode:Tui_decode.decode_json_response_body ~host ~port
+                  ~path:("/api/v1/keepers/turns?preparation_details_for=" ^ name) in
+              Tui_decode.decode_keeper_turns json));
+      Eio.Promise.await reply in
+    let expect_original = function
+      | Error detail -> Alcotest.fail detail
+      | Ok rows ->
+          let row = List.find (fun (row : Tui_decode.keeper_turn_row) -> row.ktr_keeper_name=name) rows in
+          Alcotest.(check (option string)) "original chat control observation" (Some (Keeper_owner.chat_control_token owner))
+            row.ktr_chat_control_token;
+          (match row.ktr_state with
+           | Tui_decode.Keeper_turn_running {interrupt_token;preview=Some preview;_} ->
+               Alcotest.(check string) "actual original slot token"
+                 (Keeper_interrupt_token.to_string slot.interrupt_token) interrupt_token;
+               Alcotest.(check bool) "actual original preparation lineage" true
+                 (match preview.ktp_preparation with
+                  | Some preparation -> preparation.turn_ref=Some original
+                      && preparation.phase=Keeper_turn_preview.World_preparation
+                      && preparation.state=Keeper_turn_preview.Preparation_active
+                  | None -> false)
+           | Keeper_turn_running _ | Keeper_turn_idle | Keeper_turn_unavailable _ ->
+               Alcotest.fail "admitted Owner turn lost original running/preparation state") in
+    expect_original (poll ());
+    served := foreign_state;
+    (match poll () with Error _ -> () | Ok _ -> Alcotest.fail "foreign idle row replaced the original running observation");
+    Alcotest.(check bool) "read refusal does not mutate the original turn" true
+      (match Keeper_owner.turn_in_flight owner with
+       | Some current -> Keeper_interrupt_token.equal current.interrupt_token slot.interrupt_token
+       | None -> false);
+    served := state;
+    expect_original (poll ());
+    Eio.Promise.resolve allow_release ();
+    (match Eio.Promise.await finished with
+     | Ok (`Ran ()) -> ()
+     | Ok (`Busy _) -> Alcotest.fail "original maintenance lost its slot"
+     | Error error -> Alcotest.fail (Keeper_owner.error_to_string error));
+    (match poll () with
+     | Ok rows -> Alcotest.(check bool) "actual finished Owner becomes idle only after completion" true
+         (List.exists (fun (row : Tui_decode.keeper_turn_row) -> row.ktr_keeper_name=name
+           && row.ktr_state=Tui_decode.Keeper_turn_idle) rows)
+     | Error detail -> Alcotest.fail detail))
+;;
+
 let test_run_next_ownership_and_started_boundary () =
   with_test_state (fun ~sw ~config ~state ->
     let name = "priority-route" in
@@ -248,6 +388,7 @@ let () =
   Alcotest.run "keeper_turns_route"
     [ ( "keeper-turns-route"
       , [ Alcotest.test_case "invalid or conflicting interrupt identity" `Quick test_interrupt_rejects_invalid_or_conflicting_identity
+        ; Alcotest.test_case "original turn through workspace refusal and recovery" `Quick test_owned_turn_survives_bound_read_refusal_and_recovery
         ; Alcotest.test_case "run-next ownership, idempotency, and started boundary" `Quick test_run_next_ownership_and_started_boundary
 
         ; Alcotest.test_case "empty workspace answers an empty fleet" `Quick

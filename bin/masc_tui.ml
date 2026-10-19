@@ -1954,12 +1954,12 @@ let launch_workspace_request ?(operation = false) state ~mailbox ~boundary_error
 (* These read-only consumers carry their expected roots through the actual GET
    and require the server's admission receipt, including for cache reuse. Local
    ownership is checked before dispatch; a separate health GET adds no binding. *)
-let launch_workspace_json_read state ~mailbox ~deliver read =
+let capture_workspace_json_read state read =
   let expected = state.server_identity in
   let authority = state.workspace_authority in
   let reading = state.workspace_read_authority in
   let host = server_peer_host and port = state.port in
-  launch_workspace_result state ~mailbox ~boundary_error:Fun.id ~deliver (fun () ->
+  fun () ->
     match expected with
     | None -> Error "Workspace identity is unavailable for this read"
     | Some expected ->
@@ -1971,7 +1971,11 @@ let launch_workspace_json_read state ~mailbox ~deliver read =
         then Error "Workspace identity changed before this read"
         else
           Masc_tui_workspace_read.with_binding ~host ~port ~expected
-            ~proof:Masc_tui_workspace_read.Request_precondition read)
+            ~proof:Masc_tui_workspace_read.Request_precondition read
+
+let launch_workspace_json_read state ~mailbox ~deliver read =
+  let read = capture_workspace_json_read state read in
+  launch_workspace_result state ~mailbox ~boundary_error:Fun.id ~deliver read
 
 (* A creation keeps its operation receipt even after its workspace withdraws.
    Only the result handler may use current authority to refresh or open chat. *)
@@ -3132,7 +3136,8 @@ let launch_keeper_turns_load state ~mailbox =
       ~on_not_run:(fun () -> state.keeper_turns_inflight <- false)
       ~deliver:(fun result ->
         enqueue_async mailbox (Keeper_turns_loaded (generation, result)))
-      (fun () -> Masc_tui_loader.load_keeper_turns ~host ~port ~preparation_details_for)
+      (capture_workspace_json_read state (fun () ->
+        Masc_tui_loader.load_keeper_turns ~host ~port ~preparation_details_for))
   end
   end
 

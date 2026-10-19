@@ -1081,7 +1081,10 @@ let load_keeper_tool_approvals ~(host : string) ~(port : int) :
 (** Load which keepers are mid-turn right now (the "answering now" badge). *)
 let load_keeper_turns ~(host : string) ~(port : int) ~preparation_details_for :
     (Tui_decode.keeper_turn_row list, string) result =
-  Result.bind (fetch_keeper_turns ~host ~port ~preparation_details_for) Tui_decode.decode_keeper_turns
+  let ( let* ) = Result.bind in
+  let* json = fetch_keeper_turns ~host ~port ~preparation_details_for in
+  Masc_tui_response_decode.run ~name:"keeper.turns.decode_wait" (fun () ->
+    Tui_decode.decode_keeper_turns json)
 
 (** Load the durable Gate: pending approvals and both lane modes. *)
 let load_dashboard_gate ~(host : string) ~(port : int) :

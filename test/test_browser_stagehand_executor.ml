@@ -161,7 +161,7 @@ let test_capture_passes_the_surface () =
   @@ fun env ->
   Time_compat.set_clock (Eio.Stdenv.clock env);
   Lane.install_activity_observer (Some (fun _ -> Lane.Enabled));
-  Lane.install_stagehand_executor (Some (Executor.execute ~tabs ~call:(call fake)));
+  Lane.install_stagehand_executor (Some (fun ~actor verb -> Executor.execute ~tabs ~call:(call fake) ?actor verb));
   let captured = Fun.protect ~finally:(fun () ->
     Lane.install_activity_observer None; Lane.install_stagehand_executor None) (fun () ->
     Masc.Browser_surface.capture { Masc.Browser_surface.route = Lane.Stagehand_route; tab_id = Some 1 }) in
@@ -258,6 +258,76 @@ let test_reads_run_the_page_scripts () =
 let point = { Lane.Pointer.x = 0.5; y = 0.25 }
 let observed_viewport = { Lane.Pointer.document_id = "d1"; width = 800.; height = 600.; scroll_x = 0.; scroll_y = 0. }
 
+let feedback_arguments body = function
+  | Wire.Page_evaluate {expression;_} ->
+    let sample = Executor.evaluate_expression ~runtime:Executor.No_runtime ~body ~args:`Null in
+    let prefix = String.sub sample 0 (String.length sample - String.length "null)") in
+    if String.starts_with ~prefix expression then
+      Some (Yojson.Safe.from_string (String.sub expression (String.length prefix)
+        (String.length expression - String.length prefix - 1)))
+    else None
+  | _ -> None
+;;
+
+let test_actor_feedback_outcomes () = Eio_main.run (fun _ ->
+  let tabs = Executor.Tabs.create () and fake = fake [shop ()] ~active:(Some "P2") in
+  ignore (listed tabs fake);
+  let begins = ref [] and finishes = ref [] and overlay_fails = ref false in
+  let call request = match feedback_arguments Masc.Browser_pointer_feedback.begin_script request with
+    | Some args -> begins:=args::!begins;
+      if !overlay_fails then Error (Session.Lost "overlay unavailable") else Ok (`Assoc ["value",`String "null"])
+    | None -> match feedback_arguments Masc.Browser_pointer_feedback.finish_script request with
+      | Some args -> finishes:=args::!finishes;
+        if !overlay_fails then raise (Failure "overlay unavailable") else Ok (`Assoc ["value",`String "null"])
+      | None -> call fake request in
+  let invoke () = Executor.execute ~tabs ~call ~actor:"keeper-observed"
+    (Lane.Page_interact {tab_id=0;expected_url=Some "http://127.0.0.1:1/shop";
+      action=Lane.Hover_at {point;viewport=observed_viewport}}) in
+  let check_feedback phase =
+    let start=List.hd !begins and finish=List.hd !finishes in
+    check string "explicit keeper owns the overlay" "keeper-observed" Yojson.Safe.Util.(member "actor" start |> to_string);
+    check string "original action is displayed" "hover_at" Yojson.Safe.Util.(member "action" start |> to_string);
+    let id=Yojson.Safe.Util.(member "requestId" start |> to_string) in
+    check bool "interaction request identity is a UUID" true (Option.is_some (Uuidm.of_string id));
+    check string "finish belongs to this exact request" id Yojson.Safe.Util.(member "requestId" finish |> to_string);
+    check string "observational terminal phase" phase Yojson.Safe.Util.(member "phase" finish |> to_string) in
+  ignore (served (invoke ()));check_feedback "finished";
+  fake.failing <- (function Wire.Page_evaluate _ -> Some (Session.Rejected {code= -32603;message="page_url_changed"})|_->None);
+  check bool "guard refusal stays before effect" true (rejected_before_effect (invoke ()));
+  check_feedback "refused";
+  fake.sent <- [];
+  fake.failing <- (function Wire.Page_hover _ -> Some (Session.Lost "native input unanswered")|_->None);
+  check bool "unknown input stays unknown" true (refused (invoke ()));
+  check_feedback "unknown";
+  check int "unknown input is never replayed" 1
+    (List.length (List.filter (function Wire.Page_hover _->true|_->false) fake.sent));
+  fake.failing <- (fun _ -> None);fake.sent<-[];overlay_fails:=true;
+  ignore (served (invoke ()));
+  check int "overlay failures neither block nor repeat authoritative input" 1
+    (List.length (List.filter (function Wire.Page_hover _->true|_->false) fake.sent));
+  let count=List.length !begins in
+  ignore (served (Executor.execute ~tabs ~call (Lane.Page_interact {tab_id=0;
+    expected_url=Some "http://127.0.0.1:1/shop";action=Lane.Hover_at {point;viewport=observed_viewport}})));
+  check int "anonymous calls invent no owner" count (List.length !begins);
+  overlay_fails:=false;
+  let entered,enter=Eio.Promise.create () and never,_=Eio.Promise.create () in
+  let cancelled=ref false in
+  let cancel_call = function
+    | Wire.Page_hover _ -> Eio.Promise.resolve enter ();Eio.Promise.await never
+    | request -> call request in
+  (match Eio.Switch.run (fun sw ->
+     Eio.Fiber.fork ~sw (fun () ->
+       match Executor.execute ~tabs ~call:cancel_call ~actor:"keeper-observed"
+           (Lane.Page_interact {tab_id=0;expected_url=Some "http://127.0.0.1:1/shop";
+             action=Lane.Hover_at {point;viewport=observed_viewport}}) with
+       | _ -> fail "cancelled native input returned normally"
+       | exception (Eio.Cancel.Cancelled _ as exn) -> cancelled:=true;raise exn);
+     Eio.Promise.await entered;Eio.Switch.fail sw Exit)
+   with () -> fail "expected scope cancellation" | exception Exit -> ());
+  check bool "caller cancellation propagates" true !cancelled;
+  check_feedback "unknown")
+;;
+
 let test_hover_wire () =
   let request = Wire.Page_hover {page_id="P2";x=400.;y=150.} in
   let encoded = Wire.encode_call ~id:7 request |> Yojson.Safe.from_string in
@@ -293,15 +363,17 @@ let test_semantic_pointer_input () =
     Executor.execute ~tabs ~call (Lane.Page_interact {tab_id=0;expected_url;action}) in
   let viewport = Lane.Pointer.viewport_to_json observed_viewport in
   let resolved_point = Lane.Pointer.point_to_json point in
-  ignore (served (execute (Lane.Hover (Lane.Selector "#menu"))
-    (`Assoc ["url",`String "http://127.0.0.1:1/shop";"point",resolved_point;"viewport",viewport])));
+  let hovered = served (execute (Lane.Hover (Lane.Selector "#menu"))
+    (`Assoc ["url",`String "http://127.0.0.1:1/shop";"point",resolved_point;"viewport",viewport])) in
+  check string "semantic hover retains the requested action" "hover" Yojson.Safe.Util.(member "action" hovered |> to_string);
   (match List.rev fake.sent with
    | [Wire.Page_evaluate _;Wire.Page_evaluate _;Wire.Page_hover {page_id="P2";x=400.;y=150.};Wire.Page_evaluate _] -> ()
    | _ -> fail "resolve, guard, native hover, receipt required");
   let drag = Lane.Drag_to {source=Lane.Selector "#source";destination=Lane.Selector "#destination";
     via=[];duration_ms=0} in
-  ignore (served (execute drag (`Assoc ["url",`String "http://127.0.0.1:1/shop";"from",resolved_point;
-    "to",Lane.Pointer.point_to_json {x=0.75;y=0.5};"viewport",viewport])));
+  let dragged = served (execute drag (`Assoc ["url",`String "http://127.0.0.1:1/shop";"from",resolved_point;
+    "to",Lane.Pointer.point_to_json {x=0.75;y=0.5};"viewport",viewport])) in
+  check string "semantic drag retains the requested action" "drag_to" Yojson.Safe.Util.(member "action" dragged |> to_string);
   (match List.rev fake.sent with
    | [Wire.Page_evaluate _;Wire.Page_evaluate _;
       Wire.Page_drag_and_drop {page_id="P2";from_x=400.;from_y=150.;to_x=600.;to_y=300.;
@@ -318,8 +390,9 @@ let test_semantic_pointer_input () =
     check int "bad arrival only performs target resolution" 1 (List.length fake.sent))
     [`Null;`Assoc ["x",`Float 1.;"y",`Float 0.5]];
   List.iter (fun action ->
-    ignore (served (execute ~expected_url:None action
-      (`Assoc ["url",`String "http://127.0.0.1:1/shop";"point",resolved_point;"viewport",viewport])));
+    let clicked = served (execute ~expected_url:None action
+      (`Assoc ["url",`String "http://127.0.0.1:1/shop";"point",resolved_point;"viewport",viewport])) in
+    check string "native semantic click retains the requested action" "click" Yojson.Safe.Util.(member "action" clicked |> to_string);
     match List.rev fake.sent with
     | [Wire.Page_evaluate _;Wire.Page_evaluate {expression;_};
        Wire.Page_click {page_id="P2";x=400.;y=150.};Wire.Page_evaluate _] ->
@@ -546,7 +619,8 @@ let () =
     "interactions", [ test_case "scripts and native pointer input" `Quick test_interactions;
       test_case "hover uses official runtime wire without a model" `Quick test_hover_wire;
       test_case "observed targets resolve into native hover and drag" `Quick test_semantic_pointer_input;
-      test_case "hover failure boundaries never replay input" `Quick test_hover_effect_boundary ];
+      test_case "hover failure boundaries never replay input" `Quick test_hover_effect_boundary;
+      test_case "attributed feedback cannot alter authoritative input" `Quick test_actor_feedback_outcomes ];
     "refusals", [ test_case "an unserved verb sends nothing" `Quick test_unserved_verbs ];
     "evaluate", [
       test_case "the expression calls its body" `Quick test_evaluate_expression;

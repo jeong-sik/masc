@@ -16,7 +16,7 @@ let with_executor answer f =
   Time_compat.set_clock (Eio.Stdenv.clock env);
   Lane.install_stagehand_executor
     (Some
-       (fun verb ->
+       (fun ~actor:_ verb ->
          sent := verb :: !sent;
          answer));
   Fun.protect ~finally:(fun () -> Lane.install_stagehand_executor None) f
@@ -111,7 +111,7 @@ let test_an_unsuccessful_act_is_a_failure () =
   Eio_main.run
   @@ fun env ->
   Time_compat.set_clock (Eio.Stdenv.clock env);
-  Lane.install_stagehand_executor (Some (Executor.execute ~tabs ~call));
+  Lane.install_stagehand_executor (Some (fun ~actor verb -> Executor.execute ~tabs ~call ?actor verb));
   Fun.protect ~finally:(fun () -> Lane.install_stagehand_executor None)
   @@ fun () ->
   (match Executor.execute ~tabs ~call Lane.Tabs_list with

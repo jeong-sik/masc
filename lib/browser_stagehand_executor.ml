@@ -313,6 +313,7 @@ let pointer ~call ~tab_id ~page_id ~args ~name input =
 
 let interact ~tabs ~call ~tab_id ~expected_url action =
   let* page_id = page_of ~tabs tab_id in
+  let name = Browser_lane.interaction_verb action in
   let args = Browser_lane.interaction_args ~tab_id ~expected_url action in
   let* action, expected_url = match (action : Browser_lane.interaction) with
     | Browser_lane.Drag_to {duration_ms;_} when duration_ms <> 0 ->
@@ -353,13 +354,13 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
   | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
     Error (Browser_lane.Rejected_before_effect "unresolved semantic pointer target")
   | Browser_lane.Hover_at {point;viewport} ->
-    pointer ~call ~tab_id ~page_id ~args ~name:"hover_at"
+    pointer ~call ~tab_id ~page_id ~args ~name
       (Wire.Page_hover {page_id;x=viewport_x viewport point;y=viewport_y viewport point})
   | Browser_lane.Click_at { point; viewport } ->
-    pointer ~call ~tab_id ~page_id ~args ~name:"click_at"
+    pointer ~call ~tab_id ~page_id ~args ~name
       (Wire.Page_click { page_id; x = viewport_x viewport point; y = viewport_y viewport point })
   | Browser_lane.Scroll_at { point; viewport; x; y } ->
-    pointer ~call ~tab_id ~page_id ~args ~name:"scroll_at"
+    pointer ~call ~tab_id ~page_id ~args ~name
       (Wire.Page_scroll
          { page_id; x = viewport_x viewport point; y = viewport_y viewport point
          ; delta_x = float_of_int x; delta_y = float_of_int y })
@@ -372,12 +373,41 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
     let route = match via with
       | [] -> [Wire.{x=(from_x +. to_x) /. 2.;y=(from_y +. to_y) /. 2.}]
       | _::_ -> List.map (fun point -> Wire.{x=viewport_x viewport point;y=viewport_y viewport point}) via in
-    pointer ~call ~tab_id ~page_id ~args ~name:"drag"
+    pointer ~call ~tab_id ~page_id ~args ~name
       (Wire.Page_drag_and_drop
          {page_id;from_x;from_y;to_x;to_y;route})
   | Browser_lane.Fill _ | Browser_lane.Scroll _ | Browser_lane.Follow_link _ | Browser_lane.Fill_node _ ->
     let* receipt = evaluate ~runtime:Scene_runtime ~send:(send call) ~args page_id Browser_interaction.script in
     interaction_receipt ~tab_id receipt
+;;
+
+let attributed_interact ~tabs ~call ~actor ~tab_id ~expected_url action =
+  match actor with
+  | None -> interact ~tabs ~call ~tab_id ~expected_url action
+  | Some actor ->
+    let* page_id = page_of ~tabs tab_id in
+    let request_id = Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
+    let metadata = ["requestId",`String request_id;"actor",`String actor;
+      "action",`String (Browser_lane.interaction_verb action)] in
+    let observe body args =
+      match evaluate ~runtime:No_runtime ~send:(send call) ~args page_id body with
+      | Ok _ | Error _ -> ()
+      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+      | exception _ -> () in
+    Eio.Switch.run (fun sw ->
+      let phase = ref Browser_pointer_feedback.Unknown in
+      (* Switch cleanup is cancellation-protected. Feedback only observes;
+         a missing overlay never authorizes or replays the browser input. *)
+      Eio.Switch.on_release sw (fun () -> observe Browser_pointer_feedback.finish_script
+        (`Assoc (("phase",Browser_pointer_feedback.outcome_to_json !phase)::metadata)));
+      observe Browser_pointer_feedback.begin_script (`Assoc metadata);
+      let result = interact ~tabs ~call ~tab_id ~expected_url action in
+      phase := (match result with
+        | Ok _ -> Browser_pointer_feedback.Finished
+        | Error (Browser_lane.Rejected_before_effect _) -> Browser_pointer_feedback.Refused
+        | Error (Browser_lane.Refused _ | Browser_lane.Timed_out | Browser_lane.Lane_absent | Browser_lane.Answered _) ->
+          Browser_pointer_feedback.Unknown);
+      result)
 ;;
 
 (* Stagehand answers an act it could not carry out (no element matched, the
@@ -407,7 +437,7 @@ let sentence ~tabs ~call ~tab_id ~outcome to_call =
 
 let reported_as_data (_ : Yojson.Safe.t) = Ok ()
 
-let execute ~tabs ~call verb =
+let execute ~tabs ~call ?actor verb =
   let served =
     match verb with
     | Browser_lane.Tabs_list -> list_tabs ~tabs ~call
@@ -416,7 +446,7 @@ let execute ~tabs ~call verb =
     | Browser_lane.Page_read { tab_id; max_chars } -> read_text ~tabs ~call ~tab_id ~max_chars
     | Browser_lane.Page_elements { tab_id } -> read_elements ~tabs ~call ~tab_id
     | Browser_lane.Page_scene { tab_id; max_chars; view; scope } -> read_scene ~tabs ~call ~tab_id ~max_chars ~view ~scope
-    | Browser_lane.Page_interact { tab_id; expected_url; action } -> interact ~tabs ~call ~tab_id ~expected_url action
+    | Browser_lane.Page_interact { tab_id; expected_url; action } -> attributed_interact ~tabs ~call ~actor ~tab_id ~expected_url action
     | Browser_lane.Page_instruct { tab_id; instruction } ->
       sentence ~tabs ~call ~tab_id ~outcome:act_outcome (fun page_id -> Wire.Act { page_id; instruction; timeout = Wire.sentence_timeout })
     | Browser_lane.Page_locate { tab_id; instruction } ->

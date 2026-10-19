@@ -763,7 +763,7 @@ let issue_automation_with ~activity_check ~verb ~timeout_sec =
       ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)
 let issue_automation ~verb ~timeout_sec =
   issue_automation_with ~activity_check:(activity_refusal Lane_name.Automation) ~verb ~timeout_sec
-let stagehand_executor : (verb -> answer) option Atomic.t = Atomic.make None
+let stagehand_executor : (actor:string option -> verb -> answer) option Atomic.t = Atomic.make None
 let install_stagehand_executor executor = Atomic.set stagehand_executor executor
 type backend_observation = Live_clients of int | Executor_registered of bool
 type inventory_observation = { activity : activity; backend : backend_observation }
@@ -777,7 +777,7 @@ let inventory_observation ?observed_activity lane =
   | Lane_name.Automation -> Executor_registered (Option.is_some (Atomic.get automation_executor))
   | Lane_name.Stagehand -> Executor_registered (Option.is_some (Atomic.get stagehand_executor))
   in { activity; backend }
-let issue_stagehand_with ~activity_check ~verb ~timeout_sec =
+let issue_stagehand_with ~actor ~activity_check ~verb ~timeout_sec =
   if not (verb_allowed_on_stagehand verb) then
     Rejected_before_effect ("the stagehand lane does not serve " ^ verb_to_string verb)
   else match activity_check verb with
@@ -786,11 +786,11 @@ let issue_stagehand_with ~activity_check ~verb ~timeout_sec =
   | None -> Lane_absent
   | Some execute ->
     (match timeout_sec with
-     | None -> execute verb
-     | Some timeout_sec -> Watched_work.run (fun () -> execute verb)
+     | None -> execute ~actor verb
+     | Some timeout_sec -> Watched_work.run (fun () -> execute ~actor verb)
          ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out))
 let issue_stagehand ~verb ~timeout_sec =
-  issue_stagehand_with ~activity_check:(activity_refusal Lane_name.Stagehand) ~verb ~timeout_sec
+  issue_stagehand_with ~actor:None ~activity_check:(activity_refusal Lane_name.Stagehand) ~verb ~timeout_sec
 (* The lanes whose browser the server owns; sessions and navigation belong
    to them, and the live browser belongs to the operator. *)
 type server_lane = Server_automation | Server_stagehand
@@ -861,7 +861,7 @@ let issue_for_actor ~actor ~target ~verb ~timeout_sec =
   match target with
   | Live_client client -> issue_live_with ~activity_check:(activity_refusal Lane_name.Live) ?actor client ~verb ~timeout_sec
   | Automation -> Ok (issue_automation ~verb ~timeout_sec)
-  | Stagehand -> Ok (issue_stagehand ~verb ~timeout_sec:(Some timeout_sec))
+  | Stagehand -> Ok (issue_stagehand_with ~actor ~activity_check:(activity_refusal Lane_name.Stagehand) ~verb ~timeout_sec:(Some timeout_sec))
 
 let issue_for ~target ~verb ~timeout_sec =
   issue_for_actor ~actor:None ~target ~verb ~timeout_sec
@@ -888,7 +888,7 @@ end = struct
     match admitted with
     | Live_client client -> issue_live_with ~activity_check client ~verb ~timeout_sec
     | Automation -> Ok (issue_automation_with ~activity_check ~verb ~timeout_sec)
-    | Stagehand -> Ok (issue_stagehand_with ~activity_check ~verb ~timeout_sec:(Some timeout_sec))
+    | Stagehand -> Ok (issue_stagehand_with ~actor:None ~activity_check ~verb ~timeout_sec:(Some timeout_sec))
 end
 
 (** Additional observations never queue behind an existing browser command.

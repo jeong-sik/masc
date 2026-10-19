@@ -15,7 +15,7 @@ let with_executors f =
   Time_compat.set_clock (Eio.Stdenv.clock env);
   let automation = ref [] and stagehand = ref [] in
   Lane.install_automation_executor (Some (fun verb -> automation := verb :: !automation; answered));
-  Lane.install_stagehand_executor (Some (fun verb -> stagehand := verb :: !stagehand; answered));
+  Lane.install_stagehand_executor (Some (fun ~actor:_ verb -> stagehand := verb :: !stagehand; answered));
   Fun.protect
     ~finally:(fun () ->
       Lane.install_automation_executor None;
@@ -53,7 +53,7 @@ let test_stagehand_open_waits_for_attach () =
   let clock = Eio.Stdenv.clock env in
   Time_compat.set_clock clock;
   Lane.install_stagehand_executor
-    (Some (fun _ ->
+    (Some (fun ~actor:_ _ ->
        Eio.Time.sleep clock 0.01;
        answered));
   Fun.protect

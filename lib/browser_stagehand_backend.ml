@@ -21,6 +21,7 @@ type 'session state = Closed | Opening | Open of 'session opened | Closing
 
 type request =
   { verb : Browser_lane.verb
+  ; actor : string option
   ; reply : Browser_lane.answer Eio.Promise.u
   ; caller_left : unit Eio.Promise.t
   }
@@ -213,7 +214,7 @@ let status t =
    session's one-call slot alone allows: a click would land on a page its
    guard never checked. The automation lane holds its session lock for a
    whole verb the same way. *)
-let page t ~began verb =
+let page t ~began ~actor verb =
   Eio.Semaphore.acquire t.verbs;
   (* fun-protect-finally-ok: [Eio.Semaphore.release] does not suspend; the
      slot comes back on return, exception and cancellation, and unlike
@@ -222,7 +223,7 @@ let page t ~began verb =
     match t.state with
     | Open opened ->
       began opened;
-      Executor.execute ~tabs:t.tabs ~call:(t.call opened.session) verb
+      Executor.execute ~tabs:t.tabs ~call:(t.call opened.session) ?actor verb
     | Closed | Opening | Closing -> no_session)
 ;;
 
@@ -282,7 +283,7 @@ let retire_unanswered_sentence t ~expected ~answers_before =
   | `Unanswered -> retire_sentence_session t expected
 ;;
 
-let serve t { verb; reply; caller_left } =
+let serve t { verb; actor; reply; caller_left } =
   let run_to_the_end work = Eio.Promise.resolve reply (guarded work) in
   match verb with
   | Browser_lane.Session_open { headless } ->
@@ -309,7 +310,7 @@ let serve t { verb; reply; caller_left } =
          ~watcher:(fun () ->
            Eio.Promise.await caller_left;
            None)
-         (fun () -> Some (guarded (fun () -> page t ~began:(fun opened ->
+         (fun () -> Some (guarded (fun () -> page t ~actor ~began:(fun opened ->
            progress := Began;
            began_session := Some (opened, !(opened.abandoned_answers))) verb)))
      with
@@ -353,10 +354,10 @@ let create ~sw ~clock ~open_session ~call ~pid ~log =
   t
 ;;
 
-let execute t verb =
+let execute t ?actor verb =
   let answer, reply = Eio.Promise.create () in
   let caller_left, leave = Eio.Promise.create () in
-  Eio.Stream.add t.requests { verb; reply; caller_left };
+  Eio.Stream.add t.requests { verb; actor; reply; caller_left };
   match Eio.Promise.await answer with
   | answer -> answer
   | exception (Eio.Cancel.Cancelled _ as exn) ->

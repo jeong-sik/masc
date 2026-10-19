@@ -352,7 +352,7 @@ let prepare_start ~cleanup ~sw ~env ~base_path ~configuration =
           ~call:(fun t -> Session.call t.session)
           ~pid ~log:log_event
       in
-      Browser_lane.install_stagehand_executor (Some (Browser_stagehand_backend.execute backend));
+      Browser_lane.install_stagehand_executor (Some (fun ~actor verb -> Browser_stagehand_backend.execute backend ?actor verb));
       Eio.Switch.on_release sw (fun () -> Browser_lane.install_stagehand_executor None);
       Log.Server.info "browser-lane: stagehand serves with %s" config.Browser_configuration.chrome)
 ;;

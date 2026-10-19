@@ -17,6 +17,7 @@ on:
           - detail-ownership
           - workspace-files
           - rich-workspace
+          - rich-chat-workspace
 
 permissions:
   contents: read

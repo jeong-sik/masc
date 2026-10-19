@@ -287,7 +287,7 @@ export function sourceCommand(editor,line) {
     }
     case 'title':count(1,Number.MAX_SAFE_INTEGER);return {editor:sourceEditor({...editor.project,name:args.join(' ')},{...editor,undo:[...editor.undo,editor.project],redo:[]})}
     case 'undo':case 'redo':count(0);return {editor:sourceAction(editor,{kind:command})}
-    case 'save':case 'play':case 'stop':case 'record':case 'help':case 'audio':count(0);return {editor,effect:{kind:command}}
+    case 'save':case 'play':case 'stop':case 'record':case 'help':case 'audio':case 'arrange':count(0);return {editor,effect:{kind:command}}
     case 'save-as':case 'export':case 'wave':case 'output':case 'midi-output':count(1,Number.MAX_SAFE_INTEGER);return {editor,effect:{kind:command,path:args.join(' ')}}
     case 'midi-port':count(2);{
       const port=Number(args[0]);if(!Number.isInteger(port)||port<0||port>127)throw new Error('MIDI port must be 0–127')

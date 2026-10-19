@@ -450,52 +450,35 @@ let prompt_section_separator = Antigravity_input_frame.section_separator
    the host compacts its own input. The observation maps back to the durable
    history, as on the Antigravity lane. *)
 let carried_history_projection
+    ?argument_projection
     ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
     ~turn_start ~keeper_name ~runtime_id source_projection
   : Agent_core.Agent.model_input_projection
   =
   fun history_messages ->
-  let* librarian_front = Host.read_librarian_front librarian_front history_messages in
-  let carried_front_seed = Host.read_seed_once carried_front_seed in
-  (* Nothing cuts the range, so a working state a Librarian snapshot names
-     displaces none of its atoms and goes in front of it
-     ([Host.compose_librarian_range], RFC-0460). *)
-  let compose librarian_front =
-    let carried =
-      Host.carried_start_range
-        ~keeper_name
-        ~runtime_id
-        ~carried_front_seed
-        ~librarian_front
-        ~own_first_atom:0
-        ~turn_start
-        history_messages
-    in
-    let* sent =
-      Host.project_source ~unread:librarian_front.Keeper_turn_driver_try_provider.unread
-        source_projection carried.Host.messages
-    in
-    Ok { Host.carried; sent; atoms_kept = Host.carried_atoms carried }
-  in
-  let* windowed =
-    Host.compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front
-  in
-  Option.iter
-    (fun observe ->
-       observe
-         windowed.Host.carried.Host.front
-         ~transmitted_bytes:windowed.Host.carried.Host.transmitted_bytes)
-    on_carried_front;
-  Option.iter
-    (fun observe ->
-       Option.iter
-         observe
-         (Runtime_model_input_tail_window.observe
-            ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest history_messages)
-            ~history_atom_count:windowed.Host.carried.Host.history_atom_count
-            (Host.windowed_projection windowed)))
-    on_model_input_window_observation;
-  Ok windowed.Host.sent
+  let* frozen = Host.read_librarian_front librarian_front history_messages in
+  let window = ref None and front = ref None in
+  let* sent = Host.start_range_projection
+    ?argument_projection
+    ~measure_message_bytes:Host.measure_message_bytes
+    ~capacity_bytes:max_int ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
+    ?on_model_input_window_observation:(Option.map
+      (fun _ observation -> window := Some observation) on_model_input_window_observation)
+    ?carried_front_seed
+    ~librarian_front:(fun _ -> Ok frozen)
+    ?on_carried_front:(Option.map
+      (fun _ observed ~transmitted_bytes -> front := Some (observed,transmitted_bytes))
+      on_carried_front)
+    ~turn_start ~keeper_name ~runtime_id history_messages in
+  let* sent = Host.project_source
+    ~unread:frozen.Keeper_turn_driver_try_provider.unread source_projection sent in
+  (* A refused custom projection returned no range. Publish the buffered
+     raw-source observations only after the final transmitted copy exists. *)
+  Option.iter (fun (front,transmitted_bytes) ->
+    Option.iter (fun observe -> observe front ~transmitted_bytes) on_carried_front) !front;
+  Option.iter (fun observation ->
+    Option.iter (fun observe -> observe observation) on_model_input_window_observation) !window;
+  Ok sent
 ;;
 
 let prompt_for_turn ?composed_context ~held ~is_resume ~goal (prepared : Host.prepared_turn) =
@@ -831,7 +814,7 @@ let phase_name : Session_store.phase -> string = function
   | Session_store.Settled _ -> "Settled"
 ;;
 
-let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled
+let run_without_lifecycle ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled
     ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
     ~on_model_input_window_observation ~carried_front_seed ~librarian_front ~on_carried_front
@@ -1064,6 +1047,9 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       else
         let project =
           carried_history_projection
+            ?argument_projection:(Option.bind argument_source (fun source ->
+              Host.argument_projection source ~tools:prepared.tools
+                ~history_prefix:(Option.to_list historical_task_message)))
             ?on_model_input_window_observation
             ?carried_front_seed
             ?librarian_front
@@ -1768,7 +1754,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                  recovery_detail)))
 ;;
 
-let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture
+let run ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture
     ?official_client_continuation ~runtime_id ~configured_reasoning_effort
     ~turn_timeout_s ~quota_scope ~keeper_name ~pre_tool_rejects ~base_path ~workspace_root ?native_workspace_context ~goal
     ~goal_blocks ~system_prompt ~tools
@@ -1800,6 +1786,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       run_without_lifecycle
+        ~argument_source
         ~official_task_reference
         ~composed_context
         ~accepts_image_input

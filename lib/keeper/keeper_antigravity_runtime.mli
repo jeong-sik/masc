@@ -11,6 +11,7 @@ type attempt_outcome =
     closes the same-turn retry boundary before user/tool code can run. *)
 
 val run :
+  ?argument_source:Keeper_official_client_host.argument_source ->
   ?official_task_reference:Keeper_official_task_reference.t ->
   ?composed_context:(unit -> Keeper_official_client_host.composed_context option) ->
   (* Read after hook assembly to preserve typed block rendering. This lane
@@ -138,7 +139,8 @@ module For_testing : sig
       they are fed before the emit returns. *)
 
   val carried_history_projection
-    :  ?on_model_input_window_observation:
+    :  ?argument_projection:Keeper_official_client_host.argument_projection
+    -> ?on_model_input_window_observation:
          (Runtime_model_input_tail_window.window_observation -> unit)
     -> ?carried_front_seed:(unit -> Keeper_carried_front.seed_read)
     -> ?librarian_front:Keeper_official_client_host.librarian_front_reader

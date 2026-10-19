@@ -32,6 +32,12 @@ val media_degraded_with_current_input :
   dispatch_input:Agent_core.Types.message ->
   projection
 
+val history_only : projection -> projection
+(** Keep the exact canonical/dispatch history prefix authority while removing
+    the current-input obligation. Official clients send the current goal on a
+    separate prompt surface; this view is only for their history projection.
+    Agent Core checkpoint restoration must retain the full projection. *)
+
 (** Split [messages] after an exact structural [prefix]. *)
 val split :
   prefix:Agent_core.Types.message list ->

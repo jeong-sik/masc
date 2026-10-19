@@ -73,7 +73,13 @@ pair has the required structural and transport evidence. Other gaps are
 
 This checks exact reuse of the nested operational request, not reproduction of
 the surrounding long notes/envelope. It does not establish official-client,
-fleet, installation or visible UI behavior. The official Codex, Claude,
-Antigravity and Muse transmitted-context paths remain a separate implementation
-and verification requirement for #37853; a remote client-held conversation cannot
-be retroactively rewritten by this runner.
+fleet, installation or visible UI behavior. Official Codex, Claude, Antigravity
+and Muse Start/reseed paths bind their own raw completed seed and actual prepared
+reader surface through the shared Host projection. They preserve the canonical
+source and only materialize arguments in the transmitted range. Resume leaves
+the remote conversation held by its client and performs no argument projection.
+These adapters have separate fake-client serialization and recovery scenarios;
+those fixtures and this AgentCore-only runner require their own execution
+evidence. This runner does not establish official-client response quality or
+retroactively rewrite a remote client-held conversation. Actual official-lane
+and paired model verification remain requirements for #37853.

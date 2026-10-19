@@ -550,7 +550,10 @@ val create_argument_source :
   replay_prefix:Keeper_replay_prefix.projection ->
   turn_start:Keeper_carried_front.turn_start -> argument_source option
 (** [None] for Wide, missing raw seed, empty base path, or unknown/empty
-    completed boundary. Creation performs no blob I/O or occurrence binding. *)
+    completed boundary. Creation performs no blob I/O or occurrence binding.
+    The replay authority covers history only: official clients transmit the
+    current goal separately, so its input obligation is not part of this
+    binding. Both exact history prefix guards remain in force. *)
 
 type argument_projection
 
@@ -599,12 +602,17 @@ val prepare_turn :
   system_prompt:string ->
   tools:Agent_core.Tool.t list ->
   initial_messages:Agent_core.Types.message list ->
-  model_input_projection:Agent_core.Agent.model_input_projection option ->
+  model_input_projection:
+    (tools:Agent_core.Tool.t list -> Agent_core.Agent.model_input_projection) option ->
   hooks:Agent_core.Hooks.hooks option ->
   configured_reasoning_effort:Llm_provider.Reasoning_effort.t option ->
   (prepared_turn, Agent_core.Error.t) result
 (** [configured_reasoning_effort] seeds the turn params the
     [before_turn_params] hook receives, so a hook can still override it.
+
+    [model_input_projection] receives the actual hook-resolved tool surface.
+    In particular [tool_choice=None_] supplies an empty surface; an unsupported
+    forced tool choice is refused before the projection can store references.
 
     The system prompt is refused when it trims to nothing, after a hook's
     [system_prompt_override] has been applied, as

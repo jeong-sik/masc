@@ -81,7 +81,7 @@ let prepared_account_home ~base_path =
   | Error error -> fail (Runtime_antigravity_home.error_to_string error)
 ;;
 
-let fixture_script ~base_path =
+let fixture_script_with_tools ~argument_reader ~base_path =
   let path = Filename.concat base_path "agy-fixture.sh" in
   let prompt_path = Filename.concat base_path "antigravity-prompt.txt" in
   let script =
@@ -167,7 +167,7 @@ version = "2025-11-25"
 post({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":version,"capabilities":{},"clientInfo":{"name":"agy-fixture","version":"1"}}})
 post({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}, version)
 tools = post({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}, version)
-assert [tool["name"] for tool in tools["result"]["tools"]] == ["masc_probe"]
+assert sorted(tool["name"] for tool in tools["result"]["tools"]) == %s
 # Every tool masc serves is declared eager and nothing else is, or the model sees its name only.
 assert sorted(server["tools"]) == sorted(tool["name"] for tool in tools["result"]["tools"]), server.get("tools")
 assert all(v == {"eager": True} for v in server["tools"].values()), server["tools"]
@@ -188,9 +188,14 @@ printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","
          (Filename.concat base_path
            (Keeper_sandbox.host_root_rel_of_profile Keeper_types_profile_sandbox.Docker
              "antigravity-fixture")))))
+      (Yojson.Safe.to_string (`List (List.map (fun name -> `String name)
+         (if argument_reader then ["keeper_artifact_read";"masc_probe"] else ["masc_probe"]))))
   in
   write_file ~mode:0o700 path script;
   path
+;;
+
+let fixture_script ~base_path = fixture_script_with_tools ~argument_reader:false ~base_path
 ;;
 
 let blank_then_success_fixture_script ~base_path =
@@ -1865,11 +1870,182 @@ let test_child_fd_ceiling_reports_and_recovers () =
     true
 ;;
 
+(* Exercise the actual adapter writer, then recover its serialized argument
+   through the same canonical reader tool that the prepared surface advertises. *)
+module Argument_start_fixture = struct
+  module T = Agent_core.Types
+  module Host = Keeper_official_client_host
+  let old_input = `Assoc ["command", `String (String.make 4000 'a')]
+  let current_input = `Assoc ["command", `String (String.make 4000 'c')]
+  let exchange id input =
+    [ T.make_message ~role:T.Assistant [T.ToolUse {id;name="record";input}]
+    ; T.tool_result_msg ~tool_use_id:id ~content:"done" () ]
+  let seed = T.make_message ~role:T.User [T.Text "Earlier completed work"]
+             :: exchange "historical-argument" old_input
+  let history = seed @ [T.make_message ~role:T.User [T.Text "Current work"]]
+                @ exchange "current-argument" current_input
+  let boundary messages = Keeper_carried_front.Turn_boundary
+      {end_atom=snd (Runtime_model_input_tail_window.annotate messages)}
+  let source ~base_path ~keeper_name seed =
+    Host.create_argument_source ~input_policy:Keeper_input_policy.Small ~base_path ~keeper_name
+      ~seed:(Some seed) ~replay_prefix:Keeper_replay_prefix.unchanged ~turn_start:(boundary seed)
+  let librarian_front _ : (Host.librarian_position, Agent_core.Error.t) result = Ok
+      {point=Keeper_turn_driver_try_provider.Librarian_progress {end_atom=1};
+       unread=Keeper_librarian_request_unread.empty}
+  let snapshot () = List.map Agent_core.Checkpoint.message_to_json history
+  let reader base_path =
+    let schema = Keeper_runtime_schemas_toml.artifact_read in
+    Tool_bridge.agent_core_tool_of_masc_with_execution_env ~base_path
+      ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
+      ~model_projection:(fun () -> Tool_output.bounded_inline_model_projection)
+      ~name:schema.name ~description:schema.description ~input_schema:schema.input_schema
+      (fun _ args ->
+        let execution = Keeper_artifact_read.handle ~base_path ~args in
+        match execution.disposition with
+        | Tool_result.Completed () -> Tool_result.make_ok ~tool_name:schema.name
+            ~start_time:(Tool_timing.start ()) ?data:execution.data ()
+        | Tool_result.Failed class_ -> Tool_result.make_err ~tool_name:schema.name ~class_
+            ~start_time:(Tool_timing.start ()) execution.raw_output
+        | Tool_result.Deferred () -> fail "canonical reader cannot defer")
+  let wire_input id envelopes =
+    let open Yojson.Safe.Util in
+    let blocks = List.concat_map (fun envelope ->
+      envelope |> member "message" |> member "content_blocks" |> to_list) envelopes in
+    match List.find_opt (fun block -> member "type" block=`String "tool_use"
+      && member "id" block=`String id) blocks with
+    | Some block -> member "input" block
+    | None -> fail ("actual wire omitted tool occurrence " ^ id)
+  let check_start ~enabled ~reader envelopes =
+    check bool "current-turn argument is exact on the actual wire" true
+      (wire_input "current-argument" envelopes=current_input);
+    let historical = wire_input "historical-argument" envelopes in
+    if not enabled then
+      check bool "without the actual reader the historical argument stays raw" true
+        (historical=old_input)
+    else match Tool_output.normalized_artifact_ref_of_json historical with
+      | Tool_output.Not_normalized_artifact_ref | Invalid_normalized_artifact_ref _ ->
+        fail "actual Start did not serialize a normalized argument reference"
+      | Tool_output.Decoded_normalized_artifact_ref reference ->
+        check string "argument MIME" "application/json" reference.mime;
+        let bytes = Buffer.create reference.bytes in
+        let rec read offset =
+          let result = match Agent_core.Tool.execute reader
+              (`Assoc ["sha256",`String reference.sha256;"offset",`Int offset]) with
+            | Ok result -> result | Error error -> fail error.message in
+          let page = Yojson.Safe.from_string result.content in
+          let open Yojson.Safe.Util in
+          let content = page |> member "content" |> to_string in
+          Buffer.add_string bytes (match page |> member "encoding" |> to_string with
+            | "utf-8" -> content | "base64" -> Base64.decode_exn content
+            | other -> fail ("unexpected page encoding " ^ other));
+          if not (page |> member "eof" |> to_bool) then
+            read (page |> member "next_offset" |> to_int) in
+        read 0;
+        check string "canonical tool reconstructs exact original JSON"
+          (Yojson.Safe.to_string old_input) (Buffer.contents bytes)
+  let check_resume_did_not_store base_path =
+    let sha256=Digestif.SHA256.(to_hex (digest_string (Yojson.Safe.to_string current_input))) in
+    match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256 with
+    | Ok None -> ()
+    | Ok (Some _) -> fail "Resume materialized the newly eligible argument"
+    | Error error -> fail (Tool_blob_store.fetch_error_to_string error)
+end
+
+let test_projection_refusal_emits_no_carried_observations () =
+  let projected = ref 0 and observed = ref 0 in
+  let result = Keeper_antigravity_runtime.For_testing.carried_history_projection
+    ~on_model_input_window_observation:(fun _ -> incr observed)
+    ~on_carried_front:(fun _ ~transmitted_bytes:_ -> incr observed)
+    ~librarian_front:Argument_start_fixture.librarian_front
+    ~turn_start:(Argument_start_fixture.boundary Argument_start_fixture.seed)
+    ~keeper_name:"refusal-fixture" ~runtime_id:"antigravity.gemini"
+    (Some (fun _ -> incr projected;Error (Agent_core.Error.Internal "projection refused")))
+    Argument_start_fixture.history in
+  (match result with
+   | Error (Agent_core.Error.Internal "projection refused") -> ()
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok _ -> fail "source projection refusal was lost");
+  check int "source projection runs once" 1 !projected;
+  check int "a refused range publishes no continuity or window" 0 !observed
+;;
+
+let test_actual_start_demotes_arguments_but_resume_keeps_them_held () =
+  let module F = Argument_start_fixture in
+  List.iter (fun enabled ->
+    let base_path = temp_workspace () |> Unix.realpath in
+    let snapshot = Runtime.For_testing.snapshot () in
+    Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot; cleanup_tree base_path) (fun () ->
+      Unix.mkdir (Filename.concat base_path ".masc") 0o700;
+      let keeper_name="antigravity-fixture" in
+      Masc_test_deps.declare_fixture_keeper ~base_path
+        ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) keeper_name;
+      let oauth_source=Filename.concat base_path "operator-oauth-token" in
+      write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "argument-account");
+      let cli_path=fixture_script_with_tools ~argument_reader:enabled ~base_path in
+      let runtime_path=Filename.concat base_path "runtime.toml" in
+      write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
+      Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+        Eio_context.set_env env;
+        Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw (fun () ->
+          Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+          let config=match Runtime.get_runtime_by_id "antigravity.gemini" with
+            | Some {Runtime_instance.execution=Runtime_execution.Antigravity_cli config;_} -> config
+            | Some _ | None -> fail "Antigravity binding missing" in
+          let reader=F.reader base_path in
+          let marker : Agent_core.Types.tool_param =
+            {name="marker";description="Fixture marker";param_type=String;required=true} in
+          let probe=Agent_core.Tool.create ~name:"masc_probe" ~description:"Return fixture marker"
+            ~parameters:[marker] (fun _ -> Ok
+              {Agent_core.Types.content="MASC_TOOL_RESULT";content_blocks=None;_meta=None}) in
+          let tools=if enabled then [probe;reader] else [probe] in
+          let before=F.snapshot () in
+          let transmissions=ref [] in
+          let run seed =
+            let attempt=Keeper_antigravity_runtime.run
+              ?argument_source:(F.source ~base_path ~keeper_name seed)
+              ~accepts_image_input:false ~runtime_id:"antigravity.gemini" ~keeper_name
+              ~pre_tool_rejects:(ref []) ~base_path ~goal:"Continue the work" ~goal_blocks:None
+              ~system_prompt:"Argument writer fixture" ~tools ~initial_messages:F.history
+              ~turn_start:(F.boundary seed) ~librarian_front:F.librarian_front
+              ~model_input_projection:None
+              ~on_transmitted_model_input:(fun input -> transmissions:=input :: !transmissions)
+              ~hooks:None ~context_injector:None ~context:(Some (Agent_core.Context.create ()))
+              ~event_bus:None ~raw_trace:None ~on_event:None ~config () in
+            match attempt.result with
+            | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error) in
+          run F.seed;
+          let prompt_path=Filename.concat base_path "antigravity-prompt.txt" in
+          let envelopes=In_channel.with_open_bin prompt_path In_channel.input_all
+            |> String.split_on_char '\n' |> List.filter_map (fun line ->
+              try match Yojson.Safe.from_string line with
+                | `Assoc fields as envelope when List.assoc_opt "schema" fields=
+                    Some (`String Keeper_official_client_context_codec.schema) -> Some envelope
+                | _ -> None
+              with Yojson.Json_error _ -> None) in
+          F.check_start ~enabled ~reader envelopes;
+          F.check_resume_did_not_store base_path;
+          (* A fresh completed seed covers more of the same raw history;
+             Resume must neither bind nor materialize its newly eligible SHA. *)
+          run F.history;
+          (match List.rev !transmissions with
+           | [Keeper_official_client_host.Whole_input_transmitted _;
+              Keeper_official_client_host.Held_by_client_session] -> ()
+           | _ -> fail "expected one Start and one client-held Resume");
+          let resumed=In_channel.with_open_bin prompt_path In_channel.input_all in
+          check bool "Resume omits historical canonical envelopes" false
+            (String_util.contains_substring resumed Keeper_official_client_context_codec.schema);
+          F.check_resume_did_not_store base_path;
+          check bool "raw checkpoint source remains unchanged" true (F.snapshot ()=before))))))
+    [true;false]
+;;
+
 let () =
   run
     "keeper_antigravity_runtime"
     [ ( "lifecycle"
-        , [ test_case "native policy failure releases its claim" `Quick
+        , [ test_case "projection refusal publishes no range" `Quick test_projection_refusal_emits_no_carried_observations
+          ; test_case "actual argument Start and held Resume" `Quick test_actual_start_demotes_arguments_but_resume_keeps_them_held
+          ; test_case "native policy failure releases its claim" `Quick
             test_native_policy_failure_releases_claim
           ; test_case
             "projects MCP tool and settles"

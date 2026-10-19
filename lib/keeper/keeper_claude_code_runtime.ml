@@ -73,6 +73,7 @@ let measure_model_input_message_bytes message =
    wrote a record with no window reading and no input composition -- which is
    what [/context] reads. Same measurement, reported instead of discarded. *)
 let model_input_projection_for_capacity
+    ?argument_projection
     ~capacity_bytes
     ~observed_next_shrink_capacity_bytes
     ~observed_floor_capacity_bytes
@@ -88,6 +89,7 @@ let model_input_projection_for_capacity
   let* frozen = Host.read_librarian_front librarian_front messages in
   let* windowed =
     Host.start_range_projection
+      ?argument_projection
       ~measure_message_bytes:measure_model_input_message_bytes
       ~capacity_bytes
       ~unbounded_capacity_bytes:unbounded_model_input_capacity_bytes
@@ -779,7 +781,8 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         ~system_prompt
         ~tools
         ~initial_messages
-        ~model_input_projection:(model_input_projection_for session_mode)
+        ~model_input_projection:(model_input_projection_for
+          ~history_prefix:(Option.to_list historical_task_message) session_mode)
         ~hooks:(Some hooks)
     in
     let* () = Keeper_official_task_reference.require_preserved
@@ -1552,7 +1555,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                   recovery_detail))))
 ;;
 
-let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1634,14 +1637,21 @@ let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~
                carries in front of the prompt is placed by this projection.
                It reports no window and no carried front, though -- the range
                it measures is not what a resume sends. *)
-            ~model_input_projection_for:(fun session_mode ->
+            ~model_input_projection_for:(fun ~history_prefix session_mode ->
               let observed callback =
                 match session_mode with
                 | Runtime_claude_code.Start -> callback
                 | Runtime_claude_code.Resume _ -> None
               in
               Some
-                (model_input_projection_for_capacity
+                (fun ~tools ->
+                  let argument_projection = match session_mode with
+                    | Runtime_claude_code.Start ->
+                      Option.bind argument_source (fun source ->
+                        Host.argument_projection source ~tools ~history_prefix)
+                    | Runtime_claude_code.Resume _ -> None in
+                  model_input_projection_for_capacity
+                   ?argument_projection
                    ~capacity_bytes
                    ~observed_next_shrink_capacity_bytes
                    ~observed_floor_capacity_bytes

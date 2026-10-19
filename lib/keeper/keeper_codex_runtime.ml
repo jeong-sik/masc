@@ -166,6 +166,7 @@ let record_next_shrink_capacity
    later front wins, so the ladder keeps narrowing instead of being widened
    back by the seed. *)
 let carried_model_input_projection
+    ?argument_projection
     ~thread_mode
     ~measure_message_bytes
     ~capacity_bytes
@@ -204,6 +205,7 @@ let carried_model_input_projection
   in
   let* sent =
     Host.start_range_projection
+      ?argument_projection
       ~measure_message_bytes
       ~capacity_bytes
       ~unbounded_capacity_bytes:unbounded_model_input_capacity_bytes
@@ -975,7 +977,8 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         ~tools
         ~initial_messages
         ~model_input_projection:
-          (Some (project_history ~thread_mode))
+          (Some (project_history ~thread_mode
+                   ~history_prefix:(Option.to_list historical_task_message)))
         ~hooks:(Some hooks)
     in
     let* prompt, images =
@@ -1788,7 +1791,7 @@ let note_transport_uncertainty effect_disposition =
   | true | false -> ()
 ;;
 
-let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~context_window ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
+let run ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~context_window ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context
@@ -1888,13 +1891,19 @@ let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~
              and no carried front, though -- the range it measures is not
              what a Resume sends, and both records are only for a range the
              lane sent. As on the Claude Code lane. *)
-          ~project_history:(fun ~thread_mode ->
+          ~project_history:(fun ~thread_mode ~history_prefix ~tools ->
+            let argument_projection = match thread_mode with
+              | Runtime_codex_app_server.Start ->
+                Option.bind argument_source (fun source ->
+                  Host.argument_projection source ~tools ~history_prefix)
+              | Runtime_codex_app_server.Resume _ -> None in
             let observed callback =
               match thread_mode with
               | Runtime_codex_app_server.Start -> callback
               | Runtime_codex_app_server.Resume _ -> None
             in
             carried_model_input_projection
+              ?argument_projection
               ~thread_mode
               ~measure_message_bytes
               ~capacity_bytes

@@ -3070,6 +3070,10 @@ let run_direct_attempt
       ?on_memory_capacity_refusal
       ?required_native_posture ?on_native_task_observation ?on_child_content_observation ?on_event
       ?hooks
+      ?argument_source ?librarian_front
+      ?(initial_messages = [])
+      ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      ?(on_transmitted_model_input = fun _ -> ())
       ?(system_prompt = "pre-dispatch fixture system prompt")
       ~base_path
       ~cli_path
@@ -3106,9 +3110,10 @@ let run_direct_attempt
                     | Some _ | None -> fail "Claude runtime fixture did not resolve"
                   in
                   Keeper_claude_code_runtime.run
+                    ?argument_source ?librarian_front
                     ?on_memory_capacity_refusal
                     ?required_native_posture ?on_native_task_observation ?on_child_content_observation
-                    ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+                    ~turn_start
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
                       ~runtime:(Runtime.get_runtime_by_id "claude.claude" |> Option.get))
                     ~pre_tool_rejects:(ref [])
@@ -3126,9 +3131,9 @@ let run_direct_attempt
                        only its non-emptiness is load-bearing. *)
                     ~system_prompt
                     ~tools
-                    ~initial_messages:[]
+                    ~initial_messages
                     ~model_input_projection:None
-                    ~on_transmitted_model_input:(fun _ -> ())
+                    ~on_transmitted_model_input
                     ~hooks
                     ~context_injector:None
                       (* Dynamic tools require the Keeper shared context
@@ -6022,6 +6027,132 @@ let test_a_working_state_that_displaces_nothing_goes () =
       (working_state_not_carried ~reason:"displaces_atoms")
 ;;
 
+(* Exercise the actual adapter writer, then recover its serialized argument
+   through the same canonical reader tool that the prepared surface advertises. *)
+module Argument_start_fixture = struct
+  module T = Agent_core.Types
+  module Host = Keeper_official_client_host
+  let old_input = `Assoc ["command", `String (String.make 4000 'a')]
+  let current_input = `Assoc ["command", `String (String.make 4000 'c')]
+  let exchange id input =
+    [ T.make_message ~role:T.Assistant [T.ToolUse {id;name="record";input}]
+    ; T.tool_result_msg ~tool_use_id:id ~content:"done" () ]
+  let seed = T.make_message ~role:T.User [T.Text "Earlier completed work"]
+             :: exchange "historical-argument" old_input
+  let history = seed @ [T.make_message ~role:T.User [T.Text "Current work"]]
+                @ exchange "current-argument" current_input
+  let boundary messages = Keeper_carried_front.Turn_boundary
+      {end_atom=snd (Runtime_model_input_tail_window.annotate messages)}
+  let source ~base_path ~keeper_name seed =
+    Host.create_argument_source ~input_policy:Keeper_input_policy.Small ~base_path ~keeper_name
+      ~seed:(Some seed) ~replay_prefix:Keeper_replay_prefix.unchanged ~turn_start:(boundary seed)
+  let librarian_front _ : (Host.librarian_position, Agent_core.Error.t) result = Ok
+      {point=Keeper_turn_driver_try_provider.Librarian_progress {end_atom=1};
+       unread=Keeper_librarian_request_unread.empty}
+  let snapshot () = List.map Agent_core.Checkpoint.message_to_json history
+  let reader base_path =
+    let schema = Keeper_runtime_schemas_toml.artifact_read in
+    Tool_bridge.agent_core_tool_of_masc_with_execution_env ~base_path
+      ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
+      ~model_projection:(fun () -> Tool_output.bounded_inline_model_projection)
+      ~name:schema.name ~description:schema.description ~input_schema:schema.input_schema
+      (fun _ args ->
+        let execution = Keeper_artifact_read.handle ~base_path ~args in
+        match execution.disposition with
+        | Tool_result.Completed () -> Tool_result.make_ok ~tool_name:schema.name
+            ~start_time:(Tool_timing.start ()) ?data:execution.data ()
+        | Tool_result.Failed class_ -> Tool_result.make_err ~tool_name:schema.name ~class_
+            ~start_time:(Tool_timing.start ()) execution.raw_output
+        | Tool_result.Deferred () -> fail "canonical reader cannot defer")
+  let wire_input id envelopes =
+    let open Yojson.Safe.Util in
+    let blocks = List.concat_map (fun envelope ->
+      envelope |> member "message" |> member "content_blocks" |> to_list) envelopes in
+    match List.find_opt (fun block -> member "type" block=`String "tool_use"
+      && member "id" block=`String id) blocks with
+    | Some block -> member "input" block
+    | None -> fail ("actual wire omitted tool occurrence " ^ id)
+  let check_start ~enabled ~reader envelopes =
+    check bool "current-turn argument is exact on the actual wire" true
+      (wire_input "current-argument" envelopes=current_input);
+    let historical = wire_input "historical-argument" envelopes in
+    if not enabled then
+      check bool "without the actual reader the historical argument stays raw" true
+        (historical=old_input)
+    else match Tool_output.normalized_artifact_ref_of_json historical with
+      | Tool_output.Not_normalized_artifact_ref | Invalid_normalized_artifact_ref _ ->
+        fail "actual Start did not serialize a normalized argument reference"
+      | Tool_output.Decoded_normalized_artifact_ref reference ->
+        check string "argument MIME" "application/json" reference.mime;
+        let bytes = Buffer.create reference.bytes in
+        let rec read offset =
+          let result = match Agent_core.Tool.execute reader
+              (`Assoc ["sha256",`String reference.sha256;"offset",`Int offset]) with
+            | Ok result -> result | Error error -> fail error.message in
+          let page = Yojson.Safe.from_string result.content in
+          let open Yojson.Safe.Util in
+          let content = page |> member "content" |> to_string in
+          Buffer.add_string bytes (match page |> member "encoding" |> to_string with
+            | "utf-8" -> content | "base64" -> Base64.decode_exn content
+            | other -> fail ("unexpected page encoding " ^ other));
+          if not (page |> member "eof" |> to_bool) then
+            read (page |> member "next_offset" |> to_int) in
+        read 0;
+        check string "canonical tool reconstructs exact original JSON"
+          (Yojson.Safe.to_string old_input) (Buffer.contents bytes)
+  let check_resume_did_not_store base_path =
+    let sha256=Digestif.SHA256.(to_hex (digest_string (Yojson.Safe.to_string current_input))) in
+    match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256 with
+    | Ok None -> ()
+    | Ok (Some _) -> fail "Resume materialized the newly eligible argument"
+    | Error error -> fail (Tool_blob_store.fetch_error_to_string error)
+end
+
+let test_actual_start_demotes_arguments_but_resume_keeps_them_held () =
+  let module F = Argument_start_fixture in
+  List.iter (fun enabled ->
+    let base_path = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      let before = F.snapshot () in
+      let reader = F.reader base_path in
+      let tools = if enabled then [reader] else [] in
+      let first_prompt_marker = Filename.concat base_path "argument-start.json" in
+      let second_prompt_marker = Filename.concat base_path "argument-resume.json" in
+      let lines turn = [Emit (assistant ~turn_id:turn "ARGUMENT_OK");
+                        Emit (result ~turn_id:turn "ARGUMENT_OK")] in
+      with_fixture_sequence ~first_prompt_marker ~second_prompt_marker
+        (lines "argument-turn-1") (lines "argument-turn-2") (fun cli_path ->
+          let transmissions = ref [] in
+          let run seed =
+            let attempt = run_direct_attempt ~base_path ~cli_path ~goal:"Continue the work"
+              ~tools ?argument_source:(F.source ~base_path ~keeper_name:"claude-pre-dispatch" seed)
+              ~initial_messages:F.history ~turn_start:(F.boundary seed)
+              ~librarian_front:F.librarian_front
+              ~on_transmitted_model_input:(fun input -> transmissions:=input :: !transmissions) () in
+            match attempt.result with
+            | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error) in
+          run F.seed;
+          let envelopes = In_channel.with_open_bin first_prompt_marker In_channel.input_all
+            |> content_of_wire_message |> Yojson.Safe.from_string
+            |> Yojson.Safe.Util.member "history" |> Yojson.Safe.Util.to_list in
+          F.check_start ~enabled ~reader envelopes;
+          F.check_resume_did_not_store base_path;
+          (* Same raw history, but its last closed cycle is now completed.
+             A fresh memo would store this distinct SHA if Resume projected it. *)
+          run F.history;
+          (match List.rev !transmissions with
+           | [Keeper_official_client_host.Whole_input_transmitted _;
+              Keeper_official_client_host.Held_by_client_session] -> ()
+           | _ -> fail "expected one Start and one client-held Resume");
+          let resumed = In_channel.with_open_bin second_prompt_marker In_channel.input_all
+            |> content_of_wire_message in
+          check bool "Resume does not resend the historical argument" false
+            (String_util.contains_substring resumed (Yojson.Safe.to_string F.old_input));
+          F.check_resume_did_not_store base_path;
+          check bool "raw checkpoint source remains unchanged" true (F.snapshot ()=before))))
+    [true;false]
+;;
+
 let () =
   (* Pin the prompt directory explicitly. Under dune the registry falls back to
      [DUNE_SOURCEROOT], but a test executable run directly has neither that
@@ -6047,7 +6178,8 @@ let () =
             test_child_tool_metadata_does_not_replace_root_observation
         ] )
     ; ( "lifecycle"
-      , [ test_case "settles and resumes" `Quick test_keeper_settles_and_resumes
+      , [ test_case "actual argument Start and held Resume" `Quick test_actual_start_demotes_arguments_but_resume_keeps_them_held
+        ; test_case "settles and resumes" `Quick test_keeper_settles_and_resumes
         ; test_case "blank completion rejects progress but preserves session" `Quick
             test_blank_completion_rejected_without_losing_session
         ; test_case "resume prompt carries the task reference" `Quick

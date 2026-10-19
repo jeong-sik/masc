@@ -1755,7 +1755,7 @@ let test_extra_system_context_keeps_typed_provenance () =
       ~initial_messages
       ~model_input_projection:
         (Some
-           (fun messages ->
+           (fun ~tools:_ messages ->
               projected_messages := Some messages;
               Ok messages))
       ~hooks:(Some hooks)
@@ -2889,10 +2889,30 @@ let test_carried_summaries_without_a_witness_name_one_carrier () =
     (List.length (Host.carried_summaries [ Agent_core.Types.user_msg "hi" ]))
 ;;
 
+let test_unsupported_choice_refuses_before_projection () =
+  let projected = ref false in
+  let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
+    | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
+      Agent_core.Hooks.AdjustParams {current_params with tool_choice=Some Agent_core.Types.Any}
+    | _ -> Agent_core.Hooks.Continue)} in
+  let result = Host.prepare_turn ~runtime_label:"Fixture" ~keeper_name:"choice-fixture"
+    ~turn_count:1 ~system_prompt:"SYS" ~tools:[] ~initial_messages:[]
+    ~model_input_projection:(Some (fun ~tools:_ messages -> projected:=true;Ok messages))
+    ~hooks:(Some hooks) ~configured_reasoning_effort:None in
+  (match result with
+   | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig {field="tool_choice";_})) -> ()
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok _ -> fail "forced choice was admitted");
+  check bool "refused tool choice cannot enter a materializing projection" false !projected
+;;
+
 let () =
   run
     "keeper official-client host"
-    [ ( "carried context summaries"
+    [ ( "prepared tool authority"
+      , [test_case "unsupported choice refuses before projection" `Quick
+           test_unsupported_choice_refuses_before_projection] )
+    ; ( "carried context summaries"
       , [ test_case "issued prefix and held delivery" `Quick
             test_issued_prefix_delivery_preserves_held_semantics
         ; test_case

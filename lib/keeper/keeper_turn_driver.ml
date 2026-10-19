@@ -2563,12 +2563,22 @@ let run_named
           ~fallback_enable_thinking:enable_thinking
           ()
       in
+      let official_argument_source =
+        match runtime.Runtime_instance.execution with
+        | Runtime_execution.Agent_core _ -> None
+        | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ ->
+          Keeper_official_client_host.create_argument_source
+            ~input_policy ~base_path ~keeper_name ~seed:argument_demotion_seed
+            ~replay_prefix:replay_prefix_projection
+            ~turn_start:(Eio.Lazy.force official_client_turn_boundary)
+      in
       (match runtime.Runtime_instance.execution with
        | Runtime_execution.Agent_core _ -> ()
        | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ ->
          Log.Keeper.info ~keeper_name
-           "input policy runtime=%s selected=%s context_owner=official_client applied=false"
-           attempt_runtime_id (Keeper_input_policy.to_string input_policy));
+           "input policy runtime=%s selected=%s context_owner=official_client argument_source_available=%b"
+           attempt_runtime_id (Keeper_input_policy.to_string input_policy)
+           (Option.is_some official_argument_source));
       match runtime.Runtime_instance.execution with
       | Runtime_execution.Codex_app_server config ->
         let ( reset_model_input_observation
@@ -2587,6 +2597,7 @@ let run_named
               on_request_attribution
           in
           Keeper_codex_runtime.run ?on_native_tool_completion ?on_native_tool_progress
+            ?argument_source:official_argument_source
             ?on_memory_capacity_refusal
             ?on_tool_execution
             ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
@@ -2747,6 +2758,7 @@ let run_named
               on_request_attribution
           in
           Keeper_antigravity_runtime.run ?on_native_tool_completion
+            ?argument_source:official_argument_source
             ?on_tool_execution
             ?composed_context:official_client_composed_context
             ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
@@ -2874,6 +2886,7 @@ let run_named
             ; effect_disposition = Keeper_provider_attempt_effect.No_effect_observed }
           | Ok (workspace_root, native_context) ->
           Keeper_muse_runtime.run
+            ?argument_source:official_argument_source
             ?on_tool_execution
             ?composed_context:official_client_composed_context
             ~configured_reasoning_effort:runtime.model.reasoning_effort
@@ -2998,6 +3011,7 @@ let run_named
           let native_attempt : Runtime_native_tasks.attempt =
             { routing_run_id; runtime_id = attempt_runtime_id; lane_attempt_index = idx } in
           Keeper_claude_code_runtime.run ?on_native_tool_progress ?on_native_tool_completion
+            ?argument_source:official_argument_source
             ?on_provider_retry:(Option.map
               (fun observe retry -> observe ~attempt:native_attempt retry)
               on_provider_retry)

@@ -38,6 +38,12 @@ let media_degraded_with_current_input
     }
 ;;
 
+let history_only = function
+  | Unchanged -> Unchanged
+  | Media_degraded {canonical_prefix;dispatch_prefix;current_input=_} ->
+    Media_degraded {canonical_prefix;dispatch_prefix;current_input=None}
+;;
+
 let rec split ~(prefix : Agent_core.Types.message list) messages =
   match prefix, messages with
   | [], suffix -> Ok suffix

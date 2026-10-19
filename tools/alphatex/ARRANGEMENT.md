@@ -222,3 +222,36 @@ original full-source audition's complete ordered-stream delivery. Maximum
 observed lateness is reported; sample-clock timing and physical latency are not
 claimed. Whole-arrangement looping, MIDI2/UMP, VST,
 monitoring and recording/overdub remain unfinished integrations.
+
+## Phrase and harmony experiments
+
+Use `:arrange` in the phrase editor after creating notes, `:chord` or
+`:progression`. It opens the current audible phrase at beat zero in an
+arrangement. The full editable draft is retained with the generated MIDI, so
+mute/solo and voicing decisions can be revisited. The backing's tempo and meter
+start from the phrase. Closing the arrangement returns to the unchanged parent
+draft and its undo history.
+
+Inside an arrangement:
+
+```text
+phrase
+edit-midi asset-1
+edit-midi asset-2 2
+cursor 8
+place asset-3 8
+```
+
+`:phrase` creates a new editable experiment. `:edit-midi` chooses an asset (the
+selected asset when omitted) and optionally an SMF2 pattern number. Generated
+assets open their phrase draft; original SMF assets open the expressive source
+editor. After edits and `q`, a new asset and the edited pattern are selected for
+placement with Enter. Explicit `:place` still names an SMF2 pattern when needed.
+Existing sources and clips remain unchanged. Parent undo removes that import as
+one transaction; redo restores it. Editing without changes adds no asset.
+
+Generated phrase drafts are inline in portable arrangement JSON and verified
+against their MIDI export on save/reopen/playback preparation. A separate saved
+child draft under `phrases/` is useful on its own but is not needed to reopen the
+arrangement. Select placement and independent output channels when layering
+variants: copying an experiment does not change its MIDI channel ownership.

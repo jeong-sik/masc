@@ -1,7 +1,7 @@
 import { validateCapturedSource } from './captured-source.mjs'
 import { captureRegionTime } from './capture-time.mjs'
 import { validateMidiSource, midiSourcePattern } from './midi-source.mjs'
-import { PPQ } from './sequencer-project.mjs'
+import { PPQ, validateProject } from './sequencer-project.mjs'
 import { validateCapturePlacement, capturePlacementStart, projectCapturedPlacement } from './capture-placement.mjs'
 import { validateCalibrationCapture } from './calibration-profile.mjs'
 import { validatePractice } from './arrangement-practice.mjs'
@@ -36,7 +36,13 @@ function unique(items, name) {
 export function validateArrangementAsset(asset) {
   text(asset?.id, 'asset identity'); text(asset.name, 'asset name')
   switch (asset.kind) {
-    case 'midi': validateMidiSource(asset.source); break
+    case 'midi':
+      validateMidiSource(asset.source)
+      if (asset.phrase !== undefined) {
+        if (asset.phrase?.kind !== undefined) throw new Error('Invalid editable phrase')
+        validateProject(asset.phrase)
+      }
+      break
     case 'capture': validateCapturedSource(asset); break
     case 'wave': {
       if (typeof asset.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(asset.sha256)

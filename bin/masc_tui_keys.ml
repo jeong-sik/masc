@@ -430,6 +430,7 @@ let for_surface = function
       ; b Navigate "p" "requests" ~help:"approvals and questions"
       ; b Navigate ";" "agenda" ~help:"Goal confirmations and tasks waiting on you"
       ; b Navigate "m" "Usage" ~help:"account windows and Keeper usage"
+      ; b Navigate "s" "music" ~help:"phrases, arrangements and recorded takes; no Keeper or score required"
       ]
       @ listing_meta
   | Acting ->

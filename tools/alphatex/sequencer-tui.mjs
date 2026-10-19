@@ -1,6 +1,7 @@
+import { arrangementRoute, selectArrangementRoute } from './arrangement-playback.mjs'
 import { mkdtemp, rm, writeFile, copyFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join, resolve, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { emitKeypressEvents } from 'node:readline'
@@ -11,8 +12,12 @@ import { loadProject, saveProject, projectMidi } from './sequencer-files.mjs'
 import { sourceTickAtSeconds, sourceSecondsAtTick } from './midi-source-playback.mjs'
 import { safeText } from './terminal.mjs'
 import { openPlayback } from './playback.mjs'
+import { InstrumentPicker } from './instruments.mjs'
+import { defaultStateDirectory, snapshotWriter } from './vst.mjs'
+import { renderVstPhrase } from './sequencer-vst.mjs'
 
 const help = [
+  ':arrange snapshots this phrase into backing; q returns to this draft',
   'Source seek/resume restores channel state; unknown initial or opaque device state is an error.',
   'Arrow keys: time/pitch; Shift+arrows: move note; Enter/x: insert/remove note',
   'Tab: track; n: new track; m: mute; o: solo; u/y: undo/redo',
@@ -32,40 +37,65 @@ const help = [
   ':output device-UID selects an audio output; --devices lists device identities.',
   ':midi-output ID sends phrases to a MIDI destination; :audio returns to audio.',
   ':seek 4 moves playback to quarter-note beat 4; :stop ends the transport.',
-  'Audio preview uses a SoundFont; MIDI output sends the project notes directly.',
+  'i: choose VST/preset or explicit SoundFont; first audio playback opens the picker.',
+  'VST presets own the sound; phrase program/bank messages do not replace them.',
   'Imported MIDI: source ticks retain tempo/expression; :pattern N selects SMF2.',
   'Use :channel 1–16 or :select event-ID for source notes sharing a cursor.',
-  'Source: select :midi-output ID, then Space plays/stops from the beginning.',
+  'Source: choose a VST or :midi-output ID; selected SMF2 and SMPTE performances are supported.',
   'Multiple source ports: :midi-port PORT ID for each port (0–127).',
-  'Source pause/seek/loop and WAV synthesis require expression-state reconstruction.',
+  'Source VST audio supports pause/seek and :wave; source clip looping is unfinished.',
 ]
 
 export async function viewSequencer({ path, root = resolve('music-projects'), embedded = false, signal,
-  soundfontPath, sessionRoot, input, midi, output, midiOutput, initialDocument, pattern } = {}) {
+  soundfontPath, sessionRoot, input, midi, output, midiOutput, initialDocument, pattern, initialPortBindings = [],
+  stateDirectory = defaultStateDirectory() } = {}) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('Sequencer requires a terminal')
   if (path && initialDocument) throw new Error('Open a saved document or import MIDI, one at a time')
   const loaded = path ? await loadProject(path, { signal }) : null
   if (signal?.aborted) return
   if (loaded?.project.kind === 'arrangement') {
     const { viewArrangement } = await import('./arrangement-tui.mjs')
-    return viewArrangement({ loaded, root, embedded, signal, output, midiOutput })
+    return viewArrangement({ loaded, root, embedded, signal, output, midiOutput, stateDirectory })
   }
   if (output !== undefined && midiOutput !== undefined) throw new Error('Choose an audio output or a MIDI destination')
   let editor = newEditor(initialDocument ?? loaded?.project, { pattern }), revision = loaded?.revision ?? null
   path = loaded?.path ?? join(root, `phrase-${randomUUID()}.json`)
+  const initialSnapshot = editor.project
   let saved = loaded?.project, status = 'Enter a note or :help', prompt = null, showHelp = false
-  let loop = false, accepting = true, closed = false, suspended = false, task = Promise.resolve(), sessionTask = null
+  let loop = false, accepting = true, closed = false, suspended = false, task = Promise.resolve(), childTask = null
   let selectedOutput = output
-  let selectedMidiOutput = midiOutput, portBindings = []
+  let selectedMidiOutput = midiOutput, portBindings = structuredClone(initialPortBindings)
   const sessionAbort = new AbortController()
   const directory = await mkdtemp(join(tmpdir(), 'masc-sequencer-'))
   const worker = new Worker(new URL('./sequencer-worker.mjs', import.meta.url))
   const jobs = new Map(), players = new Map()
+  const nativeRenders = new Set(), observations = new Set()
+  let audioInstrument = { kind: 'unselected' }, currentVstRender = null
+  const writeSnapshot = snapshotWriter(stateDirectory)
   let jobNumber = 0, generation = 0, transport = { kind: 'stopped' }, workerFailure = null, pendingDraw = null
   const wasRaw = process.stdin.isRaw
   let finish
   const done = new Promise(resolve => { finish = () => { accepting = false; resolve() } })
   const dirty = () => editor.project !== saved
+  function observe(fields) {
+    const pending = writeSnapshot({ ...fields, view: 'phrase', project_path: path,
+      document_kind: editor.project.kind ?? 'phrase' })
+    observations.add(pending)
+    pending.catch(error => { status = `VST observation: ${error.message}`; draw() })
+      .finally(() => observations.delete(pending))
+  }
+  function chooseInstrument(choice) {
+    task = task.then(() => {
+      if (!accepting || closed || suspended) return
+      stop(); audioInstrument = choice; selectedMidiOutput = undefined; portBindings = []
+      status = choice.kind === 'vst' ? `Selected ${choice.selection.name}` : 'Selected SoundFont'
+      play()
+    }).catch(error => { status = error.message }).finally(draw)
+  }
+  const picker = new InstrumentPicker({ directory: stateDirectory, notify: draw,
+    selected: selection => chooseInstrument({ kind: 'vst', selection }),
+    soundfont: () => chooseInstrument({ kind: 'soundfont' }),
+    failed: error => { status = `VST: ${error.message}`; draw() } })
   function fit(text) {
     let used = 0, result = ''
     for (const char of safeText(text)) {
@@ -79,7 +109,8 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     if (!['playing', 'paused'].includes(transport.kind)) return editor.tick
     const view = editorView(editor), per = editorAxis(editor).per
     const start = loop ? view.loop.start : 0
-    const seconds = transport.position + (transport.kind === 'playing' ? (performance.now() - transport.since) / 1000 : 0)
+    const elapsed = transport.position + (transport.kind === 'playing' ? (performance.now() - transport.since) / 1000 : 0)
+    const seconds = Math.min(loop ? elapsed % transport.duration : elapsed, transport.phraseDuration ?? transport.duration)
     if (editor.project.kind === 'midi-source') return sourceTickAtSeconds(editor.performance, seconds)
     return start + (loop ? seconds % transport.duration : seconds) / 60 * view.tempo * per
   }
@@ -100,7 +131,14 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       `Cursor ${editor.tick / per} · ${Note.fromMidi(editor.pitch)} · grid ${editor.step / per} · length ${(current?.duration ?? editor.duration) / per} · velocity ${current?.velocity ?? editor.velocity}`,
       `Chord candidates: ${at.candidates.join(' / ') || '—'} · ${at.notes.join(' ')} · ${status}`,
     ]
-    if (showHelp) lines.push(...help)
+    if (picker.view) {
+      lines.length = 0
+      lines.push(picker.view.title, status)
+      if (picker.view.query !== undefined) lines.push(`${picker.view.searching ? 'Search' : 'Filter'}: ${picker.view.query}`)
+      const items = picker.items(), height = Math.max(1, rows - 6)
+      const start = Math.max(0, picker.view.cursor - height + 1)
+      for (let i = start; i < Math.min(items.length, start + height); i++) lines.push(`${i === picker.view.cursor ? '›' : ' '} ${items[i].name}`)
+    } else if (showHelp) lines.push(...help)
     else {
       const first = Math.floor(editor.tick / (editor.step * cols)) * editor.step * cols
       const barTicks = project.timingLabel ? per : project.meter[0] * per * 4 / project.meter[1]
@@ -124,43 +162,64 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         if (pitch === editor.pitch) cells[cursor] = current ? '◆' : '◇'
         lines.push(`${Note.fromMidi(pitch).padStart(5)}  ${cells.join('')}`)
       }
+      const instrument = audioInstrument.kind === 'vst' ? `VST ${audioInstrument.selection.name}` : audioInstrument.kind === 'soundfont' ? 'SoundFont' : 'choose instrument'
       const destination = portBindings.length ? portBindings.map(binding => `${binding.port}→${binding.destination}`).join(', ')
         : selectedMidiOutput === undefined ? selectedOutput ?? 'system default' : `MIDI ${selectedMidiOutput}`
-      lines.push(`Playhead ${(playTick() / per).toFixed(2)} · loop ${project.loop.start / per}–${project.loop.end / per} · output ${destination} · ${path}`)
+      lines.push(`Playhead ${(playTick() / per).toFixed(2)} · loop ${project.loop.start / per}–${project.loop.end / per} · ${instrument} · output ${destination} · ${path}`)
     }
     let output = '\x1b[H'
     for (let row = 1; row <= rows; row++) output += `\x1b[${row};1H\x1b[2K`
     lines.slice(0, rows - 2).forEach((line, row) => { output += `\x1b[${row + 1};1H${fit(line)}` })
-    output += `\x1b[${rows - 1};1H${fit(prompt === null ? 'Space:play  Enter:note  arrows:cursor  Tab:track  u/y:undo/redo  :commands  ?:help' : `:${prompt}`)}`
+    output += `\x1b[${rows - 1};1H${fit(picker.view ? '↑/↓:choose  Enter:select  /:search  e:native editor  p:preset path  Esc:return' : prompt === null ? 'Space:play  i:instrument  Enter:note  arrows:cursor  Tab:track  :commands  ?:help' : `:${prompt}`)}`
     output += `\x1b[${rows};1H${fit('s:save  l:loop  r:recording  q:save/back  n:new track  m:mute  o:solo')}`
     process.stdout.write(output)
   }
   function stop() {
     generation++
     if (transport.cancel) Atomics.store(transport.cancel, 0, 1)
+    transport.native?.cancel()
     transport.handle?.stop()
+    if (currentVstRender || transport.native) observe({ state: 'stop_requested',
+      selection: audioInstrument.kind === 'vst' ? audioInstrument.selection : null, render: currentVstRender })
+    currentVstRender = null
     transport = { kind: 'stopped' }
   }
   function render(snapshot, options = {}) {
     if (!accepting) throw new Error('Sequencer is closing')
     if (workerFailure) throw new Error(workerFailure)
-    if (snapshot.kind === 'midi-source' && options.format !== 'midi') throw new Error('Select a MIDI output for source audition; source WAV synthesis is not connected')
-    const id = ++jobNumber, cancel = new Int32Array(new SharedArrayBuffer(4)), path = join(directory, `${id}.${options.format === 'midi' ? 'json' : 'wav'}`)
+    if (snapshot.kind === 'midi-source' && !['midi', 'vst-midi'].includes(options.format)) throw new Error('Source audition requires a VST instrument or MIDI output')
+    const id = ++jobNumber, cancel = new Int32Array(new SharedArrayBuffer(4)), path = join(directory, `${id}.${options.format === 'midi' ? 'json' : options.format === 'vst-midi' ? 'mid' : 'wav'}`)
     const promise = new Promise((resolve, reject) => { jobs.set(id, { resolve, reject, cancel }) })
     worker.postMessage({ id, path, project: snapshot, cancel: cancel.buffer, options: { ...options, soundfontPath } })
     return { promise, cancel }
+  }
+  function renderAudio(snapshot, options = {}) {
+    if (audioInstrument.kind === 'unselected') throw new Error('Choose an instrument with i before exporting audio')
+    if (audioInstrument.kind === 'soundfont') return render(snapshot, { ...options, format: 'wav' })
+    const selection = audioInstrument.selection
+    const preparation = render(snapshot, { ...options, format: 'vst-midi' })
+    const native = renderVstPhrase({ preparation, selection, outputPath: join(directory, `${jobNumber}.vst.wav`), stateDirectory, loop: options.loop })
+    nativeRenders.add(native)
+    native.promise.finally(() => nativeRenders.delete(native)).catch(() => {})
+    return { promise: native.promise, cancel: preparation.cancel, native }
   }
   async function startPlayer(wave, id) {
     // Finish the previous owner before a new one can reuse its MIDI keys. Its
     // final note-offs must never cut off the replacement transport's notes.
     await Promise.allSettled([...players.values()])
     if (!accepting || closed || id !== generation) return
+    currentVstRender = wave.vst ?? null
+    if (wave.vst) observe({ state: 'rendered', selection: wave.selection, render: wave.vst })
     const midiDestination = wave.midiOutput ?? selectedMidiOutput
     const handle = openPlayback({ path: wave.path, output: midiDestination === undefined ? selectedOutput : undefined,
       midiOutput: midiDestination, midiBindings: wave.midiBindings, loop, onEvent: event => {
       if (!accepting || closed || id !== generation) return
       if (['playing', 'paused'].includes(event.kind)) {
-        transport = { kind: event.kind, handle, position: event.currentTime, duration: event.duration, since: performance.now() }
+        const changed = transport.kind !== event.kind
+        transport = { kind: event.kind, handle, position: event.currentTime, duration: event.duration,
+          phraseDuration: wave.phraseDuration, since: performance.now() }
+        if (wave.vst && changed) observe({ state: `player_${event.kind}`, selection: wave.selection, render: wave.vst,
+          position_seconds: event.currentTime, duration_seconds: event.duration })
       }
       draw()
     } })
@@ -169,26 +228,32 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       if (!closed && id === generation) { status = error.message; draw() }
     })
     const settled = handle.completion.then(() => {
-      if (!closed && id === generation) { transport = { kind: 'stopped' }; status = 'Playback finished'; draw() }
+      if (!closed && id === generation) { transport = { kind: 'stopped' }; status = 'Playback finished';
+        if (wave.vst) observe({ state: 'player_finished', selection: wave.selection, render: wave.vst }); draw() }
     }, error => {
-      if (!closed && id === generation) { transport = { kind: 'stopped' }; status = error.message; draw() }
+      if (!closed && id === generation) { transport = { kind: 'stopped' }; status = error.message;
+        if (wave.vst) observe({ state: 'failed', selection: wave.selection, render: wave.vst, error: error.message }); draw() }
     }).finally(() => { players.delete(handle) })
     players.set(handle, settled)
-    status = midiDestination !== undefined ? 'MIDI output' : wave.clippedSamples > 0 ? 'Preview clipped; lower :level' : 'SoundFont preview'; draw()
+    status = wave.vst ? `VST: ${wave.selection.name}` : midiDestination !== undefined ? 'MIDI output' : wave.clippedSamples > 0 ? 'Preview clipped; lower :level' : 'SoundFont preview'; draw()
   }
   function play() {
-    if (!accepting) return
+    if (!accepting || suspended || childTask) return
     if (transport.kind === 'playing') {
       transport.handle.pause()
       return
     }
     if (transport.kind === 'paused') { transport.handle.resume(); return }
     if (transport.kind !== 'stopped') { stop(); draw(); return }
-    const id = ++generation, result = render(editor.project, { loop, format: editor.project.kind === 'midi-source' || selectedMidiOutput !== undefined ? 'midi' : 'wav',
-      pattern: editor.pattern, midiOutput: selectedMidiOutput, portBindings })
-    transport = { kind: 'rendering', cancel: result.cancel }
+    const midiRoute = selectedMidiOutput !== undefined || portBindings.length > 0
+    if (!midiRoute && audioInstrument.kind === 'unselected') { picker.open(); return }
+    const id = ++generation, options = { loop, pattern: editor.pattern, midiOutput: selectedMidiOutput, portBindings }
+    const result = midiRoute ? render(editor.project, { ...options, format: 'midi' }) : renderAudio(editor.project, options)
+    transport = { kind: 'rendering', cancel: result.cancel, native: result.native }
+    if (result.native) observe({ state: 'rendering', selection: audioInstrument.selection, render: null })
     result.promise.then(wave => startPlayer(wave, id)).catch(error => {
-      if (!closed && id === generation) { transport = { kind: 'stopped' }; status = error.message; draw() }
+      if (!closed && id === generation) { transport = { kind: 'stopped' }; status = error.message;
+        if (result.native) observe({ state: 'failed', selection: audioInstrument.selection, render: null, error: error.message }); draw() }
     })
     draw()
   }
@@ -208,14 +273,49 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       if (accepting && !closed) { process.stdin.on('keypress', keypress); draw() }
     }
   }
+  function arrange() {
+    if (!accepting || childTask) return
+    if (editor.project.kind === 'midi-source') throw new Error('Create an arrangement from an editable phrase; import original MIDI in the arrangement editor')
+    stop()
+    const expected = generation, snapshot = editor.project
+    const route = arrangementRoute({ output: selectedOutput, midiOutput: selectedMidiOutput })
+    const bindings = structuredClone(portBindings)
+    const job = render(snapshot, { format: 'arrangement' })
+    transport = { kind: 'rendering', cancel: job.cancel }; status = 'Preparing phrase for arrangement'
+    let entered = false
+    const owned = (async () => {
+      try {
+        const result = await job.promise
+        await Promise.allSettled([...players.values()])
+        if (!accepting || closed || generation !== expected) return
+        const { viewArrangement } = await import('./arrangement-tui.mjs')
+        if (!accepting || closed || generation !== expected) return
+        let initialRoute = route
+        for (const binding of bindings) initialRoute = selectArrangementRoute(initialRoute,
+          { kind: 'midi-port', asset: result.asset, ...binding })
+        entered = true; suspended = true; transport = { kind: 'stopped' }
+        process.stdin.off('keypress', keypress)
+        await viewArrangement({ initialDocument: result.project, root: dirname(path), embedded: true,
+          signal: sessionAbort.signal, initialRoute, stateDirectory })
+        status = 'Returned from arrangement; phrase draft retained'
+      } catch (error) { if (accepting && generation === expected) { transport = { kind: 'stopped' }; status = error.message } }
+      finally {
+        if (entered) { suspended = false; if (accepting && !closed) process.stdin.on('keypress', keypress) }
+        if (childTask === owned) childTask = null
+        draw()
+      }
+    })()
+    childTask = owned
+  }
   async function effect(value) {
-    if (!accepting && ['play', 'record', 'wave'].includes(value.kind)) return
+    if (!accepting && ['play', 'record', 'wave', 'arrange'].includes(value.kind)) return
     switch (value.kind) {
+      case 'arrange': arrange(); break
       case 'save': await save(); break
       case 'save-as': await save(value.path); break
       case 'export': await writeFile(value.path, projectMidi(editor.project), { flag: 'wx', mode: 0o600 }); status = `Exported ${value.path}`; break
       case 'wave': {
-        const job = render(editor.project)
+        const job = renderAudio(editor.project, { pattern: editor.pattern })
         const wave = await job.promise
         if (accepting && !closed) {
           await copyFile(wave.path, value.path, constants.COPYFILE_EXCL)
@@ -243,12 +343,16 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         break
       }
       case 'help': showHelp = !showHelp; break
-      case 'record': if (!sessionTask) sessionTask = record().catch(error => { status = error.message }).finally(() => { sessionTask = null }); break
+      case 'record': if (!childTask) childTask = record().catch(error => { status = error.message }).finally(() => { childTask = null }); break
     }
   }
   async function keypress(text, key = {}) {
     if (!accepting || closed || suspended) return
     if (key.ctrl && key.name === 'c') { finish(); return }
+    if (picker.view) {
+      try { await picker.keypress(text, key) } catch (error) { status = `VST: ${error.message}` }
+      draw(); return
+    }
     if (prompt !== null) {
       if (key.name === 'escape') prompt = null
       else if (key.name === 'backspace') prompt = [...prompt].slice(0, -1).join('')
@@ -275,6 +379,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       const original = editor.project
       switch (key.name) {
         case 'space': play(); break
+        case 'i': if (accepting && !suspended && !childTask) { stop(); picker.open() }; break
         case 's': await save(); break
         case 'r': await effect({ kind: 'record' }); break
         case 'l': if (editor.project.kind === 'midi-source') throw new Error('MIDI source clip looping requires the arrangement transport'); stop(); loop = !loop; break
@@ -328,15 +433,17 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   try { draw(); if (signal?.aborted) finish(); await done }
   finally {
     if (pendingDraw) clearImmediate(pendingDraw)
-    closed = true; stop(); clearInterval(timer); sessionAbort.abort()
+    closed = true; stop(); picker.close(); clearInterval(timer); sessionAbort.abort()
     process.stdin.off('keypress', keypress); process.stdin.off('end', onEnd)
     process.stdout.off('resize', onResize); signal?.removeEventListener('abort', onAbort)
     for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.off(name, onSignal)
     for (const handle of players.keys()) handle.terminate()
+    for (const job of nativeRenders) job.cancel()
     for (const job of jobs.values()) { Atomics.store(job.cancel, 0, 1); job.reject(new Error('Sequencer closed')) }
     jobs.clear()
     try {
-      await Promise.allSettled([task, sessionTask, worker.terminate(), ...players.values()])
+      await Promise.allSettled([task, childTask, picker.settled(), worker.terminate(), ...players.values(), ...[...nativeRenders].map(job => job.promise)])
+      await Promise.allSettled([...observations])
       if (dirty()) {
         try { await save() }
         catch {
@@ -354,4 +461,5 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       if (recovery) process.stderr.write(`Phrase edits retained at ${recovery}\n`)
     }
   }
+  return { project: editor.project, pattern: editor.pattern, changed: editor.project !== initialSnapshot }
 }

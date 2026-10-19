@@ -1,3 +1,4 @@
+import { verifyPhraseSnapshot } from './phrase-arrangement.mjs'
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { arrangementPlaybackSchedule, newArrangement } from './arrangement.mjs'
@@ -70,6 +71,7 @@ export async function prepareArrangementMidi(project, { directory, signal, midiO
     const identity = JSON.stringify([asset.id, clip.pattern ?? null])
     let source = sources.find(source => source.id === identity)
     if (!source) {
+      verifyPhraseSnapshot(asset)
       const selected = portBindings.filter(binding => binding.asset === asset.id).map(({ port, destination }) => ({ port, destination }))
       source = { id: identity, timeline: sourceMidiTimeline(asset.source, { pattern: clip.pattern,
         ...(selected.length ? { portBindings: selected } : { midiOutput }) }) }

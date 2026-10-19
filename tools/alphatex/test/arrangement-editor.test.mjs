@@ -1,3 +1,6 @@
+import { newProject, editProject, PPQ } from '../sequencer-project.mjs'
+import { importPhraseDocument } from '../phrase-arrangement.mjs'
+import { newEditor, editorCommand } from '../sequencer-editor.mjs'
 import { practiceEnabled } from '../arrangement-practice.mjs'
 import { liveMidiPlan } from '../live-midi.mjs'
 import { calibrationSelection } from '../audio-calibration.mjs'
@@ -13,7 +16,7 @@ import { newArrangement, editArrangement, arrangementSchedule } from '../arrange
 import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } from '../arrangement-playback.mjs'
 import * as editorAPI from '../arrangement-editor.mjs'
 import { loadArrangement } from '../arrangement-files.mjs'
-import { importMidiSource, exportMidiSource } from '../midi-source.mjs'
+import { importMidiSource, exportMidiSource, midiSourcePattern } from '../midi-source.mjs'
 import { recordingEpoch } from '../arrangement-recording.mjs'
 import { recordingCorrectionContext, recordingCorrectionCapture } from '../recording-correction.mjs'
 import { calibrationMilliseconds, calibrationResidual, validateCalibrationCapture } from '../calibration-profile.mjs'
@@ -73,7 +76,7 @@ test('actual IO worker preserves sources in redo history when saving to a differ
 
 const flush=()=>new Promise(resolve=>setImmediate(resolve))
 async function controller(options={}){
-  const observed={requests:[],saved:[],recovered:[],terminated:false,players:[],removed:[],takes:[],captures:[],monitors:[],live:[],liveAttempts:[],claims:[],calibrations:[],writes:[]},process=new EventEmitter()
+  const observed={requests:[],saved:[],recovered:[],terminated:false,players:[],removed:[],takes:[],captures:[],monitors:[],live:[],liveAttempts:[],claims:[],calibrations:[],writes:[],phrases:[]},process=new EventEmitter()
   const admitLive=options.admitLive, heldPlaybackReady=options.playbackReady
   process.stdin=Object.assign(new EventEmitter(),{isTTY:true,isRaw:false,setRawMode(value){this.isRaw=value},resume(){},pause(){}})
   process.stdout=Object.assign(new EventEmitter(),{isTTY:true,columns:100,rows:24,write(){}});process.stderr={write(){}}
@@ -119,6 +122,10 @@ async function controller(options={}){
       observed.captures.push(entry)
       return{completion,stop(){entry.stops++}}
     },
+    openSequencer(options){
+      let finish;const result=new Promise(resolve=>{finish=resolve})
+      observed.phrases.push({options,finish});return result
+    },
     viewSession(options){
       let finish
       const completion=new Promise(resolve=>{finish=resolve})
@@ -140,6 +147,7 @@ async function controller(options={}){
   }
   const source=(await readFile(new URL('../arrangement-tui.mjs',import.meta.url),'utf8')).replace(/^import .*$/gm,'')
     .replace("new URL('./arrangement-worker.mjs', import.meta.url)","new URL('file:///worker')")
+    .replace("await import('./sequencer-tui.mjs')",'await Promise.resolve({viewSequencer:openSequencer})')
   const prefix=`const {${Object.keys(globalThis[slot]).join(',')}}=globalThis[${JSON.stringify(slot)}];\n`
   const {viewArrangement}=await import('data:text/javascript;base64,'+Buffer.from(prefix+source).toString('base64'))
   const abort=new AbortController(),done=viewArrangement({root:'/synthetic',signal:abort.signal}).finally(()=>{delete globalThis[slot]})
@@ -296,11 +304,12 @@ test('document mutation stops the admitted playback revision while cursor motion
 
 async function closeController(view) {
   view.abort.abort()
-  for (const job of view.observed.requests.filter(job=>['prepare-wave','prepare-midi','prepare-mixed','prepare-take','import-wave','import-midi','import-take'].includes(job.kind))) {
+  for (const job of view.observed.requests.filter(job=>['prepare-wave','prepare-midi','prepare-mixed','prepare-take','prepare-phrase','import-wave','import-midi','import-take'].includes(job.kind))) {
     view.worker.emit('message',{id:job.id,ok:false,cancelled:true,error:'Cancelled'})
   }
   for (const player of view.observed.players) player.finish()
   for (const take of view.observed.takes) take.finish()
+  for (const phrase of view.observed.phrases) phrase.finish({changed:false})
   await view.done
 }
 test('explicit MIDI selection cannot route a WAV arrangement to default audio; choosing audio clears MIDI bindings',async()=>{
@@ -872,5 +881,81 @@ test('a rejected playing acknowledgement stops its child and retains private sou
   assert.ok(!view.observed.removed.includes('/owned/practice/rejected'))
   view.observed.players[0].finish();await flush()
   assert.ok(view.observed.removed.includes('/owned/practice/rejected'))
+ }finally{await closeController(view)}
+})
+
+
+test('arrangement phrase edit imports one immutable variant after child closure and undo restores the previous document',async()=>{
+ const view=await controller();await primeWave(view)
+ try {
+  view.command('phrase');await flush();const prep=view.observed.requests.find(job=>job.kind==='prepare-phrase')
+  assert.equal(prep.asset,undefined);assert.equal(view.observed.phrases.length,0)
+  const phrase=newProject();view.worker.emit('message',{id:prep.id,ok:true,result:phrase});await flush()
+  const child=view.observed.phrases[0];assert.ok(child.options.embedded);assert.equal(view.process.stdin.listenerCount('keypress'),0)
+  const edited=editProject(phrase,'track-1',{kind:'chord',symbol:'Cmaj7',start:0,duration:PPQ,mode:'drop2',octave:4,velocity:96})
+  child.finish({project:edited,changed:true});await flush()
+  const job=view.observed.requests.find(job=>job.kind==='import-phrase');assert.ok(job)
+  assert.deepEqual(job.document,edited)
+  view.worker.emit('message',{id:job.id,ok:true,result:importPhraseDocument(job.project,job.document)});await flush()
+  view.command('save');await flush();const changed=view.observed.saved.at(-1).project
+  assert.equal(changed.assets.length,2);assert.deepEqual(changed.clips,prep.project.clips)
+  assert.deepEqual(changed.assets[1].phrase,edited);assert.equal(view.process.stdin.listenerCount('keypress'),1)
+  view.command('undo');view.command('save');await flush()
+  assert.deepEqual(view.observed.saved.at(-1).project,prep.project)
+ }finally{await closeController(view)}
+})
+
+test('closing an active MIDI edit waits for child cancellation and refuses its late variant import',async()=>{
+ const view=await controller();await primeWave(view)
+ view.command('phrase');await flush();const prep=view.observed.requests.find(job=>job.kind==='prepare-phrase')
+ view.worker.emit('message',{id:prep.id,ok:true,result:newProject()});await flush()
+ const child=view.observed.phrases[0];view.abort.abort();await flush()
+ assert.equal(child.options.signal.aborted,true);assert.equal(view.observed.terminated,false)
+ child.finish({project:newProject(),changed:true});await view.done
+ assert.equal(view.observed.requests.some(job=>job.kind==='import-phrase'),false)
+ assert.equal(view.process.stdin.isRaw,false)
+})
+
+test('returning from SMF2 editing carries the edited pattern into Enter placement without changing other patterns',async()=>{
+ const track=pitch=>Buffer.from([0,0xb0,1,77,0,0x90,pitch,100,0x83,0x60,0x80,pitch,45,0,0xff,0x2f,0])
+ const chunk=bytes=>{const header=Buffer.alloc(8);header.write('MTrk');header.writeUInt32BE(bytes.length,4);return Buffer.concat([header,bytes])}
+ const bytes=Buffer.concat([Buffer.from('4d546864000000060002000201e0','hex'),chunk(track(60)),chunk(track(67))])
+ const source=importMidiSource(bytes),view=await controller()
+ try {
+  view.command('import-midi /music/patterns.mid');await flush()
+  const job=view.observed.requests.find(job=>job.kind==='import-midi')
+  const asset={id:'asset-1',kind:'midi',name:'Patterns',source}
+  view.worker.emit('message',{id:job.id,ok:true,result:{project:editArrangement(job.project,{kind:'asset-add',asset}),asset:asset.id}});await flush()
+  view.command('place asset-1 0 2');view.command('edit-midi');await flush()
+  const prep=view.observed.requests.find(job=>job.kind==='prepare-phrase')
+  view.worker.emit('message',{id:prep.id,ok:true,result:source});await flush()
+  const child=view.observed.phrases[0];assert.equal(child.options.pattern,1)
+  const edited=editorCommand(newEditor(source,{pattern:child.options.pattern}),'transpose 2').editor
+  child.finish({project:edited.project,pattern:edited.pattern,changed:true});await flush()
+  const imported=view.observed.requests.find(job=>job.kind==='import-phrase')
+  view.worker.emit('message',{id:imported.id,ok:true,result:importPhraseDocument(imported.project,imported.document)});await flush()
+  view.command('cursor 2');view.key('return');view.command('save');await flush()
+  const saved=view.observed.saved.at(-1).project
+  assert.equal(saved.clips.length,2);assert.equal(saved.clips[1].asset,'asset-2');assert.equal(saved.clips[1].pattern,1)
+  assert.equal(saved.clips[1].position,2*PPQ)
+  assert.deepEqual(Buffer.from(exportMidiSource(saved.assets[0].source)),bytes)
+  assert.deepEqual(midiSourcePattern(saved.assets[1].source,{pattern:0}),midiSourcePattern(source,{pattern:0}))
+  assert.equal(midiSourcePattern(saved.assets[1].source,{pattern:1}).notes[0].pitch,69)
+  // Selecting another source clears the child selection instead of inventing an SMF2 default.
+  let state=editorAPI.arrangementImported(editorAPI.arrangementEditor(),{project:saved,asset:'asset-2',pattern:1})
+  state=editorAPI.arrangementCommand(state,'asset asset-1').editor
+  assert.throws(()=>editorAPI.arrangementAction(state,{kind:'place'}),/format-2 MIDI pattern/)
+  state=editorAPI.arrangementCommand(state,'select '+saved.clips[0].id).editor
+  assert.equal(editorAPI.arrangementAction(state,{kind:'place'}).project.clips.at(-1).pattern,1)
+ }finally{await closeController(view)}
+})
+
+test('stop fences a late phrase preparation before child keyboard or input ownership transfers',async()=>{
+ const view=await controller();await primeWave(view)
+ try {
+  view.command('phrase');await flush();const prep=view.observed.requests.find(job=>job.kind==='prepare-phrase')
+  view.command('stop');await flush();assert.ok(view.observed.requests.some(job=>job.kind==='cancel'&&job.request===prep.id))
+  view.worker.emit('message',{id:prep.id,ok:true,result:newProject()});await flush()
+  assert.equal(view.observed.phrases.length,0);assert.equal(view.process.stdin.listenerCount('keypress'),1)
  }finally{await closeController(view)}
 })

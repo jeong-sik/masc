@@ -11091,6 +11091,13 @@ let focus_acting_pane_or_say_why (state : state) =
 let score_terminal_handoff :
   (sources:string list -> index:int -> (unit, string) result) option ref = ref None
 
+let music_terminal_handoff : (unit -> (unit, string) result) option ref = ref None
+
+let open_music () =
+  match !music_terminal_handoff with
+  | None -> Error "Music workbench requires an active terminal session"
+  | Some launch -> launch ()
+
 let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   let target =
     match keeper_name with
@@ -11119,7 +11126,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       | Attach_image_ref_missing_value | Preset_list | Preset_save _ | Preset_save_missing_name
       | Preset_restore _ | Preset_restore_missing_name | Preset_show _ | Preset_show_missing_name
       | Preset_delete _ | Preset_delete_missing_name | Listen
-      | Open_score _ | Score_invalid_index | Unknown _ -> true
+      | Open_music | Music_invalid_arguments | Open_score _ | Score_invalid_index | Unknown _ -> true
   then
     notice ~kind:Notice_failure
       "A queued edit is active; press Enter for its text or Ctrl-U to abandon it"
@@ -11438,6 +11445,13 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       listen_newest_media state
   | Masc_tui_command.Score_invalid_index ->
       notice ~kind:Notice_failure "/score [N]: N must be a positive score number, newest first"
+  | Masc_tui_command.Music_invalid_arguments ->
+      notice ~kind:Notice_failure "Use /music; choose a project or take in the workbench"
+  | Masc_tui_command.Open_music ->
+      Masc_tui_message_input.clear state.msg_input;
+      (match open_music () with
+       | Ok () -> ()
+       | Error detail -> notice ~kind:Notice_failure detail)
   | Masc_tui_command.Open_score index ->
       let sources = image_conversation_rows state
         |> List.concat_map (fun (entry : msg_entry) -> Masc_tui_markdown.alphatex_sources entry.me_text)
@@ -16872,6 +16886,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Help | Masc_tui_command.Features
        | Masc_tui_command.Show_load_errors
        | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
+       | Masc_tui_command.Open_music | Masc_tui_command.Music_invalid_arguments
         | Masc_tui_command.Open_diff | Masc_tui_command.Open_patch_modal
         | Masc_tui_command.Open_usage | Masc_tui_command.Open_changes
         | Masc_tui_command.Toggle_acting_pane
@@ -22198,25 +22213,31 @@ let main
      completion. Late replies update every existing terminal capability consumer. *)
   install_terminal_probe_publisher input_reader ~publish:apply_terminal_observation;
 
+  let restore_music_terminal () =
+    output_string stdout (mouse_tracking_disable ^ bracketed_paste_disable);
+    if Terminal_profile.kitty_keyboard terminal_profile then
+      output_string stdout Masc_tui_csi.disable_kitty_keyboard;
+    flush stdout;
+    restore_terminal () in
+  let reenter_music_terminal () =
+    reenter_terminal ();
+    Frame_presenter.setup frame_presenter ~write:(output_string stdout)
+      ~flush:(fun () -> flush stdout);
+    output_string stdout mouse_tracking_enable;
+    if Terminal_profile.kitty_keyboard terminal_profile then
+      output_string stdout Masc_tui_csi.enable_kitty_keyboard;
+    flush stdout in
+  music_terminal_handoff := Some (fun () ->
+    let root = Filename.concat
+      (Common.masc_dir_from_base_path ~base_path:state.local_base_path) "music" in
+    Masc_tui_score.launch_music ~restore:restore_music_terminal ~reenter:reenter_music_terminal
+      ~project_root:(Filename.concat root "projects") ~session_root:(Filename.concat root "sessions")
+      ~soundfont:!boot_midi_soundfont);
   score_terminal_handoff := Some (fun ~sources ~index ->
     match !active_graphics_protocol, !image_cell_pixels with
     | Masc_tui_graphics.Kitty_protocol, Some ((width, height) as cell_pixels)
       when width > 0 && height > 0 ->
-        let restore () =
-          output_string stdout (mouse_tracking_disable ^ bracketed_paste_disable);
-          if Terminal_profile.kitty_keyboard terminal_profile then
-            output_string stdout Masc_tui_csi.disable_kitty_keyboard;
-          flush stdout;
-          restore_terminal () in
-        let reenter () =
-          reenter_terminal ();
-          Frame_presenter.setup frame_presenter ~write:(output_string stdout)
-            ~flush:(fun () -> flush stdout);
-          output_string stdout mouse_tracking_enable;
-          if Terminal_profile.kitty_keyboard terminal_profile then
-            output_string stdout Masc_tui_csi.enable_kitty_keyboard;
-          flush stdout in
-        Masc_tui_score.launch ~restore ~reenter ~sources ~index ~cell_pixels
+        Masc_tui_score.launch ~restore:restore_music_terminal ~reenter:reenter_music_terminal ~sources ~index ~cell_pixels
           ~soundfont:!boot_midi_soundfont
     | (Masc_tui_graphics.Kitty_protocol, (Some _ | None))
     | (Masc_tui_graphics.ITerm2_protocol | Masc_tui_graphics.Unsupported_protocol), _ ->
@@ -28514,6 +28535,10 @@ and is loaded on demand through keeper_skill.
             | Home_choose_keeper ->
                 goto_surface state ~mailbox:async_messages (Keepers Keeper_list)
             | Home_create_keeper -> handle_keeper_create ~return_to:Keeper_chat_return_home ()))
+        | Some "s" when state.view = Overview ->
+            (match open_music () with
+             | Ok () -> ()
+             | Error detail -> report_action state "error" detail)
         | Some ("m" | "M") when state.view = Overview ->
             goto_surface state ~mailbox:async_messages Metrics
         | Some "f" when state.view = Metrics && not state.usage_telemetry_open ->

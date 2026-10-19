@@ -752,6 +752,11 @@ let account_login_action_is_read = function
   | Activate_saved _ | Select_existing _ | Start _ | Input _
   | Cancel | Prepare _ | Save _ | Close | Nothing | Remove _ -> false
 
+let ask_answer_completion_message (submission : ask_submission)
+    (completion : Ask_answer_completion.observation) =
+  Workspace_scoped (submission.as_authority, submission.as_reading,
+    Ask_answer_done (submission, completion.receipt, completion.asks))
+
 let rec workspace_message_is_read = function
   | Keeper_logs_loaded _ -> true
   | Chat_search_finished _ -> true

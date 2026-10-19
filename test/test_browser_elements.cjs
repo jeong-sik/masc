@@ -132,6 +132,38 @@ test('live elements retain tab identity and match native control observations', 
   assert.deepEqual(page, runNative(context));
 });
 
+test('shared ancestor visibility stays correct and is refreshed for each observation', async () => {
+  const { context, text } = fixture();
+  const body = text.parentElement;
+  const html = body.parentElement;
+  let hidden = null, visibility = null;
+  const calls = new Map();
+  context.getComputedStyle = element => {
+    calls.set(element, (calls.get(element) || 0) + 1);
+    return { display: element === hidden ? 'none' : 'block', opacity: '1',
+      visibility: element === visibility ? 'hidden' : 'visible' };
+  };
+  for (const ancestor of [null, body, html, null]) {
+    hidden = ancestor;
+    calls.clear();
+    const native = runNative(context);
+    const nativeCalls = [...calls.values()].reduce((a, b) => a + b, 0);
+    calls.clear();
+    const { tabId, ...extension } = await runExtension(context);
+    assert.deepEqual(native, extension, 'ancestor display and later changes preserve observations');
+    console.log(JSON.stringify({ hiddenAncestor: ancestor?.localName ?? null,
+      nativeStyleReads: nativeCalls, extensionStyleReads: [...calls.values()].reduce((a, b) => a + b, 0) }));
+  }
+  visibility = body;
+  assert.equal(runNative(context).total, 8, 'a descendant can override inherited visibility');
+  visibility = text;
+  assert.equal(runNative(context).total, 7, 'the control own visibility still hides it');
+  hidden = null;
+  context.getComputedStyle = element => ({ display: 'block', visibility: 'visible',
+    opacity: element === html ? '0' : '1' });
+  assert.equal(runNative(context).total, 0, 'an opacity-zero ancestor hides every descendant');
+});
+
 // A cut through a surrogate pair leaves half a character. JSON then carries
 // an escape that a strict reader refuses, and the whole inventory is lost.
 test('element text is cut by code point, never through a surrogate pair', async () => {

@@ -306,7 +306,7 @@ conversation. `keeper_artifact_publish` accepts `title`, `summary`, `format`
 `goal_id` link it to the work. The running Keeper supplies the author identity.
 
 Open **Work → Artifacts** in the dashboard to search the published list and
-read a document in a viewport-filling reader. Use Back to list or Escape to
+read a document in a viewport-filling reader. Use Back to list to
 return to the catalog; expand Report information for author and work links.
 The reader offers preview, source, version selection, copy-link
 and source download. Self-contained HTML can use inline JavaScript and CSS;

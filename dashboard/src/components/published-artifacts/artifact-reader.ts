@@ -51,6 +51,10 @@ export function ArtifactReader({ doc, fixedRevision, onClose }: {
   return html`
     <dialog ref=${dialog} aria-labelledby="artifact-reader-title"
       class="fixed inset-0 m-0 h-dvh max-h-none w-full max-w-none overflow-hidden border-0 bg-[var(--color-bg-surface)] p-0 text-[var(--color-fg-default)]"
+      onKeyDown=${(event: KeyboardEvent) => {
+        // Let the native dialog handle Escape before the shell's chat shortcut.
+        if (event.key === 'Escape') event.stopPropagation()
+      }}
       onCancel=${(event: Event) => { event.preventDefault(); onClose() }}>
     <article class="flex h-full min-w-0 flex-col" aria-label="아티팩트 본문">
       <header class="shrink-0 border-b border-[var(--color-border-default)] px-4 py-3 space-y-2">

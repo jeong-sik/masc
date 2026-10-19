@@ -23,7 +23,7 @@ workspace, identity and dashboard. It does not require another hosting service.
    of other channels.
 4. Work → Artifacts shows title, author, summary and update time. Selecting a
    result opens a viewport-filling reader above the dashboard. Back to list or
-   Escape returns to the searchable catalog. Search filters title, summary and
+   Escape in the reader controls returns to the searchable catalog. Search filters title, summary and
    author. Empty, loading, missing and failed states remain distinguishable.
 5. The reader provides rendered/source views, revision selection, copy-link and
    exact-source download. HTML uses the remaining viewport; Markdown has a

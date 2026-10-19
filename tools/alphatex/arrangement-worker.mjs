@@ -6,6 +6,8 @@ import { attachRecordedTake } from './arrangement-recording.mjs'
 import { analyzeCalibration } from './audio-calibration.mjs'
 import { inspectCalibration } from './calibration-files.mjs'
 
+import { preparePractice } from './arrangement-practice.mjs'
+
 const active = new Map()
 parentPort.on('message', async job => {
   if (job.kind === 'cancel') {
@@ -43,6 +45,10 @@ parentPort.on('message', async job => {
         result = await saveArrangement(job.path, job.project, job.revision, { sourceRoot: job.sourceRoot, signal }); break
       }
       default: throw new Error('Unknown arrangement IO request')
+    }
+    switch (job.kind) {
+      case 'prepare-capture': case 'prepare-mixed': case 'prepare-midi': case 'prepare-audio': case 'prepare-wave':
+        result = await preparePractice(job.project, result, { signal }); break
     }
     parentPort.postMessage({ id: job.id, ok: true, result })
   } catch (error) { parentPort.postMessage({ id: job.id, ok: false, cancelled: signal.aborted, error: error.message }) }

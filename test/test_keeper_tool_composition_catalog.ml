@@ -1302,12 +1302,13 @@ let test_prepare_schema_has_no_recursive_references () =
     alternatives
 ;;
 
-(* The whole advertised catalog — static descriptors and the OCaml-built
-   composition surfaces alike — rides in one provider request, so a single
-   recursive schema anywhere breaks every turn on a provider that refuses
-   recursive JSON Schemas (Muse: 400 "Recursive JSON schemas ..."). Walk every
-   descriptor input schema and the prepare/run projections and require no
-   [$ref] and no [$defs] at any depth (#43150 follow-up, task-2359). *)
+(* A provider that refuses recursive JSON Schemas rejects the whole request,
+   not only a call to a tool that carries one (Muse: 400 "Recursive JSON
+   schemas ..."), so the schemas a request advertises must hold no [$ref] and
+   no [$defs] at any depth. This sweep over-approximates that wire set:
+   [all_descriptors ()] unions public and private descriptors — a superset of
+   what one provider request carries — and the prepare/run projections ride
+   along (#43150 follow-up, task-2359). *)
 let test_every_advertised_schema_holds_no_recursive_references () =
   let rec has_reference_keyword = function
     | `Assoc fields ->

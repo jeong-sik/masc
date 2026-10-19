@@ -1005,3 +1005,28 @@ test('captured audio loop audition retains its plan owner through controls and d
  }finally{await closeController(view)}
  assert.equal(view.process.stdin.isRaw,false)
 })
+
+test('ordinary paired captured loop retains its plan owner through controls and drains it before removing the snapshot',async()=>{
+ const view=await controller()
+ try{
+  const asset=await primeCapture(view)
+  view.command('place capture-1 0');view.command('repeat 8');view.command('loop 1 3')
+  view.command('mixed-output selected-audio');view.command('midi-source capture-1 keys -42');view.key('space');await flush()
+  const prepared=view.observed.requests.find(job=>job.kind==='prepare-capture');assert.ok(prepared)
+  assert.deepEqual(prepared.project.playbackLoop,{start:960,end:2880})
+  assert.deepEqual(prepared.project.assets[0],asset)
+  view.worker.emit('message',{id:prepared.id,ok:true,result:{path:'/owned-recovery/paired-loop/plan.json',format:'capture-arrangement',midiOutput:'-42',bindings:[{port:0,destination:'-42'}],loop:true,originSeconds:.6}});await flush()
+  const player=view.observed.players[0];assert.equal(player.options.loop,true);assert.equal(player.options.output,'selected-audio');assert.deepEqual(player.options.midiBindings,[{port:0,destination:'-42'}])
+  view.key('space');view.command('seek 2');view.key('space');await flush()
+  assert.deepEqual(player.commands.slice(0,3),['pause',['seek',.6],'resume'])
+  view.command('seek 3');await flush();assert.deepEqual(player.commands.at(-1),['seek',0])
+  view.command('input audio-in');view.command('record');await flush();assert.equal(view.observed.captures.length,0)
+  view.key('q');await flush();assert.ok(player.commands.includes('stop'))
+  assert.ok(!view.observed.removed.includes('/owned-recovery/paired-loop'))
+  player.finish();await view.done
+  assert.ok(view.observed.removed.includes('/owned-recovery/paired-loop'))
+  const saved=view.observed.saved.at(-1).project
+  assert.deepEqual(saved.assets[0],asset);assert.deepEqual(saved.playbackLoop,{start:960,end:2880});assert.equal(saved.clips[0].repeat,8)
+ }finally{await closeController(view)}
+ assert.equal(view.process.stdin.isRaw,false)
+})

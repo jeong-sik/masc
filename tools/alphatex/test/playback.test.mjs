@@ -247,14 +247,15 @@ test('paired and hybrid loops pin only selected acquired streams through control
   f.playback.pause();f.event('paused',state);f.playback.seek(.4);f.playback.resume();f.event('playing',state)
   f.playback.stop();f.event('stopped',state);f.close();await f.playback.completion
   assert.deepEqual(f.commands.map(c=>c.kind),['pause','seek','resume','stop'])
-  const silent=fixture(options);silent.event('playing',{...state,bindings:[]});await silent.playback.ready
-  silent.event('stopped',{...state,bindings:[]});silent.close();await silent.playback.completion
-  for(const wrong of [[binding('unselected',2)],[binding('43',1)],[binding('43',2),binding('43',2,1)]]){
+  const silentBindings=hybrid?[binding('42',1)]:[]
+  const silent=fixture(options);silent.event('playing',{...state,bindings:silentBindings});await silent.playback.ready
+  silent.event('stopped',{...state,bindings:silentBindings});silent.close();await silent.playback.completion
+  for(const wrong of [[binding('unselected',2)],[binding('43',1)],[binding('43',2),binding('43',2,1)],...(hybrid?[[]]:[])]){
    const bad=fixture(options);bad.event('playing',{...state,bindings:wrong});bad.close(1)
    await assert.rejects(bad.playback.completion,/unselected MIDI/)
   }
   const changed=fixture(options);changed.event('playing',state);await changed.playback.ready
-  changed.event('paused',{...state,bindings:[]});changed.close(1)
+  changed.event('paused',{...state,bindings:silentBindings});changed.close(1)
   await assert.rejects(changed.playback.completion,/changed its acquired/)
  }
 })

@@ -1270,6 +1270,19 @@ val decode_runtime_resolved_full :
     and assignments in server order and reject lane assignments absent from
     this snapshot. The snapshot retains independent usage-window errors. *)
 
+type runtime_resolved_observation = {
+  rro_catalog : (runtime_resolved_catalog, string) result;
+  rro_usage : (Tui_decode_usage.provider_usage_windows, string) result;
+}
+(** Catalogue and quota availability are independent observations. When the
+    catalogue is valid its snapshot uses exactly [rro_usage]; catalogue failure
+    still retains this response's usage result without borrowing another read. *)
+
+val decode_runtime_resolved_observation : Yojson.Safe.t -> runtime_resolved_observation
+(** Interpret quota once and reuse it while validating the snapshot and its
+    assignments. Preserve each error independently, including catalogue errors
+    before the snapshot reaches quota interpretation. *)
+
 val decode_runtime_resolved :
   Yojson.Safe.t ->
   (runtime_option list * runtime_assignment list, string) result

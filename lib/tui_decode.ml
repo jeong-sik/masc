@@ -1967,7 +1967,7 @@ let decode_runtime_resolved_lane json =
   in
   Ok { rrl_id; rrl_runtime_ids; rrl_declared }
 
-let decode_runtime_resolved_snapshot json =
+let decode_runtime_resolved_snapshot_using ~read_usage json =
   let* rrs_generated_at_iso = required_string_field json "generated_at_iso" in
   let* source = required_string_field json "source" in
   let* () =
@@ -1995,7 +1995,7 @@ let decode_runtime_resolved_snapshot json =
   in
   (* Capture the credential/quota scope before catalogue/surface projections split.
      quota_scope itself is only an ordinal within this response. *)
-  let rrs_usage = Tui_decode_usage.decode_provider_usage_windows json in
+  let rrs_usage = read_usage () in
   let* runtime_items = required_list_field json "runtimes" in
   let* rrs_runtimes =
     decode_list "runtimes"
@@ -2094,6 +2094,13 @@ let decode_runtime_resolved_snapshot json =
     ; rrs_runtimes
     ; rrs_lanes
     }
+
+let decode_runtime_resolved_snapshot json =
+  (* Snapshot-only readers retain the original validation order: an early
+     source/header refusal does not need to interpret usage. The observation
+     reader supplies its already interpreted independent result instead. *)
+  decode_runtime_resolved_snapshot_using
+    ~read_usage:(fun () -> Tui_decode_usage.decode_provider_usage_windows json) json
 
 (* The provider usage windows of [GET /api/v1/runtime/resolved]: what each
    provider account said about its own usage windows, as the server recorded
@@ -4585,8 +4592,7 @@ type runtime_resolved_catalog = {
   rrc_assignments : runtime_assignment list;
 }
 
-let decode_runtime_resolved_full json =
-  let* snapshot = decode_runtime_resolved_snapshot json in
+let decode_runtime_catalog_from_snapshot ~snapshot json =
   let* assignment_items = required_list_field json "assignments" in
   let* assignments =
     decode_list "assignments" decode_runtime_assignment assignment_items
@@ -4611,6 +4617,22 @@ let decode_runtime_resolved_full json =
              assignment.ra_keeper)
   in
   Ok {rrc_snapshot=snapshot;rrc_assignments=assignments}
+
+let decode_runtime_resolved_full json =
+  let* snapshot = decode_runtime_resolved_snapshot json in
+  decode_runtime_catalog_from_snapshot ~snapshot json
+
+type runtime_resolved_observation = {
+  rro_catalog : (runtime_resolved_catalog, string) result;
+  rro_usage : (Tui_decode_usage.provider_usage_windows, string) result;
+}
+
+let decode_runtime_resolved_observation json =
+  let rro_usage = Tui_decode_usage.decode_provider_usage_windows json in
+  let rro_catalog =
+    let* snapshot = decode_runtime_resolved_snapshot_using ~read_usage:(fun () -> rro_usage) json in
+    decode_runtime_catalog_from_snapshot ~snapshot json in
+  {rro_catalog;rro_usage}
 
 let decode_runtime_resolved json =
   let* catalog = decode_runtime_resolved_full json in

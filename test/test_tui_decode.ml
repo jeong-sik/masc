@@ -8947,31 +8947,34 @@ let runtime_resolved_surface_json () =
           ] )
     ]
 
+let runtime_quota_scope_account scope id =
+  `Assoc ["scope", `String scope; "scope_id", `String id;
+    "providers", `List []; "state", `String "not_reported_since_start"; "windows", `List []]
+
+let runtime_quota_scope_document scope accounts =
+  let first = resolved_runtime "runtime-a" "Resolved A" "model-a"
+    |> set_field "quota_scope" (`String scope) in
+  let base = runtime_resolved_surface_json () in
+  let runtimes = Yojson.Safe.Util.(base |> member "runtimes" |> to_list) in
+  base |> set_field "default_runtime" first
+    |> set_field "runtimes" (`List (first :: List.tl runtimes))
+    |> set_field "provider_usage_windows_since" (`Float 0.)
+    |> set_field "provider_usage_windows" (`List accounts)
+
 let test_runtime_quota_scope_is_paired_with_its_response () =
-  let account scope id = `Assoc ["scope", `String scope; "scope_id", `String id;
-    "providers", `List []; "state", `String "not_reported_since_start"; "windows", `List []] in
-  let document scope accounts =
-    let first = resolved_runtime "runtime-a" "Resolved A" "model-a"
-      |> set_field "quota_scope" (`String scope) in
-    let base = runtime_resolved_surface_json () in
-    let runtimes = Yojson.Safe.Util.(base |> member "runtimes" |> to_list) in
-    base |> set_field "default_runtime" first
-      |> set_field "runtimes" (`List (first :: List.tl runtimes))
-      |> set_field "provider_usage_windows_since" (`Float 0.)
-      |> set_field "provider_usage_windows" (`List accounts) in
   let decode json = match Tui_decode.decode_runtime_resolved_snapshot json with
     | Ok value -> value | Error detail -> Alcotest.fail detail in
   let first snapshot = List.hd snapshot.Tui_decode.rrs_runtimes in
-  let initial = document "account:1"
-    [account "account:1" "stable-first"; account "account:2" "stable-second"] in
+  let initial = runtime_quota_scope_document "account:1"
+    [runtime_quota_scope_account "account:1" "stable-first"; runtime_quota_scope_account "account:2" "stable-second"] in
   let captured = first (decode initial) in
   Alcotest.(check (option string)) "snapshot retains quota scope" (Some "stable-first")
     captured.ro_quota_scope_id;
-  let reordered = first (decode (document "account:2"
-    [account "account:1" "stable-second"; account "account:2" "stable-first"])) in
+  let reordered = first (decode (runtime_quota_scope_document "account:2"
+    [runtime_quota_scope_account "account:1" "stable-second"; runtime_quota_scope_account "account:2" "stable-first"])) in
   Alcotest.(check (option string)) "reordering ordinals retains quota scope" captured.ro_quota_scope_id
     reordered.ro_quota_scope_id;
-  let relocated = document "account:1" [account "account:1" "different-location"] in
+  let relocated = runtime_quota_scope_document "account:1" [runtime_quota_scope_account "account:1" "different-location"] in
   let new_row = first (decode relocated) in
   Alcotest.(check (option string)) "different credential location at same ordinal changes scope"
     (Some "different-location") new_row.ro_quota_scope_id;
@@ -8987,8 +8990,53 @@ let test_runtime_quota_scope_is_paired_with_its_response () =
       row.ro_quota_scope_id;
     Alcotest.(check (option string)) "response-local correlation survives failed Usage join"
       (Some "account:1") row.ro_quota_scope)
-    [document "account:1" []; set_field "provider_usage_windows" `Null initial;
-     document "account:1" [account "account:1" "one"; account "account:1" "two"]]
+    [runtime_quota_scope_document "account:1" []; set_field "provider_usage_windows" `Null initial;
+     runtime_quota_scope_document "account:1" [runtime_quota_scope_account "account:1" "one"; runtime_quota_scope_account "account:1" "two"]]
+
+let test_runtime_observation_keeps_response_owned_usage_through_failure () =
+  let document id = runtime_quota_scope_document "account:1"
+    [runtime_quota_scope_account "account:1" id] in
+  let catalog observation = match observation.Tui_decode.rro_catalog with
+    | Ok value -> value | Error detail -> Alcotest.fail detail in
+  let first observation = List.hd (catalog observation).rrc_snapshot.rrs_runtimes in
+  let opening = Tui_decode.decode_runtime_resolved_observation (document "captured") in
+  Alcotest.(check (option string)) "runtime retains the quota identity captured with this response"
+    (Some "captured") (first opening).ro_quota_scope_id;
+  Alcotest.(check bool) "catalogue and independent usage keep the same observation" true
+    ((catalog opening).rrc_snapshot.rrs_usage=opening.rro_usage && Result.is_ok opening.rro_usage);
+  let failed = Tui_decode.decode_runtime_resolved_observation
+    (document "captured" |> set_field "provider_usage_windows" `Null) in
+  Alcotest.(check bool) "usage failure preserves healthy catalogue and its actual usage error" true
+    (Result.is_error failed.rro_usage && (catalog failed).rrc_snapshot.rrs_usage=failed.rro_usage);
+  Alcotest.(check (option string)) "failed usage cannot borrow the previous response's scope"
+    None (first failed).ro_quota_scope_id;
+  let successor = Tui_decode.decode_runtime_resolved_observation (document "replacement") in
+  Alcotest.(check (option string)) "fresh usage at the same ordinal retains its own identity"
+    (Some "replacement") (first successor).ro_quota_scope_id;
+  Alcotest.(check (option string)) "the prior immutable observation is not rewritten"
+    (Some "captured") (first opening).ro_quota_scope_id
+
+let test_runtime_observation_keeps_usage_when_catalogue_is_invalid () =
+  let source = runtime_quota_scope_document "account:1"
+    [runtime_quota_scope_account "account:1" "independent"] in
+  let absent_lane = `Assoc ["keeper",`String "orbiter";"assignment_source",`String "explicit";
+    "resolved",`Assoc ["kind",`String "lane";"id",`String "absent"]] in
+  List.iter (fun json ->
+    let observation = Tui_decode.decode_runtime_resolved_observation json in
+    match observation.rro_catalog,observation.rro_usage with
+    | Error _,Ok usage ->
+        Alcotest.(check (list string)) "valid quota survives both early and late catalogue refusals"
+          ["independent"]
+          (List.map (fun (account : Tui_decode_usage.provider_usage_account) -> account.pua_scope_id) usage.puws_accounts)
+    | Ok _,(Ok _ | Error _) | Error _,Error _ ->
+        Alcotest.fail "catalogue refusal erased independent quota or became success")
+    [source |> set_field "source" (`String "/other/source");
+     source |> set_field "assignments" (`List [absent_lane]);
+     source |> set_field "runtimes" (`List [`String "not-a-runtime-object"])];
+  let both_failed = source |> set_field "source" (`String "/other/source")
+    |> set_field "provider_usage_windows" `Null |> Tui_decode.decode_runtime_resolved_observation in
+  Alcotest.(check bool) "two failures remain two failures rather than empty success" true
+    (Result.is_error both_failed.rro_catalog && Result.is_error both_failed.rro_usage)
 
 let test_decode_and_join_runtime_surface () =
   match
@@ -13158,6 +13206,10 @@ let () =
           test_decode_and_join_runtime_surface
       ; Alcotest.test_case "Runtime quota scopes remain paired with response" `Quick
           test_runtime_quota_scope_is_paired_with_its_response
+      ; Alcotest.test_case "Overview quota and catalogue retain response-owned partial observations" `Quick
+          test_runtime_observation_keeps_response_owned_usage_through_failure
+      ; Alcotest.test_case "Overview catalogue refusals preserve independent quota" `Quick
+          test_runtime_observation_keeps_usage_when_catalogue_is_invalid
       ; Alcotest.test_case "rejects an unknown provider status" `Quick
           test_runtime_probe_rejects_unknown_status
       ; Alcotest.test_case "probe status reads every word the server writes"

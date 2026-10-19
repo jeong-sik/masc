@@ -50,6 +50,8 @@ let browser
 try {
   const health = await http('/health?full=1')
   assert.equal(health.build.binary_commit, expectedCommit)
+  assert.equal(health.dashboard_surface.status, 'ok', 'dashboard bundle must match the actual server source')
+  evidence.dashboardStatus = health.dashboard_surface.status
   assert.equal(resolve(health.paths.effective_base_path), resolve(expectedBase))
   assert.notEqual(resolve(expectedBase), resolve(process.cwd()), 'proof must use an isolated runtime workspace')
   assert.ok(Number.isSafeInteger(health.process_memory.pid) && health.process_memory.pid > 0)
@@ -61,7 +63,7 @@ try {
     assert.notEqual(evidence.servicePid, created.servicePid, 'stop and restart the isolated service before resume')
     notes.push('service PID changed since successful create proof')
   }
-  notes.push('actual binary commit and isolated workspace match')
+  notes.push('actual binary commit, matched dashboard source and isolated workspace agree')
   let records
   if (mode === 'create') {
     const catalog = await http('/api/v1/published-artifacts')
@@ -151,8 +153,11 @@ try {
   assert.equal(await frame.locator('body').getAttribute('data-storage-access'), 'blocked')
   await page.screenshot({ path: join(output, `${mode}-desktop-html.png`), fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })
+  await frame.getByRole('button', { name: '확인 1회' }).scrollIntoViewIfNeeded()
+  await frame.getByRole('button', { name: '확인 1회' }).click()
+  await frame.getByRole('button', { name: '확인 2회' }).waitFor()
   await page.screenshot({ path: join(output, `${mode}-mobile-html.png`), fullPage: true })
-  notes.push('HTML counter interaction and denied parent document/storage/fetch; desktop/mobile screenshots retained')
+  notes.push('desktop/mobile HTML counter interaction and denied parent document/storage/fetch; screenshots retained')
   assert.deepEqual(errors, [], 'unexpected browser script errors')
   evidence.documents = records
   evidence.status = 'passed'

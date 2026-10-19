@@ -1,0 +1,66 @@
+{
+  "observed_head": "1f6b3fbe610bf74371e91bbd006f20c5e1b5de4a",
+  "proof": "actual candidate parser/executor/wire to isolated Chromium and installed Stagehand runtime; not a full server or TUI build",
+  "source_files": [
+    {
+      "path": "lib/browser_lane/browser_lane.ml",
+      "sha256": "833b7c02665a52fc08df4c48c1f764f6d8177dc62ba77179a3cd23e23f9cb1f6"
+    },
+    {
+      "path": "lib/browser_lane/browser_keyboard.ml",
+      "sha256": "9eded55d77913f88f6dd83bab2dd90cb60d529af0f85bbf6dea3ac3e5084a851"
+    },
+    {
+      "path": "lib/browser_lane/browser_keyboard.mli",
+      "sha256": "5b1c158fbf76cee0a402c6f494af023084c29563fb77c0ef0fa5cffa11d24f53"
+    },
+    {
+      "path": "lib/browser_lane/browser_pointer.ml",
+      "sha256": "51d7fca9a5d76822d4e9360c08bca92030682906df0f32d78b84038fd1d60753"
+    },
+    {
+      "path": "lib/browser_interaction.ml",
+      "sha256": "5285d4f7c32ec349222ab89077f2bacbe6c2acc1ee02499197bafc042f6d5314"
+    },
+    {
+      "path": "lib/browser_interaction.mli",
+      "sha256": "2eb871f1cc7f0c70860e076a3202e0be3f754c6699462ef2c8d690a023c210cd"
+    },
+    {
+      "path": "lib/browser_stagehand_wire.ml",
+      "sha256": "b2c8cb8fec6e31d040fdbd39881ddc1841bdb4b00a47ce18f9adba4afe9fc82c"
+    },
+    {
+      "path": "lib/browser_stagehand_wire.mli",
+      "sha256": "94a0dcb2a2c0b692ff72fcd5d1dbc00aac2040d19840eb914a867e716fc74f25"
+    },
+    {
+      "path": "lib/browser_stagehand_executor.ml",
+      "sha256": "aab14c18b8a59248950f2f2c2f587f7a4b92ea931ef6ecb003337f97a7c936b9"
+    },
+    {
+      "path": "lib/browser_stagehand_executor.mli",
+      "sha256": "c5d8e0abd9f659100f6c0d6c8a97a75f23801fb8b5d471a43f6207a20c7ff189"
+    },
+    {
+      "path": "lib/browser_scene_script.ml",
+      "sha256": "8f1ff2b389cb7ece615832d9f41b5b1398da8c37a81774487b9f3a6b88dd6ffb"
+    },
+    {
+      "path": "lib/browser_pointer_feedback.ml",
+      "sha256": "38bc1a74fb3212e1c501f28fc43609613a745f0b0b768fd168ae6daf79cc6d6a"
+    },
+    {
+      "path": "lib/browser_surface.ml",
+      "sha256": "c8ac24a406091be8dfb1d56564f88a9a3846d5a96503c209b9eb557ff29c6cc7"
+    },
+    {
+      "path": "lib/browser_surface.mli",
+      "sha256": "650032c666f7784d4e283ffdbeb6cf33b87c84be3f14fad519d594582b91c632"
+    },
+    {
+      "path": "lib/browser_selection.ml",
+      "sha256": "089b1d56e90cb82b0da36bc5770995e84ac9e847b14effb1d49ee174c84cc9ca"
+    }
+  ]
+}

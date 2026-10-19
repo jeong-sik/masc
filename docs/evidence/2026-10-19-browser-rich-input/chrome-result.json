@@ -1,0 +1,368 @@
+{
+  "runtimeMarker": {
+    "receiver": "function",
+    "marker": {
+      "protocolVersion": "2.0.0",
+      "serverInfo": {
+        "name": "stagehand",
+        "version": "1.0.2"
+      }
+    }
+  },
+  "actualCandidateExecutor": "standalone owned_stagehand_bridge using the source set in source-manifest.json",
+  "doubleClick": {
+    "count": 1,
+    "events": [
+      {
+        "type": "dblclick",
+        "trusted": true,
+        "target": "counter",
+        "key": null,
+        "meta": false,
+        "control": false
+      }
+    ]
+  },
+  "nativeUnicode": {
+    "value": "안녕 Pele 🦊",
+    "events": [
+      {
+        "type": "input",
+        "trusted": true,
+        "target": "editor",
+        "key": null,
+        "meta": null,
+        "control": null
+      },
+      {
+        "type": "input",
+        "trusted": true,
+        "target": "editor",
+        "key": null,
+        "meta": null,
+        "control": null
+      },
+      {
+        "type": "input",
+        "trusted": true,
+        "target": "editor",
+        "key": null,
+        "meta": null,
+        "control": null
+      },
+      {
+        "type": "input",
+        "trusted": true,
+        "target": "editor",
+        "key": null,
+        "meta": null,
+        "control": null
+      },
+      {
+        "type": "input",
+        "trusted": true,
+        "target": "editor",
+        "key": null,
+        "meta": null,
+        "control": null
+      },
+      {
+        "type": "input",
+        "trusted": true,
+        "target": "editor",
+        "key": null,
+        "meta": null,
+        "control": null
+      },
+      {
+        "type": "input",
+        "trusted": true,
+        "target": "editor",
+        "key": null,
+        "meta": null,
+        "control": null
+      },
+      {
+        "type": "input",
+        "trusted": true,
+        "target": "editor",
+        "key": null,
+        "meta": null,
+        "control": null
+      },
+      {
+        "type": "input",
+        "trusted": true,
+        "target": "editor",
+        "key": null,
+        "meta": null,
+        "control": null
+      }
+    ]
+  },
+  "modifierReplacement": {
+    "value": "바꿈",
+    "keys": [
+      {
+        "type": "keydown",
+        "trusted": true,
+        "target": "editor",
+        "key": "안",
+        "meta": false,
+        "control": false
+      },
+      {
+        "type": "keyup",
+        "trusted": true,
+        "target": "editor",
+        "key": "안",
+        "meta": false,
+        "control": false
+      },
+      {
+        "type": "keydown",
+        "trusted": true,
+        "target": "editor",
+        "key": "녕",
+        "meta": false,
+        "control": false
+      },
+      {
+        "type": "keyup",
+        "trusted": true,
+        "target": "editor",
+        "key": "녕",
+        "meta": false,
+        "control": false
+      },
+      {
+        "type": "keydown",
+        "trusted": true,
+        "target": "editor",
+        "key": " ",
+        "meta": false,
+        "control": false
+      },
+      {
+        "type": "keyup",
+        "trusted": true,
+        "target": "editor",
+        "key": " ",
+        "meta": false,
+        "control": false
+      },
+      {
+        "type": "keydown",
+        "trusted": true,
+        "target": "editor",
+        "key": "P",
+        "meta": false,
+        "control": false
+      },
+      {
+        "type": "keyup",
+        "trusted": true,
+        "target": "editor",
+        "key": "P",
+        "meta": false,
+        "control": false
+      },
+      {
+        "type": "keydown",
+        "trusted": true,
+        "target": "editor",
+        "key": "e",
+        "meta": false,
+        "control": false
+      },
+      {
+        "type": "keyup",
+        "trusted": true,
+        "target": "editor",
+        "key": "e",
+        "meta": false,
+        "control": false
+      },
+      {
+        "type": "keydown",
+        "trusted": true,
+        "target": "editor",
+        "key": "l",
+        "meta": false,
+        "control": false
+      },
+      {
+        "type": "keyup",
+        "trusted": true,
+        "target": "editor",
+        "key": "l",
+        "meta": false,
+        "control": false
+      },
+      {
+        "type": "keydown",
+        "trusted": true,
+        "target": "editor",
+        "key": "e",
+        "meta": false,
+        "control": false
+      },
+      {
+        "type": "keyup",
+        "trusted": true,
+        "target": "editor",
+        "key": "e",
+        "meta": false,
+        "control": false
+      },
+      {
+        "type": "keydown",
+        "trusted": true,
+        "target": "editor",
+        "key": " ",
+        "meta": false,
+        "control": false
+      },
+      {
+        "type": "keyup",
+        "trusted": true,
+        "target": "editor",
+        "key": " ",
+        "meta": false,
+        "control": false
+      },
+      {
+        "type": "keydown",
+        "trusted": true,
+        "target": "editor",
+        "key": "🦊",
+        "meta": false,
+        "control": false
+      },
+      {
+        "type": "keyup",
+        "trusted": true,
+        "target": "editor",
+        "key": "🦊",
+        "meta": false,
+        "control": false
+      },
+      {
+        "type": "keydown",
+        "trusted": true,
+        "target": "editor",
+        "key": "Meta",
+        "meta": true,
+        "control": false
+      },
+      {
+        "type": "keydown",
+        "trusted": true,
+        "target": "editor",
+        "key": "a",
+        "meta": true,
+        "control": false
+      },
+      {
+        "type": "keyup",
+        "trusted": true,
+        "target": "editor",
+        "key": "a",
+        "meta": true,
+        "control": false
+      },
+      {
+        "type": "keyup",
+        "trusted": true,
+        "target": "editor",
+        "key": "Meta",
+        "meta": true,
+        "control": false
+      },
+      {
+        "type": "keydown",
+        "trusted": true,
+        "target": "editor",
+        "key": "바",
+        "meta": false,
+        "control": false
+      },
+      {
+        "type": "keyup",
+        "trusted": true,
+        "target": "editor",
+        "key": "바",
+        "meta": false,
+        "control": false
+      },
+      {
+        "type": "keydown",
+        "trusted": true,
+        "target": "editor",
+        "key": "꿈",
+        "meta": false,
+        "control": false
+      },
+      {
+        "type": "keyup",
+        "trusted": true,
+        "target": "editor",
+        "key": "꿈",
+        "meta": false,
+        "control": false
+      }
+    ]
+  },
+  "staleDocument": {
+    "rejected": "scene_document_changed"
+  },
+  "staleDocumentCalls": [
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate"
+  ],
+  "calls": [
+    "stagehand.init",
+    "context.pages",
+    "context.active_page",
+    "page.evaluate",
+    "context.pages",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.click",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.click",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.type",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.key_press",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.type",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate"
+  ]
+}

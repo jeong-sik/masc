@@ -401,38 +401,16 @@ let execute_unlocked t = function
             Ok (`Assoc ["interactionFailure", `Assoc
               ["message", `String (error_message error); "effectStarted", `Bool false]])
           | Ok before ->
-          let move (point : Browser_lane.Pointer.point) = `Assoc [
-            "type",`String "pointerMove"; "duration",`Int 0; "origin",`String "viewport";
-            "x",`Int (int_of_float (point.x *. viewport.width));
-            "y",`Int (int_of_float (point.y *. viewport.height))] in
-          let button kind = `Assoc ["type",`String kind; "button",`Int 0] in
-          let moves = match action with
-            | Browser_lane.Drag {to_;_} -> [move to_]
+          let gesture = match action with
+            | Browser_lane.Hover_at _ -> Browser_lane.Pointer.Hover
+            | Browser_lane.Drag {to_;_} -> Browser_lane.Pointer.Drag {via=[];destination=to_;duration_ms=0}
+            | Browser_lane.Scroll_at {x;y;_} -> Browser_lane.Pointer.Wheel {x;y}
             | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
-            | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
-            | Browser_lane.Scroll_at _ | Browser_lane.Follow_link _ | Browser_lane.Click_node _
-            | Browser_lane.Fill_node _ -> [] in
-          let pointer_actions = `Assoc ["actions",`List [`Assoc [
-            "type",`String "pointer"; "id",`String "masc-browser-pointer";
-            "parameters",`Assoc ["pointerType",`String "mouse"];
-            "actions",`List (match action with
-              | Browser_lane.Hover_at _ -> [move point]
-              | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
-              | Browser_lane.Scroll _ | Browser_lane.Click_at _ | Browser_lane.Scroll_at _
-              | Browser_lane.Drag _ | Browser_lane.Follow_link _ | Browser_lane.Click_node _
-              | Browser_lane.Fill_node _ -> [move point;button "pointerDown"] @ moves @ [button "pointerUp"])]]] in
-          let actions = match action with
-            | Browser_lane.Scroll_at {x;y;_} -> `Assoc ["actions",`List [`Assoc [
-                "type",`String "wheel";"id",`String "masc-browser-wheel";
-                "actions",`List [`Assoc ["type",`String "scroll";"duration",`Int 0;
-                  "origin",`String "viewport";
-                  "x",`Int (int_of_float (point.x *. viewport.width));
-                  "y",`Int (int_of_float (point.y *. viewport.height));
-                  "deltaX",`Int x;"deltaY",`Int y]]]]]
-            | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
-            | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
-            | Browser_lane.Drag _ | Browser_lane.Follow_link _ | Browser_lane.Click_node _
-            | Browser_lane.Fill_node _ -> pointer_actions in
+            | Browser_lane.Scroll _ | Browser_lane.Click_at _ | Browser_lane.Follow_link _
+            | Browser_lane.Click_node _ | Browser_lane.Fill_node _ -> Browser_lane.Pointer.Click in
+          let actions = `Assoc ["actions", Browser_lane.Pointer.input_sources
+            ~pointer_id:"masc-browser-pointer" ~wheel_id:"masc-browser-wheel"
+            ~viewport ~start:point gesture] in
           (* Release even if transport cancellation interrupts a pressed gesture.
              The enclosing session lock remains held throughout cleanup. *)
           let applied, released = match action with

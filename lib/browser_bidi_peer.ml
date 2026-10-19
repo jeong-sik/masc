@@ -190,21 +190,13 @@ let pointer t context args ~(viewport : Browser_lane.Pointer.viewport) ~start mo
   let before result = Result.map_error (fun e -> Before_effect e) result in
   let unknown result = Result.map_error (fun e -> Outcome_unknown e) result in
   let* observed = before (script t context Browser_interaction.pointer_guard_script args) in
-  let coords (p : Browser_lane.Pointer.point) = ["x",`Int (int_of_float (p.x *. viewport.width));"y",`Int (int_of_float (p.y *. viewport.height))] in
-  let move p = obj (["type",str "pointerMove";"origin",str "viewport"] @ coords p) in
-  let button name = obj ["type",str name;"button",`Int 0] in
-  let source = match motion with
-    | Hover_pointer ->
-      obj ["type",str "pointer";"id",str "masc-pointer";"parameters",obj ["pointerType",str "mouse"];
-        "actions",`List [move start]]
-    | Wheel_pointer {x;y} ->
-      obj ["type",str "wheel";"id",str "masc-wheel";"actions",`List [obj
-        (["type",str "scroll";"deltaX",`Int x;"deltaY",`Int y;"origin",str "viewport"] @ coords start)]]
-    | Click_pointer | Drag_pointer _ ->
-      let middle=match motion with Drag_pointer finish->[move finish]
-        | Hover_pointer | Click_pointer | Wheel_pointer _->[] in
-      obj ["type",str "pointer";"id",str "masc-pointer";"parameters",obj ["pointerType",str "mouse"];
-        "actions",`List ([move start;button "pointerDown"] @ middle @ [button "pointerUp"])] in
+  let gesture = match motion with
+    | Hover_pointer -> Browser_lane.Pointer.Hover
+    | Click_pointer -> Browser_lane.Pointer.Click
+    | Drag_pointer destination -> Browser_lane.Pointer.Drag {via=[];destination;duration_ms=0}
+    | Wheel_pointer {x;y} -> Browser_lane.Pointer.Wheel {x;y} in
+  let sources = Browser_lane.Pointer.input_sources ~pointer_id:"masc-pointer"
+    ~wheel_id:"masc-wheel" ~viewport ~start gesture in
   (* No replay after dispatch. Release is itself a protocol action and remains
      bounded by the transport deadline. Protected release cleanup may outlast
      the host command deadline by that bound; failure ends the client. *)
@@ -214,7 +206,7 @@ let pointer t context args ~(viewport : Browser_lane.Pointer.viewport) ~start mo
     | Hover_pointer | Wheel_pointer _ -> ()
     | Click_pointer | Drag_pointer _ -> Eio.Switch.on_release sw (fun ()->
       released:=Result.map (fun _->()) (command t "input.releaseActions" (obj ["context",str context]))));
-    command t "input.performActions" (obj ["context",str context;"actions",`List [source]])) in
+    command t "input.performActions" (obj ["context",str context;"actions",sources])) in
   let* _=unknown applied in
   let* ()=unknown !released in
   let* after = unknown (script t context Browser_interaction.pointer_receipt_script (obj [])) in

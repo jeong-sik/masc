@@ -263,7 +263,8 @@ let test_upstream_child_arguments_bind_exact_declared_plan ~children_first () =
     List.iter (fun node -> check bool "bound child layering retains its own new operands" true
       (List.exists (fun original -> original == node) (Plan.nodes bound))) bound_layers;
     let query = List.find (fun (node : Plan.node) -> node.tool_name = "keeper_memory_search") (Plan.nodes bound) in
-    let resolved = Plan.Json_template.resolve ~lookup:(fun _ -> None) query.input |> require "bound query" in
+    let resolved = Plan.resolve_input bound ~run_id:(Plan.Run_id.fresh ()) ~node_id:query.id
+        ~lookup:(fun _ -> None) |> require "bound query through its reconstructed plan contract" in
     check bool "declared parameter reaches the correct leaf" true (Yojson.Safe.equal resolved input);
     List.iter (fun input -> match Plan.bind_child_plan ~input child with
       | Error (Plan.Child_arguments_rejected _) -> ()

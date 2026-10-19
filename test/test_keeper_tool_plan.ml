@@ -346,7 +346,18 @@ let test_output_schema_and_consumer_input_are_enforced () =
        (Plan.Input_template_resolution_failed
          { error = Plan.Json_template.Missing_output missing; _ })
      when Plan.Node_id.equal missing lane_id -> ()
-   | Error _ | Ok _ -> fail "validated output crossed a plan boundary")
+   | Error _ | Ok _ -> fail "validated output crossed a plan boundary");
+  let other_output = Plan.validate_output other_plan ~run_id ~node_id:lane_id lane_value
+    |> function Ok output -> output | Error _ -> fail "reconstructed plan rejected its own producer" in
+  let own_lookup id = if Plan.Node_id.equal id lane_id then Some other_output else None in
+  (match Plan.resolve_input other_plan ~run_id ~node_id:(node_id "grep") ~lookup:own_lookup with
+   | Ok input -> check bool "reconstructed plan resumes with its own validated producer" true
+       (Yojson.Safe.equal input (`Assoc ["pattern",`String "docker"]))
+   | Error _ -> fail "reconstructed plan could not consume its own output after rejecting the foreign one");
+  (match Plan.resolve_input plan ~run_id ~node_id:(node_id "grep") ~lookup with
+   | Ok input -> check bool "original plan remains usable after another plan resolves" true
+       (Yojson.Safe.equal input (`Assoc ["pattern",`String "docker"]))
+   | Error _ -> fail "reconstructed plan displaced the original plan's producer binding")
 ;;
 
 let test_read_output_feeds_grep_path_input () =

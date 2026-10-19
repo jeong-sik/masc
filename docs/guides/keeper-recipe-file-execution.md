@@ -177,6 +177,13 @@ its exact returned `sha256`. Preparing a draft performs no node effect.
 
 ## Before/After evidence
 
+The abstract plan also binds each canonical node to its original resolved
+contract once. Construction validators and later descriptor/input/output/child
+export queries reuse that plan-owned index. Parameter binding and reconstruction
+produce a fresh index and plan identity; previous plan/run outputs remain
+ineligible. See the [plan source comparison](../audits/2026-10-19-composition-plan-contract-index.md)
+for validation/error-order invariants, early-refusal costs and evidence limits.
+
 File preparation retains the original plan's leaves, member contracts and
 preparation predecessor lists in private immutable ID indexes. Lookup still
 requires the original physical member; aggregate consumption also checks the

@@ -23,6 +23,7 @@ if len(sys.argv) > 2 and sys.argv[1] == '--binary':
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = importlib.util.spec_from_file_location('runtime_setup', ROOT / 'scripts/install-runtime-setup.py')
+assert MODULE is not None and MODULE.loader is not None
 SETUP = importlib.util.module_from_spec(MODULE)
 MODULE.loader.exec_module(SETUP)
 
@@ -135,6 +136,7 @@ class PresentationPrerequisites(unittest.TestCase):
             env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ.get('PATH', ''))
             base = Path(directory) / 'workspace'
             base.mkdir()
+            assert BINARY is not None
             args = [BINARY, 'prerequisite-actions', 'presentation-tools', '--base-path', str(base)]
             catalog = subprocess.run(args, env=env, capture_output=True, text=True, check=True)
             actions = json.loads(catalog.stdout)['actions']
@@ -160,6 +162,7 @@ class PresentationPrerequisites(unittest.TestCase):
             renderer.chmod(0o755)
             env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ.get('PATH', ''))
             before = list(base.iterdir())
+            assert BINARY is not None
             result = subprocess.run([BINARY, 'prerequisite-actions', 'presentation-tools', '--base-path', str(base)],
                                     env=env, capture_output=True, text=True, check=True)
             self.assertEqual(list(base.iterdir()), before, 'detection must not install or create a workspace environment')
@@ -395,10 +398,12 @@ class RuntimeSetupAdapter(unittest.TestCase):
             payload = json.loads(path.read_text())
             self.requests.append((path, payload))
         if command == 'runtime-setup-render':
+            assert payload is not None
             value = dict(runtime_id='native.' + payload['model'], runtime_toml='native runtime')
         elif command == 'runtime-setup-inventory':
             value = dict(runtimes=[dict(id='original.model')], setup_revision=self.revision)
         elif command == 'runtime-setup-batch':
+            assert payload is not None
             value = dict(runtime_id=payload['default_runtime_id'], runtime_ids=payload['runtime_ids'],
                          configured=True, commit=dict(durability='durable', warnings=[]), validation='passed', readiness='verified' if payload['verify'] else 'not_probed')
         else:
@@ -675,6 +680,7 @@ class RuntimeSetupAdapter(unittest.TestCase):
         finally:
             process.kill()
             process.wait()
+            assert process.stdout is not None
             process.stdout.close()
             os.close(master)
             os.close(slave)
@@ -914,6 +920,7 @@ for line in sys.stdin:
     print(json.dumps({'id':request['id'],'result':result}), flush=True)
 ''')
             client.chmod(0o700)
+            assert BINARY is not None
             result = subprocess.run([BINARY, 'runtime-codex-models', '--cli-path', str(client), '--account-home', str(original)],
                 env=dict(os.environ, HOME=str(home), CODEX_HOME=str(ambient)), capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -1489,6 +1496,7 @@ class MultipleSelection(unittest.TestCase):
             if process.poll() is None:
                 process.kill()
                 process.wait()
+            assert process.stdout is not None
             process.stdout.close()
             os.close(master)
             os.close(slave)
@@ -1542,6 +1550,7 @@ class MultipleSelection(unittest.TestCase):
             if process.poll() is None:
                 process.kill()
                 process.wait()
+            assert process.stdout is not None
             process.stdout.close()
             os.close(master)
             os.close(slave)
@@ -1740,6 +1749,7 @@ class WorkspaceFromCurrentDirectory(unittest.TestCase):
     """
 
     def run_masc(self, home, cwd, *argv):
+        assert BINARY is not None
         environment = dict(HOME=str(home), PATH=os.environ.get('PATH', '/usr/bin:/bin'),
                            XDG_CONFIG_HOME=str(home / 'config'))
         return subprocess.run([BINARY, *argv], cwd=cwd, env=environment,
@@ -1788,6 +1798,7 @@ class WorkspaceFromCurrentDirectory(unittest.TestCase):
 @unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')
 class InstalledModelCatalog(unittest.TestCase):
     def test_astra_client_and_provider_contexts_resolve_their_own_exact_rows(self):
+        assert BINARY is not None
         result=subprocess.run([BINARY,'runtime-model-list','codex'],check=True,capture_output=True,text=True)
         models=json.loads(result.stdout)['models']
         self.assertNotIn('gpt-5.6-luna', {row['id'] for row in models},
@@ -1817,6 +1828,7 @@ class InstalledModelCatalog(unittest.TestCase):
         self.assertEqual(unknown.stdout,'')
 
     def test_claude_list_includes_sonnet5_5_and_selects_without_context_question(self):
+        assert BINARY is not None
         result=subprocess.run([BINARY,'runtime-model-list','claude-code'],check=True,capture_output=True,text=True)
         catalog=json.loads(result.stdout)
         self.assertIs(catalog['account_availability_verified'],False)
@@ -1833,6 +1845,7 @@ class InstalledModelCatalog(unittest.TestCase):
         self.assertNotIn('Documented/configured context limit',terminal.getvalue())
 
     def test_provider_mode_lists_curated_rows_for_a_named_catalog_provider(self):
+        assert BINARY is not None
         result=subprocess.run([BINARY,'runtime-model-list','--provider','openrouter'],check=True,capture_output=True,text=True)
         catalog=json.loads(result.stdout)
         self.assertIs(catalog['account_availability_verified'],False)
@@ -1844,6 +1857,7 @@ class InstalledModelCatalog(unittest.TestCase):
         self.assertIs(flash['supports_streaming'],True)
 
     def test_provider_mode_rejects_unknown_ids_and_bare_invocations(self):
+        assert BINARY is not None
         unknown=subprocess.run([BINARY,'runtime-model-list','--provider','not-a-provider'],capture_output=True,text=True)
         self.assertNotEqual(unknown.returncode,0)
         self.assertEqual(unknown.stdout,'')
@@ -2140,8 +2154,8 @@ base_url = "https://voice.fixture.invalid/v1"
                 self.end_headers()
                 self.wfile.write(body)
 
-            def log_message(self, *_args):
-                pass
+            def log_message(self, format, *_args):
+                del format
 
         server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -2153,6 +2167,7 @@ base_url = "https://voice.fixture.invalid/v1"
             server.server_close()
 
     def verify_voice(self, voice):
+        assert BINARY is not None
         with self.workspace(voice) as (base, runtime):
             env = {key: value for key, value in os.environ.items()
                    if not key.startswith(('MASC_', 'AGENT_CORE_'))}
@@ -2267,6 +2282,7 @@ base_url = "https://voice.fixture.invalid/v1"
         # answer says that, rather than naming a JSON file nobody made.
         # On a host without `say` the endpoint refuses; the configuration is
         # still found, which is what this asks.
+        assert BINARY is not None
         with self.workspace() as (base, runtime):
             result = self.configure(base, '--voice', 'Yuna')
             self.assertEqual(result.returncode, 0, result.stderr)

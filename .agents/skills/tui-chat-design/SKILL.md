@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인계와 늦은 터미널 응답, 비동기 조회·설정 저장·긴 질문의 요약과 전체 읽기·Ask 답변과 재조회를 바꿀 때 쓴다. Keeper·Work·로그·Board·Runtime·Overview의 원본 요청·입력·revision·소유권, 준비 상세·현재 턴·이력의 workspace 검증과 캐시 영수증, 공유 조회와 부분 실패, worker 관측·UI 반영·paint 증거를 구분한다."
+description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인계와 늦은 터미널 응답, 비동기 조회·설정 저장·긴 질문의 요약과 전체 읽기·Ask 답변과 재조회를 바꿀 때 쓴다. Keeper·Work·로그·Board·Runtime·Overview·Tools의 원본 요청·입력·revision·소유권, 준비 상세·현재 턴·이력·Tools 구성 조회의 workspace 검증과 캐시 영수증, 공유 조회와 부분 실패, worker 관측·UI 반영·paint 증거를 구분한다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -85,6 +85,24 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인�
   조회 중/조회 완료는 Task 진행·효과·Goal 성공이 아니다. 상태/원래 이벤트 경계를 검사하며
   문구·배치·행 순서·PTY 검사를 추가하지 않는다. Before/After는
   `docs/audits/2026-10-19-tui-detail-history-ownership.md`를 따른다.
+
+## Tools 구성 조회
+
+- inventory·Skills catalog·async-request 관측은 서로의 결과를 입력으로 받지 않는다.
+  `launch_tools_load`의 원래 dispatch에서 각각 `launch_workspace_json_read`로 시작한다.
+  inventory의 완료 callback에서 형제 조회를 새로 시작하거나 별도 identity GET을 붙이지 않는다.
+  세 GET 모두 원래 workspace의 expected root와 서버 receipt·cache 경계를 사용하며, 세 응답을
+  동일 시점의 원자적 snapshot으로 부르지 않는다. 자동 재조회 공유·명시 재조회 supersession·
+  선택한 Keeper·generation·workspace authority·read epoch의 적용 조건을 유지한다.
+- 세 pending 구성은 기존 UI 처리에서 각각 정리한다. 한 구성의 지연·실패가 형제의 결과를
+  덮거나 막지 않는다. 실패 중 마지막 정상 관측을 유지하고 warming·미초기화·관측 불가를
+  정상 빈 값으로 바꾸지 않는다. switch 부재도 공유 launcher의 각 구성 실패로 정리한다.
+- 세 typed decoder의 순수 JSON 해석만 기존 공용 CPU 경로에 넘긴다. HTTP·인증·cache·
+  pending·선택·UI 상태를 worker로 옮기지 않는다. `tools.inventory.decode_wait`·
+  `skills.catalog.decode_wait`·`tools.async_observation.decode_wait`는 pool 대기와 반환도
+  포함하며 순수 CPU 시간·paint·Task 진척이 아니다. 명시적 정상 경로의 GET 6→3은
+  실제 속도 50% 개선을 뜻하지 않는다. 비교와 미실행 시나리오는
+  `docs/audits/2026-10-19-tui-tools-composed-workspace-reads.md`를 따른다.
 
 ## 에디터 준비 조회
 

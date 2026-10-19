@@ -3441,7 +3441,6 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
    refresh and selection changes supersede it, retaining the generation guard. *)
 let launch_tools_load ?(force = true) state ~mailbox =
   if server_authority_ready state then begin
-  let authority = state.workspace_authority in
   let keeper =
     Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state)
   in
@@ -3460,27 +3459,20 @@ let launch_tools_load ?(force = true) state ~mailbox =
       };
     let host = server_peer_host in
     let port = state.port in
-    (* The async-request observation is read after the inventory, as it
-       always was; the inventory's answer launches it. Both go through the
-       shared launch, so a missing or finished switch still answers each part
-       and the pending read settles instead of staying "loading". *)
-    let launch_async_observation () =
-      launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-        ~deliver:(fun result -> Tools_async_observation_loaded (generation, result))
-        (fun () -> Masc_tui_http.fetch_async_request_observation ~host ~port)
-    in
-    (* The skills catalog (usage + flows) is a separate read and must not
-       delay the tool list: a slow catalog costs its own section, not the
-       screen. *)
-    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    (* These projections have no result dependency. Start each in this
+       dispatch with its original workspace binding and completion envelope;
+       a slow or failed inventory must not hold back async observation.
+       Each named pending part still receives its own result, including when
+       the shared launch cannot run, and settles independently in the UI. *)
+    launch_workspace_json_read state ~mailbox
       ~deliver:(fun result -> Skills_catalog_loaded (generation,
         Masc_tui_async_read.attribute Masc_tui_async_read.Skills_catalog result))
       (fun () -> Masc_tui_loader.load_skills_catalog ~host ~port);
-    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-      ~deliver:(fun result ->
-        if authority = state.workspace_authority
-           && generation = state.tools_request_generation then launch_async_observation ();
-        Tools_loaded (generation, keeper, result))
+    launch_workspace_json_read state ~mailbox
+      ~deliver:(fun result -> Tools_async_observation_loaded (generation, result))
+      (fun () -> Masc_tui_http.fetch_async_request_observation ~host ~port);
+    launch_workspace_json_read state ~mailbox
+      ~deliver:(fun result -> Tools_loaded (generation, keeper, result))
       (fun () -> Masc_tui_loader.load_tools ~host ~port ?keeper ())
   end
   end

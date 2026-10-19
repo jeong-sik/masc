@@ -34,6 +34,11 @@ type record_outcome =
 type decode_error =
   | Expected_object of { field : string }
   | Missing_string of { field : string }
+  | Missing_string_in_event_row of
+      { field : string
+      ; row_in_batch : int
+      ; row_sha256 : string
+      }
   | Duplicate_field of
       { object_name : string
       ; field : string
@@ -118,7 +123,7 @@ type store_error =
 
 let decode_error_code = function
   | Expected_object _ -> "expected_object"
-  | Missing_string _ -> "missing_string"
+  | Missing_string _ | Missing_string_in_event_row _ -> "missing_string"
   | Duplicate_field _ -> "duplicate_field"
   | Unexpected_field _ -> "unexpected_field"
   | Unsupported_schema _ -> "unsupported_schema"
@@ -203,6 +208,12 @@ let store_error_to_string = function
   (* Keep the category in the human string too: a write reads the session's
      rows before it appends, so one undecodable row fails every later write
      for the session — the code is what identifies the poison row's shape. *)
+  | Decode_failed (Missing_string { field }) ->
+    Printf.sprintf "decode failed: missing_string field=%s" field
+  | Decode_failed (Missing_string_in_event_row { field; row_in_batch; row_sha256 }) ->
+    Printf.sprintf
+      "decode failed: missing_string field=%s event_row_in_batch=%d row_sha256=%s"
+      field row_in_batch row_sha256
   | Decode_failed error -> "decode failed: " ^ decode_error_code error
   | Invocation_id_collision tool_use_id ->
     "Skill invocation id collision: " ^ tool_use_id
@@ -1950,14 +1961,24 @@ let parse_row row =
 
 let apply_event_rows ~expected_trace_id ledger rows =
   let builder = builder_of_ledger ledger in
-  let* () =
+  let* _ =
     List.fold_left
       (fun result row ->
-         let* () = result in
+         let* row_in_batch = result in
          let* json = parse_row row in
-         let* event = decode_event ~expected_trace_id json in
-         apply_event builder event)
-      (Ok ())
+         let* event =
+           decode_event ~expected_trace_id json
+           |> Result.map_error (function
+             | Missing_string { field } ->
+               Missing_string_in_event_row
+                 { field; row_in_batch
+                 ; row_sha256 = Digestif.SHA256.(digest_string row |> to_hex)
+                 }
+             | error -> error)
+         in
+         let* () = apply_event builder event in
+         Ok (row_in_batch + 1))
+      (Ok 1)
       rows
   in
   Ok (ledger_of_builder builder)

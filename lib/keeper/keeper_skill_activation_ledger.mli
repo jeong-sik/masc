@@ -167,6 +167,11 @@ type record_outcome =
 type decode_error =
   | Expected_object of { field : string }
   | Missing_string of { field : string }
+  | Missing_string_in_event_row of
+      { field : string
+      ; row_in_batch : int
+      ; row_sha256 : string
+      }
   | Duplicate_field of
       { object_name : string
       ; field : string

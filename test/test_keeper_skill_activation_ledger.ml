@@ -376,6 +376,44 @@ let activation_row value =
         ])
 ;;
 
+let test_legacy_composition_reports_exact_row_without_appending () =
+  with_session @@ fun config trace_id session_dir ->
+  let original = activation ~skill_tool_use_id:"legacy-composition"
+      ~invocation:(Ledger.Composition_invocation
+        { origin = Ledger.Session_composition; tool_name = "keeper_compose_review"
+        ; execution_id = Ids.Execution_id.of_string "physical-execution" }) () in
+  let legacy = match Ledger.activation_to_yojson original with
+    | `Assoc fields ->
+      let invocation = match List.assoc "invocation" fields with
+        | `Assoc fields -> fields | _ -> fail "invocation object" in
+      `Assoc (("invocation", `Assoc (List.remove_assoc "execution_id" invocation))
+        :: List.remove_assoc "invocation" fields)
+    | _ -> fail "activation object" in
+  let row = Yojson.Safe.to_string
+      (`Assoc ["kind", `String "activation_recorded"; "activation", legacy]) in
+  let file = events_file session_dir in
+  let bytes = header_row config trace_id ^ "\n"
+      ^ activation_row (activation ()) ^ "\n" ^ row ^ "\n" in
+  write_file file bytes;
+  let check_error = function
+    | Error (Ledger.Decode_failed
+        (Ledger.Missing_string_in_event_row { field; row_in_batch; row_sha256 }) as error) ->
+      check string "the actual missing field is retained" "execution_id" field;
+      check int "second event in this replay batch" 2 row_in_batch;
+      check string "hash identifies the unchanged original JSON row"
+        Digestif.SHA256.(digest_string row |> to_hex) row_sha256;
+      check string "stable failure class" "decode_failed.missing_string"
+        (Ledger.store_error_code error)
+    | Error error -> fail (Ledger.store_error_to_string error)
+    | Ok _ -> fail "legacy composition was accepted without physical execution identity" in
+  check_error (Ledger.load ~config ~trace_id);
+  (* A later instruction is not appended past evidence the reader cannot decode. *)
+  (match Ledger.record ~config ~trace_id (activation ~revision:'b' ()) with
+   | Error error -> check_error (Error error)
+   | Ok _ -> fail "later instruction silently skipped the undecodable composition");
+  check string "diagnosis neither skips nor rewrites original evidence" bytes (read_file file)
+;;
+
 (* A crash while appending leaves the last row without its newline. A reader
    without the lock leaves that row out; the first locked read in a process
    cuts it off the file before replaying, and writing carries on after it. *)
@@ -1334,7 +1372,7 @@ let test_receipt_projection_revision_binds_full_unicode_id () =
    decode shape that poisoned it. *)
 let test_store_error_decode_detail_is_kept () =
   check string "decode category is part of the message"
-    "decode failed: missing_string"
+    "decode failed: missing_string field=skill_name"
     (Ledger.store_error_to_string
        (Ledger.Decode_failed (Ledger.Missing_string { field = "skill_name" })))
 ;;
@@ -1437,7 +1475,9 @@ let () =
   run
     "keeper skill activation ledger"
     [ ( "session ledger"
-      , [ test_case "nested dispatch identities use exact parent result delivery" `Quick
+      , [ test_case "legacy composition identifies its row and refuses later append" `Quick
+            test_legacy_composition_reports_exact_row_without_appending
+        ; test_case "nested dispatch identities use exact parent result delivery" `Quick
             test_nested_dispatch_identity_and_parent_delivery_survive_reload
         ; test_case "nested provenance rejects tampering and invocation rebinding" `Quick
             test_nested_scope_integrity_and_invocation_conflict

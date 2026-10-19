@@ -452,6 +452,22 @@ test('a cropped MIDI repeat carries exact absolute rational starts through the n
 }))
 
 
+test('captured placement display seconds equal the native reading of their reduced exact start at fractional tempos',async()=>fixture(async({root,input})=>{
+ const {projectCapturedPlacement,manualCapturePlacement}=await import('../capture-placement.mjs')
+ // UmpRegions.swift CaptureStartNanoseconds.rational(displaySeconds:) refuses any other value.
+ const native=({numerator,denominator})=>{const n=BigInt(numerator),d=BigInt(denominator)*1_000_000_000n;return Number(n/d)+Number(n%d)/Number(d)}
+ const project=(await importArrangementCapture(newArrangement(),input,{projectPath:join(root,'song.json')})).project,asset=project.assets[0]
+ for(let hundredths=6033;hundredths<24000;hundredths+=71)for(const position of [240,961])for(const offset of ['0','-0.5','450']){
+  const parts=projectCapturedPlacement({...project,tempo:hundredths/100},asset,{position,offset:'0',extent:'4800000',repeat:3,placement:manualCapturePlacement(offset)})
+  for(const part of parts)assert.equal(part.startSeconds,native(part.startNanoseconds),`tempo ${hundredths/100}, tick ${position}, offset ${offset}`)
+ }
+ let editor=arrangementEditor((await importArrangementCapture(newArrangement({tempo:133.33}),input,{projectPath:join(root,'song.json')})).project)
+ for(const line of ['capture-region asset-1 0.25 0 .2','split-take','select region-2','capture-offset 0'])editor=arrangementCommand(editor,line).editor
+ const plan=JSON.parse(await readFile((await prepareArrangementCaptureRegions(editor.project,{sourceRoot:root,directory:root,midiOutput:'42'})).path,'utf8'))
+ const clip=plan.umpRegions.regions[0];assert.equal(clip.startSeconds,native(clip.startNanoseconds))
+}))
+
+
 test('a long decimal-tempo placement horizon covers its exact native final deadline',async()=>fixture(async({root,input})=>{
  let editor=arrangementEditor((await importArrangementCapture(newArrangement({tempo:120.1}),input,{projectPath:join(root,'song.json')})).project)
  for(const line of ['capture-region asset-1 2402 0 .2','split-take','select region-2','capture-offset -50'])editor=arrangementCommand(editor,line).editor

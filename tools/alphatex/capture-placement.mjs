@@ -57,7 +57,9 @@ export function projectCapturedPlacement(project, asset, clip) {
   const emit = (offset, extent, repeat, delta) => {
     const source = captureRegionTime(asset, { offset: String(offset), extent: String(extent) })
     const absoluteN = startN * d + delta * n * startD, absoluteD = startD * d
-    const startSeconds = seconds(absoluteN, absoluteD), startNanoseconds = fraction(absoluteN, absoluteD)
+    // Native re-derives the display from the reduced fraction and requires equality.
+    const startNanoseconds = fraction(absoluteN, absoluteD)
+    const startSeconds = seconds(BigInt(startNanoseconds.numerator), BigInt(startNanoseconds.denominator))
     return { ...clip, offset: String(offset), extent: String(extent), repeat: Number(repeat), ...source, startSeconds, startNanoseconds,
       endSeconds: deadlineSeconds(absoluteN + extent * repeat * n * startD, absoluteD) }
   }

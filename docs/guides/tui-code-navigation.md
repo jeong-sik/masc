@@ -36,4 +36,5 @@ Enter to open the selected result. Esc keeps the original reading. Results
 outside the workspace show their address without requesting a workspace file.
 An answer arriving after another key, paste or mouse action cannot take over
 that newer input. A different source reading, question or workspace retires
-the original choices.
+the original choices. A cancelled question or closed picker stays cancelled
+when the workspace reconnects.

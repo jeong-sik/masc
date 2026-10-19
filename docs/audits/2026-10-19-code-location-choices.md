@@ -38,6 +38,22 @@ source and authority, cancelled/copied/invented offers and outside addresses.
 Earlier location scenarios now explicitly consume staged answers. Checks
 inspect requests, saved state and decisions, not screen wording or row order.
 
+Independent review found two defects in the initial candidate. First, three
+existing finder matches omitted the new location-palette constructor. The main
+idle path opens that palette immediately before consuming finder results, so
+the omission could fail on the next step. Those matches now refuse location
+palettes explicitly. A state case follows that actual idle ordering and checks
+that late catalog and finder success/failure callbacks cannot replace choices.
+
+Second, cancelling a query left its recovery key available to workspace
+reconfirmation. Explicit input cancellation now clears that key as well as its
+unopened offer. An open, current picker retains its ticket while filtering;
+closing it clears the query key. Ordinary file Refresh recovery remains
+available. State cases cover cancellation before/after receipt, close followed
+by recovery, and an uncancelled question resuming with a fresh source ticket.
+The recovery fixture checks request/state decisions; it does not execute a
+live server-disconnect cycle.
+
 Changed OCaml files parse and whitespace checks pass. No local Dune build was
 run. The new cases, native compilation and actual candidate behavior require
 their own evidence. Predecessor source 731c791 and its native run are not

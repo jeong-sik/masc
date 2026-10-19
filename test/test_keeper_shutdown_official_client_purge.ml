@@ -143,7 +143,8 @@ let test_purge_removes_muse_identity_directory () =
 
 (* A home whose derivation inputs are gone (the runtime configuration no
    longer assigns this Keeper) cannot be named by the purge either. The purge
-   stays complete, and the entry is omitted rather than failing. *)
+   stays complete, the entry is omitted rather than failing, and the resolver
+   records a typed warning explaining why the home could not be derived. *)
 let test_purge_omits_home_it_cannot_derive () =
   with_base_path @@ fun config base_path ->
   let oauth_source = Filename.concat base_path "operator-oauth.json" in
@@ -151,12 +152,116 @@ let test_purge_omits_home_it_cannot_derive () =
   write_runtime_toml
     base_path
     (runtime_toml ~oauth_source ~account_home ~assignment:"");
+  let artifacts, warnings =
+    Server_dashboard_http_delete_actions.For_testing
+    .resolve_official_client_purge_artifacts
+      config
+      ~keeper_name
+  in
+  check int "no official-client artifacts derived" 0 (List.length artifacts);
+  (match warnings with
+   | [ Server_dashboard_http_delete_actions.For_testing.Keeper_not_assigned ] -> ()
+   | other ->
+     failf
+       "expected [Keeper_not_assigned], got [%s]"
+       (String.concat
+          "; "
+          (List.map
+             Server_dashboard_http_delete_actions.For_testing
+             .official_client_purge_warning_to_string
+             other)));
   let home, lock = antigravity_paths base_path ~oauth_source in
   plant_file (Filename.concat home "generation/token") "managed token copy";
   plant_file lock "";
   purge config;
   check bool "an underivable home is left in place" true (Sys.file_exists home);
   check bool "an underivable lock is left in place" true (Sys.file_exists lock)
+;;
+
+let test_purge_removes_non_first_lane_candidate_homes () =
+  with_base_path @@ fun config base_path ->
+  let oauth_source = Filename.concat base_path "operator-oauth.json" in
+  plant_file oauth_source {|{"access_token":"fixture"}|};
+  let account_home = Filename.concat base_path "muse-account" in
+  let toml =
+    Printf.sprintf
+      {|
+[runtime]
+default = "fallback_lane"
+
+[providers.codex]
+protocol = "codex-app-server"
+command = "/fixture/codex"
+is-non-interactive = true
+
+[models.gpt5]
+api-name = "gpt-5-codex"
+max-context = 128000
+
+[codex.gpt5]
+
+[providers.agy]
+protocol = "antigravity-cli"
+command = "/fixture/agy"
+is-non-interactive = true
+timeout-s = 10.0
+credentials = { type = "file", path = "%s" }
+
+[models.gemini]
+api-name = "gemini-fixture"
+max-context = 128000
+
+[agy.gemini]
+
+[providers.muse]
+protocol = "muse-serve"
+command = "/fixture/muse"
+account-home = "%s"
+is-non-interactive = true
+
+[models.muse-spark]
+api-name = "muse-spark-1.3"
+max-context = 100000
+
+[muse.muse-spark]
+
+[runtime.lanes.fallback_lane]
+candidates = ["codex.gpt5", "agy.gemini", "muse.muse-spark"]
+
+[runtime.assignments]
+%s = "fallback_lane"
+|}
+      oauth_source
+      account_home
+      keeper_name
+  in
+  write_runtime_toml base_path toml;
+  let home, lock = antigravity_paths base_path ~oauth_source in
+  plant_file
+    (Filename.concat home ".gemini/antigravity-cli/antigravity-oauth-token")
+    "managed token copy";
+  plant_file lock "";
+  let runtime_root = Common.masc_dir_from_base_path ~base_path in
+  let identity_dir =
+    Runtime_muse_home.keeper_identity_dir ~runtime_root ~keeper_name ~account_home
+  in
+  plant_file (Filename.concat identity_dir "workspace/native-state") "fixture";
+  let artifacts, warnings =
+    Server_dashboard_http_delete_actions.For_testing
+    .resolve_official_client_purge_artifacts
+      config
+      ~keeper_name
+  in
+  check int "three official-client artifacts derived from non-first candidates" 3
+    (List.length artifacts);
+  check int "no warnings on valid multi-candidate lane" 0 (List.length warnings);
+  purge config;
+  check bool "purge removes non-first Antigravity owner HOME" false
+    (Sys.file_exists home);
+  check bool "purge removes non-first Antigravity prepare lock" false
+    (Sys.file_exists lock);
+  check bool "purge removes non-first Muse identity directory" false
+    (Sys.file_exists identity_dir)
 ;;
 
 let () =
@@ -168,6 +273,10 @@ let () =
             test_purge_removes_muse_identity_directory
         ; test_case "purge omits a home it can no longer derive" `Quick
             test_purge_omits_home_it_cannot_derive
+        ; test_case
+            "purge removes official-client homes of non-first lane candidates"
+            `Quick
+            test_purge_removes_non_first_lane_candidate_homes
         ] )
     ]
 ;;

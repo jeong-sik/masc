@@ -488,77 +488,178 @@ let keeper_artifact_path config keeper_name artifact =
   | Agent_artifact_bundle _ -> None
 ;;
 
+type official_client_purge_warning =
+  | Runtime_toml_unreadable of
+      { path : string
+      ; detail : string
+      }
+  | Keeper_not_assigned
+  | Empty_lane_candidates of { lane_id : string }
+  | Candidate_binding_missing of { runtime_id : string }
+  | Candidate_provider_missing of
+      { runtime_id : string
+      ; provider_id : string
+      }
+  | Antigravity_credentials_not_file of
+      { runtime_id : string
+      ; provider_id : string
+      }
+  | Muse_account_home_missing of
+      { runtime_id : string
+      ; provider_id : string
+      }
+
+let official_client_purge_warning_to_string = function
+  | Runtime_toml_unreadable { path; detail } ->
+    Printf.sprintf "runtime.toml unreadable (%s): %s" path detail
+  | Keeper_not_assigned -> "keeper has no runtime assignment"
+  | Empty_lane_candidates { lane_id } ->
+    Printf.sprintf "assigned lane %s declares no candidates" lane_id
+  | Candidate_binding_missing { runtime_id } ->
+    Printf.sprintf "runtime binding %s not found" runtime_id
+  | Candidate_provider_missing { runtime_id; provider_id } ->
+    Printf.sprintf
+      "provider %s for runtime binding %s not found"
+      provider_id
+      runtime_id
+  | Antigravity_credentials_not_file { runtime_id; provider_id } ->
+    Printf.sprintf
+      "antigravity provider %s for runtime binding %s has no file credentials"
+      provider_id
+      runtime_id
+  | Muse_account_home_missing { runtime_id; provider_id } ->
+    Printf.sprintf
+      "muse provider %s for runtime binding %s has no account_home"
+      provider_id
+      runtime_id
+;;
+
 (* The official-client owner homes are named by a hash of the Keeper name and
    an OAuth source (Antigravity) or account home (Muse) that lives in
-   runtime.toml. Derive the paths before the removal loop commits keeper
-   removal, which deletes the assignment this resolution reads; an
-   unresolvable configuration omits the entry rather than failing the purge,
-   since a same-name successor cannot re-derive the leaf either way. *)
-let official_client_purge_artifacts config ~keeper_name =
+   runtime.toml. Derive the paths across every candidate in the assigned lane
+   before the removal loop commits keeper removal, which deletes the
+   assignment this resolution reads; an unresolvable configuration logs a
+   typed warning and omits the entry rather than failing the purge, since a
+   same-name successor cannot re-derive the leaf either way. *)
+let resolve_official_client_purge_artifacts config ~keeper_name =
   let open Keeper_shutdown_types in
   let runtime_root = Common.masc_dir_from_base_path ~base_path:config.Workspace.base_path in
   let runtime_toml =
     Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:config.Workspace.base_path
   in
+  let dedup_artifacts artifacts =
+    let seen = Hashtbl.create (List.length artifacts) in
+    List.filter
+      (fun artifact ->
+         match keeper_artifact_path config keeper_name artifact with
+         | None -> true
+         | Some path ->
+           if Hashtbl.mem seen path
+           then false
+           else (
+             Hashtbl.replace seen path ();
+             true))
+      artifacts
+  in
   match Runtime_toml.parse_file runtime_toml with
-  | Error _ -> []
-  | Ok cfg ->
-    let entry_runtime_id route =
-      match route with
-      | None -> None
-      | Some id ->
-        (match
-           List.find_opt
-             (fun (lane : Runtime_schema.lane_decl) -> String.equal lane.id id)
-             cfg.lane_decls
-         with
-         | Some lane ->
-           (match lane.candidate_ids with
-            | first :: _ -> Some first
-            | [] -> None)
-         | None -> Some id)
+  | Error errors ->
+    let detail =
+      errors
+      |> List.map (fun (err : Runtime_toml.parse_error) ->
+           Printf.sprintf "%s: %s" err.path err.message)
+      |> String.concat "; "
     in
-    (match entry_runtime_id (List.assoc_opt keeper_name cfg.keeper_assignments) with
-     | None -> []
-     | Some runtime_id ->
-       (match
-          List.find_opt
-            (fun (binding : Runtime_schema.binding) ->
-               String.equal (Runtime_schema.binding_key binding) runtime_id)
-            cfg.bindings
-        with
-        | None -> []
-        | Some binding ->
-          (match Runtime_schema.provider_of_id cfg binding.provider_id with
-           | None -> []
-           | Some provider ->
-             (match provider.api_format with
-              | Runtime_schema.Antigravity_cli_runtime ->
-                (match provider.credentials with
-                 | Some (Runtime_schema.File oauth_source) ->
-                   let owner_leaf =
-                     Runtime_antigravity_home.keeper_owner_leaf ~keeper_name ~oauth_source
-                   in
-                   [ Keeper_antigravity_home_artifact
+    [], [ Runtime_toml_unreadable { path = runtime_toml; detail } ]
+  | Ok cfg ->
+    let resolve_candidate runtime_id =
+      match
+        List.find_opt
+          (fun (binding : Runtime_schema.binding) ->
+             String.equal (Runtime_schema.binding_key binding) runtime_id)
+          cfg.bindings
+      with
+      | None -> [], [ Candidate_binding_missing { runtime_id } ]
+      | Some binding ->
+        (match Runtime_schema.provider_of_id cfg binding.provider_id with
+         | None ->
+           [], [ Candidate_provider_missing { runtime_id; provider_id = binding.provider_id } ]
+         | Some provider ->
+           (match provider.api_format with
+            | Runtime_schema.Antigravity_cli_runtime ->
+              (match provider.credentials with
+               | Some (Runtime_schema.File oauth_source) ->
+                 let owner_leaf =
+                   Runtime_antigravity_home.keeper_owner_leaf ~keeper_name ~oauth_source
+                 in
+                 ( [ Keeper_antigravity_home_artifact
                        (Runtime_antigravity_home.keeper_home_dir ~runtime_root ~owner_leaf)
                    ; Keeper_antigravity_prepare_lock_artifact
                        (Runtime_antigravity_home.keeper_prepare_lock_path ~runtime_root ~owner_leaf)
                    ]
-                 | Some (Runtime_schema.Env _ | Runtime_schema.Inline _) | None -> [])
-              | Runtime_schema.Muse_serve_runtime ->
-                (match provider.account_home with
-                 | None -> []
-                 | Some account_home ->
-                   [ Keeper_muse_home_artifact
+                 , [] )
+               | Some (Runtime_schema.Env _ | Runtime_schema.Inline _) | None ->
+                 ( []
+                 , [ Antigravity_credentials_not_file
+                       { runtime_id; provider_id = binding.provider_id }
+                   ] ))
+            | Runtime_schema.Muse_serve_runtime ->
+              (match provider.account_home with
+               | None ->
+                 ( []
+                 , [ Muse_account_home_missing
+                       { runtime_id; provider_id = binding.provider_id }
+                   ] )
+               | Some account_home ->
+                 ( [ Keeper_muse_home_artifact
                        (Runtime_muse_home.keeper_identity_dir ~runtime_root ~keeper_name ~account_home)
-                   ])
-              | Runtime_schema.Codex_app_server_runtime
-              | Runtime_schema.Claude_code_runtime
-              | Runtime_schema.Messages_api
-              | Runtime_schema.Chat_completions_api
-              | Runtime_schema.Ollama_api
-              | Runtime_schema.Gemini_api
-              | Runtime_schema.Vertex_gemini_api -> []))))
+                   ]
+                 , [] ))
+            | Runtime_schema.Codex_app_server_runtime
+            | Runtime_schema.Claude_code_runtime
+            | Runtime_schema.Messages_api
+            | Runtime_schema.Chat_completions_api
+            | Runtime_schema.Ollama_api
+            | Runtime_schema.Gemini_api
+            | Runtime_schema.Vertex_gemini_api -> [], []))
+    in
+    (match List.assoc_opt keeper_name cfg.keeper_assignments with
+     | None -> [], [ Keeper_not_assigned ]
+     | Some route_id ->
+       let candidate_ids, route_warnings =
+         match
+           List.find_opt
+             (fun (lane : Runtime_schema.lane_decl) -> String.equal lane.id route_id)
+             cfg.lane_decls
+         with
+         | Some lane ->
+           (match lane.candidate_ids with
+            | [] -> [], [ Empty_lane_candidates { lane_id = lane.id } ]
+            | candidates -> candidates, [])
+         | None -> [ route_id ], []
+       in
+       let artifacts_rev, warnings_rev =
+         List.fold_left
+           (fun (acc_art, acc_warn) runtime_id ->
+              let arts, warns = resolve_candidate runtime_id in
+              List.rev_append arts acc_art, List.rev_append warns acc_warn)
+           ([], List.rev route_warnings)
+           candidate_ids
+       in
+       dedup_artifacts (List.rev artifacts_rev), List.rev warnings_rev)
+;;
+
+let official_client_purge_artifacts config ~keeper_name =
+  let artifacts, warnings =
+    resolve_official_client_purge_artifacts config ~keeper_name
+  in
+  List.iter
+    (fun warning ->
+       Log.Keeper.warn
+         "dashboard Keeper purge (%s): official-client home not derivable: %s"
+         keeper_name
+         (official_client_purge_warning_to_string warning))
+    warnings;
+  artifacts
 ;;
 
 let keeper_playground_paths config keeper_name =
@@ -946,6 +1047,31 @@ let handle_board_close_post ~agent_name req reqd body_str =
 ;;
 
 module For_testing = struct
+  type nonrec official_client_purge_warning = official_client_purge_warning =
+    | Runtime_toml_unreadable of
+        { path : string
+        ; detail : string
+        }
+    | Keeper_not_assigned
+    | Empty_lane_candidates of { lane_id : string }
+    | Candidate_binding_missing of { runtime_id : string }
+    | Candidate_provider_missing of
+        { runtime_id : string
+        ; provider_id : string
+        }
+    | Antigravity_credentials_not_file of
+        { runtime_id : string
+        ; provider_id : string
+        }
+    | Muse_account_home_missing of
+        { runtime_id : string
+        ; provider_id : string
+        }
+
+  let official_client_purge_warning_to_string =
+    official_client_purge_warning_to_string
+  let resolve_official_client_purge_artifacts =
+    resolve_official_client_purge_artifacts
   let purge_agent_artifacts config agent_names =
     purge_agent_filesystem_artifacts ~validate_alias:validate_agent_alias config agent_names
     |> Result.map (fun _ -> ())

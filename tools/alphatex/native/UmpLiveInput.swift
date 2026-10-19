@@ -210,9 +210,14 @@ final class UmpLiveInput {
         }
         var activeKeys = Set<String>()
         for key in active {
-            guard catalog[key] != nil, activeKeys.insert(key).inserted else {
-                throw MidiFailure("live MIDI active keys must be unique and present in the catalog")
+            guard catalog[key] != nil else {
+                // An active key the catalog does not define is a protocol error:
+                // keep the current set and name the refusal instead of opening a
+                // route from a bare key.
+                try onEvent?(["kind": "ack", "admitted": activeRoutes.map(\.key), "rejected": [], "error": "unknown-key"])
+                return
             }
+            activeKeys.insert(key)
         }
         // The active subset, in catalog order, is itself a legal plan.
         let desired = routes.filter { activeKeys.contains($0.key) }

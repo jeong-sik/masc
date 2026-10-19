@@ -614,8 +614,22 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
             default: throw new Error('Unknown live MIDI route change')
           }
           if (next.length) next = liveMidiPlan(next, []).routes
-          await settleLiveMidi(); liveRoutes = next
-          const live = startLiveMidi(); if (live) await live.ready
+          if (!liveMidi) {
+            liveRoutes = next
+            const live = startLiveMidi(); if (live) await live.ready
+            return
+          }
+          // The owner is running: reconfigure it in place. Routes that stay
+          // active keep their CoreMIDI connections, only added routes open and
+          // only removed routes close, so a failure never blinks the rest.
+          const ack = await liveMidi.handle.set(next, next.map(route => route.key))
+          if (ack.error) throw new Error(`Live MIDI rejected the route set: ${ack.error}`)
+          liveRoutes = next.filter(route => ack.admitted.includes(route.key))
+          if (ack.rejected.length) {
+            // A route that could not open leaves the target; re-queue the
+            // remainder so the monitor converges without a restart.
+            await liveMidi.handle.set(next, liveRoutes.map(route => route.key))
+          }
         })
         break
       }

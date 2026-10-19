@@ -100,7 +100,7 @@ export function selectArrangementRoute(route, effect) {
   switch (effect.kind) {
     case 'output': return { kind: 'audio', output: effect.path }
     case 'mixed-output': return { kind: 'mixed', output: effect.path, midiOutput: route.midiOutput, portBindings: route.portBindings ?? [], ...(route.sourceBindings ? { sourceBindings: route.sourceBindings } : {}) }
-    case 'midi-output': return { ...(route.kind === 'mixed' ? { kind: 'mixed', output: route.output } : { kind: 'midi' }), midiOutput: effect.destination, portBindings: [] }
+    case 'midi-output': return { ...(route.kind === 'mixed' ? { kind: 'mixed', output: route.output } : { kind: 'midi' }), ...(route.sourceBindings ? { sourceBindings: route.sourceBindings } : {}), midiOutput: effect.destination, portBindings: [] }
     case 'midi-port': return { ...(route.kind === 'mixed' ? { kind: 'mixed', output: route.output } : { kind: 'midi' }), ...(route.sourceBindings ? { sourceBindings: route.sourceBindings } : {}), portBindings: [
       ...(route.portBindings ?? []).filter(binding => binding.asset !== effect.asset || binding.port !== effect.port),
       { asset: effect.asset, port: effect.port, destination: effect.destination }] }

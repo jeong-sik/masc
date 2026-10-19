@@ -9,6 +9,14 @@ let read_pair left right =
       let left = left () in
       left, right ()
 
+(* Child reads inherit their caller's workspace binding. Each map joins its
+   children in the current cancellation scope and retains input/result pairing;
+   callers without an installed TUI runtime keep the synchronous entry point. *)
+let read_map read items =
+  match Eio_context.get_switch_opt () with
+  | Some _ -> Eio.Fiber.List.map read items
+  | None -> List.map read items
+
 module Keeper_declared_roster = Masc.Keeper_declared_roster
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_status_runtime = Masc.Keeper_status_runtime
@@ -1291,39 +1299,50 @@ let load_connectors ~(host : string) ~(port : int) :
   match fetch_connectors ~host ~port with
   | Error err -> Error err
   | Ok json ->
-      (match Masc.Tui_decode_connectors.decode_connector_snapshot json with
+      (match Masc_tui_response_decode.run ~name:"connectors.snapshot.decode_wait" (fun () ->
+         Masc.Tui_decode_connectors.decode_connector_snapshot json) with
        | Error _ as error -> error
        | Ok snapshot ->
            let load_pages connector kind =
-             let page_limit = 500 in
+             let label = match kind with
+               | Masc.Tui_decode_connectors.Connector_server_name -> "server"
+               | Masc.Tui_decode_connectors.Connector_channel_name -> "channel"
+               | Masc.Tui_decode_connectors.Connector_person_name -> "person"
+             in
              let rec loop after_id pages =
                match
                  Masc_tui_http.fetch_connector_names ~host ~port
-                   ~connector:connector.Masc.Tui_decode_connectors.cn_id ~kind ?after_id
-                   ~limit:page_limit ()
+                   ~connector:connector.Masc.Tui_decode_connectors.cn_id ~kind:label ?after_id ()
                with
                | Error detail ->
-                 List.rev pages, Some (kind ^ ": " ^ detail)
+                 List.rev pages, Some (label ^ ": " ^ detail)
                | Ok json ->
-                 (match Masc.Tui_decode_connectors.decode_connector_name_page json with
+                 (match Masc_tui_response_decode.run ~name:"connectors.names.decode_wait" (fun () ->
+                    Masc.Tui_decode_connectors.decode_connector_name_page json) with
                   | Error detail ->
-                    List.rev pages, Some (kind ^ ": " ^ detail)
+                    List.rev pages, Some (label ^ ": " ^ detail)
                   | Ok page ->
                     let count = List.length page.cnp_mappings in
-                    if page.cnp_after_id <> after_id then
+                    if not (String.equal page.cnp_connector_id connector.cn_id) then
                       ( List.rev pages
-                      , Some (kind ^ ": directory cursor response mismatch") )
+                      , Some (label ^ ": directory connector response mismatch") )
+                    else if page.cnp_kind <> kind then
+                      ( List.rev pages
+                      , Some (label ^ ": directory kind response mismatch") )
+                    else if page.cnp_after_id <> after_id then
+                      ( List.rev pages
+                      , Some (label ^ ": directory cursor response mismatch") )
                     else if page.cnp_total < count then
                       ( List.rev pages
-                      , Some (kind ^ ": directory page count exceeds total") )
+                      , Some (label ^ ": directory page count exceeds total") )
                     else if page.cnp_has_more && count = 0 then
                       ( List.rev (page :: pages)
-                      , Some (kind ^ ": directory pagination made no progress") )
+                      , Some (label ^ ": directory pagination made no progress") )
                     else if page.cnp_has_more then
                       (match page.cnp_next_after_id with
                        | None ->
                          ( List.rev (page :: pages)
-                         , Some (kind ^ ": directory page has no next cursor") )
+                         , Some (label ^ ": directory page has no next cursor") )
                        | Some next_after
                          when (match after_id with
                                | Some previous ->
@@ -1331,7 +1350,7 @@ let load_connectors ~(host : string) ~(port : int) :
                                | None -> false) ->
                          ( List.rev (page :: pages)
                          , Some
-                             (kind ^ ": directory cursor did not advance") )
+                             (label ^ ": directory cursor did not advance") )
                        | Some next_after ->
                          loop (Some next_after) (page :: pages))
                     else List.rev (page :: pages), None)
@@ -1339,13 +1358,14 @@ let load_connectors ~(host : string) ~(port : int) :
              loop None []
            in
            let connectors =
-             List.map
+             read_map
                (fun connector ->
                   let directory_results =
-                    [ load_pages connector "server"
-                    ; load_pages connector "channel"
-                    ; load_pages connector "person"
-                    ]
+                    read_map (load_pages connector)
+                      [ Masc.Tui_decode_connectors.Connector_server_name
+                      ; Masc.Tui_decode_connectors.Connector_channel_name
+                      ; Masc.Tui_decode_connectors.Connector_person_name
+                      ]
                   in
                   let pages =
                     directory_results
@@ -1355,11 +1375,12 @@ let load_connectors ~(host : string) ~(port : int) :
                   let read_problems =
                     List.filter_map snd directory_results
                   in
-                  Masc.Tui_decode_connectors.connector_with_name_pages connector ~pages
-                    ~error:
-                      (match read_problems with
-                       | [] -> None
-                       | problems -> Some (String.concat "; " problems)))
+                  Masc_tui_response_decode.run ~name:"connectors.names.project_wait" (fun () ->
+                    Masc.Tui_decode_connectors.connector_with_name_pages connector ~pages
+                      ~error:
+                        (match read_problems with
+                         | [] -> None
+                         | problems -> Some (String.concat "; " problems))))
                snapshot.cs_connectors
            in
            Ok { snapshot with cs_connectors = connectors })

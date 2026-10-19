@@ -624,8 +624,15 @@ for page reads and hover; new tabs share that profile's default user context.
 Existing tabs and protected start pages are left in place. This is an explicit
 request, never an automatic response to a failed start-page read.
 
-A refused creation or a command never written is a pre-effect failure. If the reply is
-lost or navigation fails after creation, the host does not create another tab
-or close the created context. Its error preserves the known created tab ID;
-list the current connections and inspect their tabs before deciding what to do
-next. Old connection tab IDs must not be reused on a replacement connection.
+A refused creation or a command never written is a pre-effect failure. When
+creation is confirmed but navigation is refused or the page summary fails,
+the response remains a failure with `effectPhase:"partial"` and a structured
+`created:true`/`tabId` receipt. The server adds the selected connection identity
+and keeps that receipt in the Keeper's error output. The host keeps serving
+this connection, so the caller can list or read the same tab before deciding
+what to do next. This is a confirmed effect, never permission to replay creation.
+
+A lost reply or broken session remains an unknown outcome and ends the
+connection. The host never creates another tab or closes the created context
+to recover. List current connections and observe their tabs again; old
+connection tab IDs must not be reused on a replacement connection.

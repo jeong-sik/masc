@@ -99,7 +99,7 @@ do {_ = try Voice(region:invalid,asset:asset,capacity:257,outputChannels:2);prec
 let monoAsset=Asset(id:"audio",path:CommandLine.arguments[2],sha256:"",sampleRate:48000,channels:1,frames:4800)
 for capacity:UInt32 in [257,8192] {
  var routed=separateAudio;routed.audioChannel=CaptureAudioChannel(input:1,output:2)
- let mono=try Voice(region:routed,asset:monoAsset,capacity:capacity,outputChannels:2)
+ let mono=try Voice(region:routed,asset:monoAsset,capacity:capacity,outputChannels:2,outputLayout:AVAudioChannelLayout(layoutTag:kAudioChannelLayoutTag_Stereo))
  let target=AVAudioPCMBuffer(pcmFormat:mono.format,frameCapacity:capacity)!
  precondition(mono.file.processingFormat.channelCount==1 && mono.format.channelCount==2)
  while try mono.fill(target) {

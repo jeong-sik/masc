@@ -15369,22 +15369,46 @@ let skip_ask_question state =
 let clear_ask_question state =
   with_ask_draft state (fun draft question -> Ask.clear draft ~question)
 
-type ask_receipt_phase = Post_response | Reread_complete
+let log_ask_answer_observation observation =
+  Log.Transport.info "tui_ask_answer_lifecycle=%s"
+    (Yojson.Safe.to_string (Ask_answer_observation.to_json observation))
 
-let observe_ask_answer_receipt state ~phase submission result =
+let observe_ask_answer_call submission call operation =
+  let started_ns = Mtime_clock.elapsed_ns () in
+  log_ask_answer_observation (Ask_answer_observation.make submission ~at_ns:started_ns (Ask_answer_observation.Call_started call));
+  match operation () with
+  | result ->
+    log_ask_answer_observation (Ask_answer_observation.make submission ~at_ns:(Mtime_clock.elapsed_ns ())
+      (Ask_answer_observation.Call_finished {call; started_ns; outcome=Ask_answer_observation.outcome_of_result result}));
+    result
+  | exception error ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    let outcome = match error with Eio.Cancel.Cancelled _ -> Ask_answer_observation.Cancelled
+      | _ -> Ask_answer_observation.Raised in
+    let emit () =
+      log_ask_answer_observation (Ask_answer_observation.make submission ~at_ns:(Mtime_clock.elapsed_ns ())
+        (Ask_answer_observation.Call_finished {call; started_ns; outcome})) in
+    (match Masc.Fs_compat.execution_context () with
+     | Masc.Fs_compat.Non_eio -> emit ()
+     | Masc.Fs_compat.Eio_fiber -> Eio.Cancel.protect emit);
+    Printexc.raise_with_backtrace error backtrace
+
+let observe_ask_answer_receipt state submission result =
   Option.iter (fun feedback ->
-    let phase = match phase with
-      | Post_response -> "post_response" | Reread_complete -> "reread_complete" in
     Log.Transport.info "tui_ask_answer_receipt=%s"
       (Yojson.Safe.to_string (`Assoc
-        [ "phase", `String phase
+        [ "phase", `String "receipt_admitted"
+        ; "submission_started_ns", `String (Int64.to_string submission.as_started_ns)
         ; "admitted_ns", `String (Int64.to_string (Mtime_clock.elapsed_ns ()))
         ; "receipt", Ask.answer_feedback_to_json feedback ])))
     (Masc_tui_types.retain_ask_answer_feedback state submission result)
 
 let apply_ask_answer_completion state submission result asks =
   let answered_label = submission.as_answered_label in
-  observe_ask_answer_receipt state ~phase:Reread_complete submission result;
+  observe_ask_answer_receipt state submission result;
+  Option.iter log_ask_answer_observation
+    (Masc_tui_types.observe_ask_reread_completion state submission
+      ~at_ns:(Mtime_clock.elapsed_ns ()) asks);
   state.ask_submit_inflight <- false;
   state.pending_ask_submit <- None;
   let close_draft () =
@@ -15429,7 +15453,8 @@ let start_ask_answer state ~keeper_name ~ask_id ~source_turn_ref ~answered_label
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   let identity = state.server_identity in
-  let submission = { as_request = ref (); as_authority = authority; as_keeper_name = keeper_name;
+  let submission = { as_request = ref (); as_started_ns = Mtime_clock.elapsed_ns ();
+    as_authority = authority; as_keeper_name = keeper_name;
     as_ask_id = ask_id; as_source_turn_ref = source_turn_ref; as_answered_label = answered_label } in
   if state.workspace_identity <> Workspace_identity_match then
     report_action state "error" "Cannot answer: workspace identity is unverified; draft retained"
@@ -15437,6 +15462,7 @@ let start_ask_answer state ~keeper_name ~ask_id ~source_turn_ref ~answered_label
   supersede_home_decision_receipt state;
 
   Masc_tui_types.begin_ask_submission_state ~submission state;
+  log_ask_answer_observation (Ask_answer_observation.make submission ~at_ns:submission.as_started_ns Ask_answer_observation.Submitted);
   let host = server_peer_host in
   let port = state.port in
   let check = workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port in
@@ -15444,9 +15470,10 @@ let start_ask_answer state ~keeper_name ~ask_id ~source_turn_ref ~answered_label
     let result =
       try
         let ( let* ) = Result.bind in
-        let* () = check () in
-        Masc_tui_http.post_keeper_ask_answer ~host ~port ~keeper_name ~ask_id
-          ~answers ~session_id:None
+        let* () = observe_ask_answer_call submission Ask_answer_observation.Workspace_check check in
+        observe_ask_answer_call submission Ask_answer_observation.Answer_post (fun () ->
+          Masc_tui_http.post_keeper_ask_answer ~host ~port ~keeper_name ~ask_id
+            ~answers ~session_id:None)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -15461,7 +15488,8 @@ let start_ask_answer state ~keeper_name ~ask_id ~source_turn_ref ~answered_label
         let* expected_workspace = match identity with
           | Some identity -> Ok identity
           | None -> Error "Server workspace identity is unavailable" in
-        Masc_tui_http.fetch_keeper_asks ~expected_workspace ~host ~port ()
+        observe_ask_answer_call submission Ask_answer_observation.Asks_reread (fun () ->
+          Masc_tui_http.fetch_keeper_asks ~expected_workspace ~host ~port ())
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error ("asks reload failed: " ^ Printexc.to_string exn)
@@ -19135,7 +19163,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
           ~received_ns:None ~outcome:(match result with Ok () -> "complete" | Error _ -> "unconfirmed"))
         (Masc_tui_types.finish_ask_followup_read state request submission result)
   | Ask_answer_receipt_observed (submission, result) ->
-      observe_ask_answer_receipt state ~phase:Post_response submission result;
+      observe_ask_answer_receipt state submission result;
       launch_ask_followup_load state ~mailbox
   | Ask_answer_done (submission, result, asks) ->
       apply_ask_answer_completion state submission result asks;

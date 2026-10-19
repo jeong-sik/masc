@@ -207,6 +207,8 @@ asking turn from the later answer-reaction and Tool evidence.
 
 `tui_ask_source` records the opened source and monotonic opening time;
 `tui_ask_answer_receipt` retains the question source in its receipt metadata;
+`tui_ask_answer_lifecycle` separates original submission, check/POST/reread call
+boundaries and admitted reread outcome without duplicating that receipt;
 `tui_ask_followup` names it as `question_source_turn_ref`, separate from actual
 reaction/Tool observations. Question/choice/answer text and server error details
 are excluded from these source fields. This supports joining original and later

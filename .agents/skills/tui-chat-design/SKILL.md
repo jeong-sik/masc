@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회의 부분 수신·하위 완료 관측과 Board 독립 데이터·목록/census 가용성·콜드 identity 재결속과 요청별 조회 조건 관측, Keeper·Work·로그·질문 원본의 비동기 조회, Runtime·Overview 목록/사용량의 공유 해석, Keeper 설정·Sandbox 단축키·Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
+description: "MASC TUI의 채팅·입력·로딩·진행 상태, 비동기 조회·설정 저장·Ask 답변과 재조회를 바꿀 때 쓴다. Keeper·Work·로그·Board·Runtime·Overview의 원본 요청·입력·revision·소유권, 공유 조회와 부분 실패, worker 관측·UI 반영·paint 증거를 구분한다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -299,6 +299,12 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회�
   Keepers 목록·Activity에서 관측하고 제어한다. 추적 중인 요청은 삭제하지 않는다.
 - 전송 결과 미확인, 중단 실패, 관측 실패, 승인 질문은 기본 화면에서도 보인다.
   `Attention`은 기본 대화에서 상세를 접어도 남는다.
+- Ask 답변 영수증은 원래 제출 요청에 한 번만 보존한다. 그 중복 방지 조건으로 목록 재조회
+  완료 관측까지 막지 않는다. 재조회는 실제 Result와 현재 제출·workspace 소유권으로 별도
+  관측하고, 실패가 이미 보존한 POST 영수증을 덮지 않는다. 원래 제출 시작 시각에 확인·POST·
+  재조회 함수의 진입·반환·예외·취소 시각을 연결한다. 없는 종료는 unfinished로 남긴다.
+  함수 대기는 auth·pool·해석·시작 로그 비용을 포함하며 순수 HTTP RTT가 아니다. worker 반환과
+  UI admission도 별개이며, 관측은 mutation gate·초안·후속 읽기 권한을 바꾸지 않는다.
 - Ask 답변 후속 상태는 원래 질문에 저장된 Task로 연결한다. 답변 저장·wake·Tool 결과와
   실제 Task 단계를 구분하고, 읽기에 실패해 남긴 단계는 마지막 관측으로 표시한다.
   현재 Keeper Task로 바꿔 연결하거나 Task 관측만으로 전체 Goal 완료를 표시하지 않는다.

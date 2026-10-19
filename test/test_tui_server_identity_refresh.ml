@@ -1954,7 +1954,7 @@ let test_question_origin_survives_answer_and_workspace_change () =
   let origin = Ask.origin_of_row original in
   toggle_ask_origin state origin;
   let submission : ask_submission =
-    {as_request=ref ();as_authority=state.workspace_authority;
+    {as_request=ref ();as_started_ns=0L;as_authority=state.workspace_authority;
      as_keeper_name=original.ar_keeper;as_ask_id=original.ar_id;as_answered_label="private choice";
      as_source_turn_ref=original.ar_source_turn_ref} in
   begin_ask_submission_state ~submission state;
@@ -1992,12 +1992,13 @@ let test_question_origin_survives_answer_and_workspace_change () =
 let test_answer_receipt_has_one_original_submission_owner () =
   let open Masc_tui_types in
   let module Decode = Masc.Tui_decode_asks in
+  let module O = Ask_answer_observation in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
     ~port:0 ~refresh_interval:0. () in
   state.workspace_identity <- Workspace_identity_match;
   state.server_identity <- Some (identity "/workspace/a");
   let submission ask_id : ask_submission =
-    { as_request = ref (); as_authority = state.workspace_authority;
+    { as_request = ref (); as_started_ns = 10L; as_authority = state.workspace_authority;
       as_keeper_name = "reader"; as_ask_id = ask_id; as_source_turn_ref = None; as_answered_label = "reader: choice" } in
   let first = submission "first" in
   begin_ask_submission_state ~submission:first state;
@@ -2012,12 +2013,32 @@ let test_answer_receipt_has_one_original_submission_owner () =
     (current_ask_answer_feedback state = Some feedback);
   Alcotest.(check bool) "terminal duplicate cannot replace the earlier POST receipt" true
     (Option.is_none (retain_ask_answer_feedback state first (Error "later observation failed")));
+  let failed_reread = match observe_ask_reread_completion state first ~at_ns:20L (Error "reread failed") with
+    | Some observation -> observation
+    | None -> Alcotest.fail "early POST receipt suppressed canonical reread completion" in
+  Alcotest.(check bool) "failed reread keeps the original request and its independent outcome" true
+    (failed_reread.submission.as_request == first.as_request
+     && failed_reread.submission.as_started_ns=10L && failed_reread.at_ns=20L
+     && failed_reread.event=O.Reread_admitted O.Returned_error);
+  Alcotest.(check bool) "lifecycle observation cannot settle submission or overwrite its receipt" true
+    (state.ask_submit_inflight && current_ask_answer_feedback state=Some feedback);
+  state.ask_submit_inflight <- false;
+  Alcotest.(check bool) "settled submission cannot emit another reread admission" true
+    (Option.is_none (observe_ask_reread_completion state first ~at_ns:21L (Error "duplicate")));
   let second = submission "second" in
   begin_ask_submission_state ~submission:second state;
   let next = match retain_ask_answer_feedback state second (Error "recording unknown") with
     | Some next -> next | None -> Alcotest.fail "new original submission must own its receipt" in
   Alcotest.(check bool) "an older request cannot overwrite the newer receipt" true
     (Option.is_none (retain_ask_answer_feedback state first receipt));
+  let empty : Decode.asks_snapshot = {asn_keeper=None;asn_open_count=0;asn_rows=[]} in
+  Alcotest.(check bool) "old reread cannot borrow a newer submission's ownership" true
+    (Option.is_none (observe_ask_reread_completion state first ~at_ns:30L (Ok empty)));
+  Alcotest.(check bool) "successful empty reread does not confirm an unknown answer write" true
+    (match observe_ask_reread_completion state second ~at_ns:31L (Ok empty) with
+     | Some observation -> observation.event=O.Reread_admitted O.Returned
+         && current_ask_answer_feedback state=Some next
+     | None -> false);
   Alcotest.(check bool) "newer unconfirmed result remains unconfirmed" true
     (current_ask_answer_feedback state = Some next);
   let Workspace_authority generation = state.workspace_authority in
@@ -2026,11 +2047,15 @@ let test_answer_receipt_has_one_original_submission_owner () =
     (Option.is_none (current_ask_answer_feedback state));
   Alcotest.(check bool) "old submission cannot enter a replacement workspace" true
     (Option.is_none (retain_ask_answer_feedback state second receipt));
+  Alcotest.(check bool) "old workspace reread grants no lifecycle admission" true
+    (Option.is_none (observe_ask_reread_completion state second ~at_ns:40L (Ok empty)));
   let unread = submission "unread" in
   begin_ask_submission_state ~submission:unread state;
   state.workspace_identity <- Workspace_identity_unread;
   Alcotest.(check bool) "unconfirmed workspace grants no receipt admission" true
-    (Option.is_none (retain_ask_answer_feedback state unread receipt))
+    (Option.is_none (retain_ask_answer_feedback state unread receipt));
+  Alcotest.(check bool) "unconfirmed workspace grants no reread admission" true
+    (Option.is_none (observe_ask_reread_completion state unread ~at_ns:41L (Ok empty)))
 
 let original_answer_followup_identity ?(at=200.) ?(stimulus="original-source") () =
   let module Decode = Masc.Tui_decode_asks in
@@ -2051,7 +2076,7 @@ let answer_followup_state () =
       ~port:0 ~refresh_interval:0. () in
   state.workspace_identity <- Workspace_identity_match;
   state.server_identity <- Some (identity state.local_base_path);
-  let submission name : ask_submission = {as_request=ref ();as_authority=state.workspace_authority;
+  let submission name : ask_submission = {as_request=ref ();as_started_ns=0L;as_authority=state.workspace_authority;
       as_keeper_name="alpha";as_ask_id=name;as_source_turn_ref=None;as_answered_label="choice"} in
   let first = submission "original" in
   begin_ask_submission_state ~submission:first state;

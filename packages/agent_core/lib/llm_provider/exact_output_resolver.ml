@@ -770,9 +770,7 @@ let load_resolver_snapshot
         , (provider : Model_catalog.provider_entry)
         , (model : Model_catalog.model_entry) ) ->
          let* targets = result in
-         let anthropic_thinking_control =
-           Binding.anthropic_thinking_control_of_model model
-         in
+         let catalog_policy = Binding.anthropic_thinking_control_of_model model in
          let* () = Ok () in
          (* The wire, and with it the capabilities a request on that wire can
             express and the reasoning stance it has to state. A binding answers
@@ -818,6 +816,18 @@ let load_resolver_snapshot
            | Binding_wire { config = binding; _ } ->
              binding.PC.max_concurrent_requests, binding.PC.admission_priority_run_limit
          in
+         (* A binding answers with the policy its ordinary requests run on: its
+            own deployment declaration first, else the frozen catalog row.
+            Without this a row that carries no policy but gains a deployment
+            declaration would honor it on the turn path and ignore it here. *)
+         let anthropic_thinking_control =
+           match target.wire with
+           | Catalog_provider_wire -> catalog_policy
+           | Binding_wire { config = binding; _ } ->
+             (match binding.PC.model_anthropic_thinking_control_override with
+              | Some _ as declared -> declared
+              | None -> catalog_policy)
+         in
          let projection_config =
            PC.make
              ~kind
@@ -830,6 +840,7 @@ let load_resolver_snapshot
              ?enable_thinking:target.enable_thinking
              ?reasoning_effort:target.reasoning_effort
              ~model_capabilities_override:capabilities
+             ?model_anthropic_thinking_control_override:anthropic_thinking_control
              ~reasoning_uncontrolled
              ?connect_timeout_s:target.connect_timeout_s
              ?max_concurrent_requests

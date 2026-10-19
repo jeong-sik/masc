@@ -231,6 +231,14 @@ type reasoning_streaming_format =
   | Template_reasoning_streaming
 [@@deriving show, eq]
 
+type anthropic_thinking_control =
+  Llm_provider.Capabilities.anthropic_thinking_control =
+  | Anthropic_adaptive_default
+  | Anthropic_adaptive_disabled_through_high
+  | Anthropic_adaptive_between_tools
+  | Anthropic_always_adaptive
+[@@deriving show, eq]
+
 (** Per-model capabilities, mirroring AGENT_CORE [Llm_provider.Capabilities] for the
     fields callers branch on. Fields already present on {!model_spec}
     ([tools_support]/[thinking_support]/[max_context]/[streaming]) are not
@@ -243,6 +251,7 @@ type model_capabilities =
   ; supports_parallel_tool_calls : bool option
   ; thinking_control_format : thinking_control_format
   ; declared_thinking_control_format : thinking_control_format option
+  ; anthropic_thinking_control : anthropic_thinking_control option
   ; reasoning_streaming_format : reasoning_streaming_format option
   ; supports_image_input : bool option
   ; supports_audio_input : bool option
@@ -268,6 +277,7 @@ let model_capabilities_default =
   ; supports_parallel_tool_calls = None
   ; thinking_control_format = No_thinking_control
   ; declared_thinking_control_format = None
+  ; anthropic_thinking_control = None
   ; reasoning_streaming_format = None
   ; supports_image_input = None
   ; supports_audio_input = None

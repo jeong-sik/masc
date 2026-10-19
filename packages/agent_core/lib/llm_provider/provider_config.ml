@@ -83,6 +83,7 @@ type t =
   ; cache_system_prompt : bool
   ; cache_extended_ttl : bool
   ; model_capabilities_override : Capabilities.capabilities option
+  ; model_anthropic_thinking_control_override : Capabilities.anthropic_thinking_control option
   ; request_policy_snapshot : request_policy_snapshot option
   ; keep_alive : string option
   ; return_progress : bool
@@ -127,6 +128,7 @@ let make
       ?(cache_system_prompt = false)
       ?(cache_extended_ttl = false)
       ?model_capabilities_override
+      ?model_anthropic_thinking_control_override
       ?keep_alive
       ?(return_progress = false)
       ?internal_model_rotation_count
@@ -188,6 +190,7 @@ let make
   ; cache_system_prompt
   ; cache_extended_ttl
   ; model_capabilities_override
+  ; model_anthropic_thinking_control_override
   ; request_policy_snapshot = None
   ; keep_alive
   ; return_progress
@@ -268,11 +271,14 @@ let capabilities_for_config_model (config : t) =
 let anthropic_thinking_control (config : t) =
   match config.kind with
   | Anthropic ->
-    (match matching_request_policy config with
-     | Some policy -> Capabilities.request_policy_anthropic_thinking_control policy
+    (match config.model_anthropic_thinking_control_override with
+     | Some _ as declared -> declared
      | None ->
-       resolve_request_policy config
-       |> Capabilities.request_policy_anthropic_thinking_control)
+       (match matching_request_policy config with
+        | Some policy -> Capabilities.request_policy_anthropic_thinking_control policy
+        | None ->
+          resolve_request_policy config
+          |> Capabilities.request_policy_anthropic_thinking_control))
   | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> None
 ;;
 

@@ -409,12 +409,8 @@ let functional_capability_projection
     ]
 ;;
 
-let catalog_anthropic_thinking_control = function
-  | None -> None
-  | Some Capability_vocab.Adaptive_default -> Some Caps.Anthropic_adaptive_default
-  | Some Capability_vocab.Adaptive_disabled_through_high -> Some Caps.Anthropic_adaptive_disabled_through_high
-  | Some Capability_vocab.Adaptive_between_tools -> Some Caps.Anthropic_adaptive_between_tools
-  | Some Capability_vocab.Always_adaptive -> Some Caps.Anthropic_always_adaptive
+let catalog_anthropic_thinking_control =
+  Option.map Caps.anthropic_thinking_control_of_vocab_value
 ;;
 
 let catalog_modality_priority fallback = function

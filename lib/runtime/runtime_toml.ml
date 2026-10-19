@@ -1034,6 +1034,7 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
     [ "max-output-tokens"
     ; "thinking-control-format"
     ; thinking_control_token_key
+    ; "anthropic-thinking-control"
     ; "reasoning-streaming-format"
     ; "supports-tool-choice"
     ; "supports-required-tool-choice"
@@ -1100,6 +1101,29 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
                  raw
                  Llm_provider.Capability_vocab.reasoning_streaming_format_syntax)))
   in
+  let anthropic_thinking_control_result =
+    match typed_find "a string" path tbl "anthropic-thinking-control" Otoml.get_string with
+    | Error errors -> Error errors
+    | Ok None -> Ok None
+    | Ok (Some raw) ->
+      (* Both spellings, like the sibling thinking-control-format: the catalog
+         vocabulary is underscore-joined, the dashboard projection is
+         hyphen-joined, and either must round-trip through this parser. *)
+      let normalized = String.map (fun c -> if Char.equal c '-' then '_' else c) raw in
+      (match Llm_provider.Capability_vocab.anthropic_thinking_control_of_string normalized with
+       | Some policy ->
+         Ok (Some (Llm_provider.Capabilities.anthropic_thinking_control_of_vocab_value policy))
+       | None ->
+         Error
+           (error
+              (path ^ ".anthropic-thinking-control")
+              (Printf.sprintf
+                 "unknown anthropic-thinking-control %S — expected %s"
+                 raw
+                 (String.concat
+                    "|"
+                    Llm_provider.Capability_vocab.anthropic_thinking_control_values))))
+  in
   let positive_int_opt_field key =
     match typed_find "an integer" path tbl key Otoml.get_integer with
     | Error _ as error -> error
@@ -1131,6 +1155,7 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
   in
   let* thinking_control_format = thinking_control_format_result in
   let* reasoning_streaming_format = reasoning_streaming_format_result in
+  let* anthropic_thinking_control = anthropic_thinking_control_result in
   let* max_output_tokens = positive_int_opt_field "max-output-tokens" in
   let* supports_tool_choice = b "supports-tool-choice" in
   let* supports_required_tool_choice = b "supports-required-tool-choice" in
@@ -1160,6 +1185,7 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
         (match Otoml.find_opt tbl Fun.id [ "thinking-control-format" ] with
          | None -> None
          | Some _ -> Some thinking_control_format)
+    ; anthropic_thinking_control
     ; reasoning_streaming_format
     ; supports_image_input
     ; supports_audio_input

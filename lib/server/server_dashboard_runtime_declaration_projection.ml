@@ -27,6 +27,19 @@ let thinking_control_format_wire : Runtime_schema.thinking_control_format -> str
   | Runtime_schema.Reasoning_effort -> "reasoning-effort"
 ;;
 
+let anthropic_thinking_control_wire : Runtime_schema.anthropic_thinking_control -> string = function
+  | Runtime_schema.Anthropic_adaptive_default -> "adaptive-default"
+  | Runtime_schema.Anthropic_adaptive_disabled_through_high -> "adaptive-disabled-through-high"
+  | Runtime_schema.Anthropic_adaptive_between_tools -> "adaptive-between-tools"
+  | Runtime_schema.Anthropic_always_adaptive -> "always-adaptive"
+;;
+
+let anthropic_thinking_control_json : Runtime_schema.anthropic_thinking_control option -> Yojson.Safe.t =
+  function
+  | None -> `Null
+  | Some policy -> `String (anthropic_thinking_control_wire policy)
+;;
+
 let preserve_thinking_control_format_wire
   : Llm_provider.Capabilities.preserve_thinking_control_format -> string
   = function
@@ -177,6 +190,7 @@ let runtime_request_config_json (rt : Runtime_instance.t) =
     ; "response_format", response_format_json cfg.response_format
     ; "cache_system_prompt", `Bool cfg.cache_system_prompt
     ; "has_model_capabilities_override", `Bool (Option.is_some cfg.model_capabilities_override)
+    ; "has_model_anthropic_thinking_control_override", `Bool (Option.is_some cfg.model_anthropic_thinking_control_override)
     ; "keep_alive", Json_util.string_opt_to_json cfg.keep_alive
     ; "internal_model_rotation_count", Json_util.int_opt_to_json cfg.internal_model_rotation_count
     ; "num_ctx", Json_util.int_opt_to_json cfg.num_ctx
@@ -224,6 +238,7 @@ let runtime_declared_model_capabilities_json
       ; "supports_named_tool_choice", Json_util.bool_opt_to_json caps.supports_named_tool_choice
       ; "supports_parallel_tool_calls", Json_util.bool_opt_to_json caps.supports_parallel_tool_calls
       ; "thinking_control_format", `String (thinking_control_format_wire caps.thinking_control_format)
+      ; "anthropic_thinking_control", anthropic_thinking_control_json caps.anthropic_thinking_control
       ; "supports_image_input", Json_util.bool_opt_to_json caps.supports_image_input
       ; "supports_audio_input", Json_util.bool_opt_to_json caps.supports_audio_input
       ; "supports_video_input", Json_util.bool_opt_to_json caps.supports_video_input

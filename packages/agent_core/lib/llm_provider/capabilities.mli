@@ -111,6 +111,13 @@ type anthropic_thinking_control =
           thinking; only low/medium/high effort is accepted in that mode. *)
   | Anthropic_always_adaptive
 
+val anthropic_thinking_control_of_vocab_value
+  :  Capability_vocab.anthropic_thinking_control
+  -> anthropic_thinking_control
+(** Project a parsed vocabulary value to the resolved policy. Callers parse
+    operator- or catalog-facing strings with
+    {!Capability_vocab.anthropic_thinking_control_of_string} first. *)
+
 type capabilities =
   { (* Numeric limits *)
     max_context_tokens : int option

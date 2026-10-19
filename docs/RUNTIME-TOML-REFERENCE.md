@@ -168,6 +168,13 @@ different from an unwritten key (#37435).
   `chat-template-token`.
 - `reasoning-streaming-format`: `none`, `default`, `template_parser`,
   `delta:<field>`, `delta_details:<field>`.
+- `anthropic-thinking-control`: `adaptive_default`,
+  `adaptive_disabled_through_high`, `adaptive_between_tools`,
+  `always_adaptive` (hyphen-joined spellings accepted too). Only for an
+  Anthropic-wire binding the model catalog answers no policy for
+  (operator-own pattern: no readable row, or a row that carries no policy);
+  the loader refuses it where the catalog already declares a policy for the
+  binding's model and where the wire is not Anthropic.
 - `max-output-tokens`: positive int (non-positive values are ignored with a
   warning).
 - Feature booleans: `supports-tool-choice`, `supports-required-tool-choice`,

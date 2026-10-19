@@ -139,6 +139,41 @@ Mismatch assessments never overwrite either original `attempt.json`.
 Coordinator fixture/driver failures go to `process.json`, preserving any native
 receipt. Normal run finalization uses the same reader to write `summary.json`.
 
+Each attempt also has `process_observation`, associated through its declared
+pair/strategy path. It retains that `process.json` path, read state
+(`read`/`missing`/`invalid`), hash of readable bytes, decoded `reported_record`
+where possible, interpreted `kind` and any admission reason. The same projection
+is included in the pair's reported timing arm. `process_states` summarizes these
+read states over the full declared cohort, separately from `receipt_states` and
+native/coordinator outcomes.
+
+Each pair also has a shared `setup_observation`, read once from its declared
+`pair-NNNN/setup.json`, and `setup_states` counts these over declared pairs
+rather than attempts. It preserves the decoded object without interpreting
+`setup_complete`, `unfinished`, fixture contents or its clock as proof of setup
+success, timing or invocation ownership. This supplies context when setup
+failure leaves both process records absent. The regular-file/hash/read-state
+boundary is shared with process observations, while process variant admission
+remains specific to the process reader.
+
+The reader recognizes the coordinator's two recorded variants: an integer
+`returncode` with numeric wall-clock `observed_epoch` (`driver_returned`), or
+null `returncode` plus `observation: fixture_or_driver_unavailable` and string
+`detail`. JSON booleans are not return codes. Unknown/partial/malformed records
+remain invalid with their available hash/decoded data; absent/nonregular records
+do not abort other attempts or erase their timing. A known return code is saved
+outside the invocation-error handler, so a persistence error cannot rewrite a
+completed invocation as an unavailable one. Such a save failure reaches the CLI
+error boundary; the preallocated denominator and native receipts remain.
+
+These are recorded metadata, not current process probes. A zero return code
+does not fabricate a missing successful native receipt; another code or an
+unavailability record does not overwrite a received native result. Missing
+records do not mean running or stopped, negative codes are not converted into
+platform-specific signal diagnoses, and epochs are not used for elapsed-time
+arithmetic. Both `current_liveness_verified` and `execution_verified` stay false.
+No process ID lookup, retry, signal, launch or runtime verdict is derived here.
+
 The manifest must bind the complete expected pair/strategy/path list and exact
 experiment bytes. If that declaration is invalid, reporting refuses rather than
 inventing a denominator. Descendant symlinks/nonregular files are not followed.

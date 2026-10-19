@@ -12,11 +12,18 @@ characters) and `native-tui-scenario`:
 | --- | --- | --- |
 | `detail-ownership` (default) | TUI and the three test executables | `test_tui_detail_reading`, `test_tui_board_successor`, `test_tui_usage_scope` |
 | `workspace-files` | TUI, server and the three test executables | `test_repo_git`, `test_tui_workspace_entries`, `test_workspace_file_confidentiality` |
+| `rich-workspace` | TUI, server and the six test executables | The `workspace-files` suites plus `test_lsp_position`, `test_tui_music_launcher`, `test_tui_alphatex` |
 
 The server target is `bin/main_eio.exe`; the TUI is `bin/masc_tui.exe`.
 Each test target is `test/<suite>.exe`. Unknown scenarios are refused before
 source checkout and again before selecting build targets. With no native source
 SHA, only the existing source/config/credential checks run.
+
+Use `rich-workspace` for a selected music and Code integration candidate. It
+checks Unicode LSP positions, music child-process handoff and AlphaTex parsing
+alongside file discovery and request ownership. It does not execute the Node
+music package, play audio or establish visible terminal behavior; record those
+checks separately against the same source commit.
 
 For a workspace file-finder candidate:
 
@@ -37,7 +44,7 @@ result. An accepted request or running job is not a passing result.
 The artifact is named `tui-macos-arm64-<source SHA>-<run ID>`. It retains build
 targets, logs, completed suite names, native dependency lists and `receipt.json`.
 The TUI's embedded `--build-commit` must equal the selected source. The workspace
-scenario also checks the server's `build-commit` and includes it as `masc`, with
+scenarios also check the server's `build-commit` and include it as `masc`, with
 its own digest and dependency list. The receipt records source SHA, workflow
 SHA, scenario and both binary digests; the existing TUI `sha256` field remains.
 The default scenario records no server digest.

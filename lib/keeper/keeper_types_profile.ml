@@ -174,9 +174,35 @@ let load_keeper_instructions ~toml_path _name defaults =
       ; detail = "keeper TOML must set a non-empty keeper.instructions"
       }
 
+(* Runtime lookup is by filename, while discovery uses keeper.name. A
+   declaration whose two names disagree is indexed under both and refused
+   under both: the roster asks by keeper.name and the runtime by filename,
+   and each used to get an answer the other could not see (audit F386). The
+   per-file loader checks the same agreement (#36427) so /health, boot, and
+   snapshot projections cannot disagree on a mismatched file. A name claimed
+   by more than one file is refused at the snapshot rather than letting
+   directory order pick a winner. *)
+let name_mismatch_error ~path ~file_name ~keeper_name =
+  Error
+    { keeper_path = path
+    ; failing_path = path
+    ; kind = Invalid_name
+    ; detail =
+        Printf.sprintf
+          "keeper.name %S does not match the file name %S"
+          keeper_name
+          file_name
+    }
+
+let load_keeper_instructions_for_file ~toml_path ~file_name keeper_name defaults =
+  if not (String.equal keeper_name file_name)
+  then name_mismatch_error ~path:toml_path ~file_name ~keeper_name
+  else load_keeper_instructions ~toml_path keeper_name defaults
+
 let materialization_defaults_of_content ~path bytes =
+  let file_name = Filename.remove_extension (Filename.basename path) in
   Result.bind (inspect_keeper_toml_content ~path bytes) (fun (name, defaults) ->
-    load_keeper_instructions ~toml_path:path name defaults)
+    load_keeper_instructions_for_file ~toml_path:path ~file_name name defaults)
 
 let load_keeper_profile_defaults_result_uncached_with_paths
     ~keeper_toml_path
@@ -188,7 +214,15 @@ let load_keeper_profile_defaults_result_uncached_with_paths
     match load_keeper_toml keeper_toml_path with
     | Error _ as error -> error
     | Ok (loaded_name, defaults) ->
-      load_keeper_instructions ~toml_path:keeper_toml_path loaded_name defaults
+      let file_name = Filename.remove_extension (Filename.basename keeper_toml_path) in
+      if not (String.equal loaded_name file_name)
+      then name_mismatch_error ~path:keeper_toml_path ~file_name ~keeper_name:loaded_name
+      else
+        load_keeper_instructions_for_file
+          ~toml_path:keeper_toml_path
+          ~file_name:name
+          loaded_name
+          defaults
 
 let load_keeper_profile_defaults_result_uncached name :
     (keeper_profile_defaults, keeper_toml_load_error) result =
@@ -210,24 +244,6 @@ type keeper_profile_snapshot =
       (string * (keeper_profile_defaults, keeper_toml_load_error) result) list
   }
 
-(* Runtime lookup is by filename, while discovery uses keeper.name. A
-   declaration whose two names disagree is indexed under both and refused
-   under both: the roster asks by keeper.name and the runtime by filename,
-   and each used to get an answer the other could not see (audit F386). A
-   name claimed by more than one file is refused the same way rather than
-   letting directory order pick a winner. *)
-let name_mismatch_error ~path ~file_name ~keeper_name =
-  Error
-    { keeper_path = path
-    ; failing_path = path
-    ; kind = Invalid_name
-    ; detail =
-        Printf.sprintf
-          "keeper.name %S does not match the file name %S"
-          keeper_name
-          file_name
-    }
-
 let duplicate_claim_error ~name ~first ~others =
   Error
     { keeper_path = first
@@ -246,12 +262,18 @@ let index_keeper_profile_declarations declarations =
       (fun (path, discovery) ->
         let file_name = Filename.remove_extension (Filename.basename path) in
         match discovery with
-        | Loaded { keeper_name; defaults } when String.equal keeper_name file_name
-          ->
-          [ file_name, path, load_keeper_instructions ~toml_path:path keeper_name defaults ]
-        | Loaded { keeper_name; _ } ->
-          let refused = name_mismatch_error ~path ~file_name ~keeper_name in
-          [ file_name, path, refused; keeper_name, path, refused ]
+        | Loaded { keeper_name; defaults } ->
+          (match
+             load_keeper_instructions_for_file
+               ~toml_path:path
+               ~file_name
+               keeper_name
+               defaults
+           with
+           | Error { kind = Invalid_name; _ } as refused
+             when not (String.equal keeper_name file_name) ->
+             [ file_name, path, refused; keeper_name, path, refused ]
+           | result -> [ file_name, path, result ])
         | Invalid { error; _ } -> [ file_name, path, Error error ])
       declarations
   in
@@ -450,12 +472,18 @@ let keeper_toml_unknown_keys_of_path path =
                 }))
 
 let keeper_toml_config_error_of_path path =
+  let file_name = keeper_name_of_toml_path path in
   match inspect_keeper_toml path with
-  | Ok _ -> None
+  | Ok (loaded_name, _) when String.equal loaded_name file_name -> None
+  | Ok (loaded_name, _) ->
+    (match name_mismatch_error ~path ~file_name ~keeper_name:loaded_name with
+     | Ok _ -> None
+     | Error error ->
+       Some (keeper_toml_config_error_of_load_error ~keeper_name:file_name error))
   | Error error ->
     Some
       (keeper_toml_config_error_of_load_error
-         ~keeper_name:(keeper_name_of_toml_path path)
+         ~keeper_name:file_name
          error)
 
 let keeper_toml_config_errors_in_dir_result dir =

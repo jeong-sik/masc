@@ -142,10 +142,9 @@ type autoboot_exclusion = {
 (* [profile_snapshot] is the caller's already-read profile table, for a
    reader that answers for the whole fleet in one pass; without one each
    keeper's profile is loaded from its own file, which is what the boot
-   path does. The two agree for a well-formed profile directory. They do
-   not for a file whose [keeper.name] differs from its file name, or a name
-   two files claim: the snapshot refuses both and the per-file load checks
-   neither. *)
+   path does. Both paths refuse a file whose [keeper.name] differs from its
+   file name (#36427); only the snapshot sees across the directory to refuse
+   a name claimed by more than one file. *)
 let profile_defaults_for ?profile_snapshot config name =
   match profile_snapshot with
   | Some snapshot -> Keeper_types_profile.snapshot_profile_defaults snapshot name

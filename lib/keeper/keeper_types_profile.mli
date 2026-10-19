@@ -110,7 +110,9 @@ val load_keeper_profile_defaults_result_for_base_path :
   (keeper_profile_defaults, keeper_toml_load_error) result
 (** A keeper with no [keepers/<name>.toml] is [Error] with kind
     [Declaration_not_found name] and the expected path as [failing_path];
-    it never loads as empty defaults. *)
+    it never loads as empty defaults. A file whose [keeper.name] differs
+    from [<name>] is refused with kind [Invalid_name], matching
+    {!snapshot_profile_defaults}. *)
 
 (** One projection's immutable declaration reads. Every file is parsed once;
     capture a new snapshot for each projection so edits, additions, removals,

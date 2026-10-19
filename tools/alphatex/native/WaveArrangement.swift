@@ -89,7 +89,8 @@ struct Region: Decodable {
     let frameCount: AVAudioFramePosition
     let repetitions: AVAudioFramePosition
     let captureClock: CaptureAudioClock?
-    enum CodingKeys: String, CodingKey { case id, asset, startSeconds, offsetFrames, frameCount, captureClock; case repetitions = "repeat" }
+    var component: CaptureRegionComponent? = nil
+    enum CodingKeys: String, CodingKey { case id, asset, startSeconds, offsetFrames, frameCount, captureClock, component; case repetitions = "repeat" }
     func totalFrames() throws -> AVAudioFramePosition {
         let (total, overflow) = frameCount.multipliedReportingOverflow(by: repetitions)
         guard frameCount > 0, repetitions > 0, !overflow, total > 0 else { throw AudioFailure("region exceeds the native frame timeline") }
@@ -130,6 +131,7 @@ struct Plan: Decodable {
                   let asset = assets.first(where: { $0.id == region.asset }),
                   region.frameCount <= asset.frames, region.offsetFrames <= asset.frames - region.frameCount else { throw AudioFailure("invalid region source bounds") }
             guard region.captureClock == nil || clocked else { throw AudioFailure("captured audio clock requires an explicit captured audio plan") }
+            guard region.component == nil || region.component == .audio && region.captureClock != nil else { throw AudioFailure("invalid captured audio component") }
             let total: AVAudioFramePosition
             if let clock = region.captureClock {
                 total = try clock.layout(rate: asset.sampleRate, offsetFrames: region.offsetFrames,
@@ -163,9 +165,17 @@ struct Plan: Decodable {
                 _ = try UmpRegionTransport(timeline: umpRegions)
                 for region in regions {
                     guard let clock = region.captureClock else { continue }
+                    if region.component == .audio {
+                        guard !umpRegions.regions.contains(where: { $0.id == region.id }) else { throw AudioFailure("separated audio cannot silently pair with UMP") }
+                        if let source = umpRegions.sources.first(where: { $0.id == region.asset }) {
+                            guard source.timeline.clock.origin == clock.origin,
+                                  source.timeline.clock.numer == clock.numer, source.timeline.clock.denom == clock.denom else { throw AudioFailure("separated components disagree on their original source clock") }
+                        }
+                        continue
+                    }
                     guard let notes = umpRegions.regions.first(where: { $0.id == region.id }),
                           let source = umpRegions.sources.first(where: { $0.id == notes.source }),
-                          notes.source == region.asset, notes.startSeconds == region.startSeconds,
+                          notes.component == nil, notes.source == region.asset, notes.startSeconds == region.startSeconds,
                           notes.offset == clock.offset, notes.extent == clock.extent,
                           notes.repeatCount == UInt64(region.repetitions),
                           source.timeline.clock.origin == clock.origin,
@@ -173,6 +183,7 @@ struct Plan: Decodable {
                         throw AudioFailure("paired WAV and UMP regions disagree on their source identity or clock")
                     }
                 }
+                guard !umpRegions.regions.contains(where: { notes in notes.component == .midi && regions.contains(where: { $0.id == notes.id }) }) else { throw AudioFailure("separated MIDI cannot silently pair with WAV") }
             }
         } else {
             guard abs(end - duration) < sample else { throw AudioFailure("duration does not match region sources") }
@@ -439,14 +450,25 @@ final class ArrangementTransport {
         try checkOutput(); engine.prepare(); try engine.start()
         let rate = engine.outputNode.outputFormat(forBus: 0).sampleRate, latency = engine.outputNode.presentationLatency
         guard rate.isFinite, rate > 0, latency.isFinite, latency >= 0 else { throw AudioFailure("output clock is unavailable") }
-        // play(at:) synchronizes with the live render thread. Reserve one render
-        // quantum per admitted node plus the next output quantum. The deadline
-        // below still rejects a late start rather than shifting individual clips.
+        // A node may already have rendered beyond wall-clock now. Apple defines
+        // play(at:) before lastRenderTime as immediate playback, so reserve the
+        // common lead beyond every active render frontier, not just wall time.
+        var frontier = mach_absolute_time()
+        let renderTimes = voices.filter({ active.contains($0.region.id) }).map({ $0.player.lastRenderTime })
+        if !renderTimes.isEmpty {
+            for candidate in [engine.outputNode.lastRenderTime] + renderTimes {
+                guard let time = candidate, time.isHostTimeValid else { throw AudioFailure("audio render clock is unavailable at start") }
+                frontier = max(frontier, time.hostTime)
+            }
+        }
         let lead = Double(renderQuantum) / rate * Double(active.count + 1) + latency
-        anchor = try futureHost(lead, from: mach_absolute_time())
+        anchor = try futureHost(lead, from: frontier)
         _ = try futureHost(plan.duration - position, from: anchor)
         for voice in voices where active.contains(voice.region.id) {
             let when = try futureHost(max(0, voice.region.startSeconds - position), from: anchor)
+            guard let render = voice.player.lastRenderTime, render.isHostTimeValid, render.hostTime < when else {
+                throw AudioFailure("audio node passed its common start deadline")
+            }
             voice.player.play(at: AVAudioTime(hostTime: when))
         }
         if let midi { try midi.runCoordinated(anchorNanoseconds: AudioConvertHostTimeToNanos(anchor)) }

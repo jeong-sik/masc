@@ -23,6 +23,67 @@ func source(_ id:String,_ rows:[UmpPacket],numer:UInt32=1,denom:UInt32=1,extent:
 }
 func clip(_ id:String="clip",source:String="take",start:Double=0,offset:String="0",extent:String="1000000000",repeatCount:UInt64=1)->UmpRegion{UmpRegion(id:id,source:source,startSeconds:start,offset:offset,extent:extent,repeatCount:repeatCount)}
 func owner(_ sources:[UmpRegionSource],_ clips:[UmpRegion],duration:Double=1)throws->UmpRegionTransport{try UmpRegionTransport(timeline:UmpArrangement(schemaVersion:1,duration:duration,sources:sources,regions:clips))}
+// Project-zero crops retain an exact absolute phase across a partial head and
+// a compressed tail. Each absolute deadline rounds once, including when the
+// first retained host tick is itself a fractional nanosecond after zero.
+func exactClip(_ id:String,startN:String,startD:String,start:Double,offset:String,extent:String,repeats:UInt64=1)->UmpRegion {
+ var region=clip(id,source:"adjacent",start:start,offset:offset,extent:extent,repeatCount:repeats)
+ region.component = .midi
+ region.startNanoseconds=CaptureStartNanoseconds(numerator:startN,denominator:startD)
+ return region
+}
+let adjacent=source("adjacent",[packet(0,on),packet(1,off)],numer:125,denom:3,extent:"4800001")
+for fractional in [false,true] {
+ let head=exactClip("head",startN:fractional ? "95":"0",startD:fractional ? "3":"1",start:fractional ? 95/3/1e9:0,offset:fractional ? "1":"1200000",extent:fractional ? "4800000":"3600001")
+ let tailN=fractional ? "600000095":"450000125",tailSeconds=Double(tailN)!/3/1e9
+ let tail=exactClip("tail",startN:tailN,startD:"3",start:tailSeconds,offset:"0",extent:"4800001",repeats:2)
+ let projected=try owner([adjacent],[tail,head])
+ let h=projected.clips.first{$0.id=="head"}!,t=projected.clips.first{$0.id=="tail"}!
+ precondition(h.end==t.start && h.next(copy:0,index:h.endIndex)==t.start,"exact adjacent boundary rounds once")
+ host=0;sent=[];try projected.stageCoordinated(at:0);try projected.runCoordinated(anchorNanoseconds:10)
+ host=10+t.start-1;projected.tick();precondition(!sent.contains{$0.1==on},"tail must not start before its exact rounded deadline")
+ host=10+t.start;projected.tick();precondition(sent.last!.1==on,"tail acquires at the common boundary")
+ host=10+t.next(copy:0,index:1);projected.tick();precondition(sent.last!.1==off)
+ // A real tenth-nanosecond physical overlap is still refused, even if its
+ // two integer scheduler boundaries coincide after rounding.
+ let overlap=exactClip("overlap",startN:String(UInt128(tailN)!*10-3),startD:"30",start:(Double(tailN)!*10-3)/30/1e9,offset:"0",extent:"4800001")
+ refuses{_ = try owner([adjacent],[head,overlap])}
+ projected.finish(reason:"test",error:nil,publish:false)
+}
+let mismatch=exactClip("mismatch",startN:"0",startD:"1",start:1,offset:"0",extent:"1")
+refuses{_ = try owner([adjacent],[mismatch])}
+// Fractional entry and future deadlines retain original zero-length wire pairs;
+// a genuinely late callback still skips a wholly expired pair.
+for tick:UInt64 in [1,2] {
+ let pairs=source("adjacent",[packet(tick,on),packet(tick,off)],numer:125,denom:3,extent:"4800001")
+ let entry=exactClip("entry",startN:"95",startD:"3",start:95/3/1e9,offset:"1",extent:"4800000",repeats:2)
+ for late in [false,true] {
+  let owner=try owner([pairs],[entry]),c=owner.clips[0]
+  host=0;sent=[];try owner.stageCoordinated(at:0);try owner.runCoordinated(anchorNanoseconds:10)
+  let due=c.next(copy:0,index:0)
+  if tick==2 {host=10+c.start;owner.tick();precondition(sent.isEmpty)}
+  host=10+due+(late ? 1:0);owner.tick()
+  precondition(sent.map{$0.1} == (late ? []:[on,off]),"ceil-due wire pair differs from expired history")
+  if !late {let next=c.next(copy:1,index:0);host=10+next;owner.tick();precondition(Array(sent.suffix(2)).map{$0.1}==[on,off])}
+  owner.finish(reason:"test",error:nil,publish:false)
+ }
+}
+// Ordinary fractional tempos produce large exact binary denominators. Compare
+// real bounds without overflowing cross products, including unequal fractions.
+func display(_ n:UInt128,_ d:UInt128)->Double {let scale=d*1_000_000_000;return Double(n/scale)+Double(n%scale)/Double(scale)}
+let tempoN:UInt128=2_111_062_325_329_920_000_000_000,tempoD:UInt128=4_341_751_515_761_869
+for differentDenominator in [false,true] {
+ let first=exactClip("one",startN:String(tempoN),startD:String(tempoD),start:display(tempoN,tempoD),offset:"0",extent:"4800000")
+ let n=tempoN*2*(differentDenominator ? 10:1)+(differentDenominator ? tempoD:0),d=tempoD*(differentDenominator ? 10:1)
+ let second=exactClip("two",startN:String(n),startD:String(d),start:display(n,d),offset:"0",extent:"4800000")
+ _ = try owner([adjacent],[first,second],duration:2)
+}
+// A twenty-minute placement at tempo120.1 has an exact final ceil one ns
+// beyond the rounded display sum. The prepared horizon must cover that bound.
+let longN:UInt128=1_690_327_662_532_287_092_050_000_000,longD:UInt128=1_408_547_695_956_241
+let long=exactClip("long",startN:String(longN),startD:String(longD),start:display(longN,longD),offset:"0",extent:"4800000")
+refuses{_ = try owner([adjacent],[long],duration:1200.25)}
+_ = try owner([adjacent],[long],duration:1200.250000001)
 // An optional retained real recording is supplied by the installed-runtime
 // probe. It uses the same production decoder/region owner and synthetic send
 // edge; no endpoint registration or opening is needed for this reproduction.

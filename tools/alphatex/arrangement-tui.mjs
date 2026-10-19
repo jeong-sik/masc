@@ -21,6 +21,7 @@ import { measureAudioCalibration } from './audio-calibration.mjs'
 import { calibrationMilliseconds, calibrationResidual, validateCalibrationCapture } from './calibration-profile.mjs'
 
 const help = [
+  ':phrase opens a new phrase; :edit-midi [ASSET] [PATTERN] makes an editable variant; Enter places its new asset',
   ':practice BARS on|off   count-in bars and metronome; :record also starts stopped backing',
   ':record-calibration DIRECTORY   inspect next-take measurement; :record-correction pulse N | manual MS IN OUT | none',
   ':calibration-open DIRECTORY   inspect saved samples/clocks; :calibration-apply PULSE_NUMBER adopts one displayed residual',
@@ -60,20 +61,21 @@ const help = [
   'Channel scopes filter system/SysEx. Transport/edits finalize recording; whole looping remains unfinished.',
 ]
 
-export async function viewArrangement({ path, loaded, initialDocument, root = resolve('music-projects'), embedded = false, signal, output, midiOutput } = {}) {
+export async function viewArrangement({ path, loaded, initialDocument, root = resolve('music-projects'), embedded = false, signal, output, midiOutput, initialRoute } = {}) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('Arrangement editor requires a terminal')
   if ((path || loaded) && initialDocument) throw new Error('Open a saved arrangement or a new one, one at a time')
   if (signal?.aborted) return
   if (loaded) await verifyArrangementAssets(loaded.project, dirname(loaded.path), { signal })
   else loaded = path ? await loadArrangement(path, { signal }) : null
   if (signal?.aborted) return
+  if (initialRoute && (output !== undefined || midiOutput !== undefined)) throw new Error('Choose a handoff route or output selections')
   let editor = arrangementEditor(initialDocument ?? loaded?.project), saved = loaded?.project
   path = loaded?.path ?? join(root, `arrangement-${randomUUID()}.json`)
   path = resolve(path)
   if (!loaded) await verifyArrangementAssets(editor.project, dirname(path), { signal })
   if (signal?.aborted) return
   let sourceRoot = dirname(path), revision = loaded?.revision ?? null
-  let accepting = true, closed = false, suspended = false, takeAbort = null, takeTask = null, task = Promise.resolve(), prompt = null, status = 'Import a WAV or MIDI source with :help', showHelp = false
+  let accepting = true, closed = false, suspended = false, takeAbort = null, takeTask = null, phrasePreparation = null, task = Promise.resolve(), prompt = null, status = 'Import a WAV or MIDI source with :help', showHelp = false
   let pendingDraw = null, sequence = 0, workerFailure = null, recovery = null, terminatingWorker = false
   const failedSavePaths = new Set()
   const directory = await mkdtemp(join(tmpdir(), 'masc-arrangement-play-'))
@@ -81,7 +83,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   try { worker = new Worker(new URL('./arrangement-worker.mjs', import.meta.url)) }
   catch (error) { await rm(directory, { recursive: true, force: true }); throw error }
   const jobs = new Map(), players = new Map(), preparations = new Set(), wasRaw = process.stdin.isRaw
-  let transport = { kind: 'stopped' }, generation = 0, preparing = null, route = arrangementRoute({ output, midiOutput })
+  let transport = { kind: 'stopped' }, generation = 0, preparing = null, route = initialRoute ? structuredClone(initialRoute) : arrangementRoute({ output, midiOutput })
   let monitoring = null, monitorOutput = null
   let liveMidi = null, liveRoutes = [], liveTransitions = Promise.resolve()
   const playerPlans = new Map(), planInspections = new Map()
@@ -378,7 +380,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     return started
   }
   function openTake(asset) {
-    if (!accepting || takeTask) return
+    if (!accepting || takeTask || phrasePreparation) return
     stop()
     const expected = ++generation
     transport = { kind: 'preparing' }; status = 'Preparing captured source…'
@@ -417,6 +419,52 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     preparation.catch(error => { if (accepting) { status = error.message; draw() } }).finally(() => preparations.delete(preparation))
     draw()
   }
+  function openPhrase(asset, pattern) {
+    if (!accepting || takeTask || phrasePreparation) return
+    stop()
+    const expected = generation, project = editor.project, clip = selectedRegion(editor)
+    const prepared = request({ kind: 'prepare-phrase', project, asset }, id => { preparing = id })
+    transport = { kind: 'preparing' }; status = 'Opening MIDI experiment'
+    const preparation = (async () => {
+      let controller
+      try {
+        const document = await prepared
+        if (generation === expected) preparing = null
+        await Promise.allSettled([...players.values()])
+        if (!accepting || generation !== expected) return
+        const { viewSequencer } = await import('./sequencer-tui.mjs')
+        if (!accepting || generation !== expected) return
+        controller = new AbortController(); takeAbort = controller; takeTask = preparation
+        suspended = true; transport = { kind: 'stopped' }; process.stdin.off('keypress', keypress)
+        await Promise.all([settleMonitoring(), settleLiveMidi()])
+        if (!accepting || controller.signal.aborted) return
+        const bindings = (route.portBindings ?? []).filter(binding => binding.asset === asset).map(({ port, destination }) => ({ port, destination }))
+        const midiOutput = document.kind === 'midi-source' ? route.midiOutput : bindings.find(binding => binding.port === 0)?.destination ?? route.midiOutput
+        const edited = await viewSequencer({ initialDocument: document, root: join(sourceRoot, 'phrases'),
+          embedded: true, signal: controller.signal, pattern: pattern ?? (clip?.asset === asset ? clip.pattern : undefined),
+          output: midiOutput === undefined && !bindings.length ? route.output : undefined, midiOutput,
+          initialPortBindings: document.kind === 'midi-source' ? bindings : [] })
+        if (!accepting || controller.signal.aborted || generation !== expected || editor.project !== project || !edited?.changed) return
+        const imported = await request({ kind: 'import-phrase', project, document: edited.project })
+        if (!accepting || controller.signal.aborted || generation !== expected || editor.project !== project) return
+        adopt(arrangementImported(editor, imported)); status = 'MIDI variant imported; Enter places the new asset'
+      } catch (error) { if (generation === expected) { preparing = null; transport = { kind: 'stopped' }; status = error.message } }
+      finally {
+        if (controller && takeAbort === controller) {
+          takeAbort = null; suspended = false
+          if (accepting && !closed) process.stdin.on('keypress', keypress)
+        }
+        if (takeTask === preparation) takeTask = null
+        if (phrasePreparation === preparation) phrasePreparation = null
+        startMonitoring()
+        transitionLiveMidi(async () => { await settleLiveMidi(); const live = startLiveMidi(); if (live) await live.ready }).catch(() => {})
+        draw()
+      }
+    })()
+    phrasePreparation = preparation; preparations.add(preparation)
+    preparation.catch(error => { if (accepting) { status = error.message; draw() } }).finally(() => preparations.delete(preparation))
+    draw()
+  }
   async function save(target = path) {
     target = resolve(target)
     const project = editor.project, nextRoot = dirname(target)
@@ -433,6 +481,8 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   }
   async function effect(value) {
     switch (value.kind) {
+      case 'phrase': openPhrase(); break
+      case 'edit-midi': openPhrase(value.asset, value.pattern); break
       case 'record-calibration': {
         recordingInspection = null
         if (!input || !route.output) throw new Error('Select :input and :mixed-output before inspecting a recording calibration')

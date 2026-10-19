@@ -135,6 +135,12 @@ export function arrangementCommand(editor, line) {
       count(2)
       if (!['on', 'off'].includes(args[1])) throw new Error('Choose metronome on or off')
       value = { kind: 'practice', practice: { countInBars: Number(args[0]), metronome: args[1] === 'on' } }; break
+    case 'phrase': count(0); return { editor, effect: { kind: command } }
+    case 'edit-midi': {
+      count(0, 2); const asset = args[0] ?? editor.asset
+      if (!editor.project.assets.some(item => item.id === asset && item.kind === 'midi')) throw new Error('Choose a MIDI asset to edit')
+      return { editor, effect: { kind: command, asset, ...(args[1] === undefined ? {} : { pattern: pattern(args[1]) }) } }
+    }
     case 'record-calibration':
     case 'calibration-open':
       if (!tail) throw new Error('Choose a saved calibration experiment directory')

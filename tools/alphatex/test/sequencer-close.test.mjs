@@ -2,16 +2,18 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { EventEmitter } from 'node:events'
-import { join, resolve } from 'node:path'
+import { join, resolve, dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
+import { arrangementRoute, selectArrangementRoute } from '../arrangement-playback.mjs'
+import { arrangementFromPhrase } from '../phrase-arrangement.mjs'
 import * as editor from '../sequencer-editor.mjs'
 import { harmonyAt, PPQ } from '../sequencer-project.mjs'
 
 // Exercise actual controller decisions with owned IO substitutes. No terminal
 // output, layout, audio hardware or player behavior is asserted.
 async function controller(options = {}) {
-  const observed = { saved: [], workers: [], writes: [], copies: [], sessions: 0, players: 0 }
+  const observed = { saved: [], workers: [], writes: [], copies: [], sessions: 0, players: 0, arrangements: [] }
   const process = new EventEmitter()
   process.stdin = new EventEmitter()
   Object.assign(process.stdin, { isTTY: true, isRaw: false,
@@ -28,18 +30,20 @@ async function controller(options = {}) {
     process, mkdtemp: async () => '/synthetic-temp', rm: async () => {},
     writeFile: async path => { observed.writes.push(path) },
     copyFile: async (from, to) => { observed.copies.push([from, to]) },
-    constants, join, resolve, tmpdir: () => '/synthetic', randomUUID, emitKeypressEvents() {},
+    arrangementRoute, selectArrangementRoute, dirname, constants, join, resolve, tmpdir: () => '/synthetic', randomUUID, emitKeypressEvents() {},
     openPlayback(value) { observed.players++; if (options.playback) return options.playback(value); throw new Error('Unexpected playback') }, Worker,
     Note: { fromMidi: String }, ...editor, harmonyAt, PPQ,
     loadProject: async () => { throw new Error('Unexpected load') },
     saveProject: async (path, project) => { observed.saved.push(structuredClone(project)); return 'revision' },
     projectMidi() { throw new Error('Unexpected MIDI export') }, safeText: String,
+    async openArrangement(value) { observed.arrangements.push(value); await options.arrangement?.(value) },
     async openSession(value) { observed.sessions++; await options.session?.(value) },
   }
   const source = (await readFile(new URL('../sequencer-tui.mjs', import.meta.url), 'utf8'))
     .replace(/^import .*$/gm, '')
     .replace("new URL('./sequencer-worker.mjs', import.meta.url)", "new URL('file:///synthetic-worker')")
     .replace("await import('./music-session.mjs')", 'await Promise.resolve({ viewSession: openSession })')
+    .replaceAll("await import('./arrangement-tui.mjs')", 'await Promise.resolve({ viewArrangement: openArrangement })')
   const prefix = `const {${Object.keys(globalThis[slot]).join(',')}} = globalThis[${JSON.stringify(slot)}];\n`
   const { viewSequencer } = await import('data:text/javascript;base64,' + Buffer.from(prefix + source).toString('base64'))
   const signal = new AbortController()
@@ -172,4 +176,42 @@ test('MIDI and audio route decisions fence obsolete jobs and drain the previous 
   assert.equal(requests[2].midiOutput, undefined)
   view.key('q'); await view.done
   assert.equal(view.process.stdin.isRaw, false)
+})
+
+
+test('phrase-to-arrangement handoff preserves the editable parent, output intent and keyboard ownership',async()=>{
+ let release;const closed=new Promise(resolve=>{release=resolve})
+ const view=await controller({midiOutput:'-123',arrangement:()=>closed})
+ view.command('chord Cmaj7 0 4 drop2');view.command('arrange');await flush()
+ const worker=view.observed.workers[0],job=worker.requests[0]
+ assert.equal(job.options.format,'arrangement')
+ worker.emit('message',{id:job.id,ok:true,result:arrangementFromPhrase(job.project)});await flush()
+ const handoff=view.observed.arrangements[0]
+ assert.deepEqual(handoff.initialDocument.assets[0].phrase,job.project)
+ assert.equal(handoff.initialRoute.kind,'midi');assert.equal(handoff.initialRoute.midiOutput,'-123')
+ assert.equal(handoff.embedded,true);assert.equal(view.process.stdin.listenerCount('keypress'),0)
+ release();await flush();assert.equal(view.process.stdin.listenerCount('keypress'),1)
+ view.command('undo');view.key('q');await view.done
+ assert.equal(view.observed.saved.at(-1).tracks[0].notes.length,0)
+ assert.equal(handoff.initialDocument.assets[0].phrase.tracks[0].notes.length,4)
+ assert.equal(view.process.stdin.isRaw,false)
+})
+
+test('closing pending arrangement preparation cancels it and rejects a late handoff',async()=>{
+ const view=await controller();view.key('return');view.command('arrange');await flush()
+ const worker=view.observed.workers[0],job=worker.requests[0]
+ view.key('q');await view.done
+ assert.equal(Atomics.load(new Int32Array(job.cancel),0),1)
+ worker.emit('message',{id:job.id,ok:true,result:arrangementFromPhrase(job.project)});await flush()
+ assert.equal(view.observed.arrangements.length,0);assert.equal(view.process.stdin.isRaw,false)
+})
+
+test('parent shutdown aborts an active arrangement and waits for its child lifetime',async()=>{
+ let release;const pending=new Promise(resolve=>{release=resolve})
+ const view=await controller({arrangement:()=>pending});view.key('return');view.command('arrange');await flush()
+ const worker=view.observed.workers[0],job=worker.requests[0]
+ worker.emit('message',{id:job.id,ok:true,result:arrangementFromPhrase(job.project)});await flush()
+ let returned=false;view.done.then(()=>{returned=true});view.signal.abort();await flush()
+ assert.equal(view.observed.arrangements[0].signal.aborted,true);assert.equal(returned,false)
+ release();await view.done;assert.equal(view.process.stdin.isRaw,false)
 })

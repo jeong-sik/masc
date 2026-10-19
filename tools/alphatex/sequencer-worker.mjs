@@ -1,3 +1,4 @@
+import { arrangementFromPhrase } from './phrase-arrangement.mjs'
 import { parentPort } from 'node:worker_threads'
 import { writeFileSync } from 'node:fs'
 import { sourceMidiTimeline } from './midi-source-playback.mjs'
@@ -6,7 +7,11 @@ parentPort.on('message', async job => {
   try {
     const cancelled = () => Atomics.load(new Int32Array(job.cancel), 0) !== 0
     let result
-    if (job.options.format === 'midi') {
+    if (cancelled()) throw new Error('Preparation cancelled')
+    if (job.options.format === 'arrangement') {
+      result = arrangementFromPhrase(job.project)
+      if (cancelled()) throw new Error('Arrangement preparation cancelled')
+    } else if (job.options.format === 'midi') {
       const timeline = job.project.kind === 'midi-source' ? sourceMidiTimeline(job.project, job.options) : projectMidiTimeline(job.project, job.options)
       if (cancelled()) throw new Error('MIDI preparation cancelled')
       writeFileSync(job.path, JSON.stringify(timeline), { flag: 'wx', mode: 0o600 })

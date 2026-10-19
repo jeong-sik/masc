@@ -1,6 +1,7 @@
+import { arrangementRoute, selectArrangementRoute } from './arrangement-playback.mjs'
 import { mkdtemp, rm, writeFile, copyFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join, resolve, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { emitKeypressEvents } from 'node:readline'
@@ -13,6 +14,7 @@ import { safeText } from './terminal.mjs'
 import { openPlayback } from './playback.mjs'
 
 const help = [
+  ':arrange snapshots this phrase into backing; q returns to this draft',
   'Source seek/resume restores channel state; unknown initial or opaque device state is an error.',
   'Arrow keys: time/pitch; Shift+arrows: move note; Enter/x: insert/remove note',
   'Tab: track; n: new track; m: mute; o: solo; u/y: undo/redo',
@@ -41,7 +43,7 @@ const help = [
 ]
 
 export async function viewSequencer({ path, root = resolve('music-projects'), embedded = false, signal,
-  soundfontPath, sessionRoot, input, midi, output, midiOutput, initialDocument, pattern } = {}) {
+  soundfontPath, sessionRoot, input, midi, output, midiOutput, initialDocument, pattern, initialPortBindings = [] } = {}) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('Sequencer requires a terminal')
   if (path && initialDocument) throw new Error('Open a saved document or import MIDI, one at a time')
   const loaded = path ? await loadProject(path, { signal }) : null
@@ -53,10 +55,11 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   if (output !== undefined && midiOutput !== undefined) throw new Error('Choose an audio output or a MIDI destination')
   let editor = newEditor(initialDocument ?? loaded?.project, { pattern }), revision = loaded?.revision ?? null
   path = loaded?.path ?? join(root, `phrase-${randomUUID()}.json`)
+  const initialSnapshot = editor.project
   let saved = loaded?.project, status = 'Enter a note or :help', prompt = null, showHelp = false
-  let loop = false, accepting = true, closed = false, suspended = false, task = Promise.resolve(), sessionTask = null
+  let loop = false, accepting = true, closed = false, suspended = false, task = Promise.resolve(), childTask = null
   let selectedOutput = output
-  let selectedMidiOutput = midiOutput, portBindings = []
+  let selectedMidiOutput = midiOutput, portBindings = structuredClone(initialPortBindings)
   const sessionAbort = new AbortController()
   const directory = await mkdtemp(join(tmpdir(), 'masc-sequencer-'))
   const worker = new Worker(new URL('./sequencer-worker.mjs', import.meta.url))
@@ -208,9 +211,44 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       if (accepting && !closed) { process.stdin.on('keypress', keypress); draw() }
     }
   }
+  function arrange() {
+    if (!accepting || childTask) return
+    if (editor.project.kind === 'midi-source') throw new Error('Create an arrangement from an editable phrase; import original MIDI in the arrangement editor')
+    stop()
+    const expected = generation, snapshot = editor.project
+    const route = arrangementRoute({ output: selectedOutput, midiOutput: selectedMidiOutput })
+    const bindings = structuredClone(portBindings)
+    const job = render(snapshot, { format: 'arrangement' })
+    transport = { kind: 'rendering', cancel: job.cancel }; status = 'Preparing phrase for arrangement'
+    let entered = false
+    const owned = (async () => {
+      try {
+        const result = await job.promise
+        await Promise.allSettled([...players.values()])
+        if (!accepting || closed || generation !== expected) return
+        const { viewArrangement } = await import('./arrangement-tui.mjs')
+        if (!accepting || closed || generation !== expected) return
+        let initialRoute = route
+        for (const binding of bindings) initialRoute = selectArrangementRoute(initialRoute,
+          { kind: 'midi-port', asset: result.asset, ...binding })
+        entered = true; suspended = true; transport = { kind: 'stopped' }
+        process.stdin.off('keypress', keypress)
+        await viewArrangement({ initialDocument: result.project, root: dirname(path), embedded: true,
+          signal: sessionAbort.signal, initialRoute })
+        status = 'Returned from arrangement; phrase draft retained'
+      } catch (error) { if (accepting && generation === expected) { transport = { kind: 'stopped' }; status = error.message } }
+      finally {
+        if (entered) { suspended = false; if (accepting && !closed) process.stdin.on('keypress', keypress) }
+        if (childTask === owned) childTask = null
+        draw()
+      }
+    })()
+    childTask = owned
+  }
   async function effect(value) {
-    if (!accepting && ['play', 'record', 'wave'].includes(value.kind)) return
+    if (!accepting && ['play', 'record', 'wave', 'arrange'].includes(value.kind)) return
     switch (value.kind) {
+      case 'arrange': arrange(); break
       case 'save': await save(); break
       case 'save-as': await save(value.path); break
       case 'export': await writeFile(value.path, projectMidi(editor.project), { flag: 'wx', mode: 0o600 }); status = `Exported ${value.path}`; break
@@ -243,7 +281,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         break
       }
       case 'help': showHelp = !showHelp; break
-      case 'record': if (!sessionTask) sessionTask = record().catch(error => { status = error.message }).finally(() => { sessionTask = null }); break
+      case 'record': if (!childTask) childTask = record().catch(error => { status = error.message }).finally(() => { childTask = null }); break
     }
   }
   async function keypress(text, key = {}) {
@@ -336,7 +374,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     for (const job of jobs.values()) { Atomics.store(job.cancel, 0, 1); job.reject(new Error('Sequencer closed')) }
     jobs.clear()
     try {
-      await Promise.allSettled([task, sessionTask, worker.terminate(), ...players.values()])
+      await Promise.allSettled([task, childTask, worker.terminate(), ...players.values()])
       if (dirty()) {
         try { await save() }
         catch {
@@ -354,4 +392,5 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       if (recovery) process.stderr.write(`Phrase edits retained at ${recovery}\n`)
     }
   }
+  return { project: editor.project, pattern: editor.pattern, changed: editor.project !== initialSnapshot }
 }

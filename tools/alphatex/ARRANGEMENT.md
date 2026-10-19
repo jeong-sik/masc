@@ -106,6 +106,14 @@ project directory. A missing or changed asset is an error, not an empty track.
 WAV verification is a read-time observation; future playback must own its opened
 sources, not treat a returned pathname as an immutable operating-system handle.
 
+Older schema-1 captured assets omitted `midiTime`. Reopen reconstructs only that
+missing field from verified project-owned capture files before strict document
+validation. All four file hashes, raw packet bounds and manifest/clock provenance
+must agree; malformed existing bounds remain errors. Reopen leaves the stored
+JSON untouched and retains its original revision for conflict-safe saving. The
+next explicit save writes the verified bounds, including null bounds for a
+WAV-only take.
+
 The shared musical-document entrypoint routes arrangement documents to their
 editor before acquiring phrase-editor terminal, worker or rendering resources.
 WAV assets are verified before the arrangement editor acquires raw terminal mode.

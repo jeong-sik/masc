@@ -46,6 +46,7 @@ describe('artifact library user flow', () => {
     const view = render(html`<${ArtifactsSurface} />`)
     fireEvent.click(await view.findByRole('button', { name: /주간 조사 보고서/ }))
     expect(await view.findByRole('heading', { name: first.title })).toBeTruthy()
+    fireEvent.click(view.getByText('보고서 정보'))
     expect(view.getByRole('link', { name: 'task-42' }).getAttribute('href')).toContain('task=task-42')
     fireEvent.click(view.getByRole('button', { name: '원본', exact: true }))
     expect(view.getByLabelText('문서 원본').textContent).toBe(document.content)
@@ -54,6 +55,9 @@ describe('artifact library user flow', () => {
     expect(await view.findByRole('heading', { name: '조사 초안' })).toBeTruthy()
     fireEvent.click(view.getByRole('button', { name: '원본', exact: true }))
     expect(view.getByLabelText('문서 원본').textContent).toBe('# 이전 원본')
+    fireEvent.click(view.getByRole('button', { name: '목록으로' }))
+    expect(navigate).toHaveBeenLastCalledWith('workspace', { section: 'artifacts' })
+    expect(view.queryByRole('dialog')).toBeNull()
     fireEvent.input(view.getByRole('searchbox'), { target: { value: 'designer' } })
     expect(view.queryByRole('button', { name: /주간 조사 보고서/ })).toBeNull()
     expect(view.getByRole('button', { name: /동작하는 차트/ })).toBeTruthy()
@@ -64,6 +68,9 @@ describe('artifact library user flow', () => {
     const view = render(html`<${ArtifactsSurface} />`)
     expect(await view.findByRole('heading', { name: '조사 초안' })).toBeTruthy()
     expect((view.getByLabelText('문서 버전') as HTMLSelectElement).value).toBe('1')
+    fireEvent(view.getByRole('dialog'), new Event('cancel', { cancelable: true }))
+    expect(navigate).toHaveBeenLastCalledWith('workspace', { section: 'artifacts' })
+    expect(view.queryByRole('dialog')).toBeNull()
   })
 
   it('opens HTML in an opaque sandbox with a restrictive resource policy', async () => {

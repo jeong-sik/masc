@@ -142,6 +142,8 @@ try {
   assert.equal(await article.getByLabel('문서 버전').inputValue(), '1')
   notes.push('actual dashboard selection, GFM table rendering, source bytes, old version download and URL reload')
 
+  await page.keyboard.press('Escape')
+  await page.getByRole('dialog').waitFor({ state: 'detached' })
   await library.getByRole('searchbox').fill('실행 가능한')
   await library.getByRole('button', { name: /실행 가능한 보고서/ }).click()
   const frame = page.frameLocator('iframe[title="실행 가능한 보고서"]')
@@ -157,7 +159,11 @@ try {
   await frame.getByRole('button', { name: '확인 1회' }).click()
   await frame.getByRole('button', { name: '확인 2회' }).waitFor()
   await page.screenshot({ path: join(output, `${mode}-mobile-html.png`), fullPage: true })
+  await article.getByRole('button', { name: '목록으로' }).click()
+  await page.getByRole('dialog').waitFor({ state: 'detached' })
+  assert.equal(await library.getByRole('searchbox').inputValue(), '실행 가능한')
   notes.push('desktop/mobile HTML counter interaction and denied parent document/storage/fetch; screenshots retained')
+  notes.push('Escape and Back return from the reader to the preserved catalog search')
   assert.deepEqual(errors, [], 'unexpected browser script errors')
   evidence.documents = records
   evidence.status = 'passed'

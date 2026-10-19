@@ -81,6 +81,11 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, Keeper·Work·�
   명시적 refresh·저장 후 조회 요구는 진행 중 요청 뒤의 새 조회 한 번으로 모은다. 앞선 응답을
   저장 후 최신 관측이라고 부르지 않는다. Overview/Runtime surface의 별도 reader까지 공유됐다고
   확대해서 주장하지 않는다. ETag 재사용은 진행 중 요청 공유와 별개다.
+- full decoder가 반환한 typed snapshot과 assignment를 함께 재사용한다. 기본 route를 얻으려고
+  같은 JSON의 snapshot을 다시 해석하거나 현재 전역 catalogue를 끌어오지 않는다. lane 참조·
+  runtime 중복·default 일관성 검증과 usage 관측의 독립 오류를 유지한다. 순수 catalogue 해석은
+  기존 response-decode CPU 경로에서 하고, HTTP/cache·read owner·UI 반영은 caller에 둔다.
+  `runtime.catalog.decode_wait`는 pool 대기와 결과 전달을 포함하며 paint·순수 CPU 시간은 아니다.
 - 재조회·실패 중 마지막 정상 catalogue를 남기고 refreshing/stale과 마지막 실패를 함께
   보여 준다. 정상 empty 결과는 loading이 아니다. 기존 exact replacement의 fresh-read 조건은
   유지한다. 화면 문구 기대값 대신 요청·소유 상태·결정 시나리오를 작성한다.

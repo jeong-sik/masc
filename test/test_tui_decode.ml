@@ -8598,7 +8598,10 @@ let test_decode_runtime_resolved () =
 let test_decode_runtime_resolved_full () =
   match Tui_decode.decode_runtime_resolved_full runtime_resolved_json with
   | Error err -> Alcotest.fail err
-  | Ok (runtimes, lanes, assignments) ->
+  | Ok catalog ->
+      let snapshot = catalog.Tui_decode.rrc_snapshot in
+      let runtimes = snapshot.rrs_runtimes and lanes = snapshot.rrs_lanes
+      and assignments = catalog.rrc_assignments in
       Alcotest.(check int) "both runtimes decode" 2 (List.length runtimes);
       Alcotest.(check int) "lanes decode" 1 (List.length lanes);
       (match lanes with
@@ -8610,6 +8613,51 @@ let test_decode_runtime_resolved_full () =
            Alcotest.(check bool) "a table declares this lane" true lane.rrl_declared
        | _ -> Alcotest.fail "expected exactly one lane");
       Alcotest.(check int) "assignments decode" 1 (List.length assignments)
+
+let test_catalog_reuses_snapshot_route_and_assignment_provenance () =
+  let lane = `Assoc ["id",`String "primary";"declared",`Bool true;
+    "runtime_ids",`List [`String "ollama_cloud.deepseek";`String "exact.embed"]] in
+  let assignment = `Assoc ["keeper",`String "orbiter";"assignment_source",`String "explicit";
+    "resolved",`Assoc ["kind",`String "lane";"id",`String "primary"]] in
+  let json = runtime_resolved_json
+    |> replace_assoc_field "default_route" (`String "primary")
+    |> replace_assoc_field "lanes" (`List [lane])
+    |> replace_assoc_field "assignments" (`List [assignment]) in
+  let catalog = match Tui_decode.decode_runtime_resolved_full json with
+    | Ok catalog -> catalog | Error detail -> Alcotest.fail detail in
+  let snapshot = catalog.Tui_decode.rrc_snapshot in
+  Alcotest.(check (option string)) "configured route remains a lane, not its entry runtime"
+    (Some "primary") snapshot.rrs_default_route;
+  Alcotest.(check (option string)) "entry runtime shares the validated snapshot"
+    (Some "ollama_cloud.deepseek") snapshot.rrs_default_runtime_id;
+  Alcotest.(check (option string)) "source path retained with the observation"
+    (Some "/workspace/config/runtime.toml") snapshot.rrs_config_path;
+  Alcotest.(check string) "source timestamp retained"
+    "2026-08-24T10:20:02Z" snapshot.rrs_generated_at_iso;
+  Alcotest.(check (list string)) "candidate order is still server order"
+    ["ollama_cloud.deepseek";"exact.embed"]
+    (List.map (fun (runtime : Tui_decode.runtime_option) -> runtime.ro_id) snapshot.rrs_runtimes);
+  (match catalog.rrc_assignments with
+   | [assignment] ->
+       (match assignment.ra_resolution with
+        | Runtime_assignment_lane lane ->
+            Alcotest.(check string) "assignment references this snapshot's lane" "primary" lane
+        | Runtime_assignment_missing | Runtime_assignment_unavailable _ ->
+            Alcotest.fail "assignment lost the lane validated against this snapshot")
+   | assignments -> Alcotest.failf "expected one assignment, got %d" (List.length assignments));
+  Alcotest.(check bool) "missing usage-window observation remains an independent error" true
+    (Result.is_error snapshot.rrs_usage)
+
+let test_catalog_reuse_preserves_rejection_of_invalid_documents () =
+  let absent_lane = `Assoc ["keeper",`String "orbiter";"assignment_source",`String "explicit";
+    "resolved",`Assoc ["kind",`String "lane";"id",`String "not-declared"]] in
+  List.iter (fun json ->
+    match Tui_decode.decode_runtime_resolved_full json with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "invalid document was promoted to a reusable catalogue")
+    [ runtime_resolved_json |> replace_assoc_field "source" (`String "/other/source")
+    ; runtime_resolved_json |> replace_assoc_field "assignments" (`List [absent_lane])
+    ; runtime_resolved_json |> replace_assoc_field "runtimes" (`List [picker_default_runtime;picker_default_runtime]) ]
 
 let test_exact_slot_group_is_typed () =
   let change_group group = function
@@ -8723,8 +8771,8 @@ let test_decode_runtime_resolved_lane_needs_its_origin () =
   in
   match Tui_decode.decode_runtime_resolved_full json with
   | Error detail -> Alcotest.fail detail
-  | Ok (_, lanes, _) ->
-      (match lanes with
+  | Ok catalog ->
+      (match catalog.Tui_decode.rrc_snapshot.rrs_lanes with
        | [ lane ] ->
            Alcotest.(check bool) "no table declares it" false lane.Tui_decode.rrl_declared
        | other -> Alcotest.failf "expected one lane, got %d" (List.length other))
@@ -13150,6 +13198,10 @@ let () =
           test_decode_runtime_resolved;
         Alcotest.test_case "carries runtimes, lanes, and assignments" `Quick
           test_decode_runtime_resolved_full;
+        Alcotest.test_case "catalogue retains one snapshot for route and assignment provenance" `Quick
+          test_catalog_reuses_snapshot_route_and_assignment_provenance;
+        Alcotest.test_case "catalogue reuse preserves document and assignment validation" `Quick
+          test_catalog_reuse_preserves_rejection_of_invalid_documents;
         Alcotest.test_case "exact slot destination is typed" `Quick
           test_exact_slot_group_is_typed;
         Alcotest.test_case "exact body deadline flag is optional" `Quick

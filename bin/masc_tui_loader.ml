@@ -970,10 +970,11 @@ let load_runtime_resolved ~(host : string) ~(port : int) :
   match fetch_runtime_resolved ~host ~port with
   | Error err -> Error ("runtime catalogue load failed: " ^ err)
   | Ok json ->
-      let ( let* ) = Result.bind in
-      let* runtimes, lanes, assignments = Tui_decode.decode_runtime_resolved_full json in
-      let* snapshot = Tui_decode.decode_runtime_resolved_snapshot json in
-      Ok (runtimes, lanes, assignments, snapshot.rrs_default_route)
+      Masc_tui_response_decode.run ~name:"runtime.catalog.decode_wait" (fun () ->
+        Tui_decode.decode_runtime_resolved_full json
+        |> Result.map (fun catalog ->
+          let snapshot = catalog.Tui_decode.rrc_snapshot in
+          snapshot.rrs_runtimes, snapshot.rrs_lanes, catalog.rrc_assignments, snapshot.rrs_default_route))
 
 (** One read of [/api/v1/runtime/resolved] for the Overview: the runtime rows
     and the provider usage windows. The two decode apart, and a failed fetch
@@ -988,7 +989,7 @@ let load_overview_runtime_resolved ~(host : string) ~(port : int) :
   | Ok json ->
       Masc_tui_response_decode.run ~name:"runtime.quota.decode_wait" (fun () ->
         ( Result.map
-            (fun (options, _lanes, _assignments) -> options)
+            (fun catalog -> catalog.Tui_decode.rrc_snapshot.rrs_runtimes)
             (Tui_decode.decode_runtime_resolved_full json)
         , Masc.Tui_decode_usage.decode_provider_usage_windows json ))
 

@@ -10,6 +10,7 @@ import { Note } from 'tonal'
 import { newEditor, editorCommand, editorAction, selectedNote, editorView, editorAxis, editorHarmony } from './sequencer-editor.mjs'
 import { loadProject, saveProject, projectMidi } from './sequencer-files.mjs'
 import { sourceTickAtSeconds, sourceSecondsAtTick } from './midi-source-playback.mjs'
+import { sourceExpressions, selectedExpression } from './midi-source-editor.mjs'
 import { safeText } from './terminal.mjs'
 import { openPlayback } from './playback.mjs'
 import { InstrumentPicker } from './instruments.mjs'
@@ -17,6 +18,9 @@ import { defaultStateDirectory, snapshotWriter } from './vst.mjs'
 import { renderVstPhrase } from './sequencer-vst.mjs'
 
 const help = [
+  'Source :events toggles expression list; Up/Down selects, Enter edits value, +/- changes, x removes.',
+  ':cc CTRL VALUE [AT] :bend VALUE [AT] :program VALUE [AT] :pressure VALUE [AT] :poly-pressure KEY VALUE [AT]',
+  ':event ID; :event-value VALUE; :event-move AT; :event-set KIND VALUES; :event-channel CH; :event-remove',
   ':arrange snapshots this phrase into backing; q returns to this draft',
   'Source seek/resume restores channel state; unknown initial or opaque device state is an error.',
   'Arrow keys: time/pitch; Shift+arrows: move note; Enter/x: insert/remove note',
@@ -139,7 +143,15 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       const start = Math.max(0, picker.view.cursor - height + 1)
       for (let i = start; i < Math.min(items.length, start + height); i++) lines.push(`${i === picker.view.cursor ? '›' : ' '} ${items[i].name}`)
     } else if (showHelp) lines.push(...help)
-    else {
+    else if (editor.project.kind === 'midi-source' && editor.eventView) {
+      const events = sourceExpressions(editor), capacity = Math.max(1, rows - 9)
+      const selected = events.findIndex(event => event.id === editor.selectedExpressionID)
+      const first = Math.max(0, selected - capacity + 1)
+      lines.push('Expression events · Up/Down selects · Shift+Left/Right moves · Enter edits value · :events returns to notes')
+      for (const event of events.slice(first, first + capacity)) lines.push(
+        `${event.id === editor.selectedExpressionID ? '>' : ' '} ${event.id} · ${event.tick / per} ${axis.label} · port ${event.port} ch ${event.channel + 1} · ${event.kind}${event.controller === undefined ? '' : ' ' + event.controller}${event.pitch === undefined ? '' : ' ' + Note.fromMidi(event.pitch)} · ${event.value}`)
+      if (!events.length) lines.push('No expression events in this track/channel. :channel CH then :cc CTRL VALUE AT inserts one.')
+    } else {
       const first = Math.floor(editor.tick / (editor.step * cols)) * editor.step * cols
       const barTicks = project.timingLabel ? per : project.meter[0] * per * 4 / project.meter[1]
       const ruler = Array.from({ length: cols }, (_, x) => {
@@ -384,17 +396,27 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         case 'r': await effect({ kind: 'record' }); break
         case 'l': if (editor.project.kind === 'midi-source') throw new Error('MIDI source clip looping requires the arrangement transport'); stop(); loop = !loop; break
         case 'tab': editor = editorAction(editor, { kind: 'track' }); break
-        case 'return': case 'x': editor = editorAction(editor, { kind: 'toggle-note' }); break
-        case 'delete': case 'backspace': editor = editorAction(editor, { kind: 'remove' }); break
+        case 'return':
+          if (editor.eventView) {
+            const event = selectedExpression(editor)
+            if (!event) throw new Error('Select an expression event first')
+            prompt = 'event-value ' + event.value
+          } else editor = editorAction(editor, { kind: 'toggle-note' })
+          break
+        case 'x': editor = editorAction(editor, { kind: editor.eventView ? 'expression-remove' : 'toggle-note' }); break
+        case 'delete': case 'backspace': editor = editorAction(editor, { kind: editor.eventView ? 'expression-remove' : 'remove' }); break
         case 'u': editor = editorAction(editor, { kind: 'undo' }); break
         case 'y': editor = editorAction(editor, { kind: 'redo' }); break
         case 'm': editor = editorAction(editor, { kind: 'mute' }); break
         case 'o': editor = editorAction(editor, { kind: 'solo' }); break
         case 'g': editor = editorAction(editor, { kind: 'grid' }); break
-        case 'left': case 'right': editor = editorAction(editor, { kind: key.shift ? 'move-note' : 'move', ticks: editor.step * (key.name === 'left' ? -1 : 1) }); break
-        case 'up': case 'down': editor = editorAction(editor, { kind: key.shift ? 'move-note' : 'move', pitches: key.name === 'up' ? 1 : -1 }); break
+        case 'left': case 'right': editor = editorAction(editor, { kind: key.shift ? editor.eventView ? 'expression-move' : 'move-note' : 'move', ticks: editor.step * (key.name === 'left' ? -1 : 1) }); break
+        case 'up': case 'down': editor = editorAction(editor, editor.eventView ? { kind: 'expression-next', direction: key.name === 'down' ? 1 : -1 }
+          : { kind: key.shift ? 'move-note' : 'move', pitches: key.name === 'up' ? 1 : -1 }); break
         default:
-          if (text === '[' || text === ']') editor = editorAction(editor, { kind: 'duration', value: (selectedNote(editor)?.duration ?? editor.duration) * (text === '[' ? 0.5 : 2) })
+          if (editor.eventView) {
+            if (['+', '=', '-'].includes(text)) editor = editorAction(editor, { kind: 'expression-value', delta: text === '-' ? -1 : 1 })
+          } else if (text === '[' || text === ']') editor = editorAction(editor, { kind: 'duration', value: (selectedNote(editor)?.duration ?? editor.duration) * (text === '[' ? 0.5 : 2) })
           else if (['+', '=', '-'].includes(text)) editor = editorAction(editor, { kind: 'velocity', value: (selectedNote(editor)?.velocity ?? editor.velocity) + (text === '-' ? -1 : 1) })
       }
       if (original !== editor.project) { stop(); status = 'Edited' }

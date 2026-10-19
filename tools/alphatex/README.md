@@ -535,3 +535,40 @@ Original MIDI variants preserve the full source document and expression events;
 they are not reduced to generated phrase notes. Input monitoring and backing
 owners close before another editor takes the keyboard; close/cancel cannot open
 a late child or import a stale variant.
+
+### Edit original MIDI expression
+
+Open imported MIDI or use `:edit-midi` in an arrangement. `:events` switches
+between notes and the expression list for the current track/channel. Up/Down
+selects an event; Enter opens its value for editing; `+`/`-` changes that value;
+Shift+Left/Right moves it by the current grid; `x`/Delete removes it. `u`/`y`
+undoes/redoes document changes. The list includes event IDs, source positions,
+ports and channels. `:event ID` selects an event directly.
+
+```
+channel 1
+cc 74 99 0.25
+bend 12345 0.5
+program 33 0.5
+pressure 64 0.5
+poly-pressure C4 63 0.5
+event-value 80
+event-move 1
+event-set cc 11 90
+event-channel 2
+event-remove
+```
+
+Insert commands accept an optional source position (the cursor when omitted).
+Positions use beats for PPQ sources and frames for SMPTE sources, resolving to
+whole source ticks. Select a channel before inserting into an ambiguous track.
+Program, controller and pressure values use MIDI's 0–127 wire numbers; pitch bend
+uses 0–16383 with center 8192, following the
+[MIDI Association's channel message table](https://midi.org/expanded-midi-1-0-messages-list).
+
+Each command edits one explicit event. Existing same-tick event order is retained;
+new events follow existing events at the same tick. Bank selection, RPN/NRPN and
+other controller sequences are not automatically combined or rewritten. Moving
+an existing event across a source port change is refused. Notes, unrelated
+patterns, SysEx and metadata remain in the original performance; export and
+arrangement variants carry the selected edits alongside the original bytes.

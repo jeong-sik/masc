@@ -2093,6 +2093,20 @@ Keeper's effective Tool surface, async requests, Skill activations, cross-Keeper
 Skill usage, and the registered Tool catalog. This keeps the Skill views from
 being buried below a long Tool list.
 
+In async requests, `J/K` selects an original request and `Enter` opens its
+detail. `r` refreshes that exact request; `Esc` returns to the active list.
+The selection stays on the original submitter, request ID and target Keeper
+when a terminal request disappears from the active list. `o` opens an editor
+with those three JSON fields, so a known terminal request can also be read
+directly without browsing history. The target Keeper cannot stand in for the
+original submitter.
+
+The detail separates the physical worker outcome from its original Composition
+run, source Task, owner generation and explicit logical decision. Unavailable
+logical evidence stays separate from a successful physical read. Refresh
+failures retain the last observation with its failure; retained logical data is
+marked as an earlier reading. Status observations do not authorize replay.
+
 The Skill Usage pane opens with a summary box: observed catalog entries,
 distinct Keepers, and separate `TRIGGERED`, `DELIVERED`, and `ACTIONS` totals.
 These are observations from current Keeper sessions at exact Skill revisions,

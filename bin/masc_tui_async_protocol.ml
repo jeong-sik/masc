@@ -465,6 +465,7 @@ type async_msg =
   | Skills_catalog_loaded of int * (Masc.Tui_decode_tools.skills_catalog, string) result
   | Skill_evidence_loaded of unit ref * string * (Yojson.Safe.t, string) result
   | Tools_async_observation_loaded of int * (Masc.Tui_decode.async_request_observation, string) result
+  | Tools_async_detail_loaded of Masc_tui_types.tools_async_detail_request * (Masc.Tui_decode_async_request.reading, string) result
   | Runtime_lane_slots_written of
       Masc_tui_types.runtime_lane_list
       * (Masc_tui_types.slot_editor_target * Masc_tui_types.slot_editor_identity * Masc_tui_types.slot_editor_identity) option
@@ -904,6 +905,7 @@ let rec workspace_message_is_read = function
   | Skills_catalog_loaded _
   | Skill_evidence_loaded _
   | Tools_async_observation_loaded _
+  | Tools_async_detail_loaded _
   | Runtime_catalog_loaded _
   | Keeper_tool_approvals_loaded _
   | Approvals_summary_loaded _
@@ -1109,7 +1111,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Browser_lane_screenshot_ready _ | Connectors_status_loaded (_, _) | Connectors_loaded (_, _)
     | Connector_unbind_all_done _ | Runtime_surface_loaded (_, _)
     | Tools_loaded (_, _, _) | Skills_catalog_loaded (_, _)
-    | Skill_evidence_loaded (_, _, _) | Tools_async_observation_loaded (_, _)
+    | Skill_evidence_loaded (_, _, _) | (Tools_async_observation_loaded (_, _) | Tools_async_detail_loaded _)
     | Runtime_lane_slots_written (_, _, _) | Runtime_catalog_loaded (_, _)
     | Runtime_assignment_changed (_, _, _)
     | Keeper_chat_approval_answered (_, _, _, _)
@@ -1244,7 +1246,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Browser_lane_follow_loaded (_, Error _) | Connectors_status_loaded (_, _) | Connectors_loaded (_, _)
   | Connector_unbind_all_done _ | Runtime_surface_loaded (_, _)
   | Tools_loaded (_, _, _) | Skills_catalog_loaded (_, _)
-  | Skill_evidence_loaded (_, _, _) | Tools_async_observation_loaded (_, _)
+  | Skill_evidence_loaded (_, _, _) | (Tools_async_observation_loaded (_, _) | Tools_async_detail_loaded _)
   | Runtime_lane_slots_written (_, _, _) | Runtime_catalog_loaded (_, _)
   | Runtime_assignment_changed (_, _, _)
   | Keeper_chat_approval_answered (_, _, _, _)

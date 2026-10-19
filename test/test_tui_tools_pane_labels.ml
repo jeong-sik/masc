@@ -30,7 +30,7 @@ let async_json =
   `Assoc
     [ "schema", `String "masc.async-request-observation/v1"; "status", `String "ready"
     ; "summary", `Assoc [ "active", `Int 1; "runtime_owned", `Int 1; "ownership_unknown", `Int 0; "record_errors", `Int 0 ]
-    ; "requests", `List [ `Assoc [ "request_id", `String "req-capture-0001"; "keeper_name", `String "imp"; "status", `String "running"; "worker_ownership", `String "runtime_owned"; "elapsed_sec", `Float 12.5 ] ]
+    ; "requests", `List [ `Assoc [ "request_id", `String "req-capture-0001"; "submitted_by", `String "capture-owner"; "keeper_name", `String "imp"; "status", `String "running"; "worker_ownership", `String "runtime_owned"; "elapsed_sec", `Float 12.5 ] ]
     ; "startup_recovery", `Null ]
 
 let ledger_of_json revision =

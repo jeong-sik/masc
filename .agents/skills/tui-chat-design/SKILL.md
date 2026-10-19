@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인계와 늦은 터미널 응답, 비동기 조회·설정 저장·긴 질문의 요약과 전체 읽기·Ask 답변과 재조회를 바꿀 때 쓴다. Keeper·Work·로그·Board·Runtime·Overview·Tools·Connectors의 원본 요청·입력·revision·소유권, 준비 상세·현재 턴·이력·구성 조회·디렉터리 페이지의 workspace 검증과 캐시 영수증, 공유 조회와 부분 실패, worker 관측·UI 반영·paint 증거를 구분한다."
+description: "MASC TUI의 원본 비동기 요청 상세·물리/논리 관측, 채팅·입력·로딩·진행 상태, 시작 키 인계와 늦은 터미널 응답, 비동기 조회·설정 저장·긴 질문의 요약과 전체 읽기·Ask 답변과 재조회를 바꿀 때 쓴다. Keeper·Work·로그·Board·Runtime·Overview·Tools·Connectors의 원본 요청·입력·revision·소유권, 준비 상세·현재 턴·이력·구성 조회·디렉터리 페이지의 workspace 검증과 캐시 영수증, 공유 조회와 부분 실패, worker 관측·UI 반영·paint 증거를 구분한다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -107,6 +107,28 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인�
   포함하며 순수 CPU 시간·paint·Task 진척이 아니다. 명시적 정상 경로의 GET 6→3은
   실제 속도 50% 개선을 뜻하지 않는다. 비교와 미실행 시나리오는
   `docs/audits/2026-10-19-tui-tools-composed-workspace-reads.md`를 따른다.
+
+## 원본 비동기 요청 상세
+
+- Tools 비동기 목록은 원래 `submitted_by`·request ID·대상 Keeper를 함께 보관한다.
+  J/K 선택과 Enter 상세는 그 원본을 사용한다. 요청이 활성 목록에서 사라져도 선택이나
+  열린 상세를 다른 행으로 바꾸지 않는다. `o`의 명시적 원본 ID 조회도 같은 경로를 쓰며
+  현재 Keeper를 빠진 요청자나 대상으로 채우지 않는다. 원문 ID 입력 중 기존 초안과
+  workspace/read authority를 보존하고 철회된 입력으로 새 조회를 시작하지 않는다.
+- 단건 GET은 기존 workspace admission·공유 IO/CPU 경계를 쓴다. 원래 요청자·요청 ID·
+  대상의 echo와 물리 상태/결과, run·원본 Task·논리 owner·종결 결정을 엄격히 읽는다.
+  물리적 대기/실패와 논리적 종결, 조회 불가를 구분하고 조회를 Task 진척으로 표시하지 않는다.
+- 상세는 원래 fetched ticket·read authority·선택과 일치할 때만 반영한다. 명시적 재조회는
+  이전 worker에 취소를 요청하고 새 ticket을 소유하며, cadence는 진행 중 읽기를 공유한다.
+  늦은 응답·worker 정리는 새 읽기를 끝내거나 덮지 않는다. 닫기·pane 변경·workspace 철회는
+  원래 읽기만 retire하며 실제 정리는 공통 workspace job registry가 소유한다.
+- 같은 원본의 재조회/실패는 이전 물리 관측과 원인을 보존한다. 물리 조회가 성공해도 논리
+  읽기에 실패하면, 요청 context까지 같은 이전 논리만 별도로 남기고 최신 확인이 아니라고
+  표시한다. 다른 원본이나 workspace에는 이전 관측을 빌려주지 않는다. 목록 재확인 실패도
+  마지막 정상 목록을 숨기거나 정상 빈 목록으로 만들지 않는다.
+- 상세를 볼 때 cadence는 그 단건을 읽으며 전체 Tool·Skill 목록을 기다리지 않는다.
+  이 경로를 실제 화면·키 반응·속도 증거로 부르지 않는다. 검사는 원래 자원·API·소유권과
+  상태를 대상으로 작성하고 문구·배치·행 순서·snapshot·PTY 검사는 만들지 않는다.
 
 ## Connector 조회와 페이지
 

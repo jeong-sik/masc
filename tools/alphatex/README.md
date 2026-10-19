@@ -378,3 +378,33 @@ buffers retain their own channel counts, so mono input can target a stereo
 output without duplicating the signal onto the other channel. This routing is
 the per-channel prerequisite for measured calibration adoption; measurement
 inspection/adoption and recording-wide calibration policy remain subsequent work.
+
+### Inspect and adopt an audio calibration
+
+Select a separated audio component, choose its `:capture-channel INPUT OUTPUT`
+route, and select the measured playback output with `:mixed-output OUTPUT_UID`.
+Use `:calibration-open /path/to/calibrations/EXPERIMENT` to inspect a saved
+`:calibrate` experiment. The IO worker snapshots its seven evidence files,
+regenerates the known reference and recomputes both matches from recorded PCM
+and host clocks. Changed candidate numbers, reference data or captured bytes
+are errors. Both signed residuals, correlations, spread and sample resolution
+are shown before adoption; no confidence threshold or average is applied.
+
+`:calibration-apply 1` or `:calibration-apply 2` explicitly replaces that audio
+component's placement with the chosen pulse's exact signed residual. Positive
+values advance audio; negative values delay it. This is one undoable edit and
+never moves MIDI. The source input UID/rate, unmonitored capture and selected
+input/output channels must match. Playback also requires the measured output
+UID, sample rate and CoreAudio hardware buffer size. To choose different channels or a
+manual value, use `:capture-offset 0` (or another manual offset) first.
+
+The portable document embeds the original measurement record, inspected
+clock/pulse summary and all evidence content hashes. Its hash and device/pulse
+fields must still agree on reopen, with no external pathname dependency. SaveAs/reopen therefore
+retain the adoption decision even if the original experiment is moved. Keep the
+original experiment for full PCM reanalysis. A saved decision is historical
+measurement evidence, not a promise that cable paths, input hardware settings or
+monitoring configuration remain unchanged: remeasure after changing that setup.
+This is explicit captured-component playback placement; recording correction
+policy and count-in remain separate work. No audio measurement is reused as a
+MIDI or acoustic latency guarantee.

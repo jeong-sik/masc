@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { Worker } from 'node:worker_threads'
 import { emitKeypressEvents } from 'node:readline'
 import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } from './arrangement-playback.mjs'
-import { arrangementEditor, arrangementAction, arrangementCommand, arrangementImported, selectedRegion } from './arrangement-editor.mjs'
+import { arrangementEditor, arrangementAction, arrangementCommand, arrangementImported, arrangementCalibrated, selectedRegion } from './arrangement-editor.mjs'
 import { loadArrangement, verifyArrangementAssets, saveArrangement } from './arrangement-files.mjs'
 import { saveProject } from './sequencer-files.mjs'
 import { safeText } from './terminal.mjs'
@@ -16,8 +16,10 @@ import { openLiveMidi, backingMidiClaims, liveMidiPlan } from './live-midi.mjs'
 import { midiDestinations } from './playback.mjs'
 import { recordingEpoch } from './arrangement-recording.mjs'
 import { measureAudioCalibration } from './audio-calibration.mjs'
+import { calibrationMilliseconds, validateCalibrationCapture } from './calibration-profile.mjs'
 
 const help = [
+  ':calibration-open DIRECTORY   inspect saved samples/clocks; :calibration-apply PULSE_NUMBER adopts one displayed residual',
   ':capture-channel IN_CH OUT_CH   route one captured audio channel; :capture-channel all restores every source channel',
   ':split-take   separate selected captured audio/MIDI; :capture-offset MS (positive advances, negative delays)',
   ':calibrate OUTPUT_UID IN_CH OUT_CH MAX_LAG_MS  audio loopback candidates; Esc/q cancels and returns',
@@ -81,6 +83,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   const playerPlans = new Map(), planInspections = new Map()
   let recording = null, input = null, midiInput = 'all', transportPending = false, inputDevices = null, discoveryTicket = 0
   let calibration = null
+  let calibrationInspection = null
   const discovery = new AbortController()
   let complete
   const done = new Promise(resolve => { complete = resolve })
@@ -269,6 +272,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     draw()
   }
   function adopt(next) {
+    if (next.project !== editor.project || next.region !== editor.region) calibrationInspection = null
     if (next.project !== editor.project) stop()
     editor = next
   }
@@ -394,6 +398,26 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   }
   async function effect(value) {
     switch (value.kind) {
+      case 'calibration-open': {
+        calibrationInspection = null
+        const project = editor.project, region = editor.region, output = route.output
+        const clip = selectedRegion(editor)
+        if (clip?.component !== 'audio' || !clip.audioChannel) throw new Error('Choose a separated audio component and :capture-channel first')
+        status = 'Verifying retained calibration samples and clocks'; draw()
+        const profile = await request({ kind: 'inspect-calibration', path: value.path })
+        if (!accepting || editor.project !== project || editor.region !== region || route.output !== output) return
+        validateCalibrationCapture(profile, project.assets.find(asset => asset.id === clip.asset), clip, output ?? null)
+        calibrationInspection = { profile, project, region, output }
+        status = 'Inspect both pulses; :calibration-apply 1 or 2 explicitly adopts one residual'
+        break
+      }
+      case 'calibration-apply': {
+        const owned = calibrationInspection
+        if (!owned || owned.project !== editor.project || owned.region !== editor.region || owned.output !== route.output) throw new Error('Open calibration for the current component and output before applying it')
+        adopt(arrangementCalibrated(editor, { profile: owned.profile, match: value.match, output: route.output }))
+        status = 'Selected measured audio advance applied; original MIDI and source retained'
+        break
+      }
       case 'calibrate': {
         if (workerFailure) throw workerFailure
         if (!input) throw new Error('Select :input AUDIO_UID before calibration')
@@ -567,17 +591,22 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     const monitorInfo = recording?.monitoring ?? monitoring?.info
     const reportedLatency = monitorInfo ? ` · ${((monitorInfo.latency.inputSeconds + monitorInfo.latency.outputSeconds) * 1000).toFixed(2)} ms reported I/O` : ''
     const rows = process.stdout.rows || 24, width = Math.max(1, (process.stdout.columns || 80) - 24)
+    const profile = calibrationInspection?.profile ?? clip?.placement?.profile
+    const residuals = profile?.pulses.map(pulse => calibrationMilliseconds(profile, pulse))
     const lines = [`Arrangement · ${project.title}${project !== saved ? ' *' : ''} · ${project.tempo} BPM · ${project.meter.join('/')}`,
       `Cursor ${editor.tick / project.ppq} beats · grid ${editor.step / project.ppq} · ${status}`,
       `Playback ${transport.kind} · ${(transport.event?.currentTime ?? 0).toFixed(2)} s · ${transport.event?.device.name ?? route.output ?? route.midiOutput ?? 'default output'}`,
       `Recording ${recording?.phase ?? 'idle'} · input ${input ?? 'choose :input'} · MIDI ${midiInput}`,
       `Monitor ${recording?.monitoring ? 'active to ' + recording.monitoring.output.id : monitoring ? monitoring.phase + ' to ' + monitorOutput : 'off'}${reportedLatency}`,
       `MIDI monitor ${liveMidi?.phase ?? 'off'}${liveMidi?.info ? ' · ' + liveMidi.info.bindings.map(binding => binding.device.name + ' ← ' + binding.source).join(', ') : ''}`]
+    if (profile) lines.push(`Calibration ${profile.input.id}:${profile.input.channel} → ${profile.output.id}:${profile.output.channel} · ${profile.input.sampleRate}/${profile.output.sampleRate} Hz`,
+      ...profile.pulses.map((pulse, index) => `Pulse ${index + 1}: ${residuals[index].toFixed(3)} ms · correlation ${pulse.correlation.toFixed(6)}`),
+      `Spread ${(Math.max(...residuals) - Math.min(...residuals)).toFixed(3)} ms · sample resolution ${(1000 / profile.input.sampleRate).toFixed(6)} ms`)
     if (inputDevices !== null) lines.push(...inputDevices)
     else if (showHelp) lines.push(...help)
     else {
       const left = Math.floor(editor.tick / editor.step / width) * width * editor.step
-      const selected = project.lanes.findIndex(lane => lane.id === editor.lane), capacity = Math.max(1, rows - 10)
+      const selected = project.lanes.findIndex(lane => lane.id === editor.lane), capacity = Math.max(1, rows - 10 - (profile ? 4 : 0))
       const start = Math.max(0, selected - capacity + 1)
       lines.push(`Window starts at ${left / project.ppq} quarter-note beats; each cell ${editor.step / project.ppq} beats`)
       for (const [index, lane] of project.lanes.slice(start, start + capacity).entries()) {
@@ -591,7 +620,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         lines.push(`${lane.id === editor.lane ? '>' : ' '} ${index + start + 1} ${lane.name.slice(0, 12).padEnd(12)} ${lane.muted ? 'm' : '-'}${lane.solo ? 's' : '-'} ${cells.join('')}`)
       }
       if (!project.lanes.length) lines.push('Import a source, then Enter or :place to add its first lane and region.')
-      lines.push(clip ? `${clip.id} · ${clip.name}${clip.audioChannel ? ` [input ${clip.audioChannel.input} → output ${clip.audioChannel.output}]` : ''}${clip.component ? ` (${clip.component}${clip.placement ? `, manual advance ${Number(clip.placement.advanceNanoseconds.numerator) / Number(clip.placement.advanceNanoseconds.denominator) / 1e6} ms` : ''})` : ''} · beat ${clip.position / project.ppq} · source ${clip.offset}+${clip.extent} ${project.assets.find(asset => asset.id === clip.asset).kind === 'capture' ? 'host ticks' : ''} · repeat ${clip.repeat}${clip.pattern === undefined ? '' : ` · pattern ${clip.pattern + 1}`}` : 'Up/Down selects a region on the current lane.')
+      lines.push(clip ? `${clip.id} · ${clip.name}${clip.audioChannel ? ` [input ${clip.audioChannel.input} → output ${clip.audioChannel.output}]` : ''}${clip.component ? ` (${clip.component}${clip.placement ? `, ${clip.placement.kind === 'calibrated' ? 'measured' : 'manual'} advance ${Number(clip.placement.advanceNanoseconds.numerator) / Number(clip.placement.advanceNanoseconds.denominator) / 1e6} ms` : ''})` : ''} · beat ${clip.position / project.ppq} · source ${clip.offset}+${clip.extent} ${project.assets.find(asset => asset.id === clip.asset).kind === 'capture' ? 'host ticks' : ''} · repeat ${clip.repeat}${clip.pattern === undefined ? '' : ` · pattern ${clip.pattern + 1}`}` : 'Up/Down selects a region on the current lane.')
       lines.push(asset ? `${asset.id} · ${asset.name} · ${asset.kind === 'wave' ? `${asset.metadata.frames} frames / ${asset.metadata.sampleRate} Hz / ${asset.metadata.channels} channels` : asset.kind === 'capture' ? `${asset.manifest.audioFrames} frames + ${asset.manifest.midiPacketCount} UMP packets; Enter opens the take` : 'original MIDI ticks; format-2 patterns require explicit selection'}` : 'No imported asset. :import-wave FILE or :import-midi FILE')
       lines.push(`Library ${project.assets.length} sources · ${project.clips.length} regions · a cycles sources · ? help`, path)
     }

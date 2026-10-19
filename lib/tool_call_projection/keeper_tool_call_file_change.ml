@@ -316,7 +316,7 @@ let kind_of_row ~(handler : Keeper_tool_descriptor.runtime_handler) row =
   | Keeper_tool_descriptor.Tool_browser_instruct
   | Keeper_tool_descriptor.Tool_browser_interact
   | Keeper_tool_descriptor.Tool_lane_addon _
-  | Keeper_tool_descriptor.Tool_analyze_image -> Ok None
+  | Keeper_tool_descriptor.Tool_analyze_image | Keeper_tool_descriptor.Tool_read_image -> Ok None
 
 (* The call's own outcome, read by the rule every tool-call log reader shares.
    A deferred write has not changed the file yet. A row that does not say how

@@ -95,7 +95,7 @@ let of_handler (handler : Keeper_tool_descriptor.runtime_handler) =
     | Keeper_tool_descriptor.Tool_masc_file_dispatch
     | Keeper_tool_descriptor.Tool_masc_wiki_dispatch
     | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
-    | Keeper_tool_descriptor.Tool_analyze_image ) ->
+    | Keeper_tool_descriptor.Tool_analyze_image | Keeper_tool_descriptor.Tool_read_image ) ->
     Failure_returns_to_model
 ;;
 

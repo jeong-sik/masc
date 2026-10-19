@@ -83,7 +83,8 @@ let producer_authorization_owner descriptor =
   | Keeper_tool_descriptor.Tool_masc_file_dispatch
   | Keeper_tool_descriptor.Tool_masc_wiki_dispatch
   | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
-  | Keeper_tool_descriptor.Tool_analyze_image | Keeper_tool_descriptor.Tool_lane_addon _ -> None
+  | Keeper_tool_descriptor.Tool_analyze_image | Keeper_tool_descriptor.Tool_read_image
+  | Keeper_tool_descriptor.Tool_lane_addon _ -> None
 
 let owner_reason = function
   | Execution_gate -> "the execution Gate decides this call with its resolved context"

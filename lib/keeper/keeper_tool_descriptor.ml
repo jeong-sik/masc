@@ -161,6 +161,7 @@ type runtime_handler =
   | Tool_masc_wiki_dispatch
   | Tool_masc_local_runtime_dispatch
   | Tool_analyze_image
+  | Tool_read_image
 
 type policy =
   { readonly_of_input : readonly_of_input
@@ -298,6 +299,7 @@ let runtime_handler_to_string = function
   | Tool_masc_wiki_dispatch -> "tool_masc_wiki_dispatch"
   | Tool_masc_local_runtime_dispatch -> "tool_masc_local_runtime_dispatch"
   | Tool_analyze_image -> "tool_analyze_image"
+  | Tool_read_image -> "tool_read_image"
 ;;
 
 
@@ -552,7 +554,7 @@ let descriptor
       | Tool_masc_file_dispatch
       | Tool_masc_wiki_dispatch
       | Tool_masc_local_runtime_dispatch
-      | Tool_analyze_image ) -> Ordinary ordinary_execution_mode
+      | Tool_analyze_image | Tool_read_image ) -> Ordinary ordinary_execution_mode
   in
   (* Fail-closed admission rule for parallel tool use: a descriptor may opt
      into [Concurrent] batches only when its policy carries a static
@@ -2941,12 +2943,23 @@ let internal_descriptors : t list =
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_masc_file_dispatch
       ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"keeper.vision.read_image"
+      ~name:Keeper_runtime_schemas_toml.keeper_image_read.name
+      ~description:Keeper_runtime_schemas_toml.keeper_image_read.description
+      ~input_schema:Keeper_runtime_schemas_toml.keeper_image_read.input_schema
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_read_image
+      ()
     (* ── vision delegation (RFC-keeper-vision-delegation-tool §2.6) ─ *)
   ; in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity
-      (* Unread image placeholders carry a keeper-local artifact handle.
-         The model needs this reader to recover those pixels through the
-         existing vision sub-call, including on text-only runtime lanes. *)
+      (* Text-only runtimes can recover an owned image's meaning through this
+         explicit sub-call; native readers receive pixels instead. *)
       ~keeper_model_projection:Internal_name
       ~input_schema_source:Canonical_registry
       ~id:"keeper.vision.analyze_image"
@@ -3484,7 +3497,7 @@ let prepared_leaf_admission descriptor =
         | Tool_masc_file_dispatch
         | Tool_masc_wiki_dispatch
         | Tool_masc_local_runtime_dispatch
-        | Tool_analyze_image -> Direct_only))
+        | Tool_analyze_image | Tool_read_image -> Direct_only))
 ;;
 
 let readonly_internal_names () =

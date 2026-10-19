@@ -15,6 +15,7 @@ val artifact_publish : Masc_domain.tool_schema
 val skill_validate : Masc_domain.tool_schema
 val skill_publish : Masc_domain.tool_schema
 val keeper_analyze_image : Masc_domain.tool_schema
+val keeper_image_read : Masc_domain.tool_schema
 
 (* RFC-0430 Phase 3 — provider Files tools. *)
 val file_upload : Masc_domain.tool_schema
@@ -22,6 +23,4 @@ val file_delete : Masc_domain.tool_schema
 val file_list : Masc_domain.tool_schema
 
 val schemas : Masc_domain.tool_schema list
-(** The seven, in the order a model reads them: artifact_read, fusion,
-    fusion_status, file_upload, file_delete, file_list,
-    keeper_analyze_image. *)
+(** Canonical Keeper runtime declarations, in model-facing catalog order. *)

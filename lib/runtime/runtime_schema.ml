@@ -464,8 +464,9 @@ type typesafeai_selection =
 (** [\[typesafeai\]] -- the TypeSafe AI (System One Jev) lane. Keys stay in
     the environment; each destination names the variable holding its own
     ([api_key_env]). Everything else about the lane is here. [lane_enabled]
-    turns the lane off; it cannot turn it on without a key in one of the named
-    variables. [destinations] are the System One servers asked in order until
+    turns the lane off; it cannot turn itself on — a keyless destination
+    arms the lane alone, and a destination that names a variable needs that
+    variable to hold a non-blank key. [destinations] are the System One servers asked in order until
     one answers ({!Typesafeai_client.evaluate}); TypeSafe's own server and
     OpenRouter's [/api/v1/systemone] both speak the protocol. Two gates ask
     the vendor: [board_attention] (the Board attention judgment,

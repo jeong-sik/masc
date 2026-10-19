@@ -84,7 +84,9 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # Calibrated probabilistic decisions for the board_attention_exact lane and
 # the librarian absorb gate (RFC-librarian-absorb-gate).
 # Keys stay in the environment; each destination names the variable holding
-# its own, and a non-blank key in one of them turns the lane on. Everything
+# its own, and a non-blank key in one of them turns the lane on — a
+# destination that names no variable is armed without a key, so it turns the
+# lane on by itself. Everything
 # else about the lane is the [typesafeai] table (sample at the end of this
 # block; absent means the defaults shown there; a misspelt key is a load
 # error): enabled = false turns the lane off even with a key and cannot turn
@@ -115,10 +117,14 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # selection orders the armed destinations per judgment: "in_order" (the
 # default) asks them in the order the table names them; "random" draws a
 # uniformly random armed destination first and keeps the rest as reserve, so
-# three armed destinations each answer a third of the calls. A destination
-# may leave api_key_env out entirely: it is then asked with no
+# of three armed destinations each is drawn first with probability 1/3. It
+# is a draw, not a round-robin: the final share of answered calls is close
+# to even but not exact, because a refusal moves the call on to a reserve.
+# A destination may leave api_key_env out entirely: it is then asked with no
 # Authorization header, which is how the machine's own Ollama
-# (http://127.0.0.1:11434/v1/systemone) joins the walk without a key.
+# (http://127.0.0.1:11434/v1/systemone) joins the walk without a key, and
+# it arms the lane on its own — a key is only required to arm a destination
+# that names a variable. See docs/guides/typesafeai-selection.md.
 #
 # [typesafeai]
 # enabled = true

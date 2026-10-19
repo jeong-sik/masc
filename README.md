@@ -357,6 +357,7 @@ Keeper, use its lifecycle controls in the Keepers view before closing the UI.
 | Connect external services | [Keeper identity](docs/KEEPER-IDENTITY-MANUAL.md) |
 | Add procedures and skills | [Skills](docs/SKILLS.md) |
 | Ask typed questions with a decision model | [`masc_decide` guide](docs/guides/masc-decide.md) |
+| Spread `[typesafeai]` judgments across System One servers | [`selection` guide](docs/guides/typesafeai-selection.md) |
 | Understand runtime settings and prompts | [Configuration](docs/spec/14-configuration.md) · [Environment](docs/ENV-CONTRACT.md) · [Prompt map](docs/PROMPT-MAP.md) |
 | Understand the design and next steps | [Specifications](docs/spec/SPEC-INDEX.md) · [Roadmap](ROADMAP.md) |
 | Contribute a change | [Contributing](CONTRIBUTING.md) · [Contributor workflow](docs/guides/CONTRIBUTOR-WORKFLOW.md) · [Agent instructions](AGENTS.md) |

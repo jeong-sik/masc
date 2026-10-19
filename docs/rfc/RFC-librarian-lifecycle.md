@@ -363,7 +363,7 @@ flowchart TD
 
   저장 계약은 `Librarian_continuity_snapshot` 스키마 2다. `schema_version: 2`와 `unread_messages`는 필수이며, 빈 목록도 명시한다. 다른 스키마나 필드 누락을 전부 읽음으로 바꾸지 않는다. 각 atom 메시지는 trace, 이력 시작 경계 줄, atom 번호, atom 안 메시지 번호와 원문 메시지의 durable JSON SHA-256에 묶인다. 공식 클라이언트 메시지는 턴 ID, 경계 줄, 턴 안 메시지 번호와 같은 원문 해시에 묶이며 atom 스냅숏에 섞지 않는다. 이유는 명명된 typed 크기 거절의 비어 있지 않은 집합이다. 모르는 원인, 중복 좌표, 다른 이력 세대, 스냅숏 끝 밖의 좌표, 원문과 맞지 않는 해시는 거절한다.
 
-  스냅숏의 끝은 구멍을 제외한 표현 범위다. append 때 유효한 이전 구멍을 새 working state와 함께 이어 싣고, summarized 요청은 그 원문 좌표와 원인을 working state와 함께 보낸다. purge는 이 스냅숏의 앞부분을 원문 그대로 보존하며, 구멍이 있는 스냅숏이 원문과 맞지 않으면 없는 것으로 취급해 지우지 않고 거절한다. 구멍이 있는 스냅숏 자체는 durable 소비자의 전부 읽음 증명이 아니다.
+  스냅숏의 끝은 구멍을 제외한 표현 범위다. append 때 유효한 이전 구멍을 새 working state와 함께 이어 싣는다. 요청은 working state와 별도의 pinned unread 기록으로 원문 좌표와 원인을 보낸다. purge는 이 스냅숏의 앞부분을 원문 그대로 보존하며, 구멍이 있는 스냅숏이 원문과 맞지 않으면 없는 것으로 취급해 지우지 않고 거절한다. 구멍이 있는 스냅숏 자체는 durable 소비자의 전부 읽음 증명이 아니다.
 
   Memory WAL의 atom·공식 턴 영수증 ID도 스키마 2이며, 비어 있는 경우까지 `unread_messages`를 필수로 싣는다. atom 기록은 해당 trace·이력 세대의 선택 구간 안에 있어야 하고, 공식 턴 기록은 선택된 경계 줄과 턴 ID에 있어야 한다. 누락 기록도 원래의 `Prepared → snapshot → Committed` 영수증 전체에 포함되므로 snapshot 해시와 revision으로 함께 복구된다. 사실이 바뀌지 않는 Memory 커밋에서도 같은 영수증을 남긴다. 기존의 전부 읽음 조회는 누락 목록이 비어 있을 때만 영수증을 돌려주며, 별도의 coverage 조회는 누락 기록까지 돌려준다. 이 기록은 해당 커밋 구간의 증거이며, 나중 구간으로 위치를 옮기는 소비자는 이전 구멍도 별도로 보존해야 한다.
 
@@ -372,6 +372,12 @@ flowchart TD
   소비자는 누적 기록 저장을 확인한 뒤 외부 입력 읽음 확인과 atom·공식 턴 진행 위치를 쓴다. 중간에 끊기면 Memory WAL로 위치를 복구하되, atom은 원 체크포인트 메시지 해시, 공식 턴은 선택된 history fragment 메시지 해시를 대조한 뒤 위치를 옮긴다. 일반 체크포인트 purge는 누적 원장을 보존하며, Keeper 전체를 명시적으로 삭제하는 절차는 이 원장도 삭제한다. 현재 Memory를 디코딩하지 못한 경우의 기존 격리·다시 쓰기 경로는 유지한다. 이때 증명할 수 없는 구멍을 읽은 위치의 근거로 쓰지 않는다.
 
   화면 관측은 `keeper.memory_os.current_health.v8`의 필수 `context_cycle.unread`로 전달한다. `snapshot`과 `memory`는 각기 `available`과 원문 좌표·SHA-256·명명된 크기 거절 원인 목록, 또는 `unavailable`이다. 두 저장소의 기록은 겹칠 수 있으며 한쪽 읽기 실패로 다른 쪽 기록을 숨기지 않는다. 원문 내용과 working state 본문은 보내지 않는다. Memory 항목은 이미 저장된 누적 원장을 관측할 뿐, 그 조회 자체가 영수증을 확정하거나 원장을 쓰지는 않는다. 따라서 0은 그 저장소에서 관측한 기록 수이지 전체 이력·요청을 전부 읽었다는 증명이 아니다. 기존 health 경로의 별도 Memory 복구 동작은 유지한다.
+
+  요청 조립은 같은 두 관측을 `Keeper_librarian_request_unread`의 불변 값으로 턴마다 한 번 고정한다. 먼저 실제 cursor를 선택하고, 그 뒤 누적 Memory unread 원장을 읽는다. writer가 구멍을 보존한 뒤 cursor를 옮기는 순서와 짝을 이뤄, 새 cursor와 그보다 이른 원장을 조합하지 않는다. 스냅숏 복원이 실패하거나 더 늦은 Memory 진행 위치·accepted seed가 앞머리를 정해도 raw 스냅숏에서 읽은 구멍과 누적 원장의 관측은 별개로 보존한다. 조회 실패는 해당 출처의 `unavailable`이며, 원장의 수동 복구·소비·게시를 요청 경로에서 실행하지 않는다.
+
+  이 기록은 atom을 열지 않는 독립 pinned carrier로 입력 크기 계산 전에 붙인다. working state를 용량 때문에 빼거나 이력을 하나도 싣지 않는 바닥에 도달해도 유지하며, custom projection 뒤에는 같은 고정 값을 다시 붙인다. candidate별 미디어 표현을 바꿔도 원문 좌표·해시는 다시 계산하지 않는다. Agent Core의 forecast와 `masc.continuity-request.v2` 진단도 같은 관측을 사용한다. 진단의 실제 body 해시·바이트는 전송 직렬화 경계의 관측이지 모델 이해나 저장 성공 증거가 아니다.
+
+  공식 클라이언트는 System 경로로 정상 빈 관측까지 명시적으로 보낸다. reader가 없으면 빈 목록 대신 두 출처 모두 `unavailable`이다. resume은 `Librarian_unread`라는 별도 held identity로 같은 바이트는 생략하고, 내용 변경·정상 빈 관측·조회 불가 전이는 새 기록으로 보낸다. 실제 턴이 정산된 뒤에만 이 identity를 저장한다. 빈 관측은 이전 unread가 실제로 읽혔다는 뜻이 아니며, 새 관측을 보냈다는 뜻이다. Agent Core의 새 요청은 두 출처가 정상 빈 목록이면 carrier를 생략한다.
 
   Memory가 아직 처리하지 않은 메시지는 context-only 상태로 대신하지 않는다. context-only 프롬프트는 Memory 처리가 끝났다고 전제하고 `previous_working_state`를 Memory의 근거로 쓰지 않는다. `Keeper_librarian_runtime.infer_memory_step`은 일반 Memory 프롬프트·엄격 파서·흡수/복제 판정 gate로 정확한 입력을 판단하되 저장 전에 반환한다. 반환값은 원 입력과 실행 ID, gate 원증거, 파서가 만든 사실의 시각·출처·근거, gate를 통과한 흡수, 교정·삭제 및 별도의 이어갈 상태를 보존한다. live 큐는 정리하지 않으며 Memory·continuity·영수증·읽은 위치를 게시하지 않는다. 실패·취소 관측도 Memory 조회/실패 저널을 호출하지 않으므로 별도로 남은 publication을 복구하지 않는다. 실행 원장과 typed 실패 반환에 결과를 남기며 TUI는 이 상태를 실제 저장과 구별한다.
 
@@ -387,7 +393,7 @@ flowchart TD
 
   중간 A→B→C 또는 A→B→A는 transaction과 순서 단계별 원문·판정·gate·support 무효화·흡수·교정·삭제를 가진 `ordered_program` 증거로 canonical journal에 보존한다. 실제 snapshot에는 최종 사실만 쓰며 전체 실제 prior→final delta를 기록한다. 중간 B를 저장된 과거 사실이나 일반 revision link로 만들지 않는다. 최종 facts가 같아도 실제 revision 하나와 전체 proof를 기존 publication WAL에 준비하고 snapshot rename·fsync 뒤 확정한다. 복구는 그 canonical journal과 같은 epoch·원 snapshot hash·최종 facts·원경계 소비 영수증을 대조하며 원 source나 추론을 다시 실행하지 않는다. live commit callback은 durability 확인 직후 secondary I/O 전에 한 번만 호출하고 복구는 재호출하지 않는다. journal 쓰기 실패 뒤 이미 확인된 target은 evidence-pending인 commit이다. rename 뒤 durability도 확인하지 못했으면 기존 WAL로 회복할 때까지 확정으로 보고하지 않는다.
 
-  격리와 Keeper 전체 삭제는 writer와 같은 잠금 아래 epoch를 회전해 이전 추론 권한을 무효화한다. 삭제는 먼저 이전 epoch의 pending publication을 복구·dispatch하고 잠금 안에서 pending 부재를 다시 확인한 뒤 epoch를 회전한다. 이후 삭제가 실패해도 이전 anchor는 재사용하지 못한다. Keeper 전체 삭제 계획은 epoch 파일도 소유한다. archive에는 실제로 저장됐던 원 fact의 첫 retirement 이유만 전달하고 가상 중간 fact는 올리지 않는다. ordered identity를 아직 해석하지 않는 recall은 unresolved로 남기며, 같은 ID를 raw 교체했다가 복원해도 이전 binding을 새 occurrence로 넘기지 않는다. 이 API는 저장 경계이며, Memory 미처리 메시지를 내리는 실제 floor producer와 absorbed 요청 연결은 아직 완성하지 않았다.
+  격리와 Keeper 전체 삭제는 writer와 같은 잠금 아래 epoch를 회전해 이전 추론 권한을 무효화한다. 삭제는 먼저 이전 epoch의 pending publication을 복구·dispatch하고 잠금 안에서 pending 부재를 다시 확인한 뒤 epoch를 회전한다. 이후 삭제가 실패해도 이전 anchor는 재사용하지 못한다. Keeper 전체 삭제 계획은 epoch 파일도 소유한다. archive에는 실제로 저장됐던 원 fact의 첫 retirement 이유만 전달하고 가상 중간 fact는 올리지 않는다. ordered identity를 아직 해석하지 않는 recall은 unresolved로 남기며, 같은 ID를 raw 교체했다가 복원해도 이전 binding을 새 occurrence로 넘기지 않는다. 이 API는 저장 경계이며, Memory 미처리 메시지를 내리는 실제 floor producer는 아직 완성하지 않았다. absorbed 요청의 unread 전달 연결은 위 계약을 따르되 실제 타입 검사·동작 실행·설치된 제품의 수용 증거와 구분한다.
 
   이 저장·요청 계약만으로 건너뛰기를 켜지 않는다. Memory 영수증과 진행 위치의 원자적 복구, absorbed 요청, 대시보드·TUI, TLA 불변식이 같은 뜻을 갖춘 뒤 바닥의 실제 거절을 unread 기록에 연결한다. 전체 구현은 #37850에서 추적한다.
 

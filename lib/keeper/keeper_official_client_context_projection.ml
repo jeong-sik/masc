@@ -116,6 +116,7 @@ let is_composed_system_context (message : Agent_core.Types.message) =
    | Agent_core.Types.Extra_system_context_provenance.Invalid
    | Agent_core.Types.Extra_system_context_provenance.Duplicate -> false)
   || Runtime_model_input_tail_window.is_working_state message
+  || Runtime_model_input_tail_window.is_unread_context message
 ;;
 
 let history_role_label = function
@@ -168,6 +169,8 @@ let carried_message context message =
 let carried_of_message ~composed_context (message : Agent_core.Types.message) =
   if Keeper_official_task_reference.is_reference message
   then [ carried_message Session_store.Historical_task_reference message ]
+  else if Runtime_model_input_tail_window.is_unread_context message
+  then [ carried_message Session_store.Librarian_unread message ]
   else if Runtime_model_input_tail_window.is_working_state message
   then [ carried_message Session_store.Librarian_working_state message ]
   else if is_composed_system_context message
@@ -221,6 +224,7 @@ let carried_label = function
   | Session_store.Context_block block -> "block:" ^ Prompt_block_id.to_string block
   | Session_store.Context_carrier -> "carrier"
   | Session_store.Librarian_working_state -> "librarian_working_state"
+  | Session_store.Librarian_unread -> "librarian_unread"
   | Session_store.Historical_task_reference -> "historical_task_reference"
 ;;
 
@@ -247,6 +251,7 @@ let is_block item =
   | Session_store.Context_block _ -> true
   | Session_store.Context_carrier
   | Session_store.Librarian_working_state
+  | Session_store.Librarian_unread
   | Session_store.Historical_task_reference -> false
 ;;
 
@@ -261,9 +266,9 @@ let block_text item =
 ;;
 
 let block_id item = match item.held.Session_store.context with
-  | Session_store.Context_block id -> Some id | Session_store.Context_carrier
-                                              | Session_store.Librarian_working_state
-                                              | Session_store.Historical_task_reference -> None
+  | Session_store.Context_block id -> Some id
+  | Session_store.Context_carrier | Session_store.Librarian_working_state
+  | Session_store.Librarian_unread | Session_store.Historical_task_reference -> None
 
 let rec rendered_messages = function
   | [] -> []
@@ -312,10 +317,12 @@ let resume_prompt ~goal ~held ?composed_context messages =
     | ( (( Session_store.Context_block _
          | Session_store.Context_carrier
          | Session_store.Librarian_working_state
+         | Session_store.Librarian_unread
          | Session_store.Historical_task_reference ) as current_context)
       , (( Session_store.Context_block _
          | Session_store.Context_carrier
          | Session_store.Librarian_working_state
+         | Session_store.Librarian_unread
          | Session_store.Historical_task_reference ) as previous_context) ) ->
       current_context = previous_context
   in

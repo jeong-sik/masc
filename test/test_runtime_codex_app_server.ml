@@ -6149,11 +6149,16 @@ let test_keeper_context_lifecycle_three_settled_turns () =
       | Some frontier -> frontier | None -> fail "settled context frontier missing" in
     check bool "held context requires real completion acknowledgement" true
       (frontier.acknowledged_turn=Some settlement);
-    check int "both issuer identities remain acknowledged" 2 (List.length frontier.held_context);
-    let acknowledged_blocks = List.map (fun (held : Store.held_context) ->
+    let acknowledged_blocks = List.filter_map (fun (held : Store.held_context) ->
       match held.context with
-      | Store.Context_block block -> Prompt_block_id.to_string block, held.sha256
-      | _ -> fail "this fixture should acknowledge only its two issuer blocks") frontier.held_context in
+      | Store.Context_block block -> Some (Prompt_block_id.to_string block, held.sha256)
+      | Store.Librarian_unread -> None
+      | Store.Context_carrier | Store.Librarian_working_state | Store.Historical_task_reference ->
+        fail "unexpected non-issuer context in the fixture") frontier.held_context in
+    check int "both issuer identities remain acknowledged" 2 (List.length acknowledged_blocks);
+    check int "the independent native unread observation is also acknowledged" 1
+      (List.length (List.filter (fun (held : Store.held_context) ->
+        held.context=Store.Librarian_unread) frontier.held_context));
     let expected_blocks = List.map (fun (block,text) ->
       Prompt_block_id.to_string block, Digestif.SHA256.(digest_string text |> to_hex)) issued.blocks in
     check (list (pair string string)) "settlement replaces changed block digest and preserves unchanged digest"

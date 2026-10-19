@@ -87,6 +87,7 @@ let record_completed_turn ~config =
 (* Runs one turn whose history is [covered] plus this turn's input, and
    returns the attempt errors the lane reported, newest first. *)
 let dispatch ?carried_front_seed ?(initial_messages = covered @ [msg T.User pending])
+    ?(on_error = fun () -> ())
     ~sw ~net ~base_path () =
   let errors = ref [] in
   (match Keeper_turn_driver.run_named ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk ~system_prompt:"Continuity dispatch fixture."
@@ -94,7 +95,7 @@ let dispatch ?carried_front_seed ?(initial_messages = covered @ [msg T.User pend
       ?carried_front_seed ~initial_messages ~agent_core_tools:[]
       ~goal:"Report progress."
       ~on_runtime_attempt_error:(fun ~runtime_id ~attempt:_ ~dispatch:_ error ->
-        errors := (runtime_id, error) :: !errors)
+        errors := (runtime_id, error) :: !errors;on_error ())
       ~sw ~net () with
    | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
   !errors
@@ -167,6 +168,73 @@ let test_real_dispatch_preserves_pair_across_refusal () =
   Keeper_continuity_observation.forget ~config ~keeper_name;
   check bool "cleanup removes process observation" true
     (Option.is_none (Keeper_continuity_observation.latest ~config ~keeper_name))
+;;
+
+(* A cumulative ledger changes after the first request has actually failed.
+   The fallback must carry the original request's observations and hashes,
+   rather than combining its old cursor with newly loaded evidence. *)
+let test_real_dispatch_freezes_unread_across_refusal () =
+  with_dispatch_fixture @@ fun ~sw ~net ~config ~base_path ~refused ~accepted ->
+  let module Unread = Keeper_librarian_unread in
+  let module Frozen = Keeper_librarian_request_unread in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  let hole atom reason = Unread.for_atom ~trace_id ~history_start_boundary_line:1
+    ~atom ~message_in_atom:0 ~messages:covered ~reasons:[reason] |> require in
+  let original=hole 0 Keeper_librarian_input_refusal.Input_capacity in
+  let later=hole 1 Keeper_librarian_input_refusal.Request_body_refused in
+  let boundary=record_completed_turn ~config in
+  let snapshot=S.capture ~unread_messages:[original] ~trace_id ~lines:[1,Ok boundary]
+    ~messages:covered ~working_state |> require_snapshot in
+  let path=Keeper_librarian_continuity.path ~config ~keeper_name in
+  S.save ~path snapshot |> require_snapshot;
+  let saved_before=Fs_compat.load_file path in
+  let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  (* Prepare and change valid persisted fixture evidence through the public
+     path/codec. This scenario exercises request reads, not hole publication. *)
+  let append_fixture_holes holes=Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id:keeper_name
+    (fun () ->
+      let previous=Keeper_memory_os_current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name |> require in
+      let merged=Unread.merge previous holes |> require in
+      let ledger_path=Keeper_memory_os_current.unread_ledger_path ~keepers_dir ~keeper_id:keeper_name in
+      Fs_compat.save_file_atomic_strict ledger_path
+        (Yojson.Safe.to_string (`Assoc ["schema_version",`Int 1;
+          "unread_messages",Unread.list_to_json merged])) |> require) in
+  append_fixture_holes [original];
+  let transitions=ref 0 in
+  let on_error ()=incr transitions;append_fixture_holes [later] in
+  (match dispatch ~on_error ~sw ~net ~base_path () with
+   | ("refused.sample",Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _)) :: _ -> ()
+   | _ -> fail "the real first peer did not return a typed size refusal");
+  check int "one terminal refusal precedes the fallback" 1 !transitions;
+  check int "first request reached the refusing peer" 1 (Fixture.post_count refused);
+  check int "second request reached the fallback peer" 1 (Fixture.post_count accepted);
+  let frozen=Frozen.of_results ~snapshot:(Ok [original]) ~memory:(Ok [original]) in
+  let carrier=match Frozen.text frozen with Some text -> text | None -> fail "missing unread fixture" in
+  let store=Dated_jsonl.open_store
+    (Keeper_types_support.keeper_store_location config keeper_name Continuity_requests) in
+  let evidence=Dated_jsonl.read_recent store 10 in
+  List.iter (fun (runtime,peer) ->
+    let rows=request_messages peer in
+    check bool "actual wire preserves the same frozen unread evidence" true (has_content rows carrier);
+    check bool "the exact unread original is absent from raw history" false
+      (has_content rows "Build the patch.");
+    let row=match List.find_opt (fun row -> U.member "runtime_id" row=`String runtime) evidence with
+      | Some row -> row | None -> fail "frozen request diagnostic missing" in
+    check string "diagnostic uses the unread observation schema" "masc.continuity-request.v2"
+      (row |> U.member "schema" |> U.to_string);
+    check bool "diagnostic binds precisely the sent frozen observation" true
+      (U.member "unread" row=Frozen.to_json frozen);
+    let body=List.hd (Fixture.request_bodies peer) in
+    check int "diagnostic counts the actual body bytes" (String.length body)
+      (row |> U.member "wire" |> U.member "body_bytes" |> U.to_int);
+    check string "diagnostic hashes the actual body bytes" Digestif.SHA256.(digest_string body |> to_hex)
+      (row |> U.member "wire" |> U.member "body_sha256" |> U.to_string))
+    ["refused.sample",refused;"accepted.sample",accepted];
+  let ledger=Keeper_memory_os_current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name |> require in
+  check bool "the real store changed between candidates" true (List.mem later ledger);
+  check int "both exact original holes remain in the cumulative store" 2 (List.length ledger);
+  check string "read-only dispatch preserves snapshot bytes" saved_before (Fs_compat.load_file path);
+  Keeper_continuity_observation.forget ~config ~keeper_name
 ;;
 
 (* The turn goes out from where the last completed turn ended, carrying only
@@ -268,7 +336,9 @@ let test_a_librarian_behind_refusal_resends_from_the_boundary () =
 
 let () = run "continuity HTTP dispatch"
   ["real peer", [test_case "saved pair survives provider refusal and failover" `Quick
-    test_real_dispatch_preserves_pair_across_refusal];
+    test_real_dispatch_preserves_pair_across_refusal;
+    test_case "snapshot and Memory unread freeze across actual failover" `Quick
+      test_real_dispatch_freezes_unread_across_refusal];
    "unusable snapshot", [
     test_case "an unreadable snapshot file dispatches from the turn start" `Quick
       test_unreadable_snapshot_dispatches_from_the_turn_start;

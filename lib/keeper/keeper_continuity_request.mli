@@ -13,11 +13,11 @@ type range =
       (** When true this bounded range does not certify the final custom projection. *)
   }
 
-val to_json : runtime_id:string -> selection:selection -> range:range ->
+val to_json : unread:Keeper_librarian_request_unread.t -> runtime_id:string -> selection:selection -> range:range ->
   wire:Llm_provider.Request_wire_observer.observation -> Yojson.Safe.t
 
 val record_best_effort : config:Workspace.config -> keeper_name:string ->
-  runtime_id:string -> selection:selection -> range:range ->
+  unread:Keeper_librarian_request_unread.t -> runtime_id:string -> selection:selection -> range:range ->
   wire:Llm_provider.Request_wire_observer.observation -> unit
 (** Append request identity and selection/range metadata at the existing
     pre-dispatch boundary. Missing capture identity is explicitly unbound.

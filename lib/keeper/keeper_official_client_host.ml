@@ -316,6 +316,10 @@ type carried_start =
 
 type librarian_position = Keeper_turn_driver_try_provider.librarian_position
 
+let project_source ~unread source_projection messages =
+  let result=match source_projection with None -> Ok messages | Some project -> project messages in
+  Result.map (Keeper_librarian_request_unread.attach ~include_empty:true ~role:Agent_core.Types.System unread) result
+
 type librarian_front_reader =
   Agent_core.Types.message list -> (librarian_position, Agent_core.Error.t) result
 
@@ -324,7 +328,7 @@ type librarian_front_reader =
    "no position for these messages" once, here, rather than in each lane. *)
 let read_librarian_front reader messages =
   match reader with
-  | None -> Ok Keeper_turn_driver_try_provider.No_position
+  | None -> Ok Keeper_turn_driver_try_provider.no_librarian_position
   | Some read -> read messages
 ;;
 
@@ -499,7 +503,7 @@ let carried_start_range
     | Some (accepted, _) -> max accepted first
     | None -> first
   in
-  let absorbed = librarian_front in
+  let absorbed = librarian_front.Keeper_turn_driver_try_provider.point in
   (* The range and what it must carry, decided together: a front that stands
      for absorbed atoms cannot be composed without the working state that
      stands for them. *)
@@ -546,6 +550,8 @@ let carried_start_range
       , Librarian_snapshot { absorbed_through; boundary_line } )
     | Plain (first_atom, front) -> messages, first_atom, front
   in
+  let carried_messages=Keeper_librarian_request_unread.attach ~include_empty:true ~role:Agent_core.Types.System
+    librarian_front.Keeper_turn_driver_try_provider.unread carried_messages in
   (* The cut is the same for every front. The window's omission preamble
      goes in whenever the first kept atom cannot open a conversation, working
      state or not: the working state says what the atoms before the range
@@ -754,7 +760,7 @@ let has_accepted_empty_range (carried : carried_start) =
    request the position alone cannot carry is still refused, with the error
    of that composition. *)
 let compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front =
-  match librarian_front with
+  match librarian_front.Keeper_turn_driver_try_provider.point with
   | Keeper_turn_driver_try_provider.Librarian_progress _
   | Keeper_turn_driver_try_provider.No_position -> compose librarian_front
   | Keeper_turn_driver_try_provider.Librarian_snapshot
@@ -773,8 +779,8 @@ let compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front =
      | Ok _ | Error _ ->
        let* alone =
          compose
-           (Keeper_turn_driver_try_provider.Librarian_progress
-              { end_atom = snapshot.end_atom })
+           {librarian_front with Keeper_turn_driver_try_provider.point=
+             Keeper_turn_driver_try_provider.Librarian_progress {end_atom=snapshot.end_atom}}
        in
        let leave_out reason =
          Log.Keeper.warn
@@ -825,6 +831,9 @@ let start_range_projection
     ~reserved_bytes ?on_model_input_window_observation ?carried_front_seed
     ?librarian_front ?on_carried_front ~turn_start ~keeper_name ~runtime_id
     messages =
+  let* librarian_front = read_librarian_front librarian_front messages in
+  let messages=Keeper_librarian_request_unread.attach ~include_empty:true ~role:Agent_core.Types.System
+    librarian_front.Keeper_turn_driver_try_provider.unread messages in
   let _, history_atom_count = Runtime_model_input_tail_window.annotate messages in
   let observe_window projection =
     Option.iter
@@ -856,7 +865,6 @@ let start_range_projection
       | Some projection -> projection.Runtime_model_input_tail_window.dropped_atoms
       | None -> 0
     in
-    let* librarian_front = read_librarian_front librarian_front messages in
     let carried_front_seed = read_seed_once carried_front_seed in
     let compose librarian_front =
       let carried =

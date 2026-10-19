@@ -395,6 +395,15 @@ type carried_start =
     and the lane refuses the request with it before any seed is weighed. *)
 type librarian_position = Keeper_turn_driver_try_provider.librarian_position
 
+val project_source :
+  unread:Keeper_librarian_request_unread.t ->
+  Agent_core.Agent.model_input_projection option -> Agent_core.Agent.model_input_projection
+(** Preserve the same frozen unread evidence after a custom source projection.
+    It may change the history view, but cannot remove or replace this evidence.
+    Native requests explicitly carry known empty observations too, allowing a
+    resumed session to supersede older unread evidence. The same carrier is
+    pinned before capacity measurement. *)
+
 type librarian_front_reader =
   Agent_core.Types.message list -> (librarian_position, Agent_core.Error.t) result
 (** Reads the turn's choice as a position in exactly the messages a lane is

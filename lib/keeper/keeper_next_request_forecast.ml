@@ -165,6 +165,8 @@ let carry ~measure ~continuity ~front ~accepted ~turn_start ~counted_tokens mess
   in
   let projection, transmitted_bytes =
     Keeper_turn_driver_try_provider.project_range_start
+      ~unread:(Option.fold ~none:Keeper_librarian_request_unread.empty
+        ~some:Keeper_turn_driver_try_provider.request_unread continuity)
       ~measure_message_bytes:measure
       ~atom_count
       start

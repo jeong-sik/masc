@@ -75,6 +75,11 @@ val working_state_metadata : Agent_core.Types.metadata
 (** The metadata a working-state message carries: {!working_state_marker_key}
     alone. *)
 
+val unread_context_metadata : Agent_core.Types.metadata
+val is_unread_context : Agent_core.Types.message -> bool
+(** Independent pinned request evidence, distinct from per-turn context and
+    working state. Source hashes describe the original canonical history. *)
+
 val is_working_state : Agent_core.Types.message -> bool
 (** Whether the message carries {!working_state_marker_key} under any value.
     Such a message is {!Pinned}. *)

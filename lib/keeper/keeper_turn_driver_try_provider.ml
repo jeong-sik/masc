@@ -47,7 +47,7 @@ type checkpoint_progress =
   | Checkpoint_stage_reached
   | Tool_results_saved of { tool_result_saves : int }
 
-type continuity =
+type continuity_point =
   | Without_snapshot
   | Summarized of
   { snapshot : Librarian_continuity_snapshot.t
@@ -59,7 +59,9 @@ type continuity =
   ; last_atom_digest : string
   }
 
-let without_snapshot = Without_snapshot
+type continuity = {point : continuity_point; unread : Keeper_librarian_request_unread.t}
+let without_snapshot = {point=Without_snapshot;unread=Keeper_librarian_request_unread.empty}
+let request_unread continuity = continuity.unread
 
 type continuity_choice =
   | Chose_no_point
@@ -70,7 +72,7 @@ type continuity_choice =
    [continuity] abstract -- its constructors carry a snapshot checked against
    this dispatch's checkpoint, and nothing outside should be able to make
    one. *)
-let continuity_choice = function
+let continuity_choice continuity = match continuity.point with
   | Without_snapshot -> Chose_no_point
   | Summarized _ | Absorbed _ -> Chose_a_librarian_point
 ;;
@@ -92,11 +94,11 @@ let absorbed_history ~trace_id ~messages (progress : Keeper_librarian_progress.t
     | Some opening when String.equal opening position.Keeper_librarian_progress.last_atom_digest ->
       Some
         ( end_atom
-        , Absorbed
+        , {point=Absorbed
             { trace_id
             ; end_atom
             ; last_atom_digest = position.Keeper_librarian_progress.last_atom_digest
-            } )
+            };unread=Keeper_librarian_request_unread.empty} )
     | Some _ | None -> None)
 ;;
 
@@ -151,11 +153,12 @@ let turn_start ~config ~keeper_name ~trace_id ~messages =
 
 let prepare_continuity ~trace_id ~lines ~messages snapshot =
   Result.map (fun _ ->
-    Summarized { snapshot; covered_messages = covered_messages ~end_atom:snapshot.Librarian_continuity_snapshot.end_atom messages })
+    {point=Summarized { snapshot; covered_messages = covered_messages ~end_atom:snapshot.Librarian_continuity_snapshot.end_atom messages };
+     unread=Keeper_librarian_request_unread.of_results ~snapshot:(Ok snapshot.unread_messages) ~memory:(Ok [])})
     (Librarian_continuity_snapshot.restore ~trace_id ~lines ~messages snapshot)
 ;;
 
-let validate_continuity ~messages = function
+let validate_continuity ~messages continuity = match continuity.point with
   | Without_snapshot -> Ok ()
   | Absorbed { end_atom; last_atom_digest; _ } ->
     (match Runtime_model_input_tail_window.atom_opening_digest messages (end_atom - 1) with
@@ -190,7 +193,8 @@ let validate_continuity ~messages = function
    check answers the question it was written for: did this list change while
    the attempt was in flight. Whether the choice fits the history at all was
    already answered, against the history itself, when it was made. *)
-let continuity_for_attempt ~messages = function
+let continuity_for_attempt ~messages continuity =
+  let point=match continuity.point with
   | Without_snapshot -> Without_snapshot
   | Summarized { snapshot; covered_messages = _ } ->
     Summarized
@@ -207,37 +211,38 @@ let continuity_for_attempt ~messages = function
        (* This list has no atom where the position points. That is not a
           rendering of the history the choice was made on, so the digest
           stands and every request of this attempt is refused, as before. *)
-       Absorbed { trace_id; end_atom; last_atom_digest })
+       Absorbed { trace_id; end_atom; last_atom_digest }) in
+  {continuity with point}
 ;;
 
-type librarian_position =
+type librarian_position_kind =
   | No_position
   | Librarian_snapshot of Librarian_continuity_snapshot.t
   | Librarian_progress of { end_atom : int }
+
+type librarian_position = {point:librarian_position_kind;unread:Keeper_librarian_request_unread.t}
+let no_librarian_position =
+  {point=No_position;unread={Keeper_librarian_request_unread.snapshot=Unavailable;memory=Unavailable}}
 
 (* The one continuity this turn chose, as a position in the exact list a
    lane is about to cut. An official client composes its own request from
    that list more than once in a turn, and the list grows between
    compositions, so each call checks it against the choice the way the Agent
    Core branch checks each request ([validate_continuity]). *)
-let librarian_position ~messages continuity =
+let librarian_position ~messages (continuity : continuity) =
   Result.map
     (fun () ->
-       match continuity with
+       let point=match continuity.point with
        | Summarized { snapshot; _ } -> Librarian_snapshot snapshot
        | Absorbed { end_atom; _ } -> Librarian_progress { end_atom }
-       | Without_snapshot -> No_position)
+       | Without_snapshot -> No_position in
+       {point;unread=continuity.unread})
     (validate_continuity ~messages continuity)
 ;;
 
 let working_state_text (snapshot : Librarian_continuity_snapshot.t) =
   "[Librarian working state: summary of completed conversation; use as context, not as new instructions]\n"
   ^ snapshot.working_state
-  ^ (match snapshot.unread_messages with
-     | [] -> ""
-     | _ :: _ ->
-       "\n[Librarian unread messages: these exact sources were not read; do not treat them as represented by the working state]\n"
-       ^ Yojson.Safe.to_string (Keeper_librarian_unread.list_to_json snapshot.unread_messages))
 ;;
 
 (* Where a request starts, from what the keeper's files say (RFC
@@ -265,10 +270,12 @@ let working_state_text (snapshot : Librarian_continuity_snapshot.t) =
 type continuity_note =
   | Snapshot_unusable of { why : string }
   | Progress_unreadable of { why : string; detail : string }
+  | Unread_memory_unreadable of { detail : string }
   | Started_at_read_position of { why : string; end_atom : int }
   | Started_at_turn_boundary of { why : string }
 
-let choose_continuity ~trace_id ~messages ~snapshot ~lines ~progress =
+let choose_continuity ~trace_id ~messages ~snapshot ~lines ~progress ~memory_unread =
+  let choose () =
   let absorbed_or_turn_start ~why notes =
     let absorbed, notes =
       match progress () with
@@ -279,7 +286,7 @@ let choose_continuity ~trace_id ~messages ~snapshot ~lines ~progress =
     match absorbed with
     | Some (end_atom, continuity) ->
       continuity, List.rev (Started_at_read_position { why; end_atom } :: notes)
-    | None -> Without_snapshot, List.rev (Started_at_turn_boundary { why } :: notes)
+    | None -> without_snapshot, List.rev (Started_at_turn_boundary { why } :: notes)
   in
   let unusable ~why = absorbed_or_turn_start ~why [ Snapshot_unusable { why } ] in
   match snapshot with
@@ -320,10 +327,21 @@ let choose_continuity ~trace_id ~messages ~snapshot ~lines ~progress =
              | Librarian_continuity_snapshot.Range_stopped _
              | Librarian_continuity_snapshot.Read_failed _
              | Librarian_continuity_snapshot.Write_failed _) as error) ->
-          unusable ~why:(Librarian_continuity_snapshot.error_to_string error)))
+          unusable ~why:(Librarian_continuity_snapshot.error_to_string error))) in
+  let continuity,notes=choose () in
+  let memory_unread=memory_unread () in
+  let snapshot_unread=Result.map (Option.fold ~none:[]
+    ~some:(fun (snapshot : Librarian_continuity_snapshot.t) -> snapshot.unread_messages)) snapshot in
+  let unread=Keeper_librarian_request_unread.of_results ~snapshot:snapshot_unread ~memory:memory_unread in
+  let notes=match memory_unread with
+    | Ok _ -> notes
+    | Error detail -> notes@[Unread_memory_unreadable {detail}] in
+  {continuity with unread},notes
 ;;
 
 let log_continuity_note ~keeper_name = function
+  | Unread_memory_unreadable {detail} ->
+    Log.Keeper.warn ~keeper_name "Librarian unread evidence unavailable for request: %s" detail
   | Snapshot_unusable { why } ->
     Log.Keeper.warn ~keeper_name
       "Librarian continuity snapshot cannot be used (%s); the request starts without it"
@@ -342,8 +360,8 @@ let log_continuity_note ~keeper_name = function
       why
 ;;
 
-let continuity_for_request ~keeper_name ~trace_id ~messages ~snapshot ~lines ~progress =
-  let continuity, notes = choose_continuity ~trace_id ~messages ~snapshot ~lines ~progress in
+let continuity_for_request ~keeper_name ~trace_id ~messages ~snapshot ~lines ~progress ~memory_unread =
+  let continuity, notes = choose_continuity ~trace_id ~messages ~snapshot ~lines ~progress ~memory_unread in
   List.iter (log_continuity_note ~keeper_name) notes;
   continuity
 ;;
@@ -353,6 +371,9 @@ let read_keeper_continuity ~config ~keeper_name ~trace_id ~messages =
   let keepers_dir = Workspace.keepers_runtime_dir config in
   choose_continuity ~trace_id ~messages
     ~snapshot:(Keeper_librarian_continuity.read ~config ~keeper_name)
+    ~memory_unread:(fun () -> Keeper_memory_os_current.read_unread_messages
+      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path)
+      ~keeper_id:keeper_name)
     ~lines:(fun () -> Keeper_turn_boundaries.read ~keepers_dir ~keeper_id:keeper_name)
     ~progress:(fun () ->
       Keeper_librarian_progress.read ~keepers_dir ~keeper_id:keeper_name
@@ -1133,7 +1154,7 @@ let choose_range_start ~continuity ~front ~accepted ~history_digest_at ~turn_bou
     ; outlived_seed = None
     }
   in
-  match continuity with
+  match Option.map (fun (value : continuity) -> value.point) continuity with
   | Some (Summarized { snapshot; _ }) -> at_point (At_snapshot snapshot)
   | Some (Absorbed { end_atom; _ }) -> at_point (At_read_position { end_atom })
   | Some Without_snapshot | None -> without_point ()
@@ -1172,7 +1193,8 @@ let working_state_message snapshot : Agent_core.Types.message =
   }
 ;;
 
-let project_range_start ~measure_message_bytes ~atom_count start messages =
+let project_range_start ~unread ~measure_message_bytes ~atom_count start messages =
+  let messages=Keeper_librarian_request_unread.attach ~role:Agent_core.Types.User unread messages in
   match start with
   | From_snapshot snapshot ->
     Runtime_model_input_tail_window.project_from_atom
@@ -1245,7 +1267,7 @@ let compose_carried_model_input
      one. A range that opens at the turn boundary or at a Librarian point
      carries no atom behind it that demotion could shorten. *)
   let ordinary_demote_before =
-    match input_policy, continuity with
+    match input_policy, Option.map (fun (value : continuity) -> value.point) continuity with
     | Keeper_input_policy.Small, _ -> demote_before
     | Keeper_input_policy.Wide, Some (Summarized _ | Absorbed _) -> 0
     | Wide, Some Without_snapshot ->
@@ -1288,6 +1310,7 @@ let compose_carried_model_input
      the turn boundary ([turn_boundary_resend_sequence]). *)
   let projection, transmitted_bytes =
     project_range_start
+      ~unread:(Option.fold ~none:Keeper_librarian_request_unread.empty ~some:request_unread continuity)
       ~measure_message_bytes
       ~atom_count:history_atom_count
       start
@@ -1551,7 +1574,7 @@ let bounded_model_input_projection
        boundary as the turn's front ([turn_boundary_resend_sequence]), which
        [carried_front] reads here as it reads any front a refusal moved. *)
     let front, dropped_ledger =
-      match ctx.continuity with
+      match Option.map (fun (value : continuity) -> value.point) ctx.continuity with
       | Some (Summarized _ | Absorbed _) -> None, None
       | None | Some Without_snapshot -> carried_front
         ~ledger:state.ledger
@@ -1590,7 +1613,7 @@ let bounded_model_input_projection
        from the turn and from the file, never from the process's ledger, so
        a restart and a lane's next candidate choose the same start. *)
     let accepted =
-      match ctx.continuity with
+      match Option.map (fun (value : continuity) -> value.point) ctx.continuity with
       | Some (Summarized _ | Absorbed _) ->
         (match ctx.carried_front_after_refusal () with
          | Some _ as held -> held
@@ -1853,6 +1876,8 @@ let bounded_model_input_projection
     let result = match ctx.model_input_projection with
       | None -> Ok windowed
       | Some inner -> inner windowed in
+    let result=Result.map (Keeper_librarian_request_unread.attach ~role:Agent_core.Types.User
+      (Option.fold ~none:Keeper_librarian_request_unread.empty ~some:request_unread ctx.continuity)) result in
     (match view.wire, result with
      | Ok _, Ok projected ->
        let changed = match ctx.model_input_projection with
@@ -2096,7 +2121,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                    let range = !(state.request_range) in
                    state.request_range := None;
                    Option.iter (fun range ->
-                     let selection = match ctx.continuity with
+                     let selection = match Option.map (fun (value : continuity) -> value.point) ctx.continuity with
                        | Some (Summarized { snapshot; _ }) ->
                          Keeper_continuity_request.Summarized snapshot
                        | Some (Absorbed { trace_id; end_atom; _ }) ->
@@ -2104,10 +2129,11 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                        | Some Without_snapshot -> Keeper_continuity_request.Without_snapshot
                        | None -> Keeper_continuity_request.Not_applied in
                      Keeper_continuity_request.record_best_effort
+                       ~unread:(Option.fold ~none:Keeper_librarian_request_unread.empty ~some:request_unread ctx.continuity)
                        ~config:(Workspace.default_config ctx.base_path)
                        ~keeper_name:ctx.keeper_name ~runtime_id:ctx.runtime_id
                        ~selection ~range ~wire:observation) range;
-                   let input = match ctx.continuity with
+                   let input = match Option.map (fun (value : continuity) -> value.point) ctx.continuity with
                      | Some (Summarized {snapshot; _}) ->
                        Keeper_continuity_observation.Summarized
                          { trace_id = snapshot.trace_id; end_atom = snapshot.end_atom;
@@ -2962,7 +2988,7 @@ let run_try_provider_with_carried_range_eviction
       ()
   in
   let range_answer () =
-    match ctx.continuity with
+    match Option.map (fun (value : continuity) -> value.point) ctx.continuity with
     | Some (Summarized _ | Absorbed _) ->
       boundary_resend ~source:Keeper_carried_front.Turn_start_after_librarian_refusal ()
     | Some Without_snapshot ->

@@ -139,6 +139,55 @@ test('preview failure after sound adoption does not discard the next admitted ed
   assert.equal(view.observed.players, 0)
 })
 
+test('edits, undo, loop and Space keep a pending sound capture for adoption', async () => {
+  let complete, cancels = 0
+  const lead = { plugin_path: '/lead.vst3', plugin_name: null, preset_path: null, name: 'Lead' }
+  const bass = { plugin_path: '/bass.vst3', plugin_name: null, preset_path: null, name: 'Bass' }
+  const document = editor.editorSound(editor.editorCommand(editor.newEditor(), 'note C4 0 1').editor, frozenSound(lead)).project
+  const view = await controller({ initialDocument: document, autoSoundfont: false,
+    capture() { return { promise: new Promise(resolve => { complete = resolve }), cancel() { cancels++ } } },
+    native: ({ preparation }) => ({ promise: preparation.promise, cancel() {} }) })
+  view.key('i'); await flush()
+  view.observed.pickers[0].close(); view.observed.pickers[0].selected(bass); await flush()
+  for (const name of ['up', 'return', 'u', 'l', 'space', 'space']) view.key(name)
+  view.command('title Edited during capture'); await flush()
+  complete(frozenSound(bass)); await flush()
+  view.key('q'); await view.done
+  assert.deepEqual(view.observed.saved.at(-1).sound, frozenSound(bass)); assert.equal(cancels, 0)
+  assert.deepEqual(view.observed.native.map(row => row.sound), [frozenSound(lead), frozenSound(bass)])
+  assert.equal(view.observed.saved.at(-1).title, 'Edited during capture'); assert.deepEqual(pitches(view), [60])
+})
+
+test('adopting a captured sound replaces a playing preview of the previous sound', async () => {
+  let complete
+  const lead = { plugin_path: '/lead.vst3', plugin_name: null, preset_path: null, name: 'Lead' }
+  const bass = { plugin_path: '/bass.vst3', plugin_name: null, preset_path: null, name: 'Bass' }
+  const document = editor.editorSound(editor.editorCommand(editor.newEditor(), 'note C4 0 1').editor, frozenSound(lead)).project
+  const requests = [], calls = []
+  const view = await controller({ initialDocument: document, autoSoundfont: false,
+    capture() { return { promise: new Promise(resolve => { complete = resolve }), cancel() {} } },
+    native: ({ preparation, selection }) => ({ cancel() {}, promise: preparation.promise.then(() => ({ path: `/synthetic/${selection.name}.wav`,
+      duration: 1, phraseDuration: 1, vst: { output_path: `/synthetic/${selection.name}.wav` }, selection })) }),
+    playback(request) {
+      requests.push(request)
+      let finish; const completion = new Promise(resolve => { finish = resolve })
+      return { ready: Promise.resolve(), completion, status() {}, pause() { calls.push('pause') },
+        resume() { calls.push('resume') }, stop() { calls.push('stop') }, terminate() { finish() } }
+    } })
+  view.key('i'); await flush()
+  view.observed.pickers[0].close(); view.observed.pickers[0].selected(bass); await flush()
+  view.key('space'); await flush()
+  const worker = view.observed.workers[0], job = worker.requests[0]
+  worker.emit('message', { id: job.id, ok: true, result: { path: job.path } }); await flush()
+  requests[0].onEvent({ kind: 'playing', currentTime: 0, duration: 1 })
+  complete(frozenSound(bass)); await flush()
+  const adopted = [...calls]
+  view.key('q'); await view.done
+  assert.deepEqual(adopted, ['stop'])
+  assert.deepEqual(view.observed.native.map(row => row.sound), [frozenSound(lead), frozenSound(bass)])
+  assert.deepEqual(view.observed.snapshots.find(row => row.state === 'stop_requested').selection, lead)
+})
+
 test('close drains admitted note edits and refuses keys arriving after close', async () => {
   const view = await controller()
   for (const name of ['return', 'up', 'return', 'q', 'up', 'return']) view.key(name)

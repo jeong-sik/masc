@@ -160,7 +160,8 @@ let create ~transaction_id ~keeper_id ~turn_ref ~sources ~unread ~initial_curren
 
 let same_semantics left right =
   left.claim = right.claim && left.category = right.category && left.basis = right.basis
-  && left.origin = right.origin
+  && left.origin = right.origin && left.first_seen = right.first_seen
+  && right.last_seen >= left.last_seen
 
 let matches_expected ~extras expected actual =
   let* expected = index_facts expected in

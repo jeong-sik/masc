@@ -7,6 +7,8 @@ module Identity_set = Set_util.StringSet
 type transition =
   { evidence : revision_evidence
   ; removed : fact list
+  ; program : Keeper_memory_os_program_types.publication option
+  ; recreated_memory_ids : string list
   }
 
 type lineage =
@@ -100,7 +102,10 @@ let advance ~after_states ~binding (frontier, unresolved_rev) row =
   let next_rev, unresolved_rev =
     List.fold_left
       (fun (next_rev, unresolved_rev) ({ identity; lineage } as path) ->
-        if not (List.mem identity row.evidence.removed_memory_ids)
+        if List.mem identity row.recreated_memory_ids || Option.fold ~none:false ~some:(fun execution ->
+          List.mem identity (Keeper_memory_os_program.touched_ids execution.Keeper_memory_os_program_types.execution)) row.program
+        then next_rev, note (Unrecorded_lineage revision) unresolved_rev
+        else if not (List.mem identity row.evidence.removed_memory_ids)
            || List.mem identity row.evidence.added_memory_ids
         then path :: next_rev, unresolved_rev
         else

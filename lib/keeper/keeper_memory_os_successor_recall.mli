@@ -6,6 +6,8 @@ open Keeper_memory_os_current_types
 type transition =
   { evidence : revision_evidence
   ; removed : Keeper_memory_os_types.fact list
+  ; program : Keeper_memory_os_program_types.publication option
+  ; recreated_memory_ids : string list
   }
 
 val project :

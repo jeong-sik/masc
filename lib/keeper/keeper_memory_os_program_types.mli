@@ -49,3 +49,39 @@ type execution =
   ; stages : stage list
   ; final_facts : fact list
   }
+
+(** Identity of the original Memory observation and its durable history prefix.
+    A prefix includes complete journal rows, not a wall-clock freshness bound. *)
+type store_anchor =
+  { epoch : string
+  ; snapshot : (int * string) option
+  ; journal_length : int
+  ; journal_sha256 : string
+  }
+
+type source_boundary =
+  | Atom_boundary of
+      { receipt_scope : string
+      ; trace_id : string
+      ; history_start_boundary_line : int
+      ; start_atom : int
+      ; end_atom : int
+      ; last_atom_digest : string
+      ; end_boundary_line : int
+      ; boundary_lines_seen : int
+      ; checkpoint_sha256 : string
+      }
+  | Official_boundary of
+      { receipt_scope : string
+      ; after_boundary_line : int
+      ; turns : (int * Ids.Turn_ref.t * string) list
+      }
+
+type publication =
+  { execution : execution
+  ; captured : store_anchor
+  ; locked_prior : store_anchor
+  ; boundary : source_boundary
+  }
+(** The captured inference basis and actual locked prior remain distinct.
+    The outer WAL binds this canonical proof to one target revision/hash. *)

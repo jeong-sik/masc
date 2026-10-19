@@ -112,6 +112,7 @@ type journal_entry =
       ; source : source
       ; change : change
       ; dropped : Keeper_memory_os_types.dropped_statement list option
+      ; program : Keeper_memory_os_program_types.publication option
       }
   | Journal_failed of
       { recorded_at : float

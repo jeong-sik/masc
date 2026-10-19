@@ -38,6 +38,7 @@ type dashboard_purge_artifact =
   | Keeper_librarian_unread_ledger_artifact
   | Keeper_memory_admission_queue_artifact
       (** Independent pending inputs: removed by whole-Keeper purge, not checkpoint purge. *)
+  | Keeper_memory_epoch_artifact
   | Keeper_memory_publication_artifact
   | Keeper_memory_retraction_plan_artifact
   | Keeper_memory_source_current_artifact

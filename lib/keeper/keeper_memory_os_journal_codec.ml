@@ -83,7 +83,7 @@ let links_applied_to_snapshot (snapshot : t) links =
     && List.exists (fun fact -> memory_id fact = link.superseded_by) snapshot.facts) links
 ;;
 
-let journal_entry_to_json ~commit_effect ~revision_links ~dropped_statements snapshot =
+let journal_entry_to_json ?program ~commit_effect ~revision_links ~dropped_statements snapshot =
   `Assoc
     ([ "outcome", `String committed_outcome
      ; "commit_effect", `String (match commit_effect with Rewritten -> "rewritten" | Unchanged -> "unchanged")
@@ -92,6 +92,8 @@ let journal_entry_to_json ~commit_effect ~revision_links ~dropped_statements sna
      ; "source", Snapshot_codec.source_to_json snapshot.source
      ; "change", Snapshot_codec.change_to_json snapshot.change
      ]
+     @ (match program with None -> [] | Some execution ->
+         ["ordered_program",Keeper_memory_os_program_publication.to_json execution])
      @ (match commit_effect with
         | Rewritten -> ["revision_links", revision_links_to_json revision_links]
         | Unchanged -> [])
@@ -133,8 +135,17 @@ let committed_entry_of_fields fields =
   let expected = ["outcome"; "recorded_at"; "revision"; "source"; "change"]
     @ (if List.mem_assoc "dropped" fields then ["dropped"] else [])
     @ (if List.mem_assoc "commit_effect" fields then ["commit_effect"] else [])
-    @ (if List.mem_assoc "revision_links" fields then ["revision_links"] else []) in
+    @ (if List.mem_assoc "revision_links" fields then ["revision_links"] else [])
+    @ (if List.mem_assoc "ordered_program" fields then ["ordered_program"] else []) in
   let fields_are_exact = exact_object_fields expected fields in
+  let* program = match List.assoc_opt "ordered_program" fields with
+    | None -> Ok None
+    | Some json ->
+      let* execution = Keeper_memory_os_program_publication.of_json json in
+      (match transition, links with
+       | Some Rewritten, Some [] -> Ok (Some execution)
+       | (Some Rewritten | Some Unchanged | None), (Some _ | None) ->
+         Error "ordered program requires one explicit rewrite without flattened legacy links") in
   let dropped_of_json = function
     | `List items ->
       let rec loop index acc = function
@@ -175,15 +186,28 @@ let committed_entry_of_fields fields =
             (Keeper_memory_os_types.wire_error_to_string error))
      | Ok _, Ok _ when revision < 0 -> Error "committed line has a negative revision"
      | Ok source, Ok change ->
+       let* () = match program with
+         | None -> Ok ()
+         | Some publication ->
+           let librarian = match source.kind with
+             | Librarian -> true
+             | Explicit_write | Explicit_retract -> false in
+           let* () =
+             if librarian && change.invalidated=[] && not (List.mem_assoc "dropped" fields)
+             then Ok ()
+             else Error "ordered proof must retain intermediate causes in its program, not legacy outer fields" in
+           Keeper_memory_os_program_publication.validate_transition publication
+             ~source_trace_id:source.trace_id ~revision ~added:change.added ~removed:change.removed
+             ~retained:change.retained in
        (match List.assoc_opt "dropped" fields with
         | None ->
-          Ok (Journal_committed { recorded_at; revision; source; change; dropped = None })
+          Ok (Journal_committed { recorded_at; revision; source; change; dropped = None; program })
         | Some dropped ->
           (match dropped_of_json dropped with
            | Ok statements ->
              Ok
                (Journal_committed
-                  { recorded_at; revision; source; change; dropped = Some statements })
+                  { recorded_at; revision; source; change; dropped = Some statements; program })
            | Error detail ->
              Error
                (Printf.sprintf
@@ -274,7 +298,7 @@ let journal_quarantine_to_json ~now ~rejection ~rejected_path =
 
 (* Read-side projection of every closed journal shape. *)
 let decoded_journal_entry_to_json = function
-  | Journal_committed { recorded_at; revision; source; change; dropped } ->
+  | Journal_committed { recorded_at; revision; source; change; dropped; program=_ } ->
     `Assoc
       ([ "outcome", `String committed_outcome
        ; "recorded_at", `Float recorded_at

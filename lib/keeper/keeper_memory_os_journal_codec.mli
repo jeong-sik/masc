@@ -26,6 +26,7 @@ val links_applied_to_snapshot : t -> revision list -> bool
 (** Every source is removed and every successor is present in the snapshot. *)
 
 val journal_entry_to_json :
+  ?program:Keeper_memory_os_program_types.publication ->
   commit_effect:commit_effect ->
   revision_links:revision list ->
   dropped_statements:dropped_statement list option ->

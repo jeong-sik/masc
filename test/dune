@@ -1465,6 +1465,11 @@
 ; schema sentence parity with Agent Core, strict JSON parse, ordered walk.
 
 (test
+ (name test_keeper_memory_os_program_publication)
+ (modules test_keeper_memory_os_program_publication)
+ (libraries masc_test_deps masc masc.runtime agent_core))
+
+(test
  (name test_keeper_memory_os_program)
  (modules test_keeper_memory_os_program)
  (libraries masc_test_deps masc masc.runtime agent_core))

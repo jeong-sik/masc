@@ -243,6 +243,7 @@ type journal_entry =
       ; source : source
       ; change : change
       ; dropped : Keeper_memory_os_types.dropped_statement list option
+      ; program : Keeper_memory_os_program_types.publication option
       }
   | Journal_failed of
       { recorded_at : float
@@ -428,6 +429,22 @@ val snapshot_sha256 : t -> string
     successful exact cleanup can return the next CAS coordinate without a
     second read. *)
 
+val epoch_path : keepers_dir:string -> keeper_id:string -> string
+
+type program_anchor
+val capture_program_anchor :
+  keepers_dir:string -> keeper_id:string -> (program_anchor, string) result
+val program_anchor_snapshot : program_anchor -> t option
+(** Capture exact Memory bytes, stable incarnation and a durable complete
+    journal prefix under aggregate/snapshot locks. The anchor is process-local
+    authority, never reconstructed from a caller-provided public record. *)
+
+val with_program_reset :
+  keepers_dir:string -> keeper_id:string -> (unit -> ('a, string) result) -> ('a, string) result
+(** Serialize destructive Keeper cleanup with Memory writers and invalidate
+    captured program anchors before the first removal. The callback must not
+    re-enter this store. A failed cleanup still invalidates old anchors. *)
+
 val committed_durable_range
   :  keepers_dir:string
   -> keeper_id:string
@@ -610,6 +627,45 @@ val read_successor_recall_for_keepers_dir :
     Lineage failures are returned separately without discarding current facts.
     [Retired_without_successor] is conclusive retirement, not unreadable history.
     No bindings means no journal scan. No receipts or bindings are retargeted. *)
+
+type program_source =
+  | Atom_program_source of
+      { range : durable_range_id
+      ; checkpoint : Agent_core.Types.message list
+      }
+  | Official_program_source of
+      { range : official_range_id
+      ; selected_turns : (int * Ids.Turn_ref.t * Agent_core.Types.message list) list
+      }
+
+type program_commit =
+  { snapshot : t
+  ; proof : Keeper_memory_os_program_types.publication
+  }
+
+val apply_program :
+  ?on_committed:(program_commit -> unit) ->
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  keepers_dir:string -> keeper_id:string -> now:float ->
+  anchor:program_anchor -> source:program_source ->
+  validate_source:(unit -> (unit, string) result) ->
+  Keeper_memory_os_program.t -> (program_commit, string) result
+(** Replay the complete program against locked Memory and publish once, with
+    canonical ordered evidence even when final facts are unchanged. Bind the
+    original full message boundary and captured Memory basis; reject missing
+    history, incarnation/ABA changes and semantic replay divergence before any
+    preparation. Never flatten virtual steps into legacy revision links.
+
+    [source] is the host's immutable original checkpoint/selected turn capture.
+    [validate_source] must run under the caller's source-owner serialization
+    held across this call, before Memory's aggregate/snapshot locks in the lock
+    order; it confirms the original boundary and cursor remain admissible.
+    It must not acquire those same locks or mutate storage. The store invokes
+    it under its write lock before preparation; checking a mutable source
+    without retaining its owning lock is not sufficient. Live on_committed
+    runs once after durability before secondary I/O; recovery never reruns it.
+    A later journal failure leaves a committed target with recoverable proof,
+    not a rejection of the already published Memory. *)
 
 val apply_disposition
   :  ?on_committed:(disposition -> unit)
@@ -880,6 +936,14 @@ val merge_basis
 module For_testing : sig
   val decode_snapshot : string -> (t, string) result
   (** Decode captured bytes only; does not establish publication durability. *)
+
+  val apply_program_with_publication_io :
+    write_snapshot:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->
+    sync_snapshot:(string -> (unit, string) result) ->
+    before_journal:(unit -> unit) -> on_committed:(program_commit -> unit) ->
+    keepers_dir:string -> keeper_id:string -> now:float -> anchor:program_anchor ->
+    source:program_source -> validate_source:(unit -> (unit, string) result) ->
+    Keeper_memory_os_program.t -> (program_commit, string) result
 
   val replace_with_publication_io :
     write_snapshot:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->

@@ -383,6 +383,10 @@ let keeper_artifact_path config keeper_name artifact =
     Some (Keeper_memory_os_current.unread_ledger_path
       ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
         ~base_path:config.Workspace.base_path) ~keeper_id:keeper_name)
+  | Keeper_memory_epoch_artifact ->
+    Some (Keeper_memory_os_current.epoch_path
+      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
+        ~base_path:config.Workspace.base_path) ~keeper_id:keeper_name)
   | Keeper_memory_publication_artifact ->
     Some (Keeper_memory_os_current.publication_receipt_path
       ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
@@ -673,6 +677,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
          | Keeper_librarian_range_receipt_artifact
          | Keeper_librarian_unread_ledger_artifact
          | Keeper_memory_admission_queue_artifact
+         | Keeper_memory_epoch_artifact
          | Keeper_memory_publication_artifact
          | Keeper_memory_retraction_plan_artifact
          | Keeper_memory_source_current_artifact
@@ -716,6 +721,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
             | Keeper_librarian_range_receipt_artifact
             | Keeper_librarian_unread_ledger_artifact
             | Keeper_memory_admission_queue_artifact
+            | Keeper_memory_epoch_artifact
             | Keeper_memory_publication_artifact
             | Keeper_memory_retraction_plan_artifact
             | Keeper_memory_source_current_artifact
@@ -747,6 +753,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
              | Keeper_runtime_directory_artifact | Keeper_memory_current_artifact
              | Keeper_librarian_range_receipt_artifact | Keeper_memory_admission_queue_artifact
              | Keeper_librarian_unread_ledger_artifact
+             | Keeper_memory_epoch_artifact
              | Keeper_memory_publication_artifact | Keeper_memory_retraction_plan_artifact
              | Keeper_memory_source_current_artifact | Keeper_working_context_recall_artifact
              | Keeper_working_context_artifact | Keeper_memory_journal_artifact
@@ -770,6 +777,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
                | Keeper_librarian_range_receipt_artifact
                | Keeper_librarian_unread_ledger_artifact
                | Keeper_memory_admission_queue_artifact
+               | Keeper_memory_epoch_artifact
                | Keeper_memory_publication_artifact
             | Keeper_memory_retraction_plan_artifact
                | Keeper_memory_source_current_artifact
@@ -806,7 +814,10 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
   in
   match Eio_context.run_on_owner_domain (fun () ->
     Keeper_memory_lane.with_librarian_purge
-      ~base_path:config.Workspace.base_path ~keeper_name remove_artifacts)
+      ~base_path:config.Workspace.base_path ~keeper_name (fun () ->
+        Keeper_memory_os_current.with_program_reset
+          ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
+            ~base_path:config.Workspace.base_path) ~keeper_id:keeper_name remove_artifacts))
   with
   | Ok result -> result
   | Error error -> Error ("Librarian lane could not be stopped before purge: "

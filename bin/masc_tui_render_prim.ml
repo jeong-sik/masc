@@ -1968,7 +1968,7 @@ let draw_ask_text_entry buf cols ~draft ~question (entry : ask_text_entry) =
    choices and their marks, whatever the draft holds, and the free-text line.
    Lifted out of the panel so the panel can draw a question into a buffer of
    its own and ask how tall it came out before deciding to spend those rows. *)
-let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode_asks.ask_row)
+let draw_ask_question buf cols ~text_entry ~(row : Masc.Tui_decode_asks.ask_row)
     ~draft ~(question : Masc.Tui_decode_asks.ask_question) ~answering
     ~selected_question =
   (* The caret is the only thing saying where the cursor is: which question
@@ -2057,7 +2057,7 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode_asks.ask_
          row -- nor onto another ask's question of the same id, since
          masc_ask numbers every ask from q1. *)
       let editing_here =
-        match state.ask_text_entry with
+        match text_entry with
         | Some entry
           when String.equal (Ask_projection.free_text_ask_id entry.ate_slot) ask_id
                && String.equal
@@ -2157,6 +2157,7 @@ let draw_ask_origin buf cols (state : state) =
 let ask_question_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let text_entry = state.ask_text_entry in
   let lines =
     match List.nth_opt (question_asks state) state.ask_cursor with
     | None -> ["  No questions waiting"]
@@ -2166,7 +2167,7 @@ let ask_question_viewport (state : state) =
          | None -> ["  No question selected"]
          | Some question ->
              let text, _ = ask_block (fun b ->
-               match state.ask_text_entry with
+               match text_entry with
                | Some entry when String.equal
                    (Ask_projection.free_text_question_id entry.ate_slot) question.aq_id ->
                    (* Typing owns the keys. Keep the editor separate from
@@ -2176,7 +2177,7 @@ let ask_question_viewport (state : state) =
                    draw_ask_text_entry b cols ~draft ~question entry
                | Some _ | None ->
                    draw_ask_origin b cols state;
-                   draw_ask_question b cols state ~row ~draft ~question
+                   draw_ask_question b cols ~text_entry ~row ~draft ~question
                      ~answering:true ~selected_question:true;
                    draw_ask_context b cols ~row) in
              String.split_on_char '\n' text |> List.filter (fun line -> line <> ""))

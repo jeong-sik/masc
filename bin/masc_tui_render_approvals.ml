@@ -404,41 +404,44 @@ let draw_ask_questions buf cols (state : state) ~budget =
             | Some ask_id -> String.equal ask_id selected.Masc.Tui_decode_asks.ar_id
             | None -> false
           in
-          let questions = selected.Masc.Tui_decode_asks.ar_questions in
+          let questions = Array.of_list selected.Masc.Tui_decode_asks.ar_questions in
+          let question_count = Array.length questions in
           let question_cursor =
-            max 0 (min state.ask_question_cursor (List.length questions - 1))
+            max 0 (min state.ask_question_cursor (question_count - 1))
           in
+          let text_entry = state.ask_text_entry in
+          (* Each lazy cell is private to this synchronous draw. The layout
+             and emission below are its only force sites; no cell/provider
+             escapes to a fiber, worker or later frame. Capture original
+             immutable inputs rather than mutable UI state in the cells. *)
           let question_blocks =
-            List.mapi
+            Array.mapi
               (fun index question ->
-                ask_block (fun b ->
-                    draw_ask_question b cols state ~row:selected ~draft ~question
+                lazy (ask_block (fun b ->
+                    draw_ask_question b cols ~text_entry ~row:selected ~draft ~question
                       ~answering
-                      ~selected_question:(index = question_cursor)))
+                      ~selected_question:(index = question_cursor))))
               questions
           in
-          let why_text, why_rows =
-            ask_block (fun b -> draw_ask_context b cols ~row:selected)
+          let question_block index = Stdlib.Lazy.force question_blocks.(index) in
+          let context_block =
+            lazy (ask_block (fun b -> draw_ask_context b cols ~row:selected))
           in
           let plan =
             Ask_layout.plan ~budget ~spent:(count_frame_lines buf)
-              ~question_heights:(List.map snd question_blocks)
+              ~question_count ~question_height:(fun index -> snd (question_block index))
               ~question_cursor
-              ~context_height:why_rows ~other_asks:(count - 1)
+              ~context_height:(fun () -> snd (Stdlib.Lazy.force context_block))
+              ~other_asks:(count - 1)
           in
-          List.iteri
-            (fun index (text, _) ->
-              if
-                index >= plan.Ask_layout.question_start
-                && index
-                   < plan.Ask_layout.question_start
-                     + plan.Ask_layout.questions_shown
-              then
-                if plan.Ask_layout.question_preview_rows > 0 then
-                  draw_ask_question_preview buf cols
-                    ~rows:plan.Ask_layout.question_preview_rows text
-                else Buffer.add_string buf text)
-            question_blocks;
+          for index = plan.Ask_layout.question_start to
+              plan.Ask_layout.question_start + plan.Ask_layout.questions_shown - 1 do
+            let text, _ = question_block index in
+            if plan.Ask_layout.question_preview_rows > 0 then
+              draw_ask_question_preview buf cols
+                ~rows:plan.Ask_layout.question_preview_rows text
+            else Buffer.add_string buf text
+          done;
           if plan.Ask_layout.question_notice then
             box_line buf cols
               (* "in this ask", because the count above names every question
@@ -447,7 +450,8 @@ let draw_ask_questions buf cols (state : state) ~budget =
                  three rows above "+2 more questions". *)
               (Printf.sprintf "    %s+%d more in this ask -- a opens the full ask%s"
                  Ansi.dim plan.Ask_layout.questions_hidden Ansi.reset);
-          if plan.Ask_layout.context_shown then Buffer.add_string buf why_text
+          if plan.Ask_layout.context_shown then
+            Buffer.add_string buf (fst (Stdlib.Lazy.force context_block))
           else if plan.Ask_layout.context_notice then
             (* The questions are the ask and the reason explains it, so the
                reason is what the plan drops first. It used to drop without a

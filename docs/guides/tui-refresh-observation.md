@@ -1079,3 +1079,12 @@ checks immutable facts rather than row order, and exposes descriptive intervals
 only when their endpoints and declared artifact conditions agree. File hashes
 and declaration equality do not verify source-to-binary identity or execution.
 The report does not claim a speedup, input acceptance, useful work or paint.
+
+Compact Approvals question preparation also has a source-only comparison. A
+single synchronous draw now prepares only distinct question blocks needed by
+its fit probes or selected output, reusing their exact original buffers for
+height and display. A reason buffer is skipped when neither reason nor notice
+can fit. No frame/worker-spanning cache or new read is added. See the
+[per-render source audit](../audits/2026-10-19-tui-ask-frame-rendering.md) for the
+`N` to `D <= N` construction count and explicit editor-input boundary. These
+counts do not establish CPU, key-response, paint or Loading latency improvement.

@@ -7,10 +7,12 @@
     block run and be cut from the end, the panel asks here what it can afford
     and folds the rest into counted lines.
 
-    Heights come in measured -- a prompt wraps against the terminal's width, so
-    the caller draws each question into a buffer of its own and reports what it
-    came out to. Nothing here draws, so every decision it makes is testable
-    without a terminal. *)
+    Heights come from stable providers for this render call. A prompt wraps
+    against the terminal's width, so the caller constructs only requested
+    question buffers and reuses their measured heights. [question_count] is
+    the original inventory size and [question_height] covers its zero-based
+    indices. The context provider is needed only when some content space
+    remains. Nothing here draws or retains the providers after this call. *)
 
 type plan = {
   question_start : int;
@@ -46,10 +48,10 @@ type plan = {
    Full choices and answering stay in the existing scrolling reader. *)
 let min_expanded_rows = 3
 
-let plan ~budget ~spent ~question_heights ~question_cursor ~context_height
+let plan ~budget ~spent ~question_count ~question_height ~question_cursor ~context_height
     ~other_asks =
   let available = max 0 (budget - spent) in
-  let total_questions = List.length question_heights in
+  let total_questions = question_count in
   (* The expansion is served first: the folded lines are cheap, and the ask
      under the cursor is the one the keys act on.
 
@@ -68,10 +70,12 @@ let plan ~budget ~spent ~question_heights ~question_cursor ~context_height
   let expand_available = max 0 (available - others_rows) in
   let fit start room =
     let rec walk index used taken =
-      match List.nth_opt question_heights index with
-      | Some height when used + height <= room ->
+      if index >= total_questions then used, taken
+      else
+        let height = question_height index in
+        if used + height <= room then
           walk (index + 1) (used + height) (taken + 1)
-      | Some _ | None -> (used, taken)
+        else used, taken
     in
     walk start 0 0
   in
@@ -112,16 +116,16 @@ let plan ~budget ~spent ~question_heights ~question_cursor ~context_height
   (* The reason goes in only when it does not cost a question its place. It
      explains the ask; the questions are the ask. *)
   let hidden_line = if question_notice then 1 else 0 in
-  let context_shown =
-    context_height > 0 && used + hidden_line + context_height <= expand_available
-  in
-  (* Saying the reason was dropped costs a row of its own. When not even that
-     row is left the block says nothing, as it did before: keeping to the
-     budget matters more than the notice. *)
-  let context_notice =
-    context_height > 0
-    && (not context_shown)
-    && used + hidden_line + 1 <= expand_available
+  let context_shown, context_notice =
+    (* No context or context-notice row can be emitted without room. Avoid
+       constructing a discarded reason, rather than treating it as absent. *)
+    if used + hidden_line >= expand_available then false, false
+    else
+      let height = context_height () in
+      let shown = height > 0 && used + hidden_line + height <= expand_available in
+      let notice = height > 0 && not shown
+          && used + hidden_line + 1 <= expand_available in
+      shown, notice
   in
   {
     question_start;

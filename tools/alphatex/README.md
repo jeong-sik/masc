@@ -134,6 +134,24 @@ alphaTab is MPL-2.0, Bravura is OFL-1.1, alphaSkia is BSD-3-Clause. Their notice
 with the locked dependencies. The Sonivox license is in alphaTab's
 `dist/soundfont/LICENSE` and must remain with a redistributed installation.
 JZZ and JZZ MIDI SMF are MIT-licensed; their notices ship with the pinned packages.
+## Music library
+
+`masc-alphatex --music` opens a plain terminal library for new phrases,
+arrangements and audio/MIDI recordings. It also lists JSON projects under
+`--project-root` and take directories under `--session-root`. Choose with arrows
+and Enter; `q` returns from an editor to the library, then back to its caller.
+Returning refreshes the library so a newly saved phrase can be continued.
+Use `r` to refresh, `:open PATH` for a saved project, `:midi PATH` to import MIDI,
+or `:session PATH` for an existing recorded take. Paths may contain spaces.
+Missing library directories are empty; other source failures stay visible
+alongside available entries. Closing waits for the active editor's cleanup.
+
+The MASC entry is Dashboard **s** or chat `/music`. It supplies
+`<base-path>/.masc/music/projects` and `<base-path>/.masc/music/sessions` as the
+workspace library roots. The companion must be updated together with that entry.
+This library and its editors do not need Kitty graphics or a score block.
+Graphical notation still uses `/score` or the ordinary score-viewer entry.
+
 # Phrase sequencer
 
 From `/score`, press **p** to open the piano-roll editor. It also opens directly
@@ -165,24 +183,6 @@ Lane action receipt. Loop rendering omits the release tail so repetition does
 not insert an extra tail interval. Nonloop playback includes the instrument tail;
 the musical playhead stays at the phrase end during that tail. `:wave PATH`
 exports the currently selected audio instrument.
-
-### Music library
-
-`masc-alphatex --music` opens a plain terminal library for new phrases,
-arrangements and audio/MIDI recordings. It also lists JSON projects under
-`--project-root` and take directories under `--session-root`. Choose with arrows
-and Enter; `q` returns from an editor to the library, then back to its caller.
-Returning refreshes the library so a newly saved phrase can be continued.
-Use `r` to refresh, `:open PATH` for a saved project, `:midi PATH` to import MIDI,
-or `:session PATH` for an existing recorded take. Paths may contain spaces.
-Missing library directories are empty; other source failures stay visible
-alongside available entries. Closing waits for the active editor's cleanup.
-
-The MASC entry is Dashboard **s** or chat `/music`. It supplies
-`<base-path>/.masc/music/projects` and `<base-path>/.masc/music/sessions` as the
-workspace library roots. The companion must be updated together with that entry.
-This library and its editors do not need Kitty graphics or a score block.
-Graphical notation still uses `/score` or the ordinary score-viewer entry.
 
 Imported single-port MIDI can use the same VST route, including the chosen SMF2
 pattern and SMPTE timing. The original source document is retained; a synchronous

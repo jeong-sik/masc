@@ -1,3 +1,4 @@
+import { practiceEnabled } from '../arrangement-practice.mjs'
 import { liveMidiPlan } from '../live-midi.mjs'
 import { calibrationSelection } from '../audio-calibration.mjs'
 import test from 'node:test'
@@ -90,7 +91,7 @@ async function controller(options={}){
   }
   const slot=`arrange-controller-${randomUUID()}`
   globalThis[slot]={process,Worker:OwnedWorker,arrangementSchedule,arrangementRoute,selectArrangementRoute,arrangementPlaybackRequest,...editorAPI,join,dirname,resolve,tmpdir,randomUUID,
-    emitKeypressEvents(){},safeText:String,recordingEpoch,recordingCorrectionContext,recordingCorrectionCapture,calibrationMilliseconds,calibrationResidual,validateCalibrationCapture,
+    practiceEnabled, emitKeypressEvents(){},safeText:String,recordingEpoch,recordingCorrectionContext,recordingCorrectionCapture,calibrationMilliseconds,calibrationResidual,validateCalibrationCapture,
     liveMidiPlan, calibrationSelection, midiDestinations:async()=>[],
     measureAudioCalibration(options){
       let finish,reject;const completion=new Promise((yes,no)=>{finish=yes;reject=no})
@@ -813,4 +814,34 @@ test('stale recording input selection refuses correction before opening a record
  view.worker.emit('message',{id:prepare.id,ok:true,result:{path:'/owned/play/plan.json',format:'wave-arrangement'}});await flush()
  view.command('record');await flush();assert.equal(view.observed.captures.length,0)
  view.key('q');await flush();view.observed.players[0].finish();await view.done;assert.equal(view.process.stdin.isRaw,false)
+})
+
+
+test('record from stopped practice waits for admitted backing and captures against its fresh epoch',async()=>{
+ const view=await controller();await primeWave(view)
+ try {
+  view.command('practice 1 on');view.command('input interface');view.command('record');await flush()
+  const prepare=view.observed.requests.find(job=>job.kind==='prepare-wave')
+  assert.ok(prepare);assert.deepEqual(prepare.project.practice,{countInBars:1,metronome:true});assert.equal(view.observed.captures.length,0)
+  view.worker.emit('message',{id:prepare.id,ok:true,result:{path:'/owned/practice/plan.json',format:'wave-arrangement'}});await flush();await flush()
+  assert.equal(view.observed.players.length,1);assert.equal(view.observed.captures.length,1)
+  const capture=view.observed.captures[0]
+  assert.equal(capture.options.input,'interface')
+  const intent=JSON.parse(view.observed.writes.find(item=>item.path.endsWith('.request.json')).data)
+  assert.equal(intent.epoch.clock.anchor,'9007199254740993123')
+  view.command('record-stop');await flush();capture.finish({});await flush()
+  const attach=view.observed.requests.find(job=>job.kind==='attach-recording');assert.deepEqual(attach.epoch,intent.epoch)
+  view.worker.emit('message',{id:attach.id,ok:false,error:'retain complete take'});await flush()
+ }finally{await closeController(view)}
+})
+
+test('closing a record-triggered preparation rejects late playback and late input admission',async()=>{
+ const view=await controller();await primeWave(view)
+ view.command('practice 1 off');view.command('input interface');view.command('record');await flush()
+ const prepare=view.observed.requests.find(job=>job.kind==='prepare-wave');assert.ok(prepare)
+ view.key('q');await flush()
+ view.worker.emit('message',{id:prepare.id,ok:true,result:{path:'/owned/practice/late/plan.json',format:'wave-arrangement'}})
+ await view.done
+ assert.equal(view.observed.players.length,0);assert.equal(view.observed.captures.length,0)
+ assert.ok(view.observed.removed.includes('/owned/practice/late'));assert.equal(view.process.stdin.isRaw,false)
 })

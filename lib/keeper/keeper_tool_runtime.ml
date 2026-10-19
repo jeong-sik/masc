@@ -119,7 +119,7 @@ let handle_filesystem ?prepared_read ?prepared_edit ?prepared_write ctx descript
   | Tool_peer_artifact
   | Tool_artifact_read
   | Tool_skill_validate
-  | Tool_skill_publish
+  | Tool_artifact_publish | Tool_skill_publish
   | Tool_workspace_memory_read
   | Tool_memory_search
   | Tool_memory_select
@@ -208,7 +208,7 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_peer_artifact
   | Tool_artifact_read
   | Tool_skill_validate
-  | Tool_skill_publish
+  | Tool_artifact_publish | Tool_skill_publish
   | Tool_workspace_memory_read
   | Tool_memory_search
   | Tool_memory_select
@@ -333,6 +333,9 @@ let handle_in_process ctx descriptor args =
            Keeper_skill_validate.handle
              ~descriptors:(Keeper_tool_descriptor.all_descriptors ())
              ~draft_context:None ~config:ctx.config ~args)
+  | Tool_artifact_publish ->
+    Some (Keeper_artifact_publish.handle ~base_path:ctx.config.base_path
+      ~author:ctx.meta.name ~args)
   | Tool_skill_publish ->
     Some
       (Keeper_skill_publish.handle

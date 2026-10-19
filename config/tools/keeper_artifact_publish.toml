@@ -1,0 +1,56 @@
+name = "keeper_artifact_publish"
+description = """
+Publish a standalone report, document or self-contained interactive HTML result \
+to the dashboard Artifacts library. Saves exact content and returns a durable \
+open link. Include that link when reporting the result. To revise a published \
+artifact, supply its id and expected_revision together; previous versions remain \
+readable. HTML can use inline JavaScript/CSS and embedded images, but cannot \
+access the dashboard or its credentials; external subresource loads and fetch \
+requests are blocked. Author \
+is the current Keeper. This tool does not post another chat or Board message."""
+additional_properties = false
+
+[[params]]
+name = "title"
+type = "string"
+required = true
+description = "Human-readable document title."
+
+[[params]]
+name = "summary"
+type = "string"
+required = true
+description = "Short summary shown in the catalog and conversation card."
+
+[[params]]
+name = "format"
+type = "string"
+enum = ["markdown", "html"]
+required = true
+
+[[params]]
+name = "content"
+type = "string"
+required = true
+description = "Complete Markdown or self-contained HTML source, preserved exactly."
+
+[[params]]
+name = "id"
+type = "string"
+description = "Existing artifact id when publishing a new revision. Omit for a new document."
+
+[[params]]
+name = "expected_revision"
+type = "integer"
+minimum = 1
+description = "Expected current revision. Required together with id for an update."
+
+[[params]]
+name = "task_id"
+type = "string"
+description = "Related MASC task id, when applicable."
+
+[[params]]
+name = "goal_id"
+type = "string"
+description = "Related MASC goal id, when applicable."

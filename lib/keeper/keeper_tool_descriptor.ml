@@ -111,6 +111,7 @@ type runtime_handler =
   | Tool_peer_artifact
   | Tool_artifact_read
   | Tool_skill_validate
+  | Tool_artifact_publish
   | Tool_skill_publish
   | Tool_workspace_memory_read
   | Tool_memory_search
@@ -247,6 +248,7 @@ let runtime_handler_to_string = function
   | Tool_peer_artifact -> "keeper_artifact_transfer"
   | Tool_artifact_read -> "tool_artifact_read"
   | Tool_skill_validate -> "tool_skill_validate"
+  | Tool_artifact_publish -> "tool_artifact_publish"
   | Tool_skill_publish -> "tool_skill_publish"
   | Tool_workspace_memory_read -> "tool_workspace_memory_read"
   | Tool_memory_search -> "tool_memory_search"
@@ -511,7 +513,7 @@ let descriptor
       | Tool_peer_artifact
   | Tool_artifact_read
       | Tool_skill_validate
-      | Tool_skill_publish
+      | Tool_artifact_publish | Tool_skill_publish
       | Tool_workspace_memory_read
       | Tool_memory_search
       | Tool_memory_select
@@ -2648,6 +2650,17 @@ let internal_descriptors : t list =
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
       ~input_schema_source:Canonical_registry
+      ~id:"keeper.artifact.publish"
+      ~name:Keeper_runtime_schemas_toml.artifact_publish.name
+      ~description:Keeper_runtime_schemas_toml.artifact_publish.description
+      ~input_schema:Keeper_runtime_schemas_toml.artifact_publish.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_artifact_publish
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
       ~id:"keeper.skill.validate"
       ~name:Keeper_runtime_schemas_toml.skill_validate.name
       ~description:Keeper_runtime_schemas_toml.skill_validate.description
@@ -3424,7 +3437,7 @@ let prepared_leaf_admission descriptor =
         | Tool_peer_artifact
         | Tool_artifact_read
         | Tool_skill_validate
-        | Tool_skill_publish
+        | Tool_artifact_publish | Tool_skill_publish
         | Tool_workspace_memory_read
         | Tool_memory_search
         | Tool_memory_select

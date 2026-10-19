@@ -39,6 +39,7 @@ let fusion_decision = schema_of_name "masc_fusion_decision"
 let fusion_status = schema_of_name "masc_fusion_status"
 let peer_artifact = schema_of_name "keeper_artifact_transfer"
 let artifact_read = schema_of_name "keeper_artifact_read"
+let artifact_publish = schema_of_name "keeper_artifact_publish"
 let skill_validate = schema_of_name "keeper_skill_validate"
 let skill_publish = schema_of_name "keeper_skill_publish"
 let keeper_analyze_image = schema_of_name "keeper_analyze_image"
@@ -52,6 +53,7 @@ let file_list = schema_of_name "masc_file_list"
 let schemas =
   [ peer_artifact
   ; artifact_read
+  ; artifact_publish
   ; skill_validate
   ; skill_publish
   ; fusion

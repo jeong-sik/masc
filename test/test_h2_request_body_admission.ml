@@ -119,7 +119,7 @@ let rec pump_until session finished =
       pump_until session finished))
 
 let open_request session ?(meth = `POST) ?(headers = [])
-    ?(on_response_headers = fun _ -> ()) target =
+    ?(on_response_headers = fun _ -> ()) ?(on_stream_error = fun _ -> ()) target =
   let reply, resolve = Eio.Promise.create () in
   let finish result =
     if not (Eio.Promise.is_resolved reply) then Eio.Promise.resolve resolve result
@@ -128,7 +128,9 @@ let open_request session ?(meth = `POST) ?(headers = [])
     ~headers:(H2.Headers.of_list ((":authority", authority) :: headers)) in
   let writer = H2.Client_connection.request session.client
     ~flush_headers_immediately:true request
-    ~error_handler:(fun error -> finish (Error (Stream_failure error)))
+    ~error_handler:(fun error ->
+      on_stream_error error;
+      finish (Error (Stream_failure error)))
     ~response_handler:(fun response reader ->
       on_response_headers response;
       let body = Buffer.create 256 in
@@ -286,6 +288,7 @@ let test_malformed_headers_preserve_next_post headers ~clock sw =
   let delivered = ref None in
   let deliveries = ref 0 in
   let seen_status = ref None in
+  let seen_error = ref None in
   let handler reqd = Helpers.h2_read_body ~sw reqd (fun body ->
     incr deliveries;
     delivered := Some (String.length body);
@@ -293,21 +296,28 @@ let test_malformed_headers_preserve_next_post headers ~clock sw =
   let session = create_session ~clock ~config:continuity_config ~handler () in
   let writer, reply = open_request session ~headers
     ~on_response_headers:(fun response -> seen_status := Some (H2.Status.to_code response.status))
+    ~on_stream_error:(fun error -> seen_error := Some error)
     "/upload" in
   (* Invalid HEADERS are refused before the request handler. This upload is
      already in flight: the pinned H2 parser then resets the closed stream.
      Keep both the 400 headers and the precise reset visible; a completed HTTP
      error body is not promised for DATA arriving after malformed HEADERS. *)
   send_whole continuity_body writer;
-  pump_until session (fun () -> Eio.Promise.is_resolved reply);
+  pump_until session (fun () ->
+    Eio.Promise.is_resolved reply && Option.is_some !seen_error);
   check (option int) "malformed headers produced HTTP 400" (Some 400) !seen_status;
   (match Eio.Promise.await reply with
-   | Error (Stream_failure (`Protocol_error (code, _))) ->
+   | Error (Stream_failure _ | Incomplete_response_body) -> ()
+   | Ok _ -> fail "expected a failed response after malformed HEADERS and in-flight DATA");
+  (* Closing the stream discards its reader before the error handler runs.
+     The first reply can therefore be aborted EOF; observe the typed reset
+     independently rather than losing it to first-wins reply settlement. *)
+  (match !seen_error with
+   | Some (`Protocol_error (code, _)) ->
      check bool "in-flight DATA produced the pinned StreamClosed reset" true
        (code = H2.Error_code.StreamClosed)
-   | Error (Stream_failure (`Malformed_response _ | `Invalid_response_body_length _ | `Exn _))
-   | Error Incomplete_response_body -> fail "unexpected malformed-upload failure"
-   | Ok _ -> fail "expected the pinned parser's reset after in-flight DATA");
+   | Some (`Malformed_response _ | `Invalid_response_body_length _ | `Exn _)
+   | None -> fail "expected the pinned parser's typed reset after in-flight DATA");
   check int "malformed upload never reached the application" 0 !deliveries;
   check_next_body session delivered;
   check int "only the next valid body was delivered" 1 !deliveries

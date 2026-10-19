@@ -314,11 +314,28 @@ let pointer ~call ~tab_id ~page_id ~args ~name input =
 let interact ~tabs ~call ~tab_id ~expected_url action =
   let* page_id = page_of ~tabs tab_id in
   let args = Browser_lane.interaction_args ~tab_id ~expected_url action in
+  let* action, expected_url = match (action : Browser_lane.interaction) with
+    | Browser_lane.Drag_to {via;duration_ms;_} when via <> [] || duration_ms <> 0 ->
+      Error (Browser_lane.Rejected_before_effect "drag paths and timing require automation or a live BiDi connection")
+    | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
+      let* resolved = evaluate ~runtime:Scene_runtime ~send:(send_guard call) ~args
+          page_id Browser_interaction.pointer_target_script |> guard_result in
+      let* action = Browser_interaction.resolve_pointer_action action resolved
+        |> Result.map_error (fun detail -> Browser_lane.Rejected_before_effect detail) in
+      let* url = string_field ~method_:"page.evaluate" "url" resolved |> guard_result in
+      Ok (action, Some url)
+    | Browser_lane.Activate_tab | Browser_lane.Fill _
+    | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
+    | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
+    | Browser_lane.Fill_node _ -> Ok (action, expected_url) in
+  let args = Browser_lane.interaction_args ~tab_id ~expected_url action in
   match (action : Browser_lane.interaction) with
   | Browser_lane.Activate_tab -> Error (Browser_lane.Rejected_before_effect "activate_tab requires live lane")
-  | Browser_lane.Hover _ | Browser_lane.Drag_to _ ->
-    Error (Browser_lane.Rejected_before_effect "semantic pointer targets require automation or a live BiDi connection")
-  | Browser_lane.Hover_at _ -> Error (Browser_lane.Rejected_before_effect "trusted hover requires automation or a live BiDi connection")
+  | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
+    Error (Browser_lane.Rejected_before_effect "unresolved semantic pointer target")
+  | Browser_lane.Hover_at {point;viewport} ->
+    pointer ~call ~tab_id ~page_id ~args ~name:"hover_at"
+      (Wire.Page_hover {page_id;x=viewport_x viewport point;y=viewport_y viewport point})
   | Browser_lane.Click_at { point; viewport } ->
     pointer ~call ~tab_id ~page_id ~args ~name:"click_at"
       (Wire.Page_click { page_id; x = viewport_x viewport point; y = viewport_y viewport point })
@@ -335,8 +352,7 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
       (Wire.Page_drag_and_drop
          { page_id; from_x = viewport_x viewport from; from_y = viewport_y viewport from
          ; to_x = viewport_x viewport to_; to_y = viewport_y viewport to_ })
-  | Browser_lane.Click _ | Browser_lane.Fill _ | Browser_lane.Scroll _ | Browser_lane.Follow_link _
-  | Browser_lane.Click_node _ | Browser_lane.Fill_node _ ->
+  | Browser_lane.Fill _ | Browser_lane.Scroll _ | Browser_lane.Follow_link _ | Browser_lane.Fill_node _ ->
     let* receipt = evaluate ~runtime:Scene_runtime ~send:(send call) ~args page_id Browser_interaction.script in
     interaction_receipt ~tab_id receipt
 ;;

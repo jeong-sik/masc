@@ -88,7 +88,7 @@ let with_backend ?(configure = ignore) ?(call_hook = fun _ -> None) f =
               session.log (Session.Cancelled_call_answered
                 { method_ = "stagehand.act"; rejected = false });
             raise exn)
-       | Wire.Observe _ | Wire.Extract _ | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_click _
+       | Wire.Observe _ | Wire.Extract _ | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_hover _ | Wire.Page_click _
        | Wire.Page_scroll _ | Wire.Page_drag_and_drop _ ->
          failf "the backend sent %s" (Wire.method_name request))
 
@@ -359,7 +359,7 @@ let test_pointer_guard_and_input_keep_the_verb_slot () =
       Some (Ok (`Assoc [ "page", page ]))
     | Wire.Close | Wire.Act _ | Wire.Observe _ | Wire.Extract _ | Wire.Context_pages
     | Wire.Context_active_page | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_evaluate _
-    | Wire.Page_click _ | Wire.Page_scroll _ | Wire.Page_drag_and_drop _ -> None
+    | Wire.Page_hover _ | Wire.Page_click _ | Wire.Page_scroll _ | Wire.Page_drag_and_drop _ -> None
   in
   with_backend ~call_hook
   @@ fun h ->

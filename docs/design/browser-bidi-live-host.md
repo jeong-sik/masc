@@ -534,7 +534,14 @@ to BiDi tab IDs. The host declares its mode with `x-browser-transport`. An
 installed host that omits this header uses the WebExtension poll contract;
 BiDi hosts declare `webdriver_bidi`. The server rejects empty or unknown values
 and a transport change on an existing client ID. Interaction receipts identify
-the resolved tab with `tabId`. Stagehand rejects trusted hover before input. This is not an atomic snapshot/input
+the resolved tab with `tabId`. Stagehand Chromium also serves `hover_at`, semantic
+`hover`, and semantic `drag_to` with the same observed-target resolution and
+URL/viewport checks. It sends the runtime's native `page.hover` or
+`page.drag_and_drop` calls, without a model or synthetic DOM input. Observed
+selector and scene-node clicks resolve into native `page.click` with the
+resolver's current URL and viewport guarded before input. Custom drag
+paths and timing remain unsupported on this lane and are refused before input.
+This is not an atomic snapshot/input
 transaction: the operator can still change the page after validation. There is
 no write replay. An unknown outcome stops this live client. Reads and interactions
 share the existing host command deadline; connection setup has that same bound.

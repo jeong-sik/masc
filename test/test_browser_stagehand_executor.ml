@@ -63,7 +63,7 @@ let call fake request =
        Ok (`Assoc [ "page", `Assoc [ "page_id", `String page_id; "url", `String url ]; "response", `Null ])
      | Wire.Act _ | Wire.Observe _ | Wire.Extract _ ->
        Ok (`Assoc [ "data", `Assoc [ "success", `Bool true ]; "metadata", `Assoc [ "cache", `Assoc [] ] ])
-     | Wire.Page_click _ | Wire.Page_scroll _ | Wire.Page_drag_and_drop _ -> Ok (`Assoc [ "ok", `Bool true ])
+     | Wire.Page_hover _ | Wire.Page_click _ | Wire.Page_scroll _ | Wire.Page_drag_and_drop _ -> Ok (`Assoc [ "ok", `Bool true ])
      | Wire.Close -> failf "the executor sent %s" (Wire.method_name request))
 ;;
 
@@ -258,15 +258,111 @@ let test_reads_run_the_page_scripts () =
 let point = { Lane.Pointer.x = 0.5; y = 0.25 }
 let observed_viewport = { Lane.Pointer.document_id = "d1"; width = 800.; height = 600.; scroll_x = 0.; scroll_y = 0. }
 
+let test_hover_wire () =
+  let request = Wire.Page_hover {page_id="P2";x=400.;y=150.} in
+  let encoded = Wire.encode_call ~id:7 request |> Yojson.Safe.from_string in
+  check string "official runtime method" "page.hover" Yojson.Safe.Util.(member "method" encoded |> to_string);
+  check string "coordinates and page use protocol wire keys"
+    {|{"page_id":"P2","x":400.0,"y":150.0}|}
+    Yojson.Safe.Util.(member "params" encoded |> to_s);
+  check bool "native hover never asks a model" false (Wire.uses_model request);
+  check bool "native hover has no sentence timeout" true (Option.is_none (Wire.sentence_timeout_of_call request))
+;;
+
+let test_semantic_pointer_input () =
+  let tabs = Executor.Tabs.create () and fake = fake [shop ()] ~active:(Some "P2") in
+  ignore (listed tabs fake);
+  let expected_url = Some "http://127.0.0.1:1/shop" in
+  let execute ?(expected_url=expected_url) action resolution =
+    fake.sent <- [];
+    let responses = ref [resolution;
+      `Assoc ["url",`String "http://127.0.0.1:1/shop"];
+      `Assoc ["url",`String "http://127.0.0.1:1/shop";"title",`String "Shop"]] in
+    let call request = match request with
+      | Wire.Page_evaluate _ ->
+        fake.sent <- request :: fake.sent;
+        (match !responses with
+         | value::rest -> responses:=rest;Ok (`Assoc ["value",`String (to_s value)])
+         | [] -> fail "unexpected evaluation")
+      | _ -> call fake request in
+    Executor.execute ~tabs ~call (Lane.Page_interact {tab_id=0;expected_url;action}) in
+  let viewport = Lane.Pointer.viewport_to_json observed_viewport in
+  let resolved_point = Lane.Pointer.point_to_json point in
+  ignore (served (execute (Lane.Hover (Lane.Selector "#menu"))
+    (`Assoc ["url",`String "http://127.0.0.1:1/shop";"point",resolved_point;"viewport",viewport])));
+  (match List.rev fake.sent with
+   | [Wire.Page_evaluate _;Wire.Page_evaluate _;Wire.Page_hover {page_id="P2";x=400.;y=150.};Wire.Page_evaluate _] -> ()
+   | _ -> fail "resolve, guard, native hover, receipt required");
+  let drag = Lane.Drag_to {source=Lane.Selector "#source";destination=Lane.Selector "#destination";
+    via=[];duration_ms=0} in
+  ignore (served (execute drag (`Assoc ["url",`String "http://127.0.0.1:1/shop";"from",resolved_point;
+    "to",Lane.Pointer.point_to_json {x=0.75;y=0.5};"viewport",viewport])));
+  (match List.rev fake.sent with
+   | [Wire.Page_evaluate _;Wire.Page_evaluate _;
+      Wire.Page_drag_and_drop {page_id="P2";from_x=400.;from_y=150.;to_x=600.;to_y=300.};Wire.Page_evaluate _] -> ()
+   | _ -> fail "resolved semantic drag must use one native runtime drag");
+  List.iter (fun action ->
+    ignore (served (execute ~expected_url:None action
+      (`Assoc ["url",`String "http://127.0.0.1:1/shop";"point",resolved_point;"viewport",viewport])));
+    match List.rev fake.sent with
+    | [Wire.Page_evaluate _;Wire.Page_evaluate {expression;_};
+       Wire.Page_click {page_id="P2";x=400.;y=150.};Wire.Page_evaluate _] ->
+      check string "click binds the resolver's URL and viewport before native input"
+        (Executor.evaluate_expression ~runtime:Executor.Scene_runtime
+          ~body:Masc.Browser_interaction.pointer_guard_script
+          ~args:(Lane.interaction_args ~tab_id:0 ~expected_url
+            (Lane.Click_at {point;viewport=observed_viewport}))) expression
+    | _ -> fail "observed click must resolve, guard, and dispatch one native click")
+    [Lane.Click "#menu-item";Lane.Click_node {document_id="d1";node_id="n1"}];
+  check bool "resolver refusal is before any input" true
+    (rejected_before_effect (execute (Lane.Hover (Lane.Selector "#covered"))
+      (`Assoc ["interactionFailure",`Assoc ["message",`String "element_pointer_obstructed";"effectStarted",`Bool false]])));
+  check int "refusal sends only resolution" 1 (List.length fake.sent);
+  check bool "malformed resolver geometry is before input" true
+    (rejected_before_effect (execute (Lane.Hover (Lane.Selector "#menu")) (`Assoc [])));
+  check int "malformed target sends no native input" 1 (List.length fake.sent);
+  fake.sent <- [];
+  let custom = Lane.Drag_to {source=Lane.Selector "#source";destination=Lane.Selector "#destination";
+    via=[point];duration_ms=0} in
+  check bool "unsupported custom path is before input" true
+    (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
+      (Lane.Page_interact {tab_id=0;expected_url;action=custom})));
+  check int "custom path is refused before resolution too" 0 (List.length fake.sent)
+;;
+
+let test_hover_effect_boundary () =
+  let tabs = Executor.Tabs.create () and fake = fake [shop ()] ~active:(Some "P2") in
+  ignore (listed tabs fake);
+  let invoke () = Executor.execute ~tabs ~call:(call fake)
+    (Lane.Page_interact {tab_id=0;expected_url=Some "http://127.0.0.1:1/shop";
+      action=Lane.Hover_at {point;viewport=observed_viewport}}) in
+  fake.sent <- [];
+  fake.failing <- (function Wire.Page_evaluate _ -> Some (Session.Rejected {code= -32603;message="observed_viewport_changed"}) | _ -> None);
+  check bool "changed viewport blocks native hover" true (rejected_before_effect (invoke ()));
+  check bool "guard failure sends no hover" true (List.for_all (function Wire.Page_hover _ -> false | _ -> true) fake.sent);
+  fake.sent <- [];
+  fake.failing <- (function Wire.Page_hover _ -> Some (Session.Lost "input reply missing") | _ -> None);
+  check bool "lost input is uncertain" true (refused (invoke ()));
+  check int "unknown native input is never replayed" 1
+    (List.length (List.filter (function Wire.Page_hover _ -> true | _ -> false) fake.sent));
+  fake.sent <- [];
+  let reads = ref 0 in
+  fake.failing <- (function Wire.Page_evaluate _ -> incr reads;
+    if !reads=2 then Some (Session.Detached) else None | _ -> None);
+  check bool "lost receipt after input is uncertain" true (refused (invoke ()));
+  check int "receipt failure does not repeat hover" 1
+    (List.length (List.filter (function Wire.Page_hover _ -> true | _ -> false) fake.sent))
+;;
+
 let test_interactions () =
   let tabs = Executor.Tabs.create () and fake = fake [ shop () ] ~active:(Some "P2") in
   ignore (listed tabs fake);
   let expected_url = Some "http://127.0.0.1:1/shop" in
-  let click = Lane.Click "#submit" in
+  let click = Lane.Fill {selector="#name";text="replacement"} in
   fake.sent <- [];
   fake.evaluated <- Some
     (`Assoc
-       [ "action", `String "click"
+       [ "action", `String "fill"
        ; "urlBefore", `String "http://127.0.0.1:1/shop"
        ; "url", `String "http://127.0.0.1:1/shop"
        ; "title", `String "Shop"
@@ -410,7 +506,10 @@ let () =
         test_case "an act Stagehand did not carry out is a failure" `Quick test_act_that_did_not_succeed
       ] );
     "reads", [ test_case "reads run the page scripts" `Quick test_reads_run_the_page_scripts ];
-    "interactions", [ test_case "scripts and native pointer input" `Quick test_interactions ];
+    "interactions", [ test_case "scripts and native pointer input" `Quick test_interactions;
+      test_case "hover uses official runtime wire without a model" `Quick test_hover_wire;
+      test_case "observed targets resolve into native hover and drag" `Quick test_semantic_pointer_input;
+      test_case "hover failure boundaries never replay input" `Quick test_hover_effect_boundary ];
     "refusals", [ test_case "an unserved verb sends nothing" `Quick test_unserved_verbs ];
     "evaluate", [
       test_case "the expression calls its body" `Quick test_evaluate_expression;

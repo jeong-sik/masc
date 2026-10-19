@@ -41,7 +41,10 @@ val evaluate_expression : runtime:page_runtime -> body:string -> args:Yojson.Saf
 
 (** Serves [Tabs_list], [Page_goto], [Page_capture], the reads [Page_read],
     [Page_elements] and [Page_scene] (with the automation lane's page scripts,
-    so observations have one shape), and the sentence verbs.
+    so observations have one shape), interactions, and the sentence verbs.
+    Semantic click, hover and drag resolve observed targets without scrolling, then
+    recheck their URL and viewport before native Stagehand pointer input.
+    Custom drag paths and timing are refused before any input.
     Every other verb, sessions included, is refused before any call: the
     backend answers sessions itself, and
     {!Browser_lane.verb_allowed_on_stagehand} keeps the rest from arriving.

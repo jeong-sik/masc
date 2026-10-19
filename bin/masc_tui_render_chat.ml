@@ -4433,10 +4433,11 @@ let render_keeper_message (state : state) =
        precedes its first paint, the pin already restores a reading position
        although the stored scroll is still zero. Reserve and draw its chrome
        from that same requested position, before measuring the history. *)
-    let command_window = keeper_message_command_window ~scroll:requested state
+    let status_frame = keeper_message_status_frame state ~now:(Unix.gettimeofday ()) in
+    let command_window = keeper_message_command_window ~status_frame ~scroll:requested state
       ~terminal_rows:rows ~terminal_cols:cols in
     let command_rows = match command_window with None -> 0 | Some (_, entries) -> 2 + List.length entries in
-    let status_rows = keeper_message_status_rows ~scroll:requested state
+    let status_rows = keeper_message_status_rows ~status_frame ~scroll:requested state
       ~terminal_cols:cols + command_rows in
     let support_status_rows =
       keeper_message_support_status_rows ~scroll:requested state ~status_rows
@@ -4701,13 +4702,11 @@ let render_keeper_message (state : state) =
        long preview status loses its tail rather than the keys after it. *)
     List.iter
       (fun (row : Masc_tui_answering.chat_activity_row) ->
-        let keys = match state.msg_tool_visibility, Masc_tui_types.keeper_message_status_log state with
-          | (Tools_compact | Tools_results), Some live
-            when state.msg_target_keeper_name = Some (Masc_tui_types.turn_log_keeper_name live)
-              && Masc_tui_types.keeper_message_folded_status_count state live.tl_transcript
-                   ~now:(Unix.gettimeofday ()) > 0 ->
+        let keys = match state.msg_tool_visibility, status_frame with
+          | (Tools_compact | Tools_results), Message_status (_, status)
+            when status.kmsp_folded_count > 0 ->
               row.keys ^ " · " ^ Masc_tui_keys.expand_turn_label
-          | (Tools_full | Tools_compact | Tools_results), _ -> row.keys in
+          | (Tools_full | Tools_compact | Tools_results), (No_message_status | Message_status _) -> row.keys in
         let lead_room = max 0 (framed_inner_width chat_cols - 2
           - Message_layout.display_width keys) in
         let lead =
@@ -4785,10 +4784,8 @@ let render_keeper_message (state : state) =
            box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
              "  Older load failed · /errors"
        | None -> ());
-    (match Masc_tui_types.keeper_message_status_log state with
-     | Some live
-       when state.msg_target_keeper_name
-            = Some (Masc_tui_types.turn_log_keeper_name live) ->
+    (match status_frame with
+     | Message_status (live, status) ->
          let live = live.tl_transcript in
          (* The streaming turn is the row the eye waits on: drawn in the
             accent rather than dimmed, behind the mark a running turn wears
@@ -4864,10 +4861,7 @@ let render_keeper_message (state : state) =
          (* What the fold took, said on the line that stays. A count the
             reader can see is a thing they can ask for; rows that simply were
             not drawn are a screen that looks complete and is not. *)
-         let now = Unix.gettimeofday () in
-         let folded_away =
-           Masc_tui_types.keeper_message_folded_status_count state live ~now
-         in
+         let folded_away = status.kmsp_folded_count in
          let gate_waiting =
            match state.msg_target_keeper_name with
            | Some keeper_name when state.msg_turn_folded ->
@@ -4888,8 +4882,8 @@ let render_keeper_message (state : state) =
                " · " ^ String.concat " · " parts ^ " · "
                ^ Masc_tui_keys.expand_turn_label
          in
-         let status_rows = Masc_tui_types.keeper_message_visible_status_rows state live ~now in
-         if Masc_tui_types.keeper_message_standalone_details_hint state live ~now
+         let status_rows = status.kmsp_rows in
+         if status.kmsp_details_hint
          then box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
            (Printf.sprintf "  +%d · %s:details" folded_away Masc_tui_keys.expand_turn_label);
          List.iter
@@ -4934,7 +4928,7 @@ let render_keeper_message (state : state) =
                   in
                   box_line_styled chat_buf chat_cols ~style ("  " ^ text)))
            status_rows
-     | Some _ | None -> ());
+     | No_message_status -> ());
     (* Effects this Keeper is not waiting on. A deferral returns successfully
        and the Keeper carries on, so the tool row reads as a plain return and
        nothing else on this pane said the effect was still out. The phase

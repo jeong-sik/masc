@@ -264,7 +264,7 @@ let test_compact_progress_follows_working_execution () =
     | Some source ->
         check string "status belongs to the execution producing events"
           "active-execution" (Tui.turn_log_execution_id source);
-        Tui.keeper_message_visible_status_rows state source.tl_transcript ~now
+        (Tui.keeper_message_status_projection state source.tl_transcript ~now).kmsp_rows
         |> List.filter_map (fun (kind, text) ->
             match kind with
             | Masc_tui_keeper_chat_transcript.Progress -> Some text

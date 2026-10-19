@@ -17886,9 +17886,16 @@ let keeper_message_unfolded_status_rows (state : state) live ~now =
      | None -> [])
   @ keeper_message_saved_preparation_rows state live
 
-let keeper_message_visible_status_rows (state : state) live ~now =
+type keeper_message_status_projection =
+  { kmsp_rows : (Masc_tui_keeper_chat_transcript.status_kind * string) list
+  ; kmsp_folded_count : int
+  ; kmsp_details_hint : bool
+  ; kmsp_row_count : int
+  }
+
+let keeper_message_status_projection (state : state) live ~now =
   let rows = keeper_message_unfolded_status_rows state live ~now in
-  if state.msg_turn_folded then
+  let visible = if state.msg_turn_folded then
     List.filter
       (fun (kind, _) ->
         match kind with
@@ -17898,25 +17905,31 @@ let keeper_message_visible_status_rows (state : state) live ~now =
         | Masc_tui_keeper_chat_transcript.Answer_needed
         | Masc_tui_keeper_chat_transcript.Approval _ | Attention -> Masc_tui_keeper_chat_transcript.status_row_survives_folding kind)
       rows
-  else rows
-
-(* Count rows hidden by folding after the diagnostic mode has selected its
-   rows. Full progress and the compact summary report this same count. *)
-let keeper_message_folded_status_count (state : state) live ~now =
-  if not state.msg_turn_folded then 0
-  else
-    List.length (keeper_message_unfolded_status_rows state live ~now)
-    - List.length (keeper_message_visible_status_rows state live ~now)
-
-let keeper_message_standalone_details_hint (state : state) live ~now =
-  keeper_message_folded_status_count state live ~now > 0
-  && not (List.exists
+    else rows in
+  let visible_count = List.length visible in
+  (* Folding counts the same original rows that supplied the visible list.
+     The hint owns a reserved row only when no progress row can carry it. *)
+  let folded_count = if state.msg_turn_folded then List.length rows - visible_count else 0 in
+  let details_hint = folded_count > 0 && not (List.exists
     (fun (kind, _) -> kind = Masc_tui_keeper_chat_transcript.Progress)
-    (keeper_message_visible_status_rows state live ~now))
+    visible) in
+  { kmsp_rows=visible; kmsp_folded_count=folded_count; kmsp_details_hint=details_hint
+  ; kmsp_row_count=visible_count + if details_hint then 1 else 0 }
 
-let keeper_message_counted_status_rows state live ~now =
-  List.length (keeper_message_visible_status_rows state live ~now)
-  + if keeper_message_standalone_details_hint state live ~now then 1 else 0
+type keeper_message_status_frame =
+  | No_message_status
+  | Message_status of turn_log * keeper_message_status_projection
+
+(* One synchronous draw may pass this value through menu measurement, history
+   budgeting and status drawing. The frame adds no cache or worker handoff;
+   the next draw observes the current selection again. *)
+let keeper_message_status_frame (state : state) ~now =
+  match keeper_message_status_log state with
+  | None -> No_message_status
+  | Some live when state.msg_target_keeper_name <> Some (turn_log_keeper_name live) ->
+    No_message_status
+  | Some live -> Message_status (live,
+      keeper_message_status_projection state live.tl_transcript ~now)
 
 let keeper_observed_turn (state : state) keeper_name =
   if Option.is_some state.keeper_turns_error then None
@@ -18356,7 +18369,10 @@ let keeper_message_inflight_rows (state : state) ~chat_cols:_ ~now =
   List.map (fun group -> true, summary group)
     (keeper_message_inflight_drawn state)
 
-let keeper_message_status_rows ?scroll (state : state) ~terminal_cols =
+let keeper_message_status_rows ?status_frame ?scroll (state : state) ~terminal_cols =
+  let status_frame = match status_frame with
+    | Some frame -> frame
+    | None -> keeper_message_status_frame state ~now:(Unix.gettimeofday ()) in
   let chat_cols = Masc_tui_roster_pane.content_cols
       ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
   let unavailable_target =
@@ -18369,20 +18385,9 @@ let keeper_message_status_rows ?scroll (state : state) ~terminal_cols =
   + List.length (keeper_message_activity_rows state)
   + List.length (keeper_observed_interrupt_rows state)
   + unavailable_target
-  + (match keeper_message_status_log state with
-     | None -> 0
-     | Some live
-       when state.msg_target_keeper_name <> Some (turn_log_keeper_name live) ->
-         (* Another keeper's live turn draws nothing on this screen, so it
-            must reserve nothing -- the counter mirrors the pane. *)
-         0
-     | Some live ->
-         (* Same call the drawing makes, so the budget cannot count a
-            different number of rows than the pane draws. The age in the
-            progress row changes the text, never the row count, so the
-            two clock reads cannot disagree on the number. *)
-         keeper_message_counted_status_rows state live.tl_transcript
-           ~now:(Unix.gettimeofday ()))
+  + (match status_frame with
+     | No_message_status -> 0
+     | Message_status (_, status) -> status.kmsp_row_count)
   (* The promoted line and the queued ones are entries in the history now --
      the chat pane appends them to the same stream it scrolls, so the
      conversation holds one time axis. Nothing is reserved for them here:
@@ -18412,7 +18417,7 @@ let keeper_message_status_rows ?scroll (state : state) ~terminal_cols =
   + (if keeper_message_reading_back ?scroll state then 1 else 0)
   + composer_extra_rows state
 
-let keeper_message_command_window ?scroll state ~terminal_rows ~terminal_cols =
+let keeper_message_command_window ?status_frame ?scroll state ~terminal_rows ~terminal_cols =
   match state.view, state.keeper_message_focus, state.voice_capture,
         state.msg_recall_replaces with
   | Keepers Keeper_message, Right_pane, None, None
@@ -18422,7 +18427,7 @@ let keeper_message_command_window ?scroll state ~terminal_rows ~terminal_cols =
         (Masc_tui_message_input.contents state.msg_input) with
      | None -> None
      | Some menu ->
-       let status_rows = keeper_message_status_rows ?scroll state ~terminal_cols + 1 in
+       let status_rows = keeper_message_status_rows ?status_frame ?scroll state ~terminal_cols + 1 in
        let chat_cols = Masc_tui_roster_pane.content_cols
            ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
        let history_rows = Masc_tui_message_layout.message_history_height

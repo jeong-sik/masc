@@ -1,5 +1,14 @@
 # TUI refresh observations and before/after comparisons
 
+Keeper chat status now prepares one immutable projection in a synchronous draw
+for command-menu measurement, history budgeting, Activity expansion keys and
+actual display. The original selected log (or explicit absence), visible rows,
+folded count and standalone detail hint stay together for that draw. Nothing is
+cached across frames or sent to a worker. The
+[status projection comparison](../audits/2026-10-19-tui-status-frame-projection.md)
+records conditional source construction counts and unchanged ownership limits;
+it is not a measured CPU, input, paint or Loading result.
+
 Selected durable preparation details preserve three scan diagnostic categories
 (unsupported events, malformed manifest rows and malformed JSON) separately
 from returned-row decoding issues. Malformed scan rows cannot be attributed to

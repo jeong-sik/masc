@@ -1088,3 +1088,10 @@ can fit. No frame/worker-spanning cache or new read is added. See the
 [per-render source audit](../audits/2026-10-19-tui-ask-frame-rendering.md) for the
 `N` to `D <= N` construction count and explicit editor-input boundary. These
 counts do not establish CPU, key-response, paint or Loading latency improvement.
+
+The full Ask reader now also checks both original editor-slot identities before
+displaying written input: Ask ID and question ID. Its separate editor path used
+to check only question ID, unlike the shared question renderer. This is a source
+ownership guard, not a reproduced stale-refresh defect or a latency result; see
+the [editor ownership comparison](../audits/2026-10-19-tui-ask-editor-owner.md)
+for normal refresh protections, unchanged save ownership and remaining evidence.

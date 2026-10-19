@@ -2168,10 +2168,14 @@ let ask_question_viewport (state : state) =
          | Some question ->
              let text, _ = ask_block (fun b ->
                match text_entry with
-               | Some entry when String.equal
-                   (Ask_projection.free_text_question_id entry.ate_slot) question.aq_id ->
+               | Some entry
+                 when String.equal (Ask_projection.free_text_ask_id entry.ate_slot) row.ar_id
+                      && String.equal
+                           (Ask_projection.free_text_question_id entry.ate_slot) question.aq_id ->
                    (* Typing owns the keys. Keep the editor separate from
-                      choices and context that can fill the reader. *)
+                      choices and context that can fill the reader. The slot
+                      must own this Ask too: question IDs repeat across Asks,
+                      and saving still targets the slot's original owner. *)
                    box_wrapped_field b cols ~head:"  " ~style:Ansi.bold
                      question.aq_prompt;
                    draw_ask_text_entry b cols ~draft ~question entry

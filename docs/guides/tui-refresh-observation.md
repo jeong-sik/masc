@@ -50,6 +50,17 @@ no timing improvement is inferred. The
 [diagnostic scope comparison](../audits/2026-10-19-tui-preparation-diagnostic-scope.md)
 records source Before/After and the unexecuted compound trace scenario.
 
+An explicit Keeper history refresh now retires that Keeper's preparation read
+capability while retaining its last successful observation for the exact same
+journal object/revision, Keeper, Turn_ref and operation. Details distinguish a
+queued recheck, an owned read in progress and a failed recheck beside that earlier
+observation. None confirms fresh data. A late retired response cannot settle the
+replacement read, and refreshing another Keeper does not retire this one.
+Hidden completion remains hidden until the same source is selected again;
+workspace retirement still discards all evidence. The
+[retained preparation comparison](../audits/2026-10-19-tui-preparation-retained-refresh.md)
+records the source states and separate unmeasured paint/Loading/performance limits.
+
 The TUI records the logical readers of a full HTTP refresh and shows which reader
 it is waiting for. Diagnostic status explains a refresh that has not finished;
 independent roster delivery also removes the unrelated-reader wait for that

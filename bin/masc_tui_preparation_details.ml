@@ -164,9 +164,26 @@ type t =
   { selected : target option
   ; pending : request option
   ; cached : (target * (snapshot, string) result) option
+  ; retained : (target * snapshot) option
   }
-type view = Not_loaded | Loading | Failed of string | Loaded of snapshot
-let empty = {selected=None; pending=None; cached=None}
+type recheck = Recheck_pending | Recheck_loading | Recheck_failed of string
+type view =
+  | Not_loaded | Loading | Failed of string | Loaded of snapshot
+  | Retained of { snapshot : snapshot; recheck : recheck }
+let empty = {selected=None; pending=None; cached=None; retained=None}
+
+let refresh ~keeper_name state =
+  let pending = match state.pending with
+    | Some request when String.equal keeper_name request.target.keeper_name -> None
+    | (Some _ | None) as pending -> pending in
+  let cached, retained = match state.cached with
+    | Some (target, Ok snapshot) when String.equal keeper_name target.keeper_name ->
+      None, Some (target,snapshot)
+    | Some (target, Error _) when String.equal keeper_name target.keeper_name -> None, state.retained
+    | Some _ | None -> state.cached, state.retained in
+  if pending==state.pending && cached==state.cached && retained==state.retained then state
+  else {state with pending; cached; retained}
+;;
 
 let select selected state =
   match selected with
@@ -187,6 +204,15 @@ let select selected state =
 
 let requested_target request = request.target
 
+let last_observed target state =
+  match state.cached with
+  | Some (cached, Ok snapshot) when equal cached target -> Some snapshot
+  | Some _ | None ->
+    match state.retained with
+    | Some (cached, snapshot) when equal cached target -> Some snapshot
+    | Some _ | None -> None
+;;
+
 let receive request result state =
   match state.pending with
   | Some pending when pending.nonce==request.nonce && equal pending.target request.target ->
@@ -195,17 +221,25 @@ let receive request result state =
       | Ok snapshot when not (equal target snapshot.observed_target) ->
         Error "preparation observation belongs to another selection"
       | Ok _ | Error _ -> result in
-    {state with pending=None; cached=Some (target,result)}
+    let retained = match result with
+      | Ok _ -> None
+      | Error _ -> Option.map (fun snapshot -> target,snapshot) (last_observed target state) in
+    {state with pending=None; cached=Some (target,result); retained}
   | Some _ | None -> state
 ;;
 
 let view target state =
   match state.selected with
   | Some selected when equal target selected ->
+    let retained recheck fallback = match last_observed target state with
+      | Some snapshot -> Retained {snapshot;recheck}
+      | None -> fallback in
     (match state.pending, state.cached with
-     | Some request, (Some (_, (Ok _ | Error _)) | None) when equal request.target target -> Loading
+     | Some request, (Some (_, (Ok _ | Error _)) | None) when equal request.target target ->
+       retained Recheck_loading Loading
      | (Some _ | None), Some (cached, Ok snapshot) when equal cached target -> Loaded snapshot
-     | (Some _ | None), Some (cached, Error detail) when equal cached target -> Failed detail
-     | (Some _ | None), (Some (_, (Ok _ | Error _)) | None) -> Not_loaded)
+     | (Some _ | None), Some (cached, Error detail) when equal cached target ->
+       retained (Recheck_failed detail) (Failed detail)
+     | (Some _ | None), (Some (_, (Ok _ | Error _)) | None) -> retained Recheck_pending Not_loaded)
   | Some _ | None -> Not_loaded
 ;;

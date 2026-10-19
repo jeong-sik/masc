@@ -177,6 +177,9 @@ Eio 는 협력형 스케줄러다. 취소와 시간 초과는 fiber 가 멈추�
   Ready producer가 성공한 준비에서 만든 불변 의존 계층은 같은 원래 plan인지 물리 확인한
   executor가 재사용한다. 일반 plan의 `dependency_layers` 호출 계약은 바꾸지 않는다.
   보관한 그래프를 동적 입력·binding·결과·실행 허가로 쓰거나 다른 plan에 넘기지 않는다.
+  aggregate 파일의 `resource_ordering`은 원래 plan/member 확인 뒤 이미 만든 의존 계층과
+  원래 선행조건 목록을 읽기 전용 결과로 함께 전달한다. executor에서 그래프를 다시
+  만들지 않고, 호출자가 그래프를 주입하는 옵션이나 별도 캐시/구 API 래퍼를 두지 않는다.
   executor의 descriptor·준비된 파일·Ready 순서는 닫힌 타입으로 구분한다. Ready의 원래
   병렬 정적 그룹을 만들려고 빈 자원 선행조건 표나 pending 전체 탐색을 만들지 않는다.
   일반 descriptor 스케줄로 대신 보내면 공유가 달라진다. 실제 binding의 충돌·배타 실행과

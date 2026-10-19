@@ -34,15 +34,26 @@ val plan : t -> Keeper_tool_plan.t
 val source : t -> Keeper_tool_call_log_context.turn_context
 val scopes : t -> Agent_core.Tool_contract.Resource_scope.t list
 
-val resource_dependencies
+type resource_ordering = private
+  { dependency_layers : Keeper_tool_plan.node list list
+  ; predecessors : (Keeper_tool_plan.Node_id.t * Keeper_tool_plan.Node_id.t list) list
+  }
+(** Immutable original layers and the resource predecessor lists derived from
+    them. Only the producer constructs this value; it contains no capabilities,
+    resolved inputs, results or effect/replay permission. *)
+
+val resource_ordering
   : plan:Keeper_tool_plan.t
   -> t
-  -> (Keeper_tool_plan.Node_id.t * Keeper_tool_plan.Node_id.t list) list option
+  -> resource_ordering option
 (** Earlier conflicting prepared leaves in dependency-layer order. Only the
     exact immutable plan has this ordering; [None] means a different plan.
     Disjoint siblings share no ordering edge. These edges grant neither
     authorization nor replay and do not replace the plan's dependencies.
-    Shared source reads do not conflict; overlapping target writes still do. *)
+    Shared source reads do not conflict; overlapping target writes still do.
+    The executor shares these already-built layers with scheduling instead of
+    rebuilding the same graph. Each call returns its own ordering only after
+    the original plan/member checks; an unused preparation does not build one. *)
 
 val for_node
   : plan:Keeper_tool_plan.t

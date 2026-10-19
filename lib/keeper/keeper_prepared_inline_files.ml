@@ -125,10 +125,16 @@ let plan t = t.plan
 let source t = t.source
 let scopes t = List.concat_map (fun leaf -> operation_scopes leaf.operation) t.leaves
 
-let resource_dependencies ~plan t =
+type resource_ordering =
+  { dependency_layers : Plan.node list list
+  ; predecessors : (Plan.Node_id.t * Plan.Node_id.t list) list
+  }
+
+let resource_ordering ~plan t =
   if not (plan == t.plan) then None
   else
-    let leaves = Plan.dependency_layers plan |> List.concat_map (fun nodes ->
+    let dependency_layers = Plan.dependency_layers plan in
+    let leaves = dependency_layers |> List.concat_map (fun nodes ->
       List.map (fun node ->
         match Node_map.find_opt node.Plan.id t.leaves_by_id with
         | Some leaf when leaf.node == node -> leaf
@@ -144,7 +150,8 @@ let resource_dependencies ~plan t =
           then Some prior.node.Plan.id else None) earlier in
         (leaf.node.id, predecessors) :: collect (leaf :: earlier) rest
     in
-    Some (collect [] leaves)
+    let predecessors = collect [] leaves in
+    Some {dependency_layers; predecessors}
 ;;
 
 let for_node ~plan ~node ~input t =
@@ -232,7 +239,7 @@ module Ready = struct
   ;;
 
   let plan t = t.plan
-  let dependency_layers t = t.dependency_layers
+  let dependency_layers (t : t) = t.dependency_layers
 
   let preparation_predecessors t ~node =
     match Node_map.find_opt node.Plan.id t.preparation_orders with

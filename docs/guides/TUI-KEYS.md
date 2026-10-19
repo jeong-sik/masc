@@ -174,6 +174,11 @@ Admission diagnostics additionally keep the response's query, the controls at
 application and the retained listing's query separate for success/failure. Missing
 owned terminal data has no invented response query. These are request-linked log
 fields; actual runtime logs and visible behavior remain separate evidence.
+Full/navigation dispatch diagnostics also retain the original and current source
+request through cold identity handoff. Planned Board conditions stay fixed even
+if controls move; an originally non-Board read stays unrequested in that context.
+Dispatch/rebind/cleanup observations are separate from actual HTTP starts, received
+data and paint. A missing finish record remains an unfinished observation.
 
 ## Usage
 

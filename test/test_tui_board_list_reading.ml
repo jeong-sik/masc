@@ -250,6 +250,84 @@ let test_empty_query_origin_survives_missing_result_and_is_withdrawn () =
      && Option.fold ~none:false ~some:(fun application -> application.bpa_listing_query=Some original)
        missing_application)
 
+
+(* Model the already-admitted owner replacement. The real cold identity guard
+   has separate scenarios; this does not execute the private acknowledgement loop. *)
+let test_surface_context_rebind_keeps_origin_query_and_current_admission () =
+  let current=state () in
+  current.board_sort <- Board_recent;current.board_hearth <- Some "origin";
+  let original_query=board_query current and needs={nothing with needs_board=true} in
+  let reads,original=Surface_read_order.dispatch ~kind:Surface_read_order.Full
+    ~needs ~started_ns:0L current.http_surface_reads in
+  current.http_surface_reads <- reads;
+  let context=Surface_read_context.capture ~needs ~board_query:original_query original in
+  Buffer.add_string current.board_draft "keep through identity handoff";
+  current.board_sort <- Board_updated;current.board_hearth <- Some "later-controls";
+  current.http_surface_reads <- Surface_read_order.invalidate current.http_surface_reads;
+  let reads,successor=Surface_read_order.dispatch ~kind:Surface_read_order.Full
+    ~needs ~started_ns:1L current.http_surface_reads in
+  current.http_surface_reads <- reads;
+  let rebound=Surface_read_context.rebind context successor in
+  finish_http_surface_read current (Surface_read_context.current context);
+  Alcotest.(check bool) "rebinding preserves origin and planned query without borrowing controls" true
+    (Surface_read_context.origin rebound==original
+     && Surface_read_context.current rebound==successor
+     && Surface_read_context.current context==original
+     && Surface_read_context.planned_board_query rebound=Some original_query
+     && Surface_read_order.owns_dataset current.http_surface_reads
+       (Surface_read_context.current rebound) Surface_read_order.Board_posts
+     && observe_delivery current (Surface_read_context.current context)
+       {bpr_query=original_query;bpr_result=Ok [post "retired"]}=None);
+  let application=match observe_delivery current (Surface_read_context.current rebound)
+      {bpr_query=original_query;bpr_result=Ok [post "owned"]} with
+    | Some application -> application | None -> Alcotest.fail "rebound posts not owned" in
+  Alcotest.(check bool) "actual receipt joins planned input to changed controls under successor ownership" true
+    (application.bpa_delivery=Board_posts_received original_query
+     && application.bpa_requested_query=board_query current
+     && board_posts_query current=original_query
+     && Buffer.contents current.board_draft="keep through identity handoff");
+  let remaining=take_http_surface_datasets current (Surface_read_context.current rebound) in
+  finish_http_surface_read current (Surface_read_context.current rebound);
+  Alcotest.(check bool) "terminal cleanup cannot replay already received posts or rewrite the origin" true
+    (not (List.mem Surface_read_order.Board_posts remaining)
+     && Surface_read_context.planned_board_query rebound=Some original_query
+     && Surface_read_context.origin context==original)
+
+let test_unrequested_board_context_does_not_gain_new_navigation_input () =
+  let current=state () in
+  let needs={nothing with needs_planning=true} in
+  let reads,original=Surface_read_order.dispatch ~kind:Surface_read_order.Full
+    ~needs ~started_ns:0L current.http_surface_reads in
+  current.http_surface_reads <- reads;
+  let context=Surface_read_context.capture ~needs ~board_query:(board_query current) original in
+  current.board_hearth <- Some "new-navigation";
+  let navigation=dispatch current in
+  let navigation_context=Surface_read_context.capture ~needs:{nothing with needs_board=true}
+    ~board_query:(board_query current) navigation in
+  let requested=board_query current in
+  current.board_hearth <- Some "later-controls";
+  let reads,replacement=Surface_read_order.dispatch ~kind:Surface_read_order.Full
+    ~needs ~started_ns:1L current.http_surface_reads in
+  current.http_surface_reads <- reads;
+  let rebound=Surface_read_context.rebind context replacement in
+  finish_http_surface_read current (Surface_read_context.current context);
+  Alcotest.(check bool) "a non-Board intent stays absent and cannot consume navigation posts" true
+    (Surface_read_context.planned_board_query rebound=None
+     && Surface_read_context.planned_board_query navigation_context=Some requested
+     && not (Surface_read_order.owns_dataset current.http_surface_reads
+       (Surface_read_context.current rebound) Surface_read_order.Board_posts)
+     && Surface_read_order.owns_dataset current.http_surface_reads navigation Surface_read_order.Board_posts);
+  suspend_workspace_readings current;
+  let successor=dispatch current in
+  finish_http_surface_read current (Surface_read_context.current rebound);
+  finish_http_surface_read current (Surface_read_context.current navigation_context);
+  Alcotest.(check bool) "retired context cleanup cannot settle a later owner or invent observed data" true
+    (Surface_read_order.owns_dataset current.http_surface_reads successor Surface_read_order.Board_posts
+     && board_posts_snapshot current=None
+     && Surface_read_context.planned_board_query rebound=None
+     && observe_delivery current (Surface_read_context.current navigation_context)
+       {bpr_query=requested;bpr_result=Ok [post "late"]}=None)
+
 let () = Alcotest.run "tui_board_list_reading"
   ["availability and continuity",
    [Alcotest.test_case "initial loading empty and failure" `Quick test_initial_loading_empty_and_failure_are_distinct;
@@ -262,4 +340,8 @@ let () = Alcotest.run "tui_board_list_reading"
     Alcotest.test_case "superseded query and owned terminal fallback" `Quick
       test_superseded_query_and_terminal_fallback_keep_original_owner;
     Alcotest.test_case "empty query missing result and withdrawal" `Quick
-      test_empty_query_origin_survives_missing_result_and_is_withdrawn]]
+      test_empty_query_origin_survives_missing_result_and_is_withdrawn;
+    Alcotest.test_case "context rebind original query and successor admission" `Quick
+      test_surface_context_rebind_keeps_origin_query_and_current_admission;
+    Alcotest.test_case "unrequested context navigation and retirement" `Quick
+      test_unrequested_board_context_does_not_gain_new_navigation_input]]

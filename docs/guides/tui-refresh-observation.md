@@ -473,8 +473,10 @@ checks, and this independent request creates no navigation collector or identity
 authority. `tui_system_logs_read_started` and `tui_system_logs_read_applied`
 record its own source clocks and received/failed UI application separately.
 
-`tui_surface_read_started` identifies navigation request id, monotonic start,
-whether a full pass was running and the admitted navigation collector count.
+`tui_surface_read_started` identifies a logical full/navigation dispatch request,
+its monotonic start, whether a full pass was running and the admitted navigation
+collector count. It records registration of the intended read, not actual HTTP
+entry: a booting full pass can still perform only the identity probe.
 `tui_surface_read_applied` records the same
 dataset request id and start clock, monotonic application clock, and each applied
 dataset's logical source, concrete dataset and received/failed outcome. Board posts
@@ -484,7 +486,11 @@ consumed by early delivery is excluded.
 These are UI state application observations, not physical request counts,
 successful operator actions or first paint. Empty source lists grant no usable
 screen claim. `tui_surface_read_finished` records the matching start and UI
-settlement clocks and remaining navigation count. `tui_surface_read_refused`
+settlement clocks and remaining navigation count. Both lifecycle events carry the
+same immutable `context` JSON described below; synchronous fallback now records
+normal-return cleanup too. Logging stays outside finalizers, preserving existing
+exception unwinding. A start without a finish remains an unfinished observation,
+not a claimed worker exit or inferred timeout. `tui_surface_read_refused`
 separately records current workspace/generation and latest-navigation eligibility;
 it contains no response text. Counts describe UI-owned collectors rather than
 physical HTTP requests or running Keeper actions. Existing full refresh clocks
@@ -545,6 +551,35 @@ The worker uses only this acknowledged binding for subsequent progress, early
 observations, final results and failure settlement. It does not take a later
 workspace authority from mutable UI state. Rejection and handler exit resolve the
 acknowledgement; cancellation still propagates through the worker's switch.
+
+The surface binding now carries one immutable context through dispatch, cold
+identity acknowledgement and collector completion. `context` schema 1 contains
+`origin` and `current` opaque requests projected as session-local id, request kind
+and original monotonic dispatch clock, plus `planned_board_query`. The latter is
+the sort/hearth frozen beside the actual producer input; null means Board was not
+requested, even if controls change before acknowledgement. It is intent rather
+than a response query; the application object's null delivery query still means
+missing data. No current controls are borrowed to reconstruct original intent.
+
+When the existing cold guard admits an identity, `tui_surface_read_rebound` links
+the previous current request to the successor context. Only current request changes;
+origin and intent remain fixed. This records UI owner creation and acknowledgement
+offer, not proof the worker consumed it or started HTTP. The worker transports the
+acknowledged context in its completion while datasets/terminal application still
+use the same current opaque request in the original admission checks. Query metadata
+never authorizes a result or changes the requested datasets. Join subsequent
+application/cleanup records by that current request; ids are not global across TUI
+sessions. A duplicate/retired navigation completion retains its existing suppression.
+
+Full and navigation starts now share lifecycle fields; cold rebinding and normal
+synchronous cleanup are additionally visible. Cancellation or an application
+exception can leave only the start/rebind record: retain it as unfinished instead
+of inventing an end or a received outcome. Existing reader progress still supplies
+actual reader start/return/interruption observations. No HTTP, health probe,
+independent id/generation, retry, deadline or UI row is added. Cleanup reuses the
+existing monotonic clock source, with additional observation reads on synchronous
+normal returns. Context encoding and the added log writes have unmeasured overhead;
+source fields alone do not prove actual logs, worker exit, first input or paint.
 
 | Boundary | Before | Source implementation |
 |---|---|---|

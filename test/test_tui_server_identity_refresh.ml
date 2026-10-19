@@ -1009,6 +1009,13 @@ let test_initial_probe_requires_current_cold_workspace () =
   let state, early = early_asks_fixture () in
   state.workspace_identity <- Workspace_identity_unread;
   state.server_identity <- None;
+  let needs={nothing with needs_board=true} in
+  let reads,original=Surface_read_order.dispatch ~kind:Surface_read_order.Full
+    ~needs ~started_ns:0L state.http_surface_reads in
+  state.http_surface_reads <- reads;
+  let planned=board_query state in
+  let context=Surface_read_context.capture ~needs ~board_query:planned original in
+  state.board_sort <- Board_updated;state.board_hearth <- Some "later-controls";
   let admitted identity = can_admit_initial_http_identity state
       ~ticket:early.ea_ticket ~authority:early.ea_authority identity in
   Alcotest.(check bool) "ready current matching cold probe can hand off" true
@@ -1017,7 +1024,9 @@ let test_initial_probe_requires_current_cold_workspace () =
     (state.workspace_identity = Workspace_identity_unread
      && state.server_identity = None
      && state.workspace_authority = early.ea_authority
-     && Snapshot_read.in_flight state.asks_read);
+     && Snapshot_read.in_flight state.asks_read
+     && Surface_read_context.planned_board_query context=Some planned
+     && Surface_read_context.current context==original);
   List.iter (fun candidate ->
     Alcotest.(check bool) "foreign incomplete or booting probes cannot hand off" false
       (admitted candidate))
@@ -1038,7 +1047,11 @@ let test_initial_probe_requires_current_cold_workspace () =
   let Workspace_authority generation = state.workspace_authority in
   state.workspace_authority <- Workspace_authority (generation + 1);
   Alcotest.(check bool) "old authority cannot confirm a replacement workspace" false
-    (admitted early.ea_identity)
+    (admitted early.ea_identity);
+  Alcotest.(check bool) "retained context does not grant authority or replace original query with controls" true
+    (Surface_read_context.planned_board_query context=Some planned
+     && not (board_query_equal planned (board_query state))
+     && Surface_read_context.origin context==original)
 
 let test_initial_probe_rejects_retired_refresh () =
   let open Masc_tui_types in

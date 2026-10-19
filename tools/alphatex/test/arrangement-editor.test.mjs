@@ -66,7 +66,7 @@ test('actual IO worker preserves sources in redo history when saving to a differ
 
 const flush=()=>new Promise(resolve=>setImmediate(resolve))
 async function controller(options={}){
-  const observed={requests:[],saved:[],recovered:[],terminated:false},process=new EventEmitter()
+  const observed={requests:[],saved:[],recovered:[],terminated:false,players:[],removed:[]},process=new EventEmitter()
   process.stdin=Object.assign(new EventEmitter(),{isTTY:true,isRaw:false,setRawMode(value){this.isRaw=value},resume(){},pause(){}})
   process.stdout=Object.assign(new EventEmitter(),{isTTY:true,columns:100,rows:24,write(){}});process.stderr={write(){}}
   let owner
@@ -86,7 +86,14 @@ async function controller(options={}){
     emitKeypressEvents(){},safeText:String,
     verifyArrangementAssets:async()=>new Map(),
     loadArrangement:async()=>{throw new Error('Unexpected load')},
-    mkdtemp:async()=>'/owned-recovery',writeFile:async()=>{},
+    mkdtemp:async()=>'/owned-recovery',writeFile:async()=>{},rm:async path=>{observed.removed.push(path)},openPlayback(options){
+      let resolve,reject
+      const completion=new Promise((yes,no)=>{resolve=yes;reject=no})
+      const event=(kind,currentTime=0)=>options.onEvent({kind,currentTime,duration:10,device:{id:'output',name:'Output',outputs:2},loop:false})
+      const handle={completion,ready:Promise.resolve(),stop(){entry.commands.push('stop')},terminate(){entry.commands.push('terminate')},pause(){entry.commands.push('pause');event('paused')},resume(){entry.commands.push('resume');event('playing')},status(){entry.commands.push('status')},seek(seconds){entry.commands.push(['seek',seconds])}}
+      const entry={options,handle,commands:[],finish(){event('stopped');resolve({kind:'stopped'})},reject,event}
+      observed.players.push(entry);queueMicrotask(()=>event('playing'));return handle
+    },
     saveProject:async()=>{throw new Error('Unexpected unverified recovery')},
     saveArrangement:async(path,project,revision,extra)=>{observed.recovered.push({path,project,revision,...extra})},
   }
@@ -193,4 +200,48 @@ test('worker exit with no active job rejects an already admitted save after inpu
   assert.equal(view.observed.recovered[0].project.title,'Accepted before worker exit')
   assert.equal(view.process.stdin.isRaw,false)
   assert.equal(view.observed.terminated,true)
+})
+
+
+test('WAV preparation stays cancellable and a late result cannot launch playback',async()=>{
+  const view=await controller()
+  view.key('space');await flush()
+  const request=view.observed.requests.find(job=>job.kind==='prepare-wave')
+  assert.ok(request)
+  view.key('space');await flush()
+  assert.ok(view.observed.requests.some(job=>job.kind==='cancel'&&job.request===request.id))
+  view.worker.emit('message',{id:request.id,ok:true,result:{path:'/owned-recovery/play-1/plan.json',format:'wave-arrangement'}})
+  await flush();assert.equal(view.observed.players.length,0)
+  view.key('q');await view.done
+  assert.ok(view.observed.removed.includes('/owned-recovery/play-1'))
+})
+
+test('arrangement owns one player through pause, seek, resume and close cleanup',async()=>{
+  const view=await controller()
+  view.key('space');await flush()
+  const request=view.observed.requests.find(job=>job.kind==='prepare-wave')
+  view.worker.emit('message',{id:request.id,ok:true,result:{path:'/owned-recovery/play-1/plan.json',format:'wave-arrangement'}})
+  await flush();const player=view.observed.players[0]
+  assert.equal(player.options.format,'wave-arrangement')
+  view.key('space');await flush();view.command('seek 2');await flush();view.key('space');await flush()
+  assert.ok(player.commands.includes('pause'));assert.ok(player.commands.includes('resume'))
+  assert.ok(player.commands.some(command=>Array.isArray(command)&&command[0]==='seek'&&command[1]===1.2))
+  view.key('q');await flush()
+  let returned=false;view.done.then(()=>{returned=true});await flush();assert.equal(returned,false)
+  assert.ok(player.commands.includes('stop'));assert.ok(player.commands.includes('terminate'))
+  assert.ok(!view.observed.removed.includes('/owned-recovery/play-1'))
+  player.finish();await view.done
+  assert.equal(view.observed.players.length,1);assert.equal(view.process.stdin.isRaw,false)
+  assert.ok(view.observed.removed.includes('/owned-recovery/play-1'))
+})
+
+test('document mutation stops the admitted playback revision while cursor motion keeps it',async()=>{
+  const view=await controller();view.key('space');await flush()
+  const job=view.observed.requests.find(job=>job.kind==='prepare-wave')
+  view.worker.emit('message',{id:job.id,ok:true,result:{path:'/owned-recovery/play-1/plan.json',format:'wave-arrangement'}})
+  await flush();const player=view.observed.players[0]
+  view.command('cursor 4');await flush();assert.ok(!player.commands.includes('stop'))
+  view.command('title New revision');await flush();assert.ok(player.commands.includes('stop'))
+  player.finish();view.key('q');await view.done
+  assert.equal(view.observed.saved.at(-1).project.title,'New revision')
 })

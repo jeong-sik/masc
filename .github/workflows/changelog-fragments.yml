@@ -27,11 +27,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_URL: ${{ github.event.pull_request.url }}
         run: |
-          set -eu
+          set -euo pipefail
           # Only the fragments this PR adds or edits: a stacked PR must not be
-          # refused for a lower fragment it does not carry.
-          files=$(gh api --paginate --jq '.[].filename | select(. != "changelog.d/README.md")' \
-            "$PR_URL/files?per_page=100" | grep '^changelog\.d/' || true)
+          # refused for a lower fragment it does not carry, and a release fold
+          # deletes fragments, so removed files are skipped. The API call and
+          # the grep stay separate commands: an API failure fails the step,
+          # only an empty match falls through as an empty list.
+          listing=$(gh api --paginate --jq '.[] | select(.status != "removed") | .filename | select(. != "changelog.d/README.md")' \
+            "$PR_URL/files?per_page=100")
+          files=$(printf '%s\n' "$listing" | grep '^changelog\.d/' || true)
           python3 scripts/changelog-fragments.py check-files $files
       - name: Check every fragment cites its own pull request
         if: github.event_name == 'workflow_dispatch'

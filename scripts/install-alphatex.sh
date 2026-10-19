@@ -15,7 +15,7 @@ command -v pnpm >/dev/null 2>&1 || { printf '%s\n' 'pnpm is required to install 
 node -e 'if (Number(process.versions.node.split(".")[0]) < 22) process.exit(1)'
 mkdir -p "$prefix"
 prefix=$(CDPATH= cd -- "$prefix" && pwd)
-runtime_files='package.json pnpm-lock.yaml engine.mjs audio.mjs diagnostics.mjs worker.mjs terminal.mjs viewer.mjs capture.mjs session-data.mjs music-session.mjs wave-file.mjs native/MusicSession.swift native/Info.plist vst.mjs instruments.mjs'
+runtime_files='package.json pnpm-lock.yaml engine.mjs audio.mjs diagnostics.mjs worker.mjs terminal.mjs viewer.mjs capture.mjs session-data.mjs music-session.mjs wave-file.mjs sequencer-project.mjs sequencer-files.mjs sequencer-audio.mjs sequencer-editor.mjs sequencer-worker.mjs sequencer-tui.mjs native/MusicSession.swift native/Info.plist vst.mjs instruments.mjs'
 revision=$(node --input-type=module - "$repo_root/tools/alphatex" $runtime_files <<'FINGERPRINT'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'

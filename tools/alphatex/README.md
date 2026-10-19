@@ -139,3 +139,47 @@ alphaTab is MPL-2.0, Bravura is OFL-1.1, alphaSkia is BSD-3-Clause. Their notice
 with the locked dependencies. The Sonivox license is in alphaTab's
 `dist/soundfont/LICENSE` and must remain with a redistributed installation.
 JZZ and JZZ MIDI SMF are MIT-licensed; their notices ship with the pinned packages.
+# Phrase sequencer
+
+From `/score`, press **p** to open the piano-roll editor. It also opens directly
+with `masc-alphatex --sequence`; reopen a saved document with `--project song.json`.
+Projects save under `./music-projects` by default (`--project-root` changes this).
+An existing recording remains a separate take; the editor's **r** opens the capture
+screen and returns to the same phrase. It does not yet overdub into the project.
+
+Move the cursor with arrows; Enter inserts or removes a note. Shift+arrows moves
+the selected note. `[`/`]` changes its length, `+`/`-` changes velocity, and `g`
+cycles the musical grid. Tab changes track, `n` adds one, `m` mutes it and `o`
+solos it. `u`/`y` undo/redo. Space previews the audible tracks with the bundled
+SoundFont; `l` toggles repetition of the loop region. This WAV preview restarts the
+system player between passes and does not provide sample-continuous external MIDI
+transport. `s` saves, and q/Esc saves edits before returning. If the original file
+changed externally, closing retains edits in a private recovery document and prints
+its path rather than replacing the changed file.
+
+Press `:` for commands and `?` for help. Beat numbers start at zero and use quarter
+notes. For example:
+
+```
+progression 0 4 rootless Dm7 G7 Cmaj7
+track-add Electric bass
+program 33
+level 80
+note D2 0 4 110
+note G2 4 4 105
+note C2 8 4 100
+loop 0 12
+export /path/phrase.mid
+save-as /path/experiment.json
+```
+
+`chord Cmaj7 0 4 drop2 4 0` inserts a four-beat voicing; modes are close, drop2
+and rootless, followed by octave and inversion. Tonal supplies chord candidates,
+intervals and the rootless dictionary. Candidates at the cursor include bass and
+inversions but do not assert a unique harmonic interpretation. `transpose -12`,
+`quantize 0.25` and `duplicate 8` operate on the selected track transactionally.
+`tempo 120`, `length 32` and `meter 3 4` set project timing. MIDI/WAV export refuses
+existing files. `level 100` and `pan 64` set the selected track's MIDI volume and
+pan (0–127; pan 64 is center). Dense mixes can clip; lower track levels when the
+preview/export reports clipped samples. The broader destination and remaining work are recorded in
+[the sequencer design](../../docs/design/tui/MUSIC-SEQUENCER.md).

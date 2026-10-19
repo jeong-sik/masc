@@ -88,6 +88,22 @@ test('a retired library read cannot overwrite the refreshed library or close sta
   assert.equal(model.entries[0].path, '/current.json')
 })
 
+test('a late library result preserves the selection moved while reading', async () => {
+  const pending = deferred(), opened = []
+  const model = new MusicWorkbench({ read: () => pending.promise,
+    open: async entry => { opened.push(entry) } })
+  const refreshing = model.refresh(); await flush()
+  assert.equal(model.loading, true)
+  model.move(1)
+  const selected = model.entries[model.cursor]
+  pending.resolve({ entries: [{ kind: 'project', name: 'new', path: '/new.json' }, ...model.entries], errors: [] })
+  await refreshing
+  assert.equal(model.entries[model.cursor], selected)
+  await model.activate()
+  assert.deepEqual(opened, [selected])
+  await model.close()
+})
+
 test('a rejected project stays a source failure without starting a replacement editor', async () => {
   const requests = []
   const model = new MusicWorkbench({ open: async entry => { requests.push(entry); throw new Error('Project changed') } })

@@ -70,13 +70,13 @@ export class MusicWorkbench {
     if (this.closed || this.child) return
     this.reader?.abort()
     const reader = new AbortController(); this.reader = reader
-    const selected = identity(this.entries[this.cursor])
     this.loading = true; this.changed()
     const pending = Promise.resolve().then(() => this.read(this, { signal: reader.signal }))
     this.reads.add(pending)
     try {
       const result = await pending
       if (this.closed || this.reader !== reader || reader.signal.aborted) return
+      const selected = identity(this.entries[this.cursor])
       this.entries = result.entries; this.errors = result.errors
       this.cursor = Math.max(0, this.entries.findIndex(entry => identity(entry) === selected))
     } catch (error) {

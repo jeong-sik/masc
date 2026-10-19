@@ -181,14 +181,16 @@ if [ "$merge_check" -eq 1 ]; then
   exit 0
 fi
 check_current_ci
-if [ "$check_only" -eq 0 ]; then
+[ "$me" != "$pr_author" ] || refuse "the PR author cannot approve their own change"
+if [ "$check_only" -eq 0 ] || [ -n "$review_base" ] || [ -n "$review_diff" ]; then
   [[ "$review_base" =~ ^[0-9a-f]{40}$ && "$review_diff" =~ ^[0-9a-f]{64}$ ]] ||
     refuse "supply the base and complete diff identity captured during source review (--review-base/--review-diff)"
   declared_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$review_base" --head "$head") ||
     refuse "reviewed base diff unavailable"
   [ "$declared_diff" = "$review_diff" ] && [ "$current_diff" = "$review_diff" ] ||
     refuse "current complete diff differs from the reviewed change"
-  [ "$me" != "$pr_author" ] || refuse "the PR author cannot approve their own change"
+fi
+if [ "$check_only" -eq 0 ] || [ -n "$body" ]; then
   [ -s "$body" ] || refuse "review body missing or empty"
   review_body=$(cat "$body")
   vline=${review_body%%$'\n'*}

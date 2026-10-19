@@ -5,9 +5,11 @@ let chord key modifiers = match Keyboard.of_wire ~key ~modifiers with
   | Ok value -> value | Error detail -> fail detail
 let test_unicode_boundary () =
   List.iter (fun text -> check bool "valid Unicode text" true (Keyboard.validate_text text=Ok ()))
-    ["";"한글🙂";"a\n\tβ";"é"];
+    ["";"한글🙂";"a β";"é"];
   List.iter (fun text -> check bool "malformed UTF-8 refused" true
     (Result.is_error (Keyboard.validate_text text))) ["\255";"\237\160\128";"\240\159"];
+  List.iter (fun text -> check bool "text never silently sends navigation or control keys" true
+    (Result.is_error (Keyboard.validate_text text))) ["first\tsecond";"first\nsubmit";"first\rsubmit";"\000";"\127"];
   List.iter (fun text -> check string "one scalar retained" text (Keyboard.key_text (chord text []).key))
     ["a";"+";"한";"🙂"];
   List.iter (fun key -> check bool "not one scalar or named key" true
@@ -32,6 +34,25 @@ let test_native_protocol () =
     check string "exact native params" params (Yojson.Safe.to_string (Wire.call_params request));
     check bool "native input never asks a model" false (Wire.uses_model request);
     check bool "native input has no sentence timeout" true (Wire.sentence_timeout_of_call request=None)) cases
+let test_w3c_input_sources () =
+  let field key json = Yojson.Safe.Util.member key json in
+  let actions source = match source with
+    | `List [source] -> field "actions" source |> Yojson.Safe.Util.to_list
+    | _ -> fail "one keyboard source required" in
+  let events = Keyboard.input_source ~id:"owner" (chord "a" ["Meta";"Shift"]) |> actions in
+  check (list string) "down and reverse-order up retain ownership"
+    ["keyDown";"keyDown";"keyDown";"keyUp";"keyUp";"keyUp"]
+    (List.map (fun event -> field "type" event |> Yojson.Safe.Util.to_string) events);
+  check (list string) "modifier chord is held until release"
+    ["\xee\x80\xbd";"\xee\x80\x88";"a";"a";"\xee\x80\x88";"\xee\x80\xbd"]
+    (List.map (fun event -> field "value" event |> Yojson.Safe.Util.to_string) events);
+  let unicode = match Keyboard.text_source ~id:"owner" "한🙂" with Ok value -> actions value | Error detail -> fail detail in
+  check (list string) "Unicode scalars never split into UTF-8 bytes"
+    ["한";"한";"🙂";"🙂"]
+    (List.map (fun event -> field "value" event |> Yojson.Safe.Util.to_string) unicode);
+  check bool "reserved WebDriver key scalar cannot become text input" true
+    (Result.is_error (Keyboard.text_source ~id:"owner" "\xee\x80\x89"))
 let () = run "browser keyboard" ["native",[
   test_case "Unicode and closed chord boundary" `Quick test_unicode_boundary;
+  test_case "native W3C chord ownership and Unicode scalar input" `Quick test_w3c_input_sources;
   test_case "actual Stagehand protocol fields" `Quick test_native_protocol]]

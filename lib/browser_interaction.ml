@@ -4,7 +4,7 @@ type request = { route : Browser_selection.preference; tab_id : int;
 let ( let* ) = Result.bind
 let parse = function
   | `Assoc fields ->
-    let allowed = ["lane"; "clientId"; "tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "source"; "destination"; "via"; "durationMs"] in
+    let allowed = ["lane"; "clientId"; "tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "source"; "destination"; "via"; "durationMs"; "key"; "modifiers"] in
     let* () = if List.for_all (fun (key, _) -> List.mem key allowed) fields
       && List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields))
       then Ok () else Error "unknown or duplicate browser interaction argument" in
@@ -40,6 +40,9 @@ let parse = function
          | _ -> Error "pointer target requires selector or documentId/nodeId")
       | _ -> Error "pointer target requires selector or documentId/nodeId" in
     let excludes keys =
+      let keys = (match List.assoc_opt "action" fields with
+        | Some (`String "press_key") -> keys
+        | _ -> "key" :: "modifiers" :: keys) in
       let keys = match List.assoc_opt "action" fields with
         | Some (`String "drag_to") -> keys
         | Some (`String "drag") -> "source" :: "destination" :: keys
@@ -67,6 +70,35 @@ let parse = function
         | Some _ -> Error "durationMs must be a nonnegative JavaScript-safe integer" in
       Ok (via,duration_ms) in
     let* action = match List.assoc_opt "action" fields with
+      | Some (`String ("type_text" | "press_key" as action)) ->
+        let* () = excludes (["selector";"nodeId";"x";"y";"point";"from";"to";"viewport"] @
+          if action = "press_key" then ["text"] else []) in
+        let* () = match expected_url with Some _ -> Ok () | None -> Error "native keyboard input requires expectedUrl" in
+        let* document_id = match List.assoc_opt "documentId" fields with
+          | Some (`String id) when id <> "" -> Ok id | _ -> Error "native keyboard input requires observed documentId" in
+        if action = "type_text" then
+          let* text = match List.assoc_opt "text" fields with Some (`String text) -> Ok text
+            | _ -> Error "type_text requires string text" in
+          let* () = Browser_lane.Keyboard.validate_text text in
+          Ok (Browser_lane.Type_text {document_id;text})
+        else
+          let* key = match List.assoc_opt "key" fields with Some (`String key) -> Ok key
+            | _ -> Error "press_key requires key" in
+          let* modifiers = match List.assoc_opt "modifiers" fields with
+            | None -> Ok []
+            | Some (`List values) ->
+              let rec strings = function [] -> Ok [] | `String value::rest ->
+                let* rest = strings rest in Ok (value::rest)
+                | _ -> Error "modifiers must contain strings" in strings values
+            | Some _ -> Error "modifiers must be an array" in
+          let* key = Browser_lane.Keyboard.of_wire ~key ~modifiers in
+          Ok (Browser_lane.Press_key {document_id;key})
+      | Some (`String "double_click") ->
+        let* () = excludes ["text";"x";"y";"point";"from";"to";"viewport"] in
+        let* () = match expected_url with Some _ -> Ok () | None -> Error "double_click requires expectedUrl" in
+        let* target = pointer_target (List.filter (fun (key,_) ->
+          List.mem key ["selector";"documentId";"nodeId"]) fields) in
+        Ok (Browser_lane.Double_click target)
       | Some (`String "hover") ->
         let* () = excludes ["text";"x";"y";"point";"from";"to";"viewport"] in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "hover requires expectedUrl" in
@@ -120,12 +152,13 @@ let parse = function
         let* point = geometry Browser_lane.Pointer.point_of_json "point" in
         let* x = integer "x" in let* y = integer "y" in
         Ok (Browser_lane.Scroll_at {point;viewport;x;y})
-      | Some (`String "hover_at") ->
+      | Some (`String ("hover_at" | "double_click_at" as action)) ->
         let* () = excludes ["selector";"text";"documentId";"nodeId";"x";"y";"from";"to"] in
-        let* () = match expected_url with Some _ -> Ok () | None -> Error "hover_at requires expectedUrl" in
+        let* () = match expected_url with Some _ -> Ok () | None -> Error (action ^ " requires expectedUrl") in
         let* viewport = geometry Browser_lane.Pointer.viewport_of_json "viewport" in
         let* point = geometry Browser_lane.Pointer.point_of_json "point" in
-        Ok (Browser_lane.Hover_at {point;viewport})
+        Ok (if action = "double_click_at" then Browser_lane.Double_click_at {point;viewport}
+          else Browser_lane.Hover_at {point;viewport})
       | Some (`String ("click_at" | "drag" as action)) ->
         let* () = excludes (["selector"; "text"; "documentId"; "nodeId"; "x"; "y"] @
           if action = "click_at" then ["from"; "to"] else ["point"]) in
@@ -139,7 +172,7 @@ let parse = function
           let* to_ = geometry Browser_lane.Pointer.point_of_json "to" in
           let* via,duration_ms = drag_options () in
           Ok (Browser_lane.Drag {from;to_;viewport;via;duration_ms})
-      | _ -> Error "action must be activate_tab, click, follow_link, fill, scroll, click_at, scroll_at, hover, hover_at, drag or drag_to" in
+      | _ -> Error "action must be activate_tab, click, double_click, double_click_at, type_text, press_key, follow_link, fill, scroll, click_at, scroll_at, hover, hover_at, drag or drag_to" in
     Ok { route = base.route; tab_id; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
 
@@ -373,6 +406,27 @@ if (!expected || Object.keys(current).some(key => current[key] !== expected[key]
 return {url:location.href,title:document.title,scrollX,scrollY};
 |js}
 
+let keyboard_guard_script = {js|
+const args = arguments[0];
+if (args.expectedUrl !== location.href) throw new Error('page_url_changed');
+if (browserScene({mode:'viewport'}).documentId !== args.documentId)
+  throw new Error('scene_document_changed');
+let focused = document.activeElement;
+while (focused?.shadowRoot?.activeElement) focused = focused.shadowRoot.activeElement;
+if (!focused || !focused.isConnected) throw new Error('keyboard_focus_unavailable');
+for (let node = focused; node; node = node.parentElement ?? node.getRootNode?.().host ?? null) {
+  if (node.inert || node.getAttribute('aria-disabled') === 'true') throw new Error('keyboard_focus_disabled');
+}
+if (focused.disabled || focused.matches(':disabled')) throw new Error('keyboard_focus_disabled');
+if (args.action === 'type_text') {
+  const input = focused.localName === 'input' &&
+    ['text','search','email','url','tel','password','number'].includes(focused.type);
+  if ((!input && focused.localName !== 'textarea' && !focused.isContentEditable) || focused.readOnly ||
+      focused.getAttribute('aria-readonly') === 'true') throw new Error('keyboard_focus_not_editable');
+}
+return {url:location.href,title:document.title,scrollX,scrollY};
+|js}
+
 (* What a pointer action reports once the browser has taken it. *)
 let pointer_receipt_script = "return {url:location.href,title:document.title,scrollX,scrollY};"
 
@@ -390,7 +444,7 @@ try {
       element = found[0];
     } else element = browserScene({...spec,mode:'resolve'});
     if (!element.isConnected) throw new Error('element_detached');
-    if (args.action === 'click') {
+    if ((args.action === 'click' || args.action === 'double_click')) {
       const activationTarget = (element.localName === 'label' && element.control) || element;
       if (activationTarget.matches(':disabled')) throw new Error('element_disabled');
       for (const start of new Set([element,activationTarget]))
@@ -406,7 +460,7 @@ try {
     const rects = Array.from(element.getClientRects());
     // display:contents labels have no box of their own. Their visible text
     // still activates the associated control through native label behavior.
-    if (args.action === 'click' && element.localName === 'label') {
+    if ((args.action === 'click' || args.action === 'double_click') && element.localName === 'label') {
       const walker = document.createTreeWalker(element,NodeFilter.SHOW_TEXT);
       while (walker.nextNode()) {
         const text = walker.currentNode, parent = text.parentElement;
@@ -457,7 +511,7 @@ try {
     throw new Error('element_pointer_obstructed');
   };
   let geometry;
-  if (args.action === 'hover' || args.action === 'click') geometry = {point:target(args).point};
+  if (args.action === 'hover' || (args.action === 'click' || args.action === 'double_click')) geometry = {point:target(args).point};
   else {
     const source = target(args.source), destination = target(args.destination,true);
     geometry = {from:source.point,to:destination.point,
@@ -481,12 +535,14 @@ let resolve_pointer_action action = function
     let* viewport = Browser_lane.Pointer.viewport_of_json raw_viewport in
     let point key = let* raw = required key in Browser_lane.Pointer.point_of_json raw in
     (match action with
+     | Browser_lane.Double_click _ -> let* point = point "point" in Ok (Browser_lane.Double_click_at {point;viewport})
      | Browser_lane.Hover _ -> let* point = point "point" in Ok (Browser_lane.Hover_at {point;viewport})
      | Browser_lane.Click _ | Browser_lane.Click_node _ ->
        let* point = point "point" in Ok (Browser_lane.Click_at {point;viewport})
      | Browser_lane.Drag_to {via;duration_ms;_} -> let* from = point "from" in let* to_ = point "to" in
        Ok (Browser_lane.Drag {from;to_;viewport;via;duration_ms})
      | Browser_lane.Activate_tab | Browser_lane.Fill _
+     | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
      | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
      | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
      | Browser_lane.Fill_node _ -> Error "semantic pointer action required")

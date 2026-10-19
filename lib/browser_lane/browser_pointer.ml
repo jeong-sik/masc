@@ -31,6 +31,7 @@ let viewport_to_json viewport = `Assoc ["documentId",`String viewport.document_i
 type gesture =
   | Hover
   | Click
+  | Double_click
   | Drag of { via : point list; destination : point; duration_ms : int }
   | Wheel of { x : int; y : int }
 
@@ -49,6 +50,8 @@ let input_sources ~pointer_id ~wheel_id ~viewport ~start gesture =
   let source = match gesture with
     | Hover -> pointer [move ~duration_ms:0 start]
     | Click -> pointer [move ~duration_ms:0 start; button "pointerDown"; button "pointerUp"]
+    | Double_click -> pointer [move ~duration_ms:0 start; button "pointerDown"; button "pointerUp";
+        button "pointerDown"; button "pointerUp"]
     | Drag {via;destination;duration_ms} ->
       let via = match via with
         | [] -> [{x=(start.x +. destination.x) /. 2.; y=(start.y +. destination.y) /. 2.}]

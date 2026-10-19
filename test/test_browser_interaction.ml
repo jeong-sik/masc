@@ -16,6 +16,20 @@ let test_typed_actions () =
   check bool "live interactions admitted" true (Browser_lane.verb_allowed_on_live verb);
   check bool "interactions are writes" false (Browser_lane.verb_is_read verb);
   check string "closed wire verb" "page.interact" (Browser_lane.verb_to_string verb)
+let test_native_keyboard_parser () =
+  let bound = ["expectedUrl",`String "https://example.org";"documentId",`String "d1"] in
+  let cases = [fields "type_text" @ bound @ ["text",`String "한글🙂"];
+    fields "press_key" @ bound @ ["key",`String "a";"modifiers",`List [`String "Meta"]];
+    fields "double_click" @ ["expectedUrl",`String "https://example.org";"selector",`String "#editor"]] in
+  List.iter (fun args -> let request=parsed args in
+    let wire=Browser_lane.interaction_args ~tab_id:request.tab_id ~expected_url:request.expected_url request.action in
+    check bool "native input round trips closed action" true ((parsed Yojson.Safe.Util.(to_assoc wire)).action=request.action)) cases;
+  List.iter (fun args -> check bool "bad keyboard or unobserved focus rejected" true
+    (Result.is_error (Interaction.parse (`Assoc args))))
+    [fields "type_text" @ ["text",`String "hello"];fields "press_key" @ bound @ ["key",`String "ab"];
+     fields "press_key" @ bound @ ["key",`String "a";"modifiers",`List [`String "Meta";`String "Meta"]];
+     fields "fill" @ ["selector",`String "#input";"text",`String "ok";"key",`String "Enter"];
+     fields "type_text" @ bound @ ["text",`String "ok";"nodeId",`String "n"]]
 let test_activate_tab () =
   let args = fields "activate_tab" @ ["lane",`String "live";"expectedUrl",`String "https://example.org"] in
   let request = parsed args in
@@ -132,6 +146,7 @@ let test_pointer_actions () =
      `Assoc ["x",`Float nan;"y",`Float 0.];
      `Assoc ["x",`Int 0;"y",`Int 0;"x",`Int 0]]
 let () = run "browser interaction" ["typed boundary", [
+  test_case "native keyboard and double click parser" `Quick test_native_keyboard_parser;
   test_case "observed semantic pointer targets" `Quick test_semantic_pointer_actions;
   test_case "drag path and timing contract" `Quick test_drag_options;
   test_case "explicit live tab activation" `Quick test_activate_tab;

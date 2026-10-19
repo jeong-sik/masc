@@ -27,6 +27,10 @@ type scene_view = Content | Regions
 type pointer_target = Selector of string | Scene_node of node_ref
 
 type interaction = Activate_tab | Click of string | Fill of { selector : string; text : string }
+  | Double_click of pointer_target
+  | Double_click_at of { point : Pointer.point; viewport : Pointer.viewport }
+  | Type_text of { document_id : string; text : string }
+  | Press_key of { document_id : string; key : Keyboard.t }
   | Scroll of { x : int; y : int }
   | Hover of pointer_target
   | Drag_to of { source : pointer_target; destination : pointer_target; via : Pointer.point list; duration_ms : int }
@@ -85,6 +89,10 @@ let verb_to_string = function
    thing that crosses a boundary. *)
 let interaction_verb = function
   | Activate_tab -> "activate_tab"
+  | Double_click _ -> "double_click"
+  | Double_click_at _ -> "double_click_at"
+  | Type_text _ -> "type_text"
+  | Press_key _ -> "press_key"
   | Scroll_at _ -> "scroll_at"
   | Hover _ -> "hover"
   | Drag_to _ -> "drag_to"
@@ -108,6 +116,11 @@ let interaction_args ~tab_id ~expected_url action =
   let verb = "action", `String (interaction_verb action) in
   let fields = match action with
     | Activate_tab -> [verb]
+    | Double_click target -> verb :: target_fields target
+    | Double_click_at {point;viewport} -> [verb;
+        "point",Pointer.point_to_json point;"viewport",Pointer.viewport_to_json viewport]
+    | Type_text {document_id;text} -> [verb;"documentId",`String document_id;"text",`String text]
+    | Press_key {document_id;key} -> [verb;"documentId",`String document_id] @ Keyboard.to_json_fields key
     | Hover target -> verb :: target_fields target
     | Drag_to {source;destination;via;duration_ms} -> [verb; "source",`Assoc (target_fields source);
         "destination",`Assoc (target_fields destination)] @ drag_fields via duration_ms
@@ -222,6 +235,8 @@ type live_capability =
   | Point_scroll
   | Trusted_hover
   | Trusted_drag
+  | Trusted_double_click
+  | Trusted_keyboard
   | Tab_activation
   | Tab_creation
 [@@deriving enumerate]
@@ -238,6 +253,8 @@ let live_capability_to_wire = function
   | Point_scroll -> "point_scroll"
   | Trusted_hover -> "trusted_hover"
   | Trusted_drag -> "trusted_drag"
+  | Trusted_double_click -> "trusted_double_click"
+  | Trusted_keyboard -> "trusted_keyboard"
   | Tab_activation -> "tab_activation"
   | Tab_creation -> "tab_creation"
 ;;
@@ -250,6 +267,8 @@ let live_capability_of_wire raw =
 
 let live_capability_of_interaction = function
   | Activate_tab -> Tab_activation
+  | Double_click _ | Double_click_at _ -> Trusted_double_click
+  | Type_text _ | Press_key _ -> Trusted_keyboard
   | Click _ | Fill _ | Scroll _ | Follow_link _ | Click_node _ | Fill_node _ -> Dom_interaction
   | Click_at _ -> Point_click
   | Scroll_at _ -> Point_scroll
@@ -376,8 +395,8 @@ let live_transport_serves transport capability =
     , ( Tab_listing | Text_read | Document_source | Element_inventory | Viewport_capture
       | Scene_read | Dom_interaction | Point_click | Point_scroll ) ) -> true
   | Web_extension, Tab_activation -> true
-  | Web_extension, (Trusted_hover | Trusted_drag | Tab_creation) -> false
-  | Webdriver_bidi, (Trusted_hover | Trusted_drag | Tab_creation) -> true
+  | Web_extension, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_keyboard | Tab_creation) -> false
+  | Webdriver_bidi, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_keyboard | Tab_creation) -> true
   | Webdriver_bidi, Tab_activation -> false
 ;;
 

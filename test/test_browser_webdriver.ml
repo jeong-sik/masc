@@ -502,6 +502,51 @@ let test_pointer_guard_failure_rejects_before_effect () =
       (match Driver.execute driver hover with Lane.Rejected_before_effect _ -> true | _ -> false);
     check int "failed hover guard sends no pointer input" 0 !actions)
 
+let test_native_keyboard_and_double_click () = Eio_main.run (fun _ ->
+  let submitted = ref [] and released = ref 0 and guard_failure = ref false and lost = ref false in
+  let request ~method_ ~path ~body = match method_,path with
+    | `POST,"/session" -> Ok (`Assoc ["sessionId",`String "owned";
+        "capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
+    | `GET,"/session/owned/window/handles" -> Ok (`List [`String "tab"])
+    | `GET,"/session/owned/window" -> Ok (`String "tab")
+    | `POST,"/session/owned/window" | `POST,"/session/owned/frame" -> Ok `Null
+    | `POST,"/session/owned/execute/sync" -> if !guard_failure then Error (Driver.Protocol "scene_document_changed")
+      else Ok (`Assoc ["url",`String "https://example.org";"title",`String "native"])
+    | `POST,"/session/owned/actions" -> submitted := body :: !submitted;
+      if !lost then Error (Driver.Transport "input reply missing") else Ok `Null
+    | `DELETE,"/session/owned/actions" -> incr released;Ok `Null
+    | _ -> fail ("unexpected native request: " ^ path) in
+  let driver = Driver.create ~start_downloads ~request () in
+  ignore (Driver.execute driver (Lane.Session_open {headless=None}));
+  ignore (Driver.execute driver Lane.Tabs_list);
+  let key=match Lane.Keyboard.of_wire ~key:"a" ~modifiers:["Meta"] with Ok key->key|Error detail->fail detail in
+  let point : Lane.Pointer.point = {x=0.5;y=0.5} in
+  let viewport : Lane.Pointer.viewport = {document_id="d1";width=800.;height=600.;scroll_x=0.;scroll_y=0.} in
+  List.iter (fun action ->
+    let verb=Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";action} in
+    submitted:=[];released:=0;
+    (match Driver.execute driver verb with Lane.Answered _ -> () | _ -> fail "native input failed");
+    check int "one native action sequence" 1 (List.length !submitted);
+    check int "all pressed input is released" 1 !released;
+    guard_failure:=true;submitted:=[];released:=0;
+    (match Driver.execute driver verb with Lane.Rejected_before_effect _ -> () | _ -> fail "guard failure must reject before input");
+    check int "failed guard sends no native action" 0 (List.length !submitted);
+    check int "failed guard releases no input it did not own" 0 !released;
+    guard_failure:=false;lost:=true;submitted:=[];released:=0;
+    (match Driver.execute driver verb with Lane.Refused _ -> () | _ -> fail "missing reply must remain uncertain");
+    check int "uncertain input is never replayed" 1 (List.length !submitted);
+    check int "uncertain input still releases" 1 !released;
+    lost:=false)
+    [Lane.Type_text {document_id="d1";text="한🙂"};Lane.Press_key {document_id="d1";key};
+     Lane.Double_click_at {point;viewport}];
+  List.iter (fun text -> submitted:=[];released:=0;
+    (match Driver.execute driver (Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";
+      action=Lane.Type_text {document_id="d1";text}}) with
+     | Lane.Rejected_before_effect _ -> () | _ -> fail "text controls/reserved scalars must reject before input");
+    check int "rejected text sends no action sequence" 0 (List.length !submitted);
+    check int "rejected text sends no native release" 0 !released) ["a\tb";"a\nb";"a\rb";"\xee\x80\x89"])
+
+
 let test_optional_document_never_selects_or_blocks_owner () =
   Eio_main.run (fun _ ->
     let calls = ref [] in
@@ -612,6 +657,7 @@ let test_remote_error_is_a_closed_sum () =
     | _ -> fail "status must answer after the session was lost")
 
 let () = run "native Firefox lane" ["behavior", [
+  test_case "native keyboard and double click guarded release" `Quick test_native_keyboard_and_double_click;
   test_case "optional document never selects or blocks owner" `Quick test_optional_document_never_selects_or_blocks_owner;
   test_case "download setup failure rolls back session" `Quick test_download_setup_rollback;
   test_case "semantic clicks use native input" `Quick test_semantic_click_uses_native_pointer_input;

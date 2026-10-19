@@ -260,6 +260,28 @@ let driver_status t =
     | (Some _ | None), (Some _ | None) ->
       `Assoc [ "error", `String "WebDriver /status answered without ready and message" ]
 
+let native_keyboard t session ~args ~action_name sources =
+  match script t session (Browser_scene_script.runtime ^ Browser_interaction.keyboard_guard_script) [args] with
+  | Error error -> Ok (`Assoc ["interactionFailure", `Assoc
+      ["message",`String (error_message error);"effectStarted",`Bool false]])
+  | Ok before ->
+    let released = ref None in
+    let applied = Eio.Switch.run (fun sw ->
+      Eio.Switch.on_release sw (fun () ->
+        let result = call t session `DELETE "/actions" None in
+        (match result with Ok _ -> session.pointer_state <- Released | Error _ -> ());
+        released := Some result);
+      session.pointer_state <- Release_required;
+      call t session `POST "/actions" (Some (`Assoc ["actions",sources]))) in
+    let* _ = applied in
+    let* () = match !released with Some result -> Result.map (fun _ -> ()) result
+      | None -> Error (Protocol "keyboard cleanup did not run") in
+    let* after = script t session Browser_interaction.pointer_receipt_script [] in
+    let* url_before = string_field "url" before in
+    match after with
+    | `Assoc fields -> Ok (`Assoc (("urlBefore",`String url_before)::("action",`String action_name)::fields))
+    | _ -> Error (Protocol "invalid keyboard receipt")
+
 let execute_unlocked t = function
   | Browser_lane.Session_open { headless } ->
     (match t.session with
@@ -406,12 +428,13 @@ let execute_unlocked t = function
       let args = Browser_lane.interaction_args ~tab_id ~expected_url action in
       let action_name = Browser_lane.interaction_verb action in
       let native_action = match action with
-        | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
+        | Browser_lane.Double_click _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
           let* resolved = script t session (Browser_scene_script.runtime ^ Browser_interaction.pointer_target_script) [args] in
           let* action = Result.map_error (fun message -> Protocol message)
             (Browser_interaction.resolve_pointer_action action resolved) in
           let* url = string_field "url" resolved in
           Ok (Some url,action)
+        | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
         | Browser_lane.Activate_tab | Browser_lane.Fill _
         | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
         | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
@@ -422,8 +445,16 @@ let execute_unlocked t = function
         | Ok (expected_url,action) ->
         let args = Browser_lane.interaction_args ~tab_id ~expected_url action in
         match action with
-        | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
+        | Browser_lane.Double_click _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
           Error (Protocol "unresolved semantic pointer target")
+        | Browser_lane.Type_text {text;_} ->
+          (match Browser_lane.Keyboard.text_source ~id:"masc-browser-keyboard" text with
+           | Error message -> Ok (`Assoc ["interactionFailure", `Assoc ["message",`String message;"effectStarted",`Bool false]])
+           | Ok sources -> native_keyboard t session ~args ~action_name sources)
+        | Browser_lane.Press_key {key;_} ->
+          native_keyboard t session ~args ~action_name
+            (Browser_lane.Keyboard.input_source ~id:"masc-browser-keyboard" key)
+        | Browser_lane.Double_click_at {point;viewport}
         | Browser_lane.Hover_at {point;viewport}
         | Browser_lane.Click_at {point;viewport}
         | Browser_lane.Scroll_at {point;viewport;_}
@@ -438,8 +469,10 @@ let execute_unlocked t = function
           | Ok before ->
           let gesture = match action with
             | Browser_lane.Hover_at _ -> Browser_lane.Pointer.Hover
+            | Browser_lane.Double_click_at _ -> Browser_lane.Pointer.Double_click
             | Browser_lane.Drag {to_;via;duration_ms;_} -> Browser_lane.Pointer.Drag {via;destination=to_;duration_ms}
             | Browser_lane.Scroll_at {x;y;_} -> Browser_lane.Pointer.Wheel {x;y}
+            | Browser_lane.Double_click _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
             | Browser_lane.Hover _ | Browser_lane.Drag_to _
             | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
             | Browser_lane.Scroll _ | Browser_lane.Click_at _ | Browser_lane.Follow_link _
@@ -454,6 +487,7 @@ let execute_unlocked t = function
                 (* Hover and wheel actions do not press buttons. Session acquisition
                    already recovers any older pending pointer release. *)
                 call t session `POST "/actions" (Some actions), Ok ()
+            | Browser_lane.Double_click _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
             | Browser_lane.Hover _ | Browser_lane.Drag_to _
             | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
             | Browser_lane.Scroll _ | Browser_lane.Click_at _ | Browser_lane.Drag _
@@ -556,7 +590,8 @@ let execute t verb =
     | Browser_lane.Page_downloads _ | Browser_lane.Page_capture _ | Browser_lane.Page_scene _
     | Browser_lane.Page_interact
         { action =
-            ( Browser_lane.Click _ | Browser_lane.Fill _ | Browser_lane.Scroll _
+            ( Browser_lane.Double_click _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
+            | Browser_lane.Click _ | Browser_lane.Fill _ | Browser_lane.Scroll _
             | Browser_lane.Hover _ | Browser_lane.Drag_to _
             | Browser_lane.Hover_at _ | Browser_lane.Click_at _
             | Browser_lane.Scroll_at _ | Browser_lane.Drag _

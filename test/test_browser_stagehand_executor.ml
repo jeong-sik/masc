@@ -587,6 +587,57 @@ let test_script_throw_keeps_its_reason () =
   | _ -> fail "a throw in the page script is refused with its reason"
 ;;
 
+let test_native_keyboard_and_double_click () =
+  let tabs = Executor.Tabs.create () and fake = fake [shop ()] ~active:(Some "P2") in
+  ignore (listed tabs fake);
+  let key = match Lane.Keyboard.of_wire ~key:"a" ~modifiers:["Meta"] with
+    | Ok key -> key | Error detail -> fail detail in
+  let actions = [Lane.Type_text {document_id="d1";text="한글🙂"};
+    Lane.Press_key {document_id="d1";key};
+    Lane.Double_click_at {point;viewport=observed_viewport}] in
+  List.iter (fun action ->
+    fake.sent <- [];
+    let verb = Lane.Page_interact {tab_id=0;expected_url=Some "https://example.org";action} in
+    let result = served (Executor.execute ~tabs ~call:(call fake) verb) in
+    check string "receipt retains semantic input action" (Lane.interaction_verb action)
+      Yojson.Safe.Util.(result |> member "action" |> to_string);
+    (match List.rev fake.sent,action with
+     | [Wire.Page_evaluate _;Wire.Page_type {page_id="P2";text="한글🙂"};Wire.Page_evaluate _],Lane.Type_text _
+     | [Wire.Page_evaluate _;Wire.Page_key_press {page_id="P2";_};Wire.Page_evaluate _],Lane.Press_key _
+     | [Wire.Page_evaluate _;Wire.Page_double_click {page_id="P2";x=400.;y=150.};Wire.Page_evaluate _],Lane.Double_click_at _ -> ()
+     | _ -> fail "native input must be guarded, sent once, and followed by a read-only receipt");
+    fake.sent <- [];fake.script_throws <- Some "scene_document_changed";
+    check bool "guard refusal is before effect" true
+      (rejected_before_effect (Executor.execute ~tabs ~call:(call fake) verb));
+    check int "guard failure sends no input" 1 (List.length fake.sent);
+    fake.sent <- [];fake.script_throws <- None;
+    fake.failing <- (function Wire.Page_type _ | Wire.Page_key_press _ | Wire.Page_double_click _ ->
+      Some (Session.Lost "input reply missing") | _ -> None);
+    check bool "lost input reply preserves uncertainty" true
+      (refused (Executor.execute ~tabs ~call:(call fake) verb));
+    check int "input is never replayed" 2 (List.length fake.sent);
+    fake.failing <- (fun _ -> None)) actions;
+  List.iter (fun text ->
+    fake.sent <- [];
+    check bool "text controls are rejected before native input" true
+      (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
+        (Lane.Page_interact {tab_id=0;expected_url=Some "https://example.org";
+          action=Lane.Type_text {document_id="d1";text}})));
+    check int "rejected text sends no runtime request" 0 (List.length fake.sent)) ["a\tb";"a\nb";"a\rb"];
+  let supplementary=match Lane.Keyboard.of_wire ~key:"🙂" ~modifiers:[] with Ok key->key|Error detail->fail detail in
+  fake.sent <- [];
+  check bool "runtime cannot silently accept an unsupported supplementary key" true
+    (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
+      (Lane.Page_interact {tab_id=0;expected_url=Some "https://example.org";
+        action=Lane.Press_key {document_id="d1";key=supplementary}})));
+  check int "unsupported key never reaches runtime" 0 (List.length fake.sent);
+  ignore (served (Executor.execute ~tabs ~call:(call fake)
+    (Lane.Page_interact {tab_id=0;expected_url=Some "https://example.org";
+      action=Lane.Type_text {document_id="d1";text="\xee\x80\x89"}})));
+  check bool "Stagehand PUA remains literal text rather than a modifier chord" true
+    (List.exists (function Wire.Page_type {text="\xee\x80\x89";_}->true|_->false) fake.sent)
+;;
+
 let test_evaluate_expression () =
   let args = `Assoc [ "mode", `String "viewport" ] in
   let expression = Executor.evaluate_expression ~runtime:Executor.No_runtime ~body:"return 1;" ~args in
@@ -617,7 +668,8 @@ let () =
         test_case "an act Stagehand did not carry out is a failure" `Quick test_act_that_did_not_succeed
       ] );
     "reads", [ test_case "reads run the page scripts" `Quick test_reads_run_the_page_scripts ];
-    "interactions", [ test_case "scripts and native pointer input" `Quick test_interactions;
+    "interactions", [ test_case "native keys/text/double click preserve guard and failure boundaries" `Quick test_native_keyboard_and_double_click;
+      test_case "scripts and native pointer input" `Quick test_interactions;
       test_case "hover uses official runtime wire without a model" `Quick test_hover_wire;
       test_case "observed targets resolve into native hover and drag" `Quick test_semantic_pointer_input;
       test_case "hover failure boundaries never replay input" `Quick test_hover_effect_boundary;

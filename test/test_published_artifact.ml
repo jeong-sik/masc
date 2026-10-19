@@ -1,5 +1,6 @@
 module A = Masc.Published_artifact
 module S = Masc.Published_artifact_store
+module Tool_bridge = Masc.Tool_bridge
 
 let with_base f =
   let base = Filename.temp_file "published_artifact" "" in

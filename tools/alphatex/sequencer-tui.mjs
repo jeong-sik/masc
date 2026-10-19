@@ -78,7 +78,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   const jobs = new Map(), players = new Map()
   const nativeRenders = new Set(), observations = new Set()
   const audioInstrument = () => editor.project.sound ?? { kind: 'unselected' }
-  let currentVstRender = null
+  let currentVstRender = null, pendingSound = null
   const writeSnapshot = snapshotWriter(stateDirectory)
   let jobNumber = 0, generation = 0, transport = { kind: 'stopped' }, workerFailure = null, pendingDraw = null
   const wasRaw = process.stdin.isRaw
@@ -93,21 +93,33 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       .finally(() => observations.delete(pending))
   }
   function chooseInstrument(choice) {
-    task = task.then(async () => {
+    task = task.then(() => {
       if (!accepting || closed || suspended) return
       stop()
-      let sound = choice
       if (choice.kind === 'vst') {
         const capture = captureVstSound(choice.selection)
-        nativeRenders.add(capture)
-        try { sound = await capture.promise } finally { nativeRenders.delete(capture) }
-      }
-      if (!accepting || closed || suspended) return
+        let cancelled = false
+        const owned = { cancel() { if (!cancelled) { cancelled = true; capture.cancel() } } }
+        pendingSound = owned
+        owned.promise = capture.promise.then(sound => {
+          task = task.then(() => {
+            if (cancelled || pendingSound !== owned || !accepting || closed || suspended) return
+            pendingSound = null
+            adoptSound(sound)
+          })
+          return task
+        }).catch(error => {
+          if (!cancelled && pendingSound === owned && accepting && !closed) status = error.message
+        }).finally(() => { if (pendingSound === owned) pendingSound = null; nativeRenders.delete(owned); draw() })
+        nativeRenders.add(owned)
+      } else adoptSound(choice)
+    }).catch(error => { status = error.message }).finally(draw)
+  }
+  function adoptSound(sound) {
       editor = editorSound(editor, sound)
       selectedMidiOutput = undefined; portBindings = []
-      status = choice.kind === 'vst' ? `Selected ${choice.selection.name}` : 'Selected SoundFont'
+      status = sound.kind === 'vst' ? `Selected ${sound.selection.name}` : 'Selected SoundFont'
       play()
-    }).catch(error => { status = error.message }).finally(draw)
   }
   const picker = new InstrumentPicker({ directory: stateDirectory, notify: draw,
     selected: selection => chooseInstrument({ kind: 'vst', selection }),
@@ -211,6 +223,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   }
   function stop() {
     generation++
+    pendingSound?.cancel(); pendingSound = null
     if (transport.cancel) Atomics.store(transport.cancel, 0, 1)
     transport.native?.cancel()
     transport.handle?.stop()

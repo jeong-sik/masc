@@ -105,6 +105,24 @@ test('closing during sound capture waits for child closure and refuses late adop
   assert.equal(view.observed.native.length, 0); assert.equal(view.observed.players, 0)
 })
 
+test('stop and MIDI route selection retire a pending snapshot while editor decisions remain live', async () => {
+  let complete, cancels = 0
+  const selection = { plugin_path: '/synth.vst3', plugin_name: null, preset_path: null, name: 'Bass' }
+  const view = await controller({ autoSoundfont: false, capture() {
+    return { promise: new Promise(resolve => { complete = resolve }), cancel() { cancels++ } }
+  } })
+  view.key('return'); view.key('i'); await flush()
+  view.observed.pickers[0].close(); view.observed.pickers[0].selected(selection); await flush()
+  view.command('stop'); view.command('midi-output -123'); view.key('up'); view.key('return'); view.key('s'); await flush()
+  assert.equal(cancels, 1); assert.deepEqual(pitches(view), [60, 61])
+  complete(frozenSound(selection)); await flush()
+  view.command('play'); await flush()
+  const request = view.observed.workers[0].requests.at(-1)
+  assert.equal(request.options.format, 'midi'); assert.equal(request.options.midiOutput, '-123')
+  assert.equal(request.project.sound, undefined); assert.equal(view.observed.native.length, 0)
+  view.key('q'); await view.done
+})
+
 test('close drains admitted note edits and refuses keys arriving after close', async () => {
   const view = await controller()
   for (const name of ['return', 'up', 'return', 'q', 'up', 'return']) view.key(name)

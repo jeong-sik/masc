@@ -4,6 +4,18 @@
 type followup = No_followup | Reveal_cursor | Load_file of string
 
 val push_code_jump : Masc_tui_types.state -> unit
+type return_followup =
+  | No_return
+  | Return_committed
+  | Read_return_file of Masc_tui_types.code_return_owner * string Masc_tui_fetched.request
+
+val start_return : Masc_tui_types.state -> return_followup
+(** Keep history and the current reading until the destination is available.
+    Repeated requests share the pending return. A readable current destination
+    or a tree-only destination commits immediately. *)
+val take_ready_return_file : Masc_tui_types.state -> input_pending:bool -> bool
+(** Commit an owned success after queued input has had priority. Failure,
+    cancellation and superseded owners leave the history entry available. *)
 val apply_entries : Masc_tui_types.state ->
   (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request ->
   (Masc.Tui_decode.workspace_tree_node list, string) result -> unit

@@ -43,7 +43,9 @@ val apply_blame : Masc_tui_types.state -> string Masc_tui_fetched.request ->
 val start_lsp_question : ?line:int -> Masc_tui_types.state -> question:string -> symbol:string ->
   Masc_tui_types.code_lsp_query Masc_tui_fetched.request option
 (** Capture the source file and scope. Identical in-flight questions are
-    suppressed; a different question owns a new request identity. *)
+    suppressed; a different question owns a new request identity. An accepted
+    request clears the previous settled note; pending status comes from its
+    owned fetched source. *)
 val apply_lsp_answer : Masc_tui_types.state ->
   Masc_tui_types.code_lsp_query Masc_tui_fetched.request ->
   (Masc.Tui_decode.lsp_answer, string) result -> unit

@@ -931,6 +931,107 @@ let offered_locations state locations =
 let location path line : Decode.lsp_location =
   {ll_path=path; ll_line=line; ll_inside=true}
 
+let ask_pending state question =
+  match Code_results.start_lsp_question state ~question ~symbol:"target" with
+  | Some request -> request
+  | None -> Alcotest.fail "question did not start"
+
+let test_lsp_pending_status_follows_request_lifetime () =
+  List.iter (fun result ->
+    let state, _ = finder_fixture () in
+    close_code_finder state;
+    state.code_lsp_note <- Some "previous observation";
+    let request = ask_pending state "references" in
+    Alcotest.(check bool) "accepted question clears the previous settled observation" true
+      (Option.is_none state.code_lsp_note);
+    Alcotest.(check bool) "pending query names the accepted request" true
+      (Option.equal code_lsp_query_equal (Some (Fetched.request_key request))
+         (code_lsp_pending_query state));
+    Code_results.apply_lsp_answer state request result;
+    Alcotest.(check bool) "success, failure or a staged location offer is no longer pending" true
+      (Option.is_none (code_lsp_pending_query state)))
+    [Ok (Decode.Lsp_hover (Some "hover observation")); Error "language server failed";
+     Ok (Decode.Lsp_locations []);
+     Ok (Decode.Lsp_locations [location "one.ml" 1; location "two.ml" 2])];
+  let state, _ = finder_fixture () in
+  close_code_finder state;
+  let cancelled = ask_pending state "references" in
+  Code_results.retire_lsp_input state;
+  Alcotest.(check bool) "input cancellation removes pending status" true
+    (Option.is_none (code_lsp_pending_query state) && Option.is_none state.code_lsp_note);
+  Code_results.apply_lsp_answer state cancelled (Error "late error");
+  Alcotest.(check bool) "late cancelled error cannot restore pending status or a note" true
+    (Option.is_none (code_lsp_pending_query state) && Option.is_none state.code_lsp_note);
+  ignore (offered_locations state [location "one.ml" 1; location "two.ml" 2]);
+  ignore (Code_results.take_ready_lsp_locations state ~input_pending:false);
+  close_code_finder state;
+  Alcotest.(check bool) "closing received choices leaves no pending question" true
+    (Option.is_none (code_lsp_pending_query state)
+     && Option.is_none (Fetched.current_request state.code_lsp_query))
+
+let test_lsp_pending_status_includes_refresh_and_retry () =
+  List.iter (fun result ->
+    let state, _ = finder_fixture () in
+    close_code_finder state;
+    let settled = ask_pending state "hover" in
+    Code_results.apply_lsp_answer state settled result;
+    let refreshed = ask_pending state "hover" in
+    Alcotest.(check bool) "same-question Ready refresh or failed retry remains pending" true
+      (Fetched.in_flight state.code_lsp_query && Option.is_some (code_lsp_pending_query state)
+       && not (Fetched.same_request ~equal:code_lsp_query_equal settled refreshed)
+       && Option.is_none state.code_lsp_note);
+    Alcotest.(check bool) "refresh and retry preserve their prior fetched observation" true
+      (match Fetched.current state.code_lsp_query with
+       | Some (_, (Fetched.Ready () | Fetched.Failed _)) -> true
+       | None | Some (_, (Fetched.Absent | Fetched.Loading | Fetched.Stale _)) -> false);
+    let note = Some "another observation" in
+    state.code_lsp_note <- note;
+    Alcotest.(check bool) "suppressed duplicate does not mutate an existing note" true
+      (Option.is_none (Code_results.start_lsp_question state ~question:"hover" ~symbol:"target")
+       && state.code_lsp_note == note);
+    Code_results.apply_lsp_answer state refreshed result;
+    Alcotest.(check bool) "settling refresh or retry removes pending status" true
+      (Option.is_none (code_lsp_pending_query state));
+    state.code_file <- Fetched.clear state.code_file;
+    state.code_lsp_note <- note;
+    Alcotest.(check bool) "refused question without a source does not erase its note" true
+      (Option.is_none (Code_results.start_lsp_question state ~question:"hover" ~symbol:"target")
+       && state.code_lsp_note == note && Option.is_none (code_lsp_pending_query state)))
+    [Ok (Decode.Lsp_hover (Some "hover observation")); Error "language server failed"]
+
+let test_lsp_pending_status_belongs_to_the_current_source () =
+  let state, _ = finder_fixture () in
+  close_code_finder state;
+  let old = ask_pending state "references" in
+  let replacement = ask_pending state "hover" in
+  Code_results.apply_lsp_answer state old (Ok (Decode.Lsp_hover (Some "obsolete")));
+  Alcotest.(check bool) "replaced question cannot settle the current pending query" true
+    (Option.equal code_lsp_query_equal (Some (Fetched.request_key replacement))
+       (code_lsp_pending_query state) && Option.is_none state.code_lsp_note);
+  List.iter (fun change ->
+    let state, _ = finder_fixture () in
+    close_code_finder state;
+    let request = ask_pending state "references" in
+    change state;
+    Alcotest.(check bool) "changed authority, view, scope, directory or file cannot show pending" true
+      (Option.is_none (code_lsp_pending_query state));
+    Code_results.apply_lsp_answer state request (Error "obsolete failure");
+    Alcotest.(check bool) "the same owner guard refuses the late answer" true
+      (Option.is_none state.code_lsp_note))
+    [ (fun state -> state.server_identity <- None)
+    ; (fun state -> state.workspace_authority <-
+         (let Workspace_authority generation = state.workspace_authority in
+          Workspace_authority (generation + 1)))
+    ; (fun state -> state.workspace_read_authority <- ref ())
+    ; (fun state -> state.view <- Repositories)
+    ; (fun state -> state.code_scope <- Code_scope_project)
+    ; (fun state -> state.code_dir <- "other")
+    ; (fun state ->
+        let file, _ = start_read ~equal:String.equal state.code_file "src/old.ml" in
+        state.code_file <- file)
+    ; suspend_workspace_readings
+    ]
+
 let resume_question_after_workspace_confirmation state =
   let identity = state.server_identity in
   state.server_identity <- None;
@@ -1221,7 +1322,13 @@ let () =
   Alcotest.run
     "masc-tui-workspace-entries"
     [ ( "location choices"
-      , [ Alcotest.test_case "cancelled questions do not resume after workspace recovery" `Quick
+      , [ Alcotest.test_case "pending status follows accepted request lifetime" `Quick
+            test_lsp_pending_status_follows_request_lifetime
+        ; Alcotest.test_case "pending status includes same-question refresh and retry" `Quick
+            test_lsp_pending_status_includes_refresh_and_retry
+        ; Alcotest.test_case "pending status belongs to the current source" `Quick
+            test_lsp_pending_status_belongs_to_the_current_source
+        ; Alcotest.test_case "cancelled questions do not resume after workspace recovery" `Quick
             test_cancelled_questions_do_not_resume_after_workspace_recovery
         ; Alcotest.test_case "picker keeps its query ticket only until close" `Quick
             test_location_picker_keeps_ticket_until_close_without_resuming

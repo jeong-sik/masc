@@ -520,7 +520,7 @@ let handle_in_process ctx descriptor args =
     Some (Keeper_tool_in_process_runtime.handle_browser_act_with_outcome
       ~turn_sandbox_factory:ctx.turn_sandbox_factory ~config:ctx.config ~meta:ctx.meta ~args)
   | Tool_browser_interact ->
-    Some (Keeper_tool_in_process_runtime.handle_browser_interact_with_outcome ~config:ctx.config ~args)
+    Some (Keeper_tool_in_process_runtime.handle_browser_interact_with_outcome ~config:ctx.config ~meta:ctx.meta ~args)
   | Tool_browser_instruct ->
     Some (Keeper_tool_in_process_runtime.handle_browser_instruct_with_outcome ~args)
   | Tool_masc_control_dispatch ->

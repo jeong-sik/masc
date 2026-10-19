@@ -84,7 +84,7 @@ let test_unreadable_tab_does_not_hide_other_tabs () =
     let unavailable = data |> member "unavailableTabs" |> to_list in
     check (list int) "unreadable tab is not silently dropped" [1]
       (List.map (fun row -> row |> member "id" |> to_int) unavailable);
-    check string "browser's refusal survives" "BiDi command rejected: unsupported operation"
+    check string "browser's refusal survives" "script.callFunction: BiDi command rejected: unsupported operation"
       (List.hd unavailable |> member "error" |> to_string)
 
 let test_active_tab_after_unreadable_tab () =

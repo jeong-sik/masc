@@ -21,7 +21,7 @@ let leaving_window_sec = 0.25
 
 type verb = Masc.Browser_bidi_peer.verb =
   | Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact
-type command = { id : string; verb : verb; args : Yojson.Safe.t }
+type command = { id : string; verb : verb; args : Yojson.Safe.t; actor : string option }
 type poll = Empty | Forward of command | Reject of string
 type exchange_phase = Writing_frame | Awaiting_reply
 type exchange = Replied of Yojson.Safe.t | Write_timed_out
@@ -54,13 +54,17 @@ let decode_poll json =
         | Some (`Assoc _ as args) -> Ok args
         | _ -> Error "command args must be an object"
       in
+      let* actor = match List.assoc_opt "actor" fields with
+        | None -> Ok None
+        | Some (`String name) when String.trim name <> "" -> Ok (Some name)
+        | Some _ -> Error "invalid browser operation actor" in
       match name with
-      | "tabs.list" -> Ok (Forward { id; verb = Tabs_list; args })
-      | "page.read" -> Ok (Forward { id; verb = Page_read; args })
-      | "page.scene" -> Ok (Forward { id; verb = Page_scene; args })
-      | "page.elements" -> Ok (Forward { id; verb = Page_elements; args })
-      | "page.capture" -> Ok (Forward { id; verb = Page_capture; args })
-      | "page.interact" -> Ok (Forward { id; verb = Page_interact; args })
+      | "tabs.list" -> Ok (Forward { id; verb = Tabs_list; args; actor })
+      | "page.read" -> Ok (Forward { id; verb = Page_read; args; actor })
+      | "page.scene" -> Ok (Forward { id; verb = Page_scene; args; actor })
+      | "page.elements" -> Ok (Forward { id; verb = Page_elements; args; actor })
+      | "page.capture" -> Ok (Forward { id; verb = Page_capture; args; actor })
+      | "page.interact" -> Ok (Forward { id; verb = Page_interact; args; actor })
       | _ -> Ok (Reject id)
 
 let command_json ~deadline_ms command =
@@ -610,7 +614,7 @@ let run env config =
   let forward = forward ~clock ~stdout:(Eio.Stdenv.stdout env) pending in
   let registered = ref None in
   let run_poll () =
-    match forward {id="browser-info"; verb=Browser_info; args=`Assoc []} with
+    match forward {id="browser-info"; verb=Browser_info; args=`Assoc []; actor=None} with
     | Write_timed_out -> Error "browser metadata frame write timed out"
     | Replied reply ->
       let* info = browser_info reply in
@@ -836,7 +840,7 @@ let run_bidi env config url ~firefox_profile ~stop =
             let result =
               match
                 within ~clock extension_timeout_sec (fun () ->
-                  Masc.Browser_bidi_peer.dispatch peer ~verb:command.verb command.args)
+                  Masc.Browser_bidi_peer.dispatch ?actor:command.actor ~request_id:command.id peer ~verb:command.verb command.args)
               with
               | Some result -> result
               | None -> Error (Masc.Browser_bidi_peer.Outcome_unknown "BiDi command deadline exceeded")

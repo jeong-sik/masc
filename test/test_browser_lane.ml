@@ -315,7 +315,34 @@ let test_duplicate_result_after_lost_ack_is_accepted () = with_clients (fun sw c
     (Lane.deliver_result ~client_id:info.client_id ~id:command.id ~payload:(payload "changed")
      = Error "result_id_reused_with_different_payload"))
 
+let activity_ok = function Ok x -> x | Error _ -> failwith "unexpected refusal"
+let test_agent_activity () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
+ Eio_main.run @@ fun env -> Time_compat.set_clock (Eio.Stdenv.clock env); Eio.Switch.run @@ fun sw ->
+ let info : Browser_lane.client_info = {client_id=activity_ok (Browser_lane.client_id_of_string "11111111-1111-4111-8111-111111111118");browser=Firefox;version="fixture";engine_version="fixture";transport=Webdriver_bidi} in
+ let client=activity_ok (Browser_lane.register info) in
+ let viewport : Browser_lane.Pointer.viewport = {document_id="owned";width=100.;height=100.;scroll_x=0.;scroll_y=0.} in
+ let point : Browser_lane.Pointer.point = {x=0.5;y=0.5} in
+ let verb=Browser_lane.Page_interact {tab_id=1;expected_url=Some "https://example.org/";action=Hover_at {point;viewport}} in
+ let queued=Eio.Fiber.fork_promise ~sw (fun () -> Browser_lane.issue_for_actor ~actor:(Some "fixture-keeper") ~target:(Live_client client) ~verb ~timeout_sec:20.) in
+ let rec admitted () = match Browser_lane.client_interactions client with [] -> Eio.Fiber.yield ();admitted () | _::_ -> () in admitted ();
+ let activity=Browser_lane.client_interactions client in
+ (match activity with [work] -> assert(work.actor=Some "fixture-keeper" && work.phase=Interaction_queued) | _ -> failwith "missing queued activity");
+ let issued=Option.get (activity_ok (Browser_lane.take_command ~client_info:info ~window_sec:0.1)) in
+ (match issued.verb_json with `Assoc fields -> assert(List.assoc_opt "actor" fields=Some (`String "fixture-keeper"))|_ -> assert false);
+ (match Browser_lane.client_interactions client with [work] -> assert(work.phase=Interaction_running) | _ -> failwith "missing running activity");
+ ignore(activity_ok (Browser_lane.deliver_result ~client_id:info.client_id ~id:issued.id ~payload:(`Assoc ["ok",`Bool true;"data",`Assoc []])));
+ ignore(Eio.Promise.await_exn queued);
+ assert(Browser_lane.client_interactions client=[]);
+ let active=Eio.Fiber.fork_promise ~sw (fun () -> Browser_lane.issue_for_actor ~actor:(Some "fixture-keeper") ~target:(Live_client client) ~verb ~timeout_sec:20.) in
+ let rec admitted () = match Browser_lane.client_interactions client with [] -> Eio.Fiber.yield ();admitted () | _::_ -> () in admitted ();
+ assert(List.length (Browser_lane.client_interactions client)=1);
+ ignore(activity_ok (Browser_lane.disconnect_client ~client_id:info.client_id));
+ ignore(Eio.Promise.await_exn active);
+ assert(Browser_lane.client_interactions client=[]);
+ ()
+
 let () = run "browser client routing" ["ownership", [
+  test_case "agent activity follows queue ownership and cleanup" `Quick test_agent_activity;
   test_case "each live transport serves its part of the table" `Quick test_transport_table;
   test_case "unserved live work is refused before queue admission" `Quick test_unserved_work_queues_nothing;
   test_case "an unserved request names the transport that serves it" `Quick test_unsupported_message_names_the_serving_transport;

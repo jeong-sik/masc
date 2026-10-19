@@ -21,6 +21,7 @@ const help = [
   'Source :events toggles expression list; Up/Down selects, Enter edits value, +/- changes, x removes.',
   ':cc CTRL VALUE [AT] :bend VALUE [AT] :program VALUE [AT] :pressure VALUE [AT] :poly-pressure KEY VALUE [AT]',
   ':event ID; :event-value VALUE; :event-move AT; :event-set KIND VALUES; :event-channel CH; :event-remove',
+  ':event-before first-note|EVENT_ID orders this expression at the same tick; :event-order-reset restores natural order',
   ':arrange snapshots this phrase into backing; q returns to this draft',
   'Source seek/resume restores channel state; unknown initial or opaque device state is an error.',
   'Arrow keys: time/pitch; Shift+arrows: move note; Enter/x: insert/remove note',

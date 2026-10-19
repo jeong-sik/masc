@@ -226,15 +226,32 @@ let string_member ~context = function
 ;;
 
 let number_member ~context = function
-  | `Float value -> Ok value
+  | `Float value when Float.is_finite value -> Ok value
+  | `Float _ -> Error (context ^ " must be finite")
   | `Int value -> Ok (Float.of_int value)
   | _ -> Error (context ^ " must be a number")
 ;;
 
-let string_option_member = function
-  | `String value -> Some value
-  | `Null -> None
-  | _ -> None
+let bounded_number ~context ~maximum json =
+  let* value = number_member ~context json in
+  if value < 0. || value > maximum then
+    Error (Printf.sprintf "%s must be between 0 and %g" context maximum)
+  else Ok value
+;;
+
+let probability_member ~context = bounded_number ~context ~maximum:1.
+
+let string_option_member ~context = function
+  | `String value -> Ok (Some value)
+  | `Null -> Ok None
+  | _ -> Error (context ^ " must be a string or null")
+;;
+
+let optional_description ~context key pairs =
+  match List.assoc_opt key pairs with
+  | None -> Ok None
+  | Some json -> string_option_member ~context:(context ^ "." ^ key) json
+;;
 
 let decode_instructions ~context = function
   | `String value -> Ok value
@@ -254,18 +271,21 @@ let decode_choice name body =
   in
   let* instructions = instructions in
   let* criteria = criteria in
-  let* () =
+  let* criteria =
     List.fold_left
-      (fun acc (option, _) ->
-        let* () = acc in
-        if option = "" then Error (name ^ " criteria keys must not be blank") else Ok ())
-      (Ok ()) criteria
+      (fun acc (option, json) ->
+        let* acc = acc in
+        let* _ = nonblank ~field:(name ^ " criteria key") option in
+        if List.mem_assoc option acc then
+          Error (Printf.sprintf "%s criteria key %S appears more than once" name option)
+        else
+          let* description =
+            string_option_member ~context:(name ^ ".criteria." ^ option) json
+          in
+          Ok ((option, description) :: acc))
+      (Ok []) criteria
   in
-  Ok
-    (Choice
-       { instructions
-       ; criteria = List.map (fun (o, d) -> (o, string_option_member d)) criteria
-       })
+  Ok (Choice { instructions; criteria = List.rev criteria })
 ;;
 
 let decode_noul name body =
@@ -274,14 +294,27 @@ let decode_noul name body =
     | Some json -> decode_instructions ~context:(name ^ ".instructions") json
     | None -> Error (name ^ " is missing instructions")
   in
-  let true_description, false_description =
+  let criteria =
     match List.assoc_opt "criteria" body with
-    | Some (`Assoc pairs) ->
-        ( Option.bind (List.assoc_opt "true" pairs) string_option_member
-        , Option.bind (List.assoc_opt "false" pairs) string_option_member )
-    | _ -> (None, None)
+    | None | Some `Null -> Ok []
+    | Some (`Assoc pairs) -> Ok pairs
+    | Some _ -> Error (name ^ " criteria must be an object or null")
   in
   let* instructions = instructions in
+  let* criteria = criteria in
+  let* _ =
+    List.fold_left
+      (fun acc (key, _) ->
+        let* seen = acc in
+        if key <> "true" && key <> "false" then
+          Error (name ^ " criteria permits only true and false descriptions")
+        else if List.mem key seen then
+          Error (Printf.sprintf "%s criteria key %S appears more than once" name key)
+        else Ok (key :: seen))
+      (Ok []) criteria
+  in
+  let* true_description = optional_description ~context:(name ^ ".criteria") "true" criteria in
+  let* false_description = optional_description ~context:(name ^ ".criteria") "false" criteria in
   Ok (Noul { instructions; true_description; false_description })
 ;;
 
@@ -336,21 +369,47 @@ let decode_questions = function
 
 (* ── Answers ────────────────────────────────────────────── *)
 
-let decode_probabilities ~context = function
+(* Bind object fields to the original request, including duplicate and missing
+   keys. Object order is not significant; the returned list follows the request. *)
+let requested_members ~context ~keys = function
   | `Assoc pairs ->
-      List.fold_left
-        (fun acc (option, value) ->
+      let* _ =
+        List.fold_left
+          (fun acc (key, _) ->
+            let* seen = acc in
+            if not (List.mem key keys) then
+              Error (Printf.sprintf "%s has unasked key %S" context key)
+            else if List.mem key seen then
+              Error (Printf.sprintf "%s key %S appears more than once" context key)
+            else Ok (key :: seen))
+          (Ok []) pairs
+      in
+      List.fold_right
+        (fun key acc ->
           let* acc = acc in
-          let* probability = number_member ~context:(context ^ "." ^ option) value in
-          Ok (acc @ [ (option, probability) ]))
-        (Ok []) pairs
-  | _ -> Error (context ^ " must be an object of option to probability")
+          match List.assoc_opt key pairs with
+          | None -> Error (Printf.sprintf "%s is missing key %S" context key)
+          | Some value -> Ok ((key, value) :: acc))
+        keys (Ok [])
+  | _ -> Error (context ^ " must be an object")
+;;
+
+let decode_probabilities ~context ~keys json =
+  let* pairs = requested_members ~context ~keys json in
+  List.fold_right
+    (fun (key, value) acc ->
+      let* acc = acc in
+      let* probability = probability_member ~context:(context ^ "." ^ key) value in
+      Ok ((key, probability) :: acc))
+    pairs (Ok [])
+;;
 
 let decode_answer (name, question) = function
   | `Assoc body -> (
       let kind = List.assoc_opt "type" body in
       match question, kind with
-      | Choice _, Some (`String "choice") ->
+      | Choice { criteria; _ }, Some (`String "choice") ->
+          let keys = List.map fst criteria in
           let choice =
             match List.assoc_opt "choice" body with
             | Some json -> string_member ~context:(name ^ ".choice") json
@@ -358,64 +417,68 @@ let decode_answer (name, question) = function
           in
           let probabilities =
             match List.assoc_opt "probabilities" body with
-            | Some json -> decode_probabilities ~context:(name ^ ".probabilities") json
+            | Some json -> decode_probabilities ~context:(name ^ ".probabilities") ~keys json
             | None -> Error (name ^ " answer is missing probabilities")
           in
           let confidence =
             match List.assoc_opt "confidence" body with
-            | Some json -> number_member ~context:(name ^ ".confidence") json
+            | Some json -> probability_member ~context:(name ^ ".confidence") json
             | None -> Error (name ^ " answer is missing confidence")
           in
           let* choice = choice in
           let* probabilities = probabilities in
           let* confidence = confidence in
-          Ok (Choice_answer { choice; probabilities; confidence })
+          if List.mem choice keys then
+            Ok (Choice_answer { choice; probabilities; confidence })
+          else Error (Printf.sprintf "%s chose unasked option %S" name choice)
       | Noul _, Some (`String "noul") ->
           let noul =
             match List.assoc_opt "noul" body with
-            | Some json -> number_member ~context:(name ^ ".noul") json
+            | Some json -> probability_member ~context:(name ^ ".noul") json
             | None -> Error (name ^ " answer is missing noul")
           in
           let* noul = noul in
           Ok (Noul_answer noul)
-      | Score _, Some (`String "score") ->
+      | Score { scale; _ }, Some (`String "score") ->
+          let keys = List.mapi (fun index _ -> string_of_int index) scale in
           let score =
             match List.assoc_opt "score" body with
-            | Some json -> number_member ~context:(name ^ ".score") json
+            | Some json ->
+                bounded_number ~context:(name ^ ".score")
+                  ~maximum:(Float.of_int (List.length scale - 1)) json
             | None -> Error (name ^ " answer is missing score")
           in
           let legend =
             match List.assoc_opt "legend" body with
-            | Some (`List entries) ->
-                List.fold_left
-                  (fun acc entry ->
+            | Some json ->
+                let* entries = requested_members ~context:(name ^ ".legend") ~keys json in
+                List.fold_right
+                  (fun (_, entry) acc ->
                     let* acc = acc in
                     let* value = string_member ~context:(name ^ ".legend entry") entry in
-                    Ok (acc @ [ value ]))
-                  (Ok []) entries
-            | _ -> Error (name ^ " answer legend must be an array")
+                    Ok (value :: acc))
+                  entries (Ok [])
+            | None -> Error (name ^ " answer is missing legend")
           in
           let probabilities =
             match List.assoc_opt "probabilities" body with
-            | Some (`List entries) ->
-                List.fold_left
-                  (fun acc entry ->
-                    let* acc = acc in
-                    let* value = number_member ~context:(name ^ ".probabilities entry") entry in
-                    Ok (acc @ [ value ]))
-                  (Ok []) entries
-            | _ -> Error (name ^ " answer probabilities must be an array")
+            | Some json ->
+                let* pairs = decode_probabilities ~context:(name ^ ".probabilities") ~keys json in
+                Ok (List.map snd pairs)
+            | None -> Error (name ^ " answer is missing probabilities")
           in
           let confidence =
             match List.assoc_opt "confidence" body with
-            | Some json -> number_member ~context:(name ^ ".confidence") json
+            | Some json -> probability_member ~context:(name ^ ".confidence") json
             | None -> Error (name ^ " answer is missing confidence")
           in
           let* score = score in
           let* legend = legend in
           let* probabilities = probabilities in
           let* confidence = confidence in
-          Ok (Score_answer { score; legend; probabilities; confidence })
+          if legend = scale then
+            Ok (Score_answer { score; legend; probabilities; confidence })
+          else Error (name ^ " answer legend does not match the requested criteria")
       | Choice _, _ | Noul _, _ | Score _, _ ->
           let describe_question = function
             | Choice _ -> "choice"
@@ -561,6 +624,11 @@ let decide ~timeout_sec (request : request) (backend : backend) :
                 List.fold_left
                   (fun acc (name, answer_json) ->
                     let* acc = acc in
+                    let* () =
+                      if List.mem_assoc name acc then
+                        Error (Printf.sprintf "answer for question %S appears more than once" name)
+                      else Ok ()
+                    in
                     let question =
                       List.assoc_opt name request.questions
                     in

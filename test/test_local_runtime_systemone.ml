@@ -39,7 +39,7 @@ let test_default_backend_and_model () =
         (match S.default_model Local with "nimble" -> 0 | _ -> 1);
       check bool "no model override by default" true (Option.is_none model);
       check int "default timeout" S.default_timeout_sec timeout_sec
-  | Ok _ -> fail "expected the local backend"
+  | Ok { S.backend = Cloud; _ } -> fail "expected the local backend"
 
 let test_unknown_backend_is_rejected () =
   let message =
@@ -74,16 +74,16 @@ let test_question_decoding () =
            check string "choice instructions" "Which?" instructions;
            check int "null description decodes as None" 1
              (List.length (List.filter (fun (_, d) -> Option.is_none d) criteria))
-       | _ -> fail "depth did not decode as a choice");
+       | Some (S.Noul _ | S.Score _) | None -> fail "depth did not decode as a choice");
       (match List.assoc_opt "green" questions with
        | Some (S.Noul { true_description; false_description; _ }) ->
            check (option string) "noul true description" (Some "yes") true_description;
            check (option string) "noul false description" (Some "no") false_description
-       | _ -> fail "green did not decode as a noul");
+       | Some (S.Choice _ | S.Score _) | None -> fail "green did not decode as a noul");
       (match List.assoc_opt "risk" questions with
        | Some (S.Score { scale; _ }) ->
            check (list string) "score scale keeps its order" [ "low"; "mid"; "high" ] scale
-       | _ -> fail "risk did not decode as a score")
+       | Some (S.Choice _ | S.Noul _) | None -> fail "risk did not decode as a score")
 
 let test_bad_questions_are_rejected () =
   let expect_error label json =
@@ -100,6 +100,49 @@ let test_bad_questions_are_rejected () =
         "q":{"type":"noul","instructions":"b"}}}|};
   expect_error "invalid name characters"
     {|{"state":"s","questions":{"has space":{"type":"noul","instructions":"a"}}}|}
+
+let test_criteria_preserve_the_asked_meaning () =
+  let parse_question question =
+    args (Printf.sprintf {|{"state":"s","questions":{"q":%s}}|} question)
+  in
+  List.iter
+    (fun (label, question) ->
+      check bool label true (Result.is_error (parse_question question)))
+    [ ("object choice description",
+       {|{"type":"choice","instructions":"?","criteria":{"approve":{"rule":"all checked"},"reject":"missing"}}|})
+    ; ("numeric choice description",
+       {|{"type":"choice","instructions":"?","criteria":{"approve":1,"reject":null}}|})
+    ; ("duplicate choice option",
+       {|{"type":"choice","instructions":"?","criteria":{"approve":null,"approve":"changed"}}|})
+    ; ("blank choice key",
+       {|{"type":"choice","instructions":"?","criteria":{" ":null,"reject":null}}|})
+    ; ("malformed noul criteria",
+       {|{"type":"noul","instructions":"?","criteria":["yes","no"]}|})
+    ; ("malformed noul description",
+       {|{"type":"noul","instructions":"?","criteria":{"true":false}}|})
+    ; ("unknown noul outcome",
+       {|{"type":"noul","instructions":"?","criteria":{"yes":"agreed"}}|})
+    ; ("duplicate noul outcome",
+       {|{"type":"noul","instructions":"?","criteria":{"true":null,"true":"changed"}}|})
+    ];
+  List.iter
+    (fun criteria ->
+      match parse_question
+              (Printf.sprintf {|{"type":"noul","instructions":"?"%s}|} criteria) with
+      | Ok { S.questions; _ } ->
+          (match questions with
+           | [ (name, question) ] ->
+               check string "question name is retained" "q" name;
+               (match question with
+                | S.Noul { true_description; false_description; _ } ->
+                    check (option string) "true description remains absent" None true_description;
+                    check (option string) "false description remains absent" None false_description
+                | S.Choice _ | S.Score _ -> fail "expected the original noul question")
+           | [] | _ :: _ :: _ -> fail "expected exactly one question")
+      | Error message -> fail message)
+    [ ""; {|,"criteria":null|}; {|,"criteria":{}|}
+    ; {|,"criteria":{"true":null,"false":null}|}
+    ]
 
 let test_timeout_bounds_are_enforced () =
   check bool "timeout 0 rejected" true
@@ -190,7 +233,8 @@ let test_answers_decode_from_a_live_capture () =
     { S.model = "clef:cloud"
     ; state = "s"
     ; questions =
-        [ ("merged", noul_question ()); ("depth", choice_question [ ("skim", None); ("deep", None) ]) ]
+        [ ("merged", noul_question ())
+        ; ("depth", choice_question [ ("skim", None); ("normal", None); ("deep", None) ]) ]
     }
   in
   let open Yojson.Safe.Util in
@@ -199,20 +243,112 @@ let test_answers_decode_from_a_live_capture () =
          (answers |> member "merged") with
    | Ok (S.Noul_answer probability) ->
        check (float 0.001) "noul probability" 0.0155 probability
-   | _ -> fail "merged did not decode as a noul answer");
+   | Ok (S.Choice_answer _ | S.Score_answer _) -> fail "merged did not decode as a noul answer"
+   | Error message -> fail message);
   (match S.decode_answer ("depth", snd (List.nth request.questions 1))
          (answers |> member "depth") with
    | Ok (S.Choice_answer { choice; probabilities; confidence }) ->
        check string "chosen option" "deep" choice;
        check int "one probability per option" 3 (List.length probabilities);
        check (float 0.0001) "confidence" 0.0578 confidence
-   | _ -> fail "depth did not decode as a choice answer")
+   | Ok (S.Noul_answer _ | S.Score_answer _) -> fail "depth did not decode as a choice answer"
+   | Error message -> fail message)
 
 let test_answer_type_mismatch_is_rejected () =
   let asked = ("q", noul_question ()) in
   let answered = `Assoc [ ("type", `String "choice"); ("choice", `String "x") ] in
   check bool "answered type must match the asked type" true
     (Result.is_error (S.decode_answer asked answered))
+
+let choice_answer ?(choice = "deep") ?(confidence = `Float 0.5) probabilities =
+  `Assoc
+    [ ("type", `String "choice"); ("choice", `String choice)
+    ; ("probabilities", `Assoc probabilities); ("confidence", confidence)
+    ]
+
+let test_choice_answers_belong_to_the_request () =
+  let asked = ("depth", choice_question [ ("skim", None); ("deep", None) ]) in
+  let probabilities = [ ("deep", `Float 0.8); ("skim", `Float 0.2) ] in
+  (match S.decode_answer asked (choice_answer probabilities) with
+   | Ok (S.Choice_answer { probabilities; _ }) ->
+       check (list string) "response object order does not change request order"
+         [ "skim"; "deep" ] (List.map fst probabilities)
+   | Ok (S.Noul_answer _ | S.Score_answer _) -> fail "expected a choice answer"
+   | Error message -> fail message);
+  List.iter
+    (fun (label, answer) ->
+      check bool label true (Result.is_error (S.decode_answer asked answer)))
+    [ ("original live-capture mismatch is rejected",
+       choice_answer [ ("skim", `Float 0.1833); ("normal", `Float 0.3597); ("deep", `Float 0.457) ])
+    ; ("missing requested probability", choice_answer [ ("deep", `Float 0.8) ])
+    ; ("duplicate probability key", choice_answer (probabilities @ [ ("deep", `Float 0.8) ]))
+    ; ("unasked selected option", choice_answer ~choice:"normal" probabilities)
+    ];
+  (* Rounded distributions need not sum to exactly one. *)
+  check bool "rounded probabilities remain valid" true
+    (Result.is_ok
+       (S.decode_answer asked
+          (choice_answer [ ("skim", `Float 0.3333); ("deep", `Float 0.6666) ])))
+
+let score_answer ?(score = `Float 0.8) ?(confidence = `Float 0.5)
+    ?(legend = `Assoc [ ("1", `String "high"); ("0", `String "low") ])
+    ?(probabilities = `Assoc [ ("1", `Float 0.8); ("0", `Float 0.2) ]) () =
+  `Assoc
+    [ ("type", `String "score"); ("score", score); ("legend", legend)
+    ; ("probabilities", probabilities); ("confidence", confidence)
+    ]
+
+let test_score_answers_belong_to_the_requested_scale () =
+  let asked = ("risk", score_question [ "low"; "high" ]) in
+  (match S.decode_answer asked (score_answer ()) with
+   | Ok (S.Score_answer { score; legend; probabilities; _ } as answer) ->
+       check (float 0.0001) "weighted zero-based score" 0.8 score;
+       check (list string) "indexed legend follows request order" [ "low"; "high" ] legend;
+       check (list (float 0.0001)) "indexed probabilities follow request order"
+         [ 0.2; 0.8 ] probabilities;
+       let open Yojson.Safe.Util in
+       check (list string) "tool result normalizes the legend to an ordered array"
+         [ "low"; "high" ] (S.answer_to_yojson answer |> member "legend" |> to_list |> List.map to_string)
+   | Ok (S.Choice_answer _ | S.Noul_answer _) -> fail "expected a score answer"
+   | Error message -> fail message);
+  List.iter
+    (fun (label, answer) ->
+      check bool label true (Result.is_error (S.decode_answer asked answer)))
+    [ ("different legend", score_answer ~legend:(`Assoc [ ("0", `String "low"); ("1", `String "other") ]) ())
+    ; ("missing legend level", score_answer ~legend:(`Assoc [ ("0", `String "low") ]) ())
+    ; ("unasked probability level", score_answer ~probabilities:(`Assoc [ ("0", `Float 0.1); ("1", `Float 0.8); ("2", `Float 0.1) ]) ())
+    ; ("missing probability level", score_answer ~probabilities:(`Assoc [ ("0", `Float 1.) ]) ())
+    ; ("duplicate probability level", score_answer ~probabilities:(`Assoc [ ("0", `Float 0.1); ("0", `Float 0.1); ("1", `Float 0.8) ]) ())
+    ; ("array is not the endpoint's indexed legend", score_answer ~legend:(`List [ `String "low"; `String "high" ]) ())
+    ; ("score exceeds the requested scale", score_answer ~score:(`Float 2.) ())
+    ]
+
+let test_numeric_answers_are_finite_and_in_range () =
+  let choice = ("depth", choice_question [ ("skim", None); ("deep", None) ]) in
+  let score = ("risk", score_question [ "low"; "high" ]) in
+  List.iter
+    (fun value ->
+      let reject asked answer =
+        check bool "invalid numeric answer is rejected" true
+          (Result.is_error (S.decode_answer asked answer))
+      in
+      reject ("merged", noul_question ())
+        (`Assoc [ ("type", `String "noul"); ("noul", value) ]);
+      reject choice (choice_answer [ ("skim", value); ("deep", `Float 0.8) ]);
+      reject choice (choice_answer ~confidence:value [ ("skim", `Float 0.2); ("deep", `Float 0.8) ]);
+      reject score (score_answer ~score:value ());
+      reject score (score_answer ~confidence:value ());
+      reject score (score_answer ~probabilities:(`Assoc [ ("0", value); ("1", `Float 0.8) ]) ()))
+    [ `Float (-0.1); `Float 1.1; `Float Float.nan; `Float Float.infinity
+    ; `Float Float.neg_infinity
+    ];
+  List.iter
+    (fun value ->
+      check bool "probability endpoints remain valid" true
+        (Result.is_ok
+           (S.decode_answer ("merged", noul_question ())
+              (`Assoc [ ("type", `String "noul"); ("noul", value) ]))))
+    [ `Int 0; `Int 1 ]
 
 let () =
   run
@@ -223,6 +359,7 @@ let () =
         ; test_case "state required" `Quick test_state_is_required_and_nonblank
         ; test_case "question decoding" `Quick test_question_decoding
         ; test_case "bad questions" `Quick test_bad_questions_are_rejected
+        ; test_case "criteria preserve meaning" `Quick test_criteria_preserve_the_asked_meaning
         ; test_case "timeout bounds" `Quick test_timeout_bounds_are_enforced
         ] )
     ; ( "request"
@@ -232,5 +369,8 @@ let () =
     ; ( "answers"
       , [ test_case "live capture" `Quick test_answers_decode_from_a_live_capture
         ; test_case "type mismatch" `Quick test_answer_type_mismatch_is_rejected
+        ; test_case "choice request binding" `Quick test_choice_answers_belong_to_the_request
+        ; test_case "score request binding" `Quick test_score_answers_belong_to_the_requested_scale
+        ; test_case "numeric answer bounds" `Quick test_numeric_answers_are_finite_and_in_range
         ] )
     ]

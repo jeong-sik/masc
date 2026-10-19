@@ -140,13 +140,16 @@ let decode ~target json =
     let* () = match phase,completed_at with
       | (Queued | Running | Cancelling),None -> Ok ()
       | (Waiting | Lost | Cancelled | Persistence_failed | Done _),Some _ -> Ok ()
-      | _ -> Error "physical phase and completion boundary disagree" in
+      | (Queued | Running | Cancelling),Some _
+      | (Waiting | Lost | Cancelled | Persistence_failed | Done _),None ->
+        Error "physical phase and completion boundary disagree" in
     let* () = match phase,List.assoc_opt "ok" f,List.assoc_opt "result" f with
       | (Queued | Running),None,None -> Ok ()
       | Waiting,None,Some _ -> Ok ()
       | (Cancelling | Lost | Cancelled | Persistence_failed),Some (`Bool false),Some _ -> Ok ()
       | Done expected,Some (`Bool ok),Some _ when expected=ok -> Ok ()
-      | _ -> Error "physical phase, outcome and retained result disagree" in
+      | (Queued | Running | Waiting | Cancelling | Lost | Cancelled | Persistence_failed | Done _),_,_ ->
+        Error "physical phase, outcome and retained result disagree" in
     let* dependencies = match phase,List.assoc_opt "dependencies" f,List.assoc_opt "worker_released" f with
       | Waiting,Some (`List values),Some (`Bool true) ->
         let* reversed = List.fold_left (fun prior json -> let* values = prior in
@@ -154,7 +157,8 @@ let decode ~target json =
         if reversed = [] then Error "waiting physical owner has no dependencies" else Ok (List.rev reversed)
       | Waiting,_,_ -> Error "invalid physical dependency wait"
       | (Queued | Running | Cancelling | Lost | Cancelled | Persistence_failed | Done _),None,None -> Ok []
-      | _ -> Error "dependency wait fields outside their physical phase" in
+      | (Queued | Running | Cancelling | Lost | Cancelled | Persistence_failed | Done _),_,_ ->
+        Error "dependency wait fields outside their physical phase" in
     let* logical = logical ~request_context (List.assoc "continuation" f) in
     let* notice = match phase with
       | Cancelling | Lost | Cancelled | Persistence_failed ->

@@ -214,7 +214,61 @@ let store_error_to_string = function
     Printf.sprintf
       "decode failed: missing_string field=%s event_row_in_batch=%d row_sha256=%s"
       field row_in_batch row_sha256
-  | Decode_failed error -> "decode failed: " ^ decode_error_code error
+  | Decode_failed
+      ((Expected_object _
+        | Duplicate_field _
+        | Unexpected_field _
+        | Unsupported_schema _
+        | Invalid_source_id _
+        | Invalid_skill_name _
+        | Invalid_package_id _
+        | Invalid_content_revision _
+        | Invalid_snapshot_revision _
+        | Invalid_workspace_key _
+        | Invalid_session_id _
+        | Invalid_origin_kind _
+        | Invalid_task_id _
+        | Empty_task_ids
+        | Duplicate_task_id _
+        | Invalid_tool_name _
+        | Invalid_composition_execution_id
+        | Invalid_nested_composition_scope _
+        | Invalid_turn_ref _
+        | Turn_ref_session_mismatch
+        | Invalid_runtime_id
+        | Invalid_skill_tool_use_id
+        | Invalid_agent_core_turn _
+        | Invalid_served_content_kind _
+        | Invalid_served_content_path _
+        | Invalid_served_content_bytes _
+        | Invalid_served_content_sha256 _
+        | Invalid_delivery_agent_core_turn _
+        | Invalid_delivery_boundary_kind _
+        | Invalid_delivery_time _
+        | Invalid_action_identity_field
+        | Invalid_action_tool_name_field _
+        | Invalid_action_agent_core_turn _
+        | Invalid_action_time _
+        | Invalid_transition_rejection_kind _
+        | Orphan_transition_rejection _
+        | Transition_rejection_activation_mismatch _
+        | Duplicate_action_identity
+        | Invalid_activated_at _
+        | Duplicate_skill_tool_use_id
+        | Session_id_mismatch
+        | Workspace_key_mismatch
+        | Invalid_ledger_revision _
+        | Ledger_revision_mismatch
+        | Invalid_event_kind _
+        | Blank_event_row
+        | Activation_recorded_with_evidence _
+        | Unknown_event_activation _
+        | Delivery_already_observed _
+        | Action_target_not_delivered _
+        | Unterminated_header_row
+        | Invalid_async_result_evidence _
+        | Invalid_async_action_evidence _) as error) ->
+    "decode failed: " ^ decode_error_code error
   | Invocation_id_collision tool_use_id ->
     "Skill invocation id collision: " ^ tool_use_id
   | Action_identity_collision _ -> "Skill action identity collision"
@@ -1974,7 +2028,60 @@ let apply_event_rows ~expected_trace_id ledger rows =
                  { field; row_in_batch
                  ; row_sha256 = Digestif.SHA256.(digest_string row |> to_hex)
                  }
-             | error -> error)
+             | (Expected_object _
+               | Missing_string_in_event_row _
+               | Duplicate_field _
+               | Unexpected_field _
+               | Unsupported_schema _
+               | Invalid_source_id _
+               | Invalid_skill_name _
+               | Invalid_package_id _
+               | Invalid_content_revision _
+               | Invalid_snapshot_revision _
+               | Invalid_workspace_key _
+               | Invalid_session_id _
+               | Invalid_origin_kind _
+               | Invalid_task_id _
+               | Empty_task_ids
+               | Duplicate_task_id _
+               | Invalid_tool_name _
+               | Invalid_composition_execution_id
+               | Invalid_nested_composition_scope _
+               | Invalid_turn_ref _
+               | Turn_ref_session_mismatch
+               | Invalid_runtime_id
+               | Invalid_skill_tool_use_id
+               | Invalid_agent_core_turn _
+               | Invalid_served_content_kind _
+               | Invalid_served_content_path _
+               | Invalid_served_content_bytes _
+               | Invalid_served_content_sha256 _
+               | Invalid_delivery_agent_core_turn _
+               | Invalid_delivery_boundary_kind _
+               | Invalid_delivery_time _
+               | Invalid_action_identity_field
+               | Invalid_action_tool_name_field _
+               | Invalid_action_agent_core_turn _
+               | Invalid_action_time _
+               | Invalid_transition_rejection_kind _
+               | Orphan_transition_rejection _
+               | Transition_rejection_activation_mismatch _
+               | Duplicate_action_identity
+               | Invalid_activated_at _
+               | Duplicate_skill_tool_use_id
+               | Session_id_mismatch
+               | Workspace_key_mismatch
+               | Invalid_ledger_revision _
+               | Ledger_revision_mismatch
+               | Invalid_event_kind _
+               | Blank_event_row
+               | Activation_recorded_with_evidence _
+               | Unknown_event_activation _
+               | Delivery_already_observed _
+               | Action_target_not_delivered _
+               | Unterminated_header_row
+               | Invalid_async_result_evidence _
+               | Invalid_async_action_evidence _) as error -> error)
          in
          let* () = apply_event builder event in
          Ok (row_in_batch + 1))

@@ -112,13 +112,23 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # whose confidence reaches board_attention_confidence_floor (0 to 1, default
 # 0.3) is kept. A lower-confidence answer, an explicit uncertain answer or a
 # failed call is judged again by the board_attention_exact slots below.
+# selection orders the armed destinations per judgment: "in_order" (the
+# default) asks them in the order the table names them; "random" draws a
+# uniformly random armed destination first and keeps the rest as reserve, so
+# three armed destinations each answer a third of the calls. A destination
+# may leave api_key_env out entirely: it is then asked with no
+# Authorization header, which is how the machine's own Ollama
+# (http://127.0.0.1:11434/v1/systemone) joins the walk without a key.
 #
 # [typesafeai]
 # enabled = true
+# selection = "in_order"
 # destinations = [
 #   { endpoint = "https://api.typesafe.ai/v1/systemone", model = "jev-latest", api_key_env = "TYPESAFEAI_API_KEY" },
 #   # OpenRouter serves the same protocol; listed second it answers when the first does not:
 #   # { endpoint = "https://openrouter.ai/api/v1/systemone", model = "~typesafe/jev-latest", api_key_env = "OPENROUTER_API_KEY" },
+#   # A keyless local destination, asked without an Authorization header:
+#   # { endpoint = "http://127.0.0.1:11434/v1/systemone", model = "nimble" },
 # ]
 # board_attention = true
 # board_attention_confidence_floor = 0.3

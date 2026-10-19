@@ -69,7 +69,7 @@ let with_adapter f =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base) (fun () ->
     let config = Masc.Workspace.default_config base in
     let destination : Masc.Typesafeai_client.destination =
-      {endpoint="https://fixture.invalid/evaluate";model="fixture";api_key="private-fixture-key"} in
+      {endpoint="https://fixture.invalid/evaluate";model="fixture";api_key=Some "private-fixture-key"} in
     let adapter = Masc.Keeper_workspace_memory_selection_io.create
       ~config ~keeper_id:"fixture" ~destinations:(destination,[]) in
     f adapter destination)
@@ -89,7 +89,7 @@ let test_request_is_durable_before_dispatch () = with_adapter (fun adapter desti
     Alcotest.(check bool) "exact source-bearing state is retained" true
       (Yojson.Safe.Util.member "state" row = state);
     Alcotest.(check bool) "credentials are absent from the record" false
-      (String_util.contains_substring (Yojson.Safe.to_string row) destination.api_key);
+      (String_util.contains_substring (Yojson.Safe.to_string row) (Option.value destination.api_key ~default:""));
     Ok {Masc.Typesafeai_client.response=response "not_needed";
         destination=Masc.Typesafeai_client.identify destination;
         request_body_sha256="fixture-request";passed_over=[]} in

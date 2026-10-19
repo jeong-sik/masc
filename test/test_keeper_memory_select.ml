@@ -65,7 +65,7 @@ let with_fixture ?(enabled=true) ?(excluded=false) test =
   Masc_test_deps.with_typesafeai_policy
     {Runtime_schema.default_typesafeai with lane_enabled=true;workspace_memory_selection_enabled=enabled;
       excluded_keepers=(if excluded then [keeper_id] else []);
-      destinations=({Runtime_schema.endpoint=server.base_url;model="fixture";api_key_env=key},[])} @@ fun () ->
+      destinations=({Runtime_schema.endpoint=server.base_url;model="fixture";api_key_env=Some key},[])} @@ fun () ->
   let context : Dispatch.context =
     {config;meta;publication_recovery={provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper_id};
      ctx_work=Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"test";
@@ -299,7 +299,7 @@ let test_stalled_endpoint_ends_at_the_turn_clock () =
     {Runtime_schema.default_typesafeai with lane_enabled=true;workspace_memory_selection_enabled=true;
       excluded_keepers=[];
       destinations=({Runtime_schema.endpoint=Printf.sprintf "http://127.0.0.1:%d/evaluate" port;
-                     model="fixture";api_key_env=key},[])} @@ fun () ->
+                     model="fixture";api_key_env=Some key},[])} @@ fun () ->
   let clock=Eio_mock.Clock.make () in
   let context : Dispatch.context =
     {config;meta;publication_recovery={provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper_id};

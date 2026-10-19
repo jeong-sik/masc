@@ -100,12 +100,12 @@ let test_second_destination_answers_after_a_capacity_refusal () =
   let typesafe = serve ~sw ~net ~respond:(refuses `Service_unavailable) in
   let openrouter = serve ~sw ~net ~respond:(answers ~model:"typesafe/jev-1.13") in
   let first =
-    { Client.endpoint = typesafe.uri; model = "jev-latest"; api_key = "typesafe-key" }
+    { Client.endpoint = typesafe.uri; model = "jev-latest"; api_key = Some "typesafe-key" }
   in
   let second =
     { Client.endpoint = openrouter.uri
     ; model = "~typesafe/jev-latest"
-    ; api_key = "openrouter-key"
+    ; api_key = Some "openrouter-key"
     }
   in
   match evaluate ~clock (first, [ second ]) with
@@ -151,9 +151,9 @@ let test_a_request_refusal_still_asks_the_next_destination () =
   let unavailable = serve ~sw ~net ~respond:(refuses `Service_unavailable) in
   let refusing = serve ~sw ~net ~respond:(refuses `Unprocessable_entity) in
   let answering = serve ~sw ~net ~respond:(answers ~model:"m3") in
-  let first = { Client.endpoint = unavailable.uri; model = "m1"; api_key = "k1" } in
-  let second = { Client.endpoint = refusing.uri; model = "m2"; api_key = "k2" } in
-  let third = { Client.endpoint = answering.uri; model = "m3"; api_key = "k3" } in
+  let first = { Client.endpoint = unavailable.uri; model = "m1"; api_key = Some "k1" } in
+  let second = { Client.endpoint = refusing.uri; model = "m2"; api_key = Some "k2" } in
+  let third = { Client.endpoint = answering.uri; model = "m3"; api_key = Some "k3" } in
   match evaluate ~clock (first, [ second; third ]) with
   | Error failure -> Alcotest.fail (Client.failure_to_string failure)
   | Ok evaluated ->
@@ -186,7 +186,7 @@ let test_one_destination_renders_as_its_refusal () =
   with_env
   @@ fun ~sw ~net ~clock ->
   let server = serve ~sw ~net ~respond:(refuses `Unprocessable_entity) in
-  let only = { Client.endpoint = server.uri; model = "jev-latest"; api_key = "k1" } in
+  let only = { Client.endpoint = server.uri; model = "jev-latest"; api_key = Some "k1" } in
   match evaluate ~clock (only, []) with
   | Ok _ -> Alcotest.fail "the only destination refused"
   | Error failure ->
@@ -201,9 +201,9 @@ let test_no_response_moves_to_the_next_destination () =
   with_env
   @@ fun ~sw ~net ~clock ->
   let closed_uri = "http://127.0.0.1:9/systemone" in
-  let closed = { Client.endpoint = closed_uri; model = "jev-latest"; api_key = "k1" } in
+  let closed = { Client.endpoint = closed_uri; model = "jev-latest"; api_key = Some "k1" } in
   let server = serve ~sw ~net ~respond:(answers ~model:"jev-latest") in
-  let second = { Client.endpoint = server.uri; model = "jev-latest"; api_key = "k2" } in
+  let second = { Client.endpoint = server.uri; model = "jev-latest"; api_key = Some "k2" } in
   match evaluate ~clock (closed, [ second ]) with
   | Error failure -> Alcotest.fail (Client.failure_to_string failure)
   | Ok evaluated ->
@@ -222,8 +222,8 @@ let test_every_destination_refusing_is_recorded_in_order () =
   @@ fun ~sw ~net ~clock ->
   let a = serve ~sw ~net ~respond:(refuses `Service_unavailable) in
   let b = serve ~sw ~net ~respond:(refuses `Too_many_requests) in
-  let first = { Client.endpoint = a.uri; model = "jev-latest"; api_key = "ka" } in
-  let second = { Client.endpoint = b.uri; model = "~typesafe/jev-latest"; api_key = "kb" } in
+  let first = { Client.endpoint = a.uri; model = "jev-latest"; api_key = Some "ka" } in
+  let second = { Client.endpoint = b.uri; model = "~typesafe/jev-latest"; api_key = Some "kb" } in
   match evaluate ~clock (first, [ second ]) with
   | Ok _ -> Alcotest.fail "both refused"
   | Error failure ->
@@ -246,6 +246,28 @@ let test_every_destination_refusing_is_recorded_in_order () =
       "json attempts"
       2
       Yojson.Safe.Util.(member "attempts" json |> to_list |> List.length)
+;;
+
+(* A destination that carries no key asks with no Authorization header:
+   the local-server case [api_key_env] left out of the table. *)
+let test_a_keyless_destination_asks_without_authorization () =
+  with_env
+  @@ fun ~sw ~net ~clock ->
+  let server = serve ~sw ~net ~respond:(answers ~model:"nimble-fixture") in
+  let destination =
+    { Client.endpoint = server.uri; model = "nimble"; api_key = None }
+  in
+  match evaluate ~clock (destination, []) with
+  | Error failure -> Alcotest.fail (Client.failure_to_string failure)
+  | Ok evaluated ->
+    Alcotest.(check string)
+      "the keyless server answered" "nimble-fixture"
+      evaluated.response.model;
+    (match !(server.received) with
+     | [ _raw, authorization ] ->
+       Alcotest.(check (option string))
+         "no Authorization header is sent" None authorization
+     | received -> Alcotest.failf "server saw %d requests" (List.length received))
 ;;
 
 let () =
@@ -272,6 +294,10 @@ let () =
             "every destination refusing is recorded in order"
             `Quick
             test_every_destination_refusing_is_recorded_in_order
+        ; Alcotest.test_case
+            "a keyless destination asks without authorization"
+            `Quick
+            test_a_keyless_destination_asks_without_authorization
         ] )
     ]
 ;;

@@ -3,7 +3,9 @@ let ( let* ) = Result.bind
 type destination =
   { endpoint : string
   ; model : string
-  ; api_key : string
+  ; api_key : string option
+      (** [None] asks with no Authorization header: a local server that
+          authenticates nobody. *)
   }
 
 type destination_id =
@@ -59,10 +61,14 @@ let destination_id_to_yojson ({ destination_uri; model } : destination_id) =
 let redact_credentials ~endpoint ~api_key detail =
   let displayed = endpoint_for_observation endpoint in
   let normalized = Uri.of_string endpoint |> Uri.to_string in
-  detail
-  |> String_util.replace_substring ~needle:endpoint ~by:displayed
-  |> String_util.replace_substring ~needle:normalized ~by:displayed
-  |> String_util.replace_substring ~needle:api_key ~by:"[REDACTED]"
+  let without_endpoints =
+    detail
+    |> String_util.replace_substring ~needle:endpoint ~by:displayed
+    |> String_util.replace_substring ~needle:normalized ~by:displayed
+  in
+  match api_key with
+  | Some api_key -> String_util.replace_substring ~needle:api_key ~by:"[REDACTED]" without_endpoints
+  | None -> without_endpoints
 ;;
 
 let redact_diagnostic ~endpoint ~api_key detail =
@@ -143,10 +149,10 @@ let ask ~timeout_sec ?clock ~state ~questions { endpoint; model; api_key } =
   let body = Yojson.Safe.to_string request_json in
   let request_body_sha256 = Digestif.SHA256.(digest_string body |> to_hex) in
   let headers =
-    [ "authorization", "Bearer " ^ api_key
-    ; "content-type", "application/json"
-    ; "accept", "application/json"
-    ]
+    (match api_key with
+     | Some api_key -> [ ("authorization", "Bearer " ^ api_key) ]
+     | None -> [])
+    @ [ ("content-type", "application/json"); ("accept", "application/json") ]
   in
   let* status, response_body =
     Masc_http_client.post_sync ?clock ~timeout_sec ~url:endpoint ~headers ~body ()

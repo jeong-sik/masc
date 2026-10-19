@@ -18,7 +18,9 @@
 type destination =
   { endpoint : string  (** the URL the request is posted to *)
   ; model : string  (** the model id as this server names it *)
-  ; api_key : string  (** the bearer key this server takes *)
+  ; api_key : string option
+      (** the bearer key this server takes; [None] sends no Authorization
+          header, for a local server that authenticates nobody *)
   }
 
 type destination_id =
@@ -119,5 +121,5 @@ val evaluate :
     outbound clients share. *)
 
 module For_testing : sig
-  val transport_failure : endpoint:string -> api_key:string -> string -> refusal
+  val transport_failure : endpoint:string -> api_key:string option -> string -> refusal
 end

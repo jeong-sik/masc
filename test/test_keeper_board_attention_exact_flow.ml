@@ -1424,7 +1424,7 @@ let with_jev
       { Runtime_schema.default_typesafeai with
         excluded_keepers;
         destinations =
-          ( { Runtime_schema.endpoint; model = "requested-model"; api_key_env = "TYPESAFEAI_API_KEY" }
+          ( { Runtime_schema.endpoint; model = "requested-model"; api_key_env = Some "TYPESAFEAI_API_KEY" }
           , [] )
       }
       f)
@@ -2379,7 +2379,7 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
             ~destinations:
               ( { Typesafeai_client.endpoint = jev.base_url
                  ; model = "requested-model"
-                 ; api_key = "test-typesafeai-key"
+                 ; api_key = Some "test-typesafeai-key"
                  }
               , [] )
             ~candidate

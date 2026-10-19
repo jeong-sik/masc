@@ -109,3 +109,9 @@ val readiness : unit -> readiness
     [Configured] carries the armed destinations in walk order, each as its
     observation URL and the model id it is asked for, never a key. Two
     destinations may share a model id, so the URL is what tells them apart. *)
+
+module For_testing : sig
+  val shuffle_with : (unit -> float) -> 'a list -> 'a list
+  (** The uniform shuffle [selection = random] orders the armed destinations
+      with; the rng is injected so a test can pin the draw. *)
+end

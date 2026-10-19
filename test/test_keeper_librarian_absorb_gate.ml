@@ -571,7 +571,7 @@ let run_runtime_evidence () =
         { Runtime_schema.default_typesafeai with
           lane_enabled = scenario <> Lane_disabled_run
         ; destinations =
-            ( { Runtime_schema.endpoint = jev_uri; model = requested_model; api_key_env = "TYPESAFEAI_API_KEY" }
+            ( { Runtime_schema.endpoint = jev_uri; model = requested_model; api_key_env = Some "TYPESAFEAI_API_KEY" }
             , [] )
         ; absorb_gate = scenario <> Gate_disabled_run
         ; excluded_keepers = (if scenario = Excluded_run then [ keeper_id ] else [])
@@ -965,7 +965,7 @@ let test_transport_diagnostics_preserve_cause_without_configured_credentials () 
   List.iter (fun cause ->
     let detail = Printf.sprintf "%s url=%s normalized=%s key=%s"
         cause endpoint normalized api_key in
-    let failure = Client.For_testing.transport_failure ~endpoint ~api_key detail in
+    let failure = Client.For_testing.transport_failure ~endpoint ~api_key:(Some api_key) detail in
     let rendered = Client.refusal_to_string failure in
     Alcotest.(check string) "diagnostic cause and safe destination remain"
       (Printf.sprintf "typesafeai: transport failure: %s url=%s normalized=%s key=[REDACTED]"
@@ -1007,7 +1007,7 @@ let test_failure_bodies_omit_configured_credentials () =
       ~on_error:(fun exn -> Alcotest.fail (Printexc.to_string exn)));
   List.iter (fun (status, suffix) ->
     reply := status, "gateway echo " ^ api_key ^ " url=" ^ endpoint ^ suffix;
-    let destination = { Client.endpoint; model = "gateway-echo-model"; api_key } in
+    let destination = { Client.endpoint; model = "gateway-echo-model"; api_key = Some api_key } in
     let failure =
       match Client.evaluate ~clock ~destinations:(destination, []) ~state:`Null ~questions:[] () with
       | Error failure ->
@@ -1050,11 +1050,11 @@ let test_run_records_the_destination_passed_over () =
       destinations =
         ( { Runtime_schema.endpoint = closed
           ; model = "first-model"
-          ; api_key_env = "TYPESAFEAI_API_KEY"
+          ; api_key_env = Some "TYPESAFEAI_API_KEY"
           }
         , [ { Runtime_schema.endpoint = reserve.base_url
             ; model = "reserve-model"
-            ; api_key_env = reserve_key
+            ; api_key_env = Some reserve_key
             }
           ] )
     } @@ fun () ->
@@ -1100,7 +1100,7 @@ let test_run_uses_one_destination_and_model_snapshot () =
             destinations =
               ( { Runtime_schema.endpoint = alternate.base_url
                 ; model = "changed-after-first-request"
-                ; api_key_env = "TYPESAFEAI_API_KEY"
+                ; api_key_env = Some "TYPESAFEAI_API_KEY"
                 }
               , [] )
           })
@@ -1111,7 +1111,7 @@ let test_run_uses_one_destination_and_model_snapshot () =
       destinations =
         ( { Runtime_schema.endpoint = configured_endpoint
           ; model = "initial-request-model"
-          ; api_key_env = "TYPESAFEAI_API_KEY"
+          ; api_key_env = Some "TYPESAFEAI_API_KEY"
           }
         , [] )
     } @@ fun () ->
@@ -1193,7 +1193,7 @@ let test_cancelled_next_request_keeps_the_completed_observation () =
   Masc_test_deps.with_typesafeai_policy
     { (Runtime_typesafeai_policy.current ()) with
       destinations =
-        ( { Runtime_schema.endpoint = server.base_url; model = "request-model"; api_key_env = "TYPESAFEAI_API_KEY" }
+        ( { Runtime_schema.endpoint = server.base_url; model = "request-model"; api_key_env = Some "TYPESAFEAI_API_KEY" }
         , [] )
     } @@ fun () ->
   let first = fact (List.nth sources 0) in
@@ -1316,7 +1316,7 @@ let test_cancellation_during_terminal_callback_settles_registry () =
   Masc_test_deps.with_typesafeai_policy
     { (Runtime_typesafeai_policy.current ()) with destinations =
         ({ Runtime_schema.endpoint = server.base_url; model = "request-model";
-           api_key_env = "TYPESAFEAI_API_KEY" }, []) } @@ fun () ->
+           api_key_env = Some "TYPESAFEAI_API_KEY" }, []) } @@ fun () ->
   let directory = Filename.temp_dir "absorb-terminal-cancel-" "" in
   Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
   let path = Filename.concat directory Runs.storage_filename in
@@ -1379,7 +1379,7 @@ let test_cancellation_during_finish_callback_still_publishes_the_observation () 
   Masc_test_deps.with_typesafeai_policy
     { (Runtime_typesafeai_policy.current ()) with destinations =
         ({ Runtime_schema.endpoint = server.base_url; model = "request-model";
-           api_key_env = "TYPESAFEAI_API_KEY" }, []) } @@ fun () ->
+           api_key_env = Some "TYPESAFEAI_API_KEY" }, []) } @@ fun () ->
   let source = fact (List.hd sources) in
   let observed = ref [] in
   let raised = ref false in
@@ -1408,7 +1408,7 @@ let test_cancellation_during_failure_settlement_propagates_as_cancelled () =
   Masc_test_deps.with_typesafeai_policy
     { (Runtime_typesafeai_policy.current ()) with destinations =
         ({ Runtime_schema.endpoint = server.base_url; model = "request-model";
-           api_key_env = "TYPESAFEAI_API_KEY" }, []) } @@ fun () ->
+           api_key_env = Some "TYPESAFEAI_API_KEY" }, []) } @@ fun () ->
   (* The request window sleeps on this clock; raising from it is how the
      fixture makes the provider call raise instead of returning [Error]. *)
   let clock =
@@ -2203,7 +2203,7 @@ let test_the_runtime_does_not_save_a_copy ~fail_reverse () =
         lane_enabled = true
       ; destinations =
           ( { Runtime_schema.endpoint = Printf.sprintf "http://127.0.0.1:%d/evaluate" port
-            ; model = "copy-claim-model"; api_key_env = "TYPESAFEAI_API_KEY" }
+            ; model = "copy-claim-model"; api_key_env = Some "TYPESAFEAI_API_KEY" }
           , [] )
       ; absorb_gate = true
       }
@@ -2317,7 +2317,7 @@ let check_failed_absorb_evaluations ~status ~body ~failure_code ~diagnostic () =
       lane_enabled = true
     ; destinations =
         ( { Runtime_schema.endpoint = Printf.sprintf "http://127.0.0.1:%d/evaluate" port
-          ; model = "payment-fixture"; api_key_env = "TYPESAFEAI_API_KEY" }
+          ; model = "payment-fixture"; api_key_env = Some "TYPESAFEAI_API_KEY" }
         , [] )
     ; absorb_gate = true
     }

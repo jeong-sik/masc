@@ -62,7 +62,7 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
       ~on_error:(fun exn -> raise exn));
   let destination : Runtime_schema.typesafeai_destination =
     {endpoint=Printf.sprintf "http://127.0.0.1:%d" port;
-     model="fixture-requested-jev"; api_key_env="MASC_PREFLIGHT_FIXTURE_KEY"} in
+     model="fixture-requested-jev"; api_key_env=Some "MASC_PREFLIGHT_FIXTURE_KEY"} in
   let policy = {Runtime_schema.default_typesafeai with
     destinations=(destination, []); librarian_preflight=enabled;
     excluded_keepers=(if excluded then [name] else [])} in

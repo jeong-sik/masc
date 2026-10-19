@@ -72,7 +72,7 @@ let capture () =
   Masc_test_deps.with_process_env key (Some "synthetic-local-key") @@ fun () ->
   Masc_test_deps.with_typesafeai_policy
     {Runtime_schema.default_typesafeai with lane_enabled=true;workspace_memory_selection_enabled=true;
-     excluded_keepers=[];destinations=({Runtime_schema.endpoint=server.base_url;model="jev-latest";api_key_env=key},[])} @@ fun () ->
+     excluded_keepers=[];destinations=({Runtime_schema.endpoint=server.base_url;model="jev-latest";api_key_env=Some key},[])} @@ fun () ->
   let context : Dispatch.context =
     {config;meta;publication_recovery={provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper_id};
      ctx_work=Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"";

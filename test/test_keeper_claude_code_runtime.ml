@@ -5034,7 +5034,7 @@ let test_memory_capacity_reprojection_reaches_cli_input () =
     let module IO = Keeper_workspace_memory_selection_io in
     let config = Workspace.default_config base_path in
     let destination : Typesafeai_client.destination =
-      {endpoint="https://fixture.invalid/evaluate";model="fixture";api_key="fixture"} in
+      {endpoint="https://fixture.invalid/evaluate";model="fixture";api_key=Some "fixture"} in
     let adapter = IO.create ~config ~keeper_id:"claude-pre-dispatch" ~destinations:(destination,[]) in
     let row id = `Assoc ["id",`String id;"use",`String "comparison";
       "sources",`String ("MEMORY-" ^ id ^ "-" ^ String.make 2000 'x')] in

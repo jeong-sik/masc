@@ -443,8 +443,22 @@ type exact_output_lane_decl =
 type typesafeai_destination =
   { endpoint : string  (** the URL the request is posted to *)
   ; model : string  (** the model id as that server names it *)
-  ; api_key_env : string  (** the environment variable holding that server's bearer key *)
+  ; api_key_env : string option
+      (** the environment variable holding that server's bearer key. [None]
+          asks the server with no Authorization header: a local server that
+          authenticates nobody, such as the machine's own Ollama. *)
   }
+[@@deriving show, eq]
+
+(** How a judgment picks the first destination to ask. *)
+type typesafeai_selection =
+  | In_order
+      (** every judgment asks the destinations in the order the table names
+          them; a refusal walks the rest in that order. The default. *)
+  | Random
+      (** every judgment draws a uniformly random armed destination first and
+          keeps the rest as reserve in walk order, so N armed destinations
+          are asked first 1/N of the time each. *)
 [@@deriving show, eq]
 
 (** [\[typesafeai\]] -- the TypeSafe AI (System One Jev) lane. Keys stay in
@@ -465,6 +479,9 @@ type typesafeai_destination =
 type typesafeai =
   { lane_enabled : bool
   ; destinations : typesafeai_destination * typesafeai_destination list
+  ; selection : typesafeai_selection
+      (** [selection]: how each judgment orders the armed destinations
+          ({!typesafeai_selection}). *)
   ; board_attention : bool
   ; board_attention_confidence_floor : float
       (** [board_attention_confidence_floor]: Jev's relevant or not-relevant
@@ -487,7 +504,7 @@ type typesafeai =
 let typesafe_destination =
   { endpoint = "https://api.typesafe.ai/v1/systemone"
   ; model = "jev-latest"
-  ; api_key_env = "TYPESAFEAI_API_KEY"
+  ; api_key_env = Some "TYPESAFEAI_API_KEY"
   }
 ;;
 
@@ -506,6 +523,7 @@ let typesafe_destination =
 let default_typesafeai =
   { lane_enabled = true
   ; destinations = typesafe_destination, []
+  ; selection = In_order
   ; board_attention = true
   ; board_attention_confidence_floor = 0.3
   ; absorb_gate = false

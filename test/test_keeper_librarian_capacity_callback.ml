@@ -157,7 +157,7 @@ let test_absorb_evidence_capacity_recovers ~base_path () =
   Masc_test_deps.with_typesafeai_policy
     {Runtime_schema.default_typesafeai with absorb_gate=true;
      destinations=({Runtime_schema.endpoint=jev.base_url; model="fixture";
-                    api_key_env="TYPESAFEAI_API_KEY"},[])} @@ fun () ->
+                    api_key_env=Some "TYPESAFEAI_API_KEY"},[])} @@ fun () ->
   let observation = Agent_core.Types.user_msg "A17 recovery was verified after the investigation." in
   let input : L.input =
     {turn_ref=Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1000;

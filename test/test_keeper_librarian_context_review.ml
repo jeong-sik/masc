@@ -154,7 +154,7 @@ let test_case ~base_path ~registry scenario () =
       destinations =
         ( { Runtime_schema.endpoint = Printf.sprintf "http://127.0.0.1:%d/evaluate" port
           ; model = "requested-context-fixture"
-          ; api_key_env = "TYPESAFEAI_API_KEY"
+          ; api_key_env = Some "TYPESAFEAI_API_KEY"
           }
         , [] );
       context_review = true; absorb_gate = true;

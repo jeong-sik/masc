@@ -127,7 +127,7 @@ let test_cancel ?(observer_checks = true) ?(closed_pool = false) ~base_path ~reg
       destinations =
         ( { Runtime_schema.endpoint = jev.base_url
           ; model = "requested-cancel-model"
-          ; api_key_env = "TYPESAFEAI_API_KEY"
+          ; api_key_env = Some "TYPESAFEAI_API_KEY"
           }
         , [] )
     ; absorb_gate = true

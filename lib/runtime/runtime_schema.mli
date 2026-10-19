@@ -384,16 +384,31 @@ type exact_output_lane_decl =
 type typesafeai_destination =
   { endpoint : string  (** the URL the request is posted to *)
   ; model : string  (** the model id as that server names it *)
-  ; api_key_env : string  (** the environment variable holding that server's bearer key *)
+  ; api_key_env : string option
+      (** the environment variable holding that server's bearer key. [None]
+          asks the server with no Authorization header: a local server that
+          authenticates nobody, such as the machine's own Ollama. *)
   }
+[@@deriving show, eq]
+
+(** How a judgment picks the first destination to ask. *)
+type typesafeai_selection =
+  | In_order
+      (** every judgment asks the destinations in the order the table names
+          them; a refusal walks the rest in that order. The default. *)
+  | Random
+      (** every judgment draws a uniformly random armed destination first and
+          keeps the rest as reserve in walk order, so N armed destinations
+          are asked first 1/N of the time each. *)
 [@@deriving show, eq]
 
 (** [\[typesafeai\]] -- the TypeSafe AI (System One Jev) lane. Keys stay in
     the environment; each destination names the variable holding its own
     ([api_key_env]). Everything else about the lane is here. [lane_enabled]
     turns the lane off; it cannot turn it on without a key in one of the named
-    variables. [destinations] are the System One servers asked in order until
-    one answers ({!Typesafeai_client.evaluate}); TypeSafe's own server and
+    variables. [destinations] are the System One servers asked until
+    one answers ({!Typesafeai_client.evaluate}), ordered per judgment by
+    [selection]; TypeSafe's own server and
     OpenRouter's [/api/v1/systemone] both speak the protocol. Two gates ask
     the vendor: [board_attention] (the Board attention judgment,
     {!Keeper_board_attention_exact_flow}, which sends the post and the
@@ -406,6 +421,9 @@ type typesafeai_destination =
 type typesafeai =
   { lane_enabled : bool
   ; destinations : typesafeai_destination * typesafeai_destination list
+  ; selection : typesafeai_selection
+      (** [selection]: how each judgment orders the armed destinations
+          ({!typesafeai_selection}). *)
   ; board_attention : bool
   ; board_attention_confidence_floor : float
       (** [board_attention_confidence_floor]: Jev's relevant or not-relevant

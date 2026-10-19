@@ -4900,7 +4900,7 @@ let test_keeper_reprojects_memory_after_actual_codex_capacity_refusal () =
     Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
     let module IO = Keeper_workspace_memory_selection_io in
     let destination : Typesafeai_client.destination =
-      {endpoint="https://fixture.invalid/evaluate";model="fixture";api_key="fixture"} in
+      {endpoint="https://fixture.invalid/evaluate";model="fixture";api_key=Some "fixture"} in
     let adapter = IO.create ~config:(Workspace.default_config base_path)
       ~keeper_id:"codex-memory-capacity" ~destinations:(destination,[]) in
     let receipt_path = IO.journal_path adapter in

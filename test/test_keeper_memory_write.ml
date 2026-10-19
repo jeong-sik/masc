@@ -853,7 +853,7 @@ let test_demand_recall_does_not_materialize_or_verify_all_memory () =
        lane_enabled=true; workspace_memory_selection_enabled=enabled;
        excluded_keepers=(if excluded then [meta.name] else []);
        destinations=({Runtime_schema.endpoint="http://127.0.0.1:1";
-                      model="notice-only"; api_key_env=key},[])} f in
+                      model="notice-only"; api_key_env=Some key},[])} f in
   let notice ~offered ~loader_alive ~search ~reader =
     let access = Masc.Keeper_request_tool_access.create ~offered
         ~deferred_names:["keeper_memory_select"] ~loader_alive in

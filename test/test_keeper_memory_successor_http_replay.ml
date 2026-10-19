@@ -95,7 +95,7 @@ let replay filename ~enabled () =
   Masc_test_deps.with_process_env key (Some "synthetic-local-replay-key") @@ fun () ->
   Masc_test_deps.with_typesafeai_policy
     {Runtime_schema.default_typesafeai with lane_enabled=enabled;absorb_gate=false;excluded_keepers=[];
-     destinations=({Runtime_schema.endpoint=server.base_url;model="jev-latest";api_key_env=key},[])} @@ fun () ->
+     destinations=({Runtime_schema.endpoint=server.base_url;model="jev-latest";api_key_env=Some key},[])} @@ fun () ->
   let results=List.concat_map (fun query -> List.map (fun source ->
     observed:=[];
     let query_text=jstring "query" query in

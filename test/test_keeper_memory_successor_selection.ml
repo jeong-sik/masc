@@ -206,7 +206,7 @@ let test_a_stalled_endpoint_ends_at_the_turn_clock () =
   Masc_test_deps.with_typesafeai_policy
     {Runtime_schema.default_typesafeai with lane_enabled=true; absorb_gate=false; excluded_keepers=[];
      destinations=({Runtime_schema.endpoint=Printf.sprintf "http://127.0.0.1:%d/evaluate" port;
-                    model="jev-fixture"; api_key_env=key},[])} @@ fun () ->
+                    model="jev-fixture"; api_key_env=Some key},[])} @@ fun () ->
   let config = Masc.Workspace.default_config base_path in
   let keeper_id = "successor-stalled-keeper" in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in

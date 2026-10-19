@@ -32,18 +32,52 @@ let unavailable_reason_to_string = function
 
 let configured_destinations () = (policy ()).Runtime_schema.destinations
 
-(* A destination is armed when the variable it names holds a non-blank key.
-   One that does not is left out of the walk; the table keeps naming it. *)
+(* A destination is armed when it names no variable (a local server that
+   authenticates nobody asks with no key) or when the variable it names
+   holds a non-blank key. One whose variable holds nothing is left out of
+   the walk; the table keeps naming it. *)
 let arm (destination : Runtime_schema.typesafeai_destination) =
-  Env_config_core.raw_value_opt destination.api_key_env
-  |> Env_config_core.trim_opt
-  |> Option.map (fun api_key ->
-    { Typesafeai_client.endpoint = destination.endpoint; model = destination.model; api_key })
+  match destination.api_key_env with
+  | None ->
+    Some
+      { Typesafeai_client.endpoint = destination.endpoint
+      ; model = destination.model
+      ; api_key = None
+      }
+  | Some variable ->
+    Env_config_core.raw_value_opt variable
+    |> Env_config_core.trim_opt
+    |> Option.map (fun api_key ->
+           { Typesafeai_client.endpoint = destination.endpoint
+           ; model = destination.model
+           ; api_key = Some api_key
+           })
+;;
+
+(* A uniform shuffle (Fisher-Yates). With [selection = random] each
+   judgment draws the destination it asks first this way, so N armed
+   destinations are each asked first 1/N of the time; the rest stay as
+   reserve. [rng] is injected so tests pin the draw. *)
+let shuffle_with (rng : unit -> float) (items : 'a list) : 'a list =
+  let shuffled = Array.of_list items in
+  for i = Array.length shuffled - 1 downto 1 do
+    let j = int_of_float (rng () *. float_of_int (i + 1)) in
+    let held = shuffled.(i) in
+    shuffled.(i) <- shuffled.(j);
+    shuffled.(j) <- held
+  done;
+  Array.to_list shuffled
 ;;
 
 let armed () =
   let first, rest = configured_destinations () in
-  match List.filter_map arm (first :: rest) with
+  let armed_list = List.filter_map arm (first :: rest) in
+  let ordered =
+    match (policy ()).Runtime_schema.selection with
+    | Runtime_schema.In_order -> armed_list
+    | Runtime_schema.Random -> shuffle_with (fun () -> Random.float 1.0) armed_list
+  in
+  match ordered with
   | [] -> None
   | first :: rest -> Some (first, rest)
 ;;
@@ -76,6 +110,11 @@ let is_enabled () = Result.is_ok (lane_destinations ())
 (* One exclusion for all reviews: they reach the same destinations, so a
    keeper whose content must not leave is excluded whichever gate asks. *)
 let is_excluded ~keeper_id = List.mem keeper_id (policy ()).Runtime_schema.excluded_keepers
+
+module For_testing = struct
+  let shuffle_with = shuffle_with
+end
+;;
 
 let board_attention_confidence_floor () =
   (policy ()).Runtime_schema.board_attention_confidence_floor

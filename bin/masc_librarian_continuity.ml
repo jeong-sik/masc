@@ -192,9 +192,16 @@ let judge ~clock (request : R.judge_request) =
              (first :: rest)
          with
          | Some armed -> Ok armed
-         | None ->
-             Error
-               (Printf.sprintf "the measurement judge has no key in %s" named.api_key_env))
+         | None -> (
+             (* A destination that names no variable is always armed, so only
+                a named-but-empty variable reaches this report. *)
+             match named.api_key_env with
+             | Some variable ->
+                 Error
+                   (Printf.sprintf "the measurement judge has no key in %s" variable)
+             | None ->
+                 Error
+                   "the measurement judge is neither armed nor names a variable"))
   in
   let* evaluated =
     Masc.Typesafeai_client.evaluate ~clock ~destinations:(destination, [])

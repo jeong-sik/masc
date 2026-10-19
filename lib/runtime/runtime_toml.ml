@@ -3105,6 +3105,7 @@ let validate_priority_run_limit_providers
 let typesafeai_keys =
   [ "enabled"
   ; "destinations"
+  ; "selection"
   ; "board_attention"
   ; "board_attention_confidence_floor"
   ; "absorb_gate"
@@ -3148,9 +3149,11 @@ let parse_typesafeai_excluded_keepers ~(path : string) (tbl : Otoml.t) =
 ;;
 
 (* One entry of [destinations]: the table naming where to post, which model
-   to ask for, and which environment variable holds that server's key. Every
-   field is required. [api_key_env] is a variable name, not a value, so it
-   must look like one: non-empty, no whitespace. *)
+   to ask for, and which environment variable holds that server's key.
+   [endpoint] and [model] are required. [api_key_env] is a variable name,
+   not a value, so when present it must look like one: non-empty, no
+   whitespace. Leaving it out asks the server with no Authorization header,
+   which is how a local server with no authentication joins the walk. *)
 let parse_typesafeai_destination ~(path : string) (entry : Otoml.t)
   : (Runtime_schema.typesafeai_destination, parse_error list) result
   =
@@ -3166,16 +3169,19 @@ let parse_typesafeai_destination ~(path : string) (entry : Otoml.t)
     let endpoint = required "endpoint" in
     let model = required "model" in
     let api_key_env =
-      match required "api_key_env" with
-      | Ok name
-        when String.exists (fun c -> c = ' ' || c = '\t' || c = '\n' || c = '\r') name ->
-        Error
-          (error
-             (path ^ ".api_key_env")
-             (Printf.sprintf
-                "api_key_env %S must name an environment variable without whitespace"
-                name))
-      | (Ok _ | Error _) as other -> other
+      match exact_non_empty_string_opt_field ~path entry "api_key_env" with
+      | Error _ as error -> error
+      | Ok None -> Ok None
+      | Ok (Some name) ->
+          if String.exists (fun c -> c = ' ' || c = '\t' || c = '\n' || c = '\r') name
+          then
+            Error
+              (error
+                 (path ^ ".api_key_env")
+                 (Printf.sprintf
+                    "api_key_env %S must name an environment variable without whitespace"
+                    name))
+          else Ok (Some name)
     in
     (match unknown, endpoint, model, api_key_env with
      | [], Ok endpoint, Ok model, Ok api_key_env ->
@@ -3187,6 +3193,23 @@ let parse_typesafeai_destination ~(path : string) (entry : Otoml.t)
   | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
   | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> Error
       (error path "each destination must be a table with endpoint, model and api_key_env")
+;;
+
+(* [selection]: how each judgment orders the armed destinations. The two
+   spellings are exhaustive, so anything else is a load error rather than a
+   policy that silently stayed in order. *)
+let parse_typesafeai_selection ~(path : string) (tbl : Otoml.t) ~default =
+  match
+    typed_find_or "a string" path tbl "selection" Otoml.get_string ~default:(default : string)
+  with
+  | Error _ as refused -> refused
+  | Ok "in_order" -> Ok Runtime_schema.In_order
+  | Ok "random" -> Ok Runtime_schema.Random
+  | Ok other ->
+      Error
+        (error
+           (path ^ ".selection")
+           (Printf.sprintf "selection must be in_order or random, got %S" other))
 ;;
 
 (* [destinations]: an absent key means the vendor's own server alone; a
@@ -3273,6 +3296,7 @@ let parse_typesafeai (toml : Otoml.t)
     let d = Runtime_schema.default_typesafeai in
     let enabled = typed_find_or "a boolean" path tbl "enabled" Otoml.get_boolean ~default:d.lane_enabled in
     let destinations = parse_typesafeai_destinations ~path tbl in
+    let selection = parse_typesafeai_selection ~path tbl ~default:"in_order" in
     let board_attention =
       typed_find_or "a boolean" path tbl "board_attention" Otoml.get_boolean ~default:d.board_attention
     in
@@ -3304,6 +3328,7 @@ let parse_typesafeai (toml : Otoml.t)
        ( unknown
        , enabled
        , destinations
+       , selection
        , board_attention
        , board_attention_confidence_floor
        , absorb_gate
@@ -3316,6 +3341,7 @@ let parse_typesafeai (toml : Otoml.t)
      | ( []
        , Ok lane_enabled
        , Ok destinations
+       , Ok selection
        , Ok board_attention
        , Ok board_attention_confidence_floor
        , Ok absorb_gate
@@ -3327,6 +3353,7 @@ let parse_typesafeai (toml : Otoml.t)
        Ok
          { Runtime_schema.lane_enabled
          ; destinations
+         ; selection
          ; board_attention
          ; board_attention_confidence_floor
          ; absorb_gate
@@ -3346,11 +3373,13 @@ let parse_typesafeai (toml : Otoml.t)
        , (Ok _ | Error _)
        , (Ok _ | Error _)
        , (Ok _ | Error _)
+       , (Ok _ | Error _)
        , (Ok _ | Error _) ) ->
        Error
          (unknown
           @ result_errors enabled
           @ result_errors destinations
+          @ result_errors selection
           @ result_errors board_attention
           @ result_errors board_attention_confidence_floor
           @ result_errors absorb_gate

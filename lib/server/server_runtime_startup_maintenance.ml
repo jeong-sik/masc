@@ -205,12 +205,17 @@ let report_unknown_typesafeai_exclusions ~base_path =
 let report_unarmed_typesafeai_destinations () =
   List.iter
     (fun (destination : Runtime_schema.typesafeai_destination) ->
-       Log.Server.warn
-         "[typesafeai].destinations names %s (%s), but its api_key_env %S holds no key: it is \
-          left out of the walk"
-         (Typesafeai_client.endpoint_for_observation destination.endpoint)
-         destination.model
-         destination.api_key_env)
+       (* A destination that names no variable is armed without a key, so it
+          never reaches this report; only a named-but-empty variable does. *)
+       match destination.api_key_env with
+       | None -> ()
+       | Some variable ->
+           Log.Server.warn
+             "[typesafeai].destinations names %s (%s), but its api_key_env %S holds no key: it \
+              is left out of the walk"
+             (Typesafeai_client.endpoint_for_observation destination.endpoint)
+             destination.model
+             variable)
     (Typesafeai_config.unarmed_destinations ())
 ;;
 

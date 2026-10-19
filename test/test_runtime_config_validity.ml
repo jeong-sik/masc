@@ -6378,6 +6378,35 @@ let test_typesafeai_absent_is_the_default () =
     check (list string) "nobody is excluded" [] t.Runtime_schema.excluded_keepers
 ;;
 
+let test_typesafeai_selection_and_keyless_destination () =
+  let table =
+    "[typesafeai]\n\
+     destinations = [\n\
+     \  { endpoint = \"http://127.0.0.1:9/local\", model = \"nimble\" },\n\
+     \  { endpoint = \"https://api.typesafe.ai/v1/systemone\", model = \"jev-latest\", api_key_env = \"TYPESAFEAI_API_KEY\" },\n\
+     ]\n\
+     selection = \"random\"\n"
+  in
+  match Runtime_toml.parse_string (lsp_probe_config table) with
+  | Error errors -> failf "the table must parse: %s" (error_messages errors)
+  | Ok config ->
+    let t = config.Runtime_schema.typesafeai in
+    check bool "selection random parses" true
+      (t.Runtime_schema.selection = Runtime_schema.Random);
+    let first, rest = t.Runtime_schema.destinations in
+    check (option string) "a destination may name no variable" None
+      first.Runtime_schema.api_key_env;
+    check int "and still walks with a keyed reserve" 1 (List.length rest)
+;;
+
+let test_typesafeai_rejects_an_unknown_selection () =
+  match
+    Runtime_toml.parse_string (lsp_probe_config "[typesafeai]\nselection = \"round_robin\"\n")
+  with
+  | Error _ -> ()
+  | Ok _ -> fail "an unknown selection value must not parse"
+;;
+
 let test_typesafeai_reads_the_whole_table () =
   match Runtime_toml.parse_string (lsp_probe_config typesafeai_table) with
   | Error errors -> failf "the table must parse: %s" (error_messages errors)
@@ -6387,12 +6416,12 @@ let test_typesafeai_reads_the_whole_table () =
     let first, rest = t.Runtime_schema.destinations in
     check string "first endpoint" "http://127.0.0.1:9/judge" first.Runtime_schema.endpoint;
     check string "first model" "jev-1.13" first.Runtime_schema.model;
-    check string "first key variable" "TYPESAFEAI_API_KEY" first.Runtime_schema.api_key_env;
+    check string "first key variable" "TYPESAFEAI_API_KEY" (match first.Runtime_schema.api_key_env with Some v -> v | None -> "");
     (match rest with
      | [ second ] ->
        check string "second endpoint" "http://127.0.0.1:9/reserve" second.Runtime_schema.endpoint;
        check string "second model" "~typesafe/jev-latest" second.Runtime_schema.model;
-       check string "second key variable" "OPENROUTER_API_KEY" second.Runtime_schema.api_key_env
+       check string "second key variable" "OPENROUTER_API_KEY" (match second.Runtime_schema.api_key_env with Some v -> v | None -> "")
      | _ -> failf "two destinations, in order; got %d after the first" (List.length rest));
     check bool "board_attention" false t.Runtime_schema.board_attention;
     check (float 0.0) "board_attention_confidence_floor" 0.45
@@ -6479,9 +6508,6 @@ let test_typesafeai_refuses_a_value_that_names_nothing () =
   typesafeai_rejects ~what:"a blank destination endpoint"
     "[typesafeai]\ndestinations = [{ endpoint = \"  \", model = \"m\", api_key_env = \"K\" }]\n"
     "endpoint must be non-empty";
-  typesafeai_rejects ~what:"a destination without its key variable"
-    "[typesafeai]\ndestinations = [{ endpoint = \"http://127.0.0.1:9/judge\", model = \"m\" }]\n"
-    "api_key_env is required";
   typesafeai_rejects ~what:"a key variable with whitespace"
     "[typesafeai]\ndestinations = [{ endpoint = \"http://127.0.0.1:9/judge\", model = \"m\", api_key_env = \"A B\" }]\n"
     "must name an environment variable without whitespace";
@@ -7187,6 +7213,10 @@ let () =
         ] )
     ; ( "typesafeai"
       , [ test_case "absent is the default" `Quick test_typesafeai_absent_is_the_default
+        ; test_case "selection and a keyless destination read" `Quick
+            test_typesafeai_selection_and_keyless_destination
+        ; test_case "an unknown selection is refused" `Quick
+            test_typesafeai_rejects_an_unknown_selection
         ; test_case "reads the whole table" `Quick test_typesafeai_reads_the_whole_table
         ; test_case "reads destinations written as table headers" `Quick
             test_typesafeai_reads_destinations_written_as_table_headers

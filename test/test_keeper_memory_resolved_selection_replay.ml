@@ -94,7 +94,7 @@ let replay ~enabled () =
   Masc_test_deps.with_process_env key (Some "synthetic-local-key") @@ fun () ->
   Masc_test_deps.with_typesafeai_policy
     {Runtime_schema.default_typesafeai with lane_enabled=enabled;excluded_keepers=[];workspace_memory_selection_enabled=true;
-     destinations=({Runtime_schema.endpoint=server.base_url;model="jev-latest";api_key_env=key},[])} @@ fun () ->
+     destinations=({Runtime_schema.endpoint=server.base_url;model="jev-latest";api_key_env=Some key},[])} @@ fun () ->
   let measurements=List.map (fun query ->
     let request=match rows "requests" query with [request] -> request | _ -> fail "expected one full-detail request" in
     let body=jstring "request_body" request in

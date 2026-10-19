@@ -801,7 +801,7 @@ let test_absorb_gate_capacity_refusal_splits_the_admission_batch () =
     ; absorb_gate = true
     ; destinations =
         ( { Runtime_schema.endpoint = "http://127.0.0.1:1/evaluate"; model = "jev-fixture"
-          ; api_key_env = "TYPESAFEAI_API_KEY" }
+          ; api_key_env = Some "TYPESAFEAI_API_KEY" }
         , [] )
     } @@ fun () ->
   let module Queue = Masc.Keeper_memory_admission_queue in

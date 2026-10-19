@@ -396,7 +396,7 @@ let test_config_defaults () =
   Alcotest.(check string) "default endpoint"
     "https://api.typesafe.ai/v1/systemone" first.Runtime_schema.endpoint;
   Alcotest.(check string) "default model" "jev-latest" first.Runtime_schema.model;
-  Alcotest.(check string) "default key variable" "TYPESAFEAI_API_KEY" first.Runtime_schema.api_key_env;
+  Alcotest.(check string) "default key variable" "TYPESAFEAI_API_KEY" (match first.Runtime_schema.api_key_env with Some v -> v | None -> "");
   Alcotest.(check int) "the vendor's own server alone" 0 (List.length rest)
 ;;
 
@@ -418,6 +418,7 @@ let policy
   =
   { Runtime_schema.lane_enabled = enabled
   ; destinations
+  ; selection = Runtime_schema.In_order
   ; board_attention
   ; board_attention_confidence_floor
   ; absorb_gate
@@ -439,7 +440,7 @@ let destination
       ()
   : Runtime_schema.typesafeai_destination
   =
-  { Runtime_schema.endpoint; model; api_key_env }
+  { Runtime_schema.endpoint; model; api_key_env = Some api_key_env }
 ;;
 
 (* The lane reads the published [typesafeai] table; before any load that is
@@ -473,7 +474,7 @@ let test_only_destinations_with_a_key_are_armed () =
     | Ok (first, rest) ->
       List.map
         (fun (armed : Masc.Typesafeai_client.destination) ->
-           String.concat "|" [ armed.endpoint; armed.model; armed.api_key ])
+           String.concat "|" [ armed.endpoint; armed.model; Option.value armed.api_key ~default:"-" ])
         (first :: rest)
   in
   let with_second key f = Masc_test_deps.with_process_env second_key key f in
@@ -492,7 +493,8 @@ let test_only_destinations_with_a_key_are_armed () =
         Alcotest.(check (list string)) "the one left out is named for the boot report"
           [ second_key ]
           (List.map
-             (fun (left_out : Runtime_schema.typesafeai_destination) -> left_out.api_key_env)
+             (fun (left_out : Runtime_schema.typesafeai_destination) ->
+                Option.value left_out.api_key_env ~default:"-")
              (C.unarmed_destinations ()))));
     with_key None (fun () ->
       with_second (Some "k-openrouter") (fun () ->
@@ -568,10 +570,30 @@ let test_each_gate_has_its_own_switch () =
    first of the gate's switch, the exclusion, the lane switch and the key:
    what the operator declared comes before what the lane can do, so a gate
    that is on and unaskable is told apart from one that was told not to ask. *)
+(* [selection = random] orders the armed destinations by a uniform shuffle:
+   every armed destination is still in the walk exactly once, whichever the
+   draw picks first. A pinned rng makes the draw itself deterministic. *)
+let test_random_selection_keeps_every_destination () =
+  let three = [ "a"; "b"; "c" ] in
+  let drawn = C.For_testing.shuffle_with (fun () -> 0.5) three in
+  Alcotest.(check (list string)) "a pinned draw is a fixed order"
+    [ "a"; "c"; "b" ] drawn;
+  List.iter
+    (fun fixed ->
+       let shuffled = C.For_testing.shuffle_with (fun () -> fixed) three in
+       Alcotest.(check bool)
+         (Printf.sprintf "rng %.2f: the shuffle is a permutation" fixed)
+         true
+         (List.length shuffled = 3
+          && List.for_all (fun item -> List.mem item three) shuffled))
+    [ 0.0; 0.25; 0.5; 0.75; 0.99 ]
+;;
+
 let test_an_excluded_keeper_keeps_its_content_home () =
   let state = function
     | Error reason -> C.unavailable_reason_to_string reason
-    | Ok ((first : Masc.Typesafeai_client.destination), _) -> "on:" ^ first.api_key
+    | Ok ((first : Masc.Typesafeai_client.destination), _) ->
+      "on:" ^ Option.value first.api_key ~default:"-"
   in
   let excluded = "kidsnote-slack-context-collector" in
   with_key (Some "synthetic-jev-key") (fun () ->
@@ -726,6 +748,8 @@ let () =
             test_unknown_excluded_keepers_are_named
         ; Alcotest.test_case "each gate has its own switch" `Quick
             test_each_gate_has_its_own_switch
+        ; Alcotest.test_case "random selection shuffles every destination in" `Quick
+            test_random_selection_keeps_every_destination
         ] )
 
     ]

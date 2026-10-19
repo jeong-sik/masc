@@ -651,7 +651,14 @@ final class ArrangementTransport {
     func run() throws {
         guard state != .stopped else { return }
         guard (plan.loop != nil || position < plan.duration), !active.isEmpty || midi != nil || plan.clocked else { position = plan.duration; finish(reason: "finished"); return }
-        try checkOutput(); engine.prepare(); try engine.start()
+        try checkOutput()
+        // Prime each scheduled player's native buffers before reserving the
+        // shared epoch. play(at:) must not pay first-use preparation while
+        // later voices are still waiting to receive that same deadline.
+        for voice in voices where active.contains(voice.region.id) {
+            voice.player.prepare(withFrameCount: voice.capacity)
+        }
+        engine.prepare(); try engine.start()
         let rate = engine.outputNode.outputFormat(forBus: 0).sampleRate, latency = engine.outputNode.presentationLatency
         guard rate.isFinite, rate > 0, latency.isFinite, latency >= 0 else { throw AudioFailure("output clock is unavailable") }
         // A node may already have rendered beyond wall-clock now. Apple defines

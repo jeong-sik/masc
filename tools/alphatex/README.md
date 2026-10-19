@@ -134,6 +134,33 @@ alphaTab is MPL-2.0, Bravura is OFL-1.1, alphaSkia is BSD-3-Clause. Their notice
 with the locked dependencies. The Sonivox license is in alphaTab's
 `dist/soundfont/LICENSE` and must remain with a redistributed installation.
 JZZ and JZZ MIDI SMF are MIT-licensed; their notices ship with the pinned packages.
+## Music library
+
+`masc-alphatex --music` opens a plain terminal library for new phrases,
+arrangements and audio/MIDI recordings. It also lists JSON projects under
+`--project-root` and take directories under `--session-root`. Choose with arrows
+and Enter; `q` returns from an editor to the library, then back to its caller.
+Returning refreshes the library so a newly saved phrase can be continued.
+Use `r` to refresh, `:open PATH` for a saved project, `:midi PATH` to import MIDI,
+or `:session PATH` for an existing recorded take. Paths may contain spaces.
+Missing library directories are empty; other source failures stay visible
+alongside available entries. Closing waits for the active editor's cleanup.
+
+Selecting a saved item reads its details in a separate worker. Phrase details
+show the saved title, tempo, meter, duration and tracks; imported MIDI retains
+independent pattern durations. Arrangement details describe the document and
+its sources, without asserting that external assets can play. Take details
+validate the capture files and retain a failed recording's reason. A damaged
+item stays selectable with its read failure visible. Moving away cancels the
+old inspection and waits for its worker to exit before reading the new item;
+opening an editor and closing the library also join that cleanup.
+
+The MASC entry is Dashboard **s** or chat `/music`. It supplies
+`<base-path>/.masc/music/projects` and `<base-path>/.masc/music/sessions` as the
+workspace library roots. The companion must be updated together with that entry.
+This library and its editors do not need Kitty graphics or a score block.
+Graphical notation still uses `/score` or the ordinary score-viewer entry.
+
 # Phrase sequencer
 
 From `/score`, press **p** to open the piano-roll editor. It also opens directly

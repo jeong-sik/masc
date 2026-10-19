@@ -113,3 +113,43 @@ test('a rejected project stays a source failure without starting a replacement e
   assert.equal(model.child, null)
   await model.close()
 })
+
+test('inspection retires the previous worker and never applies its late result to a new selection', async t => {
+  const jobs = [], entries = ['A', 'B', 'C'].map(name => ({ kind: 'project', name, path: `/${name}.json` }))
+  const model = new MusicWorkbench({ read: async () => ({ entries, errors: [] }), inspect: entry => {
+    const result = deferred(), exited = deferred()
+    const job = { entry, result, exited, cancelled: false,
+      promise: result.promise, completion: exited.promise, cancel() { this.cancelled = true } }
+    jobs.push(job); return job
+  } })
+  t.after(async () => { const closing = model.close(); for (const job of jobs) { job.result.resolve({}); job.exited.resolve() }; await closing })
+  await model.refresh(); await flush()
+  assert.equal(jobs[0].entry.path, '/A.json')
+  model.move(1); model.move(1); await flush()
+  assert.equal(jobs[0].cancelled, true)
+  assert.equal(jobs.length, 1)
+  jobs[0].result.resolve({ kind: 'phrase', title: 'retired A' }); jobs[0].exited.resolve(); await flush()
+  assert.equal(jobs.length, 2)
+  assert.equal(jobs[1].entry.path, '/C.json')
+  assert.equal(model.inspection.kind, 'loading')
+  jobs[1].result.resolve({ kind: 'phrase', title: 'current C' }); jobs[1].exited.resolve(); await flush()
+  assert.equal(model.inspection.info.title, 'current C')
+  let returned = false
+  const close = model.close().then(() => { returned = true }); await close
+  assert.equal(returned, true)
+})
+
+test('opening a project waits for inspection cleanup and forwards its selected path unchanged', async t => {
+  const result = deferred(), exited = deferred(), requests = []
+  let cancelled = false
+  const entry = { kind: 'project', name: 'Selected', path: '/selected.json' }
+  const model = new MusicWorkbench({ read: async () => ({ entries: [entry], errors: [] }),
+    inspect: () => ({ promise: result.promise, completion: exited.promise, cancel() { cancelled = true } }),
+    open: async selected => { requests.push(selected) } })
+  t.after(async () => { const closing = model.close(); result.resolve({}); exited.resolve(); await closing })
+  await model.refresh(); await flush()
+  const opening = model.activate(); await flush()
+  assert.equal(cancelled, true); assert.deepEqual(requests, [])
+  result.resolve({ kind: 'phrase', title: 'old observation' }); exited.resolve(); await opening
+  assert.deepEqual(requests, [entry])
+})

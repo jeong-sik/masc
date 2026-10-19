@@ -44,6 +44,9 @@ type t =
       (** [/score [N]] opens a frozen alphaTex score in this terminal using
           official alphaTab notation and playback; N is newest-first. *)
   | Score_invalid_index
+  | Open_music
+      (** [/music] opens the terminal music library without score graphics. *)
+  | Music_invalid_arguments
   | Listen
       (** [/listen] — play the newest playable attachment in this
           conversation (audio through the local player chain, MIDI through

@@ -730,9 +730,20 @@ cell. No final result message is added to the shared queue. Both empty cells
 close on worker exit or pre-entry withdrawal without fabricated outcomes; actual
 returned facts survive.
 
-The regular UI drain recovers pending cells after queued messages, preserving
-queued identity-withdrawal ordering. It first recovers POST receipts, then final
-facts. A final fact recreates the same Workspace_scoped/Ask_answer_done transport
+The regular UI drain captures the actual queued prefix at the start of a delivery
+round. It applies that prefix in FIFO order, including its identity withdrawals,
+then collects one finite set of ready original-owned results. New shared traffic
+cannot extend the prefix and new publications cannot extend that collected set.
+Both input drains and later loop passes retain the same round; the existing
+per-pass deadline still controls each take and is rechecked after collection.
+This covers Ask POST/final results, Runtime form saves, Keeper settings saves,
+runtime assignment and creation. Collection includes every ready owner in each
+source, so continuously renewed higher-priority results cannot extend the round
+either. A completed round yields back to the caller even when new shared traffic
+is queued. See the [delivery-round source Before/After](../audits/2026-10-19-owned-result-drain-rounds.md).
+
+Within the collected set, POST receipts precede final facts. A final fact
+recreates the same Workspace_scoped/Ask_answer_done transport
 from the original workspace and read scope, including an originally absent read
 scope; current UI state never fills that absence. The existing operation
 admission/projection preserves a confirmed POST receipt while refusing a retired
@@ -740,6 +751,15 @@ GET. A foreign workspace drops UI delivery while its raw fact remains retained.
 The current/inflight submission check prevents duplicate terminal settlement;
 it adds no read authority and still permits the existing operation outcome when
 identity confirmation is temporarily unavailable.
+
+Identity changes arriving after the captured prefix belong to a later FIFO
+segment; they do not preempt an already collected owned set. Admission uses the
+UI's current original request/workspace/read rules on every application, including
+after a pause for input. Collection grants no authority. The collection reads
+owners successively, not as an atomic snapshot of all publications. A later
+status publication remains eligible for a later round; saved status messages
+still pass the existing monotonic/once-only guards. The original ready timestamp
+is retained, so wait-to-application logs include delays across round/input pauses.
 
 Recovery consumes each pending transport once; session owners keep raw facts
 after consumption, supersession and withdrawal. Completed/closed owners leave

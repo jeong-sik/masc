@@ -2108,7 +2108,7 @@ let test_answer_receipt_survives_full_mailbox_and_worker_cancellation () =
     (R.publish original.as_receipt ~observed_ns:21L (Error "late cancellation"));
   Alcotest.(check bool) "publication grants no feedback or final action settlement" true
     (state.ask_submit_inflight && Option.is_none state.ask_answer_feedback);
-  let final_owner, final_fact = match take_pending_ask_answer_completion state with
+  let final_owner, final_fact = match List.nth_opt (take_pending_ask_answer_completions state) 0 with
     | Some fact -> fact | None -> Alcotest.fail "cancellation lost the completed reread" in
   Alcotest.(check bool) "raw final result is coherent and cannot be overwritten by worker closure" true
     (final_owner==original && final_fact.receipt=receipt && final_fact.asks=reread
@@ -2135,7 +2135,7 @@ let test_answer_receipt_survives_full_mailbox_and_worker_cancellation () =
       | _ -> Alcotest.fail "completion did not use canonical operation projection")
    | _ -> Alcotest.fail "completion borrowed a current unscoped transport");
   Alcotest.(check bool) "raw facts and terminal transport are distinct, each retained once" true
-    (Option.is_none (take_pending_ask_answer_completion state)
+    ((take_pending_ask_answer_completions state=[])
      && match C.read original.as_completion with C.Returned fact -> fact.asks=reread
         | C.Waiting | C.Closed_without_result -> false);
   state.ask_submit_inflight <- false;
@@ -2151,7 +2151,7 @@ let test_answer_receipt_survives_full_mailbox_and_worker_cancellation () =
      Alcotest.(check bool) "foreign authority cannot replay recovered completion into a replacement workspace" false
        (P.workspace_message_admitted state ~authority ~reading inner)
    | _ -> Alcotest.fail "original completion lost its scope");
-  let pending, observed = match pending_ask_answer_receipt state with
+  let pending, observed = match List.nth_opt (pending_ask_answer_receipts state) 0 with
     | Some pending -> pending | None -> Alcotest.fail "withdrawal lost the published receipt" in
   Alcotest.(check bool) "pending receipt keeps original result, timestamp and source" true
     (pending.as_request==original.as_request && observed.result=receipt && observed.observed_ns=20L
@@ -2172,8 +2172,8 @@ let test_answer_receipt_survives_full_mailbox_and_worker_cancellation () =
   begin_ask_submission_state ~submission:abandoned state;
   close_ask_submission abandoned;
   Alcotest.(check bool) "worker closure invents neither an answer result nor pending notification" true
-    (Option.is_none (pending_ask_answer_receipt state)
-     && Option.is_none (take_pending_ask_answer_completion state)
+    ((pending_ask_answer_receipts state=[])
+     && (take_pending_ask_answer_completions state=[])
      && match R.read abandoned.as_receipt,C.read abandoned.as_completion with
        | R.Closed_without_result,C.Closed_without_result -> true
        | (R.Waiting | R.Returned _ | R.Closed_without_result),(C.Waiting | C.Returned _ | C.Closed_without_result) -> false);
@@ -2182,7 +2182,7 @@ let test_answer_receipt_survives_full_mailbox_and_worker_cancellation () =
   ignore (R.publish post_only.as_receipt ~observed_ns:35L receipt);
   close_ask_submission post_only;
   Alcotest.(check bool) "a known POST with no reread result does not settle the submission" true
-    (state.ask_submit_inflight && Option.is_none (take_pending_ask_answer_completion state)
+    (state.ask_submit_inflight && (take_pending_ask_answer_completions state=[])
      && match take_ask_answer_receipt state post_only with
         | Some (_, fact) -> fact.result=receipt | None -> false);
   let replacement = submission "replacement" in
@@ -2198,7 +2198,7 @@ let test_answer_receipt_survives_full_mailbox_and_worker_cancellation () =
   let unconfirmed = {(submission "original-unconfirmed-read") with as_reading=None} in
   begin_ask_submission_state ~submission:unconfirmed state;
   ignore (C.publish unconfirmed.as_completion ~observed_ns:40L ~receipt ~asks:reread);
-  let owner, fact = match take_pending_ask_answer_completion state with
+  let owner, fact = match List.nth_opt (take_pending_ask_answer_completions state) 0 with
     | Some fact -> fact | None -> Alcotest.fail "original unconfirmed scope lost its completion fact" in
   (match P.ask_answer_completion_message owner fact with
    | P.Workspace_scoped (authority,None,inner) ->
@@ -2902,7 +2902,7 @@ let test_creation_receipt_survives_full_notification_queue_cancel () =
     Eio.Promise.await published;
     Eio.Cancel.cancel context Creation_test_cancelled;
     Eio.Promise.await finished;
-    match pending_keeper_creation_receipt state with
+    match List.nth_opt (pending_keeper_creation_receipts state) 0 with
     | None -> Alcotest.fail "cancellation lost the original mutation receipt"
     | Some (owner, status, ready_at_ns) ->
       Alcotest.(check bool) "receipt keeps the original owner" true
@@ -2914,7 +2914,7 @@ let test_creation_receipt_survives_full_notification_queue_cancel () =
       Alcotest.(check bool) "UI can admit the original receipt without its notification" true
         (apply_keeper_creation_status state owner status);
       Alcotest.(check bool) "terminal pending slot is retired" true
-        (Option.is_none (pending_keeper_creation_receipt state));
+        ((pending_keeper_creation_receipts state=[]));
       Alcotest.(check bool) "only the confirmed original form is cleared" true
         (clear_created_keeper_draft state owner)))
 
@@ -3190,7 +3190,7 @@ let test_settings_save_keeps_receipt_through_withdrawal () =
   state.workspace_authority <- Workspace_authority (epoch+1);
   ignore (publish_keeper_settings_save request ~observed_ns:24L
     (Settings_finished (Some {ksp_snapshot=draft.ksd_snapshot.kss_observed;ksp_patch=Some draft.ksd_patch},Settings_unconfirmed "connection ended after possible dispatch")));
-  let recovered = match pending_keeper_settings_save_receipt state with
+  let recovered = match List.nth_opt (pending_keeper_settings_save_receipts state) 0 with
     | Some (owner,status,_) -> owner.ksv_token == request.ksv_token && apply_keeper_settings_save state owner status
     | None -> false in
   Alcotest.(check bool) "receipt survives navigation and read withdrawal without a mailbox" true recovered;
@@ -3333,7 +3333,7 @@ let test_sandbox_receipt_keeps_frozen_source_after_withdrawal () =
   state.workspace_read_authority <- ref ();
   let outcome = Settings_finished (Some prepared,Settings_unconfirmed "connection ended") in
   ignore (publish_keeper_settings_save request ~observed_ns:23L outcome);
-  let retained = match pending_keeper_settings_save_receipt state with
+  let retained = match List.nth_opt (pending_keeper_settings_save_receipts state) 0 with
     | Some (owner,status,_) -> apply_keeper_settings_save state owner status
     | None -> false in
   Alcotest.(check bool) "withdrawal cannot lose an admitted shortcut receipt" true retained;
@@ -3372,7 +3372,7 @@ let test_assignment_receipt_keeps_original_choice_after_withdrawal () =
   state.workspace_identity <- Workspace_identity_match_unconfirmed "server disconnected";
   let finished = Assignment_finished (Some prepared,Assignment_unconfirmed "interrupted after dispatch") in
   ignore (publish_runtime_assignment request ~observed_ns:33L finished);
-  let retained = match pending_runtime_assignment_receipt state with
+  let retained = match List.nth_opt (pending_runtime_assignment_receipts state) 0 with
     | Some (owner,status,observed_ns) ->
         owner.ras_token==request.ras_token && observed_ns=33L && apply_runtime_assignment state owner status
     | None -> false in
@@ -3579,7 +3579,7 @@ let test_runtime_form_retains_unknown_and_rejects_duplicate () =
     | Ok prepared -> prepared | Error _ -> Alcotest.fail "prepare failed" in
   ignore (publish_runtime_form_save request ~observed_ns:12L (Form_previewing prepared));
   ignore (publish_runtime_form_save request ~observed_ns:13L (Form_posting prepared));
-  let latest = match pending_runtime_form_save_receipt state with
+  let latest = match List.nth_opt (pending_runtime_form_save_receipts state) 0 with
     | Some (_,status,_) -> status | None -> Alcotest.fail "posting observation lost" in
   Alcotest.(check bool) "coalesced posting can skip preview admission" true (apply_runtime_form_save state request latest);
   state.runtime_model_form <- None; state.runtime_form_save_focus <- None;
@@ -3824,10 +3824,152 @@ let test_runtime_snapshot_refresh_reuses_draft_without_changing_ownership () =
     (held.rce_rows == initial.rce_rows && not (Edit.same_draft session held.rce_session))
 
 
+(* This exercises request/state delivery, not rendered rows or elapsed time.
+   The callback models the loop's existing deadline without adding a timer. *)
+let test_owned_results_progress_between_shared_queue_prefixes () =
+  Eio_main.run @@ fun _ ->
+  let open Masc_tui_types in
+  let module P = Masc_tui_async_protocol in
+  let module Round = P.Delivery_round in
+  let module Event = struct
+    type t = Withdraw_reading | Shared_traffic | Owned of P.async_msg P.mailed
+  end in
+  let state,keeper,_,_,settings = keeper_settings_save_fixture () in
+  let second_keeper = {keeper with k_name="assignment-owner"} in
+  state.keepers <- [keeper;second_keeper];
+  state.view <- Keepers Keeper_runtime_pick;
+  state.runtime_pick_keeper <- Some second_keeper.k_name;
+  let assignment = runtime_assignment_request state second_keeper.k_name (Some "codex.example") 30L in
+  let form = runtime_form_request state (runtime_model_draft ()) in
+  let created = creation_request state "created" "original created declaration" in
+  let unknown = creation_request state "unknown" "original unconfirmed declaration" in
+  let late = creation_request state "later" "later declaration" in
+  let make_submission name : ask_submission =
+    {as_request=ref ();as_started_ns=10L;as_receipt=Ask_answer_receipt.create ();
+     as_completion=Ask_answer_completion.create ();as_reading=Some state.workspace_read_authority;
+     as_authority=state.workspace_authority;as_keeper_name=keeper.k_name;as_ask_id=name;
+     as_answered_label="original choice";as_source_turn_ref=None} in
+  let superseded = make_submission "superseded" and current = make_submission "current" in
+  let receipt = Ok (Masc.Tui_decode_asks.Ask_answer_recorded Masc.Tui_decode_asks.Ask_wake_stored) in
+  let asks = Ok {Masc.Tui_decode_asks.asn_keeper=None;asn_open_count=0;asn_rows=[]} in
+  List.iter (fun submission ->
+    begin_ask_submission_state ~submission state;
+    ignore (Ask_answer_receipt.publish submission.as_receipt ~observed_ns:40L receipt);
+    ignore (Ask_answer_completion.publish submission.as_completion ~observed_ns:41L ~receipt ~asks))
+    [superseded;current];
+  let form_status = Form_finished (None,Form_unconfirmed "transport ended after dispatch") in
+  let settings_status = Settings_finished (None,Settings_not_sent "proof unavailable before dispatch") in
+  let assignment_status = Assignment_finished (None,Assignment_refused "server refused") in
+  let unknown_status = Creation_finished (Creation_unconfirmed "response unavailable") in
+  ignore (publish_runtime_form_save form ~observed_ns:42L form_status);
+  ignore (publish_keeper_settings_save settings ~observed_ns:43L settings_status);
+  ignore (publish_runtime_assignment assignment ~observed_ns:44L assignment_status);
+  ignore (publish_keeper_creation_status created ~observed_ns:45L (Creation_finished Creation_created));
+  ignore (publish_keeper_creation_status unknown ~observed_ns:46L unknown_status);
+  let mailbox = Eio.Stream.create 2 in
+  Eio.Stream.add mailbox Event.Withdraw_reading;
+  Eio.Stream.add mailbox Event.Shared_traffic;
+  let round = ref Round.empty and can_take = ref true in
+  let first_collection = ref true in
+  let terminal_seen = ref false in
+  let collect_owned () =
+    let captured = P.collect_owned_results state in
+    if !first_collection then begin
+      first_collection := false;
+      can_take := false;
+      (* A publication after collection must not extend the retained set. *)
+      ignore (publish_keeper_creation_status late ~observed_ns:47L (Creation_finished Creation_created))
+    end;
+    List.map (fun ready -> Event.Owned ready) captured in
+  let take () =
+    let ready,next = Round.take !round ~can_take:(fun () -> !can_take)
+      ~queued:(fun () -> Eio.Stream.length mailbox)
+      ~take_shared:(fun () -> Eio.Stream.take_nonblocking mailbox) ~collect_owned in
+    round := next;
+    ready in
+  let apply_owned (ready : P.async_msg P.mailed) = match ready.message with
+    | P.Ask_answer_receipt_ready owner ->
+        let held,fact = match take_ask_answer_receipt state owner with
+          | Some observed -> observed | None -> Alcotest.fail "owned POST result was delivered twice" in
+        Alcotest.(check bool) "read withdrawal retains the canonical POST without new feedback authority" true
+          (held.as_request==owner.as_request && fact.result=receipt
+           && Option.is_none (retain_ask_answer_feedback state held fact.result))
+    | P.Workspace_scoped (authority,reading,(P.Ask_answer_done (owner,_,_) as inner)) ->
+        Alcotest.(check bool) "captured identity withdrawal precedes terminal read admission" true
+          (P.workspace_message_admitted state ~authority ~reading inner
+           && match P.project_workspace_operation_reply state ~authority ~reading inner with
+             | P.Ask_answer_done (_,saved,observed) -> saved=receipt && Result.is_error observed
+             | _ -> false);
+        if owner.as_request==current.as_request then terminal_seen := true
+    | P.Runtime_form_save_changed (owner,status,_) ->
+        let Workspace_authority generation = state.workspace_authority in
+        state.workspace_authority <- Workspace_authority (generation+1);
+        Alcotest.(check bool) "captured foreign form receipt grants no surface authority" true
+          (!terminal_seen && owner.rfs_token==form.rfs_token && status=form_status
+           && not (runtime_form_save_current state owner)
+           && apply_runtime_form_save state owner status)
+    | P.Keeper_settings_save_changed (owner,status,_) ->
+        Alcotest.(check bool) "original refused settings result settles only its owner" true
+          (owner.ksv_token==settings.ksv_token && status=settings_status
+           && not (keeper_settings_save_current state owner)
+           && apply_keeper_settings_save state owner status)
+    | P.Runtime_assignment_changed (owner,status,_) ->
+        Alcotest.(check bool) "original assignment refusal retains its explicit choice after withdrawal" true
+          (owner.ras_token==assignment.ras_token && status=assignment_status
+           && owner.ras_runtime_id=Some "codex.example"
+           && not (runtime_assignment_current state owner)
+           && apply_runtime_assignment state owner status)
+    | P.Keeper_creation_changed (owner,status) ->
+        Alcotest.(check bool) "each creation consumes only its own terminal result once" true
+          (apply_keeper_creation_status state owner status)
+    | _ -> Alcotest.fail "unexpected owned result" in
+  let apply = function
+    | Event.Withdraw_reading ->
+        state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
+          ~local_base_path:state.local_base_path (Error "identity unavailable");
+        suspend_workspace_readings state;
+        Eio.Stream.add mailbox Event.Shared_traffic
+    | Event.Shared_traffic -> Eio.Stream.add mailbox Event.Shared_traffic
+    | Event.Owned ready -> apply_owned ready in
+  let take_required () = match take () with Some ready -> apply ready
+    | None -> Alcotest.fail "captured shared prefix was lost" in
+  take_required ();
+  can_take := false;
+  Alcotest.(check bool) "a spent input pass neither consumes the prefix nor collects owned offers" true
+    (Option.is_none (take ()) && !first_collection && Eio.Stream.length mailbox=2
+     && List.exists (fun owner -> owner.as_request==current.as_request) state.ask_answer_completion_pending);
+  can_take := true;
+  take_required ();
+  Alcotest.(check bool) "collection crossing the deadline retains its batch before any application" true
+    (Option.is_none (take ()) && not !first_collection && not !terminal_seen
+     && state.ask_answer_completion_pending=[] && Eio.Stream.length mailbox=2);
+  can_take := true;
+  let rec finish_round () = match take () with
+    | None -> () | Some ready -> apply ready; finish_round () in
+  finish_round ();
+  let status_of owner = List.find_map (fun attempt ->
+    if attempt.kca_request.kcr_token==owner.kcr_token then Some attempt.kca_status else None)
+      state.keeper_creations in
+  Alcotest.(check bool) "all originally ready owners settle while later traffic and publications remain" true
+    (!terminal_seen && Eio.Stream.length mailbox=2
+     && status_of created=Some (Creation_finished Creation_created)
+     && status_of unknown=Some unknown_status && status_of late=Some Creation_checking
+     && List.for_all (fun owner ->
+       match Ask_answer_completion.read owner.as_completion with
+       | Ask_answer_completion.Returned fact -> fact.receipt=receipt && fact.asks=asks
+       | Ask_answer_completion.Waiting | Ask_answer_completion.Closed_without_result -> false)
+       [superseded;current]);
+  finish_round ();
+  Alcotest.(check bool) "the next captured prefix also yields to the later original owner" true
+    (Eio.Stream.length mailbox=2 && status_of late=Some (Creation_finished Creation_created)
+     && P.collect_owned_results state=[])
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "catalogue consumers share reads and accumulate fresh demand" `Quick
+      , [ Alcotest.test_case "owned operation results progress between continuously refilled shared prefixes" `Quick
+            test_owned_results_progress_between_shared_queue_prefixes
+        ; Alcotest.test_case "catalogue consumers share reads and accumulate fresh demand" `Quick
             test_catalog_demands_share_and_refresh_after_current_read
         ; Alcotest.test_case "catalogue refresh retains observation, failure and empty success" `Quick
             test_catalog_refresh_retains_observation_and_empty_success

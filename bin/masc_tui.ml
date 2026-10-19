@@ -21222,10 +21222,10 @@ let async_drain_budget_ns = 4_000_000L
 (* The pass computes one deadline from [async_drain_budget_ns] and both drains
    in the pass share it, so the two calls together apply at most one frame of
    queued work. No item starts past the deadline — not even the first — so a
-   spent pass leaves its mailbox for the next pass, whose fresh deadline always
-   admits at least that pass's first take. An item that starts in budget still
-   runs whole, so one pass can overrun by the single item in flight at expiry. *)
-let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) state ~base_path ~http_refresh_inflight
+   spent pass retains its delivery round for the next pass. An item or owned
+   collection that starts in budget still runs whole; recheck the deadline
+   after collection before applying any of its results. *)
+let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) state ~delivery_round ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup
     ~frame_presenter ~render_schedule mailbox =
   let progress_changed = Masc_tui_types.drain_http_progress state in
@@ -21235,30 +21235,16 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) state ~
     | Some deadline -> Int64.compare (Mtime_clock.elapsed_ns ()) deadline >= 0
   in
   let rec loop changed =
-    let ready = if over_budget () then None
-      else match Eio.Stream.take_nonblocking mailbox with
-      | Some ready -> Some ready
-      | None ->
-          (* Keep queued identity withdrawals ahead of recovered receipts. *)
-          (match pending_ask_answer_receipt state with
-           | Some (submission, observation) ->
-               Some {ready_at_ns=observation.observed_ns; message=Ask_answer_receipt_ready submission}
-           | None -> (match take_pending_ask_answer_completion state with
-           | Some (submission, completion) ->
-               Some {ready_at_ns=completion.observed_ns;
-                 message=ask_answer_completion_message submission completion}
-           | None -> (match pending_runtime_form_save_receipt state with
-           | Some (request, status, ready_at_ns) ->
-               Some {ready_at_ns; message=Runtime_form_save_changed (request, status, ready_at_ns)}
-           | None -> (match pending_keeper_settings_save_receipt state with
-             | Some (request,status,ready_at_ns) ->
-                 Some {ready_at_ns;message=Keeper_settings_save_changed (request,status,ready_at_ns)}
-             | None -> (match pending_runtime_assignment_receipt state with
-               | Some (request,status,ready_at_ns) ->
-                   Some {ready_at_ns;message=Runtime_assignment_changed (request,status,ready_at_ns)}
-               | None -> Option.map (fun (request, status, ready_at_ns) ->
-                   { ready_at_ns; message = Keeper_creation_changed (request, status) })
-                   (pending_keeper_creation_receipt state)))))) in
+    (* The session retains the round across both drains and later passes.
+       Identity changes queued when the round starts stay ahead of owned
+       facts; later arrivals cannot keep extending that prefix. Collecting the
+       finite owned set rechecks the same deadline before its first result. *)
+    let ready, next = Delivery_round.take !delivery_round
+      ~can_take:(fun () -> not (over_budget ()))
+      ~queued:(fun () -> Eio.Stream.length mailbox)
+      ~take_shared:(fun () -> Eio.Stream.take_nonblocking mailbox)
+      ~collect_owned:(fun () -> collect_owned_results state) in
+    delivery_round := next;
     match ready with
     | None ->
         state.keeper_creation_waits <- List.filter
@@ -21798,6 +21784,7 @@ let main
   let http_scoped_refresh_inflight = ref false in
   let scoped_refresh_followup = ref No_scoped_followup in
   let async_messages = Eio.Stream.create 32 in
+  let async_delivery_round = ref Delivery_round.empty in
   let workspace_write_ready action =
     match write_authority_refusal state state.workspace_authority with
     | None -> true
@@ -23515,7 +23502,7 @@ and is loaded on demand through keeper_skill.
         Int64.add (Mtime_clock.elapsed_ns ()) async_drain_budget_ns
       in
       if
-        drain_async_messages ~deadline_ns:drain_deadline_ns
+        drain_async_messages ~delivery_round:async_delivery_round ~deadline_ns:drain_deadline_ns
           ~input_pending:(fun () -> input_reader_has_ready_input input_reader) state ~base_path
           ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup
@@ -31873,7 +31860,7 @@ and is loaded on demand through keeper_skill.
          pass budget is spent this applies nothing and the mailbox waits for
          the next pass. *)
       if
-        drain_async_messages ~deadline_ns:drain_deadline_ns
+        drain_async_messages ~delivery_round:async_delivery_round ~deadline_ns:drain_deadline_ns
           ~input_pending:(fun () -> input_reader_has_ready_input input_reader) state ~base_path
           ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup

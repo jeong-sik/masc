@@ -4,7 +4,9 @@ Open `:` → `go Browser Lane`, or press `B` from Connectors. **Automatic** asks
 server which available browser can supply the reader, then binds the concrete
 browser and lists its open tabs. Select any page by title and URL; websites have
 no dedicated views or filters. Entering the reader never opens a browser window.
-When no open browser is available, a work-browser recommendation shows `o:open`.
+Only an explicit `no_available_browser` browse decision can offer a work-browser
+recommendation with `o:open`. Ambiguous browsers or other selection refusals keep
+their cause and require a choice; they never become a work-browser suggestion.
 The reader occupies the full content width and shows its selected browser. Keeper panels and the composer return
 when leaving the reader.
 

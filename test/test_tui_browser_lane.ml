@@ -922,7 +922,7 @@ let recommended lane client reason = `Assoc ["ok",`Bool true;"data",`Assoc [
   "lane",`String lane;"clientId",(match client with None->`Null | Some id->`String id);
   "reason",`String reason]]
 let unavailable = `Assoc ["ok",`Bool false;"error",`Assoc [
-  "code",`String "browser_not_connected";"message",`String "No connected browser"]]
+  "code",`String "no_available_browser";"message",`String "No connected browser"]]
 let recommended_work = recommended "stagehand" None "preferred_work_browser"
 let automatic_discover ?(generation=101) view answer =
   accept_clients ~generation (decode_discovery answer)
@@ -964,6 +964,23 @@ let test_automatic_browser_binding () =
       Failed detail->Error detail | Idle | No_browser | Loading _->Ok ()))
 
 let test_automatic_work_requests () =
+  let ambiguous = `Assoc ["ok",`Bool false;"error",`Assoc [
+    "code",`String "ambiguous_browsers";"message",`String "Choose a connected browser"]] in
+  let refusal, read = automatic_discover (create ())
+    (automatic_answer ambiguous recommended_work) in
+  expect "ambiguous connected browsers do not become a work-browser open prompt"
+    (not read && refusal.selection=Unbound && refusal.source=Live
+     && refusal.selected_client=None && not refusal.pending_open
+     && refusal.client_picker=Some 0 && refusal.load=Failed "Choose a connected browser");
+  List.iter (fun code ->
+    let refused = `Assoc ["ok",`Bool false;"error",`Assoc [
+      "code",`String code;"message",`String "Keep the original refusal"]] in
+    let same, read = automatic_discover (create ())
+      (automatic_answer refused recommended_work) in
+    expect "other selection refusals never authorize a work fallback"
+      (not read && same.selection=Unbound && same.source=Live
+       && same.load=Failed "Keep the original refusal"))
+    ["browser_binding_required";"new_server_refusal"];
   let empty = automatic_answer ~listed:[] unavailable recommended_work in
   let prompt, read = automatic_discover (create ()) empty in
   expect "entering the reader with no browser binds a work recommendation without opening it"

@@ -5561,7 +5561,9 @@ module Browser_lane_view = struct
   type automatic_reason = Explicit_browser | Existing_login | Existing_work_session
     | Preferred_work_browser | Compatible_work_browser | Available_connected_browser
   type recommendation = { lane : source; client_id : string option; reason : automatic_reason }
-  type selection_error = { code : string; message : string }
+  type selection_error_kind = No_available_browser | Ambiguous_browsers | Binding_required
+    | Automatic_unavailable | Invalid_automatic_response | Unrecognized_selection_error
+  type selection_error = { kind : selection_error_kind; code : string; message : string }
   type automatic = {
     browse : (recommendation, selection_error) result;
     work : (recommendation, selection_error) result;
@@ -6352,6 +6354,10 @@ module Browser_lane_view = struct
           scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None;
           scroll = 0; client_picker = None; read_view = Text_view }
     | Live, None | (Automation | Stagehand), Some _ -> Error "Invalid recommended browser identity"
+  let can_offer_work_browser = function
+    | No_available_browser -> true
+    | Ambiguous_browsers | Binding_required | Automatic_unavailable
+    | Invalid_automatic_response | Unrecognized_selection_error -> false
   let accept_clients ~generation result t =
     match t.load with
     | Loading (current, Discover purpose) when current = generation ->
@@ -6367,13 +6373,14 @@ module Browser_lane_view = struct
                  load=(if clients=[] then No_browser else Idle)}, false
              | Unbound | Work_unbound ->
                  let chosen = match automatic with
-                   | None -> Error {code="automatic_unavailable";
+                   | None -> Error {kind=Automatic_unavailable;code="automatic_unavailable";
                        message="This server does not report an automatic browser; choose a browser"}
                    | Some recommendations ->
                        (match t.selection, recommendations.browse with
                         | Work_unbound, _ -> recommendations.work
                         | Unbound, Ok choice -> Ok choice
-                        | Unbound, Error _ -> recommendations.work
+                        | Unbound, Error error ->
+                            if can_offer_work_browser error.kind then recommendations.work else Error error
                         | (Live_unbound | Bound_automatic | Bound_explicit), _ -> recommendations.browse) in
                  (match chosen with
                   | Error detail -> {next with load=Failed detail.message; client_picker=Some 0;
@@ -6469,7 +6476,12 @@ module Browser_lane_view = struct
       let* error = field "error" json in
       let* code = get string "code" error in
       let* message = get string "message" error in
-      Ok (Error {code;message})
+      let kind = match code with
+        | "no_available_browser" -> No_available_browser
+        | "ambiguous_browsers" -> Ambiguous_browsers
+        | "browser_binding_required" -> Binding_required
+        | _ -> Unrecognized_selection_error in
+      Ok (Error {kind;code;message})
     else
       let* data = field "data" json in
       let* lane = get parse_source "lane" data in
@@ -6514,7 +6526,7 @@ module Browser_lane_view = struct
     let automatic = match decode_automatic data with
       | Ok automatic -> automatic
       | Error message ->
-          let refused = Error {code="invalid_automatic_response";message} in
+          let refused = Error {kind=Invalid_automatic_response;code="invalid_automatic_response";message} in
           Some {browse=refused;work=refused} in
     Ok { listed; bidi_host = decode_bidi_host reported; automatic }
   let parse_client_id source json =

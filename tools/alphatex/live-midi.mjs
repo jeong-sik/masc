@@ -114,12 +114,14 @@ export async function openLiveMidi({ routes, reserved, signal, onEvent = () => {
         if (event.kind === 'ack') {
           const waiter = setWaiters.shift()
           if (!waiter) throw new Error('Unexpected live MIDI route acknowledgement')
-          if (!Array.isArray(event.admitted) || !Array.isArray(event.rejected)
-            || event.admitted.some(key => !waiter.routes.some(route => route.key === key))
-            || event.rejected.some(key => !waiter.routes.some(route => route.key === key))
-            || event.admitted.some(key => event.rejected.includes(key))
-            || (event.error !== undefined && event.error !== 'unknown-key')
-            || (event.error === 'unknown-key' && (event.admitted.length || event.rejected.length))) throw new Error('Invalid live MIDI route acknowledgement')
+          const known = key => waiter.routes.some(route => route.key === key)
+          // `unknown-key` keeps the current set, so its admitted keys need not be in
+          // the catalog we just sent; a normal ack may only name catalog keys.
+          const valid = Array.isArray(event.admitted) && Array.isArray(event.rejected)
+            && (event.error === undefined || event.error === 'unknown-key')
+            && !event.admitted.some(key => event.rejected.includes(key))
+            && (event.error === 'unknown-key' || (event.admitted.every(known) && event.rejected.every(known)))
+          if (!valid) throw new Error('Invalid live MIDI route acknowledgement')
           waiter.resolve(event); onEvent(event); return
         }
         if (!['monitoring', 'stopped'].includes(event.kind) || final || event.deliveryProtocol !== 2

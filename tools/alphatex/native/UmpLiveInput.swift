@@ -248,7 +248,7 @@ final class UmpLiveInput {
         let nextKeys = Set(nextRoutes.map(\.key))
         for (route, output) in zip(activeRoutes, outputs) where !nextKeys.contains(route.key) { try? output.close() }
         activeRoutes = nextRoutes; outputs = nextOutputs
-        try syncSources(Set(nextRoutes.map(\.source)))
+        syncSources(Set(nextRoutes.map(\.source)))
         try onEvent?(["kind": "ack", "admitted": nextRoutes.map(\.key), "rejected": rejected])
     }
     // Open a source the first time a route needs it and drop it once the last
@@ -261,7 +261,7 @@ final class UmpLiveInput {
         try checked(MIDIPortConnectSource(port, source.endpoint, UnsafeMutableRawPointer(bitPattern: UInt(source.endpoint))), "connect selected live MIDI input")
         lock.lock(); sources[source.endpoint] = source; lock.unlock()
     }
-    private func syncSources(_ needed: Set<String>) throws {
+    private func syncSources(_ needed: Set<String>) {
         lock.lock()
         let stale = sources.filter { !needed.contains(String($0.value.uid)) }
         for endpoint in stale.keys { sources.removeValue(forKey: endpoint) }

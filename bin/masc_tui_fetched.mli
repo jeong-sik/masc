@@ -44,6 +44,12 @@ val start : equal:('k -> 'k -> bool) -> ('k, 'a) t -> key:'k -> ('k, 'a) start_r
     request runs, rather than flashing back to {!Loading}. *)
 
 val clear : ('k, 'a) t -> ('k, 'a) t
+val cancel_pending : reason:string -> ('k, 'a) t -> ('k, 'a) t
+(** Retire pending reply admission, retaining completed values and their
+    existing [Ready]/[Stale] observation or a retry's prior failure. An initial
+    read without a value becomes [Failed reason]. Settled sources are unchanged.
+    This neither publishes a new read result nor stops the underlying worker;
+    late replies cannot settle the source. *)
 val refresh : equal:('k -> 'k -> bool) -> ('k, 'a) t -> key:'k -> ('k, 'a) start_result
 (** Explicitly supersede an outstanding request, including for the same key.
     Retain that key's last good value or known no-value failure while its replacement

@@ -6,26 +6,109 @@ module Message_layout = Masc_tui_message_layout
 
 type followup = No_followup | Reveal_cursor | Load_file of string
 
-(* Remember where a jump is about to leave from, so B can walk back.
-   Bounded: the oldest entry falls off past twenty. *)
-let code_jump_back_limit = 20
-
 let push_code_jump state =
-  let file = Masc_tui_fetched.current_key state.code_file in
-  let entry =
-    ( state.code_scope,
-      state.code_dir,
-      file,
-      state.code_file_cursor,
-      state.code_file_scroll )
-  in
+  state.code_return <- None;
   state.code_jump_back <-
-    entry
-    :: (if List.length state.code_jump_back >= code_jump_back_limit then
-          List.filteri
-            (fun i _ -> i < code_jump_back_limit - 1)
-            state.code_jump_back
-        else state.code_jump_back)
+    { cj_scope = state.code_scope; cj_dir = state.code_dir;
+      cj_file = Masc_tui_fetched.current_key state.code_file;
+      cj_cursor = state.code_file_cursor; cj_scroll = state.code_file_scroll;
+      cj_hscroll = state.code_file_hscroll; cj_tree_cursor = state.code_cursor;
+      cj_focus = state.code_focus_file } :: state.code_jump_back
+
+type return_followup =
+  | No_return
+  | Return_committed
+  | Read_return_file of code_return_owner * string Masc_tui_fetched.request
+
+let return_owner_current state owner =
+  code_finder_current state owner.cro_origin
+  && state.code_jump_back == owner.cro_history
+
+let restore_position state target =
+  let last_line = match Masc_tui_fetched.current state.code_file with
+    | Some (_, (Masc_tui_fetched.Ready rows | Masc_tui_fetched.Stale (rows, _))) ->
+        max 0 (Array.length rows - 1)
+    | None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+                    | Masc_tui_fetched.Failed _)) -> 0 in
+  let clamp last value = max 0 (min last value) in
+  state.code_file_cursor <- clamp last_line target.cj_cursor;
+  state.code_file_scroll <- clamp last_line target.cj_scroll;
+  state.code_file_hscroll <- clamp (max 0 (state.code_file_max_width - 1)) target.cj_hscroll;
+  state.code_cursor <- max 0 target.cj_tree_cursor;
+  state.code_focus_file <- target.cj_focus;
+  state.code_target_line <- None
+
+let commit_return_location state target rest =
+  let changed = state.code_scope <> target.cj_scope
+    || not (String.equal state.code_dir target.cj_dir) in
+  state.code_return <- None;
+  set_code_scope state target.cj_scope;
+  state.code_dir <- target.cj_dir;
+  state.code_jump_back <- rest;
+  if changed then state.code_listing <- Masc_tui_fetched.clear state.code_listing
+
+let start_return state =
+  if not (server_authority_ready state) then begin
+    state.code_lsp_note <- Some "Cannot return until the workspace is confirmed";
+    No_return
+  end else match state.code_return with
+  | Some reading when return_owner_current state reading.crr_owner -> No_return
+  | Some _ | None ->
+    state.code_return <- None;
+    match state.code_jump_back with
+    | [] -> state.code_lsp_note <- Some "No jump to return from"; No_return
+    | target :: rest ->
+      (* Ordinary opens can still own this source, including same-key refreshes
+         that expose Ready. Retire them before capturing the return owner so a
+         late callback cannot reset the current or restored reading. *)
+      state.code_file <- Masc_tui_fetched.cancel_pending
+          ~reason:"File read cancelled by return navigation" state.code_file;
+      state.code_file_resume_intent <- Refresh_code_file;
+      match target.cj_file with
+      | None ->
+          commit_return_location state target rest;
+          state.code_file <- Masc_tui_fetched.clear state.code_file;
+          state.code_file_resume_intent <- Refresh_code_file;
+          restore_position state target;
+          state.code_focus_file <- Left_pane;
+          Return_committed
+      | Some path ->
+        match Masc_tui_fetched.current state.code_file with
+        | Some (current, Masc_tui_fetched.Ready _)
+            when state.code_scope = target.cj_scope && String.equal current path ->
+            commit_return_location state target rest;
+            restore_position state target;
+            Return_committed
+        | None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+                         | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _
+                         | Masc_tui_fetched.Failed _)) ->
+          let owner = { cro_origin = {
+            cfo_workspace = state.workspace_authority;
+            cfo_reading = state.workspace_read_authority;
+            cfo_scope = state.code_scope; cfo_dir = state.code_dir;
+            cfo_file = Masc_tui_fetched.current_request state.code_file };
+            cro_history = state.code_jump_back } in
+          match Masc_tui_fetched.start ~equal:String.equal Masc_tui_fetched.initial ~key:path with
+          | Masc_tui_fetched.Already_loading -> No_return
+          | Masc_tui_fetched.Started (file, request) ->
+              state.code_return <- Some { crr_owner = owner; crr_file = file };
+              state.code_lsp_note <- Some ("Returning to "
+                ^ Masc.Tui_terminal_text.sanitize_terminal_text path);
+              Read_return_file (owner, request)
+
+let apply_return_file state owner request result =
+  match state.code_return with
+  | Some reading when reading.crr_owner == owner && return_owner_current state owner
+      && Masc_tui_fetched.is_current ~equal:String.equal reading.crr_file request ->
+      (match result with
+       | Error detail ->
+           state.code_return <- None;
+           state.code_lsp_note <- Some ("Return failed: "
+             ^ Masc.Tui_terminal_text.sanitize_terminal_text detail)
+       | Ok _ ->
+           state.code_return <- Some { reading with crr_file =
+             Masc_tui_fetched.complete ~equal:String.equal reading.crr_file request result })
+  | Some _ | None -> ()
 
 let apply_entries (state : state) request result =
   state.code_listing <-
@@ -53,7 +136,7 @@ let apply_catalog (state : state) request result =
           state.code_catalog request result
   | Palette_files _ | Palette_jump | Palette_choice _ -> ()
 
-let apply_file ?(intent = Open_code_file) (state : state) request result = (
+let apply_open_file ~preserve_view (state : state) request result = (
   let path = Masc_tui_fetched.request_key request in
   (* An answer for a file the operator has moved past describes bytes
      that are no longer on screen, and everything below resets the
@@ -68,9 +151,6 @@ let apply_file ?(intent = Open_code_file) (state : state) request result = (
       (* Recovery retains the selected file even if its first read did not
          finish. Its sibling reads restart independently; this completion
          must preserve their owners and any answers that arrived first. *)
-      let preserve_view = match intent with
-        | Refresh_code_file -> true
-        | Open_code_file -> false in
       (* Lex once at load: comment and string state crosses rows, so a
          window could not answer. Past the budget the file draws plain
          rather than slowly. *)
@@ -155,6 +235,34 @@ let apply_file ?(intent = Open_code_file) (state : state) request result = (
           (Error detail))
 
 ;;
+
+let apply_file ?(intent = Open_code_file) state request result =
+  match intent with
+  | Open_code_file -> apply_open_file ~preserve_view:false state request result
+  | Refresh_code_file -> apply_open_file ~preserve_view:true state request result
+  | Return_code_file owner -> apply_return_file state owner request result
+
+let take_ready_return_file state ~input_pending =
+  if input_pending then false
+  else match state.code_return with
+  | Some reading when return_owner_current state reading.crr_owner ->
+      (match reading.crr_owner.cro_history, Masc_tui_fetched.current reading.crr_file with
+       | target :: rest, Some (path, Masc_tui_fetched.Ready content) ->
+           commit_return_location state target rest;
+           state.code_file <- Masc_tui_fetched.clear state.code_file;
+           (match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:path with
+            | Masc_tui_fetched.Already_loading -> false
+            | Masc_tui_fetched.Started (file, request) ->
+                state.code_file <- file;
+                state.code_target_line <- None;
+                apply_open_file ~preserve_view:false state request (Ok content);
+                restore_position state target;
+                true)
+       | ([] | _ :: _), (None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+                        | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _
+                        | Masc_tui_fetched.Failed _))) -> false)
+  | Some _ -> state.code_return <- None; false
+  | None -> false
 
 let take_ready_found_file (state : state) ~input_pending =
   if input_pending then false

@@ -1042,6 +1042,14 @@ final class MidiTransport {
                 let old = regionCursors[index]
                 guard old.copy < region.spec.repeatCount,
                       seconds >= regionStart(region, copy: old.copy) + region.duration else { continue }
+                if let cycle, let host = cycleHost,
+                   try cycle.deadline(position: regionStart(region, copy: old.copy) + region.duration,
+                                      index: cycleIndex, offset: offset - cycle.start, anchor: anchor) >= host {
+                    // A copy that ends in this native batch is still an
+                    // ordered stream, even when its virtual end is earlier
+                    // than the observed fractional phase. Drain it below.
+                    continue
+                }
                 let copy = seconds >= region.end ? region.spec.repeatCount
                     : min(region.spec.repeatCount - 1, max(0, Int(floor((seconds - region.spec.startSeconds) / region.duration))))
                 guard copy > old.copy else { continue }
@@ -1058,7 +1066,11 @@ final class MidiTransport {
                         let release = type == 0x80 || type == 0x90 && event.bytes[2] == 0
                         let key = UInt16(event.bytes[0] & 15) << 8 | UInt16(event.bytes[1])
                         let deadline = regionStart(region, copy: old.copy) + (event.seconds - region.spec.sourceStart)
-                        let expired = loop && deadline < (observedAt ?? seconds)
+                        let expired: Bool
+                        if let cycle, let host = cycleHost {
+                            expired = try cycle.deadline(position: deadline, index: cycleIndex,
+                                offset: offset - cycle.start, anchor: anchor) < host
+                        } else { expired = loop && deadline < (observedAt ?? seconds) }
                         if cycle != nil {
                             try applyCycleEvent(event, origin: regionCursors[index].index, attackAllowed: !expired)
                         } else {
@@ -1097,7 +1109,7 @@ final class MidiTransport {
             let region = timeline.regions[action.region]
             switch action.kind {
             case .begin:
-                if cut != nil { regionCursors[action.region] = MidiRegionCursor(copy: region.spec.repeatCount) }
+                if let cut, cycle == nil || action.seconds >= cut { regionCursors[action.region] = MidiRegionCursor(copy: region.spec.repeatCount) }
                 else { try beginRegion(action.region, at: region.spec.sourceStart) }
             case .end:
                 try sourceSilence(addresses: regionScopes[action.region])
@@ -1112,10 +1124,11 @@ final class MidiTransport {
                     let key = UInt16(event.bytes[0] & 15) << 8 | UInt16(event.bytes[1])
                     var send = true
                     if cycle != nil {
-                        if cut != nil { send = !attack || action.seconds >= (observedAt ?? seconds) }
-                        else if let cycle, let host = cycleHost {
+                        if let cycle, let host = cycleHost {
                             let deadline = try cycle.deadline(position: action.seconds, index: cycleIndex, offset: offset - cycle.start, anchor: anchor)
-                            if attack && deadline < host { send = try liveRegionAttacks(action.region).contains(regionCursors[action.region].index) }
+                            if attack && deadline < host {
+                                send = cut == nil ? try liveRegionAttacks(action.region).contains(regionCursors[action.region].index) : false
+                            }
                         }
                         try applyCycleEvent(event, origin: regionCursors[action.region].index, attackAllowed: send)
                     } else {
@@ -1183,8 +1196,7 @@ final class MidiTransport {
                 let now = min(cycle.end.nextDown, cycle.start + phase.seconds)
                 if phase.index != cycleIndex {
                     pendingRestore = false
-                    let observed = phase.index > cycleIndex && phase.index - cycleIndex == 1 ? cycle.end + phase.seconds : Double.infinity
-                    try reconcileRegions(at: cycle.end, reconstruct: false, observedAt: observed, cut: cycle.end)
+                    try reconcileRegions(at: cycle.end, reconstruct: false, cut: cycle.end)
                     try silence(); cycleIndex = phase.index
                     try restore(at: now)
                 } else {

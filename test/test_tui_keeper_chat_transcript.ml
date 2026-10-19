@@ -2733,10 +2733,41 @@ let test_terminal_reasoning_cannot_replace_response_state () =
   ) [Live.Run_finished; Live.Run_failed { message="failed" }]
 ;;
 
+let test_composition_note_preserves_delivery_execution_and_live_error () =
+  let t = fresh () in
+  feed t [Live.Run_started; tool_started "same-provider-id" "keeper_compose_review";
+    tool_ended "same-provider-id"; tool_result "same-provider-id" "physical-original";
+    Live.Reply_details {reply=""; turn_outcome=Continuation_checkpoint;
+      turn_ref="same-turn#1"; terminal_stream_scope=None}; Live.Run_finished];
+  ignore (Transcript.note_tool_outcome t ~execution_id:"physical-original"
+    ~outcome:Transcript.Failed ~duration:None);
+  let execution = match Masc.Keeper_skill_execution_projection.of_yojson
+      (`Assoc ["status", `String "failed"; "execution_id", `String "physical-original"]) with
+    | Ok value -> value | Error detail -> fail detail in
+  let evidence execution_id =
+    let execution = match Masc.Keeper_skill_execution_projection.of_yojson
+        (`Assoc ["status", `String "failed"; "execution_id", `String execution_id]) with
+      | Ok value -> value | Error detail -> fail detail in
+    Transcript.make_skill_activity
+    ~invocation:(Transcript.Composition_run {tool_name="keeper_compose_review"})
+    ~skill_tool_use_id:"same-provider-id" ~turn_ref:"same-turn#1" ~runtime_id:"actual-runtime"
+    ~execution_id ~execution ~skill_name:"review" ~state:Transcript.Skill_used ~actions:["Execute"] () in
+  Transcript.note_skill_activity t (evidence "physical-original");
+  let skills () = Transcript.drawn t |> List.concat_map (fun (item : Transcript.drawn_item) ->
+    match item.drawn with Transcript.Drawn_skill skills -> skills | _ -> []) in
+  let matched = List.hd (skills ()) in
+  check bool "wire failure is retained separately" true matched.call_failed;
+  check bool "durable delivery remains true" true (matched.state=Transcript.Skill_used);
+  check (list string) "durable actions survive the live failure" ["Execute"] matched.actions;
+  check bool "canonical failure survives the live pairing" true (matched.execution=Some execution);
+  Transcript.note_skill_activity t (evidence "physical-other");
+  check int "same runtime and provider ID cannot conflate another execution" 2 (List.length (skills ()))
+
 let () =
   run "tui_keeper_chat_transcript"
     [ ( "provider retry ownership", [test_case "retry progress requires current runtime attempt" `Quick test_provider_retry_progress_owner] )
-    ; ( "response boundaries", [test_case "Skill evidence retains runtime identity" `Quick test_skill_evidence_retains_invocation_runtime_identity;
+    ; ( "response boundaries", [test_case "composition note keeps separate execution and delivery" `Quick test_composition_note_preserves_delivery_execution_and_live_error;
+      test_case "Skill evidence retains runtime identity" `Quick test_skill_evidence_retains_invocation_runtime_identity;
       test_case "scoped details retire prior model activity" `Quick test_scoped_details_retire_prior_model_activity;
       test_case "scoped details retire prior response usage" `Quick test_scoped_details_retire_prior_response_usage;
       test_case "boundaries and stable origins" `Quick test_response_boundaries_preserve_origins; test_case "interleaved final authority" `Quick test_interleaved_final_keeps_observed_times_and_bytes; test_case "usage reset boundaries" `Quick test_usage_resets_only_at_response_boundaries; test_case "response end retains turn and tool lifecycle" `Quick test_response_stop_preserves_pending_work; test_case "new response without text" `Quick test_empty_new_response_does_not_replace_prior_message])

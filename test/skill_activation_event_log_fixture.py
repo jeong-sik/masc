@@ -3,7 +3,7 @@
 The server opens a session's log with a header row naming the workspace and
 the session, then appends one row per event (header_to_yojson and
 event_to_yojson in Keeper_skill_activation_ledger). ``event_log`` writes rows
-that fold to a masc.skill-activations/v7 ledger: the header, every activation
+that fold to a masc.skill-activations/v8 ledger: the header, every activation
 recorded with no delivery and no actions, then each activation's delivery and
 actions, then the transition rejections.
 """

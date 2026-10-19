@@ -73,6 +73,7 @@ type invocation =
   | Composition_invocation of
       { origin : composition_origin
       ; tool_name : string
+      ; execution_id : Ids.Execution_id.t
       }
 
   | Nested_composition_invocation of

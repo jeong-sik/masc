@@ -455,7 +455,7 @@ let keeper_chat_trace_blocks config name =
 ;;
 
 let keeper_chat_skill_projection_schema =
-  "masc.keeper_chat.skill_activations.v1"
+  "masc.keeper_chat.skill_activations.v2"
 ;;
 
 let chat_row_turn_ref fields =
@@ -499,20 +499,45 @@ let chat_row_reports_skill_activation fields =
   | Some _ | None -> false
 ;;
 
-let keeper_chat_skill_activations_json ~status ?detail activations =
+let composition_execution_projection ~config ~keeper_name activations =
+  let module Execution = Keeper_skill_execution_projection in
+  let execution_ids = List.filter_map (fun (activation : Keeper_skill_activation_ledger.activation) ->
+    match activation.invocation with
+    | Composition_invocation { execution_id; _ } -> Some (Ids.Execution_id.to_string execution_id)
+    | Instruction_invocation _ | Nested_composition_invocation _ -> None) activations in
+  let rows = match execution_ids with
+    | [] -> Ok []
+    | _ ->
+      let store = Dated_jsonl.open_store
+          (Dated_jsonl.Store.at (Workspace.dated_store_root config) Dated_jsonl.Store.Root.Tool_calls) in
+      Keeper_tool_call_index.by_execution_ids ~store ~keeper_name ~execution_ids in
+  fun (activation : Keeper_skill_activation_ledger.activation) ->
+    match activation.invocation with
+    | Instruction_invocation _ -> None
+    | Composition_invocation _ | Nested_composition_invocation _ ->
+      Some (Execution.of_rows ~keeper_name ~rows activation)
+;;
+
+let keeper_chat_skill_activations_json ~status ?detail
+    ?(execution_for_activation = fun _ -> None) activations =
   `Assoc
     ([ "schema", `String keeper_chat_skill_projection_schema
      ; "status", `String status
      ; ( "activations"
        , `List
-           (List.map
-              Keeper_skill_activation_ledger.activation_to_yojson
+           (List.map (fun activation ->
+              let json = Keeper_skill_activation_ledger.activation_to_yojson activation in
+              match json, execution_for_activation activation with
+              | `Assoc fields, Some execution ->
+                `Assoc (("execution", Keeper_skill_execution_projection.to_yojson execution) :: fields)
+              | _, None -> json
+              | (`Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _), Some _ -> json)
               activations) )
      ]
      @ Json_util.string_field_if_present "detail" detail)
 ;;
 
-let attach_keeper_chat_skill_activations ~config rows =
+let attach_keeper_chat_skill_activations ~config ~keeper_name rows =
   let resolved_by_trace = Hashtbl.create 4 in
   let resolve_trace trace_id =
     match Hashtbl.find_opt resolved_by_trace trace_id with
@@ -563,6 +588,7 @@ let attach_keeper_chat_skill_activations ~config rows =
                   | _ :: _, _ ->
                     Some
                       (keeper_chat_skill_activations_json ~status:"available"
+                         ~execution_for_activation:(composition_execution_projection ~config ~keeper_name activations)
                          activations)
                   | [], true ->
                     Some
@@ -628,7 +654,7 @@ let render_keeper_chat_history config name messages autonomous_turns =
         (List.length autonomous_rows);
       other
   in
-  attach_keeper_chat_skill_activations ~config rows
+  attach_keeper_chat_skill_activations ~config ~keeper_name:name rows
 ;;
 
 let keeper_chat_history_json config name =
@@ -650,7 +676,7 @@ let keeper_chat_history_page_json ?max_total config name ~cursor =
   let messages =
     Keeper_chat_store.to_json_array ~omit_stream_contract:true ~base_dir
       ?trace_block_by_turn_ref history_messages
-    |> attach_keeper_chat_skill_activations ~config
+    |> attach_keeper_chat_skill_activations ~config ~keeper_name:name
   in
   Ok (`Assoc
     [ "schema", `String "masc.keeper_chat_history.page.v2"

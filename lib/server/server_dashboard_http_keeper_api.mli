@@ -105,7 +105,7 @@ include module type of Server_dashboard_http_keeper_api_types
 (** {1 Chat history paging} *)
 
 val attach_keeper_chat_skill_activations :
-  config:Workspace.config -> Yojson.Safe.t -> Yojson.Safe.t
+  config:Workspace.config -> keeper_name:string -> Yojson.Safe.t -> Yojson.Safe.t
 (** Attach the exact-turn Skill activation projection to assistant chat rows.
     A row that reports [keeper_skill] but has no matching retained activation
     receives an explicit missing/unavailable status; no timestamp or row-order

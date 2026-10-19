@@ -16,7 +16,7 @@ import type { DashboardRuntimeProbeResponse } from './schemas/runtime-probe'
 // The activation ledger's wire schema — keeper_skill_activation_ledger.ml
 // writes exactly this tag, and every reader below pins it before trusting
 // the rows.
-const SKILL_ACTIVATIONS_SCHEMA = 'masc.skill-activations/v7'
+const SKILL_ACTIVATIONS_SCHEMA = 'masc.skill-activations/v8'
 
 // --- Tool metrics (P4 Phase 4.5) ---
 
@@ -659,6 +659,7 @@ export type DashboardSkillActivationInvocation =
       kind: 'composition'
       origin: DashboardSkillCompositionOrigin
       tool_name: string
+      execution_id: string
     }
   | {
       kind: 'nested_composition'
@@ -1299,7 +1300,7 @@ function decodeSkillActivationInvocation(
   const record = exactSkillActivationObject(
     value,
     label,
-    ['kind', 'origin', 'served_content', 'tool_name', 'scope'],
+    ['kind', 'origin', 'served_content', 'tool_name', 'scope', 'execution_id'],
   )
   if (record.kind === 'instruction') {
     exactSkillActivationObject(value, label, ['kind', 'origin', 'served_content'])
@@ -1335,9 +1336,10 @@ function decodeSkillActivationInvocation(
     throw new Error(`skill_activations ${label}.served_content.kind is unsupported`)
   }
   if (record.kind === 'composition') {
-    exactSkillActivationObject(value, label, ['kind', 'origin', 'tool_name'])
+    exactSkillActivationObject(value, label, ['kind', 'origin', 'tool_name', 'execution_id'])
     return {
       kind: 'composition',
+      execution_id: skillActivationNonblank(record.execution_id, `${label}.execution_id`),
       origin: decodeCompositionOrigin(record.origin, `${label}.origin`),
       tool_name: skillActivationString(record.tool_name, `${label}.tool_name`),
     }

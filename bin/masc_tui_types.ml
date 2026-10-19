@@ -12006,12 +12006,14 @@ let same_skill_invocation ~inventory
   Option.is_some left.turn_ref && Option.is_some left.skill_tool_use_id
   && left.turn_ref = right.turn_ref
   && left.skill_tool_use_id = right.skill_tool_use_id
+  && left.execution_id = right.execution_id
   && (match left.runtime_id, right.runtime_id with
       | Some left, Some right -> String.equal left right
       | None, _ | _, None ->
           let runtimes = left :: right :: inventory
             |> List.filter_map (fun (candidate : Masc_tui_keeper_chat_transcript.skill_activity) ->
               if candidate.turn_ref=left.turn_ref && candidate.skill_tool_use_id=left.skill_tool_use_id
+                 && candidate.execution_id=left.execution_id
               then candidate.runtime_id else None)
             |> List.sort_uniq String.compare in
           match runtimes with [] | [_] -> true | _ :: _ :: _ -> false)

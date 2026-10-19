@@ -1,5 +1,5 @@
 {
-  "schema": "masc.skill-activations/v7",
+  "schema": "masc.skill-activations/v8",
   "workspace_key": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
   "session_id": "trace-one",
   "revision": "cacdd31ce460a86c4b657344f8f54bd446b871c3d645247cdf80c52f0b706f9b",

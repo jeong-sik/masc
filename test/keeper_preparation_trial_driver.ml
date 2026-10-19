@@ -1166,7 +1166,7 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
          nested_execution_proven ~base ~fixture ~turn ~skill_reference:reference ~scope ~raw_records rows stdout_rows &&
          List.exists (fun id -> Keeper_id.Task_id.to_string id=string "task_id" fixture)
            (A.task_id_set_to_list task_ids)
-       | Named_inline,A.Composition_invocation {origin=A.Task_composition {task_ids};tool_name} ->
+       | Named_inline,A.Composition_invocation {origin=A.Task_composition {task_ids};tool_name;_} ->
          tool_name=string "skill_tool_name" fixture && activation.runtime_id=turn.runtime_profile &&
          named_execution_proven ~base ~fixture ~turn ~raw_records rows stdout_rows ~activation ~tool_name &&
          List.exists (fun id -> Keeper_id.Task_id.to_string id=string "task_id" fixture)

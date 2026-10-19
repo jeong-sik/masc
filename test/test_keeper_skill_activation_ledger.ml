@@ -612,6 +612,7 @@ let test_session_origins_roundtrip () =
           (Ledger.Composition_invocation
              { origin = Ledger.Session_composition
              ; tool_name = "keeper_compose_review"
+             ; execution_id = Ids.Execution_id.of_string "execution-review"
              })
         ()
     ]
@@ -632,7 +633,7 @@ let test_session_origins_roundtrip () =
      with
      | [ Ledger.Instruction_invocation { origin = Ledger.Session_instruction; _ }
        ; Ledger.Composition_invocation
-           { origin = Ledger.Session_composition; tool_name }
+           { origin = Ledger.Session_composition; tool_name; _ }
        ] ->
        check string "composition tool" "keeper_compose_review" tool_name;
        check_the_file_replays_the_held_ledger config trace_id
@@ -1116,7 +1117,7 @@ let test_duplicate_exact_key_is_rejected_during_decode () =
   in
   let json =
     `Assoc
-      [ "schema", `String "masc.skill-activations/v7"
+      [ "schema", `String "masc.skill-activations/v8"
       ; "workspace_key", `String workspace_key
       ; "session_id", `String session_id
       ; "revision", `String revision
@@ -1189,6 +1190,7 @@ let test_activation_boundaries_are_typed () =
     Ledger.Composition_invocation
       { origin = Ledger.Task_composition { task_ids = task_ids [ "task-001" ] }
       ; tool_name = "not/a/tool"
+      ; execution_id = Ids.Execution_id.of_string "execution-invalid"
       }
   in
   match activation_result ~invocation:invalid_tool_invocation () with

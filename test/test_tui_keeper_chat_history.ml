@@ -167,7 +167,7 @@ let skill_activation ?(delivery = `Assoc []) ?(actions = [])
 
 let skill_projection ?detail ~status activations =
   `Assoc
-    ([ "schema", `String "masc.keeper_chat.skill_activations.v1"
+    ([ "schema", `String "masc.keeper_chat.skill_activations.v2"
      ; "status", `String status
      ; "activations", `List activations
      ]
@@ -977,7 +977,7 @@ let test_exact_skill_evidence_replaces_the_raw_call_and_names_actions () =
       (`List
          [ autonomous_turn ~turn_ref:"trace-1#54"
              ~skill_activations:projection
-             [ tool ~status:"ok" "keeper_skill"
+             [ tool ~tool_call_id:"skill-use-1" ~status:"ok" "keeper_skill"
              ; tool ~status:"ok" "Execute"
              ; tool ~status:"ok" "Read"
              ]
@@ -1035,7 +1035,7 @@ let test_served_skill_without_delivery_does_not_claim_use () =
       (`List
          [ autonomous_turn ~turn_ref:"trace-1#54"
              ~skill_activations:projection
-             [ tool ~status:"ok" "keeper_skill" ]
+             [ tool ~tool_call_id:"skill-use-1" ~status:"ok" "keeper_skill" ]
          ])
   in
   match decoded.History.rows with
@@ -1081,7 +1081,7 @@ let test_missing_skill_evidence_stays_visible_beside_the_raw_call () =
   | rows ->
       failf "expected warning plus raw Skill tool, got %d row(s)" (List.length rows)
 
-let test_skill_evidence_count_mismatch_retains_every_raw_call () =
+let test_unmatched_skill_evidence_retains_every_raw_call () =
   let projection =
     skill_projection ~status:"available" [ skill_activation () ]
   in
@@ -1101,7 +1101,7 @@ let test_skill_evidence_count_mismatch_retains_every_raw_call () =
     ] ->
       check string "the exact activation is still shown" "ci-red-attribution"
         exact.skill_name;
-      check bool "the count mismatch is a visible evidence error" true
+      check bool "unmatched call authority is a visible evidence gap" true
         (warning.state = Transcript.Skill_evidence_unavailable);
       check int "neither unmatched raw call is hidden" 2
         (List.length raw.activities)
@@ -1849,10 +1849,50 @@ let test_operation_and_autonomous_sources_keep_typed_tool_blocks () =
       Some (Masc_tui_keeper_chat_log.Autonomous_turn turn)])
 ;;
 
+let composition_activation status =
+  let activation = skill_activation ~actions:["Execute"]
+    ~invocation:(`Assoc ["kind", `String "composition";
+      "tool_name", `String "keeper_compose_review"; "execution_id", `String "physical-original"]) () in
+  let execution = `Assoc (["status", `String status] @
+    if status = "unrecorded" then [] else ["execution_id", `String "physical-original"]) in
+  match activation with `Assoc fields -> `Assoc (("execution", execution) :: fields)
+  | _ -> fail "invalid fixture"
+
+let test_composition_execution_and_delivery_remain_separate () =
+  List.iter (fun status ->
+    let decoded = decode (`List [autonomous_turn ~turn_ref:"trace-1#54"
+      ~skill_activations:(skill_projection ~status:"available" [composition_activation status])
+      [tool ~execution_id:"physical-original" ~status:"err" "keeper_compose_review"]]) in
+    let skills = List.concat_map (fun (row : History.row) -> match row.kind with
+      | History.Skill_activity skills -> skills | _ -> []) decoded.History.rows in
+    let skill = List.find (fun (skill : Transcript.skill_activity) -> skill.execution_id = Some "physical-original") skills in
+    check bool "raw wire error survives independent canonical disposition" true skill.call_failed;
+    check bool "delivery and subsequent actions are still true even after failure" true (skill.state = Transcript.Skill_used);
+    check (list string) "subsequent action is preserved without promoting the composition" ["Execute"] skill.actions;
+    let execution = match skill.execution with Some value -> value | None -> fail "execution missing" in
+    check string "independent canonical execution disposition" status
+      Yojson.Safe.Util.(Masc.Keeper_skill_execution_projection.to_yojson execution |> member "status" |> to_string);
+    let raw = List.concat_map (fun (row : History.row) -> match row.kind with
+      | History.Tool_calls block -> block.activities | _ -> []) decoded.rows in
+    check int "only known exact execution replaces its raw call"
+      (if status = "unrecorded" then 1 else 0) (List.length raw))
+    ["completed";"deferred";"failed";"unrecorded"]
+
+let test_composition_never_hides_a_different_execution () =
+  let decoded = decode (`List [autonomous_turn ~turn_ref:"trace-1#54"
+    ~skill_activations:(skill_projection ~status:"available" [composition_activation "failed"])
+    [tool ~execution_id:"physical-other" ~tool_call_id:"skill-use-1" ~status:"ok" "keeper_compose_review"]]) in
+  let raw = List.concat_map (fun (row : History.row) -> match row.kind with
+    | History.Tool_calls block -> block.activities | _ -> []) decoded.History.rows in
+  check (list (option string)) "same provider call ID cannot hide another physical call"
+    [Some "physical-other"] (List.map (fun (tool : Transcript.tool_activity) -> tool.execution_id) raw)
+
 let () =
   run "tui_keeper_chat_history"
     [ ( "rows"
-      , [ test_case "operation and autonomous sources keep typed tool blocks" `Quick
+      , [ test_case "composition delivery and execution remain independent" `Quick test_composition_execution_and_delivery_remain_separate
+        ; test_case "composition keeps other physical executions" `Quick test_composition_never_hides_a_different_execution
+        ; test_case "operation and autonomous sources keep typed tool blocks" `Quick
             test_operation_and_autonomous_sources_keep_typed_tool_blocks
         ; test_case "roles map to what the pane draws" `Quick
             test_roles_map_to_what_the_pane_draws
@@ -1924,7 +1964,7 @@ let () =
         ; test_case "missing Skill evidence remains visible" `Quick
             test_missing_skill_evidence_stays_visible_beside_the_raw_call
         ; test_case "Skill evidence count mismatch keeps raw calls" `Quick
-            test_skill_evidence_count_mismatch_retains_every_raw_call
+            test_unmatched_skill_evidence_retains_every_raw_call
         ; test_case "an unknown invocation kind does not decode" `Quick
             test_an_unknown_invocation_kind_does_not_decode
         ; test_case "projection keeps stable row and absolute turn identity"

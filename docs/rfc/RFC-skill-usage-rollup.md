@@ -16,11 +16,18 @@ related: ["skills-as-tools", "RFC-0411-skill-surface-costs-its-reference"]
 
 masc 는 Skill 활성화 증거를 세션마다 durable 하게 남긴다
 (`<base>/.masc/traces/<trace>/skill-activations.json`, 스키마
-`masc.skill-activations/v7`, `Keeper_skill_activation_ledger`). 그런데 이 증거를
+`masc.skill-activations/v8`, `Keeper_skill_activation_ledger`). 그런데 이 증거를
 **세션을 가로질러 집계하는 경로가 없다.** 대시보드와 TUI 는
 `Keeper_skill_activation_projection.resolve ~keeper_name` 으로 **그 keeper 의 현재
 trace 하나**만 본다. 그 결과 운영자에게는 "어떤 Skill 이 얼마나 쓰이는가"가 보이지
 않고, 실제로 517회(39세션) 활성화가 있음에도 "아무것도 안 쓰이는" 것처럼 보인다.
+
+Composition 활성화는 실행 전 원래 SDK Invocation의 physical execution ID를 봉인한다.
+전달 영수증은 오류 결과가 모델에 전달된 경우에도 참이며, 후속 action은 실행 완료를
+뜻하지 않는다. chat projection v2는 원래 실행 ID의 canonical disposition을 별도로
+읽어 completed/deferred/failed/unrecorded를 표시한다. ID 중복·출처 불일치·원장 조회
+실패는 unavailable이며 성공 기본값이 없다. nested 호출의 child logical outcome을
+확인하지 못한 경로는 부모의 physical completion을 빌리지 않고 unrecorded로 남긴다.
 
 이 RFC 는 세션횡단 per-Skill 롤업을 정의하고, 그것을 CLI·TUI·대시보드 세 표면에서
 같은 집계로 재사용한다.

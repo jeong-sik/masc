@@ -73,6 +73,9 @@ type invocation =
   | Composition_invocation of
       { origin : composition_origin
       ; tool_name : string
+      ; execution_id : Ids.Execution_id.t
+          (** Physical execution identity minted from the original opaque SDK
+              Invocation before execution; provider call IDs are insufficient. *)
       }
 
   | Nested_composition_invocation of

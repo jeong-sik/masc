@@ -412,26 +412,29 @@ final class ArrangementTransport {
         do {
             try checkOutput()
             let command = try JSONDecoder().decode(AudioCommand.self, from: Data(line.utf8))
-            if plan.captured {
+            do {
                 switch command {
-                case .pause, .resume, .seek: throw AudioFailure("captured UMP pause/seek requires expression-state reconstruction; stop and restart the complete take")
-                default: break
+                case .pause: if state == .playing {
+                    let time = currentTime()
+                    if time >= plan.duration { position = plan.duration; finish(reason: "finished"); return }
+                    engine.pause(); stopVoices(); position = time; state = .paused
+                    try midi?.stageCoordinated(at: time)
                 }
-            }
-            switch command {
-            case .pause: if state == .playing {
-                let time = currentTime()
-                if time >= plan.duration { position = plan.duration; finish(reason: "finished"); return }
-                engine.pause(); stopVoices(); position = time; state = .paused
-                try midi?.stageCoordinated(at: time)
-            }
-            case .resume: if state == .paused { try schedule(from: position, playing: true) }
-            case .seek(let seconds):
-                guard seconds.isFinite, seconds >= 0, seconds <= plan.duration else { throw AudioFailure("seek outside arrangement duration") }
-                if seconds == plan.duration { position = seconds; finish(reason: "finished"); return }
-                try schedule(from: seconds, playing: state == .playing)
-            case .status: break
-            case .stop: finish(reason: "stop"); return
+                case .resume: if state == .paused { try schedule(from: position, playing: true) }
+                case .seek(let seconds):
+                    guard seconds.isFinite, seconds >= 0, seconds <= plan.duration else { throw AudioFailure("seek outside arrangement duration") }
+                    if seconds == plan.duration { position = seconds; finish(reason: "finished"); return }
+                    try schedule(from: seconds, playing: state == .playing)
+                case .status: break
+                case .stop: finish(reason: "stop"); return
+                }
+            } catch {
+                // A rejected pause/resume/seek is a command error: report it and
+                // keep the transport running instead of stopping playback.
+                report(String(describing: error))
+                try? audioEmit(["kind": "error", "message": String(describing: error)])
+                if state != .stopped { publish() }
+                return
             }
             if state != .stopped { publish() }
         } catch { finish(reason: "command-failed", error: error) }

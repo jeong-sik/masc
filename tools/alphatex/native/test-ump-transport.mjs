@@ -30,7 +30,7 @@ reviewClock=999_999_999;a.tick();precondition(reviewSent.isEmpty)
 reviewClock=1_250_000_000;a.tick();precondition(reviewSent.map{$0.1}==[on,bend,off]);precondition(a.held.isEmpty)
 reviewClock=2_000_000_000;a.tick();precondition(ended==1 && a.state == .ended)
 a.tick();precondition(ended==1)
-requireFailure{try a.stageCoordinated(at:0.5)}
+try a.stageCoordinated(at:0.5);precondition(a.state == .staged)
 let owned=try UmpTransport(timeline:timeline([packet(0,"A",zeroOn)]));reviewSent=[]
 try owned.apply(UmpEvent(seconds:0,source:"A",words:zeroOn));precondition(owned.held.values.reduce(0,+)==1)
 try owned.silence();precondition(owned.held.isEmpty && reviewSent.last!.1==[0x43853c00,0])
@@ -53,10 +53,66 @@ let removal=try UmpTransport(timeline:timeline([packet(0,"A",on)]));var failures
 removal.onCoordinatedFailure={_,error in precondition(error != nil);failures+=1}
 reviewClock=0;try removal.stageCoordinated(at:0);try removal.runCoordinated(anchorNanoseconds:1)
 reviewUnavailable=true;reviewClock=2;removal.tick();precondition(failures==1 && removal.state == .stopped)
-print("UMP_DECISIONS_PASS: UInt64 source clocks, no early send, complete ordered late stream, original release/expression, MIDI2 zero velocity ownership, uncertain release retry, pedals/SysEx cleanup, group/global ownership, invalid packet/binding refusal, endpoint loss")
+// Chasing is a source-state operation: expired key pairs disappear, while
+// controllers, note attributes, original releases and pedal ordering survive.
+func event(_ time:Double,_ words:[UInt32])->UmpEvent {UmpEvent(seconds:time,source:"A",words:words)}
+func checkRestore(_ value:@autoclosure ()throws->Bool,_ why:String)throws {let actual=try value();precondition(actual,why)}
+func restore(_ rows:[UmpEvent],_ at:Double,_ prior:UmpFootprint=UmpFootprint())throws->[[UInt32]] {try umpRestoration(rows,before:at,replacing:prior).events.map{$0.words}}
+func footprint(_ rows:[UmpEvent])->UmpFootprint {var value=UmpFootprint();for row in rows{value.observe(UmpMessage(row))};return value}
+let reset:[UInt32]=[0x43b57900,0],sost:[UInt32]=[0x43b54200,0xffffffff]
+let pn:[UInt32]=[0x43653c00,0x92345678],pn2:[UInt32]=[0x43653c00,0xa2345678]
+let manage:[UInt32]=[0x43f53c03,0],pnon:[UInt32]=[0x43953c03,0x80012345]
+let noteRows=[event(0,pn),event(0.1,pnon),event(0.2,manage),event(0.3,on),event(0.4,pn2)]
+let noteReplay=try restore(noteRows,0.5)
+precondition(noteReplay==noteRows.map{$0.words},"per-note prehistory and detach+reset order")
+let repeated=[event(0,on),event(0.1,off),event(0.2,zeroOn)]
+let repeatReplay=try restore(repeated,0.3);precondition(repeatReplay==[zeroOn],"expired pair cannot release/retrigger surviving note index")
+let sustainRows=[event(0,on),event(0.1,pedal),event(0.2,off)]
+try checkRestore(restore(sustainRows,0.3)==[on,pedal,off],"original pedal-held release")
+let sostRows=[event(0,on),event(0.1,sost),event(0.2,off),event(0.3,zeroOn),event(0.4,[0x43853c00,0x45670000])]
+try checkRestore(restore(sostRows,0.5)==[on,sost,off],"sostenuto captures only held voices on its rising edge")
+let pnPrior=footprint([event(0,pn)])
+requireFailure{_ = try restore([event(0,reset)],0.5,pnPrior)}
+try checkRestore(restore([event(0,pn),event(0.1,reset),event(0.2,on)],0.5,pnPrior)==[pn,reset,on],"CC121 preserves known MIDI2 per-note pitch")
+let p0:[UInt32]=[0x43c50001,0x05000102],p1:[UInt32]=[0x43c50000,0x06000000]
+let programPrior=footprint([event(0,p0)])
+requireFailure{_ = try restore([event(0,p1)],0.5,programPrior)}
+requireFailure{_ = try restore([event(0,on),event(0.1,p0)],0.5,programPrior)}
+try checkRestore(restore([event(0,p0),event(0.1,on),event(0.2,p1)],0.5,programPrior)==[p0,on,p1],"bank-valid=0 preserves bank and initial patch precedes Note On")
+let absRpn:[UInt32]=[0x43250102,0x80000000],rel:[UInt32]=[0x43450102,0xfffffff0]
+requireFailure{_ = try restore([event(0,rel)],0.5)}
+try checkRestore(restore([event(0,absRpn),event(0.1,rel)],0.5,footprint([event(0,rel)]))==[absRpn,rel],"absolute baseline then original signed relative words")
+requireFailure{_ = try restore([event(0,sx)],0.5)}
+requireFailure{_ = try restore([],0.5,footprint([event(0,sx)]))}
+requireFailure{_ = try restore([event(0,on),event(0.1,[0x23953c7f])],0.5)}
+requireFailure{_ = try restore([event(0,[0x43b55400,0x78000000]),event(0.1,on),event(0.2,off),event(0.3,zeroOn)],0.5)}
+let midi1=[event(0,[0x23953c7f]),event(0.1,[0x23953c00]),event(0.2,[0x23953d7f])]
+try checkRestore(restore(midi1,0.3)==[[0x23953d7f]],"MIDI1 UMP zero velocity releases its key")
+// Real transport methods with a synthetic clock/send edge: staging releases
+// owned keys but sounds no restored key until the common epoch. A late first
+// callback reconstructs its current phase instead of retriggering expired keys.
+reviewUnavailable=false;reviewClock=0;reviewSent=[]
+let phase=try UmpTransport(timeline:timeline([packet(0,"A",bend),packet(2400000,"A",on),packet(4800000,"A",off),packet(14400000,"A",zeroOn)]))
+try phase.stageCoordinated(at:0.15);precondition(reviewSent.isEmpty)
+try phase.runCoordinated(anchorNanoseconds:1_000_000_000)
+reviewClock=999_999_999;phase.tick();precondition(reviewSent.isEmpty)
+reviewClock=1_200_000_000;phase.tick();precondition(reviewSent.map{$0.1}==[bend],"late epoch must not retrigger expired source keys")
+reviewClock=1_500_000_000;phase.tick();precondition(reviewSent.map{$0.1}==[bend,zeroOn])
+try phase.stageCoordinated(at:0.7);precondition(phase.held.isEmpty && phase.state == .staged)
+let pausedCount=reviewSent.count;reviewClock=2_000_000_000;phase.tick();precondition(reviewSent.count==pausedCount && phase.position(at:reviewClock)==0.7)
+try phase.runCoordinated(anchorNanoseconds:3_000_000_000)
+reviewClock=2_999_999_999;phase.tick();precondition(reviewSent.count==pausedCount)
+reviewClock=3_000_000_000;phase.tick();precondition(Array(reviewSent.suffix(2)).map{$0.1}==[bend,zeroOn])
+phase.finish(reason:"test",error:nil,publish:false);precondition(phase.held.isEmpty)
+let expired=try UmpTransport(timeline:timeline([packet(24000000,"A",on)]));reviewClock=0;reviewSent=[]
+try expired.stageCoordinated(at:0.5);try expired.runCoordinated(anchorNanoseconds:1_000_000_000)
+var expiredEnds=0;expired.onCoordinatedEnd={expiredEnds+=1}
+reviewClock=3_000_000_000;expired.tick();expired.tick()
+precondition(reviewSent.isEmpty && expired.state == .ended && expiredEnds==1,"expired reconstructed interval must not acquire even an endpoint key")
+print("UMP_DECISIONS_PASS: UInt64 source clocks, no early send, complete ordered late stream, original release/expression, MIDI2 zero velocity ownership, uncertain release retry, pedals/SysEx cleanup, group/global ownership, invalid packet/binding refusal, endpoint loss; live voice/pedal/PN/bank/program/relative baseline reconstruction; silent staging, late epoch, pause/resume cleanup")
 `
   await writeFile(join(directory,'main.swift'),main)
-  let result=spawnSync('xcrun',['swiftc','-module-cache-path',join(directory,'modules'),'-D','MIDI_LIBRARY',new URL('./MidiTransport.swift',import.meta.url).pathname,join(directory,'Ump.swift'),join(directory,'main.swift'),'-o',join(directory,'probe'),'-framework','CoreMIDI'],{encoding:'utf8'})
+  let result=spawnSync('xcrun',['swiftc','-module-cache-path',join(directory,'modules'),'-D','MIDI_LIBRARY',new URL('./MidiTransport.swift',import.meta.url).pathname,new URL('./UmpState.swift',import.meta.url).pathname,join(directory,'Ump.swift'),join(directory,'main.swift'),'-o',join(directory,'probe'),'-framework','CoreMIDI'],{encoding:'utf8'})
   assert.equal(result.status,0,result.stderr)
   result=spawnSync(join(directory,'probe'),[],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);console.log(result.stdout.trim())
 }finally{await rm(directory,{recursive:true,force:true})}

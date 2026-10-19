@@ -5133,6 +5133,7 @@
 (include stanzas/test_browser_webdriver.inc)
 (include stanzas/test_browser_cdp.inc)
 (include stanzas/test_browser_stagehand_session.inc)
+(include stanzas/test_browser_selection.inc)
 (include stanzas/test_browser_stagehand_model.inc)
 (include stanzas/test_browser_stagehand_executor.inc)
 (include stanzas/test_browser_stagehand_backend.inc)

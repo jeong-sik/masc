@@ -21,6 +21,7 @@ let test_session_lifecycle () =
       | _ -> fail ("unexpected request: " ^ path)
     in
     let driver = Driver.create ~start_downloads ~request () in
+    check bool "driver registration alone is closed" true (Driver.session_observation driver=Lane.Browser_closed);
     (match Driver.execute driver (Lane.Page_interact {tab_id=7;expected_url=Some "https://example.org";action=Lane.Activate_tab}) with
      | Lane.Rejected_before_effect _ -> () | _ -> fail "live-only activation must reject before selecting a WebDriver tab");
     check int "unsupported activation makes no backend request" 0 (List.length !calls);
@@ -29,9 +30,11 @@ let test_session_lifecycle () =
     check int "closed read never contacted driver" 0 (List.length !calls);
     let open_session () = Driver.execute driver (Lane.Session_open {headless=Some true}) in
     ignore (open_session ()); ignore (open_session ());
+    check bool "confirmed owned session is open" true (Driver.session_observation driver=Lane.Browser_open);
     check int "reopening keeps owned session" 1 (List.length !calls);
     (match Driver.execute driver (Lane.Page_goto {url="https://example.org";tab_id=None}) with
      | Lane.Refused _ -> () | _ -> fail "browser exit must be visible");
+    check bool "confirmed invalid session clears observation" true (Driver.session_observation driver=Lane.Browser_closed);
     ignore (open_session ());
     check int "session can recover after Firefox exits" 4 (List.length !calls);
     List.iter (fun verb ->
@@ -40,11 +43,39 @@ let test_session_lifecycle () =
       [ Lane.Session_open {headless=Some true}; Lane.Session_close ];
     (match Driver.execute driver Lane.Session_close with
      | Lane.Answered _ -> () | _ -> fail "session close failed");
+    check bool "confirmed deletion clears observation" true (Driver.session_observation driver=Lane.Browser_closed);
     check bool "close issues WebDriver DELETE" true
       (List.hd !calls = (`DELETE, "/session/owned"));
     (match Driver.execute driver Lane.Tabs_list with
      | Lane.Refused _ -> () | _ -> fail "closed session must refuse subsequent reads");
     check int "closed read adds no backend request" 5 (List.length !calls))
+let test_session_observer_unknown_outcome () = Eio_main.run (fun _ ->
+  let creating_fails=ref true and closing_fails=ref false and calls=ref 0 in
+  let observe=ref (fun () -> Lane.Browser_unknown) in
+  let request ~method_ ~path ~body:_ =
+    incr calls;
+    check bool "lifecycle is observable while transport is active" true (!observe ()=Lane.Browser_changing);
+    match method_,path with
+    | `POST,"/session" -> if !creating_fails then Error (Driver.Transport "create response lost")
+      else Ok (`Assoc ["sessionId",`String "owned";"capabilities",`Assoc ["webSocketUrl",`String "ws://localhost/session/owned"]])
+    | `DELETE,"/session/owned" -> if !closing_fails then Error (Driver.Transport "delete response lost") else Ok `Null
+    | _ -> fail "unexpected lifecycle request" in
+  let driver=Driver.create ~start_downloads ~request () in
+  observe:=(fun ()->Driver.session_observation driver);
+  ignore (Driver.execute driver (Lane.Session_open {headless=None}));
+  check bool "lost creation does not invent a closed or open browser" true (!observe ()=Lane.Browser_unknown);
+  check int "lifecycle reads send nothing" 1 !calls;
+  creating_fails:=false;
+  let driver=Driver.create ~start_downloads ~request () in
+  observe:=(fun ()->Driver.session_observation driver);
+  ignore (Driver.execute driver (Lane.Session_open {headless=None}));
+  check bool "confirmed new session is open" true (!observe ()=Lane.Browser_open);
+  closing_fails:=true;
+  ignore (Driver.execute driver Lane.Session_close);
+  check bool "lost deletion is unknown" true (!observe ()=Lane.Browser_unknown);
+  closing_fails:=false;
+  ignore (Driver.execute driver Lane.Session_close);
+  check bool "confirmed deletion settles closed" true (!observe ()=Lane.Browser_closed))
 let test_backend_failure () =
   match Driver.decode_response ~status:404
     {|{"value":{"error":"no such window","message":"tab closed"}}|} with
@@ -588,6 +619,7 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "pointer guard failure rejects before effect" `Quick test_pointer_guard_failure_rejects_before_effect;
   test_case "download setup cancellation rolls back session" `Quick test_download_setup_cancellation;
   test_case "session ownership and crash recovery" `Quick test_session_lifecycle;
+  test_case "lifecycle observations preserve unknown outcomes" `Quick test_session_observer_unknown_outcome;
   test_case "session status answers while closed" `Quick test_session_status_answers_while_closed;
   test_case "closed tab error" `Quick test_backend_failure;
   test_case "remote error code is a closed sum" `Quick test_remote_error_is_a_closed_sum;

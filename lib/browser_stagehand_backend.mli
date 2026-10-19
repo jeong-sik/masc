@@ -22,6 +22,8 @@ type 'session opener =
   -> ('session * Yojson.Safe.t, string) result
 
 type 'session t
+val session_observation : 'session t -> Browser_lane.session_observation
+(** Nonblocking lifecycle snapshot; never sends a browser command. *)
 
 (** A backend serving requests on fibers of [sw] until [sw] ends. Its
     fibers are daemons: when the rest of [sw] is done, an open session is

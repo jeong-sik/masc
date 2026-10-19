@@ -24,6 +24,7 @@ struct UmpRegionSource: Decodable {
     let extent: String
     let timeline: UmpTimeline
 }
+enum CaptureRegionComponent: String, Decodable { case audio, midi }
 struct UmpRegion: Decodable {
     let id: String
     let source: String
@@ -31,6 +32,7 @@ struct UmpRegion: Decodable {
     let offset: String
     let extent: String
     let repeatCount: UInt64
+    var component: CaptureRegionComponent? = nil
 }
 struct UmpArrangement: Decodable {
     let schemaVersion: Int
@@ -128,7 +130,7 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
         }
         var admitted: [UmpRegionClip] = [], potential = UmpFootprint()
         for region in timeline.regions {
-            guard !region.id.isEmpty, let (source, timed) = sources[region.source], region.repeatCount > 0 else { throw MidiFailure("invalid captured region source or repetition") }
+            guard !region.id.isEmpty, region.component != .audio, let (source, timed) = sources[region.source], region.repeatCount > 0 else { throw MidiFailure("invalid captured region source or repetition") }
             let validStart = try umpNanoseconds(region.startSeconds)
             let start = min(validStart, UInt64((region.startSeconds * 1e9).rounded(.down))), cut = try umpUnsigned(region.offset), length = try umpUnsigned(region.extent)
             let after = try umpAdd(cut, length), bound = try umpUnsigned(source.extent)

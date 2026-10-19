@@ -1,6 +1,6 @@
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
-import { arrangementSchedule, newArrangement } from './arrangement.mjs'
+import { arrangementPlaybackSchedule, newArrangement } from './arrangement.mjs'
 import { sourceMidiTimeline } from './midi-source-playback.mjs'
 import { importArrangementWave, prepareArrangementCapture } from './arrangement-files.mjs'
 import { readWaveMetadata } from './wave-file.mjs'
@@ -8,7 +8,7 @@ import { captureRange, captureRegionTime } from './capture-time.mjs'
 import { jsonLines, unpackMidi } from './session-data.mjs'
 
 function requireRegionTransport(project) {
-  const schedule = arrangementSchedule(project)
+  const schedule = arrangementPlaybackSchedule(project)
   if (schedule.some(clip => project.assets.find(asset => asset.id === clip.asset).kind === 'capture')) {
     throw new Error('Captured regions require paired capture preparation')
   }
@@ -111,11 +111,11 @@ export function selectArrangementRoute(route, effect) {
   }
 }
 export function arrangementPlaybackRequest(project, route) {
-  const schedule = arrangementSchedule(project), audible = new Set(schedule.map(clip => clip.asset))
+  const schedule = arrangementPlaybackSchedule(project), audible = new Set(schedule.map(clip => clip.asset))
   const assets = project.assets.filter(asset => audible.has(asset.id)), kinds = new Set(assets.map(asset => asset.kind))
   if (!kinds.size) throw new Error('No audible arrangement regions')
   if (kinds.has('capture')) {
-    const notes = assets.some(asset => asset.kind === 'capture' && BigInt(asset.manifest.midiPacketCount) > 0n)
+    const notes = schedule.some(clip => clip.component !== 'audio' && assets.some(asset => asset.id === clip.asset && asset.kind === 'capture' && BigInt(asset.manifest.midiPacketCount) > 0n))
     if (route.kind === 'midi' || (notes || kinds.has('midi')) && route.kind !== 'mixed') throw new Error('Select :mixed-output AUDIO_UID and MIDI destinations for paired captures')
     return { kind: 'prepare-capture', output: route.output, midiOutput: route.midiOutput, sourceBindings: route.sourceBindings ?? [], ...(kinds.has('midi') ? { portBindings: route.portBindings ?? [] } : {}) }
   }
@@ -174,7 +174,7 @@ async function snapshotAudio(project, schedule, { sourceRoot, temporary, signal 
   }
   for (const clip of schedule) {
     const asset = byID.get(clip.asset)
-    if (asset.kind !== 'capture' || !clip.audio) continue
+    if (asset.kind !== 'capture' || clip.component === 'midi' || !clip.audio) continue
     const frame = text => {
       const value = Number(text)
       if (!Number.isSafeInteger(value)) throw new Error('Captured WAV exceeds exact native plan frame precision')
@@ -182,14 +182,15 @@ async function snapshotAudio(project, schedule, { sourceRoot, temporary, signal 
     }
     regions.push({ id: clip.id, asset: clip.asset, startSeconds: clip.startSeconds,
       offsetFrames: frame(clip.audio.offsetFrames), frameCount: frame(clip.audio.frameCount), repeat: clip.repeat,
-      captureClock: { ...clip.sourceClock, firstAudioHostTime: asset.manifest.clock.firstAudioHostTime } })
+      captureClock: { ...clip.sourceClock, firstAudioHostTime: asset.manifest.clock.firstAudioHostTime },
+      ...(clip.component ? { component: clip.component } : {}) })
   }
   const used = new Set(regions.map(region => region.asset)), duration = schedule.reduce((end, clip) => Math.max(end, clip.endSeconds), 0)
   return { assets: assets.filter(asset => used.has(asset.id)), regions, duration, captures }
 }
 export async function prepareArrangementAudio(project, { sourceRoot, directory, signal } = {}) {
   signal?.throwIfAborted()
-  const schedule = arrangementSchedule(project)
+  const schedule = arrangementPlaybackSchedule(project)
   if (!schedule.length) throw new Error('No audible arrangement regions')
   if (schedule.some(clip => project.assets.find(asset => asset.id === clip.asset).kind === 'midi')) throw new Error('Audio-only audition cannot synthesize MIDI assets; mute those lanes')
   const temporary = await mkdtemp(join(directory, 'audio-play-'))
@@ -204,7 +205,7 @@ export async function prepareArrangementAudio(project, { sourceRoot, directory, 
 
 export async function prepareArrangementCaptureRegions(project, { sourceRoot, directory, signal, midiOutput, sourceBindings = [], portBindings = [] } = {}) {
   signal?.throwIfAborted()
-  const schedule = arrangementSchedule(project), byID = new Map(project.assets.map(asset => [asset.id, asset]))
+  const schedule = arrangementPlaybackSchedule(project), byID = new Map(project.assets.map(asset => [asset.id, asset]))
   if (!schedule.length) throw new Error('No audible arrangement regions')
   if (!schedule.some(clip => byID.get(clip.asset).kind === 'capture')) {
     throw new Error('Paired capture preparation requires captured lanes')
@@ -228,6 +229,7 @@ export async function prepareArrangementCaptureRegions(project, { sourceRoot, di
     const duration = schedule.reduce((end, clip) => Math.max(end, clip.endSeconds), 0)
     const sources = [], notes = []
     for (const [id, snapshot] of captures) {
+      if (!schedule.some(clip => clip.asset === id && clip.component !== 'audio')) continue
       const asset = byID.get(id), packets = [], used = new Set(), range = captureRange(asset)
       for await (const row of jsonLines(join(snapshot, 'midi.ump.jsonl'), { signal })) {
         unpackMidi(row)
@@ -242,8 +244,8 @@ export async function prepareArrangementCaptureRegions(project, { sourceRoot, di
         clock: { origin: range.origin, numer: asset.manifest.clock.numer, denom: asset.manifest.clock.denom }, bindings, packets } })
     }
     const bindings = [...new Set(sources.flatMap(source => source.timeline.bindings.map(binding => binding.destination)))].map((destination, port) => ({ port, destination }))
-    for (const clip of schedule) if (byID.get(clip.asset).kind === 'capture') {
-      notes.push({ id: clip.id, source: clip.asset, startSeconds: clip.startSeconds, offset: clip.offset, extent: clip.extent, repeatCount: clip.repeat })
+    for (const clip of schedule) if (byID.get(clip.asset).kind === 'capture' && clip.component !== 'audio') {
+      notes.push({ id: clip.id, source: clip.asset, startSeconds: clip.startSeconds, offset: clip.offset, extent: clip.extent, repeatCount: clip.repeat, ...(clip.component ? { component: clip.component } : {}) })
     }
     let midi, smfBindings = []
     if (schedule.some(clip => byID.get(clip.asset).kind === 'midi')) {

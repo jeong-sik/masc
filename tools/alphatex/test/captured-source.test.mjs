@@ -367,3 +367,60 @@ test('clock-only captures and ordinary WAV keep all audible regions in a paired 
   await assert.rejects(prepareArrangementCaptureRegions(mixed,{sourceRoot:root,directory:root,sourceBindings:[{asset:'asset-1',source:'A',destination:'42'},{asset:'asset-1',source:'B',destination:'42'}]}),/output for every/)
   assert.deepEqual(await readdir(root),before)
 }))
+
+test('split captured components retain raw sources, independent placement and one-step undo/redo after portable save',async()=>fixture(async({root,input,bytes})=>{
+ const path=join(root,'song.json'),imported=await importArrangementCapture(newArrangement(),input,{projectPath:path})
+ let editor=arrangementCommand(arrangementEditor(imported.project),'capture-region asset-1 0 0 .2 3').editor
+ const paired=editor.project;assert.throws(()=>arrangementCommand(editor,'capture-offset 50'),/Split/)
+ editor=arrangementCommand(editor,'split-take').editor;const split=editor.project
+ assert.deepEqual(split.clips.map(c=>c.component),['audio','midi']);assert.equal(split.assets.length,1)
+ assert.equal(arrangementCommand(editor,'undo').editor.project,paired)
+ assert.equal(arrangementCommand(arrangementCommand(editor,'undo').editor,'redo').editor.project,split)
+ editor=arrangementCommand(editor,'capture-offset 50').editor
+ const originalMidi=structuredClone(editor.project.clips[1]),raw=structuredClone(editor.project.assets[0])
+ const prepared=await prepareArrangementCaptureRegions(editor.project,{sourceRoot:root,directory:root,midiOutput:'42'})
+ const plan=JSON.parse(await readFile(prepared.path,'utf8'))
+ assert.deepEqual(plan.umpRegions.regions.map(c=>[c.component,c.startSeconds,c.offset,c.extent,c.repeatCount]),[['midi',0,'0','4800000',3]])
+ assert.deepEqual(plan.regions.map(c=>[c.component,c.startSeconds,c.captureClock.offset,c.captureClock.extent,c.repeat]),[['audio',0,'1200000','3600000',1],['audio',.15,'0','4800000',2]])
+ assert.deepEqual(editor.project.clips[1],originalMidi);assert.deepEqual(editor.project.assets[0],raw)
+ assert.deepEqual(plan.umpRegions.sources[0].timeline.packets,bytes.midi.toString().trim().split('\n').map(JSON.parse))
+ const copy=join(root,'copy','song.json');await saveArrangement(copy,editor.project,null,{sourceRoot:root})
+ const loaded=await loadArrangement(copy);assert.deepEqual(loaded.project,editor.project)
+ for(const [role,part] of Object.entries(raw.parts))assert.deepEqual(await readFile(join(dirname(copy),part.file)),bytes[role])
+ const shifted=arrangementCommand(editor,'capture-offset -50').editor
+ const later=JSON.parse(await readFile((await prepareArrangementCaptureRegions(shifted.project,{sourceRoot:root,directory:root,midiOutput:'42'})).path,'utf8'))
+ assert.equal(later.regions.length,1);assert.equal(later.regions[0].startSeconds,.05)
+ assert.equal(later.umpRegions.regions[0].startSeconds,0);assert.ok(later.duration>.6)
+ editor=arrangementCommand(editor,'select region-2').editor;editor=arrangementCommand(editor,'capture-offset -25').editor
+ const moved=JSON.parse(await readFile((await prepareArrangementCaptureRegions(editor.project,{sourceRoot:root,directory:root,midiOutput:'42'})).path,'utf8'))
+ assert.equal(moved.umpRegions.regions[0].startSeconds,.025);assert.equal(moved.regions[0].startSeconds,0)
+}))
+
+test('captured placement clips project-zero arithmetic without expanding millions of repeats or quantizing fractional host ticks',async()=>fixture(async({root,input})=>{
+ const imported=await importArrangementCapture(newArrangement(),input,{projectPath:join(root,'song.json')})
+ let editor=arrangementEditor(imported.project)
+ for(const line of ['capture-region asset-1 0 0 .2 2000000','split-take','capture-offset 450'])editor=arrangementCommand(editor,line).editor
+ const plan=JSON.parse(await readFile((await prepareArrangementCaptureRegions(editor.project,{sourceRoot:root,directory:root,midiOutput:'42'})).path,'utf8'))
+ assert.equal(plan.regions.length,2);assert.equal(plan.umpRegions.regions.length,1)
+ assert.deepEqual(plan.regions.map(c=>[c.startSeconds,c.captureClock.offset,c.captureClock.extent,c.repeat]),[[0,'1200000','3600000',1],[.15,'0','4800000',1999997]])
+ assert.equal(plan.umpRegions.regions[0].repeatCount,2000000)
+ editor=arrangementCommand(editor,'capture-offset 0.00000001').editor
+ const fraction=editor.project.clips[0].placement.advanceNanoseconds;assert.deepEqual(fraction,{numerator:'1',denominator:'100'})
+ const partial=JSON.parse(await readFile((await prepareArrangementCaptureRegions(editor.project,{sourceRoot:root,directory:root,midiOutput:'42'})).path,'utf8'))
+ assert.equal(partial.regions[0].captureClock.offset,'1');assert.ok(partial.regions[0].startSeconds>=0&&partial.regions[0].startSeconds<125/3/1e9)
+ assert.equal(partial.regions[1].repeat,1999999)
+}))
+
+test('an isolated audio component requires no MIDI route, while an isolated MIDI component prepares no WAV voice',async()=>fixture(async({root,input,bytes})=>{
+ const imported=await importArrangementCapture(newArrangement(),input,{projectPath:join(root,'song.json')})
+ let editor=arrangementEditor(imported.project)
+ for(const line of ['capture-region asset-1 2 0 .2','split-take','capture-offset 10'])editor=arrangementCommand(editor,line).editor
+ const audio=editArrangement(editor.project,{kind:'lane-mute',id:'lane-2'})
+ const request=arrangementPlaybackRequest(audio,arrangementRoute({output:'audio'}));assert.equal(request.kind,'prepare-capture')
+ const wave=JSON.parse(await readFile((await prepareArrangementCaptureRegions(audio,{sourceRoot:root,directory:root})).path,'utf8'))
+ assert.equal(wave.kind,'capture-audio-arrangement');assert.equal(wave.umpRegions,undefined);assert.equal(wave.regions[0].component,'audio')
+ const onlyMidi=editArrangement(editor.project,{kind:'lane-mute',id:'lane-1'})
+ const midi=JSON.parse(await readFile((await prepareArrangementCaptureRegions(onlyMidi,{sourceRoot:root,directory:root,midiOutput:'42'})).path,'utf8'))
+ assert.deepEqual(midi.regions,[]);assert.deepEqual(midi.assets,[]);assert.equal(midi.umpRegions.regions[0].component,'midi')
+ assert.deepEqual(midi.umpRegions.sources[0].timeline.packets,bytes.midi.toString().trim().split('\n').map(JSON.parse))
+}))

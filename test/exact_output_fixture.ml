@@ -23,6 +23,12 @@ let fixture_post_connect_timeout_seconds = 30.0
    at the response headers, so only this bounds a body that stalls. *)
 let fixture_post_body_timeout_seconds = 30.0
 
+type response_receipt =
+  | Complete_response of Cohttp.Code.status_code * string
+  | Refusal_without_body of Cohttp.Code.status_code
+      (** Flush refusal headers promising a nonempty body, then send no body.
+          The real client's body deadline must classify the unread cause. *)
+
 type server_behavior =
   | Reply of string
   | Stream_reply of string
@@ -32,6 +38,7 @@ type server_behavior =
           that refuses bodies over a size stands in for a real input limit, so
           a caller that answers a refusal by sending less can be watched
           converging rather than counted. *)
+  | Reply_with_receipt of (int -> string -> response_receipt)
   | Abort_after_request
   | Delay_then_reply of float * string
   | Stream_then_stall of string
@@ -113,38 +120,53 @@ let start_server ?on_request_before_reply ~sw ~net ~clock behavior =
     let request_index = Atomic.fetch_and_add posts 1 in
     ignore (Eio.Promise.try_resolve resolve_first_request_arrived ());
     Option.iter (fun hook -> hook ()) on_request_before_reply;
+    let complete response = `Response response in
     match behavior with
-    | Reply response -> Cohttp_eio.Server.respond_string ~status:`OK ~body:response ()
+    | Reply response -> complete (Cohttp_eio.Server.respond_string ~status:`OK ~body:response ())
     | Stream_reply response ->
-      Cohttp_eio.Server.respond_string
+      complete (Cohttp_eio.Server.respond_string
         ~headers:(Cohttp.Header.init_with "content-type" "text/event-stream")
-        ~status:`OK ~body:response ()
+        ~status:`OK ~body:response ())
     | Replies responses ->
       let response =
         match List.nth_opt responses request_index with
         | Some response -> response
         | None -> Alcotest.failf "no fixture reply for request %d" request_index
       in
-      Cohttp_eio.Server.respond_string ~status:`OK ~body:response ()
+      complete (Cohttp_eio.Server.respond_string ~status:`OK ~body:response ())
     | Reply_with answer ->
       let status, body = answer request_index request_body in
-      Cohttp_eio.Server.respond_string ~status ~body ()
+      complete (Cohttp_eio.Server.respond_string ~status ~body ())
+    | Reply_with_receipt answer ->
+      (match answer request_index request_body with
+       | Complete_response (status, body) ->
+         complete (Cohttp_eio.Server.respond_string ~status ~body ())
+       | Refusal_without_body status ->
+         let headers = Cohttp.Header.of_list
+           ["content-type", "application/json"; "content-length", "1";
+            "connection", "close"] in
+         `Expert (Cohttp.Response.make ~headers ~status (), fun input output ->
+           (* Ordinary respond buffers headers until the body's first read.
+              Flush explicitly before waiting: a pre-header timeout would not
+              exercise Not_received_in_window at all. *)
+           Eio.Buf_write.flush output;
+           ignore (Eio.Buf_read.take_all input)))
     | Abort_after_request -> raise Exit
     | Delay_then_reply (delay_s, response) ->
       Eio.Time.sleep clock delay_s;
-      Cohttp_eio.Server.respond_string ~status:`OK ~body:response ()
+      complete (Cohttp_eio.Server.respond_string ~status:`OK ~body:response ())
     | Stream_then_stall first_bytes ->
-      Cohttp_eio.Server.respond
+      complete (Cohttp_eio.Server.respond
         ~headers:(Cohttp.Header.init_with "content-type" "text/event-stream")
         ~status:`OK
         ~body:(stalling_source first_bytes)
-        ()
+        ())
     | Incomplete_reply first_bytes ->
-      Cohttp_eio.Server.respond
+      complete (Cohttp_eio.Server.respond
         ~headers:(Cohttp.Header.init_with "content-type" "application/json")
         ~status:`OK
         ~body:(stalling_source first_bytes)
-        ()
+        ())
   in
   let socket =
     Eio.Net.listen
@@ -159,7 +181,7 @@ let start_server ?on_request_before_reply ~sw ~net ~clock behavior =
     | `Tcp (_, port) -> port
     | _ -> Alcotest.fail "loopback listener did not expose a TCP port"
   in
-  let server = Cohttp_eio.Server.make ~callback:handler () in
+  let server = Cohttp_eio.Server.make_response_action ~callback:handler () in
   Eio.Fiber.fork_daemon ~sw (fun () ->
     Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
   { base_url = Printf.sprintf "http://127.0.0.1:%d" port

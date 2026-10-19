@@ -17,6 +17,7 @@ open Alcotest
 let expected =
   [ "masc_operator_action"
   ; "masc_operator_board_attention_quarantine_requeue"
+  ; "masc_operator_composition_resolution"
   ; "masc_operator_confirm"
   ; "masc_operator_digest"
   ; "masc_operator_judgment_write"
@@ -29,6 +30,7 @@ let expected =
 let expected_remote_order =
   [ {|masc_operator_action|}
   ; {|masc_operator_board_attention_quarantine_requeue|}
+  ; {|masc_operator_composition_resolution|}
   ; {|masc_operator_confirm|}
   ; {|masc_operator_digest|}
   ; {|masc_operator_snapshot|}

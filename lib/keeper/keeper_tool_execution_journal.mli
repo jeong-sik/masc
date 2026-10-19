@@ -129,6 +129,47 @@ val load
   -> (t, error) result
 (** Strict read-only load. Missing/corrupt authority never creates a run. *)
 
+type resolution_decision = Reject | Cancel
+type resolution
+(** A logical terminal decision, separate from the immutable physical worker
+    outcome. Original source, node results, child links and artifacts remain. *)
+
+type resolution_observation
+type resolution_report =
+  { resolution : resolution; marker_retired : bool; retirement_error : error option }
+
+val resolution_to_json : resolution -> Yojson.Safe.t
+val resolution_observation_to_json : resolution_observation -> Yojson.Safe.t
+val resolution_report_to_json : resolution_report -> Yojson.Safe.t
+
+val observe_resolution
+  : base_path:string -> keeper_name:string
+  -> composition_run_id:Keeper_tool_plan.Composition_run_id.t -> request_id:string
+  -> (resolution_observation, error) result
+(** Strict journal/source and canonical waiting/lost owner observation. Includes
+    an opaque version of the exact journal, physical terminal and pending marker.
+    Dependency/artifact readiness is not required and grants no execution right. *)
+
+val resolve_continuation
+  : base_path:string -> keeper_name:string
+  -> composition_run_id:Keeper_tool_plan.Composition_run_id.t -> request_id:string
+  -> expected_version:string -> decision:resolution_decision
+  -> requested_by:string -> reason:string -> now:float
+  -> (resolution_report, error) result
+(** Compare the observed version and original owner under the run transaction,
+    append the terminal decision durably, then retire only its exact marker.
+    All future bindings and node mutations refuse the resolved journal. Same
+    command retries retain the first timestamp and may retry marker retirement;
+    changed owner/version/decision/actor/reason is refused. Cleanup failure is
+    returned alongside the committed decision, never as a rollback claim. *)
+
+val observe_named_result
+  : base_path:string -> keeper_name:string -> Keeper_composition_dependency.composition
+  -> ((t * Keeper_msg_async.entry * resolution option), error) result
+(** A resolved child is ready for a typed failure read. Strict original named
+    membership, journal identity and canonical physical owner remain required;
+    unavailable dependency/artifact authority cannot turn resolution into exports. *)
+
 val source : t -> source
 val source_observation : t -> source_observation option
 (** Original producer metadata, if captured. Does not reread current Keeper,

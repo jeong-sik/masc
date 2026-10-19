@@ -427,10 +427,20 @@ type child_link =
   ; child_source : source
   ; accepted : Dependency.composition option
   }
+type resolution_decision = Reject | Cancel
+type resolution =
+  { owner : binding; decision : resolution_decision; requested_by : string
+  ; reason : string; resolved_at : float; expected_version : string
+  ; marker_version : string }
+type resolution_observation =
+  { request : Async.entry; version : string; resolution : resolution option }
+type resolution_report =
+  { resolution : resolution; marker_retired : bool; retirement_error : error option }
+
 type state =
   { source : source; source_sha : string; source_observation : source_observation option; owner : binding option
   ; prior_owners : (binding * node_record Nodes.t) list; nodes : node_record Nodes.t
-  ; children : child_link Nodes.t }
+  ; children : child_link Nodes.t; resolution : resolution option }
 type t = {base_path : string; root : string; path : string; immutable_source : source; source_sha : string;
           immutable_observation : source_observation option}
 type worker = {journal : t; binding : binding}
@@ -453,6 +463,39 @@ let binding_of_json json =
   {request_id; generation}
 let same_binding a b = String.equal a.request_id b.request_id && a.generation = b.generation
 let same_owner a b = match a, b with None, None -> true | Some a, Some b -> same_binding a b | _ -> false
+
+let resolution_decision_json = function Reject -> `String "rejected" | Cancel -> `String "cancelled"
+let resolution_to_json (resolution : resolution) = `Assoc
+  ["owner", binding_json resolution.owner; "decision", resolution_decision_json resolution.decision;
+   "requested_by", `String resolution.requested_by; "reason", `String resolution.reason;
+   "resolved_at", `Float resolution.resolved_at; "expected_version", `String resolution.expected_version;
+   "marker_version", `String resolution.marker_version]
+
+let resolution_of_json json =
+  let fields = object_fields
+      ["owner";"decision";"requested_by";"reason";"resolved_at";"expected_version";"marker_version"] json in
+  let owner = binding_of_json (field "owner" fields) in
+  let decision = match string (field "decision" fields) with
+    | "rejected" -> Reject | "cancelled" -> Cancel | _ -> refuse "invalid resolution decision" in
+  let requested_by = string (field "requested_by" fields)
+  and reason = string (field "reason" fields)
+  and expected_version = string (field "expected_version" fields)
+  and marker_version = string (field "marker_version" fields)
+  and resolved_at = number (field "resolved_at" fields) in
+  let digest text = String.length text = 64 && String.for_all
+      (function '0'..'9' | 'a'..'f' -> true | _ -> false) text in
+  require (exact_name requested_by && nonblank reason && finite resolved_at
+    && resolved_at >= 0. && digest expected_version && digest marker_version)
+    "invalid resolution evidence";
+  {owner;decision;requested_by;reason;resolved_at;expected_version;marker_version}
+
+let resolution_observation_to_json (observation : resolution_observation) = `Assoc
+  ["request", Async.entry_to_json observation.request; "expected_version", `String observation.version;
+   "resolution", option_json resolution_to_json observation.resolution]
+
+let resolution_report_to_json (report : resolution_report) = `Assoc
+  ["resolution", resolution_to_json report.resolution; "marker_retired", `Bool report.marker_retired;
+   "retirement_error", option_json error_to_json report.retirement_error]
 let occurrence_of_record = function Attempting occurrence | Settled (occurrence, _, _, _) -> occurrence
 let launch_invocation_json (invocation : launch_invocation) =
   `Assoc ["trace_id", `String invocation.trace_id;
@@ -682,6 +725,7 @@ let decode_state bytes = decode (fun () ->
         Some (source_observation_of_json (field "observation" fields)), rest
     | _ -> None, events in
   List.fold_left (fun state json ->
+    require (state.resolution = None) "journal event follows a terminal operator resolution";
     let kind = match json with `Assoc fields -> string (field "kind" fields) | _ -> refuse "invalid journal row" in
     let extras = match kind with
       | "binding" -> ["expected_owner"; "owner"]
@@ -689,10 +733,15 @@ let decode_state bytes = decode (fun () ->
       | "settled" -> ["occurrence"; "completed"; "failure_effect_disposition"; "dependency_wait"]
       | "child_intent" -> ["occurrence";"result_node_id";"child_source"]
       | "child_accepted" -> ["node_id";"binding"]
+      | "resolution" -> ["resolution"]
       | _ -> refuse "unknown journal event" in
     let fields = object_fields (["schema"; "kind"; "source_sha"] @ extras) json in
     require (field "schema" fields = `Int 3 && field "source_sha" fields = `String source_sha) "event source/schema mismatch";
     match kind with
+    | "resolution" ->
+      let resolution = resolution_of_json (field "resolution" fields) in
+      require (same_owner state.owner (Some resolution.owner)) "resolution owner mismatch";
+      {state with resolution=Some resolution}
     | "child_intent" ->
       let occurrence = occurrence_of_json (field "occurrence" fields) in
       let key = Plan.Node_id.to_string occurrence.node_id in
@@ -773,7 +822,8 @@ let decode_state bytes = decode (fun () ->
         Settled (occurrence, completed, phase, dependency_wait)) in
       {state with nodes = Nodes.add key record state.nodes}
     | _ -> refuse "unknown journal event")
-    {source; source_sha; source_observation; owner = None; prior_owners = []; nodes = Nodes.empty;children=Nodes.empty} events)
+    {source; source_sha; source_observation; owner = None; prior_owners = []; nodes = Nodes.empty;
+     children=Nodes.empty;resolution=None} events)
 
 let source journal = journal.immutable_source
 let source_observation journal = journal.immutable_observation
@@ -876,7 +926,7 @@ let cleanup_warning path failure =
   | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
   | Sys_error _ | Unix.Unix_error _ -> ()
 
-let update_existing journal decide = filesystem (fun () ->
+let update_existing_with_bytes journal decide = filesystem (fun () ->
   let* () = validate_owned_path ~root:journal.root ~path:journal.path ~create:false in
   let callback bytes =
     match validate_owned_path ~root:journal.root ~path:journal.path ~create:false with
@@ -884,7 +934,7 @@ let update_existing journal decide = filesystem (fun () ->
     | Ok () ->
       match Result.map_error (fun detail -> Corrupt_journal detail) (decode_state bytes) with
       | Error error -> None, Error error
-      | Ok state -> match check_source journal state with Error error -> None, Error error | Ok () -> decide state in
+      | Ok state -> match check_source journal state with Error error -> None, Error error | Ok () -> decide bytes state in
   let unpack = function None -> Error Missing_journal | Some result -> result in
   match Fs_compat.update_existing_private_file_durable_locked_result journal.path callback with
   | Fs_compat.Private_file_succeeded value -> unpack value
@@ -893,6 +943,8 @@ let update_existing journal decide = filesystem (fun () ->
   | Private_file_failed error -> Error (Persistence_failed (Fs_compat.private_jsonl_transaction_error_to_string error))
   | Private_file_failed_with_cleanup_failure {error; cleanup_failure} ->
     Error (Persistence_failed (Fs_compat.private_jsonl_transaction_error_to_string error ^ "; cleanup=" ^ Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)))
+
+let update_existing journal decide = update_existing_with_bytes journal (fun _ state -> decide state)
 
 let prepare ?observation ~base_path immutable_source = filesystem (fun () ->
   let* () = Result.map_error (fun detail -> Invalid_source detail) (decode (fun () -> validate_source immutable_source)) in
@@ -940,16 +992,23 @@ let prepare ?observation ~base_path immutable_source = filesystem (fun () ->
   | Private_file_failed_with_cleanup_failure {error; cleanup_failure} ->
     Error (Persistence_failed (Fs_compat.durable_append_error_to_string error ^ "; cleanup=" ^ Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)))
 
-let load ~base_path ~keeper_name ~composition_run_id = filesystem (fun () ->
+let load_authority_state ~base_path ~keeper_name ~composition_run_id = filesystem (fun () ->
   if not (exact_name keeper_name) then Error (Invalid_source "invalid keeper name") else
   let base_path = Fs_compat.realpath base_path in
   let root, path = path_for ~base_path ~keeper_name ~composition_run_id in
   let* state = strict_read ~root path in
   if not (String.equal state.source.keeper_name keeper_name && Plan.Composition_run_id.equal state.source.composition_run_id composition_run_id)
   then Error Source_conflict else
-  let* () = validate_artifacts ~base_path state.source in
-  Ok {base_path; root; path; immutable_source = state.source; source_sha = state.source_sha;
-      immutable_observation=state.source_observation})
+  Ok ({base_path; root; path; immutable_source = state.source; source_sha = state.source_sha;
+       immutable_observation=state.source_observation},state))
+
+let load_authority ~base_path ~keeper_name ~composition_run_id =
+  load_authority_state ~base_path ~keeper_name ~composition_run_id |> Result.map fst
+
+let load ~base_path ~keeper_name ~composition_run_id =
+  let* journal = load_authority ~base_path ~keeper_name ~composition_run_id in
+  let* () = filesystem (fun () -> validate_artifacts ~base_path:journal.base_path journal.immutable_source) in
+  Ok journal
 
 let entry_matches_source source (entry : Async.entry) = decode (fun () ->
   require (String.equal entry.keeper_name source.keeper_name && String.equal entry.submitted_by source.keeper_name) "request caller/keeper mismatch";
@@ -1062,6 +1121,107 @@ let prepare_continuation_marker journal ~request_id = filesystem (fun () ->
     if continuation_marker_json found = continuation_marker_json marker then Ok ()
     else Error (Invalid_continuation_marker "marker changed request/run/owner identity"))
 
+let marker_version (snapshot : Fs_compat.private_jsonl_snapshot) =
+  json_sha (`List [`String snapshot.bytes;
+    `String (Fs_compat.Private_jsonl_cursor.fingerprint snapshot.cursor)])
+
+let resolution_marker journal request_id =
+  let path = Filename.concat (continuation_directory ~base_path:journal.base_path)
+      (continuation_filename request_id) in
+  let* snapshot = continuation_snapshot ~root:journal.root path in
+  let* () = if Fs_compat.Private_jsonl_cursor.is_missing snapshot.cursor then Ok () else
+    let* marker = decode_continuation_marker snapshot.bytes in
+    if String.equal marker.request_id request_id
+        && String.equal marker.keeper_name journal.immutable_source.keeper_name
+        && Plan.Composition_run_id.equal marker.composition_run_id journal.immutable_source.composition_run_id
+    then Ok () else Error (Invalid_continuation_marker "resolution marker differs from the original source") in
+  Ok (path,snapshot)
+
+let retire_resolution_marker ~root ~path ~snapshot (resolution : resolution) =
+  if Fs_compat.Private_jsonl_cursor.is_missing snapshot.Fs_compat.cursor then Ok ()
+  else if not (String.equal (marker_version snapshot) resolution.marker_version)
+  then Error (Invalid_continuation_marker "resolved marker was replaced; replacement retained")
+  else
+    let* () = validate_owned_path ~root ~path ~create:true in
+    let* receipt = Fs_compat.purge_private_jsonl_durable_locked_at_snapshot_result path
+        ~expected:snapshot
+      |> Fs_compat.private_jsonl_cursor_success_receipt
+      |> Result.map_error (fun error -> Persistence_failed
+          (Fs_compat.private_jsonl_transaction_error_to_string error)) in
+    ignore (continuation_receipt path receipt);
+    match receipt.settlement_error with
+    | None -> Ok ()
+    | Some error -> Error (Persistence_failed
+        ("resolved marker primary retirement committed; settlement incomplete: " ^
+          Fs_compat.private_jsonl_transaction_error_to_string error))
+
+let with_resolution_terminal journal request_id f =
+  match Async.with_canonical_durable_terminal ~base_path:journal.base_path
+      ~caller:journal.immutable_source.keeper_name request_id ~f:(fun proof ->
+        let entry = Async.durable_terminal_entry proof in
+        let* () = entry_matches_source journal.immutable_source entry
+          |> Result.map_error (fun detail -> Invalid_source detail) in
+        match entry.status with
+        | Async.Waiting_for_dependencies _ | Lost _ -> f entry
+        | Queued | Running | Cancelling _ | Cancelled _ | Persistence_failed _ | Done _ ->
+          Error (Invalid_result "explicit continuation resolution requires a waiting or lost physical owner")) with
+  | Ok result -> result
+  | Error error -> Error (Prior_owner_not_terminal
+      {request_id;reason=Async.canonical_terminal_error_to_string error})
+
+let resolution_version bytes snapshot entry =
+  json_sha (`List [`String bytes; `String (marker_version snapshot); Async.entry_to_json entry])
+
+let observe_resolution ~base_path ~keeper_name ~composition_run_id ~request_id = filesystem (fun () ->
+  (* This loader can only observe or revoke future work. Missing dependency or
+     artifact authority must not prevent an explicit revocation, and is never
+     upgraded into replay permission. The journal and physical owner remain strict. *)
+  let* journal = load_authority ~base_path ~keeper_name ~composition_run_id in
+  with_resolution_terminal journal request_id (fun request ->
+    let* _,snapshot = resolution_marker journal request_id in
+    update_existing_with_bytes journal (fun bytes state -> None,
+      let* () = match state.owner with
+        | Some owner when String.equal owner.request_id request_id -> Ok ()
+        | None | Some _ -> Error Ownership_changed in
+      match state.resolution with
+      | Some resolution -> Ok {request;version=resolution.expected_version;resolution=Some resolution}
+      | None when Fs_compat.Private_jsonl_cursor.is_missing snapshot.cursor ->
+        Error (Invalid_continuation_marker "unresolved owner has no pending marker")
+      | None -> Ok {request;version=resolution_version bytes snapshot request;resolution=None})))
+
+let resolve_continuation ~base_path ~keeper_name ~composition_run_id ~request_id
+    ~expected_version ~decision ~requested_by ~reason ~now = filesystem (fun () ->
+  let* () = if exact_name requested_by && nonblank reason && finite now && now >= 0.
+    then Ok () else Error (Invalid_source "resolution requires an actor, reason and finite timestamp") in
+  let* journal = load_authority ~base_path ~keeper_name ~composition_run_id in
+  with_resolution_terminal journal request_id (fun request ->
+    let* path,snapshot = resolution_marker journal request_id in
+    let* resolution = update_existing_with_bytes journal (fun bytes state ->
+      match state.owner with
+      | None -> None, Error Ownership_changed
+      | Some owner when not (String.equal owner.request_id request_id) -> None, Error Ownership_changed
+      | Some owner ->
+        match state.resolution with
+        | Some resolution ->
+          if String.equal resolution.expected_version expected_version
+              && resolution.decision = decision && String.equal resolution.requested_by requested_by
+              && String.equal resolution.reason reason
+          then None, Ok resolution else None, Error Ownership_changed
+        | None ->
+          if Fs_compat.Private_jsonl_cursor.is_missing snapshot.cursor
+              || not (String.equal (resolution_version bytes snapshot request) expected_version)
+          then None, Error Ownership_changed else
+          let resolution = {owner;decision;requested_by;reason;resolved_at=now;
+            expected_version;marker_version=marker_version snapshot} in
+          Some (row (event "resolution" journal.source_sha
+            ["resolution",resolution_to_json resolution])), Ok resolution) in
+    (* The journal append has durably committed before marker retirement. Any
+       interruption here leaves a terminal decision that a same-command retry
+       or discovery can observe; it never reopens the original effect lane. *)
+    let retirement_error = match retire_resolution_marker ~root:journal.root ~path ~snapshot resolution with
+      | Ok () -> None | Error error -> Some error in
+    Ok {resolution;marker_retired=Option.is_none retirement_error;retirement_error}))
+
 let canonical_entry journal request_id =
   let* entry = match Async.load_canonical_request ~base_path:journal.base_path
       ~caller:journal.immutable_source.keeper_name request_id with
@@ -1104,6 +1264,16 @@ let named_binding journal =
   match admission with
   | Some binding -> Ok binding
   | None -> Error (Invalid_source "named run has no admitted original owner")
+
+let resolved_named_result journal state (binding : Dependency.composition) =
+  match state.resolution with
+  | None -> Ok None
+  | Some resolution ->
+    let* original = original_named_binding journal state in
+    let* () = if canonical_equal (Dependency.composition_to_json original) (Dependency.composition_to_json binding)
+      then Ok () else Error (Invalid_source "resolved result differs from the original named binding") in
+    with_resolution_terminal journal resolution.owner.request_id (fun entry ->
+      Ok (Some (entry,resolution)))
 
 let validate_nested_producer journal =
   match journal.immutable_source.producer with
@@ -1192,13 +1362,14 @@ let bind_expected_owner journal ~request_id ~(expected : binding option) ~expect
   (* on_accepted holds the new request before its worker starts. Terminal
      publication is immutable. Only run ownership needs a CAS under this lock. *)
   let* () = canonical_queued journal request_id in
-  let* () = prepare_continuation_marker journal ~request_id in
   update_existing journal (fun state ->
-    if not (same_owner state.owner expected)
+    if state.resolution <> None || not (same_owner state.owner expected)
         || Option.fold ~none:false ~some:(fun nodes -> nodes <> state.nodes) expected_nodes
         || Option.fold ~none:false ~some:(fun children -> not (same_children children state.children)) expected_children
     then None, Error Ownership_changed
-    else match state.owner with
+    else match prepare_continuation_marker journal ~request_id with
+      | Error error -> None, Error error
+      | Ok () -> match state.owner with
       | Some binding when binding.request_id = request_id -> None, Ok {journal; binding}
       | prior ->
         let binding = {request_id; generation = (match prior with None -> 1 | Some prior -> prior.generation + 1)} in
@@ -1373,6 +1544,7 @@ let waiting_continuation journal = filesystem (fun () ->
   let* () = validate_artifacts ~base_path:journal.base_path journal.immutable_source in
   let* state = strict_read ~root:journal.root journal.path in
   let* () = check_source journal state in
+  if state.resolution <> None then Ok None else
   let* () = validate_nested_producer journal in
   match state.owner with
   | None -> Ok None
@@ -1489,7 +1661,7 @@ let continuation_readiness ~read_composition_result (continuation : continuation
   let journal = continuation.journal in
   let* state = strict_read ~root:journal.root journal.path in
   let* () = check_source journal state in
-  if not (same_owner state.owner (Some continuation.expected_owner))
+  if state.resolution <> None || not (same_owner state.owner (Some continuation.expected_owner))
       || state.nodes <> continuation.suspended_nodes
       || not (same_children state.children continuation.suspended_children) then Error Ownership_changed
   else
@@ -1522,7 +1694,7 @@ let continuation_readiness ~read_composition_result (continuation : continuation
     | Waiting_for_results, true -> Ok Waiting_for_results)
       (Ok Results_ready) continuation.dependencies)
 
-let named_result_owner journal binding = filesystem (fun () ->
+let named_result_owner_state journal binding = filesystem (fun () ->
   let* state = strict_read ~root:journal.root journal.path in
   let* () = check_source journal state in
   let* original = original_named_binding journal state in
@@ -1572,7 +1744,24 @@ let named_result_owner journal binding = filesystem (fun () ->
   let* current = strict_read ~root:journal.root journal.path in
   let* () = check_source journal current in
   if same_owner current.owner state.owner && current.prior_owners = state.prior_owners && current.nodes = state.nodes
-  then Ok entry else Error Ownership_changed)
+  then Ok (entry,current) else Error Ownership_changed)
+
+let named_result_owner journal binding = named_result_owner_state journal binding |> Result.map fst
+
+let observe_named_result ~base_path ~keeper_name (binding : Dependency.composition) = filesystem (fun () ->
+  let* journal,state = load_authority_state ~base_path ~keeper_name ~composition_run_id:binding.composition_run_id in
+  let* resolved = resolved_named_result journal state binding in
+  match resolved with
+  | Some (entry,resolution) -> Ok (journal,entry,Some resolution)
+  | None ->
+    let* () = validate_artifacts ~base_path:journal.base_path journal.immutable_source in
+    let* entry,state = named_result_owner_state journal binding in
+    (* Reuse the owner reader's final source snapshot: a concurrent resolution
+       must not be hidden by its physical waiting status. *)
+    let* resolved = resolved_named_result journal state binding in
+    match resolved with
+    | Some (entry,resolution) -> Ok (journal,entry,Some resolution)
+    | None -> Ok (journal,entry,None))
 
 type pending_continuations =
   { inspected : int; ready : continuation list; waiting : int; retired : int
@@ -1626,10 +1815,13 @@ let pending_continuations_with ~before_retire ~on_ready ~read_composition_result
         let* marker = decode_continuation_marker snapshot.bytes in
         if name <> continuation_filename marker.request_id
         then Error (Invalid_continuation_marker "marker filename does not bind its request") else
-        let* journal = load ~base_path ~keeper_name:marker.keeper_name
+        let* journal = load_authority ~base_path ~keeper_name:marker.keeper_name
             ~composition_run_id:marker.composition_run_id in
         let* state = strict_read ~root journal.path in
         let* () = check_source journal state in
+        let* () = match state.resolution with
+          | Some _ -> Ok ()
+          | None -> validate_artifacts ~base_path journal.immutable_source in
         match Async.load_canonical_durable_terminal ~base_path ~caller:marker.keeper_name marker.request_id with
         | Error (Async.Canonical_terminal_runtime_active _ | Canonical_terminal_nonterminal _) -> Ok Still_waiting
         | Error (Async.Canonical_terminal_absent | Async.Canonical_terminal_unreadable _
@@ -1651,7 +1843,14 @@ let pending_continuations_with ~before_retire ~on_ready ~read_composition_result
               |> Result.map_error (fun error -> Persistence_failed
                   (Fs_compat.private_jsonl_transaction_error_to_string error)) in
             ignore (continuation_receipt path receipt); Ok Retired in
-          match state.owner with
+          match state.resolution with
+          | Some resolution ->
+            if not (String.equal resolution.owner.request_id marker.request_id)
+            then Error (Invalid_continuation_marker "resolved owner differs from pending marker") else
+            let () = before_retire path in
+            let* () = retire_resolution_marker ~root ~path ~snapshot resolution in
+            Ok Retired
+          | None -> match state.owner with
           | None -> Error (Invalid_continuation_marker "request has no bound journal owner")
           | Some current when current.request_id <> marker.request_id -> retire ()
           | Some _ ->
@@ -1688,9 +1887,9 @@ let pending_continuations_with ~before_retire ~on_ready ~read_composition_result
     | Ok Retired ->
       let report = {report with inspected=report.inspected+1} in
       {report with retired=report.retired+1}
-    (* Permanent Invalid_result also retains its marker. Explicit owner-bound
-       resolution is pending: #42799, issuecomment-6175534613. Missing
-       authority must not become retirement or replacement dispatch. *)
+    (* Permanent Invalid_result retains its marker unless an explicit, durable
+       owner-bound resolution seals this run and its exact marker snapshot.
+       Missing authority never becomes retirement or replacement dispatch. *)
     | Error error ->
       let report = {report with inspected=report.inspected+1} in
       {report with failures=(name,error) :: report.failures}) empty names in
@@ -1707,7 +1906,9 @@ module For_testing = struct
     pending_continuations_with ~before_retire ~on_ready:ignore ~read_composition_result ~base_path
 end
 
-let check_worker (worker : worker) (state : state) = if same_owner state.owner (Some worker.binding) then Ok () else Error Ownership_changed
+let check_worker (worker : worker) (state : state) =
+  if state.resolution = None && same_owner state.owner (Some worker.binding) then Ok ()
+  else Error Ownership_changed
 
 let worker_child_admission (worker : worker) ~node_ids =
   update_existing worker.journal (fun state -> None,

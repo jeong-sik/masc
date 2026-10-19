@@ -83,6 +83,7 @@ module Operator_name : sig
   type t =
     | Operator_action
     | Operator_board_attention_quarantine_requeue
+    | Operator_composition_resolution
     | Operator_confirm
     | Operator_digest
     | Operator_judgment_write

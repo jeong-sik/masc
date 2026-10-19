@@ -18,5 +18,6 @@ val digest : dual_schemas
 val action : dual_schemas
 val quarantine_requeue : Masc_domain.tool_schema
 val task_recovery_resolve : Masc_domain.tool_schema
+val composition_resolution : Masc_domain.tool_schema
 val confirm : Masc_domain.tool_schema
 val judgment_write : Masc_domain.tool_schema

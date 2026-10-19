@@ -905,7 +905,60 @@ let test_first_loss_retains_unproven_effects mode () =
       check int "public refusal creates no active request" 0 (List.length active.entries);
       reject (Journal.waiting_continuation prepared.journal);
       check string "manual refusal preserves pending marker" marker_bytes (read marker_path);
-      check string "discovery and manual refusal preserve original occurrences" original (read path));
+      check string "discovery and manual refusal preserve original occurrences" original (read path);
+      let module Command = Masc.Operator_composition_resolution_command in
+      let target = ["keeper_name",`String keeper;"request_id",`String request_id;
+        "composition_run_id",`String (Plan.Composition_run_id.to_string prepared.source.composition_run_id)] in
+      let command name fields = Command.parse_tool_command (`Assoc (("command",`String name)::target @ fields))
+        |> require "explicit operator command" in
+      let run ?(actor="operator-fixture") ~now command =
+        Command.execute ~base_path ~actor ~now command in
+      let observation = run ~now:100. (command "observe" []) |> journal_value "observe unresolved original owner"
+        |> Command.outcome_to_json in
+      let version = observation |> Yojson.Safe.Util.member "expected_version" |> Yojson.Safe.Util.to_string in
+      let decision = if mode = "unknown" then "reject" else "cancel" in
+      let resolve = command decision ["expected_version",`String version;"reason",`String "stop this exact original continuation"] in
+      (* Preserve a real original marker inode while substituting same bytes at
+         its public path. A stale operator observation cannot revoke replacement
+         authority or consume its marker. No child command is called here. *)
+      let parked = Filename.concat base_path "original-marker-for-resolution" in
+      Unix.rename marker_path parked;
+      Fun.protect ~finally:(fun () ->
+        if Sys.file_exists marker_path then Unix.unlink marker_path;
+        Unix.rename parked marker_path) (fun () ->
+        write marker_path marker_bytes; Unix.chmod marker_path 0o600;
+        (match run ~now:101. resolve with
+         | Error Journal.Ownership_changed -> ()
+         | Error error -> fail (Journal.error_to_string error)
+         | Ok _ -> fail "stale marker observation committed a resolution");
+        check string "stale resolution preserves the original node journal" original (read path);
+        check string "stale resolution retains the replacement marker" marker_bytes (read marker_path));
+      let resolved = run ~now:102. resolve |> journal_value "explicit original resolution"
+        |> Command.outcome_to_json in
+      check_json "exact marker retired after durable resolution" (`Bool true)
+        (Yojson.Safe.Util.member "marker_retired" resolved);
+      check bool "resolved marker no longer indexed" false (Sys.file_exists marker_path);
+      let resolved_bytes = read path in
+      check bool "resolution appends without rewriting original results" true (String.starts_with ~prefix:original resolved_bytes);
+      let unchanged_terminal = Async.load_canonical_durable_terminal ~base_path ~caller:keeper request_id
+        |> require "physical terminal after resolution" |> Async.durable_terminal_entry in
+      check bool "logical decision preserves physical Lost outcome" true (Async.same_entry_record terminal unchanged_terminal);
+      (match Journal.waiting_continuation prepared.journal with
+       | Ok None -> () | Ok (Some _) | Error _ -> fail "resolved journal remained resumable");
+      (match submit base_path sw prepared
+          (fun ?launch_replay:_ ~tool_use_id:_ ~node:_ ~descriptor:_ ~schedule:_ ~input:_ () ->
+            fail "resolved run attempted another child effect") with
+       | Error (_,Some Journal.Ownership_changed) -> ()
+       | Error _ | Ok _ -> fail "resolved source acquired another worker");
+      check_json "same-command retry retains original decision and timestamp" resolved
+        (run ~now:200. resolve |> journal_value "idempotent exact resolution retry" |> Command.outcome_to_json);
+      (match run ~actor:"competing-operator" ~now:201. resolve with
+       | Error Journal.Ownership_changed -> ()
+       | Error _ | Ok _ -> fail "competing operator replaced committed resolution");
+      check string "retry and competing decision preserve the committed journal" resolved_bytes (read path);
+      let settled = pending () in
+      check int "resolved original owner has no retained discovery failure" 0 (List.length settled.failures);
+      check int "resolved original owner schedules no continuation" 0 (List.length settled.ready));
     check string "original child dispatched once" "one dispatch entry\n" (read (Filename.concat base_path "first-loss-effect")))
 
 let test_exact_queued_admission () = with_workspace (fun env sw base_path ->

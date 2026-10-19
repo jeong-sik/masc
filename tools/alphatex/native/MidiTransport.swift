@@ -363,14 +363,26 @@ struct MidiRegion {
     let addresses: Set<Int>
     let startKnown: Set<ChaseField>, endTouched: Set<ChaseField>
     let sourceDuration: Double
-    var duration: Double { spec.sourceEnd - spec.sourceStart }
-    var end: Double { spec.startSeconds + duration * Double(spec.repeatCount) }
+    // Region boundaries are compared and scheduled on an exact integer-nanosecond
+    // grid. A start taken from a project position and an end accumulated from a
+    // source span must not disagree by a rounding ulp, or two exactly abutting
+    // regions read as an overlap and the whole arrangement is refused.
+    var startNanoseconds: Int64 { Int64((spec.startSeconds * 1e9).rounded()) }
+    var durationNanoseconds: Int64 { Int64((spec.sourceEnd * 1e9).rounded()) - Int64((spec.sourceStart * 1e9).rounded()) }
+    var endNanoseconds: Int64 { startNanoseconds + durationNanoseconds * Int64(spec.repeatCount) }
+    var duration: Double { Double(durationNanoseconds) / 1e9 }
+    var end: Double { Double(endNanoseconds) / 1e9 }
+    func startSeconds(copy: Int) -> Double { Double(startNanoseconds + Int64(copy) * durationNanoseconds) / 1e9 }
     init(spec: MidiRegionSpec, sourceDuration: Double, events: [WireEvent]) throws {
         guard spec.startSeconds.isFinite, spec.startSeconds >= 0, spec.sourceStart.isFinite, spec.sourceStart >= 0,
               spec.sourceEnd.isFinite, spec.sourceEnd > spec.sourceStart, spec.sourceEnd <= sourceDuration,
               spec.repeatCount > 0, spec.repeatCount <= 9_007_199_254_740_991,
               spec.startSeconds + (spec.sourceEnd - spec.sourceStart) > spec.startSeconds,
               (spec.startSeconds + (spec.sourceEnd - spec.sourceStart) * Double(spec.repeatCount)).isFinite else { throw MidiFailure("MIDI regions require representable positive source spans and finite repeat counts") }
+        guard spec.startSeconds * 1e9 < Double(Int64.max), spec.sourceEnd * 1e9 < Double(Int64.max) else { throw MidiFailure("MIDI region span exceeds the nanosecond grid") }
+        let gridStart = Int64((spec.startSeconds * 1e9).rounded())
+        let gridSpan = Int64((spec.sourceEnd * 1e9).rounded()) - Int64((spec.sourceStart * 1e9).rounded())
+        guard gridSpan > 0, Int64(spec.repeatCount) <= (Int64.max - gridStart) / gridSpan else { throw MidiFailure("MIDI region span exceeds the nanosecond grid") }
         self.spec = spec; self.events = events; self.sourceDuration = sourceDuration
         var end = SourceChase(), addresses = Set<Int>()
         for event in events where event.seconds < spec.sourceEnd || event.seconds == spec.sourceEnd && spec.sourceEnd == sourceDuration {
@@ -480,7 +492,7 @@ struct Timeline: Decodable {
                 mutations.formUnion(region.endTouched)
             }
             for (index, first) in regions.enumerated() {
-                for second in regions.dropFirst(index + 1) where first.spec.startSeconds < second.end && second.spec.startSeconds < first.end {
+                for second in regions.dropFirst(index + 1) where first.startNanoseconds < second.endNanoseconds && second.startNanoseconds < first.endNanoseconds {
                     guard first.addresses.isDisjoint(with: second.addresses) else { throw MidiFailure("overlapping MIDI regions own the same destination/channel") }
                 }
             }
@@ -762,7 +774,7 @@ final class MidiTransport {
         }
         for event in notes.values.sorted(by: { $0.key < $1.key }) where held[event.key] != event { try apply(event) }
     }
-    func regionStart(_ region: MidiRegion, copy: Int) -> Double { region.spec.startSeconds + Double(copy) * region.duration }
+    func regionStart(_ region: MidiRegion, copy: Int) -> Double { region.startSeconds(copy: copy) }
     func nextRegionAction() -> MidiRegionAction? {
         var selected: MidiRegionAction?
         for (index, region) in timeline.regions.enumerated() {
@@ -775,7 +787,7 @@ final class MidiTransport {
                 let event = region.events[cursor.index]
                 action = MidiRegionAction(seconds: start + (event.seconds - region.spec.sourceStart), region: index,
                                           kind: event.seconds == region.spec.sourceEnd ? .endpointEvent : .event)
-            } else { action = MidiRegionAction(seconds: start + region.duration, region: index, kind: .end) }
+            } else { action = MidiRegionAction(seconds: region.startSeconds(copy: cursor.copy + 1), region: index, kind: .end) }
             if selected == nil || action.seconds < selected!.seconds
                 || action.seconds == selected!.seconds && (action.kind.rawValue < selected!.kind.rawValue
                     || action.kind == selected!.kind && action.region < selected!.region) { selected = action }

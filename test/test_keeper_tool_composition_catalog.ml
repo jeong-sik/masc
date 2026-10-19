@@ -1302,6 +1302,56 @@ let test_prepare_schema_has_no_recursive_references () =
     alternatives
 ;;
 
+(* The whole advertised catalog — static descriptors and the OCaml-built
+   composition surfaces alike — rides in one provider request, so a single
+   recursive schema anywhere breaks every turn on a provider that refuses
+   recursive JSON Schemas (Muse: 400 "Recursive JSON schemas ..."). Walk every
+   descriptor input schema and the prepare/run projections and require no
+   [$ref] and no [$defs] at any depth (#43150 follow-up, task-2359). *)
+let test_every_advertised_schema_holds_no_recursive_references () =
+  let rec has_reference_keyword = function
+    | `Assoc fields ->
+      List.exists
+        (fun (key, value) ->
+           String.equal key "$ref" || String.equal key "$defs"
+           || has_reference_keyword value)
+        fields
+    | `List items -> List.exists has_reference_keyword items
+    | _ -> false
+  in
+  let offenders =
+    Masc.Keeper_tool_descriptor.all_descriptors ()
+    |> List.filter (fun ({ input_schema; _ } : Masc.Keeper_tool_descriptor.t) ->
+           has_reference_keyword input_schema)
+    |> List.map (fun ({ id; public_name; _ } : Masc.Keeper_tool_descriptor.t) ->
+           Printf.sprintf "%s (%s)" id public_name)
+  in
+  Alcotest.(check (list string))
+    "no advertised descriptor schema carries a $ref or $defs at any depth"
+    [] offenders;
+  List.iter
+    (fun (name, schema) ->
+       Alcotest.(check bool)
+         (Printf.sprintf "composition projection %s holds no $ref or $defs" name)
+         false
+         (has_reference_keyword schema))
+    [ Draft.prepare_tool_name, Draft.prepare_schema.Masc_domain.input_schema
+    ; Draft.run_tool_name, Draft.run_schema.Masc_domain.input_schema ];
+  (* Positive control: the detector must flag a deliberately recursive
+     fixture, so an empty offender list can only mean a clean catalog. *)
+  let recursive_fixture =
+    `Assoc
+      [ "type", `String "object"
+      ; "$defs", `Assoc [ "template", `Assoc [ "type", `String "object" ] ]
+      ; "properties", `Assoc
+          [ "value", `Assoc [ "$ref", `String "#/$defs/template" ] ] ]
+  in
+  Alcotest.(check bool)
+    "positive control: the detector flags a deliberately recursive schema"
+    true
+    (has_reference_keyword recursive_fixture)
+;;
+
 let test_without_recursive_refs_matches_ref_string_not_key_order () =
   (* Generator output that attaches sibling keywords (description, title) in
      either key order alongside [$ref = "#/$defs/template"] must still be
@@ -1499,6 +1549,10 @@ let () =
             "prepare schema advertises no recursive references"
             `Quick
             test_prepare_schema_has_no_recursive_references
+        ; test_case
+            "every advertised schema holds no recursive references"
+            `Quick
+            test_every_advertised_schema_holds_no_recursive_references
         ; test_case
             "without_recursive_refs matches the $ref string, not key order"
             `Quick

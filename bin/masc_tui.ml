@@ -1916,7 +1916,8 @@ let fork_workspace_job ?(observation = false) ?(on_withdrawn = fun () -> ()) sta
 
 (* Dispatch owns cancellation, error conversion and the original completion
    envelope. Each caller supplies its own admission before doing its work. *)
-let launch_workspace_result ?(operation = false) state ~mailbox ~boundary_error ~deliver perform =
+let launch_workspace_result ?(operation = false) ?(observation = false)
+    ?(on_not_run = fun () -> ()) state ~mailbox ~boundary_error ~deliver perform =
   let enqueue_async = workspace_enqueue state in
   let deliver_result result =
     let message = deliver result in
@@ -1932,14 +1933,18 @@ let launch_workspace_result ?(operation = false) state ~mailbox ~boundary_error 
     in
     deliver_result result
   in
+  let not_run detail =
+    on_not_run ();
+    deliver_result (Error (boundary_error detail))
+  in
   match Eio_context.get_switch_opt () with
   | Some sw ->
-      (match fork_workspace_job state ~sw run with
+      (match fork_workspace_job ~observation state ~sw run with
        | () -> ()
        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
        | exception exn ->
-           deliver_result (Error (boundary_error (Printexc.to_string exn))))
-  | None -> deliver_result (Error (boundary_error "Eio switch is unavailable"))
+           not_run (Printexc.to_string exn))
+  | None -> not_run "Eio switch is unavailable"
 
 (* Existing request/effect callers still recheck the endpoint before dispatch. *)
 let launch_workspace_request ?(operation = false) state ~mailbox ~boundary_error ~deliver read =
@@ -1973,9 +1978,10 @@ let capture_workspace_json_read state read =
           Masc_tui_workspace_read.with_binding ~host ~port ~expected
             ~proof:Masc_tui_workspace_read.Request_precondition read
 
-let launch_workspace_json_read state ~mailbox ~deliver read =
+let launch_workspace_json_read ?on_not_run state ~mailbox ~deliver read =
   let read = capture_workspace_json_read state read in
-  launch_workspace_result state ~mailbox ~boundary_error:Fun.id ~deliver read
+  launch_workspace_result ~observation:true ?on_not_run state
+    ~mailbox ~boundary_error:Fun.id ~deliver read
 
 (* A creation keeps its operation receipt even after its workspace withdraws.
    Only the result handler may use current authority to refresh or open chat. *)
@@ -4743,25 +4749,17 @@ let launch_board_quarantines_bulk_requeue state ~mailbox ~keeper_name items =
 let launch_connectors_load state ~mailbox =
   if server_authority_ready state then
   let authority = state.detail_read_authority in
-  let enqueue_async = workspace_enqueue state in
-  let workspace_authority = state.workspace_authority in
-  let identity = state.server_identity in
   if state.connectors_inflight then ()
   else begin
     state.connectors_inflight <- true;
     let host = server_peer_host in
     let port = state.port in
-    Masc_tui_async_read.launch
-      ~source:Masc_tui_async_read.Connectors
+    launch_workspace_json_read state ~mailbox
       ~on_not_run:(fun () -> if authority == state.detail_read_authority then state.connectors_inflight <- false)
       ~deliver:(fun result ->
-        enqueue_async mailbox (Connectors_loaded (authority, result)))
-      (fun () ->
-        let ( let* ) = Result.bind in
-        let* () = check_workspace_request state ~mailbox ~authority:workspace_authority ~identity ~host ~port () in
-        let* snapshot = Masc_tui_loader.load_connectors ~host ~port in
-        let* () = check_workspace_request ~prior_contact:Masc_tui_server_lifecycle.Server_reached state ~mailbox ~authority:workspace_authority ~identity ~host ~port () in
-        Ok snapshot)
+        Connectors_loaded (authority,
+          Masc_tui_async_read.attribute Masc_tui_async_read.Connectors result))
+      (fun () -> Masc_tui_loader.load_connectors ~host ~port)
   end
 
 (* A binding write changed what the server holds. A load already in flight

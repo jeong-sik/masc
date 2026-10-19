@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인계와 늦은 터미널 응답, 비동기 조회·설정 저장·긴 질문의 요약과 전체 읽기·Ask 답변과 재조회를 바꿀 때 쓴다. Keeper·Work·로그·Board·Runtime·Overview·Tools의 원본 요청·입력·revision·소유권, 준비 상세·현재 턴·이력·Tools 구성 조회의 workspace 검증과 캐시 영수증, 공유 조회와 부분 실패, worker 관측·UI 반영·paint 증거를 구분한다."
+description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인계와 늦은 터미널 응답, 비동기 조회·설정 저장·긴 질문의 요약과 전체 읽기·Ask 답변과 재조회를 바꿀 때 쓴다. Keeper·Work·로그·Board·Runtime·Overview·Tools·Connectors의 원본 요청·입력·revision·소유권, 준비 상세·현재 턴·이력·구성 조회·디렉터리 페이지의 workspace 검증과 캐시 영수증, 공유 조회와 부분 실패, worker 관측·UI 반영·paint 증거를 구분한다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -103,6 +103,30 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인�
   포함하며 순수 CPU 시간·paint·Task 진척이 아니다. 명시적 정상 경로의 GET 6→3은
   실제 속도 50% 개선을 뜻하지 않는다. 비교와 미실행 시나리오는
   `docs/audits/2026-10-19-tui-tools-composed-workspace-reads.md`를 따른다.
+
+## Connector 조회와 페이지
+
+- 상태 목록을 받은 뒤 Connector별 server/channel/person cursor 체인은 `read_map`으로
+  독립 실행한다. 같은 체인의 다음 cursor는 앞 페이지가 정한 값으로 순서대로 읽는다.
+  기존 Eio scope와 IO/CPU 자원을 사용하며 새 executor·동시성 상한·전체 페이지 cap을
+  만들지 않는다. TUI runtime이 설치되지 않은 entry point는 동기 map을 사용한다.
+- Connector 조회는 기존 공용 `launch_workspace_json_read`를 사용한다. 실제 상태 GET과
+  모든 페이지 GET이 원래 workspace binding을 상속하고 응답·304 receipt를 확인한다.
+  페이지의 Connector ID·typed 종류·요청 cursor를 확인한 뒤에만 합친다. 앞뒤 identity GET으로
+  중간 페이지를 증명하거나 `current_workspace_id`를 filesystem workspace 증거로 쓰지 않는다.
+  historical 이름의 provenance와 기존 인증 경계를 유지한다.
+- 공용 JSON 조회는 `fork_workspace_job`의 기존 observation 취소 registry에 등록한다.
+  읽기 epoch 철회 시 병렬 child에도 취소를 요청하고 실제 cleanup까지 원래 owner를 유지한다.
+  취소 요청·UI의 대기 해제·worker 종료를 같은 시점으로 기록하지 않는다. Connector의
+  시작 실패는 원래 authority의 inflight를 즉시 해제하고 source 실패를 한 번 전달한다.
+  일반 요청·효과의 observation 기본값은 바꾸지 않는다.
+- 정상 Error 결과는 해당 체인의 앞서 받은 페이지·형제 결과와 함께 남긴다. 예외·부모 취소는
+  structured scope를 따르고, 모든 체인을 합친 결과를 기존 UI handler가 받는다. 빠른 child가
+  먼저 끝났다는 사실을 즉시 UI 반영·paint로 부르지 않는다. 순수 snapshot/page 해석과 이름
+  projection만 공용 CPU 경로를 사용한다. `connectors.snapshot.decode_wait`·
+  `connectors.names.decode_wait`·`connectors.names.project_wait`는 pool 대기와 반환도 포함한다.
+  같은 authority에서 write 뒤에 요구한 후속 조회와 읽기 철회 사이의 수요 보존 잔여 항목은
+  `docs/audits/2026-10-19-tui-connectors-composed-workspace-reads.md`에 구분해 둔다.
 
 ## 에디터 준비 조회
 

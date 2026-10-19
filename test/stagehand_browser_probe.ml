@@ -353,8 +353,9 @@ let () =
      record "reset after BrowserInteract scroll_at" (goto_fixture ());
      record "BrowserInteract drag sends native Stagehand pointer input"
        (let* viewport, geometry = observed_viewport () in
-        (* Source and target are fixed boxes with distinct centres. The page
-           changes title only after a trusted HTML5 drop with the observed payload. *)
+        (* Raw pointer input is proved independently of HTML5 drag-and-drop.
+           This source captures a trusted press and requires movement followed
+           by a trusted release inside the distinct observed destination. *)
         let from_x = 0.2 +. (35. /. geometry.width)
         and from_y = 0.55 +. (20. /. geometry.height)
         and to_x = 0.45 +. (50. /. geometry.width)
@@ -369,18 +370,22 @@ let () =
             ; "to", `Assoc [ "x", `Float to_x; "y", `Float to_y ]
             ]
           in
-          let* _ = title_at tab_id "dragged" in
+          let* _ = title_at tab_id "pointer-dragged" in
           let* data = read "text" in
           match string_at [ "text" ] data with
-          | Some text when contains ~sub:"Drag completed" text -> Ok data
+          | Some text when contains ~sub:"Pointer drag completed" text -> Ok data
           | _ -> Error ("the drag was absent from BrowserRead: " ^ Yojson.Safe.to_string data));
      record "reset after BrowserInteract drag" (goto_fixture ());
      record "semantic drag_to accepts a trusted HTML5 drop"
        (let* _ = interact ["action",`String "drag_to";"tabId",`Int tab_id;
           "expectedUrl",`String fixture_url;
-          "source",`Assoc ["selector",`String "#drag-source"];
-          "destination",`Assoc ["selector",`String "#drop-target"]] in
-        title_at tab_id "dragged");
+          "source",`Assoc ["selector",`String "#html5-source"];
+          "destination",`Assoc ["selector",`String "#html5-target"]] in
+        let* _ = title_at tab_id "html5-dragged" in
+        let* data = read "text" in
+        match string_at ["text"] data with
+        | Some text when contains ~sub:"HTML5 drag completed" text -> Ok data
+        | _ -> Error ("the HTML5 drop was absent from BrowserRead: " ^ Yojson.Safe.to_string data));
      record "reset after semantic HTML5 drag" (goto_fixture ());
      record "observe locates the button the model chose"
        (let* data =

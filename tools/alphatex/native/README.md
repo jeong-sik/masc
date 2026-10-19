@@ -8,7 +8,7 @@ CoreMIDI unique IDs. It does not change the system default input or output.
 Build the standalone helper with the Xcode command-line tools:
 
 ```sh
-xcrun swiftc -O MusicSession.swift -o music-native \
+xcrun swiftc -parse-as-library -O MusicSession.swift -o music-native \
   -framework AVFoundation -framework CoreAudio -framework CoreMIDI -framework AudioToolbox \
   -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Info.plist
 ./music-native devices
@@ -44,8 +44,9 @@ Input format/sample continuity, device liveness, engine configuration and MIDI
 source removal are monitored. This prevents a stopped or truncated input from
 being finalized as an uninterrupted successful take.
 
-The capture helper currently provides no input monitoring, audio mixing, MIDI
-output, clock synchronization to external equipment, or latency compensation.
+Input monitoring is described in [INPUT-MONITORING.md](../INPUT-MONITORING.md).
+The capture helper currently provides no audio mixing, MIDI output, clock
+synchronization to external equipment, or latency compensation.
 BlackHole loopback and an isolated virtual MIDI source have exercised simultaneous
 48 kHz stereo capture. Physical USB interfaces and keyboards need separate device
 verification; discovery alone does not establish capture on a specific device.

@@ -79,6 +79,35 @@ func audioDevices() throws -> [AudioDevice] {
     }
 }
 
+// AVAudioFormat.h: the channel-count initializers return nil above two
+// channels, so a wider stream carries a DiscreteInOrder layout. The mixer
+// copies discrete channel N to output channel N, but renders a discrete
+// source into an unlabelled mono/stereo output as silence. A monitor output
+// fed by a wider input is therefore discrete as well.
+let unlabelledChannelLimit = 2
+
+func floatStreamFormat(sampleRate: Double, channels: Int, discrete: Bool) -> AVAudioFormat? {
+    guard discrete else {
+        return AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate,
+                             channels: AVAudioChannelCount(channels), interleaved: false)
+    }
+    // DiscreteInOrder keeps its channel count in the low 16 bits of the tag.
+    guard let layout = AVAudioChannelLayout(layoutTag: kAudioChannelLayoutTag_DiscreteInOrder | AudioChannelLayoutTag(channels)),
+          layout.channelCount == AVAudioChannelCount(channels) else {
+        return nil
+    }
+    return AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, interleaved: false, channelLayout: layout)
+}
+
+func captureStreamFormat(sampleRate: Double, inputs: Int) -> AVAudioFormat? {
+    floatStreamFormat(sampleRate: sampleRate, channels: inputs, discrete: inputs > unlabelledChannelLimit)
+}
+
+func monitorStreamFormat(sampleRate: Double, inputs: Int, outputs: Int) -> AVAudioFormat? {
+    floatStreamFormat(sampleRate: sampleRate, channels: outputs,
+                      discrete: inputs > unlabelledChannelLimit || outputs > unlabelledChannelLimit)
+}
+
 struct MidiSource {
     let endpoint: MIDIEndpointRef
     let uid: Int32
@@ -102,7 +131,8 @@ func midiSources() throws -> [MidiSource] {
 // A bounded pool prevents a slow disk from growing the capture queue forever.
 // Saturation is an explicit failed recording, never a silently dropped block.
 final class Capture {
-    let directory: URL
+    let directory: URL?
+    let monitorOutput: AudioDevice?
     let input: AudioDevice
     let sources: [MidiSource]
     let hostClock: mach_timebase_info_data_t
@@ -117,6 +147,10 @@ final class Capture {
     var tapInstalled = false
     var configurationObserver: NSObjectProtocol?
     var deviceAliveListener: AudioObjectPropertyListenerBlock?
+    var outputAliveListener: AudioObjectPropertyListenerBlock?
+    var aggregate: AudioObjectID = 0
+    var routeDevice: AudioObjectID { aggregate == 0 ? input.object : aggregate }
+    var monitoringSnapshot: [String: Any] = ["state": "off"]
     var firstFailure: String?
     var audio: AVAudioFile?
     var midi: FileHandle?
@@ -135,9 +169,9 @@ final class Capture {
     var slots: DispatchSemaphore?
     let midiSlots = DispatchSemaphore(value: 1024)
 
-    init(directory: URL, input: AudioDevice, sources: [MidiSource]) {
+    init(directory: URL?, input: AudioDevice, sources: [MidiSource], monitorOutput: AudioDevice? = nil) {
         _ = protectOutputPipe
-        self.directory = directory; self.input = input; self.sources = sources
+        self.directory = directory; self.input = input; self.sources = sources; self.monitorOutput = monitorOutput
         var clock = mach_timebase_info_data_t()
         mach_timebase_info(&clock)
         hostClock = clock
@@ -184,18 +218,43 @@ final class Capture {
         try checked(AudioObjectGetPropertyData(input.object, &key, 0, nil, &size, &alive),
                     "read selected input device state")
         guard alive != 0 else { throw SessionFailure("selected input device is no longer alive") }
+        guard try audioString(input.object, kAudioDevicePropertyDeviceUID) == input.uid else {
+            throw SessionFailure("selected input device identity changed")
+        }
     }
 
     func checkInputConfiguration() throws {
         try checkInputAlive()
         guard engine.isRunning else { throw SessionFailure("audio engine stopped during recording") }
         let node = engine.inputNode
-        guard node.audioUnit != nil, node.auAudioUnit.deviceID == input.object else {
+        guard node.audioUnit != nil, node.auAudioUnit.deviceID == routeDevice else {
             throw SessionFailure("audio engine changed the selected input device")
+        }
+        if let output = monitorOutput {
+            var key = address(kAudioDevicePropertyDeviceIsAlive)
+            var alive: UInt32 = 0; var size = UInt32(MemoryLayout<UInt32>.size)
+            try checked(AudioObjectGetPropertyData(output.object, &key, 0, nil, &size, &alive), "read monitor output state")
+            guard alive != 0, engine.outputNode.auAudioUnit.deviceID == routeDevice else {
+                throw SessionFailure("selected monitoring output is unavailable or changed")
+            }
+            guard try audioString(output.object, kAudioDevicePropertyDeviceUID) == output.uid else {
+                throw SessionFailure("selected monitoring output identity changed")
+            }
+        }
+        if aggregate != 0, let output = monitorOutput, let unit = node.audioUnit {
+            for (bus, expected) in [(UInt32(1), (0..<input.inputs).map(Int32.init)),
+                                    (UInt32(0), [Int32](repeating: -1, count: input.outputs) + (0..<output.outputs).map(Int32.init))] {
+                var size: UInt32 = 0
+                try checked(AudioUnitGetPropertyInfo(unit, kAudioOutputUnitProperty_ChannelMap, kAudioUnitScope_Output, bus, &size, nil), "read monitor channel map size")
+                guard Int(size) == expected.count * MemoryLayout<Int32>.size else { throw SessionFailure("monitor channel map size changed") }
+                var actual = [Int32](repeating: -1, count: expected.count)
+                try checked(AudioUnitGetProperty(unit, kAudioOutputUnitProperty_ChannelMap, kAudioUnitScope_Output, bus, &actual, &size), "read monitor channel map")
+                guard actual == expected else { throw SessionFailure("monitor channel map changed") }
+            }
         }
         let hardware = node.inputFormat(forBus: 0)
         guard let format, hardware.sampleRate == format.sampleRate,
-              hardware.channelCount == format.channelCount else {
+              hardware.channelCount == (aggregate == 0 ? input.inputs : input.inputs + (monitorOutput?.inputs ?? 0)) else {
             throw SessionFailure("selected audio input sample rate or channel count changed")
         }
     }
@@ -229,7 +288,23 @@ final class Capture {
         try checked(AudioObjectAddPropertyListenerBlock(input.object, &key, .main, listener),
                     "observe selected audio input state")
         deviceAliveListener = listener
+        if let output = monitorOutput {
+            let outputListener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+                self?.validateConfigurationChange()
+            }
+            try checked(AudioObjectAddPropertyListenerBlock(output.object, &key, .main, outputListener),
+                        "observe selected monitoring output")
+            outputAliveListener = outputListener
+        }
         try checkInputAlive()
+    }
+
+    var monitoring: [String: Any] {
+        guard let output = monitorOutput else { return ["state": "off"] }
+        return ["state": "active", "input": input.json, "output": output.json,
+                "sampleRate": format?.sampleRate ?? 0, "channels": format?.channelCount ?? 0,
+                "latency": ["kind": "device-reported", "inputSeconds": engine.inputNode.presentationLatency,
+                            "outputSeconds": engine.outputNode.presentationLatency]]
     }
 
     func checkMidiSourcesOnline() throws {
@@ -244,6 +319,7 @@ final class Capture {
     }
 
     func handle(_ name: String) throws -> FileHandle {
+        guard let directory else { throw SessionFailure("monitor-only session cannot create recording files") }
         let url = directory.appendingPathComponent(name)
         guard FileManager.default.createFile(atPath: url.path, contents: nil,
                                             attributes: [.posixPermissions: 0o600]) else {
@@ -267,52 +343,88 @@ final class Capture {
     }
 
     private func startResources() throws {
-        guard !FileManager.default.fileExists(atPath: directory.path) else {
-            throw SessionFailure("session directory already exists; recordings are never overwritten")
+        if let directory {
+            guard !FileManager.default.fileExists(atPath: directory.path) else {
+                throw SessionFailure("session directory already exists; recordings are never overwritten")
+            }
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
+                                                   attributes: [.posixPermissions: 0o700])
+            createdDirectory = true
+            midi = try handle("midi.ump.jsonl")
+            blocks = try handle("audio-blocks.jsonl")
         }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
-                                               attributes: [.posixPermissions: 0o700])
-        createdDirectory = true
-        midi = try handle("midi.ump.jsonl")
-        blocks = try handle("audio-blocks.jsonl")
         let node = engine.inputNode
         guard node.audioUnit != nil else { throw SessionFailure("audio input unit is unavailable") }
-        try node.auAudioUnit.setDeviceID(input.object)
-        guard node.auAudioUnit.deviceID == input.object else {
+        if let output = monitorOutput, output.object != input.object {
+            // AVAudioEngine has one I/O unit. Two selected devices require a
+            // private aggregate; neither system default nor peer channels change.
+            let description: [String: Any] = [
+                kAudioAggregateDeviceNameKey: "MASC input monitoring",
+                kAudioAggregateDeviceUIDKey: "masc-input-" + UUID().uuidString,
+                kAudioAggregateDeviceIsPrivateKey: 1,
+                kAudioAggregateDeviceMainSubDeviceKey: output.uid,
+                kAudioAggregateDeviceSubDeviceListKey: [
+                    [kAudioSubDeviceUIDKey: input.uid, kAudioSubDeviceDriftCompensationKey: 1],
+                    [kAudioSubDeviceUIDKey: output.uid]]]
+            try checked(AudioHardwareCreateAggregateDevice(description as CFDictionary, &aggregate), "create private input/output route")
+        }
+        if monitorOutput != nil { try engine.outputNode.auAudioUnit.setDeviceID(routeDevice) }
+        try node.auAudioUnit.setDeviceID(routeDevice)
+        guard node.auAudioUnit.deviceID == routeDevice else {
             throw SessionFailure("audio engine did not select the requested input device")
         }
         let hardware = node.inputFormat(forBus: 0)
         guard hardware.sampleRate > 0, hardware.channelCount > 0,
-              let captureFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
-                                               sampleRate: hardware.sampleRate,
-                                               channels: hardware.channelCount, interleaved: false) else {
+              let captureFormat = captureStreamFormat(sampleRate: hardware.sampleRate, inputs: input.inputs) else {
             throw SessionFailure("input device has no usable audio stream")
         }
         format = captureFormat
-        audio = try AVAudioFile(forWriting: directory.appendingPathComponent("audio.wav"),
-            settings: [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: captureFormat.sampleRate,
-                       AVNumberOfChannelsKey: captureFormat.channelCount, AVLinearPCMBitDepthKey: 32,
-                       AVLinearPCMIsFloatKey: true, AVLinearPCMIsNonInterleaved: false],
-            commonFormat: .pcmFormatFloat32, interleaved: false)
-        // AVAudioNode.h documents tap buffers in the 100..400 ms range.
-        // A tap groups multiple audio-unit render slices; MaximumFramesPerSlice
-        // is therefore not the capacity of a tap buffer.
-        let maxFrames = AVAudioFrameCount(ceil(captureFormat.sampleRate * 0.4))
-        let requestedFrames = AVAudioFrameCount(ceil(captureFormat.sampleRate * 0.1))
-        // One second of the device's maximum-size blocks is an explicit disk
-        // writer buffer, not a recording-duration or product-behavior limit.
-        let capacity = max(2, Int(ceil(captureFormat.sampleRate / Double(maxFrames))))
-        slots = DispatchSemaphore(value: capacity)
-        pool = try (0..<capacity).map { _ in
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: captureFormat, frameCapacity: maxFrames) else {
-                throw SessionFailure("cannot allocate audio capture buffer")
+        if let output = monitorOutput {
+            guard engine.outputNode.auAudioUnit.deviceID == routeDevice else {
+                throw SessionFailure("audio engine did not select the requested monitoring output")
             }
-            return buffer
+            engine.connect(node, to: engine.mainMixerNode, format: captureFormat)
+            guard let outputFormat = monitorStreamFormat(sampleRate: hardware.sampleRate,
+                                                         inputs: input.inputs, outputs: output.outputs) else {
+                throw SessionFailure("monitor output has no usable audio stream")
+            }
+            engine.connect(engine.mainMixerNode, to: engine.outputNode, format: outputFormat)
+            if aggregate != 0 {
+                guard let unit = node.audioUnit else { throw SessionFailure("monitor I/O unit is unavailable") }
+                var inputMap = (0..<input.inputs).map(Int32.init)
+                try checked(AudioUnitSetProperty(unit, kAudioOutputUnitProperty_ChannelMap, kAudioUnitScope_Output, 1,
+                    &inputMap, UInt32(inputMap.count * MemoryLayout<Int32>.size)), "select aggregate input channels")
+                var outputMap = [Int32](repeating: -1, count: input.outputs) + (0..<output.outputs).map(Int32.init)
+                try checked(AudioUnitSetProperty(unit, kAudioOutputUnitProperty_ChannelMap, kAudioUnitScope_Output, 0,
+                    &outputMap, UInt32(outputMap.count * MemoryLayout<Int32>.size)), "select aggregate output channels")
+            }
         }
-        node.installTap(onBus: 0, bufferSize: requestedFrames, format: captureFormat) { [weak self] buffer, time in
-            self?.acceptAudio(buffer, time)
+        if let directory {
+            audio = try AVAudioFile(forWriting: directory.appendingPathComponent("audio.wav"),
+                settings: [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: captureFormat.sampleRate,
+                           AVNumberOfChannelsKey: captureFormat.channelCount, AVLinearPCMBitDepthKey: 32,
+                           AVLinearPCMIsFloatKey: true, AVLinearPCMIsNonInterleaved: false],
+                commonFormat: .pcmFormatFloat32, interleaved: false)
+            // AVAudioNode.h documents tap buffers in the 100..400 ms range.
+            // A tap groups multiple audio-unit render slices; MaximumFramesPerSlice
+            // is therefore not the capacity of a tap buffer.
+            let maxFrames = AVAudioFrameCount(ceil(captureFormat.sampleRate * 0.4))
+            let requestedFrames = AVAudioFrameCount(ceil(captureFormat.sampleRate * 0.1))
+            // One second of the device's maximum-size blocks is an explicit disk
+            // writer buffer, not a recording-duration or product-behavior limit.
+            let capacity = max(2, Int(ceil(captureFormat.sampleRate / Double(maxFrames))))
+            slots = DispatchSemaphore(value: capacity)
+            pool = try (0..<capacity).map { _ in
+                guard let buffer = AVAudioPCMBuffer(pcmFormat: captureFormat, frameCapacity: maxFrames) else {
+                    throw SessionFailure("cannot allocate audio capture buffer")
+                }
+                return buffer
+            }
+            node.installTap(onBus: 0, bufferSize: requestedFrames, format: captureFormat) { [weak self] buffer, time in
+                self?.acceptAudio(buffer, time)
+            }
+            tapInstalled = true
         }
-        tapInstalled = true
         try monitorInput()
         requestedHost = mach_absolute_time()
         if !sources.isEmpty {
@@ -348,10 +460,12 @@ final class Capture {
         // Publish the common clock before admission opens. Callbacks can run
         // inside engine.start(), and must never overtake this session header.
         writer.sync {
-            publish(["kind": "recording", "directory": directory.path, "sampleRate": captureFormat.sampleRate,
+            if let directory {
+                publish(["kind": "recording", "directory": directory.path, "sampleRate": captureFormat.sampleRate,
                   "channels": captureFormat.channelCount, "input": input.json, "midiSources": sources.map(\.json),
                   "clock": ["kind": "mach-host-time", "numer": hostClock.numer, "denom": hostClock.denom,
                             "requestedStart": String(requestedHost)]])
+            }
         }
         state.lock()
         let failure = firstFailure
@@ -362,6 +476,10 @@ final class Capture {
         try checkInputConfiguration()
         state.lock(); let startFailure = firstFailure; state.unlock()
         if let startFailure { throw SessionFailure(startFailure) }
+        if monitorOutput != nil {
+            monitoringSnapshot = monitoring
+            publish(["kind": "monitoring", "monitoring": monitoringSnapshot])
+        }
     }
 
     func acceptAudio(_ incoming: AVAudioPCMBuffer, _ time: AVAudioTime) {
@@ -477,6 +595,11 @@ final class Capture {
             AudioObjectRemovePropertyListenerBlock(input.object, &key, .main, listener)
             deviceAliveListener = nil
         }
+        if let listener = outputAliveListener, let output = monitorOutput {
+            var key = address(kAudioDevicePropertyDeviceIsAlive)
+            AudioObjectRemovePropertyListenerBlock(output.object, &key, .main, listener)
+            outputAliveListener = nil
+        }
         engine.stop()
         if tapInstalled {
             engine.inputNode.removeTap(onBus: 0)
@@ -485,6 +608,14 @@ final class Capture {
         if port != 0 { MIDIPortDispose(port); port = 0 }
         if client != 0 { MIDIClientDispose(client); client = 0 }
         callbacks.wait()
+        if aggregate != 0 {
+            let owned = aggregate
+            do {
+                try checked(AudioHardwareDestroyAggregateDevice(owned), "destroy private input/output route")
+                aggregate = 0
+            }
+            catch { fail("monitor route cleanup failed: \(error)") }
+        }
         writer.sync {
             audio = nil // finalize the WAVE container before publishing its manifest
             for handle in [midi, blocks] {
@@ -494,7 +625,13 @@ final class Capture {
                 catch { self.fail("cannot close recording data: \(error)") }
             }
             midi = nil; blocks = nil
-            guard createdDirectory else { return }
+            guard createdDirectory, let directory else {
+                state.lock(); let failure = firstFailure; state.unlock()
+                do { try emit(["kind": "stopped", "session": ["state": failure == nil ? "monitored" : "failed",
+                                  "failure": failure as Any? ?? NSNull()]]) }
+                catch { self.fail("monitor event output failed: \(error)") }
+                return
+            }
             do {
                 state.lock(); let failure = firstFailure; state.unlock()
                 var manifest: [String: Any] = ["schemaVersion": 1, "state": failure == nil ? "recorded" : "failed",
@@ -504,7 +641,7 @@ final class Capture {
                     "sampleRate": format?.sampleRate ?? 0, "channels": format?.channelCount ?? 0,
                     "audioFrames": String(frames), "midiPacketCount": String(midiPackets),
                     "audio": "audio.wav", "audioBlocks": "audio-blocks.jsonl", "midi": "midi.ump.jsonl",
-                    "input": input.json, "midiSources": sources.map(\.json)]
+                    "input": input.json, "midiSources": sources.map(\.json), "monitoring": monitoringSnapshot]
                 try encoded(manifest).write(to: directory.appendingPathComponent("session.json"), options: [.atomic])
                 do { try emit(["kind": "stopped", "directory": directory.path, "session": manifest]) }
                 catch {
@@ -532,18 +669,30 @@ func option(_ name: String) -> String? {
     return CommandLine.arguments[index + 1]
 }
 
+#if !MUSIC_INPUT_LIBRARY
+@main enum MusicInputMain {
+static func main() {
 do {
     switch CommandLine.arguments.dropFirst().first {
     case "devices":
         try emit(["kind": "devices", "audio": try audioDevices().map(\.json), "midi": try midiSources().map(\.json)])
-    case "record":
-        guard let uid = option("--input"), let path = option("--directory") else {
-            throw SessionFailure("record requires --input DEVICE_UID and --directory NEW_SESSION_DIRECTORY")
+    case "record", "monitor":
+        let recording = CommandLine.arguments[1] == "record"
+        guard let uid = option("--input"), !recording || option("--directory") != nil else {
+            throw SessionFailure("record requires --input UID and --directory NEW_PATH; monitor requires --input UID and --monitor-output UID")
         }
+        let selectedOutput: AudioDevice?
+        if let output = option("--monitor-output") {
+            guard let found = try audioDevices().first(where: { $0.uid == output && $0.outputs > 0 }) else {
+                throw SessionFailure("selected monitoring output is unavailable")
+            }
+            selectedOutput = found
+        } else { selectedOutput = nil }
+        guard recording || selectedOutput != nil else { throw SessionFailure("monitor requires --monitor-output UID") }
         guard let input = try audioDevices().first(where: { $0.uid == uid && $0.inputs > 0 }) else {
             throw SessionFailure("selected input device is unavailable")
         }
-        let midiSelection = option("--midi") ?? "all"
+        let midiSelection = recording ? (option("--midi") ?? "all") : "none"
         let available = try midiSources()
         let selected: [MidiSource]
         switch midiSelection {
@@ -553,7 +702,8 @@ do {
             selected = available.filter { String($0.uid) == midiSelection }
             if selected.isEmpty { throw SessionFailure("selected MIDI input is unavailable") }
         }
-        let capture = Capture(directory: URL(fileURLWithPath: path), input: input, sources: selected)
+        let capture = Capture(directory: recording ? option("--directory").map { URL(fileURLWithPath: $0) } : nil,
+                              input: input, sources: selected, monitorOutput: selectedOutput)
         for sig in [SIGINT, SIGTERM, SIGHUP] {
             signal(sig, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
@@ -569,9 +719,13 @@ do {
         }
         RunLoop.main.run()
     default:
-        throw SessionFailure("usage: masc-music-native devices | record --input UID --directory NEW_PATH [--midi all|none|UID]")
+        throw SessionFailure("usage: masc-music-native devices | record --input UID --directory NEW_PATH [--midi all|none|UID] [--monitor-output UID] | monitor --input UID --monitor-output UID")
     }
 } catch {
     try? emit(["kind": "error", "message": String(describing: error)])
     exit(1)
 }
+
+}
+}
+#endif

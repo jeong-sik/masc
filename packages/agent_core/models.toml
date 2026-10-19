@@ -1951,9 +1951,14 @@ supports_response_format_json = true
 supports_structured_output = true
 supports_native_streaming = true
 
+# Mistral documents "none" and "high" for mistral-small-latest
+# (https://docs.mistral.ai/studio/conversations/reasoning). Declare ["none"]
+# only until the openai_chat_extended response parser is verified against
+# Mistral's list-shaped ThinkChunk/TextChunk message.content (#38564).
 [[models]]
 id_prefix = "mistral-small"
 base = "openai_chat_extended"
+accepted_reasoning_efforts = ["none"]
 provider_name = "mistral"
 max_context_tokens = 256000
 supports_tools = true

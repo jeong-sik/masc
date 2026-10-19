@@ -1760,6 +1760,36 @@ let test_xai_grok_4_3_declares_its_effort_ladder () =
       ])
 ;;
 
+(* Mistral documents "none" and "high" for mistral-small-latest, where "none"
+   returns plain-string content and "high" switches message.content to a list of
+   ThinkChunk/TextChunk objects (#38564). The catalog row declares ["none"] so
+   plain-string requests disabling reasoning are admitted while unverified
+   levels are refused before dispatch. *)
+let test_mistral_small_declares_none_reasoning_effort () =
+  with_repository_model_catalog (fun () ->
+    let cfg effort =
+      Provider_config.make
+        ~kind:OpenAI_compat
+        ~provider_id:"mistral"
+        ~model_id:"mistral-small"
+        ~base_url:"https://api.mistral.ai/v1"
+        ~reasoning_effort:effort
+        ()
+    in
+    (match Provider_config.validate_reasoning_effort_request_typed (cfg Reasoning_effort.None_) with
+     | Ok () -> ()
+     | Error rejection ->
+       Alcotest.failf
+         "mistral-small should accept none: %s"
+         (Provider_config.reasoning_effort_request_rejection_to_message rejection));
+    check_bool
+      "mistral-small refuses high until chunk-list response parsing is verified"
+      true
+      (Result.is_error
+         (Provider_config.validate_reasoning_effort_request_typed
+            (cfg Reasoning_effort.High))))
+;;
+
 let test_validate_output_schema_openai_unscoped_catalog_not_inferred () =
   with_repository_model_catalog (fun () ->
     let cfg =
@@ -2868,6 +2898,10 @@ let () =
             "xai/grok-4.3 declares its own effort ladder"
             `Quick
             test_xai_grok_4_3_declares_its_effort_ladder
+        ; Alcotest.test_case
+            "mistral-small declares none reasoning effort"
+            `Quick
+            test_mistral_small_declares_none_reasoning_effort
         ; Alcotest.test_case
             "reasoning effort undeclared fails closed"
             `Quick

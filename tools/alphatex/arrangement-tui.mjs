@@ -1,3 +1,4 @@
+import { viewSession } from './music-session.mjs'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { join, dirname, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -13,6 +14,7 @@ import { openPlayback } from './playback.mjs'
 
 const help = [
   ':import-wave /path/take.wav     :import-midi /path/song.mid',
+  ':import-take /path/session      :open-take [ASSET] (WAV + raw UMP)',
   ':place asset-1 0               full source at quarter-note beat 0',
   ':place asset-2 4 2             MIDI format-2 pattern 2 at beat 4',
   ':region asset-1 0 1200 4800 2   asset, beat, native offset/extent, repeats',
@@ -47,7 +49,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   if (!loaded) await verifyArrangementAssets(editor.project, dirname(path), { signal })
   if (signal?.aborted) return
   let sourceRoot = dirname(path), revision = loaded?.revision ?? null
-  let accepting = true, closed = false, task = Promise.resolve(), prompt = null, status = 'Import a WAV or MIDI source with :help', showHelp = false
+  let accepting = true, closed = false, suspended = false, takeAbort = null, takeTask = null, task = Promise.resolve(), prompt = null, status = 'Import a WAV or MIDI source with :help', showHelp = false
   let pendingDraw = null, sequence = 0, workerFailure = null, recovery = null, terminatingWorker = false
   const failedSavePaths = new Set()
   const directory = await mkdtemp(join(tmpdir(), 'masc-arrangement-play-'))
@@ -61,6 +63,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   function finish() {
     if (!accepting) return
     accepting = false
+    takeAbort?.abort()
     stop()
     for (const handle of players.keys()) handle.terminate()
     if (!workerFailure) worker.postMessage({ kind: 'cancel' })
@@ -145,12 +148,48 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     preparation.catch(error => { if (accepting) { status = error.message; draw() } }).finally(() => preparations.delete(preparation))
     draw()
   }
+  function openTake(asset) {
+    if (!accepting || takeTask) return
+    stop()
+    const expected = ++generation
+    transport = { kind: 'preparing' }; status = 'Preparing captured source…'
+    const prepared = request({ kind: 'prepare-take', project: editor.project, asset, sourceRoot, directory }, id => { preparing = id })
+    const preparation = (async () => {
+      let result, controller
+      try {
+        result = await prepared
+        if (generation === expected) preparing = null
+        await Promise.allSettled([...players.values()])
+        if (!accepting || generation !== expected) return
+        transport = { kind: 'stopped' }
+        controller = new AbortController(); takeAbort = controller; takeTask = preparation
+        suspended = true; process.stdin.off('keypress', keypress)
+        await viewSession({ directory: result.directory, root: join(sourceRoot, 'recordings'),
+          exportRoot: join(sourceRoot, 'exports'), embedded: true, signal: controller.signal })
+      } catch (error) {
+        if (generation === expected) { preparing = null; transport = { kind: 'stopped' }; status = error.message }
+      } finally {
+        if (controller && takeAbort === controller) {
+          takeAbort = null; suspended = false
+          if (accepting && !closed) process.stdin.on('keypress', keypress)
+        }
+        try { if (result) await rm(result.directory, { recursive: true, force: true }) }
+        finally {
+          if (takeTask === preparation) takeTask = null
+          draw()
+        }
+      }
+    })()
+    preparations.add(preparation)
+    preparation.catch(error => { if (accepting) { status = error.message; draw() } }).finally(() => preparations.delete(preparation))
+    draw()
+  }
   async function save(target = path) {
     target = resolve(target)
     const project = editor.project, nextRoot = dirname(target)
     const retained = new Map()
     if (nextRoot !== sourceRoot) for (const document of [project, ...editor.undo, ...editor.redo]) {
-      for (const asset of document.assets) if (asset.kind === 'wave') retained.set(asset.file, asset)
+      for (const asset of document.assets) if (asset.kind === 'wave' || asset.kind === 'capture') retained.set(asset.file ?? JSON.stringify(asset.parts), asset)
     }
     const retainedAssets = [...retained.values()].map((asset, index) => ({ ...asset, id: `retained-${index}` }))
     let nextRevision
@@ -161,6 +200,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   }
   async function effect(value) {
     switch (value.kind) {
+      case 'open-take': openTake(value.asset); break
       case 'help': showHelp = !showHelp; break
       case 'play': play(); break
       case 'stop': stop(); break
@@ -173,21 +213,26 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         stop(); route = selectArrangementRoute(route, value); status = 'Playback outputs selected'; break
       case 'save': await save(); break
       case 'save-as': if (accepting) await save(value.path); break
-      case 'import-wave': case 'import-midi': {
+      case 'import-wave': case 'import-midi': case 'import-take': {
         if (!accepting) return
         status = 'Importing source…'; draw()
         const result = await request({ ...value, project: editor.project, projectPath: path })
-        if (accepting) { adopt(arrangementImported(editor, result)); status = `Imported ${result.asset}; Enter places it at the cursor` }
+        if (accepting) { adopt(arrangementImported(editor, result)); status = value.kind === 'import-take' ? `Imported ${result.asset}; Enter opens WAV and MIDI` : `Imported ${result.asset}; Enter places it at the cursor` }
         break
       }
       default: throw new Error('Unknown arrangement effect')
     }
   }
   function enqueue(action) {
-    task = task.then(action).catch(error => { status = error.name === 'AbortError' ? 'Import or verification cancelled' : error.message }).finally(draw)
+    task = task.then(async () => {
+      // Already admitted parent actions wait for the child to return terminal
+      // ownership. Preparation remains cancellable before the child opens.
+      if (takeTask) await Promise.allSettled([takeTask])
+      await action()
+    }).catch(error => { status = error.name === 'AbortError' ? 'Import or verification cancelled' : error.message }).finally(draw)
   }
   function keypress(text, key = {}) {
-    if (!accepting || closed) return
+    if (!accepting || closed || suspended) return
     if (key.ctrl && key.name === 'c') { finish(); return }
     if (prompt !== null) {
       if (key.name === 'escape') prompt = null
@@ -207,7 +252,9 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         case 's': await save(); return
         case 'a': action = { kind: 'asset' }; break
         case 'tab': action = { kind: 'lane' }; break
-        case 'return': action = { kind: 'place' }; break
+        case 'return':
+          if (editor.project.assets.find(asset => asset.id === editor.asset)?.kind === 'capture') { openTake(editor.asset); return }
+          action = { kind: 'place' }; break
         case 'delete': case 'backspace': case 'x': action = { kind: 'remove' }; break
         case 'd': action = { kind: 'duplicate' }; break
         case 'u': action = { kind: 'undo' }; break
@@ -232,10 +279,10 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     return result
   }
   function draw() {
-    if (!closed && !pendingDraw) pendingDraw = setImmediate(() => { pendingDraw = null; drawNow() })
+    if (!closed && !suspended && !pendingDraw) pendingDraw = setImmediate(() => { pendingDraw = null; drawNow() })
   }
   function drawNow() {
-    if (closed) return
+    if (closed || suspended) return
     const project = editor.project, clip = selectedRegion(editor), asset = project.assets.find(asset => asset.id === editor.asset)
     const rows = process.stdout.rows || 24, width = Math.max(1, (process.stdout.columns || 80) - 24)
     const lines = [`Arrangement · ${project.title}${project !== saved ? ' *' : ''} · ${project.tempo} BPM · ${project.meter.join('/')}`,
@@ -259,7 +306,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       }
       if (!project.lanes.length) lines.push('Import a source, then Enter or :place to add its first lane and region.')
       lines.push(clip ? `${clip.id} · ${clip.name} · beat ${clip.position / project.ppq} · source ${clip.offset}+${clip.extent} · repeat ${clip.repeat}${clip.pattern === undefined ? '' : ` · pattern ${clip.pattern + 1}`}` : 'Up/Down selects a region on the current lane.')
-      lines.push(asset ? `${asset.id} · ${asset.name} · ${asset.kind === 'wave' ? `${asset.metadata.frames} frames / ${asset.metadata.sampleRate} Hz / ${asset.metadata.channels} channels` : 'original MIDI ticks; format-2 patterns require explicit selection'}` : 'No imported asset. :import-wave FILE or :import-midi FILE')
+      lines.push(asset ? `${asset.id} · ${asset.name} · ${asset.kind === 'wave' ? `${asset.metadata.frames} frames / ${asset.metadata.sampleRate} Hz / ${asset.metadata.channels} channels` : asset.kind === 'capture' ? `${asset.manifest.audioFrames} frames + ${asset.manifest.midiPacketCount} UMP packets; Enter opens the take` : 'original MIDI ticks; format-2 patterns require explicit selection'}` : 'No imported asset. :import-wave FILE or :import-midi FILE')
       lines.push(`Library ${project.assets.length} sources · ${project.clips.length} regions · a cycles sources · ? help`, path)
     }
     let output = '\x1b[H'

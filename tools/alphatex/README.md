@@ -261,4 +261,7 @@ duplicate and remove regions without changing originals. `--project song.json`
 reopens an arrangement; save-as carries its WAV files, including sources retained
 by undo/redo. WAV lanes stream overlapping regions; MIDI lanes retain expressive
 source playback with trims, finite repeats, pause/resume, beat seek and explicit
-asset/port outputs. Shared WAV/MIDI clock alignment and overdubs remain unfinished.
+asset/port outputs. Mixed WAV/MIDI regions use the [shared native clock](ARRANGEMENT-CLOCK.md).
+[Captured takes](CAPTURED-SOURCES.md) attach their original WAV, raw UMP and clock
+files with `:import-take DIRECTORY`; Enter opens their waveform/MIDI viewer.
+Captured-take region playback and overdubs remain unfinished.

@@ -44,7 +44,7 @@ export function openPlayback({ path, output, midiOutput, midiBindings, loop = fa
   const hybrid = format === 'hybrid-arrangement'
   const captured = ['capture-session', 'capture-arrangement'].includes(format), mixed = format === 'mixed-arrangement' || captured || hybrid
   if (!['wave', 'wave-arrangement', 'midi-arrangement', 'mixed-arrangement', 'capture-session', 'capture-arrangement', 'hybrid-arrangement', 'capture-audio-arrangement'].includes(format) || ['wave-arrangement', 'capture-audio-arrangement'].includes(format) && (midiOutput !== undefined || loop)) throw new Error('Invalid arrangement playback route or loop')
-  if ((format === 'midi-arrangement' || mixed) && (midiOutput === undefined || midiBindings === undefined || loop)) throw new Error('MIDI arrangement requires explicit bindings without whole-arrangement looping')
+  if ((format === 'midi-arrangement' || mixed) && (midiOutput === undefined || midiBindings === undefined || mixed && loop)) throw new Error('MIDI arrangement requires explicit bindings; mixed looping is not connected yet')
   if (mixed && !captured && output === undefined) throw new Error('Mixed arrangement requires an explicit audio output')
   if (typeof path !== 'string' || !path) throw new Error('A playback source path is required')
   if (output !== undefined && (typeof output !== 'string' || !output)) throw new Error('Invalid output UID')
@@ -161,6 +161,7 @@ export function openPlayback({ path, output, midiOutput, midiBindings, loop = fa
   if (signal?.aborted) abort()
   return { ready, completion, stop,
     recordingEpoch({ signal } = {}) {
+      if (loop) return Promise.reject(new Error('Loop recording requires cycle-aware take placement'))
       if (format === 'wave') return Promise.reject(new Error('Recording epochs require an arrangement'))
       if (signal?.aborted) return Promise.reject(signal.reason)
       const request = randomUUID()

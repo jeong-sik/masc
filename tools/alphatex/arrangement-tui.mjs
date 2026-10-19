@@ -38,6 +38,7 @@ const help = [
   ':trim-time 0.5 2              captured region source start/duration seconds',
   ':trim 2400 4800                WAV frames, MIDI ticks or captured host ticks',
   ':move 8    :repeat 4    :duplicate 16    :remove',
+  ':loop START END continuously repeats an SMF range; :loop off restores one-shot playback',
   ':lane-add wave Bass    :lane-add midi Keys    :lane 2',
   ':region-lane 2    :lane-name Bass    :region-name Verse    :lane-remove',
   ':asset asset-1    :select region-1    :cursor 4    :grid 0.25',
@@ -58,7 +59,7 @@ const help = [
   ':monitor AUDIO_OUTPUT_UID enables input monitoring; :monitor off disables it.',
   ':midi-monitor SOURCE_UID DEST_UID [GROUP CHANNEL ...] (1–16); omit pairs for all messages.',
   'Repeat for more routes; :midi-monitor remove SOURCE_UID DEST_UID; :midi-monitor off.',
-  'Channel scopes filter system/SysEx. Transport/edits finalize recording; whole looping remains unfinished.',
+  'Channel scopes filter system/SysEx. Transport/edits finalize recording; audio/UMP/click looping and loop recording remain unfinished.',
 ]
 
 export async function viewArrangement({ path, loaded, initialDocument, root = resolve('music-projects'), embedded = false, signal, output, midiOutput, initialRoute, stateDirectory } = {}) {
@@ -192,6 +193,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     await owned.completion
   }
   function startRecording() {
+    if (editor.project.playbackLoop !== undefined) throw new Error('Loop recording requires cycle-aware take placement; use :loop off first')
     if (recording) throw new Error('A recording is already opening or finalizing')
     if (!input) throw new Error('Select :input AUDIO_UID first; :inputs lists devices')
     if (transport.kind !== 'playing' || transportPending) throw new Error('Start arrangement playback before recording')
@@ -324,7 +326,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
           if (live) await live.ready
           if (!accepting || generation !== expected || live && liveMidi !== live) return
           transport = { kind: 'starting' }
-          const handle = openPlayback({ path: result.path, format: result.format, output, midiOutput: result.midiOutput, midiBindings: result.bindings,
+          const handle = openPlayback({ path: result.path, format: result.format, output, midiOutput: result.midiOutput, midiBindings: result.bindings, loop: result.loop ?? false,
             onEvent(event) {
               if (generation !== expected) return
               const captured = recording?.generation === expected ? recording : null
@@ -338,11 +340,12 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
               }
               if (!accepting) return
               transportPending = false
-              transport = { ...transport, kind: event.kind, event }
+              transport = { ...transport, kind: event.kind, event: { ...event,
+                currentTime: event.currentTime + (result.originSeconds ?? 0), duration: event.duration + (result.originSeconds ?? 0) } }
               draw()
             } })
           playbackHandle = handle
-          transport = { ...transport, handle }
+          transport = { ...transport, handle, originSeconds: result.originSeconds ?? 0 }
           playerPlans.set(handle, result)
           const completion = handle.completion.then(event => {
             if (recording?.generation === expected) { recording.controller.abort(); recording.handle?.stop() }
@@ -636,7 +639,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       case 'seek': {
         if (!['playing', 'paused'].includes(transport.kind)) throw new Error('Playback is not ready')
         transportPending = true
-        transport.handle.seek(value.tick / editor.project.ppq * 60 / editor.project.tempo)
+        transport.handle.seek(value.tick / editor.project.ppq * 60 / editor.project.tempo - (transport.originSeconds ?? 0))
         break
       }
       case 'midi-output': case 'midi-port': case 'midi-source': case 'output': case 'mixed-output':
@@ -728,7 +731,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     const policy = project.recordingCorrection ?? { kind: 'none' }
     const profile = recordingInspection?.profile ?? calibrationInspection?.profile ?? clip?.placement?.profile
     const residuals = profile?.pulses.map(pulse => calibrationMilliseconds(profile, pulse))
-    const lines = [`Arrangement · ${project.title}${project !== saved ? ' *' : ''} · ${project.tempo} BPM · ${project.meter.join('/')}`,
+    const lines = [`Arrangement · ${project.title}${project !== saved ? ' *' : ''} · ${project.tempo} BPM · ${project.meter.join('/')}${project.playbackLoop ? ` · LOOP ${project.playbackLoop.start / project.ppq}–${project.playbackLoop.end / project.ppq}` : ''}`,
       `Cursor ${editor.tick / project.ppq} beats · grid ${editor.step / project.ppq} · ${status}`,
       `Playback ${transport.kind}${transport.event?.practice?.phase === 'count-in' ? ' · count-in ' + transport.event.practice.remainingSeconds.toFixed(2) + ' s' : ''} · ${(transport.event?.currentTime ?? 0).toFixed(2)} s · ${transport.event?.device.name ?? route.output ?? route.midiOutput ?? 'default output'}`,
       `Practice ${project.practice?.countInBars ?? 0} count-in bars · metronome ${project.practice?.metronome ? 'on' : 'off'}`,

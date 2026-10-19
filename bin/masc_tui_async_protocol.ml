@@ -665,6 +665,12 @@ type async_msg =
      relative path, which two scopes can both have, and the handler had no
      way to tell a late answer for the scope just left from an answer for the
      scope now open (#33946). *)
+  | Code_catalog_loaded of
+      (code_workspace_scope * string) Masc_tui_fetched.request
+      * (Masc.Tui_decode.workspace_file_catalog, string) result
+  | Code_finder_file_loaded of
+      (code_workspace_scope * string) Masc_tui_fetched.request
+      * (string, string) result
   | Code_entries_loaded of
       (code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc.Tui_decode.workspace_tree_node list, string) result
@@ -932,6 +938,7 @@ let rec workspace_message_is_read = function
   | Librarian_input_loaded _
   | Resources_listed _
   | Code_entries_loaded _
+  | Code_catalog_loaded _ | Code_finder_file_loaded _
   | Code_file_loaded _
   | Code_history_loaded _
   | Code_diff_loaded _
@@ -1136,6 +1143,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Play_room_received (_, _) | Play_invites_listed (_, _)
     | Play_invite_issued (_, _, _) | Play_invite_revoked (_, _, _, _)
     | Librarian_input_loaded (_, _) | Resources_listed _
+    | Code_catalog_loaded _ | Code_finder_file_loaded _
     | Code_entries_loaded (_, _) | Code_file_loaded (_, _, _)
     | Code_history_loaded (_, _) | Code_diff_loaded (_, _)
     | Acting_pane_changes_loaded (_, _) | Code_blame_loaded (_, _)
@@ -1270,6 +1278,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Play_room_received (_, _) | Play_invites_listed (_, _)
   | Play_invite_issued (_, _, _) | Play_invite_revoked (_, _, _, _)
   | Librarian_input_loaded (_, _) | Resources_listed _
+  | Code_catalog_loaded _ | Code_finder_file_loaded _
   | Code_entries_loaded (_, _) | Code_file_loaded (_, _, _)
   | Code_history_loaded (_, _) | Code_diff_loaded (_, _)
   | Acting_pane_changes_loaded (_, _) | Code_blame_loaded (_, _)

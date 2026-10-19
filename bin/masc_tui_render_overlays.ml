@@ -322,7 +322,7 @@ let render_palette (state : state) =
     match state.palette_mode with
     | Masc_tui_types.Palette_jump ->
         Masc_tui_palette.palette_typed_question state.palette_query
-    | Masc_tui_types.Palette_choice _ -> None
+    | Masc_tui_types.Palette_choice _ | Masc_tui_types.Palette_files _ -> None
   in
   let explicit_question =
     match typed_question with
@@ -347,6 +347,8 @@ let render_palette (state : state) =
         let names = List.length (Masc_tui_palette.code_cursor_line_symbols state) in
         ( Printf.sprintf " %s · %d names on line %d" choice_question names choice_line
         , "filter:", "ask" )
+    | Masc_tui_types.Palette_files _ ->
+        (" MASC Find file", "filter:", "open")
   in
   (* The title names the palette the way the key table does (":" command
      palette) and the prompt follows it. It was "Quick Jump & Navigation" with
@@ -379,6 +381,24 @@ let render_palette (state : state) =
     Message_layout.input_viewport ~max_cells:query_width
       query
   in
+  let finder_notes =
+    match state.palette_mode with
+    | Palette_jump | Palette_choice _ -> []
+    | Palette_files _ ->
+        let catalog_note = match code_finder_catalog state with
+          | Masc_tui_fetched.Absent -> "File finder is no longer active; Esc returns to Code"
+          | Masc_tui_fetched.Loading -> "Reading checkout files…"
+          | Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail) -> detail
+          | Masc_tui_fetched.Ready catalog ->
+              Printf.sprintf "%d files · %s" (List.length catalog.Tui_decode.wfc_files)
+                (if String.equal catalog.wfc_root "" then "workspace checkout"
+                 else catalog.wfc_root) in
+        let file_notes = match Masc_tui_fetched.current state.code_finder_file with
+          | Some (_, Masc_tui_fetched.Loading) -> ["Opening selected file…"]
+          | Some (_, (Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail))) -> [detail]
+          | None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Ready _)) -> [] in
+        List.map Terminal_text.single_line (catalog_note :: file_notes)
+  in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"palette"
     ~frame:Chrome_overlay
     ~title:
@@ -399,24 +419,36 @@ let render_palette (state : state) =
     ~body:(fun ~budget c ->
       c.push_styled ~style:(Theme.recede ())
         ("   From " ^ origin ^ " · Esc returns here");
+      List.iter (fun note -> c.push ("   " ^ note)) finder_notes;
       match explicit_question with
       | Some (question, symbol) ->
           c.push_selected (" " ^ Masc_tui_theme.Glyph.current_entry ^ " " ^ question ^ " "
             ^ Terminal_text.single_line symbol);
           c.push "   Ask about this symbol in the file open on Code"
       | None ->
+          let files = match state.palette_mode with
+            | Palette_files _ -> true | Palette_jump | Palette_choice _ -> false in
           c.push_styled ~style:(Theme.recede ())
-            (Printf.sprintf "   %d commands · %d/%d · type to filter"
-              total (if total = 0 then 0 else cursor + 1) total);
-          let list_rows = max 1 (budget - 2) in
+            (Printf.sprintf "   %d %s · %d/%d · type to filter"
+              total (if files then "files" else "commands")
+              (if total = 0 then 0 else cursor + 1) total);
+          let list_rows = max 0 (budget - 2 - List.length finder_notes) in
           let first = max 0 (cursor - list_rows + 1) in
           matches
           |> List.filteri (fun i _ -> i >= first && i < first + list_rows)
           |> List.iteri (fun visible_index (label, _) ->
                if first + visible_index = cursor then
-                 c.push_selected (" " ^ Masc_tui_theme.Glyph.current_entry ^ " " ^ label)
-               else c.push ("   " ^ label));
-          if total = 0 then c.push "   No matching command · Ctrl-U clears the filter")
+                 c.push_selected (" " ^ Masc_tui_theme.Glyph.current_entry ^ " " ^ Terminal_text.single_line label)
+               else c.push ("   " ^ Terminal_text.single_line label));
+          if total = 0 then
+            (match state.palette_mode, code_finder_catalog state with
+             | Palette_files _, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+                 | Masc_tui_fetched.Failed _ | Masc_tui_fetched.Stale _) -> ()
+             | (Palette_files _ | Palette_jump | Palette_choice _),
+               (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Ready _
+               | Masc_tui_fetched.Failed _ | Masc_tui_fetched.Stale _) ->
+                 c.push (if files then "   No matching file · Ctrl-U clears the filter"
+                         else "   No matching command · Ctrl-U clears the filter")))
 
 (* The patch review overlay. [surface_chrome] owns the box, the fill and the
    footer's row, so the rows are not counted here and the keys on screen are

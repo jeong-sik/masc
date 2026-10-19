@@ -57,7 +57,7 @@ let sections =
       ; { opener = Surface "Board"
         ; description = "Enter reads a discussion; S follows its recorded successor, Esc returns" }
       ; { opener = Surface "Workspace"
-        ; description = "Enter browses files; v reads complete selected repository context" }
+        ; description = "Enter browses files; Ctrl-P in Code finds checkout files; v reads selected repository context" }
       ; { opener = Surface "System"
         ; description = "p cycles settings panes; on Models, v reads complete account/model details" }
       ] )

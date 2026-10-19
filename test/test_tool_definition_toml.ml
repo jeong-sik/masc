@@ -950,6 +950,49 @@ let test_an_exclusive_minimum_must_be_a_float () =
     "must be a float"
 ;;
 
+(* The upper end, excluded. masc_browser_interact's pointer coordinates are
+   viewport fractions in [0,1), and the pointer refuses 1.0 itself. #44011
+   wrote that bound as JSON Schema's [exclusiveMaximum] inside a [via] item;
+   the loader had no key for it, so the module that decodes the browser tools
+   failed at initialization and every masc executable exited at start. The
+   bound sits on an item's child here because that is where [via] needs it. *)
+let test_a_number_carries_an_exclusive_maximum () =
+  let schema =
+    load_ok ~name:"t"
+      ~contents:
+        (minimal "t"
+         ^ "[[params]]\nname = \"via\"\ntype = \"array\"\n\
+            [params.items]\ntype = \"object\"\n\
+            [[params.items.params]]\nname = \"x\"\ntype = \"number\"\n\
+            required = true\nminimum = 0.0\nexclusive_maximum = 1.0\n")
+  in
+  let x =
+    match member (property schema [ "via" ]) "items" with
+    | Some items ->
+      (match member items "properties" with
+       | Some properties -> member properties "x"
+       | None -> None)
+    | None -> None
+  in
+  match x with
+  | None -> fail "via.items.properties.x is missing"
+  | Some x ->
+    check bool "the float bound reaches the item's number" true
+      (member x "exclusiveMaximum" = Some (`Float 1.0));
+    check bool "the lower bound stays beside it" true
+      (member x "minimum" = Some (`Float 0.0))
+;;
+
+(* Only a number takes it, for the same reason as the lower end. *)
+let test_an_exclusive_maximum_needs_a_number () =
+  check_rejects
+    ~name:"t"
+    ~contents:
+      (minimal "t"
+       ^ "[[params]]\nname = \"n\"\ntype = \"integer\"\nexclusive_maximum = 1.0\n")
+    "exclusive_maximum"
+;;
+
 (* An integer parameter enumerates integers. tool_execute's [fd] offers 1 and
    2; quoting them would declare a different schema than the executor reads. *)
 let test_an_integer_param_enumerates_integers () =
@@ -1278,6 +1321,14 @@ let () =
             "an exclusive minimum must be a float"
             `Quick
             test_an_exclusive_minimum_must_be_a_float
+        ; test_case
+            "a number carries an exclusive maximum"
+            `Quick
+            test_a_number_carries_an_exclusive_maximum
+        ; test_case
+            "an exclusive maximum needs a number"
+            `Quick
+            test_an_exclusive_maximum_needs_a_number
         ; test_case
             "an integer param enumerates integers"
             `Quick

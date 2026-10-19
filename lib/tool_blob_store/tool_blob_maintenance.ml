@@ -463,12 +463,16 @@ let live_references ~base_path ~board_posts_file =
       | Unix.S_DIR -> scan_directory path references
       | Unix.S_REG ->
         let basename = Filename.basename path in
-        (* Keeper_tool_call_index keeps its derived SQLite read index and WAL /
-           journal sidecars in [<ledger_dir>/] (which is [tool_calls/], a
-           registered durable consumer). The index is derived, holds no blob
-           references itself, and is rebuilt from the ledger; skip both the
-           database and its active SQLite sidecar files. *)
-        if Common.is_tool_call_read_index_file basename
+        (* A directory-scoped atomic replace stages its bytes in
+           [<dir>/.atomic_*.tmp] and renames them into place. A staging file
+           is owned by its single writer and holds no blob references yet;
+           the rename target enters the scan through the directory snapshot
+           re-read, so skipping the staged bytes cannot hide a reference.
+           A staging file caught mid-write would otherwise fail the JSONL
+           durable-source parse. *)
+        if Fs_compat.is_atomic_orphan_name basename
+        then Ok references
+        else if Common.is_tool_call_read_index_file basename
         then Ok references
         else if String.equal basename Common.chat_operation_store_basename
         then

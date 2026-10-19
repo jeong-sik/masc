@@ -78,6 +78,12 @@ for differentDenominator in [false,true] {
  let second=exactClip("two",startN:String(n),startD:String(d),start:display(n,d),offset:"0",extent:"4800000")
  _ = try owner([adjacent],[first,second],duration:2)
 }
+// A twenty-minute placement at tempo120.1 has an exact final ceil one ns
+// beyond the rounded display sum. The prepared horizon must cover that bound.
+let longN:UInt128=1_690_327_662_532_287_092_050_000_000,longD:UInt128=1_408_547_695_956_241
+let long=exactClip("long",startN:String(longN),startD:String(longD),start:display(longN,longD),offset:"0",extent:"4800000")
+refuses{_ = try owner([adjacent],[long],duration:1200.25)}
+_ = try owner([adjacent],[long],duration:1200.250000001)
 // An optional retained real recording is supplied by the installed-runtime
 // probe. It uses the same production decoder/region owner and synthetic send
 // edge; no endpoint registration or opening is needed for this reproduction.

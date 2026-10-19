@@ -192,3 +192,16 @@ test('captured audio-only playback owns the native arrangement clock and refuses
   const invalid = fixture({ format }); invalid.event('playing'); invalid.close(1)
   await assert.rejects(invalid.playback.completion, /captured audio arrangement clock/)
 })
+
+test('paired captured-region playback validates the common clock and native MIDI2 endpoint binding', async () => {
+  const format = 'capture-arrangement', bindings = [{ port: 0, destination: '42' }]
+  const f = fixture({ format, midiOutput: '42', midiBindings: bindings })
+  assert.equal(f.executable, arrangementTransportPath)
+  const values = { format, clock: { kind: 'mach-host-time' }, bindings: [{ port: 0, device: { kind: 'midi', protocol: 2, id: '42', name: 'Original UMP' } }] }
+  f.event('playing', values); await f.playback.ready
+  f.playback.pause(); f.event('paused', values); f.playback.seek(.5); f.playback.resume(); f.event('playing', values)
+  f.playback.stop(); f.event('stopped', values); f.close(); await f.playback.completion
+  const wrong = fixture({ format, midiOutput: '42', midiBindings: bindings })
+  wrong.event('playing', { ...values, bindings: [{ port: 0, device: { kind: 'midi', protocol: 1, id: '42', name: 'Lossy' } }] }); wrong.close(1)
+  await assert.rejects(wrong.playback.completion, /bindings/)
+})

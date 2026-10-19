@@ -104,15 +104,19 @@ struct Plan: Decodable {
     let regions: [Region]
     let midi: Timeline?
     let ump: UmpTimeline?
+    let umpRegions: UmpArrangement?
     var captured: Bool { kind == "capture-session" }
     var capturedAudio: Bool { kind == "capture-audio-arrangement" }
+    var pairedRegions: Bool { kind == "capture-arrangement" }
+    var clocked: Bool { capturedAudio || pairedRegions }
     var mixed: Bool { kind == "mixed-arrangement" }
     func validate() throws {
-        guard (schemaVersion == 1 && kind == "wave-arrangement" && midi == nil && ump == nil
-               || schemaVersion == 2 && mixed && midi?.schemaVersion == 3 && ump == nil
-               || schemaVersion == 3 && captured && midi == nil && ump?.schemaVersion == 4
-               || schemaVersion == 4 && capturedAudio && midi == nil && ump == nil), duration.isFinite, duration > 0,
-              (!regions.isEmpty || (captured || capturedAudio) && assets.isEmpty), Set(assets.map(\.id)).count == assets.count, Set(regions.map(\.id)).count == regions.count else { throw AudioFailure("invalid WAV arrangement plan") }
+        guard (schemaVersion == 1 && kind == "wave-arrangement" && midi == nil && ump == nil && umpRegions == nil
+               || schemaVersion == 2 && mixed && midi?.schemaVersion == 3 && ump == nil && umpRegions == nil
+               || schemaVersion == 3 && captured && midi == nil && ump?.schemaVersion == 4 && umpRegions == nil
+               || schemaVersion == 4 && capturedAudio && midi == nil && ump == nil && umpRegions == nil
+               || schemaVersion == 5 && pairedRegions && midi == nil && ump == nil && umpRegions?.schemaVersion == 1), duration.isFinite, duration > 0,
+              (!regions.isEmpty || (captured || clocked) && assets.isEmpty), Set(assets.map(\.id)).count == assets.count, Set(regions.map(\.id)).count == regions.count else { throw AudioFailure("invalid WAV arrangement plan") }
         for asset in assets {
             guard !asset.id.isEmpty, !asset.path.isEmpty, asset.sampleRate.isFinite, asset.sampleRate > 0,
                   asset.channels > 0, asset.frames >= 0 else { throw AudioFailure("invalid WAV source identity or format") }
@@ -123,7 +127,7 @@ struct Plan: Decodable {
                   region.frameCount > 0, region.repetitions > 0,
                   let asset = assets.first(where: { $0.id == region.asset }),
                   region.frameCount <= asset.frames, region.offsetFrames <= asset.frames - region.frameCount else { throw AudioFailure("invalid region source bounds") }
-            guard region.captureClock == nil || capturedAudio else { throw AudioFailure("captured audio clock requires an explicit captured audio plan") }
+            guard region.captureClock == nil || clocked else { throw AudioFailure("captured audio clock requires an explicit captured audio plan") }
             let total: AVAudioFramePosition
             if let clock = region.captureClock {
                 total = try clock.layout(rate: asset.sampleRate, offsetFrames: region.offsetFrames,
@@ -133,7 +137,7 @@ struct Plan: Decodable {
             guard regionEnd.isFinite, regionEnd > region.startSeconds else { throw AudioFailure("region time is not representable") }
             // The plan duration is the exact clock end. A captured end rounds up
             // to a whole frame of its own source, never of another asset.
-            guard !capturedAudio || regionEnd <= duration || regionEnd - duration < 1 / asset.sampleRate else {
+            guard !clocked || regionEnd <= duration || regionEnd - duration < 1 / asset.sampleRate else {
                 throw AudioFailure("captured audio exceeds its arrangement duration")
             }
             end = max(end, regionEnd)
@@ -147,7 +151,24 @@ struct Plan: Decodable {
         } else if let ump {
             let events = try ump.events(), midiEnd = events.map(\.seconds).max() ?? 0
             guard ump.duration == duration, abs(max(end, midiEnd) - duration) < (sample > 0 ? sample : 1e-9) else { throw AudioFailure("capture duration does not match its source clocks") }
-        } else if !capturedAudio {
+        } else if clocked {
+            if let umpRegions {
+                guard umpRegions.duration == duration else { throw AudioFailure("captured MIDI duration differs from the paired clock") }
+                _ = try UmpRegionTransport(timeline: umpRegions)
+                for region in regions {
+                    guard let clock = region.captureClock else { continue }
+                    guard let notes = umpRegions.regions.first(where: { $0.id == region.id }),
+                          let source = umpRegions.sources.first(where: { $0.id == notes.source }),
+                          notes.source == region.asset, notes.startSeconds == region.startSeconds,
+                          notes.offset == clock.offset, notes.extent == clock.extent,
+                          notes.repeatCount == UInt64(region.repetitions),
+                          source.timeline.clock.origin == clock.origin,
+                          source.timeline.clock.numer == clock.numer, source.timeline.clock.denom == clock.denom else {
+                        throw AudioFailure("paired WAV and UMP regions disagree on their source identity or clock")
+                    }
+                }
+            }
+        } else {
             guard abs(end - duration) < sample else { throw AudioFailure("duration does not match region sources") }
         }
     }
@@ -323,7 +344,12 @@ final class ArrangementTransport {
             voices.append(voice); engine.attach(voice.player)
             engine.connect(voice.player, to: engine.mainMixerNode, format: voice.file.processingFormat)
         }
-        if let timeline = plan.ump {
+        if let timeline = plan.umpRegions {
+            let transport = try UmpRegionTransport(timeline: timeline)
+            midi = transport; try transport.prepare()
+            transport.onCoordinatedFailure = { [weak self] reason, error in self?.finish(reason: reason, error: error) }
+            transport.onCoordinatedEnd = { [weak self] in self?.midiReachedEnd() }
+        } else if let timeline = plan.ump {
             let transport = try UmpTransport(timeline: timeline)
             midi = transport; try transport.prepare()
             transport.onCoordinatedFailure = { [weak self] reason, error in self?.finish(reason: reason, error: error) }
@@ -336,10 +362,11 @@ final class ArrangementTransport {
             transport.onCoordinatedEnd = { [weak self] in self?.midiReachedEnd() }
         }
     }
+    var completed: Bool { active.isEmpty && (midi == nil || midiEnded) && (!plan.clocked || horizonEnded) }
     func midiReachedEnd() {
         guard state != .stopped else { return }
         midiEnded = true
-        if active.isEmpty { finish(reason: "finished") }
+        if completed { finish(reason: "finished") }
     }
     func checkOutput() throws {
         let alive = try deviceNumber(device.object, kAudioDevicePropertyDeviceIsAlive)
@@ -355,7 +382,7 @@ final class ArrangementTransport {
         var value: [String: Any] = ["kind": kind, "currentTime": currentTime(), "duration": plan.duration, "device": device.json,
          "loop": false, "format": plan.kind, "streamBufferFrames": capacity, "regions": voices.count]
         if let midi { value["bindings"] = midi.snapshot(kind)["bindings"] }
-        if midi != nil || plan.capturedAudio {
+        if midi != nil || plan.clocked {
             var clock: [String: Any] = ["kind": "mach-host-time", "anchor": String(anchor), "position": position,
                 "renderQuantum": renderQuantum, "sampleRate": engine.outputNode.outputFormat(forBus: 0).sampleRate,
                 "presentationLatency": engine.outputNode.presentationLatency]
@@ -379,7 +406,7 @@ final class ArrangementTransport {
             let admitted = try voice.prepare(from: seconds, finished: { [weak self] in
                 guard let self, self.generation == expected, self.state == .playing else { return }
                 self.active.remove(voice.region.id)
-                if self.active.isEmpty && (self.midi == nil || self.midiEnded) && (!self.plan.capturedAudio || self.horizonEnded) { self.finish(reason: "finished") }
+                if self.completed { self.finish(reason: "finished") }
             }, failed: { [weak self] error in
                 guard let self, self.generation == expected, self.state != .stopped else { return }
                 self.finish(reason: "source-read-failed", error: error)
@@ -391,7 +418,7 @@ final class ArrangementTransport {
     }
     func run() throws {
         guard state != .stopped else { return }
-        guard position < plan.duration, !active.isEmpty || midi != nil || plan.capturedAudio else { position = plan.duration; finish(reason: "finished"); return }
+        guard position < plan.duration, !active.isEmpty || midi != nil || plan.clocked else { position = plan.duration; finish(reason: "finished"); return }
         try checkOutput(); engine.prepare(); try engine.start()
         let rate = engine.outputNode.outputFormat(forBus: 0).sampleRate, latency = engine.outputNode.presentationLatency
         guard rate.isFinite, rate > 0, latency.isFinite, latency >= 0 else { throw AudioFailure("output clock is unavailable") }
@@ -408,14 +435,14 @@ final class ArrangementTransport {
         if let midi { try midi.runCoordinated(anchorNanoseconds: AudioConvertHostTimeToNanos(anchor)) }
         guard mach_absolute_time() < anchor else { throw AudioFailure("audio graph missed its common start deadline") }
         state = .playing; try checkOutput()
-        if plan.capturedAudio {
+        if plan.clocked {
             let expected = generation, end = try futureHost(plan.duration - position, from: anchor)
             let timer = DispatchSource.makeTimerSource(queue: .main); horizon = timer
             timer.schedule(deadline: DispatchTime(uptimeNanoseconds: AudioConvertHostTimeToNanos(end)), leeway: .nanoseconds(0))
             timer.setEventHandler { [weak self] in
                 guard let self, self.generation == expected, self.state == .playing else { return }
                 self.horizonEnded = true; self.horizon?.cancel(); self.horizon = nil
-                if self.active.isEmpty { self.finish(reason: "finished") }
+                if self.completed { self.finish(reason: "finished") }
             }
             timer.resume()
         }

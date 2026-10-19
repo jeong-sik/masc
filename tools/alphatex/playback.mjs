@@ -38,10 +38,10 @@ export async function midiDestinations({ executable = midiTransportPath, signal 
 // One owned child is one transport. Completion means its pipes and process have
 // closed, rather than merely receiving a stopped acknowledgement.
 export function openPlayback({ path, output, midiOutput, midiBindings, loop = false, format = 'wave', onEvent = () => {}, signal,
-  executable = ['wave-arrangement', 'mixed-arrangement', 'capture-session', 'capture-audio-arrangement'].includes(format) ? arrangementTransportPath : midiOutput === undefined ? transportPath : midiTransportPath, spawnProcess = spawn } = {}) {
+  executable = ['wave-arrangement', 'mixed-arrangement', 'capture-session', 'capture-arrangement', 'capture-audio-arrangement'].includes(format) ? arrangementTransportPath : midiOutput === undefined ? transportPath : midiTransportPath, spawnProcess = spawn } = {}) {
   signal?.throwIfAborted()
-  const captured = format === 'capture-session', mixed = format === 'mixed-arrangement' || captured
-  if (!['wave', 'wave-arrangement', 'midi-arrangement', 'mixed-arrangement', 'capture-session', 'capture-audio-arrangement'].includes(format) || ['wave-arrangement', 'capture-audio-arrangement'].includes(format) && (midiOutput !== undefined || loop)) throw new Error('Invalid arrangement playback route or loop')
+  const captured = ['capture-session', 'capture-arrangement'].includes(format), mixed = format === 'mixed-arrangement' || captured
+  if (!['wave', 'wave-arrangement', 'midi-arrangement', 'mixed-arrangement', 'capture-session', 'capture-arrangement', 'capture-audio-arrangement'].includes(format) || ['wave-arrangement', 'capture-audio-arrangement'].includes(format) && (midiOutput !== undefined || loop)) throw new Error('Invalid arrangement playback route or loop')
   if ((format === 'midi-arrangement' || mixed) && (midiOutput === undefined || midiBindings === undefined || loop)) throw new Error('MIDI arrangement requires explicit bindings without whole-arrangement looping')
   if (mixed && !captured && output === undefined) throw new Error('Mixed arrangement requires an explicit audio output')
   if (typeof path !== 'string' || !path) throw new Error('A playback source path is required')
@@ -92,7 +92,7 @@ export function openPlayback({ path, output, midiOutput, midiBindings, loop = fa
             : event.device.kind !== 'midi' || event.device.protocol !== 1) || event.loop !== loop) {
         throw new Error('Malformed playback state')
       }
-      if (mixed && (event.format !== (captured ? 'capture-session' : 'mixed-arrangement') || event.clock?.kind !== 'mach-host-time')) throw new Error('Missing combined arrangement clock')
+      if (mixed && (event.format !== format || event.clock?.kind !== 'mach-host-time')) throw new Error('Missing combined arrangement clock')
       if (format === 'capture-audio-arrangement' && (event.format !== format || event.clock?.kind !== 'mach-host-time')) throw new Error('Missing captured audio arrangement clock')
       if (midiBindings !== undefined) {
         if (!Array.isArray(event.bindings) || event.bindings.length !== midiBindings.length

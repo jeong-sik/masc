@@ -256,8 +256,9 @@ type async_msg =
   (** Verified questions may settle their own read before the full bundle. *)
   | Http_asks_loaded of early_asks_observation
   | Http_approvals_loaded of early_approval_observation
-  | Ask_answer_receipt_observed of
-      ask_submission * (Masc.Tui_decode_asks.ask_answer_receipt, string) result
+  | Ask_answer_receipt_ready of ask_submission
+      (** The original submission owns the published receipt; this message only
+          asks the loop to observe it. *)
   | Ask_followup_observed of Snapshot_read.request * ask_submission *
       Masc.Tui_decode_asks.ask_followup_event * int64
   | Ask_followup_finished of Snapshot_read.request * ask_submission * (unit, string) result

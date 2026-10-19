@@ -15400,9 +15400,9 @@ let observe_ask_answer_call submission call operation =
     let emit () =
       log_ask_answer_observation (Ask_answer_observation.make submission ~at_ns:(Mtime_clock.elapsed_ns ())
         (Ask_answer_observation.Call_finished {call; started_ns; outcome})) in
-    (match Masc.Fs_compat.execution_context () with
-     | Masc.Fs_compat.Non_eio -> emit ()
-     | Masc.Fs_compat.Eio_fiber -> Eio.Cancel.protect emit);
+    (match Fs_compat.execution_context () with
+     | Fs_compat.Non_eio -> emit ()
+     | Fs_compat.Eio_fiber -> Eio.Cancel.protect emit);
     Printexc.raise_with_backtrace error backtrace
 
 let observe_ask_answer_receipt state submission result =

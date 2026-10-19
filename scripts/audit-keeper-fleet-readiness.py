@@ -11,20 +11,21 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import re
 import sys
 import time
+import tomllib
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
 import masc_base_path  # noqa: E402
+from recorded_tool_outcome import RecordedCallOutcome, recorded_call_outcome  # noqa: E402
 from keeper_store_layout import (  # noqa: E402
-    StoreLayoutUnavailable,
     load_store_layout,
     store_dirname,
 )
@@ -35,9 +36,6 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 # dropped raises here instead of listing a directory that does not exist and
 # reporting the empty result as clean (#27583).
 _STORE_LAYOUT = load_store_layout(_REPO_ROOT)
-from typing import Any
-
-import tomllib
 
 
 # Runtime-emitted Board tool names.
@@ -383,11 +381,18 @@ def add_pr_refs_from_structured_output(
     return added
 
 
-def pr_evidence_from_row(row: dict[str, Any]) -> tuple[set[str], set[str]]:
+def pr_evidence_from_row(
+    row: dict[str, Any], *, recorded_call: bool = False
+) -> tuple[set[str], set[str]]:
     refs: set[str] = set()
     sources: set[str] = set()
     source = text_field(row, "_source_path")
-    if row_succeeded(row):
+    succeeded = (
+        row.get("record_kind") == "tool_call"
+        and recorded_call_outcome(row) is RecordedCallOutcome.SUCCEEDED
+        if recorded_call else row_succeeded(row)
+    )
+    if succeeded:
         add_pr_refs_from_structured_output(
             refs=refs, sources=sources, source=source, row=row
         )
@@ -506,12 +511,12 @@ def web_search_evidence_from_decision(row: dict[str, Any], source: str) -> set[s
 
 
 def web_search_evidence_from_tool_call(row: dict[str, Any], source: str) -> set[str]:
+    if row.get("record_kind") != "tool_call":
+        return set()
     tool = row.get("tool")
     if not isinstance(tool, str) or tool not in WEB_SEARCH_TOOLS:
         return set()
-    # A tool-call row's verdict is its closed `wire_outcome` (ok|error|unknown).
-    # `unknown` means the response was never observed, so it is not evidence.
-    if row.get("wire_outcome") != "ok":
+    if recorded_call_outcome(row) is not RecordedCallOutcome.SUCCEEDED:
         return set()
     return {web_search_evidence_item(tool, row, source)}
 
@@ -601,7 +606,9 @@ def scan_pr_creation_evidence(base_path: Path, name: str) -> PrCreationEvidence:
             if isinstance(row_keeper, str) and row_keeper != name:
                 continue
             row["_source_path"] = str(path)
-            row_refs, row_sources = pr_evidence_from_row(row)
+            row_refs, row_sources = pr_evidence_from_row(
+                row, recorded_call=path.is_relative_to(base_path / ".masc" / "tool_calls")
+            )
             refs.update(row_refs)
             sources.update(row_sources)
     return PrCreationEvidence(refs=refs, sources=sources)

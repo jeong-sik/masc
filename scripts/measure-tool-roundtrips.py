@@ -66,6 +66,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 
 import masc_base_path  # noqa: E402
+from recorded_tool_outcome import RecordedCallOutcome, recorded_call_outcome  # noqa: E402
 
 # Mirrors Common.max_tool_result_wire_bytes, the artifact_read page bound (both
 # the max_bytes default/maximum and the response-envelope budget). It was
@@ -205,7 +206,7 @@ def probe_pairs(turns: dict[tuple, list[dict]]) -> tuple[int, int]:
             if key_set(first.get("input")) == key_set(second.get("input")):
                 continue
             total += 1
-            if first.get("wire_outcome") == "error":
+            if recorded_call_outcome(first) is RecordedCallOutcome.FAILED:
                 first_failed += 1
     return total, first_failed
 

@@ -35,6 +35,7 @@ import { StatTile } from './common/stat-tile'
 import { coverageGapDisplay } from './common/source-health'
 import { TimeAgo } from './common/time-ago'
 import { asNullableString, asRecord, asStringArray } from './common/normalize'
+import { recordedToolOutcome, type RecordedToolOutcome } from '../lib/recorded-tool-outcome'
 
 interface StoreSnapshot {
   keepers: number
@@ -869,11 +870,23 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
   `
 }
 
+const OUTCOME_BADGES: Record<RecordedToolOutcome, { label: string; icon: string; color: string }> = {
+  succeeded: { label: 'Succeeded', icon: 'O', color: 'text-[var(--color-status-ok)]' },
+  failed: { label: 'Failed', icon: 'X', color: 'text-[var(--bad-light)]' },
+  deferred: { label: 'Deferred', icon: '…', color: 'text-[var(--color-fg-muted)]' },
+  unsettled: { label: 'Unsettled', icon: '?', color: 'text-[var(--color-fg-muted)]' },
+  malformed: { label: 'Malformed', icon: '!', color: 'text-[var(--bad-light)]' },
+}
+
 function EntryRow({ entry, routeFocused = false }: { entry: TelemetryEntry; routeFocused?: boolean }) {
   const expanded = useSignal(false)
   const meta = sourceMeta(entry.source)
   const ts = entryTimestamp(entry)
-  const success = entry.success as boolean | undefined
+  // Other telemetry producers retain their own boolean success contract.
+  const outcome = entry.source === 'tool_call_io'
+    ? recordedToolOutcome(entry)
+    : typeof entry.success === 'boolean' ? (entry.success ? 'succeeded' : 'failed') : null
+  const badge = outcome === null ? null : OUTCOME_BADGES[outcome]
   const scopeBadges = telemetryScopeBadges(entry)
   const rawJson = useMemo(() => JSON.stringify(entry, null, 2), [entry])
   const focusedClasses = routeFocused
@@ -899,9 +912,10 @@ function EntryRow({ entry, routeFocused = false }: { entry: TelemetryEntry; rout
               ? html`<span class="font-mono text-[var(--color-fg-muted)]">-</span>`
               : html`<${TimeAgo} timestamp=${ts} mode="both" class="font-mono text-[var(--color-fg-muted)]"/>`}
           </span>
-          ${success != null ? html`
-            <span class="flex-shrink-0 w-4 ${success ? 'text-[var(--color-status-ok)]' : 'text-[var(--bad-light)]'}">
-              ${success ? 'O' : 'X'}
+          ${badge ? html`
+            <span class="flex-shrink-0 w-4 ${badge.color}" data-telemetry-outcome=${outcome}
+              aria-label=${badge.label} title=${badge.label}>
+              ${badge.icon}
             </span>
           ` : html`<span class="w-4"></span>`}
           <span class="font-mono text-[var(--color-fg-primary)] truncate flex-1" title=${entryPreview(entry)}>

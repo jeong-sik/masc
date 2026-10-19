@@ -23,6 +23,7 @@
 # Related: scripts/analyze-tool-call-quality.sh (human-readable counterpart)
 
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 DAYS="${1:-1}"
 OUT_DIR="${2:-}"
@@ -51,8 +52,9 @@ emit_day() {
   local date="$1" file="$2"
   [ -f "$file" ] || return 0
 
-  jq -rc '
-    select(.success == false) |
+  jq -L "$SCRIPT_DIR/lib" -rc '
+    include "recorded-tool-outcome";
+    select(.record_kind == "tool_call" and recorded_call_outcome == "failed") |
     . as $row |
     ($row.output // "") |
     (try (fromjson | .error) catch null) as $err |

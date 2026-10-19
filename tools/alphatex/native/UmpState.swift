@@ -20,6 +20,14 @@ struct UmpField: Hashable {
             default: return nil
             }
         }
+        // Only fields that select the attack must survive a seek baseline; the
+        // rest may be defaulted without changing which sample sounds.
+        var determinesAttack: Bool {
+            switch self {
+            case .program, .bank, .noteRegistered, .noteAssignable, .noteReset: return true
+            default: return false
+            }
+        }
     }
     let address: UmpAddress
     let kind: Kind
@@ -39,15 +47,23 @@ enum UmpObstacle: String, Hashable {
 enum UmpAction {
     case on(UInt32), off(UInt32), absolute([UmpField.Kind]), relative(UmpField.Kind)
     case pedal(UInt32, Bool), kill, release, reset, management(UInt32, Bool), unsupported(UmpObstacle)
+    // System real-time (MT1 F8/FE) and utility (MT0 NOOP/JR clock/timestamp)
+    // messages carry no channel state and must not refuse reconstruction.
+    case ignored
 }
 struct UmpMessage {
     let address: UmpAddress
     let action: UmpAction
     init(_ event: UmpEvent) {
         let word = event.words[0], dialect = word >> 28, status = (word >> 20) & 15
-        let number = (word >> 8) & 127, byte = word & 255
+        let number = (word >> 8) & 127, byte = word & 255, detail = (word >> 16) & 15
         address = UmpAddress(source: event.source, prefix: word & 0xff0f0000)
-        guard dialect == 2 || dialect == 4 else { action = .unsupported(.opaque); return }
+        guard dialect == 2 || dialect == 4 else {
+            // Utility (MT0) NOOP, JR Clock and JR Timestamp carry no channel
+            // state; only genuinely opaque messages remain obstacles.
+            action = dialect == 0 && (status == 0 || status == 1 || status == 2) ? .ignored : .unsupported(.opaque)
+            return
+        }
         switch status {
         case 9 where dialect == 4 || byte > 0: action = .on(number)
         case 8, 9: action = .off(number)
@@ -78,6 +94,7 @@ struct UmpMessage {
         case 13: action = .absolute([.pressure])
         case 14: action = .absolute([.bend])
         case 15 where dialect == 4 && byte & ~3 == 0: action = .management(number, byte & 1 != 0)
+        case 15 where dialect == 2 && (detail == 8 || detail == 14): action = .ignored
         default: action = .unsupported(.opaque)
         }
     }
@@ -172,7 +189,7 @@ func umpRestoration(_ events: [UmpEvent], before seconds: Double, replacing prev
         channel.prune(); channels[address] = channel
     }
     try footprint.requireSupported()
-    guard previous.touched.allSatisfy({ $0.covered(by: known) }) else { throw MidiFailure("captured UMP seek needs an explicit source baseline for previously changed state") }
+    guard previous.touched.filter({ $0.kind.determinesAttack }).allSatisfy({ $0.covered(by: known) }) else { throw MidiFailure("captured UMP seek needs an explicit source baseline for previously changed state") }
     var live = Set<Int>()
     for channel in channels.values {
         for voice in channel.voices { live.insert(voice.on); if let off = voice.off { live.insert(off) } }
@@ -185,7 +202,7 @@ func umpRestoration(_ events: [UmpEvent], before seconds: Double, replacing prev
     for ordinal in 0..<next {
         let event = events[ordinal], message = UmpMessage(event)
         if case .on(let number) = message.action, live.contains(ordinal) {
-            let required = previous.touched.filter { $0.address == message.address && ($0.kind.note == nil || $0.kind.note == number) }
+            let required = previous.touched.filter { $0.kind.determinesAttack && $0.address == message.address && ($0.kind.note == nil || $0.kind.note == number) }
             guard required.allSatisfy({ $0.covered(by: known) }) else { throw MidiFailure("captured UMP seek needs a source baseline before a surviving Note On") }
         }
         if case .relative = message.action {} else { known.formUnion(message.fields) }

@@ -947,6 +947,68 @@ let test_first_loss_retains_unproven_effects mode () =
           | None -> fail "logical operator resolution disappeared in the TUI protocol")
        | Ok _ -> fail "physical Lost and logical resolution were conflated"
        | Error detail -> fail detail);
+      (* The original resource scenario continues through the actual exact
+         Task/history producers and the TUI's owned source reads. It never
+         supplies a current Task/list row or inspects rendered text. *)
+      let module Ui = Masc_tui_types in
+      let module Task_read = Masc.Tui_decode_task_inspection in
+      let ui=Ui.create_state ~workspace:"source-task" ~local_base_path:base_path ~port:0 ~refresh_interval:0. () in
+      ui.tools_async_selection <- Some target;ui.tools_async_detail_open <- true;
+      let request=Ui.begin_tools_async_detail ui ~force:false |> Option.get in
+      Ui.complete_tools_async_detail ui request (Detail.decode ~target projected);
+      let source=match Ui.tools_async_source_task ui with
+        | Ui.Async_source_task source -> source
+        | _ -> fail "real original run lost its Task source" in
+      check string "source link belongs to the original run" (Plan.Composition_run_id.to_string prepared.source.composition_run_id) source.ats_run_id;
+      check string "source link retains original Task" "original-source-task" source.ats_task_id;
+      let config=Workspace.default_config base_path in
+      let description="Original resource evidence\n" ^ String.make 4096 'x' in
+      let task id = Masc_domain.task_of_yojson (`Assoc ["id",`String id;"title",`String id;
+        "description",`String description;"status",`String "todo";"created_at",`String "2026-10-19T00:00:00Z"])
+        |> require "source Task fixture" in
+      let backlog=Workspace_backlog.read_backlog_r config |> require "authoritative Task backlog" in
+      Workspace_backlog.write_backlog config {backlog with tasks=[task source.ats_task_id;task "different-current-task"]};
+      List.iter (fun task_id -> Workspace_utils_ops.log_event config (`Assoc
+        ["type",`String "task_transition";"task_id",`String task_id;"ts",`String "2026-10-19T00:00:01Z";
+         "from_status",`String "todo";"to_status",`String "claimed";"actor",`String keeper]))
+        [source.ats_task_id;"different-current-task"];
+      let read_body task_id = match Masc.Server_dashboard_task_detail.read ~config ~task_id:(Some task_id)
+          |> Masc.Server_dashboard_task_detail.response with
+        | `OK,json -> Task_read.detail ~task_id:source.ats_task_id json
+        | _ -> Error "source Task producer unavailable" in
+      let read_history task_id = Masc.Task.Tool.task_history_events_json config ~task_id ~limit:50
+        |> Task_read.history ~task_id:source.ats_task_id in
+      ui.tools_async_task_source <- Some source;
+      let old_body=Ui.begin_tools_async_task_body ui ~force:false |> Option.get in
+      let old_history=Ui.begin_tools_async_task_history ui ~force:false |> Option.get in
+      Ui.suspend_workspace_readings ui;
+      let current_body=Ui.begin_tools_async_task_body ui ~force:false |> Option.get in
+      let current_history=Ui.begin_tools_async_task_history ui ~force:false |> Option.get in
+      Ui.complete_tools_async_task_body ui old_body (read_body source.ats_task_id);
+      Ui.complete_tools_async_task_history ui old_history (read_history source.ats_task_id);
+      check bool "retired Task reads cannot settle replacement reads" true
+        (Masc_tui_fetched.in_flight ui.tools_async_task_body && Masc_tui_fetched.in_flight ui.tools_async_task_history);
+      Ui.complete_tools_async_task_history ui current_history (read_history source.ats_task_id);
+      check bool "history is observed while the body remains pending" true
+        (Masc_tui_fetched.in_flight ui.tools_async_task_body &&
+         match Masc_tui_fetched.view_for ~equal:Ui.equal_tools_async_task_source ui.tools_async_task_history ~key:source with
+         | Ready [_] -> true | _ -> false);
+      Ui.complete_tools_async_task_body ui current_body (read_body source.ats_task_id);
+      let refresh=Ui.begin_tools_async_task_body ui ~force:true |> Option.get in
+      Ui.complete_tools_async_task_body ui refresh (Error "Task storage unavailable");
+      check bool "body failure retains full original Task independently of list membership" true
+        (ui.tasks_domain=[] && match Masc_tui_fetched.view_for ~equal:Ui.equal_tools_async_task_source ui.tools_async_task_body ~key:source with
+         | Stale (detail,_) -> detail.task.id=source.ats_task_id && detail.task.description=description
+         | _ -> false);
+      check bool "current Task cannot replace original Task detail" true (Result.is_error (read_body "different-current-task"));
+      check bool "current Task events cannot replace original history" true (Result.is_error (read_history "different-current-task"));
+      let late=Ui.begin_tools_async_task_body ui ~force:true |> Option.get in
+      Ui.withdraw_tools_async_details ui;
+      ui.tools_async_selection <- Some target;ui.tools_async_detail_open <- true;ui.tools_async_task_source <- Some source;
+      let replacement=Ui.begin_tools_async_task_body ui ~force:false |> Option.get in
+      Ui.complete_tools_async_task_body ui late (read_body source.ats_task_id);
+      check bool "withdrawn same-ID Task reader cannot settle its replacement" true (Masc_tui_fetched.in_flight ui.tools_async_task_body);
+      Ui.complete_tools_async_task_body ui replacement (read_body source.ats_task_id);
       check_json "exact marker retired after durable resolution" (`Bool true)
         (Yojson.Safe.Util.member "marker_retired" resolved);
       check bool "resolved marker no longer indexed" false (Sys.file_exists marker_path);

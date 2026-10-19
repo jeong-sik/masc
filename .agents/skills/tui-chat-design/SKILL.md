@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 원본 비동기 요청 상세·물리/논리 관측, 채팅·입력·로딩·진행 상태, 시작 키 인계와 늦은 터미널 응답, 비동기 조회·설정 저장·긴 질문의 요약과 전체 읽기·Ask 답변과 재조회를 바꿀 때 쓴다. Keeper·Work·로그·Board·Runtime·Overview·Tools·Connectors의 원본 요청·입력·revision·소유권, 준비 상세·현재 턴·이력·구성 조회·디렉터리 페이지의 workspace 검증과 캐시 영수증, 공유 조회와 부분 실패, worker 관측·UI 반영·paint 증거를 구분한다."
+description: "MASC TUI의 원본 비동기 요청·Task·이력 상세와 물리/논리 관측, 채팅·입력·로딩·진행 상태, 시작 키 인계와 늦은 터미널 응답, 비동기 조회·설정 저장·긴 질문의 요약과 전체 읽기·Ask 답변과 재조회를 바꿀 때 쓴다. Keeper·Work·로그·Board·Runtime·Overview·Tools·Connectors의 원본 요청·입력·revision·소유권, 준비 상세·현재 턴·이력·구성 조회·디렉터리 페이지의 workspace 검증과 캐시 영수증, 공유 조회와 부분 실패, worker 관측·UI 반영·paint 증거를 구분한다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -110,6 +110,17 @@ description: "MASC TUI의 원본 비동기 요청 상세·물리/논리 관측, 
 
 ## 원본 비동기 요청 상세
 
+- `t`로 여는 원본 Task는 확인된 run의 `source_task_id`에서만 가져온다. 같은 요청/context의
+  이전 논리 관측을 쓸 때는 그 사실과 관측 시각을 남긴다. 현재 Keeper Task나 목록 행으로
+  대신 채우지 않는다. 정확한 Task 본문·이력 API를 독립 조회하고 목록에 없는 Task도 읽는다.
+- 본문과 이력은 원래 request source/run/Task·workspace read owner·각각의 opaque ticket과
+  취소 job을 소유한다. 한쪽 완료·실패가 형제의 pending/기존 관측을 바꾸지 않는다. 명시적
+  재조회는 두 원래 읽기를 대체하고 cadence는 각 pending을 공유한다. Esc는 Task에서 원본
+  요청으로, 다음 Esc는 요청 목록으로 돌아간다. 철회·동일 ID 재진입도 이전 ticket을 빌리지 않는다.
+- Task 본문은 원래 ID echo와 canonical Goal 관측을 확인하고, 이력은 원래 Task ID가 없는
+  행이나 충돌한 ID를 거절한다. 알려진 부분 필드 해석 실패도 숨기지 않는다. 두 관측은
+  원자적 snapshot이나 Task 완료 증명이 아니다. 기존 완전한 Task 문서 렌더러를 실제 두
+  consumer가 공유하며, 문구·배치·snapshot·PTY 검사를 새로 만들지 않는다.
 - Tools 비동기 목록은 원래 `submitted_by`·request ID·대상 Keeper를 함께 보관한다.
   J/K 선택과 Enter 상세는 그 원본을 사용한다. 요청이 활성 목록에서 사라져도 선택이나
   열린 상세를 다른 행으로 바꾸지 않는다. `o`의 명시적 원본 ID 조회도 같은 경로를 쓰며

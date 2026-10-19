@@ -5007,6 +5007,25 @@ type tools_async_detail_request =
   { tad_ticket : Masc.Tui_decode_async_request.target Masc_tui_fetched.request
   ; tad_reading : unit ref; tad_job : unit ref }
 
+type tools_async_task_source =
+  { ats_request : Masc.Tui_decode_async_request.source
+  ; ats_run_id : string; ats_task_id : string; ats_observed_at : float
+  ; ats_retained : bool }
+
+type tools_async_task_link =
+  | Async_source_task of tools_async_task_source
+  | Async_source_has_no_task
+  | Async_source_not_composition
+  | Async_source_unavailable of string
+
+type tools_async_task_request =
+  { atr_ticket : tools_async_task_source Masc_tui_fetched.request
+  ; atr_reading : unit ref; atr_job : unit ref }
+
+let equal_tools_async_task_source a b =
+  Masc.Tui_decode_async_request.equal_source a.ats_request b.ats_request
+  && a.ats_run_id=b.ats_run_id && a.ats_task_id=b.ats_task_id
+
 type tools_read_inflight =
   { tri_generation : int
   ; tri_keeper : string option
@@ -8668,6 +8687,11 @@ type state = {
   mutable tools_async_detail: (Masc.Tui_decode_async_request.target, Masc.Tui_decode_async_request.reading) Masc_tui_fetched.t;
   mutable tools_async_detail_request: tools_async_detail_request option;
   mutable tools_async_last_logical: (Masc.Tui_decode_async_request.source * Masc.Tui_decode_async_request.logical_value) option;
+  mutable tools_async_task_source: tools_async_task_source option;
+  mutable tools_async_task_body: (tools_async_task_source, Masc.Tui_decode_task_inspection.detail) Masc_tui_fetched.t;
+  mutable tools_async_task_history: (tools_async_task_source, Tui_decode.task_history_event list) Masc_tui_fetched.t;
+  mutable tools_async_task_body_request: tools_async_task_request option;
+  mutable tools_async_task_history_request: tools_async_task_request option;
   mutable lane_addons: Masc_tui_lane_addons.t option;
   mutable lane_addons_cached: Masc_tui_lane_addons.t;
   mutable lane_addons_generation: int;
@@ -10545,7 +10569,14 @@ let clear_runtime_catalog_read state =
   state.runtime_catalog <- []; state.runtime_lanes <- []; state.runtime_assignments <- [];
   state.runtime_catalog_default_route <- None
 
+let suspend_tools_async_task state =
+  state.tools_async_task_body <- Masc_tui_fetched.suspend state.tools_async_task_body;
+  state.tools_async_task_history <- Masc_tui_fetched.suspend state.tools_async_task_history;
+  state.tools_async_task_body_request <- None;
+  state.tools_async_task_history_request <- None
+
 let suspend_tools_async_detail state =
+  suspend_tools_async_task state;
   state.tools_async_detail <- Masc_tui_fetched.suspend state.tools_async_detail;
   state.tools_async_detail_request <- None
 
@@ -10554,7 +10585,84 @@ let withdraw_tools_async_details state =
   state.tools_async_detail_request <- None;
   state.tools_async_selection <- None;
   state.tools_async_detail_open <- false;
-  state.tools_async_last_logical <- None
+  state.tools_async_last_logical <- None;
+  state.tools_async_task_source <- None;
+  state.tools_async_task_body <- Masc_tui_fetched.clear state.tools_async_task_body;
+  state.tools_async_task_history <- Masc_tui_fetched.clear state.tools_async_task_history;
+  state.tools_async_task_body_request <- None;
+  state.tools_async_task_history_request <- None
+
+let tools_async_source_task state =
+  let module Detail = Masc.Tui_decode_async_request in
+  match state.tools_async_selection with
+  | None -> Async_source_unavailable "No original request selected"
+  | Some target ->
+    let view=Masc_tui_fetched.view_for ~equal:Detail.equal_target state.tools_async_detail ~key:target in
+    let from_logical source ~retained = function
+      | Detail.Not_composition -> Async_source_not_composition
+      | Original_run run -> (match run.source_task_id with
+        | None -> Async_source_has_no_task
+        | Some task_id -> Async_source_task {ats_request=source;ats_run_id=run.run_id;
+            ats_task_id=task_id;ats_observed_at=run.observed_at;ats_retained=retained}) in
+    match Masc_tui_fetched.value view with
+    | None -> Async_source_unavailable "Original request has no confirmed observation"
+    | Some Detail.Absent -> Async_source_unavailable "Original request is absent"
+    | Some (Observed snapshot) ->
+      let retained=match view with Masc_tui_fetched.Stale _ -> true
+        | Ready _ -> Masc_tui_fetched.in_flight state.tools_async_detail
+        | Absent | Loading | Failed _ -> false in
+      match snapshot.logical with
+      | Detail.Confirmed value -> from_logical snapshot.source ~retained value
+      | Unavailable detail -> (match state.tools_async_last_logical with
+        | Some (source,value) when Detail.equal_source source snapshot.source ->
+            from_logical source ~retained:true value
+        | Some _ | None -> Async_source_unavailable detail)
+
+let begin_tools_async_task_body state ~force =
+  match state.tools_async_task_source with
+  | None -> None
+  | Some key ->
+    let start=if force then Masc_tui_fetched.refresh else Masc_tui_fetched.start in
+    match start ~equal:equal_tools_async_task_source state.tools_async_task_body ~key with
+    | Already_loading -> None
+    | Started (reading,atr_ticket) ->
+      state.tools_async_task_body <- reading;
+      let request={atr_ticket;atr_reading=state.workspace_read_authority;atr_job=ref ()} in
+      state.tools_async_task_body_request <- Some request;Some request
+
+let begin_tools_async_task_history state ~force =
+  match state.tools_async_task_source with
+  | None -> None
+  | Some key ->
+    let start=if force then Masc_tui_fetched.refresh else Masc_tui_fetched.start in
+    match start ~equal:equal_tools_async_task_source state.tools_async_task_history ~key with
+    | Already_loading -> None
+    | Started (reading,atr_ticket) ->
+      state.tools_async_task_history <- reading;
+      let request={atr_ticket;atr_reading=state.workspace_read_authority;atr_job=ref ()} in
+      state.tools_async_task_history_request <- Some request;Some request
+
+let tools_async_task_request_current state request pending fetched =
+  let source=Masc_tui_fetched.request_key request.atr_ticket in
+  request.atr_reading==state.workspace_read_authority
+  && Option.exists (fun current -> current==request) pending
+  && Option.exists (equal_tools_async_task_source source) state.tools_async_task_source
+  && Option.exists (Masc.Tui_decode_async_request.equal_target source.ats_request.target) state.tools_async_selection
+  && Masc_tui_fetched.is_current ~equal:equal_tools_async_task_source fetched request.atr_ticket
+
+let complete_tools_async_task_body state request result =
+  if tools_async_task_request_current state request state.tools_async_task_body_request state.tools_async_task_body then begin
+    state.tools_async_task_body_request <- None;
+    state.tools_async_task_body <- Masc_tui_fetched.complete ~equal:equal_tools_async_task_source
+      state.tools_async_task_body request.atr_ticket result
+  end
+
+let complete_tools_async_task_history state request result =
+  if tools_async_task_request_current state request state.tools_async_task_history_request state.tools_async_task_history then begin
+    state.tools_async_task_history_request <- None;
+    state.tools_async_task_history <- Masc_tui_fetched.complete ~equal:equal_tools_async_task_source
+      state.tools_async_task_history request.atr_ticket result
+  end
 
 let tools_async_targets state = match state.tools_async_observation with
   | Some (Tui_decode.Async_ready {requests;_}) -> List.map (fun (row : Tui_decode.async_request_row) ->
@@ -14403,6 +14511,11 @@ let create_state
   tools_async_detail = Masc_tui_fetched.initial;
   tools_async_detail_request = None;
   tools_async_last_logical = None;
+  tools_async_task_source = None;
+  tools_async_task_body = Masc_tui_fetched.initial;
+  tools_async_task_history = Masc_tui_fetched.initial;
+  tools_async_task_body_request = None;
+  tools_async_task_history_request = None;
   lane_addons = None;
   lane_addons_cached = Masc_tui_lane_addons.initial;
   lane_addons_generation = 0;

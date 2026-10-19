@@ -448,6 +448,8 @@ type async_msg =
   | Skill_evidence_loaded of unit ref * string * (Yojson.Safe.t, string) result
   | Tools_async_observation_loaded of int * (Masc.Tui_decode.async_request_observation, string) result
   | Tools_async_detail_loaded of Masc_tui_types.tools_async_detail_request * (Masc.Tui_decode_async_request.reading, string) result
+  | Tools_async_task_body_loaded of Masc_tui_types.tools_async_task_request * (Masc.Tui_decode_task_inspection.detail, string) result
+  | Tools_async_task_history_loaded of Masc_tui_types.tools_async_task_request * (Masc.Tui_decode.task_history_event list, string) result
   | Runtime_lane_slots_written of
       Masc_tui_types.runtime_lane_list
       * (Masc_tui_types.slot_editor_target * Masc_tui_types.slot_editor_identity * Masc_tui_types.slot_editor_identity) option

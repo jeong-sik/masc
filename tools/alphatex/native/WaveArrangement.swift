@@ -101,12 +101,13 @@ struct Region: Decodable {
     let repetitions: AVAudioFramePosition
     let captureClock: CaptureAudioClock?
     var pulseClock: PulseAudioClock? = nil
+    var pulseLoopUnit: Int64? = nil
     var component: CaptureRegionComponent? = nil
     var audioChannel: CaptureAudioChannel? = nil
     var calibrationOutput: CalibrationOutput? = nil
     var projectTick: Int64? = nil
     var startNanoseconds: CaptureStartNanoseconds? = nil
-    enum CodingKeys: String, CodingKey { case id, asset, startSeconds, offsetFrames, frameCount, captureClock, pulseClock, component, audioChannel, calibrationOutput, projectTick, startNanoseconds; case repetitions = "repeat" }
+    enum CodingKeys: String, CodingKey { case id, asset, startSeconds, offsetFrames, frameCount, captureClock, pulseClock, pulseLoopUnit, component, audioChannel, calibrationOutput, projectTick, startNanoseconds; case repetitions = "repeat" }
     func loopLayout(_ loop: WaveLoopClock, rate: Double) throws -> WaveLoopLayout {
         guard pulseClock == nil else { throw AudioFailure("practice pulse looping is not connected") }
         if let captureClock {
@@ -153,13 +154,27 @@ struct Plan: Decodable {
               (!regions.isEmpty || (captured || clocked) && assets.isEmpty), Set(assets.map(\.id)).count == assets.count, Set(regions.map(\.id)).count == regions.count else { throw AudioFailure("invalid WAV arrangement plan") }
         if let loop {
             try loop.validate()
-            guard (kind == "wave-arrangement" || mixed || capturedAudio || pairedRegions || hybrid), practice == nil, duration == loop.duration else { throw AudioFailure("audio looping requires an arrangement and its authored clock") }
+            guard (kind == "wave-arrangement" || mixed || capturedAudio || pairedRegions || hybrid) else { throw AudioFailure("audio looping requires an arrangement and its authored clock") }
+            if let practice { try practice.validate(loop: loop) }
+            else { guard duration == loop.duration else { throw AudioFailure("audio loop duration differs from its clock") } }
         }
         if let practice {
             guard !captured, practice.countInSeconds.isFinite, practice.countInSeconds >= 0,
                   practice.duration.isFinite, practice.duration > 0,
                   abs(practice.countInSeconds + practice.duration - duration) <= duration.ulp else {
                 throw AudioFailure("invalid practice timeline")
+            }
+            guard loop != nil || practice.loop == nil else { throw AudioFailure("practice loop is missing its backing clock") }
+            if let clock = practice.loop {
+                let pulses = regions.filter { $0.pulseClock != nil }
+                let intro = pulses.filter { $0.pulseLoopUnit == nil }
+                let backing = pulses.filter { $0.pulseLoopUnit != nil }
+                guard intro.count == (practice.countInSeconds > 0 ? 1 : 0), backing.count == (clock.metronome ? 1 : 0),
+                      intro.allSatisfy({ $0.pulseClock!.duration == practice.countInSeconds && $0.pulseClock!.beatCount == clock.countInBeats }),
+                      backing.allSatisfy({ $0.pulseLoopUnit == clock.unit && $0.pulseClock!.duration == practice.duration && $0.pulseClock!.beatCount == nil }),
+                      pulses.allSatisfy({ $0.pulseClock!.period.numerator == clock.period.numerator && $0.pulseClock!.period.denominator == clock.period.denominator && $0.pulseClock!.beatsPerBar == clock.beatsPerBar }) else {
+                    throw AudioFailure("practice loop pulse voices disagree with the common clock")
+                }
             }
         }
         for asset in assets {
@@ -187,7 +202,9 @@ struct Plan: Decodable {
             if let pulse = region.pulseClock {
                 guard practice != nil, region.captureClock == nil, region.component == nil, region.audioChannel == nil,
                       region.calibrationOutput == nil, region.offsetFrames == 0, region.repetitions == 1,
-                      region.startSeconds == 0, pulse.duration <= duration else { throw AudioFailure("invalid practice pulse region") }
+                      region.startSeconds == 0, region.projectTick == nil, region.startNanoseconds == nil,
+                      pulse.duration <= duration else { throw AudioFailure("invalid practice pulse region") }
+                guard practice?.loop != nil || pulse.beatCount == nil else { throw AudioFailure("exact count-in requires its loop practice clock") }
                 total = try pulse.layout(rate: asset.sampleRate, frameCount: region.frameCount).totalFrames
             } else if let clock = region.captureClock {
                 total = try clock.layout(rate: asset.sampleRate, offsetFrames: region.offsetFrames,
@@ -200,7 +217,10 @@ struct Plan: Decodable {
             guard !clocked || loop != nil || regionEnd <= duration || regionEnd - duration < 1 / asset.sampleRate else {
                 throw AudioFailure("captured audio exceeds its arrangement duration")
             }
-            if let loop {
+            if let unit = region.pulseLoopUnit {
+                guard let loop, practice?.loop != nil, let pulse = region.pulseClock else { throw AudioFailure("loop pulse is missing its practice clock") }
+                _ = try PulseLoopLayout(loop: loop, pulse: pulse, unit: unit, rate: asset.sampleRate, frameCount: region.frameCount)
+            } else if let loop, region.pulseClock == nil {
                 _ = try region.loopLayout(loop, rate: asset.sampleRate)
             }
             end = max(end, regionEnd)
@@ -275,6 +295,8 @@ final class Voice {
     let captureLayout: CaptureAudioLayout?
     let pulseLayout: PulseAudioLayout?
     let loopLayout: WaveLoopLayout?
+    let pulseLoopLayout: PulseLoopLayout?
+    var repeating: Bool { loopLayout != nil || pulseLoopLayout != nil }
     var generation: UInt64 = 0 // only the stream queue accesses these fields
     var cursor: AVAudioFramePosition = 0
     var origin: AVAudioFramePosition = 0
@@ -284,7 +306,10 @@ final class Voice {
         captureLayout = try region.captureClock?.layout(rate: asset.sampleRate, offsetFrames: region.offsetFrames,
                                                        frameCount: region.frameCount, repetitions: region.repetitions)
         pulseLayout = try region.pulseClock?.layout(rate: asset.sampleRate, frameCount: region.frameCount)
-        if let loop {
+        if let loop, let pulse = region.pulseClock, let unit = region.pulseLoopUnit {
+            pulseLoopLayout = try PulseLoopLayout(loop: loop, pulse: pulse, unit: unit, rate: asset.sampleRate, frameCount: region.frameCount)
+        } else { pulseLoopLayout = nil }
+        if let loop, region.pulseClock == nil {
             loopLayout = try region.loopLayout(loop, rate: asset.sampleRate)
         } else { loopLayout = nil }
         total = try pulseLayout?.totalFrames ?? captureLayout?.totalFrames ?? region.totalFrames()
@@ -332,16 +357,17 @@ final class Voice {
         } else { cached = nil }
     }
     func fill(_ target: AVAudioPCMBuffer) throws -> Bool {
-        guard loopLayout != nil || cursor < total else { return false }
+        guard repeating || cursor < total else { return false }
         guard let output = target.floatChannelData else { throw AudioFailure("audio output is not planar float") }
         var written: AVAudioFrameCount = 0
-        while written < capacity && (loopLayout != nil || cursor < total) {
+        while written < capacity && (repeating || cursor < total) {
             let available = Int64(capacity - written)
-            let remaining = loopLayout == nil ? min(available, total - cursor) : available
+            let remaining = repeating ? available : min(available, total - cursor)
             let loopSpan = try loopLayout?.span(at: cursor, maximum: remaining)
             let base = loopSpan ?? captureLayout?.span(at: cursor, maximum: remaining)
                 ?? (source: cursor % region.frameCount, count: min(remaining, region.frameCount - cursor % region.frameCount))
-            let span = loopSpan.map { (source: $0.source, count: $0.count, gain: Float(1)) }
+            let span = try pulseLoopLayout?.span(at: cursor, maximum: remaining)
+                ?? loopSpan.map { (source: $0.source, count: $0.count, gain: Float(1)) }
                 ?? pulseLayout?.span(at: cursor, maximum: remaining) ?? (source: base.source, count: base.count, gain: Float(1))
             var count = AVAudioFrameCount(span.count)
             guard count > 0 else { throw AudioFailure("captured audio clock did not advance") }
@@ -383,7 +409,7 @@ final class Voice {
         if player.isPlaying, let render = player.lastRenderTime, let time = player.playerTime(forNodeTime: render), time.sampleTime > scheduled {
             throw AudioFailure("audio source missed its next buffer frame; playback stopped rather than stretching the region")
         }
-        let final = loopLayout == nil && cursor == total
+        let final = !repeating && cursor == total
         player.scheduleBuffer(buffer, at: AVAudioTime(sampleTime: scheduled, atRate: asset.sampleRate),
             completionCallbackType: final ? .dataPlayedBack : .dataConsumed) { [weak self] _ in
             guard let self else { return }
@@ -400,9 +426,9 @@ final class Voice {
     func prepare(from seconds: Double, finished: @escaping () -> Void, failed: @escaping (Error) -> Void) throws -> Bool {
         try queue.sync {
             generation &+= 1
-            let skipped = max(0, loopLayout == nil ? seconds - region.startSeconds : seconds) * asset.sampleRate
+            let skipped = max(0, repeating ? seconds : seconds - region.startSeconds) * asset.sampleRate
             guard skipped.isFinite, skipped < Double(Int64.max) else { throw AudioFailure("audio seek exceeds the native frame timeline") }
-            if loopLayout == nil && skipped >= Double(total) { cursor = total; return false }
+            if !repeating && skipped >= Double(total) { cursor = total; return false }
             cursor = AVAudioFramePosition(skipped.rounded(.down)); origin = cursor
             let expected = generation
             for buffer in buffers { try enqueue(buffer, expected: expected, finished: finished, failed: failed) }
@@ -431,8 +457,13 @@ enum AudioCommand: Decodable {
         }
     }
 }
+enum PracticeLoopPosition {
+    case introduction(UInt64?)
+    case backing(Double)
+    var backing: Double { if case .backing(let phase) = self { return phase }; return 0 }
+}
 final class ArrangementTransport {
-    enum State { case prepared, playing, paused, stopped }
+    enum State { case prepared, starting, playing, paused, stopped }
     let plan: Plan
     let device: OutputDevice
     let engine = AVAudioEngine()
@@ -444,10 +475,13 @@ final class ArrangementTransport {
     var active = Set<String>()
     var horizon: DispatchSourceTimer?
     var horizonEnded = false
+    var renderStartSource: DispatchSourceUserDataAdd?
+    var renderObserver: Int?
     var state = State.prepared
     var position: Double = 0
     var anchor: UInt64 = 0
     var musicalAnchor: UInt64 = 0
+    var loopPosition = PracticeLoopPosition.introduction(nil)
     var generation: UInt64 = 0
     var listeners: [(AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
     var signals: [DispatchSourceSignal] = []
@@ -527,34 +561,60 @@ final class ArrangementTransport {
         guard alive != 0, try outputChannels(device.object) >= Int(renderChannels),
               engine.outputNode.outputFormat(forBus: 0).channelCount == renderChannels, try deviceString(device.object, kAudioDevicePropertyDeviceUID) == device.uid,
               engine.outputNode.auAudioUnit.deviceID == device.object else { throw AudioFailure("selected output is unavailable or changed") }
-        if state == .playing && !engine.isRunning { throw AudioFailure("audio engine stopped after output configuration changed") }
+        if (state == .playing || state == .starting) && !engine.isRunning { throw AudioFailure("audio engine stopped after output configuration changed") }
         for region in plan.regions {
             try region.calibrationOutput?.validate(deviceUID: device.uid, rate: engine.outputNode.outputFormat(forBus: 0).sampleRate,
                                                   frames: currentBufferFrames)
         }
     }
+    func backingTime() -> Double {
+        guard let loop = plan.loop, plan.practice?.loop != nil else { return currentTime() - (plan.practice?.countInSeconds ?? 0) }
+        guard state == .playing, let time = engine.outputNode.lastRenderTime, time.isHostTimeValid,
+              time.hostTime > musicalAnchor else { return loopPosition.backing }
+        return (loopPosition.backing + AVAudioTime.seconds(forHostTime: time.hostTime - musicalAnchor))
+            .truncatingRemainder(dividingBy: loop.duration)
+    }
+    func introRemaining() -> Double {
+        guard let practice = plan.practice else { return 0 }
+        guard practice.loop != nil else { return max(0, practice.countInSeconds - currentTime()) }
+        if state == .playing, let time = engine.outputNode.lastRenderTime, time.isHostTimeValid {
+            let frontier = max(anchor, time.hostTime)
+            return musicalAnchor > frontier ? AVAudioTime.seconds(forHostTime: musicalAnchor - frontier) : 0
+        }
+        switch loopPosition {
+        case .introduction(let remaining): return remaining.map { AVAudioTime.seconds(forHostTime: $0) } ?? practice.countInSeconds
+        case .backing: return 0
+        }
+    }
     func currentTime() -> Double {
         guard state == .playing, let time = engine.outputNode.lastRenderTime, time.isHostTimeValid, time.hostTime > anchor else { return position }
+        if let practice = plan.practice, practice.loop != nil, plan.loop != nil {
+            if time.hostTime < musicalAnchor {
+                return max(0, practice.countInSeconds - AVAudioTime.seconds(forHostTime: musicalAnchor - time.hostTime))
+            }
+            return practice.countInSeconds + backingTime()
+        }
         let elapsed = position + AVAudioTime.seconds(forHostTime: time.hostTime - anchor)
         return plan.loop == nil ? min(plan.duration, elapsed) : elapsed.truncatingRemainder(dividingBy: plan.duration)
     }
     func snapshot(_ kind: String) -> [String: Any] {
-        var value: [String: Any] = ["kind": kind, "currentTime": max(0, currentTime() - (plan.practice?.countInSeconds ?? 0)), "duration": plan.practice?.duration ?? plan.duration, "device": device.json,
+        var value: [String: Any] = ["kind": kind, "currentTime": max(0, backingTime()), "duration": plan.practice?.duration ?? plan.duration, "device": device.json,
          "loop": plan.loop != nil, "format": plan.kind, "streamBufferFrames": capacity, "regions": voices.count]
         if let practice = plan.practice {
-            let remaining = max(0, practice.countInSeconds - currentTime())
+            let remaining = introRemaining()
             value["practice"] = ["phase": remaining > 0 ? "count-in" : "backing", "remainingSeconds": remaining] as [String: Any]
         }
         if let midi { value["bindings"] = midi.snapshot(kind)["bindings"] }
         do {
             var timebase = mach_timebase_info_data_t(); mach_timebase_info(&timebase)
-            var clock: [String: Any] = ["kind": "mach-host-time", "anchor": String(musicalAnchor), "position": max(0, position - (plan.practice?.countInSeconds ?? 0)),
+            var clock: [String: Any] = ["kind": "mach-host-time", "anchor": String(musicalAnchor), "position": plan.practice?.loop != nil ? loopPosition.backing : max(0, position - (plan.practice?.countInSeconds ?? 0)),
                 "numer": timebase.numer, "denom": timebase.denom,
                 "renderQuantum": renderQuantum, "bufferFrames": bufferFrames, "sampleRate": engine.outputNode.outputFormat(forBus: 0).sampleRate,
                 "presentationLatency": engine.outputNode.presentationLatency]
             if let midi {
                 clock["midiAnchorNanoseconds"] = String(AudioConvertHostTimeToNanos(musicalAnchor))
-                clock["midiPosition"] = max(0, midi.position(at: DispatchTime.now().uptimeNanoseconds) - (plan.practice?.countInSeconds ?? 0))
+                clock["midiPosition"] = max(0, midi.position(at: DispatchTime.now().uptimeNanoseconds)
+                    - (plan.practice?.loop == nil ? plan.practice?.countInSeconds ?? 0 : 0))
             }
             value["clock"] = clock
         }
@@ -564,15 +624,25 @@ final class ArrangementTransport {
         do { try audioEmit(snapshot(state == .playing ? "playing" : "paused")) }
         catch { finish(reason: "event-output-failed", error: error, publish: false) }
     }
-    func stopVoices() { horizon?.cancel(); horizon = nil; horizonEnded = false; generation &+= 1; for voice in voices { voice.stop() }; active.removeAll() }
+    func clearRenderStart() {
+        renderStartSource?.cancel(); renderStartSource = nil
+        if let observer = renderObserver { engine.mainMixerNode.auAudioUnit.removeRenderObserver(observer) }
+        renderObserver = nil
+    }
+    func stopVoices() { horizon?.cancel(); horizon = nil; horizonEnded = false; generation &+= 1; clearRenderStart(); for voice in voices { voice.stop() }; active.removeAll() }
     func schedule(from seconds: Double, playing: Bool) throws {
         guard state != .stopped else { return }
-        if seconds >= plan.duration { position = plan.duration; finish(reason: "finished"); return }
+        if plan.loop == nil && seconds >= plan.duration { position = plan.duration; finish(reason: "finished"); return }
         engine.pause(); stopVoices(); position = seconds
-        try midi?.stageCoordinated(at: seconds); midiEnded = false
+        let backing = plan.practice?.loop == nil ? seconds : loopPosition.backing
+        try midi?.stageCoordinated(at: backing); midiEnded = false
         let expected = generation
         for voice in voices {
-            let admitted = try voice.prepare(from: seconds, finished: { [weak self] in
+            let intro = plan.practice?.loop != nil && voice.region.pulseClock != nil && voice.region.pulseLoopUnit == nil
+            // The intro ends at an exact fractional source frame. A generic
+            // floor seek at C can still admit its final ceil(C*rate) sample.
+            if intro, case .backing = loopPosition { continue }
+            let admitted = try voice.prepare(from: intro ? seconds : backing, finished: { [weak self] in
                 guard let self, self.generation == expected, self.state == .playing else { return }
                 self.active.remove(voice.region.id)
                 if self.completed { self.finish(reason: "finished") }
@@ -587,8 +657,35 @@ final class ArrangementTransport {
     }
     func run() throws {
         guard state != .stopped else { return }
-        guard position < plan.duration, !active.isEmpty || midi != nil || plan.clocked else { position = plan.duration; finish(reason: "finished"); return }
-        try checkOutput(); engine.prepare(); try engine.start()
+        guard (plan.loop != nil || position < plan.duration), !active.isEmpty || midi != nil || plan.clocked else { position = plan.duration; finish(reason: "finished"); return }
+        try checkOutput(); clearRenderStart()
+        for voice in voices where active.contains(voice.region.id) {
+            voice.player.prepare(withFrameCount: voice.capacity)
+        }
+        let expected = generation, earliest = mach_absolute_time()
+        let source = DispatchSource.makeUserDataAddSource(queue: .main)
+        renderStartSource = source
+        source.setEventHandler { [weak self] in
+            guard let self, self.state == .starting, self.generation == expected else { return }
+            self.clearRenderStart()
+            do { try self.beginPlayback(); self.publish() }
+            catch { self.finish(reason: "start-failed", error: error) }
+        }
+        source.resume()
+        // A restarted engine may still expose its previous lastRenderTime.
+        // Observe a real new render before reserving any audio/MIDI deadline.
+        // The render callback only merges a notification; ownership and all
+        // graph/control work remain on main, with no wait or startup timeout.
+        renderObserver = engine.mainMixerNode.auAudioUnit.token(byAddingRenderObserver: { flags, timestamp, _, _ in
+            if flags.contains(.unitRenderAction_PostRender), !flags.contains(.unitRenderAction_PostRenderError),
+               timestamp.pointee.mFlags.contains(.hostTimeValid),
+               timestamp.pointee.mHostTime >= earliest { source.add(data: 1) }
+        })
+        state = .starting
+        engine.prepare(); try engine.start()
+    }
+    func beginPlayback() throws {
+        try checkOutput()
         let rate = engine.outputNode.outputFormat(forBus: 0).sampleRate, latency = engine.outputNode.presentationLatency
         guard rate.isFinite, rate > 0, latency.isFinite, latency >= 0 else { throw AudioFailure("output clock is unavailable") }
         // A node may already have rendered beyond wall-clock now. Apple defines
@@ -604,16 +701,31 @@ final class ArrangementTransport {
         }
         let lead = Double(renderQuantum) / rate * Double(active.count + 1) + latency
         anchor = try futureHost(lead, from: frontier)
-        musicalAnchor = try futureHost(max(0, (plan.practice?.countInSeconds ?? 0) - position), from: anchor)
+        if let practice = plan.practice, let clock = practice.loop {
+            var timebase = mach_timebase_info_data_t(); mach_timebase_info(&timebase)
+            let remaining: UInt64
+            switch loopPosition {
+            case .introduction(let retained): remaining = try retained ?? clock.hostTicks(numer: timebase.numer, denom: timebase.denom)
+            case .backing: remaining = 0
+            }
+            let future = anchor.addingReportingOverflow(remaining)
+            guard !future.overflow else { throw AudioFailure("count-in exceeds the native host timeline") }
+            musicalAnchor = future.partialValue
+        } else {
+            musicalAnchor = try futureHost(max(0, (plan.practice?.countInSeconds ?? 0) - position), from: anchor)
+        }
         _ = try futureHost(plan.duration - position, from: anchor)
         for voice in voices where active.contains(voice.region.id) {
-            let when = try futureHost(plan.loop == nil ? max(0, voice.region.startSeconds - position) : 0, from: anchor)
+            let intro = plan.practice?.loop != nil && voice.region.pulseClock != nil && voice.region.pulseLoopUnit == nil
+            let when = try futureHost(plan.loop == nil ? max(0, voice.region.startSeconds - position) : 0,
+                from: plan.practice?.loop != nil && !intro ? musicalAnchor : anchor)
             guard let render = voice.player.lastRenderTime, render.isHostTimeValid, render.hostTime < when else {
+                report("audio start missed: region=\(voice.region.id) render=\(voice.player.lastRenderTime?.hostTime.description ?? "unavailable") deadline=\(when) frontier=\(frontier) active=\(active.count) quantum=\(renderQuantum) rate=\(rate)")
                 throw AudioFailure("audio node passed its common start deadline")
             }
             voice.player.play(at: AVAudioTime(hostTime: when))
         }
-        if let midi { try midi.runCoordinated(anchorNanoseconds: AudioConvertHostTimeToNanos(anchor)) }
+        if let midi { try midi.runCoordinated(anchorNanoseconds: AudioConvertHostTimeToNanos(plan.practice?.loop == nil ? anchor : musicalAnchor)) }
         guard mach_absolute_time() < anchor else { throw AudioFailure("audio graph missed its common start deadline") }
         state = .playing; try checkOutput()
         if plan.clocked && plan.loop == nil {
@@ -653,7 +765,7 @@ final class ArrangementTransport {
             let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
             source.setEventHandler { [weak self] in self?.finish(reason: "signal") }; source.resume(); signals.append(source)
         }
-        try schedule(from: 0, playing: true); publish()
+        try schedule(from: 0, playing: true)
     }
     func receive(_ line: String) {
         guard state != .stopped else { return }
@@ -662,19 +774,28 @@ final class ArrangementTransport {
             let command = try JSONDecoder().decode(AudioCommand.self, from: Data(line.utf8))
             do {
                 switch command {
-                case .pause: if state == .playing {
+                case .pause: if state == .playing || state == .starting {
                     let time = currentTime()
-                    if time >= plan.duration { position = plan.duration; finish(reason: "finished"); return }
+                    if plan.loop == nil && time >= plan.duration { position = plan.duration; finish(reason: "finished"); return }
+                    if plan.practice?.loop != nil && state == .playing {
+                        let backing = backingTime()
+                        let render = engine.outputNode.lastRenderTime
+                        let frontier = render?.isHostTimeValid == true ? max(anchor, render!.hostTime) : anchor
+                        loopPosition = musicalAnchor > frontier ? .introduction(musicalAnchor - frontier) : .backing(backing)
+                    }
                     engine.pause(); stopVoices(); position = time; state = .paused
-                    try midi?.stageCoordinated(at: time)
+                    try midi?.stageCoordinated(at: plan.practice?.loop == nil ? time : loopPosition.backing)
                 }
                 case .resume: if state == .paused { try schedule(from: position, playing: true) }
                 case .seek(let seconds):
                     let duration = plan.practice?.duration ?? plan.duration
                     guard seconds.isFinite, seconds >= 0, seconds <= duration else { throw AudioFailure("seek outside arrangement duration") }
-                    let raw = seconds == duration && plan.loop != nil ? 0 : seconds + (plan.practice?.countInSeconds ?? 0)
+                    let raw = (seconds == duration && plan.loop != nil ? 0 : seconds) + (plan.practice?.countInSeconds ?? 0)
+                    if plan.practice?.loop != nil {
+                        loopPosition = .backing(seconds == duration && plan.loop != nil ? 0 : seconds)
+                    }
                     if seconds == duration && plan.loop == nil { position = plan.duration; finish(reason: "finished"); return }
-                    try schedule(from: raw, playing: state == .playing)
+                    try schedule(from: raw, playing: state == .playing || state == .starting)
                 case .status: break
                 case .recordingEpoch(let request):
                     guard plan.loop == nil else { throw AudioFailure("loop recording requires cycle-aware placement") }
@@ -690,7 +811,7 @@ final class ArrangementTransport {
                 if state != .stopped { publish() }
                 return
             }
-            if state != .stopped { publish() }
+            if state != .stopped && state != .starting { publish() }
         } catch { finish(reason: "command-failed", error: error) }
     }
     func finish(reason: String, error: Error? = nil, publish: Bool = true) {

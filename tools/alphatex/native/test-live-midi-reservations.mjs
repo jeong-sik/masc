@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 const directory=await mkdtemp(join(tmpdir(),'masc-live-midi-reservations-'))
 try {
- const names=['MidiTransport','UmpTransport','UmpOutput','UmpState','UmpLiveInput','UmpRegions','HybridMidiTransport','UmpLoopTransport','CaptureAudioClock','WaveLoopClock','LiveMidiReservations','LiveMidiMain']
+ const names=['MidiTransport','UmpTransport','UmpOutput','UmpState','UmpLiveInput','UmpRegions','HybridMidiTransport','UmpLoopTransport','CaptureAudioClock','WaveLoopClock','PulseAudioClock','PulseLoopClock','LiveMidiReservations','LiveMidiMain']
  let result=spawnSync('xcrun',['swiftc','-parse-as-library','-D','MIDI_LIBRARY',...names.map(name=>new URL(name+'.swift',import.meta.url).pathname),'-o',join(directory,'probe'),'-framework','CoreMIDI'],{encoding:'utf8'})
  assert.equal(result.status,0,result.stderr)
  let serial=0
@@ -42,6 +42,12 @@ try {
  const looping={schemaVersion:5,kind:'capture-arrangement',duration,loop,umpRegions:ump}
  assert.deepEqual(await inspect(looping,'capture-arrangement'),[claim('42',3,5)])
  assert.deepEqual(await inspect({...looping,schemaVersion:6,kind:'hybrid-arrangement',midi},'hybrid-arrangement'),[{destination:'42',scope:{kind:'channels',channels:[{group:0,channel:2},{group:3,channel:5}]}}])
+ const practice={countInSeconds:2,duration,loop:{period:{numerator:'500000000',denominator:'1'},countInBeats:'4',beatsPerBar:4,unit:4,metronome:true}}
+ const practiceLoop={...looping,duration:duration+2,practice}
+ assert.deepEqual(await inspect(practiceLoop,'capture-arrangement'),[claim('42',3,5)])
+ assert.deepEqual(await inspect({...practiceLoop,schemaVersion:6,kind:'hybrid-arrangement',midi},'hybrid-arrangement'),[{destination:'42',scope:{kind:'channels',channels:[{group:0,channel:2},{group:3,channel:5}]}}])
+ await inspect({...practiceLoop,practice:{...practice,countInSeconds:1}},'capture-arrangement',true)
+ await inspect({...practiceLoop,practice:{...practice,loop:{...practice.loop,unit:8}}},'capture-arrangement',true)
  const silent={...looping,loop:{...loop,start:2304,end:2880}}
  assert.deepEqual(await inspect(silent,'capture-arrangement'),[])
  await inspect({...looping,duration:1},'capture-arrangement',true)

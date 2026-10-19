@@ -644,8 +644,8 @@ and external MIDI clock editing are separate features.
 
 `:loop START END` stores an enabled loop range in arrangement beats; `:loop off`
 restores one-shot playback. These are immutable document edits with undo/redo and
-portable save/reopen. Original WAV, SMF and mixed WAV/SMF arrangements can loop
-without count-in/metronome. Captured audio loops through `:play-audio`, or normal
+portable save/reopen. Original WAV, SMF and mixed WAV/SMF arrangements can loop.
+Captured audio loops through `:play-audio`, or normal
 playback when only audio components are audible. Original host-clock gaps,
 source trims, channel routing and fractional placement corrections remain intact.
 Normal paired captured MIDI/WAV and hybrid SMF/captured arrangements also loop
@@ -655,8 +655,14 @@ channel state is reserved against live inputs; silent destinations are omitted.
 Pause, seek, resume and stop retain the audio/MIDI owner and private source files
 until its child closes. MIDI destinations must support native MIDI 2.0 for
 captured UMP; reachable unsupported reconstruction state is refused explicitly.
-Practice-click looping and loop recording still require cycle-aware integration
-and are not admitted yet. Disabling the loop restores their one-shot workflows.
+`:practice BARS on|off` adds a one-shot count-in before the repeating backing and
+optionally a metronome during it. WAV, SMF and captured sources keep their original
+placements; the backing shares one future audio/MIDI start after the intro.
+The click follows the original meter denominator and bar accents inside the
+chosen range, including a partial bar. Pause/resume retains the remaining intro;
+seeking goes directly to the backing, and seeking the range end wraps to its
+start without another count-in. Stop/new play starts a fresh intro.
+Loop recording still requires cycle-aware take placement and is refused.
 
 For example, `:loop 4 12` repeats that passage continuously on the selected audio
 or MIDI output until stopped. It starts at beat 4. Pause/resume and `:seek BEAT` retain
@@ -674,7 +680,7 @@ rounded period. The same engine and two reusable buffers per voice continue
 through every wrap. Storage is independent of session length and clip repeat
 count, with an optional bounded cache for a short source period.
 
-SMF-only preparation clips regions to one cycle without rewriting source files or
+Without practice clicks, SMF-only preparation clips regions to one cycle without rewriting source files or
 expanding repeated copies. A leading/trailing partial repeat and the compressed
 whole copies keep original source seconds, release messages and port bindings.
 All clips share projected loop boundaries; the native cycle may include a

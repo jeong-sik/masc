@@ -81,6 +81,11 @@ export function arrangementClipTime(project, clip) {
       if (!clip.component) throw new Error('Split captured audio and MIDI before correcting one component')
       validateCapturePlacement(clip.placement)
     }
+    if (clip.audioChannel !== undefined) {
+      if (clip.component !== 'audio' || !clip.audioChannel || Object.keys(clip.audioChannel).length !== 2) throw new Error('Choose a separated audio component for channel routing')
+      integer(clip.audioChannel.input, 'captured input channel', 1); integer(clip.audioChannel.output, 'captured output channel', 1)
+      if (clip.audioChannel.input > asset.manifest.channels || clip.audioChannel.output > 0xffffffff) throw new Error('Captured channel routing exceeds its source or native output range')
+    }
     capture = captureRegionTime(asset, clip)
     sourceStart = capture.sourceStartSeconds; sourceEnd = capture.sourceEndSeconds; duration = capture.durationSeconds
     break
@@ -104,7 +109,7 @@ export function arrangementClipTime(project, clip) {
   }
   default: throw new Error('Unknown region source kind')
   }
-  if (asset.kind !== 'capture' && (clip.component !== undefined || clip.placement !== undefined)) throw new Error('Component correction requires a captured source')
+  if (asset.kind !== 'capture' && (clip.component !== undefined || clip.placement !== undefined || clip.audioChannel !== undefined)) throw new Error('Component correction requires a captured source')
   const position = asset.kind === 'capture' && clip.placement ? capturePlacementStart(project, clip) : clip.position / project.ppq * 60 / project.tempo
   duration ??= sourceEnd - sourceStart
   const end = position + duration * clip.repeat
@@ -160,6 +165,7 @@ export function editArrangement(project, edit) {
     case 'region-add': next.clips.push({ id: arrangementID(next.clips, 'region'), name: edit.name,
       asset: edit.asset, lane: edit.lane, position: edit.position, offset: edit.offset, extent: edit.extent,
       repeat: edit.repeat ?? 1, ...(edit.pattern === undefined ? {} : { pattern: edit.pattern }),
+      ...(edit.audioChannel === undefined ? {} : { audioChannel: structuredClone(edit.audioChannel) }),
       ...(edit.component === undefined ? {} : { component: edit.component }), ...(edit.placement === undefined ? {} : { placement: structuredClone(edit.placement) }) }); break
     case 'capture-split': {
       const original = region(edit.id), asset = next.assets.find(asset => asset.id === original.asset)
@@ -175,8 +181,9 @@ export function editArrangement(project, edit) {
       const clip = region(edit.id)
       for (const key of Object.keys(edit)) {
         if (['kind', 'id'].includes(key)) continue
-        if (!['name', 'lane', 'position', 'offset', 'extent', 'repeat', 'pattern', 'component', 'placement'].includes(key)) throw new Error('Unknown region edit field')
-        clip[key] = edit[key]
+        if (!['name', 'lane', 'position', 'offset', 'extent', 'repeat', 'pattern', 'component', 'placement', 'audioChannel'].includes(key)) throw new Error('Unknown region edit field')
+        if (key === 'audioChannel' && edit[key] === undefined) delete clip[key]
+        else clip[key] = structuredClone(edit[key])
       }
       break
     }

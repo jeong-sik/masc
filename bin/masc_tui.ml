@@ -18954,16 +18954,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
   | Code_blame_loaded (request, result) ->
       Code_results.apply_blame state request result
   | Code_lsp_answered (request, result) ->
-      (match Code_results.apply_lsp_answer state request result with
-       | Code_results.No_followup -> ()
-       | Code_results.Reveal_cursor ->
-           state.code_file_scroll <-
-             Masc_tui_scroll.ensure_visible ~cursor:state.code_file_cursor
-               ~height:(Masc_tui_render_code.code_pane_content_height state)
-               state.code_file_scroll
-       | Code_results.Read_location_file (owner, request) ->
-           Masc_tui_code_requests.launch_navigation_read state ~host:server_peer_host
-             ~deliver:(workspace_enqueue state mailbox) owner request)
+      Code_results.apply_lsp_answer state request result
   | Code_diff_loaded (request, result) ->
       Code_results.apply_diff state request result
   | Code_history_loaded (request, result) ->
@@ -23486,6 +23477,21 @@ and is loaded on demand through keeper_skill.
         || input_holds_incomplete_sequence input_reader
         || match paste_phase input_reader with No_paste -> false | Pasting _ | Draining_tail _ -> true
       in
+      (match Code_results.take_ready_lsp_locations state
+               ~input_pending:code_navigation_input_pending with
+       | Code_results.No_followup -> ()
+       | Code_results.Choose_location ->
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Code_results.Reveal_cursor ->
+           state.code_file_scroll <- Masc_tui_scroll.ensure_visible
+             ~cursor:state.code_file_cursor
+             ~height:(Masc_tui_render_code.code_pane_content_height state)
+             state.code_file_scroll;
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Code_results.Read_location_file (owner, request) ->
+           Masc_tui_code_requests.launch_navigation_read state ~host:server_peer_host
+             ~deliver:(workspace_enqueue state async_messages) owner request;
+           Render_schedule.request render_schedule Render_schedule.Background);
       let found_file = Code_results.take_ready_found_file state
           ~input_pending:code_navigation_input_pending in
       let navigated_file = Code_results.take_ready_navigation_file state
@@ -23564,6 +23570,10 @@ and is loaded on demand through keeper_skill.
       (* A queued action retires a deferred return before any handler changes
          its reading. Repeated B shares its pending request; protocol replies
          and idle cadence are observations rather than operator actions. *)
+      (match input with
+       | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_release _ | Mouse_wheel _) ->
+           Code_results.retire_lsp_input state
+       | Some (Graphics_reply _) | None -> ());
       (match input with
        | Some (Key "B") when state.view = Code -> ()
        | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_release _ | Mouse_wheel _) ->
@@ -26614,7 +26624,7 @@ and is loaded on demand through keeper_skill.
            let typed_question =
              match state.palette_mode with
              | Palette_jump -> Masc_tui_palette.palette_typed_question state.palette_query
-             | Palette_choice _ | Palette_files _ -> None
+             | Palette_choice _ | Palette_files _ | Palette_locations _ -> None
            in
            let move_palette by =
              state.code_finder_file <- Masc_tui_fetched.clear state.code_finder_file;
@@ -26625,7 +26635,23 @@ and is loaded on demand through keeper_skill.
            (match k with
             | "esc" -> close ()
             | "\r" when (match state.palette_mode with
-                | Palette_files _ -> true | Palette_jump | Palette_choice _ -> false) ->
+                | Palette_locations _ -> true
+                | Palette_jump | Palette_choice _ | Palette_files _ -> false) ->
+                (match Masc_tui_palette.selected_location state with
+                 | None -> ()
+                 | Some (offer, location) ->
+                     match Code_results.choose_lsp_location state offer location with
+                     | Code_results.No_followup | Code_results.Choose_location -> ()
+                     | Code_results.Reveal_cursor ->
+                         state.code_file_scroll <- Masc_tui_scroll.ensure_visible
+                           ~cursor:state.code_file_cursor
+                           ~height:(Masc_tui_render_code.code_pane_content_height state)
+                           state.code_file_scroll
+                     | Code_results.Read_location_file (owner, request) ->
+                         Masc_tui_code_requests.launch_navigation_read state ~host:server_peer_host
+                           ~deliver:(workspace_enqueue state async_messages) owner request)
+            | "\r" when (match state.palette_mode with
+                | Palette_files _ -> true | Palette_jump | Palette_choice _ | Palette_locations _ -> false) ->
                 Option.iter (fun path ->
                     Masc_tui_code_requests.open_found_file state ~host:server_peer_host
                       ~deliver:(workspace_enqueue state async_messages) ~path)
@@ -26665,7 +26691,8 @@ and is loaded on demand through keeper_skill.
                         | Masc_tui_palette.Palette_task _
                         | Masc_tui_palette.Palette_board_hearth _
                         | Masc_tui_palette.Palette_board_post _
-                        | Masc_tui_palette.Palette_code_file _ ) )
+                        | Masc_tui_palette.Palette_code_file _
+                        | Masc_tui_palette.Palette_code_location _ ) )
                   | None ->
                       report_action state "error"
                         (question ^ " needs a symbol: :" ^ question
@@ -26777,7 +26804,8 @@ and is loaded on demand through keeper_skill.
                    ->
                      Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~report:(report_action state)
                        ~question ~symbol
-                 | Some (_, Masc_tui_palette.Palette_code_file _) | None -> ())
+                 | Some (_, (Masc_tui_palette.Palette_code_file _
+                     | Masc_tui_palette.Palette_code_location _)) | None -> ())
             | "down" | "\014" -> move_palette 1
             | "up" | "\016" -> move_palette (-1)
             | "home" -> move_palette (-state.palette_cursor)

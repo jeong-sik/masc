@@ -34,8 +34,16 @@ val decode : target:target -> Yojson.Safe.t -> (snapshot, string) result
 
 type t
 type request
-type view = Not_loaded | Loading | Failed of string | Loaded of snapshot
+type recheck = Recheck_pending | Recheck_loading | Recheck_failed of string
+type view =
+  | Not_loaded | Loading | Failed of string | Loaded of snapshot
+  | Retained of { snapshot : snapshot; recheck : recheck }
 val empty : t
+val refresh : keeper_name:string -> t -> t
+(** Retire this Keeper's pending read and completed read freshness, retaining
+    its last successful snapshot for the same exact original target only.
+    The next visible selection starts a fresh request capability. Refreshing
+    another Keeper does not retire this selection's read. *)
 val select : target option -> t -> t * request option
 (** One current read for the selected journal revision. Hiding details keeps
     that owned read and can cache its result without displaying it. Selecting
@@ -45,4 +53,6 @@ val requested_target : request -> target
 val receive : request -> (snapshot, string) result -> t -> t
 (** Only the still-current request capability may settle this selection. *)
 val view : target -> t -> view
-(** Workspace retirement and explicit refresh discard [t] with [empty]. *)
+(** Retained observations are never confirmed by a pending/failed recheck.
+    A changed journal/revision or original execution cannot display them.
+    Workspace retirement discards [t] with [empty]. *)

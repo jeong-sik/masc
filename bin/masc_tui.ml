@@ -7268,7 +7268,8 @@ let launch_keeper_child_content_load ?(mode=Masc_tui_child_content.Poll) state ~
 
 let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) state ~mailbox
     ~keeper_name =
-  if force then state.msg_preparation_details <- Masc_tui_preparation_details.empty;
+  if force then state.msg_preparation_details <-
+    Masc_tui_preparation_details.refresh ~keeper_name state.msg_preparation_details;
   launch_keeper_child_content_load
     ~mode:(if force then Masc_tui_child_content.Audit else Masc_tui_child_content.Poll)
     state ~mailbox ~keeper_name;

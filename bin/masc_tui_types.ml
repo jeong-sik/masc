@@ -18223,6 +18223,14 @@ let keeper_message_saved_preparation_rows state live =
     | Invalid_report detail -> "준비 보고서 제외 · " ^ detail
     | Duplicate_report id -> "중복된 준비 보고서 · " ^ id
     | Unlinked_report -> "실행 연결이 없는 준비 보고서" in
+  let snapshot_rows (snapshot : Details.snapshot) =
+    List.map (fun value -> row ("준비 관측 범위 · " ^ issue value)) snapshot.issues
+    @ (if snapshot.reports=[] then [row "이 작업의 저장된 준비 기록이 확인되지 않음"]
+       else List.concat_map (fun (report : Masc.Keeper_preparation_runtime_observation.report) ->
+         let boundary = match report.boundary with
+           | Returned -> "반환 시점" | Raised -> "예외 시점" | Cancelled -> "취소 시점" in
+         row ("저장된 준비 · " ^ boundary ^ " · " ^ report.report_id)
+         :: Transcript.preparation_timeline_rows ~archived:true report.timeline) snapshot.reports) in
   match keeper_message_preparation_selection state with
   | Some (selected, result) when selected == live ->
     (match result with
@@ -18232,14 +18240,13 @@ let keeper_message_saved_preparation_rows state live =
        | Details.Not_loaded -> [row "저장된 준비 기록 조회 대기"]
        | Loading -> [row "저장된 준비 기록 조회 중"]
        | Failed detail -> [row ("준비 기록 조회 실패 · " ^ detail)]
-       | Loaded snapshot ->
-         List.map (fun value -> row ("준비 관측 범위 · " ^ issue value)) snapshot.issues
-         @ (if snapshot.reports=[] then [row "이 작업의 저장된 준비 기록이 확인되지 않음"]
-            else List.concat_map (fun (report : Masc.Keeper_preparation_runtime_observation.report) ->
-              let boundary = match report.boundary with
-                | Returned -> "반환 시점" | Raised -> "예외 시점" | Cancelled -> "취소 시점" in
-              row ("저장된 준비 · " ^ boundary ^ " · " ^ report.report_id)
-              :: Transcript.preparation_timeline_rows ~archived:true report.timeline) snapshot.reports))
+       | Loaded snapshot -> snapshot_rows snapshot
+       | Retained {snapshot;recheck} ->
+         let note = match recheck with
+           | Details.Recheck_pending -> "저장된 준비 · 이전 관측 유지 · 재조회 대기"
+           | Recheck_loading -> "저장된 준비 · 이전 관측 유지 · 재조회 중"
+           | Recheck_failed detail -> "저장된 준비 · 이전 관측 유지 · 재조회 실패 · " ^ detail in
+         row note :: snapshot_rows snapshot)
   | Some _ | None -> []
 ;;
 

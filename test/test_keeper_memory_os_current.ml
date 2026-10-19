@@ -4504,7 +4504,7 @@ let test_revision_target_lost_with_its_premise_keeps_the_source () =
     ~revisions:[{Types.superseded=Types.memory_id original; superseded_by=Types.memory_id successor}] () in
   check bool "a failed derived successor cannot retire the original" true (result.snapshot.facts=[original]);
   check bool "no revision event is authorized" true (result.revisions_applied=[]);
-  let journal = List.hd (List.rev (read_journal_lines ~keepers_dir)) |> Yojson.Safe.from_string in
+  let journal = List.hd (List.rev (read_journal_lines ~keepers_dir)) in
   check bool "journal retires only the actual plain drop" true
     (Yojson.Safe.Util.member "dropped" journal = `List [Types.dropped_statement_to_json retire_premise]);
   check bool "journal invents no successor edge" true

@@ -281,7 +281,8 @@ func cleanupDecision(_ setup: [UInt8], _ ending: [UInt8], expected: [[UInt8]], f
     do { try value.silence(); precondition(!fail) } catch { precondition(fail) }
     if fail { try value.silence() }
     precondition(reviewWire.map(\.1) == expected, "unexpected cleanup: \(reviewWire.map(\.1))")
-    precondition((value.sourceHeld[0] ?? [:]).isEmpty && (value.sourcePedals[0] ?? []).isEmpty && value.sourceExclusive.isEmpty)
+    reviewWire = []; try value.silence()
+    precondition(reviewWire.isEmpty, "released ownership was retried: \(reviewWire.map(\.1))")
 }
 let pressed: [UInt8] = [0x90,60,100,0x90,60,90,0x90,62,100,0xb0,64,127]
 let lifted: [UInt8] = [0x80,60,0,0x80,60,0,0x80,62,0,0xb0,64,0]

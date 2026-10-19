@@ -548,11 +548,14 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
                 (P.end_atom selected - P.start_atom selected)
                 (cause_detail ()))
          | None ->
-           (* One indivisible unit remains. The state stays Not_committed:
-              this pass no longer decides whether the cause was the range's
-              size, and naming it a capacity refusal would assert that. *)
-           report O.Not_committed O.Indivisible_unit_uncommitted
-             (Printf.sprintf "one unit remains and the pass did not commit; cause=%s" (cause_detail ())))
+           (* An existing Memory receipt can cover several atoms and cannot be
+              split. Infer the continuation without publishing partial state;
+              the original prepared range remains the sole commit boundary. *)
+           (match memory_committed, input.messages with
+            | true, _ :: _ :: _ -> message_floor ~selected ~input
+            | false, _ | true, ([] | [_]) ->
+              report O.Not_committed O.Indivisible_unit_uncommitted
+                (Printf.sprintf "one unit remains and the pass did not commit; cause=%s" (cause_detail ()))))
       | Some observed ->
         (* A CLI slot named the character limit it refused at, so the size
            that fits is computed rather than searched: this arm retries inside
@@ -567,7 +570,11 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
            report O.Not_committed O.Observed_capacity_unfit
              "the unit that finishes this turn does not fit the reported CLI input limit \
               with its observations; its Memory is left to the durable pass"
-         | Ok None -> report O.Capacity_refused O.Observed_capacity_unfit "source cannot fit the reported CLI input capacity"
+         | Ok None ->
+           (match input.messages with
+            | _ :: _ :: _ -> message_floor ~selected ~input
+            | [] | [_] -> report O.Capacity_refused O.Observed_capacity_unfit
+                "source cannot fit the reported CLI input capacity")
          | Ok (Some smaller) when P.end_atom smaller < P.end_atom selected ->
            Log.Keeper.info ~keeper_name
              "continuity input fitted to reported capacity; runtime=%s max_chars=%d end_atom=%d -> %d"
@@ -576,6 +583,58 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
            attempt ~keeper_id meta smaller
          | Ok (Some _) ->
            report O.Capacity_refused O.Observed_capacity_disagrees "provider capacity refusal disagrees with local prompt measurement")
+  and message_floor ~selected ~(input : Keeper_librarian.input) =
+    let module H = Keeper_librarian_task_context in
+    let rec read state served position = function
+      | [] ->
+        (match state, served with
+         | Some state, Some served -> Ok (state, served)
+         | None, _ | Some _, None -> Error (position, []))
+      | message :: remaining ->
+        let historical_task_contexts = List.filter_map (fun (context : H.t) ->
+          if context.first_message <= position && position < context.after_message then
+            Some {context with first_message=0;after_message=1;
+              first_tool_observation=0;after_tool_observation=0}
+          else None) input.historical_task_contexts in
+        let selected_input = {input with messages=[message]; historical_task_contexts;
+          tool_observations=[];counterpart_observations=[]} in
+        match Runtime.infer_working_state ?cli_runner ~base_path ~keepers_dir
+          ~keeper_id:keeper_name ~previous_state:state selected_input with
+        | Runtime.Inferred {working_state;served_by} ->
+          read (Some working_state) (Some served_by) (position + 1) remaining
+        | Runtime.Not_inferred reports -> Error (position, reports)
+    in
+    match read (P.previous_working_state selected) None 0 input.messages with
+    | Error (position, reports) ->
+      let detail = match reports with
+        | [] -> "no classified provider outcome"
+        | _ :: _ -> String.concat "; " (List.map
+            (fun (outcome : Runtime.not_committed) -> Printf.sprintf
+              "%s; provider_input_refusals=[%s]" outcome.detail
+              (String.concat "," (List.map Keeper_librarian_input_refusal.to_string
+                outcome.provider_input_refusals))) reports) in
+      (* A later signal starts at the unchanged snapshot. Neither a partial
+         inferred state nor a failed message is published as consumed. *)
+      report O.Not_committed O.Indivisible_unit_uncommitted
+        (Printf.sprintf "message %d did not read; volatile state discarded; cause=%s"
+          position detail)
+    | Ok (working_state, served_by) ->
+      let published = Eio.Cancel.protect (fun () ->
+        let result = Domain_pool_ref.submit_io_or_inline (fun () ->
+          P.commit ~config ~keeper_name ~prepared:selected ~working_state) in
+        (match result with
+         | Error detail -> report O.Not_committed O.Input_build_failed detail
+         | Ok _ ->
+           (match served_by with
+            | Runtime.Api_slot _ ->
+              forget_input_capacity ~config ~keeper_name; capacity := None
+            | Runtime.Cli_slot _ -> ());
+           observe O.Committed);
+        result) in
+      Eio.Fiber.check ();
+      (match published with
+       | Error _ -> ()
+       | Ok _ -> if not (has_waiting ()) then next ())
   in
   try next () with
   | Eio.Cancel.Cancelled _ as exn -> observe O.Cancelled; raise exn

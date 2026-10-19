@@ -228,11 +228,12 @@ type librarian_prompt_material =
 type pass =
   | Memory_pass of Keeper_librarian_continuity.prepared option
   | Continuity_state_pass of Keeper_librarian_continuity.prepared
+  | Volatile_state_pass of string option
   | Working_context_pass
 
 let prompt_key_of_pass = function
   | Memory_pass _ -> Prompt_names.librarian
-  | Continuity_state_pass _ -> Prompt_names.librarian_continuity
+  | Continuity_state_pass _ | Volatile_state_pass _ -> Prompt_names.librarian_continuity
   | Working_context_pass -> Prompt_names.librarian_working_context
 ;;
 
@@ -242,7 +243,7 @@ let prompt_key_of_pass = function
 let input_for_pass pass (input : Keeper_librarian.input) =
   match pass with
   | Memory_pass None | Working_context_pass -> input
-  | Memory_pass (Some _) | Continuity_state_pass _ ->
+  | Memory_pass (Some _) | Continuity_state_pass _ | Volatile_state_pass _ ->
     { input with working_context = Keeper_librarian_context.empty }
 
 let prompt_variables_of_pass pass input =
@@ -254,6 +255,10 @@ let prompt_variables_of_pass pass input =
   | Continuity_state_pass prepared ->
     Keeper_librarian.continuity_prompt_variables input
       ~continuity:(Keeper_librarian_continuity.prompt_json prepared)
+  | Volatile_state_pass previous_state ->
+    Keeper_librarian.continuity_prompt_variables input
+      ~continuity:(`Assoc ["previous_working_state",
+        (match previous_state with None -> `Null | Some state -> `String state)])
   | Working_context_pass -> Keeper_librarian.working_context_prompt_variables input
 ;;
 
@@ -272,7 +277,7 @@ let resolve_librarian_prompt pass input =
   let variables_with_rule =
     match pass with
     | Memory_pass _ | Working_context_pass -> with_working_contexts_rule variables
-    | Continuity_state_pass _ -> Ok variables
+    | Continuity_state_pass _ | Volatile_state_pass _ -> Ok variables
   in
   match variables_with_rule with
   | Error detail -> variables, Error detail
@@ -330,7 +335,7 @@ let output_requirement_of_pass pass =
   let schema = match pass with
     | Memory_pass None -> Keeper_structured_output_schema.librarian_current_output_schema
     | Memory_pass (Some _) -> Keeper_structured_output_schema.librarian_continuity_output_schema
-    | Continuity_state_pass _ ->
+    | Continuity_state_pass _ | Volatile_state_pass _ ->
       Keeper_structured_output_schema.librarian_continuity_state_output_schema
     | Working_context_pass ->
       Keeper_structured_output_schema.librarian_working_context_output_schema in
@@ -627,6 +632,7 @@ type answer =
       { prepared : Keeper_librarian_continuity.prepared
       ; working_state : string
       }
+  | Volatile_state_answer of string
   | Working_context_answer of Keeper_librarian_context.pocket list
 
 let validate_answer pass selected_input output =
@@ -637,6 +643,9 @@ let validate_answer pass selected_input output =
   | Continuity_state_pass prepared ->
     Keeper_librarian.working_state_of_json_result output
     |> Result.map (fun working_state -> Continuity_state_answer { prepared; working_state })
+  | Volatile_state_pass _ ->
+    Keeper_librarian.working_state_of_json_result output
+    |> Result.map (fun state -> Volatile_state_answer state)
   | Working_context_pass ->
     Keeper_librarian.working_contexts_of_json_result selected_input output
     |> Result.map (fun pockets -> Working_context_answer pockets)
@@ -1119,7 +1128,8 @@ let admission_mode_valid ~has_admission ~write_scope ~has_continuity
   | Context_only | Context_and_memory -> false
 ;;
 
-let run_best_effort
+let run_pass
+      ?volatile_state
       ?(write_scope = Context_and_memory)
       ?admission
       ?continuity
@@ -1140,7 +1150,11 @@ let run_best_effort
   =
   let trace_id = input_trace_id inp in
   let admission_mode_valid =
-    admission_mode_valid
+    (match volatile_state with
+     | None -> true
+     | Some _ -> not (Option.is_some admission || Option.is_some continuity
+         || Option.is_some durable_range_id || Option.is_some official_range_id))
+    && admission_mode_valid
       ~has_admission:(Option.is_some admission)
       ~write_scope
       ~has_continuity:(Option.is_some continuity)
@@ -1187,11 +1201,12 @@ let run_best_effort
           | Some current -> List.length current.facts
         in
         let pass =
-          match write_scope, continuity with
-          | Context_and_memory, continuity -> Memory_pass continuity
-          | Memory_maintenance, _ -> Memory_pass None
-          | Context_only, Some prepared -> Continuity_state_pass prepared
-          | Context_only, None -> Working_context_pass
+          match volatile_state, write_scope, continuity with
+          | Some (previous_state, _), _, _ -> Volatile_state_pass previous_state
+          | None, Context_and_memory, continuity -> Memory_pass continuity
+          | None, Memory_maintenance, _ -> Memory_pass None
+          | None, Context_only, Some prepared -> Continuity_state_pass prepared
+          | None, Context_only, None -> Working_context_pass
         in
         let prompt_input = input_for_pass pass inp in
         let prompt_variables, prompt_material =
@@ -1423,7 +1438,8 @@ let run_best_effort
                      prompt_input.working_context
                  | (Memory_maintenance | Context_only), _
                  | Context_and_memory,
-                   (Memory_pass (Some _) | Working_context_pass | Continuity_state_pass _) -> false in
+                   (Memory_pass (Some _) | Working_context_pass | Continuity_state_pass _
+                    | Volatile_state_pass _) -> false in
                let observation = Typesafeai_librarian_preflight.assess
                  ~observe:(fun observation -> observed_preflight := Some observation)
                  ~clock ~keeper_id ~eligible ~prompt () in
@@ -1545,6 +1561,8 @@ let run_best_effort
                let detail = "explicit admission remains pending: Librarian deferred every candidate" in
                on_not_committed {detail; walk_shows_size = false; input_capacity_evidence = No_input_capacity_refusal; provider_input_refusals = []; smaller_range_meets_same_failure = false};
                Ok (`Admission_deferred (exact_output, selected_slot))
+             | Volatile_state_answer working_state ->
+               Ok (`Volatile_state (working_state, exact_output, served_slot))
              | Working_context_answer proposed ->
                organize_working_context proposed;
                Ok (`Context_organized (exact_output, selected_slot))
@@ -1724,6 +1742,16 @@ let run_best_effort
                (`Assoc ["memory_write", `String "pending_explicit_admission";
                         "exact_output", exact_output]);
              on_admission_deferred ();
+             Eio.Fiber.check ()
+           | Ok (`Volatile_state (working_state, exact_output, served_slot)) ->
+             complete ?selected_slot:(Option.map served_slot_id served_slot)
+               ?usage:!observed_usage Exact_lane_run_registry.Succeeded
+               (`Assoc ["memory_write", `String "not_requested";
+                        "continuity_write", `String "volatile_only";
+                        "exact_output", exact_output]);
+             (match volatile_state, served_slot with
+              | Some (_, observe), Some served_by -> observe ~served_by working_state
+              | Some _, None | None, _ -> ());
              Eio.Fiber.check ()
            | Ok (`Context_organized (exact_output, selected_slot)) ->
              complete ~selected_slot ?usage:!observed_usage Exact_lane_run_registry.Succeeded
@@ -1924,6 +1952,25 @@ let run_best_effort
              "memory os librarian lane=%s: %s"
              exact_lane_id
              (Printexc.to_string exn))
+;;
+
+let run_best_effort = run_pass ?volatile_state:None
+
+type working_state_inference =
+  | Inferred of { working_state : string; served_by : served_slot }
+  | Not_inferred of not_committed list
+
+let infer_working_state ?cli_runner ~base_path ~keepers_dir ~keeper_id
+    ~previous_state input =
+  let inferred = ref None and reports = ref [] in
+  run_pass ~write_scope:Context_only
+    ~volatile_state:(previous_state, (fun ~served_by working_state ->
+      inferred := Some (working_state, served_by)))
+    ~on_not_committed:(fun report -> reports := report :: !reports)
+    ?cli_runner ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
+  match !inferred with
+  | Some (working_state, served_by) -> Inferred { working_state; served_by }
+  | None -> Not_inferred (List.rev !reports)
 ;;
 
 module For_testing = struct

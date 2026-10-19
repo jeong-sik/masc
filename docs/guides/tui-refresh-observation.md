@@ -761,6 +761,21 @@ status publication remains eligible for a later round; saved status messages
 still pass the existing monotonic/once-only guards. The original ready timestamp
 is retained, so wait-to-application logs include delays across round/input pauses.
 
+Runtime form, Keeper settings/Sandbox and assignment histories retain a private
+index of owners still awaiting terminal UI application. Periodic collection reads
+that index, including unfinished owners with no advancing fact yet; it does not
+read every historical atomic cell again. Publication, an empty collection,
+recovery dismissal or workspace/read withdrawal cannot retire an owner. Normal
+terminal application removes it from the index while preserving its original
+input, receipt, revision, uncertainty and observation time in admission-ordered
+history. Histories and their derived indexes change as one immutable value.
+Unknown form retry gates, document revalidation floors, notices and recovery
+still consult retained history. This reduces collection work, not history size
+or every historical lookup. Actual state updates still traverse history and
+rebuild the index. Form footer lookup returns immediately outside Config, and a
+missing focused request returns before history search. The same visibility and
+ownership decisions apply. See the [pending-history source Before/After](../audits/2026-10-19-pending-operation-history.md).
+
 Recovery consumes each pending transport once; session owners keep raw facts
 after consumption, supersession and withdrawal. Completed/closed owners leave
 their pending scans. Neither publication nor recovery itself settles a draft or

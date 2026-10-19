@@ -4341,6 +4341,54 @@ type runtime_form_save_attempt = {
   rfa_revalidation_floor : int option;
 }
 
+(* UI-applied status is immutable. Publication only changes the request's
+   atomic fact, so an unresolved owner stays indexed until normal application
+   settles it. Keep the derived index and admission-ordered history in one
+   value; recovery edits cannot independently mutate either collection. *)
+module Operation_history (Entry : sig
+  type t
+  val awaiting_delivery : t -> bool
+end) : sig
+  type t
+  val empty : t
+  val all : t -> Entry.t list
+  val pending : t -> Entry.t list
+  val add : Entry.t -> t -> t
+  val map : (Entry.t -> Entry.t) -> t -> t
+end = struct
+  type t = { history : Entry.t list; pending : Entry.t list }
+  let empty = {history=[];pending=[]}
+  let all attempts = attempts.history
+  let pending attempts = attempts.pending
+  let add attempt attempts =
+    {history=attempt :: attempts.history;
+     pending=(if Entry.awaiting_delivery attempt then attempt :: attempts.pending else attempts.pending)}
+  let map update attempts =
+    let history = List.map update attempts.history in
+    {history;pending=List.filter Entry.awaiting_delivery history}
+end
+
+module Runtime_form_saves = Operation_history (struct
+  type t = runtime_form_save_attempt
+  let awaiting_delivery attempt = match attempt.rfa_status with
+    | Form_checking | Form_previewing _ | Form_posting _ -> true
+    | Form_finished _ -> false
+end)
+
+module Keeper_settings_saves = Operation_history (struct
+  type t = keeper_settings_save_attempt
+  let awaiting_delivery attempt = match attempt.ksa_status with
+    | Settings_checking | Settings_reading | Settings_posting _ -> true
+    | Settings_finished _ -> false
+end)
+
+module Runtime_assignment_saves = Operation_history (struct
+  type t = runtime_assignment_attempt
+  let awaiting_delivery attempt = match attempt.raa_status with
+    | Assignment_checking | Assignment_reading | Assignment_posting _ -> true
+    | Assignment_finished _ -> false
+end)
+
 type keeper_creation_outcome =
   | Creation_created
   | Creation_not_sent of string
@@ -7793,7 +7841,7 @@ type state = {
      of a provider the file already declares. It holds the text it was opened
      on; the save goes through the pane's preview like [e]. *)
   mutable runtime_model_form: Masc_tui_model_form.t option;
-  mutable runtime_form_saves: runtime_form_save_attempt list;
+  mutable runtime_form_saves: Runtime_form_saves.t;
   mutable runtime_form_save_focus: unit ref option;
   mutable runtime_model_jump: string option;
 
@@ -7848,8 +7896,8 @@ type state = {
   mutable keeper_settings_editor : (keeper_settings_key, keeper_settings_snapshot) Masc_tui_fetched.t;
   mutable keeper_settings_intent : keeper_settings_request option;
   mutable keeper_settings_cancel : (unit ref * (unit -> unit)) option;
-  mutable keeper_settings_saves : keeper_settings_save_attempt list;
-  mutable runtime_assignment_saves : runtime_assignment_attempt list;
+  mutable keeper_settings_saves : Keeper_settings_saves.t;
+  mutable runtime_assignment_saves : Runtime_assignment_saves.t;
   mutable github_identity_view: (string * string list) option;
   mutable github_identity_view_error: string option;
   (* The Info tab's Board-attention rows, keyed by the Keeper they were read
@@ -9765,16 +9813,12 @@ let keeper_settings_same_origin left right =
 
 let keeper_settings_save_pending state key =
   List.exists (fun attempt ->
-    keeper_settings_same_origin key attempt.ksa_request.ksv_key
-    && match attempt.ksa_status with
-       | Settings_checking | Settings_reading | Settings_posting _ -> true
-       | Settings_finished _ -> false) state.keeper_settings_saves
+    keeper_settings_same_origin key attempt.ksa_request.ksv_key)
+      (Keeper_settings_saves.pending state.keeper_settings_saves)
 
 let runtime_assignment_save_pending state key =
-  List.exists (fun attempt -> keeper_settings_same_origin key attempt.raa_request.ras_key
-    && match attempt.raa_status with
-       | Assignment_checking | Assignment_reading | Assignment_posting _ -> true
-       | Assignment_finished _ -> false) state.runtime_assignment_saves
+  List.exists (fun attempt -> keeper_settings_same_origin key attempt.raa_request.ras_key)
+    (Runtime_assignment_saves.pending state.runtime_assignment_saves)
 
 let runtime_assignment_target_key state =
   match state.view,state.runtime_pick_keeper,state.server_identity with
@@ -9795,8 +9839,8 @@ let begin_runtime_assignment_save state ~keeper_name ~runtime_id ~started_ns =
         let request = {ras_token=ref ();ras_key=key;ras_reading=state.workspace_read_authority;
           ras_workspace=workspace;ras_runtime_id=runtime_id;ras_started_ns=started_ns;
           ras_observation=Atomic.make (Assignment_checking,started_ns)} in
-        state.runtime_assignment_saves <- {raa_request=request;raa_status=Assignment_checking}
-          :: state.runtime_assignment_saves;
+        state.runtime_assignment_saves <- Runtime_assignment_saves.add
+          {raa_request=request;raa_status=Assignment_checking} state.runtime_assignment_saves;
         Ok request
   | (Some _ | None),(Some _ | None) -> Error "Runtime assignment requires its original picker and verified workspace"
 
@@ -9829,11 +9873,12 @@ let pending_runtime_assignment_receipts state =
   List.filter_map (fun attempt ->
     let status,observed_ns = Atomic.get attempt.raa_request.ras_observation in
     if runtime_assignment_advances attempt.raa_status status
-    then Some (attempt.raa_request,status,observed_ns) else None) state.runtime_assignment_saves
+    then Some (attempt.raa_request,status,observed_ns) else None)
+      (Runtime_assignment_saves.pending state.runtime_assignment_saves)
 
 let apply_runtime_assignment state request status =
   let applied = ref false in
-  state.runtime_assignment_saves <- List.map (fun attempt ->
+  state.runtime_assignment_saves <- Runtime_assignment_saves.map (fun attempt ->
     if attempt.raa_request.ras_token == request.ras_token && runtime_assignment_advances attempt.raa_status status
     then (applied := true; {attempt with raa_status=status}) else attempt) state.runtime_assignment_saves;
   !applied
@@ -9872,7 +9917,7 @@ let runtime_assignment_needs_attention = function
 let runtime_assignment_notice state =
   Option.bind (runtime_assignment_target_key state) (fun key ->
     Option.bind (List.find_opt (fun attempt -> keeper_settings_same_origin key attempt.raa_request.ras_key)
-      state.runtime_assignment_saves) (fun attempt ->
+      (Runtime_assignment_saves.all state.runtime_assignment_saves)) (fun attempt ->
       let prefix = key.ksk_keeper ^ " assignment → " ^ runtime_assignment_choice attempt.raa_request ^ " · " in
       match attempt.raa_status with
       | Assignment_checking -> Some (prefix ^ "checking original workspace")
@@ -9916,11 +9961,12 @@ let admit_keeper_settings_save state ~key ~reading ~expected ~input ~current ~st
     let status = if current then Settings_checking else Settings_finished (None,Settings_not_sent refusal) in
     let request = {ksv_token=ref ();ksv_key=key;ksv_reading=reading;ksv_expected=expected;
       ksv_input=input;ksv_started_ns=started_ns;ksv_observation=Atomic.make (status,started_ns)} in
-    state.keeper_settings_saves <- {ksa_request=request;ksa_status=status;ksa_recoverable=true}
-      :: List.map (fun attempt ->
+    state.keeper_settings_saves <- Keeper_settings_saves.add
+      {ksa_request=request;ksa_status=status;ksa_recoverable=true}
+      (Keeper_settings_saves.map (fun attempt ->
         if keeper_settings_same_origin key attempt.ksa_request.ksv_key
            && keeper_settings_same_input_kind input attempt.ksa_request.ksv_input
-        then {attempt with ksa_recoverable=false} else attempt) state.keeper_settings_saves;
+        then {attempt with ksa_recoverable=false} else attempt) state.keeper_settings_saves);
     if current then Ok request else Error refusal
 
 let begin_keeper_settings_save state ~origin ~draft ~started_ns =
@@ -9939,11 +9985,12 @@ let pending_keeper_settings_save_receipts state =
   List.filter_map (fun attempt ->
     let status,observed_ns = Atomic.get attempt.ksa_request.ksv_observation in
     if keeper_settings_save_advances attempt.ksa_status status
-    then Some (attempt.ksa_request,status,observed_ns) else None) state.keeper_settings_saves
+    then Some (attempt.ksa_request,status,observed_ns) else None)
+      (Keeper_settings_saves.pending state.keeper_settings_saves)
 
 let apply_keeper_settings_save state request status =
   let applied = ref false in
-  state.keeper_settings_saves <- List.map (fun attempt ->
+  state.keeper_settings_saves <- Keeper_settings_saves.map (fun attempt ->
     if attempt.ksa_request.ksv_token == request.ksv_token
        && keeper_settings_save_advances attempt.ksa_status status then begin
       applied := true;
@@ -9970,7 +10017,7 @@ let keeper_settings_recovery state key =
       | Settings_finished _, Settings_editor_input draft -> Some draft
       | (Settings_checking | Settings_reading | Settings_posting _), Settings_editor_input _
       | (Settings_checking | Settings_reading | Settings_posting _ | Settings_finished _), Sandbox_shortcut_input _ -> None
-    else None) state.keeper_settings_saves
+    else None) (Keeper_settings_saves.all state.keeper_settings_saves)
 
 let keeper_settings_save_phase = function
   | Settings_checking -> "checking" | Settings_reading -> "reading_current"
@@ -10024,7 +10071,7 @@ let keeper_settings_save_notice state =
               | Sandbox_shortcut_input _ -> "Sandbox d/m/s reads current and saves the selected profile" in
             Some (label ^ " · " ^ keeper_settings_save_outcome_detail outcome ^ " · " ^ recovery)
         | Settings_finished _ -> None
-      else None) state.keeper_settings_saves)
+      else None) (Keeper_settings_saves.all state.keeper_settings_saves))
 
 let reconcile_keeper_settings_editor state ~available =
   match state.keeper_settings_intent with
@@ -12526,17 +12573,20 @@ let begin_runtime_form_save state ~draft ~started_ns =
             | Config_document_draft _, Durable
             | (Model_form_draft _ | Account_form_draft _), (Durable | Durability_unconfirmed) -> false)
        | Form_finished (_, (Form_not_sent _ | Form_invalid_account _
-                           | Form_refused _ | Form_conflict _)) -> false) state.runtime_form_saves in
+                           | Form_refused _ | Form_conflict _)) -> false)
+      (Runtime_form_saves.all state.runtime_form_saves) in
   match state.server_identity with
   | Some workspace when state.workspace_identity = Workspace_identity_match
       && server_authority_ready state && not busy ->
       let request = { rfs_token = ref (); rfs_authority = state.workspace_authority;
         rfs_workspace = workspace; rfs_draft = draft; rfs_started_ns = started_ns;
         rfs_observation = Atomic.make (Form_checking, started_ns) } in
-      state.runtime_form_saves <- {rfa_request=request; rfa_status=Form_checking;
-        rfa_recoverable=true; rfa_revalidation_floor=None} :: List.map (fun attempt ->
+      state.runtime_form_saves <- Runtime_form_saves.add
+        {rfa_request=request; rfa_status=Form_checking;
+         rfa_recoverable=true; rfa_revalidation_floor=None}
+        (Runtime_form_saves.map (fun attempt ->
           if runtime_form_origin_matches state attempt.rfa_request && same_kind attempt
-          then {attempt with rfa_recoverable=false} else attempt) state.runtime_form_saves;
+          then {attempt with rfa_recoverable=false} else attempt) state.runtime_form_saves);
       state.runtime_form_save_focus <- Some request.rfs_token;
       Ok request
   | None | Some _ -> Error (if busy then "A runtime configuration save is pending or unconfirmed; input retained"
@@ -12548,11 +12598,11 @@ let pending_runtime_form_save_receipts state =
     | (status, observed_ns) when runtime_form_save_advances attempt.rfa_status status ->
         Some (attempt.rfa_request, status, observed_ns)
     | Form_checking, _ | Form_previewing _, _ | Form_posting _, _ | Form_finished _, _ -> None)
-    state.runtime_form_saves
+    (Runtime_form_saves.pending state.runtime_form_saves)
 
 let apply_runtime_form_save state request status =
   let applied = ref false in
-  state.runtime_form_saves <- List.map (fun attempt ->
+  state.runtime_form_saves <- Runtime_form_saves.map (fun attempt ->
     if attempt.rfa_request.rfs_token == request.rfs_token
        && runtime_form_save_advances attempt.rfa_status status then begin
       applied := true;
@@ -12577,9 +12627,10 @@ let apply_runtime_form_save state request status =
   !applied
 
 let runtime_form_focused_attempt state =
-  List.find_opt (fun attempt -> runtime_form_origin_matches state attempt.rfa_request
-    && Option.exists (fun token -> token == attempt.rfa_request.rfs_token)
-      state.runtime_form_save_focus) state.runtime_form_saves
+  Option.bind state.runtime_form_save_focus (fun token ->
+    List.find_opt (fun attempt -> token == attempt.rfa_request.rfs_token
+      && runtime_form_origin_matches state attempt.rfa_request)
+      (Runtime_form_saves.all state.runtime_form_saves))
 
 let runtime_form_input_locked state =
   match runtime_form_focused_attempt state with
@@ -12589,7 +12640,7 @@ let runtime_form_input_locked state =
       | Form_invalid_account _ | Form_refused _ | Form_conflict _));_} | None -> false
 
 let release_runtime_form_recovery state =
-  state.runtime_form_saves <- List.map (fun attempt ->
+  state.runtime_form_saves <- Runtime_form_saves.map (fun attempt ->
     if Option.exists (fun token -> token == attempt.rfa_request.rfs_token)
        state.runtime_form_save_focus then {attempt with rfa_recoverable=false} else attempt)
     state.runtime_form_saves;
@@ -12608,7 +12659,7 @@ let recover_runtime_form_save state ~account =
     | Config_document_draft _ -> false in
   match List.find_opt (fun attempt -> attempt.rfa_recoverable
       && runtime_form_origin_matches state attempt.rfa_request
-      && same_kind attempt.rfa_request.rfs_draft) state.runtime_form_saves with
+      && same_kind attempt.rfa_request.rfs_draft) (Runtime_form_saves.all state.runtime_form_saves) with
   | None -> false
   | Some attempt ->
       let detail = match attempt.rfa_status with
@@ -12631,13 +12682,15 @@ let recover_runtime_form_save state ~account =
       true
 
 let runtime_form_save_notice state =
-  let visible attempt = state.view = Config && match attempt.rfa_request.rfs_draft with
+  if state.view <> Config then None else
+  let visible attempt = match attempt.rfa_request.rfs_draft with
     | Model_form_draft _ -> state.config_pane = Config_models
     | Account_form_draft _ | Config_document_draft _ -> state.config_pane = Config_runtime in
   let attempt = match runtime_form_focused_attempt state with
     | Some attempt when visible attempt -> Some attempt
     | Some _ | None -> List.find_opt (fun attempt -> visible attempt && attempt.rfa_recoverable
-        && runtime_form_origin_matches state attempt.rfa_request) state.runtime_form_saves in
+        && runtime_form_origin_matches state attempt.rfa_request)
+      (Runtime_form_saves.all state.runtime_form_saves) in
   Option.map (fun attempt ->
     let recover = match attempt.rfa_request.rfs_draft with
       | Model_form_draft _ -> "Models e/c restores input"
@@ -13570,7 +13623,7 @@ let create_state
   runtime_config_status_scroll = 0;
   runtime_account_form = None;
   runtime_model_form = None;
-  runtime_form_saves = [];
+  runtime_form_saves = Runtime_form_saves.empty;
   runtime_form_save_focus = None;
   runtime_model_jump = None;
 
@@ -13603,8 +13656,8 @@ let create_state
   keeper_settings_editor = Masc_tui_fetched.initial;
   keeper_settings_intent = None;
   keeper_settings_cancel = None;
-  keeper_settings_saves = [];
-  runtime_assignment_saves = [];
+  keeper_settings_saves = Keeper_settings_saves.empty;
+  runtime_assignment_saves = Runtime_assignment_saves.empty;
   github_identity_view = None;
   keeper_board_quarantines = Masc_tui_fetched.initial;
   board_quarantine_requeue_inflight = None;
@@ -15296,7 +15349,7 @@ let discard_runtime_config_edit (state : state) ~workspace ~path =
     state.runtime_config_edits
 
 let release_runtime_document_recovery state ~workspace ~path =
-  state.runtime_form_saves <- List.map (fun attempt ->
+  state.runtime_form_saves <- Runtime_form_saves.map (fun attempt ->
     let request = attempt.rfa_request in
     let origin = canonical_path request.rfs_workspace.sid_base_path,
       canonical_path request.rfs_workspace.sid_masc_root in

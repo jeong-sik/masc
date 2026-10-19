@@ -111,7 +111,9 @@ export function openPlayback({ path, output, midiOutput, midiBindings, loop = fa
               || binding.device?.kind !== 'midi' || typeof binding.device.name !== 'string'
               || !midiBindings.some(selected => selected.destination === binding.device.id
                 && (hybrid ? selected.protocol : 2) === binding.device.protocol))
-              || new Set(event.bindings.map(identity)).size !== event.bindings.length) {
+              || new Set(event.bindings.map(identity)).size !== event.bindings.length
+              || hybrid && midiBindings.some(selected => selected.protocol === 1
+                && !event.bindings.some(binding => binding.device.id === selected.destination && binding.device.protocol === 1))) {
             throw new Error('Playback loop acquired an unselected MIDI destination')
           }
           const identities = JSON.stringify(event.bindings.map(identity))

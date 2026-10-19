@@ -165,7 +165,8 @@ export function editArrangement(project, edit) {
       const original = region(edit.id), asset = next.assets.find(asset => asset.id === original.asset)
       if (asset?.kind !== 'capture' || original.component !== undefined) throw new Error('Choose a paired captured region to split')
       const id = arrangementID(next.lanes, 'lane')
-      next.lanes.push({ id, name: `${original.name} MIDI`, kind: 'capture', muted: false, solo: false })
+      const previous = lane(original.lane)
+      next.lanes.push({ id, name: `${original.name} MIDI`, kind: 'capture', muted: previous.muted, solo: previous.solo })
       original.component = 'audio'
       next.clips.push({ ...original, id: arrangementID(next.clips, 'region'), component: 'midi', lane: id, name: `${original.name} MIDI` })
       break

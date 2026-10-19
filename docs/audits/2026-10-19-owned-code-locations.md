@@ -31,3 +31,11 @@ candidate UI remain separate verification stages.
 Existing immediate same-file LSP response timing and multiple-result selection
 remain outside this increment. File-finder and predecessor return artifacts
 must not be cited as execution proof for this source.
+
+Independent review of first lower `ba20f5ce3e8fddbe27808d208530228ae4e4fd22`
+found a P1: broad field-prefix renaming had changed two unrelated `Micro_vm`
+constructors to nonexistent `Micno_vm`. A separate response restores both
+constructors and checks the complete seven-file delta for incidental renames.
+This demonstrates why the prior parser result is not compilation evidence.
+The repaired exact heads require renewed independent review and focused native
+execution; earlier failure/PASS scopes are not silently reused.

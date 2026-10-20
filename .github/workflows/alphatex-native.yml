@@ -34,6 +34,13 @@ jobs:
           node-version: "22"
       - name: Swift toolchain
         run: xcrun swiftc --version
+      - name: Install the terminal package dependencies
+        working-directory: tools/alphatex
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.31.0 --activate
+          pnpm install --frozen-lockfile
       - name: Native Swift harnesses
         run: |
           set -euo pipefail
@@ -59,13 +66,6 @@ jobs:
             echo "::endgroup::"
           done
           exit "$status"
-      - name: Install the terminal package dependencies
-        working-directory: tools/alphatex
-        run: |
-          set -euo pipefail
-          corepack enable
-          corepack prepare pnpm@10.31.0 --activate
-          pnpm install --frozen-lockfile
       - name: Alphatex JavaScript suite
         working-directory: tools/alphatex
         run: node --test test/*.test.mjs

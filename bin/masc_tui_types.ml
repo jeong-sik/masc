@@ -9052,6 +9052,8 @@ type state = {
      per-run detail fetch, so the list never holds one. *)
   mutable lanes_mode: lanes_mode;
   mutable lanes_cursor: int;
+  mutable lanes_exact_output: (string * string) option;
+  (** The exact output last chosen in a package row: the row id and the output name. *)
   mutable lanes_scroll: int;
   mutable lane_runs: Tui_decode.lane_run_summary list option;
   mutable lane_runs_error: string option;
@@ -13523,6 +13525,13 @@ let selected_standalone_lane (state : state) =
 
 let lanes_inventory_count state = List.length (lane_inventory_rows state)
 
+(* The exact output chosen in [row], by name, when the last choice was made in
+   that row; the cursor names rows by identity, never by position. *)
+let lanes_exact_output_name (state : state) (row : Masc.Tui_decode_lane_inventory.row) =
+  match state.lanes_exact_output with
+  | Some (row_id, name) when String.equal row_id row.id -> Some name
+  | Some _ | None -> None
+
 (** Whether a goal lifecycle arm targets this goal. Answered here rather
     than at the renderer so the renderer never reads [pg_id] outside
     [Terminal_text] -- the sanitize guard counts every access, comparison
@@ -14997,6 +15006,7 @@ let create_state
   clients_surface_generation = 0;
   lanes_mode = Lanes_overview;
   lanes_cursor = 0;
+  lanes_exact_output = None;
   lanes_scroll = 0;
   lane_runs = None;
   lane_runs_error = None;

@@ -28416,6 +28416,21 @@ and is loaded on demand through keeper_skill.
              ~set_cursor:(fun cursor -> state.resources_cursor <- cursor)
              ~reopen:(fun () ->
                Masc_tui_resources_updates.open_selected state ~read:(fun ~uri -> Masc_tui_resources_requests.launch_read state ~host:server_peer_host ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id) ~check:(capture_workspace_check state ~mailbox:async_messages) ~uri))
+       | Some (("[" | "]") as bracket)
+         when state.view = Lanes && state.lanes_mode = Lanes_overview ->
+           (* A package row's exact outputs, chosen by name (RFC operator-quiz
+              §4.8); e then opens the chosen one's table. *)
+           (match selected_inventory_lane state with
+            | None -> ()
+            | Some row ->
+              (match
+                 Masc_tui_lane_inventory.step_exact_output
+                   ~selected:(lanes_exact_output_name state row)
+                   ~direction:(if bracket = "]" then 1 else -1) row
+               with
+               | Some (_, name) ->
+                 state.lanes_exact_output <- Some (row.Masc.Tui_decode_lane_inventory.id, name)
+               | None -> ()))
        | Some "]" when state.view = Lanes ->
            (match state.lanes_mode, state.lane_runs_next, state.lane_runs_loading with
             | Lanes_run_list lane, Some before, false ->
@@ -32288,38 +32303,58 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_settings_edit ()
             | Lanes ->
+                (* [missing] is the note for a table runtime.toml does not
+                   have yet. *)
+                let open_lane_table path ~missing =
+                  let section = runtime_config_path_text path in
+                  state.view <- Config;
+                  state.config_pane <- Config_runtime;
+                  state.runtime_config_jump_section <- Some path;
+                  (* The answer to [e] is Config opening on the table, so
+                     these notes stay in the session log. On the footer
+                     they named the table before the pane had drawn it. *)
+                  (match state.runtime_config_view with
+                   | None ->
+                     add_event state "info"
+                       (Printf.sprintf "loading runtime.toml for [%s]" section);
+                     launch_runtime_config_load state ~mailbox:async_messages
+                   | Some _ ->
+                     (match apply_runtime_config_jump state with
+                      | Some (_, true) ->
+                        add_event state "info"
+                          (Printf.sprintf
+                             "runtime.toml at [%s] - e to edit" section)
+                      | Some (_, false) -> report_action state "error" (missing section)
+                      | None -> ()))
+                in
                 (match state.lanes_mode, selected_standalone_lane state with
                  | Lanes_overview, Some lane ->
-                   let path =
+                   open_lane_table
                      [ Runtime_toml_namespace.(key Runtime); "exact_output_lanes"
                      ; Standalone_lane.to_id lane.Tui_decode.sl_lane ]
-                   in
-                   let section = runtime_config_path_text path in
-                   state.view <- Config;
-                   state.config_pane <- Config_runtime;
-                   state.runtime_config_jump_section <- Some path;
-                   (* The answer to [e] is Config opening on the table, so
-                      these notes stay in the session log. On the footer
-                      they named the table before the pane had drawn it. *)
-                   (match state.runtime_config_view with
-                    | None ->
-                      add_event state "info"
-                        (Printf.sprintf "loading runtime.toml for [%s]" section);
-                      launch_runtime_config_load state ~mailbox:async_messages
-                    | Some _ ->
-                      (match apply_runtime_config_jump state with
-                       | Some (_, true) ->
-                         add_event state "info"
-                           (Printf.sprintf
-                              "runtime.toml at [%s] - e to edit" section)
-                       | Some (_, false) ->
-                         report_action state "error"
-                           (Printf.sprintf
-                              "runtime.toml has no [%s] section" section)
-                       | None -> ()))
+                     ~missing:(Printf.sprintf "runtime.toml has no [%s] section")
                  | Lanes_overview, None ->
-                   show_lanes_action_error state
-                     "Cannot open config: no standalone lane is selected"
+                   (match selected_inventory_lane state with
+                    | None ->
+                      show_lanes_action_error state
+                        "Cannot open config: no standalone lane is selected"
+                    | Some row ->
+                      (match
+                         Masc_tui_lane_inventory.selected_exact_output
+                           ~selected:(lanes_exact_output_name state row) row
+                       with
+                       | None ->
+                         show_lanes_action_error state
+                           "Cannot open config: the selected row has no exact-output lane"
+                       | Some (installation_id, output) ->
+                         (match
+                            Masc_tui_lane_inventory.exact_output_table_path ~installation_id output
+                          with
+                          | Error reason -> show_lanes_action_error state ("Cannot open config: " ^ reason)
+                          | Ok path ->
+                            open_lane_table path
+                              ~missing:(Printf.sprintf
+                                "runtime.toml has no [%s] section yet; e edits runtime.toml to add it"))))
                  | (Lanes_run_list _ | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _), _ -> ())
             | Config ->
                 (match state.config_pane with

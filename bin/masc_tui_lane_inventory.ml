@@ -129,6 +129,56 @@ let detail_lines (row : row) =
           | Some Unobserved -> ["Directory reading is incomplete; declaration absence is not established."])
          @ List.concat_map instance_lines instances)
 
+(* A package row's exact outputs, first and the rest, with the installation
+   id their runtime.toml tables are named by. Only a valid declaration that
+   lists one has any. *)
+let exact_outputs (row : row) = match row.state with
+  | Package_state {declaration = Some (Valid value); _} -> (match value.exact_outputs with
+      | [] -> None
+      | first :: rest -> Some (value.installation_id, first, rest))
+  | Package_state {declaration = Some (Invalid _ | Absent | Unobserved) | None; _}
+  | Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _ -> None
+
+let selected_exact_output ~selected (row : row) =
+  Option.map (fun (installation_id, first, rest) ->
+    let chosen = Option.bind selected (fun name ->
+      List.find_opt (fun (o : exact_output) -> String.equal o.output name) (first :: rest)) in
+    installation_id, Option.value chosen ~default:first) (exact_outputs row)
+
+let step_exact_output ~selected ~direction (row : row) =
+  Option.map (fun (installation_id, first, rest) ->
+    let outputs = Array.of_list (first :: rest) in
+    let current = match selected_exact_output ~selected row with
+      | Some (_, chosen) ->
+          Option.value ~default:0
+            (Array.find_index (fun (o : exact_output) -> String.equal o.output chosen.output) outputs)
+      | None -> 0 in
+    let next = max 0 (min (Array.length outputs - 1) (current + direction)) in
+    installation_id, outputs.(next).output) (exact_outputs row)
+
+let exact_output_table_path ~installation_id (o : exact_output) =
+  Result.map (fun addon -> Runtime_schema.exact_lane_table_path (Runtime_schema.Addon addon))
+    (Runtime_schema.addon_lane ~declaration_id:installation_id ~output:o.output)
+
+let exact_output_state (o : exact_output) =
+  (match o.configuration with
+   | Configured c -> (match c.admitted_slots @ c.cli_slots with
+       | [] -> "bound, no admitted slot"
+       | slots -> "bound: " ^ String.concat ", " slots)
+   | Disabled _ -> "off"
+   | Unconfigured _ -> "unbound"
+   | Registry_unavailable detail -> "unavailable: " ^ detail)
+  ^ (match o.source with Declared -> "" | Table_only -> " · the package declares no such output")
+
+let exact_output_lines ~selected (row : row) =
+  match selected_exact_output ~selected row, exact_outputs row with
+  | Some (_, chosen), Some (_, first, rest) ->
+      "Exact outputs ([ / ] choose, e opens its runtime.toml table):"
+      :: List.map (fun (o : exact_output) ->
+           (if String.equal o.output chosen.output then "› " else "  ") ^ o.output ^ " · " ^ exact_output_state o)
+           (first :: rest)
+  | None, _ | _, None -> []
+
 let reading_notices (snapshot : snapshot) =
   (if snapshot.package_read.complete then [] else ["Package inventory is incomplete; missing entries do not prove removal."])
   @ (if snapshot.package_read.owner_present then [] else ["Package runtime owner has not been observed; declarations and retained bindings remain listed."])

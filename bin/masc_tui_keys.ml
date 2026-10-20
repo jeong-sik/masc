@@ -668,6 +668,12 @@ let for_surface = function
              preview-checked runtime.toml editor; slots is a catalog-ref array \
              and cli_slots an official-client runtime-id array, either may be \
              left out, and an enabled lane needs one slot across the two"
+      ; b Navigate "[ / ]" "exact output"
+          ~help:
+            "on a Lane Add-on package row, choose one of its exact outputs; the \
+             preview lists each with its binding: bound, unbound, off, or a \
+             table the package does not declare. e then opens that output's \
+             runtime.addon_exact_lanes table, or says runtime.toml has none yet"
       ; b Navigate "p" "runtime"
           ~help:"open the Runtime surface"
       ; b Act "Esc" "dashboard" ~help:"back to Dashboard"

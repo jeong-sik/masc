@@ -226,6 +226,10 @@ val rejected_target_bindings
 (** Declared targets the resolver snapshot of [t] excluded because their
     provider or model has no catalog row. *)
 
+val declared_lanes : t -> Runtime_schema.exact_output_lane_decl list
+(** Every lane table runtime.toml declares, built-in and add-on, in file
+    order, before admission dropped anything. *)
+
 val declared_lane
   :  t
   -> lane_id:string

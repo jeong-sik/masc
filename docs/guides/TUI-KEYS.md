@@ -447,6 +447,7 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `Space` | open Exact, Browser or machine activity settings; Space changes the draft, s saves explicitly; Required Exact lanes cannot be off |
 | `s` | edit the model order: r replaces the selected model/effort, a adds a fallback, 1 makes it first within its HTTP/CLI group, x removes, J/K reorders, Enter/d opens the selected slot's config table, e opens the lane table, Esc closes; HTTP runs before CLI |
 | `e` | open this lane's runtime.exact_output_lanes section in the preview-checked runtime.toml editor; slots is a catalog-ref array and cli_slots an official-client runtime-id array, either may be left out, and an enabled lane needs one slot across the two |
+| `[ / ]` | on a Lane Add-on package row, choose one of its exact outputs; the preview lists each with its binding: bound, unbound, off, or a table the package does not declare. e then opens that output's runtime.addon_exact_lanes table, or says runtime.toml has none yet |
 | `p` | open the Runtime surface |
 | `Esc` | back to Dashboard |
 | `/` | jump the cursor to a matching lane; the run list and a run's detail carry no searchable rows |

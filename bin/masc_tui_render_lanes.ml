@@ -587,7 +587,9 @@ let render_lanes_overview (state : state) =
                  | Browser _ -> ["Space: activity · Enter: browser"]
                  | Machine _ -> ["Space: activity · Enter: spectate"]
                  | Exact _ | Declaration _ | Manual_instance _ -> [])
-                @ Masc_tui_lane_inventory.detail_lines inventory_row)
+                @ Masc_tui_lane_inventory.detail_lines inventory_row
+                @ Masc_tui_lane_inventory.exact_output_lines
+                    ~selected:(Masc_tui_types.lanes_exact_output_name state inventory_row) inventory_row)
                |> List.concat_map (fun line ->
                     Terminal_text.single_line line
                     |> Message_layout.wrap_words ~max_cells:(max 1 (inner - 2))

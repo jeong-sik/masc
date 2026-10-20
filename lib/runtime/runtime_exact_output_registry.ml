@@ -606,6 +606,8 @@ let rejected_target_bindings registry =
   Exact_output.resolver_rejected_target_bindings registry.resolver_snapshot
 ;;
 
+let declared_lanes registry = registry.declared_lanes
+
 let declared_lane registry ~lane_id =
   List.find_opt
     (fun (lane : Runtime_schema.exact_output_lane_decl) ->

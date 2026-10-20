@@ -12,7 +12,9 @@ type error = Binding_required | No_available_browser
       missing : Browser_capabilities.operation list }
 type work_browser =
   { activity : Browser_lane.activity; registered : bool
-  ; session : Browser_lane.session_observation }
+  ; session : Browser_lane.session_observation; locate : bool }
+(** [locate] observes the installed model consumer and selected output, not
+    merely the presence of a driver or a configured provider. *)
 type snapshot =
   { live_activity : Browser_lane.activity; live_clients : Browser_lane.client_info list
   ; automation : work_browser; stagehand : work_browser }

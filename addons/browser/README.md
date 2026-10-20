@@ -110,7 +110,30 @@ result receipt, not browser action completion. Identical duplicate deliveries
 are acknowledged and conflicting results are refused. The worker has no model
 credentials or provider route resolution.
 
-The bundled package has no declared model outputs or browser model consumer yet.
-This queue does not establish `page.locate` or Stagehand model support. Actual
-browser/model execution evidence also remains. Follow this work in
+The bundled package declares the fixed `locate` output and connects it to owned
+Gecko `page.locate`. Configure an existing model slot for the installation's
+`runtime.addon_exact_lanes.<installation-id>.locate` route using the
+[TOML guide](../../docs/guides/lane-addon-toml.md). Package defaults select this
+output; installation `exact_outputs = []` disables it independently of tool
+validation hooks. Inventory `locate` observes the selected consumer, not provider
+readiness. A missing/off/unavailable route remains pending under the existing
+Exact Output policy until an authority event or original-command cancellation.
+
+For the public alias, use `BrowserInstruct` with `action = "observe"`, the
+observed `lane = "automation"` and `tabId`, and an optional instruction. Every
+BrowserInstruct action requires the observed owned lane; act/extract still
+require Stagehand. A bound tab cannot move to another browser.
+
+The model selects node IDs from a typed scene; it supplies no selectors, code,
+coordinates or input actions. The driver reads the same tab again and refuses
+changed documents, URLs, missing nodes or changed observed meaning. Returned
+geometry and node observations come from this fresh read. The model's explanation
+is separate inference, and a match grants no permission to click. A truncated
+scene never establishes that all matching elements were found. The original
+command or detach owns model waiting; the quick browser transport clock does
+not abandon its request.
+
+The owner/queue/consumer and public alias scenarios use scripted WebDriver or
+native adapter responses. Actual browser/model execution evidence, Stagehand
+model policy and owned Chrome still remain. Follow this work in
 [issue #44150](https://github.com/jeong-sik/masc/issues/44150).

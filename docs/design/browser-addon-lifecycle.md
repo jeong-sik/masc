@@ -270,10 +270,30 @@ receipts remain distinct from successful contract validation.
    Socket fixtures cover request-ready events, concurrent listing/delivery,
    schema refusal, durable receipts, cancellation and retirement. A host-cycle
    fixture covers withdrawal of a blocked Exact call and a later request in the
-   same worker. These scenarios have not yet been executed. The bundled browser
-   package still declares no model outputs and has no model consumer connected.
-   Read-only locate, Stagehand schema/role policy, owned Chrome execution and
-   real browser/model evidence remain.
+   same worker. These scenarios have not yet been executed.
+
+   The bundled package now declares the fixed `locate` schema. A selected schema
+   must match the worker consumer contract before publishing the Gecko backend;
+   an omitted consumer is observed as unavailable independently of provider
+   readiness. Owned Gecko `page.locate` reads a typed scene under the existing
+   session owner, submits its observed nodes to the host Exact runner, then
+   reads the original tab again. Original and fresh document/URL must agree;
+   a match must occur in both scenes with unchanged observed kind, tag, text,
+   ancestor region and source context. Geometry comes from the fresh scene.
+   Model explanations remain separate inference; no selector, script or input
+   comes from the model. A truncated scene does not claim complete matching.
+   Neither the model-backed transport nor Gecko locate imposes the quick browser
+   wait clock; caller cancellation and owner retirement still withdraw it.
+
+   Public BrowserInstruct now requires the observed owned lane and tab ID.
+   Automation serves observe only when locate is selected; act/extract retain
+   their Stagehand requirement. The existing public native adapter fixture
+   checks route/tab preservation and preflight refusals. A worker owner/queue/
+   consumer fixture exercises accepted, changed-document, changed-meaning,
+   invented-reference, cancelled and retired requests using a scripted
+   WebDriver transport. These definitions are not executed browser/model proof.
+   Stagehand schema/role policy, owned Chrome execution and real browser/model
+   evidence remain.
 
 ## Completion evidence
 

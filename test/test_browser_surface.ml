@@ -1108,7 +1108,7 @@ let test_compound_read_keeps_admission () =
         check int "both read phases execute" 2 (List.length !calls);
         check bool "new read is refused after off" true (Result.is_error (Surface.read request));
         check int "refused new request sends no command" 2 (List.length !calls))
-        [Browser_lane.Automation_route,Browser_lane.install_automation_executor;
+        [Browser_lane.Automation_route,(fun executor -> Browser_lane.install_automation_executor executor);
          Browser_lane.Stagehand_route,(fun executor -> Browser_lane.install_stagehand_executor
            (Option.map (fun execute ~actor:_ verb -> execute verb) executor))]))
 

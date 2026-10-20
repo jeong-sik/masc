@@ -17,6 +17,9 @@ hooks = ["validate_input", "validate_output"]
 [world.outputs.connections]
 all_lanes = true
 
+[world.exact_outputs.locate]
+schema = "schemas/locate.json"
+
 [resources]
 max_reply_bytes = 4194304
 

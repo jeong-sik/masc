@@ -49,6 +49,7 @@ let call t ~on_cancel_after_dispatch command =
           | Error detail -> Error (Outcome_unknown ("invalid browser service reply: " ^ detail)))) in
       try (match command with
         | W.Retire | W.Model_wait _ -> exchange ()
+        | W.Issue {verb;_} when Browser_lane.verb_uses_model verb -> exchange ()
         | Snapshot|Model_requests|Model_result _|Poll _|Deliver _|Disconnect _|Issue _ -> Eio.Time.with_timeout_exn clock allowance exchange)
       with
       | Eio.Cancel.Cancelled _ as cancelled ->

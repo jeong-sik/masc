@@ -185,6 +185,69 @@ status: reference
   [docs/TUI-GUIDE.md](../TUI-GUIDE.md) ·
   [docs/design/tui/HOME-JOURNEY-ACCEPTANCE.md](../design/tui/HOME-JOURNEY-ACCEPTANCE.md)
 
+**Music Library (/music, 음악 라이브러리)**
+: TUI에서 프레이즈·어레인지먼트·녹음 테이크를 골라 열고 고치는 음악 작업 표면. Dashboard **s**
+  또는 chat `/music`으로 들어가고, 화면 자체는 별도 실행 파일 `masc-alphatex --music`이
+  그린다. MASC는 라이브러리 뿌리 두 개(`<base-path>/.masc/music/projects`·
+  `<base-path>/.masc/music/sessions`)를 넘길 뿐 편집 상태를 소유하지 않는다. 악보를 그리는
+  `/score`와 달리 Kitty 그래픽도 alphaTex 펜스도 필요 없다.
+  - 켜지는 조건: `scripts/install-alphatex.sh`가 설치한 `masc-alphatex`가 TUI의 `PATH`에
+    있어야 한다(Node.js 22+·pnpm 필요). 없으면 이 화면을 열 수 없다.
+  - 이름 경계: 표제어는 코드 주석과 도구 문서가 함께 쓰는 "terminal music library"에서 왔고
+    (`Masc_tui_command`: "`/music` opens the terminal music library"), 사용자가 실제로 누르는
+    이름은 `/music`·**s**다. 이 표면 아래 낱말은 `Phrase`·`Arrangement`·`Take` 셋이고, 셋은
+    서로 다른 편집기를 가진다. 편집기가 나뉜다고 재생도 모두 갈리는 것은 아니다 — 낱편집
+    재생은 편집기별 transport로 돌지만, backing 재생은 `Arrangement` transport가 맡는다
+    (README: "Captured regions also use the ordinary arrangement transport"). Board·chat
+    본문의 악보인 **alphaTex 펜스**는 그리기 표시일 뿐 이 편집기가 아니다.
+  - 같은 낱말의 두 층: 어레인지먼트 편집기 안에서도 "library"가 나오지만 그것은 `:import-wave`로
+    들여온 **자산 목록**을 가리킨다. 이 표제어가 가리키는 진입 화면과 다르다.
+  - 사용 가이드 없음(2026-10-20 확인): `docs/guides`에 이 표면의 안내가 없고, 문서는
+    [tools/alphatex/README.md](../../tools/alphatex/README.md)뿐이다.
+
+**Phrase (프레이즈)**
+: 음을 직접 찍고 고치는 편집 문서 하나. 터미널 피아노 롤에서 음·길이·세기·트랙을 편집하고,
+  `masc-alphatex --sequence`로 열거나 저장한 문서를 `--project song.json`으로 다시 연다.
+  기본 저장 위치는 `./music-projects`(`--project-root`로 바꾼다). alphaTex 악보에서 **p**로
+  넘어온 편집본은 별도 MIDI 실험이고, 고쳐도 원본 기보는 바뀌지 않는다.
+  - 이름 경계: Phrase는 보관된 소리 파일을 시간축에 놓는 `Arrangement`와 다르다. Phrase는
+    음을 쓰는 편집본이고 Arrangement는 소스를 배치하는 편집본이다. 낱편집 재생은 둘이
+    따로 돌지만, Phrase를 backing으로 틀면 재생은 `Arrangement` transport가 맡는다
+    (`:arrange`, README "Move phrase experiments into backing").
+  → [tools/alphatex/README.md](../../tools/alphatex/README.md) ·
+  [alphaTex 악보 안내](../guides/alphatex-tab.md)
+
+**Arrangement (어레인지먼트)**
+: 보관된 WAV/MIDI 소스를 한 시간축 위에 구간으로 놓는 편집본. `masc-alphatex --arrange`,
+  `/score` 화면의 **a** 키, 저장된 프로젝트는 `--project song.json`으로 연다. WAV 구간은
+  스트리밍 다중 음성 transport를, MIDI 구간은 source-state transport를 쓰고, 섞인 레인은
+  하나의 native 소유자가 공유 시계로 재생한다. Phrase 편집기에서 `:arrange`를 부르면 그
+  프레이즈를 0박에 놓은 backing 어레인지먼트가 열린다.
+  - 다루는 것과 넘기는 것: 구간 배치·자르기·반복·레인을 다루고, 음 자체를 고치려면
+    `:phrase`·`:edit-midi`로 Phrase 쪽 편집기로 넘어간다.
+  - 이름 경계: 일상어 "arrangement"(배열·타협)와 다른 도메인 용어다. 코드 주석의
+    "...which is the arrangement that kept the unavailable row from going missing..." 같은
+    쓰임은 음악 용어가 아니다. 음악 쪽 Arrangement는 Phrase를 담을 수 있지만 Phrase 편집기와
+    같은 문서가 아니다.
+  → [tools/alphatex/ARRANGEMENT.md](../../tools/alphatex/ARRANGEMENT.md) ·
+  [tools/alphatex/ARRANGEMENT-CLOCK.md](../../tools/alphatex/ARRANGEMENT-CLOCK.md)
+
+**Take (테이크)**
+: 한 번의 녹음 통과가 남긴 오디오/MIDI 묶음. 라이브러리가 세션 뿌리
+  (`<base-path>/.masc/music/sessions`)와 프로젝트 디렉터리의 `recordings/UUID`에서 읽는다.
+  반복 녹음은 통과마다 테이크 레인 하나를 만들고 마지막 통과를 고르며, `:takes`로 목록을 열고
+  `:take 2`·`:take next`·`:take previous`로 다른 통과를 고른다. 깨진 항목도 목록에서
+  골라지며 그 읽기 실패가 그대로 보인다(README: "A damaged item stays selectable with its
+  read failure visible").
+  - 이름 경계: Take는 어레인지먼트의 구간이 아니다. 원본은 테이크로 보존되고, 배치·자르기는
+    그 테이크를 가리키는 구간에서 한다. 그래서 어레인지먼트를 고쳐도 녹음 원본은 그대로다.
+    다만 재생은 한 transport를 공유한다 — 테이크를 바꾸면 현재 backing을 멈추고 새 재생
+    계획을 시작하고(ARRANGEMENT-RECORDING: "Changing takes stops the current backing"),
+    녹음된 테이크를 backing epoch을 유지한 채 붙일 수도 있다(README: "recorded takes can
+    be attached while the backing epoch remains continuous").
+  → [tools/alphatex/ARRANGEMENT-RECORDING.md](../../tools/alphatex/ARRANGEMENT-RECORDING.md) ·
+  [tools/alphatex/README.md](../../tools/alphatex/README.md)
+
 **Dashboard Goals**
 : TUI 첫 화면에서 Goal의 기록된 측정값과 연결된 Task 완료 수를 별도로 요약한다.
   Goal의 실제 값은 동일한 Goal ID·기준 개정·지표·목표를 가진 관측 기록에서만 읽는다.

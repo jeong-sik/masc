@@ -365,6 +365,10 @@ visibilities = ["public"]
 |} manifest binding) in
     declaration "timezone = \"Asia/Seoul\"\n";
     ignore (unwrap (Config.load_file ~path));
+    declaration "timezone = \"Asia/Seoul\"\n\n[[binding.records]]\nsource_id = \"wiki\"\nkind = \"wiki\"\n\n\
+                 [[binding.records]]\nsource_id = \"prs\"\nkind = \"github_pulls\"\nrepository_id = \"masc\"\n";
+    check int "the binding also takes wiki and github_pulls grants" 3
+      (List.length (unwrap (Lane_addon_records.grants ~operator_owned:true (unwrap (Config.load_file ~path)).binding)));
     declaration "";
     check_error "a binding without a time zone is refused before install" path;
     declaration "timezone = \"Asia/Seoul\"\nwindow = 3\n";

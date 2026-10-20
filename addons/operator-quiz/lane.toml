@@ -1,5 +1,5 @@
 id = "operator-quiz"
-revision = "0.1.2"
+revision = "0.2.0"
 title = "Operator quiz"
 contributions = ["derive", "act"]
 image = "masc-lane-operator-quiz:0.1.0"
@@ -47,14 +47,14 @@ binding_schema = '''{
         "type": "object",
         "properties": {
           "source_id": {"type": "string", "minLength": 1},
-          "kind": {"type": "string", "enum": ["board", "repository"]},
+          "kind": {"type": "string", "enum": ["board", "repository", "wiki", "github_pulls"]},
           "visibilities": {
             "type": "array",
             "minItems": 1,
             "items": {"type": "string", "enum": ["public", "unlisted", "internal", "direct"]},
             "description": "Board only. Every post in these visibilities can reach the provider of each slot bound to this installation's author output in runtime.toml. Before adding internal, or naming direct, confirm that each of those providers may receive such posts."
           },
-          "repository_id": {"type": "string", "minLength": 1, "description": "Repository only: a registered repository"},
+          "repository_id": {"type": "string", "minLength": 1, "description": "Repository and github_pulls only: a registered repository"},
           "paths": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1},
             "description": "Repository only: files, or folders ending in /, such as changelog.d/"}
         },

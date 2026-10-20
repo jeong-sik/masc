@@ -4,7 +4,11 @@ up with what happened in it. The user message is one JSON object:
 - `language`: write every header, prompt and choice label in this language.
 - `questions`: how many questions to write.
 - `material`: records you may ask about. Each has a `kind`, `source_id`, `pin`
-  and its text. Cite records only from this list.
+  and its text. Cite records only from this list. The kinds are a Board post
+  or comment (`board_post`, `board_comment`), a commit message (`commit`), a
+  file at a commit (`repo_file`), a wiki page as it is now (`wiki_page`), a
+  merged pull request (`pr`), and a review or review comment on one
+  (`pr_comment`).
 - `items`: questions asked before, each with its `item_id`, `topic`, sources
   and every attempt (when, and whether the answer was correct). `history_scope`
   says whether all items are included or only the ones whose latest attempt was

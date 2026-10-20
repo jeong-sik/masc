@@ -94,6 +94,8 @@ def grants_of_binding(binding: dict) -> tuple[q.Grant, ...]:
                 if not isinstance(paths, list) or not paths or not all(isinstance(p, str) and p for p in paths):
                     raise InvalidBinding(f"repository grant {record['source_id']} needs paths")
                 grants.append(q.Grant(record["source_id"], "repository", tuple(paths)))
+            case "wiki" | "github_pulls":
+                grants.append(q.Grant(record["source_id"], record["kind"], ()))
             case other:
                 raise InvalidBinding(f"grant kind {other!r} is not one this package reads")
     if len({grant.source_id for grant in grants}) != len(grants):
@@ -167,31 +169,67 @@ def reads(entries: list[tuple[str, dict]], assemble: Callable[[dict], dict] = _a
 
 # -- Material the author output may cite. ----------------------------------
 
-def material(session_reads: list[dict]) -> list[dict]:
-    """Board posts, Board comments and files, in the order read. Commits are
-    read only to find the files they changed; a repository page names the
-    head it read and a Board page does not."""
+def _cite(pin: q.Pin) -> str:
+    """The pin of a record the host named, as the log will read it back. A
+    record this package could not cite later is refused now, while it is
+    still a result the host keeps."""
+    text = q.pin_text(pin)
+    try:
+        q.parse_pin(q.pin_kind(pin), text)
+    except q.LogError as error:
+        raise InvalidResult(f"the host named a record this package cannot cite: {error}") from error
+    return text
+
+
+def _entry(pin: q.Pin, result: dict, author: Any, at: Any, title: str, text: str) -> dict:
+    return {"kind": q.pin_kind(pin), "source_id": result["source_id"], "pin": _cite(pin),
+            "sha256": result["sha256"], "author": author, "at": at, "title": title, "text": text}
+
+
+def _records_of(grant: q.Grant, result: dict, record: dict) -> list[dict]:
+    """The citable records one host record holds. A pull request gives
+    itself, each review that says something, and each review comment."""
+    match grant.kind, record.get("kind"):
+        case "board", "post":
+            return [_entry(q.BoardPostPin(record["id"]), result, record["author"], record["created_at"],
+                           record["title"], record["body"])]
+        case "board", "comment":
+            return [_entry(q.BoardCommentPin(record["post_id"], record["id"]), result, record["author"],
+                           record["created_at"], "", record["body"])]
+        case "repository", "commit":
+            return [_entry(q.CommitPin(record["sha"]), result, record["author"], record["committed_at"],
+                           record["subject"], record["body"])]
+        case "wiki", "page":
+            return [_entry(q.WikiPagePin(record["name"], record["revision"]), result, record["author"], 0,
+                           record["title"], record["body"])]
+        case "github_pulls", "pull_request":
+            number = record["number"]
+            reviews = record["reviews"]
+            return ([_entry(q.PrPin(number, record["merge_commit"]), result, record["author"], record["merged_at"],
+                            record["title"], record["body"])]
+                    + [_entry(q.PrReviewPin(number, review["id"]), result, review["author"], review["submitted_at"],
+                              "", review["body"]) for review in reviews if review["body"].strip()]
+                    + [_entry(q.PrCommentPin(number, comment["id"]), result, comment["author"],
+                              comment["created_at"], "", comment["body"])
+                       for review in reviews for comment in review["comments"]])
+        case kind, other:
+            raise InvalidResult(f"a {kind} page holds a record of kind {other!r}")
+
+
+def material(session_reads: list[dict], grants: dict[str, q.Grant]) -> list[dict]:
+    """The records an author request may cite, in the order read: what each
+    grant's pages hold, and the text files read at a commit. The grant a read
+    names says what its records are."""
     out: list[dict] = []
     for read in session_reads:
         request, result = read["request"], read["result"]
-        if request["kind"] == "read_records" and result["status"] == "records" and "head" not in result:
-            for record in result["records"]:
-                match record["kind"]:
-                    case "post":
-                        out.append({"kind": "board_post", "source_id": result["source_id"], "pin": record["id"],
-                                    "sha256": result["sha256"], "author": record["author"],
-                                    "at": record["created_at"], "title": record["title"], "text": record["body"]})
-                    case "comment":
-                        out.append({"kind": "board_comment", "source_id": result["source_id"],
-                                    "pin": f"{record['post_id']}/{record['id']}", "sha256": result["sha256"],
-                                    "author": record["author"], "at": record["created_at"], "title": "",
-                                    "text": record["body"]})
-                    case other:
-                        raise InvalidResult(f"a Board page holds a record of kind {other!r}")
+        grant = grants.get(request["source_id"])
+        if grant is None:
+            raise InvalidResult(f"a read of {request['source_id']}, which the session does not grant")
+        if request["kind"] == "read_records" and result["status"] == "records":
+            out += [entry for record in result["records"] for entry in _records_of(grant, result, record)]
         elif request["kind"] == "read_file" and result["status"] == "file" and result["encoding"] == "utf-8":
-            out.append({"kind": "repo_file", "source_id": result["source_id"],
-                        "pin": f"{result['commit']}:{result['path']}", "sha256": result["sha256"],
-                        "author": "", "at": 0, "title": "", "text": result["content"]})
+            out.append(_entry(q.RepoFilePin(result["commit"], result["path"]), result, "", 0, "", result["content"]))
     return out
 
 
@@ -369,9 +407,10 @@ class Flow:
         request is encoded a few times rather than once per read."""
         out: list[dict] = []
         checked = 0
+        grants = {grant.source_id: grant for grant in session.grants}
         for read in reversed(self._session_reads(session)):
             whole = reads([(digest, self.pages.read(digest)) for digest in read["digests"]])
-            out = material(whole) + out
+            out = material(whole, grants) + out
             if out and len(out) >= 2 * checked:
                 checked = len(out)
                 if not self.fits(self._author_body(session, sessions, scope=SCOPE_ALL, records=out)):
@@ -537,11 +576,12 @@ class Flow:
         cited = {source.sha256 for source in sources}
         out: dict[tuple[str, str, str], dict] = {}
         for session in sessions:
+            grants = {grant.source_id: grant for grant in session.grants}
             for read in self._session_reads(session):
                 if read["result"] is None or read["result"].get("sha256") not in cited:
                     continue
                 whole = reads([(digest, self.pages.read(digest)) for digest in read["digests"]])
-                for record in material(whole):
+                for record in material(whole, grants):
                     out[(record["kind"], record["source_id"], record["pin"])] = {
                         key: record[key] for key in ("kind", "source_id", "pin", "sha256", "title", "text")}
         return out

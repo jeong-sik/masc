@@ -80,7 +80,11 @@
                   "enum": [
                     "board_post",
                     "board_comment",
-                    "repo_file"
+                    "repo_file",
+                    "commit",
+                    "wiki_page",
+                    "pr",
+                    "pr_comment"
                   ]
                 },
                 "source_id": {

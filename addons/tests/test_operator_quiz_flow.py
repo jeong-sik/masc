@@ -23,6 +23,8 @@ import quiz_log as q  # noqa: E402
 
 BOARD = {"source_id": "board", "kind": "board", "visibilities": ["public"]}
 REPO = {"source_id": "masc", "kind": "repository", "repository_id": "masc", "paths": ["changelog.d/"]}
+WIKI = {"source_id": "wiki", "kind": "wiki"}
+PRS = {"source_id": "prs", "kind": "github_pulls", "repository_id": "masc"}
 BINDING = {"records": [BOARD], "language": "ko"}
 HEAD = "f" * 40
 PROMPTS = f.Prompts(author="author prompt", grade="grade prompt")
@@ -42,10 +44,33 @@ def commit(n: int, paths: list[str]) -> dict:
             "subject": f"commit {n}", "body": "", "paths": paths}
 
 
+def wiki_page(name: str, revision: int, body: str) -> dict:
+    return {"kind": "page", "name": name, "revision": revision, "title": f"Title of {name}", "summary": "One line",
+            "author": "operator", "body": body}
+
+
+def pull(number: int, body: str, reviews: list[dict]) -> dict:
+    return {"kind": "pull_request", "number": number, "title": f"PR {number}", "body": body,
+            "merge_commit": f"{number:040x}", "merged_at": "2026-10-20T10:00:00Z", "author": "codex",
+            "reviews": reviews}
+
+
+def review(review_id: int, body: str, comments: list[dict]) -> dict:
+    return {"id": review_id, "author": "be-sleepers", "submitted_at": "2026-10-20T09:30:00Z", "state": "APPROVED",
+            "body": body, "comments": comments}
+
+
+def review_comment(comment_id: int, body: str) -> dict:
+    return {"id": comment_id, "author": "pangyo-preachers", "created_at": "2026-10-20T09:00:00Z",
+            "path": "lib/x.ml", "line": 3, "body": body}
+
+
 class FakeHost:
     def __init__(self, *, page_size: int = 2, frame: int | None = None):
         self.board: list[dict] = []
         self.commits: list[dict] = []
+        self.wiki: list[dict] = []
+        self.pulls: list[dict] = []
         self.files: dict[tuple[str, str], str] = {}
         self.page_size = page_size
         self.frame = frame
@@ -63,7 +88,7 @@ class FakeHost:
         if after is not None and since is not None:
             raise AssertionError("a read names after or since, not both")
         if since is not None:
-            made = [record.get("created_at", record.get("committed_at")) for record in records]
+            made = [record.get("created_at", record.get("committed_at", 0.0)) for record in records]
             start = next((i for i, at in enumerate(made) if at >= since), len(records))
         else:
             start = 0 if after is None else cursors.index(after) + 1
@@ -78,8 +103,10 @@ class FakeHost:
     def produce(self, request: dict) -> dict | None:
         match request["kind"]:
             case "read_records":
-                result = self.page(request, self.board, None) if request["source_id"] == "board" \
-                    else self.page(request, self.commits, HEAD)
+                result = {"board": lambda: self.page(request, self.board, None),
+                          "wiki": lambda: self.page(request, self.wiki, None),
+                          "prs": lambda: self.page(request, self.pulls, HEAD)}.get(
+                    request["source_id"], lambda: self.page(request, self.commits, HEAD))()
             case "read_file":
                 content = self.files.get((request["commit"], request["path"]))
                 if content is None:
@@ -784,14 +811,75 @@ class Repository(Base):
         self.host.files = {(f"{1:040x}", "changelog.d/a.md"): "the ledger records facts"}
         session_id = self.compose(binding={"records": [REPO], "language": "ko"})
         seen = []
-        self.host.author = lambda payload: seen.append(payload) or answering(first_quote)(payload)
+        file_quote = answering(lambda p: draft(p["material"][-1], "the ledger"))
+        self.host.author = lambda payload: seen.append(payload) or file_quote(payload)
         self.host.run(self.flow)
         files = [r for r in self.host.listed if r["kind"] == "read_file"]
         self.assertEqual([(r["commit"], r["path"]) for r in files],
                          [(f"{1:040x}", "changelog.d/a.md"), (f"{2:040x}", "changelog.d/b.md")])
-        # b.md is gone at that commit in this fixture, as a released fragment is.
-        self.assertEqual([m["pin"] for m in seen[0]["material"]], [f"{1:040x}:changelog.d/a.md"])
+        # Both commits can be cited, then the file; b.md is gone at that commit
+        # in this fixture, as a released fragment is.
+        self.assertEqual([m["pin"] for m in seen[0]["material"]],
+                         [f"{1:040x}", f"{2:040x}", f"{1:040x}:changelog.d/a.md"])
         self.assertEqual(self.session(session_id).state, "asked")
+
+
+class Kinds(Base):
+    """The other source kinds and their pins (RFC §5, §15 L11)."""
+
+    def test_wiki_pages_pull_requests_and_their_reviews_are_material_with_their_pins(self):
+        self.host.wiki = [wiki_page("ledger", 2, "the ledger records facts")]
+        self.host.pulls = [pull(7, "keep reads bounded", [review(70, " ", [review_comment(71, "this cache grows")]),
+                                                           review(72, "looks right", [])])]
+        self.compose(binding={"records": [WIKI, PRS], "language": "ko"})
+        seen = []
+        self.host.author = lambda payload: seen.append(payload) or {"status": "invalid_output", "detail": "x"}
+        self.host.run(self.flow)
+        # A review that says nothing gives no record; its comment still does.
+        self.assertEqual([(m["kind"], m["pin"]) for m in seen[0]["material"]],
+                         [("wiki_page", "ledger@2"), ("pr", f"7@{7:040x}"), ("pr_comment", "7/r72"),
+                          ("pr_comment", "7/c71")])
+        self.assertEqual([(m["title"], m["text"]) for m in seen[0]["material"]][:2],
+                         [("Title of ledger", "the ledger records facts"), ("PR 7", "keep reads bounded")])
+
+    def test_a_question_citing_a_review_comment_keeps_its_pin_and_page(self):
+        self.host.pulls = [pull(7, "keep reads bounded", [review(70, "", [review_comment(71, "this cache grows")])])]
+        session_id = self.compose(binding={"records": [PRS], "language": "ko"})
+        self.host.author = answering(lambda p: draft(p["material"][-1], "cache grows"))
+        self.host.run(self.flow)
+        (source,) = self.session(session_id).posed[0].sources
+        self.assertEqual((source.kind, source.pin, source.quote), ("pr_comment", "7/c71", "cache grows"))
+        self.assertEqual(source.sha256, sha(self.host.pulls))
+
+    def test_a_commit_message_can_be_cited(self):
+        self.host.commits = [commit(1, ["lib/x.ml"])]
+        session_id = self.compose(binding={"records": [REPO], "language": "ko"})
+        self.host.author = answering(lambda p: draft(p["material"][0], "commit 1"))
+        self.host.run(self.flow)
+        (source,) = self.session(session_id).posed[0].sources
+        self.assertEqual((source.kind, source.pin), ("commit", f"{1:040x}"))
+
+    def test_a_record_this_package_could_not_cite_is_not_taken(self):
+        self.host.wiki = [wiki_page("Ledger", 1, "the ledger records facts")]
+        self.compose(binding={"records": [WIKI], "language": "ko"})
+        (request,) = self.flow.listing()
+        with self.assertRaisesRegex(f.InvalidResult, "cannot cite"):
+            self.flow.deliver(request["request_id"], self.host.produce(request))
+        self.assertEqual(self.flow.listing(), [request])
+
+    def test_a_read_of_a_source_the_session_does_not_grant_is_not_material(self):
+        read = {"request": {"kind": "read_records", "source_id": "wiki"}, "marker": None, "chunks": [],
+                "digests": [], "result": {"status": "records", "source_id": "wiki", "sha256": "0" * 64,
+                                          "records": [wiki_page("ledger", 1, "x")]}}
+        with self.assertRaisesRegex(f.InvalidResult, "does not grant"):
+            f.material([read], {})
+
+    def test_a_record_of_another_kind_than_its_grant_reads_is_not_taken(self):
+        self.host.wiki = [post(1, "the ledger records facts")]
+        self.compose(binding={"records": [WIKI], "language": "ko"})
+        (request,) = self.flow.listing()
+        with self.assertRaisesRegex(f.InvalidResult, "a wiki page holds a record of kind 'post'"):
+            self.flow.deliver(request["request_id"], self.host.produce(request))
 
 
 class Reductions(Base):

@@ -25,8 +25,8 @@ At base `8c2b56cb19a9f44397aa876a81396ad872ba5ec0` plus this change:
   direct route/overlay ownership, actual config-panel demand, errors, switching,
   CAS conflicts and retained edits, and the diagnostic runtime editor.
 - `pnpm typecheck` passed.
-- Vite production build passed before the additional cached-state fix; the final
-  build is recorded separately after publication.
+- Vite production build results for the published source are recorded in the PR
+  evidence separately from the earlier build before the cached-state fix.
 - `git diff --check` passed. No local Dune or CI watch was used.
 
 Reproduce from `dashboard/`:

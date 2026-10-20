@@ -12,7 +12,7 @@ const toastMocks = vi.hoisted(() => ({
 }))
 
 const devTokenMocks = vi.hoisted(() => ({
-  refreshDevTokenAfterAuthError: vi.fn(async () => true),
+  recoverFromRejectedCredential: vi.fn(async () => undefined),
 }))
 
 vi.mock('./api', () => apiMocks)
@@ -29,12 +29,13 @@ vi.mock('./components/common/toast', () => ({
 }))
 vi.mock('./api/dev-token', async importOriginal => ({
   ...(await importOriginal<typeof import('./api/dev-token')>()),
-  refreshDevTokenAfterAuthError: devTokenMocks.refreshDevTokenAfterAuthError,
+  recoverFromRejectedCredential: devTokenMocks.recoverFromRejectedCredential,
 }))
 
 afterEach(async () => {
   vi.clearAllMocks()
   vi.resetModules()
+  sessionStorage.clear()
 })
 
 describe('refreshShell auth failure handling', () => {
@@ -179,7 +180,7 @@ describe('refreshShell auth failure handling', () => {
           keeper_msg_error: 'Authentication required',
         },
       } as never,
-      { light: true, preserveAuth: true },
+      { light: true, preserveAuth: true, sentToken: null },
     )
 
     expect(store.shellAuthSummary.value).toBe(verifiedAuth)
@@ -219,26 +220,37 @@ describe('rejected shell credential recovery', () => {
     } as never
   }
 
-  it('asks for a fresh dev token and forwards the typed rejection code', async () => {
+  it('hands the sent token and the typed code to the credential recovery', async () => {
     const store = await import('./store')
-    store.hydrateShellSnapshot(shellBody(rejected), { light: true })
-    expect(devTokenMocks.refreshDevTokenAfterAuthError).toHaveBeenCalledWith('invalid_token')
+    store.hydrateShellSnapshot(shellBody(rejected), { light: true, sentToken: 'sent-token' })
+    expect(devTokenMocks.recoverFromRejectedCredential).toHaveBeenCalledWith({
+      token: 'sent-token',
+      authErrorCode: 'invalid_token',
+    })
   })
 
-  it('reaches the same recovery through a shell refresh response', async () => {
-    apiMocks.fetchDashboardShell.mockResolvedValueOnce(shellBody(rejected))
+  it('reads the sent token before a shell refresh leaves', async () => {
+    const core = await import('./api/core')
+    core.setStoredToken('sent-token', { source: 'manual' })
+    apiMocks.fetchDashboardShell.mockImplementationOnce(async () => {
+      core.setStoredToken('token-set-during-request', { source: 'manual' })
+      return shellBody(rejected)
+    })
     const store = await import('./store')
     await store.refreshShell({ force: true })
-    expect(devTokenMocks.refreshDevTokenAfterAuthError).toHaveBeenCalledWith('invalid_token')
+    expect(devTokenMocks.recoverFromRejectedCredential).toHaveBeenCalledWith({
+      token: 'sent-token',
+      authErrorCode: 'invalid_token',
+    })
   })
 
   it('leaves an accepted credential alone', async () => {
     const store = await import('./store')
     store.hydrateShellSnapshot(
       shellBody({ ...rejected, token_valid: true, auth_error_code: null, auth_error_detail: null }),
-      { light: true },
+      { light: true, sentToken: 'sent-token' },
     )
-    expect(devTokenMocks.refreshDevTokenAfterAuthError).not.toHaveBeenCalled()
+    expect(devTokenMocks.recoverFromRejectedCredential).not.toHaveBeenCalled()
   })
 
   /* No stored credential is the pre-bootstrap state, not a rejection —
@@ -248,9 +260,9 @@ describe('rejected shell credential recovery', () => {
     const store = await import('./store')
     store.hydrateShellSnapshot(
       shellBody({ ...rejected, token_present: false, auth_error_code: 'missing_token' }),
-      { light: true },
+      { light: true, sentToken: null },
     )
-    expect(devTokenMocks.refreshDevTokenAfterAuthError).not.toHaveBeenCalled()
+    expect(devTokenMocks.recoverFromRejectedCredential).not.toHaveBeenCalled()
   })
 
   /* `preserveAuth` callers are explicitly not reporting on the credential —
@@ -258,7 +270,7 @@ describe('rejected shell credential recovery', () => {
      data the caller already disclaimed. */
   it('stays out of preserveAuth hydration', async () => {
     const store = await import('./store')
-    store.hydrateShellSnapshot(shellBody(rejected), { light: true, preserveAuth: true })
-    expect(devTokenMocks.refreshDevTokenAfterAuthError).not.toHaveBeenCalled()
+    store.hydrateShellSnapshot(shellBody(rejected), { light: true, preserveAuth: true, sentToken: 'sent-token' })
+    expect(devTokenMocks.recoverFromRejectedCredential).not.toHaveBeenCalled()
   })
 })

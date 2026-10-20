@@ -549,7 +549,7 @@ export async function streamKeeperMessage(
   }
   const requestBody = JSON.stringify(body)
   const streamPath = '/api/v1/keepers/chat/stream'
-  const postStream = () => fetch(streamPath, {
+  const postStream = () => fetchControlPlane(streamPath, {
     method: 'POST',
     headers: {
       ...jsonHeaders(),

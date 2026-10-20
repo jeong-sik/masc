@@ -1,4 +1,4 @@
-import { authHeaders, get } from './core'
+import { authHeaders, fetchControlPlane, get } from './core'
 import { ensureDevToken } from './dev-token'
 
 export interface KeeperGithubAuthResult {
@@ -88,7 +88,7 @@ export async function streamKeeperGithubLogin(
   signal: AbortSignal,
 ): Promise<void> {
   await ensureDevToken()
-  const response = await fetch(keeperGithubLoginPath(keeperName, hostname, scopes), {
+  const response = await fetchControlPlane(keeperGithubLoginPath(keeperName, hostname, scopes), {
     method: 'POST',
     headers: authHeaders(),
     signal,

@@ -299,7 +299,7 @@ export async function deleteKeeperHistorySnapshots(
   name: string,
   snapshotIds: string[],
 ): Promise<KeeperCheckpointDeleteResponse> {
-  const resp = await fetch(
+  const resp = await fetchControlPlane(
     `/api/v1/keepers/${encodeURIComponent(name)}/checkpoints`,
     {
       method: 'POST',

@@ -24,6 +24,7 @@ import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } fr
 import {
   devTokenBootstrapNeedsReadinessProbe,
   ensureDevToken,
+  installRejectedCredentialRecovery,
 } from './api/dev-token'
 import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_HIGH } from './config/constants'
 import { setContextThresholds } from './config/context-thresholds'
@@ -166,6 +167,7 @@ export function App() {
 
     // Initialize hash router and compatible deep links
     initRouter()
+    const uninstallCredentialRecovery = installRejectedCredentialRecovery()
 
     const ensureLoopbackAuth = () => ensureDevToken()
       .catch(err => {
@@ -254,6 +256,7 @@ export function App() {
       stopErrorCleanup()
       disposeNamespaceTruthScheduler()
       uninstallStalenessWatch()
+      uninstallCredentialRecovery()
     }
   }, [])
 

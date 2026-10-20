@@ -7,7 +7,9 @@ import {
   getStoredToken,
   getStoredTokenMeta,
   isRemoteAccess,
+  setRejectedCredentialListener,
   setStoredToken,
+  type RejectedCredential,
 } from './core'
 
 const DEV_TOKEN_FETCH_TIMEOUT_MS = 3000
@@ -56,6 +58,18 @@ const REFRESHABLE_AUTH_CODES: ReadonlySet<DashboardAuthErrorCode> = new Set([
   'token_expired',
   'actor_mismatch',
 ])
+
+/* Codes that say the server refused the credential itself. `actor_mismatch`
+   is about the actor the request named, so the token stays. */
+const CREDENTIAL_REJECTION_CODES: ReadonlySet<DashboardAuthErrorCode> = new Set([
+  'invalid_token',
+  'token_expired',
+])
+
+function isCredentialRejectionCode(value: unknown): boolean {
+  return typeof value === 'string'
+    && CREDENTIAL_REJECTION_CODES.has(value as DashboardAuthErrorCode)
+}
 
 export function isRefreshableDashboardAuthCode(
   value: unknown,
@@ -193,4 +207,36 @@ export async function refreshDevTokenAfterAuthError(code: unknown): Promise<bool
   } finally {
     if (devTokenRefreshPromise === refresh) devTokenRefreshPromise = null
   }
+}
+
+/**
+ * The server refused the token a request carried. A loopback dev token is
+ * re-minted in place. Any other token the server called invalid or expired
+ * (pasted, from `?token=`, or used from a remote host) is dropped, because
+ * every later request would carry it and be refused the same way. Dropping it
+ * also lets the dev-token bootstrap run again, so a loopback tab picks up a
+ * fresh dev token and a remote tab shows "Login required".
+ *
+ * Nothing happens when the stored token is no longer the refused one: a late
+ * reply must not drop a token set after its request left. A dev token whose
+ * re-mint returned the same value is kept, because dropping it would only
+ * fetch it again and be refused again.
+ */
+export async function recoverFromRejectedCredential(
+  rejection: RejectedCredential,
+): Promise<void> {
+  if (getStoredToken() !== rejection.token) return
+  if (await refreshDevTokenAfterAuthError(rejection.authErrorCode)) return
+  if (!isCredentialRejectionCode(rejection.authErrorCode)) return
+  if (getStoredToken() !== rejection.token) return
+  if (getStoredTokenMeta()?.source === 'dev' && !isRemoteAccess()) return
+  clearStoredToken()
+  resetDevTokenBootstrap()
+}
+
+export function installRejectedCredentialRecovery(): () => void {
+  setRejectedCredentialListener(rejection => {
+    void recoverFromRejectedCredential(rejection)
+  })
+  return () => setRejectedCredentialListener(null)
 }

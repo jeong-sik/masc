@@ -82,6 +82,14 @@ let scenario manifest =
         check bool "read-only failure cannot claim browser input" true
           (snd (Lane_addon_tool_result.failure result)=Tool_result.Proven_pre_effect) in
       let pending,id=start () in
+      (* The locate command is now waiting on its model. That wait must not hold
+         the session lock or the active count: an idle document observation
+         still answers instead of reporting the owned browser as busy. *)
+      (match Driver.observe_document_if_idle driver ~tab_id:1 with
+       | B.Answered _ -> ()
+       | B.Refused reason -> fail ("idle observation was refused during the locate model wait: " ^ reason)
+       | B.Rejected_before_effect reason -> fail ("idle observation was rejected during the locate model wait: " ^ reason)
+       | B.Lane_absent | B.Timed_out -> fail "idle observation did not reach the owned session");
       x:=42.;check bool "original waiter accepts result" true (deliver id "menu");
       let result=Eio.Promise.await_exn pending in
       check bool "actual consumer returns success" true (result.is_error=Some false);

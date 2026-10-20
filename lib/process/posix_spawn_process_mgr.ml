@@ -167,13 +167,21 @@ module Process_impl = struct
   let pid t = t.pid
 
   let await t =
-    let status = Fiber.first
-        (fun () -> Promise.await_exn t.exit_status)
-        (fun () -> raise (Promise.await t.reaper_failure)) in
+    let observed = Fiber.first
+        (fun () -> Promise.await t.exit_status)
+        (fun () -> Error (Promise.await t.reaper_failure)) in
+    (* A release hook may subsequently finish the original reap after a
+       pre-reap failure. Prefer that physical result once it exists. Keep
+       errors as data inside [first], whose exception combiner could otherwise
+       replace a concurrently completed exit with the old reaper failure. *)
+    let status = match Promise.peek t.exit_status with
+      | Some status -> status
+      | None -> observed in
     match status with
-    | Unix.WEXITED code -> `Exited code
-    | Unix.WSIGNALED signal -> `Signaled signal
-    | Unix.WSTOPPED _ -> assert false
+    | Ok (Unix.WEXITED code) -> `Exited code
+    | Ok (Unix.WSIGNALED signal) -> `Signaled signal
+    | Ok (Unix.WSTOPPED _) -> assert false
+    | Error exn -> raise exn
   ;;
 
   let signal = signal

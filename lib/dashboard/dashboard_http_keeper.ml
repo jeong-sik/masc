@@ -122,6 +122,63 @@ let invalid_profile_dashboard_row ~keeper_name error =
     ; ("keepalive_running", `Bool false)
     ]
 
+(* The row for a keeper whose dashboard worker raised and whose degraded row
+   cannot be built either (the meta is unreadable or not current, or building
+   the degraded row raised too). The roster named the keeper, so it stays in
+   the list under its name with the error. Dropping it left an [ok:true]
+   response with a shorter list, which reads as a keeper that does not exist. *)
+let name_only_degraded_keeper_dashboard_row ~keeper_name ~(error : string) =
+  let runtime_trust = Trust.degraded_keeper_trust_json ~error in
+  let diagnostic =
+    `Assoc
+      [ ("status", `String "degraded")
+      ; ( "reason"
+        , `String
+            Keeper_runtime_trust_snapshot_core.(
+              disposition_reason_to_wire Keeper_dashboard_worker_exception) )
+      ; ("error", `String error)
+      ; ("fd_observation", `Assoc (Keeper_fd_pressure.projection_fields ()))
+      ]
+  in
+  `Assoc
+    [ ("name", `String keeper_name)
+    ; ("phase", `String "degraded")
+    ; ("pipeline_stage", `String "degraded")
+    ; ("status", `String "degraded")
+    ; ("degraded", `Bool true)
+    ; ("diagnostic", diagnostic)
+    ; ("trust", runtime_trust)
+    ; ("runtime_trust", runtime_trust)
+    ]
+
+(* Total: every keeper whose worker raised gets a row. The degraded row is the
+   preferred shape; the name-only row is what remains when the meta cannot be
+   read or the degraded row itself raises (for example when the default
+   runtime is not initialised and the meta names none). *)
+let keeper_row_after_worker_failure
+      (config : Workspace.config)
+      ~(name : string)
+      ~(error : string)
+  =
+  let name_only detail =
+    name_only_degraded_keeper_dashboard_row ~keeper_name:name ~error:detail
+  in
+  try
+    match Keeper_meta_store.read_meta config name with
+    | Ok (Some meta) -> degraded_keeper_dashboard_row ~error meta
+    | Ok None -> name_only (error ^ "; no current keeper meta")
+    | Error detail ->
+        name_only (Printf.sprintf "%s; keeper meta unreadable: %s" error detail)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | fallback_exn ->
+      let detail = Printexc.to_string fallback_exn in
+      Log.Dashboard.error
+        "keeper dashboard degraded fallback failed (%s): %s"
+        name
+        detail;
+      name_only (Printf.sprintf "%s; degraded row failed: %s" error detail)
+
 type keeper_activity_source =
   | Keeper_meta
   | Tool_call of Yojson.Safe.t
@@ -903,21 +960,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
             "keeper dashboard worker error (%s): %s"
             name
             error;
-          (try
-             match Keeper_meta_store.read_meta config name with
-             | Ok (Some meta) ->
-                 Some
-                   (degraded_keeper_dashboard_row ~error
-                      meta)
-             | Error _ | Ok None -> None
-           with
-           | Eio.Cancel.Cancelled _ as exn -> raise exn
-           | fallback_exn ->
-               Log.Dashboard.error
-                 "keeper dashboard degraded fallback failed (%s): %s"
-                 name
-                 (Printexc.to_string fallback_exn);
-               None)
+          Some (keeper_row_after_worker_failure config ~name ~error)
       in
       row)
       names
@@ -1058,22 +1101,9 @@ let execution_trust_keeper_rows (config : Workspace.config) =
                "keeper dashboard worker error (%s): %s"
                name
                error;
-             (try
-                match Keeper_meta_store.read_meta config name with
-                | Ok (Some meta) ->
-                  Some
-                    (degraded_keeper_dashboard_row ~error
-                       meta
-                     |> execution_trust_row_of_dashboard_row)
-                | Error _ | Ok None -> None
-              with
-              | Eio.Cancel.Cancelled _ as exn -> raise exn
-              | fallback_exn ->
-                Log.Dashboard.error
-                  "keeper dashboard degraded fallback failed (%s): %s"
-                  name
-                  (Printexc.to_string fallback_exn);
-                None)
+             Some
+               (keeper_row_after_worker_failure config ~name ~error
+                |> execution_trust_row_of_dashboard_row)
          in
          results.(idx) <- row)
        names);
@@ -1122,3 +1152,7 @@ let execution_trust_dashboard_json (config : Workspace.config) : Yojson.Safe.t =
 (* Per-keeper snapshot/config rendering extracted to
    [Dashboard_http_keeper_snapshot] (godfile decomp). *)
 include Dashboard_http_keeper_snapshot
+
+module For_test = struct
+  let keeper_row_after_worker_failure = keeper_row_after_worker_failure
+end

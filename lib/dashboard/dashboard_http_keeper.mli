@@ -117,3 +117,12 @@ val keeper_config_json :
     returns [None], [`OK] otherwise.  The handler avoids
     [bootstrap_runtime] mutations to keep the HTTP
     request path off the keeper-meta mutex (#3335). *)
+
+module For_test : sig
+  val keeper_row_after_worker_failure :
+    Workspace.config -> name:string -> error:string -> Yojson.Safe.t
+  (** The row a keeper gets in [keepers_dashboard_json] and
+      [execution_trust_dashboard_json] after its worker raised [error]: the
+      degraded row when the meta is readable, otherwise a row carrying only
+      the name and the errors. Never absent. *)
+end

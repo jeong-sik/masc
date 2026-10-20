@@ -2953,7 +2953,7 @@ status: reference
 
 **Composition Skill**
 : 본문의 `toml composition` fence가 도구 노드와 입력 연결을 선언하는 Skill.
-  검증된 계획이 `keeper_compose_<name>` 도구가 되며, `async=true`로 호출하면 비동기 실행 핸들(`run_id`)을 반환하여 `keeper_composition_status`·`keeper_composition_result`·`keeper_composition_cancel`로 관리한다. 즉석(ad-hoc) 계획도 `keeper_composition_prepare`와 `keeper_composition_run`으로 실행할 수 있다. 실행기는 선언된 입력과
+  검증된 계획이 `keeper_compose_<name>` 도구가 되며, 그 선언의 `execution = "async"`가 호출 방식을 정한다(호출 인자로 고르지 않는다). 비동기 선언의 호출은 접수 영수증을 돌려주며, 영수증은 durable `request_id`와 그 실행의 논리 id인 `composition_run_id`를 싣고, 이름 붙은 제출이면 `result_wait` 바인딩도 함께 준다. `keeper_composition_status`·`keeper_composition_cancel`은 그 `request_id`로 조회·취소하고, 결과는 `result_wait`를 `keeper_composition_result`의 `binding`에 그대로 넣어 읽는다. 응답에 `run_id`라는 이름의 핸들은 없다. 즉석(ad-hoc) 계획도 `keeper_composition_prepare`와 `keeper_composition_run`으로 실행할 수 있다. 실행기는 선언된 입력과
   의존 관계를 따르며, 노드 사이의 새 모델 판단을 대신하지 않는다. 필요한 노드
   도구가 Keeper의 현재 표면에 없으면 합성 도구도 그 턴에 제공하지 않는다.
 

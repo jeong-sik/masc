@@ -240,7 +240,7 @@ let load_runtime ~config_path text =
     ("[providers.snapshot]\nprotocol=\"openai-compatible-http\"\nendpoint=\"http://127.0.0.1:9\"\n[models.sample]\napi-name=\"snapshot-model\"\nmax-context=4096\n[snapshot.sample]\n[runtime]\ndefault=\"snapshot.sample\"\n" ^ text));
   match Runtime.init_default ~config_path with Ok () -> () | Error detail -> fail detail
 
-let test_start_captures_configuration ~stagehand () =
+let test_start_captures_configuration () =
   Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     let root = Filename.temp_dir "browser-start-config-" "" |> Unix.realpath in
     let old = Runtime.For_testing.snapshot () in
@@ -255,25 +255,20 @@ let test_start_captures_configuration ~stagehand () =
     let entered, enter = Eio.Promise.create () and release, finish = Eio.Promise.create () in
     let cleanup () = Eio.Promise.resolve enter (); Eio.Promise.await release in
     let configuration = Runtime.browser_configuration () in
-    let worker = if stagehand then Stagehand.For_testing.start_with_cleanup ~cleanup ~sw ~env ~base_path:root ~configuration
-      else Server_browser_webdriver.For_testing.start_with_cleanup ~cleanup ~sw ~env ~base_path:root ~configuration in
+    let worker = Stagehand.For_testing.start_with_cleanup ~cleanup ~sw ~env ~base_path:root ~configuration in
     Eio.Promise.await entered;
     let marker = Filename.concat root "new-driver-started" in
     let driver = Filename.concat root "new-driver" in
     Out_channel.with_open_bin driver (fun out -> Printf.fprintf out "#!/bin/sh\nprintf started > %s\nexit 1\n" (Filename.quote marker));
     Unix.chmod driver 0o700;
-    load (if stagehand then Printf.sprintf "[browser.stagehand]\nchrome=%S\nextension=%S\n" driver root
-      else Printf.sprintf "[browser.automation]\ngeckodriver=%S\n" driver);
+    load (Printf.sprintf "[browser.stagehand]\nchrome=%S\nextension=%S\n" driver root);
     Eio.Promise.resolve finish ();
     Eio.Promise.await_exn worker;
-    if stagehand then check bool "deferred startup did not install newly saved Stagehand config" false
+    check bool "deferred startup did not install newly saved Stagehand config" false
       (match (Browser_lane.inventory_observation Browser_lane.Lane_name.Stagehand).backend with
-       | Browser_lane.Executor_registered value -> value | _ -> fail "wrong backend")
-    else check bool "deferred startup did not launch newly saved driver" false (Sys.file_exists marker)))
+       | Browser_lane.Executor_registered value -> value | _ -> fail "wrong backend")))
 
-(* The server publishes readiness before it starts the Browser lanes, so a
-   save can land in between. Both lanes start from the snapshot taken before
-   that save, not from whatever Runtime holds when each start runs. *)
+(* A save can land between the readiness snapshot and Stagehand startup. *)
 let test_start_uses_snapshot_from_before_a_save () =
   Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     let root = Filename.temp_dir "browser-start-snapshot-" "" |> Unix.realpath in
@@ -293,11 +288,8 @@ let test_start_uses_snapshot_from_before_a_save () =
     Unix.chmod driver 0o700;
     load (Printf.sprintf "[browser.automation]\ngeckodriver=%S\n[browser.stagehand]\nchrome=%S\nextension=%S\n" driver driver root);
     let cleanup () = () in
-    let webdriver = Server_browser_webdriver.For_testing.start_with_cleanup ~cleanup ~sw ~env ~base_path:root ~configuration in
     let stagehand = Stagehand.For_testing.start_with_cleanup ~cleanup ~sw ~env ~base_path:root ~configuration in
-    Eio.Promise.await_exn webdriver;
     Eio.Promise.await_exn stagehand;
-    check bool "webdriver startup did not launch the driver saved after the snapshot" false (Sys.file_exists marker);
     check bool "Stagehand startup did not install the config saved after the snapshot" false
       (match (Browser_lane.inventory_observation Browser_lane.Lane_name.Stagehand).backend with
        | Browser_lane.Executor_registered value -> value | _ -> fail "wrong backend")))
@@ -305,9 +297,8 @@ let test_start_uses_snapshot_from_before_a_save () =
 let () =
   run "server_browser_stagehand"
     [ "lifetime"
-    , [ test_case "webdriver startup freezes configuration before cleanup" `Quick (test_start_captures_configuration ~stagehand:false);
-      test_case "Stagehand startup freezes configuration before cleanup" `Quick (test_start_captures_configuration ~stagehand:true);
-      test_case "both lanes start from the snapshot taken before a save" `Quick test_start_uses_snapshot_from_before_a_save;
+    , [ test_case "Stagehand startup freezes configuration before cleanup" `Quick test_start_captures_configuration;
+      test_case "Stagehand starts from the snapshot taken before a save" `Quick test_start_uses_snapshot_from_before_a_save;
       test_case "failed open stops Chromium before same-switch retry" `Quick
           test_failure_stops_child_before_same_switch_retry
       ; test_case "malformed owner record blocks profile reset" `Quick

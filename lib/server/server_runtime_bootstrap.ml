@@ -1801,12 +1801,6 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
       boot_stage "slack_poll.begin";
       Server_slack_poll_lane.start ~sw ~env ~state;
       boot_stage "slack_poll.end";
-      (* The browser lanes keep their owner records and profiles under the
-         server's own base path, not one resolved again from env or cwd. *)
-      boot_stage "browser_webdriver.begin";
-      Server_browser_webdriver.start ~sw ~env ~base_path
-        ~configuration:browser_configuration;
-      boot_stage "browser_webdriver.end";
       boot_stage "browser_stagehand.begin";
       Server_browser_stagehand.start ~sw ~env ~base_path
         ~configuration:browser_configuration;

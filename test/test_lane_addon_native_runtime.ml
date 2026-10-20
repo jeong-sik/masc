@@ -181,7 +181,7 @@ def handle(conn):
         req=json.loads(conn.makefile("rb").readline())
         if req["incarnation"]!=a.incarnation: raise RuntimeError("wrong owner")
         op=req["operation"]
-        if op=="snapshot": result={"reply":"receipt"} if a.mode=="bad_ready" or os.path.exists(os.path.join(a.root,"reject-snapshot-"+a.incarnation)) else {"reply":"snapshot","snapshot":{"command_running":running,"state":"serving","clients":list(clients.values()),"owned_backends":"unavailable"}}
+        if op=="snapshot": result={"reply":"receipt"} if a.mode=="bad_ready" or os.path.exists(os.path.join(a.root,"reject-snapshot-"+a.incarnation)) else {"reply":"snapshot","snapshot":{"command_running":running,"state":"serving","clients":list(clients.values()),"owned_backends":{"automation":{"activity":"disabled","registered":False,"session":"closed"},"stagehand":{"activity":"disabled","registered":False,"session":"unknown"}}}}
         elif op=="poll":
             client=dict(req["client"]);client["interactions"]=[];clients[client["clientId"]]=client
             result={"reply":"poll","command":None,"state_id":hashlib.sha256(json.dumps({"command_running":running}).encode()).hexdigest()}

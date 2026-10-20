@@ -32,9 +32,15 @@
 (test
  (name test_browser_addon_socket)
  (modules test_browser_addon_socket)
- (libraries masc masc.native_addon_lease alcotest yojson uuidm unix))
+ (libraries masc masc.native_addon_lease masc.browser_configuration alcotest yojson uuidm unix))
 
 (test
  (name test_browser_addon_client)
  (modules test_browser_addon_client)
  (libraries masc masc.browser_lane masc.masc_eio_context alcotest eio eio_main yojson unix))
+
+(test
+ (name test_browser_addon_automation)
+ (modules test_browser_addon_automation)
+ (libraries masc masc.browser_lane masc.browser_configuration masc.native_addon_lease
+  masc.time_compat masc.fs_compat alcotest eio eio_main yojson uuidm unix))

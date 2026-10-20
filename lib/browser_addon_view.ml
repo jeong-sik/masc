@@ -85,11 +85,13 @@ let clients host=run (fun () ->
     | Browser_addon_client.Unavailable detail|Outcome_unknown detail ->
         failure ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect detail) in
   let* _=projection (Lane_addon_action.canonical value) in
-  let* rows=projection (match value with
+  let* rows,automation,stagehand=projection (match value with
     | `Assoc fields ->
         (match List.assoc_opt "state" fields,List.assoc_opt "owned_backends" fields,
           List.assoc_opt "clients" fields with
-         | Some (`String "serving"),Some (`String "unavailable"),Some (`List rows) -> Ok rows
+         | Some (`String "serving"),Some owned,Some (`List rows) ->
+             let* automation,stagehand=Browser_addon_inventory.owned_of_json owned in
+             Ok (rows,automation,stagehand)
          | (None|Some _),(None|Some _),(None|Some _) -> Error "browser inventory is unavailable")
     | _ -> Error "browser inventory is unavailable") in
   let rec decode acc = function
@@ -101,8 +103,7 @@ let clients host=run (fun () ->
         decode (client::acc) rest
     | _::_ -> projection (Error "invalid browser inventory client") in
   let* live_clients=decode [] rows in
-  let unavailable={Browser_selection.activity=B.Disabled;registered=false;session=B.Browser_unknown} in
-  let snapshot={Browser_selection.live_activity=B.Enabled;live_clients;automation=unavailable;stagehand=unavailable} in
+  let snapshot={Browser_selection.live_activity=B.Enabled;live_clients;automation;stagehand} in
   let decision verb=match Browser_selection.choose ~verb ~bound:false ~snapshot Browser_selection.Automatic with
     | Ok selected -> `Assoc ["ok",`Bool true;"data",Browser_selection.to_json selected]
     | Error error -> `Assoc ["ok",`Bool false;"error",Browser_selection.error_to_json error] in

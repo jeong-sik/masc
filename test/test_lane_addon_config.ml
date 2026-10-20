@@ -352,6 +352,13 @@ let model_access_is_explicit_and_revisioned () = with_directory (fun _root packa
     write manifest (package () ^ "\n[interface]\nmodel_access = " ^ value ^ "\n");
     check_error "unknown or untyped model access is rejected" path) ["\"auto\"";"true"])
 
+let contains text needle =
+  let width = String.length needle in
+  let rec at index =
+    index + width <= String.length text
+    && (String.sub text index width = needle || at (index + 1)) in
+  at 0
+
 let exact_outputs_are_package_schemas () = with_directory (fun root packages directory ->
   let manifest = install_package packages in
   let path = Filename.concat directory "quiz.toml" in
@@ -393,8 +400,13 @@ schema = "schemas/author.json"
   Unix.symlink (Filename.concat root "outside.json") (Filename.concat schemas "escape.json");
   List.iter (fun (label, tables) ->
     with_outputs tables;
-    check_error label path)
-    [ "an upper-case name", "[world.exact_outputs.Author]\nschema = \"schemas/author.json\"\n";
+    match Config.load_file ~path with
+    | Ok _ -> failf "%s was accepted" label
+    | Error message ->
+        check bool (label ^ " is refused by the exact_outputs reader") true
+          (contains message "world.exact_outputs"))
+    [ "a directory", "[world.exact_outputs.author]\nschema = \"schemas\"\n";
+      "an upper-case name", "[world.exact_outputs.Author]\nschema = \"schemas/author.json\"\n";
       "a name starting with a digit", "[world.exact_outputs.2nd]\nschema = \"schemas/author.json\"\n";
       "a key beside schema", "[world.exact_outputs.author]\nschema = \"schemas/author.json\"\nmodel = \"x\"\n";
       "no schema", "[world.exact_outputs.author]\n";

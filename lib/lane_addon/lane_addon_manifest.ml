@@ -42,7 +42,7 @@ let output_ports world =
   | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
   | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
   | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> Error "world.outputs must be a table"
-(* [[world.exact_outputs.<name>]] schema = "<path>": the schema file ships in the
+(* [world.exact_outputs.<name>] schema = "<path>": the schema file ships in the
    package, so it is read here and becomes part of the package value. The path is
    package-relative like world.skills.directory and must stay inside the package
    after symlinks resolve. *)
@@ -54,9 +54,18 @@ let exact_outputs ~directory world =
     let label = "world.exact_outputs." ^ name ^ ".schema" in
     let* relative = Skill_resource_path.of_string path
       |> Result.map_error (fun error -> label ^ ": " ^ Skill_resource_path.error_to_string error) in
-    let resolved = Unix.realpath (Skill_resource_path.append_to ~root:directory relative) in
+    (* A path that does not exist is the package's mistake and names this field;
+       any other failure to resolve it stays an I/O failure of the load. *)
+    let* resolved = match Unix.realpath (Skill_resource_path.append_to ~root:directory relative) with
+      | resolved -> Ok resolved
+      | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR) as error, _, _) ->
+          Error (label ^ ": " ^ Unix.error_message error) in
     let* () = if String.starts_with ~prefix:(directory ^ Filename.dir_sep) resolved then Ok ()
       else Error (label ^ " resolves outside the package directory") in
+    let* () = match (Unix.stat resolved).Unix.st_kind with
+      | Unix.S_REG -> Ok ()
+      | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK ->
+          Error (label ^ " names something that is not a file") in
     let* schema = try Ok (Yojson.Safe.from_file resolved)
       with Yojson.Json_error detail -> Error (label ^ ": " ^ detail) in
     let* () = Lane_addon_action.validate_value_schema schema

@@ -114,6 +114,14 @@ test('closing a ready analysis does not reinterpret its queued Enter as a note i
   assert.equal(worker.terminated,true)
 })
 
+test('closing before an admitted analysis starts retains ownership of its queued note keys', async () => {
+  const initial = editor.editorCommand(editor.newEditor(),'note C4 0 1').editor.project
+  const view = await controller({initialDocument:initial})
+  view.command('harmony');view.key('return');view.signal.abort();await view.done
+  assert.deepEqual(view.observed.saved.at(-1),initial)
+  assert.equal(view.observed.workers[0].requests.length,0)
+})
+
 test('an admitted analysis export drains on close while retaining the original musical document', async () => {
   const initial = editor.editorCommand(editor.newEditor(),'note C4 0 1').editor.project
   const view = await controller({initialDocument:initial})

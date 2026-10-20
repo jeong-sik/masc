@@ -275,7 +275,14 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     clearHarmony(); showHelp = false
     const selectedScope = scope === 'mix' ? { kind: 'mix' } : { kind: 'track',
       id: editorView(editor).tracks[editor.track].id, ...(editor.channel === undefined ? {} : { channel: editor.channel }) }
-    const job = render(editor.project, { format: 'harmony', pattern: editor.pattern, scope: selectedScope })
+    let job
+    try { job = render(editor.project, { format: 'harmony', pattern: editor.pattern, scope: selectedScope }) }
+    catch (error) {
+      // An admitted analysis keeps its note keys even when preparation cannot
+      // start (including close). Otherwise a queued Enter edits the document.
+      harmony = { kind: 'failed', scope: selectedScope, error: error.message }
+      return
+    }
     const owner = { kind: 'loading', scope: selectedScope, job }
     harmony = owner
     job.promise.then(result => {

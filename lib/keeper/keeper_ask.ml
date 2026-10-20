@@ -515,11 +515,19 @@ let answer_to_json a =
   `Assoc
     [ ("question_id", `String a.question_id); ("response", response_to_json a.response) ]
 
-let answer_of_json json =
+let submission_of_json json =
   let* question_id = string_field "question_id" json in
   let* response_json = raw_field "response" json in
   let* response = response_of_json response_json in
+  Ok (question_id, response)
+
+let answer_of_json json =
+  let* question_id, response = submission_of_json json in
   Ok { question_id; response }
+
+let submissions_of_json = function
+  | `List items -> map_results submission_of_json items
+  | _ -> Error "answers: expected array"
 
 let responder_to_json r =
   `Assoc

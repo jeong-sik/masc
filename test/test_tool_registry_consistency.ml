@@ -327,9 +327,10 @@ let test_browser_actions_have_mutating_dispatch_authority () =
    "masc_keeper_delegate_cancel", which made the permission a dispatchable
    tool's business and left the route invisible in the catalog; the entries
    below pin the dedicated keys so neither regression can return silently. *)
-let test_approval_route_auth_keys_are_dedicated_hidden_entries () =
+let test_route_auth_keys_are_dedicated_hidden_entries () =
   let route_keys =
-    [ "keeper_tool_approval_route"; "keeper_tool_approval_mode_route" ]
+    [ "keeper_tool_approval_route"; "keeper_tool_approval_mode_route";
+      "lane_addon_ask_answer_route" ]
   in
   List.iter
     (fun name ->
@@ -408,9 +409,9 @@ let () =
             `Quick
             test_browser_actions_have_mutating_dispatch_authority
         ; test_case
-            "approval routes own dedicated hidden auth keys"
+            "operator routes own dedicated hidden auth keys"
             `Quick
-            test_approval_route_auth_keys_are_dedicated_hidden_entries
+            test_route_auth_keys_are_dedicated_hidden_entries
         ] )
     ]
 ;;

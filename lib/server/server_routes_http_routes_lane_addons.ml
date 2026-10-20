@@ -377,7 +377,7 @@ let live_workspace_precondition ~config fields =
           Error (`Bad_request, "invalid expected_workspace precondition")
         | Error Workspace.Workspace_precondition_failed ->
           Error (`Conflict, "workspace precondition failed"))
-     | _ -> Error (`Bad_request, "live takes expected_base_path and expected_masc_root together"))
+     | _ -> Error (`Bad_request, "expected_base_path and expected_masc_root go together"))
 
 let get_live request reqd =
   with_permission_auth ~permission:Masc_domain.CanPlayMachine (fun state _request reqd ->
@@ -429,6 +429,102 @@ let save_declaration request reqd =
           | Error message -> Error {Lane_addon_declaration.code=Invalid_request;message;current=None}
           | Ok args -> Runtime.save_declaration ~access ~config:(Mcp_server.workspace_config state) args in
         respond_declaration request reqd result)) request reqd
+
+(* RFC operator-quiz §4.6: an installation's questions, beside the Keeper
+   questions in Approvals. Questions and resolutions use the Keeper wire form,
+   so one editor answers both. *)
+let decode_asks_query = function
+  | [] | ["include_resolved", "false"] -> Ok false
+  | ["include_resolved", "true"] -> Ok true
+  | _ -> Error "asks accepts include_resolved=true|false once or no parameters"
+
+let installation_ask_json ~declaration_id (ask_id, ((ask : Lane_addon_asks.ask), resolution)) =
+  `Assoc
+    [ "declaration_id", `String declaration_id
+    ; "title", `String ask.title
+    ; "ask_id", `String ask_id
+    ; "asked_at", `Float ask.asked_at
+    ; "context", (match ask.context with None -> `Null | Some text -> `String text)
+    ; "questions", `List (List.map Keeper_ask_operator_projection.ask_question_json ask.questions)
+    ; "resolution", Keeper_ask_operator_projection.ask_resolution_json resolution ]
+
+let asks_payload ~config ~include_resolved =
+  let* questions = Runtime.installation_questions ~config in
+  Ok (`Assoc ["asks", `List (List.concat_map (fun (declaration_id, rows) ->
+    rows
+    |> List.filter (fun (_, (_, resolution)) ->
+         include_resolved || Keeper_ask_operator_projection.ask_row_is_open resolution)
+    |> List.map (installation_ask_json ~declaration_id)) questions)])
+
+let handle_asks state request reqd =
+  let config = Mcp_server.workspace_config state in
+  match live_workspace_precondition ~config (query_fields request) with
+  | Error (status, detail) -> respond_json_value_with_cors ~status request reqd (error_json detail)
+  | Ok fields ->
+    match decode_asks_query fields with
+    | Error detail -> respond request reqd (Error detail)
+    | Ok include_resolved ->
+      match asks_payload ~config ~include_resolved with
+      | Ok json -> respond_json_value_with_cors request reqd json
+      | Error detail ->
+        respond_json_value_with_cors ~status:`Internal_server_error request reqd (error_json detail)
+
+let decode_ask_answer body =
+  let* json = decode_body body in
+  match json with
+  | `Assoc fields ->
+    let known = ["declaration_id"; "ask_id"; "answers"; "session_id"] in
+    let* () = match List.find_opt (fun (name, _) -> not (List.mem name known)) fields with
+      | None -> Ok ()
+      | Some (name, _) -> Error ("unknown ask-answer field: " ^ name) in
+    let nonblank name = match List.assoc_opt name fields with
+      | Some (`String value) when String.trim value <> "" -> Ok value
+      | Some _ | None -> Error (name ^ " must be a non-blank string") in
+    let* declaration_id = nonblank "declaration_id" in
+    let* ask_id = nonblank "ask_id" in
+    let* submissions = match List.assoc_opt "answers" fields with
+      | Some answers -> Keeper_ask.submissions_of_json answers
+      | None -> Error "answers is required" in
+    let* session_id = match List.assoc_opt "session_id" fields with
+      | None -> Ok None
+      | Some (`String value) when String.trim value <> "" -> Ok (Some value)
+      | Some _ -> Error "session_id must be a non-blank string" in
+    Ok (declaration_id, ask_id, submissions, session_id)
+  | _ -> Error "request body must be a JSON object"
+
+let ask_answer_failure_response ~ask_id (failure : Lane_addon_asks.answer_failure) =
+  let detail = Lane_addon_asks.answer_failure_to_string failure in
+  match failure with
+  | Ask_not_found -> `Not_found, error_json detail
+  | Already_answered { answered_at } ->
+    `Conflict, `Assoc [ "error", `String detail; "state", `String "answered"
+                      ; "ask_id", `String ask_id; "answered_at", `Float answered_at ]
+  | Already_withdrawn { withdrawn_at } ->
+    `Conflict, `Assoc [ "error", `String detail; "state", `String "withdrawn"
+                      ; "ask_id", `String ask_id; "withdrawn_at", `Float withdrawn_at ]
+  | Rejected invalid ->
+    `Bad_request, `Assoc [ "error", `String detail
+                         ; "invalid_answers", `List (List.map (fun reason ->
+                             `String (Keeper_ask.invalid_answer_to_string reason)) invalid) ]
+  | Store_failed _ -> `Internal_server_error, error_json detail
+
+let handle_ask_answer ~actor state request reqd =
+  Http.Request.read_body_async reqd (fun body ->
+    match decode_ask_answer body with
+    | Error detail -> respond request reqd (Error detail)
+    | Ok (declaration_id, ask_id, submissions, session_id) ->
+      let responder =
+        { Keeper_ask.surface = Surface_ref.Dashboard { session_id }
+        ; actor_id = Some actor; display_name = None } in
+      match Runtime.answer_installation_question ~config:(Mcp_server.workspace_config state)
+              ~declaration_id ~ask_id ~submissions ~responder with
+      | Ok answers ->
+        respond_json_value_with_cors request reqd
+          (`Assoc [ "recorded", `Bool true; "declaration_id", `String declaration_id
+                  ; "ask_id", `String ask_id; "answer_count", `Int (List.length answers) ])
+      | Error failure ->
+        let status, json = ask_answer_failure_response ~ask_id failure in
+        respond_json_value_with_cors ~status request reqd json)
 
 let register_delivery ~sw ~clock =
   Runtime.register_delivery_handler (fun ~config ~caller ~keeper_name ~prompt ->
@@ -482,6 +578,10 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/lane-addons/slice" get_slice
   |> Http.Router.get "/api/v1/lane-addons/actions" get_action
   |> Http.Router.get "/api/v1/lane-addons/live" get_live
+  |> Http.Router.get "/api/v1/lane-addons/asks" (with_read_auth handle_asks)
+  |> Http.Router.post "/api/v1/lane-addons/ask-answer"
+       (with_tool_actor_auth ~tool_name:"lane_addon_ask_answer_route" (fun state actor request reqd ->
+         handle_ask_answer ~actor state request reqd))
   |> Http.Router.post "/api/v1/lane-addons/actions" (post ~operation:Runtime.Act ~tool_name:"masc_lane_act")
   |> Http.Router.post "/api/v1/lane-addons/attach" (post ~operation:Runtime.Attach ~tool_name:"masc_lane_attach")
   |> Http.Router.post "/api/v1/lane-addons/observe" (post ~operation:Runtime.Observe ~tool_name:"masc_lane_observe")

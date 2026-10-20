@@ -229,6 +229,11 @@ val responder_to_json : responder -> Yojson.Safe.t
 val responder_of_json : Yojson.Safe.t -> (responder, string) result
 (** The same codecs the event log uses, for another asker's log. *)
 
+val submissions_of_json : Yojson.Safe.t -> ((string * response) list, string) result
+(** An answer route's [answers] array, in the {!answer_to_json} form. Decoding
+    checks the shape only; {!parse_answers} checks the submissions against the
+    questions. *)
+
 val event_to_json : event -> Yojson.Safe.t
 val event_of_json : Yojson.Safe.t -> (event, string) result
 

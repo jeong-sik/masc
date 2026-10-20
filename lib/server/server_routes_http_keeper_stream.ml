@@ -4046,47 +4046,6 @@ end
    actually landed rather than echoing what this caller sent. A second
    submission gets the answer that won, not a bare rejection -- the surface
    showing it has to be able to say what was chosen. *)
-let ask_answer_response_of_json = function
-  | `Assoc fields -> (
-      match List.assoc_opt "kind" fields with
-      | Some (`String "chose") -> (
-          match List.assoc_opt "choice_ids" fields with
-          | Some (`List items) ->
-              let rec collect acc = function
-                | [] -> Ok (Keeper_ask.Chose { choice_ids = List.rev acc })
-                | `String id :: rest -> collect (id :: acc) rest
-                | _ -> Error "choice_ids must be an array of strings"
-              in
-              collect [] items
-          | Some _ | None -> Error "chose requires choice_ids")
-      | Some (`String "wrote") -> (
-          match List.assoc_opt "text" fields with
-          | Some (`String text) -> Ok (Keeper_ask.Wrote text)
-          | Some _ | None -> Error "wrote requires text")
-      | Some (`String "skipped") -> Ok Keeper_ask.Skipped
-      | Some (`String other) -> Error (Printf.sprintf "unknown response kind %S" other)
-      | Some _ | None -> Error "response requires a kind")
-  | _ -> Error "each answer response must be an object"
-
-let ask_answer_submissions_of_json items =
-  let rec collect acc = function
-    | [] -> Ok (List.rev acc)
-    | (`Assoc fields as item) :: rest -> (
-        match List.assoc_opt "question_id" fields with
-        | Some (`String question_id) -> (
-            match List.assoc_opt "response" fields with
-            | Some response_json -> (
-                match ask_answer_response_of_json response_json with
-                | Ok response -> collect ((question_id, response) :: acc) rest
-                | Error message -> Error message)
-            | None -> Error "each answer requires a response")
-        | Some _ | None ->
-            let (_ : Yojson.Safe.t) = item in
-            Error "each answer requires a question_id (string)")
-    | _ -> Error "answers must be an array of objects"
-  in
-  collect [] items
-
 let ask_answer_failure_status = function
   | Keeper_ask_store.Ask_not_found _ -> `Not_found
   | Keeper_ask_store.Already_answered _ | Keeper_ask_store.Already_withdrawn _ -> `Conflict
@@ -4177,8 +4136,8 @@ let handle_keeper_ask_answer ~actor state request reqd =
               let* ask_id = string_field "ask_id" in
               let* submissions =
                 match List.assoc_opt "answers" fields with
-                | Some (`List items) -> ask_answer_submissions_of_json items
-                | Some _ | None -> Error "answers (array) is required"
+                | Some answers -> Keeper_ask.submissions_of_json answers
+                | None -> Error "answers (array) is required"
               in
               let session_id =
                 match List.assoc_opt "session_id" fields with

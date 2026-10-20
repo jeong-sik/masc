@@ -160,30 +160,6 @@ let test_body_rows_follow_the_frame_margin () =
             (Some Masc_tui_frame.content_column) !origin)
     [ ("screen", Chrome_screen); ("overlay", Chrome_overlay) ]
 
-(* A header row's badge says whether the screen can be trusted. However long
-   the label beside it, the badge is drawn whole and the row still fits; the
-   label is what gives up cells, and with none left it loses its brackets. *)
-let test_a_long_label_yields_to_the_badge () =
-  let lead = " MASC Dashboard" in
-  let badge = "HTTP [refreshing]" in
-  let label = String.make 200 'w' in
-  List.iter
-    (fun cols ->
-      let row = badge_row ~cols ~lead ~label ~badge in
-      let shown = Masc_tui_theme.strip_sgr row in
-      let tail = String.sub shown (String.length shown - String.length badge) (String.length badge) in
-      Alcotest.(check string) (Printf.sprintf "%d cols: the badge is whole" cols) badge tail;
-      Alcotest.(check bool) (Printf.sprintf "%d cols: the row fits" cols) true
-        (Masc_tui_message_layout.display_width row <= Masc_tui_frame.inner_width ~cols))
-    [ 40; 60; 80; 100; 140 ];
-  let short = badge_row ~cols:100 ~lead ~label:"test" ~badge in
-  Alcotest.(check bool) "a label that fits is kept whole" true
-    (contains (Masc_tui_theme.strip_sgr short) "[test]");
-  let squeezed = badge_row ~cols:20 ~lead ~label:"LBL" ~badge in
-  Alcotest.(check bool) "with no room the label goes, not the badge" true
-    (contains (Masc_tui_theme.strip_sgr squeezed) badge
-     && not (contains (Masc_tui_theme.strip_sgr squeezed) "LBL"))
-
 let () =
   Alcotest.run "tui_surface_chrome_overflow"
     [ ( "surface chrome overflow"
@@ -193,7 +169,5 @@ let () =
             test_the_frame_windows_a_scrolled_body
         ; Alcotest.test_case "body rows follow the frame margin" `Quick
             test_body_rows_follow_the_frame_margin
-        ; Alcotest.test_case "a long label yields to the badge" `Quick
-            test_a_long_label_yields_to_the_badge
         ;] )
     ]

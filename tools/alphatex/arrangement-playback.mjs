@@ -140,9 +140,9 @@ export function selectArrangementRoute(route, effect) {
 // source by the ordinary preparation path, before any VST child is started.
 export function arrangementVstAssets(project, route) {
   const audible = new Set(arrangementPlaybackSchedule(project).map(clip => clip.asset))
-  return project.assets.filter(asset => audible.has(asset.id) && asset.kind === 'midi'
-    && asset.source.sound?.kind === 'vst' && route.kind !== 'midi' && route.midiOutput === undefined
-    && !(route.portBindings ?? []).some(binding => binding.asset === asset.id))
+  return project.assets.filter(asset => audible.has(asset.id) && route.kind !== 'midi' && route.midiOutput === undefined
+    && (asset.kind === 'midi' && asset.source.sound?.kind === 'vst' && !(route.portBindings ?? []).some(binding => binding.asset === asset.id)
+      || asset.kind === 'practice' && !(route.sourceBindings ?? []).some(binding => binding.asset === asset.id)))
 }
 export function arrangementPlaybackRequest(project, route) {
   const schedule = arrangementPlaybackSchedule(project), audible = new Set(schedule.map(clip => clip.asset))

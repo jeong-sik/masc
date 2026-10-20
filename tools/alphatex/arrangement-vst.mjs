@@ -14,6 +14,7 @@ import { readWaveMetadata } from './wave-file.mjs'
 import { preparePractice } from './arrangement-practice.mjs'
 import { renderBoundVst } from './project-sound-files.mjs'
 import { nativeJob } from './vst.mjs'
+import { preparePracticeVst, practiceAudioClock } from './practice-vst.mjs'
 
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const prepareBacking = {
@@ -49,19 +50,23 @@ export async function prepareVstSources(project, { route, sourceRoot, directory,
     const key = JSON.stringify([asset.id, clip.pattern ?? null])
     let render = renders.find(render => render.key === key)
     if (!render) {
-      verifyPhraseSnapshot(asset)
-      const performance = midiSourcePattern(asset.source, { pattern: clip.pattern })
-      const { bytes } = projectVstMidi(asset.source, { pattern: clip.pattern })
-      const id = randomUUID(), midiPath = join(directory, id + '.mid'), outputPath = join(directory, id + '.wav')
-      await writeFile(midiPath, bytes, { flag: 'wx', mode: 0o600, signal })
-      render = { key, id, sound: asset.source.sound, midiPath, outputPath, midiHash: digest(bytes),
-        fullClock: sourceAudioClock(performance, 0, performance.ticks) }
+      if (asset.kind === 'practice') render = { ...await preparePracticeVst(project, asset, { sourceRoot, directory, signal }), key }
+      else {
+        verifyPhraseSnapshot(asset)
+        const performance = midiSourcePattern(asset.source, { pattern: clip.pattern })
+        const { bytes } = projectVstMidi(asset.source, { pattern: clip.pattern })
+        const id = randomUUID(), midiPath = join(directory, id + '.mid'), outputPath = join(directory, id + '.wav')
+        await writeFile(midiPath, bytes, { flag: 'wx', mode: 0o600, signal })
+        render = { key, id, sound: asset.source.sound, midiPath, outputPath, midiHash: digest(bytes),
+          fullClock: sourceAudioClock(performance, 0, performance.ticks) }
+      }
       renders.push(render)
     }
-    const performance = midiSourcePattern(asset.source, { pattern: clip.pattern })
+    const clock = asset.kind === 'practice' ? practiceAudioClock(asset, clip.offset, clip.extent)
+      : sourceAudioClock(midiSourcePattern(asset.source, { pattern: clip.pattern }), clip.offset, clip.extent)
     regions.push({ id: clip.id, asset: render.id, startSeconds: project.playbackLoop
       ? clip.position / project.ppq * 60 / project.tempo : clip.startSeconds,
-    sourceClock: sourceAudioClock(performance, clip.offset, clip.extent), repeat: clip.repeat,
+    sourceClock: clock, repeat: clip.repeat,
     ...(project.playbackLoop ? { projectTick: clip.position } : {}) })
   }
   signal?.throwIfAborted()
@@ -83,13 +88,14 @@ export async function finishVstPlan(project, { preparation, rendered, directory,
   for (const source of preparation.renders) {
     signal?.throwIfAborted()
     const result = rendered.find(result => result.output_path === source.outputPath)
-    if (!result || result.midi_sha256 !== source.midiHash || result.preset_sha256 !== source.sound.preset.sha256
+    const rate = source.kind === 'practice' ? source.sampleRate : 44100
+    if (!result || (source.kind === 'practice' ? result.timeline_sha256 !== source.timelineHash : result.midi_sha256 !== source.midiHash) || result.preset_sha256 !== source.sound.preset.sha256
       || result.instrument?.identifier !== source.sound.instrument.identifier || result.instrument?.version !== source.sound.instrument.version
-      || !Number.isSafeInteger(result.frames) || result.frames <= 0 || result.sample_rate !== 44100) {
+      || !Number.isSafeInteger(result.frames) || result.frames <= 0 || result.sample_rate !== rate) {
       throw new Error('VST render does not match the selected frozen source')
     }
     const full = sourceAudioFrames(source.fullClock, result.sample_rate)
-    if (result.frames !== full.frameCount) throw new Error('VST render horizon differs from its original MIDI source')
+    if (source.kind === 'practice' ? String(result.frames) !== source.frames : result.frames !== full.frameCount) throw new Error('VST render horizon differs from its original MIDI source')
     const metadata = await readWaveMetadata(source.outputPath, { frames: result.frames, channels: 2, sampleRate: result.sample_rate }, { signal })
     const hash = createHash('sha256')
     for await (const chunk of createReadStream(source.outputPath, { signal })) hash.update(chunk)
@@ -152,8 +158,9 @@ export function startVstArrangement({ project, route, sourceRoot, directory, req
       const rendered = []
       for (const source of preparation.renders) {
         check()
-        const child = renderBoundVst(source.sound, { midi_path: source.midiPath, output_path: source.outputPath,
-          sample_rate: 44100, tail_seconds: 0 }, { run })
+        const child = renderBoundVst(source.sound, { ...(source.kind === 'practice'
+          ? { timeline_path: source.timelinePath, expected_timeline_sha256: source.timelineHash } : { midi_path: source.midiPath }), output_path: source.outputPath,
+          sample_rate: source.sampleRate ?? 44100, tail_seconds: 0 }, { run })
         children.add(child)
         try { rendered.push(await child.promise); check() }
         finally { children.delete(child) }

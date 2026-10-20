@@ -79,6 +79,25 @@ state hashes, the reported plug-in identity/version, sample rate, frame count,
 peak and output path. These identify a render, not proof that a device played it.
 Native plug-in diagnostics remain on stderr, outside the JSON reply channel.
 
+Raw practice arrangement realization uses `render` with `timeline_path` instead
+of `midi_path`, plus `expected_timeline_sha256`, `sample_rate` and
+`tail_seconds: 0`. The private hashed JSON input is
+`{schemaVersion:1, kind:"practice-vst", sampleRate, frames, events}`. `frames`
+and each event's `frame` are canonical unsigned decimal strings; events are
+nondecreasing `{frame, bytes}` records strictly inside the render horizon.
+The host validates identity, frame/message bounds and authoritative preset
+policy before opening a plugin, and returns `timeline_sha256` instead of
+`midi_sha256`. Supplying both source types is an error.
+
+The worker derives these MIDI1 events from verified raw UMP using the existing
+practice-monitor projection. High-resolution values are reduced for synthesis;
+the original source is never rewritten. A private final guard sample may realize
+an event rounded onto the after-frame boundary, while arrangement regions keep
+the original source interval and never play that padding. Rendering streams
+blocks with retained plugin state, as specified by
+[Pedalboard's instrument process API](https://spotify.github.io/pedalboard/reference/pedalboard.html).
+Use matching updated VST-host and AlphaTex installations for this protocol.
+
 Run the MIDI and process-boundary tests with the same environment:
 
 ```sh

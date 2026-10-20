@@ -1854,6 +1854,124 @@ let test_transient_goal_retry ~drop () =
               (reviews_of_goal registry goal_id)))))
 ;;
 
+(* task-2402's shape on the Goal lane: the only verifier slot refuses with a
+   hard quota whose reset the provider stated, and the walk has recorded that
+   rest. The daemon arms a retry dated at the reset instead of stopping, and
+   no scan reviews the Goal again before the reset. Only the injected clock
+   advances. *)
+let test_a_goal_review_waits_out_a_stated_provider_rest () =
+  with_workspace @@ fun config ->
+  let slot = "quota_slot.test_model" in
+  let rest_sec = 2024.751 in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  let runtime_toml = Filename.temp_file "goal-provider-rest-" ".toml" in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime_quota_window.reset_for_testing ();
+      Runtime.For_testing.restore runtime_snapshot;
+      Sys.remove runtime_toml)
+  @@ fun () ->
+  Out_channel.with_open_bin runtime_toml (fun out -> output_string out {|[runtime]
+default = "quota_slot.test_model"
+[providers.quota_slot]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.test_model]
+api-name = "test-model"
+max-context = 200000
+tools-support = true
+[quota_slot.test_model]
+|});
+  (match Runtime.init_default ~config_path:runtime_toml with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Verifier resting on a stated quota reset" in
+  ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+  let request_id = pending_request_id config goal_id in
+  let clock = Eio_mock.Clock.make () in
+  let started = Time_compat.now () in
+  Eio_mock.Clock.set_time clock started;
+  (* What the provider walk records for this refusal ([note_quota]). *)
+  Runtime_quota_window.reset_for_testing ();
+  Runtime_quota_window.note_exhausted
+    ~scope:(Option.get (Runtime.quota_scope_of_runtime_id slot))
+    ~resets_at:(started +. rest_sec);
+  let refusal =
+    Agent_core.Error.Provider
+      (Llm_provider.Error.HardQuota
+         { provider = "claude_code"
+         ; retry_after = Some rest_sec
+         ; detail = "Claude Code quota blocked (rate_limit=rejected api_status=429)"
+         })
+  in
+  let refusals = ref 0 in
+  let refusing_reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_
+      ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+      ~on_runtime_attempt_error () =
+    incr refusals;
+    on_runtime_attempt_error ~runtime_id:evaluator_runtime ~attempt:0
+      ~dispatch:Keeper_attempt_dispatch.Dispatched refusal;
+    Error refusal
+  in
+  let approvals = ref [] in
+  let finished, finish = Eio.Promise.create () in
+  let permanent = Atomic.get Goal_verification_run_registry.change_observer_fn in
+  let registry = Goal_verification_run_registry.global () in
+  let observer () =
+    if List.exists (fun (run : Goal_verification_run_registry.run) ->
+      match run.status with
+      | Completed {outcome=Committed; _} -> true
+      | _ -> false) (reviews_of_goal registry goal_id)
+    then ignore (Eio.Promise.try_resolve finish ())
+  in
+  Fun.protect ~finally:(fun () -> Atomic.set Goal_verification_run_registry.change_observer_fn permanent)
+    (fun () ->
+      Atomic.set Goal_verification_run_registry.change_observer_fn observer;
+      with_lane_and_reviewer ~slots:(fun () -> Ok [ slot ]) ~reviewer:refusing_reviewer
+        (fun () -> Eio.Switch.run (fun sw ->
+          Goal_verification_agent.start ~sw ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t) ~config;
+          let actual_clock = Option.get !workspace_clock in
+          let await label f =
+            match Eio.Time.with_timeout actual_clock hung_review_wait_s (fun () -> f (); Ok ()) with
+            | Ok () -> ()
+            | Error `Timeout -> fail (label ^ " did not happen")
+          in
+          let rec until condition = if condition () then () else (Eio.Fiber.yield (); until condition) in
+          await "the retry being armed" (fun () -> until (fun () -> Agent.retry_pending ~goal_id));
+          await "the stall notice" (fun () -> until (fun () -> goal_stall_posts ~goal_id ~request_id <> []));
+          (match goal_stall_posts ~goal_id ~request_id with
+           | [ (_post, fields) ] ->
+             (match List.assoc_opt "disposition" fields with
+              | Some disposition ->
+                (match Verification_protocol.For_testing.stall_disposition_of_json disposition with
+                 | Some (Verification_protocol.Retry_scheduled
+                           { delay = Verification_protocol.Full_interval { seconds } }) ->
+                   check (float 0.001) "the retry is dated at the stated reset" rest_sec seconds
+                 | Some (Verification_protocol.Retry_scheduled
+                           { delay = Verification_protocol.Shared_timer }) ->
+                   fail "the rest-dated retry must name its own delay"
+                 | Some Verification_protocol.No_retry_armed ->
+                   fail "a stated provider rest stopped the Goal review"
+                 | None -> fail "the disposition must decode")
+              | None -> fail "stall notice lacks its disposition")
+           | posts ->
+             fail (Printf.sprintf "expected one stall notice, got %d" (List.length posts)));
+          check int "one refused review so far" 1 !refusals;
+          Atomic.set AR.run_llm_reviewer_fn
+            (recording_reviewer approvals [ slot, Stub_approve "quota reset, target measured" ]);
+          await "the review at the stated reset" (fun () ->
+            until (fun () ->
+              if !approvals <> [] then true
+              else (ignore (Eio_mock.Clock.try_advance clock); false)));
+          check bool "the Goal was not reviewed again before the stated reset" true
+            (Float.compare (Eio.Time.now clock) (started +. rest_sec -. 0.001) >= 0);
+          check int "no refused review ran in between" 1 !refusals;
+          await "the commit" (fun () -> Eio.Promise.await finished);
+          check string "proof awaits human confirmation" "awaiting_confirmation"
+            (stored_phase config goal_id))))
+;;
+
 let test_pending_before_phase_waits_for_explicit_request () =
   with_workspace @@ fun config ->
   let ctx = workspace_ctx config in
@@ -2067,7 +2185,9 @@ let () =
         ] )
     ; ( "transient retry"
       , [test_case "provider recovery needs no new submission" `Quick (test_transient_goal_retry ~drop:false)
-        ; test_case "drop invalidates an old retry" `Quick (test_transient_goal_retry ~drop:true)] )
+        ; test_case "drop invalidates an old retry" `Quick (test_transient_goal_retry ~drop:true)
+        ; test_case "a stated provider rest dates the retry at its reset" `Quick
+            test_a_goal_review_waits_out_a_stated_provider_rest] )
     ; ( "permanent refusal"
       , [ test_case "retired model candidate arms no retry" `Quick
             test_retired_model_candidate_arms_no_retry

@@ -408,6 +408,7 @@ let process_pending_work_inner
            ~render_prompt:(fun () ->
              render_proof_prompt ~lookup ~root_layout ~submitted_evidence goal)
            ~lookup
+           ~provider_rest:Verification_retry.provider_rest
            ~on_tool_result
            ()
        in

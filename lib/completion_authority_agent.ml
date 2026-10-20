@@ -936,6 +936,7 @@ let process_task_once
                 ~sw:(Some runtime.sw)
                 ~lookup
                 ~lookup_root
+                ~provider_rest:Verification_retry.provider_rest
                 ~question
                 ~on_tool_result
                 prepared.review_request
@@ -1124,12 +1125,13 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
   if claim_review runtime key
   then (
     (* An evaluator failure that passes with time -- a transient error, or a
-       provider rest whose end is known -- has no producer action that can
-       legally advance the Task: it is still [AwaitingVerification]. Re-arm
-       the application-owned scan after the durable run observation is
-       recorded, then say what the scheduler did — in the log first, then on
-       the Board. Every other stall keeps the producer/operator contract, and
-       restart recovery still comes from [start]'s initial pending scan. *)
+       path resting until a time its provider stated -- has no producer
+       action that can legally advance the Task: it is still
+       [AwaitingVerification]. Re-arm the application-owned scan after the
+       durable run observation is recorded, then say what the scheduler did —
+       in the log first, then on the Board. Every other stall keeps the
+       producer/operator contract, and restart recovery still comes from
+       [start]'s initial pending scan. *)
     let outcome : process_outcome =
       Fun.protect
         ~finally:(fun () -> release_review runtime key)
@@ -1142,7 +1144,7 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
          time, and a provider rest dates that retry at the rest's end rather
          than stopping it. A key that requests none had only failures time
          does not change -- a credential, a configuration, a refused request,
-         a quota with no stated end, a declared run ceiling -- and nothing
+         an account refusal or a quota with no stated end -- and nothing
          schedules another look at it: the scope rule admits it again only
          through a fresh submission, or through the sweep, which is armed at
          boot and after a failed backlog read rather than on a timer. So that

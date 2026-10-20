@@ -53,6 +53,7 @@ let review () =
       }
     ~lookup
     ~lookup_root
+    ~provider_rest:Masc.Verification_retry.provider_rest
     ~base_path:(Filename.get_temp_dir_name ())
     request
 
@@ -76,7 +77,8 @@ let test_explicit_base_path_reaches_reviewer () =
               ; evidence_posture = AR.Note_only
               ; few_shot_block = ""
               }
-            ~lookup ~lookup_root ~base_path:expected request);
+            ~lookup ~lookup_root ~provider_rest:Masc.Verification_retry.provider_rest
+            ~base_path:expected request);
        match !received with
        | Some actual ->
          Alcotest.(check string) "review uses the caller BasePath" expected actual
@@ -383,6 +385,7 @@ let test_successful_lookup_is_exposed_to_the_reviewer () =
              }
            ~lookup
            ~lookup_root
+           ~provider_rest:Masc.Verification_retry.provider_rest
            ~base_path:(Filename.get_temp_dir_name ())
            request
        in

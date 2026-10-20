@@ -98,15 +98,15 @@ type review_result =
   ; gate : gate
   ; fallback_reason : string option
   ; retryable_runtimes : string list
-        (** Actual candidates whose typed failure passes with time, in attempt
+        (** Actual candidates whose failure passes with time, in attempt
             order, and the only authority for reviewing the same submission
             again without a producer or an operator acting. A candidate is
             named here for a transient error ({!Agent_core.Error.is_retryable})
-            or for a provider rest whose end is known: a rate limit, or a hard
-            quota with a stated reset, read off
-            {!Keeper_runtime_failure_route.route_of_error}. How long the retry
-            waits is not carried: the scheduler reads each candidate's recorded
-            path rest when it arms the retry ([Verification_retry.delay]). A
+            or when its path rests until a time the provider stated, as the
+            caller's [provider_rest] reads it when the slot has answered
+            ({!provider_rest}). How long the retry waits is not carried: the
+            scheduler reads each candidate's recorded path rest when it arms
+            the retry ([Verification_retry.delay]). A
             later non-retryable fallback cannot mask an earlier candidate, and
             the final diagnostic runtime does not own their retry time. Empty
             for a produced verdict, a reply without a verdict from candidates
@@ -124,6 +124,19 @@ type review_result =
             candidate's error (2026-10-07 audit F-02). *)
   }
 
+(** What the stores the provider walk writes say about one runtime's path when
+    a review's slot has answered. [Rests_until_stated_end]: the provider
+    stated when the path serves again — a hard quota's reset, the reset of a
+    spent usage window read after a refusal, a rate-limit wait — and that
+    time is still ahead. [No_stated_rest]: the path serves, or rests with no
+    end the provider named. The reader belongs to the caller, which owns the
+    walk's stores; it is read once per failed candidate, after the slot
+    answers, because the walk records a refusal's rest after it reports the
+    failed attempt. *)
+type provider_rest =
+  | Rests_until_stated_end
+  | No_stated_rest
+
 val run
   :  ?evaluator_runtime:string
   -> ?generator_runtime:string
@@ -135,6 +148,7 @@ val run
   -> render_prompt:(unit -> (string, string) result)
   -> ?goal_blocks:Agent_core.Types.content_block list
   -> lookup:lookup_surface
+  -> provider_rest:(string -> provider_rest)
   -> base_path:string
   -> unit
   -> review_result
@@ -187,6 +201,7 @@ val review
   -> question:verdict_question
   -> lookup:lookup_surface
   -> lookup_root:lookup_root
+  -> provider_rest:(string -> provider_rest)
   -> base_path:string
   -> review_request
   -> review_result

@@ -350,6 +350,13 @@ status: reference
   - 편집 경계: 노트를 다른 포트로 옮기는 편집은 거절된다(MIDI-SOURCE.md: "Moving either
     message across a MIDI Port change is rejected"). 포트는 음악 편집 대상이 아니라
     원본에 적힌 라우팅 정체성이다.
+  - 세 층 구분: `port`는 소스 파일이 정한 라우팅 번호이고, `midiOutput`은 사용자가 고른
+    하나의 출력 이름이며(포트가 여럿이면 거절된다: "Bind each source MIDI port explicitly
+    with :midi-port PORT ID"), `destination`은 그 선택이나 포트 결속에서 해석된 목적지다.
+    결속 결과는 `{ port, destination }` 쌍이다(sequencer-tui.mjs의 `portBindings`).
+    "output port"처럼 두 층을 붙인 이름은 쓰지 않는다. 출력 측 낱말은 `destination`이다
+    (midi-source-playback.mjs: "Distinct source ports require distinct destinations";
+    sequencer-tui.mjs: "Choose an audio output or a MIDI destination").
   - 이름 경계: 녹음 입력을 고르는 `--midi all|none|SOURCE_ID`의 `SOURCE_ID`는 CoreMIDI
     입력 소스 정체성이고, 이 소스 포트와 다른 층이다. 같은 모양의 낱말이 두 층에 쓰이므로
     문장에서 어느 쪽인지 밝힌다.
@@ -457,14 +464,14 @@ status: reference
     (쓸 만한 retry-after가 있는 rate limit, 재개 시각이 관측된 quota 창)만 그 시각에
     walk가 그 경로를 다시 올린다. provider가 시각을 말하지 않은 rate limit은 바닥 시각을
     둔 `Rest_dated`가 되고, 시각 없는 quota 관측은 `Rest_until_answered`가 되어
-    해제 때 기다림만 끝나며 순서 강등은 성공 답까지 남는다(`runtime_path_rest`의
-    해제 갈래 주석). `Rest_until_answered` 의 대기 자체도 `now`에서 굴러가는 바닥
-    시각으로 풀린다.
+    해제 때 기다림만 끝나며 순서 강등은 성공 답까지 남는다
+    (`Keeper_turn_driver.runtime_path_rest`). `Rest_until_answered` 의 대기 자체도
+    `now`에서 굴러가는 바닥 시각으로 풀린다.
   - 실패한 시도는 휴식이 아니다. 그 경로를 후보가 답할 때까지 뒤로 미룰 뿐, 발송을
     기다리게 하지 않는다(`RFC-0458 §3.4`).
   - 완료 검증도 같은 저장소를 읽는다. 검증 루프는 한 후보의 실패를
     `Reviews_again`·`Model_absent`·`Producer_must_act` 중 하나로 분류하고
-    (`lib/task/anti_rationalization.ml`), provider가 말한 재개 시각이 아직 앞이면
+    (`Anti_rationalization.candidate_failure`), provider가 말한 재개 시각이 아직 앞이면
     다시 검토한다. 이 분류는 다시 검토를 요청할 뿐, 검토를 막는 관문이 아니다.
     한 번의 호출 안에서 재시도를 판단하는 `Agent_core.Error.is_retryable`은 이 질문에
     답하지 못하므로, 시각을 말한 `HardQuota`에서도 재검토를 멈추지 않는다(#44227).
@@ -2181,7 +2188,7 @@ status: reference
 : 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계·머신 호스팅 레이어. `msx-machine`·`dos-machine` Add-on worker가 호스팅하는 MSX·DOS 머신,
   Browser Lane의 세션, Keeper의 도구와 턴 소유권을 결합·재사용한다. 패키지 하나가 여러
   Lane 행을 제공할 수 있다. 패키지는 `lane.toml`의 `contributions`로 observe·derive·act
-  기여를 선언하며, act 기여 패키지(예: `dos-world`·`quiz-grader`)는 `masc_lane_act` 도구로
+  기여를 선언하며, act 기여 패키지(예: `dos-world`·`operator-quiz`)는 `masc_lane_act` 도구로
   조치를 출하한다 — 즉 이 레이어는 관측뿐 아니라 조치(act)까지 포함한다. 패키지 worker는
   그 계산을 격리한다. attach·detach와 Add-on 장애는 기존 Keeper의 권한·도구·진행 중
   작업을 축소하지 않으며, 추가 근거는 활용·보류·무시할 수 있다. 원천 어댑터는
@@ -2215,29 +2222,23 @@ status: reference
   [Lane_addon_config](../../lib/lane_addon/lane_addon_config.mli) ·
   [Declaration application observations](lane-application-observation.md)
 
-**Quiz Lane (퀴즈 레인)**
-: 저장된 기록(Board·기억 OS·GitHub)에서 인용한 사실 묶음(`deck.json`, `snapshot_file`)을
-  바탕으로 문제를 내고 답을 채점하는 Lane Add-on 패키지 쌍(`quiz-questions`·`quiz-grader`).
-  출제와 채점의 권한을 엄격히 분리하고, 기록 인용과 완전 단어 일치를 강제한다(#38433, task-1688).
-  - **출제·채점 분리**: 출제 패키지(`quiz-questions`, `derive` 기여)는 팩트 덱에서 문제를
-    뽑아 `quiz/questions`로 내보낼 뿐 채점할 수 없다. 채점 패키지(`quiz-grader`, `derive`·
-    `act` 기여)는 출제 결과(`lane_output`)와 같은 팩트 덱을 함께 받아, `masc_lane_act` 도구로
-    들어온 응답을 대조해 `quiz/grades` 판정과 `quiz/score` 누적 점수를 발행한다.
-  - **기록 인용 및 완전 단어 일치**: 문제는 임의의 요약이나 추정이 아니라 실제 저장된
-    기록 파일에 글자 그대로 존재하는 인용문(`quote`)이어야 하며, 정답(`answer`)은 그 인용문
-    안의 완전한 단어(whole-word)여야 한다(예: `"unmerged"` 속의 `"merged"` 매칭은 거절).
-    질문 대상 필드는 닫힌 6종(`author`·`claimant`·`status`·`merged_commit`·`cause`·
-    `decision`)이고, 필드마다 서로 다른 답을 가진 사실이 둘 이상 있어야 출제된다. 단 하나의
-    사실이라도 기록 인용 규칙을 어기면 덱 빌드(`build_deck.py`)는 덱 생성을 통째로 거절한다.
-  - **자칭 응답자 라벨 (Claimed Answerer)**: 채점 점수는 호스트가 인증한 호출자 정체성이
-    아니라 응답자가 액션 payload에 스스로 적어 낸 라벨(`answerer_basis = self_claimed_label`)을
-    기준으로 `by_claimed_label`에 집계한다. 호스트는 인증 요청자를 보존하되 워커에 넘기지
-    않는다. 응답자 자신에 관한 질문은 `excluding_claimed_about_answerer`로 가려진다.
-  - **덱 식별자 무효화**: 덱 빌드가 새 `deck-id`를 발급하면 이전 덱으로 출제된 질문들은
-    의도적으로 채점 불가(`ungradable`)가 되어 낡은 문제와 새 정답의 혼선을 막는다.
-  → [Quiz Deck Skill](../../addons/quiz-questions/skills/quiz-deck/SKILL.md),
-  [quiz-questions](../../addons/quiz-questions/lane.toml),
-  [quiz-grader](../../addons/quiz-grader/lane.toml)
+**Operator quiz (운영자 퀴즈)**
+: 이 워크스페이스의 기록(Board 글·댓글, `repository` 권한의 파일)으로 운영자에게 객관식 문제를
+  내는 Lane Add-on 패키지(`operator-quiz`). Schedule 이 보내는 `compose` action 이 세션을 열고,
+  패키지는 host 요청(`read_records`·`read_file`·`exact_output author`·`ask`)으로 기록을 읽고
+  문제를 받아 Approvals 에 질문한다. 정답과 풀이 기록은 패키지의 persistent volume 에 있는
+  로그(`/state/operator-quiz/log.jsonl`)에만 있고, 행(`quiz/sessions`·`quiz/questions`·
+  `quiz/topics`·`quiz/items`·`quiz/measures`)은 모두 그 로그에서 계산한 projection 이다.
+  - **세션**: `writing → asked → answered`, 또는 닫힌 이유 하나로 `failed`, 질문 전에 다음
+    `compose` 가 오면 `superseded`. 시간이나 횟수로 끝나는 상태는 없다.
+  - **인용 확인**: 문제의 출처마다 인용문이 host 가 보관한 기록 바이트에 글자 그대로 있어야
+    한다. 출처의 `sha256` 은 그 Lane store blob 의 이름이다.
+  - **R·P**: R 은 놓친 뒤 다른 날(운영자 `timezone` 기준) 다시 푼 항목 중 처음 다시 푼 날
+    맞힌 비율, P 는 채점된 풀이 수를 낸 문제 수로 나눈 값이다. 둘 다 n/d 로만 보고하고,
+    어떤 상태도 이 숫자로 바뀌지 않는다.
+  → [operator-quiz](../../addons/operator-quiz/lane.toml) ·
+  [운영자 퀴즈 안내](../guides/operator-quiz.md) ·
+  [RFC](../rfc/RFC-operator-quiz-lane.md)
 
 **Lane Action Receipt & Uncertainty (Lane 액션 영수증과 불확실성 보존)**
 : Lane Add-on worker에 요청된 액션(`masc_lane_act`)의 진행 상태와 결과 영수증(`Lane Action Receipt`),

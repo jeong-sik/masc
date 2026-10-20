@@ -51,8 +51,8 @@ type goal_to_confirm =
    ask, however many questions it holds: the operator answers an ask as one
    draft and one submit, so the ask is what is waiting. *)
 type open_question =
-  { ask_id : string
-  ; keeper : string
+  { ask : Masc.Tui_decode_asks.ask_key
+  ; asked_by : string
   ; first_question : string option
   ; asked_at : float
   }
@@ -220,7 +220,7 @@ type destination =
   | Nowhere
   | Keeper_holding of { keeper : string; tool_call_id : string }
       (** The exact held call; one Keeper can have several awaiting answers. *)
-  | Ask_to_answer of string  (** the ask, answered on Approvals *)
+  | Ask_to_answer of Masc.Tui_decode_asks.ask_key  (** the ask, answered on Approvals *)
   | Goal_to_confirm of string  (** the Goal, confirmed on its own detail *)
   | Stuck_task of string  (** the task, read on its own detail *)
 
@@ -370,12 +370,12 @@ let overlay ~now ~localtime ~cols t =
     | Read rows ->
       List.map
         (fun (row : open_question) ->
-           (* The Keeper wrote both, so both are made safe to draw before the
+           (* The asker wrote both, so both are made safe to draw before the
               row is measured; a question's line breaks are content and are
               kept as marks rather than dropped. *)
-           let keeper = Masc.Tui_terminal_text.sanitize_terminal_text row.keeper in
+           let keeper = Masc.Tui_terminal_text.sanitize_terminal_text row.asked_by in
            { tone = Question
-           ; goes_to = Ask_to_answer row.ask_id
+           ; goes_to = Ask_to_answer row.ask
            ; text =
                two_column
                  ~cols
@@ -459,11 +459,25 @@ let target_indexes lines =
   loop 0 [] lines
 ;;
 
+(* Two destinations are the same target when they name the same held call,
+   Goal or task, or the same ask by [Masc.Tui_decode_asks.equal_ask_key]: an
+   installation's title is the package's and does not name the ask. *)
+let equal_destination left right =
+  match left, right with
+  | Nowhere, Nowhere -> true
+  | Keeper_holding left, Keeper_holding right ->
+      String.equal left.keeper right.keeper && String.equal left.tool_call_id right.tool_call_id
+  | Ask_to_answer left, Ask_to_answer right -> Masc.Tui_decode_asks.equal_ask_key left right
+  | Goal_to_confirm left, Goal_to_confirm right | Stuck_task left, Stuck_task right ->
+      String.equal left right
+  | (Nowhere | Keeper_holding _ | Ask_to_answer _ | Goal_to_confirm _ | Stuck_task _), _ -> false
+;;
+
 let selected_index lines ~selected =
   match selected with
   | Nowhere -> None
   | Keeper_holding _ | Ask_to_answer _ | Goal_to_confirm _ | Stuck_task _ ->
-      List.find_index (fun line -> line.goes_to = selected) lines
+      List.find_index (fun line -> equal_destination line.goes_to selected) lines
 ;;
 
 let selected_line lines ~selected =
@@ -484,7 +498,7 @@ let step lines ~selected direction =
   match targets with
   | [] -> Nowhere
   | first :: _ ->
-      (match List.find_index (( = ) selected) targets with
+      (match List.find_index (equal_destination selected) targets with
        | None -> first
        | Some index ->
            let next = match direction with

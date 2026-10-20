@@ -523,7 +523,7 @@ let test_removed_goal_does_not_select_its_replacement () =
    so the ask is what waits. *)
 let ask_row ?(questions = 1) ?(resolution = Masc.Tui_decode_asks.Ask_open)
     ask_id : Masc.Tui_decode_asks.ask_row =
-  { ar_keeper = "edgar.a.poe"
+  { ar_asker = Ask_keeper "edgar.a.poe"
   ; ar_id = ask_id
   ; ar_asked_at = asked_at_1155
   ; ar_source_turn_ref = None
@@ -553,7 +553,7 @@ let ask_targets lines =
   List.filter_map
     (fun index ->
       match List.nth_opt lines index with
-      | Some { Agenda.goes_to = Agenda.Ask_to_answer ask_id; _ } -> Some ask_id
+      | Some { Agenda.goes_to = Agenda.Ask_to_answer ask; _ } -> Some ask.ak_id
       | Some _ | None -> None)
     (Agenda.target_indexes lines)
 
@@ -571,7 +571,7 @@ let test_an_ask_waits_once_however_many_questions_it_holds () =
   check int "two open asks wait" 2 (Agenda.waiting agenda)
 
 let open_question ask_id : Agenda.open_question =
-  { ask_id; keeper = "quill"; first_question = Some "Merge?"
+  { ask = { ak_asker = Ask_keeper "quill"; ak_id = ask_id }; asked_by = "quill"; first_question = Some "Merge?"
   ; asked_at = asked_at_1155 }
 
 let with_questions rows =
@@ -675,7 +675,67 @@ let test_each_open_question_is_a_row_enter_opens () =
   let second = Agenda.step lines ~selected:first Agenda.Next in
   check bool "j reaches both" true
     (List.sort compare [ first; second ]
-     = [ Agenda.Ask_to_answer "ask-1"; Agenda.Ask_to_answer "ask-3" ])
+     = List.map (fun id -> Agenda.Ask_to_answer (Masc.Tui_decode_asks.ask_key (ask_row id))) [ "ask-1"; "ask-3" ])
+
+(* An installation's ask id is the request id its package chose, so two
+   installations can ask with one id. Home and the agenda keep them apart,
+   and a package that changes its title keeps the row the operator chose. *)
+let installation_ask ?(title = "Operator quiz") declaration_id : Masc.Tui_decode_asks.ask_row =
+  { (ask_row "s-1-ask") with
+    ar_asker = Ask_installation { ai_declaration_id = declaration_id; ai_title = title } }
+
+let home_questions state =
+  List.filter_map
+    (fun (action, _) ->
+       match action with
+       | Masc_tui_types.Home_request (Masc_tui_types.Home_question ask) -> Some ask
+       | Masc_tui_types.Home_request _ | Home_approvals | Home_agenda | Home_resume _
+       | Home_read_last _ | Home_choose_keeper | Home_create_keeper -> None)
+    (Masc_tui_home.home_decision_rows state)
+
+let asker_of (ask : Masc.Tui_decode_asks.ask_key) =
+  match ask.ak_asker with
+  | Ask_installation { ai_declaration_id; _ } -> ai_declaration_id
+  | Ask_keeper name -> name
+
+let test_two_installations_asking_with_one_id_are_two_targets () =
+  let state = agenda_state () in
+  state.workspace_identity <- Masc_tui_types.Workspace_identity_match;
+  set_asks state [ installation_ask "quiz-a"; installation_ask "quiz-b" ];
+  let asks = home_questions state in
+  check (list string) "Home has a row for each installation" [ "quiz-a"; "quiz-b" ]
+    (List.sort String.compare (List.map asker_of asks));
+  List.iter
+    (fun ask ->
+       state.view <- Masc_tui_types.Approvals;
+       state.home_opened_request <- Some (Masc_tui_types.Home_question ask);
+       state.ask_cursor <- Masc_tui_ask_projection.Released 0;
+       Masc_tui_home.reconcile_home_request_detail state;
+       let rows = Option.value ~default:[] (Masc_tui_approvals_model.approvals_open_questions state) in
+       check string "opening a row opens that installation's question" (asker_of ask)
+         (match Masc_tui_ask_projection.selected_row rows state.ask_cursor with
+          | Some row -> asker_of (Masc.Tui_decode_asks.ask_key row)
+          | None -> "nothing"))
+    asks;
+  let lines = lines_of_state state in
+  let first = Agenda.step lines ~selected:Agenda.Nowhere Agenda.Next in
+  let second = Agenda.step lines ~selected:first Agenda.Next in
+  check bool "j moves from one installation's question to the other's" false
+    (Agenda.equal_destination first second);
+  state.agenda_selected <- second;
+  (match asks with
+   | chosen :: _ -> state.home_selected <- Some (Masc_tui_types.Home_request (Home_question chosen))
+   | [] -> fail "no Home question");
+  set_asks state [ installation_ask ~title:"Quiz" "quiz-a"; installation_ask ~title:"Quiz" "quiz-b" ];
+  check bool "the agenda keeps the chosen question under a new title" true
+    (match opened_target state (lines_of_state state) with
+     | Some target -> Agenda.equal_destination target second
+     | None -> false);
+  check bool "and so does Home" true
+    (match Masc_tui_home.home_selected_action state, asks with
+     | Some (Masc_tui_types.Home_request (Home_question ask)), chosen :: _ ->
+       Masc.Tui_decode_asks.equal_ask_key ask chosen
+     | (Some _ | None), _ -> false)
 
 (* A question list that never came back is not an empty one, and it is not
    a reason to raise the strip either. *)
@@ -749,6 +809,8 @@ let () =
             test_the_window_budget_follows_the_help_line
         ; test_case "each open question is a row Enter opens" `Quick
             test_each_open_question_is_a_row_enter_opens
+        ; test_case "two installations asking with one id are two targets" `Quick
+            test_two_installations_asking_with_one_id_are_two_targets
         ; test_case "unread questions take no row and open nothing" `Quick
             test_unread_questions_take_no_row_and_open_nothing
         ] )

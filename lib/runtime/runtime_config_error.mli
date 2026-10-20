@@ -36,7 +36,7 @@ type resolution_failure =
     it. *)
 
 type exact_slot_body_deadline_gap =
-  { lane_id : string
+  { owner : Runtime_schema.exact_lane_owner
   ; slot_id : string
   ; provider_id : string
   }
@@ -62,7 +62,7 @@ type exact_lane_cli_slot_unservable_reason =
           ({!Runtime_schema.api_format_output_schema_channel}). *)
 
 type exact_lane_cli_slot_unservable =
-  { lane_id : string
+  { owner : Runtime_schema.exact_lane_owner
   ; slot_id : string
   ; provider_id : string
   ; reason : exact_lane_cli_slot_unservable_reason

@@ -3,6 +3,7 @@
    telemetry. *)
 
 let keeper_wake_enqueued_kind = "masc.keeper_wake.enqueued"
+let lane_act_handed_over_kind = "masc.lane_act.handed_over"
 let keeper_event_queue_label = "keeper_event_queue"
 let reaction_ledger_recorded_label = "recorded"
 let reaction_ledger_record_failed_label = "record_failed"
@@ -272,11 +273,28 @@ type dispatch_receipt =
       ; occurrence_status : keeper_wake_occurrence_status
       ; activation_outcome : keeper_wake_activation_outcome
       }
+  | Lane_act_handed_over of
+      { installation_id : string
+      ; instance_id : string
+      ; request_id : string
+      ; schedule_instance_id : string
+      ; schedule_id : string
+      }
 
 let dispatch_receipt_of_detail = function
   | `Assoc fields ->
     let* kind = string_field "kind" fields in
-    if String.equal kind keeper_wake_enqueued_kind
+    if String.equal kind lane_act_handed_over_kind
+    then
+      let* installation_id = string_field "installation_id" fields in
+      let* instance_id = string_field "instance_id" fields in
+      let* request_id = string_field "request_id" fields in
+      let* schedule_instance_id = string_field "schedule_instance_id" fields in
+      let* schedule_id = string_field "schedule_id" fields in
+      Ok
+        (Lane_act_handed_over
+           { installation_id; instance_id; request_id; schedule_instance_id; schedule_id })
+    else if String.equal kind keeper_wake_enqueued_kind
     then
       let* keeper_name = keeper_name_field "keeper_name" fields in
       let* schedule_instance_id = string_field "schedule_instance_id" fields in
@@ -374,6 +392,16 @@ let dispatch_receipt_to_yojson = function
        ]
        @ keeper_wake_activation_outcome_json_fields activation_outcome
        @ keeper_wake_reaction_ledger_status_json_fields reaction_ledger_status)
+  | Lane_act_handed_over
+      { installation_id; instance_id; request_id; schedule_instance_id; schedule_id } ->
+    `Assoc
+      [ "kind", `String lane_act_handed_over_kind
+      ; "installation_id", `String installation_id
+      ; "instance_id", `String instance_id
+      ; "request_id", `String request_id
+      ; "schedule_instance_id", `String schedule_instance_id
+      ; "schedule_id", `String schedule_id
+      ]
 ;;
 
 let accepts request =
@@ -1188,6 +1216,70 @@ let dispatch_keeper_wake
          (Keeper_shutdown_types.Operation_id.to_string operation_id))
 ;;
 
+(* RFC operator-quiz §4.7. The schedule's scheduler acts with the access a
+   direct masc_lane_act call of theirs would have. The occurrence id is the
+   receipt's request id, so a redelivered occurrence finds its receipt. The
+   occurrence succeeds once the receipt is durable; whether the worker ran the
+   action is the receipt's to say. *)
+let lane_act_access (actor : Schedule_domain.actor) =
+  match actor.kind with
+  | Schedule_domain.Human_operator -> Lane_addon_sources.Operator_configuration
+  | Schedule_domain.Automated_actor -> Lane_addon_sources.Keeper actor.id
+  | Schedule_domain.System -> Lane_addon_sources.Unauthenticated
+;;
+
+let lane_act_dispatch_error = function
+  | Lane_addon_runtime.Scheduled_act_failed detail ->
+    Schedule_runner.Retryable_dispatch_failure ("lane_act store failure: " ^ detail)
+  | Lane_addon_runtime.Scheduled_act_refused reason ->
+    let message =
+      let label = Lane_addon_runtime.scheduled_act_refusal_label reason in
+      match reason with
+      | Lane_addon_runtime.Action_refused detail -> Printf.sprintf "lane_act %s: %s" label detail
+      | Lane_addon_runtime.Declarations_unread | Lane_addon_runtime.Declarations_incomplete
+      | Lane_addon_runtime.Declaration_missing | Lane_addon_runtime.Declaration_disabled
+      | Lane_addon_runtime.No_live_instance | Lane_addon_runtime.Request_id_reused ->
+        "lane_act " ^ label
+    in
+    (match reason with
+     (* The first reading of the declarations has not happened yet in this
+        process: the next tick finds it. *)
+     | Lane_addon_runtime.Declarations_unread -> Schedule_runner.Retryable_dispatch_failure message
+     | Lane_addon_runtime.Declarations_incomplete | Lane_addon_runtime.Declaration_missing
+     | Lane_addon_runtime.Declaration_disabled | Lane_addon_runtime.No_live_instance
+     | Lane_addon_runtime.Request_id_reused | Lane_addon_runtime.Action_refused _ ->
+       Schedule_runner.Occurrence_dispatch_rejection message)
+;;
+
+let dispatch_lane_act config (signal : Schedule_runner.wake_signal)
+      (request : Schedule_domain.schedule_request) ~commit_acceptance payload
+  =
+  let* installation_id, action =
+    Schedule_payload_projection.lane_act_body payload |> terminal_dispatch_result
+  in
+  let requester =
+    Printf.sprintf "schedule:%s:%s" request.schedule_id request.scheduled_by.id
+  in
+  let* (receipt : Lane_addon_action.receipt) =
+    Lane_addon_runtime.scheduled_act ~config ~access:(lane_act_access request.scheduled_by)
+      ~requester ~declaration_id:installation_id
+      ~request_id:(Schedule_occurrence_id.to_string signal.occurrence_id) ~action
+    |> Result.map_error lane_act_dispatch_error
+  in
+  let detail =
+    dispatch_receipt_to_yojson
+      (Lane_act_handed_over
+         { installation_id
+         ; instance_id = receipt.instance_id
+         ; request_id = receipt.request_id
+         ; schedule_instance_id = request.schedule_instance_id
+         ; schedule_id = request.schedule_id
+         })
+  in
+  let* acceptance_commit = commit_acceptance detail in
+  Ok (Schedule_runner.Work_accepted { detail; acceptance_commit })
+;;
+
 let dispatch config ~now signal request ~commit_acceptance =
   match Schedule_payload_projection.dispatch_view_detailed request with
   | Error rejection ->
@@ -1197,7 +1289,9 @@ let dispatch config ~now signal request ~commit_acceptance =
   | Ok (kind, payload) ->
     (match kind with
      | Schedule_payload_projection.Keeper_wake ->
-       dispatch_keeper_wake config ~now signal request ~commit_acceptance payload)
+       dispatch_keeper_wake config ~now signal request ~commit_acceptance payload
+     | Schedule_payload_projection.Lane_act ->
+       dispatch_lane_act config signal request ~commit_acceptance payload)
 ;;
 
 let cancel_keeper_schedules config ~keeper_name =
@@ -1207,6 +1301,12 @@ let cancel_keeper_schedules config ~keeper_name =
       (match body_keeper_name payload with
        | Error _ -> false
        | Ok target -> String.equal target keeper_name)
+    (* A Lane action acts with its scheduler's access ([lane_act_access]), so
+       one a Keeper scheduled ends with that Keeper. *)
+    | Ok (Schedule_payload_projection.Lane_act, _) ->
+      (match request.scheduled_by.kind with
+       | Schedule_domain.Automated_actor -> String.equal request.scheduled_by.id keeper_name
+       | Schedule_domain.Human_operator | Schedule_domain.System -> false)
     | Error _ -> false
   in
   (* Cancel propagation (task-370): the queue drain must see the schedule

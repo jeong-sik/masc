@@ -77,7 +77,7 @@ let make_backend ?observe_step () =
           "inputSchema",`Assoc ["type",`String "object"]]) with
         | Ok tool -> tool | Error message -> fail message) package.exported_tools in
       let connection : Runtime.For_testing.connection = {
-        container_id = Store.digest instance_id;
+        host = None; container_id = Store.digest instance_id;
         exported_tools = (fun () -> exported_tools);
         call_exported_tool = (fun ~on_result:_ ~authorize ~principal ~name:_ ~arguments:_ ->
           state.principals := principal :: !(state.principals);

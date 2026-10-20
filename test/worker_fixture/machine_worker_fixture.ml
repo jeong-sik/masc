@@ -38,7 +38,7 @@ let with_worker ?other_backend ~machine ~create ~clock ~sw ~base_path f =
             ~root:(Filename.concat (Masc.Workspace.masc_dir config) "lane-addons") in
           let history = Masc.Lane_addon_machine_history.create () in
           let connection : R.For_testing.connection = {
-            container_id=instance_id;
+            host = None; container_id=instance_id;
             exported_tools=(fun () -> List.filter (fun (tool : S.tool) ->
               List.mem tool.name package.exported_tools) tools);
             call_exported_tool=(fun ~on_result ~authorize ~principal ~name ~arguments ->

@@ -94,7 +94,7 @@ let wake_enqueue_counts_of_dispatches dispatches =
        | None -> counts
        | Some detail ->
          (match Consumers.dispatch_receipt_of_detail detail with
-          | Error _ -> counts
+          | Error _ | Ok (Consumers.Lane_act_handed_over _) -> counts
           | Ok
               (Consumers.Keeper_wake_enqueued
                   { occurrence_status =
@@ -427,6 +427,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   Lane_addon_runtime.register_skill_export_handler
     Server_skill_snapshot_runtime.publish_lane_skills;
   Server_lane_addon_sampling.register ~config ~net:env#net;
+  Lane_addon_runtime.register_exact_runner (Server_lane_addon_exact.runner ~base_path:config.base_path);
   Lane_addon_runtime.start_configuration_service ~config ~sw ~clock;
   Lane_addon_runtime.start_fleet_service ~config ~sw ~clock;
   (* Exclusive startup ownership: before any new server request can submit a

@@ -726,7 +726,7 @@ let test_browser_lanes_highlight_config () =
    line three rows below it said "+2 more questions". *)
 let test_the_question_count_counts_questions () =
   let ask id questions : Masc.Tui_decode_asks.ask_row =
-    { Masc.Tui_decode_asks.ar_keeper = "jazz-developer"
+    { Masc.Tui_decode_asks.ar_asker = Ask_keeper "jazz-developer"
     ; ar_id = id
     ; ar_asked_at = 0.0
     ; ar_source_turn_ref = None; ar_context = None

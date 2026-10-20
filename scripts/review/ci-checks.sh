@@ -151,8 +151,11 @@ check_current_ci() {
   check_leader_selected_ci || return $?
   release_run=""
   [ "$review_policy" = release ] || return 0
+  # A failing gh read must not end as a bare exit 1: under set -e that silent
+  # death becomes an unreadable evidence_read_failed one level up (run
+  # 39404586810 died exactly here, without naming the failed call).
   local rows selected status conclusion sha branch path jobs required
-  rows=$(ci_gh_json "repos/$repo/actions/runs?head_sha=$head&per_page=100" '.workflow_runs[] | select(.path == ".github/workflows/release-candidate.yml") | [.id, .status, (.conclusion // "none"), .head_sha, .head_branch, .path] | @tsv') || return 1
+  rows=$(ci_gh_json "repos/$repo/actions/runs?head_sha=$head&per_page=100" '.workflow_runs[] | select(.path == ".github/workflows/release-candidate.yml") | [.id, .status, (.conclusion // "none"), .head_sha, .head_branch, .path] | @tsv') || { echo "approve-guard: RC run read failed: repos/$repo/actions/runs?head_sha=$head" >&2; return 1; }
   selected=$(printf '%s\n' "$rows" | awk -F '\t' -v sha="$head" -v branch="$pr_branch" '$4==sha && $5==branch' | sort -t "$(printf '\t')" -k1,1nr | head -n 1)
   IFS=$'\t' read -r release_run status conclusion sha branch path <<<"$selected"
   if [ -z "$release_run" ] || [ "$status" != completed ] || [ "$conclusion" != success ] ||
@@ -165,7 +168,7 @@ check_current_ci() {
       required="compile / Release checks passed|behavior / test suite|installation / release|Record candidate verification";;
     *) return 2;;
   esac
-  jobs=$(ci_gh_json "repos/$repo/actions/runs/$release_run/jobs?per_page=100" '.jobs[] | [.name, .status, (.conclusion // "none"), .id] | @tsv') || return 1
+  jobs=$(ci_gh_json "repos/$repo/actions/runs/$release_run/jobs?per_page=100" '.jobs[] | [.name, .status, (.conclusion // "none"), .id] | @tsv') || { echo "approve-guard: RC jobs read failed: repos/$repo/actions/runs/$release_run/jobs" >&2; return 1; }
   jobs=$(printf '%s\n' "$jobs" | sort -t "$(printf '\t')" -k1,1 -k4,4nr | awk -F '\t' 'NF && !seen[$1]++')
   # Reusable workflows deliberately skip publishing-only branches during an
   # RC. Require the full verification summaries, not every optional job.

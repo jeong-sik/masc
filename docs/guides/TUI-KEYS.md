@@ -475,7 +475,8 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `Enter` | the reader takes its own keys: j/k and the page keys scroll it, Home/End reach its ends, [ / ] step asks, Esc goes back |
 | `y / n` | y confirms, n denies the approval under the cursor |
 | `R` | only when the blocked row is safely rearmable |
-| `a` | open the selected Keeper question in its own mode; Esc leaves it |
+| `a` | open the selected question, from a Keeper or a Lane Add-on installation, in its own mode; Esc leaves it |
+| `g` | after answering an installation's question, open that installation's Results in Add-ons, where the reveal appears |
 | `o / O` | o shows the question source; O opens that immutable turn's retained input. With no open question use the last answer's source. Esc returns to the question draft; a missing source is never replaced by the Keeper's latest turn |
 | `[ / ]` | while browsing or answering a question, move to the previous or next ask; with an approval detail open, move to the previous or next approval |
 | `w` | choose manual, Auto Judge or allow-all; Enter applies, Esc cancels |

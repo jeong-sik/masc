@@ -83,8 +83,22 @@ type package = {
   skills_directory : Skill_resource_path.t option;
   exact_outputs : exact_output list;
   (** Unique names in name order. *)
+  operator_asks : bool;
+  (** [[world.asks] operator = true]: the package may ask the operator
+      questions through its host requests (RFC operator-quiz §4.6). *)
   resources : resources;
 }
+val host_requests_tool : string
+(** [lane_host_requests]: the worker lists every request it waits for
+    (RFC operator-quiz §4.4). *)
+
+val host_result_tool : string
+(** [lane_host_result]: the host delivers one final result. *)
+
+val uses_host_requests : package -> bool
+(** A package that declares an exact output or may ask the operator waits on
+    the host, so its worker must advertise both host request tools. *)
+
 val validate_exported_tools : action_tool:string option -> string list -> (string list, string) result
 (** Validate exact names, exclude worker control ports, and canonicalize order. *)
 

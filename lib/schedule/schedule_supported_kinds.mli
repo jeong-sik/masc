@@ -8,6 +8,9 @@
 
 val keeper_wake : string
 
+val lane_act : string
+(** One action for a declared Lane Add-on installation's live worker. *)
+
 val unsupported_error : string -> string
 (** Error message for a payload kind outside [supported]. *)
 

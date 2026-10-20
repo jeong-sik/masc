@@ -708,13 +708,13 @@ let test_lane_resolution_preserves_frozen_order_and_drops_rejected_slots () =
   (match
      Runtime.publish_exact_output_registry
        ~lanes:
-         [ { Runtime_schema.id = "verifier_exact"
+         [ { Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Verifier
            ; enabled = true
            ; slot_ids = [ "http.verifier-b"; "verifier-missing"; "http.verifier-a" ]
            ; cli_slot_ids = [ "official.verifier" ]
            ; max_output_tokens = Some 4_096; thinking = None
            }
-         ; { Runtime_schema.id = "auxiliary_exact"
+         ; { Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Librarian
            ; enabled = true
            ; slot_ids = [ "http.verifier-a" ]
            ; cli_slot_ids = []
@@ -779,7 +779,7 @@ let test_rejected_slot_diagnosis_names_a_runtime_id () =
   (match
      Runtime.publish_exact_output_registry
        ~lanes:
-         [ { Runtime_schema.id = "verifier_exact"
+         [ { Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Verifier
            ; enabled = true
            ; slot_ids = [ "http.verifier-a"; "verifier-missing" ]
            ; cli_slot_ids = []
@@ -887,7 +887,7 @@ let publish_verifier_lane ~slot_ids ~cli_slot_ids =
   match
     Runtime.publish_exact_output_registry
       ~lanes:
-        [ { Runtime_schema.id = "verifier_exact"
+        [ { Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Verifier
           ; enabled = true
           ; slot_ids
           ; cli_slot_ids
@@ -1052,7 +1052,7 @@ let test_setup_never_writes_a_verifier_slot_that_cannot_judge () =
     (match
        List.find_opt
          (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-            String.equal lane.id (Standalone_lane.to_id Standalone_lane.Verifier))
+            String.equal (Runtime_schema.exact_lane_key lane.owner) (Standalone_lane.to_id Standalone_lane.Verifier))
          config.exact_output_lane_decls
      with
      | None -> Alcotest.fail "setup dropped the verifier_exact lane declaration"
@@ -1092,7 +1092,7 @@ let test_setup_keeps_a_declared_cli_slot_that_can_judge () =
     (match
        List.find_opt
          (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-            String.equal lane.id (Standalone_lane.to_id Standalone_lane.Verifier))
+            String.equal (Runtime_schema.exact_lane_key lane.owner) (Standalone_lane.to_id Standalone_lane.Verifier))
          config.exact_output_lane_decls
      with
      | None -> Alcotest.fail "setup erased a verifier lane that still had a judge"

@@ -88,6 +88,34 @@ class GuardHarness(unittest.TestCase):
 class Case(GuardHarness):
     pass
 
+
+class ReadFailureNaming(GuardHarness):
+    # run 39404586810: a gh read failure inside check_reviews ended as a bare
+    # exit 1 and became an unreadable evidence_read_failed one level up. The
+    # guard must name the failed read on stderr and keep exit 1.
+    def test_source_receipt_names_the_failed_review_read(self):
+        (self.data / "reviews.json").unlink()
+        r = self.run_guard("--source-receipt")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("approve-guard: review rows read failed", r.stderr)
+        self.assertIn("repos/o/r/pulls/41487/reviews", r.stderr)
+        self.assertEqual(r.stdout, "")
+
+    def test_merge_check_names_the_failed_verdict_read(self):
+        self.review(footer_line())
+        (self.data / "comments.json").unlink()
+        r = self.run_guard("--merge-check")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("approve-guard: verdict read failed", r.stderr)
+
+    def test_healthy_receipt_path_still_admits(self):
+        self.review(footer_line())
+        r = self.run_guard("--source-receipt")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["pr"], 41487)
+
+
+class Case(GuardHarness):
     def test_exact_footer_still_passes_merge_check(self):
         self.review(footer_line())
         r = self.run_guard("--merge-check")

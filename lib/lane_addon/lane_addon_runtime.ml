@@ -22,6 +22,12 @@ let tool_change_handler = ref (fun () -> ())
 let register_tool_change_handler handler = tool_change_handler := handler
 let notify_tool_change (package : package) =
   if package.exported_tools <> [] then !tool_change_handler ()
+(* The two private tools of a worker whose package waits on the host (RFC
+   operator-quiz §4.4). Their answers are decoded by the cycle. *)
+type host_port = {
+  list_requests : unit -> (Yojson.Safe.t, string) result;
+  deliver : arguments:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
+}
 type connection = {
   observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t -> (output, string) result;
   exported_tools : unit -> Mcp_protocol.Mcp_types.tool list;
@@ -31,6 +37,7 @@ type connection = {
   act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
   stop : unit -> (unit, Lifecycle.failure) result;
   container_id : string;
+  host : host_port option;
 }
 type backend = {
   start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> package:package -> binding:Yojson.Safe.t ->
@@ -110,6 +117,17 @@ let register_skill_export_handler handler = skill_export_handler := Some handler
    request, so a wake raised for an action never schedules a second capture
    of the same state. *)
 type observation_request = Idle | Run_actions | Refresh_sources | Observe_now
+(* Why the last host request cycle stopped before its listing settled. *)
+type host_issue =
+  | Listing_failed of string
+  | Listing_refused of string
+  | Relisted_delivered_request of string
+  | Result_delivery_failed of { request_id : string; detail : string }
+  | Exact_record_failed of { request_id : string; detail : string }
+  | Ask_record_failed of { request_id : string; detail : string }
+  | No_exact_runner
+(* A projection of the last cycle; no decision reads it. *)
+type host_status = { cycles : int; waiting : (string * Yojson.Safe.t) list; issue : host_issue option }
 type entry = {
   instance_id : string; run_id : string; package : package; binding : Yojson.Safe.t;
   mutable state : Lifecycle.state; mutable engine : Lifecycle.engine option;
@@ -129,6 +147,8 @@ type entry = {
   input_installations : string list;
   action_queue : Lane_addon_action.receipt Queue.t;
   mutable current_action : Lane_addon_action.receipt option;
+  mutable host_due : bool;
+  mutable host_status : host_status;
 }
 type configuration_reading = {
   directory : string;
@@ -158,7 +178,7 @@ type sweep_retry = {
   first_refused_at : string;
 }
 
-type manager = { store : Lane_addon_store.t; entries : (string, entry) Hashtbl.t;
+type manager = { store : Lane_addon_store.t; base_path : string; entries : (string, entry) Hashtbl.t;
   recovering : (string, recovery) Hashtbl.t;
   configuration_mutex : Eio.Mutex.t; action_mutex : Eio.Mutex.t; broadcast_mutex : Eio.Mutex.t;
   fleet_journals : (string, unit) Hashtbl.t;
@@ -182,6 +202,8 @@ let delivery_handler = ref None
 let register_delivery_handler handler = delivery_handler := Some handler
 let sampling_factory = ref None
 let register_sampling_factory factory = sampling_factory := Some factory
+let exact_runner : Lane_addon_exact.runner option ref = ref None
+let register_exact_runner runner = exact_runner := Some runner
 let prepare_sampling_handler ~sw ~store ~instance_id ~(package : package) ~binding =
   match package.model_access with
   | Model_disabled -> Ok None
@@ -413,7 +435,10 @@ let persist m e = Eio.Mutex.use_ro e.persistence_mutex (fun () ->
   else
     let json = entry_json e in
     offload (fun () -> Lane_addon_store.save_binding m.store ~instance_id:e.instance_id json))
+(* [e.wake] is resolved exactly while [e.pending <> Idle || e.host_due]. *)
+let signalled e = e.pending<>Idle || e.host_due
 let wake ?(request=Observe_now) e =
+  let was_signalled = signalled e in
   let previous = e.pending in
   e.pending <- (match previous,request with
     | Observe_now,_ | _,Observe_now -> Observe_now
@@ -421,10 +446,18 @@ let wake ?(request=Observe_now) e =
     | Run_actions,_ | _,Run_actions -> Run_actions
     | Idle,Idle -> Idle);
   if previous<>Idle then e.coalesced_wakes <- e.coalesced_wakes + 1
-  else if e.pending<>Idle then Eio.Promise.resolve e.resolver ()
+  else if not was_signalled && e.pending<>Idle then Eio.Promise.resolve e.resolver ()
+(* One of the five host events (RFC operator-quiz §4.4). An event that arrives
+   during a cycle becomes one more cycle. *)
+let wake_host e =
+  if e.host_due then e.coalesced_wakes <- e.coalesced_wakes + 1
+  else (
+    let was_signalled = signalled e in
+    e.host_due <- true;
+    if not was_signalled then Eio.Promise.resolve e.resolver ())
 let clear_wake e =
   let promise, resolver = Eio.Promise.create () in
-  e.wake <- promise; e.resolver <- resolver; e.pending <- Idle
+  e.wake <- promise; e.resolver <- resolver; e.pending <- Idle; e.host_due <- false
 let entries m = Hashtbl.to_seq_values m.entries |> List.of_seq
   |> List.sort (fun a b -> String.compare a.instance_id b.instance_id)
 let status_coverage e = {
@@ -784,6 +817,191 @@ let perform_action m e (c : connection) (queued : Lane_addon_action.receipt) =
        | Ok () -> ()
        | Error message -> raise (Action_persistence_failed ("action result persistence: " ^ message)))
 
+(* Only an operator-owned TOML declaration may hold record grants. *)
+let operator_owned ~configuration ~source_access = match configuration, source_access with
+  | Some _, Lane_addon_sources.Operator_configuration -> true
+  | Some _, (Lane_addon_sources.Keeper _ | Lane_addon_sources.Unauthenticated) | None, _ -> false
+
+let host_issue_to_json = function
+  | Listing_failed detail -> `Assoc ["kind", `String "listing_failed"; "detail", `String detail]
+  | Listing_refused detail -> `Assoc ["kind", `String "listing_refused"; "detail", `String detail]
+  | Relisted_delivered_request request_id ->
+      `Assoc ["kind", `String "relisted_delivered_request"; "request_id", `String request_id]
+  | Result_delivery_failed {request_id; detail} ->
+      `Assoc ["kind", `String "result_delivery_failed"; "request_id", `String request_id; "detail", `String detail]
+  | Exact_record_failed {request_id; detail} ->
+      `Assoc ["kind", `String "exact_record_failed"; "request_id", `String request_id; "detail", `String detail]
+  | Ask_record_failed {request_id; detail} ->
+      `Assoc ["kind", `String "ask_record_failed"; "request_id", `String request_id; "detail", `String detail]
+  | No_exact_runner -> `Assoc ["kind", `String "no_exact_runner"]
+
+let host_status_json status =
+  `Assoc ["cycles", `Int status.cycles;
+    "waiting", `List (List.map (fun (request_id, reason) ->
+      `Assoc ["request_id", `String request_id; "reason", reason]) status.waiting);
+    "issue", Option.fold ~none:`Null ~some:host_issue_to_json status.issue]
+
+(* The frame the worker connection accepts is the package's [max_reply_bytes]
+   (RFC-0471 row 1). What is measured is the arguments object the host sends;
+   the JSON-RPC envelope around it is not counted. *)
+(* One cycle (RFC operator-quiz §4.4): list, deliver what is final or try each
+   request once, list again until a listing delivers nothing. The host keeps
+   no list of pending requests; [host_status] only shows the last cycle. *)
+(* What one try of a request gives: a final result body to deliver, or the
+   reason it waits for the next event. *)
+type host_attempt = Deliver of Yojson.Safe.t | Restore of Yojson.Safe.t | Wait of Yojson.Safe.t
+
+let run_host_cycle m e (port : host_port) =
+  let delivered = Hashtbl.create 8 and tried = Hashtbl.create 8 in
+  let waiting = ref [] in
+  let current_owner () : Lane_addon_host_delivery.owner = {
+    instance_id=e.instance_id;
+    authority=`Assoc ["configuration", Option.fold ~none:`Null ~some:configuration_owner_json e.configuration;
+      "source_access", Lane_addon_sources.access_to_json e.source_access; "binding", e.binding];
+  } in
+  let owner = current_owner () in
+  let not_allowed reason = Deliver (`Assoc ["status", `String "not_allowed"; "reason", `String reason]) in
+  (* The asker is the installation: a declaration that declares [world.asks]. *)
+  let asker = match e.package.operator_asks, e.configuration with
+    | false, _ -> Error "the package manifest does not declare [world.asks] operator = true"
+    | true, None -> Error "a manual Attach has no installation to ask from"
+    | true, Some owner -> Ok owner.id in
+  let read_answer = function
+    | Lane_addon_records.Page body -> Ok (Deliver body)
+    | Lane_addon_records.Not_allowed reason -> Ok (not_allowed reason)
+    | Lane_addon_records.Unavailable detail ->
+        Ok (Wait (`Assoc ["reason", `String "source_unavailable"; "detail", `String detail])) in
+  let produce = function
+    | Lane_addon_host_request.Exact_output exact ->
+        let attempt = match e.configuration, !exact_runner with
+          | None, _ ->
+              (* A manual Attach has no declaration id, so it owns no add-on lane. *)
+              Ok (Lane_addon_exact.Not_final (Lane_addon_exact.Lane_unavailable Lane_addon_exact.Lane_unconfigured))
+          | Some _, None -> Error No_exact_runner
+          | Some owner, Some runner ->
+              Lane_addon_exact.run ~store:m.store ~declaration_id:owner.id ~package:e.package ~runner exact
+              |> Result.map_error (fun detail ->
+                Exact_record_failed {request_id = exact.Lane_addon_exact.request_id; detail}) in
+        Result.map (function
+          | Lane_addon_exact.Final final -> Deliver (Lane_addon_exact.final_to_json final)
+          | Lane_addon_exact.Not_final reason -> Wait (Lane_addon_exact.not_final_to_json reason)) attempt
+    | Lane_addon_host_request.Read_records {request_id; source_id; after} ->
+        (match Lane_addon_records.grants ~operator_owned:(operator_owned ~configuration:e.configuration
+            ~source_access:e.source_access) e.binding with
+         | Error reason -> Ok (not_allowed reason)
+         | Ok grants ->
+             let measure result = String.length (Yojson.Safe.to_string
+               (Lane_addon_host_request.result_arguments ~request_id ~result)) in
+             read_answer (Lane_addon_records.read_records ~base_path:m.base_path ~store:m.store ~grants ~measure
+               ~max_bytes:e.package.resources.max_reply_bytes ~source_id ~after))
+    | Lane_addon_host_request.Ask {request_id; questions; context} ->
+        (match asker with
+         | Error reason -> Ok (not_allowed reason)
+         | Ok declaration_id ->
+             match Lane_addon_asks.ask ~ask_id:request_id ~declaration_id ~title:e.package.title ~questions
+                 ?context ~asked_at:(Time_compat.now ()) () with
+             | Error reason -> Ok (not_allowed reason)
+             | Ok asked ->
+                 let failed detail = Ask_record_failed {request_id; detail} in
+                 let* recorded = offload (fun () -> Lane_addon_asks.record m.store asked) |> Result.map_error failed in
+                 match recorded with
+                 | Lane_addon_asks.Id_reused -> Ok (Deliver (`Assoc ["status", `String "request_id_reused"]))
+                 | Lane_addon_asks.Recorded | Lane_addon_asks.Already_recorded ->
+                     let* rows = offload (fun () -> Lane_addon_asks.rows m.store ~declaration_id)
+                       |> Result.map_error failed in
+                     (* The answer is delivered only once the operator answered or
+                        the package withdrew (RFC operator-quiz §4.4). *)
+                     match List.assoc_opt request_id rows with
+                     | None -> Error (failed "the recorded question has no row")
+                     | Some (_, Keeper_ask.Open) -> Ok (Wait (`Assoc ["reason", `String "awaiting_operator"]))
+                     | Some (_, Keeper_ask.Answered_by {answers; responder; answered_at}) ->
+                         Ok (Deliver (`Assoc ["status", `String "answered";
+                           "answers", `List (List.map Keeper_ask.answer_to_json answers);
+                           "responder", Keeper_ask.responder_to_json responder;
+                           "answered_at", `Float answered_at]))
+                     | Some (_, Keeper_ask.Withdrawn_because {reason; withdrawn_at}) ->
+                         Ok (Deliver (`Assoc ["status", `String "withdrawn"; "reason", `String reason;
+                           "withdrawn_at", `Float withdrawn_at])))
+    | Lane_addon_host_request.Withdraw_ask {request_id; ask_id; reason} ->
+        (match asker with
+         | Error reason -> Ok (not_allowed reason)
+         | Ok declaration_id ->
+             let* outcome = offload (fun () ->
+                 Lane_addon_asks.withdraw m.store ~declaration_id ~ask_id ~reason ~now:(Time_compat.now ()))
+               |> Result.map_error (fun detail -> Ask_record_failed {request_id; detail}) in
+             match outcome with
+             | Lane_addon_asks.Withdrawn | Lane_addon_asks.Was_withdrawn ->
+                 Ok (Deliver (`Assoc ["status", `String "withdrawn"]))
+             | Lane_addon_asks.Was_answered -> Ok (Deliver (`Assoc ["status", `String "already_answered"]))
+             | Lane_addon_asks.Not_asked -> Ok (not_allowed ("the package asked no question " ^ ask_id)))
+    | Lane_addon_host_request.Read_file {request_id = _; source_id; commit; path} ->
+        (match Lane_addon_records.grants ~operator_owned:(operator_owned ~configuration:e.configuration
+            ~source_access:e.source_access) e.binding with
+         | Error reason -> Ok (not_allowed reason)
+         | Ok grants ->
+             read_answer (Lane_addon_records.read_file ~base_path:m.base_path ~store:m.store ~grants
+               ~source_id ~commit ~path))
+    | Lane_addon_host_request.Read_result {request_id; original_request_id; source_id; sha256; offset} ->
+        (match offload (fun () -> Lane_addon_host_delivery.read ~store:m.store ~owner ~request_id
+            ~original_request_id ~source_id ~sha256 ~offset ~max_bytes:e.package.resources.max_reply_bytes) with
+         | Ok body -> Ok (Deliver body)
+         | Error (Lane_addon_host_delivery.Refused reason) -> Ok (not_allowed reason)
+         | Error (Storage_failed detail) -> Error (Result_delivery_failed {request_id; detail})) in
+  let try_request request =
+    let request_id = Lane_addon_host_request.request_id request in
+    let* retained = offload (fun () -> Lane_addon_host_delivery.restore ~store:m.store ~owner ~request
+        ~max_bytes:e.package.resources.max_reply_bytes)
+      |> Result.map_error (function
+        | Lane_addon_host_delivery.Refused detail | Storage_failed detail -> Result_delivery_failed {request_id; detail}) in
+    match retained with Some arguments -> Ok (Restore arguments) | None -> produce request in
+  let deliver_arguments ~request_id arguments =
+    let* () = if e.stopping || (current_owner ()).authority <> owner.authority then
+        Error (Result_delivery_failed {request_id; detail="installation authority changed before result delivery"})
+      else Ok () in
+    let* answer = port.deliver ~arguments
+      |> Result.map_error (fun detail -> Result_delivery_failed {request_id; detail}) in
+    Lane_addon_host_request.accepted_of_json answer
+    |> Result.map (fun (_accepted : bool) -> ())
+    |> Result.map_error (fun detail -> Result_delivery_failed {request_id; detail}) in
+  let deliver request result =
+    let request_id = Lane_addon_host_request.request_id request in
+    let* arguments = offload (fun () -> Lane_addon_host_delivery.arguments ~store:m.store ~owner ~request
+        ~max_bytes:e.package.resources.max_reply_bytes ~result)
+      |> Result.map_error (function
+        | Lane_addon_host_delivery.Refused detail | Storage_failed detail -> Result_delivery_failed {request_id; detail}) in
+    deliver_arguments ~request_id arguments in
+  let rec pass () =
+    let* listing = port.list_requests () |> Result.map_error (fun detail -> Listing_failed detail) in
+    let* requests = Lane_addon_host_request.listing_of_json listing
+      |> Result.map_error (fun detail -> Listing_refused detail) in
+    let rec each delivered_any = function
+      | [] -> Ok delivered_any
+      | request :: rest ->
+          let request_id = Lane_addon_host_request.request_id request in
+          if Hashtbl.mem delivered request_id then Error (Relisted_delivered_request request_id)
+          else if Hashtbl.mem tried request_id then each delivered_any rest
+          else
+            let* attempt = try_request request in
+            match attempt with
+            | Restore arguments ->
+                let* () = deliver_arguments ~request_id arguments in
+                Hashtbl.replace delivered request_id ();
+                each true rest
+            | Deliver result ->
+                let* () = deliver request result in
+                Hashtbl.replace delivered request_id ();
+                each true rest
+            | Wait reason ->
+                (* Tried at most once per cycle, so it cannot keep a cycle running. *)
+                Hashtbl.replace tried request_id ();
+                waiting := (request_id, reason) :: !waiting;
+                each delivered_any rest in
+    let* delivered_any = each false requests in
+    if delivered_any then pass () else Ok () in
+  let outcome = pass () in
+  e.host_status <- { cycles = e.host_status.cycles + 1; waiting = List.rev !waiting;
+    issue = (match outcome with Ok () -> None | Error issue -> Some issue) }
+
 let observing e =
   let recovering = match e.state with Lifecycle.Failed _ -> true
     | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching _ | Lifecycle.Detached _ -> false in
@@ -827,6 +1045,23 @@ let run ~sw backend m e =
         | Ok c ->
             e.connection <- Some {export_owner;worker=c}; e.started <- true;
             notify_tool_change e.package;
+            (match c.host, e.configuration with
+             | Some _, Some owner ->
+                 (* A publication that changes one of this installation's add-on
+                    lanes is a host event. The callback only signals. *)
+                 let unsubscribes = List.filter_map (fun (output : exact_output) ->
+                   match Runtime_schema.addon_lane ~declaration_id:owner.id ~output:output.name with
+                   | Ok lane ->
+                       Some (Runtime_exact_output_registry.subscribe_lane_changes
+                         ~lane_id:(Runtime_schema.exact_lane_key (Runtime_schema.Addon lane))
+                         (fun () -> Eio_context.run_on_owner_domain (fun () -> wake_host e)))
+                   | Error detail ->
+                       Log.Misc.error "Lane Add-on %s cannot own exact output %s: %s" owner.id output.name detail;
+                       None) e.package.exact_outputs in
+                 Eio.Switch.on_release worker_sw (fun () -> List.iter (fun unsubscribe -> unsubscribe ()) unsubscribes)
+             | Some _, None | None, (Some _ | None) -> ());
+            (* A worker that finished initializing is the first host event. *)
+            if Option.is_some c.host then wake_host e;
             let rec loop () =
               if e.stopping then (
                 match e.state with Lifecycle.Detached _ -> () | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching _ | Lifecycle.Failed _ -> let pending = e.wake in
@@ -835,6 +1070,7 @@ let run ~sw backend m e =
                 let pending = e.wake in
                 Eio.Promise.await pending;
                 let request = e.pending in
+                let host_due = e.host_due in
                 clear_wake e;
                 if e.stopping then loop () else (
                   if not (Queue.is_empty e.action_queue) then (
@@ -848,8 +1084,16 @@ let run ~sw backend m e =
                       | (Observe_now | Refresh_sources), _ -> Some request
                       | (Run_actions | Idle), false -> Some Run_actions
                       | (Run_actions | Idle), true -> None in
-                    Option.iter (fun request -> wake ~request e) follow_up)
-                  else if request = Run_actions then
+                    Option.iter (fun request -> wake ~request e) follow_up;
+                    (* A terminal action receipt is a host event, and a cycle
+                       owed before the action is still owed. *)
+                    if host_due || Option.is_some c.host then wake_host e)
+                  else if host_due then (
+                    Option.iter (run_host_cycle m e) c.host;
+                    (* The cycle ends with one ordinary observation, so the
+                       package's rows show what it received. *)
+                    wake e)
+                  else if request = Run_actions || request = Idle then
                     (* The queue was drained before this wake was served
                        (finalize on stop); nothing is owed. *)
                     ()
@@ -923,7 +1167,12 @@ let backend ~store () = match !override with
             |> Result.map_error Lane_addon_worker.error_to_string);
           observe = (fun ~binding ~sources -> Lane_addon_worker.observe worker ~binding ~sources
             |> Result.map_error Lane_addon_worker.error_to_string);
-          stop = (fun () -> Lane_addon_worker.stop worker |> Result.map_error Lane_addon_worker.cleanup_failure) } in
+          stop = (fun () -> Lane_addon_worker.stop worker |> Result.map_error Lane_addon_worker.cleanup_failure);
+          host = if not (uses_host_requests package) then None else Some {
+            list_requests = (fun () -> Lane_addon_worker.host_requests worker
+              |> Result.map_error Lane_addon_worker.error_to_string);
+            deliver = (fun ~arguments -> Lane_addon_worker.host_result worker ~arguments
+              |> Result.map_error Lane_addon_worker.error_to_string) } } in
         match clock with
         | None -> Error (Lifecycle.Worker_failed "Lane Add-on Docker control requires the server Eio clock")
         | Some clock ->
@@ -974,7 +1223,7 @@ let manager config =
   let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
   match Hashtbl.find_opt managers root with
   | Some m -> m
-  | None -> let m = { store = Lane_addon_store.create ~root; entries = Hashtbl.create 8;
+  | None -> let m = { store = Lane_addon_store.create ~root; base_path = config.base_path; entries = Hashtbl.create 8;
                      recovering = Hashtbl.create 4; configuration_mutex = Eio.Mutex.create ();
                      action_mutex = Eio.Mutex.create (); broadcast_mutex = Eio.Mutex.create ();
                      fleet_journals=Hashtbl.create 8;
@@ -1502,7 +1751,8 @@ let snapshot m ~access ?instance_id () =
   let output = { rows = List.concat_map (fun (e : entry) -> e.output.rows) live;
     coverage = List.concat_map (fun e -> status_coverage e :: e.output.coverage) live } in
   let live_json entry = match entry_json entry with
-    | `Assoc fields -> `Assoc (("runtime_presence", `String "live") :: fields)
+    | `Assoc fields -> `Assoc (("runtime_presence", `String "live")
+        :: ("host_requests", host_status_json entry.host_status) :: fields)
     | _ -> assert false in
   match output_to_json output with
   | `Assoc fields -> Ok (`Assoc (("configuration", configuration_json m ~access)
@@ -1666,6 +1916,10 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
      time (#37897). Every caller looks first, so a declaration and a direct
      Attach both stop before an instance exists. *)
   let* () = (backend ~store:m.store ()).image_ready ~package in
+  (* Record grants are checked before an instance exists (RFC operator-quiz
+     §4.5): only an operator-owned declaration may hold them. *)
+  let* (_ : Lane_addon_records.grant list) =
+    Lane_addon_records.grants ~operator_owned:(operator_owned ~configuration ~source_access) binding in
   let* () = match configuration, package.state_storage with
     | None, _ | Some _, Ephemeral -> Ok ()
     | Some owner, Persistent ->
@@ -1687,6 +1941,7 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
     refresh_interest; source_access; visibility; last_committed_sources=None; unchanged_source_refreshes=0;
     running = true; started = false; active_tool_calls = 0; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
     action_queue = Queue.create (); current_action = None;
+    host_due = false; host_status = { cycles = 0; waiting = []; issue = None };
     cancel_worker = None; configuration; input_installations } in
   let* () = validate_live_connections m e in
   (* Construction only validates the registered host boundary. Discard this
@@ -1979,6 +2234,85 @@ let enqueue_action ?caller m args =
           Queue.add receipt e.action_queue;
           wake ~request:Run_actions e;
           Ok (Lane_addon_action.to_json receipt)))
+
+type scheduled_act_refusal =
+  | Declarations_unread
+  | Declarations_incomplete
+  | Declaration_missing
+  | Declaration_disabled
+  | No_live_instance
+  | Request_id_reused
+  | Action_refused of string
+type scheduled_act_error =
+  | Scheduled_act_refused of scheduled_act_refusal
+  | Scheduled_act_failed of string
+let scheduled_act_refusal_label = function
+  | Declarations_unread -> "declarations_unread"
+  | Declarations_incomplete -> "declarations_incomplete"
+  | Declaration_missing -> "declaration_missing"
+  | Declaration_disabled -> "declaration_disabled"
+  | No_live_instance -> "no_live_instance"
+  | Request_id_reused -> "request_id_reused"
+  | Action_refused _ -> "action_refused"
+(* RFC operator-quiz §4.7. A redelivered occurrence names the same request id,
+   and its receipt may sit under an instance that has since gone away. Every
+   instance the declaration owned is read before a new receipt is queued: the
+   read writes the receipt's terminal when no live worker owns it, so the
+   action is never queued twice. *)
+let scheduled_act ~config ~access ~requester ~declaration_id ~request_id ~action =
+  Eio_context.run_on_owner_domain (fun () ->
+    let m = manager config in
+    let refused reason = Error (Scheduled_act_refused reason) in
+    match m.configuration_status with
+    | None -> refused Declarations_unread
+    | Some reading ->
+      match List.find_opt (fun (d : Lane_addon_config.declaration) -> String.equal d.id declaration_id)
+              reading.snapshot.declarations with
+      | None when not reading.snapshot.complete -> refused Declarations_incomplete
+      | None -> refused Declaration_missing
+      | Some d when not d.enabled -> refused Declaration_disabled
+      | Some d ->
+        let inventory = inventory_at_root ~root:(Lane_addon_store.root m.store) in
+        let unreadable = List.exists (fun (issue : inventory_issue) ->
+          owner_concerns ~id:declaration_id ~source_path:d.source_path issue.issue_owner
+          && not issue.issue_terminal) inventory.issues in
+        let owned = List.filter_map (fun (instance : inventory_instance) ->
+          match instance.configuration with
+          | Some owner when String.equal owner.id declaration_id -> Some instance.instance_id
+          | Some _ | None -> None) inventory.instances in
+        match unreadable, Lane_addon_action.canonical action with
+        | true, _ -> refused Declarations_incomplete
+        | false, Error detail -> refused (Action_refused detail)
+        | false, Ok action ->
+          let previous = Eio.Mutex.use_ro m.action_mutex (fun () ->
+            List.fold_left (fun found instance_id -> match found with
+              | Ok (Some _) | Error _ -> found
+              | Ok None -> retained_action_unlocked m ~instance_id ~request_id) (Ok None) owned) in
+          match previous with
+          | Error detail -> Error (Scheduled_act_failed detail)
+          | Ok (Some (receipt : Lane_addon_action.receipt)) ->
+            if String.equal receipt.requester requester && Yojson.Safe.equal receipt.action action
+            then Ok receipt else refused Request_id_reused
+          | Ok None ->
+            let live = List.find_opt (fun (e : entry) ->
+              e.running && not e.stopping
+              && match e.configuration with
+                 | Some owner -> String.equal owner.id declaration_id
+                 | None -> false) (entries m) in
+            match live with
+            | None -> refused No_live_instance
+            | Some e ->
+              match require_read access e.visibility with
+              | Error detail -> refused (Action_refused detail)
+              | Ok () ->
+                let args = [ "instance_id", `String e.instance_id; "expected_incarnation", `String e.instance_id
+                           ; "request_id", `String request_id; "action", action ] in
+                match enqueue_action ~caller:requester m args with
+                | Error (Request_rejected detail) -> refused (Action_refused detail)
+                | Error (Runtime_failed detail) -> Error (Scheduled_act_failed detail)
+                | Ok json ->
+                  Lane_addon_action.of_json json
+                  |> Result.map_error (fun detail -> Scheduled_act_failed detail))
 
 let rec fleet_error_to_string = function
   | Fleet_ledger.Invalid_input e | Corrupt e | Io_error e -> e
@@ -2792,9 +3126,39 @@ let start_configuration_service ~config ~sw ~clock =
       m.configuration_nudge <- (fun () -> ()));
     Pulse.run ~sw pulse)
 
+(* RFC operator-quiz §4.6. An answer is a host event (§4.4, event 3); a worker
+   that is down lists the question again when it starts and receives the
+   answer then. *)
+let answer_installation_question ~config ~declaration_id ~ask_id ~submissions ~responder =
+  Eio_context.run_on_owner_domain (fun () ->
+    let m = manager config in
+    let result = offload (fun () ->
+      Lane_addon_asks.answer m.store ~declaration_id ~ask_id ~submissions ~responder ~now:(Time_compat.now ())) in
+    (match result with
+     | Ok _ ->
+         List.iter (fun e -> match e.configuration with
+           | Some owner when String.equal owner.id declaration_id && uses_host_requests e.package -> wake_host e
+           | Some _ | None -> ()) (entries m)
+     | Error _ -> ());
+    result)
+
+let installation_questions ~config =
+  Eio_context.run_on_owner_domain (fun () ->
+    let m = manager config in
+    offload (fun () ->
+      let* ids = Lane_addon_asks.declarations m.store in
+      List.fold_right (fun declaration_id acc ->
+        let* acc = acc in
+        let* rows = Lane_addon_asks.rows m.store ~declaration_id in
+        Ok ((declaration_id, rows) :: acc)) ids (Ok [])))
+
 module For_testing = struct
   let with_cleanup_writer writer f = Eio.Fiber.with_binding cleanup_writer_key writer f
   let with_declaration_writer writer f = Eio.Fiber.with_binding declaration_writer_key writer f
+  type nonrec host_port = host_port = {
+    list_requests : unit -> (Yojson.Safe.t, string) result;
+    deliver : arguments:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
+  }
   type nonrec connection = connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t -> (output, string) result;
     exported_tools : unit -> Mcp_protocol.Mcp_types.tool list;
@@ -2804,6 +3168,7 @@ module For_testing = struct
     act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
     stop : unit -> (unit, Lifecycle.failure) result;
     container_id : string;
+    host : host_port option;
   }
   type nonrec backend = backend = {
     start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> package:package -> binding:Yojson.Safe.t ->

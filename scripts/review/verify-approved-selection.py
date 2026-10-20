@@ -63,8 +63,13 @@ def main():
         print(refused, file=sys.stderr)
         print(refused)
         return 2
-    except (OSError, ValueError, KeyError, TypeError, AttributeError, P.SourceUnavailable):
-        print(json.dumps({"status": "unavailable", "reason": "evidence_read_failed"}))
+    except (OSError, ValueError, KeyError, TypeError, AttributeError,
+            P.SourceUnavailable) as error:
+        # The reason alone (run 39404586810: "evidence_read_failed") left the
+        # dispatch series correcting blind; carry the underlying diagnostic.
+        detail = P.unavailable_payload(error)["reason"]
+        print(json.dumps({"status": "unavailable", "reason": detail}), file=sys.stderr)
+        print(json.dumps({"status": "unavailable", "reason": detail}))
         return 1
 
 

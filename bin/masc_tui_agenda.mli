@@ -82,14 +82,14 @@ type goal_to_confirm =
     (constitution, goal completion), so it waits on the operator. *)
 
 type open_question =
-  { ask_id : string  (** the ask the row is about, so a key can open it *)
-  ; keeper : string
+  { ask : Masc.Tui_decode_asks.ask_key  (** the ask the row is about, so a key can open it *)
+  ; asked_by : string  (** the Keeper's name or the installation's title *)
   ; first_question : string option
-        (** The first question's prompt, as the Keeper wrote it. [None] for an
+        (** The first question's prompt, as the asker wrote it. [None] for an
             ask that carries no question; the row then says only who asked. *)
   ; asked_at : float
   }
-(** An ask a Keeper put to the operator that nobody has answered or withdrawn.
+(** An ask a Keeper or an installation put to the operator that nobody has answered or withdrawn.
     One row per ask, however many questions it holds: the operator answers an
     ask as one draft and one submit, so the ask is the unit of waiting. *)
 
@@ -170,7 +170,7 @@ type destination =
   | Nowhere
   | Keeper_holding of { keeper : string; tool_call_id : string }
       (** The exact held call; one Keeper can have several awaiting answers. *)
-  | Ask_to_answer of string
+  | Ask_to_answer of Masc.Tui_decode_asks.ask_key
       (** The ask, answered on Approvals where every question is answered. *)
   | Goal_to_confirm of string  (** the Goal, confirmed on its own detail *)
   | Stuck_task of string  (** the task, read on its own detail *)
@@ -193,6 +193,11 @@ val overlay :
 val target_indexes : line list -> int list
 (** Indexes of the rows Enter can act on, in display order. The cursor moves
     over these, not over prose. *)
+
+val equal_destination : destination -> destination -> bool
+(** Whether two destinations are the same target. An ask is compared by
+    [Masc.Tui_decode_asks.equal_ask_key], so an installation's new title is
+    the same ask. *)
 
 val selected_index : line list -> selected:destination -> int option
 (** The current row of the selected identity. [None] for [Nowhere] or an

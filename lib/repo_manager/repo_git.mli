@@ -54,6 +54,11 @@ val run_git :
     execution wrapper and returns non-empty stdout lines. Callers must pass
     argv tokens, never shell text. *)
 
+val run_git_read_only_raw : cwd:string -> string list -> (string, string) result
+(** [run_git] without splitting: the exact stdout bytes, read with
+    [GIT_OPTIONAL_LOCKS=0] and no prompt, for a reader that must keep a
+    commit's or a file's bytes as they are. No timeout. *)
+
 val fetch : repository:repository -> (string list, string) result
 (** [fetch ~repository] fetches all remotes and returns the list of remote
     branch names. *)

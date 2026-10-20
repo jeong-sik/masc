@@ -31,7 +31,13 @@ class Reason(Enum):
 
 
 class SourceUnavailable(Exception):
-    pass
+    # run 39404586810: the pinned reason alone hid the guard failure beneath
+    # it, so the dispatch series was corrected blind. `cause` carries the
+    # underlying diagnostic without changing the pinned vocabulary.
+    def __init__(self, reason: str, *, cause: str | None = None):
+        super().__init__(reason if cause is None else f"{reason}: {cause}")
+        self.reason = reason
+        self.cause = cause
 
 
 class Rejected(Exception):
@@ -42,6 +48,21 @@ class Rejected(Exception):
         super().__init__(message)
         self.reason = reason
         self.details = details
+
+
+def unavailable_payload(error):
+    """Unavailable JSON with the underlying diagnostic, keeping pinned reason.
+
+    A hidden read failure costs a blind dispatch series (run 39404586810
+    printed only "evidence_read_failed"), so the cause rides beside the
+    reason instead of being swallowed.
+    """
+    if isinstance(error, SourceUnavailable):
+        reason, cause = error.reason, error.cause
+    else:
+        reason, cause = type(error).__name__, str(error)
+    return {"status": "unavailable",
+            "reason": reason if not cause else f"{reason}: {cause}"}
 
 
 
@@ -153,7 +174,12 @@ def source_approval(repo, selected, *, gh):
     if result.returncode == 2:
         raise Rejected(Reason.APPROVAL_UNAVAILABLE)
     if result.returncode:
-        raise SourceUnavailable("source_approval_read_failed")
+        # exit 1 is the guard dying on a read, not the PR being refused.
+        # Named so the operator sees which call died, not only that evidence
+        # was unavailable (run 39404586810 hid this line entirely).
+        raise SourceUnavailable("source_approval_read_failed", cause=(
+            f"approve-guard exit={result.returncode} "
+            f"stderr={result.stderr.strip()[:300]}"))
     value = json.loads(result.stdout)
     ids = value.get("approval_ids")
     if (value.get("pr") != selected.pr or value.get("head") != selected.head
@@ -297,8 +323,8 @@ def main():
     except Rejected as error:
         print(json.dumps({"status": "refused", "reason": str(error)}))
         return 2
-    except (OSError, ValueError, KeyError, TypeError, SourceUnavailable):
-        print(json.dumps({"status": "unavailable", "reason": "evidence_read_failed"}))
+    except (OSError, ValueError, KeyError, TypeError, SourceUnavailable) as error:
+        print(json.dumps(unavailable_payload(error), sort_keys=True))
         return 1
 
 

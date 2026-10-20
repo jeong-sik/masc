@@ -12,7 +12,9 @@ A changed due time before the current second is refused with error_kind
 due_already_past; resending the stored
 due time is accepted. You may update a schedule you made or one that wakes you;
 its replacement must retain that ownership or fail with error_kind
-not_schedule_owner. Requester and scheduler stay unchanged."""
+not_schedule_owner. Requester and scheduler stay unchanged.
+A Lane action schedule is replaced the same way, with installation_id and
+action instead of keeper_name and message."""
 additional_properties = false
 defer_loading = true
 
@@ -43,13 +45,11 @@ RFC 3339 timestamp with Z or an explicit numeric offset, for example
 [[params]]
 name = "keeper_name"
 type = "string"
-required = true
-description = "The Keeper to wake."
+description = "The Keeper to wake. A Keeper wake needs it and message."
 
 [[params]]
 name = "message"
 type = "string"
-required = true
 description = """
 What the Keeper is being woken to do. Write the work itself. A recurring
 wake sends this text unchanged: ask the Keeper to read current state each time,
@@ -131,3 +131,30 @@ Allow a wake whose target Keeper has no durable metadata yet. Default false."""
 name = "source"
 type = "string"
 enum = ["operator_request", "automated_request", "system_request"]
+
+[[params]]
+name = "installation_id"
+type = "string"
+description = """
+For a Lane action instead of a Keeper wake: the declared Lane Add-on \
+installation (its declaration id) whose live worker runs action at each due \
+time. Give it with action, and without keeper_name, message, title, urgency \
+or allow_unregistered_keeper."""
+
+[[params]]
+name = "action"
+type = "object"
+description = """
+For a Lane action: the action object the installation's package schema \
+accepts, such as {"kind": "compose", "questions": 5}. It is checked against the worker that \
+runs it, at each due time."""
+
+[[one_of]]
+required = ["keeper_name", "message"]
+forbidden = ["installation_id", "action"]
+description = "Wake a Keeper with this message."
+
+[[one_of]]
+required = ["installation_id", "action"]
+forbidden = ["keeper_name", "message", "title", "urgency", "allow_unregistered_keeper"]
+description = "Hand this action to a declared Lane installation's live worker."

@@ -393,7 +393,7 @@ let test_hard_quota_requires_recovery_window () =
       {error=Http.ProviderFailure {kind=Http.Hard_quota {retry_after};message="quota"};
        dispatch=Exact.Generation_dispatch_started} in
     check bool "hard quota retries only a usable provider window" expected
-      (Server_candle_appraiser.For_testing.retryable_execution cause))
+      (Exact_lane_failure.(is_transient (execution cause))))
     [None,false; Some 0.,false; Some (-1.),false; Some nan,false;
      Some infinity,false; Some 60.,true]
 ;;

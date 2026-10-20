@@ -167,6 +167,10 @@ elif action == "start":
         elif method == "tools/list":
             result = {"tools": [{"name": "lane_observe", "description": "fixture",
                 "inputSchema": {"type": "object"}, "outputSchema": {"type": "object"}}]}
+            if mode in ("host", "host_missing"):
+                names = ["lane_host_requests"] + (["lane_host_result"] if mode == "host" else [])
+                for name in names:
+                    result["tools"].append({"name":name, "inputSchema":{"type":"object"}})
             if mode in ("exports", "duplicate_exports"):
                 exported = {"name":"machine_step", "description":"Advance the machine",
                     "inputSchema":{"type":"object", "properties":{"frames":{"type":"integer"}}}}
@@ -182,6 +186,13 @@ elif action == "start":
                             "incarnation":{"type":"string"}}),
                         "request_id":{"type":"string"},
                         "action":object_schema({"kind":{"type":"string","enum":["increment"]}})})})
+        elif method == "tools/call" and mode == "host" and request["params"]["name"] == "lane_host_requests":
+            result = {"structuredContent":json.loads((root / "host-listing.json").read_text()), "content":[]}
+        elif method == "tools/call" and mode == "host" and request["params"]["name"] == "lane_host_result":
+            arguments = request["params"]["arguments"]
+            with (root / "host-deliveries.jsonl").open("a") as log:
+                log.write(json.dumps(arguments) + "\n")
+            result = {"structuredContent":{"accepted":True}, "content":[]}
         elif method == "tools/call":
             arguments = request["params"]["arguments"]
             request_mode = arguments.get("sources", {}).get("mode", "good")
@@ -326,7 +337,7 @@ let package directory mode : Types.package = {
   contributions = [ Types.Observe ]; runtime = Types.Docker; image = "fixture/image";
   command = [ "observer"; mode ]; directory; skills_directory = None; action_tool = None; state_storage=Types.Ephemeral;tool_invocation=Types.Direct; exported_tools = []; outputs = [];
   binding_schema=None;presentation=Masc.Lane_addon_presentation.empty;refresh_policy=Types.Every_hint;
-  model_access=Types.Model_disabled; exact_outputs = [];
+  model_access=Types.Model_disabled; exact_outputs = []; operator_asks = false;
   resources = { cpus = 0.5; memory_bytes = 67_108_864L;
                 pids = Some 16; max_reply_bytes = 4096 };
 }
@@ -488,6 +499,101 @@ let test_structured_observation_and_exact_removal () = with_fixture (fun env sw 
   ignore (unwrap (observe second "good"));
   unwrap (Worker.stop first);
   unwrap (Worker.stop second))
+
+let test_host_result_continuations_cross_the_real_worker_port () = with_fixture (fun env sw dir docker ->
+  let module Delivery = Masc.Lane_addon_host_delivery in
+  let module Host = Masc.Lane_addon_host_request in
+  let module Store = Masc.Lane_addon_store in
+  let decode = function
+    | Ok value -> value
+    | Error (Delivery.Refused detail | Storage_failed detail) -> fail detail in
+  let host_package mode = {(package dir mode) with
+    exact_outputs=[{Types.name="author"; schema=`Assoc ["type", `String "object"]}]} in
+  let start_host mode instance_id = Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id ~package:(host_package mode) ~docker_command:docker () in
+  check bool "missing result control port refuses initialization" true
+    (Result.is_error (start_host "host_missing" "missing-host-port"));
+  let worker = unwrap (start_host "host" "host-owner") in
+  let store = Store.create ~root:(Filename.concat dir "store") in
+  let owner : Delivery.owner = {instance_id="host-owner";
+    authority=`Assoc ["grant", `String "original-operator-board-grant"]} in
+  let member = Yojson.Safe.Util.member in
+  let text key json = member key json |> Yojson.Safe.Util.to_string in
+  let integer key json = member key json |> Yojson.Safe.Util.to_int in
+  let request : Host.t = Read_records {request_id="page"; source_id="board"; after=None} in
+  let listing request =
+    write (Filename.concat dir "host-listing.json")
+      (Yojson.Safe.to_string (`Assoc ["requests", `List [Host.to_json request]]));
+    match unwrap (Worker.host_requests worker) |> Host.listing_of_json with
+    | Ok [request] -> request
+    | Ok _ | Error _ -> fail "worker did not return the exact host request" in
+  let request = listing request in
+  let result = `Assoc ["status", `String "records"; "source_id", `String "board";
+    "records", `List [`Assoc ["body", `String (String.make 12000 'x')]];
+    "next_cursor", `String "after-giant-record"; "complete", `Bool false] in
+  let send request result =
+    let arguments = decode (Delivery.arguments ~store ~owner ~request ~max_bytes:4096 ~result) in
+    check bool "full worker result arguments fit the frame" true
+      (String.length (Yojson.Safe.to_string arguments) <= 4096);
+    check bool "worker accepted the result" true
+      (Host.accepted_of_json (unwrap (Worker.host_result worker ~arguments)) = Ok true);
+    member "result" arguments in
+  let retained = send request result in
+  check string "cursor survives oversized replacement" "after-giant-record" (text "next_cursor" retained);
+  check bool "reference is not complete delivery" true (member "complete" retained = `Bool false);
+  let sha256 = text "retained_sha256" retained in
+  let bytes = Yojson.Safe.to_string result in
+  check string "advertised digest names exactly the retained JSON" (Store.digest bytes) sha256;
+  check bool "that JSON was actually persisted" true
+    (Store.read_blob store (Store.blob_reference bytes) = Ok bytes);
+  let captured = Buffer.create (String.length bytes) in
+  let rec read offset =
+    let id = "part-" ^ string_of_int offset in
+    let request = listing (Host.Read_result {request_id=id; original_request_id="page";
+      source_id=Some "board"; sha256; offset}) in
+    let chunk = decode (Delivery.read ~store ~owner ~request_id:id ~original_request_id:"page"
+      ~source_id:(Some "board") ~sha256 ~offset ~max_bytes:4096) |> send request in
+    Buffer.add_string captured (Base64.decode_exn (text "content" chunk));
+    let next = integer "next_offset" chunk in
+    if member "eof" chunk <> `Bool true then (
+      check bool "each nonterminal read progresses" true (next>offset); read next) in
+  read 0;
+  check string "worker path reassembles the whole original result" bytes (Buffer.contents captured);
+  let other_owner = {owner with instance_id="same-content-owner"} in
+  ignore (decode (Delivery.arguments ~store ~owner:other_owner ~request ~max_bytes:4096 ~result));
+  Buffer.clear captured;
+  read 0;
+  check string "another instance publishing identical bytes preserves the first continuation"
+    bytes (Buffer.contents captured);
+  let refused value = match value with Error (Delivery.Refused _) -> true | Ok _ | Error (Storage_failed _) -> false in
+  let continuation ?(owner=owner) ?(source_id=Some "board") ?(digest=sha256) ?(original_request_id="page") () =
+    Delivery.read ~store ~owner ~request_id:"refused" ~original_request_id ~source_id
+      ~sha256:digest ~offset:0 ~max_bytes:4096 in
+  check bool "another instance cannot use the digest" true
+    (refused (continuation ~owner:{owner with instance_id="another-instance"} ()));
+  check bool "changed grant authority cannot use the original result" true
+    (refused (continuation ~owner:{owner with authority=`Assoc []} ()));
+  check bool "another source cannot borrow the original request" true
+    (refused (continuation ~source_id:(Some "private-board") ()));
+  check bool "another digest cannot borrow the original request" true
+    (refused (continuation ~digest:(String.make 64 '0') ()));
+  check bool "an unretained request grants no hash access" true
+    (refused (continuation ~original_request_id:"unknown" ()));
+  let changed : Host.t = Read_records {request_id="page"; source_id="private-board"; after=None} in
+  check bool "request-id reuse cannot replace its original source" true
+    (refused (Delivery.arguments ~store ~owner ~request:changed ~max_bytes:4096 ~result));
+  let replay = send request (`Assoc ["changed", `Bool true]) in
+  check string "a relisted original request retains its first result" sha256 (text "retained_sha256" replay);
+  List.iter (fun directory ->
+    let root = Filename.concat dir directory in
+    Unix.mkdir root 0o700;
+    let failed_store = Store.create ~root:(Filename.concat root "store") in
+    Unix.mkdir (Store.root failed_store) 0o700;
+    write (Filename.concat (Store.root failed_store) directory) "not-a-directory";
+    match Delivery.arguments ~store:failed_store ~owner ~request ~max_bytes:4096 ~result with
+    | Error (Delivery.Storage_failed _) -> ()
+    | Ok _ | Error (Refused _) -> fail "retention failure must not advertise a result") ["evidence"; "host-results"];
+  unwrap (Worker.stop worker))
 
 let test_hanging_observation_is_optional_and_detachable () = with_fixture (fun env sw dir docker ->
   let worker = unwrap (start env sw dir docker "good") in
@@ -2459,6 +2565,8 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "persistent state has one writer and survives detach" `Quick
     test_persistent_state_has_one_writer_and_survives_detach;
   test_case "structured observation and exact removal" `Quick test_structured_observation_and_exact_removal;
+  test_case "host result continuation crosses the real worker control ports" `Quick
+    test_host_result_continuations_cross_the_real_worker_port;
   test_case "blocked observation preserves other owner" `Quick test_hanging_observation_is_optional_and_detachable;
   test_case "blocked initialization can detach" `Quick test_initialize_can_be_detached;
   test_case "resource refusal and bounded response" `Quick test_resource_refusal_and_bounded_reply;

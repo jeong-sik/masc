@@ -200,7 +200,7 @@ let render_overview (state : state) =
       let budget = Masc_tui_home.home_requests_budget state ~chrome_budget in
       let draw_row (action, label) =
         let line = "  " ^ label in
-        if Some action = selected then c.push_selected line else c.push line
+        if Option.equal equal_home_action (Some action) selected then c.push_selected line else c.push line
       in
       let selection_changed =
         Option.is_some state.home_selected && Option.is_none selected

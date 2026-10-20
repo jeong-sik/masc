@@ -90,7 +90,7 @@ let backend fixture : Lane.For_testing.backend = {
     let stopped = ref false in
     let exported = List.map worker_tool_definition package.exported_tools in
     let connection : Lane.For_testing.connection = {
-      container_id = digest instance_id;
+      host = None; container_id = digest instance_id;
         exported_tools = (fun () -> exported);
         call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools"));
         action_schema = (fun () -> None);

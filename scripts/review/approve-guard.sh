@@ -111,7 +111,9 @@ review_rows() {
 }
 check_reviews() {
   local rows who rid state bound scope_status review_json admit_status
-  rows=$(review_rows) || return 1
+  # A read failure must leave one named line, not a bare exit 1 swallowed by
+  # set -e into an unreadable evidence_read_failed (run 39404586810).
+  rows=$(review_rows) || { echo "approve-guard: review rows read failed: repos/$repo/pulls/$pr/reviews" >&2; return 1; }
   approvals=""; replaced=""; own_approval=""; refusal_detail=""; refused_scope_reviews=""
   while IFS=$'\t' read -r who rid state; do
     [ -n "$who" ] || continue
@@ -120,7 +122,7 @@ check_reviews() {
       else refuse "open CHANGES_REQUESTED from $who (review $rid)"; fi
     fi
     if [ "$state" = APPROVED ] && [ "$who" != "$pr_author" ]; then
-      review_json=$(ci_gh_object "repos/$repo/pulls/$pr/reviews/$rid" '.') || return 1
+      review_json=$(ci_gh_object "repos/$repo/pulls/$pr/reviews/$rid" '.') || { echo "approve-guard: review read failed: repos/$repo/pulls/$pr/reviews/$rid" >&2; return 1; }
       admit_status=0
       bound=$(admit_review "$review_json") || admit_status=$?
       [ "$admit_status" -le 1 ] || return 1
@@ -150,7 +152,7 @@ $(printf '%s\n' "$bound" | sed 's/^/    - /')
 }
 check_verdict() {
   local value state cited by
-  value=$(verdict_for "$pr" "$head") || return 1
+  value=$(verdict_for "$pr" "$head") || { echo "approve-guard: verdict read failed before parsing: PR $pr head $head" >&2; return 1; }
   read -r state cited by <<<"$value"
   if [ -n "$state" ] && [ "$state" != PASS ]; then
     [ -n "$approvals" ] || emit_refusal_detail

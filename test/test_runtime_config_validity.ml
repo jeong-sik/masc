@@ -1270,6 +1270,72 @@ let test_exact_output_lane_rejects_unknown_lane_id () =
          errors)
   | Ok _ -> fail "unknown exact-output lane id must fail config parsing"
 
+(* RFC operator-quiz §4.3 K1: an add-on lane table takes a built-in lane
+   table's keys and rules, loads into the same list, and is never required.
+   Before this table had a parser it fell into the [runtime.<profile>] branch
+   and was ignored without a word. *)
+let test_addon_exact_output_lanes_load_with_builtin_rules () =
+  let config =
+    "[runtime.exact_output_lanes.librarian_exact]\nslots = [\"slot-a\"]\n\n\
+     [runtime.addon_exact_lanes.operator-quiz.author]\nslots = [\"slot-a\"]\n\
+     cli_slots = [\"rt.x\"]\nmax_output_tokens = 8192\n\n\
+     [runtime.addon_exact_lanes.operator-quiz.grade]\nenabled = false\nslots = [\"slot-b\"]\n\n\
+     [runtime.addon_exact_lanes.\"team.quiz\".author]\nslots = [\"slot-a\"]\n"
+  in
+  match Runtime_toml.parse_string config with
+  | Error errors ->
+    failf "add-on lane tables must load: %s"
+      (String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors))
+  | Ok config ->
+    let lanes = config.Runtime_schema.exact_output_lane_decls in
+    let key (lane : Runtime_schema.exact_output_lane_decl) = Runtime_schema.exact_lane_key lane.owner in
+    check (list string) "built-in and add-on lanes load into one list"
+      [ "librarian_exact"; "operator-quiz/author"; "operator-quiz/grade"; "team.quiz/author" ]
+      (List.map key lanes);
+    List.iter (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+        check bool (key lane ^ " reads back to its owner") true
+          (Runtime_schema.exact_lane_owner_of_key (key lane) = Some lane.owner))
+      lanes;
+    let find wanted = List.find (fun lane -> key lane = wanted) lanes in
+    check (list string) "an add-on lane keeps its cli_slots" [ "rt.x" ] (find "operator-quiz/author").cli_slot_ids;
+    check (option int) "and its output budget" (Some 8192) (find "operator-quiz/author").max_output_tokens;
+    check bool "an add-on lane may be off: none is required" false (find "operator-quiz/grade").enabled;
+    check string "a declaration id that is not a bare key is quoted in the table name"
+      "runtime.addon_exact_lanes.\"team.quiz\".author"
+      (Runtime_schema.exact_lane_table_name (find "team.quiz/author").owner);
+    (* The key splits at its last slash, so an output may never hold one. *)
+    List.iter (fun (label, declaration_id, output) ->
+        check bool (label ^ " cannot be an add-on lane") true
+          (Result.is_error (Runtime_schema.addon_lane ~declaration_id ~output)))
+      [ "an output with a slash", "a", "b/c"; "a blank declaration id", " ", "author";
+        "an upper-case output", "quiz", "Author" ]
+
+let test_addon_exact_output_lane_tables_are_refused_where_wrong () =
+  List.iter (fun (label, config, path) ->
+      match Runtime_toml.parse_string config with
+      | Ok _ -> failf "%s loaded" label
+      | Error errors ->
+        check bool (label ^ " is named at its table") true
+          (List.exists (fun (error : Runtime_toml.parse_error) -> String.equal error.path path) errors))
+    [ ( "an unknown key"
+      , "[runtime.addon_exact_lanes.quiz.author]\nslots = [\"slot-a\"]\nslost = [\"slot-b\"]\n"
+      , "runtime.addon_exact_lanes.quiz.author.slost" )
+    ; ( "an output name that is not one"
+      , "[runtime.addon_exact_lanes.quiz.Author]\nslots = [\"slot-a\"]\n"
+      , "runtime.addon_exact_lanes.quiz.Author" )
+    ; ( "an enabled lane with no slot"
+      , "[runtime.addon_exact_lanes.quiz.author]\nslots = []\n"
+      , "runtime.addon_exact_lanes.quiz.author" )
+    ; ( "a declaration with no output"
+      , "[runtime.addon_exact_lanes.quiz]\n"
+      , "runtime.addon_exact_lanes.quiz" )
+    ; ( "an output that is not a table"
+      , "[runtime.addon_exact_lanes.quiz]\nauthor = \"slot-a\"\n"
+      , "runtime.addon_exact_lanes.quiz.author" )
+    ; ( "a scalar in place of the tables"
+      , "[runtime]\naddon_exact_lanes = 1\n"
+      , "runtime.addon_exact_lanes" ) ]
+
 (* The routing rebirth (RFC-0206) dropped the lane strategy ADT — a lane is
    ordered by construction — but a [strategy = "ordered"] line survived in the
    seed config and fixtures because the lane parser silently skipped keys it
@@ -1796,7 +1862,7 @@ let test_repo_runtime_toml_loads () =
 let lane_signatures =
   config.exact_output_lane_decls
   |> List.map (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-    lane.id, lane.slot_ids)
+    (Runtime_schema.exact_lane_key lane.owner), lane.slot_ids)
   |> List.sort (fun (left, _) (right, _) -> String.compare left right)
 in
 check
@@ -1838,7 +1904,7 @@ check
 List.iter
   (fun (lane : Runtime_schema.exact_output_lane_decl) ->
      check bool
-       (Printf.sprintf "%s has at least one target" lane.id)
+       (Printf.sprintf "%s has at least one target" (Runtime_schema.exact_lane_key lane.owner))
        true
        (not (List.is_empty lane.slot_ids)))
   config.exact_output_lane_decls);
@@ -1974,7 +2040,7 @@ let assert_mandatory_exact_output_lanes_declared ~label path =
          match
            List.find_opt
              (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-                String.equal lane.id lane_id)
+                String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id)
              config.exact_output_lane_decls
          with
          | None ->
@@ -2050,7 +2116,8 @@ let test_boot_reports_every_unusable_mandatory_exact_output_lane_at_once () =
     |> List.map mandatory_lane_violation_pair
   in
   let lane_decl ?(slot_ids = []) ?(cli_slot_ids = []) id =
-    { Runtime_schema.id; enabled = true; slot_ids; cli_slot_ids; max_output_tokens = None; thinking = None }
+    { Runtime_schema.owner = Option.get (Runtime_schema.exact_lane_owner_of_key id)
+    ; enabled = true; slot_ids; cli_slot_ids; max_output_tokens = None; thinking = None }
   in
   match lane_ids with
   | [] | [ _ ] -> fail "this case needs at least two mandatory lanes"
@@ -2123,7 +2190,7 @@ let exact_slots_missing_body_deadline (config : Runtime_schema.config) =
             | Some { Runtime_schema.transport = Runtime_schema.Http _; exact_body_timeout_s = Some _; _ } ->
               None
             | Some { Runtime_schema.transport = Runtime_schema.Http _; exact_body_timeout_s = None; id; _ } ->
-              Some (Printf.sprintf "%s slot %s (provider %s)" lane.id slot_id id))
+              Some (Printf.sprintf "%s slot %s (provider %s)" (Runtime_schema.exact_lane_key lane.owner) slot_id id))
          lane.slot_ids)
     config.exact_output_lane_decls
 ;;
@@ -2222,7 +2289,7 @@ let test_release_evidence_fixture_lanes_resolve_without_environment_credentials 
          match
            List.find_opt
              (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-                String.equal lane.id lane_id)
+                String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id)
              config.exact_output_lane_decls
          with
          | None ->
@@ -2327,7 +2394,7 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
                  | Error _ ->
                    failf
                      "exact-output lane %s target %s must resolve with fixture credentials"
-                     lane.id
+                     (Runtime_schema.exact_lane_key lane.owner)
                      target_ref
                  | Ok target ->
                    (match
@@ -2340,12 +2407,12 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
                     | Error _ ->
                       failf
                         "exact-output lane %s target %s must satisfy Json_syntax"
-                        lane.id
+                        (Runtime_schema.exact_lane_key lane.owner)
                         target_ref))
               | Error _ ->
                 failf
                   "exact-output lane %s target %s must exist in the frozen catalog"
-                  lane.id
+                  (Runtime_schema.exact_lane_key lane.owner)
                   target_ref)
            lane.slot_ids)
       config.exact_output_lane_decls
@@ -4505,7 +4572,7 @@ let gaps_after_boot_load content =
 let gap_triples gaps =
   List.map
     (fun (gap : Runtime_config_error.exact_slot_body_deadline_gap) ->
-       Printf.sprintf "%s/%s/%s" gap.lane_id gap.slot_id gap.provider_id)
+       Printf.sprintf "%s/%s/%s" (Runtime_schema.exact_lane_key gap.owner) gap.slot_id gap.provider_id)
     gaps
 ;;
 
@@ -4680,7 +4747,7 @@ let test_catalog_and_gap_degradation_name_both_reasons () =
     }
   in
   let exact_slots : Runtime_config_error.exact_slot_degradation =
-    { gaps = [ { lane_id = "librarian_exact"; slot_id = "local.sample"; provider_id = "local" } ]
+    { gaps = [ { owner = Runtime_schema.Builtin Standalone_lane.Librarian; slot_id = "local.sample"; provider_id = "local" } ]
     ; emptied_lane_ids = [ "librarian_exact" ]
     }
   in
@@ -7163,6 +7230,10 @@ let () =
             test_exact_output_lane_rejects_unknown_key;
           test_case "exact-output lane rejects unknown lane ids" `Quick
             test_exact_output_lane_rejects_unknown_lane_id;
+          test_case "add-on exact-output lanes load with built-in rules" `Quick
+            test_addon_exact_output_lanes_load_with_builtin_rules;
+          test_case "add-on exact-output lane tables are refused where wrong" `Quick
+            test_addon_exact_output_lane_tables_are_refused_where_wrong;
           test_case "lane rejects unknown keys" `Quick
             test_lane_rejects_unknown_key;
           test_case "model rejects unknown keys" `Quick

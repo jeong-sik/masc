@@ -465,6 +465,46 @@ let test_client_switch_cancel_reaps_leader_and_stops_descendant () =
       Eio.Process.signal sibling Sys.sigkill))
 ;;
 
+(* Startup failure cleanup may already be waiting under protection before
+   Retire cancels the process switch. Its reaper must publish the original exit
+   without waiting for a switch release hook that cannot run yet. *)
+let test_cancel_settles_protected_await () =
+  List.iter (fun cleanup_already_started ->
+    with_group_fixture (fun env marker ->
+      let clock = Eio.Stdenv.clock env in
+      let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:2. in
+      let original = ref None and descendant = ref None in
+      let entered, notify = Eio.Promise.create () in
+      Eio.Time.with_timeout_exn clock 10. (fun () ->
+        Eio.Fiber.first
+          (fun () -> Eio.Switch.run (fun sw ->
+            let proc = Eio.Process.spawn ~sw mgr
+                ["python3"; "-c"; group_fixture; marker; "ignore"] in
+            original := Some proc;
+            descendant := Some (wait_for_marker clock marker);
+            let settle () = Eio.Cancel.protect (fun () ->
+              Eio.Process.signal proc Sys.sigterm;
+              if cleanup_already_started then Eio.Promise.resolve notify ();
+              ignore (Eio.Process.await proc)) in
+            if cleanup_already_started then settle ()
+            else
+              match Eio.Promise.resolve notify (); Eio.Fiber.await_cancel () with
+              | () -> fail "cancellation fixture resumed normally"
+              | exception (Eio.Cancel.Cancelled _ as exn) -> settle (); raise exn))
+          (fun () -> Eio.Promise.await entered));
+      (match !original with
+       | None -> fail "original child was not started"
+       | Some proc ->
+         ignore (Eio.Process.await proc);
+         (match Unix.waitpid [Unix.WNOHANG] (Eio.Process.pid proc) with
+          | exception Unix.Unix_error (Unix.ECHILD, _, _) -> ()
+          | _ -> fail "cancelled protected cleanup left the original child unreaped"));
+      match !descendant with
+      | Some pid -> assert_descendant_stopped env pid
+      | None -> fail "original descendant was not observed"))
+    [false; true]
+;;
+
 let test_native_command_cancel_cleans_closed_pipe_descendant () =
   with_group_fixture (fun env marker ->
     let clock = Eio.Stdenv.clock env in
@@ -563,6 +603,8 @@ let () =
             test_group_normal_exit_reaps_in_long_lived_switch
         ; test_case "client switch cancellation owns leader and descendants" `Quick
             test_client_switch_cancel_reaps_leader_and_stops_descendant
+        ; test_case "switch cancellation settles protected original-child await" `Quick
+            test_cancel_settles_protected_await
         ; test_case "native command cancellation cleans its group" `Quick
             test_native_command_cancel_cleans_closed_pipe_descendant ])
     ; ( "parity with eio_posix"

@@ -92,12 +92,16 @@ let run_with_commit ~commit_receipt ~env ~owner ~directory work =
         | Error ((Transport _|Protocol _|Remote {code=No_such_window|No_such_alert|Unexpected_alert_open|Other _;_}) as error) -> Error error in
       let driver=Browser_webdriver.create ?binary:configuration.binary ?locate ~request:transport
         ~start_downloads:(Browser_bidi_downloads.start ~sw ~env ~root:(Filename.concat directory "downloads")
-          ~publish:(fun _ -> Error "browser downloads require the host artifact broker")) () in
-      Eio.Switch.on_release sw (fun () ->
+          ~publish:(fun path -> Eio_unix.run_in_systhread (fun () -> Browser_addon_owner.publish_download owner path))) () in
+      let close_original=Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
         Browser_addon_owner.revoke owner;
         match close ~env ~endpoint ~uncertain driver with
-        | Ok () -> clean:=true
-        | Error error -> Printf.eprintf "browser session cleanup unconfirmed: %s\n%!" (Browser_webdriver.error_message error));
+        | Ok () -> clean:=true;Ok ()
+        | Error error -> Error (Browser_webdriver.error_message error)) in
+      Eio.Switch.on_release sw (fun () ->
+        match Eio.Lazy.force close_original with
+        | Ok () -> ()
+        | Error detail -> Printf.eprintf "browser session cleanup unconfirmed: %s\n%!" detail);
       ready ~clock ~pool ~endpoint ~process;
       let execute verb = if !uncertain then
           Browser_lane.Rejected_before_effect "owned browser session authority is unknown; detach and inspect cleanup"
@@ -111,7 +115,17 @@ let run_with_commit ~commit_receipt ~env ~owner ~directory work =
           else Browser_webdriver.observe_document_if_idle driver ~tab_id) ~cleanup with
        | Ok () -> () | Error detail -> invalid_arg detail);
       Eio.Promise.resolve ready_u (Ok ());
-      Eio.Promise.await stopping);
+      Eio.Promise.await stopping;
+      (* BiDi's reader is a regular child of this switch. Close the original
+         session before switch join so its stop signal can settle that reader;
+         the release hook observes the same once-only cleanup on cancellation. *)
+      (match Eio.Lazy.force close_original with
+       | Ok () -> ()
+       | Error detail ->
+         (* A rejected DELETE leaves the regular BiDi reader alive. Fail this
+            original switch so cancellation joins its reader and owned driver;
+            returning normally would wait for that reader forever. *)
+         raise (Sys_error ("browser session cleanup unconfirmed: " ^ detail))));
       Ok ()
     with
     | Eio.Cancel.Cancelled _ as exn ->
@@ -125,8 +139,10 @@ let run_with_commit ~commit_receipt ~env ~owner ~directory work =
         ignore (Eio.Promise.try_resolve settle (Error "browser cleanup is unconfirmed"));
         raise exn in
     ignore (Eio.Promise.try_resolve ready_u outcome);
-    let outcome=if !clean && not !uncertain then Ok ()
-      else Error "owned browser cleanup is unconfirmed" in
+    let outcome=match outcome with
+      | Error _ -> outcome
+      | Ok () -> if !clean && not !uncertain then Ok ()
+        else Error "owned browser cleanup is unconfirmed" in
     (* Once driver teardown finishes, cancellation must not strand the foreground
        cleanup join. Commit its receipt and publish terminal completion together. *)
     Eio.Cancel.protect (fun () ->

@@ -35,7 +35,7 @@ let scenario () =
       let call command=match Browser_addon_client.call client ~on_cancel_after_dispatch:(fun () -> ()) command |> ok with
         | W.Model_reply value -> value
         | Service_refusal {message;_} -> fail message
-        | Snapshot_result _|Poll_result _|Receipt|Issue_result _ -> fail "unexpected model service result" in
+        | Snapshot_result _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> fail "unexpected model service result" in
       let state after=call (W.Model_wait {after}) |> Lane_addon_host_request.availability_of_json |> ok in
       let deliver id result=call (W.Model_result (Lane_addon_host_request.result_arguments ~request_id:id ~result)) in
       let work () =
@@ -50,12 +50,12 @@ let scenario () =
           (match Lane_addon_host_request.listing_of_json (call W.Model_requests) |> ok with requests -> List.length requests);
         check bool "wrong incarnation cannot access a model port" true
           (match Owner.dispatch owner {W.incarnation="0b000000-0000-4000-8000-000000000008";command=W.Model_requests} with
-           | W.Service_refusal _ -> true | Snapshot_result _|Model_reply _|Poll_result _|Receipt|Issue_result _ -> false);
+           | W.Service_refusal _ -> true | Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
         let invalid=Owner.dispatch owner {W.incarnation;command=W.Model_result
           (Lane_addon_host_request.result_arguments ~request_id:"first" ~result:(answer "menu" |> function
             | `Assoc fields -> `Assoc (("extra",`Bool true)::fields) | value -> value))} in
         check bool "unknown final fields refuse before consumption" true
-          (match invalid with W.Service_refusal _ -> true | Snapshot_result _|Model_reply _|Poll_result _|Receipt|Issue_result _ -> false);
+          (match invalid with W.Service_refusal _ -> true | Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
         check bool "no answer was supplied by a malformed result" true (not (Eio.Promise.is_resolved waiting));
         check bool "valid result durably received" true
           (deliver "first" (answer "menu")=`Assoc ["accepted",`Bool true]);

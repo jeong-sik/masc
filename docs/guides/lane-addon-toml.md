@@ -194,6 +194,11 @@ sources = []
 viewport 결속·정리 검사는 계속 적용된다. Hook을 임의 코드로 삽입하는 설정은 없으며,
 현재 제공하는 middleware 이름과 패키지가 선언한 Exact Output만 선택할 수 있다.
 
+완료된 owned Gecko 다운로드는 이 선택과 별개로 호스트가 아티팩트로 보관한다.
+원본 응답 기록 뒤 파일 전달을 끝내고, 그 최종 응답에 선택한 출력 검증을 적용한다.
+`tool_hooks = []`, `exact_outputs = []`에서도 같은 파일 권한·전달·정리 경계를 거친다.
+전달이 끝난 응답은 worker 경로 대신 `keeper_artifact_read` 참조를 제공한다.
+
 ## 반영 시점과 화면 읽기
 
 서버 시작 시 한 번 읽고, 기존 maintenance cadence를 쓰는 독립 Pulse에서 다시 읽는다.

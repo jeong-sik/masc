@@ -68,7 +68,7 @@ let mcp owner =
         match Owner.dispatch owner {W.incarnation=Owner.incarnation owner;command} with
         | W.Model_reply value -> Ok {S.content=[];is_error=Some false;structured_content=Some value;_meta=None}
         | W.Service_refusal {message;_} -> Error message
-        | Snapshot_result _|Poll_result _|Receipt|Issue_result _ -> Error "unexpected model broker reply") server in
+        | Snapshot_result _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> Error "unexpected model broker reply") server in
     add server Lane_addon_types.host_requests_tool (fun _ -> W.Model_requests)
     |> fun server -> add server Lane_addon_types.host_result_tool (fun arguments -> W.Model_result arguments) in
   let schema = `Assoc ["type",`String "object";"properties",`Assoc [

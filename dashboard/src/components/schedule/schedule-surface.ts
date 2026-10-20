@@ -127,10 +127,10 @@ export function ScheduleSurface() {
   const [pruning, setPruning] = useState(false)
   const selectedScheduleId = routeScheduleId
   const [exactSchedule, setExactSchedule] = useState<ExactScheduleState>({ kind: 'idle' })
-  // Keeper-lane wake evidence + background are large operator diagnostics
-  // (a card per keeper, dozens of lane rows). Collapsed AND unmounted by default
-  // so the schedule stays the light, primary content; the panels only mount when
-  // the operator opens them.
+  // Keeper-lane wake evidence is a large operator diagnostic (a card per
+  // keeper, dozens of lane rows). Collapsed AND unmounted by default so the
+  // schedule stays the light, primary content; the panel only mounts when the
+  // operator opens it.
   const [diagOpen, setDiagOpen] = useState(false)
 
   useEffect(() => {
@@ -373,10 +373,10 @@ export function ScheduleSurface() {
 
         ${'' /* Secondary diagnostics live BELOW the schedule and are unmounted
               until opened: the actual schedule (calendar/list) is the primary,
-              above-the-fold content. The keeper-lane wake evidence + background
-              panels are large operator diagnostics (a card per keeper, dozens of
-              lane rows) that previously buried the schedule and rendered on every
-              tick. Lazy-mounting them keeps the default surface light. */}
+              above-the-fold content. The keeper-lane wake evidence panel is a
+              large operator diagnostic (a card per keeper, dozens of lane rows)
+              that previously buried the schedule and rendered on every tick.
+              Lazy-mounting it keeps the default surface light. */}
         <section class="ov-card mt-4 sch-diag" data-testid="schedule-diagnostics">
           <button
             type="button"

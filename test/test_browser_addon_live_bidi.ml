@@ -180,10 +180,10 @@ let child mode () =
   check bool ("isolated owned live case " ^ mode) true (snd (Unix.waitpid [] pid)=Unix.WEXITED 0)
 let () =
   if Array.length Sys.argv=5 && Sys.argv.(1)="--case" then (
-    launcher:=Sys.argv.(3);guardian:=Sys.argv.(4);scenario Sys.argv.(2))
+    launcher:=Unix.realpath Sys.argv.(3);guardian:=Unix.realpath Sys.argv.(4);scenario Sys.argv.(2))
   else (
     if Array.length Sys.argv<>3 then invalid_arg "expected original native launcher and process guardian";
-    launcher:=Sys.argv.(1);guardian:=Sys.argv.(2);
+    launcher:=Unix.realpath Sys.argv.(1);guardian:=Unix.realpath Sys.argv.(2);
     run ~argv:[|Sys.argv.(0)|] "owned live BiDi identity and retirement" ["native",[
       test_case "occupied port is never adopted" `Quick (child "occupied");
       test_case "wrong process refuses before page input" `Quick (child "wrong-pid");

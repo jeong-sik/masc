@@ -9,6 +9,7 @@ let unknown = function
   | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false
 
 let scenario () = Eio_main.run (fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5. (fun () -> Eio.Switch.run (fun sw ->
     let incarnation="0b000000-0000-4000-8000-000000000003" in
     let owner=ok (Owner.create ~incarnation) in

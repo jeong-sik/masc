@@ -442,6 +442,35 @@ status: reference
   → [Runtime_candidate_backpressure](../../lib/runtime/runtime_candidate_backpressure.mli) ·
   [runtime resolved projection](../../lib/server/server_dashboard_runtime_resolved_json.mli)
 
+**Path Rest (경로 휴식)**
+: Keeper turn의 runtime walk가 한 경로를 지금 보내지 않고 기다리게 두는 상태와 그 해제
+  규칙. 드라이버는 경로마다 `Path_resting { release_at; walk_promotes_at_release }`로
+  적고(`lib/keeper/keeper_turn_driver.ml:304`), 기다릴 때는 다음 발송 시각을
+  `Wait_until { release_at; waiting_on; basis }`로 남긴다(`:320`). walk는 head부터
+  보내므로 head가 쉬면 head의 해제 시각까지 기다리고, 뒤 경로가 walk 순서에서 그
+  시각에 다시 올라오는 경우에만 기다림이 짧아진다(`:432`).
+  - 세 층을 구분한다: **닫힌 quota 창**은 provider가 보고한 관측이고, **Runtime Rate
+    Limit**은 그 후보의 프로세스 로컬 증거이며, 경로 휴식은 그 증거를 읽어 드라이버가
+    정한 대기 결정이다.
+  - 해제가 무엇을 푸는지는 이름(`Rest_dated`/`Rest_until_answered`)이 아니라 표시
+    `walk_promotes_at_release`가 정한다(`:335`). provider가 실제로 시각을 말한 휴식
+    (쓸 만한 retry-after가 있는 rate limit, 재개 시각이 관측된 quota 창)만 그 시각에
+    walk가 그 경로를 다시 올린다. provider가 시각을 말하지 않은 rate limit은 바닥 시각을
+    둔 `Rest_dated`가 되고, 시각 없는 quota 관측은 `Rest_until_answered`(`:340`)가 되어
+    해제 때 기다림만 끝나며 순서 강등은 성공 답까지 남는다(`:384`). `Rest_until_answered`
+    의 대기 자체도 `now`에서 굴러가는 바닥 시각으로 풀린다(`:394`).
+  - 실패한 시도는 휴식이 아니다. 그 경로를 후보가 답할 때까지 뒤로 미룰 뿐, 발송을
+    기다리게 하지 않는다(`:389`, `RFC-0458 §3.4`).
+  - 완료 검증도 같은 저장소를 읽는다. 검증 루프는 한 후보의 실패를
+    `Reviews_again`·`Model_absent`·`Producer_must_act` 중 하나로 분류하고
+    (`lib/task/anti_rationalization.ml:570`), provider가 말한 재개 시각이 아직 앞이면
+    다시 검토한다(`:536`). 이 분류는 다시 검토를 요청할 뿐, 검토를 막는 관문이 아니다.
+    한 번의 호출 안에서 재시도를 판단하는 `Agent_core.Error.is_retryable`은 이 질문에
+    답하지 못하므로, 시각을 말한 `HardQuota`에서도 재검토를 멈추지 않는다(#44227).
+  → [RFC-provider-path-rest](../rfc/RFC-provider-path-rest.md) ·
+  [Keeper_turn_driver](../../lib/keeper/keeper_turn_driver.ml) ·
+  [anti_rationalization](../../lib/task/anti_rationalization.ml)
+
 **Provider Admission (제공자 동시 요청 진입)**
 : 소비자가 `max_concurrent_requests`를 선언한 제공자 계정의 동시 완료 요청 수를
   제한하는 Agent Core의 진입 절차. 같은 `kind`·`base_url`·API 키 식별자를 쓰는

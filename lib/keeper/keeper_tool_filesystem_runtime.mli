@@ -262,10 +262,14 @@ end
 val read_sandbox_raw_prefix :
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
   config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
-  path:string -> ?cwd:string -> max_bytes:int -> unit -> (string, string) result
+  path:string -> ?cwd:string -> max_bytes:int -> unit ->
+  (string, Keeper_sandbox_read_backend.read_error) result
 (** Contained raw binary prefix, bounded before endpoint or Docker capture.
     Resolves like Read and never falls back to a host read. The bytes are the
     file's own: unlike Read's line window, nothing rewrites paths in them. A
+    path that does not exist or is not a regular file comes back as
+    [Missing_file] or [Not_a_file] so callers can refuse instead of reporting
+    a runtime fault; [Read_failed] stays a transport or capture fault. A
     remote Keeper's path under its endpoint's declared roots
     ({!Keeper_sandbox_remote_lane.declared_endpoint_path_of_args}) is the
     endpoint's own path: it skips the host containment check and is read as

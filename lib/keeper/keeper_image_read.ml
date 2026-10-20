@@ -25,8 +25,15 @@ let handle ?turn_sandbox_factory ~config ~(meta : Keeper_meta_contract.keeper_me
             Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
               ?turn_sandbox_factory ~config ~meta ~path
               ~max_bytes:(Keeper_vision_tool.max_image_bytes () + 1) ()
-            |> Result.map_error (fun detail ->
-                 Tool_result.Runtime_failure, "sandbox_image_read_failed", detail)
+            |> Result.map_error (function
+                 | Keeper_sandbox_read_backend.Missing_file detail ->
+                   Tool_result.Workflow_rejection, "path_not_found", detail
+                 | Keeper_sandbox_read_backend.Not_a_file detail ->
+                   Tool_result.Workflow_rejection, "path_not_a_file", detail
+                 | Keeper_sandbox_read_backend.Read_refused detail ->
+                   Tool_result.Workflow_rejection, "path_read_refused", detail
+                 | Keeper_sandbox_read_backend.Read_failed detail ->
+                   Tool_result.Runtime_failure, "sandbox_image_read_failed", detail)
         | Artifact handle ->
             Keeper_vision_tool.load_artifact
               ~dir:(Keeper_vision_tool.vision_store_dir ~keeper_name:meta.name) handle

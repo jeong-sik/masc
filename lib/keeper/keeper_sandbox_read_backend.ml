@@ -316,6 +316,12 @@ let run_command_with_capture ?turn_sandbox_factory
           | Error detail -> Error detail
           | Ok (status, _, _, Some files) ->
             (match status, files.stdout with
+             | Unix.WEXITED code, _
+               when code <> 0 && List.exists (fun ok -> ok = code) ok_exit_codes ->
+               (* A caller-declared non-zero exit (e.g. a read sentinel) is a
+                  classified outcome, not a capture fault; it carries no
+                  payload. *)
+               Ok (status, "")
              | Unix.WEXITED 0, Process_output_capture.Complete_file {path; byte_length} ->
                (match Fs_compat.load_owned_regular_file ~ownership_root:capture_dir path with
                 | Ok (Some bytes) when String.length bytes = byte_length -> Ok (status, bytes)
@@ -448,9 +454,13 @@ type read_error =
   | Missing_file of string
   | Not_a_file of string
   | Read_failed of string
+  | Read_refused of string
 
 let read_error_to_string = function
-  | Missing_file detail | Not_a_file detail | Read_failed detail -> detail
+  | Missing_file detail
+  | Not_a_file detail
+  | Read_failed detail
+  | Read_refused detail -> detail
 
 (* A window that starts past line 1 streams from that line, so the byte bound
    applies to the window and not to the file's prefix. Bounding the prefix
@@ -576,13 +586,65 @@ let read_complete_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host
 
 let read_raw_prefix ?turn_sandbox_factory ~config ~(meta : keeper_meta)
     ~host_path ~max_bytes ~timeout_sec () =
-  let ( let* ) = Result.bind in
-  if max_bytes <= 0 then Error "Raw prefix byte limit must be positive" else
-  let* path = container_path_of_host ~config ~meta ~host_path in
+  if max_bytes <= 0 then
+    Error (Read_failed "Raw prefix byte limit must be positive")
+  else
   (* Binary capture must retain exact bytes; limiting its text projection would
-     corrupt media. Bound the producing command instead, including endpoint
-     reads where the host cannot stat the source. *)
-  let* _, bytes = run_command_with_capture ?turn_sandbox_factory ~config ~meta
-      ~command_argv:["head"; "-c"; string_of_int max_bytes; path]
-      ~max_bytes:None ~timeout_sec () in
-  Ok bytes
+     corrupt media. Bound the producing command instead ([head -c] below) and
+     capture with [max_bytes:None] so remote stays on [Binary_bytes] and the
+     runtimes stay on their output-file capture. [read_file] classifies a
+     missing path with sentinel exit codes from the read script; the raw
+     prefix is the same classification without the line window. There is no
+     host [Unix.stat] pre-check: a docker host path may not exist on this
+     host, and a directory already maps to [Not_a_file] via [! -f], so the
+     sentinels are the single classifier on every profile.
+
+     The frozen Turn_runtime binary capture honours [ok_exit_codes], so the
+     sentinel exits classify as [Missing_file] / [Not_a_file] there too. *)
+  match container_path_of_host ~config ~meta ~host_path with
+  | Error detail -> Error (Read_failed detail)
+  | Ok backend_path ->
+    let profile_label =
+      Keeper_types_profile.sandbox_profile_to_string meta.sandbox_profile
+    in
+    let read_with_sentinels () =
+      let missing_exit = read_window_missing_exit
+      and not_a_file_exit = read_window_not_a_file_exit in
+      match
+        run_command_with_capture ?turn_sandbox_factory ~config ~meta
+          ~ok_exit_codes:[ 0; missing_exit; not_a_file_exit ]
+          ~command_argv:
+            [ "sh"
+            ; "-c"
+            ; Printf.sprintf
+                {|if [ ! -e "$1" ]; then exit %d; fi; if [ ! -f "$1" ]; then exit %d; fi; exec < "$1" || exit 1; head -c "$2"|}
+                missing_exit not_a_file_exit
+            ; "sh"
+            ; backend_path
+            ; string_of_int (max 0 max_bytes)
+            ]
+          ~max_bytes:None ~timeout_sec ()
+      with
+      | Error detail -> Error (Read_failed detail)
+      | Ok (Unix.WEXITED 0, bytes) -> Ok bytes
+      | Ok (Unix.WEXITED code, _) when code = missing_exit ->
+        Error
+          (Missing_file
+             (Printf.sprintf "%s_read_failed: path_not_found: %s" profile_label
+                host_path))
+      | Ok (Unix.WEXITED code, _) when code = not_a_file_exit ->
+        Error
+          (Not_a_file
+             (Printf.sprintf
+                "%s_read_failed: path_is_not_a_file: %s (Read requires a regular \
+                 file; to list a directory use Execute with ls, e.g. \
+                 argv=['ls','-la','%s'])"
+                profile_label host_path host_path))
+      (* [ok_exit_codes] admits only the codes above. *)
+      | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _) ->
+        Error
+          (Read_failed
+             (Printf.sprintf "%s_read_failed: unexpected status for %s"
+                profile_label host_path))
+    in
+    read_with_sentinels ()

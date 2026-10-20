@@ -2235,6 +2235,85 @@ let enqueue_action ?caller m args =
           wake ~request:Run_actions e;
           Ok (Lane_addon_action.to_json receipt)))
 
+type scheduled_act_refusal =
+  | Declarations_unread
+  | Declarations_incomplete
+  | Declaration_missing
+  | Declaration_disabled
+  | No_live_instance
+  | Request_id_reused
+  | Action_refused of string
+type scheduled_act_error =
+  | Scheduled_act_refused of scheduled_act_refusal
+  | Scheduled_act_failed of string
+let scheduled_act_refusal_label = function
+  | Declarations_unread -> "declarations_unread"
+  | Declarations_incomplete -> "declarations_incomplete"
+  | Declaration_missing -> "declaration_missing"
+  | Declaration_disabled -> "declaration_disabled"
+  | No_live_instance -> "no_live_instance"
+  | Request_id_reused -> "request_id_reused"
+  | Action_refused _ -> "action_refused"
+(* RFC operator-quiz §4.7. A redelivered occurrence names the same request id,
+   and its receipt may sit under an instance that has since gone away. Every
+   instance the declaration owned is read before a new receipt is queued: the
+   read writes the receipt's terminal when no live worker owns it, so the
+   action is never queued twice. *)
+let scheduled_act ~config ~access ~requester ~declaration_id ~request_id ~action =
+  Eio_context.run_on_owner_domain (fun () ->
+    let m = manager config in
+    let refused reason = Error (Scheduled_act_refused reason) in
+    match m.configuration_status with
+    | None -> refused Declarations_unread
+    | Some reading ->
+      match List.find_opt (fun (d : Lane_addon_config.declaration) -> String.equal d.id declaration_id)
+              reading.snapshot.declarations with
+      | None when not reading.snapshot.complete -> refused Declarations_incomplete
+      | None -> refused Declaration_missing
+      | Some d when not d.enabled -> refused Declaration_disabled
+      | Some d ->
+        let inventory = inventory_at_root ~root:(Lane_addon_store.root m.store) in
+        let unreadable = List.exists (fun (issue : inventory_issue) ->
+          owner_concerns ~id:declaration_id ~source_path:d.source_path issue.issue_owner
+          && not issue.issue_terminal) inventory.issues in
+        let owned = List.filter_map (fun (instance : inventory_instance) ->
+          match instance.configuration with
+          | Some owner when String.equal owner.id declaration_id -> Some instance.instance_id
+          | Some _ | None -> None) inventory.instances in
+        match unreadable, Lane_addon_action.canonical action with
+        | true, _ -> refused Declarations_incomplete
+        | false, Error detail -> refused (Action_refused detail)
+        | false, Ok action ->
+          let previous = Eio.Mutex.use_ro m.action_mutex (fun () ->
+            List.fold_left (fun found instance_id -> match found with
+              | Ok (Some _) | Error _ -> found
+              | Ok None -> retained_action_unlocked m ~instance_id ~request_id) (Ok None) owned) in
+          match previous with
+          | Error detail -> Error (Scheduled_act_failed detail)
+          | Ok (Some (receipt : Lane_addon_action.receipt)) ->
+            if String.equal receipt.requester requester && Yojson.Safe.equal receipt.action action
+            then Ok receipt else refused Request_id_reused
+          | Ok None ->
+            let live = List.find_opt (fun (e : entry) ->
+              e.running && not e.stopping
+              && match e.configuration with
+                 | Some owner -> String.equal owner.id declaration_id
+                 | None -> false) (entries m) in
+            match live with
+            | None -> refused No_live_instance
+            | Some e ->
+              match require_read access e.visibility with
+              | Error detail -> refused (Action_refused detail)
+              | Ok () ->
+                let args = [ "instance_id", `String e.instance_id; "expected_incarnation", `String e.instance_id
+                           ; "request_id", `String request_id; "action", action ] in
+                match enqueue_action ~caller:requester m args with
+                | Error (Request_rejected detail) -> refused (Action_refused detail)
+                | Error (Runtime_failed detail) -> Error (Scheduled_act_failed detail)
+                | Ok json ->
+                  Lane_addon_action.of_json json
+                  |> Result.map_error (fun detail -> Scheduled_act_failed detail))
+
 let rec fleet_error_to_string = function
   | Fleet_ledger.Invalid_input e | Corrupt e | Io_error e -> e
   | Conflict -> "Broadcast operation contradicts its durable intention"

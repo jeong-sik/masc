@@ -53,6 +53,15 @@ type dispatch_receipt =
       ; occurrence_status : keeper_wake_occurrence_status
       ; activation_outcome : keeper_wake_activation_outcome
       }
+  | Lane_act_handed_over of
+      { installation_id : string
+      ; instance_id : string
+      ; request_id : string
+      ; schedule_instance_id : string
+      ; schedule_id : string
+      }
+      (** A [masc.lane_act] occurrence whose action receipt is durable. It
+          names the receipt; the receipt says whether the worker ran it. *)
 
 val dispatch_receipt_of_detail :
   Yojson.Safe.t -> (dispatch_receipt, string) result

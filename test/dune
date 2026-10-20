@@ -2634,6 +2634,7 @@
 
 (include stanzas/test_lane_addon_live_route.inc)
 (include stanzas/test_lane_addon_ask_routes.inc)
+(include stanzas/test_lane_addon_scheduled_act.inc)
 
 (include stanzas/test_lane_addon_lifecycle.inc)
 

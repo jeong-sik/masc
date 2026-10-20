@@ -368,6 +368,7 @@ let recurrence_of_arg args =
    about what this tool asks a caller for belongs. *)
 let stamped_kind : Schedule_payload_projection.known_kind -> string = function
   | Schedule_payload_projection.Keeper_wake -> Schedule_supported_kinds.keeper_wake
+  | Schedule_payload_projection.Lane_act -> Schedule_supported_kinds.lane_act
 ;;
 
 (* One kind exists, so the tool takes its fields directly instead of an

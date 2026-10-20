@@ -17,7 +17,11 @@
 
 let keeper_wake = "masc.keeper_wake"
 
-let supported = [ keeper_wake ]
+(* One action handed to a declared Lane Add-on installation's live worker
+   (RFC operator-quiz §4.7). *)
+let lane_act = "masc.lane_act"
+
+let supported = [ keeper_wake; lane_act ]
 
 let supported_list_string () = String.concat ", " supported
 

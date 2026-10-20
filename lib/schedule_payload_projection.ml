@@ -1,7 +1,7 @@
 (* TEL-OK: pure schedule payload projection/validation. Runtime telemetry for
    unsupported creation/dispatch lives at the tool/server caller boundaries. *)
 
-type known_kind = Keeper_wake
+type known_kind = Keeper_wake | Lane_act
 
 type support_status =
   | Supported
@@ -39,15 +39,15 @@ let ( let* ) = Result.bind
 
 let known_kind_to_string = function
   | Keeper_wake -> Schedule_supported_kinds.keeper_wake
+  | Lane_act -> Schedule_supported_kinds.lane_act
 ;;
 
-let dispatch_tool_name = function
-  | Keeper_wake -> Schedule_supported_kinds.keeper_wake
-;;
+let dispatch_tool_name = known_kind_to_string
 
-let known_kinds = [ Keeper_wake ]
+let known_kinds = [ Keeper_wake; Lane_act ]
 let supported_payload_kinds = List.map known_kind_to_string known_kinds
 let keeper_wake_kind = known_kind_to_string Keeper_wake
+let lane_act_kind = known_kind_to_string Lane_act
 
 let support_status_to_string = function
   | Supported -> "supported"
@@ -69,9 +69,8 @@ let dispatch_rejection_message = function
     "unsupported schedule payload kind: " ^ raw_kind
 ;;
 
-let classify_kind = function
-  | kind when String.equal kind (known_kind_to_string Keeper_wake) -> Some Keeper_wake
-  | _ -> None
+let classify_kind kind =
+  List.find_opt (fun known -> String.equal kind (known_kind_to_string known)) known_kinds
 ;;
 
 let assoc_string key fields =
@@ -246,6 +245,34 @@ let validate_keeper_wake_body body =
        |> Result.map (fun _ -> ()))
 ;;
 
+(* Whether the action fits the package's schema is a question for the worker
+   that will run it, so dispatch checks that, not creation (RFC operator-quiz
+   §4.7). *)
+let lane_act_body_fields = [ "installation_id"; "action" ]
+
+let validate_lane_act_body body =
+  let unknown =
+    List.filter (fun (name, _) -> not (List.mem name lane_act_body_fields)) body
+    |> List.map fst
+    |> List.sort_uniq String.compare
+  in
+  match unknown, assoc_string "installation_id" body, List.assoc_opt "action" body with
+  | _ :: _, _, _ ->
+    Error
+      (Printf.sprintf
+         "%s payload body has unknown field(s): %s (known: %s)"
+         lane_act_kind
+         (String.concat ", " unknown)
+         (String.concat ", " lane_act_body_fields))
+  | [], None, _ -> Error (lane_act_kind ^ " payload requires non-empty body.installation_id")
+  | [], Some _, Some (`Assoc _) -> Ok ()
+  | [], Some _, (Some _ | None) -> Error (lane_act_kind ^ " payload requires object body.action")
+;;
+
+let validate_body = function
+  | Keeper_wake -> validate_keeper_wake_body
+  | Lane_act -> validate_lane_act_body
+;;
 
 let validate_request_payload_for_creation_detailed ~payload =
   match payload with
@@ -253,22 +280,22 @@ let validate_request_payload_for_creation_detailed ~payload =
     (match assoc_string "kind" fields with
      | Some raw_kind ->
        (match classify_kind raw_kind with
-        | Some Keeper_wake ->
+        | Some kind ->
+          let name = known_kind_to_string kind in
           let* body =
             match List.assoc_opt "body" fields with
             | Some (`Assoc body) -> Ok body
             | Some _ ->
               Error
                 (Creation_invalid_supported_payload
-                   (Keeper_wake, keeper_wake_kind ^ " payload.body must be an object"))
+                   (kind, name ^ " payload.body must be an object"))
             | None ->
               Error
                 (Creation_invalid_supported_payload
-                   (Keeper_wake, keeper_wake_kind ^ " payload requires object body"))
+                   (kind, name ^ " payload requires object body"))
           in
-          validate_keeper_wake_body body
-          |> Result.map_error (fun msg ->
-            Creation_invalid_supported_payload (Keeper_wake, msg))
+          validate_body kind body
+          |> Result.map_error (fun msg -> Creation_invalid_supported_payload (kind, msg))
         | None -> Error (Creation_unsupported_kind raw_kind))
      | None -> Error (Creation_invalid_payload "payload.kind is required"))
   | _ -> Error (Creation_invalid_payload "payload must be a JSON object")
@@ -289,7 +316,7 @@ let creation_keeper_wake_target ~payload =
                 Error
                   (keeper_wake_kind ^ " payload requires non-empty body.keeper_name"))
            | Some _ | None -> Error (keeper_wake_kind ^ " payload.body must be an object"))
-        | None -> Ok None)
+        | Some Lane_act | None -> Ok None)
      | None -> Error "payload.kind is required")
   | _ -> Error "payload must be a JSON object"
 ;;
@@ -319,13 +346,12 @@ let dispatch_view_detailed request =
     payload_view request |> Result.map_error (fun msg -> Dispatch_invalid_payload msg)
   in
   match classify_kind view.raw_kind with
-  | Some Keeper_wake ->
+  | Some kind ->
     let* () =
-      validate_keeper_wake_body view.body
-      |> Result.map_error (fun msg ->
-        Dispatch_invalid_supported_payload (Keeper_wake, msg))
+      validate_body kind view.body
+      |> Result.map_error (fun msg -> Dispatch_invalid_supported_payload (kind, msg))
     in
-    Ok (Keeper_wake, view)
+    Ok (kind, view)
   | None -> Error (Dispatch_unsupported_kind view.raw_kind)
 ;;
 
@@ -374,7 +400,7 @@ let dispatch_tool_for_request_result request =
 
 let known_kind_contract_to_yojson kind =
   match kind with
-  | Keeper_wake ->
+  | Keeper_wake | Lane_act ->
     `Assoc
       [ "kind", `String (known_kind_to_string kind)
       ; "creation_contract", `String "per_kind_validator_required"
@@ -470,12 +496,22 @@ let keeper_wake_summary body =
   | None, None -> None
 ;;
 
+let lane_act_target body =
+  Option.map (fun id -> "lane:" ^ id) (assoc_string "installation_id" body)
+;;
+
+let lane_act_summary body =
+  Option.map (fun action -> truncate_summary (Yojson.Safe.to_string action))
+    (List.assoc_opt "action" body)
+;;
+
 let target_summary_result (request : Schedule_domain.schedule_request) =
   match payload_view request with
   | Error msg -> Error msg
   | Ok view ->
     (match classify_kind view.raw_kind with
      | Some Keeper_wake -> Ok (keeper_wake_target view.body, keeper_wake_summary view.body)
+     | Some Lane_act -> Ok (lane_act_target view.body, lane_act_summary view.body)
      | None -> Ok (None, None))
 ;;
 
@@ -493,7 +529,7 @@ let wake_keeper_name_result (request : Schedule_domain.schedule_request) =
   | Ok view ->
     (match classify_kind view.raw_kind with
      | Some Keeper_wake -> Ok (keeper_wake_keeper_name view.body)
-     | None -> Ok None)
+     | Some Lane_act | None -> Ok None)
 ;;
 
 let wake_keeper_name request =
@@ -509,9 +545,15 @@ let result_delivery request =
   let* view = payload_view request in
   match classify_kind view.raw_kind with
   | Some Keeper_wake -> result_delivery_of_body view.body
-  | None -> Ok None
+  | Some Lane_act | None -> Ok None
 ;;
 
 let body_required_string view name = required_string_field name view.body
 let body_optional_string view name = optional_string_field name view.body
 let body_result_delivery view = result_delivery_of_body view.body
+
+let lane_act_body view =
+  match assoc_string "installation_id" view.body, List.assoc_opt "action" view.body with
+  | Some installation_id, Some (`Assoc _ as action) -> Ok (installation_id, action)
+  | Some _, (Some _ | None) -> Error (lane_act_kind ^ " payload requires object body.action")
+  | None, _ -> Error (lane_act_kind ^ " payload requires non-empty body.installation_id")

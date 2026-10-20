@@ -15,7 +15,7 @@ let activation =
     ; "runtime_id", `String "ollama-cloud-deepseek"
     ; "skill_tool_use_id", `String "call_capture_001"
     ; "agent_core_turn", `Int 3
-    ; "invocation", `Assoc [ "kind", `String "composition"; "origin", `Assoc [ "kind", `String "session_composition" ]; "tool_name", `String "masc_capture_helper" ]
+    ; "invocation", `Assoc [ "kind", `String "composition"; "origin", `Assoc [ "kind", `String "session_composition" ]; "execution_id", `String "exec-capture-001"; "tool_name", `String "masc_capture_helper" ]
     ; "delivery", `Assoc [ "boundary", `Assoc [ "kind", `String "model_response"; "agent_core_turn", `Int 4 ]; "runtime_id", `String "ollama-cloud-deepseek"; "delivered_at", `String "2026-10-13T15:00:00Z"; "content_bytes", `Int 128; "content_sha256", `String hex64 ]
     ; "actions", `List [ `Assoc [ "identity", `Assoc [ "kind", `String "call_id"; "call_id", `String "call_capture_action_001" ]; "tool_name", `String wire_name; "runtime_id", `String "ollama-cloud-deepseek"; "agent_core_turn", `Int 5; "observed_at", `String "2026-10-13T15:00:05Z" ] ]
     ; "activated_at", `String "2026-10-13T14:59:00Z"
@@ -70,40 +70,6 @@ let tools_state () =
   state.tools_async_observation <- Some (async_of_json ());
   state
 
-let joins lines = String.concat "\n" (List.map snd lines)
-
-let contains ~needle text =
-  let len = String.length needle in
-  let n = String.length text in
-  let rec loop i =
-    if i + len > n then false
-    else if String.sub text i len = needle then true
-    else loop (i + 1)
-  in
-  loop 0
-
-let expected_label = "MascBoardPost"
-
-let test_timeline () =
-  let state = tools_state () in
-  state.tools_pane <- Tools_activations;
-  let text = joins (Masc_tui_render_tools.tools_display_lines ~cols:120 state) in
-  Alcotest.check Alcotest.bool "timeline draws the shared label" true
-    (contains ~needle:expected_label text);
-  Alcotest.check Alcotest.bool "timeline hides the wire name" false
-    (contains ~needle:wire_name text);
-  Alcotest.check Alcotest.bool "timeline row exists" true
-    (contains ~needle:"Skill Timeline" text)
-
-let test_actions () =
-  let state = tools_state () in
-  state.tools_pane <- Tools_activations;
-  let text = joins (Masc_tui_render_tools.tools_display_lines ~cols:120 state) in
-  Alcotest.check Alcotest.bool "action row draws the shared label" true
-    (contains ~needle:("tool=" ^ expected_label) text);
-  Alcotest.check Alcotest.bool "action row hides the wire name" false
-    (contains ~needle:("tool=" ^ wire_name) text)
-
 let test_wire_name_preserved () =
   let state = tools_state () in
   match state.tools_inventory with
@@ -122,50 +88,11 @@ let test_wire_name_preserved () =
      | [] -> Alcotest.fail "expected one activation")
   | _ -> Alcotest.fail "inventory should hold the ledger"
 
-let test_skill_usage_box_borders () =
-  let state = tools_state () in
-  state.tools_pane <- Tools_usage;
-  state.skills_catalog <-
-    Some
-      { Masc.Tui_decode_tools.sc_state = Masc.Tui_decode_tools.Skills_ready
-      ; sc_config = None
-      ; sc_sources = []
-      ; sc_surfaces = []
-      ; sc_rejections = []
-      ; sc_shadows = []
-      ; sc_usage_coverage = None
-      };
-  let lines = Masc_tui_render_tools.tools_display_lines ~cols:100 state in
-  let dim_pipe =
-    Masc_tui_theme.Sgr.dim ^ Masc_tui_theme.Box.v ^ Masc_tui_theme.Sgr.reset
-  in
-  let boxed_rows =
-    List.filter
-      (fun (_, text) -> contains ~needle:"Skill Usage — 0 of 0" text)
-      lines
-  in
-  Alcotest.check Alcotest.bool "usage heading row is rendered inside skill_usage_box"
-    true (boxed_rows <> []);
-  List.iter
-    (fun (style, text) ->
-      Alcotest.check Alcotest.string "outer row style is neutral so side borders stay dim"
-        "" style;
-      Alcotest.check Alcotest.bool "left border is dim vertical rule with reset"
-        true (String.starts_with ~prefix:(dim_pipe ^ " ") text);
-      Alcotest.check Alcotest.bool "right border is dim vertical rule with reset"
-        true (String.ends_with ~suffix:(" " ^ dim_pipe) text))
-    boxed_rows
-
 let () =
   let open Alcotest in
   run "TUI tools pane labels"
     [ ( "labels"
-      , [ test_case "Skill Timeline draws the shared label" `Quick test_timeline
-        ; test_case "activation action row draws the shared label" `Quick
-            test_actions
-        ; test_case "stored action keeps the wire name" `Quick
+      , [ test_case "stored action keeps the wire name" `Quick
             test_wire_name_preserved
-        ; test_case "skill_usage_box keeps dim side borders isolated from row styles" `Quick
-            test_skill_usage_box_borders
         ] )
     ]

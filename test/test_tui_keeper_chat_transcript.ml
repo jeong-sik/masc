@@ -755,7 +755,8 @@ let test_drawn_reconciles_text_after_an_observed_skill_round () =
     (Transcript.make_skill_activity
        ~invocation:(Transcript.Composition_run { tool_name = "keeper_compose_source-review" })
        ~skill_name:"source-review" ~skill_tool_use_id:"seen-read"
-       ~turn_ref:"trace-1#3" ~state:Transcript.Skill_delivered ~actions:[] ());
+       ~turn_ref:"trace-1#3" ~execution_id:"skill-exec"
+       ~state:Transcript.Skill_delivered ~actions:[] ());
   feed t [ reply_details ~reply:"Done." () ];
   check (list string) "an observed skill still identifies the final reply stretch"
     [ "text:Let me check."; "skill:source-review"; "reply:Done." ] (drawn t)

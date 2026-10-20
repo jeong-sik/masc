@@ -99,7 +99,7 @@ let to_string = Checkpoint_codec.to_string
 
 let content_block_to_json_result ~scope block =
   let ( let* ) = Result.bind in
-  let* json = Checkpoint_codec.checkpoint_content_block_to_json_result ~scope block in
+  let json = Checkpoint_codec.checkpoint_content_block_to_json block in
   let* () = Checkpoint_codec.validate_checkpoint_json ~context:scope json in
   let* _ = Checkpoint_contract.validate_content_block
       ~scope:(Checkpoint_contract.Root scope) json in

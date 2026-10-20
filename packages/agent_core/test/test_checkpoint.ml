@@ -858,24 +858,21 @@ let () =
             match Checkpoint.drop_unencodable_json (make_checkpoint ()) with
             | None -> ()
             | Some _ -> Alcotest.fail "an encodable checkpoint has nothing to drop")
-        ; test_case "drop_unencodable_json drops a duplicate-key ToolResult json" `Quick (fun () ->
+        ; test_case "drop_unencodable_json drops a duplicate-key ToolUse input" `Quick (fun () ->
             let poisoned =
               make_checkpoint
                 ~messages:
                   [ message
-                      Types.Tool
-                      (Types.ToolResult
-                         { tool_use_id = "call-1"
-                         ; content = "result"
-                         ; outcome = Tool_succeeded
-                         ; json =
-                             Some (`Assoc [ ("k", `Int 1); ("k", `Int 2) ])
-                         ; content_blocks = None
+                      Types.Assistant
+                      (Types.ToolUse
+                         { id = "call-1"
+                         ; name = "read"
+                         ; input = `Assoc [ ("k", `Int 1); ("k", `Int 2) ]
                          })
                   ]
                 ()
             in
-            check_checkpoint_rejected "duplicate-key ToolResult json" poisoned;
+            check_checkpoint_rejected "duplicate-key ToolUse input" poisoned;
             match Checkpoint.drop_unencodable_json poisoned with
             | None -> Alcotest.fail "a duplicate-key payload is droppable"
             | Some recovered -> check_checkpoint_json_contract recovered)
@@ -953,21 +950,6 @@ let () =
                     ]
                   ()
               in
-              let tool_result_json =
-                make_checkpoint
-                  ~messages:
-                    [ message
-                        Types.Tool
-                        (Types.ToolResult
-                           { tool_use_id = "call-1"
-                           ; content = "result"
-                           ; outcome = Tool_succeeded
-                           ; json = Some (`Assoc [ "nested", `List [ `Float value ] ])
-                           ; content_blocks = None
-                           })
-                    ]
-                  ()
-              in
               let context = Context.create_sync () in
               Context.set context "nested" (`Assoc [ "value", `Float value ]);
               let input_schema =
@@ -1002,7 +984,6 @@ let () =
               ; "min_p", { (make_checkpoint ()) with min_p = Some value }
               ; "message metadata", metadata
               ; "ToolUse.input", tool_input
-              ; "ToolResult.json", tool_result_json
               ; "Context value", make_checkpoint ~context ()
               ; ( "working_context"
                 , { (make_checkpoint ()) with
@@ -1049,21 +1030,6 @@ let () =
                   ]
                 ()
             in
-            let tool_result_json =
-              make_checkpoint
-                ~messages:
-                  [ message
-                      Types.Tool
-                      (Types.ToolResult
-                         { tool_use_id = "call-1"
-                         ; content = "result"
-                         ; outcome = Tool_succeeded
-                         ; json = Some (`Assoc [ "nested", duplicate ])
-                         ; content_blocks = None
-                         })
-                  ]
-                ()
-            in
             let context = Context.create_sync () in
             Context.set context "value" (`Assoc [ "nested", duplicate ]);
             let reasoning_details =
@@ -1080,8 +1046,7 @@ let () =
                 ()
             in
             let cases =
-              [ "ToolResult.json", tool_result_json
-              ; "message metadata", metadata
+              [ "message metadata", metadata
               ; "ToolUse.input", tool_input
               ; "Context value", make_checkpoint ~context ()
               ; ( "working_context"
@@ -1099,7 +1064,7 @@ let () =
             List.iter
               (fun (path, checkpoint) -> check_checkpoint_rejected path checkpoint)
               cases;
-            match Checkpoint.to_json tool_result_json with
+            match Checkpoint.to_json tool_input with
             | _ -> fail "throwing serializer accepted a duplicate public JSON value"
             | exception Invalid_argument message ->
               check
@@ -1107,6 +1072,48 @@ let () =
                 "throwing API keeps Invalid_argument"
                 true
                 (String.starts_with ~prefix:"Checkpoint.to_json:" message))
+        ; test_case "an unretained ToolResult.json does not refuse the save" `Quick (fun () ->
+            (* [ToolResult.json] is the parse of [content]. The wire writes
+               [content] and never the parse, so a duplicate key or a
+               non-finite number in it must not refuse the checkpoint. *)
+            let duplicate = `Assoc [ "same", `Int 1; "same", `Int 2 ] in
+            [ "duplicate key", `Assoc [ "nested", duplicate ]
+            ; "NaN", `Assoc [ "nested", `List [ `Float Float.nan ] ]
+            ; "+infinity", `Assoc [ "nested", `List [ `Float Float.infinity ] ]
+            ]
+            |> List.iter (fun (label, json) ->
+              let checkpoint =
+                make_checkpoint
+                  ~messages:
+                    [ message
+                        Types.Tool
+                        (Types.ToolResult
+                           { tool_use_id = "call-1"
+                           ; content = "result"
+                           ; outcome = Tool_succeeded
+                           ; json = Some json
+                           ; content_blocks = None
+                           })
+                    ]
+                  ()
+              in
+              match Checkpoint.to_json_result checkpoint with
+              | Error error ->
+                fail (label ^ ": the unretained json refused the save: " ^ Error.to_string error)
+              | Ok encoded ->
+                (match Checkpoint.of_json encoded with
+                 | Ok
+                     { Checkpoint.messages =
+                         [ { Types.content =
+                               [ Types.ToolResult { content = "result"; json = None; _ } ]
+                           ; _
+                           }
+                         ]
+                     ; _
+                     } -> ()
+                 | Ok _ -> fail (label ^ ": the restored ToolResult is not content with json = None")
+                 | Error error ->
+                   fail (label ^ ": the saved checkpoint does not decode: " ^ Error.to_string error))))
         ; test_case "old version 4 is rejected" `Quick (fun () ->
             match Checkpoint.of_json (`Assoc [ "version", `Int 4 ]) with
             | Error (Error.Serialization (Error.VersionMismatch { got = 4; _ })) -> ()

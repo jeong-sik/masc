@@ -234,37 +234,6 @@ let validate_checkpoint_json ~context json =
   |> Result.map_error checkpoint_json_validation_error
 ;;
 
-let rec checkpoint_content_block_to_json_result ~scope block =
-  match block with
-  | ToolResult { tool_use_id; content; outcome; json; content_blocks } ->
-    let* () =
-      match json with
-      | None -> Ok ()
-      | Some json -> validate_checkpoint_json ~context:(scope ^ ".json") json
-    in
-    let* content_override =
-      match content_blocks with
-      | None -> Ok None
-      | Some blocks ->
-        blocks
-        |> List.mapi (fun index block ->
-          checkpoint_content_block_to_json_result
-            ~scope:(Printf.sprintf "%s.content_blocks[%d]" scope index)
-            block)
-        |> result_all
-        |> Result.map (fun blocks -> Some (`List blocks))
-    in
-    Ok (checkpoint_tool_result_to_json ~tool_use_id ~content ~outcome content_override)
-  | Text _
-  | Thinking _
-  | ReasoningDetails _
-  | RedactedThinking _
-  | ToolUse _
-  | Image _
-  | Document _
-  | Audio _ -> Ok (Llm_provider.Api_common.content_block_to_json block)
-;;
-
 let unique_optional_field ~field fields =
   match
     List.filter_map
@@ -500,20 +469,6 @@ let message_to_json (msg : Types.message) =
   message_json msg (List.map checkpoint_content_block_to_json msg.content)
 ;;
 
-let message_to_json_result ~message_index (msg : Types.message) =
-  msg.content
-  |> List.mapi (fun block_index block ->
-    checkpoint_content_block_to_json_result
-      ~scope:
-        (Printf.sprintf
-           "Checkpoint v12 message[%d].content[%d]"
-           message_index
-           block_index)
-      block)
-  |> result_all
-  |> Result.map (message_json msg)
-;;
-
 let message_of_json json =
   let open Yojson.Safe.Util in
   let role_str = json |> member "role" |> to_string in
@@ -588,13 +543,6 @@ let checkpoint_fields_around_messages cp =
 let checkpoint_json_with_messages cp messages =
   let before_messages, after_messages = checkpoint_fields_around_messages cp in
   `Assoc (before_messages @ ((messages_field, `List messages) :: after_messages))
-;;
-
-let checkpoint_to_json_result (cp : Checkpoint_types.t) =
-  cp.messages
-  |> List.mapi (fun message_index message -> message_to_json_result ~message_index message)
-  |> result_all
-  |> Result.map (checkpoint_json_with_messages cp)
 ;;
 
 let decode_current_json json =
@@ -696,7 +644,7 @@ let decode_current_json json =
 ;;
 
 let checkpoint_json_result cp =
-  let* json = checkpoint_to_json_result cp in
+  let json = checkpoint_json_with_messages cp (List.map message_to_json cp.messages) in
   let* () = validate_checkpoint_json ~context:"Checkpoint v12" json in
   let+ _ = decode_current_json json in
   json
@@ -732,13 +680,6 @@ let rec drop_unencodable_block (dropped : int ref) block =
       incr dropped;
       ToolUse { id; name; input = empty_object })
   | ToolResult { tool_use_id; content; outcome; json; content_blocks } ->
-    let json =
-      match json with
-      | Some payload when not (encodable_json payload) ->
-        incr dropped;
-        None
-      | json -> json
-    in
     let content_blocks =
       match content_blocks with
       | None -> None
@@ -1149,7 +1090,7 @@ let decode_written_bytes ~decode bytes =
    checkpoint. The decode reads the written bytes, with the handlers of
    [decode_current_json]. *)
 let validated_message_encoding ~message_index message =
-  let* json = message_to_json_result ~message_index message in
+  let json = message_to_json message in
   let* () = validate_checkpoint_json ~context:"Checkpoint v12" json in
   let* _ = Checkpoint_contract.validate_message message_index json in
   let bytes = Yojson.Safe.to_string json in
@@ -1275,7 +1216,7 @@ let rec same_printed_json (left : Yojson.Safe.t) (right : Yojson.Safe.t) =
    sanitizes -- and such a message is left for the save to encode. *)
 let held_read_message ~message_index message json =
   match
-    let* encoded = message_to_json_result ~message_index message in
+    let encoded = message_to_json message in
     let* () = validate_checkpoint_json ~context:"Checkpoint v12" encoded in
     let+ _ = Checkpoint_contract.validate_message message_index encoded in
     encoded

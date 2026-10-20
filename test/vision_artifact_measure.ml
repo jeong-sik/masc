@@ -60,8 +60,8 @@ let run ~root ~fixtures ~count ~window_seconds =
   let meta = match Masc_test_deps.meta_of_json_fixture
     (`Assoc ["name", `String keeper]) with
     | Ok m -> m | Error msg -> fail msg in
-  let frames = V.frames_dir ~keeper_name:keeper in
-  let kept = V.vision_store_dir ~keeper_name:keeper in
+  let frames = V.frames_dir ~keeper_name:keeper () in
+  let kept = V.vision_store_dir ~keeper_name:keeper () in
   Fs_compat.mkdir_p frames;
   for i = 0 to 499 do
     let bytes = read (Filename.concat fixtures (Printf.sprintf "%04d.png" i)) in

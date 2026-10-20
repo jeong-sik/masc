@@ -79,9 +79,10 @@ val first_vision_runtime_id : now:float -> (string, string) result
 (** Compatibility helper returning the first entry of {!vision_runtime_ids}, or
     [Error] when none is configured. *)
 
-val vision_store_dir : keeper_name:string -> string
+val vision_store_dir : ?base_path:string -> keeper_name:string -> unit -> string
 (** Per-keeper artifact store directory used by [analyze_image] and eager image
-    eviction. *)
+    eviction. Workspace-bound callers pass their explicit [base_path]; omission
+    uses the process configuration for callers without a Workspace context. *)
 
 val load_artifact :
   dir:string -> Multimodal.Vision_artifact_store.handle ->
@@ -89,18 +90,20 @@ val load_artifact :
 (** Load hash-verified bytes, including a rotated-frame lookup, with filesystem
     I/O offloaded from the Eio domain. Callers choose their Keeper's store. *)
 
-val frames_dir : keeper_name:string -> string
+val frames_dir : ?base_path:string -> keeper_name:string -> unit -> string
 (** Per-keeper subdirectory for ephemeral screen captures (MSX, DOS, browser)
     subject to bounded retention/rotation. *)
 
 val store_frame
-  :  keeper_name:string
+  :  ?base_path:string
+  -> keeper_name:string
   -> string
   -> (Multimodal.Vision_artifact_store.handle, string) result
 (** Store a transient lane/browser frame under the bounded frames directory. *)
 
 val store_kept
-  :  keeper_name:string
+  :  ?base_path:string
+  -> keeper_name:string
   -> string
   -> (Multimodal.Vision_artifact_store.handle, string) result
 (** Store a conversation or successfully analyzed frame without retention

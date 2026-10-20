@@ -40,6 +40,7 @@ let append_marker ~keepers_dir ~keeper_name ~trace_id =
 ;;
 
 let clear
+      ~base_path
       ~keepers_dir
       ~runtime_id
       ~keeper_name
@@ -64,6 +65,7 @@ let clear
   in
   match
     Keeper_context_core.save_agent_core_checkpoint_classified
+      ~base_path
       ~runtime_id
       ~keeper_name
       ~session

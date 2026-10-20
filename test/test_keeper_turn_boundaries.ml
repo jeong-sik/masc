@@ -581,6 +581,7 @@ let with_saved_history ~turn_count f =
        in
        (match
           Context.save_agent_core_checkpoint_classified
+            ~base_path:base_dir
             ~runtime_id
             ~keeper_name:keeper_id
             ~session
@@ -605,8 +606,9 @@ let saved_messages ~base_dir =
   | _session, None -> fail "the checkpoint is gone"
 ;;
 
-let clear ~keepers_dir ~session context =
+let clear ~base_path ~keepers_dir ~session context =
   Clear.clear
+    ~base_path
     ~keepers_dir
     ~runtime_id
     ~keeper_name:keeper_id
@@ -630,7 +632,7 @@ let test_a_clear_empties_the_history_and_then_says_so () =
   @@ fun ~keepers_dir ~base_dir ~session context ->
   let before = saved_messages ~base_dir in
   let pinned = List.length (List.filter is_system before) in
-  (match clear ~keepers_dir ~session context with
+  (match clear ~base_path:base_dir ~keepers_dir ~session context with
    | Clear.Cleared { cleared_message_count; marker = Ok () } ->
      check int "every conversation message was removed" (List.length before - pinned)
        cleared_message_count
@@ -656,7 +658,7 @@ let test_a_superseded_clear_writes_nothing () =
   with_saved_history ~turn_count:5
   @@ fun ~keepers_dir ~base_dir ~session context ->
   let before = saved_messages ~base_dir in
-  (match clear ~keepers_dir ~session (at_turn_count 3 context) with
+  (match clear ~base_path:base_dir ~keepers_dir ~session (at_turn_count 3 context) with
    | Clear.Superseded { incoming_turn_count; known_turn_count } ->
      check int "the clear held the older checkpoint" 3 incoming_turn_count;
      check int "the store holds the newer one" 5 known_turn_count
@@ -675,7 +677,7 @@ let test_a_clear_whose_line_is_refused_says_so () =
   with_saved_history ~turn_count:3
   @@ fun ~keepers_dir ~base_dir ~session context ->
   block_the_store ~keepers_dir;
-  (match clear ~keepers_dir ~session context with
+  (match clear ~base_path:base_dir ~keepers_dir ~session context with
    | Clear.Cleared { cleared_message_count = _; marker = Error _ } -> ()
    | (Clear.Cleared { marker = Ok (); _ } | Clear.Superseded _ | Clear.Save_unconfirmed _) as
      other -> failf "expected a cleared history with no line: %s" (describe_outcome other));
@@ -688,9 +690,9 @@ let test_a_clear_whose_line_is_refused_says_so () =
    last complete line. *)
 let test_a_torn_tail_does_not_cost_the_clear_its_line () =
   with_saved_history ~turn_count:3
-  @@ fun ~keepers_dir ~base_dir:_ ~session context ->
+  @@ fun ~keepers_dir ~base_dir ~session context ->
   plant_torn_tail ~keepers_dir;
-  (match clear ~keepers_dir ~session context with
+  (match clear ~base_path:base_dir ~keepers_dir ~session context with
    | Clear.Cleared { cleared_message_count = _; marker = Ok () } -> ()
    | (Clear.Cleared { marker = Error _; _ } | Clear.Superseded _ | Clear.Save_unconfirmed _)
      as other -> failf "expected a cleared history and its line: %s" (describe_outcome other));

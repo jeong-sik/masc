@@ -108,6 +108,7 @@ val checkpoint_write_error_to_string
     structure is rejected as [Tool_history_invalid] before any store call. No
     repair, synthetic ToolResult, or implicit context reduction occurs here. *)
 val save_agent_core_checkpoint :
+  base_path:string ->
   runtime_id:string ->
   keeper_name:string ->
   session:session_context ->
@@ -116,7 +117,9 @@ val save_agent_core_checkpoint :
   (Agent_core.Checkpoint.t, string checkpoint_write_error) result
 (** [runtime_id]/[keeper_name] gate RFC §2.3 site-2 image eviction at the
     checkpoint write boundary (Store_only); required so every write path is
-    compiler-forced to name the runtime it persists for (N-of-M closure). *)
+    compiler-forced to name the runtime it persists for (N-of-M closure).
+    [base_path] binds evicted image handles to the same Workspace as the caller's
+    image readers, independently of process-global configuration. *)
 
 (** {!save_agent_core_checkpoint} with the store's verdict kept: [Saved] when
     this checkpoint became the canonical one, [Stale_noop] when a newer writer
@@ -124,6 +127,7 @@ val save_agent_core_checkpoint :
     answers [Ok] for both, so a caller that reports what it stored uses this
     one. *)
 val save_agent_core_checkpoint_classified :
+  base_path:string ->
   runtime_id:string ->
   keeper_name:string ->
   session:session_context ->

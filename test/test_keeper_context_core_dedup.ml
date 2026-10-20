@@ -343,6 +343,7 @@ let test_checkpoint_save_load_preserves_exact_messages () =
       in
       (match
          C.save_agent_core_checkpoint
+           ~base_path:base_dir
            ~runtime_id:"test-runtime"
            ~keeper_name:"checkpoint-exact"
            ~session
@@ -427,6 +428,7 @@ let test_checkpoint_write_accepts_exact_open_tool_cycle () =
       in
       match
         C.save_agent_core_checkpoint
+          ~base_path:base_dir
           ~runtime_id:"test-runtime"
           ~keeper_name:"checkpoint-open-cycle"
           ~session
@@ -472,6 +474,7 @@ let test_checkpoint_write_rejects_orphan_tool_result () =
       in
       (match
          C.save_agent_core_checkpoint
+           ~base_path:base_dir
            ~runtime_id:"test-runtime"
            ~keeper_name:session_id
            ~session

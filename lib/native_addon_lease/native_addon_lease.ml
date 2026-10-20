@@ -15,7 +15,6 @@ let directories (t : t) = t.directories
 let ( let* ) = Result.bind
 external open_directory : string -> Unix.file_descr = "masc_native_lease_directory"
 external open_private_file : Unix.file_descr -> string -> bool -> Unix.file_descr = "masc_native_lease_file"
-let open_file directory name = open_private_file directory name true
 external holder : Unix.file_descr -> int = "masc_native_lease_holder"
 external leads_process_group : unit -> bool = "masc_native_lease_group_leader"
 type slot = { directory : Unix.file_descr;
@@ -30,16 +29,17 @@ let close_all descriptors =
     try Unix.close fd; previous with Unix.Unix_error _ as exn ->
       match previous with None -> Some exn | Some _ -> previous) None descriptors in
   match failure with None -> () | Some exn -> raise exn
-let with_slots directories work = protect (fun () -> Mutex.protect coordinator (fun () ->
+let with_slots ?(create=false) directories work = protect (fun () -> Mutex.protect coordinator (fun () ->
   let opened = ref [] in
   let retain fd = opened := fd :: !opened;fd in
   Fun.protect ~finally:(fun () -> close_all !opened) (fun () ->
     let slots = List.map (fun path ->
       let directory = retain (open_directory path) in
-      let gate = retain (open_file directory "gate") in
+      let file name = retain (open_private_file directory name create) in
+      let gate = file "gate" in
       Unix.lockf gate Unix.F_LOCK 0;
-      {directory;lease=retain (open_file directory "lease");
-        intent=retain (open_file directory "intent.json");owner=retain (open_file directory "owner.json")}) directories in
+      let slot = {directory;lease=file "lease";intent=file "intent.json";owner=file "owner.json"} in
+      Unix.fsync directory;slot) directories in
     work slots)))
 let read fd =
   ignore (Unix.lseek fd 0 Unix.SEEK_SET);
@@ -56,7 +56,7 @@ let write_json slot fd value =
     let written = Unix.write fd bytes offset (Bytes.length bytes-offset) in
     if written=0 then raise (Sys_error "native lease write made no progress") else loop (offset+written) in
   loop 0; Unix.fsync fd; Unix.fsync slot.directory
-let parse fd decode = match read fd with
+let parse fd decode = Unix.fsync fd;match read fd with
   | "" -> Ok None
   | bytes -> (try decode (Yojson.Safe.from_string bytes) |> Result.map Option.some
       with Yojson.Json_error detail -> Error (State_invalid detail))
@@ -123,21 +123,31 @@ let predecessor_clear slot =
     | None -> Ok ()
     | Some previous -> let* gone = cleared previous in
         if gone then Ok () else Error (Busy "native predecessor or foreground group is not released")
-let claim ~create ~instance_id ~directories =
-  if String.trim instance_id="" || String.contains instance_id '\000' then Error (Invalid_claim "native instance must be nonblank without NUL")
-  else if directories=[] || List.exists (fun path -> Filename.is_relative path || String.contains path '\000') directories then
+let rec sync_ancestry path =
+  let fd = Unix.openfile path [Unix.O_RDONLY;Unix.O_CLOEXEC] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd);
+  let parent = Filename.dirname path in
+  if parent<>path then sync_ancestry parent
+let canonical_directories ~sync_ancestry ~create directories =
+  if directories=[] || List.exists (fun path -> Filename.is_relative path || String.contains path '\000') directories then
     Error (Invalid_claim "native claims require absolute private directories")
   else protect (fun () ->
     if create then List.iter (fun path ->
       try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST,_,_) -> ()) directories;
     let directories = List.map (fun path ->
       let directory = open_directory path in
-      Fun.protect ~finally:(fun () -> Unix.close directory) (fun () -> Unix.realpath path)) directories in
-    Ok {instance_id;directories=List.sort_uniq String.compare directories})
+      Fun.protect ~finally:(fun () -> Unix.close directory) (fun () ->
+        let canonical = Unix.realpath path in
+        Unix.fsync directory;sync_ancestry (Filename.dirname canonical);canonical)) directories in
+    Ok (List.sort_uniq String.compare directories))
+let claim ?(sync_ancestry=sync_ancestry) ~create ~instance_id ~directories () =
+  if String.trim instance_id="" || String.contains instance_id '\000' then Error (Invalid_claim "native instance must be nonblank without NUL")
+  else let* directories = canonical_directories ~sync_ancestry ~create directories in
+    Ok {instance_id;directories}
 let traverse f = List.fold_left (fun result slot -> let* () = result in f slot) (Ok ())
-let prepare ~directories ~instance_id =
-  let* t = claim ~create:true ~instance_id ~directories in
-  let* () = with_slots t.directories (fun slots ->
+let prepare_with_sync ~sync_ancestry ~directories ~instance_id =
+  let* t = claim ~sync_ancestry ~create:true ~instance_id ~directories () in
+  let* () = with_slots ~create:true t.directories (fun slots ->
       let* () = traverse (fun slot ->
         let* () = predecessor_clear slot in
         let* _intent = read_intent slot in
@@ -148,12 +158,31 @@ let prepare ~directories ~instance_id =
         write_history slot fd instance_id Reserved)) slots;
       List.iter (fun slot -> write_intent slot instance_id "admitted") slots;Ok ()) in
   Ok t
+let prepare = prepare_with_sync ~sync_ancestry
 let check_current (t : t) slot =
   let* intent = read_intent slot in
   match intent with
   | Some (Admitted instance) when instance=t.instance_id -> Ok false
   | Some (Retired instance) when instance=t.instance_id -> Ok true
   | None | Some (Admitted _ | Retired _) -> Error Stale_claim
+let validate_existing t slots = traverse (fun slot ->
+  let* _retired = check_current t slot in
+  with_history slot t.instance_id (fun fd -> read_history fd t.instance_id |> Result.map ignore)) slots
+let reopen ~directories ~instance_id =
+  let* t = claim ~create:false ~instance_id ~directories () in
+  let* () = with_slots t.directories (validate_existing t) in Ok t
+let current ~directories =
+  let* directories = canonical_directories ~sync_ancestry ~create:false directories in
+  with_slots directories (fun slots ->
+    match slots with
+    | [] -> Error (Invalid_claim "native claim has no slots")
+    | slot::_ ->
+        let* intent = read_intent slot in
+        let* instance_id = match intent with
+          | Some (Admitted id | Retired id) -> Ok id
+          | None -> Error (State_invalid "current native intent is missing") in
+        let t = {directories;instance_id} in
+        let* () = validate_existing t slots in Ok t)
 let retire t = with_slots t.directories (fun slots ->
   let* () = traverse (fun slot -> check_current t slot |> Result.map ignore) slots in
   let* () = traverse (fun slot -> with_history slot t.instance_id (fun fd ->
@@ -217,7 +246,7 @@ let request_termination t =
       Owner_process_identity.request_termination identity
       |> Result.map_error (fun error -> Termination_refused error)) (Ok ()) identities)
 let exec ~instance_id ~directories ~command ~arguments =
-  let* t = claim ~create:false ~instance_id ~directories in
+  let* t = claim ~create:false ~instance_id ~directories () in
   if String.trim command="" || List.exists (fun text -> String.contains text '\000') (command::arguments) then
     Error (Invalid_claim "native command must be nonblank without NUL")
   else if not (leads_process_group ()) then Error (Invalid_claim "native launcher must lead its foreground process group")
@@ -237,3 +266,6 @@ let exec ~instance_id ~directories ~command ~arguments =
        Keep only the exact lease descriptor through exec; gates/metadata close. *)
     List.iter (fun slot -> Unix.clear_close_on_exec slot.lease) slots;
     Unix.execvpe command (Array.of_list (command::arguments)) (Unix.environment ()))
+module For_testing = struct
+  let prepare = prepare_with_sync
+end

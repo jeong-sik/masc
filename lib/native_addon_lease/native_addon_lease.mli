@@ -15,6 +15,12 @@ val prepare : directories:string list -> instance_id:string -> (t, error) result
     An instance is admitted only once in each slot. Its durable reservation is
     retained across replacements, retirement and process exit; retries require
     a fresh instance ID. A failed partial preparation may reserve some slots. *)
+val reopen : directories:string list -> instance_id:string -> (t, error) result
+(** Recover this exact existing claim without admitting or creating anything.
+    Every slot's current intent and permanent history must exist and match. *)
+val current : directories:string list -> (t, error) result
+(** Reopen the single current claim shared by all existing host-selected slots.
+    Missing, conflicting or damaged records are refused. No files are created. *)
 val instance_id : t -> string
 val directories : t -> string list
 val retire : t -> (unit, error) result
@@ -36,3 +42,7 @@ val exec : instance_id:string -> directories:string list -> command:string ->
     must preserve inherited lease descriptors until exit. Descendants that leave
     the group require their package's explicit resource ownership/cleanup.
     Never call in the MASC server. No payload starts on partial acquisition. *)
+module For_testing : sig
+  val prepare : sync_ancestry:(string -> unit) -> directories:string list ->
+    instance_id:string -> (t, error) result
+end

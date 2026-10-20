@@ -63,6 +63,18 @@ Apple에서는 정수 vCPU와 정확한 MiB 단위 메모리를 사용하고 `pi
 
 `world.state.mode = "persistent"`인 기존 설치의 runtime을 바꿀 때는 새 설치 ID를 사용한다. 서로 다른 실행기의 같은 이름 volume은 동일한 데이터가 아니다. 기존 설치의 runtime 전환을 거절하여 빈 상태로 교체되는 일을 막고, 과거 worker 정리는 저장된 원래 runtime으로 수행한다.
 
+`runtime = "host_process"`는 설치한 MCP stdio 실행 파일을 호스트에서 실행한다.
+`command`는 패키지 디렉터리에서 실행하며 `image`를 쓰지 않는다. `[resources]`에는
+`max_reply_bytes`만 선언한다. 컨테이너 격리나 CPU·메모리·PID 한도를 제공하지 않는다.
+`masc-native-addon-launcher`가 MASC 실행 파일 옆이나 PATH에 설치돼 있어야 한다.
+
+호스트는 설치 ID별 private 실행 슬롯을 준비하고, 정리 권한을 기록한 뒤 실행한다.
+해제 영수증은 원래 프로세스와 실행 그룹의 종료·슬롯 정리를 확인한 뒤 남긴다.
+서버 재시작 후에도 같은 실행 기록으로 복구하며, 정리를 확인하기 전에는 새 실행을
+겹치지 않는다. 현재 native 실행은 `ephemeral` 상태와 모델 호출 없는 패키지를 지원한다.
+`persistent` 상태와 observation sampling은 해당 호스트 계약을 연결하기 전까지 거절한다.
+브라우저 실행기의 Add-on 분리는 아직 구현 중이다.
+
 ## 도구 Hook 선택
 
 패키지의 `[world.tools]`에 `hooks = ["validate_input", "validate_output"]`을

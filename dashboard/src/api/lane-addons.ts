@@ -79,9 +79,17 @@ const snapshotSchema = Schema.Struct({
 const sliceSchema = Schema.Struct({
   rows: Schema.Array(laneAddonRowSchema), coverage: Schema.Array(coverageSchema), complete: Schema.Boolean,
 })
+const executorSchema = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal('container'), id: text }),
+  Schema.Struct({ kind: Schema.Literal('host_process'), pid: Schema.Int.pipe(Schema.greaterThan(1)), started: nullableText }),
+)
+export function laneAddonExecutorLabel(executor: LaneAddonActionReceipt['executor']): string {
+  if (executor === null) return 'unknown'
+  return executor.kind === 'container' ? `container ${executor.id}` : `native process ${executor.pid}`
+}
 const actionReceiptSchema = Schema.Struct({
   instance_id: text, incarnation: text, request_id: text, requester: text,
-  executor: nullableText, input_sha256: text, action: jsonObject,
+  executor: Schema.NullOr(executorSchema), input_sha256: text, action: jsonObject,
   state: Schema.Literal('queued', 'running', 'confirmed', 'failed_before_effect', 'outcome_unknown'),
   result: Schema.NullOr(jsonObject), detail: Schema.NullOr(Schema.String),
 })

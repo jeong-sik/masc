@@ -13,9 +13,12 @@ type error = Invalid_specification of string | Start_failed of string
   | Admission of Native_addon_lease.error
   | Protocol of Lane_addon_worker_protocol.error | Cleanup_unconfirmed of string
   | Stopped
+val error_to_string : error -> string
 type t
 type phase = Initializing | Validating_owner | Serving | Retired
 val phase : t -> phase
+val process_identity : t -> Lane_addon_lifecycle.resource option
+(** The actual connected child, available before discovery; not signal authority. *)
 val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock ->
   grace_seconds:float -> admission:Native_addon_lease.t -> launcher:string ->
   contract:Lane_addon_worker_protocol.contract -> command:command ->
@@ -48,6 +51,8 @@ val release : t -> (release, error) result option
     and observations; they never admit a new execution. *)
 val exported_tools : t -> Mcp_protocol.Mcp_types.tool list
 val action_schema : t -> Yojson.Safe.t option
+val host_requests : t -> (Yojson.Safe.t, error) result
+val host_result : t -> arguments:Yojson.Safe.t -> (Yojson.Safe.t, error) result
 val observe : t -> binding:Yojson.Safe.t -> sources:Yojson.Safe.t ->
   (Lane_addon_types.output, error) result
 val act : t -> arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, error) result

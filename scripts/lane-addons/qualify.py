@@ -25,6 +25,27 @@ class QualificationError(RuntimeError):
     pass
 
 
+def container_resource_id(instance: dict, *, allow_pending: bool = False) -> str | None:
+    if "resource" not in instance:
+        raise QualificationError("instance has no execution resource field")
+    resource = instance["resource"]
+    if resource is None and allow_pending:
+        package = instance.get("package")
+        if isinstance(package, dict) and package.get("runtime") == "host_process":
+            raise QualificationError("container qualification does not support host_process execution")
+        return None
+    if not isinstance(resource, dict):
+        raise QualificationError("container qualification requires a confirmed execution resource")
+    if resource.get("kind") == "host_process":
+        raise QualificationError("container qualification does not support host_process execution")
+    if set(resource) != {"kind", "id"} or resource["kind"] != "container":
+        raise QualificationError("invalid container execution resource")
+    identifier = resource["id"]
+    if not isinstance(identifier, str) or not identifier.strip():
+        raise QualificationError("container execution resource has no nonempty identity")
+    return identifier
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -269,13 +290,17 @@ def run(args) -> int:
                 raise QualificationError("attach returned no instance identity; inspect run_id manually")
             owned.append(instance_id)
             result = {"instance_id": instance_id, "addon_id": attached.get("addon_id"),
-                      "container_id": attached.get("container_id"), "detached": False}
+                      "container_id": None, "detached": False}
             results.append(result)
+            result["container_id"] = container_resource_id(attached, allow_pending=True)
             primary.stage = "observing"
             ready, snapshot = await_instance(api, instance_id,
                 lambda item: isinstance(item.get("observation_seq"), int) and item["observation_seq"] > 0,
                 stage="inspect", wait_seconds=args.wait_seconds, poll_interval=args.poll_interval)
-            result.update({"container_id": ready.get("container_id"),
+            ready_id = container_resource_id(ready)
+            if result["container_id"] is not None and result["container_id"] != ready_id:
+                raise QualificationError("owned container identity changed during startup")
+            result.update({"container_id": ready_id,
                            "observation_seq": ready["observation_seq"]})
             rows = [row for row in snapshot.get("rows", [])
                     if row.get("lane_id", "").split("/", 1)[0] == instance_id]
@@ -302,7 +327,11 @@ def run(args) -> int:
             result = next(row for row in results if row["instance_id"] == instance_id)
             try:
                 before, _ = current_instance(api, instance_id, "inspect_before_detach")
-                result["container_id"] = before.get("container_id") or result.get("container_id")
+                observed_id = container_resource_id(before, allow_pending=True)
+                if observed_id is not None:
+                    if result["container_id"] is not None and result["container_id"] != observed_id:
+                        raise QualificationError("owned container identity changed before cleanup")
+                    result["container_id"] = observed_id
             except QualificationError as error:
                 errors.append("pre-cleanup inspection: " + str(error))
             try:
@@ -317,7 +346,9 @@ def run(args) -> int:
                     for row_id in result.get("selected_row_ids", []))
                 if not result["rows_survive_detach"]:
                     errors.append("selected rows were missing from the retained slice after detach")
-                if args.docker and result.get("container_id"):
+                if args.docker:
+                    if result["container_id"] is None:
+                        raise QualificationError("Docker absence proof requested without a confirmed container identity")
                     result["docker_absent"] = docker_absence(args.docker, result["container_id"], evidence, args.http_timeout)
                     if not result["docker_absent"]:
                         errors.append("owned container absence was not independently confirmed")

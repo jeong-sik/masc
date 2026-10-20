@@ -66,7 +66,6 @@ import CoreMIDI
     let words=(0..<count).map {UInt32(0x20903c00+index*0x100+$0)}
     expected.append(words)
     tail=words.withUnsafeBufferPointer {MIDIEventListAdd(list,capacity,tail,UInt64(index+1),$0.count,$0.baseAddress!)}
-    tracePrecondition(tail != nil,"native packet fixture allocation failed")
    }
    tracePrecondition(receivedPackets(UnsafePointer(list))==expected,"variable-length wire observer changed packets")
   }

@@ -39,7 +39,11 @@ let extract_generated_nickname_prefix name =
     when is_hex4 suffix
          && array_contains nickname_animals animal
          && array_contains nickname_adjectives adjective -> join_prefix prefix_rev
-  | prefix :: _ when prefix <> "" -> Some prefix
+  (* A bare name is its own type. Any other dashed name is not a generated
+     nickname, so it has no inferred prefix: its last segment says nothing about
+     who owns it, and treating it as the owner would let that owner's token
+     stand in for the whole name. *)
+  | [ name ] when name <> "" -> Some name
   | _ -> None
 ;;
 

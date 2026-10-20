@@ -80,7 +80,9 @@ let is_dictionary_generated_nickname name =
 (** Extract the stable agent prefix from a generated nickname.
     "<prefix>-<adj>-<animal>" -> Some "<prefix>"
     "example-keeper-warm-heron" -> Some "example-keeper"
-    "<prefix>" -> Some "<prefix>" (legacy bare-prefix form) *)
+    "<prefix>" -> Some "<prefix>" (a bare name is its own type)
+    any other dashed name, such as "claude-sonnet-5" -> None: its last segment
+    is not a prefix. *)
 let extract_agent_type name =
   let parts = String.split_on_char '-' name in
   let join_prefix prefix_rev =
@@ -97,5 +99,5 @@ let extract_agent_type name =
          && array_contains animals animal
          && array_contains adjectives adjective ->
       join_prefix prefix_rev
-  | agent_type :: _ -> Some agent_type
-  | [] -> None
+  | [ agent_type ] -> Some agent_type
+  | _ -> None

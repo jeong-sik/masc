@@ -35,6 +35,24 @@ let test_non_dictionary_rejected () =
   check bool "non-dictionary adjective is rejected (the list is consulted)" false
     (Nickname.is_dictionary_generated_nickname "qa-notword-fox")
 
+(* Only a dictionary nickname has a stable prefix. The last segment of any other
+   dashed name is not an owner, so no extractor may return it and the credential
+   lookup keeps the whole name. *)
+let test_dashed_names_without_a_dictionary_suffix_have_no_prefix () =
+  List.iter
+    (fun name ->
+       check (option string) ("Nickname.extract_agent_type " ^ name) None
+         (Nickname.extract_agent_type name);
+       check (option string) ("Auth_nickname.extract_agent_type_prefix " ^ name) None
+         (Auth_nickname.extract_agent_type_prefix name);
+       check string ("credential name of " ^ name) name
+         (Auth_nickname.credential_agent_name name))
+    [ "claude-sonnet-5"; "vincent-dev"; "codex-mcp-client"; "gpt-4-turbo-preview" ];
+  check (option string) "a bare name is its own type" (Some "codex")
+    (Nickname.extract_agent_type "codex");
+  check (option string) "a bare name keeps its credential type" (Some "codex")
+    (Auth_nickname.extract_agent_type_prefix "codex")
+
 let () =
   run "nickname_words_ssot"
     [
@@ -46,5 +64,7 @@ let () =
           test_case "generator output recognized" `Quick
             test_generator_output_recognized;
           test_case "non-dictionary rejected" `Quick test_non_dictionary_rejected;
+          test_case "dashed names without a dictionary suffix have no prefix" `Quick
+            test_dashed_names_without_a_dictionary_suffix_have_no_prefix;
         ] );
     ]

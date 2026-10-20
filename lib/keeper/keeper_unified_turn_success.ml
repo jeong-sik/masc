@@ -396,6 +396,9 @@ let emit_resolved_cost_event
       ~(usage_resolution : Keeper_usage_resolution.t)
       ~usage_trust
   =
+  match result.Keeper_agent_run.final_agent_core_turn_ordinal with
+  | None -> ()
+  | Some agent_core_turn_ordinal ->
   let usage, usage_missing =
     match usage_resolution.delta with
     | Some usage -> usage, false
@@ -414,7 +417,7 @@ let emit_resolved_cost_event
     ~task_id:(Option.map Keeper_id.Task_id.to_string meta.current_task_id)
     ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
     ~keeper_turn_id
-    ~agent_core_turn_ordinal:result.Keeper_agent_run.final_agent_core_turn_ordinal
+    ~agent_core_turn_ordinal
     ~model:result.model_used
     ~input_tokens:usage.input_tokens
     ~output_tokens:usage.output_tokens

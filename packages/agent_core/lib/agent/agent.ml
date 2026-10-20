@@ -409,23 +409,12 @@ let lifecycle_outcome_of_error error =
 ;;
 
 let with_classified_run_lifecycle_events agent ~classify_success f =
-  let previous_pending = agent.pending_input in
-  let on_outcome ~run_id outcome =
-    match outcome with
-    | Agent_lifecycle_events.Failed _ -> ()
-    | Agent_lifecycle_events.Input_required request ->
-      Eio.Mutex.use_rw ~protect:true agent.mu (fun () ->
-        agent.pending_input <- Some {Agent_input_request.run_id;request})
-    | Agent_lifecycle_events.Completed _ | Agent_lifecycle_events.Yielded _ ->
-      clear_pending_input agent previous_pending
-  in
   Agent_lifecycle_events.with_run_lifecycle_events
     ~event_bus:agent.options.event_bus
     ~agent_name:agent.state.config.name
     ~raw_trace:agent.options.raw_trace
     ~current_run_id:(fun () ->
       Option.bind (lifecycle_snapshot agent) (fun s -> s.current_run_id))
-    ~on_outcome
     ~classify:(function
       | Ok success -> classify_success success
       | Error detailed -> lifecycle_outcome_of_error detailed.Provider_failure_attribution.error)

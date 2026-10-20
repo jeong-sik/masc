@@ -15,6 +15,7 @@ type periodic_callback = Agent_types.periodic_callback =
   }
 
 type checkpoint_stage = Agent_types.checkpoint_stage =
+  | After_input_wait_changed
   | After_assistant_collected
   | After_tool_results_appended
   | After_context_injection
@@ -33,6 +34,11 @@ type checkpoint_snapshot = Agent_types.checkpoint_snapshot =
   }
 
 type checkpoint_sink = Agent_types.checkpoint_sink
+(** Input-wait changes hold the Agent state lock through this callback and
+    install their candidate only after [Ok ()]. Do not re-enter the same
+    Agent's checkpoint or mutating APIs. With no sink, changes are in-memory.
+    A callback reporting an uncertain write must preserve that uncertainty;
+    [Error] does not prove its external storage was untouched. *)
 
 (** Agent-level provider-fit policy. [Body_only] requires exact serialized-byte
     admission and also requires token measurement whenever a serving constraint
@@ -574,14 +580,21 @@ val run_turn_stream_detailed
        , detailed_error )
        result
 
+type input_response_error = Agent_types.input_response_error =
+  | Input_not_current of Agent_input_request.settlement_error
+  | Input_checkpoint_failed of Error.t
+
 (** Apply a response to the exact current run/request, then consume the pending
     wait at the same owned mutation boundary. A stale or repeated response is a
     typed refusal without mutation. Uses the owner's canonical question.
     [Declined] and [Timeout] settle explicitly without a synthetic User message.
+    The candidate messages and consumed wait reach the configured checkpoint
+    sink before the in-memory mutation. A sink error leaves the Agent unchanged
+    and requires its host to reconcile any uncertain external commit.
     Successful settlement permits {!run_turn_stream} or an equivalent driver. *)
 val provide_input
   : t -> Agent_input_request.pending -> Hooks.elicitation_response
-  -> (unit, Agent_input_request.settlement_error) result
+  -> (unit, input_response_error) result
 
 (** {1 Handoff} *)
 

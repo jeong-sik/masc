@@ -23,4 +23,4 @@ val apply_response
   -> Agent_types.t
   -> Agent_input_request.pending
   -> Hooks.elicitation_response
-  -> (unit, Agent_input_request.settlement_error) result
+  -> (unit, Agent_types.input_response_error) result

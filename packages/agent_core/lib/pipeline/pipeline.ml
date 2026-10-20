@@ -29,7 +29,9 @@ type turn_outcome = Pipeline_terminal_tool.turn_outcome =
   | ToolsExecuted of checkpoint_stage
   | TerminalToolCompleted of Terminal_tool_receipt.t
 
-let persist_turn_checkpoint_for_state = Pipeline_checkpoint.persist_for_state
+let persist_turn_checkpoint_for_state agent stage state =
+  Agent_checkpoint_sink.persist_for_state agent stage
+    ~pending_input:agent.pending_input state
 
 (** Set lifecycle to Ready, invoke BeforeTurn hook, handle elicitation. *)
 let stage_input = Pipeline_stage_prepare.stage_input

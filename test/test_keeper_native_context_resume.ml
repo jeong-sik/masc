@@ -187,8 +187,124 @@ let test_active_context_restart () =
         | `Signaled signal -> failf "child died from signal %d" signal));
       run_phase ~child:false root)
 
+let test_native_input_checkpoint_order ~uncertain_consume () =
+  let root = Filename.temp_dir "keeper-native-input-" "" in
+  Fun.protect ~finally:(fun () ->
+    Eio_main.run (fun env -> Eio.Path.rmtree ~missing_ok:true Eio.Path.(env#fs / root)))
+  @@ fun () ->
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  Fs_compat.set_fs env#fs;
+  ignore (Server_startup_state.mark_state_ready ());
+  Runtime_agent_execution_runtime.initialize ~sw ~domain_mgr:env#domain_mgr ~domain_count:1
+  |> require "native execution runtime";
+  let previous_catalog = Llm_provider.Model_catalog.global () in
+  Eio.Switch.on_release sw (fun () -> match previous_catalog with
+    | None -> Llm_provider.Model_catalog.clear_global ()
+    | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+  let catalog = Printf.sprintf
+      "[[models]]\nid_prefix = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n" model_id in
+  Llm_provider.Model_catalog.of_toml_string ~source:"native-input-test" catalog
+  |> require "model catalog" |> Llm_provider.Model_catalog.set_global;
+  let workspace = Workspace.default_config root in
+  ignore (Workspace.init workspace ~agent_name:(Some "native-input-test"));
+  let meta = Masc_test_deps.meta_of_json_fixture (`Assoc [
+    "name", `String keeper_name; "trace_id", `String session_id;
+    "activation_mode", `String "manual"]) |> require "meta" in
+  Keeper_meta_store.replace_snapshot workspace meta |> require "persist meta";
+  let session_dir = Filename.concat root session_id in
+  Unix.mkdir session_dir 0o700;
+  let settled, resolve_settled = Eio.Promise.create () in
+  let provider_calls = ref 0 in
+  let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
+      (Exact_output_fixture.Reply_with (fun _ _ -> incr provider_calls; `OK, final_reply)) in
+  let provider_cfg = Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat ~provider_id:"fixture"
+      ~model_id ~base_url:server.base_url ~request_path:"/v1/chat/completions" () in
+  let execute ~sw:turn_sw ~keeper_name:_ ~claim =
+    let operation : Keeper_chat_operation.t = claim () |> require "claim operation" |> Option.get in
+    let binding : Native.binding = {base_path=root;keeper_name;operation_id;
+      execution_digest=operation.execution_digest;session_dir;session_id} in
+    let context = Agent_core.Context.create () in
+    let scope = Keeper_execution_scope_id.direct_operation operation_id in
+    let frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
+        (Keeper_repetition_snapshot.Fresh scope) |> require "direct scope" in
+    Keeper_repetition_scope.save context frame;
+    let resume = ref false in
+    let request : Agent_core.Hooks.elicitation_request =
+      {question="Which environment?";schema=None;timeout_s=None} in
+    let hooks = {Agent_core.Hooks.empty with before_turn=Some (fun _ ->
+      if !resume then Agent_core.Hooks.Continue else Agent_core.Hooks.ElicitInput request)} in
+    let sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
+      let saved = Keeper_checkpoint_store.save_agent_core_classified
+          ~history_retained:0 ~session_dir snapshot.checkpoint in
+      match saved with
+      | Error detail -> Error detail
+      | Ok (Keeper_checkpoint_store.Stale_noop _) -> Error "fixture source changed"
+      | Ok (Keeper_checkpoint_store.Saved _) ->
+        if !resume then Error "canonical write committed; acknowledgement uncertain" else Ok () in
+    let config = Runtime_agent.default_config ~name:keeper_name ~provider_cfg
+        ~system_prompt:"Ask before proceeding." ~tools:[] in
+    let config = {config with context=Some context;hooks=Some hooks;checkpoint_sink=Some sink} in
+    let dispatch checkpoint blocks =
+      let agent_ref = ref None in
+      let prepared = Native.prepare ~binding ~runtime_id ~config
+          ~agent_core_checkpoint:checkpoint ~input:(Native.New_input {blocks;metadata=[]})
+          ~agent_ref () |> require "prepare owned input call" in
+      Runtime_agent.run_blocks ~sw:turn_sw ~net:env#net ~config:(Native.config prepared)
+        ~agent_ref ?agent_core_checkpoint:(Native.prepared_checkpoint prepared) blocks in
+    let first = dispatch None [Agent_core.Types.Text goal] |> require "first input pause" in
+    let checkpoint = Option.get first.checkpoint in
+    let pending = Option.get checkpoint.pending_input in
+    check bool "first BeforeTurn pause preserves its typed request" true
+      (match first.stop_reason with
+       | Runtime_agent.InputRequired {request;_} -> request.request_id = pending.request.request_id
+       | Completed | Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
+       | Yielded_after_repeated_tool_call _ | Yielded_after_repeated_assistant_text _ -> false);
+    let retained_pending () =
+      let call = match Registry.direct_native_call ~base_path:root ~keeper_name ~operation_id
+          |> require "read native terminal" with
+        | Keeper_native_call.Terminal_unacknowledged (call, _) -> call
+        | No_native_call | Active _ -> fail "native input call omitted its terminal receipt" in
+      Keeper_checkpoint_store.load_retained_exact_snapshot ~session_dir ~reference:call.checkpoint
+      |> require "read retained input checkpoint" |> Keeper_checkpoint_store.exact_snapshot_checkpoint in
+    check bool "terminal retains newly installed input rather than its seed" true
+      ((retained_pending ()).pending_input = Some pending);
+    if uncertain_consume then (
+      resume := true;
+      check bool "uncertain consumed write is a failure" true
+        (Result.is_error (dispatch (Some checkpoint) [Agent_core.Types.Text "continue"]));
+      check bool "terminal cannot resurrect the old pending request" true
+        ((retained_pending ()).pending_input = None));
+    let canonical = Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id
+        |> require "read canonical input checkpoint" in
+    check bool "canonical and retained input observations agree" true
+      (canonical.pending_input = (retained_pending ()).pending_input);
+    check int "no provider dispatch is needed for either input boundary" 0 !provider_calls;
+    Owner.Operation_succeeded {outcome_ref="input-checkpoint-observed"} in
+  let runner : Owner.operation_runner =
+    {ready=(fun ~keeper_name:_ -> true);execute;
+     on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~execution ->
+       Eio.Promise.resolve resolve_settled execution)} in
+  Registry.install_from_store ~sw ~operation_runner:(Some runner)
+    ~on_turn_slot_released:None workspace |> require "install Owner" |> ignore;
+  let input = Keeper_chat_operation_payload.input_to_json ~message:goal ~user_blocks:[]
+      ~turn_instructions:None ~surface_context:None ~attachments:[]
+    |> Keeper_chat_operation.canonical_json |> require "canonical input" in
+  Registry.submit_operation ~base_path:root ~keeper_name ~operation_id
+    ~source:(`Assoc ["kind", `String "fixture"]) ~input |> require "submit operation" |> ignore;
+  match Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds
+      (fun () -> Eio.Promise.await settled) with
+  | Owner.Operation_succeeded _ -> ()
+  | Owner.Operation_failed {detail;_} -> fail detail
+  | Owner.Operation_deferred -> fail "input checkpoint observation deferred"
+
 let () = match Array.to_list Sys.argv with
   | [_; "--native-context-child"; root] -> run_phase ~child:true root
   | _ -> run "native shared context restart"
       ["context ownership", [test_case "resumed tool and hook changes reach durable checkpoint"
-        `Quick test_active_context_restart]]
+        `Quick test_active_context_restart;
+       test_case "first input checkpoint precedes native terminal settlement"
+         `Quick (test_native_input_checkpoint_order ~uncertain_consume:false);
+       test_case "uncertain input consumption never rolls retained state back"
+         `Quick (test_native_input_checkpoint_order ~uncertain_consume:true)]]

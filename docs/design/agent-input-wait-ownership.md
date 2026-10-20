@@ -51,3 +51,46 @@ Those consumers must read the owned continuation and retain server incarnation,
 original invocation and request identity. Historical feed events alone cannot
 prove a current wait after a replay gap. Keeper quiet/member state stays
 independent. #38005 remains open until those paths and their behavior are proven.
+
+## Input transition persistence
+
+The next layer connects installation, accepted-resume consumption and explicit
+Answer/Declined/Timeout settlement to the existing configured checkpoint sink.
+`After_input_wait_changed` carries the candidate messages and exact pending
+proof together. The Agent state lock covers the owner check, sink invocation
+and mutation. Only a successful sink result installs that candidate in memory;
+without a sink the transition remains in-memory. Sinks must not re-enter the
+same Agent's checkpoint or mutating APIs while serving this boundary.
+
+The lifecycle wrapper binds its started invocation in fiber-local context.
+The pipeline installs the wait inside that execution scope, before native
+terminal disposition. This boundary precedes InputRequired publication and parameter or
+provider work after accepted resume. A sink failure becomes a typed run failure
+rather than publishing a durable input pause. Rejected validation and replaced
+request identities do not consume the owner's stored wait. Explicit responses
+return `Input_not_current` separately from `Input_checkpoint_failed`; the latter
+does not claim that external storage was untouched. A sink can commit and then
+report uncertainty, so the host must reread/reconcile instead of treating the
+error as a retry permission. This layer adds no cross-process response endpoint.
+
+The direct native adapter advances its retained Owner before invoking the
+optional canonical sink. Until a subsequent ordinary checkpoint succeeds,
+terminal disposition preserves that Owner's actual retained reference rather
+than advancing from an older Agent snapshot. This also covers a failed
+canonical acknowledgement or a later checkpoint-journal append exception;
+terminal handling does not retry the uncertain write or resurrect its prior
+pending request. Canonical and retained checkpoint observations remain distinct.
+
+Keeper's sink rejects `Stale_noop` for an input transition: leaving another
+canonical checkpoint in place is not a successful write of this owner. A first
+BeforeTurn input pause can have no AfterTurn ordinal. Keeper finalization now
+preserves that absence rather than refusing the pause or inventing a provider
+turn; it emits no per-AfterTurn cost event in that case and projects a null
+ordinal. Other successful stop kinds still require their original ordinal.
+
+An exact persisted checkpoint proves its stored observation, not the authority
+of every possible live or retained continuation. HTTP current-state observation,
+Owner-serialized response admission/CAS, retained continuation reconciliation,
+SSE invalidation and TUI projection remain subsequent layers. In particular,
+the host must distinguish an unreadable source from a stored absent wait, and
+never promote historical checkpoint rows or feed replay into a current owner.

@@ -8,12 +8,14 @@ type periodic_callback =
   }
 
 type checkpoint_stage =
+  | After_input_wait_changed
   | After_assistant_collected
   | After_tool_results_appended
   | After_context_injection
   | After_rejected_response_dropped
 
 let checkpoint_stage_to_string = function
+  | After_input_wait_changed -> "after_input_wait_changed"
   | After_assistant_collected -> "after_assistant_collected"
   | After_tool_results_appended -> "after_tool_results_appended"
   | After_context_injection -> "after_context_injection"
@@ -28,6 +30,10 @@ type checkpoint_snapshot =
   }
 
 type checkpoint_sink = checkpoint_snapshot -> (unit, string) result
+
+type input_response_error =
+  | Input_not_current of Agent_input_request.settlement_error
+  | Input_checkpoint_failed of Error.t
 
 type context_fit_admission =
   | Body_only
@@ -174,16 +180,6 @@ type t =
 let state t = t.state
 let lifecycle t = t.lifecycle
 let pending_input t = t.pending_input
-let clear_pending_input agent expected =
-  match expected with
-  | None -> ()
-  | Some expected ->
-    Eio.Mutex.use_rw ~protect:true agent.mu (fun () ->
-      match Agent_input_request.settle ~current:agent.pending_input expected with
-      | Ok _ -> agent.pending_input <- None
-      | Error (Agent_input_request.No_pending_request | Agent_input_request.Request_not_current) -> ())
-;;
-
 let tools t = t.tools
 let context t = t.context
 let options t = t.options

@@ -287,6 +287,8 @@ let call_checkpoint binding (config : Runtime_agent.config) agent_ref =
     Ok (Agent.checkpoint ~session_id:binding.session_id
       ?working_context:config.checkpoint_sidecar agent)
 
+type terminal_checkpoint_source = Agent_snapshot | Retained_input_owner
+
 let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_ref
     ?retired_history_cut () =
   let* runtime = match Runtime_agent_execution_runtime.get () with
@@ -387,20 +389,40 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
     Owner.bind_direct_native_call ~base_path:binding.base_path
       ~keeper_name:binding.keeper_name ~operation_id:binding.operation_id
       ~execution_digest:binding.execution_digest ~observed ~call |> owner in
+  let terminal_checkpoint_source = ref Agent_snapshot in
   let on_terminal_disposition disposition =
-    let* checkpoint = call_checkpoint binding config agent_ref in
-    let* () = advance checkpoint in
+    let* () = match !terminal_checkpoint_source with
+      | Agent_snapshot ->
+        let* checkpoint = call_checkpoint binding config agent_ref in
+        advance checkpoint
+      | Retained_input_owner ->
+        (* The input sink can have advanced the Owner before a later canonical
+           write or journal acknowledgement failed. Terminal uses that Owner's
+           actual retained reference; an older Agent snapshot cannot undo it.
+           Do not retry a write with an uncertain outcome here. *)
+        Ok () in
     Owner.terminal_direct_native_call ~base_path:binding.base_path
       ~keeper_name:binding.keeper_name ~operation_id:binding.operation_id
       ~execution_digest:binding.execution_digest ~call_id ~disposition |> owner in
   let checkpoint_sink (snapshot : Agent.checkpoint_snapshot) =
+    (match snapshot.stage with
+     | Agent.After_input_wait_changed ->
+       terminal_checkpoint_source := Retained_input_owner
+     | After_assistant_collected | After_tool_results_appended
+     | After_context_injection | After_rejected_response_dropped -> ());
     let checkpoint = {snapshot.checkpoint with Agent_core.Checkpoint.session_id=binding.session_id;
       working_context=(match config.checkpoint_sidecar with
         | Some _ as sidecar -> sidecar | None -> snapshot.checkpoint.working_context)} in
     let* () = advance checkpoint in
-    match config.checkpoint_sink with
-    | None -> Ok ()
-    | Some sink -> sink {snapshot with checkpoint} in
+    let* () = match config.checkpoint_sink with
+      | None -> Ok ()
+      | Some sink -> sink {snapshot with checkpoint} in
+    (match snapshot.stage with
+     | Agent.After_input_wait_changed -> ()
+     | After_assistant_collected | After_tool_results_appended
+     | After_context_injection | After_rejected_response_dropped ->
+       terminal_checkpoint_source := Agent_snapshot);
+    Ok () in
   let execution_store = Agent.execution_store ~runtime ~dir ?resume
       ~on_scope_ready ~on_terminal_disposition () in
   Ok {binding; config={config with execution_store=Some execution_store;

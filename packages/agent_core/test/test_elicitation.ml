@@ -239,7 +239,7 @@ let test_agent_elicit_input_without_callback_pauses () =
       (Agent.provide_input restored forged_question (Hooks.Answer (`Assoc [ "env", `String "prod" ])) = Ok ());
     Alcotest.(check bool) "pending consumed" true (Agent.pending_input restored = None);
     Alcotest.(check bool) "repeated response refused" true
-      (Agent.provide_input restored pending Hooks.Declined = Error Agent_input_request.No_pending_request);
+      (Agent.provide_input restored pending Hooks.Declined = Error (Agent.Input_not_current Agent_input_request.No_pending_request));
     let agent = restored in
     let state_after_input = Agent.state agent in
     Alcotest.(check int) "input appended" 2 (List.length state_after_input.messages);
@@ -296,7 +296,7 @@ let test_current_wait_survives_rejection_and_replacement () =
   Alcotest.(check bool) "replacement request is distinct" true
     (not (String.equal a.request.request_id b.request.request_id));
   Alcotest.(check bool) "late A refused" true
-    (Agent.provide_input agent a (Hooks.Answer (`String "old")) = Error Agent_input_request.Request_not_current);
+    (Agent.provide_input agent a (Hooks.Answer (`String "old")) = Error (Agent.Input_not_current Agent_input_request.Request_not_current));
   Alcotest.(check bool) "late A leaves B and messages unchanged" true
     (Agent.pending_input agent = Some b && Agent.state agent = before);
   Alcotest.(check bool) "explicit decline settles B" true
@@ -323,7 +323,7 @@ let test_checkpoint_delta_retains_current_wait () =
   Alcotest.(check bool) "same-name agents have independent originating runs" true
     (not (String.equal pa.run_id pb.run_id));
   Alcotest.(check bool) "another Agent's response cannot settle A" true
-    (Agent.provide_input a pb Hooks.Declined = Error Agent_input_request.Request_not_current);
+    (Agent.provide_input a pb Hooks.Declined = Error (Agent.Input_not_current Agent_input_request.Request_not_current));
   let before = Agent.checkpoint a in
   let after = {before with Checkpoint.pending_input=Some pb} in
   let delta = Checkpoint.compute_delta before after in
@@ -357,14 +357,148 @@ let test_accepted_resume_failure_consumes_old_wait () =
   Alcotest.(check bool) "accepted low-level resume consumed old wait" true
     (Agent.pending_input agent = None);
   Alcotest.(check bool) "old answer cannot apply after terminal failure" true
-    (Agent.provide_input agent pending Hooks.Declined = Error Agent_input_request.No_pending_request)
+    (Agent.provide_input agent pending Hooks.Declined = Error (Agent.Input_not_current Agent_input_request.No_pending_request))
+;;
+
+let with_input_checkpoint f =
+  let path = Filename.temp_file "owned-input-checkpoint-" ".json" in
+  Sys.remove path;
+  Fun.protect ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    (fun () -> f path)
+;;
+
+let save_input_checkpoint path (snapshot : Agent.checkpoint_snapshot) =
+  Alcotest.(check bool) "input transition has its own checkpoint boundary" true
+    (snapshot.stage = Agent.After_input_wait_changed);
+  let channel = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out channel) (fun () ->
+    output_string channel (Checkpoint.to_string snapshot.checkpoint));
+  Ok ()
+;;
+
+let read_input_checkpoint path =
+  let channel = open_in_bin path in
+  let bytes = Fun.protect ~finally:(fun () -> close_in channel)
+      (fun () -> really_input_string channel (in_channel_length channel)) in
+  Result.get_ok (Checkpoint.of_string bytes)
+;;
+
+let test_pause_survives_cleanup_and_answer_is_saved () =
+  with_input_checkpoint @@ fun path ->
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let question : Hooks.elicitation_request = {question="canonical question";schema=None;timeout_s=None} in
+  let options = {Agent.default_options with hooks={Hooks.empty with
+    before_turn=Some (fun _ -> Hooks.ElicitInput question)}} in
+  let agent = Agent.create ~net:env#net ~checkpoint_sink:(save_input_checkpoint path)
+      ~config:(Types.default_config ~model:"input-only") ~options () in
+  ignore (Agent.run ~sw agent "original");
+  let pending = Option.get (Agent.pending_input agent) in
+  Agent.close agent;
+  let checkpoint = read_input_checkpoint path in
+  Alcotest.(check bool) "first pause is durable without an AfterTurn" true
+    (checkpoint.pending_input = Some pending);
+  let restored = Agent.resume ~net:env#net ~checkpoint
+      ~checkpoint_sink:(save_input_checkpoint path) () in
+  let forged = {pending with request={pending.request with question="forged question"}} in
+  Alcotest.(check bool) "response committed" true
+    (Agent.provide_input restored forged (Hooks.Answer (`String "yes")) = Ok ());
+  let current = read_input_checkpoint path in
+  Alcotest.(check bool) "answer and settlement saved together" true
+    (current.pending_input = None && current.messages = (Agent.state restored).messages);
+  let last = List.hd (List.rev current.messages) in
+  Alcotest.(check bool) "saved answer uses the canonical question" true
+    (last.content = [Types.Text "[User input] canonical question: \"yes\""]);
+  Agent.close restored
+;;
+
+let test_accepted_resume_persists_before_parameter_failure () =
+  with_input_checkpoint @@ fun path ->
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let waiting = ref true in
+  let question : Hooks.elicitation_request = {question="question";schema=None;timeout_s=None} in
+  let options = {Agent.default_options with hooks={Hooks.empty with
+    before_turn=Some (fun _ -> if !waiting then Hooks.ElicitInput question else Hooks.Continue);
+    before_turn_params=Some (fun _ ->
+      Alcotest.(check bool) "settlement already stored before parameters" true
+        ((read_input_checkpoint path).pending_input = None);
+      Hooks.HookFailed {stage=Hooks.Before_turn_params;detail="after input acceptance"})}} in
+  let agent = Agent.create ~net:env#net ~checkpoint_sink:(save_input_checkpoint path)
+      ~config:(Types.default_config ~model:"input-only") ~options () in
+  ignore (Agent.run ~sw agent "original");
+  waiting := false;
+  let result = Agent.run_turn_stream ~sw ~on_event:ignore agent in
+  Alcotest.(check bool) "parameter failure remains a failure" true (Result.is_error result);
+  Agent.close agent;
+  let restored = Agent.resume ~net:env#net ~checkpoint:(read_input_checkpoint path) () in
+  Alcotest.(check bool) "cleanup and restore cannot resurrect the old wait" true
+    (Agent.pending_input restored = None);
+  Agent.close restored
+;;
+
+let test_input_sink_failure_preserves_owned_state () =
+  with_input_checkpoint @@ fun path ->
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let refuse = ref false in
+  let question : Hooks.elicitation_request = {question="question";schema=None;timeout_s=None} in
+  let options = {Agent.default_options with hooks={Hooks.empty with
+    before_turn=Some (fun _ -> Hooks.ElicitInput question)}} in
+  let sink snapshot = if !refuse then Error "write refused" else save_input_checkpoint path snapshot in
+  let agent = Agent.create ~net:env#net ~checkpoint_sink:sink
+      ~config:(Types.default_config ~model:"input-only") ~options () in
+  ignore (Agent.run ~sw agent "original");
+  let pending = Option.get (Agent.pending_input agent) in
+  let messages = (Agent.state agent).messages in
+  refuse := true;
+  Alcotest.(check bool) "response reports persistence failure" true
+    (match Agent.provide_input agent pending (Hooks.Answer (`String "yes")) with
+     | Error (Agent.Input_checkpoint_failed _) -> true
+     | Error (Agent.Input_not_current _) | Ok () -> false);
+  Alcotest.(check bool) "failed response preserves messages and wait" true
+    ((Agent.state agent).messages = messages && Agent.pending_input agent = Some pending);
+  let result = Agent.run_turn_stream ~sw ~on_event:ignore agent in
+  Alcotest.(check bool) "replacement pause cannot claim a failed write" true
+    (match result with
+     | Error (Error.Agent (Error.InputRequired _)) | Ok _ -> false
+     | Error _ -> true);
+  Alcotest.(check bool) "original durable request remains" true
+    ((read_input_checkpoint path).pending_input = Some pending && Agent.pending_input agent = Some pending);
+  Agent.close agent
+;;
+
+let test_uncertain_input_commit_is_not_a_stale_response () =
+  with_input_checkpoint @@ fun path ->
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let uncertain = ref false in
+  let question : Hooks.elicitation_request = {question="question";schema=None;timeout_s=None} in
+  let options = {Agent.default_options with hooks={Hooks.empty with
+    before_turn=Some (fun _ -> Hooks.ElicitInput question)}} in
+  let sink snapshot =
+    let result = save_input_checkpoint path snapshot in
+    if !uncertain then Error "write outcome requires host reconciliation" else result in
+  let agent = Agent.create ~net:env#net ~checkpoint_sink:sink
+      ~config:(Types.default_config ~model:"input-only") ~options () in
+  ignore (Agent.run ~sw agent "original");
+  let pending = Option.get (Agent.pending_input agent) in
+  uncertain := true;
+  Alcotest.(check bool) "uncertainty is an explicit checkpoint error" true
+    (match Agent.provide_input agent pending Hooks.Declined with
+     | Error (Agent.Input_checkpoint_failed _) -> true
+     | Error (Agent.Input_not_current _) | Ok () -> false);
+  Alcotest.(check bool) "an error does not assert external storage unchanged" true
+    ((read_input_checkpoint path).pending_input = None && Agent.pending_input agent = Some pending);
+  Agent.close agent
 ;;
 
 let () =
   let open Alcotest in
   run
     "Elicitation"
-    [ ( "owned current input"
+    [ ( "durable input transitions"
+      , [ test_case "first pause and canonical answer survive cleanup" `Quick test_pause_survives_cleanup_and_answer_is_saved
+        ; test_case "accepted resume is saved before later failure" `Quick test_accepted_resume_persists_before_parameter_failure
+        ; test_case "failed input writes preserve the original owner" `Quick test_input_sink_failure_preserves_owned_state
+        ; test_case "uncertain writes require host reconciliation" `Quick test_uncertain_input_commit_is_not_a_stale_response ] )
+    ; ( "owned current input"
       , [ test_case "rejected resume and stale response preserve current wait" `Quick test_current_wait_survives_rejection_and_replacement
         ; test_case "concurrent same-name runs and durable deltas" `Quick test_checkpoint_delta_retains_current_wait
         ; test_case "accepted low-level resume then failure consumes old wait" `Quick test_accepted_resume_failure_consumes_old_wait ] )

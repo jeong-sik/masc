@@ -26,7 +26,8 @@
   agent_tool_execution_types
   agent_execution_projection
   agent_execution_runner
-  pipeline_checkpoint
+  agent_checkpoint_sink
+  agent_input_checkpoint
   pipeline_execution_scope
   pipeline_execution_resume
   pipeline_terminal_tool

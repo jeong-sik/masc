@@ -1,3 +1,4 @@
+import { readKeeperCostCoverage } from './lib/keeper-cost-coverage'
 import { readKeeperBoardAddress } from './lib/board-address'
 import { readRuntimeLaneObservation } from './lib/keeper-runtime-walk'
 import { readKeeperPortrait } from './lib/keeper-portrait'
@@ -741,6 +742,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         turn_count: asNumber(row.turn_count) ?? asNumber(row.total_turns),
         total_turns: asNumber(row.total_turns) ?? asNumber(row.turn_count),
         total_tokens: asNumber(row.total_tokens),
+        cost_coverage: readKeeperCostCoverage(row.total_cost_usd),
         last_latency_ms: asNumber(row.last_latency_ms),
         keeper_age_s: asNumber(row.keeper_age_s),
         last_turn_ago_s: asNumber(row.last_turn_ago_s),

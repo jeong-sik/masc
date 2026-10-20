@@ -1,3 +1,4 @@
+import { readKeeperCostCoverage } from '../lib/keeper-cost-coverage'
 import { confirmRuntimeTestWorkspace } from '../lib/runtime-workspace.test-fixture'
 import { html } from 'htm/preact'
 import { render } from 'preact'
@@ -144,7 +145,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       total_input_tokens: 1200,
       total_output_tokens: 800,
       total_tokens: 2000,
-      total_cost_usd: 0.12,
+      total_cost_usd: readKeeperCostCoverage(0.12),
       last_model_used: 'llama:test-balanced',
       last_input_tokens: 120,
       last_output_tokens: 80,

@@ -660,6 +660,20 @@ let handle
       ~resolved:turn_spend.other_readings
       ~usage_cursor
   in
+  (* Cost coverage consumes only actual readings, once, after token updates.
+     The synthetic winner usage resolution is not a provider reading. *)
+  let updated_meta =
+    let ( let* ) = Result.bind in
+    let cost =
+      let* delta = Keeper_turn_spend.cost_coverage
+        ~resolved:(turn_spend.other_readings @ Option.to_list turn_spend.turn_reading) spend in
+      Keeper_cost_coverage.add updated_meta.runtime.usage.total_cost_usd delta
+    in
+    match cost with
+    | Ok total_cost_usd ->
+      Keeper_meta_contract.map_usage (fun usage -> {usage with total_cost_usd}) updated_meta
+    | Error error -> raise (Owner_meta_commit_failed (Keeper_cost_coverage.error_to_string error))
+  in
   let updated_meta =
     if Keeper_execution_outcome.is_autonomous execution_outcome
     then acknowledge_pending_messages updated_meta observation
@@ -758,6 +772,9 @@ let handle
       ~original_meta:meta
       ~updated_meta
   in
+  Keeper_unified_metrics_support.record_keeper_total_cost_usd
+    ~keeper_name:updated_meta.name
+    ~total_cost_usd:updated_meta.runtime.usage.total_cost_usd.known_cost_usd;
   (* The spend rows follow the commit that moved the cursor. Written before
      it, a failed commit left rows whose spend the next turn resolved again
      from the old cursor. *)

@@ -170,7 +170,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
             total_input_tokens = 0;
             total_output_tokens = 0;
             total_tokens = 0;
-            total_cost_usd = 0.0;
+            total_cost_usd = Keeper_cost_coverage.empty;
             last_turn_ts = 0.0;
             last_input_tokens = 0;
             last_output_tokens = 0;

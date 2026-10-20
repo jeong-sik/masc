@@ -290,7 +290,12 @@ let decode_current_meta fields =
   let* total_input_tokens = int_field fields "total_input_tokens" in
   let* total_output_tokens = int_field fields "total_output_tokens" in
   let* total_tokens = int_field fields "total_tokens" in
-  let* total_cost_usd = float_field fields "total_cost_usd" in
+  let* cost_json = required_field fields "total_cost_usd" in
+  let* total_cost_usd =
+    match Keeper_cost_coverage.of_json cost_json with
+    | Ok value -> Ok value
+    | Error detail -> invalidf "total_cost_usd: %s" detail
+  in
   let* last_turn_ts = float_field fields "last_turn_ts" in
   let* last_input_tokens = int_field fields "last_input_tokens" in
   let* last_output_tokens = int_field fields "last_output_tokens" in

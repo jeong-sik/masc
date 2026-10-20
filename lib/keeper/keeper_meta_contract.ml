@@ -89,7 +89,7 @@ type usage_metrics =
   ; total_input_tokens : int
   ; total_output_tokens : int
   ; total_tokens : int
-  ; total_cost_usd : float
+  ; total_cost_usd : Keeper_cost_coverage.t
   ; last_turn_ts : float
   ; last_input_tokens : int
   ; last_output_tokens : int
@@ -448,7 +448,7 @@ let zero_usage : usage_metrics =
   ; total_input_tokens = 0
   ; total_output_tokens = 0
   ; total_tokens = 0
-  ; total_cost_usd = 0.0
+  ; total_cost_usd = Keeper_cost_coverage.empty
   ; last_turn_ts = 0.0
   ; last_input_tokens = 0
   ; last_output_tokens = 0

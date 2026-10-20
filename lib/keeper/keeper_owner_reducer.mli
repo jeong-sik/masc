@@ -9,7 +9,7 @@ type usage_delta =
   ; input_tokens : int
   ; output_tokens : int
   ; total_tokens : int
-  ; cost_usd : float
+  ; cost_usd : Keeper_cost_coverage.t
   ; last_turn_ts : float
   ; last_input_tokens : int
   ; last_output_tokens : int

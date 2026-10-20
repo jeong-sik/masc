@@ -881,7 +881,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("total_input_tokens", `Int m.runtime.usage.total_input_tokens);
               ("total_output_tokens", `Int m.runtime.usage.total_output_tokens);
               ("total_tokens", `Int m.runtime.usage.total_tokens);
-              ("total_cost_usd", `Float m.runtime.usage.total_cost_usd);
+              ("total_cost_usd", Keeper_cost_coverage.to_json m.runtime.usage.total_cost_usd);
               ("last_model_used", `Null);
               ( "last_usage"
               , Option.fold

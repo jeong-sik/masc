@@ -9,7 +9,7 @@ let keeper : Tui_types.keeper =
   ; k_name = "analyst"
   ; k_paused = false
   ; k_identity = Ok { k_trace_id = "trace-current"; k_created_at = "2026-08-25T00:00:00Z"; k_updated_at = "2026-08-25T00:00:00Z" }
-  ; k_activity = Some { k_current_task_id = None; k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = 0.0; k_last_turn_ts = ""; k_last_proactive_outcome = None }
+  ; k_activity = Some { k_current_task_id = None; k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = Keeper_cost_coverage.empty; k_last_turn_ts = ""; k_last_proactive_outcome = None }
   }
 
 let state () =

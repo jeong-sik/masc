@@ -112,7 +112,7 @@ let resume_with_profiles ?on_recovery_held ~profiles ~context continuation =
         ; runtime =
             { usage =
                 { total_turns = 0; total_input_tokens = 0; total_output_tokens = 0
-                ; total_tokens = 0; total_cost_usd = 0.0; last_turn_ts = 0.0
+                ; total_tokens = 0; total_cost_usd = Keeper_cost_coverage.empty; last_turn_ts = 0.0
                 ; last_input_tokens = 0; last_output_tokens = 0; last_total_tokens = 0
                 ; last_usage_reported_at = None; last_latency_ms = 0 }
             ; usage_cursor = None; last_usage_resolution = None

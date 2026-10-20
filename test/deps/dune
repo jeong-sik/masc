@@ -57,6 +57,7 @@
   (re_export masc.discovery_cache)
   (re_export masc.embedded_config)
   (re_export masc.json_field)
+  (re_export masc.keeper_cost_coverage)
   (re_export masc.keeper_hooks_agent_core_types)
   (re_export masc.keeper_sandbox_image)
   (re_export masc.local_runtime_pool)

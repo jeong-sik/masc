@@ -972,7 +972,21 @@ run_one() {
     if [[ -n "${has_usage}" && "${has_usage}" != "null" ]]; then
       input_tokens_json="$(jq -r '.metrics.total_input_tokens // null' <<< "${config_resp}")"
       output_tokens_json="$(jq -r '.metrics.total_output_tokens // null' <<< "${config_resp}")"
-      cost_usd_json="$(jq -r '.metrics.total_cost_usd // null' <<< "${config_resp}")"
+      cost_usd_json="$(jq -c '
+        def amount: type == "number" and isfinite and . >= 0;
+        # jq uses IEEE-754 numbers: counts outside the exact-integer range
+        # cannot supply trustworthy coverage to this numeric-only result.
+        def count: amount and floor == . and . <= 9007199254740991;
+        .metrics.total_cost_usd
+        | if type == "object"
+          and keys == ["history", "known_cost_usd", "priced_readings", "unobserved_attempts", "unpriced_readings", "unresolved_readings"]
+          and (.known_cost_usd | amount)
+          and ([.priced_readings, .unpriced_readings, .unresolved_readings, .unobserved_attempts] | all(count))
+          and .history == "complete" and .priced_readings > 0
+          and .unpriced_readings == 0 and .unresolved_readings == 0
+          and .unobserved_attempts == 0
+          then .known_cost_usd else null end
+      ' <<< "${config_resp}")"
     fi
   fi
 

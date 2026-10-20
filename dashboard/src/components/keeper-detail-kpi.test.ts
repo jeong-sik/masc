@@ -93,3 +93,31 @@ describe('KpiGrid', () => {
     expect(screen.queryByText('인계')).not.toBeInTheDocument()
   })
 })
+
+// Wire normalization and the real lifetime KPI share the same coverage facts.
+describe('lifetime pricing coverage', () => {
+  it('shows numeric zero as unknown history and explicit priced zero as free', async () => {
+    const { normalizeKeepers } = await import('../keeper-store-normalize')
+    const [unknown] = normalizeKeepers([{ name: 'cost-fixture', status: 'ready', total_cost_usd: 0 }])
+    render(h(KpiGrid, { keeper: unknown! }))
+    expect(screen.getByText(/history unobserved/)).toBeInTheDocument()
+    cleanup()
+    const [priced] = normalizeKeepers([{ name: 'cost-fixture', status: 'ready', total_cost_usd: {
+      known_cost_usd: 0, priced_readings: 1, unpriced_readings: 0,
+      unresolved_readings: 0, unobserved_attempts: 0, history: 'complete',
+    } }])
+    render(h(KpiGrid, { keeper: priced! }))
+    expect(screen.getByText('$0.0000')).toBeInTheDocument()
+    expect(screen.queryByText(/history unobserved/)).toBeNull()
+  })
+
+  it('shows the known part and preserves unpriced and unresolved evidence', async () => {
+    const { normalizeKeepers } = await import('../keeper-store-normalize')
+    const [mixed] = normalizeKeepers([{ name: 'cost-fixture', status: 'ready', total_cost_usd: {
+      known_cost_usd: 2, priced_readings: 1, unpriced_readings: 2,
+      unresolved_readings: 3, unobserved_attempts: 1, history: 'complete',
+    } }])
+    render(h(KpiGrid, { keeper: mixed! }))
+    expect(screen.getByText('$2.0000 known · 1 priced / 2 unpriced / 3 unresolved readings · 1 unobserved attempts')).toBeInTheDocument()
+  })
+})

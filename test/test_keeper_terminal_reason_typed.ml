@@ -1455,7 +1455,7 @@ max-concurrent = 1
         ~observation:(Some (Masc.Keeper_usage_resolution.sample_of_api_usage usage))
         ~observed_at:42.0
     in
-    Masc.Keeper_unified_metrics.update_metrics_from_result
+    let updated = Masc.Keeper_unified_metrics.update_metrics_from_result
       prior
       ~latency_ms:1
       ~observation
@@ -1463,6 +1463,22 @@ max-concurrent = 1
       ~usage_cursor
       ~is_autonomous_turn:false
       result
+    in
+    (* This fixture represents one actual provider reading. Cost is committed
+       from the same real-reading capture path as terminal success/failure,
+       separately from the synthetic-capable token metric updater. *)
+    let reading : Masc.Keeper_turn_spend.reading =
+      {reading_index=0; response_id="metric-fixture"; ordinal=1; model="fixture";
+       basis; observation=Some (Masc.Keeper_usage_resolution.sample_of_api_usage usage);
+       count_after=Masc.Keeper_turn_spend.Count_continues} in
+    let attempt : Masc.Keeper_turn_spend.attempt =
+      {routing_run_id="metric-fixture";runtime_id="fixture";lane_attempt_index=0;readings=[reading]} in
+    let resolved : Masc.Keeper_turn_spend.resolved =
+      {routing_run_id=attempt.routing_run_id;runtime_id=attempt.runtime_id;
+       lane_attempt_index=0;reading;resolution=usage_resolution} in
+    let cost = Result.get_ok (Masc.Keeper_turn_spend.cost_coverage ~resolved:[resolved] [attempt]) in
+    let total_cost_usd = Result.get_ok (Keeper_cost_coverage.add prior.runtime.usage.total_cost_usd cost) in
+    KMC.map_usage (fun usage -> {usage with total_cost_usd}) updated
   in
   let updated =
     reactive_success
@@ -1490,7 +1506,7 @@ max-concurrent = 1
       total_input_tokens = 100
     ; total_output_tokens = 20
     ; total_tokens = 120
-    ; total_cost_usd = 1.5
+    ; total_cost_usd = Result.get_ok (Keeper_cost_coverage.unobserved_history ~known_cost_usd:1.5)
     }
   in
   let prior = { meta with runtime = { meta.runtime with usage = prior_usage } } in
@@ -1524,7 +1540,7 @@ max-concurrent = 1
     (cumulative.runtime.usage.total_output_tokens = 920);
   check
     "fresh conversation cumulative cost is the first exact delta"
-    (Float.equal cumulative.runtime.usage.total_cost_usd 13.5);
+    (Float.equal cumulative.runtime.usage.total_cost_usd.known_cost_usd 13.5);
   check
     "conversation cumulative raw observation remains visible"
     (cumulative.runtime.usage.last_input_tokens = 9_000
@@ -1559,7 +1575,7 @@ max-concurrent = 1
     (resumed.runtime.usage.total_output_tokens = 960);
   check
     "resumed cumulative cost adds only the exact delta"
-    (Float.abs (resumed.runtime.usage.total_cost_usd -. 13.9) < 0.000_001);
+    (Float.abs (resumed.runtime.usage.total_cost_usd.known_cost_usd -. 13.9) < 0.000_001);
   let resumed_without_baseline, established_cursor =
     Masc.Keeper_usage_resolution.resolve
       ~cursor:None
@@ -1633,7 +1649,7 @@ max-concurrent = 1
     "the regressed turn adds nothing to the totals"
     (dropped.runtime.usage.total_input_tokens = 9_100
      && dropped.runtime.usage.total_output_tokens = 920
-     && Float.equal dropped.runtime.usage.total_cost_usd 13.5);
+     && Float.equal dropped.runtime.usage.total_cost_usd.known_cost_usd 13.5);
   check
     "the regressed turn is recorded as a counter regression"
     (match dropped.runtime.last_usage_resolution with
@@ -1686,7 +1702,7 @@ max-concurrent = 1
     "the round after a regression adds only its exact delta"
     (climbing.runtime.usage.total_input_tokens = 9_600
      && climbing.runtime.usage.total_output_tokens = 970
-     && Float.abs (climbing.runtime.usage.total_cost_usd -. 13.8) < 0.000_001);
+     && Float.abs (climbing.runtime.usage.total_cost_usd.known_cost_usd -. 13.8) < 0.000_001);
   check
     "the round after a regression is exact again"
     (match climbing.runtime.last_usage_resolution with
@@ -1788,7 +1804,7 @@ max-concurrent = 1
     (per_request.runtime.usage.total_output_tokens = 22);
   check
     "per-request cost remains additive"
-    (Float.equal per_request.runtime.usage.total_cost_usd 1.75);
+    (Float.equal per_request.runtime.usage.total_cost_usd.known_cost_usd 1.75);
   let stale_provider_failure =
     Masc.Keeper_registry.Provider_runtime_error
       { code = "api_error_invalid_request"

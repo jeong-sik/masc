@@ -25,7 +25,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; Total_input_tokens, `Int rt.usage.total_input_tokens
     ; Total_output_tokens, `Int rt.usage.total_output_tokens
     ; Total_tokens, `Int rt.usage.total_tokens
-    ; Total_cost_usd, `Float rt.usage.total_cost_usd
+    ; Total_cost_usd, Keeper_cost_coverage.to_json rt.usage.total_cost_usd
     ; Last_turn_ts, `Float rt.usage.last_turn_ts
     ; Last_input_tokens, `Int rt.usage.last_input_tokens
     ; Last_output_tokens, `Int rt.usage.last_output_tokens

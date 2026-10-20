@@ -31,7 +31,7 @@ type keeper_activity = {
   k_current_task_id : string option;
   k_total_turns : int;
   k_total_tokens : int;
-  k_total_cost_usd : float;
+  k_total_cost_usd : Keeper_cost_coverage.t;
   k_last_turn_ts : string;
   k_last_proactive_outcome : Keeper_meta_contract.proactive_cycle_outcome option;
 }
@@ -7882,3 +7882,20 @@ let decode_msx_checkpoint_receipt ~operation_id ~restore ~slot ~base_path ~masc_
        | Some _ -> invalid ())
   | _ -> invalid ()
 ;;
+let keeper_cost_summary cost =
+  let module Cost = Keeper_cost_coverage in
+  match Cost.knowledge cost with
+  | Cost.No_observations -> "no cost observations"
+  | Cost.Fully_priced -> Printf.sprintf "$%.4f" cost.known_cost_usd
+  | Cost.No_reported_prices ->
+    Printf.sprintf "not priced by provider (%d readings)" cost.unpriced_readings
+  | Cost.Partly_priced ->
+    Printf.sprintf "$%.4f known · %d priced / %d unpriced readings"
+      cost.known_cost_usd cost.priced_readings cost.unpriced_readings
+  | Cost.Unresolved ->
+    let history = match cost.history with
+      | Cost.Complete -> "" | Cost.Unobserved -> "history unobserved · "
+    in
+    Printf.sprintf "%s$%.4f known · %d priced / %d unpriced / %d unresolved readings · %d unobserved attempts"
+      history cost.known_cost_usd cost.priced_readings cost.unpriced_readings
+      cost.unresolved_readings cost.unobserved_attempts

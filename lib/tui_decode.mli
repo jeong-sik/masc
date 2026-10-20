@@ -36,7 +36,7 @@ type keeper_activity = {
   k_current_task_id : string option;
   k_total_turns : int;
   k_total_tokens : int;
-  k_total_cost_usd : float;
+  k_total_cost_usd : Keeper_cost_coverage.t;
   k_last_turn_ts : string;
   k_last_proactive_outcome : Keeper_meta_contract.proactive_cycle_outcome option;
       (** What the last proactive cycle came to, as the contract types it.
@@ -44,6 +44,10 @@ type keeper_activity = {
           the screen names it in words: as a string it was the wire token
           ("never_started"), the one spelling no surface uses. *)
 }
+
+val keeper_cost_summary : Keeper_cost_coverage.t -> string
+(** A lifetime reported sum with its pricing uncertainty; zero alone never
+    establishes free or fully priced usage. *)
 
 type keeper = {
   k_origin : keeper_origin;

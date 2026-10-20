@@ -194,9 +194,11 @@ type official_selection =
           The stop holds these lines only; the atom selection of the same
           round is independent of it (RFC §4.10). *)
 
-(** The [No_atom_history] end lines beyond [cursor], of every trace: a trace
-    that ended still has fragments in its own session directory.
-    [To_first_cut_point] takes the oldest one. *)
+(** The [No_atom_history] end lines beyond [cursor] and before the first
+    refused line beyond it, of every trace: a trace that ended still has
+    fragments in its own session directory. [lines] is in ascending line
+    order, as {!Keeper_turn_boundaries.read} returns it. [To_first_cut_point]
+    takes the oldest one. *)
 val select_official
   :  lines:
        (int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result)

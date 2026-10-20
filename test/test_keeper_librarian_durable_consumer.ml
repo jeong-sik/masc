@@ -3898,9 +3898,11 @@ let test_an_official_turn_before_a_refused_boundary_line_is_read () =
   append_official_boundary config ~trace_id ~turn:1 ~recorded_at:1.0;
   append_refused_boundary_line config;
   let carried = ref [] in
+  let committed_range = ref None in
   (match
-     consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ input ->
+     consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id input ->
        carried := text_markers input;
+       committed_range := official_range_id;
        Consumer.Memory_committed)
    with
    | Consumer.Official_advanced { atom = None; official } ->
@@ -3911,6 +3913,13 @@ let test_an_official_turn_before_a_refused_boundary_line_is_read () =
    | Consumer.Progress_advanced _
    | Consumer.Memory_not_committed _ -> fail "the turn before the refused line was not read");
   check (list string) "the turn before the refused line is carried" [ "q1"; "a1" ] !carried;
+  (match !committed_range with
+   | Some range ->
+     check int "the receipt starts at the log's beginning" 0
+       range.Masc.Keeper_memory_os_current.after_boundary_line;
+     check (list int) "the receipt names only the line before the refused one" [ 1 ]
+       (List.map fst range.Masc.Keeper_memory_os_current.turns)
+   | None -> fail "the official range was not committed");
   check_official_stop config ~line:2
 ;;
 

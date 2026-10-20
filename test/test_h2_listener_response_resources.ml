@@ -92,7 +92,7 @@ let with_listener mode ~capacity make_handler run =
         (fun () -> Fun.protect ~finally:(fun () -> List.iter (fun client -> client.close ()) !clients)
           (fun () -> run ~connect ~port))))
 
-let request ?(body="") ?(headers=[]) client ~port path =
+let request ?(body="") ?(headers=[]) ?(on_error=fun _ -> ()) client ~port path =
   let received,receive=Eio.Promise.create () in
   let failed,fail_stream=Eio.Promise.create () in
   let id=client.next_id in client.next_id<-id+2;
@@ -100,7 +100,8 @@ let request ?(body="") ?(headers=[]) client ~port path =
     (H2.Request.create ~scheme:"http" (if body="" then `GET else `POST) path
       ~headers:(H2.Headers.of_list ((":authority","localhost:"^string_of_int port)
         ::("authorization",client.authorization)::headers)))
-    ~error_handler:(fun _ ->
+    ~error_handler:(fun error ->
+      on_error error;
       if not (Eio.Promise.is_resolved received) then Eio.Promise.resolve receive (Error ());
       if not (Eio.Promise.is_resolved failed) then Eio.Promise.resolve fail_stream ())
     ~response_handler:(fun response reader ->
@@ -173,6 +174,66 @@ let test_listener_shares_capacity mode () =
     check int "reset returns capacity to the other connection" 200
       (H2.Status.to_code accepted.response.status);
     check string "slow consumption preserves the complete accepted body" payload (read_complete accepted))
+
+let test_listener_stream_admission mode () =
+  (* An explicit test configuration, not a new product default. Two held
+     streams expose both over-admission and refusal stealing an owned slot. *)
+  Masc_test_deps.with_process_env "MASC_H2_MAX_CONCURRENT_STREAMS" (Some "2") @@ fun () ->
+  let admitted=ref [] and released=ref [] in
+  let rec await_release target =
+    if not (List.mem target !released) then (Eio.Fiber.yield ();await_release target) in
+  let make_handler ~gateway:_ ~request_sw _ reqd =
+    let target=(H2.Reqd.request reqd).target in
+    admitted:=target::!admitted;
+    Eio.Switch.on_release request_sw (fun () -> released:=target::!released);
+    ignore (H2.Reqd.respond_with_streaming ~flush_headers_immediately:true reqd
+      (H2.Response.create `OK)) in
+  with_listener mode ~capacity:65536 make_handler (fun ~connect ~port ->
+    let client=connect () in
+    let first=request client ~port "/first" in
+    let first_response=response first in
+    let second=request client ~port "/second" in
+    let second_response=response second in
+    ping client;
+    let refuse path =
+      let error_seen=ref None in
+      let exchange=request ~on_error:(fun error -> error_seen:=Some error)
+        client ~port path in
+      (match Eio.Promise.await exchange.received with
+       | Error () -> ()
+       | Ok _ -> fail "excess stream reached the application handler");
+      (match !error_seen with
+       | Some (`Protocol_error ((H2.Error_code.ProtocolError | H2.Error_code.RefusedStream),_)) -> ()
+       | Some (`Protocol_error _ | `Malformed_response _ | `Invalid_response_body_length _ | `Exn _)
+       | None -> fail "excess stream did not receive an explicit H2 admission refusal");
+      ping client in
+    refuse "/excess-one";
+    refuse "/excess-two";
+    check (list string) "repeated refusals do not create spare slots"
+      ["/second";"/first"] !admitted;
+    check (list string) "refusal does not release an admitted request" [] !released;
+    reset client first first_response;
+    await_release "/first";
+    check (list string) "reset releases exactly the first request scope" ["/first"] !released;
+    let replacement=request client ~port "/replacement" in
+    let replacement_response=response replacement in
+    check int "returned slot admits a replacement" 200
+      (H2.Status.to_code replacement_response.response.status);
+    refuse "/excess-after-reuse";
+    check (list string) "only the one returned slot can be reused"
+      ["/replacement";"/second";"/first"] !admitted;
+    reset client second second_response;
+    reset client replacement replacement_response;
+    await_release "/second";
+    await_release "/replacement";
+    check (list string) "all admitted request scopes are released"
+      ["/first";"/replacement";"/second"] (List.sort String.compare !released);
+    let fresh=request client ~port "/after-all-resets" in
+    let fresh_response=response fresh in
+    check int "connection admits work after all slots were released" 200
+      (H2.Status.to_code fresh_response.response.status);
+    reset client fresh fresh_response;
+    await_release "/after-all-resets")
 
 let sse json=Printf.sprintf "data: %s\n\n" (Yojson.Safe.to_string json)
 let tools_notifications=`Assoc ["toolsListChanged",`Bool true]
@@ -276,4 +337,6 @@ let test_actual_subscription_route () =
 let ()=run "H2 listener response resources" ["actual listeners and MCP",[
   test_case "H2 listener shares capacity across TCP connections" `Quick (test_listener_shares_capacity H2_only);
   test_case "auto listener shares capacity across detected H2 connections" `Quick (test_listener_shares_capacity Auto);
+  test_case "H2 listener refuses excess streams and reuses only released slots" `Quick (test_listener_stream_admission H2_only);
+  test_case "auto listener refuses excess streams and reuses only released slots" `Quick (test_listener_stream_admission Auto);
   test_case "actual subscription overflow and slow sibling delivery" `Quick test_actual_subscription_route]]

@@ -186,7 +186,29 @@ let test_an_undeclared_output_is_not_allowed () =
     (match run_request store runner (request ~output:"grade" "r6") with
      | Exact.Final (Exact.Not_allowed _) -> ()
      | _ -> fail "an output the manifest does not declare must be not_allowed");
+    let restarted = Store.create ~root in
+    check bool "a denied id cannot be reused for a permitted output" true
+      (run_request restarted runner (request "r6") = Exact.Final Exact.Request_id_reused);
+    let allowed = {package with exact_outputs = [{Types.name="grade";schema}]} in
+    check bool "the same denied request retains its final after permission changes" true
+      (match require (Exact.run ~store:restarted ~declaration_id ~package:allowed ~runner (request ~output:"grade" "r6")) with
+       | Exact.Final (Exact.Not_allowed _) -> true | _ -> false);
     check int "without a send" 0 !sends)
+
+let test_selection_hides_but_preserves_a_retained_answer () =
+  with_root (fun root ->
+    let store = Store.create ~root in
+    let runner, sends, _ = counting_runner store (ref [Answer question]) in
+    ignore (run_request store runner (request "selected"));
+    let off request = require (Exact.run ~store ~declaration_id ~package:{package with exact_outputs=[]} ~runner request) in
+    check bool "permission does not mask a changed identity" true
+      (off (request ~output:"grade" "selected") = Exact.Final Exact.Request_id_reused);
+    check bool "disabled output does not disclose the original answer" true
+      (match off (request "selected") with Exact.Final (Exact.Not_allowed _) -> true | _ -> false);
+    check int "the delivery refusal is retained alongside the original attempt" 2 (List.length (attempts store "selected"));
+    check bool "reenabling replays the original answer" true
+      (answered_with question (run_request store runner (request "selected")));
+    check int "one provider call across selection changes" 1 !sends)
 
 (* While one run of a request is inside its call, a run of the same request
    through another store value on the same root waits and leaves the record
@@ -297,6 +319,7 @@ let () =
         ; test_case "a started attempt without outcome is unknown" `Quick test_a_started_attempt_without_outcome_is_unknown
         ; test_case "an exception ends the request as unknown" `Quick test_an_exception_ends_the_request_as_unknown
         ; test_case "an undeclared output is not allowed" `Quick test_an_undeclared_output_is_not_allowed
+        ; test_case "selection hides but preserves a retained answer" `Quick test_selection_hides_but_preserves_a_retained_answer
         ; test_case "a request in flight is not run twice" `Quick test_a_request_in_flight_is_not_run_twice
         ; test_case "a cancelled call leaves its attempt started" `Quick test_a_cancelled_call_leaves_its_attempt_started
         ; test_case "a retained answer is checked against the schema declared now" `Quick

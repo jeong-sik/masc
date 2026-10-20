@@ -9,7 +9,9 @@ val register_delivery_handler :
 val register_exact_runner : Lane_addon_exact.runner -> unit
 (** Server-owned runner for packages' exact-output requests, registered before
     configuration maintenance. Without it a declared installation's exact
-    request ends its host request cycle with [no_exact_runner]. *)
+    request ends its host request cycle with [no_exact_runner]. Retirement
+    cancels its current exact call independently of worker cleanup; a pending
+    provider outcome is not replayed and no later request is dispatched. *)
 val register_sampling_factory :
   (sw:Eio.Switch.t -> store:Lane_addon_store.t -> instance_id:string ->
     package:Lane_addon_types.package -> binding:Yojson.Safe.t ->
@@ -209,7 +211,7 @@ module For_testing : sig
     stop : unit -> (Lane_addon_lifecycle.release, Lane_addon_lifecycle.failure) result;
     resource : Lane_addon_lifecycle.resource;
     browser : Browser_addon_client.t option;
-  host : host_port option;
+    host : host_port option;
   }
   type backend = {
     start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> installation_id:string -> package:Lane_addon_types.package -> binding:Yojson.Safe.t ->

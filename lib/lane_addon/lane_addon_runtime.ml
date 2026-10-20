@@ -13,6 +13,7 @@ let runtime_result result = Result.map_error (fun detail -> Runtime_failed detai
 exception Fleet_commit_uncertain of string
 exception Fleet_commit_pending of string
 exception Worker_detached
+exception Host_cycle_stopped
 exception Action_persistence_failed of string
 type tool_export = Lane_addon_tool_export.t = private
   { owner : Lane_addon_tool_export.owner; instance_id : string; tool : Mcp_protocol.Mcp_types.tool }
@@ -143,6 +144,7 @@ type entry = {
   mutable running : bool; mutable started : bool; mutable active_tool_calls : int; persistence_mutex : Eio.Mutex.t;
   mutable coalesced_wakes : int;
   mutable cancel_worker : (unit -> unit) option;
+  mutable cancel_exact : (unit -> unit) option;
   mutable configuration : configuration_owner option;
   input_installations : string list;
   action_queue : Lane_addon_action.receipt Queue.t;
@@ -150,6 +152,10 @@ type entry = {
   mutable host_due : bool;
   mutable host_status : host_status;
 }
+let retire_admission e =
+  e.stopping <- true;
+  Option.iter (fun cancel -> cancel ()) e.cancel_exact
+
 type configuration_reading = {
   directory : string;
   snapshot : Lane_addon_config.snapshot;
@@ -888,6 +894,7 @@ let delivery_arguments e ~request_id final =
 let run_host_cycle m e (port : host_port) =
   let delivered = Hashtbl.create 8 and tried = Hashtbl.create 8 in
   let waiting = ref [] in
+  let check_live () = if e.stopping then raise Host_cycle_stopped in
   let try_request = function
     | Lane_addon_host_request.Exact_output exact ->
         (match e.configuration, !exact_runner with
@@ -896,22 +903,36 @@ let run_host_cycle m e (port : host_port) =
              Ok (Lane_addon_exact.Not_final (Lane_addon_exact.Lane_unavailable Lane_addon_exact.Lane_unconfigured))
          | Some _, None -> Error No_exact_runner
          | Some owner, Some runner ->
-             Lane_addon_exact.run ~store:m.store ~declaration_id:owner.id ~package:e.package ~runner exact
+             let result =
+               try Eio.Cancel.sub (fun cancellation ->
+                 e.cancel_exact <- Some (fun () -> Eio.Cancel.cancel cancellation Worker_detached);
+                 Fun.protect ~finally:(fun () -> e.cancel_exact <- None) (fun () ->
+                   check_live ();
+                   Lane_addon_exact.run ~store:m.store ~declaration_id:owner.id ~package:e.package ~runner exact))
+               with Eio.Cancel.Cancelled Worker_detached ->
+                 (* Consume only retirement of this exact call. Worker/root
+                    cancellation must still propagate through this boundary. *)
+                 Eio.Fiber.check ();
+                 raise Host_cycle_stopped in
+             result
              |> Result.map_error (fun detail ->
                Exact_record_failed {request_id = exact.Lane_addon_exact.request_id; detail})) in
   let deliver request_id final =
+    check_live ();
     let* answer = port.deliver ~arguments:(delivery_arguments e ~request_id final)
       |> Result.map_error (fun detail -> Result_delivery_failed {request_id; detail}) in
     Lane_addon_host_request.accepted_of_json answer
     |> Result.map (fun (_accepted : bool) -> ())
     |> Result.map_error (fun detail -> Result_delivery_failed {request_id; detail}) in
   let rec pass () =
+    check_live ();
     let* listing = port.list_requests () |> Result.map_error (fun detail -> Listing_failed detail) in
     let* requests = Lane_addon_host_request.listing_of_json listing
       |> Result.map_error (fun detail -> Listing_refused detail) in
     let rec each delivered_any = function
       | [] -> Ok delivered_any
       | request :: rest ->
+          check_live ();
           let request_id = Lane_addon_host_request.request_id request in
           if Hashtbl.mem delivered request_id then Error (Relisted_delivered_request request_id)
           else if Hashtbl.mem tried request_id then each delivered_any rest
@@ -929,7 +950,7 @@ let run_host_cycle m e (port : host_port) =
                 each delivered_any rest in
     let* delivered_any = each false requests in
     if delivered_any then pass () else Ok () in
-  let outcome = pass () in
+  let outcome = try pass () with Host_cycle_stopped -> Ok () in
   e.host_status <- { cycles = e.host_status.cycles + 1; waiting = List.rev !waiting;
     issue = (match outcome with Ok () -> None | Error issue -> Some issue) }
 
@@ -956,7 +977,8 @@ let run ~sw backend m e =
         let created c = e.connection <- Some {export_owner;worker=c};
           publish_resource Lane_addon_resource_events.Acquired e (Some c.resource) None;
           (match persist m e with Ok () -> () | Error message ->
-            e.stopping <- true; e.state <- fail_state e (Lifecycle.Persistence_failed message));
+            retire_admission e;
+            e.state <- fail_state e (Lifecycle.Persistence_failed message));
           if e.stopping then stop_entry ~sw ~backend m e in
         let started = let* state_owner = state_owner_for_entry m e
             |> Result.map_error (fun message -> Lifecycle.Worker_failed message) in
@@ -1457,7 +1479,7 @@ let call_browser_service ~config ~access ~(service:browser_service) ~command =
     let on_cancel_after_dispatch ()=match command with
       | Browser_addon_wire.Issue _ ->
         Browser_addon_client.revoke client;
-        e.stopping<-true;
+        retire_admission e;
         e.state<-fail_state e (Lifecycle.Effect_outcome_unknown "browser call cancelled after dispatch; effect outcome unknown");
         notify_tool_change e.package;
         (match persist m e with Ok () -> () | Error detail ->
@@ -1526,7 +1548,7 @@ let call_exported_tool_with_authority ~on_complete ~on_result ~authorize ~princi
       (* This caller has a shorter lifetime than the observer. Retire both
          projections before handing cleanup to the server-owned switch. *)
       Eio.Cancel.protect (fun () ->
-        e.stopping <- true;
+        retire_admission e;
         e.state <- fail_state e (Lifecycle.Effect_outcome_unknown "exported tool call cancelled; effect outcome unknown");
         notify_tool_change e.package;
         (match persist m e with Ok () -> () | Error detail ->
@@ -2147,7 +2169,7 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
     running = true; started = false; active_tool_calls = 0; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
     action_queue = Queue.create (); current_action = None;
     host_due = false; host_status = { cycles = 0; waiting = []; issue = None };
-    cancel_worker = None; configuration; input_installations } in
+    cancel_worker = None; cancel_exact = None; configuration; input_installations } in
   let* () = validate_live_connections m e in
   (* Construction only validates the registered host boundary. Discard this
      root-switch closure: backend.start constructs the actual callback with
@@ -2166,7 +2188,8 @@ let detach_entry ~sw m e =
     let earlier = match e.state with
       | Lifecycle.Failed failed | Lifecycle.Detaching (Some failed) -> Some failed
       | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching None | Lifecycle.Detached _ -> None in
-    e.stopping <- true; e.state <- Lifecycle.Detaching earlier; notify_tool_change e.package; wake e;
+    retire_admission e;
+    e.state <- Lifecycle.Detaching earlier; notify_tool_change e.package; wake e;
     wake_dependents m e;
     stop_entry ~sw ~backend:(backend ~store:m.store ()) m e);
   let* () = persist m e in Ok (entry_json e)
@@ -3274,7 +3297,7 @@ module For_testing = struct
     stop : unit -> (Lifecycle.release, Lifecycle.failure) result;
     resource : Lifecycle.resource;
     browser : Browser_addon_client.t option;
-  host : host_port option;
+    host : host_port option;
   }
   type nonrec backend = backend = {
     start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> installation_id:string -> package:package -> binding:Yojson.Safe.t ->

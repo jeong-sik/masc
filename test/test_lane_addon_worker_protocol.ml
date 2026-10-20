@@ -23,11 +23,17 @@ for line in sys.stdin:
         result = {"tools":[{"name":"lane_observe","inputSchema":{"type":"object"}},
             {"name":"increment","inputSchema":schema,"outputSchema":schema},
             {"name":"lane_act","inputSchema":action}]}
+        if len(sys.argv) > 2 and sys.argv[2] in ["host", "duplicate"]:
+            result["tools"] += [{"name":name,"inputSchema":{"type":"object"}} for name in ["lane_host_requests","lane_host_result"]]
+        if len(sys.argv) > 2 and sys.argv[2] == "duplicate":
+            result["tools"].append({"name":"lane_host_requests","inputSchema":{"type":"object"}})
     elif method == "tools/call":
         params = request["params"]
         if len(sys.argv) > 1:
             with open(sys.argv[1],"a") as output: output.write(params["name"]+"\n")
         if params["name"] == "lane_observe": value = {"rows":[],"coverage":[]}
+        elif params["name"] == "lane_host_requests": value = {"requests":[]}
+        elif params["name"] == "lane_host_result": value = {"accepted":True}
         else: value = {"value":params["arguments"]["value"]+1}
         result = {"content":[],"structuredContent":value}
     else: raise RuntimeError(method)
@@ -75,6 +81,35 @@ let invalid_contract () =
     (match Protocol.contract ~host_requests:false ~action_tool:None ~tool_invocation:Lane_addon_types.Direct
       ~exported_tools:["increment";"increment"] ~tool_hooks:[] ~max_reply_bytes:4096 with
      | Error (Protocol.Invalid_contract _) -> true | _ -> false)
+
+let host_port_admission ~selected ~advertised () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+  let calls = Filename.temp_file "addon-host-port-" ".calls" in
+  Fun.protect ~finally:(fun () -> Sys.remove calls) (fun () ->
+    let contract = require (Protocol.contract ~host_requests:selected ~action_tool:None
+      ~tool_invocation:Lane_addon_types.Direct ~exported_tools:[] ~tool_hooks:[] ~max_reply_bytes:4096) in
+    let protocol = Protocol.create ~instance_id:"host-port-admission" ~contract () in
+    let client = require (Agent_core.Mcp.connect ~sw ~mgr:(Eio.Stdenv.process_mgr env)
+      ~command:"python3" ~args:["-c";server;calls;advertised] ~max_response_bytes:4096 ()) in
+    Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () -> Protocol.close protocol)) (fun () ->
+      let initialized = Protocol.initialize protocol client in
+      if selected && advertised<>"host" then (
+        check bool "missing or duplicate private ports refuse Ready" true (Result.is_error initialized);
+        check bool "failed discovery retires admission" true (Protocol.revoked protocol))
+      else (
+        require initialized;
+        if selected then (
+          check bool "private listing reaches the actual worker" true
+            (require (Protocol.host_requests protocol) = `Assoc ["requests",`List []]);
+          check bool "private result reaches the actual worker" true
+            (require (Protocol.host_result protocol ~arguments:(`Assoc [])) = `Assoc ["accepted",`Bool true]);
+          check int "private ports are not public exports" 0 (List.length (Protocol.exported_tools protocol));
+          Protocol.revoke protocol;
+          check bool "retirement refuses private listing" true (Result.is_error (Protocol.host_requests protocol)))
+        else (
+          check bool "unselected listing never dispatches" true (Result.is_error (Protocol.host_requests protocol));
+          check bool "unselected delivery never dispatches" true
+            (Result.is_error (Protocol.host_result protocol ~arguments:(`Assoc [])));
+          check string "no tools/call reached the actual worker" "" (In_channel.with_open_bin calls In_channel.input_all)))))))
 
 let failed_discovery_retires_admission () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
   let calls = Filename.temp_file "addon-admission-" ".calls" in
@@ -151,4 +186,8 @@ let () = run "Addon engine-independent MCP admission"
     test_case "late discovery failure retires action and observation admission" `Quick failed_discovery_retires_admission;
     test_case "discovery cancellation permanently retires admission" `Quick (discovery_race ~cancel:true);
     test_case "revoke during discovery prevents late publication" `Quick (discovery_race ~cancel:false);
-    test_case "invalid contract never needs an execution engine" `Quick invalid_contract]]
+    test_case "invalid contract never needs an execution engine" `Quick invalid_contract;
+    test_case "selected private host ports use the retained connection" `Quick (host_port_admission ~selected:true ~advertised:"host");
+    test_case "missing private host ports refuse Ready" `Quick (host_port_admission ~selected:true ~advertised:"missing");
+    test_case "duplicate private host ports refuse Ready" `Quick (host_port_admission ~selected:true ~advertised:"duplicate");
+    test_case "selection off refuses even advertised host ports" `Quick (host_port_admission ~selected:false ~advertised:"host")]]

@@ -134,11 +134,12 @@ sources = []
 교체 worker를 구분한다. 이 설정은 `tool_hooks`와 observation sampling의
 `model_access`를 바꾸지 않는다. 권한과 필수 wire 검증도 그대로 적용한다.
 
-이 층은 설치의 유효 패키지에 허용된 출력만 남기는 설정 경계다. 공용 Exact-output
-실행기는 [#44203](https://github.com/jeong-sik/masc/pull/44203)에서 별도로 개발 중이며,
-브라우저 native worker의 host 요청 연결과 실제 모델·브라우저 실행 증명은
-[#44150](https://github.com/jeong-sik/masc/issues/44150)에 남아 있다. 선택 설정이
-읽혔다는 사실만으로 모델 호출 지원을 판정하지 않는다.
+설치의 유효 패키지에 허용된 출력만 남긴다. 공용 Exact-output 실행기는 native와
+container worker의 비공개 host 요청 포트에 연결된다. `exact_outputs = []`이면 그 설치에
+host 요청 포트를 만들지 않고 모델 호출도 하지 않는다. 패키지 worker가 요청 목록과 결과
+소비 포트를 구현해야 실제로 사용한다. 번들 browser worker의 비동기 모델 요청·깨우기와
+실제 모델·브라우저 실행 증명은 [#44150](https://github.com/jeong-sik/masc/issues/44150)에
+남아 있다. 선택 설정이나 범용 native 연결만으로 브라우저 모델 호출 지원을 판정하지 않는다.
 
 ## 반영 시점과 화면 읽기
 
@@ -258,7 +259,10 @@ max_output_tokens = 8192
 
 ### host 에게 요청하기
 
-exact output 을 선언한 패키지의 worker 는 비공개 도구 둘을 한 번씩 광고해야 한다. 하나라도 없으면 worker 가 시작하지 않는다. 두 도구는 export 할 수 없다.
+유효한 exact output이 있는 패키지 worker는 비공개 도구 둘을 한 번씩 광고해야 한다.
+선택한 상태에서 도구가 없거나 중복이면 Ready가 되지 않는다. native와 container가 같은
+프로토콜을 쓰며, 두 도구는 export할 수 없다. 선택이 꺼진 상태에서는 도구를 광고해도
+host가 호출하지 않는다.
 
 - `lane_host_requests`: 인자가 없다. 패키지가 기다리는 요청 전부를 `{"requests": [...]}` 로 돌려준다.
 - `lane_host_result`: `{"request_id", "result"}` 를 받고 `{"accepted": bool}` 로 답한다. 결과를 소비하는 기록을 패키지가 디스크에 쓴 뒤에만 `true` 로 답한다.
@@ -276,6 +280,13 @@ exact output 을 선언한 패키지의 worker 는 비공개 도구 둘을 한 �
 - 같은 주기에 이미 준 요청이 다시 나오면 주기를 끝내고 `relisted_delivered_request` 를 보인다.
 - 결과를 담은 인자가 `max_reply_bytes` 보다 크면 결과 대신 `{"status": "result_exceeds_frame", "retained_sha256", "bytes"}` 를 준다.
 - 최종 결과의 `status` 는 `answered`(`output`, `slot`, 선택 `usage`), `invalid_output`, `input_refused`(`kind`), `outcome_unknown`, `not_allowed`, `request_id_reused` 다. 자세한 뜻은 [운영자 퀴즈 RFC](../rfc/RFC-operator-quiz-lane.md) §4.3–4.4 에 있다.
+- 요청 ID와 body의 동일성은 출력 허용 여부보다 먼저 확인한다. 새 거절도 최종 결과로
+  보관하므로, 거절된 ID를 허용된 다른 body에 재사용하면 `request_id_reused`다.
+  이미 보관한 답을 선택 해제로 전달하지 않는 경우에는 원래 답과 거절 이력을 함께
+  보존한다. 다시 선택하면 모델을 다시 부르지 않고 원래 답을 전달한다.
+- 분리가 시작되면 해당 Exact 실행만 즉시 취소하고 다음 요청·결과 전달은 시작하지 않는다.
+  시작 기록은 있지만 결과가 없는 provider 호출은 `outcome_unknown`으로 남는다.
+  이 취소는 worker 전체를 먼저 닫지 않으므로 브라우저 Retire와 자원 정리를 계속할 수 있다.
 - 마지막 주기는 Inspect 의 instance 마다 `host_requests` 로 보인다: 주기 수, 최종이 아니어서 기다리는 요청과 그 이유, 주기를 멈춘 이유.
 
 ## 세계와 연결되는 통로

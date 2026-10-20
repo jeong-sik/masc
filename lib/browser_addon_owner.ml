@@ -146,10 +146,10 @@ let cleanup t =
     let uploads=cleanup_uploads t in
     let downloads=match t.downloads with
       | None -> Ok ()
-      | Some _ -> (match live,automation,stagehand with
+      | Some downloads -> (match live,automation,stagehand with
           | Ok (),Ok (),Ok () -> cleanup_downloads t
           | Error _,_,_ | Ok (),Error _,_ | Ok (),Ok (),Error _ ->
-              Error "download cleanup requires confirmed backend teardown") in
+              Eio_unix.run_in_systhread (fun () -> Browser_addon_downloads.abandon downloads)) in
     let errors=List.filter_map (function Ok () -> None | Error detail -> Some detail)
       [live;automation;stagehand;uploads;downloads] in
     match errors with [] -> W.Receipt

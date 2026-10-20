@@ -74,11 +74,18 @@ private final class PcmOutput {
     var lastResponseNanoseconds: UInt64 = 0
     var playingBlocks: UInt64 = 0
     var maxPlayingResponseNanoseconds: UInt64 = 0
+    let timebase: mach_timebase_info_data_t
+    var clockReported = false
+    var playingReported = false
     var listeners: [(AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
     var signals: [DispatchSourceSignal] = []
     var configuration: NSObjectProtocol?
 
     init(output: String?) throws {
+        var hostTimebase = mach_timebase_info_data_t()
+        mach_timebase_info(&hostTimebase)
+        guard hostTimebase.numer > 0, hostTimebase.denom > 0 else { throw PcmFailure("PCM host clock is unavailable") }
+        timebase = hostTimebase
         device = try selectedDevice(output)
         uid = try deviceString(device, kAudioDevicePropertyDeviceUID)
         name = try deviceString(device, kAudioObjectPropertyName)
@@ -99,14 +106,20 @@ private final class PcmOutput {
         notifications = DispatchSource.makeUserDataAddSource(queue: .main)
         notifications.activate()
         let queue = ring, wake = notifications
-        node = AVAudioSourceNode(format: format) { silent, _, count, output in
+        node = AVAudioSourceNode(format: format) { silent, timestamp, count, output in
             let buffers = UnsafeMutableAudioBufferListPointer(output)
             guard buffers.count == 2, buffers.allSatisfy({ $0.mNumberChannels == 1 && $0.mDataByteSize >= count * 4 }),
                   let left = buffers[0].mData, let right = buffers[1].mData else {
                 queue.rejectFormat(frames: Int(count)); wake.add(data: 1)
                 return kAudio_ParamError
             }
+            let start = queue.read.load(ordering: .relaxed)
             queue.render(frames: Int(count), left: left.assumingMemoryBound(to: Float.self), right: right.assumingMemoryBound(to: Float.self))
+            if count > 0, queue.fault.load(ordering: .acquiring) == 0,
+               queue.read.load(ordering: .acquiring) > start,
+               timestamp.pointee.mFlags.contains(.hostTimeValid) {
+                queue.anchor.observe(frame: start, hostTime: timestamp.pointee.mHostTime)
+            }
             silent.pointee = ObjCBool(queue.stopped.load(ordering: .acquiring))
             wake.add(data: 1)
             return noErr
@@ -158,7 +171,7 @@ private final class PcmOutput {
         try check()
         notifications.setEventHandler { [weak self] in
             guard let self, self.state != .stopped else { return }
-            do { try self.checkRender(); try self.request() } catch { self.finish(error) }
+            do { try self.checkRender(); try self.publishClock(); try self.request() } catch { self.finish(error) }
         }
         try monitor(device, address(kAudioDevicePropertyDeviceIsAlive))
         try monitor(device, address(kAudioDevicePropertyDeviceUID))
@@ -176,9 +189,16 @@ private final class PcmOutput {
             s.setEventHandler { [weak self] in self?.finish(PcmFailure("PCM output interrupted")) }
             s.resume(); signals.append(s)
         }
-        try emit(["kind": "ready", "schemaVersion": 2, "device": ["id": uid, "name": name],
+        try emit(["kind": "ready", "schemaVersion": 3, "device": ["id": uid, "name": name],
                   "sampleRate": rate, "blockFrames": frames, "prefillFrames": frames * 2])
         try request()
+    }
+    func publishClock() throws {
+        guard playingReported, !clockReported, let anchor = ring.anchor.snapshot else { return }
+        try emit(["kind": "clock", "schemaVersion": 1, "device": ["id": uid, "name": name],
+                  "sampleRate": rate, "clock": ["kind": "mach-host-time", "numer": timebase.numer, "denom": timebase.denom],
+                  "anchor": ["frame": String(anchor.frame), "hostTime": String(anchor.hostTime)]])
+        clockReported = true
     }
     func request() throws {
         guard state != .stopped, pending == nil, ring.available <= UInt64(frames) else { return }
@@ -212,6 +232,8 @@ private final class PcmOutput {
                     state = .playing
                     engine.prepare(); try engine.start(); try check()
                     try emit(["kind": "playing"])
+                    playingReported = true
+                    try publishClock()
                 }
                 try request()
             }
@@ -222,6 +244,9 @@ private final class PcmOutput {
         state = .stopped; ring.stopped.store(true, ordering: .releasing)
         engine.stop()
         var error = failure ?? renderFailure()
+        // Stop may be queued ahead of the callback wake. Retire the engine,
+        // then retain any actual anchor it published before cancelling wakes.
+        do { try publishClock() } catch let clockError { if error == nil { error = clockError } }
         // Retire audio before the final device queries. A slow control-plane
         // read at explicit stop must not starve a still-running callback.
         if error == nil {

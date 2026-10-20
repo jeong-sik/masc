@@ -143,7 +143,7 @@ export function openMonitorSession({ sound, output, channel, signal, backing,
   })()
   completion.catch(() => {})
   if (signal?.aborted) abort()
-  return { ready, completion,
+  return { ready, completion, clock: pcm.clock,
     diagnostics() {
       return { schemaVersion: 1, kind: 'step-monitor', id, channel,
         sound: { name: sound.selection.name, identifier: sound.instrument.identifier,

@@ -4,6 +4,21 @@ import Synchronization
 @main struct RingTests {
     static func main() throws {
         if #available(macOS 15.0, *) {
+            let anchor = PcmRenderAnchor()
+            precondition(anchor.snapshot == nil)
+            anchor.observe(frame: 9, hostTime: 0)
+            precondition(anchor.snapshot == nil)
+            DispatchQueue.concurrentPerform(iterations: 2) { lane in
+                if lane == 0 { anchor.observe(frame: UInt64.max - 1, hostTime: UInt64.max) }
+                else {
+                    while anchor.snapshot == nil {}
+                    let value = anchor.snapshot!
+                    precondition(value.frame == UInt64.max - 1 && value.hostTime == UInt64.max)
+                }
+            }
+            anchor.observe(frame: 0, hostTime: 1)
+            precondition(anchor.snapshot!.frame == UInt64.max - 1 && anchor.snapshot!.hostTime == UInt64.max)
+            print("PCM_RENDER_ANCHOR_IMMUTABLE_PAIR_PASS")
             let ring = try PcmRing(capacity: 4)
             try ring.append([1, -1, 2, -2, 3, -3])
             var left = [Float](repeating: 9, count: 3), right = left

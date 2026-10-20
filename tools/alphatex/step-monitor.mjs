@@ -19,10 +19,11 @@ export function openStepMonitor({ sound, output, channel, signal, backing,
   const threadId = worker.threadId
   let held = new Map(), pending = null, inspection = null, snapshot = null
   let stopping = false, closed = false, terminal = null, failure = null
-  let resolveReady, rejectReady, resolveDone, rejectDone
+  let resolveReady, rejectReady, resolveDone, rejectDone, resolveClock, rejectClock
   const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject })
   const completion = new Promise((resolve, reject) => { resolveDone = resolve; rejectDone = reject })
-  ready.catch(() => {}); completion.catch(() => {})
+  const clock = new Promise((resolve, reject) => { resolveClock = resolve; rejectClock = reject })
+  ready.catch(() => {}); completion.catch(() => {}); clock.catch(() => {})
   const diagnostics = () => structuredClone({
     ...(snapshot ?? { schemaVersion: 1, kind: 'step-monitor', id, channel,
       sound: { name: sound.selection.name, identifier: sound.instrument.identifier,
@@ -33,6 +34,7 @@ export function openStepMonitor({ sound, output, channel, signal, backing,
   const fail = reason => {
     failure ??= reason instanceof Error ? reason : new Error('Step monitor failed', { cause: reason })
     rejectReady(failure)
+    rejectClock(failure)
     pending?.reject(failure); pending = null
     // Keep the caller's exact cause even when it cannot be cloned. The worker
     // needs the cancellation decision to retire its owned children.
@@ -45,6 +47,7 @@ export function openStepMonitor({ sound, output, channel, signal, backing,
       if (message.diagnostics) snapshot = message.diagnostics
       switch (message.kind) {
         case 'ready': if (!stopping && !failure) resolveReady(message.device); break
+        case 'clock': if (!failure) resolveClock(structuredClone(message.clock)); break
         case 'sent': pending?.resolve(); pending = null; break
         case 'diagnostics': inspection?.resolve(diagnostics()); inspection = null; break
         case 'terminal':
@@ -64,6 +67,7 @@ export function openStepMonitor({ sound, output, channel, signal, backing,
     if (!terminal || code !== 0) failure ??= new Error(`Monitor worker exited ${code} without confirmed cleanup`)
     if (!stopping && !failure) failure = new Error('Monitor worker ended before stop')
     rejectReady(failure ?? new Error('Step monitor stopped before playback'))
+    rejectClock(failure ?? new Error('Step monitor ended without a source-render clock'))
     if (failure) pending?.reject(failure)
     else pending?.resolve()
     pending = null; held.clear()
@@ -72,7 +76,7 @@ export function openStepMonitor({ sound, output, channel, signal, backing,
     else resolveDone(terminal.device)
   })
   if (signal?.aborted) abort()
-  return { ready, completion, diagnostics,
+  return { ready, clock, completion, diagnostics,
     inspect() {
       if (closed) return Promise.resolve(diagnostics())
       if (inspection) return inspection.promise

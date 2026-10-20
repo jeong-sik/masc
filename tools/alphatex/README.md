@@ -166,7 +166,9 @@ age of an outstanding request at teardown. These observations include IPC and
 scheduling delay; they do not by themselves prove which component caused a stall.
 If the native process dies without a valid final receipt, `final` stays null.
 Diagnostics never turn missing audio into successful playback.
-Active export requests a fresh worker observation; its `observedAt` identifies
+The report retains a source-render host/frame anchor when the output callback
+provided a valid timestamp. It is separate from the engine-start acknowledgement
+and does not imply physical latency calibration. Active export requests a fresh worker observation; its `observedAt` identifies
 the sampling instant. Internal synchronous diagnostics retain the last worker
 message. `worker.closed` and `terminalReceived` distinguish actual worker exit
 from an acknowledged cleanup. An unexpected exit without that receipt remains

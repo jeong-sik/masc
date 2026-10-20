@@ -20,7 +20,7 @@ async function runtime({ pcm = 'paced', vst = 'valid' } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'monitor-worker-'))
   const trace = join(directory, 'events.jsonl'), workers = []
   for (const file of ['step-monitor.mjs', 'step-monitor-worker.mjs', 'step-monitor-session.mjs',
-    'phrase-backing.mjs', 'sequencer-project.mjs', 'project-sound.mjs', 'pcm-output.mjs', 'vst-stream.mjs', 'session-data.mjs', 'wave-file.mjs']) {
+    'render-midi-clock.mjs', 'exact-time.mjs', 'phrase-backing.mjs', 'sequencer-project.mjs', 'project-sound.mjs', 'pcm-output.mjs', 'vst-stream.mjs', 'session-data.mjs', 'wave-file.mjs']) {
     await copyFile(new URL(`../${file}`, import.meta.url), join(directory, file))
   }
   await symlink(fileURLToPath(new URL('../node_modules', import.meta.url)), join(directory, 'node_modules'), 'dir')
@@ -74,6 +74,8 @@ test('worker sustains demand during a blocked terminal and retains MIDI order an
   const fixture = await runtime(), owner = fixture.open()
   try {
     await owner.ready
+    const clock = await owner.clock
+    assert.equal(clock.anchor.hostTime, '9007199254740997')
     const sent = owner.send(owner.prepare(packet([0x40903c00, 0xa0000000])))
     await assert.rejects(owner.send(owner.prepare(packet([0x40904000, 0xa0000000]))), /pending monitor packet/)
     await sent
@@ -189,6 +191,7 @@ test('unexpected worker exit is failure with unconfirmed native cleanup, never a
   const inspected = owner.inspect()
   await assert.rejects(owner.completion, /without confirmed cleanup/)
   await assert.rejects(owner.ready)
+  await assert.rejects(owner.clock)
   assert.equal((await inspected).worker.closed, true)
   assert.equal(owner.diagnostics().worker.terminalReceived, false)
   assert.equal(owner.diagnostics().pcm, null)

@@ -5,6 +5,25 @@ struct PcmFailure: Error, CustomStringConvertible {
     init(_ message: String) { description = message }
 }
 
+// One audio-thread writer publishes an immutable frame/host pair. Observers
+// acquire the publication before reading either field; no callback IO or lock.
+@available(macOS 15.0, *)
+final class PcmRenderAnchor {
+    private let published = Atomic<Bool>(false)
+    private let frame = Atomic<UInt64>(0)
+    private let host = Atomic<UInt64>(0)
+    func observe(frame: UInt64, hostTime: UInt64) {
+        guard hostTime > 0, !published.load(ordering: .relaxed) else { return }
+        self.frame.store(frame, ordering: .relaxed)
+        host.store(hostTime, ordering: .relaxed)
+        published.store(true, ordering: .releasing)
+    }
+    var snapshot: (frame: UInt64, hostTime: UInt64)? {
+        guard published.load(ordering: .acquiring) else { return nil }
+        return (frame.load(ordering: .relaxed), host.load(ordering: .relaxed))
+    }
+}
+
 // Single control-thread producer / single audio-thread consumer. Samples are
 // published after copying and retired after reading, using release/acquire.
 // The render path neither allocates, locks, logs nor calls the producer.
@@ -18,6 +37,7 @@ final class PcmRing {
     let faultFrames = Atomic<UInt64>(0)
     let missing = Atomic<UInt64>(0)
     let stopped = Atomic<Bool>(false)
+    let anchor = PcmRenderAnchor()
 
     init(capacity: Int) throws {
         guard capacity > 0, capacity <= Int.max / 2 else { throw PcmFailure("invalid PCM queue capacity") }

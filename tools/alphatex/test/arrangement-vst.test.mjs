@@ -1,12 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { Worker } from 'node:worker_threads'
-import { mkdtemp, writeFile, readFile, rm, access, readdir } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, rm, access, readdir } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { newArrangement, editArrangement } from '../arrangement.mjs'
-import { importArrangementWave, saveArrangement, loadArrangement } from '../arrangement-files.mjs'
+import { importArrangementWave, importArrangementCapture, saveArrangement, loadArrangement } from '../arrangement-files.mjs'
 import { importMidiSource, midiSourcePattern } from '../midi-source.mjs'
 import { sourceAudioClock, sourceAudioFrames } from '../source-audio-clock.mjs'
 import { arrangementPlaybackRequest, arrangementRoute } from '../arrangement-playback.mjs'
@@ -166,5 +166,47 @@ test('independent SMF2 patterns and SMPTE sources render full performances while
   assert.equal(derived[2].sourceClock.denominator, '2400000'); assert.equal(derived[2].sourceClock.start, '1001')
   const rendered = await Promise.all(calls.map(async call => midiSourcePattern(importMidiSource(await readFile(call.midi_path)))) )
   assert.deepEqual(rendered.map(performance => performance.notes[0].pitch), [60, 67, 64])
+  assert.deepEqual(project, before)
+}))
+
+test('a MIDI-only residual loop keeps absolute repeated source spans under the derived audio master', () => fixture(async ({ project, start }) => {
+  project = { ...project, clips: project.clips.filter(clip => clip.asset === 'v'), playbackLoop: { start: 480, end: 960 } }
+  project = editArrangement(project, { kind: 'asset-add', asset: { ...project.assets[1], id: 'external', name: 'External' } })
+  project = editArrangement(project, { kind: 'region-add', name: 'External', asset: 'external', lane: 'lane-2', position: 0, offset: 0, extent: 480, repeat: 4 })
+  const result = await start(project, { kind: 'mixed', output: 'AudioUID', portBindings: [{ asset: 'external', port: 0, destination: '-42' }] }).promise
+  const plan = JSON.parse(await readFile(result.path))
+  assert.equal(plan.midi.regions.length, 1); assert.equal(plan.midi.regions[0].startSeconds, 0)
+  assert.equal(plan.midi.regions[0].sourceStart, 0); assert.equal(plan.midi.regions[0].sourceEnd, .5)
+  assert.equal(plan.midi.regions[0].repeatCount, 4); assert.equal(plan.midi.duration, 2)
+  assert.equal(plan.duration, .25); assert.equal(result.originSeconds, .25)
+}))
+
+test('derived VST voices compose with captured paired WAV/UMP without changing captured identity, clocks or packets', () => fixture(async ({ root, project, start }) => {
+  const input = join(root, 'capture'); await mkdir(input)
+  const origin = '1000000000', manifest = { schemaVersion: 1, state: 'recorded', failure: null,
+    audio: 'audio.wav', audioBlocks: 'audio-blocks.jsonl', midi: 'midi.ump.jsonl', sampleRate: 48000, channels: 1,
+    audioFrames: '4800', midiPacketCount: '2', input: { id: 'interface', name: 'Interface' }, midiSources: [{ id: 'keys', name: 'Keys' }],
+    clock: { kind: 'mach-host-time', numer: 125, denom: 3, requestedStart: origin, firstAudioHostTime: origin } }
+  const packets = [{ kind: 'midi', protocol: 2, source: 'keys', hostTime: origin, timestampOrigin: 'packet', words: [0x20903c64] },
+    { kind: 'midi', protocol: 2, source: 'keys', hostTime: '1001920000', timestampOrigin: 'packet', words: [0x20803c00] }]
+  await writeFile(join(input, 'session.json'), JSON.stringify(manifest))
+  await writeFile(join(input, 'audio.wav'), wave(4800, 48000, 1))
+  await writeFile(join(input, 'audio-blocks.jsonl'), JSON.stringify({ kind: 'audio', hostTime: origin,
+    deviceSampleTime: '0', frameOffset: '0', frameCount: 4800, peaks: [[0, .1]] }) + '\n')
+  await writeFile(join(input, 'midi.ump.jsonl'), packets.map(packet => JSON.stringify(packet)).join('\n') + '\n')
+  const imported = await importArrangementCapture(project, input, { projectPath: join(root, 'song.json') })
+  project = editArrangement(imported.project, { kind: 'lane-add', sourceKind: 'capture', name: 'Capture' })
+  project = editArrangement(project, { kind: 'region-add', name: 'Paired', asset: imported.asset, lane: 'lane-3', position: 0,
+    offset: '0', extent: '2400000', repeat: 3 })
+  const before = structuredClone(project)
+  const result = await start(project, { kind: 'mixed', output: 'AudioUID', portBindings: [],
+    sourceBindings: [{ asset: imported.asset, source: 'keys', destination: '-42' }] }).promise
+  const plan = JSON.parse(await readFile(result.path)), audio = plan.regions.find(region => region.captureClock)
+  assert.equal(plan.kind, 'capture-arrangement'); assert.equal(plan.umpRegions.duration, plan.duration)
+  assert.equal(audio.id, plan.umpRegions.regions[0].id); assert.equal(audio.asset, imported.asset)
+  assert.equal(audio.captureClock.offset, plan.umpRegions.regions[0].offset)
+  assert.equal(audio.captureClock.extent, plan.umpRegions.regions[0].extent)
+  assert.deepEqual(plan.umpRegions.sources[0].timeline.packets, packets)
+  assert.equal(plan.regions.filter(region => region.sourceClock).length, 2)
   assert.deepEqual(project, before)
 }))

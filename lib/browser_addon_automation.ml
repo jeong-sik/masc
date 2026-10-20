@@ -115,7 +115,13 @@ let run_with_commit ~commit_receipt ~env ~owner ~directory work =
     | Eio.Cancel.Cancelled _ as exn ->
         ignore (Eio.Promise.try_resolve ready_u (Error "browser startup was cancelled"));
         ignore (Eio.Promise.try_resolve settle (Error "browser cleanup was cancelled"));raise exn
-    | (Eio.Io _|Unix.Unix_error _|Sys_error _|Invalid_argument _) as exn -> Error (Printexc.to_string exn) in
+    | (Eio.Io _|Unix.Unix_error _|Sys_error _|Invalid_argument _) as exn -> Error (Printexc.to_string exn)
+    | exn ->
+        (* Unexpected adapter/release failures still have to wake both joins.
+           Publish uncertainty, then preserve the original exception. *)
+        ignore (Eio.Promise.try_resolve ready_u (Error "browser startup failed"));
+        ignore (Eio.Promise.try_resolve settle (Error "browser cleanup is unconfirmed"));
+        raise exn in
     ignore (Eio.Promise.try_resolve ready_u outcome);
     let outcome=if !clean && not !uncertain then Ok ()
       else Error "owned browser cleanup is unconfirmed" in

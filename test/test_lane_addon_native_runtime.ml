@@ -300,15 +300,20 @@ hooks = ["validate_input", "validate_output"]
   check bool "same native client recovers its original worker" true (poll client=Ok None);
   let arguments=`Assoc ["lane",`String "live";"clientId",`String (Browser_lane.client_id_to_string client_id);
     "command",Browser_lane.verb_json Browser_lane.Tabs_list] in
+  let public tool fields=Browser_addon_tools.handle ~config ~access
+    ~principal:(Lane_addon_call_context.Host_actor "dashboard-tester") ~reserved:[]
+    ~keeper_name:None ~tool ~tool_name:"public-browser-fixture" ~start_time:(Tool_timing.start ()) (`Assoc fields) in
+  let route_fields=["lane",`String "live";"clientId",`String (Browser_lane.client_id_to_string client_id)] in
   Eio.Fiber.both (fun () ->
-    let result=match Browser_addon_host.call host ~arguments with
-      | Ok result -> Mcp_protocol.Mcp_types.tool_result_to_yojson result
-      | Error _ -> fail "public host must receive its original partial receipt" in
-    check bool "public host retains partial effect error" true (member "isError" result=`Bool true);
+    let result=public Browser_capabilities.Tabs route_fields in
+    check bool "public proxy retains partial effect error" true (Tool_result.is_failed result);
     check bool "public host retains original payload" true
-      (member "structuredContent" result |> member "answer" |> member "payload" = payload);
+      (Tool_result.data result |> member "structuredContent" |> member "answer" |> member "payload" = payload);
     check bool "public host retains effect metadata" true
-      (member "_meta" result=Option.get (Lane_addon_tool_result.metadata partial)))
+      (Tool_result.metadata result=Lane_addon_tool_result.metadata partial);
+    check string "public alias keeps its invocation name" "public-browser-fixture" (Tool_result.tool_name result);
+    check bool "Keeper adapter receives producer's actual partial phase" true
+      ((Keeper_tool_execution.of_tool_result result).failure_effect_disposition=Tool_result.Proven_post_effect))
     (fun () ->
       wait clock (fun () -> Sys.file_exists (issued id));
       check bool "native poll wakes running observation beside waiting MCP" true (poll client=Ok None);
@@ -334,6 +339,12 @@ hooks = ["validate_input", "validate_output"]
   check bool "tab read requires its original client before discovery" true
     (Tool_result.failure_class unbound=Some Tool_result.Policy_rejection);
   check string "missing tab binding issues no discovery command" "once\n"
+    (In_channel.with_open_bin (Filename.concat root ("toolcalls-"^id)) In_channel.input_all);
+  let unbound=public Browser_capabilities.Act ["lane",`String "live";
+    "action",`String "open_tab";"url",`String "https://example.org/"] in
+  check bool "public proxy refuses incomplete explicit live tab creation" true
+    (Tool_result.failure_class unbound=Some Tool_result.Policy_rejection);
+  check string "refused tab creation never calls the worker" "once\n"
     (In_channel.with_open_bin (Filename.concat root ("toolcalls-"^id)) In_channel.input_all);
   check bool "public command receives host-verified actor" true
     (Yojson.Safe.from_file (Filename.concat root ("caller-"^id))=
@@ -368,6 +379,20 @@ hooks = ["validate_input", "validate_output"]
           "url",`String "https://example.org/";"title",`String "Fixture";
           "text",`String "hello";"chars",`Int 5;"truncated",`Bool false]))=Ok ()));
   Unix.unlink (issued id);
+  Eio.Fiber.both (fun () ->
+    let result=public Browser_capabilities.Read (route_fields @ ["tabId",`Int 7]) in
+    check bool "public text proxy completes through advertised command" true (Tool_result.is_success result);
+    check string "public text uses worker's original connection" (Browser_lane.client_id_to_string client_id)
+      (text "clientId" (Tool_result.data result));
+    check string "public text retains page data" "public read" (text "text" (Tool_result.data result)))
+    (fun () ->
+      wait clock (fun () -> calls "once\nonce\nonce\nonce\n");
+      let request=Yojson.Safe.from_file (Filename.concat root ("arguments-"^id)) in
+      check string "public read dispatches one closed text command" "page.read" (text "verb" (member "command" request));
+      check bool "public text result settled" true
+        (Browser_addon_ingress.deliver ~config ~client ~id:"fixture"
+          ~payload:(complete (`Assoc ["text",`String "public read"]))=Ok ()));
+  Unix.unlink (issued id);
   write (Filename.concat root ("reject-tool-output-"^id)) "reject";
   Eio.Fiber.both (fun () ->
     check bool "selected output middleware preserves unknown effect" true
@@ -378,7 +403,7 @@ hooks = ["validate_input", "validate_output"]
       check bool "malformed output does not prevent original settlement" true
         (Browser_addon_ingress.deliver ~config ~client ~id:"fixture"
           ~payload:(`Assoc ["ok",`Bool true;"data",`Assoc []])=Ok ()));
-  check string "output refusal does not replay browser call" "once\nonce\nonce\nonce\n"
+  check string "output refusal does not replay browser call" "once\nonce\nonce\nonce\nonce\n"
     (In_channel.with_open_bin (Filename.concat root ("toolcalls-"^id)) In_channel.input_all);
   ignore (dispatch config R.Detach ["instance_id",`String id]);
   wait clock (fun () -> let item=inspect id in

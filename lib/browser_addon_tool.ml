@@ -10,6 +10,8 @@ let text_schema = `Assoc ["type",`String "string"]
 let enum names = `Assoc ["type",`String "string";"enum",`List (List.map (fun value -> `String value) names)]
 let input_schema = object_schema ~required:["command"] [
   "lane",enum ["live";"automation";"stagehand"];"clientId",text_schema;
+  "requiredActions",`Assoc ["type",`String "array";"items",enum
+    (List.map Browser_capabilities.operation_name Browser_capabilities.operations)];
   "command",object_schema ~required:["verb";"args"] [
     "verb",enum ["tabs.list";"page.read";"page.downloads";"page.capture";
       "page.scene";"page.interact";"session.open";"session.close";"session.status";
@@ -30,9 +32,9 @@ let definition : S.tool = {name="browser_command";
   input_schema;output_schema=Some output_schema;annotations=None;icon=None;execution=None}
 let parse json =
   let* fields=match json with
-    | `Assoc fields when List.for_all (fun (key,_) -> List.mem key ["lane";"clientId";"command"]) fields
+    | `Assoc fields when List.for_all (fun (key,_) -> List.mem key ["lane";"clientId";"command";"requiredActions"]) fields
         && List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok fields
-    | _ -> Error "browser command accepts only lane, clientId and command" in
+    | _ -> Error "browser command accepts only lane, clientId, command and requiredActions" in
   let* client=match List.assoc_opt "clientId" fields with
     | None -> Ok None
     | Some (`String raw) -> B.client_id_of_string raw |> Result.map Option.some
@@ -46,7 +48,27 @@ let parse json =
     | Some (`String "stagehand"),None -> Ok (Browser_selection.Exact B.Stagehand_route,B.Stagehand_route)
     | Some _,(None|Some _) -> Error "lane must name a browser backend; clientId belongs only to live" in
   let* raw=Option.to_result ~none:"command is required" (List.assoc_opt "command" fields) in
-  let* verb=W.verb_of_json ~route raw in Ok (preference,verb)
+  let* verb=W.verb_of_json ~route raw in
+  let* required_actions=match List.assoc_opt "requiredActions" fields with
+    | None -> Ok []
+    | Some value -> Browser_capabilities.parse_required_actions value in
+  let* ()=match verb,required_actions with
+    | (B.Tabs_list|Session_open _),_ -> Ok ()
+    | (Page_read _|Page_document _|Page_downloads _|Page_capture _|Page_scene _|Page_interact _
+      |Session_close|Session_status|Page_goto _|Page_elements _|Page_act _|Page_context _
+      |Page_instruct _|Page_locate _|Page_extract _),[] -> Ok ()
+    | (Page_read _|Page_document _|Page_downloads _|Page_capture _|Page_scene _|Page_interact _
+      |Session_close|Session_status|Page_goto _|Page_elements _|Page_act _|Page_context _
+      |Page_instruct _|Page_locate _|Page_extract _),_::_ ->
+        Error "requiredActions applies only to initial tab discovery or session open" in
+  let* ()=match preference,verb with
+    | Browser_selection.Exact (B.Live_route None),B.Page_act (B.Action.Open_tab _) ->
+        Error "live open_tab requires an explicit observed clientId"
+    | (Automatic|Exact (Live_route _|Automation_route|Stagehand_route)),
+      (Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_capture _|Page_scene _|Page_interact _
+      |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act (B.Action.Open_tab _|On_tab _)|Page_context _
+      |Page_instruct _|Page_locate _|Page_extract _) -> Ok () in
+  Ok (preference,verb,required_actions)
 let bound = function
   | B.Page_read {tab_id;_}|Page_elements {tab_id} -> Option.is_some tab_id
   | Page_act (B.Action.Open_tab _) | Tabs_list | Session_open _ | Session_status -> false
@@ -68,16 +90,21 @@ let result ~start_time ~failed ~disposition data message : S.tool_result =
    structured_content=Some data;is_error=Some failed;_meta=Lane_addon_tool_result.metadata result}
 let refused ~start_time detail = result ~start_time ~failed:true ~disposition:Tool_result.Proven_pre_effect
   (W.reply_to_json (W.Service_refusal {message=detail;disposition=W.Not_started})) detail
+let selection_detail error =
+  Yojson.Safe.to_string (`Assoc ["error",Browser_selection.error_to_json error;
+    "clients",`List (List.map B.client_json (B.active_clients ()))])
 let invoke ~owner ~principal arguments =
   let start_time=Tool_timing.start () in
   let run () =
   let prepared=let* actor=match principal with
     | Lane_addon_call_context.Anonymous -> Error "browser execution requires verified host caller context"
     | Keeper _|Authenticated_agent _|Host_actor _|Operator -> Ok (Lane_addon_call_context.actor_label principal) in
-    let* preference,verb=parse arguments in let* ()=transferable verb in
-    let* selected=Browser_selection.resolve ~verb ~bound:(bound verb) preference
-      |> Result.map_error Browser_selection.error_message in
+    let* preference,verb,required_actions=parse arguments in let* ()=transferable verb in
+    let* selected=Browser_selection.resolve ~required_actions ~verb ~bound:(bound verb) preference
+      |> Result.map_error selection_detail in
     let* target=B.resolve_target ~verb selected.route |> Result.map_error B.selection_error_message in
+    let* ()=Browser_selection.require_target required_actions target
+      |> Result.map_error selection_detail in
     Ok (actor,verb,Browser_binding.of_target selected target) in
   match prepared with
   | Error detail -> refused ~start_time detail

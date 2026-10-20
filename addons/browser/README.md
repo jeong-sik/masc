@@ -18,6 +18,17 @@ tab/document work repeats the returned selection. `page.read` with
 `includeHtml = true` reads document source. The bundled browser skill describes
 guarded input and partial-result handling.
 
+Initial `tabs.list` or `session.open` commands may supply `requiredActions`, using
+the operation names from the browser capability catalog. Automatic selection
+considers those capabilities; explicit connections are checked before dispatch
+too. An explicit `lane = "live"` tab creation requires the observed `clientId`.
+
+`Browser_addon_tools` prepares the existing public browser aliases for this host
+path, retaining contextual/scene/screenshot projections, capability receipts,
+caller attribution and producer effect metadata. This adapter is not yet wired
+into the public core/Keeper dispatchers. Their existing retention, Vision,
+composition and download fixtures must move with that next routing layer.
+
 The worker publishes connection observations through MCP. Its separate private
 socket lets browser commands wait while client polls and results use other
 connections. Runtime reads its running observation through that private channel,

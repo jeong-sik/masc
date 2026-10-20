@@ -289,6 +289,116 @@ max-concurrent = 1
 (* RFC-0458 §3.4 rule 5: the forecast shows the order this Keeper's next turn
    takes. A head that failed in this Keeper's own walk is walked first again;
    the same mark recorded by another Keeper sends it behind. *)
+(* A checkpoint the build before the last [checkpoint_version] bump wrote is
+   the fresh state the next turn starts from, so the forecast is of a request
+   with no saved history rather than an error. *)
+let test_a_superseded_checkpoint_forecasts_no_saved_history () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let previous_fs = Fs_compat.get_fs_opt () in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.on_release sw (fun () ->
+    Runtime.For_testing.restore runtime_snapshot;
+    match previous_fs with
+    | Some fs -> Fs_compat.set_fs fs
+    | None -> Fs_compat.clear_fs ());
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Eio.Switch.on_release sw (fun () -> Masc_test_deps.cleanup_test_workspace base_path);
+  let config = Workspace.default_config base_path in
+  let config_path = Filename.concat base_path "runtime.toml" in
+  Out_channel.with_open_bin config_path (fun output ->
+    output_string output
+      {|[runtime]
+default = "forecast.seed"
+[providers.forecast]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.seed]
+api-name = "forecast-test-model"
+max-context = 8192
+tools-support = true
+streaming = false
+[forecast.seed]
+max-concurrent = 1
+|});
+  (match Runtime.init_default ~config_path with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String "forecast-superseded" ])
+    with
+    | Ok meta -> meta
+    | Error detail -> Alcotest.fail detail
+  in
+  (match Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let checkpoint : Agent_core.Checkpoint.t =
+    { version = Agent_core.Checkpoint.checkpoint_version
+    ; session_id = trace_id
+    ; agent_name = meta.name
+    ; model = "forecast-test-model"
+    ; system_prompt = None
+    ; messages = history ~exchanges:5 ~text_bytes:100
+    ; usage = Agent_core.Types.empty_usage
+    ; turn_count = 1
+    ; created_at = 0.
+    ; tools = []
+    ; tool_choice = None
+    ; disable_parallel_tool_use = false
+    ; temperature = None
+    ; top_p = None
+    ; top_k = None
+    ; min_p = None
+    ; reasoning_effort = None
+    ; enable_thinking = None
+    ; preserve_thinking = None
+    ; response_format = Agent_core.Types.Off
+    ; cache_system_prompt = false
+    ; context = Agent_core.Context.create_sync ()
+    ; pending_input = None; mcp_sessions = []
+    ; working_context = None
+    }
+  in
+  let earlier =
+    match Agent_core.Checkpoint.to_json checkpoint with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+              if String.equal key "version"
+              then key, `Int (Agent_core.Checkpoint.checkpoint_version - 1)
+              else key, value)
+           fields)
+    | _ -> Alcotest.fail "a checkpoint document is a JSON object"
+  in
+  let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
+  (match
+     Keeper_checkpoint_store.save_agent_core_classified ~session_dir ~history_retained:0
+       checkpoint
+   with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.fail detail);
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
+  (match Fs_compat.save_file_atomic path (Yojson.Safe.to_string earlier) with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  (match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace_id with
+   | Error (Keeper_checkpoint_store.Superseded_version _) -> ()
+   | Error error -> Alcotest.fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+   | Ok _ -> Alcotest.fail "the superseded fixture still loads");
+  match Keeper_next_request_forecast.forecast ~config ~keeper_name:meta.name with
+  | Error detail -> Alcotest.fail detail
+  | Ok forecast ->
+    Alcotest.(check int) "no saved history is carried" 0 forecast.checkpoint_messages;
+    Alcotest.(check int) "the configured runtime is forecast" 1
+      (List.length forecast.candidates)
+;;
+
 let test_the_recorders_forecast_walks_its_marked_head_first () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1142,6 +1252,8 @@ let () =
     ; ( "store"
       , [ Alcotest.test_case "forecast finds a response beyond unobserved rows" `Quick
             test_forecast_reads_an_observed_front_beyond_unobserved_rows
+        ; Alcotest.test_case "a superseded checkpoint forecasts no saved history" `Quick
+            test_a_superseded_checkpoint_forecasts_no_saved_history
         ; Alcotest.test_case "the recorder's forecast walks its marked head first" `Quick
             test_the_recorders_forecast_walks_its_marked_head_first
         ; Alcotest.test_case "the Librarian gap is read from small files" `Quick

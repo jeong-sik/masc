@@ -159,7 +159,9 @@ type t =
   }
 
 val forecast : config:Workspace.config -> keeper_name:string -> (t, string) result
-(** [Error] when the keeper is unknown or its checkpoint cannot be read. *)
+(** [Error] when the keeper is unknown or its checkpoint cannot be read. A
+    checkpoint of a version this build supersedes is the fresh state the next
+    turn starts from: the forecast carries no saved history. *)
 
 val to_json : t -> Yojson.Safe.t
 

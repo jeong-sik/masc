@@ -1364,7 +1364,15 @@ let backend ~store ~artifact_store () = match !override with
                           ("browser-" ^ Lane_addon_store.digest instance_id)) |> Result.map Option.some
                     | None | Some {stagehand_enabled=false;_}
                     | Some {stagehand_enabled=true;stagehand=None;_} -> Ok None in
-                  Browser_addon_socket.context ~instance_id ~stagehand
+                  let* live_bidi=match configuration with
+                    | Some {live_enabled=true;live_bidi=Some browser;_} ->
+                      let* guardian=native_executable "masc-browser-process-owner" in
+                      Browser_addon_live_bidi.configuration ~browser ~launcher ~guardian
+                        ~claim_directory:(Filename.concat (native_claim_root store)
+                          ("live-bidi-" ^ Lane_addon_store.digest instance_id)) |> Result.map Option.some
+                    | None | Some {live_enabled=false;_}
+                    | Some {live_enabled=true;live_bidi=None;_} -> Ok None in
+                  Browser_addon_socket.context ~instance_id ~stagehand ~live_bidi
                     ~models:(if not (uses_host_requests package) then None else Some {
                       Browser_addon_models.store_root=Filename.concat (Lane_addon_store.root store) "worker-model-results";
                       outputs=package.exact_outputs})

@@ -2305,11 +2305,11 @@ status: reference
   [Browser_lane](../../lib/browser_lane/browser_lane.ml) ·
   [Browser_capabilities](../../lib/browser_capabilities.ml)
 
-**Keeper Firefox Start Record (Keeper Firefox 시작 기록)**
-: `runtime.toml`의 `[browser.live.bidi]`로 live lane이 켜져 있으면 MASC가 다음 서버 시작 또는 Keeper의 다음 hover·drag 때 Keeper Firefox와 그 BiDi host를 직접 시작한다. 이때 시작이 어떻게 끝났는지를 `<base>/.masc/browser-lane/keeper-firefox-start.json`에 한 entry로 통째로 갈아 쓰는 기록(RFC-browser-keeper-firefox §3.7, #42235·#42250). entry는 끝난 시각·포트·프로필·결과(`Attached`/`Not_attached`)를 담고, `Not_attached`의 사유는 한 줄짜리 인쇄 가능 문자열 최대 1024바이트(`message_limit_bytes`)로 잘린다. 경계가 세 군데 있다. (1) 이 기록은 상태 문장만 읽는다 — 시작을 막는 장치가 아니다. (2) MASC는 자기 기록이 "MASC가 시작했다"고 말하는 Firefox만 재시작을 약속한다. 다른 경로로 띄운 Firefox는 운영자가 먼저 종료한다. (3) 다른 포트의 Firefox는 이 시작을 막지 않는다. 상태 표의 `keeper` 행은 시작 주체를 `kind`로 말하고 `masc_starts`는 설정된 포트·프로필과 `last_start`(`absent`/`recorded`/`unreadable`)를 실는다.
-  → [Browser_keeper_firefox_start_record](../../lib/browser_keeper_firefox_start_record.mli) ·
+**Addon-managed Firefox (Addon 소유 Firefox)**
+: `[browser.live.bidi]`로 지정한 Firefox와 BiDi 연결을 browser Lane Addon이 소유한다. 원래 native claim과 child birth/group, Firefox의 프로필 및 `moz:processID`를 확인한 뒤 고정 client UUID로 worker 내부에 등록한다. detach는 입력을 철회하고 원래 browser 종료와 claim settlement를 기다린다. 사용자 지정 프로필의 로그인 데이터는 보존한다. `keeper.kind = addon_managed`의 포트·프로필은 설정 관측이며 실제 준비 여부는 해당 Addon 관측에서 확인한다. 별도로 실행한 수동 BiDi host의 기록은 그 외부 host만 설명한다.
+  → [Browser_addon_live_bidi](../../lib/browser_addon_live_bidi.mli) ·
   [Browser_bidi_host_status](../../lib/browser_bidi_host_status.mli) ·
-  [RFC-browser-keeper-firefox](../../docs/rfc/RFC-browser-keeper-firefox.md)
+  [Browser Addon lifecycle](../design/browser-addon-lifecycle.md)
 
 **Machine Change Mark (기계 변경 표식)**
 : MSX Lane·DOS Lane 기계의 화면이 바뀌었는지 싸게 묻기 위한 표식. 변경 횟수(`count`)와

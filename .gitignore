@@ -217,3 +217,7 @@ memory/
 # lib/msx_lane needs. Install from a built checkout with
 # `opam install ./masc.opam`.
 /ocaml-msx.opam
+
+# gh CLI cache. `gh run view --log` writes here when XDG_CACHE_HOME points
+# into the tree; a keeper cache is not repository content.
+/.ghcache/

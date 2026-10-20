@@ -205,7 +205,7 @@ class BrowserLaneSetupCommand(unittest.TestCase):
         self.assertEqual(runtime_toml(base).read_text(), with_table)
         self.assertEqual((lane(base) / "token").read_text(), token)
 
-    # --mode automation: the geckodriver the server starts, and no host.
+    # --mode automation configures the Add-on-owned driver and installs no host.
     def test_automation_writes_the_geckodriver_and_installs_no_host(self):
         root = self.scratch()
         base = workspace(root)
@@ -223,7 +223,7 @@ class BrowserLaneSetupCommand(unittest.TestCase):
         for directory in ("Library", ".mozilla"):
             self.assertFalse((root / "home" / directory).exists(), "no manifest is registered")
         self.assertIn("Restart the MASC server", result.stdout)
-        self.assertIn("no login is kept", result.stdout)
+        self.assertIn("logins do not carry over to a new session", result.stdout)
         self.assertIn("Wrote [browser.automation] to", result.stdout)
         # The extension lane's sentence ("install the host...") is not this
         # lane's, and nothing here installs one.
@@ -429,7 +429,7 @@ class BrowserLaneSetupCommand(unittest.TestCase):
         self.assertTrue((manifests / "masc_browser_host.json").is_file())
         self.assertTrue((lane(base) / "extension/manifest.json").is_file())
         self.assertIn("[browser.live.bidi]", runtime_toml(base).read_text().splitlines())
-        self.assertIn("ambiguous_browser_clients", first.stdout)
+        self.assertIn("Each connected route has its own clientId", first.stdout)
         files = [runtime_toml(base), manifests / "masc_browser_host.json",
                  lane(base) / "host/launch", lane(base) / "token"]
         before = [path.read_bytes() for path in files]

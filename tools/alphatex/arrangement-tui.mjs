@@ -719,10 +719,11 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
           let result = arrangementCommand(editor, line)
           if (result.editor.project !== editor.project || result.effect && !['record', 'record-stop', 'inputs', 'input', 'midi-input', 'midi-monitor', 'help', 'takes'].includes(result.effect.kind)) {
             await settleRecording()
-            // Finalization may select a newly imported asset. Retain the take
+            // Finalization may select a newly imported asset. Retain the source
             // the user chose before waiting; never reinterpret it on that asset.
             result = result.selection?.kind === 'take-selection'
-              ? { editor: arrangementTakeSelected(editor, result.selection) } : arrangementCommand(editor, line)
+              ? { editor: arrangementTakeSelected(editor, result.selection) }
+              : result.effect?.kind === 'practice-backing' ? { editor, effect: result.effect } : arrangementCommand(editor, line)
           }
           adopt(result.editor); if (result.effect) await effect(result.effect); else status = 'Edited'
         })

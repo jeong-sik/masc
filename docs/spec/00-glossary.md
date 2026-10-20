@@ -2799,8 +2799,11 @@ status: reference
   거절하면서 `current_assignee` 에 홀더 이름을 실어 준다. Task 전이 상태가 아닌
   이유로 거절될 때 오는 `task_transition_invalid_state` 와는 다른 응답이므로,
   "지금 누가 들고 있는지" 를 알려면 `rule_id` 와 `current_assignee` 를 읽는다.
-  홀더 판정은 claim 분류의 `Self_owned`/`Held_by_other` 를 가르는 비교(`same_actor`)와
-  도구 계층의 `same_task_actor` 가 같은 이름 비교를 쓴다.
+  홀더 판정은 한 함수 `same_task_actor`(`String.equal` 로 이름만 비교한다)를 도구 계층과
+  claim 해석이 함께 쓴다. claim 해석은 그 함수를 `~same_actor` 인자로 받아
+  `Self_owned`/`Held_by_other` 를 가르고, lifecycle 의 다른 전이는 같은 함수를
+  `~same_agent` 라는 인자 이름으로 받는다. 이름표는 셋이지만 비교는 하나이므로,
+  한쪽만 바꾸면 도구가 받아들일 전이를 lifecycle 이 거절한다.
   **다른 뜻과 구별한다**: 기계를 쥔 조종자(`Keeper_dos_controller.holder_left`,
   → 조종권 (Controller))도 홀더라고 부르지만, 그쪽은 기계 조종권을 쥔 이름이고
   Task 와 무관하다. Task 문맥의 홀더는 언제나 Assignee 다.

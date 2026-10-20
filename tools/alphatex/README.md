@@ -180,8 +180,9 @@ a cancelled empty take; input/audio/storage failures retain recoverable files.
 Cancellation remains owned while files close and hashes are computed. The final
 decision is then sealed before receipt publication; later cancellation cannot
 rewrite that decision, while publication errors still reject completion.
-Existing directories/files are never reused. This is raw MIDI capture; take
-import into arrangement regions and simultaneous WAV input use separate flows.
+Existing directories/files are never reused. Import the completed MIDI take in
+the arrangement editor with `:import-practice PATH`; simultaneous WAV input uses
+the separate audio/MIDI recorder.
 Diagnostics include the take path/status/count without exposing preset bytes.
 
 After stopping or a monitoring error, `:step-diagnostics PATH` exports the last
@@ -570,6 +571,17 @@ regions. `:play-audio` explicitly auditions the WAV portions on the captured
 clock, including delayed starts, silent tails and compressed repeats; it sends
 no MIDI. Ordinary Space playback uses [paired MIDI2/WAV regions](CAPTURE-UMP-REGIONS.md)
 with selected audio/MIDI outputs and per-input `:midi-source` overrides.
+Completed phrase practice takes use `:import-practice DIRECTORY`. Enter places
+their original MIDI-only source; `:trim OFFSET EXTENT` uses decimal host-tick
+strings, and move/repeat/undo/redo work as for other regions. Select
+`:mixed-output AUDIO_UID` and `:midi-source ASSET ORIGINAL_SOURCE_UID MIDI_UID`
+before Space playback. Private receipt/context/arm/events files travel with
+save-as, including undo/redo-retained sources. Packet words, receive order,
+UInt64 timestamps and exact signed nominal frames remain unchanged. Playback
+uses an origin that includes pre-anchor packets. Failed, incomplete, corrupt or
+empty takes are rejected. The frozen VST preset remains in the private source;
+this route sends raw MIDI externally. Automatic phrase backing/pass alignment
+and playback through the captured VST remain subsequent work.
 [Hybrid arrangements](HYBRID-ARRANGEMENT.md) combine SMF, captured MIDI2 and WAV
 under one clock. [Record audio and MIDI against backing](ARRANGEMENT-RECORDING.md)
 with `:input UID`, `:record`, and `:record-stop`. Use `:monitor AUDIO_OUTPUT_UID`

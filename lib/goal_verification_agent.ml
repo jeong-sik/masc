@@ -387,9 +387,10 @@ let bind_review = Goal_verification.bind_review
 (* A review that raised stalls the request the way a deferral does, under the
    gate the Task verifier uses for the same event. Nothing arms a retry: the
    scheduling owner isolates the exception and the Goal waits in Verifying for
-   the next request_complete. Only a request that still stands is announced,
-   and a failure to read it is logged, not raised over the review's own
-   exception. *)
+   the next request_complete. Only a request that still stands is announced.
+   An exception while reading it is logged, not raised over the review's own
+   exception; a Goal that has left Verifying, or a read that returns an error,
+   posts nothing. *)
 let announce_raised ~config ~goal_id ~request_id ~evaluator_runtime ~detail =
   match bind_review config ~goal_id with
   | Ok (_, (current, _, _)) when String.equal current request_id ->
@@ -619,6 +620,15 @@ let process_pending_work ?(sw : Eio.Switch.t option = None)
            { detail = "review fiber cancelled: " ^ Printexc.to_string exn }));
     raise exn
   | exn ->
+    (* The notice goes first: the run registry write below raises when the
+       registry cannot persist, and a failure of the registry is exactly when
+       the Board is most needed. *)
+    announce_raised
+      ~config
+      ~goal_id:work.goal_id
+      ~request_id
+      ~evaluator_runtime:!evaluator_runtime
+      ~detail:(Printexc.to_string exn);
     Goal_verification_run_registry.mark_completed
       registry
       ~run_id
@@ -630,12 +640,6 @@ let process_pending_work ?(sw : Eio.Switch.t option = None)
       ?evaluator_runtime:!evaluator_runtime
       ~elapsed_s:(max 0.0 (Time_compat.now () -. started_at))
       ();
-    announce_raised
-      ~config
-      ~goal_id:work.goal_id
-      ~request_id
-      ~evaluator_runtime:!evaluator_runtime
-      ~detail:(Printexc.to_string exn);
     raise exn
 ;;
 

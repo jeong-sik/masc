@@ -12,6 +12,13 @@ navigating one. Keep `browserSelection.lane` and `browserSelection.clientId` fro
 the returned receipt. Repeat that identity for all work on its tabs/documents.
 An unavailable selection must not be replaced silently.
 
+For initial discovery, add `"requiredActions":["hover","pointer_drag"]` next to
+`command` when that work is needed. The worker chooses a compatible available
+connection or refuses before dispatch; it checks explicit connections too.
+This capability declaration does not prove that a page accepted an interaction.
+An explicitly named live connection must include its observed client ID before
+creating a tab.
+
 Commands use `{"lane":"live","clientId":"<observed UUID>","command":
 {"verb":"page.read","args":{"tabId":7,"maxChars":12000}}}`. Use
 `page.scene`/`page.capture` before coordinate input. `page.interact` retains URL,

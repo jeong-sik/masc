@@ -2355,6 +2355,136 @@ let test_media_turn_starts_from_the_live_walk_head () =
               ~media_walk
               ~lane:[ assigned; text_only; backupvision ]))))
 
+(* A text-only lane head and one image-capable candidate whose path rests: the
+   lane shape that sent every image turn to a weekly-limited account and back
+   to the head (2026-10-20). A rest that ends at a known time -- a rate limit
+   with or without a stated wait, or a quota window with a stated reset --
+   keeps the candidate out of the reroute until then, so the turn degrades on
+   the serving head and reaches the resting one only after it; at the release
+   the candidate leads image turns again. A quota observation names no end and
+   only an answer clears it, so it never keeps the candidate out: the image
+   turn still leads with it, which is the dispatch that can clear it. *)
+let test_image_turn_degrades_while_its_capable_candidate_rests () =
+  let stated_sec = 3600.0 in
+  let rests =
+    [ ( "stated rate limit"
+      , (fun (runtime : Runtime_instance.t) ->
+          Runtime_candidate_backpressure.note_rate_limit
+            ~candidate:runtime.candidate_backpressure
+            ~retry_after:(Some stated_sec))
+      , Some stated_sec )
+    ; ( "unstated rate limit"
+      , (fun (runtime : Runtime_instance.t) ->
+          Runtime_candidate_backpressure.note_rate_limit
+            ~candidate:runtime.candidate_backpressure
+            ~retry_after:None)
+      , Some Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec )
+    ; ( "dated quota window"
+      , (fun (runtime : Runtime_instance.t) ->
+          Runtime_quota_window.note_exhausted
+            ~scope:(Runtime_instance.quota_scope_of_runtime runtime)
+            ~resets_at:(Unix.gettimeofday () +. stated_sec))
+      , Some stated_sec )
+    ; ( "quota observation"
+      , (fun (runtime : Runtime_instance.t) ->
+          Runtime_quota_window.note_observed_exhausted
+            ~scope:(Runtime_instance.quota_scope_of_runtime runtime))
+      , None )
+    ]
+  in
+  List.iter
+    (fun (store, rest, release_after) ->
+       with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
+         Runtime_quota_window.reset_for_testing ();
+         Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+           let runtime id =
+             match Runtime.get_runtime_by_id id with
+             | Some runtime -> runtime
+             | None -> Alcotest.failf "missing runtime %s" id
+           in
+           let ids =
+             List.map (fun (runtime : Runtime_instance.t) -> runtime.Runtime_instance.id)
+           in
+           rest (runtime "lanevision.vision_model");
+           let image_block =
+             Agent_core.Types.Image
+               { media_type = "image/png"
+               ; data = Base64.encode_string "image"
+               ; source_type = Agent_core.Types.Base64
+               }
+           in
+           let walk = Driver.Fresh_walk_by test_recorder in
+           (* The lane as [run_agent_turn] holds it: the fresh walk's order. *)
+           let lane_at now =
+             match Driver.assignment_walk_order ~now ~walk "resilient" with
+             | Ok { Driver.order; _ } -> List.map runtime order
+             | Error _ -> Alcotest.fail "expected the resilient lane"
+           in
+           let turn_at now =
+             match lane_at now with
+             | [] -> Alcotest.fail "expected a non-empty lane"
+             | first_candidate :: remaining_runtimes ->
+               let candidates =
+                 Driver.For_testing.modality_reroute_candidates
+                   ~walk
+                   ~now
+                   ~deferred_runtime_lane:None
+                   ~first_candidate
+                   ~remaining_runtimes
+               in
+               let decision =
+                 Driver.For_testing.lane_modality_reroute_decision
+                   ~checkpoint_messages:[]
+                   ~initial_messages:[]
+                   ~goal_blocks:[ image_block ]
+                   ~first_candidate
+                   ~candidates
+               in
+               let attempts =
+                 Driver.For_testing.attempt_runtimes_for_turn
+                   ~media_walk:(Runtime_agent.media_walk ~candidates [ image_block ])
+                   ~lane:(first_candidate :: remaining_runtimes)
+               in
+               decision, ids attempts
+           in
+           let candidate_leads now what =
+             match turn_at now with
+             | Runtime_agent.Reroute { target; _ }, attempts ->
+               Alcotest.(check string)
+                 (store ^ ": " ^ what ^ ", the candidate takes the image")
+                 "lanevision.vision_model"
+                 target.Runtime_instance.id;
+               Alcotest.(check (list string))
+                 (store ^ ": " ^ what ^ ", the candidate leads the turn")
+                 [ "lanevision.vision_model"; "primary.text_model" ]
+                 attempts
+             | (Runtime_agent.No_capable_runtime _ | Runtime_agent.No_reroute_needed), _ ->
+               Alcotest.failf "%s: %s, the candidate must lead the image turn" store what
+           in
+           let now = Unix.gettimeofday () in
+           match release_after with
+           | None -> candidate_leads now "with no end to wait for"
+           | Some release_after ->
+             (match turn_at now with
+              | Runtime_agent.No_capable_runtime { required }, attempts ->
+                Alcotest.(check (list string))
+                  (store ^ ": the turn degrades for the image")
+                  [ "image" ]
+                  required;
+                Alcotest.(check (list string))
+                  (store ^ ": the serving head runs first, the resting candidate after it")
+                  [ "primary.text_model"; "lanevision.vision_model" ]
+                  attempts
+              | Runtime_agent.Reroute { target; _ }, _ ->
+                Alcotest.failf
+                  "%s: the image turn rerouted to %s while it rests"
+                  store
+                  target.Runtime_instance.id
+              | Runtime_agent.No_reroute_needed, _ ->
+                Alcotest.failf "%s: a text-only head must not claim the image" store);
+             candidate_leads (now +. release_after +. 1.0) "after its release")))
+    rests
+
 (* RFC-0440 §3: a 402 belongs to the candidate's account, so the walk moves to
    the next candidate in the same turn and does not call the first one again. *)
 let test_attempt_loop_moves_past_payment_required () =
@@ -6955,6 +7085,10 @@ let () =
             "a media turn starts from the live walk head"
             `Quick
             test_media_turn_starts_from_the_live_walk_head;
+          Alcotest.test_case
+            "an image turn degrades while its capable candidate rests"
+            `Quick
+            test_image_turn_degrades_while_its_capable_candidate_rests;
           Alcotest.test_case
             "attempt loop moves past a 402"
             `Quick

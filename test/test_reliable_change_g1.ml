@@ -384,7 +384,22 @@ let test_checker_binds_verified_revisions () =
   let summary = check_observations ~manifest ~observations:earlier_foreign in
   check bool "earlier false verdict fails" false summary.overall_passed;
   check int "earlier false verdict counted" 1 summary.false_verified_count;
-  check int "later success cannot hide foreign verdict" 2 summary.live_passed
+  check int "later success cannot hide foreign verdict" 2 summary.live_passed;
+  List.iter
+    (fun scenario ->
+       let corrupted =
+         List.map
+           (fun (o : run_observation) ->
+              if o.scenario = scenario && o.repeat_index = 1
+              then { o with external_verified = true; verdict_passed = true;
+                            target_revision = Some "foreign" }
+              else o)
+           observations
+       in
+       let summary = check_observations ~manifest ~observations:corrupted in
+       check bool "false negative-case claim fails" false summary.overall_passed;
+       check int "same false claim counted once across rules" 1 summary.false_verified_count)
+    [ Matrix_scenario Stale_revision; Live_scenario Live_negative ]
 ;;
 
 let test_missing_requested_revision_stays_missing () =

@@ -542,11 +542,9 @@ let check_observations
        let sorted_attempts = List.map fst sorted_run in
        let final_attempt, final_scenario = List.hd (List.rev sorted_run) in
        let first_attempt = List.hd sorted_attempts in
-       let run_valid = ref true in
-
-       List.iter
-         (fun o -> if not (check_verified_revision o) then run_valid := false)
-         run_obs;
+       let revision_checks = List.map check_verified_revision sorted_attempts in
+       let final_revision_valid = List.hd (List.rev revision_checks) in
+       let run_valid = ref (List.for_all Fun.id revision_checks) in
 
        (* Check for duplicated usage within run *)
        let per_req_attempts =
@@ -781,7 +779,7 @@ let check_observations
           )
         | Exit_nonzero ->
           if final_attempt.command_exit_code = Some 0 || final_attempt.external_verified then (
-            incr false_verified;
+            if final_revision_valid then incr false_verified;
             run_valid := false;
             add_finding (Printf.sprintf "exit_nonzero_false_verified_%d" repeat_index)
               (Printf.sprintf "matrix exit-nonzero run %d was falsely verified or exited 0" repeat_index)
@@ -792,7 +790,7 @@ let check_observations
           )
         | Stale_revision ->
           if final_attempt.external_verified then (
-            incr false_verified;
+            if final_revision_valid then incr false_verified;
             run_valid := false;
             add_finding (Printf.sprintf "stale_revision_false_verified_%d" repeat_index)
               (Printf.sprintf "matrix stale-revision run %d was falsely verified" repeat_index)
@@ -801,7 +799,7 @@ let check_observations
           )
         | Missing_artifact ->
           if final_attempt.external_verified then (
-            incr false_verified;
+            if final_revision_valid then incr false_verified;
             run_valid := false;
             add_finding (Printf.sprintf "missing_artifact_false_verified_%d" repeat_index)
               (Printf.sprintf "matrix missing-artifact run %d was falsely verified" repeat_index)
@@ -890,11 +888,9 @@ let check_observations
        let sorted_attempts = List.map fst sorted_run in
        let final_attempt, final_scenario = List.hd (List.rev sorted_run) in
        let first_attempt = List.hd sorted_attempts in
-       let run_valid = ref true in
-
-       List.iter
-         (fun o -> if not (check_verified_revision o) then run_valid := false)
-         sorted_attempts;
+       let revision_checks = List.map check_verified_revision sorted_attempts in
+       let final_revision_valid = List.hd (List.rev revision_checks) in
+       let run_valid = ref (List.for_all Fun.id revision_checks) in
 
        (match final_scenario with
         | Live_success ->
@@ -907,7 +903,7 @@ let check_observations
           )
         | Live_negative ->
           if final_attempt.external_verified then (
-            incr false_verified;
+            if final_revision_valid then incr false_verified;
             run_valid := false;
             add_finding (Printf.sprintf "live_negative_false_verified_%d" repeat_index)
               "live negative run was falsely verified"

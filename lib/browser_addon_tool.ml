@@ -130,6 +130,7 @@ let invoke ~owner ~principal arguments =
       | Issue_result (Ok (B.Lane_absent|Rejected_before_effect _)) -> true,Tool_result.Proven_pre_effect
       | Service_refusal {disposition=W.Outcome_unknown;_}|Issue_result (Ok (B.Timed_out|Refused _|Answered _))
       | Snapshot_result _|Model_reply _|Poll_result _|Receipt -> true,Tool_result.Effect_outcome_unknown in
+    let disposition=if B.verb_is_read verb then Tool_result.Proven_pre_effect else disposition in
     result ~start_time ~failed ~disposition data "browser command failed; inspect its original receipt before further input" in
   match run () with
   | value -> value

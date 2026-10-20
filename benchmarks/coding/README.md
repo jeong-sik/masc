@@ -70,7 +70,7 @@ operation-ID type. This observation does not claim a Task or verification ID.
 
 Every status response must explicitly identify that admitted operation before
 its state can settle the episode. A foreign, absent or malformed identity is
-recorded as a transport error, with the response retained in
+recorded as a transport error, with the original normalized MCP envelope retained in
 `runs/<run-id>/operation-invalid.json`. Prepared artifacts are still graded for
 diagnostics, but a contradictory response cannot qualify the episode as passed.
 

@@ -774,10 +774,10 @@ run_one() {
               "$(jq -cn --arg name "${keeper_name}" --arg op "${operation_id}" \
                 '{target:{kind:"keeper", name:$name}, operation_id:$op}')" 20; then
               local status_payload
-              status_payload="$(tool_result_json)"
-              if ! printf '%s' "${status_payload}" | jq -es --argjson expected "${operation_id_json}" \
+              if ! status_payload="$(tool_result_json)" \
+                || ! printf '%s' "${status_payload}" | jq -es --argjson expected "${operation_id_json}" \
                 'length == 1 and (.[0] | type == "object" and .operation_id == $expected)' >/dev/null; then
-                printf '%s' "${status_payload}" > "${run_dir}/operation-invalid.json"
+                printf '%s' "${LAST_TOOL_RAW}" > "${run_dir}/operation-invalid.json"
                 finish_status="transport_error"
                 error_text="keeper_delegate_status returned no matching operation_id"
                 break

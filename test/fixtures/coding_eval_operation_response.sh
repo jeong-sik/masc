@@ -4,6 +4,7 @@ set -euo pipefail
 repo="$1"
 proof_dir="$2"
 response="$3"
+wire_mode="${4:-text}"
 curl() { return 0; }
 # shellcheck source=scripts/harness_coding_eval.sh
 source "${repo}/scripts/harness_coding_eval.sh" --models fixture:model --out "${proof_dir}/out"
@@ -18,18 +19,28 @@ cat > "${case_dir}/verify.sh" <<'VERIFY'
 #!/usr/bin/env bash
 test -f "$1/value.txt"
 VERIFY
-call_mcp_tool() {
+call_tool() {
+  local payload
   case "$2" in
-    masc_keeper_up) LAST_TOOL_RAW='{}' ;;
-    masc_keeper_msg) LAST_TOOL_RAW='{"operation_id":"kmsg-accepted","state":"Queued"}' ;;
+    masc_keeper_up) payload='{}' ;;
+    masc_keeper_msg) payload='{"operation_id":"kmsg-accepted","state":"Queued"}' ;;
     masc_keeper_delegate_status)
       printf '%s' "$3" > "${proof_dir}/status-request.json"
-      LAST_TOOL_RAW="${response}"
+      payload="${response}"
       ;;
     *) return 1 ;;
   esac
+  local envelope
+  envelope="$(jq -cn --argjson id "$1" --arg payload "${payload}" \
+    '{jsonrpc:"2.0",id:$id,result:{content:[{type:"text",text:$payload}]}}')"
+  if [[ "$2" == masc_keeper_delegate_status && "${wire_mode}" == raw ]]; then
+    envelope="${response}"
+  fi
+  if [[ "$2" == masc_keeper_delegate_status ]]; then
+    printf '%s' "${envelope}" > "${proof_dir}/status-response.json"
+  fi
+  printf '%s' "${envelope}"
 }
-tool_result_json() { printf '%s' "${LAST_TOOL_RAW}"; }
 keeper_tool_call_names() { printf '[]'; }
 stop_keeper_best_effort() { :; }
 run_one fixture model "${case_dir}" 1

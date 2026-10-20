@@ -309,11 +309,11 @@ let test_status_response_must_identify_admitted_operation () =
   let root = source_root () in
   let fixture = Filename.concat root "test/fixtures/coding_eval_operation_response.sh" in
   List.iter
-    (fun (response, expected_status, expected_passed, invalid_response) ->
+    (fun (response, wire_mode, expected_status, expected_passed, invalid_response) ->
        let proof_dir = temp_dir "coding_eval_operation_" in
        let command =
          "bash " ^ String.concat " "
-           (List.map Filename.quote [ fixture; root; proof_dir; response ])
+           (List.map Filename.quote [ fixture; root; proof_dir; response; wire_mode ])
        in
        check int "actual episode driver finishes" 0 (Sys.command command);
        let rows =
@@ -339,27 +339,30 @@ let test_status_response_must_identify_admitted_operation () =
        check string "lookup uses the admitted identity" "kmsg-accepted" lookup;
        let run_dir = Filename.concat proof_dir "out/runs/fixture-model-l1-calc-add-r1" in
        if invalid_response then (
-         let channel = open_in_bin (Filename.concat run_dir "operation-invalid.json") in
-         let retained =
+         let read_file path =
+           let channel = open_in_bin path in
            Fun.protect ~finally:(fun () -> close_in_noerr channel)
              (fun () -> really_input_string channel (in_channel_length channel))
          in
-         check string "contradictory response bytes are retained" response retained;
+         check string "MCP response bytes survive real extraction and classification"
+           (read_file (Filename.concat proof_dir "status-response.json"))
+           (read_file (Filename.concat run_dir "operation-invalid.json"));
          check bool "contradictory response is not a final outcome" false
            (Sys.file_exists (Filename.concat run_dir "operation-final.json")))
        else
          check bool "matching terminal response is retained" true
            (Sys.file_exists (Filename.concat run_dir "operation-final.json")))
-    [ {|{"operation_id":"kmsg-accepted","state":"Succeeded"}|}, Coding_eval_report.Run_ok, true, false
-    ; {|{"operation_id":"kmsg-accepted","state":"Failed"}|}, Coding_eval_report.Run_provider_error, false, false
-    ; {|{"operation_id":"kmsg-other","state":"Succeeded"}|}, Coding_eval_report.Run_transport_error, false, true
-    ; {|{"operation_id":"kmsg-other","state":"Running"}|}, Coding_eval_report.Run_transport_error, false, true
-    ; {|{"state":"Succeeded"}|}, Coding_eval_report.Run_transport_error, false, true
-    ; {|{"operation_id":null,"state":"Succeeded"}|}, Coding_eval_report.Run_transport_error, false, true
-    ; {|{"operation_id":42,"state":"Succeeded"}|}, Coding_eval_report.Run_transport_error, false, true
-    ; "", Coding_eval_report.Run_transport_error, false, true
-    ; "not json", Coding_eval_report.Run_transport_error, false, true
-    ; {|{"operation_id":"kmsg-accepted","state":"Succeeded"} {}|}, Coding_eval_report.Run_transport_error, false, true
+    [ {|{"operation_id":"kmsg-accepted","state":"Succeeded"}|}, "text", Coding_eval_report.Run_ok, true, false
+    ; {|{"operation_id":"kmsg-accepted","state":"Failed"}|}, "text", Coding_eval_report.Run_provider_error, false, false
+    ; {|{"operation_id":"kmsg-other","state":"Succeeded"}|}, "text", Coding_eval_report.Run_transport_error, false, true
+    ; {|{"operation_id":"kmsg-other","state":"Running"}|}, "text", Coding_eval_report.Run_transport_error, false, true
+    ; {|{"state":"Succeeded"}|}, "text", Coding_eval_report.Run_transport_error, false, true
+    ; {|{"operation_id":null,"state":"Succeeded"}|}, "text", Coding_eval_report.Run_transport_error, false, true
+    ; {|{"operation_id":42,"state":"Succeeded"}|}, "text", Coding_eval_report.Run_transport_error, false, true
+    ; "", "text", Coding_eval_report.Run_transport_error, false, true
+    ; "not json", "text", Coding_eval_report.Run_transport_error, false, true
+    ; {|{"operation_id":"kmsg-accepted","state":"Succeeded"} {}|}, "text", Coding_eval_report.Run_transport_error, false, true
+    ; "not json", "raw", Coding_eval_report.Run_transport_error, false, true
     ]
 ;;
 

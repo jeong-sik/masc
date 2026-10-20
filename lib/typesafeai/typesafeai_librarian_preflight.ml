@@ -34,7 +34,7 @@ type t = { outcome : outcome; elapsed_s : float option }
 let assess ?(observe = fun _ -> ()) ~clock ~keeper_id ~eligible ~prompt () =
   match Typesafeai_config.librarian_preflight_destinations ~keeper_id with
   | Error reason -> { outcome = Skipped reason; elapsed_s = None }
-  | Ok _ when not eligible ->
+  | Ok _ when not (eligible ()) ->
     { outcome = Ineligible "this pass requires a full Librarian review"; elapsed_s = None }
   | Ok destinations ->
     (match choices with

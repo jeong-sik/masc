@@ -1064,14 +1064,16 @@ let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail =
 (* The payload the commit measures: the facts this pass saw plus the source
    store's lines. A memory over the budget commits only by shrinking, so a
    pass that proposes no change cannot commit it. An unreadable source store
-   counts as not within: the full pass reads it again at commit and reports
-   the failure there. *)
+   counts as not within, so the pass takes the full lane. *)
 let current_memory_within_budget ~keepers_dir ~keeper_id (inp : Keeper_librarian.input) =
   match
     Domain_pool_ref.submit_io_or_inline (fun () ->
       Keeper_memory_source_current.read_for_keepers_dir ~keepers_dir ~keeper_id)
   with
-  | Error _ -> false
+  | Error detail ->
+    Log.Keeper.warn ~keeper_name:keeper_id
+      "librarian preflight skipped: source memory unreadable: %s" detail;
+    false
   | Ok source ->
     Keeper_memory_os_render.facts_within_budget
       ~ordinary_facts:
@@ -1600,7 +1602,7 @@ let run_pass
                (* Maintenance is already a request to review excess memory.
                   A no-change shortcut must not stand in for that review:
                   cleanup remembers a committed input as reviewed. *)
-               let eligible = match write_scope, pass with
+               let eligible () = match write_scope, pass with
                  | Context_and_memory, Memory_pass None ->
                    Keeper_librarian_context.shows_no_working_context
                      prompt_input.working_context

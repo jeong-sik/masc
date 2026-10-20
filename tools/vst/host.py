@@ -269,7 +269,8 @@ def stream_synthesis(source, emit):
     import mido
 
     request = json.loads(source.readline())
-    if not isinstance(request, dict) or request.get('kind') != 'open' or request.get('schemaVersion') != 1:
+    if (not isinstance(request, dict) or request.get('kind') != 'open'
+            or type(request.get('schemaVersion')) is not int or request['schemaVersion'] != 1):
         raise ValueError('expected VST stream open schemaVersion 1')
     rate = request.get('sampleRate')
     if type(rate) is not int or not 0 < rate <= 0xFFFFFFFF:

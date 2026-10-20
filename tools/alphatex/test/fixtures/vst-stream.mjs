@@ -1,11 +1,10 @@
 import { createInterface } from 'node:readline'
 const mode = process.argv[2]
-let opening, total = 0n
+let total = 0n
 const reply = value => process.stdout.write(JSON.stringify(value) + '\n')
 createInterface({ input: process.stdin }).on('line', line => {
   const row = JSON.parse(line)
   if (row.kind === 'open') {
-    opening = row
     if (mode === 'wait') return
     reply({ kind: 'ready', schemaVersion: 1, sampleRate: row.sampleRate, channels: 2,
       instrument: mode === 'identity' ? { identifier: 'other' } : row.instrument, preset_sha256: row.preset.sha256 })

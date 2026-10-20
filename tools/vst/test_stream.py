@@ -106,7 +106,7 @@ class StreamTests(unittest.TestCase):
     def test_identity_and_corrupt_preset_are_refused_before_pcm(self):
         for request in [opening(instrument={'identifier': 'other', 'version': '1'}),
                         opening(preset={'data': 'YQ==', 'sha256': 'changed'}),
-                        opening(sampleRate=44100.5), opening(sampleRate=True)]:
+                        opening(sampleRate=44100.5), opening(sampleRate=True), opening(schemaVersion=True)]:
             plugin = Instrument()
             with self.assertRaises(ValueError):
                 self.run_stream([request, block(1, 7)], plugin)

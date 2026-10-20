@@ -356,8 +356,9 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     stepInput = owner; stepOwners.add(owner)
     status = practice ? 'Opening live practice input and backing' : 'Opening MIDI step input'
     owner.ready.then(info => { if (stepInput === owner && accepting && !closed) { status = `${info.practice ? 'Practice input' : 'Step input'}${info.monitoring ? ' · VST monitor' : ''}: ${info.source.name}`; draw() } }, () => {})
-    owner.completion.then(() => { status = 'Step input stopped' },
-      error => { status = `Step input stopped: ${error.message}` }).finally(() => {
+    const inputName = practice ? 'Practice input' : 'Step input'
+    owner.completion.then(() => { status = `${inputName} stopped` },
+      error => { status = `${inputName} stopped: ${error.message}` }).finally(() => {
       const report = owner.diagnostics?.()
       if (report) lastStepReport = report
       stepOwners.delete(owner)

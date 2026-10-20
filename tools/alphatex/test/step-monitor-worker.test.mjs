@@ -152,12 +152,32 @@ test('one device worker combines live notes with absolute-frame backing across f
 })
 
 test('normal stop while the synth is opening retires children without requiring ready', async () => {
-  const fixture = await runtime({ vst: 'wait-block' }), owner = fixture.open()
+  const project = newProject()
+  project.tracks[0].channel = 2
+  project.tracks.push({ ...project.tracks[0], id: 'backing', channel: 1,
+    notes: [{ id: 'bass', pitch: 48, start: 0, duration: 960, velocity: 80 }] })
+  const fixture = await runtime({ vst: 'wait-block' }), owner = fixture.open({ backing: phraseBacking(project, 'track-1') })
   try {
-    while (!(await owner.inspect()).pcm?.device) await new Promise(resolve => setImmediate(resolve))
+    while ((await owner.inspect()).backing?.instances !== 2) await new Promise(resolve => setImmediate(resolve))
     owner.stop(); await owner.completion
     await assert.rejects(owner.ready)
     await fixture.assertClosed()
+    assert.equal(owner.diagnostics().worker.terminalReceived, true)
+    assert.equal(owner.diagnostics().backing.instances, 2)
+  } finally { owner.stop(); await owner.completion.catch(() => {}); await fixture.dispose() }
+})
+
+test('practice synth failure joins every independent instance and its one output', async () => {
+  const project = newProject()
+  project.tracks[0].channel = 2
+  project.tracks.push({ ...project.tracks[0], id: 'backing', channel: 1,
+    notes: [{ id: 'bass', pitch: 48, start: 0, duration: 960, velocity: 80 }] })
+  const fixture = await runtime({ vst: 'identity' }), owner = fixture.open({ backing: phraseBacking(project, 'track-1') })
+  try {
+    await assert.rejects(owner.ready); await assert.rejects(owner.completion)
+    await fixture.assertClosed()
+    assert.equal(owner.diagnostics().backing.instances, 2)
+    assert.equal(owner.diagnostics().pcm.nativeClosed, true)
     assert.equal(owner.diagnostics().worker.terminalReceived, true)
   } finally { owner.stop(); await owner.completion.catch(() => {}); await fixture.dispose() }
 })

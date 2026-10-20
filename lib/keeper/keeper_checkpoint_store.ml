@@ -413,15 +413,59 @@ let canonical_identity_opt path =
   | _ -> None
   | exception Unix.Unix_error _ -> None
 
-(* Summaries are keyed by the file's resolved path. A save reaches the
-   canonical through [canonical_session_location], which resolves a symlinked
-   session root, while a reader is handed the configured spelling of the same
-   file. A path that does not resolve has no key, so nothing is published for
-   it and a reader parses the file. *)
+(* Summaries are keyed by the file's path under the resolved session root. A
+   save reaches the canonical through [canonical_session_location], which
+   resolves a symlinked session root, while a reader is handed the configured
+   spelling of the same file; both spellings name one key. Only the root is
+   resolved. [canonical_session_location] refuses a symbolic link at the
+   session directory and the canonical readers refuse one at the file, so a
+   path with a link below the root has a key no save publishes, and its
+   reader goes to the file. An answer found under a key is used only while it
+   carries the identity of the file at the caller's path.
+
+   A lookup resolves a root once per spelling and remembers the answer.
+   [Unix.realpath] on every lookup walked the whole path on the scheduler
+   thread and took 399 of 2,112 samples of it on 2026-10-20. Every locked
+   transaction resolves its root afresh ([canonical_session_location]) and
+   records that answer for the spelling it was given, so a root re-pointed
+   while the server runs moves the lookups and [forget_written_lineages]
+   with the saves. A root that does not resolve is not remembered, so a
+   lookup resolves it again once it exists, and until then a path under it
+   has no key. *)
+let resolved_session_roots : (string, string) Hashtbl.t = Hashtbl.create 4
+
+(* Same discipline as [canonical_summaries_mutex]. *)
+let resolved_session_roots_mutex = Stdlib.Mutex.create ()
+
+(* The resolved spelling names itself, so a key built from a path a save
+   resolved finds the same root. *)
+let remember_session_root ~spelling resolved =
+  Stdlib.Mutex.protect resolved_session_roots_mutex (fun () ->
+    Hashtbl.replace resolved_session_roots spelling resolved;
+    Hashtbl.replace resolved_session_roots resolved resolved)
+
+let resolve_session_root root =
+  match
+    Stdlib.Mutex.protect resolved_session_roots_mutex (fun () ->
+      Hashtbl.find_opt resolved_session_roots root)
+  with
+  | Some resolved -> Ok resolved
+  | None ->
+    (match Unix.realpath root with
+     | resolved ->
+       remember_session_root ~spelling:root resolved;
+       Ok resolved
+     | exception Unix.Unix_error (error, _, _) -> Error error)
+
 let summary_key canonical_path =
-  match Unix.realpath canonical_path with
-  | resolved -> Some resolved
-  | exception Unix.Unix_error _ -> None
+  let session_dir = Filename.dirname canonical_path in
+  match resolve_session_root (Filename.dirname session_dir) with
+  | Ok root ->
+    Some
+      (Filename.concat
+         (Filename.concat root (Filename.basename session_dir))
+         (Filename.basename canonical_path))
+  | Error (_ : Unix.error) -> None
 
 (* [Some summary] only while the file at [canonical_path] is the one the
    summary was taken from. *)
@@ -529,7 +573,7 @@ let lineage_owner_of_key ~key ~keeper_name =
   { owner_session_root = Filename.dirname (Filename.dirname key); owner_keeper = keeper_name }
 
 (* The memo of the file's lineage, or a fresh one for a file this process has
-   not written. A file that does not exist yet has no key. *)
+   not written. *)
 let lineage_memo ~canonical_path =
   match summary_key canonical_path with
   | None -> Agent_core.Checkpoint.create_encoding_memo ()
@@ -564,12 +608,14 @@ let keep_lineage ~canonical_path ~identity ~memo ~keeper_name written =
 
 let forget_written_lineages ~session_root ~keeper_name =
   let forgets =
-    match Unix.realpath session_root with
-    | resolved -> same_lineage_owner { owner_session_root = resolved; owner_keeper = keeper_name }
-    | exception Unix.Unix_error (error, _, _) ->
-      (* A root that no longer resolves -- its directory was moved or removed
-         before the unregistration -- cannot name its lineages, so every
-         lineage of this Keeper name goes. A lineage only spares a read: one
+    match resolve_session_root session_root with
+    | Ok resolved -> same_lineage_owner { owner_session_root = resolved; owner_keeper = keeper_name }
+    | Error error ->
+      (* A root this process never resolved and that no longer resolves --
+         its directory was moved or removed before the unregistration --
+         cannot name its lineages, so every lineage of this Keeper name goes.
+         A root a save or a load resolved is named by that resolution, as its
+         lineages' keys are. A lineage only spares a read: one
          dropped here for the same name in another workspace costs that
          workspace one read of its file. *)
       Log.Keeper.warn
@@ -839,12 +885,14 @@ let canonical_session_location session_dir =
       Fs_compat.mkdir_p parent;
       let location =
         Eio_guard.run_in_systhread ~label:"checkpoint-parent-stat" (fun () ->
+          let spelling = parent in
           let parent = Unix.realpath parent in
           if (Unix.stat parent).Unix.st_kind <> Unix.S_DIR
           then
             raise
               (Unix.Unix_error
                  (Unix.ENOTDIR, "checkpoint_session_parent", parent));
+          remember_session_root ~spelling parent;
           let location = Filename.concat parent leaf in
           (match Unix.lstat location with
            | { Unix.st_kind = Unix.S_LNK; _ } ->
@@ -902,11 +950,37 @@ let archive_agent_core_history_best_effort ~session_dir ~retained ckpt =
         ]
       ()
 
+(* The bytes go into one allocation of the size the descriptor reports, and
+   the identity returned is the descriptor's, so it names the file the bytes
+   came from: the lineage reuse in [load_ref_locked] relies on that. The bytes
+   are refused as changed while read when the descriptor is not the regular
+   file [lstat] saw at the path, or when the file ends early, or when its
+   identity moved during the read: the file was replaced or rewritten in
+   place under the read, and the bytes are not one version of it. *)
 let load_canonical_bytes_strict path =
   let unix_error error operation argument =
     Io_error
       (Printf.sprintf "%s(%s): %s"
          operation argument (Unix.error_message error))
+  in
+  let changed_while_read () =
+    Read_failed
+      { cause = Changed_while_read
+      ; detail = "canonical checkpoint changed while it was read: " ^ path
+      }
+  in
+  let read_exact fd size =
+    let bytes = Bytes.create size in
+    let rec fill offset =
+      if offset = size
+      then Some (Bytes.unsafe_to_string bytes)
+      else
+        match Unix.read fd bytes offset (size - offset) with
+        | 0 -> None
+        | count -> fill (offset + count)
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> fill offset
+    in
+    fill 0
   in
   let read () =
     match Unix.lstat path with
@@ -915,24 +989,23 @@ let load_canonical_bytes_strict path =
       Error (unix_error error operation argument)
     | stat when stat.Unix.st_kind <> Unix.S_REG ->
       Error (Io_error ("canonical checkpoint is not a regular file: " ^ path))
-    | stats ->
-      let identity_before = canonical_identity_of_stats stats in
+    | path_stats ->
       (try
          let fd = Unix.openfile path [ Unix.O_CLOEXEC; Unix.O_RDONLY ] 0 in
-         let channel =
-           match Unix.in_channel_of_descr fd with
-           | channel -> channel
-           | exception exn -> Unix.close fd; raise exn
-         in
-         let content =
-           (* For a stable-size regular file, input_all allocates from the
-              descriptor's remaining length without a final copy.
-              The standard reader also handles a file growing or shrinking
-              during the read. Identity and source admission stay below. *)
-           Fun.protect ~finally:(fun () -> close_in channel)
-             (fun () -> In_channel.input_all channel)
-         in
-         Ok (Some (identity_before, content))
+         Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+           let opened = Unix.fstat fd in
+           if opened.Unix.st_kind <> Unix.S_REG
+              || opened.Unix.st_dev <> path_stats.Unix.st_dev
+              || opened.Unix.st_ino <> path_stats.Unix.st_ino
+           then Error (changed_while_read ())
+           else (
+             let identity = canonical_identity_of_stats opened in
+             match read_exact fd identity.size with
+             | None -> Error (changed_while_read ())
+             | Some content ->
+               if canonical_identity_equal identity (canonical_identity_of_stats (Unix.fstat fd))
+               then Ok (Some (identity, content))
+               else Error (changed_while_read ())))
        with
        | Unix.Unix_error (error, operation, argument) ->
          Error (unix_error error operation argument))
@@ -1261,9 +1334,29 @@ let load_ref_locked ~session_dir ~expected_session_id =
   | Error error -> Error (Ref_read_failed error)
   | Ok None -> Error Ref_not_found
   | Ok (Some (identity_before, canonical_bytes)) ->
-    (match decode_exact_snapshot_off_scheduler ~expected_session_id canonical_bytes with
+    (* A Keeper's lineage holds what [of_string] gives for the bytes of the
+       file it wrote or read, under that file's identity, so bytes read from a
+       file of that identity are not decoded again. The read stays: the
+       snapshot carries the bytes, and the reference is their digest. A
+       Librarian pass reads the snapshot of its Keeper's current trace when it
+       prepares and again when it commits; this decode allocated 44 GB across
+       the server in 17 minutes on 2026-10-20. *)
+    let decoded =
+      match reusable_written_value ~canonical_path ~identity:identity_before with
+      | Some checkpoint ->
+        Ok
+          ( checkpoint
+          , offload_checkpoint_cpu (fun () ->
+              exact_snapshot_of_checkpoint ~expected_session_id ~canonical_bytes checkpoint) )
+      | None -> decode_exact_snapshot_off_scheduler ~expected_session_id canonical_bytes
+    in
+    (match decoded with
      | Error error -> Error (Ref_read_failed (classify_core_error error))
      | Ok (checkpoint, snapshot) ->
+       (* Published from the lineage's value too. The save or load that kept
+          it published this identity's summary, but an unlocked reader that
+          parsed the file before it can have replaced that summary since, and
+          the next save's watermark reads it. *)
        publish_summary_after_parse
          ~canonical_path
          ~identity_before:(Some identity_before)
@@ -1370,10 +1463,12 @@ let with_agent_core_exact_snapshot ~session_dir ~session_id f =
 let load_agent_core_exact_snapshot ~session_dir ~session_id =
   with_agent_core_exact_snapshot ~session_dir ~session_id Fun.id
 
-(* Only an exact snapshot names its source, so the trace and turn in the
-   reference were read from the same bytes its digest covers: equal digests
-   mean the file still holds those bytes, and decoding them again would give
-   the value the caller already holds. *)
+(* Only an exact snapshot names its source. Its digest covers the bytes it
+   read; its value, trace and turn are the decode of those bytes, or a Keeper
+   lineage's value for them under the identity rule [load_ref_locked] uses.
+   Equal digests mean the file still holds those bytes, so the value the
+   caller already holds is still the one a snapshot of the file would hand
+   out. The comparison is the digest alone. *)
 type exact_source = Keeper_checkpoint_ref.t
 
 let exact_snapshot_source snapshot = snapshot.reference
@@ -1422,8 +1517,21 @@ let read_since_locked ~session_dir ~(known : exact_source) =
            ; changed_sha256 = sha256
            })
 
+(* As in [load_ref_locked]: bytes read from a file whose identity a Keeper's
+   lineage holds are not decoded again, and the lineage's value is handed out.
+   The identity is the one the bytes were read under, so the answer does not
+   depend on what the file holds when this runs, after the lock was released. *)
 let decode_changed_bytes changed =
-  match decode_checkpoint_off_scheduler changed.changed_canonical_bytes with
+  let decoded =
+    match
+      reusable_written_value
+        ~canonical_path:changed.changed_path
+        ~identity:changed.changed_identity_before
+    with
+    | Some checkpoint -> Ok checkpoint
+    | None -> decode_checkpoint_off_scheduler changed.changed_canonical_bytes
+  in
+  match decoded with
   | Error error -> Error (Ref_read_failed (classify_core_error error))
   | Ok (checkpoint : Agent_core.Checkpoint.t) ->
     publish_summary_after_parse

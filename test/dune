@@ -6325,3 +6325,4 @@
 (include stanzas/test_tui_task_cancel_result.inc)
 
 (include stanzas/test_tui_ask_followup_result.inc)
+(include stanzas/test_browser_addon_worker.inc)

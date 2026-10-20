@@ -110,6 +110,15 @@ result receipt, not browser action completion. Identical duplicate deliveries
 are acknowledged and conflicting results are refused. The worker has no model
 credentials or provider route resolution.
 
+A package can explicitly grant `request_schema = true` for a selected model
+output. The model requirement then uses the original canonical request schema;
+the package baseline remains mandatory. The shared broker and worker receipt
+check required object keys, visited primitive types and `anyOf` before accepting
+the result. The consuming SDK owns complete validation of its schema dialect;
+this partial guard is not a full JSON Schema validator. Baseline and grant are
+both pinned to the worker incarnation. The bundled fixed `locate` output does
+not grant request schemas. Stagehand/Chrome integration remains follow-up work.
+
 The bundled package declares the fixed `locate` output and connects it to owned
 Gecko `page.locate`. Configure an existing model slot for the installation's
 `runtime.addon_exact_lanes.<installation-id>.locate` route using the

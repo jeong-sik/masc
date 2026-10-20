@@ -26,7 +26,7 @@ let package : Types.package =
   ; directory = "/nonexistent"; skills_directory = None; action_tool = None
   ; state_storage = Types.Ephemeral; tool_invocation = Types.Direct; tool_hooks = []; worker_service = Types.Mcp_tools; exported_tools = []; outputs = []
   ; refresh_policy = Types.Every_hint; model_access = Types.Model_disabled
-  ; exact_outputs = [ { Types.name = "author"; schema } ]; operator_asks = false
+  ; exact_outputs = [ { Types.name = "author"; schema; request_schema=Types.Package_schema_only } ]; operator_asks = false
   ; binding_schema = None; presentation = Lane_addon_presentation.empty
   ; execution = Types.Container { runtime = Types.Docker; image = "unused"
       ; resources = { cpus = 0.5; memory_bytes = 134217728L; pids = Some 16; max_reply_bytes = 65536 } } }
@@ -34,13 +34,13 @@ let package : Types.package =
 let user text = `Assoc [ "role", `String "user"; "text", `String text ]
 let assistant text = `Assoc [ "role", `String "assistant"; "text", `String text ]
 
-let request ?(messages = [user "Write one question about the ledger."]) id =
+let request ?schema ?(messages = [user "Write one question about the ledger."]) id =
   match
     Exact.request_of_json
       (`Assoc
-         [ "kind", `String "exact_output"; "request_id", `String id; "output", `String "author"
+         ([ "kind", `String "exact_output"; "request_id", `String id; "output", `String "author"
          ; "system", `String "You write quiz questions."
-         ; "messages", `List messages ])
+         ; "messages", `List messages ] @ (match schema with None -> [] | Some schema -> ["schema",schema])))
   with
   | Ok request -> request
   | Error detail -> fail detail
@@ -78,9 +78,9 @@ let publish ?(cli_slots = []) ~base_path targets =
        (F.resolver_snapshot ~source:base_path targets)
      : Runtime_exact_output_registry.t)
 
-let run_request ?runner ?messages ~base_path ~store id =
+let run_request ?(package=package) ?runner ?schema ?messages ~base_path ~store id =
   let runner = Option.value runner ~default:(Server_lane_addon_exact.runner ~base_path) in
-  match Exact.run ~store ~declaration_id ~package ~runner (request ?messages id) with
+  match Exact.run ~store ~declaration_id ~package ~runner (request ?schema ?messages id) with
   | Ok attempt -> attempt
   | Error detail -> fail detail
 
@@ -266,6 +266,24 @@ let test_cli_refuses_assistant_without_dispatch () =
       (answered_by (run_request ~runner ~messages:conversation ~base_path ~store "cli-history") <> None);
     check int "one capable call" 1 (F.post_count capable))
 
+let test_requested_shape_advances_http_without_replacing_baseline () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let wrong = F.start_server ~sw ~net ~clock (F.Reply (F.openai_response (`Assoc []))) in
+    let right = F.start_server ~sw ~net ~clock (F.Reply (F.openai_response question)) in
+    publish ~base_path [{F.id="wrong";base_url=wrong.base_url};{F.id="right";base_url=right.base_url}];
+    let baseline=`Assoc ["type",`String "object";"properties",`Assoc ["question",`Assoc ["type",`String "string"]];
+      "additionalProperties",`Bool false] in
+    let package={package with exact_outputs=[{Types.name="author";schema=baseline;request_schema=Types.Consumer_request_schema}]} in
+    let requested=`Assoc ["$schema",`String "https://json-schema.org/draft/2020-12/schema";
+      "type",`String "object";"required",`List [`String "question"];
+      "properties",`Assoc ["question",`Assoc ["anyOf",`List [
+        `Assoc ["type",`String "string"];`Assoc ["type",`String "null"]]]]] in
+    (match answered_by (run_request ~package ~schema:requested ~base_path ~store "dynamic-shape") with
+     | Some (_,slot,_) -> check string "partial request-shape rejection advances the HTTP walk" "right" slot
+     | None -> fail "the valid second response must answer");
+    check int "first candidate dispatched once" 1 (F.post_count wrong);
+    check int "second candidate dispatched once" 1 (F.post_count right))
+
 let () =
   run "lane add-on exact runner"
     [ ( "runner"
@@ -281,4 +299,5 @@ let () =
         ; test_case "an off lane sends nothing" `Quick test_an_off_lane_sends_nothing
         ; test_case "the cli tail answers after the http slots" `Quick test_the_cli_tail_answers_after_the_http_slots
         ; test_case "HTTP preserves conversation roles" `Quick test_http_preserves_conversation_roles
-        ; test_case "CLI refuses assistant history before dispatch" `Quick test_cli_refuses_assistant_without_dispatch ] ) ]
+        ; test_case "CLI refuses assistant history before dispatch" `Quick test_cli_refuses_assistant_without_dispatch
+        ; test_case "request shape advances HTTP without replacing baseline" `Quick test_requested_shape_advances_http_without_replacing_baseline ] ) ]

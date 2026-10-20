@@ -33,19 +33,20 @@ let package : Types.package =
   ; directory = "/nonexistent"; skills_directory = None; action_tool = None
   ; state_storage = Types.Ephemeral; tool_invocation = Types.Direct; tool_hooks = []; worker_service = Types.Mcp_tools; exported_tools = []; outputs = []
   ; refresh_policy = Types.Every_hint; model_access = Types.Model_disabled
-  ; exact_outputs = [ { Types.name = "author"; schema } ]; operator_asks = false
+  ; exact_outputs = [ { Types.name = "author"; schema; request_schema=Types.Package_schema_only } ]; operator_asks = false
   ; binding_schema = None; presentation = Masc.Lane_addon_presentation.empty
   ; execution = Types.Container { runtime = Types.Docker; image = "unused"
       ; resources = { cpus = 0.5; memory_bytes = 134217728L; pids = Some 16; max_reply_bytes = 65536 } } }
 
 let declaration_id = "quiz"
 
-let request ?(output = "author") ?(message = "Write one question.") id =
+let request ?schema ?(output = "author") ?(message = "Write one question.") id =
   require
     (Exact.request_of_json
        (`Assoc
-          [ "kind", `String "exact_output"; "request_id", `String id; "output", `String output
-          ; "messages", `List [ `Assoc [ "role", `String "user"; "text", `String message ] ] ]))
+          ([ "kind", `String "exact_output"; "request_id", `String id; "output", `String output
+          ; "messages", `List [ `Assoc [ "role", `String "user"; "text", `String message ] ] ]
+          @ (match schema with None -> [] | Some schema -> ["schema",schema]))))
 
 let question = `Assoc [ "question", `String "Q?" ]
 
@@ -190,7 +191,7 @@ let test_an_undeclared_output_is_not_allowed () =
     let restarted = Store.create ~root in
     check bool "a denied id cannot be reused for a permitted output" true
       (run_request restarted runner (request "r6") = Exact.Final Exact.Request_id_reused);
-    let allowed = {package with exact_outputs = [{Types.name="grade";schema}]} in
+    let allowed = {package with exact_outputs = [{Types.name="grade";schema;request_schema=Types.Package_schema_only}]} in
     check bool "the same denied request retains its final after permission changes" true
       (match require (Exact.run ~store:restarted ~declaration_id ~package:allowed ~runner (request ~output:"grade" "r6")) with
        | Exact.Final (Exact.Not_allowed _) -> true | _ -> false);
@@ -270,6 +271,7 @@ let test_a_retained_answer_is_checked_against_the_schema_declared_now () =
       { package with
         exact_outputs =
           [ { Types.name = "author"
+            ; request_schema=Types.Package_schema_only
             ; schema =
                 `Assoc
                   [ "type", `String "object"
@@ -346,6 +348,81 @@ let test_conversation_rejects_ambiguous_or_unsupported_wire () =
     (Result.is_error (Exact.request_of_json (`Assoc
       (fields @ ["output",`String "another";"messages",`List [message]]))))
 
+let consumer_schema = `Assoc ["$schema",`String "https://json-schema.org/draft/2020-12/schema";
+  "type",`String "object";"required",`List [`String "question"];
+  "properties",`Assoc ["question",`Assoc ["anyOf",`List [
+    `Assoc ["type",`String "string"];`Assoc ["type",`String "null"]]]]]
+let consumer_package = {package with exact_outputs=[{
+  Types.name="author";schema;request_schema=Types.Consumer_request_schema}]}
+let consumer_run store runner request = require (Exact.run ~store ~declaration_id
+  ~package:consumer_package ~runner request)
+
+let test_request_schema_authority_and_retention () =
+  with_root (fun root ->
+    let store = Store.create ~root in
+    let runner,sends,_=counting_runner store (ref [Answer question]) in
+    let original=request ~schema:consumer_schema "dynamic" in
+    check bool "permitted request answers" true (answered_with question (consumer_run store runner original));
+    (match run_request store runner original with
+     | Exact.Final (Not_allowed _) -> ()
+     | _ -> fail "revoking the grant must refuse retained delivery");
+    check bool "restoring the grant restores the original answer" true
+      (answered_with question (consumer_run store runner original));
+    let different=request ~schema:(`Assoc ["type",`String "object"]) "dynamic" in
+    check bool "schema participates in request identity" true
+      (consumer_run store runner different=Exact.Final Exact.Request_id_reused);
+    check int "no extra provider dispatch" 1 !sends;
+    let forbidden=request ~schema:consumer_schema "new-denied" in
+    (match run_request store runner forbidden with
+     | Exact.Final (Not_allowed _) -> () | _ -> fail "a new request needs a package grant");
+    (match consumer_run store runner forbidden with
+     | Exact.Final (Not_allowed _) -> () | _ -> fail "a new refusal remains a retained terminal"))
+
+let test_request_schema_is_provider_requirement_not_baseline_replacement () =
+  with_root (fun root ->
+    let store=Store.create ~root in
+    let sent_schema=ref None in
+    let runner ~lane_key:_ ~schema _request =
+      sent_schema:=Some schema;
+      Ok (fun ~validate -> match validate (`Assoc ["question",`Null]) with
+        | Ok output -> Exact.Call_ended (Answered {output;slot="fixture";usage=None})
+        | Error detail -> Exact.Call_ended (Invalid_output {detail})) in
+    (match consumer_run store runner (request ~schema:consumer_schema "baseline") with
+     | Exact.Final (Call_final (Invalid_output _)) -> ()
+     | _ -> fail "the baseline string must hold even when the request allows null");
+    check bool "the requested dialect goes to the provider" true
+      (!sent_schema=Some (require (Masc.Lane_addon_action.canonical consumer_schema)));
+    let runner,sends,_=counting_runner store (ref [Answer (`Assoc [])]) in
+    (match consumer_run store runner (request ~schema:consumer_schema "required") with
+     | Exact.Final (Call_final (Invalid_output _)) -> ()
+     | _ -> fail "required request shape applies even when the baseline permits a missing field");
+    check int "one call" 1 !sends)
+
+let test_request_schema_canonical_wire () =
+  let make schema = `Assoc ["kind",`String "exact_output";"request_id",`String "canonical";
+    "output",`String "author";"messages",`List [`Assoc ["role",`String "user";"text",`String "question"]];
+    "schema",schema] in
+  let ordered=make (`Assoc ["type",`String "object";"required",`List [`String "question"]]) |> Exact.request_of_json |> require in
+  let reversed=make (`Assoc ["required",`List [`String "question"];"type",`String "object"]) |> Exact.request_of_json |> require in
+  check string "schema object order does not change retained identity" (Exact.digest ordered) (Exact.digest reversed);
+  List.iter (fun schema -> check bool "schema must be an unambiguous JSON object" true
+    (Result.is_error (Exact.request_of_json (make schema))))
+    [`Null;`Bool true;`String "{}";`Assoc ["type",`String "object";"type",`String "string"]]
+
+let test_unknown_is_preserved_before_schema_grant_refusal () =
+  with_root (fun root ->
+    let store=Store.create ~root in
+    let pending=request ~schema:consumer_schema "unknown-schema" in
+    require (Store.save_exact_request store ~declaration_id ~request_id:pending.request_id
+      (`Assoc ["declaration_id",`String declaration_id;"request_id",`String pending.request_id;
+        "digest",`String (Exact.digest pending);"request",Exact.request_to_json pending;
+        "attempts",`List [`Null];"final",`Null]));
+    let runner,sends,_=counting_runner store (ref []) in
+    ignore (run_request store runner pending);
+    check bool "grant restoration cannot replay an uncertain call" true
+      (consumer_run store runner pending=Exact.Final Exact.Outcome_unknown);
+    check int "provider never re-entered" 0 !sends)
+
 let () =
   run "lane add-on exact requests"
     [ ( "retention"
@@ -369,4 +446,8 @@ let () =
             test_an_outcome_that_cannot_be_written_stays_unknown
         ; test_case "request decoding is strict" `Quick test_request_decoding_is_strict
         ; test_case "conversation retention binds speaker roles" `Quick test_conversation_is_retained_with_role_identity
-        ; test_case "conversation wire refuses ambiguous roles" `Quick test_conversation_rejects_ambiguous_or_unsupported_wire ] ) ]
+        ; test_case "conversation wire refuses ambiguous roles" `Quick test_conversation_rejects_ambiguous_or_unsupported_wire
+        ; test_case "request schema authority preserves retained identity" `Quick test_request_schema_authority_and_retention
+        ; test_case "provider schema cannot weaken the package baseline" `Quick test_request_schema_is_provider_requirement_not_baseline_replacement
+        ; test_case "request schema wire is canonical" `Quick test_request_schema_canonical_wire
+        ; test_case "unknown outcome survives schema grant changes" `Quick test_unknown_is_preserved_before_schema_grant_refusal ] ) ]

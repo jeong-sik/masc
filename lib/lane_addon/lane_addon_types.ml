@@ -48,7 +48,8 @@ type state_storage = Ephemeral | Persistent
 type tool_invocation = Direct | Host_context
 type tool_hook = Validate_input | Validate_output
 type worker_service = Mcp_tools | Browser_service
-type exact_output = { name : string; schema : Yojson.Safe.t }
+type request_schema_policy = Package_schema_only | Consumer_request_schema
+type exact_output = { name : string; schema : Yojson.Safe.t; request_schema : request_schema_policy }
 type package = {
   id : string; revision : string; title : string; contributions : contribution list;
   execution : execution;
@@ -234,7 +235,9 @@ let package_to_json (p : package) =
       ["tool_hooks", strings (List.map (function
         | Validate_input -> "validate_input" | Validate_output -> "validate_output") hooks)])
     @ (match p.exact_outputs with [] -> []
-      | outputs -> ["exact_outputs", `Assoc (List.map (fun output -> output.name, output.schema) outputs)])
+      | outputs -> ["exact_outputs", `Assoc (List.map (fun output -> output.name,
+          `Assoc ["schema",output.schema;"request_schema",`Bool (match output.request_schema with
+            | Package_schema_only -> false | Consumer_request_schema -> true)]) outputs)])
     @ (if p.operator_asks then ["operator_asks", `Bool true] else [])
     @ ["id", string p.id; "revision", string p.revision; "title", string p.title;
     "contributions", strings (List.map (function Observe -> "observe" | Derive -> "derive" | Act -> "act") p.contributions);

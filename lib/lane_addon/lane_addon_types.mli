@@ -59,10 +59,14 @@ type tool_invocation = Direct | Host_context
 type tool_hook = Validate_input | Validate_output
 type worker_service = Mcp_tools | Browser_service
 
-type exact_output = { name : string; schema : Yojson.Safe.t }
+type request_schema_policy = Package_schema_only | Consumer_request_schema
+type exact_output = { name : string; schema : Yojson.Safe.t; request_schema : request_schema_policy }
 (** A named exact output the package asks the host to run: [[world.exact_outputs.<name>]]
     in the manifest, with the JSON Schema read from the package file it names. The
-    operator binds its slots per installation in [runtime.toml]. *)
+    operator binds its slots per installation in [runtime.toml]. The package
+    schema is always enforced. [Consumer_request_schema] additionally permits a
+    request schema as the model requirement, with a partial required-shape check;
+    the consumer owns complete validation of that schema before acting. *)
 
 type package = {
   id : string;

@@ -196,8 +196,10 @@ status: reference
   - 이름 경계: 표제어는 코드 주석과 도구 문서가 함께 쓰는 "terminal music library"에서 왔고
     (`Masc_tui_command`: "`/music` opens the terminal music library"), 사용자가 실제로 누르는
     이름은 `/music`·**s**다. 이 표면 아래 낱말은 `Phrase`·`Arrangement`·`Take` 셋이고, 셋은
-    서로 다른 편집기를 가지며 하나의 재생 transport를 공유하지 않는다. Board·chat 본문의
-    악보인 **alphaTex 펜스**는 그리기 표시일 뿐 이 편집기가 아니다.
+    서로 다른 편집기를 가진다. 편집기가 나뉜다고 재생도 모두 갈리는 것은 아니다 — 낱편집
+    재생은 편집기별 transport로 돌지만, backing 재생은 `Arrangement` transport가 맡는다
+    (README: "Captured regions also use the ordinary arrangement transport"). Board·chat
+    본문의 악보인 **alphaTex 펜스**는 그리기 표시일 뿐 이 편집기가 아니다.
   - 같은 낱말의 두 층: 어레인지먼트 편집기 안에서도 "library"가 나오지만 그것은 `:import-wave`로
     들여온 **자산 목록**을 가리킨다. 이 표제어가 가리키는 진입 화면과 다르다.
   - 사용 가이드 없음(2026-10-20 확인): `docs/guides`에 이 표면의 안내가 없고, 문서는
@@ -209,7 +211,9 @@ status: reference
   기본 저장 위치는 `./music-projects`(`--project-root`로 바꾼다). alphaTex 악보에서 **p**로
   넘어온 편집본은 별도 MIDI 실험이고, 고쳐도 원본 기보는 바뀌지 않는다.
   - 이름 경계: Phrase는 보관된 소리 파일을 시간축에 놓는 `Arrangement`와 다르다. Phrase는
-    음을 쓰는 편집본이고 Arrangement는 소스를 배치하는 편집본이며, 둘의 transport도 따로다.
+    음을 쓰는 편집본이고 Arrangement는 소스를 배치하는 편집본이다. 낱편집 재생은 둘이
+    따로 돌지만, Phrase를 backing으로 틀면 재생은 `Arrangement` transport가 맡는다
+    (`:arrange`, README "Move phrase experiments into backing").
   → [tools/alphatex/README.md](../../tools/alphatex/README.md) ·
   [alphaTex 악보 안내](../guides/alphatex-tab.md)
 
@@ -232,10 +236,15 @@ status: reference
 : 한 번의 녹음 통과가 남긴 오디오/MIDI 묶음. 라이브러리가 세션 뿌리
   (`<base-path>/.masc/music/sessions`)와 프로젝트 디렉터리의 `recordings/UUID`에서 읽는다.
   반복 녹음은 통과마다 테이크 레인 하나를 만들고 마지막 통과를 고르며, `:takes`로 목록을 열고
-  `:take 2`·`:take next`·`:take previous`로 다른 통과를 고른다. 실패한 녹음도 이유를 남긴 채
-  목록에 남는다.
+  `:take 2`·`:take next`·`:take previous`로 다른 통과를 고른다. 깨진 항목도 목록에서
+  골라지며 그 읽기 실패가 그대로 보인다(README: "A damaged item stays selectable with its
+  read failure visible").
   - 이름 경계: Take는 어레인지먼트의 구간이 아니다. 원본은 테이크로 보존되고, 배치·자르기는
     그 테이크를 가리키는 구간에서 한다. 그래서 어레인지먼트를 고쳐도 녹음 원본은 그대로다.
+    다만 재생은 한 transport를 공유한다 — 테이크를 바꾸면 현재 backing을 멈추고 새 재생
+    계획을 시작하고(ARRANGEMENT-RECORDING: "Changing takes stops the current backing"),
+    녹음된 테이크를 backing epoch을 유지한 채 붙일 수도 있다(README: "recorded takes can
+    be attached while the backing epoch remains continuous").
   → [tools/alphatex/ARRANGEMENT-RECORDING.md](../../tools/alphatex/ARRANGEMENT-RECORDING.md) ·
   [tools/alphatex/README.md](../../tools/alphatex/README.md)
 

@@ -259,12 +259,33 @@ function encodeTrack(events) {
   let previous = 0
   const bytes = []
   for (const event of events) {
-    bytes.push(Buffer.from(vlq(event.tick - previous))); previous = event.tick
+    let delta = integer(event.tick - previous, 'MIDI delta')
+    // SMF deltas are 28-bit VLQs, not absolute tick limits. Empty sequencer
+    // metadata preserves longer gaps without a wire message or tempo change.
+    while (delta > MAX_DELTA) {
+      bytes.push(Buffer.from([...vlq(MAX_DELTA), 0xff, 0x7f, 0])); delta -= MAX_DELTA
+    }
+    bytes.push(Buffer.from(vlq(delta))); previous = event.tick
     if (event.kind === 'channel') bytes.push(Buffer.from(event.bytes))
     else if (event.kind === 'meta') bytes.push(Buffer.from([0xff, event.type, ...vlq(event.data.length)]), Buffer.from(event.data))
     else bytes.push(Buffer.from([event.status, ...vlq(event.data.length)]), Buffer.from(event.data))
   }
   return chunk('MTrk', Buffer.concat(bytes))
+}
+export function midiSourceFromEvents(events, { ppq, ...options } = {}) {
+  integer(ppq, 'MIDI PPQ', 1, 0x7fff)
+  if (!Array.isArray(events)) throw new Error('MIDI source needs ordered events')
+  for (const event of events) {
+    integer(event.tick, 'MIDI absolute tick')
+    if (event.kind === 'channel') channelBytes(event.bytes)
+    else if (event.kind === 'meta') {
+      integer(event.type, 'MIDI meta type', 0, 127)
+      if (!Array.isArray(event.data)) throw new Error('MIDI metadata needs bytes')
+      event.data.forEach(byte => integer(byte, 'MIDI meta byte', 0, 255))
+    } else throw new Error('MIDI source construction needs channel or meta events')
+  }
+  const header = Buffer.alloc(6); header.writeUInt16BE(1, 2); header.writeUInt16BE(ppq, 4)
+  return importMidiSource(Buffer.concat([chunk('MThd', header), encodeTrack(events)]), options)
 }
 export function exportMidiSource(source) {
   const parsed = materialize(source)

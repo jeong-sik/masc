@@ -4,6 +4,7 @@ import { readCaptureFiles, readCapture } from './session-data.mjs'
 import { capturePaths, captureMatches, inspectCaptureAsset } from './captured-source-files.mjs'
 import { practicePartNames } from './practice-source.mjs'
 import { practicePasses } from './practice-passes.mjs'
+import { practiceMidi } from './practice-midi.mjs'
 import { practicePaths, readPracticeFiles, inspectPracticeAsset } from './practice-source-files.mjs'
 import { readFile, open, mkdir, mkdtemp, lstat, link, rm, chmod } from 'node:fs/promises'
 import { createReadStream, createWriteStream } from 'node:fs'
@@ -194,6 +195,20 @@ export async function inspectPracticePasses(project, assetID, pass, { sourceRoot
     const result = practicePasses(asset, context.backing, pass)
     signal?.throwIfAborted()
     return { asset: assetID, ...result }
+  } finally { await rm(snapshot.directory, { recursive: true, force: true }) }
+}
+export async function importPracticeMidi(project, assetID, { sourceRoot, directory = tmpdir(), signal } = {}) {
+  const snapshot = await prepareArrangementPractice(project, assetID, { sourceRoot, directory, signal })
+  try {
+    const asset = project.assets.find(asset => asset.id === assetID), values = {}
+    for (const role of ['context', 'events']) {
+      const bytes = await readFile(join(snapshot.directory, practicePartNames[role]), { signal })
+      if (createHash('sha256').update(bytes).digest('hex') !== asset.parts[role].sha256) throw new Error('Practice content changed during MIDI derivation')
+      values[role] = bytes.toString('utf8')
+    }
+    const packets = values.events.trimEnd().split('\n').map(line => JSON.parse(line).packet)
+    const source = practiceMidi(asset, JSON.parse(values.context), packets, { signal })
+    return importPhraseDocument(project, source)
   } finally { await rm(snapshot.directory, { recursive: true, force: true }) }
 }
 // The viewer owns these snapshots until it drains WAV playback/export and

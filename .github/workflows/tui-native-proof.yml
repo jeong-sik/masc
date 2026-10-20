@@ -67,7 +67,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p proof
-          targets=(bin/masc_tui.exe)
+          targets=(bin/masc_tui.exe bin/masc_tui_keys_doc_cli.exe)
           case "$PROOF_SCENARIO" in
             detail-ownership)
               targets+=(test/test_tui_detail_reading.exe test/test_tui_board_successor.exe test/test_tui_usage_scope.exe)
@@ -110,6 +110,7 @@ jobs:
           done < proof/build-targets.txt
           test "$(_build/default/bin/masc_tui.exe --build-commit)" = "$SOURCE_SHA"
           _build/default/bin/masc_tui.exe --help </dev/null > proof/help.txt
+          _build/default/bin/masc_tui_keys_doc_cli.exe </dev/null > proof/key-reference.md
           cp _build/default/bin/masc_tui.exe proof/masc-tui
           chmod +x proof/masc-tui
           otool -L proof/masc-tui > proof/native-dependencies.txt
@@ -129,6 +130,11 @@ jobs:
               'scenario': os.environ['PROOF_SCENARIO'],
               'platform': 'macos-arm64',
               'sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
+              'key_reference': {
+                  'path': 'key-reference.md',
+                  'sha256': hashlib.sha256(Path('proof/key-reference.md').read_bytes()).hexdigest(),
+                  'producer': 'bin/masc_tui_keys_doc_cli.exe',
+              },
               'server_sha256': hashlib.sha256(Path('proof/masc').read_bytes()).hexdigest() if os.environ['PROOF_SCENARIO'] in ('workspace-files', 'rich-workspace', 'rich-chat-workspace', 'original-tool-result', 'code-references') else None,
               'build_targets': Path('proof/build-targets.txt').read_text().splitlines(),
               'executed_tests': Path('proof/executed-tests.txt').read_text().splitlines(),

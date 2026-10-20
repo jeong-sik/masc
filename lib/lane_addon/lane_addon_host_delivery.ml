@@ -61,7 +61,8 @@ let load ~store ~(owner : owner) ~original_request_id =
             (match listing with
              | [((Lane_addon_host_request.Exact_output _ | Read_records _ | Read_file _ | Ask _ | Withdraw_ask _) as request)]
                  when Lane_addon_host_request.request_id request = original_request_id -> Ok request
-             | [(Lane_addon_host_request.Exact_output _ | Read_records _ | Read_file _ | Read_result _)]
+             | [(Lane_addon_host_request.Exact_output _ | Read_records _ | Read_file _ | Ask _ | Withdraw_ask _
+                | Read_result _)]
              | [] | _ :: _ :: _ -> Error (Storage_failed "retained result original request mismatch")) in
       let* reference = match get "reference" with
         | Some value -> Lane_addon_types.evidence_of_json value |> storage

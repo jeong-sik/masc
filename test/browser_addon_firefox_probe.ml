@@ -150,7 +150,7 @@ let () =
         ~tool ~tool_name:(tool_name tool)
         ~start_time:(Tool_timing.start ()) (`Assoc fields) in
       receipts:=Tool_result.to_json result::!receipts;flush ();result in
-    let data_result = function
+    let data_result (result:Tool_result.result) = match result with
       | Tool_result.Completed output -> Ok output.data
       | Deferred _ -> Error "browser call was deferred instead of completed"
       | Failed failure -> Error failure.message in

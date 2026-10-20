@@ -2,7 +2,7 @@
 
 ## Observation
 
-Observed on 2026-10-20, 10:26:00–10:30:15 UTC (19:26–19:30 KST).
+Log observations cover 2026-10-20, 10:26:00–10:30:15 UTC (19:26–19:30 KST).
 The running server identified its embedded commit as
 `73bcae67d657a9ae73b8bb7b90ef77c787a24901`. These observations precede
 the change and do not describe the PR candidate running in production.
@@ -12,7 +12,7 @@ the change and do not describe the PR candidate running in production.
 - Server logs recorded 25–30-second compute timeouts across mission,
   briefing, goals, chat history and tools. Shell refreshes took 65.986 and
   65.596 seconds. Readiness still answered HTTP 200 with `ready:true`.
-- A three-second macOS `sample` at 19:30:22 KST observed a 34.1 GiB physical
+- A three-second macOS `sample` at 19:30:22 KST observed a 34.1G physical
   footprint. The main thread spent 1,137 of 1,553 samples in `poll`.
   Several workers visited `Librarian_continuity_snapshot.feed` (JSON encoding
   and prefix hashing); another spent 1,552 samples in memory-search SQLite

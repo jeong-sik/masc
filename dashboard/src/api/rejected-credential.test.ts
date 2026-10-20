@@ -32,6 +32,15 @@ async function settle(): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, 10))
 }
 
+/* A "keeps the token" case alone would also pass if recovery never ran. Each
+   one ends by showing recovery is live: a later expired refusal of the same
+   stored token drops it. */
+async function expectRecoveryStillDropsExpired(): Promise<void> {
+  vi.stubGlobal('fetch', vi.fn(async () => refusal('token_expired')))
+  await expect(get('/api/v1/board/reactions')).rejects.toBeInstanceOf(ApiRequestError)
+  await vi.waitFor(() => expect(getStoredToken()).toBeNull())
+}
+
 let uninstall: () => void = () => undefined
 
 beforeEach(() => {
@@ -86,6 +95,7 @@ describe('a credential the server refused', () => {
     await settle()
 
     expect(getStoredToken()).toBe('fresh-token')
+    await expectRecoveryStillDropsExpired()
   })
 
   it('keeps the token when the refusal is about the actor', async () => {
@@ -96,21 +106,24 @@ describe('a credential the server refused', () => {
     await settle()
 
     expect(getStoredToken()).toBe('pasted-token')
+    await expectRecoveryStillDropsExpired()
   })
 
   it('keeps a loopback dev token whose re-mint returns the same value', async () => {
     setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
-    vi.stubGlobal('fetch', vi.fn(async (path: string) =>
+    const fetchMock = vi.fn(async (path: string) =>
       path === DEV_TOKEN_PATH
         ? new Response(JSON.stringify({ token: 'dev-token', actor: 'dashboard', role: 'admin' }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         })
-        : refusal('invalid_token')))
+        : refusal('invalid_token'))
+    vi.stubGlobal('fetch', fetchMock)
 
     await expect(get('/api/v1/board/reactions')).rejects.toBeInstanceOf(ApiRequestError)
-    await settle()
 
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([path]) => path === DEV_TOKEN_PATH)).toBe(true))
+    await settle()
     expect(getStoredToken()).toBe('dev-token')
     expect(getStoredTokenMeta()?.source).toBe('dev')
   })

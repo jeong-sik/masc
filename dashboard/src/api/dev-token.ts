@@ -236,7 +236,9 @@ export async function recoverFromRejectedCredential(
 
 export function installRejectedCredentialRecovery(): () => void {
   setRejectedCredentialListener(rejection => {
-    void recoverFromRejectedCredential(rejection)
+    void recoverFromRejectedCredential(rejection).catch(err => {
+      console.warn('[dashboard-auth] rejected credential recovery failed', err)
+    })
   })
   return () => setRejectedCredentialListener(null)
 }

@@ -960,6 +960,9 @@ function recoverFromRejectedShellAuth(
 ): void {
   if (auth === null || auth.token_valid || !auth.token_present || sentToken === null) return
   void recoverFromRejectedCredential({ token: sentToken, authErrorCode: auth.auth_error_code ?? undefined })
+    .catch(err => {
+      console.warn('[dashboard-auth] rejected shell credential recovery failed', err)
+    })
 }
 
 export function hydrateShellSnapshot(

@@ -3,7 +3,8 @@ module Lease = B.Upload_lease
 let ( let* ) = Result.bind
 type grant = {actor:string;route:B.route;verb:B.verb;snapshot:Lease.snapshot}
 type preparation = Staging | Withdrawn
-type state = Preparing of preparation | Pending of grant | Claimed | Releasing | Consumed
+type state = Preparing of preparation | Pending of grant | Claimed | Releasing
+  | Release_failed of string | Consumed
 type t = {directory:string;device:int;inode:int;mutex:Mutex.t;changed:Condition.t;
   cleanup_mutex:Mutex.t;mutable settled:bool;
   mutable serving:bool;grants:(string,state) Hashtbl.t}
@@ -57,6 +58,16 @@ let upload_paths = function
   | Session_open _|Session_close|Session_status|Page_goto _|Page_elements _
   | Page_act (Open_tab _|On_tab {interaction=Click _|Fill _|Press _|Scroll _|Select _|Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog;_})
   | Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> Error "grant requires one upload command"
+let release t ~id snapshot =
+  let finish state=locked t (fun () ->
+    Hashtbl.replace t.grants id state;Condition.broadcast t.changed) in
+  match Lease.release snapshot with
+  | () -> finish Consumed
+  | exception exn ->
+      let backtrace=Printexc.get_raw_backtrace () in
+      finish (Release_failed (Printexc.to_string exn));
+      Printexc.raise_with_backtrace exn backtrace
+
 let stage t ~id ~actor ~route ~verb = protect (fun () ->
   let* _=B.client_id_of_string id in
   let* ()=match route with B.Automation_route -> Ok ()
@@ -69,14 +80,14 @@ let stage t ~id ~actor ~route ~verb = protect (fun () ->
   Fun.protect ~finally:(fun () -> locked t (fun () ->
     (match Hashtbl.find_opt t.grants id with
      | Some (Preparing _) -> Hashtbl.replace t.grants id Consumed
-     | None|Some (Pending _|Claimed|Releasing|Consumed) -> ());
+     | None|Some (Pending _|Claimed|Releasing|Release_failed _|Consumed) -> ());
     Condition.broadcast t.changed)) (fun () ->
     let* ()=check t in
     let files=List.map (fun path -> Filename.basename path,(fun () -> source path)) paths in
     let* snapshot=Lease.prepare_files ~temp_dir:t.directory ~files () |> Result.map_error (function
       | Lease.Read_failed detail|Snapshot_failed detail -> detail) in
     let published=ref false in
-    Fun.protect ~finally:(fun () -> if not !published then Lease.release snapshot) (fun () ->
+    Fun.protect ~finally:(fun () -> if not !published then release t ~id snapshot) (fun () ->
       let* ()=check t in
       locked t (fun () ->
         if not t.serving || Hashtbl.find_opt t.grants id<>Some (Preparing Staging)
@@ -84,18 +95,17 @@ let stage t ~id ~actor ~route ~verb = protect (fun () ->
         else (Hashtbl.replace t.grants id (Pending {actor;route;verb;snapshot});
           published:=true;Ok ())))))
 
+
 let with_claim t ~id ~actor ~route ~verb f =
   let grant=locked t (fun () ->
     if not t.serving then Error "upload broker is retired" else
     match Hashtbl.find_opt t.grants id with
     | Some (Pending grant) when grant.actor=actor && grant.route=route && grant.verb=verb ->
         Hashtbl.replace t.grants id Claimed;Ok grant
-    | None|Some (Preparing _|Pending _|Claimed|Releasing|Consumed) -> Error "upload grant is absent, consumed or belongs to another command") in
+    | None|Some (Preparing _|Pending _|Claimed|Releasing|Release_failed _|Consumed) -> Error "upload grant is absent, consumed or belongs to another command") in
   let* grant=grant in
   let finish () = Eio.Cancel.protect (fun () ->
-    Fun.protect ~finally:(fun () -> locked t (fun () ->
-      Hashtbl.replace t.grants id Consumed;Condition.broadcast t.changed))
-      (fun () -> Eio_unix.run_in_systhread (fun () -> Lease.release grant.snapshot))) in
+    Eio_unix.run_in_systhread (fun () -> release t ~id grant.snapshot)) in
   Fun.protect ~finally:finish (fun () ->
     let* ()=protect (fun () -> check t) in
     match verb with
@@ -110,12 +120,14 @@ let discard t ~id =
     | Some (Pending grant) -> Hashtbl.replace t.grants id Releasing;Some grant.snapshot
     | Some (Preparing _) -> Hashtbl.replace t.grants id (Preparing Withdrawn);None
     | None -> Hashtbl.add t.grants id Consumed;None
-    | Some (Claimed|Releasing|Consumed) -> None) in
-  Option.iter (fun snapshot ->
-    Fun.protect ~finally:(fun () -> locked t (fun () ->
-      Hashtbl.replace t.grants id Consumed;Condition.broadcast t.changed))
-      (fun () -> Lease.release snapshot)) snapshot
+    | Some (Claimed|Releasing|Release_failed _|Consumed) -> None) in
+  Option.iter (release t ~id) snapshot
 let revoke t = locked t (fun () -> t.serving<-false)
+let await_releases t =
+  let active ()=Hashtbl.fold (fun _ state waiting -> match state with
+    | Preparing _|Claimed|Releasing -> true
+    | Pending _|Release_failed _|Consumed -> waiting) t.grants false in
+  while active () do Condition.wait t.changed t.mutex done
 let cleanup t = protect (fun () ->
   Mutex.lock t.cleanup_mutex;
   Fun.protect ~finally:(fun () -> Mutex.unlock t.cleanup_mutex) (fun () ->
@@ -126,15 +138,21 @@ let cleanup t = protect (fun () ->
     else (
       revoke t;
       let snapshots=locked t (fun () ->
-        let preparing ()=Hashtbl.fold (fun _ state waiting -> match state with
-          | Preparing _|Claimed|Releasing -> true | Pending _|Consumed -> waiting) t.grants false in
-        while preparing () do Condition.wait t.changed t.mutex done;
-        let snapshots=Hashtbl.fold (fun id state acc -> match state with
+        await_releases t;
+        Hashtbl.fold (fun id state acc -> match state with
           | Pending grant -> (id,grant.snapshot)::acc
-          | Preparing _|Claimed|Releasing|Consumed -> acc) t.grants [] in
-        List.iter (fun (id,_) -> Hashtbl.replace t.grants id Consumed) snapshots;
-        List.map snd snapshots) in
-      List.iter Lease.release snapshots;
+          | Preparing _|Claimed|Releasing|Release_failed _|Consumed -> acc) t.grants []) in
+      List.iter (fun (id,snapshot) ->
+        let pending=locked t (fun () -> match Hashtbl.find_opt t.grants id with
+          | Some (Pending _) -> Hashtbl.replace t.grants id Releasing;true
+          | None|Some (Preparing _|Claimed|Releasing|Release_failed _|Consumed) -> false) in
+        if pending then release t ~id snapshot) snapshots;
+      let failures=locked t (fun () ->
+        await_releases t;
+        Hashtbl.fold (fun _ state errors -> match state with
+        | Release_failed detail -> detail::errors
+        | Preparing _|Pending _|Claimed|Releasing|Consumed -> errors) t.grants []) in
+      let* ()=match failures with [] -> Ok () | _::_ -> Error (String.concat "; " failures) in
       let* ()=check t in
       if Sys.readdir t.directory=[||] then (Unix.rmdir t.directory;t.settled<-true;Ok ())
       else Error "upload allocation still contains owned or unconfirmed files")))

@@ -98,16 +98,10 @@ let board_actor_entity raw =
   | Some (keeper_name, _) -> Activity_graph.entity ~kind:"keeper" keeper_name
   | None -> Activity_graph.entity ~kind:"agent" (String.trim raw)
 
-let board_actor_author_for_write raw =
-  match board_actor_keeper_identity raw with
-  | Some (keeper_name, _) -> keeper_name
-  | None -> String.trim raw
-
 let board_voter_query request =
   query_param request "voter"
   |> Option.map String.trim
-  |> Fun.flip Option.bind (fun raw ->
-       if raw = "" then None else Some (board_actor_author_for_write raw))
+  |> Option.filter (fun raw -> raw <> "")
 
 let board_current_vote_for_post ~voter ~post_id =
   match voter with

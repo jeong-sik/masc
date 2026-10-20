@@ -7,9 +7,6 @@ open Masc_board_handlers
 
 (** {1 Helpers} *)
 
-let raw_agent_name_meta_key ~field = field ^ "_raw_agent_name"
-let author_raw_agent_name_meta_key = raw_agent_name_meta_key ~field:"author"
-
 (* Board tool payloads are read by an LLM turn, not by a human watching a
    dashboard, so the same post must render to the same bytes on every call.
 

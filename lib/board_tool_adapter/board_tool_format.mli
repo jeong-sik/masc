@@ -9,8 +9,6 @@ type sort_order = Board_dispatch.sort_order =
   | Updated
   | Discussed
 
-val raw_agent_name_meta_key : field:string -> string
-val author_raw_agent_name_meta_key : string
 val format_timestamp_absolute : float -> string
 (** ISO8601 UTC rendering of the given instant. A function of its argument
     alone, so an unchanged board renders to unchanged bytes and a keeper does

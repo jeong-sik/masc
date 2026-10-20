@@ -16,10 +16,7 @@
     feedback memory [mcp-dispatcher-ctx-agent-name-ssot]:
 
     1. Empty / "anonymous" caller field → fill from ctx canonical.
-    2. Caller's field equals ctx → keep it as it stands.  RFC-0393
-       retired the decorated [keeper-<name>-agent] spelling, so a
-       keeper has one name and there is no second surface form to
-       fold into it.
+    2. Caller's field equals ctx → keep it as it stands.
     3. Caller's canonical disagrees with ctx canonical → REWRITE to
        ctx canonical, preserve the caller's claim under
        [meta.<field>_caller_claim] for forensics, and increment
@@ -107,24 +104,6 @@ let test_caller_short_name_matches_ctx () =
     "no caller_claim because no spoof"
     None
     (meta_string_field "author_caller_claim" result)
-
-let test_matching_caller_gets_no_second_spelling () =
-  (* RFC-0393 removed the decorated [keeper-<name>-agent] form, so a
-     matching caller has nothing to fold: the field keeps the name it
-     came with and no raw-surface note is attached beside it. *)
-  let result =
-    D.enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
-      ~agent_name:"xi-hammer"
-      (assoc [ ("author", `String "xi-hammer") ])
-  in
-  check (option string)
-    "author is the name the keeper has"
-    (Some "xi-hammer")
-    (json_string_field "author" result);
-  check (option string)
-    "no second surface recorded beside it"
-    None
-    (meta_string_field "author_raw_agent_name" result)
 
 (* --- 3. caller canonical disagrees with ctx canonical ----------- *)
 
@@ -276,8 +255,6 @@ let () =
         [
           test_case "short-name matches ctx" `Quick
             test_caller_short_name_matches_ctx;
-          test_case "a matching caller gets no second spelling" `Quick
-            test_matching_caller_gets_no_second_spelling;
         ] );
       ( "spoof-rewrite",
         [

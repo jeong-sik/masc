@@ -210,6 +210,33 @@ let first_answer_wins_when_two_surfaces_race () =
       Alcotest.(check (float 0.001)) "first timestamp kept" 1100.0 answered_at
   | rows -> Alcotest.failf "expected one answered row, got %d" (List.length rows)
 
+(* Another asker reuses the questions, the answer check and the fold with a
+   record of its own; only the asked record's type differs. *)
+type installation_ask = { id : string; title : string; questions : question list }
+
+let another_askers_log_folds_the_same_way () =
+  let questions = [ two_choice_question ~mode:Single ~free_text:Choices_only ] in
+  let asked = { id = "quiz-1"; title = "Operator quiz"; questions } in
+  let answers_for choice_id =
+    match parse_question_answers ~questions ~submissions:[ ("q1", Chose { choice_ids = [ choice_id ] }) ] with
+    | Ok answers -> answers
+    | Error errors -> fail_with "setup answer rejected" (String.concat "; " (error_names errors))
+  in
+  let events : installation_ask lifecycle_event list =
+    [ Asked asked
+    ; Answered { ask_id = "quiz-1"; answers = answers_for "b"; responder = dashboard_responder; answered_at = 2.0 }
+    ; Withdrawn { ask_id = "quiz-1"; reason = "too late"; withdrawn_at = 3.0 }
+    ; Answered { ask_id = "unknown"; answers = answers_for "a"; responder = agent_responder; answered_at = 4.0 } ]
+  in
+  (match fold_lifecycle ~ask_id:(fun asked -> asked.id) events with
+   | [ ("quiz-1", (row, Answered_by { answers = [ { response = Chose { choice_ids = [ id ] }; _ } ]; _ })) ] ->
+     Alcotest.(check string) "the installation's record" "Operator quiz" row.title;
+     Alcotest.(check string) "the first terminal event wins" "b" id
+   | rows -> Alcotest.failf "expected one answered row, got %d" (List.length rows));
+  match parse_question_answers ~questions ~submissions:[] with
+  | Error [ Unanswered { question_id = "q1" } ] -> ()
+  | Ok _ | Error _ -> Alcotest.fail "a question left out is reported for any asker"
+
 let a_withdrawn_question_is_no_longer_open () =
   let a = ok_ask ~questions:[ two_choice_question ~mode:Single ~free_text:Choices_only ] in
   let events =
@@ -342,6 +369,8 @@ let () =
         ] );
       ( "folding the log",
         [
+          Alcotest.test_case "another asker's log folds the same way" `Quick
+            another_askers_log_folds_the_same_way;
           Alcotest.test_case "first answer wins a race" `Quick
             first_answer_wins_when_two_surfaces_race;
           Alcotest.test_case "withdrawn is no longer open" `Quick

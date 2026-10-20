@@ -26,6 +26,11 @@ type target_info = { target_id : string; kind : target_kind; url : string }
     [Target.targetCreated] carries it. *)
 val target_info_of_json : Yojson.Safe.t -> (target_info, string) result
 
+val browser_process_id_of_json : Yojson.Safe.t -> (int, string) result
+(** The single browser PID in SystemInfo.getProcessInfo's result. Missing or
+    ambiguous browser rows and duplicate identity fields are refused; other
+    process kinds and unrelated metadata are not execution authority. *)
+
 type event =
   | Binding_called of { session : session_id option; name : string; payload : string }
   | Target_created of target_info

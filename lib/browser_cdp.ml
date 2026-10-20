@@ -66,6 +66,33 @@ let target_info_of_json info =
   Ok { target_id; kind = target_kind_of kind; url }
 ;;
 
+let browser_process_id_of_json json =
+  let unique key = function
+    | `Assoc fields ->
+      (match List.filter_map (fun (name,value) -> if name=key then Some value else None) fields with
+       | [value] -> Ok value
+       | [] | _::_::_ -> Error ("CDP process identity needs exactly one " ^ key))
+    | _ -> Error "CDP process identity must be an object" in
+  let* rows=unique "processInfo" json in
+  let* rows=match rows with
+    | `List rows -> Ok rows
+    | _ -> Error "CDP processInfo must be an array" in
+  let* browsers=List.fold_left (fun result row ->
+    let* browsers=result in
+    let* kind=unique "type" row in
+    match kind with
+    | `String "browser" ->
+      let* pid=unique "id" row in
+      (match pid with
+       | `Int pid when pid>1 -> Ok (pid::browsers)
+       | _ -> Error "CDP browser process needs a positive PID")
+    | `String _ -> Ok browsers
+    | _ -> Error "CDP process type must be a string") (Ok []) rows in
+  match browsers with
+  | [pid] -> Ok pid
+  | [] | _::_::_ -> Error "CDP must identify exactly one browser process"
+;;
+
 let event_of ~method_ ~session params =
   let with_params read =
     match params with

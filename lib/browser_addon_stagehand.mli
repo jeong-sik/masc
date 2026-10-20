@@ -8,6 +8,14 @@ val configuration : browser:Browser_configuration.stagehand -> launcher:string -
     an operator profile is refused rather than reset or silently substituted. *)
 val configuration_to_json : configuration -> Yojson.Safe.t
 val configuration_of_json : Yojson.Safe.t -> (configuration, string) result
+val verify_browser : admission:Native_addon_lease.t ->
+  receipt:Browser_process_owner.ready -> Browser_cdp.t -> (unit, string) result
+(** Before loading the extension or admitting page/model work, require the
+    original kernel owner lease and child incarnation, query the connection's
+    browser PID through SystemInfo.getProcessInfo, then recheck the owner and
+    child. On refusal close only this CDP connection. Never signals a PID from
+    a CDP reply or uses a matching command line as ownership. The caller still
+    owns its original process manager and resource cleanup. *)
 val settle : configuration -> incarnation:string -> directory:string -> (unit, string) result
 (** Blocking recovery of this allocation's original child claim. Retire first,
     request termination by its kernel lease, and require Settled. A successful

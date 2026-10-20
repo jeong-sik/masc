@@ -269,7 +269,23 @@ receipts remain distinct from successful contract validation.
    Each open reserves a fresh child instance before allocating its fresh private
    profile, runs the native launcher and guardian, and checks the bootstrap
    receipt against the original kernel lease before connecting CDP and loading
-   Stagehand. Startup and model work retain their original owner rather than
+   Stagehand. The guardian's strict bootstrap also records its child's kernel
+   start token. The worker checks that incarnation and its original foreground
+   group, then sends only `SystemInfo.getProcessInfo` on the new CDP connection.
+   Exactly one browser row must name that original child. It checks the kernel
+   owner and child again after the reply, before creating the Stagehand session
+   or loading its extension. Missing, duplicate or foreign browser identity
+   closes the connection and leaves cleanup with the original process manager;
+   a PID from CDP never authorizes signalling. Extension/model event handling
+   begins only after this identity admission. The CDP PID and browser process
+   row come from the [protocol definition](https://github.com/ChromeDevTools/devtools-protocol/blob/master/json/browser_protocol.json)
+   and [Chromium implementation](https://github.com/chromium/chromium/blob/main/content/browser/devtools/protocol/system_info_handler.cc).
+
+   The identity scenario uses an actual launcher/guardian/child and kernel lease
+   with scripted CDP replies. It covers changed child incarnation before any
+   command, a foreign PID, a valid original child and owner loss before a matching
+   reply. This defines behavior to execute; it is not real Chrome evidence or
+   persistent-profile support. Startup and model work retain their original owner rather than
    the quick browser response clock. Startup failure stops and joins the original process group before
    returning. Close and detach fence late launchers, close the keepalive and join
    the session switch; retirement additionally requires child-claim settlement.

@@ -396,7 +396,8 @@ val run_named :
     The runtime loop runs inside a capacity-managed queue permit.
 
     [on_runtime_attempt_error] observes every typed candidate failure after
-    its runtime manifest row is emitted, with [dispatch] saying whether the
+    its runtime manifest row and provider-rest evidence are recorded, before
+    the next candidate runs, with [dispatch] saying whether the
     candidate's provider or client was invoked or the walk refused the
     candidate first. It does not change candidate selection or the final
     error; verifier callers use it to learn whether an attempt on the one

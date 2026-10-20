@@ -835,11 +835,6 @@ let attempt_runtime_candidates
          ~status:"failed"
          ~decision:(runtime_failed_decision ~idx ~runtime_id:attempt_runtime_id error)
          Keeper_runtime_manifest.Runtime_failed;
-       on_attempt_error
-         ~runtime_id:attempt_runtime_id
-         ~attempt:idx
-         ~dispatch
-         error;
        (* HTTP 429 and coarse Provider.RateLimit do not identify the
           exhausted resource. Keep that unknown scope and the optional
           provider hint as candidate-only ordering evidence. A shared
@@ -1003,6 +998,14 @@ let attempt_runtime_candidates
         (* The turn's input or MASC itself failed; another candidate would not
            do better, so this is no evidence about this one. *)
         | Keeper_runtime_failure_route.Exhausted_visible_alive _ -> ());
+       (* Let observers retain this failure's stated rest before a later
+          candidate outlives it. The quota/usage read above owns that evidence;
+          a callback before it cannot observe the refusal's newly stated end. *)
+       on_attempt_error
+         ~runtime_id:attempt_runtime_id
+         ~attempt:idx
+         ~dispatch
+         error;
        (* Stable demotion retains every declared candidate, including when
           all are observed unavailable. Neither hint causes a wait or gate. *)
        let rest = demote_rest rest in

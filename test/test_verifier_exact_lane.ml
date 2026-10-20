@@ -377,6 +377,62 @@ let test_a_provider_rest_retries_the_review_when_the_rest_ends () =
       ])
 ;;
 
+let test_a_rest_expiring_inside_one_slot_still_retries () =
+  let module Driver = Masc.Keeper_turn_driver in
+  let module CA = Masc.Completion_authority_agent.For_testing in
+  with_rest_runtimes (fun () ->
+    List.iter
+      (fun (label, first_error) ->
+         let reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_
+             ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+             ~on_runtime_attempt_error () =
+           Driver.For_testing.attempt_runtime_candidates
+             ~walk_owner:Driver.One_shot_walk
+             ~runtime_id:evaluator_runtime ~runtime_id_of:Fun.id
+             ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+             ~on_attempt_error:on_runtime_attempt_error
+             ~read_usage_after_account_refusal:(fun candidate ->
+               if candidate = resting_slot then
+                 Runtime_quota_window.note_exhausted ~scope:(resting_scope ())
+                   ~resets_at:(Unix.gettimeofday () +. rest_sec))
+             ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+               let error =
+                 if candidate = resting_slot then first_error
+                 else (
+                   (* Advance the real quota store's expiry boundary while
+                      the second candidate owns the slot; no sleep or wall
+                      clock race is needed to prune the first candidate's
+                      previously stated rest. *)
+                   let release_at =
+                     match Runtime_quota_window.active_until ~scope:(resting_scope ())
+                         ~now:(Unix.gettimeofday ()) with
+                     | Some release_at -> release_at
+                     | None -> Alcotest.fail "the first refusal must record its rest"
+                   in
+                   Alcotest.(check (option (float 0.))) "the later candidate outlives reset"
+                     None (Runtime_quota_window.active_until ~scope:(resting_scope ()) ~now:release_at);
+                   Agent_core.Error.Config
+                     (Agent_core.Error.InvalidConfig { field = runtime_id; detail = "unusable fallback" }))
+               in
+               Error error, None, Masc.Keeper_provider_attempt_effect.No_effect_observed,
+               Masc.Keeper_attempt_dispatch.Dispatched)
+             [ resting_slot; serving_slot ]
+         in
+         let cause = with_lane_and_reviewer
+             ~slots:(fun () -> Ok [ resting_slot ]) ~reviewer
+             (fun () -> CA.not_reviewed_of_result (review ())) in
+         (match cause with
+          | CA.Not_reviewed { retryable_runtimes; _ } ->
+            Alcotest.(check (list string)) label [ resting_slot ] retryable_runtimes
+          | CA.Infrastructure_unavailable _ | CA.Commit_failed _ | CA.Raised _ ->
+            Alcotest.fail "the exhausted slot is Not_reviewed");
+         Alcotest.(check (float 0.)) "an expired rest retries on the normal pulse"
+           60. (CA.retry_delay_sec ~retry_interval_sec:60. ~now:(Unix.gettimeofday ()) cause);
+         Runtime_quota_window.reset_for_testing ())
+      [ "hard quota reset expires inside the slot", claude_code_hard_quota ~retry_after:(Some rest_sec)
+      ; "403 usage reset expires inside the slot", account_refused ])
+;;
+
 (* Failures that time alone does not change still stop and leave the move to
    the producer or the operator: a refused credential, a configuration error,
    a quota whose end the provider never stated (the walk records it as an
@@ -1163,6 +1219,10 @@ let () =
             "a provider rest retries the review when the rest ends"
             `Quick
             test_a_provider_rest_retries_the_review_when_the_rest_ends
+        ; Alcotest.test_case
+            "a rest expiring inside one slot still retries"
+            `Quick
+            test_a_rest_expiring_inside_one_slot_still_retries
         ; Alcotest.test_case
             "failures time does not change still stop the review"
             `Quick

@@ -550,9 +550,10 @@ type provider_rest =
 
    Reading the recorded rest is not a gate on past evidence. The window is
    the provider's own current statement about when this path serves again,
-   read when the review ends; it ends by itself at the provider's time, and
-   it only decides whether the review is asked again, never whether one may
-   run.
+   read when the failure is reported after the walk records it. The failure's
+   eligibility to be reviewed again survives a later candidate outliving that
+   window; the current rest still dates the next dispatch. This classification
+   only requests another review, never gates whether one may run.
 
    [Model_absent]: a retired or unknown model, permanent for the unchanged
    request.
@@ -707,7 +708,8 @@ let run
                ~on_tool_result
                ~on_runtime_attempt_error:
                  (fun ~runtime_id ~attempt:_ ~dispatch:_ error ->
-                    attempt_failures := !attempt_failures @ [ runtime_id, error ])
+                    let failure = candidate_failure ~provider_rest ~runtime_id error in
+                    attempt_failures := !attempt_failures @ [ runtime_id, failure ])
                ()
            with
            | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -718,13 +720,13 @@ let run
                      "review evaluator raised unexpectedly: %s"
                      (Printexc.to_string exn)))
          in
-         (* Classified once the slot has answered, not as each attempt is
-            reported: the walk reports a failed attempt before it records the
-            rest that attempt's refusal stated. *)
+         (* The walk reports after recording the refusal's rest. Retain that
+            classification here: another candidate in this slot can outlive
+            the stated reset and prune it before the slot answers. *)
          let retryable_runtimes, model_absent_runtimes =
            List.fold_left
-             (fun (retryable, model_absent) (runtime_id, error) ->
-                match candidate_failure ~provider_rest ~runtime_id error with
+             (fun (retryable, model_absent) (runtime_id, failure) ->
+                match failure with
                 | Reviews_again -> append_unique retryable [ runtime_id ], model_absent
                 | Model_absent -> retryable, append_unique model_absent [ runtime_id ]
                 | Producer_must_act -> retryable, model_absent)

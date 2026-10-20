@@ -1307,6 +1307,44 @@ let test_model_rejects_unknown_key () =
          errors)
   | Ok _ -> fail "unknown model key must fail config parsing"
 
+(* The provider and the model-capabilities tables reject a key they do not
+   read, as the model table does: a misspelt key would otherwise load as the
+   default and the operator's declaration would reach nothing (#33166). The
+   test names the offending path, so a regression to silently skipping unread
+   keys fails by name. *)
+let test_provider_rejects_unknown_key () =
+  let config =
+    "[providers.sample]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     max_context = 8192\n"
+  in
+  match Runtime_toml.parse_string config with
+  | Error errors ->
+    check bool "unknown provider key is named" true
+      (List.exists
+         (fun (error : Runtime_toml.parse_error) ->
+            String.equal error.path "providers.sample.max_context")
+         errors)
+  | Ok _ -> fail "unknown provider key must fail config parsing"
+
+let test_model_capabilities_rejects_unknown_key () =
+  let config =
+    "[models.sample]\n\
+     api-name = \"sample-model\"\n\
+     \n\
+     [models.sample.capabilities]\n\
+     supports_image_input = true\n"
+  in
+  match Runtime_toml.parse_string config with
+  | Error errors ->
+    check bool "unknown model capabilities key is named" true
+      (List.exists
+         (fun (error : Runtime_toml.parse_error) ->
+            String.equal error.path "models.sample.capabilities.supports_image_input")
+         errors)
+  | Ok _ -> fail "unknown model capabilities key must fail config parsing"
+
 (* A [models.X].max-context above the model's catalog window resolves to the
    catalog number with source Override_clamped_by_capability: the declaration
    is clamped away and reaches nothing. Two shipped runtimes carried one, and
@@ -7167,6 +7205,10 @@ let () =
             test_lane_rejects_unknown_key;
           test_case "model rejects unknown keys" `Quick
             test_model_rejects_unknown_key;
+          test_case "provider rejects unknown keys" `Quick
+            test_provider_rejects_unknown_key;
+          test_case "model capabilities reject unknown keys" `Quick
+            test_model_capabilities_rejects_unknown_key;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
           test_case "seed Codex profiles preserve advertised efforts" `Quick

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { TelemetryEntry } from '../../api/dashboard'
-import { bucketTelemetryEntries, hourToMs, isToolCall } from './observatory-utils'
+import { bucketTelemetryEntries, hourToMs, isToolCall, isToolCallFailure } from './observatory-utils'
 
 describe('hourToMs', () => {
   it('parses the hour-precision bucket the tool-quality API sends', () => {
@@ -50,5 +50,29 @@ describe('bucketTelemetryEntries', () => {
     expect(buckets).toHaveLength(1)
     expect(buckets[0]).toMatchObject({ count: 2, ts: 110 })
     expect(buckets[0]?.entry.tool_name).toBe('fail')
+  })
+})
+
+describe('isToolCallFailure', () => {
+  const row = (fields: Record<string, unknown>) => ({ ts: 1, ...fields }) as TelemetryEntry
+
+  it('marks a tool-call log row failed only by its recorded outcome', () => {
+    expect(isToolCallFailure(row({ source: 'tool_call_io', disposition: 'failed' }))).toBe(true)
+    expect(isToolCallFailure(row({ source: 'tool_call_io', wire_outcome: 'error' }))).toBe(true)
+    expect(isToolCallFailure(row({ source: 'tool_call_io', disposition: 'completed', wire_outcome: 'error' }))).toBe(false)
+  })
+
+  it('does not guess a failure for a deferred, unsettled or malformed log row', () => {
+    for (const fields of [{ disposition: 'deferred' }, { wire_outcome: 'unknown' }, { disposition: 'invented' }, {}]) {
+      // Even an error string beside the outcome does not turn it into a failure.
+      expect(isToolCallFailure(row({ source: 'tool_call_io', error: 'something', ...fields }))).toBe(false)
+    }
+  })
+
+  it('keeps the boolean and error contract of the tool_usage source', () => {
+    expect(isToolCallFailure(row({ source: 'tool_usage', success: false }))).toBe(true)
+    expect(isToolCallFailure(row({ source: 'tool_usage', success: true, error: 'x' }))).toBe(false)
+    expect(isToolCallFailure(row({ source: 'tool_usage', error: 'x' }))).toBe(true)
+    expect(isToolCallFailure(row({ source: 'tool_usage' }))).toBe(false)
   })
 })

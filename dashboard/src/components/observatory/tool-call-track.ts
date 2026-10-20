@@ -10,14 +10,7 @@ import { html } from 'htm/preact'
 import { useRef } from 'preact/hooks'
 import type { TelemetryEntry } from '../../api/dashboard'
 import { selectEntity, detailSelection } from './detail-selection-store'
-import { entryTimestampMs, isToolCall, useTrackBucketCount } from './observatory-utils'
-
-function isFailure(entry: TelemetryEntry): boolean {
-  if (entry.success === false) return true
-  if (entry.success === true) return false
-  const errorField = entry.error
-  return errorField != null && errorField !== ''
-}
+import { entryTimestampMs, isToolCall, isToolCallFailure, useTrackBucketCount } from './observatory-utils'
 
 function toolName(entry: TelemetryEntry): string {
   if (typeof entry.tool_name === 'string') return entry.tool_name
@@ -67,7 +60,7 @@ export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
     for (const { entry, ts } of toolEvents) {
       const pct = (ts - windowStart) / span
       const index = Math.min(bucketCount - 1, Math.max(0, Math.floor(pct * bucketCount)))
-      const failure = isFailure(entry)
+      const failure = isToolCallFailure(entry)
       const ms = durationMs(entry)
       const existing = buckets.get(index)
       if (existing) {
@@ -107,7 +100,7 @@ export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
           ? html`<div class="absolute inset-0 flex items-center justify-center text-3xs text-text-dim">이 시간 범위에 도구 호출 없음</div>`
           : markers.map(({ entry, ts, count, failureCount: bucketFailures, maxMs }) => {
               const pct = ((ts - windowStart) / span) * 100
-              const failed = bucketFailures > 0 || isFailure(entry)
+              const failed = bucketFailures > 0 || isToolCallFailure(entry)
               const name = toolName(entry)
               const selected = detailSelection.value
               const isSelected = selected !== null

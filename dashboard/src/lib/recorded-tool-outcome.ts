@@ -20,3 +20,13 @@ export function recordedToolOutcome(row: Record<string, unknown>): RecordedToolO
   }
   return 'unsettled'
 }
+
+/** The outcome of a telemetry row that stands for one tool call, or null when
+ *  its source reports none. A `tool_call_io` row is a tool-call log row, which
+ *  carries no top-level `success`, so the recorded rule decides. Other
+ *  producers keep their own boolean `success` contract. */
+export function telemetryToolOutcome(row: Record<string, unknown>): RecordedToolOutcome | null {
+  if (row.source === 'tool_call_io') return recordedToolOutcome(row)
+  if (typeof row.success === 'boolean') return row.success ? 'succeeded' : 'failed'
+  return null
+}

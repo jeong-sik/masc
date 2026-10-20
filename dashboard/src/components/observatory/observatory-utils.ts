@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from 'preact/hooks'
 import type { TelemetryEntry } from '../../api/dashboard'
+import { telemetryToolOutcome, type RecordedToolOutcome } from '../../lib/recorded-tool-outcome'
 
 export function entryTimestampMs(entry: TelemetryEntry): number | null {
   if (typeof entry.ts === 'number') return entry.ts * 1000
@@ -27,6 +28,23 @@ export function hourToMs(hour: string): number | null {
 export function isToolCall(entry: TelemetryEntry): boolean {
   const src = typeof entry.source === 'string' ? entry.source : ''
   return src === 'tool_call_io' || src === 'tool_usage'
+}
+
+/** The recorded outcome of a tool-call telemetry row, or null when its source
+ *  reports none. */
+export function toolCallOutcome(entry: TelemetryEntry): RecordedToolOutcome | null {
+  return telemetryToolOutcome(entry)
+}
+
+/** Whether a tool-call row failed. Only a recorded failure counts: a row whose
+ *  source reports no outcome falls back to its `error` field, and a deferred,
+ *  unsettled or malformed log row is not guessed to be a failure. One rule for
+ *  the call bars and the cursor readout, so the two cannot disagree. */
+export function isToolCallFailure(entry: TelemetryEntry): boolean {
+  const outcome = toolCallOutcome(entry)
+  if (outcome !== null) return outcome === 'failed'
+  const errorField = entry.error
+  return errorField != null && errorField !== ''
 }
 
 interface TelemetryMarkerBucket {

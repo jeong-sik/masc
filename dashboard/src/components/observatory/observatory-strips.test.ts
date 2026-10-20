@@ -56,7 +56,7 @@ describe('CrossSignalReadout (design vocabulary)', () => {
       <${CrossSignalReadout}
         events=${[
           entry({ event_type: 'wake' }),
-          entry({ source: 'tool_call_io', tool_name: 'tool_read_file', success: false }),
+          entry({ source: 'tool_call_io', tool_name: 'tool_read_file', disposition: 'failed' }),
         ]}
         hourlyTrend=${[{ hour: '2026-08-23T10', calls: 10, success: 9, success_rate: 90 }]}
         eventWindowMs=${120_000}
@@ -85,7 +85,7 @@ describe('DetailPane (design vocabulary)', () => {
   it('renders .ob-detail-body with a toned ai-b badge for a selection', () => {
     selectEntity({
       kind: 'tool_call',
-      entry: entry({ source: 'tool_call_io', tool_name: 'tool_execute', success: false, keeper: 'sangsu' }),
+      entry: entry({ source: 'tool_call_io', tool_name: 'tool_execute', disposition: 'failed', keeper: 'sangsu' }),
       ts: START + 60_000,
       bucketCount: 1,
     })
@@ -94,6 +94,27 @@ describe('DetailPane (design vocabulary)', () => {
     expect(container.querySelector('.ob-detail-body .ai-b.bad')?.textContent).toBe('failure')
     expect(container.textContent).toContain('tool_execute')
     expect(container.textContent).toContain('sangsu')
+  })
+
+  it('gives a deferred, unsettled and malformed log row each its own badge, none of them a success or failure', () => {
+    for (const [fields, label, tone] of [
+      [{ disposition: 'deferred' }, 'deferred', 'warn'],
+      [{ wire_outcome: 'unknown' }, 'unsettled', 'warn'],
+      [{ disposition: 'invented' }, 'malformed', 'bad'],
+      [{ disposition: 'completed' }, 'success', 'ok'],
+    ] as const) {
+      selectEntity({
+        kind: 'tool_call',
+        entry: entry({ source: 'tool_call_io', tool_name: 'tool_execute', ...fields }),
+        ts: START + 60_000,
+        bucketCount: 1,
+      })
+      const { container } = render(html`<${DetailPane} />`)
+      const badge = container.querySelector('.ob-detail-body .ai-b')
+      expect(badge?.textContent).toBe(label)
+      expect(badge?.classList.contains(tone)).toBe(true)
+      cleanup()
+    }
   })
 })
 

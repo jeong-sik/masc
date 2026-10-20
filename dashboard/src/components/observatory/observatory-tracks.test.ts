@@ -56,8 +56,8 @@ describe('ToolCallTrack (design vocabulary)', () => {
     const { container } = render(html`
       <${ToolCallTrack}
         events=${[
-          entry({ source: 'tool_call_io', tool_name: 'tool_read_file', success: true, duration_ms: 4200, ts: (START + 10 * 60_000) / 1000 }),
-          entry({ source: 'tool_call_io', tool_name: 'tool_execute', success: false, duration_ms: 100, ts: (START + 50 * 60_000) / 1000 }),
+          entry({ source: 'tool_call_io', tool_name: 'tool_read_file', disposition: 'completed', duration_ms: 4200, ts: (START + 10 * 60_000) / 1000 }),
+          entry({ source: 'tool_call_io', tool_name: 'tool_execute', disposition: 'failed', duration_ms: 100, ts: (START + 50 * 60_000) / 1000 }),
         ]}
         windowStart=${START}
         windowEnd=${END}

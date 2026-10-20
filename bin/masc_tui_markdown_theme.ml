@@ -88,5 +88,3 @@ let fenced ~language text =
   with
   | Some marker -> String.concat "\n" [ marker ^ language; text; marker ]
   | None -> text
-
-

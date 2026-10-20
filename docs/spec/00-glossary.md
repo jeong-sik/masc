@@ -601,6 +601,25 @@ status: reference
   [Masc_tui_chat_portrait](../../bin/masc_tui_chat_portrait.mli) ·
   [TUI candle styles](../TUI-GUIDE.md)
 
+**Agent Input Wait (에이전트 입력 대기)**
+: `Agent_core.Agent`가 실행 도중 사용자 입력을 기다리며 세워 둔 대기 하나
+  (`Agent_input_request.pending` = `{ run_id; request }`). `run_id`는 그 대기를 세운
+  시작 호출의 id이고, `request`는 `request_id`·`question`·선택적 `participant_name`·
+  `schema`·`timeout_s`·`created_at`을 담은 정본 요청이다. `Agent.pending_input`이
+  이 소유 값을 돌려주고, `Agent.provide_input`은 두 id를 Agent 상태 잠금 아래 대조해
+  응답을 Answer로 확정하거나 Declined·Timeout으로 닫는다. 대기가 없으면 `None`이고,
+  답이 정본 요청이 아니면 `No_pending_request`·`Request_not_current`로 거절하며 현재
+  대기와 메시지를 바꾸지 않는다. `Timeout`은 벽시계 만료가 아니라 명시적 확정이다.
+  대기 소유는 checkpoint에 함께 실려(`Checkpoint_types.checkpoint_version` = 12)
+  복원·복제 뒤에도 유지된다.
+  - 이름 경계: **Ask**는 Keeper가 운영자에게 남기는 durable 질문 묶음(`masc_ask`)이고,
+    이 대기는 한 Agent 실행 안에서 입력을 기다리는 상태다. agent 이름이나 질문 문구는
+    표시 데이터일 뿐 대기를 식별하지 못한다. 이 `run_id`는 `AgentInputRequired.task_id`가
+    싣는 시작 호출의 id이며, outcome envelope의 raw-trace run id와 다른 값이다.
+  → [Agent](../../packages/agent_core/lib/agent/agent.mli) ·
+  [Agent_input_request](../../packages/agent_core/lib/base/agent_input_request.mli) ·
+  [agent-input-wait-ownership 설계](../../docs/design/agent-input-wait-ownership.md)
+
 **Ask (질문)**
 : Keeper가 운영자에게 묻는 durable 질문 묶음. `masc_ask`가 만들고,
   `masc_ask_status`·`masc_ask_withdraw`가 조회·철회하며, 답변은 별도 wake로
@@ -1926,6 +1945,24 @@ status: reference
   [Browser_host](../../lib/browser_host/browser_host.mli) ·
   [browser-bidi-live-host 설계](../../docs/design/browser-bidi-live-host.md)
 
+**Browser Action Catalog (브라우저 동작 카탈로그)**
+: 한 브라우저 어댑터가 공개 도구로 닿을 수 있는 동작의 표(`Browser_capabilities.catalog`).
+  동작(`operation`)은 닫힌 목록이고(`operations`·`operation_of_wire`), 행마다 지원은
+  `Available`(어댑터가 구현함)·`Conditional`(구현했으나 제약 목록이 붙음)·
+  `Unsupported`(사유 문자열) 셋 중 하나다. `BrowserTabs`의 `requiredActions`나
+  `BrowserSession`의 요구 동작은 이 동작 이름 목록을 그대로 받고, 어느 후보도 요구를
+  채우지 못하면 `missingActions`와 함께 `required_browser_actions_unavailable`로
+  거절한다. 이 표는 I/O를 하지 않고, 브라우저를 고르거나 명령 권한을 주거나 브라우저를
+  바꾸지 않는다.
+  - 이름 경계: `Available`은 "어댑터가 구현했다"는 뜻이지 세션이 열려 있다거나 페이지가
+    효과를 받아들였다는 뜻이 아니다. **Live Transport** 항목의
+    `Browser_lane.live_capability`는 연결된 live 브라우저가 무엇을 할 수 있는가이고,
+    이 카탈로그는 공개 도구 동작 이름과 그 지원 정도다 — 두 축을 섞어 한쪽 표로 다른
+    쪽을 판정하지 않는다.
+  → [Browser_capabilities](../../lib/browser_capabilities.mli) ·
+  [Browser_selection](../../lib/browser_selection.mli) ·
+  [browser-action-catalog 설계](../../docs/design/browser-action-catalog.md)
+
 **Keeper Firefox Start Record (Keeper Firefox 시작 기록)**
 : `runtime.toml`의 `[browser.live.bidi]`로 live lane이 켜져 있으면 MASC가 다음 서버 시작 또는 Keeper의 다음 hover·drag 때 Keeper Firefox와 그 BiDi host를 직접 시작한다. 이때 시작이 어떻게 끝났는지를 `<base>/.masc/browser-lane/keeper-firefox-start.json`에 한 entry로 통째로 갈아 쓰는 기록(RFC-browser-keeper-firefox §3.7, #42235·#42250). entry는 끝난 시각·포트·프로필·결과(`Attached`/`Not_attached`)를 담고, `Not_attached`의 사유는 한 줄짜리 인쇄 가능 문자열 최대 1024바이트(`message_limit_bytes`)로 잘린다. 경계가 세 군데 있다. (1) 이 기록은 상태 문장만 읽는다 — 시작을 막는 장치가 아니다. (2) MASC는 자기 기록이 "MASC가 시작했다"고 말하는 Firefox만 재시작을 약속한다. 다른 경로로 띄운 Firefox는 운영자가 먼저 종료한다. (3) 다른 포트의 Firefox는 이 시작을 막지 않는다. 상태 표의 `keeper` 행은 시작 주체를 `kind`로 말하고 `masc_starts`는 설정된 포트·프로필과 `last_start`(`absent`/`recorded`/`unreadable`)를 실는다.
   → [Browser_keeper_firefox_start_record](../../lib/browser_keeper_firefox_start_record.mli) ·
@@ -2255,6 +2292,26 @@ status: reference
   같은 내용으로 다시 저장하면 `content_updated_at`은 유지한다.
   `Board_post_updated`는 실제 편집 저장이 성공한 뒤 발행한다. 게시글 ID와
   `content_updated_at`이 같은 편집은 한 사건이며, 뒤의 편집은 새 사건이다.
+
+**Report Artifact (보고서 아티팩트)**
+: Keeper가 대화와 별개로 다시 열 수 있게 게시한 독립 문서·보고서·자체 완결 HTML
+  결과(`Published_artifact.t`). `keeper_artifact_publish`(같은 입력의
+  `POST /api/v1/published-artifacts`도 같은 저장 연산을 쓴다)가 `title`·`summary`·
+  `format`(`markdown`|`html`)·`content`를 받아 게시하고, 작성자는 실행 중인 Keeper
+  정체다. 게시의 durable 권위는 `Published_artifact_store` 하나이고, 개정은 `id`와
+  `expected_revision`을 함께 넘길 때만 된다 — 낡은 revision은 `Conflict`
+  (`expected`·`actual`)로 거절하며 앞선 개정 바이트는 읽을 수 있게 남는다. id는
+  `artifact-` 접두사와 32자리 16진수(41자)이고, 링크
+  `/dashboard/#/workspace?section=artifacts&artifact=<id>`에 `&revision=<n>`을 덧붙이면
+  그 개정이 고정된다. 게시 도구는 Board·chat 글을 대신 쓰지 않는다.
+  - 이름 경계: **Board Attachment**는 글에 붙는 참조 하나이고, 이 아티팩트는 게시물과
+    무관하게 저장소에 남는 문서다. Wiki 페이지는 저장소 안 문서이고, 대화 속 링크는
+    게시 결과가 아니다. `artifact:` 접두사로 시작하는 **Evidence Reference**는 검증 근거
+    참조 형식이며 이 게시 카탈로그와 다른 층이다.
+  → [Published_artifact](../../lib/published_artifact.mli) ·
+  [Published_artifact_store](../../lib/published_artifact_store.mli) ·
+  [keeper_artifact_publish](../../lib/keeper/keeper_artifact_publish.mli) ·
+  [report-artifacts 설계](../../docs/design/report-artifacts.md)
 
 **Board Attachment (게시판 첨부)**
 : Board 글에 붙는 타입이 정해진 참조 하나(`Board_tool_attachment`). 글쓰기 시점에

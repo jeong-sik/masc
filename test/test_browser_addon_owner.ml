@@ -78,7 +78,7 @@ let scenario () = Eio_main.run (fun env ->
     check bool "unattached Chrome refuses before dispatch" true
       (pre_effect (send (W.Issue {route=B.Stagehand_route;verb=B.Session_status;
         actor=Some "keeper";timeout_sec=2.;only_if_idle=false})));
-    ok (Owner.attach_stagehand owner
+    ok (Owner.attach_stagehand owner ~models:true
       ~execute:(fun ~actor verb ->
         incr chrome_calls;chrome_actors:=actor:: !chrome_actors;
         (match verb with
@@ -89,7 +89,7 @@ let scenario () = Eio_main.run (fun env ->
       ~cleanup:(fun () -> incr chrome_cleanups;Eio.Promise.resolve begin_chrome_close ();
         Eio.Promise.await chrome_settled;Ok ()));
     check bool "a second Chrome backend cannot replace the owner" true
-      (Result.is_error (Owner.attach_stagehand owner
+      (Result.is_error (Owner.attach_stagehand owner ~models:true
         ~execute:(fun ~actor:_ _ -> fail "replacement must not run")
         ~session:(fun () -> B.Browser_open) ~cleanup:(fun () -> fail "replacement must not close")));
     let owned=Owner.snapshot owner |> Yojson.Safe.Util.member "owned_backends" |> Masc.Browser_addon_inventory.owned_of_json |> ok in
@@ -124,7 +124,7 @@ let scenario () = Eio_main.run (fun env ->
         let chrome=B.inventory_observation B.Lane_name.Stagehand in
         automation.backend=B.Executor_registered false && chrome.backend=B.Executor_registered false);
     check bool "retired owner refuses a new Chrome backend" true
-      (Result.is_error (Owner.attach_stagehand owner
+      (Result.is_error (Owner.attach_stagehand owner ~models:true
         ~execute:(fun ~actor:_ _ -> fail "retired owner must not execute")
         ~session:(fun () -> B.Browser_open) ~cleanup:(fun () -> fail "retired owner must not acquire")));
     Eio.Promise.resolve finish_close ();

@@ -32,27 +32,7 @@ type t = { session : Session.t; pid : int }
 let session t = t.session
 let pid t = t.pid
 
-let failure_message = function
-  | Browser_cdp.Command_rejected { code; message } -> Printf.sprintf "rejected (%d): %s" code message
-  | Browser_cdp.Connection_lost reason -> "connection lost: " ^ reason
-;;
-
-let attach_error_message = function
-  | Session.Extension_path detail -> "the extension directory has no real path: " ^ detail
-  | Session.Load_rejected failure -> "Chrome did not load the extension: " ^ failure_message failure
-  | Session.Extension_id_mismatch { expected; loaded } ->
-    Printf.sprintf "Chrome loaded the extension as %s, not %s, so its origin is not the allowed one" loaded expected
-  | Session.Service_worker_absent -> "the extension's service worker never appeared"
-  | Session.Runtime_not_ready -> "the Stagehand runtime was not ready in its service worker"
-  | Session.Malformed_reply { method_; detail } -> Printf.sprintf "%s answered without what attach needs: %s" method_ detail
-  | Session.Runtime_marker detail -> "the Stagehand runtime marker is unreadable: " ^ detail
-  | Session.Runtime_incompatible { found; supported } ->
-    Printf.sprintf "the Stagehand runtime speaks protocol %s; masc speaks major %d" found supported
-  | Session.Init_unanswered seconds -> Printf.sprintf "stagehand.init did not answer within %.0f s" seconds
-  | Session.Init_failed failure -> "stagehand.init failed: " ^ Browser_stagehand_executor.failure_message failure
-  | Session.Cdp failure -> "a CDP command failed: " ^ failure_message failure
-  | Session.Already_attached -> "the session was already attached"
-;;
+let attach_error_message = Browser_stagehand_executor.attach_error_message
 
 let ( let* ) = Result.bind
 
@@ -156,12 +136,6 @@ let stop_left_behind_checked ~clock ~masc_root =
      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
      | exception exn ->
        Error ("cannot remove stagehand owner record " ^ record_path ^ ": " ^ Printexc.to_string exn))
-;;
-
-let stop_left_behind ~clock ~masc_root =
-  match stop_left_behind_checked ~clock ~masc_root with
-  | Ok () -> ()
-  | Error detail -> Log.Server.warn "browser-lane: %s" detail
 ;;
 
 (* For the three exceptions a file or process step raises: [Eio.Io],
@@ -323,50 +297,3 @@ let log_event = function
   | Session.Worker_detached -> Log.Server.warn "browser-lane stagehand: the service worker went away"
   | Session.Connection_ended reason -> Log.Server.info "browser-lane stagehand: connection ended: %s" reason
 ;;
-
-let prepare_start ~cleanup ~sw ~env ~base_path ~configuration =
-  let masc_root = Config_dir_resolver.masc_root ~base_path in
-  (fun () ->
-    cleanup ~clock:(Eio.Stdenv.clock env) ~masc_root;
-    match configuration with
-    | None -> Log.Server.error "browser-lane: Runtime configuration is unavailable"
-    | Some { Browser_configuration.stagehand = None; _ } ->
-      Log.Server.info "browser-lane: stagehand has no [browser.stagehand]"
-    | Some { Browser_configuration.stagehand = Some config; _ } ->
-      let clock = Eio.Stdenv.clock env in
-      (* [base_path] is where the lane's official-client CLI slots run. *)
-      let model params =
-        Browser_stagehand_model.create ~net:(Eio.Stdenv.net env) ~clock ~base_path
-          ~resolve_lane:Browser_stagehand_model.published_lane params
-      in
-      let backend =
-        Browser_stagehand_backend.create ~sw ~clock
-          ~open_session:(fun ~sw ~headless ~log ->
-            (* The caller may have left before a slow open failed, so the
-               reason is also put where the operator reads. *)
-            match open_ ~sw ~env ~masc_root ~config ~headless ~model ~log with
-            | Ok _ as opened -> opened
-            | Error detail as failed ->
-              Log.Server.warn "browser-lane stagehand: the browser did not open: %s" detail;
-              failed)
-          ~call:(fun t -> Session.call t.session)
-          ~pid ~log:log_event
-      in
-      Browser_lane.install_stagehand_executor (Some (fun ~actor verb -> Browser_stagehand_backend.execute backend ?actor verb));
-      Browser_lane.install_server_session_observer Browser_lane.Server_stagehand
-        (Some (fun () -> Browser_stagehand_backend.session_observation backend));
-      Eio.Switch.on_release sw (fun () ->
-        Browser_lane.install_stagehand_executor None;
-        Browser_lane.install_server_session_observer Browser_lane.Server_stagehand None);
-      Log.Server.info "browser-lane: stagehand serves with %s" config.Browser_configuration.chrome)
-;;
-
-let start ~sw ~env ~base_path ~configuration =
-  let worker = prepare_start ~cleanup:stop_left_behind ~sw ~env ~base_path ~configuration in
-  Eio.Fiber.fork ~sw worker
-module For_testing = struct
-  let start_with_cleanup ~cleanup ~sw ~env ~base_path ~configuration =
-    let worker = prepare_start ~sw ~env ~base_path ~configuration
-        ~cleanup:(fun ~clock:_ ~masc_root:_ -> cleanup ()) in
-    Eio.Fiber.fork_promise ~sw worker
-end

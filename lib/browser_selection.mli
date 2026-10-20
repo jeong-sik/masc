@@ -14,7 +14,9 @@ type work_browser =
   { activity : Browser_lane.activity; registered : bool
   ; session : Browser_lane.session_observation; locate : bool }
 (** [locate] observes the installed model consumer and selected output, not
-    merely the presence of a driver or a configured provider. *)
+    merely the presence of a driver or a configured provider. For Chrome this
+    is the shared Stagehand consumer for observe, act and extract; task-required
+    sentence actions also require it before discovery or session creation. *)
 type snapshot =
   { live_activity : Browser_lane.activity; live_clients : Browser_lane.client_info list
   ; automation : work_browser; stagehand : work_browser }

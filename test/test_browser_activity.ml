@@ -158,6 +158,37 @@ let test_stagehand_actor_route () = with_lane (fun _ _ ->
   check (list (option string)) "attributed and anonymous requests keep their own actor"
     [Some "keeper-owner";None] (List.rev !owners))
 
+let test_stagehand_model_selection_and_wait () = with_lane (fun sw _ ->
+  let calls=ref 0 in
+  Lane.install_stagehand_executor ~models:false (Some (fun ~actor:_ _ -> incr calls;answer));
+  List.iter (fun verb ->
+    match Lane.issue_for_actor ~actor:None ~target:Lane.Stagehand ~verb ~timeout_sec:0.001 with
+    | Ok value -> refused value | Error _ -> fail "model route")
+    [Lane.Page_locate {tab_id=0;instruction=None};Page_instruct {tab_id=0;instruction="submit"};
+      Page_extract {tab_id=0;instruction="read";schema=Some (`Assoc [])}];
+  check int "model selection off dispatches no model verb" 0 !calls;
+  is_answer (Lane.issue_stagehand ~verb:Lane.Tabs_list ~timeout_sec:None);
+  check int "model selection off preserves native commands" 1 !calls;
+  let delayed verb =
+    let entered,enter=Eio.Promise.create () and finished,finish=Eio.Promise.create () in
+    Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve finish ())) (fun () ->
+      Lane.install_stagehand_executor ~models:true (Some (fun ~actor actual ->
+        incr calls;
+        check (option string) "original caller retained" (Some "model-owner") actor;
+        check bool "original work retained" true (actual=verb);
+        Eio.Promise.resolve enter ();Eio.Promise.await finished;answer));
+      let work=Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for_actor ~actor:(Some "model-owner")
+        ~target:Lane.Stagehand ~verb ~timeout_sec:0.001) in
+      Eio.Promise.await entered;
+      (* Deliberately cross the supplied quick response clock. Only this fixture
+         uses a delay; model work/startup retain their original owner. *)
+      Time_compat.sleep 0.01;
+      check bool "original work survives the quick browser clock" true (Eio.Promise.peek work=None);
+      Eio.Promise.resolve finish ();
+      match Eio.Promise.await_exn work with
+      | Ok value -> is_answer value | Error _ -> fail "original route") in
+  List.iter delayed [Lane.Page_locate {tab_id=0;instruction=None};Session_open {headless=Some true}])
+
 let () = run "Browser activity" [
   "configuration", test_case "paths retained and accepting locations" `Quick test_config
     :: List.map (fun (name,text) -> test_case name `Quick (fun () -> rejects text)) invalid;
@@ -166,5 +197,6 @@ let () = run "Browser activity" [
     test_case "off and unavailable keep status/close" `Quick test_off_and_close;
     test_case "accepted automation request finishes" `Quick test_accepted_finishes;
     test_case "accepted live request survives off" `Quick test_live_retains_accepted;
-    test_case "stagehand route retains explicit actor" `Quick test_stagehand_actor_route];
+    test_case "stagehand route retains explicit actor" `Quick test_stagehand_actor_route;
+    test_case "stagehand model selection and original waiting scope" `Quick test_stagehand_model_selection_and_wait];
 ]

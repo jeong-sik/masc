@@ -1302,9 +1302,8 @@ let prepare_native ~store ~installation_id ~instance_id ~cleanup_context ~is_liv
           let* () = offload (fun () -> Native_addon_lease.request_termination claim) |> native_result in
           native_settled claim in
   offload (fun () -> Native_addon_lease.prepare ~directories ~instance_id ~cleanup_context) |> native_result
-let native_launcher () =
+let native_executable name =
   try
-    let name = "masc-native-addon-launcher" in
     let siblings = if Filename.is_relative Sys.executable_name then [] else
       [Filename.concat (Filename.dirname (Unix.realpath Sys.executable_name)) name;
        Filename.concat (Filename.dirname Sys.executable_name) name] in
@@ -1315,7 +1314,7 @@ let native_launcher () =
           |> List.map (fun directory -> Filename.concat directory name) in
     match List.find_opt Executable_path.command_available (siblings @ paths) with
     | Some path -> Ok (Unix.realpath path)
-    | None -> Error "masc-native-addon-launcher is not installed beside MASC or on PATH"
+    | None -> Error (name ^ " is not installed beside MASC or on PATH")
   with (Unix.Unix_error _ | Sys_error _) as exn -> Error (Printexc.to_string exn)
 let native_package_ready (package : package) =
   let* () = match package.state_storage with
@@ -1324,7 +1323,7 @@ let native_package_ready (package : package) =
   let* () = match package.model_access with
     | Model_disabled -> Ok ()
     | Host_sampling -> Error "native observation sampling is not connected to the host broker" in
-  let* _launcher = native_launcher () in
+  let* _launcher = native_executable "masc-native-addon-launcher" in
   let* () = match Eio_context.get_clock_opt (),Fs_compat.get_fs_opt () with
     | Some _,Some _ -> Ok ()
     | None,_ | _,None -> Error "native Add-ons require the server Eio clock and filesystem" in
@@ -1345,7 +1344,7 @@ let backend ~store () = match !override with
         match package.execution with
         | Host_process _ ->
             let* () = native_package_ready package |> Result.map_error (fun detail -> Lifecycle.Worker_failed detail) in
-            let* launcher = native_launcher () |> Result.map_error (fun detail -> Lifecycle.Worker_failed detail) in
+            let* launcher = native_executable "masc-native-addon-launcher" |> Result.map_error (fun detail -> Lifecycle.Worker_failed detail) in
             let* clock = Option.to_result ~none:(Lifecycle.Worker_failed "native clock is unavailable") clock in
             let* fs = Option.to_result ~none:(Lifecycle.Worker_failed "native filesystem is unavailable") (Fs_compat.get_fs_opt ()) in
             let* contract = Lane_addon_worker_protocol.contract_of_package package
@@ -1355,11 +1354,21 @@ let backend ~store () = match !override with
               | executable::arguments -> Ok {Lane_addon_native_worker.executable;arguments} in
             let* cleanup_context=match package.worker_service with
               | Mcp_tools -> Ok None
-              | Browser_service -> offload (fun () -> Browser_addon_socket.context ~instance_id
+              | Browser_service -> offload (fun () ->
+                  let configuration=Runtime.browser_configuration () in
+                  let* stagehand=match configuration with
+                    | Some {stagehand_enabled=true;stagehand=Some browser;_} ->
+                      let* guardian=native_executable "masc-browser-process-owner" in
+                      Browser_addon_stagehand.configuration ~browser ~launcher ~guardian
+                        ~claim_directory:(Filename.concat (native_claim_root store)
+                          ("browser-" ^ Lane_addon_store.digest instance_id)) |> Result.map Option.some
+                    | None | Some {stagehand_enabled=false;_}
+                    | Some {stagehand_enabled=true;stagehand=None;_} -> Ok None in
+                  Browser_addon_socket.context ~instance_id ~stagehand
                     ~models:(if not (uses_host_requests package) then None else Some {
                       Browser_addon_models.store_root=Filename.concat (Lane_addon_store.root store) "worker-model-results";
                       outputs=package.exact_outputs})
-                    ~automation:(match Runtime.browser_configuration () with
+                    ~automation:(match configuration with
                       | Some configuration when configuration.automation_enabled -> configuration.automation
                       | None|Some _ -> None))
                   |> Result.map Option.some |> Result.map_error (fun detail -> Lifecycle.Worker_failed detail) in

@@ -170,8 +170,9 @@ receipts remain distinct from successful contract validation.
    documents interrupted-session profile retention in
    [geckodriver profiles](https://firefox-source-docs.mozilla.org/testing/geckodriver/Profiles.html).
    Downloads are staged privately but publication/upload and shared persistent
-   profiles still require their host brokers. Stagehand remains unavailable in
-   this worker until its model and process ownership are connected.
+   profiles still require their host brokers. Chrome now has the owned controller
+   described below; configured operator Chrome profiles are explicitly refused
+   until their shared-profile admission is connected.
 
    The tool proxy must
    preserve the exported tool's installation-selected command/result hooks;
@@ -249,12 +250,45 @@ receipts remain distinct from successful contract validation.
    refusal, descriptor closure, descendant cleanup and fresh admission. They
    also fill the actual stdout pipe to EAGAIN and separately exercise TERM,
    EOF and child exit without reading the bootstrap reply. They
-   use Python process trees, not an actual Chrome/CDP session. The browser Add-on
-   worker's Chrome session/profile controller and host-selected child claim
-   descriptor are not connected to this component yet; those remain the next
-   ownership integration, together with scoped file transfers and real browser
-   evidence. Source typing of this component does not establish scenario
-   execution or an installed browser.
+   use Python process trees, not an actual Chrome/CDP session. The exact
+   `fded0927497803bfc463324e3fcfddef51581d14` process-owner head passed all
+   seven scenarios in [run 39465959754](https://github.com/jeong-sik/masc/actions/runs/39465959754).
+   That result does not establish Chrome/UI or whole-stack execution.
+
+   The host now snapshots Chrome, extension, installed native launcher and
+   installed browser-process-owner paths into the original worker reservation.
+   A separate stable child claim is selected per worker incarnation outside its
+   disposable allocation. `stagehand.json` is pinned to that descriptor; the
+   worker's `--stagehand` path creates the existing session backend under its own
+   lifetime and attaches it to the Add-on owner. The selected `stagehand` Exact
+   Output callback is installed on the real session. Without that selection,
+   native commands remain available and model requests are explicitly refused;
+   the worker resolves no provider credentials or alternate model route.
+
+   Each open reserves a fresh child instance before allocating its fresh private
+   profile, runs the native launcher and guardian, and checks the bootstrap
+   receipt against the original kernel lease before connecting CDP and loading
+   Stagehand. Startup failure stops and joins the original process group before
+   returning. Close and detach fence late launchers, close the keepalive and join
+   the session switch; retirement additionally requires child-claim settlement.
+   Host recovery uses the original descriptor and child lease even after worker
+   loss. It never signals a PID taken from a page or command-line match.
+
+   After worker and child settlement and the original allocation-inode check,
+   the host removes the private Chrome profile tree without following symlinks.
+   It retains unknown resource types and changed configuration. The stable child
+   claim files survive removal. This is trusted foreground-group ownership,
+   not a sandbox or proof that a browser's escaped descendants are gone.
+
+   The `test_browser_addon_stagehand` fixture defines host allocation, actual
+   launcher/guardian/child execution, failed CDP startup, fresh admission, detach
+   during blocked startup and link-safe profile cleanup. Its browser executable
+   is scripted; it does not establish real Chrome, extension or provider use.
+   The production core Stagehand startup/executor installation has been removed.
+   The standalone browser probe still uses the separate server opener helper;
+   that probe must be moved to the Add-on/shared-Exact path before deleting the
+   helper and its PID/command-based recovery. Shared operator profiles, scoped
+   file transfers and real browser evidence remain open work.
 5. Scoped model-generation middleware using the existing exact-output authority,
    with retained request/terminal evidence and installation-selected routes. The
    new package `exact_outputs` declarations are reused; observation-only sampling
@@ -333,8 +367,9 @@ receipts remain distinct from successful contract validation.
    consumer fixture exercises accepted, changed-document, changed-meaning,
    invented-reference, cancelled and retired requests using a scripted
    WebDriver transport. These definitions are not executed browser/model proof.
-   Stagehand schema/role policy, owned Chrome execution and real browser/model
-   evidence remain.
+   Real Chrome/extension/model evidence, shared operator-profile admission and
+   scoped transfer brokers remain. The selected Stagehand schema/role adapter
+   is now connected to the worker session controller described above.
 
 ## Completion evidence
 

@@ -240,17 +240,13 @@ let of_json json =
     | Some target when target.document_id <> document_id -> Error "scene scope document mismatch"
     | Some _ | None -> Ok () in
   Ok {document_id;url;title;width;height;scroll_x;scroll_y;nodes;truncated;view;scope}
-let read ?navigation_source ?expected_url ?(view=Browser_lane.Content) ?scope (request : Browser_surface.request) ~max_chars =
-  let started = Mtime_clock.elapsed_ns () in
-  let unobserved result = Result.map_error (fun detail -> Browser_surface.Unobserved detail) result in
-  let* tab_id = match request.tab_id with
-    | Some id -> Ok id | None -> Error (Browser_surface.Unobserved "scene requires tabId") in
-  let verb = Browser_lane.Page_scene {tab_id;max_chars;view;scope} in
-  let* selected, target = Browser_surface.resolve_target ~verb request in
-  let* answer = Browser_lane.issue_for ~target ~verb
-    ~timeout_sec:20. |> Result.map_error (fun error -> Browser_surface.Unselected error) in
-  let* json = Browser_surface.observe_answer ~lane:(Browser_lane.target_lane target) answer in
-  unobserved @@
+type request = {surface:Browser_surface.request;view:Browser_lane.scene_view;
+  scope:Browser_lane.node_ref option;expected_url:string option;
+  navigation_source:navigation_source option;max_chars:int}
+let project request ~binding ~started json =
+  let view=request.view and scope=request.scope in
+  let expected_url=request.expected_url and navigation_source=request.navigation_source in
+  let* tab_id=Option.to_result ~none:"scene requires tabId" request.surface.tab_id in
   let* scene = of_json json in
   let* () = match expected_url with
     | Some url when scene.url <> url ->
@@ -267,21 +263,23 @@ let read ?navigation_source ?expected_url ?(view=Browser_lane.Content) ?scope (r
   let* actual = field "tabId" json in
   let* () = if actual = `Int tab_id then Ok () else Error "scene tab identity mismatch" in
   let elapsed_ms = Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1e6 in
-  match json with
-  | `Assoc fields ->
-    (* These fields belong to the resolved local route, not page/backend JSON.
-       Remove every supplied occurrence before attaching the authoritative
-       values so first-key and last-key consumers see the same observation. *)
-    let fields = List.filter (fun (key, _) ->
-      not (List.mem key ("source" :: "lane" :: "browserSelection" :: "elapsed_ms" :: Browser_lane.connection_field_names))) fields in
-    let lane = Browser_lane.Lane_name.to_wire (Browser_lane.target_lane target) in
-    Ok (`Assoc (fields @ ["source",`String lane; "lane",`String lane;
-        "browserSelection", Browser_selection.to_json selected]
-      @ Browser_lane.target_connection_fields target @ ["elapsed_ms",`Float elapsed_ms]))
+  match Browser_binding.annotate binding json with
+  | `Assoc fields -> Ok (`Assoc (("elapsed_ms",`Float elapsed_ms)::List.remove_assoc "elapsed_ms" fields))
   | _ -> Error "scene must be an object"
 
+let read ?navigation_source ?expected_url ?(view=Browser_lane.Content) ?scope surface ~max_chars =
+  let started=Mtime_clock.elapsed_ns () in
+  let* tab_id=Option.to_result ~none:(Browser_surface.Unobserved "scene requires tabId") surface.Browser_surface.tab_id in
+  let verb=Browser_lane.Page_scene {tab_id;max_chars;view;scope} in
+  let* selected,target=Browser_surface.resolve_target ~verb surface in
+  let* answer=Browser_lane.issue_for ~target ~verb ~timeout_sec:20.
+    |> Result.map_error (fun error -> Browser_surface.Unselected error) in
+  let* json=Browser_surface.observe_answer ~lane:(Browser_lane.target_lane target) answer in
+  project {surface;view;scope;expected_url;navigation_source;max_chars}
+    ~binding:(Browser_binding.of_target selected target) ~started json
+    |> Result.map_error (fun detail -> Browser_surface.Unobserved detail)
 
-let read_request = function
+let parse_request = function
   | `Assoc fields ->
       let allowed = ["lane";"clientId";"tabId";"view";"scope";"maxChars";"expectedUrl";"navigationSource"] in
       let keys = List.map fst fields in
@@ -307,6 +305,11 @@ let read_request = function
         | None -> Browser_page_script.text_cap None
         | Some (`Int value) -> Browser_page_script.text_cap (Some value)
         | Some _ -> Error Browser_page_script.text_cap_refused in
-      read ~view ?scope ?expected_url ?navigation_source request ~max_chars
-      |> Result.map_error Browser_surface.failure_message
+      Ok {surface=request;view;scope;expected_url;navigation_source;max_chars}
   | _ -> Error "scene request must be an object"
+
+let read_request json =
+  let* request=parse_request json in
+  read ?navigation_source:request.navigation_source ?expected_url:request.expected_url
+    ~view:request.view ?scope:request.scope request.surface ~max_chars:request.max_chars
+    |> Result.map_error Browser_surface.failure_message

@@ -130,9 +130,21 @@ receipts remain distinct from successful contract validation.
    It returns the complete MCP receipt, including error/effect metadata.
    A retained host handle cannot follow a replacement export or socket.
 
-   The individual public core tool proxies, existing Dashboard observation
-   routes and inventory are not yet enabled for the Add-on. Existing built-in
-   startup is still active. Owned backends are
+   Existing Dashboard/TUI browser inventory, observations and input routes now
+   use one retained host per workflow. Inventory observes that worker directly;
+   read/scene/screenshot/interact/session/goto invoke its advertised tool with
+   the selected input/output hooks. A two-command page read pins the first
+   command's concrete connection and refuses changed connection receipts. Bound
+   tab reads require the original client before discovery. The worker issues
+   selection/connection identity from its admitted target; page fields cannot
+   replace it. Pure projections share the existing partial-inventory, scene,
+   navigation, document, viewport and tab checks. Failed tool replies retain
+   their original MCP receipt and effect metadata. None of these paths retries
+   input or falls back to builtin queues. Read/admin authorization stays at the
+   HTTP boundary. Installed TUI and actual browser evidence remain separate.
+
+   The individual public core tool proxies are not yet enabled for the Add-on.
+   Existing built-in startup is still active. Owned backends are
    explicitly refused until profile claims and actual descendant cleanup are
    connected. The tool proxy must
    preserve the exported tool's installation-selected command/result hooks;

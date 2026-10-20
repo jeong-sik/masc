@@ -15482,10 +15482,11 @@ let leave_ask_answering state = Masc_tui_home.clear_ask_answering state
 let enter_ask_answering state =
   match selected_ask_row state with
   | None -> (
-      match (state.ask_cursor, open_ask_rows state) with
-      | Ask.Released _, _ :: _ ->
-          report_action state "system" "Choose a question with [ or ] first"
-      | (Ask.On _ | Ask.Released _), _ -> report_action state "system" "No question is waiting on you")
+      (* Nothing is selected while asks are open: the cursor was released,
+         or it points past the list. Either way [ or ] selects one. *)
+      match open_ask_rows state with
+      | _ :: _ -> report_action state "system" "Choose a question with [ or ] first"
+      | [] -> report_action state "system" "No question is waiting on you")
   | Some (row : Masc.Tui_decode_asks.ask_row) ->
       (* The answer flow is drawn by the approvals list. With an approval's
          detail open that surface is not on screen, so [a] used to set the mode

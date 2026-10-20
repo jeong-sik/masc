@@ -371,14 +371,27 @@ let stamped_kind : Schedule_payload_projection.known_kind -> string = function
   | Schedule_payload_projection.Lane_act -> Schedule_supported_kinds.lane_act
 ;;
 
-(* One kind exists, so the tool takes its fields directly instead of an
-   envelope the caller assembles. The envelope was three params -- kind,
-   schema version, body -- whose only correct values were a fixed string, the
-   integer 1, and an object with two required keys. Callers guessed, and two
-   thirds of the calls were rejected on shape before the schedule was ever
-   considered. [result_delivery] is absent on purpose: it is stamped from the
-   creating turn's continuation and a supplied one is not honoured. *)
-let payload_from_args args =
+(* The tool takes each kind's fields directly instead of an envelope the
+   caller assembles. The envelope was three params -- kind, schema version,
+   body -- whose only correct values were a fixed string, the integer 1, and
+   an object with two required keys. Callers guessed, and two thirds of the
+   calls were rejected on shape before the schedule was ever considered. The
+   fields name the kind: a Keeper wake gives keeper_name and message, a Lane
+   action installation_id and action (RFC operator-quiz §4.7). Fields of both
+   are refused rather than guessed. [result_delivery] is absent on purpose: it
+   is stamped from the creating turn's continuation and a supplied one is not
+   honoured. *)
+let keeper_wake_arg_names =
+  [ "keeper_name"; "message"; "title"; "urgency"; "allow_unregistered_keeper" ]
+let lane_act_arg_names = [ "installation_id"; "action" ]
+
+let given args name =
+  match Json_util.assoc_member_opt name args with
+  | None | Some `Null -> false
+  | Some _ -> true
+;;
+
+let keeper_wake_payload_from_args args =
   let* keeper_name = required_string args "keeper_name" in
   let* message = required_string args "message" in
   let optional name = function
@@ -395,6 +408,36 @@ let payload_from_args args =
       [ "kind", `String (stamped_kind Schedule_payload_projection.Keeper_wake)
       ; "body", `Assoc body
       ])
+;;
+
+let lane_act_payload_from_args args =
+  let* installation_id = required_string args "installation_id" in
+  let* action =
+    match Json_util.assoc_member_opt "action" args with
+    | Some (`Assoc _ as action) -> Ok action
+    | Some _ | None -> Error "action is required as an object"
+  in
+  Ok
+    (`Assoc
+      [ "kind", `String (stamped_kind Schedule_payload_projection.Lane_act)
+      ; "body", `Assoc [ "installation_id", `String installation_id; "action", action ]
+      ])
+;;
+
+let payload_from_args args =
+  match
+    List.exists (given args) keeper_wake_arg_names, List.exists (given args) lane_act_arg_names
+  with
+  | true, false -> keeper_wake_payload_from_args args
+  | false, true -> lane_act_payload_from_args args
+  | true, true ->
+    Error
+      "give keeper_name and message for a Keeper wake, or installation_id and \
+       action for a Lane action, not fields of both"
+  | false, false ->
+    Error
+      "give keeper_name and message for a Keeper wake, or installation_id and \
+       action for a Lane action"
 ;;
 
 (* [schedule_payload_unsupported_total] is no longer counted here. The label

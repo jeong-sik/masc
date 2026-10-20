@@ -163,6 +163,11 @@ installation's live worker at each due time:
  "body": {"installation_id": "operator-quiz", "action": {"kind": "compose"}}}
 ```
 
+Create one with `masc_schedule_create` (and change it with
+`masc_schedule_update`) by giving `installation_id` and `action` instead of
+`keeper_name` and `message`; the tool refuses a call that gives fields of both.
+The recurrence and due-time fields are the same as for a Keeper wake.
+
 `installation_id` is the declaration id. Creation checks only that it is not
 blank and that `action` is an object. Whether the action fits the package's
 schema is checked when the occurrence is dispatched, against the worker that
@@ -172,8 +177,10 @@ Each due occurrence is queued through the same path as a direct action
 request:
 
 - The request id is the occurrence id. The requester is
-  `schedule:<schedule_id>:<scheduler id>`. The scheduler's own access applies:
-  an operator's schedule acts as the operator, a Keeper's as that Keeper.
+  `schedule:<schedule_id>:<scheduler id>`. The occurrence is checked with the
+  access a direct action request of the scheduler would have: an operator's
+  schedule as the operator, a Keeper's as that Keeper. Removing a Keeper
+  cancels the Lane action schedules it created.
 - The occurrence succeeds once the receipt is durable. Its schedule history
   names the receipt (`installation_id`, `instance_id`, `request_id`). Whether
   the worker ran the action is the receipt's to say.

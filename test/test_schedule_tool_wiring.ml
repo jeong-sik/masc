@@ -259,21 +259,32 @@ let test_flat_tool_surface () =
      nothing is required. Both are legal JSON Schema, so this test should not
      be the thing that decides between them.
 
-     These two are what the runtime cannot proceed without. The schema said
-     nothing was mandatory while the runtime rejected a call missing either,
-     so a caller reading the declaration and sending [{}] was following it and
-     still refused. *)
-  check (list string) "create schema requires what the runtime requires"
-    [ "keeper_name"; "message" ]
+     The schema once said nothing was mandatory while the runtime rejected a
+     call missing keeper_name or message, so a caller reading the declaration
+     and sending [{}] was following it and still refused. A Lane action now
+     needs installation_id and action instead (RFC operator-quiz §4.7), so
+     each call shape is one [oneOf] alternative with the fields the runtime
+     needs for it. *)
+  let shapes schema =
+    match member "oneOf" schema with
+    | `List alternatives -> List.map required_names alternatives
+    | _ -> []
+  in
+  let wake_or_lane = [ [ "keeper_name"; "message" ]; [ "installation_id"; "action" ] ] in
+  check (list string) "create requires no field outside a shape" []
     (required_names create_schema.input_schema);
+  check (list (list string)) "create schema names each shape the runtime accepts" wake_or_lane
+    (shapes create_schema.input_schema);
   let update_schema : Masc_domain.tool_schema =
     (schedule_definition Tool_schemas_schedule.Update_request).schema
   in
   (* The migration accepts omission after loading the schedule so it can keep
      the stored recurrence and warn before the next version requires it. *)
   check (list string) "update schema requires the stable identity"
-    [ "schedule_id"; "keeper_name"; "message" ]
+    [ "schedule_id" ]
     (required_names update_schema.input_schema);
+  check (list (list string)) "update schema names the same shapes" wake_or_lane
+    (shapes update_schema.input_schema);
   let get_schema : Masc_domain.tool_schema =
     (schedule_definition Tool_schemas_schedule.Get_request).schema
   in
@@ -869,7 +880,7 @@ let test_removed_convenience_input_does_not_synthesize_payload () =
   check bool "neutral payload contract names the missing field" true
     (String_util.contains_substring
        (Tool_result.message result)
-       "keeper_name is required");
+       "keeper_name and message");
   check int "removed convenience input is not persisted" 0
     (List.length (Schedule_store.read_state config).schedules)
 ;;
@@ -1052,6 +1063,67 @@ let test_keeper_wake_schema_validation () =
     (String_util.contains_substring
        (Tool_result.message invalid)
        "unknown urgency: urgent-ish")
+;;
+
+(* A Lane action names its installation and action instead of a Keeper and a
+   message (RFC operator-quiz §4.7). The fields name the kind; fields of both
+   kinds, or of neither, are refused rather than guessed. *)
+let test_lane_act_schedule_is_created_from_its_own_fields () =
+  with_config
+  @@ fun config ->
+  let create schedule_id fields =
+    dispatch_exn config Tool_schemas_schedule.Create_request
+      (`Assoc ([ "schedule_id", `String schedule_id; "due_at_unix", `Float future_due_at ] @ fields))
+  in
+  let compose = `Assoc [ "kind", `String "compose" ] in
+  let created =
+    create "sched-lane" [ "installation_id", `String "operator-quiz"; "action", compose ]
+  in
+  check bool "a Lane action is created" true (Tool_result.is_success created);
+  (match
+     List.find_opt
+       (fun (request : Schedule_domain.schedule_request) ->
+          String.equal request.schedule_id "sched-lane")
+       (Schedule_store.read_state config).schedules
+   with
+   | Some request ->
+     check bool "its payload is masc.lane_act with exactly its fields" true
+       (Yojson.Safe.equal
+          (Schedule_domain.payload_to_yojson request.payload)
+          (`Assoc
+             [ "kind", `String Schedule_supported_kinds.lane_act
+             ; "body", `Assoc [ "installation_id", `String "operator-quiz"; "action", compose ] ]))
+   | None -> fail "the Lane action schedule was not stored");
+  let refused label fields =
+    check bool label false (Tool_result.is_success (create ("sched-" ^ label) fields))
+  in
+  refused "both-kinds"
+    [ "installation_id", `String "operator-quiz"; "action", compose
+    ; "keeper_name", `String "schedule-keeper"; "message", `String "run" ];
+  refused "neither-kind" [];
+  refused "action-not-an-object"
+    [ "installation_id", `String "operator-quiz"; "action", `String "compose" ];
+  refused "blank-installation" [ "installation_id", `String " "; "action", compose ];
+  (* The boundary every MCP and Keeper call crosses first reads the same
+     shapes from the schema. *)
+  let create_schema : Masc_domain.tool_schema =
+    (schedule_definition Tool_schemas_schedule.Create_request).schema
+  in
+  let admitted fields =
+    Result.is_ok
+      (Tool_input_validation.validate_args ~schema:create_schema.input_schema
+         ~name:"masc_schedule_create"
+         ~args:(`Assoc ([ "due_at_unix", `Float future_due_at ] @ fields)) ())
+  in
+  check bool "the schema admits a Lane action" true
+    (admitted [ "installation_id", `String "operator-quiz"; "action", compose ]);
+  check bool "the schema refuses fields of both kinds" false
+    (admitted
+       [ "installation_id", `String "operator-quiz"; "action", compose
+       ; "keeper_name", `String "schedule-keeper"; "message", `String "run" ]);
+  check bool "the schema refuses a Lane action with a wake title" false
+    (admitted
+       [ "installation_id", `String "operator-quiz"; "action", compose; "title", `String "t" ])
 ;;
 
 let test_due_signal_and_dashboard_projection () =
@@ -2228,6 +2300,8 @@ let () =
             test_payload_contracts_are_schema_only
         ; test_case "keeper wake schema validation" `Quick
             test_keeper_wake_schema_validation
+        ; test_case "lane act schedule is created from its own fields" `Quick
+            test_lane_act_schedule_is_created_from_its_own_fields
         ; test_case "due signal and dashboard projection" `Quick
             test_due_signal_and_dashboard_projection
         ; test_case "schedule store error is explicit" `Quick

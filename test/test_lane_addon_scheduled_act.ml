@@ -97,9 +97,9 @@ let lane_act_payload ?(installation_id = "quiz") () =
       ; "body", obj [ "installation_id", str installation_id; "action", compose ] ]
 
 let create_schedule ?installation_id ?(recurrence = Schedule_domain.Interval { interval_sec = 60 })
-      ~schedule_id config =
+      ?(scheduled_by = operator) ~schedule_id config =
   Schedule_service.create config ~now:100. ~runner_tick_sec:1. ~schedule_id ~requested_at:100.
-    ~requested_by:operator ~scheduled_by:operator ~due_at:200.
+    ~requested_by:scheduled_by ~scheduled_by ~due_at:200.
     ~payload:(lane_act_payload ?installation_id ()) ~source:Schedule_domain.Operator_request ~recurrence ()
   |> Result.map_error Schedule_service.service_error_to_string |> unwrap
 
@@ -282,6 +282,28 @@ let test_a_redelivered_occurrence_returns_the_same_receipt () =
     check bool "the same receipt" true (Yojson.Safe.equal first second);
     check int "run once" 1 (List.length !(worker.calls)))
 
+(* A Lane action acts with its scheduler's access, so removing a Keeper
+   cancels the ones it scheduled. An operator's schedule stays, even under
+   the same name. *)
+let test_removing_a_keeper_cancels_the_lane_actions_it_scheduled () =
+  with_installation (fun ~clock:_ ~config ~worker:_ ~fail_writes:_ ~declare:_ ->
+    let keeper id : Schedule_domain.actor = { id; kind = Schedule_domain.Automated_actor; display_name = None } in
+    ignore (create_schedule ~scheduled_by:(keeper "quiz-keeper") ~schedule_id:"by-keeper" config);
+    ignore (create_schedule ~scheduled_by:(keeper "other-keeper") ~schedule_id:"by-other-keeper" config);
+    ignore (create_schedule ~scheduled_by:{ operator with id = "quiz-keeper" } ~schedule_id:"by-operator" config);
+    Consumers.cancel_keeper_schedules config ~keeper_name:"quiz-keeper"
+    |> Result.map_error Schedule_store.store_error_to_string |> unwrap;
+    let cancelled schedule_id =
+      match Schedule_store.get_schedule config ~schedule_id with
+      | Some stored -> stored.status = Schedule_contract_values.Cancelled
+      | None -> failf "%s is missing" schedule_id in
+    check (list bool) "only the removed Keeper's" [ true; false; false ]
+      (List.map cancelled [ "by-keeper"; "by-other-keeper"; "by-operator" ]);
+    let result = tick config ~now:201. in
+    check bool "the cancelled one never dispatches" true
+      (List.for_all (fun (d : Schedule_runner.dispatch_result) -> d.schedule_id <> "by-keeper") result.dispatches);
+    ignore (handed_over (dispatch_of result "by-operator")))
+
 let () =
   run "Lane_addon_scheduled_act"
     [ ( "masc.lane_act",
@@ -296,4 +318,6 @@ let () =
         ; test_case "a missing declaration or an absent worker fails the occurrence" `Quick
             test_a_missing_declaration_or_absent_worker_fails_the_occurrence
         ; test_case "a redelivered occurrence returns the same receipt" `Quick
-            test_a_redelivered_occurrence_returns_the_same_receipt ] ) ]
+            test_a_redelivered_occurrence_returns_the_same_receipt
+        ; test_case "removing a Keeper cancels the Lane actions it scheduled" `Quick
+            test_removing_a_keeper_cancels_the_lane_actions_it_scheduled ] ) ]

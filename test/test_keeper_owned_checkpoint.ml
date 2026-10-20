@@ -90,6 +90,15 @@ let artifact_path session_dir snapshot =
 let write path bytes = Out_channel.with_open_bin path (fun ch -> output_string ch bytes)
 let read path = In_channel.with_open_bin path In_channel.input_all
 
+let test_large_canonical_read_keeps_exact_source () = with_session (fun session_dir ->
+  let marker = String.make (1024 * 1024 + 17) 'x' ^ "한글\n\"tail" in
+  let _checkpoint, expected = accepted marker in
+  write (Store.agent_core_checkpoint_path ~session_dir ~session_id:"session")
+    (Store.exact_snapshot_canonical_bytes expected);
+  match Store.load_agent_core_exact_snapshot ~session_dir ~session_id:"session" with
+  | Ok actual -> assert_snapshot "large canonical checkpoint" expected actual
+  | Error _ -> fail "the large canonical checkpoint was unavailable")
+
 let test_survives_canonical_and_history () = with_session (fun session_dir ->
   let a, snapshot = accepted "A retained" in
   Store.retain_exact_snapshot ~session_dir snapshot |> require_installed;
@@ -298,6 +307,7 @@ let test_release_removes_only_the_released_artifact () = with_session (fun sessi
     (Sys.file_exists (artifact_path session_dir dropped)))
 
 let () = run "keeper owned exact checkpoints" ["retention", [
+  test_case "large canonical read keeps exact source bytes" `Quick test_large_canonical_read_keeps_exact_source;
   test_case "A survives B canonical and rolling history" `Quick test_survives_canonical_and_history;
   test_case "same reference retry keeps exact bytes" `Quick test_same_reference_retry;
   test_case "missing retained checkpoint never uses latest" `Quick test_missing_never_uses_canonical;

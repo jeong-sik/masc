@@ -918,19 +918,19 @@ let load_canonical_bytes_strict path =
     | stats ->
       let identity_before = canonical_identity_of_stats stats in
       (try
-         let buffer = Buffer.create 4096 in
-         let bytes = Bytes.create 65536 in
-         let rec read_fd fd =
-           match Unix.read fd bytes 0 (Bytes.length bytes) with
-           | 0 -> Buffer.contents buffer
-           | count ->
-             Buffer.add_subbytes buffer bytes 0 count;
-             read_fd fd
-           | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_fd fd
-         in
          let fd = Unix.openfile path [ Unix.O_CLOEXEC; Unix.O_RDONLY ] 0 in
+         let channel =
+           match Unix.in_channel_of_descr fd with
+           | channel -> channel
+           | exception exn -> Unix.close fd; raise exn
+         in
          let content =
-           Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> read_fd fd)
+           (* For a stable-size regular file, input_all allocates from the
+              descriptor's remaining length without a final copy.
+              The standard reader also handles a file growing or shrinking
+              during the read. Identity and source admission stay below. *)
+           Fun.protect ~finally:(fun () -> close_in channel)
+             (fun () -> In_channel.input_all channel)
          in
          Ok (Some (identity_before, content))
        with

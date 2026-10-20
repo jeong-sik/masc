@@ -108,7 +108,8 @@ struct Region: Decodable {
     var calibrationOutput: CalibrationOutput? = nil
     var projectTick: Int64? = nil
     var startNanoseconds: ExactNanoseconds? = nil
-    enum CodingKeys: String, CodingKey { case id, asset, startSeconds, offsetFrames, frameCount, captureClock, sourceClock, pulseClock, pulseLoopUnit, component, audioChannel, calibrationOutput, projectTick, startNanoseconds; case repetitions = "repeat" }
+    var exportStartFrame: Int64? = nil
+    enum CodingKeys: String, CodingKey { case id, asset, startSeconds, offsetFrames, frameCount, captureClock, sourceClock, pulseClock, pulseLoopUnit, component, audioChannel, calibrationOutput, projectTick, startNanoseconds, exportStartFrame; case repetitions = "repeat" }
     func loopLayout(_ loop: WaveLoopClock, rate: Double) throws -> WaveLoopLayout {
         guard pulseClock == nil else { throw AudioFailure("practice pulse looping is not connected") }
         if let captureClock {
@@ -370,12 +371,14 @@ final class Voice {
             cached = period
         } else { cached = nil }
     }
-    func fill(_ target: AVAudioPCMBuffer) throws -> Bool {
+    func fill(_ target: AVAudioPCMBuffer, maximum: AVAudioFrameCount? = nil) throws -> Bool {
         guard repeating || cursor < total else { return false }
         guard let output = target.floatChannelData else { throw AudioFailure("audio output is not planar float") }
+        let limit = min(capacity, maximum ?? capacity)
+        guard limit > 0, target.frameCapacity >= limit else { throw AudioFailure("invalid audio buffer capacity") }
         var written: AVAudioFrameCount = 0
-        while written < capacity && (repeating || cursor < total) {
-            let available = Int64(capacity - written)
+        while written < limit && (repeating || cursor < total) {
+            let available = Int64(limit - written)
             let remaining = repeating ? available : min(available, total - cursor)
             let loopSpan = try loopLayout?.span(at: cursor, maximum: remaining)
             let base = loopSpan ?? sourceLayout?.span(at: cursor, maximum: remaining) ?? captureLayout?.span(at: cursor, maximum: remaining)
@@ -856,13 +859,144 @@ final class ArrangementTransport {
         exit(failure ? 1 : 0)
     }
 }
+// Offline export reuses the same source trim/repeat/captured-clock reader as
+// playback. Conversion never opens an audio device or physical MIDI endpoint.
+final class ExportVoice {
+    let voice: Voice
+    let converter: AVAudioConverter
+    let start: Int64
+    let minimumFrames: Int64
+    let end: Int64
+    var frames: Int64 = 0
+    var ended = false
+    init(region: Region, asset: Asset, format: AVAudioFormat, capacity: AVAudioFrameCount) throws {
+        voice = try Voice(region: region, asset: asset, capacity: capacity, outputChannels: format.channelCount)
+        guard let converter = AVAudioConverter(from: voice.format, to: format) else { throw AudioFailure("unsupported WAV export sample conversion") }
+        self.converter = converter
+        // Mono occupies every output channel. Wider sources retain discrete
+        // channel order; an absent source channel contributes silence.
+        let sourceChannels = voice.format.channelCount
+        converter.channelMap = (0..<Int(format.channelCount)).map { channel in
+            NSNumber(value: sourceChannels == 1 ? 0 : channel < Int(sourceChannels) ? channel : -1)
+        }
+        guard let origin = region.exportStartFrame, origin >= 0,
+              asset.sampleRate.rounded(.down) == asset.sampleRate, asset.sampleRate <= Double(UInt32.max) else {
+            throw AudioFailure("WAV export needs exact source-rate and project-frame placement")
+        }
+        let scaled = UInt128(voice.total) * UInt128(format.sampleRate), divisor = UInt128(asset.sampleRate)
+        let minimum = scaled / divisor, extent = minimum + (scaled % divisor == 0 ? 0 : 1)
+        guard extent <= UInt128(Int64.max - origin) else {
+            throw AudioFailure("WAV export exceeds the native frame timeline")
+        }
+        start = origin; minimumFrames = Int64(minimum); end = origin + Int64(extent)
+    }
+    func read(_ count: AVAudioFrameCount, format: AVAudioFormat) throws -> AVAudioPCMBuffer {
+        guard let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: count) else { throw AudioFailure("cannot allocate WAV conversion buffer") }
+        if ended { return output }
+        var conversionError: NSError?, sourceError: Error?
+        let status = converter.convert(to: output, error: &conversionError) { requested, state in
+            do {
+                if try self.voice.fill(self.voice.buffers[0], maximum: requested) {
+                    state.pointee = .haveData; return self.voice.buffers[0]
+                }
+                state.pointee = .endOfStream; return nil
+            } catch { sourceError = error; state.pointee = .endOfStream; return nil }
+        }
+        if let sourceError { throw sourceError }
+        if let conversionError { throw conversionError }
+        frames += Int64(output.frameLength)
+        switch status {
+        case .haveData: guard output.frameLength > 0 else { throw AudioFailure("WAV conversion did not advance") }
+        case .endOfStream:
+            ended = true
+            guard frames >= minimumFrames else { throw AudioFailure("WAV conversion ended before its source clock") }
+        case .inputRanDry: throw AudioFailure("WAV conversion exhausted its admitted source")
+        case .error: throw AudioFailure("WAV conversion failed")
+        @unknown default: throw AudioFailure("unknown WAV conversion status")
+        }
+        return output
+    }
+}
+
+func renderWaveArrangement(_ plan: Plan, output path: String) throws {
+    try plan.validate()
+    guard plan.loop == nil, plan.practice == nil, plan.midi == nil, plan.ump == nil, plan.umpRegions == nil else {
+        throw AudioFailure("WAV export needs a linear prepared audio arrangement")
+    }
+    let rate = 44100.0
+    let channels = max(1, max(plan.assets.map(\.channels).max() ?? 1, plan.regions.compactMap { $0.audioChannel?.output }.max() ?? 1))
+    guard channels <= UInt32(UInt16.max) else { throw AudioFailure("WAV export channel count exceeds its format") }
+    let tag = channels == 1 ? kAudioChannelLayoutTag_Mono : channels == 2 ? kAudioChannelLayoutTag_Stereo : kAudioChannelLayoutTag_DiscreteInOrder | channels
+    guard let layout = AVAudioChannelLayout(layoutTag: tag) else { throw AudioFailure("WAV export channel layout is unavailable") }
+    let format = AVAudioFormat(standardFormatWithSampleRate: rate, channelLayout: layout)
+    let capacity = AVAudioFrameCount(64 * 1024 / MemoryLayout<Float>.size)
+    for asset in plan.assets {
+        let file = try FileHandle(forReadingFrom: URL(fileURLWithPath: asset.path)); defer { try? file.close() }
+        var hash = SHA256()
+        while try autoreleasepool(invoking: {
+            guard let bytes = try file.read(upToCount: 64 * 1024), !bytes.isEmpty else { return false }
+            hash.update(data: bytes); return true
+        }) {}
+        guard hash.finalize().map({ String(format: "%02x", $0) }).joined() == asset.sha256 else {
+            throw AudioFailure("WAV source changed before export admission")
+        }
+    }
+    let voices = try plan.regions.map { region -> ExportVoice in
+        guard let asset = plan.assets.first(where: { $0.id == region.asset }) else { throw AudioFailure("missing WAV export source") }
+        return try ExportVoice(region: region, asset: asset, format: format, capacity: capacity)
+    }
+    let total = voices.map(\.end).max() ?? 0
+    guard total > 0, UInt128(total) * UInt128(channels) * 4 <= UInt128(UInt32.max - 36) else { throw AudioFailure("WAV export exceeds the RIFF data size range or has no audio frames") }
+    let destination = URL(fileURLWithPath: path)
+    let stage = destination.deletingLastPathComponent().appendingPathComponent(".masc-wave-\(UUID().uuidString).wav")
+    defer { try? FileManager.default.removeItem(at: stage) }
+    var peak: Float = 0
+    try autoreleasepool {
+        let file = try AVAudioFile(forWriting: stage, settings: format.settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+        var position: Int64 = 0
+        while position < total {
+            try autoreleasepool {
+                let count = AVAudioFrameCount(min(Int64(capacity), total - position))
+                guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: count), let data = buffer.floatChannelData else { throw AudioFailure("cannot allocate WAV export buffer") }
+                buffer.frameLength = count
+                for channel in 0..<Int(channels) { memset(data[channel], 0, Int(count) * MemoryLayout<Float>.size) }
+                for source in voices where !source.ended && source.start < position + Int64(count) && source.end > position {
+                    let first = max(position, source.start), requested = AVAudioFrameCount(min(position + Int64(count), source.end) - first)
+                    let converted = try source.read(requested, format: format)
+                    guard let samples = converted.floatChannelData else { throw AudioFailure("WAV conversion is not planar float") }
+                    for channel in 0..<Int(channels) {
+                        for frame in 0..<Int(converted.frameLength) {
+                            let value = samples[channel][frame], index = Int(first - position) + frame
+                            guard value.isFinite else { throw AudioFailure("WAV source contains non-finite samples") }
+                            data[channel][index] += value
+                        }
+                    }
+                }
+                for channel in 0..<Int(channels) {
+                    for frame in 0..<Int(count) {
+                        let value = data[channel][frame]
+                        guard value.isFinite else { throw AudioFailure("WAV export exceeds finite PCM range") }
+                        peak = max(peak, abs(value))
+                    }
+                }
+                try file.write(from: buffer); position += Int64(count)
+            }
+        }
+    }
+    guard Darwin.link(stage.path, destination.path) == 0 else { throw AudioFailure("cannot publish WAV export without replacing a file: errno \(errno)") }
+    try audioEmit(["kind": "rendered", "path": path, "frames": total, "sampleRate": rate, "channels": channels, "peak": peak])
+}
+
 struct Options {
+    enum Operation: String { case play, render }
+    let operation: Operation
     var file: String?
     var output: String?
     var loop = false
     init() throws {
         var args = Array(CommandLine.arguments.dropFirst())
-        guard args.first == "play" else { throw AudioFailure("usage: music-arrangement play --file PLAN [--output UID]") }
+        guard let first = args.first, let operation = Operation(rawValue: first) else { throw AudioFailure("usage: music-arrangement play|render --file PLAN [--output UID|PATH]") }
+        self.operation = operation
         args.removeFirst()
         while !args.isEmpty {
             switch args.removeFirst() {
@@ -874,6 +1008,7 @@ struct Options {
         }
         guard let file, !file.isEmpty else { throw AudioFailure("missing arrangement plan") }
         if let output, output.isEmpty { throw AudioFailure("missing output UID") }
+        if operation == .render { guard output != nil, !loop else { throw AudioFailure("render requires --output PATH and no --loop") } }
     }
 }
 #if !ARRANGEMENT_LIBRARY
@@ -889,6 +1024,11 @@ do {
     }
     let options = try Options()
     let plan = try JSONDecoder().decode(Plan.self, from: Data(contentsOf: URL(fileURLWithPath: options.file!)))
+    if options.operation == .render {
+        _ = umask(0o077)
+        try renderWaveArrangement(plan, output: options.output!)
+        return
+    }
     let transport = try ArrangementTransport(plan: plan, output: options.output, loop: options.loop)
     do { try transport.start() } catch { transport.finish(reason: "start-failed", error: error) }
     DispatchQueue.global().async {

@@ -1738,6 +1738,18 @@ starts playback or finalizes recording. Work already running continues; close
 and reopen to read a newer status. Earlier overwritten messages and recovery
 messages emitted only after exit are not retained by this reading.
 
+In the arrangement editor, `:wave /path/song.wav` exports the complete audible
+arrangement once, independently of playback loops, practice clicks, and hardware
+output selection. It combines verified WAV sources and MIDI regions rendered
+through their selected VST sounds. Output is 44.1 kHz float WAV; discrete source
+channels are retained, mono feeds each output channel, and the mix is not
+normalized. A peak above 0 dBFS is reported while the float samples are preserved.
+Existing files are never replaced. `:stop`, a new playback, a project edit,
+Save As, or closing the view cancels pending export and waits for its worker
+cleanup. Capture MIDI cannot be silently omitted: record its instrument return,
+or split the take and mute its MIDI component to export the recorded audio.
+Arrangement MIDI-file export remains unconnected.
+
 In Keeper chat, `/score [N]` opens a frozen alphaTex block in the same terminal
 with the official alphaTab engine for full notation, track selection, zoom,
 scroll and local synthesized playback. N counts closed scores newest first.

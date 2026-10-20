@@ -9,6 +9,7 @@ import { inspectCalibration } from './calibration-files.mjs'
 
 import { preparePractice } from './arrangement-practice.mjs'
 import { prepareSoundSources, finishSoundPlan } from './arrangement-sound.mjs'
+import { exportArrangementWave } from './arrangement-export.mjs'
 
 const active = new Map()
 parentPort.on('message', async job => {
@@ -25,6 +26,11 @@ parentPort.on('message', async job => {
       case 'prepare-sound-sources': result = await prepareSoundSources(job.project, { ...job, signal }); break
       case 'prepare-sound-plan': result = await finishSoundPlan(job.project, { ...job, signal }); break
       case 'prepare-phrase': result = phraseDocument(job.project, job.asset); break
+      case 'export-wave': result = await exportArrangementWave(job.project, job.path, {
+        sourceRoot: job.sourceRoot, directory: job.directory, signal,
+        onProgress(progress) {
+          if (!signal.aborted && active.get(job.id) === controller) parentPort.postMessage({ kind: 'progress', id: job.id, progress })
+        } }); break
       case 'import-phrase': result = importPhraseDocument(job.project, job.document); break
       case 'inspect-calibration': result = await inspectCalibration(job.path, { signal }); break
       case 'analyze-calibration': result = await analyzeCalibration({ ...job, signal }); break

@@ -5165,7 +5165,7 @@ let launch_lane_subscriptions state ~mailbox request =
           ~body:(Yojson.Safe.to_string (Subs.request_json request))) Subs.decode)
   end
 
-let launch_lane_addons ?initial_detail state ~mailbox request =
+let launch_lane_addons ?(target = Masc_tui_lane_addons.Read_screen) state ~mailbox request =
   if not (server_authority_ready state) then
     report_action state "error" "Lane request was not sent while workspace identity is unconfirmed; retry after reconnecting"
   else begin
@@ -5194,6 +5194,9 @@ let launch_lane_addons ?initial_detail state ~mailbox request =
   let application_reading = match lane_addons_request_failure_kind request with
     | `Request -> Masc_tui_lane_application.empty
     | `Inventory | `Detail -> view.application_reading in
+  let initial_detail = match target with
+    | Addons.Read_detail (id, incarnation) -> Some (id, incarnation)
+    | Addons.Read_screen | Addons.Read_installation_results _ -> None in
   let pending_view = { view with generation; loading = true; error = None;
     application_reading; draft = None;action_menu=None;last_action;action_receipt;presentation } in
   state.lane_addons <- Some pending_view;
@@ -5337,7 +5340,7 @@ let launch_lane_addons ?initial_detail state ~mailbox request =
       | Attach _ | Observe _ | Detach _ | Evidence _ | Act _ | Subscriptions _ -> true)
     state ~mailbox
     ~boundary_error:(lane_addons_failure_for_request request)
-    ~deliver:(fun result -> Lane_addons_loaded (generation, initial_detail, result))
+    ~deliver:(fun result -> Lane_addons_loaded (generation, target, result))
     perform)
   end
 
@@ -14238,6 +14241,27 @@ let open_keeper_detail state ~mailbox (keeper : keeper) =
 let choose_keeper_row state index = state.keeper_cursor <- index
 ;;
 
+(* The answer receipt of an installation's question leads to that
+   installation's Results, where its reveal row appears (RFC operator-quiz K6).
+   The live worker is found in a fresh inventory read, not in the last one:
+   a worker the cached snapshot names may since have been replaced. The jump
+   travels with that read and ends with it. *)
+let open_answered_installation_results state ~mailbox =
+  let module Addons = Masc_tui_lane_addons in
+  match Option.map (fun (feedback : Masc_tui_ask_projection.answer_feedback) -> feedback.af_asker)
+          (current_ask_answer_feedback state) with
+  | Some (Masc.Tui_decode_asks.Ask_installation { ai_declaration_id; _ }) ->
+      let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
+      if view.loading then
+        report_action state "system" "A Lane request is pending; press g again when it finishes"
+      else begin
+        state.lane_addons <- Some {view with screen=Addons.Overview};
+        launch_lane_addons ~target:(Addons.Read_installation_results ai_declaration_id)
+          state ~mailbox Addons.Inspect
+      end
+  | Some (Masc.Tui_decode_asks.Ask_keeper _) | None ->
+      report_action state "system" "The last answer was not to an installation"
+
 let open_lane_inventory_selection state ~mailbox =
   let module Inventory = Masc.Tui_decode_lane_inventory in
   let module Addons = Masc_tui_lane_addons in
@@ -14284,7 +14308,7 @@ let open_lane_inventory_selection state ~mailbox =
             document_key=None; presentation=Addons.Summary; error=None};
           (* Inspect first even for a retained worker: its identity must exist
              in the fresh snapshot before a history slice can join it. *)
-          launch_lane_addons ~initial_detail:(instance_id,incarnation)
+          launch_lane_addons ~target:(Addons.Read_detail (instance_id,incarnation))
             state ~mailbox Addons.Inspect)
 
 (* What a press on marked text does: the same move the key for that place
@@ -17432,11 +17456,11 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
         if view.generation<>generation then view else
         {view with loading=false;subscription_panel=Option.map
           (fun panel -> Masc_tui_lane_subscriptions.loaded panel result) view.subscription_panel})
-  | Lane_addons_loaded (generation, initial_detail, result) ->
+  | Lane_addons_loaded (generation, target, result) ->
+      let showing = Option.is_some state.lane_addons in
       map_lane_addons state (fun view ->
         if view.generation <> generation then view else
-        if Option.fold ~none:false ~some:(fun (id, incarnation) ->
-          view.screen <> Masc_tui_lane_addons.Detail (id, incarnation)) initial_detail
+        if not (Masc_tui_lane_addons.read_still_wanted view ~showing target)
         then {view with loading=false} else
         match result with
         | Error (`Inventory detail) ->
@@ -17453,9 +17477,11 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
             let view = match reply.lar_receipt with
               | None -> view
               | Some receipt -> Masc_tui_lane_addons.acknowledge_broadcast view receipt in
-            let view = match initial_detail, reply.lar_snapshot, reply.lar_diagnostic with
-              | Some _, Some _, None when view.row_cursor < 0 -> Masc_tui_lane_addons.select_initial_result view
-              | _ -> view in
+            let view = match target, reply.lar_snapshot, reply.lar_diagnostic with
+              | Masc_tui_lane_addons.Read_detail _, Some _, None when view.row_cursor < 0 ->
+                  Masc_tui_lane_addons.select_initial_result view
+              | (Masc_tui_lane_addons.Read_screen | Read_detail _ | Read_installation_results _),
+                (Some _ | None), (Some _ | None) -> view in
             let snapshot_read_error = match reply.lar_inventory_read with
               | `Unchanged -> view.snapshot_read_error
               | `Read -> None
@@ -17468,10 +17494,15 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                   Masc_tui_lane_addons.receive_application_inventory view
                     (match configuration with Some configuration -> Ok configuration
                      | None -> Error "Configuration observation is unavailable") in
-            {view with loading=false;error=reply.lar_diagnostic;
-            snapshot_read_error;
-            action_receipt=(match reply.lar_action with None -> view.action_receipt | Some _ -> reply.lar_action);
-            receipt=(match reply.lar_receipt with None -> view.receipt | Some _ -> reply.lar_receipt)});
+            let view = {view with loading=false;error=reply.lar_diagnostic;
+              snapshot_read_error;
+              action_receipt=(match reply.lar_action with None -> view.action_receipt | Some _ -> reply.lar_action);
+              receipt=(match reply.lar_receipt with None -> view.receipt | Some _ -> reply.lar_receipt)} in
+            (match target, reply.lar_snapshot, reply.lar_diagnostic with
+             | Masc_tui_lane_addons.Read_installation_results installation_id, Some _, None ->
+                 Masc_tui_lane_addons.installation_results view ~installation_id
+             | (Masc_tui_lane_addons.Read_screen | Read_detail _ | Read_installation_results _),
+               (Some _ | None), (Some _ | None) -> view));
       (match result, state.lane_addons with
        | Ok {lar_action=Some {Masc.Lane_addon_action.state=
            (Confirmed | Failed_before_effect | Outcome_unknown);_};_}, Some view
@@ -25360,7 +25391,7 @@ and is loaded on demand through keeper_skill.
                               let request = match view.overview_mode with
                                 | Addons.Retained_runs -> Addons.Slice ["run_id",item.run_id]
                                 | Addons.Current_installations -> Addons.Inspect in
-                              launch_lane_addons ~initial_detail:(item.id,item.incarnation)
+                              launch_lane_addons ~target:(Addons.Read_detail (item.id,item.incarnation))
                                 state ~mailbox:async_messages request
                           | Addons.Overview, (Some _ | None) | Addons.Detail _, None -> ()))
                      | "i" ->
@@ -31507,6 +31538,8 @@ and is loaded on demand through keeper_skill.
             (* Client-side over the loaded goals: no refetch. *)
             state.planning_filter <- next_planning_filter state.planning_filter;
             clamp_planning_cursor state
+        | Some "g" when state.view = Approvals && state.ask_answer_mode = Ask_browsing ->
+           open_answered_installation_results state ~mailbox:async_messages
         | Some "g" when state.view = Acting ->
            state.acting_cursor <- 0;
            state.acting_scroll <- 0;

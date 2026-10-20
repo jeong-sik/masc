@@ -100,6 +100,96 @@ let file_identity_and_draft_sessions () = with_directory (fun directory ->
     ["../outside.toml";"nested/file.toml";"file.json"];
   check bool "suffix-only filename follows the declaration loader" true (Result.is_ok (Draft.create ".toml")))
 
+(* A live installation's last host request cycle, from the host's own
+   not-final encoder; one unreadable value is that field's failure alone. *)
+let installation_inspect ?(host_requests = `Null) ~runtime () =
+  let instance = `Assoc ([
+    "instance_id", `String "quiz-1"; "run_id", `String "quiz"; "addon_id", `String "operator-quiz";
+    "title", `String "Operator quiz"; "revision", `String "0.1.0"; "phase", `Assoc ["kind", `String "attached"];
+    "runtime_presence", `String runtime; "observation_seq", `Int 1; "rows_count", `Int 0;
+    "incarnation", `String "quiz-1"; "action_schema", `Null;
+    "configuration", `Assoc ["id", `String "operator-quiz"; "source_path", `String "/c/operator-quiz.toml";
+                              "revision", `String "r1"];
+    "binding", `Assoc ["sources", `List []];
+    "package", `Assoc ["outputs", `Assoc ["quiz", `Assoc ["lanes", `List [`String "quiz/sessions"]]];
+                       "skills_directory", `Null]]
+    @ (if host_requests = `Null then [] else ["host_requests", host_requests])) in
+  `Assoc ["instances", `List [instance]; "rows", `List []; "coverage", `List [];
+          "configuration", `Assoc ["directory", `String "/c"; "complete", `Bool true; "declarations", `List [];
+                                   "issues", `List []]]
+
+let host_request_cycle_decodes_and_fails_alone () =
+  let module E = Masc.Lane_addon_exact in
+  let cycle reason = `Assoc ["cycles", `Int 3;
+    "waiting", `List [`Assoc ["request_id", `String "s-1-author-0"; "reason", reason];
+                      `Assoc ["request_id", `String "s-1-ask"; "reason", `Assoc ["reason", `String "awaiting_operator"]]];
+    "issue", `Assoc ["kind", `String "relisted_delivered_request"; "request_id", `String "s-1-read-2"]] in
+  let unconfigured = E.not_final_to_json (E.Lane_unavailable E.Lane_unconfigured) in
+  (match UI.decode (installation_inspect ~host_requests:(cycle unconfigured) ~runtime:"live" ()) with
+   | Ok { instances = [ { host_requests = Some (Ok hr); _ } ]; _ } ->
+       check int "passes of the last cycle" 3 hr.hr_cycles;
+       check bool "each waiting request keeps its typed reason" true
+         (hr.hr_waiting = ["s-1-author-0", UI.Host_wait_exact (E.Lane_unavailable E.Lane_unconfigured);
+                           "s-1-ask", UI.Host_wait_operator]);
+       check bool "the issue that stopped the cycle is typed" true
+         (hr.hr_issue = Some (UI.Host_relisted_delivered_request "s-1-read-2"))
+   | Ok _ -> fail "expected one instance with a readable cycle"
+   | Error detail -> fail detail);
+  (match UI.decode (installation_inspect ~host_requests:(cycle (`Assoc ["reason", `String "vibes"])) ~runtime:"live" ()) with
+   | Ok { instances = [ { host_requests = Some (Error _); title; _ } ]; _ } ->
+       check string "the rest of the instance still reads" "Operator quiz" title
+   | Ok _ -> fail "an unknown reason must make the cycle unreadable"
+   | Error detail -> fail ("an unknown reason broke the whole inspect: " ^ detail));
+  List.iter (fun reason ->
+    check bool "every not-final reason reads back as written" true
+      (E.not_final_of_json (E.not_final_to_json reason) = Ok reason))
+    [ E.Lane_unavailable E.Lane_unconfigured; E.Lane_unavailable E.Lane_off; E.Lane_unavailable E.No_admitted_slots;
+      E.Lane_unavailable (E.Lane_registry_unavailable { detail = "d" });
+      E.Provider_refused (E.Provider_unavailable { detail = "d" });
+      E.Provider_refused (E.Provider_auth_refused { detail = "d" });
+      E.Provider_refused (E.Provider_configuration_refused { detail = "d" }); E.Attempt_in_progress ]
+
+(* Every issue the host writes reads back as its own kind, a blank detail
+   included: the detail is the failure's text, not a name. *)
+let every_host_issue_reads_back () =
+  let module R = Masc.Lane_addon_runtime in
+  List.iter (fun (issue, expected) ->
+    let cycle = `Assoc ["cycles", `Int 1; "waiting", `List []; "issue", R.host_issue_to_json issue] in
+    match UI.decode (installation_inspect ~host_requests:cycle ~runtime:"live" ()) with
+    | Ok { instances = [ { host_requests = Some (Ok hr); _ } ]; _ } ->
+        check bool "the issue reads back as written" true (hr.hr_issue = Some expected)
+    | Ok _ -> fail "the issue made the cycle unreadable"
+    | Error detail -> fail detail)
+    [ R.Listing_failed "", UI.Host_listing_failed "";
+      R.Listing_refused "refused", UI.Host_listing_refused "refused";
+      R.Relisted_delivered_request "s-1-read-2", UI.Host_relisted_delivered_request "s-1-read-2";
+      R.Result_delivery_failed { request_id = "r"; detail = "" },
+      UI.Host_result_delivery_failed { request_id = "r"; detail = "" };
+      R.Exact_record_failed { request_id = "r"; detail = "disk" },
+      UI.Host_exact_record_failed { request_id = "r"; detail = "disk" };
+      R.Ask_record_failed { request_id = "r"; detail = "disk" },
+      UI.Host_ask_record_failed { request_id = "r"; detail = "disk" };
+      R.No_exact_runner, UI.Host_no_exact_runner ]
+
+(* The jump reads the inventory fresh and lands on the live worker; a
+   retained run is not where the reveal appears. *)
+let answered_installation_opens_its_results () =
+  let snapshot runtime = match UI.decode (installation_inspect ~runtime ()) with
+    | Ok snapshot -> snapshot | Error detail -> fail detail in
+  let jump = UI.Read_installation_results "operator-quiz" in
+  let retained = UI.installation_results {UI.initial with snapshot = Some (snapshot "retained")}
+      ~installation_id:"operator-quiz" in
+  check bool "without a live worker the overview stays and says why" true
+    (retained.screen = UI.Overview && Option.is_some retained.error);
+  let opened = UI.installation_results {UI.initial with snapshot = Some (snapshot "live")}
+      ~installation_id:"operator-quiz" in
+  check bool "the live worker's Results open" true
+    (opened.screen = UI.Detail ("quiz-1", "quiz-1") && opened.focus = UI.Timeline);
+  check bool "the jump applies while the overview it opened is shown" true
+    (UI.read_still_wanted UI.initial ~showing:true jump);
+  check bool "not once the operator left Add-ons" false (UI.read_still_wanted UI.initial ~showing:false jump);
+  check bool "nor once they opened an instance" false (UI.read_still_wanted opened ~showing:true jump)
+
 let configuration_and_ports () =
   let json = Yojson.Safe.from_string {|{
     "instances":[{"instance_id":"actual-1","run_id":"world","addon_id":"custom","title":"Custom layer",
@@ -320,7 +410,8 @@ let guided_actions () =
   let instance : UI.instance = {id="worker";incarnation="worker";run_id="run";
     addon_id="arbitrary-package";title="Useful observer";revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=0;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc [];outputs=[];
-    skills_directory=None;action_schema=Some schema; binding_schema=None; display=Masc.Lane_addon_presentation.empty} in
+    skills_directory=None;action_schema=Some schema; binding_schema=None; display=Masc.Lane_addon_presentation.empty;
+    host_requests=None} in
   let snapshot : UI.snapshot = {instances=[instance];configuration=None;
     output={rows=[];coverage=[]};complete=Some true} in
   let view = UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" {UI.initial with focus=UI.Instances; snapshot=Some snapshot} |> ok in
@@ -336,7 +427,7 @@ let guided_actions () =
     (Result.is_error (UI.submit_action {view with snapshot=Some replaced}));
   check bool "observation-only package has no invented action" true
     (Result.is_error (UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" {UI.initial with focus=UI.Instances; snapshot=Some
-      {snapshot with instances=[{instance with action_schema=None; binding_schema=None; display=Masc.Lane_addon_presentation.empty}]}}));
+      {snapshot with instances=[{instance with action_schema=None; binding_schema=None; display=Masc.Lane_addon_presentation.empty;host_requests=None}]}}));
   let technical = UI.open_actions ~request_id:first.request_id
     {UI.initial with focus=UI.Instances; presentation=UI.Technical;snapshot=Some snapshot} |> ok in
   check bool "opening actions exposes the choice even from technical mode" true (technical.presentation=UI.Summary);
@@ -454,7 +545,8 @@ let context_flow_uses_declared_connections () =
   let producer : UI.instance = {id="source-worker";incarnation="source-worker";run_id="project";
     addon_id="any-source";title="Project observer";revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=0;configuration_revision=Some "1";installation_id=Some "project-observer";source_path=Some "/config/project-observer.toml";binding=`Assoc ["sources",`List []];
-    outputs=["events",UI.Row.All_lanes];skills_directory=None;action_schema=None; binding_schema=None; display=Masc.Lane_addon_presentation.empty} in
+    outputs=["events",UI.Row.All_lanes];skills_directory=None;action_schema=None; binding_schema=None; display=Masc.Lane_addon_presentation.empty;
+    host_requests=None} in
   let consumer = {producer with id="metric-worker";incarnation="metric-worker";title="Project metric";
     installation_id=Some "project-metric";source_path=Some "/config/project-metric.toml";
     binding=Yojson.Safe.from_string {|{"sources":[{"source_id":"input","kind":"lane_output",
@@ -736,7 +828,7 @@ let evidence_export_chooses_a_keeper_by_name () =
     addon_id="fixture";title="Observed value changes";revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
     outputs=[];skills_directory=None;action_schema=None;binding_schema=None;
-    display=Masc.Lane_addon_presentation.empty} in
+    display=Masc.Lane_addon_presentation.empty;host_requests=None} in
   let snapshot : UI.snapshot = {instances=[worker "worker";worker "other"];
     output={rows=[row ~owner:"worker" "chosen";row ~owner:"worker" "second";row ~owner:"other" "foreign"];coverage=[]};
     complete=Some true;configuration=None} in
@@ -849,7 +941,7 @@ let refresh_preserves_operator_target () =
     addon_id="fixture";title=id;revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
     outputs=[];skills_directory=None;action_schema=None;binding_schema=None;
-    display=Masc.Lane_addon_presentation.empty} in
+    display=Masc.Lane_addon_presentation.empty;host_requests=None} in
   let declaration id : UI.declaration = {source_path=id ^ ".toml";
     installation_id=Some id;desired=Some "1";applied=Some "1";
     instance_id=Some id;issues=[];enabled=Some true;origin=UI.Parsed_declaration;application=None} in
@@ -915,7 +1007,7 @@ let detail_keeps_installation_ownership () =
     addon_id="fixture";title=id;revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=2;configuration_revision=Some "1";installation_id=Some id;source_path=Some ("/config/" ^ id ^ ".toml");
     binding=`Assoc ["sources",`List []];outputs=[];skills_directory=None;
-    action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty} in
+    action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty;host_requests=None} in
   let declaration id : UI.declaration = {source_path="/config/" ^ id ^ ".toml";
     installation_id=Some id;desired=Some "1";applied=Some "1";
     instance_id=Some id;issues=[];enabled=Some true;origin=UI.Parsed_declaration;application=None} in
@@ -996,7 +1088,7 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
   let worker : UI.instance = {id="report-worker";incarnation="incarnation";run_id="project";
     addon_id="custom";title="Project report";revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
-    outputs=[];skills_directory=None;action_schema=None;binding_schema=None;display} in
+    outputs=[];skills_directory=None;action_schema=None;binding_schema=None;display;host_requests=None} in
   let row : UI.Row.row = {id="report-row";lane_id="report-worker/report";kind=UI.Row.Value;
     title="Useful analysis";observed_at=1.;subject_id="project";clock=None;actor=None;
     fields=["body",`String "First finding\nSecond finding";"complete",`Bool false;
@@ -1190,7 +1282,7 @@ let current_installations_and_grouped_history_keep_exact_targets () =
     id;incarnation=id;run_id=run;addon_id=addon;title="Repeated title";
     revision="1";phase;runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=Some "1";installation_id=Option.map (fun _ -> addon) source_path;source_path;
     binding=`Assoc ["sources",`List []];outputs=[];skills_directory=None;
-    action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty} in
+    action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty;host_requests=None} in
   let old = worker "old-a" "project" "analysis" UI.Row.Detached (Some "/config/a.toml") in
   let current = worker "live-a" "project" "analysis" UI.Row.Attached (Some "/config/a.toml") in
   let old_two = {old with id="old-a-two";incarnation="old-a-two"} in
@@ -1360,4 +1452,7 @@ let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "switch drafts and reject mismatched file identity" `Quick file_identity_and_draft_sessions;
   test_case "configuration issues, named outputs and partial slice" `Quick configuration_and_ports;
   test_case "action identity and unknown outcome survive TUI projection" `Quick action_identity_and_uncertainty;
-  test_case "metric fields and receipts remain readable at terminal widths" `Quick metric_fields_and_receipts_remain_readable]]
+  test_case "metric fields and receipts remain readable at terminal widths" `Quick metric_fields_and_receipts_remain_readable;
+  test_case "a host request cycle decodes and fails alone" `Quick host_request_cycle_decodes_and_fails_alone;
+  test_case "every host issue reads back" `Quick every_host_issue_reads_back;
+  test_case "an answered installation opens its Results" `Quick answered_installation_opens_its_results]]

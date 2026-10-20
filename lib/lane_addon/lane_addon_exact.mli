@@ -104,6 +104,9 @@ val final_to_json : final -> Yojson.Safe.t
 val not_final_to_json : not_final -> Yojson.Safe.t
 (** The reason an attempt did not end the request, as the host shows it. *)
 
+val not_final_of_json : Yojson.Safe.t -> (not_final, string) result
+(** Exactly what {!not_final_to_json} writes; any other reason or field is an error. *)
+
 (** What a sent call can end in. *)
 type call_outcome =
   | Call_ended of call_final

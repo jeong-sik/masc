@@ -12,12 +12,30 @@ let document_rows ~width text =
       Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
         (Masc.Tui_terminal_text.sanitize_terminal_text line))
 type runtime_presence = Live_entry | Retained_binding | Presence_unknown
+type host_wait =
+  | Host_wait_exact of Masc.Lane_addon_exact.not_final
+  | Host_wait_operator
+  | Host_wait_source of string
+type host_issue =
+  | Host_listing_failed of string
+  | Host_listing_refused of string
+  | Host_relisted_delivered_request of string
+  | Host_result_delivery_failed of { request_id : string; detail : string }
+  | Host_exact_record_failed of { request_id : string; detail : string }
+  | Host_ask_record_failed of { request_id : string; detail : string }
+  | Host_no_exact_runner
+type host_requests = {
+  hr_cycles : int;
+  hr_waiting : (string * host_wait) list;
+  hr_issue : host_issue option;
+}
 type instance = {
   id : string; run_id : string; addon_id : string; title : string;
   revision : string; phase : Row.phase; runtime_presence : runtime_presence;
   observation_seq : int; rows_count : int;
   installation_id : string option; source_path : string option; configuration_revision : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
   skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
+  host_requests : (host_requests, string) result option;
 }
 type declaration_origin = Parsed_declaration | Issue_only
 type declaration = {
@@ -154,6 +172,44 @@ let runtime_presence json =
 let live_entry instance = match instance.runtime_presence with
   | Live_entry -> true
   | Retained_binding | Presence_unknown -> false
+let host_wait json =
+  match json with
+  | `Assoc ["reason", `String "awaiting_operator"] -> Ok Host_wait_operator
+  | `Assoc fields when List.assoc_opt "reason" fields = Some (`String "source_unavailable") ->
+      (match List.sort compare fields with
+       | ["detail", `String detail; "reason", _] -> Ok (Host_wait_source detail)
+       | _ -> Error "source_unavailable carries exactly its detail")
+  | json -> Result.map (fun reason -> Host_wait_exact reason) (Masc.Lane_addon_exact.not_final_of_json json)
+(* A request id is non-blank because the host's listing decoder refuses a
+   blank one; a detail is whatever text the failure carried. *)
+let detail_text = function `String s -> Ok s | _ -> Error "expected string"
+let host_issue json =
+  let* kind = get text "kind" json in
+  let request_detail make =
+    let* request_id = get text "request_id" json in
+    let* detail = get detail_text "detail" json in
+    Ok (make request_id detail) in
+  match kind with
+  | "listing_failed" -> let* detail = get detail_text "detail" json in Ok (Host_listing_failed detail)
+  | "listing_refused" -> let* detail = get detail_text "detail" json in Ok (Host_listing_refused detail)
+  | "relisted_delivered_request" ->
+      let* request_id = get text "request_id" json in Ok (Host_relisted_delivered_request request_id)
+  | "result_delivery_failed" ->
+      request_detail (fun request_id detail -> Host_result_delivery_failed { request_id; detail })
+  | "exact_record_failed" ->
+      request_detail (fun request_id detail -> Host_exact_record_failed { request_id; detail })
+  | "ask_record_failed" ->
+      request_detail (fun request_id detail -> Host_ask_record_failed { request_id; detail })
+  | "no_exact_runner" -> Ok Host_no_exact_runner
+  | other -> Error ("not a host request issue of this host: " ^ other)
+let host_requests json =
+  let* hr_cycles = get count "cycles" json in
+  let* hr_waiting = get (array (fun item ->
+    let* request_id = get text "request_id" item in
+    let* reason = get host_wait "reason" item in
+    Ok (request_id, reason))) "waiting" json in
+  let* hr_issue = optional "issue" host_issue json in
+  Ok { hr_cycles; hr_waiting; hr_issue }
 let instance json =
   let* id = get text "instance_id" json in
   let* run_id = get text "run_id" json in
@@ -186,8 +242,12 @@ let instance json =
   let* display = match List.assoc_opt "presentation" package_fields with
     | None -> Ok Masc.Lane_addon_presentation.empty
     | Some value -> Masc.Lane_addon_presentation.of_json value in
+  let host_requests = match json with
+    | `Assoc fields -> Option.map host_requests (List.assoc_opt "host_requests" fields)
+    | _ -> None in
   Ok { id; run_id; addon_id; title; revision; phase; runtime_presence; observation_seq; rows_count;
-    installation_id;source_path;configuration_revision;binding;outputs;skills_directory;incarnation;action_schema;binding_schema;display }
+    installation_id;source_path;configuration_revision;binding;outputs;skills_directory;incarnation;action_schema;binding_schema;display;
+    host_requests }
 let output json =
   let* rows = field "rows" json in
   let* coverage = field "coverage" json in
@@ -1271,6 +1331,60 @@ let help_lines = [
   "Advanced: A opens Add-on commands · Enter submits (including act or detach ID)";
 ]
 
+type read_target =
+  | Read_screen
+  | Read_detail of string * string
+  | Read_installation_results of string
+
+let read_still_wanted view ~showing target = match target with
+  | Read_screen -> true
+  | Read_detail (id, incarnation) -> view.screen = Detail (id, incarnation)
+  | Read_installation_results _ -> showing && view.screen = Overview
+
+let installation_results view ~installation_id =
+  let live = Option.bind view.snapshot (fun snapshot ->
+    List.find_opt (fun (item : instance) -> item.installation_id = Some installation_id && live_entry item)
+      snapshot.instances) in
+  match live with
+  | Some item ->
+      select_initial_result {view with screen=Detail (item.id, item.incarnation); focus=Timeline;
+        row_cursor = -1; scroll=0; selected=[]; document_key=None; presentation=Summary; error=None}
+  | None ->
+      {view with error=Some (Input_failure (installation_id
+        ^ " has no running worker; its Results appear while it runs"))}
+
+let host_wait_text = function
+  | Host_wait_operator -> "waiting for the operator's answer"
+  | Host_wait_source detail -> "source unavailable: " ^ detail
+  | Host_wait_exact reason ->
+      let module E = Masc.Lane_addon_exact in
+      (match reason with
+       | E.Lane_unavailable E.Lane_unconfigured -> "its lane has no table in runtime.toml"
+       | E.Lane_unavailable E.Lane_off -> "its lane is off"
+       | E.Lane_unavailable E.No_admitted_slots -> "its lane has no admitted slot"
+       | E.Lane_unavailable (E.Lane_registry_unavailable { detail }) -> "lane registry unavailable: " ^ detail
+       | E.Provider_refused (E.Provider_unavailable { detail }) -> "provider unavailable: " ^ detail
+       | E.Provider_refused (E.Provider_auth_refused { detail }) -> "provider refused authentication: " ^ detail
+       | E.Provider_refused (E.Provider_configuration_refused { detail }) ->
+           "provider refused the configuration: " ^ detail
+       | E.Attempt_in_progress -> "an attempt is running")
+let host_issue_text = function
+  | Host_listing_failed detail -> "the listing failed: " ^ detail
+  | Host_listing_refused detail -> "the listing was refused: " ^ detail
+  | Host_relisted_delivered_request request_id -> "listed " ^ request_id ^ " again after its result"
+  | Host_result_delivery_failed { request_id; detail } -> "delivering " ^ request_id ^ " failed: " ^ detail
+  | Host_exact_record_failed { request_id; detail } -> "recording " ^ request_id ^ " failed: " ^ detail
+  | Host_ask_record_failed { request_id; detail } -> "recording question " ^ request_id ^ " failed: " ^ detail
+  | Host_no_exact_runner -> "this host has no exact-output runner"
+let host_request_lines item = match item.host_requests with
+  | None | Some (Ok { hr_cycles = 0; hr_waiting = []; hr_issue = None }) -> []
+  | Some (Error detail) -> [""; "Host requests: unreadable · " ^ detail]
+  | Some (Ok { hr_cycles; hr_waiting; hr_issue }) ->
+      [""; Printf.sprintf "Host requests · last cycle, %d %s" hr_cycles (if hr_cycles = 1 then "pass" else "passes")]
+      @ (if hr_waiting = [] then ["  nothing waiting"]
+         else List.map (fun (request_id, wait) -> "  " ^ request_id ^ ": " ^ host_wait_text wait) hr_waiting)
+      @ Option.fold ~none:[] ~some:(fun issue -> ["  stopped: " ^ host_issue_text issue]) hr_issue
+
 let detail_lines ~width view =
   let wrap = document_rows ~width in
   match selected_instance view, view.snapshot with
@@ -1342,6 +1456,7 @@ let detail_lines ~width view =
                          "Applied: " ^ Option.value ~default:"unknown" declaration.applied]
                         @ List.map (fun issue -> "Issue: " ^ issue) declaration.issues
                    else []) config.declarations)
+          @ host_request_lines item
       | Rows ->
           if record_rows=[] then empty_result_lines view item
           else List.concat_map (fun (row : Row.row) ->

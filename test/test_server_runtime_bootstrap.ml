@@ -4074,35 +4074,60 @@ let test_health_response_survives_deleted_cwd () =
              |> member "effective_base_path"
              |> to_string)))
 
-let check_lazy_group group ~name ~tasks =
-  Alcotest.(check string) "group name" name group.Server_runtime_bootstrap.group_name;
-  Alcotest.(check (list string))
-    (name ^ " tasks")
-    tasks
-    group.Server_runtime_bootstrap.task_names
+let test_retention_does_not_hold_restoration () =
+  let previous = Server_startup_state.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Server_startup_state.For_testing.restore previous)
+    (fun () ->
+      Server_startup_state.reset ();
+      Server_startup_state.mark_state_ready () |> Result.get_ok;
+      Server_startup_state.prepare_lazy_tasks
+        ~tasks:(Server_runtime_bootstrap.lazy_startup_task_names ())
+      |> Result.get_ok;
+      Eio_main.run (fun _ ->
+        Eio.Switch.run (fun sw ->
+          let entered, entered_r = Eio.Promise.create () in
+          let release, release_r = Eio.Promise.create () in
+          let finished, finished_r = Eio.Promise.create () in
+          Server_runtime_startup_maintenance.start_maintenance ~sw
+            ~task:Server_runtime_startup_maintenance.Jsonl_retention
+            ~run:(fun () ->
+              Eio.Promise.resolve entered_r ();
+              Eio.Promise.await release;
+              Eio.Promise.resolve finished_r ());
+          Eio.Promise.await entered;
+          Alcotest.(check bool) "restoration still blocks Keeper autoboot"
+            false (Server_startup_state.pending_lazy_tasks () = []);
+          Server_startup_state.finish_lazy_task ~task:"restore_sessions";
+          Alcotest.(check (list string)) "held retention does not hold the barrier"
+            [] (Server_startup_state.pending_lazy_tasks ());
+          let state = Server_startup_state.snapshot () in
+          Alcotest.(check bool) "restoration completion publishes ready"
+            true (state.phase = Server_startup_state.Ready);
+          Alcotest.(check (option string)) "maintenance needs no boot-guard failure"
+            None state.last_error;
+          Eio.Promise.resolve release_r ();
+          Eio.Promise.await finished)))
 
-let test_lazy_startup_plan_groups_independent_tasks () =
-  let groups = Server_runtime_bootstrap.lazy_startup_plan () in
-  Alcotest.(check (list string))
-    "group order"
-    [ "initialize"; "cleanup" ]
-    (List.map
-       (fun group -> group.Server_runtime_bootstrap.group_name)
-       groups);
-  match groups with
-  | [ initialize; cleanup ] ->
-      check_lazy_group initialize ~name:"initialize"
-        ~tasks:[ "restore_sessions" ];
-      check_lazy_group cleanup ~name:"cleanup"
-        ~tasks:[ "jsonl_prune" ];
-      Alcotest.(check (list string))
-        "flattened task order"
-        [
-          "restore_sessions";
-          "jsonl_prune";
-        ]
-        (Server_runtime_bootstrap.lazy_startup_task_names ())
-  | _ -> Alcotest.fail "unexpected lazy startup group shape"
+let test_retention_failure_does_not_fail_owner () =
+  let previous = Server_startup_state.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Server_startup_state.For_testing.restore previous)
+    (fun () ->
+      Server_startup_state.reset ();
+      Server_startup_state.mark_state_ready () |> Result.get_ok;
+      let entered = ref false in
+      Eio_main.run (fun _ ->
+        Eio.Switch.run (fun sw ->
+          Server_runtime_startup_maintenance.start_maintenance ~sw
+            ~task:Server_runtime_startup_maintenance.Jsonl_retention
+            ~run:(fun () -> entered := true; raise Exit)));
+      Alcotest.(check bool) "failing maintenance actually ran" true !entered;
+      let state = Server_startup_state.snapshot () in
+      Alcotest.(check bool) "ordinary maintenance failure leaves owner ready"
+        true (state.phase = Server_startup_state.Ready);
+      Alcotest.(check (option string)) "maintenance does not fail the startup barrier"
+        None state.last_error)
 
 let test_keeper_lifecycle_refresh_invalidates_projection_snapshot () =
   with_temp_dir "keeper-lifecycle-projection" (fun dir ->
@@ -6188,8 +6213,10 @@ let () =
             test_otel_exporter_setup_failure_is_soft;
           Alcotest.test_case "otel exporter setup is background" `Quick
             test_otel_exporter_setup_does_not_block_maintenance_wiring;
-          Alcotest.test_case "lazy startup plan parallelizes independent tasks"
-            `Quick test_lazy_startup_plan_groups_independent_tasks;
+          Alcotest.test_case "retention does not delay restored Keeper startup"
+            `Quick test_retention_does_not_hold_restoration;
+          Alcotest.test_case "retention failure is isolated"
+            `Quick test_retention_failure_does_not_fail_owner;
           Alcotest.test_case
             "keeper lifecycle refresh invalidates projection snapshot"
             `Quick

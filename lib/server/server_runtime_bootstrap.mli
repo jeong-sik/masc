@@ -133,13 +133,16 @@ val bootstrap_server_state_blocking : Mcp_server.server_state -> unit
 
 val sync_bootable_keeper_credentials : Mcp_server.server_state -> unit
 
+type lazy_startup_task = Restore_sessions
+
 type lazy_startup_group = {
   group_name : string;
-  task_names : string list;
+  tasks : lazy_startup_task list;
 }
 
 val lazy_startup_plan : unit -> lazy_startup_group list
-(** Deterministic startup task grouping.  Groups run in list order; the
+(** Deterministic grouping of work required before Keeper autoboot. Retention
+    runs separately as post-readiness maintenance. Groups run in list order; the
     tasks inside a group run in parallel, so a group holds only tasks whose
     stores are independent. *)
 

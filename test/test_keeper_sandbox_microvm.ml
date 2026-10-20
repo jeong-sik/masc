@@ -1237,8 +1237,8 @@ let test_startup_sweep_serializes_inventory_with_boot () =
       Unix.WEXITED 0, ""
     | argv -> Alcotest.failf "unexpected sweep command: %s" (String.concat " " argv)
   in
-  Server_runtime_startup_maintenance.start_microvm_guest_maintenance ~sw
-    ~sweep:(fun () ->
+  Server_runtime_startup_maintenance.start_maintenance ~sw
+    ~task:Server_runtime_startup_maintenance.Microvm_guest_sweep ~run:(fun () ->
       ignore (Turn.sweep_abandoned_microvm_guests
         ~base_path:sweep_base_path
         ~command_available:(String.equal "container")
@@ -1325,20 +1325,23 @@ let test_sweep_exception_does_not_poison_lifecycle raise_error =
 ;;
 
 let test_startup_maintenance_is_owned_by_its_switch () =
-  Eio_main.run @@ fun _ ->
-  let started, started_r = Eio.Promise.create () in
-  let cancelled = ref false in
-  (try
-     Eio.Switch.run @@ fun sw ->
-     Server_runtime_startup_maintenance.start_microvm_guest_maintenance ~sw
-       ~sweep:(fun () ->
-         Eio.Promise.resolve started_r ();
-         try Eio.Fiber.await_cancel () with
-         | Eio.Cancel.Cancelled _ as exn -> cancelled := true; raise exn);
-     Eio.Promise.await started;
-     Eio.Switch.fail sw Exit
-   with Exit -> ());
-  Alcotest.(check bool) "shutdown cancels owned maintenance" true !cancelled
+  List.iter (fun task ->
+    Eio_main.run @@ fun _ ->
+    let started, started_r = Eio.Promise.create () in
+    let cancelled = ref false in
+    (try
+       Eio.Switch.run @@ fun sw ->
+       Server_runtime_startup_maintenance.start_maintenance ~sw ~task
+         ~run:(fun () ->
+           Eio.Promise.resolve started_r ();
+           try Eio.Fiber.await_cancel () with
+           | Eio.Cancel.Cancelled _ as exn -> cancelled := true; raise exn);
+       Eio.Promise.await started;
+       Eio.Switch.fail sw Exit
+     with Exit -> ());
+    Alcotest.(check bool) "shutdown cancels owned maintenance" true !cancelled)
+    [ Server_runtime_startup_maintenance.Jsonl_retention;
+      Server_runtime_startup_maintenance.Microvm_guest_sweep ]
 ;;
 
 let live_entry ~base_path ~keeper_name ~id =
@@ -2846,6 +2849,7 @@ let test_running_guest_is_a_remote_endpoint () =
     Alcotest.(check (option string)) "commits carry the keeper as committer"
       (Some "lane-smith")
       (List.assoc_opt "GIT_COMMITTER_NAME" injected);
+    Unix.mkdir (Masc.Workspace.keepers_runtime_dir config) 0o700;
     let host_gh_dir =
       match
         Masc.Keeper_github_identity.ensure_config_dir

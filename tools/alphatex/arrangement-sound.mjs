@@ -194,7 +194,7 @@ export function startSoundArrangement({ project, route, sourceRoot, directory, r
           preparation: { promise: Promise.resolve({ path: source.planPath, sha256: source.planHash }),
             cancel: new Int32Array(new SharedArrayBuffer(4)) }, outputPath: source.outputPath, run: runSoundfont,
         }) : renderBoundVst(source.sound, { ...(source.kind === 'practice'
-          ? { timeline_path: source.timelinePath, expected_timeline_sha256: source.timelineHash } : { midi_path: source.midiPath }), output_path: source.outputPath,
+          ? { frames_path: source.timelinePath, expected_timeline_sha256: source.timelineHash } : { midi_path: source.midiPath }), output_path: source.outputPath,
           sample_rate: source.sampleRate ?? 44100, tail_seconds: 0 }, { run })
         children.add(child)
         try { rendered.push({ kind: source.kind, value: await child.promise }); check() }

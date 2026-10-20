@@ -198,6 +198,40 @@ and [region properties](https://manual.ardour.org/editing/editing-regions-and-se
 separate timing operation. This model performs no implicit WAV resampling,
 stretching, source-tempo rewrite or note-only conversion of expressive MIDI.
 
+## VST instruments through the audio output
+
+Select a MIDI region (or cycle to its library asset with `a`) and press **i**.
+The instrument/preset picker verifies the selected VST, captures its actual
+state, and stores it in that asset. Undo/redo and saved projects retain the
+captured preset and instrument identity/version. Choosing a sound switches to
+the audio output route and starts its audition. **Space** subsequently starts,
+pauses or resumes; `:stop` cancels preparation or stops playback.
+
+Every audible MIDI asset needs a selected VST sound on this route. A fresh
+instance for each region/source port preserves overlapping performances without
+sharing expression or sustain state. Native MIDI preparation reconstructs the
+state at each trim/repeat boundary, retains same-time message order and release
+velocities, and releases only emitted keys/pedals. Unsafe state reconstruction
+or fragmented SysEx is reported before synthesis. Original SMF bytes are not
+rewritten. Bank/program messages do not replace the chosen VST preset.
+
+Instances render onto a common 44.1 kHz float stereo sample grid, then sum without
+normalization. Their backing WAV joins ordinary WAV regions in the existing
+arrangement transport, including authored loops, count-in and metronome. MIDI
+timing retains the native projection's source clock; audio onset is quantized to
+PCM samples. One-shot renders include a one-second release tail; loop renders
+have no appended tail interval. A missing instrument, changed version, invalid
+preset or silent note-bearing instance fails visibly. Controller-only ports may
+legitimately be silent. There is no implicit SoundFont replacement.
+
+Preparation, instance WAVs and hash receipts live in one private playback tree.
+Cancellation joins the owned native child before deleting that tree; playback
+keeps it until the transport closes. The saved project owns musical source and
+preset state, not those temporary render files. Install both the current
+`install-alphatex.sh` and `install-vst-host.sh` helpers to use this route.
+Explicit MIDI output bindings continue to select physical MIDI playback;
+captured MIDI2/UMP uses its separate paired route.
+
 ## Storage and import
 
 MIDI assets embed the original source document, including original file bytes

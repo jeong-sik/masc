@@ -13,6 +13,7 @@ import { mkdtemp, readFile, writeFile, rename, rm } from 'node:fs/promises'
 import { join, dirname, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash, randomUUID } from 'node:crypto'
+import { pickerFooter, selectionLabel } from '../instruments.mjs'
 import { emitKeypressEvents } from 'node:readline'
 import { newArrangement, editArrangement, arrangementSchedule } from '../arrangement.mjs'
 import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } from '../arrangement-playback.mjs'
@@ -79,7 +80,7 @@ test('actual IO worker preserves sources in redo history when saving to a differ
 
 const flush=()=>new Promise(resolve=>setImmediate(resolve))
 async function controller(options={}){
-  const observed={requests:[],saved:[],recovered:[],terminated:false,players:[],removed:[],takes:[],captures:[],monitors:[],live:[],liveAttempts:[],claims:[],calibrations:[],writes:[],phrases:[],umpEditors:[],soundSelections:[]},process=new EventEmitter()
+  const observed={requests:[],saved:[],recovered:[],terminated:false,players:[],removed:[],takes:[],captures:[],monitors:[],live:[],liveAttempts:[],claims:[],calibrations:[],writes:[],phrases:[],umpEditors:[],soundSelections:[],sounds:[],pickers:[]},process=new EventEmitter()
   const admitLive=options.admitLive, heldPlaybackReady=options.playbackReady
   process.stdin=Object.assign(new EventEmitter(),{isTTY:true,isRaw:false,setRawMode(value){this.isRaw=value},resume(){},pause(){}})
   process.stdout=Object.assign(new EventEmitter(),{isTTY:true,columns:100,rows:24,write(){}});process.stderr={write(){}}
@@ -97,6 +98,21 @@ async function controller(options={}){
   }
   const slot=`arrange-controller-${randomUUID()}`
   globalThis[slot]={ StatusReader,process,Worker:OwnedWorker,arrangementSchedule,arrangementRoute,selectArrangementRoute,arrangementPlaybackRequest,...editorAPI,join,dirname,resolve,tmpdir,randomUUID,
+    defaultStateDirectory:()=>'/synthetic-state',pickerFooter,selectionLabel,
+    InstrumentPicker:class {
+      constructor(callbacks){this.callbacks=callbacks;this.view=null;observed.pickers.push(this)}
+      async open(){this.view={kind:'presets',title:'Instrument',cursor:0};this.callbacks.notify()}
+      close(){this.view=null;this.callbacks.notify()}
+      async settled(){}
+      items(){return []}
+      isActive(){return false}
+      async keypress(text,key){if(key.name==='escape')this.close();else if(key.name==='return'){this.close();this.callbacks.selected(options.selection)}}
+    },
+    captureVstSound(selection){
+      let finish,reject;const promise=new Promise((yes,no)=>{finish=yes;reject=no})
+      const entry={selection,finish,reject,cancelled:0};observed.sounds.push(entry)
+      return {promise,cancel(){entry.cancelled++}}
+    },
     practiceEnabled, emitKeypressEvents(){},safeText:String,recordingEpoch,recordingCorrectionContext,recordingCorrectionCapture,calibrationMilliseconds,calibrationResidual,validateCalibrationCapture,
     liveMidiPlan, calibrationSelection, midiDestinations:async()=>[],
     captureFluidSound(path){
@@ -325,7 +341,7 @@ test('document mutation stops the admitted playback revision while cursor motion
 
 async function closeController(view) {
   view.abort.abort()
-  for (const job of view.observed.requests.filter(job=>['prepare-wave','prepare-midi','prepare-mixed','prepare-take','prepare-phrase','prepare-ump','import-ump','import-wave','import-midi','import-take'].includes(job.kind))) {
+  for (const job of view.observed.requests.filter(job=>['prepare-wave','prepare-midi','prepare-vst','prepare-mixed','prepare-take','prepare-phrase','prepare-ump','import-ump','import-wave','import-midi','import-take'].includes(job.kind))) {
     view.worker.emit('message',{id:job.id,ok:false,cancelled:true,error:'Cancelled'})
   }
   for (const player of view.observed.players) player.finish()
@@ -366,6 +382,45 @@ for (const opening of ['shortcut', 'command']) {
   })
 }
 
+function instrumentFixture() {
+  const bytes=Buffer.from('owned arrangement preset'),selection={plugin_path:'/chosen.vst3',plugin_name:null,preset_path:null,name:'Chosen'}
+  const sound={kind:'vst',selection,preset:{data:bytes.toString('base64'),sha256:createHash('sha256').update(bytes).digest('hex')},instrument:{identifier:'chosen',version:'1'}}
+  const asset={id:'asset-1',name:'Keys',kind:'midi',source:importMidiSource(midi())}
+  let project=editArrangement(newArrangement(),{kind:'asset-add',asset})
+  project=editorAPI.arrangementCommand(editorAPI.arrangementEditor(project),'place asset-1 0').editor.project
+  return {project,sound,selection}
+}
+test('arrangement picker captures the selected asset sound and sends it to audio preparation; undo restores MIDI unchanged',async()=>{
+  const fixture=instrumentFixture(),before=exportMidiSource(fixture.project.assets[0].source),view=await controller(fixture)
+  try {
+    view.key('i');await flush();view.key('return');await flush()
+    assert.deepEqual(view.observed.sounds[0].selection,fixture.selection)
+    view.observed.sounds[0].finish(fixture.sound);await flush();await flush()
+    const prepared=view.observed.requests.find(job=>job.kind==='prepare-vst');assert.ok(prepared)
+    assert.deepEqual(prepared.project.assets[0].source.sound,fixture.sound)
+    assert.deepEqual(exportMidiSource(prepared.project.assets[0].source),before)
+    view.worker.emit('message',{id:prepared.id,ok:false,error:'Fixture end'});await flush()
+    view.command('undo');view.command('save');await flush()
+    assert.equal(view.observed.saved.at(-1).project.assets[0].source.sound,undefined)
+  } finally {await closeController(view)}
+})
+test('document edits and close retire a pending instrument capture without adopting a late sound',async()=>{
+  for(const action of ['edit','close']){
+    const fixture=instrumentFixture(),view=await controller(fixture)
+    try{
+      view.key('i');await flush();view.key('return');await flush()
+      const capture=view.observed.sounds[0];assert.ok(capture)
+      if(action==='edit'){view.command('title Retained edit');await flush()}
+      else{view.key('q');await flush()}
+      assert.ok(capture.cancelled>0)
+      capture.finish(fixture.sound);await flush();await flush()
+      assert.equal(view.observed.requests.filter(job=>job.kind==='prepare-vst').length,0)
+      if(action==='edit'){view.command('save');await flush()}
+      assert.equal(view.observed.saved.at(-1).project.assets[0].source.sound,undefined)
+      if(action==='edit')assert.equal(view.observed.saved.at(-1).project.title,'Retained edit')
+    }finally{await closeController(view)}
+  }
+})
 test('explicit MIDI selection cannot route a WAV arrangement to default audio; choosing audio clears MIDI bindings',async()=>{
   const view=await controller()
   try {
@@ -388,6 +443,8 @@ test('MIDI asset bindings survive prepare and own pause/seek/resume; route chang
     view.worker.emit('message',{id:job.id,ok:true,result:{project:editArrangement(job.project,{kind:'asset-add',asset}),asset:asset.id}});await flush()
     view.command('place asset-1 0');view.command('output explicit-audio');view.key('space');await flush()
     assert.equal(view.observed.requests.filter(job=>job.kind==='prepare-midi').length,0)
+    const vst=view.observed.requests.find(job=>job.kind==='prepare-vst');assert.ok(vst)
+    view.worker.emit('message',{id:vst.id,ok:false,error:'Choose a VST sound'});await flush()
     view.command('midi-port asset-1 7 42');view.key('space');await flush()
     const prepared=view.observed.requests.find(job=>job.kind==='prepare-midi');assert.ok(prepared)
     assert.deepEqual(prepared.portBindings,[{asset:'asset-1',port:7,destination:'42'}])

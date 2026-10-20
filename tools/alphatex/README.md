@@ -393,8 +393,14 @@ that asset; `:midi-output MIDI_UID` sends all MIDI assets externally. Each sourc
 and selected SMF2 pattern renders separately with its frozen preset. Original
 tempo/SMPTE timing, source trims and repeat periods remain authoritative, including
 loop practice and count-in. Stop or exit cancels rendering and waits for the
-native process before removing its private files. Independent ports in one source
-still require explicit MIDI outputs.
+native process before removing its private files. With an audio route, independent
+ports in a MIDI source render through separate instances of its captured VST sound.
+
+Backing MIDI assets retain this sound. In the arrangement editor, **i** chooses
+the selected MIDI region/asset's VST instrument and preset. **Space** renders
+audible MIDI regions through those captured sounds and plays them alongside WAV
+backing through the selected audio output. Selection is undoable and persists
+with the project; original MIDI bytes and source clocks remain unchanged.
 Subsequent Space starts, pauses or resumes the preview; `:stop` ends playback. `l` toggles
 repetition of the loop region inside one native AVAudioEngine/PlayerNode. `:seek 4` moves to
 quarter-note beat 4. Select an audio output with `--output UID` or `:output UID`;
@@ -412,9 +418,11 @@ exports the currently selected audio instrument.
 
 Imported single-port MIDI can use the same VST route, including the chosen SMF2
 pattern and SMPTE timing. The original source document is retained; a synchronous
-PPQ performance copy is rendered. Independent source ports require separate VST
-instances, which are not connected yet; use their explicit MIDI output bindings.
-Source clip looping still requires expression-state reconstruction. These
+PPQ performance copy is rendered. In arrangements, independent region/port
+instances preserve separate expression and pedal state. The phrase/source
+audition still requires a single port; multi-port sources can use the arrangement
+VST route or their explicit MIDI output bindings.
+Phrase/source audition clip looping still requires expression-state reconstruction. These
 remaining routes are part of the broader music/TUI work.
 For external MIDI, use `--midi-output=ID` or `:midi-output ID`; `--devices` lists
 CoreMIDI destinations separately from recording sources. Use the equals form
@@ -900,7 +908,8 @@ metronome during backing playback. `:practice 2 off` counts two bars, then stops
 the click while backing continues. `:practice 0 off` disables both. The setting
 is undoable and survives saving/reopening. Each meter denominator is one click;
 the first beat of every bar is accented. Tempo changes affect the next start.
-MIDI-only arrangements also require `:mixed-output AUDIO_UID` for the click.
+Physical MIDI backing also requires `:mixed-output AUDIO_UID` for the click.
+VST backing and the click use the arrangement's selected audio output.
 
 With practice enabled, `:record` from stopped starts backing and admits recording
 after its native playing acknowledgement. Count-in audio and backing share the

@@ -15,6 +15,7 @@ const diagnosticBytes = 64 * 1024
 export function nativeJob(request, { command = 'masc-vst-host', args = [], label = 'VST' } = {}) {
   const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] })
   let cancelled = false
+  let failure = null
   let overflow = false
   let stdout = Buffer.alloc(0)
   let stderr = Buffer.alloc(0)
@@ -27,9 +28,10 @@ export function nativeJob(request, { command = 'masc-vst-host', args = [], label
     // EPIPE is settled by the process's error/close receipt below. It must not
     // become an unhandled exception if a native loader crashes before reading.
     child.stdin.on('error', () => {})
-    child.once('error', reject)
+    child.once('error', error => { failure = error })
     child.once('close', (code, signal) => {
       if (cancelled) { const error = new Error(`${label} job cancelled`); error.code = 'ABORT_ERR'; reject(error); return }
+      if (failure) { reject(failure); return }
       if (overflow) { reject(new Error(`${label} reply exceeds its protocol memory bound`)); return }
       let reply
       try { reply = JSON.parse(stdout.toString('utf8')) }

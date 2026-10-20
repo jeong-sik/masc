@@ -88,9 +88,27 @@ preserves that absence rather than refusing the pause or inventing a provider
 turn; it emits no per-AfterTurn cost event in that case and projects a null
 ordinal. Other successful stop kinds still require their original ordinal.
 
+## Stored HTTP observation
+
+The existing admin `GET /api/v1/keepers/:name/checkpoints` response includes
+`input_wait_observation`, with schema `masc.keeper.input-wait.observation.v1`
+and source `canonical_checkpoint`. One strict exact-snapshot read supplies
+the current summary, the full pending proof and its checkpoint reference
+`{trace_id, turn_count, sha256}`. The SHA-256 names the bytes actually read,
+without JSON re-encoding. Replacing a request in the same turn changes that
+reference. It is an observation at that read, not a promise that storage
+has remained unchanged until a later response.
+
+`stored_pending` includes the original run ID and canonical request; a readable
+checkpoint with no wait is `stored_none`, with a non-null reference and null
+pending input. Missing, corrupt, unsupported, identity-mismatched or unreadable
+sources produce `unavailable` with a typed error, null reference and null input.
+History remains a separate summary and never supplies a replacement current
+wait. This explicit inventory route adds no fleet-wide scan or refresh loop.
+
 An exact persisted checkpoint proves its stored observation, not the authority
-of every possible live or retained continuation. HTTP current-state observation,
-Owner-serialized response admission/CAS, retained continuation reconciliation,
-SSE invalidation and TUI projection remain subsequent layers. In particular,
-the host must distinguish an unreadable source from a stored absent wait, and
-never promote historical checkpoint rows or feed replay into a current owner.
+of every possible live or retained continuation. In particular, retained native
+Owner state can differ after an uncertain canonical write. Owner-serialized
+response admission/CAS, live/retained reconciliation, SSE invalidation and TUI
+projection remain subsequent layers. Clients must not turn this stored
+observation or historical feed replay into permission to submit a response.

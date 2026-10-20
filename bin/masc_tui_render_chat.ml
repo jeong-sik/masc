@@ -2576,7 +2576,10 @@ let settled_block_memo : (string * string, settled_block_memo) Hashtbl.t =
   Hashtbl.create 16
 
 (* An observed block whose journal read is refused, with its STATUS row,
-   under the same key and beside the block it was built from. *)
+   under the same key and beside the block it was built from. The entry goes
+   on the first frame that draws the block without the row. A turn that
+   leaves the observed set while refused keeps its entry for the session,
+   as settled_block_memo keeps its blocks. *)
 let unavailable_block_memo : (string * string, log_block * log_block) Hashtbl.t =
   Hashtbl.create 4
 
@@ -3257,16 +3260,20 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
         let ended = Masc_tui_types.observed_log_has_ended state log in
         let unavailable = Masc_tui_types.observed_log_is_unavailable state log in
         let block = held_projection ~committed:(ended || unavailable) log in
+        let key =
+          ( Masc_tui_types.turn_log_keeper_name log
+          , Masc_tui_types.turn_log_request_id log )
+        in
         match unavailable, List.rev block.lb_entries with
-        | false, _ | true, [] -> block
+        | false, _ | true, [] ->
+            (* A journal that reads again, or a block with no row to copy,
+               needs no STATUS copy kept. *)
+            Hashtbl.remove unavailable_block_memo key;
+            block
         | true, last :: _ ->
             (* The block with its STATUS row is kept beside the block it
                extends, so a refused journal does not hand the merge a new
                block on every frame. *)
-            let key =
-              ( Masc_tui_types.turn_log_keeper_name log
-              , Masc_tui_types.turn_log_request_id log )
-            in
             (match Hashtbl.find_opt unavailable_block_memo key with
              | Some (source, with_status) when source == block -> with_status
              | Some _ | None ->

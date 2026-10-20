@@ -2043,6 +2043,44 @@ let test_a_live_turn_keeps_the_merged_rows_between_journal_reads () =
       (List.for_all (fun row -> List.memq row grown.layout_entries) kept))
 ;;
 
+(* A running turn's block is memoised on its log, but whether the turn is
+   still open is read from the session: a refused journal read closes the
+   turn and leaves its log, its block and the committed rows as they were.
+   The merged rows must follow, or the last row keeps an open rail. *)
+let test_a_turn_that_stops_being_open_is_merged_again () =
+  let module Layout = Masc_tui_message_layout in
+  let module Render = Masc_tui_render_chat in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+  state.msg_target_keeper_name <- Some "alpha";
+  let occurrence : E.tool_stream_occurrence =
+    { stream_scope = 0; provider_message_id = None; block_index = 0 } in
+  let live = inflight_with_log ~keeper_name:"alpha" ~started_at:100. [] in
+  ignore (Tui_types.turn_log_add_journaled live.log
+    [ line 0 100. (E.Run_started { run_id = "l"; thread_id = "keeper:alpha" });
+      line 1 100.1 (E.Text_delta {text="looking"; response=Unobserved_scope (None)});
+      line 2 100.2 (E.Tool_call_start { occurrence;
+        tool_call_id = Some "call-live"; tool_call_name = "Read" });
+      line 3 100.3 (E.Tool_call_end { occurrence; tool_call_id = Some "call-live" });
+      line 4 100.4 (E.Text_delta {text="still going"; response=Unobserved_scope (None)}) ]);
+  state.msg_inflight <- [live]; state.msg_live <- Some live.log;
+  let projection () =
+    Render.keeper_message_projection state ~keeper_name:"alpha" ~chat_cols:120 in
+  let closing (entry : Layout.entry) = match entry.turn_rail with
+    | Layout.Rail_closes | Layout.Rail_stands -> true
+    | Layout.Rail_opens | Layout.Rail_does | Layout.Rail_says
+    | Layout.Rail_joins _ | Layout.Rail_none -> false in
+  let open_rows = projection () in
+  check bool "the running turn has no closing row" false
+    (List.exists closing open_rows.layout_entries);
+  Tui_types.remember_journal_unavailable state (Tui_types.turn_log_journal_key live.log);
+  let closed = projection () in
+  check bool "a turn that stopped being open is merged again" false
+    (closed.layout_entries == open_rows.layout_entries);
+  check bool "its last row now closes the turn" true
+    (List.exists closing closed.layout_entries)
+;;
+
 let journal_log ~request_id ~started_at ?(finished = true) () =
   let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id ~started_at in
   let _ = Tui_types.turn_log_add_journaled log
@@ -6369,6 +6407,8 @@ let () =
             test_journal_receipts_only_name_newly_folded_results
         ; test_case "a live turn keeps the merged rows between journal reads" `Quick
             test_a_live_turn_keeps_the_merged_rows_between_journal_reads
+        ; test_case "a turn that stops being open is merged again" `Quick
+            test_a_turn_that_stops_being_open_is_merged_again
         ; test_case "hold_settled_log orders by start and replaces only partial logs"
             `Quick test_hold_settled_log_orders_by_start_and_replaces_only_partial_logs
         ; test_case "a journal-built log holds its turn in the timeline" `Quick

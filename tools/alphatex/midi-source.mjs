@@ -364,8 +364,15 @@ export function editMidiSourceNotes(source, edits, { pattern } = {}) {
       if (info.format === 2 && track !== performance.pattern) throw new Error('Insert into the selected MIDI pattern')
       const channel = integer(edit.channel, 'MIDI insertion channel', 0, 15)
       const key = integer(pitch, 'MIDI note pitch', 0, 127), vel = integer(velocity, 'MIDI note velocity', 1, 127)
-      const at = integer(start, 'MIDI note start'), end = integer(at + integer(duration, 'MIDI note duration', 1), 'MIDI note end')
-      const on = insert(track, at, [0x90 | channel, key, vel]), off = insert(track, end, [0x80 | channel, key, 0])
+      const at = integer(start, 'MIDI note start'), end = integer(at + integer(duration, 'MIDI note duration', 0), 'MIDI note end')
+      const release = edit.release ?? { kind: 'note-off', velocity: 0 }
+      let releaseBytes
+      switch (release.kind) {
+        case 'note-off': releaseBytes = [0x80 | channel, key, integer(release.velocity, 'MIDI release velocity', 0, 127)]; break
+        case 'note-on-zero': releaseBytes = [0x90 | channel, key, 0]; break
+        default: throw new Error('Unknown MIDI note release form')
+      }
+      const on = insert(track, at, [0x90 | channel, key, vel]), off = insert(track, end, releaseBytes)
       // Insertions follow existing same-tick metadata, so the active port at
       // their start is the source route they must retain through their note-off.
       const port = performance.events.filter(event => event.track === track && event.tick <= at

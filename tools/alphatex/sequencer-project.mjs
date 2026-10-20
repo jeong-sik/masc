@@ -188,20 +188,27 @@ export function editProject(project, trackId, edit) {
   const track = next.tracks.find(track => track.id === trackId)
   if (!track) throw new Error('Selected track no longer exists')
   const add = note => track.notes.push({ id: uniqueId('note', track.notes), ...note })
+  const noteEdit = change => {
+    switch (change.kind) {
+      case 'note': add({ pitch: pitch(change.pitch), start: change.start, duration: change.duration, velocity: change.velocity }); break
+      case 'remove': {
+        const index = track.notes.findIndex(note => note.id === change.id)
+        if (index < 0) throw new Error('No selected note')
+        track.notes.splice(index, 1); break
+      }
+      case 'change-note': {
+        const note = track.notes.find(note => note.id === change.id)
+        if (!note) throw new Error('No selected note')
+        if (change.pitch !== undefined) note.pitch = pitch(change.pitch)
+        for (const key of ['start', 'duration', 'velocity']) if (change[key] !== undefined) note[key] = change[key]
+        break
+      }
+      default: throw new Error('Unknown batch note edit')
+    }
+  }
   switch (edit.kind) {
-    case 'note': add({ pitch: pitch(edit.pitch), start: edit.start, duration: edit.duration, velocity: edit.velocity }); break
-    case 'remove': {
-      const index = track.notes.findIndex(note => note.id === edit.id)
-      if (index < 0) throw new Error('No selected note')
-      track.notes.splice(index, 1); break
-    }
-    case 'change-note': {
-      const note = track.notes.find(note => note.id === edit.id)
-      if (!note) throw new Error('No selected note')
-      if (edit.pitch !== undefined) note.pitch = pitch(edit.pitch)
-      for (const key of ['start', 'duration', 'velocity']) if (edit[key] !== undefined) note[key] = edit[key]
-      break
-    }
+    case 'note': case 'remove': case 'change-note': noteEdit(edit); break
+    case 'batch-notes': for (const change of edit.changes) noteEdit(change); break
     case 'chord': {
       const notes = chordVoicing(edit.symbol, edit)
       for (const value of notes) add({ pitch: value, start: edit.start, duration: edit.duration, velocity: edit.velocity })

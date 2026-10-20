@@ -7297,7 +7297,7 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
     String.split_on_char '\n'
       (Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true text)
     |> List.concat_map (fun line -> if line = "" then [""] else
-      Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 6)) line) in
+      Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols - 2)) line) in
   let block_tag = function
     | "article" | "blockquote" | "dd" | "div" | "dt" | "figcaption"
     | "figure" | "footer" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
@@ -7504,12 +7504,12 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
             (Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true page.text)
           |> List.concat_map (fun line ->
               if line = "" then [""] else
-              Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 6)) line) in
+              Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols - 2)) line) in
           lines, None
 
 let browser_lane_url_line ~cols draft =
   let safe = Masc_tui_keeper_chat_projection.terminal_safe_text draft in
-  "  URL> " ^ Masc_tui_message_layout.input_viewport ~max_cells:(max 1 (cols - 12)) safe ^ "▏"
+  "  URL> " ^ Masc_tui_message_layout.input_viewport ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols - 8)) safe ^ "▏"
 
 type workspace_activity_read = Tui_decode.repository_activity_snapshot
 

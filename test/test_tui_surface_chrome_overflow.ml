@@ -101,6 +101,65 @@ let test_the_frame_windows_a_scrolled_body () =
   Alcotest.(check bool) "and draws no position row" false
     (shows lines "[lines ")
 
+(* Where a body row's content lands and how much of it the frame keeps, read
+   from the frame's own constants. The margin is one number: a full-screen
+   surface leaves it blank and an overlay draws its border in it, and on both
+   the content starts at the same column, keeps the inner width whole, and is
+   where a picture placed over the body starts. *)
+let test_body_rows_follow_the_frame_margin () =
+  let state = fresh () in
+  let inner = Masc_tui_frame.inner_width ~cols in
+  Alcotest.(check int) "the content gets what the two margins leave"
+    (cols - (2 * Masc_tui_frame.margin_cells)) inner;
+  Alcotest.(check int) "the content starts after the left margin"
+    Masc_tui_frame.margin_cells Masc_tui_frame.content_column;
+  Alcotest.(check int) "the outer width gives the inner width back" cols
+    (Masc_tui_frame.outer_width ~inner);
+  let marker = "margin-probe" in
+  let full = marker ^ String.make (inner - String.length marker) 'x' in
+  let cells = Masc_tui_message_layout.display_width in
+  let byte_index_of line needle =
+    let n = String.length needle and m = String.length line in
+    let rec at i =
+      if i + n > m then None
+      else if String.sub line i n = needle then Some i
+      else at (i + 1)
+    in
+    at 0
+  in
+  List.iter
+    (fun (label, frame) ->
+      let origin = ref None in
+      let drawn, _ =
+        surface_chrome ~overflow:Fits ~frame state ~terminal_rows ~cols
+          ~surface_key:"surface-chrome-margin" ~title:"probe" ~hints
+          ~body:(fun ~budget:_ c ->
+            origin := Some (snd (c.next_origin ()));
+            c.push full)
+      in
+      let rows =
+        List.map Masc_tui_theme.strip_sgr
+          drawn.Masc_tui_frame_presenter.lines
+      in
+      match
+        List.find_map
+          (fun row ->
+            Option.map (fun index -> (row, index)) (byte_index_of row marker))
+          rows
+      with
+      | None -> Alcotest.failf "%s: the probe row is not drawn" label
+      | Some (row, index) ->
+          Alcotest.(check int) (label ^ ": content starts at the content column")
+            Masc_tui_frame.content_column (cells (String.sub row 0 index));
+          Alcotest.(check bool) (label ^ ": a row of the inner width is drawn whole")
+            true (contains row full);
+          Alcotest.(check int) (label ^ ": the row spans the terminal") cols
+            (cells row);
+          Alcotest.(check (option int))
+            (label ^ ": a picture over the body starts at the content column")
+            (Some Masc_tui_frame.content_column) !origin)
+    [ ("screen", Chrome_screen); ("overlay", Chrome_overlay) ]
+
 let () =
   Alcotest.run "tui_surface_chrome_overflow"
     [ ( "surface chrome overflow"
@@ -108,5 +167,7 @@ let () =
             test_a_cut_body_says_what_it_hides
         ; Alcotest.test_case "the frame windows a scrolled body" `Quick
             test_the_frame_windows_a_scrolled_body
+        ; Alcotest.test_case "body rows follow the frame margin" `Quick
+            test_body_rows_follow_the_frame_margin
         ;] )
     ]

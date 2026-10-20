@@ -69,7 +69,7 @@ let code_notes_rows (state : state) ~cols =
   in
   let wrap text =
     Message_layout.wrap_body
-      ~max_cells:(max 1 (cols - 6)) ~sanitize:Terminal_text.single_line text
+      ~max_cells:(max 1 (framed_inner_width cols - 2)) ~sanitize:Terminal_text.single_line text
   in
   match memos with
   | [] -> wrap "(no memo in this file: a comment on its own row reading masc(name): text)"
@@ -102,7 +102,7 @@ let code_notes_viewport (state : state) =
 let history_change_rows ~cols (change : Masc.Tui_decode.file_change) =
   let open Masc.Tui_decode in
   let wrap text =
-    Message_layout.wrap_body ~max_cells:(max 1 (cols - 6))
+    Message_layout.wrap_body ~max_cells:(max 1 (framed_inner_width cols - 2))
       ~sanitize:Terminal_text.single_line text
   in
   let status =
@@ -126,7 +126,7 @@ let history_change_rows ~cols (change : Masc.Tui_decode.file_change) =
     (* Code whitespace is evidence: word wrapping would erase indentation
        and collapse internal spaces. Cell splitting also retains empty rows. *)
     let lines = Terminal_text.single_line text
-      |> Message_layout.split_cells ~max_cells:(max 1 (cols - 8)) in
+      |> Message_layout.split_cells ~max_cells:(max 1 (framed_inner_width cols - 4)) in
     List.map (fun line -> style ^ marker ^ line ^ Ansi.reset) lines)
   in
   List.concat_map wrap (status :: note) @ rows
@@ -134,7 +134,7 @@ let history_change_rows ~cols (change : Masc.Tui_decode.file_change) =
 let code_history_rows (state : state) ~cols =
   let wrap owner text =
     Message_layout.wrap_body
-      ~max_cells:(max 1 (cols - 6)) ~sanitize:Terminal_text.single_line text
+      ~max_cells:(max 1 (framed_inner_width cols - 2)) ~sanitize:Terminal_text.single_line text
     |> List.map (fun text -> (owner, text))
   in
   let field name text = name ^ ": " ^ Terminal_text.single_line text in
@@ -389,7 +389,7 @@ let render_code (state : state) =
               Theme.selection ^ " " ^ marker ^ name
               ^ String.make
                   (max 0
-                     (pane_cols - 7
+                     (framed_inner_width pane_cols - 3
                       - Message_layout.display_width (marker ^ name)))
                   ' '
               ^ Ansi.reset

@@ -161,7 +161,7 @@ let render_resources (state : state) =
               Theme.selection ^ " " ^ name
               ^ String.make
                   (max 0
-                     (pane_cols - 5 - Message_layout.display_width name))
+                     (framed_inner_width pane_cols - 1 - Message_layout.display_width name))
                   ' '
               ^ Ansi.reset
             else " " ^ name
@@ -227,7 +227,7 @@ let render_resources (state : state) =
          in
          let rendered =
            Message_layout.wrap_body ~markdown:document_markdown
-             ~max_cells:(max 1 (pane_cols - 8))
+             ~max_cells:(max 1 (framed_inner_width pane_cols - 4))
              ~sanitize:Terminal_text.single_line
              (resource_document resource contents ~error ~requested)
          in

@@ -180,12 +180,13 @@ let identity_notice ~cols detail =
   match detail with
   | None -> []
   | Some (kind, text) ->
-    (* Two for this indent, two for the one the pane adds, four for the box
-       around it. Wrapping wider than that is a line the frame truncates --
-       which is the whole failure this exists to undo. *)
+    (* Two for this indent and two for the one the pane adds, inside the
+       frame's inner width. Wrapping wider than that is a line the frame
+       truncates -- which is the whole failure this exists to undo. *)
     List.map
       (fun line -> "  " ^ line)
-      (Masc_tui_message_layout.wrap_words ~max_cells:(max 20 (cols - 8)) text)
+      (Masc_tui_message_layout.wrap_words
+         ~max_cells:(max 20 (Masc_tui_frame.inner_width ~cols - 4)) text)
     @
     (* Only on a refusal, and pointing at the key on this pane rather than at
        the dashboard: the form is here now. *)

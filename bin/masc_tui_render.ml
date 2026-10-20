@@ -230,7 +230,7 @@ let render_overview (state : state) =
            rows, so opening Home starts with a decision or a place to resume. *)
         let candle = Masc_tui_candle.summary_lines state.candle_observation
           |> List.concat_map (fun line ->
-            Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
+            Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols))
               (Terminal_text.single_line line))
           |> List.map (fun line -> None, " " ^ line) in
         let candle_fits = spare >= 2 + List.length candle in

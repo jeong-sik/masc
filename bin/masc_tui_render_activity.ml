@@ -94,7 +94,7 @@ let render_system_log_detail (state : state) seq =
     (Printf.sprintf "%s  seq %d  %s" (screen_title " MASC Log detail") seq
        (connection_badge state));
   box_divider buf cols;
-  let lines = system_log_detail_lines state ~seq ~width:(max 1 (cols - 8)) in
+  let lines = system_log_detail_lines state ~seq ~width:(max 1 (framed_inner_width cols - 4)) in
   let content_height = max 1 (rows - 5) in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.system_logs_detail_scroll max_scroll) in
@@ -608,7 +608,7 @@ let render_acting_evidence (state : state) entry =
           | Some value -> Terminal_text.single_line value in
         let continuation = String.make (Message_layout.display_width prefix) ' ' in
         match Message_layout.wrap_words
-                ~max_cells:(max 1 (cols - 4 - Message_layout.display_width prefix)) text with
+                ~max_cells:(max 1 (framed_inner_width cols - Message_layout.display_width prefix)) text with
         | [] -> [prefix]
         | first :: rest -> (prefix ^ first) :: List.map (fun line -> continuation ^ line) rest)
   in
@@ -619,14 +619,14 @@ let render_acting_evidence (state : state) entry =
           | None -> ["  " ^ label ^ ": not carried"]
           | Some value ->
               ("  " ^ label ^ " (producer-redacted JSON)")
-              :: (document_markdown ~width:(max 1 (cols - 7))
+              :: (document_markdown ~width:(max 1 (framed_inner_width cols - 3))
                     ("```json\n" ^ Yojson.Safe.pretty_to_string value ^ "\n```")
                   |> List.map (fun line -> "  " ^ line)) in
         let preview label = function
           | None -> ["  " ^ label ^ ": not carried"]
           | Some text ->
               ("  " ^ label ^ " (producer-redacted preview)")
-              :: (document_markdown ~width:(max 1 (cols - 7))
+              :: (document_markdown ~width:(max 1 (framed_inner_width cols - 3))
                     (Keeper_chat.terminal_safe_text ~preserve_newlines:true text)
                   |> List.map (fun line -> "  " ^ line)) in
         [""; "  INPUT / OUTPUT OBSERVATIONS"]

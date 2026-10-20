@@ -261,7 +261,7 @@ let render_verification_list (state : state) =
    | Some err ->
        box_line buf cols
          ((Theme.bad ()) ^ "  "
-         ^ fit_width (Terminal_text.single_line err) (cols - 8)
+         ^ fit_width (Terminal_text.single_line err) (framed_inner_width cols - 4)
          ^ Ansi.reset)
    | None -> ());
   box_bottom buf cols;
@@ -427,11 +427,11 @@ let verification_detail_pane (state : state) ~rows ~cols
        ~content_origin);
   Option.iter
     (fun note -> box_line_styled buf cols ~style:(Theme.warn ())
-      (fit_width note (cols - 4)))
+      (fit_width note (framed_inner_width cols)))
     armed_note;
   Option.iter
     (fun err -> box_line_styled buf cols ~style:(Theme.bad ())
-      (fit_width ("  " ^ Terminal_text.single_line err) (cols - 4)))
+      (fit_width ("  " ^ Terminal_text.single_line err) (framed_inner_width cols)))
     state.verification_verdict_error;
   (* This reading has its own pane row: pinned footer keys can consume the
      whole footer at 30 and 40 columns, leaving its trailing position cut. *)

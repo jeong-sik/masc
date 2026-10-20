@@ -320,12 +320,12 @@ let prompts_detail_layout state ~rows ~error_rows =
 let prompts_detail_lines (state : state) ~cols =
   let prompts = Masc_tui_fetched.view_for ~equal:Unit.equal state.prompts ~key:() in
   let wrap text =
-    Message_layout.wrap_body ~max_cells:(max 1 (cols - 6))
+    Message_layout.wrap_body ~max_cells:(max 1 (framed_inner_width cols - 2))
       ~sanitize:Terminal_text.single_line text
   in
   let body text =
     Message_layout.wrap_body ~markdown:document_markdown
-      ~max_cells:(max 1 (cols - 6)) ~sanitize:Terminal_text.single_line text
+      ~max_cells:(max 1 (framed_inner_width cols - 2)) ~sanitize:Terminal_text.single_line text
   in
   let field name text = name ^ ": " ^ Terminal_text.single_line text in
   let status = match prompt_catalog_status_row prompts with
@@ -511,7 +511,7 @@ let render_prompt_registry (state : state) =
   let first = if cursor < list_height then 0 else cursor - list_height + 1 in
   (match status_row with
    | Some (style, text) ->
-     box_line buf cols (style ^ "  " ^ fit_width text (cols - 6) ^ Ansi.reset)
+     box_line buf cols (style ^ "  " ^ fit_width text (framed_inner_width cols - 2) ^ Ansi.reset)
    | None -> ());
   let drawn = ref 0 in
   List.iteri
@@ -532,7 +532,7 @@ let render_prompt_registry (state : state) =
           | false, Tui_decode.Prompt_missing -> (Theme.bad ()) ^ glyph ^ Ansi.reset
         in
         let label = mark ^ " "
-            ^ Message_layout.fit_middle (max 1 (cols - 7))
+            ^ Message_layout.fit_middle (max 1 (framed_inner_width cols - 3))
                 (Terminal_text.single_line row.Tui_decode.pr_key) in
         if index = cursor then
           box_line buf cols (Theme.selection ^ " " ^ label ^ Ansi.reset)
@@ -544,7 +544,7 @@ let render_prompt_registry (state : state) =
   done;
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.recede ())
-    ("  " ^ Message_layout.truncate_middle (max 1 (cols - 6))
+    ("  " ^ Message_layout.truncate_middle (max 1 (framed_inner_width cols - 2))
        (match selected with
         | None -> "선택 없음"
         | Some row -> Terminal_text.single_line row.Tui_decode.pr_key));
@@ -593,7 +593,7 @@ let render_runtime_prompt_assets (state : state) =
   let first = if cursor < list_height then 0 else cursor - list_height + 1 in
   (match status_row with
    | Some (style, text) ->
-     box_line buf cols (style ^ "  " ^ fit_width text (cols - 6) ^ Ansi.reset)
+     box_line buf cols (style ^ "  " ^ fit_width text (framed_inner_width cols - 2) ^ Ansi.reset)
    | None -> ());
   let drawn = ref 0 in
   List.iteri
@@ -602,7 +602,7 @@ let render_runtime_prompt_assets (state : state) =
          incr drawn;
          let mark = if asset.pra_file_exists then " " else (Theme.bad ()) ^ "!" ^ Ansi.reset in
          let line = mark ^ " "
-             ^ Message_layout.fit_middle (max 1 (cols - 7))
+             ^ Message_layout.fit_middle (max 1 (framed_inner_width cols - 3))
                  (Terminal_text.single_line asset.pra_path) in
          if index = cursor then box_line buf cols (Theme.selection ^ " " ^ line ^ Ansi.reset)
          else box_line buf cols (" " ^ line)
@@ -613,7 +613,7 @@ let render_runtime_prompt_assets (state : state) =
   done;
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.recede ())
-    ("  " ^ Message_layout.truncate_middle (max 1 (cols - 6))
+    ("  " ^ Message_layout.truncate_middle (max 1 (framed_inner_width cols - 2))
        (match selected with
         | None -> "선택 없음"
         | Some asset -> Terminal_text.single_line asset.Tui_decode.pra_path));
@@ -732,7 +732,7 @@ let render_presets (state : state) =
   (match state.presets_error with
    | Some detail ->
      box_line buf cols
-       (Theme.bad () ^ "  " ^ fit_width (Terminal_text.single_line detail) (cols - 6)
+       (Theme.bad () ^ "  " ^ fit_width (Terminal_text.single_line detail) (framed_inner_width cols - 2)
         ^ Ansi.reset)
    | None -> ());
   let drawn = ref 0 in
@@ -1042,7 +1042,7 @@ let render_config_models (state : state) =
   (match state.runtime_model_form with
    | Some form ->
        let lines = Masc_tui_model_form.rows ~input_locked:(runtime_form_input_locked state)
-           ~width:(max 1 (cols - 6)) ~height:content_height form in
+           ~width:(max 1 (framed_inner_width cols - 2)) ~height:content_height form in
        List.iter (fun line -> box_line buf cols ("  " ^ Terminal_text.single_line line)) lines;
        for _ = List.length lines + 1 to content_height do box_empty buf cols done
    | None when Option.is_some state.runtime_model_jump ->
@@ -1075,8 +1075,9 @@ let render_config_models (state : state) =
        let table_height =
          max 1 (content_height - detail_height - if detail_height > 0 then 1 else 0)
        in
-       (* [box_line] spends cells on the two border glyphs and the padding
-          either side, and this pane adds two more for its own indent. A
+       (* [box_line] spends the frame's margin either side, which
+          [framed_inner_width] already leaves out, and this pane adds two
+          more for its own indent. A
           width that ignores them wraps the last column onto its own row,
           which reads as a blank value. The pane is the truth the table is
           fitted against: handing the table a floor of 40 on a terminal
@@ -1085,8 +1086,8 @@ let render_config_models (state : state) =
           stacked layout before that cut can eat a value. *)
        let table =
          Masc_tui_model_runtime_table.render
-           ~width:(max 40 (cols - 6 - 2))
-           ~pane:(max 1 (cols - 6 - 2))
+           ~width:(max 40 (framed_inner_width cols - 2 - 2))
+           ~pane:(max 1 (framed_inner_width cols - 2 - 2))
            drawn_rows
        in
        let total = List.length table in
@@ -1095,7 +1096,7 @@ let render_config_models (state : state) =
           follows. In stacked mode the item's first line is the binding's
           line: the cursor still selects the same record it did before the
           resize, which is the whole point of the transition. *)
-       let pane_width = max 1 (cols - 6 - 2) in
+       let pane_width = max 1 (framed_inner_width cols - 2 - 2) in
        let table_mode =
          Masc_tui_model_runtime_table.fits ~width:pane_width drawn_rows
        in
@@ -1164,7 +1165,7 @@ let render_config_models (state : state) =
              if i < detail_height
              then (
                let line =
-                 "  " ^ fit_width (Terminal_text.single_line line) (max 1 (cols - 7))
+                 "  " ^ fit_width (Terminal_text.single_line line) (max 1 (framed_inner_width cols - 3))
                in
                if i = 0
                then box_line_styled buf cols ~style:(Ansi.bold ^ Theme.info ()) line
@@ -1193,7 +1194,7 @@ let config_models_scrolled (state : state) : scrolled =
       }
   | None, Some _ ->
       let terminal_rows, cols = get_terminal_size () in
-      let pane = max 1 (cols - 6 - 2) in
+      let pane = max 1 (framed_inner_width cols - 2 - 2) in
       let rows = config_models_drawn_rows state in
       let document =
         Masc_tui_model_runtime_table.render ~width:(max 40 pane) ~pane rows
@@ -1217,7 +1218,7 @@ let config_models_scrolled (state : state) : scrolled =
 let config_models_stacked (state : state) =
   let _, cols = get_terminal_size () in
   not
-    (Masc_tui_model_runtime_table.fits ~width:(max 1 (cols - 6 - 2))
+    (Masc_tui_model_runtime_table.fits ~width:(max 1 (framed_inner_width cols - 2 - 2))
        (config_models_drawn_rows state))
 
 let config_metadata_style = function

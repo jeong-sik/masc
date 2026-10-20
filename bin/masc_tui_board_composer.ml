@@ -60,13 +60,13 @@ let analyze_addressing text =
 let format_addressing_hint ~max_cells kind =
   match kind with
   | Broadcast_all ->
-      Printf.sprintf "  %s%s[Broadcast: @@all -> wakes all active keepers]%s"
+      Printf.sprintf "%s%s[Broadcast: @@all -> wakes all active keepers]%s"
         Ansi.bold
         (Masc_tui_theme.tone Masc_tui_theme.Accent)
         Ansi.reset
   | Mentions targets ->
       let target_str = String.concat ", @" targets in
-      let prefix = "  [Mentions: @" in
+      let prefix = "[Mentions: @" in
       let suffix = " -> notifies targeted keepers]" in
       let cells = Masc_tui_message_layout.display_width in
       let target_cells = max 0 (max_cells - cells prefix - cells suffix) in
@@ -80,14 +80,30 @@ let format_addressing_hint ~max_cells kind =
         (fit line (max 0 max_cells))
         Ansi.reset
   | Unsupported_broadcast selectors ->
-      Printf.sprintf "  %s[Warning: unsupported broadcast @@%s (use @@all)]%s"
+      Printf.sprintf "%s[Warning: unsupported broadcast @@%s (use @@all)]%s"
         (Theme.bad ())
         (String.concat ", " selectors)
         Ansi.reset
   | Discoverable_unaddressed ->
-      Printf.sprintf "  %s[Tip: Unmentioned posts are Discoverable — use @<keeper> or @@all to wake keepers]%s"
+      Printf.sprintf "%s[Tip: Unmentioned posts are Discoverable — use @<keeper> or @@all to wake keepers]%s"
         Ansi.dim Ansi.reset
 ;;
+
+(* The caret sits one cell past the last character typed, so a draft row
+   leaves that cell free: a full row keeps the caret on it instead of on the
+   frame's margin. *)
+let caret_cells = 1
+
+(* The narrowest a draft row is wrapped to, however narrow the terminal. *)
+let draft_min_cells = 10
+
+let draft_cells ~cols =
+  max draft_min_cells (Masc_tui_frame.inner_width ~cols - caret_cells)
+;;
+
+(* Terminal columns are 1-based and the frame's content column counts from
+   0, so the draft's first character is drawn one past the content column. *)
+let draft_first_column = 1 + Masc_tui_frame.content_column
 
 let compute_caret_position ~chrome_top_rows ~cols ~visible_lines =
   let line_count = List.length visible_lines in
@@ -98,7 +114,9 @@ let compute_caret_position ~chrome_top_rows ~cols ~visible_lines =
     | [] -> ""
   in
   let text_width = Masc_tui_message_layout.display_width last_line in
-  (* column 1 (base) + 2 (box_line margin) + 2 (indent) = 5 *)
-  let caret_col = min (cols - 3) (5 + text_width) in
-  (caret_row, max 5 caret_col)
+  let last_content_column =
+    draft_first_column + Masc_tui_frame.inner_width ~cols - 1
+  in
+  let caret_col = min last_content_column (draft_first_column + text_width) in
+  (caret_row, max draft_first_column caret_col)
 ;;

@@ -29,6 +29,14 @@ val format_addressing_hint : max_cells:int -> addressing_kind -> string
 (** Formats a single-line summary with ANSI styling indicating whether keepers
     will be awakened or if the post is discoverable. *)
 
+val draft_cells : cols:int -> int
+(** Cells a draft row's text gets on a [cols]-wide terminal: the frame's inner
+    width less the cell the caret takes after the last character. *)
+
+val draft_first_column : int
+(** The 1-indexed terminal column a draft row's first character is drawn in:
+    the frame's content column, counted from 1. *)
+
 val compute_caret_position :
   chrome_top_rows:int ->
   cols:int ->

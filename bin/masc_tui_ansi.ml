@@ -814,26 +814,33 @@ let framed_divider buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
     Ansi.gray Ansi.box_l (draw_hline (framed_rule_width cols)) Ansi.box_r Ansi.reset)
 
+(* What an overlay draws between its border glyph and the content, and what
+   a borderless row draws in the border's place. Both come from the frame's
+   margin, so the two families start their content at one column. *)
+let border_padding = String.make Masc_tui_frame.border_padding_cells ' '
+let frame_margin = String.make Masc_tui_frame.margin_cells ' '
+
 let framed_line buf cols content =
   let inner = framed_inner_width cols in
-  Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
-    Ansi.gray Ansi.box_v Ansi.reset
+  Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s%s%s%s%s\n"
+    Ansi.gray Ansi.box_v Ansi.reset border_padding
     (fit_width content inner)
-    Ansi.gray Ansi.box_v Ansi.reset)
+    border_padding Ansi.gray Ansi.box_v Ansi.reset)
 
 let framed_line_styled buf cols ~style content =
   let inner = framed_inner_width cols in
   let content = fit_width content inner in
   Buffer.add_string buf
-    (Printf.sprintf "%s%s%s %s%s%s %s%s%s\n" Ansi.gray Ansi.box_v
-       Ansi.reset style content Ansi.reset Ansi.gray Ansi.box_v Ansi.reset)
+    (Printf.sprintf "%s%s%s%s%s%s%s%s%s%s%s\n" Ansi.gray Ansi.box_v
+       Ansi.reset border_padding style content Ansi.reset border_padding
+       Ansi.gray Ansi.box_v Ansi.reset)
 
 let framed_empty buf cols =
   let inner = framed_inner_width cols in
-  Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
-    Ansi.gray Ansi.box_v Ansi.reset
+  Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s%s%s%s%s\n"
+    Ansi.gray Ansi.box_v Ansi.reset border_padding
     (String.make inner ' ')
-    Ansi.gray Ansi.box_v Ansi.reset)
+    border_padding Ansi.gray Ansi.box_v Ansi.reset)
 
 (* Full-screen surfaces draw without the outer box: the terminal edge is
    already the frame, and a border around everything separates nothing (the
@@ -852,26 +859,28 @@ let box_bottom buf _cols = Buffer.add_char buf '\n'
    the surfaces draw beside it were receded. *)
 let box_divider buf cols =
   Buffer.add_string buf
-    (Printf.sprintf " %s%s%s \n" (Theme.recede ())
-       (draw_hline (framed_rule_width cols)) Ansi.reset)
+    (Printf.sprintf "%s%s%s%s%s\n" frame_margin (Theme.recede ())
+       (draw_hline (framed_inner_width cols)) Ansi.reset frame_margin)
 
-(* Rows keep the framed geometry -- two margin cells each side, content
+(* Rows keep the framed geometry -- the frame's margin each side, content
    width {!framed_inner_width} -- and still span the full [cols], so anything that
    measures a row (the PTY suite does) reads the same width either way. *)
 let box_line buf cols content =
   let inner = framed_inner_width cols in
-  Buffer.add_string buf (Printf.sprintf "  %s  \n" (fit_width content inner))
+  Buffer.add_string buf
+    (Printf.sprintf "%s%s%s\n" frame_margin (fit_width content inner) frame_margin)
 
 (* Where a body row's content starts, in cells from the terminal's left edge:
-   [box_line] pads two spaces before it and [framed_line] draws the border and
-   one space. A picture placed over body rows starts from here. *)
-let framed_content_column = 2
+   [box_line] pads the margin before it and [framed_line] draws the border in
+   the margin. A picture placed over body rows starts from here. *)
+let framed_content_column = Masc_tui_frame.content_column
 
 let box_line_styled buf cols ~style content =
   let inner = framed_inner_width cols in
   let content = fit_width content inner in
   Buffer.add_string buf
-    (Printf.sprintf "  %s%s%s  \n" style content Ansi.reset)
+    (Printf.sprintf "%s%s%s%s%s\n" frame_margin style content Ansi.reset
+       frame_margin)
 
 (* A notice or refusal detail can carry the server's own line breaks: the
    exact-lane save refusal names the [providers.<id>] table and the missing
@@ -1023,7 +1032,7 @@ let detail_heading ~cols ~lead ~id ~after ~tail =
   lead ^ id ^ after ^ tail
 
 (* The selected row of a borderless list: one reverse-video band across the
-   full row, box_line's geometry (two margin cells each side, content width
+   full row, box_line's geometry (the frame's margin each side, content width
    {!framed_inner_width}). Reverse survives NO_COLOR by contract, so this is also the
    selection signal a colourless terminal keeps. Content must carry no SGR
    of its own -- an inner reset would cut the band short; callers fold a
@@ -1031,8 +1040,8 @@ let detail_heading ~cols ~lead ~id ~after ~tail =
 let box_line_selected buf cols content =
   let inner = framed_inner_width cols in
   Buffer.add_string buf
-    (Printf.sprintf "%s  %s  %s\n" Masc_tui_theme.selection
-       (fit_width content inner) Ansi.reset)
+    (Printf.sprintf "%s%s%s%s%s\n" Masc_tui_theme.selection frame_margin
+       (fit_width content inner) frame_margin Ansi.reset)
 
 let box_empty buf cols =
   Buffer.add_string buf (String.make cols ' ');

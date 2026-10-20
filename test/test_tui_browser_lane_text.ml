@@ -164,7 +164,8 @@ let () =
      Control {clickable=false;editable=true;disabled=false;href=None;selection=Masc.Browser_scene.unobserved_control_selection}];
   let lines = (fst (Masc_tui_types.browser_lane_page_layout ~cols:80 view)) in
   List.iter (fun line ->
-    if Masc_tui_message_layout.display_width ("  " ^ line) > 76 then
+    if Masc_tui_message_layout.display_width ("  " ^ line)
+       > Masc_tui_frame.inner_width ~cols:80 then
       failwith "scene line plus indentation exceeds the framed content width") lines;
   (match lines with
    | "[>1]" :: content_lines when String.concat "" content_lines = node.text -> ()

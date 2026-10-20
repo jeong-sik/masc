@@ -10,7 +10,12 @@
     The file is written before the execution naming it commits. The pass is
     therefore run only by the server process that holds the BasePath writer
     lease, before its scheduler starts and before any keeper runs, when no
-    retention can be in flight. *)
+    retention can be in flight.
+
+    The Owner removes a file as soon as a confirmed journal commit stops
+    naming it ({!Keeper_chat_operation_store.take_released_checkpoints}). This
+    pass removes what a crash between such a commit and its removal, an
+    uncertain commit, or a failed removal left. *)
 
 type report =
   { live_references : int  (** distinct checkpoints named by unsettled executions *)

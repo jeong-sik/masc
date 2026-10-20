@@ -13,7 +13,6 @@ type direct_message =
   ; direct_reply : bool
   ; turn_instructions : string option
   ; surface_context : Yojson.Safe.t option
-  ; channel_session_key : string option
   ; channel : string
   ; user_blocks : Keeper_multimodal_input.user_input_block list
   ; attachments : Keeper_chat_store.attachment list
@@ -160,7 +159,6 @@ let direct_message
       ~direct_reply
       ?turn_instructions
       ?surface_context
-      ?channel_session_key
       ~channel
       ~user_blocks
       ~attachments
@@ -186,7 +184,6 @@ let direct_message
     ; direct_reply
     ; turn_instructions = nonempty_trimmed_option turn_instructions
     ; surface_context
-    ; channel_session_key = nonempty_trimmed_option channel_session_key
     ; channel = String.trim channel
     ; user_blocks
     ; attachments
@@ -201,7 +198,6 @@ let direct_message_with_keeper_name message keeper_name =
     ~direct_reply:message.direct_reply
     ?turn_instructions:message.turn_instructions
     ?surface_context:message.surface_context
-    ?channel_session_key:message.channel_session_key
     ~channel:message.channel
     ~user_blocks:message.user_blocks
     ~attachments:message.attachments
@@ -217,7 +213,6 @@ let direct_message_prompt message = message.request.prompt
 let direct_message_direct_reply message = message.direct_reply
 let direct_message_turn_instructions message = message.turn_instructions
 let direct_message_surface_context message = message.surface_context
-let direct_message_channel_session_key message = message.channel_session_key
 let direct_message_channel message = message.channel
 let direct_message_user_blocks message = message.user_blocks
 let direct_message_attachments message = message.attachments

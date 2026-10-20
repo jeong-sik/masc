@@ -147,7 +147,7 @@ let start_owner_with_executor_ready
   Owner.start
     ~sw
     ~store
-    ~operation_store_path:path
+    ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
     ~now
     ~operation_runner:
       (Option.map
@@ -1017,7 +1017,7 @@ let test_turn_slot_release_signals_availability () =
       (Owner.start
          ~sw
          ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-         ~operation_store_path:path
+         ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
          ~now:(fun () -> 42.0)
          ~operation_runner:
            (Some
@@ -1095,7 +1095,7 @@ let test_uncontested_turn_end_signals_nothing () =
       (Owner.start
          ~sw
          ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-         ~operation_store_path:path
+         ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
          ~now:(fun () -> 42.0)
          ~operation_runner:None
          ~on_turn_slot_released:(Some (fun () -> incr released))
@@ -2677,7 +2677,7 @@ let test_chat_interrupt_during_settle_has_nothing_to_cancel () =
   let owner = owner_ok (Owner.start ~sw
     ~keeper_name:"settle-stop"
     ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-    ~operation_store_path:path
+    ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
     ~now:(fun () -> 42.0)
     ~operation_runner:(Some runner)
     ~on_turn_slot_released:None
@@ -3203,7 +3203,7 @@ let test_startup_requeues_exact_native_call () =
     Eio.Switch.run @@ fun sw ->
     let owner = Owner.start ~sw
       ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
-      ~operation_store_path:path ~now:(fun () -> 20.) ~operation_runner:None
+      ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces") ~now:(fun () -> 20.) ~operation_runner:None
       ~on_turn_slot_released:None ~keeper_name:"native-restart"
       ~initial_meta:(Some (make_meta "native-restart")) |> owner_ok in
     check int "witnessed native operation not interrupted" 0 (List.length (Owner.restart_interrupted_operations owner));
@@ -3270,7 +3270,7 @@ let test_startup_interrupts_running_without_requeue () =
            (Owner.start
               ~sw
               ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-              ~operation_store_path:path
+              ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
               ~now:(fun () -> 20.0)
               ~operation_runner:None
            ~on_turn_slot_released:None
@@ -3627,7 +3627,7 @@ let test_startup_queued_waits_for_runner_readiness () =
            (Owner.start
               ~sw
               ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-              ~operation_store_path:path
+              ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
               ~now:(fun () -> 20.0)
               ~operation_runner:
                 (Some
@@ -3683,7 +3683,7 @@ let test_a_read_under_a_failed_reopen_keeps_the_cause () =
       (Owner.start
          ~sw
          ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-         ~operation_store_path:path
+         ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
          ~now:(fun () -> 42.0)
          ~operation_runner:None
          ~on_turn_slot_released:None
@@ -3844,7 +3844,7 @@ let with_recovery_store ~sw ~keeper_name ~runner ~on_turn_slot_released f =
   Eio.Switch.on_release sw (fun () -> if Sys.file_exists path then Unix.unlink path);
   let owner = owner_ok (Owner.start ~sw
     ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
-    ~operation_store_path:path ~now:(fun () -> 42.)
+    ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces") ~now:(fun () -> 42.)
     ~operation_runner:runner ~on_turn_slot_released ~keeper_name
     ~initial_meta:(Some (make_meta keeper_name))) in
   f owner path
@@ -4482,6 +4482,7 @@ let test_same_process_recreate_reopens_purged_operation_store () =
               ~sw
               ~store
               ~operation_store_path
+              ~session_root:(Filename.concat (Filename.dirname operation_store_path) "traces")
               ~now:(fun () -> 42.0)
               ~operation_runner:None
               ~on_turn_slot_released:None
@@ -5363,7 +5364,7 @@ let test_pending_chat_survives_repeated_autonomous_observations () =
     if Sys.file_exists path then Unix.unlink path);
   let owner = owner_ok (Owner.start ~sw
     ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-    ~operation_store_path:path ~now:(fun () -> 42.0)
+    ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces") ~now:(fun () -> 42.0)
     ~operation_runner:(Some Owner.
       { ready = (fun ~keeper_name:_ -> true); execute
       ; on_execution_settled = noop_execution_settled })

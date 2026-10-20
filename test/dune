@@ -3029,6 +3029,7 @@
 (include stanzas/test_keeper_native_result_retention.inc)
 (include stanzas/test_keeper_native_context_resume.inc)
 (include stanzas/test_keeper_native_reconcile_after_dispatch.inc)
+(include stanzas/test_keeper_native_checkpoint_release.inc)
 (include stanzas/test_keeper_ingress_native_restart.inc)
 (include stanzas/test_keeper_native_repetition_recovery.inc)
 

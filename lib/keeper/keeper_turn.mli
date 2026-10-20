@@ -58,7 +58,6 @@ module For_testing : sig
     config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->
     direct_reply:bool ->
-    channel_session_key:string option ->
     channel:string ->
     string
 

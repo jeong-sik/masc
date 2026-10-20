@@ -1555,8 +1555,10 @@ let save_agent_core_if_absent ~session_dir candidate =
 ;;
 
 (* Accepted continuations are not observational rolling history: nothing
-   expires them while a semantic execution names them. Once none does,
-   [Keeper_retained_checkpoint_sweep] removes them at server startup. *)
+   expires them while a semantic execution names them. Once a journal commit
+   stops naming one, the Owner removes it through [release_retained];
+   [Keeper_retained_checkpoint_sweep] removes, at server startup, what a crash
+   or a failed removal left. *)
 let retained_dirname = "accepted-checkpoints"
 
 let retained_checkpoint_path ~session_dir (reference : Keeper_checkpoint_ref.t) =
@@ -1657,6 +1659,52 @@ let retain_exact_snapshot_with ~write_checkpoint_bytes ~session_dir snapshot =
 
 let retain_exact_snapshot ~session_dir snapshot =
   retain_exact_snapshot_with ~write_checkpoint_bytes ~session_dir snapshot
+
+type release_failure =
+  | Lock_held_elsewhere
+  | Release_failed of string
+
+let release_retained ~session_root released =
+  let reference = Keeper_chat_operation_store.released_reference released in
+  let unlink session_dir =
+    let retained_dir = Filename.concat session_dir retained_dirname in
+    let path = retained_checkpoint_path ~session_dir reference in
+    let unlink () =
+      match Fs_compat.inspect_owned_directory_chain
+              ~ownership_root:(Filename.dirname session_dir) retained_dir with
+      | Error rejection -> Error (Fs_compat.owned_directory_chain_rejection_to_string rejection)
+      | Ok Fs_compat.Owned_directory_missing -> Ok ()
+      | Ok (Fs_compat.Owned_directory _) ->
+        (match Unix.lstat path with
+         | { Unix.st_kind = Unix.S_REG; _ } -> Unix.unlink path; Ok ()
+         | { Unix.st_kind = (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK
+                            | Unix.S_FIFO | Unix.S_SOCK) as kind; _ } ->
+           Error (Printf.sprintf "%s is a %s, not a retained checkpoint"
+                    path (Fs_compat.file_kind_to_string kind))
+         | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ())
+    in
+    match Eio_guard.run_in_systhread ~label:"keeper.checkpoint.retained.release" unlink with
+    | result -> result
+    | exception (Unix.Unix_error _ as exn) -> Error (Printexc.to_string exn)
+  in
+  let session_dir = Keeper_chat_operation_store.released_session_dir ~session_root released in
+  match canonical_session_location session_dir with
+  | Error error -> Error (Release_failed (save_agent_core_error_to_string error))
+  | Ok session_dir ->
+    (* The same lock file retention and exact reads take, tried once. *)
+    match File_lock_eio.try_with_durable_lock_observed
+            ~lock_path:(session_dir ^ ".checkpoint.lock") (fun () -> unlink session_dir) with
+    | File_lock_eio.Lock_held_elsewhere -> Error Lock_held_elsewhere
+    | File_lock_eio.Lock_attempted (File_lock_eio.Lock_not_acquired error) ->
+      Error (Release_failed (File_lock_eio.durable_lock_error_to_string error))
+    | File_lock_eio.Lock_attempted (File_lock_eio.Body_completed { value = Error detail; _ }) ->
+      Error (Release_failed detail)
+    | File_lock_eio.Lock_attempted
+        (File_lock_eio.Body_completed { value = Ok (); release_error = Some error }) ->
+      Error (Release_failed ("removed, but the checkpoint lock was not released: "
+                             ^ File_lock_eio.durable_lock_error_to_string error))
+    | File_lock_eio.Lock_attempted
+        (File_lock_eio.Body_completed { value = Ok (); release_error = None }) -> Ok ()
 
 (* Who a save keeps a lineage for. Only a Keeper's own saves do; a save by a
    tool or a test writes the file and keeps nothing. *)

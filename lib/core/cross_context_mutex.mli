@@ -22,6 +22,11 @@ val with_lock : t -> (unit -> 'a) -> 'a
     from the sibling, because two seconds is right for waiting on a file and
     not for waiting on a fiber. *)
 
+val try_with_lock : t -> (unit -> 'a) -> 'a option
+(** Run [f] only when both gates are free now; [None] when another holder has
+    either, without waiting. Cancellation and callback exceptions release what
+    was taken before propagating. *)
+
 val with_durable_lock : t -> (unit -> 'a) -> 'a
 (** Serialize a durable transaction across Eio fibers, system threads, and
     Domains.

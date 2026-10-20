@@ -179,7 +179,7 @@ let start_owner ~sw ~path ~name ~runner =
     (Owner.start
        ~sw
        ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-       ~operation_store_path:path
+       ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
        ~now:(fun () -> 42.0)
        ~operation_runner:(Some runner)
        ~on_turn_slot_released:None

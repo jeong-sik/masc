@@ -30,7 +30,6 @@ val direct_message :
   direct_reply:bool ->
   ?turn_instructions:string ->
   ?surface_context:Yojson.Safe.t ->
-  ?channel_session_key:string ->
   channel:string ->
   user_blocks:Keeper_multimodal_input.user_input_block list ->
   attachments:Keeper_chat_store.attachment list ->
@@ -46,7 +45,6 @@ val direct_message_prompt : direct_message -> string
 val direct_message_direct_reply : direct_message -> bool
 val direct_message_turn_instructions : direct_message -> string option
 val direct_message_surface_context : direct_message -> Yojson.Safe.t option
-val direct_message_channel_session_key : direct_message -> string option
 val direct_message_channel : direct_message -> string
 
 val direct_message_user_blocks :

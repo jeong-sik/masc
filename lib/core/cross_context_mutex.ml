@@ -49,3 +49,17 @@ let with_durable_lock t f =
   | Eio_guard.Non_eio -> Stdlib.Mutex.protect t.cross_context_mutex f
   | Eio_guard.Eio_fiber -> with_eio_lock Durable t f
 ;;
+
+let try_with_lock t f =
+  let with_stdlib_mutex () =
+    if Stdlib.Mutex.try_lock t.cross_context_mutex
+    then Some (Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock t.cross_context_mutex) f)
+    else None
+  in
+  match Eio_guard.execution_context () with
+  | Eio_guard.Non_eio -> with_stdlib_mutex ()
+  | Eio_guard.Eio_fiber ->
+    if Eio.Mutex.try_lock t.eio_gate
+    then Fun.protect ~finally:(fun () -> Eio.Mutex.unlock t.eio_gate) with_stdlib_mutex
+    else None
+;;

@@ -39,6 +39,8 @@ val runtime_suffix : assignment_id:string -> failed_runtime_id:string -> next_ru
 type session_scope
 val session_scope : string list -> (session_scope, string) result
 val session_scope_components : session_scope -> string list
+val scoped_session_dir : session_root:string -> session_scope -> string -> string
+(** [<session_root>/<scope components>/<session_id>]. *)
 type official_client_kind = Codex | Claude_code | Antigravity | Muse
 val official_client_kind_to_string : official_client_kind -> string
 (** The wire spelling every store and projection writes for a kind. *)
@@ -142,6 +144,15 @@ val checkpoint_references : t -> Keeper_checkpoint_ref.t list
 (** Every Agent Core checkpoint the record can still ask the store for: the
     one it resumes, a retry's, a Gate wait's and a Gate preparation's. A
     retained continuation named by no record's list is never read again. *)
+
+type retained_checkpoint = { session_scope : session_scope; reference : Keeper_checkpoint_ref.t }
+(** Where a reference's retained file lives: under
+    [scoped_session_dir ~session_root session_scope] of its trace id. *)
+
+val retained_checkpoints : t -> retained_checkpoint list
+(** {!checkpoint_references} with each reference's session scope. A Gate's
+    references carry the scope the Gate recorded; every other reference of a
+    direct operation lives directly under the session root. *)
 
 val gate_approval_ids : t -> string list
 (** Approval ids this execution may still read from the Gate store: the

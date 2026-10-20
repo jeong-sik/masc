@@ -360,6 +360,9 @@ type t =
   ; turn_in_flight : turn_in_flight option Atomic.t
   ; shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option Atomic.t
   ; mutable operation_store : Chat_operation_store.t
+  ; session_root : string
+        (* The session root of this workspace: a retained checkpoint lives
+           under [<session_root>/<scope>/<trace id>]. *)
   ; now : unit -> float
   ; closed : bool Atomic.t
   ; closed_p : unit Eio.Promise.t
@@ -981,6 +984,32 @@ let recover_operation_availability t =
              Ok ())))
 ;;
 
+(* Remove the retained files that the store's confirmed commits released.
+   This runs in the Owner fiber after the store call returns and before the
+   command's caller resumes, so the caller cannot retain the same file again
+   while it is being removed.
+
+   The session lock is tried, never waited for. Its holder may be a long
+   canonical save, a Librarian publication or another process, and waiting
+   would stall every command in this mailbox behind it, with no bound across
+   processes. A released file is named by no execution, so leaving it is
+   safe and [Keeper_retained_checkpoint_sweep] removes it at the next startup.
+   A failed removal is logged the same way; the command result stands. *)
+let release_committed_checkpoints ~keeper_name ~session_root operation_store =
+  List.iter (fun released ->
+    let sha256 = (Chat_operation_store.released_reference released).Keeper_checkpoint_ref.sha256 in
+    match Keeper_checkpoint_store.release_retained ~session_root released with
+    | Ok () -> ()
+    | Error Keeper_checkpoint_store.Lock_held_elsewhere ->
+      Log.Keeper.info ~keeper_name
+        "released retained checkpoint %s is left for the startup sweep: its session lock is held"
+        sha256
+    | Error (Keeper_checkpoint_store.Release_failed detail) ->
+      Log.Keeper.warn ~keeper_name "released retained checkpoint %s was not removed: %s"
+        sha256 detail)
+    (Chat_operation_store.take_released_checkpoints operation_store)
+;;
+
 (* A command is the moment the fence is re-examined, not a later wake:
    [wake_operation_drain] fires only when a keepalive starts or a deferred
    retry comes due, so a fence raised mid-day had no trigger to lift it and
@@ -991,7 +1020,12 @@ let run_operation_command t ~label f =
   match recover_operation_availability t with
   | Error error -> Error error
   | Ok () ->
-    (match run_operation_store ~label f with
+    let result = run_operation_store ~label f in
+    (* A command can commit before it fails, so its releases are taken
+       whatever it returns. *)
+    release_committed_checkpoints ~keeper_name:t.keeper_name ~session_root:t.session_root
+      t.operation_store;
+    (match result with
      | Error error -> Error (record_operation_error t error)
      | Ok value ->
        (match read_operation_projection t.operation_store ~now:(t.now ()) with
@@ -1051,6 +1085,7 @@ let start
       ~sw
       ~store
       ~operation_store_path
+      ~session_root
       ~now
       ~operation_runner
       ~on_turn_slot_released
@@ -1114,6 +1149,7 @@ let start
     ; turn_in_flight = Atomic.make None
     ; shutdown_operation_id = Atomic.make None
     ; operation_store
+    ; session_root
     ; now
     ; closed = Atomic.make false
     ; closed_p
@@ -2319,6 +2355,10 @@ let start
              else Eio.Promise.resolve resolve (Ok ());
              loop state shutdown_operation_id)
     in
+    (* What the restart settlement released. The registry holds its pool lock
+       while [start] runs, so the removal belongs to this fiber rather than to
+       [start], and it never waits for a session lock. *)
+    release_committed_checkpoints ~keeper_name ~session_root t.operation_store;
     start_child_if_needed initial_state None;
     (* Cancellation reaches the drain at its [Stream.take]. Whatever the
        reason, the loop is the owner's only reader, so leaving it means no

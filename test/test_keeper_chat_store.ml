@@ -748,9 +748,9 @@ let test_direct_owner_context_excludes_connector_turns () =
           ~assistant_content:"I just answered from direct chat."
           ();
         let config = Masc.Workspace.default_config base_dir in
-        let context ?channel_session_key ~direct_reply ~channel () =
+        let context ~direct_reply ~channel () =
           KT.For_testing.direct_owner_conversation_context
-            ~config ~meta ~direct_reply ~channel_session_key ~channel
+            ~config ~meta ~direct_reply ~channel
         in
         let owner_context = context ~direct_reply:true ~channel:"" () in
         Alcotest.(check bool) "owner direct receives recent transcript" true
@@ -759,9 +759,6 @@ let test_direct_owner_context_excludes_connector_turns () =
              "I just answered from direct chat.");
         Alcotest.(check string) "connector channel suppresses transcript" ""
           (context ~direct_reply:true ~channel:"discord" ());
-        Alcotest.(check string) "connector session suppresses transcript" ""
-          (context ~direct_reply:true ~channel:""
-             ~channel_session_key:"discord_workspace" ());
         Alcotest.(check string) "non-direct turn suppresses transcript" ""
           (context ~direct_reply:false ~channel:"" ())))
 

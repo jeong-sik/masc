@@ -231,13 +231,19 @@ val start
   :  sw:Eio.Switch.t
   -> store:store
   -> operation_store_path:string
+  -> session_root:string
   -> now:(unit -> float)
   -> operation_runner:operation_runner option
   -> on_turn_slot_released:(unit -> unit) option
   -> keeper_name:string
   -> initial_meta:Keeper_meta_contract.keeper_meta option
   -> (t, error) result
-(** [on_turn_slot_released] fires when a turn ends, the slot is still unclaimed
+(** [session_root] is the workspace's session root
+    ({!Keeper_fs.session_store_path}). After each store commit the Owner
+    removes, under it, the retained checkpoints that commit released
+    ({!Keeper_chat_operation_store.take_released_checkpoints}).
+
+    [on_turn_slot_released] fires when a turn ends, the slot is still unclaimed
     after the queued chat operation (if any) has been offered it, and the
     autonomous lane has been refused the slot since the last notification. The
     signal therefore means "the lane that lost the slot can start now", not "a

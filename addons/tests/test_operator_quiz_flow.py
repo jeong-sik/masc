@@ -251,6 +251,32 @@ class Compose(Base):
         self.assertEqual(self.session(session_id).failure, q.NotAllowed(f"{session_id}-read-0", "no grant"))
 
 
+class Repetition(Base):
+    def test_a_session_with_no_new_record_still_asks_a_missed_item_again(self):
+        first = self.compose("act-1")
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        self.answer(first, q.Chose(("b",)))
+        (missed,) = g.items(self.flow.sessions())
+        seen = []
+
+        def again(payload):
+            seen.append(payload)
+            (item,) = payload["items"]
+            source = item["sources"][0]
+            return {"status": "answered", "slot": "s", "output": {"questions": [
+                draft(source, source["quote"], reask=(item["item_id"],))]}}
+
+        self.host.author = again
+        second = self.compose("act-2")
+        self.host.run(self.flow)
+        (payload,) = seen
+        self.assertEqual(payload["material"], [])
+        session = self.session(second)
+        self.assertEqual(session.state, "asked")
+        self.assertEqual([(p.item_id, p.sources) for p in session.posed], [(missed.item_id, missed.sources)])
+
+
 class Sessions(Base):
     def test_a_second_compose_supersedes_a_writing_session(self):
         first = self.compose("act-1")

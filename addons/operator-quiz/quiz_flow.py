@@ -434,7 +434,10 @@ class Flow:
             self.log.append([read])
             return
         records = material(self._session_reads(after))
-        if not records:
+        # With no new record the author can still ask again an item asked
+        # before, citing its earlier sources (§7). Only a workspace with
+        # neither has nothing to ask about.
+        if not records and not g.items([s for s in sessions if s.session_id != session.session_id]):
             self.log.append([read, q.SessionFailed(session.session_id, q.NoMaterial())])
             return
         self.log.append([read, self._request_author(after, sessions, scope=SCOPE_ALL, records=records)])

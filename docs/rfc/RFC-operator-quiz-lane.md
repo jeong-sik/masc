@@ -539,6 +539,8 @@ The request body file exists so a restarted worker can list the same request wit
    - the material, each record with its retained SHA-256;
    - every review item's attempt history (§7);
    - the requested count and the language.
+
+   The material may be empty: with no new record, the history alone lets the `author` ask a missed item again, citing its earlier sources (§7).
 3. On the result, check each question:
    - every key choice id is one of its choices;
    - a `Single` question has exactly one key;
@@ -568,7 +570,7 @@ The only follow-up `author` requests inside one session are the reductions of §
 - `author_outcome_unknown {request_id}`;
 - `author_request_exceeds_frame {request_id}`: one material record alone made the author request larger than the package's reply frame, so it could not be listed (§7);
 - `result_exceeds_frame {request_id}`: an author or ask result was larger than the frame. Read results are read back in pieces instead;
-- `no_material`: every grant was read and held no record to ask about;
+- `no_material`: every grant was read and held no new record, and no question was asked before, so nothing can be asked again either;
 - `no_question_passed`: every draft became `Draft_rejected`, each with its own reason.
 
 Every state ends on an event the package sees. None ends on elapsed time or on a count.

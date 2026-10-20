@@ -1,0 +1,78 @@
+{
+  "build": {
+    "release_version": "0.59.0",
+    "binary_version": "0.59.0",
+    "repo_version": "0.59.0",
+    "commit": "546e5a2256386ab693d2abe6ae70b8e0221fa832",
+    "commit_source": "embedded",
+    "binary_commit": "546e5a2256386ab693d2abe6ae70b8e0221fa832",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "f87cac1660e00cd92c315bb6aa27a077de248d8165c969839d5f384fc508a2c1",
+    "binary_commit_unix_ts": 1792493011.0,
+    "binary_commit_age_seconds": 1065,
+    "repo_head_commit": "2ccda47e979",
+    "repo_head_commit_source": "runtime_repo_head",
+    "repo_head_commit_unix_ts": 1792493636.0,
+    "repo_head_commit_age_seconds": 440,
+    "executable_path": "/Users/dancer/.local/bin/masc",
+    "executable_dir": "/Users/dancer/.local/bin",
+    "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc",
+    "runtime_instance_id": "01a158f4-0cca-7000-a88c-1478c99a2f05",
+    "started_at": "2026-10-20T10:55:51Z",
+    "uptime_seconds": 325
+  },
+  "paths": {
+    "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc",
+    "effective_base_path": "/Users/dancer/me",
+    "effective_masc_root": "/Users/dancer/me/.masc",
+    "current_task_path": "/Users/dancer/me/.masc/current_task",
+    "current_task_shape": "absent",
+    "effective_has_masc_dir": true,
+    "roots_diverge": true,
+    "strict_mode_requested": false,
+    "startup_rejected": false,
+    "startup_abort_eligible": false,
+    "input_base_path": "/Users/dancer/me",
+    "env_masc_base_path": "/Users/dancer/me",
+    "resolution_source": "explicit_env"
+  },
+  "gc": {
+    "compactions": 0,
+    "heap_words": 3051984734,
+    "live_words": 2991126805,
+    "minor_heap_size": 4194304,
+    "space_overhead": 100,
+    "minor_collections": 3201,
+    "major_collections": 105,
+    "forced_major_collections": 0,
+    "minor_words": 19375680982.0,
+    "promoted_words": 2024528607.0,
+    "major_words": 16966415513.0
+  },
+  "process_memory": {
+    "status": "measured",
+    "pid": 42965,
+    "resident_bytes": 33522221056,
+    "source": "mach_task_info",
+    "approximate": false
+  },
+  "scheduler": {
+    "pool_domains": 14,
+    "probe": "running",
+    "interval_ms": 100.0,
+    "window_s": 60.0,
+    "stall_threshold_ms": 1000.0,
+    "lag": {
+      "samples": 600,
+      "p50_ms": 1.2030829999999937,
+      "p95_ms": 25.400832999999984,
+      "p99_ms": 94.254083,
+      "max_ms": 5771.208667000001,
+      "mean_ms": 15.941942491666662,
+      "stalls": 1,
+      "over_50ms_count": 18,
+      "over_200ms_count": 3
+    }
+  }
+}

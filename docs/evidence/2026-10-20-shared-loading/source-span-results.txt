@@ -1,0 +1,6 @@
+differential_cases=1000 matched=true
+benchmark_messages=11962 cuts=300
+before include_unread=true seconds=0.526961 allocated_bytes=1325110048
+after include_unread=true seconds=0.001489 allocated_bytes=4604104
+before include_unread=false seconds=0.850633 allocated_bytes=2294814880
+after include_unread=false seconds=0.001536 allocated_bytes=4940832

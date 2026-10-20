@@ -94,6 +94,14 @@ val call_exported_tool : ?on_result:(Mcp_protocol.Mcp_types.tool_result -> unit)
     [on_result] captures raw actual replies/effect events under RPC serialization,
     before output validation. It is not publication of a validated result. *)
 
+val host_requests : t -> (Yojson.Safe.t, error) result
+(** Calls [lane_host_requests] with no arguments and returns its structured
+    content, undecoded. *)
+
+val host_result : t -> arguments:Yojson.Safe.t -> (Yojson.Safe.t, error) result
+(** Calls [lane_host_result]. After dispatch, a transport failure does not
+    prove the package did not consume the result. *)
+
 val action_schema : t -> Yojson.Safe.t option
 val act : t -> arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, error) result
 

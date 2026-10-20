@@ -17,6 +17,8 @@ val error_to_string : error -> string
 type t
 type phase = Initializing | Validating_owner | Serving | Retired
 val phase : t -> phase
+val host_requests : t -> (Yojson.Safe.t, error) result
+val host_result : t -> arguments:Yojson.Safe.t -> (Yojson.Safe.t, error) result
 val process_identity : t -> Lane_addon_lifecycle.resource option
 (** The actual connected child, available before discovery; not signal authority. *)
 val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock ->

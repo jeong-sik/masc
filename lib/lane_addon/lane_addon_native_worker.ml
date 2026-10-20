@@ -65,6 +65,9 @@ let call t work =
       try work () |> protocol_result with Eio.Cancel.Cancelled _ as exn ->
         request_stop t;
         raise exn
+let host_requests t = call t (fun () -> Protocol.host_requests t.protocol)
+let host_result t ~arguments = call t (fun () -> Protocol.host_result t.protocol ~arguments)
+
 let observe t ~binding ~sources = call t (fun () -> Protocol.observe t.protocol ~binding ~sources)
 let act t ~arguments = call t (fun () -> Protocol.act t.protocol ~arguments)
 let call_exported_tool ?on_result ?authorize ?principal t ~name ~arguments =

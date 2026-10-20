@@ -10,10 +10,12 @@ type contract = private {
   exported_tools : string list;
   tool_hooks : Lane_addon_types.tool_hook list;
   max_reply_bytes : int;
+  host_requests : bool;
 }
 val contract : action_tool:string option ->
   tool_invocation:Lane_addon_types.tool_invocation -> exported_tools:string list ->
   tool_hooks:Lane_addon_types.tool_hook list -> max_reply_bytes:int ->
+  host_requests:bool ->
   (contract, error) result
 val contract_of_package : Lane_addon_types.package -> (contract, error) result
 type t
@@ -37,6 +39,11 @@ val close : t -> unit
     cleanup, child processes, profiles or resource release. *)
 val exported_tools : t -> Mcp_protocol.Mcp_types.tool list
 val action_schema : t -> Yojson.Safe.t option
+val host_requests : t -> (Yojson.Safe.t, error) result
+val host_result : t -> arguments:Yojson.Safe.t -> (Yojson.Safe.t, error) result
+(** Private host request/result ports. Both must be advertised exactly once
+    before a model-capable contract becomes Ready. They cannot be exported as
+    model-facing tools or called through a contract that disabled them. *)
 val observe : t -> binding:Yojson.Safe.t -> sources:Yojson.Safe.t ->
   (Lane_addon_types.output, error) result
 val act : t -> arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, error) result

@@ -36,7 +36,7 @@ for line in sys.stdin:
 let require = function Ok value -> value | Error _ -> fail "protocol operation failed"
 
 let standalone_protocol () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
-  let contract = require (Protocol.contract ~action_tool:None ~tool_invocation:Lane_addon_types.Direct
+  let contract = require (Protocol.contract ~host_requests:false ~action_tool:None ~tool_invocation:Lane_addon_types.Direct
     ~exported_tools:["increment"] ~tool_hooks:[Lane_addon_types.Validate_input;Validate_output]
     ~max_reply_bytes:4096) in
   let protocol = Protocol.create ~instance_id:"standalone-test" ~contract () in
@@ -72,14 +72,14 @@ let standalone_protocol () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
 
 let invalid_contract () =
   check bool "ambiguous exports are rejected before a connection exists" true
-    (match Protocol.contract ~action_tool:None ~tool_invocation:Lane_addon_types.Direct
+    (match Protocol.contract ~host_requests:false ~action_tool:None ~tool_invocation:Lane_addon_types.Direct
       ~exported_tools:["increment";"increment"] ~tool_hooks:[] ~max_reply_bytes:4096 with
      | Error (Protocol.Invalid_contract _) -> true | _ -> false)
 
 let failed_discovery_retires_admission () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
   let calls = Filename.temp_file "addon-admission-" ".calls" in
   Fun.protect ~finally:(fun () -> Sys.remove calls) (fun () ->
-    let contract = require (Protocol.contract ~action_tool:(Some "lane_act")
+    let contract = require (Protocol.contract ~host_requests:false ~action_tool:(Some "lane_act")
       ~tool_invocation:Lane_addon_types.Direct ~exported_tools:["increment";"missing"]
       ~tool_hooks:[] ~max_reply_bytes:4096) in
     let protocol = Protocol.create ~instance_id:"late-discovery-failure" ~contract
@@ -109,7 +109,7 @@ let discovery_race ~cancel () = Eio_main.run (fun env -> Eio.Switch.run (fun sw 
   let waiting = calls ^ ".waiting" and release = calls ^ ".release" in
   Fun.protect ~finally:(fun () -> List.iter (fun path -> if Sys.file_exists path then Sys.remove path)
     [calls;waiting;release]) (fun () ->
-    let contract = require (Protocol.contract ~action_tool:None
+    let contract = require (Protocol.contract ~host_requests:false ~action_tool:None
       ~tool_invocation:Lane_addon_types.Direct ~exported_tools:["increment"]
       ~tool_hooks:[] ~max_reply_bytes:4096) in
     let protocol = Protocol.create ~instance_id:"discovery-race" ~contract () in

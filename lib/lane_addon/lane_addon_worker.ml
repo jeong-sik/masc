@@ -447,3 +447,6 @@ let act t ~arguments = Protocol.act t.protocol ~arguments |> protocol_result
 let call_exported_tool ?on_result ?authorize ?principal t ~name ~arguments =
   Protocol.call_exported_tool ?on_result ?authorize ?principal t.protocol ~name ~arguments
   |> protocol_result
+
+let host_requests t = Protocol.host_requests t.protocol |> protocol_result
+let host_result t ~arguments = Protocol.host_result t.protocol ~arguments |> protocol_result

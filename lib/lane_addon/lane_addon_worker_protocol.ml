@@ -6,6 +6,7 @@ type contract = {
   exported_tools : string list;
   tool_hooks : tool_hook list;
   max_reply_bytes : int;
+  host_requests : bool;
 }
 type error = Invalid_contract of string | Protocol_failed of string
   | Host_refusal of Lane_addon_call_context.host_refusal
@@ -29,7 +30,7 @@ type t = {
   mutex : Eio.Mutex.t;
 }
 let ( let* ) = Result.bind
-let contract ~action_tool ~tool_invocation ~exported_tools ~tool_hooks ~max_reply_bytes =
+let contract ~action_tool ~tool_invocation ~exported_tools ~tool_hooks ~max_reply_bytes ~host_requests =
   let invalid detail = Error (Invalid_contract detail) in
   let* exported_tools = validate_exported_tools ~action_tool exported_tools
     |> Result.map_error (fun detail -> Invalid_contract detail) in
@@ -40,11 +41,11 @@ let contract ~action_tool ~tool_invocation ~exported_tools ~tool_hooks ~max_repl
     | Host_context, Some tool when String.equal tool Lane_addon_call_context.tool_name ->
         invalid "caller-context control port cannot also be the action port"
     | (Direct | Host_context), (None | Some _) -> Ok () in
-  Ok {action_tool;tool_invocation;exported_tools;tool_hooks;max_reply_bytes}
+  Ok {action_tool;tool_invocation;exported_tools;tool_hooks;max_reply_bytes;host_requests}
 let contract_of_package (package : package) =
   contract ~action_tool:package.action_tool ~tool_invocation:package.tool_invocation
     ~exported_tools:package.exported_tools ~tool_hooks:package.tool_hooks
-    ~max_reply_bytes:(Lane_addon_types.max_reply_bytes package)
+    ~max_reply_bytes:(Lane_addon_types.max_reply_bytes package) ~host_requests:(uses_host_requests package)
 let create ~instance_id ~contract ?artifact_store ?sampling_broker () = {
   instance_id;contract;artifact_store;sampling_broker;
   input_history=Lane_addon_machine_history.create ();
@@ -107,6 +108,10 @@ let initialize t client =
                     String.equal tool.name Lane_addon_call_context.tool_name) tools with
                   | [_] -> Ok ()
                   | _ -> Error (Protocol_failed "package must advertise exactly one lane_call control tool") in
+          let* () = if not t.contract.host_requests then Ok () else
+            let advertised_once name=List.length (List.filter (fun (tool:Mcp_protocol.Mcp_types.tool) -> tool.name=name) tools)=1 in
+            if advertised_once host_requests_tool && advertised_once host_result_tool then Ok ()
+            else Error (Protocol_failed "a package that declares exact outputs must advertise lane_host_requests and lane_host_result once each") in
           let* exported = List.fold_left (fun result name ->
             let* selected = result in
             match List.filter (fun (tool : Mcp_protocol.Mcp_types.tool) -> String.equal tool.name name) tools with
@@ -246,3 +251,19 @@ let call_exported_tool ?(on_result = fun _ -> ()) ?authorize ?(principal = Lane_
       with
       | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _ | Invalid_argument _) as exn ->
           Error (Protocol_failed (Printexc.to_string exn)))
+
+let call_host_tool t ~name ~arguments = protect_call t (fun () ->
+  if not t.contract.host_requests then Error (Protocol_failed "worker contract has no host request ports")
+  else Eio.Mutex.use_ro t.mutex (fun () ->
+    let* ready=ready_for_call t in
+    try
+      let* result=Agent_core.Mcp.call_tool_full ready.client ~name ~arguments
+        |> Result.map_error (fun error -> Protocol_failed (Agent_core.Error.to_string error)) in
+      match result.Mcp_protocol.Mcp_types.is_error with
+      | Some true -> Error (Protocol_failed (Agent_core.Mcp.text_of_tool_result result))
+      | None|Some false -> Option.to_result ~none:(Protocol_failed (name ^ " must return structuredContent")) result.structured_content
+    with
+    | (Eio.Io _|Unix.Unix_error _|Sys_error _|End_of_file|Failure _|Invalid_argument _) as exn ->
+        Error (Protocol_failed (Printexc.to_string exn))))
+let host_requests t = call_host_tool t ~name:host_requests_tool ~arguments:(`Assoc [])
+let host_result t ~arguments = call_host_tool t ~name:host_result_tool ~arguments

@@ -2046,6 +2046,176 @@ let test_trail_groups_consecutive_calls_into_one_block () =
       failf "expected tools/text, got %d item(s): %s" (List.length items)
         (String.concat "; " (List.map trail_item_to_string items))
 
+let model_started scope =
+  Live.Stream_model_started
+    { generation = None; model = "model"; stream_scope = Some scope; message_id = None; usage = None }
+
+let returned_call ?(tool_name = "execute") id =
+  [ tool_started id tool_name; tool_ended id; tool_result id ("exec-" ^ id) ]
+
+let narration text = Live.Text { text; response = Unobserved_scope None }
+let reasoning text = Live.Thinking { text; response = None }
+
+let gathered mode t =
+  Transcript.gather_drawn_tools mode ~item:Fun.id ~with_item:(fun _ item -> item)
+    (Transcript.drawn t)
+
+(* Which kind of row each drawn item is, and for a tool block which calls it
+   holds: the grouping, not the words the pane draws for it. *)
+let drawn_shape (item : Transcript.drawn_item) =
+  let mark =
+    match item.superseded with
+    | None -> ""
+    | Some attempt -> Printf.sprintf "superseded %d: " attempt
+  in
+  mark
+  ^
+  match item.drawn with
+  | Transcript.Drawn_tools block ->
+      "tools["
+      ^ String.concat ","
+          (List.map
+             (fun (activity : Transcript.tool_activity) ->
+               Option.value ~default:"-" activity.call_id)
+             block.activities)
+      ^ "]"
+  | Transcript.Drawn_thinking _ -> "thinking"
+  | Transcript.Drawn_text _ -> "text"
+  | Transcript.Drawn_reply _ -> "reply"
+  | Transcript.Drawn_skill _ -> "skill"
+  | Transcript.Drawn_status _ -> "status"
+  | Transcript.Drawn_error _ -> "error"
+
+(* The operator's turn of 2026-10-20: one call, then a line of narration or
+   a stretch of reasoning, then the next call, seven calls in seven model
+   responses, and one of them failed. The pane drew seven one-call blocks
+   where an autonomous turn's trace draws one. *)
+let operator_turn () =
+  let t = fresh () in
+  feed t
+    ([ Live.Run_started; model_started 0 ]
+     @ returned_call ~tool_name:"masc_board_post_get" "c1"
+     @ [ model_started 1; narration "Let me first read things."; reasoning "r1" ]
+     @ returned_call "c2"
+     @ [ model_started 2; narration "Let me check that quickly."; reasoning "r2" ]
+     @ returned_call "c3"
+     @ [ model_started 3; narration "Let me write the PR comment text." ]
+     @ returned_call "c4"
+     @ [ model_started 4; reasoning "r3" ]
+     @ returned_call "c5"
+     @ [ model_started 5; narration "Let me verify the comment was posted." ]
+     @ returned_call ~tool_name:"masc_board_comment" "c6"
+     @ [ model_started 6; reasoning "r4" ]
+     @ returned_call ~tool_name:"masc_board_post" "c7"
+     @ [ model_started 7
+       ; narration "Posted."
+       ; reply_details ~reply:"Posted." ()
+       ; Live.Run_finished
+       ]);
+  (* What the durable transcript says about the comment call, folded in the
+     way a held log is enriched from the loaded rows. *)
+  check bool "the failed call is matched" true
+    (Transcript.note_tool_outcome t ~execution_id:"exec-c6" ~outcome:Transcript.Failed
+       ~duration:(Some "4ms"));
+  t
+
+let test_full_keeps_the_calls_where_they_ran () =
+  let t = operator_turn () in
+  check bool "Full hands the drawn rows back untouched" true
+    (gathered Transcript.Full t == Transcript.drawn t);
+  check (list string) "every call stands where the turn made it"
+    [ "tools[c1]"; "text"; "thinking"; "tools[c2]"; "text"; "thinking"; "tools[c3]"
+    ; "text"; "tools[c4]"; "thinking"; "tools[c5]"; "text"; "tools[c6]"; "thinking"
+    ; "tools[c7]"; "reply" ]
+    (List.map drawn_shape (gathered Transcript.Full t))
+
+let test_compact_gathers_a_turns_calls_into_one_block () =
+  let t = operator_turn () in
+  let compact = gathered Transcript.Compact t in
+  check (list string)
+    "one block at the first call's place; narration and reasoning follow in order"
+    [ "tools[c1,c2,c3,c4,c5,c6,c7]"; "text"; "thinking"; "text"; "thinking"; "text"
+    ; "thinking"; "text"; "thinking"; "reply" ]
+    (List.map drawn_shape compact);
+  let first_tools =
+    List.find
+      (fun (item : Transcript.drawn_item) ->
+        match item.drawn with Transcript.Drawn_tools _ -> true | _ -> false)
+      (Transcript.drawn t)
+  in
+  (match compact with
+   | ({ drawn = Transcript.Drawn_tools block; _ } as head) :: _ ->
+       check bool "the block keeps the first call's row identity" true
+         (head.origin = first_tools.origin && head.at = first_tools.at);
+       check bool "the failed call stays failed inside the block" true
+         (List.exists
+            (fun (activity : Transcript.tool_activity) ->
+              activity.call_id = Some "c6" && activity.outcome = Transcript.Failed)
+            block.activities);
+       check bool "the compact summary of the block says it failed" true
+         ((Transcript.project_tool_block Transcript.Compact block).summary_outcome
+          = Some Transcript.Failed)
+   | _ -> fail "expected the gathered block first");
+  (* [drawn] matched the recorded reply against the last streamed text in
+     the order the turn ran; gathering moves calls only, so that match holds
+     and the earlier narration stays narration. *)
+  check (list (option string)) "the reply is still the turn's last text, in place"
+    [ None; None; None; None; Some "Posted." ]
+    (List.filter_map
+       (fun (item : Transcript.drawn_item) ->
+         match item.drawn with
+         | Transcript.Drawn_text _ -> Some None
+         | Transcript.Drawn_reply text -> Some (Some text)
+         | _ -> None)
+       compact);
+  check bool "no row is split into observed and final parts" true
+    (List.for_all (fun (item : Transcript.drawn_item) -> item.response_part = None) compact)
+
+(* What gathering does not cross: a Skill read, a superseded attempt and a
+   continuation segment each end the block, in Compact as in the trail. *)
+let test_compact_gathering_stops_at_skill_attempt_and_segment () =
+  let skill_read =
+    [ tool_started "skill-use-1" "keeper_skill"
+    ; tool_args_snapshot "skill-use-1"
+        {|{"identity":{"source_id":"local","package_id":"ops","name":"ci-red-attribution"}}|}
+    ; tool_ended "skill-use-1"
+    ; tool_result "skill-use-1" "exec-skill-1"
+    ]
+  in
+  let t = fresh () in
+  feed t ((Live.Run_started :: returned_call "a") @ skill_read @ returned_call "b");
+  check (list string) "a Skill read between two calls ends the block"
+    [ "tools[a]"; "skill"; "tools[b]" ]
+    (List.map drawn_shape (gathered Transcript.Compact t));
+  let t = fresh () in
+  feed t
+    ((Live.Run_started :: returned_call "a")
+     @ [ reasoning "first try"
+       ; Live.Runtime_attempt_started { runtime_id = Some "retry"; attempt_index = Some 1 }
+       ; reasoning "second try"
+       ]
+     @ returned_call "b");
+  check (list string) "a superseded attempt keeps its own block"
+    [ "superseded 0: tools[a]"; "superseded 0: thinking"; "thinking"; "tools[b]" ]
+    (List.map drawn_shape (gathered Transcript.Compact t));
+  let t = fresh () in
+  feed t
+    ((Live.Run_started :: returned_call "a")
+     @ [ Live.Reply_details
+           { terminal_stream_scope = None
+           ; reply = ""
+           ; turn_outcome = Masc.Keeper_turn_outcome.Continuation_checkpoint
+           ; turn_ref = "trace-1#3"
+           }
+       ; Live.Run_finished
+       ; Live.Run_started
+       ; reasoning "next segment"
+       ]
+     @ returned_call "b");
+  check (list string) "a continuation segment starts its own block"
+    [ "tools[a]"; "thinking"; "tools[b]" ]
+    (List.map drawn_shape (gathered Transcript.Compact t))
+
 let test_trail_updates_a_call_after_later_stretches_open () =
   let t = fresh () in
   feed t
@@ -2916,6 +3086,12 @@ let () =
             test_trail_keeps_one_empty_line_per_paragraph_break
         ; test_case "consecutive calls are one block" `Quick
             test_trail_groups_consecutive_calls_into_one_block
+        ; test_case "Full keeps the calls where they ran" `Quick
+            test_full_keeps_the_calls_where_they_ran
+        ; test_case "Compact gathers a turn's calls into one block" `Quick
+            test_compact_gathers_a_turns_calls_into_one_block
+        ; test_case "Compact gathering stops at Skill, attempt and segment" `Quick
+            test_compact_gathering_stops_at_skill_attempt_and_segment
         ; test_case "a call updates after later stretches open" `Quick
             test_trail_updates_a_call_after_later_stretches_open
         ; test_case "blank stretches are dropped" `Quick

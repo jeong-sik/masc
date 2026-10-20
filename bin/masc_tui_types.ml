@@ -919,6 +919,13 @@ let toggle_tool_visibility = function
   | Tools_full -> Tools_compact
 ;;
 
+(* Which tool projection a stance draws. Results lists every call, so it
+   draws the calls where they ran, as Full does. *)
+let tool_projection_mode_of_visibility = function
+  | Tools_compact -> Masc_tui_keeper_chat_transcript.Compact
+  | Tools_results | Tools_full -> Masc_tui_keeper_chat_transcript.Full
+;;
+
 (* The three Gate stances in the words the [w] chooser's help already uses
    ("manual, Auto Judge or allow-all"), for the rows with no space for the
    chooser's sentence. The chat header and the Keeper detail printed the wire
@@ -15642,6 +15649,42 @@ let keeper_queue_clear_treatment = function
   | Posting | Rechecking -> Leave_waiting
 ;;
 
+(* The committed rows by the rule a held log's rows follow
+   ([Masc_tui_keeper_chat_transcript.gather_tool_blocks]), so a turn reads
+   the same whether its log is held or its rows came back from the server.
+   A block gathers within one turn id and execution source; the turn's
+   reasoning and speech let calls pass. A row with no turn id has no
+   authority to join anything, as in the timeline, so it ends the block. *)
+let gather_chat_tool_rows mode rows =
+  let module Transcript = Masc_tui_keeper_chat_transcript in
+  let classify (row : msg_entry) =
+    if String.equal row.me_request_id "" then Transcript.Ends_gathering
+    else
+      let scope = (row.me_request_id, row.me_execution_source) in
+      match row.me_role, row.me_tool_block with
+      | Message_tool, Some block -> Transcript.Gathers_calls (scope, block)
+      | Message_tool, None -> Transcript.Ends_gathering
+      | (Message_thinking | Message_keeper | Message_autonomous), (Some _ | None) ->
+          Transcript.Lets_calls_pass scope
+      | ( ( Message_user _ | Message_status | Message_local | Message_error
+          | Message_skill _ | Message_memory )
+        , (Some _ | None) ) ->
+          Transcript.Ends_gathering
+  in
+  Transcript.gather_tool_blocks mode
+    ~same_scope:(fun (left_request, left_source) (right_request, right_source) ->
+      String.equal left_request right_request && left_source = right_source)
+    ~classify
+    ~with_block:(fun row block ->
+      { row with
+        me_tool_block = Some block
+      ; me_text =
+          Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true
+            (String.concat "\n" (Masc_tui_keeper_chat_history.tool_rows block))
+      })
+    rows
+;;
+
 let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
   let loaded =
     match state.msg_loaded_keeper with
@@ -15740,6 +15783,7 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
   let loaded = without_partial_replies loaded in
   let session = without_partial_replies session in
   chat_timeline ~loaded ~session ~queued_request_ids |> chat_timeline_rows
+  |> gather_chat_tool_rows (tool_projection_mode_of_visibility state.msg_tool_visibility)
 
 (* One conversation's rows, computed once per change of its inputs.
 
@@ -15753,7 +15797,8 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
    physical equality on them says whether the last answer still holds.
    Selected transcripts also carry their revision: an in-place Reply_details
    arrival changes durable suppression even without a list replacement.
-   The queue reading is compared by value.
+   The queue reading is compared by value, and so is the tool stance:
+   Compact gathers a turn's calls into one row, so Ctrl-D changes the rows.
 
    Module state rather than a field on [state], like the renderer's markdown
    cache: a derived reading is not authority, and the input layer that reads
@@ -15766,6 +15811,7 @@ type chat_rows_memo = {
   crm_settled_logs : turn_log list;
   crm_selected_sources : (turn_log * int) list;
   crm_queued_request_ids : string list;
+  crm_tool_mode : Masc_tui_keeper_chat_transcript.tool_projection_mode;
   crm_rows : msg_entry list;
 }
 
@@ -15778,6 +15824,7 @@ let chat_rows_for (state : state) keeper_name =
     keeper_message_waiting_requests state ~keeper_name
     |> List.map (fun (request, _) -> request.Masc_tui_keeper_chat_projection.request_id)
   in
+  let tool_mode = tool_projection_mode_of_visibility state.msg_tool_visibility in
   match !chat_rows_memo with
   | Some memo
     when String.equal memo.crm_keeper_name keeper_name
@@ -15790,7 +15837,8 @@ let chat_rows_for (state : state) keeper_name =
               held == log && revision = current_revision)
               memo.crm_selected_sources selected_sources
          && List.equal String.equal memo.crm_queued_request_ids
-              queued_request_ids ->
+              queued_request_ids
+         && memo.crm_tool_mode = tool_mode ->
       memo.crm_rows
   | Some _ | None ->
       let rows =
@@ -15805,6 +15853,7 @@ let chat_rows_for (state : state) keeper_name =
             crm_settled_logs = state.msg_settled_logs;
             crm_selected_sources = selected_sources;
             crm_queued_request_ids = queued_request_ids;
+            crm_tool_mode = tool_mode;
             crm_rows = rows;
           };
       rows

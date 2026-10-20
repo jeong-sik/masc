@@ -710,6 +710,53 @@ val drawn : t -> drawn_item list
     follow the observed trail and its text is preserved before the appended
     reply or status. *)
 
+(** How one row takes part in gathering a turn's calls into one tool block
+    ({!gather_tool_blocks}). ['scope] is what a block may not leave: a
+    continuation segment and attempt for a live turn, a turn id and execution
+    source for history rows. *)
+type 'scope tool_gathering =
+  | Gathers_calls of 'scope * tool_block
+      (** A block of ordinary calls in [scope]. *)
+  | Lets_calls_pass of 'scope
+      (** Reasoning or the turn's own text in [scope]. It keeps its place
+          among the other passing rows, and a later block of [scope] still
+          joins the open one. *)
+  | Ends_gathering
+      (** Anything else ends the open block: a Skill block, a receipt, a
+          status, an error, a person's line. *)
+
+val gather_tool_blocks :
+  tool_projection_mode ->
+  same_scope:('scope -> 'scope -> bool) ->
+  classify:('row -> 'scope tool_gathering) ->
+  with_block:('row -> tool_block -> 'row) ->
+  'row list ->
+  'row list
+(** The one rule for where a turn's calls are drawn. [Full] returns the rows
+    as they are, in the order the turn produced them. [Compact] draws a
+    turn's calls as one block: every block of one scope joins the first
+    block of that scope as long as only rows that [Lets_calls_pass] in the
+    same scope stand between them. The gathered block takes the first
+    block's place and row ([with_block] puts the joined calls on it, in call
+    order, with the blocks' omitted steps added up); the rows that passed
+    keep their order, after it. A row of another scope, or one that
+    [Ends_gathering], closes the block. A block nothing joined is returned
+    as it was, and every row that is not a joined block keeps its place. *)
+
+val gather_drawn_tools :
+  tool_projection_mode ->
+  item:('row -> drawn_item) ->
+  with_item:('row -> drawn_item -> 'row) ->
+  'row list ->
+  'row list
+(** {!gather_tool_blocks} over a live turn's {!drawn} rows, carried in any
+    ['row] (the pane keeps each row's position beside it). The scope is the
+    row's continuation segment and attempt, so a block never crosses a
+    segment or a superseded attempt. Reasoning, streamed text and the
+    recorded reply let calls pass; a Skill block, a receipt, a status and an
+    error end the block. {!drawn} itself is not changed: its reply
+    reconciliation reads the order the turn ran in. *)
+
 val of_log : now:float -> Masc_tui_keeper_chat_log.t -> t
 (** Replays entries in journal order using each recorded event time. [now]
     is used only for entries whose source did not provide a timestamp; those

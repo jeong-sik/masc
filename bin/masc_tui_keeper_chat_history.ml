@@ -1633,7 +1633,10 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
 (* Fold consecutive tool calls into one block, the way a live turn draws its
    calls, and keep every other row where it was. Order is the server's: it
    appends in order and its own note asks a client not to re-sort rows that
-   carry no [ts]. *)
+   carry no [ts]. These are the rows Full and Results draw; Compact gathers
+   one turn's blocks into one when the pane builds its rows
+   ([Masc_tui_types.gather_chat_tool_rows]), so the stance is a view, not a
+   second decode. *)
 let fold_tool_blocks parsed_rows =
   let flush pending acc =
     match List.rev pending with

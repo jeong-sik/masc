@@ -874,6 +874,9 @@ let test_history_keeps_producer_tool_call_identity () =
            activities)
   | rows -> failf "expected one history tool block, got %d rows" (List.length rows)
 
+(* The decoded rows keep the order the turn ran in, which Full and Results
+   draw. Compact gathers one turn's blocks into one when the pane builds its
+   rows; that rule is tested where it runs (test_tui_chat_rows_memo). *)
 let test_tool_blocks_separated_by_speech_stay_separate () =
   let decoded =
     decode
@@ -1952,7 +1955,7 @@ let () =
             test_consecutive_tool_rows_become_one_block
         ; test_case "history keeps producer tool-call identity" `Quick
             test_history_keeps_producer_tool_call_identity
-        ; test_case "speech splits tool blocks" `Quick
+        ; test_case "speech splits decoded tool blocks" `Quick
             test_tool_blocks_separated_by_speech_stay_separate
         ; test_case "the server's order is kept" `Quick test_server_order_is_kept
         ; test_case "an autonomous turn draws what it did" `Quick

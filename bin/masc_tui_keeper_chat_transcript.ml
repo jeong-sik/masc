@@ -2601,6 +2601,89 @@ let drawn t =
     t.drawn_cache <- Some (t.revision, items);
     items
 
+type 'scope tool_gathering =
+  | Gathers_calls of 'scope * tool_block
+  | Lets_calls_pass of 'scope
+  | Ends_gathering
+
+(* The block being gathered: the row that opened it, the blocks that joined
+   it, and the rows that passed while it was open. Those rows wait here
+   because the gathered block is drawn before them, and it is not finished
+   until the next row says whether it joins. *)
+type ('row, 'scope) open_gathering =
+  { og_head : 'row
+  ; og_scope : 'scope
+  ; og_blocks_rev : tool_block list
+  ; og_passed_rev : 'row list
+  }
+
+let gather_tool_blocks mode ~same_scope ~classify ~with_block rows =
+  match mode with
+  | Full -> rows
+  | Compact ->
+      (* [acc] is the output, newest first, so the passing rows go on top of
+         the gathered block that is drawn before them. *)
+      let close acc = function
+        | None -> acc
+        | Some gathering ->
+            let head =
+              match List.rev gathering.og_blocks_rev with
+              | [ _ ] -> gathering.og_head
+              | blocks ->
+                  with_block gathering.og_head
+                    (tool_block
+                       ~omitted_steps:
+                         (List.fold_left
+                            (fun steps (block : tool_block) -> steps + block.omitted_steps)
+                            0 blocks)
+                       (List.concat_map (fun (block : tool_block) -> block.activities) blocks))
+            in
+            gathering.og_passed_rev @ (head :: acc)
+      in
+      let rec walk acc gathering = function
+        | [] -> List.rev (close acc gathering)
+        | row :: rest -> (
+            match classify row, gathering with
+            | Gathers_calls (scope, block), Some held when same_scope held.og_scope scope ->
+                walk acc (Some { held with og_blocks_rev = block :: held.og_blocks_rev }) rest
+            | Lets_calls_pass scope, Some held when same_scope held.og_scope scope ->
+                walk acc (Some { held with og_passed_rev = row :: held.og_passed_rev }) rest
+            | Gathers_calls (scope, block), (Some _ | None) ->
+                walk (close acc gathering)
+                  (Some
+                     { og_head = row
+                     ; og_scope = scope
+                     ; og_blocks_rev = [ block ]
+                     ; og_passed_rev = []
+                     })
+                  rest
+            | (Lets_calls_pass _ | Ends_gathering), (Some _ | None) ->
+                walk (row :: close acc gathering) None rest)
+      in
+      walk [] None rows
+
+(* A live turn's rows by the same rule. A block gathers within one
+   continuation segment and one attempt; reasoning and the turn's text --
+   streamed or recorded -- let calls pass, because they are what the model
+   said between calls. Skill blocks, receipts, statuses and errors end the
+   block: a Skill read is not an ordinary call, and the rest mark where a
+   turn or a request begins or ends. *)
+let drawn_tool_gathering (item : drawn_item) =
+  let scope = (item.segment, item.superseded) in
+  match item.drawn with
+  | Drawn_tools block -> Gathers_calls (scope, block)
+  | Drawn_thinking _ | Drawn_text _ | Drawn_reply _ -> Lets_calls_pass scope
+  | Drawn_skill _ | Drawn_status _ | Drawn_error _ -> Ends_gathering
+
+let gather_drawn_tools mode ~item ~with_item rows =
+  gather_tool_blocks mode
+    ~same_scope:(fun (left_segment, left_attempt) (right_segment, right_attempt) ->
+      Int.equal left_segment right_segment
+      && Option.equal Int.equal left_attempt right_attempt)
+    ~classify:(fun row -> drawn_tool_gathering (item row))
+    ~with_block:(fun row block -> with_item row { (item row) with drawn = Drawn_tools block })
+    rows
+
 type model_activity =
   | Activity_model_started
   | Activity_response_ended

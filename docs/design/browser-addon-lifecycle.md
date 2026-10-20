@@ -270,7 +270,9 @@ receipts remain distinct from successful contract validation.
    profile, runs the native launcher and guardian, and checks the bootstrap
    receipt against the original kernel lease before connecting CDP and loading
    Stagehand. The guardian's strict bootstrap also records its child's kernel
-   start token. The worker checks that incarnation and its original foreground
+   start token, retained in the original process handle immediately after spawn,
+   before observers or a reaper can release that PID. The guardian never builds
+   that original identity from a later PID lookup. The worker checks that incarnation and its original foreground
    group, then sends only `SystemInfo.getProcessInfo` on the new CDP connection.
    Exactly one browser row must name that original child. It checks the kernel
    owner and child again after the reply, before creating the Stagehand session
@@ -284,7 +286,9 @@ receipts remain distinct from successful contract validation.
    The identity scenario uses an actual launcher/guardian/child and kernel lease
    with scripted CDP replies. It covers changed child incarnation before any
    command, a foreign PID, a valid original child and owner loss before a matching
-   reply. This defines behavior to execute; it is not real Chrome evidence or
+   reply. The process-manager scenario also retains original birth through
+   actual child reap and covers fast-exit and unsupported-manager handles.
+   This defines behavior to execute; it is not real Chrome evidence or
    persistent-profile support. Startup and model work retain their original owner rather than
    the quick browser response clock. Startup failure stops and joins the original process group before
    returning. Close and detach fence late launchers, close the keepalive and join

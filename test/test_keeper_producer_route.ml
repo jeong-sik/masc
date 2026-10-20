@@ -1,12 +1,9 @@
-(** Whether a verdict about a Task has a Keeper queue to go to, asked the two
-    ways this question gets asked.
+(** Whether a verdict about a Task has a Keeper queue to go to.
 
-    {!Masc.Keeper_producer_route.resolve} may repair an off-canon meta in place
-    — a durable rewrite and an fsync of another Keeper's file. The rejection
-    delivery asks the same question a second time while holding the backlog
-    lock, and that lock is a lease with a wall-clock expiry: a write inside it
-    widens the window where it expires while still held. So the in-lock caller
-    asks through a reader that writes nothing. *)
+    The rejection delivery asks {!Masc.Keeper_producer_route.resolve} twice,
+    the second time while holding the backlog lock, so the answer must come
+    from a read that writes nothing: a meta it cannot decode stays as it is
+    and answers [Error], never {!Masc.Keeper_producer_route.No_keeper}. *)
 module Route = Masc.Keeper_producer_route
 module W = Workspace_core
 
@@ -37,9 +34,8 @@ let write_meta_bytes config name bytes =
 
 let read_bytes path = In_channel.with_open_text path In_channel.input_all
 
-(* A meta the exact decoder refuses and the repair decoder accepts: the one
-   repairable enumerated field carries a value that is not one of its own
-   (#28844). Reading this through [resolve] rewrites the file. *)
+(* A meta the exact decoder refuses: the enumerated field carries a value that
+   is not one of its own (#28844). *)
 let off_canon_meta_bytes name =
   let meta =
     ok (Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String name ]))
@@ -61,53 +57,64 @@ let persist_meta config name =
        (meta_path config name)
        (Masc.Keeper_meta_json.meta_to_json meta))
 
-let test_no_entry_and_no_file_is_no_queue () =
+(* A past mtime no write can keep: a rewrite stamps the current time. *)
+let pinned_mtime = 1_000_000_000.0
+
+let file_mtime path = (Unix.stat path).Unix.st_mtime
+
+let is_no_keeper = function
+  | Ok Route.No_keeper -> true
+  | Ok (Route.Keeper _) | Error _ -> false
+
+let test_no_entry_and_no_file_is_no_keeper () =
   with_workspace (fun config ->
     Alcotest.(check bool) "nothing carries this name" true
-      (Route.has_no_queue_without_writing ~config producer);
+      (is_no_keeper (Route.resolve ~config producer));
     Alcotest.(check bool) "a blank name names nothing" true
-      (Route.has_no_queue_without_writing ~config "   "))
+      (is_no_keeper (Route.resolve ~config "   ")))
 
-let test_a_meta_file_is_a_queue () =
+let test_a_meta_file_is_a_keeper () =
   with_workspace (fun config ->
     persist_meta config producer;
-    Alcotest.(check bool) "a stopped Keeper still has a queue" false
-      (Route.has_no_queue_without_writing ~config producer))
+    match Route.resolve ~config producer with
+    | Ok (Route.Keeper name) ->
+      Alcotest.(check string) "a stopped Keeper still has a queue" producer name
+    | Ok Route.No_keeper -> Alcotest.fail "a meta file read as no Keeper"
+    | Error detail -> Alcotest.fail detail)
 
-(* The whole reason this function exists. The same file read through [resolve]
-   is rewritten; read through this one it is not touched, and the answer is
-   the direction that costs a skipped release rather than a lost task. *)
+(* The in-lock caller relies on this: the read leaves the file exactly as it
+   was, bytes and mtime, and the answer is "not now" rather than "no Keeper",
+   which costs a skipped release instead of a lost task. *)
 let test_an_off_canon_meta_is_not_rewritten () =
   with_workspace (fun config ->
     let bytes = off_canon_meta_bytes producer in
     let path = write_meta_bytes config producer bytes in
-    Alcotest.(check bool) "a meta this decoder will not read is not 'no queue'"
-      false
-      (Route.has_no_queue_without_writing ~config producer);
-    Alcotest.(check string) "and the file is exactly as it was" bytes (read_bytes path);
+    Unix.utimes path pinned_mtime pinned_mtime;
     (match Route.resolve ~config producer with
-     | Ok _ | Error _ -> ());
-    Alcotest.(check string) "and resolve leaves it as it was too" bytes
-      (read_bytes path))
+     | Error _ -> ()
+     | Ok Route.No_keeper -> Alcotest.fail "a meta this decoder will not read is not 'no Keeper'"
+     | Ok (Route.Keeper _) -> Alcotest.fail "an off-canon meta was decoded as current");
+    Alcotest.(check string) "the bytes are exactly as they were" bytes (read_bytes path);
+    Alcotest.(check (float 0.)) "the mtime is exactly as it was" pinned_mtime
+      (file_mtime path))
 
-(* A file that is not JSON at all reaches neither decoder's repair path, and
-   the answer is still "there may be a Keeper here". *)
-let test_an_unreadable_meta_is_not_no_queue () =
+(* A file that is not JSON at all is still "there may be a Keeper here". *)
+let test_an_unreadable_meta_is_not_no_keeper () =
   with_workspace (fun config ->
     let path = write_meta_bytes config producer "{not json" in
     Alcotest.(check bool) "an unreadable meta is not an absent one" false
-      (Route.has_no_queue_without_writing ~config producer);
+      (is_no_keeper (Route.resolve ~config producer));
     Alcotest.(check string) "and it is left alone" "{not json" (read_bytes path))
 
 let () =
   Alcotest.run "keeper_producer_route"
-    [ ( "asked without writing"
-      , [ Alcotest.test_case "no entry and no file is no queue" `Quick
-            test_no_entry_and_no_file_is_no_queue
-        ; Alcotest.test_case "a meta file is a queue" `Quick test_a_meta_file_is_a_queue
+    [ ( "resolve writes nothing"
+      , [ Alcotest.test_case "no entry and no file is no Keeper" `Quick
+            test_no_entry_and_no_file_is_no_keeper
+        ; Alcotest.test_case "a meta file is a Keeper" `Quick test_a_meta_file_is_a_keeper
         ; Alcotest.test_case "an off-canon meta is not rewritten" `Quick
             test_an_off_canon_meta_is_not_rewritten
-        ; Alcotest.test_case "an unreadable meta is not no queue" `Quick
-            test_an_unreadable_meta_is_not_no_queue
+        ; Alcotest.test_case "an unreadable meta is not no Keeper" `Quick
+            test_an_unreadable_meta_is_not_no_keeper
         ] )
     ]

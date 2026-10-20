@@ -136,11 +136,13 @@ let release_failure_is_permanent (error : Masc_domain.masc_error) =
 let release_unroutable_task ~config (item : Masc_domain.pending_completion_rejection) =
   (* Asked again inside the backlog lock: the routing answer above was read
      before it, and a Keeper meta can land at the producer's name in between.
-     Through the reader that writes nothing — [resolve] repairs an off-canon
-     meta in place, and an fsync of another Keeper's file under a lease-backed
-     lock widens the window where the lease expires while still held. *)
+     A meta this binary does not decode is still a Keeper: its [Error] fails
+     the release, and the obligation stays for the next interval. *)
   let still_unroutable () =
-    Ok (Keeper_producer_route.has_no_queue_without_writing ~config item.producer)
+    Keeper_producer_route.resolve ~config item.producer
+    |> Result.map (function
+      | Keeper_producer_route.No_keeper -> true
+      | Keeper_producer_route.Keeper _ -> false)
   in
   match
     Workspace_task.release_unroutable_rejected_task_r

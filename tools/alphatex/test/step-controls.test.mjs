@@ -37,6 +37,9 @@ test('catalog cancellation returns only after actual child closure, and pre-abor
   await new Promise(resolve=>child.stdout.once('data',resolve));controller.abort(new Error('menu closed'))
   await assert.rejects(promise,/menu closed/);assert.notEqual(child.exitCode??child.signalCode,null)
   await assert.rejects(listMidiSources({signal:controller.signal,spawnProcess(){assert.fail('pre-aborted catalog spawned')}}),/menu closed/)
+  const late=new AbortController(),finished=catalog('valid',{signal:late.signal})
+  finished.child.once('close',()=>late.abort(new Error('closed before catalog adoption')))
+  await assert.rejects(finished.promise,/before catalog adoption/)
 })
 test('picker selection keeps source UID on refresh and never substitutes a vanished identity',async()=>{
   const chosen=[],catalogs=[[{id:'1',name:'A'},{id:'2',name:'B'}],[{id:'2',name:'B'},{id:'1',name:'A'}],[{id:'1',name:'A'}]]
@@ -60,6 +63,19 @@ test('dismissed/refreshed discovery cannot adopt stale results and settlement re
   let settled=false;const closed=picker.settled().then(()=>{settled=true});await Promise.resolve();assert.equal(settled,false)
   wait.resolve([{id:'3',name:'Dismissed'}]);await pending;await closed
   assert.equal(picker.view,null);assert.deepEqual(chosen,['2'])
+})
+test('rapid, failed and vanished-source refreshes retain the original source intent until explicit navigation',async()=>{
+  const chosen=[],pending=deferred(),picker=new MidiSourcePicker({selected:id=>chosen.push(id),discover:async()=>[{id:'1',name:'A'},{id:'2',name:'B'}]})
+  await picker.open();picker.keypress('',{name:'down'})
+  picker.discover=()=>pending.promise;const first=picker.open();await Promise.resolve()
+  picker.discover=async()=>[{id:'1',name:'A'}];await picker.open()
+  pending.resolve([{id:'2',name:'Old'}]);await first
+  picker.keypress('',{name:'return'});assert.deepEqual(chosen,[])
+  await picker.open();picker.keypress('',{name:'return'});assert.deepEqual(chosen,[])
+  picker.discover=async()=>{throw new Error('catalog unavailable')};await picker.open()
+  picker.discover=async()=>[{id:'1',name:'A'},{id:'2',name:'B'}];await picker.open()
+  picker.keypress('',{name:'return'});assert.deepEqual(chosen,['2'])
+  await picker.open();picker.keypress('',{name:'return'});assert.deepEqual(chosen,['2','1'])
 })
 test('explicit step lengths/rests preserve notes and history and produce dotted/triplet input at exact ticks',()=>{
   let editor=editorCommand(newEditor(),'note C4 0 1 70').editor

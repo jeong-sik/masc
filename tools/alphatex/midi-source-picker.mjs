@@ -5,22 +5,25 @@ import { listMidiSources } from './midi-input.mjs'
 export class MidiSourcePicker {
   constructor({ selected, notify = () => {}, discover = listMidiSources }) {
     Object.assign(this, { selected, notify, discover })
-    this.view = null; this.epoch = 0; this.jobs = new Set()
+    this.view = null; this.epoch = 0; this.jobs = new Set(); this.preferred = undefined
   }
-  close() {
+  retire() {
     ++this.epoch
     for (const job of this.jobs) job.controller.abort(new Error('MIDI source selection cancelled'))
-    this.view = null; this.notify()
+  }
+  close() {
+    this.retire(); this.view = null; this.preferred = undefined; this.notify()
   }
   async settled() { await Promise.allSettled([...this.jobs].map(job => job.promise)) }
   open() {
-    const preferred = this.view?.kind === 'ready' ? this.view.sources[this.view.cursor]?.id : undefined
-    this.close()
+    const preferred = this.preferred
+    this.retire()
     const epoch = this.epoch, controller = new AbortController()
     this.view = { kind: 'loading' }; this.notify()
     const job = { controller }
     job.promise = Promise.resolve().then(() => this.discover({ signal: controller.signal })).then(sources => {
       if (epoch !== this.epoch) return
+      if (preferred === undefined) this.preferred = sources[0]?.id
       this.view = { kind: 'ready', sources, cursor: preferred === undefined ? 0 : sources.findIndex(source => source.id === preferred) }
     }, error => {
       if (epoch === this.epoch) this.view = { kind: 'failed', error: error instanceof Error ? error.message : String(error) }
@@ -36,6 +39,7 @@ export class MidiSourcePicker {
     if (['up', 'k', 'down', 'j'].includes(key.name)) {
       const direction = ['up', 'k'].includes(key.name) ? -1 : 1
       this.view = { ...this.view, cursor: sources.length ? cursor < 0 ? direction > 0 ? 0 : sources.length - 1 : (cursor + direction + sources.length) % sources.length : -1 }
+      if (this.view.cursor >= 0) this.preferred = sources[this.view.cursor].id
       this.notify()
     } else if (key.name === 'return') {
       const source = sources[cursor]

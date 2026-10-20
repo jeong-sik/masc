@@ -38,6 +38,7 @@ export async function listMidiSources({ signal, executable = midiInputPath, spaw
       })
     })
   } finally { signal?.removeEventListener('abort', abort) }
+  signal?.throwIfAborted()
   const result = JSON.parse(output), identities = new Set()
   if (result.kind !== 'midi-sources' || result.schemaVersion !== 1 || !Array.isArray(result.sources)) throw new Error('Invalid MIDI source catalog')
   for (const source of result.sources) {

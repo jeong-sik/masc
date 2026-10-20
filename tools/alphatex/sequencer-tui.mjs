@@ -24,7 +24,7 @@ const help = [
   ':step-input chooses a MIDI keyboard; :step-input SOURCE_UID arms it directly; :step-stop drains.',
   ':step-length 1/3 sets next note length; :step-rest [LENGTH] moves without editing notes.',
   'Lengths/rests use beats or source SMPTE frames; release held keys before changing them.',
-  'Release all keys to insert/advance by note length; manual edits stop input. No live audio echo.',
+  'Release all keys to insert/advance by note length; cursor/track edits stop input. No live audio echo.',
   'Source :events toggles expression list; Up/Down selects, Enter edits value, +/- changes, x removes.',
   ':cc CTRL VALUE [AT] :bend VALUE [AT] :program VALUE [AT] :pressure VALUE [AT] :poly-pressure KEY VALUE [AT]',
   ':event ID; :event-value VALUE; :event-move AT; :event-set KIND VALUES; :event-channel CH; :event-remove',

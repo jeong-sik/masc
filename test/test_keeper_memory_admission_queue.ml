@@ -655,12 +655,6 @@ let test_lost_receipts_do_not_block_remaining_input () =
     check int "append never reuses a consumed sequence" 4 (append keepers_dir "d" "rule d").sequence))
     [`Receipts_removed; `Older_receipts_restored]
 
-(* The snapshot itself is gone. Right after the loss the receipts it proved
-   still refuse judgment. The next ordinary Librarian read reconciles the
-   receipt sidecar against no snapshot and drops them, and the remaining
-   explicit input then joins the Memory that starts again, as durable and
-   continuity input do; it is not held back for a snapshot nothing restores.
-   See docs/guides/keeper-memory-limits.md, "Explicit memory writes". *)
 (* B committed but its receipt was lost before acknowledgement, so B is judged
    again. Committing its claim a second time refreshes the fact Memory already
    holds instead of adding another.
@@ -683,6 +677,12 @@ let test_rejudged_commit_keeps_one_fact () = with_store (fun keepers_dir ->
      | Some current -> List.map (fun (f : Types.fact) -> f.claim) current.facts
      | None -> []))
 
+(* The snapshot itself is gone. Right after the loss the receipts it proved
+   still refuse judgment. The next ordinary Librarian read reconciles the
+   receipt sidecar against no snapshot and drops them, and the remaining
+   explicit input then joins the Memory that starts again, as durable and
+   continuity input do; it is not held back for a snapshot nothing restores.
+   See docs/guides/keeper-memory-limits.md, "Explicit memory writes". *)
 let test_snapshot_loss_admits_remaining_input_into_new_memory () = with_store (fun keepers_dir ->
   List.iter (fun id -> ignore (append keepers_dir id ("rule " ^ id))) ["a";"b";"c"];
   let consumed = List.filter (fun (id : Current.explicit_candidate_id) -> id.request_id <> "c")

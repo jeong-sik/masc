@@ -843,6 +843,46 @@ let test_legacy_intents_make_the_backlog_unreadable () =
     check bool "the refusal names the intent field" true
       (String_util.contains_substring error "does not accept intent")
 
+(* A lifecycle timestamp that is not RFC 3339 makes the whole backlog
+   unreadable, as any other corrupt required field does, so the deployment
+   preflight refuses before replacing the executable. The error names the row. *)
+let test_malformed_lifecycle_clock_makes_the_backlog_unreadable () =
+  let claimed id claimed_at =
+    match task_json_for id with
+    | `Assoc fields ->
+      `Assoc
+        (List.remove_assoc "status" fields
+         @ [ "status", `String "claimed"
+           ; "assignee", `String "claude"
+           ; "claimed_at", `String claimed_at
+           ])
+    | _ -> fail "task fixture is not an object"
+  in
+  let document tasks =
+    `Assoc
+      [ "tasks", `List tasks
+      ; "last_updated", `String "2026-10-20T00:00:00Z"
+      ; "version", `Int 1
+      ]
+  in
+  let valid = "2026-10-20T00:00:00Z" in
+  (match
+     Masc_domain.backlog_of_yojson
+       (document [ claimed "a" valid; claimed "b" valid; claimed "c" valid ])
+   with
+   | Ok backlog -> check int "valid rows load" 3 (List.length backlog.tasks)
+   | Error error -> fail ("valid claimed rows were refused: " ^ error));
+  match
+    Masc_domain.backlog_of_yojson
+      (document [ claimed "a" valid; claimed "b" "not-a-time"; claimed "c" valid ])
+  with
+  | Ok _ -> fail "a backlog with a malformed claimed_at was accepted"
+  | Error error ->
+    check bool "the refusal names the row" true
+      (String_util.contains_substring error "backlog.tasks[1] corrupt");
+    check bool "the refusal names the field" true
+      (String_util.contains_substring error "claimed_at must be RFC 3339")
+
 let test_task_of_yojson_with_diagnostics_absent () =
   match Masc_domain.task_of_yojson_with_diagnostics (task_json_for "task-590") with
   | Ok (_, d) ->
@@ -1888,6 +1928,8 @@ let () =
     "backlog_of_yojson", [
       test_case "legacy intents make the backlog unreadable" `Quick
         test_legacy_intents_make_the_backlog_unreadable;
+      test_case "malformed lifecycle clock makes the backlog unreadable" `Quick
+        test_malformed_lifecycle_clock_makes_the_backlog_unreadable;
       test_case "ok" `Quick test_backlog_of_yojson_ok;
       test_case "with task" `Quick test_backlog_of_yojson_with_task;
       test_case "rejects string document" `Quick test_backlog_of_yojson_rejects_string;

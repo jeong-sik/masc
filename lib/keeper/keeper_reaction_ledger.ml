@@ -1196,12 +1196,19 @@ let read_delivery_evidence_cached ~keeper_name store ~not_before =
 ;;
 
 let read_delivery_evidence ~keeper_name store ~not_before =
-  if not_before <= 0.
-  then read_delivery_evidence_uncached ~keeper_name store ~not_before
-  else
-    match read_delivery_evidence_cached ~keeper_name store ~not_before with
-    | Ok _ as evidence -> evidence
-    | Error _ -> read_delivery_evidence_uncached ~keeper_name store ~not_before
+  (* Move the complete read before acquiring its native cache mutex. Keeping
+     open/read/close inside the job avoids transferring a live channel across
+     cancellation. Its system thread belongs to the worker domain, so set
+     unions do not share the main scheduler's runtime lock. Queue ownership
+     and the durable enqueue transaction remain on the calling fiber. *)
+  Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    Eio_guard.run_in_systhread ~label:"keeper-delivery-evidence" (fun () ->
+      if not_before <= 0.
+      then read_delivery_evidence_uncached ~keeper_name store ~not_before
+      else
+        match read_delivery_evidence_cached ~keeper_name store ~not_before with
+        | Ok _ as evidence -> evidence
+        | Error _ -> read_delivery_evidence_uncached ~keeper_name store ~not_before))
 ;;
 
 let event_queue_delivery_seen_for_source_strict_result

@@ -1500,6 +1500,37 @@ let test_delivery_evidence_follows_the_ledger_after_it_was_read () =
   seen unknown |> require_strict_delivery "an emptied ledger holds no damage" false
 ;;
 
+let with_delivery_evidence_pool f =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let previous = Domain_pool_ref.get () in
+      let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      Domain_pool_ref.set pool;
+      Fun.protect
+        ~finally:(fun () ->
+          match previous with
+          | Some previous -> Domain_pool_ref.set previous
+          | None -> Domain_pool_ref.clear_for_tests ())
+        (fun () -> f pool)))
+;;
+
+let test_delivery_evidence_pool_preserves_authority () =
+  with_delivery_evidence_pool (fun _pool ->
+    test_consumed_delivery_syntax_corruption_is_incomplete ();
+    test_delivery_evidence_reads_only_the_appended_bytes ();
+    test_delivery_evidence_follows_the_ledger_after_it_was_read ())
+;;
+
+let test_delivery_evidence_nested_worker_and_raw_domain () =
+  with_delivery_evidence_pool (fun pool ->
+    Domain_pool.submit_cpu pool test_delivery_evidence_follows_the_ledger_after_it_was_read;
+    with_consumed_delivery_source (fun ~base_path ~keeper_name ~source ->
+      let since = Unix.gettimeofday () -. 86400. in
+      let seen () = delivery_seen_strict ~not_before:since ~base_path ~keeper_name source in
+      Domain.join (Domain.spawn seen)
+      |> require_strict_delivery "raw domain reads canonical delivery evidence" true))
+;;
+
 let test_syntax_error_does_not_claim_an_occurrence_identity () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "strict-evidence-keeper" in
@@ -1881,6 +1912,10 @@ let () =
             `Quick test_delivery_evidence_reads_only_the_appended_bytes
         ; test_case "delivery evidence follows the ledger after it was read"
             `Quick test_delivery_evidence_follows_the_ledger_after_it_was_read
+        ; test_case "delivery evidence pool preserves authority"
+            `Quick test_delivery_evidence_pool_preserves_authority
+        ; test_case "delivery evidence nested worker and raw domain"
+            `Quick test_delivery_evidence_nested_worker_and_raw_domain
         ; test_case
             "syntax error cannot claim an occurrence identity"
             `Quick

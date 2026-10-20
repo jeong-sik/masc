@@ -1042,9 +1042,8 @@
   ;; test_keeper_chat_event_log replays provider retry observations; the wire
   ;; payloads live in the runtime library.
   masc.runtime
-  ;; test_keeper_model_input_demotion installs a one-worker Domain_pool to
-  ;; prove materialize addresses its bodies there.
-  masc.masc_core eio_main
+  ;; Model-input and delivery-evidence cases exercise a one-worker pool.
+  masc.masc_core eio eio_main
   masc.cost_ledger
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
   masc.skill_config masc.skill_reference masc.skill_snapshot masc.config

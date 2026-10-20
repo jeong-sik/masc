@@ -13379,14 +13379,15 @@ let goal_drop_reason_for (state : state) (goal_id : string) =
       Some entry.reason
   | Some (Goal_action_armed _ | Goal_drop_reason _) | None -> None
 
-(* A compact Home never grows a feed just because the terminal grew. An
-   explicit reader choice still applies on Home and survives surface changes. *)
+(* Every surface, Home included, starts with the narrow Activity pane, so a
+   wide terminal has the feed beside Home instead of an empty right side. The
+   pane draws only when the terminal is wide enough for it
+   ([Masc_tui_acting_pane.drawn_cols]). An explicit reader choice applies on
+   every surface and survives surface changes. *)
 let acting_pane_layout (state : state) =
   match state.acting_pane_preference with
   | Chosen_acting_pane layout -> layout
-  | Default_acting_pane ->
-      if state.view = Overview then Masc_tui_acting_pane.Hidden
-      else Masc_tui_acting_pane.Narrow
+  | Default_acting_pane -> Masc_tui_acting_pane.Narrow
 
 (* Requests retain receipts and unresolved declarations across withdrawal.
    Successful creation releases its retry body; receipts grant no authority. *)

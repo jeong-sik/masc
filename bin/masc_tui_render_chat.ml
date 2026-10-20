@@ -2575,13 +2575,45 @@ type settled_block_memo = {
 let settled_block_memo : (string * string, settled_block_memo) Hashtbl.t =
   Hashtbl.create 16
 
+(* An observed block whose journal read is refused, with its STATUS row,
+   under the same key and beside the block it was built from. *)
+let unavailable_block_memo : (string * string, log_block * log_block) Hashtbl.t =
+  Hashtbl.create 4
 
-(* The merged rows while no block is live: the same list across frames when
-   the committed entries and every settled block are the same values, which
-   is what lets the row walk keep its counts. *)
+(* The merge sets the request and rail of every row a block's request owns.
+   A row already carrying both is returned as it came: most rows of a block
+   continue their turn, the rail the block was built with. A turn's first and
+   last rows take a corner, and that copy is kept beside the row it was made
+   from, so the next merge -- after one journal read of a running turn --
+   hands back the same copy and every per-entry cache keyed on it holds. *)
+let railed_entries = Entry_cache.create 64
+
+let railed_entry (entry : Message_layout.entry) ~request_label ~turn_rail =
+  let carries (row : Message_layout.entry) =
+    String.equal row.request_label request_label && row.turn_rail = turn_rail
+  in
+  if carries entry then entry
+  else
+    match Entry_cache.find_opt railed_entries entry with
+    | Some copy when carries copy -> copy
+    | Some _ | None ->
+        let copy = { entry with Message_layout.request_label; turn_rail } in
+        Entry_cache.replace railed_entries entry copy;
+        copy
+
+
+(* The merged rows: the same list across frames when the committed entries,
+   every block and the blocks whose turn is still open are the same values,
+   which is what lets the row walk and every per-entry cache keep their
+   answers. A live turn is the usual state of a busy keeper, and its block is
+   memoised on its log's revision like a settled one, so a frame between two
+   journal reads -- every scroll key -- changes none of the three. The open
+   blocks are part of the key because they set the rail of a request's last
+   row, and a turn can end without its block changing. *)
 type merged_blocks_memo = {
   mbm_committed : Message_layout.entry list;
   mbm_blocks : log_block list;
+  mbm_open : log_block list;
   mbm_merged : (tagged_row * Message_layout.entry) list;
   mbm_entries : Message_layout.entry list;
 }
@@ -2868,9 +2900,11 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
      transcript, and its block depends on the committed rows only through
      the timeline it is placed in; so each block is memoized on the
      transcript's revision, the timeline's identity and the knobs the rows
-     read, and the merged list is reused whole while no block is live. That
-     is what keeps an idle pane holding settled turns at the same per-frame
-     cost it had before they were logs. *)
+     read, and the merged list is reused whole while no block, and no
+     block's open or closed state, has changed. That is what keeps a pane
+     holding settled turns, and a pane beside a running turn between two of
+     its journal reads, at the same per-frame cost it had before they were
+     logs. *)
   (* Both are fixed for the frame; asking per log rescanned every held log. *)
   let live_status_log = Masc_tui_types.keeper_message_status_log state in
   let member_ids_of =
@@ -3223,27 +3257,40 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
         let ended = Masc_tui_types.observed_log_has_ended state log in
         let unavailable = Masc_tui_types.observed_log_is_unavailable state log in
         let block = held_projection ~committed:(ended || unavailable) log in
-        let entries = block.lb_entries in
-        let entries =
-          match unavailable, List.rev entries with
-          | true, last :: _ ->
-              let style = Message_layout.Status in
-              entries @
-              (* The status row is not the entry it was copied from, so it
-                 names none of that entry's request or attempt. *)
-              [{ last with le_origin = None; le_is_reply = false; le_entry = { last.le_entry with delivery_state = None; style; speaker = "STATUS";
-                 heading_boundary = Message_layout.Inherit_heading;
-                 body_presentation = Message_layout.Source_body;
-                 diagnostics = [];
-                 role_label = Message_layout.align_role_label
-                   ~column:role_label_column ~style "STATUS";
-                 role_label_mark_cells = Message_layout.role_label_mark_cells
-                   ~column:role_label_column ~style ();
-                 body = "저널 갱신 불가 · 받은 기록을 유지합니다";
-                 markdown_source = Message_layout.Markdown_streaming } }]
-          | false, _ | true, [] -> entries
-        in
-        { block with lb_entries = entries })
+        match unavailable, List.rev block.lb_entries with
+        | false, _ | true, [] -> block
+        | true, last :: _ ->
+            (* The block with its STATUS row is kept beside the block it
+               extends, so a refused journal does not hand the merge a new
+               block on every frame. *)
+            let key =
+              ( Masc_tui_types.turn_log_keeper_name log
+              , Masc_tui_types.turn_log_request_id log )
+            in
+            (match Hashtbl.find_opt unavailable_block_memo key with
+             | Some (source, with_status) when source == block -> with_status
+             | Some _ | None ->
+                 let style = Message_layout.Status in
+                 let with_status =
+                   { block with
+                     lb_entries =
+                       block.lb_entries
+                       @ (* The status row is not the entry it was copied
+                            from, so it names none of that entry's request or
+                            attempt. *)
+                       [{ last with le_origin = None; le_is_reply = false; le_entry = { last.le_entry with delivery_state = None; style; speaker = "STATUS";
+                          heading_boundary = Message_layout.Inherit_heading;
+                          body_presentation = Message_layout.Source_body;
+                          diagnostics = [];
+                          role_label = Message_layout.align_role_label
+                            ~column:role_label_column ~style "STATUS";
+                          role_label_mark_cells = Message_layout.role_label_mark_cells
+                            ~column:role_label_column ~style ();
+                          body = "저널 갱신 불가 · 받은 기록을 유지합니다";
+                          markdown_source = Message_layout.Markdown_streaming } }] }
+                 in
+                 Hashtbl.replace unavailable_block_memo key (block, with_status);
+                 with_status))
     |> List.filter (fun block -> block.lb_entries <> [])
   in
   (* Classify the same selected pool that history suppression reads. *)
@@ -3432,13 +3479,11 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
               | Tagged_row message -> siding_of_message message
               | Tagged_child _ | Tagged_block _ -> None
             in
-            ( tag
-            , { entry with
-                Message_layout.request_label = request_id;
-                turn_rail =
-                  turn_rail_of ~siding ~edge
-                    ~style:entry.Message_layout.style
-              } )
+            let railed =
+              railed_entry entry ~request_label:request_id
+                ~turn_rail:(turn_rail_of ~siding ~edge ~style:entry.Message_layout.style)
+            in
+            if railed == entry then item else (tag, railed)
         | _ -> item)
       merged
   in
@@ -3457,15 +3502,12 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
             if List.for_all2 (fun (_, kept) (_, came) -> kept == came) tagged committed_tagged
             then committed_tagged, committed_layout_entries
             else tagged, List.map snd tagged)
-    | _ :: _, _ :: _ ->
-        let merged = merge_blocks () in
-        merged, List.map snd merged
-    | _ :: _, [] -> (
+    | _ :: _, _ -> (
         match !merged_blocks_memo with
         | Some memo
           when memo.mbm_committed == committed_layout_entries
-               && List.length memo.mbm_blocks = List.length blocks
-               && List.for_all2 ( == ) memo.mbm_blocks blocks ->
+               && List.equal ( == ) memo.mbm_blocks blocks
+               && List.equal ( == ) memo.mbm_open open_blocks ->
             memo.mbm_merged, memo.mbm_entries
         | Some _ | None ->
             let merged = merge_blocks () in
@@ -3474,6 +3516,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
               Some
                 { mbm_committed = committed_layout_entries;
                   mbm_blocks = blocks;
+                  mbm_open = open_blocks;
                   mbm_merged = merged;
                   mbm_entries = entries;
                 };

@@ -435,6 +435,28 @@ let test_truncate_middle () =
         (Layout.display_width s <= col))
     [ 1; 2; 3; 4; 5; 6; 7; 8; 9; 10 ]
 
+(* A duration or an age that is not a span reads as nothing. NaN and the
+   infinities have no [int_of_float], so they must not reach the ladder. *)
+let test_a_span_that_is_not_a_number_reads_as_nothing () =
+  let nothing what = check bool what true in
+  List.iter
+    (fun (what, seconds) ->
+      nothing (what ^ " is not an elapsed time") (Layout.elapsed_text seconds = None);
+      nothing (what ^ " is not an age")
+        (Layout.age_text ~now:seconds ~since:0. = None))
+    [ "NaN", Float.nan
+    ; "infinity", Float.infinity
+    ; "negative infinity", Float.neg_infinity
+    ; "a negative span", -1.
+    ];
+  nothing "a NaN stamp is not an age" (Layout.age_text ~now:10. ~since:Float.nan = None);
+  nothing "a stamp in the future is not an age" (Layout.age_text ~now:10. ~since:12. = None);
+  List.iter
+    (fun seconds ->
+      nothing "a finite span is read" (Option.is_some (Layout.elapsed_text seconds)))
+    [ 0.; -0.; 0.0004; 1.2; 59.96; 3600.; 9_000_000. ];
+  nothing "equal clocks are a zero age" (Option.is_some (Layout.age_text ~now:5. ~since:5.))
+
 let () =
   run "tui_message_layout"
     [
@@ -449,6 +471,10 @@ let () =
         ; test_case "an ASCII text is not kept" `Quick test_an_ascii_text_is_not_kept
         ; test_case "truncate_middle preserves unpadded fit and wide scalar boundaries" `Quick
             test_truncate_middle
+        ] );
+      ( "spans"
+      , [ test_case "a span that is not a number reads as nothing" `Quick
+            test_a_span_that_is_not_a_number_reads_as_nothing
         ] );
       ( "clause packing"
       , [] );

@@ -269,10 +269,19 @@ let failed_call_glyph = Acting.glyph_text Acting.Failure
 let detail_indent_cells = mark_cells + dispatch_cells + gap_cells
 let detail_label_cells = 4
 
-(* An age clamps a backwards clock to "0ms", where
-   [Masc_tui_message_layout.age_text] draws nothing; that and a NaN clock
-   are #38663. *)
-let age_text ~now at = Layout.clamped_elapsed_text (now -. at)
+(* An age is read from two clocks. When the call is stamped after the TUI's own
+   reading, or a stamp is not a number, there is no age to draw
+   ([Layout.elapsed_text] is [None]) and the cell holds the no-value mark, not
+   a time that never passed. *)
+let age_text ~now at =
+  match Layout.elapsed_text (now -. at) with
+  | Some text -> text
+  | None -> Masc_tui_theme.Glyph.no_value
+
+let ago_text ~now at =
+  match Layout.elapsed_text (now -. at) with
+  | Some text -> text ^ " ago"
+  | None -> Masc_tui_theme.Glyph.no_value
 
 let last_event_text ~now at = "last event " ^ age_text ~now at
 
@@ -944,7 +953,7 @@ let call_detail_line ~cols ~now (tool : Acting.chunk_tool) part =
   match part with
   | Detail_facts ->
       let facts =
-        { text = join [ age_text ~now tool.Acting.ct_at ^ " ago"; schedule_text tool ]
+        { text = join [ ago_text ~now tool.Acting.ct_at; schedule_text tool ]
         ; tone = Dim
         }
       in
@@ -1485,7 +1494,7 @@ let file_glyph file =
 (* One file: its kind, the address cut in the middle so the file name and
    the repository both stay readable, the range when known, the age. *)
 let file_line ~cols ~now index file =
-  let age = { text = age_text ~now file.file_at ^ " ago"; tone = Dim } in
+  let age = { text = ago_text ~now file.file_at; tone = Dim } in
   let where = Option.value ~default:"" file.file_where in
   let inner = cols - border_cells - mark_cells in
   let right = Layout.display_width age.text in
@@ -1528,7 +1537,7 @@ let changes_status_lines ~cols input =
                 ^ join
                     [ files_text files
                     ; window_text r.window_hours
-                    ; age_text ~now:input.now r.fetched_at ^ " ago"
+                    ; ago_text ~now:input.now r.fetched_at
                     ]
             ; tone = Dim
             }

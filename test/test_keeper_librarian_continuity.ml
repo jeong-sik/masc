@@ -2334,6 +2334,9 @@ let growing_history_atom_bytes = 256 * 1024
    in the openers each boundary line names. *)
 let test_a_walk_does_not_reread_the_covered_prefix () =
   with_source @@ fun _env config save _append boundary ->
+  (* [Gc.allocated_bytes] counts this domain alone, so the bound below
+     measures the work only while no worker pool would run it elsewhere. *)
+  check bool "no worker pool is installed" true (Option.is_none (Domain_pool_ref.get ()));
   let atom_messages atom =
     let id = Printf.sprintf "read-%d" atom in
     [tool_call id; tool_result id (String.make growing_history_atom_bytes 'x')] in

@@ -390,6 +390,9 @@ let digest_prefix_atom_bytes = 16 * 1024
    later end without encoding the covered atoms again, and gives the digest a
    full read gives. *)
 let test_a_verified_prefix_digest_extends_over_the_same_values () =
+  (* [Gc.allocated_bytes] counts this domain alone, so the bound below
+     measures the work only while no worker pool would run it elsewhere. *)
+  check bool "no worker pool is installed" true (Option.is_none (Domain_pool_ref.get ()));
   let atoms = List.init digest_prefix_atoms (fun atom ->
     msg T.User (Printf.sprintf "atom %d %s" atom (String.make digest_prefix_atom_bytes 'd'))) in
   let messages = pinned :: atoms in

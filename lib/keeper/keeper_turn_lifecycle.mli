@@ -2,6 +2,14 @@
 
 type tool_result = Keeper_types_profile.tool_result
 
+val accepted_field : string
+(** Field of a [handle_keeper_down] answer that took a shutdown operation, new
+    or already running. *)
+
+val already_absent_field : string
+(** Field of a [handle_keeper_down] answer for a name with no lane and no
+    metadata. *)
+
 val handle_keeper_down :
   _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
 

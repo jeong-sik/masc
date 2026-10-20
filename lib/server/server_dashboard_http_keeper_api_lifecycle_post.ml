@@ -155,7 +155,10 @@ type shutdown_outcome =
    "paused-state persist failed after shutdown" (#28731). A shape that is
    neither is refused, not read as a submission. *)
 let shutdown_outcome_of_data data =
-  match Json_util.get_bool data "already_absent", Json_util.get_bool data "accepted" with
+  match
+    ( Json_util.get_bool data Keeper_turn_lifecycle.already_absent_field
+    , Json_util.get_bool data Keeper_turn_lifecycle.accepted_field )
+  with
   | Some true, _ -> Ok Shutdown_target_absent
   | (Some false | None), Some _ -> Ok Shutdown_submitted
   | (Some false | None), None ->

@@ -9,10 +9,13 @@ let register_remove_pending_confirms_by_target =
   Keeper_shutdown_finalize.register_remove_pending_confirms_by_target
 ;;
 
+let accepted_field = "accepted"
+let already_absent_field = "already_absent"
+
 let operation_json ~accepted operation =
   match Keeper_shutdown_store.to_json operation with
   | `Assoc fields ->
-    `Assoc (("accepted", `Bool accepted) :: fields)
+    `Assoc ((accepted_field, `Bool accepted) :: fields)
   | json -> json
 ;;
 
@@ -60,7 +63,7 @@ let handle_keeper_down (ctx : _ context) args : tool_result =
             tool_result_ok_data
               (`Assoc
                  [ "name", `String requested_name
-                 ; "already_absent", `Bool true
+                 ; already_absent_field, `Bool true
                  ])
           | Ok (Some _) ->
             Log.Keeper.error

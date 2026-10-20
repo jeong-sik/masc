@@ -4184,9 +4184,22 @@ let production_keeper_meta ~base_path ~trace_id =
   | Error detail -> fail ("production Keeper meta fixture failed: " ^ detail)
 ;;
 
+type production_http_fixture =
+  { candidates : string list
+  ; respond : Yojson.Safe.t -> Cohttp.Code.status_code * string
+  }
+
+let projection_http_fixture requests =
+  { candidates=["projection.http";"codex.codex"]
+  ; respond=(fun _ ->
+      incr requests;
+      (* Empty HTTP completion is rejected before AfterTurn. *)
+      `OK,
+      {|{"id":"projection-a","model":"projection-http-fixture","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}]}|}) }
+
 let run_production_keeper_turn_as ~input_speaker ~turn_kind ~write_cost_ledger ~after_turn
     ~dynamic_context_for_tools
-    ~http_requests ~base_path ~trace_id
+    ~http_fixture ~base_path ~trace_id
     ~user_message ~cli_path ~model ~turn_instructions =
   Masc_test_deps.declare_fixture_keeper
     ~base_path ~sandbox_profile:None "codex-production-fixture";
@@ -4207,16 +4220,14 @@ let run_production_keeper_turn_as ~input_speaker ~turn_kind ~write_cost_ledger ~
                     ~mono_clock:(Eio.Stdenv.mono_clock env)
                     ~sw
                     (fun () ->
-                       let runtime_id = match http_requests with
+                       let runtime_id = match http_fixture with
                          | None -> "codex.codex"
-                         | Some requests ->
+                         | Some fixture ->
                            let callback _connection _request body =
-                             ignore (Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) : string);
-                             incr requests;
-                             (* Empty HTTP completion is rejected before
-                                AfterTurn; its projection is still observed. *)
-                             Cohttp_eio.Server.respond_string ~status:`OK
-                               ~body:{|{"id":"projection-a","model":"projection-http-fixture","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}]}|} ()
+                             let request=Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all)
+                               |> Yojson.Safe.from_string in
+                             let status,body=fixture.respond request in
+                             Cohttp_eio.Server.respond_string ~status ~body ()
                            in
                            let socket = Eio.Net.listen env#net ~sw ~backlog:1
                              (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
@@ -4226,6 +4237,14 @@ let run_production_keeper_turn_as ~input_speaker ~turn_kind ~write_cost_ledger ~
                            Eio.Fiber.fork_daemon ~sw (fun () ->
                              Cohttp_eio.Server.run socket
                                (Cohttp_eio.Server.make ~callback ()) ~on_error:raise);
+                           let last_model =
+                             if List.mem "projection.http_last" fixture.candidates then {|
+[models.http_last]
+api-name = "projection-last-fixture"
+max-context = 400000
+streaming = false
+[projection.http_last]
+|} else "" in
                            write_fixture_file runtime_path
                              (codex_runtime_toml ~model cli_path ^ Printf.sprintf {|
 [providers.projection]
@@ -4236,9 +4255,10 @@ api-name = "projection-http-fixture"
 max-context = 400000
 streaming = false
 [projection.http]
+%s
 [runtime.lanes.projection_then_codex]
-candidates = ["projection.http", "codex.codex"]
-|} port);
+candidates = [%s]
+|} port last_model (String.concat ", " (List.map (Printf.sprintf "%S") fixture.candidates)));
                            "projection_then_codex"
                        in
                        match Runtime.init_default ~config_path:runtime_path with
@@ -4321,10 +4341,15 @@ candidates = ["projection.http", "codex.codex"]
                               settlement.Keeper_agent_run.result))))))
 ;;
 
-let run_production_keeper_turn_with_projection =
+let run_production_keeper_turn_with_projection ~write_cost_ledger ~after_turn
+    ~dynamic_context_for_tools ~http_requests ~base_path ~trace_id
+    ~user_message ~cli_path ~model ~turn_instructions =
   run_production_keeper_turn_as
     ~input_speaker:(Keeper_input_speaker.Person Keeper_input_speaker.Owner)
     ~turn_kind:Turn_record.Direct
+    ~write_cost_ledger ~after_turn ~dynamic_context_for_tools
+    ~http_fixture:(Option.map projection_http_fixture http_requests)
+    ~base_path ~trace_id ~user_message ~cli_path ~model ~turn_instructions
 ;;
 
 let run_production_keeper_turn_with_predecessor ~http_requests ~base_path ~trace_id
@@ -4353,6 +4378,124 @@ let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~mod
     ~turn_instructions =
   run_production_keeper_turn_with_predecessor ~http_requests:None ~base_path
     ~trace_id ~user_message ~cli_path ~model ~turn_instructions
+;;
+
+(* #37963: enter the actual production collector/finalizer and read its
+   receipt. HTTP prose is diagnostic data even when a later candidate fails. *)
+let test_production_runtime_walk_receipt ~recover () =
+  let module Evidence=Keeper_runtime_walk_evidence in
+  let module Receipt=Keeper_execution_receipt in
+  let module Fault=Llm_provider.Candidate_fault in
+  let base_path=temp_workspace "masc-production-runtime-walk-" in
+  let trace_id="production-runtime-walk" in
+  let catalog_snapshot=Llm_provider.Model_catalog.global () in
+  Fun.protect ~finally:(fun () ->
+    (match catalog_snapshot with
+     | None -> Llm_provider.Model_catalog.clear_global ()
+     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    cleanup_tree base_path) (fun () ->
+    let catalog_path=Filename.concat base_path "walk-models.toml" in
+    let model prefix=Printf.sprintf {|
+[[models]]
+id_prefix = %S
+provider_name = "projection"
+base = "openai_chat"
+max_context_tokens = 400000
+max_output_tokens = 128
+supports_tools = true
+supports_native_streaming = false
+|} prefix in
+    write_fixture_file catalog_path
+      (model "projection-http-fixture" ^ model "projection-last-fixture");
+    (match Llm_provider.Model_catalog.load_file catalog_path with
+     | Ok catalog -> Llm_provider.Model_catalog.set_global catalog
+     | Error detail -> fail detail);
+    let requests=ref [] in
+    let receipt_seen=ref false in
+    let http_fixture=
+      { candidates=["projection.http";(if recover then "codex.codex" else "projection.http_last")]
+      ; respond=(fun request ->
+          let requested_model=Yojson.Safe.Util.(request |> member "model" |> to_string) in
+          requests:=requested_model::!requests;
+          match requested_model with
+          | "projection-http-fixture" ->
+            `Bad_request,{|{"error":{"message":"Prompt exceeds max length"}}|}
+          | "projection-last-fixture" ->
+            `Too_many_requests,{|{"error":{"message":"fixture quota","retry_after":0}}|}
+          | _ -> fail ("unexpected model request: " ^ requested_model)) } in
+    with_fixture
+      [init_result;account_chatgpt;thread_result;turn_result;item_completed;turn_completed]
+      (fun cli_path ->
+        let after_turn settlement =
+          let config=Workspace.default_config base_path in
+          let meta=production_keeper_meta ~base_path ~trace_id in
+          let raw=match Receipt.latest_json config meta.name with
+            | Some receipt -> receipt
+            | None -> fail "actual AgentRun did not append a receipt" in
+          receipt_seen:=true;
+          let evidence=match Receipt.runtime_lane_observation_of_receipt_json raw with
+            | Receipt.Runtime_lane_observed {turn;evidence} ->
+              check string "receipt belongs to the actual production turn"
+                trace_id turn.receipt_trace_id;
+              evidence
+            | Receipt.Runtime_lane_not_observed _ | Receipt.Runtime_lane_unreadable _ ->
+              fail "actual candidate callbacks did not reach the stored receipt" in
+          let expected_ids=if recover then [0,"projection.http"]
+            else [0,"projection.http";1,"projection.http_last"] in
+          check (list (pair int string)) "candidate order and ordinals reach the actual receipt"
+            expected_ids (List.map (fun (failure:Evidence.failure) ->
+              failure.attempt,failure.runtime_id) evidence.failures);
+          check bool "both failures describe actual candidate invocation" true
+            (List.for_all (fun (failure:Evidence.failure) ->
+              failure.dispatch=Runtime_attempt_dispatch.Dispatched) evidence.failures);
+          (match evidence.failures with
+           | first::rest ->
+             check bool "HTTP400 prose stays unattributed" true
+               (first.api_candidate_fault=Some Fault.Unattributed);
+             check bool "prose never becomes typed overflow" false
+               (match first.failure.cause with
+                | Keeper_request_failure.Context_overflow _ -> true
+                | _ -> false);
+             List.iter (fun (failure:Evidence.failure) ->
+               check bool "later quota has its separate typed API fact" true
+                 (failure.api_candidate_fault=Some (Fault.Binding Fault.Rate_limit))) rest
+           | [] -> fail "earlier candidate refusal disappeared");
+          (match evidence.terminal with
+           | Evidence.Terminal_not_observed -> check bool "successful fallback has no terminal callback" true recover
+           | Evidence.Candidate_terminal {runtime_id;attempt;failure} ->
+             check bool "only failed lane has a terminal origin" false recover;
+             check string "terminal keeps its actual candidate" "projection.http_last" runtime_id;
+             check int "terminal has the last candidate ordinal" 1 attempt;
+             check string "actual terminal error survives"
+               (Keeper_request_failure.summary
+                  (Keeper_request_failure.of_core_error (Agent_core.Error.Api
+                    (Llm_provider.Retry.RateLimited {message="fixture quota";retry_after=Some 0.}))))
+               (Keeper_request_failure.summary failure));
+          check bool "settlement outcome agrees with the recorded walk" recover
+            (Result.is_ok settlement.Keeper_agent_run.result);
+          let view=Receipt.runtime_lane_observation_to_yojson
+            (Receipt.runtime_lane_observation_of_receipt_json raw) in
+          let trust=Keeper_runtime_trust_snapshot.For_testing.snapshot_json_inner_with_pending_reader
+            ~read_pending:(fun ~base_path:_ -> Ok []) ~config ~meta in
+          check string "actual stored walk reaches trust execution projection"
+            (Yojson.Safe.to_string view)
+            (Yojson.Safe.to_string Yojson.Safe.Util.(trust |> member "execution" |> member "runtime_lane_observation"));
+          Printf.printf "RUNTIME_WALK_PRODUCER_RECEIPT %s\n%!" (Yojson.Safe.to_string raw)
+        in
+        let result=run_production_keeper_turn_as
+          ~input_speaker:(Keeper_input_speaker.Person Keeper_input_speaker.Owner)
+          ~turn_kind:Turn_record.Direct ~write_cost_ledger:false ~after_turn
+          ~dynamic_context_for_tools:None ~http_fixture:(Some http_fixture)
+          ~base_path ~trace_id ~user_message:"Reply without tools."
+          ~cli_path ~model:"gpt-fixture" ~turn_instructions:None in
+        check bool "production result matches scenario" recover (Result.is_ok result);
+        check bool "the actual stored receipt was inspected" true !receipt_seen;
+        match List.rev !requests with
+        | "projection-http-fixture"::rest ->
+          if recover then check (list string) "successful client followed the HTTP refusal" [] rest
+          else check bool "the next HTTP candidate actually received a request" true
+            (List.mem "projection-last-fixture" rest)
+        | _ -> fail "first candidate did not reach the HTTP fixture"))
 ;;
 
 (* #38174, RFC-0458 §3.4. A production Keeper turn names its Keeper as the
@@ -7703,7 +7846,7 @@ let test_production_wake_input_carries_the_completion_clause () =
                  ~write_cost_ledger:false
                  ~after_turn:ignore
                  ~dynamic_context_for_tools:None
-                 ~http_requests:None
+                 ~http_fixture:None
                  ~base_path
                  ~trace_id:"codex-production-wake-clause"
                  ~user_message:"Autonomous wake."
@@ -9183,6 +9326,12 @@ let () =
             "shared host text projection is hard-cut"
             `Quick
             test_official_client_host_text_projection_is_hard_cut
+        ] )
+    ; ( "production runtime walk receipt"
+      , [ test_case "Unknown400 then429 keeps both candidate failures" `Quick
+            (test_production_runtime_walk_receipt ~recover:false)
+        ; test_case "successful fallback retains the earlier Unknown400" `Quick
+            (test_production_runtime_walk_receipt ~recover:true)
         ] )
     ; ( "live subscription"
       , [ test_case

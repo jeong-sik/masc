@@ -89,7 +89,9 @@ type package = {
   presentation : Lane_addon_presentation.t;
   skills_directory : Skill_resource_path.t option;
   exact_outputs : exact_output list;
-  (** Unique names in name order. *)
+  (** Unique names in name order. A manifest contains all declared outputs;
+      an installation contains only those selected by its [exact_outputs]
+      override. Schema contents always come from the package. *)
   operator_asks : bool;
   (** [[world.asks] operator = true]: the package may ask the operator
       questions through its host requests (RFC operator-quiz §4.6). *)

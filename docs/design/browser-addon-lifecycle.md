@@ -174,6 +174,16 @@ receipts remain distinct from successful contract validation.
    with retained request/terminal evidence and installation-selected routes. The
    new package `exact_outputs` declarations are reused; observation-only sampling
    does not substitute for this broker.
+   Installations can now override `exact_outputs` with a subset of declared
+   names, independently of `tool_hooks`. Omission keeps package defaults and
+   an empty list disables these model outputs. The effective package retains
+   only selected names with their original schemas and canonical order; unknown,
+   duplicate and malformed selections are refused. Worker input revisions include
+   that effective selection. The shared retained exact-output runner is being
+   developed in [#44203](https://github.com/jeong-sik/masc/pull/44203), whose current
+   source admits output names from the supplied effective package. Native browser
+   host-request integration and actual execution evidence are still required;
+   selecting outputs alone does not enable that broker.
 
 ## Completion evidence
 

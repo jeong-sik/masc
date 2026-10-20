@@ -450,8 +450,7 @@ let test_the_loader_refuses_rows_that_fold_to_one_id () =
 ;;
 
 (* The exact-output binding tells rows apart by the key the index files them
-   under: rows whose ids differ only in case are one identity, and an overlay
-   row merges into the base row it folds to. *)
+   under: rows whose ids differ only in case are one identity. *)
 let test_the_binding_folds_row_ids_as_the_index_does () =
   let catalog =
     catalog_of_toml ~source:"binding row ids"

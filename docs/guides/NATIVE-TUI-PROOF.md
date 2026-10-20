@@ -18,6 +18,8 @@ characters) and `native-tui-scenario`:
 | `code-references` | TUI, server and the five test executables | `test_lsp_workspace_pool`, `test_lsp_questions`, `test_lsp_message_router`, `test_lsp_process_manager`, `test_server_ide_lsp_proxy` |
 
 The server target is `bin/main_eio.exe`; the TUI is `bin/masc_tui.exe`.
+Every scenario also builds `bin/masc_tui_keys_doc_cli.exe`, the canonical key
+reference generator, from the selected source. This adds no test suite.
 Each test target is `test/<suite>.exe`. Unknown scenarios are refused before
 source checkout and again before selecting build targets. With no native source
 SHA, only the existing source/config/credential checks run.
@@ -93,6 +95,15 @@ scenarios also check the server's `build-commit` and include it as `masc`, with
 its own digest and dependency list. The receipt records source SHA, workflow
 SHA, scenario and both binary digests; the existing TUI `sha256` field remains.
 The default scenario records no server digest.
+
+`key-reference.md` contains the key reference produced by that source's actual
+generator. The receipt's `key_reference` records its artifact path, SHA-256 and
+producer target; the surrounding source/workflow identities also apply to it.
+Generation must succeed before a final receipt is written. A selected source
+without the generator target fails instead of substituting another document.
+This output can be used to update `docs/guides/TUI-KEYS.md` after checking the
+source identity and digest. It does not establish visible key handling or compare
+screen wording, layout or row order.
 
 The workflow revision chooses the checks, while checkout and dependency setup
 use the selected feature tree. Validate both identities before reusing the

@@ -6,7 +6,7 @@ import { bindingErrors, initialBindingInput, inputFromValue, packageDeclaration,
 
 const object = (properties: Record<string, unknown>, required = Object.keys(properties)) => ({ type: 'object', properties, required, additionalProperties: false })
 describe('Package schema inputs and declaration preparation', () => {
-  it.each(['fusion-report', 'fusion-compute', 'fusion-results', 'quiz-grader', 'quiz-questions', 'dos-world', 'output-statistics', 'value-difference', 'wkbl-score-runs'])(
+  it.each(['fusion-report', 'fusion-compute', 'fusion-results', 'operator-quiz', 'dos-world', 'output-statistics', 'value-difference', 'wkbl-score-runs'])(
     'accepts the real %s package schema', name => {
       const source = readFileSync(resolve(process.cwd(), '..', 'addons', name, 'lane.toml'), 'utf8')
       // Repository-authored fixtures only; generated special-key data below is

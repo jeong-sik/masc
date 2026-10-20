@@ -206,7 +206,6 @@ let real_server_cases =
    releases the matching analysis observation. *)
 let analysis_server = {py|
 import json, signal, sys
-signal.signal(signal.SIGUSR1, lambda *_: None)
 active = None
 last = None
 checks = []
@@ -267,8 +266,10 @@ while True:
         for value in held_references: send(value)
         held_references.clear()
     elif method == 'proof/blockInput':
+        signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGUSR1})
         answer(msg['id'])
-        signal.pause()
+        signal.sigwait({signal.SIGUSR1})
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGUSR1})
     elif method == 'proof/analyzed':
         if active is not None: active['analyzed'] = True
         if last is not None: diagnostics(last['uri'], last['version'])

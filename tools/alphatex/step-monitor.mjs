@@ -2,6 +2,7 @@ import { unpackMidi } from './session-data.mjs'
 import { validateSound } from './project-sound.mjs'
 import { openVstStream } from './vst-stream.mjs'
 import { openPcmOutput } from './pcm-output.mjs'
+import { randomUUID } from 'node:crypto'
 
 // Audition is a declared MIDI1 projection to one selected editor channel. The
 // raw recorder owns precision/timestamps; this path plays the next device block.
@@ -61,6 +62,7 @@ export function openStepMonitor({ sound, output, channel, signal,
   if (!Number.isInteger(channel) || channel < 0 || channel > 15) throw new Error('Invalid monitor target channel')
   signal?.throwIfAborted()
   const cancellation = new AbortController()
+  const id = randomUUID()
   const stopped = new Error('Step monitor stopped')
   let synth = null, pcm = null, slot = null, held = new Map(), stopping = false, failure = null
   let resolveReady, rejectReady
@@ -122,6 +124,12 @@ export function openStepMonitor({ sound, output, channel, signal,
   completion.catch(() => {})
   if (signal?.aborted) abort()
   return { ready, completion,
+    diagnostics() {
+      return { schemaVersion: 1, kind: 'step-monitor', id, channel,
+        sound: { name: sound.selection.name, identifier: sound.instrument.identifier,
+          version: sound.instrument.version, presetSHA256: sound.preset.sha256 },
+        pcm: pcm.diagnostics() }
+    },
     prepare(packet) { return monitorPacket(packet, channel, held) },
     send(prepared) {
       if (failure) return Promise.reject(failure)

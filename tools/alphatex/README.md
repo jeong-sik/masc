@@ -147,6 +147,18 @@ at the next available device block; this mode does not preserve live performance
 timing. `:step-stop`, `:stop`, route changes and leaving the view retire audio;
 admitted step edits still drain before saving. Device underruns are errors.
 
+After stopping or a monitoring error, `:step-diagnostics PATH` exports the last
+owned monitor's JSON report without overwriting a file. During monitoring it
+exports a current snapshot. Reports retain the selected source, sound identity
+and preset hash (not preset bytes), output UID/format, first failure and validated
+native final receipt. `fault` distinguishes `none`, `underrun` and `render-format`;
+frame counters show rendered, discarded and missing audio. Device-side demand
+timing separates completed playing blocks from initial prefill, and reports the
+age of an outstanding request at teardown. These observations include IPC and
+scheduling delay; they do not by themselves prove which component caused a stall.
+If the native process dies without a valid final receipt, `final` stays null.
+Diagnostics never turn missing audio into successful playback.
+
 `:step-length VALUE` changes only the next input length, without editing an
 existing note or adding undo history. `:step-rest [VALUE]` advances the cursor
 without making notes; its default is the current input length (the grid step for

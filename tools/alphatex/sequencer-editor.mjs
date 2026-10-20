@@ -104,6 +104,10 @@ export function stepInputEffect(line) {
     if (args.length) throw new Error('Use :step-stop')
     return { kind: 'step-stop' }
   }
+  if (command === 'step-diagnostics') {
+    if (args.length !== 1) throw new Error('Use :step-diagnostics PATH')
+    return { kind: 'step-diagnostics', path: args[0] }
+  }
   if (command === 'step-length' || command === 'step-rest') {
     if (args.length > 1 || (command === 'step-length' && args.length !== 1)) throw new Error(`Use :${command} ${command === 'step-rest' ? '[VALUE]' : 'VALUE'}`)
     return { kind: command, value: args[0] }

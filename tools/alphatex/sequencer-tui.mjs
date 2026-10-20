@@ -23,6 +23,7 @@ import { MidiSourcePicker } from './midi-source-picker.mjs'
 const help = [
   ':step-input chooses a MIDI keyboard; :step-input SOURCE_UID arms it directly; :step-stop drains.',
   ':step-input [SOURCE_UID] --monitor also plays the selected VST through the audio output.',
+  ':step-diagnostics PATH exports the current/last monitor output counters and failure.',
   ':step-length 1/3 sets next note length; :step-rest [LENGTH] moves without editing notes.',
   'Lengths/rests use beats or source SMPTE frames; release held keys before changing them.',
   'Release all keys to insert/advance by note length; cursor/track edits stop input and monitoring.',
@@ -85,6 +86,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   let loop = false, accepting = true, closed = false, suspended = false, task = Promise.resolve(), childTask = null
   let harmony = null
   let stepInput = null, stepHeld = 0
+  let lastStepReport = null
   let sourceMenuOwner = null, openedSourceMenuOwner = null
   const stepOwners = new Set()
   let selectedOutput = output
@@ -351,6 +353,8 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     owner.ready.then(info => { if (stepInput === owner && accepting && !closed) { status = `Step input${info.monitoring ? ' · VST monitor' : ''}: ${info.source.name}`; draw() } }, () => {})
     owner.completion.then(() => { status = 'Step input stopped' },
       error => { status = `Step input stopped: ${error.message}` }).finally(() => {
+      const report = owner.diagnostics?.()
+      if (report) lastStepReport = report
       stepOwners.delete(owner)
       if (stepInput === owner) { stepInput = null; stepHeld = 0 }
       draw()
@@ -484,6 +488,12 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         }
         break
       case 'step-stop': stepInput?.stop(); status = 'Draining MIDI step input'; break
+      case 'step-diagnostics': {
+        const report = stepInput?.diagnostics?.() ?? lastStepReport
+        if (!report) throw new Error('Open monitored step input before exporting diagnostics')
+        await writeFile(value.path, JSON.stringify(report, null, 2) + '\n', { flag: 'wx', mode: 0o600 })
+        status = `Exported ${value.path}`; break
+      }
       case 'step-length': case 'step-rest': {
         const next = stepInput ? stepInput.control(value) : stepControl(editor, value)
         if (value.kind === 'step-rest') stopPlayback()

@@ -11,7 +11,7 @@ import * as editor from '../sequencer-editor.mjs'
 // Exercise actual controller decisions with owned IO substitutes. No terminal
 // output, layout, audio hardware or player behavior is asserted.
 async function controller(options = {}) {
-  const observed = { saved: [], discoveries: 0, inputs: 0 }
+  const observed = { saved: [], discoveries: 0, inputs: 0, diagnostics: [] }
   const process = new EventEmitter()
   process.stdin = new EventEmitter()
   Object.assign(process.stdin, { isTTY: true, isRaw: false,
@@ -53,6 +53,7 @@ async function controller(options = {}) {
     join, resolve, tmpdir: () => '/synthetic', randomUUID, emitKeypressEvents() {},
     Note: { fromMidi: String }, safeText: String,
     saveProject: async (_path, project) => { observed.saved.push(structuredClone(project)); return 'revision' },
+    writeFile: async (path, text, flags) => { observed.diagnostics.push({ path, value: JSON.parse(text), flags }) },
   }
   const source = (await readFile(new URL('../sequencer-tui.mjs', import.meta.url), 'utf8'))
     .replace(/^import .*$/gm, '')
@@ -111,6 +112,23 @@ test('monitored explicit UID refuses a MIDI output route without opening another
     view.command('step-input -17 --monitor'); await flush()
     assert.equal(view.observed.inputs, 0)
     view.key('q'); await view.done
+  } finally { view.signal.abort(); await view.done }
+})
+
+test('a stopped monitor retains its owned diagnostic receipt for explicit export without changing notes', async () => {
+  const report = { kind:'step-monitor', source:'-17', pcm:{final:{fault:'underrun',underrunFrames:'512'}} }
+  let complete
+  const view = await controller({ openStepInput() {
+    return { ready:Promise.resolve({source:{name:'Keyboard'}}), completion:new Promise(resolve=>{complete=resolve}),
+      stop() { complete() }, diagnostics() { return structuredClone(report) } }
+  } })
+  try {
+    view.command('step-input -17 --monitor'); await flush(); await flush()
+    view.command('step-stop'); await flush(); await flush()
+    view.command('step-diagnostics owned.json'); await flush()
+    assert.deepEqual(view.observed.diagnostics, [{path:'owned.json',value:report,flags:{flag:'wx',mode:0o600}}])
+    view.key('q'); await view.done
+    assert.equal(view.observed.saved.at(-1).tracks[0].notes.length, 0)
   } finally { view.signal.abort(); await view.done }
 })
 

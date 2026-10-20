@@ -24,8 +24,18 @@ import Synchronization
             } }
             precondition(left == [6, 0, 0] && right == [-6, 0, 0])
             precondition(ring.missing.load(ordering: .acquiring) == 2 && ring.available == 0)
+            precondition(ring.faultFrames.load(ordering: .acquiring) == 3)
+            ring.rejectFormat(frames: 99)
+            precondition(ring.fault.load(ordering: .acquiring) == 1 && ring.faultFrames.load(ordering: .acquiring) == 3)
             do { try ring.append([7, -7]); preconditionFailure("retired queue accepted PCM") } catch {}
             print("PCM_RING_WRAP_OVERFLOW_UNDERRUN_PASS")
+
+            let invalidFormat = try PcmRing(capacity: 4)
+            invalidFormat.rejectFormat(frames: 3)
+            invalidFormat.rejectFormat(frames: 4)
+            precondition(invalidFormat.fault.load(ordering: .acquiring) == 2)
+            precondition(invalidFormat.faultFrames.load(ordering: .acquiring) == 3 && invalidFormat.missing.load(ordering: .acquiring) == 0)
+            print("PCM_RING_FIRST_FORMAT_FAULT_PASS")
 
             let parallel = try PcmRing(capacity: 128)
             let total = 20_000

@@ -274,7 +274,10 @@ def main():
                 identities[machine] = {'instance_id': ident, 'owner': owner}
                 entry = wait_for('attach ' + machine, lambda: host.inspect(ident),
                     lambda e: e['phase']['kind'] in ('attached', 'observing') and e['observation_seq'] > 0, server)
-                container = entry['container_id']
+                resource = entry['resource']
+                assert resource['kind'] == 'container', resource
+                container = resource['id']
+                assert isinstance(container, str) and container, resource
                 identities[machine]['container_id'] = container
                 meta, = json.loads(command(['docker', 'container', 'inspect', container]))
                 assert meta['Config']['Labels']['masc.lane.instance'] == ident

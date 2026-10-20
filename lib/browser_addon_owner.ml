@@ -73,12 +73,12 @@ let attach_automation t ~locate ~execute ~session ~document ~cleanup =
       B.install_server_session_observer B.Server_automation (Some session);
       B.install_automation_document_observer (Some document);
       t.automation <- Some (owned_cleanup "automation" cleanup);Ok ())
-let attach_stagehand t ~execute ~session ~cleanup =
+let attach_stagehand t ~models ~execute ~session ~cleanup =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase,t.stagehand with
     | Retired,_ -> Error "browser owner is retired"
     | Serving,Some _ -> Error "Stagehand backend is already attached"
     | Serving,None ->
-      B.install_stagehand_executor (Some execute);
+      B.install_stagehand_executor ~models (Some execute);
       B.install_server_session_observer B.Server_stagehand (Some session);
       t.stagehand <- Some (owned_cleanup "Stagehand" cleanup);Ok ())
 let revoke t =

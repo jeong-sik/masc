@@ -1706,9 +1706,6 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
         initialized_owner
       in
       let state = activated_owner.state in
-      (* Both Browser lanes start from this one snapshot, taken before any
-         config save can be accepted; a save applies at the next restart. *)
-      let browser_configuration = Runtime.browser_configuration () in
       (* Authentication wrappers treat [server_state = Some _] as the mutation
          capability boundary. Publish only after transport-neutral activation
          has restored Gate state and started the owner persistence lanes. *)
@@ -1811,10 +1808,6 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
       boot_stage "slack_poll.begin";
       Server_slack_poll_lane.start ~sw ~env ~state;
       boot_stage "slack_poll.end";
-      boot_stage "browser_stagehand.begin";
-      Server_browser_stagehand.start ~sw ~env ~base_path
-        ~configuration:browser_configuration;
-      boot_stage "browser_stagehand.end";
       boot_stage "browser_keeper_firefox.begin";
       Server_browser_keeper_firefox.start ~sw ~env ~base_path
         ~configuration:Runtime.browser_configuration;

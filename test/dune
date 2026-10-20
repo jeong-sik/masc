@@ -5594,6 +5594,13 @@
  (action (run %{test} %{dep:../addons/browser/lane.toml} %{dep:fixtures/stagehand/llm-generate-params.json})))
 
 (test
+ (name test_browser_addon_stagehand)
+ (modules test_browser_addon_stagehand)
+ (libraries masc_test_deps masc.browser_lane masc.browser_configuration masc.native_addon_lease)
+ (deps ../bin/masc_native_addon_launcher.exe ../bin/masc_browser_process_owner.exe)
+ (action (run %{test} %{dep:../bin/masc_native_addon_launcher.exe} %{dep:../bin/masc_browser_process_owner.exe})))
+
+(test
  (name test_lane_addon_worker)
  (modules test_lane_addon_worker)
  (libraries masc.lane_addon_call_context masc masc.string_util masc_random_id mcp_protocol alcotest eio eio_main yojson unix digestif masc.fs_compat))

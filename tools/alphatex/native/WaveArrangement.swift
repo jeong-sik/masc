@@ -477,6 +477,8 @@ final class ArrangementTransport {
     var horizonEnded = false
     var renderStartSource: DispatchSourceUserDataAdd?
     var renderObserver: Int?
+    // A command refused while starting, acknowledged by that start's fence.
+    var startRefusal: String?
     var state = State.prepared
     var position: Double = 0
     var anchor: UInt64 = 0
@@ -633,7 +635,7 @@ final class ArrangementTransport {
     func clearRenderStart() {
         renderStartSource?.cancel(); renderStartSource = nil
         if let observer = renderObserver { engine.mainMixerNode.auAudioUnit.removeRenderObserver(observer) }
-        renderObserver = nil
+        renderObserver = nil; startRefusal = nil
     }
     func stopVoices() { horizon?.cancel(); horizon = nil; horizonEnded = false; generation &+= 1; clearRenderStart(); for voice in voices { voice.stop() }; active.removeAll() }
     func schedule(from seconds: Double, playing: Bool) throws { try schedule(from: seconds, playing: playing, phase: loopPosition) }
@@ -677,8 +679,9 @@ final class ArrangementTransport {
         renderStartSource = source
         source.setEventHandler { [weak self] in
             guard let self, self.state == .starting, self.generation == expected else { return }
+            let refusal = self.startRefusal
             self.clearRenderStart()
-            do { try self.beginPlayback(); self.publish() }
+            do { try self.beginPlayback(); self.publish(refusal: refusal) }
             catch { self.finish(reason: "start-failed", error: error) }
         }
         source.resume()
@@ -814,9 +817,10 @@ final class ArrangementTransport {
             if state != .stopped && state != .starting { publish() }
         } catch let refusal as UmpRefusal {
             // Neither part changed: acknowledge the kept state with the reason. A
-            // starting transport acknowledges nothing until its render fence.
+            // starting transport has no fresh clock yet, so its render fence
+            // acknowledges the reason with its playing event.
             report(refusal.description)
-            if state != .starting { publish(refusal: refusal.description) }
+            if state == .starting { startRefusal = refusal.description } else { publish(refusal: refusal.description) }
         } catch { finish(reason: "command-failed", error: error) }
     }
     func finish(reason: String, error: Error? = nil, publish: Bool = true) {

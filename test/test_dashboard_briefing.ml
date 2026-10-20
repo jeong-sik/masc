@@ -940,20 +940,28 @@ let test_briefing_ranks_a_failing_keeper_first () =
          | Error error -> fail ("write meta: " ^ error));
         meta
       in
-      let register name =
+      let register ?current_task_id name =
+        let task_field =
+          match current_task_id with
+          | Some id -> [ "current_task_id", `String id ]
+          | None -> []
+        in
         ignore
           (Lib.Keeper_registry.For_testing.register
              ~base_path:config.base_path
              name
-             (store [ "name", `String name; "trace_id", `String (name ^ "-trace") ]))
+             (store
+                ([ "name", `String name; "trace_id", `String (name ^ "-trace") ]
+                 @ task_field)))
       in
-      register "k-running";
+      register ~current_task_id:"task-1844" "k-running";
       register "k-failing";
       ignore
         (store
            [ "name", `String "k-paused"
            ; "trace_id", `String "paused-trace"
            ; "paused", `Bool true
+           ; "current_task_id", `String "task-1845"
            ]);
       (match
          Lib.Keeper_registry.dispatch_event
@@ -989,6 +997,22 @@ let test_briefing_ranks_a_failing_keeper_first () =
       (* A paused keeper's keepalive is gone, so it reads offline. *)
       check string "the paused keeper's brief carries its health" {|"offline"|}
         (health "k-paused");
+      (* [current_work] is read from the snapshot row's [current_task_id]. The
+         key used to be missing from every row, so each keeper read as holding
+         nothing (#31726). A paused keeper takes the lightweight row, the
+         others the full one. *)
+      let current_work name =
+        match row_named name briefs with
+        | Some row -> Yojson.Safe.to_string (row |> member "current_work")
+        | None -> failf "%s is missing from keeper_briefs" name
+      in
+      check string "a running keeper's brief names the task it holds" {|"task-1844"|}
+        (current_work "k-running");
+      check string "a paused keeper's brief names the task it still holds"
+        {|"task-1845"|}
+        (current_work "k-paused");
+      check string "a keeper holding no task reads null" "null"
+        (current_work "k-failing");
       (* Offline shares the top pressure rank with failing, but a pause is
          the operator's own decision, so the paused keeper ranks as no
          pressure at all and sorts below the idle one. *)

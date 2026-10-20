@@ -490,6 +490,12 @@ the existing answer reader keeps the full prompt, choices and draft. With only
 one content row, the selected preview takes that row; with none, no extra hidden
 count is drawn beyond the available space.
 
+When the selected ask leaves the list -- answered here, answered elsewhere or
+withdrawn -- nothing is selected. The next ask does not slide under the cursor,
+so `a`, `1-9` and Enter cannot answer a question that was never shown. `[` or `]`
+selects the ask now at that position, and the panel says so until one is chosen.
+The first Enter of an answer names the chosen answer; the second sends it.
+
 ## Work / Task Review
 
 | Keys | What it does |

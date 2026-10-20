@@ -158,7 +158,7 @@ let reconcile_home_request_detail state =
               (List.find_index (fun row -> home_request_of_approval row = request)
                  (approval_items state))
         | Home_question ask_id ->
-            Option.iter (fun index -> state.ask_cursor <- index)
+            Option.iter (fun index -> state.ask_cursor <- Masc_tui_ask_projection.On index)
               (List.find_index (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = ask_id)
                  (Option.value ~default:[] (approvals_open_questions state)))
         | Home_goal_confirmation goal_id ->

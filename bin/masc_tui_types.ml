@@ -8598,7 +8598,7 @@ type state = {
      -- arrows walk the approval queue, y and n decide it -- and a question
      needs a key per choice, so entering the mode is what frees them up. *)
   mutable ask_answer_mode: ask_answer_mode;
-  mutable ask_cursor: int;
+  mutable ask_cursor: Masc_tui_ask_projection.cursor;
   mutable ask_question_cursor: int;
   mutable ask_question_scroll: int;
   (* One answer at a time. The draft carries the ask it belongs to, so moving
@@ -9686,8 +9686,8 @@ let finish_ask_followup_read (state : state) request submission result =
 
 let armed_ask_submit_notice_prefix = "Press enter again to answer "
 
-let armed_ask_submit_notice keeper_name =
-  armed_ask_submit_notice_prefix ^ keeper_name
+let armed_ask_submit_notice answer_label =
+  armed_ask_submit_notice_prefix ^ answer_label
 
 let ask_submit_is_armed (state : state) =
   match state.ask_answer_mode, state.ask_text_entry, state.pending_ask_submit with
@@ -14663,7 +14663,7 @@ let create_state
   asks_error = None;
   asks_read = Snapshot_read.idle;
   ask_answer_mode = Ask_browsing;
-  ask_cursor = 0;
+  ask_cursor = Masc_tui_ask_projection.initial_cursor;
   ask_question_cursor = 0;
   ask_question_scroll = 0;
   ask_draft = None;

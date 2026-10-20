@@ -12045,7 +12045,7 @@ let apply_asks_load state = function
        | Ask_answering { aam_ask_id } ->
            (match List.find_index
                     (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = aam_ask_id) next_rows with
-            | Some index -> state.ask_cursor <- index
+            | Some index -> state.ask_cursor <- Ask.On index
             | None when state.workspace_identity = Workspace_identity_match ->
                 Masc_tui_home.clear_ask_answering state
             | None -> ()));
@@ -13107,7 +13107,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.asks_snapshot <- None;
   state.asks_error <- None;
   Masc_tui_home.clear_ask_answering state;
-  state.ask_cursor <- 0;
+  state.ask_cursor <- Ask.initial_cursor;
   state.ask_question_cursor <- 0;
   state.ask_question_scroll <- 0;
   state.ask_submit_inflight <- false;
@@ -15422,7 +15422,7 @@ let open_ask_rows state =
 
 let selected_ask_row state =
   match state.ask_answer_mode with
-  | Ask_browsing -> List.nth_opt (open_ask_rows state) state.ask_cursor
+  | Ask_browsing -> Ask.selected_row (open_ask_rows state) state.ask_cursor
   | Ask_answering { aam_ask_id } ->
       List.find_opt (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = aam_ask_id)
         (open_ask_rows state)
@@ -15481,7 +15481,11 @@ let leave_ask_answering state = Masc_tui_home.clear_ask_answering state
 
 let enter_ask_answering state =
   match selected_ask_row state with
-  | None -> report_action state "system" "No question is waiting on you"
+  | None -> (
+      match (state.ask_cursor, open_ask_rows state) with
+      | Ask.Released _, _ :: _ ->
+          report_action state "system" "Choose a question with [ or ] first"
+      | (Ask.On _ | Ask.Released _), _ -> report_action state "system" "No question is waiting on you")
   | Some (row : Masc.Tui_decode_asks.ask_row) ->
       (* The answer flow is drawn by the approvals list. With an approval's
          detail open that surface is not on screen, so [a] used to set the mode
@@ -15500,26 +15504,22 @@ let enter_ask_answering state =
    question the operator never read. *)
 let move_ask_cursor state delta =
   let rows = open_ask_rows state in
-  let count = List.length rows in
-  if count = 0 then ()
-  else begin
-    let next = max 0 (min (count - 1) (state.ask_cursor + delta)) in
-    if next <> state.ask_cursor then begin
-      state.ask_cursor <- next;
-      state.ask_origin <- None;
-      state.ask_question_cursor <- 0;
-      state.ask_question_scroll <- 0;
-      Masc_tui_types.disarm_ask_submit state;
-      match (state.ask_answer_mode, List.nth_opt rows next) with
-      (* Walking the list while browsing is not answering. Opening a draft
-         here would make [ and ] commit to a question the operator was only
-         looking at, and [a] is the key that says they mean it. *)
-      | Ask_browsing, _ -> ()
-      | Ask_answering _, None -> ()
-      | Ask_answering _, Some (row : Masc.Tui_decode_asks.ask_row) ->
-          state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Masc.Tui_decode_asks.ar_id };
-          state.ask_draft <- Some (Ask.draft_for state.ask_draft ~row)
-    end
+  let next = Ask.move_cursor rows state.ask_cursor ~delta in
+  if next <> state.ask_cursor then begin
+    state.ask_cursor <- next;
+    state.ask_origin <- None;
+    state.ask_question_cursor <- 0;
+    state.ask_question_scroll <- 0;
+    Masc_tui_types.disarm_ask_submit state;
+    match (state.ask_answer_mode, Ask.selected_row rows next) with
+    (* Walking the list while browsing is not answering. Opening a draft
+       here would make [ and ] commit to a question the operator was only
+       looking at, and [a] is the key that says they mean it. *)
+    | Ask_browsing, _ -> ()
+    | Ask_answering _, None -> ()
+    | Ask_answering _, Some (row : Masc.Tui_decode_asks.ask_row) ->
+        state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Masc.Tui_decode_asks.ar_id };
+        state.ask_draft <- Some (Ask.draft_for state.ask_draft ~row)
   end
 
 let move_ask_question_cursor state delta =
@@ -15801,6 +15801,15 @@ let handle_ask_submit state ~mailbox =
                      (fun (q : Masc.Tui_decode_asks.ask_question) -> q.Masc.Tui_decode_asks.aq_header)
                      questions)))
       | Ask.Ready answers -> (
+          (* Name the Keeper and what was chosen, not the ask's opaque id. The
+             arming press says it too: the second press sends whatever is on
+             this line, so it is the last place to see which question and
+             which choice it is before the answer settles. *)
+          let answered_label =
+            match Ask.summarize_answer draft ~row with
+            | "" -> row.Masc.Tui_decode_asks.ar_keeper
+            | chosen -> Printf.sprintf "%s: %s" row.Masc.Tui_decode_asks.ar_keeper chosen
+          in
           match
             Ask.gate_transition ~inflight:state.ask_submit_inflight
               ~pending:state.pending_ask_submit ~ask_id:row.Masc.Tui_decode_asks.ar_id
@@ -15810,17 +15819,8 @@ let handle_ask_submit state ~mailbox =
               report_action state "system" "An answer is already on its way"
           | Ask.Ask_gate_arm ask_id ->
               state.pending_ask_submit <- Some ask_id;
-              report_action state "system"
-                (Masc_tui_types.armed_ask_submit_notice
-                   row.Masc.Tui_decode_asks.ar_keeper)
+              report_action state "system" (Masc_tui_types.armed_ask_submit_notice answered_label)
           | Ask.Ask_gate_submit ->
-              (* Name the Keeper and what was chosen, not the ask's opaque id,
-                 so the confirmation says which decision landed and as what. *)
-              let answered_label =
-                match Ask.summarize_answer draft ~row with
-                | "" -> row.Masc.Tui_decode_asks.ar_keeper
-                | chosen -> Printf.sprintf "%s: %s" row.Masc.Tui_decode_asks.ar_keeper chosen
-              in
               start_ask_answer state ~keeper_name:row.Masc.Tui_decode_asks.ar_keeper
                 ~ask_id:row.Masc.Tui_decode_asks.ar_id
                 ~source_turn_ref:row.Masc.Tui_decode_asks.ar_source_turn_ref
@@ -28493,7 +28493,7 @@ and is loaded on demand through keeper_skill.
                       | None -> report_action state "system" "Question changed; choose again"
                       | Some cursor ->
                           navigate Approvals;
-                          state.ask_cursor <- cursor;
+                          state.ask_cursor <- Ask.On cursor;
                           enter_ask_answering state)
                  | Home_goal_confirmation goal_id ->
                      (match state.planning_filter with

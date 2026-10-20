@@ -186,10 +186,38 @@ val gate_transition :
 (** Two presses to answer, matching the approval queue: an answer is a fold
     that settles on first write and cannot be taken back. *)
 
+type cursor =
+  | On of int
+      (** The open ask at this position is selected. *)
+  | Released of int
+      (** The selected ask left the list -- answered here or elsewhere -- and
+          nothing is selected. The position is where [\[] and [\]] resume.
+
+          Falling back to the ask that slid into the same position let the
+          keys typed for the answered question answer the next one: two asks
+          answered four seconds apart, both with their first choice, the
+          second one never read (ask0319873c920b4606). *)
+
+val initial_cursor : cursor
+(** Before the operator has chosen anything, the first ask is selected. *)
+
 val reconcile_cursor :
   current_rows:Masc.Tui_decode_asks.ask_row list ->
-  cursor:int ->
+  cursor:cursor ->
   next_rows:Masc.Tui_decode_asks.ask_row list ->
-  int
-(** Follows the selected ask across a snapshot replacement, falling back to
-    the bounded numeric cursor only when that ask is gone. *)
+  cursor
+(** Follows the selected ask across a snapshot replacement. When that ask is
+    gone the cursor is [Released]; it never selects another ask by itself. A
+    released cursor stays released. *)
+
+val selected_row :
+  Masc.Tui_decode_asks.ask_row list -> cursor -> Masc.Tui_decode_asks.ask_row option
+(** The selected ask, or [None] when nothing is selected. *)
+
+val selected_index : Masc.Tui_decode_asks.ask_row list -> cursor -> int option
+
+val move_cursor :
+  Masc.Tui_decode_asks.ask_row list -> cursor -> delta:int -> cursor
+(** One press of [\[] or [\]]. A released cursor first selects the ask at its
+    resume position without moving, so the operator sees what they picked
+    before any key can answer it. *)

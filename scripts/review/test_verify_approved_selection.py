@@ -63,5 +63,36 @@ class SelectionIdentityCase(unittest.TestCase):
         self.assertEqual(caught.exception.reason, P.Reason.INVALID_SELECTION)
 
 
+class UnavailableCarriesCause(unittest.TestCase):
+    # run 39404586810 printed only "evidence_read_failed": the underlying
+    # failure existed but was not in the JSON. The pinned reason survives and
+    # the cause rides beside it.
+    def test_source_unavailable_keeps_reason_and_carries_cause(self):
+        error = P.SourceUnavailable("source_approval_read_failed",
+                                    cause="approve-guard exit=1 stderr=boom")
+        self.assertEqual(error.reason, "source_approval_read_failed")
+        self.assertEqual(str(error), "source_approval_read_failed: approve-guard exit=1 stderr=boom")
+
+    def test_source_unavailable_without_cause_keeps_pinned_vocabulary(self):
+        error = P.SourceUnavailable("tree_merge_failed")
+        self.assertEqual(error.reason, "tree_merge_failed")
+        self.assertEqual(str(error), "tree_merge_failed")
+
+    def test_unavailable_payload_names_the_cause(self):
+        payload = P.unavailable_payload(P.SourceUnavailable(
+            "source_approval_read_failed", cause="approve-guard exit=1 stderr=gh: boom"))
+        self.assertEqual(payload["status"], "unavailable")
+        self.assertEqual(payload["reason"],
+                         "source_approval_read_failed: approve-guard exit=1 stderr=gh: boom")
+
+    def test_unavailable_payload_keeps_plain_reasons_stable(self):
+        self.assertEqual(P.unavailable_payload(P.SourceUnavailable("tree_merge_failed")),
+                         {"status": "unavailable", "reason": "tree_merge_failed"})
+
+    def test_unavailable_payload_names_unexpected_exception_types(self):
+        payload = P.unavailable_payload(KeyError("clone_url"))
+        self.assertEqual(payload["reason"], "KeyError: 'clone_url'")
+
+
 if __name__ == "__main__":
     unittest.main()

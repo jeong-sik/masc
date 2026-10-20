@@ -3,7 +3,7 @@
 verdict_for() { # pr head
   local lines
   lines=$( { "$GH" api --paginate "repos/$repo/issues/$1/comments" --jq '.[] | [.created_at, .body, (.author_association // "UNKNOWN"), (.updated_at // .created_at)] | @tsv' &&
-             "$GH" api --paginate "repos/$repo/pulls/$1/reviews" --jq '.[] | [.submitted_at, .body, (.author_association // "UNKNOWN")] | @tsv'; } ) || return 1
+             "$GH" api --paginate "repos/$repo/pulls/$1/reviews" --jq '.[] | [.submitted_at, .body, (.author_association // "UNKNOWN")] | @tsv'; } ) || { echo "approve-guard: verdict read failed: comments/reviews of PR $1" >&2; return 1; }
   printf '%s\n' "$lines" | awk -F'\t' -v head="$2" '
     { body=$2; sub(/\\n.*/, "", body); sub(/\\r$/, "", body)
       n=split(body, w, " ")

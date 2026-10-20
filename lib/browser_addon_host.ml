@@ -85,7 +85,8 @@ let issue ?upload_paths ?(required_actions=[]) t ~preference verb =
         ~command:(Browser_addon_wire.Upload_stage {id;actor=Lane_addon_call_context.actor_label t.principal;
           route=Browser_lane.Automation_route;verb}) with
       | Ok Browser_addon_wire.Receipt -> Ok ()
-      | Ok _ -> fail ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
+      | Ok (Browser_addon_wire.Snapshot_result _|Model_reply _|Poll_result _|Issue_result _|Service_refusal _) ->
+        fail ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
           "worker upload staging was refused; no browser command was dispatched"
       | Error error -> fail ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect
           (match error with Browser_addon_client.Unavailable detail|Outcome_unknown detail -> detail) in

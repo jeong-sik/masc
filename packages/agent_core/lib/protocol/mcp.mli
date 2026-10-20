@@ -94,6 +94,7 @@ val connect
   -> command:string
   -> args:string list
   -> ?env:string array
+  -> ?cwd:Eio.Fs.dir_ty Eio.Path.t
   -> ?max_response_bytes:int
   -> ?stderr:Eio.Flow.sink_ty Eio.Resource.t
   -> ?sampling_handler:sampling_handler
@@ -102,6 +103,12 @@ val connect
 
 val initialize : t -> (unit, Error.t) result
 val close : t -> unit
+val process_id : t -> int
+(** The exact child started by [connect]. The number is for observation and
+    retained identity, never authority to signal a later process with that PID. *)
+val await_exit : t -> Eio.Process.exit_status
+(** Await the owned process handle; does not close the connection or impose a
+    timeout. The process manager defines descendant cleanup. *)
 val is_alive : t -> bool
 
 (** {1 Tool operations} *)

@@ -31,6 +31,13 @@ receipts remain distinct from successful contract validation.
 3. A host-process execution specification and lifecycle, separate from container
    resource/isolation declarations. Acquire installation/profile ownership before
    spawning. Persist exact process ownership and confirm cleanup before reuse.
+   The live `Lane_addon_native_worker` component now uses the shared protocol
+   without a container engine. Its host switch owns a foreground process group;
+   cancelled startup or calls request cleanup, and exports are revoked before
+   cleanup. Release requires an exited exact child and no observed live group
+   members. The handle does not establish durable admission/restart recovery,
+   profile ownership, or cleanup of descendants that leave that group. Native
+   manifest/runtime selection and those resource contracts remain to be wired.
 4. A browser worker that owns WebExtension/BiDi command queues and owned Gecko/
    Chrome execution. Core admission and artifact/model brokers remain host edges;
    built-in browser execution and tool fallback are removed.

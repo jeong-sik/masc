@@ -1973,6 +1973,114 @@ let test_journal_receipts_only_name_newly_folded_results () =
     (result_seqs (Tui_types.turn_log_add_journaled log [{result with seq=5}]))
 ;;
 
+(* A busy keeper is almost always mid-turn. Between two journal reads of that
+   turn nothing a frame draws from has changed, so a frame -- every scroll
+   key -- must reuse the merged rows and every per-entry cache they key, and
+   a read that grows the live turn must leave the settled turn's rows the
+   same values. *)
+let test_a_live_turn_keeps_the_merged_rows_between_journal_reads () =
+  let module Layout = Masc_tui_message_layout in
+  let module Render = Masc_tui_render_chat in
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some size)) in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    set_size (60, 120);
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+    state.msg_target_keeper_name <- Some "alpha";
+    let occurrence : E.tool_stream_occurrence =
+      { stream_scope = 0; provider_message_id = None; block_index = 0 } in
+    let settled = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"settled"
+        ~started_at:10. in
+    ignore (Tui_types.turn_log_add_journaled settled
+      [ line 0 10. (E.Run_started { run_id = "s"; thread_id = "keeper:alpha" });
+        line 1 10.1 (E.Text_delta {text="looking"; response=Unobserved_scope (None)});
+        line 2 10.2 (E.Tool_call_start { occurrence;
+          tool_call_id = Some "call-settled"; tool_call_name = "Read" });
+        line 3 10.3 (E.Tool_call_end { occurrence; tool_call_id = Some "call-settled" });
+        line 4 10.4 (E.Text_delta {text="found it"; response=Unobserved_scope (None)});
+        line 5 10.5 (journal_reply "found it");
+        line 6 10.6 (E.Run_finished { run_id = "s" }) ]);
+    Log.commit settled.Tui_types.tl_log;
+    Tui_types.hold_settled_log state settled;
+    let live = inflight_with_log ~keeper_name:"alpha" ~started_at:100.
+        [ Live.Run_started; Live.Text {text="working"; response=Unobserved_scope (None)} ] in
+    state.msg_inflight <- [live]; state.msg_live <- Some live.log;
+    let projection () =
+      Render.keeper_message_projection state ~keeper_name:"alpha" ~chat_cols:120 in
+    let first = projection () in
+    check bool "a frame with no new journal read gets the same merged rows" true
+      ((projection ()).layout_entries == first.layout_entries);
+    ignore (Render.render_keeper_message state);
+    let builds = Render.For_testing.source_index_build_count () in
+    ignore (Render.render_keeper_message state);
+    check int "a second frame with nothing new indexes no row again" builds
+      (Render.For_testing.source_index_build_count ());
+    Tui_types.turn_log_add ~now:101. live.log ~seq:(Some 2)
+      (Live.Text {text=" still"; response=Unobserved_scope (None)});
+    let grown = projection () in
+    check bool "a grown live turn is merged again" false
+      (grown.layout_entries == first.layout_entries);
+    (* The live turn's rows are projected again from its grown log. Every
+       row with one of these rails is the settled turn's here: the live turn
+       is open, so it neither closes nor continues past its single row. *)
+    let settled_row (entry : Layout.entry) = match entry.turn_rail with
+      | Layout.Rail_does | Layout.Rail_says | Layout.Rail_closes -> true
+      | Layout.Rail_opens | Layout.Rail_stands
+      | Layout.Rail_joins _ | Layout.Rail_none -> false in
+    let continuing (entry : Layout.entry) = match entry.turn_rail with
+      | Layout.Rail_does | Layout.Rail_says -> true
+      | Layout.Rail_closes | Layout.Rail_opens | Layout.Rail_stands
+      | Layout.Rail_joins _ | Layout.Rail_none -> false in
+    let kept = List.filter settled_row first.layout_entries in
+    check bool "the settled turn has a row inside its bracket and a last row" true
+      (List.exists continuing kept
+       && List.exists (fun row -> not (continuing row)) kept);
+    check bool "the settled turn's rows are the same values after the live turn grew" true
+      (List.for_all (fun row -> List.memq row grown.layout_entries) kept))
+;;
+
+(* A running turn's block is memoised on its log, but whether the turn is
+   still open is read from the session: a refused journal read closes the
+   turn and leaves its log, its block and the committed rows as they were.
+   The merged rows must follow, or the last row keeps an open rail. *)
+let test_a_turn_that_stops_being_open_is_merged_again () =
+  let module Layout = Masc_tui_message_layout in
+  let module Render = Masc_tui_render_chat in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+  state.msg_target_keeper_name <- Some "alpha";
+  let occurrence : E.tool_stream_occurrence =
+    { stream_scope = 0; provider_message_id = None; block_index = 0 } in
+  let live = inflight_with_log ~keeper_name:"alpha" ~started_at:100. [] in
+  ignore (Tui_types.turn_log_add_journaled live.log
+    [ line 0 100. (E.Run_started { run_id = "l"; thread_id = "keeper:alpha" });
+      line 1 100.1 (E.Text_delta {text="looking"; response=Unobserved_scope (None)});
+      line 2 100.2 (E.Tool_call_start { occurrence;
+        tool_call_id = Some "call-live"; tool_call_name = "Read" });
+      line 3 100.3 (E.Tool_call_end { occurrence; tool_call_id = Some "call-live" });
+      line 4 100.4 (E.Text_delta {text="still going"; response=Unobserved_scope (None)}) ]);
+  state.msg_inflight <- [live]; state.msg_live <- Some live.log;
+  let projection () =
+    Render.keeper_message_projection state ~keeper_name:"alpha" ~chat_cols:120 in
+  let closing (entry : Layout.entry) = match entry.turn_rail with
+    | Layout.Rail_closes | Layout.Rail_stands -> true
+    | Layout.Rail_opens | Layout.Rail_does | Layout.Rail_says
+    | Layout.Rail_joins _ | Layout.Rail_none -> false in
+  let open_rows = projection () in
+  check bool "the running turn has no closing row" false
+    (List.exists closing open_rows.layout_entries);
+  Tui_types.remember_journal_unavailable state (Tui_types.turn_log_journal_key live.log);
+  let closed = projection () in
+  check bool "a turn that stopped being open is merged again" false
+    (closed.layout_entries == open_rows.layout_entries);
+  check bool "its last row now closes the turn" true
+    (List.exists closing closed.layout_entries)
+;;
+
 let journal_log ~request_id ~started_at ?(finished = true) () =
   let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id ~started_at in
   let _ = Tui_types.turn_log_add_journaled log
@@ -6297,6 +6405,10 @@ let () =
             test_a_journal_fills_a_turn_log_at_the_lines_own_times
         ; test_case "journal receipts only name newly folded results" `Quick
             test_journal_receipts_only_name_newly_folded_results
+        ; test_case "a live turn keeps the merged rows between journal reads" `Quick
+            test_a_live_turn_keeps_the_merged_rows_between_journal_reads
+        ; test_case "a turn that stops being open is merged again" `Quick
+            test_a_turn_that_stops_being_open_is_merged_again
         ; test_case "hold_settled_log orders by start and replaces only partial logs"
             `Quick test_hold_settled_log_orders_by_start_and_replaces_only_partial_logs
         ; test_case "a journal-built log holds its turn in the timeline" `Quick

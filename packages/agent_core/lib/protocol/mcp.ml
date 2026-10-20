@@ -292,6 +292,8 @@ let report_release_failure exception_ backtrace =
     (Printexc.raw_backtrace_to_string backtrace)
 ;;
 
+let request_stop t = t.kill ()
+
 let close t =
   close_with_release
     ~close_client:(fun () -> Sdk_client.close t.client)

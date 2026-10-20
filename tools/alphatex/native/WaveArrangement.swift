@@ -881,6 +881,12 @@ struct Options {
 static func main() {
 _ = signal(SIGPIPE, SIG_IGN)
 do {
+    let extraction = Array(CommandLine.arguments.dropFirst())
+    if extraction.first == "extract-practice-region" {
+        guard extraction.count == 3, extraction[1] == "--file" else { throw MidiFailure("extract-practice-region requires --file PLAN") }
+        let plan = try JSONDecoder().decode(UmpRegionExtraction.self, from: Data(contentsOf: URL(fileURLWithPath: extraction[2])))
+        try audioEmit(plan.extract()); return
+    }
     let options = try Options()
     let plan = try JSONDecoder().decode(Plan.self, from: Data(contentsOf: URL(fileURLWithPath: options.file!)))
     let transport = try ArrangementTransport(plan: plan, output: options.output, loop: options.loop)

@@ -589,6 +589,16 @@ MIDI1 / 960 PPQ variant for `:edit-midi`, chord analysis and revoicing. It retai
 the captured VST sound, uses nearest source ticks at the captured SMF tempo,
 and leaves original UMP takes/pass cuts untouched. This explicitly uses the
 monitor's channel/value projection rather than lossless MIDI2 editing.
+`:practice-midi-region` derives just the selected original practice region as a
+separate editable asset starting at zero. Exact fractional host cuts are applied
+before PPQ rounding. The native `music-arrangement` companion restores notes and
+sustain/sostenuto state at entry using the same reconstruction as raw playback;
+unsupported reconstruction or MIDI1 projection fails without changing the project.
+Key durations remain key durations: a pedal-held released note can appear as a
+zero-length key with its pedal events, rather than an extended acoustic duration.
+Repeats are not expanded. Original clips, cuts, repeats and source files remain
+intact. `:edit-midi` opens the selected derived asset; Enter places it separately
+at the admitted cursor. Reinstall the AlphaTex companion when updating this command.
 `:practice-backing [ASSET]` recovers their frozen phrase as a new editable MIDI
 asset with the originally played track muted. Enter places the full phrase and
 `:edit-midi` opens it for chord/voicing experiments. Its original loop stays in

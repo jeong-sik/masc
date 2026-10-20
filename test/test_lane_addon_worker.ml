@@ -520,7 +520,7 @@ let test_host_result_continuations_cross_the_real_worker_port () = with_fixture 
   let member = Yojson.Safe.Util.member in
   let text key json = member key json |> Yojson.Safe.Util.to_string in
   let integer key json = member key json |> Yojson.Safe.Util.to_int in
-  let request : Host.t = Read_records {request_id="page"; source_id="board"; after=None} in
+  let request : Host.t = Read_records {request_id="page"; source_id="board"; start=Masc.Lane_addon_records.From_beginning} in
   let listing request =
     write (Filename.concat dir "host-listing.json")
       (Yojson.Safe.to_string (`Assoc ["requests", `List [Host.to_json request]]));
@@ -579,7 +579,7 @@ let test_host_result_continuations_cross_the_real_worker_port () = with_fixture 
     (refused (continuation ~digest:(String.make 64 '0') ()));
   check bool "an unretained request grants no hash access" true
     (refused (continuation ~original_request_id:"unknown" ()));
-  let changed : Host.t = Read_records {request_id="page"; source_id="private-board"; after=None} in
+  let changed : Host.t = Read_records {request_id="page"; source_id="private-board"; start=Masc.Lane_addon_records.From_beginning} in
   check bool "request-id reuse cannot replace its original source" true
     (refused (Delivery.arguments ~store ~owner ~request:changed ~max_bytes:4096 ~result));
   let replay = send request (`Assoc ["changed", `Bool true]) in

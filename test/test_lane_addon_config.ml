@@ -402,7 +402,7 @@ let operator_quiz_worker_speaks_the_host_contract () = with_directory (fun _root
   ignore (unwrap (Lane_addon_packet.decode (structured 2)));
   check string "compose is confirmed" "confirmed" Yojson.Safe.Util.(structured 3 |> member "status" |> to_string);
   (match unwrap (Lane_addon_host_request.listing_of_json (structured 4)) with
-   | [Lane_addon_host_request.Read_records {source_id = "board"; after = None; _}] -> ()
+   | [Lane_addon_host_request.Read_records {source_id = "board"; start = Lane_addon_records.From_beginning; _}] -> ()
    | _ -> fail "the first request of a session reads the granted Board from the start"))
 
 let model_access_is_explicit_and_revisioned () = with_directory (fun _root packages directory ->

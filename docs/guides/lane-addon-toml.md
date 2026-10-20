@@ -237,6 +237,7 @@ visibilities = ["public", "unlisted"]
 - `kind` 는 지금 `board` 와 `repository` 다(아래). `board` 는 `visibilities` 가 꼭 있어야 하고 Board 의 값(`public`, `unlisted`, `internal`, `direct`)을 소문자로 쓴다. 기본값은 없다. `direct` 는 적었을 때만 읽는다.
 - 이 visibility 의 글은 패키지의 exact output 에 묶인 slot 의 provider 에게 갈 수 있다. `internal` 을 넣기 전에 그 provider 가 내부 글을 받아도 되는지 확인한다.
 - 요청은 `{"kind": "read_records", "request_id", "source_id", "after"}` 다. `after` 는 이전 결과의 `next_cursor` 이거나, 처음부터 읽을 때는 없거나 `null` 이다.
+- 아직 커서가 없는 패키지는 `after` 대신 `since`(Unix 시각, 초)를 보내 그때부터 만든 기록만 읽는다. Board 는 글·댓글을 쓴 시각, `repository` 는 커밋 시각으로 판다. 둘을 같이 보내면 그 요청은 잘못된 요청이다. 그 시각 뒤로 기록이 없으면 `records` 는 비고 `next_cursor` 는 `null` 이다.
 - 결과는 `{"status": "records", "source_id", "records", "next_cursor", "complete", "sha256"}` 다. 오래된 것부터, frame 에 들어가는 만큼 담는다. Board 기록은 글(id, 작성자, 작성·수정 시각, visibility, 제목, 본문)과 그 글의 댓글(id, 글 id, 작성자, 작성 시각, 본문)이다.
 - host 는 답하기 전에 `records` 배열을 Lane store 에 blob 으로 보존한다. `sha256` 은 그 blob 이름이라, 나중에 글이 고쳐지거나 만료돼도 인용한 바이트를 확인할 수 있다.
 - 권한이 없는 `source_id` 나 host 가 준 적 없는 커서는 `not_allowed` 다. Board 를 읽을 수 없으면 최종이 아니고 `source_unavailable` 로 다음 사건을 기다린다.

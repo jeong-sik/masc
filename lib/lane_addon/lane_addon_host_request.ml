@@ -2,7 +2,7 @@ let ( let* ) = Result.bind
 
 type t =
   | Exact_output of Lane_addon_exact.request
-  | Read_records of { request_id : string; source_id : string; after : string option }
+  | Read_records of { request_id : string; source_id : string; start : Lane_addon_records.start }
   | Read_file of { request_id : string; source_id : string; commit : string; path : string }
   | Read_result of { request_id : string; original_request_id : string; source_id : string option;
                      sha256 : string; offset : int }
@@ -17,9 +17,15 @@ let request_id = function
 
 let to_json = function
   | Exact_output request -> Lane_addon_exact.request_to_json request
-  | Read_records {request_id; source_id; after} ->
-      `Assoc ["kind", `String "read_records"; "request_id", `String request_id;
-        "source_id", `String source_id; "after", Option.fold ~none:`Null ~some:(fun s -> `String s) after]
+  | Read_records {request_id; source_id; start} ->
+      (* The two older shapes keep their exact JSON: it is the identity a
+         retained oversized result was stored under. *)
+      let position = match start with
+        | Lane_addon_records.From_beginning -> ["after", `Null]
+        | After cursor -> ["after", `String cursor]
+        | Since at -> ["after", `Null; "since", `Float at] in
+      `Assoc (["kind", `String "read_records"; "request_id", `String request_id;
+        "source_id", `String source_id] @ position)
   | Read_file {request_id; source_id; commit; path} ->
       `Assoc ["kind", `String "read_file"; "request_id", `String request_id;
         "source_id", `String source_id; "commit", `String commit; "path", `String path]
@@ -42,7 +48,7 @@ let text fields key =
   | Some _ | None -> Error (key ^ " requires a non-blank string")
 
 let read_records fields =
-  match List.find_opt (fun (key, _) -> not (List.mem key [ "kind"; "request_id"; "source_id"; "after" ])) fields with
+  match List.find_opt (fun (key, _) -> not (List.mem key [ "kind"; "request_id"; "source_id"; "after"; "since" ])) fields with
   | Some (key, _) -> Error ("a read_records request has no key " ^ key)
   | None ->
     let* request_id = text fields "request_id" in
@@ -53,7 +59,21 @@ let read_records fields =
       | Some (`String cursor) -> Ok (Some cursor)
       | Some _ -> Error "after must be a cursor string or null"
     in
-    Ok (Read_records { request_id; source_id; after })
+    let* since =
+      match List.assoc_opt "since" fields with
+      | None | Some `Null -> Ok None
+      | Some (`Int at) when at >= 0 -> Ok (Some (Float.of_int at))
+      | Some (`Float at) when Float.is_finite at && at >= 0. -> Ok (Some at)
+      | Some _ -> Error "since must be a Unix time from 0, or null"
+    in
+    let* start =
+      match after, since with
+      | None, None -> Ok Lane_addon_records.From_beginning
+      | Some cursor, None -> Ok (Lane_addon_records.After cursor)
+      | None, Some at -> Ok (Lane_addon_records.Since at)
+      | Some _, Some _ -> Error "a read_records request names after or since, not both"
+    in
+    Ok (Read_records { request_id; source_id; start })
 
 let read_file fields =
   match List.find_opt (fun (key, _) -> not (List.mem key [ "kind"; "request_id"; "source_id"; "commit"; "path" ])) fields with

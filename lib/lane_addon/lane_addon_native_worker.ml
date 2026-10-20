@@ -9,11 +9,18 @@ type release = {
 type error = Invalid_specification of string | Start_failed of string
   | Admission of Native_addon_lease.error
   | Protocol of Protocol.error | Cleanup_unconfirmed of string | Stopped
+let error_to_string = function
+  | Invalid_specification detail | Start_failed detail | Cleanup_unconfirmed detail -> detail
+  | Admission error -> Native_addon_lease.error_to_string error
+  | Protocol (Protocol.Invalid_contract detail | Protocol.Protocol_failed detail | Protocol.Invalid_observation detail) -> detail
+  | Protocol (Protocol.Host_refusal (Lane_addon_call_context.Rejected detail | Unavailable detail | Activity_disabled detail | Activity_unobserved detail)) -> detail
+  | Protocol Protocol.Stopped | Stopped -> "native Add-on is stopped"
 type phase = Initializing | Validating_owner | Serving | Retired
 type t = {
   protocol : Protocol.t;
   admission : Native_addon_lease.t;
   mutable phase : phase;
+  mutable process_identity : Lane_addon_lifecycle.resource option;
   mutable confirmed : release option;
   request_stop : unit Eio.Promise.u;
   request_retirement : unit Eio.Promise.u;
@@ -21,6 +28,7 @@ type t = {
 }
 let ( let* ) = Result.bind
 let phase t = t.phase
+let process_identity t = t.process_identity
 let request_stop t =
   t.phase <- Retired;
   Protocol.revoke t.protocol;
@@ -92,7 +100,7 @@ let start ~sw ~clock ~grace_seconds ~admission ~launcher ~contract ~command ?cwd
   let stop_requested, set_stop = Eio.Promise.create () in
   let retirement_requested, set_retirement = Eio.Promise.create () in
   let protocol = Protocol.create ~instance_id ~contract ?artifact_store () in
-  let worker = {protocol;admission;phase=Initializing;confirmed=None;
+  let worker = {protocol;admission;phase=Initializing;process_identity=None;confirmed=None;
     request_stop=set_stop;request_retirement=set_retirement;completion} in
   Eio.Switch.check sw;
   Eio.Fiber.fork ~sw (fun () ->
@@ -135,7 +143,10 @@ let start ~sw ~clock ~grace_seconds ~admission ~launcher ~contract ~command ?cwd
             | Ok connected ->
                 client := Some connected;
                 let pid = Agent_core.Mcp.process_id connected in
-                identity := Some (pid, Posix_spawn_detached.process_start pid);
+                let started = Posix_spawn_detached.process_start pid in
+                identity := Some (pid, started);
+                worker.process_identity <- Some (Lane_addon_lifecycle.Native_resource
+                  {pid;started});
                 Eio.Switch.on_release process_sw (fun () -> Protocol.close protocol);
                 (* Kernel gate I/O cannot be cancelled once its systhread runs.
                    This sibling can still stop the exact owned process while
@@ -163,6 +174,8 @@ let start ~sw ~clock ~grace_seconds ~admission ~launcher ~contract ~command ?cwd
                               (match admission_status admission with
                                | Ok (Native_addon_lease.Live owner) when owner.pid=pid ->
                                    identity := Some (pid,Some owner.started);
+                                   worker.process_identity <- Some (Lane_addon_lifecycle.Native_resource
+                                     {pid;started=Some owner.started});
                                    (match worker.phase with
                                     | Retired | Serving | Initializing -> failure := Some Stopped
                                     | Validating_owner when Protocol.revoked protocol -> failure := Some Stopped

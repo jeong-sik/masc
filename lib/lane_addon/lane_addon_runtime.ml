@@ -29,29 +29,26 @@ type connection = {
     (Mcp_protocol.Mcp_types.tool_result, Lane_addon_call_context.invocation_error) result;
   action_schema : unit -> Yojson.Safe.t option;
   act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
-  stop : unit -> (unit, Lifecycle.failure) result;
-  container_id : string;
+  stop : unit -> (Lifecycle.release, Lifecycle.failure) result;
+  resource : Lifecycle.resource;
 }
 type backend = {
-  start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> package:package -> binding:Yojson.Safe.t ->
-    on_engine:(Lifecycle.engine -> (unit, string) result) ->
+  start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> installation_id:string -> package:package -> binding:Yojson.Safe.t ->
+    on_authority:(Lifecycle.authority -> (unit, string) result) ->
     is_live_instance:(string -> bool) ->
     on_created:(connection -> unit) -> (connection, Lifecycle.failure) result;
-  (* [is_live_instance] names the incarnations this process still owns; a dead
-     one's container may be cleared from a slot the new incarnation needs.
-     [on_engine] receives the engine identity before the first create and
-     returns only once it is persisted. A start that creates without calling
-     it has no engine on record. *)
+  (* [is_live_instance] names incarnations still owned by this process.
+     [on_authority] persists the exact container engine or native installation
+     admission before payload creation. *)
   acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:package ->
     resolve_machine_output:(Machine_lane.t -> (Lane_addon_sources.machine_output, string) result) ->
     resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
     binding:Yojson.Safe.t ->
     (Yojson.Safe.t, string) result;
-  recover_stop : runtime:runtime -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> engine:Lifecycle.engine ->
-    container_id:string option -> (unit, Lifecycle.failure) result;
-  (* Ok only when [engine], the one recorded at create, answered that the
-     container is gone or removed. *)
-  image_ready : package:package -> (unit, string) result;
+  recover_stop : state_owner:Lane_addon_worker_state.owner option -> instance_id:string ->
+    authority:Lifecycle.authority -> resource:Lifecycle.resource option -> (Lifecycle.release, Lifecycle.failure) result;
+  (* The release receipt must match the original recorded execution authority. *)
+  package_ready : package:package -> (unit, string) result;
   condition_met : runtime:runtime -> Lifecycle.condition -> bool;
   (* A waiting failure is re-examined through this one cheap read. False also
      when the condition cannot be established. *)
@@ -112,7 +109,7 @@ let register_skill_export_handler handler = skill_export_handler := Some handler
 type observation_request = Idle | Run_actions | Refresh_sources | Observe_now
 type entry = {
   instance_id : string; run_id : string; package : package; binding : Yojson.Safe.t;
-  mutable state : Lifecycle.state; mutable engine : Lifecycle.engine option;
+  mutable state : Lifecycle.state; mutable authority : Lifecycle.authority option;
   mutable seq : int; mutable output : output;
   mutable connection : owned_connection option; mutable stopping : bool;
   mutable cleanup_running : bool; changed : Eio.Condition.t; mutable wake : unit Eio.Promise.t;
@@ -194,8 +191,9 @@ let text fields key = match List.assoc_opt key fields with
   | _ -> Error (key ^ " requires a non-blank string")
 let object_ = function `Assoc fields -> Ok fields | _ -> Error "expected an object"
 let retained_runtime fields = match List.assoc_opt "runtime" fields with
-  | None -> Ok Docker
-  | Some (`String value) -> Option.to_result ~none:"invalid retained runtime" (runtime_of_string value)
+  | Some (`String "host_process") -> Ok None
+  | Some (`String value) -> Option.to_result ~none:"invalid retained runtime" (runtime_of_string value) |> Result.map Option.some
+  | None -> Ok (Some Docker)
   | Some _ -> Error "invalid retained runtime"
 let offload f = Eio_unix.run_in_systhread f
 let configuration_owner_json (owner : configuration_owner) =
@@ -285,12 +283,28 @@ let lifecycle_of_fields fields = match List.assoc_opt "lifecycle" fields with
 let record_is_detached fields = match lifecycle_of_fields fields with
   | Ok (Lifecycle.Detached _) -> true
   | Ok (Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Failed _ | Lifecycle.Detaching _) | Error _ -> false
-(* The engine a container was created on, recorded before the first create. A
-   record that does not carry the field at all is of an earlier shape. *)
-let engine_of_fields fields = match List.assoc_opt "engine" fields with
+(* Cleanup authority is persisted before creating a container or starting a
+   native payload. An observation of a resource does not grant authority. *)
+let authority_of_fields fields = match List.assoc_opt "execution_authority" fields with
   | Some `Null -> Ok None
-  | Some json -> Result.map Option.some (Lifecycle.engine_of_json json)
-  | None -> Error "missing retained engine identity"
+  | Some json -> Result.map Option.some (Lifecycle.authority_of_json json)
+  | None -> Error "missing retained execution authority"
+let resource_of_fields fields = match List.assoc_opt "resource" fields with
+  | Some `Null -> Ok None
+  | Some json -> Lifecycle.resource_of_json json |> Result.map Option.some
+  | None -> Error "missing retained execution resource"
+let retained_execution fields =
+  let* authority = authority_of_fields fields in
+  let* resource = resource_of_fields fields in
+  let* () = match authority,resource with
+    | None,None | Some _,None
+    | Some (Lifecycle.Container_authority _),Some (Lifecycle.Container_resource _)
+    | Some (Lifecycle.Native_admission _),Some (Lifecycle.Native_resource _) -> Ok ()
+    | None,Some _ -> Error "retained resource has no execution authority"
+    | Some (Lifecycle.Container_authority _),Some (Lifecycle.Native_resource _)
+    | Some (Lifecycle.Native_admission _),Some (Lifecycle.Container_resource _) ->
+        Error "retained resource differs from its execution authority" in
+  Ok (authority,resource)
 let failed_in fields = match lifecycle_of_fields fields with
   | Ok (Lifecycle.Failed failed) | Ok (Lifecycle.Detaching (Some failed)) -> Some failed
   | Ok (Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching None | Lifecycle.Detached _)
@@ -345,7 +359,7 @@ let parse_retained_binding = function
            (match configuration_of_fields fields with
             | Error detail -> Error (fault_of_fields fields (Record_invalid detail))
             | Ok binding_owner ->
-                (match lifecycle_of_fields fields, engine_of_fields fields with
+                (match lifecycle_of_fields fields, retained_execution fields with
                  | Error detail, _ | _, Error detail -> Error (fault_of_fields fields (Record_invalid detail))
                  | Ok _, Ok _ -> Ok { binding_fields = fields; read_visibility; binding_owner })))
   | _ -> Error { fault_instance = None; fault_owner = Owner_unreadable; fault_fields = [];
@@ -381,7 +395,7 @@ let entry_json e =
     "addon_id", `String e.package.id; "title", `String e.package.title;
     "revision", `String e.package.revision; "phase", phase_to_json (phase_of e);
     "lifecycle", Lifecycle.state_to_json e.state;
-    "engine", (match e.engine with None -> `Null | Some engine -> Lifecycle.engine_to_json engine);
+    "execution_authority", (match e.authority with None -> `Null | Some authority -> Lifecycle.authority_to_json authority);
     "observation_seq", `Int e.seq; "rows_count", `Int (List.length e.output.rows);
     "observation_pending", `Bool (match e.pending with
       | Observe_now | Refresh_sources -> true | Run_actions | Idle -> false); "coalesced_wakes", `Int e.coalesced_wakes;
@@ -390,9 +404,9 @@ let entry_json e =
     "package", package_to_json e.package;
     "visibility", visibility_to_json e.visibility;
     "configuration", Option.fold ~none:`Null ~some:configuration_owner_json e.configuration;
-    "container_id", (match e.connection with None -> `Null | Some c -> `String c.worker.container_id)]
-(* A detached worker that never created a container and never committed an
-   observation leaves nothing for Inspect, Slice or Evidence to read. When
+    "resource", (match e.connection with None -> `Null | Some c -> Lifecycle.resource_to_json c.worker.resource)]
+(* A detached worker that acquired no execution authority or resource and
+   never committed an observation leaves nothing for Inspect, Slice or Evidence.  When
    its start returned [Error], the masc:lane:resource:acquire_failed event in
    the agent-core event journal records why it did not start; a start that
    raised keeps its reason only in the [Failed] phase until it is retired.
@@ -400,9 +414,9 @@ let entry_json e =
    again, and a startup that keeps failing adds one per maintenance beat, so
    its durable form is no file. [persist] and the restart recovery in
    [historical_detach] both decide with this one rule. *)
-let never_started ~seq ~has_container = seq = 0 && not has_container
+let never_started ~seq ~authority ~resource = seq=0 && Option.is_none authority && Option.is_none resource
 let retains_history e =
-  not (never_started ~seq:e.seq ~has_container:(Option.is_some e.connection))
+  not (never_started ~seq:e.seq ~authority:e.authority ~resource:(Option.map (fun c -> c.worker.resource) e.connection))
 let persist m e = Eio.Mutex.use_ro e.persistence_mutex (fun () ->
   (* Capture mutable state on the owning domain after serializing writes.
      The I/O thread sees only the immutable snapshot. Every write, including
@@ -534,40 +548,52 @@ let fork_isolated ~sw f = Eio.Fiber.fork ~sw (fun () ->
 let release_detached m e =
   if is_detached e.state && not e.running && not e.cleanup_running
   then (Hashtbl.remove m.entries e.instance_id; wake_dependents m e; m.configuration_nudge ())
-let publish_resource lifecycle e container_id detail =
+let publish_resource lifecycle e resource detail =
   Lane_addon_resource_events.publish lifecycle
     { instance_id = e.instance_id; run_id = e.run_id;
       package_id = e.package.id; package_revision = e.package.revision;
-      container_id; detail }
-(* What a confirmed release stands on: the engine recorded before the first
-   create. No engine on record means no create was ever issued. A container
-   with no engine on record breaks that rule and is not called released. *)
-let release_of e container_id = match e.engine, container_id with
-  | Some engine, _ -> Ok (Lifecycle.Released { engine; container_id })
-  | None, None -> Ok Lifecycle.Never_created
-  | None, Some _ ->
-      Error (Lifecycle.Persistence_failed "a container exists but no engine was recorded for it")
+      resource; detail }
+(* A release must name the same persisted authority and observed resource.
+   Absence of authority and resource is the only never-created proof. *)
+let check_release ~instance_id ~authority ~resource release =
+  let refused () = Error (Lifecycle.Cleanup_unconfirmed "release does not match retained execution authority/resource") in
+  match release with
+  | Lifecycle.Never_created ->
+      if Option.is_none authority && Option.is_none resource then Ok release else refused ()
+  | Lifecycle.Released {engine;container_id} ->
+      (match authority with
+       | Some (Lifecycle.Container_authority owned) when Lifecycle.engine_equal engine owned.engine ->
+           (match resource with
+            | None -> Ok release
+            | Some (Lifecycle.Container_resource id) when container_id=Some id -> Ok release
+            | Some (Lifecycle.Container_resource _ | Lifecycle.Native_resource _) -> refused ())
+       | None | Some (Lifecycle.Container_authority _ | Lifecycle.Native_admission _) -> refused ())
+  | Lifecycle.Native_released receipt ->
+      (match authority with
+       | Some (Lifecycle.Native_admission owned) when receipt.installation_id=owned.installation_id
+           && receipt.instance_id=instance_id ->
+           (match resource with None | Some (Lifecycle.Native_resource _) -> Ok release
+            | Some (Lifecycle.Container_resource _) -> refused ())
+       | None | Some (Lifecycle.Container_authority _ | Lifecycle.Native_admission _) -> refused ())
 (* A cleanup that does not confirm the release is an event an operator needs
    in the server log, not only in the resource event stream. *)
-let log_cleanup_failure instance_id package_id container_id failure =
-  Log.Misc.warn "Lane Add-on cleanup was not confirmed for instance %s (package %s, container %s): %s"
-    instance_id package_id (Option.value ~default:"none" container_id) (Lifecycle.failure_to_string failure)
+let log_cleanup_failure instance_id package_id resource failure =
+  Log.Misc.warn "Lane Add-on cleanup was not confirmed for instance %s (package %s, resource %s): %s"
+    instance_id package_id (Option.fold ~none:"none" ~some:Lifecycle.resource_to_string resource) (Lifecycle.failure_to_string failure)
 
 let stop_entry ~sw ~backend m e =
   if not e.cleanup_running then
-    let cleanup = match e.connection, e.engine with
-      | Some c, _ -> Some (Some c.worker.container_id, c.worker.stop)
-      | None, None when not e.running -> Some (None, fun () -> Ok ())
-      | None, Some engine when not e.running -> Some (None, fun () ->
+    let cleanup = match e.connection, e.authority with
+      | Some c, _ -> Some (Some c.worker.resource, c.worker.stop)
+      | None, None when not e.running -> Some (None, fun () -> Ok Lifecycle.Never_created)
+      | None, Some authority when not e.running -> Some (None, fun () ->
           let* state_owner = state_owner_for_entry m e
             |> Result.map_error (fun message -> Lifecycle.Cleanup_unconfirmed message) in
-          let* container = Lane_addon_types.container e.package
-            |> Result.map_error (fun detail -> Lifecycle.Cleanup_unconfirmed detail) in
-          backend.recover_stop ~runtime:container.runtime ~state_owner ~instance_id:e.instance_id ~engine ~container_id:None)
+          backend.recover_stop ~state_owner ~instance_id:e.instance_id ~authority ~resource:None)
       | None, (None | Some _) -> None (* startup still owns the unresolved create operation *) in
     match cleanup with
     | None -> ()
-    | Some (container_id, stop) ->
+    | Some (resource, stop) ->
         e.cleanup_running <- true;
         fork_isolated ~sw (fun () ->
           Fun.protect
@@ -584,8 +610,8 @@ let stop_entry ~sw ~backend m e =
                 | Eio.Cancel.Cancelled _ as exn -> raise exn
                 | exn -> Error (Lifecycle.Cleanup_unconfirmed (Printexc.to_string exn)) in
               (match result with
-               | Ok () ->
-                   (match release_of e container_id with
+               | Ok release ->
+                   (match check_release ~instance_id:e.instance_id ~authority:e.authority ~resource release with
                     | Ok release ->
                         let already_detached = is_detached e.state in
                         e.state <- Lifecycle.Detached release; wake e;
@@ -594,17 +620,17 @@ let stop_entry ~sw ~backend m e =
                            once, at the transition into Detached. *)
                         if not already_detached then
                           publish_resource Lane_addon_resource_events.Release_confirmed e
-                            container_id None
+                            resource None
                     | Error failure ->
                         e.state <- fail_state e failure;
-                        log_cleanup_failure e.instance_id e.package.id container_id failure;
+                        log_cleanup_failure e.instance_id e.package.id resource failure;
                         publish_resource Lane_addon_resource_events.Release_incomplete e
-                          container_id (Some (Lifecycle.failure_detail failure)))
+                          resource (Some (Lifecycle.failure_detail failure)))
                | Error failure ->
                    e.state <- fail_state e failure;
-                   log_cleanup_failure e.instance_id e.package.id container_id failure;
+                   log_cleanup_failure e.instance_id e.package.id resource failure;
                    publish_resource Lane_addon_resource_events.Release_incomplete e
-                     container_id (Some (Lifecycle.failure_detail failure)));
+                     resource (Some (Lifecycle.failure_detail failure)));
               (match persist m e with Ok () -> () | Error message ->
                 e.state <- fail_state e (Lifecycle.Persistence_failed ("cleanup state persistence: " ^ message)));
               wake_dependents m e);
@@ -725,7 +751,7 @@ let commit_output m e ~sources output =
        | Error error -> Error (detail ^ "; binding persistence: " ^ error))
 let perform_action m e (c : connection) (queued : Lane_addon_action.receipt) =
   e.current_action <- Some queued;
-  let running = {queued with state = Lane_addon_action.Running; executor = Some c.container_id} in
+  let running = {queued with state = Lane_addon_action.Running; executor = Some c.resource} in
   match save_action m running with
   | Error message ->
       let receipt = {queued with state = Lane_addon_action.Failed_before_effect;
@@ -803,25 +829,24 @@ let run ~sw backend m e =
       Eio.Switch.run (fun worker_sw ->
         e.cancel_worker <- Some (fun () -> Eio.Switch.fail worker_sw Worker_detached);
         let export_owner = Lane_addon_tool_export.create_owner ~instance_id:e.instance_id in
-        let on_engine engine =
-          e.engine <- Some engine;
-          match persist m e with
-          | Ok () -> Ok ()
-          | Error message -> e.engine <- None; Error message in
+        let on_authority authority =
+          e.authority <- Some authority;
+          persist m e in
         let created c = e.connection <- Some {export_owner;worker=c};
-          publish_resource Lane_addon_resource_events.Acquired e (Some c.container_id) None;
+          publish_resource Lane_addon_resource_events.Acquired e (Some c.resource) None;
           (match persist m e with Ok () -> () | Error message ->
             e.stopping <- true; e.state <- fail_state e (Lifecycle.Persistence_failed message));
           if e.stopping then stop_entry ~sw ~backend m e in
         let started = let* state_owner = state_owner_for_entry m e
             |> Result.map_error (fun message -> Lifecycle.Worker_failed message) in
           backend.start ~state_owner ~sw:worker_sw ~instance_id:e.instance_id
-            ~package:e.package ~binding:e.binding ~on_engine
+            ~installation_id:(match e.configuration with Some owner -> owner.id | None -> e.instance_id)
+            ~package:e.package ~binding:e.binding ~on_authority
             ~is_live_instance:(is_live_instance m) ~on_created:created in
         match started with
         | Error failure ->
             publish_resource Lane_addon_resource_events.Acquire_failed e
-              (Option.map (fun c -> c.worker.container_id) e.connection) (Some (Lifecycle.failure_detail failure));
+              (Option.map (fun c -> c.worker.resource) e.connection) (Some (Lifecycle.failure_detail failure));
             if e.stopping then (
               match e.connection with None -> e.state <- fail_state e failure
               | Some _ -> stop_entry ~sw ~backend m e)
@@ -895,83 +920,199 @@ let run ~sw backend m e =
         Eio.Cancel.protect (fun () -> finalize_actions m e);
         Eio.Condition.broadcast e.changed;
         release_detached m e; raise exn)
+let native_claim_root store = Filename.concat (Lane_addon_store.root store) "native-claims"
+let native_directories store installation_id =
+  [Filename.concat (native_claim_root store) (Lane_addon_store.digest installation_id)]
+let native_result result = Result.map_error (fun error ->
+  Lifecycle.Cleanup_unconfirmed (Native_addon_lease.error_to_string error)) result
+let native_settled claim =
+  let* status = offload (fun () -> Native_addon_lease.status claim) |> native_result in
+  match status with
+  | Native_addon_lease.Settled -> Ok ()
+  | Awaiting_exec | Live _ | Cleanup_pending _ ->
+      Error (Lifecycle.Cleanup_unconfirmed "native claim has not settled")
+let native_recover ~store ~installation_id ~instance_id =
+  let* claim = offload (fun () -> Native_addon_lease.reopen
+    ~directories:(native_directories store installation_id) ~instance_id) |> native_result in
+  let* () = offload (fun () -> Native_addon_lease.request_termination claim) |> native_result in
+  let* () = native_settled claim in
+  Ok (Lifecycle.Native_released {installation_id;instance_id})
+let prepare_native ~store ~installation_id ~instance_id ~is_live_instance =
+  let* () = offload (fun () ->
+    try
+      let root = native_claim_root store in
+      (try Unix.mkdir root 0o700 with Unix.Unix_error (Unix.EEXIST,_,_) -> ());
+      let stat = Unix.lstat root in
+      if stat.Unix.st_kind=Unix.S_DIR && stat.st_uid=Unix.geteuid () && stat.st_perm land 0o077=0
+      then Ok () else Error (Lifecycle.Worker_failed "native claim root must be a private host-owned directory")
+    with (Unix.Unix_error _ | Sys_error _) as exn -> Error (Lifecycle.Worker_failed (Printexc.to_string exn))) in
+  let directories = native_directories store installation_id in
+  let* old = offload (fun () ->
+    match directories with
+    | [directory] -> (match Unix.lstat directory with
+        | _ -> Native_addon_lease.current ~directories |> Result.map Option.some
+        | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok None)
+    | [] | _::_::_ -> Error (Native_addon_lease.Invalid_claim "native installation must have one host-selected slot"))
+    |> native_result in
+  let* () = match old with
+    | None -> Ok ()
+    | Some claim ->
+        if is_live_instance (Native_addon_lease.instance_id claim) then
+          Error (Lifecycle.Worker_failed "native installation still belongs to a live incarnation")
+        else
+          (* This also recovers an orphan reservation if the server stopped
+             between preparing it and saving its binding. Never re-admit it. *)
+          let* () = offload (fun () -> Native_addon_lease.request_termination claim) |> native_result in
+          native_settled claim in
+  offload (fun () -> Native_addon_lease.prepare ~directories ~instance_id) |> native_result
+let native_launcher () =
+  try
+    let name = "masc-native-addon-launcher" in
+    let siblings = if Filename.is_relative Sys.executable_name then [] else
+      [Filename.concat (Filename.dirname (Unix.realpath Sys.executable_name)) name;
+       Filename.concat (Filename.dirname Sys.executable_name) name] in
+    let paths = match Sys.getenv_opt "PATH" with
+      | None -> []
+      | Some raw -> Executable_path.split_search_path raw
+          |> List.filter (fun directory -> directory<>"")
+          |> List.map (fun directory -> Filename.concat directory name) in
+    match List.find_opt Executable_path.command_available (siblings @ paths) with
+    | Some path -> Ok (Unix.realpath path)
+    | None -> Error "masc-native-addon-launcher is not installed beside MASC or on PATH"
+  with (Unix.Unix_error _ | Sys_error _) as exn -> Error (Printexc.to_string exn)
+let native_package_ready (package : package) =
+  let* () = match package.state_storage with
+    | Ephemeral -> Ok ()
+    | Persistent -> Error "native persistent state requires a host state-directory contract" in
+  let* () = match package.model_access with
+    | Model_disabled -> Ok ()
+    | Host_sampling -> Error "native observation sampling is not connected to the host broker" in
+  let* _launcher = native_launcher () in
+  let* () = match Eio_context.get_clock_opt (),Fs_compat.get_fs_opt () with
+    | Some _,Some _ -> Ok ()
+    | None,_ | _,None -> Error "native Add-ons require the server Eio clock and filesystem" in
+  match package.command with
+  | [] -> Error "native Add-on command is empty"
+  | command::_ ->
+      let candidate = if Filename.is_relative command && String.contains command '/'
+        then Filename.concat package.directory command else command in
+      if Executable_path.command_available candidate then Ok () else Error "native Add-on executable is unavailable"
 let backend ~store () = match !override with
   | Some backend -> backend
   | None ->
     let clock = Eio_context.get_clock_opt () in
-    (* Docker create/inspect/list/remove are the same short host-control class
-       as connector sidecar housekeeping. Reuse its operator knob rather than
-       adding a second timeout with the same meaning. *)
     let control_timeout_sec = Env_config_runtime.Sidecar.control_command_timeout_sec in
-    (* Names this server's base path on every container it creates. The
-       sweep lists only containers that carry it, so servers that share one
-       engine never see each other's. *)
     let scope = Lane_addon_store.digest (Lane_addon_store.root store) in
     {
-      start = (fun ~sw ~state_owner ~instance_id ~package ~binding ~on_engine ~is_live_instance ~on_created ->
-        let* sampling_handler = prepare_sampling_handler
-          ~sw ~store ~instance_id ~package ~binding
-          |> Result.map_error (fun message -> Lifecycle.Worker_failed message) in
-        let wrap worker = {
-          container_id = Lane_addon_worker.container_id worker;
-          exported_tools = (fun () -> Lane_addon_worker.exported_tools worker);
-          call_exported_tool = (fun ~on_result ~authorize ~principal ~name ~arguments ->
-            Lane_addon_worker.call_exported_tool ~on_result ?authorize ~principal worker ~name ~arguments
-            |> Result.map_error (function
-              | Lane_addon_worker.Host_refusal refusal -> Lane_addon_call_context.Host_refusal refusal
-              | (Lane_addon_worker.Stopped | Lane_addon_worker.Invalid_package _ | Lane_addon_worker.Docker_failed _ | Lane_addon_worker.Engine_failed _ | Lane_addon_worker.Engine_fault _ | Lane_addon_worker.Lifecycle _ | Lane_addon_worker.Protocol_failed _ | Lane_addon_worker.Invalid_observation _) as error -> Lane_addon_call_context.Transport_error (Lane_addon_worker.error_to_string error)));
-          action_schema = (fun () -> Lane_addon_worker.action_schema worker);
-          act = (fun ~arguments -> Lane_addon_worker.act worker ~arguments
-            |> Result.map_error Lane_addon_worker.error_to_string);
-          observe = (fun ~binding ~sources -> Lane_addon_worker.observe worker ~binding ~sources
-            |> Result.map_error Lane_addon_worker.error_to_string);
-          stop = (fun () -> Lane_addon_worker.stop worker |> Result.map_error Lane_addon_worker.cleanup_failure) } in
-        match clock with
-        | None -> Error (Lifecycle.Worker_failed "Lane Add-on Docker control requires the server Eio clock")
-        | Some clock ->
-            Lane_addon_worker.start ~sw ~clock ~control_timeout_sec
-              ~mgr:Posix_spawn_process_mgr.mgr ~instance_id ~package ?state_owner ~on_engine ~is_live_instance ~scope
-              ~on_created:(fun worker -> on_created (wrap worker)) ~artifact_store:store ?sampling_handler ()
-            |> Result.map wrap |> Result.map_error Lane_addon_worker.start_failure);
-      acquire = Lane_addon_sources.acquire;
-      image_ready = (fun ~package ->
-        match clock with
-        | None -> Error "Lane Add-on Docker control requires the server Eio clock"
-        | Some clock ->
-            Lane_addon_worker.inspect_image ~clock ~control_timeout_sec
-              ~mgr:Posix_spawn_process_mgr.mgr ~package ()
-            |> Result.map (fun (_ : string) -> ())
-            |> Result.map_error Lane_addon_worker.error_to_string);
-      recover_stop = (fun ~runtime ~state_owner ~instance_id ~engine ~container_id ->
-        match clock with
-        | None -> Error (Lifecycle.Cleanup_unconfirmed "Lane Add-on Docker control requires the server Eio clock")
-        | Some clock ->
-            Lane_addon_worker.recover_stop ~clock ~control_timeout_sec
-              ~mgr:Posix_spawn_process_mgr.mgr
-              ~runtime ~instance_id ~container_id ~engine ?state_owner ()
-            |> Result.map_error Lane_addon_worker.cleanup_failure);
-      condition_met = (fun ~runtime condition ->
-        match clock with
+      start = (fun ~sw ~state_owner ~instance_id ~installation_id ~package ~binding ~on_authority ~is_live_instance ~on_created ->
+        match package.execution with
+        | Host_process _ ->
+            let* () = native_package_ready package |> Result.map_error (fun detail -> Lifecycle.Worker_failed detail) in
+            let* launcher = native_launcher () |> Result.map_error (fun detail -> Lifecycle.Worker_failed detail) in
+            let* clock = Option.to_result ~none:(Lifecycle.Worker_failed "native clock is unavailable") clock in
+            let* fs = Option.to_result ~none:(Lifecycle.Worker_failed "native filesystem is unavailable") (Fs_compat.get_fs_opt ()) in
+            let* contract = Lane_addon_worker_protocol.contract_of_package package
+              |> Result.map_error (fun _ -> Lifecycle.Worker_failed "invalid native MCP contract") in
+            let* command = match package.command with
+              | [] -> Error (Lifecycle.Worker_failed "native command is empty")
+              | executable::arguments -> Ok {Lane_addon_native_worker.executable;arguments} in
+            let* admission = prepare_native ~store ~installation_id ~instance_id ~is_live_instance in
+            let retire () = offload (fun () -> Native_addon_lease.retire admission) |> native_result in
+            let* () = match on_authority (Lifecycle.Native_admission {installation_id}) with
+              | Ok () -> Ok ()
+              | Error detail ->
+                  let* () = retire () in Error (Lifecycle.Persistence_failed detail) in
+            let wrap worker =
+              let* resource = Option.to_result ~none:"native child identity is unavailable"
+                (Lane_addon_native_worker.process_identity worker) in
+              Ok {
+                resource;
+                exported_tools=(fun () -> Lane_addon_native_worker.exported_tools worker);
+                action_schema=(fun () -> Lane_addon_native_worker.action_schema worker);
+                call_exported_tool=(fun ~on_result ~authorize ~principal ~name ~arguments ->
+                  Lane_addon_native_worker.call_exported_tool ~on_result ?authorize ~principal worker ~name ~arguments
+                  |> Result.map_error (function
+                    | Lane_addon_native_worker.Protocol (Lane_addon_worker_protocol.Host_refusal refusal) -> Lane_addon_call_context.Host_refusal refusal
+                    | (Lane_addon_native_worker.Invalid_specification _ | Start_failed _ | Admission _
+                      | Protocol (Lane_addon_worker_protocol.Invalid_contract _ | Protocol_failed _ | Invalid_observation _ | Stopped)
+                      | Cleanup_unconfirmed _ | Stopped) as error ->
+                        Lane_addon_call_context.Transport_error (Lane_addon_native_worker.error_to_string error)));
+                act=(fun ~arguments -> Lane_addon_native_worker.act worker ~arguments |> Result.map_error Lane_addon_native_worker.error_to_string);
+                observe=(fun ~binding ~sources -> Lane_addon_native_worker.observe worker ~binding ~sources |> Result.map_error Lane_addon_native_worker.error_to_string);
+                stop=(fun () ->
+                  let* _receipt = Lane_addon_native_worker.stop worker
+                    |> Result.map_error (fun error -> Lifecycle.Cleanup_unconfirmed (Lane_addon_native_worker.error_to_string error)) in
+                  Ok (Lifecycle.Native_released {installation_id;instance_id}));
+              } in
+            (try
+               match Lane_addon_native_worker.start ~sw ~clock ~admission ~launcher ~contract ~command
+                 ~grace_seconds:Process_eio.child_exit_grace_seconds ~cwd:Eio.Path.(fs / package.directory)
+                 ~artifact_store:store ~on_created:(fun worker ->
+                   let* connection = wrap worker in on_created connection;Ok ()) () with
+               | Ok worker -> wrap worker |> Result.map_error (fun detail -> Lifecycle.Worker_failed detail)
+               | Error error -> let* () = retire () in
+                   Error (match error with
+                    | Lane_addon_native_worker.Cleanup_unconfirmed detail -> Lifecycle.Cleanup_unconfirmed detail
+                    | (Invalid_specification _ | Start_failed _ | Admission _ | Protocol _ | Stopped) as error ->
+                        Lifecycle.Worker_failed (Lane_addon_native_worker.error_to_string error))
+             with Eio.Cancel.Cancelled _ as exn ->
+               Eio.Cancel.protect (fun () -> ignore (retire () : (unit,Lifecycle.failure) result));raise exn)
+        | Container container ->
+          let* sampling_handler = prepare_sampling_handler ~sw ~store ~instance_id ~package ~binding
+            |> Result.map_error (fun detail -> Lifecycle.Worker_failed detail) in
+          let recorded = ref None in
+          let on_engine engine =
+            let* () = on_authority (Lifecycle.Container_authority {runtime=container.runtime;engine}) in
+            recorded := Some engine;Ok () in
+          let wrap worker = {
+            resource=Lifecycle.Container_resource (Lane_addon_worker.container_id worker);
+            exported_tools=(fun () -> Lane_addon_worker.exported_tools worker);
+            call_exported_tool=(fun ~on_result ~authorize ~principal ~name ~arguments ->
+              Lane_addon_worker.call_exported_tool ~on_result ?authorize ~principal worker ~name ~arguments
+              |> Result.map_error (function
+                | Lane_addon_worker.Host_refusal refusal -> Lane_addon_call_context.Host_refusal refusal
+                | (Lane_addon_worker.Stopped | Invalid_package _ | Docker_failed _ | Engine_failed _ | Engine_fault _ | Lifecycle _ | Protocol_failed _ | Invalid_observation _) as error ->
+                    Lane_addon_call_context.Transport_error (Lane_addon_worker.error_to_string error)));
+            action_schema=(fun () -> Lane_addon_worker.action_schema worker);
+            act=(fun ~arguments -> Lane_addon_worker.act worker ~arguments |> Result.map_error Lane_addon_worker.error_to_string);
+            observe=(fun ~binding ~sources -> Lane_addon_worker.observe worker ~binding ~sources |> Result.map_error Lane_addon_worker.error_to_string);
+            stop=(fun () ->
+              let* () = Lane_addon_worker.stop worker |> Result.map_error Lane_addon_worker.cleanup_failure in
+              match !recorded with
+              | Some engine -> Ok (Lifecycle.Released {engine;container_id=Some (Lane_addon_worker.container_id worker)})
+              | None -> Error (Lifecycle.Cleanup_unconfirmed "container has no recorded engine")) } in
+          let* clock = Option.to_result ~none:(Lifecycle.Worker_failed "container clock is unavailable") clock in
+          Lane_addon_worker.start ~sw ~clock ~control_timeout_sec ~mgr:Posix_spawn_process_mgr.mgr
+            ~instance_id ~package ?state_owner ~on_engine ~is_live_instance ~scope
+            ~on_created:(fun worker -> on_created (wrap worker)) ~artifact_store:store ?sampling_handler ()
+          |> Result.map wrap |> Result.map_error Lane_addon_worker.start_failure);
+      acquire=Lane_addon_sources.acquire;
+      package_ready=(fun ~package -> match package.execution with
+        | Host_process _ -> native_package_ready package
+        | Container _ ->
+            let* clock = Option.to_result ~none:"container clock is unavailable" clock in
+            Lane_addon_worker.inspect_image ~clock ~control_timeout_sec ~mgr:Posix_spawn_process_mgr.mgr ~package ()
+            |> Result.map (fun (_ : string) -> ()) |> Result.map_error Lane_addon_worker.error_to_string);
+      recover_stop=(fun ~state_owner ~instance_id ~authority ~resource -> match authority with
+        | Lifecycle.Native_admission {installation_id} -> native_recover ~store ~installation_id ~instance_id
+        | Container_authority {runtime;engine} ->
+            let* container_id = match resource with
+              | None -> Ok None | Some (Lifecycle.Container_resource id) -> Ok (Some id)
+              | Some (Lifecycle.Native_resource _) -> Error (Lifecycle.Cleanup_unconfirmed "native identity cannot authorize container cleanup") in
+            let* clock = Option.to_result ~none:(Lifecycle.Cleanup_unconfirmed "container clock is unavailable") clock in
+            let* () = Lane_addon_worker.recover_stop ~clock ~control_timeout_sec ~mgr:Posix_spawn_process_mgr.mgr
+              ~runtime ~instance_id ~container_id ~engine ?state_owner () |> Result.map_error Lane_addon_worker.cleanup_failure in
+            Ok (Lifecycle.Released {engine;container_id}));
+      condition_met=(fun ~runtime condition -> match clock with
         | None -> false
-        | Some clock ->
-            (match condition with
-             | Lifecycle.Engine_reachable ->
-                 Result.is_ok (Lane_addon_worker.read_engine ~clock ~control_timeout_sec
-                   ~mgr:Posix_spawn_process_mgr.mgr ~runtime ())
-             | Lifecycle.Engine_is expected ->
-                 (match Lane_addon_worker.read_engine ~clock ~control_timeout_sec
-                    ~mgr:Posix_spawn_process_mgr.mgr ~runtime () with
-                  | Ok actual -> Lifecycle.engine_equal actual expected
-                  | Error _ -> false)
-             | Lifecycle.Holder_changes holder ->
-                 Lane_addon_worker.holder_changed ~clock ~control_timeout_sec
-                   ~mgr:Posix_spawn_process_mgr.mgr ~runtime holder));
-      sweep = (fun ~runtime ~is_live_instance ->
-        match clock with
-        | None -> Error (Lifecycle.Worker_failed "Lane Add-on Docker control requires the server Eio clock")
-        | Some clock ->
-            Lane_addon_worker.sweep ~clock ~control_timeout_sec
-              ~mgr:Posix_spawn_process_mgr.mgr ~runtime ~scope ~is_live_instance ()) }
+        | Some clock -> match condition with
+          | Lifecycle.Engine_reachable -> Result.is_ok (Lane_addon_worker.read_engine ~clock ~control_timeout_sec ~mgr:Posix_spawn_process_mgr.mgr ~runtime ())
+          | Engine_is expected -> (match Lane_addon_worker.read_engine ~clock ~control_timeout_sec ~mgr:Posix_spawn_process_mgr.mgr ~runtime () with
+              | Ok actual -> Lifecycle.engine_equal actual expected | Error _ -> false)
+          | Holder_changes holder -> Lane_addon_worker.holder_changed ~clock ~control_timeout_sec ~mgr:Posix_spawn_process_mgr.mgr ~runtime holder);
+      sweep=(fun ~runtime ~is_live_instance ->
+        let* clock = Option.to_result ~none:(Lifecycle.Worker_failed "container clock is unavailable") clock in
+        Lane_addon_worker.sweep ~clock ~control_timeout_sec ~mgr:Posix_spawn_process_mgr.mgr ~runtime ~scope ~is_live_instance ()) }
 let manager config =
   let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
   match Hashtbl.find_opt managers root with
@@ -1296,21 +1437,14 @@ let historical_detach ~sw ?(wait = false) m fields =
           if wait then Finished publication.terminal_state else Started)
   | None when is_detached previous -> Ok (`Assoc fields, Already_detached)
   | None | Some (Cleanup_request_failed _ | Cleanup_unconfirmed _) ->
-    let* container_id = match List.assoc_opt "container_id" fields with
-      | Some `Null -> Ok None
-      | Some _ -> Result.map Option.some (text fields "container_id")
-      | None -> Error "missing persisted container identity" in
-    let* engine = engine_of_fields fields in
-    let* () = match engine, container_id with
-      | None, Some _ -> Error "persisted container identity has no recorded engine"
-      | None, None | Some _, (None | Some _) -> Ok () in
+    let* authority,resource = retained_execution fields in
     let* seq = match List.assoc_opt "observation_seq" fields with
       | Some (`Int n) when n >= 0 -> Ok n
       | _ -> Error "missing persisted observation sequence" in
     let* package = match List.assoc_opt "package" fields with
       | Some json -> object_ json | None -> Error "missing persisted package" in
     let* run_id = text fields "run_id" in
-    let* runtime = retained_runtime package in
+    let* retained_runtime = retained_runtime package in
     let* package_id = text package "id" in
     let* package_revision = text package "revision" in
     let* configuration = configuration_of_fields fields in
@@ -1320,8 +1454,14 @@ let historical_detach ~sw ?(wait = false) m fields =
       | Some _ -> Error "invalid retained state storage" in
     let* state_owner = state_owner_for ~store:m.store ~instance_id:id ~package_id
         ~configuration state_storage in
-    let* resources = match List.assoc_opt "resources" package with
-      | Some json -> object_ json | None -> Error "missing persisted resource settings" in
+    let* () = match authority,retained_runtime with
+      | None,_ -> Ok ()
+      | Some (Lifecycle.Container_authority owned),Some runtime when owned.runtime=runtime -> Ok ()
+      | Some (Lifecycle.Native_admission owned),None ->
+          let expected = match configuration with Some owner -> owner.id | None -> id in
+          if owned.installation_id=expected then Ok () else Error "native installation authority mismatch"
+      | Some (Lifecycle.Container_authority _ | Lifecycle.Native_admission _),(None | Some _) ->
+          Error "retained execution authority differs from package runtime" in
     let detaching = replace_state fields (Lifecycle.Detaching (failed_in fields)) in
     Hashtbl.replace m.recovering id (Cleaning fields);
     let intent =
@@ -1336,23 +1476,19 @@ let historical_detach ~sw ?(wait = false) m fields =
     let backend = backend ~store:m.store () in
     let finished = ref None in
     run_recovery ~sw ~wait m ~id ~on_failure:(fun detail -> Cleanup_unconfirmed (fields,detail)) (fun () ->
-      (* A record that names no engine never issued a create, so there is
-         nothing to ask any engine; otherwise only the recorded engine can
-         confirm the release. *)
-      let result = match engine with
-        | None -> Ok Lifecycle.Never_created
-        | Some engine ->
-            (try backend.recover_stop ~runtime ~state_owner ~instance_id:id ~engine ~container_id with
+      let result = match authority with
+        | None -> check_release ~instance_id:id ~authority ~resource Lifecycle.Never_created
+        | Some owner ->
+            (try backend.recover_stop ~state_owner ~instance_id:id ~authority:owner ~resource with
              | Eio.Cancel.Cancelled _ as exn ->
-                 Hashtbl.replace m.recovering id (Cleanup_unconfirmed (fields,"cleanup cancelled before its result was confirmed"));
-                 raise exn
+                 Hashtbl.replace m.recovering id (Cleanup_unconfirmed (fields,"cleanup cancelled before its result was confirmed"));raise exn
              | exn -> Error (Lifecycle.Cleanup_unconfirmed (Printexc.to_string exn)))
-            |> Result.map (fun () -> Lifecycle.Released { engine; container_id }) in
+            |> fun result -> let* release = result in check_release ~instance_id:id ~authority ~resource release in
       let state = match result with
         | Ok release -> Lifecycle.Detached release | Error failure -> failed_after fields failure in
       finished := Some state;
       let terminal =
-        if is_detached state && never_started ~seq ~has_container:(Option.is_some container_id)
+        if is_detached state && never_started ~seq ~authority ~resource
         then None else Some (replace_state fields state) in
       let publication = {fields;terminal;terminal_state=state} in
       (* Event publication can yield. The cleanup result already exists, so
@@ -1363,13 +1499,13 @@ let historical_detach ~sw ?(wait = false) m fields =
             this block: the obligation is kept and the next beat retries it. *)
          (match result with
           | Ok _ -> ()
-          | Error failure -> log_cleanup_failure id package_id container_id failure);
+          | Error failure -> log_cleanup_failure id package_id resource failure);
          Lane_addon_resource_events.publish
            (match result with
             | Ok _ -> Lane_addon_resource_events.Release_confirmed
             | Error _ -> Lane_addon_resource_events.Release_incomplete)
            { instance_id = id; run_id; package_id; package_revision;
-             container_id;
+             resource;
              detail = (match result with Ok _ -> None | Error failure -> Some (Lifecycle.failure_detail failure)) };
          publish_cleanup m ~id ~writer publication
        with
@@ -1645,8 +1781,7 @@ let preserve_state_runtime ~configuration ~(package : package) bindings =
             then Ok ()
             else
               let* previous_runtime = retained_runtime previous_package in
-              let* container = Lane_addon_types.container package in
-              if previous_runtime = container.runtime then Ok ()
+              if previous_runtime = Lane_addon_types.container_runtime package then Ok ()
               else Error "Persistent state belongs to a different runtime; use a new installation id"
         | None | Some _ -> Ok ()) (Ok ()) bindings
 
@@ -1668,7 +1803,7 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
      would fail the same way on every attempt and leave an instance behind each
      time (#37897). Every caller looks first, so a declaration and a direct
      Attach both stop before an instance exists. *)
-  let* () = (backend ~store:m.store ()).image_ready ~package in
+  let* () = (backend ~store:m.store ()).package_ready ~package in
   let* () = match configuration, package.state_storage with
     | None, _ | Some _, Ephemeral -> Ok ()
     | Some owner, Persistent ->
@@ -1685,7 +1820,7 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
     | Some owner -> validate_connection m ~run_id ~configuration_id:owner.id ~binding in
   let promise, resolver = Eio.Promise.create () in
   let e = { instance_id = Random_id.uuid_v7 (); run_id; package; binding;
-    state = Lifecycle.Attached; engine = None; seq = 0; output = {rows=[];coverage=[]}; connection = None;
+    state = Lifecycle.Attached; authority = None; seq = 0; output = {rows=[];coverage=[]}; connection = None;
     stopping = false; cleanup_running = false; changed = Eio.Condition.create (); wake = promise; resolver; pending = Idle;
     refresh_interest; source_access; visibility; last_committed_sources=None; unchanged_source_refreshes=0;
     running = true; started = false; active_tool_calls = 0; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
@@ -2446,7 +2581,8 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
         | Some json -> object_ json | None -> Error "missing persisted package" in
         retained_runtime package in
       match lifecycle_of_fields fields, runtime with
-      | Ok state, Ok runtime -> waiting ~runtime state
+      | Ok state, Ok (Some runtime) -> waiting ~runtime state
+      | Ok _,Ok None -> false
       | Error _, _ | _, Error _ -> false in
     let retire sw e =
       let blocked = match e.package.execution with
@@ -2474,7 +2610,7 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
         Lane_addon_types.container_runtime d.package) snapshot.declarations in
       let retained = List.filter_map (fun (_, fields) ->
         Option.bind (List.assoc_opt "package" fields) (fun json ->
-          Result.to_option (let* package = object_ json in retained_runtime package))) histories in
+          (let* package = object_ json in retained_runtime package) |> Result.to_option |> Option.join)) histories in
       List.sort_uniq Stdlib.compare (declared @ retained) in
     if can_apply then
       List.iter (fun runtime ->
@@ -2809,12 +2945,12 @@ module For_testing = struct
       (Mcp_protocol.Mcp_types.tool_result, Lane_addon_call_context.invocation_error) result;
     action_schema : unit -> Yojson.Safe.t option;
     act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
-    stop : unit -> (unit, Lifecycle.failure) result;
-    container_id : string;
+    stop : unit -> (Lifecycle.release, Lifecycle.failure) result;
+    resource : Lifecycle.resource;
   }
   type nonrec backend = backend = {
-    start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> package:package -> binding:Yojson.Safe.t ->
-      on_engine:(Lifecycle.engine -> (unit, string) result) ->
+    start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> installation_id:string -> package:package -> binding:Yojson.Safe.t ->
+      on_authority:(Lifecycle.authority -> (unit, string) result) ->
       is_live_instance:(string -> bool) ->
       on_created:(connection -> unit) -> (connection, Lifecycle.failure) result;
     acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:package ->
@@ -2822,9 +2958,9 @@ module For_testing = struct
     resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
       binding:Yojson.Safe.t ->
       (Yojson.Safe.t, string) result;
-    recover_stop : runtime:runtime -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> engine:Lifecycle.engine ->
-      container_id:string option -> (unit, Lifecycle.failure) result;
-    image_ready : package:package -> (unit, string) result;
+    recover_stop : state_owner:Lane_addon_worker_state.owner option -> instance_id:string ->
+      authority:Lifecycle.authority -> resource:Lifecycle.resource option -> (Lifecycle.release, Lifecycle.failure) result;
+    package_ready : package:package -> (unit, string) result;
     condition_met : runtime:runtime -> Lifecycle.condition -> bool;
     sweep : runtime:runtime -> is_live_instance:(string -> bool) ->
       (Lane_addon_slot.sweep_item list, Lifecycle.failure) result;

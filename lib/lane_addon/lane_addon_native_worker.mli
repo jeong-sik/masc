@@ -13,9 +13,12 @@ type error = Invalid_specification of string | Start_failed of string
   | Admission of Native_addon_lease.error
   | Protocol of Lane_addon_worker_protocol.error | Cleanup_unconfirmed of string
   | Stopped
+val error_to_string : error -> string
 type t
 type phase = Initializing | Validating_owner | Serving | Retired
 val phase : t -> phase
+val process_identity : t -> Lane_addon_lifecycle.resource option
+(** The actual connected child, available before discovery; not signal authority. *)
 val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock ->
   grace_seconds:float -> admission:Native_addon_lease.t -> launcher:string ->
   contract:Lane_addon_worker_protocol.contract -> command:command ->

@@ -9,7 +9,7 @@ type resource = {
   run_id : string;
   package_id : string;
   package_revision : string;
-  container_id : string option;
+  resource : Lane_addon_lifecycle.resource option;
   detail : string option;
 }
 
@@ -34,7 +34,8 @@ let event lifecycle (resource : resource) =
            ; ("run_id", `String resource.run_id)
            ; ("package_id", `String resource.package_id)
            ; ("package_revision", `String resource.package_revision)
-           ; ("container_id", optional resource.container_id)
+           ; ("container_id", optional (Option.bind resource.resource Lane_addon_lifecycle.container_id))
+           ; ("resource", Option.fold ~none:`Null ~some:Lane_addon_lifecycle.resource_to_json resource.resource)
            ; ("detail", optional resource.detail) ] ))
 
 let publish lifecycle (resource : resource) =

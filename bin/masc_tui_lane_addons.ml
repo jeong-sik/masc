@@ -729,7 +729,7 @@ let action_lines view = match view.last_action with
           | Some receipt -> ["  state " ^ (match receipt.Action.state with
               | Action.Queued -> "queued" | Action.Running -> "running" | Action.Confirmed -> "confirmed"
               | Action.Failed_before_effect -> "failed_before_effect" | Action.Outcome_unknown -> "outcome_unknown");
-              "  requester " ^ receipt.requester ^ " · executor " ^ Option.value ~default:"unknown" receipt.executor]
+              "  requester " ^ receipt.requester ^ " · executor " ^ Option.fold ~none:"unknown" ~some:Masc.Lane_addon_lifecycle.resource_to_string receipt.executor]
               @ (match receipt.detail with None -> [] | Some detail -> ["  " ^ detail])
               @ (match receipt.result with None -> [] | Some result -> String.split_on_char '\n' (Yojson.Safe.pretty_to_string result)))
 let move_observation view delta =

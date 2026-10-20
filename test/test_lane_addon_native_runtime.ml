@@ -1,0 +1,116 @@
+(** Real default-backend installation, MCP action and retained cleanup. No
+    browser profile, external service or fake Runtime backend is involved. *)
+open Alcotest
+open Masc
+module R = Lane_addon_runtime
+let launcher = ref ""
+let member = Yojson.Safe.Util.member
+let text key json = member key json |> Yojson.Safe.Util.to_string
+let require = function Ok value -> value | Error message -> fail message
+let dispatch config operation fields =
+  R.dispatch ~caller:"native-runtime-tester" ~access:Lane_addon_sources.Operator_configuration
+    ~config ~operation (`Assoc fields) |> Result.map_error R.error_to_string |> require
+let write path value = Out_channel.with_open_bin path (fun out -> output_string out value)
+let rec remove path = match (Unix.lstat path).Unix.st_kind with
+  | Unix.S_DIR -> Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path); Unix.rmdir path
+  | Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> Unix.unlink path
+let wait clock predicate =
+  let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.005; loop ()) in loop ()
+let server = {|import json,os,sys
+root=sys.argv[1]
+schema={"type":"object","properties":{"context":{"type":"object"},"request_id":{"type":"string"},"action":{"type":"object"}},"required":["context","request_id","action"]}
+with open(os.path.join(root,"spawned"),"w") as out: out.write(str(os.getpid()))
+for line in sys.stdin:
+    req=json.loads(line)
+    if "id" not in req: continue
+    method=req["method"]
+    if method=="initialize":
+        result={"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"native-runtime-fixture","version":"1"}}
+    elif method=="tools/list":
+        result={"tools":[{"name":"lane_observe","inputSchema":{"type":"object"}},{"name":"lane_act","inputSchema":schema}]}
+    elif method=="tools/call":
+        name=req["params"]["name"]
+        value={"rows":[],"coverage":[]}
+        if name=="lane_act":
+            with open(os.path.join(root,"effects"),"a") as out: out.write(req["params"]["arguments"]["request_id"]+"\n")
+            value={"status":"confirmed","result":{"applied":True},"output":value}
+        result={"content":[],"structuredContent":value}
+    else: raise RuntimeError(method)
+    print(json.dumps({"jsonrpc":"2.0","id":req["id"],"result":result}),flush=True)
+|}
+let with_fixture run =
+  let root = Filename.temp_dir "native-runtime-" "" in
+  let previous = Sys.getenv_opt "PATH" in
+  let bin = Filename.concat root "bin" in Unix.mkdir bin 0o700;
+  Unix.symlink !launcher (Filename.concat bin "masc-native-addon-launcher");
+  Unix.putenv "PATH" (bin ^ ":" ^ Option.value ~default:"" previous);
+  Fun.protect ~finally:(fun () ->
+    (match previous with Some value -> Unix.putenv "PATH" value | None -> Unix.unsetenv "PATH");
+    remove root) (fun () -> Eio_main.run (fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let clock = Eio.Stdenv.clock env in
+    Eio.Time.with_timeout_exn clock 15. (fun () -> Eio.Switch.run (fun sw ->
+      Eio_context.with_test_env ~sw ~clock ~net:(Eio.Stdenv.net env)
+        ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+        R.For_testing.reset (); run clock root (Workspace.default_config root))))))
+let native_installation () = with_fixture (fun clock root config ->
+  let script = Filename.concat root "worker.py" in write script server;
+  let manifest = Filename.concat root "native.toml" in
+  write manifest (Printf.sprintf {|id = "native-runtime"
+revision = "fixture-1"
+title = "Native runtime fixture"
+runtime = "host_process"
+command = ["python3", %S, %S]
+contributions = ["observe", "act"]
+[resources]
+max_reply_bytes = 65536
+[world.actions]
+tool = "lane_act"
+|} script root);
+  let attach () = dispatch config R.Attach ["manifest_path",`String manifest;
+    "run_id",`String "native-world";"binding",`Assoc ["sources",`List []]] |> text "instance_id" in
+  let inspect id = dispatch config R.Inspect ["instance_id",`String id]
+    |> member "instances" |> Yojson.Safe.Util.to_list |> List.hd in
+  let phase id = inspect id |> member "phase" |> text "kind" in
+  let ready id = (inspect id |> member "observation_seq" |> Yojson.Safe.Util.to_int)>0 in
+  let id = attach () in wait clock (fun () -> ready id);
+  let captured = inspect id in
+  check string "durable admission is native" "host_process"
+    (captured |> member "execution_authority" |> text "kind");
+  let pid = captured |> member "resource" |> member "pid" |> Yojson.Safe.Util.to_int in
+  check int "resource identifies actual payload" pid
+    (In_channel.with_open_bin (Filename.concat root "spawned") In_channel.input_all |> int_of_string);
+  let action = ["instance_id",`String id;"expected_incarnation",`String id;
+    "request_id",`String "once";"action",`Assoc []] in
+  ignore (dispatch config R.Act action);
+  let receipt () = dispatch config R.Action_status ["instance_id",`String id;"request_id",`String "once"] in
+  wait clock (fun () -> text "state" (receipt ())="confirmed");
+  check int "action receipt identifies actual native executor" pid
+    (receipt () |> member "executor" |> member "pid" |> Yojson.Safe.Util.to_int);
+  ignore (dispatch config R.Act action);
+  check string "duplicate request has one actual effect" "once\n"
+    (In_channel.with_open_bin (Filename.concat root "effects") In_channel.input_all);
+  ignore (dispatch config R.Detach ["instance_id",`String id]);
+  wait clock (fun () -> phase id="detached");
+  check bool "native foreground group is absent before release" false
+    (Posix_spawn_detached.group_id_has_members pid);
+  check string "release is native" "native_released"
+    (inspect id |> member "lifecycle" |> member "release" |> text "kind");
+  (* A captured pre-detach binding is replayed only after its actual worker has
+     settled. Recovery uses its old admission, never a replacement process. *)
+  R.For_testing.reset ();
+  let store = Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  require (Lane_addon_store.save_binding store ~instance_id:id captured);
+  ignore (dispatch config R.Detach ["instance_id",`String id]);
+  wait clock (fun () -> phase id="detached");
+  check string "retained recovery confirms the exact old incarnation" id
+    (inspect id |> member "lifecycle" |> member "release" |> text "instance_id");
+  let replacement = attach () in wait clock (fun () -> ready replacement);
+  check bool "reattach has a fresh incarnation" true (replacement<>id);
+  ignore (dispatch config R.Detach ["instance_id",`String replacement]);
+  wait clock (fun () -> phase replacement="detached"))
+let () =
+  if Array.length Sys.argv<>2 then fail "expected native admission launcher path";
+  launcher := Unix.realpath Sys.argv.(1);
+  run ~argv:[|Sys.argv.(0)|] "lane_addon_native_runtime" ["installation",[
+    test_case "actual installation action detach retained recovery reattach" `Quick native_installation]]

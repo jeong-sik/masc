@@ -1,3 +1,4 @@
+import { laneAddonExecutorLabel } from '../api/lane-addons'
 import { html } from 'htm/preact'
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import {
@@ -192,7 +193,7 @@ function LaneAddonActions({ instances, authority }: {
       ${item.error && html`<p role="alert">${item.error} The request may have been accepted. Check this request ID before sending another action.</p>`}
       ${item.receipt && html`<div>
         ${item.error && html`<p>Last recorded status: ${actionStates[item.receipt.state]}</p>`}
-        <p>Requester: ${item.receipt.requester} · executor: ${item.receipt.executor ?? 'unknown'}</p>
+        <p>Requester: ${item.receipt.requester} · executor: ${laneAddonExecutorLabel(item.receipt.executor)}</p>
         ${item.receipt.detail !== null && html`<p>${item.receipt.detail}</p>`}
         ${item.receipt.state === 'confirmed' && html`<p>The package returned this result. Completion of the surrounding task requires separate evidence.</p>`}
         ${item.receipt.result !== null && html`<pre class="whitespace-pre-wrap break-all" aria-label="Package returned result">${JSON.stringify(item.receipt.result, null, 2)}</pre>`}

@@ -85,12 +85,12 @@ let worker_tool_definition name =
       | Error message -> fail message
 
 let backend fixture : Lane.For_testing.backend = {
-  start = (fun ~sw:_ ~state_owner:_ ~instance_id ~(package : Lane_addon_types.package) ~binding:_ ~on_engine ~is_live_instance:_ ~on_created ->
+  start = (fun ~sw:_ ~state_owner:_ ~instance_id ~installation_id:_ ~(package : Lane_addon_types.package) ~binding:_ ~on_authority ~is_live_instance:_ ~on_created ->
     incr fixture.starts;
     let stopped = ref false in
     let exported = List.map worker_tool_definition package.exported_tools in
     let connection : Lane.For_testing.connection = {
-      container_id = digest instance_id;
+      resource = Masc.Lane_addon_lifecycle.Container_resource (digest instance_id);
         exported_tools = (fun () -> exported);
         call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools"));
         action_schema = (fun () -> None);
@@ -101,14 +101,22 @@ let backend fixture : Lane.For_testing.backend = {
         else Error "fixture observation unavailable");
       stop = (fun () ->
         if not !(fixture.cleanup_available) then Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "fixture cleanup unavailable")
-        else (if not !stopped then (stopped := true; incr fixture.stops); Ok ()));
+        else (if not !stopped then (stopped := true; incr fixture.stops); Ok (Masc.Lane_addon_lifecycle.Released {engine=Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine";container_id=Some (digest instance_id)})));
     } in
-    ignore (on_engine (Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine"));
+    ignore (on_authority (Masc.Lane_addon_lifecycle.Container_authority {runtime=Masc.Lane_addon_types.Docker;engine=Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine"}));
     on_created connection;
     Ok connection);
-  image_ready = (fun ~package:_ -> Ok ());
+  package_ready = (fun ~package:_ -> Ok ());
   acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
-  recover_stop = (fun ~runtime:_ ~state_owner:_ ~instance_id:_ ~engine:_ ~container_id:_ -> Ok ());
+  recover_stop = (fun ~state_owner:_ ~instance_id:_ ~authority ~resource ->
+      match authority,resource with
+      | Masc.Lane_addon_lifecycle.Container_authority {engine;_},None ->
+          Ok (Masc.Lane_addon_lifecycle.Released {engine;container_id=None})
+      | Masc.Lane_addon_lifecycle.Container_authority {engine;_},Some (Masc.Lane_addon_lifecycle.Container_resource id) ->
+          Ok (Masc.Lane_addon_lifecycle.Released {engine;container_id=Some id})
+      | Masc.Lane_addon_lifecycle.Container_authority _,Some (Masc.Lane_addon_lifecycle.Native_resource _)
+      | Masc.Lane_addon_lifecycle.Native_admission _,(None | Some _) ->
+          Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "container fixture cannot release native resources"));
   condition_met = (fun ~runtime:_ _ -> true);
   sweep = (fun ~runtime:_ ~is_live_instance:_ -> Ok []);
 }

@@ -574,14 +574,20 @@ with selected audio/MIDI outputs and per-input `:midi-source` overrides.
 Completed phrase practice takes use `:import-practice DIRECTORY`. Enter places
 their original MIDI-only source; `:trim OFFSET EXTENT` uses decimal host-tick
 strings, and move/repeat/undo/redo work as for other regions. Select
-`:mixed-output AUDIO_UID` and `:midi-source ASSET ORIGINAL_SOURCE_UID MIDI_UID`
-before Space playback. Private receipt/context/arm/events files travel with
+`:output AUDIO_UID` for playback through the captured VST identity/version and
+frozen preset. Install the matching `scripts/install-vst-host.sh` companion
+alongside `scripts/install-alphatex.sh`. To send the original raw MIDI externally,
+select `:mixed-output AUDIO_UID` and
+`:midi-source ASSET ORIGINAL_SOURCE_UID MIDI_UID`. Private receipt/context/arm/events files travel with
 save-as, including undo/redo-retained sources. Packet words, receive order,
 UInt64 timestamps and exact signed nominal frames remain unchanged. Playback
 uses an origin that includes pre-anchor packets. Failed, incomplete, corrupt or
-empty takes are rejected. The frozen VST preset remains in the private source;
-this route sends raw MIDI externally. Automatic phrase backing/pass alignment
-and playback through the captured VST remain subsequent work.
+empty takes are rejected. VST playback derives a private PCM realization using
+the same MIDI1 note/expression projection as practice monitoring, at exact
+ceiling sample positions on the source's retained rate. Original UMP and clocks
+remain unchanged. Unsupported or ambiguous messages fail explicitly; they are
+never silently replaced by SMF or another sound. Automatic phrase backing/pass
+alignment remains subsequent work.
 [Hybrid arrangements](HYBRID-ARRANGEMENT.md) combine SMF, captured MIDI2 and WAV
 under one clock. [Record audio and MIDI against backing](ARRANGEMENT-RECORDING.md)
 with `:input UID`, `:record`, and `:record-stop`. Use `:monitor AUDIO_OUTPUT_UID`

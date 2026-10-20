@@ -12,6 +12,10 @@ editors retain their separate transports.
 
 Import files with `:import-wave /path/take.wav` or `:import-midi /path/song.mid`.
 Use `:import-practice /path/take` for a completed raw MIDI practice recording.
+With `:output AUDIO_UID`, Space realizes that source through its captured VST
+preset. An explicit `:midi-source` override sends its original UMP externally
+instead. Derived audio keeps the original host-clock cuts and repeat periods;
+source files and saved project identity remain unchanged.
 Paths retain internal spaces and are literal paths, without shell expansion.
 The imported asset is selected in the library. Enter places its complete source
 at the cursor, using the current compatible lane or adding a new one.

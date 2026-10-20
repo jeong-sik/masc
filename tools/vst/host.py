@@ -31,6 +31,42 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def frame_timeline(data, expected_hash, sample_rate):
+    """Private synthesis projection; original UMP remains in the source asset."""
+    if digest(data) != nonempty(expected_hash, "expected_timeline_sha256"):
+        raise ValueError("VST frame timeline content changed")
+    value = json.loads(data)
+    if (not isinstance(value, dict) or set(value) != {"schemaVersion", "kind", "sampleRate", "frames", "events"}
+            or type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1
+            or value["kind"] != "practice-vst" or type(value["sampleRate"]) is not int
+            or value["sampleRate"] != sample_rate or not isinstance(value["events"], list)):
+        raise ValueError("invalid VST frame timeline")
+    def counter(text):
+        if (not isinstance(text, str) or not text.isascii() or not text.isdecimal()
+                or str(int(text)) != text or not 0 <= int(text) <= 0xFFFFFFFFFFFFFFFF):
+            raise ValueError("invalid VST frame counter")
+        return int(text)
+    frames = counter(value["frames"])
+    if frames == 0:
+        raise ValueError("VST frame timeline is empty")
+    previous, events = 0, []
+    for event in value["events"]:
+        if not isinstance(event, dict) or set(event) != {"frame", "bytes"}:
+            raise ValueError("invalid VST frame event")
+        frame, message = counter(event["frame"]), event["bytes"]
+        if (frame < previous or frame >= frames or not isinstance(message, list) or not message
+                or any(type(byte) is not int or not 0 <= byte <= 255 for byte in message)):
+            raise ValueError("invalid VST event frame or bytes")
+        status = message[0] >> 4
+        if (status not in (8, 9, 10, 11, 13, 14) or len(message) != (2 if status == 13 else 3)
+                or any(byte > 127 for byte in message[1:]) or status == 11 and message[1] in (0, 32)):
+            raise ValueError("VST frame event cannot replace the frozen preset or encode this message")
+        events.append((bytes(message), frame)); previous = frame
+    if not any(message[0] >> 4 == 9 and message[2] > 0 for message, _ in events):
+        raise ValueError("VST frame timeline contains no sounding notes")
+    return events, frames
+
+
 def midi_timeline(data):
     """Merge source ticks in stable track order; keep tempo integration exact."""
     import mido
@@ -175,18 +211,29 @@ def render(request):
     from pedalboard.io import AudioFile
     import numpy as np
 
-    midi_path = Path(nonempty(request.get("midi_path"), "midi_path"))
     output_path = Path(nonempty(request.get("output_path"), "output_path"))
     if output_path.exists():
         raise FileExistsError(f"output already exists: {output_path}")
-    midi_bytes = midi_path.read_bytes()
-    events, phrase_seconds = midi_timeline(midi_bytes)
     sample_rate = request.get("sample_rate", 44100)
     if type(sample_rate) is not int or not 0 < sample_rate <= 0xFFFFFFFF:
         raise ValueError("sample_rate must fit the WAV sample-rate field")
     tail = request.get("tail_seconds", 1.0)
     if isinstance(tail, bool) or not isinstance(tail, (int, float)) or not math.isfinite(tail) or tail < 0:
         raise ValueError("tail_seconds must be finite and nonnegative")
+    if (request.get("midi_path") is None) == (request.get("timeline_path") is None):
+        raise ValueError("choose one MIDI source or frame timeline")
+    if request.get("timeline_path") is not None:
+        if tail != 0:
+            raise ValueError("frame timeline owns its complete sample horizon")
+        timeline = Path(nonempty(request["timeline_path"], "timeline_path")).read_bytes()
+        events, frames = frame_timeline(timeline, request.get("expected_timeline_sha256"), sample_rate)
+        identity = {"timeline_sha256": digest(timeline)}
+    else:
+        midi_bytes = Path(nonempty(request["midi_path"], "midi_path")).read_bytes()
+        events, phrase_seconds = midi_timeline(midi_bytes)
+        frames = math.ceil((phrase_seconds + Fraction(tail)) * sample_rate)
+        events = [(message, math.ceil(timestamp * sample_rate)) for message, timestamp in events]
+        identity = {"midi_sha256": digest(midi_bytes)}
     plugin = load_instrument(request)
     expected = request.get("expected_instrument")
     if expected is not None:
@@ -200,8 +247,6 @@ def render(request):
         preset_hash = digest(preset.read_bytes())
         plugin.load_preset(str(preset))
     state_hash = digest(plugin.raw_state)
-    frames = math.ceil((phrase_seconds + Fraction(tail)) * sample_rate)
-    events = [(message, math.ceil(timestamp * sample_rate)) for message, timestamp in events]
     # Float stereo WAV is streamed one second at a time. This bounds memory
     # without imposing any limit on phrase length. All MIDI timestamps are
     # relative to the block currently being rendered.
@@ -237,7 +282,7 @@ def render(request):
         os.link(stage_name, output_path)
     finally:
         os.unlink(stage_name)
-    return {"instrument": description(plugin), "midi_sha256": digest(midi_bytes),
+    return {"instrument": description(plugin), **identity,
             "preset_sha256": preset_hash, "state_sha256": state_hash,
             "sample_rate": sample_rate, "frames": frames,
             "duration_ms": frames / sample_rate * 1000, "peak": peak,

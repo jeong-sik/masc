@@ -40,7 +40,20 @@ import CoreMIDI
   var client=MIDIClientRef(),destinations:[MIDIEndpointRef]=[]
   try checked(MIDIClientCreate("MASC owned MIDI1 wire probe" as CFString,nil,nil,&client),"private client")
   defer {for endpoint in destinations {MIDIEndpointDispose(endpoint)};MIDIClientDispose(client)}
-  let lock=NSLock();var received:[Int:[[UInt32]]]=[:]
+  let lock=NSCondition();var received:[Int:[[UInt32]]]=[:]
+  // CoreMIDI delivers on its receive thread. A send/close return and a fixed
+  // sleep do not establish that this private endpoint observed the final word.
+  func receivedWords(_ index:Int,count:Int)->[UInt32] {
+   lock.lock();defer {lock.unlock()}
+   let deadline=Date().addingTimeInterval(5)
+   while received[index,default:[]].reduce(0,{$0+$1.count}) < count {
+    if !lock.wait(until:deadline) {
+     let actual=received[index,default:[]].flatMap{$0}
+     precondition(actual.count >= count,"private endpoint missing words: \(actual)")
+    }
+   }
+   return received[index,default:[]].flatMap{$0}
+  }
   func endpoint(_ native:MIDIProtocolID,_ index:Int)throws->String {
    var result=MIDIEndpointRef()
    try checked(MIDIDestinationCreateWithProtocol(client,"MASC wire \(UUID().uuidString)" as CFString,native,&result,{list,_ in
@@ -53,7 +66,7 @@ import CoreMIDI
       rows.append(words);packet=UnsafePointer(MIDIEventPacketNext(packet))
      }
     }
-    lock.lock();received[index,default:[]].append(contentsOf:rows);lock.unlock()
+    lock.lock();received[index,default:[]].append(contentsOf:rows);lock.broadcast();lock.unlock()
    }),"private destination")
    destinations.append(result);var uid:Int32=0
    try checked(MIDIObjectGetIntegerProperty(result,kMIDIPropertyUniqueID,&uid),"private UID");return String(uid)
@@ -66,14 +79,16 @@ import CoreMIDI
   try output.prepare();precondition(output.nativeProtocols[midi1] == .midi1)
   for row in rows {try output.apply(event(row))}
   precondition(output.held.isEmpty);try output.close()
-  Thread.sleep(forTimeInterval:0.1)
-  lock.lock();let actual=received[1,default:[]].flatMap{$0};lock.unlock()
+  precondition(output.pedals.isEmpty)
+  let actual=receivedWords(1,count:13)
   precondition(actual == [0x20923c5a,0x20b24040,0x20e20040,0x20b20001,0x20b22002,0x20c20500,
    0x20d24000,0x20a23c40,0x10f80000,0x30020102,0,0x20823c00,0x20b24000],"actual MIDI1 wire or cleanup differs: \(actual)")
   let raw:[UInt32]=[0x47923c03,0x90011234]
   let exact=UmpOutput(bindings:[UmpBinding(source:"A",destination:midi2)],compatibleEvents:[event(raw)])
-  try exact.prepare();try exact.apply(event(raw));try exact.close();Thread.sleep(forTimeInterval:0.1)
-  lock.lock();let exactRows=received[2,default:[]];lock.unlock();precondition(exactRows.first==raw)
+  try exact.prepare();try exact.apply(event(raw));try exact.close()
+  precondition(exact.held.isEmpty && exact.pedals.isEmpty)
+  let native2Expected=raw+[0x47823c00,0]
+  precondition(receivedWords(2,count:native2Expected.count)==native2Expected)
   for incompatible in [[event([0x47923c00,0xb4d30000]),event([0x48923c00,0xb4d30000])],
     [event([0x27923c5a]),event([0x47823c00,0])],[event(raw)]] {
    let denied=UmpOutput(bindings:[UmpBinding(source:"A",destination:midi1)],compatibleEvents:incompatible)

@@ -331,9 +331,11 @@ status: reference
     직접 찍는 `Phrase`도 아니다. 파생한 피아노 롤이나 실수 시간표는 저장본이 아니다
     (MIDI-SOURCE.md: "Persist the source asset, not a derived piano roll or floating-point
     schedule").
-  - 아직 아닌 것: 가져온 소스를 고치는 화면 전체, MIDI 2.0 원본, 오버더브는 이 자산의
-    범위 밖이다(MIDI-SOURCE.md: "do not establish a delivered import screen or full MIDI
-    support").
+  - 아직 아닌 것: 일반 메타데이터 편집, 소스 loop 상태, 오버더브, MIDI 2.0 변환은 별도
+    작업으로 남아 있다. 시험 통과는 완전한 MIDI 지원이나 물리 장치 지원을 뜻하지 않는다
+    (MIDI-SOURCE.md: "Its tests do not establish full MIDI or physical-device support.
+    General metadata, source-loop state, overdub and MIDI 2.0 conversion remain separate
+    work.").
   → [tools/alphatex/MIDI-SOURCE.md](../../tools/alphatex/MIDI-SOURCE.md) ·
   [tools/alphatex/README.md](../../tools/alphatex/README.md)
 
@@ -367,11 +369,16 @@ status: reference
     들려주는 재생이고, 소스 오디션은 파일의 원래 메시지 순서를 그대로 보내는 재생이다.
     소스 오디션은 VST 악기나 MIDI 출력을 명시해야 하고, 두 경로의 재생 동작이 같지 않다
     (sequencer-tui.mjs: "Source audition requires a VST instrument or MIDI output").
-  - 확인 상태(2026-10-20): pause/resume/seek 지원 여부가 문서와 코드에서 갈린다 —
-    MIDI-SOURCE.md·README는 소스 타임라인에서 쓸 수 없다고 적고, native transport는
-    pause·resume·seek를 구현하고 시험한다(`MidiTransport.swift`, test-midi-transport.mjs의
-    `SOURCE_CHASE_DECISIONS_PASS`). 초기 채널값이 소스 앞부분에 없으면 seek는 거절된다
-    (MidiTransport.swift:297). 런타임에서 확인하기 전에는 어느 쪽도 확정으로 쓰지 않는다.
+  - 재생 경계: pause/resume와 소스 시계 기준 seek는 채널 상태 재구성 경계를 거쳐
+    지원한다(MIDI-SOURCE.md: "Audition starts at the beginning and supports pause/resume
+    and source-clock seek"). 소스 looping은 여전히 불가능하고, 원본 앞부분에 없는 초기
+    채널값을 되돌려야 하는 seek는 거절된다(MidiTransport.swift:297, "source seek cannot
+    restore an initial channel value absent from the source prefix"). 알 수 없는 초기
+    필드와 기기 고유 부작용도 조용히 넘어가지 않고 명시적으로 실패한다.
+  - 서술 이력: #43769(`2fa99025a2`)의 MIDI-SOURCE.md는 "Pause, resume, seek and looping
+    are explicitly unavailable for source timelines"라고 적었고, #43792(`59d3653d3b`)가
+    같은 문장을 위 지원 문장으로 바꿨다. 옛 문장을 인용하면 현행 코드와 어긋나므로,
+    이 항목은 현행 main 문장만 근거로 쓴다.
   → [tools/alphatex/MIDI-SOURCE.md](../../tools/alphatex/MIDI-SOURCE.md) ·
   [tools/alphatex/native/MidiTransport.swift](../../tools/alphatex/native/MidiTransport.swift)
 

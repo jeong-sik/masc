@@ -176,10 +176,10 @@ type turn_history =
   | No_saved_history
   | Saved_history_superseded of { expected : int; got : int }
 
-(** The one place that says which load failures are a start without saved
-    history ([Not_found], [Superseded_version]) and which are not. The turn's
-    load ({!Keeper_context_core.load_context_from_checkpoint_classified}) and
-    the next-request forecast decide through it. *)
+(** Which load failures are a start without saved history ([Not_found],
+    [Superseded_version]) and which are not. The turn's load
+    ({!Keeper_context_core.load_context_from_checkpoint_classified}) and the
+    next-request forecast decide through it. *)
 val turn_history_of_load :
   (Agent_core.Checkpoint.t, checkpoint_load_error) result ->
   (turn_history, checkpoint_load_error) result

@@ -334,6 +334,8 @@ max-concurrent = 1
    | Error detail -> Alcotest.fail detail);
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
+  (* The path is only built, not created; the save below writes a plain file. *)
+  Fs_compat.mkdir_p session_dir;
   write ~session_dir ~session_id:trace_id ~agent_name:meta.name;
   Keeper_next_request_forecast.forecast ~config ~keeper_name:meta.name
 

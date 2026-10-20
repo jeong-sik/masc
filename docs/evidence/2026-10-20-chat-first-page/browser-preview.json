@@ -1,0 +1,15 @@
+{
+  "url": "http://127.0.0.1:5174/dashboard/#keepers?keeper=code-reviewer",
+  "firstCanonicalRowFromNavigationMs": 1086.5999999046326,
+  "observedAtMs": 1166.5,
+  "canonicalRows": 37,
+  "loading": false,
+  "historyRequests": [
+    {
+      "path": "/api/v1/keepers/code-reviewer/chat/history/page",
+      "status": 200,
+      "ms": 157.5,
+      "bytes": 129077
+    }
+  ]
+}

@@ -101,12 +101,116 @@ import type { ToolCallEntry } from './api/dashboard'
 import type { KeeperStatusDetail } from './types'
 
 beforeEach(() => {
+  fetchKeeperChatHistoryPage.mockReset().mockResolvedValue({ messages: [], nextCursor: null, hasMore: false })
   clearStoredToken()
   shellAuthSummary.value = { effective_role: 'admin' }
   fetchKeeperToolCalls.mockReset()
   fetchKeeperToolCalls.mockResolvedValue({ entries: [] })
   resetToolCallOutputs()
   _resetKeeperStreamBuffersForTests()
+})
+
+describe('progressive first conversation read', () => {
+  beforeEach(() => {
+    keeperThreads.value = {}
+    keeperHydrating.value = {}
+    _resetChatHydrationForTests()
+    fetchKeeperChatHistory.mockReset()
+  })
+  function deferred<T>() {
+    let resolve!: (value: T) => void
+    let reject!: (error: Error) => void
+    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
+    return { promise, resolve, reject }
+  }
+  const row = (id: string, content = id): KeeperChatHistoryMessage => ({ id, role: 'user', content, ts: 1, delivery_provenance: null, delivery_provenance_status: 'absent' })
+  const page = (messages: KeeperChatHistoryMessage[]) => ({ messages, nextCursor: 'older', hasMore: true })
+
+  it('publishes direct rows before enrichment, preserving local rows and the older cursor', async () => {
+    const aggregate = deferred<KeeperChatHistoryMessage[]>()
+    fetchKeeperChatHistory.mockReturnValue(aggregate.promise)
+    fetchKeeperChatHistoryPage.mockResolvedValue(page([row('recent')]))
+    appendThreadEntry('echo', { id: 'local', role: 'user', source: 'direct_user', label: '나', text: 'queued', timestamp: new Date(2000).toISOString(), delivery: 'queued' })
+    appendThreadEntry('echo', { id: 'recent', role: 'user', source: 'direct_user', label: '나', text: 'observed', delivery: 'history',
+      streamContract: { source: 'sse_event', status: 'backend_terminal_event', eventName: 'done' } })
+    appendThreadEntry('echo', { id: 'autonomous', role: 'assistant', source: 'autonomous_turn', label: 'echo', text: 'prior context', delivery: 'history' })
+    const older = { id: 'older', role: 'user' as const, source: 'direct_user' as const, label: '나', text: 'older page', delivery: 'history' as const }
+    keeperChatHistoryPages.value = { echo: { entries: [older], nextCursor: 'walk-in-progress', hasMore: true } }
+    const pending = hydrateKeeperChatHistory('echo')
+    await vi.waitFor(() => expect(keeperChatHistoryHydration.value.echo).toBe('partial'))
+    expect(keeperThreads.value.echo?.map(entry => entry.id)).toEqual(expect.arrayContaining(['recent', 'local', 'autonomous', 'older']))
+    expect(keeperThreads.value.echo?.find(entry => entry.id === 'recent')?.streamContract).toMatchObject({ source: 'sse_event', eventName: 'done' })
+    expect(keeperChatHistoryPages.value.echo?.nextCursor).toBe('walk-in-progress')
+    expect(fetchKeeperToolCalls).toHaveBeenCalledTimes(1)
+    aggregate.resolve([row('recent', 'enriched')])
+    await pending
+    expect(keeperChatHistoryHydration.value.echo).toBe('hydrated')
+    expect(keeperThreads.value.echo?.filter(entry => entry.id === 'recent')).toHaveLength(1)
+    expect(keeperThreads.value.echo?.find(entry => entry.id === 'recent')?.text).toBe('enriched')
+    expect(keeperThreads.value.echo?.some(entry => entry.id === 'older')).toBe(true)
+    expect(fetchKeeperToolCalls).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps newer direct appends missing from the aggregate snapshot', async () => {
+    const aggregate = deferred<KeeperChatHistoryMessage[]>()
+    fetchKeeperChatHistory.mockReturnValue(aggregate.promise)
+    fetchKeeperChatHistoryPage.mockResolvedValue(page([row('newly-appended')]))
+    const pending = hydrateKeeperChatHistory('echo')
+    await vi.waitFor(() => expect(keeperChatHistoryHydration.value.echo).toBe('partial'))
+    aggregate.resolve([row('older')])
+    await pending
+    expect(keeperThreads.value.echo?.map(entry => entry.id)).toEqual(expect.arrayContaining(['older', 'newly-appended']))
+  })
+
+  it('retains preview rows on aggregate failure and permits an ordinary retry', async () => {
+    const aggregate = deferred<KeeperChatHistoryMessage[]>()
+    fetchKeeperChatHistory.mockReturnValueOnce(aggregate.promise)
+    fetchKeeperChatHistoryPage.mockResolvedValue(page([row('recent')]))
+    const pending = hydrateKeeperChatHistory('echo')
+    await vi.waitFor(() => expect(keeperChatHistoryHydration.value.echo).toBe('partial'))
+    aggregate.reject(new Error('aggregate unavailable'))
+    await pending
+    expect(keeperThreads.value.echo?.some(entry => entry.id === 'recent')).toBe(true)
+    expect(keeperChatHistoryHydration.value.echo).toBe('failed')
+    expect(keeperChatHistoryErrors.value.echo).toContain('aggregate unavailable')
+    fetchKeeperChatHistory.mockResolvedValueOnce([row('recent')])
+    await hydrateKeeperChatHistory('echo')
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
+    expect(keeperChatHistoryHydration.value.echo).toBe('hydrated')
+  })
+
+  it('does not infer empty conversation from an empty direct page', async () => {
+    const aggregate = deferred<KeeperChatHistoryMessage[]>()
+    fetchKeeperChatHistory.mockReturnValue(aggregate.promise)
+    const pending = hydrateKeeperChatHistory('echo')
+    await Promise.resolve()
+    expect(keeperChatHistoryHydration.value.echo).toBeUndefined()
+    aggregate.resolve([{ ...row('autonomous'), role: 'assistant' }])
+    await pending
+    expect(keeperThreads.value.echo?.some(entry => entry.id === 'autonomous')).toBe(true)
+  })
+
+  it('accepts aggregate history when the optional page fails', async () => {
+    fetchKeeperChatHistoryPage.mockRejectedValue(new Error('page unavailable'))
+    fetchKeeperChatHistory.mockResolvedValue([row('aggregate')])
+    await hydrateKeeperChatHistory('echo')
+    expect(keeperChatHistoryHydration.value.echo).toBe('hydrated')
+    expect(keeperChatHistoryErrors.value.echo).toBeNull()
+  })
+
+  it('ignores obsolete page and aggregate completions after a forced refresh', async () => {
+    const oldPage = deferred<ReturnType<typeof page>>()
+    const oldAggregate = deferred<KeeperChatHistoryMessage[]>()
+    fetchKeeperChatHistoryPage.mockReturnValueOnce(oldPage.promise).mockResolvedValueOnce(page([row('new')]))
+    fetchKeeperChatHistory.mockReturnValueOnce(oldAggregate.promise).mockResolvedValueOnce([row('new')])
+    const obsolete = hydrateKeeperChatHistory('echo')
+    await hydrateKeeperChatHistory('echo', { force: true })
+    oldPage.resolve(page([row('stale-page')]))
+    oldAggregate.resolve([row('stale-aggregate')])
+    await obsolete
+    expect(keeperThreads.value.echo?.map(entry => entry.id)).toEqual(['new'])
+    expect(keeperChatHistoryHydration.value.echo).toBe('hydrated')
+  })
 })
 
 
@@ -1252,7 +1356,7 @@ describe('loadFullKeeperHistory', () => {
     expect(keeperChatHistoryErrors.value.echo).toContain('Conversation changed')
     await loadFullKeeperHistory('echo')
     expect(fetchKeeperChatHistoryPage.mock.calls).toEqual([
-      ['echo', undefined], ['echo', 'old-file-position'], ['echo', undefined],
+      ['echo', undefined], ['echo', 'old-file-position'], ['echo'], ['echo', undefined],
     ])
   })
 

@@ -131,7 +131,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
       clear: vi.fn(),
     })
     fetchKeeperChatHistory.mockReset()
-    fetchKeeperChatHistoryPage.mockReset()
+    fetchKeeperChatHistoryPage.mockReset().mockResolvedValue({ messages: [], nextCursor: null, hasMore: false })
     fetchKeeperToolCalls.mockReset()
     fetchKeeperToolCalls.mockResolvedValue({ entries: [] })
     keeperThreads.value = {}
@@ -164,6 +164,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
   it('walks earlier server pages from the visible transcript and keeps retry available', async () => {
     fetchKeeperChatHistory.mockResolvedValue([{ id: 'new', role: 'user', content: 'Newest dialogue', ts: 1000 }])
     fetchKeeperChatHistoryPage
+      .mockResolvedValueOnce({ messages: [], nextCursor: null, hasMore: false })
       .mockRejectedValueOnce(new Error('Page temporarily unavailable'))
       .mockResolvedValueOnce({
         messages: [{ id: 'middle', role: 'user', content: 'Earlier dialogue', ts: 500 }],
@@ -188,8 +189,24 @@ describe('KeeperConversationPanel hydration wiring', () => {
     expect(container.textContent).toContain('Earlier dialogue')
     expect(olderButton()).toBeUndefined()
     expect(fetchKeeperChatHistoryPage.mock.calls).toEqual([
-      ['sangsu', undefined], ['sangsu', undefined], ['sangsu', 'position-500'],
+      ['sangsu'], ['sangsu', undefined], ['sangsu', undefined], ['sangsu', 'position-500'],
     ])
+  })
+
+  it('renders the direct conversation while aggregate enrichment remains pending', async () => {
+    let finish!: (rows: unknown[]) => void
+    fetchKeeperChatHistory.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    fetchKeeperChatHistoryPage.mockResolvedValueOnce({
+      messages: [{ id: 'direct-first', role: 'user', content: 'Recent direct question', ts: 100 }],
+      nextCursor: 'older', hasMore: true,
+    })
+    render(html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." layout="workspace" />`, container)
+    await waitFor(() => expect(container.textContent).toContain('Recent direct question'))
+    expect(container.querySelector('[data-chat-transcript-loading]')).toBeNull()
+    finish([{ id: 'direct-first', role: 'user', content: 'Recent direct question', ts: 100 },
+      { id: 'autonomous-later', role: 'assistant', content: 'Autonomous context', ts: 101 }])
+    await waitFor(() => expect(container.textContent).toContain('Autonomous context'))
+    expect(container.textContent).toContain('Recent direct question')
   })
 
   // #26276: a hard refresh starts with an empty in-memory thread. Until the

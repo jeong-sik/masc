@@ -604,6 +604,7 @@ let edit_draft state draft text =
     | Some _ | None -> Error "Workspace or file changed; the editor cannot replace another draft" in
   let* next = Draft.edit text draft in
   put_code_draft state next;
+  state.code_lsp_note <- None;
   state.code_draft_open <- true; state.code_draft_scroll <- 0;
   Ok ()
 

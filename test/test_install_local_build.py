@@ -184,7 +184,9 @@ def workspace(root):
 
 
 class LocalBuildInstall(unittest.TestCase):
-    def test_cleanup_protects_explicit_workspace_without_current_helper(self):
+    # An install that cannot run the check stops before it replaces a binary or
+    # cleans the build tree, so the selected workspace and the build stay.
+    def test_a_build_without_a_current_helper_installs_and_cleans_nothing(self):
         for helper_kind in ("missing", "old"):
             with self.subTest(helper_kind=helper_kind), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary).resolve()
@@ -220,16 +222,16 @@ class LocalBuildInstall(unittest.TestCase):
                     cwd=root,
                     env=dict(unnamed_env(root), MASC_DUNE_LOCK_HELD="1"),
                     capture_output=True, text=True)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertTrue((prefix / "masc").is_file())
-                self.assertTrue(state.exists(), "explicit workspace was removed by cleanup")
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("nothing installed", result.stderr)
+                self.assertFalse(prefix.exists(), "a binary was installed without the check")
                 self.assertEqual(state.read_text(), "operator state")
-                self.assertTrue(artifact.exists())
+                self.assertTrue(artifact.exists(), "the build tree was cleaned after a refused install")
                 self.assertEqual((checkout / "calls").read_text().splitlines(), ["build"])
 
     def test_cleanup_protects_selected_workspace_state(self):
-        for location in ("inside", "build_root", "symlink_inside", "outside", "none"):
-            for explicit in (False, True) if location != "none" else (False,):
+        for location in ("inside", "build_root", "symlink_inside", "outside"):
+            for explicit in (False, True):
                 with self.subTest(location=location, explicit=explicit), \
                         tempfile.TemporaryDirectory() as temporary:
                     root = Path(temporary).resolve()
@@ -249,16 +251,14 @@ class LocalBuildInstall(unittest.TestCase):
                         selected = root / "live workspace"
                     else:
                         selected = build_root / "live workspace"
-                    if location != "none":
-                        (selected / ".masc").mkdir(parents=True)
-                        state = selected / ".masc/durable-state"
-                        state.write_text("operator state")
+                    (selected / ".masc").mkdir(parents=True)
+                    state = selected / ".masc/durable-state"
+                    state.write_text("operator state")
                     if location == "symlink_inside":
                         alias = root / "workspace alias"
                         alias.symlink_to(selected, target_is_directory=True)
                         selected = alias
-                    preflight_helper(build, unnamed_workspace=None if location == "none"
-                                     else (selected, "persisted_default"))
+                    preflight_helper(build, unnamed_workspace=(selected, "persisted_default"))
                     executable(scripts / "check-runtime-deployment-preflight.sh", "fixture-preflight")
                     wrapper = scripts / "dune-local.sh"
                     wrapper.write_text(
@@ -279,10 +279,9 @@ class LocalBuildInstall(unittest.TestCase):
                                             capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertTrue((prefix / "masc").is_file())
-                    if location != "none":
-                        self.assertIn(f"checking runtime.toml of {selected}", result.stdout)
-                        self.assertTrue(state.exists(), "successful installation removed workspace state")
-                        self.assertEqual(state.read_text(), "operator state")
+                    self.assertIn(f"checking runtime.toml of {selected}", result.stdout)
+                    self.assertTrue(state.exists(), "successful installation removed workspace state")
+                    self.assertEqual(state.read_text(), "operator state")
                     protected = location in ("inside", "build_root", "symlink_inside")
                     self.assertEqual(artifact.exists(), protected)
                     self.assertEqual((checkout / "calls").read_text().splitlines(),
@@ -304,6 +303,8 @@ class LocalBuildInstall(unittest.TestCase):
                 build = checkout / "_build/default/bin"
                 build.mkdir(parents=True)
                 binaries(build)
+                preflight_helper(build)
+                executable(scripts / "check-runtime-deployment-preflight.sh", "fixture-preflight")
                 artifact = checkout / "_build/cache-artifact"
                 artifact.write_text("regenerable")
                 wrapper = scripts / "dune-local.sh"
@@ -322,7 +323,8 @@ class LocalBuildInstall(unittest.TestCase):
                     prefix = Path(flags[flags.index("--prefix") + 1])
                 result = subprocess.run(
                     ["bash", str(scripts / SCRIPT.name), "--prefix", str(prefix),
-                     "--manifest-dir", str(root / "absent"), *flags],
+                     "--manifest-dir", str(root / "absent"),
+                     "--base-path", str(workspace(root)), *flags],
                     env={key: value for key, value in unnamed_env(root).items()
                          if key not in ("DUNE_BUILD_DIR", "MASC_DUNE_DRY_RUN")},
                     capture_output=True, text=True)
@@ -510,7 +512,7 @@ class LocalBuildInstall(unittest.TestCase):
     # A lane set up with --mode bidi or --mode host registers no manifest, so
     # the manifests cannot lead to it; the workspace the install works with is
     # looked at as well.
-    def run_script_for_workspace(self, root, base, lanes=(), helper=True):
+    def run_script_for_workspace(self, root, base, lanes=()):
         manifests = root / "native manifests"
         for lane_base, name in lanes:
             register(manifests, lane_base, name)
@@ -519,8 +521,7 @@ class LocalBuildInstall(unittest.TestCase):
         fake_masc(build / "main_eio.exe")
         executable(build / "masc_tui.exe", "tui")
         executable(build / "masc_browser_host.exe", "new")
-        if helper:
-            preflight_helper(build)
+        preflight_helper(build)
         prefix = root / "prefix"
         result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
                                  "--prefix", str(prefix), "--manifest-dir", str(manifests),
@@ -587,18 +588,6 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertIn("is not the host just installed", result.stderr)
             self.assertNotIn("refreshed browser lane host", result.stdout)
             self.assertTrue((prefix / "masc-browser-host").is_file(), "the binaries were installed first")
-
-    def test_a_workspace_masc_did_not_resolve_is_not_refreshed_on_a_guess(self):
-        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
-            root = Path(temporary).resolve()
-            base = workspace(root)
-            install_lane(base)
-            result, prefix = self.run_script_for_workspace(root, base, helper=False)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(lane_calls(prefix), [])
-            self.assertIn("old", (base / ".masc/browser-lane/host/masc-browser-host").read_text())
-            self.assertIn(f"WARN the browser lane host of {base} is not refreshed", result.stderr)
-            self.assertIn("--mode host", result.stderr)
 
     def test_a_launcher_without_its_declaration_or_the_reverse_is_not_an_installed_lane(self):
         with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
@@ -793,9 +782,9 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertIn(f"validate-runtime-config --base-path {recorded}", helper_calls(build))
             self.assertTrue((prefix / "masc").is_file())
 
-    # #39431 makes these two refusals in the next version. Until then the
-    # install says why it did not check, once, and installs as main does.
-    def test_no_workspace_found_warns_skips_the_check_and_installs(self):
+    # An install that cannot run the check installs nothing and exits 2, and
+    # says what to do about it.
+    def test_no_workspace_found_installs_nothing(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             build = root / "build"
@@ -806,16 +795,14 @@ class LocalBuildInstall(unittest.TestCase):
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
                                      "--prefix", str(prefix), "--manifest-dir", str(root / "absent")],
                                     env=unnamed_env(root), cwd=root, capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            warnings = [line for line in result.stderr.splitlines() if "WARN" in line]
-            self.assertEqual(len(warnings), 1, result.stderr)
-            self.assertIn("--base-path DIR or set MASC_BASE_PATH", warnings[0])
-            self.assertIn("issues/39431", warnings[0])
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("--base-path DIR or set MASC_BASE_PATH", result.stderr)
+            self.assertIn("nothing installed", result.stderr)
             self.assertFalse(any(call.startswith("validate-runtime-config") for call in helper_calls(build)))
             self.assertFalse(any(call.startswith("validate-stores") for call in helper_calls(build)))
-            self.assertTrue((prefix / "masc").is_file())
+            self.assertFalse(prefix.exists(), "a binary was installed without a workspace to check")
 
-    def test_skip_build_without_the_helper_warns_skips_the_check_and_installs(self):
+    def test_skip_build_without_the_helper_installs_nothing(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             build = root / "build"
@@ -826,14 +813,13 @@ class LocalBuildInstall(unittest.TestCase):
                                      "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
                                      "--base-path", str(workspace(root))],
                                     capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            warnings = [line for line in result.stderr.splitlines() if "WARN" in line]
-            self.assertEqual(len(warnings), 1, result.stderr)
-            self.assertIn(str(build / "deployment_preflight_helper.exe"), warnings[0])
-            self.assertIn("issues/39431", warnings[0])
-            self.assertTrue((prefix / "masc").is_file())
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn(str(build / "deployment_preflight_helper.exe"), result.stderr)
+            self.assertIn("is missing", result.stderr)
+            self.assertIn("nothing installed", result.stderr)
+            self.assertFalse(prefix.exists(), "a binary was installed without the helper")
 
-    def test_skip_build_with_a_helper_older_than_the_check_warns_and_installs(self):
+    def test_skip_build_with_a_helper_older_than_the_check_installs_nothing(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             build = root / "build"
@@ -845,13 +831,13 @@ class LocalBuildInstall(unittest.TestCase):
                                      "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
                                      "--base-path", str(workspace(root))],
                                     capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            warnings = [line for line in result.stderr.splitlines() if "WARN" in line]
-            self.assertEqual(len(warnings), 1, result.stderr)
-            self.assertIn("predates the check", warnings[0])
-            # The old helper's "unexpected helper call" is expected noise.
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("predates the check", result.stderr)
+            self.assertIn("nothing installed", result.stderr)
+            # An old helper's unsupported-command noise stays suppressed even
+            # when missing preflight support refuses the installation.
             self.assertNotIn("unexpected helper call", result.stderr)
-            self.assertTrue((prefix / "masc").is_file())
+            self.assertFalse(prefix.exists(), "a binary was installed by a helper that cannot check")
 
     def test_new_helper_workspace_lookup_failure_installs_nothing(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -1103,23 +1089,6 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertTrue((prefix / "masc-check-runtime-deployment-preflight").is_file())
             self.assertIn("masc-deployment-preflight-helper", result.stdout)
 
-    # Without a helper there is no pair to install: the WARN above already
-    # says why, and the server installs alone as before.
-    def test_no_helper_installs_the_server_without_a_half_pair(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary).resolve()
-            build = root / "build"
-            build.mkdir()
-            binaries(build)
-            prefix = root / "prefix"
-            result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
-                                     "--base-path", str(workspace(root))],
-                                    check=True, capture_output=True, text=True)
-            self.assertTrue((prefix / "masc").is_file())
-            self.assertFalse((prefix / "masc-deployment-preflight-helper").exists())
-            self.assertFalse((prefix / "masc-check-runtime-deployment-preflight").exists())
-
     # A prefix that already holds an older pair from a previous install must
     # not be left running that stale gate against an upgraded server: that is
     # the exact mismatch #39224 reports, just reached through --skip-build.
@@ -1141,7 +1110,7 @@ class LocalBuildInstall(unittest.TestCase):
                                      "--base-path", str(workspace(root))],
                                     capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("already holds a deployment preflight pair", result.stderr)
+            self.assertIn("is missing", result.stderr)
             self.assertIn(str(build / "deployment_preflight_helper.exe"), result.stderr)
             self.assertEqual(old_gate.read_text(), before_gate, "stale gate was touched")
             self.assertEqual(old_helper.read_text(), before_helper, "stale helper was touched")

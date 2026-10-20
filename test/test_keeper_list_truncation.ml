@@ -384,8 +384,8 @@ let check_roster_failure expected json =
   | other -> failf "expected one Keeper row: %s" (Yojson.Safe.to_string other)
 ;;
 
-let failure_roster ?before_list f =
-  keeper_list ?before_list ~names:[ "alpha" ]
+let failure_roster ?before_list ?after_list f =
+  keeper_list ?before_list ?after_list ~names:[ "alpha" ]
     ~args:(`Assoc [ "detailed", `Bool true ]) f
 ;;
 

@@ -1016,7 +1016,7 @@
  (name masc_tui_chat_call_reader)
  (wrapped false)
  (modules masc_tui_chat_call_reader)
- (libraries masc masc_tui_fetched masc_tui_detail_reading uri))
+ (libraries masc masc_tui_fetched masc_tui_detail_reading masc_tui_execute_result uri))
 
 (library
  (name masc_tui_keeper_call_evidence)

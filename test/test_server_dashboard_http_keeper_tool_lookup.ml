@@ -219,6 +219,39 @@ let test_raw_io_routes_require_admin () =
       Alcotest.(check bool) "Admin receives retained raw I/O" true
         (String_util.contains_substring (Yojson.Safe.to_string body) secret))
       [target "editor" "protected"; "/api/v1/keepers/editor/tool-calls?limit=200"];
+    let trace_id="trace-protected-original" in
+    let turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:1 in
+    append store (`Assoc ["ts",`Float (Unix.gettimeofday ());
+      "record_kind",`String "tool_call";"keeper",`String "editor";
+      "agent_name",`String "editor";"execution_id",`String "protected-original";
+      "trace_id",`String trace_id;"session_id",`String trace_id;
+      "keeper_turn_id",`Int 1;"turn",`Int 0;"planned_index",`Int 0;
+      "turn_kind",`String "direct";"tool",`String "Execute";
+      "tool_use_id",`String "provider-original";
+      "tool_observation",Tool_observation.to_yojson
+        {attribution=Agent_observation.Pathless;turn_ref;declared_progress=None}]);
+    let original_target expected_base = Uri.make
+      ~path:"/api/v1/keepers/editor/tool-result"
+      ~query:["execution_id",["protected-original"];
+        "expected_base_path",[expected_base];
+        "expected_masc_root",[Filename.concat expected_base Common.masc_dirname]] ()
+      |> Uri.to_string in
+    let original_path=original_target config.base_path in
+    let anonymous,_=get ~router state original_path in
+    let worker_status,_=get ~router ~token:worker state original_path in
+    let admin_status,body=get ~router ~token:admin state original_path in
+    Alcotest.(check int) "original source denies anonymous reads" 401 anonymous;
+    Alcotest.(check int) "original source denies Worker reads" 403 worker_status;
+    Alcotest.(check int) "workspace-bound Admin original read is accepted" 200 admin_status;
+    (match Keeper_tool_result_page.of_json ~keeper:"editor"
+        ~execution_id:"protected-original" body with
+     | Ok Pending -> ()
+     | Ok (Unavailable _ | Page _) | Error _ -> Alcotest.fail "unpublished original turn must remain pending");
+    let wrong_status,wrong_body=get ~router ~token:admin state
+        (original_target (Filename.concat config.base_path "different-workspace")) in
+    Alcotest.(check int) "original read cannot cross workspace precondition" 409 wrong_status;
+    Alcotest.(check string) "workspace conflict comes from common middleware"
+      "workspace_precondition_failed" (wrong_body |> member "code" |> to_string);
     Alcotest.(check bool) "safe chat history does not acquire raw-record permission" true
       (Api.keeper_get_permission "/api/v1/keepers/editor/chat/history" = None);
     let safe_status, safe_body = get ~router ~token:worker state

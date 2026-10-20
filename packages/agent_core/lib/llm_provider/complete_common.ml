@@ -797,16 +797,43 @@ let serialize_http_request ~stream ~(config : Provider_config.t) ~messages ~tool
 ;;
 
 let finalize_stream_body ~http_codec body =
+  let rejected error =
+    Http_client.AcceptRejected
+      { reason = Http_client.body_injection_error_to_string error }
+  in
   match http_codec with
   | Provider_http_codec.Gemini_generate_content | Provider_http_codec.Openai_responses ->
-    body
+    Ok body
   | Provider_http_codec.Anthropic_messages | Provider_http_codec.Ollama_chat ->
-    Http_client.inject_stream_param body
+    Result.map_error rejected (Http_client.inject_stream_param body)
   | Provider_http_codec.Openai_chat | Provider_http_codec.Glm_chat ->
     (* OpenAI-compatible streaming returns token usage only when the request
        also sets stream_options.include_usage. Anthropic and Ollama carry usage
        natively, so they keep stream:true only. *)
-    Http_client.inject_stream_and_options body
+    Result.map_error rejected (Http_client.inject_stream_and_options body)
+;;
+
+(* The codec module is private to this library. Exercise the actual finalizer
+   here, while the external tests keep checking the public injectors. *)
+let%test "stream finalization refuses an unstreamable body before dispatch" =
+  List.for_all
+    (fun kind ->
+       let http_codec =
+         Provider_http_codec.of_config
+           (Provider_config.make
+              ~kind ~model_id:"model" ~base_url:"https://example.invalid" ())
+       in
+       match finalize_stream_body ~http_codec "{not-json" with
+       | Error (Http_client.AcceptRejected _) -> true
+       | Ok _
+       | Error
+           (Http_client.HttpError _ | NetworkError _ | TimeoutError _
+            | ProviderTerminal _ | ProviderFailure _) -> false)
+    [ Provider_config.Anthropic
+    ; Provider_config.Ollama
+    ; Provider_config.OpenAI_compat
+    ; Provider_config.Glm
+    ]
 ;;
 
 (* Serialize the exact body shape used by the built-in HTTP transport. The
@@ -818,11 +845,12 @@ let serialize_final_http_request_unadmitted
       ~messages
       ~tools
   =
-  Result.map
-    (fun (http_codec, body) ->
-       let body = if stream then finalize_stream_body ~http_codec body else body in
-       http_codec, body)
+  Result.bind
     (serialize_http_request ~stream ~config ~messages ~tools)
+    (fun (http_codec, body) ->
+       if stream
+       then Result.map (fun body -> http_codec, body) (finalize_stream_body ~http_codec body)
+       else Ok (http_codec, body))
 ;;
 
 let with_request_metadata ~body run =

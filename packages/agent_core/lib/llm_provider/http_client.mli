@@ -267,11 +267,12 @@ type http_error =
       ; phase : timeout_phase
       }
   | AcceptRejected of { reason : string }
-  (** The request cannot be accepted because its transport wiring is invalid,
-      such as a CLI provider without an injected subprocess transport or an
-      HTTP deadline without the clock capability required to enforce it.
-      Distinct from {!NetworkError} so callers can treat it as a configuration
-      bug rather than a transient failure. *)
+  (** The request cannot be accepted because the caller built it wrongly, such
+      as a CLI provider without an injected subprocess transport, an HTTP
+      deadline without the clock capability required to enforce it, or a
+      streaming body that cannot take the [stream] fields.
+      Distinct from {!NetworkError} so callers can treat it as a bug on their
+      side rather than a transient failure. *)
   | ProviderTerminal of
       { kind : provider_terminal_kind
       ; message : string
@@ -853,29 +854,39 @@ val read_ndjson
     return [None]. Never raises. *)
 val parse_retry_after_seconds : now:float -> string -> float option
 
+(** Why a request body could not take an injected field. The body is the
+    caller's own serialization, so either case is a defect on their side and
+    the request must not be dispatched. *)
+type body_injection_error =
+  | Body_not_json
+  | Body_not_object
+
+val body_injection_error_to_string : body_injection_error -> string
+
 (** Inject ["stream": true] into a JSON body string.
-    Any caller-supplied [stream] is replaced to avoid duplicate object keys. *)
-val inject_stream_param : string -> string
+    Any caller-supplied [stream] is replaced to avoid duplicate object keys.
+    A body that is not a JSON object is an [Error]. *)
+val inject_stream_param : string -> (string, body_injection_error) result
 
 (** Inject [{"stream_options": {"include_usage": true}}] into a JSON body
     string. OpenAI-compatible providers omit token usage from streaming
     responses unless this flag is set. Use only for OpenAI-compatible
     kinds; native-usage providers (Anthropic, Ollama, Gemini) must not
     receive it. Any caller-supplied [stream_options] is replaced to avoid
-    double-injection; a non-object or unparseable body is returned
-    unchanged. *)
-val inject_stream_options_include_usage : string -> string
+    double-injection; a body that is not a JSON object is an [Error]. *)
+val inject_stream_options_include_usage : string -> (string, body_injection_error) result
 
 (** Inject both ["stream": true] and [{"stream_options": {"include_usage": true}}]
-    in a single parse/serialize pass. Byte-identical to
-    [inject_stream_param body |> inject_stream_options_include_usage] (proven by
-    a parity test), but parses and serializes the body once instead of twice.
+    in a single parse/serialize pass. Gives the same result as
+    [Result.bind (inject_stream_param body) inject_stream_options_include_usage]
+    (proven by a parity test), but parses and serializes the body once instead
+    of twice.
     For the OpenAI-compatible streaming path that needs both fields (GLM, Kimi,
     OpenAI_compat) this removes one full Yojson parse and one full
     [Yojson.Safe.to_string] of the request body per turn. Native-usage
     providers (Anthropic, Ollama, Gemini) should keep using
     [inject_stream_param] (stream only). *)
-val inject_stream_and_options : string -> string
+val inject_stream_and_options : string -> (string, body_injection_error) result
 
 (** [safe_cohttp_response_flow source] wraps a [cohttp-eio] response body flow
     so underlying reads use buffers of at least 64KB, buffering any remainder

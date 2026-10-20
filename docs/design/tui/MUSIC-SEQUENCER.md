@@ -190,3 +190,6 @@ Format 0/1 insertion uses the conductor track; format 2 requires explicit patter
 Several signatures at one tick require explicit event selection. Original unknown or
 unrecognized metadata stays opaque, and untouched tracks/containers retain their bytes.
 The exported four-byte layout follows [JZZ's SMF time-signature contract](https://www.jazz-soft.net/doc/JZZ/jzzmidi.html).
+Arrangement handoff uses the same recognized, last-at-tick-zero signature as the editor.
+Its metadata admits every exact SMF denominator power; explicit practice/count-in still
+uses its existing native clock admission and may reject a meter outside that range.

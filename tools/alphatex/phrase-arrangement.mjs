@@ -1,6 +1,6 @@
 import { newProject, validateProject } from './sequencer-project.mjs'
 import { projectMidi } from './sequencer-files.mjs'
-import { importMidiSource, exportMidiSource, validateMidiSource, midiSourcePattern, tempoEvent } from './midi-source.mjs'
+import { importMidiSource, exportMidiSource, validateMidiSource, midiSourcePattern, tempoEvent, meterEvent } from './midi-source.mjs'
 import { newArrangement, validateArrangement, arrangementID, editArrangement } from './arrangement.mjs'
 import { isDeepStrictEqual } from 'node:util'
 
@@ -54,9 +54,9 @@ export function arrangementFromMidiSource(document, { pattern } = {}) {
   validateMidiSource(document)
   const performance = midiSourcePattern(document, { pattern })
   const tempo = performance.events.filter(event => event.kind === 'meta' && event.type === 0x51 && event.tick === 0).at(-1)
-  const meter = performance.events.find(event => event.kind === 'meta' && event.type === 0x58 && event.tick === 0 && event.data.length === 4)
+  const meter = performance.events.filter(event => event.tick === 0).map(meterEvent).filter(Boolean).at(-1)
   let project = { ...newArrangement({ title: document.name, tempo: tempo ? tempoEvent(tempo).value : 120 }),
-    meter: meter ? [meter.data[0], 2 ** meter.data[1]] : [4, 4] }
+    meter: meter ? [meter.numerator, meter.denominator] : [4, 4] }
   const imported = importPhraseDocument(project, document); project = imported.project
   project = editArrangement(project, { kind: 'lane-add', sourceKind: 'midi', name: document.name })
   project = editArrangement(project, { kind: 'region-add', lane: project.lanes[0].id, asset: imported.asset,

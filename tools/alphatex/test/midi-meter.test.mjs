@@ -78,5 +78,22 @@ test('actual workers and portable saves preserve the edited map as an independen
   const variant=await arrange.request({kind:'import-phrase',project:first.project,document:loaded})
   assert.equal(variant.project.assets.length,2);assert.deepEqual(variant.project.assets[0].source,original)
   assert.deepEqual(meters(variant.project.assets[1].source),meters(loaded));assert.deepEqual(clocks(variant.project.assets[1].source),clocks(original))
+  // Exercise the direct handoff consumer, including opaque and simultaneous
+  // originals. An exact SMF power of two is representable beyond safe integers.
+  for(const power of [0,53,255]) {
+   const edited=editorCommand(newEditor(original),`meter 7 ${2**power} 0`).editor.project
+   const result=await sequence.request({project:edited,cancel:new SharedArrayBuffer(4),options:{format:'arrangement'}})
+   assert.deepEqual(result.project.meter,[7,2**power]);assert.deepEqual(result.project.assets[0].source,edited)
+   await saveProject(join(directory,`arrangement-${power}.json`),result.project)
+   assert.deepEqual((await loadProject(join(directory,`arrangement-${power}.json`))).project,result.project)
+  }
+  const opaque=importMidiSource(smf([[0,255,88,4,0,2,24,8,0,255,47,0]]))
+  const repaired=editorCommand(newEditor(opaque),'meter 7 8 0').editor.project
+  const repair=await sequence.request({project:repaired,cancel:new SharedArrayBuffer(4),options:{format:'arrangement'}})
+  assert.deepEqual(repair.project.meter,[7,8]);assert.deepEqual(repair.project.assets[0].source,repaired)
+  const simultaneous=importMidiSource(smf([[0,255,88,4,3,2,24,8,0,255,88,4,7,3,36,12,0,255,47,0]]))
+  const selected=editorCommand(editorCommand(newEditor(simultaneous),'meter-event 0:1').editor,'meter-value 5 16').editor.project
+  const handoff=await sequence.request({project:selected,cancel:new SharedArrayBuffer(4),options:{format:'arrangement'}})
+  assert.deepEqual(handoff.project.meter,[5,16])
  }finally{await Promise.all([sequence.worker.terminate(),arrange.worker.terminate()]);await rm(directory,{recursive:true,force:true})}
 })

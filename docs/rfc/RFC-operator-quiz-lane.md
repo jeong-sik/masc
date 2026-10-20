@@ -344,7 +344,7 @@ Both join the list of control tools that cannot be exported (`lib/lane_addon/lan
 |---|---|---|
 | `read_records` | `source_id`, `after` | the binding grants `source_id` (K3) |
 | `read_file` | `source_id`, `commit`, `path` | a `repository` grant whose `paths` cover `path` |
-| `read_result` | `original_request_id`, `source_id` (null for exact output), `sha256`, `offset` | this instance retained that original request under the same declaration/grant authority, source and digest |
+| `read_result` | `original_request_id`, `source_id` (null for `exact_output`, `ask` or `withdraw_ask`), `sha256`, `offset` | this instance retained that original request under the same declaration/grant authority, source and digest |
 | `exact_output` | `output`, `system?`, `messages` | the manifest declares `output` (K1) |
 | `ask` | `questions`, `context?` | the manifest declares `[world.asks] operator = true` (K4) |
 | `withdraw_ask` | `ask_id`, `reason` | same |

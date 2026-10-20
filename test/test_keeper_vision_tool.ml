@@ -2385,7 +2385,9 @@ let test_generated_sandbox_image_reaches_vision () =
       write_file source bytes;
       let docker = Filename.concat base "docker" in
       let script = Printf.sprintf
-        "#!/bin/sh\ncase \"$1\" in\ninfo|image) printf '[]\\n'; exit 0;;\nrun) ;;\n*) exit 92;;\nesac\nwhile [ \"$#\" -gt 0 ] && [ \"$1\" != 'alpine:test' ]; do shift; done\nshift\n[ \"$1\" = head ] || exit 93\n[ \"$2\" = -c ] || exit 99\n[ \"$4\" = %s ] || exit 94\nexec /usr/bin/head -c \"$3\" %s\n"
+        "#!/bin/sh\ncase \"$1\" in\ninfo|image) printf '[]\\n'; exit 0;;\nrun) ;;\n*) exit 92;;\nesac\nwhile [ \"$#\" -gt 0 ] && [ \"$1\" != 'alpine:test' ]; do shift; done\nshift\nif [ \"$1\" = sh ] && [ \"$2\" = -c ] && [ \"$4\" = sh ] && [ \"$5\" = %s ] && [ \"$#\" = 6 ]; then exec /bin/sh -c \"$3\" sh %s \"$6\"; fi\n[ \"$1\" = head ] || exit 93\n[ \"$2\" = -c ] || exit 99\n[ \"$4\" = %s ] || exit 94\nexec /usr/bin/head -c \"$3\" %s\n"
+        (Filename.quote (Filename.concat (Masc.Keeper_sandbox.container_root meta.name) "generated.png"))
+        (Filename.quote source)
         (Filename.quote (Filename.concat (Masc.Keeper_sandbox.container_root meta.name) "generated.png"))
         (Filename.quote source) in
       write_file docker script; Unix.chmod docker 0o755;

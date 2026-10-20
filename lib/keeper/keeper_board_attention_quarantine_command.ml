@@ -603,28 +603,13 @@ type inventory =
   ; errors : inventory_error list
   }
 
-(* The partition ledger as the inventory read it. It is read only for a keeper
-   that has a recorded requeue to check, so a keeper with nothing requeued
-   adds no read and no new way to fail. *)
-type partition_view =
-  | Partitions_not_needed
-  | Partitions_read of Partition.t list
-  | Partitions_unavailable
-
-let requeue_recorded (candidate : Candidate.candidate) =
-  match candidate.status with
-  | Candidate.Quarantine { phase = Candidate.Requeued _; _ } -> true
-  | Candidate.Quarantine { phase = Candidate.Quarantined | Candidate.Requeue_requested _; _ }
-  | Candidate.Pending _
-  | Candidate.Judged _
-  | Candidate.Consumed _ -> false
-;;
-
 (* [Quarantine_pair.classify] is the one reading of a candidate/partition pair
    that the worker's start-up reconciliation and the operator command share.
-   For a candidate whose requeue is recorded it answers four ways in practice;
-   the arms below that cannot occur for a [Requeued] phase are listed rather
-   than hidden behind a wildcard, and they read as "not explained". *)
+   For a candidate whose requeue is recorded it answers with one of five:
+   [Blocked_requeued], [Blocked_unrecorded], [Ready_requeued], [Inconsistent]
+   and [Advanced_requeued]. The arms that cannot occur for a [Requeued] phase
+   are listed rather than hidden behind a wildcard, and they read as "not
+   explained". *)
 let requeued_phase_of_pair = function
   | Quarantine_pair.Blocked_requeued -> Inventory_requeue_unfinished
   | Quarantine_pair.Ready_requeued | Quarantine_pair.Advanced_requeued ->
@@ -637,18 +622,27 @@ let requeued_phase_of_pair = function
   | Quarantine_pair.Advanced_without_requeue -> Inventory_requeue_unreconciled
 ;;
 
+(* [partitions] reads the keeper's partition ledger the first time a recorded
+   requeue needs it, so a keeper with nothing requeued adds no read and no new
+   way to fail. A partition row that is absent is not "finished": [execute]
+   restores the quarantined generation's [Blocked] root from the candidate
+   ([Partition.ensure_current_roots]) and then finishes the requeue, as does
+   the worker on its next pass, so the requeue is unfinished. A row of the
+   same partition that names another candidate is refused by [execute]. An
+   unreadable ledger explains nothing, and [execute] fails on it too. *)
 let requeued_phase ~partitions ~candidate_id (state : Candidate.quarantine_state) =
-  match partitions with
-  | Partitions_not_needed | Partitions_unavailable -> Inventory_requeue_unreconciled
-  | Partitions_read partitions ->
+  match partitions () with
+  | Error _ -> Inventory_requeue_unreconciled
+  | Ok partitions ->
     (match
        List.find_opt
          (fun (partition : Partition.t) ->
-            String.equal partition.partition_id state.quarantine.partition_id
-            && String.equal partition.candidate_id candidate_id)
+            String.equal partition.partition_id state.quarantine.partition_id)
          partitions
      with
-     | None -> Inventory_requeue_unreconciled
+     | None -> Inventory_requeue_unfinished
+     | Some partition when not (String.equal partition.candidate_id candidate_id) ->
+       Inventory_requeue_unreconciled
      | Some partition -> requeued_phase_of_pair (Quarantine_pair.classify partition state))
 ;;
 
@@ -701,22 +695,27 @@ let inventory ~base_path ~keeper_names =
                 : inventory_error)
                :: errors )
            | Ok candidates ->
-             let partitions, errors =
-               if not (List.exists requeue_recorded candidates)
-               then Partitions_not_needed, errors
-               else (
-                 match Partition.load ~base_path ~keeper_name with
-                 | Ok partitions -> Partitions_read partitions, errors
-                 | Error _ ->
-                   ( Partitions_unavailable
-                   , ({ keeper_name; kind = Inventory_partition_ledger_unavailable }
-                      : inventory_error)
-                     :: errors ))
+             let loaded = ref None in
+             let partitions () =
+               match !loaded with
+               | Some result -> result
+               | None ->
+                 let result = Partition.load ~base_path ~keeper_name in
+                 loaded := Some result;
+                 result
              in
              let keeper_items =
                List.filter_map
                  (inventory_item_of_candidate ~keeper_name ~partitions)
                  candidates
+             in
+             let errors =
+               match !loaded with
+               | Some (Error _) ->
+                 ({ keeper_name; kind = Inventory_partition_ledger_unavailable }
+                  : inventory_error)
+                 :: errors
+               | Some (Ok _) | None -> errors
              in
              List.rev_append keeper_items items, errors)
          ([], [])

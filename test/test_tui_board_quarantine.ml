@@ -279,6 +279,29 @@ let ready_fetched ~keeper_name value =
     Masc_tui_fetched.complete ~equal:String.equal next request value
 ;;
 
+(* A fleet whose only quarantine row is one the partition ledger does not
+   explain has nothing to resend, but it is not "nothing blocked" either: the
+   tab carries a Bad line for it and no quiet Dim line (#38276). Tones only, no
+   wording. *)
+let test_an_unreconciled_row_does_not_read_as_nothing_blocked () =
+  let quarantines =
+    decode_ok
+      (inventory_json
+         [ item ~phase:Command.Inventory_requeue_unreconciled ~requeued_at:(Some 41.0)
+             ~partition_id:"unreconciled" ~quarantined_at:20.0 ()
+         ]
+         [])
+  in
+  let tones =
+    List.map fst
+      (Quarantine.lines ~now:100.0
+         (ready_fetched ~keeper_name:"alpha" (Ok quarantines))
+         ~keeper_name:"alpha")
+  in
+  check bool "a Bad line names the row" true (List.mem Quarantine.Bad tones);
+  check bool "no Dim line says all is quiet" false (List.mem Quarantine.Dim tones)
+;;
+
 let test_wire_strings_are_sanitized () =
   let quarantines =
     decode_ok
@@ -323,6 +346,8 @@ let () =
             test_bulk_requeue_attempts_every_waiting_row_in_order
         ; test_case "bulk refuses a stale list" `Quick
             test_bulk_requeue_refuses_a_stale_list
+        ; test_case "an unreconciled row does not read as nothing blocked" `Quick
+            test_an_unreconciled_row_does_not_read_as_nothing_blocked
         ; test_case "wire strings are sanitized" `Quick test_wire_strings_are_sanitized
         ] )
     ]

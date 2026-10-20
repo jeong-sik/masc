@@ -42,10 +42,11 @@ val category_words :
 val waiting :
   t ->
   Masc.Keeper_board_attention_quarantine_command.inventory_item list
-(** The rows still waiting for an operator: quarantined, or requeue asked for
-    and not finished. Oldest first. A row whose candidate says requeued is
-    left out: the inventory reads only the candidate ledger, so it is counted
-    as requeued on that ledger, not as finished. *)
+(** The rows still waiting for an operator: quarantined, requeue asked for and
+    not finished, or requeue recorded on the candidate while the partition is
+    still blocked (the same request finishes it). Oldest first. A row whose
+    requeue the partition ledger confirms is left out, and so is one it does
+    not explain, which the server would refuse. *)
 
 val oldest_waiting :
   t ->

@@ -195,6 +195,16 @@ let load_one_partition ~base_path =
   | partitions -> Alcotest.failf "expected one partition, got %d" (List.length partitions)
 ;;
 
+(* The phase strings the inventory serves, which is what the operator snapshot,
+   the dashboard route and the TUI read. *)
+let inventory_phases ~base_path =
+  Q.inventory_to_json (Q.inventory ~base_path ~keeper_names:[ "alpha" ])
+  |> Yojson.Safe.Util.member "items"
+  |> Yojson.Safe.Util.to_list
+  |> List.map (fun item ->
+    item |> Yojson.Safe.Util.member "phase" |> Yojson.Safe.Util.to_string)
+;;
+
 let relevant_delivery_count ~base_path ~candidate_id =
   Event_queue_persistence.load ~base_path ~keeper_name:"alpha"
   |> Event_queue.to_list
@@ -3475,9 +3485,14 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
    | _ -> Alcotest.fail "settled candidate remained in quarantine inventory")
 ;;
 
-let test_inventory_does_not_call_a_requeue_finished_without_its_partition () =
+(* A recorded requeue is unfinished while the partition is Blocked, and also
+   when the partition row is absent: [execute] restores the quarantined
+   generation's Blocked root from the candidate and finishes the requeue, as
+   the worker does on its next pass. Running that command here is what shows
+   the absent row is not a verdict the server refuses (#38276). *)
+let test_inventory_keeps_a_recorded_requeue_unfinished_until_the_partition_is_released () =
   with_temp_base "board-attention-inventory-requeue-without-partition" @@ fun base_path ->
-  let persisted = record ~base_path (candidate ~id:"candidate-inventory-pair" ()) in
+  ignore (record ~base_path (candidate ~id:"candidate-inventory-pair" ()) : A.candidate);
   let failed_exact = provenance "inventory-pair-failure" in
   let execute ~before_dispatch ~before_advance:_ _candidate =
     ok "bind failed attempt" (before_dispatch failed_exact);
@@ -3488,7 +3503,6 @@ let test_inventory_does_not_call_a_requeue_finished_without_its_partition () =
        "create quarantine"
        (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
      : W.step);
-  ignore persisted;
   let quarantined = load_one_candidate ~base_path in
   let blocked = load_one_partition ~base_path in
   let quarantine =
@@ -3517,19 +3531,40 @@ let test_inventory_does_not_call_a_requeue_finished_without_its_partition () =
           ~expected_quarantine_id:quarantine.quarantine_id
           ~requeued_at:31.0)
      : A.candidate);
-  let phases () =
-    (Q.inventory ~base_path ~keeper_names:[ "alpha" ]).items
-    |> List.map (fun (item : Q.inventory_item) -> item.phase)
-  in
-  Alcotest.(check bool)
+  Alcotest.(check (list string))
     "a recorded requeue beside a Blocked partition is unfinished"
-    true
-    (phases () = [ Q.Inventory_requeue_unfinished ]);
+    [ "requeue_unfinished" ]
+    (inventory_phases ~base_path);
   ok "empty the partition ledger" (P.purge ~base_path ~keeper_name:"alpha");
-  Alcotest.(check bool)
-    "a recorded requeue whose partition row is gone is not shown as finished"
-    true
-    (phases () = [ Q.Inventory_requeue_unreconciled ])
+  Alcotest.(check (list string))
+    "a recorded requeue whose partition row is absent is unfinished too"
+    [ "requeue_unfinished" ]
+    (inventory_phases ~base_path);
+  let command =
+    match
+      Q.make
+        ~keeper_name:"alpha"
+        ~raw_partition_id:blocked.partition_id
+        ~requested_by:"operator-test"
+        { Q.candidate_id = quarantined.candidate_id
+        ; expected_quarantine_id = quarantine.quarantine_id
+        ; decision = Q.Acknowledge_and_requeue
+        }
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "command rejected: %s" (Q.input_error_to_string error)
+  in
+  (match Q.execute ~now:32.0 ~base_path command with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.failf
+       "the command did not finish a requeue whose partition row was absent: %s"
+       (Q.execution_error_label error));
+  Alcotest.(check (list string))
+    "once the partition is released the requeue is finished"
+    [ "requeued" ]
+    (inventory_phases ~base_path)
 ;;
 
 let test_ready_requested_recovery_fails_closed () =
@@ -4238,6 +4273,13 @@ let test_stale_blocked_snapshot_cannot_requeue_new_generation () =
       | Error _ -> ()
       | Ok _ ->
         Alcotest.fail "Ready confirmation reopened a newer Blocked generation"));
+  (* The candidate records the requeue, but the partition now holds a newer
+     failure than the quarantine names. The command refused it, so the
+     inventory must not call it requeued, and it is not a request to resend. *)
+  Alcotest.(check (list string))
+    "a recorded requeue beside a newer Blocked generation is unreconciled"
+    [ "requeue_unreconciled" ]
+    (inventory_phases ~base_path);
   let durable = load_one_partition ~base_path in
   Alcotest.(check bool)
     "newer generation remains structurally distinct"
@@ -4824,9 +4866,9 @@ let () =
             `Quick
             test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles
         ; Alcotest.test_case
-            "inventory does not call a requeue finished without its partition"
+            "inventory keeps a recorded requeue unfinished until the partition is released"
             `Quick
-            test_inventory_does_not_call_a_requeue_finished_without_its_partition
+            test_inventory_keeps_a_recorded_requeue_unfinished_until_the_partition_is_released
         ; Alcotest.test_case
             "Ready+Requested recovery fails closed"
             `Quick

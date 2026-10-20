@@ -219,10 +219,17 @@ let lines ~now fetched ~keeper_name =
     [ Bad, "could not read: " ^ Terminal_text.single_line detail ]
   | Masc_tui_fetched.Ready quarantines ->
     let waiting_items = waiting quarantines in
+    let unreconciled_items =
+      items quarantines
+      |> List.filter (fun (item : Command.inventory_item) ->
+        item.Command.phase = Command.Inventory_requeue_unreconciled)
+      |> List.sort compare_oldest
+    in
     let summary =
-      match waiting_items with
-      | [] -> [ Dim, "nothing blocked" ]
-      | _ :: _ ->
+      match waiting_items, unreconciled_items with
+      | [], [] -> [ Dim, "nothing blocked" ]
+      | [], _ :: _ -> []
+      | _ :: _, _ ->
         [ ( Warn
           , Printf.sprintf
               "%d blocked, waiting for an operator \xc2\xb7 Q oldest \xc2\xb7 B all"
@@ -260,24 +267,24 @@ let lines ~now fetched ~keeper_name =
                  asked_words ))
         (by_category waiting_items)
     in
-    let count_phase phase =
+    let requeued =
       List.length
         (List.filter
-           (fun (item : Command.inventory_item) -> item.Command.phase = phase)
+           (fun (item : Command.inventory_item) ->
+              item.Command.phase = Command.Inventory_requeued)
            (items quarantines))
     in
-    let requeued = count_phase Command.Inventory_requeued in
-    let unreconciled = count_phase Command.Inventory_requeue_unreconciled in
     let requeued_lines =
-      (if requeued = 0 then []
-       else [ Dim, Printf.sprintf "%d requeued, back with the worker" requeued ])
+      (if requeued = 0 then [] else [ Dim, Printf.sprintf "%d requeued" requeued ])
       @
-      if unreconciled = 0 then []
-      else
+      match unreconciled_items with
+      | [] -> []
+      | oldest :: _ ->
         [ ( Bad
           , Printf.sprintf
-              "%d requeue(s) the partition ledger does not confirm"
-              unreconciled )
+              "%d requeue(s) the partition ledger does not confirm \xc2\xb7 oldest %s"
+              (List.length unreconciled_items)
+              (Terminal_text.single_line oldest.Command.partition_id) )
         ]
     in
     let unreadable = unreadable_rows quarantines @ quarantines.unreadable_errors in

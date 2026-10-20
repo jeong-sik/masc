@@ -44,18 +44,44 @@ let inline_svg ~name svg = Output_image { name; source = Inline_svg svg }
 let mermaid ~name source = Output_image { name; source = Inline_mermaid source }
 let mermaid_source source = Inline_mermaid source
 
-let in_message ~text ~attachments =
-  match List.find_opt (function
+let is_image = function
     | No_image -> false
-    | Named_path _ | Staged _ | Stored_attachment _ | Output_image _ | Unavailable_image _ -> true) (List.rev attachments) with
-  | Some image -> image
-  | None ->
-      match List.rev (Masc_tui_markdown.mermaid_sources text) with
-      | source :: _ -> mermaid ~name:"Mermaid" source
-      | [] ->
-      match List.rev (Masc_tui_image_ref.paths text) with
-      | last :: _ -> Named_path last
-      | [] -> No_image
+    | Named_path _ | Staged _ | Stored_attachment _ | Output_image _ | Unavailable_image _ -> true
+
+let newest previews =
+  match List.find_opt is_image (List.rev previews) with
+  | Some preview -> preview
+  | None -> No_image
+
+let in_message_previews ~text ~attachments =
+  let attachments = List.filter is_image attachments in
+  let diagrams = Masc_tui_markdown.mermaid_sources text
+    |> List.filter (fun source -> not (List.exists (function
+      | Output_image {source=Inline_mermaid other;_} -> String.equal source other
+      | Named_path _ | Staged _ | Stored_attachment _
+      | Output_image {source=(Inline_data _ | Inline_svg _ | Server_path _ | Remote_uri _);_}
+      | Unavailable_image _ | No_image -> false) attachments))
+    |> List.map (mermaid ~name:"Mermaid") in
+  List.map (fun path -> Named_path path) (Masc_tui_image_ref.paths text)
+  @ diagrams @ attachments
+
+let in_message ~text ~attachments =
+  in_message_previews ~text ~attachments |> newest
+
+let newest_first ~conversation ~staged ~order =
+  let conversation = List.filter is_image conversation in
+  let staged = List.map (fun attachment -> Staged attachment) staged in
+  let ordered = match order with
+    | Named_is_newer | Unordered -> staged @ conversation
+    | Staged_is_newer -> conversation @ staged in
+  List.rev ordered
+
+let prioritize_sources ~newly_observed sources =
+  let fresh, previous = List.partition (fun (source,_) -> newly_observed source) sources in
+  match List.concat_map snd fresh |> newest with
+  | No_image -> sources, Staged_is_newer
+  | Named_path _ | Staged _ | Stored_attachment _ | Output_image _ | Unavailable_image _ ->
+      previous @ fresh, Named_is_newer
 
 let choose_preview ~conversation ~staged ~order =
   match conversation, List.rev staged with

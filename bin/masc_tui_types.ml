@@ -1075,7 +1075,9 @@ type msg_entry = {
       (** Structural producer position within one request. Inside that request,
           timestamps never move rows; phase then this sequence is the order. *)
   me_text: string;
-  me_image: Masc_tui_image_preview.preview;
+  me_images: Masc_tui_image_preview.preview list;
+      (** Original image and closed-diagram sources, kept before terminal-safe
+          prose rendering. Every preview remains addressable within one reply. *)
   me_media: Masc_tui_chat_media.t list;
       (** Original decoded output metadata. A journal may replace the prose,
           but does not own these durable media records or their image action. *)
@@ -7910,7 +7912,13 @@ type image_observation = {
   io_logs :
     (Masc_tui_keeper_chat_log.journal_source
      * (Masc_tui_keeper_chat_transcript.drawn_origin
-        * Masc_tui_image_preview.preview) list) list;
+        * Masc_tui_image_preview.preview list) list) list;
+}
+
+type image_catalog = {
+  ic_reading : unit ref;
+  ic_keeper : string option;
+  ic_previews : Masc_tui_image_preview.preview list;
 }
 
 type task_dispatch_request = {
@@ -8420,6 +8428,7 @@ type state = {
   mutable image_open: bool;
   mutable browser_viewport : (Browser_lane_view.screenshot * string) option;
   mutable image_request_generation: int;
+  mutable image_catalog: image_catalog option;
   (* Any new input cancels an outstanding asynchronous image preview. *)
   mutable sent_image_read: sent_image_read option;
   (* The MSX spectator screen, the image overlay's twin: while [msx_open] is
@@ -15193,6 +15202,7 @@ let create_state
   image_open = false;
   browser_viewport = None;
   image_request_generation = 0;
+  image_catalog = None;
   sent_image_read = None;
   msx_open = false;
   msx_frame = None;

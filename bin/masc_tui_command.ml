@@ -19,6 +19,9 @@ type t =
   | Play_invalid of string
   | Open_score of int
   | Score_invalid_index
+  | Open_images of int
+  | List_images
+  | Images_invalid_index
   | Open_music
   | Music_invalid_arguments
   | Listen
@@ -253,6 +256,11 @@ let catalog =
     ; args = "<path>"
     ; summary = "draw an image file on the terminal"
     }
+  ; { word = "images"
+    ; aliases = []
+    ; args = "[N]"
+    ; summary = "open a conversation image or diagram; N is newest-first"
+    }
   ; { word = "attach"
     ; aliases = []
     ; args = "<path>"
@@ -432,6 +440,11 @@ let parse text =
         (match int_of_string_opt index with
          | Some index when index > 0 -> Open_score index
          | Some _ | None -> Score_invalid_index)
+    | "images", "" -> List_images
+    | "images", index ->
+        (match int_of_string_opt index with
+         | Some index when index > 0 -> Open_images index
+         | Some _ | None -> Images_invalid_index)
     | "login", client -> Account_login client
     | "settings", _ -> Open_settings
     | "diff", _ -> Open_diff

@@ -1052,7 +1052,7 @@ let image_log_observations (state : state) =
                   match item.superseded, item.drawn with
                   | None, (Drawn_text text | Drawn_reply text) ->
                       Some (item.origin,
-                        Masc_tui_image_preview.in_message ~text ~attachments:[])
+                        Masc_tui_image_preview.in_message_previews ~text ~attachments:[])
                   | Some _, _
                   | None, (Drawn_thinking _ | Drawn_skill _ | Drawn_tools _
                     | Drawn_status _ | Drawn_error _) -> None) in
@@ -1077,7 +1077,7 @@ let image_preview_candidates (state : state) logs =
                       | Message_thinking -> None
                       | Message_user _ | Message_keeper | Message_autonomous
                       | Message_status | Message_local | Message_error | Message_tool
-                      | Message_skill _ | Message_memory -> Some (anchor, row.me_image))
+                      | Message_skill _ | Message_memory -> Some (anchor, row.me_images))
              | Some (Search_journal { source; origin; _ } as anchor) ->
                  Option.bind (List.assoc_opt source logs) (fun items ->
                    Option.map (fun preview -> anchor, preview) (List.assoc_opt origin items))
@@ -1093,7 +1093,7 @@ let image_preview_candidates (state : state) logs =
               | Search_history {row_anchor; _} -> row_anchor = anchor
               | Search_child _ | Search_admission _ | Search_journal _ -> false) projected
             then None
-            else Some (Search_history {row_anchor=anchor; reply_source=None}, row.me_image)
+            else Some (Search_history {row_anchor=anchor; reply_source=None}, row.me_images)
         | Some _, (Message_keeper | Message_autonomous | Message_status | Message_local
           | Message_error | Message_tool | Message_skill _ | Message_thinking | Message_memory)
         | None, _ -> None) in
@@ -2047,6 +2047,11 @@ let next_chat_operation_seq state request_id =
 
 let append_chat_history ?at ?submitted_at ?turn_phase ?operation_seq state
     request role text =
+  let images = Masc_tui_image_preview.in_message_previews ~text
+    ~attachments:(match role with
+      | Message_user _ -> List.map (fun a -> Masc_tui_image_preview.Staged a) request.Keeper_chat.attachments
+      | Message_keeper | Message_autonomous | Message_status | Message_local | Message_error
+      | Message_tool | Message_thinking | Message_memory | Message_skill _ -> []) in
   let text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text in
   let at = Option.value ~default:(Unix.gettimeofday ()) at in
   let turn_phase =
@@ -2071,11 +2076,7 @@ let append_chat_history ?at ?submitted_at ?turn_phase ?operation_seq state
           me_turn_sequence = None;
           me_operation_seq = operation_seq;
           me_text = text;
-          me_image = Masc_tui_image_preview.in_message ~text
-            ~attachments:(match role with
-              | Message_user _ -> List.map (fun a -> Masc_tui_image_preview.Staged a) request.Keeper_chat.attachments
-              | Message_keeper | Message_autonomous | Message_status | Message_local | Message_error
-              | Message_tool | Message_thinking | Message_memory | Message_skill _ -> []);
+          me_images = images;
           me_media = [];
           me_memory_summary = None;
           me_memory_pass = Masc_tui_message_layout.No_pass;
@@ -8239,11 +8240,10 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
   ; me_turn_sequence = row.Keeper_chat_history.turn_sequence
   ; me_operation_seq = operation_seq
   ; me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text
-  ; me_image =
-      (match Masc_tui_chat_media.newest_image row.Keeper_chat_history.media with
-       | Some preview -> preview
-       | None -> Masc_tui_image_preview.in_message ~text:row.Keeper_chat_history.text
-           ~attachments:(List.map (fun note -> note.Keeper_chat_history.att_image) row.attachments))
+  ; me_images = Masc_tui_image_preview.in_message_previews
+      ~text:row.Keeper_chat_history.text
+      ~attachments:(List.map (fun note -> note.Keeper_chat_history.att_image) row.attachments
+        @ Masc_tui_chat_media.images row.Keeper_chat_history.media)
   ; me_media = row.Keeper_chat_history.media
   ; me_memory_summary =
       Option.map
@@ -8909,7 +8909,7 @@ let update_queued_history_text state (request : Keeper_chat.request) =
           && String.equal entry.me_request_id request.Keeper_chat.request_id
           && String.equal entry.me_keeper_name request.keeper_name
         then { entry with me_text = text;
-          me_image = Masc_tui_image_preview.in_message ~text:request.message
+          me_images = Masc_tui_image_preview.in_message_previews ~text:request.message
             ~attachments:(List.map (fun a -> Masc_tui_image_preview.Staged a) request.attachments) }
         else entry)
       state.msg_history
@@ -9155,7 +9155,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                        | Message_error | Message_tool | Message_skill _
                        | Message_thinking | Message_memory -> false
                      then { entry with me_text = safe_text;
-                       me_image = Masc_tui_image_preview.in_message ~text:request.message
+                       me_images = Masc_tui_image_preview.in_message_previews ~text:request.message
                          ~attachments:(List.map (fun a -> Masc_tui_image_preview.Staged a) request.attachments) }
                      else entry)
                    state.msg_history;
@@ -9468,7 +9468,7 @@ let chat_notice state ~keeper_name ~kind text =
               me_turn_sequence = None;
               me_operation_seq = next_chat_operation_seq state "";
               me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text;
-              me_image = Masc_tui_image_preview.No_image;
+              me_images = [];
               me_media = [];
               me_memory_summary = None;
               me_memory_pass = Masc_tui_message_layout.No_pass;
@@ -10628,14 +10628,6 @@ let open_staged_image state ~notice attachment =
       | Error (`Msg detail) -> refuse detail
       | Ok data -> draw_image state ~refuse ~title data)
 
-let newest_preview candidates =
-  List.rev candidates
-  |> List.find_map (fun (_, preview) ->
-       match preview with
-       | Masc_tui_image_preview.No_image -> None
-       | Named_path _ | Staged _ | Stored_attachment _ | Output_image _
-       | Unavailable_image _ -> Some preview)
-
 let image_request_is_active state entry =
   let matches request =
     String.equal request.Keeper_chat.keeper_name entry.me_keeper_name
@@ -10655,7 +10647,7 @@ let image_request_is_active state entry =
    A staged draft is superseded only by a new session row or a changed speech
    preview from a source this pane already held at staging. A newly loaded
    journal without such provenance conservatively leaves the draft first. *)
-let conversation_image state =
+let conversation_image_sources state =
   let session = image_session_rows state in
   let logs = image_log_observations state in
   let candidates = image_preview_candidates state logs in
@@ -10686,7 +10678,7 @@ let conversation_image state =
          | Waiting | Working -> true
          | Stream_ended | Stream_failed _ -> false) state.msg_inflight
   in
-  let newly_observed (anchor, preview) = match anchor with
+  let newly_observed anchor = match anchor with
     | Search_history {row_anchor; _} ->
         List.exists (same_msg_anchor row_anchor) observed_rows
     | Search_journal {source; origin; _} ->
@@ -10699,15 +10691,14 @@ let conversation_image state =
               | Some previous ->
                   match List.assoc_opt origin previous with
                   | None -> true
-                  | Some old_preview -> old_preview <> preview)
+                  | Some old_preview ->
+                      let preview = Option.value ~default:[]
+                        (Option.bind (List.assoc_opt source logs) (List.assoc_opt origin)) in
+                      Masc_tui_image_preview.newest old_preview
+                      <> Masc_tui_image_preview.newest preview)
     | Search_child _ | Search_admission _ -> false
   in
-  match newest_preview (List.filter newly_observed candidates) with
-  | Some image -> image, Masc_tui_image_preview.Named_is_newer
-  | None ->
-      match newest_preview candidates with
-      | Some image -> image, Masc_tui_image_preview.Staged_is_newer
-      | None -> Masc_tui_image_preview.No_image, Masc_tui_image_preview.Unordered
+  Masc_tui_image_preview.prioritize_sources ~newly_observed candidates
 
 (* Settle the exact interrupted preview without replacing a newer selection. *)
 let settle_retired_sent_image state =
@@ -10767,12 +10758,9 @@ let open_message_image ?skill_reference state ~mailbox ~notice ~name source =
   end
   end
 
-let open_named_image state ~mailbox =
+let open_selected_image state ~mailbox preview =
   let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
-  let conversation, order = conversation_image state in
-  match
-    Masc_tui_image_preview.choose_preview ~conversation ~staged:state.msg_attachments ~order
-  with
+  match preview with
   | Masc_tui_image_preview.Named_path path -> open_image state ~notice path
   | Masc_tui_image_preview.Staged attachment -> open_staged_image state ~notice attachment
   | Masc_tui_image_preview.Stored_attachment { name; reference } ->
@@ -10784,6 +10772,60 @@ let open_named_image state ~mailbox =
         (Printf.sprintf "Ctrl-O %s: %s" name reason)
   | Masc_tui_image_preview.No_image ->
       notice ~kind:Notice_reply "Ctrl-O: no image or closed Mermaid diagram in this conversation or the composer"
+
+let open_named_image state ~mailbox =
+  let sources, order = conversation_image_sources state in
+  let conversation = List.concat_map snd sources |> Masc_tui_image_preview.newest in
+  open_selected_image state ~mailbox
+    (Masc_tui_image_preview.choose_preview ~conversation ~staged:state.msg_attachments ~order)
+
+let capture_image_catalog state =
+  (* Freeze every source before the first fetch. Numbering is local to the
+     currently loaded conversation and never reads labels back as identities. *)
+  let sources, order = conversation_image_sources state in
+  let conversation = List.concat_map snd sources in
+  let candidates = Masc_tui_image_preview.newest_first ~conversation
+      ~staged:state.msg_attachments ~order in
+  {ic_reading=state.workspace_read_authority;ic_keeper=state.msg_target_keeper_name;
+   ic_previews=candidates}
+
+let list_conversation_images state =
+  let catalog = capture_image_catalog state in
+  state.image_catalog <- Some catalog;
+  let label = function
+    | Masc_tui_image_preview.Named_path path -> path
+    | Staged attachment -> attachment.Masc_tui_keeper_chat_projection.name
+    | Stored_attachment {name;_} | Output_image {name;_} -> name
+    | Unavailable_image {name;reason} -> name ^ " · unavailable: " ^ reason
+    | No_image -> "No image" in
+  let rows = List.mapi (fun index preview ->
+    Printf.sprintf "%d. %s" (index+1) (label preview)) catalog.ic_previews in
+  Masc_tui_message_input.clear state.msg_input;
+  let text = match rows with
+    | [] -> "/images: no image or closed diagram in the loaded conversation or composer"
+    | _ -> "Images / diagrams · /images N opens · /images refreshes this list\n"
+        ^ String.concat "\n" rows in
+  chat_notice state ~keeper_name:state.msg_target_keeper_name ~kind:Notice_reply text
+
+let open_indexed_image state ~mailbox ~index =
+  let catalog = match state.image_catalog with
+    | Some catalog -> catalog
+    | None ->
+      let catalog = capture_image_catalog state in
+      state.image_catalog <- Some catalog;
+      catalog in
+  let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
+  if catalog.ic_reading != state.workspace_read_authority
+     || catalog.ic_keeper <> state.msg_target_keeper_name then
+    notice ~kind:Notice_failure "/images: conversation changed; run /images to read its current list"
+  else match List.nth_opt catalog.ic_previews (index - 1) with
+  | Some preview ->
+      Masc_tui_message_input.clear state.msg_input;
+      open_selected_image state ~mailbox preview
+  | None ->
+      notice ~kind:Notice_failure
+        (Printf.sprintf "/images: %d image/diagram preview(s) in the loaded conversation and composer"
+           (List.length catalog.ic_previews))
 
 (* The MIDI soundfont read at boot from [tui].midi_soundfont (the same load
    that applies the theme and the saved sort). The numbered attachment keys
@@ -11268,7 +11310,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       | Attach_image_ref_missing_value | Preset_list | Preset_save _ | Preset_save_missing_name
       | Preset_restore _ | Preset_restore_missing_name | Preset_show _ | Preset_show_missing_name
       | Preset_delete _ | Preset_delete_missing_name | Listen
-      | Open_music | Music_invalid_arguments | Open_score _ | Score_invalid_index | Unknown _ -> true
+      | Open_music | Music_invalid_arguments | Open_score _ | Score_invalid_index
+      | Open_images _ | List_images | Images_invalid_index | Unknown _ -> true
   then
     notice ~kind:Notice_failure
       "A queued edit is active; press Enter for its text or Ctrl-U to abandon it"
@@ -11587,6 +11630,12 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       listen_newest_media state
   | Masc_tui_command.Score_invalid_index ->
       notice ~kind:Notice_failure "/score [N]: N must be a positive score number, newest first"
+  | Masc_tui_command.Images_invalid_index ->
+      notice ~kind:Notice_failure "/images [N]: N must be a positive image/diagram number, newest first"
+  | Masc_tui_command.Open_images index ->
+      open_indexed_image state ~mailbox ~index
+  | Masc_tui_command.List_images ->
+      list_conversation_images state
   | Masc_tui_command.Music_invalid_arguments ->
       notice ~kind:Notice_failure "Use /music; choose a project or take in the workbench"
   | Masc_tui_command.Open_music ->
@@ -17149,6 +17198,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Play_invite _
        | Masc_tui_command.Play_revoke _ | Masc_tui_command.Play_invalid _
        | Masc_tui_command.Listen
+       | Masc_tui_command.Open_images _ | Masc_tui_command.List_images | Masc_tui_command.Images_invalid_index
        | Masc_tui_command.Open_score _ | Masc_tui_command.Score_invalid_index
        | Masc_tui_command.Preset_list | Masc_tui_command.Preset_save _
        | Masc_tui_command.Preset_save_missing_name

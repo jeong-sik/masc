@@ -73,8 +73,8 @@ let append_text ~text media =
     else text ^ (if String.ends_with ~suffix:"\n" text then "" else "\n") ^ notes
 ;;
 
-let newest_image media =
-  List.rev media |> List.find_map (function
+let images media =
+  media |> List.filter_map (function
     | Image image ->
       Some (Masc_tui_image_preview.output_image
         ~name:(Option.value image.cap ~default:"Image") ~src:image.src)
@@ -102,6 +102,12 @@ let newest_image media =
     | Mermaid diagram -> Some (Masc_tui_image_preview.mermaid
         ~name:(Option.value diagram.caption ~default:"Mermaid") diagram.source)
     | Voice _ -> None)
+;;
+
+let newest_image media =
+  match List.rev (images media) with
+  | newest :: _ -> Some newest
+  | [] -> None
 ;;
 
 (* {1 Playback}

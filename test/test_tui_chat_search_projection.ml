@@ -10,7 +10,7 @@ module Layout = Masc_tui_message_layout
 let row ?(keeper = "alpha") ~id ~request_id ~role ~text at : T.msg_entry =
   { me_keeper_name = keeper; me_role = role; me_identity = T.Persisted_row id;
     me_turn_phase = T.chat_turn_phase_of_role role; me_turn_sequence = None;
-    me_operation_seq = 0; me_text = text; me_image = Masc_tui_image_preview.No_image; me_media = [];
+    me_operation_seq = 0; me_text = text; me_images = []; me_media = [];
     me_memory_summary = None; me_journal = []; me_memory_pass = Layout.No_pass;
     me_gate = None; me_submitted_at = None; me_tool_block = None;
     me_skill_block = []; me_timestamp = "00:00:00"; me_request_id = request_id;

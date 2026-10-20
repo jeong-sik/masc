@@ -46,6 +46,12 @@ type t =
       (** [/score [N]] opens a frozen alphaTex score in this terminal using
           official alphaTab notation and playback; N is newest-first. *)
   | Score_invalid_index
+  | Open_images of int
+      (** [/images [N]] selects a frozen image/diagram, newest first, including
+          earlier outputs in one reply and staged composer attachments. *)
+  | List_images
+      (** [/images] lists and freezes image/diagram numbers until the next list. *)
+  | Images_invalid_index
   | Open_music
       (** [/music] opens the terminal music library without score graphics. *)
   | Music_invalid_arguments

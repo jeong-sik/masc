@@ -1746,7 +1746,19 @@ Node.js 22+ and Kitty graphics with reported cell geometry. The guide above
 describes controls, SoundFont selection and current limits.
 
 In Keeper chat, `Ctrl-O` previews the newest image or closed `mermaid` fence.
-Structured Mermaid outputs use the same action. Install Pele with
+`/images` lists the available images and diagrams. `/images N` opens an item,
+counting newest first. The listed numbers keep their original sources even if
+new messages arrive; `/images` reads a fresh list. A Keeper or workspace change
+requires a new list before using its numbers. Without a previous list,
+`/images N` captures the current sources. This includes every retained image attachment and closed
+diagram within one reply, and staged composer images. The catalog covers the
+currently loaded conversation and selected live speech, excluding thinking and
+superseded attempts. Names remain labels; opening uses the retained source.
+An unavailable image keeps its number and reports why it cannot be opened.
+The selected source is frozen before fetching or rendering. At capture, a
+draft's existing priority relative to conversation arrivals also applies to
+number `1`; Ctrl-O continues to choose from the current conversation and draft.
+Structured Mermaid outputs use the same actions. Install Pele with
 `scripts/install-pele.sh` (Node.js 22+ and pnpm); the companion runs offline and
 renders charts, mindmaps, class diagrams and other Mermaid types as terminal
 images. The preview uses the available terminal width and observed colors;

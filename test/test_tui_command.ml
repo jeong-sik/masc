@@ -51,6 +51,9 @@ let describe = function
   | Command.Listen -> "listen"
   | Command.Open_score index -> Printf.sprintf "score:%d" index
   | Command.Score_invalid_index -> "score-invalid-index"
+  | Command.Open_images index -> Printf.sprintf "images:%d" index
+  | Command.List_images -> "list-images"
+  | Command.Images_invalid_index -> "images-invalid-index"
   | Command.Open_music -> "open-music"
   | Command.Music_invalid_arguments -> "music-invalid-arguments"
   | Command.Open_metrics -> "open-metrics"
@@ -986,10 +989,21 @@ let test_command_menu_keeps_selection_separate_from_draft () =
      let initial = menu Command.Menu_idle draft in
      menu (Command.menu_step ~direction:Command.Next ~draft initial) draft |> Command.menu_accept)
 
+let test_images_command () =
+  List.iter (fun (text,expected) ->
+    check bool "visual command stays local with an explicit positive selection" true
+      (Command.parse text = expected))
+    ["/images",Command.List_images; "/images 1",Command.Open_images 1;
+     "/images 3",Command.Open_images 3;
+     "/images 0",Command.Images_invalid_index;
+     "/images -1",Command.Images_invalid_index;
+     "/images 1 extra",Command.Images_invalid_index]
+
 let () =
   run "tui command"
     [ ( "composer"
-      , [ test_case "measurement artifact is an exact local command" `Quick test_measurement_command
+      , [ test_case "images lists or explicitly selects a visual source" `Quick test_images_command
+        ; test_case "measurement artifact is an exact local command" `Quick test_measurement_command
         ; test_case "plain text is a message" `Quick test_plain_text_is_a_message
         ; test_case "ref command parses url and bare id" `Quick
             test_ref_command_parses_url_and_bare_id

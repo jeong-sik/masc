@@ -14,7 +14,7 @@ let entry ?summary ?(pass = Masc_tui_message_layout.No_pass) ?(at = 0.) role tex
   ; me_turn_sequence = None
   ; me_operation_seq = 0
   ; me_text = text
-  ; me_image = Masc_tui_image_preview.No_image
+  ; me_images = []
   ; me_media = []
   ; me_memory_summary = summary
   ; me_journal = []

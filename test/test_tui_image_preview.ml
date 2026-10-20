@@ -197,11 +197,67 @@ let test_diagram_preview_selection () =
   | Preview.No_image -> ()
   | _ -> fail "incomplete stream was sent to the renderer"
 
+let test_all_visual_sources_remain_selectable () =
+  let first = "flowchart TD\n\tA[한글] --> B" in
+  let second = "pie\n  \"대기\": 2" in
+  let text = "shot1.png shot2.png\n```mermaid\n" ^ first
+    ^ "\n```\n~~~mermaid\n" ^ second ^ "\n~~~\n```mermaid\nincomplete" in
+  let supplied = [stored "retained.png"; Preview.mermaid ~name:"caption" second] in
+  let catalog = Preview.in_message_previews ~text ~attachments:supplied in
+  match catalog with
+  | [Preview.Named_path "shot1.png"; Named_path "shot2.png";
+     Output_image {source=Inline_mermaid one;_}; Stored_attachment _;
+     Output_image {name="caption";source=Inline_mermaid two}] ->
+      check string "earlier diagram keeps original tabs and unicode" first one;
+      check string "structured and prose copies name one diagram" second two
+  | _ -> fail "a visual source was dropped, duplicated or replaced by an unfinished fence"
+
+let test_catalog_preserves_explicit_preview_priority () =
+  let conversation = [Preview.Named_path "first.png"; stored "retained.png"] in
+  let staged = [attachment "draft1.png";attachment "draft2.png"] in
+  List.iter (fun order ->
+    let catalog = Preview.newest_first ~conversation ~staged ~order in
+    check int "both conversation and staged sources are selectable" 4 (List.length catalog);
+    let selected = Preview.choose_preview ~conversation:(Preview.newest conversation) ~staged ~order in
+    check bool "number one matches Ctrl-O's explicit priority" true
+      (List.hd catalog = selected))
+    [Preview.Named_is_newer; Staged_is_newer; Unordered];
+  let unavailable = Preview.Unavailable_image {name="missing.png";reason="not retained"} in
+  match Preview.newest_first ~conversation:[List.hd conversation;unavailable;Preview.No_image]
+      ~staged:[] ~order:Preview.Unordered with
+  | [Unavailable_image _; Named_path "first.png"] -> ()
+  | _ -> fail "unavailable producer source must retain its selection identity"
+
+let test_current_source_beats_an_older_queued_suffix () =
+  let old = Preview.Named_path "queued-before-staging.png" in
+  let current = Preview.mermaid ~name:"live" "flowchart TD\n A --> B" in
+  let sources,order = Preview.prioritize_sources
+      ~newly_observed:(String.equal "current-turn")
+      ["current-turn",[current];"old-queued",[old]] in
+  let catalog = Preview.newest_first ~conversation:(List.concat_map snd sources)
+      ~staged:[attachment "draft.png"] ~order in
+  check bool "current source selected ahead of staged and earlier queued sources" true
+    (List.hd catalog = current);
+  check int "every occurrence remains selectable" 3 (List.length catalog);
+  let sources,order = Preview.prioritize_sources
+      ~newly_observed:(String.equal "current-turn")
+      ["current-turn",[];"old-queued",[old]] in
+  match Preview.newest_first ~conversation:(List.concat_map snd sources)
+      ~staged:[attachment "draft.png"] ~order with
+  | Preview.Staged _ :: _ -> ()
+  | _ -> fail "an unfinished current source displaced a staged attachment"
+
 let () =
   run
     "tui_image_preview"
     [ ( "choose_preview"
-      , [ test_case "closed diagrams preserve source and draft priority" `Quick
+      , [ test_case "every original visual source remains selectable" `Quick
+            test_all_visual_sources_remain_selectable
+        ; test_case "new live source beats an earlier queued suffix" `Quick
+            test_current_source_beats_an_older_queued_suffix
+        ; test_case "catalog preserves explicit preview priority" `Quick
+            test_catalog_preserves_explicit_preview_priority
+        ; test_case "closed diagrams preserve source and draft priority" `Quick
             test_diagram_preview_selection
         ; test_case "sent image uses durable reference, never its label" `Quick
             test_sent_image_keeps_reference_not_filename

@@ -133,7 +133,7 @@ let restamp ~tool_name ~start_time (result : Tool_result.result) =
   | Tool_result.Completed data -> Tool_result.Completed {data with tool_name;duration_ms=Tool_timing.elapsed_ms start_time}
   | Deferred data -> Tool_result.Deferred {data with tool_name;duration_ms=Tool_timing.elapsed_ms start_time}
   | Failed data -> Tool_result.Failed {data with tool_name;duration_ms=Tool_timing.elapsed_ms start_time}
-let project ~keeper_name ~started request (receipt:Host.receipt) =
+let project ~base_path ~keeper_name ~started request (receipt:Host.receipt) =
   let annotate=Browser_binding.annotate receipt.binding in
   let capability_fields=["browserCapabilities",C.to_json (Browser_binding.backend receipt.binding);
     "requiredActions",`List (List.map (fun action -> `String (C.operation_name action)) request.required_actions)] in
@@ -152,7 +152,7 @@ let project ~keeper_name ~started request (receipt:Host.receipt) =
       let* keeper_name=Option.to_result ~none:"screenshot requires an owning Keeper" keeper_name in
       let* data=Browser_surface.capture_from ~binding:receipt.binding ~tab_id ~started receipt.data
         |> Result.map_error Browser_surface.failure_message in
-      Browser_screenshot.persist ~keeper_name data
+      Browser_screenshot.persist ~base_path ~keeper_name data
 let handle ?upload_paths ~config ~access ~principal ~reserved ~keeper_name ~tool ~tool_name ~start_time json =
   let started=Mtime_clock.elapsed_ns () in
   let result=match prepare ~keeper_name ~upload_paths tool json with
@@ -164,7 +164,7 @@ let handle ?upload_paths ~config ~access ~principal ~reserved ~keeper_name ~tool
             match Host.issue ~required_actions:request.required_actions host ~preference:request.preference request.verb with
             | Error result -> result
             | Ok receipt ->
-                (match project ~keeper_name ~started request receipt with
+                (match project ~base_path:config.Workspace.base_path ~keeper_name ~started request receipt with
                  | Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data ?metadata:receipt.raw_result._meta ()
                  | Error detail ->
                      let effect_disposition=match request.projection with

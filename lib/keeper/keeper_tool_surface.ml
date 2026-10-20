@@ -601,6 +601,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
           clear_official_client_session_then (fun () ->
             match
               Keeper_history_clear.clear
+                ~base_path:config.base_path
                 ~keepers_dir:(Workspace.keepers_runtime_dir config)
                 ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
                 ~keeper_name:meta.name

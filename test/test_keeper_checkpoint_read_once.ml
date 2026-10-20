@@ -199,6 +199,46 @@ let test_a_snapshot_behind_a_replaced_file_decodes_it () = with_session (fun ses
     check string "the last message is the replacing file's" "replaced" text
   | _ -> fail "the replacing file's last message was not one text block")
 
+(* The file is unreadable inside [f], so an answer proves the store did not
+   read it. *)
+let while_unreadable path f =
+  Unix.chmod path 0o000;
+  Fun.protect ~finally:(fun () -> Unix.chmod path 0o600) f
+
+(* A configured root re-pointed while the process runs. The save that follows
+   resolves the root afresh and lands under the new target; the lookups and
+   the forget through the configured spelling follow that save rather than
+   the target they resolved first. *)
+let test_a_repointed_root_moves_lookups_with_the_save () = with_session (fun session_dir ->
+  let scratch = Filename.dirname session_dir in
+  let first_root = Filename.concat scratch "first-root" in
+  let second_root = Filename.concat scratch "second-root" in
+  List.iter (fun root -> Unix.mkdir root 0o700; Unix.mkdir (Filename.concat root "trace") 0o700)
+    [ first_root; second_root ];
+  let linked_root = Filename.concat scratch "linked-root" in
+  Unix.symlink first_root linked_root;
+  let trace_dir = Filename.concat linked_root "trace" in
+  save_for_keeper ~session_dir:trace_dir (make_checkpoint ~session_id:"session" ~turn_count:1 ~marker:"first");
+  check int "the first target answers" 1 (load_value ~session_dir:trace_dir "the first load failed").turn_count;
+  Unix.unlink linked_root;
+  Unix.symlink second_root linked_root;
+  let second = make_checkpoint ~session_id:"session" ~turn_count:2 ~marker:"second" in
+  save_for_keeper ~session_dir:trace_dir
+    { second with messages = second.messages @ second.messages };
+  check bool "the second save landed under the new target" true
+    (Sys.file_exists (canonical_path (Filename.concat second_root "trace")));
+  while_unreadable (canonical_path trace_dir) (fun () ->
+    (match Store.canonical_message_count ~session_dir:trace_dir ~session_id:"session" with
+     | Ok (Some 4) -> ()
+     | Ok _ -> fail "the count did not describe the second save"
+     | Error _ -> fail "the count read the file: its lookup did not follow the save");
+    check int "the load answers from the second save's value" 2
+      (load_value ~session_dir:trace_dir "the load read the file").turn_count;
+    Store.forget_written_lineages ~session_root:linked_root ~keeper_name:keeper;
+    match Store.load_agent_core ~session_dir:trace_dir ~session_id:"session" with
+    | Error _ -> ()
+    | Ok _ -> fail "the forget left the value kept under the new target"))
+
 let () =
   run "keeper checkpoint read once"
     [ ( "locked read"
@@ -215,6 +255,8 @@ let () =
     ; ( "summary key"
       , [ test_case "a linked canonical is not answered from its target" `Quick
             test_a_linked_canonical_is_not_answered_from_its_target
+        ; test_case "a re-pointed root moves lookups with the save" `Quick
+            test_a_repointed_root_moves_lookups_with_the_save
         ] )
     ; ( "exact snapshot"
       , [ test_case "a keeper snapshot uses the kept decode" `Quick

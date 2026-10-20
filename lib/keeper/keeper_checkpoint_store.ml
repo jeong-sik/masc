@@ -423,16 +423,26 @@ let canonical_identity_opt path =
    reader goes to the file. An answer found under a key is used only while it
    carries the identity of the file at the caller's path.
 
-   A root is resolved once per spelling for the life of the process; the
-   session root does not move under a running server. [Unix.realpath] on
-   every lookup walked the whole path on the scheduler thread and took 399 of
-   2,112 samples of it on 2026-10-20. A root that does not resolve is not
-   remembered, so a lookup resolves it again once it exists, and until then a
-   path under it has no key. *)
+   A lookup resolves a root once per spelling and remembers the answer.
+   [Unix.realpath] on every lookup walked the whole path on the scheduler
+   thread and took 399 of 2,112 samples of it on 2026-10-20. Every locked
+   transaction resolves its root afresh ([canonical_session_location]) and
+   records that answer for the spelling it was given, so a root re-pointed
+   while the server runs moves the lookups and [forget_written_lineages]
+   with the saves. A root that does not resolve is not remembered, so a
+   lookup resolves it again once it exists, and until then a path under it
+   has no key. *)
 let resolved_session_roots : (string, string) Hashtbl.t = Hashtbl.create 4
 
 (* Same discipline as [canonical_summaries_mutex]. *)
 let resolved_session_roots_mutex = Stdlib.Mutex.create ()
+
+(* The resolved spelling names itself, so a key built from a path a save
+   resolved finds the same root. *)
+let remember_session_root ~spelling resolved =
+  Stdlib.Mutex.protect resolved_session_roots_mutex (fun () ->
+    Hashtbl.replace resolved_session_roots spelling resolved;
+    Hashtbl.replace resolved_session_roots resolved resolved)
 
 let resolve_session_root root =
   match
@@ -443,8 +453,7 @@ let resolve_session_root root =
   | None ->
     (match Unix.realpath root with
      | resolved ->
-       Stdlib.Mutex.protect resolved_session_roots_mutex (fun () ->
-         Hashtbl.replace resolved_session_roots root resolved);
+       remember_session_root ~spelling:root resolved;
        Ok resolved
      | exception Unix.Unix_error (error, _, _) -> Error error)
 
@@ -876,12 +885,14 @@ let canonical_session_location session_dir =
       Fs_compat.mkdir_p parent;
       let location =
         Eio_guard.run_in_systhread ~label:"checkpoint-parent-stat" (fun () ->
+          let spelling = parent in
           let parent = Unix.realpath parent in
           if (Unix.stat parent).Unix.st_kind <> Unix.S_DIR
           then
             raise
               (Unix.Unix_error
                  (Unix.ENOTDIR, "checkpoint_session_parent", parent));
+          remember_session_root ~spelling parent;
           let location = Filename.concat parent leaf in
           (match Unix.lstat location with
            | { Unix.st_kind = Unix.S_LNK; _ } ->

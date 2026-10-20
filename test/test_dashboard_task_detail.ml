@@ -1,8 +1,8 @@
 open Alcotest
 module Detail = Server_dashboard_task_detail
 
-let task id description =
-  let json = `Assoc [
+let task ?links id description =
+  let json = `Assoc ([
     "id", `String id; "title", `String "Complete task";
     "description", `String description; "priority", `Int 2;
     "status", `String "todo"; "files", `List [];
@@ -11,7 +11,7 @@ let task id description =
       "completion_contract", `List [`String "Verify the visible result"];
       "required_evidence", `List [`String "artifact://proof"];
       "inspect_gate_evidence", `List []; "verify_gate_evidence", `List []]
-  ] in
+  ] @ (match links with None -> [] | Some links -> ["execution_links", links])) in
   match Masc_domain.task_of_yojson json with
   | Ok task -> task
   | Error detail -> fail detail
@@ -47,6 +47,27 @@ let test_missing () =
   in
   check_status " \t" `Bad_request;
   check_status "task-missing" `Not_found
+
+(* The TUI opens an original source Task through this response with the
+   shared Task decoder, so the response must be that decoder's own encoding
+   whether or not an execution ever claimed the Task. *)
+let test_tui_reads_served_detail () =
+  let index = Hashtbl.create 0 in
+  let reads_back name original =
+    let status, body =
+      Detail.find ~tasks:[original] ~goal_task_index:index ~task_id:original.Masc_domain.id
+      |> Detail.response in
+    check bool (name ^ ": found") true (status = `OK);
+    match Masc.Tui_decode_task_inspection.detail ~task_id:original.id body with
+    | Ok decoded ->
+        check bool (name ^ ": the TUI decodes the same Task") true
+          (Masc_domain.equal_task original decoded.task)
+    | Error detail -> fail (name ^ ": " ^ detail)
+  in
+  reads_back "a Task no execution claimed" (task "task-unlinked" "body");
+  reads_back "a claimed Task"
+    (task "task-linked" "body"
+       ~links:(`Assoc ["operation_id", `String "op-1"; "session_id", `String "trace-1"]))
 
 let test_authoritative_storage () =
   Eio_main.run @@ fun env ->
@@ -104,4 +125,5 @@ let test_authoritative_storage () =
 let () = run "Dashboard task details" ["read", [
   test_case "complete selected task" `Quick test_complete_task;
   test_case "missing input and missing task" `Quick test_missing;
+  test_case "the TUI reads the detail it is served" `Quick test_tui_reads_served_detail;
   test_case "authoritative storage failures" `Quick test_authoritative_storage]]

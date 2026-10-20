@@ -560,12 +560,6 @@ let task_completed_at (task : Masc_domain.task) =
   | Masc_domain.AwaitingVerification _ -> None
 ;;
 
-let task_execution_links_json (task : Masc_domain.task) =
-  match task.execution_links with
-  | { operation_id = None; session_id = None } -> `Null
-  | links -> Masc_domain.task_execution_links_to_yojson links
-;;
-
 (* RFC-0267 Phase 1: pick a goal_id for the wire so the Work board can nest
    jobs under goals. The task record carries no goal_id; the goal_task_links
    registry holds the association.
@@ -598,7 +592,6 @@ let task_json ~goal_task_index (task : Masc_domain.task) =
     assoc_upsert fields "assignee" (Json_util.string_opt_to_json (task_assignee task))
   in
   let fields = assoc_upsert fields "updated_at" (`String (task_updated_at task)) in
-  let fields = assoc_upsert fields "execution_links" (task_execution_links_json task) in
   let fields =
     assoc_upsert
       fields

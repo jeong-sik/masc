@@ -39,10 +39,10 @@ jobs:
       contents: read
       actions: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: diagnostic
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: 2dd5e16b83683e8d2a025597205cbc2dfb02f41e
           path: source
@@ -104,7 +104,7 @@ jobs:
           fi
           cat /proc/self/cgroup > evidence/cgroup-after.txt
           cat /proc/self/mountinfo > evidence/mountinfo-after.txt
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: rc-pptx-trace-${{ github.run_id }}
@@ -121,7 +121,7 @@ jobs:
       PROBE_OUT: ${{ github.workspace }}/artifacts/runtime-probe
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup OCaml for macOS runtime probe
         if: runner.os == 'macOS'
@@ -176,7 +176,7 @@ jobs:
           shasum -a 256 --check SHA256SUMS
 
       - name: Upload runtime probe
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.target == 'macos-arm64' && 'macos-arm64-item' || inputs.target }}-probe-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: ${{ env.PROBE_OUT }}/
@@ -185,7 +185,7 @@ jobs:
 
       - name: Set up Node for Item HTTP acceptance
         if: inputs.capture_item_http
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
 
@@ -214,7 +214,7 @@ jobs:
 
       - name: Upload Item HTTP evidence without workspace credentials
         if: always() && inputs.capture_item_http
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: item-http-${{ inputs.target }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: |
@@ -259,7 +259,7 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('sha=' + candidate + '\n')
           PYCODE
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.candidate.outputs.sha }}
           persist-credentials: false
@@ -356,7 +356,7 @@ jobs:
           shasum -a 256 ./* > SHA256SUMS
           shasum -a 256 --check SHA256SUMS
       - name: Upload macOS arm64 runtime probe
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos-arm64-probe-${{ steps.candidate.outputs.sha }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/masc-macos-arm64-probe/
@@ -385,7 +385,7 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('sha=' + candidate + '\n')
           PYCODE
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.candidate.outputs.sha }}
           persist-credentials: false
@@ -456,7 +456,7 @@ jobs:
               release_verified=False, relocatable_runtime_verified=False)
           (directory / 'build-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
           PYCODE
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: preparation-driver-macos-arm64-${{ steps.candidate.outputs.sha }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/preparation-driver-probe/
@@ -469,7 +469,7 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-ocaml-toolchain
       - name: Install native build dependencies
         run: |
@@ -517,7 +517,7 @@ jobs:
           cp "$RUNNER_TEMP/stagehand-offline-controls.json" "$PROBE_OUT/offline-controls.json"
           otool -L "$PROBE_OUT/stagehand_model_probe.exe" > "$PROBE_OUT/native-dependencies.txt"
           python3 scripts/stagehand-probe-manifest.py --directory "$PROBE_OUT" --source-sha "$SOURCE_SHA"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         with:
           name: stagehand-model-probe-macos-arm64-${{ github.sha }}
@@ -555,7 +555,7 @@ jobs:
           echo "PROBE_OUT=$PROBE_OUT" >> "$GITHUB_ENV"
           mkdir -p "$PROBE_OUT/evidence"
           printf '%s\n' "$GITHUB_SHA" > "$PROBE_OUT/requested-head.txt"
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-ocaml-toolchain
       - name: Install Linux native dependencies
         run: |
@@ -636,7 +636,7 @@ jobs:
           PYRECEIPT
       - name: Upload exact-head attempt evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: lane-fusion-container-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/lane-fusion-container/

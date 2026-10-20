@@ -23,7 +23,7 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-ocaml-toolchain
       - name: System libraries
         run: |
@@ -103,7 +103,7 @@ jobs:
             --source-commit "$(git rev-parse HEAD)"
           shasum -a 256 dist/* > proof/SHA256SUMS
           tar -czf proof/masc-lane-addon-macos-arm64.tar.gz -C dist .
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: lane-addon-native-macos-arm64-${{ github.sha }}

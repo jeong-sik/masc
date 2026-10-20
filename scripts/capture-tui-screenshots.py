@@ -34,6 +34,11 @@ from playwright.sync_api import Browser, Page, sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
 import masc_base_path  # noqa: E402
+from tui_capture_redaction import (  # noqa: E402
+    discover_keeper_names,
+    leaked_names,
+    redaction_pairs,
+)
 
 WORKTREE = Path(__file__).resolve().parents[1]
 TTYD = Path("/opt/homebrew/bin/ttyd")
@@ -221,27 +226,6 @@ THAW_JS = r"""
 """
 
 
-def placeholder_for(name: str, index: int) -> str:
-    """A distinct stand-in of exactly len(name) characters."""
-    # `kpr-01` needs six cells. A shorter name gets the compact `k01` form so
-    # two different keepers never truncate onto the same token.
-    base = f"kpr-{index:02d}" if len(name) >= 6 else f"k{index:02d}"
-    if len(base) >= len(name):
-        return base[: len(name)]
-    return base + " " * (len(name) - len(base))
-
-
-def discover_keeper_names(base_path: Path) -> list[str]:
-    keepers = base_path / ".masc" / "keepers"
-    if not keepers.is_dir():
-        return []
-    return sorted(
-        (d.name for d in keepers.iterdir() if d.is_dir() and not d.name.startswith(".")),
-        key=len,
-        reverse=True,
-    )
-
-
 def free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -366,7 +350,7 @@ def main() -> int:
         return 1
 
     names = discover_keeper_names(base)
-    pairs = [[n, placeholder_for(n, i + 1)] for i, n in enumerate(names)]
+    pairs = redaction_pairs(names)
     args.out.mkdir(parents=True, exist_ok=True)
 
     saved: list[dict] = []
@@ -388,7 +372,7 @@ def main() -> int:
                 # The frame is only publishable if nothing it was meant to hide
                 # survived. Checked rather than assumed, because the failure is
                 # silent: a leaked name looks exactly like a real screenshot.
-                leaked = [n for n in names if n in screen_text(page)]
+                leaked = leaked_names(names, screen_text(page))
                 if leaked:
                     page.evaluate(THAW_JS)
                     print(f"REFUSED {stem}: {len(leaked)} name(s) still on screen: "

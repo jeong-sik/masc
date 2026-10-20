@@ -53,6 +53,7 @@ from playwright.sync_api import Browser, Page, sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
 import masc_base_path  # noqa: E402
+from tui_capture_redaction import discover_keeper_names, redaction_pairs  # noqa: E402
 
 WORKTREE = Path(__file__).resolve().parents[1]
 TTYD = Path("/opt/homebrew/bin/ttyd")
@@ -107,51 +108,6 @@ REDACT_JS = r"""
   }
 };
 """
-
-
-def placeholder_for(name: str, index: int) -> str:
-    """A distinct stand-in of exactly len(name) characters."""
-    base = f"kpr-{index:02d}" if len(name) >= 6 else f"k{index:02d}"
-    if len(base) >= len(name):
-        return base[: len(name)]
-    return base + " " * (len(name) - len(base))
-
-
-def discover_keeper_names(base_path: Path) -> list[str]:
-    keepers = base_path / ".masc" / "keepers"
-    if not keepers.is_dir():
-        return []
-    return sorted(
-        (
-            d.name
-            for d in keepers.iterdir()
-            if d.is_dir() and not d.name.startswith(".")
-        ),
-        key=len,
-        reverse=True,
-    )
-
-
-# A prefix shorter than this is too generic to redact safely; no keeper column
-# truncates a name above ~18 cells, so 12 covers every truncation in practice.
-MIN_PREFIX_LEN = 12
-
-
-def redaction_pairs(names: list[str]) -> list[list[str]]:
-    """(from, to) pairs for REDACT_JS, longest first.
-
-    Besides each full name, every displayable prefix is covered: a table column
-    truncates a long name to fit (the actor column swaps the last cell for
-    "…"), and a truncated name no longer matches the full-name rule.
-    """
-    pairs: list[list[str]] = []
-    for index, name in enumerate(names):
-        placeholder = placeholder_for(name, index + 1)
-        pairs.append([name, placeholder])
-        for cut in range(MIN_PREFIX_LEN, len(name)):
-            pairs.append([name[:cut], placeholder[:cut]])
-    pairs.sort(key=lambda pair: len(pair[0]), reverse=True)
-    return pairs
 
 
 def read_token_file(path: Path) -> str:

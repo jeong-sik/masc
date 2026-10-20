@@ -5389,6 +5389,21 @@
  (name runtest)
  (deps (alias runtest-test_install_local_build_guest_shim)))
 
+; The capture-tui-* scripts hide a keeper name and every prefix of it a table
+; column can show; a truncated name that escaped the full-name rule leaked into
+; published screenshots (#31209).
+(rule
+ (alias runtest-test_tui_capture_redaction)
+ (deps
+  test_tui_capture_redaction.py
+  ../scripts/lib/tui_capture_redaction.py)
+ (action
+  (run python3 %{dep:test_tui_capture_redaction.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_capture_redaction)))
+
 ; A script works on the base path its caller names and stops when none is
 ; named; no script reads a folder under the home directory by default.
 (rule
@@ -5397,6 +5412,7 @@
   test_scripts_require_base_path.py
   ../scripts/lib/masc_base_path.py
   ../scripts/lib/keeper_store_layout.py
+  ../scripts/lib/tui_capture_redaction.py
   ../scripts/analyze-keeper-execute-failures.sh
   ../scripts/audit-keeper-fleet-readiness.py
   ../scripts/bench-web-tools.py

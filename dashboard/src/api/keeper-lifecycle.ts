@@ -18,8 +18,6 @@ interface KeeperLifecycleResponse {
   detail?: unknown
   error?: string
   committed?: boolean
-  // Set by shutdown when the name has no Keeper: nothing was stopped.
-  already_absent?: boolean
 }
 interface KeeperControlOptions {
   signal?: AbortSignal

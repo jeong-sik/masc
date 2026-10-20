@@ -152,8 +152,10 @@ type shutdown_outcome =
    [already_absent]; there is nothing to pause in the second case. Reading the
    tool's data keeps the handler from guessing from the absence of an owner
    afterwards, which is what made a shutdown of an unknown name answer
-   "paused-state persist failed after shutdown" (#28731). A shape that is
-   neither is refused, not read as a submission. *)
+   "paused-state persist failed after shutdown" (issue #28731). "Absent" is
+   the tool's answer at the time it looked: a create that lands after that
+   look is not paused by this request. A shape that is neither is refused, not
+   read as a submission. *)
 let shutdown_outcome_of_data data =
   match
     ( Json_util.get_bool data Keeper_turn_lifecycle.already_absent_field

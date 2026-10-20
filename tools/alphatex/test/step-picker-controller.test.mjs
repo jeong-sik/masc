@@ -173,3 +173,20 @@ test('dismiss before picker dispatch retains menu keys without starting discover
  assert.deepEqual(view.observed.saved.at(-1),initial)
  } finally { view.signal.abort(); await view.done }
 })
+
+
+test('practice recording picker retains its take path and route until explicit source selection', async () => {
+  const requests=[];let complete
+  const initial={...editor.newEditor().project,sound:{kind:'soundfont'}}
+  const view=await controller({initialDocument:initial,output:'chosen-device',sources:[{id:'-17',name:'Keys'}],
+    openStepInput(request){requests.push(request);return {ready:Promise.resolve({source:{name:'Keys'},practice:true,monitoring:true}),
+      completion:new Promise(resolve=>{complete=resolve}),stop(){complete()}}} })
+  try {
+    view.command('practice-record chosen-take');view.key('return');await flush();await flush()
+    assert.equal(requests.length,1);assert.deepEqual(requests[0].recording,{path:resolve('chosen-take')})
+    assert.equal(requests[0].source,'-17');assert.equal(requests[0].practice,true)
+    assert.deepEqual(requests[0].audio.backing,phraseBacking(initial,'track-1'))
+    view.command('step-stop');await flush();view.key('q');await view.done
+    assert.deepEqual(view.observed.saved.at(-1),initial)
+  } finally {view.signal.abort();await view.done}
+})

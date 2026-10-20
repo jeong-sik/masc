@@ -155,6 +155,32 @@ at the next available device block; this mode does not preserve live performance
 timing. `:step-stop`, `:stop`, route changes and leaving the view retire audio;
 admitted step edits still drain before saving. Device underruns are errors.
 
+Use `:practice-record PATH [SOURCE_UID]` to record live MIDI over phrase backing.
+The source picker retains the requested new take path. Choose a project-bound
+VST first; the output starts and supplies an actual source-render clock before
+MIDI opens. Recording leaves phrase notes, cursor and undo history unchanged.
+`:step-stop`, a route change or leaving the view drains admitted input, closes
+the monitor and finalizes the take. The terminal reports the saved path; a
+recording failure retains its path and error for recovery.
+
+Each take uses a fresh directory with owner-only permissions. `context.json`
+freezes the project, target track and repeating backing plan, including private
+captured preset bytes. `armed.json` records the selected MIDI input header and
+source-render clock. Each `events.jsonl` row contains the original `packet`
+(UMP words, source, ordinal, hostTime and timestampOrigin) plus a signed exact
+`nominalFrame` fraction. Packets are written and synced before audition
+projection and native ACK; unsupported audition data is retained before the
+route fails. Original timestamps remain authoritative. Nominal placement does
+not measure physical latency or compensate hardware drift.
+
+`take.json` is the final receipt, with packet count, input/audio retirement,
+content hashes and `complete`, `cancelled` or `failed` status. Missing/invalid
+final metadata is an incomplete take, never success. Stop before arming leaves
+a cancelled empty take; input/audio/storage failures retain recoverable files.
+Existing directories/files are never reused. This is raw MIDI capture; take
+import into arrangement regions and simultaneous WAV input use separate flows.
+Diagnostics include the take path/status/count without exposing preset bytes.
+
 After stopping or a monitoring error, `:step-diagnostics PATH` exports the last
 owned monitor's JSON report without overwriting a file. During monitoring it
 exports a current snapshot. Reports retain the selected source, sound identity

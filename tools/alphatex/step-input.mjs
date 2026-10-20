@@ -4,7 +4,9 @@ import { editMidiSourceNotes } from './midi-source.mjs'
 import { sourceEditor } from './midi-source-editor.mjs'
 import { openMidiInput } from './midi-input.mjs'
 import { openStepMonitor } from './step-monitor.mjs'
+import { openPracticeTake } from './practice-take.mjs'
 
+const inputFailure = reason => reason instanceof Error ? reason : new Error('Step input failed', { cause: reason })
 const sourceDocument = editor => editor.project.kind === 'midi-source'
 const trackAt = editor => (editor.view ?? editor.project).tracks[editor.track]
 // These are editor identities, not rendered labels. A manual decision must not
@@ -120,19 +122,28 @@ export function stepPacket(editor, pending, packet) {
 // nor a context cancellation awaits completion inside that queue: an admitted
 // packet may itself be waiting to enter the queue.
 export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState = () => {},
-  audio, practice = false, openMonitor = openStepMonitor, openInput = openMidiInput }) {
+  audio, practice = false, recording, openTake = openPracticeTake, openMonitor = openStepMonitor, openInput = openMidiInput }) {
   if (practice && !audio) throw new Error('Practice input requires VST monitoring')
-  const { channel } = target(getEditor())
+  if (recording && !practice) throw new Error('Practice recording requires live practice mode')
+  if (audio) audio = structuredClone(audio)
+  const editor = getEditor(), { channel, track } = target(editor)
+  const takeContext = recording ? structuredClone({ path: recording.path, project: editor.project, track: track.id, sound: audio.sound, backing: audio.backing }) : null
   const cancellation = new AbortController()
   const stopped = new Error('Step input stopped before arming')
   let pending = null, stopping = false, controlsStopped = false, input = null, failure = null
-  const monitor = audio ? openMonitor({ ...audio, channel, signal: cancellation.signal }) : null
-  monitor?.completion.catch(error => cancellation.abort(error))
+  let monitor = null, take = null, admission, inputFinal
   const ready = (async () => {
+    if (takeContext) take = await openTake(takeContext)
+    cancellation.signal.throwIfAborted()
+    if (stopping) throw stopped
+    monitor = audio ? openMonitor({ ...audio, channel, signal: cancellation.signal }) : null
+    monitor?.completion.catch(error => cancellation.abort(inputFailure(error)))
     if (monitor) await monitor.ready
+    const renderClock = take ? await monitor.clock : null
     cancellation.signal.throwIfAborted()
     if (stopping) throw stopped
     input = openInput({ source, signal: cancellation.signal, async onPacket(packet, { signal }) {
+      if (take) { await admission; await take.append(packet) }
       const prepared = monitor?.prepare(packet)
       await enqueue(() => {
         signal.throwIfAborted()
@@ -145,24 +156,33 @@ export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState
       signal.throwIfAborted()
       if (monitor) await monitor.send(prepared)
     } })
-    const info = await input.ready
-    return { ...info, ...(monitor ? { monitoring: true } : {}), ...(practice ? { practice: true } : {}) }
+    admission = input.ready.then(async info => {
+      if (take) await take.arm(info, renderClock)
+      return info
+    })
+    const info = await admission
+    cancellation.signal.throwIfAborted()
+    if (stopping) throw stopped
+    return { ...info, ...(take ? { recording: take.diagnostics() } : {}), ...(monitor ? { monitoring: true } : {}), ...(practice ? { practice: true } : {}) }
   })()
   ready.catch(() => {})
   const completion = (async () => {
     try { await ready }
-    catch (error) { if (!(stopping && !input && !cancellation.signal.aborted)) failure = error }
+    catch (error) {
+      if (!(stopping && (error === stopped || !input) && !cancellation.signal.aborted)) { failure = inputFailure(error); cancellation.abort(failure) }
+    }
     // A rejected ready acknowledgement does not prove native child closure.
-    try { await input?.completion } catch (error) { failure ??= error }
+    try { inputFinal = await input?.completion } catch (error) { failure ??= inputFailure(error) }
     monitor?.stop()
-    try { await monitor?.completion } catch (error) { failure ??= error }
+    try { await monitor?.completion } catch (error) { failure ??= inputFailure(error) }
     pending = null
+    try { await take?.finish({ failure: failure ?? undefined, inputFinal, monitorFinal: monitor?.diagnostics() }) } catch (error) { failure ??= inputFailure(error) }
     if (failure) throw failure
   })()
   completion.catch(() => {})
   return { kind: practice ? 'practice-input' : 'step-input', ready, completion,
-    diagnostics() { return monitor ? { source, ...monitor.diagnostics(), failure: failure?.message ?? null } : null },
-    async inspect() { return monitor ? { source, ...await monitor.inspect(), failure: failure?.message ?? null } : null },
+    diagnostics() { return monitor ? { source, ...monitor.diagnostics(), ...(take ? { recording: take.diagnostics() } : {}), failure: failure?.message ?? null } : take ? { source, recording: take.diagnostics(), failure: failure?.message ?? null } : null },
+    async inspect() { return monitor ? { source, ...await monitor.inspect(), ...(take ? { recording: take.diagnostics() } : {}), failure: failure?.message ?? null } : take ? { source, recording: take.diagnostics(), failure: failure?.message ?? null } : null },
     stop({ admittedControls = false } = {}) {
       // View close ends native admission immediately, while controls already
       // queued before close must still decide before drained MIDI packets.
@@ -176,5 +196,5 @@ export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState
       if (controlsStopped || pending !== null) throw new Error('Release all keys and finish draining before changing step input')
       return stepControl(getEditor(), action)
     },
-    cancel(reason = new Error('Step input context changed')) { cancellation.abort(reason) } }
+    cancel(reason = new Error('Step input context changed')) { cancellation.abort(inputFailure(reason)) } }
 }

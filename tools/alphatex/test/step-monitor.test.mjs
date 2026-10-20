@@ -1,5 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { openPracticeTake } from '../practice-take.mjs'
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -18,7 +22,7 @@ const sound = { kind: 'vst', selection: { plugin_path: '/fixture.vst3', plugin_n
 const packet = words => ({ kind: 'midi', source: '10', protocol: 2, timestampOrigin: 'packet', words })
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done }); return { promise, resolve } }
 const fixture = name => fileURLToPath(new URL(`./fixtures/${name}.mjs`, import.meta.url))
-function io({ pcmMode = 'valid', vstMode = 'valid' } = {}) {
+function io({ pcmMode = 'valid', vstMode = 'valid', inputMode = 'step-chord' } = {}) {
   const children = [], blocks = []
   const spawnOwned = (...args) => { const child = spawn(...args); children.push(child); return child }
   return { children, blocks,
@@ -31,7 +35,7 @@ function io({ pcmMode = 'valid', vstMode = 'valid' } = {}) {
       return { ...owner, render(frames, messages) { blocks.push(structuredClone(messages)); return owner.render(frames, messages) } }
     },
     openInput: options => openMidiInput({ ...options, spawnProcess(_exe, args, config) {
-      return spawnOwned(process.execPath, [fixture('midi-input-owner'), 'step-chord', ...args], config)
+      return spawnOwned(process.execPath, [fixture('midi-input-owner'), inputMode, ...args], config)
     } }),
     assertClosed() { for (const child of children) assert.notEqual(child.exitCode ?? child.signalCode, null) },
   }
@@ -147,4 +151,126 @@ test('cancellation preserves even falsy causes and joins children while audio is
     await assert.rejects(owner.completion, error => error.cause === reason)
     owned.assertClosed()
   }
+})
+
+
+test('practice recording gates same-chunk input behind durable arm and drains a stored packet at stop', async () => {
+  const root=await mkdtemp(join(tmpdir(),'practice-record-')),path=join(root,'take')
+  const owned=io({pcmMode:'paced',inputMode:'step-held'}),armed=deferred(),armGate=deferred(),entered=deferred(),storeGate=deferred()
+  const editor={...newEditor(),project:{...newEditor().project,sound}},original=structuredClone(editor)
+  const owner=openStepInput({source:'10',practice:true,recording:{path},
+    audio:{sound,output:'owned',backing:phraseBacking(editor.project,'track-1')},getEditor:()=>editor,
+    adoptEditor(){assert.fail('recording edited notes')},enqueue:action=>Promise.resolve().then(action),
+    openInput:owned.openInput,openMonitor:options=>openStepMonitor({...options,...owned}),
+    async openTake(context){const take=await openPracticeTake(context);return {...take,
+      async arm(...args){armed.resolve();await armGate.promise;await take.arm(...args)},
+      async append(packet){entered.resolve();await storeGate.promise;await take.append(packet)}}} })
+  try {
+    await armed.promise
+    assert.equal(await readFile(join(path,'events.jsonl'),'utf8'),'')
+    armGate.resolve();assert.equal((await owner.ready).recording.path,path)
+    await entered.promise
+    owner.stop();storeGate.resolve();await owner.completion;owned.assertClosed()
+    const final=JSON.parse(await readFile(join(path,'take.json'),'utf8'))
+    assert.equal(final.status,'complete');assert.equal(final.packets,'1')
+    assert.equal(final.inputFinal.acknowledgedPackets,'1');assert.equal(owner.diagnostics().recording.status,'complete')
+    const row=JSON.parse(await readFile(join(path,'events.jsonl'),'utf8'))
+    assert.equal(row.packet.hostTime,'9007199254740993')
+    assert.deepEqual(row.packet.words,[0x43953c00,0x90000000,0x43954000,0xffff0000])
+    assert.deepEqual(row.nominalFrame,{numerator:'-1',denominator:'125'})
+    assert.deepEqual(editor,original)
+  } finally {armGate.resolve();storeGate.resolve();owner.stop();await owner.completion.catch(()=>{});await rm(root,{recursive:true,force:true})}
+})
+
+test('unrepresentable audition and storage failure retain raw packets and fail after input/audio closure', async () => {
+  for(const storageFailure of [false,true]){
+    const root=await mkdtemp(join(tmpdir(),'practice-record-')),path=join(root,'take'),editor={...newEditor(),project:{...newEditor().project,sound}}
+    const owned=io({pcmMode:'paced',inputMode:storageFailure?'step-held':'valid'})
+    const owner=openStepInput({source:'10',practice:true,recording:{path},
+      audio:{sound,output:'owned',backing:phraseBacking(editor.project,'track-1')},getEditor:()=>editor,
+      enqueue:action=>action(),adoptEditor(){assert.fail('recording edited notes')},openInput:owned.openInput,
+      openMonitor:options=>openStepMonitor({...options,...owned}),
+      async openTake(context){const take=await openPracticeTake(context);return storageFailure?{...take,async append(packet){await take.append(packet);throw new Error('storage failure after persistence')}}:take} })
+    try {
+      await owner.ready
+      await assert.rejects(owner.completion,storageFailure?/storage failure/:/attributes/)
+      owned.assertClosed()
+      const final=JSON.parse(await readFile(join(path,'take.json'),'utf8'))
+      assert.equal(final.status,'failed');assert.equal(final.packets,'1')
+      const row=JSON.parse(await readFile(join(path,'events.jsonl'),'utf8'))
+      assert.deepEqual(row.packet.words,storageFailure?[0x43953c00,0x90000000,0x43954000,0xffff0000]:[0x43953c03,0x90012345])
+    } finally {owner.stop();await owner.completion.catch(()=>{});await rm(root,{recursive:true,force:true})}
+  }
+})
+
+test('stop while opening the take or awaiting a missing render clock never opens MIDI or marks complete', async () => {
+  for(const missingClock of [false,true]){
+    const root=await mkdtemp(join(tmpdir(),'practice-record-')),path=join(root,'take'),gate=deferred(),entered=deferred()
+    const editor={...newEditor(),project:{...newEditor().project,sound}},owned=io({pcmMode:'clock-missing'})
+    let opened=false
+    const owner=openStepInput({source:'10',practice:true,recording:{path},
+      audio:{sound,output:'owned',backing:phraseBacking(editor.project,'track-1')},getEditor:()=>editor,
+      enqueue:action=>action(),adoptEditor(){assert.fail('recording edited notes')},openInput(){opened=true;assert.fail('MIDI opened before recording arm')},
+      async openTake(context){const take=await openPracticeTake(context);if(!missingClock){entered.resolve();await gate.promise}return take},
+      openMonitor(options){const monitor=openStepMonitor({...options,...owned});monitor.ready.then(()=>entered.resolve(),()=>{});return monitor} })
+    try {
+      await entered.promise;owner.stop();gate.resolve();await owner.completion
+      assert.equal(opened,false);owned.assertClosed()
+      assert.equal(JSON.parse(await readFile(join(path,'take.json'),'utf8')).status,'cancelled')
+    } finally {gate.resolve();owner.stop();await owner.completion.catch(()=>{});await rm(root,{recursive:true,force:true})}
+  }
+})
+
+test('arm metadata failure cancels quiet MIDI input without waiting for a first packet', async () => {
+  const root=await mkdtemp(join(tmpdir(),'practice-record-')),path=join(root,'take')
+  const editor={...newEditor(),project:{...newEditor().project,sound}},owned=io({pcmMode:'paced',inputMode:'empty'})
+  let inputSignal
+  const owner=openStepInput({source:'10',practice:true,recording:{path},
+    audio:{sound,output:'owned',backing:phraseBacking(editor.project,'track-1')},getEditor:()=>editor,
+    enqueue:action=>action(),adoptEditor(){assert.fail('recording edited notes')},
+    openInput(options){inputSignal=options.signal;return owned.openInput(options)},
+    openMonitor:options=>openStepMonitor({...options,...owned}),
+    async openTake(context){const take=await openPracticeTake(context);return {...take,async arm(){throw new Error('arm metadata write failed')}}} })
+  try {
+    await assert.rejects(owner.ready,/arm metadata write failed/)
+    assert.equal(inputSignal.aborted,true)
+    await assert.rejects(owner.completion,/arm metadata write failed/);owned.assertClosed()
+    assert.equal(JSON.parse(await readFile(join(path,'take.json'),'utf8')).status,'failed')
+  } finally {owner.cancel();await owner.completion.catch(()=>{});await rm(root,{recursive:true,force:true})}
+})
+
+test('stop or cancellation during durable arm cannot return a newly armed ready acknowledgement', async () => {
+  for(const cancel of [false,true]){
+    const root=await mkdtemp(join(tmpdir(),'practice-record-')),path=join(root,'take'),gate=deferred(),entered=deferred()
+    const editor={...newEditor(),project:{...newEditor().project,sound}},owned=io({pcmMode:'paced',inputMode:'empty'})
+    const owner=openStepInput({source:'10',practice:true,recording:{path},
+      audio:{sound,output:'owned',backing:phraseBacking(editor.project,'track-1')},getEditor:()=>editor,
+      enqueue:action=>action(),adoptEditor(){assert.fail('recording edited notes')},openInput:owned.openInput,
+      openMonitor:options=>openStepMonitor({...options,...owned}),
+      async openTake(context){const take=await openPracticeTake(context);return {...take,async arm(...args){entered.resolve();await gate.promise;return take.arm(...args)}}} })
+    try {
+      await entered.promise
+      if(cancel)owner.cancel(new Error('context changed during arm'));else owner.stop()
+      gate.resolve();await assert.rejects(owner.ready)
+      if(cancel)await assert.rejects(owner.completion,/context changed/);else await owner.completion
+      owned.assertClosed()
+      assert.equal(JSON.parse(await readFile(join(path,'take.json'),'utf8')).status,cancel?'failed':'complete')
+    } finally {gate.resolve();owner.stop();await owner.completion.catch(()=>{});await rm(root,{recursive:true,force:true})}
+  }
+})
+
+for(const reason of [null,false,0,''])test(`falsy cancellation while take storage opens remains failure (${JSON.stringify(reason)})`, async () => {
+  const root=await mkdtemp(join(tmpdir(),'practice-record-')),path=join(root,'take'),gate=deferred(),entered=deferred()
+  const editor={...newEditor(),project:{...newEditor().project,sound}}
+  const owner=openStepInput({source:'10',practice:true,recording:{path},
+    audio:{sound,output:'owned',backing:phraseBacking(editor.project,'track-1')},getEditor:()=>editor,
+    enqueue:action=>action(),adoptEditor(){assert.fail('recording edited notes')},
+    openMonitor(){assert.fail('monitor opened after cancellation')},
+    async openTake(context){const take=await openPracticeTake(context);entered.resolve();await gate.promise;return take} })
+  try {
+    await entered.promise;owner.cancel(reason);gate.resolve()
+    await assert.rejects(owner.ready,error=>error instanceof Error&&error.cause===reason)
+    await assert.rejects(owner.completion,error=>error instanceof Error&&error.cause===reason)
+    assert.equal(JSON.parse(await readFile(join(path,'take.json'),'utf8')).status,'failed')
+  } finally {gate.resolve();owner.stop();await owner.completion.catch(()=>{});await rm(root,{recursive:true,force:true})}
 })

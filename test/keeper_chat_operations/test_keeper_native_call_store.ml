@@ -11,11 +11,12 @@ let next_call_id = "019a0010-1000-7000-8000-000000000002"
 let operation_id = Operation.Operation_id.of_string "native-owned-operation" |> value
 let locator call_id = Agent.execution_locator_of_yojson
   (`Assoc ["version", `Int 1; "run_id", `String ("execution-run-" ^ call_id)]) |> value
-let checkpoint turn_count =
+let checkpoint_of_bytes ~turn_count bytes =
   Keeper_checkpoint_ref.create
     ~trace_id:(Keeper_id.Trace_id.of_string "native-trace" |> value)
-    ~turn_count ~canonical_checkpoint_bytes:(string_of_int turn_count)
+    ~turn_count ~canonical_checkpoint_bytes:(string_of_int bytes)
   |> function Ok reference -> reference | Error _ -> fail "checkpoint fixture"
+let checkpoint turn_count = checkpoint_of_bytes ~turn_count turn_count
 let make_call ?(id=call_id) ?(seed=1) operation = Native.create ~call_id:id ~runtime_id:"native.primary"
   ~operation_digest:operation.Operation.execution_digest
   ~api:(Native.New_input {seed_message_count=3}) ~seed_checkpoint:(checkpoint seed) ~locator:(locator id) |> value
@@ -191,8 +192,7 @@ let test_unknown_effect_receipt_lets_the_operation_fail_but_not_complete () = wi
 let shas = List.map (fun (reference : Keeper_checkpoint_ref.t) -> reference.sha256)
 let released label expected store =
   check (list string) label (shas expected)
-    (Store.take_released_checkpoints store
-     |> List.map (fun (retained : Keeper_semantic_execution.retained_checkpoint) -> retained.reference.sha256))
+    (Store.take_released_checkpoints store |> List.map Store.released_reference |> shas)
 let advance store operation ~observed ~next =
   commit store operation (Native.Checkpoint {call_id; observed=checkpoint observed; checkpoint=checkpoint next})
 let retired_after_advancing store operation =
@@ -264,7 +264,7 @@ let gate_waiting_on reference store =
     |> value in
   ignore (Store.defer_direct_gate store ~now:1.5 ~operation_id:gate_operation_id
             ~execution_digest:gate_operation.Operation.execution_digest ~waiting |> ok);
-  ignore (Store.take_released_checkpoints store : Keeper_semantic_execution.retained_checkpoint list)
+  ignore (Store.take_released_checkpoints store : Store.released_checkpoint list)
 
 let test_a_reference_another_execution_names_is_kept () =
   with_store ~before:(gate_waiting_on (checkpoint 2)) @@ fun _path store operation ->
@@ -293,6 +293,102 @@ let test_only_a_committed_transaction_releases () = with_store @@ fun _path stor
   advance store operation ~observed:3 ~next:4;
   released "the next commit releases only what it stopped naming" [checkpoint 3] store
 
+(* A restart settles a call that had no Owner receipt but keeps the receipt,
+   so the settled execution still names the call's checkpoints. A later
+   operation superseding a checkpoint with the same bytes must keep it. *)
+let test_a_settled_execution_with_a_receipt_keeps_its_checkpoints () =
+  let directory = Filename.temp_dir "native-call-owner" "" in
+  let path = Filename.concat directory Store.For_testing.database_file in
+  let store = Store.open_or_create ~path |> ok in
+  Fun.protect ~finally:(fun () -> ignore (Store.close store : (unit, Store.error) result)) (fun () ->
+    submit store operation_id "interrupted input";
+    let operation = claim store in
+    bind store operation (make_call operation);
+    advance store operation ~observed:1 ~next:2;
+    terminal store operation Agent.Retire;
+    ignore (Store.settle_running_after_restart store ~now:4. |> ok : Operation.t list);
+    released "a restart that keeps the receipt releases nothing" [] store;
+    let later_id = Operation.Operation_id.of_string "native-later-operation" |> value in
+    submit store later_id "later input";
+    let later = claim store in
+    let later_call = Native.create ~call_id:next_call_id ~runtime_id:"native.primary"
+        ~operation_digest:later.Operation.execution_digest
+        ~api:(Native.New_input {seed_message_count=3}) ~seed_checkpoint:(checkpoint 5)
+        ~locator:(locator next_call_id) |> value in
+    let later_commit change = Store.update_direct_native_call store ~now:5. ~operation_id:later_id
+        ~execution_digest:later.Operation.execution_digest change |> ok in
+    later_commit (Native.Bind {observed=Native.No_native_call; call=later_call});
+    later_commit (Native.Checkpoint {call_id=next_call_id; observed=checkpoint 5; checkpoint=checkpoint 6});
+    (* The bytes of the interrupted call's latest checkpoint, at a later turn. *)
+    let same_bytes = checkpoint_of_bytes ~turn_count:6 2 in
+    later_commit (Native.Checkpoint {call_id=next_call_id; observed=checkpoint 6; checkpoint=same_bytes});
+    released "the later call releases its own superseded checkpoint" [checkpoint 6] store;
+    later_commit (Native.Checkpoint {call_id=next_call_id; observed=same_bytes; checkpoint=checkpoint 7});
+    released "a checkpoint the settled receipt names is kept" [] store)
+
+(* The release reads only the rows SQL lets through. On a store holding every
+   kind of row, that selection is exactly what the startup sweep's inspection
+   keeps after decoding everything. *)
+let test_the_release_selection_matches_the_sweep () =
+  let directory = Filename.temp_dir "native-call-owner" "" in
+  let path = Filename.concat directory Store.For_testing.database_file in
+  let store = Store.open_or_create ~path |> ok in
+  Fun.protect ~finally:(fun () -> ignore (Store.close store : (unit, Store.error) result)) (fun () ->
+    let id name = Operation.Operation_id.of_string name |> value in
+    gate_waiting_on (checkpoint 9) store;
+    let cancelled = id "native-cancelled-operation" in
+    submit store cancelled "cancel me";
+    let operation = claim store in
+    ignore (Store.defer_direct_checkpoint store ~now:2. ~operation_id:cancelled
+              ~execution_digest:operation.Operation.execution_digest
+              ~checkpoint:(Keeper_semantic_execution.Agent_core (checkpoint 8)) |> ok);
+    ignore (Store.cancel_queued store ~now:2.5 ~operation_id:cancelled |> ok);
+    let completed = id "native-completed-operation" in
+    submit store completed "complete me";
+    let operation = claim store in
+    let call = Native.create ~call_id ~runtime_id:"native.primary"
+        ~operation_digest:operation.Operation.execution_digest
+        ~api:(Native.New_input {seed_message_count=3}) ~seed_checkpoint:(checkpoint 1)
+        ~locator:(locator call_id) |> value in
+    let commit_to operation_id change = Store.update_direct_native_call store ~now:3. ~operation_id
+        ~execution_digest:operation.Operation.execution_digest change |> ok in
+    commit_to completed (Native.Bind {observed=Native.No_native_call; call});
+    commit_to completed (Native.Terminal {call_id; disposition=disposition Agent.Retire});
+    ignore (Store.succeed_running store ~now:4. ~operation_id:completed ~outcome_ref:"done" |> ok);
+    let interrupted = id "native-interrupted-operation" in
+    submit store interrupted "interrupt me";
+    let operation = claim store in
+    let call = Native.create ~call_id:next_call_id ~runtime_id:"native.primary"
+        ~operation_digest:operation.Operation.execution_digest
+        ~api:(Native.New_input {seed_message_count=3}) ~seed_checkpoint:(checkpoint 3)
+        ~locator:(locator next_call_id) |> value in
+    let commit change = Store.update_direct_native_call store ~now:5. ~operation_id:interrupted
+        ~execution_digest:operation.Operation.execution_digest change |> ok in
+    commit (Native.Bind {observed=Native.No_native_call; call});
+    commit (Native.Terminal {call_id=next_call_id; disposition=disposition Agent.Retire});
+    ignore (Store.settle_running_after_restart store ~now:6. |> ok : Operation.t list);
+    let suspended = id "native-suspended-operation" in
+    submit store suspended "suspend me";
+    let operation = claim store in
+    ignore (Store.defer_direct_checkpoint store ~now:7. ~operation_id:suspended
+              ~execution_digest:operation.Operation.execution_digest
+              ~checkpoint:(Keeper_semantic_execution.Agent_core (checkpoint 4)) |> ok);
+    let ids executions =
+      List.map (fun (execution : Keeper_semantic_execution.t) ->
+          Yojson.Safe.to_string (Keeper_execution_scope_id.to_json execution.id)) executions
+      |> List.sort String.compare in
+    let selected = Store.For_testing.owning_semantic_executions store |> ok in
+    let swept = match Store.inspect_outstanding ~path |> ok with
+      | Store.Stored_operations {semantic_executions; _} -> semantic_executions
+      | Store.Missing_store -> fail "the store is missing" in
+    let all = match Store.inspect_durable_records ~path |> ok with
+      | Store.Stored_durable_records {semantic_executions; _} -> semantic_executions
+      | Store.Missing_durable_store -> fail "the store is missing" in
+    check int "every kind of row is present" 5 (List.length all);
+    check (list string) "the release selects what the sweep keeps" (ids swept) (ids selected);
+    check int "the gate wait, the receipt kept by the restart and the suspension" 3
+      (List.length selected))
+
 let () = run "native-call-owner-store" ["recovery", [
   test_case "active restart preserves exact admission" `Quick test_active_restart_preserves_seed_and_exact_identity;
   test_case "terminal restart retains incomplete receipt without dispatch" `Quick test_terminal_restart_never_dispatches;
@@ -310,4 +406,7 @@ let () = run "native-call-owner-store" ["recovery", [
   test_case "a failure settlement releases the retired call" `Quick test_failure_settlement_releases_the_retired_call;
   test_case "a suspend keeps the checkpoint it names" `Quick test_a_suspend_keeps_the_checkpoint_it_names;
   test_case "a reference another execution names is kept" `Quick test_a_reference_another_execution_names_is_kept;
-  test_case "only a committed transaction releases" `Quick test_only_a_committed_transaction_releases]]
+  test_case "only a committed transaction releases" `Quick test_only_a_committed_transaction_releases;
+  test_case "a settled execution with a receipt keeps its checkpoints" `Quick
+    test_a_settled_execution_with_a_receipt_keeps_its_checkpoints;
+  test_case "the release selection matches the sweep" `Quick test_the_release_selection_matches_the_sweep]]

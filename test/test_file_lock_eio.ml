@@ -188,6 +188,50 @@ let test_durable_lock_wait_is_cancellable () =
   | `Unexpected_admission -> fail "cross-process lock admitted while held"
   | `Failure detail -> fail ("lock wait failed instead of cancelling: " ^ detail)
 
+let ran_once label = function
+  | File_lock_eio.Lock_attempted
+      (File_lock_eio.Body_completed { value = (); release_error = None }) -> ()
+  | File_lock_eio.Lock_attempted (File_lock_eio.Body_completed { release_error = Some error; _ }) ->
+    fail (label ^ ": release failed: " ^ File_lock_eio.durable_lock_error_to_string error)
+  | File_lock_eio.Lock_attempted (File_lock_eio.Lock_not_acquired error) ->
+    fail (label ^ ": " ^ File_lock_eio.durable_lock_error_to_string error)
+  | File_lock_eio.Lock_held_elsewhere -> fail (label ^ ": a free lock was reported held")
+
+let held_elsewhere label body_ran = function
+  | File_lock_eio.Lock_held_elsewhere -> check bool (label ^ ": the body did not run") false !body_ran
+  | File_lock_eio.Lock_attempted _ -> fail (label ^ ": a held lock was entered")
+
+let test_try_durable_lock_never_waits () =
+  with_temp_path @@ fun path ->
+  let lock_path = path ^ ".lock" in
+  Eio_main.run @@ fun _env ->
+  let body_ran = ref false in
+  ran_once "a free lock" (File_lock_eio.try_with_durable_lock_observed ~lock_path (fun () -> ()));
+  let entered, signal_entered = Eio.Promise.create () in
+  let leave, signal_leave = Eio.Promise.create () in
+  Eio.Fiber.both
+    (fun () ->
+      match File_lock_eio.with_durable_lock ~lock_path (fun () ->
+          Eio.Promise.resolve signal_entered ();
+          Eio.Promise.await leave) with
+      | Ok () -> ()
+      | Error error -> fail (File_lock_eio.durable_lock_error_to_string error))
+    (fun () ->
+      Eio.Promise.await entered;
+      held_elsewhere "held by a fiber of this process" body_ran
+        (File_lock_eio.try_with_durable_lock_observed ~lock_path (fun () -> body_ran := true));
+      Eio.Promise.resolve signal_leave ());
+  ran_once "the lock once released" (File_lock_eio.try_with_durable_lock_observed ~lock_path (fun () -> ()))
+
+let test_try_durable_lock_held_by_another_process () =
+  with_temp_path @@ fun path ->
+  let lock_path = path ^ ".lock" in
+  with_external_lock_holder lock_path @@ fun _release_holder ->
+  Eio_main.run @@ fun _env ->
+  let body_ran = ref false in
+  held_elsewhere "held by another process" body_ran
+    (File_lock_eio.try_with_durable_lock_observed ~lock_path (fun () -> body_ran := true))
+
 let () =
   run "file_lock_eio"
     [
@@ -203,5 +247,9 @@ let () =
             test_durable_lock_release_failure_preserves_completed_value;
           test_case "durable cross-process wait is cancellable" `Quick
             test_durable_lock_wait_is_cancellable;
+          test_case "a durable lock attempt never waits" `Quick
+            test_try_durable_lock_never_waits;
+          test_case "a durable lock attempt sees another process" `Quick
+            test_try_durable_lock_held_by_another_process;
         ] );
     ]

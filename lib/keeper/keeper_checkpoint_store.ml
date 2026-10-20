@@ -1660,8 +1660,13 @@ let retain_exact_snapshot_with ~write_checkpoint_bytes ~session_dir snapshot =
 let retain_exact_snapshot ~session_dir snapshot =
   retain_exact_snapshot_with ~write_checkpoint_bytes ~session_dir snapshot
 
-let release_retained ~session_dir ~reference =
-  let release session_dir =
+type release_failure =
+  | Lock_held_elsewhere
+  | Release_failed of string
+
+let release_retained ~session_root released =
+  let reference = Keeper_chat_operation_store.released_reference released in
+  let unlink session_dir =
     let retained_dir = Filename.concat session_dir retained_dirname in
     let path = retained_checkpoint_path ~session_dir reference in
     let unlink () =
@@ -1682,7 +1687,24 @@ let release_retained ~session_dir ~reference =
     | result -> result
     | exception (Unix.Unix_error _ as exn) -> Error (Printexc.to_string exn)
   in
-  with_session_lock ~session_dir release |> Result.join
+  let session_dir = Keeper_chat_operation_store.released_session_dir ~session_root released in
+  match canonical_session_location session_dir with
+  | Error error -> Error (Release_failed (save_agent_core_error_to_string error))
+  | Ok session_dir ->
+    (* The same lock file retention and exact reads take, tried once. *)
+    match File_lock_eio.try_with_durable_lock_observed
+            ~lock_path:(session_dir ^ ".checkpoint.lock") (fun () -> unlink session_dir) with
+    | File_lock_eio.Lock_held_elsewhere -> Error Lock_held_elsewhere
+    | File_lock_eio.Lock_attempted (File_lock_eio.Lock_not_acquired error) ->
+      Error (Release_failed (File_lock_eio.durable_lock_error_to_string error))
+    | File_lock_eio.Lock_attempted (File_lock_eio.Body_completed { value = Error detail; _ }) ->
+      Error (Release_failed detail)
+    | File_lock_eio.Lock_attempted
+        (File_lock_eio.Body_completed { value = Ok (); release_error = Some error }) ->
+      Error (Release_failed ("removed, but the checkpoint lock was not released: "
+                             ^ File_lock_eio.durable_lock_error_to_string error))
+    | File_lock_eio.Lock_attempted
+        (File_lock_eio.Body_completed { value = Ok (); release_error = None }) -> Ok ()
 
 (* Who a save keeps a lineage for. Only a Keeper's own saves do; a save by a
    tool or a test writes the file and keeps nothing. *)

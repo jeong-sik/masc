@@ -95,6 +95,17 @@ val with_durable_lock_observed :
     fails. Open/acquire failures return [Lock_not_acquired] without running the
     body. Body exceptions retain their original exception and raw backtrace. *)
 
+type 'a durable_lock_attempt =
+  | Lock_held_elsewhere
+      (** Another fiber of this process, or another process, holds the lock
+          now. [f] did not run and nothing was waited for. *)
+  | Lock_attempted of 'a durable_lock_observation
+
+val try_with_durable_lock_observed :
+  lock_path:string -> (unit -> 'a) -> 'a durable_lock_attempt
+(** {!with_durable_lock_observed} for a caller that must not wait: one
+    attempt at each layer, and [Lock_held_elsewhere] when either is held. *)
+
 val with_durable_lock :
   lock_path:string -> (unit -> 'a) -> ('a, durable_lock_error) result
 (** Compatibility projection of {!with_durable_lock_observed}. A release

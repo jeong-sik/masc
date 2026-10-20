@@ -386,6 +386,18 @@ let open_durable_lock_file ~execution_context lock_path =
   Atomic.set opened_fd None;
   result
 
+(* One non-blocking attempt at the process lock: [Ok false] when another
+   process holds it. *)
+let try_process_lock fd ~process_lock_held =
+  try
+    run_blocking_lock_op (fun () -> Unix.lockf fd Unix.F_TLOCK 0);
+    Atomic.set process_lock_held true;
+    Ok true
+  with
+  | Unix.Unix_error ((Unix.EAGAIN | Unix.EACCES), _, _) -> Ok false
+  | Unix.Unix_error (error, operation, argument) ->
+    Error (unix_failure (error, operation, argument))
+
 let acquire_durable_flock ~execution_context lock_path =
   match open_durable_lock_file ~execution_context lock_path with
   | Error cause ->
@@ -394,16 +406,7 @@ let acquire_durable_flock ~execution_context lock_path =
     let started_at = Time_compat.now () in
     let process_lock_held = Atomic.make false in
     let rec acquire_eio retries =
-      match
-        try
-          run_blocking_lock_op (fun () -> Unix.lockf fd Unix.F_TLOCK 0);
-          Atomic.set process_lock_held true;
-          Ok true
-        with
-        | Unix.Unix_error ((Unix.EAGAIN | Unix.EACCES), _, _) -> Ok false
-        | Unix.Unix_error (error, operation, argument) ->
-          Error (unix_failure (error, operation, argument))
-      with
+      match try_process_lock fd ~process_lock_held with
       | Ok true ->
         Eio.Fiber.check ();
         observe_lock_attempt ~caller:"File_lock_eio.durable" ~retries
@@ -477,45 +480,94 @@ let release_durable_lock_result ~lock_path fd =
          cause)
 ;;
 
+(* Run [f] holding the process lock on [fd], then release it. *)
+let run_admitted ~release_fd ~lock_path execution_context fd f =
+  let admitted () =
+    let body =
+      match f () with
+      | value -> `Returned value
+      | exception exn -> `Raised (exn, Printexc.get_raw_backtrace ()) (* cancel-guard-ok: PROVISIONAL, delete with #37372. The exception is stashed as `Raised and thrown again with its backtrace on both arms that consume it (:501 and :516); the release failure is logged there and never replaces it. *)
+    in
+    let release = release_fd fd in
+    match body, release with
+    | `Returned value, Ok () ->
+      Body_completed { value; release_error = None }
+    | `Returned value, Error error ->
+      Body_completed
+        { value
+        ; release_error = Some error
+        }
+    | `Raised (exn, backtrace), Ok () ->
+      Printexc.raise_with_backtrace exn backtrace
+    | `Raised (exn, backtrace), Error error ->
+      let release_failure = error.cause in
+      Log.Misc.error
+        "file_lock_eio: release failed during body exception lock_path=%s operation=%s argument=%s error=%s%s"
+        lock_path release_failure.operation release_failure.argument
+        (Unix.error_message release_failure.error)
+        (match error.cleanup_failure with
+         | None -> ""
+         | Some cleanup ->
+           Printf.sprintf
+             " cleanup_operation=%s cleanup_argument=%s cleanup_error=%s"
+             cleanup.operation cleanup.argument
+             (Unix.error_message cleanup.error));
+      Printexc.raise_with_backtrace exn backtrace
+  in
+  protect_cleanup execution_context admitted
+
 let with_durable_lock_observed_with ~release_fd ~lock_path f =
   with_mutex lock_path (fun () ->
     let execution_context = Eio_guard.execution_context () in
     match acquire_durable_flock ~execution_context lock_path with
     | Error error -> Lock_not_acquired error
-    | Ok fd ->
-      let admitted () =
-        let body =
-          match f () with
-          | value -> `Returned value
-          | exception exn -> `Raised (exn, Printexc.get_raw_backtrace ()) (* cancel-guard-ok: PROVISIONAL, delete with #37372. The exception is stashed as `Raised and thrown again with its backtrace on both arms that consume it (:501 and :516); the release failure is logged there and never replaces it. *)
-        in
-        let release = release_fd fd in
-        match body, release with
-        | `Returned value, Ok () ->
-          Body_completed { value; release_error = None }
-        | `Returned value, Error error ->
-          Body_completed
-            { value
-            ; release_error = Some error
-            }
-        | `Raised (exn, backtrace), Ok () ->
-          Printexc.raise_with_backtrace exn backtrace
-        | `Raised (exn, backtrace), Error error ->
-          let release_failure = error.cause in
-          Log.Misc.error
-            "file_lock_eio: release failed during body exception lock_path=%s operation=%s argument=%s error=%s%s"
-            lock_path release_failure.operation release_failure.argument
-            (Unix.error_message release_failure.error)
-            (match error.cleanup_failure with
-             | None -> ""
-             | Some cleanup ->
-               Printf.sprintf
-                 " cleanup_operation=%s cleanup_argument=%s cleanup_error=%s"
-                 cleanup.operation cleanup.argument
-                 (Unix.error_message cleanup.error));
-          Printexc.raise_with_backtrace exn backtrace
-      in
-      protect_cleanup execution_context admitted)
+    | Ok fd -> run_admitted ~release_fd ~lock_path execution_context fd f)
+
+type 'a durable_lock_attempt =
+  | Lock_held_elsewhere
+  | Lock_attempted of 'a durable_lock_observation
+
+let try_with_durable_lock_observed ~lock_path f =
+  let entry = get_entry lock_path in
+  Common.protect ~module_name:"file_lock_eio" ~finally_label:"release_entry"
+    ~finally:(fun () -> release_entry entry)
+    (fun () ->
+      match Cross_context_mutex.try_with_lock entry.lock (fun () ->
+        let execution_context = Eio_guard.execution_context () in
+        match open_durable_lock_file ~execution_context lock_path with
+        | Error cause ->
+          Lock_attempted (Lock_not_acquired
+            (durable_lock_error ~lock_path ~phase:Open_lock_file cause))
+        | Ok fd ->
+          let process_lock_held = Atomic.make false in
+          let attempt =
+            match try_process_lock fd ~process_lock_held with
+            | attempt -> attempt
+            | exception exn ->
+              let backtrace = Printexc.get_raw_backtrace () in
+              if Atomic.get process_lock_held
+              then release_fd_after_exception ~lock_path execution_context fd
+              else close_fd_after_exception ~lock_path execution_context fd;
+              Printexc.raise_with_backtrace exn backtrace
+          in
+          match attempt with
+          | Ok true ->
+            Lock_attempted (run_admitted
+              ~release_fd:(release_durable_lock_result ~lock_path) ~lock_path execution_context fd f)
+          | Ok false ->
+            close_fd_after_exception ~lock_path execution_context fd;
+            Lock_held_elsewhere
+          | Error cause ->
+            let cleanup_failure =
+              match protect_cleanup execution_context (fun () -> close_fd_result fd) with
+              | Ok () -> None
+              | Error failure -> Some failure
+            in
+            Lock_attempted (Lock_not_acquired
+              (durable_lock_error ?cleanup_failure ~lock_path ~phase:Acquire_process_lock cause)))
+      with
+      | Some attempt -> attempt
+      | None -> Lock_held_elsewhere)
 
 let with_durable_lock_observed ~lock_path f =
   with_durable_lock_observed_with

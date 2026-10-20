@@ -72,7 +72,12 @@ val open_or_create : path:string -> (t, error) result
 val open_existing : path:string -> (t, error) result
 (** Open and validate the current authoritative schema without creating or
     migrating a database. Used only by the serialized Owner recovery path. *)
-val take_released_checkpoints : t -> Keeper_semantic_execution.retained_checkpoint list
+type released_checkpoint
+(** A retained checkpoint a committed transaction of this store released.
+    Only {!take_released_checkpoints} makes one, so holding one is the proof
+    that its file is no longer named. *)
+
+val take_released_checkpoints : t -> released_checkpoint list
 (** Hand over, once, the retained checkpoints that committed transactions on
     this handle released, oldest commit first. A transaction releases a
     reference one of its semantic writes stopped naming when, after all its
@@ -80,6 +85,10 @@ val take_released_checkpoints : t -> Keeper_semantic_execution.retained_checkpoi
     sha256; it computes this before its COMMIT and publishes it only when the
     COMMIT returns success. A failed or uncertain commit releases nothing.
     The caller removes the files; nothing here touches the filesystem. *)
+
+val released_reference : released_checkpoint -> Keeper_checkpoint_ref.t
+val released_session_dir : session_root:string -> released_checkpoint -> string
+(** The session directory holding the released file, under [session_root]. *)
 
 val is_open : t -> bool
 (** Whether this handle still names a live database. Every command is guarded,
@@ -231,6 +240,8 @@ module For_testing : sig
   val database_file : string
   val database_application_id : int64
   val table_column_counts : (string * int) list
+  val owning_semantic_executions : t -> (Semantic.t list, error) result
+  (** The executions a commit's release reads as live, selected partly in SQL. *)
 end
 
 (** Semantic execution records share the Owner's SQLite journal. Suspended or

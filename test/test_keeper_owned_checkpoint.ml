@@ -227,25 +227,75 @@ let test_owned_paths_and_history_deletion () = with_session (fun session_dir ->
   (match Store.retain_exact_snapshot ~session_dir snapshot with Store.Not_installed _ -> () | _ -> fail "symlink replaced");
   check bool "dangling symlink evidence retained" true ((Unix.lstat path).Unix.st_kind=Unix.S_LNK))
 
+(* Only a store commit hands out a released checkpoint, so the test makes one:
+   a native call whose checkpoint moves from [dropped] to [next] releases
+   [dropped]. *)
+let released_by_store ~(seed : Keeper_checkpoint_ref.t) ~(dropped : Keeper_checkpoint_ref.t)
+    ~(next : Keeper_checkpoint_ref.t) =
+  let module Ops = Keeper_chat_operation_store in
+  let ok = function Ok value -> value | Error error -> fail (Ops.error_to_string error) in
+  let value = function Ok value -> value | Error detail -> fail detail in
+  let directory = Filename.temp_dir "owned-checkpoint-release" "" in
+  let store = Ops.open_or_create ~path:(Filename.concat directory Ops.For_testing.database_file) |> ok in
+  Fun.protect ~finally:(fun () -> ignore (Ops.close store : (unit, Ops.error) result)) (fun () ->
+    let operation_id = Keeper_chat_operation.Operation_id.of_string "owned-release" |> value in
+    ignore (Ops.submit store ~now:1. ~operation_id ~source:(`Assoc ["kind", `String "fixture"])
+              ~input:(`Assoc ["text", `String "release"]) |> ok);
+    let operation = match Ops.claim_next store ~now:2. |> ok with
+      | Some operation -> operation | None -> fail "no operation claimed" in
+    let call_id = "019a0010-1000-7000-8000-0000000000c1" in
+    let locator = Agent_core.Agent.execution_locator_of_yojson
+        (`Assoc ["version", `Int 1; "run_id", `String "execution-run-owned-release"]) |> value in
+    let call = Keeper_native_call.create ~call_id ~runtime_id:"native.primary"
+        ~operation_digest:operation.Keeper_chat_operation.execution_digest
+        ~api:(Keeper_native_call.New_input {seed_message_count=0}) ~seed_checkpoint:seed ~locator
+      |> value in
+    let commit change = Ops.update_direct_native_call store ~now:3. ~operation_id
+        ~execution_digest:operation.execution_digest change |> ok in
+    commit (Keeper_native_call.Bind {observed=Keeper_native_call.No_native_call; call});
+    commit (Keeper_native_call.Checkpoint {call_id; observed=seed; checkpoint=dropped});
+    commit (Keeper_native_call.Checkpoint {call_id; observed=dropped; checkpoint=next});
+    match Ops.take_released_checkpoints store with
+    | [released] -> released
+    | _ -> fail "the commit did not release exactly the superseded checkpoint")
+
+let release_ok label session_root released =
+  match Store.release_retained ~session_root released with
+  | Ok () -> ()
+  | Error Store.Lock_held_elsewhere -> fail (label ^ ": the session lock was held")
+  | Error (Store.Release_failed detail) -> fail (label ^ ": " ^ detail)
+
 let test_release_removes_only_the_released_artifact () = with_session (fun session_dir ->
-  let _a, released = accepted "A released" in
+  let session_root = Filename.dirname session_dir in
+  let _s, seed = accepted "S seed" in
+  let _a, dropped = accepted "A released" in
   let _b, kept = accepted "B kept" in
-  let reference = Store.exact_snapshot_reference released in
-  (match Store.release_retained ~session_dir ~reference with
-   | Ok () -> () | Error detail -> fail ("absent retained directory: " ^ detail));
-  Store.retain_exact_snapshot ~session_dir released |> require_installed;
+  let released = released_by_store ~seed:(Store.exact_snapshot_reference seed)
+      ~dropped:(Store.exact_snapshot_reference dropped) ~next:(Store.exact_snapshot_reference kept) in
+  release_ok "absent retained directory" session_root released;
+  Store.retain_exact_snapshot ~session_dir dropped |> require_installed;
   Store.retain_exact_snapshot ~session_dir kept |> require_installed;
-  (match Store.release_retained ~session_dir ~reference with
-   | Ok () -> () | Error detail -> fail ("release: " ^ detail));
-  check bool "the released artifact is gone" false (Sys.file_exists (artifact_path session_dir released));
+  release_ok "release" session_root released;
+  check bool "the released artifact is gone" false (Sys.file_exists (artifact_path session_dir dropped));
   assert_snapshot "the other artifact" kept (load session_dir (Store.exact_snapshot_reference kept));
-  (match Store.release_retained ~session_dir ~reference with
-   | Ok () -> () | Error detail -> fail ("a second release: " ^ detail));
-  let path = artifact_path session_dir released in
+  release_ok "a second release" session_root released;
+  let path = artifact_path session_dir dropped in
   Unix.symlink (Filename.concat session_dir "outside-target") path;
-  (match Store.release_retained ~session_dir ~reference with
-   | Error _ -> () | Ok () -> fail "a symlink was released");
-  check bool "the symlink is left in place" true ((Unix.lstat path).Unix.st_kind = Unix.S_LNK))
+  (match Store.release_retained ~session_root released with
+   | Error (Store.Release_failed _) -> ()
+   | Error Store.Lock_held_elsewhere -> fail "the session lock was held"
+   | Ok () -> fail "a symlink was released");
+  check bool "the symlink is left in place" true ((Unix.lstat path).Unix.st_kind = Unix.S_LNK);
+  Unix.unlink path;
+  Store.retain_exact_snapshot ~session_dir dropped |> require_installed;
+  (* A holder of the session lock makes the release leave the file. *)
+  (match Store.with_session_lock ~session_dir (fun _ -> Store.release_retained ~session_root released) with
+   | Ok (Error Store.Lock_held_elsewhere) -> ()
+   | Ok (Error (Store.Release_failed detail)) -> fail ("release under a held lock failed: " ^ detail)
+   | Ok (Ok ()) -> fail "the release waited for or ignored the held lock"
+   | Error detail -> fail ("session lock: " ^ detail));
+  check bool "a release under a held lock leaves the file" true
+    (Sys.file_exists (artifact_path session_dir dropped)))
 
 let () = run "keeper owned exact checkpoints" ["retention", [
   test_case "A survives B canonical and rolling history" `Quick test_survives_canonical_and_history;

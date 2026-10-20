@@ -863,20 +863,26 @@ let semantic_get_with_db db id =
       else Error (Store_unavailable (sqlite_error db "lookup semantic execution" rc)))
 ;;
 
-let semantic_rows db ~active_only =
-  with_statement db ~operation:"read semantic executions"
-    "SELECT scope_key, revision, phase, record_json FROM semantic_executions ORDER BY scope_key"
+let read_semantic_rows db ~operation ~where ~keep =
+  with_statement db ~operation
+    ("SELECT scope_key, revision, phase, record_json FROM semantic_executions" ^ where
+     ^ " ORDER BY scope_key")
     (fun stmt ->
       let rec loop acc =
         let rc = Sqlite3.step stmt in
         if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
         else if rc = Sqlite3.Rc.ROW then
             let* execution = decode_semantic stmt in
-            (* The denormalized phase is not authority before validation:
-               a damaged index must not hide an outstanding operation. *)
-            loop (if active_only && Semantic.is_terminal execution then acc else execution :: acc)
-        else Error (Store_unavailable (sqlite_error db "read semantic executions" rc))
+            loop (if keep execution then execution :: acc else acc)
+        else Error (Store_unavailable (sqlite_error db operation rc))
       in loop [])
+;;
+
+let semantic_rows db ~active_only =
+  (* The denormalized phase is not authority before validation: a damaged
+     index must not hide an outstanding operation. *)
+  read_semantic_rows db ~operation:"read semantic executions" ~where:""
+    ~keep:(fun execution -> not (active_only && Semantic.is_terminal execution))
 ;;
 
 (* Executions whose checkpoint references keep retained files alive: every
@@ -887,6 +893,18 @@ let owns_checkpoint_references (execution : Semantic.t) =
   not (Semantic.is_terminal execution) || match execution.native_call with
   | Keeper_native_call.No_native_call -> false
   | Keeper_native_call.Active _ | Keeper_native_call.Terminal_unacknowledged _ -> true
+;;
+
+(* The executions that own checkpoint references, for a commit's release.
+   Settled rows are never deleted, so this does not decode them all: SQL skips
+   a row whose stored record is settled and has no native call, which names no
+   checkpoint. It reads the record itself, not the denormalized phase column,
+   and [owns_checkpoint_references] stays the authority on what is decoded. *)
+let owning_semantic_rows db =
+  read_semantic_rows db ~operation:"read semantic executions owning checkpoints"
+    ~where:" WHERE json_extract(record_json, '$.phase.kind') IS NOT 'settled' \
+            OR json_extract(record_json, '$.native_call') IS NOT NULL"
+    ~keep:owns_checkpoint_references
 ;;
 
 (* [update_semantic] records the references one write stopped naming. *)
@@ -911,9 +929,8 @@ let released_by_transaction store =
   match Atomic.exchange store.dropped [] with
   | [] -> Ok []
   | dropped ->
-    let* rows = semantic_rows store.db ~active_only:false in
-    let live = List.filter owns_checkpoint_references rows
-      |> List.concat_map Semantic.checkpoint_references
+    let* rows = owning_semantic_rows store.db in
+    let live = List.concat_map Semantic.checkpoint_references rows
       |> List.map (fun (reference : Keeper_checkpoint_ref.t) -> reference.sha256) in
     let same_file (left : Semantic.retained_checkpoint) (right : Semantic.retained_checkpoint) =
       String.equal left.reference.sha256 right.reference.sha256
@@ -949,7 +966,12 @@ let with_transaction store f =
   in_transaction store ~begin_operation:"begin operation transaction" ~store_error:Fun.id f
 ;;
 
+type released_checkpoint = Semantic.retained_checkpoint
 let take_released_checkpoints store = Atomic.exchange store.released []
+let released_reference (released : released_checkpoint) = released.reference
+let released_session_dir ~session_root (released : released_checkpoint) =
+  Semantic.scoped_session_dir ~session_root released.session_scope
+    (Keeper_id.Trace_id.to_string released.reference.trace_id)
 
 type inspection_scope =
   | Outstanding_integrity_audit
@@ -2623,5 +2645,8 @@ module For_testing = struct
   let clear_runtime_retry_read_fault () = Atomic.set next_runtime_retry_read_fault false
   let database_file = database_file
   let database_application_id = database_application_id
+  let owning_semantic_executions store =
+    let* () = ensure_open store in
+    owning_semantic_rows store.db
   let table_column_counts = table_column_counts
 end

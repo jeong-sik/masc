@@ -987,17 +987,26 @@ let recover_operation_availability t =
 (* Remove the retained files that the store's confirmed commits released.
    This runs in the Owner fiber after the store call returns and before the
    command's caller resumes, so the caller cannot retain the same file again
-   while it is being removed. A removal that fails is logged and its file is
-   left for [Keeper_retained_checkpoint_sweep]; the command result stands. *)
+   while it is being removed.
+
+   The session lock is tried, never waited for. Its holder may be a long
+   canonical save, a Librarian publication or another process, and waiting
+   would stall every command in this mailbox behind it, with no bound across
+   processes. A released file is named by no execution, so leaving it is
+   safe and [Keeper_retained_checkpoint_sweep] removes it at the next startup.
+   A failed removal is logged the same way; the command result stands. *)
 let release_committed_checkpoints ~keeper_name ~session_root operation_store =
-  List.iter (fun ({session_scope; reference} : Keeper_semantic_execution.retained_checkpoint) ->
-    let session_dir = Keeper_semantic_execution.scoped_session_dir ~session_root session_scope
-        (Keeper_id.Trace_id.to_string reference.Keeper_checkpoint_ref.trace_id) in
-    match Keeper_checkpoint_store.release_retained ~session_dir ~reference with
+  List.iter (fun released ->
+    let sha256 = (Chat_operation_store.released_reference released).Keeper_checkpoint_ref.sha256 in
+    match Keeper_checkpoint_store.release_retained ~session_root released with
     | Ok () -> ()
-    | Error detail ->
+    | Error Keeper_checkpoint_store.Lock_held_elsewhere ->
+      Log.Keeper.info ~keeper_name
+        "released retained checkpoint %s is left for the startup sweep: its session lock is held"
+        sha256
+    | Error (Keeper_checkpoint_store.Release_failed detail) ->
       Log.Keeper.warn ~keeper_name "released retained checkpoint %s was not removed: %s"
-        reference.sha256 detail)
+        sha256 detail)
     (Chat_operation_store.take_released_checkpoints operation_store)
 ;;
 
@@ -1097,11 +1106,9 @@ let start
   let startup_result =
     let startup_now = now () in
     match
-      let settled =
-        run_operation_store ~label:"settle Keeper chat operations after restart" (fun () ->
-          Chat_operation_store.settle_running_after_restart operation_store ~now:startup_now) in
-      release_committed_checkpoints ~keeper_name ~session_root operation_store;
-      settled |> Result.map_error owner_error_of_operation_error
+      run_operation_store ~label:"settle Keeper chat operations after restart" (fun () ->
+        Chat_operation_store.settle_running_after_restart operation_store ~now:startup_now)
+      |> Result.map_error owner_error_of_operation_error
     with
     | Error _ as error -> error
     | Ok interrupted ->
@@ -2348,6 +2355,10 @@ let start
              else Eio.Promise.resolve resolve (Ok ());
              loop state shutdown_operation_id)
     in
+    (* What the restart settlement released. The registry holds its pool lock
+       while [start] runs, so the removal belongs to this fiber rather than to
+       [start], and it never waits for a session lock. *)
+    release_committed_checkpoints ~keeper_name ~session_root t.operation_store;
     start_child_if_needed initial_state None;
     (* Cancellation reaches the drain at its [Stream.take]. Whatever the
        reason, the loop is the owner's only reader, so leaving it means no

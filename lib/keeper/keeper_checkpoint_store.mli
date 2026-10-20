@@ -455,16 +455,24 @@ val retain_exact_snapshot :
     [<sha256>.json] after its reference. *)
 val retained_dirname : string
 
-(** Remove the retained artifact of [reference] under [session_dir], under the
-    same session lock that retention and exact reads take. Call it only with a
-    reference a confirmed journal commit released: one that no execution still
-    names. An absent artifact or retained directory is already released. A path
-    outside the owned, symlink-free directory chain, or one that is not a
-    regular file, is refused and left in place. The removal is not fsynced:
-    an artifact a crash restores is unnamed, and
-    [Keeper_retained_checkpoint_sweep] removes it at the next startup. *)
+type release_failure =
+  | Lock_held_elsewhere
+      (** The session's checkpoint lock was held at the attempt. Nothing
+          waited and the file stays; it is unnamed, so the startup sweep
+          removes it. *)
+  | Release_failed of string
+
 val release_retained :
-  session_dir:string -> reference:Keeper_checkpoint_ref.t -> (unit, string) result
+  session_root:string -> Keeper_chat_operation_store.released_checkpoint ->
+  (unit, release_failure) result
+(** Remove the retained artifact a confirmed journal commit released, under
+    [session_root], holding the same session lock that retention and exact
+    reads take. The lock is tried once and never waited for. An absent
+    artifact or retained directory is already released. A path outside the
+    owned, symlink-free directory chain, or one that is not a regular file, is
+    refused and left in place. The removal is not fsynced: an artifact a crash
+    restores is unnamed, and [Keeper_retained_checkpoint_sweep] removes it at
+    the next startup. *)
 
 (** Read only the artifact addressed by the complete accepted reference, under
     the stable session lock. Validates immutable bytes, trace and turn count;

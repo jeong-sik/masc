@@ -652,8 +652,8 @@ let test_oauth_polling_survives_unread_authority () =
   let state = identity_state () in
   let origin : Masc.Tui_decode.server_identity =
     { sid_version = "test"; sid_binary_commit = "test";
-      sid_binary_commit_age_s = None; sid_base_path = "/workspace/a";
-      sid_masc_root = "/workspace/a/.masc"; sid_executable_in_worktree = None;
+      sid_binary_commit_age_s = None; sid_base_path = Masc.Tui_decode.Canonical_path.of_path "/workspace/a";
+      sid_masc_root = Masc.Tui_decode.Canonical_path.of_path "/workspace/a/.masc"; sid_executable_in_worktree = None;
       sid_state_ready = Some true; sid_uptime = None; sid_sse_clients = None;
       sid_gc = None; sid_scheduler = None } in
   let remember () = Masc_tui_types.remember_identity_login state
@@ -668,7 +668,7 @@ let test_oauth_polling_survives_unread_authority () =
   check (Alcotest.list Alcotest.string) "withdrawal removes consent URL" [] (pending_urls state "A");
   Masc_tui_types.reconcile_detail_intent_origins state (Error "unread");
   Masc_tui_types.reconcile_detail_intent_origins state
-    (Ok { origin with sid_masc_root = "" });
+    (Ok { origin with sid_masc_root = Masc.Tui_decode.Canonical_path.of_path "" });
   state.server_identity <- Some origin;
   Masc_tui_types.reconcile_detail_intent_origins state (Ok origin);
   (* The first successful recovery GET still says consent has not landed.
@@ -693,7 +693,7 @@ let test_oauth_polling_survives_unread_authority () =
   remember ();
   Masc_tui_types.withdraw_identity_readings state;
   Masc_tui_types.reconcile_detail_intent_origins state
-    (Ok { origin with sid_masc_root = "/workspace/b/.masc" });
+    (Ok { origin with sid_masc_root = Masc.Tui_decode.Canonical_path.of_path "/workspace/b/.masc" });
   Masc_tui_types.reconcile_detail_intent_origins state (Ok origin);
   check Alcotest.bool "foreign root then A cannot resurrect intent" false (pending ())
 

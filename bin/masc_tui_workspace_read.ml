@@ -35,15 +35,21 @@ let workspace_read_path ~host ~port ~path =
       Error "Workspace-bound read already supplies a workspace precondition"
     else
       Ok (Uri.to_string (Uri.with_query uri
-        (fields @ ["expected_base_path", [Masc_tui_types.canonical_path wr_expected.sid_base_path];
-                   "expected_masc_root", [Masc_tui_types.canonical_path wr_expected.sid_masc_root]])))
+        (fields @ ["expected_base_path",
+                   [Masc.Tui_decode.Canonical_path.to_string wr_expected.sid_base_path];
+                   "expected_masc_root",
+                   [Masc.Tui_decode.Canonical_path.to_string wr_expected.sid_masc_root]])))
 
 let validate_workspace_read_json json =
   match current_workspace_read () with
   | None | Some {wr_proof=Request_precondition;_} -> Ok json
   | Some {wr_expected;wr_proof=Health_identity;_} ->
     let ( let* ) = Result.bind in
-    let* observed = Masc.Tui_decode.decode_server_identity json in
+    (* The decode resolves both paths; it runs where every other health
+       decode runs, on the CPU pool rather than in this fiber. *)
+    let* observed =
+      Masc_tui_response_decode.run ~name:"server.identity.decode_wait" (fun () ->
+        Masc.Tui_decode.decode_server_identity json) in
     if Masc_tui_types.server_workspace_matches ~expected:(Some wr_expected) (Ok observed)
     then Ok json
     else Error "Health reading belongs to another or unavailable workspace"

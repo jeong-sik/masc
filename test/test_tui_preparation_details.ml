@@ -118,8 +118,8 @@ let workspace_admission_preserves_selected_preparation () =
          foreign_snapshot.reports);
     let expected : Tui_decode.server_identity =
       { sid_version="0.24.0"; sid_binary_commit="preparation-source"
-      ; sid_binary_commit_age_s=None; sid_base_path=Unix.realpath config.base_path
-      ; sid_masc_root=Unix.realpath (Workspace.masc_dir config)
+      ; sid_binary_commit_age_s=None; sid_base_path=Masc.Tui_decode.Canonical_path.of_path (Unix.realpath config.base_path)
+      ; sid_masc_root=Masc.Tui_decode.Canonical_path.of_path (Unix.realpath (Workspace.masc_dir config))
       ; sid_executable_in_worktree=None; sid_state_ready=Some true
       ; sid_uptime=None; sid_sse_clients=None; sid_gc=None; sid_scheduler=None } in
     let served = ref config and conditional = ref false in

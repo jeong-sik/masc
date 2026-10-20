@@ -355,6 +355,9 @@ let task_cancel_arguments ~task_id ~reason ~expected_workspace =
   ; ("reason", `String reason)
   ; ("handoff_context", `Assoc [ ("summary", `String reason) ])
   ; ("expected_workspace", `Assoc
-       [ ("base_path", `String expected_workspace.Masc.Tui_decode.sid_base_path)
-       ; ("masc_root", `String expected_workspace.sid_masc_root) ])
+       [ ("base_path",
+          `String (Masc.Tui_decode.Canonical_path.to_string
+                     expected_workspace.Masc.Tui_decode.sid_base_path))
+       ; ("masc_root",
+          `String (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root)) ])
   ]

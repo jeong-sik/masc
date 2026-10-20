@@ -318,7 +318,7 @@ let test_boot_recovers_a_paused_owner () =
 
 let directive_workspace : Decode.server_identity = {
   sid_version = "test"; sid_binary_commit = "test"; sid_binary_commit_age_s = None;
-  sid_base_path = "/workspace"; sid_masc_root = "/workspace/.masc";
+  sid_base_path = Masc.Tui_decode.Canonical_path.of_path "/workspace"; sid_masc_root = Masc.Tui_decode.Canonical_path.of_path "/workspace/.masc";
   sid_executable_in_worktree = None; sid_state_ready = Some true;
   sid_uptime = None; sid_sse_clients = None; sid_gc = None; sid_scheduler = None;
 }
@@ -326,8 +326,8 @@ let directive_workspace : Decode.server_identity = {
 let check_directive_workspace fields =
   Alcotest.(check bool) "directive binds both workspace paths" true
     (List.assoc_opt "expected_workspace" fields = Some (`Assoc
-      [ "base_path", `String directive_workspace.sid_base_path
-      ; "masc_root", `String directive_workspace.sid_masc_root ]))
+      [ "base_path", `String (Decode.Canonical_path.to_string directive_workspace.sid_base_path)
+      ; "masc_root", `String (Decode.Canonical_path.to_string directive_workspace.sid_masc_root) ]))
 
 let test_resume_body_carries_the_operation_id () =
   let body =

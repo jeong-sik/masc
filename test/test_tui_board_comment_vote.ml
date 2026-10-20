@@ -205,7 +205,7 @@ let test_arm_is_typed_by_kind () =
 let test_comment_vote_body () =
   let identity : Masc.Tui_decode.server_identity =
     { sid_version = "test"; sid_binary_commit = "0"; sid_binary_commit_age_s = None
-    ; sid_base_path = "/workspace/base"; sid_masc_root = "/workspace/base/.masc"
+    ; sid_base_path = Masc.Tui_decode.Canonical_path.of_path "/workspace/base"; sid_masc_root = Masc.Tui_decode.Canonical_path.of_path "/workspace/base/.masc"
     ; sid_executable_in_worktree = None; sid_state_ready = None; sid_uptime = None
     ; sid_sse_clients = None; sid_gc = None; sid_scheduler = None }
   in
@@ -222,10 +222,10 @@ let test_comment_vote_body () =
   Alcotest.(check string) "V sends down" "down"
     (body false |> member "direction" |> to_string);
   Alcotest.(check string) "workspace base path"
-    (canonical_path identity.sid_base_path)
+    (Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path)
     (body true |> member "expected_workspace" |> member "base_path" |> to_string);
   Alcotest.(check string) "workspace masc root"
-    (canonical_path identity.sid_masc_root)
+    (Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root)
     (body true |> member "expected_workspace" |> member "masc_root" |> to_string);
   Alcotest.(check (list string)) "no other fields"
     [ "comment_id"; "direction"; "expected_workspace" ]

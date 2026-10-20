@@ -9390,9 +9390,9 @@ let test_decode_server_identity_reads_a_probe () =
       "030fa9043aafc5c2003f830c86720afff8e8e2ff"
       identity.Tui_decode.sid_binary_commit;
     Alcotest.(check string) "base path" "/Users/worker/ws"
-      identity.Tui_decode.sid_base_path;
+      (Tui_decode.Canonical_path.to_string identity.Tui_decode.sid_base_path);
     Alcotest.(check string) "masc root" "/Users/worker/ws/.masc"
-      identity.Tui_decode.sid_masc_root;
+      (Tui_decode.Canonical_path.to_string identity.Tui_decode.sid_masc_root);
     Alcotest.(check (option (float 0.001))) "binary age" (Some 1106.0)
       identity.Tui_decode.sid_binary_commit_age_s
 
@@ -9403,7 +9403,7 @@ let test_decode_server_identity_survives_a_bare_health () =
     Alcotest.(check string) "no version reads empty rather than failing" ""
       identity.Tui_decode.sid_version;
     Alcotest.(check string) "no base path either" ""
-      identity.Tui_decode.sid_base_path;
+      (Tui_decode.Canonical_path.to_string identity.Tui_decode.sid_base_path);
     Alcotest.(check (option (float 0.001))) "and no age is None" None
       identity.Tui_decode.sid_binary_commit_age_s;
     Alcotest.(check (option bool))

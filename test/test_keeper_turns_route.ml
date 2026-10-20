@@ -247,7 +247,8 @@ let test_owned_turn_survives_bound_read_refusal_and_recovery () =
       | Some slot -> slot | None -> Alcotest.fail "original Owner did not hold its turn" in
     let expected : Tui_decode.server_identity =
       { sid_version="0.24.0"; sid_binary_commit="owned-turn-source"; sid_binary_commit_age_s=None
-      ; sid_base_path=Unix.realpath config.base_path; sid_masc_root=Unix.realpath (Workspace.masc_dir config)
+      ; sid_base_path=Tui_decode.Canonical_path.of_path (Unix.realpath config.base_path);
+        sid_masc_root=Tui_decode.Canonical_path.of_path (Unix.realpath (Workspace.masc_dir config))
       ; sid_executable_in_worktree=None; sid_state_ready=Some true
       ; sid_uptime=None; sid_sse_clients=None; sid_gc=None; sid_scheduler=None } in
     let served = ref state in

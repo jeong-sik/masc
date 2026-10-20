@@ -67,8 +67,8 @@ while True:
 |} port);
       Unix.chmod executable 0o700;
       let browser : Browser_configuration.stagehand = {chrome=executable;extension=root;profile=None} in
-      check "an operator profile is refused, never replaced" true
-        (Result.is_error (Chrome.configuration ~browser:{browser with profile=Some root}
+      check "a relative persistent profile is refused" true
+        (Result.is_error (Chrome.configuration ~browser:{browser with profile=Some "relative-profile"}
           ~launcher:!launcher ~guardian:!guardian ~claim_directory:(Filename.concat root "chrome-slot")));
       let c=ok (Chrome.configuration ~browser ~launcher:!launcher ~guardian:!guardian
         ~claim_directory:(Filename.concat root "chrome-slot")) in

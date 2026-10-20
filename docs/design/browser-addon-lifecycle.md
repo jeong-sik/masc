@@ -172,8 +172,8 @@ receipts remain distinct from successful contract validation.
    [geckodriver profiles](https://firefox-source-docs.mozilla.org/testing/geckodriver/Profiles.html).
    Downloads are staged privately but publication/upload and shared persistent
    profiles still require their host brokers. Chrome now has the owned controller
-   described below; configured operator Chrome profiles are explicitly refused
-   until their shared-profile admission is connected.
+   described below, including dedicated persistent-profile admission. Gecko
+   persistent profiles still require their ownership boundary.
 
    The tool proxy must
    preserve the exported tool's installation-selected command/result hooks;
@@ -316,8 +316,9 @@ receipts remain distinct from successful contract validation.
    events and pointer feedback are observed through the fixture's loopback HTTP
    reports rather than an alternate session/evaluation path. The separate server
    opener and its PID/command-based recovery have been removed. These are
-   executable scenario definitions, not a successful browser-proof run. Shared
-   operator profiles, scoped transfers and actual browser evidence remain open.
+   executable scenario definitions, not a successful browser-proof run. Persistent
+   Chrome profiles have the admission below; scoped transfers and actual browser
+   evidence remain open.
 5. Scoped model-generation middleware using the existing exact-output authority,
    with retained request/terminal evidence and installation-selected routes. The
    new package `exact_outputs` declarations are reused; observation-only sampling
@@ -396,9 +397,53 @@ receipts remain distinct from successful contract validation.
    consumer fixture exercises accepted, changed-document, changed-meaning,
    invented-reference, cancelled and retired requests using a scripted
    WebDriver transport. These definitions are not executed browser/model proof.
-   Real Chrome/extension/model evidence, shared operator-profile admission and
+   Real Chrome/extension/model evidence, Gecko persistent-profile admission and
    scoped transfer brokers remain. The selected Stagehand schema/role adapter
    is now connected to the worker session controller described above.
+
+## Dedicated persistent Chrome profiles
+
+`browser.stagehand.profile` selects an existing private directory for a dedicated
+MASC profile. Omitting it keeps fresh private allocations. The selected persistent
+directory keeps its cookies, preferences and login state; host cleanup never
+recursively deletes it or clears its Chrome singleton or debugging-port files.
+Chrome's default personal data directory is not an automation fallback: Chrome
+136+ requires a non-default data directory for remote debugging; see
+[Chrome's documented restriction](https://developer.chrome.com/blog/remote-debugging-port).
+
+The first selection creates one private native claim slot and an exclusive,
+durable anchor inside the profile. The descriptor pins the profile, slot, gate,
+lease and anchor identities. Subsequent selections and startup revalidate them.
+An incomplete bootstrap or a replaced synchronization inode is a refusal, not
+permission to recreate admission. Claim files and the anchor must remain stable.
+
+Each browser guardian acquires both its original child slot and this shared
+profile slot through the existing native multi-resource launcher. Two MASC
+installations cannot concurrently launch on that profile. Recovery, retirement
+and old-owner cleanup retain a child-only view: a successor advancing the shared
+profile intent cannot redirect old cleanup or make it target the successor.
+The immutable child cleanup descriptor records the chosen profile lifetime.
+
+This is cooperative ownership of a dedicated profile. Do not start an external
+Chrome on the same profile concurrently. Startup refuses an existing
+`SingletonLock`, `SingletonSocket` or `SingletonCookie`, including dangling links,
+without interpreting their PID or deleting them. The check cannot exclude an
+external start after it. Chromium's
+[ProcessSingleton implementation](https://chromium.googlesource.com/chromium/src/+/HEAD/chrome/browser/process_singleton_posix.cc)
+can forward a second launch or terminate an unresponsive existing browser; MASC
+does not use that behavior as a recovery mechanism.
+
+A preserved debugging-port file may name an old session. Only the pre-attachment
+bootstrap can repeat read-only endpoint/`SystemInfo.getProcessInfo` observations,
+within the existing startup window. Each attempt checks the original lease,
+browser child and profile identity, and closes a refused CDP connection. No
+extension, model callback or page input is admitted before these checks.
+
+The new preserved-profile scenario defines real native guardian startup, shared
+admission refusal, Retire during CDP startup, old cleanup after shared-slot
+replacement, login-fixture preservation and refusal of a replaced gate inode.
+It uses an isolated fake Chromium endpoint. Source and limited type checks are
+not execution evidence, a real persistent Chrome run or personal-profile proof.
 
 ## Completion evidence
 

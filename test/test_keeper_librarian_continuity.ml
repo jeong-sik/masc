@@ -2233,9 +2233,109 @@ let test_append_preserves_unread_source_records () = with_source @@ fun _env con
   check bool "a later atom commit cannot forget previous holes" true (next.unread_messages = [hole]);
   check int "only complete atom coverage advances" 3 next.end_atom
 
+let ready ?previous config =
+  match P.prepare_source ?previous ~config ~keeper_name ~trace_id () |> get with
+  | P.Ready prepared -> prepared
+  | P.No_source _ -> fail "missing continuity source"
+let tool_call id = Agent_core.Types.make_message ~role:Agent_core.Types.Assistant
+  [Agent_core.Types.ToolUse {id; name = "read_file"; input = `Assoc ["path", `String id]}]
+let tool_result id body =
+  { (Agent_core.Types.make_message ~role:Agent_core.Types.Tool
+       [Agent_core.Types.ToolResult {tool_use_id = id; content = body;
+         outcome = Agent_core.Types.Tool_succeeded; json = None; content_blocks = None}])
+    with tool_call_id = Some id }
+
+(* The round after a commit, in the same walk, is handed the unit it
+   committed. Unchanged checkpoint bytes are not decoded again; changed bytes
+   are, and a covered message that changed still refuses the old snapshot. *)
+let test_a_round_reads_the_previous_unit_only_while_its_bytes_stand () =
+  with_source @@ fun _env config save _append boundary ->
+  let first_atom = [tool_call "read-a"; tool_result "read-a" "result of A"] in
+  let history = first_atom @ [message "B"] in
+  save history;
+  boundary ~fresh:true 1 first_atom;
+  boundary ~fresh:false 2 history;
+  let first = ready config in
+  let again = ready ~previous:first config in
+  check bool "unchanged bytes give the values the previous unit read" true
+    (List.equal ( == ) (P.messages first) (P.messages again));
+  save (history @ [message "C in flight"]);
+  let decoded = ready ~previous:again config in
+  check bool "changed bytes are decoded again" false
+    (List.equal ( == ) (P.messages again) (P.messages decoded));
+  check bool "the decoded unit holds the same messages" true (P.messages again = P.messages decoded);
+  let committed = commit config decoded "A was read." in
+  check int "the first atom is committed" 1 committed.end_atom;
+  let next = ready ~previous:decoded config in
+  check (option string) "the committed snapshot fits the same bytes" (Some committed.working_state)
+    (P.previous_working_state next);
+  check int "the next unit starts at the committed end" 1 (P.start_atom next);
+  save (history @ [message "C in flight"; message "D in flight"]);
+  let published = commit config next "A and B were read." in
+  check int "an appended suffix during inference still publishes" 2 published.end_atom;
+  boundary ~fresh:false 3 (history @ [message "C in flight"]);
+  let after = ready ~previous:next config in
+  check (option string) "the snapshot published over appended bytes fits" (Some published.working_state)
+    (P.previous_working_state after);
+  save ([tool_call "read-a"; tool_result "read-a" "a rewritten result of A"; message "B"; message "C in flight";
+         message "D in flight"]);
+  let rewritten = ready ~previous:after config in
+  check (option string) "a covered message that changed refuses the snapshot" None
+    (P.previous_working_state rewritten);
+  check int "the rewrite starts at atom 0" 0 (P.start_atom rewritten);
+  let session_dir = Filename.concat (Masc.Keeper_fs.session_store_path config) trace_id in
+  Sys.remove (C.agent_core_checkpoint_path ~session_dir ~session_id:trace_id);
+  check bool "a removed checkpoint is no readable source" true
+    (match P.prepare_source ~previous:rewritten ~config ~keeper_name ~trace_id () with
+     | Ok (P.No_source P.Source_unreadable) -> true
+     | Ok (P.Ready _ | P.No_source (P.Drained | P.Empty_range)) | Error _ -> false)
+
+let growing_history_atoms = 48
+let growing_history_atom_bytes = 256 * 1024
+
+(* A walk over one checkpoint that keeps its bytes, reading one completed turn
+   per round. Each round's snapshot digest is the full digest of its prefix,
+   and what a round allocates does not grow with the prefix it covers: the
+   prefix is neither decoded, encoded nor compared again. The full read
+   allocates at least the covered text twice per round. Each atom is a small
+   call and a large result, so the text is in the covered prefix rather than
+   in the openers each boundary line names. *)
+let test_a_walk_does_not_reread_the_covered_prefix () =
+  with_source @@ fun _env config save _append boundary ->
+  let atom_messages atom =
+    let id = Printf.sprintf "read-%d" atom in
+    [tool_call id; tool_result id (String.make growing_history_atom_bytes 'x')] in
+  let atom_list = List.init growing_history_atoms atom_messages in
+  let history = List.concat atom_list in
+  save history;
+  let keepers_dir = Masc.Workspace.keepers_runtime_dir config in
+  let _, allocations = List.fold_left (fun (previous, allocations) turn ->
+    boundary ~fresh:(turn = 1) turn (List.concat (List.filteri (fun index _ -> index < turn) atom_list));
+    let before = Gc.allocated_bytes () in
+    let prepared = ready ?previous config in
+    let prepared_bytes = Gc.allocated_bytes () -. before in
+    record_prepared_memory config prepared;
+    let before = Gc.allocated_bytes () in
+    let snapshot = P.commit ~new_unread_messages:[] ~config ~keeper_name ~prepared
+        ~working_state:(Printf.sprintf "read through atom %d" turn) |> get in
+    let round_bytes = prepared_bytes +. (Gc.allocated_bytes () -. before) in
+    check int "one completed turn per round" turn snapshot.end_atom;
+    let lines = B.read ~keepers_dir ~keeper_id:keeper_name |> get in
+    check bool "the snapshot digest is the full digest of its prefix" true
+      (Result.is_ok (S.restore ~trace_id ~lines ~messages:history snapshot));
+    Some prepared, round_bytes :: allocations) (None, []) (List.init growing_history_atoms succ) in
+  let last = List.hd allocations and second = List.nth allocations (growing_history_atoms - 2) in
+  let covered_growth = float_of_int ((growing_history_atoms - 2) * growing_history_atom_bytes) in
+  check bool "a round's allocation does not grow with its covered prefix" true
+    (last -. second < covered_growth)
+
 let () = run "production continuity pair"
   ["cycle",[test_case "frozen prefix keeps publication checks" `Quick
       test_prefix_selection_keeps_frozen_source_and_publication_checks;
+    test_case "a round reads the previous unit only while its bytes stand" `Quick
+      test_a_round_reads_the_previous_unit_only_while_its_bytes_stand;
+    test_case "a walk does not reread the covered prefix" `Quick
+      test_a_walk_does_not_reread_the_covered_prefix;
     test_case "append preserves exact unread records" `Quick test_append_preserves_unread_source_records;
     test_case "completed turns are work units" `Quick test_completed_turn_work_units;
     test_case "a rewrite from atom 0 follows its target" `Quick test_rewrite_from_zero_follows_its_target;

@@ -353,6 +353,29 @@ val load_agent_core_exact_snapshot :
   session_id:string ->
   (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
 
+(** The bytes one exact snapshot was decoded from, named by their digest. It
+    is made only from an exact snapshot, never from a stored record. *)
+type exact_source
+
+val exact_snapshot_source : exact_checkpoint_snapshot -> exact_source
+
+type exact_snapshot_since =
+  | Unchanged_source
+      (** The file holds exactly the known bytes; their decoded value is the
+          one the caller already holds. Nothing was decoded. *)
+  | Changed_source of exact_checkpoint_snapshot
+      (** The file holds other bytes, decoded once. *)
+
+(** {!with_agent_core_exact_snapshot} for a caller that already holds one
+    exact snapshot of this session: under the same session lock the file is
+    hashed, and decoded only when its bytes differ from [known]. A missing
+    file is [Ref_not_found]. *)
+val with_agent_core_exact_snapshot_since :
+  session_dir:string ->
+  known:exact_source ->
+  (exact_snapshot_since -> 'a) ->
+  ('a, checkpoint_ref_load_error) result
+
 (** Load one canonical checkpoint and its exact source identity from the same
     locked byte snapshot. No size, mtime, timestamp, or process cache
     participates in the identity. *)

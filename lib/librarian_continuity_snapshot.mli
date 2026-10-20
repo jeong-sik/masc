@@ -50,10 +50,20 @@ type error =
   | Read_failed of string
   | Write_failed of string
 
+(** The hash state of [prefix_sha256] over the atoms before one end of one
+    message list, kept with the very message values it read. Given back to
+    {!restore} or {!capture_checkpoint_prefix} with a later end over those
+    same values, physically, it is extended by the atoms after its end; with
+    any other list it is ignored and the whole prefix is read again. *)
+type prefix_digest
+
 type restored =
   { working_state : string
   ; unread_messages : Keeper_librarian_unread.t list
   ; messages : Agent_core.Types.message list
+  ; covered_prefix : prefix_digest
+      (** The verified [prefix_sha256] state over [messages] in hand at
+          [end_atom], for a capture of the same values to extend. *)
   }
 
 val capture
@@ -72,23 +82,28 @@ val checkpoint_prefix_range : trace_id:string ->
 (** Actual completed checkpoint prefix, including history predating the log.
     This is source selection, never evidence of a Memory read or cursor move. *)
 
-val capture_checkpoint_prefix : ?end_atom:int -> unread_messages:Keeper_librarian_unread.t list ->
+val capture_checkpoint_prefix : ?prefix:prefix_digest -> ?end_atom:int ->
+  unread_messages:Keeper_librarian_unread.t list ->
   catch_up_end_atom:int option -> trace_id:string ->
   lines:(int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result) list ->
   messages:Agent_core.Types.message list -> working_state:string -> unit -> (t, error) result
 (** Explicitly capture the supplied prefix through a whole atom, covered by a
     real completed boundary. No synthetic restart or progress is introduced.
     [catch_up_end_atom] is the rewrite's catch-up target ({!t}); one the
-    captured end already reached is dropped. *)
+    captured end already reached is dropped. [prefix] is a {!prefix_digest}
+    of these message values the digest may extend instead of reading the
+    whole prefix again. *)
 
 val restore
-  :  trace_id:string
+  :  ?prefix:prefix_digest
+  -> trace_id:string
   -> lines:(int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result) list
   -> messages:Agent_core.Types.message list
   -> t
   -> (restored, error) result
 (** Validate the same history generation, exact ending boundary and turn, and every covered message, then retain
-    pinned messages and atoms at or after the exclusive end. Appends are allowed. *)
+    pinned messages and atoms at or after the exclusive end. Appends are allowed. A [prefix] over these same
+    message values spares encoding the covered messages it already fed; the decision is the same without it. *)
 
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, error) result

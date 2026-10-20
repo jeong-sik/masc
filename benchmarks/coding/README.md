@@ -67,3 +67,8 @@ durable chat operation the harness polls. It remains attached when later
 verification fails or the episode times out; it is null when no accepted
 identity was observed. The report validates it with the runtime's canonical
 operation-ID type. This observation does not claim a Task or verification ID.
+
+An episode whose Keeper setup fails before workspace preparation still records
+its failure. Verification runs only against a workspace prepared by that
+episode, including timed-out episodes; a directory left by an interrupted
+earlier run is not graded after a new admission failure.

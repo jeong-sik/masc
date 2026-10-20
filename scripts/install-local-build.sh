@@ -155,7 +155,8 @@ else
   # TOML (#44049), and this branch reported only that the workspace was not
   # resolved. The file exists only while the helper runs: the trap removes it
   # when a signal ends the script in that window, and the text moves into
-  # resolve_errors afterwards.
+  # resolve_errors afterwards. A signal that lands after mktemp created the
+  # file and before the assignment below, or SIGKILL, still leaves it.
   resolve_stderr=""
   trap 'rm -f "$resolve_stderr"' EXIT
   resolve_stderr=$(mktemp "${TMPDIR:-/tmp}/masc-resolve-workspace.XXXXXX")

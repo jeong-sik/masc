@@ -958,19 +958,24 @@ class LocalBuildInstall(unittest.TestCase):
             "returned no root": "workspace=resolved\\nsource=persisted_default\\n",
             "returned an invalid workspace answer": "workspace=bogus\\n",
         }
+        shown = {
+            "a notice": ("fixture notice before the answer", "fixture notice before the answer"),
+            "no notice": (None, "(none)"),
+        }
         for refusal, answer in answers.items():
-            with self.subTest(refusal=refusal), tempfile.TemporaryDirectory() as temporary:
-                root = Path(temporary).resolve()
-                build = root / "build"
-                build.mkdir()
-                binaries(build)
-                preflight_helper(build, unnamed_workspace=answer,
-                                 resolve_notice="fixture notice before the answer")
-                result, _ = self.run_with_private_tmpdir(root, build)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn(refusal, result.stderr)
-                self.assertTrue(result.stderr.rstrip().endswith("Its error output:\nfixture notice before the answer"),
-                                result.stderr)
+            for label, (notice, expected) in shown.items():
+                with self.subTest(refusal=refusal, helper_stderr=label), \
+                        tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary).resolve()
+                    build = root / "build"
+                    build.mkdir()
+                    binaries(build)
+                    preflight_helper(build, unnamed_workspace=answer, resolve_notice=notice)
+                    result, _ = self.run_with_private_tmpdir(root, build)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(refusal, result.stderr)
+                    self.assertTrue(result.stderr.rstrip().endswith(f"Its error output:\n{expected}"),
+                                    result.stderr)
 
     # A named workspace that does not exist yet has no runtime.toml to judge;
     # the server creates it on its first start.

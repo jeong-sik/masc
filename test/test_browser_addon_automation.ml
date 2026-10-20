@@ -22,7 +22,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers();self.wfile.write(body)
 http.server.HTTPServer((a.host,a.port),Handler).serve_forever()
 |}
-let scenario () = Eio_main.run (fun env ->
+let scenario ~cancel_receipt () = Eio_main.run (fun env ->
   Time_compat.set_clock (Eio.Stdenv.clock env);
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let slot=Filename.temp_dir "browser-owned-slot-" "" in
@@ -36,7 +36,7 @@ let scenario () = Eio_main.run (fun env ->
   Eio.Switch.run (fun sw ->
     Eio.Switch.on_release sw (fun () -> Unix.unlink executable);
     let owner=ok (Owner.create ~incarnation:instance_id) in
-    Masc.Browser_addon_automation.run ~env ~owner ~directory (fun () ->
+    let work () =
       let snapshot=Owner.snapshot owner in
       let owned=Yojson.Safe.Util.member "owned_backends" snapshot in
       let automation,_=ok (Masc.Browser_addon_inventory.owned_of_json owned) in
@@ -53,11 +53,37 @@ let scenario () = Eio_main.run (fun env ->
         | W.Issue_result (Ok (B.Answered (`Assoc fields))) -> List.assoc_opt "ok" fields=Some (`Bool true)
         | Issue_result _|Snapshot_result _|Poll_result _|Receipt|Service_refusal _ -> false);
       check bool "private retirement joins backend cleanup" true
-        (Owner.dispatch owner {W.incarnation=instance_id;command=W.Retire}=W.Receipt)));
+        (Owner.dispatch owner {W.incarnation=instance_id;command=W.Retire}=W.Receipt) in
+    if not cancel_receipt then Masc.Browser_addon_automation.run ~env ~owner ~directory work
+    else (
+      let committing,begin_commit=Eio.Promise.create () and proceed,finish_commit=Eio.Promise.create () in
+      let context,publish_context=Eio.Promise.create () in
+      let worker=Eio.Fiber.fork_promise ~sw (fun () ->
+        try Eio.Cancel.sub (fun cancellation ->
+          Eio.Promise.resolve publish_context cancellation;
+          Masc.Browser_addon_automation.For_testing.run ~env ~owner ~directory work
+            ~commit_receipt:(fun ~path ~contents ->
+              Eio.Promise.resolve begin_commit ();
+              Eio.Promise.await proceed;
+              Eio_unix.run_in_systhread (fun () -> Fs_compat.save_file_atomic_strict path contents))) with
+        | Eio.Cancel.Cancelled _ -> ()) in
+      let cancellation=Eio.Promise.await context in
+      Eio.Promise.await committing;
+      Eio.Cancel.cancel cancellation Exit;
+      Eio.Promise.resolve finish_commit ();
+      Eio.Promise.await_exn worker));
   check bool "worker retained a cleanup receipt" true (Sys.file_exists (Filename.concat directory "automation-closed.json"));
   lease (Native_addon_lease.retire admission);
   ok (Socket.cleanup ~admission ~directory:slot);
   check bool "original allocation released" false (Sys.file_exists directory);
   Fs_compat.remove_tree slot)
-let () = run "browser owned driver lifecycle" ["backend",[
-  test_case "owned driver readiness, command and retirement" `Quick scenario]]
+let cancellation_child () =
+  let pid=Unix.create_process Sys.executable_name [|Sys.executable_name;"--cancel-receipt"|] Unix.stdin Unix.stdout Unix.stderr in
+  check bool "receipt cancellation joins cleanup" true (snd (Unix.waitpid [] pid)=Unix.WEXITED 0)
+let () =
+  if Array.to_list Sys.argv=[Sys.executable_name;"--cancel-receipt"] then
+    run ~argv:[|Sys.executable_name|] "browser receipt cancellation" ["backend",[
+      test_case "cancellation during receipt commit" `Quick (scenario ~cancel_receipt:true)]]
+  else run "browser owned driver lifecycle" ["backend",[
+    test_case "owned driver readiness, command and retirement" `Quick (scenario ~cancel_receipt:false);
+    test_case "receipt cancellation joins cleanup" `Quick cancellation_child]]

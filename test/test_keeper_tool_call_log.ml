@@ -1770,7 +1770,7 @@ let test_dashboard_aggregate_does_not_count_the_composition_summary () =
       (Safe_ops.json_int ~default:(-1) "malformed" summary);
     let tools =
       Yojson.Safe.Util.(member "by_tool" summary |> to_list)
-      |> List.filter_map (Safe_ops.json_string_opt "tool")
+      |> List.filter_map (Safe_ops.json_string_opt "name")
       |> List.sort String.compare
     in
     Alcotest.(check (list string)) "the summary row is not a tool's call"

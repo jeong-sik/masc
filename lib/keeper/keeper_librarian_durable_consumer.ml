@@ -1396,6 +1396,7 @@ let consume_one_with_extent
     let boundaries = List.fold_left (fun acc (line, decoded) ->
       match decoded with Ok record -> Line_map.add line record acc | Error _ -> acc)
       Line_map.empty lines in
+    let digest_at = Window.atom_opening_digest messages in
     let _, _, _, selected_messages_rev, observations_rev, historical_rev =
       List.fold_left
         (fun (prev_end, message_count, tool_count, messages_rev, observations_rev, historical_rev) step ->
@@ -1404,7 +1405,7 @@ let consume_one_with_extent
              (match atom with
               | None -> prev_end, message_count, tool_count, messages_rev, observations_rev, historical_rev
               | Some (range, _, _, _, _) ->
-                let scopes = Historical.atom_spans ~trace_id ~messages
+                let scopes = Historical.atom_spans ~trace_id ~digest_at
                     ~start_atom:prev_end ~end_atom ~boundary:(Line_map.find_opt line boundaries) in
                 let message_count, tool_count, messages_rev, observations_rev, historical_rev =
                   List.fold_left (fun (count, tool_count, messages_rev, observations_rev, contexts) scope ->

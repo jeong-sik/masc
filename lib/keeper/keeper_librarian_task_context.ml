@@ -1,5 +1,4 @@
 module B = Keeper_turn_boundaries
-module Window = Runtime_model_input_tail_window
 
 type source =
   | Atom_span of { trace_id : string; start_atom : int; end_atom : int }
@@ -14,7 +13,7 @@ type scope = { source : source; attribution : attribution }
 type t = { scope : scope; first_message : int; after_message : int;
   first_tool_observation : int; after_tool_observation : int }
 
-let atom_spans ~trace_id ~messages ~start_atom ~end_atom ~boundary =
+let atom_spans ~trace_id ~digest_at ~start_atom ~end_atom ~boundary =
   let span attribution start_atom end_atom =
     {source=Atom_span {trace_id;start_atom;end_atom};attribution} in
   let gap start_atom end_atom =
@@ -24,7 +23,7 @@ let atom_spans ~trace_id ~messages ~start_atom ~end_atom ~boundary =
       position=B.Atom_history position}; _ }
     when String.equal trace_id (Ids.Turn_ref.trace_id turn_ref)
       && end_atom <= position.end_atom
-      && Window.atom_opening_digest messages (position.end_atom - 1)
+      && digest_at (position.end_atom - 1)
          = Some position.last_atom_digest ->
     let attribution = Observed {turn_ref;task_context} in
     let admitted_start = match history_at_start with
@@ -32,7 +31,7 @@ let atom_spans ~trace_id ~messages ~start_atom ~end_atom ~boundary =
       | B.Continued_history -> None
       | B.Continued_history_from {start_atom;start_atom_digest} ->
         if start_atom > 0 && start_atom <= position.end_atom
-           && Window.atom_opening_digest messages (start_atom - 1) = Some start_atom_digest
+           && digest_at (start_atom - 1) = Some start_atom_digest
         then Some start_atom else None in
     (match admitted_start with
      | Some admitted_start ->

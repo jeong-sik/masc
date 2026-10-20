@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
+import { validateRenderClock } from './render-midi-clock.mjs'
 
 export const pcmOutputPath = fileURLToPath(new URL('./music-pcm-output', import.meta.url))
 function counter(value) {
@@ -15,16 +16,17 @@ export function openPcmOutput({ output, provideBlock, signal, onEvent = () => {}
   signal?.throwIfAborted()
   const child = spawnProcess(executable, output === undefined ? [] : ['--output', output], { stdio: ['pipe', 'pipe', 'pipe'] })
   const producer = new AbortController()
-  let failure = null, info = null, playing = false, stopping = false, closed = false, final = null, job = null
+  let failure = null, info = null, playing = false, stopping = false, closed = false, final = null, job = null, renderClock = null
   let nativeError = null, receiptError = null, settled = false
   let nextID = 1n, sent = 0n, detail = ''
-  let resolveReady, rejectReady, resolveClose, rejectClose
+  let resolveReady, rejectReady, resolveClose, rejectClose, resolveClock, rejectClock
   const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject })
   const nativeClose = new Promise((resolve, reject) => { resolveClose = resolve; rejectClose = reject })
-  ready.catch(() => {}); nativeClose.catch(() => {})
+  const clock = new Promise((resolve, reject) => { resolveClock = resolve; rejectClock = reject })
+  ready.catch(() => {}); nativeClose.catch(() => {}); clock.catch(() => {})
   function fail(reason) {
     failure ??= reason instanceof Error ? reason : new Error('PCM output failed', { cause: reason })
-    rejectReady(failure); producer.abort(failure)
+    rejectReady(failure); rejectClock(failure); producer.abort(failure)
     if (!closed) child.kill('SIGTERM')
   }
   const abort = () => fail(signal.reason)
@@ -44,7 +46,7 @@ export function openPcmOutput({ output, provideBlock, signal, onEvent = () => {}
       if (failure && event?.kind !== 'stopped') return
       switch (event?.kind) {
         case 'ready':
-          if (info || event.schemaVersion !== 2 || typeof event.device?.id !== 'string' || !event.device.id
+          if (info || event.schemaVersion !== 3 || typeof event.device?.id !== 'string' || !event.device.id
               || typeof event.device.name !== 'string' || (output !== undefined && event.device.id !== output)
               || !Number.isInteger(event.sampleRate) || event.sampleRate <= 0 || event.sampleRate > 0xffffffff
               || !Number.isInteger(event.blockFrames) || event.blockFrames <= 0 || event.blockFrames > 2 ** 24
@@ -72,6 +74,11 @@ export function openPcmOutput({ output, provideBlock, signal, onEvent = () => {}
         case 'playing':
           if (!info || playing || sent < BigInt(info.prefillFrames)) throw new Error('Unexpected PCM playback acknowledgement')
           playing = true; break
+        case 'clock':
+          validateRenderClock(event)
+          if (!info || !playing || renderClock || event.device.id !== info.device.id || event.sampleRate !== info.sampleRate
+              || counter(event.anchor.frame) >= sent) throw new Error('Unbound source-render clock')
+          renderClock = structuredClone(event); resolveClock(structuredClone(renderClock)); break
         case 'stopped': {
           if (!info || typeof event.success !== 'boolean' || !['none', 'underrun', 'render-format'].includes(event.fault)) throw new Error('Invalid PCM output final receipt')
           const admitted = counter(event.admittedFrames), rendered = counter(event.renderedFrames), discarded = counter(event.discardedFrames)
@@ -105,6 +112,7 @@ export function openPcmOutput({ output, provideBlock, signal, onEvent = () => {}
     if (!failure && (code !== 0 || !final)) fail(new Error(detail || `PCM output closed without finalization: ${code ?? exitSignal}`))
     if (failure) rejectClose(failure)
     else resolveClose(final)
+    rejectClock(failure ?? new Error('PCM output closed without a source-render clock'))
   })
   const completion = (async () => {
     try {
@@ -117,12 +125,12 @@ export function openPcmOutput({ output, provideBlock, signal, onEvent = () => {}
   })()
   completion.catch(() => {})
   if (signal?.aborted) abort()
-  return { ready, completion,
+  return { ready, clock, completion,
     diagnostics() {
       return structuredClone({ schemaVersion: 1, requestedOutput: output ?? null, device: info?.device ?? null,
         format: info ? { sampleRate: info.sampleRate, blockFrames: info.blockFrames, prefillFrames: info.prefillFrames } : null,
         playing, nativeClosed: closed, settled, requestedBlocks: String(nextID - 1n), sentFrames: String(sent),
-        nativeError, final, receiptError, failure: failure?.message ?? null })
+        nativeError, final, clock: renderClock, receiptError, failure: failure?.message ?? null })
     },
     stop() {
       if (stopping || closed || failure) return

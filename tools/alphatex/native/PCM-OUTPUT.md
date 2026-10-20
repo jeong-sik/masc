@@ -10,7 +10,7 @@ rate. The main mixer performs the selected device's channel conversion.
 Startup emits NDJSON:
 
 ```json
-{"kind":"ready","schemaVersion":2,"device":{"id":"UID","name":"Output"},"sampleRate":48000,"blockFrames":512,"prefillFrames":1024}
+{"kind":"ready","schemaVersion":3,"device":{"id":"UID","name":"Output"},"sampleRate":48000,"blockFrames":512,"prefillFrames":1024}
 {"kind":"need","id":"1","frames":512,"startFrame":"0"}
 ```
 
@@ -45,6 +45,34 @@ notifications (including UID changes) and after retiring audio at normal stop.
 The final stop acknowledgement retains that device validation. Per-block demand
 and receipt check engine state and atomic render faults without synchronous
 CoreAudio device-property queries.
+
+After the first successful callback with a valid nonzero host timestamp, the
+control thread emits one source-render clock observation:
+
+```json
+{"kind":"clock","schemaVersion":1,"device":{"id":"UID","name":"Output"},"sampleRate":48000,"clock":{"kind":"mach-host-time","numer":125,"denom":3},"anchor":{"frame":"0","hostTime":"9007199254740997"}}
+```
+
+The values above are illustrative. `anchor.frame` is the consumed PCM offset at
+the start of that callback; an earlier callback without a valid host timestamp
+can make it nonzero. `anchor.hostTime` comes from the callback's `AudioTimeStamp`,
+not engine startup or IPC arrival. A single audio-thread writer publishes an
+immutable atomic pair with release/acquire ordering; only the control lifecycle
+serializes it. Invalid/zero timestamps never become invented anchors.
+
+`openPcmOutput.clock` resolves that observation; it rejects on failure or closure
+without one. Clock availability is separate from playing and normal completion.
+The owner rejects duplicate clocks, another device/rate, invalid timebases and
+frame positions outside admitted PCM. Diagnostics retain a detached clock after
+retirement. The monitor worker relays the observation and exposes its own clock
+promise without adding per-block terminal traffic.
+
+`nominalMidiFrame(hostTime, midiClock, renderClock)` preserves large host ticks
+and returns a signed exact frame fraction at the declared nominal sample rate.
+Pre-anchor packets are not clamped, and sub-frame positions are not rounded.
+The input/output Mach timebases must agree. This is the basis for timed MIDI
+recording; it does not measure physical I/O latency or compensate indefinite
+hardware rate drift. Original packet timestamps remain authoritative.
 
 `{"kind":"stop"}` retires the queue and stops the engine immediately. This is
 live monitoring: queued future audio is discarded, rather than played after
@@ -81,7 +109,7 @@ device/format, sent frames, first native error, validated final counters, protoc
 receipt errors and native/producer settlement. A failed native receipt can admit
 fewer frames than the JS sent before failure, but rendered plus discarded must
 equal native admitted. No valid receipt means `final: null`, never invented
-success. Protocol-v2 readiness must match the companion shipped in the same
+success. Protocol-v3 readiness must match the companion shipped in the same
 immutable runtime.
 
 The immutable alphaTex installer fingerprints both native sources and the JS
@@ -97,3 +125,5 @@ finite transaction validation, underrun, concurrent stereo ordering and retireme
 device and continuous VST probes are recorded separately from these checks.
 
 Reference: [Apple AVAudioSourceNode callback contract](https://developer.apple.com/documentation/avfaudio/avaudiosourcenode/init(renderblock:)).
+
+Timestamp references: [source render callback HAL time](https://developer.apple.com/documentation/avfaudio/avaudiosourcenoderenderblock), [timestamp validity flags](https://developer.apple.com/documentation/coreaudiotypes/audiotimestampflags), [host-clock representations](https://developer.apple.com/documentation/avfaudio/avaudiotime).

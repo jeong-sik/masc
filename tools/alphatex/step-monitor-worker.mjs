@@ -24,6 +24,7 @@ try {
   parentPort.on('message', receive)
   parentPort.on('messageerror', fail)
   owner.ready.then(device => post({ kind: 'ready', device }), () => {})
+  owner.clock.then(clock => post({ kind: 'clock', clock }), () => {})
   let device, error
   try { device = await owner.completion } catch (failure) { error = failure }
   post({ kind: 'terminal', device, error })

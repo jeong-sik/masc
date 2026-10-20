@@ -42,6 +42,32 @@ test('prefill and playing acknowledgements may already be queued when stop is re
   assert.deepEqual(requests.slice(0, 2), [['1', '0'], ['2', '8']])
   assert.equal(final.admittedFrames, '16')
 })
+
+test('source-render clock binds the admitted device and retains host precision and immutable diagnostics', async () => {
+  const owner = openPcmOutput({ ...options('paced'), provideBlock: row => Buffer.alloc(row.frames * 8) })
+  try {
+    const clock = await owner.clock
+    assert.equal(clock.anchor.hostTime, '9007199254740997'); assert.equal(clock.anchor.frame, '0')
+    clock.anchor.hostTime = '1'
+    assert.equal(owner.diagnostics().clock.anchor.hostTime, '9007199254740997')
+    owner.stop(); await owner.completion
+    assert.equal(owner.diagnostics().nativeClosed, true)
+  } finally { owner.stop(); await owner.completion.catch(() => {}) }
+})
+
+test('unbound or duplicate render clocks fail after closure; absent clock is never fabricated at stop', async () => {
+  for (const mode of ['clock-version', 'clock-device', 'clock-rate', 'clock-timebase', 'clock-zero', 'clock-range', 'clock-early', 'clock-duplicate']) {
+    const owner = openPcmOutput({ ...options(mode), provideBlock: row => Buffer.alloc(row.frames * 8) })
+    await assert.rejects(owner.completion)
+    assert.equal(owner.diagnostics().nativeClosed, true)
+    if (mode !== 'clock-duplicate') await assert.rejects(owner.clock)
+  }
+  let owner
+  owner = openPcmOutput({ ...options('clock-missing'), provideBlock: row => Buffer.alloc(row.frames * 8),
+    onEvent(event) { if (event.kind === 'playing') owner.stop() } })
+  await owner.completion; await assert.rejects(owner.clock, /without a source-render clock/)
+  assert.equal(owner.diagnostics().clock, null)
+})
 test('identity, demand, PCM, underrun and finalization errors reject after closure', async () => {
   for (const mode of ['identity', 'demand', 'underrun', 'total', 'unfinalized', 'exit', 'bad-pcm', 'nan']) {
     let owner, closed = false

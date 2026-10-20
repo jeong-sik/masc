@@ -12,13 +12,21 @@ const final = (success = true, fault = 'none') => ({ kind: 'stopped', success, f
   demand: { completedBlocks: String(admitted / 8n), lastResponseNanoseconds: admitted ? '17' : '0',
     playingBlocks: String(admitted > 16n ? admitted / 8n - 2n : 0n), maxPlayingResponseNanoseconds: admitted > 16n ? '19' : '0',
     maxResponseNanoseconds: admitted ? '19' : '0', pendingNanoseconds: null } })
-reply({ kind: 'ready', schemaVersion: 2, device: { id: mode === 'identity' ? 'other' : 'owned', name: 'Owned fixture' }, sampleRate: 48000, blockFrames: 8, prefillFrames: 16 })
+reply({ kind: 'ready', schemaVersion: mode === 'clock-version' ? 2 : 3, device: { id: mode === 'identity' ? 'other' : 'owned', name: 'Owned fixture' }, sampleRate: 48000, blockFrames: 8, prefillFrames: 16 })
+const clock = { kind: 'clock', schemaVersion: 1, device: { id: mode === 'clock-device' ? 'other' : 'owned', name: 'Owned fixture' },
+  sampleRate: mode === 'clock-rate' ? 44100 : 48000,
+  clock: { kind: 'mach-host-time', numer: mode === 'clock-timebase' ? 0 : 125, denom: 3 },
+  anchor: { frame: mode === 'clock-range' ? '16' : '0', hostTime: mode === 'clock-zero' ? '0' : '9007199254740997' } }
+if (mode === 'clock-early') reply(clock)
 need()
 createInterface({ input: process.stdin }).on('close', () => clearTimeout(demandTimer)).on('line', line => {
   const row = JSON.parse(line)
   if (row.kind === 'block') {
     admitted += 8n
-    if (admitted === 16n) reply({ kind: 'playing' })
+    if (admitted === 16n) {
+      reply({ kind: 'playing' })
+      if (mode !== 'clock-missing') process.stdout.write([clock, ...(mode === 'clock-duplicate' ? [clock] : [])].map(JSON.stringify).join('\n') + '\n')
+    }
     if (['fault-final','format-final'].includes(mode) && admitted === 16n) {
       const fault = mode === 'fault-final' ? 'underrun' : 'render-format'
       // Both receipts are already available to the reader. A separate write

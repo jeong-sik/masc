@@ -557,3 +557,25 @@ let execute ~tabs ~call ?actor verb =
   | Ok data -> Browser_lane.Answered (`Assoc [ "ok", `Bool true; "data", data ])
   | Error answer -> answer
 ;;
+
+let cdp_failure_message = function
+  | Browser_cdp.Command_rejected { code; message } -> Printf.sprintf "rejected (%d): %s" code message
+  | Browser_cdp.Connection_lost reason -> "connection lost: " ^ reason
+;;
+
+let attach_error_message = function
+  | Browser_stagehand_session.Extension_path detail -> "the extension directory has no real path: " ^ detail
+  | Browser_stagehand_session.Load_rejected failure -> "Chrome did not load the extension: " ^ cdp_failure_message failure
+  | Browser_stagehand_session.Extension_id_mismatch { expected; loaded } ->
+    Printf.sprintf "Chrome loaded the extension as %s, not %s, so its origin is not the allowed one" loaded expected
+  | Browser_stagehand_session.Service_worker_absent -> "the extension's service worker never appeared"
+  | Browser_stagehand_session.Runtime_not_ready -> "the Stagehand runtime was not ready in its service worker"
+  | Browser_stagehand_session.Malformed_reply { method_; detail } -> Printf.sprintf "%s answered without what attach needs: %s" method_ detail
+  | Browser_stagehand_session.Runtime_marker detail -> "the Stagehand runtime marker is unreadable: " ^ detail
+  | Browser_stagehand_session.Runtime_incompatible { found; supported } ->
+    Printf.sprintf "the Stagehand runtime speaks protocol %s; masc speaks major %d" found supported
+  | Browser_stagehand_session.Init_unanswered seconds -> Printf.sprintf "stagehand.init did not answer within %.0f s" seconds
+  | Browser_stagehand_session.Init_failed failure -> "stagehand.init failed: " ^ failure_message failure
+  | Browser_stagehand_session.Cdp failure -> "a CDP command failed: " ^ cdp_failure_message failure
+  | Browser_stagehand_session.Already_attached -> "the session was already attached"
+;;

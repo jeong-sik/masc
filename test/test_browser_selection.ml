@@ -82,6 +82,11 @@ let test_eligibility () =
     (choose ~verb:locate {empty with automation}=Error Selection.No_available_browser);
   selected {route=Lane.Automation_route;reason=Selection.Existing_work_session}
     (choose ~verb:locate {empty with automation={automation with locate=true}});
+  let chrome=work Lane.Browser_open in
+  check bool "Chrome without a selected model consumer is not eligible" true
+    (choose ~verb:locate {empty with stagehand=chrome}=Error Selection.No_available_browser);
+  selected {route=Lane.Stagehand_route;reason=Selection.Existing_work_session}
+    (choose ~verb:locate {empty with stagehand={chrome with locate=true}});
   check bool "a bound locate cannot switch from its observed browser" true
     (choose ~verb:locate ~bound:true {empty with automation={automation with locate=true}}=Error Selection.Binding_required)
 let test_inactive_session_cleanup () =

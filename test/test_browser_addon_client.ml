@@ -14,6 +14,7 @@ let scenario () = Eio_main.run (fun env ->
         let entered,enter=Eio.Promise.create () in
         let model_waiting,model_wait=Eio.Promise.create () in
         let locating,locate=Eio.Promise.create () in
+        let starting,start=Eio.Promise.create () in
         let never,_=Eio.Promise.create () in
         let cancellations=ref 0 in
         let client=ok (Client.create ~socket_path:path ~incarnation:"0b000000-0000-4000-8000-000000000001"
@@ -50,6 +51,14 @@ let scenario () = Eio_main.run (fun env ->
               (fun () -> Eio.Promise.await locating;Eio.Time.sleep clock 0.03;`Waiting) with
              | `Waiting -> ()
              | `Returned _ -> fail "model-backed issue must retain its caller-owned wait");
+            (match Eio.Fiber.first
+              (fun () -> `Returned (Client.call client ~on_cancel_after_dispatch:(fun () -> ())
+                (W.Issue {route=Browser_lane.Stagehand_route;
+                  verb=Browser_lane.Session_open {headless=Some true};actor=None;
+                  timeout_sec=0.001;only_if_idle=false})))
+              (fun () -> Eio.Promise.await starting;Eio.Time.sleep clock 0.03;`Waiting) with
+             | `Waiting -> ()
+             | `Returned _ -> fail "Chrome startup must retain its owner beyond the quick transport clock");
             let client=ok (Client.create ~socket_path:path ~incarnation:"0b000000-0000-4000-8000-000000000001"
               ~max_message_bytes:4096 ~control_timeout_sec:1. ~available:(fun () -> true)) in
             let client_id=ok (Browser_lane.client_id_of_string "0c000000-0000-4000-8000-000000000001") in

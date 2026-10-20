@@ -23,13 +23,14 @@ val attach_automation : t -> locate:bool -> execute:(Browser_lane.verb -> Browse
   cleanup:(unit -> (unit, string) result) -> (unit, string) result
 (** Publish a ready worker-owned backend. Revocation removes all three callbacks
     before resource teardown. A retired owner cannot acquire a backend. *)
-val attach_stagehand : t ->
+val attach_stagehand : t -> models:bool ->
   execute:(actor:string option -> Browser_lane.verb -> Browser_lane.answer) ->
   session:(unit -> Browser_lane.session_observation) ->
   cleanup:(unit -> (unit, string) result) -> (unit, string) result
 (** Publish an owned Chrome backend independently of automation. Actor identity
     remains attached to its admitted command. Registration does not establish an
-    open session or model availability. Retire fences both backends, starts both
+    open session. [models] observes the selected consumer/output grant and
+    controls model-verb admission independently of native input. Retire fences both backends, starts both
     cleanups and waits for both before answering. Each attached cleanup runs once;
     concurrent or repeated Retire requests observe the same result. An error or
     exception from either cleanup prevents a successful retirement receipt. *)

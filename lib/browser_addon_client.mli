@@ -12,7 +12,9 @@ val call : t -> on_cancel_after_dispatch:(unit -> unit) -> Browser_addon_wire.co
     command's own wait window for Issue/Poll. Private Retire and Model_wait wait
     for lifecycle completion/state change rather than the quick-control timeout; caller
     cancellation still propagates. Model-backed Issue calls also wait for their
-    owner rather than the quick transport clock. Cancellation after writing invokes
+    owner rather than the quick transport clock. Owned Chrome Session_open also
+    retains its original startup owner and resource-readiness bounds.
+    Cancellation after writing invokes
     the owner's callback under cancellation protection, then propagates. *)
 val revoke : t -> unit
 (** Admission only. Caller still owns worker termination and resource cleanup. *)

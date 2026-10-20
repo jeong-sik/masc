@@ -19,6 +19,9 @@ val run : env:Eio_unix.Stdenv.base -> instance_id:string -> command:string list 
     group TERM and grants the supplied resource-cleanup grace; normal child exit
     ends the group promptly. Any input byte also closes that keepalive contract.
     Child output goes to stderr; on_ready is the sole stdout producer.
+    [on_ready] must use cooperative Eio I/O. It runs concurrently with shutdown
+    observation and is cancelled on stop/child exit, so bootstrap backpressure
+    cannot hold resource cleanup. A partial bootstrap reply proves no outcome.
 
     This is trusted native ownership, not a sandbox. Descendants that deliberately
     leave this group need separate ownership and cannot be counted as settled by

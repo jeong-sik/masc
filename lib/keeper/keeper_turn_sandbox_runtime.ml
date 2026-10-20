@@ -2224,7 +2224,8 @@ let start_container ?timeout_sec (t : t) =
                        | Keeper_sandbox_runtime.Docker_container_absent )
                    | Error _ ) as container_state ->
                    Error
-                     (Keeper_sandbox_exec_failure.docker_container_start_failure_message
+                     (Keeper_sandbox_exec_failure.docker_run_failure_message
+                        ~prefix:"docker_container_start_failed"
                         ~base_path_hash:
                           (Keeper_sandbox_runtime.base_path_hash t.config.base_path)
                         ~keeper_name:t.meta.name

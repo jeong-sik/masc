@@ -6,6 +6,8 @@
     backend failure can be reached through multiple tools.
 
     1. [status_label] - exit-status -> wire label
+    1b. [docker_run_failure_message] - the error a failed [docker run] of a
+       keeper container reports: status, optional container state, output.
     2. [docker_failure_message_internal] - full message with
        optional context (base_path_hash, keeper_name, container_kind,
        network_label) + missing-cwd hint + mount-failure context
@@ -28,10 +30,11 @@ let status_label = function
   | Unix.WSTOPPED n -> Printf.sprintf "stopped=%d" n
 ;;
 
-(* What a probe found right after [docker run] failed. [stopped] means the
-   daemon created the container and it then died; [absent] means the run was
-   refused before a container existed. The two read the same in the run's
-   output when it is only a container id (#31363). *)
+(* What a probe found by container name right after [docker run] failed. It
+   reads [.State.Running] of a container of that name: [stopped] means one
+   exists and is not running (a run that failed at create leaves one in
+   [Created], and so does another start's stopped container of the same name),
+   [absent] means none exists. It does not say which turn created it. *)
 let container_state_after_failed_run_label = function
   | Ok Keeper_sandbox_runtime.Docker_container_running -> "running"
   | Ok Keeper_sandbox_runtime.Docker_container_stopped -> "stopped"
@@ -39,19 +42,20 @@ let container_state_after_failed_run_label = function
   | Error _ -> "unknown"
 ;;
 
-let docker_container_start_failure_message
+let docker_run_failure_message
       ?base_path_hash
       ?keeper_name
       ?container_kind
       ?network_label
+      ?container_state
+      ~prefix
       ~image
       ~status
-      ~container_state
       ~output
       ()
   =
-  let truncated = Keeper_sandbox_runtime.docker_failure_output_for_log output in
-  let output_label = if String.trim truncated = "" then "<no output>" else truncated in
+  let truncated = String.trim (Keeper_sandbox_runtime.docker_failure_output_for_log output) in
+  let output_label = if String.equal truncated "" then "<no output>" else truncated in
   let mount_failure_context =
     Keeper_sandbox_runtime.docker_mount_failure_context_suffix
       ?base_path_hash
@@ -61,11 +65,21 @@ let docker_container_start_failure_message
       ?network_label
       output
   in
+  let container_state_field =
+    match container_state with
+    | None -> ""
+    | Some state ->
+      Printf.sprintf " container_after_run=%s" (container_state_after_failed_run_label state)
+  in
+  (* The fields that name the cause come before the output: the output can run
+     to 4 KiB on a mount failure and a reader that cuts the head must still
+     see them. *)
   Printf.sprintf
-    "docker_container_start_failed: %s status=%s container_after_run=%s%s"
-    output_label
+    "%s: status=%s%s output=%s%s"
+    prefix
     (status_label status)
-    (container_state_after_failed_run_label container_state)
+    container_state_field
+    output_label
     mount_failure_context
 ;;
 

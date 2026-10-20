@@ -1204,6 +1204,7 @@ let test_search_executor_owns_frozen_source () = at_sizes (fun origin ->
     check bool "reprojected current frame shows actual matched speech" true
       (Astring.String.is_infix ~affix:"newest MATCH" (screen state));
     let before_retarget=Atomic.get state.msg_search_generation in
+    T.set_keeper_chat_sources state {kcs_history=Some state.msg_loaded;kcs_memory=[]};
     state.msg_target_keeper_name <- Some "beta";
     T.restore_keeper_chat_page state "beta";
     state.msg_target_keeper_name <- Some "alpha";

@@ -28,6 +28,47 @@ let status_label = function
   | Unix.WSTOPPED n -> Printf.sprintf "stopped=%d" n
 ;;
 
+(* What a probe found right after [docker run] failed. [stopped] means the
+   daemon created the container and it then died; [absent] means the run was
+   refused before a container existed. The two read the same in the run's
+   output when it is only a container id (#31363). *)
+let container_state_after_failed_run_label = function
+  | Ok Keeper_sandbox_runtime.Docker_container_running -> "running"
+  | Ok Keeper_sandbox_runtime.Docker_container_stopped -> "stopped"
+  | Ok Keeper_sandbox_runtime.Docker_container_absent -> "absent"
+  | Error _ -> "unknown"
+;;
+
+let docker_container_start_failure_message
+      ?base_path_hash
+      ?keeper_name
+      ?container_kind
+      ?network_label
+      ~image
+      ~status
+      ~container_state
+      ~output
+      ()
+  =
+  let truncated = Keeper_sandbox_runtime.docker_failure_output_for_log output in
+  let output_label = if String.trim truncated = "" then "<no output>" else truncated in
+  let mount_failure_context =
+    Keeper_sandbox_runtime.docker_mount_failure_context_suffix
+      ?base_path_hash
+      ?keeper_name
+      ~image
+      ?container_kind
+      ?network_label
+      output
+  in
+  Printf.sprintf
+    "docker_container_start_failed: %s status=%s container_after_run=%s%s"
+    output_label
+    (status_label status)
+    (container_state_after_failed_run_label container_state)
+    mount_failure_context
+;;
+
 let docker_failure_message_internal
       ?base_path_hash
       ?keeper_name

@@ -2434,6 +2434,88 @@ let test_docker_mount_failure_message_preserves_path () =
   Alcotest.(check bool) "status emitted" true
     (String_util.contains_substring message "status=\"exit=125\"")
 
+(* A failed [docker run] that printed only a container id used to read as
+   "docker_container_start_failed: <hex>": no exit status, and no way to tell a
+   container that was created and died from a run the daemon refused (#31363). *)
+let container_id_only = "49e2edb7faf9d6b3de3552a1273ca31e847c72f9b91af7e487c07836efe17610"
+
+let start_failure ?(output = container_id_only) ~status ~container_state () =
+  Keeper_sandbox_exec_failure.docker_container_start_failure_message
+    ~image:"masc-keeper-sandbox:local"
+    ~status
+    ~container_state
+    ~output
+    ()
+
+let contains = String_util.contains_substring
+
+let test_start_failure_message_carries_status_and_container_state () =
+  let died =
+    start_failure
+      ~status:(Unix.WEXITED 125)
+      ~container_state:(Ok Keeper_sandbox_runtime.Docker_container_stopped)
+      ()
+  in
+  Alcotest.(check bool) "keeps the prefix" true
+    (contains died "docker_container_start_failed:");
+  Alcotest.(check bool) "keeps the container id" true (contains died container_id_only);
+  Alcotest.(check bool) "carries the exit status" true (contains died "status=exit=125");
+  Alcotest.(check bool) "says the container was created and died" true
+    (contains died "container_after_run=stopped");
+  let refused =
+    start_failure
+      ~status:(Unix.WEXITED 125)
+      ~container_state:(Ok Keeper_sandbox_runtime.Docker_container_absent)
+      ()
+  in
+  Alcotest.(check bool) "says the run was refused" true
+    (contains refused "container_after_run=absent");
+  let unprobed =
+    start_failure
+      ~status:(Unix.WSIGNALED 9)
+      ~container_state:(Error "docker inspect timed out")
+      ()
+  in
+  Alcotest.(check bool) "a signal is named as a signal" true
+    (contains unprobed "status=signal=9");
+  Alcotest.(check bool) "a failed probe is unknown, not a guess" true
+    (contains unprobed "container_after_run=unknown")
+
+let test_start_failure_message_names_empty_output () =
+  let message =
+    start_failure
+      ~output:"  \n"
+      ~status:(Unix.WEXITED 1)
+      ~container_state:(Ok Keeper_sandbox_runtime.Docker_container_absent)
+      ()
+  in
+  Alcotest.(check bool) "empty output is marked, not left blank" true
+    (contains message "<no output>");
+  Alcotest.(check bool) "a plain failure carries no mount marker" false
+    (contains message "docker_mount_failure=true")
+
+let test_start_failure_message_keeps_mount_context () =
+  let mount_path = "/host_mnt/Users/worker/ws/.masc/playground/docker/repos/masc" in
+  let output =
+    "docker: Error response from daemon: OCI runtime create failed: error mounting \""
+    ^ mount_path
+    ^ "\" to rootfs at \"/workspace\": stat "
+    ^ mount_path
+    ^ ": no such file or directory"
+  in
+  let message =
+    start_failure
+      ~output
+      ~status:(Unix.WEXITED 125)
+      ~container_state:(Ok Keeper_sandbox_runtime.Docker_container_absent)
+      ()
+  in
+  Alcotest.(check bool) "mount marker kept" true
+    (contains message "docker_mount_failure=true");
+  Alcotest.(check bool) "mount path kept" true (contains message mount_path);
+  Alcotest.(check bool) "status stated once" false
+    (contains message "status=\"exit=125\"")
+
 let test_docker_mount_failure_structured_details () =
   let mount_path =
     "/host_mnt/Users/worker/ws/.masc/playground/docker/repos/agent_core/.worktrees/"
@@ -2592,6 +2674,15 @@ let () =
           Alcotest.test_case
             "docker mount failure preserves full path"
             `Quick test_docker_mount_failure_message_preserves_path;
+          Alcotest.test_case
+            "docker start failure carries status and container state"
+            `Quick test_start_failure_message_carries_status_and_container_state;
+          Alcotest.test_case
+            "docker start failure names empty output"
+            `Quick test_start_failure_message_names_empty_output;
+          Alcotest.test_case
+            "docker start failure keeps mount context"
+            `Quick test_start_failure_message_keeps_mount_context;
           Alcotest.test_case
             "docker mount failure emits structured details"
             `Quick test_docker_mount_failure_structured_details;

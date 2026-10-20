@@ -6,10 +6,11 @@
    [msx_open] is set (the same way it does for [image_open]) and re-fetches the
    frame on a timer instead.
 
-   The keyboard belongs to this screen while it is open, but a spectator only
-   answers [esc]: a key never reaches the surface underneath, and this
-   increment does not send keys to the server machine (that is the co-play
-   step, RFC-0439 §3.3). *)
+   The keyboard belongs to this screen while it is open: a key never reaches
+   the surface underneath. [esc] closes it and [+] / [-] resize the drawing.
+   Every other key is a game key. This module cannot reach [Masc_tui_http], so
+   the executable layer sends it to the shared server machine (RFC-0439 §3.3)
+   and re-fetches the frame. *)
 
 module Frame = Masc_tui_image_mosaic
 
@@ -455,8 +456,9 @@ let consume ~(write : string -> unit) (state : Masc_tui_types.state) key =
     false
   end
   else begin
-    (* Any other key just repaints the latest frame the poll cached: a
-       spectator does not drive the machine. *)
+    (* Any other key just repaints the latest frame the poll cached. A game key
+       never gets here: the executable layer sends it to the server machine
+       first (see [server_key]). *)
     render ~write ?notice:state.msx_notice ~connection:state.Masc_tui_types.connection_status
       ~live:state.msx_live ~interaction:state.machine_interaction state.msx_frame (last_surface ());
     true

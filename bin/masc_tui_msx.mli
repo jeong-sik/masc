@@ -111,8 +111,9 @@ val server_key : string -> string option
 val consume : write:(string -> unit) -> Masc_tui_types.state -> string -> bool
 (** One key while open. [esc] closes the screen and returns [false] (the caller
     then owes the normal frame a full repaint). Every other key repaints the
-    cached frame and returns [true]; keys are not sent to the machine in this
-    increment. *)
+    cached frame and returns [true]. This function sends nothing: a game key is
+    sent to the machine by the executable layer, which asks {!server_key}
+    first, so it does not reach here. *)
 
 val close : write:(string -> unit) -> Masc_tui_types.state -> unit
 (** Delete any terminal image placement and retire the renderer when its

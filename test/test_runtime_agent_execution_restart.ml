@@ -110,6 +110,7 @@ let child root =
       Ok ()
     | Agent_core.Agent.After_tool_results_appended -> Unix._exit crash_exit
     | Agent_core.Agent.After_context_injection
+    | Agent_core.Agent.After_input_wait_changed
     | Agent_core.Agent.After_rejected_response_dropped -> Ok ()
   in
   let config = {config with execution_store=Some execution_store;

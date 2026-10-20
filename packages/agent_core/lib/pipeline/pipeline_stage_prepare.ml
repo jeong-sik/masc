@@ -61,7 +61,12 @@ let stage_input ?raw_trace_run ?clock ~turn agent =
            ~created_at:ts
            req
        in
-       Error (Error.Agent (InputRequired input_required)))
+       (match Agent_lifecycle_events.current_invocation_id () with
+        | None -> Error (Error.Internal "input pause has no lifecycle invocation owner")
+        | Some run_id ->
+          let* () = Agent_input_checkpoint.install agent
+              {Agent_input_request.run_id;request=input_required} in
+          Error (Error.Agent (InputRequired input_required))))
   | Hooks.Nudge nudge_msg ->
     (* Keep BeforeTurn nudge behavior identical to the inlined pipeline path:
          append it as a User message so it is seen in this same turn. *)
@@ -104,8 +109,7 @@ let stage_input ?raw_trace_run ?clock ~turn agent =
     (* The accepted input stage is shared by sync, streaming, low-level and
        restored execution drivers. Started/validation rejection never gets
        here; a replacement that arrived during a callback remains current. *)
-    clear_pending_input agent previous_pending;
-    Ok ()
+    Agent_input_checkpoint.consume agent previous_pending
 ;;
 
 

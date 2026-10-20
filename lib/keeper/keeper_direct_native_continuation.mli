@@ -84,7 +84,13 @@ val prepare :
     ToolResult. After Tool-attempt admission it also preserves its exact
     transcript; the sole cut exception is an exact, still-current
     [retired_history_cut] witness. Provider-only calls admit the host's existing
-    media projection when no Tool attempt was admitted. *)
+    media projection when no Tool attempt was admitted.
+
+    Input checkpoint candidates advance the retained Owner before the optional
+    canonical sink. Until a subsequent ordinary checkpoint succeeds, terminal
+    disposition preserves the actual retained reference instead of publishing
+    an older in-memory Agent snapshot. A failed/uncertain sink is not a retry
+    permission and terminal handling does not replay that checkpoint write. *)
 
 val config : prepared -> Runtime_agent.config
 val prepared_checkpoint : prepared -> Agent_core.Checkpoint.t option

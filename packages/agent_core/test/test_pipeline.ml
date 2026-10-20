@@ -3634,6 +3634,7 @@ let test_agent_run_replays_precheckpoint_terminal_settlement () =
                  Error "simulated crash before Agent tool-result checkpoint"
                | Agent.After_context_injection ->
                  Alcotest.fail "fixture unexpectedly reached context injection"
+               | Agent.After_input_wait_changed
                | Agent.After_rejected_response_dropped ->
                  Alcotest.fail "the pipeline never writes the dropped-response stage")
              ()

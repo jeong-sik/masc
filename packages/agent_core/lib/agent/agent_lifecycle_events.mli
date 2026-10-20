@@ -25,6 +25,10 @@ type outcome =
   | Input_required of Error.input_required
   | Failed of Error.t
 
+val current_invocation_id : unit -> string option
+(** The enclosing started invocation in this fiber, including its child
+    execution scope. [None] means no lifecycle owner is active. *)
+
 (** Wrap a run with [AgentStarted] and exactly one typed invocation outcome.
 
     Successful runs publish [AgentCompleted]. Failed runs and synchronous
@@ -35,9 +39,9 @@ type outcome =
     raw-trace run id active when the call returns. [classify] maps the concrete
     run API result to the shared lifecycle vocabulary.
 
-    [on_outcome], when supplied by an owner, applies its current state before
-    publishing the matching outcome. Invocation identity is allocated even
-    without an event bus. The callback must not raise or perform external I/O.
+    The started invocation is bound for [f] and its execution fibers, even
+    without an event bus. Input persistence occurs at the actual pipeline
+    boundary inside that scope, before execution terminal disposition.
 
     If [f] raises, [AgentFailed] is still published with an [Error.Internal]
     projection of the exception; the original exception is then re-raised
@@ -48,6 +52,5 @@ val with_run_lifecycle_events
   -> raw_trace:Raw_trace.t option
   -> current_run_id:(unit -> string option)
   -> classify:(('a, 'error) result -> outcome)
-  -> ?on_outcome:(run_id:string -> outcome -> unit)
   -> (unit -> ('a, 'error) result)
   -> ('a, 'error) result

@@ -4963,6 +4963,7 @@ let test_typed_checkpoint_is_the_same_run_retry_authority () =
     [ Agent_core.Agent.After_assistant_collected
     ; Agent_core.Agent.After_tool_results_appended
     ; Agent_core.Agent.After_context_injection
+    ; Agent_core.Agent.After_input_wait_changed
     ; Agent_core.Agent.After_rejected_response_dropped
     ]
   in
@@ -5785,6 +5786,7 @@ let test_a_sink_answer_is_not_progress () =
     [ Agent_core.Agent.After_assistant_collected
     ; Agent_core.Agent.After_tool_results_appended
     ; Agent_core.Agent.After_context_injection
+    ; Agent_core.Agent.After_input_wait_changed
     ; Agent_core.Agent.After_rejected_response_dropped
     ]
 ;;
@@ -5804,6 +5806,7 @@ let test_the_sink_owner_marks_written_tool_results () =
     [ Agent_core.Agent.After_tool_results_appended, true
     ; Agent_core.Agent.After_context_injection, true
     ; Agent_core.Agent.After_assistant_collected, false
+    ; Agent_core.Agent.After_input_wait_changed, false
     ; Agent_core.Agent.After_rejected_response_dropped, false
     ];
   let progress = Atomic.make Try_provider.No_checkpoint_stage in

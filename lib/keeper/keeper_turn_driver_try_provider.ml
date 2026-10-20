@@ -749,6 +749,7 @@ let observe_checkpoint_saved progress (stage : Agent_core.Agent.checkpoint_stage
   | Agent_core.Agent.After_context_injection ->
     record_saved_tool_stage progress ~after_tool_results:false
   | Agent_core.Agent.After_assistant_collected
+  | Agent_core.Agent.After_input_wait_changed
   | Agent_core.Agent.After_rejected_response_dropped ->
     ()
 ;;

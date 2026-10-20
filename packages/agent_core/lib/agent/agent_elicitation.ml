@@ -1,5 +1,4 @@
 open Types
-open Agent_types
 
 let input_required_of_request
       ~agent_name
@@ -27,15 +26,7 @@ let message_of_response ?(metadata = []) ~question = function
 ;;
 
 let apply_response ?metadata agent supplied response =
-  Eio.Mutex.use_rw ~protect:true agent.mu (fun () ->
-    match Agent_input_request.settle ~current:agent.pending_input supplied with
-    | Error error -> Error error
-    | Ok owned ->
-      let message = message_of_response ?metadata ~question:owned.request.question response in
-      (match message with
-       | None -> ()
-       | Some message ->
-         agent.state <- {agent.state with messages=Util.snoc agent.state.messages message});
-      agent.pending_input <- None;
-      Ok ())
+  Agent_input_checkpoint.respond agent supplied
+    ~message:(fun owned ->
+      message_of_response ?metadata ~question:owned.request.question response)
 ;;

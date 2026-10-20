@@ -1906,7 +1906,14 @@ let run_turn
                     checkpoint_progress
                     snapshot.stage;
                   Ok ()
-                | Ok (Keeper_checkpoint_store.Stale_noop _) -> Ok ()
+                | Ok (Keeper_checkpoint_store.Stale_noop _) ->
+                  (match snapshot.stage with
+                   | Agent_core.Agent.After_input_wait_changed ->
+                     Error "input-wait checkpoint did not replace the current owner"
+                   | Agent_core.Agent.After_assistant_collected
+                   | After_tool_results_appended
+                   | After_context_injection
+                   | After_rejected_response_dropped -> Ok ())
                 | Error _ as error -> error
          in
          let call_run_named ~raw_trace ~initial_messages () =
@@ -2355,14 +2362,24 @@ let run_turn
                           finalize_turn_surface ~response_text
                             ~stop_reason:result.stop_reason terminal_effect_state
                         in
-                        (match turn_outcome, !final_agent_core_turn_ordinal_ref with
+                        let final_ordinal =
+                          match !final_agent_core_turn_ordinal_ref, result.stop_reason with
+                          | Some ordinal, _ -> Ok (Some ordinal)
+                          | None, Runtime_agent.InputRequired _ -> Ok None
+                          | None,
+                              (Runtime_agent.Completed
+                              | Yielded_to_operation_queued _
+                              | Yielded_to_durable_stimulus _
+                              | Yielded_after_repeated_tool_call _
+                              | Yielded_after_repeated_assistant_text _) ->
+                            Error
+                              (Agent_core.Error.Internal
+                                 "successful Agent.run returned without an AfterTurn ordinal")
+                        in
+                        (match turn_outcome, final_ordinal with
                          | Error e, _ -> Error e
-                         | Ok _, None ->
-                           Error
-                             (Agent_core.Error.Internal
-                                "successful Agent.run returned without an \
-                                 AfterTurn ordinal")
-                         | Ok (turn_outcome, terminal_effect_receipt), Some final_agent_core_turn_ordinal ->
+                         | Ok _, Error error -> Error error
+                         | Ok (turn_outcome, terminal_effect_receipt), Ok final_agent_core_turn_ordinal ->
                            Keeper_agent_run_finalize_response.finalize
                              ~task_context:ctx.task_context
                              ~config ~meta ~publication_recovery

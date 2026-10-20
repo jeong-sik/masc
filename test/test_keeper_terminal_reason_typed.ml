@@ -1154,7 +1154,7 @@ let () =
     ; runtime_observation = None
     ; cooperative_boundary = None
     ; turn_count = 1
-    ; final_agent_core_turn_ordinal = 0
+    ; final_agent_core_turn_ordinal = Some 0
     ; usage
     ; usage_reported = true
     ; usage_scope
@@ -2999,7 +2999,7 @@ max-concurrent = 1
     ; runtime_observation = Some observation
     ; cooperative_boundary = None
     ; turn_count = 1
-    ; final_agent_core_turn_ordinal = 0
+    ; final_agent_core_turn_ordinal = Some 0
     ; usage = Masc.Inference_utils.zero_usage
     ; usage_reported = true
     ; usage_scope = Runtime_usage_scope.Per_request

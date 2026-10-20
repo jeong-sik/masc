@@ -15,6 +15,9 @@ type periodic_callback =
   }
 
 type checkpoint_stage =
+  | After_input_wait_changed
+  (** The exact input wait was installed or consumed. This boundary precedes
+      lifecycle publication and any subsequent provider/parameter stage. *)
   | After_assistant_collected
   | After_tool_results_appended
   | After_context_injection
@@ -33,6 +36,10 @@ type checkpoint_snapshot =
   }
 
 type checkpoint_sink = checkpoint_snapshot -> (unit, string) result
+
+type input_response_error =
+  | Input_not_current of Agent_input_request.settlement_error
+  | Input_checkpoint_failed of Error.t
 
 type context_fit_admission =
   | Body_only
@@ -250,8 +257,6 @@ val default_options : options
 val state : t -> Types.agent_state
 val lifecycle : t -> lifecycle_snapshot option
 val pending_input : t -> Agent_input_request.pending option
-val clear_pending_input : t -> Agent_input_request.pending option -> unit
-(** Clear only the captured current run/request. A replacement remains owned. *)
 val tools : t -> Tool_set.t
 
 val extend_tools : ?order:string list -> t -> Tool.t list -> unit

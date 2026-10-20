@@ -1,14 +1,14 @@
 open Agent_types
 
-let _log = Log.create ~module_name:"pipeline_checkpoint" ()
+let _log = Log.create ~module_name:"agent_checkpoint_sink" ()
 
-let persist_for_state agent stage state =
+let persist_for_state agent stage ~pending_input state =
   match agent.checkpoint_sink with
   | None -> Ok ()
   | Some sink ->
     let checkpoint =
       Agent_checkpoint.build_checkpoint
-        ~pending_input:agent.pending_input
+        ~pending_input
         ~state
         ~tools:agent.tools
         ~context:agent.context

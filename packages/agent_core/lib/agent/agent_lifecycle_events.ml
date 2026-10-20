@@ -34,6 +34,9 @@ type outcome =
   | Input_required of Error.input_required
   | Failed of Error.t
 
+let invocation_key : string Eio.Fiber.key = Eio.Fiber.create_key ()
+let current_invocation_id () = Eio.Fiber.get invocation_key
+
 let publish_finished ~event_bus ~agent_name ~started ~current_run_id ~outcome ~elapsed =
   match event_bus, started with
   | Some bus, (correlation_id, started_run_id) ->
@@ -94,7 +97,6 @@ let with_run_lifecycle_events
       ~raw_trace
       ~current_run_id
       ~classify
-      ?(on_outcome = fun ~run_id:_ _ -> ())
       f
   =
   let started_at = Unix.gettimeofday () in
@@ -106,10 +108,9 @@ let with_run_lifecycle_events
   in
   (* A raised call must still publish its typed failure before the original
      exception is re-raised with the captured backtrace. *)
-  match f () with
+  match Eio.Fiber.with_binding invocation_key (snd started) f with
   | result ->
     let outcome = classify result in
-    on_outcome ~run_id:(snd started) outcome;
     publish_finished
       ~event_bus
       ~agent_name

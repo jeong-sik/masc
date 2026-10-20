@@ -397,7 +397,8 @@ let test_contiguous_pending_recovers_without_sparse_authority () =
 (* Characterization, not a recovery guarantee: B committed but its own
    acknowledgement never ran, so losing its receipt makes B indistinguishable
    from input never committed, and B is judged again. A row acknowledged
-   earlier does not change that. *)
+   earlier does not change that.
+   See docs/guides/keeper-memory-limits.md, "Explicit memory writes". *)
 let test_lost_receipt_of_unacknowledged_commit_is_judged_again () =
   List.iter (fun earlier_acknowledged -> with_store (fun keepers_dir ->
   if earlier_acknowledged then (
@@ -612,7 +613,8 @@ let test_semantic_deferral_with_new_tail_is_not_commit () = with_store (fun keep
 (* The live shape of 2026-10-19: rows consumed before a receipt schema cut
    lost their receipts while Memory stayed current. The rows that remain reach
    judgment against that Memory; the consumed ones are not judged again because
-   the queue no longer holds them. *)
+   the queue no longer holds them.
+   See docs/guides/keeper-memory-limits.md, "Explicit memory writes". *)
 let test_lost_receipts_do_not_block_remaining_input () =
   List.iter (fun loss -> with_store (fun keepers_dir ->
     List.iter (fun id -> ignore (append keepers_dir id ("rule " ^ id))) ["a";"b";"c"];
@@ -657,10 +659,12 @@ let test_lost_receipts_do_not_block_remaining_input () =
    still refuse judgment. The next ordinary Librarian read reconciles the
    receipt sidecar against no snapshot and drops them, and the remaining
    explicit input then joins the Memory that starts again, as durable and
-   continuity input do; it is not held back for a snapshot nothing restores. *)
+   continuity input do; it is not held back for a snapshot nothing restores.
+   See docs/guides/keeper-memory-limits.md, "Explicit memory writes". *)
 (* B committed but its receipt was lost before acknowledgement, so B is judged
    again. Committing its claim a second time refreshes the fact Memory already
-   holds instead of adding another. *)
+   holds instead of adding another.
+   See docs/guides/keeper-memory-limits.md, "Explicit memory writes". *)
 let test_rejudged_commit_keeps_one_fact () = with_store (fun keepers_dir ->
   ignore (append keepers_dir "b" "settled B");
   ignore (commit keepers_dir (Queue.candidate_ids (batch keepers_dir)) [fact "settled B"]);

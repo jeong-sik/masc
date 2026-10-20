@@ -25,12 +25,27 @@ let test_a_listing_is_refused_whole () =
 let test_a_read_request_is_strict () =
   let read fields = `Assoc [ "requests", `List [ `Assoc (("kind", `String "read_records") :: fields) ] ] in
   (match Host.listing_of_json (read [ "request_id", `String "r"; "source_id", `String "board"; "after", `Null ]) with
-   | Ok [ Host.Read_records { source_id; after = None; _ } ] -> check string "the source" "board" source_id
+   | Ok [ Host.Read_records { source_id; start = Masc.Lane_addon_records.From_beginning; _ } ] ->
+     check string "the source" "board" source_id
    | Ok _ | Error _ -> fail "a read from the beginning must decode");
+  (match Host.listing_of_json (read [ "request_id", `String "r"; "source_id", `String "board"; "since", `Float 1.5e9 ]) with
+   | Ok [ Host.Read_records { start = Masc.Lane_addon_records.Since at; _ } ] -> check (float 0.) "the time" 1.5e9 at
+   | Ok _ | Error _ -> fail "a read since a time must decode");
+  (match Host.listing_of_json (read [ "request_id", `String "r"; "source_id", `String "board"; "since", `Int 1_500_000_000 ]) with
+   | Ok [ Host.Read_records { start = Masc.Lane_addon_records.Since _; _ } ] -> ()
+   | Ok _ | Error _ -> fail "a whole-second time must decode");
   List.iter (fun (label, fields) -> check bool label true (Result.is_error (Host.listing_of_json (read fields))))
     [ "an unknown key", [ "request_id", `String "r"; "source_id", `String "board"; "limit", `Int 5 ]
     ; "a cursor that is not a string", [ "request_id", `String "r"; "source_id", `String "board"; "after", `Int 3 ]
-    ; "no source", [ "request_id", `String "r" ] ]
+    ; "a cursor and a time", [ "request_id", `String "r"; "source_id", `String "board"; "after", `String "c"
+                             ; "since", `Float 1.5e9 ]
+    ; "a time before 0", [ "request_id", `String "r"; "source_id", `String "board"; "since", `Float (-1.) ]
+    ; "a time that is not a number", [ "request_id", `String "r"; "source_id", `String "board"; "since", `String "today" ]
+    ; "no source", [ "request_id", `String "r" ] ];
+  (* The older shapes are the identity a retained result was stored under. *)
+  check bool "a read from the beginning keeps its JSON" true
+    (Host.to_json (Host.Read_records { request_id = "r"; source_id = "board"; start = Masc.Lane_addon_records.From_beginning })
+     = `Assoc [ "kind", `String "read_records"; "request_id", `String "r"; "source_id", `String "board"; "after", `Null ])
 
 let test_a_file_request_is_strict () =
   let file fields = `Assoc [ "requests", `List [ `Assoc (("kind", `String "read_file") :: fields) ] ] in

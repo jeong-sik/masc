@@ -244,9 +244,10 @@ kind="board"
 visibilities=["public"]
 |}
 
-let read ?after id source_id =
+let read ?after ?since id source_id =
   `Assoc ([ "kind", `String "read_records"; "request_id", `String id; "source_id", `String source_id ]
-          @ match after with None -> [] | Some cursor -> [ "after", `String cursor ])
+          @ (match after with None -> [] | Some cursor -> [ "after", `String cursor ])
+          @ match since with None -> [] | Some at -> [ "since", `Float at ])
 
 let post ?(visibility = Board.Public) ?(body = "body") title =
   match Board_dispatch.create_post ~author:"operator" ~content:body ~title ~body ~post_kind:Board.Human_post ~visibility () with
@@ -317,6 +318,25 @@ let test_a_page_holds_what_fits_the_frame () =
         check bool "every delivery fits the frame" true (String.length (Yojson.Safe.to_string arguments) <= 4096))
       !(worker.delivered);
     ignore config)
+
+(* A package with no cursor yet reads what was made since it began, not the
+   Board's whole history. *)
+let test_a_since_read_keeps_what_was_made_from_that_time () =
+  with_installation ~declaration:board_granted (fun clock _config worker _ _root ->
+    ignore (post "before");
+    let since = Unix.gettimeofday () in
+    ignore (post "after");
+    worker.listing := [ read ~since "s1" "board" ];
+    publish_lane_change ();
+    await clock (fun () -> List.exists (fun a -> text "request_id" a = "s1") !(worker.delivered));
+    let result = result_of "s1" worker in
+    check (list string) "only what was made from that time" [ "after" ] (record_titles result);
+    worker.listing := [ read ~since:(Unix.gettimeofday () +. 3600.) "s2" "board" ];
+    publish_lane_change ();
+    await clock (fun () -> List.exists (fun a -> text "request_id" a = "s2") !(worker.delivered));
+    let empty = result_of "s2" worker in
+    check (list string) "nothing yet" [] (record_titles empty);
+    check bool "and no cursor to give" true (member "next_cursor" empty = `Null))
 
 let test_an_ungranted_source_or_a_foreign_cursor_is_not_allowed () =
   with_installation ~declaration:board_granted (fun clock _config worker _ _root ->
@@ -510,6 +530,22 @@ let test_a_repository_is_read_by_first_parent_commits () =
     let after = member "records" (result_of "g2" worker) |> Yojson.Safe.Util.to_list |> List.map (text "subject") in
     check (list string) "a cursor reads only later commits" [ "add code"; "add the second fragment" ] after)
 
+let test_a_since_read_compares_commit_times () =
+  with_installation ~declaration:repository_granted (fun clock _config worker _ root ->
+    let first, _second, third = repository root in
+    let commit_time sha = float_of_string (git (Filename.concat root "repos/masc") [ "log"; "-1"; "--format=%ct"; sha ]) in
+    let subjects id since =
+      worker.listing := [ read ~since id "masc-repo" ];
+      publish_lane_change ();
+      await clock (fun () -> delivered id worker);
+      member "records" (result_of id worker) |> Yojson.Safe.Util.to_list |> List.map (text "subject") in
+    check (list string) "a time before the history reads all of it"
+      [ "add the first fragment"; "add code"; "add the second fragment" ] (subjects "t1" 0.);
+    check (list string) "a commit made at that time is kept"
+      [ "add the first fragment"; "add code"; "add the second fragment" ] (subjects "t2" (commit_time first));
+    check (list string) "nothing after the last commit" [] (subjects "t3" (commit_time third +. 1.));
+    check bool "and the page still names the head" true (text "head" (result_of "t3" worker) = third))
+
 let test_a_file_under_the_grant_is_read_at_a_commit () =
   with_installation ~declaration:repository_granted (fun clock _config worker _ root ->
     let first, second, _third = repository root in
@@ -663,6 +699,8 @@ let () =
             test_a_granted_board_is_read_oldest_first_and_retained
         ; test_case "a cursor reads only what came after" `Quick test_a_cursor_reads_only_what_came_after
         ; test_case "a page holds what fits the frame" `Quick test_a_page_holds_what_fits_the_frame
+        ; test_case "a since read keeps what was made from that time" `Quick
+            test_a_since_read_keeps_what_was_made_from_that_time
         ; test_case "an ungranted source or a foreign cursor is not allowed" `Quick
             test_an_ungranted_source_or_a_foreign_cursor_is_not_allowed
         ; test_case "a giant first record preserves the next record" `Quick
@@ -670,6 +708,7 @@ let () =
     ; ( "repository reads"
       , [ test_case "a repository is read by first-parent commits" `Quick
             test_a_repository_is_read_by_first_parent_commits
+        ; test_case "a since read compares commit times" `Quick test_a_since_read_compares_commit_times
         ; test_case "a file under the grant is read at a commit" `Quick test_a_file_under_the_grant_is_read_at_a_commit
         ; test_case "an unregistered repository waits" `Quick test_an_unregistered_repository_waits
         ; test_case "large text and binary files reconstruct their original bytes" `Quick

@@ -342,7 +342,7 @@ Both join the list of control tools that cannot be exported (`lib/lane_addon/lan
 
 | Kind | Fields | Allowed when |
 |---|---|---|
-| `read_records` | `source_id`, `after` | the binding grants `source_id` (K3) |
+| `read_records` | `source_id`, `after` or `since` | the binding grants `source_id` (K3) |
 | `read_file` | `source_id`, `commit`, `path` | a `repository` grant whose `paths` cover `path` |
 | `read_result` | `original_request_id`, `source_id` (null for `exact_output`, `ask` or `withdraw_ask`), `sha256`, `offset` | this instance retained that original request under the same declaration/grant authority, source and digest |
 | `exact_output` | `output`, `system?`, `messages` | the manifest declares `output` (K1) |
@@ -419,7 +419,7 @@ repository_id = "masc"
 - **Where the posts go.** Every post in a granted visibility can reach the providers of every slot bound to the package's exact outputs (`author` and `grade`) in `runtime.toml`. The package's `binding_schema` therefore gives `visibilities` a `description` that says so and asks the operator to confirm, before adding `internal`, that each provider bound to those slots may receive internal posts. The same applies to `direct`, which is read only when named. The Dashboard binding form shows a schema `description` under its field (`dashboard/src/components/lane-binding-form.ts:112`), and the install step of `docs/guides/operator-quiz.md` repeats it for a declaration written by hand. The example above leaves `internal` out, so adding it is a deliberate choice.
 - This is guidance at the point of choice, not a new host check. The control is still the explicit `visibilities` grant. A host check that ties visibilities to named slots is §12 A11.
 
-**What `read_records` returns.** Records after the given cursor, oldest first, until the frame is full, with the next cursor and `complete`:
+**What `read_records` returns.** Records after the given cursor, oldest first, until the frame is full, with the next cursor and `complete`. A request with no cursor may send `since` (a Unix time) instead and gets only the records made at or after it: a Board post's or comment's creation time, a commit's commit time (#44537):
 
 | Kind | Records |
 |---|---|

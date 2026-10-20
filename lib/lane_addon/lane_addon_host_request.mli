@@ -6,9 +6,11 @@
 
 type t =
   | Exact_output of Lane_addon_exact.request
-  | Read_records of { request_id : string; source_id : string; after : string option }
-      (** Records of a granted source after [after], a cursor the host gave in
-          an earlier result. [None] reads from the beginning. *)
+  | Read_records of { request_id : string; source_id : string; start : Lane_addon_records.start }
+      (** Records of a granted source from [start]: the beginning, after a
+          cursor the host gave in an earlier result ([after]), or since a Unix
+          time ([since]). A request that names both [after] and [since] is
+          malformed. *)
   | Read_file of { request_id : string; source_id : string; commit : string; path : string }
       (** One file's bytes at a commit of a granted repository. *)
   | Read_result of {

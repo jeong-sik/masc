@@ -100,6 +100,14 @@ type read =
   | Not_allowed of string
   | Unavailable of string
 
+type start =
+  | From_beginning
+  | After of string
+  | Since of float
+
+(* The cursor a read with no record answers: the one it was given. *)
+let start_cursor = function After cursor -> Some cursor | From_beginning | Since _ -> None
+
 (* A record's place in the oldest-first order. The package gets it back as an
    opaque cursor. *)
 type key = { at : float; kind : string; id : string }
@@ -201,8 +209,8 @@ let take_page ~measure ~max_bytes ~empty_body items =
   take [] 0 items
 
 (* Retains the page's records, then answers it. *)
-let answer_page ?head ~store ~source_id ~after (taken, complete) =
-  let next_cursor = match List.rev taken with (cursor, _) :: _ -> Some cursor | [] -> after in
+let answer_page ?head ~store ~source_id ~start (taken, complete) =
+  let next_cursor = match List.rev taken with (cursor, _) :: _ -> Some cursor | [] -> start_cursor start in
   let records = List.map snd taken in
   match
     Eio_unix.run_in_systhread (fun () ->
@@ -249,59 +257,90 @@ let commit_record ~cwd sha () =
          ; "paths", `List (List.map (fun path -> `String path) paths) ])
   | _ -> Error ("unreadable commit " ^ sha)
 
-let repository_records ~base_path ~store ~measure ~max_bytes ~source_id ~repository_id ~after =
+(* What reading the default branch's history can come to. *)
+type history =
+  | Commits of string list  (** First-parent commits from the start, oldest first. *)
+  | Not_on_branch  (** [after] is not a commit the head reaches. *)
+  | Unreadable of string
+
+(* A [Since] read compares each commit's commit time, the time its record
+   reports. *)
+let first_parent_commits ~cwd ~head start =
+  let lines output = List.filter (fun line -> line <> "") (String.split_on_char '\n' output) in
+  let listed = function Ok output -> Commits (lines output) | Error detail -> Unreadable detail in
+  match start with
+  | From_beginning -> listed (git ~cwd [ "rev-list"; "--first-parent"; "--reverse"; head ])
+  | After after when commit_id_shaped after && reached ~cwd ~head after ->
+    listed (git ~cwd [ "rev-list"; "--first-parent"; "--reverse"; after ^ ".." ^ head ])
+  | After _ -> Not_on_branch
+  | Since at ->
+    (match git ~cwd [ "log"; "--first-parent"; "--reverse"; "--format=%H %ct"; head ] with
+     | Error detail -> Unreadable detail
+     | Ok output ->
+       let newer =
+         List.fold_right
+           (fun line acc ->
+              let* acc = acc in
+              match String.split_on_char ' ' line with
+              | [ sha; time ] ->
+                (match float_of_string_opt time with
+                 | Some committed_at when committed_at >= at -> Ok (sha :: acc)
+                 | Some _ -> Ok acc
+                 | None -> Error ("commit time of " ^ sha))
+              | _ -> Error ("unreadable history line " ^ line))
+           (lines output) (Ok [])
+       in
+       (match newer with Ok shas -> Commits shas | Error detail -> Unreadable detail))
+
+let repository_records ~base_path ~store ~measure ~max_bytes ~source_id ~repository_id ~start =
   match checkout ~base_path ~repository_id with
   | Error detail -> Unavailable ("repository " ^ repository_id ^ " cannot be read: " ^ detail)
   | Ok (cwd, head) ->
-    let range =
-      match after with
-      | None -> Ok head
-      | Some after when commit_id_shaped after && reached ~cwd ~head after -> Ok (after ^ ".." ^ head)
-      | Some _ -> Error "after is not a commit of the default branch"
-    in
-    (match range with
-     | Error reason -> Not_allowed reason
-     | Ok range ->
-       (match git ~cwd [ "rev-list"; "--first-parent"; "--reverse"; range ] with
-        | Error detail -> Unavailable ("the history cannot be read: " ^ detail)
-        | Ok listing ->
-          let shas = List.filter (fun sha -> sha <> "") (String.split_on_char '\n' listing) in
-          let empty_body ~next_cursor =
-            page_body ~head ~source_id ~records:[] ~next_cursor ~complete:false ~sha256:sha256_placeholder ()
-          in
-          (match take_page ~measure ~max_bytes ~empty_body (List.map (fun sha -> sha, commit_record ~cwd sha) shas) with
-           | Error detail -> Unavailable ("a commit cannot be read: " ^ detail)
-           | Ok page -> answer_page ~head ~store ~source_id ~after page)))
+    (match first_parent_commits ~cwd ~head start with
+     | Not_on_branch -> Not_allowed "after is not a commit of the default branch"
+     | Unreadable detail -> Unavailable ("the history cannot be read: " ^ detail)
+     | Commits shas ->
+       let empty_body ~next_cursor =
+         page_body ~head ~source_id ~records:[] ~next_cursor ~complete:false ~sha256:sha256_placeholder ()
+       in
+       (match take_page ~measure ~max_bytes ~empty_body (List.map (fun sha -> sha, commit_record ~cwd sha) shas) with
+        | Error detail -> Unavailable ("a commit cannot be read: " ^ detail)
+        | Ok page -> answer_page ~head ~store ~source_id ~start page))
 
 let granted grants source_id = List.find_opt (fun grant -> String.equal (source_id_of grant) source_id) grants
 let not_granted source_id = Not_allowed ("source " ^ source_id ^ " is not granted to this installation")
 
-let read_records ~base_path ~store ~grants ~measure ~max_bytes ~source_id ~after =
+(* Which Board records a read keeps, or why its cursor is refused. *)
+let board_pending start =
+  match start with
+  | From_beginning -> Ok (fun _ -> true)
+  | Since at -> Ok (fun (key : key) -> key.at >= at)
+  | After cursor ->
+    (match key_of_cursor cursor with
+     | Some after -> Ok (fun key -> compare_key key after > 0)
+     | None -> Error "after is not a cursor this host gave")
+
+let read_records ~base_path ~store ~grants ~measure ~max_bytes ~source_id ~start =
   match granted grants source_id with
   | None -> not_granted source_id
   | Some (Repository { repository_id; _ }) ->
-    repository_records ~base_path ~store ~measure ~max_bytes ~source_id ~repository_id ~after
+    repository_records ~base_path ~store ~measure ~max_bytes ~source_id ~repository_id ~start
   | Some (Board { visibilities; _ }) ->
-    let after_key = Option.map key_of_cursor after in
-    (match after_key with
-     | Some None -> Not_allowed "after is not a cursor this host gave"
-     | None | Some (Some _) ->
+    (match board_pending start with
+     | Error reason -> Not_allowed reason
+     | Ok keep ->
        (match board_records ~visibilities with
         | Error detail -> Unavailable ("the Board cannot be read: " ^ detail)
         | Ok records ->
           let sorted = List.sort (fun (a, _) (b, _) -> compare_key a b) records in
-          let pending =
-            match after_key with
-            | Some (Some after) -> List.filter (fun (key, _) -> compare_key key after > 0) sorted
-            | None | Some None -> sorted
-          in
+          let pending = List.filter (fun (key, _) -> keep key) sorted in
           let empty_body ~next_cursor =
             page_body ~source_id ~records:[] ~next_cursor ~complete:false ~sha256:sha256_placeholder ()
           in
           let items = List.map (fun (key, json) -> cursor_of_key key, fun () -> Ok json) pending in
           (match take_page ~measure ~max_bytes ~empty_body items with
            | Error detail -> Unavailable detail
-           | Ok page -> answer_page ~store ~source_id ~after page)))
+           | Ok page -> answer_page ~store ~source_id ~start page)))
 
 let read_file ~base_path ~store ~grants ~source_id ~commit ~path =
   match granted grants source_id with

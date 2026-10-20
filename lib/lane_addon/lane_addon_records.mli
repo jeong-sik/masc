@@ -41,11 +41,21 @@ type read =
   | Unavailable of string
       (** The source cannot be read now. The request waits for the next host event. *)
 
+(** Where a read starts. *)
+type start =
+  | From_beginning
+  | After of string  (** A cursor this host gave in an earlier result. *)
+  | Since of float
+      (** Records made at or after this Unix time: a Board post's or
+          comment's creation time, a commit's commit time. A package that
+          has no cursor yet reads what happened since it began, not the
+          whole history. *)
+
 val read_records :
   base_path:string -> store:Lane_addon_store.t -> grants:grant list ->
   measure:(Yojson.Safe.t -> int) -> max_bytes:int ->
-  source_id:string -> after:string option -> read
-(** Records after [after], oldest first, as many as fit: [measure] gives the
+  source_id:string -> start:start -> read
+(** Records from [start], oldest first, as many as fit: [measure] gives the
     bytes a result body takes in the frame, and the page stays within
     [max_bytes]. A first record that does not fit alone is still the page. The
     host delivery retains that complete result JSON and supplies request-bound

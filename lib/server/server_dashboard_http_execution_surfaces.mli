@@ -125,6 +125,9 @@ module For_testing : sig
 
   val publish_execution_success_if_current :
     generation:int -> Yojson.Safe.t -> bool
+  (** Publishes as an attempt that began after every attempt so far: [false]
+      only when the surface was invalidated since [generation]. An attempt
+      still running then publishes nothing. *)
 
   type execution_attempt
   (** One attempt at publishing the execution surface: the generation it began
@@ -145,6 +148,12 @@ module For_testing : sig
       refreshing the light body, and the window around the whole attempt --
       must not replace the answer this attempt already recorded, and the
       outcome of an older read must not replace a newer one. *)
+
+  val publish_execution_attempt_failure_message : execution_attempt -> string -> bool
+  (** The same admission as {!publish_execution_attempt_failure}, for a failure
+      that is known only by its message. The refresh loop publishes the
+      attempt's [exn] from the attempt, then its window's message from
+      [on_failure], both under one attempt. *)
 
   val cached_representation :
     config:Workspace.config -> Httpun.Request.t ->

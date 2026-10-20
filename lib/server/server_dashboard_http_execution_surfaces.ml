@@ -311,8 +311,11 @@ type last_publication =
 let execution_next_ticket = ref 0
 let execution_last_publication = ref No_publication
 
-(* An attempt at the current generation with the newest ticket and no other
-   effect on the surface: for an outcome with no attempt of its own to name. *)
+(* An attempt at the current generation with a ticket newer than every attempt
+   begun so far, which leaves the surface's attempt stamp alone: for an
+   outcome with no attempt of its own to name. Its outcome is published over
+   the outcome of every earlier attempt, and an earlier attempt still running
+   then publishes nothing. *)
 let execution_attempt_now () =
   with_execution_publication_lock (fun () ->
     incr execution_next_ticket;
@@ -855,10 +858,11 @@ let cached_execution_or_first_success ~clock ~timeout_sec compute =
     (match cached_success () with
      | Some current -> current
      | None ->
-       (* DET-OK: invalidation won the publication race, so this request may
-          receive only its own completed pre-invalidation value.  It is left
-          unstamped and cannot republish either cache; clients with a mutation
-          watermark reject identity-less late responses. *)
+       (* DET-OK: invalidation won the publication race, or an attempt that
+          began later published a failure over this one, so this request may
+          receive only its own completed value.  It is left unstamped and
+          cannot republish either cache; clients with a mutation watermark
+          reject identity-less late responses. *)
        Unpublished_response json)
 ;;
 
@@ -1456,6 +1460,7 @@ module For_testing = struct
   let begin_execution_attempt = begin_execution_attempt
   let publish_execution_attempt_success = publish_execution_attempt_success
   let publish_execution_attempt_failure = publish_execution_attempt_failure
+  let publish_execution_attempt_failure_message = publish_execution_attempt_failure_message
   let refresh_execution_default_light_http_body
         ?(prepare = Http_response_payload.prepare) ~config () =
     refresh_execution_default_light_http_body_with ~prepare ~config ()

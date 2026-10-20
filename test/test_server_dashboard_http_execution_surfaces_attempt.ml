@@ -136,6 +136,79 @@ let test_a_newer_attempts_outcome_follows_an_older_attempts_answer () =
     (Option.is_some (surface ()).last_error)
 ;;
 
+(* An invalidation ends every attempt that began before it, whatever the
+   attempt would publish. *)
+let test_an_attempt_begun_before_an_invalidation_publishes_nothing () =
+  with_execution_surface
+  @@ fun () ->
+  let before = Attempt.begin_execution_attempt () in
+  Execution.invalidate_execution_cache ();
+  Alcotest.(check bool)
+    "its failure is not published"
+    false
+    (Attempt.publish_execution_attempt_failure before (Failure "before"));
+  Alcotest.(check bool)
+    "its answer is not published"
+    false
+    (Attempt.publish_execution_attempt_success before (`Assoc [ "marker", `String "before" ]));
+  let surface = surface () in
+  Alcotest.(check (option string)) "no error was recorded" None surface.last_error;
+  Alcotest.(check bool) "no answer was recorded" true (Option.is_none surface.last_success_unix);
+  let after = Attempt.begin_execution_attempt () in
+  Alcotest.(check bool)
+    "an attempt begun after the invalidation publishes"
+    true
+    (Attempt.publish_execution_attempt_success after (`Assoc [ "marker", `String "after" ]))
+;;
+
+(* A newer attempt that failed has said the surface has no answer; the outcome
+   of an older read, answer or failure, does not take that back. *)
+let test_an_older_attempts_outcome_does_not_replace_a_newer_attempts_failure () =
+  with_execution_surface
+  @@ fun () ->
+  let older = Attempt.begin_execution_attempt () in
+  let newer = Attempt.begin_execution_attempt () in
+  Alcotest.(check bool)
+    "the newer attempt publishes its failure"
+    true
+    (Attempt.publish_execution_attempt_failure newer (Failure "newer"));
+  Alcotest.(check bool)
+    "the older attempt's answer is not published over it"
+    false
+    (Attempt.publish_execution_attempt_success older (`Assoc [ "marker", `String "older" ]));
+  Alcotest.(check bool)
+    "the older attempt's failure is not published over it"
+    false
+    (Attempt.publish_execution_attempt_failure older (Failure "older"));
+  let surface = surface () in
+  Alcotest.(check (option string))
+    "the newer failure stands"
+    (Some (Printexc.to_string (Failure "newer")))
+    surface.last_error;
+  Alcotest.(check bool) "no answer was recorded" true (Option.is_none surface.last_success_unix)
+;;
+
+(* The refresh loop publishes an attempt's exception from the attempt and the
+   message of the window that ran out from [on_failure], both under one
+   attempt. *)
+let test_an_attempts_failure_message_follows_its_failure () =
+  with_execution_surface
+  @@ fun () ->
+  let attempt = Attempt.begin_execution_attempt () in
+  Alcotest.(check bool)
+    "the attempt publishes its failure"
+    true
+    (Attempt.publish_execution_attempt_failure attempt (Failure "the attempt"));
+  Alcotest.(check bool)
+    "the attempt publishes the message of its window"
+    true
+    (Attempt.publish_execution_attempt_failure_message attempt "the window ran out");
+  Alcotest.(check (option string))
+    "the message is the surface's"
+    (Some "the window ran out")
+    (surface ()).last_error
+;;
+
 let () =
   Alcotest.run
     "execution publication attempt"
@@ -160,6 +233,18 @@ let () =
             "a newer attempt's outcome follows an older attempt's answer"
             `Quick
             test_a_newer_attempts_outcome_follows_an_older_attempts_answer
+        ; Alcotest.test_case
+            "an attempt begun before an invalidation publishes nothing"
+            `Quick
+            test_an_attempt_begun_before_an_invalidation_publishes_nothing
+        ; Alcotest.test_case
+            "an older attempt's outcome does not replace a newer attempt's failure"
+            `Quick
+            test_an_older_attempts_outcome_does_not_replace_a_newer_attempts_failure
+        ; Alcotest.test_case
+            "an attempt's failure message follows its failure"
+            `Quick
+            test_an_attempts_failure_message_follows_its_failure
         ] )
     ]
 ;;

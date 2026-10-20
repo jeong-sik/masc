@@ -20,6 +20,7 @@ let no_memory_fact_events =
   }
 
 type memory_fact = {
+  mf_keeper : string;
   mf_claim : string;
   mf_category : Keeper_memory_os_types.category;
   mf_origin : string;
@@ -30,6 +31,7 @@ type memory_fact = {
 }
 
 type memory_source_fact = {
+  msf_keeper : string;
   msf_claim : string;
   msf_first_seen : float;
   msf_path : string;
@@ -37,6 +39,7 @@ type memory_source_fact = {
 }
 
 type memory_invalidation = {
+  mi_keeper : string;
   mi_source_path : string;
   mi_invalidated_at : float;
   mi_reason : string;
@@ -48,14 +51,10 @@ type 'a memory_store_reading =
   | Memory_store_present of 'a
 
 type memory_ordinary_store = {
-  mos_revision : int;
-  mos_updated_at : float;
   mos_facts : memory_fact list;
 }
 
 type memory_source_store = {
-  mss_revision : int;
-  mss_updated_at : float;
   mss_facts : memory_source_fact list;
   mss_invalidations : memory_invalidation list;
 }
@@ -97,7 +96,7 @@ let decode_memory_fact_events json =
   let* mfe_revised_from = require_string_list json "revised_from" in
   Ok { mfe_retrieval; mfe_retracted_count; mfe_revised_from }
 
-let decode_memory_fact json =
+let decode_memory_fact ~keeper json =
   let* mf_claim = required_string_field json "claim" in
   let* raw_category = required_string_field json "category" in
   let* mf_category =
@@ -116,7 +115,8 @@ let decode_memory_fact json =
   let* events_json = required_object_field json "events" in
   let* mf_events = decode_memory_fact_events events_json in
   Ok
-    { mf_claim
+    { mf_keeper = keeper
+    ; mf_claim
     ; mf_category
     ; mf_origin
     ; mf_first_seen
@@ -125,18 +125,18 @@ let decode_memory_fact json =
     ; mf_events
     }
 
-let decode_memory_source_fact json =
+let decode_memory_source_fact ~keeper json =
   let* msf_claim = required_string_field json "claim" in
   let* msf_first_seen = Json_util.require_float json "first_seen" in
   let* msf_path = required_string_field json "path" in
   let* msf_sha256 = required_string_field json "sha256" in
-  Ok { msf_claim; msf_first_seen; msf_path; msf_sha256 }
+  Ok { msf_keeper = keeper; msf_claim; msf_first_seen; msf_path; msf_sha256 }
 
-let decode_memory_invalidation json =
+let decode_memory_invalidation ~keeper json =
   let* mi_source_path = required_string_field json "source_path" in
   let* mi_invalidated_at = Json_util.require_float json "invalidated_at" in
   let* mi_reason = required_string_field json "reason" in
-  Ok { mi_source_path; mi_invalidated_at; mi_reason }
+  Ok { mi_keeper = keeper; mi_source_path; mi_invalidated_at; mi_reason }
 
 (* The server answers each store with exactly one of three shapes:
    {"read_error"}, {"present": false}, or {"present": true, ...rows}. Read
@@ -156,44 +156,36 @@ let decode_memory_store_reading ~label decode_present json =
         let* value = decode_present json in
         Ok (Memory_store_present value)
 
-let decode_memory_ordinary_store json =
-  let* mos_revision = required_int_field json "revision" in
-  let* mos_updated_at = Json_util.require_float json "updated_at" in
+let decode_memory_ordinary_store ~keeper json =
   let* facts_json = required_list_field json "facts" in
-  let* mos_facts = decode_list "facts" decode_memory_fact facts_json in
-  Ok { mos_revision; mos_updated_at; mos_facts }
+  let* mos_facts = decode_list "facts" (decode_memory_fact ~keeper) facts_json in
+  Ok { mos_facts }
 
-let decode_memory_source_store json =
-  let* mss_revision = required_int_field json "revision" in
-  let* mss_updated_at = Json_util.require_float json "updated_at" in
+let decode_memory_source_store ~keeper json =
   let* facts_json = required_list_field json "facts" in
-  let* mss_facts = decode_list "facts" decode_memory_source_fact facts_json in
+  let* mss_facts = decode_list "facts" (decode_memory_source_fact ~keeper) facts_json in
   let* invalidations_json = required_list_field json "invalidations" in
   let* mss_invalidations =
-    decode_list "invalidations" decode_memory_invalidation invalidations_json
+    decode_list "invalidations" (decode_memory_invalidation ~keeper) invalidations_json
   in
-  Ok { mss_revision; mss_updated_at; mss_facts; mss_invalidations }
+  Ok { mss_facts; mss_invalidations }
 
 let decode_memory_fact_snapshot json =
   let* mfs_keeper = required_string_field json "keeper" in
   let* mfs_events_read_error = required_nullable_string_field json "events_read_error" in
   let* ordinary_json = required_member json "ordinary" in
   let* mfs_ordinary =
-    decode_memory_store_reading ~label:"ordinary" decode_memory_ordinary_store
-      ordinary_json
+    decode_memory_store_reading ~label:"ordinary"
+      (decode_memory_ordinary_store ~keeper:mfs_keeper) ordinary_json
   in
   let* source_json = required_member json "source_bound" in
   let* mfs_source =
     decode_memory_store_reading ~label:"source_bound"
-      decode_memory_source_store source_json
+      (decode_memory_source_store ~keeper:mfs_keeper) source_json
   in
   Ok { mfs_keeper; mfs_ordinary; mfs_source; mfs_events_read_error }
 
-let merge_keeper_memory_facts ~now loads =
-  let tagged keeper_name ~sep text =
-    if String.starts_with ~prefix:(keeper_name ^ sep) text then text
-    else keeper_name ^ sep ^ text
-  in
+let merge_keeper_memory_facts loads =
   let step (ord, src, invals, event_errors, unread) (keeper_name, load) =
     match load with
     | Error detail -> ord, src, invals, event_errors, (keeper_name, detail) :: unread
@@ -208,8 +200,7 @@ let merge_keeper_memory_facts ~now loads =
         | Memory_store_present store ->
           ( List.rev_append
               (List.map
-                 (fun (f : memory_fact) ->
-                   { f with mf_origin = tagged keeper_name ~sep:" \xc2\xb7 " f.mf_origin })
+                 (fun (f : memory_fact) -> { f with mf_keeper = keeper_name })
                  store.mos_facts)
               ord
           , unread )
@@ -222,14 +213,12 @@ let merge_keeper_memory_facts ~now loads =
         | Memory_store_present store ->
           ( List.rev_append
               (List.map
-                 (fun (f : memory_source_fact) ->
-                   { f with msf_path = tagged keeper_name ~sep:":" f.msf_path })
+                 (fun (f : memory_source_fact) -> { f with msf_keeper = keeper_name })
                  store.mss_facts)
               src
           , List.rev_append
               (List.map
-                 (fun (inv : memory_invalidation) ->
-                   { inv with mi_source_path = tagged keeper_name ~sep:":" inv.mi_source_path })
+                 (fun (inv : memory_invalidation) -> { inv with mi_keeper = keeper_name })
                  store.mss_invalidations)
               invals
           , unread )
@@ -245,13 +234,10 @@ let merge_keeper_memory_facts ~now loads =
   let snapshot =
     { mfs_keeper = "*"
     ; mfs_ordinary =
-        Memory_store_present
-          { mos_revision = 1; mos_updated_at = now; mos_facts = List.rev ord }
+        Memory_store_present { mos_facts = List.rev ord }
     ; mfs_source =
         Memory_store_present
-          { mss_revision = 1
-          ; mss_updated_at = now
-          ; mss_facts = List.rev src
+          { mss_facts = List.rev src
           ; mss_invalidations = List.rev invals
           }
     ; mfs_events_read_error =

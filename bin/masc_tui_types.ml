@@ -16749,10 +16749,13 @@ let memory_fact_search_text = function
       f.Masc.Tui_decode_memory_facts.mf_claim ^ " "
       ^ Memory_category.category_to_string f.Masc.Tui_decode_memory_facts.mf_category
       ^ " " ^ f.Masc.Tui_decode_memory_facts.mf_origin
+      ^ " " ^ f.Masc.Tui_decode_memory_facts.mf_keeper
   | Memory_row_source_fact f ->
       f.Masc.Tui_decode_memory_facts.msf_claim ^ " " ^ f.Masc.Tui_decode_memory_facts.msf_path
+      ^ " " ^ f.Masc.Tui_decode_memory_facts.msf_keeper
   | Memory_row_invalidation f ->
       f.Masc.Tui_decode_memory_facts.mi_reason ^ " " ^ f.Masc.Tui_decode_memory_facts.mi_source_path
+      ^ " " ^ f.Masc.Tui_decode_memory_facts.mi_keeper
 
 (* The filter the Memory surface is narrowed by: the text being typed while a
    search is open, and the applied one otherwise. Every count, every list and

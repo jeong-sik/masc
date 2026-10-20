@@ -80,7 +80,8 @@ let check_claim_rows ~what lines =
 
 let test_detail_keeps_the_claim_line_breaks () =
   let fact : Masc.Tui_decode_memory_facts.memory_fact =
-    { mf_claim = multi_line_claim
+    { mf_keeper = "alpha"
+    ; mf_claim = multi_line_claim
     ; mf_category = Cat.Constraint
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
@@ -92,7 +93,8 @@ let test_detail_keeps_the_claim_line_breaks () =
   check_claim_rows ~what:"fact"
     (Render_memory.memory_fact_detail_lines ~cols:40 (Types.Memory_row_fact fact));
   let sfact : Masc.Tui_decode_memory_facts.memory_source_fact =
-    { msf_claim = multi_line_claim
+    { msf_keeper = "alpha"
+    ; msf_claim = multi_line_claim
     ; msf_first_seen = 100.0
     ; msf_path = "config/runtime.toml"
     ; msf_sha256 = "abc123sha"
@@ -287,8 +289,9 @@ let facts_body_lines ?(cols = 100) ?(budget = 30) state =
     ~push_empty:(fun () -> ());
   List.rev !lines
 
-let make_memory_fact category claim : Masc.Tui_decode_memory_facts.memory_fact =
-  { mf_claim = claim
+let make_memory_fact ?(keeper = "alpha") category claim : Masc.Tui_decode_memory_facts.memory_fact =
+  { mf_keeper = keeper
+  ; mf_claim = claim
   ; mf_category = category
   ; mf_origin = "manual"
   ; mf_first_seen = 100.0
@@ -299,28 +302,26 @@ let make_memory_fact category claim : Masc.Tui_decode_memory_facts.memory_fact =
 
 let three_kinds_state ?(keeper = "alpha") ?(extra_ordinary = []) () =
   let state = make_state () in
-  let fact = make_memory_fact in
+  let fact = make_memory_fact ~keeper in
   let ordinary : Masc.Tui_decode_memory_facts.memory_ordinary_store =
-    { mos_revision = 1
-    ; mos_updated_at = 1000.0
-    ; mos_facts =
+    { mos_facts =
         [ fact Cat.Fact "The renderer draws the board"
         ; fact Cat.Preference "Roger reads for the tester"
         ] @ extra_ordinary
     }
   in
   let source : Masc.Tui_decode_memory_facts.memory_source_store =
-    { mss_revision = 1
-    ; mss_updated_at = 1000.0
-    ; mss_facts =
-        [ { msf_claim = "Config points at runtime.toml"
+    { mss_facts =
+        [ { msf_keeper = keeper
+          ; msf_claim = "Config points at runtime.toml"
           ; msf_first_seen = 150.0
           ; msf_path = "config/rt.toml"
           ; msf_sha256 = "abc123sha"
           }
         ]
     ; mss_invalidations =
-        [ { mi_source_path = "legacy_docs.md"
+        [ { mi_keeper = keeper
+          ; mi_source_path = "legacy_docs.md"
           ; mi_invalidated_at = 300.0
           ; mi_reason = "superseded"
           }

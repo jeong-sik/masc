@@ -4,7 +4,8 @@ module Types = Masc_tui_types
 
 let make_fact ?(category = Cat.Fact) ?(origin = "chat") ?(first = 100.0)
     ?(last = 200.0) ?(events = Masc.Tui_decode_memory_facts.no_memory_fact_events) ~claim id : Masc.Tui_decode_memory_facts.memory_fact =
-  { mf_claim = claim
+  { mf_keeper = "test_keeper"
+  ; mf_claim = claim
   ; mf_category = category
   ; mf_origin = origin
   ; mf_first_seen = first
@@ -21,14 +22,16 @@ let retrieved ~count ~days ~last ?(retracted = 0) ?(revised_from = []) () :
   }
 
 let make_source_fact ~path ~claim sha : Masc.Tui_decode_memory_facts.memory_source_fact =
-  { msf_claim = claim
+  { msf_keeper = "test_keeper"
+  ; msf_claim = claim
   ; msf_first_seen = 150.0
   ; msf_path = path
   ; msf_sha256 = sha
   }
 
 let make_invalidation ~path ~reason ts : Masc.Tui_decode_memory_facts.memory_invalidation =
-  { mi_source_path = path
+  { mi_keeper = "test_keeper"
+  ; mi_source_path = path
   ; mi_invalidated_at = ts
   ; mi_reason = reason
   }
@@ -37,15 +40,10 @@ let make_snapshot ~ordinary_facts ~source_facts ~invalidations =
   { Masc.Tui_decode_memory_facts.mfs_keeper = "test_keeper"
   ; mfs_ordinary =
       Masc.Tui_decode_memory_facts.Memory_store_present
-        { mos_revision = 1
-        ; mos_updated_at = 300.0
-        ; mos_facts = ordinary_facts
-        }
+        { mos_facts = ordinary_facts }
   ; mfs_source =
       Masc.Tui_decode_memory_facts.Memory_store_present
-        { mss_revision = 1
-        ; mss_updated_at = 300.0
-        ; mss_facts = source_facts
+        { mss_facts = source_facts
         ; mss_invalidations = invalidations
         }
   ; mfs_events_read_error = None

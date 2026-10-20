@@ -209,7 +209,8 @@ let test_schedule_update_form_preserves_exact_editable_definition () =
     (form |> member "expires_at_unix" <> `Null)
 
 let sample_memory_fact ~category ~claim : Masc.Tui_decode_memory_facts.memory_fact =
-  { Masc.Tui_decode_memory_facts.mf_claim = claim
+  { Masc.Tui_decode_memory_facts.mf_keeper = "alpha"
+  ; mf_claim = claim
   ; mf_category = category
   ; mf_origin = "authored"
   ; mf_first_seen = 0.
@@ -237,26 +238,24 @@ let memory_state_with_facts () =
       { Masc.Tui_decode_memory_facts.mfs_keeper = "alpha"
       ; mfs_ordinary =
           Masc.Tui_decode_memory_facts.Memory_store_present
-            { Masc.Tui_decode_memory_facts.mos_revision = 1
-            ; mos_updated_at = 0.
-            ; mos_facts =
+            { Masc.Tui_decode_memory_facts.mos_facts =
                 [ sample_memory_fact ~category:Cat.Lesson ~claim:"a"
                 ; sample_memory_fact ~category:Cat.Blocker ~claim:"b"
                 ]
             }
       ; mfs_source =
           Masc.Tui_decode_memory_facts.Memory_store_present
-            { Masc.Tui_decode_memory_facts.mss_revision = 1
-            ; mss_updated_at = 0.
-            ; mss_facts =
-                [ { Masc.Tui_decode_memory_facts.msf_claim = "bound"
+            { Masc.Tui_decode_memory_facts.mss_facts =
+                [ { Masc.Tui_decode_memory_facts.msf_keeper = "alpha"
+                  ; msf_claim = "bound"
                   ; msf_first_seen = 0.
                   ; msf_path = "docs/a.md"
                   ; msf_sha256 = "cafe"
                   }
                 ]
             ; mss_invalidations =
-                [ { Masc.Tui_decode_memory_facts.mi_source_path = "docs/old.md"
+                [ { Masc.Tui_decode_memory_facts.mi_keeper = "alpha"
+                  ; mi_source_path = "docs/old.md"
                   ; mi_invalidated_at = 0.
                   ; mi_reason = "source_changed"
                   }

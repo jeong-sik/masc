@@ -5663,7 +5663,7 @@ let launch_all_memory_facts_load state ~mailbox =
       (* One answer: the merged facts and the keepers missing from them
          travel together, so the handler never has to keep one answer across
          another. *)
-      Ok (Masc.Tui_decode_memory_facts.merge_keeper_memory_facts ~now:(Unix.gettimeofday ()) loads))
+      Ok (Masc.Tui_decode_memory_facts.merge_keeper_memory_facts loads))
 
 let open_all_fleet_memory state ~mailbox =
   state.memory_facts_keeper <- Some "*";

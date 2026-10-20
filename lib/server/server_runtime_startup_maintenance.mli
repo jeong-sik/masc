@@ -39,6 +39,8 @@ val prune_jsonl_at_resolved_window : base_path:string -> jsonl_prune_outcome
     periodic pass both call this, so neither can read a different window. *)
 
 val startup_prune_jsonl : Mcp_server.server_state -> unit
+(** Run one retention pass. Exceptions, including cancellation, propagate to
+    the owning maintenance runner for observation and isolation. *)
 
 val startup_sweep_microvm_guests : Mcp_server.server_state -> unit
 (** Collect abandoned guests with the runtime lifecycle lock. Failure is
@@ -64,10 +66,13 @@ val report_unarmed_typesafeai_destinations : unit -> unit
 (** One warning per destination {!Typesafeai_config.unarmed_destinations}
     finds. Called once the runtime table is loaded. *)
 
-val start_microvm_guest_maintenance :
-  sw:Eio.Switch.t -> sweep:(unit -> unit) -> unit
-(** Fork a switch-owned startup sweep outside the Keeper readiness barrier.
+type task = Jsonl_retention | Microvm_guest_sweep
+
+val start_maintenance :
+  sw:Eio.Switch.t -> task:task -> run:(unit -> unit) -> unit
+(** Fork switch-owned startup maintenance outside the Keeper readiness barrier.
     Logs start, completion, failure, and cancellation; shutdown cancels the
-    maintenance fiber. The runtime's protected lifecycle section completes
-    before cancellation takes effect; each CLI command retains its timeout.
-    [sweep] owns per-backend outcome observations. *)
+    maintenance fiber. Ordinary failure is observed without failing readiness.
+    [task] identifies observations; [run] supplies the work. The microVM
+    runtime's protected lifecycle section completes before cancellation takes
+    effect and each CLI command retains its timeout. *)

@@ -24,6 +24,7 @@ type t = {
   input_history : Lane_addon_machine_history.t;
   sampling_broker : Lane_addon_sampling.t option;
   mutable exported_tools : Mcp_protocol.Mcp_types.tool list;
+  mutable tool_hooks : (string * Lane_addon_tool_hooks.t) list;
   mutable action_schema : Yojson.Safe.t option;
   mutable client : Agent_core.Mcp.t option;
   cleanup : unit -> (unit, error) result;
@@ -405,7 +406,7 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
       stderr_source := None;
       Ok () in
     let worker = { id; name; instance_id; package; image; artifact_store; input_history=Lane_addon_machine_history.create (); sampling_broker; action_schema = None; exported_tools = [];
-                   client = None; cleanup = worker_cleanup;
+                   tool_hooks = []; client = None; cleanup = worker_cleanup;
                    mutex = Eio.Mutex.create (); stopping = false; removed = false } in
     let result = try
       on_created worker;
@@ -470,6 +471,12 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
             | [tool] -> Ok (tool :: selected)
             | _ -> Error (Protocol_failed ("package must advertise exactly one exported tool: " ^ name)))
             (Ok []) package.exported_tools in
+          let* tool_hooks = List.fold_left (fun result (tool : Mcp_protocol.Mcp_types.tool) ->
+            let* checks = result in
+            let* hooks = Lane_addon_tool_hooks.prepare ~hooks:package.tool_hooks tool
+              |> Result.map_error (fun detail -> Protocol_failed detail) in
+            Ok ((tool.name, hooks) :: checks)) (Ok []) exported in
+          worker.tool_hooks <- tool_hooks;
           worker.exported_tools <- List.rev exported;
           Ok worker
       with
@@ -597,6 +604,11 @@ let call_exported_tool ?(on_result = fun _ -> ()) ?authorize ?(principal = Lane_
         else Error (Protocol_failed "tool is not exported by this worker") in
       let* client = match t.client with Some client -> Ok client
         | None -> Error (Protocol_failed "worker initialization pending") in
+      let* hooks = match List.assoc_opt name t.tool_hooks with
+        | Some hooks -> Ok hooks
+        | None -> Error (Protocol_failed "exported tool middleware is unavailable") in
+      let* () = Lane_addon_tool_hooks.before_call hooks arguments
+        |> Result.map_error (fun detail -> Host_refusal (Lane_addon_call_context.Rejected detail)) in
       let call ~name ~arguments =
         Eio.Mutex.use_ro t.mutex (fun () ->
           if t.stopping then Error "Add-on worker is stopped"
@@ -604,11 +616,14 @@ let call_exported_tool ?(on_result = fun _ -> ()) ?authorize ?(principal = Lane_
             |> Result.map (fun result -> on_result result; result)
             |> Result.map_error Agent_core.Error.to_string) in
       try
-        Lane_addon_worker_invocation.run ~invocation:t.package.tool_invocation
+        let* result = Lane_addon_worker_invocation.run ~invocation:t.package.tool_invocation
           ~authorize ~principal ~name ~arguments ~call
         |> Result.map_error (function
           | Lane_addon_call_context.Host_refusal refusal -> Host_refusal refusal
-          | Transport_error detail -> Protocol_failed detail)
+          | Transport_error detail -> Protocol_failed detail) in
+        let* () = Lane_addon_tool_hooks.after_call hooks result
+          |> Result.map_error (fun detail -> Protocol_failed ("tool result rejected after dispatch: " ^ detail)) in
+        Ok result
       with
       | Eio.Cancel.Cancelled _ as exn -> t.stopping <- true; raise exn
       | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _ | Invalid_argument _) as exn ->

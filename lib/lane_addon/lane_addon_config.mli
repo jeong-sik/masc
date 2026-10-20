@@ -26,7 +26,9 @@ type snapshot = {
 
 (** Resolve relative manifest and snapshot-file paths from the declaration's
     directory. The semantic revision excludes comments and the source filename,
-    but includes the resolved package and ordered binding values. [enabled] is
+    but includes the resolved package, selected [tool_hooks] override and ordered
+    binding values. Omitted hooks use the package default; [] disables both
+    optional tool-contract hooks. [enabled] is
     desired worker activity, separate from this payload revision. During the
     accepting deployment stage an absent key retains the current enabled behavior. *)
 val load_file : path:string -> (declaration, string) result

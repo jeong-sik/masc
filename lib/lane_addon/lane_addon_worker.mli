@@ -93,7 +93,11 @@ val call_exported_tool : ?on_result:(Mcp_protocol.Mcp_types.tool_result -> unit)
   (Mcp_protocol.Mcp_types.tool_result, error) result
 (** Calls only a declared, initialized export. A stop revokes admission before
     resource cleanup. After dispatch, transport failure does not prove absence
-    of effects and must not trigger automatic replay. *)
+    of effects and must not trigger automatic replay. Selected input hooks run
+    before mediation or RPC; selected output hooks check the final target reply,
+    including host-context invocation, without inspecting private control replies.
+    [on_result] captures raw actual replies/effect events under RPC serialization,
+    before output validation. It is not publication of a validated result. *)
 
 val host_requests : t -> (Yojson.Safe.t, error) result
 (** Calls [lane_host_requests] with no arguments and returns its structured

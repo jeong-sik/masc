@@ -413,6 +413,32 @@ let operator_quiz_worker_speaks_the_host_contract () = with_directory (fun _root
    | [Lane_addon_host_request.Read_records {source_id = "board"; start = Lane_addon_records.Since _; _}] -> ()
    | _ -> fail "the first request of a session reads the granted Board since the quiz began"))
 
+let tool_hooks_are_selected_and_revisioned () = with_directory (fun _root packages directory ->
+  let manifest = install_package packages in
+  let path = Filename.concat directory "hooks.toml" in
+  write path (declaration msx_binding);
+  let initial = unwrap (Config.load_file ~path) in
+  check bool "old package has no hooks" true (initial.package.tool_hooks = []);
+  check bool "no hook key changes old package identity" true
+    (Yojson.Safe.Util.member "tool_hooks" (Lane_addon_types.package_to_json initial.package) = `Null);
+  write manifest (package () ^ "\n[world.tools]\nexport = [\"machine_step\"]\nhooks = [\"validate_output\"]\n");
+  let default = unwrap (Config.load_file ~path) in
+  check bool "package selects output validation" true
+    (default.package.tool_hooks = [Lane_addon_types.Validate_output]);
+  write path (declaration ~extra:"tool_hooks = []" msx_binding);
+  let off = unwrap (Config.load_file ~path) in
+  check bool "installation can turn optional hooks off" true (off.package.tool_hooks = []);
+  check bool "hook change replaces the worker identity" true (off.revision <> default.revision);
+  write path (declaration ~extra:"tool_hooks = [\"validate_input\"]" msx_binding);
+  let input = unwrap (Config.load_file ~path) in
+  check bool "input can be selected independently" true
+    (input.package.tool_hooks = [Lane_addon_types.Validate_input]);
+  List.iter (fun extra ->
+    write path (declaration ~extra msx_binding);
+    check_error "unknown, duplicate or malformed hook selection is refused" path)
+    ["tool_hooks = [\"unknown\"]"; "tool_hooks = [\"validate_input\", \"validate_input\"]";
+     "tool_hooks = true"; "tool_hooks = [1]"])
+
 let model_access_is_explicit_and_revisioned () = with_directory (fun _root packages directory ->
   let manifest = install_package packages in
   let path = Filename.concat directory "model.toml" in
@@ -674,6 +700,7 @@ let () = run "Lane Add-on declarative composition"
      test_case "judge source schema is enforced before worker start" `Quick judge_source_schema_is_enforced;
      test_case "assembled Fusion declarations load with explicit model boundaries" `Quick assembled_fusion_declarations;
      test_case "model access is explicit and changes configuration identity" `Quick model_access_is_explicit_and_revisioned;
+     test_case "tool hooks are selectable per installation and revisioned" `Quick tool_hooks_are_selected_and_revisioned;
      test_case "exact outputs are package schemas in the configuration identity" `Quick exact_outputs_are_package_schemas;
      test_case "operator asks are a package declaration" `Quick operator_asks_are_a_package_declaration;
      test_case "shipped DOS chain packages declare enforceable binding contracts" `Quick shipped_dos_chain_declares_binding_contracts;

@@ -61,3 +61,35 @@ this was fixed by letting only a successful physical-page read clear that source
 failure. Review also checked retirement, all direct async constructor consumers
 and the cold/explicit suspension distinction. Final exact-head review follows
 publication.
+
+## Warm refresh and independent page failure
+
+```sh
+python3 docs/evidence/2026-10-20-tui-first-page/warm_page_error_probe.py
+```
+
+A further actual MASC review requested clearing an older-page failure on warm
+aggregate success when no initial page was requested. Independent review response
+identified a source race in that proposal: while the warm aggregate is waiting,
+an explicit older-page GET can fail. Clearing on the later aggregate success
+would erase that separate failure without re-reading its cursor.
+
+The added standalone probe extracts the actual `Keeper_chat_older_loaded` arm
+alongside the production warm launch/atomic/aggregate application flow. It applies
+an explicit-page failure during a pending warm aggregate, verifies the later
+aggregate preserves its error, exact retry cursor and held rows, then applies a
+successful retry for that same cursor and verifies the error clears and the next
+cursor/has-more observation advances. The failure does not gate retry or message
+submission. A counterfactual warm clear is injected only in that experiment and
+must fail specifically because it erases the page failure. No production clear
+branch or extra `first_page` policy accessor was added.
+
+Both reviewers checked the actual source/cursor/retry contract, rather than
+accepting the author comment as sufficient evidence. The original MASC reviewer
+withdrew the finding and disclosed that its quoted diff hash was not computed;
+that value is excluded from evidence. Dismissing the original GitHub change
+request and obtaining a new exact-head guard verdict remain separate procedures.
+The experiment retains the same HTTP/workspace/state/row/job fixture limits as
+the ordering probe; it is not native linkage, real HTTP, installation or latency
+proof. The earlier eight-file source review was for its recorded head; this
+probe/documentation delta needs a fresh current-head review.

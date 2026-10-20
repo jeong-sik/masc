@@ -57,6 +57,8 @@ source "${ROOT_DIR}/scripts/harness/lib/test_framework.sh"
 source "${ROOT_DIR}/scripts/harness/lib/server_bootstrap.sh"
 # shellcheck source=scripts/harness/lib/mcp_call.sh
 source "${ROOT_DIR}/scripts/harness/lib/mcp_call.sh"
+# shellcheck source=scripts/harness/lib/coding_eval_evidence.sh
+source "${ROOT_DIR}/scripts/harness/lib/coding_eval_evidence.sh"
 
 cleanup() {
   harness_stop_server "${SERVER_PID}" 10
@@ -550,64 +552,6 @@ append_row() {
   printf '%s\n' "${row}" >> "${RUNS_JSONL}"
 }
 
-# Build one evidence row. passed is derived here exactly the way the report
-# CLI re-derives it (status=ok && verify_exit=0 && regression stayed green);
-# the CLI refuses a row where the two stories diverge, so a bug in either side
-# surfaces as a loud decode error instead of a silently wrong number.
-evidence_row() {
-  jq -cn \
-    --arg case_id "$1" \
-    --argjson run_index "$2" \
-    --arg run_id "$3" \
-    --arg provider "$4" \
-    --arg model "$5" \
-    --arg status "$6" \
-    --argjson verify_exit "$7" \
-    --argjson duration_ms "$8" \
-    --argjson recorded_at "$9" \
-    --argjson tool_calls "${10}" \
-    --argjson input_tokens "${11}" \
-    --argjson output_tokens "${12}" \
-    --argjson cost_usd "${13}" \
-    --argjson error "${14}" \
-    --argjson regression_exit "${15}" \
-    --argjson edited_source_files "${16}" \
-    --argjson edited_target_files "${17}" \
-    --argjson build_exit "${18}" \
-    --arg execution_mode "${19}" \
-    --argjson artifact_references "${20}" \
-    '{
-      case_id: $case_id,
-      run_index: $run_index,
-      run_id: $run_id,
-      provider: $provider,
-      model: $model,
-      status: $status,
-      verify_exit: $verify_exit,
-      regression_exit: $regression_exit,
-      edited_source_files: $edited_source_files,
-      edited_target_files: $edited_target_files,
-      build_exit: $build_exit,
-      passed: ($status == "ok" and $verify_exit == 0
-               and ($regression_exit == null or $regression_exit == 0)),
-      duration_ms: $duration_ms,
-      recorded_at: $recorded_at,
-      tool_calls: $tool_calls,
-      input_tokens: $input_tokens,
-      output_tokens: $output_tokens,
-      cost_usd: $cost_usd,
-      error: $error,
-      usage_scope: (if $input_tokens != null then "cumulative-request-snapshot" else null end),
-      request_or_task_identity: ("task-" + $run_id),
-      run_turn_attempt_identity: ($run_id + "-" + ($run_index | tostring)),
-      target_revision: $model,
-      requested_revision: $model,
-      verdict_run_identity: ("verdict-" + $run_id),
-      artifact_references: $artifact_references,
-      execution_mode: $execution_mode
-    }'
-}
-
 json_string_or_null() {
   local value="$1"
   if [[ -z "${value}" ]]; then
@@ -645,30 +589,6 @@ count_edited_target_files() {
     fi
   done < <(find "${solution_dir}" -type f)
   printf '%s' "${count}"
-}
-
-# List the reference-solution target files that the candidate actually changed,
-# as a JSON array of relative paths. Returns [] if none were edited.
-list_edited_target_files() {
-  local case_dir="$1" workspace="$2"
-  local solution_dir="${case_dir}/solution"
-  local pristine_dir="${case_dir}/workspace"
-  local -a edited=()
-  local rel
-  if [[ -d "${solution_dir}" ]]; then
-    while IFS= read -r target_path; do
-      rel="${target_path#"${solution_dir}/"}"
-      if [[ -f "${workspace}/${rel}" ]] \
-        && ! cmp -s "${pristine_dir}/${rel}" "${workspace}/${rel}"; then
-        edited+=("${rel}")
-      fi
-    done < <(find "${solution_dir}" -type f)
-  fi
-  if [[ ${#edited[@]} -eq 0 ]]; then
-    printf '[]'
-  else
-    printf '%s\n' "${edited[@]}" | jq -R . | jq -s .
-  fi
 }
 
 # Count the pristine source files (everything in the canonical workspace except
@@ -754,7 +674,6 @@ run_one() {
 
   local finish_status="ok" error_text="" verify_exit_json="null" regression_exit_json="null"
   local build_exit_json="null" edited_source_json="null" edited_target_json="null"
-  local artifact_references_json="[]"
   local tool_calls_json='[]' input_tokens_json="null" output_tokens_json="null"
   local cost_usd_json="null"
   local memory_seeded=0
@@ -914,7 +833,6 @@ run_one() {
     # edits are. The report splits a verify-red run by these without guessing.
     edited_source_json="$(count_edited_source_files "${case_dir}" "${workspace}" "${test_files}")"
     edited_target_json="$(count_edited_target_files "${case_dir}" "${workspace}")"
-    artifact_references_json="$(list_edited_target_files "${case_dir}" "${workspace}")"
 
     # SWE-bench-style honest oracle: restore each protected test file from the
     # case's canonical workspace before grading, so a run cannot pass by
@@ -1003,7 +921,7 @@ run_one() {
     "${tool_calls_json}" "${input_tokens_json}" "${output_tokens_json}" \
     "${cost_usd_json}" "$(json_string_or_null "${error_text}")" \
     "${regression_exit_json}" "${edited_source_json}" "${edited_target_json}" \
-    "${build_exit_json}" "${EXECUTION_MODE}" "${artifact_references_json}")"
+    "${build_exit_json}")"
   append_row "${row}" "${evidence_path}"
   echo "[coding-eval] ${run_id}: status=${finish_status} verify_exit=${verify_exit_json} regression_exit=${regression_exit_json} edited_target=${edited_target_json} build=${build_exit_json}" >&2
 }

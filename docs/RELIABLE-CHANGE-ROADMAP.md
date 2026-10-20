@@ -183,8 +183,9 @@ JSON reader는 요청 revision이 없을 때 결과 revision으로 대신 채우
 
 이 비교는 관측 행에 적힌 두 값만 검사한다. 실제 산출물 해시, 독립 판정 원문,
 실행 중 runtime identity 및 경계 suite의 검증을 대신하지 않는다.
-특히 coding harness가 모델 이름으로 만드는 revision과 합성 request/verdict ID는
-실제 G1 연결의 증거가 아니다(#44317). 이 항목의 구현·CI 결과만으로 G1을 완료하지 않는다.
+coding harness는 코딩 평가에서 관측한 값만 기록하며, G1의 request/attempt/verdict ID와
+artifact revision을 만들어 채우지 않는다. 실제 producer에 연결하는 작업은 미완료다
+(#44317). 선택적인 checker 호출이나 이 항목의 구현·CI 결과만으로 G1을 완료하지 않는다.
 
 ## G2 — 고정된 두 단계 변경이 중단 뒤 수습된다
 

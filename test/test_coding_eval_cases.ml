@@ -210,6 +210,51 @@ let test_report_pipeline_on_fixed_rows () =
     check bool "report names the buckets" true (string_contains rendered "verify_red: 1")
 ;;
 
+let test_report_decodes_real_harness_rows () =
+  let helper = Filename.concat (source_root ()) "scripts/harness/lib/coding_eval_evidence.sh" in
+  let dir = temp_dir "coding_eval_emitted_" in
+  let runs_path = Filename.concat dir "runs.jsonl" in
+  List.iteri
+    (fun index (status, verify_exit, regression_exit) ->
+       let args =
+         [ helper; "l1-calc-add"; string_of_int (index + 1); "observed-run"
+         ; "provider"; "model"; status; verify_exit; "100"; "1234"
+         ; "[]"; "null"; "null"; "null"; "null"; regression_exit
+         ; "1"; "1"; "null"
+         ]
+       in
+       let command =
+         "bash -c "
+         ^ Filename.quote "set -euo pipefail; source \"$1\"; shift; evidence_row \"$@\""
+         ^ " coding-eval-emitter "
+         ^ String.concat " " (List.map Filename.quote args)
+         ^ " >> " ^ Filename.quote runs_path
+       in
+       check int "real row producer succeeds" 0 (Sys.command command))
+    [ "ok", "0", "0"; "ok", "1", "0"; "ok", "0", "1"
+    ; "provider_error", "0", "0"
+    ];
+  let rows =
+    match Coding_eval_report.rows_of_jsonl_file runs_path with
+    | Error message -> failf "real harness rows refused by report reader: %s" message
+    | Ok rows -> rows
+  in
+  check (list bool) "only settled green verification passes"
+    [ true; false; false; false ]
+    (List.map (fun (row : Coding_eval_report.row) -> row.passed) rows);
+  List.iter
+    (fun (row : Coding_eval_report.row) ->
+       check string "model stays model identity" "model" row.model;
+       check (option int) "unreported tokens remain unknown" None row.input_tokens;
+       check (option (float 0.0001)) "unreported cost remains unknown" None row.cost_usd)
+    rows;
+  match Coding_eval_report.build_suite ~cases:(loaded_cases ()) ~rows ~k:1 with
+  | Error message -> fail message
+  | Ok report ->
+    check int "all actual emitted rows enter the report" 4 report.suite.total_runs;
+    check (float 0.0001) "one passing coding evaluation" 0.25 report.suite.overall_pass_rate
+;;
+
 let test_row_disagreeing_with_its_verdict_is_refused () =
   match
     Coding_eval_report.row_of_json
@@ -471,6 +516,7 @@ let () =
         ] )
     ; ( "report"
       , [ test_case "fixed rows pipeline" `Quick test_report_pipeline_on_fixed_rows
+        ; test_case "real harness rows decode" `Quick test_report_decodes_real_harness_rows
         ; test_case
             "inconsistent row refused"
             `Quick

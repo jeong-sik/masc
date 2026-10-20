@@ -96,7 +96,7 @@ let json_upsert_meta_string_field name value fields =
     json_upsert_assoc_field "meta" meta_json fields
 
 (** #10297: Otel_metric_store counter recording the cycle when a board-tool
-    caller supplied an identity field whose canonical form disagrees
+    caller supplied an identity field that disagrees
     with the runtime contract's [agent_name].  Pre-fix the caller's
     value was accepted unconditionally; the counter makes spoof
     attempts (or Keeper instruction confusion) visible to
@@ -112,7 +112,7 @@ let () =
     ~name:board_actor_identity_spoof_metric
     ~help:
       "Total board-tool calls where the caller-supplied identity field \
-       (author / voter / owner / user_id) canonicalised to a different keeper than the \
+       (author / voter / owner / user_id) named a different principal than the \
        runtime contract's agent_name. The dispatcher rewrites the field \
        to the trusted ctx value and preserves the caller's claim in \
        [meta.<field>_caller_claim]; this counter surfaces the rewrite \

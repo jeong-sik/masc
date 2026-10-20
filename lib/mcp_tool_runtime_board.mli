@@ -13,9 +13,8 @@
     RFC-0062 Phase 4c-2: {!dispatch} now returns [Tool_result.result option]
     instead of [(bool * string) option].
 
-    Internal: 11 helpers (activity emission, JSON field upsert,
-    Otel_metric_store counter, identity canonicalization, surface-of-
-    record helpers, board author canonicalizer) stay private — the
+    Internal: helpers (activity emission, JSON field upsert,
+    Otel_metric_store counter) stay private — the
     .mli pins the dispatch contract, not the identity-spoof
     plumbing. *)
 
@@ -35,9 +34,9 @@ val ensure_board_post_author :
   agent_name:string -> Yojson.Safe.t -> Yojson.Safe.t
 (** [ensure_board_post_author ~agent_name args] enforces the
     [masc_board_post] author-identity contract: when [args.author]
-    differs from [agent_name] (after canonicalization), records
+    differs from [agent_name] (both trimmed), records
     the spoof attempt via the Otel_metric_store counter and rewrites the
-    author field to the canonical keeper name.
+    author field to [agent_name].
 
     Returns the (possibly mutated) [args] JSON object.  Specialised
     delegate of the internal [enforce_caller_identity] helper —
@@ -52,9 +51,9 @@ val enforce_caller_identity :
   Yojson.Safe.t
 (** [enforce_caller_identity ~tool ~field ~agent_name args]
     enforces caller-identity contract for arbitrary
-    [(tool, field)] pairs.  When [args.<field>] (after
-    canonicalization) differs from [agent_name]'s canonical form,
-    records the spoof attempt and rewrites the field.  Pinned for
+    [(tool, field)] pairs.  When [args.<field>] (trimmed) differs from
+    the trimmed [agent_name], records the spoof attempt and rewrites
+    the field.  Pinned for
     behaviour-tests under
     {!test/test_board_author_identity_10297} which cover all four
     board entries ([masc_board_post] / [_comment] / [_vote] /

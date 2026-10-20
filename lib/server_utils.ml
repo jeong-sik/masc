@@ -101,7 +101,7 @@ let board_actor_entity raw =
 let board_voter_query request =
   query_param request "voter"
   |> Option.map String.trim
-  |> Option.filter (fun raw -> raw <> "")
+  |> Fun.flip Option.bind (fun raw -> if raw = "" then None else Some raw)
 
 let board_current_vote_for_post ~voter ~post_id =
   match voter with

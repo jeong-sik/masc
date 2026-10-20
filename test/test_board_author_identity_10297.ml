@@ -15,10 +15,10 @@
     contract — the 3-branch SSOT pattern from
     feedback memory [mcp-dispatcher-ctx-agent-name-ssot]:
 
-    1. Empty / "anonymous" caller field → fill from ctx canonical.
+    1. Empty / "anonymous" caller field → fill from ctx.
     2. Caller's field equals ctx → keep it as it stands.
-    3. Caller's canonical disagrees with ctx canonical → REWRITE to
-       ctx canonical, preserve the caller's claim under
+    3. Caller's field disagrees with ctx → REWRITE to
+       ctx, preserve the caller's claim under
        [meta.<field>_caller_claim] for forensics, and increment
        [masc_board_actor_identity_spoof_total{tool, field}]. *)
 
@@ -65,7 +65,7 @@ let test_blank_field_fills_from_ctx () =
       (assoc [ ("body", `String "hi") ])
   in
   check (option string)
-    "blank author rewritten to ctx canonical"
+    "blank author rewritten to ctx"
     (Some "xi-hammer")
     (json_string_field "author" result);
   check (option string)
@@ -80,7 +80,7 @@ let test_anonymous_field_fills_from_ctx () =
       (assoc [ ("author", `String "anonymous"); ("body", `String "hi") ])
   in
   check (option string)
-    "anonymous author rewritten to ctx canonical"
+    "anonymous author rewritten to ctx"
     (Some "xi-hammer")
     (json_string_field "author" result);
   check (option string)
@@ -88,7 +88,7 @@ let test_anonymous_field_fills_from_ctx () =
     None
     (meta_string_field "author_caller_claim" result)
 
-(* --- 2. caller canonical matches ctx canonical ------------------ *)
+(* --- 2. caller claim matches ctx --------------------------- *)
 
 let test_caller_short_name_matches_ctx () =
   let result =
@@ -105,7 +105,39 @@ let test_caller_short_name_matches_ctx () =
     None
     (meta_string_field "author_caller_claim" result)
 
-(* --- 3. caller canonical disagrees with ctx canonical ----------- *)
+(* Names reach this gate from HTTP bodies and auth contexts, so stray
+   whitespace on either side must not read as a different principal. *)
+let test_padded_names_compare_trimmed () =
+  let before = counter_for ~tool:"masc_board_post" ~field:"author" in
+  let result =
+    D.enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
+      ~agent_name:"  xi-hammer "
+      (assoc [ ("author", `String " xi-hammer") ])
+  in
+  check (option string)
+    "the stored author is the trimmed name"
+    (Some "xi-hammer")
+    (json_string_field "author" result);
+  check (option string)
+    "padding is not a spoof"
+    None
+    (meta_string_field "author_caller_claim" result);
+  check (float 0.0001)
+    "no spoof counter for padding"
+    before
+    (counter_for ~tool:"masc_board_post" ~field:"author")
+
+let test_blank_claim_without_ctx_is_untouched () =
+  let args = assoc [ ("author", `String "  ") ] in
+  let result =
+    D.enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
+      ~agent_name:"" args
+  in
+  check string "arguments returned as they came"
+    (Yojson.Safe.to_string args)
+    (Yojson.Safe.to_string result)
+
+(* --- 3. caller claim disagrees with ctx ----------- *)
 
 let test_velvet_hammer_cannot_post_as_delta () =
   (* The exact #10297 reproducer: xi-hammer keeper attempts to
@@ -120,7 +152,7 @@ let test_velvet_hammer_cannot_post_as_delta () =
          [ ("author", `String "delta"); ("body", `String "spoof attempt") ])
   in
   check (option string)
-    "author rewritten to ctx canonical"
+    "author rewritten to ctx"
     (Some "xi-hammer")
     (json_string_field "author" result);
   check (option string)
@@ -143,7 +175,7 @@ let test_voter_field_spoof_also_rewritten () =
       (assoc [ ("voter", `String "delta"); ("post_id", `String "p1") ])
   in
   check (option string)
-    "voter rewritten to ctx canonical"
+    "voter rewritten to ctx"
     (Some "xi-hammer")
     (json_string_field "voter" result);
   check (option string)
@@ -246,15 +278,19 @@ let () =
     [
       ( "blank-fills-from-ctx",
         [
-          test_case "blank author -> ctx canonical" `Quick
+          test_case "blank author -> ctx" `Quick
             test_blank_field_fills_from_ctx;
-          test_case "anonymous author -> ctx canonical" `Quick
+          test_case "anonymous author -> ctx" `Quick
             test_anonymous_field_fills_from_ctx;
         ] );
-      ( "matching-canonical",
+      ( "matching-claim",
         [
           test_case "short-name matches ctx" `Quick
             test_caller_short_name_matches_ctx;
+          test_case "padded names compare trimmed" `Quick
+            test_padded_names_compare_trimmed;
+          test_case "blank claim without ctx is untouched" `Quick
+            test_blank_claim_without_ctx_is_untouched;
         ] );
       ( "spoof-rewrite",
         [

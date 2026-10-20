@@ -114,7 +114,8 @@ val board_actor_entity : string -> Activity_graph.entity_ref
     as {!board_actor_identity_json} but in the graph-typed shape. *)
 
 val board_voter_query : Httpun.Request.t -> string option
-(** Reads and canonicalizes the board [voter] query parameter. *)
+(** Reads the board [voter] query parameter, trimmed; [None] when it is
+    absent or blank. *)
 
 val board_current_vote_for_post :
   voter:string option -> post_id:string -> Board.vote_direction option option

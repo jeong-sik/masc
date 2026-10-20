@@ -360,6 +360,19 @@ let runtime_to_json ~assignments ~lanes : Yojson.Safe.t =
     ]
 ;;
 
+(* A preset's lane is read only in the format this build writes. One without a
+   request setting predates it, and restoring it would not know whether to keep
+   or remove what the file declares, so the reason says what the operator can
+   do. *)
+let lane_setting_missing lane_id key =
+  Printf.sprintf
+    "lane %s has no %s: this preset was saved by a build that did not keep the \
+     lane's request settings, so it cannot be restored; save the current state as a \
+     new preset, or add \"max_output_tokens\": null and \"thinking\": null to each \
+     lane in runtime.json if the file should declare neither"
+    lane_id key
+;;
+
 let runtime_of_json (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
@@ -404,21 +417,25 @@ let runtime_of_json (json : Yojson.Safe.t) =
                   ~none:("lane " ^ id ^ " is not an exact-output lane")
                   (Runtime_schema.exact_lane_owner_of_key id)
               in
-              (* The two request settings are options: absent and null both
-                 mean the lane declares none. A preset saved before they were
-                 captured has no key; it restores as no declaration. A value
-                 of another type, or a budget that is not positive (the
-                 runtime TOML refuses it too), is refused rather than coerced. *)
+              (* The two request settings are options written as a value or null.
+                 The key must be there: a preset saved by a build that did not
+                 keep them says nothing about them, and reading that silence as
+                 "declares none" would make a restore remove the declarations
+                 the file holds now. A value of another type, or a budget that
+                 is not positive (the runtime TOML refuses it too), is refused
+                 rather than coerced. *)
               let* max_output_tokens =
                 match List.assoc_opt "max_output_tokens" lane_fields with
-                | None | Some `Null -> Ok None
+                | None -> Error (lane_setting_missing id "max_output_tokens")
+                | Some `Null -> Ok None
                 | Some (`Int n) when n > 0 -> Ok (Some n)
                 | Some _ ->
                   Error ("lane " ^ id ^ " max_output_tokens must be a positive integer or null")
               in
               let* thinking =
                 match List.assoc_opt "thinking" lane_fields with
-                | None | Some `Null -> Ok None
+                | None -> Error (lane_setting_missing id "thinking")
+                | Some `Null -> Ok None
                 | Some (`Bool flag) -> Ok (Some flag)
                 | Some _ -> Error ("lane " ^ id ^ " thinking must be a boolean or null")
               in
@@ -857,18 +874,33 @@ let runtime_text_with ~current_assignments ~current_lanes ~assignments ~lanes co
       then content
       else (
         let path = Runtime_schema.exact_lane_table_name lane.owner in
+        let current = List.find_opt (fun current -> Runtime_schema.equal_exact_lane_owner current.owner lane.owner) current_lanes in
         let content = Toml_line_editor.edit_table_bool content ~path ~key:"enabled" ~value:lane.enabled in
-        let content =
-          match lane.max_output_tokens with
-          | Some value -> Toml_line_editor.edit_table_int content ~path ~key:"max_output_tokens" ~value
-          | None -> Toml_line_editor.edit_table_scalar content ~path ~key:"max_output_tokens" ~value:None
+        (* A request setting is written only where it differs, like the slots
+           below: the integer writer replaces the whole line, so rewriting an
+           unchanged budget would drop its trailing comment. *)
+        let differs project =
+          match current with
+          | Some current -> project current <> project lane
+          | None -> true
         in
         let content =
-          match lane.thinking with
-          | Some value -> Toml_line_editor.edit_table_bool content ~path ~key:"thinking" ~value
-          | None -> Toml_line_editor.edit_table_scalar content ~path ~key:"thinking" ~value:None
+          if not (differs (fun l -> l.max_output_tokens))
+          then content
+          else (
+            match lane.max_output_tokens with
+            | Some value -> Toml_line_editor.edit_table_int content ~path ~key:"max_output_tokens" ~value
+            | None -> Toml_line_editor.edit_table_scalar content ~path ~key:"max_output_tokens" ~value:None)
         in
-        match List.find_opt (fun current -> Runtime_schema.equal_exact_lane_owner current.owner lane.owner) current_lanes with
+        let content =
+          if not (differs (fun l -> l.thinking))
+          then content
+          else (
+            match lane.thinking with
+            | Some value -> Toml_line_editor.edit_table_bool content ~path ~key:"thinking" ~value
+            | None -> Toml_line_editor.edit_table_scalar content ~path ~key:"thinking" ~value:None)
+        in
+        match current with
         | Some current when current.slots = lane.slots && current.cli_slots = lane.cli_slots -> content
         | Some _ | None ->
           let content =

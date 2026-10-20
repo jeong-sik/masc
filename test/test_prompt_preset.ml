@@ -712,7 +712,31 @@ let test_runtime_text_carries_the_lane_request_settings () =
       ~wanted:(lane ~max_output_tokens:(Some 8192) ~thinking:(Some true)) text
   in
   check (option int) "the budget is replaced" (Some 8192) found.Preset.max_output_tokens;
-  check (option bool) "thinking is replaced" (Some true) found.Preset.thinking
+  check (option bool) "thinking is replaced" (Some true) found.Preset.thinking;
+  (* A setting that already holds is not rewritten: the integer writer replaces
+     the whole line, so rewriting an unchanged budget would drop its comment. *)
+  let commented =
+    Toml_line_editor.edit_table_int runtime_fixture
+      ~path:"runtime.exact_output_lanes.librarian_exact" ~key:"max_output_tokens" ~value:4096
+    |> fun text ->
+    let marker = "max_output_tokens = 4096" in
+    let i =
+      let rec find i = if String.sub text i (String.length marker) = marker then i else find (i + 1) in
+      find 0
+    in
+    String.sub text 0 (i + String.length marker) ^ " # provider cap, do not raise"
+    ^ String.sub text (i + String.length marker) (String.length text - i - String.length marker)
+  in
+  let text, found =
+    apply ~current:declared
+      ~wanted:(lane ~max_output_tokens:(Some 4096) ~thinking:(Some true))
+      (Toml_line_editor.edit_table_bool commented
+         ~path:"runtime.exact_output_lanes.librarian_exact" ~key:"thinking" ~value:false)
+  in
+  check (option int) "the unchanged budget still reads 4096" (Some 4096) found.Preset.max_output_tokens;
+  check (option bool) "the changed flag is rewritten" (Some true) found.Preset.thinking;
+  check bool "the unchanged budget keeps its trailing comment" true
+    (contains_substring text "max_output_tokens = 4096 # provider cap, do not raise")
 ;;
 
 let test_saved_lane_request_settings_shape () =
@@ -726,7 +750,7 @@ let test_saved_lane_request_settings_shape () =
          ~path:librarian ~key:"thinking" ~value:false);
     let saved = or_fail (Preset.capture ~base_path ~name:"settings" ~description:"") in
     let lane_of (snapshot : Preset.snapshot) id =
-      List.find (fun (l : Preset.lane) -> l.Preset.id = id) snapshot.Preset.lanes
+      List.find (fun (l : Preset.lane) -> Runtime_schema.exact_lane_key l.Preset.owner = id) snapshot.Preset.lanes
     in
     Alcotest.(check (option int)) "capture reads the budget" (Some 4096)
       (lane_of saved "librarian_exact").Preset.max_output_tokens;
@@ -738,9 +762,27 @@ let test_saved_lane_request_settings_shape () =
     let loaded = or_fail (Preset.load ~base_path "settings") in
     Alcotest.(check bool) "the lanes read back as saved" true
       (loaded.Preset.lanes = saved.Preset.lanes);
-    (* A preset saved before these were captured has no keys: it declares
-       none. A value of another type, or a budget that is not positive, is
-       refused rather than coerced. *)
+    (* A lane that declares none is saved as null, not left out. *)
+    let runtime_json_path = Filename.concat (Preset.source_directory ~base_path saved) "runtime.json" in
+    let saved_lane id =
+      match Yojson.Safe.from_file runtime_json_path with
+      | `Assoc fields ->
+        (match List.assoc_opt "exact_output_lanes" fields with
+         | Some (`Assoc lanes) ->
+           (match List.assoc_opt id lanes with
+            | Some (`Assoc lane_fields) -> lane_fields
+            | _ -> Alcotest.failf "saved lane %s is missing" id)
+         | _ -> Alcotest.fail "saved lanes must be an object")
+      | _ -> Alcotest.fail "saved runtime must be an object"
+    in
+    Alcotest.(check bool) "an undeclared budget is written as null" true
+      (List.assoc_opt "max_output_tokens" (saved_lane "hitl_auto_judge") = Some `Null);
+    Alcotest.(check bool) "an undeclared thinking flag is written as null" true
+      (List.assoc_opt "thinking" (saved_lane "hitl_auto_judge") = Some `Null);
+    (* A preset saved before these were kept has no keys. Restoring it would
+       have to guess between keeping and removing what the file declares, so it
+       is refused with what to do. A value of another type, or a budget that is
+       not positive, is refused rather than coerced. *)
     let runtime_json = Filename.concat (Preset.source_directory ~base_path saved) "runtime.json" in
     let original = Yojson.Safe.from_file runtime_json in
     let with_lane_fields change =
@@ -755,17 +797,17 @@ let test_saved_lane_request_settings_shape () =
                 | _ -> Alcotest.fail "saved lane must be an object")) lanes)
             | _ -> Alcotest.fail "saved lanes must be an object")) fields)
       | _ -> Alcotest.fail "saved runtime must be an object" in
-    Yojson.Safe.to_file runtime_json
-      (with_lane_fields (fun fields ->
-         List.remove_assoc "thinking" (List.remove_assoc "max_output_tokens" fields)));
-    (match Preset.load ~base_path "settings" with
-     | Ok older ->
-       List.iter (fun (lane : Preset.lane) ->
-         Alcotest.(check (option int)) ("older preset lane " ^ lane.id ^ " budget") None
-           lane.max_output_tokens;
-         Alcotest.(check (option bool)) ("older preset lane " ^ lane.id ^ " thinking") None
-           lane.thinking) older.Preset.lanes
-     | Error detail -> Alcotest.failf "a preset without the keys must load: %s" detail);
+    List.iter (fun key ->
+      Yojson.Safe.to_file runtime_json
+        (with_lane_fields (fun fields -> List.remove_assoc key fields));
+      match Preset.load ~base_path "settings" with
+      | Error detail ->
+        Alcotest.(check bool) ("a preset without " ^ key ^ " is refused naming it") true
+          (contains_substring detail key);
+        Alcotest.(check bool) "and the reason says how to get past it" true
+          (contains_substring detail "save the current state as a new preset")
+      | Ok _ -> Alcotest.failf "a preset without %s was accepted" key)
+      [ "max_output_tokens"; "thinking" ];
     List.iter (fun (label, key, bad) ->
       Yojson.Safe.to_file runtime_json
         (with_lane_fields (fun fields -> (key, bad) :: List.remove_assoc key fields));

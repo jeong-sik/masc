@@ -141,26 +141,49 @@ and handle_transition ~tool_name ~start_time ctx args =
       ~task_id
       ~action_s
   | Some task_before ->
-  let release_owner_mismatch_rejection =
-    match action, task_opt with
-    | Masc_domain.Release, Some task ->
+  (* Release and submit act on work the caller holds. A caller that is not the
+     holder is refused here with the holder named, so the lifecycle's generic
+     [Invalid_transition] never has to stand in for an ownership problem. Only
+     [task_assignee_of_status] states (Claimed, InProgress, AwaitingVerification)
+     have a holder; a Todo or terminal Task goes to the lifecycle, whose message
+     and valid_next_actions hint stay as they were. The holder may resubmit its
+     own AwaitingVerification Task: that supersede is the lifecycle's to allow.
+
+     The holder test here ([Workspace.same_task_actor]) and the lifecycle's
+     [same_agent] are the same function. If one is ever redefined, redefine
+     the other with it, or the tool refuses what the lifecycle would accept. *)
+  let owner_requirement =
+    match action with
+    | Masc_domain.Release ->
+      Some ("task_release_requires_current_owner", "release")
+    | Masc_domain.Submit_for_verification ->
+      Some ("task_submit_requires_current_owner", "submit")
+    | Masc_domain.Claim
+    | Masc_domain.Start
+    | Masc_domain.Done_action
+    | Masc_domain.Cancel -> None
+  in
+  let owner_mismatch_rejection =
+    match owner_requirement, task_opt with
+    | Some (rule_id, verb), Some task ->
       (match Workspace.task_assignee_of_status task.task_status with
        | Some assignee
          when not (Workspace.same_task_actor ctx.config assignee ctx.agent_name) ->
          let status = Masc_domain.task_status_to_string task.task_status in
          let message =
            Printf.sprintf
-             "Task %s is %s and owned by %s; %s cannot release it."
+             "Task %s is %s and owned by %s; %s cannot %s it."
              task_id
              status
              assignee
              ctx.agent_name
+             verb
          in
          Some
            (workflow_rejection_result
               ~tool_name
               ~start_time
-              ~rule_id:"task_release_requires_current_owner"
+              ~rule_id
               ~extra_fields:
                 [ "task_id", `String task_id
                 ; "task_status", `String status
@@ -169,17 +192,12 @@ and handle_transition ~tool_name ~start_time ctx args =
                 ]
               message)
        | Some _ | None -> None)
-    | Masc_domain.Release, None -> None
-    | ( Masc_domain.Claim
-      | Masc_domain.Start
-      | Masc_domain.Done_action
-      | Masc_domain.Cancel
-      | Masc_domain.Submit_for_verification ), _ -> None
+    | Some _, None | None, (Some _ | None) -> None
   in
   (* The terminal-verdict no-op branch is gone with the verdict actions: an agent
      can no longer request approve/reject here, so there is no verdict-on-terminal
      case to absorb. *)
-  match release_owner_mismatch_rejection with
+  match owner_mismatch_rejection with
   | Some result -> result
   | None ->
   let completion_state_error =
@@ -192,35 +210,33 @@ and handle_transition ~tool_name ~start_time ctx args =
   | Some err ->
     log_task_transition_failed ~agent_name:ctx.agent_name err;
     let message = Masc_domain.masc_error_to_string err in
-    let rule_id =
+    let rule_id, recoverable =
       (* Exhaustive, no catch-all: [completion_state_error] returns only
          [Task] errors and only four of the five constructors, but a [_] arm
          here would silently absorb a newly added variant into the generic
-         rule id instead of failing to compile. *)
+         rule id instead of failing to compile. [recoverable] is decided in the
+         same arm as the rule id it belongs to. *)
       match err with
       | Masc_domain.Task (Masc_domain.Task_error.NotClaimed _) ->
-        Some "task_done_requires_claimed_or_started"
+        Some "task_done_requires_claimed_or_started", Some true
       | Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed _) ->
-        Some "task_done_requires_current_owner"
+        Some "task_done_requires_current_owner", None
       | Masc_domain.Task
           (Masc_domain.Task_error.InvalidState _
           | Masc_domain.Task_error.VerificationSuperseded _) ->
-        Some "task_done_invalid_lifecycle_state"
+        Some "task_done_invalid_lifecycle_state", None
       | Masc_domain.Task (Masc_domain.Task_error.NotFound _) ->
-        Some "task_done_task_not_found"
+        Some "task_done_task_not_found", None
       | Masc_domain.Task (Masc_domain.Task_error.InvalidId _)
       | Masc_domain.Agent _
       | Masc_domain.Auth _
-      | Masc_domain.System _ -> Some "task_done_lifecycle_rejected"
+      | Masc_domain.System _ -> Some "task_done_lifecycle_rejected", None
     in
     workflow_rejection_result
       ~tool_name
       ~start_time
       ?rule_id
-      ?recoverable:
-        (match rule_id with
-         | Some "task_done_requires_claimed_or_started" -> Some true
-         | _ -> None)
+      ?recoverable
       message
   | None ->
   match handoff_context with

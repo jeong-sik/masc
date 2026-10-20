@@ -4,6 +4,7 @@ include Operator_digest
 (* Keeper runtime identity fields extracted to
    [Operator_control_snapshot_identity_fields] (godfile decomp). *)
 let keeper_runtime_identity_fields = Operator_control_snapshot_identity_fields.keeper_runtime_identity_fields
+let keeper_current_task_field = Operator_control_snapshot_identity_fields.keeper_current_task_field
 (* action_result_status + confirmation_state + action_log_entry types,
    stringifiers, and persistence helpers extracted to
    [Operator_control_snapshot_action_log] (godfile decomp). The
@@ -248,6 +249,7 @@ let keepers_json
                            ; "created_at", `String meta.created_at
                            ]
                            @ keeper_runtime_identity_fields meta
+                           @ [ keeper_current_task_field meta ]
                            @ Keeper_status_bridge.runtime_blocker_fields_json config meta
                            @ Keeper_status_bridge.attention_fields_json config meta
                            @ [ "runtime_trust", runtime_trust ])))
@@ -403,6 +405,7 @@ let keepers_json
                          ; "last_model_used", `String (Keeper_status_runtime.active_model_of_meta meta)
                          ]
                          @ keeper_runtime_identity_fields meta
+                         @ [ keeper_current_task_field meta ]
                          @ [ "keepalive_running", `Bool keepalive_running
                            ; "next_model_hint", `Null
                            ; ( "latest_tool_names"

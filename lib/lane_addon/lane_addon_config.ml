@@ -102,8 +102,24 @@ let resolve_snapshot_paths ~directory = function
        | _ -> `Assoc fields)
   | value -> value
 
+let select_exact_outputs declared = function
+  | `List values ->
+      let rec names selected = function
+        | [] -> Ok selected
+        | `String name :: rest ->
+            if List.mem name selected then Error ("duplicate exact output selection: " ^ name)
+            else if not (List.exists (fun (output:Lane_addon_types.exact_output) ->
+              String.equal output.name name) declared) then
+              Error ("exact_outputs selects an undeclared package output: " ^ name)
+            else names (name::selected) rest
+        | _::_ -> Error "exact_outputs requires an array of declared output names" in
+      let* selected = names [] values in
+      Ok (List.filter (fun (output:Lane_addon_types.exact_output) ->
+        List.mem output.name selected) declared)
+  | _ -> Error "exact_outputs requires an array of declared output names"
+
 let decode ~source_path ~source_revision ~id fields =
-  let allowed = ["id"; "enabled"; "run_id"; "manifest_path"; "binding"; "tool_hooks"] in
+  let allowed = ["id"; "enabled"; "run_id"; "manifest_path"; "binding"; "tool_hooks"; "exact_outputs"] in
   let* () = match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
     | None -> Ok () | Some (key, _) -> Error ("unknown declaration field: " ^ key) in
   let* enabled = match List.assoc_opt "enabled" fields with
@@ -125,6 +141,12 @@ let decode ~source_path ~source_revision ~id fields =
         let* json = json_of_toml ~path:"tool_hooks" value in
         let* tool_hooks = Lane_addon_tool_hooks.selection_of_json json in
         Ok {package with tool_hooks} in
+  let* package = match List.assoc_opt "exact_outputs" fields with
+    | None -> Ok package
+    | Some value ->
+        let* json = json_of_toml ~path:"exact_outputs" value in
+        let* exact_outputs = select_exact_outputs package.exact_outputs json in
+        Ok {package with exact_outputs} in
   let* binding = match List.assoc_opt "binding" fields with
     | Some (Otoml.TomlTable _ | Otoml.TomlInlineTable _ as value) ->
         json_of_toml ~path:"binding" value

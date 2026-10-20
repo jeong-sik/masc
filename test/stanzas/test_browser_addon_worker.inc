@@ -1,4 +1,15 @@
 (test
+ (name test_browser_addon_observation)
+ (modules test_browser_addon_observation)
+ (libraries masc alcotest yojson))
+
+(test
+ (name test_browser_addon_tool)
+ (modules test_browser_addon_tool)
+ (libraries masc masc.browser_lane masc.time_compat masc.lane_addon_call_context
+  masc.lane_addon_tool_result masc.tool_types mcp_protocol alcotest eio eio_main yojson uuidm))
+
+(test
  (name test_browser_addon_owner)
  (modules test_browser_addon_owner)
  (libraries masc masc.browser_lane masc.time_compat alcotest eio eio_main yojson uuidm))

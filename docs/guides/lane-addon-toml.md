@@ -97,7 +97,10 @@ sources = []
 응답이 잘못됐으면 이미 수행된 조작의 결과는 불확실하며 재전송하지 않는다.
 실패 응답은 원래 실패·효과 metadata를 유지한다.
 
-선택한 Hook의 스키마는 기존 Add-on 행동 계약의 닫힌 subset을 사용한다.
+선택한 Hook의 스키마는 지원되는 명시적 JSON Schema subset을 사용한다.
+객체는 `additionalProperties` 정책을 명시해야 한다. `true`이면 가변 결과·인자를
+허용하면서 선언된 필드와 JSON 유효성을 검사한다. Add-on 행동 봉투는 재귀적으로
+닫힌 객체만 허용한다.
 선택한 출력 검사가 있으면 **모든 export 도구**에 지원되는 `outputSchema`가 있어야
 장착할 수 있다. 임의 JSON Schema 전체 지원을 뜻하지 않는다. Hook 변경은 설치
 revision과 worker 교체에 반영된다. 이 선택은 LLM을 호출하거나 모델 route를 바꾸지

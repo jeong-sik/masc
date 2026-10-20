@@ -164,14 +164,14 @@ p.add_argument("--socket");p.add_argument("--incarnation");p.add_argument("--max
 a=p.parse_args()
 s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);s.bind(a.socket);s.listen()
 with open(os.path.join(a.root,"endpoint-"+a.incarnation),"w") as out: out.write(a.socket)
-event=threading.Event();payload=None
+event=threading.Event();payload=None;running=False
 def handle(conn):
-    global payload
+    global payload,running
     with conn:
         req=json.loads(conn.makefile("rb").readline())
         if req["incarnation"]!=a.incarnation: raise RuntimeError("wrong owner")
         op=req["operation"]
-        if op=="snapshot": result={"reply":"receipt"} if a.mode=="bad_ready" else {"reply":"snapshot","snapshot":{}}
+        if op=="snapshot": result={"reply":"receipt"} if a.mode=="bad_ready" else {"reply":"snapshot","snapshot":{"command_running":running}}
         elif op=="issue":
             event.clear()
             with open(os.path.join(a.root,"issued-"+a.incarnation),"w") as out: out.write("issued")
@@ -190,8 +190,16 @@ for line in sys.stdin:
     if "id" not in req: continue
     method=req["method"]
     if method=="initialize": result={"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"browser-host-fixture","version":"1"}}
-    elif method=="tools/list": result={"tools":[{"name":"lane_observe","inputSchema":{"type":"object"}}]}
-    elif method=="tools/call": result={"content":[],"structuredContent":{"rows":[],"coverage":[]}}
+    elif method=="tools/list": result={"tools":[{"name":name,"inputSchema":{"type":"object"}} for name in ["lane_observe","lane_call","browser_command"]]}
+    elif method=="tools/call":
+        if req["params"]["name"]=="lane_call":
+            if req["params"]["arguments"]["tool"]!="browser_command": raise RuntimeError("wrong export")
+            event.clear();running=True
+            with open(os.path.join(a.root,"issued-"+a.incarnation),"w") as out: out.write("issued")
+            with open(os.path.join(a.root,"toolcalls-"+a.incarnation),"a") as out: out.write("once\n")
+            event.wait();running=False
+            result={"content":[],"structuredContent":{"ok":True}}
+        else: result={"content":[],"structuredContent":{"rows":[],"coverage":[]}}
     else: raise RuntimeError(method)
     print(json.dumps({"jsonrpc":"2.0","id":req["id"],"result":result}),flush=True)
 |}
@@ -207,6 +215,9 @@ command = ["python3", %S, %S, %S]
 contributions = ["observe"]
 [resources]
 max_reply_bytes = 65536
+[world.tools]
+export = ["browser_command"]
+invocation = "host_context"
 |} script root mode) in
   let access=Lane_addon_sources.Operator_configuration in
   let inspect id=dispatch config R.Inspect ["instance_id",`String id]
@@ -229,6 +240,25 @@ max_reply_bytes = 65536
   let issue=Browser_addon_wire.Issue {route=Browser_lane.Live_route (Some client_id);verb=Browser_lane.Tabs_list;
     actor=Some "browser-host-tester";timeout_sec=2.;only_if_idle=false} in
   let payload=`Assoc ["ok",`Bool false;"effectPhase",`String "partial";"error",`String "partial result"] in
+  let export ()=R.tool_exports ~config ~access ~reserved:[] |> require
+    |> List.find (fun (item:R.tool_export) -> item.instance_id=id && item.tool.name="browser_command") in
+  let export=export () in
+  Eio.Fiber.both (fun () ->
+    let result=R.call_exported_tool_with_principal ~principal:(Some Lane_addon_call_context.Operator)
+      ~config ~access ~reserved:[] ~export ~arguments:(`Assoc []) in
+    check bool "long MCP export returns after reverse-channel result" true (Result.is_ok result))
+    (fun () ->
+      wait clock (fun () -> Sys.file_exists (issued id));
+      ignore (dispatch config R.Observe ["instance_id",`String id]);
+      wait clock (fun () -> dispatch config R.Inspect ["instance_id",`String id]
+        |> member "rows" |> Yojson.Safe.Util.to_list
+        |> List.exists (fun row -> member "command_running" (member "fields" row)=`Bool true));
+      check bool "running observation commits before MCP call settles" true
+        (call original Browser_addon_wire.Snapshot=Ok (Browser_addon_wire.Snapshot_result (`Assoc ["command_running",`Bool true])));
+      ignore (call original (Browser_addon_wire.Deliver {client_id;id="fixture";payload})));
+  check string "long MCP export dispatched once" "once\n"
+    (In_channel.with_open_bin (Filename.concat root ("toolcalls-"^id)) In_channel.input_all);
+  Unix.unlink (issued id);
   Eio.Fiber.both (fun () -> check bool "browser result disposition retained" true
     (call original issue=Ok (Browser_addon_wire.Issue_result (Ok (Browser_lane.Answered payload)))))
     (fun () -> wait clock (fun () -> Sys.file_exists (issued id));

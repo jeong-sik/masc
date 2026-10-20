@@ -311,6 +311,15 @@ harbor 없이 컨테이너 하나에서 arm K 의 기계 경로 전체를 확인
 `printf x > /tmp/marker` 를 시키면 `>` 가 printf 의 리터럴 인자가 되어 exit 0 으로 끝나고
 파일은 안 생긴다.
 
+probe 는 marker 만 기다리지 않고 `masc_keeper_msg` 가 돌려준 `operation_id` 로
+`masc_keeper_delegate_status` 를 함께 읽는다 (`image/keeper_turn_wait.sh`). turn 이
+`Failed` 나 `Cancelled` 로 끝나면 450초를 기다리지 않고 그 상태와 원문을 찍고 끝난다.
+`Succeeded` 인데 marker 가 없는 경우와 상태 조회가 계속 안 되는 경우도 각자 이름으로
+끝나며, 둘 다 `keeper-did-not-act` 로 뭉치지 않는다. 가짜 docker 와 가짜 mcp 로 이
+분기를 확인하려면
+`python3 -m unittest discover -s benchmarks/terminal_bench/image -p test_keeper_turn_wait.py`
+를 실행한다. 컨테이너, 서버, provider 호출은 없다.
+
 ## 베이스 이미지 확인
 
     ./image/probe_bases.sh                  # 4.0.0 세트의 서로 다른 베이스들

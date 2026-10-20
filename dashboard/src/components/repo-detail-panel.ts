@@ -19,7 +19,6 @@ export interface BranchInfo {
   name: string
   is_default: boolean
   is_remote: boolean
-  last_commit_at: string | null
 }
 
 // ── State ────────────────────────────────────────────────
@@ -41,7 +40,6 @@ export function normalizeBranch(raw: unknown): BranchInfo | null {
     name,
     is_default: b.is_default === true,
     is_remote: b.is_remote === true,
-    last_commit_at: typeof b.last_commit_at === 'string' ? b.last_commit_at : null,
   }
 }
 
@@ -300,9 +298,6 @@ export function RepoDetailPanel() {
                         ? html`<span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-text-dim border border-[var(--color-border-default)]">원격</span>`
                         : null}
                     </div>
-                    ${branch.last_commit_at
-                      ? html`<span class="text-2xs text-[var(--color-fg-muted)]">${formatDate(branch.last_commit_at)}</span>`
-                      : null}
                   </div>
                 `)}
               </div>

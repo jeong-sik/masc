@@ -156,7 +156,6 @@ let branch_json ~default_branch name =
       ("name", `String short_name);
       ("is_default", `Bool (List.exists (String.equal short_name) default_names));
       ("is_remote", `Bool is_remote);
-      ("last_commit_at", `Null);
     ]
 
 let slug_of_repo_name name =

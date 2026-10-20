@@ -30,7 +30,7 @@ max_reply_bytes = 4194304
 [interface]
 binding_schema = '''{
   "type": "object",
-  "properties": {"sources": {"type": "array", "maxItems": 0}},
+  "properties": {"sources": {"type": "array", "items": {"type": "object", "properties": {}, "additionalProperties": false}, "maxItems": 0}},
   "required": ["sources"],
   "additionalProperties": false
 }'''

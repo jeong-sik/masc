@@ -108,4 +108,3 @@ after rename uses `workspace_file_save_uncertain`: retain the draft and reread
 before considering another save. A missing response likewise does not establish
 whether a write happened. This API does not by itself add a Code edit key,
 retained drafts or a conflict comparison view; those remain separate TUI work.
-

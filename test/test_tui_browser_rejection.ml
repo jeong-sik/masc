@@ -56,15 +56,26 @@ let test_refusals_read_back () =
             "point",`Assoc ["x",`Float 0.5;"y",`Float 0.5];
             "viewport",`Assoc ["documentId",`String "observed";"width",`Int 800;"height",`Int 600;
               "scrollX",`Int 0;"scrollY",`Int 0]]))) in
+      let untargeted () = recorded (Tools.handle_tabs ~base_path:no_workspace ~tool_name:"BrowserTabs"
+        ~start_time:(Tool_timing.start ()) (`Assoc [])) in
+      let unbound_goto () = recorded (Tools.handle_goto ~tool_name:"BrowserGoto"
+        ~start_time:(Tool_timing.start ()) (`Assoc ["url",`String "https://example.org/"])) in
       let tabs_of client_id =
         recorded (Tools.handle_tabs ~base_path:no_workspace ~tool_name:"BrowserTabs"
           ~start_time:(Tool_timing.start ()) (`Assoc ["clientId", `String client_id])) in
       let unconnected = tabs () in
       check bool "no connected browser: the next step precedes the list" true (lists_come_last unconnected);
       (match Rejection.of_result unconnected with
-       | Some {case=Lane.No_live_client_case; detail=Rejection.Next_step sentence} ->
+       | Some {case=Rejection.Lane Lane.No_live_client_case; detail=Rejection.Next_step sentence} ->
          check bool "no connected browser carries its next step" true (sentence <> "")
        | Some _ | None -> fail "a call with no browser connected did not read back as no_live_client");
+      (match Rejection.of_result (untargeted ()) with
+       | Some {case=Rejection.Choice Lane.No_available_browser_case; detail=Rejection.Next_step sentence} ->
+         check bool "no browser to choose carries its next step" true (sentence <> "")
+       | Some _ | None -> fail "a call naming no lane with no browser did not read back as no_available_browser");
+      (match Rejection.of_result (unbound_goto ()) with
+       | Some {case=Rejection.Choice Lane.Binding_required_case; detail=Rejection.Next_step _} -> ()
+       | Some _ | None -> fail "a navigation naming no browser did not read back as browser_binding_required");
       let extension = info 1 Lane.Web_extension in
       connect extension;
       let text = hover extension in
@@ -75,7 +86,7 @@ let test_refusals_read_back () =
            ~prefix:{|{"error":"live_transport_unsupported","capability":"trusted_hover","transport":"web_extension",|});
       check bool "an unserved request: the next step precedes the lists" true (lists_come_last text);
       (match Rejection.of_result text with
-       | Some ({case=Lane.Transport_unsupported_case;
+       | Some ({case=Rejection.Lane Lane.Transport_unsupported_case;
                 detail=Rejection.Unserved {transport=Lane.Web_extension; capability=Lane.Trusted_hover; serving_clients=0}}
                as rejection) ->
          check string "a failed call's refusal shows as its decoded row"
@@ -94,17 +105,25 @@ let test_refusals_read_back () =
       let ambiguous = tabs () in
       check bool "two connected browsers: the next step precedes the list" true (lists_come_last ambiguous);
       (match Rejection.of_result ambiguous with
-       | Some {case=Lane.Ambiguous_clients_case; detail=Rejection.Next_step _} -> ()
+       | Some {case=Rejection.Lane Lane.Ambiguous_clients_case; detail=Rejection.Next_step _} -> ()
        | Some _ | None -> fail "two connected browsers did not read back as ambiguous");
+      (* Browser choice takes a BiDi connection first, so two of them leave it
+         nothing to choose between. *)
+      connect (info 4 Lane.Webdriver_bidi);
+      (match Rejection.of_result (untargeted ()) with
+       | Some ({case=Rejection.Choice Lane.Ambiguous_browsers_case; detail=Rejection.Next_step _} as rejection) ->
+         check string "a call naming no lane shows as its decoded row"
+           (Rejection.line ~lacking rejection) (Rejection.preview ~failed:true ~lacking (untargeted ()))
+       | Some _ | None -> fail "a call naming no lane with two BiDi browsers did not read back as ambiguous_browsers");
       let gone = tabs_of (Lane.client_id_to_string (info 3 Lane.Web_extension).client_id) in
       check bool "a browser that left: the next step precedes the list" true (lists_come_last gone);
       (match Rejection.of_result gone with
-       | Some {case=Lane.Selected_client_disconnected_case; detail=Rejection.Next_step _} -> ()
+       | Some {case=Rejection.Lane Lane.Selected_client_disconnected_case; detail=Rejection.Next_step _} -> ()
        | Some _ | None -> fail "a browser that left did not read back as disconnected");
       Lane.install_activity_observer (Some (fun _ -> Lane.Disabled));
       Eio.Switch.on_release sw (fun () -> Lane.install_activity_observer (Some (fun _ -> Lane.Enabled)));
       match Rejection.of_result (tabs ()) with
-      | Some {case=Lane.Lane_off_case; detail=Rejection.Next_step _} -> ()
+      | Some {case=Rejection.Lane Lane.Lane_off_case; detail=Rejection.Next_step _} -> ()
       | Some _ | None -> fail "a lane that is off did not read back"))
 
 (* Copied from a Keeper's call log on 2026-10-08, client IDs replaced. *)
@@ -114,9 +133,18 @@ let recorded_disconnect =
 
 let test_recorded_log_row () =
   match Rejection.of_result recorded_disconnect with
-  | Some {case=Lane.Selected_client_disconnected_case; detail=Rejection.Next_step sentence} ->
+  | Some {case=Rejection.Lane Lane.Selected_client_disconnected_case; detail=Rejection.Next_step sentence} ->
     check bool "a logged refusal keeps its next step" true (sentence <> "")
   | Some _ | None -> fail "the logged refusal did not read back"
+
+(* Browser choice writes these codes and the TUI looks them up: each case
+   reads back as itself, so two cases can never share a code. *)
+let test_choice_codes_read_back () =
+  List.iter (fun case ->
+    let code = Lane.choice_case_code case in
+    check bool (code ^ " reads back as its own case") true
+      (Lane.choice_case_of_code code = Some case))
+    Lane.all_of_choice_case
 
 let test_other_results_are_left_alone () =
   List.iter (fun (name, text) ->
@@ -131,6 +159,10 @@ let test_other_results_are_left_alone () =
     ; "a capability the lane does not know",
       {|{"error":"live_transport_unsupported","capability":"mind_reading","transport":"web_extension","servingClients":[]}|}
     ; "a lane case without its sentence", {|{"error":"no_live_client"}|}
+    ; "a choice code browser choice does not own", {|{"code":"quota_exhausted","message":"Ask again tomorrow."}|}
+    ; "a choice case without its sentence", {|{"code":"no_available_browser"}|}
+    ; "a lane case and a choice case in one object",
+      {|{"error":"no_live_client","code":"no_available_browser","retry":"Connect.","message":"Connect."}|}
     ; "an empty result", "" ]
 
 let () =
@@ -138,4 +170,5 @@ let () =
     [ "decode",
       [ test_case "refusals read back from what the Keeper was told" `Quick test_refusals_read_back
       ; test_case "a logged refusal row" `Quick test_recorded_log_row
+      ; test_case "every choice code reads back as its case" `Quick test_choice_codes_read_back
       ; test_case "other results are left alone" `Quick test_other_results_are_left_alone ] ]

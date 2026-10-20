@@ -6,10 +6,48 @@ type detail =
       }
   | Next_step of string
 
+type case =
+  | Lane of Browser_lane.selection_case
+  | Choice of Browser_lane.choice_case
+
 type t =
-  { case : Browser_lane.selection_case
+  { case : case
   ; detail : detail
   }
+
+let string_field fields name =
+  match List.assoc_opt name fields with
+  | Some (`String value) -> Some value
+  | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null) | None -> None
+;;
+
+let lane_refusal fields code =
+  let ( let* ) = Option.bind in
+  let string = string_field fields in
+  let* case = Browser_lane.selection_case_of_code code in
+  match case with
+  | Browser_lane.Transport_unsupported_case ->
+    let* transport =
+      Option.bind (string "transport") (fun raw ->
+        Result.to_option (Browser_lane.live_transport_of_string raw))
+    in
+    let* capability = Option.bind (string "capability") Browser_lane.live_capability_of_wire in
+    let* serving_clients =
+      match List.assoc_opt "servingClients" fields with
+      | Some (`List clients) -> Some (List.length clients)
+      | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _) | None ->
+        None
+    in
+    Some { case = Lane case; detail = Unserved { transport; capability; serving_clients } }
+  | Browser_lane.Lane_off_case | Browser_lane.Activity_unavailable_case ->
+    let* message = string "message" in
+    Some { case = Lane case; detail = Next_step message }
+  | Browser_lane.No_live_client_case
+  | Browser_lane.Selected_client_disconnected_case
+  | Browser_lane.Ambiguous_clients_case ->
+    let* retry = string "retry" in
+    Some { case = Lane case; detail = Next_step retry }
+;;
 
 let of_result text =
   let ( let* ) = Option.bind in
@@ -24,38 +62,22 @@ let of_result text =
     | `Assoc fields -> Some fields
     | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
   in
-  let string name =
-    match List.assoc_opt name fields with
-    | Some (`String value) -> Some value
-    | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null) | None -> None
-  in
-  let* case = Option.bind (string "error") Browser_lane.selection_case_of_code in
-  match case with
-  | Browser_lane.Transport_unsupported_case ->
-    let* transport =
-      Option.bind (string "transport") (fun raw ->
-        Result.to_option (Browser_lane.live_transport_of_string raw))
-    in
-    let* capability = Option.bind (string "capability") Browser_lane.live_capability_of_wire in
-    let* serving_clients =
-      match List.assoc_opt "servingClients" fields with
-      | Some (`List clients) -> Some (List.length clients)
-      | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _) | None ->
-        None
-    in
-    Some { case; detail = Unserved { transport; capability; serving_clients } }
-  | Browser_lane.Lane_off_case | Browser_lane.Activity_unavailable_case ->
+  let string = string_field fields in
+  match string "error", string "code" with
+  | Some code, None -> lane_refusal fields code
+  | None, Some code ->
+    let* case = Browser_lane.choice_case_of_code code in
     let* message = string "message" in
-    Some { case; detail = Next_step message }
-  | Browser_lane.No_live_client_case
-  | Browser_lane.Selected_client_disconnected_case
-  | Browser_lane.Ambiguous_clients_case ->
-    let* retry = string "retry" in
-    Some { case; detail = Next_step retry }
+    Some { case = Choice case; detail = Next_step message }
+  | Some _, Some _ | None, None -> None
 ;;
 
 let line ~lacking rejection =
-  let code = Browser_lane.selection_case_code rejection.case in
+  let code =
+    match rejection.case with
+    | Lane case -> Browser_lane.selection_case_code case
+    | Choice case -> Browser_lane.choice_case_code case
+  in
   match rejection.detail with
   | Next_step sentence -> code ^ " \xc2\xb7 " ^ sentence
   | Unserved { transport; capability; serving_clients } ->

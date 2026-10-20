@@ -1,10 +1,12 @@
 (** A browser tool's refusal, as a Keeper was told it.
 
     [Tool_misc_browser_lane] writes a refusal that dispatched nothing as one
-    JSON object naming the case in [error]. The tool bridge appends its
-    failure-class line after the tool's own text, so in a recorded result the
-    refusal is the first line. [of_result] reads that line back into the
-    lane's own vocabulary; any other text is [None]. *)
+    JSON object. A refusal from the lane the call named names its case in
+    [error]; a call that named no lane is refused by browser choice, which
+    names its case in [code]. The tool bridge appends its failure-class line
+    after the tool's own text, so in a recorded result the refusal is the
+    first line. [of_result] reads that line back into the lane's own
+    vocabulary; any other text is [None]. *)
 
 type detail =
   | Unserved of
@@ -16,8 +18,14 @@ type detail =
   | Next_step of string
   (** The sentence the refusal gave for what happens next. *)
 
+type case =
+  | Lane of Browser_lane.selection_case
+  (** The lane the call named refused it. *)
+  | Choice of Browser_lane.choice_case
+  (** The call named no lane and no browser could be chosen for it. *)
+
 type t =
-  { case : Browser_lane.selection_case
+  { case : case
   ; detail : detail
   }
 

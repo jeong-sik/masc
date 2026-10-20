@@ -37,11 +37,13 @@ let error_message = function
   | Ambiguous_browsers _ -> "More than one browser is available. Select its lane and, for a connected browser, clientId."
   | Required_actions_unavailable _ -> "No available browser implements all requiredActions. Inspect candidates and their missingActions; explicitly open a compatible work session or change the task requirements."
   | Unsupported_required_actions _ -> "The selected browser does not implement all requiredActions. Its owner was preserved and no command was dispatched."
-let error_to_json error = `Assoc (["code",`String (match error with
-  | Binding_required -> "browser_binding_required" | No_available_browser -> "no_available_browser"
-  | Ambiguous_browsers _ -> "ambiguous_browsers"
-  | Required_actions_unavailable _ -> "required_browser_actions_unavailable"
-  | Unsupported_required_actions _ -> "unsupported_required_browser_actions");"message",`String (error_message error)]
+let choice_case = function
+  | Binding_required -> Lane.Binding_required_case | No_available_browser -> Lane.No_available_browser_case
+  | Ambiguous_browsers _ -> Lane.Ambiguous_browsers_case
+  | Required_actions_unavailable _ -> Lane.Required_actions_unavailable_case
+  | Unsupported_required_actions _ -> Lane.Unsupported_required_actions_case
+let error_to_json error = `Assoc (["code",`String (Lane.choice_case_code (choice_case error));
+  "message",`String (error_message error)]
   @ match error with Ambiguous_browsers routes -> ["browsers",`List (List.map (fun route -> `Assoc (route_fields route)) routes)]
     | Required_actions_unavailable {required;candidates} ->
         ["requiredActions",operations_json required;"candidates",`List (List.map (fun (route,missing) ->

@@ -6540,11 +6540,13 @@ module Browser_lane_view = struct
       let* error = field "error" json in
       let* code = get string "code" error in
       let* message = get string "message" error in
-      let kind = match code with
-        | "no_available_browser" -> No_available_browser
-        | "ambiguous_browsers" -> Ambiguous_browsers
-        | "browser_binding_required" -> Binding_required
-        | _ -> Unrecognized_selection_error in
+      let kind = match Browser_lane.choice_case_of_code code with
+        | Some Browser_lane.No_available_browser_case -> No_available_browser
+        | Some Browser_lane.Ambiguous_browsers_case -> Ambiguous_browsers
+        | Some Browser_lane.Binding_required_case -> Binding_required
+        | Some (Browser_lane.Required_actions_unavailable_case
+               | Browser_lane.Unsupported_required_actions_case)
+        | None -> Unrecognized_selection_error in
       Ok (Error {kind;code;message})
     else
       let* data = field "data" json in

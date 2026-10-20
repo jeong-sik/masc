@@ -618,6 +618,27 @@ let selection_case_of_code code =
 
 let selection_error_code error = selection_case_code (selection_case error)
 
+(* The same, for a call that named no lane: Browser_selection could not choose
+   a browser for it. Its refusal names the case in [code], where a
+   [selection_case] refusal names its case in [error]. *)
+type choice_case =
+  | Binding_required_case
+  | No_available_browser_case
+  | Ambiguous_browsers_case
+  | Required_actions_unavailable_case
+  | Unsupported_required_actions_case
+[@@deriving enumerate]
+
+let choice_case_code = function
+  | Binding_required_case -> "browser_binding_required"
+  | No_available_browser_case -> "no_available_browser"
+  | Ambiguous_browsers_case -> "ambiguous_browsers"
+  | Required_actions_unavailable_case -> "required_browser_actions_unavailable"
+  | Unsupported_required_actions_case -> "unsupported_required_browser_actions"
+
+let choice_case_of_code code =
+  List.find_opt (fun case -> String.equal (choice_case_code case) code) all_of_choice_case
+
 let selection_error_message = function
   | Activity_rejected rejection -> activity_rejection_message rejection
   | Transport_unsupported { transport; capability; _ } as error ->

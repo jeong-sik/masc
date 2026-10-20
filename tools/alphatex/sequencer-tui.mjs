@@ -622,6 +622,10 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       return
     }
     if (picker.view) {
+      if (key.name === 's' && !picker.view.searching
+          && ['plugins', 'presets'].includes(picker.view.kind)) {
+        stop(); status = 'Stopped'; draw(); return
+      }
       try { await picker.keypress(text, key) } catch (error) { status = `VST: ${error.message}` }
       draw(); return
     }

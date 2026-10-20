@@ -3,7 +3,7 @@ let ( let* ) = Result.bind
 (* Binary transfers are buffered in memory before browser effects. This is a
    resource bound per file, not a Keeper runtime budget. One extra byte proves
    whether a file fits; no successful upload contains a truncated prefix. *)
-let max_file_bytes = 16 * 1024 * 1024
+let max_file_bytes = Browser_lane.Upload_lease.max_file_bytes
 
 let decode_hex output =
   let hex = String.to_seq output |> Seq.filter (function

@@ -2,6 +2,7 @@
 import { h } from 'preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { KeeperMetricsRead } from '../api/dashboard'
 
 const apiMocks = vi.hoisted(() => ({
   fetchRuntimeModelMetrics: vi.fn(),
@@ -36,10 +37,14 @@ function modelMetrics({
   }
 }
 
+// What the server reports for a store it read without a bad line.
+const READ_IN_FULL: KeeperMetricsRead = { state: 'read', malformed_rows: 0, unread_turn_rows: 0 }
+
 function keeperMetrics({
   keepers = [
     {
       keeper_name: 'sangsu',
+      metrics_read: READ_IN_FULL,
       total_cost_usd: 0.2 as number | null,
       cost_reported_samples: 4,
       cost_unreported_samples: 0,
@@ -50,8 +55,8 @@ function keeperMetrics({
       tokens_reported_samples: 4,
       tokens_unreported_samples: 0,
       tokens_unread_samples: 0,
-      p50_latency_ms: 900,
-      p95_latency_ms: 2100,
+      p50_latency_ms: 900 as number | null,
+      p95_latency_ms: 2100 as number | null,
       sample_count: 4,
     },
   ],
@@ -336,6 +341,7 @@ describe('CostDashboard route-backed focus behavior', () => {
       keepers: [
         {
           keeper_name: 'subscription-keeper',
+          metrics_read: READ_IN_FULL,
           total_cost_usd: null,
           cost_reported_samples: 0,
           cost_unreported_samples: 3,
@@ -376,6 +382,7 @@ describe('CostDashboard route-backed focus behavior', () => {
       keepers: [
         {
           keeper_name: 'no-usage-keeper',
+          metrics_read: READ_IN_FULL,
           total_cost_usd: null,
           cost_reported_samples: 0,
           cost_unreported_samples: 1,
@@ -411,6 +418,127 @@ describe('CostDashboard route-backed focus behavior', () => {
     expect(container.textContent).toContain('미보고 / 미보고')
     expect(container.textContent).toContain('2턴 토큰 미보고')
     expect(container.textContent).toContain('1턴 비용 못 읽음')
+  })
+
+  it('says a keeper store could not be read instead of showing zero turns', async () => {
+    apiMocks.fetchKeeperCostMetrics.mockResolvedValue(keeperMetrics({
+      keepers: [
+        {
+          keeper_name: 'readable-keeper',
+          metrics_read: READ_IN_FULL,
+          total_cost_usd: 0.5,
+          cost_reported_samples: 2,
+          cost_unreported_samples: 0,
+          cost_unread_samples: 0,
+          total_input_tokens: 1000,
+          total_output_tokens: 400,
+          total_tokens: 1400,
+          tokens_reported_samples: 2,
+          tokens_unreported_samples: 0,
+          tokens_unread_samples: 0,
+          p50_latency_ms: 800,
+          p95_latency_ms: 1500,
+          sample_count: 2,
+        },
+        {
+          keeper_name: 'unreadable-keeper',
+          metrics_read: { state: 'failed', reason: 'disk read failed' } as KeeperMetricsRead,
+          total_cost_usd: null,
+          cost_reported_samples: 0,
+          cost_unreported_samples: 0,
+          cost_unread_samples: 0,
+          total_input_tokens: null,
+          total_output_tokens: null,
+          total_tokens: null,
+          tokens_reported_samples: 0,
+          tokens_unreported_samples: 0,
+          tokens_unread_samples: 0,
+          p50_latency_ms: null,
+          p95_latency_ms: null,
+          sample_count: 0,
+        },
+      ],
+    }))
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'cost', focus: 'agent' },
+      postId: null,
+    }
+
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => container.textContent?.includes('unreadable-keeper') ?? false, 'keeper metrics')
+
+    const row = container.querySelector('tr[data-keeper-metrics-read="failed"]')
+    expect(row?.textContent).toContain('unreadable-keeper')
+    // The reason is on the row and no cost, token or "미보고" figure stands in for it.
+    expect(row?.querySelector('[data-testid="keeper-cost-missing"]')?.textContent).toContain('disk read failed')
+    expect(row?.textContent).not.toContain('미보고')
+    expect(row?.textContent).not.toContain('$0')
+    // The team total is a lower bound: the unreadable keeper is named beside it.
+    expect(container.textContent).toContain('≥ ')
+    expect(container.textContent).toContain('unreadable-keeper')
+    expect(container.querySelector('tr[data-keeper-metrics-read="read"]')?.textContent).toContain('readable-keeper')
+  })
+
+  it('marks a keeper total with bad lines as at least that much', async () => {
+    apiMocks.fetchKeeperCostMetrics.mockResolvedValue(keeperMetrics({
+      keepers: [
+        {
+          keeper_name: 'torn-keeper',
+          metrics_read: { state: 'read', malformed_rows: 3, unread_turn_rows: 1 } as KeeperMetricsRead,
+          total_cost_usd: 0.25,
+          cost_reported_samples: 2,
+          cost_unreported_samples: 0,
+          cost_unread_samples: 0,
+          total_input_tokens: 600,
+          total_output_tokens: 200,
+          total_tokens: 800,
+          tokens_reported_samples: 2,
+          tokens_unreported_samples: 0,
+          tokens_unread_samples: 0,
+          p50_latency_ms: 700,
+          p95_latency_ms: 1200,
+          sample_count: 2,
+        },
+      ],
+    }))
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'cost', focus: 'agent' },
+      postId: null,
+    }
+
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => container.textContent?.includes('torn-keeper') ?? false, 'keeper metrics')
+
+    const row = container.querySelector('tr[data-keeper-metrics-read="read"]')
+    const cells = Array.from(row?.querySelectorAll('td') ?? []).map(td => td.textContent?.trim() ?? '')
+    // Tokens in, tokens out and cost are all "at least".
+    expect(cells.slice(0, 3).every(cell => cell.startsWith('≥ '))).toBe(true)
+    const note = row?.querySelector('[data-testid="keeper-cost-missing"]')?.textContent ?? ''
+    expect(note).toContain('3')
+    expect(note).toContain('1')
+    // The team tile says so too.
+    expect(container.textContent).toContain('≥ $')
+  })
+
+  it('shows no lower-bound mark when every store was read in full', async () => {
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'cost', focus: 'agent' },
+      postId: null,
+    }
+
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => container.textContent?.includes('sangsu') ?? false, 'keeper metrics')
+
+    expect(container.textContent).not.toContain('≥ ')
   })
 
 })

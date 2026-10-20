@@ -21,12 +21,14 @@ import {
   fetchKeeperDecisions,
   type DashboardRuntimeModelMetric,
   type KeeperCostMetric,
+  type KeeperMetricsRead,
   type LatencyBucket,
   type AuditEntry,
   type KeeperDecision,
   type DashboardFeedMetadata,
 } from '../api/dashboard'
 import { terminalReasonCodeLabel } from './fsm-hub-types'
+import { keeperCostReadCoverage, type KeeperCostReadCoverage } from './cost/keeper-cost-read-coverage'
 import { LoadingState, ErrorState } from './common/feedback-state'
 import { StatTile } from './common/stat-tile'
 import { FilterChips } from './common/filter-chips'
@@ -310,6 +312,7 @@ const keeperTotals = computed(() => {
   let p50Sum = 0
   let p50Count = 0
   let p95Max = 0
+  const readCoverage = keeperCostReadCoverage(data)
   for (const k of data) {
     if (k.total_cost_usd != null) reportedCost += k.total_cost_usd
     costReportedSamples += k.cost_reported_samples
@@ -332,7 +335,7 @@ const keeperTotals = computed(() => {
   // Same for tokens: no keeper reported usage means unknown, not 0 tokens.
   const totalIn = tokensReportedSamples > 0 ? reportedIn : null
   const totalOut = tokensReportedSamples > 0 ? reportedOut : null
-  return { totalCost, costUnreportedSamples, costUnreadSamples, tokensUnreportedSamples, tokensUnreadSamples, totalIn, totalOut, p50Avg, p95Max, count: data.length, totalSuccess: 0, totalError: 0, errorRate: null, avgTtfrc: null, totalCache: 0, totalCacheCreation: 0, totalReasoning: 0, cacheRatio: null, reasoningRatio: null }
+  return { totalCost, costUnreportedSamples, costUnreadSamples, tokensUnreportedSamples, tokensUnreadSamples, readCoverage, totalIn, totalOut, p50Avg, p95Max, count: data.length, totalSuccess: 0, totalError: 0, errorRate: null, avgTtfrc: null, totalCache: 0, totalCacheCreation: 0, totalReasoning: 0, cacheRatio: null, reasoningRatio: null }
 })
 
 // Keepers whose cost is unknown sort after every keeper with a reported cost.
@@ -344,15 +347,47 @@ function compareKeeperCost(a: KeeperCostMetric, b: KeeperCostMetric): number {
 }
 
 function costTileNote(
-  t: { count: number; costUnreportedSamples?: number; costUnreadSamples?: number },
+  t: { count: number; costUnreportedSamples?: number; costUnreadSamples?: number; readCoverage?: KeeperCostReadCoverage },
   mode: ViewMode,
 ): string {
   const scope = `${t.count} ${mode === 'model' ? 'runtime lanes' : 'keepers'}`
-  return [scope, ...missingSampleNotes('비용', t.costUnreportedSamples ?? 0, t.costUnreadSamples ?? 0)].join(' · ')
+  return [
+    scope,
+    ...missingSampleNotes('비용', t.costUnreportedSamples ?? 0, t.costUnreadSamples ?? 0),
+    ...readCoverageNotes(t.readCoverage),
+  ].join(' · ')
 }
 
-function tokenTileNote(t: { count: number; tokensUnreportedSamples?: number; tokensUnreadSamples?: number }): string {
-  return ['aggregated window', ...missingSampleNotes('토큰', t.tokensUnreportedSamples ?? 0, t.tokensUnreadSamples ?? 0)].join(' · ')
+function tokenTileNote(
+  t: { count: number; tokensUnreportedSamples?: number; tokensUnreadSamples?: number; readCoverage?: KeeperCostReadCoverage },
+): string {
+  return [
+    'aggregated window',
+    ...missingSampleNotes('토큰', t.tokensUnreportedSamples ?? 0, t.tokensUnreadSamples ?? 0),
+    ...readCoverageNotes(t.readCoverage),
+  ].join(' · ')
+}
+
+// Keepers whose metrics the server could not read in full. A total over them is
+// a lower bound, so the tile says so beside the number.
+function readCoverageNotes(coverage: KeeperCostReadCoverage | undefined): string[] {
+  const notes: string[] = []
+  if (coverage && coverage.unreadKeepers.length > 0) {
+    notes.push(`${coverage.unreadKeepers.length}개 Keeper 저장소 읽지 못함(${coverage.unreadKeepers.join(', ')}) — 합계에서 빠짐`)
+  }
+  if (coverage && coverage.partialKeepers.length > 0) {
+    notes.push(`${coverage.partialKeepers.length}개 Keeper 일부 줄 읽지 못함(${coverage.partialKeepers.join(', ')})`)
+  }
+  return notes
+}
+
+function isLowerBound(coverage: KeeperCostReadCoverage | undefined): boolean {
+  return coverage !== undefined && (coverage.unreadKeepers.length > 0 || coverage.partialKeepers.length > 0)
+}
+
+// "≥ " marks a figure that counts only what the server could read.
+function lowerBoundPrefix(coverage: KeeperCostReadCoverage | undefined): string {
+  return isLowerBound(coverage) ? '≥ ' : ''
 }
 
 // "미보고" is the runtime's null; "못 읽음" is a row the server could not
@@ -373,6 +408,22 @@ function costMissingCell(unreported: number, unread: number, samples: number): s
 
 function formatReportedTokens(n: number | null): string {
   return n == null ? '미보고' : formatCostTokens(n)
+}
+
+// What the server could read of one keeper's metrics store, in words. `null`
+// when it read everything. A store it could not read shows "읽지 못함", never a
+// zero or "turns: none"; a store with bad lines shows how many.
+function keeperReadNote(read: KeeperMetricsRead): string | null {
+  switch (read.state) {
+    case 'failed':
+      return `저장소 읽지 못함: ${read.reason}`
+    case 'read': {
+      const parts: string[] = []
+      if (read.malformed_rows > 0) parts.push(`깨진 줄 ${read.malformed_rows}`)
+      if (read.unread_turn_rows > 0) parts.push(`못 읽은 턴 ${read.unread_turn_rows}`)
+      return parts.length > 0 ? parts.join(' · ') : null
+    }
+  }
 }
 
 function ThRight({ children }: { children: unknown }) {
@@ -522,16 +573,22 @@ function KeeperRow({
   const overBudget = p95 != null && p95 > 8000
   const unreported = keeper.cost_unreported_samples
   const unread = keeper.cost_unread_samples
+  const storeUnread = keeper.metrics_read.state === 'failed'
+  const readNote = keeperReadNote(keeper.metrics_read)
+  // A sum over a store with bad lines counts only the readable ones.
+  const bound = readNote !== null && !storeUnread ? '≥ ' : ''
+  const unreadCell = html`<span class="text-[var(--color-status-warn)]">읽지 못함</span>`
+  const tokensCell = (n: number | null) => storeUnread ? unreadCell : n == null ? '미보고' : `${bound}${formatCostTokens(n)}`
 
   return html`
-    <tr class="border-b border-[var(--color-border-default)]/40 align-baseline">
+    <tr class="border-b border-[var(--color-border-default)]/40 align-baseline" data-keeper-metrics-read=${keeper.metrics_read.state}>
       <th scope="row" class="px-2 py-1.5 text-left font-mono text-xs text-[var(--color-accent-fg)]">
         ${keeper.keeper_name}
       </th>
-      <td class="px-2 py-1.5 text-right font-mono text-xs ${inTok == null ? 'text-text-disabled' : ''}">${formatReportedTokens(inTok)}</td>
-      <td class="px-2 py-1.5 text-right font-mono text-xs ${outTok == null ? 'text-text-disabled' : ''}">${formatReportedTokens(outTok)}</td>
-      <td class="px-2 py-1.5 text-right font-mono text-xs ${cost == null ? 'text-text-disabled' : 'text-[var(--color-accent-fg)]'}">
-        ${cost == null ? '미보고' : formatCost(cost)}
+      <td class="px-2 py-1.5 text-right font-mono text-xs ${inTok == null || storeUnread ? 'text-text-disabled' : ''}">${tokensCell(inTok)}</td>
+      <td class="px-2 py-1.5 text-right font-mono text-xs ${outTok == null || storeUnread ? 'text-text-disabled' : ''}">${tokensCell(outTok)}</td>
+      <td class="px-2 py-1.5 text-right font-mono text-xs ${cost == null || storeUnread ? 'text-text-disabled' : 'text-[var(--color-accent-fg)]'}">
+        ${storeUnread ? unreadCell : cost == null ? '미보고' : `${bound}${formatCost(cost)}`}
       </td>
       <td class="px-2 py-1.5 min-w-[80px]">
         <div class="h-1.5 rounded-[var(--r-0)] bg-[var(--color-bg-surface)]">
@@ -552,8 +609,10 @@ function KeeperRow({
           ></div>
         </div>
       </td>
-      <td class="px-2 py-1.5 text-right font-mono text-2xs ${unreported + unread > 0 ? 'text-[var(--color-status-warn)]' : 'text-text-muted'}">
-        ${costMissingCell(unreported, unread, keeper.sample_count)}
+      <td class="px-2 py-1.5 text-right font-mono text-2xs ${unreported + unread > 0 || readNote !== null ? 'text-[var(--color-status-warn)]' : 'text-text-muted'}" data-testid="keeper-cost-missing">
+        ${[storeUnread ? null : costMissingCell(unreported, unread, keeper.sample_count), readNote]
+          .filter((part): part is string => part !== null && part !== '—')
+          .join(' · ') || '—'}
       </td>
     </tr>
   `
@@ -1151,13 +1210,17 @@ function CostDashboardContent({ view }: { view: CostView }) {
           <div class="grid grid-cols-2 gap-2 md:grid-cols-4">
             <${StatTile}
               label="Total Cost"
-              value=${t.totalCost == null ? '미보고' : formatCost(t.totalCost)}
+              value=${t.totalCost == null ? '미보고' : `${lowerBoundPrefix('readCoverage' in t ? t.readCoverage : undefined)}${formatCost(t.totalCost)}`}
               status="ok"
               delta=${{ direction: 'up', text: costTileNote(t, mode) }}
             />
             <${StatTile}
               label="Tokens In / Out"
-              value=${`${formatReportedTokens(t.totalIn)} / ${formatReportedTokens(t.totalOut)}`}
+              value=${(() => {
+                const bound = lowerBoundPrefix('readCoverage' in t ? t.readCoverage : undefined)
+                const side = (n: number | null) => n == null ? formatReportedTokens(n) : `${bound}${formatReportedTokens(n)}`
+                return `${side(t.totalIn)} / ${side(t.totalOut)}`
+              })()}
               delta=${{ direction: 'flat', text: tokenTileNote(t) }}
             />
             <${StatTile}

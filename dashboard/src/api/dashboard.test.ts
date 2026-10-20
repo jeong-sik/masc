@@ -5567,7 +5567,15 @@ describe('fetchRuntimeModelMetrics', () => {
 })
 
 describe('fetchKeeperCostMetrics', () => {
+  // A store the server read in full; a row that says otherwise sets its own.
+  const readInFull = { state: 'read', malformed_rows: 0, unread_turn_rows: 0 }
+
   function stubKeeperCosts(keepers: unknown[]) {
+    stubRawKeeperCosts(keepers.map(keeper => ({ metrics_read: readInFull, ...(keeper as object) })))
+  }
+
+  // The payload exactly as given, with no default added.
+  function stubRawKeeperCosts(keepers: unknown[]) {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ window_minutes: 60, keepers, generated_at: 1 }), {
         status: 200,
@@ -5669,6 +5677,61 @@ describe('fetchKeeperCostMetrics', () => {
     const result = await readyKeeperCosts()
 
     expect(result.keepers.map(k => k.keeper_name)).toEqual(['consistent'])
+  })
+
+  // Token and cost fields of a keeper with nothing to report; only metrics_read varies.
+  const emptyKeeper = {
+    keeper_name: 'k',
+    total_cost_usd: null,
+    cost_reported_samples: 0,
+    cost_unreported_samples: 0,
+    cost_unread_samples: 0,
+    total_input_tokens: null,
+    total_output_tokens: null,
+    total_tokens: null,
+    tokens_reported_samples: 0,
+    tokens_unreported_samples: 0,
+    tokens_unread_samples: 0,
+    sample_count: 0,
+  }
+
+  it('keeps a store the server could not read apart from a keeper with no turns', async () => {
+    stubRawKeeperCosts([
+      { ...emptyKeeper, keeper_name: 'unreadable', metrics_read: { state: 'failed', reason: 'disk read failed' } },
+      { ...emptyKeeper, keeper_name: 'quiet', metrics_read: readInFull },
+    ])
+
+    const result = await readyKeeperCosts()
+
+    expect(result.keepers.find(k => k.keeper_name === 'unreadable')?.metrics_read)
+      .toEqual({ state: 'failed', reason: 'disk read failed' })
+    expect(result.keepers.find(k => k.keeper_name === 'quiet')?.metrics_read)
+      .toEqual({ state: 'read', malformed_rows: 0, unread_turn_rows: 0 })
+  })
+
+  it('keeps the count of malformed lines and unreadable turn rows', async () => {
+    stubRawKeeperCosts([
+      { ...emptyKeeper, metrics_read: { state: 'read', malformed_rows: 3, unread_turn_rows: 2 } },
+    ])
+
+    const result = await readyKeeperCosts()
+
+    expect(result.keepers[0]?.metrics_read).toEqual({ state: 'read', malformed_rows: 3, unread_turn_rows: 2 })
+  })
+
+  it('drops a keeper row whose metrics_read is missing or not one the server writes', async () => {
+    stubRawKeeperCosts([
+      { ...emptyKeeper, keeper_name: 'missing' },
+      { ...emptyKeeper, keeper_name: 'unknown-state', metrics_read: { state: 'partial' } },
+      { ...emptyKeeper, keeper_name: 'negative', metrics_read: { state: 'read', malformed_rows: -1, unread_turn_rows: 0 } },
+      { ...emptyKeeper, keeper_name: 'no-turn-count', metrics_read: { state: 'read', malformed_rows: 0 } },
+      { ...emptyKeeper, keeper_name: 'no-reason', metrics_read: { state: 'failed' } },
+      { ...emptyKeeper, keeper_name: 'fine', metrics_read: readInFull },
+    ])
+
+    const result = await readyKeeperCosts()
+
+    expect(result.keepers.map(k => k.keeper_name)).toEqual(['fine'])
   })
 
   it('keeps unreported token totals as null and the unread counts apart', async () => {

@@ -375,20 +375,39 @@ let test_awaiting_is_claimable_by_nobody () =
 (* A rejection returns its task to the producer. It takes the producer's focus
    unless the producer is working a different task they started meanwhile. *)
 let test_rejection_keeps_the_focus_of_other_active_work () =
-  let focus ~current_task ~holds_active =
-    L.focus_after_rejection ~rejected_task:"task-1" ~current_task ~holds_active
+  let producer = "alice" in
+  let task id status : D.task = { (task_with_status status) with id } in
+  let held_by assignee = D.Claimed { assignee; claimed_at = now } in
+  let focus ~current_task other_status =
+    L.focus_after_rejection ~producer ~rejected_task:"task-1" ~current_task
+      ~tasks:[ task "task-1" in_progress; task "task-2" other_status ]
   in
   let check label expected actual =
     if not (String.equal expected actual)
     then failwith (Printf.sprintf "%s: expected %s, got %s" label expected actual)
   in
-  check "no focus" "task-1" (focus ~current_task:None ~holds_active:(fun _ -> true));
+  check "no focus" "task-1" (focus ~current_task:None (held_by producer));
   check "focus already on the rejected task" "task-1"
-    (focus ~current_task:(Some "task-1") ~holds_active:(fun _ -> true));
-  check "focus on active other work" "task-2"
-    (focus ~current_task:(Some "task-2") ~holds_active:(String.equal "task-2"));
-  check "focus left on work the producer no longer holds" "task-1"
-    (focus ~current_task:(Some "task-2") ~holds_active:(fun _ -> false))
+    (focus ~current_task:(Some "task-1") (held_by producer));
+  check "claimed other work keeps the focus" "task-2"
+    (focus ~current_task:(Some "task-2") (held_by producer));
+  check "started other work keeps the focus" "task-2"
+    (focus ~current_task:(Some "task-2")
+       (D.InProgress { assignee = producer; started_at = now }));
+  check "other work held by someone else does not" "task-1"
+    (focus ~current_task:(Some "task-2") (held_by "bob"));
+  check "other work not yet claimed does not" "task-1"
+    (focus ~current_task:(Some "task-2") D.Todo);
+  check "other work awaiting its own verdict does not" "task-1"
+    (focus ~current_task:(Some "task-2") awaiting);
+  check "finished other work does not" "task-1"
+    (focus ~current_task:(Some "task-2")
+       (D.Done { assignee = producer; completed_at = now; notes = None }));
+  check "cancelled other work does not" "task-1"
+    (focus ~current_task:(Some "task-2")
+       (D.Cancelled { cancelled_by = producer; cancelled_at = now; reason = None }));
+  check "a task missing from the backlog does not" "task-1"
+    (focus ~current_task:(Some "task-9") (held_by producer))
 ;;
 
 let () =

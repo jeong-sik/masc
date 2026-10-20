@@ -5,7 +5,7 @@ GH="${GUARD_GH:-gh}"
 here="$(cd "$(dirname "$0")" && pwd)"
 repo=""; pr=""; head=""; body=""; run=""; replace_cr=""
 review_base=""; review_diff=""
-check_only=0; merge_check=0; receipt_json=0; print_footer=0
+check_only=0; merge_check=0; source_receipt=0; receipt_json=0; print_footer=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo|--pr|--head|--body|--run|--replace-own-cr|--review-base|--review-diff)
@@ -17,6 +17,7 @@ while [ $# -gt 0 ]; do
     --run) run="$2"; shift 2;; --replace-own-cr) replace_cr="$2"; shift 2;;
     --review-base) review_base="$2"; shift 2;; --review-diff) review_diff="$2"; shift 2;;
     --check) check_only=1; shift;; --merge-check) merge_check=1; shift;;
+    --source-receipt) source_receipt=1; shift;;
     --receipt-json) receipt_json=1; shift;; --print-footer) print_footer=1; shift;;
     *) echo "approve-guard: unknown argument $1" >&2; exit 1;;
   esac
@@ -24,8 +25,11 @@ done
 [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && "$pr" =~ ^[1-9][0-9]*$ && "$head" =~ ^[0-9a-f]{40}$ ]] || exit 2
 [ -z "$run" ] || [[ "$run" =~ ^[1-9][0-9]*$ ]] || exit 2
 [ -z "$replace_cr" ] || [[ "$replace_cr" =~ ^[1-9][0-9]*$ ]] || exit 2
-[ "$check_only" -eq 0 ] || [ "$merge_check" -eq 0 ] || exit 2
+[ "$((check_only + merge_check + source_receipt + print_footer))" -le 1 ] || exit 2
 [ "$receipt_json" -eq 0 ] || [ "$merge_check" -eq 1 ] || exit 2
+# Source receipts are read-only authority for selecting checks, not merge
+# permission. Reject publication/release inputs rather than silently ignoring them.
+[ "$source_receipt" -eq 0 ] || { [ -z "$body" ] && [ -z "$run" ] && [ -z "$replace_cr" ] && [ -z "$review_base" ] && [ -z "$review_diff" ] && [ "$receipt_json" -eq 0 ]; } || exit 2
 # Read-only helper mode: print the exact footer tail a reviewer should append,
 # computed from the PR's live base/head. Mutually exclusive with every mode.
 [ "$print_footer" -eq 0 ] || { [ "$check_only" -eq 0 ] && [ "$merge_check" -eq 0 ] && [ -z "$body" ] && [ -z "$run" ] && [ -z "$replace_cr" ] && [ -z "$review_base" ] && [ -z "$review_diff" ]; } || exit 2
@@ -78,6 +82,7 @@ compute_scope() {
   python3 -c 'import json,sys; s=json.loads(sys.argv[3]); print(json.dumps({"base_ref":sys.argv[1],"base_sha":sys.argv[2],"stack":None if s is None else {"number":s["number"],"position":s["position"],"base_ref":s["base"]["ref"]}},separators=(",",":")))' "$pr_base" "$pr_base_sha" "$pr_stack"
 }
 read_current_pr
+[ "$source_receipt" -eq 0 ] || [ "$review_policy" = source ] || refuse "source receipts cannot admit a release"
 current_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha" --head "$head") || refuse "complete review diff unavailable"
 # Merge admission must establish the policy-specific CI identity before
 # review verdicts are parsed. Release verdicts are bound to this selected run;
@@ -89,7 +94,7 @@ fi
 # installation tokens cannot query /user. Review/check paths still require
 # the caller identity for self-approval and owned change-request rules.
 me=""
-if [ "$merge_check" -eq 0 ]; then
+if [ "$merge_check" -eq 0 ] && [ "$source_receipt" -eq 0 ]; then
   me=$(ci_gh_object user '.login')
   [ -n "$me" ] || exit 1
 fi
@@ -162,7 +167,7 @@ check_verdict() {
 }
 check_reviews
 check_verdict
-if [ "$merge_check" -eq 1 ]; then
+if [ "$merge_check" -eq 1 ] || [ "$source_receipt" -eq 1 ]; then
   [ -n "$approvals" ] || refuse_detail "no trusted non-author approval bound to this head and complete diff"
   read_current_pr
   check_reviews
@@ -175,7 +180,7 @@ if [ "$merge_check" -eq 1 ]; then
   check_reviews
   [ -n "$approvals" ] || refuse "approval changed after final diff read"
   check_verdict
-  if [ "$receipt_json" -eq 1 ]; then
+  if [ "$receipt_json" -eq 1 ] || [ "$source_receipt" -eq 1 ]; then
     python3 -c 'import json,sys; print(json.dumps({"pr":int(sys.argv[1]),"head":sys.argv[2],"approval_ids":[int(x) for x in sys.argv[3].split()]}))' "$pr" "$head" "$approvals"
   else echo "MERGE-CHECK PASS #$pr head $head approvals:$approvals"; fi
   exit 0

@@ -49,6 +49,13 @@ approved combination, use [the selection commands](../scripts/review/APPROVED-CI
 to prepare the candidate and receipt. Dispatch `leader-ci.yml` from main with the
 exact candidate SHA, receipt and chosen scopes. Main's verifier rechecks source
 approvals and reconstructs that candidate before build or test jobs begin.
+Preparation and runner rechecks read `approve-guard.sh --source-receipt`:
+it requires current independent source approval, exact head, complete diff,
+review scope and no later blocking verdict or change request. This read-only,
+source-only receipt does not consult the selected run's own CI pin, so a pending
+or failed pin cannot prevent verification or an explicitly requested retry.
+It cannot publish approval or admit a release. Actual merge admission continues
+to check that pin and refuses pending or failed selected runs.
 Ordinary compile builds only `lib/masc.cmxa` for the stack bottom. Ordinary behavior
 verification requires explicit suites. Prefer short, lightweight checks; about
 two minutes is an example of their size, not a fixed cap, job timeout or pass/fail

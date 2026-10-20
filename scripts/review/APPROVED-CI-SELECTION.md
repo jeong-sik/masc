@@ -5,7 +5,7 @@ approved PR heads belong in a combined candidate. A PR push, Ready transition
 or approval does not start CI.
 
 Source review uses `approve-guard.sh` independently of CI. The preparation
-command reads its approval receipts, combines only the leader's explicit
+command reads its source-only `--source-receipt` JSON, combines only the leader's explicit
 selection, then rechecks approvals and main. This initial path selects open,
 Ready PRs targeting main. This preparation tool does not compose non-main bases;
 that local selection limit is not a GitHub Native Stack restriction. Follow the
@@ -27,6 +27,10 @@ combined commit and tree. A newly created local branch retains the candidate.
 It changes no checkout and publishes nothing. Conflicts, unapproved members,
 head changes, revoked approvals, change requests or a moving main prevent
 preparation. No Actions/check-run API reads, build or CI dispatch occur here.
+Source receipt reads retain head, diff, scope, independent approval and blocking
+verdict checks, without consulting the selected run's pending or failed CI pin.
+They are read-only, reject release heads and cannot grant merge permission.
+The merge guard still checks that pin separately.
 
 After these workflow changes are integrated into main, publish the prepared
 candidate branch explicitly and dispatch `leader-ci.yml` on main. Set its

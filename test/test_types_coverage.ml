@@ -423,7 +423,8 @@ let test_task_status_lifecycle_clock_is_strict_rfc3339 () =
             | Ok _ ->
               failf "%s accepted %s=%s" status key
                 (Option.value clock ~default:"<missing>"))
-         [ None; Some ""; Some "not-a-time"; Some "2024-01-01" ])
+         [ None; Some ""; Some "not-a-time"; Some "2024-01-01"
+         ; Some "2024-01-01 00:00:00Z" ])
     lifecycle_clock_rows
 
 let test_task_status_to_yojson_done_with_notes () =

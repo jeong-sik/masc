@@ -77,6 +77,16 @@ val call_exported_tool_with_principal : principal:Lane_addon_call_context.princi
     never from caller-supplied tool arguments. [access] still controls visibility. *)
 type browser_service = private {instance_id:string;owner:Lane_addon_tool_export.owner}
 val browser_services : config:Workspace.config -> access:Lane_addon_sources.access -> browser_service list
+type browser_service_status = Browser_ready of browser_service
+  | Browser_refresh_needed of browser_service | Browser_unavailable | Browser_retired
+val browser_service_status : config:Workspace.config -> access:Lane_addon_sources.access ->
+  instance_id:string -> browser_service_status
+(** Inventory absence is not retirement. Failed/not-ready workers remain
+    unavailable; a worker with failed observations retains its exact connection
+    for result settlement. [Observe] requests recovery when its loop is running.
+    Stopping/detached authority proves retirement. A retained
+    record must be readable, visible and explicitly detached before it can
+    retire a client after live handles are gone. *)
 val call_browser_service : config:Workspace.config -> access:Lane_addon_sources.access ->
   service:browser_service -> command:Browser_addon_wire.command ->
   (Browser_addon_wire.reply, Browser_addon_client.error) result

@@ -157,7 +157,7 @@ let interrupted_reservation () = native_installation_with_slot (fun directory ->
   ignore (Native_addon_lease.prepare ~cleanup_context:None ~directories:[directory] ~instance_id:"unpublished"
     |> Result.map_error Native_addon_lease.error_to_string |> require);
   write (Filename.concat directory "intent.json") "") ()
-let browser_server = {|import argparse,json,os,socket,sys,threading
+let browser_server = {|import argparse,hashlib,json,os,socket,sys,threading
 p=argparse.ArgumentParser()
 p.add_argument("root");p.add_argument("mode")
 p.add_argument("--socket");p.add_argument("--incarnation");p.add_argument("--max-message-bytes")
@@ -171,7 +171,9 @@ def handle(conn):
         req=json.loads(conn.makefile("rb").readline())
         if req["incarnation"]!=a.incarnation: raise RuntimeError("wrong owner")
         op=req["operation"]
-        if op=="snapshot": result={"reply":"receipt"} if a.mode=="bad_ready" else {"reply":"snapshot","snapshot":{"command_running":running}}
+        if op=="snapshot": result={"reply":"receipt"} if a.mode=="bad_ready" or os.path.exists(os.path.join(a.root,"reject-snapshot-"+a.incarnation)) else {"reply":"snapshot","snapshot":{"command_running":running}}
+        elif op=="poll": result={"reply":"poll","command":None,"state_id":hashlib.sha256(json.dumps({"command_running":running}).encode()).hexdigest()}
+        elif op=="disconnect": result={"reply":"receipt"}
         elif op=="issue":
             event.clear()
             with open(os.path.join(a.root,"issued-"+a.incarnation),"w") as out: out.write("issued")
@@ -240,6 +242,22 @@ invocation = "host_context"
   let issue=Browser_addon_wire.Issue {route=Browser_lane.Live_route (Some client_id);verb=Browser_lane.Tabs_list;
     actor=Some "browser-host-tester";timeout_sec=2.;only_if_idle=false} in
   let payload=`Assoc ["ok",`Bool false;"effectPhase",`String "partial";"error",`String "partial result"] in
+  let client={Browser_lane.client_id;browser=Firefox;version="158";engine_version="158";transport=Webdriver_bidi} in
+  let browser_directory=Filename.concat (Workspace.masc_dir config) Common.browser_lane_dirname in
+  Unix.mkdir browser_directory 0o700;
+  let poll client=Browser_addon_ingress.poll ~config ~client ~window_sec:0.001 in
+  check bool "native ingress registers its first original worker" true (poll client=Ok None);
+  let reject_snapshot=Filename.concat root ("reject-snapshot-"^id) in
+  write reject_snapshot "reject";
+  ignore (dispatch config R.Observe ["instance_id",`String id]);
+  wait clock (fun () -> inspect id |> member "phase" |> text "kind"="failed");
+  check bool "temporary observation failure does not retire native client" true
+    (match poll client with Error (Browser_addon_ingress.Unavailable _) -> true | _ -> false);
+  Unix.unlink reject_snapshot;
+  ignore (poll client);
+  wait clock (fun () -> match R.browser_service_status ~config ~access ~instance_id:id with
+    | R.Browser_ready _ -> true | Browser_refresh_needed _|Browser_unavailable|Browser_retired -> false);
+  check bool "same native client recovers its original worker" true (poll client=Ok None);
   let export ()=R.tool_exports ~config ~access ~reserved:[] |> require
     |> List.find (fun (item:R.tool_export) -> item.instance_id=id && item.tool.name="browser_command") in
   let export=export () in
@@ -249,13 +267,21 @@ invocation = "host_context"
     check bool "long MCP export returns after reverse-channel result" true (Result.is_ok result))
     (fun () ->
       wait clock (fun () -> Sys.file_exists (issued id));
-      ignore (dispatch config R.Observe ["instance_id",`String id]);
+      check bool "native poll wakes running observation beside waiting MCP" true (poll client=Ok None);
       wait clock (fun () -> dispatch config R.Inspect ["instance_id",`String id]
         |> member "rows" |> Yojson.Safe.Util.to_list
         |> List.exists (fun row -> member "command_running" (member "fields" row)=`Bool true));
       check bool "running observation commits before MCP call settles" true
         (call original Browser_addon_wire.Snapshot=Ok (Browser_addon_wire.Snapshot_result (`Assoc ["command_running",`Bool true])));
-      ignore (call original (Browser_addon_wire.Deliver {client_id;id="fixture";payload})));
+      write reject_snapshot "reject";
+      ignore (dispatch config R.Observe ["instance_id",`String id]);
+      wait clock (fun () -> inspect id |> member "phase" |> text "kind"="failed");
+      check bool "native result settles original command despite failed observation" true
+        (Browser_addon_ingress.deliver ~config ~client ~id:"fixture" ~payload=Ok ()));
+  Unix.unlink reject_snapshot;
+  ignore (poll client);
+  wait clock (fun () -> match R.browser_service_status ~config ~access ~instance_id:id with
+    | R.Browser_ready _ -> true | Browser_refresh_needed _|Browser_unavailable|Browser_retired -> false);
   check string "long MCP export dispatched once" "once\n"
     (In_channel.with_open_bin (Filename.concat root ("toolcalls-"^id)) In_channel.input_all);
   Unix.unlink (issued id);
@@ -272,6 +298,14 @@ invocation = "host_context"
   check bool "detached handle refused" true (unavailable (call original Browser_addon_wire.Snapshot));
   let replacement=attach "normal" in let next=selected replacement in
   check bool "old handle never resolves replacement" true (unavailable (call original Browser_addon_wire.Snapshot));
+  check bool "old native client never polls replacement" true
+    (poll client=Error (Browser_addon_ingress.Registration_refused Browser_lane.Client_retired));
+  check bool "late native result never reaches replacement" true
+    (Browser_addon_ingress.deliver ~config ~client ~id:"fixture" ~payload=
+      Error (Browser_addon_ingress.Registration_refused Browser_lane.Client_retired));
+  let new_client={client with client_id=require (Browser_lane.client_id_of_string "0c000000-0000-4000-8000-000000000002")} in
+  check bool "a fresh native connection can reach the replacement" true (poll new_client=Ok None);
+  check bool "replacement has received no replayed command" false (Sys.file_exists (issued replacement));
   let next_pid=inspect replacement |> member "resource" |> member "pid" |> Yojson.Safe.Util.to_int in
   Eio.Fiber.first (fun () -> ignore (call next issue);fail "cancelled issue returned")
     (fun () -> wait clock (fun () -> Sys.file_exists (issued replacement)));

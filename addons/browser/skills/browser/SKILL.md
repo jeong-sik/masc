@@ -24,7 +24,7 @@ refusal disposition and backend partial-effect payloads have distinct meanings.
 After a lost reply or unknown outcome, observe the original page before further
 input. Never repeat a click, drag or tab creation merely because its reply failed.
 
-Available work depends on the connected adapter. Owned-browser startup, the
-authenticated HTTP host bridge and file-transfer brokers are still being
-integrated. Upload paths and download listing are currently refused by this
+Available work depends on the connected adapter. Native hosts connect through
+the authenticated workspace HTTP bridge. Owned-browser startup and file-transfer
+brokers are still being integrated. Upload paths and download listing are currently refused by this
 tool before dispatch. This package is not yet an operator browser replacement.

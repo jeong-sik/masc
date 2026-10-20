@@ -10505,8 +10505,8 @@ let server_authority_ready state =
 let code_draft_address state =
   match state.server_identity, Masc_tui_fetched.current_key state.code_file with
   | Some workspace, Some path -> Some {
-      Masc_tui_code_draft.base_path = canonical_path workspace.Tui_decode.sid_base_path;
-      masc_root = canonical_path workspace.sid_masc_root; scope = state.code_scope; path }
+      Masc_tui_code_draft.base_path = workspace.Tui_decode.sid_base_path;
+      masc_root = workspace.sid_masc_root; scope = state.code_scope; path }
   | None, _ | Some _, None -> None
 
 let current_code_draft state =

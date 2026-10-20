@@ -70,9 +70,9 @@ let host_result t ~arguments = call t (fun () -> Protocol.host_result t.protocol
 
 let observe t ~binding ~sources = call t (fun () -> Protocol.observe t.protocol ~binding ~sources)
 let act t ~arguments = call t (fun () -> Protocol.act t.protocol ~arguments)
-let call_exported_tool ?on_result ?authorize ?principal t ~name ~arguments =
+let call_exported_tool ?on_result ?finalize_result ?authorize ?principal t ~name ~arguments =
   call t (fun () ->
-    Protocol.call_exported_tool ?on_result ?authorize ?principal t.protocol ~name ~arguments)
+    Protocol.call_exported_tool ?on_result ?finalize_result ?authorize ?principal t.protocol ~name ~arguments)
 
 let start ~sw ~clock ~grace_seconds ~admission ~launcher ~contract ~command ?cwd ?env
     ?artifact_store ?(on_created = fun _ -> Ok ()) () =

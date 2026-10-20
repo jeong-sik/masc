@@ -219,7 +219,12 @@ let act t ~arguments =
         Error (Protocol_failed (Printexc.to_string exn)))
 )
 
-let call_exported_tool ?(on_result = fun _ -> ()) ?authorize ?(principal = Lane_addon_call_context.Anonymous) t ~name ~arguments =
+type result_finalizer = name:string -> arguments:Yojson.Safe.t ->
+  principal:Lane_addon_call_context.principal -> result:Mcp_protocol.Mcp_types.tool_result ->
+  (Mcp_protocol.Mcp_types.tool_result, string) result
+let call_exported_tool ?(on_result = fun _ -> ())
+    ?(finalize_result = fun ~name:_ ~arguments:_ ~principal:_ ~result -> Ok result)
+    ?authorize ?(principal = Lane_addon_call_context.Anonymous) t ~name ~arguments =
   protect_call t (fun () ->
   if revoked t then Error Stopped
   else
@@ -245,6 +250,11 @@ let call_exported_tool ?(on_result = fun _ -> ()) ?authorize ?(principal = Lane_
         |> Result.map_error (function
           | Lane_addon_call_context.Host_refusal refusal -> Host_refusal refusal
           | Transport_error detail -> Protocol_failed detail) in
+        let* result = (try finalize_result ~name ~arguments ~principal ~result with
+          | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+          | exn -> Error (Printexc.to_string exn))
+          |> Result.map_error (fun detail -> Protocol_failed
+            ("tool result finalization failed after dispatch: " ^ detail)) in
         let* () = Lane_addon_tool_hooks.after_call hooks result
           |> Result.map_error (fun detail -> Protocol_failed ("tool result rejected after dispatch: " ^ detail)) in
         Ok result

@@ -47,10 +47,19 @@ val host_result : t -> arguments:Yojson.Safe.t -> (Yojson.Safe.t, error) result
 val observe : t -> binding:Yojson.Safe.t -> sources:Yojson.Safe.t ->
   (Lane_addon_types.output, error) result
 val act : t -> arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, error) result
+type result_finalizer = name:string -> arguments:Yojson.Safe.t ->
+  principal:Lane_addon_call_context.principal -> result:Mcp_protocol.Mcp_types.tool_result ->
+  (Mcp_protocol.Mcp_types.tool_result, string) result
+(** Mandatory host receipt processing when supplied. Receives the original
+    exported call identity and raw reply, independently of selected hooks. *)
 val call_exported_tool : ?on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) ->
+  ?finalize_result:result_finalizer ->
   ?authorize:Lane_addon_call_context.mediation ->
   ?principal:Lane_addon_call_context.principal -> t -> name:string ->
   arguments:Yojson.Safe.t -> (Mcp_protocol.Mcp_types.tool_result, error) result
 (** Call the target through its exact initialized contract, without replay.
-    Raw replies are captured before selected output validation. Cancellation
-    revokes admission and propagates to the execution owner. *)
+    [on_result] sees each original RPC reply under the RPC mutex as before.
+    After invocation succeeds, [finalize_result] runs once outside that mutex,
+    before selected output validation; omission preserves the raw reply.
+    Finalization errors are post-dispatch protocol failures, never replayed.
+    Cancellation revokes admission and propagates to the execution owner. *)

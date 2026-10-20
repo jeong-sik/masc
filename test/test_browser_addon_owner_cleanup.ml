@@ -6,7 +6,7 @@ let ok = function Ok value -> value | Error message -> fail message
 let unknown = function
   | W.Service_refusal {disposition=W.Outcome_unknown;_} -> true
   | W.Service_refusal {disposition=W.Not_started;_}
-  | W.Snapshot_result _|Model_reply _|Poll_result _|Receipt|Issue_result _ -> false
+  | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false
 
 let scenario () = Eio_main.run (fun env ->
   Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5. (fun () -> Eio.Switch.run (fun sw ->
@@ -57,7 +57,7 @@ let scenario () = Eio_main.run (fun env ->
       (match reply with
        | W.Service_refusal {message;_} ->
          message="automation settlement unconfirmed; Stagehand backend cleanup raised; settlement is unconfirmed"
-       | W.Snapshot_result _|Model_reply _|Poll_result _|Receipt|Issue_result _ -> false);
+       | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
     check bool "repeated Retire retains the same failure" true (send ()=reply);
     check int "failed automation cleanup is not replayed" 1 !automation_calls;
     check int "raised Chrome cleanup is not replayed" 1 !chrome_calls))))

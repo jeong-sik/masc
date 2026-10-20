@@ -22,8 +22,19 @@ let () =
     (match Result.bind uploads (Masc.Browser_addon_owner.attach_uploads owner) with
      | Ok () -> () | Error detail -> raise (Arg.Bad detail));
     Eio.Switch.on_release sw (fun () ->
-      match Masc.Browser_addon_owner.cleanup_uploads owner with
-      | Ok () -> () | Error detail -> Printf.eprintf "browser upload cleanup unconfirmed: %s\n%!" detail);
+      (* The nested owned backend scopes have joined before this outer release.
+         Cancellation may bypass the host's orderly Retire RPC; observe the same
+         original backend and transfer cleanup here as well. *)
+      match Masc.Browser_addon_owner.dispatch owner
+        {Masc.Browser_addon_wire.incarnation;command=Retire} with
+      | Receipt -> ()
+      | Service_refusal {message;_} -> Printf.eprintf "browser cleanup unconfirmed: %s\n%!" message
+      | Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Issue_result _ ->
+          Printf.eprintf "browser cleanup returned no settlement receipt\n%!");
+    let downloads=Eio_unix.run_in_systhread (fun () ->
+      Masc.Browser_addon_downloads.create ~directory:(Filename.dirname socket_path)) in
+    (match Result.bind downloads (Masc.Browser_addon_owner.attach_downloads owner) with
+     | Ok () -> () | Error detail -> raise (Arg.Bad detail));
     if !models then (
       let directory=Filename.dirname socket_path in
       let configuration=Eio_unix.run_in_systhread (fun () ->

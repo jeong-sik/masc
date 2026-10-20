@@ -19,7 +19,8 @@ type 'session opened =
   ; abandoned_answered : Eio.Condition.t  (* broadcast on each such reply *)
   }
 
-type 'session state = Closed | Opening | Open of 'session opened | Closing
+type 'session state = Closed | Opening | Open of 'session opened
+  | Closing of string option ref
   | Quarantined of 'session opened
 
 type request =
@@ -54,7 +55,7 @@ let set_state t state =
   Atomic.set t.observed_session (match state with
     | Closed -> (match t.last_settlement with
       | Ok () -> Browser_lane.Browser_closed | Error _ -> Browser_lane.Browser_unknown)
-    | Opening | Closing -> Browser_lane.Browser_changing
+    | Opening | Closing _ -> Browser_lane.Browser_changing
     | Quarantined _ -> Browser_lane.Browser_unknown
     | Open opened -> match !(opened.ended) with
       | None -> Browser_lane.Browser_open | Some _ -> Browser_lane.Browser_unknown)
@@ -157,10 +158,10 @@ let run_session t ~headless ~opened ~resolve_opened =
             ~watcher:(fun () -> Eio.Promise.await released;None)
             (fun () -> Some (t.open_session ~sw:session_sw ~headless ~log)) in
           match opening with
-          | None -> set_state t Closing;not_opened "the server is stopping"
-          | Some (Error (Not_opened detail)) -> set_state t Closing;not_opened detail
+          | None -> set_state t (Closing ended);not_opened "the server is stopping"
+          | Some (Error (Not_opened detail)) -> set_state t (Closing ended);not_opened detail
           | Some (Error (Cleanup_unconfirmed detail)) ->
-            terminal := Error detail;set_state t Closing;not_opened detail
+            terminal := Error detail;set_state t (Closing ended);not_opened detail
           | Some (Ok (session, _init)) ->
             Executor.Tabs.forget_pages t.tabs;
             t.last_end <- None;
@@ -169,7 +170,7 @@ let run_session t ~headless ~opened ~resolve_opened =
             (match !ended with Some _ -> !release_on_end () | None -> ());
             Eio.Promise.resolve resolve_opened (Ok ());
             Eio.Promise.await released;
-            set_state t Closing;
+            set_state t (Closing ended);
             terminal :=
               (match t.shutdown session with
                | result -> result
@@ -194,7 +195,7 @@ let open_session t ~headless =
   match t.state with
   | Quarantined _ -> keyboard_quarantined
   (* An ended session is being let go; the next open after that starts anew. *)
-  | Open { ended = { contents = Some _ }; _ } | Opening | Closing -> in_transition
+  | Open { ended = { contents = Some _ }; _ } | Opening | Closing _ -> in_transition
   | Open { ended = { contents = None }; _ } ->
     answered (`Assoc [ "opened", `Bool true; "reused", `Bool true; "backend", `String backend_name ])
   | Closed when Result.is_error t.last_settlement ->
@@ -213,9 +214,9 @@ let close_session t =
   | Closed -> (match t.last_settlement with
     | Ok () -> answered (`Assoc [ "closed", `Bool true ])
     | Error detail -> Browser_lane.Refused ("browser shutdown unconfirmed: " ^ detail))
-  | Opening | Closing -> in_transition
+  | Opening | Closing _ -> in_transition
   | Open opened | Quarantined opened ->
-    set_state t Closing;
+    set_state t (Closing opened.ended);
     (* The browser stops whatever the runtime answers: a close that raised
        would otherwise leave the backend Closing, and every later open and
        close "ask again", until the server stops. *)
@@ -245,7 +246,8 @@ let status t =
     match t.state with
     | Closed -> [ "open", `Bool false ] @ (match t.last_end with Some reason -> [ "ended", `String reason ] | None -> [])
     | Opening -> [ "open", `Bool false; "opening", `Bool true ]
-    | Closing -> [ "open", `Bool true; "closing", `Bool true ]
+    | Closing ended -> [ "open", `Bool true; "closing", `Bool true ]
+      @ (match !ended with Some reason -> [ "ended", `String reason ] | None -> [])
     | Quarantined opened -> ["open",`Bool true;"quarantined",`Bool true;
         "backend",`String backend_name;"pid",`Int (t.pid opened.session);
         "reason",`String "native keyboard release is unconfirmed; explicitly close and reopen before new work"]
@@ -275,7 +277,7 @@ let page t ~began ~actor verb =
         Eio.Switch.on_release sw (fun () ->
           if !keyboard_pending then match t.state with
             | Open current when current == opened -> set_state t (Quarantined current)
-            | Closed | Opening | Closing | Quarantined _ | Open _ -> ());
+            | Closed | Opening | Closing _ | Quarantined _ | Open _ -> ());
         let call request =
           let keyboard = match request with
             | Wire.Page_key_press _ | Wire.Page_type _ -> true
@@ -295,7 +297,7 @@ let page t ~began ~actor verb =
           result in
         Executor.execute ~tabs:t.tabs ~call ?actor verb)
     | Quarantined _ -> keyboard_quarantined
-    | Closed | Opening | Closing -> no_session)
+    | Closed | Opening | Closing _ -> no_session)
 ;;
 
 (* Whether a page verb got the verb slot and began sending: a caller that
@@ -330,10 +332,10 @@ let is_sentence = function
 let retire_sentence_session t expected =
   match t.state with
   | Open current when expected == current ->
-    set_state t Closing;
+    set_state t (Closing current.ended);
     release_session current.release;
     ignore (Eio.Promise.await current.stopped)
-  | Closed | Opening | Closing | Quarantined _ | Open _ -> ()
+  | Closed | Opening | Closing _ | Quarantined _ | Open _ -> ()
 ;;
 
 let retire_unanswered_sentence t ~expected ~answers_before =
@@ -441,4 +443,4 @@ let execute t ?actor verb =
 
 let settlement t = match t.state with
   | Closed -> t.last_settlement
-  | Opening|Open _|Closing|Quarantined _ -> Error "browser lifetime has not joined"
+  | Opening|Open _|Closing _|Quarantined _ -> Error "browser lifetime has not joined"

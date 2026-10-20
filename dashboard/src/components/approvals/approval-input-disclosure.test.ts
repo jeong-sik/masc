@@ -46,6 +46,21 @@ describe('approvalInputDisclosure', () => {
     expect(approvalInputDisclosure({ input, input_preview: null }).kind).toBe('preview_is_partial')
   })
 
+  it('writes invisible and reordering characters out by code point', () => {
+    const input = 'rm\u202E\u200B -rf /\uFEFF'
+    const disclosure = approvalInputDisclosure({ input, input_preview: 'rm…' })
+    expect(disclosure.kind).toBe('preview_is_partial')
+    if (disclosure.kind === 'preview_is_partial') {
+      expect(disclosure.fullText).toBe('rm\u27E6U+202E\u27E7\u27E6U+200B\u27E7 -rf /\u27E6U+FEFF\u27E7')
+    }
+  })
+
+  it('keeps ordinary whitespace and non-Latin text as written', () => {
+    const input = 'echo 안녕\n\tdone'
+    const disclosure = approvalInputDisclosure({ input, input_preview: 'echo…' })
+    expect(disclosure).toEqual({ kind: 'preview_is_partial', fullText: input })
+  })
+
   it('treats a null input as sent', () => {
     expect(approvalInputDisclosure({ input: null, input_preview: 'null' }).kind).toBe('preview_is_whole')
   })

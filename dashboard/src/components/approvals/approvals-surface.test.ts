@@ -1394,6 +1394,88 @@ describe('ApprovalsSurface', () => {
       expect(resolveGateApproval).toHaveBeenCalledWith('appr-long', { decision: 'approve', rememberRule: false })
     })
 
+    it('keeps Approve held until the box has been scrolled to its end', async () => {
+      const { ApprovalsSurface, resolveGateApproval } = await loadSurface([
+        queueItem({ id: 'appr-scroll', input: longInput, input_preview: cutPreview }),
+      ])
+      render(html`<${ApprovalsSurface} />`, container)
+      await flushUi()
+
+      // happy-dom lays nothing out, so give the box the geometry of a text that
+      // overflows its frame: 1000px of text in a 320px box.
+      const box = container.querySelector<HTMLElement>('.ap-card .ap-input-pre')!
+      let scrollTop = 0
+      Object.defineProperty(box, 'scrollHeight', { configurable: true, get: () => 1000 })
+      Object.defineProperty(box, 'clientHeight', { configurable: true, get: () => 320 })
+      Object.defineProperty(box, 'scrollTop', { configurable: true, get: () => scrollTop, set: (v: number) => { scrollTop = v } })
+
+      openFullInput()
+      await flushUi()
+      expect(cardButtons().approve?.disabled).toBe(true)
+      expect(cardButtons().always?.disabled).toBe(true)
+
+      scrollTop = 300
+      box.dispatchEvent(new Event('scroll'))
+      await flushUi()
+      expect(cardButtons().approve?.disabled).toBe(true)
+
+      scrollTop = 680
+      box.dispatchEvent(new Event('scroll'))
+      await flushUi()
+      expect(cardButtons().approve?.disabled).toBe(false)
+      expect(cardButtons().always?.disabled).toBe(false)
+
+      cardButtons().approve?.click()
+      await flushUi()
+      expect(resolveGateApproval).toHaveBeenCalledWith('appr-scroll', { decision: 'approve', rememberRule: false })
+    })
+
+    it('holds a request again, and closes the box, when its input hash changes after it was read', async () => {
+      const first = queueItem({ id: 'appr-rehash', input: longInput, input_preview: cutPreview, input_hash: 'a'.repeat(64) })
+      const { ApprovalsSurface, gateSignals } = await loadSurface([first])
+      render(html`<${ApprovalsSurface} />`, container)
+      await flushUi()
+
+      openFullInput()
+      await flushUi()
+      expect(cardButtons().approve?.disabled).toBe(false)
+
+      // The same request id now stands for a different input.
+      const changed = queueItem({
+        id: 'appr-rehash',
+        input: { command: `echo changed && ${dangerous}` },
+        input_preview: cutPreview,
+        input_hash: 'b'.repeat(64),
+      })
+      gateSignals.gateResource.reset({ ...gateSignals.gateData.value!, approval_queue: [changed] })
+      await flushUi()
+
+      expect(cardButtons().approve?.disabled).toBe(true)
+      expect(cardButtons().always?.disabled).toBe(true)
+      const details = container.querySelector<HTMLDetailsElement>('.ap-card [data-testid="approval-input-full"]')
+      expect(details?.open).toBe(false)
+
+      // A browser also fires `toggle` when the box is closed from outside. That
+      // close is not a reading and must not release the new request.
+      details!.dispatchEvent(new Event('toggle'))
+      await flushUi()
+      expect(cardButtons().approve?.disabled).toBe(true)
+      expect(cardButtons().always?.disabled).toBe(true)
+    })
+
+    it('writes invisible and reordering characters out by code point', async () => {
+      const tricky = { command: `ls ${'a'.repeat(300)}‮ txt.sh` }
+      const { ApprovalsSurface } = await loadSurface([
+        queueItem({ id: 'appr-bidi', input: tricky, input_preview: cutPreview }),
+      ])
+      render(html`<${ApprovalsSurface} />`, container)
+      await flushUi()
+
+      const text = container.querySelector('.ap-card [data-testid="approval-input-full"]')?.textContent ?? ''
+      expect(text).toContain('U+202E')
+      expect(text).not.toContain('‮')
+    })
+
     it('does not hold Approve when the preview is the whole input', async () => {
       const input = { path: 'a.txt', content: 'hello' }
       const { ApprovalsSurface } = await loadSurface([

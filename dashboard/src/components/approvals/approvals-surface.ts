@@ -587,17 +587,27 @@ function approvalSummaryBlock(item: KeeperApprovalQueueItem) {
   }
 }
 
+/** The text box has been scrolled to its end, or has nothing below the fold. */
+function scrolledToEnd(box: HTMLElement): boolean {
+  return box.scrollHeight - box.scrollTop - box.clientHeight <= 1
+}
+
 /** The full input, or the plain statement that only a preview exists. The
- *  card opens it on request (and holds Approve until then); the detail panel
- *  shows it open. */
+ *  card holds Approve until the text has been read to its end: opening the box
+ *  is not enough, because the box scrolls and a tail can sit below the fold.
+ *  The detail panel shows it open and holds nothing. */
 function ApprovalInputFull({
   disclosure,
   open,
+  held = false,
   onOpened,
+  onReadToEnd,
 }: {
   disclosure: ApprovalInputDisclosure
   open: boolean
+  held?: boolean
   onOpened?: () => void
+  onReadToEnd?: () => void
 }) {
   if (disclosure.kind === 'preview_is_whole') return null
   if (disclosure.kind === 'full_input_not_sent') {
@@ -610,11 +620,24 @@ function ApprovalInputFull({
     data-testid="approval-input-full"
     open=${open}
     onToggle=${(event: Event) => {
-      if ((event.currentTarget as HTMLDetailsElement).open) onOpened?.()
+      const details = event.currentTarget as HTMLDetailsElement
+      // Preact also closes the box when the request changes under it; that
+      // close must not count as reading.
+      if (!details.open) return
+      onOpened?.()
+      const box = details.querySelector<HTMLElement>('.ap-input-pre')
+      if (box && scrolledToEnd(box)) onReadToEnd?.()
     }}
   >
-    <summary>입력 원문 전체 (${disclosure.fullText.length}자)</summary>
-    <pre class="ap-input-pre mono">${disclosure.fullText}</pre>
+    <summary>입력 원문 전체 (${disclosure.fullText.length}자)${held ? ' · 끝까지 내려야 승인할 수 있어요' : ''}</summary>
+    <pre
+      class="ap-input-pre mono"
+      tabindex="0"
+      aria-label="입력 원문 전체"
+      onScroll=${(event: Event) => {
+        if (scrolledToEnd(event.currentTarget as HTMLElement)) onReadToEnd?.()
+      }}
+    >${disclosure.fullText}</pre>
   </details>`
 }
 
@@ -637,9 +660,13 @@ function ApprovalCard({
   // a new request and starts closed again.
   const inputKey = `${item.id}:${item.input_hash}`
   const [openedInputKey, setOpenedInputKey] = useState<string | null>(null)
-  const disclosure = approvalInputDisclosure(item)
-  const decisionHeld = decisionWaitsForFullInput(disclosure, openedInputKey === inputKey)
-  const heldTitle = '입력 원문 전체를 펼쳐서 읽은 뒤에 누를 수 있어요'
+  const [readInputKey, setReadInputKey] = useState<string | null>(null)
+  const disclosure = useMemo(
+    () => approvalInputDisclosure({ input: item.input, input_preview: item.input_preview }),
+    [item.input, item.input_preview],
+  )
+  const decisionHeld = decisionWaitsForFullInput(disclosure, readInputKey === inputKey)
+  const heldTitle = '입력 원문 전체를 끝까지 읽은 뒤에 누를 수 있어요'
 
   return html`
     <article
@@ -696,11 +723,16 @@ function ApprovalCard({
             <${ApprovalInputFull}
               disclosure=${disclosure}
               open=${openedInputKey === inputKey}
+              held=${decisionHeld}
               onOpened=${() => setOpenedInputKey(inputKey)}
+              onReadToEnd=${() => setReadInputKey(inputKey)}
             />
           </div>
         </div>
         <div class="ap-actions">
+          <span class="ap-input-hash mono" title=${item.input_hash} data-testid="approval-input-hash">
+            #${item.input_hash.slice(0, 12)}
+          </span>
           ${rearmExpectation
             ? html`<button
                 type="button"
@@ -737,9 +769,6 @@ function ApprovalCard({
             title="맥락 보기"
             disabled=${anyBusy}
           >대화에서 검토 →</button>
-          <span class="ap-input-hash mono" title=${item.input_hash} data-testid="approval-input-hash">
-            #${item.input_hash.slice(0, 12)}
-          </span>
         </div>
       </div>
     </article>

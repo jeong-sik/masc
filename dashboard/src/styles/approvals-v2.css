@@ -77,7 +77,7 @@
 .ap-input-full[open] > summary { color: var(--text-bright); border-bottom: 1px solid var(--border-soft); }
 .ap-input-pre { margin: 0; padding: 8px 10px; max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: var(--fs-12); line-height: 1.5; color: var(--text-primary); }
 .ap-input-note { margin-top: 6px; font-size: var(--fs-10); color: var(--status-warn); }
-.ap-input-hash { margin-left: auto; align-self: center; font-size: var(--fs-10); color: var(--text-dim); }
+.ap-input-hash { align-self: center; font-size: var(--fs-10); color: var(--text-dim); }
 
 /* Static request metadata (e.g. sandbox profile) shown beside the keeper/goal
    links. Mirrors .ap-req-goal's dim mono look but is NOT interactive — no

@@ -114,6 +114,9 @@ type t =
   ; runtime_selected_model : string option
   ; runtime_attempt_count : int
   ; runtime_lane_attempt_count : int
+  ; runtime_lane_evidence : Keeper_runtime_walk_evidence.t option
+    (** Candidate failure facts from the actual walk, or [None] when not
+        captured. The last turn's evidence does not describe a live blocker. *)
   ; runtime_fallback_applied : bool
   ; runtime_outcome : runtime_outcome
   ; agent_core_internal_runtime_allowed : bool

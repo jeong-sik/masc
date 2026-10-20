@@ -620,6 +620,7 @@ let receipt_row ~keeper_name ~outcome ~terminal_reason_code ~error_message ~ende
   ; runtime_selected_model = None
   ; runtime_attempt_count = 1
   ; runtime_lane_attempt_count = 1
+  ; runtime_lane_evidence = None
   ; runtime_fallback_applied = false
   ; runtime_outcome = Keeper_execution_receipt.Runtime_failed
   ; agent_core_internal_runtime_allowed = true

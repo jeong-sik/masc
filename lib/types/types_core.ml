@@ -378,15 +378,35 @@ let task_status_to_yojson status =
 let task_status_of_yojson json =
   let req key = Json_util.get_string_with_default json ~key ~default:"" in
   let opt key = Json_util.get_string json key in
+  (* Write-boundary format validation: a lifecycle timestamp stays the wire
+     string because no in-process consumer reads it as a time (RFC-0371
+     audit), but a missing or non-RFC 3339 value is a corrupt row. It is
+     rejected here for every status, never read as the empty string. *)
+  let clock ~status key =
+    match opt key with
+    | None -> Error (Printf.sprintf "%s requires %s" status key)
+    | Some value ->
+      (match parse_iso8601_opt value with
+       | Some _ -> Ok value
+       | None ->
+         Error (Printf.sprintf "%s %s must be RFC 3339, got %S" status key value))
+  in
   try
     match Task_status_tag.of_string (req "status") with
     | Some Task_status_tag.Todo -> Ok Todo
     | Some Task_status_tag.Claimed ->
-        Ok (Claimed { assignee = req "assignee"; claimed_at = req "claimed_at" })
+        Result.map
+          (fun claimed_at -> Claimed { assignee = req "assignee"; claimed_at })
+          (clock ~status:"claimed" "claimed_at")
     | Some Task_status_tag.In_progress ->
-        Ok (InProgress { assignee = req "assignee"; started_at = req "started_at" })
+        Result.map
+          (fun started_at -> InProgress { assignee = req "assignee"; started_at })
+          (clock ~status:"in_progress" "started_at")
     | Some Task_status_tag.Done ->
-        Ok (Done { assignee = req "assignee"; completed_at = req "completed_at"; notes = opt "notes" })
+        Result.map
+          (fun completed_at ->
+            Done { assignee = req "assignee"; completed_at; notes = opt "notes" })
+          (clock ~status:"done" "completed_at")
     | Some Task_status_tag.Awaiting_verification ->
         (* A submission has one meaning: completion. A row carrying another
            intent must not be silently reinterpreted on a direct server start
@@ -397,34 +417,23 @@ let task_status_of_yojson json =
         in
         if has_intent then Error "awaiting_verification does not accept intent"
         else
-        (* Write-boundary format validation: the field stays the wire string
-           because no in-process consumer reads it as a time (rg: the only
-           parse_iso8601 of a task started_at is this check; graphql carries
-           it as display text). RFC-0371 audit reclassified this from
-           validate-then-discard on that evidence. *)
-        (match Json_util.get_string json "started_at" with
-         | None -> Error "awaiting_verification requires started_at"
-         | Some started_at ->
-           (match parse_iso8601_opt started_at with
-            | Some _ ->
-              Ok
-                (AwaitingVerification
-                   { assignee = req "assignee"
-                   ; started_at
-                   ; submitted_at = req "submitted_at"
-                   ; verification_id = req "verification_id"
-                   })
-            | None ->
-              Error
-                (Printf.sprintf
-                   "awaiting_verification started_at must be RFC 3339, got %S"
-                   started_at)))
+        (match clock ~status:"awaiting_verification" "started_at",
+               clock ~status:"awaiting_verification" "submitted_at" with
+         | Error detail, _ | Ok _, Error detail -> Error detail
+         | Ok started_at, Ok submitted_at ->
+           Ok
+             (AwaitingVerification
+                { assignee = req "assignee"
+                ; started_at
+                ; submitted_at
+                ; verification_id = req "verification_id"
+                }))
     | Some Task_status_tag.Cancelled ->
-        Ok (Cancelled
-              { cancelled_by = req "cancelled_by"
-              ; cancelled_at = req "cancelled_at"
-              ; reason = opt "reason"
-              })
+        Result.map
+          (fun cancelled_at ->
+            Cancelled
+              { cancelled_by = req "cancelled_by"; cancelled_at; reason = opt "reason" })
+          (clock ~status:"cancelled" "cancelled_at")
     | None -> Error ("Unknown task status: " ^ req "status")
   with e -> Error (Printexc.to_string e)
 

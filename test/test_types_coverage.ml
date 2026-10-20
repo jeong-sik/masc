@@ -387,6 +387,45 @@ let test_task_status_awaiting_rejects_missing_or_invalid_start () =
        | Ok _ -> fail "awaiting_verification must reject missing or invalid started_at")
     [ without_start; invalid_start ]
 
+(* Every lifecycle timestamp is a strict RFC 3339 instant at the decode
+   boundary. A missing or malformed value is a corrupt row; an offset is valid. *)
+let lifecycle_clock_rows =
+  [ "claimed", "claimed_at", [ "assignee", `String "claude" ]
+  ; "in_progress", "started_at", [ "assignee", `String "claude" ]
+  ; "done", "completed_at", [ "assignee", `String "codex" ]
+  ; "cancelled", "cancelled_at", [ "cancelled_by", `String "user" ]
+  ; ( "awaiting_verification"
+    , "submitted_at"
+    , [ "assignee", `String "codex"
+      ; "started_at", `String "2024-01-01T00:00:00Z"
+      ; "verification_id", `String "verification-1"
+      ] )
+  ]
+
+let test_task_status_lifecycle_clock_is_strict_rfc3339 () =
+  List.iter
+    (fun (status, key, fields) ->
+       let decode clock =
+         Masc_domain.task_status_of_yojson
+           (`Assoc
+              ((("status", `String status) :: fields)
+               @ (match clock with
+                  | Some value -> [ key, `String value ]
+                  | None -> [])))
+       in
+       (match decode (Some "2024-01-01T09:00:00+09:00") with
+        | Ok _ -> ()
+        | Error detail -> failf "%s rejected an RFC 3339 offset: %s" status detail);
+       List.iter
+         (fun clock ->
+            match decode clock with
+            | Error _ -> ()
+            | Ok _ ->
+              failf "%s accepted %s=%s" status key
+                (Option.value clock ~default:"<missing>"))
+         [ None; Some ""; Some "not-a-time"; Some "2024-01-01" ])
+    lifecycle_clock_rows
+
 let test_task_status_to_yojson_done_with_notes () =
   let status = Masc_domain.Done { assignee = "codex"; completed_at = "2024-01-01"; notes = Some "All tests pass" } in
   let json = Masc_domain.task_status_to_yojson status in
@@ -453,7 +492,7 @@ let test_task_status_of_yojson_claimed () =
   let json = `Assoc [
     ("status", `String "claimed");
     ("assignee", `String "claude");
-    ("claimed_at", `String "2024-01-01")
+    ("claimed_at", `String "2024-01-01T00:00:00Z")
   ] in
   match Masc_domain.task_status_of_yojson json with
   | Ok (Masc_domain.Claimed { assignee; _ }) -> check string "assignee" "claude" assignee
@@ -464,7 +503,7 @@ let test_task_status_of_yojson_in_progress () =
   let json = `Assoc [
     ("status", `String "in_progress");
     ("assignee", `String "gemini");
-    ("started_at", `String "2024-01-01")
+    ("started_at", `String "2024-01-01T00:00:00Z")
   ] in
   match Masc_domain.task_status_of_yojson json with
   | Ok (Masc_domain.InProgress { assignee; _ }) -> check string "assignee" "gemini" assignee
@@ -475,7 +514,7 @@ let test_task_status_of_yojson_done () =
   let json = `Assoc [
     ("status", `String "done");
     ("assignee", `String "codex");
-    ("completed_at", `String "2024-01-01");
+    ("completed_at", `String "2024-01-01T00:00:00Z");
     ("notes", `String "Done!")
   ] in
   match Masc_domain.task_status_of_yojson json with
@@ -487,7 +526,7 @@ let test_task_status_of_yojson_cancelled () =
   let json = `Assoc [
     ("status", `String "cancelled");
     ("cancelled_by", `String "user");
-    ("cancelled_at", `String "2024-01-01");
+    ("cancelled_at", `String "2024-01-01T00:00:00Z");
     ("reason", `Null)
   ] in
   match Masc_domain.task_status_of_yojson json with
@@ -1803,6 +1842,8 @@ let () =
       test_case "in_progress" `Quick test_task_status_of_yojson_in_progress;
       test_case "awaiting hard-cuts missing start" `Quick
         test_task_status_awaiting_rejects_missing_or_invalid_start;
+      test_case "every lifecycle clock is strict RFC 3339" `Quick
+        test_task_status_lifecycle_clock_is_strict_rfc3339;
       test_case "done" `Quick test_task_status_of_yojson_done;
       test_case "cancelled" `Quick test_task_status_of_yojson_cancelled;
       test_case "unknown" `Quick test_task_status_of_yojson_unknown;

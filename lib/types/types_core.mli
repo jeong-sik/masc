@@ -166,6 +166,9 @@ val task_status_is_done : task_status -> bool
 val valid_task_status_strings : string list
 val task_status_to_yojson : task_status -> Yojson.Safe.t
 val task_status_of_yojson : Yojson.Safe.t -> (task_status, string) result
+(** Every lifecycle timestamp ([claimed_at], [started_at], [submitted_at],
+    [completed_at], [cancelled_at]) must be present and RFC 3339. A missing or
+    malformed value is an [Error], never an empty or substituted time. *)
 
 type task_execution_links =
   { operation_id : string option [@default None]

@@ -446,6 +446,18 @@ test('terminal Enter bytes open the selected captured source viewer',async()=>{
     assert.equal(view.observed.takes.length,1)
   } finally {await closeController(view)}
 })
+test('the key hint names what Enter does for the selected asset kind',async()=>{
+  const view=await controller()
+  try {
+    let frame=''
+    view.process.stdout.write=text=>{frame=text}
+    await primeWave(view);await primeCapture(view)
+    view.command('asset capture-1');await flush();await flush()
+    assert.match(frame,/Enter:open source/);assert.doesNotMatch(frame,/Enter:place/)
+    view.command('asset asset-1');await flush();await flush()
+    assert.match(frame,/Enter:place/);assert.doesNotMatch(frame,/Enter:open source/)
+  } finally {await closeController(view)}
+})
 test('captured source viewer waits for playback, borrows input and returns ownership before removing its snapshot',async()=>{
   const view=await controller()
   try {

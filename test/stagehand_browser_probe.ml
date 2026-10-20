@@ -217,8 +217,7 @@ let () =
     let open Yojson.Safe.Util in
     let declared=report |> member "declarations" |> to_list
       |> List.filter (fun item -> member "id" item=`String "browser") in
-    let refused=report |> member "issues" |> to_list |> List.filter (fun issue ->
-      member "id" issue=`String "browser" || member "source_path" issue=`String declaration) in
+    let refused=report |> member "issues" |> to_list in
     if member "complete" report<>`Bool true || List.length declared<>1 || refused<>[] then
       failwith ("browser declaration was not applied: " ^ Yojson.Safe.to_string report);
     await (fun () ->
@@ -230,6 +229,16 @@ let () =
       | [service] -> Some service
       | [] -> None | _::_::_ -> failwith "ambiguous fixture browser Add-ons") in
   let first=attach () in
+  record "the real catalog publishes the browser package Skill"
+    (let* catalog=Server_skill_snapshot_runtime.lookup ~base_path
+       |> Result.map_error Server_skill_snapshot_runtime.error_to_string in
+     match catalog with
+     | Server_skill_snapshot_runtime.Ready {snapshot;_} ->
+       (match Skill_catalog_snapshot.find_effective_by_name snapshot "browser" with
+        | Some entry when entry.directory=Filename.concat (Filename.dirname manifest) "skills/browser" -> Ok `Null
+        | Some _ -> Error "catalog Skill came from another source"
+        | None -> Error "browser package Skill is absent")
+     | Not_registered|Uninitialized -> Error "workspace Skill catalog is unavailable");
   let host=Browser_addon_host.connect ~config ~access ~principal ~reserved:[]
     |> Result.map_error (function R.Unavailable s|Outcome_unknown s -> s
       | Host_refusal _ -> "host refused the fixture principal") |> require in

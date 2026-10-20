@@ -85,6 +85,16 @@ let () =
       match R.browser_services ~config ~access with [service] -> Some service
       | [] -> None | _::_::_ -> failwith "ambiguous browser installations") in
     witness "instance_id" (`String service.instance_id);
+    ignore (record "the real catalog publishes the browser package Skill"
+      (let* catalog=Server_skill_snapshot_runtime.lookup ~base_path
+         |> Result.map_error Server_skill_snapshot_runtime.error_to_string in
+       match catalog with
+       | Server_skill_snapshot_runtime.Ready {snapshot;_} ->
+         (match Skill_catalog_snapshot.find_effective_by_name snapshot "browser" with
+          | Some entry -> check "catalog Skill came from another source"
+              (entry.directory=Filename.concat (Filename.dirname manifest) "skills/browser")
+          | None -> Error "browser package Skill is absent")
+       | Not_registered|Uninitialized -> Error "workspace Skill catalog is unavailable"));
     let invoke ?upload_paths tool fields =
       let tool_name=match tool with
         | Browser_capabilities.Tabs -> "BrowserTabs" | Read -> "BrowserRead"

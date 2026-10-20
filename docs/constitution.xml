@@ -105,7 +105,8 @@
                    (거절한 slot 의 provider 가 다시 받는 시각을 밝혔으면 — rate limit, hard quota reset,
                    403 뒤 사용량 창 — 그 시각까지만 더 기다린다),
                    후보 실패의 typed 판정(Reviews_again | Model_absent | Producer_must_act)이
-                   자동 재시도 지속 여부를 결정하고
+                   자동 재시도 지속 여부를 결정하고 (Agent_core.Error.is_retryable 과
+                   기록된 provider 휴식은 그 판정의 입력이다)
                    전역 review_slots 세마포어가 동시 실행만 제한한다.
                    (completion_authority_agent.ml, anti_rationalization.ml)</invariant>
       </lifecycle>

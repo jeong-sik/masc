@@ -1307,32 +1307,50 @@ let fetch_workspace_entries ?keeper ?repo ~(host : string) ~(port : int)
       | json -> Masc.Tui_decode.decode_workspace_tree json)
 
 (** The whole file at [path] ([/api/v1/workspace/file]). *)
-let fetch_workspace_file ?keeper ?repo ?expected_workspace ~(host : string) ~(port : int)
-    ~(path : string) () : (string, string) result =
+let fetch_workspace_file ?keeper ?repo ~expected_workspace ~(host : string) ~(port : int)
+    ~(path : string) () : (Masc.Tui_decode.workspace_file_source, string) result =
   let route =
     Printf.sprintf "/api/v1/workspace/file?path=%s%s%s"
-      (percent_encode_query_value path)
-      (keeper_query_suffix keeper)
-      (repo_query_suffix repo)
-  in
-  let reading = match expected_workspace with
-    | None ->
-        (match http_get ~host ~port ~path:route with
-         | Error detail -> Error detail
-         | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
-             Error (named_refusal "workspace file" ~status ~body)
-         | Ok (_, body) ->
-             match Yojson.Safe.from_string body with
-             | exception Yojson.Json_error detail ->
-                 Error ("workspace file was not JSON: " ^ detail)
-             | json -> Ok json)
-    | Some expected ->
-        Masc_tui_workspace_read.with_binding ~host ~port ~expected
-          ~proof:Masc_tui_workspace_read.Request_precondition (fun () ->
-            get_json ~host ~port ~path:route)
-        |> Result.map_error (fun detail -> "workspace file: " ^ detail)
-  in
-  Result.bind reading Masc.Tui_decode.decode_workspace_file
+      (percent_encode_query_value path) (keeper_query_suffix keeper) (repo_query_suffix repo) in
+  Masc_tui_workspace_read.with_binding ~host ~port ~expected:expected_workspace
+    ~proof:Masc_tui_workspace_read.Request_precondition (fun () -> get_json ~host ~port ~path:route)
+  |> Result.map_error (fun detail -> "workspace file: " ^ detail)
+  |> fun reading -> Result.bind reading Masc.Tui_decode.decode_workspace_file
+
+let save_workspace_file_draft ~host ~port draft =
+  let module Draft = Masc_tui_code_draft in
+  let address = Draft.address draft in
+  let keeper, repo = match address.scope with
+    | Draft.Code_scope_project -> None, None
+    | Draft.Code_scope_keeper name -> Some name, None
+    | Draft.Code_scope_repo id -> None, Some id in
+  let scope = keeper_query_suffix keeper ^ repo_query_suffix repo in
+  let route = "/api/v1/workspace/file" ^
+    (if String.equal scope "" then "" else "?" ^ String.sub scope 1 (String.length scope - 1)) in
+  let body = Yojson.Safe.to_string (`Assoc [
+    "path", `String address.path; "expected_revision", `String (Draft.base draft).revision;
+    "content", `String (Draft.text draft);
+    "expected_workspace", `Assoc ["base_path", `String address.base_path;
+      "masc_root", `String address.masc_root]]) in
+  match http_post ~headers:(auth_headers ()) ~host ~port ~path:route ~body with
+  | Error detail -> Draft.Save_uncertain detail
+  | Ok (409, body) -> Draft.Save_conflict (named_refusal "file save" ~status:409 ~body)
+  | Ok (status, body) when status >= 400 && status < 500 ->
+    Draft.Save_refused (named_refusal "file save" ~status ~body)
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+    Draft.Save_uncertain (named_refusal "file save" ~status ~body)
+  | Ok (_, body) ->
+    let parsed = try
+      let json = Yojson.Safe.from_string body in
+      match Yojson.Safe.Util.(json |> member "ok"), Yojson.Safe.Util.(json |> member "revision") with
+      | `Bool true, `String revision -> Tool_output.validate_sha256 revision
+          |> Result.map_error Tool_output.invalid_sha256_to_string
+          |> Result.map (fun _ -> revision)
+      | _, _ -> Error "Save response lacks a committed revision"
+    with Yojson.Json_error detail -> Error detail in
+    match parsed with
+    | Ok revision -> Draft.Save_succeeded revision
+    | Error detail -> Draft.Save_uncertain detail
 
 let fetch_workspace_file_catalog ?keeper ?repo ~expected_workspace ~host ~port ~path () =
   let route =

@@ -49,40 +49,28 @@ let abort_detail = function
 let roundtrip ~restore ~reenter ?(suffix = ".json") (content : string)
   : (string, abort) result =
   match editor_command () with
-  | None ->
-    Error (Editor_unavailable "no $EDITOR or $VISUAL is set")
+  | None -> Error (Editor_unavailable "no $EDITOR or $VISUAL is set")
   | Some editor ->
-    let path = Filename.temp_file "masc-editor" suffix in
-    let finally () = (try Sys.remove path with _ -> ()) in  (* @observe-allowed: the editor's temp file, which some editors replace rather than write in place, so it may already be gone *)
-    let outcome =
-      try
-        let oc = open_out path in
-        output_string oc content;
-        close_out oc;
-        restore ();
-        let status = run_editor editor path in
-        reenter ();
-        (match status with
-         | Unix.WEXITED 0 ->
-           (try
-              let ic = open_in path in
-              let n = in_channel_length ic in
-              let really = really_input_string ic n in
-              close_in ic;
-              Ok really
-            with e ->
-              Error (Form_unreadable (Printexc.to_string e)))
-         | Unix.WEXITED 127 ->
-           Error (Editor_unavailable (editor ^ ": command not found"))
-         | Unix.WEXITED code ->
-           ignore code;
-           Error Cancelled
-         | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
-           Error
-             (Editor_unavailable
-                (Printf.sprintf "%s was stopped by signal %d" editor signal)))
-      with e -> Error (Form_unreadable (Printexc.to_string e))
-    in
-    finally ();
-    outcome
+    try
+      let path = Filename.temp_file "masc-editor" suffix in
+      Fun.protect
+        ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
+        (fun () ->
+          let channel = open_out_bin path in
+          Fun.protect ~finally:(fun () -> close_out_noerr channel)
+            (fun () -> output_string channel content; flush channel);
+          let status = Fun.protect ~finally:reenter (fun () ->
+            restore (); run_editor editor path) in
+          match status with
+          | Unix.WEXITED 0 ->
+            let channel = open_in_bin path in
+            Fun.protect ~finally:(fun () -> close_in_noerr channel)
+              (fun () -> Ok (really_input_string channel (in_channel_length channel)))
+          | Unix.WEXITED 127 -> Error (Editor_unavailable (editor ^ ": command not found"))
+          | Unix.WEXITED _ -> Error Cancelled
+          | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+            Error (Editor_unavailable (Printf.sprintf "%s was stopped by signal %d" editor signal)))
+    with
+    | Sys_error detail -> Error (Form_unreadable detail)
+    | Unix.Unix_error _ as exn -> Error (Form_unreadable (Printexc.to_string exn))
 ;;

@@ -59,6 +59,39 @@ let code_pane_content_height (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   pane_surface_content_height ~rows
 
+let code_draft_rows state ~cols =
+  let module Draft = Masc_tui_code_draft in
+  match current_code_draft state with
+  | None -> []
+  | Some draft ->
+    let wrap text = Message_layout.wrap_body
+      ~max_cells:(max 1 (framed_inner_width cols - 2)) ~sanitize:Terminal_text.single_line text in
+    let status, before, comparing = match Draft.phase draft with
+      | Draft.Editable -> "Unsaved draft · this session", (Draft.base draft).text, "original source → draft"
+      | Draft.Saving _ -> "Saving submitted draft; waiting for acknowledgement", (Draft.base draft).text, "original source → submitted draft"
+      | Draft.Rejected detail -> "Save refused: " ^ detail, (Draft.base draft).text, "original source → draft"
+      | Draft.Needs_review (reason, current) ->
+        let detail = match reason with Draft.Conflict text | Draft.Uncertain text -> text in
+        ("Draft retained: " ^ detail),
+        (match current with Some source -> source.text | None -> (Draft.base draft).text),
+        (match current with Some _ -> "reread server source → draft · A adopts this revision"
+                          | None -> "original source → draft · r rereads the server before comparison") in
+    let ending_text text = match Draft.ending text with
+      | Draft.Empty_source -> "empty" | Draft.Final_lf -> "final LF"
+      | Draft.Final_crlf -> "final CRLF" | Draft.No_final_newline -> "no final newline" in
+    let bytes = Printf.sprintf "Bytes %d → %d · %s → %s"
+      (String.length before) (String.length (Draft.text draft))
+      (ending_text before) (ending_text (Draft.text draft)) in
+    let rows = Diff.rows ~before ~after:(Draft.text draft) |> List.concat_map (fun row ->
+      let marker, style, text = match row with
+        | Diff.Context text -> "  ", Ansi.dim, text
+        | Diff.Removed text -> "- ", Theme.Syntax.diff_removed_bg, text
+        | Diff.Added text -> "+ ", Theme.Syntax.diff_added_bg, text in
+      Terminal_text.single_line text |> Message_layout.split_cells
+        ~max_cells:(max 1 (framed_inner_width cols - 4))
+      |> List.map (fun text -> style ^ marker ^ text ^ Ansi.reset)) in
+    List.concat_map wrap [status; comparing; bytes; "e edit · S save · r reread · A adopt compared revision · X discard · Esc close"] @ rows
+
 let code_notes_rows (state : state) ~cols =
   let memos =
     match Masc_tui_fetched.current state.code_file with
@@ -401,6 +434,7 @@ let render_code (state : state) =
     framed_bottom pane_buf pane_cols
   in
   let content_pane ~split pane_buf pane_cols =
+    let draft_showing = state.code_draft_open && Option.is_some (current_code_draft state) in
     let history_showing = state.code_history_open in
     let diff_showing = state.code_diff_open in
     let notes_showing = state.code_notes_open in
@@ -420,12 +454,13 @@ let render_code (state : state) =
             else path
           in
           let base =
-            if notes_showing then "notes: " ^ path
+            if draft_showing then "draft: " ^ path
+            else if notes_showing then "notes: " ^ path
             else if diff_showing then
               Printf.sprintf "diff col %d vs HEAD: %s"
                 (state.code_diff_hscroll + 1) path
             else if history_showing then "history: " ^ path
-            else path
+            else path ^ (if Option.is_some (current_code_draft state) then " · draft retained (V)" else "")
           in
           (* The note (a language-server answer, a PR link) rides the title
              in every view: the history's Enter writes one too. *)
@@ -511,7 +546,17 @@ let render_code (state : state) =
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
     let content_height = code_pane_content_height state in
-    (if notes_showing then
+    (if draft_showing then
+       let rendered = code_draft_rows state ~cols:pane_cols in
+       let maximum = max 0 (List.length rendered - content_height) in
+       let scroll = max 0 (min state.code_draft_scroll maximum) in
+       let window = Rows.of_list ~first:scroll ~height:content_height rendered in
+       for index = 0 to content_height - 1 do
+         match Rows.at window (scroll + index) with
+         | Some line -> box_line pane_buf pane_cols ("  " ^ line)
+         | None -> box_empty pane_buf pane_cols
+       done
+     else if notes_showing then
        let rendered = code_notes_rows state ~cols:pane_cols in
        let total = List.length rendered in
        let height = max 1 (content_height - 1) in

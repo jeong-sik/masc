@@ -158,7 +158,9 @@ let apply_open_file ~preserve_view (state : state) request result = (
   then ()
   else
   match result with
-  | Ok content ->
+  | Ok (source : Masc.Tui_decode.workspace_file_source) ->
+      let content = source.wfs_content in
+      if not preserve_view then state.code_draft_open <- false;
       state.code_file_resume_intent <- Refresh_code_file;
       (* Recovery retains the selected file even if its first read did not
          finish. Its sibling reads restart independently; this completion
@@ -181,7 +183,19 @@ let apply_open_file ~preserve_view (state : state) request result = (
          the array. *)
       state.code_file <-
         Masc_tui_fetched.complete ~equal:String.equal state.code_file request
-          (Ok { cfd_source = content; cfd_rows = Array.of_list rows });
+          (Ok { cfd_source = content; cfd_revision = source.wfs_revision; cfd_rows = Array.of_list rows });
+      Option.iter (fun draft ->
+        let review_owned = match state.code_draft_review with
+          | Some (owner, reading) -> reading == request
+              && Masc_tui_code_draft.same_draft owner draft
+          | None -> false in
+        let observe = match Masc_tui_code_draft.phase draft with
+          | Masc_tui_code_draft.Needs_review _ -> review_owned
+          | Masc_tui_code_draft.Editable | Masc_tui_code_draft.Rejected _ -> true
+          | Masc_tui_code_draft.Saving _ -> false in
+        if observe then put_code_draft state (Masc_tui_code_draft.observe
+          { text = content; revision = source.wfs_revision } draft);
+        if review_owned then state.code_draft_review <- None) (current_code_draft state);
       (* The jump that asked for this file may have named a line; the
          reset and the jump live together so neither overwrites the
          other. Consumed once -- the next plain open starts at the top. *)
@@ -258,7 +272,8 @@ let copy_file_source (state : state) =
   if not (server_authority_ready state) then
     Error "Confirm the workspace before copying file source"
   else if state.view <> Code || state.code_focus_file <> Right_pane
-          || state.code_history_open || state.code_diff_open || state.code_notes_open then
+          || state.code_history_open || state.code_diff_open || state.code_notes_open
+          || state.code_draft_open then
     Error "Focus file content to copy its source"
   else match Masc_tui_fetched.current state.code_file with
     | Some (path, Masc_tui_fetched.Ready document) -> Ok (path, document.cfd_source)
@@ -563,3 +578,96 @@ let apply_history (state : state) request result =
   end
 
 ;;
+
+
+module Draft = Masc_tui_code_draft
+
+let prepare_draft state =
+  if not (server_authority_ready state) || not (code_edit_focus state) then
+    Error "Focus a readable file in a confirmed workspace before editing"
+  else match current_code_draft state with
+    | Some draft -> (match Draft.phase draft with
+        | Draft.Saving _ -> Error "Wait for this draft's save before editing"
+        | Draft.Editable | Draft.Rejected _ | Draft.Needs_review _ -> Ok draft)
+    | None -> match code_draft_address state, Masc_tui_fetched.current state.code_file with
+      | Some address, Some (_, Masc_tui_fetched.Ready source) ->
+        Ok (Draft.create ~address ~source:{text=source.cfd_source; revision=source.cfd_revision})
+      | (None | Some _), (None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+          | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ | Masc_tui_fetched.Ready _))) ->
+        Error "The current file has no editable source revision"
+
+let edit_draft state draft text =
+  let ( let* ) = Result.bind in
+  let* () = match code_draft_address state with
+    | Some address when Draft.equal_address address (Draft.address draft)
+        && server_authority_ready state -> Ok ()
+    | Some _ | None -> Error "Workspace or file changed; the editor cannot replace another draft" in
+  let* next = Draft.edit text draft in
+  put_code_draft state next;
+  state.code_draft_open <- true; state.code_draft_scroll <- 0;
+  Ok ()
+
+let discard_draft state = match current_code_draft state with
+  | None -> Error "No draft for this file"
+  | Some draft when not (Draft.can_discard draft) -> Error "Wait for the submitted save before discarding"
+  | Some draft ->
+    state.code_drafts <- List.filter (fun existing -> existing != draft) state.code_drafts;
+    state.code_draft_open <- false; state.code_draft_review <- None; Ok ()
+
+let adopt_draft_revision state = match
+  (if server_authority_ready state then current_code_draft state else None) with
+  | None -> Error "No draft for this file"
+  | Some draft -> Result.map (put_code_draft state) (Draft.adopt_current draft)
+
+let begin_draft_save state =
+  let ( let* ) = Result.bind in
+  let* () = match write_authority_refusal state state.workspace_authority with
+    | None when code_edit_focus state -> Ok ()
+    | None -> Error "Focus the file or its draft before saving"
+    | Some detail -> Error detail in
+  let* draft = match current_code_draft state with
+    | Some draft -> Ok draft | None -> Error "No edited draft to save" in
+  let* submitted, ticket = Draft.begin_save draft in
+  put_code_draft state submitted;
+  state.code_draft_open <- true;
+  state.code_draft_review <- None;
+  Ok ({ csr_address=Draft.address submitted; csr_ticket=ticket;
+    csr_file=Masc_tui_fetched.current_request state.code_file }, submitted)
+
+let complete_draft_save state request outcome =
+  let refresh = ref false in
+  state.code_drafts <- List.filter_map (fun draft ->
+    if not (Draft.equal_address request.csr_address (Draft.address draft)) then Some draft
+    else match Draft.complete request.csr_ticket outcome draft with
+      | Draft.Ignored -> Some draft
+      | Draft.Retained next -> Some next
+      | Draft.Committed _ ->
+        state.code_saved_refreshes <- request.csr_address :: List.filter
+          (fun address -> not (Draft.equal_address address request.csr_address)) state.code_saved_refreshes;
+        (match code_draft_address state with
+         | Some address when Draft.equal_address address request.csr_address -> state.code_draft_open <- false
+         | Some _ | None -> ());
+        let original_reading = match request.csr_file,
+            Masc_tui_fetched.current_request state.code_file with
+          | Some before, Some current -> before == current
+          | None, _ | Some _, None -> false in
+        refresh := original_reading && state.view = Code && server_authority_ready state
+          && Option.is_none state.code_navigation && not state.palette_open
+          && Option.is_none state.search
+          && (match code_draft_address state with
+              | Some address -> Draft.equal_address address request.csr_address | None -> false);
+        if !refresh then begin
+          state.code_draft_open <- false;
+          state.code_lsp_note <- Some "Draft saved; refreshing server source"
+        end;
+        None) state.code_drafts;
+  !refresh
+
+let saved_refresh_path state ~input_pending =
+  if input_pending || state.view <> Code || not (server_authority_ready state)
+     || state.palette_open || Option.is_some state.search
+     || Option.is_some state.code_navigation || Masc_tui_fetched.in_flight state.code_file
+  then None
+  else match code_draft_address state with
+    | Some address when List.exists (Draft.equal_address address) state.code_saved_refreshes -> Some address.path
+    | Some _ | None -> None

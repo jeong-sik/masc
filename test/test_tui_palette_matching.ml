@@ -212,7 +212,7 @@ let landed ~path rows =
       |> List.map (fun segments -> String.concat "" (List.map fst segments))
       |> String.concat "\n" in
     Masc_tui_fetched.complete ~equal:String.equal t request
-      (Ok { cfd_source = source; cfd_rows = Array.of_list rows })
+      (Ok { cfd_source = source; cfd_revision = String.make 64 'a'; cfd_rows = Array.of_list rows })
 ;;
 
 let check_names = Alcotest.(check (list string))

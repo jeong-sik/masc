@@ -28,7 +28,7 @@ let package dir max_bytes : Types.package = {
   id="source-test";revision="1";title="Source capture fixture";
   contributions=[Types.Observe];command=["unused"];
   directory=dir;skills_directory=None;action_tool=None;state_storage=Types.Ephemeral;tool_invocation=Types.Direct;exported_tools=[];outputs=[];refresh_policy=Types.Every_hint;
-  model_access=Types.Model_disabled;exact_outputs=[];tool_hooks=[];
+  model_access=Types.Model_disabled;exact_outputs=[];tool_hooks=[];worker_service=Types.Mcp_tools;
   binding_schema=None;presentation=Masc.Lane_addon_presentation.empty;
   execution=Types.Host_process {max_reply_bytes=max_bytes}}
 let file_source id path = `Assoc ["kind", `String "snapshot_file";

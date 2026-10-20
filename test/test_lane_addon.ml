@@ -79,7 +79,7 @@ let make_backend ?observe_step () =
         match Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc ["name",`String name;
           "inputSchema",`Assoc ["type",`String "object"]]) with
         | Ok tool -> tool | Error message -> fail message) package.exported_tools in
-      let connection : Runtime.For_testing.connection = {
+      let connection : Runtime.For_testing.connection = {browser=None;
         resource = Lifecycle.Container_resource (Store.digest instance_id);
         exported_tools = (fun () -> exported_tools);
         call_exported_tool = (fun ~on_result:_ ~authorize ~principal ~name:_ ~arguments:_ ->

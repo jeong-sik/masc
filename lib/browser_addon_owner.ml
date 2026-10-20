@@ -64,7 +64,9 @@ let dispatch t (request : W.request) =
      | Error reply -> reply
      | Ok client -> waiting t ~disposition:W.Not_started (fun () ->
          match B.take_registered_command ~client ~window_sec with
-         | Ok command -> W.Poll_result command
+         | Ok command ->
+           let state_id=Digestif.SHA256.(to_hex (digest_string (Yojson.Safe.to_string (snapshot t)))) in
+           W.Poll_result {command;state_id}
          | Error error -> refusal (B.registration_refusal_to_wire error)))
   | W.Deliver {client_id;id;payload} ->
     (match with_admission t request.incarnation (fun () -> B.deliver_result ~client_id ~id ~payload

@@ -1,0 +1,21 @@
+id = "browser"
+revision = "0.1.0"
+title = "Browser connections"
+runtime = "host_process"
+service = "browser"
+command = ["masc-browser-addon-worker"]
+contributions = ["observe"]
+
+[world.outputs.connections]
+all_lanes = true
+
+[resources]
+max_reply_bytes = 4194304
+
+[interface]
+binding_schema = '''{
+  "type": "object",
+  "properties": {"sources": {"type": "array", "maxItems": 0}},
+  "required": ["sources"],
+  "additionalProperties": false
+}'''

@@ -114,6 +114,14 @@ let load ~path =
       let* value = read key Otoml.get_string in
       if String.trim value = "" then Error (String.concat "." key ^ " is blank") else Ok value
     in
+    let* worker_service = match Otoml.find_opt document Fun.id ["service"] with
+      | None | Some (Otoml.TomlString "tools") -> Ok Mcp_tools
+      | Some (Otoml.TomlString "browser") -> Ok Browser_service
+      | Some (Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+          | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+          | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+          | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _) ->
+          Error "service must be tools or browser" in
     let* world = match Otoml.find_opt document Fun.id ["world"] with
       | None -> Ok []
       | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields) ->
@@ -311,10 +319,21 @@ let load ~path =
           let resources = {cpus;memory_bytes=Int64.of_int memory;pids;max_reply_bytes} in
           let* () = check_resources ~runtime resources in
           Ok (Container {runtime;image;resources}) in
+    let* () = match worker_service with
+      | Mcp_tools -> Ok ()
+      | Browser_service ->
+          let* () = match execution with Host_process _ -> Ok ()
+            | Container _ -> Error "browser service requires native execution" in
+          let* () = match state_storage with Ephemeral -> Ok ()
+            | Persistent -> Error "browser service requires ephemeral execution" in
+          let* () = match model_access with Model_disabled -> Ok ()
+            | Host_sampling -> Error "browser service sampling is not attached" in
+          (match action_tool,exported_tools with None,[] -> Ok ()
+           | Some _,_ | None,(_::_) -> Error "browser service must omit MCP actions and exports") in
     if command = [] || List.exists (fun arg -> String.trim arg = "" || String.contains arg '\000') command
     then Error "command requires non-blank argv entries without NUL"
     else if contributions = [] then Error "at least one contribution is required"
-    else Ok { id; revision; title; contributions = List.rev contributions; execution; command;
+    else Ok { id; revision; title; contributions = List.rev contributions; execution; worker_service; command;
       directory = Filename.dirname path; skills_directory; action_tool; state_storage;
       tool_invocation; exported_tools; tool_hooks; outputs; refresh_policy; model_access;
       binding_schema; presentation; exact_outputs }

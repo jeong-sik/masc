@@ -145,7 +145,7 @@ sources = []
   configure false; reconcile (); wait clock (fun () -> detached second))
 let native_installation () = native_installation_with_slot (fun _ -> ()) ()
 let interrupted_namespace () = native_installation_with_slot (fun directory ->
-  match Native_addon_lease.For_testing.prepare ~directories:[directory] ~instance_id:"unpublished"
+  match Native_addon_lease.For_testing.prepare ~cleanup_context:None ~directories:[directory] ~instance_id:"unpublished"
       ~sync_ancestry:(fun parent -> raise (Unix.Unix_error (Unix.EIO,"fsync",parent))) with
   | Error _ -> () | Ok _ -> fail "namespace interruption did not occur") ()
 let interrupted_metadata () = native_installation_with_slot (fun directory ->
@@ -154,9 +154,107 @@ let interrupted_metadata () = native_installation_with_slot (fun directory ->
     let fd=Unix.openfile (Filename.concat directory name) [Unix.O_CREAT;Unix.O_WRONLY] 0o600 in
     Unix.close fd) ["gate";"lease";"intent.json";"owner.json"]) ()
 let interrupted_reservation () = native_installation_with_slot (fun directory ->
-  ignore (Native_addon_lease.prepare ~directories:[directory] ~instance_id:"unpublished"
+  ignore (Native_addon_lease.prepare ~cleanup_context:None ~directories:[directory] ~instance_id:"unpublished"
     |> Result.map_error Native_addon_lease.error_to_string |> require);
   write (Filename.concat directory "intent.json") "") ()
+let browser_server = {|import argparse,json,os,socket,sys,threading
+p=argparse.ArgumentParser()
+p.add_argument("root");p.add_argument("mode")
+p.add_argument("--socket");p.add_argument("--incarnation");p.add_argument("--max-message-bytes")
+a=p.parse_args()
+s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);s.bind(a.socket);s.listen()
+with open(os.path.join(a.root,"endpoint-"+a.incarnation),"w") as out: out.write(a.socket)
+event=threading.Event();payload=None
+def handle(conn):
+    global payload
+    with conn:
+        req=json.loads(conn.makefile("rb").readline())
+        if req["incarnation"]!=a.incarnation: raise RuntimeError("wrong owner")
+        op=req["operation"]
+        if op=="snapshot": result={"reply":"receipt"} if a.mode=="bad_ready" else {"reply":"snapshot","snapshot":{}}
+        elif op=="issue":
+            event.clear()
+            with open(os.path.join(a.root,"issued-"+a.incarnation),"w") as out: out.write("issued")
+            event.wait()
+            result={"reply":"issue","answer":{"status":"answered","payload":payload}}
+        elif op=="deliver":
+            payload=req["payload"];event.set();result={"reply":"receipt"}
+        else: raise RuntimeError(op)
+        conn.sendall((json.dumps(result)+"\n").encode())
+def serve():
+    while True:
+        conn,_=s.accept();threading.Thread(target=handle,args=(conn,),daemon=True).start()
+threading.Thread(target=serve,daemon=True).start()
+for line in sys.stdin:
+    req=json.loads(line)
+    if "id" not in req: continue
+    method=req["method"]
+    if method=="initialize": result={"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"browser-host-fixture","version":"1"}}
+    elif method=="tools/list": result={"tools":[{"name":"lane_observe","inputSchema":{"type":"object"}}]}
+    elif method=="tools/call": result={"content":[],"structuredContent":{"rows":[],"coverage":[]}}
+    else: raise RuntimeError(method)
+    print(json.dumps({"jsonrpc":"2.0","id":req["id"],"result":result}),flush=True)
+|}
+let browser_installation () = with_fixture (fun clock root config ->
+  let script=Filename.concat root "browser.py" in write script browser_server;
+  let manifest=Filename.concat root "browser.toml" in
+  let install mode = write manifest (Printf.sprintf {|id = "browser-host-fixture"
+revision = "fixture-1"
+title = "Browser service fixture"
+runtime = "host_process"
+service = "browser"
+command = ["python3", %S, %S, %S]
+contributions = ["observe"]
+[resources]
+max_reply_bytes = 65536
+|} script root mode) in
+  let access=Lane_addon_sources.Operator_configuration in
+  let inspect id=dispatch config R.Inspect ["instance_id",`String id]
+    |> member "instances" |> Yojson.Safe.Util.to_list |> List.hd in
+  let services ()=R.browser_services ~config ~access in
+  let attach mode=install mode;dispatch config R.Attach ["manifest_path",`String manifest;
+    "run_id",`String "browser-host";"binding",`Assoc ["sources",`List []]] |> text "instance_id" in
+  let call service command=R.call_browser_service ~config ~access ~service ~command in
+  let endpoint id=Filename.concat root ("endpoint-"^id) in
+  let issued id=Filename.concat root ("issued-"^id) in
+  let socket_path id=In_channel.with_open_bin (endpoint id) In_channel.input_all in
+  let unavailable result=match result with Error (Browser_addon_client.Unavailable _) -> true
+    | Ok _|Error (Browser_addon_client.Outcome_unknown _) -> false in
+  let selected id=wait clock (fun () -> List.exists (fun (service:R.browser_service) -> service.instance_id=id) (services ()));
+    List.find (fun (service:R.browser_service) -> service.instance_id=id) (services ()) in
+  let id=attach "normal" in
+  let original=selected id in
+  let pid=inspect id |> member "resource" |> member "pid" |> Yojson.Safe.Util.to_int in
+  let client_id=require (Browser_lane.client_id_of_string "0c000000-0000-4000-8000-000000000001") in
+  let issue=Browser_addon_wire.Issue {route=Browser_lane.Live_route (Some client_id);verb=Browser_lane.Tabs_list;
+    actor=Some "browser-host-tester";timeout_sec=2.;only_if_idle=false} in
+  let payload=`Assoc ["ok",`Bool false;"effectPhase",`String "partial";"error",`String "partial result"] in
+  Eio.Fiber.both (fun () -> check bool "browser result disposition retained" true
+    (call original issue=Ok (Browser_addon_wire.Issue_result (Ok (Browser_lane.Answered payload)))))
+    (fun () -> wait clock (fun () -> Sys.file_exists (issued id));
+      check bool "reverse channel works beside waiting issue" true
+        (call original (Browser_addon_wire.Deliver {client_id;id="fixture";payload})=Ok Browser_addon_wire.Receipt));
+  ignore (dispatch config R.Detach ["instance_id",`String id]);
+  wait clock (fun () -> let item=inspect id in
+    text "kind" (member "phase" item)="detached" && text "runtime_presence" item="retained");
+  wait clock (fun () -> not (Posix_spawn_detached.group_id_has_members pid));
+  check bool "socket absent before release" false (Sys.file_exists (Filename.dirname (socket_path id)));
+  check bool "detached handle refused" true (unavailable (call original Browser_addon_wire.Snapshot));
+  let replacement=attach "normal" in let next=selected replacement in
+  check bool "old handle never resolves replacement" true (unavailable (call original Browser_addon_wire.Snapshot));
+  let next_pid=inspect replacement |> member "resource" |> member "pid" |> Yojson.Safe.Util.to_int in
+  Eio.Fiber.first (fun () -> ignore (call next issue);fail "cancelled issue returned")
+    (fun () -> wait clock (fun () -> Sys.file_exists (issued replacement)));
+  wait clock (fun () -> not (Posix_spawn_detached.group_id_has_members next_pid));
+  wait clock (fun () -> not (Sys.file_exists (Filename.dirname (socket_path replacement))));
+  check bool "cancelled issue withdraws original service" true (unavailable (call next Browser_addon_wire.Snapshot));
+  let refused=attach "bad_ready" in
+  wait clock (fun () -> Sys.file_exists (endpoint refused));
+  let failed_pid ()=inspect refused |> member "resource" |> member "pid" in
+  wait clock (fun () -> match failed_pid () with `Int pid -> not (Posix_spawn_detached.group_id_has_members pid) | _ -> false);
+  wait clock (fun () -> not (Sys.file_exists (Filename.dirname (socket_path refused))));
+  check bool "readiness refusal never advertises service" false
+    (List.exists (fun (service:R.browser_service) -> service.instance_id=refused) (services ())))
 let () =
   if Array.length Sys.argv<>2 then fail "expected native admission launcher path";
   launcher := Unix.realpath Sys.argv.(1);
@@ -164,4 +262,5 @@ let () =
     test_case "actual installation action detach retained recovery reattach" `Quick native_installation;
     test_case "configuration resumes after interrupted slot namespace" `Quick interrupted_namespace;
     test_case "configuration resumes after interrupted slot metadata" `Quick interrupted_metadata;
-    test_case "configuration retires unpublished reservation before fresh attach" `Quick interrupted_reservation]]
+    test_case "configuration retires unpublished reservation before fresh attach" `Quick interrupted_reservation;
+    test_case "browser service concurrent channels exact owner cancellation and failed readiness" `Quick browser_installation]]

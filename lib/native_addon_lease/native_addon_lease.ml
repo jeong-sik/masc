@@ -22,7 +22,8 @@ external replace_private_file : Unix.file_descr -> string -> string -> unit = "m
 type slot = { directory : Unix.file_descr;
   lease : Unix.file_descr; intent : Unix.file_descr; owner : Unix.file_descr }
 type intent = Admitted of string | Retired of string
-type history = Reserved | Revoked | Consumed
+type history_state = Reserved | Revoked | Consumed
+type history = {state:history_state;cleanup_context:Yojson.Safe.t option}
 let coordinator = Mutex.create ()
 let protect work = try work () with
   | (Unix.Unix_error _ | Sys_error _) as exn -> Error (Io_failure (Printexc.to_string exn))
@@ -87,28 +88,31 @@ let with_history slot instance work =
 let read_history fd instance =
   let* history = parse fd (function
   | `Assoc fields -> (match sorted fields with
-      | ["instance_id",`String known;"state",`String state] when known=instance ->
-          (match state with
-           | "reserved" -> Ok Reserved | "revoked" -> Ok Revoked | "consumed" -> Ok Consumed
-           | _ -> Error (State_invalid "invalid native instance history"))
+      | ["cleanup_context",context;"instance_id",`String known;"state",`String state;"version",`Int 2] when known=instance ->
+          let* state=match state with
+            | "reserved" -> Ok Reserved | "revoked" -> Ok Revoked | "consumed" -> Ok Consumed
+            | _ -> Error (State_invalid "invalid native instance history") in
+          let cleanup_context=match context with `Null -> None | value -> Some value in
+          Ok {state;cleanup_context}
       | _ -> Error (State_invalid "invalid native instance history"))
   | _ -> Error (State_invalid "invalid native instance history")) in
   match history with
   | Some history -> Ok history
   | None -> Error (State_invalid "native instance history is empty")
-let write_history slot instance state =
-  let state = match state with Reserved -> "reserved" | Revoked -> "revoked" | Consumed -> "consumed" in
-  write_metadata slot (history_name instance) (`Assoc ["instance_id",`String instance;"state",`String state])
+let write_history slot instance history =
+  let state = match history.state with Reserved -> "reserved" | Revoked -> "revoked" | Consumed -> "consumed" in
+  write_metadata slot (history_name instance) (`Assoc ["instance_id",`String instance;"state",`String state;
+    "cleanup_context",Option.value ~default:`Null history.cleanup_context;"version",`Int 2])
 let unused_instance slot instance =
   try with_history slot instance (fun fd ->
   let* history = read_history fd instance in
-  match history with
+  match history.state with
   | Consumed -> Error Consumed_claim
   | Reserved | Revoked -> Error Stale_claim)
   with Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ()
 let reserved_instance slot instance = with_history slot instance (fun fd ->
   let* history = read_history fd instance in
-  match history with
+  match history.state with
   | Reserved -> Ok ()
   | Consumed -> Error Consumed_claim
   | Revoked -> Error Stale_claim)
@@ -150,7 +154,7 @@ let claim ?(sync_ancestry=sync_ancestry) ~create ~instance_id ~directories () =
   else let* directories = canonical_directories ~sync_ancestry ~create directories in
     Ok {instance_id;directories}
 let traverse f = List.fold_left (fun result slot -> let* () = result in f slot) (Ok ())
-let prepare_with_sync ~sync_ancestry ~directories ~instance_id =
+let prepare_with_sync ~sync_ancestry ~directories ~instance_id ~cleanup_context =
   let* t = claim ~sync_ancestry ~create:true ~instance_id ~directories () in
   let* () = with_slots ~create:true t.directories (fun slots ->
       let* () = traverse (fun slot ->
@@ -159,7 +163,7 @@ let prepare_with_sync ~sync_ancestry ~directories ~instance_id =
         unused_instance slot instance_id) slots in
       (* Reserve before publishing the current intent. Never erase these files:
          latest-owner receipts alone forget A when B replaces it. *)
-      List.iter (fun slot -> write_history slot instance_id Reserved) slots;
+      List.iter (fun slot -> write_history slot instance_id {state=Reserved;cleanup_context}) slots;
       List.iter (fun slot -> write_intent slot instance_id "admitted") slots;Ok ()) in
   Ok t
 let prepare = prepare_with_sync ~sync_ancestry
@@ -169,9 +173,16 @@ let check_current (t : t) slot =
   | Some (Admitted instance) when instance=t.instance_id -> Ok false
   | Some (Retired instance) when instance=t.instance_id -> Ok true
   | None | Some (Admitted _ | Retired _) -> Error Stale_claim
-let validate_existing t slots = traverse (fun slot ->
-  let* _retired = check_current t slot in
-  with_history slot t.instance_id (fun fd -> read_history fd t.instance_id |> Result.map ignore)) slots
+let existing_context t slots =
+  let* contexts=List.fold_left (fun result slot -> let* contexts=result in
+    let* _retired=check_current t slot in
+    with_history slot t.instance_id (fun fd -> let* history=read_history fd t.instance_id in
+      Ok (history.cleanup_context::contexts))) (Ok []) slots in
+  match contexts with
+  | [] -> Error (Invalid_claim "native claim has no resource context")
+  | context::rest -> if List.for_all ((=) context) rest then Ok context
+      else Error (State_invalid "native cleanup contexts disagree")
+let validate_existing t slots = existing_context t slots |> Result.map ignore
 let reopen ~directories ~instance_id =
   let* t = claim ~create:false ~instance_id ~directories () in
   let* () = with_slots t.directories (validate_existing t) in Ok t
@@ -231,7 +242,7 @@ let recover_preparation ~directory:path =
       | _, Some text when text<>"" -> Ok false
       | (None | Some _), (None | Some _) ->
           let* histories = preparation_histories path directory in
-          if List.exists (fun (_,history) -> match history with
+          if List.exists (fun (_,history) -> match history.state with
               | Reserved | Revoked -> false | Consumed -> true) histories then Ok false
           else match histories with
             | [] | [_] -> Ok true
@@ -254,22 +265,23 @@ let recover_preparation ~directory:path =
                     match histories with
                     | [] -> Ok Unpublished
                     | [instance_id,history] ->
-                        (match history with
+                        (match history.state with
                          | Consumed -> Error (State_invalid "native preparation was already consumed")
                          | Reserved | Revoked ->
                              (* Recover cleanup authority, never execution. The
                                 original ID remains permanently unavailable. *)
-                             write_history slot instance_id Revoked;
+                             write_history slot instance_id {history with state=Revoked};
                              write_intent slot instance_id "retired";
                              Ok (Current {directories;instance_id}))
                     | _::_::_ -> Error (State_invalid "unpublished native reservations disagree")))
       | [] | _::_::_ -> Error (Invalid_claim "native preparation requires one installation slot")))
+let cleanup_context t = with_slots t.directories (existing_context t)
 let retire t = with_slots t.directories (fun slots ->
   let* () = traverse (fun slot -> check_current t slot |> Result.map ignore) slots in
   let* () = traverse (fun slot -> with_history slot t.instance_id (fun fd ->
     let* history = read_history fd t.instance_id in
-    match history with
-    | Reserved -> write_history slot t.instance_id Revoked; Ok ()
+    match history.state with
+    | Reserved -> write_history slot t.instance_id {history with state=Revoked}; Ok ()
     | Revoked | Consumed -> Ok ())) slots in
   List.iter (fun slot -> write_intent slot t.instance_id "retired") slots;Ok ())
 let slot_status t slot =
@@ -332,6 +344,7 @@ let exec ~instance_id ~directories ~command ~arguments =
     Error (Invalid_claim "native command must be nonblank without NUL")
   else if not (leads_process_group ()) then Error (Invalid_claim "native launcher must lead its foreground process group")
   else with_slots t.directories (fun slots ->
+    let* () = validate_existing t slots in
     let* () = traverse (fun slot ->
       let* retired = check_current t slot in
       if retired then Error Stale_claim else
@@ -339,7 +352,9 @@ let exec ~instance_id ~directories ~command ~arguments =
       reserved_instance slot instance_id) slots in
     let* started = Option.to_result ~none:Identity_unavailable (Posix_spawn_detached.process_start (Unix.getpid ())) in
     List.iter (fun slot -> Unix.lockf slot.lease Unix.F_TLOCK 0) slots;
-    List.iter (fun slot -> write_history slot instance_id Consumed) slots;
+    let* ()=traverse (fun slot -> with_history slot instance_id (fun fd ->
+      let* history=read_history fd instance_id in
+      write_history slot instance_id {history with state=Consumed};Ok ())) slots in
     List.iter (fun slot -> write_json slot slot.owner
       (`Assoc ["instance_id",`String instance_id;"pid",`Int (Unix.getpid ());"started",`String started])) slots;
     (* Closing ANY descriptor for a POSIX lease inode drops that process's lock.

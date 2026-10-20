@@ -88,11 +88,25 @@ receipts remain distinct from successful contract validation.
    stdin EOF and termination signals retire the owner. The host supplies the
    installation's native reply bound to this second transport as well.
 
-   This foundation has no package manifest or core proxy enabled. Existing
-   built-in startup is still active. Owned backends are explicitly refused here
-   until profile claims and actual descendant cleanup are connected. Next, the
-   native host must select the socket/UUID arguments after owner validation and
-   pin existing HTTP host registrations to that original incarnation. Late host
+   The `addons/browser` manifest selects the typed `service = "browser"` contract.
+   Runtime reserves immutable socket allocation intent in native admission
+   history before creating a directory, then records its acquired inode before
+   payload spawn. Socket/UUID arguments come only from that host reservation.
+   A ready service requires both the native owner and a private-socket snapshot.
+   Failed readiness stops that original worker and confirms socket cleanup.
+   Service handles retain the original connection token; detach or replacement
+   cannot make an old handle callable. Post-dispatch Issue cancellation withdraws
+   service admission and requests exact worker cleanup without replay. Transport
+   exchanges use the existing host control timeout plus the requested wait.
+   Empty repeat polls and snapshots do not create observation activity.
+   Normal stop, orphan recovery and slot replacement all require original socket
+   cleanup after native settlement. Unknown contents or changed inodes remain
+   unconfirmed; a successful historical release cannot delete a resurrected path.
+
+   The public core proxy is not enabled. Existing built-in startup is still
+   active. Owned backends are explicitly refused here until profile claims and
+   actual descendant cleanup are connected. Next, the native host must pin
+   existing HTTP host registrations to that original incarnation. Late host
    poll/result retries must never be redirected to a replacement. The proxy must
    apply installation-selected command/result hooks; mandatory wire decoding
    does not replace those optional hooks. Upload leases, artifacts and model

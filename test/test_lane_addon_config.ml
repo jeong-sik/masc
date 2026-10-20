@@ -595,6 +595,31 @@ hooks = ["validate_input", "validate_output"]
   check bool "native refuses an image rather than ignoring it" true
     (Result.is_error (load ~image:"image = \"unused\"" "max_reply_bytes = 4096")))
 
+let browser_service_is_explicit () = with_directory (fun _root packages _directory ->
+  let path=Filename.concat packages "browser.toml" in
+  let load service extra=write path (Printf.sprintf {|id = "browser"
+revision = "1"
+title = "Browser"
+runtime = "host_process"
+service = %s
+command = ["masc-browser-addon-worker"]
+contributions = ["observe"]
+[resources]
+max_reply_bytes = 4096
+%s
+|} service extra);Lane_addon_manifest.load ~path in
+  let browser=match load "\"browser\"" "" with Ok package -> package
+    | Error error -> fail (Lane_addon_manifest.error_to_string error) in
+  check bool "browser service is a typed package contract" true
+    (browser.worker_service=Lane_addon_types.Browser_service);
+  check bool "browser selection survives revision serialization" true
+    (Yojson.Safe.Util.member "service" (Lane_addon_types.package_to_json browser)=`String "browser");
+  List.iter (fun (service,extra) -> check bool "unsupported service contract refused" true
+    (Result.is_error (load service extra)))
+    ["\"unknown\"","";"true","";"\"browser\"","[world.state]\nmode = \"persistent\"";
+     "\"browser\"","[interface]\nmodel_access = \"host_sampling\"";
+     "\"browser\"","[world.tools]\nexport = [\"arbitrary_tool\"]"])
+
 let tool_exports_are_explicit_and_revisioned () = with_directory (fun _root packages directory ->
   let manifest = install_package packages in
   let path = Filename.concat directory "machine.toml" in
@@ -636,7 +661,8 @@ path = "/host"|} ])
 
 let () = run "Lane Add-on declarative composition"
   ["configuration",
-    [test_case "native execution declares no container isolation" `Quick native_execution_has_no_container_claims;
+    [test_case "browser service is explicit and names only supported capabilities" `Quick browser_service_is_explicit;
+      test_case "native execution declares no container isolation" `Quick native_execution_has_no_container_claims;
       test_case "runtime resources name only enforceable limits" `Quick runtime_selects_enforceable_resources;
      test_case "persistent state is explicit and revisioned" `Quick persistent_state_is_explicit_and_revisioned;
      test_case "tool exports are explicit and revisioned" `Quick tool_exports_are_explicit_and_revisioned;

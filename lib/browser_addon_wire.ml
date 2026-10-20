@@ -217,27 +217,29 @@ let answer_of_json value =
   | _ -> Error "unknown browser answer"
 
 type disposition = Not_started | Outcome_unknown
-type reply = Snapshot_result of Yojson.Safe.t | Poll_result of B.issued option | Receipt
+type reply = Snapshot_result of Yojson.Safe.t
+  | Poll_result of {command:B.issued option;state_id:string} | Receipt
   | Issue_result of (B.answer, B.selection_error) result
   | Service_refusal of {message:string;disposition:disposition}
 let reply_to_json = function
   | Snapshot_result snapshot -> `Assoc ["reply",string "snapshot";"snapshot",snapshot]
-  | Poll_result command -> `Assoc ["reply",string "poll";"command",nullable (fun (command:B.issued) ->
-      `Assoc ["id",string command.id;"command",command.verb_json]) command]
+  | Poll_result {command;state_id} -> `Assoc ["reply",string "poll";"command",nullable (fun (command:B.issued) ->
+      `Assoc ["id",string command.id;"command",command.verb_json]) command;"state_id",string state_id]
   | Receipt -> `Assoc ["reply",string "receipt"]
   | Issue_result answer -> `Assoc ["reply",string "issue";"answer",answer_to_json answer]
   | Service_refusal {message;disposition} -> `Assoc ["reply",string "refusal";"message",string message;
       "effect",string (match disposition with Not_started -> "not_started" | Outcome_unknown -> "unknown")]
 let reply_of_json value =
-  let* fields = object_fields ["reply";"snapshot";"command";"answer";"message";"effect"] value in
+  let* fields = object_fields ["reply";"snapshot";"command";"state_id";"answer";"message";"effect"] value in
   let* name = text_field fields "reply" in
   let reply_keys keys = exact ("reply"::keys) value |> Result.map (fun _ -> ()) in
   match name with
   | "snapshot" -> let* () = reply_keys ["snapshot"] in let* snapshot = required fields "snapshot" in Ok (Snapshot_result snapshot)
-  | "poll" -> let* () = reply_keys ["command"] in let* raw = required fields "command" in
+  | "poll" -> let* () = reply_keys ["command";"state_id"] in let* raw = required fields "command" in
       let* command = optional (fun raw -> let* fields = exact ["id";"command"] raw in
         let* id = text_field fields "id" in let* verb_json = required fields "command" in
-        Ok {B.id;verb_json}) raw in Ok (Poll_result command)
+        Ok {B.id;verb_json}) raw in
+      let* state_id = text_field fields "state_id" in Ok (Poll_result {command;state_id})
   | "receipt" -> let* () = reply_keys [] in Ok Receipt
   | "issue" -> let* () = reply_keys ["answer"] in let* raw = required fields "answer" in
       let* answer = answer_of_json raw in Ok (Issue_result answer)

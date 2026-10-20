@@ -13,6 +13,10 @@ session stopped. A read result too large for the frame comes back in pieces
 counts. When everything is read, the session asks the author output once; a
 refusal for size is answered with a smaller request until nothing is left to
 drop.
+
+Only a summary of each read stays in memory. Record bodies and file contents
+are read again from disk when the author request is written, newest first,
+and only as far as one request can hold (#44537).
 """
 from __future__ import annotations
 
@@ -109,20 +113,28 @@ def _assemble(marker: dict, chunks: list[dict]) -> dict:
     return result
 
 
-def reads(entries: list[dict]) -> list[dict]:
-    """Each read request of a session with its whole result, or with the
-    pieces received so far when it came back too large for the frame."""
+def _assemble_whole(item: dict) -> dict:
+    return _assemble(item["marker"], item["chunks"])
+
+
+def reads(entries: list[tuple[str, dict]], assemble: Callable[[dict], dict] = _assemble_whole) -> list[dict]:
+    """Each read request of a session with its result, or with the pieces
+    received so far when it came back too large for the frame. [entries]
+    pairs each kept body with its digest, and each read names the digests it
+    was put together from. [assemble] gives the result of a read whose last
+    piece came."""
     out: list[dict] = []
     by_request: dict[str, dict] = {}
-    for entry in entries:
+    for key, entry in entries:
         request, result = entry["request"], entry["result"]
         if request["kind"] == "read_result":
             target = by_request.get(request["original_request_id"])
             if target is None or target["marker"] is None:
                 raise q.LogError(f"a piece of {request['original_request_id']}, which was not read in pieces")
             target["chunks"].append(result)
+            target["digests"].append(key)
             continue
-        item = {"request": request, "marker": None, "chunks": [], "result": None}
+        item = {"request": request, "marker": None, "chunks": [], "result": None, "digests": [key]}
         if result["status"] == "result_exceeds_frame":
             item["marker"] = result
         else:
@@ -131,7 +143,7 @@ def reads(entries: list[dict]) -> list[dict]:
         by_request[request["request_id"]] = item
     for item in out:
         if item["marker"] is not None and item["chunks"] and item["chunks"][-1].get("eof") is True:
-            item["result"] = _assemble(item["marker"], item["chunks"])
+            item["result"] = assemble(item)
     return out
 
 
@@ -163,6 +175,25 @@ def material(session_reads: list[dict]) -> list[dict]:
                         "pin": f"{result['commit']}:{result['path']}", "sha256": result["sha256"],
                         "author": "", "at": 0, "title": "", "text": result["content"]})
     return out
+
+
+def summary(request: dict, result: dict, paths: tuple[str, ...]) -> dict:
+    """What the listing uses of a result: its status and where reading goes
+    next. Board records and file contents are left out; they are read again
+    from disk only for the author request. A repository page keeps, of each
+    commit, its id and the changed paths the grant covers [paths], which
+    name the files still to read."""
+    match request["kind"], result["status"]:
+        case "read_records", "records":
+            if paths:
+                return result | {"records": [{"sha": record["sha"],
+                                              "paths": [path for path in record["paths"] if covers(paths, path)]}
+                                             for record in result["records"]]}
+            return {key: value for key, value in result.items() if key != "records"}
+        case ("read_file", "file") | ("read_result", "result_chunk"):
+            return {key: value for key, value in result.items() if key != "content"}
+        case _:
+            return result
 
 
 # -- Drafts (RFC §4.9 Compose, step 3). -------------------------------------
@@ -220,6 +251,7 @@ class Flow:
         # Kept bodies are named by their digest, so what is derived from one
         # never goes stale. The fold is redone only when the log grew.
         self._entries: dict[tuple[str, tuple[str, ...]], dict] = {}
+        self._summaries: dict[tuple[str, tuple[str, ...]], dict] = {}
         self._sources: dict[str, str | None] = {}
         self._folded: tuple[int, list[q.Session]] = (-1, [])
 
@@ -229,29 +261,41 @@ class Flow:
             self._folded = (len(events), q.fold(events))
         return self._folded[1]
 
+    @staticmethod
+    def _paths(grants: dict[str, q.Grant], source: Any) -> tuple[str, ...]:
+        grant = grants.get(source) if isinstance(source, str) else None
+        return grant.paths if grant is not None and grant.kind == "repository" else ()
+
     def _entry(self, digest: str, grants: dict[str, q.Grant]) -> dict:
-        """A kept read as this flow uses it. A repository page keeps, of each
-        commit, its id and the changed paths the grant covers: a first
-        session reads the whole first-parent history, and the rest of each
-        commit is never used here. The kept body on disk stays whole."""
+        """A kept read as the listing uses it: the request and a summary of
+        its result (see summary()). Only summaries stay in memory, so what
+        the worker holds does not grow with what its sessions read (#44537).
+        The kept body on disk stays whole."""
         source = self._sources.get(digest)
-        grant = grants.get(source) if source is not None else None
-        paths = grant.paths if grant is not None and grant.kind == "repository" else ()
+        paths = self._paths(grants, source)
         cached = self._entries.get((digest, paths))
         if cached is not None:
             return cached
         entry = self.pages.read(digest)
         source = entry["request"].get("source_id")
         self._sources[digest] = source
-        grant = grants.get(source) if isinstance(source, str) else None
-        paths = grant.paths if grant is not None and grant.kind == "repository" else ()
-        result = entry["result"]
-        if paths and entry["request"]["kind"] == "read_records" and result["status"] == "records":
-            result = result | {"records": [{"sha": record["sha"],
-                                            "paths": [path for path in record["paths"] if covers(paths, path)]}
-                                           for record in result["records"]]}
-        self._entries[(digest, paths)] = {"request": entry["request"], "result": result}
+        paths = self._paths(grants, source)
+        self._entries[(digest, paths)] = {"request": entry["request"],
+                                          "result": summary(entry["request"], entry["result"], paths)}
         return self._entries[(digest, paths)]
+
+    def _assembled(self, grants: dict[str, q.Grant], item: dict) -> dict:
+        """The summary of a read whose pieces have all come. The pieces are
+        read again from disk once and dropped; the summary is kept under the
+        digest of the whole result, so it never goes stale."""
+        paths = self._paths(grants, item["request"].get("source_id"))
+        key = (item["marker"]["retained_sha256"], paths)
+        cached = self._summaries.get(key)
+        if cached is None:
+            pieces = [self.pages.read(digest)["result"] for digest in item["digests"][1:]]
+            cached = summary(item["request"], _assemble(item["marker"], pieces), paths)
+            self._summaries[key] = cached
+        return cached
 
     # -- compose --------------------------------------------------------------
 
@@ -268,8 +312,29 @@ class Flow:
     # -- listing --------------------------------------------------------------
 
     def _session_reads(self, session: q.Session) -> list[dict]:
+        """The session's reads, each with the summary of its result."""
         grants = {grant.source_id: grant for grant in session.grants}
-        return reads([self._entry(event.digest, grants) for event in session.material])
+        return reads([(event.digest, self._entry(event.digest, grants)) for event in session.material],
+                     lambda item: self._assembled(grants, item))
+
+    def _material(self, session: q.Session, sessions: list[q.Session]) -> list[dict]:
+        """The material of a session that has read everything, in the order
+        read, with the oldest left out once the rest no longer fits one
+        author request. Reads are taken again from disk from the last one
+        back; the request keeps only the newer part that fits (§7), so older
+        reads are not loaded at all, and what is held at once stays near one
+        frame. The fit is checked each time the material doubles, so the
+        request is encoded a few times rather than once per read."""
+        out: list[dict] = []
+        checked = 0
+        for read in reversed(self._session_reads(session)):
+            whole = reads([(digest, self.pages.read(digest)) for digest in read["digests"]])
+            out = material(whole) + out
+            if out and len(out) >= 2 * checked:
+                checked = len(out)
+                if not self.fits(self._author_body(session, sessions, scope=SCOPE_ALL, records=out)):
+                    break
+        return out
 
     def _start_cursor(self, grant: q.Grant, sessions: list[q.Session], session_id: str) -> str | None:
         """Where the last earlier session that reached asked stopped reading
@@ -439,7 +504,7 @@ class Flow:
         if self._next_read(after, sessions) is not None:
             self.log.append([read])
             return
-        records = material(self._session_reads(after))
+        records = self._material(after, sessions)
         # With no new record the author can still ask again an item asked
         # before, citing its earlier sources (§7). Only a workspace with
         # neither has nothing to ask about.

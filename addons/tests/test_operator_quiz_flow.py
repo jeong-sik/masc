@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import tracemalloc
 from typing import Callable
 import unittest
 
@@ -542,13 +543,10 @@ class Reductions(Base):
 class Frame(Base):
     def test_an_author_request_too_large_to_list_keeps_the_newer_half(self):
         self.host.board += [post(4, "four"), post(5, "five")]
-        whole = None
 
+        # A frame that holds three records and not five.
         def fits(body):
-            nonlocal whole
-            size = len(json.dumps(body))
-            whole = size if whole is None else whole
-            return size < whole
+            return len(json.loads(body["messages"][0])["material"]) <= 3
         self.flow = f.Flow(self.state, "prompt", fits)
         session_id = self.compose()
         seen = []
@@ -564,6 +562,73 @@ class Frame(Base):
         session = self.session(session_id)
         self.assertEqual((session.failure, session.requests),
                          (q.AuthorRequestExceedsFrame(f"{session_id}-author-0"), ()))
+
+
+class Memory(Base):
+    """What a worker holds does not grow with what its sessions read: on the
+    live workspace a session that read the Board from the start ran the
+    worker out of memory twice, the second time right after a restart that
+    read every kept page back (#44537)."""
+
+    def deliver_one(self):
+        (request,) = self.flow.listing()
+        self.assertTrue(self.flow.deliver(request["request_id"], self.host.produce(request)))
+
+    def test_a_restarted_worker_keeps_no_record_body_of_the_pages_it_reads_back(self):
+        self.host = FakeHost(page_size=10)
+        self.host.board = [post(n, f"post {n} " + "x" * 4000) for n in range(1, 201)]
+        self.compose()
+        for _ in range(19):
+            self.deliver_one()
+        kept = sum(path.stat().st_size for path in q.Blobs(self.state, "pages").directory.iterdir())
+        tracemalloc.start()
+        try:
+            restarted = f.Flow(self.state, "prompt", lambda request: True)
+            (request,) = restarted.listing()
+            held, _ = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertEqual(request["after"], "000189")
+        self.assertLess(held, kept // 10)
+
+    def test_a_restarted_worker_keeps_no_content_of_the_files_it_reads_back(self):
+        self.host = FakeHost(page_size=50)
+        self.host.commits = [commit(n, [f"changelog.d/{n}.md"]) for n in range(1, 41)]
+        self.host.files = {(f"{n:040x}", f"changelog.d/{n}.md"): f"fragment {n} " + "x" * 100000 for n in range(1, 41)}
+        self.compose(binding={"records": [REPO], "language": "ko"})
+        for _ in range(40):
+            self.deliver_one()
+        kept = sum(path.stat().st_size for path in q.Blobs(self.state, "pages").directory.iterdir())
+        tracemalloc.start()
+        try:
+            restarted = f.Flow(self.state, "prompt", lambda request: True)
+            (request,) = restarted.listing()
+            held, _ = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertEqual((request["kind"], request["path"]), ("read_file", "changelog.d/40.md"))
+        self.assertLess(held, kept // 10)
+
+    def test_the_author_request_reads_back_only_the_newest_pages_that_fit(self):
+        self.host.board = [post(n, f"post {n}") for n in range(1, 7)]
+
+        # A frame that holds two records and not four.
+        def fits(body):
+            return len(json.loads(body["messages"][0])["material"]) <= 2
+        self.flow = f.Flow(self.state, "prompt", fits)
+        seen = []
+        self.host.author = lambda payload: seen.append(payload) or {"status": "invalid_output", "detail": "x"}
+        session_id = self.compose()
+        self.deliver_one()
+        self.deliver_one()
+        first_page = self.session(session_id).material[0].digest
+        read = self.flow.pages.read
+        loaded = []
+        self.flow.pages.read = lambda key: loaded.append(key) or read(key)
+        self.deliver_one()
+        self.assertNotIn(first_page, loaded)
+        self.host.run(self.flow)
+        self.assertEqual([m["pin"] for m in seen[0]["material"]], ["p-5", "p-6"])
 
 
 class Grading(unittest.TestCase):

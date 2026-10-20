@@ -5570,7 +5570,7 @@
 (test
  (name test_browser_addon_artifacts)
  (modules test_browser_addon_artifacts)
- (libraries masc masc.browser_lane masc.lane_addon_call_context masc.masc_tool_blob_store masc.native_addon_lease masc.fs_compat masc.masc_eio_context mcp_protocol alcotest eio eio.unix eio_main yojson unix uuidm digestif))
+ (libraries masc masc.browser_lane masc.lane_addon_call_context masc.masc_tool_blob_store masc.native_addon_lease masc.fs_compat masc.masc_eio_context masc.time_compat mcp_protocol alcotest eio eio.unix eio_main yojson unix digestif))
 
 (test
  (name test_lane_addon_worker_protocol)

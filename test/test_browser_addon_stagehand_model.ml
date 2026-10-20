@@ -22,7 +22,10 @@ let scenario manifest fixture =
     Time_compat.set_clock clock;Fs_compat.set_fs (Eio.Stdenv.fs env);
     Eio.Time.with_timeout_exn clock 20. (fun () ->
     Eio_context.with_test_env ~sw ~clock ~net ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
-      let package=Lane_addon_manifest.load ~path:manifest |> ok in
+      let package=match Lane_addon_manifest.load ~path:manifest with
+        | Ok package -> package
+        | Error error -> failf "Stagehand manifest %s: %s" manifest
+            (Lane_addon_manifest.error_to_string error) in
       let owner=Owner.create ~incarnation |> ok in
       check bool "unselected model publishes no callback" true (Model.for_owner owner=Ok None);
       let models=Models.create ~incarnation ~configuration:{Models.store_root=Filename.concat base_path "receipts";

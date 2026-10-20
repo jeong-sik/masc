@@ -1678,6 +1678,68 @@ let test_deferred_review_is_announced_and_waits_for_a_request () =
   check string "the requested review committed" "awaiting_confirmation" (stored_phase config goal_id)
 ;;
 
+(* A review that raises ends with the run row [Raised] and the exception
+   continues to its isolating owner, which logs and moves on without arming a
+   retry. The Board hears of it the way it hears of a deferral, under the gate
+   the Task verifier uses for the same event, and says no retry is armed
+   (#38679). The outcome observer is the seam outside the evaluator's own
+   exception guard. *)
+let test_raised_review_is_announced () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Verifier raises" in
+  ignore (must_succeed "initial request" (transition ctx goal_id "request_complete"));
+  let request_id = pending_request_id config goal_id in
+  let registry = Goal_verification_run_registry.global () in
+  let saved_observer = Atomic.get AR.outcome_observer_fn in
+  Fun.protect
+    ~finally:(fun () -> Atomic.set AR.outcome_observer_fn saved_observer)
+    (fun () ->
+      Atomic.set AR.outcome_observer_fn
+        (fun ~outcome:_ ~runtime:_ -> failwith "outcome observer raised");
+      with_lane_and_reviewer ~slots:(fun () -> Ok ["verifier-a"])
+        ~reviewer:(recording_reviewer (ref []) ["verifier-a", Stub_malformed])
+        (fun () ->
+          match Agent.process_pending_work config { goal_id } with
+          | exception Failure _ -> ()
+          | Agent.Committed | Agent.Superseded | Agent.Deferred _ ->
+            fail "the exception must continue to the review's owner"));
+  (match reviews_of_goal registry goal_id with
+   | [ run ] ->
+     (match run.status with
+      | Goal_verification_run_registry.Completed
+          { outcome = Goal_verification_run_registry.Raised { detail }; _ } ->
+        check bool "the run row carries the exception" true
+          (String_util.string_contains_substring
+             ~needle:"outcome observer raised" detail)
+      | _ -> fail "the run must end Raised")
+   | runs -> fail (Printf.sprintf "expected one run, got %d" (List.length runs)));
+  match goal_stall_posts ~goal_id ~request_id with
+  | [ (post, fields) ] ->
+    let text name =
+      match List.assoc_opt name fields with
+      | Some (`String value) -> value
+      | Some _ | None -> fail ("stall notice lacks " ^ name) in
+    check string "the notice names a Goal review" "goal_review" (text "subject");
+    check string "the notice is keyed by the Raised gate" "Raised" (text "gate");
+    check bool "the notice carries the exception" true
+      (String_util.string_contains_substring
+         ~needle:"outcome observer raised" (text "detail"));
+    (match List.assoc_opt "disposition" fields with
+     | Some disposition ->
+       (match Verification_protocol.For_testing.stall_disposition_of_json disposition with
+        | Some Verification_protocol.No_retry_armed -> ()
+        | Some (Verification_protocol.Retry_scheduled _) ->
+          fail "a raised review arms no retry"
+        | None -> fail "the disposition must decode")
+     | None -> fail "stall notice lacks its disposition");
+    check bool "the notice names the forward path" true
+      (String_util.string_contains_substring ~needle:"request_complete" post.body);
+    check string "the Goal waits in verifying" "verifying" (stored_phase config goal_id)
+  | posts ->
+    fail (Printf.sprintf "expected one stall notice, got %d" (List.length posts))
+;;
+
 (* A candidate that refuses with a typed model-absence error (a retired or
    unknown model) is a permanent failure for the unchanged request: the
    deferral names it in [model_absent_runtimes], keeps it out of
@@ -2025,6 +2087,8 @@ let () =
             (test_wake_after_deferred_persist_survives_active_scan ~same_request:true)
         ; test_case "deferred review is announced and waits for a request" `Quick
             test_deferred_review_is_announced_and_waits_for_a_request
+        ; test_case "raised review is announced" `Quick
+            test_raised_review_is_announced
         ; test_case "pending before phase waits for explicit retry" `Quick
             test_pending_before_phase_waits_for_explicit_request
         ; test_case "reopen from verifying cancels a hung review" `Quick

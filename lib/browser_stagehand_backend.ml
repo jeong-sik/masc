@@ -2,16 +2,18 @@ module Session = Browser_stagehand_session
 module Executor = Browser_stagehand_executor
 module Wire = Browser_stagehand_wire
 
+type open_error = Not_opened of string | Cleanup_unconfirmed of string
+
 type 'session opener =
   sw:Eio.Switch.t
   -> headless:bool
   -> log:(Session.event -> unit)
-  -> ('session * Yojson.Safe.t, string) result
+  -> ('session * Yojson.Safe.t, open_error) result
 
 type 'session opened =
   { session : 'session
   ; release : unit Eio.Promise.u
-  ; stopped : unit Eio.Promise.t
+  ; stopped : (unit, string) result Eio.Promise.t
   ; ended : string option ref  (* the first reason the session stopped working *)
   ; abandoned_answers : int ref  (* settled replies whose callers left, including cancellation races *)
   ; abandoned_answered : Eio.Condition.t  (* broadcast on each such reply *)
@@ -32,6 +34,7 @@ type 'session t =
   ; sleep : float -> unit
   ; open_session : 'session opener
   ; call : 'session -> Executor.call
+  ; shutdown : 'session -> (unit, string) result
   ; pid : 'session -> int
   ; log : Session.event -> unit
   ; requests : request Eio.Stream.t
@@ -39,6 +42,7 @@ type 'session t =
   ; verbs : Eio.Semaphore.t  (* one page verb at a time *)
   ; mutable state : 'session state
   ; observed_session : Browser_lane.session_observation Atomic.t
+  ; mutable last_settlement : (unit, string) result
   ; mutable last_end : string option  (* why the last session stopped working, until the next open *)
   }
 
@@ -48,7 +52,8 @@ let session_observation t = Atomic.get t.observed_session
 let set_state t state =
   t.state <- state;
   Atomic.set t.observed_session (match state with
-    | Closed -> Browser_lane.Browser_closed
+    | Closed -> (match t.last_settlement with
+      | Ok () -> Browser_lane.Browser_closed | Error _ -> Browser_lane.Browser_unknown)
     | Opening | Closing -> Browser_lane.Browser_changing
     | Quarantined _ -> Browser_lane.Browser_unknown
     | Open opened -> match !(opened.ended) with
@@ -127,32 +132,50 @@ let run_session t ~headless ~opened ~resolve_opened =
     t.log event
   in
   let stopped, resolve_stopped = Eio.Promise.create () in
+  let terminal = ref (Ok ()) in
   let not_opened detail =
     if not (Eio.Promise.is_resolved opened) then Eio.Promise.resolve resolve_opened (Error detail)
   in
   let finish () =
     t.last_end <- !ended;
+    t.last_settlement <- !terminal;
     set_state t Closed;
-    Eio.Promise.resolve resolve_stopped ()
+    Eio.Promise.resolve resolve_stopped !terminal
   in
   (match
-    Eio.Switch.run (fun session_sw ->
-      match t.open_session ~sw:session_sw ~headless ~log with
-      | Error detail ->
-        (* The browser may be running; it stops as this switch ends, and
-           until then the backend is closing, not opening. *)
-        set_state t Closing;
-        not_opened detail
-      | Ok (session, _init) ->
-        let released, release = Eio.Promise.create () in
-        Executor.Tabs.forget_pages t.tabs;
-        t.last_end <- None;
-        set_state t (Open { session; release; stopped; ended; abandoned_answers; abandoned_answered });
-        release_on_end := (fun () -> release_session release);
-        (* An end that came between attach and now. *)
-        (match !ended with Some _ -> !release_on_end () | None -> ());
-        Eio.Promise.resolve resolve_opened (Ok ());
-        Eio.Promise.await released)
+    Eio.Switch.run (fun control_sw ->
+      let released, release = Eio.Promise.create () in
+      Eio.Fiber.fork_daemon ~sw:control_sw (fun () ->
+        Fun.protect ~finally:(fun () -> release_session release) Eio.Fiber.await_cancel);
+      Eio.Cancel.protect (fun () ->
+        Eio.Switch.check control_sw;
+        Eio.Switch.run (fun session_sw ->
+          (* Only transport ownership is protected. Cancelling the control
+             lifetime cancels startup work and joins its partial-open cleanup.
+             A successful result wins a simultaneous cancellation signal. *)
+          let opening=Watched_work.run
+            ~watcher:(fun () -> Eio.Promise.await released;None)
+            (fun () -> Some (t.open_session ~sw:session_sw ~headless ~log)) in
+          match opening with
+          | None -> set_state t Closing;not_opened "the server is stopping"
+          | Some (Error (Not_opened detail)) -> set_state t Closing;not_opened detail
+          | Some (Error (Cleanup_unconfirmed detail)) ->
+            terminal := Error detail;set_state t Closing;not_opened detail
+          | Some (Ok (session, _init)) ->
+            Executor.Tabs.forget_pages t.tabs;
+            t.last_end <- None;
+            set_state t (Open { session; release; stopped; ended; abandoned_answers; abandoned_answered });
+            release_on_end := (fun () -> release_session release);
+            (match !ended with Some _ -> !release_on_end () | None -> ());
+            Eio.Promise.resolve resolve_opened (Ok ());
+            Eio.Promise.await released;
+            set_state t Closing;
+            terminal :=
+              (match t.shutdown session with
+               | result -> result
+               | exception (Eio.Cancel.Cancelled _ as exn) ->
+                 terminal := Error "browser shutdown was cancelled";raise exn
+               | exception exn -> Error ("browser shutdown raised: " ^ Printexc.to_string exn)))))
   with
   | () -> finish ()
   | exception (Eio.Cancel.Cancelled _ as exn) ->
@@ -160,9 +183,9 @@ let run_session t ~headless ~opened ~resolve_opened =
     finish ();
     raise exn
   | exception exn ->
-    (* The opener and the session's fibers fail this session, not the server
-       whose switch this fiber is on. *)
-    not_opened ("the stagehand session failed: " ^ Printexc.to_string exn);
+    let detail="the stagehand lifetime failed: " ^ Printexc.to_string exn in
+    terminal := Error (match !terminal with Ok () -> detail | Error previous -> previous ^ "; " ^ detail);
+    not_opened detail;
     finish ());
   `Stop_daemon
 ;;
@@ -174,6 +197,8 @@ let open_session t ~headless =
   | Open { ended = { contents = Some _ }; _ } | Opening | Closing -> in_transition
   | Open { ended = { contents = None }; _ } ->
     answered (`Assoc [ "opened", `Bool true; "reused", `Bool true; "backend", `String backend_name ])
+  | Closed when Result.is_error t.last_settlement ->
+    Browser_lane.Refused "the previous browser shutdown is unconfirmed; retire this installation and inspect its original resources"
   | Closed ->
     set_state t Opening;
     let opened, resolve_opened = Eio.Promise.create () in
@@ -185,7 +210,9 @@ let open_session t ~headless =
 
 let close_session t =
   match t.state with
-  | Closed -> answered (`Assoc [ "closed", `Bool true ])
+  | Closed -> (match t.last_settlement with
+    | Ok () -> answered (`Assoc [ "closed", `Bool true ])
+    | Error detail -> Browser_lane.Refused ("browser shutdown unconfirmed: " ^ detail))
   | Opening | Closing -> in_transition
   | Open opened | Quarantined opened ->
     set_state t Closing;
@@ -208,8 +235,9 @@ let close_session t =
       | exception exn -> "did not close: " ^ Printexc.to_string exn
     in
     release_session opened.release;
-    Eio.Promise.await opened.stopped;
-    answered (`Assoc [ "closed", `Bool true; "runtime", `String runtime ])
+    (match Eio.Promise.await opened.stopped with
+     | Ok () -> answered (`Assoc [ "closed", `Bool true; "runtime", `String runtime ])
+     | Error detail -> Browser_lane.Refused ("browser shutdown unconfirmed: " ^ detail))
 ;;
 
 let status t =
@@ -304,7 +332,7 @@ let retire_sentence_session t expected =
   | Open current when expected == current ->
     set_state t Closing;
     release_session current.release;
-    Eio.Promise.await current.stopped
+    ignore (Eio.Promise.await current.stopped)
   | Closed | Opening | Closing | Quarantined _ | Open _ -> ()
 ;;
 
@@ -368,12 +396,13 @@ let serve t { verb; actor; reply; caller_left } =
         | Began | Queued -> ()))
 ;;
 
-let create ~sw ~clock ~open_session ~call ~pid ~log =
+let create ~sw ~clock ~open_session ~call ~shutdown ~pid ~log =
   let t =
     { sw
     ; sleep = Eio.Time.sleep clock
     ; open_session
     ; call
+    ; shutdown
     ; pid
     ; log
     ; requests = Eio.Stream.create max_int
@@ -381,6 +410,7 @@ let create ~sw ~clock ~open_session ~call ~pid ~log =
     ; verbs = Eio.Semaphore.make 1
     ; state = Closed
     ; observed_session = Atomic.make Browser_lane.Browser_closed
+    ; last_settlement = Ok ()
     ; last_end = None
     }
   in
@@ -408,3 +438,7 @@ let execute t ?actor verb =
     Eio.Promise.resolve leave ();
     raise exn
 ;;
+
+let settlement t = match t.state with
+  | Closed -> t.last_settlement
+  | Opening|Open _|Closing|Quarantined _ -> Error "browser lifetime has not joined"

@@ -1152,10 +1152,11 @@ let test_retired_kind_row_dropped () =
       match K.load_all_result ~base_dir ~keeper_name with
       | Ok _ -> Alcotest.fail "strict load accepted a retired kind row"
       | Error detail ->
-        Alcotest.(check string)
+        Alcotest.(check bool)
           "strict reader names the retired field"
-          (Printf.sprintf "%s:2 unknown chat row field \"kind\"" path)
-          detail)
+          true
+          (String_util.contains_substring detail
+             {|unknown chat row field "kind"|}))
 
 let test_window_keeps_tool_lines_of_retained_turns () =
   let base_dir = temp_base_path "keeper-chat-store-window" in

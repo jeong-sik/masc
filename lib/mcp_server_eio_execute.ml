@@ -43,6 +43,24 @@ let lane_access_for_caller ~config
 
 ;;
 
+let browser_principal_for_caller ~config (caller:Mcp_server_eio_caller_identity.t) =
+  let access=lane_access_for_caller ~config caller in
+  if caller.verified_internal_keeper_runtime then
+    match access with
+    | Lane_addon_sources.Keeper name -> Lane_addon_call_context.Keeper name
+    | Operator_configuration|Unauthenticated -> Lane_addon_call_context.Anonymous
+  else match caller.token with
+    | None -> Lane_addon_call_context.Anonymous
+    | Some token ->
+        match Auth.find_credential_by_token config.base_path ~token with
+        | Error _ -> Lane_addon_call_context.Anonymous
+        | Ok credential ->
+            match access with
+            | Lane_addon_sources.Keeper name -> Lane_addon_call_context.Keeper name
+            | Operator_configuration|Unauthenticated ->
+                Lane_addon_call_context.Authenticated_agent credential.agent_name
+;;
+
 let execute_tool_eio
       ~sw
       ~clock
@@ -454,6 +472,7 @@ let execute_tool_eio
                          "Candle tools require an authenticated Keeper; a supplied caller name is not a wallet identity") in
                    let dispatch ?dos_admission () =
                      Tool_misc.dispatch ?dos_admission
+                       ~browser_principal:(browser_principal_for_caller ~config caller_identity)
                        ~lane_access
                        { Tool_misc.config
                        ; agent_name

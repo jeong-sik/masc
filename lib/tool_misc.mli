@@ -51,7 +51,8 @@ val with_web_fetch_http_get_for_test :
 val dispatch :
   ?ask_source_turn_ref:Ids.Turn_ref.t ->
   ?dos_admission:((unit -> Tool_result.result) -> Tool_result.result) ->
-  ?lane_access:Lane_addon_sources.access -> context -> name:string ->
+  ?lane_access:Lane_addon_sources.access ->
+  ?browser_principal:Lane_addon_call_context.principal -> context -> name:string ->
   args:Yojson.Safe.t -> Tool_result.result option
 (** [lane_access] is host-verified authority for Lane operations. An omitted
     value is unauthenticated. Keeper access supplies the canonical Lane caller;
@@ -59,7 +60,9 @@ val dispatch :
     [dos_admission] wraps only prepared load/restore effects; callers enforcing
     participation must pass their final credential admission through it.
     [ask_source_turn_ref] is frozen host provenance, never a Tool argument;
-    omission records an unobserved source. It grants no effect authority. *)
+    omission records an unobserved source. It grants no effect authority.
+    [browser_principal] is verified by the caller; omission is anonymous and
+    cannot execute a browser Add-on command. *)
 
 val tool_inventory_json :
   context -> include_hidden:bool -> Yojson.Safe.t

@@ -2335,14 +2335,25 @@ let test_internal_keeper_lane_access_requires_verified_runtime_and_keeper () =
       Fs_compat.mkdir_p (Filename.dirname meta_path);
       Yojson.Safe.to_file meta_path (Masc.Keeper_meta_json.meta_to_json (make_keeper_meta "alpha"));
       let token = Auth.ensure_internal_keeper_token base_path in
-      let access ~internal_keeper_runtime ~token ~name =
+      let resolve ~internal_keeper_runtime ~token ~name =
         let caller = Masc.Mcp_server_eio_caller_identity.resolve ~config
           ~tool_name:"masc_lane_inspect" ~arguments:(`Assoc ["_agent_name", `String name])
           ~identity:(test_agent_identity ~uuid:"lane-runtime" ~session_key:"lane-runtime")
           ~cached_resolved_agent:None ~auth_token:(Some token) ~internal_keeper_runtime
           ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
           ~workspace_initialized:(fun () -> false) ~log_mcp_exn:(fun ~label:_ _ -> ()) in
-        Masc.Mcp_server_eio_execute.lane_access_for_caller ~config caller in
+        caller in
+      let access ~internal_keeper_runtime ~token ~name =
+        Masc.Mcp_server_eio_execute.lane_access_for_caller ~config
+          (resolve ~internal_keeper_runtime ~token ~name) in
+      let caller=resolve ~internal_keeper_runtime:true ~token ~name:"alpha" in
+      Alcotest.(check bool) "browser actor is the verified canonical Keeper" true
+        (Masc.Mcp_server_eio_execute.browser_principal_for_caller ~config caller=
+          Lane_addon_call_context.Keeper "alpha");
+      let spoofed={caller with token=None;verified_internal_keeper_runtime=false} in
+      Alcotest.(check bool) "a resolved caller name without credential is not browser authority" true
+        (Masc.Mcp_server_eio_execute.browser_principal_for_caller ~config spoofed=
+          Lane_addon_call_context.Anonymous);
       Alcotest.(check bool) "verified runtime resolves existing Keeper" true
         (access ~internal_keeper_runtime:true ~token ~name:"alpha" = Masc.Lane_addon_sources.Keeper "alpha");
       List.iter (fun (internal_keeper_runtime, token, name) ->

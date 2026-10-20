@@ -72,7 +72,7 @@ let prepare_read ~keeper_name json =
   | `Text -> prepared request Raw (B.Page_read {tab_id=request.tab_id;max_chars=Some max_chars})
   | `Elements -> prepared request Raw (B.Page_elements {tab_id=request.tab_id})
   | `Frames|`Dialog -> Error "contextual read requires a frame or dialog mode"
-let prepare ~keeper_name tool json =
+let prepare ~keeper_name ~upload_paths tool json =
   let* _=Lane_addon_action.canonical json in
   match tool with
   | C.Read -> prepare_read ~keeper_name json
@@ -82,6 +82,12 @@ let prepare ~keeper_name tool json =
         verb=B.Page_interact {tab_id=request.tab_id;expected_url=request.expected_url;action=request.action}}
   | Act ->
       let* action=B.Action.parse json in
+      let* action=match action,upload_paths with
+        | B.Action.On_tab ({interaction=Upload {selector;_};_} as target),Some paths ->
+            Ok (B.Action.On_tab {target with interaction=Upload {selector;paths}})
+        | On_tab {interaction=Upload _;_},None -> Error "upload requires an authoritative Keeper file context"
+        | (Open_tab _|On_tab {interaction=(Click _|Fill _|Press _|Select _|Scroll _|Back|Forward|Reload
+            |Close_tab|Accept_dialog _|Dismiss_dialog);_}),(None|Some _) -> Ok action in
       let* request=Legacy.tool_request json in
       let* ()=match action,request.route with
         | B.Action.Open_tab _,Browser_selection.Exact (B.Live_route None) ->
@@ -141,9 +147,9 @@ let project ~keeper_name ~started request (receipt:Host.receipt) =
       let* data=Browser_surface.capture_from ~binding:receipt.binding ~tab_id ~started receipt.data
         |> Result.map_error Browser_surface.failure_message in
       Browser_screenshot.persist ~keeper_name data
-let handle ~config ~access ~principal ~reserved ~keeper_name ~tool ~tool_name ~start_time json =
+let handle ?upload_paths ~config ~access ~principal ~reserved ~keeper_name ~tool ~tool_name ~start_time json =
   let started=Mtime_clock.elapsed_ns () in
-  let result=match prepare ~keeper_name tool json with
+  let result=match prepare ~keeper_name ~upload_paths tool json with
     | Error detail -> Legacy.make_input_err ~tool_name ~start_time detail
     | Ok request ->
         match Host.connect ~config ~access ~principal ~reserved with

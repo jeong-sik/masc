@@ -391,6 +391,9 @@ type quota_write_owner =
           (* 이 시도가 포착한 자격 증명 세대의 출처. 홈 미확인 기록을 누가 지울 수 있는지 가른다 *)
       ; read : Runtime_codex_account.read }
 
+(* 첫 scope: 소진을 쓰고 성공이 지운다. 두 번째 목록: 성공이 지울 수 있는 홈 미확인 scope.
+   [source] 는 이 함수가 읽지 않는다. 홈 미확인 scope 를 쓰고 지우는 호출이
+   같은 [Codex_run] 의 [source] 를 아래 [_in_home] 쌍에 그대로 넘긴다. *)
 let scopes_to_write = function
   | Captured s -> Load_time s, []
   | Codex_run { home; read = Stated k; source = _ } -> Codex_account k, [ Codex_home_account_not_stated home ]
@@ -398,14 +401,36 @@ let scopes_to_write = function
     Codex_home_account_not_stated home, []
 ```
 
+홈 미확인 기록은 쓴 시도의 세대를 함께 남긴다. 그 기록을 쓰고 지우는 길은 아래 쌍 하나뿐이다.
+
+```ocaml
+(* lib/runtime/runtime_codex_home_account.mli *)
+type generation_order = Older | Not_older | Unordered
+val generation_order : source -> than:source -> generation_order
+(** [source] 의 세대가 [than] 의 세대보다 옛 것이면 [Older], 같거나 새 것이면 [Not_older].
+    순서를 증명하지 못하면 [Unordered]. *)
+
+(* lib/runtime/runtime_quota_window.mli *)
+val note_observed_exhausted_in_home : home:string -> source:Runtime_codex_home_account.source -> unit
+val note_succeeded_in_home : home:string -> source:Runtime_codex_home_account.source -> unit
+```
+
 - 사용량 소진(`usageLimitExceeded`)은 `scopes_to_write` 의 첫 scope 에 `note_observed_exhausted` 로 적는다.
-- `sessionBudgetExceeded` 는 계정 증거가 아니다. 읽기와 관계없이 `Codex_home_account_not_stated home` 에 적는다.
+  그 scope 가 홈 미확인 scope 이면 `note_observed_exhausted_in_home` 으로 적는다.
+- `sessionBudgetExceeded` 는 계정 증거가 아니다. 읽기와 관계없이 `Codex_home_account_not_stated home` 에 `note_observed_exhausted_in_home` 으로 적는다.
   지금 이것을 홈 scope 에 적는 동작과 같은 결과다. 넓히지도 좁히지도 않는다 (결정 7).
-- 홈 미확인 기록(`Codex_home_account_not_stated home`)은 쓴 시도의 `source` 가 포착한 자격 증명 세대를 함께 남긴다.
-- 성공(`note_succeeded`)은 `scopes_to_write` 의 첫 scope 를 지운다. 홈 미확인 기록은 그 성공이 포착한 세대가 기록의 세대와 같거나 더 새로울 때만 지운다.
-  성공 쪽이 더 옛 세대이거나 세대 순서를 증명하지 못하면 지우지 않는다. 옛 세대로 통과한 turn 은 새 세대에서 난 "알 수 없는 계정이 소진" 증거가 틀렸다는 근거가 못 된다.
-  계정을 확인한 turn 은 계정 기록을 지우고, 그 홈의 미확인 기록은 위 조건을 만족할 때만 함께 지운다.
-  계정을 확인하지 못한 turn 은 같은 조건으로 그 홈의 미확인 기록만 지운다. 어느 계정이 답했는지 모르므로 계정 기록은 건드리지 않는다.
+- 홈 미확인 기록을 쓸 때: 기록이 없거나 기록의 세대보다 옛 것이 아닌(`Not_older`) 쓰기는 기록과 세대 표시를 새로 쓴다.
+  `Older` 쓰기와 `Unordered` 쓰기는 이미 있는 기록과 세대 표시를 그대로 둔다. 세대 표시는 올라가기만 한다.
+  늦게 온 옛 세대의 쓰기가 표시를 낮추면 그 뒤 옛 세대의 성공이 새 세대의 기록을 지울 수 있다.
+  `Until` 로 쓰는 사용량 창은 성공이 지우지 않으므로 세대 표시를 쓰지 않는다.
+- 성공은 두 가지를 따로 한다.
+  - 계정 scope: `Stated k` 인 turn 의 성공은 `Codex_account k` 기록을 `note_succeeded` 로 지운다. 세대를 보지 않는다. 그 기록의 주인이 k 이고 성공도 k 로 귀속됐으니, 옛 세대의 성공도 k 에 대해서는 증거다.
+  - 홈 미확인 scope: `note_succeeded_in_home` 이 기록의 세대와 성공의 세대를 비교해 `Not_older` 일 때만 지운다. `Older` 나 `Unordered` 면 기록을 둔다.
+    옛 세대로 통과한 turn 은 새 세대에서 난 "알 수 없는 계정이 소진" 증거가 틀렸다는 근거가 못 된다.
+    비교와 삭제는 `Runtime_quota_window` 의 한 번의 잠금 안에서 한다. 호출자가 비교한 뒤 따로 지울 수 있는 함수는 내보내지 않는다.
+  - 계정을 확인하지 못한 turn 은 홈 미확인 scope 만 한다. 어느 계정이 답했는지 모르므로 계정 기록은 건드리지 않는다.
+- 이 세대 규칙은 출처를 공급할 수 있을 때(위 구현 선행 조건의 미해결 항목) 적용하는 계약 초안이다.
+  공급하기 전에는 `source` 를 만들 수 없어 홈 미확인 기록에 세대 표시가 없다. 그동안은 결정 4 대로 지금과 같이 쓰고, 성공이 지운다.
 - 사용량 창(`account/rateLimits/updated` 알림과 turn 안 읽기의 창)은 첫 scope 에 적는다.
   알림이 읽기의 답보다 먼저 오면 turn 이 끝날 때 한꺼번에 적는다. 알림 창을 먼저 홈에 적고 나중에 옮기지 않는다.
 - turn 안 읽기의 결과는 출처가 확인됐을 때 그 출처의 ticket 으로 `observe` 에도 넘긴다.
@@ -468,6 +493,7 @@ MASC 규칙은 "새 상태·필드·Gate 는 없을 때 durable truth 가 손상
 | `Runtime_codex_home_account` (홈 → 확인한 계정) | 후보 순서를 정하는 시점에 그 홈이 어느 계정에 닿는지 알 곳이 없다 |
 | `Codex_home_account_not_stated` | 계정을 모르는 증거를 버리거나 계정으로 꾸며야 한다 |
 | `quota_write_owner` | 순서와 기록이 같은 함수를 써서, turn 이 알아낸 계정이 기록에 닿지 못한다 |
+| 홈 미확인 기록의 세대 표시 (`Runtime_quota_window`, 프로세스 안) | 옛 세대의 성공이 새 세대의 증거를 지우고, 옛 세대의 쓰기가 표시를 낮춘다 |
 | turn 마다 보내는 `account/rateLimits/read` | turn 의 기록을 그 turn 이 쓴 계정에 붙일 수 없다 |
 
 | 없어지는 것 |
@@ -579,8 +605,10 @@ constitution 의 testing 절에 따라 기능 단위로 본다. 기존 가짜 ap
 | 답이 순서를 바꿔 옴 | 읽기의 답이 `thread/start` 답보다 늦게, 또는 먼저 와도 protocol 오류가 나지 않는다. 다른 모르는 id 는 여전히 오류다 |
 | ChatGPT 가 아닌 로그인 | `account/read` 가 `apiKey` 를 답하면 읽기를 보내지 않는다 |
 | `sessionBudgetExceeded` | 계정을 확인한 turn 이라도 홈 미확인 scope 에만 적고 계정 scope 에는 적지 않는다 |
-| 성공이 지우는 것 | 계정을 확인한 turn 의 성공은 계정 기록을 지우고, 같은 세대이거나 더 새로운 세대일 때만 홈 미확인 기록도 지운다. 확인 못 한 turn 의 성공은 같은 조건으로 홈 미확인 기록만 지운다 |
-| 옛 세대의 성공 | 홈 H 의 세대 1 에서 계정 X 를 확인한 turn 이 멈춘 사이 H 가 세대 2(계정 Y)로 바뀌고, 세대 2 의 turn 이 계정을 확인하지 못한 채 `usageLimitExceeded` 를 받아 H 의 미확인 기록이 남는다. 이어서 세대 1 의 turn 이 X 로 성공한다. X 의 계정 기록은 지워지고 H 의 미확인 기록은 남아서 H 후보는 계속 뒤에 있다. 세대 2 의 성공은 그 기록을 지운다. 세대 순서를 증명하지 못한 성공은 기록을 지우지 않는다 |
+| 성공이 지우는 것 | 계정 X 와 홈 H 의 소진 기록을 둔 뒤, 같은 세대에서 X 를 확인한 turn 이 성공하면 X 기록과 H 미확인 기록이 함께 지워진다. 같은 세대에서 계정을 확인하지 못한 turn 이 성공하면 H 미확인 기록만 지워지고 X 기록은 남는다 |
+| 옛 세대의 성공 | 세대 1 에서 X 를 확인한 turn 이 멈춘 사이 H 가 세대 2(계정 Y)로 바뀌고, 세대 2 의 turn 이 계정을 확인하지 못한 채 `usageLimitExceeded` 를 받는다. X 의 계정 기록도 소진으로 둔다. 세대 1 의 turn 이 X 로 성공하면 X 기록은 지워지고 H 미확인 기록은 남아 H 후보는 계속 뒤에 있다. 이어서 세대 2 의 성공이 오면 H 미확인 기록이 지워진다 |
+| 순서를 증명하지 못한 성공 | 가짜 출처 공급자가 세대 순서를 답하지 못하게 한다(`Unordered`). 그 출처의 성공은 H 미확인 기록을 지우지 않는다 |
+| 옛 세대의 쓰기 | 세대 2 의 H 미확인 기록이 있을 때 세대 1 의 `usageLimitExceeded` 나 `sessionBudgetExceeded` 가 늦게 쓰인다. 세대 표시는 2 로 남고, 이어서 세대 1 의 성공이 와도 기록은 남는다 |
 | resolved JSON 과 observe 경합 | 응답을 만드는 도중 `observe` 가 끼어도 응답은 500 없이 한 스냅숏으로 일관된다 |
 | 식별자 노출 | 가짜 계정 id·email 문자열이 resolved JSON, 로그 줄, TUI 캡처 어디에도 나오지 않는다 |
 
@@ -593,9 +621,13 @@ constitution 의 testing 절에 따라 기능 단위로 본다. 기존 가짜 ap
 - turn 안 읽기를 기다리게 되돌리면 "읽기가 멈춤" 이 실패해야 한다.
 - 세대 대신 요청 순번만으로 홈을 갱신하면 "옛 프로세스의 새 요청" 이 실패해야 한다.
 - 성공이 세대를 보지 않고 홈 미확인 기록을 지우게 하면 "옛 세대의 성공" 이 실패해야 한다.
+- 같은 세대의 성공도 지우지 못하게(`Not_older` 를 새 세대만으로 좁히면) "성공이 지우는 것" 이 실패해야 한다.
+- `Unordered` 를 지우는 쪽으로 처리하면 "순서를 증명하지 못한 성공" 이 실패해야 한다.
+- 계정 기록의 삭제에도 세대 조건을 걸면 "옛 세대의 성공" 이 실패해야 한다 (X 기록이 남는다).
+- 옛 세대의 쓰기가 세대 표시를 낮추게 하면 "옛 세대의 쓰기" 가 실패해야 한다.
 - 같은 프로세스 또는 앞뒤 email 일치만으로 귀속을 확정하면 사용자 변경·X→Y→X 시험이 실패해야 한다.
 
-추가한 세 시나리오는 구현의 수용 시험 계획이다. 실제 multi-seat 계정으로 재현했거나 구현 시험을 실행했다는 주장이 아니다.
+추가한 시나리오는 구현의 수용 시험 계획이다. 실제 multi-seat 계정으로 재현했거나 구현 시험을 실행했다는 주장이 아니다.
 
 배포 뒤 실측:
 
@@ -619,7 +651,7 @@ constitution 의 testing 절에 따라 기능 단위로 본다. 기존 가짜 ap
    이 단계에서 기록은 아직 `Codex_home_account_not_stated home` 에 적는다. 계정 scope 에는 기록이 없으므로 동작은 지금과 같다.
 3. **기록이 계정에 붙는다** (2 위) — `quota_write_owner` 를 `run_attempt` 가 돌려주고 turn driver·Fusion·Codex turn 이 그 값으로 적는다.
    사용량 창도 계정에 적는다. `sessionBudgetExceeded` 는 홈에 남긴다. Codex turn 의 scope 재계산을 지운다.
-   시험: 홈 둘·재로그인·재로그인 뒤 읽기 실패·늦은 읽기·옛 프로세스의 새 요청·사용자 변경·미확인·성공·옛 세대의 성공·session budget, 위 변이 시험.
+   시험: 홈 둘·재로그인·재로그인 뒤 읽기 실패·늦은 읽기·옛 프로세스의 새 요청·사용자 변경·미확인·성공·옛 세대의 성공·순서를 증명하지 못한 성공·옛 세대의 쓰기·session budget, 위 변이 시험.
 4. **표면** (3 위) — resolved JSON 스냅숏, 묶음별 소진·주인 종류, runtime 줄 `usage_scope`. TUI decode·Overview, dashboard schema 를 같은 PR 에서 바꾼다.
    glossary 의 "닫힌 quota 창"·"Provider Usage Window" 항목과 `docs/spec/14-configuration.md`. 시험: 식별자 노출, 경합, TUI 캡처.
 5. **재로그인 알아채기** (2 위, 결정 3 에 따라) — 로그인 세션 완료 때 읽기, 운영자 다시 읽기 요청, setup 화면의 "같은 계정" 표시.

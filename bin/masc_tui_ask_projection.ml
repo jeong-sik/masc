@@ -439,18 +439,39 @@ let gate_transition ~inflight ~pending ~ask_id =
     | Some armed when String.equal armed ask_id -> Ask_gate_submit
     | Some _ | None -> Ask_gate_arm ask_id
 
-let fallback_cursor ~cursor rows = min (max 0 cursor) (max 0 (List.length rows - 1))
+type cursor = On of int | Released of int
+
+let initial_cursor = On 0
+
+let bounded_position ~position rows = min (max 0 position) (max 0 (List.length rows - 1))
 
 let reconcile_cursor ~current_rows ~cursor ~next_rows =
-  let selected =
-    if cursor < 0 then None
-    else Option.map (fun (row : Decode.ask_row) -> row.ar_id) (List.nth_opt current_rows cursor)
-  in
-  match selected with
-  | Some ask_id -> (
-      match
-        List.find_index (fun (row : Decode.ask_row) -> String.equal ask_id row.ar_id) next_rows
-      with
-      | Some index -> index
-      | None -> fallback_cursor ~cursor next_rows)
-  | None -> fallback_cursor ~cursor next_rows
+  match cursor with
+  | Released position -> Released (bounded_position ~position next_rows)
+  | On position -> (
+      match List.nth_opt current_rows (max 0 position) with
+      (* No ask was under the cursor -- the list was empty or not read yet --
+         so the operator has not chosen anything that could go missing. *)
+      | None -> On (bounded_position ~position next_rows)
+      | Some (selected : Decode.ask_row) -> (
+          match
+            List.find_index
+              (fun (row : Decode.ask_row) -> String.equal selected.ar_id row.ar_id)
+              next_rows
+          with
+          | Some index -> On index
+          | None -> Released (bounded_position ~position next_rows)))
+
+let selected_index rows = function
+  | Released _ -> None
+  | On position ->
+      if position >= 0 && position < List.length rows then Some position else None
+
+let selected_row rows cursor =
+  Option.bind (selected_index rows cursor) (List.nth_opt rows)
+
+let move_cursor rows cursor ~delta =
+  match (rows, cursor) with
+  | [], _ -> cursor
+  | _ :: _, Released position -> On (bounded_position ~position rows)
+  | _ :: _, On position -> On (bounded_position ~position:(position + delta) rows)

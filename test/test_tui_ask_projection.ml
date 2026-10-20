@@ -260,19 +260,70 @@ let test_gate_rearms_on_a_different_ask () =
 
 let rows ids = List.map (fun id -> row id) ids
 
+let cursor_t =
+  Alcotest.testable
+    (fun fmt -> function
+      | Ask.On position -> Format.fprintf fmt "On %d" position
+      | Ask.Released position -> Format.fprintf fmt "Released %d" position)
+    ( = )
+
+let selected_id rows cursor =
+  Option.map (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id) (Ask.selected_row rows cursor)
+
 let test_cursor_follows_the_ask () =
-  Alcotest.(check int) "same ask, new index" 2
-    (Ask.reconcile_cursor ~current_rows:(rows [ "a1"; "a2" ]) ~cursor:1
+  Alcotest.check cursor_t "same ask, new index" (Ask.On 2)
+    (Ask.reconcile_cursor ~current_rows:(rows [ "a1"; "a2" ]) ~cursor:(Ask.On 1)
        ~next_rows:(rows [ "x"; "y"; "a2" ]))
 
-let test_cursor_falls_back_when_ask_is_gone () =
-  Alcotest.(check int) "bounded, not stale" 1
-    (Ask.reconcile_cursor ~current_rows:(rows [ "a1"; "a2" ]) ~cursor:1
+let test_cursor_releases_when_ask_is_gone () =
+  Alcotest.check cursor_t "nothing selected, resume where it was" (Ask.Released 1)
+    (Ask.reconcile_cursor ~current_rows:(rows [ "a1"; "a2" ]) ~cursor:(Ask.On 1)
        ~next_rows:(rows [ "x"; "y" ]))
 
 let test_cursor_clamps_to_shorter_list () =
-  Alcotest.(check int) "clamped" 0
-    (Ask.reconcile_cursor ~current_rows:(rows [ "a1"; "a2"; "a3" ]) ~cursor:2 ~next_rows:(rows [ "x" ]))
+  Alcotest.check cursor_t "released and clamped" (Ask.Released 0)
+    (Ask.reconcile_cursor ~current_rows:(rows [ "a1"; "a2"; "a3" ]) ~cursor:(Ask.On 2)
+       ~next_rows:(rows [ "x" ]))
+
+(* ask0319873c920b4606: the operator answered the first ask; the re-read
+   dropped it and the account question slid into position 0. The same keys,
+   pressed again four seconds later, answered that question with its first
+   choice without it ever being chosen. *)
+let test_answered_ask_does_not_select_the_next () =
+  let before = rows [ "answered"; "unread" ] and after = rows [ "unread" ] in
+  let cursor = Ask.reconcile_cursor ~current_rows:before ~cursor:(Ask.On 0) ~next_rows:after in
+  Alcotest.(check (option string)) "no ask is selected" None (selected_id after cursor)
+
+let test_first_read_selects_the_first_ask () =
+  let next_rows = rows [ "a1"; "a2" ] in
+  let cursor = Ask.reconcile_cursor ~current_rows:[] ~cursor:Ask.initial_cursor ~next_rows in
+  Alcotest.(check (option string)) "nothing was chosen yet" (Some "a1") (selected_id next_rows cursor)
+
+let test_released_cursor_stays_released () =
+  let next_rows = rows [ "a1"; "a2"; "a3" ] in
+  let cursor =
+    Ask.reconcile_cursor ~current_rows:(rows [ "a1" ]) ~cursor:(Ask.Released 1) ~next_rows
+  in
+  Alcotest.check cursor_t "a new arrival is not selected for the operator" (Ask.Released 1) cursor;
+  Alcotest.(check (option string)) "no selection" None (selected_id next_rows cursor)
+
+let test_move_from_released_selects_in_place () =
+  let current = rows [ "unread"; "later" ] in
+  let cursor = Ask.move_cursor current (Ask.Released 0) ~delta:1 in
+  Alcotest.(check (option string)) "the first press selects, it does not skip"
+    (Some "unread") (selected_id current cursor)
+
+let test_move_clamps () =
+  let current = rows [ "a1"; "a2" ] in
+  Alcotest.check cursor_t "down at the end" (Ask.On 1) (Ask.move_cursor current (Ask.On 1) ~delta:1);
+  Alcotest.check cursor_t "up at the top" (Ask.On 0) (Ask.move_cursor current (Ask.On 0) ~delta:(-1))
+
+let test_move_on_empty_list_keeps_cursor () =
+  Alcotest.check cursor_t "nothing to move to" (Ask.Released 0)
+    (Ask.move_cursor [] (Ask.Released 0) ~delta:1)
+
+let test_out_of_range_position_selects_nothing () =
+  Alcotest.(check (option string)) "no row there" None (selected_id (rows [ "a1" ]) (Ask.On 5))
 
 let snapshot rows : Masc.Tui_decode_asks.asks_snapshot =
   { asn_keeper = None; asn_open_count = List.length rows; asn_rows = rows }
@@ -811,8 +862,19 @@ let () =
       ( "cursor",
         [
           Alcotest.test_case "follows the ask" `Quick test_cursor_follows_the_ask;
-          Alcotest.test_case "falls back when gone" `Quick test_cursor_falls_back_when_ask_is_gone;
+          Alcotest.test_case "releases when gone" `Quick test_cursor_releases_when_ask_is_gone;
           Alcotest.test_case "clamps" `Quick test_cursor_clamps_to_shorter_list;
+          Alcotest.test_case "answered ask does not select the next" `Quick
+            test_answered_ask_does_not_select_the_next;
+          Alcotest.test_case "first read selects the first ask" `Quick
+            test_first_read_selects_the_first_ask;
+          Alcotest.test_case "released stays released" `Quick test_released_cursor_stays_released;
+          Alcotest.test_case "move from released selects in place" `Quick
+            test_move_from_released_selects_in_place;
+          Alcotest.test_case "move clamps" `Quick test_move_clamps;
+          Alcotest.test_case "move on empty list" `Quick test_move_on_empty_list_keeps_cursor;
+          Alcotest.test_case "out of range selects nothing" `Quick
+            test_out_of_range_position_selects_nothing;
         ] );
       ( "summary",
         [

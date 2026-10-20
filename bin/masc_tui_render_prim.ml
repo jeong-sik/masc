@@ -1944,7 +1944,7 @@ let selected_ask_question (state : state) =
   match state.asks_snapshot with
   | None -> None
   | Some snapshot -> (
-      match List.nth_opt (Ask_projection.open_rows snapshot) state.ask_cursor with
+      match Ask_projection.selected_row (Ask_projection.open_rows snapshot) state.ask_cursor with
       | None -> None
       | Some (row : Masc.Tui_decode_asks.ask_row) ->
           List.nth_opt row.Masc.Tui_decode_asks.ar_questions state.ask_question_cursor)
@@ -2159,7 +2159,9 @@ let ask_question_viewport (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let text_entry = state.ask_text_entry in
   let lines =
-    match List.nth_opt (question_asks state) state.ask_cursor with
+    let asks = question_asks state in
+    match Ask_projection.selected_row asks state.ask_cursor with
+    | None when asks <> [] -> ["  Nothing selected -- [ or ] chooses a question"]
     | None -> ["  No questions waiting"]
     | Some row ->
         let draft = Ask_projection.draft_for state.ask_draft ~row in

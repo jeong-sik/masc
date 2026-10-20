@@ -10,6 +10,10 @@ val register_exact_runner : Lane_addon_exact.runner -> unit
 (** Server-owned runner for packages' exact-output requests, registered before
     configuration maintenance. Without it a declared installation's exact
     request ends its host request cycle with [no_exact_runner]. *)
+val register_github_reader : Lane_addon_records.github -> unit
+(** Server-owned GitHub access for [github_pulls] record grants, registered
+    before configuration maintenance. Until then such a read waits as
+    [source_unavailable]. *)
 val register_sampling_factory :
   (sw:Eio.Switch.t -> store:Lane_addon_store.t -> instance_id:string ->
     package:Lane_addon_types.package -> binding:Yojson.Safe.t ->

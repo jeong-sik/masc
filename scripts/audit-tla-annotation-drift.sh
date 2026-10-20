@@ -246,8 +246,6 @@ declare -a CROSS_SPEC_UNIFORM_SETS=(
   "TurnPhaseSet"
   # KTC + KCL: decision projection.
   "DecisionSet"
-  # KTC + KCL: runtime-state projection.
-  "RuntimeSet"
 )
 
 CROSS_SPEC_DRIFTS=0

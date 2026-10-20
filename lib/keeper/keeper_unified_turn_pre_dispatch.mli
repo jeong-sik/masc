@@ -51,11 +51,10 @@ val build_runtime_execution
     serve the turn's prompt. For a lane that is the lane's candidates. When
     [deferred_runtime_lane] is the hint the turn resumes from (its
     [next_runtime_id] is [runtime_id]), it is [Keeper_turn_driver.deferred_runtime_ids]
-    of that hint, the candidates the walk still rotates through. A hint whose
-    [next_runtime_id] is not [runtime_id] is not this turn's walk and adds no
-    candidate.
+    of that hint, the candidates the walk still rotates through.
 
     Failure modes (returned as [Error]):
+    - [deferred_runtime_lane] resumes at a runtime other than [runtime_id].
     - The exact [runtime_id] has no configured context window.
     - [meta.max_context_override] is not positive.
 

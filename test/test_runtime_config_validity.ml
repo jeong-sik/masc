@@ -6245,36 +6245,47 @@ let test_deferred_budget_is_bound_by_a_later_candidate_window () =
                ~later_runtime_ids:[ "ollama_cloud.smallwin" ]
                ~failure:(Agent_core.Error.Internal "first candidate failed")
            in
+           let hint_with_unknown_later =
+             Keeper_turn_driver.restore_deferred_runtime_lane
+               ~assignment_id:"ollama_cloud.bigwin"
+               ~failed_runtime_id:"ollama_cloud.bigwin"
+               ~next_runtime_id:"ollama_cloud.midwin"
+               ~later_runtime_ids:[ "ollama_cloud.absent" ]
+               ~failure:(Agent_core.Error.Internal "first candidate failed")
+           in
+           let execution ~runtime_id ~deferred_runtime_lane =
+             Keeper_unified_turn_pre_dispatch.build_runtime_execution
+               ~meta
+               ~runtime_id
+               ~deferred_runtime_lane
+           in
            let max_context ~runtime_id ~deferred_runtime_lane =
-             match
-               Keeper_unified_turn_pre_dispatch.build_runtime_execution
-                 ~meta
-                 ~runtime_id
-                 ~deferred_runtime_lane
-             with
+             match execution ~runtime_id ~deferred_runtime_lane with
              | Error error ->
                failf
                  "deferred execution should resolve: %s"
                  (Agent_core.Error.to_string error)
              | Ok execution -> execution.max_context
            in
-           check bool
-             "the next candidate's own window with no hint is above the later one"
-             true
-             (max_context ~runtime_id:"ollama_cloud.midwin" ~deferred_runtime_lane:None > 203000);
+           check int
+             "the next candidate's own window with no hint"
+             300000
+             (max_context ~runtime_id:"ollama_cloud.midwin" ~deferred_runtime_lane:None);
            check int
              "the budget is the smallest window of the resumed suffix"
              203000
              (max_context
                 ~runtime_id:"ollama_cloud.midwin"
                 ~deferred_runtime_lane:(Some hint));
-           check bool
-             "a hint that does not start at this runtime adds no candidate"
-             true
+           check int
+             "a later candidate with no resolvable window does not bound the turn"
+             300000
              (max_context
-                ~runtime_id:"ollama_cloud.bigwin"
-                ~deferred_runtime_lane:(Some hint)
-              > 203000)))
+                ~runtime_id:"ollama_cloud.midwin"
+                ~deferred_runtime_lane:(Some hint_with_unknown_later));
+           match execution ~runtime_id:"ollama_cloud.bigwin" ~deferred_runtime_lane:(Some hint) with
+           | Error _ -> ()
+           | Ok _ -> fail "a hint that resumes at another runtime was accepted"))
 
 let test_runtime_max_context_missing_both_sources_rejected_at_load () =
   let runtime_toml =

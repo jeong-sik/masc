@@ -30,5 +30,14 @@ that restoration still holds the barrier, isolates ordinary retention failure,
 and checks shutdown cancellation for both maintenance task kinds. The previous
 group-name/list-shape assertion was replaced by those lifecycle observations.
 
-Changed source syntax and whitespace were checked. Native execution and actual
-startup latency for this candidate remain pending; no improvement time is claimed.
+Changed source syntax and whitespace were checked. The focused native run
+[39467102729](https://github.com/jeong-sik/masc/actions/runs/39467102729), at
+`53846754dfcd77a0910c0a4f610f075532f5d109`, passed 117 bootstrap cases, including
+held retention and ordinary maintenance failure. Its microVM suite passed the
+maintenance lifecycle and cancellation cases but failed one of 95 cases: the
+existing remote-endpoint fixture did not create the Keeper runtime directory
+before preparing its GitHub identity. The fixture now creates that prerequisite,
+as the guest-reuse identity fixture already does. Production identity checks
+are unchanged. The whole run failed; the corrected head needs a new focused run.
+
+Installed startup latency remains unmeasured; no improvement time is claimed.

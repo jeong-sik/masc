@@ -4,7 +4,26 @@ The optional browser Add-on owns live command queues and Gecko automation.
 The Gecko driver starts only with an attached browser Add-on and a configured,
 enabled `[browser.automation]`. Chrome/Stagehand also starts inside that worker,
 with its original native process owner and shared Exact Output broker. The Keeper
-live bridge still has a server startup path that must move to its Add-on owner.
+live Firefox also starts inside that worker when `[browser.live.bidi]` is
+configured and `[browser.live]` is enabled. Attaching the Add-on acquires its
+browser resources; detaching it revokes input and joins their cleanup. The
+configured Firefox profile keeps its logins across attachments.
+
+The live Firefox path starts a new browser through the native process owner.
+It checks the original kernel lease and child identity, the configured profile
+and Firefox's `moz:processID` before publishing a connection. An occupied port
+or an already used profile is a startup refusal. Existing browser processes
+remain under their operator's control. Polls and results go directly to the
+original worker and client UUID. Normal detach sends `browser.close` once to
+that verified browser and waits for its original owner. Failed shutdown stays
+unconfirmed. Persistent profile contents and shared lease files remain in place.
+Failure to start a configured live Firefox prevents this worker from becoming
+ready; its other backends are joined during failed-start cleanup. An unexpected
+connection failure revokes that worker rather than publishing a dead client.
+
+The external WebExtension/native-host bridge remains available independently.
+Its observations describe those external hosts. Read the attached browser
+Add-on's observation for the worker-owned Firefox connection and startup errors.
 
 The operator selects two independent middleware boundaries:
 

@@ -10,7 +10,7 @@ let with_claim ?(automation=None) ?(models=fun _ -> None) work =
   let directory=Filename.temp_file "browser-addon-slot-" "" in
   Unix.unlink directory;Unix.mkdir directory 0o700;
   let instance_id=Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
-  let context=ok (Socket.context ~stagehand:None ~instance_id ~automation ~models:(models directory)) in
+  let context=ok (Socket.context ~stagehand:None ~live_bidi:None ~instance_id ~automation ~models:(models directory)) in
   let root=match context with `Assoc fields -> (match List.assoc_opt "directory" fields with
     | Some (`String root) -> root | _ -> Alcotest.fail "missing allocation directory")
     | _ -> Alcotest.fail "invalid allocation intent" in

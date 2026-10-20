@@ -197,8 +197,10 @@ val load_agent_core_for_save :
   (Agent_core.Checkpoint.t, checkpoint_load_error) result
 
 (** Drops what the store keeps for [keeper_name]'s checkpoints under
-    [session_root], or for every Keeper of that name when [session_root] no
-    longer resolves. A save still running keeps its value again afterwards:
+    [session_root], or for every Keeper of that name when [session_root]
+    was never resolved by this process and no longer resolves. The store
+    resolves a session root once per spelling and keys what it keeps under
+    that resolution. A save still running keeps its value again afterwards:
     the decode of the bytes it wrote, handed out only while the file keeps
     that identity (#43575). *)
 val forget_written_lineages : session_root:string -> keeper_name:string -> unit

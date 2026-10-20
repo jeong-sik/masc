@@ -413,15 +413,50 @@ let canonical_identity_opt path =
   | _ -> None
   | exception Unix.Unix_error _ -> None
 
-(* Summaries are keyed by the file's resolved path. A save reaches the
-   canonical through [canonical_session_location], which resolves a symlinked
-   session root, while a reader is handed the configured spelling of the same
-   file. A path that does not resolve has no key, so nothing is published for
-   it and a reader parses the file. *)
+(* Summaries are keyed by the file's path under the resolved session root. A
+   save reaches the canonical through [canonical_session_location], which
+   resolves a symlinked session root, while a reader is handed the configured
+   spelling of the same file; both spellings name one key. Only the root is
+   resolved. [canonical_session_location] refuses a symbolic link at the
+   session directory and the canonical readers refuse one at the file, so a
+   path with a link below the root has a key no save publishes, and its
+   reader goes to the file. An answer found under a key is used only while it
+   carries the identity of the file at the caller's path.
+
+   A root is resolved once per spelling for the life of the process; the
+   session root does not move under a running server. [Unix.realpath] on
+   every lookup walked the whole path on the scheduler thread and took 399 of
+   2,112 samples of it on 2026-10-20. A root that does not resolve is not
+   remembered, so a lookup resolves it again once it exists, and until then a
+   path under it has no key. *)
+let resolved_session_roots : (string, string) Hashtbl.t = Hashtbl.create 4
+
+(* Same discipline as [canonical_summaries_mutex]. *)
+let resolved_session_roots_mutex = Stdlib.Mutex.create ()
+
+let resolve_session_root root =
+  match
+    Stdlib.Mutex.protect resolved_session_roots_mutex (fun () ->
+      Hashtbl.find_opt resolved_session_roots root)
+  with
+  | Some resolved -> Ok resolved
+  | None ->
+    (match Unix.realpath root with
+     | resolved ->
+       Stdlib.Mutex.protect resolved_session_roots_mutex (fun () ->
+         Hashtbl.replace resolved_session_roots root resolved);
+       Ok resolved
+     | exception Unix.Unix_error (error, _, _) -> Error error)
+
 let summary_key canonical_path =
-  match Unix.realpath canonical_path with
-  | resolved -> Some resolved
-  | exception Unix.Unix_error _ -> None
+  let session_dir = Filename.dirname canonical_path in
+  match resolve_session_root (Filename.dirname session_dir) with
+  | Ok root ->
+    Some
+      (Filename.concat
+         (Filename.concat root (Filename.basename session_dir))
+         (Filename.basename canonical_path))
+  | Error (_ : Unix.error) -> None
 
 (* [Some summary] only while the file at [canonical_path] is the one the
    summary was taken from. *)
@@ -529,7 +564,7 @@ let lineage_owner_of_key ~key ~keeper_name =
   { owner_session_root = Filename.dirname (Filename.dirname key); owner_keeper = keeper_name }
 
 (* The memo of the file's lineage, or a fresh one for a file this process has
-   not written. A file that does not exist yet has no key. *)
+   not written. *)
 let lineage_memo ~canonical_path =
   match summary_key canonical_path with
   | None -> Agent_core.Checkpoint.create_encoding_memo ()
@@ -564,12 +599,14 @@ let keep_lineage ~canonical_path ~identity ~memo ~keeper_name written =
 
 let forget_written_lineages ~session_root ~keeper_name =
   let forgets =
-    match Unix.realpath session_root with
-    | resolved -> same_lineage_owner { owner_session_root = resolved; owner_keeper = keeper_name }
-    | exception Unix.Unix_error (error, _, _) ->
-      (* A root that no longer resolves -- its directory was moved or removed
-         before the unregistration -- cannot name its lineages, so every
-         lineage of this Keeper name goes. A lineage only spares a read: one
+    match resolve_session_root session_root with
+    | Ok resolved -> same_lineage_owner { owner_session_root = resolved; owner_keeper = keeper_name }
+    | Error error ->
+      (* A root this process never resolved and that no longer resolves --
+         its directory was moved or removed before the unregistration --
+         cannot name its lineages, so every lineage of this Keeper name goes.
+         A root a save or a load resolved is named by that resolution, as its
+         lineages' keys are. A lineage only spares a read: one
          dropped here for the same name in another workspace costs that
          workspace one read of its file. *)
       Log.Keeper.warn

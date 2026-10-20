@@ -137,6 +137,23 @@ let test_a_truncated_canonical_is_a_parse_error () = with_session (fun session_d
   write_file path "";
   refused_as "an empty canonical" `Parse_error session_dir)
 
+(* The summary key resolves only the session root. A canonical that is a link
+   to another session's canonical is not that session's file, so it is not
+   answered from the summary of the file it points to: the reader goes to the
+   file and refuses the link. *)
+let test_a_linked_canonical_is_not_answered_from_its_target () = with_session (fun session_dir ->
+  save_plain ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:1 ~marker:"target");
+  (match Store.canonical_message_count ~session_dir ~session_id:"session" with
+   | Ok (Some 2) -> ()
+   | Ok _ | Error _ -> fail "the target's own count was not two messages");
+  let other_dir = Filename.concat (Filename.dirname session_dir) "other" in
+  Unix.mkdir other_dir 0o700;
+  Unix.symlink (canonical_path session_dir) (canonical_path other_dir);
+  match Store.canonical_message_count ~session_dir:other_dir ~session_id:"session" with
+  | Error (Store.Io_error _) -> ()
+  | Error error -> failf "the link was refused as %s" (Store.checkpoint_load_error_to_string error)
+  | Ok _ -> fail "the link was answered from its target's summary")
+
 let () =
   run "keeper checkpoint read once"
     [ ( "locked read"
@@ -149,5 +166,9 @@ let () =
         ; test_case "an unreadable canonical is refused" `Quick test_an_unreadable_canonical_is_refused
         ; test_case "a truncated canonical is a parse error" `Quick
             test_a_truncated_canonical_is_a_parse_error
+        ] )
+    ; ( "summary key"
+      , [ test_case "a linked canonical is not answered from its target" `Quick
+            test_a_linked_canonical_is_not_answered_from_its_target
         ] )
     ]

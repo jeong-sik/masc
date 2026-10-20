@@ -28,6 +28,7 @@ type prepared =
   ; previous_unread_messages : Keeper_librarian_unread.t list
   ; recovery_receipt : Keeper_memory_os_current.durable_range_id option
   ; range : R.range
+  ; cuts : R.atom_cut list
   ; covering_cut : R.atom_cut
   ; start_atom : int
   ; end_atom : int
@@ -186,7 +187,7 @@ let prepare_source ?end_atom ~config ~keeper_name ~trace_id () =
               ~end_atom:receipt.end_atom ~messages receipt.unread_messages in
             Keeper_librarian_unread.merge previous_unread_messages receipt.unread_messages in
         let unread = R.slice messages {range with R.start_atom; end_atom} in
-        Ok (Ready {trace_id;lines;messages;previous=stored;previous_state;previous_unread_messages;recovery_receipt;range;covering_cut;start_atom;end_atom;unread;
+        Ok (Ready {trace_id;lines;messages;previous=stored;previous_state;previous_unread_messages;recovery_receipt;range;cuts;covering_cut;start_atom;end_atom;unread;
                   catch_up_target})
 
 (* The reason an empty source was empty is dropped here: a caller that only
@@ -195,6 +196,20 @@ let prepare ?end_atom ~config ~keeper_name ~trace_id () =
   prepare_source ?end_atom ~config ~keeper_name ~trace_id ()
   |> Result.map (function Ready prepared -> Some prepared | No_source _ -> None)
 let messages prepared = prepared.unread
+let select_prefix ~end_atom prepared =
+  match prepared.recovery_receipt with
+  | Some _ -> Ok prepared
+  | None ->
+    if end_atom <= prepared.start_atom || end_atom > prepared.end_atom then
+      Error "continuity prefix is outside the selected source"
+    else if end_atom = prepared.end_atom then Ok prepared
+    else
+      match List.find_opt (fun (cut : R.atom_cut) -> cut.cut_end_atom >= end_atom) prepared.cuts with
+      | None -> Error "continuity source has no covering completed boundary"
+      | Some covering_cut ->
+        let unread = R.slice prepared.messages
+          {prepared.range with R.start_atom=prepared.start_atom;end_atom} in
+        Ok {prepared with end_atom;covering_cut;unread}
 let memory_sources prepared =
   Keeper_librarian_unread.sources_for_atom_range ~trace_id:prepared.trace_id
     ~history_start_boundary_line:prepared.range.history_start_boundary_line
@@ -211,10 +226,9 @@ let unread_message prepared ~source ~reasons =
    covering turn, or an exact receipt may cover several turns. *)
 let source_spans ?(include_unread=true) prepared =
   let module H = Keeper_librarian_task_context in
-  let cuts = R.cut_lines ~trace_id:prepared.trace_id ~lines:prepared.lines
-      ~messages:prepared.messages prepared.range
-    |> List.sort (fun (a : R.atom_cut) (b : R.atom_cut) ->
-        compare (a.cut_end_atom, a.cut_line) (b.cut_end_atom, b.cut_line)) in
+  (* These cuts were validated against this immutable source during prepare.
+     Keep the full list: a selected prefix can stop inside a completed turn. *)
+  let cuts = prepared.cuts in
   let _, reversed = List.fold_left (fun (start_atom, reversed) (cut : R.atom_cut) ->
     let end_atom = min prepared.end_atom cut.cut_end_atom in
     if end_atom <= start_atom then start_atom, reversed else
@@ -260,8 +274,7 @@ let turn_window prepared =
   let cut = prepared.covering_cut in
   if prepared.end_atom <> cut.cut_end_atom then None
   else
-    let cuts = R.cut_lines ~trace_id:prepared.trace_id ~lines:prepared.lines
-        ~messages:prepared.messages prepared.range in
+    let cuts = prepared.cuts in
     let latest_at_or_before bound = List.fold_left (fun found (line : R.atom_cut) ->
       if line.cut_end_atom > bound then found
       else match found with
@@ -330,8 +343,7 @@ let memory_committed ~config ~keeper_name prepared =
       && W.atom_opening_digest prepared.messages (receipt.end_atom - 1) = Some receipt.last_atom_digest
       && List.exists (fun (cut : R.atom_cut) ->
            cut.cut_line = receipt.end_boundary_line && cut.cut_end_atom = receipt.end_atom)
-           (R.cut_lines ~trace_id:prepared.trace_id ~lines:prepared.lines
-              ~messages:prepared.messages prepared.range)
+           prepared.cuts
     | None, _ | Some _, None -> false)
 let previous_working_state prepared = prepared.previous_state
 let previous_unread_messages prepared = prepared.previous_unread_messages

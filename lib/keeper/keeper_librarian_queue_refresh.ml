@@ -399,17 +399,13 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
                 refusal left, and the logged number is the number of atoms
                 this pass sends. *)
              let end_atom = P.start_atom prepared + width in
-             (match Domain_pool_ref.submit_io_or_inline (fun () ->
-                P.prepare_source ~end_atom ~config ~keeper_name
-                  ~trace_id:current_trace ()) with
+             (* The prepared source already owns the exact checkpoint and
+                validated boundaries. Re-reading it here decoded and hashed
+                the whole history again just to choose a smaller endpoint. *)
+             (match Domain_pool_ref.submit_cpu_or_inline (fun () ->
+                P.select_prefix ~end_atom prepared) with
               | Error detail -> report O.Input_unavailable O.Input_build_failed detail
-              | Ok (P.No_source no_source) ->
-                (* The checkpoint changed between the two reads. Sending the
-                   first read's range would send more than the width, so this
-                   pass settles on what the second read found, as a first read
-                   that found it would. *)
-                settle_no_source no_source
-              | Ok (P.Ready one_unit) ->
+              | Ok one_unit ->
                 (* completed_end_atom names the last completed turn inside the
                    prepared range: when it equals start_atom the range holds no
                    turn cut, and the unit is an atom cut rather than a turn. *)

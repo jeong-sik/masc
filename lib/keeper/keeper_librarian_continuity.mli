@@ -64,6 +64,12 @@ val commit : config:Workspace.config -> keeper_name:string -> prepared:prepared 
 val messages : prepared -> Agent_core.Types.message list
 (** Exact new source atoms of the range. The pass renders them once, folded,
     for both Memory disposition and working-state inference. *)
+val select_prefix : end_atom:int -> prepared -> (prepared, string) result
+(** Clip the selected source using its frozen checkpoint and validated cuts,
+    without reading storage again. The end must remain inside the selected
+    interval. An exact recovery receipt keeps its entire original interval,
+    taking precedence over the requested end as in {!prepare_source}.
+    Publication still revalidates the original source and snapshot CAS. *)
 val source_spans : ?include_unread:bool -> prepared ->
   (Keeper_librarian_task_context.scope * Agent_core.Types.message list) list
 (** Ordered historical attribution and its exact selected messages, derived

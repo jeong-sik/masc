@@ -43,6 +43,47 @@ let record_memory config = record_prepared_memory config (prepare config |> some
 let commit config prepared text =
   record_prepared_memory config prepared;
   P.commit ~new_unread_messages:[] ~config ~keeper_name ~prepared ~working_state:text |> get
+let test_prefix_selection_keeps_frozen_source_and_publication_checks () =
+  with_source @@ fun _env config save _append boundary ->
+  let prefix = List.map message ["A"; "B"] in
+  let full = prefix @ List.map message ["C"; "D"] in
+  save full;
+  boundary ~fresh:true 1 prefix;
+  boundary ~fresh:false 2 full;
+  let wide = P.prepare ~end_atom:4 ~config ~keeper_name ~trace_id () |> get |> some in
+  let reread = P.prepare ~end_atom:2 ~config ~keeper_name ~trace_id () |> get |> some in
+  let selected = P.select_prefix ~end_atom:2 wide |> get in
+  check bool "same messages as explicit preparation" true (P.messages selected = P.messages reread);
+  check bool "same historical attribution" true (P.source_spans selected = P.source_spans reread);
+  check bool "same covering turn" true (Ids.Turn_ref.equal (P.turn_ref selected) (P.turn_ref reread));
+  check bool "same counterpart window" true (P.turn_window selected = P.turn_window reread);
+  check bool "same exact receipt" true
+    (P.memory_range_id ~config ~keeper_name selected = P.memory_range_id ~config ~keeper_name reread);
+  List.iter (fun end_atom ->
+    let reread = P.prepare ~end_atom ~config ~keeper_name ~trace_id () |> get |> some in
+    let selected = P.select_prefix ~end_atom wide |> get in
+    check bool "mid-turn prefix keeps exact source attribution" true
+      (P.source_spans selected = P.source_spans reread);
+    check bool "mid-turn prefix keeps original covering turn" true
+      (Ids.Turn_ref.equal (P.turn_ref selected) (P.turn_ref reread));
+    check bool "mid-turn prefix carries no completed counterpart window" true
+      (P.turn_window selected = None && P.turn_window reread = None);
+    check bool "mid-turn prefix keeps exact receipt" true
+      (P.memory_range_id ~config ~keeper_name selected = P.memory_range_id ~config ~keeper_name reread))
+    [1; 3];
+  check bool "unchanged endpoint shares original source" true
+    ((P.select_prefix ~end_atom:4 wide |> get) == wide);
+  check bool "empty prefix rejected" true (Result.is_error (P.select_prefix ~end_atom:0 wide));
+  check bool "widening rejected" true (Result.is_error (P.select_prefix ~end_atom:5 wide));
+  record_prepared_memory config selected;
+  save (message "Changed A" :: List.tl full);
+  let still_original = P.select_prefix ~end_atom:2 wide |> get in
+  check bool "selection keeps original checkpoint after disk changes" true
+    (P.messages still_original = prefix);
+  check bool "changed original source still refuses publication" true
+    (Result.is_error (P.commit ~new_unread_messages:[] ~config ~keeper_name
+      ~prepared:still_original ~working_state:"The original A and B"));
+  check bool "refusal publishes no continuation" true (Option.is_none (P.read ~config ~keeper_name |> get))
 let test_append_cas_and_restart () = with_source @@ fun _env config save append boundary ->
   let prefix=[message "Keep the deployment pending approval."] in
   save prefix;boundary ~fresh:true 1 prefix;
@@ -243,6 +284,8 @@ let test_historical_sources_survive_narrowing_and_recovery () =
   check bool "recovery keeps exact source context" true (P.source_spans recovered = P.source_spans narrow);
   check bool "recovery keeps exact frontier" true ((P.memory_range_id ~config ~keeper_name recovered |> get) = receipt);
   check bool "committed recovery cannot shrink" true (P.narrow recovered = None);
+  check bool "prefix selection cannot split exact recovery" true
+    ((P.select_prefix ~end_atom:1 recovered |> get) == recovered);
   ignore (commit config recovered "Continue Task B");
   check bool "next suffix contains only remaining B" true (contexts (prepare config |> some) = [task_b,3])
 
@@ -2155,7 +2198,9 @@ let test_append_preserves_unread_source_records () = with_source @@ fun _env con
   check int "only complete atom coverage advances" 3 next.end_atom
 
 let () = run "production continuity pair"
-  ["cycle",[test_case "append preserves exact unread records" `Quick test_append_preserves_unread_source_records;
+  ["cycle",[test_case "frozen prefix keeps publication checks" `Quick
+      test_prefix_selection_keeps_frozen_source_and_publication_checks;
+    test_case "append preserves exact unread records" `Quick test_append_preserves_unread_source_records;
     test_case "completed turns are work units" `Quick test_completed_turn_work_units;
     test_case "a rewrite from atom 0 follows its target" `Quick test_rewrite_from_zero_follows_its_target;
     test_case "the rewrite target is the Librarian's position" `Quick test_rewrite_target_is_the_librarian_position;

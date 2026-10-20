@@ -72,7 +72,7 @@ const wire = source => midiSourcePattern(source).events.filter(event => event.ki
 const derive = (data, cut, project = data.imported.project) => data.request({ kind: 'practice-midi-region',
   project, asset: data.imported.asset, cut, sourceRoot: dirname(data.path), directory: data.directory, nativeExecutable })
 
-test('selected cut and cursor survive another asset selection and capture attachment; original regions and private files survive save', () => fixture(async data => {
+test('admitted cut addresses the raw region independently of the library selection; latest project and original files survive save', () => fixture(async data => {
   const { imported, files, root, path, directory } = data
   const parts = await Promise.all(Object.values(files).map(file => readFile(file)))
   let editor = arrangementEditor(imported.project)

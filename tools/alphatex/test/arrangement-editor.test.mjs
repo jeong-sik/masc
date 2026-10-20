@@ -1155,8 +1155,9 @@ test('implicit take admission retains its asset and resolved cycle across succes
  }
 })
 
-for(const command of ['practice-backing','practice-midi']) test(`implicit ${command} retains its admitted source across recording attachment and undo`,()=>practiceSourceFixture(async({root,input,rows,publish})=>{
- if(command==='practice-midi'){
+for(const command of ['practice-backing','practice-midi','practice-midi-region']) test(`implicit ${command} retains its admitted source across recording attachment and undo`,()=>practiceSourceFixture(async({root,input,rows,publish})=>{
+ const region=command==='practice-midi-region'
+ if(command!=='practice-backing'){
   rows[0].packet.words=[0x43953c00,0x90000000];await publish()
  }
  const view=await controller()
@@ -1167,9 +1168,13 @@ for(const command of ['practice-backing','practice-midi']) test(`implicit ${comm
   const imported=await importArrangementPractice(importedJob.project,input,{projectPath:join(root,'song.json')})
   view.worker.emit('message',{id:importedJob.id,ok:true,result:imported});await flush()
   const selected=imported.asset,source=structuredClone(imported.project.assets.find(asset=>asset.id===selected))
+  if(region){
+   view.command(`practice-region ${selected} 6 1 4000000 2 3`);view.command('cursor 7')
+   view.command('mixed-output audio');view.command(`midi-source ${selected} 10 42`);await flush()
+  }
   view.command('input audio');view.command('play');await flush()
-  const prep=view.observed.requests.find(job=>job.kind==='prepare-wave')
-  view.worker.emit('message',{id:prep.id,ok:true,result:{path:'/owned/backing/plan.json',format:'wave-arrangement'}});await flush()
+  const prep=view.observed.requests.find(job=>job.kind===(region?'prepare-capture':'prepare-wave'))
+  view.worker.emit('message',{id:prep.id,ok:true,result:{path:'/owned/backing/plan.json',format:region?'capture-arrangement':'wave-arrangement',...(region?{midiOutput:'42',bindings:[{port:0,destination:'42'}]}:{})}});await flush()
   view.observed.players[0].handle.recordingEpoch=async()=>({kind:'playing',loop:false,duration:10,device:{id:'audio',outputs:2},
    clock:{kind:'mach-host-time',anchor:'100',position:0,numer:1,denom:1}})
   view.command('record');await flush();const capture=view.observed.captures[0];assert.ok(capture)
@@ -1182,7 +1187,10 @@ for(const command of ['practice-backing','practice-midi']) test(`implicit ${comm
   const backing=view.observed.requests.find(job=>job.kind===command)
   assert.ok(backing,'the admitted restoration must reach its worker after attachment')
   assert.equal(backing.asset,selected);assert.deepEqual(backing.project,attached.project)
-  const restored=await (command==='practice-midi'?importPracticeMidi:restorePracticeBacking)(backing.project,backing.asset,{sourceRoot:root,directory:root})
+  if(region){assert.equal(backing.tick,6720);assert.deepEqual(backing.cut,{offset:'1',extent:'4000000',sourceDivisor:'2'})}
+  // This controller fixture supplies a valid imported source; the native cut is
+  // exercised by the actual Worker in practice-region-midi.test.mjs.
+  const restored=await (command!=='practice-backing'?importPracticeMidi:restorePracticeBacking)(backing.project,backing.asset,{sourceRoot:root,directory:root})
   view.worker.emit('message',{id:backing.id,ok:true,result:restored});await flush()
   view.command('save');await flush()
   const saved=view.observed.saved.at(-1).project
@@ -1190,6 +1198,12 @@ for(const command of ['practice-backing','practice-midi']) test(`implicit ${comm
   assert.deepEqual(saved.assets.find(asset=>asset.id===selected),source)
   assert.ok(saved.assets.some(asset=>asset.id==='capture-2'))
   assert.equal(saved.assets.find(asset=>asset.id===restored.asset).kind,'midi')
+  if(region){
+   view.key('return');view.command('save');await flush()
+   const placed=view.observed.saved.at(-1).project.clips.at(-1)
+   assert.equal(placed.position,6720);assert.equal(placed.asset,restored.asset)
+   view.command('undo');await flush()
+  }
   view.command('undo');view.command('save');await flush()
   assert.deepEqual(view.observed.saved.at(-1).project,attached.project)
  }finally{

@@ -609,53 +609,64 @@ let test_render_memory_body_sorting () =
   check (option string) "known dates sort before absent snapshots" (Some "beta") (selected ())
 ;;
 
-(* The fleet header must move when the source side holds invalidations. It
-   used to print only the ordinary side's count, so a fleet with 15 source
-   invalidations and no ordinary ones read as clean (#38446). The check is that
-   the header rows differ and the difference carries the number, not how the
-   row is worded or where it sits. *)
-let test_fleet_header_carries_the_source_invalidation_total () =
+(* The fleet header must move when the source side holds invalidations or an
+   unreadable source snapshot. It used to print only the ordinary side's count,
+   so a fleet with 15 source invalidations and no ordinary ones read as clean,
+   and a Keeper whose source snapshot could not be read counted as 0 (#38446).
+   The check is that the header rows differ and the difference carries the
+   number, not how the row is worded or where it sits. The fixture keeps the
+   fleet totals equal to the sums over the Keeper rows, as the decoder demands. *)
+let test_fleet_header_carries_the_source_totals () =
   let state = make_state () in
-  let keeper = make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024 in
-  let health ~source_invalidations : Masc.Tui_decode_memory_health.memory_health_snapshot =
-    { mhs_generated_at = 1000.0
-    ; mhs_keepers = [ keeper ]
-    ; mhs_refused_keepers = []
-    ; mhs_total_facts = 10
-    ; mhs_total_observed_facts = 10
-    ; mhs_total_derived_facts = 0
-    ; mhs_total_support_invalidations = 0
-    ; mhs_total_snapshot_bytes = 1024
-    ; mhs_total_source_facts = 0
-    ; mhs_total_source_invalidations = source_invalidations
-    ; mhs_total_source_snapshot_bytes = 0
-    ; mhs_total_librarian_failures = 0
-    ; mhs_total_librarian_unread_turns = Some 0
-    ; mhs_total_librarian_continuity_unread_atoms = 0
-    ; mhs_total_librarian_continuity_unmeasured = 0
-    ; mhs_total_vision_ingest_errors = 0
-    ; mhs_total_read_errors = 0
-    ; mhs_total_source_read_errors = 0
-    ; mhs_warn_alerts = 0
-    ; mhs_error_alerts = 0
-    ; mhs_starving_keepers = 0
-    }
-  in
-  let header_rows ~cols ~source_invalidations =
-    state.memory_health <- Some (health ~source_invalidations);
+  let base = make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024 in
+  let header_rows ~cols ~source_invalidations ~source_read_errors =
+    let keeper =
+      { base with
+        mkh_source_invalidations = source_invalidations
+      ; mkh_source_read_error =
+          (if source_read_errors > 0 then Some "unreadable source snapshot" else None)
+      }
+    in
+    state.memory_health <-
+      Some
+        ({ mhs_generated_at = 1000.0
+         ; mhs_keepers = [ keeper ]
+         ; mhs_refused_keepers = []
+         ; mhs_total_facts = 10
+         ; mhs_total_observed_facts = 10
+         ; mhs_total_derived_facts = 0
+         ; mhs_total_support_invalidations = 0
+         ; mhs_total_snapshot_bytes = 1024
+         ; mhs_total_source_facts = 0
+         ; mhs_total_source_invalidations = source_invalidations
+         ; mhs_total_source_snapshot_bytes = 0
+         ; mhs_total_librarian_failures = 0
+         ; mhs_total_librarian_unread_turns = Some 0
+         ; mhs_total_librarian_continuity_unread_atoms = 0
+         ; mhs_total_librarian_continuity_unmeasured = 0
+         ; mhs_total_vision_ingest_errors = 0
+         ; mhs_total_read_errors = 0
+         ; mhs_total_source_read_errors = source_read_errors
+         ; mhs_warn_alerts = 0
+         ; mhs_error_alerts = 0
+         ; mhs_starving_keepers = 0
+         }
+         : Masc.Tui_decode_memory_health.memory_health_snapshot);
     Render_memory.memory_fleet_header_rows ~cols state
   in
+  let only_in later earlier = List.filter (fun row -> not (List.mem row earlier)) later in
   List.iter
     (fun cols ->
-       let none = header_rows ~cols ~source_invalidations:0 in
-       let some = header_rows ~cols ~source_invalidations:15 in
-       let only_with_invalidations =
-         List.filter (fun row -> not (List.mem row none)) some
-       in
-       check bool (Printf.sprintf "a source total changes the header at %d columns" cols)
-         true (only_with_invalidations <> []);
+       let clean = header_rows ~cols ~source_invalidations:0 ~source_read_errors:0 in
+       let invalidated = header_rows ~cols ~source_invalidations:15 ~source_read_errors:0 in
+       let unreadable = header_rows ~cols ~source_invalidations:0 ~source_read_errors:1 in
+       let invalidations_row = only_in invalidated clean in
+       check bool (Printf.sprintf "a source invalidation total changes the header at %d columns" cols)
+         true (invalidations_row <> []);
        check bool (Printf.sprintf "and the changed rows carry the total at %d columns" cols)
-         true (List.exists (contains "15") only_with_invalidations))
+         true (List.exists (contains "15") invalidations_row);
+       check bool (Printf.sprintf "an unreadable source snapshot changes the header at %d columns" cols)
+         true (only_in unreadable clean <> []))
     [ 100; 140 ]
 
 let test_render_memory_overflow_selection () =
@@ -937,8 +948,8 @@ let () =
         ; test_case "the librarian line names a stalled gap" `Quick
             test_the_librarian_line_names_a_stalled_gap
         ; test_case "memory_body_sorting" `Quick test_render_memory_body_sorting
-        ; test_case "the fleet header carries the source invalidation total" `Quick
-            test_fleet_header_carries_the_source_invalidation_total
+        ; test_case "the fleet header carries the source totals" `Quick
+            test_fleet_header_carries_the_source_totals
         ; test_case "memory_overflow_selection" `Quick test_render_memory_overflow_selection
         ; test_case "Category rail keeps counts, click targets and frame width" `Quick
             test_category_rail_keeps_click_targets_and_frame_width

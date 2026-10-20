@@ -991,13 +991,24 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
              snapshot.mhs_total_support_invalidations "support invalidation"
          ]
        (* The source-bound snapshot is stored and invalidated apart from the
-          ordinary facts above, and each Keeper's detail already prints its own
-          count. Without this row the fleet header read "0 support
-          invalidations" while the source side held the only ones (#38446). *)
+          ordinary facts above, and each Keeper's roster row and detail already
+          print their own count (#38446). The count here is the standing set of
+          source invalidations; the Ordinary count is the invalidations of the
+          latest write only, so the two are not one total split in two. A
+          Keeper whose source snapshot could not be read contributes 0 to the
+          count, so the row also says how many Keepers that is, as the roster
+          does with "read error". *)
        @ labelled "Source:"
-         [ Masc_tui_message_layout.count_noun
-             snapshot.mhs_total_source_invalidations "invalidation"
-         ]
+         ([ Masc_tui_message_layout.count_noun
+              snapshot.mhs_total_source_invalidations "invalidation"
+          ]
+          @ (if snapshot.mhs_total_source_read_errors > 0
+             then
+               [ Masc_tui_message_layout.count_noun
+                   snapshot.mhs_total_source_read_errors "keeper"
+                 ^ " with a source read error"
+               ]
+             else []))
        @ labelled "Librarian:"
          [ (match snapshot.mhs_total_librarian_unread_turns with
             | None -> "? turns"

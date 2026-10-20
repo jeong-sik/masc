@@ -58,15 +58,18 @@ let upload_paths = function
   | Session_open _|Session_close|Session_status|Page_goto _|Page_elements _
   | Page_act (Open_tab _|On_tab {interaction=Click _|Fill _|Press _|Scroll _|Select _|Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog;_})
   | Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> Error "grant requires one upload command"
+let release_failed t ~id exn =
+  let backtrace=Printexc.get_raw_backtrace () in
+  locked t (fun () ->
+    Hashtbl.replace t.grants id (Release_failed (Printexc.to_string exn));
+    Condition.broadcast t.changed);
+  Printexc.raise_with_backtrace exn backtrace
 let release t ~id snapshot =
   let finish state=locked t (fun () ->
     Hashtbl.replace t.grants id state;Condition.broadcast t.changed) in
   match Lease.release snapshot with
   | () -> finish Consumed
-  | exception exn ->
-      let backtrace=Printexc.get_raw_backtrace () in
-      finish (Release_failed (Printexc.to_string exn));
-      Printexc.raise_with_backtrace exn backtrace
+  | exception exn -> release_failed t ~id exn
 
 let stage t ~id ~actor ~route ~verb = protect (fun () ->
   let* _=B.client_id_of_string id in
@@ -84,7 +87,9 @@ let stage t ~id ~actor ~route ~verb = protect (fun () ->
     Condition.broadcast t.changed)) (fun () ->
     let* ()=check t in
     let files=List.map (fun path -> Filename.basename path,(fun () -> source path)) paths in
-    let* snapshot=Lease.prepare_files ~temp_dir:t.directory ~files () |> Result.map_error (function
+    let* snapshot=(match Lease.prepare_files ~temp_dir:t.directory ~files () with
+      | result -> result
+      | exception exn -> release_failed t ~id exn) |> Result.map_error (function
       | Lease.Read_failed detail|Snapshot_failed detail -> detail) in
     let published=ref false in
     Fun.protect ~finally:(fun () -> if not !published then release t ~id snapshot) (fun () ->

@@ -32,6 +32,10 @@ with patch.object(keeper_store_layout, "load_store_layout", return_value={
     READINESS = load("outcome_readiness", "audit-keeper-fleet-readiness.py")
 
 
+ACCEPTANCE = load(
+    "outcome_acceptance", "harness/workload/keeper_multi_collaboration_acceptance.py")
+
+
 def call(**fields):
     return {"record_kind": "tool_call", "keeper": "fixture", "tool": "masc_web_search",
             "duration_ms": 12, "input": {}, "output": '{}', **fields}
@@ -178,6 +182,21 @@ class OutcomeConsumers(unittest.TestCase):
         # 2 of 5 tool_call rows succeeded; 1 of the 2 Execute rows failed.
         self.assertEqual(metrics["tool_call_success_pct"], 40.0)
         self.assertEqual(metrics["execute_failure_pct"], 50.0)
+
+    def test_acceptance_harness_reads_the_recorded_outcome_of_a_log_row(self):
+        for fields, verdict in [({"disposition": "completed", "wire_outcome": "error"}, True),
+                                ({"disposition": "failed", "wire_outcome": "ok"}, False),
+                                ({"wire_outcome": "ok"}, True),
+                                ({"wire_outcome": "error"}, False),
+                                ({"disposition": "deferred"}, None),
+                                ({"wire_outcome": "unknown"}, None),
+                                ({"disposition": "invented"}, None),
+                                ({"success": True}, None),
+                                ({"success": False}, None)]:
+            with self.subTest(fields=fields):
+                row = call(**fields)
+                self.assertIs(ACCEPTANCE.row_success_verdict(row), verdict)
+                self.assertIs(ACCEPTANCE.row_succeeded(row), verdict is True)
 
     def test_quality_harness_marks_only_a_settled_success_as_success(self):
         rows = [call(keeper="fixture", tool="tool_execute", disposition="completed", wire_outcome="error"),

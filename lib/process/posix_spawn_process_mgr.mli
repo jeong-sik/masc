@@ -17,6 +17,14 @@
 
 val mgr : Eio_unix.Process.mgr_ty Eio.Resource.t
 
+val original_start : _ Eio.Process.t -> string option
+(** Kernel birth token captured immediately after the original spawn, before
+    observers or the reaper can release its PID. Reading this value never looks
+    up a PID again; it remains the original observation after exit/reap.
+    [None] means the manager does not provide this observation, or the original
+    child's birth could not be observed. It must not authorize a fresh lookup
+    as a replacement for the original identity. *)
+
 val foreground_mgr :
   clock:_ Eio.Time.clock -> grace_seconds:float ->
   Eio_unix.Process.mgr_ty Eio.Resource.t

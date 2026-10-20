@@ -38,6 +38,7 @@ let expected =
   ; "masc_file_delete"
   ; "masc_file_list"
   ; "keeper_analyze_image"
+  ; "keeper_image_read"
   ]
 ;;
 

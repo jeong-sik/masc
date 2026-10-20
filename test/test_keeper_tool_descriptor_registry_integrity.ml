@@ -1590,6 +1590,10 @@ let test_concurrent_execution_opt_ins_are_exact () =
     (* Revalidate write-during-read is source-store file-lock serialized;
        appends ride the per-path mutex. *)
     ; "keeper_context_status"
+    (* Reads one file or stored image; the only write keeps the verified bytes
+       in the content-addressed vision store, which names a file by the hash of
+       its bytes, replaces it atomically and is not pruned on this path. *)
+    ; "keeper_image_read"
     (* A single [Store.load] of the job record; nothing is written and no
        backend is contacted. *)
     ; "keeper_job_result"

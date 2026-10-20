@@ -370,18 +370,25 @@ type lane_decl =
     lane's table under [runtime] and its registry key, so a reader that needs
     either matches on the owner. Every lane today is a built-in standalone
     lane. *)
+val exact_output_name_valid : string -> bool
+(** An exact output name: [a-z][a-z0-9_]*, as a package manifest declares it. *)
+
+(** A Lane Add-on installation's named exact output: the declaration id that
+    owns the persistent volume and a [world.exact_outputs] name. Private, so
+    every value has a non-blank declaration id and a valid output name, which
+    is what keeps {!exact_lane_key} unambiguous. *)
+type addon_lane = private { declaration_id : string; output : string }
+[@@deriving show, eq]
+
+val addon_lane : declaration_id:string -> output:string -> (addon_lane, string) result
+
 type exact_lane_owner =
   | Builtin of
       (Standalone_lane.t
       [@printer fun fmt lane -> Format.pp_print_string fmt (Standalone_lane.to_id lane)]
       [@equal Standalone_lane.equal])
-  | Addon of { declaration_id : string; output : string }
-      (** A Lane Add-on installation's named exact output: the declaration id
-          that owns the persistent volume and a [world.exact_outputs] name. *)
+  | Addon of addon_lane
 [@@deriving show, eq]
-
-val exact_output_name_valid : string -> bool
-(** An exact output name: [a-z][a-z0-9_]*, as a package manifest declares it. *)
 
 val exact_lane_key : exact_lane_owner -> string
 (** The key the exact-output registry, its errors and the wires carry:

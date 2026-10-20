@@ -1302,7 +1302,13 @@ let test_addon_exact_output_lanes_load_with_builtin_rules () =
     check bool "an add-on lane may be off: none is required" false (find "operator-quiz/grade").enabled;
     check string "a declaration id that is not a bare key is quoted in the table name"
       "runtime.addon_exact_lanes.\"team.quiz\".author"
-      (Runtime_schema.exact_lane_table_name (find "team.quiz/author").owner)
+      (Runtime_schema.exact_lane_table_name (find "team.quiz/author").owner);
+    (* The key splits at its last slash, so an output may never hold one. *)
+    List.iter (fun (label, declaration_id, output) ->
+        check bool (label ^ " cannot be an add-on lane") true
+          (Result.is_error (Runtime_schema.addon_lane ~declaration_id ~output)))
+      [ "an output with a slash", "a", "b/c"; "a blank declaration id", " ", "author";
+        "an upper-case output", "quiz", "Author" ]
 
 let test_addon_exact_output_lane_tables_are_refused_where_wrong () =
   List.iter (fun (label, config, path) ->

@@ -434,13 +434,6 @@ type lane_decl =
   }
 [@@deriving show, eq]
 
-type exact_lane_owner =
-  | Builtin of
-      (Standalone_lane.t
-      [@printer fun fmt lane -> Format.pp_print_string fmt (Standalone_lane.to_id lane)]
-      [@equal Standalone_lane.equal])
-  | Addon of { declaration_id : string; output : string }
-[@@deriving show, eq]
 
 (* A declaration id may be any non-blank string, so it can hold a slash; an
    output name cannot (it is a-z, 0-9 and _ only), so the key splits at its last slash.
@@ -451,6 +444,22 @@ let exact_output_name_valid name =
   name <> ""
   && (match name.[0] with 'a' .. 'z' -> true | _ -> false)
   && String.for_all (function 'a' .. 'z' | '0' .. '9' | '_' -> true | _ -> false) name
+
+type addon_lane = { declaration_id : string; output : string } [@@deriving show, eq]
+
+let addon_lane ~declaration_id ~output =
+  if String.trim declaration_id = "" then Error "a declaration id must not be blank"
+  else if not (exact_output_name_valid output)
+  then Error "an exact output name is a-z, 0-9 and _, starting with a letter"
+  else Ok { declaration_id; output }
+
+type exact_lane_owner =
+  | Builtin of
+      (Standalone_lane.t
+      [@printer fun fmt lane -> Format.pp_print_string fmt (Standalone_lane.to_id lane)]
+      [@equal Standalone_lane.equal])
+  | Addon of addon_lane
+[@@deriving show, eq]
 
 let exact_lane_key = function
   | Builtin lane -> Standalone_lane.to_id lane
@@ -463,9 +472,7 @@ let exact_lane_owner_of_key key =
   | Some position ->
     let declaration_id = String.sub key 0 position in
     let output = String.sub key (position + 1) (String.length key - position - 1) in
-    if String.trim declaration_id <> "" && exact_output_name_valid output
-    then Some (Addon { declaration_id; output })
-    else None
+    Result.to_option (addon_lane ~declaration_id ~output) |> Option.map (fun lane -> Addon lane)
 
 let exact_lane_table_path = function
   | Builtin lane ->

@@ -223,7 +223,7 @@ let test_an_addon_lane_slot_without_a_body_deadline_is_named () =
   (match Runtime.init_default ~config_path:path with
    | Ok () -> ()
    | Error detail -> failf "boot must not refuse a connect-only provider: %s" detail);
-  let owner = Runtime_schema.Addon { declaration_id = "operator-quiz"; output = "author" } in
+  let owner = Runtime_schema.Addon (Result.get_ok (Runtime_schema.addon_lane ~declaration_id:"operator-quiz" ~output:"author")) in
   let degradation = Runtime.exact_slot_degradation () in
   match
     List.filter

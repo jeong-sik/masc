@@ -672,8 +672,8 @@ let test_addon_lanes_publish_beside_builtin_lanes () =
     load_control_snapshot
       (Exact_output.Full_replacement { source = "addon-lanes"; contents = replacement_catalog })
   in
-  let author = Runtime_schema.Addon { declaration_id = "operator-quiz"; output = "author" } in
-  let grade = Runtime_schema.Addon { declaration_id = "operator-quiz"; output = "grade" } in
+  let author = Runtime_schema.Addon (Result.get_ok (Runtime_schema.addon_lane ~declaration_id:"operator-quiz" ~output:"author")) in
+  let grade = Runtime_schema.Addon (Result.get_ok (Runtime_schema.addon_lane ~declaration_id:"operator-quiz" ~output:"grade")) in
   let lane owner enabled : Runtime_schema.exact_output_lane_decl =
     { owner; enabled; slot_ids = [ replacement_target ]; cli_slot_ids = []
     ; max_output_tokens = Some 4_096; thinking = None }
@@ -693,7 +693,10 @@ let test_addon_lanes_publish_beside_builtin_lanes () =
      | Error error ->
        Alcotest.failf "an add-on lane must resolve: %s" (Registry.lane_resolution_error_to_string error));
     (match Registry.resolve_lane registry ~lane_id:(Runtime_schema.exact_lane_key grade) with
-     | Error (Registry.Exact_lane_off _) -> ()
+     | Error (Registry.Exact_lane_off _ as error) ->
+       Alcotest.(check bool) "the refusal names the add-on table to turn it on" true
+         (String_util.contains_substring (Registry.lane_resolution_error_to_string error)
+            "runtime.addon_exact_lanes.operator-quiz.grade.enabled = true")
      | Ok _ | Error _ -> Alcotest.fail "a disabled add-on lane must resolve to Exact_lane_off");
     match Registry.resolve_lane registry ~lane_id:"operator-quiz/review" with
     | Error (Registry.Exact_lane_unconfigured _) -> ()

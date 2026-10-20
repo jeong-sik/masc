@@ -5572,6 +5572,11 @@
  (libraries masc masc.agent_core mcp_protocol alcotest eio eio_main yojson))
 
 (test
+ (name test_lane_addon_native_worker)
+ (modules test_lane_addon_native_worker)
+ (libraries masc masc.agent_core masc_process mcp_protocol alcotest eio eio_main yojson unix))
+
+(test
  (name test_lane_addon_worker)
  (modules test_lane_addon_worker)
  (libraries masc.lane_addon_call_context masc masc.string_util masc_random_id mcp_protocol alcotest eio eio_main yojson unix digestif masc.fs_compat base64))

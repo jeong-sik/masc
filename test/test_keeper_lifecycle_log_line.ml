@@ -36,7 +36,12 @@ let test_success_has_no_reason_field () =
     "already_live likewise carries nothing extra"
     "keeper lifecycle boot name=analyst actor=masc-tui outcome=already_live \
      duration_ms=0"
-    (line P.Already_live)
+    (line P.Already_live);
+  Alcotest.(check string)
+    "already_absent names itself and carries nothing extra"
+    "keeper lifecycle shutdown name=analyst actor=masc-tui outcome=already_absent \
+     duration_ms=0"
+    (line ~action:"shutdown" P.Already_absent)
 
 let test_rejection_names_its_gate () =
   let paused_meta =
@@ -82,6 +87,7 @@ let test_persist_failure_carries_its_error () =
 let test_severity_follows_the_outcome () =
   check_level "success is Info" Log.Info P.Succeeded;
   check_level "already live is Info" Log.Info P.Already_live;
+  check_level "already absent is Info" Log.Info P.Already_absent;
   check_level "a rejection is Warn" Log.Warn (P.Rejected "paused");
   check_level "a missing dispatch is Warn" Log.Warn P.Dispatch_none;
   check_level "a persist failure is Warn" Log.Warn (P.Persist_failed "io")
@@ -93,6 +99,32 @@ let test_fields_stay_in_order () =
      outcome=dispatch_none duration_ms=17"
     (line ~action:"shutdown" ~name:"alder" ~actor:"dashboard" ~duration_ms:17
        P.Dispatch_none)
+
+(* keeper_down's two success shapes (lib/keeper/keeper_turn_lifecycle.ml). *)
+let test_shutdown_outcome_reads_the_tool_data () =
+  let outcome =
+    Alcotest.testable
+      (fun fmt -> function
+         | P.Shutdown_submitted -> Format.pp_print_string fmt "submitted"
+         | P.Shutdown_target_absent -> Format.pp_print_string fmt "target_absent")
+      ( = )
+  in
+  let read json = P.shutdown_outcome_of_data (Yojson.Safe.from_string json) in
+  Alcotest.(check (result outcome string))
+    "a name with no Keeper is absent, and nothing is persisted for it"
+    (Ok P.Shutdown_target_absent)
+    (read {|{"name":"ghost","already_absent":true}|});
+  Alcotest.(check (result outcome string))
+    "an accepted operation is a submission"
+    (Ok P.Shutdown_submitted)
+    (read {|{"accepted":true,"operation_id":"op-1"}|});
+  Alcotest.(check (result outcome string))
+    "an operation observed already running is also a submission"
+    (Ok P.Shutdown_submitted)
+    (read {|{"accepted":false,"operation_id":"op-1"}|});
+  Alcotest.(check bool)
+    "data that carries neither is refused, not read as a submission" true
+    (Result.is_error (read {|{"name":"ghost"}|}))
 
 let () =
   Alcotest.run "keeper_lifecycle_log_line"
@@ -107,6 +139,8 @@ let () =
             test_dispatch_error_text_stays_on_one_line;
           Alcotest.test_case "persist failure carries its error" `Quick
             test_persist_failure_carries_its_error;
+          Alcotest.test_case "shutdown outcome reads the tool data" `Quick
+            test_shutdown_outcome_reads_the_tool_data;
         ] );
       ( "shape",
         [

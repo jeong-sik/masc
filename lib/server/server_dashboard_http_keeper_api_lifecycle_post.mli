@@ -39,6 +39,7 @@ val invalidate_keeper_execution_surfaces : config:Workspace.config -> unit -> un
 type lifecycle_outcome =
   | Succeeded
   | Already_live
+  | Already_absent
   | Rejected of string
   | Dispatch_none
   | Persist_failed of string
@@ -60,6 +61,16 @@ val lifecycle_log_line :
     appended last as [reason=...] with newlines collapsed to spaces, so free
     text from a dispatched tool cannot split the record across lines. *)
 
+
+type shutdown_outcome =
+  | Shutdown_submitted
+  | Shutdown_target_absent
+
+val shutdown_outcome_of_data : Yojson.Safe.t -> (shutdown_outcome, string) result
+(** Read what [keeper_down] did from its data: [accepted] means it took the
+    shutdown (a new operation or one already running), [already_absent] means
+    the name has no lane and no metadata, so there is nothing to pause. Data
+    that carries neither is an [Error], never a submission. *)
 
 type up_workspace_error =
   | Invalid_workspace_precondition

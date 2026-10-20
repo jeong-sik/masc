@@ -151,10 +151,11 @@ let handle_read ~tool_name ~start_time ctx args : Tool_result.result =
        survives slugification. A page whose header does not read is listed
        by filename, so it resolves by filename and has no title to match. The
        query is lowercased once. Content read for title-matching is cached so
-       the chosen file is not read twice. The index tells a Keeper to read a
-       page by its file name without [.md], so a page with exactly that name
-       wins over a page whose name or title only contains the query:
-       [setlist] opens [setlist.md], not [pm-setlist.md], which sorts first. *)
+       the chosen file is not read twice. The index shows a page by its file
+       name and tells a Keeper to read it by that name with or without [.md],
+       so a page with exactly that name wins over a page whose name or title
+       only contains the query: [setlist] and [setlist.md] both open
+       [setlist.md], not [pm-setlist.md], which sorts first. *)
     let topic_lc = String.lowercase_ascii topic in
     let files = list_pages ~base_path:ctx.base_path in
     let title_matches content =
@@ -164,9 +165,8 @@ let handle_read ~tool_name ~start_time ctx args : Tool_result.result =
       | Error _ -> false
     in
     let is_exact_name path =
-      String.equal
-        (String.lowercase_ascii (Filename.remove_extension (Filename.basename path)))
-        topic_lc
+      let file_lc = String.lowercase_ascii (Filename.basename path) in
+      String.equal file_lc topic_lc || String.equal file_lc (topic_lc ^ ".md")
     in
     let matched =
       match List.find_opt is_exact_name files with

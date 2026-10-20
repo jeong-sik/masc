@@ -313,21 +313,25 @@ let test_read_by_page_name () =
     Alcotest.(check bool) "page name substring matches" true ok
   )
 
-(* The index names a page by its file name without .md. A longer name that
-   contains it sorts first here, and must not be opened instead. *)
+(* The index shows a page by its file name and the prompt asks for it without
+   .md. A longer name that contains it sorts first here, and must not be
+   opened instead, whichever way the Keeper writes the name. *)
 let test_read_prefers_the_page_named_exactly () =
   with_temp_base_path (fun ctx ->
     create_ok ctx
       (create_args ~page:"pm-setlist" ~title:"PM Setlist" ~body:"Body of the PM page." ());
     create_ok ctx
       (create_args ~page:"setlist" ~title:"Setlist" ~body:"Body of the plain page." ());
-    let read_args = `Assoc [("topic", `String "setlist")] in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_read" ~args:read_args in
-    Alcotest.(check bool) "read succeeds" true ok;
-    Alcotest.(check bool) "opens the page of that name" true
-      (msg_contains ~needle:"Body of the plain page." msg);
-    Alcotest.(check bool) "not the longer name" false
-      (msg_contains ~needle:"Body of the PM page." msg)
+    List.iter
+      (fun topic ->
+        let read_args = `Assoc [("topic", `String topic)] in
+        let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_read" ~args:read_args in
+        Alcotest.(check bool) (topic ^ ": read succeeds") true ok;
+        Alcotest.(check bool) (topic ^ ": opens the page of that name") true
+          (msg_contains ~needle:"Body of the plain page." msg);
+        Alcotest.(check bool) (topic ^ ": not the longer name") false
+          (msg_contains ~needle:"Body of the PM page." msg))
+      ["setlist"; "setlist.md"; "SETLIST.MD"]
   )
 
 (* ============================================================

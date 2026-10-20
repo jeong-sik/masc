@@ -154,9 +154,10 @@ val wiki_root : base_path:string -> string
 
 val handle_read : tool_name:string -> start_time:Tool_timing.started -> context -> Yojson.Safe.t -> Tool_result.result
 (** [handle_read ~tool_name ~start_time ctx args] handles [masc_wiki_read].
-    Required arg: [topic] (string, case-insensitive partial match against
-    the Markdown filename or, for a page whose frontmatter reads, its
-    [title]).
+    Required arg: [topic] (string, case-insensitive). A page whose file
+    name equals [topic], with or without [.md], is opened first. Otherwise
+    the first page whose Markdown filename contains [topic] or, for a page
+    whose frontmatter reads, whose [title] contains it.
     Failure classes: [Workflow_rejection] when [topic] is missing or
     no page matches; [Runtime_failure] when read I/O fails;
     [Ok] with ["## <basename>\n\n<content>"] in [data.text], the heading

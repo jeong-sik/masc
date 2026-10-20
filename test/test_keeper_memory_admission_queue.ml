@@ -326,7 +326,7 @@ let test_sparse_consumption_retains_gap_and_append () = with_store (fun keepers_
 (* Accepted B no longer has a queue row after acknowledgement. Memory its
    receipt cannot be verified against, or a receipt file that cannot be read,
    must not turn that state into a fresh empty memory store. *)
-let test_sparse_authority_loss_refuses_judgment () =
+let test_unverifiable_memory_authority_refuses_judgment () =
   List.iter (fun damage -> with_store (fun keepers_dir ->
     ignore (append keepers_dir "a" "uncertain A");
     ignore (append keepers_dir "b" "settled B");
@@ -658,6 +658,27 @@ let test_lost_receipts_do_not_block_remaining_input () =
    receipt sidecar against no snapshot and drops them, and the remaining
    explicit input then joins the Memory that starts again, as durable and
    continuity input do; it is not held back for a snapshot nothing restores. *)
+(* B committed but its receipt was lost before acknowledgement, so B is judged
+   again. Committing its claim a second time refreshes the fact Memory already
+   holds instead of adding another. *)
+let test_rejudged_commit_keeps_one_fact () = with_store (fun keepers_dir ->
+  ignore (append keepers_dir "b" "settled B");
+  ignore (commit keepers_dir (Queue.candidate_ids (batch keepers_dir)) [fact "settled B"]);
+  Sys.remove (Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper");
+  let judged = ref [] in
+  let outcome = Worker.For_testing.run_with ~keepers_dir ~keeper_name:"keeper"
+    ~judge:(fun selected ->
+      judged := candidate_names selected :: !judged;
+      ignore (commit keepers_dir (Queue.candidate_ids selected) [fact "settled B"]);
+      Worker.Committed) in
+  check (list (list string)) "the committed row is judged again" [["b"]] !judged;
+  check bool "the re-judged row settles" true (outcome = Worker.Settled {has_more=false});
+  let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require in
+  check (list string) "Memory holds the claim once" ["settled B"]
+    (match current with
+     | Some current -> List.map (fun (f : Types.fact) -> f.claim) current.facts
+     | None -> []))
+
 let test_snapshot_loss_admits_remaining_input_into_new_memory () = with_store (fun keepers_dir ->
   List.iter (fun id -> ignore (append keepers_dir id ("rule " ^ id))) ["a";"b";"c"];
   let consumed = List.filter (fun (id : Current.explicit_candidate_id) -> id.request_id <> "c")
@@ -714,7 +735,7 @@ let () = run "durable explicit admission queue"
     test_case "concurrent acknowledgement preserves deferred input" `Quick test_concurrent_acknowledgement_preserves_deferred_input;
     test_case "a lost receipt of an unacknowledged commit is judged again" `Quick test_lost_receipt_of_unacknowledged_commit_is_judged_again;
     test_case "contiguous pending recovers without sparse authority" `Quick test_contiguous_pending_recovers_without_sparse_authority;
-    test_case "lost sparse authority refuses judgment without retiring evidence" `Quick test_sparse_authority_loss_refuses_judgment;
+    test_case "unverifiable Memory authority refuses judgment without retiring evidence" `Quick test_unverifiable_memory_authority_refuses_judgment;
     test_case "new input during semantic deferral is recheck, not commit" `Quick test_semantic_deferral_with_new_tail_is_not_commit;
     test_case "capacity siblings continue past semantic uncertainty" `Quick test_capacity_left_uncertainty_does_not_block_right;
     test_case "capacity sibling traversal stops on provider outage" `Quick test_capacity_outage_stops_before_sibling;
@@ -723,6 +744,7 @@ let () = run "durable explicit admission queue"
     test_case "nested capacity split retains indivisible input" `Quick test_nested_capacity_retains_indivisible_input;
     test_case "all deferred capacity siblings do not spin" `Quick test_capacity_all_siblings_deferred_do_not_spin;
     test_case "lost receipts do not block the remaining input" `Quick test_lost_receipts_do_not_block_remaining_input;
+    test_case "a re-judged commit keeps one fact" `Quick test_rejudged_commit_keeps_one_fact;
     test_case "snapshot loss admits remaining input into the new Memory" `Quick test_snapshot_loss_admits_remaining_input_into_new_memory;
     test_case "sparse receipt recovery preserves deferred gap and new append" `Quick test_sparse_consumption_retains_gap_and_append;
     test_case "partial worker wakes only newly unjudged input" `Quick test_worker_partial_consumption_wakes_only_new_input;

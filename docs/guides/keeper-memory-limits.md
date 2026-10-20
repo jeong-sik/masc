@@ -72,3 +72,24 @@ both files retain their original bytes while subsequent writes can start fresh.
 This also covers explicit retractions and supersessions. Older missing journal
 entries are not reconstructed; absence is still not proof that a fact never
 existed. Entries without reason-bearing removals remain best-effort observations.
+
+## Explicit memory writes
+
+`keeper_memory_write` first saves the fact to the Keeper's pending admission
+queue (`<keeper>.memory-admission.json`) and answers
+`persisted_pending_admission`. The Librarian then judges pending rows against
+current Memory and commits them. Each committed row leaves a receipt naming its
+queue generation, sequence and payload digest, and acknowledgement removes
+exactly the rows a receipt names. Nothing else removes a row, so a sequence
+that has left the queue is committed history.
+
+- Losing the receipt of such a sequence (for example in a receipt schema cut)
+  does not hold back the rows that remain.
+- A pending row whose receipt is lost is judged again against current Memory.
+  Committing the same claim again refreshes the fact Memory already holds.
+- While a committed receipt names a snapshot that is missing, undecodable or
+  has other bytes, admission stops before judgment. Losing the snapshot loses
+  the facts it held. Once an ordinary Librarian read reconciles the receipts
+  against no snapshot, the remaining explicit writes start the new Memory, as
+  durable and continuity input do. The operator accepted this transition on
+  2026-10-20 (#44144).

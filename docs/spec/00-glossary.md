@@ -276,7 +276,11 @@ status: reference
     들여온 WAV/MIDI 자산이다. `:split-take`로 찢어도 원본은 그대로다. 흔한 일상어
     "지역"과 이 도구의 "구간"은 다른 뜻이므로, 음악 도구 문서에서 region은 항상
     이 자리로 읽는다. 반복은 자리의 속성이다: "repetition of the loop region"(README)은
-    하나의 자리가 여러 번 이어지는 것이고, 복제된 자리와는 다르다.
+    하나의 자리가 여러 번 이어지는 것이고, 복제된 자리와는 다르다. 그러므로 loop region은
+    새 개념이 아니라 반복을 가진 Region, 곧 이 항목의 특수한 경우이고, 따로 표제어를
+    세우지 않는다. 코드도 같다: UMP 루프 계획은 `timeline.regions`의 각 항목에서
+    `repeatCount`를 읽어 클립을 만들고, 0이면 "invalid captured loop region"으로
+    거절한다(`UmpLoopTransport.swift`).
   → [tools/alphatex/README.md](../../tools/alphatex/README.md) ·
   [tools/alphatex/CAPTURE-UMP-REGIONS.md](../../tools/alphatex/CAPTURE-UMP-REGIONS.md) ·
   [tools/alphatex/ARRANGEMENT.md](../../tools/alphatex/ARRANGEMENT.md)

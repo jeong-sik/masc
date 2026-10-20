@@ -8,7 +8,7 @@ type admitted_slot =
   }
 
 type admitted_lane =
-  { id : string
+  { owner : Runtime_schema.exact_lane_owner
   ; enabled : bool
   ; slots : admitted_slot list
   ; cli_slots : string list
@@ -124,7 +124,7 @@ type resolved_lane =
 
 type lane_resolution_error =
   | Exact_lane_unconfigured of { lane_id : string }
-  | Exact_lane_off of { lane_id : string }
+  | Exact_lane_off of { lane_id : string; owner : Runtime_schema.exact_lane_owner }
   | No_admitted_lane_slots of { lane_id : string }
 
 type prepared_replacement =
@@ -176,7 +176,8 @@ let lane_publication registry lane_id =
            String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id)
         registry.declared_lanes in
     let targets = match List.find_opt
-        (fun (lane : admitted_lane) -> String.equal lane.id lane_id)
+        (fun (lane : admitted_lane) ->
+           String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id)
         registry.exact_output_lanes with
       | None -> []
       | Some lane -> List.map (fun (slot : admitted_slot) ->
@@ -342,7 +343,7 @@ let admit_lanes ~admitted_by_id resolver_snapshot lanes =
           (position + 1)
           (String_set.add lane_id seen)
           admitted_by_id
-          ({ id = lane_id
+          ({ owner = lane.owner
            ; enabled = lane.enabled
            ; slots
            ; cli_slots = lane.cli_slot_ids
@@ -362,7 +363,8 @@ let validate_required_lanes required_lane_ids admitted_lanes =
     | lane_id :: rest ->
       (match
          List.find_opt
-           (fun (lane : admitted_lane) -> String.equal lane.id lane_id)
+           (fun (lane : admitted_lane) ->
+              String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id)
            admitted_lanes
        with
        | Some { slots = _ :: _; _ }
@@ -641,11 +643,11 @@ let catalog_absent_assignments resolver_snapshot ~(assignments :
 let resolve_lane registry ~lane_id =
   match
     List.find_opt
-      (fun lane -> String.equal lane.id lane_id)
+      (fun lane -> String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id)
       registry.exact_output_lanes
   with
   | None -> Error (Exact_lane_unconfigured { lane_id })
-  | Some { enabled = false; _ } -> Error (Exact_lane_off { lane_id })
+  | Some { enabled = false; owner; _ } -> Error (Exact_lane_off { lane_id; owner })
   | Some lane ->
     (* A lane is empty only when it has NOTHING to run: cli fallbacks keep a
        lane alive even when every catalog slot was dropped (and a cli-only
@@ -794,8 +796,9 @@ let publication_error_to_string = function
 ;;
 
 let lane_resolution_error_to_string = function
-  | Exact_lane_off { lane_id } ->
-    Printf.sprintf "exact-output lane %S is off; set runtime.exact_output_lanes.%s.enabled = true to accept new work" lane_id lane_id
+  | Exact_lane_off { lane_id; owner } ->
+    Printf.sprintf "exact-output lane %S is off; set %s.enabled = true to accept new work" lane_id
+      (Runtime_schema.exact_lane_table_name owner)
   | Exact_lane_unconfigured { lane_id } ->
     Printf.sprintf "exact-output lane %S is not configured" lane_id
   | No_admitted_lane_slots { lane_id } ->

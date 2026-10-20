@@ -3019,13 +3019,15 @@ let parse_addon_exact_output_lanes (toml : Otoml.t)
   let table_path = Ns.(path Runtime) "addon_exact_lanes" in
   let not_a_table path what = Error (error path (what ^ " must be a table")) in
   let parse_output declaration_id (output, value) =
-    let owner = Runtime_schema.Addon { declaration_id; output } in
-    let path = Runtime_schema.exact_lane_table_name owner in
-    if not (Runtime_schema.exact_output_name_valid output)
-    then Error (error path "an exact output name is a-z, 0-9 and _, starting with a letter")
-    else
+    let path =
+      String.concat "." [ table_path; Toml_line_editor.render_key declaration_id; Toml_line_editor.render_key output ]
+    in
+    match Runtime_schema.addon_lane ~declaration_id ~output with
+    | Error message -> Error (error path message)
+    | Ok lane ->
       match value with
-      | Otoml.TomlTable _ | Otoml.TomlInlineTable _ -> parse_exact_output_lane ~owner value
+      | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
+        parse_exact_output_lane ~owner:(Runtime_schema.Addon lane) value
       | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
       | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
       | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ->

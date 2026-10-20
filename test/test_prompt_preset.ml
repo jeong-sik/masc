@@ -628,10 +628,10 @@ let test_runtime_text_transform () =
    table. *)
 let test_runtime_text_carries_addon_lanes () =
   let open Alcotest in
-  let author = Runtime_schema.Addon { declaration_id = "operator-quiz"; output = "author" } in
+  List.iter (fun (declaration_id, header) ->
+  let author = Runtime_schema.Addon (Result.get_ok (Runtime_schema.addon_lane ~declaration_id ~output:"author")) in
   let source =
-    runtime_fixture
-    ^ "\n[runtime.addon_exact_lanes.operator-quiz.author]\nslots = [\"openai.gpt\"]\n"
+    runtime_fixture ^ "\n" ^ header ^ "\nslots = [\"openai.gpt\"]\n"
   in
   let captured =
     match Preset.runtime_of_text source with
@@ -652,9 +652,12 @@ let test_runtime_text_carries_addon_lanes () =
     (match List.find_opt (fun (lane : Preset.lane) ->
          Runtime_schema.equal_exact_lane_owner lane.Preset.owner author) lanes with
      | Some lane ->
-       check (list string) "the add-on table takes the preset's slots" [ "runpod_mtp.qwen" ] lane.Preset.slots;
-       check bool "and its activity" false lane.Preset.enabled
-     | None -> fail "the add-on lane is gone after restore")
+       check (list string) (declaration_id ^ ": the add-on table takes the preset's slots")
+         [ "runpod_mtp.qwen" ] lane.Preset.slots;
+       check bool (declaration_id ^ ": and its activity") false lane.Preset.enabled
+     | None -> fail (declaration_id ^ ": the add-on lane is gone after restore")))
+    [ "operator-quiz", "[runtime.addon_exact_lanes.operator-quiz.author]";
+      "team.quiz", "[runtime.addon_exact_lanes.\"team.quiz\".author]" ]
 ;;
 
 let test_saved_lane_activity_shape () =

@@ -48,9 +48,8 @@ let output_ports world =
    package-relative like world.skills.directory and must stay inside the package
    after symlinks resolve. *)
 let exact_outputs ~directory world =
-  let valid_name name =
-    name <> "" && (match name.[0] with 'a' .. 'z' -> true | _ -> false)
-    && String.for_all (function 'a' .. 'z' | '0' .. '9' | '_' -> true | _ -> false) name in
+  (* The runtime lane key relies on this name rule, so both read it from one place. *)
+  let valid_name = Runtime_schema.exact_output_name_valid in
   let read_schema name path =
     let label = "world.exact_outputs." ^ name ^ ".schema" in
     let* relative = Skill_resource_path.of_string path

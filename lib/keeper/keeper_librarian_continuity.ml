@@ -423,9 +423,12 @@ let with_original_source ~config ~keeper_name ~prepared publish =
       let* range_now = S.checkpoint_prefix_range ~trace_id:prepared.trace_id ~lines ~messages:current_messages
         |> Result.map_error S.error_to_string in
       (* Unchanged bytes decode to the messages the unit read. Changed bytes
-         are compared one message at a time, each pair as its checkpoint JSON:
-         equal values encode to equal JSON, and the JSON of the rare pair
-         whose values differ is built only for that pair. *)
+         are compared one message at a time with the whole-prefix check's
+         equality: a pair passes when its checkpoint JSON trees are equal.
+         Values equal under [=] give trees equal under [=], so the first test
+         only spares building the trees and accepts nothing the tree compare
+         refuses. Neither test is byte equality: [0.0] and [-0.0] pass both,
+         though they encode one byte apart. *)
       let read_prefix_unchanged = match since with
         | C.Unchanged_source -> true
         | C.Changed_source _ ->

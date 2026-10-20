@@ -7379,6 +7379,26 @@ let test_keeper_resume_sends_changed_working_state_once () =
          (String_util.contains_substring fifth "WORKING_STATE_VERSION_TWO"))
 ;;
 
+(* Every request carries the frozen Librarian unread observation, ahead of the
+   per-turn context. The first request of a fixture with no snapshot or Memory
+   reader yet sends the "unavailable" observation; once the readers answer with
+   nothing unread, the next request sends the empty one. *)
+let unread_envelope ~snapshot ~memory =
+  let unread = Keeper_librarian_request_unread.of_results ~snapshot ~memory in
+  match Keeper_librarian_request_unread.attach ~include_empty:true
+      ~role:Agent_core.Types.System unread [] with
+  | [carrier] -> Keeper_official_client_host.encode_history_message carrier
+  | [] | _ :: _ :: _ -> failwith "an unread observation must have one carrier"
+;;
+
+let unavailable_unread_envelope =
+  unread_envelope
+    ~snapshot:(Error "fixture has no snapshot reader")
+    ~memory:(Error "fixture has no Memory reader")
+;;
+
+let empty_unread_envelope = unread_envelope ~snapshot:(Ok []) ~memory:(Ok [])
+
 let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
   let base_path = temp_workspace "masc-codex-context-wire-" in
   let start_capture = Filename.temp_file "masc-codex-context-start-" ".jsonl" in
@@ -7514,7 +7534,8 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
          |> Keeper_official_client_host.encode_history_message
        in
        check string "start config includes current context"
-         (system_prompt ^ "\n\n" ^ posture_note ^ "\n\n" ^ envelope dynamic_context)
+         (String.concat "\n\n"
+            [ system_prompt; posture_note; unavailable_unread_envelope; envelope dynamic_context ])
          start_instructions;
        (* The thread holds the conversation, so the resumed instructions name
           only the current system prompt; the per-turn context rides in front
@@ -7576,7 +7597,11 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
           fail "dynamic context lost its typed provenance");
        check string "start prompt stays exact" goal (turn_prompt start_capture);
        check string "resume prompt carries the current context in front of the goal"
-         ("SYSTEM:\n" ^ envelope "UPDATED_CONTEXT" ^ "\n\n" ^ goal)
+         (String.concat "\n\n"
+            [ "SYSTEM:\n" ^ empty_unread_envelope
+            ; "SYSTEM:\n" ^ envelope "UPDATED_CONTEXT"
+            ; goal
+            ])
          (turn_prompt resume_capture))
 ;;
 
@@ -8339,6 +8364,15 @@ let test_production_keeper_resolves_a_resumed_codex_turn_against_its_thread () =
        | Some _ | None -> fail "the resumed turn is not resolved against its thread")
 ;;
 
+(* The per-turn context envelope, as opposed to the unread observation that
+   travels in front of it. *)
+let carries_extra_system_context envelope =
+  let metadata = Yojson.Safe.Util.(envelope |> member "message" |> member "metadata") in
+  List.for_all
+    (fun (key, _) -> Yojson.Safe.Util.member key metadata <> `Null)
+    Agent_core.Types.Extra_system_context_provenance.metadata
+;;
+
 let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =
   let base_path = temp_workspace "masc-codex-production-context-" in
   let capture = Filename.temp_file "masc-codex-production-context-" ".jsonl" in
@@ -8397,7 +8431,8 @@ let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =
            |> String.split_on_char '\n'
            |> List.find_map (fun text ->
              match Yojson.Safe.from_string text with
-             | envelope when member "schema" envelope = `String Keeper_official_client_context_codec.schema ->
+             | envelope when member "schema" envelope = `String Keeper_official_client_context_codec.schema
+                             && carries_extra_system_context envelope ->
                Some envelope
              | _ -> None
              | exception Yojson.Json_error _ -> None)

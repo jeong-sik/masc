@@ -27,13 +27,16 @@ import {
   object,
   optional,
   picklist,
+  pipe,
   string,
+  transform,
   unknown,
   type BaseIssue,
   type InferOutput,
 } from 'valibot'
 
 import { SchemaDriftError, parseOrThrow } from './drift-error'
+import { readRuntimeLaneObservation } from '../../lib/keeper-runtime-walk'
 
 // FSM state fields stay open strings. The backend can ship new variants
 // ahead of the dashboard, and coercing an unknown state to Stable/idle/clean
@@ -151,6 +154,7 @@ const DegradedRetryLaneSchema = object({
 })
 
 const KeeperCompositeExecutionSchema = object({
+  runtime_lane_observation: pipe(unknown(), transform(readRuntimeLaneObservation)),
   latest_receipt_present: boolean(),
   recorded_at: nullable(string()),
   outcome: nullable(string()),

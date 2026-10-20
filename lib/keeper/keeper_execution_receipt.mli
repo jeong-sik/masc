@@ -300,6 +300,8 @@ val runtime_lane_observation_of_receipt_json :
     the store or diagnose errors that the caller's store reader discarded. *)
 
 val runtime_lane_observation_to_yojson : runtime_lane_observation -> Yojson.Safe.t
+(** Operator projection with derived failure summaries. The evidence's source
+    failure payloads and ordering remain intact; this is not the storage codec. *)
 
 (** The newest receipt's terminal fields, read back from the store. Labels are
     prefixed so they do not collide with {!t}'s. *)

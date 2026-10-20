@@ -109,6 +109,7 @@ function execution(
 ): KeeperCompositeExecution {
   return {
     latest_receipt_present: true,
+    runtime_lane_observation: { state: 'unreadable', turn: null, evidence: null, error: 'trace_id' },
     recorded_at: '2026-04-25T07:30:00Z',
     outcome: 'receipt_done',
     terminal_reason_code: 'success',

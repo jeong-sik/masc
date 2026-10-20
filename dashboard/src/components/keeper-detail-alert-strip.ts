@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { KeeperRuntimeWalkObservation } from './keeper-runtime-walk-observation'
 import { signal } from '@preact/signals'
 import { ActionButton } from './common/button'
 import {
@@ -155,6 +156,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const shouldShowOperatorDispositionReason =
     operatorDispositionReason !== null && operatorDispositionReason !== trustSummary
   const executionSummary = keeper.trust?.execution_summary ?? null
+  const runtimeLaneObservation = executionSummary?.runtime_lane_observation ?? null
   const providerAttempts = executionSummary?.provider_attempt_count
   const providerFallback = executionSummary?.provider_fallback_applied
   const runtimeOutcome = executionSummary?.runtime_outcome?.trim() || null
@@ -198,7 +200,8 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     || typeof observedProviderAttempts === 'number'
     || observedProviderFallback === true
   const hasExecutionEvidenceSignal =
-    Boolean(stopCause)
+    runtimeLaneObservation !== null
+    || Boolean(stopCause)
     || Boolean(latestTerminalCode)
     || Boolean(latestNextAction)
     || shouldShowOperatorDispositionReason
@@ -358,6 +361,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">런타임</strong> · ${runtimeLabel}</span>`
           : null}
         ${renderRuntimeAttempt ? renderRuntimeAttemptObservation(runtimeAttempt) : null}
+        <${KeeperRuntimeWalkObservation} observation=${runtimeLaneObservation} />
         ${trustLatestEvent
           ? html`
               <span>

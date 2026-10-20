@@ -43,4 +43,3 @@ export async function practiceSourceFixture(run) {
     await run({ root, input, files, context, arm, rows, receipt, publish })
   } finally { await rm(root, { recursive: true, force: true }) }
 }
-

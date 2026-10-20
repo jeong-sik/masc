@@ -10,6 +10,7 @@ import { arrangementEditor, arrangementCommand } from '../arrangement-editor.mjs
 import { newArrangement, editArrangement } from '../arrangement.mjs'
 import { arrangementRoute, arrangementPlaybackRequest, selectArrangementRoute } from '../arrangement-playback.mjs'
 import { startVstArrangement } from '../arrangement-vst.mjs'
+import { phraseBacking } from '../phrase-backing.mjs'
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const json = async path => JSON.parse(await readFile(path, 'utf8'))
 function wave(frames, rate) {
@@ -19,9 +20,10 @@ function wave(frames, rate) {
   bytes.writeUInt16LE(8, 32); bytes.writeUInt16LE(32, 34); bytes.write('data', 36); bytes.writeUInt32LE(frames * 8, 40)
   return bytes
 }
-async function fixture(run) {
+async function fixture(run, configure) {
   await practiceSourceFixture(async original => {
     const { root, input, rows, publish } = original
+    await configure?.(original)
     rows[0].packet.words[0] &= 0xffffff00; rows[0].packet.words[1] = 0x90010000; await publish()
     const path = join(root, 'project', 'song.json'), imported = await importArrangementPractice(newArrangement({ tempo: 120.1 }), input, { projectPath: path })
     const editor = arrangementCommand(arrangementEditor(imported.project), 'region asset-1 .5 1 48000 3').editor
@@ -51,8 +53,8 @@ test('captured sound route derives sample-frame VST input without changing raw U
   const before = structuredClone(project), prepared = await start().promise, plan = await json(prepared.path), call = calls[0]
   assert.equal(calls.length, 1); assert.equal(call.midi_path, undefined); assert.equal(call.sample_rate, 48000)
   const timeline = await json(call.timeline_path)
-  assert.equal(timeline.kind, 'practice-vst'); assert.deepEqual(timeline.events.map(event => event.frame), ['0', '5', '49'])
-  assert.deepEqual(timeline.events.map(event => event.bytes), [[0xb0 | context.backing.channel, 74, 85], [0x90 | context.backing.channel, 60, 72], [0x80 | context.backing.channel, 60, 9]])
+  assert.equal(timeline.kind, 'practice-vst'); assert.deepEqual(timeline.events.map(event => event.frame), ['0', '0', '0', '5', '49'])
+  assert.deepEqual(timeline.events.map(event => event.bytes), [...context.backing.initial, [0xb0 | context.backing.channel, 74, 85], [0x90 | context.backing.channel, 60, 72], [0x80 | context.backing.channel, 60, 9]])
   const clip = plan.regions[0]
   assert.deepEqual(clip.sourceClock, { start: '125', end: '6000125', denominator: '3000000000' })
   assert.equal(clip.offsetFrames, 1); assert.equal(clip.frameCount, 96); assert.equal(clip.repeat, 3)
@@ -60,6 +62,26 @@ test('captured sound route derives sample-frame VST input without changing raw U
   assert.deepEqual(project, before); assert.equal(rows[0].packet.hostTime, '18446744073709002400')
   const saved = join(root, 'portable', 'song.json'); await saveArrangement(saved, project, null, { sourceRoot: dirname(path) })
   assert.deepEqual((await loadArrangement(saved)).project, before)
+}))
+
+test('captured track controls precede same-frame raw overrides in the actual worker render input', () => fixture(async ({ project, rows, calls, start, context }) => {
+  const original = structuredClone(rows), before = structuredClone(project)
+  await start().promise
+  const timeline = await json(calls[0].timeline_path), channel = context.backing.channel
+  assert.deepEqual(timeline.events, [
+    { frame: '0', bytes: [0xb0 | channel, 7, 23] },
+    { frame: '0', bytes: [0xb0 | channel, 10, 100] },
+    { frame: '0', bytes: [0xb0 | channel, 7, 85] },
+    { frame: '0', bytes: [0xb0 | channel, 10, 17] },
+    { frame: '5', bytes: [0x90 | channel, 60, 72] },
+    { frame: '49', bytes: [0x80 | channel, 60, 9] },
+  ])
+  assert.deepEqual(rows, original); assert.deepEqual(project, before)
+}, ({ context, rows }) => {
+  const track = context.project.tracks.find(track => track.id === context.track)
+  track.level = 23; track.pan = 100
+  context.backing = phraseBacking(context.project, context.track, true)
+  rows[1].packet.words = [0x23b50755, 0x23b50a11]
 }))
 
 test('loop and count-in keep exact original raw source periods under the derived audio master', () => fixture(async ({ project, start }) => {

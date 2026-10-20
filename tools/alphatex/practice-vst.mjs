@@ -35,7 +35,8 @@ export async function preparePracticeVst(project, asset, { sourceRoot, directory
   packets.sort((a, b) => BigInt(a.hostTime) < BigInt(b.hostTime) ? -1 : BigInt(a.hostTime) > BigInt(b.hostTime) ? 1 : 0)
   const range = practiceRange(asset), rate = asset.metadata.renderClock.sampleRate
   const n = BigInt(asset.metadata.renderClock.clock.numer) * BigInt(rate), d = BigInt(asset.metadata.renderClock.clock.denom) * 1_000_000_000n
-  const fullClock = practiceAudioClock(asset), full = sourceAudioFrames(fullClock, rate), events = []
+  const fullClock = practiceAudioClock(asset), full = sourceAudioFrames(fullClock, rate)
+  const events = context.backing.initial.map(bytes => ({ frame: '0', bytes: [...bytes] }))
   let held = new Map(), frames = BigInt(full.frameCount)
   for (const packet of packets) {
     signal?.throwIfAborted()

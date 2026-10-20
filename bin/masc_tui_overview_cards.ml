@@ -22,23 +22,23 @@ let row_body ~is_selected ~cells (action, label) =
   let lines = row_lines ~cells label in
   if is_selected action then List.map (band ~cells) lines else lines
 
-let draw ~inner ~rows ~is_selected ~decisions ~decision_title ~continuation ~status =
+let draw ~inner ~rows ~is_selected ~decisions ~decisions_whole ~continuation ~status =
   let fits =
     Masc_tui_card.columns_that_fit ~inner_width:inner ~gap:column_gap
       ~min_card_width ~max_columns:column_count
   in
-  if fits < column_count then None
+  if fits < column_count || not decisions_whole then None
   else begin
     let rows_of entries ~cells =
       List.concat_map (row_body ~is_selected ~cells) entries
     in
     let decision_card =
-      { Masc_tui_card.title = decision_title
+      { Masc_tui_card.title = "Needs your decision"
       ; body =
           (fun ~cells ->
              match decisions with
-             (* The caller draws the cards only where the window holds a
-                decision or none exists, so an empty list means none waits. *)
+             (* The cards are drawn only for a whole window, so an empty list
+                means no decision waits. *)
              | [] -> [ Theme.recede () ^ "No decision is waiting on you." ^ Ansi.reset ]
              | _ :: _ -> rows_of decisions ~cells)
       }

@@ -647,6 +647,22 @@ let test_an_open_question_keeps_the_badge_up_until_answered () =
   check string "the answered question leaves the badge" "" (label ())
 
 (* Every open ask is a row Enter can open, and only open asks are. *)
+(* The drawing and the key loop that stores the decision window's first row
+   read one number for the rows Home leaves the window. It is the chrome's body
+   budget less the requests link, and less the one-time help line while that
+   line is shown. *)
+let test_the_window_budget_follows_the_help_line () =
+  let state = agenda_state () in
+  state.help_hint_shown <- false;
+  check int "help line and requests link take two rows" 18
+    (Masc_tui_home.home_requests_budget state ~chrome_budget:20);
+  state.help_hint_shown <- true;
+  check int "requests link takes one row" 19
+    (Masc_tui_home.home_requests_budget state ~chrome_budget:20);
+  state.help_hint_shown <- false;
+  check int "never below zero" 0
+    (Masc_tui_home.home_requests_budget state ~chrome_budget:1)
+
 let test_each_open_question_is_a_row_enter_opens () =
   let state = agenda_state () in
   set_asks state
@@ -729,6 +745,8 @@ let () =
             test_the_badge_fits_the_room_it_is_given
         ; test_case "an open question keeps the badge up until answered" `Quick
             test_an_open_question_keeps_the_badge_up_until_answered
+        ; test_case "the window budget follows the help line" `Quick
+            test_the_window_budget_follows_the_help_line
         ; test_case "each open question is a row Enter opens" `Quick
             test_each_open_question_is_a_row_enter_opens
         ; test_case "unread questions take no row and open nothing" `Quick

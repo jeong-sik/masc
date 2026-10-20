@@ -2641,7 +2641,8 @@ incidents are not counted as operator decisions.
 
 Use j/k or the arrows to choose, then Enter to open. Long request lists window
 around the selected identity while Continue and new work remain visible; the
-heading states the shown row range. Esc from a Home-opened reader returns to
+heading states the shown row range, and a window that shows only some requests
+is drawn as plain rows, never as cards. Esc from a Home-opened reader returns to
 Home with its selection and request window retained. If the request disappears
 or its source becomes unreadable, Home requires explicit reselection. A new
 top-level navigation ends the previous reader's return context.

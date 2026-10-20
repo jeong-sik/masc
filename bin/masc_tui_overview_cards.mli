@@ -19,11 +19,14 @@ val draw :
   rows:int ->
   is_selected:('action -> bool) ->
   decisions:('action * string) list ->
-  decision_title:string ->
+  decisions_whole:bool ->
   continuation:('action * string) list ->
   status:(cells:int -> string list) ->
   string list option
 (** The cards as lines of exactly [inner] cells, or [None] when they do not fit
     and the caller draws the plain rows instead: [inner] holds fewer than two
-    columns, or the cards need more than [rows] lines. The cards are as tall as
+    columns, the cards need more than [rows] lines, or [decisions_whole] is
+    false. [decisions_whole] says the window holds every decision; a window
+    that holds only some is named by its row range in the plain layout's
+    heading, which the card title has no place for. The cards are as tall as
     their rows and the two columns end on the same line. *)

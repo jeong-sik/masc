@@ -183,25 +183,21 @@ let render_overview (state : state) =
     ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
     ~hints:(if state.keeper_navigation_open then Masc_tui_keys.keeper_navigation_hints
             else Masc_tui_keys.footer_hints Overview)
-    ~body:(fun ~budget c ->
+    ~body:(fun ~budget:chrome_budget c ->
       (* The one-time door line: the first screen a reader meets names the
          sheet's key, because a footer item is easy to read past before the
          habit of reading footers exists. The first input of any kind
          retires it and writes [tui].help_hint_shown. *)
-      let budget =
-        if state.help_hint_shown then budget
-        else begin
-          c.push
-            (" " ^ Ansi.dim
-             ^ Masc_tui_footer.help_hint_item ^ " — every screen's keys"
-             ^ Ansi.reset);
-          max 0 (budget - 1)
-        end
-      in
+      if not state.help_hint_shown then
+        c.push
+          (" " ^ Ansi.dim
+           ^ Masc_tui_footer.help_hint_item ^ " — every screen's keys"
+           ^ Ansi.reset);
       c.push
         (" " ^ pressable (Press_surface Approvals)
            (Ansi.dim ^ "p:Approvals / Questions" ^ Ansi.reset));
-      let budget = max 0 (budget - 1) in
+      (* The key loop stores the window's first row from the same number. *)
+      let budget = Masc_tui_home.home_requests_budget state ~chrome_budget in
       let draw_row (action, label) =
         let line = "  " ^ label in
         if Some action = selected then c.push_selected line else c.push line
@@ -240,12 +236,7 @@ let render_overview (state : state) =
             ~rows:(budget - warning_rows)
             ~is_selected:(fun action -> Some action = selected)
             ~decisions
-            ~decision_title:
-              (if List.length decisions = List.length all_decisions
-               then "Needs your decision"
-               else Printf.sprintf "Needs your decision · rows %d-%d/%d · j/k for more"
-                   (first + 1) (first + List.length decisions)
-                   (List.length all_decisions))
+            ~decisions_whole:(List.length decisions = List.length all_decisions)
             ~continuation ~status
         in
         match card_rows with

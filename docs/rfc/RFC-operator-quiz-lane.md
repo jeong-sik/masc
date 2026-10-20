@@ -521,11 +521,12 @@ The binding also names `language` and `timezone`. The time zone is the operator'
 | `Session_opened` | session id, action request id, requested question count, grants, language, opened time |
 | `Material_read` | session id, request id, digest of the kept request and result under `/state/operator-quiz/pages/` (the page's cursor, completeness and SHA-256 are in it) |
 | `Exact_requested` | session id, request id, output name, request digest. The request body is already at `/state/operator-quiz/requests/<digest>.json` |
+| `Grade_requested` | ask id, question id, grade request id, request digest. Written with the answer for each written answer, and again at the next `compose` after a `Grade_failed`. The body is kept the same way |
 | `Posed` | ask request id, question id, item id, topic, key (`choices` ids or `points` rubric), sources |
 | `Draft_rejected` | author request id, question index, reason |
 | `Session_failed` | session id, reason (closed, see Sessions) |
 | `Answer_received` | host ask id, answers, responder, answered time |
-| `Judged` | ask id, question id, verdict (`correct`, `incorrect`, `void {reason}`), rationale, grade request id |
+| `Judged` | ask id, question id, verdict (`correct`, `incorrect`, `void`), rationale (for `void`, what is wrong with the question or key), grade request id |
 | `Grade_failed` | ask id, question id, grade request id, final result kind (§6.2) |
 | `Disputed` | ask id, question id, note, action request id |
 
@@ -657,10 +658,10 @@ New host state is limited to the first three rows. Each one holds a fact that wo
   - what was recorded before the answer: the rubric for a free-text question, or the label of the key choice for a choice question;
   - the sources with their quotes;
   - the answer.
-- Its schema allows `correct`, `incorrect` or `void` with a reason, and requires a rationale that names the missing point.
+- Its schema allows `correct`, `incorrect` or `void`, and requires a rationale that names the missing point, or for `void` what is wrong with the question or key. The schema has no nullable or conditional field, because the host's exact-output schemas allow neither.
 - The verdict is binary. A partial score would be a number standing in for a judgment.
 - While the `grade` lane is unavailable or a provider is rate-limited, the request stays listed and the answer stays waiting, visibly and with no expiry (§4.3, §4.4).
-- A final failure (`invalid_output`, `input_refused`, `outcome_unknown`, `not_allowed`) is written as `Grade_failed`. The answer stays `awaiting_judgment` and its row shows the failure. The package lists a new `grade` request for it at the next `compose`, or at a `dispute` on that question. It never lists one in reply to its own failure, so a lane that keeps failing cannot keep a cycle running.
+- A final failure (`invalid_output`, `input_refused`, `outcome_unknown`, `not_allowed`, `result_exceeds_frame`, or `request_exceeds_frame` when the grade request alone would not fit the package's frame) is written as `Grade_failed`. A rationale of only whitespace passes the schema's length rule and is `invalid_output` too. The answer stays `awaiting_judgment` and its row shows the failure. The package lists a new `grade` request for it at the next `compose`, or at a `dispute` on that question. It never lists one in reply to its own failure, so a lane that keeps failing cannot keep a cycle running.
 
 ### 6.3 Skips and unanswered questions
 
@@ -696,7 +697,7 @@ New host state is limited to the first three rows. Each one holds a fact that wo
 
 The package computes these from its log and publishes them as rows on every observation. The host retains them as it retains any output. Nothing new is stored.
 
-- **Attempt state (closed):** `open | withdrawn | correct of by | incorrect of by | skipped | awaiting_judgment | void of reason`, where `by = key | judgment of judged_at`.
+- **Attempt state (closed):** `open | withdrawn | correct of by | incorrect of by | skipped | awaiting_judgment | void`, where `by = key | judgment of judged_at`.
 - **`quiz/sessions`:** one row per compose. It shows the session's state (§4.9 Sessions), counts of correct, incorrect, skipped, awaiting and void questions, and the session's history scope. A `failed` session shows its typed reason and request id; a `superseded` session names the session that replaced it. Every session that fails has a row, so a session that fails after its scheduled occurrence `Succeeded` is visible here. A compose that never ran has no session; its receipt says why (§4.7). The row is a projection; nothing reads it to decide anything.
 - **`quiz/questions`:** one row per answered question. This is the reveal: your answer, the expected answer, the verdict and its chain, and the sources with quotes and hashes. A question that is still open has no row, so the key never shows early.
 - **Score:** correct divided by (correct + incorrect + skipped), per session and over all attempts. It is always shown with its numerator and denominator. Rows carry timestamps; grouping by local day happens on display. The score is not used as a control or as the success signal.

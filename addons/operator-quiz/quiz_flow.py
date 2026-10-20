@@ -14,6 +14,10 @@ counts. When everything is read, the session asks the author output once; a
 refusal for size is answered with a smaller request until nothing is left to
 drop.
 
+A written answer is graded by the grade output (§6.2). Its request is written
+with the answer, and a final failure is asked again only at the next compose,
+never in reply to the failure itself.
+
 Only a summary of each read stays in memory. Record bodies and file contents
 are read again from disk when the author request is written, newest first,
 and only as far as one request can hold (#44537).
@@ -23,6 +27,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -30,6 +35,7 @@ import quiz_grading as g
 import quiz_log as q
 
 AUTHOR = "author"
+GRADE = "grade"
 SCOPE_ALL = "all"
 SCOPE_OPEN_DEBT = "open_debt_only"
 FREE_TEXT = {"kind": "choices_only"}
@@ -42,6 +48,12 @@ class InvalidResult(ValueError):
 
 class InvalidBinding(ValueError):
     """The installation's binding does not name what a session reads."""
+
+
+@dataclass(frozen=True, slots=True)
+class Prompts:
+    author: str
+    grade: str
 
 
 def digest(value: Any) -> str:
@@ -239,14 +251,14 @@ def check_draft(draft: dict, input_material: list[dict],
 
 
 class Flow:
-    def __init__(self, state: Path, prompt: str, fits: Callable[[dict], bool]):
+    def __init__(self, state: Path, prompts: Prompts, fits: Callable[[dict], bool]):
         """[fits] says whether a listing that holds this one request fits the
         package's reply frame. The frame is a transport limit; an author
         request that does not fit could never be listed."""
         self.log = q.Log(state)
         self.pages = q.Blobs(state, "pages")
         self.requests = q.Blobs(state, "requests")
-        self.prompt = prompt
+        self.prompts = prompts
         self.fits = fits
         # Kept bodies are named by their digest, so what is derived from one
         # never goes stale. The fold is redone only when the log grew.
@@ -305,8 +317,18 @@ class Flow:
         grants = grants_of_binding(binding)
         language = language_of_binding(binding)
         session_id = session_id_of(action_request_id)
-        if all(session.session_id != session_id for session in self.sessions()):
-            self.log.append([q.SessionOpened(session_id, action_request_id, questions, grants, language, opened_at)])
+        sessions = self.sessions()
+        if all(session.session_id != session_id for session in sessions):
+            # A grade that ended in a final failure is asked again here, once
+            # per compose (§6.2), and so is a written answer that has no
+            # grading at all: one answered before this package graded, or
+            # whose request was lost with the end of a torn write.
+            again = [event for session in sessions if session.state == "answered" and session.answer is not None
+                     for posed, response in zip(session.posed, _responses(session.answer, session.posed))
+                     if _needs_grade(session.grading_of(posed.question_id), response)
+                     for event in self._request_grade(session, posed, response)]
+            self.log.append([q.SessionOpened(session_id, action_request_id, questions, grants, language, opened_at),
+                             *again])
         return session_id
 
     # -- listing --------------------------------------------------------------
@@ -412,6 +434,9 @@ class Flow:
                     request = self._next_read(session, sessions)
                     if request is not None:
                         out.append(request)
+        out += [self.requests.read(outstanding.digest) for session in sessions if session.state == "answered"
+                for posed in session.posed
+                if (outstanding := session.outstanding_grade(posed.question_id)) is not None]
         out += [self._ask(session) for session in sessions if session.state == "asked"]
         return out
 
@@ -428,7 +453,7 @@ class Flow:
                               "attempts": [{"answered_at": a.answered_at, "verdict": a.verdict} for a in item.attempts],
                               "sources": [source.to_json() for source in item.sources]} for item in history]}
         request_id = f"{session.session_id}-{AUTHOR}-{len(session.requests)}"
-        return {"kind": "exact_output", "request_id": request_id, "output": AUTHOR, "system": self.prompt,
+        return {"kind": "exact_output", "request_id": request_id, "output": AUTHOR, "system": self.prompts.author,
                 "messages": [json.dumps(payload, ensure_ascii=False, sort_keys=True)]}
 
     def _request_author(self, session: q.Session, sessions: list[q.Session], *, scope: str,
@@ -450,6 +475,35 @@ class Flow:
     def _payload(body: dict) -> dict:
         return json.loads(body["messages"][0])
 
+    # -- the grade request --------------------------------------------------
+
+    def _request_grade(self, session: q.Session, posed: q.Posed, response: q.Response) -> list[q.Event]:
+        """Writes the body of a grade request for one answered question and
+        returns the event that names it (§6.2): the question, the labels of
+        its key choices as recorded before the answer, the sources with their
+        quotes, the answer, and the judgments it already has. A request that
+        would not fit the frame could never be listed, so it ends at once."""
+        labels = {choice["choice_id"]: choice["label"] for choice in posed.question["choices"]}
+        judgments = session.judgments_of(posed.question_id)
+        payload = {"language": session.language,
+                   "question": {"header": posed.question["header"], "prompt": posed.question["prompt"],
+                                "mode": posed.question["mode"], "choices": posed.question["choices"]},
+                   "expected": {"kind": "choices", "labels": [labels[key] for key in posed.key]},
+                   "sources": [source.to_json() for source in posed.sources],
+                   "answer": q.response_to_json(response),
+                   "judgments": [{"judgment": q.judgment_to_json(j.judgment), "rationale": j.rationale}
+                                 for j in judgments]}
+        asked = sum(isinstance(e, q.GradeRequested) for e in session.grading_of(posed.question_id))
+        request_id = f"{posed.ask_id}-{GRADE}-{posed.question_id}-{asked}"
+        body = {"kind": "exact_output", "request_id": request_id, "output": GRADE, "system": self.prompts.grade,
+                "messages": [json.dumps(payload, ensure_ascii=False, sort_keys=True)]}
+        key = digest(body)
+        self.requests.write(key, body)
+        requested = q.GradeRequested(posed.ask_id, posed.question_id, request_id, key)
+        if self.fits(body):
+            return [requested]
+        return [requested, q.GradeFailed(posed.ask_id, posed.question_id, request_id, "request_exceeds_frame", None)]
+
     def history_scope(self, session: q.Session) -> str | None:
         """The history scope of the session's latest author request."""
         if not session.requests:
@@ -467,7 +521,11 @@ class Flow:
         listed = next((r for r in self.listing() if r["request_id"] == request_id), None)
         if listed is None:
             return False
-        if listed["kind"] == "ask":
+        grading = next(((session, event) for session in sessions for event in session.grading
+                        if isinstance(event, q.GradeRequested) and event.request_id == request_id), None)
+        if grading is not None:
+            self._deliver_grade(*grading, result)
+        elif listed["kind"] == "ask":
             session = next(s for s in sessions if s.ask_id == request_id)
             self._deliver_ask(session, request_id, result)
         else:
@@ -616,7 +674,17 @@ class Flow:
                 # posed question has exactly one response.
                 if sorted(answer.question_id for answer in answers) != sorted(p.question_id for p in session.posed):
                     raise InvalidResult("the answers do not name each posed question once")
-                self.log.append([q.AnswerReceived(ask_id, answers, responder, float(answered_at))])
+                received = q.AnswerReceived(ask_id, answers, responder, float(answered_at))
+                problem = q.unreadable(received)
+                if problem is not None:
+                    raise InvalidResult(f"the answer cannot be kept: {problem}")
+                responses = {answer.question_id: answer.response for answer in answers}
+                # The answer and the grade request of each written answer are
+                # one write, so no answer waits for a request that was never made.
+                self.log.append([received, *(event for posed in session.posed
+                                             if isinstance(responses[posed.question_id], q.Wrote)
+                                             for event in self._request_grade(session, posed,
+                                                                              responses[posed.question_id]))])
             case "not_allowed":
                 self.log.append([q.SessionFailed(session.session_id,
                                                  q.NotAllowed(ask_id, str(result.get("reason"))))])
@@ -627,3 +695,73 @@ class Flow:
                 self.log.append([q.SessionFailed(session.session_id, q.ResultExceedsFrame(ask_id))])
             case other:
                 raise InvalidResult(f"an ask of this package cannot end as {other}")
+
+    def _deliver_grade(self, session: q.Session, request: q.GradeRequested, result: dict) -> None:
+        """A judgment, or the final failure that leaves the answer waiting."""
+        def failed(kind: str, detail: str | None) -> q.Event:
+            return q.GradeFailed(request.ask_id, request.question_id, request.request_id, kind, detail)
+        event: q.Event
+        match result["status"]:
+            case "answered":
+                event = self._judgment(request, result.get("output"))
+            case "invalid_output":
+                event = failed("invalid_output", _detail(result.get("detail")))
+            case "input_refused":
+                event = failed("input_refused", _detail(result.get("kind")))
+            case "outcome_unknown":
+                event = failed("outcome_unknown", None)
+            case "not_allowed":
+                event = failed("not_allowed", _detail(result.get("reason")))
+            case "request_id_reused":
+                event = failed("not_allowed", "request_id_reused")
+            case "result_exceeds_frame":
+                event = failed("result_exceeds_frame", None)
+            case other:
+                raise InvalidResult(f"a grade request cannot end as {other}")
+        if q.unreadable(event) is not None:
+            # The result is final either way; one the log cannot keep is the
+            # output's failure, so the answer waits visibly instead of the
+            # result being delivered again and again.
+            event = failed("invalid_output", "the output holds text the log cannot keep")
+        self.log.append([event])
+
+    @staticmethod
+    def _judgment(request: q.GradeRequested, output: Any) -> q.Event:
+        """The grade schema's verdict and rationale as a Judged. The host
+        checked the schema, so anything else is a broken delivery. A
+        rationale of only whitespace passes the schema's length rule and is
+        kept as the output's failure."""
+        if not isinstance(output, dict) or set(output) != {"verdict", "rationale"} \
+                or not isinstance(output["rationale"], str):
+            raise InvalidResult("an answered grade request carries the grade schema's verdict and rationale")
+        judgment: q.Judgment
+        match output["verdict"]:
+            case "correct":
+                judgment = q.Correct()
+            case "incorrect":
+                judgment = q.Incorrect()
+            case "void":
+                judgment = q.Void()
+            case other:
+                raise InvalidResult(f"{other!r} is not a verdict of the grade schema")
+        if not output["rationale"].strip():
+            return q.GradeFailed(request.ask_id, request.question_id, request.request_id, "invalid_output",
+                                 "the rationale is only whitespace")
+        return q.Judged(request.ask_id, request.question_id, judgment, output["rationale"], request.request_id)
+
+
+def _needs_grade(grading: tuple[q.GradeRequested | q.Judged | q.GradeFailed, ...], response: q.Response) -> bool:
+    """Whether a compose asks for this answered question's grade again."""
+    if grading:
+        return isinstance(grading[-1], q.GradeFailed)
+    return isinstance(response, q.Wrote)
+
+
+def _responses(answer: q.AnswerReceived, posed: tuple[q.Posed, ...]) -> list[q.Response]:
+    """The responses of an answer in the order its questions were posed."""
+    by_question = {item.question_id: item.response for item in answer.answers}
+    return [by_question[question.question_id] for question in posed]
+
+
+def _detail(value: Any) -> str | None:
+    return value if isinstance(value, str) and value.strip() else None

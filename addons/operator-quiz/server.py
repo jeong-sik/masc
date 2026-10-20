@@ -70,9 +70,9 @@ def reply(request_id, result: dict) -> str:
 
 
 class Worker:
-    def __init__(self, state: Path, prompt: str, max_reply_bytes: int):
+    def __init__(self, state: Path, prompts: f.Prompts, max_reply_bytes: int):
         self.max_reply_bytes = max_reply_bytes
-        self.flow = f.Flow(state, prompt, self.fits)
+        self.flow = f.Flow(state, prompts, self.fits)
         self.binding: dict | None = None
         self.zone: ZoneInfo | None = None
         self.context: dict | None = None
@@ -220,8 +220,9 @@ def main() -> None:
     parser.add_argument("--state", type=Path, required=True)
     options = parser.parse_args()
     manifest = tomllib.loads((HERE / "lane.toml").read_text(encoding="utf-8"))
-    worker = Worker(options.state, (HERE / "prompts" / "author.md").read_text(encoding="utf-8"),
-                    manifest["resources"]["max_reply_bytes"])
+    prompts = f.Prompts(author=(HERE / "prompts" / "author.md").read_text(encoding="utf-8"),
+                        grade=(HERE / "prompts" / "grade.md").read_text(encoding="utf-8"))
+    worker = Worker(options.state, prompts, manifest["resources"]["max_reply_bytes"])
     for line in sys.stdin.buffer:
         request_id = None
         try:

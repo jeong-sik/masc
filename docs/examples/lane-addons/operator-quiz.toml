@@ -1,6 +1,7 @@
 # Adjust manifest_path when copying this declaration outside this directory.
 # Bind the author output in runtime.toml before the first compose
-# ([runtime.addon_exact_lanes.operator-quiz.author]).
+# ([runtime.addon_exact_lanes.operator-quiz.author]), and the grade output
+# ([runtime.addon_exact_lanes.operator-quiz.grade]) so written answers are graded.
 id = "operator-quiz"
 run_id = "operator-quiz"
 manifest_path = "../../../addons/operator-quiz/lane.toml"

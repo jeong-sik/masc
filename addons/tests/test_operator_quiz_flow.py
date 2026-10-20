@@ -25,6 +25,7 @@ BOARD = {"source_id": "board", "kind": "board", "visibilities": ["public"]}
 REPO = {"source_id": "masc", "kind": "repository", "repository_id": "masc", "paths": ["changelog.d/"]}
 BINDING = {"records": [BOARD], "language": "ko"}
 HEAD = "f" * 40
+PROMPTS = f.Prompts(author="author prompt", grade="grade prompt")
 
 
 def sha(value) -> str:
@@ -50,6 +51,7 @@ class FakeHost:
         self.frame = frame
         # None leaves the request waiting, as a lane that has not answered does.
         self.author: Callable[[dict], dict | None] = lambda payload: None
+        self.grade: Callable[[dict], dict | None] = lambda payload: None
         self.answers: dict[str, dict] = {}
         self.retained: dict[str, bytes] = {}
         self.listed: list[dict] = []
@@ -95,7 +97,8 @@ class FakeHost:
                         "eof": offset + len(piece) == len(data), "encoding": "base64",
                         "content": base64.b64encode(piece).decode()}
             case "exact_output":
-                return self.author(json.loads(request["messages"][0]))
+                answer = self.author if request["output"] == "author" else self.grade
+                return answer(json.loads(request["messages"][0]))
             case "ask":
                 return self.answers.get(request["request_id"])
             case other:
@@ -149,7 +152,7 @@ class Base(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.state = Path(self.temporary.name)
-        self.flow = f.Flow(self.state, "prompt", lambda request: True)
+        self.flow = f.Flow(self.state, PROMPTS, lambda request: True)
         self.host = FakeHost()
         self.host.board = [post(1, "the ledger records facts"), post(2, "keepers choose their next step"),
                            post(3, "an open question never expires")]
@@ -257,6 +260,145 @@ class Compose(Base):
         self.host.produce = lambda request: {"status": "not_allowed", "reason": "no grant"}
         self.host.run(self.flow)
         self.assertEqual(self.session(session_id).failure, q.NotAllowed(f"{session_id}-read-0", "no grant"))
+
+
+def judging(verdict: str, rationale: str = "names the point"):
+    return lambda payload: {"status": "answered", "slot": "s",
+                            "output": {"verdict": verdict, "rationale": rationale}}
+
+
+class Judging(Base):
+    """A written answer and the grade output (RFC §6.2)."""
+    def wrote(self, text="facts"):
+        session_id = self.compose()
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        self.answer(session_id, q.Wrote(text))
+        return session_id
+
+    def grade_requests(self):
+        return [r for r in self.flow.listing() if r["kind"] == "exact_output" and r["output"] == f.GRADE]
+
+    def test_a_written_answer_lists_one_grade_request_with_the_key_labels(self):
+        self.wrote("facts")
+        (request,) = self.grade_requests()
+        payload = json.loads(request["messages"][0])
+        self.assertEqual(request["system"], PROMPTS.grade)
+        self.assertEqual(payload["expected"], {"kind": "choices", "labels": ["Facts"]})
+        self.assertEqual(payload["answer"], {"kind": "wrote", "text": "facts"})
+        self.assertEqual([s["quote"] for s in payload["sources"]], ["the ledg"])
+
+    def test_a_judgment_decides_the_verdict_and_ends_the_request(self):
+        session_id = self.wrote()
+        self.host.grade = judging("correct")
+        self.host.run(self.flow)
+        session = self.session(session_id)
+        posed = session.posed[0]
+        self.assertEqual(g.verdict(posed, q.Wrote("facts"), session.judgments_of(posed.question_id)), g.CORRECT)
+        self.assertEqual(self.grade_requests(), [])
+        (item,) = g.items(self.flow.sessions())
+        self.assertEqual([a.verdict for a in item.attempts], [g.CORRECT])
+
+    def test_a_void_judgment_takes_the_question_out_of_the_attempts(self):
+        self.wrote()
+        self.host.grade = judging("void", "the quote does not say what the key says")
+        self.host.run(self.flow)
+        (item,) = g.items(self.flow.sessions())
+        self.assertEqual(item.attempts, ())
+
+    def test_a_rationale_of_only_whitespace_is_kept_as_the_outputs_failure(self):
+        session_id = self.wrote()
+        self.host.grade = judging("incorrect", "   ")
+        self.host.run(self.flow)
+        (failure,) = [e for e in self.session(session_id).grading if isinstance(e, q.GradeFailed)]
+        self.assertEqual(failure.kind, "invalid_output")
+
+    def test_a_final_failure_waits_until_the_next_compose(self):
+        session_id = self.wrote()
+        self.host.grade = lambda payload: {"status": "outcome_unknown"}
+        self.host.run(self.flow)
+        self.assertEqual(self.grade_requests(), [])
+        posed = self.session(session_id).posed[0]
+        self.assertEqual(g.verdict(posed, q.Wrote("facts"), ()), g.AWAITING_JUDGMENT)
+        self.host.author = lambda payload: None  # the new session's author request waits
+        self.flow.compose("act-2", 1, BINDING, 5.0)
+        (request,) = self.grade_requests()
+        self.assertTrue(request["request_id"].endswith("-grade-q1-1"))
+        self.host.grade = judging("incorrect")
+        self.host.run(self.flow)
+        self.assertEqual(self.session(session_id).judgments_of("q1")[0].judgment, q.Incorrect())
+
+    def test_a_restarted_worker_lists_the_same_grade_request(self):
+        self.wrote()
+        (request,) = self.grade_requests()
+        restarted = f.Flow(self.state, PROMPTS, lambda request: True)
+        self.assertIn(request, restarted.listing())
+
+    def test_a_grade_request_that_cannot_fit_the_frame_ends_at_once(self):
+        session_id = self.compose()
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        self.flow = f.Flow(self.state, PROMPTS, lambda request: request["output"] != f.GRADE
+                           if request["kind"] == "exact_output" else True)
+        self.answer(session_id, q.Wrote("facts"))
+        (failure,) = [e for e in self.session(session_id).grading if isinstance(e, q.GradeFailed)]
+        self.assertEqual(failure.kind, "request_exceeds_frame")
+        self.assertEqual(self.grade_requests(), [])
+
+    def test_a_written_answer_with_no_grading_is_asked_at_the_next_compose(self):
+        # The answer line without its grade request, as a torn write or an
+        # answer from before this package graded leaves it.
+        session_id = self.compose()
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        ask_id = self.session(session_id).ask_id
+        self.flow.log.append([q.AnswerReceived(ask_id, (q.Answer("q1", q.Wrote("facts")),),
+                                               {"surface": "dashboard"}, 10.0)])
+        self.assertEqual(self.grade_requests(), [])
+        self.host.author = lambda payload: None
+        self.flow.compose("act-2", 1, BINDING, 11.0)
+        (request,) = self.grade_requests()
+        self.assertTrue(request["request_id"].endswith("-grade-q1-0"))
+
+    def test_every_failed_grade_is_asked_again_in_one_compose(self):
+        session_id = self.compose(questions=2)
+        self.host.author = answering(first_quote, lambda p: draft(p["material"][1], "keepers"))
+        self.host.run(self.flow)
+        self.answer(session_id, q.Wrote("facts"), q.Wrote("they choose"))
+        self.host.grade = lambda payload: {"status": "invalid_output", "detail": "schema"}
+        self.host.run(self.flow)
+        self.assertEqual(self.grade_requests(), [])
+        self.host.author = lambda payload: None
+        self.flow.compose("act-2", 1, BINDING, 11.0)
+        self.assertEqual(sorted(r["request_id"].rsplit("-grade-", 1)[1] for r in self.grade_requests()),
+                         ["q1-1", "q2-1"])
+
+    def test_text_the_log_cannot_keep_is_refused_at_the_boundary(self):
+        session_id = self.wrote()
+        self.host.grade = judging("correct", "facts \ud800")
+        self.host.run(self.flow)
+        (failure,) = [e for e in self.session(session_id).grading if isinstance(e, q.GradeFailed)]
+        self.assertEqual(failure.kind, "invalid_output")
+        self.host.board.append(post(4, "an answer is recorded once"))
+        second = self.flow.compose("act-2", 1, BINDING, 20.0)
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        ask_id = self.session(second).ask_id
+        events = len(self.flow.log.read())
+        broken = {"status": "answered", "answered_at": 21.0,
+                  "responder": {"surface": "dashboard", "actor_id": None, "display_name": None},
+                  "answers": [{"question_id": "q1", "response": {"kind": "wrote", "text": "facts \ud800"}}]}
+        with self.assertRaises(f.InvalidResult):
+            self.flow.deliver(ask_id, broken)
+        self.assertEqual(len(self.flow.log.read()), events)
+
+    def test_a_choice_or_a_skip_needs_no_grade_request(self):
+        session_id = self.compose()
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        self.answer(session_id, q.Chose(("a",)))
+        self.assertEqual(self.grade_requests(), [])
+        self.assertEqual(self.session(session_id).grading, ())
 
 
 class Repetition(Base):
@@ -451,7 +593,7 @@ class Recovery(Base):
         listing = self.flow.listing()
         (request,) = listing
         self.assertEqual(request["request_id"], f"{session_id}-author-0")
-        restarted = f.Flow(self.state, "prompt", lambda request: True)
+        restarted = f.Flow(self.state, PROMPTS, lambda request: True)
         self.assertEqual(restarted.listing(), listing)
         self.assertEqual(f.digest(request), self.session(session_id).requests[0].digest)
 
@@ -547,7 +689,7 @@ class Frame(Base):
         # A frame that holds three records and not five.
         def fits(body):
             return len(json.loads(body["messages"][0])["material"]) <= 3
-        self.flow = f.Flow(self.state, "prompt", fits)
+        self.flow = f.Flow(self.state, PROMPTS, fits)
         session_id = self.compose()
         seen = []
         self.host.author = lambda payload: seen.append(payload) or {"status": "invalid_output", "detail": "x"}
@@ -556,7 +698,7 @@ class Frame(Base):
         self.assertEqual(self.session(session_id).requests[0].request_id, f"{session_id}-author-0")
 
     def test_one_record_that_cannot_be_listed_fails_the_session(self):
-        self.flow = f.Flow(self.state, "prompt", lambda request: False)
+        self.flow = f.Flow(self.state, PROMPTS, lambda request: False)
         session_id = self.compose()
         self.host.run(self.flow)
         session = self.session(session_id)
@@ -583,7 +725,7 @@ class Memory(Base):
         kept = sum(path.stat().st_size for path in q.Blobs(self.state, "pages").directory.iterdir())
         tracemalloc.start()
         try:
-            restarted = f.Flow(self.state, "prompt", lambda request: True)
+            restarted = f.Flow(self.state, PROMPTS, lambda request: True)
             (request,) = restarted.listing()
             held, _ = tracemalloc.get_traced_memory()
         finally:
@@ -601,7 +743,7 @@ class Memory(Base):
         kept = sum(path.stat().st_size for path in q.Blobs(self.state, "pages").directory.iterdir())
         tracemalloc.start()
         try:
-            restarted = f.Flow(self.state, "prompt", lambda request: True)
+            restarted = f.Flow(self.state, PROMPTS, lambda request: True)
             (request,) = restarted.listing()
             held, _ = tracemalloc.get_traced_memory()
         finally:
@@ -615,7 +757,7 @@ class Memory(Base):
         # A frame that holds two records and not four.
         def fits(body):
             return len(json.loads(body["messages"][0])["material"]) <= 2
-        self.flow = f.Flow(self.state, "prompt", fits)
+        self.flow = f.Flow(self.state, PROMPTS, fits)
         seen = []
         self.host.author = lambda payload: seen.append(payload) or {"status": "invalid_output", "detail": "x"}
         session_id = self.compose()

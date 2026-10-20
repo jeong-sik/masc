@@ -122,6 +122,34 @@ class TwoWeeks(unittest.TestCase):
         later = p.observation(q.fold(HISTORY), {}, SEOUL, at(15, 12))
         self.assertEqual(later, self.output)
 
+    def test_a_judgment_that_changes_a_verdict_counts_in_g_and_shows_on_its_reveal(self):
+        events = HISTORY + [
+            q.GradeRequested("s07-ask", "q1", "s07-ask-grade-q1-0", "1" * 64),
+            q.Judged("s07-ask", "q1", q.Incorrect(), "the post says plans too", "s07-ask-grade-q1-0"),
+            q.GradeRequested("s12-ask", "q1", "s12-ask-grade-q1-0", "2" * 64),
+            q.Judged("s12-ask", "q1", q.Correct(), "names facts", "s12-ask-grade-q1-0")]
+        output = p.observation(q.fold(events), {}, SEOUL, at(14, 12))
+        (measures,) = [row for row in output["rows"] if row["lane_id"] == p.MEASURES]
+        self.assertEqual(measures["fields"]["changed_grades"], {"n": 1, "d": 12})
+        reveals = {row["subject_id"]: row["fields"] for row in output["rows"] if row["lane_id"] == p.QUESTIONS}
+        self.assertEqual((reveals["s07/q1"]["verdict"], reveals["s07/q1"]["by"]), ("incorrect", "judgment"))
+        self.assertEqual([j["rationale"] for j in reveals["s07/q1"]["judgments"]], ["the post says plans too"])
+        self.assertEqual((reveals["s12/q1"]["verdict"], reveals["s12/q1"]["grading"]), ("correct", None))
+
+    def test_a_void_judgment_is_no_attempt_and_a_waiting_grade_shows(self):
+        events = HISTORY + [
+            q.GradeRequested("s07-ask", "q1", "s07-ask-grade-q1-0", "1" * 64),
+            q.Judged("s07-ask", "q1", q.Void(), "no", "s07-ask-grade-q1-0"),
+            q.GradeRequested("s12-ask", "q1", "s12-ask-grade-q1-0", "2" * 64)]
+        output = p.observation(q.fold(events), {}, SEOUL, at(14, 12))
+        (measures,) = [row for row in output["rows"] if row["lane_id"] == p.MEASURES]
+        self.assertEqual(measures["fields"]["participation"], {"n": 10, "d": 13})
+        (i4,) = [row for row in output["rows"] if row["lane_id"] == p.ITEMS and row["subject_id"] == "i4"]
+        self.assertEqual(len(i4["fields"]["attempts"]), 1)
+        reveals = {row["subject_id"]: row["fields"] for row in output["rows"] if row["lane_id"] == p.QUESTIONS}
+        self.assertEqual(reveals["s07/q1"]["verdict"], "void")
+        self.assertEqual(reveals["s12/q1"]["grading"], {"state": "waiting", "request_id": "s12-ask-grade-q1-0"})
+
     def test_a_failed_session_shows_its_typed_reason(self):
         events = HISTORY + [q.SessionOpened("s20", "act-20", 1, GRANTS, "ko", at(14, 10)),
                             q.SessionFailed("s20", q.AuthorInvalidOutput("s20-author-0"))]

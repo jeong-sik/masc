@@ -186,6 +186,61 @@ class Answer:
         return Answer(_text(fields["question_id"], "answer.question_id"), response_of_json(fields["response"]))
 
 
+# -- A judgment the grade output brings (RFC §6.2, §6.4). A void question or
+#    key is not an attempt; the judgment's rationale says what is wrong. ----
+
+@dataclass(frozen=True, slots=True)
+class Correct:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class Incorrect:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class Void:
+    pass
+
+
+Judgment = Union[Correct, Incorrect, Void]
+
+
+def judgment_to_json(judgment: Judgment) -> dict:
+    match judgment:
+        case Correct():
+            return {"kind": "correct"}
+        case Incorrect():
+            return {"kind": "incorrect"}
+        case Void():
+            return {"kind": "void"}
+
+
+def judgment_of_json(value: Any) -> Judgment:
+    if not isinstance(value, dict):
+        raise LogError("judgment must be an object")
+    match value.get("kind"):
+        case "correct":
+            _exact(value, {"kind"}, "judgment")
+            return Correct()
+        case "incorrect":
+            _exact(value, {"kind"}, "judgment")
+            return Incorrect()
+        case "void":
+            _exact(value, {"kind"}, "judgment")
+            return Void()
+        case other:
+            raise LogError(f"judgment.kind {other!r} is not correct, incorrect or void")
+
+
+# The final results a grade request can end with that bring no judgment. The
+# answer stays awaiting judgment, and the next compose asks again.
+# request_exceeds_frame: the grade request alone would not fit the package's reply frame.
+GRADE_FAILURES = {"invalid_output", "input_refused", "outcome_unknown", "not_allowed", "result_exceeds_frame",
+                  "request_exceeds_frame"}
+
+
 # -- Why a session failed (RFC §4.9 Sessions, closed). ---------------------
 
 @dataclass(frozen=True, slots=True)
@@ -292,8 +347,7 @@ def failure_of_json(value: Any) -> Failure:
             raise LogError(f"reason.kind {other!r} is not a session failure")
 
 
-# -- Events (RFC §4.9 Log). The first slice grades choices by key only, so
-#    Judged, Grade_failed and Disputed arrive with the grade output. -------
+# -- Events (RFC §4.9 Log). Disputed arrives with the dispute action. -------
 
 @dataclass(frozen=True, slots=True)
 class SessionOpened:
@@ -356,7 +410,36 @@ class AnswerReceived:
     answered_at: float
 
 
-Event = Union[SessionOpened, MaterialRead, ExactRequested, Posed, DraftRejected, SessionFailed, AnswerReceived]
+@dataclass(frozen=True, slots=True)
+class GradeRequested:
+    """A grade request for one answered question; its body is kept under
+    requests/ by its digest."""
+    ask_id: str
+    question_id: str
+    request_id: str
+    digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class Judged:
+    ask_id: str
+    question_id: str
+    judgment: Judgment
+    rationale: str
+    request_id: str  # the grade request that brought it
+
+
+@dataclass(frozen=True, slots=True)
+class GradeFailed:
+    ask_id: str
+    question_id: str
+    request_id: str
+    kind: str  # one of GRADE_FAILURES
+    detail: str | None
+
+
+Event = Union[SessionOpened, MaterialRead, ExactRequested, Posed, DraftRejected, SessionFailed, AnswerReceived,
+              GradeRequested, Judged, GradeFailed]
 
 
 def event_to_json(event: Event) -> dict:
@@ -384,6 +467,15 @@ def event_to_json(event: Event) -> dict:
             return {"event": "answer_received", "ask_id": ask_id,
                     "answers": [answer.to_json() for answer in answers],
                     "responder": responder, "answered_at": answered_at}
+        case GradeRequested(ask_id, question_id, request_id, digest):
+            return {"event": "grade_requested", "ask_id": ask_id, "question_id": question_id,
+                    "request_id": request_id, "digest": digest}
+        case Judged(ask_id, question_id, judgment, rationale, request_id):
+            return {"event": "judged", "ask_id": ask_id, "question_id": question_id,
+                    "judgment": judgment_to_json(judgment), "rationale": rationale, "request_id": request_id}
+        case GradeFailed(ask_id, question_id, request_id, kind, detail):
+            return {"event": "grade_failed", "ask_id": ask_id, "question_id": question_id,
+                    "request_id": request_id, "kind": kind, "detail": detail}
 
 
 def event_of_json(value: Any) -> Event:
@@ -436,6 +528,23 @@ def event_of_json(value: Any) -> Event:
                 raise LogError("answer_received.responder must be an object")
             return AnswerReceived(_text(f["ask_id"], "ask_id"), tuple(Answer.of_json(a) for a in f["answers"]),
                                   f["responder"], _time(f["answered_at"], "answered_at"))
+        case "grade_requested":
+            f = _exact(value, {"event", "ask_id", "question_id", "request_id", "digest"}, "grade_requested")
+            return GradeRequested(_text(f["ask_id"], "ask_id"), _text(f["question_id"], "question_id"),
+                                  _text(f["request_id"], "request_id"), _text(f["digest"], "digest"))
+        case "judged":
+            f = _exact(value, {"event", "ask_id", "question_id", "judgment", "rationale", "request_id"}, "judged")
+            return Judged(_text(f["ask_id"], "ask_id"), _text(f["question_id"], "question_id"),
+                          judgment_of_json(f["judgment"]), _text(f["rationale"], "rationale"),
+                          _text(f["request_id"], "request_id"))
+        case "grade_failed":
+            f = _exact(value, {"event", "ask_id", "question_id", "request_id", "kind", "detail"}, "grade_failed")
+            kind = _text(f["kind"], "grade_failed.kind")
+            if kind not in GRADE_FAILURES:
+                raise LogError(f"grade_failed.kind {kind!r} is not a final grade failure")
+            detail = None if f["detail"] is None else _text(f["detail"], "grade_failed.detail")
+            return GradeFailed(_text(f["ask_id"], "ask_id"), _text(f["question_id"], "question_id"),
+                               _text(f["request_id"], "request_id"), kind, detail)
         case other:
             raise LogError(f"event {other!r} is not an event of this package")
 
@@ -460,12 +569,22 @@ def _make_directory(path: Path) -> None:
     _fsync_directory(path.parent)
 
 
+def _line(event: Event) -> bytes:
+    """The bytes one event is written as."""
+    return (json.dumps(event_to_json(event), ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+            + "\n").encode("utf-8")
+
+
 def unreadable(event: Event) -> str | None:
-    """Why this event would not read back as written, or None."""
+    """Why this event would not read back as written, or None. It is checked
+    through the bytes it would be written as: text UTF-8 cannot hold, such as
+    a lone surrogate, never reaches the file."""
     try:
-        if event_of_json(json.loads(json.dumps(event_to_json(event), allow_nan=False))) == event:
+        if event_of_json(json.loads(_line(event).decode("utf-8"))) == event:
             return None
         return f"{type(event).__name__} reads back differently"
+    except UnicodeEncodeError:
+        return f"{type(event).__name__} holds text UTF-8 cannot encode"
     except (LogError, ValueError, TypeError) as error:
         return str(error)
 
@@ -528,9 +647,7 @@ class Log:
             if problem is not None:
                 raise LogError(problem)
         _, complete = self._read()
-        payload = b"".join(
-            (json.dumps(event_to_json(event), ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n")
-            .encode("utf-8") for event in events)
+        payload = b"".join(_line(event) for event in events)
         created = not self.path.exists()
         _make_directory(self.directory)
         descriptor = os.open(self.path, os.O_WRONLY | os.O_CREAT, 0o600)
@@ -600,10 +717,22 @@ class Session:
     rejected: tuple[DraftRejected, ...]
     posed: tuple[Posed, ...]
     answer: AnswerReceived | None
+    grading: tuple[GradeRequested | Judged | GradeFailed, ...]  # in log order
 
     @property
     def ask_id(self) -> str | None:
         return self.posed[0].ask_id if self.posed else None
+
+    def grading_of(self, question_id: str) -> tuple[GradeRequested | Judged | GradeFailed, ...]:
+        return tuple(event for event in self.grading if event.question_id == question_id)
+
+    def judgments_of(self, question_id: str) -> tuple[Judged, ...]:
+        return tuple(event for event in self.grading_of(question_id) if isinstance(event, Judged))
+
+    def outstanding_grade(self, question_id: str) -> GradeRequested | None:
+        """The grade request for this question that has no result yet."""
+        events = self.grading_of(question_id)
+        return events[-1] if events and isinstance(events[-1], GradeRequested) else None
 
 
 def fold(events: list[Event]) -> list[Session]:
@@ -613,6 +742,7 @@ def fold(events: list[Event]) -> list[Session]:
     sessions: dict[str, dict] = {}
     order: list[str] = []
     by_ask: dict[str, str] = {}
+    grade_requests: set[str] = set()
 
     def session(session_id: str, label: str) -> dict:
         if session_id not in sessions:
@@ -639,7 +769,7 @@ def fold(events: list[Event]) -> list[Session]:
                                         "questions": questions, "grants": grants, "language": language,
                                         "opened_at": opened_at, "state": "writing", "failure": None,
                                         "superseded_by": None, "material": [], "requests": [], "rejected": [],
-                                        "posed": [], "answer": None}
+                                        "posed": [], "answer": None, "grading": []}
                 order.append(session_id)
             case MaterialRead(session_id=session_id):
                 writing(session_id, "material_read")["material"].append(event)
@@ -675,8 +805,28 @@ def fold(events: list[Event]) -> list[Session]:
                     raise LogError(f"answer_received for session {current['session_id']}, which is {current['state']}")
                 current["state"] = "answered"
                 current["answer"] = event
+            case GradeRequested(ask_id=ask_id, question_id=question_id, request_id=request_id) \
+                    | Judged(ask_id=ask_id, question_id=question_id, request_id=request_id) \
+                    | GradeFailed(ask_id=ask_id, question_id=question_id, request_id=request_id):
+                label = type(event).__name__
+                if ask_id not in by_ask or sessions[by_ask[ask_id]]["state"] != "answered":
+                    raise LogError(f"{label} for ask {ask_id}, which no answered session posed")
+                current = sessions[by_ask[ask_id]]
+                if all(p.question_id != question_id for p in current["posed"]):
+                    raise LogError(f"{label} for question {question_id}, which ask {ask_id} did not pose")
+                earlier = [e for e in current["grading"] if e.question_id == question_id]
+                outstanding = earlier[-1] if earlier and isinstance(earlier[-1], GradeRequested) else None
+                if isinstance(event, GradeRequested):
+                    if outstanding is not None:
+                        raise LogError(f"{label} for {ask_id}/{question_id} while {outstanding.request_id} waits")
+                    if request_id in grade_requests:
+                        raise LogError(f"grade request {request_id} was written twice")
+                    grade_requests.add(request_id)
+                elif outstanding is None or outstanding.request_id != request_id:
+                    raise LogError(f"{label} for {request_id}, which is not the waiting grade request")
+                current["grading"].append(event)
     return [Session(s["session_id"], s["action_request_id"], s["questions"], s["grants"], s["language"],
                     s["opened_at"], s["state"], s["failure"],
                     s["superseded_by"], tuple(s["material"]), tuple(s["requests"]), tuple(s["rejected"]),
-                    tuple(s["posed"]), s["answer"])
+                    tuple(s["posed"]), s["answer"], tuple(s["grading"]))
             for s in (sessions[session_id] for session_id in order)]

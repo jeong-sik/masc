@@ -338,8 +338,10 @@ let shipped_operator_quiz_declaration_loads () =
   let loaded = unwrap (Config.load_file ~path:(repo_file "docs/examples/lane-addons/operator-quiz.toml")) in
   let package = loaded.package in
   check string "the declaration names the package" "operator-quiz" package.id;
-  check (list string) "the package declares the author output only"
-    ["author"] (List.map (fun (output : Lane_addon_types.exact_output) -> output.name) package.exact_outputs);
+  check (list string) "the package declares the author and grade outputs"
+    ["author"; "grade"]
+    (List.sort String.compare
+       (List.map (fun (output : Lane_addon_types.exact_output) -> output.name) package.exact_outputs));
   check bool "the package asks the operator" true package.operator_asks;
   check bool "the quiz log lives on persistent state" true (package.state_storage = Lane_addon_types.Persistent);
   check (option string) "compose and export arrive through lane_act" (Some "lane_act") package.action_tool;

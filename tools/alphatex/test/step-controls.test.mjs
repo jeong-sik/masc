@@ -115,8 +115,8 @@ test('armed controls refuse held chords/drain but close preserves already admitt
   await input.ready;await held.promise
   for(const action of [{kind:'step-length',value:'1/2'},{kind:'step-rest'}])assert.throws(()=>input.control(action),/Release all keys/)
   assert.equal(editor.project.tracks[0].notes.length,0);input.stop();await input.completion
-  let fakeOptions,finish
-  const fake=openStepInput({source:'10',getEditor:()=>editor,adoptEditor:next=>{editor=next},enqueue:action=>action(),openInput(options){fakeOptions=options;return {ready:Promise.resolve(),completion:new Promise(resolve=>{finish=resolve}),stop(){}}}})
+  let finish
+  const fake=openStepInput({source:'10',getEditor:()=>editor,adoptEditor:next=>{editor=next},enqueue:action=>action(),openInput(){return {ready:Promise.resolve(),completion:new Promise(resolve=>{finish=resolve}),stop(){}}}})
   fake.stop({admittedControls:true});editor=fake.control({kind:'step-length',value:'1/2'});assert.equal(editor.duration,480)
   fake.stop();assert.throws(()=>fake.control({kind:'step-rest'}),/draining/)
   finish();await fake.completion

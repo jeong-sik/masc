@@ -38,7 +38,9 @@ export class MidiSourcePicker {
     const { sources, cursor } = this.view
     if (['up', 'k', 'down', 'j'].includes(key.name)) {
       const direction = ['up', 'k'].includes(key.name) ? -1 : 1
-      this.view = { ...this.view, cursor: sources.length ? cursor < 0 ? direction > 0 ? 0 : sources.length - 1 : (cursor + direction + sources.length) % sources.length : -1 }
+      let next = -1
+      if (sources.length) next = cursor < 0 ? direction > 0 ? 0 : sources.length - 1 : (cursor + direction + sources.length) % sources.length
+      this.view = { ...this.view, cursor: next }
       if (this.view.cursor >= 0) this.preferred = sources[this.view.cursor].id
       this.notify()
     } else if (key.name === 'return') {

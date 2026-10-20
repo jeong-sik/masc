@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { emitKeypressEvents } from 'node:readline'
 import { Worker } from 'node:worker_threads'
 import { Note } from 'tonal'
-import { newEditor, editorCommand, editorAction, selectedNote, selectedNotes, editorView, editorAxis, editorHarmony, editorSound } from './sequencer-editor.mjs'
+import { newEditor, editorCommand, editorAction, selectedNote, selectedNotes, editorView, editorAxis, editorHarmony, editorSound, stepInputEffect } from './sequencer-editor.mjs'
 import { loadProject, saveProject, projectMidi } from './sequencer-files.mjs'
 import { sourceTickAtSeconds, sourceSecondsAtTick } from './midi-source-playback.mjs'
 import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo } from './midi-source-editor.mjs'
@@ -84,6 +84,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   let loop = false, accepting = true, closed = false, suspended = false, task = Promise.resolve(), childTask = null
   let harmony = null
   let stepInput = null, stepHeld = 0
+  let sourceMenuOwner = null, openedSourceMenuOwner = null
   const stepOwners = new Set()
   let selectedOutput = output
   let selectedMidiOutput = midiOutput, portBindings = structuredClone(initialPortBindings)
@@ -466,14 +467,15 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     })()
     childTask = owned
   }
-  async function effect(value) {
+  async function effect(value, menuOwner = null) {
     if (!accepting && ['play', 'record', 'wave', 'arrange', 'step-input'].includes(value.kind)) return
     switch (value.kind) {
       case 'step-input':
         if (value.source !== undefined) startStepInput(value.source)
         else {
+          if (sourceMenuOwner !== menuOwner) return
           if (stepInput) throw new Error('Use :step-stop before choosing another MIDI source')
-          if (!suspended && !childTask) { stop(); clearHarmony(); sourcePicker.open() }
+          if (!suspended && !childTask) { stop(); clearHarmony(); openedSourceMenuOwner = menuOwner; sourcePicker.open() }
         }
         break
       case 'step-stop': stepInput?.stop(); status = 'Draining MIDI step input'; break
@@ -528,7 +530,21 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   async function keypress(text, key = {}) {
     if (!accepting || closed || suspended) return
     if (key.ctrl && key.name === 'c') { finish(); return }
-    if (sourcePicker.view) { sourcePicker.keypress(text, key); draw(); return }
+    if (sourceMenuOwner) {
+      const owner = sourceMenuOwner
+      const dismiss = ['escape', 'q'].includes(key.name)
+      if (dismiss) sourceMenuOwner = null
+      task = task.then(() => {
+        // The menu owns keys from command admission, including keys queued
+        // before discovery opens, after dismissal, or before view close.
+        if (openedSourceMenuOwner !== owner || !sourcePicker.view) return
+        if (dismiss) { sourcePicker.close(); openedSourceMenuOwner = null; return }
+        if (sourceMenuOwner !== owner) return
+        sourcePicker.keypress(text, key)
+        if (!sourcePicker.view) { sourceMenuOwner = null; openedSourceMenuOwner = null }
+      }).catch(error => { status = error.message }).finally(draw)
+      return
+    }
     if (picker.view) {
       try { await picker.keypress(text, key) } catch (error) { status = `VST: ${error.message}` }
       draw(); return
@@ -538,15 +554,23 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       else if (key.name === 'backspace') prompt = [...prompt].slice(0, -1).join('')
       else if (key.name === 'return') {
         const line = prompt; prompt = null
+        let admittedEffect
+        try { admittedEffect = stepInputEffect(line) }
+        catch (error) { status = error.message; draw(); return }
+        const menuOwner = admittedEffect?.kind === 'step-input' && admittedEffect.source === undefined ? {} : null
+        if (menuOwner) sourceMenuOwner = menuOwner
         task = task.then(async () => {
           // This command was admitted before close; retain its editor decision.
           // effect() separately refuses new playback/recording/WAV work.
-          const result = editorCommand(editor, line)
+          const result = admittedEffect ? { editor, effect: admittedEffect } : editorCommand(editor, line)
           if (result.editor.project !== editor.project || result.editor.pattern !== editor.pattern) stopPlayback()
           const previous = editor; editor = result.editor; changedContext(previous)
-          if (result.effect) await effect(result.effect)
+          if (result.effect) await effect(result.effect, menuOwner)
           else status = 'Edited'
-        }).catch(error => { status = error.message }).finally(draw)
+        }).catch(error => { status = error.message }).finally(() => {
+          if (menuOwner && sourceMenuOwner === menuOwner && !sourcePicker.view) sourceMenuOwner = null
+          draw()
+        })
       } else if (text && !key.ctrl && !key.meta) prompt += safeText(text)
       draw(); return
     }

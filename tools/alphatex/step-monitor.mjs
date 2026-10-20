@@ -6,7 +6,7 @@ export { monitorPacket } from './step-monitor-session.mjs'
 
 // The terminal owns note decisions; the worker owns every device demand and
 // synth block. No per-block acknowledgement crosses the terminal event loop.
-export function openStepMonitor({ sound, output, channel, signal,
+export function openStepMonitor({ sound, output, channel, signal, backing,
   createWorker = (url, options) => new Worker(url, options) }) {
   validateSound(sound)
   if (sound.kind !== 'vst') throw new Error('Choose a VST instrument before monitored step input')
@@ -15,7 +15,7 @@ export function openStepMonitor({ sound, output, channel, signal,
   sound = structuredClone(sound)
   const id = randomUUID()
   const worker = createWorker(new URL('./step-monitor-worker.mjs', import.meta.url), {
-    workerData: { sound, output, channel, id }, name: 'music-monitor' })
+    workerData: { sound, output, channel, id, backing }, name: 'music-monitor' })
   const threadId = worker.threadId
   let held = new Map(), pending = null, inspection = null, snapshot = null
   let stopping = false, closed = false, terminal = null, failure = null

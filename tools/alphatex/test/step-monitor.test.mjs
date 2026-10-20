@@ -9,6 +9,7 @@ import { openMidiInput } from '../midi-input.mjs'
 import { openPcmOutput } from '../pcm-output.mjs'
 import { openVstStream } from '../vst-stream.mjs'
 import { newEditor, editorCommand } from '../sequencer-editor.mjs'
+import { phraseBacking } from '../phrase-backing.mjs'
 
 const data = Buffer.from('owned monitor preset')
 const sound = { kind: 'vst', selection: { plugin_path: '/fixture.vst3', plugin_name: null, preset_path: null, name: 'Fixture' },
@@ -56,6 +57,28 @@ test('one input drives selected-channel audition and one undoable chord; all thr
     assert.deepEqual(editor.project.tracks[0].notes.map(note => [note.pitch, note.velocity, note.start]), [[60, 72, 0], [64, 127, 0]])
     assert.equal(editor.tick, 960)
     assert.equal(editorCommand(editor, 'undo').editor.project.tracks[0].notes.length, 0)
+  } finally { owner.cancel(); await owner.completion.catch(() => {}) }
+})
+
+test('practice input sounds the same source without changing notes, cursor or undo history', async () => {
+  const owned = io(), sounded = deferred(), editor = newEditor(), states = []
+  let sent = 0
+  const owner = openStepInput({ source: '10', practice: true,
+    audio: { sound, output: 'owned', backing: phraseBacking(editor.project, 'track-1') },
+    getEditor: () => editor, adoptEditor() { assert.fail('practice edited the phrase') },
+    enqueue: action => Promise.resolve().then(action), onState: state => states.push(state.held),
+    openInput: owned.openInput, openMonitor(options) {
+      const monitor = openStepMonitor({ ...options, ...owned })
+      return { ...monitor, async send(prepared) { await monitor.send(prepared); if (++sent === 3) sounded.resolve() } }
+    } })
+  try {
+    assert.equal((await owner.ready).practice, true)
+    await sounded.promise
+    assert.throws(() => owner.control({ kind: 'step-rest' }), /Stop practice/)
+    owner.stop(); await owner.completion; owned.assertClosed()
+    assert.deepEqual(states, [2, 1, 0]); assert.deepEqual(editor, newEditor())
+    assert.ok(owned.blocks.flat().some(row => row.bytes[0] === 0x90 && row.bytes[1] === 60))
+    assert.equal(owner.diagnostics().backing.track, 'track-1')
   } finally { owner.cancel(); await owner.completion.catch(() => {}) }
 })
 

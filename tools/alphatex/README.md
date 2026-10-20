@@ -172,6 +172,30 @@ message. `worker.closed` and `terminalReceived` distinguish actual worker exit
 from an acknowledged cleanup. An unexpected exit without that receipt remains
 a failure and does not invent native closure or a successful final report.
 
+`:practice-input [SOURCE_UID]` opens free-play practice on the selected phrase
+track. The other audible tracks repeat through the chosen VST preset, honoring
+their mute/solo, level and pan. With loop enabled the selected loop range repeats;
+otherwise the whole phrase repeats. The selected track is replaced by live input.
+Playing does not insert notes, advance the cursor or create undo entries.
+`:step-stop` ends the session; route, instrument, loop or editor context changes
+retire it before another session. Input opens after audio starts, so an early
+backing note can sound before the MIDI ready acknowledgement.
+
+One worker and one PCM output clock every participating track. Live and backing
+tracks use separate persistent VST instances, retaining independent same-pitch
+voices and expression even with omni synths. All instances use the captured
+project preset; GM program changes do not select different sounds. Blocks are
+summed without automatic normalization or clipping. Diagnostics include the
+participating channels, instance count, produced frames, peak and count of
+samples above full scale; lower track levels if the mix is too loud. Synth or
+output failure stops the entire session. Absolute cycle ticks are rounded once
+at the output rate, preventing cumulative loop rounding drift. Notes or cycles
+shorter than one output frame are refused.
+
+This command currently uses editable phrase tracks. Original MIDI sources keep
+their existing arrangement transport and raw recorder; practice input does not
+record timestamps or replace an arrangement recording take.
+
 `:step-length VALUE` changes only the next input length, without editing an
 existing note or adding undo history. `:step-rest [VALUE]` advances the cursor
 without making notes; its default is the current input length (the grid step for

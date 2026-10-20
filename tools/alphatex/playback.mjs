@@ -38,7 +38,7 @@ export async function midiDestinations({ executable = midiTransportPath, signal 
 
 // One owned child is one transport. Completion means its pipes and process have
 // closed, rather than merely receiving a stopped acknowledgement.
-export function openPlayback({ path, output, midiOutput, midiBindings, loop = false, format = 'wave', onEvent = () => {}, signal,
+export function openPlayback({ path, output, midiOutput, midiBindings, frameRange, loop = false, format = 'wave', onEvent = () => {}, signal,
   executable = ['wave-arrangement', 'mixed-arrangement', 'capture-session', 'capture-arrangement', 'hybrid-arrangement', 'capture-audio-arrangement'].includes(format) ? arrangementTransportPath : midiOutput === undefined ? transportPath : midiTransportPath, spawnProcess = spawn } = {}) {
   signal?.throwIfAborted()
   const hybrid = format === 'hybrid-arrangement'
@@ -62,9 +62,15 @@ export function openPlayback({ path, output, midiOutput, midiBindings, loop = fa
     midiBindings = midiBindings.map(({ port, destination, protocol }) => ({ port, destination, ...(hybrid ? { protocol } : {}) }))
   }
   if (typeof loop !== 'boolean') throw new Error('Invalid loop selection')
+  if (frameRange !== undefined && frameRange !== null) frameRange = { offsetFrames: frameRange.offsetFrames, frameCount: frameRange.frameCount }
+  if (frameRange !== undefined && (format !== 'wave' || midiOutput !== undefined
+      || !Number.isSafeInteger(frameRange?.offsetFrames) || frameRange.offsetFrames < 0
+      || !Number.isSafeInteger(frameRange.frameCount) || frameRange.frameCount <= 0
+      || !Number.isSafeInteger(frameRange.offsetFrames + frameRange.frameCount))) throw new Error('Invalid PCM playback window')
   const selectedID = mixed ? output : midiOutput ?? output
   const selection = mixed || midiOutput === undefined ? (output === undefined ? [] : ['--output', output]) : ['--destination', midiOutput]
-  const args = ['play', '--file', path, ...selection, ...(loop ? ['--loop'] : [])]
+  const args = ['play', '--file', path, ...selection, ...(loop ? ['--loop'] : []),
+    ...(frameRange ? ['--offset-frames', String(frameRange.offsetFrames), '--frame-count', String(frameRange.frameCount)] : [])]
   const child = spawnProcess(executable, args, { stdio: ['pipe', 'pipe', 'pipe'] })
   let failure = null, final = null, current = null, firstDevice = null, loopBindings = null, nativeBindings = null, started = false, closed = false, stopping = false, detail = ''
   let resolveReady, rejectReady, resolveDone, rejectDone
@@ -101,6 +107,8 @@ export function openPlayback({ path, output, midiOutput, midiBindings, loop = fa
         throw new Error('Malformed playback state')
       }
       if (mixed && (event.format !== format || event.clock?.kind !== 'mach-host-time')) throw new Error('Missing combined arrangement clock')
+      if (frameRange && (event.frameRange?.offsetFrames !== frameRange.offsetFrames
+          || event.frameRange?.frameCount !== frameRange.frameCount)) throw new Error('Playback PCM window differs from the selected source frames')
       if (format === 'capture-audio-arrangement' && (event.format !== format || event.clock?.kind !== 'mach-host-time')) throw new Error('Missing captured audio arrangement clock')
       if (midiBindings !== undefined) {
         if (loop && ['capture-arrangement', 'hybrid-arrangement'].includes(format)) {

@@ -1,4 +1,15 @@
 import { midiSourcePattern } from './midi-source.mjs'
+import { sourceAudioClock } from './source-audio-clock.mjs'
+import { fraction, regionEdgeSeconds } from './exact-time.mjs'
+
+export function sourceLoopWindow(performance, range = { start: 0, end: performance.ticks }) {
+  const { start, end } = range
+  const clock = sourceAudioClock(performance, start, end - start)
+  const startSeconds = sourceSecondsAtTick(performance, start), endSeconds = sourceSecondsAtTick(performance, end)
+  if (endSeconds <= startSeconds) throw new Error('Source loop time is not representable')
+  const periodNanoseconds = fraction((BigInt(clock.end) - BigInt(clock.start)) * 1_000_000_000n, BigInt(clock.denominator))
+  return { start, end, startSeconds, endSeconds, clock, periodNanoseconds }
+}
 
 function destination(value) {
   if (typeof value !== 'string' || !/^-?(0|[1-9][0-9]*)$/.test(value)
@@ -10,8 +21,7 @@ function destination(value) {
 
 // Keep the wire stream, including F7 escape/continuation payloads. Meta events
 // influence source timing/routing but are never transmitted as MIDI status FF.
-export function sourceMidiTimeline(source, { pattern, midiOutput, portBindings = [], loop = false } = {}) {
-  if (loop) throw new Error('Source audition plays once from the beginning; clip looping requires state reconstruction')
+export function sourceMidiTimeline(source, { pattern, midiOutput, portBindings = [], loop = false, sourceLoop } = {}) {
   const performance = midiSourcePattern(source, { pattern })
   const events = performance.events.flatMap(event => {
     if (event.kind === 'meta') return []
@@ -39,7 +49,15 @@ export function sourceMidiTimeline(source, { pattern, midiOutput, portBindings =
   if (new Set(bindings.map(binding => binding.destination)).size !== bindings.length) {
     throw new Error('Distinct source ports require distinct destinations; merged MIDI wire state is not supported')
   }
-  return { schemaVersion: 2, duration: performance.seconds, bindings, events }
+  const timeline = { schemaVersion: 2, duration: performance.seconds, bindings, events }
+  if (!loop) return timeline
+  const window = sourceLoopWindow(performance, sourceLoop), startNanoseconds = fraction(0n, 1n)
+  const duration = regionEdgeSeconds(startNanoseconds, window.periodNanoseconds, 1)
+  return { schemaVersion: 3, duration, sourceWindow: window,
+    bindings: bindings.map((binding, port) => ({ port, destination: binding.destination })),
+    sources: [{ id: 'source', timeline }], regions: [{ id: 'loop', source: 'source', startSeconds: 0,
+      startNanoseconds, periodNanoseconds: window.periodNanoseconds, sourceStart: window.startSeconds,
+      sourceEnd: window.endSeconds, repeatCount: 1 }] }
 }
 
 export function sourceTickAtSeconds(performance, seconds) {

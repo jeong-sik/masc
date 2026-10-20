@@ -37,8 +37,8 @@ unique voice interpretation. Zero-length notes remain valid source events.
 note transactionally. `editMidiSourceNotes` applies a batch and can insert paired
 channel notes into a selected source track. Edits change only the selected source messages; controllers,
 pressure, pitch bend, program/tempo maps, metadata and SysEx remain intact. A
-source-event gap that cannot fit SMF's four-byte delta rejects the edit instead of
-inserting a new semantic event. Accepted changes retain their original on/off IDs
+source-event gap exceeding SMF's four-byte delta is split with empty sequencer
+metadata while preserving absolute ticks. Accepted changes retain their original on/off IDs
 and source port. Moving either message across a MIDI Port change is rejected;
 there is no implicit route edit. Inserted notes use the active source port at
 their start and must retain it through their off. Edits that change FIFO pairing,
@@ -61,7 +61,7 @@ event placement. Notes retain their ticks, pairing and release data.
 The source editor connects note, expression and tempo experiments to explicit-output
 audition, source-state-aware pause/resume/seek and immutable arrangement variants.
 Its tests do not establish full MIDI or physical-device support. General metadata,
-source-loop state, overdub and MIDI 2.0 conversion remain separate work.
+overdub and MIDI 2.0 editing remain separate work.
 See [the sequencer design](../../docs/design/tui/MUSIC-SEQUENCER.md).
 
 References: [MIDI Association SMF reference index](https://midi.org/standard-midi-files-specification),
@@ -89,10 +89,38 @@ F0/F7 interpretation follows the [Standard MIDI Files specification](https://mid
 
 Audition starts at the beginning and supports pause/resume and source-clock seek
 through the [channel-state reconstruction boundary](SOURCE-STATE.md). Unknown
-initial fields and opaque device effects fail explicitly; source looping remains
-unavailable. A late wake sends
+initial fields and opaque device effects fail explicitly. A late wake sends
 every due source message in order, including zero-length notes and note-off
 release velocity; this is semantic-stream preservation, not sample-clock timing.
 Stop sends owned key-offs and enabled hold-pedal releases. Opaque vendor SysEx
 state, shared-channel external notes, physical-device latency, MIDI 2.0 and
 external clock synchronization are not claimed.
+
+## Source-window audition
+
+In the source piano roll, `:loop START END` selects and enables a session-local
+source range; `l` toggles looping without changing it. Units remain source beats
+or SMPTE frames as displayed. The loop selection does not change the source
+document or MIDI/WAV export. Selecting a pattern resets it to that pattern's full
+range; edits/undo retain it while it still fits, otherwise it resets to the full
+current performance.
+
+External MIDI reuses the region transport: original ordered source history,
+explicit port bindings and exact tempo-map/SMPTE interval remain in the plan.
+The standalone transport repeats its host-nanosecond-rounded cycle; it is not
+an external MIDI clock. Known-state/opaque-effect refusal and owned-key/pedal cleanup remain the
+same as arrangement regions. No reduced phrase notes or controller defaults are
+substituted. Pause/resume and `:seek` use positions within this source range.
+
+VST audition renders the full selected performance with its captured instrument,
+then the native audio player reads only the range's half-open PCM frames. This
+keeps pre-window synthesis and pedal history and repeats that rendered waveform;
+it does not synthesize a new MIDI attack/chase on each wrap. Each source edge is
+rounded up to the first PCM frame at or after that edge. The sample-quantized
+period can differ by less than one frame from the source interval; this is an
+audio audition, not external clock synchronization. Windows containing no PCM
+frame fail explicitly. The full render and its MIDI/preset evidence stay intact.
+Playback acknowledgements pin the selected frame offset/count.
+Retained WAV format/frame count and WAV/MIDI hashes are checked against the
+admitted preparation and native receipt before playback. Updating the
+`music-transport` companion is required.

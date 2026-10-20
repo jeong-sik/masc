@@ -155,7 +155,7 @@ let eager_read ~base_path ~exclude_runtime_ids ~media_type ~bytes
    else — including an already-evicted [Text] placeholder — passes through
    unchanged, so re-running on a rehydrated message is a no-op (idempotent: no
    double-store, no double-extract). *)
-let evict_block ~read ~mode ~keeper_name ~eager_budget (block : Agent_core.Types.content_block) =
+let evict_block ?base_path ~read ~mode ~keeper_name ~eager_budget (block : Agent_core.Types.content_block) =
   match block with
   | Agent_core.Types.Image { media_type; data; source_type } ->
     (match source_type with
@@ -189,7 +189,7 @@ let evict_block ~read ~mode ~keeper_name ~eager_budget (block : Agent_core.Types
                 (image_store_failed_placeholder ~reason:"unsupported image media type")
             | Ok media_type ->
               (match
-                 Keeper_vision_tool.store_kept ~keeper_name bytes
+                 Keeper_vision_tool.store_kept ?base_path ~keeper_name bytes
                with
                | Error _ ->
                  record_eviction ~keeper_name ~mode ~result:"error" ~reason:"store_failed";
@@ -275,7 +275,7 @@ let evict_blocks ?base_path ~mode ~delegate ~keeper_name blocks =
     in
     (* This path has no lane walk behind it, so nothing is spent yet. *)
     List.map
-      (evict_block
+      (evict_block ?base_path
          ~read:(eager_read ~base_path ~exclude_runtime_ids:[])
          ~mode ~keeper_name ~eager_budget)
       blocks)
@@ -297,7 +297,7 @@ type image_projection =
   ; delegated_images : int
   }
 
-let fallback_projector_with_read ?(exclude_runtime_ids = []) ~read ~keeper_name () =
+let fallback_projector_with_read ?base_path ?(exclude_runtime_ids = []) ~read ~keeper_name () =
   let cached = Hashtbl.create 8 in
   let eager_budget = ref max_eager_reads_per_turn in
   let project_image ~mode block =
@@ -318,7 +318,7 @@ let fallback_projector_with_read ?(exclude_runtime_ids = []) ~read ~keeper_name 
         | Llm_provider.Types.Text _ | Llm_provider.Types.Thinking _
         | Llm_provider.Types.ReasoningDetails _ | Llm_provider.Types.RedactedThinking _
         | Llm_provider.Types.ToolUse _ | Llm_provider.Types.ToolResult _
-        | Llm_provider.Types.Document _ | Llm_provider.Types.Audio _ -> evict_block
+        | Llm_provider.Types.Document _ | Llm_provider.Types.Audio _ -> evict_block ?base_path
             ~read:(read ~exclude_runtime_ids)
             ~mode ~keeper_name ~eager_budget block
       in
@@ -356,7 +356,7 @@ let fallback_projector_with_read ?(exclude_runtime_ids = []) ~read ~keeper_name 
 ;;
 
 let fallback_projector ?base_path ?exclude_runtime_ids ~keeper_name () =
-  fallback_projector_with_read ?exclude_runtime_ids ~read:(eager_read ~base_path) ~keeper_name ()
+  fallback_projector_with_read ?base_path ?exclude_runtime_ids ~read:(eager_read ~base_path) ~keeper_name ()
 
 module For_testing = struct
   let fallback_projector = fallback_projector_with_read

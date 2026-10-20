@@ -49,7 +49,8 @@ type outcome =
     re-raises after it has written the checkpoint leaves an emptied history
     with no line, the one state this module cannot report. *)
 val clear
-  :  keepers_dir:string
+  :  base_path:string
+  -> keepers_dir:string
   -> runtime_id:string
   -> keeper_name:string
   -> session:Keeper_context_core.session_context

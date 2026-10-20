@@ -1,5 +1,5 @@
 let ( let* ) = Result.bind
-let persist ~keeper_name json =
+let persist ~base_path ~keeper_name json =
   let string key = match json with
     | `Assoc fields -> (match List.assoc_opt key fields with
         | Some (`String value) -> Ok value | _ -> Error ("screenshot missing " ^ key))
@@ -43,7 +43,7 @@ let persist ~keeper_name json =
       let* width, height = match Keeper_image_dimensions.image_dimensions bytes with
         | Some (width,height) when width > 0 && height > 0 -> Ok (width,height)
         | _ -> Error "invalid screenshot dimensions" in
-      let* handle = Keeper_vision_tool.store_frame ~keeper_name bytes in
+      let* handle = Keeper_vision_tool.store_frame ~base_path ~keeper_name bytes in
       Ok (`Assoc (connection_fields @ observation_fields @ ["artifact", `String (Multimodal.Vision_artifact_store.to_string handle);
         "media_type", `String mime; "tabId", `Int tab_id; "url", `String url;
         "title", `String title; "width", `Int width; "height", `Int height;

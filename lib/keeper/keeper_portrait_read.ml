@@ -96,7 +96,7 @@ let handle ~base_path ~keeper_name ~tool_name ~start_time ~args =
            | Ok bytes ->
                (* The tool promises a durable artifact. Screen frames share a
                   rotating cache; the kept store preserves the returned handle. *)
-               (match Keeper_vision_tool.store_kept ~keeper_name bytes with
+               (match Keeper_vision_tool.store_kept ~base_path ~keeper_name bytes with
                 | Error message -> Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time message
                 | Ok artifact ->
                     Tool_result.make_ok ~tool_name ~start_time

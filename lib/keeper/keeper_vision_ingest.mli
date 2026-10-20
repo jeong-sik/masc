@@ -108,7 +108,7 @@ val error_reasons : string list
 
 module For_testing : sig
   val fallback_projector :
-    ?exclude_runtime_ids:string list ->
+    ?base_path:string -> ?exclude_runtime_ids:string list ->
     read:
       (exclude_runtime_ids:string list ->
        media_type:string -> bytes:string -> (string, string) result option) ->

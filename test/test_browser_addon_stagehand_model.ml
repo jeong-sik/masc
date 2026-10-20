@@ -75,8 +75,20 @@ let scenario manifest fixture =
       check int "reported usage is preserved" 2 (answer |> member "usage" |> member "total_tokens" |> to_int);
       check bool "unknown cache counts are omitted" true (answer |> member "usage" |> member "cached_input_tokens" = `Null);
       (match F.request_bodies server with [body] ->
-        check (list string) "shared HTTP transport retains conversation roles" ["system";"user";"assistant";"user"]
-          (Yojson.Safe.from_string body |> member "messages" |> to_list |> List.map (fun value -> value |> member "role" |> to_string))
+        let schema=match request.schema with Some schema -> schema | None -> fail "consumer request schema expected" in
+        let requirement=Agent_core.Exact_output.make_output_requirement ~schema
+          ~minimum_guarantee:Agent_core.Exact_output.Json_syntax in
+        let instruction=Agent_core.Exact_output.schema_instruction_text requirement in
+        let expected=Option.to_list (Option.map (fun text -> "system",text) request.system)
+          @ List.map (fun (message:Exact.message) ->
+              (match message.role with User -> "user" | Assistant -> "assistant"),message.text) request.messages
+          @ ["user",instruction] in
+        let wire=Yojson.Safe.from_string body in
+        check (list (pair string string)) "shared HTTP preserves the full conversation and adds the canonical schema turn"
+          expected (wire |> member "messages" |> to_list |> List.map (fun value ->
+            (value |> member "role" |> to_string),(value |> member "content" |> to_string)));
+        check string "syntax guarantee uses declared JSON mode" "json_object"
+          (wire |> member "response_format" |> member "type" |> to_string)
        | _ -> fail "one provider request expected");
       List.iter (fun malformed -> check bool "unsupported input is refused before publishing" true (Result.is_error (model malformed)))
         [set "temperature" (`Float 0.2) params;set "stop_sequences" (`List [`String "stop"]) params;

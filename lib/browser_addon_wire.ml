@@ -122,7 +122,8 @@ let verb_of_json ~route value =
       Ok (B.Page_extract {tab_id;instruction;schema=List.assoc_opt "schema" fields})
   | _ -> Error "unknown browser verb"
 
-type command = Snapshot | Retire | Poll of {client:B.client_info;window_sec:float}
+type command = Snapshot | Retire | Model_requests | Model_result of Yojson.Safe.t
+  | Model_wait of {after:string option} | Poll of {client:B.client_info;window_sec:float}
   | Deliver of {client_id:B.client_id;id:string;payload:Yojson.Safe.t}
   | Disconnect of B.client_id
   | Issue of {route:B.route;verb:B.verb;actor:string option;timeout_sec:float;only_if_idle:bool}
@@ -131,6 +132,9 @@ let to_json request =
   let fields = match request.command with
     | Snapshot -> ["operation",string "snapshot"]
     | Retire -> ["operation",string "retire"]
+    | Model_requests -> ["operation",string "model_requests"]
+    | Model_result arguments -> ["operation",string "model_result";"arguments",arguments]
+    | Model_wait {after} -> ["operation",string "model_wait";"after",nullable string after]
     | Poll {client;window_sec} -> ["operation",string "poll";"client",client_to_json client;"window_sec",`Float window_sec]
     | Deliver {client_id;id;payload} -> ["operation",string "deliver";"clientId",string (B.client_id_to_string client_id);"id",string id;"payload",payload]
     | Disconnect client_id -> ["operation",string "disconnect";"clientId",string (B.client_id_to_string client_id)]
@@ -138,13 +142,18 @@ let to_json request =
         "command",B.verb_json verb;"actor",nullable string actor;"timeout_sec",`Float timeout_sec;"only_if_idle",`Bool only_if_idle] in
   `Assoc (("incarnation",string request.incarnation)::fields)
 let of_json value =
-  let* fields = object_fields ["incarnation";"operation";"client";"window_sec";"clientId";"id";"payload";"route";"command";"actor";"timeout_sec";"only_if_idle"] value in
+  let* fields = object_fields ["incarnation";"operation";"arguments";"after";"client";"window_sec";"clientId";"id";"payload";"route";"command";"actor";"timeout_sec";"only_if_idle"] value in
   let* incarnation = text_field fields "incarnation" in let* name = text_field fields "operation" in
   let exact keys = exact ("incarnation"::"operation"::keys) value |> Result.map (fun _ -> ()) in
   let client_id () = let* text = text_field fields "clientId" in B.client_id_of_string text in
   let* command = match name with
     | "snapshot" -> let* () = exact [] in Ok Snapshot
     | "retire" -> let* () = exact [] in Ok Retire
+    | "model_requests" -> let* () = exact [] in Ok Model_requests
+    | "model_result" -> let* () = exact ["arguments"] in
+        let* arguments=required fields "arguments" in Ok (Model_result arguments)
+    | "model_wait" -> let* () = exact ["after"] in
+        let* raw=required fields "after" in let* after=optional text raw in Ok (Model_wait {after})
     | "poll" -> let* () = exact ["client";"window_sec"] in let* raw = required fields "client" in
         let* client = client_of_json raw in let* raw = required fields "window_sec" in let* window_sec = positive raw in Ok (Poll {client;window_sec})
     | "deliver" -> let* () = exact ["clientId";"id";"payload"] in let* client_id = client_id () in
@@ -219,12 +228,13 @@ let answer_of_json value =
   | _ -> Error "unknown browser answer"
 
 type disposition = Not_started | Outcome_unknown
-type reply = Snapshot_result of Yojson.Safe.t
+type reply = Snapshot_result of Yojson.Safe.t | Model_reply of Yojson.Safe.t
   | Poll_result of {command:B.issued option;state_id:string} | Receipt
   | Issue_result of (B.answer, B.selection_error) result
   | Service_refusal of {message:string;disposition:disposition}
 let reply_to_json = function
   | Snapshot_result snapshot -> `Assoc ["reply",string "snapshot";"snapshot",snapshot]
+  | Model_reply value -> `Assoc ["reply",string "model";"value",value]
   | Poll_result {command;state_id} -> `Assoc ["reply",string "poll";"command",nullable (fun (command:B.issued) ->
       `Assoc ["id",string command.id;"command",command.verb_json]) command;"state_id",string state_id]
   | Receipt -> `Assoc ["reply",string "receipt"]
@@ -232,11 +242,12 @@ let reply_to_json = function
   | Service_refusal {message;disposition} -> `Assoc ["reply",string "refusal";"message",string message;
       "effect",string (match disposition with Not_started -> "not_started" | Outcome_unknown -> "unknown")]
 let reply_of_json value =
-  let* fields = object_fields ["reply";"snapshot";"command";"state_id";"answer";"message";"effect"] value in
+  let* fields = object_fields ["reply";"snapshot";"value";"command";"state_id";"answer";"message";"effect"] value in
   let* name = text_field fields "reply" in
   let reply_keys keys = exact ("reply"::keys) value |> Result.map (fun _ -> ()) in
   match name with
   | "snapshot" -> let* () = reply_keys ["snapshot"] in let* snapshot = required fields "snapshot" in Ok (Snapshot_result snapshot)
+  | "model" -> let* ()=reply_keys ["value"] in let* value=required fields "value" in Ok (Model_reply value)
   | "poll" -> let* () = reply_keys ["command";"state_id"] in let* raw = required fields "command" in
       let* command = optional (fun raw -> let* fields = exact ["id";"command"] raw in
         let* id = text_field fields "id" in let* verb_json = required fields "command" in

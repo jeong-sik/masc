@@ -1,7 +1,8 @@
 let () =
-  let socket = ref None and incarnation = ref None and bound = ref None and automation = ref false in
+  let socket = ref None and incarnation = ref None and bound = ref None and automation = ref false and models = ref false in
   Arg.parse [
     "--automation",Arg.Set automation,"Start the host-selected owned Gecko backend";
+    "--models",Arg.Set models,"Attach the host-selected model request broker";
     "--socket",Arg.String (fun value -> socket:=Some value),"Host-selected private Unix socket";
     "--incarnation",Arg.String (fun value -> incarnation:=Some value),"Host-selected worker UUID";
     "--max-message-bytes",Arg.Int (fun value -> bound:=Some value),"Native installation reply bound"]
@@ -14,6 +15,18 @@ let () =
     Eio.Switch.run (fun sw ->
     let owner = match Masc.Browser_addon_owner.create ~incarnation with
       | Ok owner -> owner | Error message -> raise (Arg.Bad message) in
+    if !models then (
+      let directory=Filename.dirname socket_path in
+      let configuration=Eio_unix.run_in_systhread (fun () ->
+        let ( let* )=Result.bind in
+        let* value=Fs_compat.load_owned_regular_file ~ownership_root:directory (Filename.concat directory "models.json")
+          |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
+        let* text=Option.to_result ~none:"missing browser model configuration" value in
+        try Masc.Browser_addon_models.configuration_of_json (Yojson.Safe.from_string text)
+        with Yojson.Json_error detail -> Error detail) in
+      let queue=Result.bind configuration (fun configuration -> Masc.Browser_addon_models.create ~incarnation ~configuration) in
+      match Result.bind queue (Masc.Browser_addon_owner.attach_models owner) with
+      | Ok () -> () | Error detail -> raise (Arg.Bad detail));
     let revoke () = Masc.Browser_addon_owner.revoke owner in
     Eio.Switch.on_release sw revoke;
     let stopping = Atomic.make false and wake = Eio.Condition.create () in

@@ -36,8 +36,8 @@ val digest : request -> string
     different digest is [Request_id_reused]. *)
 
 type checked
-(** An answer that matched the package's declared schema. Only the
-    [validate] function [run] hands to a call makes one. *)
+(** An answer that matched the package's declared schema. Constructed by the
+    [validate] function [run] hands to a call, or strict [final_of_json] decoding. *)
 
 val checked_json : checked -> Yojson.Safe.t
 
@@ -102,6 +102,9 @@ type attempt =
 
 val final_to_json : final -> Yojson.Safe.t
 (** The result body a package receives. *)
+val final_of_json : schema:Yojson.Safe.t -> Yojson.Safe.t -> (final, string) result
+(** Strict host-result decoding, including the declared schema check for an
+    answer. It never constructs a checked answer from unchecked wire JSON. *)
 
 val not_final_to_json : not_final -> Yojson.Safe.t
 (** The reason an attempt did not end the request, as the host shows it. *)

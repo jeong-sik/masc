@@ -16,3 +16,9 @@ val result_arguments : request_id:string -> result:Yojson.Safe.t -> Yojson.Safe.
 
 val accepted_of_json : Yojson.Safe.t -> (bool, string) result
 (** Exactly [{"accepted": bool}]. *)
+
+type availability = { revision : string; request_ids : string list }
+val availability_to_json : availability -> Yojson.Safe.t
+val availability_of_json : Yojson.Safe.t -> (availability, string) result
+(** An opaque state token and the exact pending IDs of one original worker.
+    A watcher waits for a different token; there is no periodic polling. *)

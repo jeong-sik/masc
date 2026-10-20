@@ -9,6 +9,7 @@ type t = {
   mutable clients : B.client_id list;
   mutable automation : bool;
   mutable cleanup : (unit -> (unit, string) result) option;
+  mutable models : Browser_addon_models.t option;
   retired : unit Eio.Promise.t;
   retire : unit Eio.Promise.u;
 }
@@ -22,7 +23,7 @@ let create ~incarnation =
       Error "a browser owner already exists in this process"
     else
       let retired, retire = Eio.Promise.create () in
-      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=false;cleanup=None;retired;retire} in
+      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=false;cleanup=None;models=None;retired;retire} in
       B.install_activity_observer (Some (fun lane -> match t.phase,lane with
         | Serving,B.Lane_name.Live -> B.Enabled
         | Serving,B.Lane_name.Automation -> if t.automation then B.Enabled else B.Disabled
@@ -39,6 +40,20 @@ let snapshot t = `Assoc [
   "state",`String (match t.phase with Serving -> "serving" | Retired -> "retired");
   "clients",`List (List.map B.client_json (B.connected_clients ()));
   "owned_backends",Browser_addon_inventory.owned_to_json (Browser_selection.snapshot ())]
+let models_enabled t = Option.is_some t.models
+let attach_models t models =
+  Eio.Mutex.use_rw ~protect:true t.gate (fun () ->
+    if Browser_addon_models.incarnation models<>t.incarnation then Error "wrong browser model incarnation" else
+    match t.phase,t.models with
+    | Retired,_ -> Error "browser owner is retired"
+    | Serving,Some _ -> Error "browser model broker is already attached"
+    | Serving,None -> t.models<-Some models;Ok ())
+let admitted_models t =
+  Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase,t.models with
+    | Retired,_ -> Error Browser_addon_models.Retired
+    | Serving,None -> Error (Browser_addon_models.Output_disabled "model broker")
+    | Serving,Some models -> Ok models)
+let generate t request = Result.bind (admitted_models t) (fun models -> Browser_addon_models.request models request)
 let attach_automation t ~execute ~session ~document ~cleanup =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase,t.automation with
     | Retired,_ -> Error "browser owner is retired"
@@ -54,6 +69,7 @@ let revoke t =
     | Retired -> ()
     | Serving ->
       t.phase <- Retired;
+      Option.iter Browser_addon_models.retire t.models;
       t.automation <- false;
       B.install_automation_executor None;
       B.install_server_session_observer B.Server_automation None;
@@ -65,6 +81,14 @@ let waiting t ~disposition run =
   Watched_work.run run ~watcher:(fun () ->
     Eio.Promise.await t.retired;
     refusal ~disposition "browser worker retired during the request")
+let model_port t incarnation run =
+  let models=with_admission t incarnation (fun () -> match t.models with
+    | Some models -> Ok models | None -> Error (refusal "browser model broker is disabled")) in
+  match models with
+  | Error reply -> reply
+  | Ok models -> (match run models with
+      | Ok value -> W.Model_reply value
+      | Error error -> refusal (Browser_addon_models.error_to_string error))
 let dispatch t (request : W.request) =
   match request.command with
   | W.Retire ->
@@ -76,6 +100,12 @@ let dispatch t (request : W.request) =
   | W.Snapshot ->
     (match with_admission t request.incarnation (fun () -> Ok (snapshot t)) with
      | Error reply -> reply | Ok value -> W.Snapshot_result value)
+  | W.Model_requests -> model_port t request.incarnation Browser_addon_models.listing
+  | W.Model_result arguments -> model_port t request.incarnation (fun models ->
+      Browser_addon_models.deliver models ~arguments
+      |> Result.map (fun accepted -> `Assoc ["accepted",`Bool accepted]))
+  | W.Model_wait {after} -> model_port t request.incarnation (fun models ->
+      Browser_addon_models.wait models ~after |> Result.map Lane_addon_host_request.availability_to_json)
   | W.Poll {client;window_sec} ->
     (match with_admission t request.incarnation (fun () ->
       match B.register client with

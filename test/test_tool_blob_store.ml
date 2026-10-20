@@ -1609,15 +1609,8 @@ let test_maintenance_reads_chat_operation_store_and_prepared_gate_checkpoint () 
             |> Result.map_error Masc.Keeper_checkpoint_store.checkpoint_ref_create_error_to_string
             |> require
           in
-          let session_scope =
-            Semantic.session_scope [ "channels"; "default" ] |> require
-          in
           let preparation : Semantic.gate_preparation =
-            { session_scope
-            ; source =
-                Semantic.Prepared_agent_core
-                  { reference; canonical_checkpoint_bytes }
-            }
+            Semantic.Prepared_agent_core { reference; canonical_checkpoint_bytes }
           in
           let binding =
             (* gate_binding already reports its error as a string, so

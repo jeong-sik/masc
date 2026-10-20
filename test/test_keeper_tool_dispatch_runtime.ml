@@ -9733,7 +9733,7 @@ default = "official.primary"
         ~config:native_config ()) in
   run, capture, executions
 
-let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_unavailable=false) ?(retention_rollover=false) ?(advance_native=false) ?(recover_binding=false) ?(recover_retention=false) ?(one_shot=false) ?(native_output_rejected=false) ?(native_blocks=false) ?(native=false) ?(checkpoint_failure=false) ?(channel_session=false) ?(runtime_failure=false) ?(binding_failure=false) decision () =
+let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_unavailable=false) ?(retention_rollover=false) ?(advance_native=false) ?(recover_binding=false) ?(recover_retention=false) ?(one_shot=false) ?(native_output_rejected=false) ?(native_blocks=false) ?(native=false) ?(checkpoint_failure=false) ?(runtime_failure=false) ?(binding_failure=false) decision () =
   with_exec_fixture ~process:native ~bind_eio_context:native "direct_gate_current_history"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let require label = function Ok value -> value | Error _ -> fail (label ^ " failed") in
@@ -9789,9 +9789,7 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
       let session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
       let root = Masc.Keeper_fs.session_base_dir config in
       ignore (Masc.Keeper_fs.ensure_dir root);
-      let session_root = if channel_session then Filename.concat (Filename.concat root "channels") "original-channel" else root in
-      ignore (Masc.Keeper_fs.ensure_dir session_root);
-      let session_dir = Filename.concat session_root session_id in
+      let session_dir = Filename.concat root session_id in
       ignore (Masc.Keeper_fs.ensure_dir session_dir);
       let context = Agent_core.Context.create_sync () in
       let scope = Keeper_execution_scope_id.direct_operation operation_id in
@@ -10477,8 +10475,8 @@ let () =
       test_case "reference persists and replays exact bytes" `Quick test_binary_write_reference_survives_replay;
       test_case "artifact mode is judged by the typed write-mode parser" `Quick test_write_content_artifact_mode_uses_typed_parser]);
     ("direct_gate_resume", [
-      test_case "retention IO repair recovers exact original channel history before replay" `Quick
-        (test_direct_gate_current_history_resume ~checkpoint_failure:true ~recover_retention:true ~channel_session:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "retention IO repair recovers exact original history before replay" `Quick
+        (test_direct_gate_current_history_resume ~checkpoint_failure:true ~recover_retention:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "native one-shot approval delivers input and preserves exact grant" `Quick
         (test_direct_gate_current_history_resume ~native:true ~one_shot:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "native Gate input settles despite rejected output" `Quick
@@ -10491,8 +10489,8 @@ let () =
         (test_direct_gate_current_history_resume ~native:true (Keeper_approval_queue_rules_types.Decision.Reject "declined by authority"));
       test_case "unavailable Gate authority retains original input and runtime suffix" `Quick
         (test_direct_gate_current_history_resume ~binding_failure:true ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
-      test_case "unprepared channel Gate recovers original input after authority repair" `Quick
-        (test_direct_gate_current_history_resume ~binding_failure:true ~recover_binding:true ~channel_session:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "unprepared Gate recovers original input after authority repair" `Quick
+        (test_direct_gate_current_history_resume ~binding_failure:true ~recover_binding:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "unprepared Gate recovers frozen runtime suffix after authority repair" `Quick
         (test_direct_gate_current_history_resume ~binding_failure:true ~recover_binding:true ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "failed producer captured checkpoint survives unavailable source and original runtime suffix" `Quick
@@ -10507,8 +10505,6 @@ let () =
         (test_direct_gate_current_history_resume ~binding_failure:true ~recover_binding:true ~native:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "unretained checkpoint keeps frozen runtime suffix without replay" `Quick
         (test_direct_gate_current_history_resume ~checkpoint_failure:true ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
-      test_case "channel-scoped Gate resumes original input with current channel history" `Quick
-        (test_direct_gate_current_history_resume ~channel_session:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "new Gate and runtime failure retain both obligations" `Quick
         (test_direct_gate_current_history_resume ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "pending original bytes survive rolling checkpoint pruning during retention outage" `Quick

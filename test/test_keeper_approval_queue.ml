@@ -2858,7 +2858,6 @@ let defer_direct_gate_on ~base_path ~keeper_name ~approval_id =
        let waiting =
          Execution.gate_wait
            ~checkpoint
-           ~session_scope:(Execution.session_scope [] |> string_ok)
            ~obligations:[ obligation ]
          |> string_ok
        in

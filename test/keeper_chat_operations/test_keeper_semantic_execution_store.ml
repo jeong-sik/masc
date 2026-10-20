@@ -168,8 +168,7 @@ let test_readonly_inventory_includes_every_unsettled_phase () =
     let gated = claim store ~now:2. in
     let obligation = Execution.gate_obligation ~approval_id:"approval" ~tool_name:"tool_execute"
       ~input_hash:(hash "tool input") |> string_ok in
-    let waiting = Execution.gate_wait ~checkpoint:(checkpoint ())
-      ~session_scope:(Execution.session_scope [] |> string_ok) ~obligations:[obligation] |> string_ok in
+    let waiting = Execution.gate_wait ~checkpoint:(checkpoint ()) ~obligations:[obligation] |> string_ok in
     ignore (Store.defer_direct_gate store ~now:3. ~operation_id:gated.operation_id
       ~execution_digest:gated.execution_digest ~waiting |> store_ok);
     let cooling = claim store ~now:4. in

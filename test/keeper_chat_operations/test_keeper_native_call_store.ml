@@ -259,8 +259,7 @@ let gate_waiting_on reference store =
   let obligation = Keeper_semantic_execution.gate_obligation ~approval_id:"approval"
       ~tool_name:"tool_execute" ~input_hash:(Digestif.SHA256.(digest_string "tool input" |> to_hex))
     |> value in
-  let waiting = Keeper_semantic_execution.gate_wait ~checkpoint:reference
-      ~session_scope:(Keeper_semantic_execution.session_scope [] |> value) ~obligations:[obligation]
+  let waiting = Keeper_semantic_execution.gate_wait ~checkpoint:reference ~obligations:[obligation]
     |> value in
   ignore (Store.defer_direct_gate store ~now:1.5 ~operation_id:gate_operation_id
             ~execution_digest:gate_operation.Operation.execution_digest ~waiting |> ok);

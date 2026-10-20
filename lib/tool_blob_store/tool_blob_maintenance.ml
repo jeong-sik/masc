@@ -328,7 +328,7 @@ let references_in_chat_operation_store ~ownership_root path =
             | Keeper_semantic_execution.Recovering { origin; _ } ->
               (match origin with
                | Keeper_semantic_execution.Gate_binding { preparation; _ } ->
-                 (match preparation.source with
+                 (match preparation with
                   | Keeper_semantic_execution.Prepared_agent_core
                       { canonical_checkpoint_bytes; _ } ->
                     Result.bind after_record (fun references ->

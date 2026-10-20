@@ -177,6 +177,21 @@ let test_append_then_read_in_order () =
   check (list event_testable) "every row reads back" written (events_only rows)
 ;;
 
+let test_append_all_writes_every_valid_event_in_order () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let keeper_id = "keeper" in
+  let written =
+    [ retrieved ~at:1000. "first"
+    ; retracted ~at:1001. ()
+    ; revised ~memory_id:id_b ~at:1002. id_a
+    ]
+  in
+  check int "nothing comes back" 0
+    (List.length (Events.append_all ~keepers_dir ~keeper_id written));
+  check (list event_testable) "the events read back in the order given" written
+    (events_only (read_ok ~keepers_dir ~keeper_id))
+;;
+
 let test_append_cuts_a_torn_tail_first () =
   with_temp_keepers @@ fun keepers_dir ->
   let keeper_id = "keeper" in
@@ -362,6 +377,8 @@ let () =
         ] )
     ; ( "sidecar"
       , [ test_case "append then read in order" `Quick test_append_then_read_in_order
+        ; test_case "append_all writes every valid event in order" `Quick
+            test_append_all_writes_every_valid_event_in_order
         ; test_case "an append cuts a torn tail first" `Quick test_append_cuts_a_torn_tail_first
         ; test_case "a missing file is no events" `Quick test_missing_sidecar_reads_as_no_events
         ; test_case "an unreadable line stays in the list" `Quick test_unreadable_line_stays_in_the_list

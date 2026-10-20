@@ -810,11 +810,11 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
               Keeper_status_metrics.invalidate_tool_audit_cache
                 config
                 ~keeper_name:keeper_name
-            | Keeper_memory_journal_artifact | Keeper_memory_events_artifact ->
-              (* The journal and the events sidecar are written through a
-                 memoized appender; unlinking without dropping that writer
-                 would leave a same-process successor keeper appending to the
-                 deleted inode, so no new file would ever appear. *)
+            | Keeper_memory_journal_artifact ->
+              (* The journal is written through a memoized appender;
+                 unlinking without dropping that writer would leave a
+                 same-process successor keeper appending to the deleted
+                 inode, so no new file would ever appear. *)
               Fs_compat.invalidate_cached_writer path
             | Keeper_root_logs_artifact
             | Keeper_runtime_directory_artifact
@@ -830,6 +830,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
             | Keeper_working_context_artifact
             | Keeper_memory_journal_lock_artifact
             | Keeper_memory_absorbed_artifact
+            | Keeper_memory_events_artifact
             | Keeper_turn_boundaries_artifact
             | Keeper_librarian_progress_artifact
             | Keeper_external_read_cursor_artifact

@@ -131,45 +131,61 @@ let append_error_to_string = function
 
 (* A row a crash cut short has no newline. The locked durable append cuts it
    off before writing, so the next event starts its own line instead of
-   joining the torn one and making both unreadable. *)
+   joining the torn one and making both unreadable. All the lines go in one
+   transaction: one lock, one fsync of the file, one of its directory. *)
+let write_events ~keepers_dir ~keeper_id (events : event list) : (unit, append_error) result =
+  let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let suffix =
+    String.concat ""
+      (List.map (fun e -> Yojson.Safe.to_string (event_to_json e) ^ "\n") events)
+  in
+  let failed message = Error (Write_failed { path; message }) in
+  match Fs_compat.append_private_jsonl_durable_locked_result path suffix with
+  | Fs_compat.Private_file_succeeded () -> Ok ()
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure { value = (); cleanup_failure } ->
+    Log.Keeper.warn
+      ~keeper_name:keeper_id
+      "memory event append committed; descriptor settlement failed path=%s: %s"
+      path
+      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+    Ok ()
+  | Fs_compat.Private_file_failed error ->
+    failed (Fs_compat.private_jsonl_append_error_to_string error)
+  | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+    failed
+      (Printf.sprintf
+         "%s; descriptor settlement also failed: %s"
+         (Fs_compat.private_jsonl_append_error_to_string error)
+         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn -> failed (Printexc.to_string exn)
+;;
+
 let append ~keepers_dir ~keeper_id (e : event) : (unit, append_error) result =
   match validate e with
   | Error error -> Error (Invalid_event error)
-  | Ok e ->
-    let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
-    let suffix = Yojson.Safe.to_string (event_to_json e) ^ "\n" in
-    let failed message = Error (Write_failed { path; message }) in
-    (match Fs_compat.append_private_jsonl_durable_locked_result path suffix with
-     | Fs_compat.Private_file_succeeded () -> Ok ()
-     | Fs_compat.Private_file_succeeded_with_cleanup_failure { value = (); cleanup_failure } ->
-       Log.Keeper.warn
-         ~keeper_name:keeper_id
-         "memory event append committed; descriptor settlement failed path=%s: %s"
-         path
-         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
-       Ok ()
-     | Fs_compat.Private_file_failed error ->
-       failed (Fs_compat.private_jsonl_append_error_to_string error)
-     | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
-       failed
-         (Printf.sprintf
-            "%s; descriptor settlement also failed: %s"
-            (Fs_compat.private_jsonl_append_error_to_string error)
-            (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
-     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-     | exception exn -> failed (Printexc.to_string exn))
+  | Ok e -> write_events ~keepers_dir ~keeper_id [ e ]
 ;;
 
-(* Append in order and hand back only what failed. A producer on a path that
-   must not fail (a search returning its results, a librarian pass that has
-   committed) reports these in its log and goes on. *)
+(* Reject the events that fail validation, then write the rest in one append.
+   A producer on a path that must not fail (a search returning its results, a
+   librarian pass that has committed) reports what comes back in its log and
+   goes on. *)
 let append_all ~keepers_dir ~keeper_id (events : event list) : append_error list =
-  List.filter_map
-    (fun event ->
-       match append ~keepers_dir ~keeper_id event with
-       | Ok () -> None
-       | Error error -> Some error)
-    events
+  let rejected, valid =
+    List.partition_map
+      (fun event ->
+         match validate event with
+         | Error error -> Either.Left (Invalid_event error)
+         | Ok event -> Either.Right event)
+      events
+  in
+  match valid with
+  | [] -> rejected
+  | _ :: _ ->
+    (match write_events ~keepers_dir ~keeper_id valid with
+     | Ok () -> rejected
+     | Error error -> rejected @ [ error ])
 ;;
 
 type read_error =

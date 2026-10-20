@@ -185,17 +185,21 @@ status: reference
   [docs/TUI-GUIDE.md](../TUI-GUIDE.md) ·
   [docs/design/tui/HOME-JOURNEY-ACCEPTANCE.md](../design/tui/HOME-JOURNEY-ACCEPTANCE.md)
 
-**Music Lab (음악 실험실)**
-: TUI에서 프레이즈·어레인지먼트·녹음 테이크를 열고 고치는 음악 작업 표면. Dashboard **s**
+**Music Library (/music, 음악 라이브러리)**
+: TUI에서 프레이즈·어레인지먼트·녹음 테이크를 골라 열고 고치는 음악 작업 표면. Dashboard **s**
   또는 chat `/music`으로 들어가고, 화면 자체는 별도 실행 파일 `masc-alphatex --music`이
   그린다. MASC는 라이브러리 뿌리 두 개(`<base-path>/.masc/music/projects`·
   `<base-path>/.masc/music/sessions`)를 넘길 뿐 편집 상태를 소유하지 않는다. 악보를 그리는
   `/score`와 달리 Kitty 그래픽도 alphaTex 펜스도 필요 없다.
   - 켜지는 조건: `scripts/install-alphatex.sh`가 설치한 `masc-alphatex`가 TUI의 `PATH`에
     있어야 한다(Node.js 22+·pnpm 필요). 없으면 이 화면을 열 수 없다.
-  - 이름 경계: 사용자가 다루는 낱말은 `Music Lab` 아래 `Phrase`·`Arrangement`·`Take` 셋이고,
-    셋은 서로 다른 편집기를 가지며 하나의 재생 transport를 공유하지 않는다. Board·chat 본문의
+  - 이름 경계: 표제어는 코드 주석과 도구 문서가 함께 쓰는 "terminal music library"에서 왔고
+    (`Masc_tui_command`: "`/music` opens the terminal music library"), 사용자가 실제로 누르는
+    이름은 `/music`·**s**다. 이 표면 아래 낱말은 `Phrase`·`Arrangement`·`Take` 셋이고, 셋은
+    서로 다른 편집기를 가지며 하나의 재생 transport를 공유하지 않는다. Board·chat 본문의
     악보인 **alphaTex 펜스**는 그리기 표시일 뿐 이 편집기가 아니다.
+  - 같은 낱말의 두 층: 어레인지먼트 편집기 안에서도 "library"가 나오지만 그것은 `:import-wave`로
+    들여온 **자산 목록**을 가리킨다. 이 표제어가 가리키는 진입 화면과 다르다.
   - 사용 가이드 없음(2026-10-20 확인): `docs/guides`에 이 표면의 안내가 없고, 문서는
     [tools/alphatex/README.md](../../tools/alphatex/README.md)뿐이다.
 

@@ -13,6 +13,7 @@ let scenario () = Eio_main.run (fun env ->
         let socket=Eio.Net.listen ~sw ~backlog:1 net (`Unix path) in
         let entered,enter=Eio.Promise.create () in
         let model_waiting,model_wait=Eio.Promise.create () in
+        let locating,locate=Eio.Promise.create () in
         let never,_=Eio.Promise.create () in
         let cancellations=ref 0 in
         let client=ok (Client.create ~socket_path:path ~incarnation:"0b000000-0000-4000-8000-000000000001"
@@ -21,9 +22,12 @@ let scenario () = Eio_main.run (fun env ->
           while true do Eio.Switch.check server_sw;
             Eio.Net.accept_fork ~sw:server_sw socket ~on_error:(fun exn -> raise exn) (fun flow _ ->
               let raw=Eio.Buf_read.line (Eio.Buf_read.of_flow flow ~max_size:4096) in
-              if Yojson.Safe.Util.member "operation" (Yojson.Safe.from_string raw)=`String "issue" then
-                ignore (Eio.Promise.try_resolve enter ());
-              if Yojson.Safe.Util.member "operation" (Yojson.Safe.from_string raw)=`String "model_wait" then
+              let request=Yojson.Safe.from_string raw in
+              if Yojson.Safe.Util.member "operation" request=`String "issue" then (
+                if Yojson.Safe.Util.(request |> member "command" |> member "verb")=`String "page.locate"
+                then ignore (Eio.Promise.try_resolve locate ())
+                else ignore (Eio.Promise.try_resolve enter ()));
+              if Yojson.Safe.Util.member "operation" request=`String "model_wait" then
                 ignore (Eio.Promise.try_resolve model_wait ());
               Eio.Promise.await never)
           done))
@@ -38,6 +42,14 @@ let scenario () = Eio_main.run (fun env ->
               (fun () -> Eio.Promise.await model_waiting;Eio.Time.sleep clock 0.03;`Waiting) with
              | `Waiting -> ()
              | `Returned _ -> fail "model state watch must outlive the quick control timeout");
+            (match Eio.Fiber.first
+              (fun () -> `Returned (Client.call client ~on_cancel_after_dispatch:(fun () -> ())
+                (W.Issue {route=Browser_lane.Automation_route;
+                  verb=Browser_lane.Page_locate {tab_id=1;instruction=None};actor=None;
+                  timeout_sec=0.001;only_if_idle=false})))
+              (fun () -> Eio.Promise.await locating;Eio.Time.sleep clock 0.03;`Waiting) with
+             | `Waiting -> ()
+             | `Returned _ -> fail "model-backed issue must retain its caller-owned wait");
             let client=ok (Client.create ~socket_path:path ~incarnation:"0b000000-0000-4000-8000-000000000001"
               ~max_message_bytes:4096 ~control_timeout_sec:1. ~available:(fun () -> true)) in
             let client_id=ok (Browser_lane.client_id_of_string "0c000000-0000-4000-8000-000000000001") in

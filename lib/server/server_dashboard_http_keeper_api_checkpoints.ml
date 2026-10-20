@@ -105,6 +105,61 @@ let current_checkpoint_error_json
     `Assoc [ "kind", `String "agent_core_error"; "detail", `String detail ]
 ;;
 
+let checkpoint_ref_load_error_json
+      (error : Keeper_checkpoint_store.checkpoint_ref_load_error)
+  =
+  match error with
+  | Ref_not_found -> `Assoc [ "kind", `String "not_found" ]
+  | Ref_read_failed error ->
+    `Assoc [ "kind", `String "read_failed"; "cause", checkpoint_load_error_json error ]
+  | Ref_identity_invalid error ->
+    `Assoc
+      [ "kind", `String "identity_invalid"
+      ; "detail", `String (Keeper_checkpoint_store.checkpoint_identity_error_to_string error)
+      ]
+  | Ref_session_mismatch { expected; actual } ->
+    `Assoc
+      [ "kind", `String "session_mismatch"
+      ; "expected", `String (Keeper_id.Trace_id.to_string expected)
+      ; "actual", `String (Keeper_id.Trace_id.to_string actual)
+      ]
+  | Ref_lock_failed detail ->
+    `Assoc [ "kind", `String "lock_failed"; "detail", `String detail ]
+;;
+
+let input_wait_observation_json snapshot_result =
+  let status, checkpoint_ref, pending_input, error =
+    match snapshot_result with
+    | Ok snapshot ->
+      let checkpoint = Keeper_checkpoint_store.exact_snapshot_checkpoint snapshot in
+      let reference = Keeper_checkpoint_store.exact_snapshot_reference snapshot in
+      let status, pending_input =
+        match checkpoint.pending_input with
+        | None -> "stored_none", `Null
+        | Some pending ->
+          "stored_pending", Agent_core.Agent_input_request.pending_to_json pending
+      in
+      ( status
+      , `Assoc
+          [ "trace_id", `String (Keeper_id.Trace_id.to_string reference.trace_id)
+          ; "turn_count", `Int reference.turn_count
+          ; "sha256", `String reference.sha256
+          ]
+      , pending_input
+      , `Null )
+    | Error error ->
+      "unavailable", `Null, `Null, checkpoint_ref_load_error_json error
+  in
+  `Assoc
+    [ "schema", `String "masc.keeper.input-wait.observation.v1"
+    ; "source", `String "canonical_checkpoint"
+    ; "status", `String status
+    ; "checkpoint_ref", checkpoint_ref
+    ; "pending_input", pending_input
+    ; "error", error
+    ]
+;;
+
 let checkpoint_load_failure_json
       ~(source_kind : string)
       ~(snapshot_id : string)
@@ -137,9 +192,15 @@ let inventory_json (config : Workspace.config) (name : string)
     let current_path =
       Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id
     in
+    (* Summary, pending proof and reference all come from one exact read. A
+       concurrent replacement cannot lend its identity to another payload. *)
+    let snapshot_result =
+      Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id
+    in
     let current_json, current_history_snapshot_id, current_status, current_error =
-      match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace_id with
-      | Ok checkpoint ->
+      match snapshot_result with
+      | Ok snapshot ->
+        let checkpoint = Keeper_checkpoint_store.exact_snapshot_checkpoint snapshot in
         let current_history_snapshot_id =
           Keeper_checkpoint_store.agent_core_history_snapshot_id_of_checkpoint checkpoint
         in
@@ -150,7 +211,8 @@ let inventory_json (config : Workspace.config) (name : string)
           ~is_current:true
           checkpoint
         |> fun json -> Some json, current_history_snapshot_id, "available", `Null
-      | Error error ->
+      | Error Ref_not_found -> None, "", "missing", `Null
+      | Error (Ref_read_failed error) ->
         let status =
           match error with
           | Keeper_checkpoint_store.Not_found
@@ -160,6 +222,8 @@ let inventory_json (config : Workspace.config) (name : string)
             "unavailable"
         in
         None, "", status, current_checkpoint_error_json error
+      | Error ((Ref_identity_invalid _ | Ref_session_mismatch _ | Ref_lock_failed _) as error) ->
+        None, "", "unavailable", checkpoint_ref_load_error_json error
     in
     let history_json, history_errors =
       Keeper_checkpoint_store.list_agent_core_history_files ~session_dir
@@ -205,6 +269,7 @@ let inventory_json (config : Workspace.config) (name : string)
             | None -> `Null )
         ; "current_status", `String current_status
         ; "current_error", current_error
+        ; "input_wait_observation", input_wait_observation_json snapshot_result
         ; "history", `List history_json
         ; "history_errors", `List history_errors
         ] )

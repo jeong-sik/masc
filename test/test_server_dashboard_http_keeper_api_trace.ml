@@ -141,7 +141,7 @@ let string_member key = function
   | _ -> fail "expected object"
 ;;
 
-let runtime_manifest_json_with_field row_json field replacement =
+let json_with_field row_json field replacement =
   match row_json with
   | `Assoc fields ->
     `Assoc
@@ -149,17 +149,17 @@ let runtime_manifest_json_with_field row_json field replacement =
          (fun (key, value) ->
             if String.equal key field then key, replacement else key, value)
          fields)
-  | _ -> fail "runtime manifest row must encode as an object"
+  | _ -> fail "fixture must encode as an object"
 ;;
 
 let runtime_manifest_json_with_event row_json event =
-  runtime_manifest_json_with_field row_json "event" (`String event)
+  json_with_field row_json "event" (`String event)
 ;;
 
 let runtime_manifest_json_without_field row_json field =
   match row_json with
   | `Assoc fields -> `Assoc (List.remove_assoc field fields)
-  | _ -> fail "runtime manifest row must encode as an object"
+  | _ -> fail "fixture must encode as an object"
 ;;
 
 (* The scan record carries no mutable field, so folding a row must leave the
@@ -222,7 +222,7 @@ let test_runtime_manifest_scan_surfaces_diagnostics_without_repeat_warnings () =
     ; runtime_manifest_json_with_event active_row "unsupported_manifest_event_3"
     ; runtime_manifest_json_with_event active_row "unsupported_manifest_event_4"
     ; runtime_manifest_json_with_event active_row "unsupported_manifest_event_5"
-    ; runtime_manifest_json_with_field
+    ; json_with_field
         (runtime_manifest_json_with_event active_row "unsupported_manifest_event_1")
         "schema_version"
         (`Int 2)
@@ -488,19 +488,13 @@ let make_inventory_checkpoint ~session_id ~turn_count ~created_at =
     }
 ;;
 
-(* Exercise the actual POST handler and its HTTP/JSON projection without a
-   listening server. The transport fixture follows the tool-lookup tests. *)
-let post_checkpoint_history state ~keeper_name snapshot_ids =
-  let body = Yojson.Safe.to_string
-      (`Assoc [ "action", `String "delete_history"
-              ; "snapshot_ids", `List (List.map (fun id -> `String id) snapshot_ids) ]) in
+(* Exercise the actual handlers and HTTP/JSON projection without a listener. *)
+let checkpoint_http_response ~meth ~keeper_name ~body handler =
   let output = Buffer.create 1024 in
-  let connection = Httpun.Server_connection.create (fun reqd ->
-    Server_dashboard_http_keeper_api_post.handle_keeper_checkpoints_post
-      state (Httpun.Reqd.request reqd) reqd body) in
+  let connection = Httpun.Server_connection.create handler in
   let wire = Printf.sprintf
-      "POST /api/v1/keepers/%s/checkpoints HTTP/1.1\r\nHost: localhost\r\nContent-Length: %d\r\n\r\n%s"
-      keeper_name (String.length body) body in
+      "%s /api/v1/keepers/%s/checkpoints HTTP/1.1\r\nHost: localhost\r\nContent-Length: %d\r\n\r\n%s"
+      meth keeper_name (String.length body) body in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length wire) wire in
   ignore (Httpun.Server_connection.read_eof connection input ~off:0
             ~len:(Bigstringaf.length input));
@@ -528,6 +522,21 @@ let post_checkpoint_history state ~keeper_name snapshot_ids =
     | _ :: rest -> response_body rest
     | [] -> fail "missing HTTP header boundary" in
   status, Yojson.Safe.from_string (response_body lines)
+;;
+
+let post_checkpoint_history state ~keeper_name snapshot_ids =
+  let body = Yojson.Safe.to_string
+      (`Assoc [ "action", `String "delete_history"
+              ; "snapshot_ids", `List (List.map (fun id -> `String id) snapshot_ids) ]) in
+  checkpoint_http_response ~meth:"POST" ~keeper_name ~body (fun reqd ->
+    Server_dashboard_http_keeper_api_post.handle_keeper_checkpoints_post
+      state (Httpun.Reqd.request reqd) reqd body)
+;;
+
+let get_checkpoint_inventory state ~keeper_name =
+  checkpoint_http_response ~meth:"GET" ~keeper_name ~body:"" (fun reqd ->
+    let request = Httpun.Reqd.request reqd in
+    Server_dashboard_http_keeper_api.handle_keeper_get_subroutes state request request reqd)
 ;;
 
 let test_history_delete_preserves_session_files () =
@@ -779,6 +788,130 @@ let test_checkpoint_inventory_projects_missing_current () =
     (json |> member "current_status" |> to_string);
   check bool "normal missing current has no error" true
     (json |> member "current_error" = `Null)
+;;
+
+let with_input_wait_inventory f =
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
+  with_temp_dir @@ fun dir ->
+  Eio_main.run @@ fun _env ->
+  let state = Mcp_server.For_testing.create_state ~base_path:dir in
+  let config = Mcp_server.workspace_config state in
+  let keeper_name = "input-observation" in
+  let trace_id = "trace-input-observation" in
+  Keeper_meta_store.replace_snapshot config
+    (make_checkpoint_inventory_meta ~name:keeper_name ~trace_id)
+  |> Result.map_error (fun detail -> fail detail) |> Result.get_ok;
+  let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
+  let canonical = Keeper_checkpoint_store.agent_core_checkpoint_path
+      ~session_dir ~session_id:trace_id in
+  let read () =
+    let status, body = get_checkpoint_inventory state ~keeper_name in
+    check int "checkpoint GET succeeds" 200 status;
+    Yojson.Safe.Util.member "input_wait_observation" body
+  in
+  f ~trace_id ~session_dir ~canonical ~read
+;;
+
+let inventory_pending ~run_id ~request_id ~question =
+  Agent_core.Agent_input_request.
+    { run_id
+    ; request =
+        { request_id; participant_name = Some "operator"; question
+        ; schema = Some (`Assoc [ "type", `String "object" ])
+        ; timeout_s = None; created_at = 10.0
+        }
+    }
+;;
+
+let replace_inventory_checkpoint_bytes path bytes =
+  match Fs_compat.save_file_atomic path bytes with
+  | Ok () -> ()
+  | Error detail -> fail ("checkpoint fixture replacement failed: " ^ detail)
+;;
+
+let test_input_wait_inventory_tracks_exact_replacements () =
+  with_input_wait_inventory @@ fun ~trace_id ~session_dir ~canonical ~read ->
+  let module Store = Keeper_checkpoint_store in
+  let open Yojson.Safe.Util in
+  let initial = make_inventory_checkpoint ~session_id:trace_id ~turn_count:4 ~created_at:10.0 in
+  let save checkpoint =
+    match Store.save_agent_core_classified ~history_retained:2 ~session_dir checkpoint with
+    | Ok (Store.Saved _) -> ()
+    | Ok (Store.Stale_noop _) -> fail "input replacement was not stored"
+    | Error detail -> fail detail
+  in
+  let inspect ~status pending =
+    let observed = read () in
+    check string "observation source" "canonical_checkpoint"
+      (observed |> member "source" |> to_string);
+    check string "stored wait status" status (observed |> member "status" |> to_string);
+    check bool "canonical pending proof" true (observed |> member "pending_input" = pending);
+    check bool "readable observation has no error" true (observed |> member "error" = `Null);
+    let reference = observed |> member "checkpoint_ref" in
+    check string "original trace" trace_id (reference |> member "trace_id" |> to_string);
+    check int "same turn can replace a request" 4 (reference |> member "turn_count" |> to_int);
+    let expected = Digestif.SHA256.(to_hex (digest_string (Fs_compat.load_file canonical))) in
+    check string "hash of actual bytes, without re-encoding" expected
+      (reference |> member "sha256" |> to_string);
+    reference
+  in
+  let a = inventory_pending ~run_id:"run-a" ~request_id:"request-a" ~question:"First question?" in
+  save { initial with pending_input = Some a };
+  (* Equivalent JSON bytes must still have their own exact reference. *)
+  replace_inventory_checkpoint_bytes canonical ("\n" ^ Fs_compat.load_file canonical);
+  let ref_a = inspect ~status:"stored_pending" (Agent_core.Agent_input_request.pending_to_json a) in
+  let b = inventory_pending ~run_id:"run-b" ~request_id:"request-b" ~question:"Replacement question?" in
+  save { initial with pending_input = Some b; created_at = 11.0 };
+  let ref_b = inspect ~status:"stored_pending" (Agent_core.Agent_input_request.pending_to_json b) in
+  check bool "replacement has a different exact reference" false (ref_a = ref_b);
+  save { initial with pending_input = None; created_at = 12.0 };
+  let ref_none = inspect ~status:"stored_none" `Null in
+  check bool "settlement has a different exact reference" false (ref_b = ref_none);
+  check bool "old pending history still exists" true
+    (List.length (Store.list_agent_core_history_files ~session_dir) > 0)
+;;
+
+let test_input_wait_inventory_refuses_unavailable_sources () =
+  with_input_wait_inventory @@ fun ~trace_id ~session_dir ~canonical ~read ->
+  let module Store = Keeper_checkpoint_store in
+  let open Yojson.Safe.Util in
+  let unavailable kind =
+    let observed = read () in
+    check string "source is explicitly unavailable" "unavailable"
+      (observed |> member "status" |> to_string);
+    check bool "no reference is fabricated" true (observed |> member "checkpoint_ref" = `Null);
+    check bool "no pending proof is borrowed" true (observed |> member "pending_input" = `Null);
+    check string "failure category" kind (observed |> member "error" |> member "kind" |> to_string)
+  in
+  unavailable "not_found";
+  let pending = inventory_pending ~run_id:"old-run" ~request_id:"old-request" ~question:"Old question?" in
+  let checkpoint = make_inventory_checkpoint ~session_id:trace_id ~turn_count:1 ~created_at:10.0 in
+  (match Store.save_agent_core_classified ~history_retained:2 ~session_dir
+      { checkpoint with pending_input = Some pending } with
+   | Ok (Store.Saved _) -> ()
+   | Ok (Store.Stale_noop _) -> fail "fresh checkpoint was stale"
+   | Error detail -> fail detail);
+  (* Replace the canonical inode; in-place corruption would also corrupt its
+     hardlinked history and fail to test a readable historical fallback. *)
+  replace_inventory_checkpoint_bytes canonical "{invalid checkpoint";
+  unavailable "read_failed";
+  let unsupported = json_with_field
+      (Agent_core.Checkpoint.to_json checkpoint) "version"
+      (`Int (Agent_core.Checkpoint.checkpoint_version - 1)) in
+  replace_inventory_checkpoint_bytes canonical (Yojson.Safe.to_string unsupported);
+  unavailable "read_failed";
+  replace_inventory_checkpoint_bytes canonical (Agent_core.Checkpoint.to_string
+    { checkpoint with session_id = "foreign-session" });
+  unavailable "session_mismatch";
+  Sys.remove canonical;
+  unavailable "not_found";
+  check bool "a readable old pending request remains in history" true
+    (Store.list_agent_core_history_files ~session_dir
+     |> List.exists (fun snapshot_id ->
+       match Store.load_agent_core_history_file ~session_dir ~snapshot_id with
+       | Ok old -> old.pending_input = Some pending
+       | Error _ -> false))
 ;;
 
 (* Clock groups fold the edge stream into a table of per-group accumulators.
@@ -1050,6 +1183,14 @@ let () =
             "projects missing current without failing inventory"
             `Quick
             test_checkpoint_inventory_projects_missing_current
+        ; test_case
+            "input wait follows exact same-turn replacement and settlement"
+            `Quick
+            test_input_wait_inventory_tracks_exact_replacements
+        ; test_case
+            "input wait never borrows unavailable or historical state"
+            `Quick
+            test_input_wait_inventory_refuses_unavailable_sources
         ] )
     ; ( "checkpoint_purge"
       , [ test_case

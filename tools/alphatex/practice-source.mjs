@@ -33,17 +33,20 @@ export function practiceRange(asset) {
   const midiEnd = meta.midiTime.last === null ? anchor : practiceUnsigned(meta.midiTime.last) + 1n
   return { origin: String(origin), extent: String((renderEnd > midiEnd ? renderEnd : midiEnd) - origin) }
 }
-export function practiceRegionTime(asset, { offset, extent }) {
+export function practiceRegionTime(asset, { offset, extent, sourceDivisor }) {
   const range = practiceRange(asset), clock = asset.metadata.renderClock.clock
   // Native region spans use UInt128; absolute packet timestamps stay UInt64.
   const start = practiceUnsigned(offset, (1n << 128n) - 1n), length = practiceUnsigned(extent, (1n << 128n) - 1n)
-  if (!length || start + length > BigInt(range.extent)) throw new Error('Practice region exceeds its source host-clock span')
-  const sourceStartSeconds = exactSeconds(start * BigInt(clock.numer), BigInt(clock.denom))
-  const sourceEndSeconds = exactSeconds((start + length) * BigInt(clock.numer), BigInt(clock.denom))
-  const durationSeconds = exactSeconds(length * BigInt(clock.numer), BigInt(clock.denom))
+  const subdivision = sourceDivisor === undefined ? 1n : practiceUnsigned(sourceDivisor, (1n << 128n) - 1n)
+  if (!subdivision || !length || start + length > BigInt(range.extent) * subdivision) throw new Error('Practice region exceeds its source host-clock span')
+  const denominator = BigInt(clock.denom) * subdivision
+  const sourceStartSeconds = exactSeconds(start * BigInt(clock.numer), denominator)
+  const sourceEndSeconds = exactSeconds((start + length) * BigInt(clock.numer), denominator)
+  const durationSeconds = exactSeconds(length * BigInt(clock.numer), denominator)
   if (sourceEndSeconds <= sourceStartSeconds || durationSeconds <= 0) throw new Error('Practice region time is not representable')
   return { sourceStartSeconds, sourceEndSeconds, durationSeconds,
-    sourceClock: { origin: range.origin, offset, extent, numer: clock.numer, denom: clock.denom }, audio: null }
+    sourceClock: { origin: range.origin, offset, extent, numer: clock.numer, denom: clock.denom,
+      ...(sourceDivisor === undefined ? {} : { sourceDivisor }) }, audio: null }
 }
 export function validatePracticeSource(asset) {
   if (asset?.kind !== 'practice' || !asset.parts || Object.keys(asset.parts).length !== Object.keys(practicePartNames).length) throw new Error('Invalid practice source parts')

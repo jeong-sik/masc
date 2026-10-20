@@ -8,10 +8,10 @@ import { practiceRange, practiceRegionTime } from './practice-source.mjs'
 import { monitorPacket } from './step-monitor-session.mjs'
 import { sourceAudioFrames } from './source-audio-clock.mjs'
 
-export function practiceAudioClock(asset, offset = '0', extent = practiceRange(asset).extent) {
-  const { sourceClock: clock } = practiceRegionTime(asset, { offset, extent })
+export function practiceAudioClock(asset, offset = '0', extent = practiceRange(asset).extent, sourceDivisor) {
+  const { sourceClock: clock } = practiceRegionTime(asset, { offset, extent, sourceDivisor })
   return { start: String(BigInt(offset) * BigInt(clock.numer)),
-    end: String((BigInt(offset) + BigInt(extent)) * BigInt(clock.numer)), denominator: String(BigInt(clock.denom) * 1_000_000_000n) }
+    end: String((BigInt(offset) + BigInt(extent)) * BigInt(clock.numer)), denominator: String(BigInt(clock.denom) * BigInt(clock.sourceDivisor ?? '1') * 1_000_000_000n) }
 }
 
 // Worker-only source stage. No plug-in is opened here. The raw take remains

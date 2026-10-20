@@ -292,6 +292,20 @@ do {try later.stageCoordinated(at:0.05);preconditionFailure("admitted a seek bef
 precondition(later.state == .playing && later.timer != nil,"a refused seek leaves the playing owner unchanged")
 try later.stageCoordinated(at:0.15);precondition(later.state == .staged)
 later.finish(reason:"test",error:nil,publish:false)
+// Source window [1/2,5/2) ticks: both original packets stay inside. Each
+// deadline includes the original fractional cut and absolute repeat once.
+var fractional=clip(offset:"1",extent:"4",repeatCount:2);fractional.sourceDivisor="2"
+let fractionalSource=source("take",[packet(1,on),packet(2,off)],numer:125,denom:3,extent:"10")
+let fractionOwner=try owner([fractionalSource],[fractional])
+host=0;sent=[];try fractionOwner.stageCoordinated(at:0);try fractionOwner.runCoordinated(anchorNanoseconds:10)
+for (time,count) in [(UInt64(30),0),(31,1),(73,2),(115,3),(156,4)] {
+ host=time;fractionOwner.tick();precondition(sent.filter{$0.1==on || $0.1==off}.count==count)
+}
+precondition(fractionOwner.clips[0].end==167)
+fractionOwner.finish(reason:"fractional",error:nil,publish:false)
+var invalidFraction=fractional;invalidFraction.sourceDivisor="0"
+refuses{_ = try owner([fractionalSource],[invalidFraction])}
+print("UMP_FRACTIONAL_REGIONS_PASS")
 refuses{_ = try owner([source("take",[packet(0,[0x30120102,0])])],[clip()])}
 let lost=try owner([a],[clip()]);host=0;try lost.stageCoordinated(at:0);try lost.runCoordinated(anchorNanoseconds:10);unavailable=true;host=10;lost.tick();precondition(lost.state == .stopped && lost.terminalFailure != nil)
 print("UMP_REGIONS_PASS: exact adjacent ticks and UInt64+1 end, original attributes/releases and active-copy FIFO drain, exact-entry attacks, silent staging, 2M compressed late-copy lookup, pause/seek/resume, independent overlapping scopes, sequential physical baselines, first-copy entry after earlier regions only, repeat and seek-back baselines, uncertain acquisition cleanup, unsupported/overlap admission and endpoint loss")

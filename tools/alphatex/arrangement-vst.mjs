@@ -62,7 +62,7 @@ export async function prepareVstSources(project, { route, sourceRoot, directory,
       }
       renders.push(render)
     }
-    const clock = asset.kind === 'practice' ? practiceAudioClock(asset, clip.offset, clip.extent)
+    const clock = asset.kind === 'practice' ? practiceAudioClock(asset, clip.offset, clip.extent, clip.sourceDivisor)
       : sourceAudioClock(midiSourcePattern(asset.source, { pattern: clip.pattern }), clip.offset, clip.extent)
     regions.push({ id: clip.id, asset: render.id, startSeconds: project.playbackLoop
       ? clip.position / project.ppq * 60 / project.tempo : clip.startSeconds,

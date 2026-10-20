@@ -127,6 +127,7 @@ export function arrangementClipTime(project, clip) {
   if (!asset) throw new Error('Region source is missing')
   integer(clip.position, 'region project position')
   integer(clip.repeat, 'region repeat count', 1)
+  if (clip.sourceDivisor !== undefined && asset.kind !== 'practice') throw new Error('Fractional host cuts require a practice source')
   let sourceStart, sourceEnd, duration, capture, exact
   switch (asset.kind) {
   case 'practice': {
@@ -134,7 +135,7 @@ export function arrangementClipTime(project, clip) {
     capture = practiceRegionTime(asset, clip)
     sourceStart = capture.sourceStartSeconds; sourceEnd = capture.sourceEndSeconds; duration = capture.durationSeconds
     exact = { start: fraction(...projectNanoseconds(project, clip.position)),
-      period: fraction(BigInt(clip.extent) * BigInt(capture.sourceClock.numer), BigInt(capture.sourceClock.denom)) }
+      period: fraction(BigInt(clip.extent) * BigInt(capture.sourceClock.numer), BigInt(capture.sourceClock.denom) * BigInt(clip.sourceDivisor ?? '1')) }
     break
   }
   case 'capture': {
@@ -251,6 +252,7 @@ export function editArrangement(project, edit) {
     case 'region-add': next.clips.push({ id: arrangementID(next.clips, 'region'), name: edit.name,
       asset: edit.asset, lane: edit.lane, position: edit.position, offset: edit.offset, extent: edit.extent,
       repeat: edit.repeat ?? 1, ...(edit.takeCycle === undefined ? {} : { takeCycle: edit.takeCycle }), ...(edit.pattern === undefined ? {} : { pattern: edit.pattern }),
+      ...(edit.sourceDivisor === undefined ? {} : { sourceDivisor: edit.sourceDivisor }),
       ...(edit.clockOffsetNanoseconds === undefined ? {} : { clockOffsetNanoseconds: structuredClone(edit.clockOffsetNanoseconds) }),
       ...(edit.audioChannel === undefined ? {} : { audioChannel: structuredClone(edit.audioChannel) }),
       ...(edit.component === undefined ? {} : { component: edit.component }), ...(edit.placement === undefined ? {} : { placement: structuredClone(edit.placement) }) }); break
@@ -268,8 +270,8 @@ export function editArrangement(project, edit) {
       const clip = region(edit.id)
       for (const key of Object.keys(edit)) {
         if (['kind', 'id'].includes(key)) continue
-        if (!['name', 'lane', 'position', 'offset', 'extent', 'repeat', 'pattern', 'component', 'placement', 'audioChannel', 'clockOffsetNanoseconds'].includes(key)) throw new Error('Unknown region edit field')
-        if (key === 'audioChannel' && edit[key] === undefined) delete clip[key]
+        if (!['name', 'lane', 'position', 'offset', 'extent', 'repeat', 'pattern', 'component', 'placement', 'audioChannel', 'clockOffsetNanoseconds', 'sourceDivisor'].includes(key)) throw new Error('Unknown region edit field')
+        if (['audioChannel', 'sourceDivisor'].includes(key) && edit[key] === undefined) delete clip[key]
         else clip[key] = structuredClone(edit[key])
       }
       break

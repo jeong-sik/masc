@@ -574,6 +574,11 @@ with selected audio/MIDI outputs and per-input `:midi-source` overrides.
 Completed phrase practice takes use `:import-practice DIRECTORY`. Enter places
 their original MIDI-only source; `:trim OFFSET EXTENT` uses decimal host-tick
 strings, and move/repeat/undo/redo work as for other regions.
+For a boundary between host ticks, `:trim-fraction OFFSET EXTENT DIVISOR`
+retains its rational cut for both raw external MIDI and VST playback.
+`:practice-region ASSET BEAT OFFSET EXTENT DIVISOR [REPEAT]` places one directly;
+normal `:trim` restores whole-tick units. These are explicit source cuts, not
+automatic practice-pass placement.
 `:practice-backing [ASSET]` recovers their frozen phrase as a new editable MIDI
 asset with the originally played track muted. Enter places the full phrase and
 `:edit-midi` opens it for chord/voicing experiments. Its original loop stays in

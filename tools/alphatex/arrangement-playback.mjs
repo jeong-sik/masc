@@ -312,6 +312,7 @@ export async function prepareArrangementCaptureRegions(project, { sourceRoot, di
     const bindings = [...new Set(sources.flatMap(source => source.timeline.bindings.map(binding => binding.destination)))].map((destination, port) => ({ port, destination }))
     for (const clip of schedule) if (['capture', 'practice'].includes(byID.get(clip.asset).kind) && clip.component !== 'audio') {
       notes.push({ id: clip.id, source: clip.asset, startSeconds: clip.startSeconds, offset: clip.offset, extent: clip.extent, repeatCount: clip.repeat, ...(clip.component ? { component: clip.component } : {}),
+      ...(clip.sourceDivisor === undefined ? {} : { sourceDivisor: clip.sourceDivisor }),
       ...(clip.startNanoseconds ? { startNanoseconds: clip.startNanoseconds } : {}) })
     }
     let midi, smfBindings = []

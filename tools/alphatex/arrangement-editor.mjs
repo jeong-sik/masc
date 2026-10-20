@@ -58,7 +58,7 @@ function position(value) {
   if (!Number.isSafeInteger(value) || value < 0) throw new Error('Invalid arrangement cursor position')
   return value
 }
-function place(editor, assetID, tick, { offset, extent, repeat = 1, pattern } = {}) {
+function place(editor, assetID, tick, { offset, extent, repeat = 1, pattern, sourceDivisor } = {}) {
   const asset = editor.project.assets.find(asset => asset.id === assetID)
   if (!asset) throw new Error('Select an imported asset')
   offset ??= ['capture', 'practice'].includes(asset.kind) ? '0' : 0
@@ -69,7 +69,8 @@ function place(editor, assetID, tick, { offset, extent, repeat = 1, pattern } = 
     lane = project.lanes.at(-1)
   }
   project = editArrangement(project, { kind: 'region-add', asset: asset.id, lane: lane.id, name: asset.name,
-    position: tick, offset, extent, repeat, ...(pattern === undefined ? {} : { pattern }) })
+    position: tick, offset, extent, repeat, ...(pattern === undefined ? {} : { pattern }),
+    ...(sourceDivisor === undefined ? {} : { sourceDivisor }) })
   const next = commit(editor, project)
   return { ...next, asset: asset.id, pattern, lane: lane.id, region: project.clips.at(-1).id, tick }
 }
@@ -139,7 +140,8 @@ export function arrangementCommand(editor, line) {
   const sourceRange = (assetID, offset, extent) => {
     const asset = editor.project.assets.find(asset => asset.id === assetID)
     if (!asset) throw new Error('Select an imported asset')
-    return ['capture', 'practice'].includes(asset.kind) ? { offset, extent } : { offset: Number(offset), extent: Number(extent) }
+    return asset.kind === 'practice' ? { offset, extent, sourceDivisor: undefined }
+      : asset.kind === 'capture' ? { offset, extent } : { offset: Number(offset), extent: Number(extent) }
   }
   const timeRange = (assetID, start, duration) => {
     const asset = editor.project.assets.find(asset => asset.id === assetID && asset.kind === 'capture')
@@ -277,6 +279,16 @@ export function arrangementCommand(editor, line) {
       return { editor: { ...editor, step } }
     }
     case 'place': count(2, 3); return { editor: place(editor, args[0], beats(args[1]), { pattern: pattern(args[2]) }) }
+    case 'practice-region': {
+      count(5, 6)
+      if (!editor.project.assets.some(asset => asset.id === args[0] && asset.kind === 'practice')) throw new Error('Choose a raw practice source for fractional host cuts')
+      return { editor: place(editor, args[0], beats(args[1]), { offset: args[2], extent: args[3], sourceDivisor: args[4], repeat: args[5] === undefined ? 1 : Number(args[5]) }) }
+    }
+    case 'trim-fraction': {
+      count(3)
+      if (editor.project.assets.find(asset => asset.id === selectedRegion(editor)?.asset)?.kind !== 'practice') throw new Error('Choose a practice region for fractional host cuts')
+      value = { kind: 'region-change', id: regionID(editor), offset: args[0], extent: args[1], sourceDivisor: args[2] }; break
+    }
     case 'capture-region': count(4, 5); return { editor: place(editor, args[0], beats(args[1]), {
       ...timeRange(args[0], args[2], args[3]), repeat: args[4] === undefined ? 1 : Number(args[4]) }) }
     case 'region': count(4, 6); return { editor: place(editor, args[0], beats(args[1]), {

@@ -272,6 +272,10 @@ type resume_delivery =
   { prompt : string
   ; context_projection : Keeper_context_submission_link.t
   ; held_context : Keeper_official_client_session_store.held_context list
+  ; unchanged_sections : Keeper_context_layers.source list
+    (** World State sections the prompt left out because the session holds
+        them unchanged, in render order; the prompt names exactly these
+        ({!unchanged_sections_notice}). *)
   }
 
 val start_held_context :
@@ -281,7 +285,8 @@ val start_held_context :
 (** What a start leaves the new vendor session holding: every context
     {!is_carried_on_resume} selects, named and digested as {!resume_prompt}
     names it, except blocks {!Prompt_block_id.resent_when_held} sends every
-    time. *)
+    time and World State sections
+    {!Keeper_context_layers.resend_on_resume} sends every time. *)
 
 type carried_summary =
   { label : string
@@ -325,10 +330,33 @@ val resume_prompt :
     one carrier. Everything else in [messages] is left out: the vendor
     session holds it. With nothing to send the prompt is [goal] exactly.
 
+    The [Dynamic_context] block is compared one World State section at a time
+    when [composed_context] kept the renderer's partition of its exact text
+    ({!Keeper_context_assembly.dynamic_context_sections}); otherwise it is one
+    carried context like any block. It is left out only when the session holds
+    every section it can leave out and it has none that is sent on every
+    resume ({!Keeper_context_layers.resend_on_resume}). Otherwise it goes out
+    with the sections that changed, the ones sent on every resume and its
+    frame; each section the session holds unchanged is left out, and one
+    System message after the carrier names those ({!unchanged_sections_notice},
+    [unchanged_sections]). A line that does not render sends every section.
+
     [held_context] is [held] updated with every carried context this turn
-    composed, whether sent or already held. Antigravity passes [[]] and so
+    composed, whether sent or already held. Composed World State sections
+    replace every section the session held before, and they and the whole
+    [Dynamic_context] block or the whole carrier replace each other, so the
+    set names only the latest copy of each. A claim that does not resume an
+    acknowledged settlement reads [[]]
+    ({!Keeper_official_client_session_store.held_context_for_resume}), and a
+    lane that saw the client compact settles holding nothing, so after either
+    every section goes out again. Antigravity passes [[]] and so
     sends every carried context; it refuses a task reference before it
     composes, so on that lane the selection is the composed context alone. *)
+
+val unchanged_sections_notice :
+  Keeper_context_layers.source list -> (string, string) result
+(** The line {!resume_prompt} sends in place of the named World State sections
+    ([keeper.world.frame.unchanged_sections]). *)
 
 val measure_message_bytes : Agent_core.Types.message -> int
 (** Bytes one message occupies in the canonical MASC encoding

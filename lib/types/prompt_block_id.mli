@@ -95,4 +95,9 @@ val resent_when_held : t -> bool
     adds nothing the session does not already hold. [Operator_note] answers
     [true]: a note is someone speaking, and an operator repeating the same
     words is a new utterance, not a copy of the earlier one. A new constructor
-    must declare its class here. *)
+    must declare its class here.
+
+    [Dynamic_context] answers for the block as one text. When the renderer's
+    partition of the block is known, a resume compares its World State
+    sections one at a time instead, each with its own class
+    ([Keeper_context_layers.resend_on_resume]). *)

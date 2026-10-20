@@ -32,6 +32,7 @@ type resume_delivery = Keeper_official_client_context_projection.resume_delivery
   { prompt : string
   ; context_projection : Keeper_context_submission_link.t
   ; held_context : Keeper_official_client_session_store.held_context list
+  ; unchanged_sections : Keeper_context_layers.source list
   }
 
 type carried_summary = Keeper_official_client_context_projection.carried_summary =

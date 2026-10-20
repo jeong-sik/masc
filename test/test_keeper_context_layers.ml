@@ -117,6 +117,40 @@ let test_issued_partition_preserves_occurrences () =
     cursor := offset + bytes) spans;
   check int "all bytes accounted for" (String.length (L.text rendered)) !cursor
 
+(* A resumed official-client session records which World State sections it
+   holds by these names, so every source must read back as itself. The
+   unattributed list is kept by hand here, as [all_layers] is. *)
+let test_every_section_name_reads_back () =
+  let sources =
+    List.map (fun layer -> L.Layer layer) all_layers
+    @ List.map (fun reason -> L.Unattributed reason)
+        [ L.World_frame; L.Host_workspace_recall; L.Direct_turn; L.Unprojected_input ]
+  in
+  List.iter
+    (fun source ->
+      check bool (L.source_name source ^ " reads back") true
+        (L.source_of_name (L.source_name source) = Some source))
+    sources;
+  check int "names are distinct" (List.length sources)
+    (List.length (List.sort_uniq compare (List.map L.source_name sources)));
+  check bool "an unknown name is refused" true (L.source_of_name "board" = None)
+
+let test_sections_split_the_text_by_source () =
+  let rendered =
+    L.assemble ~content_of:(function
+      | L.Wiki -> Some "WIKI"
+      | L.Fleet_messages -> Some "FLEET"
+      | _ -> None)
+    |> L.prepend_unattributed World_frame "FRAME"
+  in
+  let rendered = L.append_unattributed rendered Host_workspace_recall "RECALL" in
+  check (list (pair string string)) "each span with its source, in order"
+    [ "world_frame", "FRAME"; "wiki", "WIKI"; "fleet_messages", "FLEET";
+      "host_workspace_recall", "RECALL" ]
+    (List.map (fun (source, text) -> L.source_name source, text) (L.sections rendered));
+  check string "the sections concatenate to the text" (L.text rendered)
+    (String.concat "" (List.map snd (L.sections rendered)))
+
 let () =
   run "keeper_context_layers"
     [
@@ -139,5 +173,12 @@ let () =
             test_assemble_empty_when_all_absent;
           test_case "all present follows ordered" `Quick
             test_assemble_all_present_follows_ordered;
+          test_case "sections split the text by source" `Quick
+            test_sections_split_the_text_by_source;
+        ] );
+      ( "section names",
+        [
+          test_case "every section name reads back" `Quick
+            test_every_section_name_reads_back;
         ] );
     ]

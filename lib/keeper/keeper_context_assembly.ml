@@ -17,6 +17,7 @@ type t =
   { extra_system_context : string option
   ; blocks : (Prompt_block_id.t * string) list
   ; receipt : receipt option
+  ; dynamic_context_partition : Keeper_context_layers.rendered option
   }
 
 let sha256 text = Digestif.SHA256.(digest_string text |> to_hex)
@@ -56,14 +57,36 @@ let assemble ~dynamic_context_partition ~existing_extra_system_context ~blocks =
        append (Block block) text;
        present := true)
     blocks;
-  if not !present then { extra_system_context = None; blocks; receipt = None }
+  let dynamic_context_partition =
+    match dynamic_context_partition with
+    | Some rendered
+      when List.exists
+             (fun (block, text) ->
+                Prompt_block_id.equal block Prompt_block_id.Dynamic_context
+                && String.equal text (Keeper_context_layers.text rendered))
+             blocks -> Some rendered
+    | Some _ | None -> None
+  in
+  if not !present
+  then { extra_system_context = None; blocks; receipt = None; dynamic_context_partition }
   else
     let text = Buffer.contents buffer in
     { extra_system_context = Some text
     ; blocks
     ; receipt =
         Some { bytes = String.length text; sha256 = sha256 text; spans = List.rev !spans }
+    ; dynamic_context_partition
     }
+;;
+
+let dynamic_context_sections assembly =
+  match Option.map Keeper_context_layers.sections assembly.dynamic_context_partition with
+  | None | Some [] -> None
+  | Some sections ->
+    let sources = List.map fst sections in
+    if List.length (List.sort_uniq compare sources) = List.length sources
+    then Some sections
+    else None
 ;;
 
 let blocks_for_carrier assembly text =

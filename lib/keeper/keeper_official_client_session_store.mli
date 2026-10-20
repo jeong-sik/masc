@@ -146,11 +146,14 @@ type context_delivery =
   | Held_by_vendor_session
 
 (** One piece of per-turn context a resume carries in front of its prompt,
-    named by what composed it: one typed block of the context carrier, the
-    whole carrier when its blocks are not known, the Librarian working state,
-    the independent unread observation, or the historical task reference. *)
+    named by what composed it: one typed block of the context carrier, one
+    World State section of its [Dynamic_context] block when the renderer's
+    partition of that block is known, the whole carrier when its blocks are
+    not known, the Librarian working state, the independent unread
+    observation, or the historical task reference. *)
 type carried_context =
   | Context_block of Prompt_block_id.t
+  | Context_section of Keeper_context_layers.source
   | Context_carrier
   | Librarian_working_state
   | Librarian_unread

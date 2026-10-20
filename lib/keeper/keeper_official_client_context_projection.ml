@@ -141,24 +141,68 @@ type resume_delivery =
   { prompt : string
   ; context_projection : Keeper_context_submission_link.t
   ; held_context : Session_store.held_context list
+  ; unchanged_sections : Keeper_context_layers.source list
   }
 
 let sha256_hex text = Digestif.SHA256.(digest_string text |> to_hex)
 
+(* One World State section of a [Dynamic_context] block whose renderer
+   partition the assembly kept: what rendered it, its exact text, and the name
+   and digest a session holds it under. *)
+type world_state_section =
+  { section : Keeper_context_layers.source
+  ; section_text : string
+  ; section_held : Session_store.held_context
+  }
+
+(* What a resume compares with what the session holds: the carried context as
+   one text, or the World State sections of its [Dynamic_context] block. *)
+type carried_body =
+  | Whole_text
+  | World_state_sections of world_state_section list
+
 (* One carried context a turn composes: its name and digest, whether a resume
-   sends it again when the session holds the same bytes, and the message a
-   resume renders for it. *)
+   sends it again when the session holds the same bytes, the message a
+   resume renders for it, and what a resume compares. *)
 type carried =
   { held : Session_store.held_context
   ; resent_when_held : bool
   ; message : Agent_core.Types.message
+  ; body : carried_body
   }
 
 let carried_message context message =
   { held = { Session_store.context; sha256 = sha256_hex (encode_history_message message) }
   ; resent_when_held = false
   ; message
+  ; body = Whole_text
   }
+;;
+
+let world_state_section (section, section_text) =
+  { section
+  ; section_text
+  ; section_held =
+      { Session_store.context = Session_store.Context_section section
+      ; sha256 = sha256_hex section_text
+      }
+  }
+;;
+
+(* A block is compared section by section only when it is the
+   [Dynamic_context] block and the assembly kept the renderer's partition of
+   its exact text with every section named apart. Fleet messages and recent
+   actions change on nearly every turn, so compared as one block the World
+   State went out whole on every resume, and the unchanged wiki contents,
+   memory ledger and own Board posts piled up in the session with it. *)
+let block_body assembly = function
+  | Prompt_block_id.Dynamic_context ->
+    (match Keeper_context_assembly.dynamic_context_sections assembly with
+     | Some sections -> World_state_sections (List.map world_state_section sections)
+     | None -> Whole_text)
+  | Prompt_block_id.(
+      Keeper_instructions | Temporal_summary | Memory_os_recall
+      | Librarian_working_context | Operator_note | Skill_compositions) -> Whole_text
 ;;
 
 (* The context carrier splits into its typed blocks only when it is the exact
@@ -179,6 +223,7 @@ let carried_of_message ~composed_context (message : Agent_core.Types.message) =
       match composed_context, message.content with
       | Some assembly, [ Agent_core.Types.Text text ] ->
         Keeper_context_assembly.blocks_for_carrier assembly text
+        |> Option.map (fun blocks -> assembly, blocks)
       | Some _,
         ( []
         | [ Agent_core.Types.(
@@ -188,7 +233,7 @@ let carried_of_message ~composed_context (message : Agent_core.Types.message) =
       | None, _ -> None
     in
     match blocks with
-    | Some blocks ->
+    | Some (assembly, blocks) ->
       List.map
         (fun (block, text) ->
            { held =
@@ -197,6 +242,7 @@ let carried_of_message ~composed_context (message : Agent_core.Types.message) =
                }
            ; resent_when_held = Prompt_block_id.resent_when_held block
            ; message = extra_system_context_message text
+           ; body = block_body assembly block
            })
         blocks
     | None -> [ carried_message Session_store.Context_carrier message ])
@@ -207,11 +253,23 @@ let carried_context ~composed_context messages =
   List.concat_map (carried_of_message ~composed_context) messages
 ;;
 
-let held_of_carried carried =
-  carried
-  |> List.filter (fun item -> not item.resent_when_held)
-  |> List.map (fun item -> item.held)
+(* What the session holds once it has this carried context: the context under
+   its name, or each World State section a resume may leave out. What is sent
+   on every resume is never left out, so it is not recorded. *)
+let held_of_item item =
+  match item.body with
+  | Whole_text -> if item.resent_when_held then [] else [ item.held ]
+  | World_state_sections sections ->
+    List.filter_map
+      (fun section ->
+         match Keeper_context_layers.resend_on_resume section.section with
+         | Keeper_context_layers.Sent_every_resume -> None
+         | Keeper_context_layers.(Sent_when_changed | Sent_with_other_sections) ->
+           Some section.section_held)
+      sections
 ;;
+
+let held_of_carried carried = List.concat_map held_of_item carried
 
 type carried_summary =
   { label : string
@@ -222,6 +280,8 @@ type carried_summary =
 
 let carried_label = function
   | Session_store.Context_block block -> "block:" ^ Prompt_block_id.to_string block
+  | Session_store.Context_section section ->
+    "section:" ^ Keeper_context_layers.source_name section
   | Session_store.Context_carrier -> "carrier"
   | Session_store.Librarian_working_state -> "librarian_working_state"
   | Session_store.Librarian_unread -> "librarian_unread"
@@ -249,6 +309,7 @@ let start_held_context ?composed_context messages =
 let is_block item =
   match item.held.Session_store.context with
   | Session_store.Context_block _ -> true
+  | Session_store.Context_section _
   | Session_store.Context_carrier
   | Session_store.Librarian_working_state
   | Session_store.Librarian_unread
@@ -267,39 +328,140 @@ let block_text item =
 
 let block_id item = match item.held.Session_store.context with
   | Session_store.Context_block id -> Some id
-  | Session_store.Context_carrier | Session_store.Librarian_working_state
-  | Session_store.Librarian_unread | Session_store.Historical_task_reference -> None
+  | Session_store.Context_section _ | Session_store.Context_carrier
+  | Session_store.Librarian_working_state | Session_store.Librarian_unread
+  | Session_store.Historical_task_reference -> None
+
+let unchanged_sections_notice sections =
+  Prompt_registry.render_prompt_template
+    Prompt_names.keeper_world_frame_unchanged_sections
+    [ "sections", String.concat ", " (List.map Keeper_context_layers.source_name sections) ]
+;;
+
+(* What a resume sends for one carried context: all of it, or the World State
+   sections the session does not hold unchanged with the line naming the ones
+   it does. [unchanged] is never empty. *)
+type sent =
+  | Sent_whole of carried
+  | Sent_changed_sections of
+      { item : carried
+      ; sections : world_state_section list
+      ; unchanged : world_state_section list
+      ; notice : string
+      }
+
+type carried_delivery =
+  | Already_held
+  | Sent of sent
+
+let carried_delivery ~held item =
+  let holds entry = List.mem entry held in
+  match item.body with
+  | Whole_text ->
+    if (not item.resent_when_held) && holds item.held then Already_held
+    else Sent (Sent_whole item)
+  | World_state_sections sections ->
+    let resend section = Keeper_context_layers.resend_on_resume section.section in
+    let section_held section =
+      match resend section with
+      | Keeper_context_layers.Sent_every_resume -> false
+      | Keeper_context_layers.(Sent_when_changed | Sent_with_other_sections) ->
+        holds section.section_held
+    in
+    let left_out section =
+      match resend section with
+      | Keeper_context_layers.Sent_when_changed -> section_held section
+      | Keeper_context_layers.(Sent_every_resume | Sent_with_other_sections) -> false
+    in
+    if List.for_all section_held sections
+    then Already_held
+    else (
+      match List.partition (fun section -> not (left_out section)) sections with
+      | _, [] -> Sent (Sent_whole item)
+      | sent, (_ :: _ as unchanged) ->
+        (match unchanged_sections_notice (List.map (fun section -> section.section) unchanged) with
+         | Ok notice -> Sent (Sent_changed_sections { item; sections = sent; unchanged; notice })
+         | Error detail ->
+           (* Leaving a section out is sound only beside the line that names
+              it, so without that line every section goes out. *)
+           Log.Keeper.warn
+             "World State unchanged-sections line did not render; sending every section: %s"
+             detail;
+           Sent (Sent_whole item)))
+;;
+
+let sent_item = function
+  | Sent_whole item | Sent_changed_sections { item; _ } -> item
+;;
+
+let sent_text = function
+  | Sent_whole item -> block_text item
+  | Sent_changed_sections { sections; _ } ->
+    Some (String.concat "" (List.map (fun section -> section.section_text) sections))
+;;
+
+let sent_unchanged = function
+  | Sent_whole _ -> []
+  | Sent_changed_sections { unchanged; _ } ->
+    List.map (fun section -> section.section) unchanged
+;;
+
+let sent_notice = function
+  | Sent_whole _ -> None
+  | Sent_changed_sections { notice; _ } -> Some notice
+;;
+
+(* The line goes out as its own System message after the carrier it speaks
+   for. It is host text, not issuer bytes, so it claims no context
+   provenance. *)
+let unchanged_sections_message notice =
+  system_context_message ~metadata:[] notice
+;;
 
 let rec rendered_messages = function
   | [] -> []
-  | item :: rest when is_block item ->
-    let rec take_blocks texts ids = function
-      | next :: rest when is_block next ->
-        (match block_text next, block_id next with
-         | Some text, Some id -> take_blocks (text :: texts) (id :: ids) rest
-         | _ -> List.rev texts, List.rev ids, next :: rest)
-      | rest -> List.rev texts, List.rev ids, rest in
-    (match block_text item, block_id item with
+  | sent :: rest when is_block (sent_item sent) ->
+    let rec take_blocks texts ids unchanged notices = function
+      | next :: rest when is_block (sent_item next) ->
+        (match sent_text next, block_id (sent_item next) with
+         | Some text, Some id ->
+           take_blocks (text :: texts) (id :: ids)
+             (List.rev_append (sent_unchanged next) unchanged)
+             (Option.fold ~none:notices ~some:(fun notice -> notice :: notices)
+                (sent_notice next))
+             rest
+         | _ -> (texts, ids, unchanged, notices), next :: rest)
+      | rest -> (texts, ids, unchanged, notices), rest in
+    (match sent_text sent, block_id (sent_item sent) with
      | Some text, Some id ->
-       let texts, ids, rest = take_blocks [text] [id] rest in
-       (extra_system_context_message (String.concat resume_section_separator texts),Some ids)
-       :: rendered_messages rest
-     | _ -> (item.message,None) :: rendered_messages rest)
-  | item :: rest -> (item.message,None) :: rendered_messages rest
+       let (texts, ids, unchanged, notices), rest =
+         take_blocks [text] [id] (List.rev (sent_unchanged sent))
+           (Option.to_list (sent_notice sent)) rest in
+       (extra_system_context_message (String.concat resume_section_separator (List.rev texts)),
+        Some (List.rev ids, List.rev unchanged))
+       :: List.rev_map (fun notice -> unchanged_sections_message notice, None) notices
+       @ rendered_messages rest
+     | _ -> ((sent_item sent).message,None) :: rendered_messages rest)
+  | sent :: rest -> ((sent_item sent).message,None) :: rendered_messages rest
 ;;
 
 let resume_prompt ~goal ~held ?composed_context messages =
   let carried = carried_context ~composed_context messages in
-  let already_held item =
-    (not item.resent_when_held) && List.mem item.held held
-  in
-  let selected, omitted = List.partition (fun item -> not (already_held item)) carried in
+  let deliveries = List.map (fun item -> item, carried_delivery ~held item) carried in
+  let sent = List.filter_map (fun (_, delivery) -> match delivery with
+    | Sent sent -> Some sent
+    | Already_held -> None) deliveries in
+  let omitted = List.filter_map (fun (item, delivery) -> match delivery with
+    | Already_held -> Some item
+    | Sent _ -> None) deliveries in
   let context_projection =
-    selected |> rendered_messages
-    |> List.map (fun ((message : Agent_core.Types.message),selected_blocks) ->
+    sent |> rendered_messages
+    |> List.map (fun ((message : Agent_core.Types.message),selection) ->
       Keeper_context_submission_link.concat ~separator:""
         [Keeper_context_submission_link.literal (history_role_label message.role);
-         Keeper_context_submission_link.encoded_carrier ~assembly:composed_context ~selected_blocks message])
+         Keeper_context_submission_link.encoded_carrier ~assembly:composed_context
+           ~selected_blocks:(Option.map fst selection)
+           ?omitted_sections:(Option.map snd selection) message])
     |> Keeper_context_submission_link.concat ~separator:resume_section_separator
     |> Keeper_context_submission_link.trim in
   let composed = held_of_carried carried in
@@ -307,30 +469,53 @@ let resume_prompt ~goal ~held ?composed_context messages =
      same name. A whole carrier and the typed blocks name the same text, so
      each supersedes the other: after a turn that sent the whole carrier, the
      session's latest copy of every block is inside that carrier, not in an
-     earlier block digest. *)
-  let supersedes (current : Session_store.held_context)
-      (previous : Session_store.held_context) =
-    match current.context, previous.context with
-    | Session_store.Context_carrier, Session_store.Context_block _
-    | Session_store.Context_block _, Session_store.Context_carrier ->
-      true
-    | ( (( Session_store.Context_block _
-         | Session_store.Context_carrier
-         | Session_store.Librarian_working_state
-         | Session_store.Librarian_unread
-         | Session_store.Historical_task_reference ) as current_context)
-      , (( Session_store.Context_block _
-         | Session_store.Context_carrier
-         | Session_store.Librarian_working_state
-         | Session_store.Librarian_unread
-         | Session_store.Historical_task_reference ) as previous_context) ) ->
-      current_context = previous_context
+     earlier block digest. World State sections and their whole
+     [Dynamic_context] block stand in for each other the same way. A World
+     State also replaces the previous one as a whole: after a turn that
+     composed its sections, the sections the session holds as current are
+     exactly those, so a section absent this turn goes out again when it
+     returns. *)
+  let supersedes item (previous : Session_store.held_context) =
+    match item.body, previous.context with
+    | World_state_sections _,
+      ( Session_store.Context_section _
+      | Session_store.Context_block Prompt_block_id.Dynamic_context
+      | Session_store.Context_carrier ) -> true
+    | World_state_sections _,
+      ( Session_store.Context_block
+          Prompt_block_id.(
+            Keeper_instructions | Temporal_summary | Memory_os_recall
+            | Librarian_working_context | Operator_note | Skill_compositions)
+      | Session_store.Librarian_working_state
+      | Session_store.Librarian_unread
+      | Session_store.Historical_task_reference ) -> false
+    | Whole_text, previous_context ->
+      (not item.resent_when_held)
+      && (match item.held.context, previous_context with
+          | Session_store.Context_carrier,
+            (Session_store.Context_block _ | Session_store.Context_section _)
+          | Session_store.Context_block _, Session_store.Context_carrier -> true
+          | Session_store.Context_block block, Session_store.Context_section _ ->
+            Prompt_block_id.equal block Prompt_block_id.Dynamic_context
+          | ( (( Session_store.Context_block _
+               | Session_store.Context_section _
+               | Session_store.Context_carrier
+               | Session_store.Librarian_working_state
+               | Session_store.Librarian_unread
+               | Session_store.Historical_task_reference ) as current_context)
+            , (( Session_store.Context_block _
+               | Session_store.Context_section _
+               | Session_store.Context_carrier
+               | Session_store.Librarian_working_state
+               | Session_store.Librarian_unread
+               | Session_store.Historical_task_reference ) as previous_context) ) ->
+            current_context = previous_context)
   in
   let held_context =
     composed
     @ List.filter
         (fun previous ->
-           not (List.exists (fun current -> supersedes current previous) composed))
+           not (List.exists (fun item -> supersedes item previous) carried))
         held
   in
   let context_projection =
@@ -342,7 +527,8 @@ let resume_prompt ~goal ~held ?composed_context messages =
     Keeper_context_submission_link.omit_held ~assembly:composed_context
       ~blocks:(Option.map (fun id -> [id]) (block_id item)) item.message projection)
     context_projection omitted in
-  { prompt = Keeper_context_submission_link.text context_projection; held_context; context_projection }
+  { prompt = Keeper_context_submission_link.text context_projection; held_context; context_projection
+  ; unchanged_sections = List.concat_map sent_unchanged sent }
 
 ;;
 

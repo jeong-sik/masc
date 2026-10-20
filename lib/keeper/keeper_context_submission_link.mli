@@ -8,9 +8,15 @@ val literal : string -> t
 val text : t -> string
 val encoded_carrier :
   assembly:Keeper_context_assembly.t option ->
-  selected_blocks:Prompt_block_id.t list option -> Agent_core.Types.message -> t
+  selected_blocks:Prompt_block_id.t list option ->
+  ?omitted_sections:Keeper_context_layers.source list ->
+  Agent_core.Types.message -> t
 (** Encodes the actual message with the production codec. Attribution requires
-    exact issuer bytes, or an exact ordered subset of its uniquely named blocks. *)
+    exact issuer bytes, or an exact ordered subset of its uniquely named blocks.
+    [omitted_sections] (default none) are World State sections a resume left
+    out of the selected [Dynamic_context] block; the block then attributes as
+    its renderer's other sections, in order, and the proof names the ones left
+    out. *)
 val concat : separator:string -> t list -> t
 val trim : t -> t
 val omit_held : assembly:Keeper_context_assembly.t option ->

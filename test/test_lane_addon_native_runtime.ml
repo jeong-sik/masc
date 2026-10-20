@@ -53,7 +53,7 @@ let with_fixture run =
       Eio_context.with_test_env ~sw ~clock ~net:(Eio.Stdenv.net env)
         ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
         R.For_testing.reset (); run clock root (Workspace.default_config root))))))
-let native_installation () = with_fixture (fun clock root config ->
+let native_installation_with_slot seed_slot () = with_fixture (fun clock root config ->
   let script = Filename.concat root "worker.py" in write script server;
   let manifest = Filename.concat root "native.toml" in
   write manifest (Printf.sprintf {|id = "native-runtime"
@@ -125,6 +125,9 @@ sources = []
       | `Assoc fields -> List.assoc_opt "id" fields=Some (`String "configured-native")
           && text "kind" (member "phase" item)<>"detached"
       | _ -> false) in
+  let slot = Filename.concat (Filename.concat (Lane_addon_store.root store) "native-claims")
+    (Lane_addon_store.digest "configured-native") in
+  seed_slot slot;
   configure true; reconcile ();
   wait clock (fun () -> Option.exists (fun item -> ready (text "instance_id" item)) (configured ()));
   let first = require (Option.to_result ~none:"configured installation missing" (configured ())) |> text "instance_id" in
@@ -136,14 +139,29 @@ sources = []
   check bool "configured reattach replaces the incarnation" true (first<>second);
   check bool "prior installation group is gone before slot reuse" false
     (Posix_spawn_detached.group_id_has_members first_pid);
-  let slot = Filename.concat (Filename.concat (Lane_addon_store.root store) "native-claims")
-    (Lane_addon_store.digest "configured-native") in
   let claim = Eio_unix.run_in_systhread (fun () -> Native_addon_lease.current ~directories:[slot])
     |> Result.map_error Native_addon_lease.error_to_string |> require in
   check string "same installation slot belongs to the replacement" second (Native_addon_lease.instance_id claim);
   configure false; reconcile (); wait clock (fun () -> detached second))
+let native_installation () = native_installation_with_slot (fun _ -> ()) ()
+let interrupted_namespace () = native_installation_with_slot (fun directory ->
+  match Native_addon_lease.For_testing.prepare ~directories:[directory] ~instance_id:"unpublished"
+      ~sync_ancestry:(fun parent -> raise (Unix.Unix_error (Unix.EIO,"fsync",parent))) with
+  | Error _ -> () | Ok _ -> fail "namespace interruption did not occur") ()
+let interrupted_metadata () = native_installation_with_slot (fun directory ->
+  Unix.mkdir directory 0o700;
+  List.iter (fun name ->
+    let fd=Unix.openfile (Filename.concat directory name) [Unix.O_CREAT;Unix.O_WRONLY] 0o600 in
+    Unix.close fd) ["gate";"lease";"intent.json";"owner.json"]) ()
+let interrupted_reservation () = native_installation_with_slot (fun directory ->
+  ignore (Native_addon_lease.prepare ~directories:[directory] ~instance_id:"unpublished"
+    |> Result.map_error Native_addon_lease.error_to_string |> require);
+  write (Filename.concat directory "intent.json") "") ()
 let () =
   if Array.length Sys.argv<>2 then fail "expected native admission launcher path";
   launcher := Unix.realpath Sys.argv.(1);
   run ~argv:[|Sys.argv.(0)|] "lane_addon_native_runtime" ["installation",[
-    test_case "actual installation action detach retained recovery reattach" `Quick native_installation]]
+    test_case "actual installation action detach retained recovery reattach" `Quick native_installation;
+    test_case "configuration resumes after interrupted slot namespace" `Quick interrupted_namespace;
+    test_case "configuration resumes after interrupted slot metadata" `Quick interrupted_metadata;
+    test_case "configuration retires unpublished reservation before fresh attach" `Quick interrupted_reservation]]

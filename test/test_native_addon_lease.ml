@@ -214,6 +214,53 @@ let test_namespace_sync_failure () = with_fixture (fun fixture ->
   let next = prepare [directory] "b" in
   let pid = start fixture next "recovered-after-sync-failure" in
   stop fixture next pid)
+let test_partial_preparation_recovery () =
+  List.iter (fun interrupted -> with_fixture (fun fixture ->
+    let directory = path fixture "slot" in
+    Unix.mkdir directory 0o700;
+    let metadata name =
+      let fd=Unix.openfile (Filename.concat directory name) [Unix.O_CREAT;Unix.O_WRONLY] 0o600 in
+      Unix.close fd in
+    (match interrupted with
+     | `Directory -> ()
+     | `Gate -> metadata "gate"
+     | `Metadata -> List.iter metadata ["gate";"lease";"intent.json";"owner.json"]
+     | `Reservation ->
+         ignore (prepare [directory] "interrupted" : Lease.t);
+         write (Filename.concat directory "intent.json") "");
+    let inode name = try Some (Unix.stat (Filename.concat directory name)).Unix.st_ino
+      with Unix.Unix_error (Unix.ENOENT,_,_) -> None in
+    let gate=inode "gate" and lease=inode "lease" in
+    (match ok (Lease.recover_preparation ~directory) with
+     | Lease.Unpublished -> check "only an unreserved bootstrap is unpublished" true (interrupted<>`Reservation)
+     | Lease.Current previous ->
+         check "interrupted reservation remains permanently fenced" true (interrupted=`Reservation);
+         settled previous;
+         denied_launcher fixture previous "interrupted-replay";
+         rejected (Lease.prepare ~directories:[directory] ~instance_id:"interrupted"));
+    List.iter (fun (name,before) -> match before with
+      | None -> () | Some expected -> check "stable synchronization inode preserved" true (inode name=Some expected))
+      ["gate",gate;"lease",lease];
+    let next=prepare [directory] "replacement" in
+    let pid=start fixture next "replacement-started" in
+    stop fixture next pid)) [`Directory;`Gate;`Metadata;`Reservation]
+let test_preparation_recovery_refuses_uncertain_authority () = with_fixture (fun fixture ->
+  let directory=path fixture "slot" in
+  let claim=prepare [directory] "consumed" in
+  let pid=start fixture claim "consumed-started" in
+  let intent=Filename.concat directory "intent.json" in
+  let original=In_channel.with_open_bin intent In_channel.input_all in
+  write intent "";
+  rejected (Lease.recover_preparation ~directory);
+  check "failed recovery preserves running payload" true (Posix_spawn_detached.group_id_has_members pid);
+  check "missing consumed intent remains unmodified" true
+    (In_channel.with_open_bin intent In_channel.input_all="");
+  write intent original;
+  stop fixture claim pid;
+  write intent "{";
+  rejected (Lease.recover_preparation ~directory);
+  check "damaged published authority is not repaired" true
+    (In_channel.with_open_bin intent In_channel.input_all="{"))
 let () =
   if Array.length Sys.argv <> 2 then failwith "expected actual native Addon launcher path";
   launcher := Unix.realpath Sys.argv.(1);
@@ -230,4 +277,6 @@ let () =
        "private inode enforcement",test_private_inodes;
        "reopen exact ownership after lost handles",test_reopen_after_handle_loss;
        "reopen never recreates missing authority",test_reopen_never_creates;
-       "namespace sync failure refuses admission",test_namespace_sync_failure]]
+       "namespace sync failure refuses admission",test_namespace_sync_failure;
+       "interrupted preparation recovers without readmission",test_partial_preparation_recovery;
+       "preparation recovery refuses consumed and damaged authority",test_preparation_recovery_refuses_uncertain_authority]]

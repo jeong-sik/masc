@@ -85,10 +85,20 @@ let record_attempt progress attempt =
   Atomic.set progress { current with attempts_rev = attempt :: current.attempts_rev }
 ;;
 
-let rec replace_or_prepend ~same value = function
-  | [] -> [ value ]
-  | head :: tail when same head value -> value :: tail
-  | head :: tail -> head :: replace_or_prepend ~same value tail
+(* The lists are kept newest first and reversed once in [progress_snapshot], so a
+   value seen for the first time goes at the head like [record_admission] and
+   [record_advance] do. Appending it at the end made [attempts] and
+   [measurements] come out newest first beside [admissions] and [advances]
+   oldest first (#38530). *)
+let replace_or_prepend ~same value list =
+  let rec replace = function
+    | [] -> None
+    | head :: tail when same head value -> Some (value :: tail)
+    | head :: tail -> Option.map (fun tail -> head :: tail) (replace tail)
+  in
+  match replace list with
+  | Some replaced -> replaced
+  | None -> value :: list
 ;;
 
 let publish_attempt progress ~same attempt =

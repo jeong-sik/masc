@@ -4615,6 +4615,16 @@ let test_postdispatch_outcomes_advance_once_to_successor () =
         1
         (EO.receipt_dispatch_count cause.receipt);
       check int (label ^ " both candidates own an attempt") 2 (List.length evidence.attempts);
+      (* Attempts and admissions are both listed in the order the walk met
+         them; the attempts used to come out newest first (#38530). *)
+      check
+        (list string)
+        (label ^ " attempts are listed in walk order")
+        [ label ^ "-a"; label ^ "-b" ]
+        (List.map
+           (fun (attempt : EO.flow_attempt_snapshot) ->
+              attempt.visit.identity.candidate_id)
+           evidence.attempts);
       check
         bool
         (label ^ " ends as an advanceable exhaustion")

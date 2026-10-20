@@ -402,8 +402,10 @@ let operator_quiz_worker_speaks_the_host_contract () = with_directory (fun _root
   ignore (unwrap (Lane_addon_packet.decode (structured 2)));
   check string "compose is confirmed" "confirmed" Yojson.Safe.Util.(structured 3 |> member "status" |> to_string);
   (match unwrap (Lane_addon_host_request.listing_of_json (structured 4)) with
-   | [Lane_addon_host_request.Read_records {source_id = "board"; start = Lane_addon_records.From_beginning; _}] -> ()
-   | _ -> fail "the first request of a session reads the granted Board from the start"))
+   (* No session has asked yet, so the first read starts at the time the
+      quiz began, not at the start of the Board (#44537). *)
+   | [Lane_addon_host_request.Read_records {source_id = "board"; start = Lane_addon_records.Since _; _}] -> ()
+   | _ -> fail "the first request of a session reads the granted Board since the quiz began"))
 
 let model_access_is_explicit_and_revisioned () = with_directory (fun _root packages directory ->
   let manifest = install_package packages in

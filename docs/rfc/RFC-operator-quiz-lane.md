@@ -534,7 +534,7 @@ If the log cannot be read, every write action fails before effect. An unreadable
 The request body file exists so a restarted worker can list the same request with the same digest (§4.4 Recovery after a crash). `Session_failed` and `Grade_failed` exist because a delivered final result must be consumed by a durable event. Without one, a restarted package would list the same request again and could not tell that it had already decided.
 
 **Compose, step by step.**
-1. List `read_records` from each grant's cursor until each reports `complete`. The cursor is the last one recorded by a session that reached `asked`; material read by a failed or superseded session is read again. List `read_file` for the files the new commits changed under the grant paths.
+1. List `read_records` from each grant's cursor until each reports `complete`. The cursor is the last one recorded by a session that reached `asked`; material read by a failed or superseded session is read again. With no such cursor the read starts `since` the first session the log holds, the time the operator turned the quiz on, not from the start of the history: the author only ever sees the newest material that fits one request, and reading a workspace's whole Board and history first ran the worker out of memory on its first live session (#44537). List `read_file` for the files the new commits changed under the grant paths.
 2. List `exact_output author` with:
    - the material, each record with its retained SHA-256;
    - every review item's attempt history (§7);

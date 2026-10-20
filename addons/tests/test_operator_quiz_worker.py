@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 
 from test_operator_quiz_flow import FakeHost, first_quote, answering, post
@@ -100,7 +101,11 @@ class WorkerCase(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.state = Path(self.temporary.name)
         self.host = FakeHost()
-        self.host.board = [post(1, "the ledger records facts"), post(2, "keepers choose their next step")]
+        # The worker opens a session at the wall-clock time and its first
+        # session reads only what was made since then, so these posts are
+        # made after it (#44537).
+        later = int(time.time()) + 3600
+        self.host.board = [post(later + 1, "the ledger records facts"), post(later + 2, "keepers choose their next step")]
         self.workers: list[Worker] = []
 
     def tearDown(self):

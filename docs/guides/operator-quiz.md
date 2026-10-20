@@ -117,7 +117,7 @@ Results 에 다섯 lane 이 나온다.
 | `kind` | 뜻 |
 |---|---|
 | `not_allowed` | host 가 규칙으로 요청을 거절했다(권한이 없는 기록, 선언하지 않은 출력, `[world.asks]` 없음). 질문을 낸 세션도 그 질문이 거절되면 여기서 끝난다. |
-| `no_material` | 모든 권한을 읽었지만 새 기록이 없었고, 전에 낸 문제도 없었다. |
+| `no_material` | 모든 권한을 읽었지만 새 기록이 없었고, 전에 낸 문제도 없었다. 아직 문제를 낸 세션이 없으면 퀴즈를 켠 뒤(첫 세션이 열린 뒤) 생긴 기록만 읽으므로, 켜자마자 보낸 `compose` 는 이렇게 끝나기 쉽다. |
 | `author_invalid_output` | `author` 답이 schema 에 맞지 않았다. |
 | `author_input_refused` | provider 가 입력이 크다고 거절했고, 줄일 것이 더 없었다. |
 | `author_outcome_unknown` | 호출이 갔는지 알 수 없다. |

@@ -1,5 +1,5 @@
 id = "operator-quiz"
-revision = "0.1.0"
+revision = "0.1.1"
 title = "Operator quiz"
 contributions = ["derive", "act"]
 image = "masc-lane-operator-quiz:0.1.0"

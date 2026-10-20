@@ -1812,6 +1812,12 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
      time (#37897). Every caller looks first, so a declaration and a direct
      Attach both stop before an instance exists. *)
   let* () = (backend ~store:m.store ()).image_ready ~package in
+  (* Record grants are checked before an instance exists (RFC operator-quiz
+     §4.5): only an operator-owned declaration may hold them. *)
+  let operator_owned = match configuration, source_access with
+    | Some _, Lane_addon_sources.Operator_configuration -> true
+    | Some _, (Lane_addon_sources.Keeper _ | Lane_addon_sources.Unauthenticated) | None, _ -> false in
+  let* (_ : Lane_addon_records.grant list) = Lane_addon_records.grants ~operator_owned binding in
   let* () = match configuration, package.state_storage with
     | None, _ | Some _, Ephemeral -> Ok ()
     | Some owner, Persistent ->

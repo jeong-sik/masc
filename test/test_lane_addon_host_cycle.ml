@@ -107,7 +107,7 @@ let cycles config = match member "cycles" (host_requests config) with `Int n -> 
 let await clock predicate =
   let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.001; loop ()) in loop ()
 
-let with_installation ?(listing = []) ?(mode = Answer (`Assoc [ "question", `String "Q?" ])) ?(consume = true) f =
+let with_installation ?(declaration = declaration) ?(listing = []) ?(mode = Answer (`Assoc [ "question", `String "Q?" ])) ?(consume = true) f =
   let root = Filename.temp_dir "lane-host-cycle-" "" |> Unix.realpath in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
     let config_root = Filename.concat root ".masc/config" in
@@ -130,7 +130,7 @@ let with_installation ?(listing = []) ?(mode = Answer (`Assoc [ "question", `Str
                 let config = Workspace.default_config root in
                 Runtime.For_testing.with_backend (backend worker) (fun () ->
                   ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
-                  f clock config worker state;
+                  f clock config worker state root;
                   Sys.remove (Filename.concat directory "quiz.toml");
                   ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
                   await clock (fun () -> host_requests config = `Null)))))))))
@@ -138,7 +138,7 @@ let with_installation ?(listing = []) ?(mode = Answer (`Assoc [ "question", `Str
 let delivered_status arguments = text "status" (member "result" arguments)
 
 let test_a_started_worker_gets_its_final_result_once () =
-  with_installation ~listing:[ exact "r1" ] (fun clock config worker state ->
+  with_installation ~listing:[ exact "r1" ] (fun clock config worker state  _root->
     await clock (fun () -> cycles config >= 1);
     (match !(worker.delivered) with
      | [ arguments ] ->
@@ -150,7 +150,7 @@ let test_a_started_worker_gets_its_final_result_once () =
     await clock (fun () -> !(worker.observations) >= 1))
 
 let test_a_request_that_is_not_final_waits_for_the_next_event () =
-  with_installation ~listing:[ exact "r2" ] ~mode:Off (fun clock config worker state ->
+  with_installation ~listing:[ exact "r2" ] ~mode:Off (fun clock config worker state  _root->
     await clock (fun () -> cycles config >= 1);
     check int "nothing was delivered" 0 (List.length !(worker.delivered));
     (match member "waiting" (host_requests config) with
@@ -168,7 +168,7 @@ let test_a_request_that_is_not_final_waits_for_the_next_event () =
     check int "the lane change asked again" 2 !(state.resolutions))
 
 let test_a_request_listed_again_after_delivery_ends_the_cycle () =
-  with_installation ~listing:[ exact "r3" ] ~consume:false (fun clock config worker _ ->
+  with_installation ~listing:[ exact "r3" ] ~consume:false (fun clock config worker _  _root->
     await clock (fun () -> cycles config >= 1);
     check int "delivered once" 1 (List.length !(worker.delivered));
     match member "issue" (host_requests config) with
@@ -179,7 +179,7 @@ let test_a_request_listed_again_after_delivery_ends_the_cycle () =
 
 let test_a_result_larger_than_the_frame_is_delivered_as_its_size () =
   let long = `Assoc [ "question", `String (String.make 5000 'q') ] in
-  with_installation ~listing:[ exact "r4" ] ~mode:(Answer long) (fun clock config worker _ ->
+  with_installation ~listing:[ exact "r4" ] ~mode:(Answer long) (fun clock config worker _  _root->
     await clock (fun () -> cycles config >= 1);
     match !(worker.delivered) with
     | [ arguments ] ->
@@ -190,13 +190,38 @@ let test_a_result_larger_than_the_frame_is_delivered_as_its_size () =
 
 let test_a_listing_with_an_unknown_kind_is_refused_whole () =
   let ask = `Assoc [ "kind", `String "ask"; "request_id", `String "q1" ] in
-  with_installation ~listing:[ exact "r5"; ask ] (fun clock config worker state ->
+  with_installation ~listing:[ exact "r5"; ask ] (fun clock config worker state  _root->
     await clock (fun () -> cycles config >= 1);
     check int "nothing was run" 0 !(state.resolutions);
     check int "nothing was delivered" 0 (List.length !(worker.delivered));
     match member "issue" (host_requests config) with
     | `Assoc _ as issue -> check string "the instance shows it" "listing_refused" (text "kind" issue)
     | _ -> fail "an unknown request kind must refuse the listing")
+
+let granted = declaration ^ {|[[binding.records]]
+source_id="board"
+kind="board"
+visibilities=["public"]
+|}
+
+let test_an_operator_declaration_attaches_with_its_grants () =
+  with_installation ~declaration:granted (fun clock config _ _ _root ->
+    await clock (fun () -> cycles config >= 1);
+    check bool "the declared installation runs" true (host_requests config <> `Null))
+
+let test_a_manual_attach_with_grants_is_refused () =
+  with_installation (fun clock config _ _ root ->
+    await clock (fun () -> cycles config >= 1);
+    let binding = `Assoc [ "sources", `List []
+                         ; "records", `List [ `Assoc [ "source_id", `String "board"; "kind", `String "board"
+                                                     ; "visibilities", `List [ `String "public" ] ] ] ] in
+    match
+      Runtime.dispatch ~access:Lane_addon_sources.Operator_configuration ~config ~operation:Runtime.Attach
+        (`Assoc [ "manifest_path", `String (Filename.concat root ".masc/package.toml")
+                ; "run_id", `String "manual"; "binding", binding ])
+    with
+    | Error _ -> ()
+    | Ok _ -> fail "a manual Attach must not hold record grants")
 
 let () =
   Mirage_crypto_rng_unix.use_default ();
@@ -210,4 +235,8 @@ let () =
         ; test_case "a result larger than the frame is delivered as its size" `Quick
             test_a_result_larger_than_the_frame_is_delivered_as_its_size
         ; test_case "a listing with an unknown kind is refused whole" `Quick
-            test_a_listing_with_an_unknown_kind_is_refused_whole ] ) ]
+            test_a_listing_with_an_unknown_kind_is_refused_whole ] )
+    ; ( "grants"
+      , [ test_case "an operator declaration attaches with its grants" `Quick
+            test_an_operator_declaration_attaches_with_its_grants
+        ; test_case "a manual attach with grants is refused" `Quick test_a_manual_attach_with_grants_is_refused ] ) ]

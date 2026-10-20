@@ -33,6 +33,7 @@ import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 import { formatDateTimeKo, formatDurationCompound } from '../../lib/format-time'
 import { toolDisplayLabel } from '../../lib/tool-display-label'
 import { approvalOriginSummary, approvalContinuationLabel } from '../../lib/keeper-approval-origin'
+import { approvalInputText } from '../../lib/keeper-approval-input-text'
 import {
   approvalInputDisclosure,
   decisionWaitsForFullInput,
@@ -387,7 +388,7 @@ function approvalDetailRows(item: KeeperApprovalQueueItem): Array<{ label: strin
       ? { label: '입력 참조', value: item.origin.source.sources.map(source => `${source.snapshot_ref}@${source.admitted_revision}`).join(', ') }
       : null,
     { label: '요청시각', value: compactText(item.requested_at) },
-    { label: '입력', value: compactText(item.input_preview) || '입력 미리보기 없음' },
+    { label: '입력', value: compactText(approvalInputText(item.input_preview ?? '')) || '입력 미리보기 없음' },
     { label: 'Auto Judge', value: disposition },
     { label: 'Exact attempt', value: exact },
   ].filter((row): row is { label: string; value: string } => Boolean(row?.value))
@@ -654,6 +655,7 @@ function ApprovalCard({
   const busy = actingId === item.id
   const anyBusy = Boolean(actingId)
   const title = approvalTitle(item)
+  const inputPreview = approvalInputText(item.input_preview ?? '').trim()
   const rearmExpectation = summaryRearmExpectation(item)
   const phase = approvalPhase(item)
   // Opening the full input is bound to this exact request: a new input hash is
@@ -718,7 +720,7 @@ function ApprovalCard({
             </div>
             <div class="ap-req-meta ap-origin-summary mono" data-testid="approval-origin-summary">${approvalOriginSummary(item.origin)}</div>
             <div class="ap-req-quote">
-              ${item.input_preview?.trim() ? `“${item.input_preview.trim()}”` : '입력 미리보기 없음'}
+              ${inputPreview ? `“${inputPreview}”` : '입력 미리보기 없음'}
             </div>
             <${ApprovalInputFull}
               disclosure=${disclosure}

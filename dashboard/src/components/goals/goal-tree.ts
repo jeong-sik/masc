@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import { SECONDS_PER_HOUR } from '../../lib/format-time'
 import { fetchDashboardGoalDetail, fetchDashboardGoalsTree } from '../../api/dashboard'
 import { currentDashboardActor } from '../../api/core'
+import { approvalInputText } from '../../lib/keeper-approval-input-text'
 import { callMcpTool } from '../../api/mcp'
 import { route } from '../../router'
 import {
@@ -1113,7 +1114,7 @@ function GoalDetailPanel({
                             <strong class="text-text-strong">${String(approval.tool_name ?? '(unknown tool)')}</strong>
                             <span class="text-text-dim">Human HITL · nonblocking</span>
                           </div>
-                          <div class="mt-2 text-text-muted">${String(approval.input_preview ?? 'pending operator decision')}</div>
+                          <div class="mt-2 text-text-muted">${approvalInputText(String(approval.input_preview ?? 'pending operator decision'))}</div>
                         </div>
                       `)}
                     </div>

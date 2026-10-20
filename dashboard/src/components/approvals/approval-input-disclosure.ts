@@ -13,6 +13,7 @@
 // showing more.
 
 import type { KeeperApprovalQueueItem } from '../../types'
+import { approvalInputText } from '../../lib/keeper-approval-input-text'
 
 export type ApprovalInputDisclosure =
   /** The preview is the whole input; nothing is hidden. */
@@ -22,26 +23,11 @@ export type ApprovalInputDisclosure =
   /** The server sent no full input, so the preview is all there is and it may be cut. */
   | { kind: 'full_input_not_sent' }
 
-// Characters that draw nothing or reorder what is drawn around them: zero-width
-// and joiner marks, bidirectional embeddings, overrides and isolates, the byte
-// order mark, the soft hyphen and the tag block. In text a person approves they
-// would let the screen and the executed input differ, so each is written out as
-// its code point.
-const INVISIBLE_OR_REORDERING =
-  /[\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]|[\u{E0000}-\u{E007F}]/gu
-
-function showInvisible(text: string): string {
-  return text.replace(INVISIBLE_OR_REORDERING, ch => {
-    const code = ch.codePointAt(0) ?? 0
-    return `\u27E6U+${code.toString(16).toUpperCase().padStart(4, '0')}\u27E7`
-  })
-}
-
 /** A string input reads as itself (a command keeps its line breaks); anything
  *  else is pretty-printed JSON. Invisible and reordering characters are shown
  *  by code point. */
 function readableText(input: unknown): string {
-  return showInvisible(typeof input === 'string' ? input : (JSON.stringify(input, null, 2) ?? ''))
+  return approvalInputText(typeof input === 'string' ? input : (JSON.stringify(input, null, 2) ?? ''))
 }
 
 export function approvalInputDisclosure(

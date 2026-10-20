@@ -1476,6 +1476,39 @@ describe('ApprovalsSurface', () => {
       expect(text).not.toContain('‮')
     })
 
+    it.each([
+      { command: 'echo \u202Eevil\u200B' },
+      'echo \u202Eevil\u200B',
+    ])('shows code points in an exact short preview: %j', async input => {
+      const { ApprovalsSurface } = await loadSurface([
+        queueItem({ id: 'appr-short-invisible', input, input_preview: JSON.stringify(input) }),
+      ])
+      render(html`<${ApprovalsSurface} />`, container)
+      await flushUi()
+
+      const text = container.querySelector('.ap-card .ap-req-quote')?.textContent ?? ''
+      expect(text).toContain('⟦U+202E⟧')
+      expect(text).toContain('⟦U+200B⟧')
+      expect(text).not.toContain('\u202E')
+      expect(text).not.toContain('\u200B')
+      expect(container.querySelector('[data-testid="approval-input-full"]')).toBeNull()
+      expect(cardButtons().approve?.disabled).toBe(false)
+    })
+
+    it('shows code points when only a preview was sent', async () => {
+      const { ApprovalsSurface } = await loadSurface([
+        queueItem({ id: 'appr-preview-invisible', input_preview: 'echo \u202Eevil\u200B' }),
+      ])
+      render(html`<${ApprovalsSurface} />`, container)
+      await flushUi()
+
+      const text = container.querySelector('.ap-card .ap-req-quote')?.textContent ?? ''
+      expect(text).toContain('⟦U+202E⟧')
+      expect(text).toContain('⟦U+200B⟧')
+      expect(text).not.toContain('\u202E')
+      expect(text).not.toContain('\u200B')
+    })
+
     it('does not hold Approve when the preview is the whole input', async () => {
       const input = { path: 'a.txt', content: 'hello' }
       const { ApprovalsSurface } = await loadSurface([

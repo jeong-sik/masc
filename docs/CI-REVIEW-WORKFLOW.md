@@ -56,6 +56,16 @@ boundary. Existing stalled-job and runner hang guards are separate resource
 safeguards. Incomplete or skipped coverage is never a successful build or test
 result.
 
+Suite selection follows the content of the change, not a path heuristic. One
+standing mapping: a PR that edits anything under `config/tools/` selects
+`test_tool_definition_toml` for its targeted verification — that suite runs
+`Tool_definition_toml.validate_embedded` over the whole shipped tree, so it
+catches a wrong key in one file before landing instead of waiting for the
+nightly lane. The
+2026-10-19 regression (#44011, a bad `[[tool.items]]` key that killed
+`main_eio`/`masc_tui` at boot while syntax checks stayed green) is the reason:
+the guard existed, but no review path ran it.
+
 Native GitHub Stacks use REST `stack` metadata and the [stack workflow](guides/NATIVE-GITHUB-STACKS.md). Merge a native stack whole, once, through its top PR; never merge it layer by layer from the bottom. The asynchronous merge endpoint on the top PR includes every open PR below it. Inspect and approve every included head; do not treat a non-main direct base as a blocker or manually retarget a native stack. A leaf source-review PASS does not certify its downstack.
 
 `pr-check.yml` offers optional explicit `workflow_dispatch` source/config syntax

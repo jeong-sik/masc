@@ -1402,7 +1402,13 @@ let run_without_lifecycle ~argument_source ~official_task_reference ~composed_co
       recovery_failure := Session_store.State_persistence_failed;
       (* The stop ends the turn before the host reports its terminal, so the
          host's count stays unobserved: live resumes after a host stop have
-         found the turn counted and found it not counted. *)
+         found the turn counted and found it not counted. What the turn
+         delivered is held either way. The host took the submission in
+         durably before it acknowledged the turn, MASC never asks it to
+         retract one, and an uncounted turn's submission stays in the
+         history the next request sends: on Muse 1.4.11 a turn that failed
+         before any answer resumed with [turnCount] 0, and the next turn's
+         request carried its user message as history. *)
       let* settled =
         Session_store.settle_holding
           ~held_context:!settled_held_context

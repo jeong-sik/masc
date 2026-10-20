@@ -2176,6 +2176,19 @@ let test_retry_previous_expects_the_count_before_the_failed_turn () =
     check bool "the earlier settlement is restored" true (retried.phase = settled.phase);
     check host_turns_testable "the retry expects the count before the failed turn"
       (Reported 1) retried.host_turns;
+    (* The retried resume is refused before the session opens; a second retry
+       expects the same count. *)
+    let claimed = claim_muse ~base_path ~keeper_name ~expected:(Some retried) ~at:7.1 in
+    let refused = require_recovery ~base_path ~keeper_name ~expected:claimed
+        ~failure:Protocol_failed ~detail:"fixture count mismatch" ~required_at:7.2
+      |> Result.get_ok in
+    let recovery_id = match refused.phase with
+      | Recovery_required required -> required.recovery_id
+      | _ -> fail "fixture recovery was not stored" in
+    let retried, _ = resolve_recovery ~base_path ~keeper_name ~expected:refused ~recovery_id
+        ~resolution:Retry_previous ~resolved_by:"operator" ~resolved_at:7.3 |> Result.get_ok in
+    check host_turns_testable "a repeated retry expects the same count" (Reported 1)
+      retried.host_turns;
     (* A host stop leaves the count unobserved; a claim that fails before it
        opens the session ran nothing, so the retry keeps both endings open. *)
     let claimed = claim_muse ~base_path ~keeper_name ~expected:(Some retried) ~at:8. in
@@ -2221,10 +2234,29 @@ let test_a_muse_binding_without_the_host_count_does_not_load () =
       | Error _ -> None in
     check (option host_turns_testable) "a settled Muse binding without the count is refused"
       None (loads "muse" (binding ~client_kind:"muse" ~phase:settled ~host_turns:None));
-    check (option host_turns_testable) "a settled Muse binding with the count loads"
+    check (option host_turns_testable) "a settled Muse binding with a reported count loads"
+      (Some (Reported 2))
+      (loads "muse" (binding ~client_kind:"muse" ~phase:settled
+        ~host_turns:(Some {|{"kind":"reported","turns":2}|})));
+    check (option host_turns_testable) "a settled Muse binding with an unobserved ending loads"
       (Some (Unobserved_after 3))
       (loads "muse" (binding ~client_kind:"muse" ~phase:settled
         ~host_turns:(Some {|{"kind":"unobserved_after","turns":3}|})));
+    let in_flight = Printf.sprintf
+        {|{"kind":"turn_inflight","owner_epoch":"%s","previous_settlement":null,"session_id":"session-1","turn_id":"turn-2"}|}
+        owner_epoch in
+    let recovery previous = Printf.sprintf
+        {|{"detail":"fixture","failure":"provider_rejected","kind":"recovery_required","observed_session_id":"session-1","observed_turn_id":null,"owner_epoch":"%s","previous_settlement":%s,"recovery_id":"33333333-3333-4333-8333-333333333333","required_at":1.0}|}
+        owner_epoch previous in
+    check (option host_turns_testable) "an in-flight Muse claim without the count is refused"
+      None (loads "muse" (binding ~client_kind:"muse" ~phase:in_flight ~host_turns:None));
+    check (option host_turns_testable)
+      "a Muse recovery that would resume an earlier settlement without the count is refused"
+      None (loads "muse" (binding ~client_kind:"muse"
+        ~phase:(recovery {|{"session_id":"session-0","turn_id":"turn-0"}|}) ~host_turns:None));
+    check (option host_turns_testable) "a Muse recovery with no earlier settlement loads"
+      (Some Not_reported)
+      (loads "muse" (binding ~client_kind:"muse" ~phase:(recovery "null") ~host_turns:None));
     check (option host_turns_testable) "a ready Muse binding names no session"
       (Some Not_reported)
       (loads "muse" (binding ~client_kind:"muse" ~phase:{|{"kind":"ready"}|} ~host_turns:None));

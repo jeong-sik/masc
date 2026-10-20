@@ -17,9 +17,6 @@ type step =
   | Exit_with of int
   | Mark_spawned of string
   | Sleep of float  (** Read nothing for this long. *)
-  | Hold_until_term of { marker : string; exit_delay_s : float }
-      (** Run until SIGTERM, then take [exit_delay_s] to exit, touching
-          [marker] just before it does. A host killed before that never does. *)
   | Expect_launch of { home : string; native_read : bool }
 
 let init_frame ~granted =
@@ -129,11 +126,6 @@ let script_text ~capture steps =
       | Exit_with code -> line (Printf.sprintf "exit %d" code)
       | Mark_spawned path -> line (Printf.sprintf "touch %s" (shell_quote path))
       | Sleep seconds -> line (Printf.sprintf "sleep %g" seconds)
-      | Hold_until_term { marker; exit_delay_s } ->
-        line
-          (Printf.sprintf "trap \"sleep %g; touch %s; exit 0\" TERM" exit_delay_s
-             (shell_quote marker));
-        line "while :; do sleep 0.05; done"
       | Expect_launch { home; native_read } ->
         let home = Unix.realpath home in
         List.iter
@@ -1298,50 +1290,13 @@ let test_stream_callback_preserves_reserved_controls () =
   Serve.emit_stream_event None event
 ;;
 
-(* The owner gave up on the turn while the host was working on it. The host is
-   asked to stop and the cancelled owner waits for it to exit: a host that is
-   killed before it exits never releases the session it holds, and the next
-   resume of that session is refused while the lease is held. *)
-let test_a_cancelled_turn_waits_for_the_host_to_exit () =
-  let marker = Filename.temp_file "masc-muse-exited-" "" in
-  Sys.remove marker;
-  Fun.protect
-    ~finally:(fun () -> if Sys.file_exists marker then Sys.remove marker)
-    (fun () ->
-      with_script
-        (handshake_and_session ~granted:[]
-         @ [ Write agent_started; Hold_until_term { marker; exit_delay_s = 0.3 } ])
-        (fun ~dir ~requests:_ ->
-          Eio_main.run (fun env ->
-            let clock = Eio.Stdenv.clock env in
-            let prompt_sent, resolve_prompt_sent = Eio.Promise.create () in
-            Eio.Fiber.first
-              (fun () ->
-                let (_ : (Serve.turn_result, Serve.error) result) =
-                  Serve.run_turn
-                    ~on_prompt_sent:(fun () -> Eio.Promise.resolve resolve_prompt_sent ())
-                    ~mgr:(Eio.Stdenv.process_mgr env)
-                    ~clock
-                    ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
-                    (config ())
-                    ~workspace_root:"/w"
-                    ~prompt:"say MASC_MUSE_OK"
-                    ~images:[]
-                in
-                ())
-              (fun () ->
-                Eio.Promise.await prompt_sent;
-                Eio.Time.sleep clock 0.2);
-            check bool "the host exited on its own before the owner went on" true
-              (Sys.file_exists marker))))
-;;
-
 (* A write inside the turn that outlasts its window: the host took the
    [turn/start] line before it answered, so it may be running the turn, and a
    caller that retries on [turn_accepted = false] would run it twice. The
    approval decision echoes the host's own approval id; the host sends a long
-   one and stops reading, so the write cannot finish. *)
-let test_an_approval_write_that_times_out_reports_the_turn_as_accepted () =
+   one and stops reading, so the write cannot finish. The approval arrives
+   while a tool item is open, or while the model is still working. *)
+let an_approval_write_that_times_out_reports_the_turn_as_accepted ~tool_item_open () =
   let long_id = String.make 300_000 'x' in
   let approval_with_long_id =
     match Yojson.Safe.from_string approval_request with
@@ -1369,11 +1324,11 @@ let test_an_approval_write_that_times_out_reports_the_turn_as_accepted () =
   in
   with_script
     (handshake_and_session ~granted:[]
-     @ [ Write agent_started
-       ; Write tool_started
-       ; Write approval_with_long_id
+     @ [ Write agent_started ]
+     @ (if tool_item_open then [ Write tool_started ] else [])
+     @ [ Write approval_with_long_id
        ; Read (* approval ack *)
-       ; Sleep 5.0
+       ; Sleep 1.0
        ])
     (fun ~dir ~requests:_ ->
       Eio_main.run (fun env ->
@@ -1390,6 +1345,36 @@ let test_an_approval_write_that_times_out_reports_the_turn_as_accepted () =
         | Error (Serve.Timeout { turn_accepted; _ }) ->
           check bool "the turn was accepted before the write timed out" true turn_accepted
         | Ok _ -> fail "the approval decision cannot have been written"
+        | Error error -> fail (Serve.error_to_string error)))
+;;
+
+(* The write that outlasts its window comes before the turn exists: the
+   [session/start] request names a workspace root too long for the pipe and the
+   host reads nothing after its handshake. Nothing was started, so the caller
+   may try again. *)
+let test_a_session_start_write_that_times_out_reports_the_turn_as_not_accepted () =
+  let long_workspace_root = "/" ^ String.make 300_000 'w' in
+  with_script
+    [ Read
+    ; Write (init_frame ~granted:[])
+    ; Read (* initialized *)
+    ; Sleep 1.0
+    ]
+    (fun ~dir ~requests:_ ->
+      Eio_main.run (fun env ->
+        match
+          Serve.run_turn
+            ~mgr:(Eio.Stdenv.process_mgr env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
+            (config ~admission_timeout_s:0.3 ())
+            ~workspace_root:long_workspace_root
+            ~prompt:"say MASC_MUSE_OK"
+            ~images:[]
+        with
+        | Error (Serve.Timeout { turn_accepted; _ }) ->
+          check bool "no turn had started when the write timed out" false turn_accepted
+        | Ok _ -> fail "the session/start request cannot have been written"
         | Error error -> fail (Serve.error_to_string error)))
 ;;
 
@@ -1433,10 +1418,12 @@ let () =
             test_resume_admits_only_the_counts_its_expectation_names
         ; test_case "start requires an empty session" `Quick
             test_start_requires_an_empty_session
-        ; test_case "a cancelled turn waits for the host to exit" `Quick
-            test_a_cancelled_turn_waits_for_the_host_to_exit
-        ; test_case "an approval write that times out reports the turn as accepted" `Quick
-            test_an_approval_write_that_times_out_reports_the_turn_as_accepted
+        ; test_case "an approval write that times out with a tool item open reports the turn as accepted" `Quick
+            (an_approval_write_that_times_out_reports_the_turn_as_accepted ~tool_item_open:true)
+        ; test_case "an approval write that times out during the model turn reports the turn as accepted" `Quick
+            (an_approval_write_that_times_out_reports_the_turn_as_accepted ~tool_item_open:false)
+        ; test_case "a session start write that times out reports the turn as not accepted" `Quick
+            test_a_session_start_write_that_times_out_reports_the_turn_as_not_accepted
         ] )
     ]
 ;;

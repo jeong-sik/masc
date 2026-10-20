@@ -388,7 +388,14 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
                stop. *)
             observe O.No_source
         in
+        (* A worker pool keeps the job closure until the job returns, so the
+           closure takes [previous] out of a cell rather than capturing it:
+           the source then drops the round before's checkpoint once it knows
+           the file changed, before decoding the new one. *)
+        let handed = ref previous in
         match Domain_pool_ref.submit_io_or_inline (fun () ->
+          let previous = !handed in
+          handed := None;
           P.prepare_source ?previous ~config ~keeper_name ~trace_id:current_trace ()) with
         | Error detail -> report O.Source_unavailable O.Source_read_failed detail
         | Ok (P.No_source no_source) -> settle_no_source no_source

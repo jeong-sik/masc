@@ -2290,6 +2290,38 @@ let test_a_round_reads_the_previous_unit_only_while_its_bytes_stand () =
      | Ok (P.No_source P.Source_unreadable) -> true
      | Ok (P.Ready _ | P.No_source (P.Drained | P.Empty_range)) | Error _ -> false)
 
+(* A changed checkpoint is read and hashed without decoding it, so a caller
+   holding the known snapshot's messages can let them go before the new
+   bytes are decoded: they are collectable between the two calls. *)
+let test_a_changed_read_leaves_the_decode_to_its_caller () =
+  with_source @@ fun _env config save _append _boundary ->
+  let session_dir = Filename.concat (Masc.Keeper_fs.session_store_path config) trace_id in
+  let load () = C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id
+    |> Result.map_error C.checkpoint_ref_load_error_to_string |> get in
+  save [message "A"];
+  let held = Weak.create 1 in
+  let known = (fun () ->
+    let snapshot = load () in
+    Weak.set held 0 (Some (C.exact_snapshot_messages snapshot));
+    C.exact_snapshot_source snapshot) () in
+  let since () = C.read_agent_core_exact_bytes_since ~session_dir ~known
+    |> Result.map_error C.checkpoint_ref_load_error_to_string |> get in
+  check bool "unchanged bytes are not decoded" true
+    (match since () with C.Unchanged_bytes -> true | C.Changed_bytes _ -> false);
+  save [message "A"; message "B"];
+  match since () with
+  | C.Unchanged_bytes -> fail "changed bytes read as unchanged"
+  | C.Changed_bytes changed ->
+    Gc.full_major ();
+    check bool "the known messages are collectable before the decode" true
+      (Option.is_none (Weak.get held 0));
+    let decoded = C.decode_changed_bytes changed
+      |> Result.map_error C.checkpoint_ref_load_error_to_string |> get in
+    check bool "the decode gives the changed messages" true
+      (C.exact_snapshot_messages decoded = [message "A"; message "B"]);
+    check bool "the decode names the bytes a load names" true
+      (C.exact_snapshot_reference decoded = C.exact_snapshot_reference (load ()))
+
 let growing_history_atoms = 48
 let growing_history_atom_bytes = 256 * 1024
 
@@ -2336,6 +2368,8 @@ let () = run "production continuity pair"
       test_a_round_reads_the_previous_unit_only_while_its_bytes_stand;
     test_case "a walk does not reread the covered prefix" `Quick
       test_a_walk_does_not_reread_the_covered_prefix;
+    test_case "a changed read leaves the decode to its caller" `Quick
+      test_a_changed_read_leaves_the_decode_to_its_caller;
     test_case "append preserves exact unread records" `Quick test_append_preserves_unread_source_records;
     test_case "completed turns are work units" `Quick test_completed_turn_work_units;
     test_case "a rewrite from atom 0 follows its target" `Quick test_rewrite_from_zero_follows_its_target;

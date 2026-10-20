@@ -97,20 +97,19 @@ let prepare_source ?previous ?end_atom ~config ~keeper_name ~trace_id () =
   (* The round before, in the same lane walk, holds an exact snapshot of this
      trace. While the file still holds those bytes its decoded messages are
      the ones that round read, so neither the decode nor the covered prefix's
-     digest is repeated; changed bytes are decoded and digested in full. *)
-  let previous = match previous with
-    | Some (previous : prepared) when String.equal previous.trace_id trace_id -> Some previous
-    | Some _ | None -> None in
+     digest is repeated; changed bytes are decoded and digested in full.
+     Nothing reads [previous] after the hash, so on changed bytes the round
+     before's checkpoint can be collected before the new one is decoded. *)
+  let decoded checkpoint =
+    C.exact_snapshot_source checkpoint, C.exact_snapshot_messages checkpoint, None in
   let loaded = match previous with
-    | Some previous ->
-      C.with_agent_core_exact_snapshot_since ~session_dir ~known:previous.source (function
-        | C.Unchanged_source -> previous.source, previous.messages
-        | C.Changed_source checkpoint ->
-          C.exact_snapshot_source checkpoint, C.exact_snapshot_messages checkpoint)
-    | None ->
-      C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id
-      |> Result.map (fun checkpoint ->
-        C.exact_snapshot_source checkpoint, C.exact_snapshot_messages checkpoint) in
+    | Some (previous : prepared) when String.equal previous.trace_id trace_id ->
+      (match C.read_agent_core_exact_bytes_since ~session_dir ~known:previous.source with
+       | Ok C.Unchanged_bytes -> Ok (previous.source, previous.messages, previous.covered_prefix)
+       | Ok (C.Changed_bytes changed) -> C.decode_changed_bytes changed |> Result.map decoded
+       | Error _ as error -> error)
+    | Some _ | None ->
+      C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id |> Result.map decoded in
   match loaded with
   | Error C.Ref_not_found -> Ok (No_source Source_unreadable)
   | Error
@@ -121,7 +120,7 @@ let prepare_source ?previous ?end_atom ~config ~keeper_name ~trace_id () =
       | C.Ref_identity_invalid _ -> "continuity checkpoint identity invalid"
       | C.Ref_session_mismatch _ -> "continuity checkpoint trace mismatch"
       | C.Ref_lock_failed detail -> detail)
-  | Ok (source, messages) ->
+  | Ok (source, messages, prefix) ->
     match S.checkpoint_prefix_range ~trace_id ~lines ~messages with
     | Error (S.Uncovered_history | S.Unmatched_history) -> Ok (No_source Source_unreadable)
     | Error
@@ -129,7 +128,6 @@ let prepare_source ?previous ?end_atom ~config ~keeper_name ~trace_id () =
          | S.Invalid_snapshot _ | S.Read_failed _ | S.Write_failed _) as error) ->
       Error (S.error_to_string error)
     | Ok range ->
-      let prefix = Option.bind previous (fun (previous : prepared) -> previous.covered_prefix) in
       let fitting_previous = match previous_snapshot with
         | Some snapshot -> (match S.restore ?prefix ~trace_id ~lines ~messages snapshot with
             | Ok restored -> Some (snapshot, restored.working_state, restored.covered_prefix)

@@ -207,7 +207,9 @@ let record_restart_terminal ~base_dir ~keeper_name ~settlement =
    delivery key makes a second start on the same store a no-op. The row is
    evidence for the operator, not the keeper's utterance, so it does not
    advance the lane watermark. A row that cannot be written is logged and
-   does not stop the owner from starting. *)
+   does not stop the owner from starting. The stored source is decoded only
+   when the row is written, so a source that no longer decodes is reported
+   once, by the start that writes its row without a surface. *)
 let record_restart_interruptions pool ~keeper_name owner =
   let base_dir = pool.config.Workspace.base_path in
   List.iter
@@ -230,17 +232,8 @@ let record_restart_interruptions pool ~keeper_name owner =
                 }
             ; _
             } -> ());
-       let surface, conversation_id, broadcast_source =
-         match Keeper_chat_operation_payload.source_of_json operation.source with
-         | Ok source ->
-           Some source.surface, source.conversation_id, Surface_ref.lane_label source.surface
-         | Error detail ->
-           Log.Keeper.warn
-             ~keeper_name
-             "restart-interrupted operation %s has an undecodable source; its failure row carries no surface: %s"
-             operation_id
-             detail;
-           None, None, "restart"
+       let source =
+         lazy (Keeper_chat_operation_payload.source_of_json operation.source)
        in
        match
          Keeper_chat_delivery_identity.Request_id.of_string operation_id
@@ -252,17 +245,36 @@ let record_restart_interruptions pool ~keeper_name owner =
            operation_id
            detail
        | Ok request_id ->
+         let route =
+           lazy
+             (match Lazy.force source with
+              | Ok source ->
+                { Keeper_chat_store.Row_route.surface = Some source.surface
+                ; conversation_id = source.conversation_id
+                }
+              | Error _ -> Keeper_chat_store.Row_route.none)
+         in
          (match
             Keeper_chat_store.append_request_failure_once
               ~base_dir
               ~keeper_name
               ~delivery_key:(Keeper_chat_delivery_identity.Operation request_id)
               ~content:restart_interrupted_reply
-              ?surface
-              ?conversation_id
+              ~route
               ()
           with
           | Ok (Keeper_chat_store.Appended _) ->
+            let broadcast_source =
+              match Lazy.force source with
+              | Ok source -> Surface_ref.lane_label source.surface
+              | Error detail ->
+                Log.Keeper.warn
+                  ~keeper_name
+                  "restart-interrupted operation %s has an undecodable source; its failure row carries no surface: %s"
+                  operation_id
+                  detail;
+                "restart"
+            in
             Keeper_chat_broadcast.chat_appended
               ~keeper_name
               ~source:broadcast_source

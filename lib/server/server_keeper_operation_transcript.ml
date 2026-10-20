@@ -39,14 +39,19 @@ let persist ~base_dir ~keeper_name ~operation_id ~resumed_from ~settlement
     | _ -> Keeper_chat_store.append_tool_calls_once ~base_dir ~keeper_name
         ~delivery_key:tool_delivery_key ~tool_calls ?surface ?conversation_id ?turn_ref ()
         |> Result.map (fun _ -> ()) in
-  let terminal append content =
+  let terminal append =
     let* terminal_tools = match resumed_from with
       | None -> Ok tool_calls
       | Some _ -> let* () = tools_only () in Ok [] in
-    append ~base_dir ~keeper_name ~delivery_key ~content
-      ?surface ?conversation_id ?tool_calls:(Some terminal_tools) ?blocks ?turn_ref ?stream_lifecycle ()
-    |> Result.map (fun _ -> ()) in
+    append terminal_tools |> Result.map (fun _ -> ()) in
   match settlement with
   | Runtime_deferred -> tools_only ()
-  | Reply content -> terminal Keeper_chat_store.append_assistant_message_once content
-  | Request_failed content -> terminal Keeper_chat_store.append_request_failure_once content
+  | Reply content ->
+    terminal (fun tool_calls ->
+      Keeper_chat_store.append_assistant_message_once ~base_dir ~keeper_name ~delivery_key
+        ~content ?surface ?conversation_id ~tool_calls ?blocks ?turn_ref ?stream_lifecycle ())
+  | Request_failed content ->
+    terminal (fun tool_calls ->
+      Keeper_chat_store.append_request_failure_once ~base_dir ~keeper_name ~delivery_key
+        ~content ~route:(Lazy.from_val { Keeper_chat_store.Row_route.surface; conversation_id })
+        ~tool_calls ?blocks ?turn_ref ?stream_lifecycle ())

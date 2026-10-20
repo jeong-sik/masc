@@ -3463,6 +3463,120 @@ let test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request (
        start_and_check [journal;member_journal])
 ;;
 
+(* A restart-interrupted operation stays in the store with the source it was
+   submitted with. Once that source no longer decodes, the first start writes a
+   failure row without a surface and says so; every later start finds the row
+   present and neither decodes the source nor repeats the warning. *)
+let test_registry_start_reports_an_undecodable_restart_source_only_when_it_writes_the_row () =
+  let base_path = Filename.temp_dir "keeper-owner-restart-old-source" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.For_testing.clear ();
+      remove_tree base_path)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+       let config = Workspace.default_config base_path in
+       ignore (Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "restart-old-source-owner" in
+       (match Keeper_meta_store.replace_snapshot config (make_meta keeper_name) with
+        | Ok () -> ()
+        | Error detail -> fail ("persist keeper meta: " ^ detail));
+       let operation_id = operation_id "kmsg-restart-old-source" in
+       let source =
+         match
+           Keeper_chat_operation_payload.source_to_json
+             ~submitted_by:"masc-tui"
+             ~thread_id:("keeper:" ^ keeper_name)
+             ~continuation_channel:
+               (Keeper_continuation_channel.dashboard ~thread_id:("keeper:" ^ keeper_name)
+                |> Result.get_ok)
+             ~surface:(Surface_ref.Dashboard { session_id = None })
+             ~channel:""
+             ~channel_user_id:""
+             ~channel_user_name:""
+             ~channel_workspace_id:""
+             ~conversation_id:(Some "old-source-conversation")
+             ~external_message_id:None
+             ~workspace_id:None
+             ~extra_mentions:[]
+             ~sender_keeper:None
+             ~user_row_origin:Keeper_chat_store.Needs_append
+           |> Result.get_ok
+         with
+         | `Assoc fields -> `Assoc (List.remove_assoc "sender_keeper" fields)
+         | _ -> fail "an operation source encodes as a JSON object"
+       in
+       let decode_detail =
+         match Keeper_chat_operation_payload.source_of_json source with
+         | Error detail -> detail
+         | Ok _ -> fail "a source without sender_keeper must not decode"
+       in
+       let store_path =
+         Keeper_chat_operation_store.path_for_keeper
+           ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config)
+           ~keeper_name
+       in
+       (try Unix.mkdir (Filename.dirname store_path) 0o755 with
+        | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+       let seed =
+         Keeper_chat_operation_store.open_or_create ~path:store_path
+         |> Result.map_error Keeper_chat_operation_store.error_to_string
+         |> Result.get_ok
+       in
+       Keeper_chat_operation_store.submit seed ~now:10.0 ~operation_id ~source
+         ~input:(operation_input "running at crash")
+       |> Result.get_ok
+       |> ignore;
+       Keeper_chat_operation_store.claim_next seed ~now:11.0 |> Result.get_ok |> ignore;
+       Keeper_chat_operation_store.close seed |> Result.get_ok;
+       let decode_warning =
+         Printf.sprintf
+           "restart-interrupted operation %s has an undecodable source; its failure row carries no surface: %s"
+           (Chat_operation.Operation_id.to_string operation_id)
+           decode_detail
+       in
+       let start_and_count_warnings () =
+         let baseline = (Log.Ring.bounds ()).total - 1 in
+         Eio.Switch.run (fun sw ->
+           match
+             Owner_registry.install_from_store
+               ~sw
+               ~operation_runner:None
+               ~on_turn_slot_released:None
+               config
+           with
+           | Ok count -> check int "one owner installed" 1 count
+           | Error error -> fail (Owner_registry.install_error_to_string error));
+         Log.Ring.recent
+           ~limit:1000
+           ~module_filter:"Keeper"
+           ~since_seq:baseline
+           ~order:`Oldest_first
+           ()
+         |> List.filter (fun (entry : Log.Ring.entry) ->
+              entry.level = Log.Warn
+              && Option.equal String.equal entry.keeper_name (Some keeper_name)
+              && String.equal entry.message decode_warning)
+         |> List.length
+       in
+       let failure_rows () =
+         Keeper_chat_store.load ~base_dir:base_path ~keeper_name
+         |> List.filter (fun (row : Keeper_chat_store.chat_message) ->
+              Keeper_chat_store.Role.equal row.role Keeper_chat_store.Role.Request_failure)
+       in
+       check int "the start that writes the row reports the undecodable source" 1
+         (start_and_count_warnings ());
+       (match failure_rows () with
+        | [ row ] ->
+          check bool "the row carries no surface" true (Option.is_none row.surface);
+          check (option string) "the row carries no conversation" None row.conversation_id
+        | rows -> failf "expected one failure row, got %d" (List.length rows));
+       check int "a start that finds the row present does not report the source again" 0
+         (start_and_count_warnings ());
+       check int "the later start writes no second row" 1 (List.length (failure_rows ())))
+;;
+
 (* A shared chat batch runs once and journals to every member. The restart
    settles the whole batch, so every member's journal needs the terminal, not
    only the execution leader's. *)
@@ -5571,6 +5685,10 @@ let () =
             "registry start leaves a failure row for a restart-interrupted request"
             `Quick
             test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request
+        ; test_case
+            "registry start reports an undecodable restart source only when it writes the row"
+            `Quick
+            test_registry_start_reports_an_undecodable_restart_source_only_when_it_writes_the_row
         ; test_case
             "registry start ends every batch member journal after a restart"
             `Quick

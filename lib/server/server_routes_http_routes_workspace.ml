@@ -421,6 +421,52 @@ let load_workspace_file_content ?(max_bytes = workspace_file_read_max_bytes) fil
     | Unix.Unix_error _ as exn -> Error (File_read_failed (Printexc.to_string exn))
     | Sys_error msg -> Error (File_read_failed msg))
 
+type workspace_file_save_error =
+  | Save_invalid_path
+  | Save_invalid_revision
+  | Save_conflict
+  | Save_too_large
+  | Save_read_failed of workspace_file_read_error
+  | Save_write_failed of Fs_compat.atomic_replace_failure
+
+let workspace_file_revision ~base file content =
+  Yojson.Safe.to_string (`List [ `String (resolve_existing_prefix base);
+    `String file.resolved_path; `String content ])
+  |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex
+
+let save_workspace_file ~base ~path ~expected_revision ~content =
+  let ( let* ) = Result.bind in
+  let* _ = Tool_output.validate_sha256 expected_revision
+    |> Result.map_error (fun _ -> Save_invalid_revision) in
+  let* () = if String.length content > workspace_file_read_max_bytes
+    then Error Save_too_large else Ok () in
+  let* () = if String.contains path '\000' then Error Save_invalid_path else Ok () in
+  let resolve () = resolve_workspace_file base path
+    |> Result.map_error (fun _ -> Save_invalid_path) in
+  let* initial = resolve () in
+  let lock = Keeper_fs.acquire_path_lock initial.resolved_path in
+  Fun.protect
+    ~finally:(fun () -> Keeper_fs.release_path_lock initial.resolved_path lock)
+    (fun () -> Eio.Mutex.use_rw ~protect:true (Keeper_fs.path_lock_mutex lock) (fun () ->
+      let* file = resolve () in
+      let* () = if String.equal file.resolved_path initial.resolved_path
+        then Ok () else Error Save_conflict in
+      let* current = load_workspace_file_content file
+        |> Result.map_error (fun error -> Save_read_failed error) in
+      let* () = if String.equal expected_revision (workspace_file_revision ~base file current)
+        then Ok () else Error Save_conflict in
+      if String.equal current content then Ok expected_revision
+      else
+        let* permissions = run_blocking_file_io (fun () ->
+          try Ok ((Unix.lstat file.resolved_path).Unix.st_perm land 0o777) with
+          | Unix.Unix_error _ as exn -> Error (Save_read_failed (File_read_failed (Printexc.to_string exn)))) in
+        let* () = Fs_compat.write_file_atomic_strict_staged file.resolved_path
+          ~write:(fun channel ->
+            Unix.fchmod (Unix.descr_of_out_channel channel) permissions;
+            output_string channel content)
+          |> Result.map_error (fun error -> Save_write_failed error) in
+        Ok (workspace_file_revision ~base file content)))
+
 (* Strip [base] (and the following separator) from [safe]. Handles
    [base = "/"], trailing slash on [base], and [safe = base] (returns "").
    Assumes the workspace-file resolver has already enforced the prefix
@@ -727,6 +773,8 @@ module For_testing = struct
   let repository_owning = repository_owning
   let workspace_file_catalog = workspace_file_catalog
   let load_workspace_file_content = load_workspace_file_content
+  let workspace_file_revision = workspace_file_revision
+  let save_workspace_file = save_workspace_file
 end
 
 (* --- Blame parsing: collect per-line then group adjacent same-author ranges --- *)
@@ -1175,7 +1223,10 @@ let add_routes router =
               | Ok file ->
                 (match load_workspace_file_content file with
                  | Ok content ->
-                   let json = `Assoc [("ok", `Bool true); ("content", `String content)] in
+                   let revision = Domain_pool_ref.submit_io_or_inline (fun () ->
+                     workspace_file_revision ~base file content) in
+                   let json = `Assoc [("ok", `Bool true); ("content", `String content);
+                     ("revision", `String revision)] in
                    json_response_with_source ~status:`OK ~source request reqd json
                  | Error File_not_found | Error File_not_regular ->
                    json_response ~status:`Not_found request reqd (json_error "File not found")
@@ -1189,6 +1240,65 @@ let add_routes router =
                      ~path:file.lexical_path
                      (Failure msg);
                    json_response ~status:`Internal_server_error request reqd (json_error "Failed to read file"))))
+         request reqd)
+
+  |> Http.Router.post "/api/v1/workspace/file" (fun request reqd ->
+       with_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let refuse status code detail =
+               json_response ~status request reqd
+                 (`Assoc ["ok", `Bool false; "code", `String code; "error", `String detail]) in
+             let invalid () = refuse `Bad_request "invalid_workspace_file_save"
+                 "Provide path, expected_revision, content and expected_workspace" in
+             match Yojson.Safe.from_string body with
+             | exception Yojson.Json_error _ -> invalid ()
+             | `Assoc fields when List.length fields = 4
+                 && List.sort_uniq String.compare (List.map fst fields)
+                    = ["content"; "expected_revision"; "expected_workspace"; "path"] ->
+               (match List.assoc_opt "path" fields, List.assoc_opt "expected_revision" fields,
+                      List.assoc_opt "content" fields, List.assoc_opt "expected_workspace" fields with
+                | Some (`String path), Some (`String expected_revision), Some (`String content), Some (`Assoc _) ->
+                  let config = Mcp_server.workspace_config state in
+                  (match Workspace.validate_expected_workspace ~config (`Assoc fields) with
+                   | Error Workspace.Invalid_workspace_precondition -> invalid ()
+                   | Error Workspace.Workspace_precondition_failed ->
+                     refuse `Conflict "workspace_precondition_failed" "Workspace changed; retain the draft and refresh its identity"
+                   | Ok _ ->
+                     let uri = Uri.of_string request.target in
+                     let scope_valid = match Uri.query uri with
+                       | [] -> true
+                       | [ ("keeper" | "repo_id"), [name] ] -> String.trim name <> ""
+                       | _ -> false in
+                     if not scope_valid then invalid ()
+                     else
+                       let base, source = resolve_workspace_base ~state ~uri in
+                       match source with
+                       | `RepositoryMissing _ | `RepositoryUnknown _ | `PlaygroundMissing _ | `KeeperUnknown _ ->
+                         refuse `Not_found "workspace_unavailable" "The selected workspace is unavailable"
+                       | `Project | `Repository _ | `Playground _ ->
+                         (match save_workspace_file ~base ~path ~expected_revision ~content with
+                          | Ok revision -> json_response_with_source ~status:`OK ~source request reqd
+                            (`Assoc ["ok", `Bool true; "revision", `String revision])
+                          | Error Save_invalid_path -> refuse `Bad_request "invalid_path" "Invalid path"
+                          | Error Save_invalid_revision -> invalid ()
+                          | Error Save_conflict -> refuse `Conflict "workspace_file_changed" "File changed; retain the draft and compare the current source"
+                          | Error Save_too_large | Error (Save_read_failed (File_too_large _)) ->
+                            refuse `Payload_too_large "workspace_file_too_large" "File exceeds the configured readable size"
+                          | Error (Save_read_failed (File_not_found | File_not_regular)) ->
+                            refuse `Not_found "workspace_file_unavailable" "The existing file is unavailable"
+                          | Error (Save_read_failed File_changed_during_open) ->
+                            refuse `Conflict "workspace_file_changed" "File changed; retain the draft"
+                          | Error (Save_read_failed (File_read_failed _)) ->
+                            refuse `Service_unavailable "workspace_file_read_failed" "Could not read the current file; retain the draft"
+                          | Error (Save_write_failed error) ->
+                            observe_workspace_route_failure ~site:"file_save" ~path
+                              error.Fs_compat.exception_;
+                            (match error.stage with
+                             | Fs_compat.Before_rename -> refuse `Internal_server_error "workspace_file_save_failed" "Save failed before publication; retain the draft"
+                             | Fs_compat.After_rename -> refuse `Internal_server_error "workspace_file_save_uncertain" "File may have been saved; retain the draft and reread before another save")))
+                | _ -> invalid ())
+             | _ -> invalid ()))
          request reqd)
 
   |> Http.Router.get "/api/v1/lsp/question" (fun request reqd ->

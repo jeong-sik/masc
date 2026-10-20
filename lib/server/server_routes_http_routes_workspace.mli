@@ -100,6 +100,18 @@ type workspace_file_read_error =
     [File_changed_during_open] means the lstat/open/fstat identity check
     did not match, so the route rejects the path without reading it. *)
 
+type workspace_file_save_error =
+  | Save_invalid_path
+  | Save_invalid_revision
+  | Save_conflict
+  | Save_too_large
+  | Save_read_failed of workspace_file_read_error
+  | Save_write_failed of Fs_compat.atomic_replace_failure
+(** Existing-file optimistic writes compare the revision under a shared
+    resolved-path lock. Non-cooperating external writers must own their own
+    exclusion; this is not a filesystem transaction against arbitrary writers.
+    A staged write failure retains whether publication may already have occurred. *)
+
 type workspace_file_catalog = {
   catalog_root : string;
   catalog_paths : string list;
@@ -192,6 +204,15 @@ module For_testing : sig
     ?max_bytes:int ->
     safe_workspace_file ->
     (string, workspace_file_read_error) result
+
+  val workspace_file_revision : base:string -> safe_workspace_file -> string -> string
+  (** Bind original bytes to the canonical workspace root and resolved target. *)
+
+  val save_workspace_file :
+    base:string -> path:string -> expected_revision:string -> content:string ->
+    (string, workspace_file_save_error) result
+  (** Replace an existing permitted file, preserving ordinary permission bits.
+      Success returns the revision of the committed bytes. *)
 end
 
 module For_testing_log : sig

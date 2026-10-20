@@ -257,11 +257,20 @@ let remove_binding_with ~sync_parent t ~instance_id = protect (fun () ->
 let remove_binding = remove_binding_with ~sync_parent:sync_parent_directory
 let action_path ~instance_id ~request_id =
   Filename.concat "actions" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
-let save_action_with ~sync_parent t ~instance_id ~request_id json = protect (fun () ->
-  let path = Filename.concat t.root (action_path ~instance_id ~request_id) in
+(* One keyed JSON record, published with every directory below root synced. *)
+let save_record_with ~sync_parent t relative json = protect (fun () ->
+  let path = Filename.concat t.root relative in
   durable_directory t ~sync_parent (Filename.dirname path);
   Fs_compat.save_file_atomic_strict path (Yojson.Safe.to_string json))
+let save_action_with ~sync_parent t ~instance_id ~request_id json =
+  save_record_with ~sync_parent t (action_path ~instance_id ~request_id) json
 let save_action = save_action_with ~sync_parent:sync_parent_directory
+(* Keyed by the declaration id, not the instance id: an attach mints a new
+   instance id, and a restarted worker must find what the host retained. *)
+let exact_request_path ~declaration_id ~request_id =
+  Filename.concat "exact-requests" (Filename.concat (digest declaration_id) (digest request_id ^ ".json"))
+let save_exact_request t ~declaration_id ~request_id json =
+  save_record_with ~sync_parent:sync_parent_directory t (exact_request_path ~declaration_id ~request_id) json
 let broadcast_path ~instance_id ~request_id =
   Filename.concat "broadcasts" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
 let save_broadcast t ~instance_id ~request_id json =
@@ -440,20 +449,25 @@ let bounded_file_with ~sync_file ~sync_parent ~verification ~max_bytes path = pr
     else if stat.Unix.st_size > max_bytes then Error "retained file exceeds its read envelope"
     else read_verified_record ~sync_file ~sync_parent ~verification path fd stat))
 let bounded_file = bounded_file_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~verification:Durable
-let load_action_with ~sync_file ~sync_parent t ~instance_id ~request_id = protect (fun () ->
-  let path = Filename.concat t.root (action_path ~instance_id ~request_id) in
+let load_record_with ~what ~sync_file ~sync_parent t relative = protect (fun () ->
+  let path = Filename.concat t.root relative in
   match Fs_compat.exact_path_kind path with
   | Fs_compat.Exact_missing -> Ok None
   | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
       let stat = Unix.stat path in
-      if stat.Unix.st_kind <> Unix.S_REG then Error "action receipt is not a regular file"
+      if stat.Unix.st_kind <> Unix.S_REG then Error (what ^ " is not a regular file")
       else
         (* No new receipt-size policy: use the observed file size to reject
            growth between the path read and the exact descriptor verification. *)
         let* bytes = bounded_file_with ~sync_file ~sync_parent ~verification:Durable
           ~max_bytes:stat.Unix.st_size path in
         Ok (Some (Yojson.Safe.from_string bytes)))
+let load_action_with ~sync_file ~sync_parent t ~instance_id ~request_id =
+  load_record_with ~what:"action receipt" ~sync_file ~sync_parent t (action_path ~instance_id ~request_id)
 let load_action = load_action_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
+let load_exact_request t ~declaration_id ~request_id =
+  load_record_with ~what:"exact request record" ~sync_file:Unix.fsync ~sync_parent:Unix.fsync t
+    (exact_request_path ~declaration_id ~request_id)
 
 type observation_write_error =
   | Observation_rejected of string

@@ -1067,19 +1067,11 @@
  (modules test_voice_session_manager)
  (libraries masc_test_deps eio_main unix))
 
-; Extracted from the big (tests ...) group above: the fixtures run the typed
-; dispatch on a keeper meta whose sandbox_profile resolves to Local (the
-; profile is incidental — the suite measures stream finalization on rejected
-; dispatches), and dispatch now rejects Local fail-closed without the hatch.
 (test
  (name test_keeper_tool_execute_stream_close)
  (modules test_keeper_tool_execute_stream_close)
  (libraries masc_test_deps))
 
-; Extracted from the big (tests ...) group above: a handful of typed-dispatch
-; cases run on a keeper meta whose sandbox_profile resolves to Local (the
-; profile is incidental — the suite measures routing/finalization, not sandbox
-; isolation), and dispatch now rejects Local fail-closed without the hatch.
 (test
  (name test_keeper_sandbox_docker_route)
  (modules test_keeper_sandbox_docker_route)
@@ -1099,10 +1091,6 @@
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
   masc.skill_config masc.skill_reference masc.skill_snapshot masc.config))
 
-; Extracted from the big (tests ...) group above: the declarative keeper
-; fixture TOMLs seed sandbox_profile = "local" (incidental — the suite
-; measures supervisor boot/meta materialization, not sandbox isolation),
-; and keeper-up validation now rejects Local fail-closed without the hatch.
 (test
  (name test_keeper_supervisor)
  (modules test_keeper_supervisor)
@@ -1111,11 +1099,6 @@
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
   masc.skill_config masc.skill_reference masc.skill_snapshot masc.config))
 
-; Extracted from the big (tests ...) group above: the connector route
-; fixtures boot keepers whose sandbox_profile resolves to Local (incidental —
-; the suite measures channel-gate connector route contracts, not sandbox
-; isolation), and keeper-up validation now rejects Local fail-closed without
-; the hatch.
 (test
  (name test_channel_gate_connector_routes)
  (modules test_channel_gate_connector_routes)
@@ -1234,11 +1217,6 @@
  (modules test_operator_control_snapshot_cache)
  (libraries alcotest yojson masc_test_deps eio_main eio.mock))
 
-; Extracted from the big (tests ...) group above: the "keeper up ok" case
-; creates a keeper without a sandbox_profile, which resolves to Local and is
-; now rejected fail-closed. The profile is incidental to what this suite
-; measures (operator snapshot contents), so the stanza sets the dev/test
-; hatch rather than migrating the fixture to docker (no daemon here).
 (test
  (name test_operator_control_snapshot)
  (modules test_operator_control_snapshot)
@@ -1999,20 +1977,11 @@
   masc.tool_metrics_store)
  (deps ../bin/main_eio.exe fixtures/skill-ledger-async-actions.json))
 
-; Extracted from the Group 3 (tests ...) list above: the read-model fixtures
-; seed sandbox_profile = "local" (incidental — the suite measures namespace
-; truth, not sandbox isolation), and keeper-up validation now rejects Local
-; fail-closed without the hatch.
 (test
  (name test_dashboard_namespace_truth)
  (modules test_dashboard_namespace_truth)
  (libraries masc_test_deps))
 
-; Extracted from the Group 3 (tests ...) list above: the config-sync fixture
-; TOML seeds sandbox_profile = "local" (incidental — the suite measures
-; dashboard behavior contracts such as config POST materializing a missing
-; keeper TOML, not sandbox isolation), and keeper config update validation
-; now rejects Local fail-closed without the hatch.
 (test
  (name test_dashboard_http_core)
  (modules test_dashboard_http_core)

@@ -110,10 +110,11 @@ let execute_http ~note ~resolved ~requirement ~messages ~validate =
           in
           let flow =
             Exact.execute_flow_once ~net ~clock
-              ~before_measurement_dispatch:(fun _ -> Ok ())
+              ~before_measurement_dispatch:(fun _ -> Eio.Fiber.check (); Ok ())
               ~on_measurement_terminal:(fun _ -> Ok ())
-              ~before_dispatch:(fun _ -> Ok ())
+              ~before_dispatch:(fun _ -> Eio.Fiber.check (); Ok ())
               ~before_advance:(fun ~failed ~next:_ ->
+                Eio.Fiber.check ();
                 (match failed with
                  | Exact.Flow_candidate_execution_failed { candidate; cause } -> execution_failed candidate cause
                  | Exact.Flow_candidate_rejected rejection -> rejected rejection);
@@ -172,6 +173,7 @@ let call ~cli_runner ~base_path ~(resolved : Registry.resolved_lane) ~schema (re
   | Http_answered { output; slot; usage } -> Addon.Call_ended (Addon.Answered { output; slot; usage })
   | Http_stopped -> ended ()
   | Http_exhausted ->
+    Eio.Fiber.check ();
     match resolved.cli_slots with
     | [] -> ended ()
     | cli_slots ->

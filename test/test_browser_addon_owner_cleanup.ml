@@ -8,12 +8,21 @@ let unknown = function
   | W.Service_refusal {disposition=W.Not_started;_}
   | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false
 
-let scenario () = Eio_main.run (fun env ->
+let scenario () =
+  let root=Unix.realpath (Filename.temp_dir ~perms:0o700 "browser-owner-download-" "") in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+  let directory=Filename.concat root "downloads" in Unix.mkdir directory 0o700;
+  let source=Filename.concat directory "completed.bin" in
+  Out_channel.with_open_bin source (fun out -> output_string out "retained bytes");
+  let downloads=ok (Masc.Browser_addon_downloads.create ~directory:root) in
+  Eio_main.run (fun env ->
   Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5. (fun () -> Eio.Switch.run (fun sw ->
     let incarnation="0b000000-0000-4000-8000-000000000003" in
     let owner=ok (Owner.create ~incarnation) in
     Eio.Switch.on_release sw (fun () -> Owner.revoke owner);
+    ok (Owner.attach_downloads owner downloads);
+    ignore (ok (Eio_unix.run_in_systhread (fun () -> Owner.publish_download owner source)));
     let send ()=Owner.dispatch owner {W.incarnation;command=W.Retire} in
     let automation_started,start_automation=Eio.Promise.create ()
     and chrome_started,start_chrome=Eio.Promise.create ()
@@ -75,40 +84,17 @@ let scenario () = Eio_main.run (fun env ->
     check bool "cleanup exceptions do not leak private diagnostics" true
       (match reply with
        | W.Service_refusal {message;_} ->
-         message="automation settlement unconfirmed; Stagehand backend cleanup raised; settlement is unconfirmed"
+         message="automation settlement unconfirmed; Stagehand backend cleanup raised; settlement is unconfirmed; download cleanup requires confirmed backend teardown"
        | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
     check bool "repeated Retire retains the same failure" true (send ()=reply);
     check int "failed automation cleanup is not replayed" 1 !automation_calls;
     check int "owned live cleanup is not replayed" 1 !live_calls;
-    check int "raised Chrome cleanup is not replayed" 1 !chrome_calls))))
-
-let unconfirmed_downloads () =
-  let root=Unix.realpath (Filename.temp_dir ~perms:0o700 "browser-owner-download-" "") in
-  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
-    let directory=Filename.concat root "downloads" in Unix.mkdir directory 0o700;
-    let source=Filename.concat directory "completed.bin" in
-    Out_channel.with_open_bin source (fun out -> output_string out "retained bytes");
-    let downloads=ok (Masc.Browser_addon_downloads.create ~directory:root) in
-    Eio_main.run (fun _env ->
-      let incarnation="0b000000-0000-4000-8000-000000000005" in
-      let owner=ok (Owner.create ~incarnation) in
-      ok (Owner.attach_downloads owner downloads);
-      ignore (ok (Eio_unix.run_in_systhread (fun () -> Owner.publish_download owner source)));
-      ok (Owner.attach_automation owner ~locate:false
-        ~execute:(fun _ -> fail "retirement must not issue browser input")
-        ~session:(fun () -> B.Browser_closed)
-        ~document:(fun ~tab_id:_ -> fail "retirement must not read a page")
-        ~cleanup:(fun () -> Error "backend still owns its files"));
-      let retire ()=Owner.dispatch owner {W.incarnation;command=W.Retire} in
-      let first=retire () in
-      check bool "unconfirmed backend cannot release the owner" true (unknown first);
-      check bool "repeat retirement keeps its original failure" true (retire ()=first);
-      let result=Eio_unix.run_in_systhread (fun () -> Masc.Browser_addon_downloads.cleanup downloads) in
-      check bool "owner abandoned pins without authorizing file cleanup" true
-        (result=Error "download cleanup requires confirmed backend teardown");
-      check string "backend failure preserves original bytes" "retained bytes"
-        (In_channel.with_open_bin source In_channel.input_all)))
+    check int "raised Chrome cleanup is not replayed" 1 !chrome_calls;
+    let result=Eio_unix.run_in_systhread (fun () -> Masc.Browser_addon_downloads.cleanup downloads) in
+    check bool "owner abandoned pins without authorizing file cleanup" true
+      (result=Error "download cleanup requires confirmed backend teardown");
+    check string "backend failure preserves original bytes" "retained bytes"
+      (In_channel.with_open_bin source In_channel.input_all))))))
 
 let () = run "browser addon cleanup" ["lifecycle",[
-  test_case "all backends settle despite failure and caller cancellation" `Quick scenario;
-  test_case "unconfirmed backend abandons download pins without deleting files" `Quick unconfirmed_downloads]]
+  test_case "all backends settle despite failure and caller cancellation" `Quick scenario]]

@@ -134,10 +134,23 @@ export function selectArrangementRoute(route, effect) {
     default: throw new Error('Unknown arrangement output selection')
   }
 }
+// Explicit external bindings take precedence over a stored local instrument.
+// A partially bound asset stays external and is validated as one complete wire
+// source by the ordinary preparation path, before any VST child is started.
+export function arrangementVstAssets(project, route) {
+  const audible = new Set(arrangementPlaybackSchedule(project).map(clip => clip.asset))
+  return project.assets.filter(asset => audible.has(asset.id) && asset.kind === 'midi'
+    && asset.source.sound?.kind === 'vst' && route.kind !== 'midi' && route.midiOutput === undefined
+    && !(route.portBindings ?? []).some(binding => binding.asset === asset.id))
+}
 export function arrangementPlaybackRequest(project, route) {
   const schedule = arrangementPlaybackSchedule(project), audible = new Set(schedule.map(clip => clip.asset))
   const assets = project.assets.filter(asset => audible.has(asset.id)), kinds = new Set(assets.map(asset => asset.kind))
   if (!kinds.size) throw new Error('No audible arrangement regions')
+  if (arrangementVstAssets(project, route).length) {
+    if (!route.output) throw new Error('Choose :output AUDIO_UID or :mixed-output AUDIO_UID for the stored VST sounds')
+    return { kind: 'prepare-vst', output: route.output, route }
+  }
   if (practiceEnabled(project) && kinds.has('midi') && (route.kind !== 'mixed' || !route.output)) throw new Error('Choose :mixed-output AUDIO_UID for the practice click and MIDI backing')
   if (kinds.has('capture')) {
     const notes = schedule.some(clip => clip.component !== 'audio' && assets.some(asset => asset.id === clip.asset && asset.kind === 'capture' && BigInt(asset.manifest.midiPacketCount) > 0n))

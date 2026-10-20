@@ -8,6 +8,7 @@ import { analyzeCalibration } from './audio-calibration.mjs'
 import { inspectCalibration } from './calibration-files.mjs'
 
 import { preparePractice } from './arrangement-practice.mjs'
+import { prepareVstSources, finishVstPlan } from './arrangement-vst.mjs'
 
 const active = new Map()
 parentPort.on('message', async job => {
@@ -21,6 +22,8 @@ parentPort.on('message', async job => {
   try {
     let result
     switch (job.kind) {
+      case 'prepare-vst-sources': result = await prepareVstSources(job.project, { ...job, signal }); break
+      case 'prepare-vst-plan': result = await finishVstPlan(job.project, { ...job, signal }); break
       case 'prepare-phrase': result = phraseDocument(job.project, job.asset); break
       case 'import-phrase': result = importPhraseDocument(job.project, job.document); break
       case 'inspect-calibration': result = await inspectCalibration(job.path, { signal }); break

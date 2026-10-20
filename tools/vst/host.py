@@ -17,6 +17,8 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import struct
+from fractions import Fraction
 
 
 def nonempty(value, name):
@@ -30,18 +32,23 @@ def digest(data):
 
 
 def midi_timeline(data):
-    """Mido merges SMF tracks and applies tempo changes to delta seconds."""
+    """Merge source ticks in stable track order; keep tempo integration exact."""
     import mido
 
     midi = mido.MidiFile(file=io.BytesIO(data))
     if midi.type == 2:
         raise ValueError("asynchronous SMF type 2 has no single phrase timeline")
-    elapsed = 0.0
+    if midi.ticks_per_beat <= 0:
+        raise ValueError("render a selected synchronous PPQ performance")
+    elapsed = Fraction(0)
+    tempo = 500000
     events = []
-    for message in midi:
-        elapsed += message.time
-        if not math.isfinite(elapsed) or elapsed < 0:
+    for message in mido.merge_tracks(midi.tracks):
+        elapsed += Fraction(message.time * tempo, midi.ticks_per_beat * 1000000)
+        if elapsed < 0:
             raise ValueError("MIDI contains an invalid event time")
+        if message.type == "set_tempo":
+            tempo = message.tempo
         if message.is_meta:
             continue
         # The chosen VST preset is authoritative. GM bank/program messages
@@ -53,6 +60,41 @@ def midi_timeline(data):
     if not any(event[0][0] & 0xF0 == 0x90 and event[0][2] > 0 for event in events):
         raise ValueError("MIDI phrase contains no sounding note-on events")
     return events, elapsed
+
+
+def frame_seconds(frame, sample_rate):
+    """Encode a sample index through Pedalboard 0.9.26's Float32 product.
+
+    Both MIDI timestamps and duration use trunc(float32(time)*float32(rate)).
+    Choosing time=frame/rate can lose a sample. Verify the native conversion;
+    search the positive Float32 ordering if the midpoint is not representable.
+    """
+    def f32(value):
+        return struct.unpack("f", struct.pack("f", value))[0]
+
+    rate = f32(sample_rate)
+    if rate != sample_rate:
+        raise ValueError("sample rate is not exact in the VST host Float32 API")
+
+    def index(value):
+        return int(f32(value * rate))
+
+    value = f32((frame + .5) / sample_rate) if frame else 0.0
+    if index(value) == frame:
+        return value
+    low = 0
+    high = struct.unpack("I", struct.pack("f", (frame + 1) / sample_rate))[0] + 1
+    while low < high:
+        middle = (low + high) // 2
+        value = struct.unpack("f", struct.pack("I", middle))[0]
+        if index(value) >= frame:
+            high = middle
+        else:
+            low = middle + 1
+    value = struct.unpack("f", struct.pack("I", low))[0]
+    if index(value) != frame:
+        raise ValueError("sample position is not representable by the VST host Float32 API")
+    return value
 
 
 def candidates():
@@ -158,7 +200,8 @@ def render(request):
         preset_hash = digest(preset.read_bytes())
         plugin.load_preset(str(preset))
     state_hash = digest(plugin.raw_state)
-    frames = math.ceil((phrase_seconds + tail) * sample_rate)
+    frames = math.ceil((phrase_seconds + Fraction(tail)) * sample_rate)
+    events = [(message, math.ceil(timestamp * sample_rate)) for message, timestamp in events]
     # Float stereo WAV is streamed one second at a time. This bounds memory
     # without imposing any limit on phrase length. All MIDI timestamps are
     # relative to the block currently being rendered.
@@ -170,14 +213,15 @@ def render(request):
     try:
         with AudioFile(stage_name, "w", sample_rate, 2, bit_depth=32) as output:
             while rendered < frames:
-                count = min(sample_rate, frames - rendered)
-                start, end = rendered / sample_rate, (rendered + count) / sample_rate
+                # Float32 represents every integer only through 2**24. Keep
+                # relative event indices inside that native API boundary.
+                count = min(sample_rate, 1 << 24, frames - rendered)
                 block = []
-                while event_index < len(events) and events[event_index][1] < end:
-                    message, timestamp = events[event_index]
-                    block.append((message, max(0.0, timestamp - start)))
+                while event_index < len(events) and events[event_index][1] < rendered + count:
+                    message, sample = events[event_index]
+                    block.append((message, frame_seconds(sample - rendered, sample_rate)))
                     event_index += 1
-                audio = plugin(block, duration=count / sample_rate,
+                audio = plugin(block, duration=frame_seconds(count, sample_rate),
                                sample_rate=sample_rate, num_channels=2,
                                reset=rendered == 0)
                 if audio.shape != (2, count) or not np.isfinite(audio).all():

@@ -326,6 +326,7 @@ type reading =                  (* 후보 순서·쉬는 시각·사용량 묶�
 ```
 
 `note_exhausted`, `note_observed_exhausted`, `note_succeeded` 는 `scope` 만 받아서 홈 미확인 기록에 닿지 못한다.
+`reading_equal` 과 `reading_to_string` 은 `Window s` 에서 `scope_equal`, `scope_to_string` 을 따르고 `Home h` 는 홈 문자열로 가른다. 사용량 표의 키가 `reading` 이다.
 `is_exhausted`, `active_until`, `demote_order` 는 `reading` 을 받는다. 아래에서 `Codex_home_account_not_stated` 는 `Home (home_not_stated h)` 가 가리키는 기록의 이름이다.
 
 - `scope_of_codex_home` 은 없어진다. Codex 는 `Official_client_home` 을 더 만들지 않는다.
@@ -392,74 +393,74 @@ quota 응답만 확인됐거나 시도 중 인증 주인이 바뀔 수 있어 �
 지금은 `?quota_scope_of` 하나가 둘 다 한다 (`lib/keeper/keeper_turn_driver.ml:594`, `:617-623`, `:715`, `:791`).
 
 ```ocaml
+(* lib/runtime/runtime_codex_home_account.mli *)
+type generation_order = Older | Not_older | Unordered
+val generation_order : source option -> than:source option -> generation_order
+(** 두 값만 읽는 순수 함수다. 표를 읽지 않고 잠금을 잡지 않는다.
+    [Older] 와 [Not_older] 는 순서를 증명했을 때만 답한다. 한 쌍의 두 방향은 어긋나지 않는다
+    ([a] 가 [b] 보다 [Older] 이면 [b] 는 [a] 보다 [Not_older]).
+    [None] 은 [None] 과는 [Not_older] 이고 [Some _] 과는 [Unordered] 다. *)
+val home_of_source : source -> string
+
+(* lib/runtime/runtime_quota_window.mli *)
+type home_target
+(** 홈 미확인 기록을 쓰고 지우는 데 필요한 홈과 출처. 홈과 출처가 어긋나는 값은 만들 수 없다. *)
+val home_target_of_source : Runtime_codex_home_account.source -> home_target     (* 홈은 [home_of_source] *)
+val home_target_without_source : home:string -> home_target
+val note_observed_exhausted_in_home : home_target -> unit
+val note_succeeded_in_home : home_target -> unit
+```
+
+```ocaml
 (* 시도 하나가 끝나면 run_attempt 가 Ok 든 Error 든 함께 돌려준다 *)
 type quota_write_owner =
   | Captured of Runtime_quota_window.load_time_scope
       (* Codex 가 아닌 후보: dispatch 전에 잡은 scope. 지금과 같다 *)
   | Codex_run of
-      { source : Runtime_codex_home_account.source option
-          (* 이 시도가 포착한 자격 증명 세대의 출처. 홈은 [home_of_source] 가 답한다.
-             [None] 은 출처를 공급하는 경로가 아직 없다는 뜻이다 (아래 마지막 항목) *)
-      ; home : string
-          (* [source] 가 [Some s] 이면 [home_of_source s] 와 같다 *)
+      { home : Runtime_quota_window.home_target
+          (* run_attempt 가 한 번 만든다. 출처가 없으면 [home_target_without_source] *)
       ; read : Runtime_codex_account.read }
 
 type write_target =
   | Window_target of Runtime_quota_window.scope       (* 세대를 따지지 않고 쓰고 지운다 *)
-  | Home_target of { home : string; source : Runtime_codex_home_account.source option }
-      (* 세대를 비교해 쓰고 지운다. [_in_home] 쌍으로만 닿는다 *)
+  | Home_target of Runtime_quota_window.home_target   (* 세대를 비교해 쓰고 지운다 *)
 
 (* 첫 target: 소진을 쓰고 성공이 지운다. 두 번째 목록: 성공이 함께 지우는 target.
    [Home_target] 은 어느 자리에 있든 [_in_home] 함수로만 쓰고 지운다. *)
 let scopes_to_write = function
   | Captured s -> Window_target (Load_time s), []
-  | Codex_run { home; source; read = Stated k } ->
-    Window_target (Codex_account k), [ Home_target { home; source } ]
-  | Codex_run { home; source; read = Identity_unconfirmed | Not_stated | Not_applicable | Read_failed _ } ->
-    Home_target { home; source }, []
-```
+  | Codex_run { home; read = Stated k } -> Window_target (Codex_account k), [ Home_target home ]
+  | Codex_run { home; read = Identity_unconfirmed | Not_stated | Not_applicable | Read_failed _ } ->
+    Home_target home, []
 
-홈 미확인 기록은 쓴 시도의 출처를 함께 남긴다. 그 기록을 쓰고 지우는 길은 아래 함수들뿐이다.
-
-```ocaml
-(* lib/runtime/runtime_codex_home_account.mli *)
-type generation_order = Older | Not_older | Unordered
-val generation_order : source -> than:source -> generation_order
-(** 두 출처 값만 읽는 순수 함수다. 표를 읽지 않고 잠금을 잡지 않는다.
-    [source] 의 세대가 [than] 의 세대보다 옛 것이면 [Older], 같거나 새 것이면 [Not_older].
-    순서를 증명하지 못하면 [Unordered]. *)
-val home_of_source : source -> string
-
-(* lib/runtime/runtime_quota_window.mli *)
-val note_observed_exhausted_in_home : home:string -> source:Runtime_codex_home_account.source option -> unit
-val note_exhausted_in_home :
-  home:string -> source:Runtime_codex_home_account.source option -> resets_at:float -> unit
-val note_succeeded_in_home : home:string -> source:Runtime_codex_home_account.source option -> unit
+(* [sessionBudgetExceeded] 는 읽기와 관계없이 홈 target 에 쓴다 *)
+let home_target_of_owner = function
+  | Captured _ -> None
+  | Codex_run { home; read = _ } -> Some home
 ```
 
 - 사용량 소진(`usageLimitExceeded`)은 첫 target 에 적는다. `Window_target s` 는 `note_observed_exhausted ~scope:s`,
-  `Home_target` 은 `note_observed_exhausted_in_home` 이다.
-- `sessionBudgetExceeded` 는 계정 증거가 아니다. 읽기와 관계없이 홈 미확인 기록에 `note_observed_exhausted_in_home` 으로 적는다.
-  지금 이것을 홈 scope 에 적는 동작과 같은 결과다. 넓히지도 좁히지도 않는다 (결정 7).
-- 홈 미확인 기록의 `Observed` 는 쓴 시도의 출처들을 집합으로 갖는다. 보통 하나다.
-  - 쓰기: 집합의 어떤 출처보다 옛 것(`Older`)이면 무시한다. 아니면 이 쓰기가 `Not_older` 인 출처를 집합에서 빼고 자기 출처를 넣는다.
-    순서를 증명하지 못한(`Unordered`) 출처는 집합에 남는다. 이미 `Until` 인 기록은 지금처럼 `Observed` 가 덮지 않는다.
-  - `Until` 쓰기(`note_exhausted_in_home`)는 세대를 비교하지 않고 기존 기록을 대체한다 (지금 `note_exhausted` 와 같다).
-    성공이 `Until` 을 지우지 않으므로 세대가 필요 없고, 시각이 지나면 사라진다.
-  - 이렇게 하지 않으면 늦게 온 옛 세대의 쓰기가 표시를 낮추거나 새 증거를 버려서, 그 뒤 옛 세대의 성공이 새 세대의 기록을 지울 수 있다.
-- 성공은 두 가지를 따로 한다.
-  - 계정: `Stated k` 인 turn 의 성공은 `Codex_account k` 기록을 `note_succeeded` 로 지운다. 세대를 보지 않는다.
-    그 기록의 주인이 k 이고 성공도 k 로 귀속됐다. 같은 계정으로 다시 로그인해 세대가 바뀐 뒤에도 옛 세대의 k 성공은 이 기록을 지운다.
-    계정 기록이 세대가 아니라 계정에 묶인다는 기존 의미(결정 1)를 이 항목은 바꾸지 않는다.
-  - 홈: `note_succeeded_in_home` 은 `Observed` 기록의 출처 집합 모든 출처에 대해 성공의 출처가 `Not_older` 일 때만 지운다.
-    하나라도 `Older` 나 `Unordered` 면 기록을 둔다. `Until` 기록은 지우지 않는다.
+  `Home_target` 은 `note_observed_exhausted_in_home` 이다. 홈 미확인 기록은 `Observed` 만 갖는다.
+  Codex 는 리셋 시각을 추론하지 않으므로 (앞의 '리셋을 추론하지 않는다') 거기에 `Until` 을 쓰는 길이 없다.
+- `sessionBudgetExceeded` 는 계정 증거가 아니다. 읽기와 관계없이 `home_target_of_owner` 가 돌려준 홈 target 에
+  `note_observed_exhausted_in_home` 으로 적는다. 지금 이것을 홈 scope 에 적는 동작과 같은 결과다. 넓히지도 좁히지도 않는다 (결정 7).
+- 홈 미확인 `Observed` 기록은 쓴 시도의 출처들을 집합으로 갖는다. 출처 없는 시도(`None`)도 한 원소다. 보통 하나다.
+  - 쓰기: 집합의 어떤 원소보다 옛 것(`Older`)이면 무시한다. 아니면 이 쓰기가 `Not_older` 인 원소를 집합에서 빼고 자기 출처를 넣는다.
+    순서를 증명하지 못한(`Unordered`) 원소는 집합에 남는다.
+  - 성공: 성공의 출처가 `Not_older` 인 원소를 집합에서 빼고, 집합이 비면 기록을 지운다. `Older` 나 `Unordered` 인 원소는 남고 기록도 남는다.
     옛 세대로 통과한 turn 은 새 세대에서 난 "알 수 없는 계정이 소진" 증거가 틀렸다는 근거가 못 된다.
-    비교와 삭제는 `Runtime_quota_window` 의 한 번의 잠금 안에서 한다. 비교한 뒤 따로 지울 수 있는 함수는 내보내지 않는다.
-  - 계정을 확인하지 못한 turn 은 홈 기록만 한다. 어느 계정이 답했는지 모르므로 계정 기록은 건드리지 않는다.
-- 출처를 공급하는 경로가 생기기 전(위 구현 선행 조건의 미해결 항목)에는 모든 시도의 `source` 가 `None` 이고, 이 빌드는 `Some` 을 만들지 않는다.
-  `None` 으로 쓴 기록은 출처 집합이 비어 있다. 비교할 출처가 없으므로 어떤 성공이든 지운다. 결정 4 대로 지금과 같다.
-  공급 경로가 생기면 모든 Codex 시도가 `Some` 을 갖는다. 같은 프로세스 안에서 두 방식을 섞지 않는다.
-- 사용량 창(`account/rateLimits/updated` 알림과 turn 안 읽기의 창)은 첫 target 에 `Until` 로 적는다. `Home_target` 이면 `note_exhausted_in_home` 이다.
+  - 비교와 삭제는 `Runtime_quota_window` 의 한 번의 잠금 안에서 한다. 비교한 뒤 따로 지울 수 있는 함수는 내보내지 않는다.
+  - 이렇게 하지 않으면 늦게 온 옛 세대의 쓰기가 새 증거를 버리거나 덮어서, 그 뒤 옛 세대의 성공이 새 세대의 기록을 지울 수 있다.
+  - 집합의 크기는 서로 순서를 증명하지 못한 출처의 수만큼 늘 수 있다. 상한은 정하지 않았다. 집합은 프로세스 안에만 있고 서버를 다시 켜면 비워진다.
+    출처를 공급하는 경로(위 구현 선행 조건의 미해결 항목)를 정할 때 같이 정한다.
+  - 출처를 공급하기 전에는 모든 시도가 `None` 이다. 쓰기는 `None` 원소를, 성공은 그 원소를 빼서 지금과 같이 쓰고 지운다 (결정 4).
+    공급이 생긴 뒤에도 `Some` 으로 쓴 기록을 `None` 성공은 지우지 못하고, `None` 으로 쓴 기록을 `Some` 성공은 지우지 못한다 (서로 `Unordered`).
+- 계정 기록의 성공: `Stated k` 인 turn 의 성공은 `Codex_account k` 기록을 `note_succeeded` 로 지운다. 세대를 보지 않는다.
+  그 기록의 주인이 k 이고 성공도 k 로 귀속됐다. 같은 계정으로 다시 로그인해 세대가 바뀐 뒤에도 옛 세대의 k 성공은 이 기록을 지운다.
+  계정 기록이 세대가 아니라 계정에 묶인다는 기존 의미(결정 1)를 이 항목은 바꾸지 않는다.
+  계정을 확인하지 못한 turn 은 홈 기록만 한다. 어느 계정이 답했는지 모르므로 계정 기록은 건드리지 않는다.
+- 사용량 창(`account/rateLimits/updated` 알림과 turn 안 읽기의 창)은 사용량 표에 첫 target 의 주인(`reading`)으로 적는다.
+  소진 표에는 쓰지 않는다. 사용량 표와 `reading` 의 비교·이름은 `scope_equal` 과 같은 규칙의 `reading_equal`, `reading_to_string` 이 맡는다.
   알림이 읽기의 답보다 먼저 오면 turn 이 끝날 때 한꺼번에 적는다. 알림 창을 먼저 홈에 적고 나중에 옮기지 않는다.
 - turn 안 읽기의 결과는 출처가 확인됐을 때 그 출처의 ticket 으로 `observe` 에도 넘긴다.
   요청 시점에 옛 프로세스를 현재 자격 증명 세대로 다시 표시하지 않는다.
@@ -540,6 +541,7 @@ MASC 규칙은 "새 상태·필드·Gate 는 없을 때 durable truth 가 손상
 | walk 매개변수 `?quota_scope_of` (`lib/keeper/keeper_turn_driver.ml:594`, 기본값 `:617-623`) | 순서와 기록에 같은 함수 | 순서용 `?quota_scopes_of` 와 `run_attempt` 가 돌려주는 `quota_write_owner` 로 가른다 |
 | `Runtime_quota_window` 의 읽기 `is_exhausted`, `active_until`, `demote_order` 와 부르는 모든 곳 | `scope` | `reading` |
 | 기록을 쓰는 곳 (turn driver, Fusion, Codex turn) | `note_*` 에 scope | `write_target` 을 빠짐없이 match 해서 `Window_target` 은 `note_*`, `Home_target` 은 `_in_home` 을 부른다. `note_*` 는 `scope` 만 받아 홈 미확인 기록에 닿지 못한다 |
+| 사용량 표 (`Runtime_provider_usage_window`) | `scope` 로 가른 키 | `reading` 으로 가른 키 |
 | `demote_unavailable_candidates` (`:202-245`) 와 부르는 곳 `:247-256`, `:715`, `:1243-1250`, `:2144-2146` | 후보 하나에 scope 하나 | `reading * reading list`. 하나라도 소진이면 뒤로 |
 | path rest (`:330-337`) | scope 하나의 `active_until` | 위 "후보 순서와 쉬는 시각" 규칙 |
 | 시도 뒤 기록 (`:791`, `:802-803`, `:845-853`, `:913-915`) | dispatch 전 scope | `quota_write_owner` |
@@ -639,8 +641,9 @@ constitution 의 testing 절에 따라 기능 단위로 본다. 기존 가짜 ap
 | 옛 세대의 성공 | 세대 1 에서 X 를 확인한 turn 이 멈춘 사이 H 가 세대 2(계정 Y)로 바뀌고, 세대 2 의 turn 이 계정을 확인하지 못한 채 `usageLimitExceeded` 를 받는다. X 의 계정 기록도 소진으로 둔다. 세대 1 의 turn 이 X 로 성공하면 X 기록은 지워지고 H 미확인 기록은 남아 H 후보는 계속 뒤에 있다. 이어서 세대 2 의 성공이 오면 H 미확인 기록이 지워진다 |
 | 순서를 증명하지 못한 성공 | 가짜 출처 공급자가 세대 순서를 답하지 못하게 한다(`Unordered`). 그 출처의 성공은 H 미확인 기록을 지우지 않는다 |
 | 옛 세대의 쓰기 | 세대 2 의 turn 이 계정을 확인하지 못한 채 `usageLimitExceeded` 를 받아 H 미확인 기록이 있을 때, 세대 1 의 `usageLimitExceeded` 나 `sessionBudgetExceeded` 가 늦게 쓰인다. 출처 집합은 세대 2 만 남고, 이어서 세대 1 의 성공이 와도 기록은 남는다 |
-| 순서를 증명하지 못한 쓰기 | H 미확인 기록이 세대 1 의 출처로 있을 때 세대 순서를 답하지 못하는 출처 Q 의 `usageLimitExceeded` 가 쓰인다. 출처 집합에 둘이 남아서 세대 1 의 성공이 와도 기록은 남는다. 세대 1 과 Q 보다 `Not_older` 인 세대의 성공이 오면 지워진다 |
-| 창이 있는 기록 | H 미확인 기록이 `Until` 이면 어떤 세대의 성공도 지우지 않고, 이어지는 `Observed` 쓰기도 그 창을 덮지 않는다 |
+| 순서를 증명하지 못한 쓰기 | H 미확인 기록이 세대 1 의 출처 S 로 있을 때 세대 순서를 답하지 못하는 출처 Q 의 `usageLimitExceeded` 가 쓰인다. 집합은 {S, Q} 다. S 에서 난 성공만으로는 기록이 남고(Q 의 증거), Q 에서 난 성공만으로도 남는다. 둘이 다 오거나 S 와 Q 보다 `Not_older` 인 성공이 오면 지워진다. 순서를 바꿔 Q 먼저 와도 같다 |
+| 출처 없는 시도 | 출처를 공급하기 전에는 `None` 으로 쓴 H 미확인 기록을 `None` 으로 난 성공이 지운다 (지금과 같다). `Some` 출처로 쓴 기록은 `None` 성공이 지우지 못하고, `None` 으로 쓴 기록은 `Some` 성공이 지우지 못한다. `None` 쓰기가 `Some` 으로 쓴 기록에 와도 그 `Some` 원소의 성공만으로는 기록이 남는다 |
+| 사용량 창 | Codex 사용량 창을 읽어도 홈 미확인 소진 기록이 생기거나 지워지지 않는다. 창은 사용량 표에만 남고 그 키는 `reading` 이다 |
 | resolved JSON 과 observe 경합 | 응답을 만드는 도중 `observe` 가 끼어도 응답은 500 없이 한 스냅숏으로 일관된다 |
 | 식별자 노출 | 가짜 계정 id·email 문자열이 resolved JSON, 로그 줄, TUI 캡처 어디에도 나오지 않는다 |
 
@@ -656,9 +659,12 @@ constitution 의 testing 절에 따라 기능 단위로 본다. 기존 가짜 ap
 - 같은 세대의 성공도 지우지 못하게(`Not_older` 를 새 세대만으로 좁히면) "성공이 지우는 것" 이 실패해야 한다.
 - `Unordered` 를 지우는 쪽으로 처리하면 "순서를 증명하지 못한 성공" 이 실패해야 한다.
 - 계정 기록의 삭제에도 세대 조건을 걸면 "옛 세대의 성공" 이 실패해야 한다 (X 기록이 남는다).
-- 순서를 증명하지 못한 쓰기를 무시하면(집합에 넣지 않으면) "순서를 증명하지 못한 쓰기" 가 실패해야 한다.
-- 성공이 `Until` 기록을 지우게 하거나 `Observed` 쓰기가 `Until` 을 덮게 하면 "창이 있는 기록" 이 실패해야 한다.
-- 옛 세대의 쓰기가 세대 표시를 낮추게 하면 "옛 세대의 쓰기" 가 실패해야 한다.
+- 순서를 증명하지 못한 쓰기를 무시하면(집합에 넣지 않으면) S 에서 난 성공이 기록을 지워서 "순서를 증명하지 못한 쓰기" 가 실패해야 한다.
+- 순서를 증명하지 못한 쓰기가 집합을 덮어쓰면(집합이 {Q} 가 되면) Q 에서 난 성공이 기록을 지워서 "순서를 증명하지 못한 쓰기" 가 실패해야 한다.
+- 성공이 원소를 하나씩 빼지 않고 모든 원소에 `Not_older` 일 때만 지우게 하면 S 와 Q 의 성공이 차례로 와도 지워지지 않아서 "순서를 증명하지 못한 쓰기" 가 실패해야 한다.
+- 옛 세대의 쓰기가 집합을 덮어쓰거나 옛 출처를 넣으면 "옛 세대의 쓰기" 가 실패해야 한다.
+- `None` 을 `Some` 과 `Not_older` 로 답하게 하면 "출처 없는 시도" 가 실패해야 한다.
+- 사용량 창이 소진 표에 `Until` 을 쓰게 하면 "사용량 창" 이 실패해야 한다.
 - 같은 프로세스 또는 앞뒤 email 일치만으로 귀속을 확정하면 사용자 변경·X→Y→X 시험이 실패해야 한다.
 
 추가한 시나리오는 구현의 수용 시험 계획이다. 실제 multi-seat 계정으로 재현했거나 구현 시험을 실행했다는 주장이 아니다.
@@ -682,12 +688,13 @@ constitution 의 testing 절에 따라 기능 단위로 본다. 기존 가짜 ap
 2. **순서가 계정을 읽는다** (1 위) — `Runtime_codex_home_account`(source, ticket, snapshot), `load_time_scope`/`scope` 분리, `quota_owner`,
    `quota_scopes_of_runtime`, `Hashtbl.Make`, `scope_to_string` 의 `log_label`.
    시작 때 읽기·거절 뒤 읽기·turn 읽기가 `observe` 한다. 순서를 읽는 곳(turn driver, path rest, exact lane, one-shot, vision)이 scope 들을 읽는다.
-   이 단계에서 기록은 아직 홈 미확인 기록에 `source = None` 으로 `_in_home` 함수가 적는다. 계정 scope 에는 기록이 없으므로 동작은 지금과 같다.
-   `reading`, `generation_order`, `home_of_source` 와 `_in_home` 세 함수가 여기서 생긴다. `scope` 에서 홈 미확인 생성자를 빼서 일반 `note_*` 가 그 기록을 쓰는 옛 길이 없어진다.
+   이 단계에서 기록은 아직 홈 미확인 기록에 `home_target_without_source` 로 만든 target 을 `_in_home` 함수에 넘겨 적는다. 계정 scope 에는 기록이 없으므로 동작은 지금과 같다.
+   `reading`, `generation_order`, `home_of_source`, `home_target` 과 `_in_home` 두 함수, `write_target`, `Codex_run` 이 여기서 생긴다.
+   `scope` 에서 홈 미확인 생성자를 빼서 일반 `note_*` 가 그 기록을 쓰는 옛 길이 없어진다. 이 단계의 `quota_write_owner` 는 모든 Codex 시도에 `home_target_without_source` 를 싣는다.
 3. **기록이 계정에 붙는다** (2 위) — `quota_write_owner` 를 `run_attempt` 가 돌려주고 turn driver·Fusion·Codex turn 이 그 값으로 적는다.
    사용량 창도 계정에 적는다. `sessionBudgetExceeded` 는 홈에 남긴다. Codex turn 의 scope 재계산을 지운다.
-   `write_target` 으로 쓰는 곳을 가르고, `Codex_run` 이 `source` 를 싣는다. 출처 공급 경로가 없으면 모든 시도의 `source` 는 `None` 이다.
-   시험: 홈 둘·재로그인·재로그인 뒤 읽기 실패·늦은 읽기·옛 프로세스의 새 요청·사용자 변경·미확인·성공·옛 세대의 성공·순서를 증명하지 못한 성공·옛 세대의 쓰기·순서를 증명하지 못한 쓰기·창이 있는 기록·session budget, 위 변이 시험.
+   `Stated` 인 turn 은 계정 target 에 쓴다. 출처 공급 경로가 확정되면 `home_target_of_source` 로 `Some` 출처를 싣는다. 확정되기 전에는 위 단계와 같이 출처가 없다.
+   시험: 홈 둘·재로그인·재로그인 뒤 읽기 실패·늦은 읽기·옛 프로세스의 새 요청·사용자 변경·미확인·성공·옛 세대의 성공·순서를 증명하지 못한 성공·옛 세대의 쓰기·순서를 증명하지 못한 쓰기·출처 없는 시도·사용량 창·session budget, 위 변이 시험.
 4. **표면** (3 위) — resolved JSON 스냅숏, 묶음별 소진·주인 종류, runtime 줄 `usage_scope`. TUI decode·Overview, dashboard schema 를 같은 PR 에서 바꾼다.
    glossary 의 "닫힌 quota 창"·"Provider Usage Window" 항목과 `docs/spec/14-configuration.md`. 시험: 식별자 노출, 경합, TUI 캡처.
 5. **재로그인 알아채기** (2 위, 결정 3 에 따라) — 로그인 세션 완료 때 읽기, 운영자 다시 읽기 요청, setup 화면의 "같은 계정" 표시.

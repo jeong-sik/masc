@@ -128,7 +128,13 @@ let invalid_profile_dashboard_row ~keeper_name error =
    cannot be built either (the meta is unreadable or not current, or building
    the degraded row raised too). The roster named the keeper, so it stays in
    the list under its name with the error. Dropping it left an [ok:true]
-   response with a shorter list, which reads as a keeper that does not exist. *)
+   response with a shorter list, which reads as a keeper that does not exist.
+
+   This is the last step of [keeper_row_after_worker_failure], so it must not
+   raise. It only wraps the name and [error] in constants and closed-variant
+   wire strings ([Trust.degraded_keeper_trust_json] passes
+   [receipt_operator_disposition = None]) and reads atomic counters
+   ([Keeper_fd_pressure.projection_fields]). It reads no file and no registry. *)
 let name_only_degraded_keeper_dashboard_row ~keeper_name ~(error : string) =
   let runtime_trust = Trust.degraded_keeper_trust_json ~error in
   let diagnostic = worker_failure_diagnostic ~error in

@@ -195,6 +195,7 @@ let test_shutdown_signals_child_and_closes_held_pipes () =
     ; stdout_r
     ; stderr_r
     ; write_mutex=Eio.Mutex.create ()
+    ; transport_state=Atomic.make Lsp_process_manager.Open
     }
   in
   Lsp_process_manager.shutdown lsp_proc;

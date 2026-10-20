@@ -160,6 +160,7 @@ let transmit t ~timeout ~what f =
   | Eio.Time.Timeout -> Error (Printf.sprintf "%s write timed out after %.0fs" what timeout)
   | Eio.Io _ as exn -> Error (Printexc.to_string exn)
   | End_of_file -> Error "Language server closed its input"
+  | Lsp_process_manager.Closed_transport -> Error "Language server transport is closed"
 ;;
 
 let initialize_params ~workspace_root =

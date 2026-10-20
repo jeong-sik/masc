@@ -434,18 +434,26 @@ let test_blocked_writer_does_not_hold_other_process () = with_analysis_server (f
       Eio.Promise.resolve resolve context;
       (* Larger than the native pipe buffer; the controlled peer has stopped
          reading. This is a resource fixture, not a product content limit. *)
-      Lsp_workspace_pool.notify pool ~language:Lsp_process_manager.Python
+      Lsp_workspace_pool.ask pool ~language:Lsp_process_manager.Python
         ~workspace_root:peer ~method_:"proof/payload"
         ~params:(`Assoc ["body",`String (String.make 1_048_576 'x')]))) in
   let context=Eio.Promise.await cancellation in
   Eio.Fiber.yield ();
   check bool "the controlled peer leaves the write pending" false (Eio.Promise.is_resolved writing);
+  let queued=Eio.Fiber.fork_promise ~sw (fun () ->
+    Lsp_workspace_pool.ask pool ~language:Lsp_process_manager.Python
+      ~workspace_root:peer ~method_:"proof/queued" ~params:(`Assoc [])) in
+  Eio.Fiber.yield ();
   ignore (analysis_control pool root "proof/state");
   Eio.Cancel.cancel context Exit;
   check bool "a partial-frame cancellation propagates" true
     (match Eio.Promise.await writing with
      | Error (Eio.Cancel.Cancelled _) -> true
      | Ok _ | Error _ -> false);
+  check bool "queued writer sees an owned closed transport as a typed failure" true
+    (match Eio.Promise.await queued with
+     | Ok (Error (Lsp_workspace_pool.Server_failed _)) -> true
+     | Ok (Ok _ | Error _) | Error _ -> false);
   ignore (analysis_control pool root "proof/state"))
 ;;
 

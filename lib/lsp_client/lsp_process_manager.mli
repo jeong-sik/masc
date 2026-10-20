@@ -4,6 +4,9 @@
     ([read_exact], [read_header_line], [parse_content_length]) are
     intentionally not exposed. *)
 
+type transport_state = Open | Closed
+exception Closed_transport
+
 type lsp_process = {
   lang_id : string;
   proc : Eio_unix.Process.ty Eio.Std.r;
@@ -11,6 +14,7 @@ type lsp_process = {
   stdout_r : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r;
   stderr_r : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r;
   write_mutex : Eio.Mutex.t;
+  transport_state : transport_state Atomic.t;
 }
 
 type spawn_error =

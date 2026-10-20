@@ -204,13 +204,17 @@ permission. Ordinary review guards do not need a CI receipt; Release admission
 still requires its current-head full verification evidence.
 
 For real browser Addon checks, dispatch `browser-stagehand-proof.yml` with a full
-`candidate_sha` and `browser=chromium` or `browser=firefox`. The workflow builds
+`candidate_sha` and `browser=chromium`, `browser=firefox` or `browser=gecko`. The workflow builds
 only that browser's scenario and its launcher, process guardian and worker. It
 checks out the source candidate independently of the workflow ref; the artifact
 records both commits and retains the four executables with their SHA-256 list.
 Chromium exercises Stagehand on isolated private and persistent profiles. Firefox
 uses a fresh private test workspace and persistent profile for trusted input,
 in-flight detach, confirmed cleanup, fresh reattachment and stale-client refusal.
+`gecko` selects owned Firefox through geckodriver for host-granted file upload,
+late page reads after host snapshot release, actual download bytes and durable
+download/screenshot artifacts after confirmed Addon retirement. Its fixture
+payload reader is explicit host authority, not a Keeper sandbox authorization test.
 Both use controlled loopback pages, never the operator's profile or signed-in
 sites. Logs, scenario receipts and screenshots show only that selected execution;
 they do not prove Safari parity, installed production behavior or full regression.

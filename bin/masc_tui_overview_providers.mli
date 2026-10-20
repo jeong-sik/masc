@@ -150,6 +150,24 @@ val section :
     an operator who only needs what can be used now is not scrolled past
     what cannot; the header counts still cover every account. *)
 
+val section_cards :
+  providers:Masc_tui_types.overview_providers_reading ->
+  runtimes:Masc_tui_types.overview_quota_reading ->
+  account_emails:Masc_tui_types.overview_account_emails_reading ->
+  now:float ->
+  show_unusable:bool ->
+  width:int ->
+  section option
+(** {!section} with each account drawn as a card, two to a row, when [width]
+    holds two columns of them; below that it is {!section} itself. A card is
+    titled with the account's name and holds its windows, an observed
+    exhaustion and its email, with the bars sized to the card. The two
+    accounts of a row end on the same line. The headings, the summary and the
+    notes are the same lines either way, and every row fits [width]. *)
+
+val cards_fit : width:int -> bool
+(** Whether {!section_cards} draws cards at [width]. *)
+
 val clock_text : now:float -> float -> string
 (** A time of day in the terminal's zone; a time on another day than [now]
     carries its month and day. *)

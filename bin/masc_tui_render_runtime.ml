@@ -1170,7 +1170,7 @@ let provider_history_lines ~cols (state : state) =
 let usage_lines ~cols (state : state) =
   let open Masc.Tui_decode_usage in
   let scopes =
-    match Overview_providers.section
+    match Overview_providers.section_cards
             ~providers:(usage_providers_reading state) ~runtimes:state.overview_quota
             ~account_emails:state.overview_account_emails
             ~show_unusable:state.usage_show_unusable

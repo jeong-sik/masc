@@ -1370,6 +1370,103 @@ let test_trend_line_breaks_at_gaps_and_keeps_marks () =
            (cells_of_band band))
        bands)
 
+
+(* ---- cards ----------------------------------------------------------- *)
+
+let card_lines ?(runtimes = Types.Quota_unread) ~width accounts =
+  match
+    Providers.section_cards
+      ~providers:(Types.Providers_read (decode_accounts accounts))
+      ~runtimes ~account_emails:Types.Account_emails_unread ~now ~width
+      ~show_unusable:true
+  with
+  | Some section -> section.lines
+  | None -> fail "a read draws a section"
+
+let wide_enough_for_cards = 160
+
+let occurrences ~affix text =
+  let n = String.length affix and h = String.length text in
+  let rec loop i count =
+    if i + n > h then count
+    else if String.equal (String.sub text i n) affix then loop (i + n) (count + 1)
+    else loop (i + 1) count
+  in
+  if n = 0 then 0 else loop 0 0
+
+let card_corners lines =
+  List.fold_left
+    (fun total line -> total + occurrences ~affix:Masc_tui_theme.Box.tl line)
+    0 (List.map plain lines)
+
+(* A card is drawn for every entry the plan has, and for no other thing. *)
+let test_cards_draw_one_card_per_plan_entry () =
+  let entries =
+    Providers.plan ~now ~runtimes:Types.Quota_unread
+      (decode_accounts screenshot_accounts).Masc.Tui_decode_usage.puws_accounts
+    |> List.fold_left (fun total group -> total + List.length group.Providers.pg_entries) 0
+  in
+  check int "one card for each entry the plan has" entries
+    (card_corners (card_lines ~width:wide_enough_for_cards screenshot_accounts))
+
+(* The same windows are drawn as rows and as cards: the layout is the only
+   difference. Two cards share a line, so bars are counted, not the lines
+   that hold one. *)
+let test_cards_draw_the_same_windows_as_rows () =
+  let bars lines =
+    List.fold_left
+      (fun total line -> total + occurrences ~affix:meter_open (plain line))
+      0 lines
+  in
+  check int "one bar per window that has a cap, as in rows"
+    (bars (screenshot_section ~width:wide_enough_for_cards ()))
+    (bars (card_lines ~width:wide_enough_for_cards screenshot_accounts))
+
+let test_every_card_line_fits_the_width () =
+  List.iter
+    (fun width ->
+      List.iter
+        (fun line ->
+          let cells = Masc_tui_message_layout.display_width line in
+          if cells > width then failf "%d cells in a %d-cell screen: %S" cells width (plain line))
+        (card_lines ~width edge_accounts))
+    [ 104; 110; 120; 160; 230 ]
+
+(* Where two columns of cards do not fit, the section is the rows it always
+   was. *)
+let test_a_narrow_screen_keeps_the_rows () =
+  List.iter
+    (fun width ->
+      check bool (Printf.sprintf "no cards at %d" width) false
+        (Providers.cards_fit ~width);
+      check (list string) (Printf.sprintf "the same lines at %d" width)
+        (section_lines ~width screenshot_accounts)
+        (card_lines ~width screenshot_accounts))
+    [ 20; 80; 100 ];
+  check bool "cards at a wide width" true
+    (Providers.cards_fit ~width:wide_enough_for_cards)
+
+(* The summary above the plan, and its section headings, do not depend on how
+   the accounts are drawn. *)
+let test_cards_keep_the_summary_and_headings () =
+  let headings lines =
+    List.filter (fun line -> contains ~affix:"Usable (" line || contains ~affix:"No report (" line)
+      (List.map plain lines)
+  in
+  check (list string) "the same headings"
+    (headings (section_lines ~width:wide_enough_for_cards screenshot_accounts))
+    (headings (card_lines ~width:wide_enough_for_cards screenshot_accounts));
+  let first_blank lines =
+    let rec upto acc = function
+      | [] | "" :: _ -> List.rev acc
+      | line :: rest -> upto (line :: acc) rest
+    in
+    upto [] (List.map plain lines)
+  in
+  check (list string) "the same summary"
+    (first_blank (section_lines ~width:wide_enough_for_cards screenshot_accounts))
+    (first_blank (card_lines ~width:wide_enough_for_cards screenshot_accounts))
+
 let () =
   run "tui_overview_providers"
     [ ( "providers"
@@ -1439,5 +1536,17 @@ let () =
             test_hidden_unusable_collapses_to_its_heading
         ; test_case "trend line breaks at gaps and keeps marks" `Quick
             test_trend_line_breaks_at_gaps_and_keeps_marks
+        ] )
+    ; ( "cards"
+      , [ test_case "one card per plan entry" `Quick
+            test_cards_draw_one_card_per_plan_entry
+        ; test_case "cards draw the same windows as rows" `Quick
+            test_cards_draw_the_same_windows_as_rows
+        ; test_case "every card line fits the width" `Quick
+            test_every_card_line_fits_the_width
+        ; test_case "a narrow screen keeps the rows" `Quick
+            test_a_narrow_screen_keeps_the_rows
+        ; test_case "cards keep the summary and headings" `Quick
+            test_cards_keep_the_summary_and_headings
         ] )
     ]

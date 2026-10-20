@@ -96,7 +96,7 @@ let invalidate_keeper_execution_surfaces ~config () =
 
 (* Typed outcome of a keeper lifecycle action, so the log severity is chosen by
    an exhaustive match rather than a string-parsing wildcard with a permissive
-   default (#8605). [Succeeded]/[Already_live] are successes (Info);
+   default (#8605). [Succeeded]/[Already_live]/[Already_absent] are successes (Info);
    [Rejected] (400) and [Dispatch_none] (500) are failures (Warn) — see
    docs/spec/18-log-severity-taxonomy.md.
 
@@ -109,6 +109,7 @@ let invalidate_keeper_execution_surfaces ~config () =
 type lifecycle_outcome =
   | Succeeded
   | Already_live
+  | Already_absent
   | Rejected of string
   | Dispatch_none
   | Persist_failed of string
@@ -123,6 +124,7 @@ let lifecycle_log_line ~action ~name ~actor ~duration_ms outcome =
     match outcome with
     | Succeeded -> (Log.Info, "ok", None)
     | Already_live -> (Log.Info, "already_live", None)
+    | Already_absent -> (Log.Info, "already_absent", None)
     | Rejected why -> (Log.Warn, "rejected", Some why)
     | Dispatch_none -> (Log.Warn, "dispatch_none", None)
     | Persist_failed why -> (Log.Warn, "persist_failed", Some why)
@@ -140,6 +142,29 @@ let lifecycle_log_line ~action ~name ~actor ~duration_ms outcome =
   , Printf.sprintf
       "keeper lifecycle %s name=%s actor=%s outcome=%s duration_ms=%d%s"
       action name actor outcome_s duration_ms reason_s )
+
+type shutdown_outcome =
+  | Shutdown_submitted
+  | Shutdown_target_absent
+
+(* [keeper_down] answers a shutdown it accepted with the operation record
+   ([accepted]) and one for a Keeper with no lane and no metadata with
+   [already_absent]; there is nothing to pause in the second case. Reading the
+   tool's data keeps the handler from guessing from the absence of an owner
+   afterwards, which is what made a shutdown of an unknown name answer
+   "paused-state persist failed after shutdown" (issue #28731). "Absent" is
+   the tool's answer at the time it looked: a create that lands after that
+   look is not paused by this request. A shape that is neither is refused, not
+   read as a submission. *)
+let shutdown_outcome_of_data data =
+  match
+    ( Json_util.get_bool data Keeper_turn_lifecycle.already_absent_field
+    , Json_util.get_bool data Keeper_turn_lifecycle.accepted_field )
+  with
+  | Some true, _ -> Ok Shutdown_target_absent
+  | (Some false | None), Some _ -> Ok Shutdown_submitted
+  | (Some false | None), None ->
+    Error "keeper_down answered neither accepted nor already_absent"
 
 type boot_preflight =
   | Boot_allowed
@@ -479,21 +504,25 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
               let post_action_result =
                 match action with
                 | "shutdown" ->
-                  if persist_keeper_pause ()
-                  then (
-                    (* See #37175: only the lifecycle listener acts on a partial refresh. *)
-                    ignore
-                      (refresh_keeper_execution_surfaces
-                         ~config
-                         ~name
-                         (Keeper_lifecycle_events.Phase_event
-                            Keeper_state_machine.Paused)
-                        : surface_refresh);
-                    Ok ())
-                  else Error "paused-state persist failed after shutdown"
+                  (match shutdown_outcome_of_data (Tool_result.data result) with
+                   | Error detail -> Error detail
+                   | Ok Shutdown_target_absent -> Ok (Some Shutdown_target_absent)
+                   | Ok Shutdown_submitted ->
+                     if persist_keeper_pause ()
+                     then (
+                       (* See #37175: only the lifecycle listener acts on a partial refresh. *)
+                       ignore
+                         (refresh_keeper_execution_surfaces
+                            ~config
+                            ~name
+                            (Keeper_lifecycle_events.Phase_event
+                               Keeper_state_machine.Paused)
+                           : surface_refresh);
+                       Ok (Some Shutdown_submitted))
+                     else Error "paused-state persist failed after shutdown")
                 | _ ->
                   invalidate_keeper_execution_surfaces ~config ();
-                  Ok ()
+                  Ok None
               in
               (match post_action_result with
                | Error msg ->
@@ -504,8 +533,11 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                    ~ok:false
                    reqd
                    msg
-               | Ok () ->
-                 log_lifecycle_result Succeeded;
+               | Ok outcome ->
+                 log_lifecycle_result
+                   (match outcome with
+                    | Some Shutdown_target_absent -> Already_absent
+                    | Some Shutdown_submitted | None -> Succeeded);
                  (* Three actions reach this branch -- "up", "shutdown" and
                     "reset" -- and only "up" has anything to report: a create
                     names the sandbox profile and network mode the keeper
@@ -522,6 +554,14 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                    then [ ("detail", Tool_result.data result) ]
                    else []
                  in
+                 (* A shutdown of a name that has no Keeper succeeds, as the
+                    tool does, and says so: an operator who mistyped the name
+                    is told nothing was stopped. *)
+                 let absent_detail =
+                   match outcome with
+                   | Some Shutdown_target_absent -> [ ("already_absent", `Bool true) ]
+                   | Some Shutdown_submitted | None -> []
+                 in
                  Http.Response.json_value ~compress:true ~request:req
                    (`Assoc
                       ([
@@ -529,7 +569,8 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                          ("action", `String action);
                          ("name", `String name);
                        ]
-                      @ create_detail))
+                      @ create_detail
+                      @ absent_detail))
                    reqd)
             | Some result ->
               let body = Tool_result.message result in

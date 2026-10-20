@@ -2095,7 +2095,7 @@
 (test
  (name test_keeper_lifecycle_log_line)
  (modules test_keeper_lifecycle_log_line)
- (libraries alcotest astring masc_log masc_server))
+ (libraries alcotest astring masc_log masc_server yojson))
 
 ; Bounded-cache eviction guard for client-keyed dashboard metrics caches.
 

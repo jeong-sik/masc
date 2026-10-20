@@ -66,8 +66,12 @@ let runner state : Exact.runner = fun ~lane_key:_ ~schema:_ _ ->
         | Ok output -> Exact.Call_ended (Exact.Answered { output; slot = "fixture"; usage = None })
         | Error detail -> Exact.Call_ended (Exact.Invalid_output { detail }))
 
-let port worker : Runtime.For_testing.host_port = {
-  list_requests = (fun () -> Ok (`Assoc [ "requests", `List !(worker.listing) ]));
+let port ?await_change ?(before_listing = fun _ -> ()) worker : Runtime.For_testing.host_port = {
+  await_change;
+  list_requests = (fun () ->
+    let requests= !(worker.listing) in
+    before_listing requests;
+    Ok (`Assoc [ "requests", `List requests ]));
   deliver = (fun ~arguments ->
     worker.delivered := arguments :: !(worker.delivered);
     let request_id = text "request_id" arguments in
@@ -77,7 +81,7 @@ let port worker : Runtime.For_testing.host_port = {
     Ok (`Assoc [ "accepted", `Bool !(worker.consume) ]));
 }
 
-let backend ?(before_stop = fun () -> ()) worker : Runtime.For_testing.backend = {
+let backend ?await_change ?before_listing ?(before_stop = fun () -> ()) worker : Runtime.For_testing.backend = {
   start = (fun ~sw:_ ~state_owner:_ ~instance_id ~installation_id:_ ~package:_ ~binding:_ ~on_authority ~is_live_instance:_ ~on_created ->
     let connection : Runtime.For_testing.connection = {browser=None;
       observe = (fun ~binding:_ ~sources:_ -> incr worker.observations; Ok { rows = []; coverage = [] });
@@ -87,7 +91,7 @@ let backend ?(before_stop = fun () -> ()) worker : Runtime.For_testing.backend =
       action_schema = (fun () -> None); act = (fun ~arguments:_ -> Error "read-only");
       stop = (fun () -> before_stop (); Ok (Lane_addon_lifecycle.Released
         { engine = Lane_addon_lifecycle.Docker_engine "fixture-engine"; container_id = Some instance_id }));
-      resource = Lane_addon_lifecycle.Container_resource instance_id; host = Some (port worker) } in
+      resource = Lane_addon_lifecycle.Container_resource instance_id; host = Some (port ?await_change ?before_listing worker) } in
     ignore (on_authority (Lane_addon_lifecycle.Container_authority
       { runtime = Lane_addon_types.Docker; engine = Lane_addon_lifecycle.Docker_engine "fixture-engine" }));
     on_created connection; Ok connection);
@@ -121,7 +125,7 @@ let cycles config = match member "cycles" (host_requests config) with `Int n -> 
 let await clock predicate =
   let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.001; loop ()) in loop ()
 
-let with_installation ?before_stop ?(make_runner = runner) ?(manifest = manifest) ?(declaration = declaration) ?(listing = []) ?(mode = Answer (`Assoc [ "question", `String "Q?" ])) ?(consume = true) f =
+let with_installation ?await_change ?before_listing ?before_stop ?(make_runner = runner) ?(manifest = manifest) ?(declaration = declaration) ?(listing = []) ?(mode = Answer (`Assoc [ "question", `String "Q?" ])) ?(consume = true) f =
   let root = Filename.temp_dir "lane-host-cycle-" "" |> Unix.realpath in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
     let config_root = Filename.concat root ".masc/config" in
@@ -147,7 +151,7 @@ let with_installation ?before_stop ?(make_runner = runner) ?(manifest = manifest
                 let state = { mode = ref mode; resolutions = ref 0 } in
                 Runtime.register_exact_runner (make_runner state);
                 let config = Workspace.default_config root in
-                Runtime.For_testing.with_backend (backend ?before_stop worker) (fun () ->
+                Runtime.For_testing.with_backend (backend ?await_change ?before_listing ?before_stop worker) (fun () ->
                   ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
                   f clock config worker state root;
                   let source = Filename.concat directory "quiz.toml" in
@@ -165,6 +169,65 @@ let publish_lane_change () =
   ignore (F.publish_registry ~lane_id:"quiz/author" ~slot_ids:[ slot ] snapshot : Runtime_exact_output_registry.t)
 
 let delivered_status arguments = text "status" (member "result" arguments)
+
+let test_withdrawal_event_before_stale_listing () =
+  let revision=ref 0 and ids=ref [] and changed=Eio.Condition.create () in
+  let listing_entered,listing_enter=Eio.Promise.create () in
+  let release_listing,release=Eio.Promise.create () in
+  let withdrawal_seen,seen=Eio.Promise.create () in
+  let held=ref false in
+  let before_listing requests=if requests<>[] && not !held then (
+    held:=true;Eio.Promise.resolve listing_enter ();Eio.Promise.await release_listing) in
+  let await_change ~after=Eio.Condition.loop_no_mutex changed (fun () ->
+    let state={Lane_addon_host_request.revision=string_of_int !revision;request_ids= !ids} in
+    if after=Some state.revision then None else (
+      if !revision=2 then ignore (Eio.Promise.try_resolve seen ());
+      Some (Ok state))) in
+  with_installation ~await_change ~before_listing (fun clock config worker state _root ->
+    Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve release ())) (fun () ->
+    await clock (fun () -> cycles config>=1);
+    worker.listing:=[exact "already-withdrawn"];ids:=["already-withdrawn"];
+    revision:=1;Eio.Condition.broadcast changed;
+    Eio.Promise.await listing_entered;
+    worker.listing:=[];ids:=[];revision:=2;Eio.Condition.broadcast changed;
+    Eio.Promise.await withdrawal_seen;
+    let previous=cycles config in
+    Eio.Promise.resolve release ();
+    await clock (fun () -> cycles config>previous);
+    check int "a stale listing cannot start an already withdrawn model call" 0 !(state.resolutions);
+    check int "a stale listing cannot deliver an answer" 0 (List.length !(worker.delivered))))
+
+let test_model_events_admit_and_withdraw_an_exact_scope () =
+  let revision=ref 0 and ids=ref [] and changed=Eio.Condition.create () in
+  let availability ()={Lane_addon_host_request.revision=string_of_int !revision;request_ids= !ids} in
+  let await_change ~after=Eio.Condition.loop_no_mutex changed (fun () ->
+    let state=availability () in if after=Some state.revision then None else Some (Ok state)) in
+  let cancelled, cancel=Eio.Promise.create () in
+  let entered, enter=Eio.Promise.create () in
+  let make_runner state ~lane_key:_ ~schema:_ (request:Exact.request) =
+    incr state.resolutions;
+    if request.request_id="withdraw" then Ok (fun ~validate:_ ->
+      Fun.protect ~finally:(fun () -> Eio.Promise.resolve cancel ()) (fun () ->
+        Eio.Promise.resolve enter ();
+        Eio.Fiber.await_cancel ()))
+    else runner {state with resolutions=ref 0} ~lane_key:"fixture" ~schema:(`Assoc []) request in
+  with_installation ~await_change ~make_runner (fun clock config worker state _root ->
+    await clock (fun () -> cycles config>=1);
+    let publish requests =
+      worker.listing:=requests;
+      ids:=List.map (text "request_id") requests;
+      incr revision;Eio.Condition.broadcast changed in
+    publish [exact "withdraw"];
+    Eio.Promise.await entered;
+    publish [];
+    Eio.Promise.await cancelled;
+    check int "one scoped model call was cancelled" 1 !(state.resolutions);
+    check int "a withdrawn command receives no late answer" 0 (List.length !(worker.delivered));
+    publish [exact "next-command"];
+    await clock (fun () -> List.length !(worker.delivered)=1);
+    check string "the original worker still receives a later command" "next-command"
+      (text "request_id" (List.hd !(worker.delivered)));
+    check int "events admit a later request without replaying the first" 2 !(state.resolutions))
 
 let test_retirement_cancels_exact_before_worker_cleanup_finishes () =
   let entered, enter = Eio.Promise.create () and finished, finish = Eio.Promise.create () in
@@ -1061,6 +1124,8 @@ let () =
   run "lane add-on host request cycle"
     [ ( "cycle"
       , [ test_case "a started worker gets its final result once" `Quick test_a_started_worker_gets_its_final_result_once
+        ; test_case "model events admit and withdraw one exact scope" `Quick test_model_events_admit_and_withdraw_an_exact_scope
+        ; test_case "withdrawal event can precede a stale listing" `Quick test_withdrawal_event_before_stale_listing
         ; test_case "retirement cancels exact before worker cleanup finishes" `Quick test_retirement_cancels_exact_before_worker_cleanup_finishes
         ; test_case "a request that is not final waits for the next event" `Quick
             test_a_request_that_is_not_final_waits_for_the_next_event

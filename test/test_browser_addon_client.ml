@@ -12,6 +12,7 @@ let scenario () = Eio_main.run (fun env ->
       Eio_context.with_test_env ~sw ~clock ~net ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
         let socket=Eio.Net.listen ~sw ~backlog:1 net (`Unix path) in
         let entered,enter=Eio.Promise.create () in
+        let model_waiting,model_wait=Eio.Promise.create () in
         let never,_=Eio.Promise.create () in
         let cancellations=ref 0 in
         let client=ok (Client.create ~socket_path:path ~incarnation:"0b000000-0000-4000-8000-000000000001"
@@ -22,6 +23,8 @@ let scenario () = Eio_main.run (fun env ->
               let raw=Eio.Buf_read.line (Eio.Buf_read.of_flow flow ~max_size:4096) in
               if Yojson.Safe.Util.member "operation" (Yojson.Safe.from_string raw)=`String "issue" then
                 ignore (Eio.Promise.try_resolve enter ());
+              if Yojson.Safe.Util.member "operation" (Yojson.Safe.from_string raw)=`String "model_wait" then
+                ignore (Eio.Promise.try_resolve model_wait ());
               Eio.Promise.await never)
           done))
           (fun () ->
@@ -29,6 +32,12 @@ let scenario () = Eio_main.run (fun env ->
             check bool "silent peer times out after dispatch with unknown outcome" true
               (match result with Error (Client.Outcome_unknown _) -> true | Ok _|Error (Client.Unavailable _) -> false);
             check int "transport timeout is distinct from caller cancellation" 0 !cancellations;
+            (match Eio.Fiber.first
+              (fun () -> `Returned (Client.call client ~on_cancel_after_dispatch:(fun () -> ())
+                (W.Model_wait {after=Some "unchanged"})))
+              (fun () -> Eio.Promise.await model_waiting;Eio.Time.sleep clock 0.03;`Waiting) with
+             | `Waiting -> ()
+             | `Returned _ -> fail "model state watch must outlive the quick control timeout");
             let client=ok (Client.create ~socket_path:path ~incarnation:"0b000000-0000-4000-8000-000000000001"
               ~max_message_bytes:4096 ~control_timeout_sec:1. ~available:(fun () -> true)) in
             let client_id=ok (Browser_lane.client_id_of_string "0c000000-0000-4000-8000-000000000001") in

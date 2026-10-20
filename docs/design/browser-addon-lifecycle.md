@@ -244,10 +244,36 @@ receipts remain distinct from successful contract validation.
    retained-answer reattachment. Protocol fixtures cover missing/duplicate ports
    and unselected-port admission; a runtime fixture holds cleanup open while
    retiring a blocked exact call. These are scenario definitions, not execution
-   evidence. The bundled browser worker still needs a concurrent model queue
-   and a request-ready wake event; initial Ready/action/registry events cannot
-   service a model request made inside a long-running browser command. Stagehand
-   owned Chrome execution and real browser/model evidence also remain.
+   evidence.
+
+   The browser worker now has a model queue and concurrent private request,
+   result and availability-wait socket ports. Only selected outputs enter its
+   pinned `models.json` bootstrap configuration. A request publishes an opaque
+   availability revision; the host suspends on changes without a timer, apart
+   from the serialized MCP command that may be waiting for that model. Original
+   command cancellation withdraws only its own waiter. Before cancelling an
+   active Exact scope, the host rechecks the request listing so an older event
+   cannot cancel a newer dispatch. It also rechecks after registering each
+   Exact cancellation scope, so a delayed listing cannot start a request whose
+   withdrawal event was already processed. Detach fences the queue and wakes waiters.
+
+   Results are checked against the selected schema and closed terminal wire
+   format, then durably recorded with incarnation, original request digest,
+   result digest and `model_result_received` disposition before waking the
+   original waiter. Identical deliveries are acknowledged; conflicting ones
+   cannot overwrite a receipt. A late result cannot wake a replacement command.
+   Receipts live in the served Add-on store, outside the disposable browser
+   profile allocation, and do not claim browser action completion. Neither the
+   owner admission lock nor the serialized MCP channel is held during model
+   waits or receipt I/O.
+
+   Socket fixtures cover request-ready events, concurrent listing/delivery,
+   schema refusal, durable receipts, cancellation and retirement. A host-cycle
+   fixture covers withdrawal of a blocked Exact call and a later request in the
+   same worker. These scenarios have not yet been executed. The bundled browser
+   package still declares no model outputs and has no model consumer connected.
+   Read-only locate, Stagehand schema/role policy, owned Chrome execution and
+   real browser/model evidence remain.
 
 ## Completion evidence
 

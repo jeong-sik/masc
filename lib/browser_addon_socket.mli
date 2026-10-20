@@ -1,7 +1,8 @@
 (** Host-selected socket resource of a native browser installation. Blocking
     filesystem operations must be offloaded by the server caller. *)
 type t
-val context : instance_id:string -> automation:Browser_configuration.automation option -> (Yojson.Safe.t, string) result
+val context : instance_id:string -> automation:Browser_configuration.automation option ->
+  models:Browser_addon_models.configuration option -> (Yojson.Safe.t, string) result
 (** Selects a private per-instance socket directory without creating it. Persist
     this immutable descriptor through Native_addon_lease.prepare before mkdir. *)
 val acquire : admission:Native_addon_lease.t -> directory:string -> (t, string) result

@@ -62,7 +62,7 @@ let shape_name name =
   let clipped =
     if String.length name <= shape_name_max_bytes
     then name
-    else String.sub name 0 shape_name_max_bytes ^ "..."
+    else String_util.utf8_prefix ~max_bytes:shape_name_max_bytes name ^ "..."
   in
   Printf.sprintf "%S" clipped
 ;;

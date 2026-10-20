@@ -53,9 +53,15 @@ let is_valid_trace_id s =
 (* Bounded preview for id validation error messages — these ids
    originate from external requests / config / JSON; full dump risks
    log spam on bad input. 32 bytes matches [Ids.Trace_id.preview]. *)
+let preview_id_max_bytes = 32
+
 let preview_id s =
-  if String.length s <= 32 then s
-  else Printf.sprintf "%s… (%d bytes total)" (String.sub s 0 32) (String.length s)
+  if String.length s <= preview_id_max_bytes then s
+  else
+    Printf.sprintf
+      "%s… (%d bytes total)"
+      (String_util.utf8_prefix ~max_bytes:preview_id_max_bytes s)
+      (String.length s)
 ;;
 
 module Trace_id = struct

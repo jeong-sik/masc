@@ -193,7 +193,7 @@ let string_option_to_yojson : string option -> Yojson.Safe.t = function
 
 let excerpt ?(max = 160) (json : Yojson.Safe.t) : string =
   let s = Yojson.Safe.to_string json in
-  if String.length s > max then String.sub s 0 max ^ "..." else s
+  if String.length s > max then String_util.utf8_prefix ~max_bytes:max s ^ "..." else s
 
 let int_opt_to_json : int option -> Yojson.Safe.t = function
   | Some n -> `Int n

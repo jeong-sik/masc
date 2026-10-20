@@ -570,12 +570,16 @@ let provenance_arg args =
     broadcast 2026-05-15T10:51:20Z). Diagnostic, not a workaround: the
     offending value field points the next triager at the failing
     field. *)
+let type_error_value_max_bytes = 120
+
 let with_yojson_boundary ~tool_name ~start_time handler : Tool_result.result =
   try handler () with
   | Yojson.Safe.Util.Type_error (msg, bad_value) ->
     let value_repr =
       let s = Yojson.Safe.to_string bad_value in
-      if String.length s > 120 then String.sub s 0 120 ^ "…" else s
+      if String.length s > type_error_value_max_bytes
+      then String_util.utf8_prefix ~max_bytes:type_error_value_max_bytes s ^ "…"
+      else s
     in
     (* RFC-0189 — JSON type error is caller-input shape violation.
        Workflow_rejection (not Runtime_failure) because the request itself

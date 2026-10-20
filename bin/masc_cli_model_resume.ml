@@ -1,17 +1,10 @@
 type outcome = Resumed of { exact_output_available : bool } | Refused of string
 
+let bounded_cause_max_bytes = 240
+
 let bounded_cause text =
-  let max_bytes = 240 in
-  let len = String.length text in
-  if len <= max_bytes then text
-  else
-    let rec cut index =
-      if index >= len then len
-      else
-        let step = Uchar.utf_decode_length (String.get_utf_8_uchar text index) in
-        if index + step > max_bytes then index else cut (index + step)
-    in
-    String.sub text 0 (cut 0) ^ "..."
+  if String.length text <= bounded_cause_max_bytes then text
+  else String_util.utf8_prefix ~max_bytes:bounded_cause_max_bytes text ^ "..."
 
 let response ~status body =
   let decoded = try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None in

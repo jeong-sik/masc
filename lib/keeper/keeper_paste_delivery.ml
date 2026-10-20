@@ -96,6 +96,10 @@ let deliver_staged_pastes ~write ~staging_dir =
    on the endpoint. The observed failure class -- absent file, wrong tree,
    truncated to zero -- all fails this check. [$0] is the script name, [$1]
    the translated path. *)
+(* The remote command's stdout is quoted in the error when it is not a byte
+   count; a long answer is cut to this many bytes. *)
+let remote_stdout_preview_max_bytes = 80
+
 let readback_script = "wc -c < \"$1\""
 let readback_name = "masc-paste-readback"
 
@@ -153,8 +157,10 @@ let verify_readback ~endpoint ~config ~meta ~file_name ~expected_bytes =
         | None ->
           let answer = String.trim stdout in
           let answer =
-            if String.length answer > 80
-            then String.sub answer 0 80 ^ "..."
+            if String.length answer > remote_stdout_preview_max_bytes
+            then
+              String_util.utf8_prefix ~max_bytes:remote_stdout_preview_max_bytes answer
+              ^ "..."
             else answer
           in
           Error

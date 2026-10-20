@@ -26,13 +26,12 @@ let redact_text (s : string) : string =
    — one Korean board comment crossing the 1024-byte preview boundary made
    [response.json()] throw, and 68 runs went unshown.
 
-   [String_util.utf8_char_boundary] is the existing answer to this (8+ callers
-   already route through that module's UTF-8 helpers); only the cut index moves,
-   so the byte budget and the suffix behave exactly as before. *)
+   [String_util.utf8_prefix] is the existing answer to this; only the cut index
+   moves, so the byte budget and the suffix behave exactly as before. *)
 let truncate ?(max_len = default_max_len) (s : string) : string =
   let s = String.trim s in
   if String.length s <= max_len then s
-  else String.sub s 0 (String_util.utf8_char_boundary s max_len) ^ "...(truncated)"
+  else String_util.utf8_prefix ~max_bytes:max_len s ^ "...(truncated)"
 
 (* Blob markers (see [Tool_output.encode_for_agent_core]) carry structural fields
    (sha256/bytes/mime) the dashboard needs to render the marker as a "Stored

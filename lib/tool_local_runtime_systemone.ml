@@ -572,10 +572,12 @@ let args_of_yojson (json : Yojson.Safe.t) : (args, string) result =
 
 (* ── The call ───────────────────────────────────────────── *)
 
+let excerpt_max_bytes = 200
+
 let excerpt text =
   let length = String.length text in
-  if length <= 200 then text
-  else String.sub text 0 200 ^ "..."
+  if length <= excerpt_max_bytes then text
+  else String_util.utf8_prefix ~max_bytes:excerpt_max_bytes text ^ "..."
 ;;
 
 let decide ~timeout_sec (request : request) (backend : backend) :

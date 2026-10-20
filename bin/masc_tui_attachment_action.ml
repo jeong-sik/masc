@@ -167,10 +167,13 @@ let write_file path bytes =
     Ok ()
   with Sys_error message -> Error message
 
+let digest_display_bytes = 12
+
 let display_name ~(sha256 : string) = function
   | Some name when not (String.equal name "") -> name
   | Some _ | None ->
-      if String.length sha256 > 12 then String.sub sha256 0 12 ^ "…"
+      if String.length sha256 > digest_display_bytes
+      then String_util.utf8_prefix ~max_bytes:digest_display_bytes sha256 ^ "…"
       else sha256
 
 let open_external ~name ~path =

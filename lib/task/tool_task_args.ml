@@ -74,7 +74,7 @@ let synthesize_summary_from_siblings args =
   in
   let truncate ~max_len s =
     if String.length s <= max_len then s
-    else String.sub s 0 max_len ^ "…"
+    else String_util.utf8_prefix ~max_bytes:max_len s ^ "…"
   in
   match pick "notes" with
   | Some s -> Some (truncate ~max_len:240 (first_line s))

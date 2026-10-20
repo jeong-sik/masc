@@ -30,6 +30,9 @@ type declared_lane_failure =
    only caller of [run] is production.  *)
 let lane_retry_continuation = Keeper_turn_driver.Restart_cycle
 
+(* The paused agent's question is logged cut to this many bytes. *)
+let input_required_question_log_max_bytes = 80
+
 let declared_lane_failure_of_error err =
   match capacity_refusal_of_error err with
   | Some (Provider_context_window _) -> Provider_context_overflow
@@ -339,8 +342,10 @@ let run (ctx : ctx)
           meta.name
           ir.Agent_core.Error.request_id
           (let q = ir.Agent_core.Error.question in
-           if String.length q > 80
-           then String.sub q 0 80 ^ "…"
+           if String.length q > input_required_question_log_max_bytes
+           then
+             String_util.utf8_prefix ~max_bytes:input_required_question_log_max_bytes q
+             ^ "…"
            else q);
         Keeper_turn_fsm.emit_transition
           ~keeper_name:meta.name

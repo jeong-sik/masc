@@ -49,6 +49,22 @@ let test_optional_missing () =
   | Tool_input_validation.Invalid _ -> fail "expected Valid for missing optional field"
 ;;
 
+(* The preview of a wrong-typed string value ends on a character boundary: 20
+   bytes of Hangul would otherwise cut the seventh syllable in half. *)
+let test_string_preview_keeps_multibyte_character_whole () =
+  let schema = make_schema [ make_param ~param_type:Types.Integer "count" ] in
+  let input = `Assoc [ "count", `String "가나다라마바사아자차" ] in
+  match Tool_input_validation.validate schema input with
+  | Tool_input_validation.Invalid [ error ] ->
+    check
+      string
+      "six whole syllables"
+      {|string("가나다라마바...")|}
+      (actual_to_string error.actual)
+  | Tool_input_validation.Invalid _ | Tool_input_validation.Valid _ ->
+    fail "expected one Invalid error for a string given as an integer"
+;;
+
 let test_null_is_type_error () =
   let schema = make_schema [ make_param ~param_type:Types.String "room" ] in
   let input = `Assoc [ "room", `Null ] in
@@ -676,6 +692,10 @@ let () =
       , [ test_case "missing required" `Quick test_required_missing
         ; test_case "present required" `Quick test_required_present
         ; test_case "optional missing" `Quick test_optional_missing
+        ; test_case
+            "string preview keeps a multibyte character whole"
+            `Quick
+            test_string_preview_keeps_multibyte_character_whole
         ; test_case "null is type error" `Quick test_null_is_type_error
         ] )
     ; ( "type_check"

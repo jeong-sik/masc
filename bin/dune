@@ -1378,7 +1378,7 @@
  (name masc_tui_attachment_action)
  (wrapped false)
  (modules masc_tui_attachment_action)
- (libraries masc_tui_types masc_tui_browser masc_tui_midi unix))
+ (libraries masc_tui_types masc_tui_browser masc_tui_midi masc_string_util unix))
 
 (library
  (name masc_tui_memo)

@@ -605,26 +605,6 @@ let parse_subscription json =
    neutralised: the detail is shown in the UI. *)
 let subscription_stderr_limit = 300
 
-(* Back a byte cut up to a UTF-8 character boundary, so the excerpt never
-   ends mid-codepoint on valid input. *)
-let utf8_cut text limit =
-  let limit = min limit (String.length text) in
-  if limit = String.length text then limit
-  else begin
-    let pos = ref limit in
-    while !pos > 0 && Char.code text.[!pos] land 0xC0 = 0x80 do
-      decr pos
-    done;
-    let lead = Char.code text.[!pos] in
-    let width =
-      if lead land 0x80 = 0 then 1
-      else if lead land 0xE0 = 0xC0 then 2
-      else if lead land 0xF0 = 0xE0 then 3
-      else 4
-    in
-    if !pos + width > limit then !pos else limit
-  end
-
 let subscription_stderr_excerpt stderr_buf =
   let mapped =
     Buffer.contents stderr_buf
@@ -636,7 +616,8 @@ let subscription_stderr_excerpt stderr_buf =
   in
   if mapped = "" then None
   else if String.length mapped <= subscription_stderr_limit then Some mapped
-  else Some (String.sub mapped 0 (utf8_cut mapped subscription_stderr_limit) ^ "…")
+  else
+    Some (String_util.utf8_prefix ~max_bytes:subscription_stderr_limit mapped ^ "…")
 
 (* A document the CLI stopped in the middle names no reason by itself. The
    byte count tells a cut at the very start from one near the end. The probe

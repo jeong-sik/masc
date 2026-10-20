@@ -221,7 +221,7 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
     let title =
       if String.length bs.title <= limit
       then bs.title
-      else String.sub bs.title 0 limit ^ "...[truncated]"
+      else String_util.utf8_prefix ~max_bytes:limit bs.title ^ "...[truncated]"
     in
     Printf.sprintf
       "board_signal kind=%s author=%s title=%s"

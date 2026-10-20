@@ -26,4 +26,4 @@
  ; eio is already linked transitively through masc_process; naming it here is what
  ; lets this library reference Eio.Cancel.Cancelled, which #37372 requires of any
  ; catch-all around an Eio call -- and Process_eio.run_argv is one.
- (libraries masc_process yojson unix threads eio))
+ (libraries masc_process masc_string_util yojson unix threads eio))

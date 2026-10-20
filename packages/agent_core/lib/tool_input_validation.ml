@@ -32,14 +32,16 @@ type validation_result =
 
 (* ── Type description ────────────────────────────────────── *)
 
+(* A string value in a validation message is cut to this many bytes. *)
+let value_preview_max_bytes = 20
+
 let describe_json_value = function
   | `Null -> "null"
   | `Bool b -> Printf.sprintf "boolean(%b)" b
   | `Int i -> Printf.sprintf "integer(%d)" i
   | `Float f -> Printf.sprintf "number(%g)" f
   | `String s ->
-    let preview = if String.length s > 20 then String.sub s 0 20 ^ "..." else s in
-    Printf.sprintf "string(\"%s\")" preview
+    Printf.sprintf "string(\"%s\")" (Util.clip s value_preview_max_bytes)
   | `List _ -> "array"
   | `Assoc _ -> "object"
   | `Intlit s -> Printf.sprintf "integer(%s)" s

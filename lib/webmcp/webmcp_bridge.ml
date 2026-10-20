@@ -76,7 +76,9 @@ let bridge_argv ~script_path ~cdp_port ~page ~subcommand =
 let truncate_detail text =
   let limit = 400 in
   let text = String.trim text in
-  if String.length text <= limit then text else String.sub text 0 limit ^ "…"
+  if String.length text <= limit
+  then text
+  else String_util.utf8_prefix ~max_bytes:limit text ^ "…"
 ;;
 
 let classify_exit status ~stdout ~stderr =

@@ -1101,7 +1101,7 @@ let http_status_error ~status_code ~body =
         (* The fallback can also be valid JSON without a usable error field.
            Report its size without claiming a JSON parse failure. *)
         Printf.sprintf "%s... (%d bytes, response body)"
-          (String.sub body 0 raw_error_body_head_bytes)
+          (String_util.utf8_prefix ~max_bytes:raw_error_body_head_bytes body)
           (String.length body)
       else body
   in

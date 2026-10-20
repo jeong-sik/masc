@@ -321,20 +321,10 @@ let describe_rejected_names names =
     | name :: rest -> take (index + 1) (name :: shown) rest
   in
   let shown, hidden = take 0 [] distinct in
-  let clip name =
-    if String.length name <= rejected_name_char_limit
-    then name
-    else begin
-      (* Never cut inside a UTF-8 sequence. The clipped name is carried in the
-         prompt for the rest of the conversation, and an invalid byte there
-         would be replayed on every request. *)
-      let cut = ref rejected_name_char_limit in
-      while !cut > 0 && Char.code name.[!cut] land 0xC0 = 0x80 do
-        decr cut
-      done;
-      String.sub name 0 !cut ^ "..."
-    end
-  in
+  (* [Util.clip] never cuts inside a UTF-8 sequence. The clipped name is
+     carried in the prompt for the rest of the conversation, and an invalid
+     byte there would be replayed on every request. *)
+  let clip name = Util.clip name rejected_name_char_limit in
   let listed = String.concat ", " (List.map (fun name -> "\"" ^ clip name ^ "\"") shown) in
   if hidden = 0 then listed else Printf.sprintf "%s and %d more" listed hidden
 ;;

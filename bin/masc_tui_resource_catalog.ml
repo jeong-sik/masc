@@ -4,6 +4,9 @@ type report = { id : string; revision : Published.revision }
 type key = Mcp_uri of string | Report_revision of report
 type t = Mcp of Masc_tui_mcp.resource | Report of report
 type listing = { entries : t list; notes : string list }
+type reading = { parts : Masc_tui_mcp.resource_content list; revisions : report list }
+type direction = Older | Newer
+type read_request = { key : key; owner : unit ref }
 
 let ( let* ) = Result.bind
 let key = function Mcp resource -> Mcp_uri resource.uri | Report report -> Report_revision report
@@ -11,6 +14,31 @@ let equal_key left right = match left, right with
   | Mcp_uri left, Mcp_uri right -> String.equal left right
   | Report_revision left, Report_revision right -> left = right
   | Mcp_uri _, Report_revision _ | Report_revision _, Mcp_uri _ -> false
+
+let owns_key entry requested = match entry, requested with
+  | Mcp resource, Mcp_uri uri -> String.equal resource.uri uri
+  | Report report, Report_revision requested -> String.equal report.id requested.id
+  | Mcp _, Report_revision _ | Report _, Mcp_uri _ -> false
+
+let entry_for_key entries requested =
+  Option.map (fun entry -> match requested with
+    | Mcp_uri _ -> entry
+    | Report_revision report -> Report report)
+    (List.find_opt (fun entry -> owns_key entry requested) entries)
+
+let adjacent_revision direction ~current revisions =
+  let rec find previous = function
+    | [] -> None
+    | report :: rest ->
+      if equal_key (Report_revision report) (Report_revision current) then
+        let candidate = match direction with Older -> List.nth_opt rest 0 | Newer -> previous in
+        (match candidate with
+         | Some report when String.equal report.id current.id -> Some report
+         | Some _ | None -> None)
+      else find (Some report) rest in
+  find None revisions
+
+let mcp_reading parts = { parts; revisions = [] }
 
 let report_path report =
   Printf.sprintf "/api/v1/published-artifacts/%s?revision=%d" report.id report.revision.revision
@@ -79,9 +107,10 @@ let report_contents expected json =
          || not (String.equal (Digestif.SHA256.(to_hex (digest_string content))) expected.revision.body.sha256)
          || not (String.is_valid_utf_8 content)
     then Error "report body does not match its published reference"
-    else Ok [{ Masc_tui_mcp.rc_uri = Some (metadata (Report expected)).uri
-             ; rc_mime_type = Some expected.revision.body.mime
-             ; rc_kind = Resource_text content }]
+    else Ok { parts = [{ Masc_tui_mcp.rc_uri = Some (metadata (Report expected)).uri
+                       ; rc_mime_type = Some expected.revision.body.mime
+                       ; rc_kind = Resource_text content }]
+            ; revisions = List.map (fun revision -> { id = expected.id; revision }) history.revisions }
   | _ -> Error "invalid published report body"
 
 let walk_note = function

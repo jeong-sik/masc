@@ -8536,6 +8536,8 @@ type state = {
     (Masc_tui_resource_catalog.key * Masc_tui_mcp.resource_content list) option;
   mutable resource_content_error: (Masc_tui_resource_catalog.key * string) option;
   mutable resource_pending_key: Masc_tui_resource_catalog.key option;
+  mutable resource_read_owner: unit ref option;
+  mutable resource_revision_history: Masc_tui_resource_catalog.report list;
   mutable resource_scroll: int;
   mutable resource_focus: pane_focus;
   mutable resource_image_cursor: int;
@@ -10942,6 +10944,14 @@ let retain_resource_read state ~key =
   let same_resource = match state.resource_content with
     | Some (current, _) -> Masc_tui_resource_catalog.equal_key current key
     | None -> false in
+  state.resource_read_owner <- None;
+  let known_revision = match key with
+    | Masc_tui_resource_catalog.Mcp_uri _ -> false
+    | Report_revision report -> List.exists (fun candidate ->
+        Masc_tui_resource_catalog.equal_key
+          (Masc_tui_resource_catalog.Report_revision candidate)
+          (Masc_tui_resource_catalog.Report_revision report)) state.resource_revision_history in
+  if not (same_resource || known_revision) then state.resource_revision_history <- [];
   state.resource_pending_key <- Some key;
   if not same_resource then begin
     state.resource_content <- None;
@@ -11678,6 +11688,7 @@ let suspend_workspace_readings state =
   close_task_inspection state
     ~reason:(Masc_tui_original_task_read.Workspace_unconfirmed "Waiting for original workspace identity.");
   suspend_verification_evidence_read state;
+  state.resource_read_owner <- None;
   state.chat_call_reader <- None;
   state.chat_call_pending <- None;
   state.task_history <- Masc_tui_fetched.suspend state.task_history;
@@ -15251,6 +15262,8 @@ let create_state
   resource_content = None;
   resource_content_error = None;
   resource_pending_key = None;
+  resource_read_owner = None;
+  resource_revision_history = [];
   resource_scroll = 0;
   resource_focus = Left_pane;
   resource_image_cursor = 0;

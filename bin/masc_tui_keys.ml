@@ -982,6 +982,8 @@ let for_surface = function
           ~help:"the first or last resource, or the ends of the text when it \
                  is focused"
       ; b Act "Enter" "read" ~help:"read the selected resource"
+      ; b Navigate "{ / }" "older / newer revision" ~detail:Detail_only
+          ~help:"read the adjacent published report revision from its validated history"
       ; b Navigate ", / ." "image" ~detail:Detail_only
           ~help:"select the previous or next image part in the loaded resource"
       ; b Act "Ctrl-O" "preview image" ~detail:Detail_only

@@ -402,7 +402,13 @@ resource and authorized published reports; `Enter` reads one beside the
 list. Reports use the existing admin API and pin the listed revision, with body
 digest and byte-length verification. A report API refusal leaves MCP resources
 available and records the refusal; per-report storage diagnostics remain visible.
-Report Markdown uses the shared document renderer; HTML is displayed as source. The detail starts with the server's description, full URI, MIME type,
+Report Markdown uses the shared document renderer; HTML is displayed as source.
+After reading a report, `{`/`}` opens the older/newer revision from its validated
+history. Each move fetches that exact revision and verifies the body again; it
+does not wrap at an end. The chosen revision stays open when the catalog refreshes
+to a newer latest version, as long as the report remains listed. Switching reports
+or withdrawing the workspace clears the old history. Request ownership also
+rejects superseded completions after navigating away and back to the same revision. The detail starts with the server's description, full URI, MIME type,
 and declared byte size, then the payload. JSON is pretty-printed; JSON, TOML,
 and YAML payloads use the shared code lexer, while Markdown uses the same
 renderer as chat and Board. Image parts retain their original encoded bytes:

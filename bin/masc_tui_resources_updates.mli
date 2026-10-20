@@ -6,17 +6,24 @@ val listed :
   Masc_tui_types.state ->
   (Masc_tui_resource_catalog.listing, string) result ->
   unit
-(** Keep the open key selected across a new listing. If it is absent, clamp the
+(** Keep the open resource selected across a new listing, including a fixed
+    report revision when its report is still listed. If it is absent, clamp the
     cursor and clear the reading that no longer has a listed resource. A failed
     listing retains the previous inventory and records its error. Partial inventory and per-report diagnostics stay visible in the status line. *)
 
 val read_done :
-  Masc_tui_types.state -> key:Masc_tui_resource_catalog.key ->
-  (Masc_tui_mcp.resource_content list, string) result -> unit
-(** Only the pending key consumes the response. Text, metadata and blob payloads remain byte-for-byte
+  Masc_tui_types.state -> request:Masc_tui_resource_catalog.read_request ->
+  (Masc_tui_resource_catalog.reading, string) result -> unit
+(** Only the pending key and exact request owner consume the response. Text, metadata and blob payloads remain byte-for-byte
     unchanged in the retained content list. A refused read retains the previous content. *)
 
 val open_selected :
   Masc_tui_types.state -> read:(key:Masc_tui_resource_catalog.key -> unit) -> unit
 (** With a selected resource, move focus to its content pane before [read].
     An empty or invalid selection leaves state unchanged and invokes no callback. *)
+
+val step_revision :
+  Masc_tui_types.state -> direction:Masc_tui_resource_catalog.direction ->
+  read:(key:Masc_tui_resource_catalog.key -> unit) -> unit
+(** Request the adjacent validated revision of the open report. Does not admit
+    a body, synthesize revisions or wrap at an end. MCP reads have no history. *)

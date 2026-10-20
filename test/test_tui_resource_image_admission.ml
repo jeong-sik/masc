@@ -6,6 +6,10 @@ module Types = Masc_tui_types
 
 module Catalog = Masc_tui_resource_catalog
 let key = testable (fun fmt _ -> Format.pp_print_string fmt "resource key") Catalog.equal_key
+let read_done state ~key result =
+  let owner = ref () in
+  state.Types.resource_read_owner <- Some owner;
+  Updates.read_done state ~request:{Catalog.key;owner} (Result.map Catalog.mcp_reading result)
 let uri = Catalog.Mcp_uri "masc://drawing"
 let svg = "<svg\twidth=\"10\" height=\"10\" xmlns=\"http://www.w3.org/2000/svg\">\r\n<text>A\tB</text>\r\n</svg>"
 let parts () =
@@ -25,7 +29,7 @@ let test_original_admission () =
   let state = state () and original = parts () in
   state.resource_pending_key <- Some uri;
   state.resource_image_cursor <- 1;
-  Updates.read_done state ~key:uri (Ok original);
+  read_done state ~key:uri (Ok original);
   let admitted = saved state in
   check (option key) "pending consumed" None state.resource_pending_key;
   check int "new image selection" 0 state.resource_image_cursor;
@@ -48,7 +52,7 @@ let test_wrong_pending () =
   let state = state () and original = parts () in
   state.resource_content <- Some (uri,original);
   state.resource_pending_key <- Some (Catalog.Mcp_uri "masc://next");
-  Updates.read_done state ~key:uri (Ok (parts ()));
+  read_done state ~key:uri (Ok (parts ()));
   check bool "late URI cannot replace content" true (saved state == original);
   check (option key) "current request retained" (Some (Catalog.Mcp_uri "masc://next")) state.resource_pending_key
 
@@ -56,10 +60,10 @@ let test_failed_read () =
   let state = state () and original = parts () in
   state.resource_content <- Some (uri,original);
   state.resource_pending_key <- Some uri;
-  Updates.read_done state ~key:uri (Error "read refused");
+  read_done state ~key:uri (Error "read refused");
   check bool "failure preserves original" true (saved state == original);
   check (option (pair key string)) "explicit failure" (Some (uri,"read refused")) state.resource_content_error;
-  Updates.read_done state ~key:uri (Ok (parts ()));
+  read_done state ~key:uri (Ok (parts ()));
   check bool "detached completion cannot replace" true (saved state == original)
 
 let test_new_observation () =
@@ -69,7 +73,7 @@ let test_new_observation () =
   state.resource_pending_key <- Some uri;
   state.resource_content_error <- Some (uri,"previous failure");
   let next = parts () in
-  Updates.read_done state ~key:uri (Ok next);
+  read_done state ~key:uri (Ok next);
   check bool "new response stored exactly" true (saved state == next);
   check bool "equal new bytes retire old preview" false (Images.same_reading ~equal:Catalog.equal_key old state.resource_content);
   check (option (pair key string)) "success clears previous error" None state.resource_content_error

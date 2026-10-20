@@ -40,7 +40,8 @@ let exact_revision () =
   let report = report selected in
   check string "read pins listed revision" ("/api/v1/published-artifacts/" ^ id ^ "?revision=1")
     (Catalog.report_path report);
-  let parts = get (Catalog.report_contents report (detail first [second;first] markdown)) in
+  let reading = get (Catalog.report_contents report (detail first [second;first] markdown)) in
+  let parts = reading.parts in
   (match parts with
    | [{ Masc_tui_mcp.rc_kind = Resource_text raw; _ }] -> check string "UTF8/CRLF exact source" markdown raw
    | [{ Masc_tui_mcp.rc_kind = Resource_blob _; _ }] | [] | _ :: _ :: _ -> fail "original text missing");
@@ -53,11 +54,14 @@ let exact_revision () =
 let html_source () =
   let selected = revision ~format:Published.Html html in
   let entry = entry selected in
-  let contents = get (Catalog.report_contents (report entry) (detail selected [selected] html)) in
+  let reading = get (Catalog.report_contents (report entry) (detail selected [selected] html)) in
+  let contents = reading.parts in
   let state = state () in
   let key = Catalog.key entry in
   state.resource_pending_key <- Some key;
-  Updates.read_done state ~key:key (Ok contents);
+  let owner = ref () in
+  state.resource_read_owner <- Some owner;
+  Updates.read_done state ~request:{Catalog.key;owner} (Ok reading);
   check bool "admission retains immutable original" true
     (match state.resource_content with Some (_, actual) -> actual == contents | None -> false);
   match contents with
@@ -105,13 +109,15 @@ let selection_and_withdrawal () =
   list first;
   check bool "unchanged listing keeps reading" true (Option.is_some state.resource_content);
   list second;
-  check bool "new revision withdraws old reading" true (Option.is_none state.resource_content);
+  check bool "listed report keeps explicitly pinned reading" true (Option.is_some state.resource_content);
   state.resource_pending_key <- Some (Catalog.key second);
-  Updates.read_done state ~key:(Catalog.key first) (Ok []);
+  let owner = ref () in
+  state.resource_read_owner <- Some owner;
+  Updates.read_done state ~request:{Catalog.key=Catalog.key first;owner} (Ok (Catalog.mcp_reading []));
   check bool "late revision cannot settle new one" true (state.resource_pending_key=Some (Catalog.key second));
   Updates.listed state (Ok (get (Catalog.combine (Ok ([], `Complete)) (Error "403"))));
   check bool "revoked report loses pending ownership" true (state.resource_pending_key=None);
-  Updates.read_done state ~key:(Catalog.key second) (Ok []);
+  Updates.read_done state ~request:{Catalog.key=Catalog.key second;owner} (Ok (Catalog.mcp_reading []));
   check bool "revoked late reply cannot restore content" true (state.resource_content=None)
 
 let transport_identity () =
@@ -120,10 +126,96 @@ let transport_identity () =
   check bool "URI collision cannot cross authority" false
     (Catalog.equal_key (Catalog.key report) (Catalog.key mcp))
 
+let history () =
+  let first = revision "one" in
+  let second = revision ~number:2 "two" in
+  let third = revision ~number:3 "three" in
+  let current = report (entry second) in
+  let reading = get (Catalog.report_contents current (detail second [third;second;first] "two")) in
+  first, second, third, current, reading
+
+let revision_requests () =
+  let _, _, _, current, reading = history () in
+  let state = state () in
+  state.resource_content <- Some (Catalog.Report_revision current, reading.parts);
+  state.resource_revision_history <- reading.revisions;
+  let requests = ref [] in
+  let read ~key = requests := key :: !requests;
+    Masc_tui_types.retain_resource_read state ~key in
+  Updates.step_revision state ~direction:Catalog.Older ~read;
+  let first = match !requests with
+    | [Catalog.Report_revision report] -> report
+    | [] | Catalog.Mcp_uri _ :: _ | Catalog.Report_revision _ :: _ -> fail "older request missing" in
+  check int "older exact revision" 1 first.revision.revision;
+  check string "older fixed API path" ("/api/v1/published-artifacts/" ^ id ^ "?revision=1") (Catalog.report_path first);
+  check bool "history is not a loaded body" true (state.resource_content=None);
+  Updates.step_revision state ~direction:Catalog.Older ~read;
+  check int "oldest does not wrap" 1 (List.length !requests);
+  Updates.step_revision state ~direction:Catalog.Newer ~read;
+  Updates.step_revision state ~direction:Catalog.Newer ~read;
+  Updates.step_revision state ~direction:Catalog.Newer ~read;
+  check int "newest does not wrap" 3 (List.length !requests);
+  (match state.resource_pending_key with
+   | Some (Catalog.Report_revision report) -> check int "rapid navigation uses pending revision" 3 report.revision.revision
+   | Some (Catalog.Mcp_uri _) | None -> fail "newest request missing");
+  Masc_tui_types.retain_resource_read state ~key:(Catalog.Mcp_uri "masc://next");
+  Updates.step_revision state ~direction:Catalog.Older ~read;
+  check int "MCP has no report revision requests" 3 (List.length !requests);
+  check bool "switch withdraws report history" true (state.resource_revision_history=[])
+
+let pinned_refresh () =
+  let _, _, third, current, reading = history () in
+  let state = state () in
+  state.resource_content <- Some (Catalog.Report_revision current, reading.parts);
+  state.resource_revision_history <- reading.revisions;
+  Updates.listed state (Ok {Catalog.entries=[entry third];notes=[]});
+  check bool "latest refresh retains older original" true
+    (match state.resource_content with Some (_,parts) -> parts==reading.parts | None -> false);
+  (match Catalog.entry_for_key [entry third] (Catalog.Report_revision current) with
+   | Some (Catalog.Report report) -> check int "detail remains selected revision" 2 report.revision.revision
+   | Some (Catalog.Mcp _) | None -> fail "pinned detail lost");
+  Updates.listed state (Ok {Catalog.entries=[];notes=[]});
+  check bool "withdrawal clears body and history" true
+    (state.resource_content=None && state.resource_revision_history=[] && state.resource_read_owner=None)
+
+let superseded_same_key () =
+  let _, _, _, current, reading = history () in
+  let state = state () in
+  let key = Catalog.Report_revision current in
+  let old_owner = ref () and new_owner = ref () in
+  state.resource_pending_key <- Some key;
+  state.resource_read_owner <- Some new_owner;
+  Updates.read_done state ~request:{Catalog.key;owner=old_owner} (Ok reading);
+  check bool "same key old request cannot settle newer read" true
+    (state.resource_content=None && state.resource_pending_key=Some key);
+  Updates.read_done state ~request:{Catalog.key;owner=new_owner} (Ok reading);
+  check bool "current request admits original" true
+    (match state.resource_content with Some (_,parts) -> parts==reading.parts | None -> false);
+  Updates.read_done state ~request:{Catalog.key;owner=old_owner} (Error "old failure");
+  check bool "detached error cannot replace admitted source" true (state.resource_content_error=None)
+
+let failed_revision_navigation () =
+  let _, _, _, current, reading = history () in
+  let state = state () in
+  let key = Catalog.Report_revision current and owner=ref () in
+  state.resource_revision_history <- reading.revisions;
+  state.resource_pending_key <- Some key; state.resource_read_owner <- Some owner;
+  Updates.read_done state ~request:{Catalog.key;owner} (Error "revision unavailable");
+  let next = ref None in
+  Updates.step_revision state ~direction:Catalog.Newer ~read:(fun ~key -> next := Some key);
+  (match !next with
+   | Some (Catalog.Report_revision report) -> check int "failure can navigate to known neighbor" 3 report.revision.revision
+   | Some (Catalog.Mcp_uri _) | None -> fail "neighbor after failure missing");
+  check bool "failed body never fabricated from history" true (state.resource_content=None)
+
 let () = run "published report resources" ["report reading",[
   test_case "pinned revision and body integrity" `Quick exact_revision;
   test_case "HTML original admission" `Quick html_source;
   test_case "malformed inventory refused" `Quick invalid_catalog;
   test_case "partial inventories and diagnostics" `Quick partial_sources;
   test_case "selection revision and revocation ownership" `Quick selection_and_withdrawal;
-  test_case "separate read authority" `Quick transport_identity]]
+  test_case "separate read authority" `Quick transport_identity;
+  test_case "exact neighboring revision requests" `Quick revision_requests;
+  test_case "pinned refresh and withdrawal" `Quick pinned_refresh;
+  test_case "same key new request ownership" `Quick superseded_same_key;
+  test_case "navigation after a refused revision" `Quick failed_revision_navigation]]

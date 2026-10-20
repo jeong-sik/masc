@@ -53,7 +53,7 @@ let pretty_resource_text ~mime text =
   | None -> text
 
 let resource_document entry
-    (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor =
+    (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor ~revisions =
   let resource = Catalog.metadata entry in
   let present = function
     | Some text when String.trim text <> "" -> text
@@ -65,14 +65,23 @@ let resource_document entry
     | None -> "size unknown"
   in
   let mime = present resource.mime_type in
+  let revision_note = match entry with
+    | Catalog.Mcp _ -> []
+    | Report report ->
+      let available direction = Option.is_some (Catalog.adjacent_revision direction
+        ~current:report revisions) in
+      [Printf.sprintf "**Revision:** %d · %d known · { older%s · } newer%s"
+         report.revision.revision (List.length revisions)
+         (if available Catalog.Older then "" else " unavailable")
+         (if available Catalog.Newer then "" else " unavailable")] in
   let metadata =
     String.concat "\n\n"
-      [ Catalog.origin entry
+      ([ Catalog.origin entry
       ; "**About:** " ^ present resource.description
       ; "**URI:** `" ^ resource.uri ^ "`"
       ; "**Name:** " ^ resource.name
       ; "**Type:** `" ^ mime ^ "` · **Size:** " ^ size
-      ]
+      ] @ revision_note)
   in
   let part_document index (part : Masc_tui_mcp.resource_content) =
     let part_mime = Option.value part.rc_mime_type ~default:mime in
@@ -192,10 +201,7 @@ let render_resources (state : state) =
       | None, None, None -> Option.map Catalog.key selected_resource
     in
     let shown_resource =
-      Option.bind shown_uri (fun uri ->
-          List.find_opt
-            (fun resource -> Catalog.equal_key (Catalog.key resource) uri)
-            rows_list)
+      Option.bind shown_uri (Catalog.entry_for_key rows_list)
     in
     let title =
       match shown_resource with
@@ -237,7 +243,7 @@ let render_resources (state : state) =
            Message_layout.wrap_body ~markdown:document_markdown
              ~max_cells:(max 1 (framed_inner_width pane_cols - 4))
              ~sanitize:Terminal_text.single_line
-             (resource_document resource contents ~error ~requested ~image_cursor:state.resource_image_cursor)
+             (resource_document resource contents ~error ~requested ~image_cursor:state.resource_image_cursor ~revisions:state.resource_revision_history)
          in
          let total_lines = List.length rendered in
          let max_scroll = max 0 (total_lines - content_height) in

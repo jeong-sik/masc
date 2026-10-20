@@ -64,7 +64,7 @@ private final class PcmOutput {
     let rate: Double
     let channels: AVAudioChannelCount
     let ring: PcmRing
-    let notifications = DispatchSource.makeUserDataAddSource(queue: .main)
+    let notifications: DispatchSourceUserDataAdd
     var node: AVAudioSourceNode!
     var state = State.prepared
     var requested: UInt64 = 0
@@ -88,6 +88,11 @@ private final class PcmOutput {
         // Double buffering limits queued live latency; reserve the AU's maximum
         // render quantum too, so callback memory always covers its API bound.
         ring = try PcmRing(capacity: 2 * Int(max(frames, engine.outputNode.auAudioUnit.maximumFramesToRender)))
+        // A suspended DispatchSource traps when released during init unwind.
+        // Create it after throwing validation, activate before any later path
+        // can release it, and never resume it a second time in start().
+        notifications = DispatchSource.makeUserDataAddSource(queue: .main)
+        notifications.activate()
         let queue = ring, wake = notifications
         node = AVAudioSourceNode(format: format) { silent, _, count, output in
             let buffers = UnsafeMutableAudioBufferListPointer(output)
@@ -129,7 +134,6 @@ private final class PcmOutput {
             guard let self, self.state != .stopped else { return }
             do { try self.check(); try self.request() } catch { self.finish(error) }
         }
-        notifications.resume()
         try monitor(device, address(kAudioDevicePropertyDeviceIsAlive))
         try monitor(device, address(kAudioDevicePropertyBufferFrameSize))
         try monitor(device, address(kAudioDevicePropertyNominalSampleRate))

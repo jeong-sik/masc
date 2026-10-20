@@ -19,6 +19,7 @@ let process_termination_grace_s = 2.0
    closes, so the documented exit code can name why it stopped. *)
 let exit_reap_grace_s = 2.0
 let stderr_chunk_bytes = 4096
+let stdout_drain_chunk_bytes = 4096
 let stderr_tail_bytes = 4096
 let max_wire_line_bytes = 8 * 1024 * 1024
 
@@ -565,7 +566,32 @@ let drain_stderr flow tail =
     Log.Runtime_agent.debug "Muse Code stderr drain failed: %s" (Printexc.to_string exn)
 ;;
 
-let terminate_spawned_process ~clock proc stdin_w =
+(* The host closes its stdout when it exits. [Eio.Process.await] cannot finish
+   once the switch that owns the host is cancelled (the fiber that reaps the
+   host is cancelled with the switch, and releasing the switch kills the host
+   outright), so a cancelled owner observes the exit through that closure
+   instead. A grandchild that keeps the pipe open costs the whole grace period
+   and nothing else. *)
+let wait_for_stdout_close ~clock stdout_r =
+  let scratch = Cstruct.create stdout_drain_chunk_bytes in
+  let rec drain () =
+    match Eio.Flow.single_read stdout_r scratch with
+    | (_ : int) -> drain ()
+    | exception End_of_file -> ()
+  in
+  try Eio.Time.with_timeout_exn clock process_termination_grace_s drain with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Eio.Time.Timeout -> ()
+  | exn ->
+    Log.Runtime_agent.debug "Muse Code stdout drain failed: %s" (Printexc.to_string exn)
+;;
+
+(* The host is asked to stop and given [process_termination_grace_s] to exit
+   before it is killed. A host that is killed instead of exiting never
+   releases the session it holds, and the next resume of that session is
+   refused while the lease is held, so a cancelled owner waits for the exit as
+   well. *)
+let terminate_spawned_process ~clock proc stdin_w stdout_r =
   let owning_switch_cancelled = Eio.Fiber.is_cancelled () in
   Eio.Cancel.protect (fun () ->
     (try Eio.Flow.close stdin_w with
@@ -578,8 +604,9 @@ let terminate_spawned_process ~clock proc stdin_w =
        Log.Runtime_agent.debug
          "Muse Code termination signal failed: %s"
          (Printexc.to_string exn));
-    if not owning_switch_cancelled
-    then (
+    if owning_switch_cancelled
+    then wait_for_stdout_close ~clock stdout_r
+    else (
       try
         Eio.Time.with_timeout_exn clock process_termination_grace_s (fun () ->
           let (_ : Eio.Process.exit_status) = Eio.Process.await proc in
@@ -617,6 +644,15 @@ let window_for_phase config = function
   | Awaiting_admission -> Some config.admission_timeout_s
   | Model_turn -> config.timeout_s
   | Tool_item_running -> None
+;;
+
+(* Whether the complete [turn/start] request has left this process. The host
+   takes a command in durably before it acknowledges it, so from then on a
+   write or a wait that ran out of time leaves a turn the host may be running;
+   before it, the line was not complete and nothing started. *)
+let turn_written = function
+  | Awaiting_admission -> false
+  | Model_turn | Tool_item_running -> true
 ;;
 
 type io =
@@ -749,19 +785,25 @@ let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mg
           | exn -> protocol_error "stdout read" (Printexc.to_string exn)
       in
       Fun.protect
-        ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)
+        ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w stdout_r)
         (fun () ->
-           run
-             { send
-             ; send_context
-             ; on_subscription_usage
-             ; receive
-             ; set_receive_phase = (fun phase -> receive_phase := phase)
-             ; next_id =
-                 (fun () ->
-                   incr last_id;
-                   !last_id)
-             }))
+           (* A write that outlasts its window raises where it is made, mid-turn
+              included, so the phase decides whether the turn was accepted. *)
+           try
+             run
+               { send
+               ; send_context
+               ; on_subscription_usage
+               ; receive
+               ; set_receive_phase = (fun phase -> receive_phase := phase)
+               ; next_id =
+                   (fun () ->
+                     incr last_id;
+                     !last_id)
+               }
+           with
+           | Idle_timeout seconds ->
+             Error (Timeout { seconds; turn_accepted = turn_written !receive_phase })))
 ;;
 
 (* ── Protocol ─────────────────────────────────────────────────────────── *)

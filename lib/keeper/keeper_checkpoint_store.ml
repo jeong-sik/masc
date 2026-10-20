@@ -902,11 +902,37 @@ let archive_agent_core_history_best_effort ~session_dir ~retained ckpt =
         ]
       ()
 
+(* The bytes go into one allocation of the size the descriptor reports, and
+   the identity returned is the descriptor's, so it names the file the bytes
+   came from: the lineage reuse in [load_ref_locked] relies on that. The bytes
+   are refused as changed while read when the descriptor is not the regular
+   file [lstat] saw at the path, or when the file ends early, or when its
+   identity moved during the read: the file was replaced or rewritten in
+   place under the read, and the bytes are not one version of it. *)
 let load_canonical_bytes_strict path =
   let unix_error error operation argument =
     Io_error
       (Printf.sprintf "%s(%s): %s"
          operation argument (Unix.error_message error))
+  in
+  let changed_while_read () =
+    Read_failed
+      { cause = Changed_while_read
+      ; detail = "canonical checkpoint changed while it was read: " ^ path
+      }
+  in
+  let read_exact fd size =
+    let bytes = Bytes.create size in
+    let rec fill offset =
+      if offset = size
+      then Some (Bytes.unsafe_to_string bytes)
+      else
+        match Unix.read fd bytes offset (size - offset) with
+        | 0 -> None
+        | count -> fill (offset + count)
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> fill offset
+    in
+    fill 0
   in
   let read () =
     match Unix.lstat path with
@@ -915,24 +941,23 @@ let load_canonical_bytes_strict path =
       Error (unix_error error operation argument)
     | stat when stat.Unix.st_kind <> Unix.S_REG ->
       Error (Io_error ("canonical checkpoint is not a regular file: " ^ path))
-    | stats ->
-      let identity_before = canonical_identity_of_stats stats in
+    | path_stats ->
       (try
          let fd = Unix.openfile path [ Unix.O_CLOEXEC; Unix.O_RDONLY ] 0 in
-         let channel =
-           match Unix.in_channel_of_descr fd with
-           | channel -> channel
-           | exception exn -> Unix.close fd; raise exn
-         in
-         let content =
-           (* For a stable-size regular file, input_all allocates from the
-              descriptor's remaining length without a final copy.
-              The standard reader also handles a file growing or shrinking
-              during the read. Identity and source admission stay below. *)
-           Fun.protect ~finally:(fun () -> close_in channel)
-             (fun () -> In_channel.input_all channel)
-         in
-         Ok (Some (identity_before, content))
+         Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+           let opened = Unix.fstat fd in
+           if opened.Unix.st_kind <> Unix.S_REG
+              || opened.Unix.st_dev <> path_stats.Unix.st_dev
+              || opened.Unix.st_ino <> path_stats.Unix.st_ino
+           then Error (changed_while_read ())
+           else (
+             let identity = canonical_identity_of_stats opened in
+             match read_exact fd identity.size with
+             | None -> Error (changed_while_read ())
+             | Some content ->
+               if canonical_identity_equal identity (canonical_identity_of_stats (Unix.fstat fd))
+               then Ok (Some (identity, content))
+               else Error (changed_while_read ())))
        with
        | Unix.Unix_error (error, operation, argument) ->
          Error (unix_error error operation argument))

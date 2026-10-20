@@ -11,7 +11,7 @@ related: ["0425", "schedule-history-and-outcome", "wiki-lint-and-page-contracts"
 # RFC: Operator quiz
 
 - Status: Draft. Times are UTC unless marked.
-- Operator request: Board `p-c15d88ca431ebdcc30bd9869a212c1df`. The author did not re-read the post. The text below is the paraphrase given in the task brief (원문 미직독).
+- Operator request: Board `p-c15d88ca431ebdcc30bd9869a212c1df` (2026-10-20T01:23:52Z), verbatim: "야 그리고 이거 지식 격차나 이해부채, 운영자에게 자꾸 부채가 쌓이는데 이거 해결할 어떤 장치? / Quiz Lane ? 음 / 되새김 Lane? ㅋㅋ / 음 이거 켜면 / 매일 또는 지정한 시간마다 문제 - 채점 - 평균 점수 및 시험 보는 기능 있음 좋겠음 / 내가 부채가 계속 쌓이거든..."
 - Coordinates are `path:line` at `b5a3e7540a3`. §16 lists what the author read directly and what came from research agents.
 - The file slug keeps the word "lane" because the request used it. The feature is not a Lane (§3.8, D1).
 

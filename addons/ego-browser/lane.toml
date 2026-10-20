@@ -1,0 +1,38 @@
+id = "ego-browser"
+revision = "0.1.0"
+title = "ego browser companion"
+contributions = ["observe"]
+image = "masc-lane-ego-browser:0.1.0"
+command = ["python3", "server.py"]
+
+[world.outputs.browser]
+lanes = ["browser/session"]
+
+[world.skills]
+directory = "skills"
+
+[resources]
+cpus = 0.5
+memory_bytes = 134217728
+pids = 16
+max_reply_bytes = 4194304
+
+[interface]
+refresh_policy = "source_changes"
+presentation = '''{
+ "description":"Native ego task-space observations; actions run through the explicit host companion",
+ "readings":[
+  {"lane_id":"browser/session","path":["status"],"label":"Result","format":"text"},
+  {"lane_id":"browser/session","path":["session","name"],"label":"Task space","format":"text"},
+  {"lane_id":"browser/session","path":["url"],"label":"Page","format":"text"},
+  {"lane_id":"browser/session","path":["snapshot"],"label":"Observed page","format":"text"}
+ ]
+}'''
+binding_schema = '''{
+ "type":"object","additionalProperties":false,"required":["sources"],
+ "properties":{"sources":{"type":"array","minItems":1,"items":{
+  "type":"object","additionalProperties":false,"required":["source_id","kind","path"],
+  "properties":{"source_id":{"type":"string","const":"ego-browser"},
+   "kind":{"type":"string","const":"snapshot_file"},"path":{"type":"string","minLength":1}}
+ }}}
+}'''

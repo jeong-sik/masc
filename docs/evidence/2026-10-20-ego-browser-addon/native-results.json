@@ -1,0 +1,376 @@
+[
+  {
+    "task": "hover",
+    "exit": 0,
+    "result": {
+      "request_id": "final-plugin-hover-1-validated",
+      "operation": "batch",
+      "status": "postcondition_met",
+      "session": {
+        "name": "MASC ego add-on proof 20261020",
+        "epoch": "00794417-5f10-4fc4-8587-ef1c1b4ee73e",
+        "owner_identity": "0b5269c5-7af8-461b-831a-3171a4e5df26",
+        "native_name": "MASC ego add-on proof 20261020 [masc:0b5269c5-7af8-461b-831a-3171a4e5df26]",
+        "space_id": 3,
+        "page": "p1"
+      },
+      "completed_steps": 4,
+      "failed_step": null,
+      "url": "http://127.0.0.1:52390/?task=hover&run=final-plugin-hover-1-validated",
+      "title": "Browser interaction pilot",
+      "snapshot": "[p1 \"Browser interaction pilot\" | space \"MASC ego add-on proof 20261020 [masc:0b5269c5-7af8-461b-831a-3171a4e5df26]\"(3): 1 managed, 0 untracked \u2014 p1* \"Browser interaction pilot\"]\nroot\n  heading\n    text \"Browser interaction pilot\"\n  paragraph\n    text \"Hover Reports, then choose Export CSV. Selectors: #reports and #export-csv.\"\n  container\n    button [ref=21]\n      text \"Reports\"\n    button [ref=22]\n      text \"Export CSV\"\n  output [ref=23]\n    text \"Completed: hover\"\n",
+      "error": null,
+      "screenshot": {
+        "path": "/private/tmp/ego-addon-live-20261020/final-state/5f5df69429701722c0523456a8763c947c3e4d1a6d661ed63712728b7940fa1c.png",
+        "sha256": "d1e7828041bc8d4bc6d40d5338cecee13c176fad729e23eaf2276ba46b7c9b9f"
+      }
+    },
+    "events": [
+      {
+        "run": "final-plugin-hover-1-validated",
+        "task": "hover",
+        "event": "loaded",
+        "at": 7.400000095367432,
+        "width": 1200,
+        "height": 929,
+        "received_at": 1792496287.678592
+      },
+      {
+        "run": "final-plugin-hover-1-validated",
+        "task": "hover",
+        "event": "hover",
+        "at": 83,
+        "trusted": true,
+        "received_at": 1792496287.755716
+      },
+      {
+        "run": "final-plugin-hover-1-validated",
+        "task": "hover",
+        "event": "click",
+        "at": 165.40000009536743,
+        "trusted": true,
+        "received_at": 1792496287.836896
+      },
+      {
+        "run": "final-plugin-hover-1-validated",
+        "task": "hover",
+        "event": "completed",
+        "at": 165.70000004768372,
+        "trusted": true,
+        "received_at": 1792496287.837125
+      }
+    ],
+    "trusted_completion": true,
+    "duplicate_equal": true,
+    "events_after_duplicate_equal": true
+  },
+  {
+    "task": "scroll",
+    "exit": 0,
+    "result": {
+      "request_id": "final-plugin-scroll-1-validated",
+      "operation": "batch",
+      "status": "postcondition_met",
+      "session": {
+        "name": "MASC ego add-on proof 20261020",
+        "epoch": "00794417-5f10-4fc4-8587-ef1c1b4ee73e",
+        "owner_identity": "0b5269c5-7af8-461b-831a-3171a4e5df26",
+        "native_name": "MASC ego add-on proof 20261020 [masc:0b5269c5-7af8-461b-831a-3171a4e5df26]",
+        "space_id": 3,
+        "page": "p1"
+      },
+      "completed_steps": 2,
+      "failed_step": null,
+      "url": "http://127.0.0.1:52390/?task=scroll&run=final-plugin-scroll-1-validated",
+      "title": "Browser interaction pilot",
+      "snapshot": "[p1 \"Browser interaction pilot\" | space \"MASC ego add-on proof 20261020 [masc:0b5269c5-7af8-461b-831a-3171a4e5df26]\"(3): 1 managed, 0 untracked \u2014 p1* \"Browser interaction pilot\"]\nroot\n  container\n    heading\n      text \"Archive\"\n    button [ref=24]\n      text \"Archive report\"\n  output [ref=25]\n    text \"Completed: scroll\"\n",
+      "error": null,
+      "screenshot": null
+    },
+    "events": [
+      {
+        "run": "final-plugin-scroll-1-validated",
+        "task": "scroll",
+        "event": "loaded",
+        "at": 5.799999952316284,
+        "width": 1200,
+        "height": 929,
+        "received_at": 1792496289.343935
+      },
+      {
+        "run": "final-plugin-scroll-1-validated",
+        "task": "scroll",
+        "event": "scroll",
+        "at": 72.70000004768372,
+        "y": 30.5,
+        "received_at": 1792496289.4111629
+      },
+      {
+        "run": "final-plugin-scroll-1-validated",
+        "task": "scroll",
+        "event": "scroll",
+        "at": 105.59999990463257,
+        "y": 115.5,
+        "received_at": 1792496289.444472
+      },
+      {
+        "run": "final-plugin-scroll-1-validated",
+        "task": "scroll",
+        "event": "scroll",
+        "at": 139.5,
+        "y": 243.5,
+        "received_at": 1792496289.477993
+      },
+      {
+        "run": "final-plugin-scroll-1-validated",
+        "task": "scroll",
+        "event": "scroll",
+        "at": 181.29999995231628,
+        "y": 404.5,
+        "received_at": 1792496289.5205061
+      },
+      {
+        "run": "final-plugin-scroll-1-validated",
+        "task": "scroll",
+        "event": "scroll",
+        "at": 205.90000009536743,
+        "y": 586.5,
+        "received_at": 1792496289.544428
+      },
+      {
+        "run": "final-plugin-scroll-1-validated",
+        "task": "scroll",
+        "event": "scroll",
+        "at": 247.79999995231628,
+        "y": 780,
+        "received_at": 1792496289.586858
+      },
+      {
+        "run": "final-plugin-scroll-1-validated",
+        "task": "scroll",
+        "event": "scroll",
+        "at": 282.2000000476837,
+        "y": 973,
+        "received_at": 1792496289.621224
+      },
+      {
+        "run": "final-plugin-scroll-1-validated",
+        "task": "scroll",
+        "event": "scroll",
+        "at": 306.09999990463257,
+        "y": 1155.5,
+        "received_at": 1792496289.645123
+      },
+      {
+        "run": "final-plugin-scroll-1-validated",
+        "task": "scroll",
+        "event": "scroll",
+        "at": 352.40000009536743,
+        "y": 1156,
+        "received_at": 1792496289.691575
+      },
+      {
+        "run": "final-plugin-scroll-1-validated",
+        "task": "scroll",
+        "event": "click",
+        "at": 541.7999999523163,
+        "trusted": true,
+        "received_at": 1792496289.881236
+      },
+      {
+        "run": "final-plugin-scroll-1-validated",
+        "task": "scroll",
+        "event": "completed",
+        "at": 542.2999999523163,
+        "trusted": true,
+        "received_at": 1792496289.881394
+      }
+    ],
+    "trusted_completion": true,
+    "duplicate_equal": true,
+    "events_after_duplicate_equal": true
+  },
+  {
+    "task": "drag",
+    "exit": 0,
+    "result": {
+      "request_id": "final-plugin-drag-1-validated",
+      "operation": "batch",
+      "status": "postcondition_met",
+      "session": {
+        "name": "MASC ego add-on proof 20261020",
+        "epoch": "00794417-5f10-4fc4-8587-ef1c1b4ee73e",
+        "owner_identity": "0b5269c5-7af8-461b-831a-3171a4e5df26",
+        "native_name": "MASC ego add-on proof 20261020 [masc:0b5269c5-7af8-461b-831a-3171a4e5df26]",
+        "space_id": 3,
+        "page": "p1"
+      },
+      "completed_steps": 2,
+      "failed_step": null,
+      "url": "http://127.0.0.1:52390/?task=drag&run=final-plugin-drag-1-validated",
+      "title": "Browser interaction pilot",
+      "snapshot": "[p1 \"Browser interaction pilot\" | space \"MASC ego add-on proof 20261020 [masc:0b5269c5-7af8-461b-831a-3171a4e5df26]\"(3): 1 managed, 0 untracked \u2014 p1* \"Browser interaction pilot\"]\nroot\n  heading\n    text \"Browser interaction pilot\"\n  paragraph\n    text \"Drag Task Alpha to Done. Selectors: #card and #done.\"\n  container \"Done\"\n    heading\n      text \"Done\"\n    button [ref=26]\n      text \"Task Alpha\"\n  output [ref=27]\n    text \"Completed: drag\"\n",
+      "error": null,
+      "screenshot": {
+        "path": "/private/tmp/ego-addon-live-20261020/final-state/6e3e934eaec0abcdf8125aca47df256d8fbcd2c70e991c986390f65812b04a34.png",
+        "sha256": "a14086ca58ba6fc68df7d9f85eaa77c227c54a3e88cd75539135c580e4e56636"
+      }
+    },
+    "events": [
+      {
+        "run": "final-plugin-drag-1-validated",
+        "task": "drag",
+        "event": "loaded",
+        "at": 11.200000047683716,
+        "width": 1200,
+        "height": 929,
+        "received_at": 1792496290.3499289
+      },
+      {
+        "run": "final-plugin-drag-1-validated",
+        "task": "drag",
+        "event": "pointerdown",
+        "at": 154.59999990463257,
+        "trusted": true,
+        "x": 132,
+        "y": 240,
+        "received_at": 1792496290.49383
+      },
+      {
+        "run": "final-plugin-drag-1-validated",
+        "task": "drag",
+        "event": "pointerup",
+        "at": 214.59999990463257,
+        "trusted": true,
+        "x": 455,
+        "y": 240,
+        "inside": true,
+        "received_at": 1792496290.554312
+      },
+      {
+        "run": "final-plugin-drag-1-validated",
+        "task": "drag",
+        "event": "completed",
+        "at": 215.20000004768372,
+        "trusted": true,
+        "received_at": 1792496290.5553129
+      }
+    ],
+    "trusted_completion": true,
+    "duplicate_equal": true,
+    "events_after_duplicate_equal": true
+  },
+  {
+    "task": "cross-drag",
+    "exit": 1,
+    "result": {
+      "request_id": "final-plugin-cross-drag-1-validated",
+      "operation": "batch",
+      "status": "outcome_unknown",
+      "session": {
+        "name": "MASC ego add-on proof 20261020",
+        "epoch": "00794417-5f10-4fc4-8587-ef1c1b4ee73e",
+        "owner_identity": "0b5269c5-7af8-461b-831a-3171a4e5df26",
+        "native_name": "MASC ego add-on proof 20261020 [masc:0b5269c5-7af8-461b-831a-3171a4e5df26]",
+        "space_id": 3,
+        "page": "p1"
+      },
+      "completed_steps": 2,
+      "failed_step": null,
+      "url": "http://127.0.0.1:52390/?task=cross-drag&run=final-plugin-cross-drag-1-validated",
+      "title": "Browser interaction pilot",
+      "snapshot": "[p1 \"Browser interaction pilot\" | space \"MASC ego add-on proof 20261020 [masc:0b5269c5-7af8-461b-831a-3171a4e5df26]\"(3): 1 managed, 0 untracked \u2014 p1* \"Browser interaction pilot\"]\nroot\n  container \"Done\"\n    heading\n      text \"Done\"\n  output [ref=28]\n    text \"Not completed\"\n",
+      "error": {
+        "code": null,
+        "message": "page.waitForSelector timed out after 10000ms: text=\"Completed: cross-drag\""
+      },
+      "screenshot": null
+    },
+    "events": [
+      {
+        "run": "final-plugin-cross-drag-1-validated",
+        "task": "cross-drag",
+        "event": "loaded",
+        "at": 13.100000143051147,
+        "width": 1200,
+        "height": 929,
+        "received_at": 1792496292.119837
+      },
+      {
+        "run": "final-plugin-cross-drag-1-validated",
+        "task": "cross-drag",
+        "event": "scroll",
+        "at": 103.70000004768372,
+        "y": 33.5,
+        "received_at": 1792496292.2110279
+      },
+      {
+        "run": "final-plugin-cross-drag-1-validated",
+        "task": "cross-drag",
+        "event": "scroll",
+        "at": 137.40000009536743,
+        "y": 125,
+        "received_at": 1792496292.244351
+      },
+      {
+        "run": "final-plugin-cross-drag-1-validated",
+        "task": "cross-drag",
+        "event": "scroll",
+        "at": 170.80000019073486,
+        "y": 264,
+        "received_at": 1792496292.2777731
+      },
+      {
+        "run": "final-plugin-cross-drag-1-validated",
+        "task": "cross-drag",
+        "event": "scroll",
+        "at": 196,
+        "y": 438.5,
+        "received_at": 1792496292.3031008
+      },
+      {
+        "run": "final-plugin-cross-drag-1-validated",
+        "task": "cross-drag",
+        "event": "scroll",
+        "at": 245.60000014305115,
+        "y": 636,
+        "received_at": 1792496292.352837
+      },
+      {
+        "run": "final-plugin-cross-drag-1-validated",
+        "task": "cross-drag",
+        "event": "scroll",
+        "at": 302.80000019073486,
+        "y": 845.5,
+        "received_at": 1792496292.410191
+      },
+      {
+        "run": "final-plugin-cross-drag-1-validated",
+        "task": "cross-drag",
+        "event": "scroll",
+        "at": 1279.6000001430511,
+        "y": 1054.5,
+        "received_at": 1792496293.387972
+      },
+      {
+        "run": "final-plugin-cross-drag-1-validated",
+        "task": "cross-drag",
+        "event": "scroll",
+        "at": 1304.8000001907349,
+        "y": 1252,
+        "received_at": 1792496293.4120991
+      },
+      {
+        "run": "final-plugin-cross-drag-1-validated",
+        "task": "cross-drag",
+        "event": "scroll",
+        "at": 1350,
+        "y": 1371,
+        "received_at": 1792496293.458713
+      }
+    ],
+    "trusted_completion": false,
+    "duplicate_equal": true,
+    "events_after_duplicate_equal": true
+  }
+]

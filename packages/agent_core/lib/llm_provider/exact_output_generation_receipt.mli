@@ -47,11 +47,6 @@ val snapshot : t -> snapshot
 val snapshot_phase : snapshot -> effect_phase
 val snapshot_dispatch_count : snapshot -> int
 val snapshot_generation_dispatched : snapshot -> bool
-val snapshot_http_status : snapshot -> int option
-val snapshot_provider_trace : snapshot -> provider_trace option
 val snapshot_call_id : snapshot -> call_id
 val snapshot_plan_fingerprint : snapshot -> string
 val snapshot_request_body_sha256 : snapshot -> string
-val snapshot_catalog_generation : snapshot -> Exact_output_resolver.catalog_generation
-val snapshot_catalog_evidence : snapshot -> Exact_output_resolver.catalog_evidence
-val snapshot_target_identity : snapshot -> Exact_output_resolver.target_identity

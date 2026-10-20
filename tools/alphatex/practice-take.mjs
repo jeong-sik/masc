@@ -30,9 +30,9 @@ export async function openPracticeTake({ path, project, track, sound, backing })
   await mkdir(path, { mode: 0o700 }) // no recursive creation or reuse of an existing take
   await jsonFile(join(path, 'context.json'), { schemaVersion: 1, kind: 'practice-take-context', project, track, backing })
   const eventsPath = join(path, 'events.jsonl'), events = await open(eventsPath, 'wx', 0o600)
-  let armed = null, count = 0n, final = null, finished = false
+  let armed = null, count = 0n, finished = false, status = 'opening'
   const diagnostics = () => ({ kind: 'practice-take', path, packets: String(count), armed: armed !== null,
-    status: final?.status ?? (finished ? 'failed' : armed ? 'recording' : 'opening') })
+    status })
   return {
     diagnostics,
     async arm(input, renderClock) {
@@ -44,7 +44,7 @@ export async function openPracticeTake({ path, project, track, sound, backing })
       nominalMidiFrame(renderClock.anchor.hostTime, input.clock, renderClock)
       const value = { schemaVersion: 1, kind: 'practice-take-arm', input: structuredClone(input), renderClock: structuredClone(renderClock) }
       await jsonFile(join(path, 'armed.json'), value)
-      armed = value
+      armed = value; status = 'recording'
     },
     async append(packet) {
       if (!armed || finished) throw new Error('Practice take is not recording')
@@ -56,27 +56,34 @@ export async function openPracticeTake({ path, project, track, sound, backing })
       await events.writeFile(JSON.stringify(row) + '\n'); await events.sync()
       count++
     },
-    async finish({ failure, inputFinal, monitorFinal }) {
+    async finish({ failure, inputFinal, monitorFinal, signal, onCommit = () => {} }) {
       if (finished) throw new Error('Practice take is already closed')
-      finished = true
-      let error = failure === undefined ? undefined : failure instanceof Error ? failure : new Error('Practice recording failed', { cause: failure })
-      try { await events.sync() } catch (cause) { error ??= cause }
-      try { await events.close() } catch (cause) { error ??= cause }
-      if (!error && armed && (inputFinal?.source !== armed.input.source.id || inputFinal?.success !== true || inputFinal.admittedPackets !== String(count)
-          || inputFinal.acknowledgedPackets !== String(count) || inputFinal.discardedPackets !== '0'
-          || !isDeepStrictEqual(monitorFinal?.pcm?.clock, armed.renderClock) || monitorFinal?.pcm?.final?.success !== true || !monitorFinal.pcm.nativeClosed || !monitorFinal.pcm.settled
-          || (monitorFinal.worker && (!monitorFinal.worker.closed || !monitorFinal.worker.terminalReceived)))) {
-        error = new Error('Practice recording did not confirm input/audio retirement')
-      }
-      const value = { schemaVersion: 1, kind: 'practice-take', status: error ? 'failed' : armed ? 'complete' : 'cancelled',
-        packets: String(count), error: error?.message ?? null, inputFinal: inputFinal ?? null, monitorFinal: monitorFinal ?? null,
-        files: { context: { file: 'context.json', sha256: await digest(join(path, 'context.json')) },
+      finished = true; status = 'finalizing'
+      try {
+        let error = failure === undefined ? undefined : failure instanceof Error ? failure : new Error('Practice recording failed', { cause: failure })
+        try { await events.sync() } catch (cause) { error ??= cause }
+        try { await events.close() } catch (cause) { error ??= cause }
+        if (!error && armed && (inputFinal?.source !== armed.input.source.id || inputFinal?.success !== true || inputFinal.admittedPackets !== String(count)
+            || inputFinal.acknowledgedPackets !== String(count) || inputFinal.discardedPackets !== '0'
+            || !isDeepStrictEqual(monitorFinal?.pcm?.clock, armed.renderClock) || monitorFinal?.pcm?.final?.success !== true || !monitorFinal.pcm.nativeClosed || !monitorFinal.pcm.settled
+            || (monitorFinal.worker && (!monitorFinal.worker.closed || !monitorFinal.worker.terminalReceived)))) {
+          error = new Error('Practice recording did not confirm input/audio retirement')
+        }
+        const files = { context: { file: 'context.json', sha256: await digest(join(path, 'context.json')) },
           events: { file: 'events.jsonl', sha256: await digest(eventsPath) },
-          ...(armed ? { arm: { file: 'armed.json', sha256: await digest(join(path, 'armed.json')) } } : {}) } }
-      await jsonFile(join(path, 'take.json'), value)
-      final = value
-      if (error) throw error
-      return structuredClone(final)
+          ...(armed ? { arm: { file: 'armed.json', sha256: await digest(join(path, 'armed.json')) } } : {}) }
+        if (signal?.aborted) error ??= signal.reason instanceof Error ? signal.reason : new Error('Practice recording cancelled', { cause: signal.reason })
+        // Seal the terminal decision synchronously after the last cancellation
+        // check. Receipt publication still joins IO and may fail; cancellation
+        // after this boundary cannot rewrite an already-decided take.
+        onCommit()
+        const value = { schemaVersion: 1, kind: 'practice-take', status: error ? 'failed' : armed ? 'complete' : 'cancelled',
+          packets: String(count), error: error?.message ?? null, inputFinal: inputFinal ?? null, monitorFinal: monitorFinal ?? null, files }
+        await jsonFile(join(path, 'take.json'), value)
+        status = value.status
+        if (error) throw error
+        return structuredClone(value)
+      } catch (error) { status = 'failed'; throw error }
     },
   }
 }

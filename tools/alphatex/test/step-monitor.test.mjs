@@ -274,3 +274,20 @@ for(const reason of [null,false,0,''])test(`falsy cancellation while take storag
     assert.equal(JSON.parse(await readFile(join(path,'take.json'),'utf8')).status,'failed')
   } finally {gate.resolve();owner.stop();await owner.completion.catch(()=>{});await rm(root,{recursive:true,force:true})}
 })
+
+test('cancellation after children close but before take decision is sealed remains a failed take', async () => {
+  const root=await mkdtemp(join(tmpdir(),'practice-record-')),path=join(root,'take'),gate=deferred(),entered=deferred()
+  const editor={...newEditor(),project:{...newEditor().project,sound}},owned=io({pcmMode:'paced',inputMode:'empty'})
+  const owner=openStepInput({source:'10',practice:true,recording:{path},
+    audio:{sound,output:'owned',backing:phraseBacking(editor.project,'track-1')},getEditor:()=>editor,
+    enqueue:action=>action(),adoptEditor(){assert.fail('recording edited notes')},openInput:owned.openInput,
+    openMonitor:options=>openStepMonitor({...options,...owned}),
+    async openTake(context){const take=await openPracticeTake(context);return {...take,async finish(options){entered.resolve();await gate.promise;return take.finish(options)}}} })
+  try {
+    await owner.ready;owner.stop();await entered.promise;owned.assertClosed()
+    owner.cancel(null);gate.resolve()
+    await assert.rejects(owner.completion,error=>error.cause===null)
+    const final=JSON.parse(await readFile(join(path,'take.json'),'utf8'))
+    assert.equal(final.status,'failed');assert.notEqual(final.error,null)
+  } finally {gate.resolve();owner.stop();await owner.completion.catch(()=>{});await rm(root,{recursive:true,force:true})}
+})

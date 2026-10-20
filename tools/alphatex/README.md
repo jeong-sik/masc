@@ -177,6 +177,9 @@ not measure physical latency or compensate hardware drift.
 content hashes and `complete`, `cancelled` or `failed` status. Missing/invalid
 final metadata is an incomplete take, never success. Stop before arming leaves
 a cancelled empty take; input/audio/storage failures retain recoverable files.
+Cancellation remains owned while files close and hashes are computed. The final
+decision is then sealed before receipt publication; later cancellation cannot
+rewrite that decision, while publication errors still reject completion.
 Existing directories/files are never reused. This is raw MIDI capture; take
 import into arrangement regions and simultaneous WAV input use separate flows.
 Diagnostics include the take path/status/count without exposing preset bytes.

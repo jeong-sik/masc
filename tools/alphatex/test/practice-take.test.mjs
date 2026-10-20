@@ -71,3 +71,12 @@ test('clock mismatch, failed retirement and manifest publication failure cannot 
     assert.equal(await readFile(join(root,'collision','take.json'),'utf8'),'existing')
   } finally {await rm(root,{recursive:true,force:true})}
 })
+
+test('terminal decision is sealed before publication; later cancellation does not rewrite the receipt', async () => {
+  const root=await mkdtemp(join(tmpdir(),'practice-take-')),path=join(root,'take'),signal=new AbortController()
+  try {
+    const take=await openPracticeTake(context(path));await take.arm(input,clock)
+    const final=await take.finish({...receipts(0),signal:signal.signal,onCommit(){signal.abort(new Error('after terminal decision'))}})
+    assert.equal(final.status,'complete');assert.equal((await json(join(path,'take.json'))).status,'complete')
+  } finally {await rm(root,{recursive:true,force:true})}
+})

@@ -131,7 +131,7 @@ export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState
   const cancellation = new AbortController()
   const stopped = new Error('Step input stopped before arming')
   let pending = null, stopping = false, controlsStopped = false, input = null, failure = null
-  let monitor = null, take = null, admission, inputFinal
+  let monitor = null, take = null, admission, inputFinal, sealed = false
   const ready = (async () => {
     if (takeContext) take = await openTake(takeContext)
     cancellation.signal.throwIfAborted()
@@ -176,7 +176,8 @@ export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState
     monitor?.stop()
     try { await monitor?.completion } catch (error) { failure ??= inputFailure(error) }
     pending = null
-    try { await take?.finish({ failure: failure ?? undefined, inputFinal, monitorFinal: monitor?.diagnostics() }) } catch (error) { failure ??= inputFailure(error) }
+    try { await take?.finish({ failure: failure ?? undefined, inputFinal, monitorFinal: monitor?.diagnostics(), signal: cancellation.signal, onCommit() { sealed = true } }) } catch (error) { failure ??= inputFailure(error) }
+    sealed = true
     if (failure) throw failure
   })()
   completion.catch(() => {})
@@ -196,5 +197,8 @@ export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState
       if (controlsStopped || pending !== null) throw new Error('Release all keys and finish draining before changing step input')
       return stepControl(getEditor(), action)
     },
-    cancel(reason = new Error('Step input context changed')) { cancellation.abort(inputFailure(reason)) } }
+    cancel(reason = new Error('Step input context changed')) {
+      if (sealed) return
+      failure ??= inputFailure(reason); cancellation.abort(failure)
+    } }
 }

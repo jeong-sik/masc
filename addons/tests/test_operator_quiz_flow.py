@@ -55,8 +55,15 @@ class FakeHost:
 
     def page(self, request: dict, records: list[dict], head: str | None) -> dict:
         after = request["after"]
+        since = request.get("since")
         cursors = [str(index).zfill(6) for index in range(len(records))]
-        start = 0 if after is None else cursors.index(after) + 1
+        if after is not None and since is not None:
+            raise AssertionError("a read names after or since, not both")
+        if since is not None:
+            made = [record.get("created_at", record.get("committed_at")) for record in records]
+            start = next((i for i, at in enumerate(made) if at >= since), len(records))
+        else:
+            start = 0 if after is None else cursors.index(after) + 1
         taken = list(range(start, min(start + self.page_size, len(records))))
         body = {"status": "records", "source_id": request["source_id"]}
         if head is not None:
@@ -315,7 +322,31 @@ class Sessions(Base):
         self.host.run(self.flow)
         reads = [r for r in self.host.listed if r["kind"] == "read_records" and r["request_id"].startswith(second)]
         self.assertEqual(reads[0]["after"], "000002")
+        self.assertNotIn("since", reads[0])
         self.assertEqual([m["pin"] for m in seen[0]["material"]], ["p-4"])
+
+    def test_the_first_session_reads_only_what_was_made_since_the_quiz_began(self):
+        session_id = self.flow.compose("act-1", 1, BINDING, 3.5)
+        self.host.board.append(post(5, "a decision made after the quiz was turned on"))
+        seen = []
+        self.host.author = lambda payload: seen.append(payload) or {"status": "outcome_unknown"}
+        self.host.run(self.flow)
+        reads = [r for r in self.host.listed if r["kind"] == "read_records" and r["request_id"].startswith(session_id)]
+        self.assertEqual((reads[0]["after"], reads[0]["since"]), (None, 3.5))
+        self.assertEqual([m["pin"] for m in seen[0]["material"]], ["p-5"])
+
+    def test_a_later_session_with_no_asked_session_reads_since_the_first_one(self):
+        self.flow.compose("act-1", 1, BINDING, 3.5)
+        self.host.board.append(post(5, "a decision made after the quiz was turned on"))
+        self.host.author = lambda payload: {"status": "outcome_unknown"}
+        self.host.run(self.flow)
+        second = self.flow.compose("act-2", 1, BINDING, 10.0)
+        seen = []
+        self.host.author = lambda payload: seen.append(payload) or {"status": "outcome_unknown"}
+        self.host.run(self.flow)
+        reads = [r for r in self.host.listed if r["kind"] == "read_records" and r["request_id"].startswith(second)]
+        self.assertEqual(reads[0]["since"], 3.5)
+        self.assertEqual([m["pin"] for m in seen[0]["material"]], ["p-5"])
 
     def test_material_of_a_failed_session_is_read_again(self):
         self.compose("act-1")

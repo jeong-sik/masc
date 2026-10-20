@@ -311,8 +311,14 @@ class Flow:
             if not pages or not pages[-1]["result"]["complete"]:
                 after = (pages[-1]["result"]["next_cursor"] if pages
                          else self._start_cursor(grant, sessions, session.session_id))
-                return {"kind": "read_records", "request_id": request_id, "source_id": grant.source_id,
-                        "after": after}
+                request = {"kind": "read_records", "request_id": request_id, "source_id": grant.source_id,
+                           "after": after}
+                if after is None:
+                    # No session has asked yet, so nothing marks where the
+                    # last one stopped: read what was made since the quiz
+                    # began, not the workspace's whole history (#44537).
+                    request["since"] = sessions[0].opened_at
+                return request
             if grant.kind == "repository":
                 done = {(r["request"]["commit"], r["request"]["path"]) for r in session_reads
                         if r["request"]["kind"] == "read_file" and r["request"]["source_id"] == grant.source_id}

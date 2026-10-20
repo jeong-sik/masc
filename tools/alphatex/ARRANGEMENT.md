@@ -11,6 +11,7 @@ editors retain their separate transports.
 ## Terminal workflow
 
 Import files with `:import-wave /path/take.wav` or `:import-midi /path/song.mid`.
+Use `:import-practice /path/take` for a completed raw MIDI practice recording.
 Paths retain internal spaces and are literal paths, without shell expansion.
 The imported asset is selected in the library. Enter places its complete source
 at the cursor, using the current compatible lane or adding a new one.
@@ -36,7 +37,8 @@ the grid. `:grid 0.25` sets a quarter-beat grid.
 :save-as /path/song.json
 ```
 
-Source offsets/extents use whole WAV frames or original MIDI ticks; project
+Source offsets/extents use whole WAV frames, original SMF ticks or decimal
+host-tick strings for raw practice recordings; project
 positions use quarter-note beats. Pattern numbers in commands start at 1.
 Trim rejects an out-of-bounds range rather than rounding or shortening it.
 `x`/Delete removes a region, `d` duplicates at the cursor, `m`/`o` toggles lane
@@ -47,7 +49,7 @@ mute/solo, and `u`/`y` undoes/redoes document edits. `:lane-remove` retains sour
 Import and save IO run in an owned worker. Accepted commands remain ordered;
 closing refuses new input, cancels an in-progress import, waits for cleanup and
 drains already accepted editor decisions. An import finishing after close cannot
-replace the document. Save-as materializes WAVs and captured takes retained by undo/redo history as
+replace the document. Save-as materializes WAVs, captured takes and raw practice sources retained by undo/redo history as
 well as the current document, so a later redo does not depend on the old folder.
 An uncertain/failed save is not automatically retried at the same path on close;
 edits are retained at a fresh recovery location. If source corruption prevents

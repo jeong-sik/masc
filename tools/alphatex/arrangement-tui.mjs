@@ -32,6 +32,7 @@ const help = [
   ':calibrate OUTPUT_UID IN_CH OUT_CH MAX_LAG_MS  audio loopback candidates; Esc/q cancels and returns',
   ':import-wave /path/take.wav     :import-midi /path/song.mid',
   ':import-take /path/session      :open-take [ASSET] (WAV + raw UMP)',
+  ':import-practice /path/take     import original MIDI from a completed practice take',
   ':place asset-1 0               full source at quarter-note beat 0',
   ':place asset-2 4 2             MIDI format-2 pattern 2 at beat 4',
   ':region asset-1 0 1200 4800 2   asset, beat, native offset/extent, repeats',
@@ -486,7 +487,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     const project = editor.project, nextRoot = dirname(target)
     const retained = new Map()
     if (nextRoot !== sourceRoot) for (const document of [project, ...editor.undo, ...editor.redo]) {
-      for (const asset of document.assets) if (asset.kind === 'wave' || asset.kind === 'capture') retained.set(asset.file ?? JSON.stringify(asset.parts), asset)
+      for (const asset of document.assets) if (['wave', 'capture', 'practice'].includes(asset.kind)) retained.set(asset.file ?? JSON.stringify(asset.parts), asset)
     }
     const retainedAssets = [...retained.values()].map((asset, index) => ({ ...asset, id: `retained-${index}` }))
     let nextRevision
@@ -680,7 +681,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         stop(); route = selectArrangementRoute(route, value); status = 'Playback outputs selected'; break
       case 'save': await save(); break
       case 'save-as': if (accepting) await save(value.path); break
-      case 'import-wave': case 'import-midi': case 'import-take': {
+      case 'import-wave': case 'import-midi': case 'import-take': case 'import-practice': {
         if (!accepting) return
         status = 'Importing source…'; draw()
         const result = await request({ ...value, project: editor.project, projectPath: path })
@@ -810,8 +811,8 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         lines.push(`${lane.id === editor.lane ? '>' : ' '} ${index + start + 1} ${lane.name.slice(0, 12).padEnd(12)} ${lane.muted ? 'm' : '-'}${lane.solo ? 's' : '-'} ${cells.join('')}`)
       }
       if (!project.lanes.length) lines.push('Import a source, then Enter or :place to add its first lane and region.')
-      lines.push(clip ? `${clip.id} · ${clip.name}${clip.audioChannel ? ` [input ${clip.audioChannel.input} → output ${clip.audioChannel.output}]` : ''}${clip.component ? ` (${clip.component}${clip.placement ? `, ${clip.placement.kind === 'calibrated' ? 'measured' : 'manual'} advance ${Number(clip.placement.advanceNanoseconds.numerator) / Number(clip.placement.advanceNanoseconds.denominator) / 1e6} ms` : ''})` : ''} · beat ${clip.position / project.ppq} · source ${clip.offset}+${clip.extent} ${project.assets.find(asset => asset.id === clip.asset).kind === 'capture' ? 'host ticks' : ''} · repeat ${clip.repeat}${clip.pattern === undefined ? '' : ` · pattern ${clip.pattern + 1}`}` : 'Up/Down selects a region on the current lane.')
-      lines.push(asset ? `${asset.id} · ${asset.name}${asset.selectedTake === undefined ? '' : ` · take ${BigInt(asset.selectedTake) + 1n} (:takes)`} · ${asset.kind === 'wave' ? `${asset.metadata.frames} frames / ${asset.metadata.sampleRate} Hz / ${asset.metadata.channels} channels` : asset.kind === 'capture' ? `${asset.manifest.audioFrames} frames + ${asset.manifest.midiPacketCount} UMP packets; Enter opens the take` : 'original MIDI ticks; format-2 patterns require explicit selection'}` : 'No imported asset. :import-wave FILE or :import-midi FILE')
+      lines.push(clip ? `${clip.id} · ${clip.name}${clip.audioChannel ? ` [input ${clip.audioChannel.input} → output ${clip.audioChannel.output}]` : ''}${clip.component ? ` (${clip.component}${clip.placement ? `, ${clip.placement.kind === 'calibrated' ? 'measured' : 'manual'} advance ${Number(clip.placement.advanceNanoseconds.numerator) / Number(clip.placement.advanceNanoseconds.denominator) / 1e6} ms` : ''})` : ''} · beat ${clip.position / project.ppq} · source ${clip.offset}+${clip.extent} ${['capture', 'practice'].includes(project.assets.find(asset => asset.id === clip.asset).kind) ? 'host ticks' : ''} · repeat ${clip.repeat}${clip.pattern === undefined ? '' : ` · pattern ${clip.pattern + 1}`}` : 'Up/Down selects a region on the current lane.')
+      lines.push(asset ? `${asset.id} · ${asset.name}${asset.selectedTake === undefined ? '' : ` · take ${BigInt(asset.selectedTake) + 1n} (:takes)`} · ${asset.kind === 'wave' ? `${asset.metadata.frames} frames / ${asset.metadata.sampleRate} Hz / ${asset.metadata.channels} channels` : asset.kind === 'capture' ? `${asset.manifest.audioFrames} frames + ${asset.manifest.midiPacketCount} UMP packets; Enter opens the take` : asset.kind === 'practice' ? `${asset.metadata.packets} original UMP packets; Enter places a host-clock region` : 'original MIDI ticks; format-2 patterns require explicit selection'}` : 'No imported asset. :import-wave FILE or :import-midi FILE')
       lines.push(`Library ${project.assets.length} sources · ${project.clips.length} regions · a cycles sources · ? help`, path)
     }
     let output = '\x1b[H'

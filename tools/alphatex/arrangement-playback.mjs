@@ -3,9 +3,10 @@ import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { arrangementPlaybackSchedule, newArrangement } from './arrangement.mjs'
 import { sourceMidiTimeline } from './midi-source-playback.mjs'
-import { importArrangementWave, prepareArrangementCapture } from './arrangement-files.mjs'
+import { importArrangementWave, prepareArrangementCapture, prepareArrangementPractice } from './arrangement-files.mjs'
 import { readWaveMetadata } from './wave-file.mjs'
 import { captureRange, captureRegionTime } from './capture-time.mjs'
+import { practiceRange, practiceRegionTime } from './practice-source.mjs'
 import { projectCapturedPlacement } from './capture-placement.mjs'
 import { jsonLines, unpackMidi } from './session-data.mjs'
 
@@ -15,8 +16,8 @@ import { regionEdgeSeconds } from './exact-time.mjs'
 
 function requireRegionTransport(project) {
   const schedule = arrangementPlaybackSchedule(project)
-  if (schedule.some(clip => project.assets.find(asset => asset.id === clip.asset).kind === 'capture')) {
-    throw new Error('Captured regions require paired capture preparation')
+  if (schedule.some(clip => ['capture', 'practice'].includes(project.assets.find(asset => asset.id === clip.asset).kind))) {
+    throw new Error('Captured and practice regions require paired capture preparation')
   }
   return schedule
 }
@@ -152,13 +153,15 @@ export function arrangementPlaybackRequest(project, route) {
     return { kind: 'prepare-vst', output: route.output, route }
   }
   if (practiceEnabled(project) && kinds.has('midi') && (route.kind !== 'mixed' || !route.output)) throw new Error('Choose :mixed-output AUDIO_UID for the practice click and MIDI backing')
-  if (kinds.has('capture')) {
-    const notes = schedule.some(clip => clip.component !== 'audio' && assets.some(asset => asset.id === clip.asset && asset.kind === 'capture' && BigInt(asset.manifest.midiPacketCount) > 0n))
+  if (kinds.has('capture') || kinds.has('practice')) {
+    if (kinds.has('practice') && !route.output) throw new Error('Select :mixed-output AUDIO_UID for the practice MIDI clock')
+    const notes = schedule.some(clip => clip.component !== 'audio' && assets.some(asset => asset.id === clip.asset
+      && (asset.kind === 'capture' && BigInt(asset.manifest.midiPacketCount) > 0n || asset.kind === 'practice' && BigInt(asset.metadata.packets) > 0n)))
     if (project.playbackLoop && !notes && !kinds.has('midi')) {
       if (route.kind === 'midi') throw new Error('Choose an audio output for audible captured audio')
       return { kind: 'prepare-audio', output: route.output }
     }
-    if (route.kind === 'midi' || (notes || kinds.has('midi')) && route.kind !== 'mixed') throw new Error('Select :mixed-output AUDIO_UID and MIDI destinations for paired captures')
+    if (route.kind === 'midi' || (notes || kinds.has('midi')) && route.kind !== 'mixed') throw new Error('Select :mixed-output AUDIO_UID and MIDI destinations for raw UMP regions')
     return { kind: 'prepare-capture', output: route.output, midiOutput: route.midiOutput, sourceBindings: route.sourceBindings ?? [], ...(kinds.has('midi') ? { portBindings: route.portBindings ?? [] } : {}) }
   }
   if (kinds.size > 1 && route.kind !== 'mixed') throw new Error('Select :mixed-output AUDIO_UID and MIDI destinations for mixed playback')
@@ -202,16 +205,19 @@ export async function prepareArrangementMixed(project, options = {}) {
 // Both routes snapshot complete captures once. The paired route consumes the
 // same private files; the explicit audio audition selects only their WAV data.
 async function snapshotAudio(project, schedule, { sourceRoot, temporary, signal }) {
-  const byID = new Map(project.assets.map(asset => [asset.id, asset])), assets = [], regions = [], captures = new Map()
+  const byID = new Map(project.assets.map(asset => [asset.id, asset])), assets = [], regions = [], rawSources = new Map()
   for (const id of new Set(schedule.map(clip => clip.asset))) {
     const asset = byID.get(id)
     if (asset.kind === 'capture') {
       const snapshot = await prepareArrangementCapture(project, id, { sourceRoot, directory: temporary, signal })
-      captures.set(id, snapshot.directory)
+      rawSources.set(id, snapshot.directory)
       const path = join(snapshot.directory, 'audio.wav'), metadata = await readWaveMetadata(path, {}, { signal })
       const frames = Number(metadata.frames)
       if (!Number.isSafeInteger(frames)) throw new Error('Captured WAV exceeds exact native plan frame precision')
       if (frames) assets.push({ id, path, sha256: asset.parts.audio.sha256, ...metadata, frames })
+    } else if (asset.kind === 'practice') {
+      const snapshot = await prepareArrangementPractice(project, id, { sourceRoot, directory: temporary, signal })
+      rawSources.set(id, snapshot.directory)
     } else {
       const snapshot = await prepareArrangementWave({ ...project, clips: project.clips.filter(clip => clip.asset === id) },
         { sourceRoot, directory: temporary, signal })
@@ -238,14 +244,14 @@ async function snapshotAudio(project, schedule, { sourceRoot, temporary, signal 
       ...(clip.audioChannel ? { audioChannel: { ...clip.audioChannel } } : {}) })
   }
   const used = new Set(regions.map(region => region.asset)), duration = schedule.reduce((end, clip) => Math.max(end, clip.endSeconds), 0)
-  return { assets: assets.filter(asset => used.has(asset.id)), regions, duration, captures }
+  return { assets: assets.filter(asset => used.has(asset.id)), regions, duration, rawSources }
 }
 export async function prepareArrangementAudio(project, { sourceRoot, directory, signal } = {}) {
   signal?.throwIfAborted()
   const loop = arrangementLoop(project)
   const schedule = arrangementPlaybackSchedule(project)
   if (!schedule.length) throw new Error('No audible arrangement regions')
-  if (schedule.some(clip => project.assets.find(asset => asset.id === clip.asset).kind === 'midi')) throw new Error('Audio-only audition cannot synthesize MIDI assets; mute those lanes')
+  if (schedule.some(clip => ['midi', 'practice'].includes(project.assets.find(asset => asset.id === clip.asset).kind))) throw new Error('Audio-only audition cannot synthesize MIDI assets; mute those lanes')
   const temporary = await mkdtemp(join(directory, 'audio-play-'))
   try {
     const { assets, regions, duration: sourceDuration } = await snapshotAudio(project, schedule, { sourceRoot, temporary, signal })
@@ -264,8 +270,8 @@ export async function prepareArrangementCaptureRegions(project, { sourceRoot, di
   const schedule = arrangementPlaybackSchedule(project).flatMap(clip => project.playbackLoop && project.assets.find(asset => asset.id === clip.asset).kind === 'capture' && !clip.startNanoseconds
     ? projectCapturedPlacement(project, project.assets.find(asset => asset.id === clip.asset), clip) : [clip]), byID = new Map(project.assets.map(asset => [asset.id, asset]))
   if (!schedule.length) throw new Error('No audible arrangement regions')
-  if (!schedule.some(clip => byID.get(clip.asset).kind === 'capture')) {
-    throw new Error('Paired capture preparation requires captured lanes')
+  if (!schedule.some(clip => ['capture', 'practice'].includes(byID.get(clip.asset).kind))) {
+    throw new Error('Raw UMP preparation requires captured lanes or practice lanes')
   }
   const destination = value => {
     const number = Number(value)
@@ -276,20 +282,22 @@ export async function prepareArrangementCaptureRegions(project, { sourceRoot, di
   const selected = new Set()
   for (const binding of sourceBindings) {
     const asset = byID.get(binding?.asset), identity = JSON.stringify([binding?.asset, binding?.source])
-    if (asset?.kind !== 'capture' || typeof binding.source !== 'string' || !binding.source || selected.has(identity)) throw new Error('Invalid or duplicate captured asset/source binding')
+    if (!['capture', 'practice'].includes(asset?.kind) || typeof binding.source !== 'string' || !binding.source || selected.has(identity)) throw new Error('Invalid or duplicate captured asset/source binding')
     destination(binding.destination); selected.add(identity)
   }
   if (midiOutput !== undefined) destination(midiOutput)
   const temporary = await mkdtemp(join(directory, 'capture-region-play-'))
   try {
-    const { assets, regions, captures } = await snapshotAudio(project, schedule.filter(clip => byID.get(clip.asset).kind !== 'midi'), { sourceRoot, temporary, signal })
+    const { assets, regions, rawSources } = await snapshotAudio(project, schedule.filter(clip => byID.get(clip.asset).kind !== 'midi'), { sourceRoot, temporary, signal })
     const sourceDuration = schedule.reduce((end, clip) => Math.max(end, clip.endSeconds), 0)
     const duration = loop ? (project.playbackLoop.end - project.playbackLoop.start) / project.ppq * 60 / project.tempo : sourceDuration
     const sources = [], notes = []
-    for (const [id, snapshot] of captures) {
+    for (const [id, snapshot] of rawSources) {
       if (!schedule.some(clip => clip.asset === id && clip.component !== 'audio')) continue
-      const asset = byID.get(id), packets = [], used = new Set(), range = captureRange(asset)
-      for await (const row of jsonLines(join(snapshot, 'midi.ump.jsonl'), { signal })) {
+      const asset = byID.get(id), practice = asset.kind === 'practice', packets = [], used = new Set()
+      const range = practice ? practiceRange(asset) : captureRange(asset), clock = practice ? asset.metadata.renderClock.clock : asset.manifest.clock
+      for await (const record of jsonLines(join(snapshot, practice ? 'events.jsonl' : 'midi.ump.jsonl'), { signal })) {
+        const row = practice ? record.packet : record
         unpackMidi(row)
         if (typeof row.hostTime !== 'string' || !/^(0|[1-9][0-9]*)$/.test(row.hostTime) || BigInt(row.hostTime) > 0xffffffffffffffffn || !row.words.length) throw new Error('Invalid captured packet host time or empty UMP')
         used.add(row.source); packets.push(row)
@@ -298,11 +306,11 @@ export async function prepareArrangementCaptureRegions(project, { sourceRoot, di
       if (explicit.some(binding => !used.has(binding.source))) throw new Error('Binding names an unused captured MIDI source')
       const bindings = [...used].map(source => ({ source, destination: destination(explicit.find(binding => binding.source === source)?.destination ?? midiOutput) }))
       sources.push({ id, extent: range.extent, timeline: { schemaVersion: 4,
-        duration: captureRegionTime(asset, { offset: '0', extent: range.extent }).durationSeconds,
-        clock: { origin: range.origin, numer: asset.manifest.clock.numer, denom: asset.manifest.clock.denom }, bindings, packets } })
+        duration: (practice ? practiceRegionTime : captureRegionTime)(asset, { offset: '0', extent: range.extent }).durationSeconds,
+        clock: { origin: range.origin, numer: clock.numer, denom: clock.denom }, bindings, packets } })
     }
     const bindings = [...new Set(sources.flatMap(source => source.timeline.bindings.map(binding => binding.destination)))].map((destination, port) => ({ port, destination }))
-    for (const clip of schedule) if (byID.get(clip.asset).kind === 'capture' && clip.component !== 'audio') {
+    for (const clip of schedule) if (['capture', 'practice'].includes(byID.get(clip.asset).kind) && clip.component !== 'audio') {
       notes.push({ id: clip.id, source: clip.asset, startSeconds: clip.startSeconds, offset: clip.offset, extent: clip.extent, repeatCount: clip.repeat, ...(clip.component ? { component: clip.component } : {}),
       ...(clip.startNanoseconds ? { startNanoseconds: clip.startNanoseconds } : {}) })
     }

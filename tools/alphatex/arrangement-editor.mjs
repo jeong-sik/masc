@@ -1,6 +1,7 @@
 import { newArrangement, validateArrangement, editArrangement, arrangementSchedule, arrangementTakes } from './arrangement.mjs'
 import { midiSourcePattern } from './midi-source.mjs'
 import { captureRange, captureRegionFromSeconds } from './capture-time.mjs'
+import { practiceRange } from './practice-source.mjs'
 import { beats, PPQ } from './sequencer-project.mjs'
 import { calibrationSelection } from './audio-calibration.mjs'
 import { manualCapturePlacement } from './capture-placement.mjs'
@@ -60,8 +61,8 @@ function position(value) {
 function place(editor, assetID, tick, { offset, extent, repeat = 1, pattern } = {}) {
   const asset = editor.project.assets.find(asset => asset.id === assetID)
   if (!asset) throw new Error('Select an imported asset')
-  offset ??= asset.kind === 'capture' ? '0' : 0
-  extent ??= asset.kind === 'capture' ? captureRange(asset).extent : asset.kind === 'wave' ? asset.metadata.frames : midiSourcePattern(asset.source, { pattern }).ticks
+  offset ??= ['capture', 'practice'].includes(asset.kind) ? '0' : 0
+  extent ??= asset.kind === 'practice' ? practiceRange(asset).extent : asset.kind === 'capture' ? captureRange(asset).extent : asset.kind === 'wave' ? asset.metadata.frames : midiSourcePattern(asset.source, { pattern }).ticks
   let project = editor.project, lane = project.lanes.find(lane => lane.id === editor.lane && lane.kind === asset.kind)
   if (!lane) {
     project = editArrangement(project, { kind: 'lane-add', sourceKind: asset.kind, name: asset.name })
@@ -138,7 +139,7 @@ export function arrangementCommand(editor, line) {
   const sourceRange = (assetID, offset, extent) => {
     const asset = editor.project.assets.find(asset => asset.id === assetID)
     if (!asset) throw new Error('Select an imported asset')
-    return asset.kind === 'capture' ? { offset, extent } : { offset: Number(offset), extent: Number(extent) }
+    return ['capture', 'practice'].includes(asset.kind) ? { offset, extent } : { offset: Number(offset), extent: Number(extent) }
   }
   const timeRange = (assetID, start, duration) => {
     const asset = editor.project.assets.find(asset => asset.id === assetID && asset.kind === 'capture')
@@ -209,7 +210,7 @@ export function arrangementCommand(editor, line) {
     case 'calibrate':
       count(4)
       return { editor, effect: { kind: command, ...calibrationSelection({ output: args[0], inputChannel: Number(args[1]), outputChannel: Number(args[2]), maxLagMs: Number(args[3]) }) } }
-    case 'import-wave': case 'import-midi': case 'import-take': case 'save-as':
+    case 'import-wave': case 'import-midi': case 'import-take': case 'import-practice': case 'save-as':
       if (!tail) throw new Error('Choose a file path')
       return { editor, effect: { kind: command, path: tail } }
     case 'open-take': {
@@ -237,8 +238,9 @@ export function arrangementCommand(editor, line) {
     case 'midi-output': count(1); return { editor, effect: { kind: command, destination: args[0] } }
     case 'midi-source': {
       count(3)
-      const asset = editor.project.assets.find(asset => asset.id === args[0] && asset.kind === 'capture')
-      if (!asset?.manifest.midiSources.some(source => source.id === args[1])) throw new Error('Choose a captured asset and its original MIDI source ID')
+      const asset = editor.project.assets.find(asset => asset.id === args[0])
+      const sources = asset?.kind === 'capture' ? asset.manifest.midiSources : asset?.kind === 'practice' ? [asset.metadata.input.source] : []
+      if (!sources.some(source => source.id === args[1])) throw new Error('Choose a raw asset and its original MIDI source ID')
       if (!/^-?(0|[1-9][0-9]*)$/.test(args[2]) || BigInt(args[2]) < -2147483648n || BigInt(args[2]) > 2147483647n || String(Number(args[2])) !== args[2]) throw new Error('Choose an exact MIDI destination UID')
       return { editor, effect: { kind: command, asset: args[0], source: args[1], destination: args[2] } }
     }

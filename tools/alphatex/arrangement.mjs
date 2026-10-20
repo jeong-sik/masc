@@ -1,4 +1,5 @@
 import { validateCapturedSource } from './captured-source.mjs'
+import { validatePracticeSource, practiceRegionTime } from './practice-source.mjs'
 import { captureRegionTime } from './capture-time.mjs'
 import { validateMidiSource, midiSourcePattern, tempoEvent } from './midi-source.mjs'
 import { PPQ, validateProject } from './sequencer-project.mjs'
@@ -64,6 +65,7 @@ export function validateArrangementAsset(asset) {
       }
       break
     case 'capture': validateCapturedSource(asset); break
+    case 'practice': validatePracticeSource(asset); break
     case 'wave': {
       if (typeof asset.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(asset.sha256)
           || asset.file !== `assets/${asset.sha256}.wav`) throw new Error('Invalid portable WAV identity/path')
@@ -127,6 +129,14 @@ export function arrangementClipTime(project, clip) {
   integer(clip.repeat, 'region repeat count', 1)
   let sourceStart, sourceEnd, duration, capture, exact
   switch (asset.kind) {
+  case 'practice': {
+    if (clip.pattern !== undefined) throw new Error('Raw practice regions do not have SMF patterns')
+    capture = practiceRegionTime(asset, clip)
+    sourceStart = capture.sourceStartSeconds; sourceEnd = capture.sourceEndSeconds; duration = capture.durationSeconds
+    exact = { start: fraction(...projectNanoseconds(project, clip.position)),
+      period: fraction(BigInt(clip.extent) * BigInt(capture.sourceClock.numer), BigInt(capture.sourceClock.denom)) }
+    break
+  }
   case 'capture': {
     if (clip.pattern !== undefined) throw new Error('Captured regions do not have MIDI patterns')
     if (clip.component !== undefined && !['audio', 'midi'].includes(clip.component)) throw new Error('Unknown captured region component')
@@ -195,7 +205,7 @@ export function validateArrangement(project) {
   const assets = new Map(project.assets.map(asset => [asset.id, asset])), lanes = new Map(project.lanes.map(lane => [lane.id, lane]))
   for (const lane of project.lanes) {
     text(lane.name, 'lane name')
-    if (!['wave', 'midi', 'capture'].includes(lane.kind) || typeof lane.muted !== 'boolean' || typeof lane.solo !== 'boolean') throw new Error('Invalid arrangement lane')
+    if (!['wave', 'midi', 'capture', 'practice'].includes(lane.kind) || typeof lane.muted !== 'boolean' || typeof lane.solo !== 'boolean') throw new Error('Invalid arrangement lane')
   }
   const recordedCycles = new Map(project.assets.filter(asset => asset.selectedTake !== undefined).map(asset => [asset.id, new Set(asset.recording.passes.map(pass => pass.cycle))]))
   for (const clip of project.clips) {

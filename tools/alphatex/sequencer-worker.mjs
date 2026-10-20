@@ -37,12 +37,14 @@ parentPort.on('message', async job => {
       const midi = projectVstMidi(job.project, job.options)
       if (cancelled()) throw new Error('VST MIDI preparation cancelled')
       writeFileSync(job.path, midi.bytes, { flag: 'wx', mode: 0o600 })
-      result = { path: job.path, duration: midi.duration, format: 'vst-midi' }
+      result = { path: job.path, duration: midi.duration, format: 'vst-midi', ...(midi.sourceWindow ? { sourceWindow: midi.sourceWindow } : {}) }
     } else if (job.options.format === 'midi') {
       const timeline = job.project.kind === 'midi-source' ? sourceMidiTimeline(job.project, job.options) : projectMidiTimeline(job.project, job.options)
       if (cancelled()) throw new Error('MIDI preparation cancelled')
       writeFileSync(job.path, JSON.stringify(timeline), { flag: 'wx', mode: 0o600 })
-      result = { path: job.path, duration: timeline.duration, clippedSamples: 0, format: 'midi', ...(timeline.bindings ? { midiOutput: timeline.bindings[0].destination, midiBindings: timeline.bindings } : {}) }
+      result = { path: job.path, duration: timeline.duration, clippedSamples: 0, format: timeline.schemaVersion === 3 ? 'midi-arrangement' : 'midi',
+        ...(timeline.sourceWindow ? { sourceWindow: timeline.sourceWindow } : {}),
+        ...(timeline.bindings ? { midiOutput: timeline.bindings[0].destination, midiBindings: timeline.bindings } : {}) }
     } else {
       if (job.options.format !== undefined && job.options.format !== 'wav') throw new Error('Unknown playback format')
       const { renderProject } = await import('./sequencer-audio.mjs')

@@ -12,6 +12,7 @@ import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo } fr
 import { importMidiSource, midiSourcePattern } from '../midi-source.mjs'
 import { harmonyAt, PPQ } from '../sequencer-project.mjs'
 import { MidiSourcePicker as SourcePicker } from '../midi-source-picker.mjs'
+import { sourceSecondsAtTick, sourceTickAtSeconds } from '../midi-source-playback.mjs'
 
 const frozenSound = selection => ({ kind: 'vst', selection, instrument: { identifier: 'Bass', version: '1' },
   preset: { data: Buffer.from('frozen state').toString('base64'), sha256: createHash('sha256').update('frozen state').digest('hex') } })
@@ -58,7 +59,7 @@ async function controller(options = {}) {
     copyFile: async (from, to) => { observed.copies.push([from, to]) },
     arrangementRoute, selectArrangementRoute, dirname, constants, join, resolve, tmpdir: () => '/synthetic', randomUUID, emitKeypressEvents() {},
     openPlayback(value) { observed.players++; if (options.playback) return options.playback(value); throw new Error('Unexpected playback') }, Worker,
-    Note: { fromMidi: String }, ...editor, harmonyAt, PPQ, sourceExpressions, selectedExpression, sourceTempos, selectedTempo,
+    Note: { fromMidi: String }, ...editor, harmonyAt, PPQ, sourceExpressions, selectedExpression, sourceTempos, selectedTempo, sourceSecondsAtTick, sourceTickAtSeconds,
     loadProject: async () => { throw new Error('Unexpected load') },
     saveProject: async (path, project) => { observed.saved.push(structuredClone(project)); return 'revision' },
     projectMidi() { throw new Error('Unexpected MIDI export') }, safeText: String,
@@ -596,4 +597,35 @@ test('tempo keyboard decisions and an admitted tempo edit drain into close witho
   assert.deepEqual(after.notes.map(n=>[n.id,n.off,n.start,n.duration]),midiSourcePattern(source).notes.map(n=>[n.id,n.off,n.start,n.duration]))
  }finally{view.key('q');await view.done}
  assert.equal(view.process.stdin.isRaw,false)
+})
+
+test('source loop owns current range, routes region playback, seeks locally and retires obsolete preparations on toggle', async () => {
+ const {midiSourceFromEvents}=await import('../midi-source.mjs')
+ const project=midiSourceFromEvents([{tick:0,kind:'channel',bytes:[0x90,60,96]},
+  {tick:1920,kind:'channel',bytes:[0x80,60,47]},{tick:1920,kind:'meta',type:0x2f,data:[]}],{ppq:960})
+ let opened,finish;const commands=[]
+ const view=await controller({initialDocument:project,midiOutput:'42',playback(value){
+  opened=value
+  const handle={pause(){commands.push('pause')},resume(){commands.push('resume')},seek(seconds){commands.push(seconds)},stop(){commands.push('stop');finish()},
+   ready:Promise.resolve(),completion:new Promise(resolve=>{finish=resolve})}
+  return handle
+ }})
+ view.command('loop .5 1.5');view.command('play');await flush()
+ const worker=view.observed.workers[0],old=worker.requests.at(-1)
+ assert.deepEqual(old.options.sourceLoop,{start:480,end:1440});assert.equal(old.options.loop,true)
+ view.key('l');await flush();assert.equal(Atomics.load(new Int32Array(old.cancel),0),1)
+ worker.emit('message',{id:old.id,ok:true,result:{path:'/obsolete',format:'midi-arrangement'}});await flush()
+ assert.equal(view.observed.players,0)
+ view.command('loop .5 1.5');view.command('play');await flush()
+ const next=worker.requests.at(-1),sourceWindow={start:480,end:1440,startSeconds:.25,endSeconds:.75}
+ worker.emit('message',{id:next.id,ok:true,result:{path:'/owned/region',duration:.5,format:'midi-arrangement',midiOutput:'42',midiBindings:[{port:0,destination:'42'}],sourceWindow}});await flush()
+ assert.equal(opened.format,'midi-arrangement');assert.equal(opened.loop,true)
+ opened.onEvent({kind:'playing',currentTime:0,duration:.5});await flush()
+ view.command('seek 1');view.command('seek 0');view.command('seek 1.5');await flush()
+ assert.deepEqual(commands,[.25,.5])
+ view.key('space');await flush();assert.equal(commands.at(-1),'pause')
+ opened.onEvent({kind:'paused',currentTime:.1,duration:.5});view.key('space');await flush();assert.equal(commands.at(-1),'resume')
+ view.command('transpose 2');await flush();assert.equal(commands.at(-1),'stop')
+ view.key('q');await view.done
+ assert.deepEqual(midiSourcePattern(view.observed.saved.at(-1)).notes.map(note=>note.pitch),[62])
 })

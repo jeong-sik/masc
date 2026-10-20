@@ -67,7 +67,7 @@ const help = [
   'Use :channel 1–16 or :select event-ID for source notes sharing a cursor.',
   'Source: choose a VST or :midi-output ID; selected SMF2 and SMPTE performances are supported.',
   'Multiple source ports: :midi-port PORT ID for each port (0–127).',
-  'Source VST audio supports pause/seek and :wave; source clip looping is unfinished.',
+  'Source :loop START END chooses a session-local source range; l toggles MIDI / rendered VST window looping.',
 ]
 
 export async function viewSequencer({ path, root = resolve('music-projects'), embedded = false, signal,
@@ -173,7 +173,8 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     const start = loop ? view.loop.start : 0
     const elapsed = transport.position + (transport.kind === 'playing' ? (performance.now() - transport.since) / 1000 : 0)
     const seconds = Math.min(loop ? elapsed % transport.duration : elapsed, transport.phraseDuration ?? transport.duration)
-    if (editor.project.kind === 'midi-source') return sourceTickAtSeconds(editor.performance, seconds)
+    if (editor.project.kind === 'midi-source') return sourceTickAtSeconds(editor.performance,
+      Math.min(transport.sourceWindow?.endSeconds ?? Infinity, seconds + (transport.sourceWindow?.startSeconds ?? 0)))
     return start + (loop ? seconds % transport.duration : seconds) / 60 * view.tempo * per
   }
   function draw() {
@@ -388,12 +389,13 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     if (wave.vst) observe({ state: 'rendered', selection: wave.selection, render: wave.vst })
     const midiDestination = wave.midiOutput ?? selectedMidiOutput
     const handle = openPlayback({ path: wave.path, output: midiDestination === undefined ? selectedOutput : undefined,
-      midiOutput: midiDestination, midiBindings: wave.midiBindings, loop, onEvent: event => {
+      midiOutput: midiDestination, midiBindings: wave.midiBindings, frameRange: wave.frameRange,
+      format: wave.format === 'midi-arrangement' ? 'midi-arrangement' : 'wave', loop, onEvent: event => {
       if (!accepting || closed || id !== generation) return
       if (['playing', 'paused'].includes(event.kind)) {
         const changed = transport.kind !== event.kind
         transport = { kind: event.kind, handle, position: event.currentTime, duration: event.duration,
-          phraseDuration: wave.phraseDuration, since: performance.now() }
+          phraseDuration: wave.phraseDuration, sourceWindow: wave.sourceWindow, since: performance.now() }
         if (wave.vst && changed) observe({ state: `player_${event.kind}`, selection: wave.selection, render: wave.vst,
           position_seconds: event.currentTime, duration_seconds: event.duration })
       }
@@ -424,7 +426,8 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     if (transport.kind !== 'stopped') { stopPlayback(); draw(); return }
     const midiRoute = selectedMidiOutput !== undefined || portBindings.length > 0
     if (!midiRoute && audioInstrument().kind === 'unselected') { picker.open(); return }
-    const id = ++generation, options = { loop, pattern: editor.pattern, midiOutput: selectedMidiOutput, portBindings }
+    const id = ++generation, options = { loop, pattern: editor.pattern, midiOutput: selectedMidiOutput, portBindings,
+      ...(editor.project.kind === 'midi-source' ? { sourceLoop: editor.sourceLoop } : {}) }
     const result = midiRoute ? render(editor.project, { ...options, format: 'midi' }) : renderAudio(editor.project, options)
     transport = { kind: 'rendering', cancel: result.cancel, native: result.native }
     if (result.native) observe({ state: 'rendering', selection: audioInstrument().selection, render: null })
@@ -529,6 +532,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         break
       }
       case 'play': play(); break
+      case 'source-loop': stepInput?.stop(); stopPlayback(); loop = true; status = 'Source loop selected'; break
       case 'stop': stop(); break
       case 'output': stop(); portBindings = []; selectedOutput = value.path; selectedMidiOutput = undefined; status = `Audio output: ${selectedOutput}`; break
       case 'midi-output': stop(); portBindings = []; selectedMidiOutput = value.path; status = `MIDI output: ${selectedMidiOutput}`; break
@@ -537,7 +541,13 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       case 'seek': {
         if (!accepting) return
         if (!transport.handle) throw new Error('Start playback before seeking')
-        if (editor.project.kind === 'midi-source') { transport.handle.seek(sourceSecondsAtTick(editor.performance, value.tick)); break }
+        if (editor.project.kind === 'midi-source') {
+          const window = transport.sourceWindow
+          if (window && (value.tick < window.start || value.tick > window.end)) throw new Error('Seek must be within the source loop range')
+          const seconds = window && value.tick === window.end ? transport.duration
+            : sourceSecondsAtTick(editor.performance, value.tick) - (window?.startSeconds ?? 0)
+          transport.handle.seek(window ? Math.min(transport.duration, seconds) : seconds); break
+        }
         const view = editorView(editor), per = editorAxis(editor).per
         const start = loop ? view.loop.start : 0
         const end = loop ? view.loop.end : view.length
@@ -644,7 +654,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
           if (accepting && !suspended && !childTask) { stop(); picker.open() }; break
         case 's': await save(); break
         case 'r': await effect({ kind: 'record' }); break
-        case 'l': if (editor.project.kind === 'midi-source') throw new Error('MIDI source clip looping requires the arrangement transport'); stepInput?.stop(); stopPlayback(); loop = !loop; break
+        case 'l': stepInput?.stop(); stopPlayback(); loop = !loop; break
         case 'tab': editor = editorAction(editor, { kind: 'track' }); break
         case 'return':
           if (editor.eventView) {

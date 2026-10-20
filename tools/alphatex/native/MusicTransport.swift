@@ -90,6 +90,22 @@ enum Command: Decodable {
     }
 }
 
+// Decode only the admitted source frame window. This retains the original VST
+// render and lets pause/seek/loop positions remain local to that window.
+func readAudioWindow(_ audio: AVAudioFile, offsetFrames: Int64 = 0, frameCount: Int64? = nil) throws -> AVAudioPCMBuffer {
+    guard offsetFrames >= 0, offsetFrames <= audio.length else { throw TransportFailure("audio window starts outside its source") }
+    let count = frameCount ?? (audio.length - offsetFrames)
+    guard count > 0, count <= audio.length - offsetFrames,
+          let capacity = AVAudioFrameCount(exactly: count),
+          let decoded = AVAudioPCMBuffer(pcmFormat: audio.processingFormat, frameCapacity: capacity) else {
+        throw TransportFailure("audio window exceeds its source or PCM buffer resource")
+    }
+    audio.framePosition = offsetFrames
+    try audio.read(into: decoded, frameCount: capacity)
+    guard decoded.frameLength == capacity else { throw TransportFailure("audio decode did not supply all declared window frames") }
+    return decoded
+}
+
 final class Transport {
     enum State { case prepared, playing, paused, stopped }
     let engine = AVAudioEngine()
@@ -98,6 +114,7 @@ final class Transport {
     let device: OutputDevice
     let loop: Bool
     let duration: Double
+    let frameRange: [String: Int64]?
     var state = State.prepared
     var originFrame: AVAudioFramePosition = 0
     var pausedFrame: AVAudioFramePosition = 0
@@ -106,20 +123,14 @@ final class Transport {
     var signals: [DispatchSourceSignal] = []
     var configurationObserver: NSObjectProtocol?
 
-    init(file: URL, output: String?, loop: Bool) throws {
+    init(file: URL, output: String?, loop: Bool, offsetFrames: Int64 = 0, frameCount: Int64? = nil) throws {
         device = try selectedOutput(output)
         self.loop = loop
+        self.frameRange = frameCount.map { ["offsetFrames": offsetFrames, "frameCount": $0] }
         let audio = try AVAudioFile(forReading: file, commonFormat: .pcmFormatFloat32, interleaved: false)
-        // AVAudioPCMBuffer frameCapacity is a UInt32 API boundary. Allocation
-        // and decode failures are explicit; there is no phrase-duration budget.
-        guard audio.length > 0, let capacity = AVAudioFrameCount(exactly: audio.length),
-              let decoded = AVAudioPCMBuffer(pcmFormat: audio.processingFormat, frameCapacity: capacity) else {
-            throw TransportFailure("audio cannot fit the player's PCM buffer resource")
-        }
-        try audio.read(into: decoded, frameCount: capacity)
-        guard decoded.frameLength == capacity else { throw TransportFailure("audio decode did not supply all declared frames") }
+        let decoded = try readAudioWindow(audio, offsetFrames: offsetFrames, frameCount: frameCount)
         buffer = decoded
-        duration = Double(capacity) / decoded.format.sampleRate
+        duration = Double(decoded.frameLength) / decoded.format.sampleRate
         guard duration.isFinite, duration > 0 else { throw TransportFailure("audio file has no finite playable duration") }
         engine.attach(player)
         try engine.outputNode.auAudioUnit.setDeviceID(device.object)
@@ -222,8 +233,10 @@ final class Transport {
         publish()
     }
     func snapshot(_ kind: String) -> [String: Any] {
-        ["kind": kind, "currentTime": Double(positionFrame()) / buffer.format.sampleRate, "duration": duration,
-         "device": device.json, "loop": loop]
+        var value: [String: Any] = ["kind": kind, "currentTime": Double(positionFrame()) / buffer.format.sampleRate, "duration": duration,
+                                  "device": device.json, "loop": loop]
+        if let frameRange { value["frameRange"] = frameRange }
+        return value
     }
     func publish() {
         guard state != .stopped else { return }
@@ -292,6 +305,8 @@ struct Options {
     var file: String?
     var output: String?
     var loop = false
+    var offsetFrames: Int64?
+    var frameCount: Int64?
     init() throws {
         var args = Array(CommandLine.arguments.dropFirst())
         guard args.first == "play" else { throw TransportFailure("usage: music-transport play --file WAV [--output UID] [--loop]") }
@@ -307,18 +322,26 @@ struct Options {
             case "--loop":
                 guard !loop else { throw TransportFailure("duplicate --loop option") }
                 loop = true
+            case "--offset-frames":
+                guard offsetFrames == nil, !args.isEmpty, let value = Int64(args.removeFirst()), value >= 0 else { throw TransportFailure("--offset-frames requires a nonnegative frame position") }
+                offsetFrames = value
+            case "--frame-count":
+                guard frameCount == nil, !args.isEmpty, let value = Int64(args.removeFirst()), value > 0 else { throw TransportFailure("--frame-count requires a positive frame count") }
+                frameCount = value
             default: throw TransportFailure("unknown transport option")
             }
         }
         guard let file, !file.isEmpty else { throw TransportFailure("--file requires a WAV path") }
         if let output, output.isEmpty { throw TransportFailure("--output requires a device UID") }
+        guard (offsetFrames == nil) == (frameCount == nil) else { throw TransportFailure("audio window requires both offset and frame count") }
     }
 }
 
 _ = signal(SIGPIPE, SIG_IGN)
 do {
     let options = try Options()
-    let transport = try Transport(file: URL(fileURLWithPath: options.file!), output: options.output, loop: options.loop)
+    let transport = try Transport(file: URL(fileURLWithPath: options.file!), output: options.output, loop: options.loop,
+                                  offsetFrames: options.offsetFrames ?? 0, frameCount: options.frameCount)
     do { try transport.start() }
     catch { transport.finish(reason: "start-failed", error: error) }
     DispatchQueue.global().async {

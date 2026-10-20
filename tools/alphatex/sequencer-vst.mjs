@@ -4,14 +4,18 @@ import { midiSourcePattern, exportMidiSourcePattern } from './midi-source.mjs'
 import { nativeJob, retainRender } from './vst.mjs'
 import { renderBoundVst } from './project-sound-files.mjs'
 import { validateVstSelection } from './project-sound.mjs'
+import { sourceLoopWindow } from './midi-source-playback.mjs'
+import { sourceAudioFrames } from './source-audio-clock.mjs'
 
 export function projectVstMidi(project, options = {}) {
   if (project?.kind === 'midi-source') {
-    if (options.loop) throw new Error('Source clip looping requires expression-state reconstruction')
     const performance = midiSourcePattern(project, options)
     const ports = new Set(performance.events.filter(event => event.kind !== 'meta').map(event => event.port))
     if (ports.size > 1) throw new Error('Independent source MIDI ports require separate instrument instances; use explicit MIDI port outputs')
-    return { bytes: exportMidiSourcePattern(project, options), duration: performance.seconds }
+    // Render the complete original performance. A PCM window retains pre-cut
+    // instrument/pedal history instead of fabricating a new attack at entry.
+    return { bytes: exportMidiSourcePattern(project, options), duration: performance.seconds,
+      ...(options.loop ? { sourceWindow: sourceLoopWindow(performance, options.sourceLoop) } : {}) }
   }
   const { seconds } = sequenceEvents(project, options)
   return { bytes: projectMidi(project, options), duration: seconds }
@@ -32,10 +36,20 @@ export function renderVstPhrase({ preparation, selection, sound, outputPath, sta
     native = sound ? renderBoundVst(sound, request, { run }) : run(request)
     const result = await native.promise
     check()
+    let window = {}
+    if (midi.sourceWindow) {
+      const frameRange = sourceAudioFrames(midi.sourceWindow.clock, result.sample_rate)
+      if (frameRange.frameCount <= 0 || !Number.isSafeInteger(result.frames)
+          || frameRange.offsetFrames + frameRange.frameCount > result.frames) {
+        throw new Error('Selected source loop has no complete rendered PCM window')
+      }
+      window = { sourceWindow: midi.sourceWindow, frameRange,
+        duration: frameRange.frameCount / result.sample_rate, phraseDuration: frameRange.frameCount / result.sample_rate }
+    }
     const retained = await retainRender(stateDirectory, result, midi.path)
     if (cancelled) { await retained.discard(); check() }
     return { path: retained.result.output_path, duration: result.duration_ms / 1000,
-      phraseDuration: midi.duration, clippedSamples: 0, format: 'wav', selection, vst: retained.result }
+      phraseDuration: midi.duration, clippedSamples: 0, format: 'wav', selection, vst: retained.result, ...window }
   })()
   return { promise, cancel() {
     cancelled = true

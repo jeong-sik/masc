@@ -315,3 +315,14 @@ test('captured output accepts native MIDI1 with its owner identity intact and re
   await assert.rejects(g.playback.completion,/changed its captured/)
  }
 })
+
+test('selected PCM frames are forwarded exactly and every acknowledgement remains bound to that window', async () => {
+  const frameRange={offsetFrames:22051,frameCount:11025},f=fixture({loop:true,frameRange})
+  assert.deepEqual(f.args.slice(-4),['--offset-frames','22051','--frame-count','11025'])
+  f.event('playing',{frameRange});await f.playback.ready
+  f.playback.pause();f.event('paused',{frameRange});f.playback.resume()
+  f.event('playing',{frameRange:{...frameRange,offsetFrames:0}})
+  assert.deepEqual(f.signals,['SIGTERM']);f.close(1)
+  await assert.rejects(f.playback.completion,/PCM window/)
+  for(const range of [{offsetFrames:-1,frameCount:1},{offsetFrames:0,frameCount:0},{offsetFrames:0,frameCount:1.5}])assert.throws(()=>fixture({frameRange:range}),/PCM/)
+})

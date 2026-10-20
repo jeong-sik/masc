@@ -22,16 +22,18 @@ export function sourceEditor(project, previous = {}, pattern = previous.pattern)
   const tempo = firstTempo ? tempoEvent(firstTempo).value : 120
   const meter = performance?.events.find(e => e.kind === 'meta' && e.type === 0x58 && e.tick === 0 && e.data.length === 4)
   const end = performance?.ticks ?? 0
+  const oldLoop = previous.sourceLoop
+  const sourceLoop = oldLoop && oldLoop.start < oldLoop.end && oldLoop.end <= end ? oldLoop : { start: 0, end }
   const length = end + 1 // include endpoint notes in the viewport, without extending the source performance
   const view = { title: project.name, tempo, meter: meter ? [meter.data[0], 2 ** meter.data[1]] : [4,4],
     timingLabel: info.timing.kind === 'ppq' ? 'MIDI tempo map' : `SMPTE ${info.timing.frameCode}`,
-    displayLength: end, length, loop: { start: 0, end }, tracks }
+    displayLength: end, length, loop: sourceLoop, tracks }
   const steps = [per/4,per/2,per,per*2,per*4].filter(n => Number.isSafeInteger(n) && n > 0)
   const track = Math.min(previous.track ?? Math.max(0, tracks.findIndex(t => t.notes.length)), tracks.length-1)
   const first = tracks[track].notes.reduce((first, note) =>
     first === null || note.start < first.start ? note : first, null)
   return { velocity: 96, duration: per, step: steps[0], undo: [], redo: [], ...previous,
-    project, pattern: chosen, performance, info, axis, view, steps,
+    project, pattern: chosen, performance, info, axis, view, steps, sourceLoop,
     selectedID: performance?.notes.some(n=>n.id===previous.selectedID) ? previous.selectedID : undefined,
     selectedExpressionID: performance?.events.some(event=>event.id===previous.selectedExpressionID && expressionEvent(event)) ? previous.selectedExpressionID : undefined,
     selectedTempoID: performance?.events.some(event=>event.id===previous.selectedTempoID && tempoEvent(event)) ? previous.selectedTempoID : undefined,
@@ -169,6 +171,12 @@ export function sourceCommand(editor,line) {
       ...(kind === 'poly-pressure' ? { pitch: pitch(values[0]) } : {}) }
   }
   switch(command){
+    case 'loop': {
+      count(2); const start = units(args[0]), end = units(args[1])
+      if (!editor.performance || start >= end || end > editor.performance.ticks) throw new Error('Loop must be a positive range within the selected MIDI pattern')
+      const sourceLoop = { start, end }
+      return { editor: { ...editor, sourceLoop, view: { ...editor.view, loop: sourceLoop } }, effect: { kind: 'source-loop' } }
+    }
     case 'tempos': {
       count(0); const next = { ...editor, eventView: editor.eventView === 'tempo' ? undefined : 'tempo' }
       return { editor: next.eventView && !selectedTempo(next) ? sourceAction(next, { kind: 'tempo-next', direction: 1 }) : next }
@@ -234,7 +242,7 @@ export function sourceCommand(editor,line) {
     case 'pattern':{
       count(1);const pattern=Number(args[0])-1
       if(!Number.isSafeInteger(pattern)||pattern<0||pattern>=editor.info.patterns)throw new Error('Unknown MIDI pattern')
-      return {editor:sourceEditor(editor.project,{...editor,track:0,tick:undefined,pitch:undefined,selectedID:undefined,channel:undefined,selectedExpressionID:undefined,selectedTempoID:undefined},pattern)}
+      return {editor:sourceEditor(editor.project,{...editor,sourceLoop:undefined,track:0,tick:undefined,pitch:undefined,selectedID:undefined,channel:undefined,selectedExpressionID:undefined,selectedTempoID:undefined},pattern)}
     }
     case 'select':{
       count(1);const note=editor.performance?.notes.find(n=>n.id===args[0]);if(!note)throw new Error('Unknown MIDI note event ID')

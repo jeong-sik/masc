@@ -289,6 +289,24 @@ particular, polyphonic pressure keeps its original key rather than being
 reassigned to the new pitches. Chord candidates remain analysis of sounding
 keys, not sustain-pedal voice durations or a unique harmonic interpretation.
 
+`:harmony` or `:harmony mix` opens a worker-produced timeline of key-set changes,
+including rests. Phrase mix analysis follows mute/solo; imported MIDI uses the
+chosen pattern's tracks. `:harmony track` inspects the current track, including
+a muted phrase track, and honors an imported MIDI channel selection. Different
+source ports in that scope contribute their keys together. Positions retain
+phrase beats or the original MIDI PPQ/SMPTE axis. Zero-duration source notes
+appear as point events rather than being stretched into sounding intervals.
+
+Up/Down selects an interval. Enter returns to the piano roll at its original
+tick and lowest key, keeping the current track so `:revoice` can compare a
+voicing there. Esc/q closes the analysis. Ordinary note-editing keys are owned
+by this read-only list; commands remain available. Document, pattern, track or
+channel changes cancel its result, and a late worker cannot reopen it. The
+analysis uses exact key durations and Tonal candidates; it does not infer pedal
+extension or resolve an ambiguous chord to one answer. No attack-window
+threshold is used to group nearby notes. `:harmony-export PATH` writes all rows,
+notes, candidates, scope and clock units as JSON, refusing an existing file.
+
 
 ## MIDI source experiments
 

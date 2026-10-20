@@ -56,6 +56,15 @@ multiple channels/ports. Other expression events retain their original keys and
 bytes, so polyphonic pressure is not retargeted by this note edit. Analysis remains
 candidate-based and uses key durations, not inferred pedal-extended sound.
 
+The harmonic timeline runs in the owned sequencer worker. It sweeps exact
+note-on/off boundaries, retains shared-key overlap counts and rests, and represents
+zero-duration source notes as points. Mix analysis uses audible phrase tracks or
+the chosen MIDI pattern; track analysis additionally uses the source channel
+selection. Original PPQ/SMPTE positions remain the analysis authority. Choosing a
+row returns to that tick for further edits; analysis itself never changes the
+musical document. Context changes cancel obsolete work, close joins the worker,
+and complete candidate data can be exported without overwriting an existing file.
+
 Native WAV preview uses AVAudioEngine/PlayerNode buffers with pause, seek and
 looping, pinned to a CoreAudio output. External MIDI preview uses a separately
 owned CoreMIDI sender and pins a destination by unique ID. It projects the same

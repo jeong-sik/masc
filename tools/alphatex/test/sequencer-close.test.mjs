@@ -77,6 +77,43 @@ async function controller(options = {}) {
 const flush = () => new Promise(resolve => setImmediate(resolve))
 const pitches = value => value.observed.saved.at(-1).tracks[0].notes.map(note => note.pitch)
 
+test('analysis owns note keys, then selecting an interval returns to the intended voicing edit', async () => {
+  let initial = editor.newEditor()
+  for (const line of ['chord Cmaj7 0 4','chord Dm7 4 4']) initial = editor.editorCommand(initial,line).editor
+  const view = await controller({initialDocument:initial.project})
+  view.command('harmony track'); view.key('delete'); await flush()
+  const worker = view.observed.workers[0], job = worker.requests[0]
+  assert.deepEqual(job.options.scope,{kind:'track',id:'track-1'})
+  worker.emit('message',{id:job.id,ok:true,result:{rows:[{kind:'span',start:0,end:4*PPQ,pitches:[60,64,67,71],notes:[],candidates:[]},
+    {kind:'span',start:4*PPQ,end:8*PPQ,pitches:[62,65,69,72],notes:[],candidates:[]}]}})
+  await flush();view.key('down');view.key('return');view.command('revoice Dm7 drop2 4');await flush()
+  view.key('q');await view.done
+  assert.deepEqual(pitches(view),[60,64,67,71,57,62,65,72])
+})
+
+test('a changed draft cancels analysis and its late result cannot take ownership of subsequent note input', async () => {
+  const initial = editor.editorCommand(editor.newEditor(),'note C4 0 1').editor.project
+  const view = await controller({initialDocument:initial})
+  view.command('harmony');await flush()
+  const worker = view.observed.workers[0], job = worker.requests[0]
+  view.command('transpose 12');await flush()
+  assert.equal(Atomics.load(new Int32Array(job.cancel),0),1)
+  worker.emit('message',{id:job.id,ok:true,result:{rows:[{kind:'span',start:0,end:PPQ,pitches:[60],notes:[],candidates:[]}]}})
+  await flush();view.key('return');view.key('q');await view.done
+  assert.deepEqual(pitches(view),[72,60])
+})
+
+test('closing a ready analysis does not reinterpret its queued Enter as a note insertion or removal', async () => {
+  const initial = editor.editorCommand(editor.newEditor(),'note C4 0 1').editor.project
+  const view = await controller({initialDocument:initial})
+  view.command('harmony');await flush()
+  const worker = view.observed.workers[0], job = worker.requests[0]
+  worker.emit('message',{id:job.id,ok:true,result:{rows:[{kind:'span',start:0,end:PPQ,pitches:[60],notes:[],candidates:[]}]}})
+  await flush();view.key('return');view.signal.abort();await view.done
+  assert.deepEqual(view.observed.saved.at(-1),initial)
+  assert.equal(worker.terminated,true)
+})
+
 test('reopened document auditions its frozen sound without consulting the picker', async () => {
   const selection = { plugin_path: '/synth.vst3', plugin_name: null, preset_path: '/removed.vstpreset', name: 'Bass' }
   const document = editor.editorSound(editor.editorCommand(editor.newEditor(), 'note C4 0 1').editor, frozenSound(selection)).project

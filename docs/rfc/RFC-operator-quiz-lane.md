@@ -1,44 +1,66 @@
 ---
 rfc: "operator-quiz-lane"
-title: "Operator quiz: a Keeper asks from fleet records on a Schedule, grades from one fact log"
+title: "Operator quiz: a Lane Add-on writes and grades through its own exact-output lanes"
 status: Draft
 created: 2026-10-20
 updated: 2026-10-20
 author: claude
-related: ["0425", "schedule-history-and-outcome", "wiki-lint-and-page-contracts"]
+related: ["0471", "0465", "cli-runtimes-as-lane-slots", "every-lane-is-one-row-in-one-registry", "schedule-history-and-outcome"]
 ---
 
 # RFC: Operator quiz
 
 - Status: Draft. Times are UTC unless marked.
 - Operator request: Board `p-c15d88ca431ebdcc30bd9869a212c1df` (2026-10-20T01:23:52Z), verbatim: "야 그리고 이거 지식 격차나 이해부채, 운영자에게 자꾸 부채가 쌓이는데 이거 해결할 어떤 장치? / Quiz Lane ? 음 / 되새김 Lane? ㅋㅋ / 음 이거 켜면 / 매일 또는 지정한 시간마다 문제 - 채점 - 평균 점수 및 시험 보는 기능 있음 좋겠음 / 내가 부채가 계속 쌓이거든..."
-- Coordinates are `path:line` at `b5a3e7540a3`. §16 lists what the author read directly and what came from research agents.
-- The file slug keeps the word "lane" because the request used it. The feature is not a Lane (§3.8, D1).
+- This revision replaces the Keeper-centred design merged in #44101. The operator answered the eight questions of that revision (§13). The previous design is now alternative A1 (§12).
+- Coordinates are `path:line` at `a6b9b1f58c2`. §16 lists what the author read.
+- The reviews of 2026-10-20 on #44114 are answered in this text. §13.3 maps each item to its section.
+- The file slug keeps the word "lane". The feature is a Lane Add-on package that owns two exact-output lanes, which is what "Lane" means in the glossary (`docs/spec/00-glossary.md:1352-1355`).
 
 ## 0. Summary
 
-The operator says knowledge gaps and "understanding debt" keep piling up and asks for a quiz. This RFC proposes the smallest version that fits the existing system:
+The operator says knowledge gaps and "understanding debt" keep piling up and asks for a quiz. The operator chose who writes and grades it: not a Keeper, but "Lane Add-on 안에 Exact Output Lane 이 포함된 스타일".
 
-- A Keeper writes the quiz when a Schedule wakes it.
-- The operator answers in TUI Approvals, exactly as they answer any Keeper question today.
-- One new append-only log records the expected answer, the topic, the review item and the cited sources for each question. It is written before the question becomes visible.
-- Choice answers are graded by comparing choice ids with that record. Free-text answers are judged by the Keeper against a rubric it wrote before the answer.
-- Score, history, the "which topics I keep missing" map and the re-ask list are computed on read. None of them is stored.
+The design in one paragraph:
 
-A "Quiz Lane" already exists as a Lane Add-on pair (`quiz-questions`, `quiz-grader`). It has never been installed on the live workspace, and its design refuses repeat attempts. This RFC does not build on it. O1 asks the operator whether to delete it.
+- An `operator-quiz` Lane Add-on package runs in its own container and keeps its own append-only log on its persistent state volume.
+- A Schedule sends it a `compose` action at the times the operator picks.
+- The package reads recent fleet records through the host, then asks its `author` exact-output lane for questions as JSON that must match a schema shipped in the package.
+- It checks every quote against the record bytes it read, writes the answer key to its log, and only then raises the questions in TUI Approvals.
+- Choice answers are graded by comparing choice ids. Free-text answers go to its `grade` exact-output lane.
+- The package publishes score, sessions, the debt map and review items as ordinary Lane rows. The TUI shows them on the generic Add-on Results screen.
+
+The package needs five things the core does not offer today (§3.9). Each is generic: the core still does not know what a quiz is. §4.2 marks every piece as core or package.
 
 ## 1. Decisions
 
-- D1. The feature is called "operator quiz". It is a Keeper, a Schedule and Ask. It is not a Lane, and it adds no Lanes-list row.
-- D2. One new durable record: `<base-path>/.masc/keeper_quiz/<keeper>.jsonl`. It is append-only and has two event kinds, `Posed` and `Judged`. Nothing else is stored.
-- D3. The operator sees an ordinary Ask. The answer keys, answer route and answer log do not change.
-- D4. The key is on disk before the question exists. One tool appends the `Posed` rows and then the Ask, under the same `ask_id`.
-- D5. A choice grade is a pure function of the recorded key and the recorded answer. It is never stored.
-- D6. A free-text grade is a Keeper judgment, stored as `Judged`. A later `Judged` replaces an earlier one for display and scoring. Both stay in the log.
-- D7. The operator disputes a grade by sending the quiz Keeper an ordinary message. The operator does not write grades (O5).
-- D8. The code has no spacing intervals or due dates. The projection shows each review item's attempts, and the Keeper decides what to ask again.
+### 1.1 Operator decisions (2026-10-20)
+
+| # | Question (§13) | Decision |
+|---|---|---|
+| O1 | Delete the existing `quiz-questions` / `quiz-grader` pair? | Delete it, with its tests, glossary entry and doc mentions. |
+| O2 | Name | "operator quiz" |
+| O3 | Who writes questions | Not a Keeper: "별도 lane", clarified as "Lane Add-on 안에 Exact Output Lane 이 포함된 스타일". |
+| O4 | Who grades free text | Not a Keeper, same answer as O3. |
+| O5 | Direct grade override by the operator | Not in v1. Disputes go by message. |
+| O6 | Allowed sources | All seven kinds (§5). |
+| O7 | Targets | As proposed: 30 days, at least 20 re-asked items, recovery at least 2/3. They are reported targets, not pass/fail gates (§14). |
+| O8 | Does a skip count? | A skipped question counts as a miss. |
+
+The operator's own words were relayed for O3 and O4 only. O1, O2 and O5-O8 were relayed as "the recommended option".
+
+### 1.2 Design decisions
+
+- D1. The feature is a Lane Add-on package, `operator-quiz`. It appears in the Lanes list as one `package` row (`docs/spec/00-glossary.md:1374-1384`).
+- D2. Question writing and free-text grading are two exact-output lanes owned by the package: `author` and `grade`. The package ships their JSON Schemas. The operator binds their slots in `runtime.toml`.
+- D3. The package never calls the host. The host asks the package what it is waiting for and delivers results (§4.4). The package's state says what it waits for. The host's records say what happened.
+- D4. The answer key is on the package's persistent volume before the question exists anywhere the operator can see it.
+- D5. A choice grade is a pure function of the key and the answer. It is never stored.
+- D6. A free-text grade is the `grade` lane's output, accepted by the package and stored as `Judged`. A later `Judged` replaces an earlier one for display and scoring. Both stay in the log.
+- D7. The operator disputes a grade with a `dispute` action carrying their own words. The package regrades through the `grade` lane. The operator never writes a grade (O5).
+- D8. The code has no spacing intervals or due dates. The `author` lane sees each review item's attempt history and picks re-asks, following the practice written in the package prompt (§7).
 - D9. Success is measured by recovery on re-asked items (§14), not by the average score.
-- D10. Every question cites at least one source with a verbatim quote. The server checks the quote for sources it stores itself: Board and wiki.
+- D10. Every question cites at least one record with a verbatim quote. The package checks every quote against record bytes the host read and retained, for all seven source kinds. The check is exact containment in those bytes. It tests whether a quote the model claims is really there; it is not a word or pattern match that guesses meaning (§4.11).
 
 ## 2. Problem
 
@@ -61,491 +83,828 @@ Why a test and not a digest: the retrieval-practice literature reports that taki
 
 ## 3. What exists
 
-### 3.1 The existing "Quiz Lane" add-on pair
+### 3.1 Lane Add-ons
 
-- Glossary: a Lane Add-on pair `quiz-questions` and `quiz-grader` (#38433, task-1688). Questions come from a fact deck of records, and grading is a separate package (`docs/spec/00-glossary.md:1912-1934`).
-- `quiz-questions` turns deck facts into multiple-choice questions.
-  - It has a closed set of six templates: `author`, `claimant`, `status`, `merged_commit`, `cause`, `decision` (`addons/quiz-questions/server.py:22-31`).
-  - It offers at most four choices, and the wrong choices are real answers taken from other facts (`:31`, `:54-59`).
-- The `quiz-deck` skill refuses any fact whose answer is not a whole word inside a quote copied from the saved record (`addons/quiz-questions/skills/quiz-deck/SKILL.md:8-26`). It also states its limits: it does not catch a negation elsewhere in the quote, and it cannot show that the fact was worth asking (`:27-33`).
-- `quiz-grader` grades `masc_lane_act` answers by exact string comparison with the deck answer (`addons/quiz-grader/server.py:182-210`).
-  - Only one graded attempt is allowed per question and claimed answerer: "the first grade stands" (`:201-209`).
-  - The answerer is a label the caller writes in, not an authenticated identity (`addons/quiz-grader/README.md:5-7`).
-  - Grader state lives only in the worker incarnation and is not replayed after a restart (`server.py:10-11`). A new worker starts with an empty score (`README.md:40-42`).
-- Live state (read 2026-10-20): `<base-path>/.masc/config/lane-addons/` holds five declarations (`dos-counter`, `dos-machine`, `dos-output-statistics`, `msx-machine`, `vst-phrase`), none of them quiz. `quiz` does not occur anywhere under `.masc/lane-addons/`.
+**Package manifest (`lane.toml`).**
+- Top-level keys are `id`, `revision`, `title`, `image`, `runtime`, `command`, `contributions` and `[resources]` (`lib/lane_addon/lane_addon_manifest.ml:178-217`).
+- `[world]` accepts only `skills`, `actions`, `outputs`, `tools` and `state` (`:60-66`). `[interface]` accepts only `binding_schema`, `presentation`, `refresh_policy` and `model_access` (`:134-143`).
+- `[world.state] mode = "persistent"` selects a persistent volume (`:122-132`).
+- The parsed package record is `Lane_addon_types.package` (`lib/lane_addon/lane_addon_types.mli:56-79`).
 
-Gaps between this pair and the request:
-- (a) Answers go through `masc_lane_act`, not the operator's Approvals.
-- (b) The same question cannot be graded twice for the same answerer, so spaced repetition is ruled out.
-- (c) The score resets with every worker incarnation.
-- (d) The six templates are mostly recall of names and SHAs, and there is no free text.
-- (e) There are no topics, so no debt map can be built.
-- (f) The add-on contract says the core does not interpret package meaning (`docs/design/lane-addon-v0.md:42`). It also says a package that needs TUI menu changes has failed the contract (`:53`). An operator history and debt-map view for this package would break both rules.
+**Declarations.**
+- An installation is a TOML file under `<base-path>/.masc/config/lane-addons/` (`docs/guides/tui-lane-addons.md:127`).
+- Its keys are `id`, `enabled`, `run_id`, `manifest_path` and `[binding]`; anything else is refused (`lib/lane_addon/lane_addon_config.ml:106-108`).
+- `enabled = false` removes the worker and keeps the TOML and retained observations (`docs/guides/lane-package-activity.md:3-20`).
 
-Worth keeping from it:
-- The person answering never sees which choice is right.
-- Every answer is backed by a quote from a record.
-- Wrong choices come from real neighbouring facts.
+**Worker container.**
+- Docker and Apple workers run with `--network none`, a read-only root and all capabilities dropped (`lib/lane_addon/lane_addon_engine.ml:60`, `:66`).
+- The worker is an MCP server over stdio. The host is the client.
 
-### 3.2 Ask (Keeper questions)
+**Actions.**
+- A package with `contributions = ["act"]` advertises one action tool taking exactly `context`, `request_id` and `action` (`docs/guides/lane-world-actions.md:60-69`).
+- Callers use `POST /api/v1/lane-addons/actions` or `masc_lane_act` with `instance_id`, `expected_incarnation`, `request_id` and `action` (`:82-93`; `config/tools/masc_lane_act.toml:1-40`).
+- The request is durable before dispatch. The same request id with the same input returns the same receipt; different input is refused (`docs/guides/lane-world-actions.md:108-110`).
+- Receipt states are `queued`, `running`, `confirmed`, `failed_before_effect` and `outcome_unknown` (`:112-118`; `lib/lane_addon/lane_addon_action.mli:3`).
+- Orphaned receipts are never replayed against a replacement worker (`docs/guides/lane-world-actions.md:150-153`).
+- An action carries no sources. Only observations receive `binding` and `sources` (`:74-75`; `lib/lane_addon/lane_addon_worker.ml:531-540`).
 
-- A question has choices with a stable `choice_id` (`lib/keeper/keeper_ask.mli:26-32`) and a `Single` or `Multi` mode (`:43-45`).
-  - Every question also accepts a free-text `Wrote` answer (`:47-51`) and a `Skipped` answer (`:121-126`).
-  - Questions never expire, and the asking Keeper is not suspended (`:12-14`).
-  - The ask's `context` is rendered beside the prompt (`:91-94`), so it cannot hold a hidden key.
-- Store: append-only `<base_path>/.masc/keeper_ask/<sanitized-keeper>.jsonl`. Writes go through a per-path mutex and a file lock, and the first recorded answer wins (`lib/keeper/keeper_ask_store.mli:1-13`).
-- Tool `masc_ask` makes the `ask_id` and appends `Asked` (`lib/mcp_tool_runtime_ask.ml:155-175`). Its description says "Use for missing external decisions" (`config/tools/masc_ask.toml:2-7`). The answer reaches the Keeper as a wake that carries the original questions (`:4-7`; `lib/keeper/keeper_ask_answer_wake.mli:16-27`).
-- Measured weak spot: in 2026-09, 84 of 131 `masc_ask` calls failed, mostly because Keepers got the nested schema wrong (`docs/rfc/RFC-0425-a-question-says-how-it-can-be-answered.md:15-31`). A quiz tool with more nested fields carries the same risk.
-- Answer route: `POST /api/v1/keepers/ask-answer` (`lib/server/server_routes_http_routes_dashboard.ml:3829-3833`). The responder is recorded as `Surface_ref.Dashboard` (`lib/server/server_routes_http_keeper_stream.ml:4196-4199`).
-- The list route accepts `include_resolved` (`:4348-4349`), but the TUI only fetches open questions (`bin/masc_tui_http.ml:3673-3678`).
-- Live use: 45 per-Keeper ask logs, 1,972 lines in total (count of `.masc/keeper_ask/*.jsonl`, 2026-10-20).
+**Observations and sources.**
+- Source kinds are `fusion_run`, `snapshot_file`, `msx_capture`, `dos_capture`, `lane_output` and `browser_document` (`lib/lane_addon/lane_addon_sources.mli:8-15`).
+- `snapshot_file` takes an absolute path to a file in a fixed JSON envelope, not an arbitrary file (`lib/lane_addon/lane_addon_sources.ml:101-103`, `:386-397`). The host retains the file bytes as a content-addressed blob (`:398`).
+- Read access has three values: `Operator_configuration`, `Keeper of string` and `Unauthenticated` (`lib/lane_addon/lane_addon_sources.mli:70-72`).
+- No source reads the Board, the wiki, a git repository or GitHub.
 
-### 3.3 Schedules
+**Lane updates.** `masc_lane_updates` lets a subscribed Keeper read and acknowledge an installation's output. It never wakes a Keeper (`config/tools/masc_lane_updates.toml:2-8`; `docs/guides/lane-subscriptions.md:16-19`). It is a Keeper-facing reader and plays no part in this design.
 
-- Recurrence options are `One_shot`, `Interval`, `Daily {hour; minute; second; timezone}` and `Cron`. The timezone is a fixed offset: `Asia/Seoul`/`KST` is +09:00, with no DST (`lib/schedule/schedule_domain.mli:36-61`).
-- Statuses are Scheduled, Due, Running, Succeeded, Failed, Cancelled and Expired (`:18-25`).
-  - There is no enabled or paused state.
-  - Cancel is terminal, and update works only on Scheduled or Due rows (`config/tools/masc_schedule_cancel.toml:3-6`, `masc_schedule_update.toml:3-5`; agent).
-- The only payload kind is `masc.keeper_wake` (`lib/schedule/schedule_supported_kinds.ml:18-20`; agent).
-  - A due wake goes into the Keeper's event queue (`lib/server/server_schedule_consumers.ml:1023-1061`; agent).
-  - A recurring wake sends the same text every time (`config/tools/masc_schedule_create.toml:53-62`).
-  - The next occurrence is held while the previous one has not been consumed (`lib/schedule/schedule_runner.mli:23`).
-- The TUI already posts create, update and cancel (`bin/masc_tui_http.ml:2765-2784`; agent).
+**Persistent state.**
+- The state owner is the workspace, the installation and the package. A TOML installation uses its declaration `id`; a manual Attach uses its instance id (`lib/lane_addon/lane_addon_runtime.ml:211-218`).
+- The Docker volume is `masc-lane-state-<sha256 of the owner>` and its single writer container is the same name plus `-writer` (`lib/lane_addon/lane_addon_worker_state.ml:13-28`). Incarnations of one installation share that writer name (`lib/lane_addon/lane_addon_slot.mli:5-13`).
+- The worker sees the volume at `/state`. Detach and disable remove the worker, not the volume. Renaming the declaration id or the package id starts a new, empty state (`docs/guides/machine-addon-state.md:27-42`).
+- Changing the runtime (Docker or Apple) of a persistent installation is refused; it needs a new installation id (`lib/lane_addon/lane_addon_runtime.ml:1631-1647`).
 
-### 3.4 Goals
+**TUI.**
+- An instance detail has four tabs: Results, Links, Installation and Records (`docs/guides/tui-lane-addons.md:66-76`).
+- `interface.presentation` declares which row fields Results shows (`:78-80`; `lib/lane_addon/lane_addon_presentation.mli:1-16`).
+- The action menu `a` lists closed values from the action schema's `enum`/`const`. A schema with a required free-text field sends the operator to `A`, where they type `act {…}` as JSON (`docs/guides/tui-lane-addons.md:111-119`).
 
-- A Goal stores its metric and target as strings (`lib/goal/goal_document.mli:3-16`).
-- It keeps one observation, and a new one replaces the previous (`lib/goal/goal_measurement.mli:35-36`).
-- A metric must name something the completion judge can open: a URL, a `board:` post or a `fusion:` run (`config/tools/masc_goal_upsert.toml:31-41`; agent).
+**Skills.** `[world.skills] directory` publishes read-only Skills into the Keeper Skill catalog (`lib/lane_addon/lane_addon_manifest.ml:81-85`; `docs/guides/tui-lane-addons.md:166-167`). They are for Keepers. This package ships none.
 
-A Goal cannot hold per-question history.
+**What a package may not do.**
+- The core does not interpret a package's domain meaning (`docs/design/lane-addon-v0.md:42`).
+- A package that needs a change to the server dispatcher, a TUI menu or a Dashboard component has failed the contract (`:53`; `docs/guides/lane-world-actions.md:207-209`).
+- Writing a new source driver is a different, allowed kind of work (`docs/design/lane-addon-v0.md:54`).
+- No new scheduler for add-ons: they react to existing completion signals or explicit requests (`:99`).
+- Worker control tools cannot be exported to Keepers: `lane_observe`, the call-context tool, `lane_machine_inputs`, the controller tools and the action tool (`lib/lane_addon/lane_addon_types.ml:62-73`). The host already pages `lane_machine_inputs` from the worker on its own initiative (`docs/design/lane-addon-tool-exports.md:78-83`).
 
-### 3.5 Wiki, Keeper memory, artifacts
+### 3.2 Model access for packages today: host sampling
 
-- **Wiki:** Keepers can create and update pages, and an update needs `base_revision` (glossary `:3925`; `config/tools/masc_wiki_update.toml:5-10`; agent). It is knowledge to cite, not a ledger.
-- **Keeper memory:** a write first waits for Librarian admission and can be declined (`config/tools/keeper_memory_write.toml:5`; agent). It is the Keeper's own subjective view, so it is not a record of grades.
-- **Artifacts:** `keeper_artifact_publish` stores revisioned Markdown or HTML (`config/tools/keeper_artifact_publish.toml:1-45`; agent). It fits a human-readable report, not a ledger.
+- A manifest may declare `[interface] model_access = "host_sampling"` (`lib/lane_addon/lane_addon_manifest.ml:144-151`; `docs/design/lane-addon-model-boundary.md:46-50`).
+- The route comes from `binding.model_route` and resolves through the Keeper runtime candidate order (`[runtime.lanes.<id>]`), not through exact-output lanes (`lib/server/server_lane_addon_sampling.ml:35-45`; `docs/design/lane-addon-model-boundary.md:113-128`).
+- Sampling is allowed only inside an observation, never inside an action (`lib/lane_addon/lane_addon_worker.ml:524-527`; `lib/lane_addon/lane_addon_sampling.mli:12-14`).
+- Replies are free text. No JSON Schema is enforced (`docs/design/lane-addon-model-boundary.md:157-163`).
+- Official-client runtimes are refused because they cannot take a per-request output limit (`:140-144`).
+- MCP sampling is deprecated in the 2026-07-28 specification, and new designs should not adopt it (`:9-13`; `docs/spec/00-glossary.md:86-92`).
 
-### 3.6 Places questions can come from
+Host sampling therefore cannot give the quiz a schema-checked answer, cannot run during an action, and cannot use the operator's exact-output slots. `addons/fusion-compute` uses it (`addons/fusion-compute/lane.toml:17-19`); this RFC leaves it alone.
 
-- **Changelog fragments:**
-  - Each PR adds `changelog.d/<PR>.md`. Its bullets sit under fixed `###` sections and cite the PR's own number (`changelog.d/README.md:3-17`).
-  - Release deletes the fragments (`:20-24`), so a question has to cite them by commit.
-- **Board:**
-  - Post and comment ids are `p-`/`c-` followed by 32 hex characters (`lib/board_types/board_types.ml:85`, `:99-108`; agent).
-  - `masc_board_post_get` returns a post with up to its 20 newest comments (`config/tools/masc_board_post_get.toml:6-12`; agent).
-  - Posts can be edited (`config/tools/masc_board_post_update.toml`).
-- **GitHub:**
-  - Keepers reach GitHub through `tool_execute` in their sandbox (`config/tools/tool_execute.toml:1-18`). The images ship `gh` and `git` (`sandbox-images/base/Dockerfile:17-21`), and each Keeper has its own `gh` identity (`lib/keeper/keeper_github_identity.ml:100-107`) (all agent).
-  - Unconfirmed: whether a given Keeper has a login, network access and a checkout.
+### 3.3 Exact-output lanes
 
-### 3.7 TUI
+- A lane is one `[runtime.exact_output_lanes.<id>]` table (`config/runtime.toml:162-184`). Its keys are `enabled`, `slots`, `cli_slots`, `max_output_tokens` and `thinking` (`lib/runtime/runtime_toml.ml:2805-2824`; `lib/runtime/runtime_schema.mli:369-392`).
+- Lane ids are the closed type `Standalone_lane.t` with seven constructors (`lib/runtime/standalone_lane.mli:13-21`). A table under any other name fails the load, because it would otherwise vanish from every surface (`lib/runtime/runtime_toml.ml:2975-2991`).
+- An enabled lane needs at least one slot; a Required lane cannot be disabled (`:2908-2919`; `docs/guides/exact-lane-activity.md:19-21`).
+- An HTTP slot whose provider declares no `exact-body-timeout-s` is a typed gap. A save that adds one is refused (`lib/runtime/runtime.ml:195-215`; `lib/runtime/runtime_config_error.mli:38-45`, `:104-109`). A `cli_slots` entry must be an official client with an output-schema channel (`:57-79`).
+- The registry publishes all lanes at once and resolves one lane to its admitted slots. Errors are `Exact_lane_unconfigured`, `Exact_lane_off` and `No_admitted_lane_slots` (`lib/runtime/runtime_exact_output_registry.mli:108-111`, `:134-158`, `:261-267`). A consumer can subscribe to changes of one lane (`:113-132`).
+- A caller inside the server builds the requirement with `Exact.make_output_requirement ~schema ~minimum_guarantee:Exact.Json_syntax` (`packages/agent_core/lib/llm_provider/exact_output.mli:162-167`, `:548-551`). The Candle appraiser is a complete small example:
+  - it resolves its lane (`lib/server/server_candle_appraiser.ml:6-10`);
+  - it walks the HTTP slots and validates each answer, returning `Accept` or `Reject_and_advance` (`:143-200`, `:176-179`);
+  - it falls back to `cli_slots` through `Keeper_lane_cli_oneshot.walk` with the same requirement (`:329-345`);
+  - it records the run in `Exact_lane_run_registry` (`:377`), whose lane type is also closed (`lib/exact_lane_run_registry.mli:7-12`).
+- Thirteen files read `exact_output_lane_decl`, including account removal, prompt presets, lane editing and server bootstrap (`lib/runtime/runtime_account_removal.ml`, `lib/prompt_preset.ml`, `lib/runtime/runtime_lane_edit.ml`, `lib/server/server_runtime_bootstrap.ml`).
 
-- Open questions sit under Approvals as "[?] Questions waiting on you" (`bin/masc_tui_render_approvals.ml:383-401`). `a` opens answering (`bin/masc_tui.ml:15482`; agent).
-- Answering keys:
-  - Digits 1-9 pick a choice by position.
-  - The digit just after the last choice opens free text (`bin/masc_tui.ml:25808-25818`).
-  - Enter must be pressed twice to send (`:15795-15826`; agent).
-- After sending, one "last answer" receipt block is shown (`bin/masc_tui_render_approvals.ml:245-361`; agent). Home also lists question rows (`bin/masc_tui_home.ml:34-45`; agent).
-- A new question rings the bell and shows a desktop banner, "<keeper> is waiting on a decision" (`bin/masc_tui.ml:12008-12029`).
-- The tab ring has seven entries (`bin/masc_tui_types.ml:3961-3969`), and Approvals belongs to the Work family (`bin/masc_tui_surface_navigation.ml:7-22`; agent).
-- Neither the TUI nor the web dashboard shows answered questions anywhere (agent).
+Nothing lets a Lane Add-on request an exact-output call today.
 
-### 3.8 What "Lane" means here
+### 3.4 Ask and Approvals
 
-- The glossary defines Lane as a fixed execution path for exact-output model work. It names four other, unrelated uses of the word (`docs/spec/00-glossary.md:1352-1372`).
-- Lane family is the row group in the operator's Lanes list: exact, browser, machine or package (`:1374-1384`). A package lane is switched by a root `enabled` key (`docs/guides/lane-package-activity.md:3-20`).
+- `Keeper_ask` calls itself surface-neutral, but an ask is owned by a Keeper: it carries `keeper_name`, a Keeper continuation channel and a source turn (`lib/keeper/keeper_ask.mli:1-18`, `:87-104`).
+- Questions have stable `choice_id`s, `Single` or `Multi` mode, and every question also accepts free text and `Skipped` (`:26-32`, `:43-51`, `:121-126`). Asks never expire (`:12-14`).
+- The fold keeps the first terminal event per ask (`:191-196`).
+- The only writer of an ask is `masc_ask` (`lib/mcp_tool_runtime_ask.ml:175`). The log is `<base_path>/.masc/keeper_ask/<keeper>.jsonl` (`lib/keeper/keeper_ask_store.mli:1-13`).
+- The answer route is `POST /api/v1/keepers/ask-answer` with a Keeper `name` (`lib/server/server_routes_http_routes_dashboard.ml:3831`; `lib/server/server_routes_http_keeper_stream.ml:4176-4177`). An answer becomes a Keeper wake (`:4155-4161`), and maintenance recovers undelivered wakes (`lib/server/server_bootstrap_maintenance.ml:820-822`).
+- The TUI fetches `/api/v1/keepers/asks` and posts answers (`bin/masc_tui_http.ml:2565-2585`, `:3699-3712`). Approvals shows "[?] Questions waiting on you" (`bin/masc_tui_render_approvals.ml:400`). A new question shows the banner "<keeper> is waiting on a decision" (`bin/masc_tui.ml:12022`).
 
-A quiz driven by a Keeper wake fits none of these. Calling it a Lane would add a sixth meaning, which is why D1 names it "operator quiz".
+An add-on cannot raise a question in Approvals through any existing path.
+
+### 3.5 Schedules
+
+- Recurrences are `One_shot`, `Interval`, `Daily` and `Cron`, with fixed-offset timezones such as `Asia/Seoul` (+09:00) (`lib/schedule/schedule_domain.mli:34-61`).
+- The payload is opaque `{kind; body}`. The consumer of a kind owns authorization of its effect (`:1-5`).
+- The only supported kind is `masc.keeper_wake` (`lib/schedule/schedule_supported_kinds.ml:18-20`; `lib/schedule_payload_projection.mli:7`). A new kind needs a list entry, a creation validator branch and a consumer branch (`lib/schedule/schedule_supported_kinds.ml:1-16`; `lib/tool_schedule.ml:404-412`; `lib/server/server_schedule_consumers.ml:379`, `:1191`, `:1373`).
+- A consumer may hold a due occurrence while its target still holds the previous one (`Previous_occurrence_unconsumed`, `lib/schedule/schedule_runner.mli:21-24`, `:99-111`). The hold is the consumer's choice. The Keeper wake consumer holds only heartbeat `Interval` schedules; `Daily`, `Cron` and `One_shot` fire on every due (`lib/server/server_schedule_consumers.ml:1260-1296`, `:1364-1371`).
+- A consumer's acceptance proves the work is durable. What the work does afterwards is outside the scheduler contract (`lib/schedule/schedule_runner.mli:80-86`).
+- The TUI creates schedules by posting its JSON form to `masc_schedule_create` (`bin/masc_tui_http.ml:2787-2796`).
+
+Add-ons have no timer of their own, and a worker cannot start anything: it only answers the host.
+
+### 3.6 Where fleet records live
+
+- **Board:** the host Board store (`lib/board/board.mli:1`). Post ids start with `p-` and comment ids with `c-` followed by lowercase hex (`lib/board_types/board_types.ml:85`, `:100-109`). Posts can be edited (`config/tools/masc_board_post_update.toml`).
+- **Wiki:** pages carry a `revision` that starts at 1 and grows by one per update (`lib/wiki_page.mli:70`).
+- **Git:** registered repositories have a local clone path (`lib/repo_manager/repo_store.mli:39`).
+- **GitHub:** the server already reads open PRs of registered repositories over GraphQL, with the token of the Keeper named by `[repositories] pr_reader` (`lib/server/server_repository_pulls.mli:1-22`). It does not read merged PRs or review comments.
+- **Changelog fragments:** each PR adds `changelog.d/<PR>.md` (`changelog.d/README.md:3-17`). Release folds them into `CHANGELOG.md` and deletes them (`:20-23`), so a question cites a fragment by commit.
+
+### 3.7 The existing "Quiz Lane" pair (deleted by O1)
+
+- `quiz-questions` turns a fact deck into multiple-choice questions from six closed templates (`addons/quiz-questions/server.py:22-31`).
+- `quiz-grader` allows one graded attempt per question and claimed answerer: "the first grade stands" (`addons/quiz-grader/server.py:200-209`).
+- Its state lives only in the worker incarnation and is not replayed (`:10-11`). A new worker starts with an empty score (`addons/quiz-grader/README.md:40-41`).
+- Its deck had to be built by a script outside MASC, `build_deck.py` (`docs/spec/00-glossary.md:1912-1931`).
+
+Worth keeping: the answerer never sees which choice is right; every answer is backed by a quote; wrong choices come from real neighbouring facts. Its own limits still apply: a quote check does not catch a negation elsewhere in the record, and it cannot show the fact was worth asking (`addons/quiz-questions/skills/quiz-deck/SKILL.md:27-33`).
+
+### 3.8 Live state
+
+Read on 2026-10-20 for the previous revision and not re-read: `<base-path>/.masc/config/lane-addons/` held five declarations, none of them quiz. This revision touched no live state.
+
+### 3.9 Gaps
+
+| The operator's choice needs | Exists today | Missing |
+|---|---|---|
+| Exact-output lanes owned by a package, slots bound by the operator | Built-in lanes only, closed set (§3.3) | K1 |
+| The package asks the host for work and gets results | Host sampling only, free text, observation only (§3.2) | K2 |
+| Records of all seven kinds reach the package | No Board, wiki, git or GitHub source (§3.1) | K3 |
+| The operator answers in Approvals | Keeper-owned asks only (§3.4) | K4 |
+| It runs at times the operator picks, without a Keeper | Schedules wake Keepers only (§3.5) | K5 |
+| Key, attempts and grades survive restarts | Persistent volume (§3.1) | nothing |
+| Score, history, debt map visible | Generic rows and presentation (§3.1) | nothing |
 
 ## 4. Design
 
-### 4.1 Pieces and flow
+### 4.1 Flow
 
-1. The operator creates a Schedule that wakes the quiz Keeper (§10).
-2. On the wake, the Keeper reads `masc_quiz_history` (open quizzes, review items, topics) and recent records (§5).
-3. The Keeper decides whether to ask and what to ask. It calls `masc_quiz_ask` with the questions.
-4. The tool checks the input, appends the `Posed` rows, then appends `Asked` to the ask log under the same `ask_id`.
-5. The operator answers in Approvals as today.
-6. The TUI answer receipt reveals each question's verdict, the expected answer and the sources (§9).
-7. The answer wake reaches the Keeper. For every free-text answer, the Keeper calls `masc_quiz_judge`.
-8. The Quiz surface shows sessions, reveals, the debt map and review items.
+1. A Schedule fires `masc.lane_act` with `{installation_id = "operator-quiz", action = {kind = "compose"}}` (K5).
+2. The host queues the action on the installation's live worker. The package records a new session in its log and returns `confirmed`.
+3. The action reaching a terminal receipt starts a host request cycle (K2). The package lists what it waits for: record reads first (K3).
+4. The host reads the records, retains the bytes, and delivers each page. The package stores its cursors and asks for an `author` call with the new material and the review items' histories.
+5. The host runs the `author` lane (K1) and delivers the JSON. The package checks every question and quote. It appends `Posed` rows with the keys, then lists an `ask` without keys or sources.
+6. The host records the installation ask (K4). The question appears in Approvals.
+7. The operator answers in Approvals. The answer is recorded by the host and starts a cycle. The host delivers the answers.
+8. The package grades choices on the spot. For each free-text answer it asks for a `grade` call, and stores the result as `Judged`.
+9. After the cycle, the host runs one ordinary observation. The package publishes its projection rows, and the TUI Results screen shows them.
 
 ```mermaid
 sequenceDiagram
   participant S as Schedule
-  participant K as Quiz Keeper
-  participant Q as keeper_quiz log
-  participant A as keeper_ask log
+  participant H as Host
+  participant W as operator-quiz worker
+  participant V as /state log
+  participant L as author and grade lanes
   participant T as Operator TUI
-  S->>K: keeper_wake, same text each time
-  K->>K: read masc_quiz_history and recent records
-  K->>Q: Posed rows (key, topic, item, sources)
-  K->>A: Asked, same ask_id
-  T->>A: Answered (digit or free text)
-  A-->>K: answer wake
-  K->>Q: Judged (free-text answers, re-judgments)
-  T->>T: projection joins both logs on read
+  S->>H: masc.lane_act compose
+  H->>W: lane_act compose
+  W->>V: Session opened
+  H->>W: lane_host_requests
+  W-->>H: read_records, read_file
+  H->>W: lane_host_result (pages, retained hashes)
+  W-->>H: exact_output author
+  H->>L: one-shot call, package schema
+  H->>W: lane_host_result (questions JSON)
+  W->>V: Posed rows with keys
+  W-->>H: ask (no keys, no sources)
+  H->>T: question in Approvals
+  T->>H: answer
+  H->>W: lane_host_result (answers)
+  W->>V: Answer_received, choice verdicts
+  W-->>H: exact_output grade (free text)
+  H->>L: one-shot call
+  H->>W: lane_host_result (verdict JSON)
+  W->>V: Judged
+  H->>W: lane_observe
+  W-->>H: projection rows
 ```
 
-### 4.2 The one new record
+### 4.2 Core or package
 
-The record is append-only JSONL with one file per asking Keeper. It follows the layout and lock pattern of `Keeper_ask_store`.
-
-```ocaml
-type source =
-  | Pr of { number : int; merge_commit : Commit_sha.t; quote : Quote.t }
-  | Pr_comment of { number : int; comment_id : int; quote : Quote.t }
-  | Commit of { sha : Commit_sha.t; quote : Quote.t }
-  | Repo_file of { commit : Commit_sha.t; path : Repo_path.t;
-                   first_line : int; last_line : int; quote : Quote.t }
-  | Board_post of { post_id : Post_id.t; quote : Quote.t }
-  | Board_comment of { post_id : Post_id.t; comment_id : Comment_id.t; quote : Quote.t }
-  | Wiki_page of { name : Wiki_page_name.t; revision : int; quote : Quote.t }
-
-type expected =
-  | Choices of string list  (* non-empty; ids of this question's choices *)
-  | Points of string        (* rubric for a free-text question *)
-
-type posed = private {
-  ask_id : string; question_id : string;
-  item_id : Item_id.t;      (* stable across re-asks, [a-z0-9-]+ *)
-  topic : Topic.t;          (* [a-z0-9-]+ *)
-  expected : expected;
-  sources : source list;    (* non-empty *)
-  posed_at : float;
-}
-
-type verdict = Correct | Incorrect | Void of { reason : string }
-
-type judged = private {
-  ask_id : string; question_id : string;
-  verdict : verdict; rationale : string; judged_at : float;
-}
-
-type event = Posed of posed | Judged of judged
-```
-
-- **Writers:** only the owning Keeper, through the two tools in §4.4.
-- **Decode:**
-  - The decoder is strict. An unknown event kind, an unknown source kind or a malformed id is a decode error that names the path and line.
-  - A missing log is a different result from an empty log, as in `Keeper_ask_store` (`keeper_ask_store.mli:42-46`).
-- **Fold:**
-  - A second `Posed` for the same `(ask_id, question_id)` is dropped and counted as an anomaly. The first one wins, the same rule as the ask fold (`keeper_ask.mli:191-196`).
-  - For each question, the last `Judged` in file order is the current one, and earlier ones stay as its history.
-- **Ordering (D4):** `masc_quiz_ask` makes the `ask_id` and appends every `Posed` row. Only after that write succeeds does it build the `Keeper_ask.ask` and call `Keeper_ask_store.record_ask`.
-  - So the key is durable before the operator can see the question.
-  - If the Ask append fails, the `Posed` rows have no Ask. The projection counts them as "posed, never asked" and leaves them out of every score.
-- **Spoilers:** the read route leaves out `expected` and `sources` while a question is still open. That is a visibility choice, not a guard. The file on disk holds the key, and the operator can read it.
-
-### 4.3 Why each fact lives where it does
-
-| Fact | Where it lives | Why |
+| Piece | Kind | Knows quiz meaning? |
 |---|---|---|
-| Question text, choices, time asked | Ask log (exists) | Unchanged |
-| The answer, who answered, when | Ask log (exists) | Unchanged |
-| Expected answer, fixed before the answer | `Posed` (new) | The ask `context` and choice text are rendered to the operator (`keeper_ask.mli:26-32`, `:91-94`), so there is no hidden slot. Keeper memory can be declined. The add-on deck exists only inside a worker. Without this record, nothing shows that a grade predates the answer. |
-| Topic, review item, sources | `Posed` (new) | The debt map and re-asks group by them. No record holds them as typed values, and reading them out of prose is string matching (constitution `docs/constitution.xml:451-457`). |
-| Free-text verdict and reasons | `Judged` (new) | A judgment exists nowhere else. Running the model again could give a different answer. |
-| Choice verdict | Not stored | A pure function of the key and the answer |
-| Score, history, debt map, review items | Not stored | Projections (§8) |
-| Dispute | Chat log (exists) | An ordinary message. If it changes the grade, the result is a new `Judged`. |
-| On/off and times | Schedule (exists) | Unchanged |
+| K1 Package exact-output lanes | core | no |
+| K2 Host requests (two private worker tools) | core | no |
+| K3 Record reads for Board, wiki, repository, GitHub | core | no. It knows the host's own record kinds, which is host knowledge, not package meaning |
+| K4 Installation questions in Approvals | core | no |
+| K5 Scheduled lane action | core | no |
+| K6 Generic TUI support for K1, K2, K4 | core (TUI) | no |
+| P `addons/operator-quiz`: schemas, prompts, log, grading, spacing, projections | package | yes |
 
-### 4.4 Tools
+All quiz meaning lives in P. If the core needs a quiz-specific branch anywhere, the design has failed the add-on contract (`docs/design/lane-addon-v0.md:53`).
 
-- **`masc_quiz_ask`**
-  - Arguments: the `questions` array of `masc_ask`, where every question object also carries a required `quiz` object `{item_id, topic, key_choice_ids | key_points, sources}`, plus the optional top-level `context`. It reuses the question parser in `mcp_tool_runtime_ask.ml`, so the Ask part cannot drift from `masc_ask`.
-  - It refuses before writing anything when:
-    - a question has no `quiz` object;
-    - a key choice id is not one of that question's choices;
-    - a `Single` question has more or fewer than one key;
-    - a question with choices has no `key_choice_ids`;
-    - a question without choices has no `key_points`;
-    - `sources` is empty, or a source kind is unknown;
-    - a Board or wiki quote does not occur in the stored record right now (D10).
-  - It returns the `masc_ask` body plus the number of `Posed` rows. Its description includes one complete call; RFC-0425 found that a real example removed most nesting mistakes.
-- **`masc_quiz_judge`**
-  - Arguments: `{ask_id, question_id, verdict: correct|incorrect|void, rationale, void_reason?}`.
-  - It refuses when:
-    - the caller is not the Keeper that asked;
-    - the ask is still open or was withdrawn;
-    - the question has no `Posed` row;
-    - either log cannot be read. An unreadable store never permits a write (constitution `:245-248`).
-- **`masc_quiz_history`**
-  - Read-only. It returns the projection from §8 for the calling Keeper or for the whole fleet.
-  - Large results are split with a cursor. Tool results over 16,384 bytes become sealed blobs (copied from `RFC-wiki-lint-and-page-contracts.md` §4.1; not re-read).
+### 4.3 K1: Package exact-output lanes (core)
 
-### 4.5 Fit with the constitution
+**Manifest.** A package declares named exact outputs. The schema file ships in the package:
 
-- **`no_wall_clock_death` (`:220-226`):** open quizzes, unjudged answers and review items never expire.
-- **`persist_before_model_call` (`:240-243`):** the key is written before the question can be seen.
-- **`closed_sum_over_string` and `strict_parse_no_default` (`:228-238`):**
-  - Verdict, source kind and attempt state are closed sums.
-  - Unknown input fails to decode.
-- **`magic_number` and `budget_gate` (`:440-466`):** the code has no intervals, caps, daily limits or weights.
-- **`legacy_residue` (`:487-494`):** this is a new store with no readers or converters for older data.
+```toml
+[world.exact_outputs.author]
+schema = "schemas/author.json"
+
+[world.exact_outputs.grade]
+schema = "schemas/grade.json"
+```
+
+- The name matches `[a-z][a-z0-9_]*`. The path is package-relative, like `world.skills.directory`.
+- Manifest load reads each schema and checks it with the validator action schemas already use (`lib/lane_addon/lane_addon_action.mli:25-27`). It must describe an object. Unsupported keywords are refused, as for actions (`docs/guides/lane-world-actions.md:71-73`).
+- The schemas become part of the package value, so they change the declaration's semantic revision (`lib/lane_addon/lane_addon_config.mli:27-31`).
+
+**Binding in `runtime.toml`.** The operator binds slots per installation and output:
+
+```toml
+[runtime.addon_exact_lanes.operator-quiz.author]
+slots = ["glm-coding.glm-5-3"]
+cli_slots = ["claude-code"]
+max_output_tokens = 8192
+
+[runtime.addon_exact_lanes.operator-quiz.grade]
+slots = ["ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
+```
+
+- The first key is the declaration `id`, the same identity that owns the persistent volume. The second is the output name.
+- Each table is parsed by the existing `parse_exact_output_lane` (`lib/runtime/runtime_toml.ml:2800`), so `enabled`, `slots`, `cli_slots`, `max_output_tokens`, `thinking`, the body-deadline rule and the CLI schema-channel rule apply unchanged.
+- `Runtime_schema.exact_output_lane_decl` gains a typed owner: `Builtin of Standalone_lane.t | Addon of { declaration_id; output }`. The registry key is derived from it. Add-on lanes travel in the same list as built-in lanes, so all thirteen readers (§3.3) see them without a per-site patch.
+- Add-on lanes are always Optional. Their admission class is `Standard` (`lib/runtime/standalone_lane.mli:43-50`).
+- `runtime.toml` loads before declarations, so it cannot check that the declaration and output exist. An unknown pair loads and shows as an unbound row in the Lanes list. A declared output with no table resolves to `Exact_lane_unconfigured` at call time. Neither case is silent.
+- A manual Attach has no declaration id, so all its exact requests resolve to `Exact_lane_unconfigured`.
+
+**Execution.** The host runs a package request the way the Candle appraiser runs its own (§3.3):
+- the requirement is the package schema with `Json_syntax`;
+- each HTTP answer is validated against the package schema, then `Accept` or `Reject_and_advance`;
+- `cli_slots` run afterwards through `Keeper_lane_cli_oneshot.walk`;
+- the package supplies an optional `system` text and the user `messages`. Images are out of scope for v1.
+
+**Retention.** The host retains the request in the Lane store before the first provider call, and every attempt's outcome after it, keyed by declaration id and request id with a digest of the request. This is the same order `Lane_addon_sampling` already keeps (`lib/lane_addon/lane_addon_sampling.mli:1-7`; `docs/design/lane-addon-model-boundary.md:65-86`). A request listed again after a restart gets its retained final result. The model is not called twice for a request that already has one.
+
+**Final results, delivered to the package** (closed sum):
+- `answered {output; slot; usage?}`;
+- `invalid_output {detail}`: every slot answered and no answer matched the schema;
+- `input_refused {kind}`: a provider refused this input itself (input capacity, context overflow, invalid request, request body refused). The same input cannot succeed, so the package must change it;
+- `outcome_unknown`: a call may have been sent and no outcome was retained. This includes a request the host retained before a restart and never finished: the host cannot tell whether the provider received it, so it does not call again.
+
+**Not final, so not delivered:** the lane is unconfigured, off or has no admitted slots; a provider refusal that may pass (rate limit, overload, network, timeout); an authentication or authorization refusal. The request stays listed, the Host requests view (K6) shows the reason, and the host tries it again on the next trigger (§4.4). Each attempt is retained as evidence. This follows `failure_keeps_evidence`: a failed delivery leaves evidence and does not consume the request (`docs/constitution.xml:250-253`).
+
+**No ceilings.** MASC adds no input or output size limit. `max_output_tokens` is the operator's optional lane key. If a provider refuses an input as too large, that typed refusal reaches the package as `input_refused`, and the package changes the input (§7).
+
+### 4.4 K2: Host requests (core)
+
+**Two private worker tools.**
+- `lane_host_requests`: no arguments. Returns `{requests: [...]}`, everything the package is waiting for.
+- `lane_host_result`: `{request_id, result}`. Returns `{accepted: bool}`.
+
+Both join the list of control tools that cannot be exported (`lib/lane_addon/lane_addon_types.ml:62-73`).
+
+**Request kinds** (closed; an unknown kind refuses the whole listing and shows an issue on the instance):
+
+| Kind | Fields | Allowed when |
+|---|---|---|
+| `read_records` | `source_id`, `after` | the binding grants `source_id` (K3) |
+| `read_file` | `source_id`, `commit`, `path` | a `repository` grant whose `paths` cover `path` |
+| `exact_output` | `output`, `system?`, `messages` | the manifest declares `output` (K1) |
+| `ask` | `questions`, `context?` | the manifest declares `[world.asks] operator = true` (K4) |
+| `withdraw_ask` | `ask_id`, `reason` | same |
+
+**When the host asks.** Only on these five existing events, never on a timer:
+1. the worker finished initializing: first start, restart, or a new worker after `enabled = true`;
+2. an action of that instance reached a terminal receipt: a scheduled or ad hoc `compose`, a `dispute` or an `export`;
+3. an installation question of that installation was answered (K4);
+4. a publication changed one of its add-on lanes (registry subscription, §3.3), for example when the operator edits that lane's table;
+5. its declaration was reconciled.
+
+A trigger that arrives during a cycle becomes one more cycle, as observation hints already do (`docs/design/lane-addon-v0.md:98`). Cycles of one instance never overlap.
+
+**One cycle.**
+1. List the requests.
+2. For each request in order: deliver a final result the host already holds, or try the work once and deliver its result if it is final.
+   - An `ask` is recorded once per request id. Its result is delivered only when the operator has answered it or the package has withdrawn it.
+   - A request whose attempt was not final stays undelivered until the next trigger. It is tried at most once per cycle, so it cannot keep a cycle running.
+3. List again. The cycle ends when a listing produces no delivery.
+4. Run one ordinary observation, so the package's rows show the new state.
+
+**Waiting for a trigger is intended.** A request whose last attempt was not final (lane unconfigured, off or without admitted slots; rate limit, overload, network, timeout; an authentication or authorization refusal) stays listed. The Host requests view (K6) shows it with its reason. It is tried again only on one of the five events above. Nothing else reopens it. A provider that stops rate-limiting is not an event the host sees. The host runs no add-on clock (`docs/design/lane-addon-v0.md:99`), and a retry interval would be a number deciding when to call a provider. For this package the operator's Schedule is the clock: each scheduled `compose` ends in a terminal receipt (event 2). A transient failure is therefore tried again at the latest at the next scheduled compose. If the waiting request belongs to a session that has not asked yet, that compose supersedes the session (§4.9 Sessions) and the new session's request takes its place.
+
+**Rules.**
+- The same request id with a different digest is refused as `request_id_reused`, the rule action receipts already follow (`docs/guides/lane-world-actions.md:108-110`).
+- A request the manifest or binding does not allow (an ungranted `source_id`, a path outside the grant, an undeclared output, `ask` without `[world.asks]`) gets the final result `not_allowed {reason}`. Only a change to the declaration or the package can make the same request pass, so waiting for a trigger would not help it.
+- `lane_host_result` answers `accepted = true` only after the package has durably written the log event that consumes the result (§4.9 Log). A package that dies before that write lists the same request again after restart and receives the same retained result.
+- A request id already delivered in this cycle and listed again ends the cycle and shows `relisted_delivered_request` on the instance. There is no attempt count.
+- A result that does not fit the frame the worker connection accepts is delivered as `result_exceeds_frame {retained_sha256; bytes}`. That frame limit is the transport limit `max_reply_bytes` is meant to be (`docs/rfc/RFC-0471-max-reply-bytes-bounds-one-thing.md`, row 1).
+- The host keeps no list of pending requests. What the package waits for lives in the package. What happened lives in host records: retained pages, exact outcomes, questions and answers. This keeps the host a record of facts, not a workflow engine.
+
+**Recovery after a crash.** These cases use only the rules above: the request id, the digest, retention before the call, and relisting. R is an `author` request with digest D. The package writes R's full body to `/state` before it writes `Exact_requested` (§4.9 Log), so it can list R again with the same bytes.
+
+| Crash point | What survives | Reopened by | What happens |
+|---|---|---|---|
+| The package wrote `Exact_requested` R and died before the host listed R | Package: `Exact_requested` R and R's body, no outcome event. Host: nothing for R | Event 1, the new worker's initialization | The package folds its log, sees R without an outcome and lists R from the stored body, so the digest is D again. The host has no record of R. It retains R, calls the lane once and delivers the result. |
+| The host retained R's final result and died before delivering it | Host: R and its final outcome in the Lane store. Package: `Exact_requested` R, no outcome event | Event 1 after the server restarts | The package lists R with digest D. The host finds the retained final result for this declaration id, R and D and delivers it without calling a provider (§4.3 Retention). |
+| The host retained R, may have sent the call, and died before retaining an outcome | Host: R, no outcome. Package: as above | Event 1 | The host delivers `outcome_unknown` and does not call again (§4.3). The package writes `Session_failed {author_outcome_unknown}`. The next `compose` is the next try. |
+| The host delivered R's result and the package died before writing its event | Host: R and its final outcome. Package: as above | Event 1 | Same as the second row. The package had not answered `accepted`, so nothing was consumed. |
+
+No row needs a pending list on the host, an attempt counter or a timer.
+
+### 4.5 K3: Record reads (core)
+
+**Grants.** The binding names what the package may read, as `binding.records`. The host reads that key itself, as it reads `binding.sources` and `binding.model_route`:
+
+```toml
+[[binding.records]]
+source_id = "board"
+kind = "board"
+visibilities = ["public", "unlisted"]
+
+[[binding.records]]
+source_id = "wiki"
+kind = "wiki"
+
+[[binding.records]]
+source_id = "masc-repo"
+kind = "repository"
+repository_id = "masc"
+paths = ["changelog.d/", "CHANGELOG.md", "docs/rfc/", "docs/constitution.xml", "lib/", "bin/"]
+
+[[binding.records]]
+source_id = "masc-prs"
+kind = "github_pulls"
+repository_id = "masc"
+```
+
+- Only an operator-owned TOML declaration may hold grants (`Operator_configuration`, `lib/lane_addon/lane_addon_sources.mli:70-72`).
+- `visibilities` is required for `board` and takes the Board's own four values, `Public`, `Unlisted`, `Internal` and `Direct` (`lib/board_types/board_types.ml:157-161`), written in lower case. A missing value is an error, not a default. `direct` posts are read only when the grant names them.
+- **Where the posts go.** Every post in a granted visibility can reach the providers of every slot bound to the package's exact outputs (`author` and `grade`) in `runtime.toml`. The package's `binding_schema` therefore gives `visibilities` a `description` that says so and asks the operator to confirm, before adding `internal`, that each provider bound to those slots may receive internal posts. The same applies to `direct`, which is read only when named. The Dashboard binding form shows a schema `description` under its field (`dashboard/src/components/lane-binding-form.ts:112`), and the install step of `docs/guides/operator-quiz.md` repeats it for a declaration written by hand. The example above leaves `internal` out, so adding it is a deliberate choice.
+- This is guidance at the point of choice, not a new host check. The control is still the explicit `visibilities` grant. A host check that ties visibilities to named slots is §12 A11.
+
+**What `read_records` returns.** Records after the given cursor, oldest first, until the frame is full, with the next cursor and `complete`:
+
+| Kind | Records |
+|---|---|
+| `board` | posts and comments: id, author, created and updated time, title, body |
+| `wiki` | page versions: name, revision, updated time, body |
+| `repository` | first-parent commits on the default branch: SHA, author, commit time, subject, body, changed paths; the reply names the clone head it read |
+| `github_pulls` | merged PRs (number, title, body, merge commit, merge time, author) and review comments (PR, comment id, author, time, path, line, body), read with the `[repositories] pr_reader` token |
+
+`read_file` returns one file's bytes at a commit, under the grant's `paths`.
+
+**Retention.** Every page and file is retained as a content-addressed blob in the Lane store, as `snapshot_file` bytes are today (`lib/lane_addon/lane_addon_sources.ml:398`). The result carries the SHA-256. A citation names that hash, so a Board post edited later or a fragment deleted at release still leaves the quoted bytes readable.
+
+### 4.6 K4: Installation questions in Approvals (core)
+
+- A new store per declaration in the Lane store, append-only, with `Asked`, `Answered` and `Withdrawn`.
+- It reuses `Keeper_ask.question`, `Keeper_ask.parse_answers`, `Keeper_ask.answer`, the responder record and the first-terminal-wins fold (`lib/keeper/keeper_ask.mli:191-196`).
+- The asker is the installation: its declaration id and package title. It carries no Keeper continuation and wakes no Keeper.
+- Routes: `GET /api/v1/lane-addons/asks` (open by default, `include_resolved` optional) and `POST /api/v1/lane-addons/ask-answer`. The responder is recorded as the Dashboard surface, as Keeper answers are.
+- An answer starts a K2 cycle. If the worker is down, the answer waits in the store and is delivered when the next worker lists the `ask` again. No separate delivery ledger is needed.
+- Only the package withdraws its own question.
+- Why a separate store and not one store for both askers: a Keeper ask carries Keeper-only fields (`lib/keeper/keeper_ask.mli:87-104`), and its answer becomes a Keeper wake that maintenance recovers when undelivered (`lib/server/server_routes_http_keeper_stream.ml:4155-4161`; `lib/server/server_bootstrap_maintenance.ml:820-822`). An installation's answer needs neither. A hard cut of the Keeper ask log is not the reason: the product is unreleased, so a hard cut is allowed (`docs/constitution.xml:487-494`). The reason is scope. One store would put `masc_ask`, the per-Keeper log, the answer route and wake recovery under change in a layer about a feature with no Keeper in it. The two stores share the question, answer and fold types, so the concept is defined once. §12 A6 compares the one-store design.
+
+### 4.7 K5: Scheduled lane action (core)
+
+- New payload kind `masc.lane_act`. Body: `{installation_id, action}`.
+- The validator checks that `action` is an object and `installation_id` is non-blank. Whether the action fits the package schema is checked at dispatch, against the worker that will run it.
+- Dispatch finds the declaration's live instance in the inventory (`lib/lane_addon/lane_addon_runtime.mli:109-117`). It queues the action through the existing `Act` operation (`:31`). The request id is the occurrence id, so a redelivered occurrence returns the same receipt.
+- The occurrence is `Succeeded` once the receipt is durably queued. It is `Failed` with a typed reason when the declaration is missing, disabled, has no live instance, or the action is refused.
+- `Succeeded` means only that the action was handed over (§3.5). The acceptance detail names the receipt (`instance_id`, `request_id`), so the schedule history leads to it. Three records answer three questions: the schedule history says the action was accepted, the receipt says whether the worker ran it, and the package's `quiz/sessions` row says how the session ended (§4.9 Sessions, §8). A session that fails later is never shown as a success; it has its own row with its typed reason.
+- **No hold.** Every due occurrence dispatches, as `Daily` and `Cron` Keeper wakes do (§3.5). Each occurrence has its own receipt, the worker runs its actions one at a time, and the package decides what a second `compose` means (§4.9 Sessions). No fact is lost without a hold. A hold would be a gate with its own end condition to get right. The previous revision held on the receipt without saying how the hold ends when the instance goes away. After a process death the receipt stays `queued` on disk until something reads it through the runtime, so a hold that only looked at it would wait with nothing to end the wait.
+- **When the instance goes away.** The receipt's own writer, the Lane runtime under its action lock, already ends the receipt on that event. K5 adds nothing:
+  - when a worker's lifetime ends (exit, failure, disable or detach), the runtime rewrites every receipt that worker still held: `queued` becomes `failed_before_effect` and `running` becomes `outcome_unknown` (`lib/lane_addon/lane_addon_runtime.ml:641-667`, called at `:886-894`);
+  - if the server process dies first, or that write fails, the receipt stays `queued` or `running` on disk. The first read of the receipt through the runtime (a status read or a repeated request) finds no live worker that owns it and writes the same terminal (`:1899-1932`; `docs/guides/lane-world-actions.md:150-153`);
+  - neither path replays the action. A scheduled `compose` that never ran shows as `failed_before_effect` on its receipt and has no session row.
+- The receipt's requester is the schedule's creator, with the schedule id.
+- This reuses the one scheduler MASC has. It adds no add-on timer (`docs/design/lane-addon-v0.md:99`).
+
+### 4.8 K6: Generic TUI support (core, TUI)
+
+- **Approvals** lists installation questions beside Keeper questions, labelled with the installation title. Answering uses the same keys and editor. The answer posts to the K4 route.
+  - The banner reads "<title> is waiting on you".
+  - The answer receipt offers a jump to that installation's Results. The key is chosen in L7 from the keys Approvals leaves free.
+- **Lanes list:** a package row lists its declared exact outputs with their binding state: bound, unbound, off, or a table with no declaration. Each entry opens the preview-checked `runtime.toml` editor at `[runtime.addon_exact_lanes.<id>.<name>]`, the editor `e` opens for built-in exact lanes (`docs/guides/TUI-KEYS.md:449`).
+- **Add-on detail:** a "Host requests" view lists the requests of the last listing and the host's state for each: done, waiting for an answer, or refused with its typed reason.
+- Nothing here names a quiz.
+
+### 4.9 P: the `operator-quiz` package
+
+**Manifest.**
+
+```toml
+id = "operator-quiz"
+revision = "0.1.0"
+title = "Operator quiz"
+contributions = ["derive", "act"]
+image = "masc-lane-operator-quiz:0.1.0"
+command = ["python3", "server.py"]
+
+[world.actions]
+tool = "lane_act"
+
+[world.state]
+mode = "persistent"
+
+[world.asks]
+operator = true
+
+[world.exact_outputs.author]
+schema = "schemas/author.json"
+
+[world.exact_outputs.grade]
+schema = "schemas/grade.json"
+
+[world.outputs.quiz]
+lanes = ["quiz/sessions", "quiz/questions", "quiz/topics", "quiz/items", "quiz/measures"]
+
+[resources]
+cpus = 0.5
+memory_bytes = 134217728
+pids = 16
+max_reply_bytes = 4194304
+
+[interface]
+binding_schema = '''{ … records grants (with the visibilities description of §4.5), language … }'''
+presentation = '''{ … readings for the five lanes … }'''
+```
+
+**Actions** (the action schema's `kind` is a closed enum, so the TUI menu lists them):
+- `compose {questions?}`: start a session. `questions` is how many to write. The Schedule body or the operator sets it; nothing caps it.
+- `dispute {ask_id, question_id, note}`: the operator's words about a grade (O5, D7).
+- `export {}`: return the whole log as an artifact. The host retains its bytes with a SHA-256 (`docs/guides/lane-world-actions.md:156-186`).
+
+**Log** at `/state/operator-quiz/log.jsonl`. It is append-only and decoded strictly: an unknown event or field is an error naming the line. Events:
+
+| Event | Holds |
+|---|---|
+| `Session_opened` | session id, action request id, requested question count |
+| `Material_read` | session id, grant id, page SHA-256, cursor after |
+| `Exact_requested` | session id, request id, output name, request digest. The request body is already at `/state/operator-quiz/requests/<digest>.json` |
+| `Posed` | ask request id, question id, item id, topic, key (`choices` ids or `points` rubric), sources |
+| `Draft_rejected` | author request id, question index, reason |
+| `Session_failed` | session id, reason (closed, see Sessions) |
+| `Answer_received` | host ask id, answers, responder, answered time |
+| `Judged` | ask id, question id, verdict (`correct`, `incorrect`, `void {reason}`), rationale, grade request id |
+| `Grade_failed` | ask id, question id, grade request id, final result kind (§6.2) |
+| `Disputed` | ask id, question id, note, action request id |
+
+If the log cannot be read, every write action fails before effect. An unreadable log never authorizes a write (`docs/constitution.xml:245-248`).
+
+The request body file exists so a restarted worker can list the same request with the same digest (§4.4 Recovery after a crash). `Session_failed` and `Grade_failed` exist because a delivered final result must be consumed by a durable event. Without one, a restarted package would list the same request again and could not tell that it had already decided.
+
+**Compose, step by step.**
+1. List `read_records` from each grant's cursor until each reports `complete`. The cursor is the last one recorded by a session that reached `asked`; material read by a failed or superseded session is read again. List `read_file` for the files the new commits changed under the grant paths.
+2. List `exact_output author` with:
+   - the material, each record with its retained SHA-256;
+   - every review item's attempt history (§7);
+   - the requested count and the language.
+3. On the result, check each question:
+   - every key choice id is one of its choices;
+   - a `Single` question has exactly one key;
+   - a question without choices has a rubric;
+   - every source names a record the package read;
+   - every quote occurs byte for byte in that record's retained bytes.
+4. A question that fails is dropped as `Draft_rejected`, with the reason. The package does not list another `author` request to replace it. If no question passes, the session fails with `no_question_passed`.
+5. Append the `Posed` rows. Only after that write succeeds, list the `ask`, without keys or sources.
+
+The only follow-up `author` requests inside one session are the reductions of §7 after an input refusal. Each one is smaller than the one before. When nothing is left to drop, the session fails.
+
+**Sessions.** A session is the package's record, not a host state. The host knows only requests, results, questions and answers. A session's state is a fold of the log; only the events in the Log table are stored.
+
+| State | Entered on | Left on |
+|---|---|---|
+| `writing` | `Session_opened` (the `compose` action) | its `Posed` rows → `asked`; `Session_failed` → `failed`; a later `Session_opened` → `superseded` |
+| `asked` | the session's `Posed` rows. From then on the package lists the session's `ask` until the answer is delivered | `Answer_received` → `answered` |
+| `answered` | `Answer_received` | every answered question has a verdict → `graded` |
+| `graded` | derived: each answer has a verdict, a choice by its key (§6.1) and free text by `Judged` | nothing. A later `Judged` after a dispute changes a verdict, not the state |
+| `failed {reason}` | `Session_failed` | nothing |
+| `superseded` | derived: a later `Session_opened` while this session is `writing` | nothing |
+
+`Session_failed` reasons (closed):
+- `not_allowed {request_id; reason}`: the host refused one of the session's requests by rule (§4.4);
+- `author_invalid_output {request_id}`;
+- `author_input_refused {request_id; kind}`: refused after the reductions of §7 had nothing left to drop;
+- `author_outcome_unknown {request_id}`;
+- `no_question_passed`: every draft became `Draft_rejected`, each with its own reason.
+
+Every state ends on an event the package sees. None ends on elapsed time or on a count.
+
+**A new `compose` while an earlier session is open.** What happens depends on the earlier session's state:
+- `writing`: the new session supersedes it. The package stops listing the earlier session's requests. A result the host already retained for them stays in the Lane store as evidence and is not delivered. A result that arrives for a superseded session anyway is answered `accepted = false` and changes nothing. Why supersede rather than refuse: the new session reads the newer material and carries the latest requested count, and refusing would keep a stuck session in front of every later compose.
+- `asked` or `answered`: the earlier session is not touched. Its `ask` stays listed and its question stays in Approvals until the operator answers it, and grading continues. The new session raises its own question.
+- `graded`, `failed` or `superseded`: nothing to do.
+
+There is no limit on how many sessions can be `asked` at once. Each `compose` adds at most one open question, and the operator sets how often `compose` runs. An open question is a decision waiting on the operator; no fact is lost while it waits. A limit would be a number deciding when the package stops asking (`magic_number`), and closing old questions would decide for the operator. `quiz/sessions` shows how many are open and P (§14) shows participation.
+
+### 4.10 Where each fact lives
+
+| Fact | Where | Why |
+|---|---|---|
+| Record bytes a question cites | Lane store blobs (K3) | The citation must stay checkable after an edit or a release deletes the source |
+| Exact request and outcome | Lane store (K1) | Persist before the model call (`docs/constitution.xml:240-243`); a restart must not call the model again |
+| Question text and the operator's answer | Installation question store (K4) | The answer reaches the host, possibly while the worker is down |
+| Key, topic, review item, sources | Package log on `/state` | Must exist before the answer; only the package knows what they mean |
+| Free-text verdict | Package log `Judged`, plus the retained `grade` outcome | The package's acceptance and the model's output are different facts |
+| A session's failure, a grade's failure | Package log `Session_failed`, `Grade_failed` | A delivered final result must be consumed by a durable event (§4.9) |
+| Choice verdict | Not stored | A pure function of key and answer |
+| Score, sessions, debt map, items, R/G/P | Not stored; rows published per observation | Projections (§8) |
+| Dispute | Action receipt (exists) and `Disputed` | An ordinary request to the installation |
+| On/off and times | Declaration `enabled` and Schedules (exist) | Unchanged |
+
+New host state is limited to the first three rows. Each one holds a fact that would otherwise be lost.
+
+### 4.11 Fit with the rules
+
+- **`no_wall_clock_death` (`docs/constitution.xml:220-226`):** open questions, unjudged answers and review items never expire.
+- **`closed_sum_over_string` and `strict_parse_no_default` (`:228-238`):** request kinds, result kinds, record kinds, verdicts and log events are closed sets. Unknown input is an error.
+- **`persist_before_model_call` (`:240-243`):** the host retains each exact request before the provider call. The package writes `Exact_requested` before listing the request.
+- **`failure_keeps_evidence` (`:250-253`):** every attempt's outcome is retained. An attempt that is not final leaves the request listed and is tried again on the next trigger. A final failure reaches the package as a typed result, and the package writes it (`Session_failed`, `Grade_failed`). No failure moves a session on silently, and a scheduled occurrence's `Succeeded` never stands for a session's outcome (§4.7).
+- **`magic_number` and `budget_gate` (`:440-449`, `:459-466`):** no intervals, caps, daily limits or weights in the core or the package. Frame limits are transport limits. The O7 numbers live in this document and the guide, never in code, and no state reads them (§14).
+- **`string_matching` (`:451-457`):** the quote check asks one question: are the quoted bytes present, exactly, in the bytes the host retained for the cited record? Its input is a claim and a stored record, like comparing a digest. No keyword, prefix or pattern stands in for a type, and no wording of the record steers what happens next.
+- **`legacy_residue` (`:487-494`):** new stores, no readers for older data, and the old quiz pair is deleted.
 - **Operator rules:**
-  - The log holds facts, and the Keeper chooses the next question.
-  - Visibility is a projection.
-  - A dispute is a message, not a contract.
+  - Records hold facts. The package chooses its next request, the way a Keeper chooses its next action.
+  - New host state exists only where a fact would be lost (§4.10).
+  - Visibility is a projection: rows and the Approvals list are read models.
+  - There is no Keeper anywhere in the flow.
 
 ## 5. Question sources and citations
 
-| Kind | Pin | How a reader checks it | Server-checked |
+| Kind | Pin | Read through | Quote checked against |
 |---|---|---|---|
-| `pr` | number + merge commit | `gh pr view <n>` | no |
-| `pr_comment` | PR number + comment id | GitHub comment URL | no |
-| `commit` | 40-hex SHA | `git show <sha>` | no |
-| `repo_file` | commit + path + line range | `git show <sha>:<path>` | no |
-| `board_post` | `p-…` | `masc board post get` | yes, at pose time |
-| `board_comment` | `p-…` + `c-…` | same | yes, at pose time |
-| `wiki_page` | name + revision | `keeper_wiki_read` | yes, against the current revision |
+| `pr` | number + merge commit | `github_pulls` grant | retained page |
+| `pr_comment` | PR number + comment id | `github_pulls` grant | retained page |
+| `commit` | 40-hex SHA | `repository` grant | retained page |
+| `repo_file` | commit + path + line range | `repository` grant, `read_file` | retained file |
+| `board_post` | `p-…` | `board` grant | retained page |
+| `board_comment` | `p-…` + `c-…` | `board` grant | retained page |
+| `wiki_page` | name + revision | `wiki` grant | retained page |
 
-- Each source carries a verbatim `quote`, with no whitespace or case normalisation. The key must follow from the quoted text. That is the Keeper's duty, and the dispute path checks it.
-- `repo_file` covers several sources:
-  - changelog fragments, cited by a commit that still has them because release deletes them;
-  - `CHANGELOG.md` release sections;
-  - RFCs;
-  - the constitution;
-  - code.
-  ocaml-refactor-woman's review pitfalls fit `pr_comment`.
-- Board posts can be edited. The pose-time check proves what the record said at that moment, and the reveal says so.
-- A source is never shown before the answer, because a citation like "PR #44081" can give the answer away. The Skill (L5) tells the Keeper not to put sources in the ask `context`.
-- Selection is guidance in the Skill, not code. Prefer:
+- O6's seven kinds stay the target. The first slice (§15) uses `board_post`, `board_comment` and `repo_file` under `changelog.d/` only.
+- Each source carries a verbatim `quote` with no whitespace or case normalisation, plus the SHA-256 of the retained bytes. The key must follow from the quoted text. The `author` prompt asks for that, and the dispute path checks it.
+- `repo_file` covers changelog fragments (cited by a commit that still has them), `CHANGELOG.md` release sections, RFCs, the constitution and code. ocaml-refactor-woman's review pitfalls fit `pr_comment`.
+- A source is never shown before the answer, because a citation like "PR #44081" can give the answer away.
+- Selection is guidance in the `author` prompt, not code. Prefer:
   - things the operator decided or merged;
-  - PRs and fragments merged since the last quiz;
+  - records since the last session;
   - release notes;
   - reviews that found P1/P2 problems;
   - RFC decisions.
 
-  Ask "why" and "what changed" rather than "who" and "which SHA". The existing templates (§3.1) show how a quiz drifts into trivia.
-- "Checkable" means that from the reveal, one command or one TUI jump opens the record at the pinned coordinate and shows the quote.
-- The limits from `SKILL.md:27-33` still apply. A quote check does not catch a negation elsewhere in the record, and it does not show that the fact was worth asking.
+  Ask "why" and "what changed" rather than "who" and "which SHA". The deleted templates (§3.7) show how a quiz drifts into trivia.
+- "Checkable" means that from the reveal row, the retained bytes named by the hash show the quote, and the pin opens the live record.
+- The limits from `SKILL.md:27-33` still apply.
 
 ## 6. Grading
 
 ### 6.1 Choice questions
 
-- An answer `Chose ids` is `Correct` when its id set equals the key set, and `Incorrect` otherwise.
-- A `Multi` question needs the exact set. There is no partial credit.
-- The verdict is recomputed on every read and never stored.
-- On a re-ask, the Skill tells the Keeper to reshuffle choice positions and draw wrong choices from real neighbouring facts, as `quiz-questions` did (`server.py:54-59`).
+- An answer `Chose ids` is correct when its id set equals the key set, and incorrect otherwise. A `Multi` question needs the exact set; there is no partial credit.
+- The verdict is recomputed whenever the package builds its rows, and never stored.
+- On a re-ask, the prompt tells the `author` lane to reshuffle choice positions and draw wrong choices from real neighbouring facts.
 
 ### 6.2 Free text
 
-- A `Wrote` answer on any question is `Awaiting_judgment` until a `Judged` row exists. Ask always allows free text (`keeper_ask.mli:47-48`).
-- The asking Keeper judges against what it recorded before the answer and the sources:
-  - for a free-text question, the `key_points`;
-  - for a choice question, the label of the key choice.
-- The rationale names the point that was missing.
+- A `Wrote` answer on any question waits for judgment until a `Judged` event exists. Ask always allows free text (`lib/keeper/keeper_ask.mli:47-51`).
+- The `grade` lane receives:
+  - the question;
+  - what was recorded before the answer: the rubric for a free-text question, or the label of the key choice for a choice question;
+  - the sources with their quotes;
+  - the answer.
+- Its schema allows `correct`, `incorrect` or `void` with a reason, and requires a rationale that names the missing point.
 - The verdict is binary. A partial score would be a number standing in for a judgment.
-- An unjudged answer stays visibly awaiting, with no expiry. O4 asks whether the judge should be someone other than the asking Keeper.
+- While the `grade` lane is unavailable or a provider is rate-limited, the request stays listed and the answer stays waiting, visibly and with no expiry (§4.3, §4.4).
+- A final failure (`invalid_output`, `input_refused`, `outcome_unknown`, `not_allowed`) is written as `Grade_failed`. The answer stays `awaiting_judgment` and its row shows the failure. The package lists a new `grade` request for it at the next `compose`, or at a `dispute` on that question. It never lists one in reply to its own failure, so a lane that keeps failing cannot keep a cycle running.
 
 ### 6.3 Skips and unanswered questions
 
-- `Skipped` counts as a miss: the operator said "I don't know" (O8).
+- `Skipped` counts as a miss (O8).
 - Withdrawn and unanswered questions are not attempts. They are counted separately.
 
 ### 6.4 Disputes
 
-- From a reveal, `d` opens chat with the quiz Keeper, prefilled with the `ask_id` and `question_id`.
-- The Keeper reads the source again and may append a new `Judged`: `Correct`, `Incorrect`, or `Void` when the question or the key was wrong.
-- A `Judged` row also overrides a key-based choice grade. Deterministic grading is the default, not a lock.
-- The reveal shows the whole chain of judgments.
+- The operator sends `dispute {ask_id, question_id, note}`. In the TUI this is the add-on action command `A` with `act {…}`, because `note` is free text (`docs/guides/tui-lane-addons.md:116-119`). A Keeper can send the same action with `masc_lane_act`.
+- The package lists a `grade` request with the note, the prior verdict and the retained source bytes. The result is a new `Judged`: correct, incorrect, or void when the question or key was wrong.
+- A `Judged` also overrides a key-based choice grade. Deterministic grading is the default, not a lock.
+- The reveal row shows the whole chain of judgments.
 - How often grades change after a dispute is the guard metric G (§14).
 
 ## 7. Spaced repetition
 
-- The unit is the review item (`item_id`). It stays the same across re-asks, while the wording and the choices may change.
-- For each item, the projection gives:
+- The unit is the review item (`item_id`). It stays the same across re-asks, while the wording and choices may change.
+- For each item, the package derives:
   - every attempt with its time and verdict;
   - the latest verdict;
   - how many correct answers in a row end the history;
   - its topic and sources.
-- The code computes no due date. A table of intervals would be a number deciding what the Keeper does (constitution `:440-449`). Leitner boxes, SM-2 and FSRS also differ, and there is no local data to choose between them.
-- The Keeper reads each item's history and decides. The Skill describes a starting practice in words:
+- No code computes a due date. A table of intervals would be a number deciding what to ask, and there is no local data to choose between Leitner boxes, SM-2 and FSRS.
+- The `author` lane receives every item's history and picks re-asks. The package prompt describes a starting practice in words:
   - ask a missed item again on a later day;
   - leave longer gaps after each correct answer;
   - stop asking an item after several correct answers spread over time.
-- Trade-off: this is less predictable than a coded schedule. The operator can see every re-ask in the item history, and R (§14) shows whether it works. If R stays low, a coded schedule is the next RFC.
+- The package checks that every `reask_of` names a known item.
+- If the provider refuses the `author` request as too large, the package sends the open-debt items (latest attempt a miss) alone and marks the session `history_scope = open_debt_only`. If material is too large, it splits the material into two requests. These react to the provider's typed refusal. They are not size rules.
+- Trade-off: this is less predictable than a coded schedule. Every re-ask shows in the item history, and R (§14) shows whether it works. If R stays low, a coded schedule is the next RFC.
 
 ## 8. Projections: score, history, debt map
 
-- **Inputs:** every Keeper's ask log and quiz log, found the same way as `Keeper_ask_store.discover_rows_result` (`keeper_ask_store.mli:52-61`).
-- **Join:** on `(keeper, ask_id, question_id)`. An ask with no `Posed` rows is a decision, not a quiz, and is excluded.
-- **Attempt state (closed sum):**
+The package computes these from its log and publishes them as rows on every observation. The host retains them as it retains any output. Nothing new is stored.
 
-  ```ocaml
-  Open | Withdrawn | Correct of by | Incorrect of by | Skipped
-  | Awaiting_judgment | Void of reason
-  (* by = Key | Judgment of { judged_at } *)
-  ```
-- **Session:** one quiz Ask, with counts of correct, incorrect, skipped, awaiting and void questions.
-- **Score:** correct divided by (correct + incorrect + skipped). It is shown per session and over all attempts, always with its numerator and denominator.
-  - The server returns timestamps, and the TUI groups them by day or week in local time. This needs no timezone setting.
-  - The score is not used as a control or as the success signal.
-- **Debt map:** one row per topic, showing:
-  - review items and attempts;
+- **Attempt state (closed):** `open | withdrawn | correct of by | incorrect of by | skipped | awaiting_judgment | void of reason`, where `by = key | judgment of judged_at`.
+- **`quiz/sessions`:** one row per compose. It shows the session's state (§4.9 Sessions), counts of correct, incorrect, skipped, awaiting and void questions, and the session's history scope. A `failed` session shows its typed reason and request id; a `superseded` session names the session that replaced it. Every session that fails has a row, so a session that fails after its scheduled occurrence `Succeeded` is visible here. A compose that never ran has no session; its receipt says why (§4.7). The row is a projection; nothing reads it to decide anything.
+- **`quiz/questions`:** one row per answered question. This is the reveal: your answer, the expected answer, the verdict and its chain, and the sources with quotes and hashes. A question that is still open has no row, so the key never shows early.
+- **Score:** correct divided by (correct + incorrect + skipped), per session and over all attempts. It is always shown with its numerator and denominator. Rows carry timestamps; grouping by local day happens on display. The score is not used as a control or as the success signal.
+- **`quiz/topics` (debt map):** one row per topic, showing:
+  - items and attempts;
   - misses;
-  - "open debt": items whose latest attempt is a miss;
+  - open debt, meaning items whose latest attempt is a miss;
   - the time of the last miss;
   - the open-debt items with their sources.
 
-  There are no weights and no ranking formula. Rows are sorted by open-debt count and then by name, for display only. Deciding which debt matters is left to the operator or a Keeper, in words.
-- **Review items:** as described in §7.
-- **Observability:** the projection also counts posed-but-never-asked questions, fold anomalies and unreadable logs. An unreadable log is reported as such, never as an empty one.
+  There are no weights and no ranking formula. Order on screen is by open debt, then name, for display only.
+- **`quiz/items`:** the review items of §7.
+- **`quiz/measures`:** R, G and P (§14) as fractions, plus counts of rejected drafts, failed sessions by reason, failed grades, refused calls and questions posed but never asked. It carries no pass or fail field.
 
 ## 9. TUI surfaces
 
-- **Today's quiz:** Approvals and Home rows, with the same answering keys as today.
-  - The ask-list route adds a derived `quiz` mark to each row: `Quiz`, `Decision`, or `Unknown` when the quiz log cannot be read. A failed quiz-log read never hides the ask itself.
-  - Quiz rows are labelled "Quiz". The banner reads "<keeper> sent a quiz" instead of "is waiting on a decision" (`bin/masc_tui.ml:12021-12026`).
-- **Reveal after answering:** the answer receipt block shows, for each question:
-  - the operator's answer;
-  - the expected answer;
-  - the verdict, or "waiting for judgment";
-  - the sources with their quotes.
-- **Quiz surface:** new, in the Work family, reached from the palette ("go Quiz") and a Home row.
-  - It lists sessions, newest first. Enter opens one question's reveal with its judgment chain.
-  - It shows topics (the debt map), review items, and the R, G and P counts from §14.
-  - `d` disputes and `o` opens the source.
-  - Data comes from one new read route, `GET /api/v1/keepers/quiz`, using the same tool auth as the asks list.
-- **Web dashboard:** no change in this RFC. It already answers asks.
-- **Tests:** they check the requests sent and the decoded state. No test pins screen text, layout or row order (constitution `:371-373`).
+- **Today's quiz:** Approvals, through K4 and K6. Same answering keys as today.
+- **Reveal after answering:** the Approvals answer receipt jumps to the installation's Results. `quiz/questions` rows show the reveal through the package's presentation readings.
+- **History, debt map, items, measures:** the same Results screen, through the other four lanes.
+- **Material, calls, refusals:** the K6 "Host requests" view, and the Records tab for raw rows.
+- **No quiz-specific screen.** The previous revision's Quiz surface is dropped. A quiz-specific TUI menu would break the add-on contract (`docs/design/lane-addon-v0.md:53`).
+- **Tests** check requests sent, decoded state and decisions. No test pins screen text, layout or row order (`docs/constitution.xml:371-373`).
 
 ## 10. Turning it on and off, setting times
 
-- **On:** pick the quiz Keeper (O3). Then create a Schedule for it, from the TUI schedule form or with `masc_schedule_create`.
-  - Use `Daily {hour = 8; minute = 30; timezone = "Asia/Seoul"}`, or `Cron "30 8 * * 1-5"` with the same timezone for weekdays only.
-  - Example message: "Compose today's operator quiz with the operator-quiz skill. Read masc_quiz_history first."
-  - The wake text repeats unchanged, so it tells the Keeper to read current state each time (`masc_schedule_create.toml:53-62`).
-- **Change the time:** use `masc_schedule_update`.
-- **Off:** cancel the Schedule. No pause state exists (§3.3), so turning it back on means creating a new Schedule. Quiz history is not touched.
-- **Ad hoc:** ask the quiz Keeper in chat.
-- **Several quizzers:** give each Keeper its own Schedule. The logs are per Keeper, and the projection merges them.
-- **No new settings:** this adds no config key, no flag and no `runtime.toml` table.
-- **Unanswered quizzes:**
-  - The next wake is held only while the previous wake is unconsumed (`schedule_runner.mli:23`).
-  - Open quiz asks stay open.
-  - The Keeper sees the open count in `masc_quiz_history` and in the ask tool's `open_count` (`mcp_tool_runtime_ask.ml:185-201`). It decides whether to withdraw yesterday's quiz or skip today. The code sets no limit.
+1. **Prepare the image:** build `masc-lane-operator-quiz:<revision>` and load it into the engine MASC uses. Reconciliation does not build images (`docs/guides/lane-world-actions.md:21-23`).
+2. **Install:** add `operator-quiz.toml` under `lane-addons/`, with grants and `language`. Before granting `internal` (or naming `direct`), check that the providers of the slots bound in step 3 may receive those posts (§4.5).
+3. **Bind slots:** add the two `[runtime.addon_exact_lanes.operator-quiz.*]` tables. Using different models for `author` and `grade` keeps a model from grading its own questions.
+4. **Set the times:** create a Schedule with kind `masc.lane_act`. For example `Daily {hour = 8; minute = 30; timezone = "Asia/Seoul"}`, or `Cron "30 8 * * 1-5"` with the same timezone for weekdays. Body: `{installation_id = "operator-quiz", action = {kind = "compose", questions = 5}}`.
+
+Day to day:
+- **Change the time:** `masc_schedule_update`.
+- **Pause:** cancel the Schedule (Schedules have no pause state), or set `enabled = false` on the declaration. Disabling removes the worker and keeps the volume. Open questions stay in Approvals and can still be answered; the next worker receives the answers.
+- **Ad hoc:** run `compose` from the add-on action menu.
+- **Unanswered quizzes:** nothing withdraws or limits them. Each compose raises a new question; it supersedes only a session that has not posed its questions yet (§4.9 Sessions). The operator sees how many are open, and P (§14) reports participation.
+- **Two quizzes:** install the package twice under two declaration ids. Each gets its own volume, lanes and Schedules.
+- **Volume loss and backups:** keys, attempts and judgments live only on the installation's volume (D4, §4.10). If the volume is lost, they are lost. Host records survive (questions, answers, retained pages and exact outcomes), but they cannot rebuild the keys. `export` copies the whole log into the host's Lane store as a retained artifact with its SHA-256. The operator may run it periodically with a second Schedule of kind `masc.lane_act` and body `{installation_id = "operator-quiz", action = {kind = "export"}}`. This is the operator's choice; nothing creates that Schedule by default. Restoring a log from an export is not in v1 (§11): an export keeps the facts readable, it does not restore the package.
 
 ## 11. Out of scope
 
-- General learning material that the fleet has not recorded.
+- General learning material the fleet has not recorded.
 - A coded spacing algorithm or due dates.
-- Any gate or consequence:
-  - a quiz result never blocks a merge, an approval, a task or a Keeper action;
-  - there are no Candle rewards and no penalties.
+- Any gate or consequence: a quiz result never blocks a merge, an approval, a task or a Keeper action. No Candle rewards and no penalties.
 - Weighted debt scores and rankings by formula.
 - More than one human operator.
-- A web dashboard quiz view, and delivery over Slack or Discord.
-- Changes to the Gate approval queue or the `masc_ask` schema.
-- Generating questions on the server without a Keeper.
-- Importing data from the existing Quiz Lane add-ons.
+- A web dashboard view, and delivery over Slack or Discord.
+- Changes to Keeper asks, `masc_ask` or the Gate approval queue.
+- Moving `fusion-compute` off host sampling.
+- Images in exact requests.
+- Importing data from the deleted quiz pair.
+- Restoring a package log from an `export` artifact.
 
 ## 12. Alternatives considered
 
 | Alternative | For | Against |
 |---|---|---|
-| A1. Extend the existing Quiz Lane add-ons | Keeps its quote checks and the split between asking and grading | "First grade stands" rules out re-asks. The score resets with each incarnation. Answers go through `masc_lane_act` with a self-written label. Six recall-style templates and no free text. An operator history view breaks the add-on contract (§3.1 f). Fixing all of this rewrites both packages and adds a core replay path. |
-| A2. No new record: key in Keeper memory, grades in chat or on the Board | No new code | Memory can decline the key, and nothing shows the key predates the answer. Score and debt map would mean parsing prose or re-running a model on every read. Not reproducible. |
-| A3. New `Keeper_ask.event` variants for key and judgment | One file and one fold per Keeper | Every surface that encodes asks must remember to hide the key. Quiz meaning enters a module whose contract is decisions. The Gate/Ask split (`keeper_ask.mli:7-10`) already keeps different meanings in separate records. |
-| A4. Goal plus measurement for the score | Existing surface | One observation per Goal and no per-question history. Could later mirror R as a Goal, through a Board post the metric names. |
-| A5. Wiki page or artifact as the quiz log | Human-readable | Prose to parse. A wiki page is knowledge, not a ledger. A weekly report artifact built on the projection could come later. |
-| A6. Coded spacing (Leitner, SM-2, FSRS) | Predictable and studied | A number decides Keeper behaviour, with no local data to set parameters. Revisit if R stays low. |
-| A7. An independent judge for free text (another Keeper or a Fusion panel) | The judge did not write the question | More moving parts and an extra turn per answer. Kept as O4. |
-| A8. A daily digest instead of a quiz | Less effort for the operator | Re-reading is what retrieval practice beats in the cited studies, and a digest gives no signal of what the operator missed. It could run alongside. |
-| A9. A separate quiz-answering UI | Could be shaped for quizzes | Duplicates the Approvals answering keys, free-text editor and two-step send for no gain. |
+| A1. The previous revision: a quiz Keeper woken by a Schedule, `masc_quiz_ask`/`judge`/`history` tools, a `keeper_quiz/<keeper>.jsonl` log | No new add-on core; Keepers already read every source with their tools | The operator chose not to have a Keeper write or grade (O3, O4). Each quiz costs Keeper turns. Three new Keeper tools with nested schemas carry the error rate RFC-0425 measured. Quiz meaning would enter the Keeper tool surface. |
+| A2. Host sampling for the two model calls | Exists today | Free text, so no schema; observation only, so no model call during an action; Keeper candidate order instead of exact lanes; official clients refused; deprecated in the MCP specification (§3.2) |
+| A3. Two new built-in lanes, `quiz_author` and `quiz_grade`, in `Standalone_lane.t` | Smallest code; reuses everything in §3.3 | The core then names quiz meaning, against `docs/design/lane-addon-v0.md:42`, and every future package would need a core constructor |
+| A4. Extend the old quiz pair | Keeps its quote checks | "First grade stands" rules out re-asks; no model; ephemeral score; self-claimed answerer label; a deck built outside MASC (§3.7) |
+| A5. Answer in the add-on detail screen instead of Approvals (no K4) | Package-only | A static action schema cannot list each question's choices, so every answer becomes `act {…}` typed as JSON; no bell or banner |
+| A6. One question store for both askers: the asker is a closed sum `Keeper of {…} \| Installation of declaration_id`, with one list route and one answer route | The concept "a question waiting on the operator" lives in one store. Approvals reads one list and posts to one route. A hard cut is allowed before release (`docs/constitution.xml:487-494`), so migration is not a cost | `masc_ask`, the per-Keeper log, the answer route keyed by Keeper name, the wake on answer and maintenance's wake recovery all change, in a layer about a feature with no Keeper in it. The answer route still matches on the asker, because the effects differ: a durable Keeper wake with recovery, or a K2 trigger with no delivery ledger. Not chosen: K4 shares the question, answer and fold types instead (§4.6). If the operator prefers one store, only K4, K6 and their layers change |
+| A7. Host requests carried in action results, with the host tracking what is pending | No new worker tools | The host would keep a workflow ledger of pending requests; with K2 the package alone says what it waits for |
+| A8. Material as `snapshot_file` decks built by a script | Exists today | Someone has to run the script on time, and the envelope has to be produced outside MASC; this is what the old pair needed |
+| A9. Coded spacing (Leitner, SM-2, FSRS) | Predictable and studied | No local data to set parameters; revisit if R stays low |
+| A10. A daily digest instead of a quiz | Less effort for the operator | Re-reading is what retrieval practice beats in the cited studies, and a digest shows nothing about what the operator missed |
+| A11. A host check tying Board visibilities to named slots (the grant lists the slots that may receive `internal` posts, and the host refuses an exact request whose admitted slots are not all listed) | Enforced, not only described | A new declaration field whose only job is to restrict, checked against `runtime.toml` slots that change on their own. Whenever the two drift, every exact request of the declaration is refused. It records no fact that would otherwise be lost. §4.5 puts the confirmation in the `binding_schema` description instead |
+| A12. Hold the next scheduled `compose` while the previous receipt is `queued` or `running` (the previous revision) | At most one compose waits per installation | A gate that needs its own end condition; as written it had none after a process death left the receipt `queued` (review of 2026-10-20). Without it nothing is lost, because each occurrence has its own receipt and the package decides what a second compose means (§4.7, §4.9) |
 
-## 13. Open decisions for the operator
+## 13. Operator decisions
 
-- O1. The existing Quiz Lane add-on pair has never been installed live. Two options:
-  - Delete it in this stack: `addons/quiz-questions`, `addons/quiz-grader`, `addons/tests/test_quiz_lane.py`, `test/test_lane_quiz_packages.py` with its stanza and `test/dune` entry, the glossary entry, and the mentions in `docs/design/lane-addon-v0.md:40`, glossary `:1878` and `addons/README.md`.
-  - Keep it as a Keeper-facing add-on example.
+### 13.1 Recorded (2026-10-20)
 
-  Recommendation: delete it. Two quiz concepts invite the wrong context.
-- O2. Name the feature "operator quiz" (recommended), or keep "Quiz Lane". "Quiz Lane" collides with the existing meanings of Lane even if O1 removes the add-on.
-- O3. Which Keeper or Keepers quiz, and how many questions per session. The count goes in the schedule message or the Keeper's instructions, not in code.
-  - Suggested start: one dedicated Keeper. ocaml-refactor-woman and geek-scout send it material as ordinary messages.
-  - The alternative is that each of them quizzes on its own Schedule.
-- O4. Who judges free text:
-  - the asking Keeper (recommended for v1);
-  - a separate Keeper;
-  - the operator, through a follow-up self-check Ask.
-- O5. May the operator write a grade directly (override or void)? Recommendation: not in v1. Disputes go by message.
-- O6. Which sources are allowed:
-  - all seven kinds (recommended);
-  - only the server-checked kinds (Board and wiki). This would drop PRs, commits and code, which is most of what the fleet merges.
-- O7. The targets in §14.
-- O8. Does `Skipped` count as a miss (recommended), or is it left out of the score?
+- **O1. Delete the old pair.** Decided: delete. Layer L13 removes:
+  - `addons/quiz-questions/` and `addons/quiz-grader/`;
+  - `addons/tests/test_quiz_lane.py`, `test/test_lane_quiz_packages.py`, `test/stanzas/test_lane_quiz_packages.inc` and its include at `test/dune:5665`;
+  - the two package ids in `dashboard/src/lib/lane-binding-form.test.ts:9`;
+  - the rows at `addons/README.md:22-23`;
+  - the glossary entry `docs/spec/00-glossary.md:1912-1934` and the `quiz-grader` example at `:1878`;
+  - the `quiz-grader` example at `docs/design/lane-addon-v0.md:40`;
+  - the four `docs/evidence/2026-09-30-quiz-*` directories, which only describe the deleted pair.
+- **O2. Name.** Decided: "operator quiz".
+- **O3. Who writes questions.** Decided: not a Keeper. "별도 lane", clarified as "Lane Add-on 안에 Exact Output Lane 이 포함된 스타일". Implemented as the package's `author` lane (K1).
+- **O4. Who grades free text.** Decided: not a Keeper, same words as O3. Implemented as the package's `grade` lane.
+- **O5. Direct grade override.** Decided: not in v1; disputes by message. With no Keeper to message, the message is the `dispute` action carrying the operator's own words (§6.4).
+- **O6. Sources.** Decided: all seven kinds. This is what makes K3 necessary.
+- **O7. Targets.** Decided: as proposed (§14). They are reported targets, not pass/fail gates, and are revisited after the first month of observation.
+- **O8. Skips.** Decided: a skip counts as a miss.
+
+### 13.2 Recorded later the same day
+
+- **Q1. Where the operator answers.** Decided: Approvals, through K4. A5 (answering in the add-on detail screen) is not built.
+- **Q2. GitHub credential.** Decided: K3 reads merged PRs and review comments with the `[repositories] pr_reader` Keeper's token, read-only, as the PR overview does today (`lib/server/server_repository_pulls.mli:3-7`). No separate credential is introduced.
+- **Q3. Leftover history.** Decided: L13 keeps the released `CHANGELOG.md` lines (`CHANGELOG.md:5479`, `:5605-5606`) and the evidence manifests that only list file hashes. They record what shipped or what a past run read; they do not describe the current system.
+
+No operator decision is open. The choice of a separate K4 store (§12 A6) is the author's; the operator can reverse it.
+
+### 13.3 Review responses (2026-10-20)
+
+Reviews on #44114 at heads `817c0e6d10f` and `2f0972b5ff2`.
+
+| Reviewer, item | Answer | Where |
+|---|---|---|
+| context-reviewer (1), blocking: a held schedule never releases when the instance goes away | K5 holds nothing. The receipt's writer already ends `queued` and `running` receipts when the worker's lifetime ends, or on the first read after a process death | §3.5, §4.7, §12 A12, L5 |
+| context-reviewer (2): a transiently failed K2 request waits for the next trigger | Intended. The five triggers are listed; nothing else reopens a request, and the next scheduled `compose` is one of them | §4.4 Waiting for a trigger |
+| be-sleepers 1: smallest vertical slice first | S1: Board and changelog fragments, choice questions, grading by choice id, `compose → Approvals → grade`. Free-text `grade`, `dispute` and the other kinds come in S2. O6 stays the target | §15, §5 |
+| be-sleepers 2: session lifecycle and the Nth `compose` | Session state table with event-based ends and closed failure reasons. A new compose supersedes a `writing` session and leaves an `asked` one alone. No numeric limit on open sessions | §4.9 Sessions |
+| be-sleepers 3: crash recovery | One row per crash point, using request id, digest, retention and relisting. The package stores each request body so a relist has the same digest | §4.4 Recovery after a crash, §4.9 Log |
+| be-sleepers 4: K5 `Succeeded` hides later failures | `Succeeded` means handed over. Every failed session is a `quiz/sessions` row with its typed reason; a compose that never ran shows on its receipt | §4.7, §4.9 Sessions, §8 |
+| be-sleepers 5: who receives `internal` posts | The `binding_schema` description asks the operator to confirm the providers of the bound slots before granting `internal`; `direct` only when named. The example no longer grants `internal` | §4.5, §10, §12 A11 |
+| be-sleepers 6: O7 numbers | Reported targets chosen without a baseline, revisited after the first month. No code holds them and no state reads them | §1.1, §13.1, §14, §4.11 |
+| be-sleepers 7: volume loss and `export` | A periodic `export` Schedule is an operator option, not a default | §10, §11 |
+| be-sleepers, second comment 3: K4's reason | The hard-cut reason is withdrawn. The one-store design is compared and not chosen | §4.6, §12 A6 |
+| be-sleepers, second comment 4: the quote check and `string_matching` | It is exact containment in retained bytes, not a word match | D10, §4.11 |
+| be-sleepers, second comment 5: K3 wording in §4.2 | K3 knows the host's record kinds, not quiz meaning | §4.2 |
+| Found while answering: `grade` relisted after its own final failure could loop in one cycle | `Grade_failed` is written; the next `grade` request waits for the next `compose` or a `dispute` | §6.2 |
+| Found while answering: the package log's `Asked` event had no producer, because an `ask` result arrives only with the answer | Removed. A session is `asked` once its `Posed` rows exist; the host ask id arrives in `Answer_received` | §4.9 Log, Sessions |
+
+be-sleepers' second comment items 1, 2 and 6 restate first-comment items 4, 2 and 6 with constitution references; the rows above answer both. Its item 2 also withdrew the earlier request for a session cap or expiry, which matches the event-based ends in §4.9.
+
+Q3 stays as decided. be-sleepers' first comment preferred deleting the leftover history; the operator chose to keep the released lines (§13.2), and the second comment agrees they do not conflict with `legacy_residue`.
 
 ## 14. Success criterion
 
 - **Primary, R (recovery on re-ask):**
-  - The denominator is the number of review items that had a miss (`Incorrect` or `Skipped`) followed by a graded attempt on a later local day.
-  - The numerator is the number of those items whose first later attempt was `Correct`.
-  - The projection reports R as a fraction n/d.
-- **Proposed target (O7):** after 30 days of running the Schedule, d ≥ 20 and n/d ≥ 2/3.
-  - With d < 20, the result is "not measurable yet", not a pass.
-  - No baseline exists. These numbers are a starting proposal, not derived from data.
-- **Guard, G (grading error):** the number of `Judged` rows that change an earlier verdict on the same question (from the key or from an earlier judgment), divided by graded attempts. Proposed target: ≤ 1/20. A high G means the keys or the judge are wrong more often than the operator is.
-- **Reported, P (participation):** graded attempts divided by posed questions in the window. It has no target. A low P means the quiz costs more attention than the operator gives it, and acting on that is the operator's call.
-- **Why not the average:** the question writer sets the difficulty, so the average can rise just because the questions got easier. R holds the item fixed.
+  - The denominator is the number of review items that had a miss (`incorrect` or `skipped`) followed by a graded attempt on a later local day.
+  - The numerator is the number of those items whose first later attempt was correct.
+  - `quiz/measures` reports R as a fraction n/d.
+- **Target (O7), reported, not a gate:** after 30 days of running the Schedule, d ≥ 20 and n/d ≥ 2/3.
+  - The numbers were chosen without a baseline. They are a starting proposal, not derived from data.
+  - They are noisy. With d = 20 and a true rate of 2/3, the binomial spread is about 0.1, so 2/3 sits inside the noise.
+  - They are revisited after the first month of observation, from the R, G and P actually observed.
+- **Guard, G (grading error):** the number of `Judged` events that change an earlier verdict on the same question (from the key or an earlier judgment), divided by graded attempts. Reported target: ≤ 1/20, with the same status as O7. A high G means the keys or the `grade` lane are wrong more often than the operator is.
+- **No constant decides a state.** These numbers live in this document and in `docs/guides/operator-quiz.md`, not in code. `quiz/measures` reports n/d and counts only. No field says pass, fail or "not measurable yet", and no number changes a question, a session, a schedule or any other state (`docs/constitution.xml:440-449`). Reading R against the target is the operator's call.
+- **Reported, P (participation):** graded attempts divided by posed questions in the window. No target. A low P means the quiz costs more attention than the operator gives it; acting on that is the operator's call.
+- **Why not the average:** the question writer sets the difficulty, so the average can rise just because questions got easier. R holds the item fixed.
   - Caveat: rewording an item changes its difficulty a little.
-  - Reshuffling the choices stops the operator from remembering a choice's position.
+  - Reshuffling choices stops the operator from remembering a choice's position.
 - **What R does not show:** understanding of anything outside the recorded facts (§2).
-- **Evidence (constitution `:528-532`):** the live quiz log, the projection output, and TUI screenshots of the Approvals reveal and the Quiz surface after the first week, with R, G and P on day 30.
+- **Evidence (`docs/constitution.xml:528-532`):**
+  - the exported log artifact with its SHA-256;
+  - retained `author` and `grade` requests and outcomes;
+  - `quiz/measures` rows;
+  - TUI screenshots of Approvals, the reveal in Results and the Host requests view after the first week;
+  - R, G and P on day 30.
 
 ## 15. Implementation plan
 
-The work is a stacked set of PRs (`gh stack`). Each layer stays within the 20k-token work unit (constitution `:329-341`) and carries its own changelog fragment.
+The work is a native stack (`gh stack`). Each layer is one PR with its tests, stays within the 20k-token work unit (`docs/constitution.xml:329-341`), and carries its own changelog fragment.
 
-| Layer | PR | Content | Tests |
-|---|---|---|---|
-| L0 | this RFC | Design | `scripts/rfc-generate-index.py --check` |
-| L1 | Record | `lib/keeper/keeper_quiz.ml(i)`: types, constructors that return `result` over `private` types, codec. `lib/keeper/keeper_quiz_store.ml(i)`: append, read and discover, with the `Keeper_ask_store` lock pattern | Each event and source kind round-trips. An unknown kind or bad id fails with path and line. A missing log differs from an empty one. A duplicate `Posed` keeps the first and counts an anomaly. Concurrent appends are serialized. |
-| L2 | Projection | `Keeper_quiz_projection`, pure: attempt states, sessions, items, topics, R/G/P | Table cases: choice right and wrong; Multi exact set; `Wrote` → awaiting; `Judged` overrides the key; `Void` is excluded; `Skipped` is a miss; decision asks are excluded; posed-but-never-asked is counted; R/G/P on a fixed two-week fixture. |
-| L3 | Tools | `masc_quiz_ask`, `masc_quiz_judge`, `masc_quiz_history`, their `config/tools/*.toml`, cases in `test/test_keeper_tool_matrix_cases.ml`, and the Board/wiki quote check | Every refusal writes nothing. `Posed` is on disk before `Asked`, shown with an interleaving hook like `Keeper_ask_store.For_testing`. The `Asked` row decodes the same as a `masc_ask` row. Judge refusals: open, withdrawn, other Keeper, unreadable log. |
-| L4 | Server and TUI | `GET /api/v1/keepers/quiz`; the `quiz` mark on ask rows; the TUI label, banner text, reveal in the answer receipt, Quiz surface and dispute prefill | The TUI sends the expected paths and queries. The decoders accept the projection and refuse unknown states. No screen text or layout tests. |
-| L5 | Skill and guide | `skills/operator-quiz/SKILL.md` covers sources, verbatim quotes, reusing topics, rewording and reshuffling, the re-ask practice, judging against the rubric, and not leaking sources. Also `docs/guides/operator-quiz.md` (on/off and schedule examples) and a glossary entry "Operator quiz" | The guide's example calls match the tool toml. |
-| L6 | Only if O1 = delete | Remove the add-on pair and every mention of it | The add-on test suite passes without the quiz cases. |
+The order is a vertical slice first, then wider layers. O6 (all seven source kinds) and O4 (free-text grading) stay the target; this is ordering only.
 
-After L5, the operator creates the Schedule and the live acceptance in §14 begins.
+**Slice 1 (S1)** closes `compose → Approvals → grade` end to end with the fewest kinds:
+- sources: Board posts and comments, and changelog fragments (`repo_file` under `changelog.d/`, read through a `repository` grant whose `paths` is `["changelog.d/"]`);
+- choice questions only. The `author` schema has no rubric branch;
+- grading by choice id only. No `grade` output is declared. A `Wrote` answer stays `awaiting_judgment`, visibly, until S2 adds `grade`;
+- actions `compose` and `export`.
+
+The core pieces in S1 are already generic: K1 declares any named output and K2 has all its request kinds. S2 adds only the record kinds K3 lacks, the package's second lane and the remaining TUI entries.
+
+| Layer | Slice | Kind | Content | Tests |
+|---|---|---|---|---|
+| L0 | | doc | This RFC | `scripts/rfc-generate-index.py --check` |
+| L1 | S1 | core | K1 config: `[world.exact_outputs]` in the manifest; `[runtime.addon_exact_lanes.<id>.<name>]`; the typed owner on `exact_output_lane_decl`; publication with built-in lanes | Manifest: schema file read, unsupported keyword refused, unknown key refused. TOML: the same key rules, body-deadline gap and CLI schema-channel refusals for add-on tables. Publication: add-on lanes are Optional, and `enabled = false` resolves to `Exact_lane_off`. Account removal and preset capture include add-on lanes. |
+| L2 | S1 | core | K2 ports and cycle, plus the K1 runner and retention | A fixture worker (Python, like `addons/tests`) and a loopback HTTP provider fixture, as the sampling integration scenario uses (`docs/design/lane-addon-model-boundary.md:146-153`). Covered: the request is retained before the provider call; each row of §4.4 Recovery after a crash, with one provider call at most; an unconfigured lane or a rate limit leaves the request undelivered, tried once per cycle and again on each of the five triggers; `not_allowed` for an undeclared output; `request_id_reused`; `relisted_delivered_request` ends the cycle; a schema-invalid answer advances to the next slot; the CLI tail runs; `result_exceeds_frame`. |
+| L3 | S1 | core | K3 `board` and `repository` grants; `read_records`, `read_file`; page retention | `not_allowed` for an ungranted source and for `read_file` outside `paths`; Keeper-owned and manual installations hold no grants; a missing `visibilities` refused; cursors move forward; the hash in the result equals the retained blob. |
+| L4 | S1 | core | K4 store, routes and delivery through K2 | First answer wins; an answer given while the worker is down is delivered by the next worker; only the package withdraws; Keeper ask logs are untouched. |
+| L5 | S1 | core | K5 `masc.lane_act` | Creation validator; dispatch finds the live instance; missing, disabled or absent instance fails with its reason; two due occurrences dispatch two receipts, with no hold; a worker that exits holding a queued scheduled receipt leaves it `failed_before_effect`; after a simulated process death, the first runtime read writes the terminal; the acceptance detail names the receipt; redelivery returns the same receipt. |
+| L6 | S1 | package | `addons/operator-quiz` slice: manifest with `author` only, the choice-only `author` schema and prompt, worker, log, sessions, choice grading, spacing input, projections, presentation, `binding_schema` with the §4.5 description; `compose` and `export`; `docs/guides/operator-quiz.md`; glossary entry "Operator quiz"; example declaration (Board and `changelog.d/` grants) and `runtime.toml` table | Against a fake host speaking K2: `Posed` is on disk before the `ask` is listed; a quote missing from the retained bytes drops the question; choice right and wrong; exact `Multi` set; `Wrote` waits; skip is a miss; a second `compose` supersedes a `writing` session and its requests leave the listing; a `compose` leaves an `asked` session untouched; `invalid_output` gives `Session_failed` and no new `author` request; all drafts rejected gives `no_question_passed`; a new session reads from the cursors of the last `asked` session; `accepted` only after the log write; a restart lists the same request from its stored body with the same digest; an input-capacity refusal leads to `open_debt_only`; state survives a worker restart on the same volume; an unreadable log refuses writes; R and P on a fixed two-week fixture. |
+| L7 | S1 | core (TUI) | K6: Approvals installation questions, banner, jump to Results; Host requests view | Requests sent and decoders: asker label, answer path. Unknown states refused. No screen-text tests. |
+| L8 | S2 | package | `grade` output, schema and prompt; free-text questions with a rubric; `Judged`, `Grade_failed`; `dispute` | `Wrote` is judged; `Judged` overrides the key; `void` is excluded; a dispute leads to a new `Judged`; a final grade failure gives `Grade_failed` and no new `grade` request until the next `compose` or a `dispute`; G on the fixture. |
+| L9 | S2 | core | K3 `wiki` | `not_allowed` for an ungranted wiki; revisions page forward; the hash equals the retained blob. |
+| L10 | S2 | core | K3 `github_pulls` | A GraphQL fixture for merged PRs and review comments; no reader configured gives a typed refusal. |
+| L11 | S2 | package | The remaining source kinds in the `author` schema and prompt: `commit`, `repo_file` beyond `changelog.d/`, `wiki_page`, `pr`, `pr_comment`; example grants for them | Each kind's pin is decoded strictly; each quote is checked against its retained page or file. |
+| L12 | S2 | core (TUI) | K6: Lanes list exact outputs and `e` | Decoders and the editor target. No screen-text tests. |
+| L13 | | delete | O1 removals (§13.1) | `git grep -i quiz` finds only the operator quiz and the history Q3 keeps; the Dashboard binding-form test passes without the two ids. |
+
+After L7 is deployed, the operator installs the package, binds `author` in the preview-checked `runtime.toml` editor (the Lanes list entries arrive in L12) and creates the Schedule. S1 is accepted when a scheduled compose reaches Approvals, the answer is graded, `quiz/questions` shows the reveal and `quiz/sessions` shows every session's state, including any failed one with its reason. The live measurement in §14 starts with S1. Until L8, a `Wrote` answer is not a graded attempt.
 
 ## 16. Read scope and confidence
 
-**Read directly by the author at `b5a3e7540a3`:**
+**Read directly by the author at `a6b9b1f58c2`:**
 - `AGENTS.md` and `docs/constitution.xml` in full.
-- `docs/rfc/README.md`, and `RFC-wiki-lint-and-page-contracts.md` (outline and §11-13).
-- `lib/keeper/keeper_ask.mli` and `keeper_ask_store.mli` in full. The first 60 lines of `keeper_ask_answer_wake.mli`, and `keeper_ask_operator_projection.mli`.
-- `lib/mcp_tool_runtime_ask.ml:121-210` and `config/tools/masc_ask.toml:1-60`.
-- The whole `addons/quiz-questions` and `addons/quiz-grader` packages, apart from the Dockerfiles and `build_deck.py`.
-- `docs/design/lane-addon-v0.md`; glossary `:1352-1384` and `:1860-1934`.
-- `lib/lane_addon/lane_addon_action.mli`, and `config/tools/masc_lane_act.toml:1-40`.
-- `schedule_domain.mli:18-61`, `masc_schedule_create.toml:50-64`, `goal_measurement.mli:30-37`, `changelog.d/README.md:1-24` and `lane-package-activity.md:1-20`.
-- Spot checks against the agent reports:
-  - `bin/masc_tui.ml:25806-25820` and `:12008-12030`;
-  - `bin/masc_tui_http.ml:3673-3690`;
-  - `bin/masc_tui_render_approvals.ml:245-250` and `:383-401`;
-  - `bin/masc_tui_types.ml:3961-3969`;
-  - `server_routes_http_routes_dashboard.ml:3825-3834`;
-  - `server_routes_http_keeper_stream.ml:4194-4200` and `:4348-4372`;
-  - `schedule_runner.mli:23-25`.
-- Live counts on 2026-10-20: the `lane-addons` declarations, `quiz` under `.masc/lane-addons/`, and the ask logs.
+- The previous revision of this RFC and `docs/rfc/README.md`.
+- `docs/design/lane-addon-v0.md` and `lane-addon-model-boundary.md` in full; `lane-addon-tool-exports.md` in full.
+- `docs/guides/lane-world-actions.md`, `tui-lane-addons.md`, `machine-addon-state.md`, `lane-subscriptions.md` and `exact-lane-activity.md` in full; `lane-package-activity.md:1-20`.
+- `lib/lane_addon/`: `lane_addon_manifest.ml` in full; the interfaces of `types`, `action`, `sources`, `sampling`, `worker_state`, `config`, `declaration`, `presentation`; parts of `slot.mli`, `worker.mli`, `runtime.mli`, `worker.ml:515-540`, `sources.ml:40-104`, `:386-416`, `runtime.ml:205-225`, `:1625-1680`, `types.ml:60-73`, `engine.ml` (network flags) and `worker_state.ml:1-32`.
+- Exact lanes: `standalone_lane.mli`, `runtime_exact_output_registry.mli` and `server_candle_appraiser.ml` in full; `runtime_toml.ml:2800-3007`; `runtime_schema.mli:360-392`, `:466-478`; `runtime_config_error.mli:30-110`; `runtime.ml:195-215`; `exact_lane_run_registry.mli` outline; `exact_output.mli:155-175`, `:540-560`; `config/runtime.toml:140-185`.
+- Ask: `keeper_ask.mli:1-240`, `keeper_ask_store.mli:1-80`, `server_routes_http_keeper_stream.ml:4150-4215`.
+- Schedules: `schedule_supported_kinds.ml:1-40`, `schedule_domain.mli:1-80`, `schedule_runner.mli:1-60`, `schedule_payload_projection.ml:30-52`, `tool_schedule.ml:404-412`, `server_schedule_consumers.ml:1360-1373`.
+- Records: `server_repository_pulls.mli:1-60`, `repo_store.mli` outline, `repo_manager_types.mli:1-30`, `board.mli:1-12`, `board_types.ml:80-110`, `:155-161`, `wiki_page.mli:1-15`, `:70`.
+- Old pair: both `lane.toml` files, `quiz-grader/server.py:8-12`, `:199-210`, `README.md:38-43`, `quiz-questions/server.py:20-31`, `SKILL.md:25-34`; glossary `:86-104`, `:1350-1386`, `:1870-1936`; every `git grep -i quiz` hit.
+- RFC-0471 §1.
 
-**Read by research agents in this session and not re-read** (marked "agent" in the text): schedule consumer and tool details, Goal tools, wiki/memory/artifact tool text, Board ids, GitHub sandbox access, TUI navigation and answer flow line numbers outside the spot checks.
+**Read for the review responses (same commit):**
+- `lane_addon_runtime.ml:641-667` (worker-lifetime finalization of receipts), `:860-895` (where it runs), `:1899-1990` (receipt read recovery and enqueue).
+- `lane_addon_action.mli` in full; `lane-world-actions.md:95-200`.
+- `schedule_runner.mli:1-170`; `server_schedule_consumers.ml:1249-1373`; `server_bootstrap_maintenance.ml:140-160`.
+- `lane_addon_sampling.mli:1-30`; `lane-addon-model-boundary.md:60-90`.
+- `lane-addon-interface.md:1-45`; `dashboard/src/components/lane-binding-form.ts:100-116` (where a field's schema `description` is shown).
+- `docs/constitution.xml:218-256` and `:438-470`.
 
 **Not read:**
 - the Board post itself;
-- the body of `Keeper_ask_answer_wake`;
-- `Workspace_utils.masc_dir`;
-- whether old wiki revisions are retained;
-- which Keepers actually have a GitHub login and a checkout.
+- the Board and wiki store internals a K3 reader would call;
+- `Repo_sync`, and how fresh a registered clone is;
+- the GitHub GraphQL fields for merged PRs and review comments;
+- the TUI code for Approvals answering beyond the lines cited;
+- the body of `Keeper_lane_cli_oneshot.walk`.
 
 **Confidence:**
-- Existing state (§3): high where read directly, medium where an agent read it.
-- How well the design fits the rules: medium to high. The weakest point is D10, the exact quote check. It compares a claimed citation with stored bytes, not a heuristic, and is the same check the `quiz-deck` skill already makes.
+- Existing state (§3): high. Every claim was read at the cited line.
+- That K1-K5 are the smallest generic additions for the operator's choice: medium. K2 is a new protocol. Its crash cases and session ends are now written down (§4.4, §4.9), but they are designed, not proved; L2 and L6 tests are where they are proved.
+- That K5 needs no hold: high for the receipt side, which is read from code (§4.7). The claim that nothing is lost without a hold rests on the session rules of §4.9.
+- Fit with the rules: medium to high. The weakest point is K3's reach: the package can read Board posts and send them to the model providers in the operator's `author` and `grade` slots. The control is the required `visibilities` grant; the `binding_schema` description asks for a slot check before `internal` (§4.5), but nothing enforces it.
+- Volume loss loses keys and judgments (§10). `export` keeps a readable copy; there is no restore.
+- The separate K4 store (§4.6) is a judgment about scope. A reviewer argued for one store; §12 A6 records both sides.
 - Whether the quiz reduces the operator's debt: unknown. §14 is how it gets measured.
 
 ## 17. References

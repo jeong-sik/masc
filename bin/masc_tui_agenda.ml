@@ -457,11 +457,25 @@ let target_indexes lines =
   loop 0 [] lines
 ;;
 
+(* Two destinations are the same target when they name the same held call,
+   Goal or task, or the same ask by [Masc.Tui_decode_asks.equal_ask_key]: an
+   installation's title is the package's and does not name the ask. *)
+let equal_destination left right =
+  match left, right with
+  | Nowhere, Nowhere -> true
+  | Keeper_holding left, Keeper_holding right ->
+      String.equal left.keeper right.keeper && String.equal left.tool_call_id right.tool_call_id
+  | Ask_to_answer left, Ask_to_answer right -> Masc.Tui_decode_asks.equal_ask_key left right
+  | Goal_to_confirm left, Goal_to_confirm right | Stuck_task left, Stuck_task right ->
+      String.equal left right
+  | (Nowhere | Keeper_holding _ | Ask_to_answer _ | Goal_to_confirm _ | Stuck_task _), _ -> false
+;;
+
 let selected_index lines ~selected =
   match selected with
   | Nowhere -> None
   | Keeper_holding _ | Ask_to_answer _ | Goal_to_confirm _ | Stuck_task _ ->
-      List.find_index (fun line -> line.goes_to = selected) lines
+      List.find_index (fun line -> equal_destination line.goes_to selected) lines
 ;;
 
 let selected_line lines ~selected =
@@ -482,7 +496,7 @@ let step lines ~selected direction =
   match targets with
   | [] -> Nowhere
   | first :: _ ->
-      (match List.find_index (( = ) selected) targets with
+      (match List.find_index (equal_destination selected) targets with
        | None -> first
        | Some index ->
            let next = match direction with

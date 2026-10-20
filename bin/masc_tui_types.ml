@@ -7754,7 +7754,9 @@ type home_request =
   | Home_held_call of { keeper : string; call_id : string }
   | Home_gate_request of string
   | Home_operator_request of string
-  | Home_question of string
+  | Home_question of Masc.Tui_decode_asks.ask_key
+      (** An installation's ask id is unique only within that installation, so
+          the asker is part of which question a row opens. *)
   | Home_goal_confirmation of string
   | Home_operator_task of string
 
@@ -7766,6 +7768,31 @@ type home_action =
   | Home_read_last of string
   | Home_choose_keeper
   | Home_create_keeper
+
+(* Which request a Home row names. A question is compared by
+   [Masc.Tui_decode_asks.equal_ask_key], so a package that changes its
+   title keeps the row the operator chose. *)
+let equal_home_request left right =
+  match left, right with
+  | Home_held_call left, Home_held_call right ->
+      String.equal left.keeper right.keeper && String.equal left.call_id right.call_id
+  | Home_gate_request left, Home_gate_request right
+  | Home_operator_request left, Home_operator_request right
+  | Home_goal_confirmation left, Home_goal_confirmation right
+  | Home_operator_task left, Home_operator_task right -> String.equal left right
+  | Home_question left, Home_question right -> Masc.Tui_decode_asks.equal_ask_key left right
+  | ( Home_held_call _ | Home_gate_request _ | Home_operator_request _ | Home_question _
+    | Home_goal_confirmation _ | Home_operator_task _ ), _ -> false
+
+let equal_home_action left right =
+  match left, right with
+  | Home_request left, Home_request right -> equal_home_request left right
+  | Home_resume left, Home_resume right | Home_read_last left, Home_read_last right ->
+      String.equal left right
+  | Home_approvals, Home_approvals | Home_agenda, Home_agenda
+  | Home_choose_keeper, Home_choose_keeper | Home_create_keeper, Home_create_keeper -> true
+  | ( Home_approvals | Home_request _ | Home_agenda | Home_resume _ | Home_read_last _
+    | Home_choose_keeper | Home_create_keeper ), _ -> false
 
 type acting_pane_preference =
   | Default_acting_pane

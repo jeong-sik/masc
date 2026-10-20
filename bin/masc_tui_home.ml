@@ -40,7 +40,7 @@ let home_decision_rows (state : state) =
             | None, question :: _ -> question.aq_prompt
             | None, [] -> "open question"
           in
-          Home_request (Home_question row.ar_id),
+          Home_request (Home_question (Masc.Tui_decode_asks.ask_key row)),
           Printf.sprintf "Question · %s [%s] · %s" (clean (Masc.Tui_decode_asks.ask_asker_label row.ar_asker))
             (Masc_tui_message_layout.truncate_middle 12 (clean row.ar_id)) (clean why))
     else []
@@ -141,7 +141,8 @@ let reconcile_home_request_detail state =
          | Home_held_call _ | Home_gate_request _ | Home_operator_request _
          | Home_goal_confirmation _ | Home_operator_task _ -> false)
       then ()
-      else if not (List.mem_assoc (Home_request request) (home_decision_rows state)) then begin
+      else if not (List.exists (fun (action, _) -> equal_home_action action (Home_request request))
+                     (home_decision_rows state)) then begin
         (match request with
           | Home_question _ -> clear_ask_answering state
           | Home_held_call _ | Home_gate_request _ | Home_operator_request _
@@ -155,11 +156,11 @@ let reconcile_home_request_detail state =
         match request with
         | Home_held_call _ | Home_gate_request _ | Home_operator_request _ ->
             Option.iter (fun index -> state.approval_cursor <- index)
-              (List.find_index (fun row -> home_request_of_approval row = request)
+              (List.find_index (fun row -> equal_home_request (home_request_of_approval row) request)
                  (approval_items state))
-        | Home_question ask_id ->
+        | Home_question ask ->
             Option.iter (fun index -> state.ask_cursor <- Masc_tui_ask_projection.On index)
-              (List.find_index (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = ask_id)
+              (List.find_index (fun row -> Masc.Tui_decode_asks.(equal_ask_key ask (ask_key row)))
                  (Option.value ~default:[] (approvals_open_questions state)))
         | Home_goal_confirmation goal_id ->
             state.planning_mode <- Planning_detail goal_id;
@@ -245,8 +246,7 @@ let home_selected_action state =
   let actions = home_actions state in
   match state.home_selected with
   | None -> List.nth_opt actions 0
-  | Some action ->
-      if List.mem action actions then Some action else None
+  | Some action -> List.find_opt (equal_home_action action) actions
 
 (* Frame preparation pins only an authoritative initial reading; transient
    boot destinations must remain free to settle. Drawing shares these pure
@@ -282,7 +282,7 @@ let home_decision_window state ~budget =
   let capacity = max 0 (budget - List.length (home_notice_lines state)
       - List.length continuation - 2 - warning_rows) in
   let first = max 0 (min state.home_decision_scroll (List.length decisions - capacity)) in
-  let first = match List.find_index (fun (action, _) -> Some action = selected) decisions with
+  let first = match List.find_index (fun (action, _) -> Option.equal equal_home_action (Some action) selected) decisions with
     | Some index when index < first -> index
     | Some index when index >= first + capacity -> max 0 (index - capacity + 1)
     | Some _ | None -> first
@@ -293,7 +293,7 @@ let home_step state ~backwards =
   let actions = home_actions state in
   let current = home_selected_action state in
   let index =
-    match List.find_index (fun action -> Some action = current) actions with
+    match List.find_index (fun action -> Option.equal equal_home_action (Some action) current) actions with
     | None -> 0
     | Some index ->
         if backwards then max 0 (index - 1)

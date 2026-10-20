@@ -687,6 +687,9 @@ let test_installation_receipts_follow_the_route () =
     (refused (decode 404 (failure Masc.Lane_addon_asks.Ask_not_found)));
   Alcotest.(check bool) "answers that do not fit are refused" true
     (refused (decode 400 (failure (Masc.Lane_addon_asks.Rejected []))));
+  Alcotest.(check bool) "a refusal with a reason that is not text is not read" true
+    (Result.is_error
+       (decode 400 (`Assoc [ "error", `String "invalid answers"; "invalid_answers", `List [ `Int 1 ] ])));
   Alcotest.(check bool) "a store failure leaves recording unconfirmed" true
     (Result.is_error (decode 500 (failure (Masc.Lane_addon_asks.Store_failed "disk"))))
 

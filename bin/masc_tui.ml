@@ -12013,9 +12013,8 @@ let apply_approvals_load state result =
 let notify_new_asks (arrived : Masc.Tui_decode_asks.ask_key list) =
   let message =
     match List.map (fun (ask : Masc.Tui_decode_asks.ask_key) -> ask.ak_asker) arrived with
-    | [ asker ] -> (match asker with
-        | Masc.Tui_decode_asks.Ask_keeper name -> Printf.sprintf "%s is waiting on a decision" name
-        | Masc.Tui_decode_asks.Ask_installation { ai_title; _ } -> Printf.sprintf "%s is waiting on you" ai_title)
+    | [ asker ] ->
+        Printf.sprintf "%s is waiting on a decision" (Masc.Tui_decode_asks.ask_asker_label asker)
     | [] | _ :: _ :: _ ->
         let count = List.length arrived in
         Printf.sprintf "%s %s waiting on a decision"
@@ -28706,7 +28705,8 @@ and is loaded on demand through keeper_skill.
                 (match request with
                  | Home_held_call _ | Home_gate_request _ | Home_operator_request _ ->
                      (match List.find_index
-                              (fun row -> Masc_tui_home.home_request_of_approval row = request)
+                              (fun row ->
+                                 equal_home_request (Masc_tui_home.home_request_of_approval row) request)
                               (Masc_tui_approvals_model.approval_items state) with
                       | None -> report_action state "system" "Request changed; choose again"
                       | Some cursor ->
@@ -28714,9 +28714,9 @@ and is loaded on demand through keeper_skill.
                           state.approval_cursor <- cursor;
                           state.approval_detail_open <- true;
                           state.approval_detail_scroll <- 0)
-                 | Home_question ask_id ->
+                 | Home_question ask ->
                      (match List.find_index
-                              (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = ask_id)
+                              (fun row -> Masc.Tui_decode_asks.(equal_ask_key ask (ask_key row)))
                               (open_ask_rows state) with
                       | None -> report_action state "system" "Question changed; choose again"
                       | Some cursor ->

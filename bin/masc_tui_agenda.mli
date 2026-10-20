@@ -194,6 +194,11 @@ val target_indexes : line list -> int list
 (** Indexes of the rows Enter can act on, in display order. The cursor moves
     over these, not over prose. *)
 
+val equal_destination : destination -> destination -> bool
+(** Whether two destinations are the same target. An ask is compared by
+    [Masc.Tui_decode_asks.equal_ask_key], so an installation's new title is
+    the same ask. *)
+
 val selected_index : line list -> selected:destination -> int option
 (** The current row of the selected identity. [None] for [Nowhere] or an
     identity removed by a refresh; a different row never inherits selection. *)

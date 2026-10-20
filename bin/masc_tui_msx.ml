@@ -6,10 +6,14 @@
    [msx_open] is set (the same way it does for [image_open]) and re-fetches the
    frame on a timer instead.
 
-   The keyboard belongs to this screen while it is open, but a spectator only
-   answers [esc]: a key never reaches the surface underneath, and this
-   increment does not send keys to the server machine (that is the co-play
-   step, RFC-0439 §3.3). *)
+   The keyboard belongs to this screen while it is open: a key never reaches
+   the surface underneath. [esc] closes it and [+] / [-] resize the drawing.
+   The screen opens in [Observe_machine]: game keys only repaint there. The
+   executable forwards mapped game keys only in [Control_machine] (F5 toggles
+   interaction); it also handles F4 machine switching, F6/F7 checkpoints, F8
+   media selection and Tab/room focus before game-key dispatch. This module
+   cannot reach [Masc_tui_http]; eligible input is sent by the executable to
+   the shared server machine (RFC-0439 §3.3), then the frame is re-fetched. *)
 
 module Frame = Masc_tui_image_mosaic
 
@@ -455,8 +459,9 @@ let consume ~(write : string -> unit) (state : Masc_tui_types.state) key =
     false
   end
   else begin
-    (* Any other key just repaints the latest frame the poll cached: a
-       spectator does not drive the machine. *)
+    (* Direct calls with any other key only repaint the poll's cached frame.
+       The production event loop currently calls [consume] only for [esc];
+       its own dispatch owns observation, control and game-key forwarding. *)
     render ~write ?notice:state.msx_notice ~connection:state.Masc_tui_types.connection_status
       ~live:state.msx_live ~interaction:state.machine_interaction state.msx_frame (last_surface ());
     true

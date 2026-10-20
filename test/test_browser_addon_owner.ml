@@ -60,7 +60,7 @@ let scenario () = Eio_main.run (fun env ->
     let issued = command (Eio.Promise.await_exn poll) in
     let closing,begin_close=Eio.Promise.create () and settled,finish_close=Eio.Promise.create () in
     let automation_calls=ref 0 in
-    ok (Owner.attach_automation owner
+    ok (Owner.attach_automation owner ~locate:false
       ~execute:(fun _ -> incr automation_calls;B.Answered (`Assoc ["ok",`Bool true;"data",`Null]))
       ~session:(fun () -> B.Browser_closed)
       ~document:(fun ~tab_id:_ -> B.Rejected_before_effect "no document")
@@ -68,6 +68,10 @@ let scenario () = Eio_main.run (fun env ->
     let owned=Owner.snapshot owner |> Yojson.Safe.Util.member "owned_backends" |> Masc.Browser_addon_inventory.owned_of_json |> ok in
     check bool "ready backend is visible without inventing an open session" true
       (let automation,_=owned in automation.registered && automation.session=B.Browser_closed);
+    check bool "an unselected locate consumer refuses before backend work" true
+      (pre_effect (send (W.Issue {route=B.Automation_route;verb=B.Page_locate {tab_id=1;instruction=None};
+        actor=Some "keeper";timeout_sec=2.;only_if_idle=false})));
+    check int "selection off sends no backend command" 0 !automation_calls;
     ignore (send (W.Issue {route=B.Automation_route;verb=B.Session_status;actor=Some "keeper";timeout_sec=2.;only_if_idle=false}));
     check int "owned backend command dispatched once" 1 !automation_calls;
     let retired=Eio.Fiber.fork_promise ~sw (fun () -> send W.Retire) in

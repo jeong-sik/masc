@@ -26,6 +26,17 @@ document and viewport guards; `page.act` supports the closed tab/frame action
 set. Inputs, clicks, hover, drag, scrolling and keys all use the same selected
 browser. Do not send JavaScript or raw debug protocol commands.
 
+Owned Gecko can serve `page.locate` when this installation selects the `locate`
+Exact Output. Repeat its observed `lane = "automation"` and `tabId`; supply an
+optional `instruction`. The model chooses only observed node IDs. The worker
+checks the original document and target meaning again and returns fresh node
+observations with a separate `inference` explanation. A match is not a click or
+permission to act. Preserve its documentId/nodeId and perform the normal guarded
+interaction only when the user's task authorizes it. A truncated scene does not
+establish that every match was found. If locate is disabled or its model route
+is unavailable, inspect that configuration rather than moving the tab to another
+browser. Act/extract still require Stagehand and are not supplied by this worker.
+
 Read the entire result before deciding the next action. `isError`, private
 refusal disposition and backend partial-effect payloads have distinct meanings.
 After a lost reply or unknown outcome, observe the original page before further

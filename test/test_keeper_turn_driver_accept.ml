@@ -1497,6 +1497,20 @@ let test_quiet_final_shape_names_the_settled_form () =
     true
     (shape ~stop_reason:Agent_core.Types.MaxTokens [] = None)
 
+(* The label is the [shape] value of masc_keeper_quiet_finals_total; the
+   dashboards and alerts that read the counter match these exact values. *)
+let test_quiet_final_shape_labels_are_the_metric_values () =
+  List.iter
+    (fun (shape, expected) ->
+       Alcotest.(check string)
+         expected
+         expected
+         (Keeper_tooling.Response.quiet_final_shape_label shape))
+    [ Keeper_tooling.Response.Quiet_blank_text, "blank_text"
+    ; Keeper_tooling.Response.Quiet_no_content, "no_content"
+    ; Keeper_tooling.Response.Quiet_thinking_only, "thinking_only"
+    ]
+
 let wake_observation
     ~pending_messages
     ~pending_board_events
@@ -2420,6 +2434,10 @@ let () =
             "quiet final shape names the settled form"
             `Quick
             test_quiet_final_shape_names_the_settled_form;
+          Alcotest.test_case
+            "quiet final shape labels are the metric values"
+            `Quick
+            test_quiet_final_shape_labels_are_the_metric_values;
           Alcotest.test_case
             "autonomous wake without input allows a quiet final"
             `Quick

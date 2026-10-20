@@ -6,4 +6,5 @@ val invoke : owner:Browser_addon_owner.t -> principal:Lane_addon_call_context.pr
   Yojson.Safe.t -> Mcp_protocol.Mcp_types.tool_result
 (** Select once, retain the concrete client in the receipt, and dispatch once.
     Failed and partial receipts retain their payload and effect disposition.
-    Upload paths and downloads require the still-pending host artifact broker. *)
+    Uploads consume a private host grant bound to the original caller/command.
+    Downloads still require the host artifact broker. *)

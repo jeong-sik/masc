@@ -21,10 +21,15 @@ type receipt = {binding:Browser_binding.t;data:Yojson.Safe.t;
   raw_result:Mcp_protocol.Mcp_types.tool_result}
 (** The original successful MCP receipt remains available if a caller's
     observation projection or persistence fails after command completion. *)
-val issue : ?required_actions:Browser_capabilities.operation list ->
+val issue : ?upload_paths:string list -> ?required_actions:Browser_capabilities.operation list ->
   t -> preference:Browser_selection.preference -> Browser_lane.verb ->
   (receipt, Tool_result.result) result
 (** Invoke the advertised tool once and decode its mandatory connection and
     success receipt. The selected schema hooks remain optional; identity and
     wire decoding remain mandatory. Failed/partial replies preserve raw data
     and effect metadata. Malformed post-dispatch replies have unknown effect. *)
+
+(** [upload_paths] must be an exact pending host snapshot batch, not caller
+    paths. The host prepares worker-owned copies over the original private
+    connection, then uses the ordinary exported tool/hooks once. A failed or
+    cancelled call is never replayed. *)

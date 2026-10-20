@@ -122,7 +122,9 @@ module For_test : sig
   val keeper_row_after_worker_failure :
     Workspace.config -> name:string -> error:string -> Yojson.Safe.t
   (** The row a keeper gets in [keepers_dashboard_json] and
-      [execution_trust_dashboard_json] after its worker raised [error]: the
-      degraded row when the meta is readable, otherwise a row carrying only
-      the name and the errors. Never absent. *)
+      [execution_trust_dashboard_json] after its worker raised [error]. It is
+      the degraded row when the meta is present and building it succeeds;
+      otherwise a row carrying only the name and the errors (meta absent, not
+      current or unreadable, or the degraded row itself raised). Never
+      absent. *)
 end

@@ -7755,7 +7755,10 @@ let test_keepers_dashboard_json_fiber_batch_collects_all_keepers () =
 (* #36101: a keeper whose dashboard worker raised used to drop out of the list
    when its degraded row could not be built either, and the response still said
    [ok]. Whatever the meta looks like, the keeper keeps a row that carries its
-   name and the error that broke its worker. *)
+   name and the error that broke its worker. Each case below can only be
+   served by one arm of the helper, except the stored meta: that one takes the
+   degraded row or, when building it raises for want of a runtime, the
+   name-only row, and both satisfy the same assertions. *)
 let test_keeper_row_after_worker_failure_is_never_absent () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   ignore (Workspace.init config ~agent_name:None);
@@ -7770,7 +7773,8 @@ let test_keeper_row_after_worker_failure_is_never_absent () =
     Dashboard_http_keeper.For_test.keeper_row_after_worker_failure config ~name ~error
   in
   let open Yojson.Safe.Util in
-  let check_row ~name row =
+  let check_row ~name =
+    let row = row_of name in
     check string (name ^ " keeps its name") name (row |> member "name" |> to_string);
     check bool (name ^ " is marked degraded") true (row |> member "degraded" |> to_bool);
     check string (name ^ " status") "degraded" (row |> member "status" |> to_string);
@@ -7779,8 +7783,7 @@ let test_keeper_row_after_worker_failure_is_never_absent () =
     check bool (name ^ " has a trust object") true
       (match row |> member "trust" with `Assoc _ -> true | _ -> false)
   in
-  (* A stored meta: the degraded row, or the name-only row when building it
-     raises (no default runtime and none in the meta). Either way a row. *)
+  (* A stored meta. *)
   let stored = "worker-fail-stored" in
   let meta =
     match
@@ -7793,14 +7796,16 @@ let test_keeper_row_after_worker_failure_is_never_absent () =
   (match Masc.Keeper_meta_store.replace_snapshot config meta with
    | Ok () -> ()
    | Error error -> fail ("write meta: " ^ error));
-  check_row ~name:stored (row_of stored);
-  (* No meta at all: nothing to build a degraded row from, so the name-only
-     row stands in. *)
-  let ghost = "worker-fail-no-meta" in
-  check_row ~name:ghost (row_of ghost);
-  check bool "the name-only row says why it has no meta" true
-    (contains ~needle:"no current keeper meta"
-       (row_of ghost |> member "diagnostic" |> member "error" |> to_string))
+  check_row ~name:stored;
+  (* No meta file: the name-only row is the only row there is to give. *)
+  check_row ~name:"worker-fail-no-meta";
+  (* A meta file that is not JSON: [read_meta_presence] answers [Error]. *)
+  let unreadable = "worker-fail-unreadable" in
+  let unreadable_path = Masc.Keeper_types_profile.keeper_meta_path config unreadable in
+  Fs_compat.mkdir_p (Filename.dirname unreadable_path);
+  Out_channel.with_open_bin unreadable_path (fun channel ->
+    output_string channel "{ invalid json syntax }");
+  check_row ~name:unreadable
 
 (* The `.mli` calls the error clear on success a deliberate contract, and
    nothing tested it. It is also exactly what a snapshot swap could drop,

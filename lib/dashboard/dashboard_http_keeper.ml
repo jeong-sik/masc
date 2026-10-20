@@ -48,27 +48,29 @@ let non_empty_trimmed_string_opt value =
   let trimmed = String.trim value in
   if trimmed = "" then None else Some trimmed
 
+(* The [diagnostic] object of a row whose dashboard worker raised. Both the
+   degraded row and the name-only row carry it, so they cannot drift apart. *)
+let worker_failure_diagnostic ~(error : string) =
+  `Assoc
+    [ ("status", `String "degraded")
+    ; ( "reason"
+      , `String
+          Keeper_runtime_trust_snapshot_core.(
+            disposition_reason_to_wire Keeper_dashboard_worker_exception) )
+    ; ("error", `String error)
+    ; ("fd_observation", `Assoc (Keeper_fd_pressure.projection_fields ()))
+    ]
+
 let degraded_keeper_dashboard_row
       ~(error : string)
       (m : Keeper_meta_contract.keeper_meta)
   =
   let runtime_trust = Trust.degraded_keeper_trust_json ~error in
-  let fd_observation = `Assoc (Keeper_fd_pressure.projection_fields ()) in
   let runtime_id =
     Keeper_meta_contract.runtime_id_of_meta m |> non_empty_trimmed_string_opt
   in
   let runtime_id_json = Json_util.string_opt_to_json runtime_id in
-  let diagnostic =
-    `Assoc
-      ([ ("status", `String "degraded")
-       ; ( "reason"
-         , `String
-             Keeper_runtime_trust_snapshot_core.(
-               disposition_reason_to_wire Keeper_dashboard_worker_exception) )
-       ; ("error", `String error)
-       ; ("fd_observation", fd_observation)
-       ])
-  in
+  let diagnostic = worker_failure_diagnostic ~error in
   `Assoc
     ([ ("name", `String m.name)
      ; ( "keeper_id"
@@ -129,17 +131,7 @@ let invalid_profile_dashboard_row ~keeper_name error =
    response with a shorter list, which reads as a keeper that does not exist. *)
 let name_only_degraded_keeper_dashboard_row ~keeper_name ~(error : string) =
   let runtime_trust = Trust.degraded_keeper_trust_json ~error in
-  let diagnostic =
-    `Assoc
-      [ ("status", `String "degraded")
-      ; ( "reason"
-        , `String
-            Keeper_runtime_trust_snapshot_core.(
-              disposition_reason_to_wire Keeper_dashboard_worker_exception) )
-      ; ("error", `String error)
-      ; ("fd_observation", `Assoc (Keeper_fd_pressure.projection_fields ()))
-      ]
-  in
+  let diagnostic = worker_failure_diagnostic ~error in
   `Assoc
     [ ("name", `String keeper_name)
     ; ("phase", `String "degraded")
@@ -153,8 +145,9 @@ let name_only_degraded_keeper_dashboard_row ~keeper_name ~(error : string) =
 
 (* Total: every keeper whose worker raised gets a row. The degraded row is the
    preferred shape; the name-only row is what remains when the meta cannot be
-   read or the degraded row itself raises (for example when the default
-   runtime is not initialised and the meta names none). *)
+   read, is absent or not current, or when building the degraded row raises
+   (for example [runtime_id_of_meta] finds no runtime assignment for the keeper
+   and no default runtime). *)
 let keeper_row_after_worker_failure
       (config : Workspace.config)
       ~(name : string)
@@ -164,9 +157,14 @@ let keeper_row_after_worker_failure
     name_only_degraded_keeper_dashboard_row ~keeper_name:name ~error:detail
   in
   try
-    match Keeper_meta_store.read_meta config name with
-    | Ok (Some meta) -> degraded_keeper_dashboard_row ~error meta
-    | Ok None -> name_only (error ^ "; no current keeper meta")
+    match Keeper_meta_store.read_meta_presence config name with
+    | Ok (Keeper_meta_store.Meta_present meta) ->
+        degraded_keeper_dashboard_row ~error meta
+    | Ok Keeper_meta_store.Meta_absent ->
+        name_only (error ^ "; no keeper meta file")
+    | Ok (Keeper_meta_store.Meta_not_current detail) ->
+        name_only
+          (Printf.sprintf "%s; keeper meta is not current: %s" error detail)
     | Error detail ->
         name_only (Printf.sprintf "%s; keeper meta unreadable: %s" error detail)
   with

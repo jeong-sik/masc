@@ -5183,6 +5183,7 @@
 (include stanzas/test_browser_selection.inc)
 (include stanzas/test_browser_task_capabilities.inc)
 (include stanzas/test_browser_stagehand_model.inc)
+(include stanzas/test_browser_addon_chrome_profile.inc)
 (include stanzas/test_browser_stagehand_executor.inc)
 (include stanzas/test_browser_keyboard.inc)
 (include stanzas/test_browser_stagehand_backend.inc)

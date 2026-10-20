@@ -12,7 +12,7 @@ import { validateVstSelection as selection } from './project-sound.mjs'
 const replyBytes = 16 * 1024 * 1024
 const diagnosticBytes = 64 * 1024
 
-export function nativeJob(request, { command = 'masc-vst-host', args = [] } = {}) {
+export function nativeJob(request, { command = 'masc-vst-host', args = [], label = 'VST' } = {}) {
   const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] })
   let cancelled = false
   let overflow = false
@@ -29,14 +29,14 @@ export function nativeJob(request, { command = 'masc-vst-host', args = [] } = {}
     child.stdin.on('error', () => {})
     child.once('error', reject)
     child.once('close', (code, signal) => {
-      if (cancelled) { const error = new Error('VST job cancelled'); error.code = 'ABORT_ERR'; reject(error); return }
-      if (overflow) { reject(new Error('VST reply exceeds its protocol memory bound')); return }
+      if (cancelled) { const error = new Error(`${label} job cancelled`); error.code = 'ABORT_ERR'; reject(error); return }
+      if (overflow) { reject(new Error(`${label} reply exceeds its protocol memory bound`)); return }
       let reply
       try { reply = JSON.parse(stdout.toString('utf8')) }
-      catch { reject(new Error(`VST host ended without a valid reply (${signal ?? code}): ${stderr.toString('utf8')}`)); return }
+      catch { reject(new Error(`${label} host ended without a valid reply (${signal ?? code}): ${stderr.toString('utf8')}`)); return }
       if (reply?.ok === false && typeof reply.error === 'string') { reject(new Error(reply.error)); return }
       if (code !== 0 || reply?.ok !== true || !reply.result || typeof reply.result !== 'object') {
-        reject(new Error(`Invalid VST host completion (${signal ?? code})`)); return
+        reject(new Error(`Invalid ${label} host completion (${signal ?? code})`)); return
       }
       resolve(reply.result)
     })

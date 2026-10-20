@@ -13,6 +13,7 @@ import { importMidiSource, midiSourcePattern } from '../midi-source.mjs'
 import { harmonyAt, PPQ } from '../sequencer-project.mjs'
 import { MidiSourcePicker as SourcePicker } from '../midi-source-picker.mjs'
 import { sourceSecondsAtTick, sourceTickAtSeconds } from '../midi-source-playback.mjs'
+import { isFluidSound } from '../soundfont.mjs'
 
 const frozenSound = selection => ({ kind: 'vst', selection, instrument: { identifier: 'Bass', version: '1' },
   preset: { data: Buffer.from('frozen state').toString('base64'), sha256: createHash('sha256').update('frozen state').digest('hex') } })
@@ -54,6 +55,9 @@ async function controller(options = {}) {
     snapshotWriter: () => async value => { observed.snapshots.push(value) },
     captureVstSound(selection) { observed.soundCaptures.push(selection); return options.capture?.(selection) ?? { promise: Promise.resolve(frozenSound(selection)), cancel() {} } },
     renderVstPhrase(value) { observed.native.push(value); return options.native(value) },
+    isFluidSound,
+    captureFluidSound() { throw new Error('Unexpected FluidSynth selection') },
+    renderFluidSound() { throw new Error('Unexpected FluidSynth render') },
     mkdtemp: async () => '/synthetic-temp', rm: async () => {},
     writeFile: async path => { observed.writes.push(path) },
     copyFile: async (from, to) => { observed.copies.push([from, to]) },

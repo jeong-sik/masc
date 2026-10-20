@@ -39,6 +39,12 @@ parentPort.on('message', async job => {
       writeFileSync(job.path, midi.bytes, { flag: 'wx', mode: 0o600 })
       result = { path: job.path, duration: midi.duration, format: 'vst-midi',
         ...(midi.sourceWindow ? { sourceWindow: midi.sourceWindow, midiSha256: midi.midiSha256 } : {}) }
+    } else if (job.options.format === 'fluid-plan') {
+      const { fluidRenderPlan } = await import('./soundfont.mjs')
+      const plan = fluidRenderPlan(job.project, job.options)
+      if (cancelled()) throw new Error('SoundFont preparation cancelled')
+      writeFileSync(job.path, JSON.stringify(plan), { flag: 'wx', mode: 0o600 })
+      result = { path: job.path, format: 'fluid-plan' }
     } else if (job.options.format === 'midi') {
       const timeline = job.project.kind === 'midi-source' ? sourceMidiTimeline(job.project, job.options) : projectMidiTimeline(job.project, job.options)
       if (cancelled()) throw new Error('MIDI preparation cancelled')

@@ -125,6 +125,7 @@ export function editorCommand(editor, line) {
   const effect = stepInputEffect(line)
   if (effect) return { editor, effect }
   const [command, ...args] = line.trim().split(/\s+/)
+  if (command === 'soundfont-fluid') return { editor, effect: { kind: 'soundfont-fluid', ...(args.length ? { path: args.join(' ') } : {}) } }
   const selected = noteSelectionCommand(editor, command, args)
   const result = selected === undefined ? runCommand(editor, line) : { editor: selected }
   return { ...result, editor: retainNoteSelection(editor, result.editor, { history: ['undo', 'redo'].includes(command) }) }

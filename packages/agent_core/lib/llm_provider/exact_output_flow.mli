@@ -82,6 +82,8 @@ val record_advance
   -> 'advance
   -> unit
 
+(** Every list is in the order its items were first recorded. Republishing an
+    attempt or a measurement replaces it where it stands. *)
 val progress_snapshot
   :  ('admission, 'attempt, 'measurement, 'advance) progress
   -> ('admission, 'attempt, 'measurement, 'advance) progress_snapshot

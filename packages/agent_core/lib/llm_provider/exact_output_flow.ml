@@ -85,11 +85,11 @@ let record_attempt progress attempt =
   Atomic.set progress { current with attempts_rev = attempt :: current.attempts_rev }
 ;;
 
-(* The lists are kept newest first and reversed once in [progress_snapshot], so a
-   value seen for the first time goes at the head like [record_admission] and
-   [record_advance] do. Appending it at the end made [attempts] and
-   [measurements] come out newest first beside [admissions] and [advances]
-   oldest first (#38530). *)
+(* A value is published when its visit starts and again as the visit settles.
+   The lists are kept newest first and reversed once in [progress_snapshot]:
+   a value seen for the first time goes at the head, like [record_admission]
+   and [record_advance] do, and a later publication replaces it where it
+   stands. All four lists come out oldest first. *)
 let replace_or_prepend ~same value list =
   let rec replace = function
     | [] -> None

@@ -11,7 +11,10 @@
     wrote reaches the terminal as bytes: an SGR sequence becomes a {!pen},
     any other complete sequence -- a cursor move, an OSC 8 hyperlink's
     brackets, a window title -- is dropped, and what is left of the text still
-    goes through the caller's sanitizer. *)
+    goes through the caller's sanitizer. The one thing kept of an OSC 8
+    hyperlink is its address, which follows the link's text as ordinary text
+    unless the text is the address: what the program drew can differ from
+    where the link goes. *)
 
 type colour =
   | Black
@@ -38,6 +41,10 @@ type weight =
 
 type pen =
   { foreground : foreground option  (** [None]: the terminal's own. *)
+  ; background : bool
+        (** The program set a background colour (SGR 40-47, 100-107, 48). This
+            pane draws none, and a foreground chosen for that background can be
+            unreadable on its own, so {!render} leaves the foreground out. *)
   ; weight : weight
   ; italic : bool
   ; underline : bool
@@ -57,7 +64,10 @@ val parse : string -> line list
     empty line. The pen carries over a line end the way it does on a
     terminal. A sequence the text ends inside is dropped: the process is
     still writing, and the next read has the rest of it. An ESC that starts
-    no sequence stays in the text, for the sanitizer to show. *)
+    no sequence stays in the text, for the sanitizer to show; that includes an
+    ESC that ends a line whose LF has arrived. CAN and SUB cancel the sequence
+    they arrive in: what was read of it is dropped and the text after them
+    shows. *)
 
 val text : line -> string
 (** The line's characters without their pens. *)

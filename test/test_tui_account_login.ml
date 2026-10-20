@@ -562,7 +562,8 @@ let partly_checked_save () =
 let foreign_escapes_never_reach_the_terminal () =
   let only line = match Sgr_text.parse line with [ runs ] -> runs | lines -> fail (Printf.sprintf "%d lines" (List.length lines)) in
   let hostile = only "a\027[2J\027[5;5Hb\027]8;;https://evil.example/\027\\link\027]8;;\027\\c\027[?25ld\027(Be\027]0;title\007f\0277g" in
-  check string "cursor moves, hyperlinks, titles and charsets are dropped, their text kept" "ablinkcdefg" (Sgr_text.text hostile);
+  check string "cursor moves, titles and charsets are dropped, a hyperlink's text is kept and its address follows it"
+    "ablink (https://evil.example/)cdefg" (Sgr_text.text hostile);
   check bool "nothing the client wrote is sent as an escape" false
     (String.contains (Sgr_text.render ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text hostile) '\027');
   check string "a sequence the stream ends inside waits for the rest" "x" (Sgr_text.text (only "x\027[9"));
@@ -586,6 +587,42 @@ let foreign_escapes_never_reach_the_terminal () =
      check (option (triple int int int)) "38;2 truecolor" (Some (10, 20, 30)) (channels (foreground z));
      check (option (triple int int int)) "colon sub-parameters" (Some (1, 2, 3)) (channels (foreground w))
    | runs -> fail (Printf.sprintf "%d runs" (List.length runs)))
+(* A login's colours are read for what the operator needs from the screen: text
+   the program made readable stays readable, and a link's address is not lost. *)
+let sgr_text_keeps_what_the_operator_reads () =
+  let only line = match Sgr_text.parse line with [ runs ] -> runs | lines -> fail (Printf.sprintf "%d lines" (List.length lines)) in
+  let text line = Sgr_text.text (only line) in
+  let background (run : Sgr_text.run) = run.Sgr_text.pen.Sgr_text.background in
+  List.iter (fun (name, input) ->
+    match only input with
+    | [ run ] -> check bool name true (background run)
+    | runs -> fail (Printf.sprintf "%s: %d runs" name (List.length runs)))
+    [ "SGR 40-47", "\027[30;47mX"; "SGR 100-107", "\027[100mX"; "SGR 48;5", "\027[48;5;7mX";
+      "SGR 48;2", "\027[48;2;1;2;3mX"; "SGR 48:2", "\027[48:2::1:2:3mX" ];
+  (match only "\027[47mA\027[49mB\027[47mC\027[0mD" with
+   | [ a; b; c; d ] ->
+     check (list bool) "49 and 0 end the background" [ true; false; true; false ]
+       (List.map background [ a; b; c; d ])
+   | runs -> fail (Printf.sprintf "%d runs" (List.length runs)));
+  let address = "https://login.example/device?code=ABCD-EFGH" in
+  let linked text = "\027]8;;" ^ address ^ "\027\\" ^ text ^ "\027]8;;\027\\" in
+  let shown = text ("Open " ^ linked "the login page" ^ " now") in
+  check bool "a link's text stays" true (contains shown "Open the login page");
+  check bool "its address follows" true (contains shown address);
+  check string "a link whose text is its address is not repeated" address (text (linked address));
+  check bool "BEL ends the link too, and its parameters are not part of the address" true
+    (contains (text "\027]8;id=7;https://b.example/\007b\027]8;;\007") "https://b.example/");
+  check bool "an address with a semicolon is kept whole" true
+    (contains (text "\027]8;;https://c.example/?a=b;c\027\\c\027]8;;\027\\") "https://c.example/?a=b;c");
+  check bool "an unrelated OSC adds nothing" true (text "a\027]0;title\007b" = "ab");
+  (match Sgr_text.parse "a\027\nb" with
+   | [ first; second ] ->
+     check string "an ESC ending a finished line stays in the text" "a\027" (Sgr_text.text first);
+     check string "the next line is its own" "b" (Sgr_text.text second)
+   | lines -> fail (Printf.sprintf "%d lines" (List.length lines)));
+  check string "an ESC ending the line still being written waits for the rest" "a" (text "a\027");
+  check string "CAN ends an OSC string" "avisible" (text "a\027]0;t\024visible");
+  check string "SUB ends a CSI" "avisible" (text "a\027[3\026visible")
 (* The server reads each account's email from its client's login file; each
    client's account list leads every row with it so the operator can tell
    accounts apart. *)
@@ -1074,5 +1111,6 @@ let () = run "TUI account login" ["workflow",[
   test_case "retry preserves early input until a new session starts" `Quick retry_early_input;
   test_case "visible cursor and recovery identity" `Quick viewport_and_receipt;
   test_case "foreign escapes never reach the terminal" `Quick foreign_escapes_never_reach_the_terminal;
+  test_case "sgr text keeps what the operator reads" `Quick sgr_text_keeps_what_the_operator_reads;
   test_case "removal from the list" `Quick removal_from_the_list;
   test_case "refused removal" `Quick refused_removal]]

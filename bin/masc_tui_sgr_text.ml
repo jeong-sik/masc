@@ -23,12 +23,14 @@ type weight =
 
 type pen =
   { foreground : foreground option
+  ; background : bool
   ; weight : weight
   ; italic : bool
   ; underline : bool
   }
 
-let plain = { foreground = None; weight = Regular; italic = false; underline = false }
+let plain =
+  { foreground = None; background = false; weight = Regular; italic = false; underline = false }
 
 type run =
   { pen : pen
@@ -111,8 +113,10 @@ let slot_colour constructor pen offset =
   with_foreground pen (Option.map constructor (colour_of_offset offset))
 
 (* Every SGR code this pane does not draw -- blink, reverse, conceal, strike,
-   fonts, backgrounds -- leaves the pen as it was: the text still shows, the
-   way a terminal without that attribute shows it. *)
+   fonts -- leaves the pen as it was: the text still shows, the way a terminal
+   without that attribute shows it. A background is the exception: it is
+   remembered, because a foreground chosen for it can be unreadable on this
+   pane's own background, and the drawing leaves that foreground out. *)
 let code pen = function
   | 0 -> plain
   | 1 -> { pen with weight = Bold }
@@ -123,27 +127,34 @@ let code pen = function
   | 23 -> { pen with italic = false }
   | 24 -> { pen with underline = false }
   | 39 -> { pen with foreground = None }
+  | 49 -> { pen with background = false }
+  | value when (value >= 40 && value <= 47) || (value >= 100 && value <= 107) ->
+    { pen with background = true }
   | value when value >= 30 && value <= 37 -> slot_colour (fun c -> Palette c) pen (value - 30)
   | value when value >= 90 && value <= 97 -> slot_colour (fun c -> Bright c) pen (value - 90)
   | _ -> pen
 
-(* 38 is the foreground; 48 (background) and 58 (underline colour) are read
-   only so the numbers after them are not taken for codes of their own -- a
-   background's 5 and palette index 1 are not "blink, then bold". An
-   extended colour whose shape is wrong ends the list: which of the numbers
-   after it are codes can no longer be told. *)
+(* 38 is the foreground. 48 (background) is remembered as a flag and 58
+   (underline colour) is read only so the numbers after them are not taken for
+   codes of their own -- a background's 5 and palette index 1 are not "blink,
+   then bold". An extended colour whose shape is wrong ends the list: which of
+   the numbers after it are codes can no longer be told. *)
 let rec apply pen = function
   | [] -> pen
   | Code 38 :: Code 5 :: Code index :: rest -> apply (with_foreground pen (indexed index)) rest
   | Code 38 :: Code 2 :: Code red :: Code green :: Code blue :: rest ->
     apply (with_foreground pen (rgb red green blue)) rest
-  | Code (48 | 58) :: Code 5 :: Code _ :: rest -> apply pen rest
-  | Code (48 | 58) :: Code 2 :: Code _ :: Code _ :: Code _ :: rest -> apply pen rest
+  | Code 48 :: Code 5 :: Code _ :: rest -> apply { pen with background = true } rest
+  | Code 48 :: Code 2 :: Code _ :: Code _ :: Code _ :: rest ->
+    apply { pen with background = true } rest
+  | Code 58 :: Code 5 :: Code _ :: rest -> apply pen rest
+  | Code 58 :: Code 2 :: Code _ :: Code _ :: Code _ :: rest -> apply pen rest
   | Code (38 | 48 | 58) :: _ -> pen
   | Code value :: rest -> apply (code pen value) rest
   | Sub [ 38; 5; index ] :: rest -> apply (with_foreground pen (indexed index)) rest
   | (Sub [ 38; 2; red; green; blue ] | Sub [ 38; 2; _; red; green; blue ]) :: rest ->
     apply (with_foreground pen (rgb red green blue)) rest
+  | Sub (48 :: _) :: rest -> apply { pen with background = true } rest
   | Sub [ 4; 0 ] :: rest -> apply { pen with underline = false } rest
   | Sub [ 4; _ ] :: rest -> apply { pen with underline = true } rest
   | (Sub _ | Unreadable) :: rest -> apply pen rest
@@ -156,11 +167,16 @@ type escape =
       (** An SGR sequence: its parameters, and the index after its [m]. *)
   | Dropped of int
       (** A complete sequence this pane does not draw; the index after it. *)
+  | Operating_system_command of string * int
+      (** An OSC string that ended in BEL or ST: its payload, and the index
+          after it. *)
   | Unfinished  (** The line ends inside it. *)
   | Not_a_sequence  (** A byte no sequence may hold follows; the ESC is text. *)
 
 let esc = '\027'
 let bel = '\007'
+let cancel = '\024'
+let substitute = '\026'
 let string_terminator = '\\'
 let in_range low high byte = Char.compare byte low >= 0 && Char.compare byte high <= 0
 let is_parameter_byte = in_range '\x30' '\x3f'
@@ -168,6 +184,10 @@ let is_intermediate_byte = in_range '\x20' '\x2f'
 let is_final_byte = in_range '\x40' '\x7e'
 let is_escape_final_byte = in_range '\x30' '\x7e'
 let is_sgr_parameter byte = in_range '0' '9' byte || Char.equal byte ';' || Char.equal byte ':'
+
+(* CAN and SUB cancel the sequence they arrive in (ECMA-48 §8.3.6, §8.3.148):
+   what was read of it is dropped and the text after them shows. *)
+let cancels byte = Char.equal byte cancel || Char.equal byte substitute
 
 (* CSI: parameter bytes, then intermediate bytes, then one final byte. Only
    [m] with plain numeric parameters is SGR; a private marker ([?25l]) or an
@@ -185,6 +205,7 @@ let control_sequence line ~from =
         if Char.equal byte 'm' && (not intermediate) && String.for_all is_sgr_parameter parameters
         then Pen_change (parameters, index + 1)
         else Dropped (index + 1)
+      else if cancels byte then Dropped (index + 1)
       else Not_a_sequence
   in
   scan from ~intermediate:false
@@ -193,14 +214,19 @@ let control_sequence line ~from =
    ESC that is not ST abandons the string there and starts what follows. *)
 let string_sequence line ~from ~bel_ends =
   let length = String.length line in
+  let payload index = String.sub line from (index - from) in
+  let ended payload_end next =
+    if bel_ends then Operating_system_command (payload payload_end, next) else Dropped next
+  in
   let rec scan index =
     if index >= length then Unfinished
     else
       let byte = line.[index] in
-      if bel_ends && Char.equal byte bel then Dropped (index + 1)
+      if bel_ends && Char.equal byte bel then ended index (index + 1)
+      else if cancels byte then Dropped (index + 1)
       else if Char.equal byte esc then
         if index + 1 >= length then Unfinished
-        else if Char.equal line.[index + 1] string_terminator then Dropped (index + 2)
+        else if Char.equal line.[index + 1] string_terminator then ended index (index + 2)
         else Dropped index
       else scan (index + 1)
   in
@@ -219,9 +245,12 @@ let designation line ~from =
   in
   scan from
 
-let escape_at line index =
+(* An ESC that ends a line already finished by its LF starts nothing: the
+   sequence cannot continue on the next line, so it stays in the text for the
+   sanitizer. On the line still being written it waits for the rest. *)
+let escape_at line index ~complete =
   let length = String.length line in
-  if index + 1 >= length then Unfinished
+  if index + 1 >= length then (if complete then Not_a_sequence else Unfinished)
   else
     let from = index + 2 in
     match line.[index + 1] with
@@ -232,11 +261,46 @@ let escape_at line index =
     | byte when is_escape_final_byte byte -> Dropped from
     | _ -> Not_a_sequence
 
+(* ── Hyperlinks ───────────────────────────────────────────────────────── *)
+
+(* OSC 8 ([8 ; params ; URI]) opens a link over the text up to the OSC 8 with
+   an empty URI. [None] for any other OSC. *)
+type hyperlink =
+  | Link_open of string
+  | Link_close
+
+let hyperlink_of_payload payload =
+  match String.split_on_char ';' payload with
+  | "8" :: _params :: uri_parts ->
+    (match String.concat ";" uri_parts with
+     | "" -> Some Link_close
+     | uri -> Some (Link_open uri))
+  | _ -> None
+
 (* ── Lines ────────────────────────────────────────────────────────────── *)
 
-let read_line pen line =
+(* The link is shown as its address after its text, unless the text is the
+   address: the drawn text can differ from where the link goes, and the
+   operator needs the address to read or copy it. *)
+let link_address uri = " (" ^ uri ^ ")"
+
+let read_line ~complete pen line =
   let length = String.length line in
   let buffer = Buffer.create length in
+  let link_text = Buffer.create 0 in
+  let link = ref None in
+  let add_char char =
+    Buffer.add_char buffer char;
+    if Option.is_some !link then Buffer.add_char link_text char
+  in
+  let finish_link () =
+    (match !link with
+     | Some uri when not (String.equal (Buffer.contents link_text) uri) ->
+       Buffer.add_string buffer (link_address uri)
+     | Some _ | None -> ());
+    link := None;
+    Buffer.clear link_text
+  in
   let close pen runs =
     if Buffer.length buffer = 0 then runs
     else begin
@@ -246,34 +310,49 @@ let read_line pen line =
     end
   in
   let rec walk index pen runs =
-    if index >= length then pen, List.rev (close pen runs)
+    if index >= length then begin
+      finish_link ();
+      pen, List.rev (close pen runs)
+    end
     else if Char.equal line.[index] esc then begin
-      match escape_at line index with
+      match escape_at line index ~complete with
       | Pen_change (parameters, next) ->
         let runs = close pen runs in
         let fields = List.map field_of_string (String.split_on_char ';' parameters) in
         walk next (apply pen fields) runs
+      | Operating_system_command (payload, next) ->
+        (match hyperlink_of_payload payload with
+         | Some Link_close -> finish_link ()
+         | Some (Link_open uri) ->
+           finish_link ();
+           link := Some uri
+         | None -> ());
+        walk next pen runs
       | Dropped next -> walk next pen runs
-      | Unfinished -> pen, List.rev (close pen runs)
+      | Unfinished ->
+        finish_link ();
+        pen, List.rev (close pen runs)
       | Not_a_sequence ->
-        Buffer.add_char buffer esc;
+        add_char esc;
         walk (index + 1) pen runs
     end
     else begin
-      Buffer.add_char buffer line.[index];
+      add_char line.[index];
       walk (index + 1) pen runs
     end
   in
   walk 0 pen []
 
 let parse text =
-  let _, lines =
+  let pieces = String.split_on_char '\n' text in
+  let last = List.length pieces - 1 in
+  let _, _, lines =
     List.fold_left
-      (fun (pen, lines) line ->
-        let pen, runs = read_line pen line in
-        pen, runs :: lines)
-      (plain, [])
-      (String.split_on_char '\n' text)
+      (fun (index, pen, lines) line ->
+        let pen, runs = read_line ~complete:(index < last) pen line in
+        index + 1, pen, runs :: lines)
+      (0, plain, [])
+      pieces
   in
   List.rev lines
 
@@ -313,7 +392,9 @@ let weight_escape = function
 
 let opening pen =
   String.concat ""
-    [ (match pen.foreground with Some foreground -> foreground_escape foreground | None -> "")
+    [ (match pen.foreground with
+       | Some foreground when not pen.background -> foreground_escape foreground
+       | Some _ | None -> "")
     ; weight_escape pen.weight
     ; (if pen.italic then Sgr.italic else "")
     ; (if pen.underline then Sgr.underline else "")

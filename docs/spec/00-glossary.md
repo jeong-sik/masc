@@ -2145,14 +2145,24 @@ status: reference
 **Composition**
 : Tool 노드의 실행 선후 관계와 결과 참조 등 구조를 검사한 실행 계획. 합성 Skill은
   허용된 계획을 `keeper_compose_<name>` Tool로 노출하며, 즉석(ad-hoc) 계획은
-  `keeper_composition_prepare`로 검증·저장(`prepared_id`)한 뒤 `keeper_composition_run`으로
-  실행하거나 `keeper_compose_<name>`의 `async=true`로 비동기 실행(`run_id`)하고
-  `keeper_composition_status`·`keeper_composition_result`·`keeper_composition_cancel`로
-  추적·취소한다. 노드 중 `keeper_job_start`가 시작한 소유 격리 작업(`job_id`)은 같은
-  합성 실행 안에서 `keeper_job_status`·`keeper_job_result`가 완료까지 기다릴 수 있다.
+  `keeper_composition_prepare`로 검증·동결해 durable draft 참조를 받은 뒤 그 `sha256`을
+  `keeper_composition_run`에 넘기거나, 같은 입력을 `keeper_composition_run`의 `recipe`에
+  넣어 한 호출로 검증·저장·실행한다. prepare만으로는 어떤 노드도 실행되지 않는다.
+  - 주소: `execution`이 `async`이면 접수 응답이 durable `request_id`를 주고,
+    `keeper_composition_status`·`keeper_composition_cancel`은 그 `request_id`로 조회·취소한다.
+    `composition_run_id`는 그 실행의 논리 run id이며, 앞 요청이 확정적으로 끝난 뒤
+    이어 갈 때만 같은 draft `sha256`과 함께 `resume_run_id`로 넘긴다. `run_id`라는 이름으로
+    status·cancel을 부르지 않는다.
+  - 접수는 완료가 아니다. 이름 붙은 async 제출은 `result_wait` 바인딩을 돌려주고, 결과는
+    그 바인딩을 `keeper_composition_result`의 `binding`에 그대로 넣어 읽는다(→ result_wait).
+  - 노드 중 `keeper_job_start`가 시작한 소유 격리 작업(`job_id`)은 같은 합성 실행 안에서
+    `keeper_job_status`·`keeper_job_result`가 완료까지 기다릴 수 있다. 준비된 의존성 대기
+    (`waiting_for_dependencies`)는 원래 의존성(`owned_job` 또는 `composition_result`)을
+    이름하며, 서버는 그 결과가 준비되고 실행이 허용되면 새 모델 턴 없이 원래 run을 이어 간다.
   → [선언 문법](../../lib/keeper/keeper_tool_composition_catalog.mli),
   [실행 계획](../../lib/keeper/keeper_tool_plan.mli),
-  [비동기 실행 레지스트리](../../lib/keeper/keeper_composition_run_registry.mli)
+  [durable async 요청 저장소](../../lib/keeper/keeper_msg_async.mli),
+  [합성 의존성](../../lib/keeper/keeper_composition_dependency.mli)
 
 **Parallel Tool Calls**
 : 모델 응답 하나에 여러 도구 호출이 들어오는 것. 모델의 지원 여부는 카탈로그의

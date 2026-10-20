@@ -1749,7 +1749,27 @@ Save As, or closing the view cancels pending export; its private files are
 removed after worker cleanup. To export a capture containing MIDI, split the
 take and mute its MIDI component. Record the instrument return as audio when
 you want its synthesized sound included in the WAV.
-Arrangement MIDI-file export remains unconnected.
+
+`:export /path/song.mid` writes the complete audible MIDI arrangement once as
+SMF1, independently of loop/practice and physical output selection. Source
+expression, bank/program changes, held notes and pedals are reconstructed at
+trim/repeat boundaries by the native MIDI projector. Equal-tick wire order is
+retained. Each region/source-port pair has its own exported port (0–127), so
+overlapping regions keep independent channel state. The receiving sequencer
+must honor port metadata and choose instruments; VST audio is exported with
+`:wave`. Text/lyrics/cues retain their bytes in the playback tracks. A separate
+`MASC` chunk retains the complete linear project, including original source
+bytes, other metadata, edits and owned instrument snapshots. Other sequencers
+can ignore this chunk; it is provenance, not automatic project restoration.
+
+The SMF has a 32767 PPQ grid and an integer-microsecond tempo. Event times are
+rounded to the nearest encoded tick; the result reports the largest measured
+grid error relative to the native projection (which already rounds region
+edges outward to nanoseconds). WAV regions are excluded and counted. Captured
+UMP, segmented SysEx and state that the native projector cannot reconstruct
+are refused explicitly rather than silently converted. Split/mute captured
+MIDI to export other regions. Existing files are never replaced, and MIDI
+export uses the same cancellation/cleanup ownership as WAV export.
 
 In Keeper chat, `/score [N]` opens a frozen alphaTex block in the same terminal
 with the official alphaTab engine for full notation, track selection, zoom,

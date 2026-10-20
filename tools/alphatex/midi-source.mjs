@@ -322,6 +322,19 @@ export function midiSourceFromTracks(tracks, { ppq, ...options } = {}) {
   const header = Buffer.alloc(6); header.writeUInt16BE(tracks.length === 1 ? 0 : 1); header.writeUInt16BE(tracks.length, 2); header.writeUInt16BE(ppq, 4)
   return importMidiSource(Buffer.concat([chunk('MThd', header), ...tracks.map(encodeTrack)]), options)
 }
+
+// New SMF documents share the provenance editor's raw-event encoder. It emits
+// explicit statuses across metadata/SysEx and retains F7 escape packet bytes.
+export function encodeMidiFile({ division, tracks, extraChunks = [] }) {
+  integer(division, 'MIDI PPQ division', 1, 0x7fff)
+  integer(tracks.length, 'MIDI track count', 1, 0xffff)
+  const header = Buffer.alloc(6)
+  header.writeUInt16BE(1); header.writeUInt16BE(tracks.length, 2); header.writeUInt16BE(division, 4)
+  const bytes = Buffer.concat([chunk('MThd', header), ...tracks.map(encodeTrack),
+    ...extraChunks.map(value => chunk(value.type, value.data))])
+  parse(bytes)
+  return bytes
+}
 export function exportMidiSource(source) {
   const parsed = materialize(source)
   if (!source.changes.length && !source.insertions.length && !source.orders?.length) return Uint8Array.from(parsed.bytes)

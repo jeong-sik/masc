@@ -64,6 +64,7 @@ const help = [
   ':tempo 120    :meter 3 4    :title Experiment    :mute    :solo',
   ':save    :save-as /path/song.json    :undo    :redo',
   ':wave /path/song.wav exports the complete arrangement once, without practice clicks or playback looping; :stop cancels',
+  ':export /path/song.mid exports MIDI tracks, expression and independent ports; audio requires :wave',
   'Arrows: cursor/regions; Shift+Left/Right: move region; Tab: lane; a: asset',
   'Enter: place selected asset; d: duplicate at cursor; x/Delete: remove',
   'Captured asset: Enter opens source; :place adds its region.',
@@ -860,16 +861,18 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         stop(); route = selectArrangementRoute(route, value); status = 'Playback outputs selected'; break
       case 'save': await save(); break
       case 'save-as': if (accepting) await save(value.path); break
-      case 'export-wave': {
+      case 'export-midi': case 'export-wave': {
         if (!accepting) return
         stop()
         const owned = { id: null, project: editor.project, projectPath: path }
         exporting = owned
-        status = 'Exporting complete arrangement as float WAV…'
+        status = value.kind === 'export-midi' ? 'Exporting complete arrangement as MIDI…' : 'Exporting complete arrangement as float WAV…'
         const active = () => accepting && exporting === owned && editor.project === owned.project && path === owned.projectPath
         const pending = request({ ...value, project: owned.project, sourceRoot, directory }, id => { owned.id = id }, progress => {
           if (!active()) return
           switch (progress.kind) {
+            case 'midi-projection': status = 'Reconstructing MIDI region expression…'; break
+            case 'midi-encode': status = 'Writing MIDI tracks and source provenance…'; break
             case 'wave-snapshot': status = 'Snapshotting WAV export sources…'; break
             case 'vst-projection': status = 'Projecting WAV export instruments…'; break
             case 'vst-render': status = `Exporting VST instances ${progress.completed}/${progress.total} complete`; break
@@ -879,7 +882,10 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
           }
           draw()
         }).then(result => {
-          if (active()) status = `Exported ${result.path} · ${result.frames} frames / ${result.sampleRate} Hz / ${result.channels} channels${result.peak > 1 ? ' · peak above 0 dBFS; float samples retained' : ''}`
+          if (!active()) return
+          status = result.kind === 'midi-export'
+            ? `Exported ${result.path} · ${result.tracks} MIDI tracks · timing error ≤${(result.maxTimingErrorNanoseconds / 1000).toFixed(3)} µs · ${result.excludedAudioRegions.length} audio regions excluded; choose instruments in your sequencer`
+            : `Exported ${result.path} · ${result.frames} frames / ${result.sampleRate} Hz / ${result.channels} channels${result.peak > 1 ? ' · peak above 0 dBFS; float samples retained' : ''}`
         }, error => { if (active()) status = error.message }).finally(() => {
           if (exporting === owned) exporting = null
           preparations.delete(pending); draw()

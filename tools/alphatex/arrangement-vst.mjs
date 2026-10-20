@@ -29,19 +29,22 @@ function pcmFrame(seconds, roundUp) {
 
 // The projector never opens MIDI destinations or plug-ins. Bound VST sound is
 // carried separately to the renderer; wire ports retain their source identity.
-export function arrangementVstMidiPlan(project) {
+export function arrangementMidiPlan(project, { requireVst = false } = {}) {
   const schedule = arrangementPlaybackSchedule(project)
   const byID = new Map(project.assets.map(asset => [asset.id, asset]))
   const clips = schedule.filter(clip => byID.get(clip.asset).kind === 'midi')
-  if (!clips.length) throw new Error('No audible MIDI regions to render through VST')
+  if (!clips.length) throw new Error('No audible MIDI regions to project')
   const sources = [], sounds = [], regions = []
   for (const clip of clips) {
     const asset = byID.get(clip.asset), id = JSON.stringify([asset.id, clip.pattern ?? null])
     if (!sources.some(source => source.id === id)) {
       verifyPhraseSnapshot(asset)
-      if (asset.source.sound === undefined) throw new Error(`Choose a VST sound for MIDI asset ${asset.id}`)
-      const sound = validateSound(asset.source.sound)
-      if (sound.kind !== 'vst') throw new Error(`Choose a VST sound for MIDI asset ${asset.id}`)
+      let sound
+      if (requireVst) {
+        if (asset.source.sound === undefined) throw new Error(`Choose a VST sound for MIDI asset ${asset.id}`)
+        sound = validateSound(asset.source.sound)
+        if (sound.kind !== 'vst') throw new Error(`Choose a VST sound for MIDI asset ${asset.id}`)
+      }
       const performance = midiSourcePattern(asset.source, { pattern: clip.pattern })
       const events = performance.events.flatMap(event => {
         if (event.kind === 'meta') return []
@@ -50,7 +53,7 @@ export function arrangementVstMidiPlan(project) {
         return bytes.length ? [{ seconds: event.seconds, port: event.port, bytes: [...bytes] }] : []
       })
       sources.push({ id, duration: performance.seconds, events })
-      sounds.push({ source: id, sound })
+      if (requireVst) sounds.push({ source: id, sound })
     }
     regions.push({ id: clip.id, source: id, startSeconds: clip.startSeconds,
       sourceStart: clip.sourceStartSeconds, sourceEnd: clip.sourceEndSeconds, repeatCount: clip.repeat,
@@ -68,11 +71,13 @@ export function arrangementVstMidiPlan(project) {
   ...(loop ? { loop: true, originSeconds: loop.start } : {}) }
 }
 
+export function arrangementVstMidiPlan(project) { return arrangementMidiPlan(project, { requireVst: true }) }
+
 // Cancellation waits for child close, not merely for a signal or a reply. Only
 // the caller removes the encompassing preparation tree after that boundary.
-export async function prepareArrangementVstMidi(project, { directory, signal, executable = midiTransportPath } = {}) {
+export async function prepareArrangementMidiParts(project, { directory, signal, executable = midiTransportPath, requireVst = false } = {}) {
   signal?.throwIfAborted()
-  const selected = arrangementVstMidiPlan(project), root = resolve(directory)
+  const selected = arrangementMidiPlan(project, { requireVst }), root = resolve(directory)
   const path = join(root, 'vst-midi.json'), output = join(root, 'vst-midi-parts')
   await writeFile(path, JSON.stringify(selected.plan), { flag: 'wx', mode: 0o600, signal })
   signal?.throwIfAborted()
@@ -111,7 +116,7 @@ export async function prepareArrangementVstMidi(project, { directory, signal, ex
   const parts = manifest.parts.map((part, index) => {
     const identity = JSON.stringify([part.region, part.port]), region = expected.get(identity)
     const sound = selected.sounds.find(value => value.source === part.source)?.sound
-    if (!region || region.source !== part.source || !sound || part.id !== index
+    if (!region || region.source !== part.source || (requireVst && !sound) || part.id !== index
         || part.path !== join(output, `part-${index}.jsonl`) || identities.has(identity)
         || !Number.isInteger(part.port) || part.port < 0 || part.port > 127
         || !Number.isFinite(part.startSeconds) || part.startSeconds < 0
@@ -126,6 +131,10 @@ export async function prepareArrangementVstMidi(project, { directory, signal, ex
     return { ...part, sound }
   })
   return { ...selected, parts, path: join(output, 'manifest.json') }
+}
+
+export function prepareArrangementVstMidi(project, options) {
+  return prepareArrangementMidiParts(project, { ...options, requireVst: true })
 }
 
 // Each source port/region owns a fresh native instance. Render one at a time,

@@ -209,15 +209,15 @@ test('controller serializes import with admitted clip edits and saves final deci
   assert.notEqual(saved.title,'Too late');assert.equal(view.process.stdin.isRaw,false);assert.equal(view.observed.terminated,true)
 })
 
-test('WAV export snapshots original project and stop retires progress and late completion without changing the document', async () => {
+for (const [command, kind, suffix] of [['wave','export-wave','wav'], ['export','export-midi','mid']]) test(`${kind} snapshots the project and stop retires late completion without document changes`, async () => {
   let editor=editorAPI.arrangementImported(editorAPI.arrangementEditor(),imported(newArrangement()))
   editor=editorAPI.arrangementCommand(editor,'place asset-1 0').editor
-  assert.equal(editorAPI.arrangementCommand(editor,'wave /music/My  mix.wav').effect.path,'/music/My  mix.wav')
-  assert.throws(()=>editorAPI.arrangementCommand(editor,'wave'))
+  assert.equal(editorAPI.arrangementCommand(editor,`${command} /music/My  mix.${suffix}`).effect.path,`/music/My  mix.${suffix}`)
+  assert.throws(()=>editorAPI.arrangementCommand(editor,command))
   const view=await controller({project:editor.project})
-  view.command('wave /music/My  mix.wav');await flush()
-  const job=view.observed.requests.find(job=>job.kind==='export-wave')
-  assert.deepEqual(job.project,editor.project);assert.equal(job.path,'/music/My  mix.wav')
+  view.command(`${command} /music/My  mix.${suffix}`);await flush()
+  const job=view.observed.requests.find(job=>job.kind===kind)
+  assert.deepEqual(job.project,editor.project);assert.equal(job.path,`/music/My  mix.${suffix}`)
   assert.equal(view.observed.players.length,0)
   view.command('stop');await flush()
   assert.ok(view.observed.requests.some(request=>request.kind==='cancel'&&request.request===job.id))
@@ -227,10 +227,10 @@ test('WAV export snapshots original project and stop retires progress and late c
   assert.deepEqual(view.observed.saved.at(-1).project,editor.project)
 })
 
-test('closing during export waits for the original worker settlement before removing its preparation tree', async () => {
+for (const [command, kind] of [['wave','export-wave'], ['export','export-midi']]) test(`closing during ${kind} waits for the original worker settlement before source removal`, async () => {
   const view=await controller()
-  view.command('wave /music/mix.wav');await flush()
-  const job=view.observed.requests.find(job=>job.kind==='export-wave')
+  view.command(`${command} /music/mix`);await flush()
+  const job=view.observed.requests.find(job=>job.kind===kind)
   view.key('q');await flush()
   assert.equal(view.observed.terminated,false);assert.deepEqual(view.observed.removed,[])
   assert.ok(view.observed.requests.some(request=>request.kind==='cancel'&&request.request===job.id))

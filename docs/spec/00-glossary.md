@@ -150,6 +150,24 @@ status: reference
   → [Approval_detail](../../bin/masc_tui_approval_detail.mli),
   [Tui_decode](../../lib/tui_decode.mli)
 
+**Card (TUI 카드)**
+: TUI 화면이 여러 독립된 읽을거리를 나란히 보여 줄 때, 읽을거리 하나를 제목 붙은 상자에 담는 단위
+  (`Masc_tui_card`). 카드는 배정받은 칸을 그대로 채우는 사각형이다 — `height` 행 × `width` 열.
+  제목은 위쪽 테두리에 한 줄로 들어가고, 본문은 좌우로 한 칸씩 띄운다. 카드보다 긴 본문은 잘리고
+  마지막 행이 몇 행을 남겼는지 말한다(`+N more`). 카드는 자기 색을 갖지 않는다 — 호출자가 style
+  코드를 넘기므로 어느 팔레트에서도 같은 카드로 읽힌다.
+  - 배치: 카드는 열마다 쌓이고, 열들은 같은 행에서 끝난다. 짧은 열의 맨 아래 카드가 남는 높이를
+    받으므로 화면은 높이가 제각각인 상자가 아니라 바닥이 반듯한 한 덩어리다(`Masc_tui_card.grid`).
+  - 이름 경계: Card는 화면 전체를 감싸는 테두리가 아니다. 읽을거리가 하나뿐인 화면에는 상자를
+    두르지 않고, 카드가 들어갈 폭이나 높이가 모자라면 화면은 원래의 낱개 행으로 돌아간다.
+    Home(Dashboard) 화면의 `Needs your decision`·`Continue`·`Status` 카드와 Usage의 계정별 카드가
+    모두 이 한 단위다. Board Attachment를 대시보드에서 여는 "카드"는 웹 화면의 다른 표면이므로
+    이 단위가 아니다.
+  - 좁은 칸: `min_width`·`min_height`보다 작으면 상자를 그리지 않고 그만큼의 빈 행을 돌려준다.
+    행 수를 세는 호출자의 셈이 어긋나지 않는다.
+  → [Masc_tui_card](../../bin/masc_tui_card.mli) ·
+  [LAYOUT-LANGUAGE](../design/tui/LAYOUT-LANGUAGE.md)
+
 **Surface**
 : 같은 MASC 상태에 접근하고 관찰하는 사용자 표면. TUI, MCP, Dashboard처럼 서로 다른
   입구를 가리키며, 각 표면은 독립 상태를 소유하지 않는다.

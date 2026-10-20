@@ -95,6 +95,10 @@ function act(editor, action) {
 // A small exact command grammar. Commands yield typed effects; the terminal owns IO.
 export function stepInputEffect(line) {
   const [command, ...args] = line.trim().split(/\s+/)
+  if (command === 'practice-record') {
+    if (args.length < 1 || args.length > 2) throw new Error('Use :practice-record PATH [SOURCE_UID]')
+    return { kind: 'step-input', source: args[1], monitor: true, practice: true, recording: { path: args[0] } }
+  }
   if (command === 'practice-input') {
     if (args.length > 1) throw new Error('Use :practice-input [SOURCE_UID]')
     return { kind: 'step-input', source: args[0], monitor: true, practice: true }

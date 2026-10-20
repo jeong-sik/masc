@@ -8,14 +8,6 @@ import type { AuditEntry } from './api/dashboard'
 import { contextThresholds } from './config/context-thresholds'
 import type { StatusChipTone } from './components/common/status-chip'
 
-// --- Filter toggles ---
-
-export type LiveFilterKind = 'broadcast' | 'tasks' | 'keepers' | 'system'
-
-export const liveFilters = signal<Set<LiveFilterKind>>(
-  new Set(['broadcast', 'tasks', 'keepers', 'system']),
-)
-
 export const selectedAgent = signal<string | null>(null)
 
 export type PulseState = 'working' | 'idle'

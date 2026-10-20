@@ -302,10 +302,6 @@ export function declaredRuntimeLaneCandidates(sourceText: string, laneId: string
   return declaredRuntimeLanes(sourceText).get(laneId) ?? null
 }
 
-export function declaredRuntimeLaneIds(sourceText: string): string[] {
-  return [...declaredRuntimeLanes(sourceText).keys()]
-}
-
 // A binding is a <provider>.<model> table whose provider is declared and is
 // not a name another reader owns, the rule the server's loader uses. Every
 // other two-segment table ([fusion.presets], [voice.tts],

@@ -30,17 +30,10 @@ import type {
   DashboardShellResponse,
 } from './types'
 import { fetchDashboardBootstrap, fetchDashboardShell } from './api/dashboard-hot'
-import { journal } from './sse'
 import { showToast } from './components/common/toast'
 import { errorMessageOr } from './lib/format-string'
 import { isAbortError } from './lib/async-state'
 import { normalizeKeepers } from './keeper-store-normalize'
-import { buildAgentMotion, normalizeAgentKey, type AgentMotionSnapshot } from './components/common/agent-motion'
-import {
-  keeperIdentityKeys,
-  keeperPrincipalKey,
-} from './components/common/keeper-identity'
-import { groupByKey } from './components/common/collection'
 import { setArrayByKeyIfChanged } from './signal-utils'
 import { FetchScheduler } from './lib/fetch-scheduler'
 import { WARM_MAX_RETRIES, warmRetryDelayFor } from './lib/warm-retry'
@@ -552,87 +545,6 @@ export const tasksByStatus = computed(() => {
     awaitingVerification: all.filter(t => t.status === 'awaiting_verification'),
     done: all.filter(t => t.status === 'done'),
   }
-})
-
-function keeperPrincipalLookup(keeperList: Keeper[]): Map<string, string> {
-  const lookup = new Map<string, string>()
-  for (const keeper of keeperList) {
-    const principal =
-      keeperPrincipalKey(keeper.keeper_id, keeper.name)
-      ?? normalizeAgentKey(keeper.name)
-    for (const key of keeperIdentityKeys(keeper.keeper_id, keeper.name)) {
-      lookup.set(normalizeAgentKey(key), principal)
-    }
-  }
-  return lookup
-}
-
-function actorPrincipalKey(
-  value: string | null | undefined,
-  lookup: ReadonlyMap<string, string>,
-): string {
-  const raw = normalizeAgentKey(value)
-  if (!raw) return raw
-  return lookup.get(raw) ?? raw
-}
-
-function boardPostPrincipalKey(
-  post: BoardPost,
-  lookup: ReadonlyMap<string, string>,
-): string {
-  const rawResolved = actorPrincipalKey(post.author, lookup)
-  if (rawResolved !== normalizeAgentKey(post.author)) return rawResolved
-  const projected = post.author_identity?.key
-  return projected ? normalizeAgentKey(projected) : rawResolved
-}
-
-export const agentMotionMap: ReadonlySignal<Map<string, AgentMotionSnapshot>> = computed(() => {
-  const map = new Map<string, AgentMotionSnapshot>()
-  const taskList = tasks.value
-  const messageList = messages.value
-  const journalList = journal.value
-  const boardPostList = boardPosts.value
-  const keeperList = keepers.value
-  const keeperLookup = keeperPrincipalLookup(keeperList)
-
-  // Pre-index: one pass per array — O(N) total instead of O(N * agents)
-  const tasksByAgent = groupByKey(taskList, t => actorPrincipalKey(t.assignee, keeperLookup))
-  const messagesByAgent = groupByKey(messageList, m => actorPrincipalKey(m.from ?? '', keeperLookup))
-  const journalByAgent = groupByKey(journalList, e => actorPrincipalKey(e.agent, keeperLookup))
-  const journalByAuthor = groupByKey(journalList, e => actorPrincipalKey(e.author, keeperLookup))
-  const boardByAgent = groupByKey(boardPostList, p => boardPostPrincipalKey(p, keeperLookup))
-  const keepersByAgent = groupByKey(
-    keeperList,
-    k => keeperPrincipalKey(k.keeper_id, k.name) ?? normalizeAgentKey(k.name),
-  )
-
-  for (const agent of agents.value) {
-    const rawKey = normalizeAgentKey(agent.name)
-    const key = actorPrincipalKey(agent.name, keeperLookup)
-    // Merge journal entries matched by agent OR author (deduplicate)
-    const agentJournal = journalByAgent.get(key) ?? []
-    const authorJournal = journalByAuthor.get(key) ?? []
-    const mergedJournal = agentJournal.length === 0
-      ? authorJournal
-      : authorJournal.length === 0
-        ? agentJournal
-        : agentJournal.concat(authorJournal)
-
-    const snapshot = buildAgentMotion(
-      tasksByAgent.get(key) ?? [],
-      messagesByAgent.get(key) ?? [],
-      mergedJournal,
-      {
-        currentTask: agent.current_task,
-        lastSeen: agent.last_seen,
-        boardPosts: boardByAgent.get(key) ?? [],
-        keepers: keepersByAgent.get(key) ?? [],
-      },
-    )
-    map.set(rawKey, snapshot)
-    map.set(key, snapshot)
-  }
-  return map
 })
 
 // --- Refresh orchestration ---

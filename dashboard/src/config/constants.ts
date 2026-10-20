@@ -42,7 +42,6 @@ export const DASHBOARD_WS_DISCOVERY_CACHE_MAX_FAILURES = 3
 export const TRANSPORT_RETRY_BASE_MS = 1_000
 export const TRANSPORT_RETRY_MAX_MS = 30_000
 export const TRANSPORT_RETRY_JITTER_MS = 1_000
-export const TRANSPORT_RETRY_MAX_ATTEMPTS = 10
 
 // --- Reconnect backoff (dashboard WS) ---
 // Cap at 60s with plus/minus 1s jitter to break reconnect storms when the server is

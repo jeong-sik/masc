@@ -597,21 +597,6 @@ export interface KeeperPurgeStatus {
   description: string
 }
 
-export async function fetchKeeperPurgeStatus(name: string, operationId: string): Promise<KeeperPurgeStatus> {
-  const query = new URLSearchParams({ keeper_name: name.trim(), operation_id: operationId })
-  const response = await fetchControlPlane(`/api/v1/dashboard/keepers/purge-status?${query}`, {
-    method: 'GET', headers: jsonHeaders(),
-  })
-  if (!response.ok) {
-    throw new Error(`삭제 상태 확인 실패 (HTTP ${response.status}): ${await response.text()}`)
-  }
-  const result = decodeKeeperPurgeStatus(await response.json())
-  if (result.keeperName !== name.trim() || result.operationId !== operationId) {
-    throw new Error('삭제 상태 응답이 요청한 작업과 다릅니다')
-  }
-  return result
-}
-
 function decodeKeeperPurgeStatus(value: unknown): KeeperPurgeStatus {
   if (!isRecord(value) || !isRecord(value.operation)
     || !isRecord(value.operation.phase) || value.operation.phase.kind !== value.phase

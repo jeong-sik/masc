@@ -932,7 +932,7 @@ val elapsed_text : float -> string option
     a reader is comparing them; past a minute they are noise and the ladder
     takes over. A negative duration is [None], as a backwards {!age_text} is:
     a clock that disagreed with itself, not a call that took no time. So is a
-    NaN or an infinite one. *)
+    NaN, an infinite one, or one past 10^15 seconds. *)
 
 val age_text : now:float -> since:float -> string option
 (** How long something has been outstanding, as {!span_text}.
@@ -941,4 +941,5 @@ val age_text : now:float -> since:float -> string option
     reader can tell slow from stuck. Rendered from a clock the caller passes
     rather than one read here, so a test can state the instant and two rows in
     one frame can share a single read. A clock that moved backwards, or a
-    stamp that is not a number, says nothing rather than an age. *)
+    stamp that is not a number or is absurdly far off, says nothing rather
+    than an age. *)

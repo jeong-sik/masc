@@ -797,8 +797,8 @@ let run_badge run =
    comparing them; on a pane too narrow for that, their sum, which is the
    one figure a run has. A call the feed gave no duration is left out of the
    list and out of the sum: the pane does not invent one. A duration the
-   ladder has no spelling for -- a negative one -- is left out the same way,
-   so it neither shows in the list nor takes from the sum. *)
+   ladder has no spelling for -- a negative, NaN or infinite one -- is left
+   out the same way, so it neither shows in the list nor takes from the sum. *)
 let run_durations run =
   List.filter_map
     (fun (tool : Acting.chunk_tool) ->

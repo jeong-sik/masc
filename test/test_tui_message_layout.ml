@@ -448,6 +448,8 @@ let test_a_span_that_is_not_a_number_reads_as_nothing () =
     ; "infinity", Float.infinity
     ; "negative infinity", Float.neg_infinity
     ; "a negative span", -1.
+    ; "a span past what an integer holds", 1e19
+    ; "the largest finite float", Float.max_float
     ];
   nothing "a NaN stamp is not an age" (Layout.age_text ~now:10. ~since:Float.nan = None);
   nothing "a stamp in the future is not an age" (Layout.age_text ~now:10. ~since:12. = None);

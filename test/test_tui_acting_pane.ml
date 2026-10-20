@@ -863,6 +863,22 @@ let test_cursor_stops_at_the_frames_edge () =
   check (option int) "an empty frame has no row" None
     (Pane.next_target_row ~targets:[||] ~row:(-1) ~step:1)
 
+(* An age is read from the feed's stamp and the TUI's own clock. A stamp after
+   the clock, or one that is not a number, has no age: the cell holds the
+   no-value mark, not "0ms" (#38663). *)
+let test_an_age_the_clocks_cannot_give_draws_the_no_value_mark () =
+  let no_value = Masc_tui_theme.Glyph.no_value in
+  List.iter
+    (fun (what, stamp) ->
+       check string what no_value (Pane.age_text ~now stamp))
+    [ "a stamp after the clock", now +. 10.
+    ; "a stamp that is not a number", Float.nan
+    ];
+  check bool "a stamp before the clock has an age" true
+    (not (String.equal (Pane.age_text ~now (now -. 10.)) no_value));
+  check bool "a stamp at the clock has an age" true
+    (not (String.equal (Pane.age_text ~now now) no_value))
+
 let () =
   run "tui acting pane"
     [ ( "viewport allocation"
@@ -941,4 +957,8 @@ let () =
         ; test_case "keepers waiting on approval still draw" `Quick
             test_beside_the_roster_keepers_waiting_on_approval_still_draw
         ;] )
+    ; ( "ages"
+      , [ test_case "an age the clocks cannot give draws the no-value mark" `Quick
+            test_an_age_the_clocks_cannot_give_draws_the_no_value_mark
+        ] )
     ]

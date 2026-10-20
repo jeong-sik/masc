@@ -2358,17 +2358,25 @@ let span_text seconds =
    {!span_text}'s truncation would draw right after "59.9s".
 
    A negative duration is a clock that disagreed with itself, not a call that
-   took no time: drawing it "0ms" would say the call was instant. A NaN or an
-   infinite one is not a duration at all, and [int_of_float] of either is not
-   defined. All three read as nothing, as a backwards {!age_text} does, and the
-   caller draws the placeholder its own cell uses for a missing value. *)
+   took no time: drawing it "0ms" would say the call was instant. A NaN, an
+   infinite or an absurdly long one is not a duration at all, and
+   [int_of_float] of such a value is not defined. All of them read as nothing,
+   as a backwards {!age_text} does, and the caller draws the placeholder its
+   own cell uses for a missing value. *)
 let milliseconds_in_a_second = 1000.
 let tenths_in_a_second = 10.
 let tenths_in_a_minute = 600.
 
+(* [int_of_float] is defined only below 2^62, about 4.6e18, and the ladder
+   reads a span as whole seconds. Far below that, past this many seconds
+   (thirty million years), a value is a malformed stamp or duration, not a span. *)
+let longest_readable_span_seconds = 1e15
+
 (* Whether a difference of two clocks, or a duration someone handed over, is a
-   span a reader can use. *)
-let is_readable_span seconds = Float.is_finite seconds && seconds >= 0.
+   span a reader can use. NaN fails both comparisons and an infinity fails the
+   second. *)
+let is_readable_span seconds =
+  seconds >= 0. && seconds <= longest_readable_span_seconds
 
 (* [Float.max] turns [-0.] into [+0.], which would otherwise print "-0ms". *)
 let elapsed_ladder seconds =

@@ -44,8 +44,9 @@ let snapshot t =
   | Service_refusal {message;disposition=Not_started} -> Error (Browser_addon_client.Unavailable message)
   | Service_refusal {message;disposition=Outcome_unknown} -> Error (Browser_addon_client.Outcome_unknown message)
   | Receipt|Issue_result _|Poll_result _ -> Error (Browser_addon_client.Outcome_unknown "unexpected browser snapshot reply")
-type receipt = {binding:Browser_binding.t;data:Yojson.Safe.t}
-let issue t ~preference verb =
+type receipt = {binding:Browser_binding.t;data:Yojson.Safe.t;
+  raw_result:Mcp_protocol.Mcp_types.tool_result}
+let issue ?(required_actions=[]) t ~preference verb =
   let start_time=Tool_timing.start () in
   let fail ?metadata ?(data=`Null) ~class_ ~effect_disposition message =
     Error (Tool_result.make_err ~tool_name:Browser_addon_tool.definition.name ~start_time
@@ -56,7 +57,9 @@ let issue t ~preference verb =
         (match client with None -> []|Some id -> ["clientId",`String (Browser_lane.client_id_to_string id)])
     | Exact Automation_route -> ["lane",`String "automation"]
     | Exact Stagehand_route -> ["lane",`String "stagehand"] in
-  match call t ~arguments:(`Assoc (route_fields @ ["command",Browser_lane.verb_json verb])) with
+  let required=match required_actions with [] -> [] | _::_ -> ["requiredActions",`List
+    (List.map (fun action -> `String (Browser_capabilities.operation_name action)) required_actions)] in
+  match call t ~arguments:(`Assoc (route_fields @ required @ ["command",Browser_lane.verb_json verb])) with
   | Error error -> Error (error_result ~start_time error)
   | Ok result ->
       let raw=Mcp_protocol.Mcp_types.tool_result_to_yojson result in
@@ -83,7 +86,7 @@ let issue t ~preference verb =
         match reply with
         | Browser_addon_wire.Issue_result (Ok (Browser_lane.Answered (`Assoc payload))) ->
             (match List.assoc_opt "ok" payload,List.assoc_opt "data" payload with
-             | Some (`Bool true),Some data -> Ok {binding;data}
+             | Some (`Bool true),Some data -> Ok {binding;data;raw_result=result}
              | (None|Some _),(None|Some _) -> Error "browser success receipt lacks ok/data")
         | Issue_result (Ok (Answered _|Lane_absent|Timed_out|Refused _|Rejected_before_effect _)|Error _)
         | Service_refusal _|Receipt|Snapshot_result _|Poll_result _ -> Error "unexpected successful browser command receipt" in

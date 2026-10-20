@@ -38,10 +38,14 @@ val stop : t -> (release, error) result
     only after exact child exit, durable retirement and admission settlement.
     Retirement and owned-group cleanup run concurrently so a launcher holding
     its gates cannot prevent its own termination. Neither alone proves release.
-    Repeated calls await the same completion; they never restart a command. *)
+    Repeated calls await the same child completion, then retry idempotent
+    retirement of this exact admission and reread settlement. A failed durable
+    write is not a permanent child-cleanup result. No command is restarted. *)
 val release : t -> (release, error) result option
 (** A confirmed receipt remains evidence for this original incarnation after
-    replacement. Pending checks may yield for kernel/file observations. *)
+    replacement. An exited child with unconfirmed retirement remains retryable
+    through this same handle. Pending checks may yield for kernel/file writes
+    and observations; they never admit a new execution. *)
 val exported_tools : t -> Mcp_protocol.Mcp_types.tool list
 val action_schema : t -> Yojson.Safe.t option
 val observe : t -> binding:Yojson.Safe.t -> sources:Yojson.Safe.t ->

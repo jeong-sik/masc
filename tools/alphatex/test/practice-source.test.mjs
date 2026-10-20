@@ -15,6 +15,7 @@ import { practicePartNames, practiceRange, practiceRegionTime } from '../practic
 import { readPracticeFiles } from '../practice-source-files.mjs'
 import { importArrangementPractice, saveArrangement, loadArrangement, prepareArrangementPractice, verifyArrangementAssets } from '../arrangement-files.mjs'
 import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest, prepareArrangementCaptureRegions, prepareArrangementAudio } from '../arrangement-playback.mjs'
+import { projectNanoseconds, fraction } from '../exact-time.mjs'
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const json = async path => JSON.parse(await readFile(path, 'utf8'))
@@ -187,4 +188,23 @@ test('empty takes, changed receipt bytes, stale hashes and public preset copies 
   receipt.files.events.sha256 = hash(''); await writeFile(files.receipt, JSON.stringify(receipt))
   assert.equal((await readPracticeFiles(files)).metadata.packets, '0')
   await assert.rejects(importArrangementPractice(newArrangement(), input, { projectPath: join(root, 'empty', 'song.json') }), /no MIDI packets/)
+}))
+
+test('fractional-tempo practice placement preserves the native exact loop entry and outward final horizon', async () => fixture(async ({ root, input, rows, publish }) => {
+  // A same-tick On/Off pair must be delivered, not reconstructed as empty
+  // history when a binary64 placement falls just before the loop origin.
+  rows[1].packet.words = [0x43953c00, 0x80000000, 0x43853c00, 0]
+  await publish()
+  const path = join(root, 'project', 'song.json'), imported = await importArrangementPractice(newArrangement({ tempo: 120.1 }), input, { projectPath: path })
+  let editor = arrangementCommand(arrangementEditor(imported.project), 'region asset-1 .5 0 48000 3').editor
+  editor = arrangementCommand(editor, 'loop .5 1.5').editor
+  const prepared = await prepareArrangementCaptureRegions(editor.project, { sourceRoot: dirname(path), directory: root, midiOutput: '42' }), plan = await json(prepared.path)
+  const region = plan.umpRegions.regions[0], start = fraction(...projectNanoseconds(editor.project, 480))
+  assert.deepEqual(region.startNanoseconds, start)
+  assert.equal(region.offset, '0'); assert.equal(region.extent, '48000'); assert.equal(region.repeatCount, 3)
+  assert.deepEqual(plan.umpRegions.sources[0].timeline.packets, rows.map(row => row.packet))
+  // The one-shot source horizon must enclose the exact final native boundary.
+  const n = BigInt(start.numerator) + 3n * 48000n * 125n * BigInt(start.denominator) / 3n, d = BigInt(start.denominator)
+  const horizon = BigInt(Math.round(plan.umpRegions.duration * 1e9))
+  assert.ok(horizon * d >= n); assert.ok((horizon - 1n) * d < n)
 }))

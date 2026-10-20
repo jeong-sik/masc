@@ -133,6 +133,8 @@ export function arrangementClipTime(project, clip) {
     if (clip.pattern !== undefined) throw new Error('Raw practice regions do not have SMF patterns')
     capture = practiceRegionTime(asset, clip)
     sourceStart = capture.sourceStartSeconds; sourceEnd = capture.sourceEndSeconds; duration = capture.durationSeconds
+    exact = { start: fraction(...projectNanoseconds(project, clip.position)),
+      period: fraction(BigInt(clip.extent) * BigInt(capture.sourceClock.numer), BigInt(capture.sourceClock.denom)) }
     break
   }
   case 'capture': {

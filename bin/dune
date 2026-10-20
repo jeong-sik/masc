@@ -3039,3 +3039,10 @@
  (public_name masc-native-addon-launcher)
  (package masc)
  (libraries masc.native_addon_lease))
+
+(executable
+ (name masc_browser_addon_worker)
+ (modules masc_browser_addon_worker)
+ (public_name masc-browser-addon-worker)
+ (package masc)
+ (libraries masc masc.time_compat mcp_protocol.eio eio eio_main))

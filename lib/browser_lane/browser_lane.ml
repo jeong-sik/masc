@@ -704,10 +704,7 @@ let register info =
         waiters=Hashtbl.create 8; interactions=Hashtbl.create 8; last_delivered_result=None; closed=false;
         connected_until=Monotonic_deadline.after ~seconds:lane_connected_window_sec} in
       Hashtbl.add clients key client; Ok client)
-let take_command ~client_info ~window_sec =
-  match register client_info with
-  | Error _ as error -> error
-  | Ok client ->
+let take_registered_command ~client ~window_sec =
     let rec take () =
       let issued = Eio.Stream.take client.commands in
       if not (connected client) then None
@@ -724,6 +721,10 @@ let take_command ~client_info ~window_sec =
        the window's [None], and the issuer would have waited out its own
        timeout for an answer nobody was asked for. *)
     Ok (Watched_work.run take ~watcher:(fun () -> Time_compat.sleep window_sec; None))
+let take_command ~client_info ~window_sec =
+  match register client_info with
+  | Error _ as error -> error
+  | Ok client -> take_registered_command ~client ~window_sec
 let deliver_result ~client_id ~id ~payload =
   match Eio.Mutex.use_ro clients_mutex (fun () ->
     Hashtbl.find_opt clients (client_id_to_string client_id)) with

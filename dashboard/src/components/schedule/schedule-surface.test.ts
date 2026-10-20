@@ -2,7 +2,6 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
-  DashboardKeeperBackground,
   DashboardKeeperWaitingInventory,
   DashboardScheduledAutomationAvailableData,
   DashboardScheduledAutomationProjection,
@@ -14,7 +13,6 @@ type MockToolsResponse = {
   tool_inventory: { tools: unknown[] }
   tool_usage: Record<string, unknown>
   keeper_waiting_inventory?: DashboardKeeperWaitingInventory
-  keeper_background?: DashboardKeeperBackground
 }
 
 const mocks = vi.hoisted(() => ({
@@ -173,36 +171,6 @@ function sampleWaitingInventory(): DashboardKeeperWaitingInventory {
   }
 }
 
-function sampleKeeperBackground(): DashboardKeeperBackground {
-  return {
-    schema: 'masc.dashboard.keeper_background.v1',
-    source: 'server_keeper_background',
-    keeper_count: 1,
-    recurring_keeper_count: 1,
-    recurring_count: 1,
-    keepers: [
-      {
-        keeper_name: 'sangsu',
-        loop: { phase: 'running', restart_count: 0, started_at_iso: '2026-07-08T00:00:00Z' },
-        recurring_count: 1,
-        recurring: [
-          {
-            id: 'loop-1-1',
-            label: 'heartbeat-check',
-            action_kind: 'broadcast',
-            interval_sec: 30,
-            enabled: true,
-            run_count: 3,
-            failure_count: 0,
-            last_run_at_iso: '2026-07-08T00:01:00Z',
-            next_run_at_iso: '2026-07-08T00:01:30Z',
-          },
-        ],
-      },
-    ],
-  }
-}
-
 async function flush(): Promise<void> {
   for (let i = 0; i < 4; i += 1) {
     await Promise.resolve()
@@ -259,7 +227,6 @@ describe('ScheduleSurface', () => {
       tool_inventory: { tools: [] },
       tool_usage: {},
       keeper_waiting_inventory: sampleWaitingInventory(),
-      keeper_background: sampleKeeperBackground(),
     }
 
     render(html`<${ScheduleSurface} />`, container)
@@ -283,7 +250,7 @@ describe('ScheduleSurface', () => {
     container.querySelector<HTMLButtonElement>('[data-schedule-filter="due"]')?.click()
     await flush()
     expect(container.textContent).toContain('wake signal 피드 · schedule_runner.tick')
-    // The keeper-lane / background diagnostics are collapsed AND lazy-mounted by
+    // The keeper-lane diagnostics are collapsed AND lazy-mounted by
     // default; open them before asserting their content.
     expect(container.querySelector('[data-testid="schedule-keeper-lanes"]')).toBeNull()
     container.querySelector<HTMLButtonElement>('[data-testid="schedule-diagnostics-toggle"]')?.click()
@@ -294,12 +261,6 @@ describe('ScheduleSurface', () => {
       .toContain('sangsu')
     expect(container.querySelector('[data-testid="schedule-keeper-lanes"]')?.textContent)
       .toContain('masc.board_post')
-    // Keeper background panel renders as a sibling card on the same surface,
-    // reading data.keeper_background (recurring tasks + loop liveness).
-    expect(container.querySelector('[data-testid="schedule-keeper-background"]')?.textContent)
-      .toContain('Keeper Background · recurring tasks')
-    expect(container.querySelector('[data-testid="schedule-keeper-background"]')?.textContent)
-      .toContain('heartbeat-check')
     // REMOVED: '출처 <signal_source>' feed attribution line is not rendered on
     // the v2 surface (it is diagnostics-only); no equivalent element exists to
     // retarget, so this coverage is dropped rather than weakened.

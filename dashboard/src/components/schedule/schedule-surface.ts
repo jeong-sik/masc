@@ -24,7 +24,6 @@ import { ActionButton } from '../common/button'
 import { StatusChip } from '../common/status-chip'
 import { showToast } from '../common/toast'
 import { KeeperLaneInventoryPanel } from '../tools/keeper-waiting-inventory-panel'
-import { KeeperBackgroundPanel } from '../tools/keeper-background-panel'
 import {
   ScheduleAside,
   ScheduledAutomationPanel,
@@ -97,7 +96,6 @@ export function ScheduleSurface() {
   const page = projection?.state === 'available' ? projection.page : null
   const projectionError = projection?.state === 'unavailable' ? projection.reason : null
   const waitingInventory = data?.keeper_waiting_inventory ?? null
-  const keeperBackground = data?.keeper_background ?? null
   const loading = scheduledAutomationLoading.value
   const error = scheduledAutomationError.value
   const blockingError = automation ? null : projectionError ?? error
@@ -386,17 +384,12 @@ export function ScheduleSurface() {
             aria-expanded=${diagOpen ? 'true' : 'false'}
             data-testid="schedule-diagnostics-toggle"
             onClick=${() => setDiagOpen(open => !open)}
-          >Keeper 진단 · wake evidence · background ${diagOpen ? '▴' : '▾'}</button>
+          >Keeper 진단 · wake evidence ${diagOpen ? '▴' : '▾'}</button>
           ${diagOpen
             ? html`
                 <section class="mt-3" aria-label="Keeper lane inventory" data-testid="schedule-keeper-lanes">
                   <div class="ov-card-h"><h3>Keeper Lanes · wake evidence</h3></div>
                   <${KeeperLaneInventoryPanel} inventory=${waitingInventory} />
-                </section>
-
-                <section class="mt-4" aria-label="Keeper background" data-testid="schedule-keeper-background">
-                  <div class="ov-card-h"><h3>Keeper Background · recurring tasks</h3></div>
-                  <${KeeperBackgroundPanel} background=${keeperBackground} />
                 </section>
               `
             : null}

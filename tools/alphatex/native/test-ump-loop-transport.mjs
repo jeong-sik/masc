@@ -88,14 +88,13 @@ func stop(_ owner:UmpLoopTransport){owner.finish(reason:"test",error:nil,publish
   let o=try owner([heldToEnd],[region(extent:"125000000",repeats:8)],cycle:cutClock);try start(o)
   if active {try observe(o,100);try observe(o,490_000_100);sent=[]}
   try observe(o,612_500_100+late)
-  print("UMP_LOOP_LATE_CLOSE ACTIVE",active,"LATE",late,"SENT",sent.map{$0.1})
   precondition(sent.map{$0.1} == (active ? [off]:[]),"late batch re-attacked a voice held to an instance end due in the same batch")
   precondition(o.state == .playing && o.output.held.isEmpty);stop(o)
  }}
  // The trim ends before the original Off, so every copy holds its voice to
  // an inner copy end. A late first batch at that exact end stays silent.
  let inner=try owner([heldToEnd],[region(extent:"110000000",repeats:8)],cycle:cutClock);try start(inner)
- try observe(inner,110_000_100);print("UMP_LOOP_LATE_CLOSE INNER SENT",sent.map{$0.1})
+ try observe(inner,110_000_100)
  precondition(sent.isEmpty && inner.output.held.isEmpty,"late first batch re-attacked a voice held to an inner copy end");stop(inner)
  print("UMP_LOOP_LATE_CLOSE_PASS: late batches at an exact wrap or inner copy end keep voices held to that end silent; acquired releases and 1 ns-late wraps unchanged")
  let normal=try MidiCycle(start:0,end:1,duration:1,period:1_000_000_000,divisor:1,exactStart:(0,1))

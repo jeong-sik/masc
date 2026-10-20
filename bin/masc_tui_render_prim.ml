@@ -1562,6 +1562,25 @@ let connection_badge (state : state) =
   | Masc_tui_types.Workspace_identity_match -> connection in
   connection ^ refresh_progress_badge state
 
+(* A header row of [lead], a bracketed [label] and [badge]. The badge says
+   whether the screen can be trusted, so it is drawn whole and the label gives
+   up cells to it, down to losing its brackets. The six cells are the two gaps
+   and the brackets. *)
+let badge_row ~cols ~lead ~label ~badge =
+  let room =
+    framed_inner_width cols
+    - Message_layout.display_width lead
+    - Message_layout.display_width badge
+    - 6
+  in
+  if room < 1 then Printf.sprintf "%s  %s" lead badge
+  else
+    let label =
+      if Message_layout.display_width label <= room then label
+      else Message_layout.take_cells label (room - 1) ^ "\xe2\x80\xa6"
+    in
+    Printf.sprintf "%s  %s[%s]%s  %s" lead Ansi.dim label Ansi.reset badge
+
 (* What the headings laid out by [detail_heading] draw before the id: a lane
    run, a measurement artifact named by its sha256, a Fusion run (whose list
    and launch form carry the same title), one runtime's detail, and one

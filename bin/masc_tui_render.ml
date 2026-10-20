@@ -122,11 +122,11 @@ let workspace_health_label = function
    task list lives in Work, Keeper rows in Keepers, and account windows in
    Usage. A missing reading is never projected as a zero. *)
 (* The Dashboard keeps its working layout through loading and failure. *)
-let overview_header (state : state) =
-  Printf.sprintf "%s  %s[%s]%s  %s"
-    (screen_title " MASC Dashboard") Ansi.dim
-    (Terminal_text.single_line state.workspace) Ansi.reset
-    (connection_badge state)
+let overview_header (state : state) ~cols =
+  badge_row ~cols
+    ~lead:(screen_title " MASC Dashboard")
+    ~label:(Terminal_text.single_line state.workspace)
+    ~badge:(connection_badge state)
 
 let render_overview (state : state) =
   let terminal_rows, full_cols = get_terminal_size () in
@@ -179,7 +179,7 @@ let render_overview (state : state) =
             flow.Masc_tui_task_flow.recent.completed
   in
   surface_chrome ~overflow:Fits ?sidebar state ~terminal_rows ~cols:full_cols ~surface_key:"overview"
-    ~title:(overview_header state)
+    ~title:(overview_header state ~cols)
     ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
     ~hints:(if state.keeper_navigation_open then Masc_tui_keys.keeper_navigation_hints
             else Masc_tui_keys.footer_hints Overview)

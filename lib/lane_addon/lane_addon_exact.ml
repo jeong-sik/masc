@@ -90,10 +90,12 @@ type lane_unavailable =
   | Lane_unconfigured
   | Lane_off
   | No_admitted_slots
+  | Lane_registry_unavailable of { detail : string }
 
 type provider_refusal =
   | Provider_unavailable of { detail : string }
   | Provider_auth_refused of { detail : string }
+  | Provider_configuration_refused of { detail : string }
 
 type not_final =
   | Lane_unavailable of lane_unavailable
@@ -165,10 +167,14 @@ let not_final_to_json = function
   | Lane_unavailable Lane_unconfigured -> `Assoc [ "reason", `String "lane_unconfigured" ]
   | Lane_unavailable Lane_off -> `Assoc [ "reason", `String "lane_off" ]
   | Lane_unavailable No_admitted_slots -> `Assoc [ "reason", `String "no_admitted_slots" ]
+  | Lane_unavailable (Lane_registry_unavailable { detail }) ->
+    `Assoc [ "reason", `String "lane_registry_unavailable"; "detail", `String detail ]
   | Provider_refused (Provider_unavailable { detail }) ->
     `Assoc [ "reason", `String "provider_unavailable"; "detail", `String detail ]
   | Provider_refused (Provider_auth_refused { detail }) ->
     `Assoc [ "reason", `String "provider_auth_refused"; "detail", `String detail ]
+  | Provider_refused (Provider_configuration_refused { detail }) ->
+    `Assoc [ "reason", `String "provider_configuration_refused"; "detail", `String detail ]
   | Attempt_in_progress -> `Assoc [ "reason", `String "attempt_in_progress" ]
 
 type call_outcome =

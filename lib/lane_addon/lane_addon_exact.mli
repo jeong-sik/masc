@@ -72,6 +72,9 @@ type lane_unavailable =
   | Lane_unconfigured
   | Lane_off
   | No_admitted_slots
+  | Lane_registry_unavailable of { detail : string }
+      (** The host has no published lane registry right now: before startup
+          published one, or while a replacement is being committed. *)
 
 (** A provider refusal of a sent call that may pass without changing the
     input. *)
@@ -79,6 +82,9 @@ type provider_refusal =
   | Provider_unavailable of { detail : string }
       (** Rate limit, overload, network or timeout. *)
   | Provider_auth_refused of { detail : string }
+  | Provider_configuration_refused of { detail : string }
+      (** A slot's runtime, quota, billing or the host could not take the
+          call. It may pass after the operator changes one of them. *)
 
 (** Why an attempt did not end the request. It stays listed and is tried
     again on the next host event; each attempt is retained as evidence. *)

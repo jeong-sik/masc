@@ -5936,6 +5936,11 @@
 (include stanzas/test_candle_appraiser_transport.inc)
 
 (test
+ (name test_lane_addon_exact_runner)
+ (modules test_lane_addon_exact_runner)
+ (libraries masc_test_deps masc.server exact_output_fixture))
+
+(test
  (name test_exact_lane_failure)
  (modules test_exact_lane_failure)
  (libraries masc_test_deps masc.server))

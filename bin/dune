@@ -3199,3 +3199,10 @@
  (libraries masc digestif masc_tui_fetched masc_tui_detail_reading
   masc_tui_text_block masc_tui_message_layout masc_tui_markdown_theme
   masc_tui_artifact_html masc_tui_artifact_html_rows))
+
+(executable
+ (name masc_browser_process_owner)
+ (modules masc_browser_process_owner)
+ (public_name masc-browser-process-owner)
+ (package masc)
+ (libraries masc.browser_process_owner yojson eio eio_main))

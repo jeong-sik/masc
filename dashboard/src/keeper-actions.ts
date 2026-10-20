@@ -1,6 +1,6 @@
 import { toolObservationContinues } from './keeper-tool-observations'
 import { initialKeeperResponseState, reduceKeeperResponse } from './lib/keeper-response-state'
-import { keeperStreamContract } from './keeper-stream-contract'
+import { keeperStreamContract, normalizeStreamContract } from './keeper-stream-contract'
 import { normalizeKeeperStatusPayloadDeliveryProvenance } from './api/schemas/keeper-chat-delivery-provenance'
 import { keeperResponseIsFailed, keeperResponseIsTerminal } from './lib/keeper-response-state'
 import {
@@ -428,10 +428,21 @@ async function fetchAndMergeKeeperChatHistory(keeperName: string, request: ChatH
   const history = await fetchKeeperChatHistory(keeperName)
   if (chatHistoryHydrationRequests.get(keeperName) !== request) return
   if (history.length > 0) {
-    const enriched = chatHistoryEntriesFromRest(keeperName, history)
+    const observedById = new Map((keeperThreads.value[keeperName] ?? []).map(entry => [entry.id, entry]))
+    const explicitContracts = new Set(history.filter(message => normalizeStreamContract(message.stream_contract) !== null)
+      .map(message => message.id))
+    const enriched = chatHistoryEntriesFromRest(keeperName, history).map(entry => {
+      const observed = observedById.get(entry.id)
+      return !explicitContracts.has(entry.id) && observed?.streamContract
+        ? { ...entry, streamContract: observed.streamContract }
+        : entry
+    })
     const ids = new Set(enriched.map(entry => entry.id))
-    // The two requests do not share a snapshot. A page can observe a newer
-    // append; keep its rows while the aggregate wins enrichment on equal IDs.
+    // These are independent canonical observations with different windows:
+    // physical page rows versus the aggregate's role-selected tail. Absence
+    // from the latter is not deletion evidence. Keep page observations within
+    // the ordinary thread cap, without pinning them in older-page state. The
+    // next successful forced refresh replaces this request-local union.
     mergeServerHistoryEntries(keeperName, [
       ...enriched,
       ...request.previewEntries.filter(entry => !ids.has(entry.id)),

@@ -193,20 +193,22 @@ describe('KeeperConversationPanel hydration wiring', () => {
     ])
   })
 
-  it('renders the direct conversation while aggregate enrichment remains pending', async () => {
+  it.each(['workspace', 'primary', 'default'] as const)('marks the direct conversation partial while enrichment remains pending (%s)', async layout => {
     let finish!: (rows: unknown[]) => void
     fetchKeeperChatHistory.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
     fetchKeeperChatHistoryPage.mockResolvedValueOnce({
       messages: [{ id: 'direct-first', role: 'user', content: 'Recent direct question', ts: 100 }],
       nextCursor: 'older', hasMore: true,
     })
-    render(html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." layout="workspace" />`, container)
+    render(html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." layout=${layout === 'default' ? undefined : layout} />`, container)
     await waitFor(() => expect(container.textContent).toContain('Recent direct question'))
     expect(container.querySelector('[data-chat-transcript-loading]')).toBeNull()
+    expect(container.querySelector('[data-chat-history-partial]')?.textContent).toContain('나머지 대화를 불러오는 중')
     finish([{ id: 'direct-first', role: 'user', content: 'Recent direct question', ts: 100 },
       { id: 'autonomous-later', role: 'assistant', content: 'Autonomous context', ts: 101 }])
     await waitFor(() => expect(container.textContent).toContain('Autonomous context'))
     expect(container.textContent).toContain('Recent direct question')
+    expect(container.querySelector('[data-chat-history-partial]')).toBeNull()
   })
 
   // #26276: a hard refresh starts with an empty in-memory thread. Until the

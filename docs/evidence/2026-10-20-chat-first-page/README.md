@@ -13,21 +13,28 @@ aggregate settles full hydration. Empty direct history does not establish absenc
 of autonomous conversation. A failed optional page leaves aggregate processing
 intact; an aggregate failure retains page rows and releases the initial-read guard
 for retry. Request ownership rejects obsolete results. The page does not change
-the user's older-page cursor. Exact-id aggregate rows enrich preview rows; preview
-appends absent from the aggregate's earlier observation are retained. Tool output
+the user's older-page cursor. Exact-id aggregate rows enrich preview rows; canonical
+page observations absent from its different role-selected window are retained
+within the ordinary thread cap, until the next successful forced refresh. Tool output
 hydration starts when rows first become available and runs once per request.
 
 ## Validation
 
-- 96 tests passed in `keeper-actions.test.ts` and
-  `keeper-shared-hydration.integration.test.ts` (5.91s). New cases cover partial
+- 100 tests passed in `keeper-actions.test.ts` and
+  `keeper-shared-hydration.integration.test.ts` (6.09s). New cases cover partial
   publication, local/older/autonomous rows, stream metadata, aggregate failure and
-  retry, empty direct history, failed preview, stale completions and newer appends.
-- Dashboard `tsc --noEmit`, ESLint on the four changed TS files and
+  retry, empty direct history, failed preview, stale completions, differing windows,
+  forced replacement and late preview completion after aggregate failure.
+- Dashboard `tsc --noEmit`, ESLint on the six changed TS files and
   `git diff --check` passed. No local Dune or CI was run.
+- The broader `keeper-shared.test.ts` suite has one pre-existing failure in
+  `wires the live tool-output hydration contract store into the transcript`
+  (`pending` vs `hydration-failed`). It was separately reproduced with both that
+  test and component restored to pre-response head `5a136973`; 24 other tests passed.
 - A Vite source preview at 127.0.0.1:5174 used the existing live server as backend.
   On a cold application reload with code-reviewer selected, a MutationObserver
-  recorded the first canonical history row at 1,086.6ms from navigation. At
+  recorded the first canonical history row at 1,086.6ms from navigation, on
+  implementation head `00f75eea` before the review-response status/metadata changes. At
   1,166.5ms, 37 canonical rows were visible, the loading card was absent, and the
   page request had completed in 157.5ms (HTTP 200; 129,077 encoded bytes).
   The aggregate request had not completed at that observation.
@@ -38,6 +45,24 @@ and is not published. This single source-preview observation is not a controlled
 before/after latency trial, an installed Dashboard verdict or proof that aggregate
 work became faster. Vite startup/module loading is included in the navigation
 measurement. Physical display latency is not measured.
+
+## MASC review response
+
+- A late preview cannot overwrite aggregate failure: the aggregate's synchronous
+  catch/finally retires request ownership before a later page continuation runs.
+  A deferred-response test now checks that ordering explicitly.
+- Physical pages and role-selected aggregate tails have different membership.
+  Their bounded union is intentional, does not pin rows into older-page state or
+  write the source, and is replaced by a successful forced refresh. An omitted ID
+  alone is not proof of a newer append or deletion. Cross-generation purge
+  consistency is not certified by these two APIs; no timestamp ordering fence is
+  invented. The differing-window test checks the cap and replacement behavior.
+- All three conversation layouts now explicitly announce that recent dialogue is
+  shown while remaining conversation loads. The full-screen loading card stays
+  absent so the available content remains readable.
+- Aggregate fallback metadata retains an already observed stream contract for
+  the same exact row ID. An explicit valid backend contract still wins. Tests
+  cover both paths.
 
 ## Runtime cycle and remaining work
 

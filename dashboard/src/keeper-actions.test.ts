@@ -147,11 +147,12 @@ describe('progressive first conversation read', () => {
     expect(keeperChatHistoryHydration.value.echo).toBe('hydrated')
     expect(keeperThreads.value.echo?.filter(entry => entry.id === 'recent')).toHaveLength(1)
     expect(keeperThreads.value.echo?.find(entry => entry.id === 'recent')?.text).toBe('enriched')
+    expect(keeperThreads.value.echo?.find(entry => entry.id === 'recent')?.streamContract).toMatchObject({ source: 'sse_event', eventName: 'done' })
     expect(keeperThreads.value.echo?.some(entry => entry.id === 'older')).toBe(true)
     expect(fetchKeeperToolCalls).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps newer direct appends missing from the aggregate snapshot', async () => {
+  it('keeps independently observed direct appends missing from the aggregate snapshot', async () => {
     const aggregate = deferred<KeeperChatHistoryMessage[]>()
     fetchKeeperChatHistory.mockReturnValue(aggregate.promise)
     fetchKeeperChatHistoryPage.mockResolvedValue(page([row('newly-appended')]))
@@ -160,6 +161,23 @@ describe('progressive first conversation read', () => {
     aggregate.resolve([row('older')])
     await pending
     expect(keeperThreads.value.echo?.map(entry => entry.id)).toEqual(expect.arrayContaining(['older', 'newly-appended']))
+  })
+
+  it('bounds different page/role windows and replaces their union on a forced refresh', async () => {
+    const aggregate = deferred<KeeperChatHistoryMessage[]>()
+    const physical = Array.from({ length: 240 }, (_, index) => ({ ...row(`direct-${index}`), ts: 1000 + index }))
+    const roleWindow = physical.slice(-100)
+    fetchKeeperChatHistory.mockReturnValueOnce(aggregate.promise).mockResolvedValueOnce(roleWindow)
+    fetchKeeperChatHistoryPage.mockResolvedValueOnce(page(physical))
+    const pending = hydrateKeeperChatHistory('echo')
+    await vi.waitFor(() => expect(keeperChatHistoryHydration.value.echo).toBe('partial'))
+    aggregate.resolve(roleWindow)
+    await pending
+    expect(keeperThreads.value.echo).toHaveLength(THREAD_ENTRY_CAP)
+    expect(keeperThreads.value.echo?.map(entry => entry.id)).toContain('direct-40')
+    expect(keeperChatHistoryPages.value.echo).toBeUndefined()
+    await hydrateKeeperChatHistory('echo', { force: true })
+    expect(keeperThreads.value.echo?.map(entry => entry.id)).toEqual(roleWindow.map(message => message.id))
   })
 
   it('retains preview rows on aggregate failure and permits an ordinary retry', async () => {
@@ -177,6 +195,18 @@ describe('progressive first conversation read', () => {
     await hydrateKeeperChatHistory('echo')
     expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
     expect(keeperChatHistoryHydration.value.echo).toBe('hydrated')
+  })
+
+  it('ignores a preview that completes after aggregate failure', async () => {
+    const preview = deferred<ReturnType<typeof page>>()
+    fetchKeeperChatHistoryPage.mockReturnValueOnce(preview.promise)
+    fetchKeeperChatHistory.mockRejectedValueOnce(new Error('aggregate unavailable'))
+    await hydrateKeeperChatHistory('echo')
+    preview.resolve(page([row('late')]))
+    await preview.promise
+    expect(keeperChatHistoryHydration.value.echo).toBe('failed')
+    expect(keeperChatHistoryErrors.value.echo).toContain('aggregate unavailable')
+    expect(keeperThreads.value.echo).toBeUndefined()
   })
 
   it('does not infer empty conversation from an empty direct page', async () => {
@@ -391,6 +421,11 @@ describe('hydrateKeeperChatHistory', () => {
   })
 
   it('keeps backend stream contracts when hydrating server history', async () => {
+    appendThreadEntry('echo', {
+      id: 'msg-contract-assistant', role: 'assistant', source: 'direct_assistant',
+      label: 'echo', text: 'observed', delivery: 'history',
+      streamContract: { source: 'sse_event', status: 'backend_terminal_event', eventName: 'done' },
+    })
     fetchKeeperChatHistory.mockResolvedValue([
       {
         id: 'msg-contract-assistant',

@@ -3976,6 +3976,40 @@ let test_a_cli_slot_naming_a_client_without_an_output_schema_channel_is_refused 
     ["cli_slots"; "slots"]
 ;;
 
+(* RFC operator-quiz §4.3 K1: an add-on lane's cli_slots dispatch through the
+   same one-shot CLI tail, so the same schema-channel rule refuses them, and
+   the refusal names the add-on table. *)
+let test_an_addon_lane_cli_slot_without_an_output_schema_channel_is_refused () =
+  let config =
+    String.concat
+      "\n\n"
+      [ String.trim runtime_config
+      ; String.trim muse_serve_bindings
+      ; Printf.sprintf "[runtime.addon_exact_lanes.operator-quiz.author]\ncli_slots = [\"%s\"]"
+          muse_serve_runtime_id
+      ]
+  in
+  with_temp_dir "runtime-addon-cli-slot" @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path config;
+  match Runtime.load_list ~config_path:path with
+  | Error
+      (Runtime_config_error.Exact_lane_cli_slot_unservable
+         ({ owner = Runtime_schema.Addon { declaration_id = "operator-quiz"; output = "author" }
+          ; reason = Runtime_config_error.Client_without_output_schema
+          ; _ } as unservable)) ->
+    Alcotest.(check string) "the offending entry" muse_serve_runtime_id unservable.slot_id;
+    Alcotest.(check bool) "the refusal names the add-on table" true
+      (string_contains
+         (Runtime_config_error.to_diagnostic_text ~config_path:path
+            (Runtime_config_error.Exact_lane_cli_slot_unservable unservable))
+         "[runtime.addon_exact_lanes.operator-quiz.author]")
+  | Error failure ->
+    Alcotest.failf "refused for another reason: %s"
+      (Runtime_config_error.to_diagnostic_text ~config_path:path failure)
+  | Ok _ -> Alcotest.fail "an add-on cli_slots entry naming Muse Code loaded"
+;;
+
 let test_a_sibling_lane_cli_slot_naming_an_official_client_is_accepted () =
   let config =
     String.concat
@@ -4399,6 +4433,9 @@ let () =
         ; Alcotest.test_case
             "a cli slot naming a client without an output-schema channel is refused" `Quick
             test_a_cli_slot_naming_a_client_without_an_output_schema_channel_is_refused
+        ; Alcotest.test_case
+            "an add-on lane cli slot without an output-schema channel is refused" `Quick
+            test_an_addon_lane_cli_slot_without_an_output_schema_channel_is_refused
         ; Alcotest.test_case
             "a sibling lane's CLI slot naming an official client is accepted"
             `Quick

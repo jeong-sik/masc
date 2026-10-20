@@ -262,6 +262,23 @@ let test_disabled_exact_lane_can_lose_last_account () =
     Alcotest.(check (list string)) "CLI candidates removed" [] lane.cli_slot_ids)
     ["slots";"cli_slots"]
 
+(* RFC operator-quiz §4.3 K1: an add-on lane is an exact-output lane like any
+   other, so removing an account takes its slots out of the add-on table. *)
+let test_an_addon_exact_lane_loses_the_account () =
+  let source = fixture
+    ^ "\n[runtime.addon_exact_lanes.operator-quiz.author]\n\
+       slots = [\"codex_acct1.gpt-5.6\", \"codex_subscription.gpt-5.6\"]\n" in
+  let result = removed ~text:source "codex_acct1" in
+  let config = loaded result.text in
+  let author = List.find (fun (lane : S.exact_output_lane_decl) ->
+      S.exact_lane_key lane.owner = "operator-quiz/author") config.exact_output_lane_decls in
+  Alcotest.(check (list string)) "the account's slot left the add-on table"
+    [ "codex_subscription.gpt-5.6" ] author.slot_ids;
+  Alcotest.(check bool) "the change names the add-on lane" true
+    (List.exists (function
+       | R.Exact_lane_slot { lane = "operator-quiz/author"; runtime = "codex_acct1.gpt-5.6" } -> true
+       | _ -> false) result.changes)
+
 let test_what_has_no_replacement_is_refused () =
   let cases =
     [ ( "the default"
@@ -275,6 +292,10 @@ let test_what_has_no_replacement_is_refused () =
       , fixture
         ^ "\n[runtime.exact_output_lanes.hitl_auto_judge]\nslots = []\ncli_slots = [\"codex_acct1.gpt-5.6\"]\n"
       , R.Exact_lane_emptied "hitl_auto_judge" )
+    ; ( "an add-on exact lane with no other slot"
+      , fixture
+        ^ "\n[runtime.addon_exact_lanes.operator-quiz.author]\nslots = [\"codex_acct1.gpt-5.6\"]\n"
+      , R.Exact_lane_emptied "operator-quiz/author" )
     ]
   in
   List.iter
@@ -362,6 +383,8 @@ let () =
             test_an_antigravity_account_takes_its_credentials_table
         ; Alcotest.test_case "accounts using a shared model set are removed" `Quick
             test_accounts_using_a_shared_model_set_are_removed
+        ; Alcotest.test_case "an add-on exact lane loses the account" `Quick
+            test_an_addon_exact_lane_loses_the_account
         ; Alcotest.test_case "what has no replacement is refused" `Quick
             test_what_has_no_replacement_is_refused
         ; Alcotest.test_case "a lane named like its runtime keeps its routes" `Quick

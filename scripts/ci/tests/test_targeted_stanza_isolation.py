@@ -106,6 +106,12 @@ class TargetedStanzaIsolation(unittest.TestCase):
         path.chmod(0o755)
 
     def test_real_targeted_runner_builds_only_selected_deps_then_executes_fixture(self):
+        # No custom action: this exercises the direct executable path. Dune's
+        # directory environment still belongs to that executable's run.
+        self.inc.write_text(MIXED.replace(
+            "(action (setenv ACTIVITY_MODE selected (run %{test})))", ""))
+        self.dune.write_text("(env (_ (env-vars (ACTIVITY_MODE selected))))\n"
+                             "(include stanzas/test_browser_activity.inc)\n")
         runner = self.root / "scripts/ci-run-targeted-tests.sh"
         shutil.copyfile(SCRIPTS / runner.name, runner)
         (self.root / "test/test_browser_activity.ml").touch()
@@ -137,6 +143,75 @@ path.chmod(0o755)
         executed = json.loads(result_path.read_text())
         self.assertEqual(executed, {"mode": "selected", "cwd": str(self.root / "_build/default/test")})
         self.assertNotIn("main_stdio", (self.root / "build-args.json").read_text())
+
+    def test_custom_action_query_preserves_dune_variable_and_argv_ownership(self):
+        self.inc.write_text(MIXED.replace("ACTIVITY_MODE selected", "ACTIVITY_MODE %{workspace_root}"))
+        result = subprocess.run(
+            [sys.executable, str(self.reader), "--action-alias", "test_browser_activity"],
+            cwd=self.root, text=True, capture_output=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "@@test/runtest-test_browser_activity\n")
+        self.inc.write_text("(test (name test_browser_activity))\n")
+        result = subprocess.run(
+            [sys.executable, str(self.reader), "--action-alias", "test_browser_activity"],
+            cwd=self.root, text=True, capture_output=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def run_custom_action(self, suite_path, exit_code=0):
+        directory, name = suite_path.rsplit("/", 1)
+        source = self.root / (suite_path + ".ml")
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.touch()
+        (source.parent / "dune").write_text(f"""
+(tests (names {name} unrelated_test)
+ (deps launcher.exe)
+ (action (chdir nested
+   (setenv DUNE_SOURCEROOT %{{workspace_root}}
+    (run %{{test}} %{{dep:launcher.exe}} "argument with spaces")))))
+""")
+        runner = self.root / "scripts/ci-run-targeted-tests.sh"
+        shutil.copyfile(SCRIPTS / runner.name, runner)
+        commands = self.root / "commands"
+        commands.mkdir()
+        self.executable(commands / "timeout", "import os,sys\nos.execvp(sys.argv[6], sys.argv[6:])\n")
+        self.executable(commands / "opam", """
+import json,os,sys
+from pathlib import Path
+Path('alias-call.json').write_text(json.dumps({'argv':sys.argv[1:],
+                                           'verbose':os.environ.get('ALCOTEST_VERBOSE')}))
+raise SystemExit(int(os.environ['FAKE_DUNE_EXIT']))
+""")
+        env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
+                   TARGET_SUITES=suite_path, FAKE_DUNE_EXIT=str(exit_code),
+                   CI_TEST_LOG_FILE=str(self.root / "runner.log"))
+        result = subprocess.run(["bash", str(runner)], cwd=self.root, env=env,
+                                text=True, capture_output=True, timeout=15)
+        invocation = json.loads((self.root / "alias-call.json").read_text())
+        self.assertEqual(invocation, {
+            "argv": ["exec", "--", "dune", "build", "--root", ".", "--force",
+                     "--no-buffer", "-j", "1", f"@@{directory}/runtest-{name}"],
+            "verbose": "1",
+        })
+        return result
+
+    def test_custom_action_runs_only_its_nonrecursive_generated_alias(self):
+        # Remove the per-suite include so the named action comes from test/dune.
+        self.inc.unlink()
+        result = self.run_custom_action("test/test_browser_activity")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_external_suite_uses_its_own_directory_alias(self):
+        result = self.run_custom_action("packages/agent_core/test/test_browser_activity")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_custom_action_failure_is_not_reported_as_success(self):
+        self.inc.unlink()
+        result = self.run_custom_action("test/test_browser_activity", exit_code=23)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("FAIL exit 23", result.stdout)
 
 
 if __name__ == "__main__":

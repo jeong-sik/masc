@@ -227,15 +227,12 @@ jobs:
         # Dune's exit status and full log; the observer emits progress and
         # enforces the outer hang backstop.
         #
-        # The targeted path skips both scripts. Dune holds a (test) action's
-        # output until the suite exits, so under dune a hang names nothing;
-        # the executable run directly with ALCOTEST_VERBOSE=1 prints each
-        # case as it finishes. The environment is what test/dune's (env)
-        # block sets for every suite plus the setenv lines of the suite's
-        # own stanza in test/stanzas/*.inc; a suite whose stanza sets more
-        # needs a case below, and one that is missing gets the shared
-        # environment only. DUNE_SOURCEROOT is what masc_test_deps reads
-        # to find config/ and prompts/ from inside _build.
+        # The targeted path selects only the requested suites. Plain test
+        # executables use their declared environment/dependencies; named tests
+        # with custom actions run through Dune's per-test alias so arguments,
+        # wrappers and variable expansion remain Dune's responsibility.
+        # --no-buffer and ALCOTEST_VERBOSE stream case progress. DUNE_SOURCEROOT
+        # is what masc_test_deps reads to find config/ and prompts/ inside _build.
         run: |
           set -euo pipefail
           if [ "${MINIMAL_CHECK}" != true ]; then

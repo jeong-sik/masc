@@ -21,6 +21,7 @@ suites=()
 exes=()
 aliases=()
 unresolved=()
+stanza_env_reader="${repo_root}/scripts/ci/stanza_env.py"
 IFS=',' read -r -a requested <<< "${TARGET_SUITES}"
 for suite in ${requested[@]+"${requested[@]}"}; do
   suite="${suite// /}"
@@ -46,11 +47,11 @@ for suite in ${requested[@]+"${requested[@]}"}; do
   # segment of a path to match one would let an OCaml suite under
   # packages/ be answered by a same-named alias under test/.
   if [ -f "test/${suite}.py" ] || [ -f "${suite}.py" ]; then
-    aliases+=("${suite##*/}")
+    aliases+=("@runtest-${suite##*/}")
   elif [ "${suite}" = "${suite##*/}" ] \
     && grep -Eqr "^[[:space:]]*\(alias runtest-${suite}\)[[:space:]]*$" \
          test/dune test/stanzas 2>/dev/null; then
-    aliases+=("${suite}")
+    aliases+=("@runtest-${suite}")
   else
     # The name used to be a path fragment under test/, so a suite
     # outside it was unreachable: every one of the 43 under
@@ -68,8 +69,21 @@ for suite in ${requested[@]+"${requested[@]}"}; do
       unresolved+=("${suite}")
       continue
     fi
-    suites+=("${suite_path}")
-    exes+=("${suite_path}.exe")
+    # Dune owns custom test actions: a bare executable would lose their argv,
+    # chdir and other wrappers. Its generated per-test alias selects just this
+    # directory's action, rather than evaluating it again in the shell runner.
+    if ! action_alias=$(python3 "${stanza_env_reader}" \
+        --dir "$(dirname "${suite_path}")" \
+        --action-alias "$(basename "${suite_path}")"); then
+      unresolved+=("${suite}")
+      continue
+    fi
+    if [ -n "${action_alias}" ]; then
+      aliases+=("${action_alias}")
+    else
+      suites+=("${suite_path}")
+      exes+=("${suite_path}.exe")
+    fi
   fi
 done
 # A name that resolves to nothing used to end the dispatch right
@@ -109,7 +123,9 @@ for suite in ${aliases[@]+"${aliases[@]}"}; do
   log "[targeted] ${suite}: start $(date -u +%Y-%m-%dT%H:%M:%SZ) (dune alias)"
   started=$(date +%s)
   rc=0
-  "${timeout_command}" -s TERM -k "${TARGET_SUITE_KILL_GRACE_SEC}" "${TARGET_SUITE_TIMEOUT_SEC}"               opam exec -- dune build --root . --force --no-buffer -j 1 "@runtest-${suite}" 2>&1 | tee -a "${CI_TEST_LOG_FILE}" || rc=$?
+  "${timeout_command}" -s TERM -k "${TARGET_SUITE_KILL_GRACE_SEC}" "${TARGET_SUITE_TIMEOUT_SEC}" \
+    env ALCOTEST_VERBOSE=1 opam exec -- dune build --root . --force --no-buffer -j 1 "${suite}" \
+    2>&1 | tee -a "${CI_TEST_LOG_FILE}" || rc=$?
   elapsed=$(( $(date +%s) - started ))
   case "${rc}" in
     0)   log "[targeted] ${suite}: OK in ${elapsed}s" ;;
@@ -134,7 +150,6 @@ fi
 # substitution leaves the loop's exit status at 0, and a suite that
 # runs with no environment because the reader broke is the exact
 # outcome this replaces.
-stanza_env_reader="${repo_root}/scripts/ci/stanza_env.py"
 # suites hold the resolved path; the reader takes the directory and
 # the bare name, because a stanza names a suite without its path.
 stanza_deps=()

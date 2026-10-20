@@ -53,6 +53,13 @@ val load_action : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t
     bytes and both path identities again. A visible rename alone is not durable
     confirmation. Sync/read/identity failures return [Error] without replay or
     changing the result. Reads keep the existing full-receipt allocation policy. *)
+val save_exact_request : t -> declaration_id:string -> request_id:string ->
+  Yojson.Safe.t -> (unit, string) result
+val load_exact_request : t -> declaration_id:string -> request_id:string ->
+  (Yojson.Safe.t option, string) result
+(** A package's exact-output request and its attempts, keyed by the
+    declaration id so a restarted worker finds what the host retained. Same
+    durability and read verification as action receipts. *)
 val save_sampling_request : t -> instance_id:string -> request_id:string ->
   Yojson.Safe.t -> (unit, string) result
 val save_sampling_outcome : t -> instance_id:string -> request_id:string ->

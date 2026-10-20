@@ -624,12 +624,15 @@ let test_keeper_request_starts_the_bidi_connection () =
       let asked = ref 0 in
       let starts answer = Starter.install (Some (fun () -> incr asked; answer ())) in
       let has key data = List.mem_assoc key U.(data |> to_assoc) in
-      (* No connection at all: the start shows one. *)
+      (* The browser the tab was observed on is gone and none is listed: the
+         start shows one. A tab's work names its browser, so the gone browser is
+         the one the request names. *)
       let bidi = info 1 Lane.Webdriver_bidi in
+      let gone = info 9 Lane.Webdriver_bidi in
       starts (fun () -> connect bidi; Starter.Attached { client = bidi; started = Starter.Firefox_and_host });
-      let data = interact hover in
+      let data = interact ~client:gone hover in
       check int "the start was asked" 1 !asked;
-      check string "the request is still refused" "no_live_client" U.(data |> member "error" |> to_string);
+      check string "the request is still refused" "selected_client_disconnected" U.(data |> member "error" |> to_string);
       check string "with the connection the start showed" (id bidi)
         U.(data |> member "bidiConnection" |> member "clientId" |> to_string);
       check string "and what it started" "firefox_and_host"
@@ -642,8 +645,8 @@ let test_keeper_request_starts_the_bidi_connection () =
         U.(data |> member "clients" |> to_list |> List.map (fun client -> client |> member "clientId" |> to_string));
       leave bidi;
       (* Work an extension serves asks for no start, even with no connection. *)
-      let data = interact click in
-      check string "refused for want of any connection" "no_live_client" U.(data |> member "error" |> to_string);
+      let data = interact ~client:gone click in
+      check string "refused for want of any connection" "selected_client_disconnected" U.(data |> member "error" |> to_string);
       check int "with no start asked" 1 !asked;
       (* An extension only: the start is asked, and says why it showed none. *)
       let extension = info 2 Lane.Web_extension in
@@ -676,19 +679,20 @@ let test_keeper_request_starts_the_bidi_connection () =
       let data = interact ~client:extension hover in
       check int "no start while a BiDi connection is listed" 4 !asked;
       check bool "and none named" false (has "bidiConnection" data || has "bidiStartFailed" data);
-      (* Several to choose from, one of which serves it: the choice is the remedy. *)
+      (* A request that names no browser is refused for its missing binding,
+         however many connections are listed and whether or not one serves the
+         work: no browser left and none was chosen, so no start is asked. *)
       let other = info 3 Lane.Web_extension in
       connect other;
       let data = interact hover in
-      check string "a choice is the remedy" "ambiguous_browser_clients" U.(data |> member "error" |> to_string);
+      check string "naming no browser is the refusal" "browser_binding_required" U.(data |> member "code" |> to_string);
       check int "with a serving one among them, no start" 4 !asked;
       leave listed;
-      (* Several, none of which serves it: a choice cannot help, so a start is asked. *)
       starts (fun () -> Starter.Not_attached (Starter.Start_failed "none here"));
       let data = interact hover in
-      check string "still the choice's refusal" "ambiguous_browser_clients" U.(data |> member "error" |> to_string);
-      check int "with none serving, a start" 5 !asked;
-      check bool "and why it showed none" true (has "bidiStartFailed" data);
+      check string "still the binding's refusal" "browser_binding_required" U.(data |> member "code" |> to_string);
+      check int "with none serving, no start" 4 !asked;
+      check bool "and none named" false (has "bidiConnection" data || has "bidiStartFailed" data);
       (* A server where none is asked for leaves the answer as it was. *)
       starts (fun () -> Starter.Not_asked_for);
       let data = interact ~client:extension hover in

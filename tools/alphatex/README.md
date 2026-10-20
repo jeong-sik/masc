@@ -97,6 +97,15 @@ Exports refuse to overwrite an existing file. Rendering and synthesis in the
 interactive view run on workers. Only the active generation may replace the
 score or start audio, and workers stop before temporary files are removed.
 
+## Keyboard input boundary
+
+The installed source-only MIDI reader accepts one explicit CoreMIDI source
+without an audio input or output route. It retains complete delivered UMP words
+and integer host timestamps, acknowledges each asynchronous consumer decision,
+and drains admitted input on normal stop. This is the input boundary for keyboard
+editing; it is not yet exposed as a piano-roll step-input command.
+See [source-only MIDI input](MIDI-INPUT.md) for the protocol, ownership and checks.
+
 ## Recording audio and MIDI
 
 On macOS, the installer compiles a CoreAudio/CoreMIDI companion using the Xcode

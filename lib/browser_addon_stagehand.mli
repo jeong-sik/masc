@@ -37,7 +37,12 @@ val run : env:Eio_unix.Stdenv.base -> owner:Browser_addon_owner.t ->
     native launcher and browser process owner. Native input remains available
     without a model selection; model requests require the selected stagehand
     output and its request-schema grant. On retirement, revoke admission before
-    releasing the backend switch and confirm the original child claim settled.
+    releasing the backend switch. Orderly shutdown sends Browser.close once on
+    the verified original CDP connection and joins its pinned child owner before
+    releasing transport resources. Failed graceful shutdown uses original-owner
+    abort cleanup and retains its error; it never resets profile metadata or
+    replays a close on a replacement connection. Confirm the original child
+    claim settled independently of the orderly shutdown result.
 
     Trusted native execution is not a sandbox; the guardian's foreground group
     contract does not include descendants that deliberately escape it. *)

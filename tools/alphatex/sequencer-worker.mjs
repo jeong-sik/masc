@@ -4,7 +4,7 @@ import { writeFileSync } from 'node:fs'
 import { sourceMidiTimeline } from './midi-source-playback.mjs'
 import { projectMidiTimeline } from './sequencer-midi.mjs'
 import { newEditor, editorView, editorAxis } from './sequencer-editor.mjs'
-import { activeTracks, harmonyTimeline } from './sequencer-project.mjs'
+import { activeTracks, harmonyTimeline, GM_DRUM_CHANNEL } from './sequencer-project.mjs'
 import { createHash } from 'node:crypto'
 parentPort.on('message', async job => {
   try {
@@ -25,6 +25,10 @@ parentPort.on('message', async job => {
           tracks = [track]; break
         }
         default: throw new Error('Unknown harmony analysis scope')
+      }
+      if (job.project.kind !== 'midi-source') {
+        if (scope.kind === 'track' && tracks[0].channel === GM_DRUM_CHANNEL) throw new Error('Choose a melodic track for harmony analysis')
+        tracks = tracks.filter(track => track.channel !== GM_DRUM_CHANNEL)
       }
       const notes = tracks.flatMap(track => track.notes).filter(note => scope.channel === undefined || note.channel === scope.channel)
       result = { kind: 'harmonic-analysis', schemaVersion: 1, title: view.title, scope, axis: editorAxis(editor),

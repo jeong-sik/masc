@@ -3,8 +3,9 @@ import { validateSound } from './project-sound.mjs'
 
 // Quarter-note ticks are the document authority. Wall time belongs to transport.
 export const PPQ = 960 // alphaSynth's native quarter-note resolution
+export const GM_DRUM_CHANNEL = 9 // General MIDI channel numbers on the wire are zero-based.
 const MAX_SMF_DELTA = 0x0fffffff // SMF variable-length delta time has at most four 7-bit bytes.
-const MELODIC_CHANNELS = Array.from({ length: 16 }, (_, i) => i).filter(channel => channel !== 9)
+const MELODIC_CHANNELS = Array.from({ length: 16 }, (_, i) => i).filter(channel => channel !== GM_DRUM_CHANNEL)
 const int = (value, name, low = 0, high = Number.MAX_SAFE_INTEGER) => {
   if (!Number.isSafeInteger(value) || value < low || value > high) throw new Error(`Invalid ${name}`)
   return value
@@ -14,7 +15,8 @@ const text = (value, name) => {
   return value
 }
 export function pitch(value) {
-  const midi = typeof value === 'number' ? value : Note.midi(value)
+  const numeric = typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN
+  const midi = typeof value === 'number' ? value : Number.isFinite(numeric) ? numeric : Note.midi(value)
   return int(midi, 'pitch (use C4 or MIDI 0–127)', 0, 127)
 }
 export function beats(value) {
@@ -41,7 +43,6 @@ export function validateProject(project) {
     ids.add(track.id)
     int(track.channel, 'MIDI channel', 0, 15); int(track.program, 'program', 0, 127)
     int(track.level, 'track level', 0, 127); int(track.pan, 'track pan', 0, 127)
-    if (track.channel === 9) throw new Error('GM percussion channel 10 is not a melodic track')
     if (channels.has(track.channel)) throw new Error('Tracks need separate MIDI channels to retain independent programs')
     channels.add(track.channel)
     if (typeof track.muted !== 'boolean' || typeof track.solo !== 'boolean') throw new Error('Invalid track audibility')
@@ -83,7 +84,7 @@ export function activeTracks(project) {
   return project.tracks.filter(track => !track.muted && (!solo || track.solo))
 }
 export function harmonyAt(project, tick, { all = false } = {}) {
-  const notes = (all ? project.tracks : activeTracks(project)).flatMap(track => track.notes)
+  const notes = (all ? project.tracks : activeTracks(project)).filter(track => track.channel !== GM_DRUM_CHANNEL).flatMap(track => track.notes)
     .filter(note => note.start <= tick && tick < note.start + note.duration)
   const pitches = [...new Set(notes.map(note => note.pitch))].sort((a, b) => a - b)
   return { pitches, notes: pitches.map(Note.fromMidi), candidates: Chord.detect(pitches.map(Note.fromMidi)) }
@@ -187,6 +188,9 @@ export function editProject(project, trackId, edit) {
   const next = structuredClone(project)
   const track = next.tracks.find(track => track.id === trackId)
   if (!track) throw new Error('Selected track no longer exists')
+  if (track.channel === GM_DRUM_CHANNEL && ['chord', 'revoice', 'progression'].includes(edit.kind)) {
+    throw new Error('Chord voicings need a melodic track; drum notes select percussion sounds')
+  }
   const add = note => track.notes.push({ id: uniqueId('note', track.notes), ...note })
   const noteEdit = change => {
     switch (change.kind) {
@@ -238,9 +242,11 @@ export function editProject(project, trackId, edit) {
       for (const note of [...track.notes]) { const { id, ...data } = note; add({ ...data, start: data.start + offset }) }
       break
     }
-    case 'track': {
-      const channel = MELODIC_CHANNELS.find(channel => !next.tracks.some(track => track.channel === channel))
+    case 'track': case 'drum-track': {
+      const channel = edit.kind === 'drum-track' ? GM_DRUM_CHANNEL
+        : MELODIC_CHANNELS.find(channel => !next.tracks.some(track => track.channel === channel))
       if (channel === undefined) throw new Error('All 15 melodic MIDI channels are already assigned')
+      if (next.tracks.some(track => track.channel === channel)) throw new Error('GM percussion channel 10 already has a track')
       next.tracks.push({ id: uniqueId('track', next.tracks), name: text(edit.name, 'track name'), channel, program: 0, level: 100, pan: 64, muted: false, solo: false, notes: [] })
       break
     }

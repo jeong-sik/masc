@@ -5,8 +5,9 @@ The native `music-midi-input --source UID` companion and
 CoreMIDI source. The installer ships them beside the other music companions.
 They open an input port, with no audio stream or MIDI destination.
 
-This is the input boundary for keyboard editing. It is not yet a piano-roll
-step-input command. Existing audio/MIDI takes and live output forwarding keep
+The piano roll uses this boundary through `:step-input SOURCE_UID` and
+`:step-stop`; see [keyboard step entry](README.md#midi-keyboard-step-entry).
+Existing audio/MIDI takes and live output forwarding keep
 their own owners. Their audio-input and output-route requirements do not apply
 to this source-only reader.
 

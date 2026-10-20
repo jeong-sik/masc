@@ -15,7 +15,9 @@ export function projectNanoseconds(project, position) {
   const [tempoN, tempoD] = binary(project.tempo)
   return [BigInt(position) * 60n * 1_000_000_000n * tempoD, BigInt(project.ppq) * tempoN]
 }
-// The binary64 display native code compares with an exact start.
+// The binary64 display native code compares with an exact start. A loop
+// piece's startSeconds shows its exact start before rounding; native
+// MidiRegion.start is rounded up to whole nanoseconds, so the two may differ.
 export function exactSeconds(n, d) {
   d *= 1_000_000_000n
   const result = Number(n / d) + Number(n % d) / Number(d)

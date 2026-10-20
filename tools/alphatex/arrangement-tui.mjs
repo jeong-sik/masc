@@ -810,7 +810,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     let output = '\x1b[H'
     for (let row = 1; row <= rows; row++) output += `\x1b[${row};1H\x1b[2K`
     lines.slice(0, Math.max(0, rows - 2)).forEach((line, index) => { output += `\x1b[${index + 1};1H${fit(line)}` })
-    output += `\x1b[${Math.max(1, rows - 1)};1H${fit(prompt === null ? 'arrows:cursor/regions  Shift+←→:move  Tab:lane  a:asset  Enter:place  u/y:undo/redo' : `:${prompt}`)}`
+    output += `\x1b[${Math.max(1, rows - 1)};1H${fit(prompt === null ? `arrows:cursor/regions  Shift+←→:move  Tab:lane  a:asset  Enter:${asset?.kind === 'capture' ? 'open source' : 'place'}  u/y:undo/redo` : `:${prompt}`)}`
     output += `\x1b[${rows};1H${fit('s:save  d:duplicate  x:remove  m/o:mute/solo  :commands  ?:help  q:save/back')}`
     process.stdout.write(output)
   }

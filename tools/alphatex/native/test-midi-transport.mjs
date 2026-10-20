@@ -805,7 +805,6 @@ let lateOutsideOwner=try MidiTransport(timeline:lateOutsideTimeline,uid:"1",loop
 lateOutsideOwner.prepared=true;lateOutsideOwner.destination=lateOutsideBase.destination;lateOutsideOwner.sourceDestinations=lateOutsideBase.sourceDestinations
 reset(0);reviewWire=[];try lateOutsideOwner.stageCoordinated(at:0);try lateOutsideOwner.runCoordinated(anchorNanoseconds:1_000_000_000)
 reviewClock=1_450_000_001;lateOutsideOwner.tick()
-print("LATE_FIRST_WRAP_OUTSIDE_OPAQUE",lateOutsideOwner.state,"FAILURE",String(describing:lateOutsideOwner.terminalFailure),"WIRE",reviewWire.map(\.1))
 precondition(lateOutsideOwner.state == .playing && lateOutsideOwner.terminalFailure==nil && !reviewWire.map(\.1).contains { $0[0]==0xf0 },"late wrap included unreachable opaque suffix")
 
 
@@ -822,7 +821,6 @@ for initial in [false,true] { for late in [false,true] {
  if !initial {reviewClock=1_000_000_000;owner.tick();reviewWire=[]}
  reviewClock=1_625_000_000+(late ? 1:0);owner.tick()
  let deadline=try missedCycle.deadline(position:0.5+0.1249999991,index:0,offset:0,anchor:1_000_000_000)
- print("COMPRESSED_OLD_DUE_COPY_INITIAL",initial,"DEADLINE",deadline,"HOST",reviewClock,"WIRE",reviewWire.map(\.1))
  precondition(deadline==1_625_000_000)
  let notes=reviewWire.map(\.1).filter { $0[0]&0xe0==0x80 }
  precondition(notes == (late ? []:[[0x90,81,100],[0x80,81,79]]),"compressed skip lost exactly-due old copy or replayed late history")
@@ -844,7 +842,6 @@ for (staged,active) in [(0.0,true),(0.0,false),(0.45,false)] { for late:UInt64 i
  if active { reviewClock=1_000_000_000;owner.tick();reviewClock=1_490_000_000;owner.tick();reviewWire=[] }
  let wrap=try heldCutCycle.deadline(position:heldCutCycle.end,index:0,offset:staged,anchor:1_000_000_000)
  reviewClock=wrap+late;owner.tick()
- print("WRAP_EXPIRED_ATTACK_STAGED",staged,"ACTIVE",active,"LATE",late,"WIRE",reviewWire.map(\.1))
  let notes=reviewWire.map(\.1).filter { $0[0]&0xe0==0x80 }
  precondition(notes == (active ? [[0x80,83,70]]:[]),"late wrap re-attacked a key whose attack expired before the cut")
  precondition(owner.state == .playing && owner.cycleIndex==1 && owner.sourceHeld[0]?[83] ?? 0==0)
@@ -867,7 +864,6 @@ for base in [cutReleaseBase,cutProgramBase] {
  owner.prepared=true;owner.destination=base.destination;owner.sourceDestinations=base.sourceDestinations
  reset(0);reviewWire=[];try owner.stageCoordinated(at:0);try owner.runCoordinated(anchorNanoseconds:1_000_000_000)
  reviewClock=try heldCutCycle.deadline(position:heldCutCycle.end,index:0,offset:0,anchor:1_000_000_000);owner.tick()
- print("WRAP_CUT_ENTRY",owner.state,"FAILURE",String(describing:owner.terminalFailure),"WIRE",reviewWire.map(\.1))
  precondition(owner.state == .playing && owner.terminalFailure==nil,"notes-free cut entry refused a key held across a program change")
  let notes=reviewWire.map(\.1).filter { $0[0]&0xe0==0x80 }
  precondition(notes.isEmpty,"cut entry sounded or released a key it never sent")

@@ -78,7 +78,8 @@ controllers before a Per-Note Management Detach while the note sounds.
 Unknown initial values are not
 invented. Unsupported reconstruction refuses the pause, resume or seek before
 either owner changes: playback keeps its playing or paused state and position,
-and the acknowledging state event carries the diagnostic in `refusal`. Opaque
+and the acknowledging state event carries the diagnostic in `refusal`. While
+playback is still starting, the playing event that ends the start carries it. Opaque
 system/SysEx effects, channel-mode
 changes, Hold 2, one-shot Portamento Control, MIDI 1.0 compound parameter controls and mixed message dialects
 on one output channel currently require complete-source playback. NOOP, JR Clock,

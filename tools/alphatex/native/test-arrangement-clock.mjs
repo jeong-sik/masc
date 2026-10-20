@@ -74,7 +74,7 @@ final class FakeMidi { var stages:[Double]=[], runs:[UInt64]=[], refuse=false;fu
  enum State {case prepared,starting,playing,paused,stopped}
  var plan=FakePlan();let engine=FakeEngine(),renderQuantum=1024
  var horizon:FakeTimer?;var horizonEnded=false
- var renderStartSource:FakeDataSource?;var renderObserver:Int?
+ var renderStartSource:FakeDataSource?;var renderObserver:Int?;var startRefusal:String?
  var midi:FakeMidi?;var midiEnded=false\n var state=State.prepared,voices=[FakeVoice()],active=Set<String>(),position=0.0,anchor:UInt64=0,musicalAnchor:UInt64=0,generation:UInt64=0,finished=0,published=0,failures=0,refusals:[String?]=[]
  var loopPosition=PracticeLoopPosition.introduction(nil)
  func checkOutput()throws{}
@@ -167,6 +167,20 @@ let paused=(kept.engine.pauses,kept.voices[0].stops,kept.position);kept.midi!.re
 for line in [#"{"kind":"seek","seconds":0.6}"#,#"{"kind":"resume"}"#] {
   kept.receive(line);precondition(kept.state == .paused && kept.position==paused.2 && kept.finished==0 && kept.engine.pauses==paused.0 && kept.voices[0].stops==paused.1,"refused paused command keeps the pause")
 }
+// A starting transport has no fresh clock yet, so a command refused there is
+// acknowledged by that start's playing event. An admitted command answers for
+// itself and drops a refusal its start has not acknowledged.
+let starting=Probe();starting.midi=FakeMidi();starting.engine.autoRender=false
+try starting.schedule(from:0,playing:true);starting.midi!.refuse=true
+starting.receive(#"{"kind":"pause"}"#);starting.receive(#"{"kind":"seek","seconds":0.5}"#)
+precondition(starting.state == .starting && starting.position==0 && starting.published==0 && starting.finished==0,"refused commands keep the start")
+starting.engine.mainMixerNode.auAudioUnit.render()
+precondition(starting.state == .playing && starting.refusals == ["refused reconstruction"],"the start acknowledges the refused command")
+starting.midi!.refuse=false;starting.receive(#"{"kind":"seek","seconds":0.25}"#)
+starting.midi!.refuse=true;starting.receive(#"{"kind":"pause"}"#)
+starting.midi!.refuse=false;starting.receive(#"{"kind":"pause"}"#);starting.receive(#"{"kind":"resume"}"#)
+starting.engine.mainMixerNode.auAudioUnit.render()
+precondition(starting.state == .playing && starting.refusals == ["refused reconstruction",nil,nil],"an admitted command drops the unacknowledged refusal")
 let silent=Probe();silent.plan.clocked=true;silent.voices[0].end=0;silent.engine.outputNode.lastRenderTime=nil;silent.voices[0].player.lastRenderTime=nil
 try silent.schedule(from:0,playing:true);precondition(silent.state == .playing && silent.active.isEmpty && silent.finished==0)
 silent.horizon!.fire();precondition(silent.finished==1)

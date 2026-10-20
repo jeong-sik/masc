@@ -3,11 +3,11 @@ import assert from 'node:assert/strict'
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { importMidiSource } from '../midi-source.mjs'
-import { newArrangement, editArrangement } from '../arrangement.mjs'
+import { importMidiSource, midiSourcePattern } from '../midi-source.mjs'
+import { newArrangement, editArrangement, sourceNanosecondsAtTick } from '../arrangement.mjs'
 import { prepareArrangementMidi } from '../arrangement-playback.mjs'
 import { arrangementEditor, arrangementCommand } from '../arrangement-editor.mjs'
-import { regionEdgeSeconds } from '../exact-time.mjs'
+import { regionEdgeSeconds, fraction } from '../exact-time.mjs'
 const chunk = (type, bytes) => { const h = Buffer.alloc(8); h.write(type); h.writeUInt32BE(bytes.length, 4); return Buffer.concat([h, Buffer.from(bytes)]) }
 const source = (division = 480, format = 1) => {
   const h = Buffer.alloc(6); h.writeUInt16BE(format); h.writeUInt16BE(2, 2); h.writeUInt16BE(division, 4)
@@ -80,3 +80,23 @@ test('loop pieces of adjacent MIDI regions abut on their exact edges',async()=>w
   assert.equal(edge(plan.regions[0],1),edge(plan.regions[1],0));assert.equal(edge(plan.regions[1],1),3)
   assert.equal(plan.duration,3);assert.equal(prepared.originSeconds,.6)
 }))
+// Expected values are hand-computed from the bytes: ticks * microseconds per
+// quarter / PPQ per tempo segment, or ticks / ticksPerFrame * 1001 / 30000
+// seconds at 29.97 fps SMPTE.
+test('exact source nanoseconds follow every tempo change of a merged SMF and ignore tempo under SMPTE',()=>{
+  const pattern=(division,tracks)=>{
+    const h=Buffer.alloc(6);h.writeUInt16BE(1);h.writeUInt16BE(tracks.length,2);h.writeUInt16BE(division,4)
+    return midiSourcePattern(importMidiSource(Buffer.concat([chunk('MThd',h),...tracks.map(track=>chunk('MTrk',track))])))
+  }
+  const at=(performance,tick)=>fraction(...sourceNanosecondsAtTick(performance,tick))
+  // 500000 us per quarter from tick 0 and 333333 from tick 1440 in the first
+  // track; 400000 from tick 960 in the note track, between the two.
+  const tempo=pattern(480,[[0,255,81,3,0x07,0xa1,0x20,0x8b,0x20,255,81,3,0x05,0x16,0x15,0,255,47,0],
+    [0,0x90,60,100,0x87,0x40,255,81,3,0x06,0x1a,0x80,0x87,0x40,0x80,60,0,0,255,47,0]])
+  for(const [tick,numerator,denominator] of [[0,'0','1'],[480,'500000000','1'],[960,'1000000000','1'],[1200,'1200000000','1'],
+    [1440,'1400000000','1'],[1441,'5602777775','4'],[1920,'1733333000','1']])assert.deepEqual(at(tempo,tick),{numerator,denominator},`tick ${tick}`)
+  // 0xe350: 29.97 fps drop-frame, 80 ticks per frame; its 1000000 us tempo has no effect.
+  const smpte=pattern(0xe350,[[0,255,81,3,0x0f,0x42,0x40,0,0x90,60,100,0x92,0x60,0x80,60,0,0,255,47,0]])
+  for(const [tick,numerator,denominator] of [[100,'125125000','3'],[1200,'500500000','1'],[2400,'1001000000','1']])
+    assert.deepEqual(at(smpte,tick),{numerator,denominator},`SMPTE tick ${tick}`)
+})

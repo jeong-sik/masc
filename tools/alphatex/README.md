@@ -97,13 +97,37 @@ Exports refuse to overwrite an existing file. Rendering and synthesis in the
 interactive view run on workers. Only the active generation may replace the
 score or start audio, and workers stop before temporary files are removed.
 
-## Keyboard input boundary
+## MIDI keyboard step entry
+
+In the piano roll, `:step-input SOURCE_UID` opens one MIDI keyboard source (find
+its UID with `masc-alphatex --devices`). Set the cursor, track and note length
+before arming; source documents also need a selected pattern and an unambiguous
+channel (`:channel 1–16`). Press keys together, then release all of them: the
+chord is inserted in one undoable edit and the cursor advances by note length.
+This works in phrase tracks and original-tick PPQ/SMPTE MIDI source tracks.
+
+`:step-stop` drains admitted input; leaving the piano roll also joins input before
+the final save. An incomplete held chord is discarded. Manual cursor/track/
+channel/length/project edits stop input, so held notes cannot move into a new
+context. Use `:step-input` again after changing context. Stop step entry before
+playback, recording, instrument selection or opening the arrangement.
+
+Input groups/channels distinguish held keys and are mapped to the chosen target
+track/channel. MIDI2 velocity is explicitly reduced to seven bits; zero-velocity
+MIDI2 attacks become the quietest supported note, while MIDI1 note-on-zero is a
+release. Source notes retain projected release velocities. Sustain/controllers,
+expression and SysEx do not alter step notes. MIDI2 note attributes and repeated
+voices that would overlap the same target key fail explicitly. This mode has no
+live audio/MIDI echo. Use the recorder for timed playing and raw MIDI2 capture.
+
+The length is the editor's input length, selected with `[`/`]` before arming;
+those keys also edit an existing note at the cursor. At a phrase endpoint, extend
+the document or move the cursor before starting another chord.
 
 The installed source-only MIDI reader accepts one explicit CoreMIDI source
 without an audio input or output route. It retains complete delivered UMP words
 and integer host timestamps, acknowledges each asynchronous consumer decision,
-and drains admitted input on normal stop. This is the input boundary for keyboard
-editing; it is not yet exposed as a piano-roll step-input command.
+and drains admitted input on normal stop.
 See [source-only MIDI input](MIDI-INPUT.md) for the protocol, ownership and checks.
 
 ## Recording audio and MIDI

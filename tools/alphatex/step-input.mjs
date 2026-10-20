@@ -1,0 +1,92 @@
+import { unpackMidi } from './session-data.mjs'
+import { editProject } from './sequencer-project.mjs'
+import { editMidiSourceNotes } from './midi-source.mjs'
+import { sourceEditor } from './midi-source-editor.mjs'
+import { openMidiInput } from './midi-input.mjs'
+
+const sourceDocument = editor => editor.project.kind === 'midi-source'
+const trackAt = editor => (editor.view ?? editor.project).tracks[editor.track]
+// These are editor identities, not rendered labels. A manual decision must not
+// move the target of an already held chord, even if it later returns here.
+export function sameStepContext(a, b) {
+  return a.project === b.project && ['pattern', 'track', 'channel', 'tick', 'pitch',
+    'duration', 'step', 'eventView', 'selectedID'].every(key => a[key] === b[key])
+}
+function target(editor) {
+  if (editor.eventView) throw new Error('Return to piano-roll notes before step input')
+  const track = trackAt(editor)
+  if (!track || (sourceDocument(editor) && !editor.performance)) throw new Error('Select a MIDI pattern before step input')
+  const channel = sourceDocument(editor) ? editor.channel ?? (track.channels.length === 1 ? track.channels[0] : undefined) : track.channel
+  if (channel === undefined) throw new Error('Select :channel 1–16 before step input')
+  return { track, channel }
+}
+function insertChord(editor, notes) {
+  const { track, channel } = target(editor)
+  const end = editor.tick + editor.duration
+  if (!Number.isSafeInteger(end)) throw new Error('Step input exceeds MIDI tick precision')
+  const changes = notes.map(note => ({ kind: sourceDocument(editor) ? 'insert' : 'note',
+    pitch: note.pitch, start: editor.tick, duration: editor.duration, velocity: note.velocity,
+    ...(sourceDocument(editor) ? { track: track.sourceTrack, channel, release: note.release } : {}) }))
+  const project = sourceDocument(editor) ? editMidiSourceNotes(editor.project, changes, { pattern: editor.pattern })
+    : editProject(editor.project, track.id, { kind: 'batch-notes', changes })
+  const previous = { ...editor, undo: [...editor.undo, editor.project], redo: [], noteSelection: undefined, selectedID: undefined }
+  const next = sourceDocument(editor) ? sourceEditor(project, previous) : { ...previous, project }
+  // Source point notes use the positive grid step. A phrase endpoint cursor is
+  // retained exactly; further input refuses until the user extends/repositions.
+  return { ...next, tick: editor.tick + (editor.duration || editor.step), pitch: notes[0].pitch }
+}
+// One packet is a private transaction: an unrepresentable message or chord
+// cannot leave earlier changes from that packet partly applied.
+export function stepPacket(editor, pending, packet) {
+  target(editor)
+  if (pending && !sameStepContext(pending.context, editor)) throw new Error('Step input context changed while keys were held')
+  let state = pending ? { ...pending, notes: pending.notes.map(note => ({ ...note })), held: new Map([...pending.held].map(([key, ids]) => [key, [...ids]])) } : null
+  let inserted = 0
+  for (const message of unpackMidi(packet)) {
+    const type = message[0] >>> 4, status = message[1] >>> 4
+    if ((type === 1 && message[1] === 0xff)
+        || ([2, 4].includes(type) && status === 0xb && [120, 123].includes(message[2]))) throw new Error('MIDI reset/all-notes-off cancelled step input')
+    if (!message.isNoteOn() && !message.isNoteOff()) continue
+    const pitch = message[2]
+    if (pitch > 127 || (type === 2 && message[3] > 127)) throw new Error('Invalid step-input note data')
+    if (type === 4 && (message[3] !== 0 || message[6] !== 0 || message[7] !== 0)) throw new Error('Step notes cannot represent MIDI2 note attributes; use the recorder for raw MIDI')
+    const key = JSON.stringify([packet.source, message[0] & 15, message[1] & 15, pitch])
+    if (message.isNoteOn()) {
+      state ??= { context: editor, notes: [], held: new Map() }
+      const ids = state.held.get(key) ?? []
+      ids.push(state.notes.length); state.held.set(key, ids)
+      // This is an explicit note-editing projection, not raw take recording.
+      const velocity = type === 4 ? Math.max(1, ((message[4] << 8) | message[5]) >>> 9) : message[3]
+      state.notes.push({ pitch, velocity })
+    } else if (state?.held.has(key)) {
+      const ids = state.held.get(key), index = ids.shift()
+      if (!ids.length) state.held.delete(key)
+      const velocity = type === 4 ? ((message[4] << 8) | message[5]) >>> 9 : message[3]
+      state.notes[index].release = type === 2 && status === 9 ? { kind: 'note-on-zero' } : { kind: 'note-off', velocity }
+      if (!state.held.size) {
+        editor = insertChord(editor, state.notes); inserted += state.notes.length; state = null
+      }
+    }
+  }
+  return { editor, pending: state, inserted }
+}
+
+// The terminal supplies its existing serialized decision queue. Neither stop()
+// nor a context cancellation awaits completion inside that queue: an admitted
+// packet may itself be waiting to enter the queue.
+export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState = () => {}, openInput = openMidiInput }) {
+  target(getEditor())
+  const cancellation = new AbortController()
+  let pending = null
+  const input = openInput({ source, signal: cancellation.signal, onPacket: (packet, { signal }) => enqueue(() => {
+    signal.throwIfAborted()
+    const result = stepPacket(getEditor(), pending, packet)
+    pending = result.pending
+    if (result.inserted) adoptEditor(result.editor, result.inserted)
+    onState({ kind: 'input', held: pending ? [...pending.held.values()].reduce((n, ids) => n + ids.length, 0) : 0 })
+  }) })
+  const completion = input.completion.finally(() => { pending = null })
+  completion.catch(() => {})
+  return { ready: input.ready, completion, stop: input.stop,
+    cancel(reason = new Error('Step input context changed')) { cancellation.abort(reason) } }
+}

@@ -7,6 +7,10 @@ import { join } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { openMidiInput } from '../midi-input.mjs'
+import { openStepInput } from '../step-input.mjs'
+import { newEditor, editorCommand } from '../sequencer-editor.mjs'
+import { saveProject, loadProject, projectMidi } from '../sequencer-files.mjs'
+import { importMidiSource, midiSourcePattern } from '../midi-source.mjs'
 if (process.platform !== 'darwin') { console.log('MIDI_INPUT_NATIVE_SKIP: CoreMIDI requires macOS'); process.exit(0) }
 const directory = await mkdtemp(join(tmpdir(), 'masc-midi-input-native-'))
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done }); return { promise, resolve } }
@@ -174,6 +178,33 @@ try {
     await selected.request({ kind: 'emit', packets }); await all.promise; input.stop(); await input.completion
     assert.deepEqual(words, [0x40953c00, 0xffff0000, 0x40b54000, 0xffffffff, 0x40e50000, 0x80000000, 0x40853c00, 0])
     console.log('MIDI_INPUT_NATIVE_MIDI1_PASS: actual MIDI1 source converts note/hold/bend/release into protocol2 delivery through the same consumer')
+  } finally { await selected.close() }
+  selected = await source('1')
+  try {
+    let editor = editorCommand(newEditor(), 'note C2 0 4').editor
+    editor = editorCommand(editor, 'track-add Keyboard').editor
+    const original = editor.project, held = deferred(), inserted = deferred()
+    let task = Promise.resolve()
+    const input = openStepInput({ source: selected.source, getEditor: () => editor,
+      adoptEditor(next) { editor = next; inserted.resolve() },
+      enqueue(action) { const decision = task.then(action); task = decision.catch(() => {}); return decision },
+      onState(state) { if (state.held === 3) held.resolve() },
+      openInput: options => open(selected, options) })
+    await input.ready
+    await selected.request({ kind: 'emit', other: true, packets: [[0x2095307f]] })
+    await selected.request({ kind: 'emit', packets: [[0x20953c60, 0x20954070, 0x2095437f]] })
+    await held.promise; assert.equal(editor.project, original)
+    await selected.request({ kind: 'emit', packets: [[0x20853c40, 0x20854020, 0x20854310]] })
+    await inserted.promise; input.stop(); await input.completion
+    assert.deepEqual(editor.project.tracks[0], original.tracks[0])
+    assert.deepEqual(editor.project.tracks[1].notes.map(note => [note.start, note.duration, note.pitch, note.velocity]), [[0,960,60,96],[0,960,64,112],[0,960,67,127]])
+    assert.deepEqual(editorCommand(editor, 'undo').editor.project, original)
+    const path = join(directory, 'keyboard.json'); await saveProject(path, editor.project)
+    const reopened = (await loadProject(path)).project
+    assert.deepEqual(reopened, editor.project)
+    const notes = midiSourcePattern(importMidiSource(projectMidi(reopened))).notes.filter(note => note.track === 2)
+    assert.deepEqual(notes.map(note => [note.start, note.duration, note.pitch, note.velocity]), [[0,960,60,96],[0,960,64,112],[0,960,67,127]])
+    console.log('MIDI_STEP_NATIVE_EDIT_PASS: selected actual MIDI1 source -> protocol2 owner -> serialized chord editor -> one undo, other track retained, save/reopen/MIDI export')
   } finally { await selected.close() }
   selected = await source()
   try {

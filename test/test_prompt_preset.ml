@@ -593,13 +593,13 @@ let test_runtime_text_transform () =
     Preset.runtime_text_with
       ~current_assignments:[ "routingtest", "openai.gpt"; "budgettest", "openai.gpt" ]
       ~current_lanes:
-        [ { Preset.owner = Runtime_schema.Builtin Standalone_lane.Librarian; enabled = true; slots = [ "openai.gpt"; "runpod_mtp.qwen" ]; cli_slots = [] }
-        ; { Preset.owner = Runtime_schema.Builtin Standalone_lane.Hitl_auto_judge; enabled = true; slots = [ "openai.gpt" ]; cli_slots = [] }
+        [ { Preset.owner = Runtime_schema.Builtin Standalone_lane.Librarian; enabled = true; slots = [ "openai.gpt"; "runpod_mtp.qwen" ]; cli_slots = []; max_output_tokens = None; thinking = None }
+        ; { Preset.owner = Runtime_schema.Builtin Standalone_lane.Hitl_auto_judge; enabled = true; slots = [ "openai.gpt" ]; cli_slots = []; max_output_tokens = None; thinking = None }
         ]
       ~assignments:[ "routingtest", "runpod_mtp.qwen" ]
       ~lanes:
-        [ { Preset.owner = Runtime_schema.Builtin Standalone_lane.Librarian; enabled = true; slots = [ "runpod_mtp.qwen" ]; cli_slots = [] }
-        ; { Preset.owner = Runtime_schema.Builtin Standalone_lane.Hitl_auto_judge; enabled = true; slots = [ "openai.gpt" ]; cli_slots = [] }
+        [ { Preset.owner = Runtime_schema.Builtin Standalone_lane.Librarian; enabled = true; slots = [ "runpod_mtp.qwen" ]; cli_slots = []; max_output_tokens = None; thinking = None }
+        ; { Preset.owner = Runtime_schema.Builtin Standalone_lane.Hitl_auto_judge; enabled = true; slots = [ "openai.gpt" ]; cli_slots = []; max_output_tokens = None; thinking = None }
         ]
       runtime_fixture
   in
@@ -643,7 +643,7 @@ let test_runtime_text_carries_addon_lanes () =
          Runtime_schema.equal_exact_lane_owner lane.Preset.owner author) captured);
   let text =
     Preset.runtime_text_with ~current_assignments:[] ~current_lanes:captured ~assignments:[]
-      ~lanes:[ { Preset.owner = author; enabled = false; slots = [ "runpod_mtp.qwen" ]; cli_slots = [] } ]
+      ~lanes:[ { Preset.owner = author; enabled = false; slots = [ "runpod_mtp.qwen" ]; cli_slots = []; max_output_tokens = None; thinking = None } ]
       source
   in
   match Preset.runtime_of_text text with
@@ -658,6 +658,126 @@ let test_runtime_text_carries_addon_lanes () =
      | None -> fail (declaration_id ^ ": the add-on lane is gone after restore")))
     [ "operator-quiz", "[runtime.addon_exact_lanes.operator-quiz.author]";
       "team.quiz", "[runtime.addon_exact_lanes.\"team.quiz\".author]" ]
+;;
+
+(* The lane's two optional request settings are part of what a preset carries
+   (#38216): present in the preset they are written into the lane table, absent
+   in the preset they are removed from it, and the lane notes around them stay. *)
+let test_runtime_text_carries_the_lane_request_settings () =
+  let open Alcotest in
+  let lane ~max_output_tokens ~thinking =
+    { Preset.owner = Runtime_schema.Builtin Standalone_lane.Librarian
+    ; enabled = true
+    ; slots = [ "openai.gpt"; "runpod_mtp.qwen" ]
+    ; cli_slots = []
+    ; max_output_tokens
+    ; thinking
+    }
+  in
+  let apply ~current ~wanted content =
+    let text =
+      Preset.runtime_text_with
+        ~current_assignments:[]
+        ~current_lanes:[ current ]
+        ~assignments:[]
+        ~lanes:[ wanted ]
+        content
+    in
+    match Preset.runtime_of_text text with
+    | Ok (_, lanes) ->
+      (match List.find_opt (fun (l : Preset.lane) -> l.Preset.owner = Runtime_schema.Builtin Standalone_lane.Librarian) lanes with
+       | Some found -> text, found
+       | None -> fail "the lane is gone after the edit")
+    | Error message -> fail ("edited runtime.toml does not parse: " ^ message)
+  in
+  let declared = lane ~max_output_tokens:(Some 4096) ~thinking:(Some false) in
+  let undeclared = lane ~max_output_tokens:None ~thinking:None in
+  (* A lane table that declares neither: the preset's values are added. *)
+  let text, found = apply ~current:undeclared ~wanted:declared runtime_fixture in
+  check (option int) "the budget is written" (Some 4096) found.Preset.max_output_tokens;
+  check (option bool) "thinking is written" (Some false) found.Preset.thinking;
+  check bool "the operator note survives" true
+    (contains_substring text "# operator note that must survive");
+  (* The file holds them, the preset declares none: they are removed, so the
+     restored file reads back as the preset captured it. *)
+  let text, found = apply ~current:declared ~wanted:undeclared text in
+  check (option int) "the budget is removed" None found.Preset.max_output_tokens;
+  check (option bool) "thinking is removed" None found.Preset.thinking;
+  check bool "the budget line is gone from the text" false
+    (contains_substring text "max_output_tokens");
+  (* A different value replaces the old one. *)
+  let text, _ = apply ~current:undeclared ~wanted:declared runtime_fixture in
+  let _, found =
+    apply ~current:declared
+      ~wanted:(lane ~max_output_tokens:(Some 8192) ~thinking:(Some true)) text
+  in
+  check (option int) "the budget is replaced" (Some 8192) found.Preset.max_output_tokens;
+  check (option bool) "thinking is replaced" (Some true) found.Preset.thinking
+;;
+
+let test_saved_lane_request_settings_shape () =
+  with_base (fun ~base_path ~keepers:_ ~config ->
+    let path = Filename.concat config "runtime.toml" in
+    let librarian = "runtime.exact_output_lanes.librarian_exact" in
+    write_file path
+      (Toml_line_editor.edit_table_bool
+         (Toml_line_editor.edit_table_int runtime_fixture ~path:librarian
+            ~key:"max_output_tokens" ~value:4096)
+         ~path:librarian ~key:"thinking" ~value:false);
+    let saved = or_fail (Preset.capture ~base_path ~name:"settings" ~description:"") in
+    let lane_of (snapshot : Preset.snapshot) id =
+      List.find (fun (l : Preset.lane) -> l.Preset.id = id) snapshot.Preset.lanes
+    in
+    Alcotest.(check (option int)) "capture reads the budget" (Some 4096)
+      (lane_of saved "librarian_exact").Preset.max_output_tokens;
+    Alcotest.(check (option bool)) "capture reads thinking" (Some false)
+      (lane_of saved "librarian_exact").Preset.thinking;
+    Alcotest.(check (option int)) "a lane that declares none captures none" None
+      (lane_of saved "hitl_auto_judge").Preset.max_output_tokens;
+    or_fail (Preset.save ~base_path saved);
+    let loaded = or_fail (Preset.load ~base_path "settings") in
+    Alcotest.(check bool) "the lanes read back as saved" true
+      (loaded.Preset.lanes = saved.Preset.lanes);
+    (* A preset saved before these were captured has no keys: it declares
+       none. A value of another type, or a budget that is not positive, is
+       refused rather than coerced. *)
+    let runtime_json = Filename.concat (Preset.source_directory ~base_path saved) "runtime.json" in
+    let original = Yojson.Safe.from_file runtime_json in
+    let with_lane_fields change =
+      match original with
+      | `Assoc fields ->
+        `Assoc (List.map (fun (key, value) ->
+          if key <> "exact_output_lanes" then key, value else
+          key, (match value with
+            | `Assoc lanes -> `Assoc (List.map (fun (id, lane) ->
+              id, (match lane with
+                | `Assoc lane_fields -> `Assoc (change lane_fields)
+                | _ -> Alcotest.fail "saved lane must be an object")) lanes)
+            | _ -> Alcotest.fail "saved lanes must be an object")) fields)
+      | _ -> Alcotest.fail "saved runtime must be an object" in
+    Yojson.Safe.to_file runtime_json
+      (with_lane_fields (fun fields ->
+         List.remove_assoc "thinking" (List.remove_assoc "max_output_tokens" fields)));
+    (match Preset.load ~base_path "settings" with
+     | Ok older ->
+       List.iter (fun (lane : Preset.lane) ->
+         Alcotest.(check (option int)) ("older preset lane " ^ lane.id ^ " budget") None
+           lane.max_output_tokens;
+         Alcotest.(check (option bool)) ("older preset lane " ^ lane.id ^ " thinking") None
+           lane.thinking) older.Preset.lanes
+     | Error detail -> Alcotest.failf "a preset without the keys must load: %s" detail);
+    List.iter (fun (label, key, bad) ->
+      Yojson.Safe.to_file runtime_json
+        (with_lane_fields (fun fields -> (key, bad) :: List.remove_assoc key fields));
+      match Preset.load ~base_path "settings" with
+      | Error detail ->
+        Alcotest.(check bool) (label ^ " is refused naming the key") true
+          (contains_substring detail key)
+      | Ok _ -> Alcotest.failf "%s was accepted" label)
+      [ "a string budget", "max_output_tokens", `String "4096"
+      ; "a zero budget", "max_output_tokens", `Int 0
+      ; "a negative budget", "max_output_tokens", `Int (-1)
+      ; "a string thinking flag", "thinking", `String "false" ])
 ;;
 
 let test_saved_lane_activity_shape () =
@@ -906,6 +1026,10 @@ let () =
             test_runtime_text_transform
         ; Alcotest.test_case "the runtime.toml text carries add-on lanes" `Quick
             test_runtime_text_carries_addon_lanes
+        ; Alcotest.test_case "the runtime.toml text carries the lane request settings" `Quick
+            test_runtime_text_carries_the_lane_request_settings
+        ; Alcotest.test_case "a saved lane keeps its request settings; older presets declare none" `Quick
+            test_saved_lane_request_settings_shape
         ; Alcotest.test_case "an override written against an older default still restores" `Quick
             test_override_written_against_an_older_default_still_restores
         ; Alcotest.test_case "an override that cannot render is skipped with the reason" `Quick

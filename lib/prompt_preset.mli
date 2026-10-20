@@ -11,6 +11,12 @@ type lane =
   ; enabled : bool
   ; slots : string list
   ; cli_slots : string list
+  ; max_output_tokens : int option
+        (** The lane's declared output budget; [None] declares none, and
+            restoring [None] removes the key from the lane table. *)
+  ; thinking : bool option
+        (** The lane's declared [enable_thinking]; [None] declares none, and
+            restoring [None] removes the key from the lane table. *)
   }
 
 type snapshot =

@@ -5666,6 +5666,7 @@
   mcp_protocol mcp_protocol.eio eio eio.unix eio_main yojson unix))
 
 (include stanzas/test_lane_quiz_packages.inc)
+(include stanzas/test_operator_quiz_package.inc)
 (include stanzas/test_lane_fusion_compute_packages.inc)
 
 (test

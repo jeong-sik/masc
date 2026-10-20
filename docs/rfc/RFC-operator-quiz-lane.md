@@ -222,7 +222,7 @@ Read on 2026-10-20 for the previous revision and not re-read: `<base-path>/.masc
 
 ### 4.1 Flow
 
-1. A Schedule fires `masc.lane_act` with `{installation_id = "operator-quiz", action = {kind = "compose"}}` (K5).
+1. A Schedule fires `masc.lane_act` with `{installation_id = "operator-quiz", action = {kind = "compose", questions = 5}}` (K5). `questions` is required: the operator says how many to ask, and the package has no default.
 2. The host queues the action on the installation's live worker. The package records a new session in its log and returns `confirmed`.
 3. The action reaching a terminal receipt starts a host request cycle (K2). The package lists what it waits for: record reads first (K3).
 4. The host reads the records, retains the bytes, and delivers each page. The package stores its cursors and asks for an `author` call with the new material and the review items' histories.
@@ -503,12 +503,14 @@ pids = 16
 max_reply_bytes = 4194304
 
 [interface]
-binding_schema = '''{ … records grants (with the visibilities description of §4.5), language … }'''
+binding_schema = '''{ … sources (always empty), records grants (with the visibilities description of §4.5), language, timezone … }'''
 presentation = '''{ … readings for the five lanes … }'''
 ```
 
 **Actions** (the action schema's `kind` is a closed enum, so the TUI menu lists them):
-- `compose {questions?}`: start a session. `questions` is how many to write. The Schedule body or the operator sets it; nothing caps it.
+- `compose {questions}`: start a session. `questions` is how many to write and is required; the package has no default. The Schedule body or the operator sets it; nothing caps it.
+
+The binding also names `language` and `timezone`. The time zone is the operator's IANA zone; R (§14) counts a later local day in it. `binding.sources` is required by the host and is always empty here.
 - `dispute {ask_id, question_id, note}`: the operator's words about a grade (O5, D7).
 - `export {}`: return the whole log as an artifact. The host retains its bytes with a SHA-256 (`docs/guides/lane-world-actions.md:156-186`).
 
@@ -516,8 +518,8 @@ presentation = '''{ … readings for the five lanes … }'''
 
 | Event | Holds |
 |---|---|
-| `Session_opened` | session id, action request id, requested question count |
-| `Material_read` | session id, grant id, page SHA-256, cursor after |
+| `Session_opened` | session id, action request id, requested question count, grants, language, opened time |
+| `Material_read` | session id, request id, digest of the kept request and result under `/state/operator-quiz/pages/` (the page's cursor, completeness and SHA-256 are in it) |
 | `Exact_requested` | session id, request id, output name, request digest. The request body is already at `/state/operator-quiz/requests/<digest>.json` |
 | `Posed` | ask request id, question id, item id, topic, key (`choices` ids or `points` rubric), sources |
 | `Draft_rejected` | author request id, question index, reason |
@@ -553,7 +555,7 @@ The only follow-up `author` requests inside one session are the reductions of §
 | State | Entered on | Left on |
 |---|---|---|
 | `writing` | `Session_opened` (the `compose` action) | its `Posed` rows → `asked`; `Session_failed` → `failed`; a later `Session_opened` → `superseded` |
-| `asked` | the session's `Posed` rows. From then on the package lists the session's `ask` until the answer is delivered | `Answer_received` → `answered` |
+| `asked` | the session's `Posed` rows. From then on the package lists the session's `ask` until the answer is delivered | `Answer_received` → `answered`; `Session_failed` when the host refuses the ask by rule (`not_allowed`, `request_id_reused`) → `failed` |
 | `answered` | `Answer_received` | every answered question has a verdict → `graded` |
 | `graded` | derived: each answer has a verdict, a choice by its key (§6.1) and free text by `Judged` | nothing. A later `Judged` after a dispute changes a verdict, not the state |
 | `failed {reason}` | `Session_failed` | nothing |
@@ -564,6 +566,9 @@ The only follow-up `author` requests inside one session are the reductions of §
 - `author_invalid_output {request_id}`;
 - `author_input_refused {request_id; kind}`: refused after the reductions of §7 had nothing left to drop;
 - `author_outcome_unknown {request_id}`;
+- `author_request_exceeds_frame {request_id}`: one material record alone made the author request larger than the package's reply frame, so it could not be listed (§7);
+- `result_exceeds_frame {request_id}`: an author or ask result was larger than the frame. Read results are read back in pieces instead;
+- `no_material`: every grant was read and held no record to ask about;
 - `no_question_passed`: every draft became `Draft_rejected`, each with its own reason.
 
 Every state ends on an event the package sees. None ends on elapsed time or on a count.
@@ -682,7 +687,7 @@ New host state is limited to the first three rows. Each one holds a fact that wo
   - leave longer gaps after each correct answer;
   - stop asking an item after several correct answers spread over time.
 - The package checks that every `reask_of` names a known item.
-- If the provider refuses the `author` request as too large, the package sends the open-debt items (latest attempt a miss) alone and marks the session `history_scope = open_debt_only`. If material is too large, it splits the material into two requests. These react to the provider's typed refusal. They are not size rules.
+- If the provider refuses the `author` request as too large, the package sends the open-debt items (latest attempt a miss) alone and marks the session `history_scope = open_debt_only`. If it is still too large, the package sends the newer half of the material, and halves again on each refusal. A request that would not fit the package's own reply frame is cut the same way before it is listed; the frame is the transport limit the worker already has. The older half is not asked about in this session; the next session reads from this session's cursors. When one record is left and the provider still refuses, the session fails with `author_input_refused`. These react to the provider's typed refusal. They are not size rules.
 - Trade-off: this is less predictable than a coded schedule. Every re-ask shows in the item history, and R (§14) shows whether it works. If R stays low, a coded schedule is the next RFC.
 
 ## 8. Projections: score, history, debt map

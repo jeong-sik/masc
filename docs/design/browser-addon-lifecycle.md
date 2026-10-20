@@ -23,13 +23,18 @@ receipts remain distinct from successful contract validation.
    package default or installation override. It uses the existing closed schema
    subset and rejects unsupported declarations before exporting tools. It does
    not perform LLM generation or move browser processes.
-2. A host-process execution specification and lifecycle, separate from container
+2. Separate MCP admission, discovery, calls and contract hooks from container
+   control. The existing container owner delegates to this shared protocol;
+   only Ready publishes immutable schema/tool/hook state. Failed or cancelled
+   discovery cannot admit calls or recover on a late reply. This separation
+   supplies no process-cleanup evidence by itself.
+3. A host-process execution specification and lifecycle, separate from container
    resource/isolation declarations. Acquire installation/profile ownership before
    spawning. Persist exact process ownership and confirm cleanup before reuse.
-3. A browser worker that owns WebExtension/BiDi command queues and owned Gecko/
+4. A browser worker that owns WebExtension/BiDi command queues and owned Gecko/
    Chrome execution. Core admission and artifact/model brokers remain host edges;
    built-in browser execution and tool fallback are removed.
-4. Scoped model-generation middleware using the existing exact-output authority,
+5. Scoped model-generation middleware using the existing exact-output authority,
    with retained request/terminal evidence and installation-selected routes. The
    new package `exact_outputs` declarations are reused; observation-only sampling
    does not substitute for this broker.

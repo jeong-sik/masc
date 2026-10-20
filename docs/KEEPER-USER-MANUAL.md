@@ -243,6 +243,16 @@ boundary.
 | A count of `0` beside `data unreliable` in the TUI | The read failed. It does not mean the list is empty |
 | Everything looks stale after an edit | Two roots. Check `effective_base_path` and `effective_masc_root` in `/health?full=1` |
 
+For a typed rate-limit failure, the execution receipt's
+`runtime.lane_evidence.failures[].failure.cause` and the candidate terminal's
+`failure.cause` retain `kind: provider_rate_limited`, the provider when known,
+the provider's `retry_after` hint in seconds, and its diagnostic separately.
+A null hint means no wait was stated; it is not zero or a locally chosen delay.
+The hint is relative to the provider response, not to when you read the receipt,
+and does not promise that a retry was scheduled. Chat failure summaries describe
+the same observation. Lane scheduling still owns the decision to retry or use
+another candidate.
+
 Runtime-owned files outside `.masc/config/` are not inputs. Keeper snapshots,
 task stores, board logs, receipts, and approval history are written by the
 server; editing them by hand is how you get a state nothing agrees on.

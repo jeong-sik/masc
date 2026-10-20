@@ -54,7 +54,7 @@ type failure_site =
 type cause =
   | Core of Keeper_request_failure_core.t
       (** An agent-core failure this module has no arm of its own for.
-          RFC-0454 §2.2's per-constructor table replaces this arm; the four
+          RFC-0454 §2.2's per-constructor table replaces this arm; the named
           shapes below are the ones a producer already rendered as its own
           sentence, and moving them here is what keeps that rendering from
           living above the value. *)
@@ -66,6 +66,14 @@ type cause =
       ; kind : Llm_provider.Http_client.network_error_kind
       ; detail : string
       }
+  | Provider_rate_limited of
+      { provider : string option
+      ; retry_after : float option
+      ; detail : string
+      }
+      (** A typed provider throttle. [retry_after] is the provider's relative
+          wait hint in seconds, not a promise that MASC scheduled a retry.
+          [None] preserves the absence of a hint without inventing a delay. *)
   | Context_overflow of { limit : int option }
   | Input_capacity
   | Operator_cancelled
@@ -123,7 +131,7 @@ type t = { cause : cause }
 
 val of_core_error : Agent_core.Error.t -> t
 (** Project an agent-core error into a request failure. A MASC error on the
-    carrier becomes {!Masc}; the four shapes agent-core states in terms a
+    carrier becomes {!Masc}; the named shapes agent-core states in terms a
     person can act on become their own constructors; anything else becomes
     {!Core}. This is the one place that decides, so no producer renders an
     agent-core error itself. *)

@@ -32,6 +32,11 @@ type cause =
       ; kind : Llm_provider.Http_client.network_error_kind
       ; detail : string
       }
+  | Provider_rate_limited of
+      { provider : string option
+      ; retry_after : float option
+      ; detail : string
+      }
   | Context_overflow of { limit : int option }
   | Input_capacity
   | Operator_cancelled
@@ -94,10 +99,11 @@ let cause_of_core_error (error : Agent_core.Error.t) =
   match error with
   | Agent_core.Error.Api (Agent_core.Retry.NetworkError { message; kind }) ->
     Provider_network { provider = None; kind; detail = message }
+  | Agent_core.Error.Api (Agent_core.Retry.RateLimited { message; retry_after }) ->
+    Provider_rate_limited { provider = None; retry_after; detail = message }
   | Agent_core.Error.Api (Agent_core.Retry.ContextOverflow { limit; _ }) ->
     Context_overflow { limit }
   | Agent_core.Error.Api (Agent_core.Retry.InputCapacity _) -> Input_capacity
-  | Agent_core.Error.Api (Agent_core.Retry.RateLimited _)
   | Agent_core.Error.Api (Agent_core.Retry.Overloaded _)
   | Agent_core.Error.Api (Agent_core.Retry.ServerError _)
   | Agent_core.Error.Api (Agent_core.Retry.AuthError _)
@@ -110,6 +116,9 @@ let cause_of_core_error (error : Agent_core.Error.t) =
       (Llm_provider.Error.NetworkError { provider; kind; detail; _ }) ->
     Provider_network { provider = Some provider; kind; detail }
   | Agent_core.Error.Provider
+      (Llm_provider.Error.RateLimit { provider; retry_after; detail }) ->
+    Provider_rate_limited { provider = Some provider; retry_after; detail }
+  | Agent_core.Error.Provider
       ( Llm_provider.Error.MissingApiKey _
       | Llm_provider.Error.InvalidConfig _
       | Llm_provider.Error.ParseError _
@@ -119,7 +128,6 @@ let cause_of_core_error (error : Agent_core.Error.t) =
       | Llm_provider.Error.ProviderUnavailable _
       | Llm_provider.Error.EmptyCompletion _
       | Llm_provider.Error.RepeatingGeneration _
-      | Llm_provider.Error.RateLimit _
       | Llm_provider.Error.HardQuota _
       | Llm_provider.Error.CapacityExhausted _
       | Llm_provider.Error.AuthError _
@@ -249,6 +257,14 @@ let summary_of_cause = function
             (Keeper_internal_error.core_error_of_masc_internal_error masc_error)))
   | Provider_network { provider; kind; detail } ->
     provider_network_summary ~provider ~kind ~detail
+  | Provider_rate_limited { provider; retry_after; detail } ->
+    let wait =
+      match retry_after with
+      | Some seconds -> Printf.sprintf "provider wait hint: %g seconds" seconds
+      | None -> "provider did not state a wait time"
+    in
+    Printf.sprintf "%s is rate limited (%s): %s"
+      (runtime_provider_label provider) wait (one_line detail)
   | Context_overflow { limit } -> context_overflow_summary ~limit
   | Input_capacity ->
     "The runtime flow reported a typed input-capacity failure. MASC did not \
@@ -393,6 +409,13 @@ let cause_to_yojson = function
           | None -> `Null )
       ; ( "network_kind"
         , `String (Llm_provider.Http_client.network_error_kind_to_string kind) )
+      ; "detail", `String detail
+      ]
+  | Provider_rate_limited { provider; retry_after; detail } ->
+    `Assoc
+      [ "kind", `String "provider_rate_limited"
+      ; "provider", (match provider with Some value -> `String value | None -> `Null)
+      ; "retry_after", (match retry_after with Some value -> `Float value | None -> `Null)
       ; "detail", `String detail
       ]
   | Context_overflow { limit } ->
@@ -554,6 +577,26 @@ let cause_of_yojson (json : Yojson.Safe.t) =
                      (fun detail ->
                         Provider_network { provider; kind = network_kind; detail })
                      (string_field kind fields "detail"))))
+        | "provider_rate_limited" ->
+          require kind [ "provider"; "retry_after"; "detail" ] fields (fun () ->
+            let provider =
+              match List.assoc_opt "provider" fields with
+              | Some (`String value) -> Ok (Some value)
+              | Some `Null -> Ok None
+              | Some _ | None -> field_error kind "provider"
+            in
+            let retry_after =
+              match List.assoc_opt "retry_after" fields with
+              | Some (`Float value) when Float.is_finite value -> Ok (Some value)
+              | Some (`Int value) -> Ok (Some (float_of_int value))
+              | Some `Null -> Ok None
+              | Some _ | None -> field_error kind "retry_after"
+            in
+            Result.bind provider (fun provider ->
+              Result.bind retry_after (fun retry_after ->
+                Result.map
+                  (fun detail -> Provider_rate_limited { provider; retry_after; detail })
+                  (string_field kind fields "detail"))))
         | "context_overflow" ->
           require kind [ "limit" ] fields (fun () ->
             match List.assoc_opt "limit" fields with

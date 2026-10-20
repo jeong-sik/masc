@@ -13,7 +13,7 @@ final class Edge:CoordinatedMidiTransport {
  var stages:[Double]=[];var runs:[UInt64]=[];var prepares=0;var closes=0;var fail="";let id:String;let protocolID:Int
  init(_ id:String,_ p:Int){self.id=id;protocolID=p}
  func prepare()throws{prepares+=1;if fail=="prepare"{throw MidiFailure("prepare edge")}}
- func stageCoordinated(at seconds:Double)throws{stages.append(seconds);if fail=="stage"{throw MidiFailure("stage edge")}}
+ func stageCoordinated(at seconds:Double)throws{stages.append(seconds);if fail=="stage"{throw MidiFailure("stage edge")};if fail=="refuse"{throw UmpRefusal("refused edge")}}
  func runCoordinated(anchorNanoseconds:UInt64)throws{runs.append(anchorNanoseconds);anchor=anchorNanoseconds;if fail=="run"{throw MidiFailure("run edge")}}
  func position(at host:UInt64)->Double{0}
  func snapshot(_ kind:String)->[String:Any]{["bindings":[["port":0,"device":["kind":"midi","id":id,"name":id,"protocol":protocolID]]]]}
@@ -46,6 +46,19 @@ func capture(_ group:UInt32,_ channel:UInt32,_ uid:String="42") -> UmpArrangemen
 }
 _ = try HybridMidiTransport(midi:midi,ump:capture(3,0));_ = try HybridMidiTransport(midi:midi,ump:capture(0,1));_ = try HybridMidiTransport(midi:midi,ump:capture(0,0,"43"))
 refuses{_ = try HybridMidiTransport(midi:midi,ump:capture(0,0))}
+// A captured owner refuses before any send. Staged first, its refusal leaves
+// every owner playing for the audio owner to keep; a later one is fatal.
+let refusing=Edge("43",2),smf=Edge("42",1),kept=HybridMidiTransport(owners:[refusing,smf],duration:2)
+try kept.prepare();try kept.stageCoordinated(at:0);try kept.runCoordinated(anchorNanoseconds:100);refusing.fail="refuse"
+do {try kept.stageCoordinated(at:0.5);preconditionFailure("refused stage admitted")} catch is UmpRefusal {}
+precondition(kept.state == .playing && kept.offset==0 && smf.stages==[0] && smf.closes+refusing.closes==0,"refused stage keeps both owners playing")
+refusing.fail="";try kept.stageCoordinated(at:0.5);precondition(kept.state == .staged && smf.stages==[0,0.5] && kept.offset==0.5)
+let staged=Edge("42",1),late=Edge("43",2),fatal=HybridMidiTransport(owners:[staged,late],duration:2);late.fail="refuse"
+refuses{try fatal.stageCoordinated(at:0)};precondition(fatal.state == .stopped && staged.closes==1)
+let real=try HybridMidiTransport(midi:midi,ump:capture(3,0)),captured=real.owners.compactMap{$0 as? UmpRegionTransport}[0]
+captured.output.footprint.observe(UmpMessage(UmpEvent(seconds:0,source:"42",words:[0x33020102,0])))
+do {try real.stageCoordinated(at:0.5);preconditionFailure("refused hybrid stage admitted")} catch is UmpRefusal {}
+precondition(real.state == .prepared && captured.state == .prepared,"the real hybrid stages its captured owner first")
 let cycle=try MidiCycle(start:0.1,end:0.4,duration:0.3,period:300000000,divisor:1,exactStart:(100000000,1))
 let retained=try HybridMidiTransport(midi:midi,ump:capture(3,0),cycle:cycle)
 precondition(retained.duration==0.3 && retained.cycle != nil && retained.owners[1] is UmpLoopTransport)
@@ -56,7 +69,11 @@ var loopEnds=0;looped.onCoordinatedEnd={loopEnds+=1};left.onCoordinatedEnd?();ri
 precondition(looped.state == .playing && loopEnds==0 && abs(looped.position(at:1_000_000_100)-0.2)<1e-8)
 try looped.stageCoordinated(at:0);precondition(left.stages==[0.1,0] && right.stages==left.stages)
 looped.finish(reason:"stop-loop",error:nil,publish:false);precondition(left.closes==1 && right.closes==1)
-print("HYBRID_MIDI_PASS: actual physical group/channel admission, shared UID streams, common epoch, both completion orders, silent stage, prepare/stage/start failure unwind, reentrant and cleanup error drain")
+let loopCaptured=retained.owners[1] as! UmpLoopTransport
+loopCaptured.output.footprint.observe(UmpMessage(UmpEvent(seconds:0,source:"42",words:[0x33020102,0])))
+do {try retained.stageCoordinated(at:0);preconditionFailure("refused loop stage admitted")} catch is UmpRefusal {}
+precondition(retained.state == .prepared && loopCaptured.state == .prepared,"the looped hybrid stages its captured owner first")
+print("HYBRID_MIDI_PASS: actual physical group/channel admission, shared UID streams, common epoch, both completion orders, silent stage, prepare/stage/start failure unwind, captured refusal before any stage keeps playback (regions and loops), reentrant and cleanup error drain")
 `
  await writeFile(join(directory,'main.swift'),swift)
  const files=['MidiTransport.swift','UmpTransport.swift','UmpOutput.swift','UmpRegions.swift','UmpState.swift','HybridMidiTransport.swift','UmpLoopTransport.swift'].map(file=>new URL(file,import.meta.url).pathname)

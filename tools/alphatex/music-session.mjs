@@ -172,7 +172,7 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
         abort.signal.throwIfAborted()
         paired = openPlayback({ ...plan, midiBindings: plan.bindings, output, signal: abort.signal, onEvent(event) {
           if (['playing', 'paused', 'stopped'].includes(event.kind)) pairedState = event.kind
-          if (!closed && !abort.signal.aborted) { status = event.kind === 'error' ? event.message : `Capture ${event.kind}`;draw() }
+          if (!closed && !abort.signal.aborted) { status = event.kind === 'error' ? event.message : event.refusal ?? `Capture ${event.kind}`;draw() }
         } })
         await paired.completion
       } catch (error) { if (!closed && !abort.signal.aborted) status = error.message }

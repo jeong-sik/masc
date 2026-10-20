@@ -9,6 +9,13 @@ struct UmpChannel: Hashable {
     let channel: UInt32
     init(source: String, channel: UInt32) { self.source = source; self.channel = channel }
     init(_ event: UmpEvent) { source = event.source; channel = event.words[0] & 0x0f0f0000 }
+    // Only MIDI 1.0 and MIDI 2.0 channel-voice words address a channel; a
+    // utility or system word's low status bits are not one.
+    init?(voice event: UmpEvent) {
+        let dialect = event.words[0] >> 28
+        guard dialect == 2 || dialect == 4 else { return nil }
+        self.init(event)
+    }
     func contains(_ address: UmpAddress) -> Bool { source == address.source && channel == address.channel }
 }
 final class UmpOutput {

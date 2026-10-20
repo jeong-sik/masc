@@ -94,6 +94,7 @@ export function openPlayback({ path, output, midiOutput, midiBindings, loop = fa
       if (!['playing', 'paused', 'stopped'].includes(event.kind) || final
           || !Number.isFinite(event.currentTime) || !Number.isFinite(event.duration)
           || (midiBindings === undefined ? event.duration <= 0 : event.duration < 0) || event.currentTime < 0 || event.currentTime > event.duration
+          || event.refusal !== undefined && (event.kind === 'stopped' || typeof event.refusal !== 'string' || !event.refusal)
           || typeof event.device?.id !== 'string' || !event.device.id || typeof event.device.name !== 'string'
           || (mixed || midiOutput === undefined ? !Number.isInteger(event.device.outputs) || event.device.outputs <= 0
             : event.device.kind !== 'midi' || event.device.protocol !== 1) || event.loop !== loop) {

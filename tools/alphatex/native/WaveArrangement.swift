@@ -624,8 +624,10 @@ final class ArrangementTransport {
         }
         return value
     }
-    func publish() {
-        do { try audioEmit(snapshot(state == .playing ? "playing" : "paused")) }
+    func publish(refusal: String? = nil) {
+        var event = snapshot(state == .playing ? "playing" : "paused")
+        if let refusal { event["refusal"] = refusal }
+        do { try audioEmit(event) }
         catch { finish(reason: "event-output-failed", error: error, publish: false) }
     }
     func clearRenderStart() {
@@ -634,12 +636,16 @@ final class ArrangementTransport {
         renderObserver = nil
     }
     func stopVoices() { horizon?.cancel(); horizon = nil; horizonEnded = false; generation &+= 1; clearRenderStart(); for voice in voices { voice.stop() }; active.removeAll() }
-    func schedule(from seconds: Double, playing: Bool) throws {
+    func schedule(from seconds: Double, playing: Bool) throws { try schedule(from: seconds, playing: playing, phase: loopPosition) }
+    // The phase becomes the transport state only after the MIDI stage is admitted.
+    func schedule(from seconds: Double, playing: Bool, phase: PracticeLoopPosition) throws {
         guard state != .stopped else { return }
         if plan.loop == nil && seconds >= plan.duration { position = plan.duration; finish(reason: "finished"); return }
-        engine.pause(); stopVoices(); position = seconds
-        let backing = plan.practice?.loop == nil ? seconds : loopPosition.backing
+        let backing = plan.practice?.loop == nil ? seconds : phase.backing
+        // A refused MIDI reconstruction throws before either part changes.
         try midi?.stageCoordinated(at: backing); midiEnded = false
+        loopPosition = phase
+        engine.pause(); stopVoices(); position = seconds
         let expected = generation
         for voice in voices {
             let intro = plan.practice?.loop != nil && voice.region.pulseClock != nil && voice.region.pulseLoopUnit == nil
@@ -776,45 +782,41 @@ final class ArrangementTransport {
         do {
             try checkOutput()
             let command = try JSONDecoder().decode(AudioCommand.self, from: Data(line.utf8))
-            do {
-                switch command {
-                case .pause: if state == .playing || state == .starting {
-                    let time = currentTime()
-                    if plan.loop == nil && time >= plan.duration { position = plan.duration; finish(reason: "finished"); return }
-                    if plan.practice?.loop != nil && state == .playing {
-                        let backing = backingTime()
-                        let render = engine.outputNode.lastRenderTime
-                        let frontier = render?.isHostTimeValid == true ? max(anchor, render!.hostTime) : anchor
-                        loopPosition = musicalAnchor > frontier ? .introduction(musicalAnchor - frontier) : .backing(backing)
-                    }
-                    engine.pause(); stopVoices(); position = time; state = .paused
-                    try midi?.stageCoordinated(at: plan.practice?.loop == nil ? time : loopPosition.backing)
+            switch command {
+            case .pause: if state == .playing || state == .starting {
+                let time = currentTime()
+                if plan.loop == nil && time >= plan.duration { position = plan.duration; finish(reason: "finished"); return }
+                var phase = loopPosition
+                if plan.practice?.loop != nil && state == .playing {
+                    let backing = backingTime()
+                    let render = engine.outputNode.lastRenderTime
+                    let frontier = render?.isHostTimeValid == true ? max(anchor, render!.hostTime) : anchor
+                    phase = musicalAnchor > frontier ? .introduction(musicalAnchor - frontier) : .backing(backing)
                 }
-                case .resume: if state == .paused { try schedule(from: position, playing: true) }
-                case .seek(let seconds):
-                    let duration = plan.practice?.duration ?? plan.duration
-                    guard seconds.isFinite, seconds >= 0, seconds <= duration else { throw AudioFailure("seek outside arrangement duration") }
-                    let raw = (seconds == duration && plan.loop != nil ? 0 : seconds) + (plan.practice?.countInSeconds ?? 0)
-                    if plan.practice?.loop != nil {
-                        loopPosition = .backing(seconds == duration && plan.loop != nil ? 0 : seconds)
-                    }
-                    if seconds == duration && plan.loop == nil { position = plan.duration; finish(reason: "finished"); return }
-                    try schedule(from: raw, playing: state == .playing || state == .starting)
-                case .status: break
-                case .recordingEpoch(let request):
-                    var event = snapshot(state == .playing ? "playing" : "paused")
-                    event["recordingRequest"] = request; try audioEmit(event); return
-                case .stop: finish(reason: "stop"); return
-                }
-            } catch {
-                // A rejected pause/resume/seek is a command error: report it and
-                // keep the transport running instead of stopping playback.
-                report(String(describing: error))
-                try? audioEmit(["kind": "error", "message": String(describing: error)])
-                if state != .stopped { publish() }
-                return
+                try midi?.stageCoordinated(at: plan.practice?.loop == nil ? time : phase.backing)
+                loopPosition = phase
+                engine.pause(); stopVoices(); position = time; state = .paused
+            }
+            case .resume: if state == .paused { try schedule(from: position, playing: true) }
+            case .seek(let seconds):
+                let duration = plan.practice?.duration ?? plan.duration
+                guard seconds.isFinite, seconds >= 0, seconds <= duration else { throw AudioFailure("seek outside arrangement duration") }
+                let raw = (seconds == duration && plan.loop != nil ? 0 : seconds) + (plan.practice?.countInSeconds ?? 0)
+                let phase = plan.practice?.loop != nil ? .backing(seconds == duration && plan.loop != nil ? 0 : seconds) : loopPosition
+                if seconds == duration && plan.loop == nil { position = plan.duration; finish(reason: "finished"); return }
+                try schedule(from: raw, playing: state == .playing || state == .starting, phase: phase)
+            case .status: break
+            case .recordingEpoch(let request):
+                var event = snapshot(state == .playing ? "playing" : "paused")
+                event["recordingRequest"] = request; try audioEmit(event); return
+            case .stop: finish(reason: "stop"); return
             }
             if state != .stopped && state != .starting { publish() }
+        } catch let refusal as UmpRefusal {
+            // Neither part changed: acknowledge the kept state with the reason. A
+            // starting transport acknowledges nothing until its render fence.
+            report(refusal.description)
+            if state != .starting { publish(refusal: refusal.description) }
         } catch { finish(reason: "command-failed", error: error) }
     }
     func finish(reason: String, error: Error? = nil, publish: Bool = true) {

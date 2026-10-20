@@ -17,7 +17,9 @@ duration shared by both. Captures with no MIDI retain clock-only regions.
 `HybridMidiTransport` admits both real engines before acquiring outputs. It owns
 preparation, silent staging, one future epoch, either-order completion and failure
 cleanup. Both MIDI engines and every audio voice must finish, including a silent
-arrangement horizon. A second-engine failure stops and drains the first. Pause,
+arrangement horizon. A second-engine failure stops and drains the first. The
+captured engine stages first, so its refused reconstruction leaves both engines
+unchanged and the pause, resume or seek is refused without ending playback. Pause,
 forward/backward seek, output changes, editing and exit preserve that ownership.
 Each protocol engine retains its original expressive state model and uncertainty
 accounting; no MIDI2 words are converted to MIDI1.

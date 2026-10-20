@@ -20,20 +20,38 @@ struct UmpField: Hashable {
             default: return nil
             }
         }
-        // Only fields that select the attack must survive a seek baseline; the
-        // rest may be defaulted without changing which sample sounds.
-        var determinesAttack: Bool {
-            switch self {
-            case .program, .bank, .noteRegistered, .noteAssignable, .noteReset: return true
-            default: return false
-            }
-        }
     }
     let address: UmpAddress
     let kind: Kind
     func covered(by known: Set<UmpField>) -> Bool {
         if known.contains(self) { return true }
         return address.dialect == 4 && kind.note.map { known.contains(UmpField(address: address, kind: .noteReset($0))) } == true
+    }
+    static let bankSelect: Set<UInt32> = [0, 32]
+    static let portamento: Set<UInt32> = [5, 37, 65]
+    static let registeredPitch: UInt32 = 3
+    static let noteSelection: Set<Kind> = [.registered(0, 3), .registered(0, 4), .registered(0, 6), .registered(0, 7)]
+    // A voice keeps what its Note On started with: its patch, Portamento Time
+    // and On/Off glide, Tuning Program/Bank (MIDI Tuning Standard persists for
+    // subsequent Note Ons, UMP v1.1.2 7.4.15), MPE Configuration, the Per-Note
+    // Pitch Bend Sensitivity of "all Notes which follow" (7.4.13.1) and Pitch
+    // 7.25, from which a receiver may select the sample. Assignable controllers
+    // have vendor meanings and are kept as well. A per-note reset changed every
+    // per-note value. Bend, pressure and other controllers are continuous.
+    func kept(byAttackOf number: UInt32) -> Bool {
+        switch kind {
+        case .program, .bank, .assignable: return true
+        case .controller(let index): return UmpField.portamento.contains(index)
+        case .registered: return UmpField.noteSelection.contains(kind)
+        case .noteRegistered(let note, let index): return note == number && index == UmpField.registeredPitch
+        case .noteAssignable(let note, _), .noteReset(let note): return note == number
+        case .bend, .pressure, .poly, .noteBend: return false
+        }
+    }
+    // MIDI 1.0 Bank Select takes effect at the next Program Change.
+    var selectsBank: Bool {
+        if case .controller(let index) = kind { return address.dialect == 2 && UmpField.bankSelect.contains(index) }
+        return false
     }
 }
 enum UmpObstacle: String, Hashable {
@@ -44,25 +62,32 @@ enum UmpObstacle: String, Hashable {
     case oneShot = "one-shot Portamento Control"
     case dialect = "mixed MIDI 1.0 and MIDI 2.0 state on one channel"
 }
+// Source state reconstruction cannot restore, raised before any message is
+// sent, so a command owner can keep its current playback.
+struct UmpRefusal: Error, CustomStringConvertible {
+    let description: String
+    init(_ value: String) { description = value }
+}
 enum UmpAction {
     case on(UInt32), off(UInt32), absolute([UmpField.Kind]), relative(UmpField.Kind)
-    case pedal(UInt32, Bool), kill, release, reset, management(UInt32, Bool), unsupported(UmpObstacle)
-    // System real-time (MT1 F8/FE) and utility (MT0 NOOP/JR clock/timestamp)
-    // messages carry no channel state and must not refuse reconstruction.
-    case ignored
+    case pedal(UInt32, Bool), kill, release, reset, management(UInt32, detach: Bool, reset: Bool), unsupported(UmpObstacle)
+    case stateless
 }
 struct UmpMessage {
+    // UMP v1.1.2 Appendix F.1: Utility NOOP, JR Clock and JR Timestamp, and
+    // System Real Time Timing Clock and Active Sensing carry timing or link
+    // liveness, not device state. Reconstruction neither restores nor replays them.
+    static let statelessUtility: Set<UInt32> = [0x0, 0x1, 0x2]
+    static let statelessSystem: Set<UInt32> = [0xf8, 0xfe]
     let address: UmpAddress
     let action: UmpAction
     init(_ event: UmpEvent) {
         let word = event.words[0], dialect = word >> 28, status = (word >> 20) & 15
-        let number = (word >> 8) & 127, byte = word & 255, detail = (word >> 16) & 15
+        let number = (word >> 8) & 127, byte = word & 255
         address = UmpAddress(source: event.source, prefix: word & 0xff0f0000)
         guard dialect == 2 || dialect == 4 else {
-            // Utility (MT0) NOOP, JR Clock and JR Timestamp carry no channel
-            // state; only genuinely opaque messages remain obstacles.
-            action = dialect == 0 && (status == 0 || status == 1 || status == 2) ? .ignored : .unsupported(.opaque)
-            return
+            let stateless = dialect == 0 ? UmpMessage.statelessUtility.contains(status) : dialect == 1 && UmpMessage.statelessSystem.contains((word >> 16) & 255)
+            action = stateless ? .stateless : .unsupported(.opaque); return
         }
         switch status {
         case 9 where dialect == 4 || byte > 0: action = .on(number)
@@ -93,8 +118,7 @@ struct UmpMessage {
             action = .absolute(dialect == 4 && word & 1 != 0 ? [.program, .bank] : [.program])
         case 13: action = .absolute([.pressure])
         case 14: action = .absolute([.bend])
-        case 15 where dialect == 4 && byte & ~3 == 0: action = .management(number, byte & 1 != 0)
-        case 15 where dialect == 2 && (detail == 8 || detail == 14): action = .ignored
+        case 15 where dialect == 4 && byte & ~3 == 0: action = .management(number, detach: byte & 2 != 0, reset: byte & 1 != 0)
         default: action = .unsupported(.opaque)
         }
     }
@@ -104,7 +128,7 @@ struct UmpMessage {
         case .absolute(let values): kinds = values
         case .relative(let value): kinds = [value]
         case .pedal(let number, _): kinds = [.controller(number)]
-        case .management(let number, true): kinds = [.noteReset(number)]
+        case .management(let number, _, reset: true): kinds = [.noteReset(number)]
         case .reset:
             // Reset All Controllers retains bank/program, volume/pan and RPN
             // values. It does NOT reset MIDI2 PNCC or Per-Note Pitch Bend.
@@ -132,7 +156,21 @@ struct UmpFootprint {
         if case .unsupported(let reason) = message.action { obstacles.insert(reason) }
     }
     func requireSupported() throws {
-        guard obstacles.isEmpty else { throw MidiFailure("captured UMP reconstruction cannot restore \(obstacles.map(\.rawValue).sorted().joined(separator: ", ")); full-source playback remains available") }
+        guard obstacles.isEmpty else { throw UmpRefusal("captured UMP reconstruction cannot restore \(obstacles.map(\.rawValue).sorted().joined(separator: ", ")); full-source playback remains available") }
+    }
+}
+// A sounding voice keeps the values its Note On started with and, from a
+// Per-Note Management Detach on, its per-note values; a Program Change latches
+// MIDI 1.0 Bank Select for later Note Ons. Fields the transport changed need a
+// source baseline before these messages; other values sent later still reach
+// the voice.
+func umpKeptFields(_ message: UmpMessage, sounding: Set<UInt32>, changed previous: UmpFootprint) -> [UmpField] {
+    switch message.action {
+    case .on(let number): return previous.touched.filter { $0.address == message.address && $0.kept(byAttackOf: number) }
+    case .absolute(let kinds) where kinds.contains(.program): return previous.touched.filter { $0.address == message.address && $0.selectsBank }
+    case .management(let number, detach: true, _) where sounding.contains(number):
+        return previous.touched.filter { $0.address == message.address && $0.kind.note == number }
+    default: return []
     }
 }
 struct UmpVoice {
@@ -172,7 +210,7 @@ func umpRestoration(_ events: [UmpEvent], prefixCount: Int, followingCount: Int 
         let message = UmpMessage(event), address = message.address
         footprint.observe(message)
         if case .relative(let kind) = message.action, !UmpField(address: address, kind: kind).covered(by: known) {
-            throw MidiFailure("captured UMP relative parameter needs an absolute source baseline")
+            throw UmpRefusal("captured UMP relative parameter needs an absolute source baseline")
         }
         if case .relative = message.action {} else { known.formUnion(message.fields) }
         var channel = channels[address] ?? UmpChannelState()
@@ -203,44 +241,66 @@ func umpRestoration(_ events: [UmpEvent], prefixCount: Int, followingCount: Int 
         for voice in channel.voices where !voice.held && !channel.sustain && !(channel.sostenuto && voice.captured) { expiredNotes[voice.on] = ordinal }
         channel.prune(); channels[address] = channel
     }
-    var entryKnown = known
+    var live = Set<Int>(), entrySounding: [UmpAddress: Set<UInt32>] = [:]
+    for (address, channel) in channels {
+        for voice in channel.voices where !excludingNotes.contains(voice.on) {
+            live.insert(voice.on); if let off = voice.off { live.insert(off) }
+            entrySounding[address, default: []].insert(voice.number)
+        }
+    }
     // Region admission may inspect the retained due stream to prove that its
     // original preamble establishes each field before an attack/relative use.
     // This is validation only: future messages are never added to replay.
     // Historical live voices still require their own pre-attack baselines below.
-    for event in events[prefixCount..<admissionEnd] {
+    // Entry events in the restored batch are sent with the prefix, so they need
+    // baselines only where a surviving or entering voice keeps a value. A later
+    // preamble message plays at its own deadline: every voice still sounding
+    // after the batch needs each changed field by then, and a later attack too.
+    var entryKnown = known, batchChecked = false
+    let batchEnd = prefixCount + followingCount
+    func requireSoundingBaselines() throws {
+        batchChecked = true
+        let stale = previous.touched.filter { field in
+            guard let numbers = entrySounding[field.address] else { return false }
+            return field.kind.note.map(numbers.contains) ?? true
+        }
+        guard stale.allSatisfy({ $0.covered(by: entryKnown) }) else { throw UmpRefusal("captured UMP entry needs a source baseline for state of a note still sounding after its entry") }
+    }
+    for (ordinal, event) in zip(prefixCount..<admissionEnd, events[prefixCount..<admissionEnd]) {
+        if ordinal == batchEnd { try requireSoundingBaselines() }
         let message = UmpMessage(event)
         footprint.observe(message)
-        if case .on(let number) = message.action {
-            let required = previous.touched.filter { field in
-                field.kind.determinesAttack && field.address == message.address && (field.kind.note == nil || field.kind.note == number)
-            }
-            guard required.allSatisfy({ $0.covered(by: entryKnown) }) else { throw MidiFailure("captured UMP entry needs a source baseline before its Note On") }
+        var required = umpKeptFields(message, sounding: entrySounding[message.address] ?? [], changed: previous)
+        if case .on(let number) = message.action, ordinal >= batchEnd {
+            required = previous.touched.filter { $0.address == message.address && ($0.kind.note == nil || $0.kind.note == number) }
         }
+        guard required.allSatisfy({ $0.covered(by: entryKnown) }) else {
+            throw UmpRefusal("captured UMP entry needs a source baseline for the patch, Pitch or per-note values a sounding note keeps")
+        }
+        if case .on(let number) = message.action { entrySounding[message.address, default: []].insert(number) }
         if case .relative(let kind) = message.action, !UmpField(address: message.address, kind: kind).covered(by: entryKnown) {
-            throw MidiFailure("captured UMP relative entry needs an absolute source baseline")
+            throw UmpRefusal("captured UMP relative entry needs an absolute source baseline")
         }
         if case .relative = message.action {} else { entryKnown.formUnion(message.fields) }
     }
+    if !batchChecked { try requireSoundingBaselines() }
     try footprint.requireSupported()
-    guard previous.touched.filter({ $0.kind.determinesAttack }).allSatisfy({ $0.covered(by: entryKnown) }) else { throw MidiFailure("captured UMP seek needs an explicit source baseline for previously changed state") }
-    var live = Set<Int>()
-    for channel in channels.values {
-        for voice in channel.voices where !excludingNotes.contains(voice.on) { live.insert(voice.on); if let off = voice.off { live.insert(off) } }
-    }
-    // Establish prior mutations before each surviving Note On, not merely by
-    // the cut. For example a later program message cannot establish the patch
-    // that a voice used when its original Note On selected a sample.
+    guard previous.touched.allSatisfy({ $0.covered(by: entryKnown) }) else { throw UmpRefusal("captured UMP seek needs an explicit source baseline for previously changed state") }
+    // Besides the cut, a changed field needs its baseline earlier in the replay
+    // where a surviving voice keeps its value; the replay is sent at once, so any
+    // other value it sets later still reaches that voice.
     known.removeAll()
-    var replay: [UmpEvent] = []
+    var replay: [UmpEvent] = [], sounding: [UmpAddress: Set<UInt32>] = [:]
     for ordinal in 0..<next {
         let event = events[ordinal], message = UmpMessage(event)
-        if case .on(let number) = message.action, live.contains(ordinal) {
-            let required = previous.touched.filter { $0.kind.determinesAttack && $0.address == message.address && ($0.kind.note == nil || $0.kind.note == number) }
-            guard required.allSatisfy({ $0.covered(by: known) }) else { throw MidiFailure("captured UMP seek needs a source baseline before a surviving Note On") }
+        if case .stateless = message.action { continue }
+        if notes.contains(ordinal) && !live.contains(ordinal) { continue }
+        guard umpKeptFields(message, sounding: sounding[message.address] ?? [], changed: previous).allSatisfy({ $0.covered(by: known) }) else {
+            throw UmpRefusal("captured UMP seek needs a source baseline for a changed value that a Note On, Program Change or Detach keeps")
         }
+        if case .on(let number) = message.action { sounding[message.address, default: []].insert(number) }
         if case .relative = message.action {} else { known.formUnion(message.fields) }
-        if !notes.contains(ordinal) || live.contains(ordinal) { replay.append(event) }
+        replay.append(event)
     }
     return UmpRestoration(events: replay, nextIndex: next, heldNotes: Set(channels.values.flatMap { $0.voices.filter { $0.held && !excludingNotes.contains($0.on) }.map(\.on) }), releaseOwners: releaseOwners, expiredNotes: expiredNotes)
 }

@@ -5581,7 +5581,7 @@
 (test
  (name test_lane_addon_worker_protocol)
  (modules test_lane_addon_worker_protocol)
- (libraries masc masc.agent_core mcp_protocol alcotest eio eio_main yojson))
+ (libraries masc masc.agent_core masc.lane_addon_call_context mcp_protocol alcotest eio eio_main yojson))
 
 (test
  (name test_native_addon_lease)
@@ -5593,7 +5593,7 @@
 (test
  (name test_lane_addon_native_worker)
  (modules test_lane_addon_native_worker)
- (libraries masc masc.agent_core masc_process masc.native_addon_lease mcp_protocol alcotest eio eio.unix eio_main yojson unix)
+ (libraries masc masc.agent_core masc.lane_addon_call_context masc_process masc.native_addon_lease mcp_protocol alcotest eio eio.unix eio_main yojson unix)
  (deps ../bin/masc_native_addon_launcher.exe)
  (action (run %{test} %{dep:../bin/masc_native_addon_launcher.exe})))
 

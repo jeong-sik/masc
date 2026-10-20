@@ -23,6 +23,7 @@ let show = function
   | D.Mouse_wheel (Masc.Tui_mouse_protocol.Wheel_down, row, column) ->
       Printf.sprintf "wheel-down %d,%d" row column
   | D.Mouse_left_press (row, column) -> Printf.sprintf "press %d,%d" row column
+  | D.Mouse_left_drag (row, column) -> Printf.sprintf "drag %d,%d" row column
   | D.Mouse_left_release (row, column) ->
       Printf.sprintf "release %d,%d" row column
   | D.Reply reply -> "reply " ^ show_reply reply
@@ -153,6 +154,17 @@ let test_sgr_mouse () =
     [ "wheel-up 5,10"; "press 3,4"; "release 3,4" ]
     (decode "\x1b[<64;10;5M\x1b[<0;4;3M\x1b[<0;4;3m")
 
+(* Button-event tracking ([?1002]) reports where the pointer moved between a
+   press and its release. Only the left button's motion is read; a right
+   drag and a shifted left drag stay keys nobody binds, as their presses do. *)
+let test_sgr_left_drag () =
+  check_events "press, two moves, release"
+    [ "press 3,4"; "drag 3,5"; "drag 4,9"; "release 4,9" ]
+    (decode "\x1b[<0;4;3M\x1b[<32;5;3M\x1b[<32;9;4M\x1b[<0;9;4m");
+  check_events "right drag and shifted left drag"
+    [ "key unknown-esc"; "key unknown-esc" ]
+    (decode "\x1b[<34;5;3M\x1b[<36;5;3M")
+
 (* The same events SGR gives, with the position the three bytes carry: "*"
    and "%" are column 10 and row 5 offset by 32. *)
 let test_x10_mouse () =
@@ -163,6 +175,17 @@ let test_x10_mouse () =
     (decode
        (Printf.sprintf "\x1b[M%c*%%\x1b[M%c*%%\x1b[M%c*%%x" wheel_up_button
           left_button release_button))
+
+(* X10 motion with the left button held: the motion bit (32) on button 0,
+   offset by 32 like every byte of the report. *)
+let test_x10_left_drag () =
+  let left_button = Char.chr 32 and left_drag = Char.chr (32 + 32)
+  and release_button = Char.chr (3 + 32) in
+  check_events "press, move, release"
+    [ "press 5,10"; "drag 5,11"; "release 5,11" ]
+    (decode
+       (Printf.sprintf "\x1b[M%c*%%\x1b[M%c+%%\x1b[M%c+%%" left_button left_drag
+          release_button))
 
 let test_x10_mouse_short_on_idle () =
   let decoder = D.create () in
@@ -283,7 +306,9 @@ let () =
             test_alt_bracket_is_escape_then_keys ] );
       ( "mouse",
         [ test_case "SGR" `Quick test_sgr_mouse;
+          test_case "SGR left drag" `Quick test_sgr_left_drag;
           test_case "X10" `Quick test_x10_mouse;
+          test_case "X10 left drag" `Quick test_x10_left_drag;
           test_case "X10 short on idle" `Quick test_x10_mouse_short_on_idle;
           test_case "X10 release after overlap is no button's release" `Quick
             test_x10_release_after_overlap_is_no_buttons_release ] );

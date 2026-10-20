@@ -5257,57 +5257,65 @@ let render_keeper_message (state : state) =
     let cursor_column =
       input_column + if split then keeper_roster_pane_cols else 0
     in
-    if split then begin
-      let left_buf = Buffer.create 1024 in
-      let pane_rows = count_frame_lines chat_buf in
-      let portrait =
-        match List.find_opt
-          (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
-          state.keepers with
-        | None -> None
-        | Some keeper ->
-          (match (keeper_reading state keeper).Keeper_control.liveness with
-           | Keeper_control.Present runtime ->
-             (match runtime.kr_portrait with
-              | Tui_decode.Ready equipment ->
-                Masc_tui_chat_portrait.shown ~name:keeper_name
-                  ~portrait:(Keeper_portrait_equipment.Ready equipment)
-                  ~rows:pane_rows ~cols:keeper_roster_pane_cols
-              | Tui_decode.Unavailable _ -> None)
-           | Keeper_control.Unobserved | Keeper_control.Absent
-           | Keeper_control.Invalid _ -> None)
-      in
-      let roster_rows = match portrait with
-        | None -> pane_rows
-        | Some portrait -> portrait.Masc_tui_chat_portrait.roster_rows in
-      Option.iter (fun portrait ->
-        box_line left_buf keeper_roster_pane_cols
-          (Theme.recede () ^ " 현재 대화 · " ^ display_keeper_name ^ Ansi.reset);
-        (* Anchor pixels to the caption actually drawn above the selectable roster. *)
-        let picture_row = count_frame_lines left_buf in
-        List.iter (box_line left_buf keeper_roster_pane_cols)
-          portrait.Masc_tui_chat_portrait.picture_lines;
-        (* A present left-pane row must retain its width: [box_bottom] is
-           a bare newline for full-screen surfaces and would pull the
-           right-pane composer into the portrait column. *)
-        box_line left_buf keeper_roster_pane_cols "";
-        Option.iter (fun (placement : Masc_tui_portrait_view.placement) ->
-          Masc_tui_portrait_view.request
-            {placement with row = picture_row + strip_rows}) portrait.placement)
-        portrait;
-      keeper_roster_pane
-        ~focused:(state.keeper_message_focus = Left_pane)
-        state ~rows:roster_rows ~cols:keeper_roster_pane_cols left_buf;
-      write_two_panes buf ~left_cols:keeper_roster_pane_cols ~left:left_buf
-        ~right:chat_buf
-    end;
+    let roster =
+      if not split then None
+      else begin
+        let left_buf = Buffer.create 1024 in
+        let pane_rows = count_frame_lines chat_buf in
+        let portrait =
+          match List.find_opt
+            (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
+            state.keepers with
+          | None -> None
+          | Some keeper ->
+            (match (keeper_reading state keeper).Keeper_control.liveness with
+             | Keeper_control.Present runtime ->
+               (match runtime.kr_portrait with
+                | Tui_decode.Ready equipment ->
+                  Masc_tui_chat_portrait.shown ~name:keeper_name
+                    ~portrait:(Keeper_portrait_equipment.Ready equipment)
+                    ~rows:pane_rows ~cols:keeper_roster_pane_cols
+                | Tui_decode.Unavailable _ -> None)
+             | Keeper_control.Unobserved | Keeper_control.Absent
+             | Keeper_control.Invalid _ -> None)
+        in
+        let roster_rows = match portrait with
+          | None -> pane_rows
+          | Some portrait -> portrait.Masc_tui_chat_portrait.roster_rows in
+        Option.iter (fun portrait ->
+          box_line left_buf keeper_roster_pane_cols
+            (Theme.recede () ^ " 현재 대화 · " ^ display_keeper_name ^ Ansi.reset);
+          (* Anchor pixels to the caption actually drawn above the selectable roster. *)
+          let picture_row = count_frame_lines left_buf in
+          List.iter (box_line left_buf keeper_roster_pane_cols)
+            portrait.Masc_tui_chat_portrait.picture_lines;
+          (* A present left-pane row must retain its width: [box_bottom] is
+             a bare newline for full-screen surfaces and would pull the
+             right-pane composer into the portrait column. *)
+          box_line left_buf keeper_roster_pane_cols "";
+          Option.iter (fun (placement : Masc_tui_portrait_view.placement) ->
+            Masc_tui_portrait_view.request
+              {placement with row = picture_row + strip_rows}) portrait.placement)
+          portrait;
+        keeper_roster_pane
+          ~focused:(state.keeper_message_focus = Left_pane)
+          state ~rows:roster_rows ~cols:keeper_roster_pane_cols left_buf;
+        write_two_panes buf ~left_cols:keeper_roster_pane_cols ~left:left_buf
+          ~right:chat_buf;
+        (* [write_two_panes] runs to the taller of the two. *)
+        Some
+          { Masc_tui_pane_selection.roster_cols = keeper_roster_pane_cols
+          ; roster_rows = max pane_rows (count_frame_lines left_buf)
+          }
+      end
+    in
     (* History already reserves these two fixed rows. Append them once after
        composing the panes, with the same full width in split and plain chat. *)
     Buffer.add_string buf (" " ^ fit_width identity_row telemetry_cells ^ "\n");
     Buffer.add_string buf
       (footer_line state ~max_cells:cols ?position:scroll_position ~hints:footer_hints);
     finish_frame_beside_acting_pane state ~surface_key:"keeper-message"
-      ~clamped:(Message_scroll scroll_feedback)
+      ~clamped:(Message_scroll scroll_feedback) ?roster
       ~cursor:
         (if state.keeper_message_focus = Left_pane then
            Frame_presenter.Hidden

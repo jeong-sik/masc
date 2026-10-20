@@ -306,7 +306,12 @@ let global =
              Esc or Ctrl-W gives the keys back; the chat keeps Ctrl-W for its draft until \
              the draft is empty"
   ; b Meta "Ctrl-^" "show or hide Browser Lane; retain tab and scroll"
-  ; b Meta "Ctrl-T" "release the mouse so you can drag-select and copy"
+  ; b Meta "Ctrl-T" "mouse to the terminal and back; with masc, a drag copies one pane"
+      ~help:"the mouse starts with masc: a drag selects inside the pane it began in \
+             (Keeper roster, surface or Activity pane) and copies it on release via OSC 52, \
+             a press that does not move clicks, and Esc drops a selection still held; \
+             Ctrl-T hands the mouse to the terminal for its own selection across the \
+             whole window, and Ctrl-T again takes it back"
   ; b Navigate "Ctrl-]" "follow the reference under the cursor"
       ~help:"follow the reference under the cursor; Esc on the surface it opens comes back here"
   ; b Meta "q" "quit"

@@ -79,6 +79,11 @@ let acting_pane_row_targets : Masc_tui_acting_pane.row_target array ref = ref [|
 
 let acting_pane_scroll_max = ref 0
 
+(* Where each pane of the frame being drawn sits on the terminal. The surface
+   ends set it, the render hands it out beside the frame, and the loop reads
+   a drag against the copy the terminal accepted, never this one. *)
+let frame_panes = ref Masc_tui_pane_selection.no_panes
+
 
 
 (* The value [Masc_tui_types.apply_clamped_scroll] writes, read back from
@@ -1228,6 +1233,9 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
   let full_cols = cols + pane_cols in
   let framed = Buffer.create (Buffer.length buf + 256) in
   add_rows_beside_acting_pane state framed ~cols ~pane_rows:body_rows body;
+  frame_panes :=
+    Masc_tui_pane_selection.frame_layout ~first_row:(strip_rows + 1)
+      ~body_rows ~main_cols:cols ~activity_cols:pane_cols ~roster:None;
   Masc_tui_frame_timing.finish_stage ~name:"surface.panes" pane_started;
   let chrome_started = Masc_tui_frame_timing.start_stage () in
   (if agenda_rows > 0 then
@@ -1249,15 +1257,20 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
    laid out against the same [cols] every surface does, the terminal less the
    Activity pane, so the pane is drawn in those columns here too, beside the
    rows above its own footer. The strip
-   spans the whole terminal. *)
-let finish_frame_beside_acting_pane (state : state) ?clamped ~surface_key
-    ~cursor ~rows ~cols buf =
+   spans the whole terminal. [roster] is the Keeper roster the chat drew at
+   its left edge, a pane of its own for a drag. *)
+let finish_frame_beside_acting_pane (state : state) ?clamped ?roster
+    ~surface_key ~cursor ~rows ~cols buf =
   let framed = Buffer.create (Buffer.length buf + 4096) in
   let lines = frame_lines buf in
   (* These frames draw neither the shared composer nor the agenda. Only
      their final footer stays below the pane; use the actual drawn height. *)
   let pane_rows = max 0 (min (rows - 1) (List.length lines - 1)) in
   add_rows_beside_acting_pane state framed ~cols ~pane_rows lines;
+  frame_panes :=
+    Masc_tui_pane_selection.frame_layout ~first_row:(strip_rows + 1)
+      ~body_rows:pane_rows ~main_cols:cols
+      ~activity_cols:!acting_pane_reserved_cols ~roster;
   finish_frame_with_strip state ?clamped ~surface_key ~cursor ~rows
     ~cols:(cols + !acting_pane_reserved_cols) framed
 

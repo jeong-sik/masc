@@ -153,6 +153,13 @@ let last_frame_is_compact presenter =
   | None -> true
   | Some previous -> previous.compact_frame
 
+let presented_rows presenter =
+  if presenter.invalidated then None
+  else
+    Option.map
+      (fun (previous : snapshot) -> Array.to_list previous.screen)
+      presenter.previous
+
 (* Sent when a scheme is picked and when one is dropped. [None] is "follow the
    terminal", which is a reset rather than a colour: masc has no opinion to
    send once the reader has withdrawn theirs. *)

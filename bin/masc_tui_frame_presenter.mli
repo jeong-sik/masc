@@ -34,6 +34,12 @@ val last_frame_is_compact : t -> bool
     Before the first frame and after invalidation this is conservatively
     [true], so input cannot act on a surface the terminal has not shown. *)
 
+val presented_rows : t -> string list option
+(** The rows the terminal shows, as the last successfully presented frame
+    wrote them, one per terminal row (top first, [""] for a row the frame left
+    empty). [None] before the first frame and after invalidation: what the
+    terminal shows then is not a frame this presenter wrote. *)
+
 val setup : t -> write:(string -> unit) -> flush:(unit -> unit) -> unit
 (** Take the alternate screen and discard the cached screen, so the next
     [present] paints every row. Call before the first frame, and again after

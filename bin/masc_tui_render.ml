@@ -656,6 +656,9 @@ let frame_choice (state : state) ~terminal_rows =
 let render (state : state) =
   (* Marks number the targets of this frame alone. *)
   Masc_tui_hit.reset press_marks;
+  (* So do the panes: a frame that ends without recording any, the
+     too-small notice, has none to select from. *)
+  frame_panes := Masc_tui_pane_selection.no_panes;
   (* And the candle, and any placed picture, is on this frame only if this
      frame draws it. *)
   Masc_tui_emblem_screen.begin_frame ();
@@ -733,4 +736,4 @@ let render (state : state) =
           (fun target -> not (press_changes_the_surface target))
           presses
   in
-  ({ frame with Frame_presenter.lines }, clamped, approval, presses)
+  ({ frame with Frame_presenter.lines }, clamped, approval, presses, !frame_panes)

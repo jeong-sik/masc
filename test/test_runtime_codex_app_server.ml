@@ -4990,6 +4990,10 @@ let test_blank_completion_rejected_without_losing_session () =
     {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"completed"}}}|} in
   let blank_terminal =
     {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[{"type":"agentMessage","text":" ","phase":"final_answer"}],"status":"completed"}}}|} in
+  let commentary_item =
+    {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","id":"narration","text":"확인할게요.","phase":"commentary"}}}|} in
+  let commentary_terminal =
+    {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[{"type":"agentMessage","text":"확인할게요.","phase":"commentary"}],"status":"completed"}}}|} in
   let handshake = [init_result; account_chatgpt; thread_result; turn_result] in
   List.iter (fun frames ->
     let base_path = temp_workspace "masc-codex-blank-settlement-" in
@@ -5014,13 +5018,14 @@ let test_blank_completion_rejected_without_losing_session () =
                 ~runtime_id:"codex.codex" with
         | Ok {previous_settlement = Some {session_id = "thread-1"; _}; _} -> ()
         | _ -> fail "next turn would abandon the resumable thread")))
-    [[blank_terminal]; [blank_item; empty_terminal]];
+    [[blank_terminal]; [blank_item; empty_terminal];
+     [commentary_item; empty_terminal]; [commentary_terminal]];
   with_fixture (handshake @
-      [{|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","text":"visible commentary","phase":"commentary"}}}|};
+      [{|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","text":"visible partial","phase":"partial_answer"}}}|};
        blank_item; blank_terminal]) (fun path ->
     match run_fixture path with
     | Ok turn -> check string "blank final does not erase visible fallback"
-        "visible commentary" turn.text
+        "visible partial" turn.text
     | Error error -> fail (Runtime_codex_app_server.error_to_string error));
   (* Neither a terminal frame without a message nor an unfinished blank delta
      is evidence of a completed assistant message. *)
@@ -5034,6 +5039,96 @@ let test_blank_completion_rejected_without_losing_session () =
      [{|{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"blank","delta":""}}|}; empty_terminal]]
 ;;
 
+
+(* [commentary] is narration between tool calls. It reaches the stream, but the
+   turn's answer is the final answer, then any answer candidate (a
+   [partial_answer], an unrecognized phase, or a message without a phase). *)
+let test_commentary_is_not_the_turn_answer () =
+  let handshake = [init_result; account_chatgpt; thread_result; turn_result] in
+  let message (id, phase, text) =
+    `Assoc (["type", `String "agentMessage"; "text", `String text]
+            @ (match id with None -> [] | Some id -> ["id", `String id])
+            @ match phase with None -> [] | Some phase -> ["phase", `String phase]) in
+  let notification method_ fields =
+    Yojson.Safe.to_string (`Assoc ["method", `String method_;
+      "params", `Assoc (["threadId", `String "thread-1"; "turnId", `String "turn-1"] @ fields)]) in
+  let completed item = notification "item/completed" ["item", message item] in
+  let delta (id, _, text) =
+    notification "item/agentMessage/delta"
+      ((match id with None -> [] | Some id -> ["itemId", `String id]) @ ["delta", `String text]) in
+  let terminal items =
+    Yojson.Safe.to_string (`Assoc ["method", `String "turn/completed";
+      "params", `Assoc ["threadId", `String "thread-1";
+        "turn", `Assoc ["id", `String "turn-1"; "items", `List (List.map message items);
+                        "status", `String "completed"]]]) in
+  let commentary = Some "n1", Some "commentary", "확인할게요." in
+  let more_commentary = Some "n2", Some "commentary", "정리할게요." in
+  let final = Some "f1", Some "final_answer", "완료" in
+  let partial = Some "p1", Some "partial_answer", "일부" in
+  let unphased = Some "u1", None, "본문" in
+  let unrecognized = Some "x1", Some "future_phase", "본문" in
+  let frames_of delivery items = match delivery with
+    | `Completed -> List.map completed items @ [terminal []]
+    | `Streamed -> List.concat_map (fun item -> [delta item; completed item]) items @ [terminal []]
+    | `Terminal_items -> [terminal items] in
+  let answer ?(on_event = fun _ -> ()) name frames =
+    with_fixture (handshake @ frames) (fun path ->
+      match run_fixture ~on_stream_event:on_event path with
+      | Ok turn -> turn.text
+      | Error error -> fail (name ^ ": " ^ Runtime_codex_app_server.error_to_string error)) in
+  List.iter (fun (name, items, expected) ->
+    List.iter (fun (delivery_name, delivery) ->
+      check string (name ^ " / " ^ delivery_name) expected
+        (answer name (frames_of delivery items)))
+      ["completed", `Completed; "streamed", `Streamed; "terminal items", `Terminal_items])
+    [ "commentary alone", [commentary], ""
+    ; "commentary before the final answer", [commentary; final], "완료"
+    ; "commentary after the final answer", [final; commentary], "완료"
+    ; "commentary before a partial answer", [commentary; partial], "일부"
+    ; "commentary after a partial answer", [partial; commentary], "일부"
+    ; "commentary before an unphased message", [commentary; unphased], "본문"
+    ; "commentary before an unrecognized phase", [commentary; unrecognized], "본문"
+    ; "two commentaries", [commentary; more_commentary], ""
+    ];
+  (* A delta carries no phase: the streaming text of a commentary item is
+     dropped when the item completes, or when the turn's items name it as
+     commentary. The text of an item that never completes stays the fallback. *)
+  List.iter (fun (name, frames, expected) ->
+    check string name expected (answer name frames))
+    [ "unfinished stream after commentary", [delta commentary; completed commentary;
+        delta (Some "p1", None, "일"); terminal []], "일"
+    ; "unfinished stream alone", [delta (Some "p1", None, "일"); terminal []], "일"
+    ; "streamed commentary named only by the turn's items",
+        [delta commentary; terminal [commentary]], ""
+    ; "unfinished stream beside streamed commentary",
+        [delta commentary; delta (Some "p1", None, "일"); terminal [commentary]], "일"
+    ; "another item's completion leaves an unfinished stream",
+        [delta (Some "a", None, "본"); completed (Some "b", Some "final_answer", "");
+         terminal []], "본"
+    ; "commentary completion leaves another item's unfinished stream",
+        [delta (Some "a", None, "본"); completed more_commentary; terminal []], "본"
+    ; "anonymous commentary",
+        [delta (None, Some "commentary", "확인"); completed (None, Some "commentary", "확인할게요.");
+         terminal []], ""
+    ; "anonymous text adopted by a named commentary",
+        [delta (None, None, "확인"); completed commentary; terminal []], ""
+    ; "anonymous answer candidate",
+        [delta (None, None, "본"); completed (None, None, "본문"); terminal []], "본문"
+    ; "a tool item completing mid-stream",
+        [delta (Some "p1", None, "일"); native_command_started; native_command_completed;
+         terminal []], "일"
+    ];
+  let events = ref [] in
+  check string "commentary alone, streamed" ""
+    (answer ~on_event:(fun event -> events := event :: !events) "stream events"
+       (frames_of `Streamed [commentary]));
+  let stream_text = List.rev !events |> List.filter_map (function
+    | Runtime_codex_app_server.Text_delta {delta; _} -> Some delta
+    | Turn_finished {text} -> Some ("<finished:" ^ text ^ ">")
+    | _ -> None) in
+  check (list string) "commentary reaches the stream and leaves the turn without an answer"
+    ["확인할게요."; "<finished:>"] stream_text
+;;
 
 let test_keeper_reprojects_memory_after_actual_codex_capacity_refusal () =
   let module Memory = Keeper_workspace_memory_host_recall in
@@ -9192,6 +9287,8 @@ let () =
             test_keeper_maps_official_context_error_to_typed_core_error
         ; test_case "blank completion rejects progress but preserves session" `Quick
             test_blank_completion_rejected_without_losing_session
+        ; test_case "commentary is not the turn answer" `Quick
+            test_commentary_is_not_the_turn_answer
         ; test_case
             "Keeper does not retry context error after tool effect"
             `Quick

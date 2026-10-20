@@ -17,8 +17,12 @@ val error_result : start_time:Tool_timing.started -> Lane_addon_runtime.tool_cal
 val snapshot : t -> (Yojson.Safe.t, Browser_addon_client.error) result
 (** Read-only observation on the same original service. This is not a tool
     invocation and does not select, start or replace a browser. *)
-type receipt = {binding:Browser_binding.t;data:Yojson.Safe.t}
-val issue : t -> preference:Browser_selection.preference -> Browser_lane.verb ->
+type receipt = {binding:Browser_binding.t;data:Yojson.Safe.t;
+  raw_result:Mcp_protocol.Mcp_types.tool_result}
+(** The original successful MCP receipt remains available if a caller's
+    observation projection or persistence fails after command completion. *)
+val issue : ?required_actions:Browser_capabilities.operation list ->
+  t -> preference:Browser_selection.preference -> Browser_lane.verb ->
   (receipt, Tool_result.result) result
 (** Invoke the advertised tool once and decode its mandatory connection and
     success receipt. The selected schema hooks remain optional; identity and

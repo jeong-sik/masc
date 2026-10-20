@@ -183,8 +183,11 @@ candidates = ["forbidden.verifier", "official.verifier"]
      contract at all. *)
   check bool "the client is told where to read the contract" true
     (List.mem (`String "--system-prompt-file") argv);
-  check string "managed verifier contract reaches client" managed
-    (member "system_prompt" invocation |> Yojson.Safe.Util.to_string);
+  (* The contract leads the system prompt. Context the official-client host
+     adds for every request, such as the Librarian's frozen unread evidence
+     (#43793), follows it. *)
+  check bool "managed verifier contract leads the client's system prompt" true
+    (String.starts_with ~prefix:managed (member "system_prompt" invocation |> Yojson.Safe.Util.to_string));
   let client_root = member "cwd" invocation |> Yojson.Safe.Util.to_string in
   check bool "client does not run in workspace" false (String.equal root client_root);
   check bool "private session root reclaimed after terminal result" false (Sys.file_exists client_root);

@@ -562,10 +562,18 @@ let failure_json ~audit error =
 ;;
 
 
+(* What the operator can do with a quarantined candidate, read from the
+   candidate ledger and, once a requeue is recorded, from the partition ledger
+   too. A recorded requeue is only half of the transition: the partition
+   leaves [Blocked] in a second write, and a process that ends between the two
+   leaves a [Requeued] candidate beside a [Blocked] partition that
+   [execute] finishes. So the candidate's phase alone cannot say "requeued". *)
 type inventory_phase =
   | Inventory_quarantined
   | Inventory_requeue_requested
+  | Inventory_requeue_unfinished
   | Inventory_requeued
+  | Inventory_requeue_unreconciled
 
 type inventory_item =
   { keeper_name : string
@@ -583,6 +591,7 @@ type inventory_item =
 
 type inventory_error_kind =
   | Inventory_candidate_ledger_unavailable
+  | Inventory_partition_ledger_unavailable
 
 type inventory_error =
   { keeper_name : string
@@ -594,20 +603,69 @@ type inventory =
   ; errors : inventory_error list
   }
 
-let inventory_phase_projection = function
-  | Candidate.Quarantined -> Inventory_quarantined, None, None, None
-  | Candidate.Requeue_requested { requested_at; requested_by } ->
-    Inventory_requeue_requested, Some requested_at, None, Some requested_by
-  | Candidate.Requeued { requeued_at; requested_by } ->
-    Inventory_requeued, None, Some requeued_at, Some requested_by
+(* The partition ledger as the inventory read it. It is read only for a keeper
+   that has a recorded requeue to check, so a keeper with nothing requeued
+   adds no read and no new way to fail. *)
+type partition_view =
+  | Partitions_not_needed
+  | Partitions_read of Partition.t list
+  | Partitions_unavailable
+
+let requeue_recorded (candidate : Candidate.candidate) =
+  match candidate.status with
+  | Candidate.Quarantine { phase = Candidate.Requeued _; _ } -> true
+  | Candidate.Quarantine { phase = Candidate.Quarantined | Candidate.Requeue_requested _; _ }
+  | Candidate.Pending _
+  | Candidate.Judged _
+  | Candidate.Consumed _ -> false
 ;;
 
-let inventory_item_of_candidate ~keeper_name (candidate : Candidate.candidate) =
+(* [Quarantine_pair.classify] is the one reading of a candidate/partition pair
+   that the worker's start-up reconciliation and the operator command share.
+   For a candidate whose requeue is recorded it answers four ways in practice;
+   the arms below that cannot occur for a [Requeued] phase are listed rather
+   than hidden behind a wildcard, and they read as "not explained". *)
+let requeued_phase_of_pair = function
+  | Quarantine_pair.Blocked_requeued -> Inventory_requeue_unfinished
+  | Quarantine_pair.Ready_requeued | Quarantine_pair.Advanced_requeued ->
+    Inventory_requeued
+  | Quarantine_pair.Blocked_unrecorded
+  | Quarantine_pair.Other_partition
+  | Quarantine_pair.Inconsistent _
+  | Quarantine_pair.Blocked_awaiting_request
+  | Quarantine_pair.Blocked_requeue_requested
+  | Quarantine_pair.Advanced_without_requeue -> Inventory_requeue_unreconciled
+;;
+
+let requeued_phase ~partitions ~candidate_id (state : Candidate.quarantine_state) =
+  match partitions with
+  | Partitions_not_needed | Partitions_unavailable -> Inventory_requeue_unreconciled
+  | Partitions_read partitions ->
+    (match
+       List.find_opt
+         (fun (partition : Partition.t) ->
+            String.equal partition.partition_id state.quarantine.partition_id
+            && String.equal partition.candidate_id candidate_id)
+         partitions
+     with
+     | None -> Inventory_requeue_unreconciled
+     | Some partition -> requeued_phase_of_pair (Quarantine_pair.classify partition state))
+;;
+
+let inventory_item_of_candidate ~keeper_name ~partitions (candidate : Candidate.candidate) =
   match candidate.status with
   | Candidate.Pending _ | Candidate.Judged _ | Candidate.Consumed _ -> None
-  | Candidate.Quarantine { quarantine; phase } ->
+  | Candidate.Quarantine ({ quarantine; phase } as state) ->
     let phase, requested_at, requeued_at, requested_by =
-      inventory_phase_projection phase
+      match phase with
+      | Candidate.Quarantined -> Inventory_quarantined, None, None, None
+      | Candidate.Requeue_requested { requested_at; requested_by } ->
+        Inventory_requeue_requested, Some requested_at, None, Some requested_by
+      | Candidate.Requeued { requeued_at; requested_by } ->
+        ( requeued_phase ~partitions ~candidate_id:candidate.candidate_id state
+        , None
+        , Some requeued_at
+        , Some requested_by )
     in
     Some
       { keeper_name
@@ -643,8 +701,22 @@ let inventory ~base_path ~keeper_names =
                 : inventory_error)
                :: errors )
            | Ok candidates ->
+             let partitions, errors =
+               if not (List.exists requeue_recorded candidates)
+               then Partitions_not_needed, errors
+               else (
+                 match Partition.load ~base_path ~keeper_name with
+                 | Ok partitions -> Partitions_read partitions, errors
+                 | Error _ ->
+                   ( Partitions_unavailable
+                   , ({ keeper_name; kind = Inventory_partition_ledger_unavailable }
+                      : inventory_error)
+                     :: errors ))
+             in
              let keeper_items =
-               List.filter_map (inventory_item_of_candidate ~keeper_name) candidates
+               List.filter_map
+                 (inventory_item_of_candidate ~keeper_name ~partitions)
+                 candidates
              in
              List.rev_append keeper_items items, errors)
          ([], [])
@@ -657,11 +729,14 @@ let inventory ~base_path ~keeper_names =
 let inventory_phase_to_string = function
   | Inventory_quarantined -> "quarantined"
   | Inventory_requeue_requested -> "requeue_requested"
+  | Inventory_requeue_unfinished -> "requeue_unfinished"
   | Inventory_requeued -> "requeued"
+  | Inventory_requeue_unreconciled -> "requeue_unreconciled"
 ;;
 
 let inventory_error_kind_to_string = function
   | Inventory_candidate_ledger_unavailable -> "candidate_ledger_unavailable"
+  | Inventory_partition_ledger_unavailable -> "partition_ledger_unavailable"
 ;;
 
 
@@ -734,12 +809,15 @@ let request_to_json (request : request) =
 let inventory_phase_of_string = function
   | "quarantined" -> Some Inventory_quarantined
   | "requeue_requested" -> Some Inventory_requeue_requested
+  | "requeue_unfinished" -> Some Inventory_requeue_unfinished
   | "requeued" -> Some Inventory_requeued
+  | "requeue_unreconciled" -> Some Inventory_requeue_unreconciled
   | _ -> None
 ;;
 
 let inventory_error_kind_of_string = function
   | "candidate_ledger_unavailable" -> Some Inventory_candidate_ledger_unavailable
+  | "partition_ledger_unavailable" -> Some Inventory_partition_ledger_unavailable
   | _ -> None
 ;;
 

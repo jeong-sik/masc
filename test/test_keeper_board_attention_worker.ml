@@ -3294,9 +3294,11 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
     "inventory quarantine CAS"
     quarantine.quarantine_id
     inventory_item.quarantine_id;
+  (* The candidate says Requeued and the partition is still Blocked: the Ready
+     commit has not happened, so this is not a finished requeue (#38276). *)
   (match inventory_item.phase, inventory_item.requeued_at with
-   | Q.Inventory_requeued, Some 31.0 -> ()
-   | _ -> Alcotest.fail "inventory did not expose the durable requeue phase");
+   | Q.Inventory_requeue_unfinished, Some 31.0 -> ()
+   | _ -> Alcotest.fail "inventory did not expose the unfinished requeue");
   (match inventory_item.attempt_provenance with
    | Some durable when same_candidate_provenance durable failed_exact -> ()
    | _ -> Alcotest.fail "inventory lost opaque attempt provenance references");
@@ -3321,7 +3323,7 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
   check_json_string "partition_id" blocked.partition_id;
   check_json_string "candidate_id" persisted.candidate_id;
   check_json_string "quarantine_id" quarantine.quarantine_id;
-  check_json_string "phase" "requeued";
+  check_json_string "phase" "requeue_unfinished";
   let request : Q.request =
     { candidate_id = persisted.candidate_id
     ; expected_quarantine_id = quarantine.quarantine_id
@@ -3351,6 +3353,11 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
   (match recovered.candidate.status, recovered.partition.state with
    | A.Quarantine { phase = A.Requeued _; _ }, P.Ready -> ()
    | _ -> Alcotest.fail "Requeued+Blocked recovery did not commit Ready");
+  (match (Q.inventory ~base_path ~keeper_names:[ "alpha" ]).items with
+   | [ { Q.phase = Q.Inventory_requeued; _ } ] -> ()
+   | _ ->
+     Alcotest.fail
+       "inventory still shows the requeue as unfinished after the partition was released");
   let exact = provenance "manual-requeue-success" in
   let spent ~before_dispatch ~before_advance:_ _candidate =
     ok "bind requeued spent lane" (before_dispatch (provenance "requeued-spent"));
@@ -3466,6 +3473,63 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
   (match (Q.inventory ~base_path ~keeper_names:[ "alpha" ]).items with
    | [] -> ()
    | _ -> Alcotest.fail "settled candidate remained in quarantine inventory")
+;;
+
+let test_inventory_does_not_call_a_requeue_finished_without_its_partition () =
+  with_temp_base "board-attention-inventory-requeue-without-partition" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ~id:"candidate-inventory-pair" ()) in
+  let failed_exact = provenance "inventory-pair-failure" in
+  let execute ~before_dispatch ~before_advance:_ _candidate =
+    ok "bind failed attempt" (before_dispatch failed_exact);
+    raise (Failure "injected exact worker exception")
+  in
+  ignore
+    (ok
+       "create quarantine"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+     : W.step);
+  ignore persisted;
+  let quarantined = load_one_candidate ~base_path in
+  let blocked = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status with
+    | A.Quarantine { quarantine; phase = A.Quarantined } -> quarantine
+    | _ -> Alcotest.fail "fixture did not project quarantine"
+  in
+  let requested =
+    ok
+      "persist requeue request"
+      (A.request_quarantine_requeue
+         ~base_path
+         ~candidate:quarantined
+         ~partition_id:blocked.partition_id
+         ~expected_quarantine_id:quarantine.quarantine_id
+         ~requested_at:30.0
+         ~requested_by:"operator-test")
+  in
+  ignore
+    (ok
+       "persist candidate requeue authorization"
+       (A.finish_quarantine_requeue
+          ~base_path
+          ~candidate:requested
+          ~partition_id:blocked.partition_id
+          ~expected_quarantine_id:quarantine.quarantine_id
+          ~requeued_at:31.0)
+     : A.candidate);
+  let phases () =
+    (Q.inventory ~base_path ~keeper_names:[ "alpha" ]).items
+    |> List.map (fun (item : Q.inventory_item) -> item.phase)
+  in
+  Alcotest.(check bool)
+    "a recorded requeue beside a Blocked partition is unfinished"
+    true
+    (phases () = [ Q.Inventory_requeue_unfinished ]);
+  ok "empty the partition ledger" (P.purge ~base_path ~keeper_name:"alpha");
+  Alcotest.(check bool)
+    "a recorded requeue whose partition row is gone is not shown as finished"
+    true
+    (phases () = [ Q.Inventory_requeue_unreconciled ])
 ;;
 
 let test_ready_requested_recovery_fails_closed () =
@@ -4759,6 +4823,10 @@ let () =
             "Requeued+Blocked recovery settles normally"
             `Quick
             test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles
+        ; Alcotest.test_case
+            "inventory does not call a requeue finished without its partition"
+            `Quick
+            test_inventory_does_not_call_a_requeue_finished_without_its_partition
         ; Alcotest.test_case
             "Ready+Requested recovery fails closed"
             `Quick

@@ -266,7 +266,10 @@ refuses{_ = try owner([source("take",[packet(0,on),packet(1,bend)])],[clip(repea
 let pc1:[UInt32]=[0x23c50500],bank1:[UInt32]=[0x23b50001],on1:[UInt32]=[0x23953c7f]
 refuses{_ = try owner([source("take",[packet(0,pc1),packet(0,bank1),packet(0,on1)])],[clip(repeatCount:2)],duration:2)}
 _ = try owner([source("take",[packet(0,bank1),packet(0,pc1),packet(0,on1)])],[clip(repeatCount:2)],duration:2)
-_ = try owner([source("take",[packet(0,p0),packet(0,pitch),packet(0,on),packet(0,pn),packet(0,detach),packet(1,p1),packet(1,pitch),packet(1,pn)])],[clip(repeatCount:2)],duration:2)
+// A per-note bend after the entry attack is expression, not its baseline.
+// Keep that refusal and establish the admissible baseline before the attack.
+refuses{_ = try owner([source("take",[packet(0,p0),packet(0,pitch),packet(0,on),packet(0,pn),packet(0,detach),packet(1,p1),packet(1,pitch),packet(1,pn)])],[clip(repeatCount:2)],duration:2)}
+_ = try owner([source("take",[packet(0,p0),packet(0,pitch),packet(0,pn),packet(0,on),packet(0,detach),packet(1,p1),packet(1,pitch),packet(1,pn)])],[clip(repeatCount:2)],duration:2)
 // A later region on the same channel follows the earlier one's changes.
 refuses{_ = try owner([first,source("other",[packet(0,on),packet(1,p1)])],[clip(extent:"100000000"),clip("second",source:"other",start:0.1,extent:"100000000")],duration:0.2)}
 // Admission covers playback in order; a seek back that would bring a later

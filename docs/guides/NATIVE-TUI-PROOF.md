@@ -158,6 +158,17 @@ This output can be used to update `docs/guides/TUI-KEYS.md` after checking the
 source identity and digest. It does not establish visible key handling or compare
 screen wording, layout or row order.
 
+Every selected suite runs once even if an earlier suite fails. The workflow
+retains each suite and log pipeline exit code in `test-results.tsv` and the
+receipt. `executed_tests` includes completed failed suites as well as passing
+ones; `behavior_passed` requires the complete selected list in order and zero
+suite/log exit codes. A failed suite still fails the job.
+
+After a successful build, exact-commit binary packaging also runs when a suite
+fails, so the artifact can support further diagnosis without rebuilding. A
+failed behavior receipt does not certify those binaries for installation or
+turn the failed job into a passing check. Cancellation does not start packaging.
+
 The workflow revision chooses the checks, while checkout and dependency setup
 use the selected feature tree. Validate both identities before reusing the
 artifact. A missing receipt, failed suite or partial artifact is not success.

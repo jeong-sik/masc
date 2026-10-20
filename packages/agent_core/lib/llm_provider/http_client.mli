@@ -853,18 +853,27 @@ val read_ndjson
     return [None]. Never raises. *)
 val parse_retry_after_seconds : now:float -> string -> float option
 
+(** Why a request body could not take an injected field. The body is the
+    caller's own serialization, so either case is a defect on their side and
+    the request must not be dispatched. *)
+type body_injection_error =
+  | Body_not_json of { detail : string }
+  | Body_not_object
+
+val body_injection_error_to_string : body_injection_error -> string
+
 (** Inject ["stream": true] into a JSON body string.
-    Any caller-supplied [stream] is replaced to avoid duplicate object keys. *)
-val inject_stream_param : string -> string
+    Any caller-supplied [stream] is replaced to avoid duplicate object keys.
+    A body that is not a JSON object is an [Error]. *)
+val inject_stream_param : string -> (string, body_injection_error) result
 
 (** Inject [{"stream_options": {"include_usage": true}}] into a JSON body
     string. OpenAI-compatible providers omit token usage from streaming
     responses unless this flag is set. Use only for OpenAI-compatible
     kinds; native-usage providers (Anthropic, Ollama, Gemini) must not
     receive it. Any caller-supplied [stream_options] is replaced to avoid
-    double-injection; a non-object or unparseable body is returned
-    unchanged. *)
-val inject_stream_options_include_usage : string -> string
+    double-injection; a body that is not a JSON object is an [Error]. *)
+val inject_stream_options_include_usage : string -> (string, body_injection_error) result
 
 (** Inject both ["stream": true] and [{"stream_options": {"include_usage": true}}]
     in a single parse/serialize pass. Byte-identical to
@@ -875,7 +884,7 @@ val inject_stream_options_include_usage : string -> string
     [Yojson.Safe.to_string] of the request body per turn. Native-usage
     providers (Anthropic, Ollama, Gemini) should keep using
     [inject_stream_param] (stream only). *)
-val inject_stream_and_options : string -> string
+val inject_stream_and_options : string -> (string, body_injection_error) result
 
 (** [safe_cohttp_response_flow source] wraps a [cohttp-eio] response body flow
     so underlying reads use buffers of at least 64KB, buffering any remainder

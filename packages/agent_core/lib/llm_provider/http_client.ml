@@ -3494,13 +3494,30 @@ let read_ndjson
   loop ()
 ;;
 
-let inject_stream_param body_str =
+type body_injection_error =
+  | Body_not_json of { detail : string }
+  | Body_not_object
+
+let body_injection_error_to_string = function
+  | Body_not_json { detail } ->
+    Printf.sprintf "request body is not valid JSON: %s" detail
+  | Body_not_object -> "request body is not a JSON object"
+;;
+
+(* A body that cannot take the fields is an error for the caller, never a
+   silently unchanged request: the provider would otherwise answer a body that
+   was not asked to stream. *)
+let inject_into_object_body body_str inject =
   match Yojson.Safe.from_string body_str with
-  | `Assoc fields ->
-    let without_existing = List.filter (fun (k, _) -> k <> "stream") fields in
-    Yojson.Safe.to_string (`Assoc (("stream", `Bool true) :: without_existing))
-  | other -> Yojson.Safe.to_string other
-  | exception Yojson.Json_error _ -> body_str
+  | `Assoc fields -> Ok (Yojson.Safe.to_string (`Assoc (inject fields)))
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    Error Body_not_object
+  | exception Yojson.Json_error detail -> Error (Body_not_json { detail })
+;;
+
+let inject_stream_param body_str =
+  inject_into_object_body body_str (fun fields ->
+    ("stream", `Bool true) :: List.filter (fun (k, _) -> k <> "stream") fields)
 ;;
 
 (* OpenAI streaming omits the [usage] object on every chunk unless the
@@ -3510,32 +3527,18 @@ let inject_stream_param body_str =
    report zero token usage. Anthropic/Ollama/Gemini carry usage natively
    and must NOT receive this field. Mirrors [inject_stream_param]'s
    JSON-manipulation style: drop any caller-supplied [stream_options]
-   before re-adding so the flag cannot be double-injected, and leave a
-   malformed/non-object body untouched. *)
+   before re-adding so the flag cannot be double-injected. *)
 let inject_stream_options_include_usage body_str =
-  match Yojson.Safe.from_string body_str with
-  | `Assoc fields ->
-    let without_existing = List.filter (fun (k, _) -> k <> "stream_options") fields in
-    Yojson.Safe.to_string
-      (`Assoc
-          (("stream_options", `Assoc [ "include_usage", `Bool true ]) :: without_existing))
-  | other -> Yojson.Safe.to_string other
-  | exception Yojson.Json_error _ -> body_str
+  inject_into_object_body body_str (fun fields ->
+    ("stream_options", `Assoc [ "include_usage", `Bool true ])
+    :: List.filter (fun (k, _) -> k <> "stream_options") fields)
 ;;
 
 let inject_stream_and_options body_str =
-  match Yojson.Safe.from_string body_str with
-  | `Assoc fields ->
-    let without_existing =
-      List.filter (fun (k, _) -> k <> "stream" && k <> "stream_options") fields
-    in
-    Yojson.Safe.to_string
-      (`Assoc
-          (("stream_options", `Assoc [ "include_usage", `Bool true ])
-           :: ("stream", `Bool true)
-           :: without_existing))
-  | other -> Yojson.Safe.to_string other
-  | exception Yojson.Json_error _ -> body_str
+  inject_into_object_body body_str (fun fields ->
+    ("stream_options", `Assoc [ "include_usage", `Bool true ])
+    :: ("stream", `Bool true)
+    :: List.filter (fun (k, _) -> k <> "stream" && k <> "stream_options") fields)
 ;;
 
 let%test "inject_stream_and_options matches chained param >> options" =
@@ -3545,7 +3548,7 @@ let%test "inject_stream_and_options matches chained param >> options" =
   List.for_all
     (fun body ->
        inject_stream_and_options body
-       = inject_stream_options_include_usage (inject_stream_param body))
+       = Result.bind (inject_stream_param body) inject_stream_options_include_usage)
     [ {|{"model":"glm-4"}|}
     ; {|{"model":"gpt-4","stream":false}|}
     ; {|{"messages":[],"stream_options":{"include_usage":false}}|}

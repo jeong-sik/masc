@@ -3,9 +3,14 @@
 open Agent_core
 open Llm_provider
 
+let injected = function
+  | Ok body -> body
+  | Error error -> Alcotest.fail (Http_client.body_injection_error_to_string error)
+;;
+
 let test_inject_stream_param_basic () =
   let body = {|{"model":"gpt-4","messages":[]}|} in
-  let result = Http_client.inject_stream_param body in
+  let result = injected (Http_client.inject_stream_param body) in
   let json = Yojson.Safe.from_string result in
   let open Yojson.Safe.Util in
   Alcotest.(check bool) "stream present" true (json |> member "stream" |> to_bool);
@@ -14,7 +19,7 @@ let test_inject_stream_param_basic () =
 
 let test_inject_stream_param_existing_stream () =
   let body = {|{"stream":false,"model":"test"}|} in
-  let result = Http_client.inject_stream_param body in
+  let result = injected (Http_client.inject_stream_param body) in
   let json = Yojson.Safe.from_string result in
   let fields =
     match json with
@@ -27,23 +32,58 @@ let test_inject_stream_param_existing_stream () =
 ;;
 
 let test_inject_stream_param_non_json () =
-  let body = "not json" in
-  let result = Http_client.inject_stream_param body in
-  Alcotest.(check string) "returned as-is" "not json" result
+  match Http_client.inject_stream_param "not json" with
+  | Error (Http_client.Body_not_json _) -> ()
+  | Error Http_client.Body_not_object -> Alcotest.fail "unparseable text is not JSON at all"
+  | Ok body -> Alcotest.failf "an unparseable body was accepted as %S" body
 ;;
 
 let test_inject_stream_param_empty () =
   let body = "{}" in
-  let result = Http_client.inject_stream_param body in
+  let result = injected (Http_client.inject_stream_param body) in
   let json = Yojson.Safe.from_string result in
   let open Yojson.Safe.Util in
   Alcotest.(check bool) "stream added" true (json |> member "stream" |> to_bool)
 ;;
 
 let test_inject_stream_param_array () =
-  let body = "[1,2,3]" in
-  let result = Http_client.inject_stream_param body in
-  Alcotest.(check string) "array unchanged" "[1,2,3]" result
+  match Http_client.inject_stream_param "[1,2,3]" with
+  | Error Http_client.Body_not_object -> ()
+  | Error (Http_client.Body_not_json _) -> Alcotest.fail "an array is valid JSON"
+  | Ok body -> Alcotest.failf "a JSON array was accepted as %S" body
+;;
+
+(* The three injectors refuse the same inputs, so no caller can end up with a
+   body that one of them left unstreamed and another let through. *)
+let test_inject_stream_refusals_agree () =
+  List.iter
+    (fun body ->
+       let refused injector =
+         Result.is_error (injector body)
+       in
+       Alcotest.(check bool) ("param refuses " ^ body) true
+         (refused Http_client.inject_stream_param);
+       Alcotest.(check bool) ("options refuses " ^ body) true
+         (refused Http_client.inject_stream_options_include_usage);
+       Alcotest.(check bool) ("combined refuses " ^ body) true
+         (refused Http_client.inject_stream_and_options))
+    [ "not json"; "[1,2,3]"; ""; "null"; "42"; {|"text"|}; "{not-json" ]
+;;
+
+(* A streaming request whose body cannot take the stream fields is rejected
+   before dispatch, with the same error type as other serialization failures. *)
+let test_finalize_stream_body_rejects_unstreamable_body () =
+  List.iter
+    (fun http_codec ->
+       match Complete_common.finalize_stream_body ~http_codec "{not-json" with
+       | Error (Http_client.AcceptRejected _) -> ()
+       | Error _ -> Alcotest.fail "expected AcceptRejected"
+       | Ok body -> Alcotest.failf "an unparseable body was finalized as %S" body)
+    [ Provider_http_codec.Anthropic_messages
+    ; Provider_http_codec.Ollama_chat
+    ; Provider_http_codec.Openai_chat
+    ; Provider_http_codec.Glm_chat
+    ]
 ;;
 
 let test_inject_stream_and_options_parity () =
@@ -67,10 +107,14 @@ let test_inject_stream_and_options_parity () =
     (fun body ->
        let combined = Http_client.inject_stream_and_options body in
        let chained =
-         Http_client.inject_stream_options_include_usage
+         Result.bind
            (Http_client.inject_stream_param body)
+           Http_client.inject_stream_options_include_usage
        in
-       Alcotest.(check string) "parity with chained" chained combined)
+       Alcotest.(check (result string string))
+         "parity with chained"
+         (Result.map_error Http_client.body_injection_error_to_string chained)
+         (Result.map_error Http_client.body_injection_error_to_string combined))
     bodies
 ;;
 
@@ -1165,6 +1209,11 @@ let () =
         ; Alcotest.test_case "non-json" `Quick test_inject_stream_param_non_json
         ; Alcotest.test_case "empty object" `Quick test_inject_stream_param_empty
         ; Alcotest.test_case "array" `Quick test_inject_stream_param_array
+        ; Alcotest.test_case "refusals agree" `Quick test_inject_stream_refusals_agree
+        ; Alcotest.test_case
+            "finalize rejects unstreamable body"
+            `Quick
+            test_finalize_stream_body_rejects_unstreamable_body
         ; Alcotest.test_case
             "and_options parity with chained"
             `Quick

@@ -1135,7 +1135,8 @@ let fold_chunks ~traces entries =
               Hashtbl.replace lane_folds key (entry, count)
           | true, None ->
               plains :=
-                (entry.ae_at, row_of_entry ~duration_ms:None entry) :: !plains)
+                (entry.ae_at, keeper_row_of_entry ~traces ~duration_ms:None entry)
+                :: !plains)
       | Some member ->
           let keeper = keeper_of_event ~traces event in
           let session = session_of_member member in

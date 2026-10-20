@@ -78,5 +78,5 @@ let lines ~height ~render t =
     | Some (Package package) ->
         [package.metadata.title ^ " · revision " ^ package.metadata.revision;package.manifest_path]
         @ Option.to_list package.metadata.description
-        @ ["Enter rereads the package and image state; nothing is installed yet."] in
+        @ ["Enter rereads the package execution; nothing is installed yet."] in
   header @ visible @ List.concat_map render details

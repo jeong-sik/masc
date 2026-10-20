@@ -14,6 +14,7 @@ module Runtime = struct
 end
 module Types = Lane_addon_types
 module Store = Lane_addon_store
+let ( let* ) = Result.bind
 
 let unwrap = function Ok value -> value | Error message -> fail message
 let member = Yojson.Safe.Util.member
@@ -88,8 +89,10 @@ let make_backend () =
     Lane_addon_slot.proven (Fake.port state.world) ~expected:engine ~lift:Fun.id work in
   let backend : Runtime.For_testing.backend = {
     start = (fun ~sw:_ ~state_owner ~instance_id ~(package : Types.package) ~binding:_ ~on_engine ~is_live_instance ~on_created ->
+      let* container = Types.container package
+        |> Result.map_error (fun detail -> Lifecycle.Worker_failed detail) in
       Hashtbl.replace state.state_owners instance_id
-        (Option.map (Lane_addon_worker_state.volume_name ~runtime:package.runtime) state_owner);
+        (Option.map (Lane_addon_worker_state.volume_name ~runtime:container.runtime) state_owner);
       let stopped, release_stop = Eio.Promise.create () in
       let stop_sent = ref false in
       let container_id = Store.digest instance_id in
@@ -145,7 +148,7 @@ let make_backend () =
         | Ok () ->
             let name, mine = match state_owner with
               | Some owner ->
-                  Lane_addon_worker_state.container_name ~runtime:package.runtime owner,
+                  Lane_addon_worker_state.container_name ~runtime:container.runtime owner,
                   Some (Lane_addon_worker_state.identity owner)
               | None -> container_name instance_id, None in
             (match Lane_addon_slot.claim (Fake.port state.world) ~name ~instance_id ~mine ~is_live_instance with

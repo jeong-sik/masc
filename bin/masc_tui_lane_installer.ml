@@ -10,7 +10,9 @@ let text name json = let* value = field name json in match value with
 let string_schema = `Assoc ["type",`String "string";"minLength",`Int 1]
 let object_schema properties = `Assoc ["type",`String "object";"properties",`Assoc properties;
   "required",`List (List.map (fun (key,_) -> `String key) properties);"additionalProperties",`Bool false]
-type preview = {path:string;title:string;revision:string;image:string;image_state:string}
+type inspection = Available of string | Unverified of string
+type execution = Host_process | Container of {image_name:string;inspection:inspection}
+type preview = {path:string;title:string;revision:string;execution:execution}
 type t = Path of Form.t | Pending of int * string * t | Binding of preview * Form.t
   | Catalog of Browser.t | Catalog_pending of int * string option * Browser.t * Form.t option
   | Directory of Form.t * Browser.t
@@ -38,18 +40,25 @@ let accept_preview json =
   let* path = text "manifest_path" json in
   let* package = field "package" json in
   let* title = text "title" package in let* revision = text "revision" package in
-  let* image = text "image" package in
-  let* image_result = field "image" json in
-  let* state = text "state" image_result in
-  let* image_state = match state with
-    | "available" -> let* digest = text "digest" image_result in Ok ("Available: " ^ digest)
-    | "unverified" -> let* detail = text "detail" image_result in Ok ("Image unverified: " ^ detail)
-    | _ -> Error "unknown image inspection state" in
+  let* execution = field "execution" json in
+  let* kind = text "kind" execution in
+  let* execution = match kind with
+    | "host_process" -> Ok Host_process
+    | "container" ->
+        let* image_name = text "image_name" execution in
+        let* image = field "image" execution in
+        let* state = text "state" image in
+        let* inspection = match state with
+          | "available" -> let* digest = text "digest" image in Ok (Available digest)
+          | "unverified" -> let* detail = text "detail" image in Ok (Unverified detail)
+          | _ -> Error "unknown image inspection state" in
+        Ok (Container {image_name;inspection})
+    | _ -> Error "unknown package execution kind" in
   let* binding_schema = field "binding_schema" package in
   if binding_schema=`Null then Ok None else
   let* form = Form.create ~schema:(object_schema ["installation_id",string_schema;"run_id",string_schema;"binding",binding_schema])
       ~initial:(`Assoc []) in
-  Ok (Some (Binding ({path;title;revision;image;image_state},form)))
+  Ok (Some (Binding ({path;title;revision;execution},form)))
 (* The refusal names the key that works where the preview returns. Only the
    package browser answers n; a text input takes it as a letter, and Esc leads
    from each input back to the Add-ons list, where n also opens the editor. *)
@@ -152,9 +161,15 @@ let lines ?(height=24) ?(render=fun line -> [line]) state =
   | Catalog_pending (_,path,_,_) -> render_lines ["Reading local packages · Esc:cancel";
       "Folder: " ^ (match path with None -> "workspace root" | Some path -> path)]
   | Directory (form,_) -> render_lines ("Open workspace folder" :: Form.lines form)
-  | Pending (_,path,_) -> render_lines ["Reading package and image state · Esc:cancel";"Manifest: " ^ path]
+  | Pending (_,path,_) -> render_lines ["Reading package execution · Esc:cancel";"Manifest: " ^ path]
   | Path form -> render_lines ("Install Add-on: manifest path on the connected server" :: Form.lines form)
   | Binding (preview,form) ->
+      let execution = match preview.execution with
+        | Host_process -> ["Runs as a host process."]
+        | Container {image_name;inspection} ->
+            ["Image: " ^ image_name;match inspection with
+              | Available digest -> "Available: " ^ digest
+              | Unverified detail -> "Image unverified: " ^ detail] in
       render_lines (["Install " ^ preview.title ^ " · revision " ^ preview.revision;
-       "Manifest: " ^ preview.path;"Image: " ^ preview.image;preview.image_state;
-       "Preview does not start a worker. Enter after review creates a local TOML draft."] @ Form.lines form)
+       "Manifest: " ^ preview.path] @ execution @
+       ["Preview does not start a worker. Enter after review creates a local TOML draft."] @ Form.lines form)

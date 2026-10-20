@@ -510,7 +510,7 @@ let resolve_machine_output m ~consumer_id machine =
   | [e] when e.state = Lifecycle.Attached && e.started && not e.stopping && e.seq > 0
       && e.pending = Idle && e.active_tool_calls = 0 && Option.is_none e.current_action ->
       Ok {Lane_addon_sources.worker_instance=e.instance_id;worker_seq=e.seq;
-        worker_max_bytes=e.package.resources.max_reply_bytes;worker_output=e.output}
+        worker_max_bytes=(Lane_addon_types.max_reply_bytes e.package);worker_output=e.output}
   | [_] -> Error "machine worker observation is unavailable or refreshing"
   | [] -> Error "no shared machine worker is attached"
   | _ -> Error "multiple shared workers provide the machine"
@@ -604,7 +604,9 @@ let stop_entry ~sw ~backend m e =
       | None, Some engine when not e.running -> Some (None, fun () ->
           let* state_owner = state_owner_for_entry m e
             |> Result.map_error (fun message -> Lifecycle.Cleanup_unconfirmed message) in
-          backend.recover_stop ~runtime:e.package.runtime ~state_owner ~instance_id:e.instance_id ~engine ~container_id:None)
+          let* container = Lane_addon_types.container e.package
+            |> Result.map_error (fun detail -> Lifecycle.Cleanup_unconfirmed detail) in
+          backend.recover_stop ~runtime:container.runtime ~state_owner ~instance_id:e.instance_id ~engine ~container_id:None)
       | None, (None | Some _) -> None (* startup still owns the unresolved create operation *) in
     match cleanup with
     | None -> ()
@@ -721,7 +723,7 @@ let commit_output m e ~sources output =
   let* namespaced_bytes = add_output_bytes
     (Int64.of_int (String.length (Yojson.Safe.to_string (output_to_json output)))) allowance in
   let* () =
-    if namespaced_bytes <= Int64.of_int e.package.resources.max_reply_bytes
+    if namespaced_bytes <= Int64.of_int (Lane_addon_types.max_reply_bytes e.package)
     then Ok () else Error "namespaced observation exceeds the declared host observation envelope" in
   let output = namespace e seq output in
   let write = match Eio.Fiber.get observation_writer_key with
@@ -1298,7 +1300,7 @@ let observation_for_export ~config ~access ~name = Eio_context.run_on_owner_doma
            | Detaching | Detached -> Ok None
            | Attached | Observing ->
                if e.seq = 0 || not e.started || e.stopping then Error "machine worker observation is not available yet"
-               else Ok (Some {instance_id=e.instance_id;observation_seq=e.seq;max_bytes=e.package.resources.max_reply_bytes;
+               else Ok (Some {instance_id=e.instance_id;observation_seq=e.seq;max_bytes=(Lane_addon_types.max_reply_bytes e.package);
                  refreshing=e.state = Lifecycle.Observing || e.pending <> Idle || e.active_tool_calls > 0 || Option.is_some e.current_action;output=e.output}))
       | _ -> Error "multiple visible installations provide this machine")
 
@@ -1923,7 +1925,8 @@ let preserve_state_runtime ~configuration ~(package : package) bindings =
             then Ok ()
             else
               let* previous_runtime = retained_runtime previous_package in
-              if previous_runtime = package.runtime then Ok ()
+              let* container = Lane_addon_types.container package in
+              if previous_runtime = container.runtime then Ok ()
               else Error "Persistent state belongs to a different runtime; use a new installation id"
         | None | Some _ -> Ok ()) (Ok ()) bindings
 
@@ -2810,7 +2813,10 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
       | Ok state, Ok runtime -> waiting ~runtime state
       | Error _, _ | _, Error _ -> false in
     let retire sw e =
-      if waiting ~runtime:e.package.runtime e.state then () else
+      let blocked = match e.package.execution with
+        | Container container -> waiting ~runtime:container.runtime e.state
+        | Host_process _ -> false in
+      if blocked then () else
       match detach_entry ~sw m e with
       | Ok _ -> ()
       | Error message ->
@@ -2828,7 +2834,8 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
        foreign holder, ends the sweep for this process. An engine that does
        not answer is an issue of this beat. *)
     let runtimes_in_use =
-      let declared = List.map (fun (d : Lane_addon_config.declaration) -> d.package.runtime) snapshot.declarations in
+      let declared = List.filter_map (fun (d : Lane_addon_config.declaration) ->
+        Lane_addon_types.container_runtime d.package) snapshot.declarations in
       let retained = List.filter_map (fun (_, fields) ->
         Option.bind (List.assoc_opt "package" fields) (fun json ->
           Result.to_option (let* package = object_ json in retained_runtime package))) histories in

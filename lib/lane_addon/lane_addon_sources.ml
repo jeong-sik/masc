@@ -585,7 +585,7 @@ let acquire ~access ~store ~(package : Lane_addon_types.package) ~resolve_machin
   let reserved = List.map (fun source -> source, fallback source, wire_length (fallback source)) sources in
   let separators = max 0 (List.length sources - 1) in
   let minimum = List.fold_left (fun n (_, _, length) -> n + length) (2 + separators) reserved in
-  if minimum > package.resources.max_reply_bytes then
+  if minimum > (Lane_addon_types.max_reply_bytes package) then
     Error "binding source identities exceed the combined ingress envelope"
   else
     let rec loop acc remaining reserved_rest = function
@@ -597,5 +597,5 @@ let acquire ~access ~store ~(package : Lane_addon_types.package) ~resolve_machin
           let size = wire_length captured in
           let selected, size = if size <= available then captured, size else missing, missing_size in
           loop (selected :: acc) (remaining - size) tail_reserved rest in
-    let available = package.resources.max_reply_bytes - 2 - separators in
+    let available = (Lane_addon_types.max_reply_bytes package) - 2 - separators in
     loop [] available (minimum - 2 - separators) reserved

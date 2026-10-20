@@ -8,6 +8,7 @@ module S = Mcp_protocol.Sampling
 module Store = Lane_addon_store
 
 let require = function Ok value -> value | Error detail -> failwith detail
+let container_spec package = T.container package |> require
 let ensure condition detail = if not condition then failwith detail
 let member = Yojson.Safe.Util.member
 let text key value = member key value |> Yojson.Safe.Util.to_string
@@ -104,9 +105,9 @@ let run ~repo_root ~output_dir ~head_sha =
         in ensure (version<>"") "Docker daemon did not return a server version"; version in
       let images = [package repo_root "fusion-compute";package repo_root "fusion-report"] in
       let image_records = List.map (fun (package : T.package) ->
-        let value = Yojson.Safe.from_string (docker ["image";"inspect";package.image])
+        let value = Yojson.Safe.from_string (docker ["image";"inspect";(container_spec package).image])
           |> Yojson.Safe.Util.to_list |> List.hd in
-        package.image, value) images in
+        (container_spec package).image, value) images in
       let daemon_version = daemon () in
       let compiled_sha = match Build_commit_generated.commit with Some sha -> sha
         | None -> failwith "probe binary has no embedded build commit" in
@@ -309,7 +310,7 @@ let run ~repo_root ~output_dir ~head_sha =
             let data = owned_container id container in
             let package_id = text "addon_id" instance in
             let package = List.find (fun (package : T.package) -> package.id=package_id) images in
-            let image = List.assoc package.image image_records in
+            let image = List.assoc (container_spec package).image image_records in
             let host = member "HostConfig" data and container_config = member "Config" data in
             ensure (text "NetworkMode" host="none") "container has network access";
             ensure (member "ReadonlyRootfs" host=`Bool true) "container root is writable";
@@ -326,10 +327,10 @@ let run ~repo_root ~output_dir ~head_sha =
             let int64 key = match member key host with
               | `Int value -> Int64.of_int value | `Intlit value -> Int64.of_string value
               | _ -> failwith ("Docker resource field is not an integer: " ^ key) in
-            ensure (int64 "NanoCpus"=Int64.of_float (Float.round (package.resources.cpus *. 1_000_000_000.))) "Docker CPU limit differs from the installed package";
-            ensure (int64 "Memory"=package.resources.memory_bytes
-              && int64 "MemorySwap"=package.resources.memory_bytes
-              && Some (int64 "PidsLimit")=Option.map Int64.of_int package.resources.pids) "Docker memory or PID limits differ from the installed package";
+            ensure (int64 "NanoCpus"=Int64.of_float (Float.round ((container_spec package).resources.cpus *. 1_000_000_000.))) "Docker CPU limit differs from the installed package";
+            ensure (int64 "Memory"=(container_spec package).resources.memory_bytes
+              && int64 "MemorySwap"=(container_spec package).resources.memory_bytes
+              && Some (int64 "PidsLimit")=Option.map Int64.of_int (container_spec package).resources.pids) "Docker memory or PID limits differ from the installed package";
             (match list "Mounts" data with
              | [mount] -> ensure (member "RW" mount=`Bool false
                  && text "Destination" mount="/addon" && text "Source" mount=package.directory)
@@ -339,7 +340,7 @@ let run ~repo_root ~output_dir ~head_sha =
               Yojson.Safe.Util.to_string value |> String.split_on_char '=' |> List.hd) in
             container_receipts := `Assoc ["instance_id",`String id;"container_id",`String container;
               "installation_id",member "configuration" instance |> member "id";
-              "image",`String package.image;"image_id",member "Image" data;
+              "image",`String (container_spec package).image;"image_id",member "Image" data;
               "protocol_sha256",`String protocol_sha;
               "network",`String "none";"readonly_rootfs",`Bool true;"cap_drop",member "CapDrop" host;
               "security_options",member "SecurityOpt" host;"user",member "User" container_config;

@@ -26,11 +26,11 @@ let with_store f =
       f dir (Store.create ~root:(Filename.concat dir "retained"))))
 let package dir max_bytes : Types.package = {
   id="source-test";revision="1";title="Source capture fixture";
-  contributions=[Types.Observe];image="unused";command=["unused"];
-  directory=dir;skills_directory=None;action_tool=None;runtime=Types.Docker;state_storage=Types.Ephemeral;tool_invocation=Types.Direct;exported_tools=[];outputs=[];refresh_policy=Types.Every_hint;
+  contributions=[Types.Observe];command=["unused"];
+  directory=dir;skills_directory=None;action_tool=None;state_storage=Types.Ephemeral;tool_invocation=Types.Direct;exported_tools=[];outputs=[];refresh_policy=Types.Every_hint;
   model_access=Types.Model_disabled;exact_outputs=[];tool_hooks=[];operator_asks=false;
   binding_schema=None;presentation=Masc.Lane_addon_presentation.empty;
-  resources={cpus=0.5;memory_bytes=134217728L;pids=Some 16;max_reply_bytes=max_bytes}}
+  execution=Types.Host_process {max_reply_bytes=max_bytes}}
 let file_source id path = `Assoc ["kind", `String "snapshot_file";
   "source_id", `String id; "path", `String path]
 let binding sources = `Assoc ["sources", `List sources]

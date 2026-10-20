@@ -21,7 +21,7 @@ const schema = object({ sources: { type: 'array', minItems: 1, items: object({
   output_id: { type: 'string', minLength: 1 },
 }, ['source_id', 'kind', 'installation_id', 'selection']) }, count: { type: 'integer', minimum: 0 }, enabled: { type: 'boolean' } })
 const preview = { manifest_path: '/workspace/packages/report/lane.toml', package: { title: 'Report package', revision: 'fresh-2', image: 'image:2', binding_schema: schema },
-  image: { state: 'unverified', detail: 'Fixture does not inspect Docker' } }
+  execution: { kind: 'container', image_name: 'image:2', image: { state: 'unverified', detail: 'Fixture does not inspect Docker' } } }
 const catalog = { directory: '/workspace/packages', parent: '/workspace', entries: [
   { kind: 'package', manifest_path: preview.manifest_path, title: 'Listed package', revision: 'listed-1', description: 'Input form package' },
   { kind: 'issue', path: '/workspace/packages/bad/lane.toml', message: 'Invalid manifest' },

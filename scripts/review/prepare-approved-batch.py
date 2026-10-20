@@ -108,9 +108,17 @@ class Trees:
         tree = self.commands.sha(result.stdout.splitlines()[0])
         result = subprocess.run(self.git + ["-c", "user.name=Approved selection",
             "-c", "user.email=approved-selection@example.invalid", "-c", "commit.gpgSign=false",
+            "-c", "i18n.commitEncoding=UTF-8",
             "commit-tree", tree, "-p", left, "-p", right],
             input="Explicit source-approved candidate\n", text=True, capture_output=True,
-            env=os.environ | {"GIT_AUTHOR_DATE": "2000-01-01T00:00:00Z",
+            # Identity environment variables override `git -c user.*`.
+            # Freeze every commit identity field so prepare and runner
+            # reconstruction produce the same commit, not only the same tree.
+            env=os.environ | {"GIT_AUTHOR_NAME": "Approved selection",
+                              "GIT_AUTHOR_EMAIL": "approved-selection@example.invalid",
+                              "GIT_COMMITTER_NAME": "Approved selection",
+                              "GIT_COMMITTER_EMAIL": "approved-selection@example.invalid",
+                              "GIT_AUTHOR_DATE": "2000-01-01T00:00:00Z",
                               "GIT_COMMITTER_DATE": "2000-01-01T00:00:00Z"})
         if result.returncode:
             raise SourceUnavailable("tree_commit_failed")

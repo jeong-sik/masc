@@ -55,11 +55,11 @@ let poll ~config ~client ~window_sec =
   match reply with
   | W.Poll_result {command;_} -> Ok command
   | Service_refusal {message;disposition} -> Error (refusal disposition message)
-  | Snapshot_result _|Receipt|Issue_result _ -> Error (Outcome_unknown "unexpected browser poll receipt")
+  | Snapshot_result _|Model_reply _|Receipt|Issue_result _ -> Error (Outcome_unknown "unexpected browser poll receipt")
 let receipt = function
   | W.Receipt -> Ok ()
   | Service_refusal {message;disposition} -> Error (refusal disposition message)
-  | Snapshot_result _|Poll_result _|Issue_result _ -> Error (Outcome_unknown "unexpected browser host receipt")
+  | Snapshot_result _|Model_reply _|Poll_result _|Issue_result _ -> Error (Outcome_unknown "unexpected browser host receipt")
 let deliver ~config ~client ~id ~payload =
   let* service=existing ~config ~client in
   let* reply=call ~config ~service (W.Deliver {client_id=client.B.client_id;id;payload}) in

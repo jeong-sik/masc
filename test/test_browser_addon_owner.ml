@@ -9,14 +9,14 @@ let id = ok (B.client_id_of_string "0c000000-0000-4000-8000-000000000001")
 let client = {B.client_id=id;browser=B.Firefox;version="158";engine_version="158";transport=B.Webdriver_bidi}
 let receipt = function
   | W.Receipt -> true
-  | W.Snapshot_result _|Poll_result _|Issue_result _|Service_refusal _ -> false
+  | W.Snapshot_result _|Model_reply _|Poll_result _|Issue_result _|Service_refusal _ -> false
 let pre_effect = function
   | W.Service_refusal {disposition=W.Not_started;_} -> true
   | W.Service_refusal {disposition=W.Outcome_unknown;_}
-  | W.Snapshot_result _|Poll_result _|Receipt|Issue_result _ -> false
+  | W.Snapshot_result _|Model_reply _|Poll_result _|Receipt|Issue_result _ -> false
 let command = function
   | W.Poll_result {command=Some command;_} -> command
-  | W.Poll_result {command=None;_}|Snapshot_result _|Receipt|Issue_result _|Service_refusal _ -> fail "expected dispatched command"
+  | W.Poll_result {command=None;_}|Snapshot_result _|Model_reply _|Receipt|Issue_result _|Service_refusal _ -> fail "expected dispatched command"
 let scenario () = Eio_main.run (fun env ->
   Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5. (fun () -> Eio.Switch.run (fun sw ->
@@ -46,7 +46,7 @@ let scenario () = Eio_main.run (fun env ->
       (match Eio.Promise.await_exn pending with
        | W.Issue_result (Ok (B.Answered actual)) -> actual=payload
        | W.Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
-       | W.Issue_result (Error _)|Snapshot_result _|Poll_result _|Receipt|Service_refusal _ -> false);
+       | W.Issue_result (Error _)|Snapshot_result _|Model_reply _|Poll_result _|Receipt|Service_refusal _ -> false);
     check bool "identical result retry is idempotent" true
       (receipt (send (W.Deliver {client_id=id;id=issued.id;payload})));
     check bool "changed retry is refused" true
@@ -85,7 +85,7 @@ let scenario () = Eio_main.run (fun env ->
            payload=`Assoc ["ok",`Bool false;"error",`String "client_disconnected"]
        | W.Service_refusal {disposition=W.Not_started;_}
        | W.Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
-       | W.Issue_result (Error _)|Snapshot_result _|Poll_result _|Receipt -> false);
+       | W.Issue_result (Error _)|Snapshot_result _|Model_reply _|Poll_result _|Receipt -> false);
     check bool "late result cannot attach to retired owner" true
       (pre_effect (send (W.Deliver {client_id=id;id=issued.id;payload})));
     check bool "retired owner cannot register again" true

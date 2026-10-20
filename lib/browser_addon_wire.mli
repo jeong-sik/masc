@@ -7,6 +7,11 @@ type command =
   | Retire
 (** Private lifecycle control. Retires admission and waits for owned backend
     cleanup; never export through ordinary browser ingress or model tools. *)
+  | Model_requests
+  | Model_result of Yojson.Safe.t
+  | Model_wait of { after : string option }
+(** Private host broker ports. The long wait ends on a request-set change or
+    retirement, independently of a browser command waiting on its model. *)
   | Poll of { client : Browser_lane.client_info; window_sec : float }
   | Deliver of { client_id : Browser_lane.client_id; id : string; payload : Yojson.Safe.t }
   | Disconnect of Browser_lane.client_id
@@ -34,6 +39,7 @@ val client_of_json : Yojson.Safe.t -> (Browser_lane.client_info, string) result
 type disposition = Not_started | Outcome_unknown
 type reply =
   | Snapshot_result of Yojson.Safe.t
+  | Model_reply of Yojson.Safe.t
   | Poll_result of { command : Browser_lane.issued option; state_id : string }
   | Receipt
   | Issue_result of (Browser_lane.answer, Browser_lane.selection_error) result

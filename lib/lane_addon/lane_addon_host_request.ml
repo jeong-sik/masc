@@ -165,3 +165,19 @@ let result_arguments ~request_id ~result = `Assoc [ "request_id", `String reques
 let accepted_of_json = function
   | `Assoc [ "accepted", `Bool accepted ] -> Ok accepted
   | _ -> Error "lane_host_result must answer exactly {\"accepted\": bool}"
+
+type availability = { revision : string; request_ids : string list }
+let availability_to_json state = `Assoc ["revision",`String state.revision;
+  "request_ids",`List (List.map (fun id -> `String id) state.request_ids)]
+let availability_of_json = function
+  | `Assoc fields when List.sort String.compare (List.map fst fields)=["request_ids";"revision"] ->
+      let* revision = match List.assoc "revision" fields with
+        | `String value when String.trim value<>"" -> Ok value | _ -> Error "invalid host request revision" in
+      let* request_ids = match List.assoc "request_ids" fields with
+        | `List values -> List.fold_right (fun value acc -> let* rest=acc in
+            match value with `String id when String.trim id<>"" -> Ok (id::rest)
+              | _ -> Error "invalid pending host request id") values (Ok [])
+        | _ -> Error "pending host requests must be an array" in
+      if List.length request_ids <> List.length (List.sort_uniq String.compare request_ids)
+      then Error "duplicate pending host request id" else Ok {revision;request_ids}
+  | _ -> Error "invalid host request availability"

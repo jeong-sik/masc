@@ -129,7 +129,7 @@ let invoke ~owner ~principal arguments =
       | Service_refusal {disposition=W.Not_started;_}|Issue_result (Error _)
       | Issue_result (Ok (B.Lane_absent|Rejected_before_effect _)) -> true,Tool_result.Proven_pre_effect
       | Service_refusal {disposition=W.Outcome_unknown;_}|Issue_result (Ok (B.Timed_out|Refused _|Answered _))
-      | Snapshot_result _|Poll_result _|Receipt -> true,Tool_result.Effect_outcome_unknown in
+      | Snapshot_result _|Model_reply _|Poll_result _|Receipt -> true,Tool_result.Effect_outcome_unknown in
     result ~start_time ~failed ~disposition data "browser command failed; inspect its original receipt before further input" in
   match run () with
   | value -> value

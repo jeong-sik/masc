@@ -6,11 +6,11 @@ let check = Alcotest.check Alcotest.bool
 let rec remove path = match (Unix.lstat path).Unix.st_kind with
   | Unix.S_DIR -> Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);Unix.rmdir path
   | Unix.S_REG|Unix.S_LNK|Unix.S_CHR|Unix.S_BLK|Unix.S_FIFO|Unix.S_SOCK -> Unix.unlink path
-let with_claim ?(automation=None) work =
+let with_claim ?(automation=None) ?(models=fun _ -> None) work =
   let directory=Filename.temp_file "browser-addon-slot-" "" in
   Unix.unlink directory;Unix.mkdir directory 0o700;
   let instance_id=Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
-  let context=ok (Socket.context ~instance_id ~automation) in
+  let context=ok (Socket.context ~instance_id ~automation ~models:(models directory)) in
   let root=match context with `Assoc fields -> (match List.assoc_opt "directory" fields with
     | Some (`String root) -> root | _ -> Alcotest.fail "missing allocation directory")
     | _ -> Alcotest.fail "invalid allocation intent" in
@@ -52,6 +52,24 @@ let replaced_directory () = with_claim (fun admission directory root ->
   lease (Lease.retire admission);
   check "different directory identity is retained" true (Result.is_error (Socket.cleanup ~admission ~directory));
   check "replacement preserved" true (Sys.file_exists root))
+let model_configuration_cleanup () =
+  let models directory=Some {Masc.Browser_addon_models.store_root=Filename.concat directory "model-results";
+    outputs=[{Masc.Lane_addon_types.name="locate";schema=`Assoc ["type",`String "string"]}]} in
+  with_claim ~models (fun admission directory root ->
+    let owned=ok (Socket.acquire ~admission ~directory) in
+    check "worker receives the host model configuration flag" true
+      (List.mem "--models" (Socket.arguments owned ~max_message_bytes:65536));
+    let path=Filename.concat root "models.json" in
+    let original=In_channel.with_open_bin path In_channel.input_all in
+    let retained=Filename.concat directory "model-result-receipt" in
+    Out_channel.with_open_bin retained (fun out -> output_string out "retained independently");
+    Out_channel.with_open_bin path (fun out -> output_string out "{}");
+    lease (Lease.retire admission);
+    check "changed model scope prevents allocation release" true (Result.is_error (Socket.cleanup ~admission ~directory));
+    Out_channel.with_open_bin path (fun out -> output_string out original);
+    ok (Socket.cleanup ~admission ~directory);
+    check "model bootstrap is released with original allocation" false (Sys.file_exists root);
+    check "separate model receipts survive resource cleanup" true (Sys.file_exists retained))
 let owned_backend_cleanup () =
   with_claim ~automation:(Some {Browser_configuration.driver="/usr/bin/geckodriver";binary=None})
     (fun admission directory root ->
@@ -97,5 +115,6 @@ let () = Alcotest.run "browser addon socket ownership" ["recovery",[
   Alcotest.test_case "crash before acquisition record" `Quick interrupted_acquisition;
   Alcotest.test_case "unconfirmed socket is retained" `Quick unknown_resources;
   Alcotest.test_case "replacement identity is retained" `Quick replaced_directory;
+  Alcotest.test_case "model bootstrap cleanup preserves separate receipts" `Quick model_configuration_cleanup;
   Alcotest.test_case "owned backend requires receipt and empty resource trees" `Quick owned_backend_cleanup;
   Alcotest.test_case "owned cleanup resumes after interrupted file deletion" `Quick interrupted_owned_cleanup]]

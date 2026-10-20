@@ -712,6 +712,42 @@ let test_restore_preserves_lane_activity_and_autosave () =
         (librarian autosave.lanes).enabled)) [false; true]
 ;;
 
+(* The overrides file is read through [Fs_compat], so inside Eio the read runs
+   on a system thread and does not hold the server's domain (#39273). The
+   outcomes are the ones the inline read gave: a value, a typed read failure
+   for a missing file, a typed JSON failure for a broken one. *)
+let test_override_load_reads_under_an_installed_eio_fs () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let path = Filename.concat dir "prompt_overrides.json" in
+      let entry =
+        { Override.key = prompt_key
+        ; value = "edited"
+        ; authored_against = Override.default_revision ~body:"default"
+        ; template_variables = []
+        }
+      in
+      (match Override.save ~path [ entry ] with
+       | Ok () -> ()
+       | Error error -> Alcotest.fail (Override.error_to_string error));
+      (match Override.load ~path with
+       | Ok [ loaded ] -> Alcotest.(check string) "the saved value is read back" "edited" loaded.Override.value
+       | Ok entries -> Alcotest.failf "expected one entry, read %d" (List.length entries)
+       | Error error -> Alcotest.fail (Override.error_to_string error));
+      (match Override.load ~path:(Filename.concat dir "absent.json") with
+       | Error (Override.Read_failed _) -> ()
+       | Ok _ | Error _ -> Alcotest.fail "a missing file is a read failure");
+      write_file path "{";
+      match Override.load ~path with
+      | Error (Override.Invalid_json _) -> ()
+      | Ok _ | Error _ -> Alcotest.fail "a broken file is a JSON failure")
+;;
+
 let test_default_baseline_survives_drift_and_restore () =
   with_base (fun ~base_path ~keepers:_ ~config:_ ->
     let prompts_dir = Filename.concat base_path "prompts" in
@@ -883,6 +919,8 @@ let () =
             test_a_failed_save_keeps_the_preset_it_was_replacing
         ; Alcotest.test_case "restoring the autosave undoes the latest restore" `Quick
             test_restoring_the_autosave_undoes_the_latest_restore
+        ; Alcotest.test_case "the overrides file is read under an installed Eio fs" `Quick
+            test_override_load_reads_under_an_installed_eio_fs
         ] )
     ]
 ;;

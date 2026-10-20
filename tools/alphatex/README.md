@@ -401,6 +401,10 @@ the selected MIDI region/asset's VST instrument and preset. **Space** renders
 audible MIDI regions through those captured sounds and plays them alongside WAV
 backing through the selected audio output. Selection is undoable and persists
 with the project; original MIDI bytes and source clocks remain unchanged.
+While preparing arrangement VST playback, the status distinguishes MIDI
+projection, completed instance renders out of the verified region/port total,
+and mixing. Stopping playback or editing the project retires that preparation's
+progress; a late worker message cannot replace the current project's status.
 Subsequent Space starts, pauses or resumes the preview; `:stop` ends playback. `l` toggles
 repetition of the loop region inside one native AVAudioEngine/PlayerNode. `:seek 4` moves to
 quarter-note beat 4. Select an audio output with `--output UID` or `:output UID`;

@@ -42,7 +42,7 @@ let test_concurrent_acknowledgement_preserves_deferred_input () = with_store (fu
     (List.map (fun (row : Queue.candidate) -> row.request_id)
       (Queue.candidates (batch keepers_dir))))
 
-let test_concurrent_acknowledgement_detects_receipt_loss () =
+let test_concurrent_receipt_loss_leaves_remaining_input () =
   List.iter (fun reuse_request_id -> with_store (fun keepers_dir ->
   ignore (append keepers_dir "a" "deferred A");
   ignore (append keepers_dir "b" "settled B");
@@ -51,7 +51,7 @@ let test_concurrent_acknowledgement_detects_receipt_loss () =
   let interleaved = ref false in
   let queue_path = Queue.path ~keepers_dir ~keeper_id:"keeper" in
   let after_other_ack = ref "" in
-  let result = Queue.For_testing.acknowledge_with ~keepers_dir ~keeper_id:"keeper"
+  Queue.For_testing.acknowledge_with ~keepers_dir ~keeper_id:"keeper"
     ~read_receipts:(fun ~queue_generation ->
       let earlier = Current.committed_explicit_candidates ~keepers_dir
         ~keeper_id:"keeper" ~queue_generation |> require in
@@ -62,24 +62,21 @@ let test_concurrent_acknowledgement_detects_receipt_loss () =
         if reuse_request_id then ignore (append keepers_dir "b" "new B occurrence");
         after_other_ack := Fs_compat.load_file queue_path;
         Sys.remove (Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper"));
-      Ok earlier) in
-  (match result with Error _ -> () | Ok () -> fail "concurrent receipt loss accepted");
-  check string "receipt loss preserves queue bytes" !after_other_ack
+      Ok earlier) |> require;
+  check string "receipt loss rewrites no queue byte" !after_other_ack
     (Fs_compat.load_file queue_path);
   check (list string) "another acknowledgement removes only committed B" (if reuse_request_id then ["a";"b"] else ["a"])
     (List.map (fun (row : Queue.candidate) -> row.request_id)
       (Queue.candidates (batch keepers_dir))))) [false; true]
 
-let test_concurrently_added_tail_requires_receipt_authority () =
+let test_concurrently_consumed_tail_is_left_to_its_acknowledgement () =
   List.iter (fun lose_receipt -> with_store (fun keepers_dir ->
     ignore (append keepers_dir "a" "deferred A");
     let interleaved = ref false in
-    let observations = ref 0 in
     let queue_path = Queue.path ~keepers_dir ~keeper_id:"keeper" in
     let after_other_ack = ref "" in
-    let result = Queue.For_testing.acknowledge_with ~keepers_dir ~keeper_id:"keeper"
+    Queue.For_testing.acknowledge_with ~keepers_dir ~keeper_id:"keeper"
       ~read_receipts:(fun ~queue_generation ->
-        incr observations;
         let earlier = Current.committed_explicit_candidates ~keepers_dir
           ~keeper_id:"keeper" ~queue_generation |> require in
         if not !interleaved then (
@@ -92,14 +89,12 @@ let test_concurrently_added_tail_requires_receipt_authority () =
           after_other_ack := Fs_compat.load_file queue_path;
           if lose_receipt then
             Sys.remove (Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper"));
-        Ok earlier) in
-    (match result, lose_receipt with
-     | Ok (), false | Error _, true -> ()
-     | Ok (), true -> fail "consumed new tail without receipt authority accepted"
-     | Error detail, false -> fail detail);
-    check int "new tail authority is reobserved" 2 !observations;
+        Ok earlier) |> require;
     check string "outer acknowledgement preserves queue bytes" !after_other_ack
-      (Fs_compat.load_file queue_path))) [false; true]
+      (Fs_compat.load_file queue_path);
+    check (list string) "deferred A stays pending" ["a"]
+      (List.map (fun (row : Queue.candidate) -> row.request_id)
+        (Queue.candidates (batch keepers_dir))))) [false; true]
 
 let test_pending_is_not_current () = with_store (fun keepers_dir ->
   let first = append keepers_dir "one" "first rule" in
@@ -328,9 +323,10 @@ let test_sparse_consumption_retains_gap_and_append () = with_store (fun keepers_
   check bool "recovery did not restore retired claim" true
     (match snapshot with Some snapshot -> snapshot.facts=[] | None -> false))
 
-(* Accepted B no longer has a queue row after acknowledgement. A missing
-   authority file must not turn that state into a fresh empty memory store. *)
-let test_sparse_authority_loss_refuses_judgment () =
+(* Accepted B no longer has a queue row after acknowledgement. Memory its
+   receipt cannot be verified against, or a receipt file that cannot be read,
+   must not turn that state into a fresh empty memory store. *)
+let test_unverifiable_memory_authority_refuses_judgment () =
   List.iter (fun damage -> with_store (fun keepers_dir ->
     ignore (append keepers_dir "a" "uncertain A");
     ignore (append keepers_dir "b" "settled B");
@@ -362,7 +358,6 @@ let test_sparse_authority_loss_refuses_judgment () =
        let fields=Yojson.Safe.Util.to_assoc json in
        Fs_compat.save_file snapshot (Yojson.Safe.to_string
          (`Assoc (("updated_at",`Float 999.) :: List.remove_assoc "updated_at" fields)))
-     | `Missing_receipt -> Sys.remove receipt
      | `Corrupt_receipt -> Fs_compat.save_file receipt "{broken receipt");
     let before=List.map (fun path -> path,Fs_compat.load_file_opt path) [snapshot;receipt;queue;journal] in
     let calls=ref 0 in
@@ -373,7 +368,7 @@ let test_sparse_authority_loss_refuses_judgment () =
      | _ -> fail "lost sparse admission authority was treated as ordinary pending input");
     List.iter (fun (path,bytes) -> check (option string)
       "failed authority check preserves every surviving store byte" bytes (Fs_compat.load_file_opt path)) before))
-    [`Missing_snapshot;`Corrupt_snapshot;`Mismatched_snapshot;`Missing_receipt;`Corrupt_receipt]
+    [`Missing_snapshot;`Corrupt_snapshot;`Mismatched_snapshot;`Corrupt_receipt]
 
 let test_contiguous_pending_recovers_without_sparse_authority () =
   List.iter (fun empty_receipts -> with_store (fun keepers_dir ->
@@ -399,10 +394,17 @@ let test_contiguous_pending_recovers_without_sparse_authority () =
          List.exists (fun (f : Types.fact) -> f.claim = "recoverable current fact") current.facts
        | None -> false))) [false;true]
 
-(* Characterization of the remaining ambiguity, not a recovery guarantee:
-   all original rows are still queued before acknowledgement. Losing the only
-   receipt then leaves no sequence hole from which to detect a prior commit. *)
-let test_missing_receipt_before_acknowledgement_is_unresolved_authority () = with_store (fun keepers_dir ->
+(* Characterization, not a recovery guarantee: B committed but its own
+   acknowledgement never ran, so losing its receipt makes B indistinguishable
+   from input never committed, and B is judged again. A row acknowledged
+   earlier does not change that.
+   See docs/guides/keeper-memory-limits.md, "Explicit memory writes". *)
+let test_lost_receipt_of_unacknowledged_commit_is_judged_again () =
+  List.iter (fun earlier_acknowledged -> with_store (fun keepers_dir ->
+  if earlier_acknowledged then (
+    ignore (append keepers_dir "x" "settled X");
+    ignore (commit keepers_dir (Queue.candidate_ids (batch keepers_dir)) [fact "settled X"]);
+    acknowledge keepers_dir);
   ignore (append keepers_dir "a" "uncertain A");
   ignore (append keepers_dir "b" "settled B");
   let b=List.find (fun (id:Current.explicit_candidate_id) -> id.request_id="b")
@@ -417,11 +419,12 @@ let test_missing_receipt_before_acknowledgement_is_unresolved_authority () = wit
     ~judge:(fun selected ->
       calls:=List.map (fun (row:Queue.candidate) -> row.request_id) (Queue.candidates selected) :: !calls;
       Worker.Awaiting_evidence) in
-  check (list (list string)) "known limitation: contiguous queued rows can reach judgment again"
+  check (list (list string)) "the unacknowledged commit reaches judgment again"
     [["a";"b"]] !calls;
   (match outcome with Worker.Pending _ -> () | _ -> fail "unexpected diagnostic outcome");
   check string "diagnostic performs no consumption or reconstruction" before (Fs_compat.load_file queue);
-  check (option string) "missing receipt is not fabricated" None (Fs_compat.load_file_opt receipt))
+  check (option string) "missing receipt is not fabricated" None (Fs_compat.load_file_opt receipt)))
+  [false; true]
 
 let test_worker_partial_consumption_wakes_only_new_input () =
   List.iter (fun append_during_judgment -> with_store (fun keepers_dir ->
@@ -607,54 +610,106 @@ let test_semantic_deferral_with_new_tail_is_not_commit () = with_store (fun keep
   check bool "semantic waiting did not create a Memory snapshot" true
     ((Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require) = None))
 
-let test_sparse_lost_receipts_keeps_queue_blocked () =
-  List.iter (fun consume_all -> with_store (fun keepers_dir ->
-    ignore (append keepers_dir "a" "pending A");
-    ignore (append keepers_dir "b" "settled B");
+(* The live shape of 2026-10-19: rows consumed before a receipt schema cut
+   lost their receipts while Memory stayed current. The rows that remain reach
+   judgment against that Memory; the consumed ones are not judged again because
+   the queue no longer holds them.
+   See docs/guides/keeper-memory-limits.md, "Explicit memory writes". *)
+let test_lost_receipts_do_not_block_remaining_input () =
+  List.iter (fun loss -> with_store (fun keepers_dir ->
+    List.iter (fun id -> ignore (append keepers_dir id ("rule " ^ id))) ["a";"b";"c"];
     let ids = Queue.candidate_ids (batch keepers_dir) in
-    let selected = if consume_all then ids else
-      List.filter (fun (id : Current.explicit_candidate_id) -> id.request_id="b") ids in
-    ignore (commit keepers_dir selected []);
+    let id_of request_id =
+      List.find (fun (id : Current.explicit_candidate_id) -> id.request_id = request_id) ids in
+    ignore (commit keepers_dir [id_of "a"] [fact "rule a"]);
     acknowledge keepers_dir;
+    let receipt_path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+    let receipts_naming_only_a = Fs_compat.load_file receipt_path in
+    ignore (commit keepers_dir [id_of "b"] [fact "rule b"]);
+    acknowledge keepers_dir;
+    (match loss with
+     | `Receipts_removed -> Sys.remove receipt_path
+     | `Older_receipts_restored ->
+       Fs_compat.save_file_atomic_strict receipt_path receipts_naming_only_a |> require);
     let queue_path = Queue.path ~keepers_dir ~keeper_id:"keeper" in
     let before = Fs_compat.load_file queue_path in
-    Sys.remove (Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper");
-    (match Queue.acknowledge_committed ~keepers_dir ~keeper_id:"keeper" with
-     | Ok () -> fail "consumed sparse history without receipts was admitted"
-     | Error detail -> check bool "absent product backup remains an explicit recovery blocker" true
-         (Astring.String.is_infix ~affix:"independently attested exact backup that this product does not create" detail));
-    check string "lost receipt never rewrites pending bytes or order" before
-      (Fs_compat.load_file queue_path))) [false;true]
+    acknowledge keepers_dir;
+    check string "a lost receipt rewrites no pending byte" before
+      (Fs_compat.load_file queue_path);
+    let judged = ref [] in
+    let outcome = Worker.For_testing.run_with ~keepers_dir ~keeper_name:"keeper"
+      ~judge:(fun selected ->
+        judged := candidate_names selected :: !judged;
+        ignore (commit keepers_dir (Queue.candidate_ids selected) [fact "rule c"]);
+        Worker.Committed) in
+    check (list (list string)) "only the remaining row is judged" [["c"]] !judged;
+    check bool "the remaining row settles" true (outcome = Worker.Settled {has_more=false});
+    check bool "the queue drains" true (pending keepers_dir = None);
+    let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require in
+    check (list string) "Memory keeps the consumed and the new facts"
+      ["rule a"; "rule b"; "rule c"]
+      (match current with
+       | Some current ->
+         List.sort String.compare (List.map (fun (f : Types.fact) -> f.claim) current.facts)
+       | None -> []);
+    check int "append never reuses a consumed sequence" 4 (append keepers_dir "d" "rule d").sequence))
+    [`Receipts_removed; `Older_receipts_restored]
 
-let test_partially_lost_receipts_keep_queue_blocked () = with_store (fun keepers_dir ->
+(* The snapshot itself is gone. Right after the loss the receipts it proved
+   still refuse judgment. The next ordinary Librarian read reconciles the
+   receipt sidecar against no snapshot and drops them, and the remaining
+   explicit input then joins the Memory that starts again, as durable and
+   continuity input do; it is not held back for a snapshot nothing restores.
+   See docs/guides/keeper-memory-limits.md, "Explicit memory writes". *)
+(* B committed but its receipt was lost before acknowledgement, so B is judged
+   again. Committing its claim a second time refreshes the fact Memory already
+   holds instead of adding another.
+   See docs/guides/keeper-memory-limits.md, "Explicit memory writes". *)
+let test_rejudged_commit_keeps_one_fact () = with_store (fun keepers_dir ->
+  ignore (append keepers_dir "b" "settled B");
+  ignore (commit keepers_dir (Queue.candidate_ids (batch keepers_dir)) [fact "settled B"]);
+  Sys.remove (Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper");
+  let judged = ref [] in
+  let outcome = Worker.For_testing.run_with ~keepers_dir ~keeper_name:"keeper"
+    ~judge:(fun selected ->
+      judged := candidate_names selected :: !judged;
+      ignore (commit keepers_dir (Queue.candidate_ids selected) [fact "settled B"]);
+      Worker.Committed) in
+  check (list (list string)) "the committed row is judged again" [["b"]] !judged;
+  check bool "the re-judged row settles" true (outcome = Worker.Settled {has_more=false});
+  let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require in
+  check (list string) "Memory holds the claim once" ["settled B"]
+    (match current with
+     | Some current -> List.map (fun (f : Types.fact) -> f.claim) current.facts
+     | None -> []))
+
+let test_snapshot_loss_admits_remaining_input_into_new_memory () = with_store (fun keepers_dir ->
   List.iter (fun id -> ignore (append keepers_dir id ("rule " ^ id))) ["a";"b";"c"];
-  let ids = Queue.candidate_ids (batch keepers_dir) in
-  let id_of request_id =
-    List.find (fun (id : Current.explicit_candidate_id) -> id.request_id = request_id) ids in
-  ignore (commit keepers_dir [id_of "a"] [fact "rule a"]);
+  let consumed = List.filter (fun (id : Current.explicit_candidate_id) -> id.request_id <> "c")
+    (Queue.candidate_ids (batch keepers_dir)) in
+  ignore (commit keepers_dir consumed [fact "rule a"; fact "rule b"]);
   acknowledge keepers_dir;
-  let receipt_path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
-  let receipts_naming_only_a = Fs_compat.load_file receipt_path in
-  ignore (commit keepers_dir [id_of "b"] [fact "rule b"]);
-  acknowledge keepers_dir;
-  check (list int) "a and b consumed, c pending" [3]
-    (List.map (fun (row : Queue.candidate) -> row.sequence) (Queue.candidates (batch keepers_dir)));
-  (* An older but valid receipt file comes back: sequence 1 still has its
-     receipt, nothing names consumed sequence 2. *)
-  Fs_compat.save_file_atomic_strict receipt_path receipts_naming_only_a |> require;
-  let queue_path = Queue.path ~keepers_dir ~keeper_id:"keeper" in
-  let before = Fs_compat.load_file queue_path in
-  (match Queue.acknowledge_committed ~keepers_dir ~keeper_id:"keeper" with
-   | Ok () -> fail "a consumed sequence without its receipt was admitted"
-   | Error _ -> ());
-  check string "partial receipt loss never rewrites pending bytes" before
-    (Fs_compat.load_file queue_path);
+  Sys.remove (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper");
   (match Worker.For_testing.run_with ~keepers_dir ~keeper_name:"keeper"
-     ~judge:(fun _ -> fail "pending input judged past unproven consumption") with
+     ~judge:(fun _ -> fail "input judged against a receipt whose snapshot is gone") with
    | Worker.Unavailable _ -> ()
    | Worker.Disabled | Worker.Idle | Worker.Recheck_new_input | Worker.Settled _
-   | Worker.Pending _ ->
-     fail "worker continued past a consumed sequence without its receipt"))
+   | Worker.Pending _ -> fail "a receipt without its snapshot was accepted");
+  ignore (Current.committed_durable_coverage ~keepers_dir ~keeper_id:"keeper"
+    ~receipt_scope:"ordinary-librarian-read" |> require);
+  let judged = ref [] in
+  let outcome = Worker.For_testing.run_with ~keepers_dir ~keeper_name:"keeper"
+    ~judge:(fun selected ->
+      judged := candidate_names selected :: !judged;
+      ignore (commit keepers_dir (Queue.candidate_ids selected) [fact "rule c"]);
+      Worker.Committed) in
+  check (list (list string)) "only the remaining row is judged" [["c"]] !judged;
+  check bool "the remaining row settles" true (outcome = Worker.Settled {has_more=false});
+  let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require in
+  check (list string) "the new Memory holds what reached it after the loss" ["rule c"]
+    (match current with
+     | Some current -> List.map (fun (f : Types.fact) -> f.claim) current.facts
+     | None -> []))
 
 let test_size_with_a_same_failure_is_deferred_whole () =
   let reason ~capacity ~same : Masc.Keeper_librarian_runtime.not_committed =
@@ -679,12 +734,12 @@ let test_size_with_a_same_failure_is_deferred_whole () =
 
 let () = run "durable explicit admission queue"
   ["storage boundaries", [
-    test_case "concurrently added tail requires receipt authority" `Quick test_concurrently_added_tail_requires_receipt_authority;
-    test_case "concurrent acknowledgement detects receipt loss" `Quick test_concurrent_acknowledgement_detects_receipt_loss;
+    test_case "concurrently consumed tail is left to its own acknowledgement" `Quick test_concurrently_consumed_tail_is_left_to_its_acknowledgement;
+    test_case "concurrent receipt loss leaves remaining input" `Quick test_concurrent_receipt_loss_leaves_remaining_input;
     test_case "concurrent acknowledgement preserves deferred input" `Quick test_concurrent_acknowledgement_preserves_deferred_input;
-    test_case "missing receipt before acknowledgement remains explicit scope limitation" `Quick test_missing_receipt_before_acknowledgement_is_unresolved_authority;
+    test_case "a lost receipt of an unacknowledged commit is judged again" `Quick test_lost_receipt_of_unacknowledged_commit_is_judged_again;
     test_case "contiguous pending recovers without sparse authority" `Quick test_contiguous_pending_recovers_without_sparse_authority;
-    test_case "lost sparse authority refuses judgment without retiring evidence" `Quick test_sparse_authority_loss_refuses_judgment;
+    test_case "unverifiable Memory authority refuses judgment without retiring evidence" `Quick test_unverifiable_memory_authority_refuses_judgment;
     test_case "new input during semantic deferral is recheck, not commit" `Quick test_semantic_deferral_with_new_tail_is_not_commit;
     test_case "capacity siblings continue past semantic uncertainty" `Quick test_capacity_left_uncertainty_does_not_block_right;
     test_case "capacity sibling traversal stops on provider outage" `Quick test_capacity_outage_stops_before_sibling;
@@ -692,8 +747,9 @@ let () = run "durable explicit admission queue"
     test_case "size with a same failure is deferred whole" `Quick test_size_with_a_same_failure_is_deferred_whole;
     test_case "nested capacity split retains indivisible input" `Quick test_nested_capacity_retains_indivisible_input;
     test_case "all deferred capacity siblings do not spin" `Quick test_capacity_all_siblings_deferred_do_not_spin;
-    test_case "lost sparse receipts preserve the unrecoverable queue boundary" `Quick test_sparse_lost_receipts_keeps_queue_blocked;
-    test_case "partially lost sparse receipts keep the queue blocked" `Quick test_partially_lost_receipts_keep_queue_blocked;
+    test_case "lost receipts do not block the remaining input" `Quick test_lost_receipts_do_not_block_remaining_input;
+    test_case "a re-judged commit keeps one fact" `Quick test_rejudged_commit_keeps_one_fact;
+    test_case "snapshot loss admits remaining input into the new Memory" `Quick test_snapshot_loss_admits_remaining_input_into_new_memory;
     test_case "sparse receipt recovery preserves deferred gap and new append" `Quick test_sparse_consumption_retains_gap_and_append;
     test_case "partial worker wakes only newly unjudged input" `Quick test_worker_partial_consumption_wakes_only_new_input;
     test_case "pending is distinct from current Memory" `Quick test_pending_is_not_current;

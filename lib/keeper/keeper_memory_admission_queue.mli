@@ -49,11 +49,12 @@ val acknowledge_committed :
     generation and exact ID/sequence/payload matches before removing those rows.
     Deferred gaps and concurrently appended rows survive. Any receipt collision
     refuses the entire rewrite. No success flag authorizes consumption.
-    Every allocated sequence must be represented by pending input or a committed
-    candidate; an unexplained sparse gap refuses judgment without rewriting stores.
-    The persisted last_sequence is never reduced, even when pending is empty.
-    Missing receipts before any acknowledgement can remain indistinguishable from
-    never-committed contiguous input; this check cannot reconstruct that authority. *)
+    A consumed sequence whose receipt is gone holds back nothing: it is no
+    longer input. A pending row whose receipt is missing cannot be told apart
+    from input never committed, so it stays pending and is judged again against
+    current Memory. Memory the receipts cannot be verified against refuses
+    before any rewrite. The persisted last_sequence is never reduced, even when
+    pending is empty. *)
 
 val path : keepers_dir:string -> keeper_id:string -> string
 val list_keeper_ids : keepers_dir:string -> (string list, string) result

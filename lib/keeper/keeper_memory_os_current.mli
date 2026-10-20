@@ -527,7 +527,7 @@ val committed_explicit_candidates :
     this generation, ordered by sequence. Matching prepared evidence is projected
     in memory only. Missing, undecodable or mismatched snapshot authority for a
     committed receipt returns an error without changing stored evidence.
-    A consumer must still match the original payload and account for queue gaps.
+    A consumer must still match the original payload.
     Candidate receipts survive later valid snapshot revisions and retirement.
     This is not reconstruction of missing receipts or an immutable ledger. *)
 

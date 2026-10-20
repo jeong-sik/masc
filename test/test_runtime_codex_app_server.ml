@@ -4380,10 +4380,8 @@ let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~mod
     ~trace_id ~user_message ~cli_path ~model ~turn_instructions
 ;;
 
-(* #38174, RFC-0458 §3.4. A production Keeper turn names its Keeper as the
-   recorder of a failed attempt, so that Keeper's next cycle dispatches the
-   candidate again. The client closes before the turn starts; the route calls
-   that a server error, which a fleet walk records. *)
+(* #37963: enter the actual production collector/finalizer and read its
+   receipt. HTTP prose is diagnostic data even when a later candidate fails. *)
 let test_production_runtime_walk_receipt ~recover () =
   let module Evidence=Keeper_runtime_walk_evidence in
   let module Receipt=Keeper_execution_receipt in
@@ -4500,6 +4498,10 @@ supports_native_streaming = false
         | _ -> fail "first candidate did not reach the HTTP fixture"))
 ;;
 
+(* #38174, RFC-0458 §3.4. A production Keeper turn names its Keeper as the
+   recorder of a failed attempt, so that Keeper's next cycle dispatches the
+   candidate again. The client closes before the turn starts; the route calls
+   that a server error, which a fleet walk records. *)
 let test_production_turn_records_its_keeper_as_the_failure_recorder () =
   let base_path = temp_workspace "masc-codex-production-recorder-" in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->

@@ -3,9 +3,9 @@ rfc: "keeper-build-output-returns-to-a-disposable-volume"
 title: "Keeper build output returns to a disposable volume"
 status: Draft
 created: 2026-09-24
-updated: 2026-10-06
+updated: 2026-10-21
 author: vincent
-related: ["0399", "0400", "0122"]
+related: ["0399", "0400", "0122", "keeper-boot-runs-no-one-shot-container"]
 ---
 
 # RFC — Keeper build output returns to a disposable volume
@@ -66,7 +66,8 @@ that drops every capability and adds back `CAP_SYS_ADMIN` (`CapEff`
 entrypoint, trims the same volume and the host image shrinks: `masc-keeper-work-pr-updater`, 39 GB used inside, `volume.img`
 116 GB → 39 GB, `fstrim` reported 213.3 GiB trimmed. Apple's `--mount`
 takes `type, source, target, readonly` only, so a `discard` mount option has
-no spelling; the trim runs at boot instead (§ Work volume trim at boot).
+no spelling; the work volume's ext4 `discard` default and when it is set
+are specified in RFC-keeper-boot-runs-no-one-shot-container.
 
 `container volume prune` (no-container-reference volumes only, by design —
 verified in the CLI's own `--help`) did reclaim real host space: 6 orphaned
@@ -74,8 +75,8 @@ volumes, 759 GB → 612 GB, host free 42 GiB → 112 GiB. It could not touch the
 five volumes above 50 GB because every one of them belongs to a keeper that
 is still running.
 
-So a guest delete returns host disk only once something with
-`CAP_SYS_ADMIN` trims the volume while no guest has it attached.
+So a guest delete returns host disk only when the volume's ext4 mount
+discards it, and a guest cannot make its own mount do that.
 
 ## What the codebase already says
 
@@ -142,8 +143,8 @@ volumes/masc-keeper-build-<name>/           /masc-build/<checkout>/
 `plan_build_link`, `Build_absent | Build_symlink | Build_real_directory`, the
 never-follow-a-symlink walk, the scan's refusal to delete a real directory
 inside a live guest — the *decision* RFC-0399 made carries over unchanged.
-Removing a real directory is the boot helper's job, while no guest holds the
-volume (§B). The *mechanics* do not carry over: a
+Removing a real directory happens at a fresh boot, before the guest serves
+a turn (§B). The *mechanics* do not carry over: a
 first pass ported RFC-0399's walk and link as host-side
 `Unix.lstat`/`Sys.readdir`/`Unix.symlink` on a `playground_root`, which was
 correct when RFC-0399 wrote it and stopped being correct when RFC-0400 made
@@ -210,37 +211,6 @@ on every install rather than respecting a symlink (measured there,
 `node_modules` is not part of this RFC either. `cargo`/`target` stays
 unmeasured, as RFC-0399 left it.
 
-## Work volume trim at boot
-
-`Keeper_turn_sandbox_runtime` boots a guest only on its `Boot` branch, after
-the name's old guest is force-deleted, so no guest holds the work volume
-there. On `Apple_container` it runs
-`Keeper_sandbox_microvm.apple_work_volume_trim_argv` before `container run`:
-the keeper's own image, `--rm`, the volume's stable `-trim` container name,
-`--user 0`, `--cap-drop ALL` then `--cap-add CAP_SYS_ADMIN` and
-`--cap-add CAP_DAC_OVERRIDE` (the latter for §B), the volume at `/masc-trim`. Its script sets the volume's
-ext4 `discard` default (`tune2fs -o discard`, #40734), so every later guest
-mount discards a deleted file's blocks as it goes; drops `discard` for its
-own mount only; removes real build output (§B); and runs
-`fstrim -v /masc-trim`. Both fleet images carry `/usr/sbin/fstrim`
-(checked 2026-09-26) and `/usr/bin/mount` (checked 2026-10-06).
-
-The trim container is force-removed and its absence confirmed by the JSON
-container inventory before and after trimming, including a CLI timeout.
-An unreadable inventory or a remaining trim container refuses the guest
-boot. Only confirmed cleanup makes a failed trim harmless: then boot goes
-on and the keeper log names the trim failure. A running guest is never trimmed: a second
-ext4 mount of the volume would corrupt it. A keeper whose guest stays up
-reclaims on its next boot.
-
-The disk reclamation above was measured with a manual trim command, not
-through this boot path. CI exercises the cleanup and refusal protocol with
-an injected container CLI; it does not measure host disk reclamation.
-
-With the work volume trimmed at boot, `_build` on the work volume is
-reclaimed the same way, which leaves the build volume below an open question
-rather than the only path (see Open questions).
-
 ## Scope, as a stack
 
 ### A. Reattach the mechanism (implemented, PR #38563)
@@ -276,8 +246,8 @@ argv/script shape rather than a real filesystem.
 The scan never deletes: it runs inside a live guest, where a keeper's build
 may be using a real `_build`, so a real directory found there is left alone
 and reported as `Link_refused_real_directory`, the same posture RFC-0399
-took toward real output. §B removes it before the next guest starts, and the
-scan that runs right after that boot links the checkout.
+took toward real output. The next fresh boot removes it before its scan
+runs (§B), and that scan links the checkout.
 
 `MASC_KEEPER_MICROVM_BUILD_VOLUME_SIZE` (default `128g`, RFC-0399's own
 default) is reintroduced with the same name RFC-0400 deleted, mirroring
@@ -299,7 +269,7 @@ first adoption builds a real `_build` on the unified volume before any scan
 can link it, and keeps writing there until the guest restarts. That restart
 removes it (§B) and links the checkout, so the gap lasts one guest life.
 
-### B. Boot removes real build output from the work volume (implemented)
+### B. A fresh boot removes real build output from the work volume (implemented)
 
 §A links only a checkout whose `_build` does not exist yet, and its scan
 runs once per guest. Keepers make a worktree per task and build it in the
@@ -314,54 +284,26 @@ it, and the output stays on the work volume for good. Measured 2026-10-06:
 - `Link_refused_real_directory` warnings in the system log: 2,785 on
   09-29, then 328, 329, 182, 95, 166, 143 a day through 10-05.
 
-The work volume helper (see "Work volume trim at boot") now removes them.
-Its script, in order:
+A fresh boot removes them before the guest serves a turn. The removal's
+scope:
 
-1. `tune2fs -o discard` on the volume's device (unchanged).
-2. `mount -o remount,nodiscard /masc-trim` — this mount only; the
-   superblock default from step 1 still applies to the guest's mount.
-3. `build_output_removal_script`: under `/masc-trim/<keeper>`, every
-   directory named `_build` at the scan's depth whose parent holds
-   `dune-project` is removed with `rm -rf`. The keeper root itself and
-   `.git` are skipped, as the scan skips them. `find` without `-L` never
-   follows a symlinked `_build`, and `-type d` does not match one, so a
-   link and its build volume target are untouched. Paths reach `rm` as
-   `-exec` arguments, never as lines of output, so a directory name holding
-   a newline cannot split into another checkout's path. A checkout holding
-   `.masc-keep-build` keeps its output — the same marker the guest's idle
-   build cleanup (`config/scripts/keeper-build-cleanup.py`) already skips.
-   One line per removal goes to the trim log; a failed removal is printed
-   and does not stop the trim.
-4. `fstrim -v /masc-trim` (unchanged).
+- under the keeper's root, every directory named `_build` at the scan's
+  depth whose parent holds `dune-project` (`build_output_removal_script`);
+- the keeper root itself and `.git` are skipped, as the scan skips them;
+- `find` without `-L` never follows a symlinked `_build`, and `-type d` does
+  not match one, so a link and its build volume target are untouched;
+- paths reach the removal as `-exec` arguments, never as lines of output, so
+  a directory name holding a newline cannot split into another checkout's
+  path;
+- a checkout holding `.masc-keep-build` keeps its output — the same marker
+  the guest's idle build cleanup (`config/scripts/keeper-build-cleanup.py`)
+  already skips;
+- a failed removal is printed and does not stop the boot.
 
-No guest holds the volume at that point, so no build can be using the
-output; the scan inside a live guest still never deletes (§A). A stale
-guest of another network mode whose removal failed cannot change that:
-Virtualization.framework refuses to attach an image a running VM holds
-(measured 2026-10-06, "The storage device attachment is invalid"), so the
-helper then fails to start and the boot goes on without reclaim.
-
-The tree belongs to the server's uid with mode 0755, and uid 0 with
-`CAP_SYS_ADMIN` alone gets only the "other" bits — measured 2026-10-06 on a
-`_build` made as 502:20 under umask 022, `rm` answered "Permission denied"
-and freed nothing. The helper therefore also holds `CAP_DAC_OVERRIDE`
-(`CapEff` 0000000000200002), which reaches nothing new: its root is
-read-only, its network is off, and its one writable mount is this keeper's
-own work volume. The guest
-that boots next finds those checkouts without `_build`, and §A links them.
-
-Step 2 decides where the time goes, not how much. Measured 2026-10-06 on
-container 1.3.1 with `masc-sandbox:general`, 20 GB of build-shaped output
-(250 × 80 MB plus 20,000 small files) on a scratch volume: removal took
-7.7 s with `discard` on and 0.07 s with it off, `fstrim` after it 7.4 s, and
-`volume.img` went from 20 GB to 15 MB either way — about 0.37 s per GB of
-host discard. The helper runs under the boot's I/O budget (30 s by default),
-so a 90 GB `_build` can run past it. With step 2 the removal is done in well
-under a second and the budget runs out inside `fstrim`, which changes
-nothing on the filesystem: the guest boots, its checkouts are already free
-of real `_build`, and the next boot's `fstrim` returns the rest of the
-blocks. If the remount is refused, the script says so and removes with
-`discard` on.
+Where the removal runs, as which user, and how the freed blocks return to
+the host are specified in RFC-keeper-boot-runs-no-one-shot-container. The
+guest that serves the first turn finds those checkouts without a real
+`_build`, and §A links them.
 
 The cost is the one §C already accepts: the first `dune build` of each such
 checkout after a restart is cold.
@@ -402,14 +344,6 @@ lockfile check, or size threshold; `keeper_disk_pressure.ml` is untouched.
   the line-reading loop this replaced removed all of `a`. The same script, run in
   `masc-sandbox:general` and `masc-sandbox-ocaml` (dash, GNU find 4.9.0),
   gave the same result as macOS `sh`.
-- Helper end to end (§B, 2026-10-06): the generated script under the
-  production flags (`--user 0`, `--cap-drop ALL`, `--cap-add CAP_SYS_ADMIN`,
-  `--cap-add CAP_DAC_OVERRIDE`, `--network none`, `--read-only`), in both
-  fleet images, on a scratch volume whose tree was written as 502:20 under
-  umask 022: five checkouts with a 50 MB `_build` each, one named
-  `a<newline>z` beside `a`, one holding `.masc-keep-build`. Exit 0 in 1–6 s;
-  four `_build` gone, the marked one kept, every `src/` file kept,
-  `volume.img` 253 MB → 53 MB.
 - Missing (open): the first fleet boot after §B is deployed, recording each
   keeper's `volume.img` before and after.
 
@@ -457,7 +391,7 @@ that doesn't.
 ## Open questions
 
 - With the work volume's `discard` default and §B, a real `_build` on the
-  work volume is removed at every boot and its blocks return; the build
+  work volume is removed at every fresh boot and its blocks return; the build
   volume now differs only in holding linked checkouts' output between
   boots. Whether it still earns its extra mount and its boot-time recreate
   is undecided; measure one fleet boot cycle with §B first.

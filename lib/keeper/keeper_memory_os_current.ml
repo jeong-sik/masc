@@ -2782,7 +2782,7 @@ type receipt_read = Reconcile_receipts | Preserve_authority of string
 
 (* Admission cannot reinterpret a consumed input as new when its snapshot proof
    disappears. This read projects prepared commits in memory only, preserving
-   every stored byte even when the caller subsequently rejects queue coverage. *)
+   every stored byte. *)
 let preserved_committed_receipts ~keepers_dir ~keeper_id ~snapshot ~queue_generation =
   (* The cached read decodes the sidecar only when its file identity changed.
      Nothing here writes the sidecar or marks a fixed point. Entries the

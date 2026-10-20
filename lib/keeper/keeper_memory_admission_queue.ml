@@ -3,11 +3,6 @@ open Keeper_memory_os_types
 let ( let* ) = Result.bind
 let ( let+ ) value f = Result.map f value
 
-module Candidate_identity_set = Set.Make (struct
-  type t = Keeper_memory_os_current.explicit_candidate_id
-  let compare = Stdlib.compare
-end)
-
 (* In memory [pending] is newest-first so an append is O(1); the wire format
    and every consumer-facing batch stay strictly ascending, enforced by
    [state_of_json] and produced by reversing only at the serialization and
@@ -164,31 +159,7 @@ let read_pending ~keepers_dir ~keeper_id =
   | None | Some {pending = []; _} -> None
   | Some state -> Some {generation = state.generation; rows = List.rev state.pending}
 
-(* Sparse acknowledgement may remove rows in any order, but it never erases
-   their allocated sequence. Every hole must still have exact commit authority.
-   Merge the two sorted streams without enumerating an untrusted numeric range. *)
-let validate_sequence_coverage (state : state) receipts =
-  let unavailable detail = Error (detail ^
-    "; recovery needs an independently attested exact backup that this product does not create — without one this state is unrecoverable and the queue stays blocked (docs/guides/MEMORY-ADMISSION-RECOVERY.md)") in
-  let rec cover previous pending committed =
-    let advance sequence pending committed =
-      if previous = max_int || sequence <> previous + 1 then
-        unavailable "explicit admission authority unavailable: allocated sequence has neither pending input nor a committed receipt; stores preserved"
-      else cover sequence pending committed in
-    match pending, committed with
-    | [], [] ->
-      if previous = state.last_sequence then Ok ()
-      else unavailable "explicit admission authority unavailable: allocated tail has no pending input or committed receipt; stores preserved"
-    | row :: pending, [] -> advance row.sequence pending []
-    | [], (receipt : Keeper_memory_os_current.explicit_candidate_id) :: committed ->
-      advance receipt.sequence [] committed
-    | row :: pending_tail, (receipt : Keeper_memory_os_current.explicit_candidate_id) :: committed_tail ->
-      if row.sequence = receipt.sequence then advance row.sequence pending_tail committed_tail
-      else if row.sequence < receipt.sequence then advance row.sequence pending_tail committed
-      else advance receipt.sequence pending committed_tail in
-  cover 0 (List.rev state.pending) receipts
-
-let rec acknowledge_with ~read_receipts ~keepers_dir ~keeper_id =
+let acknowledge_with ~read_receipts ~keepers_dir ~keeper_id =
   let* initial = read ~keepers_dir ~keeper_id in
   match initial with
   | None -> Ok ()
@@ -196,37 +167,17 @@ let rec acknowledge_with ~read_receipts ~keepers_dir ~keeper_id =
     (* Receipt recovery owns the aggregate lock. Take this observation first,
        then revalidate the queue generation and every matching payload under
        its lock. A later receipt is consumed by a subsequent acknowledgement.
-       Positions already missing from [initial] were removed before these
-       receipts were read, so they are checked against them here. Rows another
-       acknowledgement removes after this read carry receipts this observation
-       may not contain, so the locked rewrite does not repeat the check. *)
+       A receipt removes only the row it names. A row without one stays pending
+       and is judged against current Memory; a consumed sequence whose receipt
+       is gone is no longer input, so it holds back nothing. Memory the receipts
+       cannot be verified against is refused by [read_receipts] before this. *)
     let* receipts = read_receipts ~queue_generation:initial.generation in
-    let* () = validate_sequence_coverage initial
-      (List.filter (fun (receipt : Keeper_memory_os_current.explicit_candidate_id) ->
-         receipt.sequence <= initial.last_sequence) receipts) in
-    let* reobserve = locked ~keepers_dir ~keeper_id (fun () ->
+    locked ~keepers_dir ~keeper_id (fun () ->
       let* current = read ~keepers_dir ~keeper_id in
       match current with
       | None -> Error "pending admission queue disappeared before acknowledgement"
       | Some state when state.generation <> initial.generation ->
         Error "pending admission generation changed before acknowledgement"
-      | Some state when
-          let current_ids = Candidate_identity_set.of_list
-            (List.map (candidate_id ~generation:state.generation) state.pending) in
-          let receipt_ids = Candidate_identity_set.of_list receipts in
-          List.exists (fun row ->
-            let identity = candidate_id ~generation:initial.generation row in
-            not (Candidate_identity_set.mem identity current_ids)
-            && not (Candidate_identity_set.mem identity receipt_ids)) initial.pending
-          || (match validate_sequence_coverage state
-               (List.filter (fun (receipt : Keeper_memory_os_current.explicit_candidate_id) ->
-                  receipt.sequence <= state.last_sequence) receipts) with
-              | Ok () -> false
-              | Error _ -> true) ->
-        (* A removed row or an uncovered allocated tail outlived our authority
-           observation. Release this lock before reading Memory again; this
-           also covers rows appended and consumed after [initial] was read. *)
-        Ok true
       | Some state ->
         let by_request = Hashtbl.create (List.length receipts) in
         let by_sequence = Hashtbl.create (List.length receipts) in
@@ -249,11 +200,8 @@ let rec acknowledge_with ~read_receipts ~keepers_dir ~keeper_id =
             Error "committed admission candidate does not match pending identity and payload")
           (Ok []) state.pending in
         let pending = List.rev retained in
-        if List.length pending = List.length state.pending then Ok false
-        else Result.map (fun () -> false)
-          (write ~keepers_dir ~keeper_id {state with pending})) in
-    if reobserve then acknowledge_with ~read_receipts ~keepers_dir ~keeper_id
-    else Ok ()
+        if List.length pending = List.length state.pending then Ok ()
+        else write ~keepers_dir ~keeper_id {state with pending})
 
 let acknowledge_committed ~keepers_dir ~keeper_id =
   acknowledge_with ~keepers_dir ~keeper_id

@@ -225,7 +225,10 @@ let memory_admission_queue_store =
 let memory_source_current_store =
   { store = "memory-source current claims"
   ; on_refusal =
-      "keeper_memory_write and recall both refuse the claim for that source        path, and neither writer repairs it because the upsert reads first"
+      "keeper_memory_write with a source path and memory search refuse for that \
+       keeper, and no writer repairs the file because the upsert reads it first; \
+       recall logs a warning, counts the read error, and tells the keeper that \
+       source-bound memory is unavailable"
   ; scan =
       (fun ~base_path ->
          let keepers_dir =
@@ -283,8 +286,10 @@ let disposition_receipt_store =
 let board_posts_store =
   { store = "board posts"
   ; on_refusal =
-      "the loader drops the row without a log or a counter, and the next \
-       full-snapshot write removes it from disk"
+      "the loader keeps the rows it can read and logs an ERROR naming the file; \
+       posts and comments are not rewritten, and deleting a post or sweeping \
+       expired ones is refused, until the line is fixed or removed and the \
+       server restarts"
   ; scan =
       (fun ~base_path ->
          let path =

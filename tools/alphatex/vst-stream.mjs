@@ -24,7 +24,7 @@ export function openVstStream(sound, { sampleRate = 44100, signal,
   const completion = new Promise((resolve, reject) => { resolveDone = resolve; rejectDone = reject })
   ready.catch(() => {}); completion.catch(() => {})
   function fail(error) {
-    failure ??= error
+    failure ??= error instanceof Error ? error : new Error('VST stream failed', { cause: error })
     rejectReady(failure)
     pending?.reject(failure); pending = null
     if (!closed) child.kill('SIGTERM')

@@ -78,3 +78,16 @@ test('retiring an in-flight block rejects its PCM and joins closure; early stop 
   await assert.rejects(unavailable.ready, { code: 'ENOENT' })
   await assert.rejects(unavailable.completion, { code: 'ENOENT' })
 })
+
+test('every cancellation reason remains failure when a clean final reply races process closure', async () => {
+  for (const reason of [null, false, 0, '']) for (const kind of ['cancel', 'signal']) {
+    const cancellation = new AbortController()
+    const owner = openVstStream(sound(), { ...options('cancel-race'), signal: cancellation.signal })
+    await owner.ready // The actual child installed its signal handler.
+    owner.stop()
+    if (kind === 'cancel') owner.cancel(reason)
+    else cancellation.abort(reason)
+    await assert.rejects(owner.completion, error => error instanceof Error && error.cause === reason)
+    await assert.rejects(owner.render(1), error => error instanceof Error && error.cause === reason)
+  }
+})

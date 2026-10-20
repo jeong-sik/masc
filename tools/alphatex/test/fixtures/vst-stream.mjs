@@ -1,5 +1,6 @@
 import { createInterface } from 'node:readline'
 const mode = process.argv[2]
+if (mode === 'cancel-race') process.on('SIGTERM', () => {})
 let total = 0n
 const reply = value => process.stdout.write(JSON.stringify(value) + '\n')
 createInterface({ input: process.stdin }).on('line', line => {

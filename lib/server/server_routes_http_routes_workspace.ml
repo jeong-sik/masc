@@ -427,14 +427,74 @@ type workspace_file_save_error =
   | Save_conflict
   | Save_too_large
   | Save_read_failed of workspace_file_read_error
-  | Save_write_failed of Fs_compat.atomic_replace_failure
+  | Save_write_failed of Fs_compat.capability_write_error
+  | Save_recovery_unavailable of Keeper_publication_recovery_availability.unavailable
+  | Save_recovery_release_failed of {
+      save_result : (string, workspace_file_save_error) result;
+      release_failure : Fs_compat.Publication_recovery.lane_release_failure;
+    }
+  | Save_io_failed of { publication_may_have_started : bool; detail : string }
 
-let workspace_file_revision ~base file content =
-  Yojson.Safe.to_string (`List [ `String (resolve_existing_prefix base);
+let workspace_file_revision_at_root ~root file content =
+  Yojson.Safe.to_string (`List [ `String root;
     `String file.resolved_path; `String content ])
   |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex
 
-let save_workspace_file ~base ~path ~expected_revision ~content =
+let workspace_file_revision ~base file content =
+  workspace_file_revision_at_root ~root:(resolve_existing_prefix base) file content
+
+let same_capability_identity (a : Eio.File.Stat.t) (b : Eio.File.Stat.t) =
+  Int64.equal a.dev b.dev && Int64.equal a.ino b.ino
+
+let open_workspace_save_directory ~sw path =
+  let before = Eio.Path.stat ~follow:false path in
+  if before.kind <> `Directory then Error Save_conflict
+  else
+    let directory = (Eio.Path.open_dir ~sw path :> Eio.Fs.dir_ty Eio.Path.t) in
+    let opened = Eio.Path.with_open_in Eio.Path.(directory / ".") Eio.File.stat in
+    if opened.kind = `Directory && same_capability_identity before opened
+    then Ok (directory, opened)
+    else Error Save_conflict
+
+let read_workspace_save_file ~sw ~parent ~leaf =
+  let target = Eio.Path.(parent / leaf) in
+  let before = Eio.Path.stat ~follow:false target in
+  if before.kind <> `Regular_file then Error (Save_read_failed File_not_regular)
+  else
+    let descriptor = Eio.Path.open_in ~sw target in
+    let opened = Eio.File.stat descriptor in
+    if opened.kind <> `Regular_file || not (same_capability_identity before opened)
+    then Error Save_conflict
+    else if Optint.Int63.compare opened.size
+        (Optint.Int63.of_int workspace_file_read_max_bytes) > 0
+    then Error Save_too_large
+    else
+      let bytes = Cstruct.create (Optint.Int63.to_int opened.size) in
+      (try
+         Eio.Flow.read_exact descriptor bytes;
+         let after = Eio.File.stat descriptor in
+         let current = Eio.Path.stat ~follow:false target in
+         if not (same_capability_identity opened current)
+            || current.kind <> `Regular_file
+            || not (Optint.Int63.equal opened.size after.size)
+            || opened.mtime <> after.mtime || opened.ctime <> after.ctime
+         then Error Save_conflict
+         else Ok (Cstruct.to_string bytes, opened.perm land 0o777)
+       with End_of_file -> Error Save_conflict)
+
+let workspace_save_registry publication_recovery =
+  let open Keeper_publication_recovery_availability in
+  match publication_recovery () with
+  | Available registry -> Ok registry
+  | Initializing -> Error (Save_recovery_unavailable Runtime_initializing)
+  | Registry_unavailable error ->
+    Error (Save_recovery_unavailable (Runtime_registry_unavailable error))
+  | Initialization_crashed error ->
+    Error (Save_recovery_unavailable (Runtime_initialization_crashed error))
+  | Non_runtime -> Error (Save_recovery_unavailable Runtime_non_runtime)
+
+let save_workspace_file_before_publication ~before_publication
+    ~publication_recovery ~base ~path ~expected_revision ~content =
   let ( let* ) = Result.bind in
   let* _ = Tool_output.validate_sha256 expected_revision
     |> Result.map_error (fun _ -> Save_invalid_revision) in
@@ -443,29 +503,77 @@ let save_workspace_file ~base ~path ~expected_revision ~content =
   let* () = if String.contains path '\000' then Error Save_invalid_path else Ok () in
   let resolve () = resolve_workspace_file base path
     |> Result.map_error (fun _ -> Save_invalid_path) in
-  let* initial = resolve () in
-  let lock = Keeper_fs.acquire_path_lock initial.resolved_path in
-  Fun.protect
-    ~finally:(fun () -> Keeper_fs.release_path_lock initial.resolved_path lock)
-    (fun () -> Eio.Mutex.use_rw ~protect:true (Keeper_fs.path_lock_mutex lock) (fun () ->
+  let publication_may_have_started = ref false in
+  try
+    let* root, root_identity, initial = run_blocking_file_io (fun () ->
+      let root = resolve_existing_prefix base in
+      let identity = Unix.lstat root in
       let* file = resolve () in
-      let* () = if String.equal file.resolved_path initial.resolved_path
-        then Ok () else Error Save_conflict in
-      let* current = load_workspace_file_content file
-        |> Result.map_error (fun error -> Save_read_failed error) in
-      let* () = if String.equal expected_revision (workspace_file_revision ~base file current)
-        then Ok () else Error Save_conflict in
-      if String.equal current content then Ok expected_revision
-      else
-        let* permissions = run_blocking_file_io (fun () ->
-          try Ok ((Unix.lstat file.resolved_path).Unix.st_perm land 0o777) with
-          | Unix.Unix_error _ as exn -> Error (Save_read_failed (File_read_failed (Printexc.to_string exn)))) in
-        let* () = Fs_compat.write_file_atomic_strict_staged file.resolved_path
-          ~write:(fun channel ->
-            Unix.fchmod (Unix.descr_of_out_channel channel) permissions;
-            output_string channel content)
-          |> Result.map_error (fun error -> Save_write_failed error) in
-        Ok (workspace_file_revision ~base file content)))
+      if identity.Unix.st_kind <> Unix.S_DIR
+         || not (path_within ~base:root file.resolved_path)
+      then Error Save_conflict
+      else Ok (root, identity, file)) in
+    let lock = Keeper_fs.acquire_path_lock initial.resolved_path in
+    Fun.protect
+      ~finally:(fun () -> Keeper_fs.release_path_lock initial.resolved_path lock)
+      (fun () -> Eio.Mutex.use_rw ~protect:true (Keeper_fs.path_lock_mutex lock) (fun () ->
+        let* file = resolve () in
+        let* () = if String.equal file.resolved_path initial.resolved_path
+          then Ok () else Error Save_conflict in
+        let* fs = match Fs_compat.get_fs_opt () with
+          | Some fs -> Ok fs
+          | None -> Error (Save_read_failed (File_read_failed "Filesystem capability unavailable")) in
+        Eio.Switch.run @@ fun sw ->
+        let* root_dir, opened_root = open_workspace_save_directory ~sw Eio.Path.(fs / root) in
+        let* () = if Int64.equal opened_root.dev (Int64.of_int root_identity.Unix.st_dev)
+            && Int64.equal opened_root.ino (Int64.of_int root_identity.Unix.st_ino)
+          then Ok () else Error Save_conflict in
+        let components = components_under ~base:root file.resolved_path in
+        let rec with_parent parent = function
+          | [] -> Error Save_invalid_path
+          | [leaf] -> Ok (parent, leaf)
+          | component :: rest ->
+            let* child, _ = open_workspace_save_directory ~sw Eio.Path.(parent / component) in
+            with_parent child rest in
+        let* parent, leaf = with_parent root_dir components in
+        let* current, permissions = read_workspace_save_file ~sw ~parent ~leaf in
+        let revision content = workspace_file_revision_at_root ~root file content in
+        let* () = if String.equal expected_revision (revision current)
+          then Ok () else Error Save_conflict in
+        if String.equal current content then Ok expected_revision
+        else
+          let* target = Fs_compat.atomic_replace_recovery_target
+            ~allowed_root_path:root ~allowed_root_device:opened_root.dev
+            ~allowed_root_inode:opened_root.ino
+            ~parent_components:(components_under ~base:root (Filename.dirname file.resolved_path))
+            ~target_leaf:leaf ~permissions
+            |> Result.map_error (fun _ -> Save_invalid_path) in
+          let* registry = workspace_save_registry publication_recovery in
+          before_publication ();
+          match Fs_compat.Publication_recovery.with_lane ~registry
+            ~owner:"workspace-file-editor" (fun recovery ->
+              publication_may_have_started := true;
+              let* () = Fs_compat.replace_capability_file ~recovery ~parent ~target content
+                |> Result.map_error (fun error -> Save_write_failed error) in
+              Ok (revision content)) with
+          | Error error -> Error (Save_recovery_unavailable
+              (Keeper_publication_recovery_availability.Lane_unavailable error))
+          | Ok (Fs_compat.Publication_recovery.Lane_released result) -> result
+          | Ok (Fs_compat.Publication_recovery.Lane_release_failed { value; release_failure }) ->
+            Error (Save_recovery_release_failed { save_result = value; release_failure })))
+  with
+  | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) when not !publication_may_have_started ->
+    Error (Save_read_failed File_not_found)
+  | Eio.Io _ as exn -> Error (Save_io_failed
+      { publication_may_have_started = !publication_may_have_started;
+        detail = Printexc.to_string exn })
+  | Unix.Unix_error _ as exn -> Error (Save_io_failed
+      { publication_may_have_started = !publication_may_have_started;
+        detail = Printexc.to_string exn })
+
+let save_workspace_file ~publication_recovery ~base ~path ~expected_revision ~content =
+  save_workspace_file_before_publication ~before_publication:(fun () -> ())
+    ~publication_recovery ~base ~path ~expected_revision ~content
 
 (* Strip [base] (and the following separator) from [safe]. Handles
    [base = "/"], trailing slash on [base], and [safe = base] (returns "").
@@ -775,6 +883,7 @@ module For_testing = struct
   let load_workspace_file_content = load_workspace_file_content
   let workspace_file_revision = workspace_file_revision
   let save_workspace_file = save_workspace_file
+  let save_workspace_file_before_publication = save_workspace_file_before_publication
 end
 
 (* --- Blame parsing: collect per-line then group adjacent same-author ranges --- *)
@@ -1277,7 +1386,9 @@ let add_routes router =
                        | `RepositoryMissing _ | `RepositoryUnknown _ | `PlaygroundMissing _ | `KeeperUnknown _ ->
                          refuse `Not_found "workspace_unavailable" "The selected workspace is unavailable"
                        | `Project | `Repository _ | `Playground _ ->
-                         (match save_workspace_file ~base ~path ~expected_revision ~content with
+                         (match save_workspace_file
+                           ~publication_recovery:(Mcp_server.publication_recovery_availability_provider state)
+                           ~base ~path ~expected_revision ~content with
                           | Ok revision -> json_response_with_source ~status:`OK ~source request reqd
                             (`Assoc ["ok", `Bool true; "revision", `String revision])
                           | Error Save_invalid_path -> refuse `Bad_request "invalid_path" "Invalid path"
@@ -1291,12 +1402,30 @@ let add_routes router =
                             refuse `Conflict "workspace_file_changed" "File changed; retain the draft"
                           | Error (Save_read_failed (File_read_failed _)) ->
                             refuse `Service_unavailable "workspace_file_read_failed" "Could not read the current file; retain the draft"
+                          | Error (Save_recovery_unavailable error) ->
+                            Log.Server.warn "workspace file recovery unavailable: %s"
+                              (Keeper_publication_recovery_availability.unavailable_to_string error);
+                            refuse `Service_unavailable "workspace_file_save_unavailable" "Save is unavailable; retain the draft"
+                          | Error (Save_recovery_release_failed { save_result; release_failure }) ->
+                            Log.Server.warn "workspace file recovery release failed saved=%b evidence=%s"
+                              (Result.is_ok save_result)
+                              (Fs_compat.Publication_recovery.lane_release_failure_to_string release_failure);
+                            refuse `Internal_server_error "workspace_file_save_uncertain" "File may have been saved; retain the draft and reread before another save"
+                          | Error (Save_io_failed { publication_may_have_started; detail }) ->
+                            Log.Server.warn "workspace file save IO failed publication_started=%b evidence=%s"
+                              publication_may_have_started detail;
+                            if publication_may_have_started then
+                              refuse `Internal_server_error "workspace_file_save_uncertain" "File may have been saved; retain the draft and reread before another save"
+                            else
+                              refuse `Service_unavailable "workspace_file_read_failed" "Could not read the current file; retain the draft"
                           | Error (Save_write_failed error) ->
-                            observe_workspace_route_failure ~site:"file_save" ~path
-                              error.Fs_compat.exception_;
-                            (match error.stage with
-                             | Fs_compat.Before_rename -> refuse `Internal_server_error "workspace_file_save_failed" "Save failed before publication; retain the draft"
-                             | Fs_compat.After_rename -> refuse `Internal_server_error "workspace_file_save_uncertain" "File may have been saved; retain the draft and reread before another save")))
+                            Log.Server.warn "workspace file publication failed: %s"
+                              (Fs_compat.capability_write_error_to_string error);
+                            (match error.target_effect with
+                             | Fs_compat.Target_unchanged -> refuse `Internal_server_error "workspace_file_save_failed" "Save failed before publication; retain the draft"
+                             | Fs_compat.Target_created | Fs_compat.Target_created_incomplete
+                             | Fs_compat.Target_replaced | Fs_compat.Target_state_unknown ->
+                               refuse `Internal_server_error "workspace_file_save_uncertain" "File may have been saved; retain the draft and reread before another save")))
                 | _ -> invalid ())
              | _ -> invalid ()))
          request reqd)

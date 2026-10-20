@@ -67,7 +67,8 @@ attempt has already finished.
 Definition, hover and references requests keep the selected name's position
 when Korean text, emoji or other Unicode characters precede it on the line.
 Malformed source encoding is reported as a failed question.
-# Workspace file revision and save API
+
+## Workspace file revision and save API
 
 The Code editor integration uses `GET /api/v1/workspace/file?path=...` with the
 existing optional `keeper` or `repo_id` scope. Besides the original `content`,
@@ -95,16 +96,23 @@ Unknown or unavailable scopes cannot fall back to a project write. Confidential,
 traversal and symlink-escape paths use the same rejection policy as reads.
 The new content must fit the existing configured file-read size limit.
 
-The server compares the observed revision under its shared resolved-path lock.
+The server pins the canonical root and walks each target-parent component
+through checked directory capabilities. It compares the current bytes and
+publishes relative to the same held parent, so replacing a root or parent name
+with an outside symlink cannot redirect staging or replacement outside that
+capability. The observed revision is compared under its shared resolved-path lock.
 This coordinates server writers; it is optimistic concurrency, not a filesystem
 transaction against non-cooperating external writers. A revision conflict is
 HTTP409 (`workspace_file_changed`) and leaves the current file intact. The
 atomic replacement preserves exact bytes and ordinary permission bits, including
-executable bits, and requires payload and parent-directory fsync. An unchanged
+executable bits, and requires payload and parent-directory fsync. Replacement
+borrows the process publication-recovery registry through its dedicated
+`workspace-file-editor` owner. An unavailable registry or blocked recovery owner
+refuses the save without retrying it. An unchanged
 candidate needs no replacement; an explicitly empty candidate remains valid.
 
 On success, the response returns the revision of the committed bytes. A failure
-after rename uses `workspace_file_save_uncertain`: retain the draft and reread
+after publication may have started, including a lane-release failure, uses `workspace_file_save_uncertain`: retain the draft and reread
 before considering another save. A missing response likewise does not establish
 whether a write happened. This API does not by itself add a Code edit key,
 retained drafts or a conflict comparison view; those remain separate TUI work.

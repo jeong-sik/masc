@@ -17,10 +17,13 @@ import { InstrumentPicker } from './instruments.mjs'
 import { defaultStateDirectory, snapshotWriter } from './vst.mjs'
 import { renderVstPhrase } from './sequencer-vst.mjs'
 import { captureVstSound } from './project-sound-files.mjs'
-import { openStepInput, sameStepContext } from './step-input.mjs'
+import { openStepInput, sameStepContext, stepControl } from './step-input.mjs'
+import { MidiSourcePicker } from './midi-source-picker.mjs'
 
 const help = [
-  ':step-input SOURCE_UID enters held-key chords at the cursor; :step-stop drains input.',
+  ':step-input chooses a MIDI keyboard; :step-input SOURCE_UID arms it directly; :step-stop drains.',
+  ':step-length 1/3 sets next note length; :step-rest [LENGTH] moves without editing notes.',
+  'Lengths/rests use beats or source SMPTE frames; release held keys before changing them.',
   'Release all keys to insert/advance by note length; manual edits stop input. No live audio echo.',
   'Source :events toggles expression list; Up/Down selects, Enter edits value, +/- changes, x removes.',
   ':cc CTRL VALUE [AT] :bend VALUE [AT] :program VALUE [AT] :pressure VALUE [AT] :poly-pressure KEY VALUE [AT]',
@@ -141,6 +144,10 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     selected: selection => chooseInstrument({ kind: 'vst', selection }),
     soundfont: () => chooseInstrument({ kind: 'soundfont' }),
     failed: error => { status = `VST: ${error.message}`; draw() } })
+  const sourcePicker = new MidiSourcePicker({ notify: draw, selected(source) {
+    task = task.then(() => { if (accepting && !closed && !suspended) startStepInput(source) })
+      .catch(error => { status = error.message }).finally(draw)
+  } })
   function fit(text) {
     let used = 0, result = ''
     for (const char of safeText(text)) {
@@ -174,10 +181,25 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     const lines = [
       `${project.title}${dirty() ? ' *' : ''} · ${project.timingLabel ?? `${project.tempo} BPM`} · ${project.meter.join('/')} · ${(project.displayLength ?? project.length) / per} ${axis.label} · ${transport.kind}${loop ? ' · LOOP' : ''}`,
       `Track ${editor.track + 1}/${project.tracks.length}: ${track.name} · ${track.detail ?? `ch ${track.channel + 1} · program ${track.program} · level ${track.level} · pan ${track.pan}`}${track.muted ? ' · MUTED' : ''}${track.solo ? ' · SOLO' : ''} · ${track.notes.length} notes`,
-      `Cursor ${editor.tick / per} · ${Note.fromMidi(editor.pitch)} · grid ${editor.step / per} · length ${(current?.duration ?? editor.duration) / per} · velocity ${current?.velocity ?? editor.velocity}${selection.size ? ` · ${selection.size} selected` : ''}${editor.noteClipboard ? ` · ${editor.noteClipboard.notes.length} copied` : ''}`,
+      `Cursor ${editor.tick / per} · ${Note.fromMidi(editor.pitch)} · grid ${editor.step / per} · length ${(current?.duration ?? editor.duration) / per} · input length ${editor.duration / per} · velocity ${current?.velocity ?? editor.velocity}${selection.size ? ` · ${selection.size} selected` : ''}${editor.noteClipboard ? ` · ${editor.noteClipboard.notes.length} copied` : ''}`,
       `Chord candidates: ${at.candidates.join(' / ') || '—'} · ${at.notes.join(' ')} · ${stepInput ? `MIDI step · ${stepHeld} held · ` : ''}${status}`,
     ]
-    if (picker.view) {
+    if (sourcePicker.view) {
+      lines.length = 0
+      const view = sourcePicker.view
+      lines.push('Choose MIDI step-input source', status)
+      if (view.kind === 'loading') lines.push('Reading MIDI sources…')
+      else if (view.kind === 'failed') lines.push(view.error)
+      else {
+        if (!view.sources.length) lines.push('No available MIDI sources. Connect a keyboard, then refresh.')
+        if (view.cursor < 0 && view.sources.length) lines.push('Previous source is unavailable; choose explicitly.')
+        const height = Math.max(1, rows - 6), first = Math.max(0, view.cursor - height + 1)
+        for (let index = first; index < Math.min(view.sources.length, first + height); index++) {
+          const source = view.sources[index]
+          lines.push(`${view.cursor === index ? '›' : ' '} ${source.name} · ${source.id}`)
+        }
+      }
+    } else if (picker.view) {
       lines.length = 0
       lines.push(picker.view.title, status)
       if (picker.view.query !== undefined) lines.push(`${picker.view.searching ? 'Search' : 'Filter'}: ${picker.view.query}`)
@@ -247,8 +269,8 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     let output = '\x1b[H'
     for (let row = 1; row <= rows; row++) output += `\x1b[${row};1H\x1b[2K`
     lines.slice(0, rows - 2).forEach((line, row) => { output += `\x1b[${row + 1};1H${fit(line)}` })
-    output += `\x1b[${rows - 1};1H${fit(picker.view ? '↑/↓:choose  Enter:select  /:search  e:native editor  p:preset path  Esc:return' : prompt !== null ? `:${prompt}` : harmony ? '↑/↓:choose interval  Enter:go to notes  :commands  Esc/q:return' : 'Space:play  i:instrument  Enter:note  arrows:cursor  Tab:track  :commands  ?:help')}`
-    output += `\x1b[${rows};1H${fit(harmony && !picker.view ? ':harmony mix|track  :harmony-export PATH · analysis preserves the musical document' : 's:save  l:loop  r:recording  q:save/back  n:new track  m:mute  o:solo')}`
+    output += `\x1b[${rows - 1};1H${fit(sourcePicker.view ? '↑/↓:choose  Enter:arm keyboard  r:refresh  Esc/q:cancel' : picker.view ? '↑/↓:choose  Enter:select  /:search  e:native editor  p:preset path  Esc:return' : prompt !== null ? `:${prompt}` : harmony ? '↑/↓:choose interval  Enter:go to notes  :commands  Esc/q:return' : 'Space:play  i:instrument  Enter:note  arrows:cursor  Tab:track  :commands  ?:help')}`
+    output += `\x1b[${rows};1H${fit(sourcePicker.view ? 'Selection opens MIDI input only; no audio or output route.' : harmony && !picker.view ? ':harmony mix|track  :harmony-export PATH · analysis preserves the musical document' : 's:save  l:loop  r:recording  q:save/back  n:new track  m:mute  o:solo')}`
     process.stdout.write(output)
   }
   function stop() {
@@ -447,8 +469,21 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   async function effect(value) {
     if (!accepting && ['play', 'record', 'wave', 'arrange', 'step-input'].includes(value.kind)) return
     switch (value.kind) {
-      case 'step-input': startStepInput(value.source); break
+      case 'step-input':
+        if (value.source !== undefined) startStepInput(value.source)
+        else {
+          if (stepInput) throw new Error('Use :step-stop before choosing another MIDI source')
+          if (!suspended && !childTask) { stop(); clearHarmony(); sourcePicker.open() }
+        }
+        break
       case 'step-stop': stepInput?.stop(); status = 'Draining MIDI step input'; break
+      case 'step-length': case 'step-rest': {
+        const next = stepInput ? stepInput.control(value) : stepControl(editor, value)
+        if (value.kind === 'step-rest') stopPlayback()
+        editor = next; clearHarmony()
+        status = value.kind === 'step-length' ? 'Input note length changed' : 'Inserted a step rest'
+        break
+      }
       case 'harmony': analyze(value.scope); break
       case 'harmony-export':
         if (harmony?.kind !== 'ready') throw new Error('Open a ready :harmony analysis before exporting')
@@ -493,6 +528,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   async function keypress(text, key = {}) {
     if (!accepting || closed || suspended) return
     if (key.ctrl && key.name === 'c') { finish(); return }
+    if (sourcePicker.view) { sourcePicker.keypress(text, key); draw(); return }
     if (picker.view) {
       try { await picker.keypress(text, key) } catch (error) { status = `VST: ${error.message}` }
       draw(); return
@@ -622,10 +658,10 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   try { draw(); if (signal?.aborted) finish(); await done }
   finally {
     if (pendingDraw) clearImmediate(pendingDraw)
-    closed = true; stop(); picker.close(); clearInterval(timer); sessionAbort.abort()
+    closed = true; stop(); picker.close(); sourcePicker.close(); clearInterval(timer); sessionAbort.abort()
     // Close native admission now, but retain already admitted editor decisions.
     // MIDI consumers use task, so join them outside that serialized queue.
-    for (const owner of stepOwners) owner.stop()
+    for (const owner of stepOwners) owner.stop({ admittedControls: true })
     process.stdin.off('keypress', keypress); process.stdin.off('end', onEnd)
     process.stdout.off('resize', onResize); signal?.removeEventListener('abort', onAbort)
     for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.off(name, onSignal)
@@ -634,7 +670,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     for (const job of jobs.values()) { Atomics.store(job.cancel, 0, 1); job.reject(new Error('Sequencer closed')) }
     jobs.clear()
     try {
-      await Promise.allSettled([task, childTask, picker.settled(), worker.terminate(), ...players.values(), ...[...nativeRenders].map(job => job.promise), ...[...stepOwners].map(owner => owner.completion)])
+      await Promise.allSettled([task, childTask, picker.settled(), sourcePicker.settled(), worker.terminate(), ...players.values(), ...[...nativeRenders].map(job => job.promise), ...[...stepOwners].map(owner => owner.completion)])
       await Promise.allSettled([...observations])
       if (dirty()) {
         try { await save() }

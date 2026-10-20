@@ -96,12 +96,16 @@ function act(editor, action) {
 export function editorCommand(editor, line) {
   const [command, ...args] = line.trim().split(/\s+/)
   if (command === 'step-input') {
-    if (args.length !== 1) throw new Error('Use :step-input SOURCE_UID')
+    if (args.length > 1) throw new Error('Use :step-input [SOURCE_UID]')
     return { editor, effect: { kind: 'step-input', source: args[0] } }
   }
   if (command === 'step-stop') {
     if (args.length) throw new Error('Use :step-stop')
     return { editor, effect: { kind: 'step-stop' } }
+  }
+  if (command === 'step-length' || command === 'step-rest') {
+    if (args.length > 1 || (command === 'step-length' && args.length !== 1)) throw new Error(`Use :${command} ${command === 'step-rest' ? '[VALUE]' : 'VALUE'}`)
+    return { editor, effect: { kind: command, value: args[0] } }
   }
   const selected = noteSelectionCommand(editor, command, args)
   const result = selected === undefined ? runCommand(editor, line) : { editor: selected }

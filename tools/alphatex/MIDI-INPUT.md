@@ -5,7 +5,7 @@ The native `music-midi-input --source UID` companion and
 CoreMIDI source. The installer ships them beside the other music companions.
 They open an input port, with no audio stream or MIDI destination.
 
-The piano roll uses this boundary through `:step-input SOURCE_UID` and
+The piano roll uses this boundary through `:step-input [SOURCE_UID]` and
 `:step-stop`; see [keyboard step entry](README.md#midi-keyboard-step-entry).
 Existing audio/MIDI takes and live output forwarding keep
 their own owners. Their audio-input and output-route requirements do not apply
@@ -107,3 +107,18 @@ Apple's primary API contracts:
 [MIDIInputPortCreateWithProtocol](https://developer.apple.com/documentation/coremidi/midiinputportcreatewithprotocol(_:_:_:_:_:)),
 [MIDIEventPacket](https://developer.apple.com/documentation/coremidi/midieventpacket),
 [MIDIReceivedEventList](https://developer.apple.com/documentation/coremidi/midireceivedeventlist(_:_:)).
+
+## Source discovery
+
+`music-midi-input --sources` returns one `{kind:"midi-sources",schemaVersion:1,
+sources:[{id:"10",name:"Keyboard"}]}` JSON object and exits. It enumerates system
+source endpoints and validates each exact UID with the same resolver used for
+arming, creating no client, port, callback, audio stream or output route. An
+endpoint/identity race fails the query; refresh rather than guessing a replacement.
+CoreMIDI reports zero sources for no endpoints or an enumeration error, so an empty
+catalog does not certify the hardware configuration.
+
+`listMidiSources` validates catalog identity/schema/duplicates and joins its child
+before returning, including cancellation. The TUI picker owns cancelled and
+refreshed queries until closure and ignores stale results. Arming revalidates the
+chosen UID; discovery never starts input.

@@ -99,16 +99,18 @@ score or start audio, and workers stop before temporary files are removed.
 
 ## MIDI keyboard step entry
 
-In the piano roll, `:step-input SOURCE_UID` opens one MIDI keyboard source (find
-its UID with `masc-alphatex --devices`). Set the cursor, track and note length
-before arming; source documents also need a selected pattern and an unambiguous
+In the piano roll, `:step-input` opens a MIDI source picker. Choose with Up/Down
+and Enter; `r` refreshes, Esc/q cancels. Refresh retains the selected UID; if it
+disappears, choose again explicitly. Discovery opens no audio, capture or output
+route. `:step-input SOURCE_UID` still arms a known UID directly. Set the cursor
+and track before arming; source documents also need a selected pattern and an unambiguous
 channel (`:channel 1–16`). Press keys together, then release all of them: the
 chord is inserted in one undoable edit and the cursor advances by note length.
 This works in phrase tracks and original-tick PPQ/SMPTE MIDI source tracks.
 
 `:step-stop` drains admitted input; leaving the piano roll also joins input before
 the final save. An incomplete held chord is discarded. Manual cursor/track/
-channel/length/project edits stop input, so held notes cannot move into a new
+channel/project edits stop input, so held notes cannot move into a new
 context. Use `:step-input` again after changing context. Stop step entry before
 playback, recording, instrument selection or opening the arrangement.
 
@@ -120,9 +122,21 @@ expression and SysEx do not alter step notes. MIDI2 note attributes and repeated
 voices that would overlap the same target key fail explicitly. This mode has no
 live audio/MIDI echo. Use the recorder for timed playing and raw MIDI2 capture.
 
-The length is the editor's input length, selected with `[`/`]` before arming;
-those keys also edit an existing note at the cursor. At a phrase endpoint, extend
-the document or move the cursor before starting another chord.
+`:step-length VALUE` changes only the next input length, without editing an
+existing note or adding undo history. `:step-rest [VALUE]` advances the cursor
+without making notes; its default is the current input length (the grid step for
+source point notes). Both controls work between chords while input is armed;
+release all keys first. A manual `:step-stop` begins draining and refuses further
+step controls until it completes. Already queued controls remain owned at view
+close, before the final save.
+
+Values are exact nonnegative decimals or integer fractions in quarter-note beats,
+or frames for SMPTE sources: `:step-length 1/3` is a triplet at phrase PPQ960;
+`:step-length 1.5` is a dotted quarter. Values must resolve to whole original
+ticks; a PPQ1001 source accepts `1/7` (143 ticks) and refuses `1/2`. Phrase lengths
+and rests must be positive; source length `0` creates a point note. `[`/`]` still
+edit an existing note at the cursor and stop step input. At a phrase endpoint,
+extend the document or move the cursor before starting another chord.
 
 The installed source-only MIDI reader accepts one explicit CoreMIDI source
 without an audio input or output route. It retains complete delivered UMP words

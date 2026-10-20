@@ -17,10 +17,10 @@ export function practiceAudioClock(asset, offset = '0', extent = practiceRange(a
 // Worker-only source stage. No plug-in is opened here. The raw take remains
 // private and immutable; this is the same declared MIDI1 synthesis projection
 // as monitored practice, scheduled at exact ceiling sample indices.
-export async function preparePracticeVst(project, asset, { sourceRoot, directory, signal } = {}) {
+export async function preparePracticeSound(project, asset, { sourceRoot, directory, signal } = {}) {
   const snapshot = await prepareArrangementPractice(project, asset.id, { sourceRoot, directory, signal })
   const bytes = await readFile(join(snapshot.directory, 'context.json'), { signal })
-  if (createHash('sha256').update(bytes).digest('hex') !== asset.parts.context.sha256) throw new Error('Practice VST context changed')
+  if (createHash('sha256').update(bytes).digest('hex') !== asset.parts.context.sha256) throw new Error('Practice instrument context changed')
   const context = JSON.parse(bytes.toString('utf8')), packets = [], digest = createHash('sha256')
   const input = createReadStream(join(snapshot.directory, 'events.jsonl'), { signal })
   input.on('data', chunk => digest.update(chunk))
@@ -31,7 +31,7 @@ export async function preparePracticeVst(project, asset, { sourceRoot, directory
   finally { lines.close(); input.destroy() }
   if (failure) throw failure
   signal?.throwIfAborted()
-  if (digest.digest('hex') !== asset.parts.events.sha256) throw new Error('Practice VST events changed')
+  if (digest.digest('hex') !== asset.parts.events.sha256) throw new Error('Practice instrument events changed')
   packets.sort((a, b) => BigInt(a.hostTime) < BigInt(b.hostTime) ? -1 : BigInt(a.hostTime) > BigInt(b.hostTime) ? 1 : 0)
   const range = practiceRange(asset), rate = asset.metadata.renderClock.sampleRate
   const n = BigInt(asset.metadata.renderClock.clock.numer) * BigInt(rate), d = BigInt(asset.metadata.renderClock.clock.denom) * 1_000_000_000n
@@ -47,8 +47,29 @@ export async function preparePracticeVst(project, asset, { sourceRoot, directory
     // Render its guard sample, while every region retains the original cut.
     if (projected.messages.length && frame >= frames) frames = frame + 1n
   }
-  if (!events.some(event => (event.bytes[0] & 0xf0) === 0x90 && event.bytes[2] > 0)) throw new Error('Practice VST projection has no sounding notes')
+  if (!events.some(event => (event.bytes[0] & 0xf0) === 0x90 && event.bytes[2] > 0)) throw new Error('Practice instrument projection has no sounding notes')
   const id = randomUUID(), timelinePath = join(directory, id + '.json'), outputPath = join(directory, id + '.wav')
+  if (asset.sound !== undefined) {
+    const track = context.project.tracks.find(track => track.id === context.track)
+    const projected = [{ frame: '0', bytes: [0xc0 | context.backing.channel, track.program] }, ...events]
+    const quantum = BigInt(asset.sound.engine.controlFrames)
+    // A control-block guard is private render storage. Original region cuts
+    // and repeat periods still use fullClock, never this longer buffer.
+    for (const event of projected) {
+      const frame = BigInt(event.frame), guard = (frame + quantum - 1n) / quantum * quantum + 1n
+      if (guard > frames) frames = guard
+    }
+    const exact = value => {
+      const number = Number(value)
+      if (!Number.isSafeInteger(number)) throw new Error('Practice SoundFont frame exceeds exact native plan precision')
+      return number
+    }
+    const plan = Buffer.from(JSON.stringify({ schemaVersion: 1, kind: 'soundfont-render', sampleRate: rate, frames: exact(frames),
+      ports: [{ port: 0, events: projected.map(event => ({ ...event, frame: exact(event.frame) })) }] }))
+    await writeFile(timelinePath, plan, { flag: 'wx', mode: 0o400, signal }); signal?.throwIfAborted()
+    return { id, kind: 'soundfont', sound: asset.sound, planPath: timelinePath, outputPath,
+      planHash: createHash('sha256').update(plan).digest('hex'), sampleRate: rate, frames: String(frames), fullClock }
+  }
   const timeline = Buffer.from(JSON.stringify({ schemaVersion: 1, kind: 'practice-vst', sampleRate: rate, frames: String(frames), events }))
   await writeFile(timelinePath, timeline, { flag: 'wx', mode: 0o400, signal }); signal?.throwIfAborted()
   return { id, kind: 'practice', sound: context.project.sound, timelinePath, outputPath,

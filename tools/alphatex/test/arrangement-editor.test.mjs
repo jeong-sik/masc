@@ -11,7 +11,7 @@ import { Worker } from 'node:worker_threads'
 import { mkdtemp, readFile, writeFile, rename, rm } from 'node:fs/promises'
 import { join, dirname, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { emitKeypressEvents } from 'node:readline'
 import { newArrangement, editArrangement, arrangementSchedule } from '../arrangement.mjs'
 import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } from '../arrangement-playback.mjs'
@@ -78,7 +78,7 @@ test('actual IO worker preserves sources in redo history when saving to a differ
 
 const flush=()=>new Promise(resolve=>setImmediate(resolve))
 async function controller(options={}){
-  const observed={requests:[],saved:[],recovered:[],terminated:false,players:[],removed:[],takes:[],captures:[],monitors:[],live:[],liveAttempts:[],claims:[],calibrations:[],writes:[],phrases:[]},process=new EventEmitter()
+  const observed={requests:[],saved:[],recovered:[],terminated:false,players:[],removed:[],takes:[],captures:[],monitors:[],live:[],liveAttempts:[],claims:[],calibrations:[],writes:[],phrases:[],soundSelections:[]},process=new EventEmitter()
   const admitLive=options.admitLive, heldPlaybackReady=options.playbackReady
   process.stdin=Object.assign(new EventEmitter(),{isTTY:true,isRaw:false,setRawMode(value){this.isRaw=value},resume(){},pause(){}})
   process.stdout=Object.assign(new EventEmitter(),{isTTY:true,columns:100,rows:24,write(){}});process.stderr={write(){}}
@@ -98,6 +98,11 @@ async function controller(options={}){
   globalThis[slot]={process,Worker:OwnedWorker,arrangementSchedule,arrangementRoute,selectArrangementRoute,arrangementPlaybackRequest,...editorAPI,join,dirname,resolve,tmpdir,randomUUID,
     practiceEnabled, emitKeypressEvents(){},safeText:String,recordingEpoch,recordingCorrectionContext,recordingCorrectionCapture,calibrationMilliseconds,calibrationResidual,validateCalibrationCapture,
     liveMidiPlan, calibrationSelection, midiDestinations:async()=>[],
+    captureFluidSound(path){
+      let finish,reject; const promise=new Promise((yes,no)=>{finish=yes;reject=no})
+      const entry={path,finish,reject,cancels:0};observed.soundSelections.push(entry)
+      return {promise,cancel(){entry.cancels++}}
+    },
     measureAudioCalibration(options){
       let finish,reject;const completion=new Promise((yes,no)=>{finish=yes;reject=no})
       observed.calibrations.push({options,finish,reject});return completion
@@ -160,7 +165,7 @@ async function controller(options={}){
     .replace("await import('./sequencer-tui.mjs')",'await Promise.resolve({viewSequencer:openSequencer})')
   const prefix=`const {${Object.keys(globalThis[slot]).join(',')}}=globalThis[${JSON.stringify(slot)}];\n`
   const {viewArrangement}=await import('data:text/javascript;base64,'+Buffer.from(prefix+source).toString('base64'))
-  const abort=new AbortController(),done=viewArrangement({root:'/synthetic',signal:abort.signal}).finally(()=>{delete globalThis[slot]})
+  const abort=new AbortController(),done=viewArrangement({root:'/synthetic',initialDocument:options.project,signal:abort.signal}).finally(()=>{delete globalThis[slot]})
   await flush()
   const key=(name,text='',extra={})=>process.stdin.emit('keypress',text,{name,...extra})
   return {observed,process,done,abort,key,worker:owner,command(line){key(undefined,':');key(undefined,line);key('return')}}
@@ -1332,4 +1337,63 @@ test('replacing a practice pass clears a child SMF2 pattern before the next Ente
   for(const job of view.observed.requests.filter(job=>['import-practice','practice-pass'].includes(job.kind)))view.worker.emit('message',{id:job.id,ok:false,error:'Fixture closed'})
   await closeController(view)
  }
+}))
+
+const boundFixtureFont = () => {
+  const bytes = Buffer.from('RIFF0000sfbk')
+  return { kind: 'soundfont', engine: { kind: 'fluidsynth', version: 'fixture', controlFrames: 64 }, bankStyle: 'mma',
+    font: { name: 'fixture.sf2', data: bytes.toString('base64'), sha256: createHash('sha256').update(bytes).digest('hex') } }
+}
+async function practiceSoundController(run) {
+  await practiceSourceFixture(async ({ root, input }) => {
+    const imported = await importArrangementPractice(newArrangement(), input, { projectPath: join(root, 'song.json') })
+    const project = editArrangement(imported.project, { kind: 'asset-add', asset: { ...imported.project.assets[0], id: 'asset-2' } })
+    await run(await controller({ project }), project)
+  })
+}
+
+test('actual arrangement controller binds the explicit practice asset after selection moves; failed reselection retains it', () => practiceSoundController(async c => {
+  const sound = boundFixtureFont()
+  c.command('practice-soundfont asset-1 /a font.sf2'); await flush()
+  assert.equal(c.observed.soundSelections.length, 1)
+  assert.equal(c.observed.soundSelections[0].path, '/a font.sf2')
+  c.command('asset asset-2'); await flush()
+  c.observed.soundSelections[0].finish(sound); await flush()
+  c.command('practice-soundfont asset-1 /unavailable.sf2'); await flush()
+  c.observed.soundSelections[1].reject(new Error('FluidSynth library unavailable')); await flush()
+  c.key('q'); await c.done
+  const saved = c.observed.saved.at(-1).project
+  assert.deepEqual(saved.assets[0].sound, sound)
+  assert.equal(saved.assets[1].sound, undefined)
+}))
+
+test('editing invalidates an unfinished practice sound selection without restoring the stale project', () => practiceSoundController(async c => {
+  c.command('practice-soundfont asset-1'); await flush()
+  c.command('title Latest decision'); await flush()
+  assert.ok(c.observed.soundSelections[0].cancels > 0)
+  c.observed.soundSelections[0].finish(boundFixtureFont()); await flush()
+  c.key('q'); await c.done
+  const saved = c.observed.saved.at(-1).project
+  assert.equal(saved.title, 'Latest decision')
+  assert.equal(saved.assets[0].sound, undefined)
+}))
+
+test('close cancels and joins practice sound selection through native completion before saving original state', () => practiceSoundController(async (c, original) => {
+  c.command('practice-soundfont asset-1'); await flush()
+  c.key('q')
+  let settled = false; c.done.then(() => { settled = true })
+  await flush()
+  assert.ok(c.observed.soundSelections[0].cancels > 0)
+  assert.equal(settled, false)
+  c.observed.soundSelections[0].finish(boundFixtureFont()); await c.done
+  assert.deepEqual(c.observed.saved.at(-1).project, original)
+  assert.equal(c.observed.terminated, true)
+}))
+
+test('a queued practice sound command cannot open a child after abort has already closed the view', () => practiceSoundController(async c => {
+  c.command('practice-soundfont asset-1')
+  c.abort.abort()
+  await c.done
+  assert.equal(c.observed.soundSelections.length, 0)
+  assert.equal(c.observed.terminated, true)
 }))

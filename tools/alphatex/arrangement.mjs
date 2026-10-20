@@ -245,6 +245,13 @@ export function editArrangement(project, edit) {
       break
     }
     case 'asset-add': next.assets.push(structuredClone(edit.asset)); break
+    case 'practice-sound': {
+      const asset = next.assets.find(asset => asset.id === edit.asset && asset.kind === 'practice')
+      if (!asset) throw new Error('Choose a raw practice asset for instrument selection')
+      if (edit.sound === undefined) delete asset.sound
+      else asset.sound = structuredClone(edit.sound)
+      break
+    }
     case 'lane-add': next.lanes.push({ id: arrangementID(next.lanes, 'lane'), name: edit.name,
       kind: edit.sourceKind, muted: false, solo: false }); break
     case 'lane-remove': lane(edit.id); next.lanes = next.lanes.filter(item => item.id !== edit.id); next.clips = next.clips.filter(clip => clip.lane !== edit.id); break

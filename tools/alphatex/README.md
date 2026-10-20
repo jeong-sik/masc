@@ -310,6 +310,10 @@ instrument selection survive Ctrl-L; ordinary save/edit/play/record keys are
 consumed while reading. Existing work continues without pause or finalization.
 The body is fixed at open; reopen to observe a later status. This is not a
 history of overwritten statuses or recovery output printed only after exit.
+In an arrangement, the reading also captures the actual transport state,
+position and output device, plus the recording phase and selected inputs.
+The preparing notice ends when the native player acknowledges playback;
+stopping explicitly reports the stopped state.
 
 `masc-alphatex --music` opens a plain terminal library for new phrases,
 arrangements and audio/MIDI recordings. It also lists JSON projects under

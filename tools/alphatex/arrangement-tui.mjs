@@ -313,6 +313,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     preparing = null
     transport.handle?.stop()
     transport = { kind: 'stopped' }
+    status = 'Playback stopped'
     draw()
   }
   function adopt(next) {
@@ -361,7 +362,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     if (sound) preparing = { kind: 'sound', handle: sound }
     const prepared = sound ? sound.promise : request({ ...selection, project, sourceRoot, directory }, id => { preparing = { kind: 'worker', id } })
     const preparation = (async () => {
-      let result, playbackCompletion, playbackHandle
+      let result, playbackCompletion, playbackHandle, startedPlaying = false
       try {
         result = await prepared
         if (generation === expected) preparing = null
@@ -390,6 +391,10 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
                 captured.controller.abort(); captured.handle?.stop()
               }
               if (!accepting) return
+              if (!startedPlaying && event.kind === 'playing') {
+                startedPlaying = true
+                status = 'Playback started'
+              }
               transportPending = false
               transport = { ...transport, kind: event.kind, event: { ...event,
                 currentTime: event.currentTime + (result.originSeconds ?? 0), duration: event.duration + (result.originSeconds ?? 0) } }
@@ -852,7 +857,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     if (key.ctrl && key.name === 'c') { finish(); return }
     if (statusReader.keypress(text, key, process.stdout)) { draw(); return }
     if (key.ctrl && key.name === 'l' || prompt === null && text === '!') {
-      statusReader.open('Arrangement status at open', `${status}\n\nProject: ${path}`)
+      statusReader.open('Arrangement status at open', statusBody())
       draw(); return
     }
     if (prompt !== null) {
@@ -861,7 +866,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       else if (key.name === 'return') {
         const line = prompt; prompt = null
         // Reading a status must never finalize an active recording.
-        if (statusReader.command(line, 'Arrangement status at open', `${status}\n\nProject: ${path}`)) { draw(); return }
+        if (statusReader.command(line, 'Arrangement status at open', statusBody())) { draw(); return }
         if (arrangementCommandAdmission(line).kind === 'stop') {
           derivationAdmission++
           // Also invalidate derivations admitted in this same input batch,
@@ -924,6 +929,14 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     }
     return result
   }
+  function playbackSummary() {
+    return `Playback ${transport.kind}${transport.event?.practice?.phase === 'count-in' ? ' · count-in ' + transport.event.practice.remainingSeconds.toFixed(2) + ' s' : ''} · ${(transport.event?.currentTime ?? 0).toFixed(2)} s · ${transport.event?.device.name ?? route.output ?? route.midiOutput ?? 'default output'}`
+  }
+  function statusBody() {
+    return [status, '', playbackSummary(),
+      `Recording ${recording?.phase ?? 'idle'} · input ${input ?? 'not selected'} · MIDI ${midiInput}`,
+      `Project: ${path}`].join('\n')
+  }
   function draw() {
     if (!closed && !suspended && !pendingDraw) pendingDraw = setImmediate(() => { pendingDraw = null; drawNow() })
   }
@@ -940,7 +953,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     const residuals = profile?.pulses.map(pulse => calibrationMilliseconds(profile, pulse))
     const lines = [`Arrangement · ${project.title}${project !== saved ? ' *' : ''} · ${project.tempo} BPM · ${project.meter.join('/')}${project.playbackLoop ? ` · LOOP ${project.playbackLoop.start / project.ppq}–${project.playbackLoop.end / project.ppq}` : ''}`,
       `Cursor ${editor.tick / project.ppq} beats · grid ${editor.step / project.ppq} · ${status}`,
-      `Playback ${transport.kind}${transport.event?.practice?.phase === 'count-in' ? ' · count-in ' + transport.event.practice.remainingSeconds.toFixed(2) + ' s' : ''} · ${(transport.event?.currentTime ?? 0).toFixed(2)} s · ${transport.event?.device.name ?? route.output ?? route.midiOutput ?? 'default output'}`,
+      playbackSummary(),
       `Practice ${project.practice?.countInBars ?? 0} count-in bars · metronome ${project.practice?.metronome ? 'on' : 'off'}`,
       `Recording ${recording?.phase ?? 'idle'} · input ${input ?? 'choose :input'} · MIDI ${midiInput} · correction ${policy.kind === 'none' ? 'none' : policy.placement.kind + ' ' + Number(policy.placement.advanceNanoseconds.numerator) / Number(policy.placement.advanceNanoseconds.denominator) / 1e6 + ' ms'}`,
       `Monitor ${recording?.monitoring ? 'active to ' + recording.monitoring.output.id : monitoring ? monitoring.phase + ' to ' + monitorOutput : 'off'}${reportedLatency}`,

@@ -597,6 +597,36 @@ let test_codex_runtime_inventory_is_unverified_until_measured () =
       (verification |> J.member "reason" |> J.to_string))
 ;;
 
+(* The inventory decides "official client" from the runtime's checkpoint
+   owner, so an Agent_core runtime is the other side of the Codex case above:
+   configured, available, and with nothing to verify. *)
+let test_agent_core_runtime_inventory_is_configured () =
+  with_runtime_initialized (fun () ->
+    let entry =
+      Server_dashboard_http_runtime_info.runtime_inventory_json ()
+      |> J.member "providers"
+      |> J.to_list
+      |> List.find (fun entry ->
+        String.equal
+          "openai.gpt"
+          (entry |> J.member "runtime_id" |> J.to_string))
+    in
+    Alcotest.(check string)
+      "status"
+      "configured"
+      (entry |> J.member "status" |> J.to_string);
+    Alcotest.(check bool)
+      "available"
+      true
+      (entry |> J.member "available" |> J.to_bool);
+    Alcotest.(check bool)
+      "nothing to verify"
+      true
+      (match entry |> J.member "verification" with
+       | `Null -> true
+       | _ -> false))
+;;
+
 let test_codex_runtime_cannot_enter_agent_core_runner () =
   with_codex_runtime_initialized (fun () ->
     match Runtime_agent_core_runner.For_testing.resolve_runtime_providers ~runtime_id:"codex.codex" () with
@@ -4095,6 +4125,10 @@ let () =
             "dashboard Codex runtime stays unavailable until measured"
             `Quick
             test_codex_runtime_inventory_is_unverified_until_measured
+        ; Alcotest.test_case
+            "dashboard agent_core runtime is configured and available"
+            `Quick
+            test_agent_core_runtime_inventory_is_configured
         ; Alcotest.test_case
             "dashboard runtime inventory reports transport kind"
             `Quick

@@ -1692,12 +1692,9 @@ let runtime_admission_json (rt : Runtime_instance.t) =
 let runtime_inventory_entry_json ~default_id (rt : Runtime_instance.t) =
   let runtime_kind = runtime_kind_of_transport rt.provider.transport in
   let is_official_client_runtime =
-    match rt.execution with
-    | Runtime_execution.Codex_app_server _
-    | Runtime_execution.Claude_code _
-    | Runtime_execution.Antigravity_cli _
-    | Runtime_execution.Muse_serve _ -> true
-    | Runtime_execution.Agent_core _ -> false
+    match Runtime_execution.checkpoint_owner rt.execution with
+    | Runtime_execution.Official_client -> true
+    | Runtime_execution.Masc_agent_core -> false
   in
   let runtime_status =
     if is_official_client_runtime then "configured_unverified" else "configured"

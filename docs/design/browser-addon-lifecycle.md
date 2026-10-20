@@ -468,6 +468,44 @@ the same input, model, cancellation and cleanup path. These new real-cookie
 scenario definitions have not yet executed; they do not establish real login
 preservation or personal-site behavior.
 
+## Host-authorized uploads into the owned Gecko backend
+
+The host admits uploads only from an exact pending `Browser_lane.Upload_lease`
+batch produced by the Keeper's existing file-read authority. It retains the
+original Add-on service, caller and bound automation command, then asks that
+worker's private socket to copy the approved regular 0600 single-link files
+into its own allocation. The existing per-file 16 MiB bound is shared by both
+sides; file bytes do not travel inside the bounded MCP/JSON frame.
+
+A host-minted one-use grant binds the verified actor, route and complete upload
+command. The ordinary exported `browser_command` still runs the installation's
+selected input/output hooks. Only its matching upload can consume the grant;
+an ordinary low-level Issue with arbitrary paths is refused. The worker passes
+its registered copies to the existing WebDriver upload owner, so a browser may
+read them lazily after the host call and source snapshots have ended. Confirmed
+session teardown releases the claimed copies. Host cleanup discards pending
+grants on the same original connection, including a failed connection retained
+for settlement; it never looks up a replacement or retries browser input.
+
+Discard before or during preparation fences late grant publication. Retirement
+fences new work, joins preparation and active claim scopes, then releases pending
+files after backend cleanup. Snapshot deletion uses the existing descriptor-bound
+parent/batch cleanup primitive; a replaced allocation remains unconfirmed. The
+host's default staging uses a process-owned private anchor rather than treating
+a shared system temp directory as deletion authority. This is cooperative native
+ownership, not isolation from a same-UID writer bypassing those ownership rules.
+
+The focused scenario defines public export/hooks, one-use caller binding, lazy
+read lifetime, discard fencing and replacement-root refusal using the actual
+owner/broker/lease modules with a scripted automation executor. It has not yet
+run through linked Dune/CI, a real worker/socket or Gecko. A separate bounded
+local probe executed the original upload-lease and owned-tree cleanup code and
+C primitive: generic callback results, cleanup under a shared 1777 temp directory,
+browser-claimed lifetime and replacement-file preservation passed. That probe
+uses an exact cleanup-function re-export adapter and is not a whole Fs library,
+worker or browser build. Downloads, Chrome uploads and other backend transfer
+contracts remain open.
+
 ## Completion evidence
 
 The private-profile public Add-on proof passed all 38 recorded steps in

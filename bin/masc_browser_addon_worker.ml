@@ -17,6 +17,13 @@ let () =
     Eio.Switch.run (fun sw ->
     let owner = match Masc.Browser_addon_owner.create ~incarnation with
       | Ok owner -> owner | Error message -> raise (Arg.Bad message) in
+    let uploads=Eio_unix.run_in_systhread (fun () ->
+      Masc.Browser_addon_uploads.create ~directory:(Filename.dirname socket_path)) in
+    (match Result.bind uploads (Masc.Browser_addon_owner.attach_uploads owner) with
+     | Ok () -> () | Error detail -> raise (Arg.Bad detail));
+    Eio.Switch.on_release sw (fun () ->
+      match Masc.Browser_addon_owner.cleanup_uploads owner with
+      | Ok () -> () | Error detail -> Printf.eprintf "browser upload cleanup unconfirmed: %s\n%!" detail);
     if !models then (
       let directory=Filename.dirname socket_path in
       let configuration=Eio_unix.run_in_systhread (fun () ->

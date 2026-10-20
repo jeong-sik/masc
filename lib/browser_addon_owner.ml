@@ -11,6 +11,7 @@ type t = {
   mutable automation : cleanup option;
   mutable stagehand : cleanup option;
   mutable models : Browser_addon_models.t option;
+  mutable uploads : Browser_addon_uploads.t option;
   retired : unit Eio.Promise.t;
   retire : unit Eio.Promise.u;
 }
@@ -24,7 +25,7 @@ let create ~incarnation =
       Error "a browser owner already exists in this process"
     else
       let retired, retire = Eio.Promise.create () in
-      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=None;stagehand=None;models=None;retired;retire} in
+      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=None;stagehand=None;models=None;uploads=None;retired;retire} in
       B.install_activity_observer (Some (fun lane -> match t.phase,lane with
         | Serving,B.Lane_name.Live -> B.Enabled
         | Serving,B.Lane_name.Automation -> if Option.is_some t.automation then B.Enabled else B.Disabled
@@ -50,6 +51,17 @@ let attach_models t models =
     | Retired,_ -> Error "browser owner is retired"
     | Serving,Some _ -> Error "browser model broker is already attached"
     | Serving,None -> t.models<-Some models;Ok ())
+let attach_uploads t uploads =
+  Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase,t.uploads with
+    | Retired,_ -> Error "browser owner is retired"
+    | Serving,Some _ -> Error "browser upload broker is already attached"
+    | Serving,None -> t.uploads<-Some uploads;Ok ())
+let admitted_uploads t incarnation = with_admission t incarnation (fun () ->
+  match t.uploads with Some uploads -> Ok uploads
+    | None -> Error (refusal "browser upload broker is unavailable"))
+let cleanup_uploads t = match t.uploads with
+  | None -> Ok ()
+  | Some uploads -> Eio_unix.run_in_systhread (fun () -> Browser_addon_uploads.cleanup uploads)
 let admitted_models t =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase,t.models with
     | Retired,_ -> Error Browser_addon_models.Retired
@@ -88,6 +100,7 @@ let revoke t =
     | Serving ->
       t.phase <- Retired;
       Option.iter Browser_addon_models.retire t.models;
+      Option.iter Browser_addon_uploads.revoke t.uploads;
       B.install_automation_executor None;
       B.install_server_session_observer B.Server_automation None;
       B.install_automation_document_observer None;
@@ -104,15 +117,53 @@ let cleanup t =
     let settle = function None -> Ok () | Some cleanup -> Eio.Lazy.force cleanup in
     let automation,stagehand = Eio.Fiber.pair
         (fun () -> settle t.automation) (fun () -> settle t.stagehand) in
-    match automation,stagehand with
-    | Ok (),Ok () -> W.Receipt
-    | Error message,Ok () | Ok (),Error message -> refusal ~disposition:W.Outcome_unknown message
-    | Error automation,Error stagehand ->
-      refusal ~disposition:W.Outcome_unknown (automation ^ "; " ^ stagehand))
+    let uploads=cleanup_uploads t in
+    let errors=List.filter_map (function Ok () -> None | Error detail -> Some detail)
+      [automation;stagehand;uploads] in
+    match errors with [] -> W.Receipt
+      | _::_ -> refusal ~disposition:W.Outcome_unknown (String.concat "; " errors))
 let waiting t ~disposition run =
   Watched_work.run run ~watcher:(fun () ->
     Eio.Promise.await t.retired;
     refusal ~disposition "browser worker retired during the request")
+type upload_admission = Ordinary | Scoped_upload
+let issue t ~incarnation ~upload_admission ~route ~verb ~actor ~timeout_sec ~only_if_idle =
+  let allowed=match verb,upload_admission with
+    | B.Page_act (B.Action.On_tab {interaction=B.Action.Upload _;_}),Ordinary ->
+        Error (refusal "upload requires its private host snapshot grant")
+    | (B.Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_capture _|Page_scene _|Page_interact _
+      |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _
+      |Page_act (Open_tab _|On_tab {interaction=Click _|Fill _|Press _|Scroll _|Select _|Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog;_})
+      |Page_context _|Page_instruct _|Page_locate _|Page_extract _),(Ordinary|Scoped_upload)
+    | Page_act (On_tab {interaction=Upload _;_}),Scoped_upload -> Ok () in
+  match allowed with Error reply -> reply | Ok () ->
+    (match with_admission t incarnation (fun () ->
+      match route with
+      | B.Stagehand_route when Option.is_none t.stagehand -> Error (refusal "Stagehand is not attached to this worker")
+      | B.Automation_route when Option.is_none t.automation -> Error (refusal "automation is not attached to this worker")
+      | B.Live_route None -> Error (refusal "worker execution requires a selected clientId")
+      | B.Live_route (Some _) | B.Automation_route | B.Stagehand_route ->
+        B.resolve_target ~verb route |> Result.map_error (fun error -> W.Issue_result (Error error))) with
+     | Error reply -> reply
+     | Ok target -> waiting t ~disposition:W.Outcome_unknown (fun () ->
+         W.Issue_result (if only_if_idle then
+           match verb with
+           | B.Page_document {tab_id} -> B.issue_document_if_idle ~target ~tab_id ~timeout_sec
+           | B.Tabs_list|Page_read _|Page_downloads _|Page_capture _|Page_scene _|Page_interact _
+           | Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act _
+           | Page_context _|Page_instruct _|Page_locate _|Page_extract _ ->
+             Ok (B.Rejected_before_effect "idle admission supports document reads only")
+         else B.issue_for_actor ~actor ~target ~verb ~timeout_sec)))
+
+let dispatch_upload t ~id ~actor ~route ~verb =
+  match admitted_uploads t t.incarnation with
+  | Error reply -> reply
+  | Ok uploads ->
+    match Browser_addon_uploads.with_claim uploads ~id ~actor ~route ~verb (fun verb ->
+      issue t ~incarnation:t.incarnation ~upload_admission:Scoped_upload ~route ~verb
+        ~actor:(Some actor) ~timeout_sec:B.default_timeout_sec ~only_if_idle:false) with
+    | Ok reply -> reply | Error detail -> refusal detail
+
 let model_port t incarnation run =
   let models=with_admission t incarnation (fun () -> match t.models with
     | Some models -> Ok models | None -> Error (refusal "browser model broker is disabled")) in
@@ -129,6 +180,16 @@ let dispatch t (request : W.request) =
   | W.Snapshot ->
     (match with_admission t request.incarnation (fun () -> Ok (snapshot t)) with
      | Error reply -> reply | Ok value -> W.Snapshot_result value)
+  | W.Upload_stage {id;actor;route;verb} ->
+    (match admitted_uploads t request.incarnation with
+     | Error reply -> reply
+     | Ok uploads ->
+       match Eio_unix.run_in_systhread (fun () -> Browser_addon_uploads.stage uploads ~id ~actor ~route ~verb) with
+       | Ok () -> W.Receipt | Error detail -> refusal detail)
+  | W.Upload_discard id ->
+    (match admitted_uploads t request.incarnation with
+     | Error reply -> reply
+     | Ok uploads -> Eio_unix.run_in_systhread (fun () -> Browser_addon_uploads.discard uploads ~id);W.Receipt)
   | W.Model_requests -> model_port t request.incarnation Browser_addon_models.listing
   | W.Model_result arguments -> model_port t request.incarnation (fun models ->
       Browser_addon_models.deliver models ~arguments
@@ -159,20 +220,5 @@ let dispatch t (request : W.request) =
       |> Result.map_error refusal) with
      | Error reply -> reply | Ok () -> W.Receipt)
   | W.Issue {route;verb;actor;timeout_sec;only_if_idle} ->
-    (match with_admission t request.incarnation (fun () ->
-      match route with
-      | B.Stagehand_route when Option.is_none t.stagehand -> Error (refusal "Stagehand is not attached to this worker")
-      | B.Automation_route when Option.is_none t.automation -> Error (refusal "automation is not attached to this worker")
-      | B.Live_route None -> Error (refusal "worker execution requires a selected clientId")
-      | B.Live_route (Some _) | B.Automation_route | B.Stagehand_route ->
-        B.resolve_target ~verb route |> Result.map_error (fun error -> W.Issue_result (Error error))) with
-     | Error reply -> reply
-     | Ok target -> waiting t ~disposition:W.Outcome_unknown (fun () ->
-         W.Issue_result (if only_if_idle then
-           match verb with
-           | B.Page_document {tab_id} -> B.issue_document_if_idle ~target ~tab_id ~timeout_sec
-           | B.Tabs_list|Page_read _|Page_downloads _|Page_capture _|Page_scene _|Page_interact _
-           | Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act _
-           | Page_context _|Page_instruct _|Page_locate _|Page_extract _ ->
-             Ok (B.Rejected_before_effect "idle admission supports document reads only")
-         else B.issue_for_actor ~actor ~target ~verb ~timeout_sec)))
+    issue t ~incarnation:request.incarnation ~upload_admission:Ordinary
+      ~route ~verb ~actor ~timeout_sec ~only_if_idle

@@ -103,7 +103,9 @@ val call_browser_service : config:Workspace.config -> access:Lane_addon_sources.
 (** Trusted host transport boundary, not a Keeper tool. The server first admits
     the caller and pins host registrations to this original handle. Every call
     revalidates visibility and exact connection ownership on the owner domain;
-    no replacement lookup or retry. Selected tool middleware belongs at the
+    no replacement lookup or retry. Pending-upload discard remains available on
+    that original failed connection for settlement; staging and input do not.
+    Selected tool middleware belongs at the
     eventual browser tool bridge, before this low-level transport boundary. *)
 val call_exported_tool : config:Workspace.config -> access:Lane_addon_sources.access ->
   reserved:string list -> export:tool_export -> arguments:Yojson.Safe.t ->

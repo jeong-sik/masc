@@ -569,7 +569,7 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
          match Browser_surface.capture {request with tab_id=Some tab_id} with
          | Error failure -> read_failure ~base_path ~tool_name ~start_time failure
          | Ok data ->
-         match Browser_screenshot.persist ~keeper_name data with
+         match Browser_screenshot.persist ~base_path ~keeper_name data with
          | Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
          | Error detail -> make_workflow_err ~tool_name ~start_time detail)
     | `Text ->

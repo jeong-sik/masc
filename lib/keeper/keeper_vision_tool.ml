@@ -88,13 +88,16 @@ let first_vision_runtime_id ~now : (string, string) result =
   | id :: _ -> Ok id
   | [] -> Error "no image-capable runtime configured"
 
-(* Per-keeper content-addressed store dir. Phase 2 ingestion (§2.3) will write
-   incoming images here under the same path. *)
-let vision_store_dir ~keeper_name =
-  Filename.concat (Config_dir_resolver.keepers_dir ()) (keeper_name ^ ".vision")
+(* Per-keeper content-addressed storage. Workspace callers keep publication,
+   read and promotion on the same explicit config-root resolution. *)
+let vision_store_dir ?base_path ~keeper_name () =
+  let keepers = match base_path with
+    | None -> Config_dir_resolver.keepers_dir ()
+    | Some base_path -> Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  Filename.concat keepers (keeper_name ^ ".vision")
 
-let frames_dir ~keeper_name =
-  Store.frames_dir ~dir:(vision_store_dir ~keeper_name)
+let frames_dir ?base_path ~keeper_name () =
+  Store.frames_dir ~dir:(vision_store_dir ?base_path ~keeper_name ())
 
 let run_artifact_job ~label f =
   match Domain_pool_ref.get () with
@@ -103,13 +106,13 @@ let run_artifact_job ~label f =
       Eio_guard.check_if_ready ();
       Domain_pool_ref.submit_io_or_inline f
 
-let store_frame ~keeper_name bytes =
-  let dir = frames_dir ~keeper_name in
+let store_frame ?base_path ~keeper_name bytes =
+  let dir = frames_dir ?base_path ~keeper_name () in
   run_artifact_job ~label:"vision-artifact-store" (fun () ->
     Store.store ~auto_prune:true ~dir bytes)
 
-let store_kept ~keeper_name bytes =
-  let dir = vision_store_dir ~keeper_name in
+let store_kept ?base_path ~keeper_name bytes =
+  let dir = vision_store_dir ?base_path ~keeper_name () in
   run_artifact_job ~label:"vision-artifact-store" (fun () ->
     Store.store ~auto_prune:false ~dir bytes)
 
@@ -1061,7 +1064,7 @@ let handle_with_outcome
          ~failure_class:Tool_result.Runtime_failure
          "eio_context_unavailable"
      | Some sw, Some net, Some clock ->
-       let dir = vision_store_dir ~keeper_name:meta.name in
+       let dir = vision_store_dir ?base_path ~keeper_name:meta.name () in
          (match load_artifact ~dir (Store.of_string handle_str) with
         | Error error ->
           let failure_class, code, recovery = match error with
@@ -1109,7 +1112,7 @@ let handle_with_outcome
                    (* A frame's handle is the Keeper's only durable reference.
                       Keep the verified bytes before reporting a successful
                       analysis, even if rotation removed the frame meanwhile. *)
-                   (match store_kept ~keeper_name:meta.name bytes with
+                   (match store_kept ?base_path ~keeper_name:meta.name bytes with
                     | Ok _ -> execution_of_vision_outcome outcome
                     | Error detail ->
                       failed

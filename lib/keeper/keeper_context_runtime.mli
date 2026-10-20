@@ -50,7 +50,8 @@ val context_of_agent_core_checkpoint
   -> working_context
 
 val save_agent_core_checkpoint
-  :  runtime_id:string
+  :  base_path:string
+  -> runtime_id:string
   -> keeper_name:string
   -> session:session_context
   -> agent_name:string

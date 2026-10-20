@@ -175,7 +175,17 @@ let is_candidate ~goal_created_at ~confirmed_at = function
   | Candle_event.Deleted -> false
 ;;
 
-let validate_durable_candidates_internal (waiting : waiting) events =
+(* Which eligibility rule judges the candidate list of a stored [Candidates]
+   row. A new settlement is held to today's window ([Current_rules]). A
+   settlement read back from the ledger is judged against the list recorded
+   when it was written ([Recorded_rules]): that list was decided under the rules
+   of its time, and re-deciding it under a later rule would make one old row
+   unreadable for every Goal. *)
+type rules =
+  | Current_rules
+  | Recorded_rules
+
+let validate_durable_candidates_internal ~rules (waiting : waiting) events =
   let ( let* ) = Result.bind in
   let* pass = match pass_of waiting events with
     | Some pass -> Ok pass
@@ -196,12 +206,17 @@ let validate_durable_candidates_internal (waiting : waiting) events =
        || List.sort String.compare observed_ids <> List.sort String.compare pass.linked_task_ids
     then Error "durable task observations must cover every Snapshot-linked task exactly once"
     else
-      let eligible_ids = List.filter_map (fun (id, task) ->
-        if is_candidate ~goal_created_at:pass.goal_created_at
-            ~confirmed_at:waiting.confirmed_at task then Some id else None) tasks in
-      if List.sort String.compare ids <> List.sort String.compare eligible_ids
-      then Error "durable candidate tasks must equal the complete eligible Snapshot subset"
-      else Ok () in
+      match rules with
+      | Current_rules ->
+        let eligible_ids = List.filter_map (fun (id, task) ->
+          if is_candidate ~goal_created_at:pass.goal_created_at
+              ~confirmed_at:waiting.confirmed_at task then Some id else None) tasks in
+        if List.sort String.compare ids <> List.sort String.compare eligible_ids
+        then Error "durable candidate tasks must equal the complete eligible Snapshot subset"
+        else Ok ()
+      | Recorded_rules ->
+        if List.for_all (fun id -> List.mem id observed_ids) ids then Ok ()
+        else Error "durable candidate tasks must be observed Snapshot-linked tasks" in
   let* () =
     let observed_ids = List.map fst task_keepers in
     if List.sort String.compare observed_ids <> List.sort String.compare ids
@@ -223,15 +238,15 @@ let validate_durable_candidates_internal (waiting : waiting) events =
   Ok (pass, tasks, ids, keepers, task_keepers)
 
 let validate_durable_candidates (waiting : waiting) events =
-  Result.map ignore (validate_durable_candidates_internal waiting events)
+  Result.map ignore (validate_durable_candidates_internal ~rules:Current_rules waiting events)
 
-let validate_settlement (waiting : waiting) events body =
+let validate_settlement_under ~rules (waiting : waiting) events body =
   let ( let* ) = Result.bind in
   let matches goal_id request_id verification_run_id =
     goal_id = waiting.goal_id && request_id = waiting.request_id
     && verification_run_id = waiting.verification_run_id in
   let* pass, tasks, ids, keepers, task_keepers =
-    validate_durable_candidates_internal waiting events
+    validate_durable_candidates_internal ~rules waiting events
   in
   let recipients relations =
     let actual = List.map (fun (r : Candle_appraisal.task_relation) -> r.task_id) relations in
@@ -270,8 +285,10 @@ let validate_settlement (waiting : waiting) events body =
   | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ ->
     Error "settlement does not name the confirmed verifier run"
 
-(* The open obligation a settlement row closes, when the row is a settlement. *)
-let open_obligation events body =
+let validate_settlement waiting events body =
+  validate_settlement_under ~rules:Current_rules waiting events body
+
+let validate_under ~rules events body =
   let goal_id = match body with
     | Candle_event.Paid p -> Some p.identity.goal_id
     | Candle_event.Unattributed u -> Some u.goal_id
@@ -279,37 +296,14 @@ let open_obligation events body =
     | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
     | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ -> None in
   match goal_id with
-  | None -> Ok None
+  | None -> Ok ()
   | Some goal_id ->
     match state ~goal_id events with
     | No_obligation | Failed _ | Settled -> Error "settlement requires an open payout obligation"
-    | Waiting waiting -> Ok (Some waiting)
+    | Waiting waiting -> validate_settlement_under ~rules waiting events body
 
-(* Whether a settlement row names the run the open obligation was confirmed for. *)
-let names_confirmed_run (waiting : waiting) body =
-  let matches goal_id request_id verification_run_id =
-    goal_id = waiting.goal_id && request_id = waiting.request_id
-    && verification_run_id = waiting.verification_run_id in
-  match body with
-  | Candle_event.Paid p -> matches p.identity.goal_id p.identity.request_id p.identity.verification_run_id
-  | Candle_event.Unattributed u -> matches u.goal_id u.request_id u.verification_run_id
-  | Candle_event.Payout_failed f -> matches f.goal_id f.request_id f.verification_run_id
-  | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
-  | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ -> false
-
-let validate_replay events body =
-  match open_obligation events body with
-  | Error _ as refused -> refused
-  | Ok None -> Ok ()
-  | Ok (Some waiting) ->
-    if names_confirmed_run waiting body then Ok ()
-    else Error "settlement does not name the confirmed verifier run"
-
-let validate_record events body =
-  match open_obligation events body with
-  | Error _ as refused -> refused
-  | Ok None -> Ok ()
-  | Ok (Some waiting) -> validate_settlement waiting events body
+let validate_record events body = validate_under ~rules:Current_rules events body
+let validate_replay events body = validate_under ~rules:Recorded_rules events body
 
 let keeper_name ~is_keeper = function
   | Candle_event.Found { assignee = Some name; _ } -> if is_keeper name then Some name else None

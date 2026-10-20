@@ -125,10 +125,10 @@ let remember records event =
     Goal_records.add goal_id (event :: reversed) records
 ;;
 
-(* A row is judged against the rules of the moment it enters the ledger
-   ([Append]), and read back only for what the rows themselves state
-   ([Replay]). Re-deciding a stored settlement under a later rule would make
-   one old row unreadable for every Goal. *)
+(* A settlement is admitted under today's rules when it enters the ledger
+   ([Append]), and read back against the candidate list recorded when it was
+   written ([Replay]). Re-deciding that list under a later rule would make one
+   old row unreadable for every Goal. *)
 type admission =
   | Append
   | Replay

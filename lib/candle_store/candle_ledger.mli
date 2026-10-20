@@ -9,8 +9,11 @@
     A row that does not read fails the whole read. Paying and buying refuse to
     run on a ledger nobody can read, so a bad row has to stop them, not be
     skipped. Settlement rows must also agree with preceding obligation,
-    Snapshot and Candidates rows. Reads and appends use the same pure payout
-    admission. *)
+    Snapshot and Candidates rows. An append is admitted under today's payout
+    rules ({!Candle_payout.validate_record}); a read judges a stored settlement
+    by the Candidates list recorded when it was written
+    ({!Candle_payout.validate_replay}), so changing the eligibility window does
+    not make an old row unreadable. *)
 
 val path : base_path:string -> string
 

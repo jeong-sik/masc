@@ -67,13 +67,24 @@ per-note detach/reset. Relative registered/assignable parameters require an
 absolute value in the source prefix. MIDI 1.0 channel-voice UMP words remain
 MIDI 1.0 UMP words; no MIDI 2.0 expression is reduced to that dialect.
 
-Previously changed fields need an explicit source baseline, including before a
-surviving Note On that selected a patch or pitch. Unknown initial values are not
-invented. Unsupported reconstruction stops both owners with a diagnostic; it
-does not change the retained source. Opaque system/SysEx effects, channel-mode
+Previously changed fields need an explicit source baseline. The restored prefix
+is sent at once, so a controller, pressure or pitch bend that follows a surviving
+Note On still reaches that voice. Values a voice keeps need their baseline
+before its Note On: program and bank, Portamento Time and On/Off, Tuning
+Program/Bank, MPE Configuration, Per-Note Pitch Bend Sensitivity, Registered
+Per-Note Controller #3 Pitch 7.25 and assignable controllers. MIDI 1.0 Bank
+Select needs one before the Program Change that applies it, and per-note
+controllers before a Per-Note Management Detach while the note sounds.
+Unknown initial values are not
+invented. Unsupported reconstruction refuses the pause, resume or seek before
+either owner changes: playback keeps its playing or paused state and position,
+and the acknowledging state event carries the diagnostic in `refusal`. Opaque
+system/SysEx effects, channel-mode
 changes, Hold 2, one-shot Portamento Control, MIDI 1.0 compound parameter controls and mixed message dialects
-on one output channel currently require complete-source playback. Full-source
-audition still emits every original message. Per-note management and CC121 are
+on one output channel currently require complete-source playback. NOOP, JR Clock,
+JR Timestamp, Timing Clock and Active Sensing carry no device state; reconstruction
+neither restores nor replays them, and playback sends them at their original times.
+Full-source audition still emits every original message. Per-note management and CC121 are
 handled according to the [UMP v1.1.2 specification](https://amei-music.github.io/midi2.0-docs/amei-pdf/M2-104-UM_v1-1-2_UMP_and_MIDI_2-0_Protocol_Specification.pdf).
 
 Staging sends no restored Note On before the shared future epoch. If its callback

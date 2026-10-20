@@ -205,7 +205,15 @@ struct UmpRegionClip {
     let scope: Set<UmpChannel>
     let releaseOwners: [Int: Int]
     let expiredNotes: [Int: Int]
+    let footprint: UmpFootprint
+    var entryPrior = UmpFootprint()
 
+    // A first copy follows only earlier regions on its channels; each repeat
+    // also follows the copy before it.
+    func prior(repeating: Bool) -> UmpFootprint {
+        guard repeating else { return entryPrior }
+        var value = entryPrior; value.formUnion(footprint); return value
+    }
     func prefix(at scaledTime: UInt128, inclusive: Bool = true) -> Int {
         var low = 0, high = endIndex
         while low < high {
@@ -258,6 +266,18 @@ struct UmpRegionClip {
     func next(copy: UInt64, index: Int) -> UInt64 {
         if index < endIndex { return deadline(copy: copy, delta: UInt128(timed[index].ticks) * numer - cut) }
         return deadline(copy: copy, delta: period)
+    }
+}
+
+extension UmpFootprint {
+    func scoped(to scope: Set<UmpChannel>) -> UmpFootprint {
+        var value = self
+        value.touched = touched.filter { field in scope.contains { $0.contains(field.address) } }
+        value.addresses = addresses.filter { address in scope.contains { $0.contains(address) } }
+        return value
+    }
+    mutating func formUnion(_ other: UmpFootprint) {
+        touched.formUnion(other.touched); addresses.formUnion(other.addresses); obstacles.formUnion(other.obstacles)
     }
 }
 
@@ -325,27 +345,32 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
             let end = upperBound / denom + (upperBound % denom == 0 ? 0 : 1)
             guard end > UInt128(start), end <= UInt128(duration) else { throw MidiFailure("captured region exceeds arrangement duration") }
             let endIndex = timed.firstIndex { UInt128($0.ticks) >= after } ?? timed.count
-            let events = timed.map(\.event), scope = Set(events.prefix(endIndex).map(UmpChannel.init))
+            let events = timed.map(\.event), scope = Set(events.prefix(endIndex).compactMap(UmpChannel.init(voice:)))
             // Every replayed prefix is part of this physical scope, even when
             // its keys were originally acquired before the cut.
-            for event in events.prefix(endIndex) { potential.observe(UmpMessage(event)) }
+            var own = UmpFootprint()
+            for event in events.prefix(endIndex) { own.observe(UmpMessage(event)); potential.observe(UmpMessage(event)) }
             let notes = try umpRestoration(events, prefixCount: endIndex, replacing: UmpFootprint())
             admitted.append(UmpRegionClip(id: region.id, start: start, origin: origin, phaseOffset: phaseOffset,
                 lowerBound: lowerBound, upperBound: upperBound, end: UInt64(end), repeatCount: region.repeatCount,
-                cut: scaledCut, period: period, numer: numer, denom: denom, timed: timed, events: events, endIndex: endIndex, scope: scope, releaseOwners: notes.releaseOwners, expiredNotes: notes.expiredNotes))
+                cut: scaledCut, period: period, numer: numer, denom: denom, timed: timed, events: events, endIndex: endIndex, scope: scope, releaseOwners: notes.releaseOwners, expiredNotes: notes.expiredNotes, footprint: own))
         }
         try potential.requireSupported()
-        for (index, clip) in admitted.enumerated() {
+        for index in admitted.indices {
+            var clip = admitted[index]
             for other in admitted.prefix(index) where !clip.scope.isDisjoint(with: other.scope) {
                 let entersBeforeEnd = umpRationalLess(clip.lowerBound, clip.denom, other.upperBound, other.denom)
                 let otherEntersBeforeEnd = umpRationalLess(other.lowerBound, other.denom, clip.upperBound, clip.denom)
                 guard !entersBeforeEnd || !otherEntersBeforeEnd else { throw MidiFailure("overlapping captured regions share physical MIDI channels; select independent outputs") }
             }
-            // The first copy enters an empty physical output, so it is admitted
-            // with no previous state rather than with the source prefix footprint.
-            // Only a repeat copy boundary carries a previous footprint (the live
-            // output's state), which playback supplies via `output.prior`.
-            _ = try clip.restore(at: clip.cut, replacing: UmpFootprint())
+            for other in admitted where umpRationalLess(other.lowerBound, other.denom, clip.lowerBound, clip.denom) {
+                clip.entryPrior.formUnion(other.footprint.scoped(to: clip.scope))
+            }
+            // Entry events and silent preambles remain an original due stream.
+            // Explicit baselines must precede each attack/relative use; they
+            // cannot repair a historical live voice's patch or escape the cut.
+            _ = try clip.restore(at: clip.cut, replacing: clip.prior(repeating: clip.repeatCount > 1))
+            admitted[index] = clip
         }
         clips = admitted
         output = UmpOutput(bindings: destinations.map { UmpBinding(source: $0, destination: $0) })
@@ -359,8 +384,15 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
         let position = try umpNanoseconds(seconds)
         guard position < duration else { throw MidiFailure("captured region seek exceeds duration") }
         for clip in clips {
-            if let phase = clip.phase(at: position) {
-                _ = try clip.restore(at: phase.time, replacing: output.prior(in: clip.scope))
+            let prior = output.prior(in: clip.scope), phase = clip.phase(at: position)
+            if let phase { _ = try clip.restore(at: phase.time, replacing: prior) }
+            // Admission proved each entry ahead after earlier regions and copies
+            // only. After a seek back this owner may have changed more of its
+            // state: refuse the seek rather than stop playback at that entry.
+            if position < clip.start || phase.map({ $0.copy + 1 < clip.repeatCount }) == true {
+                var ahead = clip.prior(repeating: phase != nil || clip.repeatCount > 1)
+                ahead.formUnion(prior)
+                _ = try clip.restore(at: clip.cut, replacing: ahead)
             }
         }
         try output.checkDestinations(); timer?.cancel(); timer = nil

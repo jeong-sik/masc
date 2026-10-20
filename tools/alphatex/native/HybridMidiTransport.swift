@@ -4,6 +4,7 @@ import Foundation
 // admission, all-or-nothing lifecycle and one completion, not their wire data.
 final class HybridMidiTransport: CoordinatedMidiTransport {
     let owners: [any CoordinatedMidiTransport]
+    let stagingOrder: [Int]
     let duration: Double
     let cycle: MidiCycle?
     var anchor: UInt64 = 0
@@ -43,10 +44,14 @@ final class HybridMidiTransport: CoordinatedMidiTransport {
             throw MidiFailure("SMF and captured UMP share physical MIDI channel state; select independent channels, groups or outputs")
         }
         let source = try MidiTransport(timeline: midi, uid: uid, loop: cycle != nil, coordinated: true, groupZeroUMP: true, cycle: cycle)
-        self.init(owners: [source, captured], duration: cycle?.duration ?? midi.duration, cycle: cycle)
+        // The captured owner refuses an unsupported reconstruction before any
+        // send, so it stages first; bindings keep their SMF-first order.
+        self.init(owners: [source, captured], duration: cycle?.duration ?? midi.duration, cycle: cycle, stagingOrder: [1, 0])
     }
-    init(owners: [any CoordinatedMidiTransport], duration: Double, cycle: MidiCycle? = nil) {
-        self.owners = owners; self.duration = duration; self.cycle = cycle
+    init(owners: [any CoordinatedMidiTransport], duration: Double, cycle: MidiCycle? = nil, stagingOrder: [Int]? = nil) {
+        let order = stagingOrder ?? Array(owners.indices)
+        precondition(order.count == owners.count && Set(order) == Set(owners.indices), "hybrid staging order must name each owner once")
+        self.owners = owners; self.stagingOrder = order; self.duration = duration; self.cycle = cycle
         for (index, owner) in owners.enumerated() {
             owner.onCoordinatedFailure = { [weak self] reason, error in self?.finish(reason: reason, error: error, publish: false) }
             owner.onCoordinatedEnd = { [weak self] in
@@ -62,9 +67,13 @@ final class HybridMidiTransport: CoordinatedMidiTransport {
     }
     func stageCoordinated(at seconds: Double) throws {
         guard state != .stopped, seconds.isFinite, seconds >= 0, seconds < duration else { throw MidiFailure("invalid hybrid MIDI seek") }
+        var staged = 0
         do {
-            for owner in owners { try owner.stageCoordinated(at: seconds) }
+            for index in stagingOrder { try owners[index].stageCoordinated(at: seconds); staged += 1 }
             ended.removeAll(); offset = seconds; state = .staged
+        } catch let refusal as UmpRefusal where staged == 0 {
+            // No owner has staged or sent anything: the audio owner keeps playback.
+            throw refusal
         } catch { finish(reason: "hybrid-stage-failed", error: error, publish: false); throw error }
     }
     func runCoordinated(anchorNanoseconds: UInt64) throws {

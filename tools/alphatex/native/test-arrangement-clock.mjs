@@ -8,6 +8,8 @@ const part=(first,last)=>{const a=source.indexOf(first),b=source.indexOf(last,a)
 const methods=[part('    var completed: Bool', '    func checkOutput()'),part('    func backingTime()', '    func snapshot('),part('    func clearRenderStart()', '    func monitor('),part('    func receive(', '    func finish(')].join('\n').replaceAll('mach_absolute_time()', 'reviewHost').replaceAll('DispatchSource.makeTimerSource(queue: .main)', 'reviewTimer()').replaceAll('DispatchSource.makeUserDataAddSource(queue: .main)', 'reviewDataSource()')
 const command=part('enum AudioCommand: Decodable', 'final class ArrangementTransport')
 const future=part('func futureHost(', 'struct Asset:')
+const ump=await readFile(new URL('./UmpState.swift',import.meta.url),'utf8')
+const refusal=ump.slice(ump.indexOf('struct UmpRefusal'),ump.indexOf('enum UmpAction'))
 const swift=`import Foundation
 import AVFoundation
 import CoreAudio
@@ -24,6 +26,7 @@ final class FakeTimer {
  func fire(){handler?()}
 }
 func reviewTimer()->FakeTimer{FakeTimer()}
+${refusal}
 final class FakeDataSource {
  var handler:(()->Void)?,cancelled=false
  func setEventHandler(handler:@escaping()->Void){self.handler=handler}
@@ -67,15 +70,15 @@ final class FakeEngine {
  func pause(){pauses+=1;isRunning=false}
  func stop(){stops+=1;isRunning=false}
 }
-final class FakeMidi { var stages:[Double]=[], runs:[UInt64]=[];func stageCoordinated(at seconds:Double)throws{stages.append(seconds)};func runCoordinated(anchorNanoseconds:UInt64)throws{runs.append(anchorNanoseconds)} }\nfinal class Probe {
+final class FakeMidi { var stages:[Double]=[], runs:[UInt64]=[], refuse=false;func stageCoordinated(at seconds:Double)throws{if refuse{throw UmpRefusal("refused reconstruction")};stages.append(seconds)};func runCoordinated(anchorNanoseconds:UInt64)throws{runs.append(anchorNanoseconds)} }\nfinal class Probe {
  enum State {case prepared,starting,playing,paused,stopped}
  var plan=FakePlan();let engine=FakeEngine(),renderQuantum=1024
  var horizon:FakeTimer?;var horizonEnded=false
  var renderStartSource:FakeDataSource?;var renderObserver:Int?
- var midi:FakeMidi?;var midiEnded=false\n var state=State.prepared,voices=[FakeVoice()],active=Set<String>(),position=0.0,anchor:UInt64=0,musicalAnchor:UInt64=0,generation:UInt64=0,finished=0,published=0,failures=0
+ var midi:FakeMidi?;var midiEnded=false\n var state=State.prepared,voices=[FakeVoice()],active=Set<String>(),position=0.0,anchor:UInt64=0,musicalAnchor:UInt64=0,generation:UInt64=0,finished=0,published=0,failures=0,refusals:[String?]=[]
  var loopPosition=PracticeLoopPosition.introduction(nil)
  func checkOutput()throws{}
- func publish(){published+=1}
+ func publish(refusal:String?=nil){published+=1;refusals.append(refusal)}
  func snapshot(_ kind:String)->[String:Any]{["kind":kind,"clock":["anchor":String(anchor),"position":position]]}
  func finish(reason:String,error:Error?=nil){guard state != .stopped else{return};if error != nil {failures+=1};state = .stopped;finished+=1;stopVoices();engine.stop()}
  ${methods}
@@ -151,6 +154,19 @@ stale();precondition(paired.finished==0 && paired.active==["region-1"])
 let waiting=Probe();waiting.midi=FakeMidi();waiting.voices[0].end=0.2;waiting.engine.outputNode.lastRenderTime=nil;waiting.voices[0].player.lastRenderTime=nil;try waiting.schedule(from:0.8,playing:true)
 precondition(waiting.state == .playing && waiting.active.isEmpty && waiting.finished==0 && waiting.midi!.stages==[0.8])
 waiting.midiReachedEnd();precondition(waiting.finished==1)
+// A refused reconstruction changes neither part; the command is acknowledged
+// with its reason and playback keeps its playing or paused state and position.
+let kept=Probe();kept.midi=FakeMidi();try kept.schedule(from:0,playing:true)
+kept.engine.outputNode.lastRenderTime=AVAudioTime(hostTime:try futureHost(0.25,from:kept.anchor))
+let pauses=kept.engine.pauses,stops=kept.voices[0].stops;kept.midi!.refuse=true
+func unchanged(_ state:Probe.State,_ position:Double)->Bool {kept.state == state && kept.position==position && kept.finished==0 && kept.engine.pauses==pauses && kept.voices[0].stops==stops && kept.refusals.last == .some("refused reconstruction")}
+kept.receive(#"{"kind":"pause"}"#);precondition(unchanged(.playing,0) && kept.active==["region-1"],"refused pause keeps playing")
+kept.receive(#"{"kind":"seek","seconds":0.5}"#);precondition(unchanged(.playing,0),"refused seek keeps playing")
+kept.midi!.refuse=false;kept.receive(#"{"kind":"pause"}"#);precondition(kept.state == .paused && kept.refusals.last == .some(nil))
+let paused=(kept.engine.pauses,kept.voices[0].stops,kept.position);kept.midi!.refuse=true
+for line in [#"{"kind":"seek","seconds":0.6}"#,#"{"kind":"resume"}"#] {
+  kept.receive(line);precondition(kept.state == .paused && kept.position==paused.2 && kept.finished==0 && kept.engine.pauses==paused.0 && kept.voices[0].stops==paused.1,"refused paused command keeps the pause")
+}
 let silent=Probe();silent.plan.clocked=true;silent.voices[0].end=0;silent.engine.outputNode.lastRenderTime=nil;silent.voices[0].player.lastRenderTime=nil
 try silent.schedule(from:0,playing:true);precondition(silent.state == .playing && silent.active.isEmpty && silent.finished==0)
 silent.horizon!.fire();precondition(silent.finished==1)
@@ -247,7 +263,7 @@ huge.receive(#"{"kind":"resume"}"#);precondition(huge.state == .playing && huge.
 huge.receive(#"{"kind":"stop"}"#)
 let fine=LoopPracticePlan(period:.init(numerator:"1",denominator:"3"),countInBeats:"1",beatsPerBar:1,unit:4,metronome:true)
 let outward=try fine.hostTicks(numer:125,denom:3);precondition(outward==1)
-print("ARRANGEMENT_CLOCK_DECISIONS_PASS: fresh successful render fence, stale/error render rejection, pending pause/seek/stop and old callback isolation, clocked silent horizon, either-order audio/MIDI/horizon completion, cancelled timer isolation across pause/seek/resume/stop; either-part-first completion, WAV-only continuity, one stop, common anchor conversion, paired pause/seek/resume, stale callback isolation, MIDI tail without audio voices")
+print("ARRANGEMENT_CLOCK_DECISIONS_PASS: fresh successful render fence, stale/error render rejection, pending pause/seek/stop and old callback isolation, clocked silent horizon, either-order audio/MIDI/horizon completion, cancelled timer isolation across pause/seek/resume/stop; either-part-first completion, WAV-only continuity, one stop, common anchor conversion, paired pause/seek/resume, stale callback isolation, MIDI tail without audio voices, refused reconstruction keeps playing or paused state")
 `
 const dir=await mkdtemp(join(process.env.TMPDIR ?? '/tmp','masc-arrangement-clock-'))
 try {

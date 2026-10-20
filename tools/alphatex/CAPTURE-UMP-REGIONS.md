@@ -42,21 +42,28 @@ region scheduler use its effects with separate timer lifetimes. A region release
 only its physical channel scope; sequential assets on a channel share prior
 mutations and restore explicit original baselines. Overlapping channel scopes
 require independent routes. Scope includes replayed prefix state and keys that
-began before the cut. Baseline coverage is checked against the plan's potential
-mutations before output, including before each surviving Note On. Opaque effects,
+began before the cut; only channel-voice messages claim a channel, so timing
+words do not. Before output, each region's first copy is checked against
+the mutations of earlier regions on its channels, and a repeat also against the
+copy before it. A seek checks the entries still ahead against this owner's
+actual mutations too, and refuses instead of stopping playback at that entry.
+Entry events need a baseline earlier only for values a Note On, Program Change
+or Detach keeps, as in [captured-take seeks](CAPTURE-PLAYBACK.md). Opaque effects,
 unknown baseline dependencies and mixed state dialects report diagnostics; original
 full-source audition remains available. No default controller values or lossy
 protocol conversion are invented.
 
 A recorded region can begin with silence before its controller/program preamble.
-Admission inspects the retained due stream through the region's exclusive end
-and requires source-defined absolute values before each Note On or relative use.
-Those future messages remain scheduled at their original timestamps; validation
-does not pull them into the entry replay. This also applies when repeating a
-region or seeking into a still-silent preamble. Historical surviving voices still
-need the values that preceded their original attack. A later controller/program
-cannot repair an earlier unknown attack, and a baseline outside the cut cannot
-establish state inside it. Scoped cleanup and physical ownership stay intact.
+Admission inspects the retained due stream through the region's exclusive end.
+A changed field needs a source-defined absolute value before each later Note On,
+before any relative use, and by the end of the entry batch while a note sounds;
+inside the entry batch only values a Note On, Program Change or Detach keeps
+need one earlier. Those future messages remain scheduled at their original
+timestamps; validation does not pull them into the entry replay. This also
+applies when repeating a region or seeking into a still-silent preamble. A later
+controller/program cannot repair an earlier attack or a sounding note, and a
+baseline outside the cut cannot establish state inside it. Scoped cleanup and
+physical ownership stay intact.
 
 Staging releases owned notes but acquires no restored notes. All acquisition waits
 for the audio owner's common future epoch. Late callbacks reconcile the current

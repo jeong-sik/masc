@@ -87,6 +87,23 @@ test('native failure after readiness closes state admission without replacing or
   f.close(0)
   await assert.rejects(f.playback.completion, /Device disappeared/)
 })
+test('a refused command acknowledges the kept state without ending the owner', async () => {
+  const seen = [], f = fixture({ onEvent: event => seen.push([event.kind, event.refusal]) })
+  f.event('playing'); await f.playback.ready
+  f.playback.pause(); f.event('playing', { refusal: 'reconstruction refused' })
+  f.playback.pause(); f.event('paused')
+  assert.deepEqual(seen, [['playing', undefined], ['playing', 'reconstruction refused'], ['paused', undefined]])
+  assert.deepEqual(f.signals, [])
+  f.playback.stop(); f.event('stopped'); f.close(); await f.playback.completion
+  for (const refusal of ['', 7]) {
+    const bad = fixture(); bad.event('playing'); await bad.playback.ready
+    bad.event('paused', { refusal }); assert.deepEqual(bad.signals, ['SIGTERM']); bad.close(1)
+    await assert.rejects(bad.playback.completion, /Malformed playback state/)
+  }
+  const stopped = fixture(); stopped.event('playing'); await stopped.playback.ready
+  stopped.event('stopped', { refusal: 'reconstruction refused' }); stopped.close(1)
+  await assert.rejects(stopped.playback.completion, /Malformed playback state/)
+})
 test('early stop, cancellation and native failure do not become successful playback', async () => {
   const f = fixture(); f.playback.stop(); assert.deepEqual(f.commands, [{ kind: 'stop' }]); f.close(0)
   await assert.rejects(f.playback.completion, /without finalization/)

@@ -402,14 +402,6 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
   let phase_counts = phase_snapshot.counts in
   let keeper_fibers = phase_counts.running in
   let server_state = current_server_state_opt () in
-  (* One read of each keeper meta file, shared by the paused-keepers,
-     execution and fleet-safety sections. *)
-  let meta_reading =
-    Option.map
-      (fun state -> read_keeper_metas (Mcp_server.workspace_config state))
-      server_state
-  in
-  let fleet_meta_scan = Option.map keeper_fleet_meta_scan meta_reading in
   let keeper_identity_drift_json =
     compute_section ~name:"keeper_identity_drift" ?section_timings_ref
       (fun () ->
@@ -454,16 +446,6 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
           |> Mcp_server.workspace_scope_publication_recovery_snapshot
           |> Mcp_server.publication_recovery_snapshot_to_health_yojson)
   in
-  let paused_keepers_json =
-    compute_section ~name:"paused_keepers" ?section_timings_ref
-      (fun () ->
-        match fleet_meta_scan with
-        | Some scan ->
-          paused_keepers_health_json_of_scan
-            ~registry_paused_names:(registry_paused_keeper_names ())
-            scan.paused_scan
-        | None -> paused_keepers_health_json ())
-  in
   let reaction_ledger_json =
     compute_section ~name:"keeper_reaction_ledger" ?section_timings_ref
       keeper_reaction_ledger_health_json
@@ -479,6 +461,26 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
   let keeper_hitl_gate_json =
     compute_section ~name:"keeper_hitl_gate" ?section_timings_ref
       keeper_hitl_gate_health_json
+  in
+  (* One read of each keeper meta file, shared by the paused-keepers,
+     execution and fleet-safety sections. It is taken right before the
+     event-queue section, which discovers the queue-holding Keepers again:
+     the owner set and that discovery stay adjacent. *)
+  let meta_reading =
+    Option.map
+      (fun state -> read_keeper_metas (Mcp_server.workspace_config state))
+      server_state
+  in
+  let fleet_meta_scan = Option.map keeper_fleet_meta_scan meta_reading in
+  let paused_keepers_json =
+    compute_section ~name:"paused_keepers" ?section_timings_ref
+      (fun () ->
+        match fleet_meta_scan with
+        | Some scan ->
+          paused_keepers_health_json_of_scan
+            ~registry_paused_names:(registry_paused_keeper_names ())
+            scan.paused_scan
+        | None -> paused_keepers_health_json ())
   in
   let execution_snapshot =
     match meta_reading with

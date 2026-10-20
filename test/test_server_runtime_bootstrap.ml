@@ -1538,13 +1538,14 @@ let test_health_json_surfaces_durable_paused_keepers () =
             true
             (reaction_ledger |> member "operator_action_required" |> to_bool)))
 
-(* The dashboard snapshot rebuilds the light runtime resolution every tick.
-   Its paused/autoboot scan, its execution owners and its active-task
+(* The dashboard snapshot rebuilds the light runtime resolution every tick;
+   the full one and /health are built on request. In each, the paused and
+   autoboot scan, the bootable set, the execution owners and the active-task
    bindings all name a Keeper that is declared, persisted and queue-holding,
-   and that Keeper's metadata file is read once for the three of them. The
-   reads are counted through the fail-open decode counter: a metadata file
-   that is JSON but not a Keeper meta bumps it on every read. *)
-let test_light_runtime_resolution_reads_each_keeper_meta_once () =
+   and that Keeper's metadata file is read once for all of them. The reads
+   are counted through the fail-open decode counter: a metadata file that is
+   JSON but not a Keeper meta bumps it on every read. *)
+let test_fleet_projections_read_each_keeper_meta_once () =
   with_temp_dir "light-fleet-meta-read-once" (fun dir ->
     let config_root = make_config_root dir in
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
@@ -1575,12 +1576,17 @@ let test_light_runtime_resolution_reads_each_keeper_meta_once () =
             ~labels:[ ("keeper", "aggregate"); ("site", "meta_parse") ]
             ()
         in
-        let before = undecodable_meta_reads () in
-        let light =
-          `Assoc
-            (Server_routes_http_runtime.keeper_fleet_runtime_resolution_light_fields ())
+        let reads_during f =
+          let before = undecodable_meta_reads () in
+          let value = f () in
+          value, undecodable_meta_reads () -. before
         in
         let open Yojson.Safe.Util in
+        let light, light_reads =
+          reads_during (fun () ->
+            `Assoc
+              (Server_routes_http_runtime.keeper_fleet_runtime_resolution_light_fields ()))
+        in
         Alcotest.(check int) "the declared Keeper is an autoboot target"
           1
           (light |> member "keeper_fleet_safety"
@@ -1588,7 +1594,28 @@ let test_light_runtime_resolution_reads_each_keeper_meta_once () =
         Alcotest.(check (float 0.0))
           "one read of the Keeper's metadata per light projection"
           1.0
-          (undecodable_meta_reads () -. before)))
+          light_reads;
+        let full, full_reads =
+          reads_during (fun () ->
+            `Assoc (Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields ()))
+        in
+        Alcotest.(check int) "the full projection sees the same autoboot target"
+          1
+          (full |> member "keeper_fleet_safety"
+           |> member "autoboot_enabled_keeper_count" |> to_int);
+        Alcotest.(check (float 0.0))
+          "one read of the Keeper's metadata per full projection"
+          1.0
+          full_reads;
+        let (_ : Yojson.Safe.t), health_reads =
+          reads_during (fun () ->
+            Server_routes_http_runtime.make_health_json
+              (Httpun.Request.create `GET "/health"))
+        in
+        Alcotest.(check (float 0.0))
+          "one read of the Keeper's metadata per health response"
+          1.0
+          health_reads))
 
 let test_health_json_observes_owner_turn () =
   with_temp_dir "health-keeper-owner-work" (fun dir ->
@@ -6328,8 +6355,8 @@ let () =
             "health json surfaces durable paused keepers"
             `Quick test_health_json_surfaces_durable_paused_keepers;
           Alcotest.test_case
-            "light runtime resolution reads each Keeper meta once"
-            `Quick test_light_runtime_resolution_reads_each_keeper_meta_once;
+            "fleet projections read each Keeper meta once"
+            `Quick test_fleet_projections_read_each_keeper_meta_once;
           Alcotest.test_case
             "health json surfaces Keeper Owner turn"
             `Quick test_health_json_observes_owner_turn;

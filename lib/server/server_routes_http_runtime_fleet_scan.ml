@@ -434,6 +434,24 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) reading =
     bootable_names = sorted_unique_strings scan.bootable_names;
   }
 
+(* [Keeper_runtime.bootable_keeper_names] over the shared reads: the boot
+   path's exclusion rule, then a profile that loads. It differs from the meta
+   scan's [bootable_names] in one case: a Keeper whose meta file is
+   unreadable is bootable here only when its profile loads. *)
+let boot_path_bootable_names reading =
+  reading.declared_metas
+  |> List.filter_map (fun { meta_name; meta_read } ->
+    let profile =
+      profile_defaults ?profile_snapshot:reading.profiles reading.scope meta_name
+    in
+    let excluded =
+      match meta_read with
+      | Ok meta ->
+        Option.is_some (Keeper_runtime.autoboot_exclusion_reason_of_reads ~meta ~profile)
+      | Error _ -> false
+    in
+    if (not excluded) && Result.is_ok profile then Some meta_name else None)
+
 let autoboot_enabled_keeper_scan config =
   Keeper_meta_store.configured_keeper_names config
   |> sorted_unique_strings

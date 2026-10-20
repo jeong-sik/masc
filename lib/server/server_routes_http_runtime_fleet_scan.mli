@@ -22,14 +22,22 @@ val read_keeper_metas :
 (** One read of every Keeper's durable metadata for one fleet projection:
     the declared and persisted Keepers, and the registered or queue-holding
     owners. A name in more than one population is read once. The meta scan,
-    the execution snapshot and the active-task bindings answer from it, so a
-    projection decodes each metadata file once and its sections agree on one
-    observation. Profile defaults come from [profile_snapshot] when given,
-    otherwise from each Keeper's live profile load. *)
+    {!boot_path_bootable_names}, the execution snapshot and the active-task
+    bindings answer from it, so across those sections a projection decodes
+    each metadata file once and they agree on one observation. Profile
+    defaults come from [profile_snapshot] when given, otherwise from each
+    Keeper's live profile load. *)
+
+val boot_path_bootable_names : keeper_meta_reading -> string list
+(** [Keeper_runtime.bootable_keeper_names] over the reading: declared Keepers
+    the boot path does not exclude and whose profile loads. Unlike the meta
+    scan's [bootable_names], a Keeper whose metadata file is unreadable counts
+    only when its profile loads. *)
 
 val pause_kind : Keeper_meta_contract.keeper_meta -> pause_kind
 val pause_kind_to_wire : pause_kind -> string
 val registry_paused_keeper_names : unit -> String.t list
+val empty_paused_keeper_scan : paused_keeper_scan
 val paused_keepers_health_json_of_scan :
   registry_paused_names:String.t list ->
   paused_keeper_scan ->

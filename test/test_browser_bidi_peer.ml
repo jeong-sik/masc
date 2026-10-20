@@ -4,6 +4,11 @@ module Peer = Masc.Browser_bidi_peer
    failure it was is asked where a case is about that. *)
 let metadata peer = Result.map_error Peer.session_failure_message (Peer.metadata peer)
 let obj xs = `Assoc xs
+(* [check bool] on a substring of the injected script reported only the label,
+   so a wrong script arrived without the script in the log. *)
+let check_contains ~name ~needle text =
+  if not (String_util.contains_substring text needle) then
+    Alcotest.failf "%s: %S is missing from %S" name needle text
 (* The session's end, with a failure as its sentence. *)
 let ended_session peer =
   Result.map_error Peer.session_end_failure_message (Peer.end_session peer)
@@ -159,9 +164,11 @@ let test_document_source () =
     check string "and carries the source" "<html></html>" (data |> member "html" |> to_string);
     (match !ran with
      | [declaration] ->
-       check bool "one script, the shared document helper" true
-         (String_util.contains_substring declaration Browser_lane.Document.runtime
-          && String_util.contains_substring declaration "return browserDocument();")
+       check_contains ~name:"one script, the shared document helper"
+         ~needle:Browser_lane.Document.runtime declaration;
+       check_contains
+         ~name:"one script, ending in the shared document helper call"
+         ~needle:"return browserDocument();" declaration
      | _ -> fail "the document read ran other than one script")
   | Error (Peer.Before_effect detail) | Error (Peer.Outcome_unknown detail | Peer.Partial_failure {message=detail;_}) ->
     failf "the peer refused a document-source read: %s" detail
@@ -190,8 +197,9 @@ let test_document_still_loading () =
      | Ok _ -> failf "%s was answered for a document still loading" name);
     match !ran with
     | [declaration] ->
-      check bool (name ^ ": the page is asked whether its parser is done") true
-        (String_util.contains_substring declaration "document.readyState === 'loading'")
+      check_contains
+        ~name:(name ^ ": the page is asked whether its parser is done")
+        ~needle:"document.readyState === 'loading'" declaration
     | _ -> failf "%s ran other than one script" name) whole_document_reads
 (* An answer too long for one socket message is refused in the page, which
    sends its length as a number. The peer reports that before any effect
@@ -216,9 +224,12 @@ let test_answer_too_large_for_the_socket () =
      | Ok _ -> failf "%s accepted a length as its answer" name);
     match !ran with
     | [declaration] ->
-      check bool (name ^ ": the page measures its answer against the bound") true
-        (String_util.contains_substring declaration
-           (Printf.sprintf "answer.length > %d ? answer.length : answer" Peer.script_answer_limit_units))
+      check_contains
+        ~name:(name ^ ": the page measures its answer against the bound")
+        ~needle:
+          (Printf.sprintf "answer.length > %d ? answer.length : answer"
+             Peer.script_answer_limit_units)
+        declaration
     | _ -> failf "%s ran other than one script" name) whole_document_reads;
   check bool "three bytes a unit, plus the envelope, fit one message" true
     (Peer.script_answer_limit_units * 3 < Peer.reply_limit_bytes)
@@ -248,8 +259,8 @@ let test_element_inventory () =
     (match !ran with
      | [context, declaration] ->
        check string "one script, in the requested tab" "owned" context;
-       check bool "and it is the shared element script" true
-         (String_util.contains_substring declaration Masc.Browser_page_script.elements)
+       check_contains ~name:"and it is the shared element script"
+         ~needle:Masc.Browser_page_script.elements declaration
      | _ -> fail "the inventory ran other than one script")
   | Error (Peer.Before_effect detail) | Error (Peer.Outcome_unknown detail | Peer.Partial_failure {message=detail;_}) ->
     failf "the peer refused an element inventory: %s" detail

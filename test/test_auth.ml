@@ -9,6 +9,13 @@ module Tool_spec = Tool_spec
 module Tool_dispatch = Tool_dispatch
 module Types = Masc_domain
 
+(* [Alcotest.(check bool)] prints only [false] when a substring assertion on an
+   error text fails, so the actual detail never reaches the log. Asserting
+   through [failf] prints the needle and the text that was searched. *)
+let check_contains ~name ~needle detail =
+  if not (String_util.contains_substring detail needle) then
+    Alcotest.failf "%s: %S is missing from %S" name needle detail
+
 (* Setup a temp directory for testing *)
 let setup_test_workspace () =
   (* Use PID + timestamp for deterministic unique dir *)
@@ -212,8 +219,8 @@ let test_load_auth_config_rejects_malformed_file () =
       | _ -> fail "malformed auth configuration file must not load"
       | exception (Auth.Auth_config_error { file = actual_file; reason } as error) ->
         check string "error identifies config file" file actual_file;
-        check bool "error identifies invalid field" true
-          (String_util.contains_substring reason "require_token");
+        check_contains ~name:"error identifies invalid field"
+          ~needle:"require_token" reason;
         check string "public exception hides path and parser detail"
           "Auth.Auth_config_error"
           (Printexc.to_string error))
@@ -483,12 +490,12 @@ let test_verify_token_reports_token_owner_on_agent_mismatch () =
   match create_result, verify_result with
   | Ok _, Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized msg)) ->
       let rendered = Masc_domain.masc_error_to_string (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized msg)) in
-      check bool "mismatch message names token owner" true
-        (String.contains rendered '('
-         && String_util.contains_substring rendered "bearer token belongs to codex");
-      check bool "mismatch message explains fix" true
-        (String_util.contains_substring rendered
-           "masc login --agent gemini --role worker --shell")
+      check bool "mismatch message points at the token owner" true
+        (String.contains rendered '(');
+      check_contains ~name:"mismatch message names token owner"
+        ~needle:"bearer token belongs to codex" rendered;
+      check_contains ~name:"mismatch message explains fix"
+        ~needle:"masc login --agent gemini --role worker --shell" rendered
   | Ok _, Ok _ ->
       fail "verify_token should fail when token owner and requested agent differ"
   | Ok _, Error e ->
@@ -820,8 +827,8 @@ let test_verify_token_rejects_dashboard_dev_legacy_alias () =
   | Ok cred -> fail (Printf.sprintf "unexpected credential owner: %s" cred.agent_name)
   | Error e ->
       let rendered = Masc_domain.masc_error_to_string e in
-      check bool "legacy dashboard-dev bearer rejected for dashboard" true
-        (String_util.contains_substring rendered "bearer token belongs to dashboard-dev")
+      check_contains ~name:"legacy dashboard-dev bearer rejected for dashboard"
+        ~needle:"bearer token belongs to dashboard-dev" rendered
 
 let test_save_raw_token_credential_uses_provided_token () =
   let dir = setup_test_workspace () in

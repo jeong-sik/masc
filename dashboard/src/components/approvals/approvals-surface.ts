@@ -34,6 +34,11 @@ import { formatDateTimeKo, formatDurationCompound } from '../../lib/format-time'
 import { toolDisplayLabel } from '../../lib/tool-display-label'
 import { approvalOriginSummary, approvalContinuationLabel } from '../../lib/keeper-approval-origin'
 import {
+  approvalInputDisclosure,
+  decisionWaitsForFullInput,
+  type ApprovalInputDisclosure,
+} from './approval-input-disclosure'
+import {
   keeperResolvedApprovalDecisionClass,
   keeperResolvedApprovalDecisionTone,
   keeperResolvedApprovalDecisionLabel,
@@ -582,6 +587,37 @@ function approvalSummaryBlock(item: KeeperApprovalQueueItem) {
   }
 }
 
+/** The full input, or the plain statement that only a preview exists. The
+ *  card opens it on request (and holds Approve until then); the detail panel
+ *  shows it open. */
+function ApprovalInputFull({
+  disclosure,
+  open,
+  onOpened,
+}: {
+  disclosure: ApprovalInputDisclosure
+  open: boolean
+  onOpened?: () => void
+}) {
+  if (disclosure.kind === 'preview_is_whole') return null
+  if (disclosure.kind === 'full_input_not_sent') {
+    return html`<div class="ap-input-note" data-testid="approval-input-note">
+      입력 원문이 오지 않아 미리보기만 보여요. 뒷부분이 잘렸을 수 있어요.
+    </div>`
+  }
+  return html`<details
+    class="ap-input-full"
+    data-testid="approval-input-full"
+    open=${open}
+    onToggle=${(event: Event) => {
+      if ((event.currentTarget as HTMLDetailsElement).open) onOpened?.()
+    }}
+  >
+    <summary>입력 원문 전체 (${disclosure.fullText.length}자)</summary>
+    <pre class="ap-input-pre mono">${disclosure.fullText}</pre>
+  </details>`
+}
+
 function ApprovalCard({
   item,
   selected,
@@ -597,6 +633,13 @@ function ApprovalCard({
   const title = approvalTitle(item)
   const rearmExpectation = summaryRearmExpectation(item)
   const phase = approvalPhase(item)
+  // Opening the full input is bound to this exact request: a new input hash is
+  // a new request and starts closed again.
+  const inputKey = `${item.id}:${item.input_hash}`
+  const [openedInputKey, setOpenedInputKey] = useState<string | null>(null)
+  const disclosure = approvalInputDisclosure(item)
+  const decisionHeld = decisionWaitsForFullInput(disclosure, openedInputKey === inputKey)
+  const heldTitle = '입력 원문 전체를 펼쳐서 읽은 뒤에 누를 수 있어요'
 
   return html`
     <article
@@ -650,6 +693,11 @@ function ApprovalCard({
             <div class="ap-req-quote">
               ${item.input_preview?.trim() ? `“${item.input_preview.trim()}”` : '입력 미리보기 없음'}
             </div>
+            <${ApprovalInputFull}
+              disclosure=${disclosure}
+              open=${openedInputKey === inputKey}
+              onOpened=${() => setOpenedInputKey(inputKey)}
+            />
           </div>
         </div>
         <div class="ap-actions">
@@ -666,14 +714,15 @@ function ApprovalCard({
             type="button"
             class="ap-act approve"
             onClick=${() => void respondToKeeperApproval(item.id, 'approve')}
-            disabled=${anyBusy}
+            title=${decisionHeld ? heldTitle : undefined}
+            disabled=${anyBusy || decisionHeld}
           >${busy ? '처리 중…' : '승인'}</button>
           <button
             type="button"
             class="ap-act always"
             onClick=${() => void respondToKeeperApproval(item.id, 'approve', true)}
-            title="승인하고 동일 요청을 자동 승인하는 Always 규칙을 저장합니다"
-            disabled=${anyBusy}
+            title=${decisionHeld ? heldTitle : '승인하고 동일 요청을 자동 승인하는 Always 규칙을 저장합니다'}
+            disabled=${anyBusy || decisionHeld}
           >${busy ? '처리 중…' : '항상 승인'}</button>
           <button
             type="button"
@@ -688,6 +737,9 @@ function ApprovalCard({
             title="맥락 보기"
             disabled=${anyBusy}
           >대화에서 검토 →</button>
+          <span class="ap-input-hash mono" title=${item.input_hash} data-testid="approval-input-hash">
+            #${item.input_hash.slice(0, 12)}
+          </span>
         </div>
       </div>
     </article>
@@ -704,6 +756,7 @@ function ApprovalDetailPanel({
   if (!item) return null
   const rows = approvalDetailRows(item)
   const phase = approvalPhase(item)
+  const disclosure = approvalInputDisclosure(item)
 
   return html`
     <aside
@@ -726,6 +779,7 @@ function ApprovalDetailPanel({
           </div>
         `)}
       </dl>
+      <${ApprovalInputFull} disclosure=${disclosure} open=${true} />
     </aside>
   `
 }

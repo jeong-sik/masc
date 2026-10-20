@@ -33,6 +33,7 @@ const help = [
   'All positions and lengths below use quarter-note beats starting at 0.',
   ':note C4 0 1 96              pitch, beat, duration, optional velocity',
   ':chord Cmaj7 0 4 drop2 4 0  symbol, beat, duration, mode, octave, inversion',
+  ':revoice Cmaj7 drop2 4 0  change cursor voices; retain timing/dynamics; u:compare',
   ':progression 0 4 rootless Dm7 G7 Cmaj7',
   ':tempo 120    :length 32    :meter 3 4    :loop 4 12',
   ':transpose -12    :quantize 0.25    :duplicate 8   (selected track)',

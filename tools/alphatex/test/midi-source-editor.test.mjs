@@ -21,6 +21,79 @@ function performance(format=1, division=1001) {
   return file.toUint8Array()
 }
 
+test('MIDI revoicing retains source clocks, release dynamics and expressions through history and export', async () => {
+  const file = new JZZ.MIDI.SMF(0, 1001), track = new JZZ.MIDI.SMF.MTrk()
+  track.add(0, JZZ.MIDI.smfBPM(120)).add(0, JZZ.MIDI.smfMidiPort(3))
+    .add(0, JZZ.MIDI.control(0, 1, 77)).add(0, JZZ.MIDI.pitchBend(0, 9000))
+  for (const [i, key] of [60,64,67,71].entries()) track.add(0, JZZ.MIDI.noteOn(0, key, 80+i))
+  track.add(0, JZZ.MIDI.noteOn(1, 36, 110)).add(1001, JZZ.MIDI.smfBPM(60))
+  for (const [i, key] of [60,64,67,71].entries()) track.add(2002, JZZ.MIDI.noteOff(0, key, 30+i))
+  track.add(3003, JZZ.MIDI.noteOff(1, 36, 50)).add(4004, JZZ.MIDI.smfEndOfTrack()); file.push(track)
+  const bytes = file.toUint8Array(), source = importMidiSource(bytes), before = structuredClone(source)
+  let editor = newEditor(source)
+  assert.throws(() => editorCommand(editor, 'revoice Cmaj7 drop2'), /channel/)
+  editor = editorCommand(editor, 'channel 1').editor
+  const voice = editor.performance.notes.find(note => note.channel === 0 && note.pitch === 64)
+  editor = editorCommand(editor, `select ${voice.id}`).editor
+  const selected = selectedNote(editor).id
+  editor = editorCommand(editor, 'revoice Cmaj7 drop2 4').editor
+  assert.equal(selectedNote(editor).id, selected)
+  const changed = editor.project, after = editor.performance
+  const original = midiSourcePattern(source)
+  for (const note of original.notes) {
+    const next = after.notes.find(n => n.id === note.id)
+    const { pitch, ...rest } = note, { pitch: nextPitch, ...nextRest } = next
+    assert.deepEqual(nextRest, rest)
+    if (note.channel === 1) assert.equal(nextPitch, pitch)
+  }
+  const noteEvents = new Set(original.notes.flatMap(note => [note.id, note.off]))
+  assert.deepEqual(after.events.filter(e => !noteEvents.has(e.id)), original.events.filter(e => !noteEvents.has(e.id)))
+  editor = editorAction(editor, { kind: 'undo' }); assert.deepEqual(editor.project, source)
+  assert.equal(selectedNote(editor).id, selected)
+  const dynamics = editorAction(editor, { kind: 'velocity', value: 101 })
+  assert.equal(dynamics.performance.notes.find(note => note.id === selected).velocity, 101)
+  assert.equal(dynamics.performance.notes.find(note => note.pitch === 60).velocity, 80)
+  editor = editorAction(editor, { kind: 'redo' }); assert.deepEqual(editor.project, changed)
+  assert.equal(selectedNote(editor).id, selected)
+  const directory = await mkdtemp(join(tmpdir(), 'masc-midi-revoice-'))
+  try {
+    const path = join(directory, 'experiment.json')
+    await saveProject(path, changed)
+    const reopened = (await loadProject(path)).project
+    const parsed = new JZZ.MIDI.SMF(projectMidi(reopened))
+    assert.equal(parsed.ppqn, 1001)
+    assert.deepEqual([...parsed[0]].filter(e => e.isNoteOn() && (e[0]&15) === 0).map(e => [e.tt,e[1],e[2]]),
+      [[0,55,80],[0,60,81],[0,64,82],[0,71,83]])
+    assert.deepEqual([...parsed[0]].filter(e => e.isNoteOff() && (e[0]&15) === 0).map(e => [e.tt,e[1],e[2]]),
+      [[2002,55,30],[2002,60,31],[2002,64,32],[2002,71,33]])
+  } finally { await rm(directory, { recursive: true, force: true }) }
+  assert.deepEqual(source, before)
+})
+
+test('explicit source-note selection anchors revoicing when ports share a channel', () => {
+  const file = new JZZ.MIDI.SMF(0,480), track = new JZZ.MIDI.SMF.MTrk()
+  for (const port of [1,2]) {
+    // An explicit different status after metadata avoids JZZ compressing a
+    // running NoteOn status across that metadata boundary in the fixture.
+    track.add(0,JZZ.MIDI.smfMidiPort(port)).add(0,JZZ.MIDI.control(0,1,port))
+    for (const key of [60,64,67,71]) track.add(0,JZZ.MIDI.noteOn(0,key,90))
+  }
+  for (const port of [1,2]) {
+    track.add(480,JZZ.MIDI.smfMidiPort(port)).add(480,JZZ.MIDI.control(0,1,port))
+    for (const key of [60,64,67,71]) track.add(480,JZZ.MIDI.noteOff(0,key,45))
+  }
+  track.add(480,JZZ.MIDI.smfEndOfTrack());file.push(track)
+  const source = importMidiSource(file.toUint8Array()), before = structuredClone(source)
+  let editor = newEditor(source)
+  assert.throws(() => editorCommand(editor, 'revoice Cmaj7 drop2'), /source ports/)
+  const anchor = editor.performance.notes.find(n => n.port === 1)
+  editor = editorCommand(editor, `select ${anchor.id}`).editor
+  editor = editorCommand(editor, 'revoice Cmaj7 drop2').editor
+  assert.deepEqual(editor.performance.notes.filter(n => n.port === 1).map(n => n.pitch), [55,60,64,71])
+  assert.deepEqual(editor.performance.notes.filter(n => n.port === 2).map(n => n.pitch), [60,64,67,71])
+  assert.deepEqual(source, before)
+})
+
 test('imported performance supports chord experiments, note decisions, undo, save/reopen and full-data export', async()=>{
   const bytes=performance(),source=importMidiSource(bytes)
   let editor=newEditor(source)

@@ -273,6 +273,22 @@ pan (0–127; pan 64 is center). Dense mixes can clip; lower track levels when t
 preview/export reports clipped samples. The broader destination and remaining work are recorded in
 [the sequencer design](../../docs/design/tui/MUSIC-SEQUENCER.md).
 
+To compare voicings of existing notes, put the cursor inside the chord and use
+`:revoice Cmaj7 drop2 4 0`: symbol, close/drop2/rootless, optional octave and
+inversion. It changes the selected track's sounding voices from low to high,
+retaining each note's identity, onset, duration and velocity. `u`/`y` compares
+the before/after versions. Other tracks and notes outside the cursor stay intact.
+The target must have the same number of voices; use `:chord` to compose a
+different voice count. Overlaps and unsupported voicings leave the draft intact.
+
+The same command edits imported MIDI in its source clock. Choose `:channel N`
+when several channels sound, or `:select event-ID` to anchor a source port and
+channel. Note-on/off pairs and release velocities survive export; tempo,
+controllers and other expression messages retain their original bytes. In
+particular, polyphonic pressure keeps its original key rather than being
+reassigned to the new pitches. Chord candidates remain analysis of sounding
+keys, not sustain-pedal voice durations or a unique harmonic interpretation.
+
 
 ## MIDI source experiments
 

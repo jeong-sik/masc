@@ -122,6 +122,18 @@ export function chordVoicing(symbol, { mode = 'close', octave = 4, inversion = 0
   return notes
 }
 
+// Reassign existing voices, low to high, without replacing their identities,
+// rhythm or dynamics. A different voice count needs a separate composition edit.
+export function revoiceNotes(notes, tick, symbol, options) {
+  int(tick, 'voicing cursor')
+  const voices = notes.filter(note => note.duration === 0 ? note.start === tick
+    : note.start <= tick && tick < note.start + note.duration).sort((a, b) => a.pitch - b.pitch)
+  if (!voices.length) throw new Error('No notes sounding at the cursor in the selected track/channel')
+  const pitches = chordVoicing(symbol, { ...options, previous: voices.map(note => note.pitch) })
+  if (pitches.length !== voices.length) throw new Error(`Voicing has ${pitches.length} voices; the cursor has ${voices.length}. Use :chord to compose a different number of voices`)
+  return voices.map((note, index) => ({ id: note.id, pitch: pitches[index] }))
+}
+
 // Every edit is transactional: validate a private candidate before returning it.
 // Callers may retain immutable before/after documents for undo and redo.
 export function editProject(project, trackId, edit) {
@@ -147,6 +159,11 @@ export function editProject(project, trackId, edit) {
     case 'chord': {
       const notes = chordVoicing(edit.symbol, edit)
       for (const value of notes) add({ pitch: value, start: edit.start, duration: edit.duration, velocity: edit.velocity })
+      break
+    }
+    case 'revoice': {
+      const changes = new Map(revoiceNotes(track.notes, edit.tick, edit.symbol, edit).map(note => [note.id, note.pitch]))
+      for (const note of track.notes) if (changes.has(note.id)) note.pitch = changes.get(note.id)
       break
     }
     case 'progression': {

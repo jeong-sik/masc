@@ -61,8 +61,15 @@ export function editorAction(editor, action) {
       const source = editor[action.kind]
       if (!source.length) return editor
       const project = source.at(-1), other = action.kind === 'undo' ? 'redo' : 'undo'
+      const track = Math.min(editor.track, project.tracks.length - 1)
+      // Note IDs are scoped to a track. Follow the actual selected voice only
+      // when that same track survives; a deleted track must not select its peer.
+      const restored = project.tracks[track].id === editor.project.tracks[editor.track].id
+        ? project.tracks[track].notes.find(value => value.id === note?.id) : undefined
+      const inside = restored && restored.start <= editor.tick && editor.tick < restored.start + restored.duration
       return { ...editor, project, [action.kind]: source.slice(0, -1), [other]: [...editor[other], editor.project],
-        track: Math.min(editor.track, project.tracks.length - 1), tick: Math.min(editor.tick, project.length - 1) }
+        track, tick: restored && !inside ? restored.start : Math.min(editor.tick, project.length - 1),
+        pitch: restored?.pitch ?? editor.pitch }
     }
     case 'mute': case 'solo': {
       const track = editor.project.tracks[editor.track], field = action.kind === 'mute' ? 'muted' : 'solo'
@@ -83,6 +90,7 @@ export function editorCommand(editor, line) {
   switch (command) {
     case 'note': count(3, 4); edit = { kind: 'note', pitch: pitch(args[0]), start: beats(args[1]), duration: beats(args[2]), velocity: args[3] === undefined ? editor.velocity : Number(args[3]) }; break
     case 'chord': count(3, 6); edit = { kind: 'chord', symbol: args[0], start: beats(args[1]), duration: beats(args[2]), mode: args[3] ?? 'close', octave: args[4] === undefined ? 4 : Number(args[4]), inversion: args[5] === undefined ? 0 : Number(args[5]), velocity: editor.velocity }; break
+    case 'revoice': count(2, 4); edit = { kind: 'revoice', tick: editor.tick, symbol: args[0], mode: args[1], octave: args[2] === undefined ? 4 : Number(args[2]), inversion: args[3] === undefined ? 0 : Number(args[3]) }; break
     case 'progression': count(4, Number.MAX_SAFE_INTEGER); edit = { kind: 'progression', start: beats(args[0]), duration: beats(args[1]), mode: args[2], octave: 3, symbols: args.slice(3), velocity: editor.velocity }; break
     case 'tempo': count(1); edit = { kind: 'tempo', value: Number(args[0]) }; break
     case 'length': count(1); edit = { kind: 'length', value: beats(args[0]) }; break
@@ -117,6 +125,11 @@ export function editorCommand(editor, line) {
     default: throw new Error(`Unknown command: ${command}; use :help`)
   }
   const next = apply(editor, edit)
+  if (command === 'revoice') {
+    const selected = selectedNote(editor)
+    const voice = next.project.tracks[next.track].notes.find(note => note.id === selected?.id)
+    return { editor: voice ? { ...next, pitch: voice.pitch } : next }
+  }
   return { editor: command === 'track-add' ? { ...next, track: next.project.tracks.length - 1 } : next }
 }
 

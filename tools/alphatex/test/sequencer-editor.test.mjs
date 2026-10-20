@@ -9,6 +9,65 @@ import { mkdtemp, rm, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
+import JZZ from 'jzz'
+import midiFiles from 'jzz-midi-smf'
+midiFiles(JZZ)
+
+test('revoicing compares existing voices with undo and retains rhythm, dynamics, other parts and exported keys', async () => {
+  let editor = newEditor()
+  const command = line => { editor = editorCommand(editor, line).editor }
+  command('chord Cmaj7 0 4')
+  command('chord Dm7 4 4')
+  command('cursor 1 E4')
+  editor = editorAction(editor, { kind: 'velocity', value: 83 })
+  editor = editorAction(editor, { kind: 'duration', value: 3 * PPQ })
+  command('track-add Bass'); command('note C2 0 8 105'); command('track 1')
+  const before = structuredClone(editor.project), id = selectedNote(editor).id
+  command('revoice Cmaj7 drop2 4 0')
+  const changed = editor.project
+  assert.deepEqual(changed.tracks[0].notes.slice(0, 4).map(n => n.pitch), [55, 60, 64, 71])
+  assert.equal(selectedNote(editor).id, id)
+  for (const note of before.tracks[0].notes) {
+    const { pitch, ...rest } = note, { pitch: nextPitch, ...after } = changed.tracks[0].notes.find(n => n.id === note.id)
+    assert.deepEqual(after, rest)
+    if (note.start >= 4 * PPQ) assert.equal(nextPitch, pitch)
+  }
+  assert.deepEqual(changed.tracks[1], before.tracks[1])
+  command('undo'); assert.deepEqual(editor.project, before)
+  assert.equal(selectedNote(editor).id, id)
+  const dynamics = editorAction(editor, { kind: 'velocity', value: 101 })
+  assert.equal(dynamics.project.tracks[0].notes.find(note => note.id === id).velocity, 101)
+  assert.equal(dynamics.project.tracks[0].notes.find(note => note.id !== id).velocity, 96)
+  command('redo'); assert.deepEqual(editor.project, changed)
+  assert.equal(selectedNote(editor).id, id)
+  command('revoice Cmaj7 rootless 3'); assert.equal(editor.project.tracks[0].notes.length, 8)
+  command('undo'); assert.deepEqual(editor.project, changed)
+  const dir = await mkdtemp(join(tmpdir(), 'masc-revoice-'))
+  try {
+    const path = join(dir, 'voicing.json')
+    await saveProject(path, changed)
+    const reopened = (await loadProject(path)).project
+    assert.deepEqual(reopened, changed)
+    const midi = new JZZ.MIDI.SMF(projectMidi(reopened))
+    assert.deepEqual([...midi[1]].filter(e => e.isNoteOn() && e.tt === 0).map(e => e.getNote()), [55, 60, 64, 71])
+    assert.ok([...midi[1]].some(e => e.isNoteOff() && e.getNote() === 60 && e.tt === 3 * PPQ))
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('revoicing never partly edits the draft on changed voice count or a new same-key overlap', () => {
+  const editor = editorCommand(newEditor(), 'chord Cmaj7 0 4').editor
+  const before = structuredClone(editor)
+  for (const command of ['revoice C close', 'revoice nope close', 'revoice Cmaj7 drop2 9']) {
+    assert.throws(() => editorCommand(editor, command))
+    assert.deepEqual(editor, before)
+  }
+  const collision = editorCommand(editor, 'note G3 3 1').editor
+  const collisionBefore = structuredClone(collision)
+  assert.throws(() => editorCommand(collision, 'revoice Cmaj7 drop2 4'), /Overlapping/)
+  assert.deepEqual(collision, collisionBefore)
+  const empty = editorCommand(editor, 'cursor 8 C4').editor
+  assert.throws(() => editorCommand(empty, 'revoice Cmaj7 close'), /No notes sounding/)
+})
 
 test('musician creates a progression and bass, changes sound, solos, undoes and reopens', async () => {
   let editor = newEditor()

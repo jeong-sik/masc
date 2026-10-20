@@ -3025,6 +3025,13 @@ status: reference
   거절하면서 `current_assignee` 에 홀더 이름을 실어 준다. Task 전이 상태가 아닌
   이유로 거절될 때 오는 `task_transition_invalid_state` 와는 다른 응답이므로,
   "지금 누가 들고 있는지" 를 알려면 `rule_id` 와 `current_assignee` 를 읽는다.
+  응답 필드도 같은 구분을 지킨다. `current_assignee` 는 홀더이고, `requested_agent` 는
+  그 전이를 요청한 쪽이라 홀더와 다를 수 있다(홀더가 아닌 에이전트가 `Release` 를
+  시도한 거절이 그 예이며, `stale_task_id_not_found`·`task_transition_invalid_state`
+  처럼 홀더와 무관한 거절에도 같은 이름으로 실린다). claim 관측 payload 의
+  `claimed_by` 는 claim 한 쪽을 가리키며 `todo_claim.winner_actor_id` 와 같은 이름이
+  들어간다. 그러므로 세 필드를 한 이름으로 뭉뚱그리면 들고 있는 쪽과 요청한 쪽이
+  뒤바뀐다.
   홀더 판정은 한 함수 `same_task_actor`(`String.equal` 로 이름만 비교한다)를 도구 계층과
   claim 해석이 함께 쓴다. claim 해석은 그 함수를 `~same_actor` 인자로 받아
   `Self_owned`/`Held_by_other` 를 가르고, lifecycle 의 다른 전이는 같은 함수를
@@ -3035,6 +3042,7 @@ status: reference
   Task 와 무관하다. Task 문맥의 홀더는 언제나 Assignee 다.
   → [Types_core](../../lib/types/types_core.mli),
   [Tool_task](../../lib/task/tool_task.ml),
+  [Tool_task_payloads](../../lib/task/tool_task_payloads.ml),
   [Workspace_task_classify.same_task_actor](../../lib/workspace/workspace_task_classify.ml)
 
 **Claim**

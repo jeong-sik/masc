@@ -7,7 +7,7 @@
   masc.masc_schedule
   ;; [Standalone_lane.t] is what the lane rows and lane views carry.
   masc.runtime
-  masc_tui_mcp masc_tui_types masc_tui_operator_projection
+  masc_tui_mcp masc_tui_resource_catalog masc_tui_types masc_tui_operator_projection
   masc_tui_keys masc_tui_keeper_mark masc_tui_memory_mark masc_tui_footer
   masc_tui_config_mark
   ;; The global quit test, so a detail tab key is checked against the one

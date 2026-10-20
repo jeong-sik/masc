@@ -22,6 +22,7 @@ type group_owner = {
 
 type t =
   { pid : int
+  ; started : string option
   ; exit_status : (Unix.process_status, exn) result Promise.t
   ; lock : Stdlib.Mutex.t
   ; group : group_owner option
@@ -166,8 +167,19 @@ module Process_impl = struct
   let signal = signal
 end
 
+type (_, _, _) Eio.Resource.pi +=
+  | Original_start : ('t, 't -> string option, [> `Process ]) Eio.Resource.pi
+
+let original_start (Eio.Resource.T (proc, handler)) =
+  match Eio.Resource.get_opt handler Original_start with
+  | Some read -> read proc
+  | None -> None
+;;
+
 let process =
-  let handler = Eio.Process.Pi.process (module Process_impl) in
+  let handler = Eio.Resource.handler
+      (Eio.Resource.H (Original_start, (fun t -> t.started)) ::
+       Eio.Resource.bindings (Eio.Process.Pi.process (module Process_impl))) in
   fun proc -> Eio.Resource.T (proc, handler)
 ;;
 
@@ -215,7 +227,12 @@ module Impl = struct
         Eio.Private.Trace.with_span "spawn" (fun () ->
           posix_spawn executable (Array.of_list args) env (cwd, Option.is_some group) (List.combine child_fds unix_fds))
       in
-      let t = { pid; exit_status; lock = Stdlib.Mutex.create (); group } in
+      (* There is no reaper for this child yet, including if it already exited.
+         Retain this observation before hooks, diagnostic writers or fork can
+         yield and release the original PID. Never reconstruct it from a PID
+         after [spawn] returns. *)
+      let started = Posix_spawn_detached.process_start pid in
+      let t = { pid; started; exit_status; lock = Stdlib.Mutex.create (); group } in
       let hook =
         Switch.on_release_cancellable sw (fun () ->
           signal t (match t.group with None -> Sys.sigkill | Some _ -> Sys.sigterm);

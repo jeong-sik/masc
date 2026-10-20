@@ -64,7 +64,7 @@ let run ~env ~instance_id ~command ~grace_seconds ~on_ready =
       let child=Eio.Process.spawn ~sw Posix_spawn_process_mgr.mgr ~stdin:input
         ~stdout:(Eio.Stdenv.stderr env) ~stderr:(Eio.Stdenv.stderr env) command in
       let child_pid=Eio.Process.pid child in
-      let* child_started=Posix_spawn_detached.process_start child_pid
+      let* child_started=Posix_spawn_process_mgr.original_start child
         |> Option.to_result ~none:Child_identity_unavailable in
       let ending=Eio.Fiber.first
           (fun () ->

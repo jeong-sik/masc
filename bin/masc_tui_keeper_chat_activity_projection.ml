@@ -153,12 +153,16 @@ let pad_to width text =
    names the tool the model meant, the suffix carries the degenerate tail
    ("...e+0061"). *)
 let tool_name_display_cap = 64
+let tool_name_head_bytes = 48
+let tool_name_tail_bytes = 14
 
 let display_tool_name wire_name =
   let name = Masc.Tool_display.list_label wire_name in
-  let length = String.length name in
-  if length <= tool_name_display_cap then name
-  else String.sub name 0 48 ^ ".." ^ String.sub name (length - 14) 14
+  if String.length name <= tool_name_display_cap then name
+  else
+    String_util.utf8_prefix ~max_bytes:tool_name_head_bytes name
+    ^ ".."
+    ^ String_util.utf8_suffix ~max_bytes:tool_name_tail_bytes name
 
 (* One formatter for rows drawn live and rows read back from the transcript.
    The names are padded to a common column so a block of calls lines up, which

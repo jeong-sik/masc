@@ -236,7 +236,7 @@ let trim_to_opt = String_util.trim_nonempty
 let truncate_text ~max_chars text =
   let len = String.length text in
   if len <= max_chars then text
-  else if max_chars <= 1 then String.sub text 0 (max 0 max_chars)
+  else if max_chars <= 1 then String_util.utf8_prefix ~max_bytes:max_chars text
   else
     String_util.utf8_safe ~max_bytes:max_chars ~suffix:"…" text
     |> String_util.to_string

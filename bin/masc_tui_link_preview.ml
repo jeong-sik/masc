@@ -559,7 +559,7 @@ let render_og_banner ?on_field ~width p =
       let fg_sub = truecolor_fg 201 209 217 in
       let short_repo =
         if String.length repo > width - 4 then
-          String.sub repo 0 (max 0 (width - 6)) ^ ".."
+          String_util.utf8_prefix ~max_bytes:(width - 6) repo ^ ".."
         else repo
       in
       [ field_cell ~band:Header_band ~row:0 ~field:Banner_brand ~value:"GITHUB" ~start:0 ~bg ~fg:fg_hi "GITHUB"

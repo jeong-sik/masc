@@ -3,6 +3,14 @@ module Types = Masc_domain
 open Alcotest
 open Masc
 
+(* A failed substring assertion on the rendered shell must not print the shell:
+   it carries the token that was just minted. The needle and the size are what
+   the reader needs. *)
+let check_shell_contains ~name ~needle shell =
+  if not (String_util.contains_substring shell needle) then
+    Alcotest.failf "%s: %S is missing from a %d-byte shell" name needle
+      (String.length shell)
+
 let rec rm_rf path =
   if Sys.file_exists path then
     if Sys.is_directory path then begin
@@ -76,9 +84,8 @@ let test_login_with_expiry_uses_caller_env_var () =
            failf "expected worker effective role: %s"
              (Masc_domain.masc_error_to_string err));
       let shell = Auth_login.render_shell report in
-      check bool "shell exports caller-named env var" true
-        (String_util.string_contains_substring ~needle:"export MASC_TOKEN="
-           shell);
+      check_shell_contains ~name:"shell exports caller-named env var"
+        ~needle:"export MASC_TOKEN=" shell;
       let json = Auth_login.to_yojson report in
       check string "json status" "ok"
         (Yojson.Safe.Util.member "status" json
@@ -137,9 +144,8 @@ let test_login_long_lived_passes_env_var_through () =
            failf "minted long-lived token did not verify: %s"
              (Masc_domain.masc_error_to_string err));
       let shell = Auth_login.render_shell report in
-      check bool "shell exports caller-named env var" true
-        (String_util.string_contains_substring ~needle:"export CUSTOM_MCP_TOKEN="
-           shell);
+      check_shell_contains ~name:"shell exports caller-named env var"
+        ~needle:"export CUSTOM_MCP_TOKEN=" shell;
       let json = Auth_login.to_yojson report in
       check string "json client env passthrough" "CUSTOM_MCP_TOKEN"
         (Yojson.Safe.Util.member "mcp_client" json

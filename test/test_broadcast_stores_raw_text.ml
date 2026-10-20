@@ -17,6 +17,12 @@ module Workspace_broadcast = Workspace_broadcast
 
 let check = Alcotest.check
 
+(* [check bool] on the containment predicate hid the stored text that made a
+   failed assertion fail; [failf] prints it. *)
+let check_absent ~name ~needle text =
+  if String_util.contains_substring text needle then
+    Alcotest.failf "%s: %S is present in %S" name needle text
+
 (* A real filesystem backend, because the assertion is about what lands on
    disk. Under the memory backend the durable row this pins does not exist. *)
 let with_workspace f =
@@ -91,9 +97,8 @@ let test_a_quoted_phrase_keeps_its_quotes () =
   with_workspace (fun config ->
       let content = "정정: 아까 \"끝까지 간 적이 없다\" 고 적었는데 틀렸습니다." in
       let delivery = broadcast config ~content in
-      check Alcotest.bool "no entity in the delivery" false
-        (String_util.contains_substring delivery.Workspace_broadcast.content
-           "&quot;");
+      check_absent ~name:"no entity in the delivery" ~needle:"&quot;"
+        delivery.Workspace_broadcast.content;
       check Alcotest.string "the phrase is intact" content
         delivery.Workspace_broadcast.content)
 

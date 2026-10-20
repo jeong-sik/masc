@@ -408,10 +408,8 @@ let meta_has_source (meta : Yojson.Safe.t option) : bool =
 (* stdlib-only substring containment; avoids a [re] dep for this test exe. *)
 let check_io_error ~where = function
   | Error (Board.Io_error msg) ->
-      Alcotest.(check bool)
-        ("error includes " ^ where)
-        true
-        (String_util.string_contains_substring ~needle:where msg)
+      if not (String_util.string_contains_substring ~needle:where msg) then
+        Alcotest.failf "error includes %s: %S is missing from %S" where where msg
   | Error e -> Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e)
   | Ok _ -> Alcotest.fail "expected Io_error"
 

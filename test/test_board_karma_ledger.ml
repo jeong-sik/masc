@@ -293,7 +293,10 @@ let test_delete_post_rewrites_persisted_snapshots () =
    | Ok _ -> Alcotest.fail "deleted post remained readable"
    | Error _ -> ());
   let check_absent label path needle =
-    Alcotest.(check bool) label false (file_contains path needle)
+    (* [check bool false] would report only the label; the needle and the file
+       it survived in are what make a stale-snapshot failure actionable. *)
+    if file_contains path needle then
+      Alcotest.failf "%s: %S is still present in %s" label needle path
   in
   check_absent "posts snapshot removes deleted post" (Board.persist_path ()) pid;
   check_absent "comments snapshot removes deleted comment" (Board.comments_path ()) cid;

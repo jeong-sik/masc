@@ -5,7 +5,7 @@ struct UmpLiveChannel: Decodable, Hashable {
     let group: UInt8
     let channel: UInt8
 }
-enum UmpLiveScope: Decodable {
+enum UmpLiveScope: Decodable, Equatable {
     case endpoint, channels(Set<UmpLiveChannel>)
     enum Keys: String, CodingKey { case kind, channels }
     enum Kind: String, Decodable { case endpoint, channels }
@@ -52,6 +52,9 @@ struct UmpLiveClaim: Decodable {
     func conflicts(_ other: Self) -> Bool { destination == other.destination && scope.overlaps(other.scope) }
 }
 struct UmpLiveRoute: Decodable {
+    // Stable identity of the route inside one live owner. `live-set` selects
+    // active routes by key, so a key must survive across reconfigure commands.
+    let key: String
     let source: String
     let destination: String
     let scope: UmpLiveScope
@@ -63,7 +66,17 @@ struct UmpLivePlan: Decodable {
     // The caller declares backing ownership explicitly, including an empty set.
     let reserved: [UmpLiveClaim]
     func validate() throws {
-        guard schemaVersion == 1, !routes.isEmpty else { throw MidiFailure("invalid live MIDI plan") }
+        guard schemaVersion == 1 else { throw MidiFailure("invalid live MIDI plan") }
+        try Self.validate(routes: routes, reserved: reserved)
+    }
+    // The same contract governs the startup plan and every `live-set` target
+    // subset, so the active set is always a legal standalone plan.
+    static func validate(routes: [UmpLiveRoute], reserved: [UmpLiveClaim]) throws {
+        guard !routes.isEmpty else { throw MidiFailure("live MIDI requires at least one active route") }
+        var keys = Set<String>()
+        for route in routes {
+            guard !route.key.isEmpty, keys.insert(route.key).inserted else { throw MidiFailure("live MIDI route keys must be unique and non-empty") }
+        }
         for uid in routes.map(\.source) + routes.map(\.destination) + reserved.map(\.destination) {
             guard let value = Int32(uid), String(value) == uid else { throw MidiFailure("live MIDI requires exact source/destination UIDs") }
         }
@@ -111,8 +124,15 @@ struct UmpLiveSource {
 final class UmpLiveInput {
     enum State { case idle, running, stopping, closed }
     struct Packet { let source: String; let host: UInt64; let ordinal: UInt64; let words: [UInt32] }
-    let plan: UmpLivePlan
-    let outputs: [UmpOutput]
+    var plan: UmpLivePlan
+    // The physical ownership declaration is re-derived by the monitor on every
+    // `set`, so a stale snapshot never gates a live route change.
+    var reserved: [UmpLiveClaim]
+    // `activeRoutes` and `outputs` stay index-aligned: routing and snapshots
+    // address an output by the position of its active route. `live-set` swaps
+    // both arrays together and never closes a route that stays active.
+    var activeRoutes: [UmpLiveRoute]
+    var outputs: [UmpOutput]
     // 256 KiB of in-flight raw payload, including callback-to-main handoff and
     // future input timestamps. Exhaustion fails explicitly; input is never dropped.
     static let maximumPendingWords = 65_536
@@ -131,7 +151,8 @@ final class UmpLiveInput {
     var now: () -> UInt64 = { mach_absolute_time() }
     let timebase: mach_timebase_info_data_t
     init(plan: UmpLivePlan) throws {
-        try plan.validate(); self.plan = plan
+        try plan.validate(); self.plan = plan; reserved = plan.reserved
+        activeRoutes = plan.routes
         outputs = plan.routes.map { UmpOutput(bindings: [UmpBinding(source: $0.source, destination: $0.destination)]) }
         var clock = mach_timebase_info_data_t(); mach_timebase_info(&clock); timebase = clock
         guard clock.numer > 0, clock.denom > 0 else { throw MidiFailure("live MIDI host clock is unavailable") }
@@ -151,7 +172,7 @@ final class UmpLiveInput {
         catch { stop(error: error); throw error }
     }
     private func startResources() throws {
-        for uid in Set(plan.routes.map(\.source)) {
+        for uid in Set(activeRoutes.map(\.source)) {
             let source = try UmpLiveSource.selected(uid); sources[source.endpoint] = source
         }
         try checked(MIDIClientCreateWithBlock("MASC live MIDI input" as CFString, &client, { [weak self] _ in
@@ -181,13 +202,83 @@ final class UmpLiveInput {
         lock.lock(); if firstFailure == nil { firstFailure = error }; accepting = false; lock.unlock()
         DispatchQueue.main.async { self.stop() }
     }
+    // `live-set`: reconcile the running owner to a new catalog and active key
+    // set. Routes that stay active keep their CoreMIDI connections; only added
+    // routes are opened and only removed routes are closed. A route that cannot
+    // open is reported in `rejected` instead of stopping the owner, and the ACK
+    // admits exactly the live set so the caller can judge a target match.
+    func set(routes: [UmpLiveRoute], active: [String], reserved: [UmpLiveClaim]?) throws {
+        guard Thread.isMainThread, state == .running else { throw MidiFailure("live MIDI set requires its running lifecycle") }
+        if let reserved { self.reserved = reserved }
+        var catalog: [String: UmpLiveRoute] = [:]
+        for route in routes {
+            guard !route.key.isEmpty, catalog.updateValue(route, forKey: route.key) == nil else {
+                throw MidiFailure("live MIDI route keys must be unique and non-empty")
+            }
+        }
+        var activeKeys = Set<String>()
+        for key in active {
+            guard catalog[key] != nil else {
+                // An active key the catalog does not define is a protocol error:
+                // keep the current set and name the refusal instead of opening a
+                // route from a bare key.
+                try onEvent?(["kind": "ack", "admitted": activeRoutes.map(\.key), "rejected": [], "error": "unknown-key"])
+                return
+            }
+            activeKeys.insert(key)
+        }
+        // The active subset, in catalog order, is itself a legal plan.
+        let desired = routes.filter { activeKeys.contains($0.key) }
+        if !desired.isEmpty { try UmpLivePlan.validate(routes: desired, reserved: self.reserved) }
+        let kept = Dictionary(zip(activeRoutes, outputs).filter { activeKeys.contains($0.0.key) }.map { ($0.0.key, $0) },
+                              uniquingKeysWith: { first, _ in first })
+        var nextRoutes: [UmpLiveRoute] = [], nextOutputs: [UmpOutput] = [], rejected: [String] = []
+        for route in desired {
+            if let (old, output) = kept[route.key],
+               old.source == route.source, old.destination == route.destination, old.scope == route.scope {
+                nextRoutes.append(route); nextOutputs.append(output)
+                continue
+            }
+            let output = UmpOutput(bindings: [UmpBinding(source: route.source, destination: route.destination)])
+            output.onFailure = { [weak self] error in self?.stop(error: error) }
+            do {
+                try ensureSource(route.source)
+                try output.prepare()
+                nextRoutes.append(route); nextOutputs.append(output)
+            } catch {
+                try? output.close(); rejected.append(route.key)
+            }
+        }
+        let nextKeys = Set(nextRoutes.map(\.key))
+        for (route, output) in zip(activeRoutes, outputs) where !nextKeys.contains(route.key) { try? output.close() }
+        activeRoutes = nextRoutes; outputs = nextOutputs
+        syncSources(Set(nextRoutes.map(\.source)))
+        try onEvent?(["kind": "ack", "admitted": nextRoutes.map(\.key), "rejected": rejected])
+    }
+    // Open a source the first time a route needs it and drop it once the last
+    // route releases it. A route that already has its port stays untouched, so
+    // an unrelated `live-set` never breaks an open connection.
+    private func ensureSource(_ uid: String) throws {
+        lock.lock(); let known = sources.values.contains { String($0.uid) == uid }; lock.unlock()
+        guard !known else { return }
+        let source = try UmpLiveSource.selected(uid)
+        try checked(MIDIPortConnectSource(port, source.endpoint, UnsafeMutableRawPointer(bitPattern: UInt(source.endpoint))), "connect selected live MIDI input")
+        lock.lock(); sources[source.endpoint] = source; lock.unlock()
+    }
+    private func syncSources(_ needed: Set<String>) {
+        lock.lock()
+        let stale = sources.filter { !needed.contains(String($0.value.uid)) }
+        for endpoint in stale.keys { sources.removeValue(forKey: endpoint) }
+        lock.unlock()
+        for endpoint in stale.keys { MIDIPortDisconnectSource(port, endpoint) }
+    }
     func receive(_ list: UnsafePointer<MIDIEventList>, context: UnsafeMutableRawPointer?) {
         lock.lock()
         guard accepting else { lock.unlock(); return }
+        let source = context.flatMap { sources[MIDIEndpointRef(UInt(bitPattern: $0))] }
         callbacks.enter(); lock.unlock()
         defer { callbacks.leave() }
-        guard list.pointee.protocol == ._2_0, let context,
-              let source = sources[MIDIEndpointRef(UInt(bitPattern: context))] else {
+        guard list.pointee.protocol == ._2_0, let source else {
             fail(MidiFailure("unbound live MIDI callback or protocol")); return
         }
         var packet = UnsafeRawPointer(list).advanced(by: MemoryLayout<MIDIEventList>.offset(of: \.packet)!)
@@ -229,7 +320,7 @@ final class UmpLiveInput {
                 defer { release(packet.words.count) }
                 let messages = try umpMessages(packet.words)
                 for words in messages {
-                    for (index, route) in plan.routes.enumerated() where route.source == packet.source {
+                    for (index, route) in activeRoutes.enumerated() where route.source == packet.source {
                         if route.scope.includes(words[0]) {
                             try checkFailure()
                             try outputs[index].apply(UmpEvent(seconds: 0, source: packet.source, words: words)); forwarded += 1
@@ -253,7 +344,8 @@ final class UmpLiveInput {
         lock.lock(); let words = pendingWords; lock.unlock()
         let bindings = outputs.enumerated().compactMap { index, output -> [String: Any]? in
             guard var binding = output.snapshot().first else { return nil }
-            binding["port"] = index; binding["source"] = plan.routes[index].source; binding["scope"] = plan.routes[index].scope.json
+            binding["port"] = index; binding["key"] = activeRoutes[index].key
+            binding["source"] = activeRoutes[index].source; binding["scope"] = activeRoutes[index].scope.json
             return binding
         }
         return ["kind": kind, "deliveryProtocol": 2, "bindings": bindings,

@@ -27,7 +27,10 @@ function claims(values) {
 }
 export function liveMidiPlan(routes, reserved) {
   if (!Array.isArray(routes) || !routes.length) throw new Error('Select a live MIDI route')
-  return { schemaVersion: 1, routes: routes.map(route => ({ source: uid(route?.source), destination: uid(route?.destination), scope: liveMidiScope(route?.scope) })), reserved: claims(reserved) }
+  return { schemaVersion: 1, routes: routes.map(route => {
+    const source = uid(route?.source), destination = uid(route?.destination)
+    return { key: `${source}:${destination}`, source, destination, scope: liveMidiScope(route?.scope) }
+  }), reserved: claims(reserved) }
 }
 // One read-only native parse uses the actual transport's compiled prefix scopes.
 export async function backingMidiClaims({ path, format, signal, executable = liveMidiPath, spawnProcess = spawn }) {
@@ -68,6 +71,7 @@ export async function openLiveMidi({ routes, reserved, signal, onEvent = () => {
     signal?.throwIfAborted()
     const child = spawnProcess(executable, ['--plan', path], { stdio: ['pipe', 'pipe', 'pipe'] })
     let failure = null, final = null, started = false, closed = false, stopping = false, detail = ''
+    const setWaiters = []
     let resolveReady, rejectReady, resolveDone, rejectDone
     const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject })
     const done = new Promise((resolve, reject) => { resolveDone = resolve; rejectDone = reject })
@@ -77,7 +81,25 @@ export async function openLiveMidi({ routes, reserved, signal, onEvent = () => {
       stopping = true
       if (!child.stdin.destroyed) child.stdin.end('{"kind":"stop"}\n')
     }
-    function fail(error) { failure ??= error; rejectReady(error); if (!closed) child.kill('SIGTERM') }
+    function fail(error) {
+      failure ??= error
+      rejectReady(error)
+      for (const waiter of setWaiters.splice(0)) waiter.reject(error)
+      if (!closed) child.kill('SIGTERM')
+    }
+    // `set`: atomically hand the owner a catalog (the plan's routes, keyed) and
+    // the active key subset. Resolves with the `ack` event; the caller decides
+    // whether `admitted` matches its target and re-queues the remainder.
+    function set(routes, active, reserved) {
+      if (failure) return Promise.reject(failure)
+      if (closed || stopping) return Promise.reject(new Error('Live MIDI owner is closing'))
+      try {
+        return new Promise((resolve, reject) => {
+          setWaiters.push({ resolve, reject, routes })
+          child.stdin.write(`${JSON.stringify({ kind: 'set', routes, active, reserved })}\n`)
+        })
+      } catch (error) { return Promise.reject(error) }
+    }
     const abort = () => { stopping = true; rejectReady(signal.reason); child.kill('SIGTERM') }
     signal?.addEventListener('abort', abort, { once: true })
     const lines = createInterface({ input: child.stdout, crlfDelay: Infinity })
@@ -88,6 +110,19 @@ export async function openLiveMidi({ routes, reserved, signal, onEvent = () => {
         if (event.kind === 'error') {
           if (typeof event.message !== 'string' || !event.message) throw new Error('Malformed live MIDI error')
           fail(new Error(event.message)); onEvent(event); return
+        }
+        if (event.kind === 'ack') {
+          const waiter = setWaiters.shift()
+          if (!waiter) throw new Error('Unexpected live MIDI route acknowledgement')
+          const known = key => waiter.routes.some(route => route.key === key)
+          // `unknown-key` keeps the current set, so its admitted keys need not be in
+          // the catalog we just sent; a normal ack may only name catalog keys.
+          const valid = Array.isArray(event.admitted) && Array.isArray(event.rejected)
+            && (event.error === undefined || event.error === 'unknown-key')
+            && !event.admitted.some(key => event.rejected.includes(key))
+            && (event.error === 'unknown-key' || (event.admitted.every(known) && event.rejected.every(known)))
+          if (!valid) throw new Error('Invalid live MIDI route acknowledgement')
+          waiter.resolve(event); onEvent(event); return
         }
         if (!['monitoring', 'stopped'].includes(event.kind) || final || event.deliveryProtocol !== 2
           || !Array.isArray(event.bindings) || event.bindings.length !== plan.routes.length
@@ -111,8 +146,12 @@ export async function openLiveMidi({ routes, reserved, signal, onEvent = () => {
       closed = true; signal?.removeEventListener('abort', abort); lines.close()
       if (failure || code !== 0 || !final) {
         const error = failure ?? new Error(detail || `Live MIDI closed without finalization: ${code ?? exitSignal}`)
+        for (const waiter of setWaiters.splice(0)) waiter.reject(error)
         rejectReady(error); rejectDone(error)
       } else {
+        // A set with no ack at a clean close must still settle: resolving
+        // would lie about admission, so reject and let the caller re-queue.
+        for (const waiter of setWaiters.splice(0)) waiter.reject(new Error('Live MIDI owner is closed'))
         if (!started) rejectReady(new Error('Live MIDI stopped before admission'))
         resolveDone(final)
       }
@@ -120,6 +159,6 @@ export async function openLiveMidi({ routes, reserved, signal, onEvent = () => {
     if (signal?.aborted) abort()
     const completion = done.finally(() => rm(temporary, { recursive: true, force: true }))
     completion.catch(() => {})
-    return { ready, completion, stop }
+    return { ready, completion, stop, set }
   } catch (error) { await rm(temporary, { recursive: true, force: true }); throw error }
 }

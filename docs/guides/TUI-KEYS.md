@@ -695,6 +695,8 @@ identity require their own evidence when comparing runs.
 | `{ / }` | read the adjacent published report revision from its validated history |
 | `, / .` | select the previous or next image part in the loaded resource |
 | `Ctrl-O` | open the selected image from the retained resource bytes |
+| `( / )` | select the previous or next original text part for copying |
+| `y` | send the selected text part's original bytes via OSC 52; terminal support is unconfirmed |
 | `Esc` | the text hands back to the list; the list leaves for System |
 | `/` | find a resource name in the list, or text in the loaded detail |
 | `n / N` | next / previous match |

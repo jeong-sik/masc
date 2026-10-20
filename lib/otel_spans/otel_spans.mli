@@ -52,6 +52,22 @@ val setup_exporter
     one. Pure; keeps the OTLP port in a single source of truth. *)
 val port_of_uri : Uri.t -> int
 
+(** Why [probe_endpoint] could not reach the collector. [No_address] is a
+    host that resolved to nothing; [Probe_raised] carries the exception the
+    resolver or the connect raised (refused, unreachable, unknown host). *)
+type probe_failure =
+  | No_address
+  | Probe_raised of exn
+
+(** One-line text of a [probe_failure], for the health-check log lines. *)
+val probe_failure_to_string : probe_failure -> string
+
+(** [probe_endpoint ~env endpoint] resolves the host of [endpoint], opens a TCP
+    connection and closes it again. [Ok ()] means the collector accepted the
+    connection. Cancellation is re-raised, never returned as a failure. *)
+val probe_endpoint :
+  env:Eio_unix.Stdenv.base -> string -> (unit, probe_failure) result
+
 (** Flush pending spans and remove the OTLP backend.
     Safe to call when disabled (no-op). Resets [is_exporter_active] to [false]. *)
 val shutdown : ?enabled:bool -> unit -> unit

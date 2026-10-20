@@ -122,6 +122,26 @@ let test_input_gate_follows_the_last_presented_frame () =
   check bool "an invalidated frame is not trusted for input" true
     (Presenter.last_frame_is_compact presenter)
 
+(* A drag's text is read from what the terminal shows. That is the last frame
+   the terminal accepted, one row per terminal row, and nothing once the
+   screen stops being one this presenter wrote. *)
+let test_presented_rows_follow_the_last_presented_frame () =
+  let presenter = Presenter.create ~synchronized_output:false () in
+  let captured = sink () in
+  check (option (list string)) "nothing before the first frame" None
+    (Presenter.presented_rows presenter);
+  present presenter captured (frame ~rows:3 [ "left | right"; "second" ]);
+  check (option (list string)) "every terminal row, the unwritten ones empty"
+    (Some [ "left | right"; "second"; "" ])
+    (Presenter.presented_rows presenter);
+  present presenter captured (frame ~rows:3 [ "left | right"; "second" ]);
+  check (option (list string)) "an unchanged frame keeps the rows on screen"
+    (Some [ "left | right"; "second"; "" ])
+    (Presenter.presented_rows presenter);
+  Presenter.invalidate presenter;
+  check (option (list string)) "an invalidated screen is not read" None
+    (Presenter.presented_rows presenter)
+
 let test_only_changed_row_is_written () =
   let presenter = Presenter.create ~synchronized_output:true () in
   let captured = sink () in
@@ -562,6 +582,8 @@ let () =
         ; test_case "one changed row" `Quick test_only_changed_row_is_written
         ; test_case "input follows the presented frame" `Quick
             test_input_gate_follows_the_last_presented_frame
+        ; test_case "the presented rows are the last frame's" `Quick
+            test_presented_rows_follow_the_last_presented_frame
         ; test_case "shorter and removed rows" `Quick
             test_shorter_content_clears_stale_rows
         ; test_case "style-only row change" `Quick

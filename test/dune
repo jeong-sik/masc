@@ -4594,6 +4594,7 @@
 (include stanzas/test_tui_send_disposition.inc)
 (include stanzas/test_tui_scroll.inc)
 (include stanzas/test_tui_hit.inc)
+(include stanzas/test_tui_pane_selection.inc)
 (include stanzas/test_tui_wheel_reader.inc)
 (include stanzas/test_tui_repository_changes_listing.inc)
 (include stanzas/test_tui_tab_strip.inc)

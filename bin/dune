@@ -1169,6 +1169,14 @@
  (modules masc_tui_hit)
  (libraries masc_tui_message_layout))
 
+; Where each pane of a frame is, and a drag kept inside one of them: the
+; click it ends as, or the selected text read back from the rows on screen.
+(library
+ (name masc_tui_pane_selection)
+ (wrapped false)
+ (modules masc_tui_pane_selection)
+ (libraries masc_tui_message_layout masc_tui_theme))
+
 ; What a press does, as the keys already do it, and the marks of the frame
 ; being drawn. A library of its own so a surface drawn outside render_prim
 ; (Metrics, Memory, Tools) marks its strip with the same vocabulary.
@@ -2023,6 +2031,7 @@
   masc_tui_frame_timing
   masc_tui_next_request_band
   masc_tui_hit
+  masc_tui_pane_selection
   masc_tui_press
   masc_tui_answering
   masc_tui_composer_projection
@@ -2078,7 +2087,7 @@
  (name masc_tui_render_chat)
  (wrapped false)
  (modules masc_tui_render_chat)
- (libraries masc_tui_press yojson masc.runtime masc_tui_child_content masc_tui_keeper_call_evidence masc_tui_native_tasks masc_tui_chat_search masc_tui_message_input
+ (libraries masc_tui_press masc_tui_pane_selection yojson masc.runtime masc_tui_child_content masc_tui_keeper_call_evidence masc_tui_native_tasks masc_tui_chat_search masc_tui_message_input
   eio
   masc_core
   masc_tui_async_read
@@ -2408,6 +2417,7 @@
   masc_tui_evidence_link
   masc_tui_render_evidence
   masc_tui_hit
+  masc_tui_pane_selection
   masc_tui_press
   masc_tui_pick_list
   masc_tui_usage_trend

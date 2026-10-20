@@ -9,6 +9,7 @@ type event =
   | Paste of Masc_tui_paste.t
   | Mouse_wheel of Masc.Tui_mouse_protocol.wheel_direction * int * int
   | Mouse_left_press of int * int
+  | Mouse_left_drag of int * int
   | Mouse_left_release of int * int
   | Reply of reply
 
@@ -119,9 +120,12 @@ let complete_csi t parameters final =
         match Masc.Tui_mouse_protocol.sgr_left_press parameters final with
         | Some (row, column) -> [ Mouse_left_press (row, column) ]
         | None -> (
-            match Masc.Tui_mouse_protocol.sgr_left_release parameters final with
-            | Some (row, column) -> [ Mouse_left_release (row, column) ]
-            | None -> key "unknown-esc"))
+            match Masc.Tui_mouse_protocol.sgr_left_drag parameters final with
+            | Some (row, column) -> [ Mouse_left_drag (row, column) ]
+            | None -> (
+                match Masc.Tui_mouse_protocol.sgr_left_release parameters final with
+                | Some (row, column) -> [ Mouse_left_release (row, column) ]
+                | None -> key "unknown-esc")))
   else if final = theme_mode_final then
     match Masc_tui_terminal_palette.parse_theme_mode_parameters parameters with
     | Some mode -> [ Reply (Theme_mode mode) ]
@@ -149,6 +153,9 @@ let x10_event t ~button ~column ~row =
   | Some (Masc.Tui_mouse_protocol.X10_left_press (row, column)) ->
       hold t Held_left;
       [ Mouse_left_press (row, column) ]
+  (* Motion holds nothing new: the press it follows was already held. *)
+  | Some (Masc.Tui_mouse_protocol.X10_left_drag (row, column)) ->
+      [ Mouse_left_drag (row, column) ]
   | Some Masc.Tui_mouse_protocol.X10_other_press ->
       hold t Held_other;
       key "unknown-esc"

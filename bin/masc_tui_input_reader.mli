@@ -22,11 +22,13 @@ type input_event =
           the operator was writing. Reading it is what keeps that from
           happening, whether or not anyone is waiting for it. *)
   | Mouse_left_press of int * int
+  | Mouse_left_drag of int * int
   | Mouse_left_release of int * int
-      (** [(row, column)] of an unmodified left-button press, 1-based as the
-          terminal reported it. Only surfaces that map frame rows to their own
-          rows consume one; everywhere else it is inert, like a wheel notch on
-          a surface with nothing to scroll. *)
+      (** [(row, column)] of an unmodified left-button press, of where the
+          pointer moved with the button still down, and of where it came up,
+          1-based as the terminal reported them. The loop reads the three as
+          one gesture: a release where the press landed is a click, and a
+          drag selects text inside the pane the press landed in. *)
   | Mouse_wheel of Masc.Tui_mouse_protocol.wheel_direction * int * int
       (** A wheel notch and the [(row, column)] it happened at. The loop
           gives a notch over the Activity pane to the pane and turns every

@@ -132,7 +132,8 @@ let test_actual_enter_bytes () =
         check bool "decoded terminal Enter opens selected original" true
           (Reader.action ~key ~height:10 reader = Reader.Open)
     | [] | (Masc_tui_input_decoder.Key _ | Paste _ | Mouse_wheel _
-              | Mouse_left_press _ | Mouse_left_release _ | Reply _) :: _ ->
+              | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _
+              | Reply _) :: _ ->
         fail "terminal byte did not decode to a single key") ['\r';'\n']
 let test_plain_t_and_explicit_command () =
   check bool "ordinary t remains chat text" true

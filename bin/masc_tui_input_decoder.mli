@@ -24,6 +24,8 @@ type event =
   | Paste of Masc_tui_paste.t  (** Everything between [200~] and [201~]. *)
   | Mouse_wheel of Masc.Tui_mouse_protocol.wheel_direction * int * int
   | Mouse_left_press of int * int
+  | Mouse_left_drag of int * int
+      (** Where the pointer moved while the left button stays down. *)
   | Mouse_left_release of int * int
   | Reply of reply
       (** Every reply that parses is emitted. Whether a later one replaces an

@@ -532,7 +532,8 @@ let deliver_decoded_replies reader text =
     List.iter (function
       | Masc_tui_input_decoder.Reply reply -> Masc_tui_input_reader.observe_terminal_reply reader reply
       | Key key -> keys := key :: !keys
-      | Paste _ | Mouse_wheel _ | Mouse_left_press _ | Mouse_left_release _ ->
+      | Paste _ | Mouse_wheel _ | Mouse_left_press _ | Mouse_left_drag _
+      | Mouse_left_release _ ->
         fail "unexpected fixture input") (Masc_tui_input_decoder.feed decoder byte)) text;
   List.rev !keys
 ;;

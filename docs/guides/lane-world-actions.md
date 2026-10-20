@@ -177,8 +177,10 @@ Each due occurrence is queued through the same path as a direct action
 request:
 
 - The request id is the occurrence id. The requester is
-  `schedule:<schedule_id>:<scheduler id>`. The scheduler's own access applies:
-  an operator's schedule acts as the operator, a Keeper's as that Keeper.
+  `schedule:<schedule_id>:<scheduler id>`. The occurrence is checked with the
+  access a direct action request of the scheduler would have: an operator's
+  schedule as the operator, a Keeper's as that Keeper. Removing a Keeper
+  cancels the Lane action schedules it created.
 - The occurrence succeeds once the receipt is durable. Its schedule history
   names the receipt (`installation_id`, `instance_id`, `request_id`). Whether
   the worker ran the action is the receipt's to say.

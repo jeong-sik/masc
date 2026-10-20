@@ -1301,7 +1301,13 @@ let cancel_keeper_schedules config ~keeper_name =
       (match body_keeper_name payload with
        | Error _ -> false
        | Ok target -> String.equal target keeper_name)
-    | Ok (Schedule_payload_projection.Lane_act, _) | Error _ -> false
+    (* A Lane action acts with its scheduler's access ([lane_act_access]), so
+       one a Keeper scheduled ends with that Keeper. *)
+    | Ok (Schedule_payload_projection.Lane_act, _) ->
+      (match request.scheduled_by.kind with
+       | Schedule_domain.Automated_actor -> String.equal request.scheduled_by.id keeper_name
+       | Schedule_domain.Human_operator | Schedule_domain.System -> false)
+    | Error _ -> false
   in
   (* Cancel propagation (task-370): the queue drain must see the schedule
      ledger before the schedules leave it, so it runs first. Removing the

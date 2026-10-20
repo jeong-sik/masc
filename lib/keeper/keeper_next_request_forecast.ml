@@ -475,11 +475,19 @@ let forecast ~config ~keeper_name =
     let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
     (match
        Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace_id
+       |> Keeper_checkpoint_store.saved_history
      with
      | Error error ->
-       Error (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
-     | Ok checkpoint ->
-       let history = checkpoint.Agent_core.Checkpoint.messages in
+       Error (Keeper_checkpoint_store.saved_history_error_to_string error)
+     | Ok saved ->
+       let history =
+         match saved with
+         | Keeper_checkpoint_store.Saved_history.Read checkpoint ->
+           checkpoint.Agent_core.Checkpoint.messages
+         (* The next turn starts fresh on a superseded checkpoint, so its
+            request carries no saved history. *)
+         | Keeper_checkpoint_store.Saved_history.Superseded _ -> []
+       in
        let wake, wake_line_bytes = wake_line () in
        let messages = history @ [ wake ] in
        let _labelled, history_atoms =

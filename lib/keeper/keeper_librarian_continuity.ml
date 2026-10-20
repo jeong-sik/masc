@@ -2,6 +2,7 @@ module S = Librarian_continuity_snapshot
 module R = Keeper_librarian_range
 module B = Keeper_turn_boundaries
 module C = Keeper_checkpoint_store
+module H = Keeper_checkpoint_store.Saved_history
 module W = Runtime_model_input_tail_window
 let ( let* ) = Result.bind
 
@@ -110,17 +111,20 @@ let prepare_source ?previous ?end_atom ~config ~keeper_name ~trace_id () =
        | Error _ as error -> error)
     | Some _ | None ->
       C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id |> Result.map decoded in
-  match loaded with
-  | Error C.Ref_not_found -> Ok (No_source Source_unreadable)
+  match C.saved_history_of_ref loaded with
+  | Error H.Ref_not_found -> Ok (No_source Source_unreadable)
+  (* Nothing in a superseded checkpoint is readable, so nothing is left to
+     read, as the durable pass answers for the same file. *)
+  | Ok (H.Superseded _) -> Ok (No_source Drained)
   | Error
-      ((C.Ref_read_failed _ | C.Ref_identity_invalid _ | C.Ref_session_mismatch _
-       | C.Ref_lock_failed _) as error) -> Error (match error with
-      | C.Ref_not_found -> "continuity checkpoint absent"
-      | C.Ref_read_failed error -> C.checkpoint_load_error_to_string error
-      | C.Ref_identity_invalid _ -> "continuity checkpoint identity invalid"
-      | C.Ref_session_mismatch _ -> "continuity checkpoint trace mismatch"
-      | C.Ref_lock_failed detail -> detail)
-  | Ok (source, messages, prefix) ->
+      ((H.Ref_read_failed _ | H.Ref_identity_invalid _ | H.Ref_session_mismatch _
+       | H.Ref_lock_failed _) as error) -> Error (match error with
+      | H.Ref_not_found -> "continuity checkpoint absent"
+      | H.Ref_read_failed error -> C.saved_history_error_to_string error
+      | H.Ref_identity_invalid _ -> "continuity checkpoint identity invalid"
+      | H.Ref_session_mismatch _ -> "continuity checkpoint trace mismatch"
+      | H.Ref_lock_failed detail -> detail)
+  | Ok (H.Read (source, messages, prefix)) ->
     match S.checkpoint_prefix_range ~trace_id ~lines ~messages with
     | Error (S.Uncovered_history | S.Unmatched_history) -> Ok (No_source Source_unreadable)
     | Error

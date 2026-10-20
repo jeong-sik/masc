@@ -1545,7 +1545,7 @@ let test_corrupt_intervening_checkpoint_stops_the_pass () =
        ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
          fail "a damaged trace in between reached commit")
    with
-   | Error (Consumer.Checkpoint_unreadable { trace_id; error = Store.Parse_error _ }) ->
+   | Error (Consumer.Checkpoint_unreadable { trace_id; error = Store.Saved_history.Parse_error _ }) ->
      check string "the error names the trace it could not read" trace_b trace_id
    | Error error -> fail (Consumer.error_to_string error)
    | Ok _ -> fail "a damaged trace in between was walked past");
@@ -2196,7 +2196,7 @@ let test_new_completed_cut_still_reads_checkpoint () =
     (current @ [message "next completed"]);
   match Consumer.consume_one ~config ~keeper_name
       ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> fail "corrupt checkpoint called commit") with
-  | Error (Consumer.Checkpoint_unreadable { error = Store.Parse_error _; _ }) -> ()
+  | Error (Consumer.Checkpoint_unreadable { error = Store.Saved_history.Parse_error _; _ }) -> ()
   | Error error -> fail (Consumer.error_to_string error)
   | Ok _ -> fail "new completed cut skipped checkpoint validation"
 ;;
@@ -2210,7 +2210,7 @@ let test_unseen_restart_still_reads_checkpoint () =
    | Ok () -> () | Error error -> fail (Boundaries.append_error_to_string error));
   match Consumer.consume_one ~config ~keeper_name
       ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> fail "unreadable restart called commit") with
-  | Error (Consumer.Checkpoint_unreadable { error = Store.Parse_error _; _ }) -> ()
+  | Error (Consumer.Checkpoint_unreadable { error = Store.Saved_history.Parse_error _; _ }) -> ()
   | Error error -> fail (Consumer.error_to_string error)
   | Ok _ -> fail "unseen restart skipped checkpoint validation"
 ;;
@@ -2454,13 +2454,14 @@ let test_external_chat_pair_straddling_a_boundary_is_not_duplicated () =
 module Official = Masc.Keeper_librarian_official_progress
 module History = Masc.Keeper_context_core_history
 
-let append_official_boundary ?(task_context = Masc.Keeper_turn_task_context.No_task) config ~trace_id ~turn ~recorded_at =
+let append_official_boundary ?(task_context = Masc.Keeper_turn_task_context.No_task)
+    ?(history_at_start = Boundaries.Continued_history) config ~trace_id ~turn ~recorded_at =
   let record : Boundaries.record =
     { recorded_at
     ; event =
         Boundaries.Turn_ended
           { task_context; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
-          ; history_at_start = Boundaries.Continued_history
+          ; history_at_start
           ; position = Boundaries.No_atom_history
           }
     }
@@ -2539,7 +2540,7 @@ let test_official_turns_skip_unchanged_atom_checkpoint ~with_atoms () =
     match Consumer.consume_one ~config ~keeper_name
         ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
           fail "corrupt atom checkpoint reached commit") with
-    | Error (Consumer.Checkpoint_unreadable { error = Store.Parse_error _; _ }) -> ()
+    | Error (Consumer.Checkpoint_unreadable { error = Store.Saved_history.Parse_error _; _ }) -> ()
     | Error error -> fail (Consumer.error_to_string error)
     | Ok _ -> fail "new atom boundary did not reopen checkpoint"
   in
@@ -2600,6 +2601,79 @@ let test_an_official_only_keeper_is_read_from_its_fragments () =
   | Consumer.Baseline_advanced _
   | Consumer.Progress_advanced _
   | Consumer.Memory_not_committed _ -> fail "read turns were read again"
+;;
+
+(* Rewrites the canonical as the build before the last [checkpoint_version]
+   bump left it: the current document with the earlier number. *)
+let supersede_checkpoint config ~trace_id =
+  let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
+  let path = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
+  let earlier =
+    match Yojson.Safe.from_string (In_channel.with_open_bin path In_channel.input_all) with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+             if String.equal key "version"
+             then key, `Int (Agent_core.Checkpoint.checkpoint_version - 1)
+             else key, value)
+           fields)
+    | _ -> fail "a checkpoint document is a JSON object"
+  in
+  let (_ : string) = overwrite_checkpoint config ~trace_id (Yojson.Safe.to_string earlier) in
+  match Store.load_agent_core ~session_dir ~session_id:trace_id with
+  | Error (Store.Superseded_version _) -> ()
+  | Error error -> failf "superseded fixture: %s" (Store.checkpoint_load_error_to_string error)
+  | Ok _ -> fail "superseded checkpoint unexpectedly loaded"
+;;
+
+(* The current trace's checkpoint holds a version this build supersedes, and
+   the keeper's turns save no checkpoint, as an official client's do, so no
+   save replaces the file. The turn after the cut starts fresh. Its atoms are
+   nothing to read: the pass reads the official turn, the next pass has
+   nothing to do, and the unread count stays readable on both. *)
+let test_a_superseded_current_checkpoint_is_fresh_state () =
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key
+    (Some "true")
+  @@ fun () ->
+  with_workspace @@ fun config ->
+  let trace_id = "trace-superseded-current" in
+  establish_progress config ~trace_id "before-the-cut";
+  supersede_checkpoint config ~trace_id;
+  write_official_turn config ~trace_id ~turn:2 ~user:"q-after-cut" ~assistant:"a-after-cut"
+    ~tools:[];
+  append_official_boundary ~history_at_start:Boundaries.Fresh_history config ~trace_id
+    ~turn:2 ~recorded_at:2.0;
+  let atom_position = read_progress config in
+  let carried = ref [] in
+  let commits = ref 0 in
+  let commit ~expected_revision:_ ~range_id ~official_range_id input =
+    incr commits;
+    check bool "no atom receipt" true (Option.is_none range_id);
+    check bool "the official receipt is carried" true (Option.is_some official_range_id);
+    carried := text_markers input;
+    Consumer.Memory_committed
+  in
+  let check_settled label =
+    match Queue_refresh.last_measurement ~config ~keeper_name with
+    | Some
+        { last_pass = Queue_refresh.Drained
+        ; unread = Some { atoms = 0; official = 0 }
+        ; _ } -> ()
+    | Some { last_pass = Queue_refresh.Stopped error; _ } ->
+      failf "%s: the pass stopped: %s" label (Consumer.error_to_string error)
+    | Some { unread = None; _ } -> failf "%s: the unread count is unavailable" label
+    | Some _ -> failf "%s: the pass did not drain" label
+    | None -> failf "%s: no measurement" label
+  in
+  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit;
+  check_settled "first pass";
+  check (list string) "the official turn after the cut is read"
+    [ "q-after-cut"; "a-after-cut" ] !carried;
+  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit;
+  check_settled "next pass";
+  check int "the official turn is committed once" 1 !commits;
+  check bool "the atom position is unchanged" true (read_progress config = atom_position)
 ;;
 
 (* An official-client turn that failed after its tools ran: its input is a
@@ -4315,6 +4389,8 @@ let () =
             (test_official_turns_skip_unchanged_atom_checkpoint ~with_atoms:false)
         ; test_case "an official-only keeper is read from its fragments" `Quick
             test_an_official_only_keeper_is_read_from_its_fragments
+        ; test_case "a superseded current checkpoint is fresh state" `Quick
+            test_a_superseded_current_checkpoint_is_fresh_state
         ; test_case "tool-only errored official turn retains admission" `Quick
             (test_a_failed_official_turn_is_read ~tool_only:true)
         ; test_case "a failed official turn is read" `Quick

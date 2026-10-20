@@ -44,7 +44,7 @@ type error =
   | Progress_unreadable of Keeper_librarian_progress.read_error
   | Checkpoint_unreadable of
       { trace_id : string
-      ; error : Keeper_checkpoint_store.checkpoint_load_error
+      ; error : Keeper_checkpoint_store.Saved_history.error
       }
   | Position_in_other_trace of Keeper_librarian_progress.position
   | Position_not_in_history of Keeper_librarian_progress.position
@@ -145,8 +145,9 @@ val consume_one
     after it are read in the order their fresh/restart boundary appears in the
     log, each from atom zero, up to the current trace; a trace with nothing to
     read is passed, and so is one whose checkpoint holds a version this build
-    supersedes, because no turn rewrites a retired trace's checkpoint and
-    stopping there would stop every trace after it. Any other unreadable
+    supersedes ({!Keeper_checkpoint_store.saved_history}). On the current
+    trace such a checkpoint leaves the atom part nothing to read, and the
+    trace's official lines are still read. Any other unreadable
     checkpoint stops the pass and names its trace. The counterpart lower bound stays at the prior position's
     boundary across that move. With no started trace to move to, the old
     cursor stays and the pass reports [Position_in_other_trace].

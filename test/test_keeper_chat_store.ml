@@ -104,7 +104,9 @@ let append_failed_request ~base_dir ~keeper_name ~user_content ~user_attachments
     ~content:user_content ~attachments:user_attachments ?surface ()
   |> Result.get_ok |> ignore;
   K.append_request_failure_once ~base_dir ~keeper_name ~delivery_key
-    ~content:diagnostic ?surface ?turn_ref () |> Result.get_ok |> ignore
+    ~content:diagnostic
+    ~route:(Lazy.from_val { K.Row_route.surface; conversation_id = None })
+    ?turn_ref () |> Result.get_ok |> ignore
 
 let test_load_records_malformed_row_drops () =
   let base_dir = temp_base_path "keeper-chat-store-drops" in
@@ -1709,6 +1711,40 @@ let test_failure_after_reply_preserves_terminal_authority () =
      | Error error -> Alcotest.fail error);
     Alcotest.(check string) "later delivery failure cannot erase persisted speech" before
       (read_file (chat_path ~base_dir ~keeper_name)))
+
+(* The route a caller derives from a stored record is read only by the call
+   that writes the row; a call that finds the row present leaves it unread. *)
+let test_failure_route_is_read_only_when_the_row_is_written () =
+  let base_dir = temp_base_path "keeper-chat-failure-route" in
+  Fun.protect ~finally:(fun () -> remove_tree base_dir) (fun () ->
+    let keeper_name = "keeper-failure-route" in
+    let delivery_key = failure_key "failure-route-operation" in
+    let route conversation_id =
+      lazy { K.Row_route.surface = None; conversation_id = Some conversation_id }
+    in
+    let append route =
+      K.append_request_failure_once ~base_dir ~keeper_name ~delivery_key
+        ~content:"the server restarted" ~route ()
+    in
+    let first = route "written-route" in
+    (match append first with
+     | Ok (K.Appended _) -> ()
+     | Ok (K.Already_present _) -> Alcotest.fail "the first failure row was already present"
+     | Error error -> Alcotest.fail error);
+    Alcotest.(check bool) "the call that writes the row reads its route" true
+      (Lazy.is_val first);
+    let second = route "unread-route" in
+    (match append second with
+     | Ok (K.Already_present _) -> ()
+     | Ok (K.Appended _) -> Alcotest.fail "a present failure row was written again"
+     | Error error -> Alcotest.fail error);
+    Alcotest.(check bool) "a call that finds the row present leaves its route unread"
+      false (Lazy.is_val second);
+    match K.load ~base_dir ~keeper_name with
+    | [ row ] ->
+      Alcotest.(check (option string)) "the row carries the written route"
+        (Some "written-route") row.K.conversation_id
+    | rows -> Alcotest.failf "expected one failure row, got %d" (List.length rows))
 
 let test_unknown_row_contract_cannot_acknowledge_input () =
   List.iter
@@ -3816,6 +3852,8 @@ let () =
             test_failure_completed_output_roundtrip;
           Alcotest.test_case "failure after reply preserves terminal authority" `Quick
             test_failure_after_reply_preserves_terminal_authority;
+          Alcotest.test_case "failure route is read only when the row is written" `Quick
+            test_failure_route_is_read_only_when_the_row_is_written;
           Alcotest.test_case "unknown row contract cannot acknowledge input" `Quick
             test_unknown_row_contract_cannot_acknowledge_input;
         ] );

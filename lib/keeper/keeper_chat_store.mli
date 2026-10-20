@@ -414,13 +414,29 @@ val append_assistant_message_once :
   unit ->
   (append_once_result, string) result
 
+(** The connector surface and conversation coordinate written on a row. *)
+module Row_route : sig
+  type t =
+    { surface : Surface_ref.t option
+    ; conversation_id : string option
+    }
+
+  val none : t
+  (** No surface and no conversation coordinate. *)
+end
+
 (** Append a server-owned failed-request result exactly once. It shares the
     terminal result slot with an assistant reply, preserves completed output,
-    and never acknowledges an input or becomes Keeper conversation memory. *)
+    and never acknowledges an input or becomes Keeper conversation memory.
+    [route] (default {!Row_route.none}) is forced under the store lock only
+    when the row is written, so a caller that derives it from a stored record
+    does no work for a row that is already present. It is forced in a system
+    thread while the chat file's lock is held, so it must be a pure
+    computation: no Eio effect and no I/O on this keeper's chat store. *)
 val append_request_failure_once :
   base_dir:string -> keeper_name:string ->
   delivery_key:Keeper_chat_delivery_identity.delivery_key -> content:string ->
-  ?surface:Surface_ref.t -> ?conversation_id:string -> ?tool_calls:tool_call list ->
+  ?route:Row_route.t Lazy.t -> ?tool_calls:tool_call list ->
   ?blocks:chat_block list -> ?turn_ref:Ids.Turn_ref.t ->
   ?stream_lifecycle:stream_lifecycle_event list -> unit ->
   (append_once_result, string) result

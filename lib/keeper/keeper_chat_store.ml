@@ -1248,10 +1248,23 @@ let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
       (sanitize_name keeper_name) (Printexc.to_string exn);
     Error (Printexc.to_string exn)
 
+module Row_route = struct
+  type t =
+    { surface : Surface_ref.t option
+    ; conversation_id : string option
+    }
+
+  let none = { surface = None; conversation_id = None }
+end
+
+(* [line] is encoded under the file lock only when its slot is absent, so a
+   lazy route is never read for a row that is already present. Stdlib.Lazy:
+   the lock body runs in a systhread where Eio.Lazy cannot run, and each lazy
+   belongs to one append call, so nothing forces it concurrently. *)
 type append_once_line =
   { transcript_slot : Keeper_chat_delivery_identity.transcript_slot
   ; row_id : string
-  ; line : string
+  ; line : string Lazy.t
   }
 
 let transcript_slot_ordinal = function
@@ -1387,7 +1400,7 @@ let append_lines_once ?(reject_partial_after_result = false) path ~delivery_key
            in
            let payload =
              additions
-             |> List.map (fun candidate -> candidate.line ^ "\n")
+             |> List.map (fun candidate -> Lazy.force candidate.line ^ "\n")
              |> String.concat ""
            in
            (if additions = [] then None else Some payload), Ok result))
@@ -1410,28 +1423,29 @@ let append_lines_once ?(reject_partial_after_result = false) path ~delivery_key
             (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)))
 ;;
 
-let tool_call_append_lines ~ts ~surface ~conversation_id ~turn_ref ~delivery_key
-      tool_calls =
+let tool_call_append_lines ~ts ~route ~turn_ref ~delivery_key tool_calls =
   List.map
     (fun (tc, transcript_slot) ->
        let row_id = mint_message_id ~ts in
        { transcript_slot
        ; row_id
        ; line =
-           encode_line
-             ~role:Role.Tool
-             ~content:(normalize_tool_args tc.args)
-             ~ts
-             ~message_id:row_id
-             ?tool_call_id:(provider_tool_call_id tc.call_id)
-             ?execution_id:tc.execution_id
-             ~tool_call_name:tc.call_name
-             ?surface
-             ?conversation_id
-             ?turn_ref
-             ~provenance:
-               { Keeper_chat_delivery_identity.delivery_key; transcript_slot }
-             ()
+           lazy
+             (let { Row_route.surface; conversation_id } = Lazy.force route in
+              encode_line
+                ~role:Role.Tool
+                ~content:(normalize_tool_args tc.args)
+                ~ts
+                ~message_id:row_id
+                ?tool_call_id:(provider_tool_call_id tc.call_id)
+                ?execution_id:tc.execution_id
+                ~tool_call_name:tc.call_name
+                ?surface
+                ?conversation_id
+                ?turn_ref
+                ~provenance:
+                  { Keeper_chat_delivery_identity.delivery_key; transcript_slot }
+                ())
        })
     (tool_transcript_bindings tool_calls)
 ;;
@@ -1456,8 +1470,9 @@ let append_tool_calls_once
       let path = chat_path ~base_dir ~keeper_name in
       let ts = Time_compat.now () in
       let lines =
-        tool_call_append_lines ~ts ~surface ~conversation_id ~turn_ref ~delivery_key
-          tool_calls
+        tool_call_append_lines ~ts
+          ~route:(Lazy.from_val { Row_route.surface; conversation_id })
+          ~turn_ref ~delivery_key tool_calls
       in
       let ordinal = List.length tool_calls - 1 in
       let result_slot = tool_transcript_slot ~ordinal (List.nth tool_calls ordinal) in
@@ -1484,8 +1499,7 @@ let append_terminal_message_once
       ~keeper_name
       ~delivery_key
       ~terminal
-      ?surface
-      ?conversation_id
+      ~route
       ?(tool_calls = [])
       ?blocks
       ?turn_ref
@@ -1508,23 +1522,24 @@ let append_terminal_message_once
       Keeper_chat_delivery_identity.Terminal_result
     in
     let line =
-      encode_line
-        ~role
-        ~content
-        ~ts
-        ~message_id:row_id
-        ?surface
-        ?conversation_id
-        ?blocks
-        ?turn_ref
-        ?stream_lifecycle
-        ~provenance:
-          { Keeper_chat_delivery_identity.delivery_key; transcript_slot }
-        ()
+      lazy
+        (let { Row_route.surface; conversation_id } = Lazy.force route in
+         encode_line
+           ~role
+           ~content
+           ~ts
+           ~message_id:row_id
+           ?surface
+           ?conversation_id
+           ?blocks
+           ?turn_ref
+           ?stream_lifecycle
+           ~provenance:
+             { Keeper_chat_delivery_identity.delivery_key; transcript_slot }
+           ())
     in
     let tool_lines =
-      tool_call_append_lines ~ts ~surface ~conversation_id ~turn_ref ~delivery_key
-        tool_calls
+      tool_call_append_lines ~ts ~route ~turn_ref ~delivery_key tool_calls
     in
     let assistant_line = { transcript_slot; row_id; line } in
     append_lines_once
@@ -1551,15 +1566,17 @@ let append_terminal_message_once
 let append_assistant_message_once ~base_dir ~keeper_name ~delivery_key ~content
     ?surface ?conversation_id ?tool_calls ?blocks ?turn_ref ?stream_lifecycle () =
   append_terminal_message_once ~base_dir ~keeper_name ~delivery_key
-    ~terminal:(Reply content) ?surface ?conversation_id ?tool_calls ?blocks
-    ?turn_ref ?stream_lifecycle ()
+    ~terminal:(Reply content)
+    ~route:(Lazy.from_val { Row_route.surface; conversation_id })
+    ?tool_calls ?blocks ?turn_ref ?stream_lifecycle ()
 ;;
 
 let append_request_failure_once ~base_dir ~keeper_name ~delivery_key ~content
-    ?surface ?conversation_id ?tool_calls ?blocks ?turn_ref ?stream_lifecycle () =
+    ?(route = Lazy.from_val Row_route.none) ?tool_calls ?blocks ?turn_ref
+    ?stream_lifecycle () =
   append_terminal_message_once ~base_dir ~keeper_name ~delivery_key
-    ~terminal:(Failed_request content) ?surface ?conversation_id ?tool_calls ?blocks
-    ?turn_ref ?stream_lifecycle ()
+    ~terminal:(Failed_request content) ~route ?tool_calls ?blocks ?turn_ref
+    ?stream_lifecycle ()
 ;;
 
 (* Unit wrapper: existing callers keep the prior swallow-and-count behavior (the

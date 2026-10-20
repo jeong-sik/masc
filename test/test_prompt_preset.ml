@@ -623,6 +623,43 @@ let test_runtime_text_transform () =
    | Error message -> fail ("transformed runtime.toml does not parse: " ^ message))
 ;;
 
+(* RFC operator-quiz §4.3 K1: a preset captures an add-on lane like a
+   built-in one and writes it back into its own [runtime.addon_exact_lanes]
+   table. *)
+let test_runtime_text_carries_addon_lanes () =
+  let open Alcotest in
+  List.iter (fun (declaration_id, header) ->
+  let author = Runtime_schema.Addon (Result.get_ok (Runtime_schema.addon_lane ~declaration_id ~output:"author")) in
+  let source =
+    runtime_fixture ^ "\n" ^ header ^ "\nslots = [\"openai.gpt\"]\n"
+  in
+  let captured =
+    match Preset.runtime_of_text source with
+    | Ok (_, lanes) -> lanes
+    | Error message -> fail ("runtime.toml with an add-on lane does not parse: " ^ message)
+  in
+  check bool "capture includes the add-on lane" true
+    (List.exists (fun (lane : Preset.lane) ->
+         Runtime_schema.equal_exact_lane_owner lane.Preset.owner author) captured);
+  let text =
+    Preset.runtime_text_with ~current_assignments:[] ~current_lanes:captured ~assignments:[]
+      ~lanes:[ { Preset.owner = author; enabled = false; slots = [ "runpod_mtp.qwen" ]; cli_slots = [] } ]
+      source
+  in
+  match Preset.runtime_of_text text with
+  | Error message -> fail ("restored runtime.toml does not parse: " ^ message)
+  | Ok (_, lanes) ->
+    (match List.find_opt (fun (lane : Preset.lane) ->
+         Runtime_schema.equal_exact_lane_owner lane.Preset.owner author) lanes with
+     | Some lane ->
+       check (list string) (declaration_id ^ ": the add-on table takes the preset's slots")
+         [ "runpod_mtp.qwen" ] lane.Preset.slots;
+       check bool (declaration_id ^ ": and its activity") false lane.Preset.enabled
+     | None -> fail (declaration_id ^ ": the add-on lane is gone after restore")))
+    [ "operator-quiz", "[runtime.addon_exact_lanes.operator-quiz.author]";
+      "team.quiz", "[runtime.addon_exact_lanes.\"team.quiz\".author]" ]
+;;
+
 let test_saved_lane_activity_shape () =
   with_base (fun ~base_path ~keepers:_ ~config:_ ->
     let snapshot = or_fail (Preset.capture ~base_path ~name:"activity-shape" ~description:"") in
@@ -867,6 +904,8 @@ let () =
             test_restore_preserves_manifest_while_journal_retained
         ; Alcotest.test_case "the runtime.toml text transform keeps every other line" `Quick
             test_runtime_text_transform
+        ; Alcotest.test_case "the runtime.toml text carries add-on lanes" `Quick
+            test_runtime_text_carries_addon_lanes
         ; Alcotest.test_case "an override written against an older default still restores" `Quick
             test_override_written_against_an_older_default_still_restores
         ; Alcotest.test_case "an override that cannot render is skipped with the reason" `Quick

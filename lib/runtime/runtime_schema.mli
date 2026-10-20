@@ -370,16 +370,30 @@ type lane_decl =
     lane's table under [runtime] and its registry key, so a reader that needs
     either matches on the owner. Every lane today is a built-in standalone
     lane. *)
+val exact_output_name_valid : string -> bool
+(** An exact output name: [a-z][a-z0-9_]*, as a package manifest declares it. *)
+
+(** A Lane Add-on installation's named exact output: the declaration id that
+    owns the persistent volume and a [world.exact_outputs] name. Private, so
+    every value has a non-blank declaration id and a valid output name, which
+    is what keeps {!exact_lane_key} unambiguous. *)
+type addon_lane = private { declaration_id : string; output : string }
+[@@deriving show, eq]
+
+val addon_lane : declaration_id:string -> output:string -> (addon_lane, string) result
+
 type exact_lane_owner =
   | Builtin of
       (Standalone_lane.t
       [@printer fun fmt lane -> Format.pp_print_string fmt (Standalone_lane.to_id lane)]
       [@equal Standalone_lane.equal])
+  | Addon of addon_lane
 [@@deriving show, eq]
 
 val exact_lane_key : exact_lane_owner -> string
 (** The key the exact-output registry, its errors and the wires carry:
-    {!Standalone_lane.to_id} for a built-in lane. *)
+    {!Standalone_lane.to_id} for a built-in lane, [<declaration_id>/<output>]
+    for an add-on lane. *)
 
 val exact_lane_owner_of_key : string -> exact_lane_owner option
 (** The owner whose {!exact_lane_key} is the argument. A key no lane has is
@@ -387,10 +401,14 @@ val exact_lane_owner_of_key : string -> exact_lane_owner option
 
 val exact_lane_table_path : exact_lane_owner -> string list
 (** The lane's table in the runtime file, from the root:
-    [["runtime"; "exact_output_lanes"; id]] for a built-in lane. *)
+    [["runtime"; "exact_output_lanes"; id]] for a built-in lane and
+    [["runtime"; "addon_exact_lanes"; declaration_id; output]] for an add-on
+    lane. *)
 
 val exact_lane_table_name : exact_lane_owner -> string
-(** {!exact_lane_table_path} joined with dots, as a message names the table. *)
+(** {!exact_lane_table_path} as a TOML table name: each key rendered by
+    {!Toml_line_editor.render_key}, so a declaration id that is not a bare key
+    is quoted. *)
 
 type exact_output_lane_decl =
   { owner : exact_lane_owner

@@ -106,7 +106,7 @@ type resolved_lane =
 
 type lane_resolution_error =
   | Exact_lane_unconfigured of { lane_id : string }
-  | Exact_lane_off of { lane_id : string }
+  | Exact_lane_off of { lane_id : string; owner : Runtime_schema.exact_lane_owner }
   | No_admitted_lane_slots of { lane_id : string }
 
 val subscribe_lane_changes : lane_id:string -> (unit -> unit) -> (unit -> unit)

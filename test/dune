@@ -5638,7 +5638,7 @@
 (test
  (name test_browser_addon_stagehand_model)
  (modules test_browser_addon_stagehand_model)
- (libraries masc_test_deps exact_output_fixture masc.browser_lane mirage-crypto-rng.unix)
+ (libraries masc_test_deps masc.server exact_output_fixture masc.browser_lane mirage-crypto-rng.unix)
  (deps (source_tree ../addons/browser) fixtures/stagehand/llm-generate-params.json)
  (action (run %{test} %{dep:../addons/browser/lane.toml} %{dep:fixtures/stagehand/llm-generate-params.json})))
 

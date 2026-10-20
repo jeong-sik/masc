@@ -584,6 +584,11 @@ the selected region of that source, retaining its position/repeats and undo.
 Partial first/final passes are identified; absolute sample boundaries prevent
 rounded cycle lengths from accumulating. This is nominal alignment, without
 physical latency/drift compensation or a change to original MIDI timestamps.
+`:practice-midi [ASSET]` derives the whole recorded performance as a new expressive
+MIDI1 / 960 PPQ variant for `:edit-midi`, chord analysis and revoicing. It retains
+the captured VST sound, uses nearest source ticks at the captured SMF tempo,
+and leaves original UMP takes/pass cuts untouched. This explicitly uses the
+monitor's channel/value projection rather than lossless MIDI2 editing.
 `:practice-backing [ASSET]` recovers their frozen phrase as a new editable MIDI
 asset with the originally played track muted. Enter places the full phrase and
 `:edit-midi` opens it for chord/voicing experiments. Its original loop stays in

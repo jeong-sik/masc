@@ -34,6 +34,7 @@ const help = [
   ':import-take /path/session      :open-take [ASSET] (WAV + raw UMP)',
   ':import-practice /path/take     import original MIDI from a completed practice take',
   ':practice-backing [ASSET] restores its editable phrase backing; Enter places it, :edit-midi edits it',
+  ':practice-midi [ASSET] derives the whole performance as MIDI1 / 960 PPQ; :edit-midi edits the variant',
   ':practice-passes [ASSET] lists original passes; :practice-pass NUMBER [ASSET] places or replaces the selected source region',
   ':practice-region ASSET BEAT OFFSET EXTENT DIVISOR [REPEAT] places an exact fractional host cut',
   ':trim-fraction OFFSET EXTENT DIVISOR edits a practice cut; :trim returns to whole host ticks',
@@ -692,11 +693,11 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         if (accepting) { adopt(arrangementImported(editor, result)); status = value.kind === 'import-take' ? `Imported ${result.asset}; Enter opens WAV and MIDI` : `Imported ${result.asset}; Enter places it at the cursor` }
         break
       }
-      case 'practice-backing': {
+      case 'practice-midi': case 'practice-backing': {
         if (!accepting) return
-        status = 'Restoring captured phrase backing…'; draw()
+        status = value.kind === 'practice-midi' ? 'Deriving whole performance as MIDI1 / 960 PPQ…' : 'Restoring captured phrase backing…'; draw()
         const result = await request({ ...value, project: editor.project, sourceRoot })
-        if (accepting) { adopt(arrangementImported(editor, result)); status = `Restored ${result.asset}; Enter places it, :edit-midi edits it` }
+        if (accepting) { adopt(arrangementImported(editor, result)); status = `${value.kind === 'practice-midi' ? 'Derived whole performance MIDI1 / 960 PPQ' : 'Restored backing'} ${result.asset}; Enter places it, :edit-midi edits it` }
         break
       }
       case 'practice-passes': case 'practice-pass': {
@@ -738,7 +739,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
             // the user chose before waiting; never reinterpret it on that asset.
             result = result.selection?.kind === 'take-selection'
               ? { editor: arrangementTakeSelected(editor, result.selection) }
-              : ['practice-backing', 'practice-pass', 'practice-passes'].includes(result.effect?.kind) ? { editor, effect: result.effect } : arrangementCommand(editor, line)
+              : ['practice-midi', 'practice-backing', 'practice-pass', 'practice-passes'].includes(result.effect?.kind) ? { editor, effect: result.effect } : arrangementCommand(editor, line)
           }
           adopt(result.editor); if (result.effect) await effect(result.effect); else status = 'Edited'
         })

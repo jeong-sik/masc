@@ -25,6 +25,23 @@ The original full phrase is restored, including notes outside its retained loop;
 use `:region` with original MIDI ticks to place a loop excerpt explicitly.
 This is an editable musical backing, not recorded monitor PCM or automatic
 alignment to the take's host clock. Pass slicing and alignment remain separate.
+Use `:practice-midi [ASSET]` to derive what you played as a new expressive MIDI
+source. `:edit-midi` opens that selected variant for note/expression edits,
+`:harmony` analysis and `:revoice` experiments; Enter places it independently.
+This derives the **whole take**, including its initial silence, even when an
+original pass region is selected. Existing raw sources, pass cuts and clips
+remain unchanged; undo removes the new import. Use source MIDI ticks to trim
+the variant explicitly. Its captured VST sound and initial volume/pan are kept.
+
+The variant uses the monitoring path's declared MIDI1 projection onto the
+captured live channel. MIDI2 values become MIDI1 values, bank/program changes
+remain excluded under the captured preset, and unsupported attributes fail
+explicitly. Host times become nearest 960 PPQ ticks using the captured tempo
+rounded to SMF microseconds per quarter note. Equal-tick events keep their
+original time/order; very short notes can become point notes. The ending is
+at least one tick, with generated note/pedal releases at the source boundary.
+This is an editing projection; original UMP precision and fractional pass cuts
+remain available on the raw take.
 Paths retain internal spaces and are literal paths, without shell expansion.
 The imported asset is selected in the library. Enter places its complete source
 at the cursor, using the current compatible lane or adding a new one.

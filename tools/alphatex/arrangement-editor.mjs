@@ -183,9 +183,9 @@ export function arrangementCommand(editor, line) {
       if (!['on', 'off'].includes(args[1])) throw new Error('Choose metronome on or off')
       value = { kind: 'practice', practice: { countInBars: Number(args[0]), metronome: args[1] === 'on' } }; break
     case 'phrase': count(0); return { editor, effect: { kind: command } }
-    case 'practice-backing': {
+    case 'practice-midi': case 'practice-backing': {
       count(0, 1); const asset = args[0] ?? editor.asset
-      if (!editor.project.assets.some(item => item.id === asset && item.kind === 'practice')) throw new Error('Choose a raw practice take for its captured backing')
+      if (!editor.project.assets.some(item => item.id === asset && item.kind === 'practice')) throw new Error('Choose a raw practice take')
       return { editor, effect: { kind: command, asset } }
     }
     case 'practice-passes': case 'practice-pass': {

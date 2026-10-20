@@ -16,7 +16,7 @@ import { emitKeypressEvents } from 'node:readline'
 import { newArrangement, editArrangement, arrangementSchedule } from '../arrangement.mjs'
 import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } from '../arrangement-playback.mjs'
 import * as editorAPI from '../arrangement-editor.mjs'
-import { loadArrangement, importArrangementPractice, restorePracticeBacking, inspectPracticePasses } from '../arrangement-files.mjs'
+import { loadArrangement, importArrangementPractice, restorePracticeBacking, inspectPracticePasses, importPracticeMidi } from '../arrangement-files.mjs'
 import { practiceSourceFixture } from './helpers/practice-source-fixture.mjs'
 import { importMidiSource, exportMidiSource, midiSourcePattern } from '../midi-source.mjs'
 import { recordingEpoch, attachRecordedTake } from '../arrangement-recording.mjs'
@@ -1155,7 +1155,10 @@ test('implicit take admission retains its asset and resolved cycle across succes
  }
 })
 
-test('implicit practice backing retains its admitted source across recording attachment and undo',()=>practiceSourceFixture(async({root,input})=>{
+for(const command of ['practice-backing','practice-midi']) test(`implicit ${command} retains its admitted source across recording attachment and undo`,()=>practiceSourceFixture(async({root,input,rows,publish})=>{
+ if(command==='practice-midi'){
+  rows[0].packet.words=[0x43953c00,0x90000000];await publish()
+ }
  const view=await controller()
  try{
   await primeWave(view);const captured=await primeCapture(view)
@@ -1170,16 +1173,16 @@ test('implicit practice backing retains its admitted source across recording att
   view.observed.players[0].handle.recordingEpoch=async()=>({kind:'playing',loop:false,duration:10,device:{id:'audio',outputs:2},
    clock:{kind:'mach-host-time',anchor:'100',position:0,numer:1,denom:1}})
   view.command('record');await flush();const capture=view.observed.captures[0];assert.ok(capture)
-  view.command('practice-backing');await flush();assert.ok(capture.stops>0)
+  view.command(command);await flush();assert.ok(capture.stops>0)
   capture.finish({manifest:captured.manifest});await flush()
   const attach=view.observed.requests.find(job=>job.kind==='attach-recording');assert.ok(attach)
   const asset={...captured,id:'capture-2',name:'New recording'}
   const attached=attachRecordedTake(attach.project,{project:editArrangement(attach.project,{kind:'asset-add',asset}),asset:asset.id},attach.epoch)
   view.worker.emit('message',{id:attach.id,ok:true,result:attached});await flush()
-  const backing=view.observed.requests.find(job=>job.kind==='practice-backing')
+  const backing=view.observed.requests.find(job=>job.kind===command)
   assert.ok(backing,'the admitted restoration must reach its worker after attachment')
   assert.equal(backing.asset,selected);assert.deepEqual(backing.project,attached.project)
-  const restored=await restorePracticeBacking(backing.project,backing.asset,{sourceRoot:root,directory:root})
+  const restored=await (command==='practice-midi'?importPracticeMidi:restorePracticeBacking)(backing.project,backing.asset,{sourceRoot:root,directory:root})
   view.worker.emit('message',{id:backing.id,ok:true,result:restored});await flush()
   view.command('save');await flush()
   const saved=view.observed.saved.at(-1).project
@@ -1191,7 +1194,7 @@ test('implicit practice backing retains its admitted source across recording att
   assert.deepEqual(view.observed.saved.at(-1).project,attached.project)
  }finally{
   for(const capture of view.observed.captures)capture.finish()
-  for(const job of view.observed.requests.filter(job=>['attach-recording','practice-backing','import-practice'].includes(job.kind)))view.worker.emit('message',{id:job.id,ok:false,error:'Fixture closed'})
+  for(const job of view.observed.requests.filter(job=>['attach-recording',command,'import-practice'].includes(job.kind)))view.worker.emit('message',{id:job.id,ok:false,error:'Fixture closed'})
   await closeController(view)
  }
 }))

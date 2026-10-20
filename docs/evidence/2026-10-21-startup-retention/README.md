@@ -38,6 +38,13 @@ maintenance lifecycle and cancellation cases but failed one of 95 cases: the
 existing remote-endpoint fixture did not create the Keeper runtime directory
 before preparing its GitHub identity. The fixture now creates that prerequisite,
 as the guest-reuse identity fixture already does. Production identity checks
-are unchanged. The whole run failed; the corrected head needs a new focused run.
+are unchanged. The whole run failed.
+
+The next run, [39468152494](https://github.com/jeong-sik/masc/actions/runs/39468152494)
+at `8b9ceb9d38daece4a2590fc4216f5ea42495d96f`, failed compilation before executing
+tests: `mkdir_p` was scoped inside another fixture. This fixture now calls
+`Unix.mkdir` directly for its new temporary Keeper runtime directory. Neither
+source review nor syntax parsing caught that name-resolution error. The current
+head needs a new focused native run; neither failed run is a current-head PASS.
 
 Installed startup latency remains unmeasured; no improvement time is claimed.

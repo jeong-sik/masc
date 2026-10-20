@@ -2849,7 +2849,7 @@ let test_running_guest_is_a_remote_endpoint () =
     Alcotest.(check (option string)) "commits carry the keeper as committer"
       (Some "lane-smith")
       (List.assoc_opt "GIT_COMMITTER_NAME" injected);
-    mkdir_p (Masc.Workspace.keepers_runtime_dir config);
+    Unix.mkdir (Masc.Workspace.keepers_runtime_dir config) 0o700;
     let host_gh_dir =
       match
         Masc.Keeper_github_identity.ensure_config_dir

@@ -5553,7 +5553,7 @@
 (test
  (name test_lane_addon_worker)
  (modules test_lane_addon_worker)
- (libraries masc.lane_addon_call_context masc masc.string_util masc_random_id mcp_protocol alcotest eio eio_main yojson unix digestif masc.fs_compat))
+ (libraries masc.lane_addon_call_context masc masc.string_util masc_random_id mcp_protocol alcotest eio eio_main yojson unix digestif masc.fs_compat base64))
 
 (include stanzas/test_bedrock_sdk.inc)
 (test
@@ -5769,7 +5769,7 @@
 (test
  (name test_lane_addon_host_cycle)
  (modules test_lane_addon_host_cycle)
- (libraries masc_test_deps exact_output_fixture eio eio_main yojson unix))
+ (libraries masc_test_deps exact_output_fixture eio eio_main yojson unix base64))
 
 (test
  (name test_lane_addon_host_request)

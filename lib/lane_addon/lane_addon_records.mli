@@ -42,14 +42,31 @@ type read =
       (** The source cannot be read now. The request waits for the next host event. *)
 
 val read_records :
-  store:Lane_addon_store.t -> grants:grant list ->
+  base_path:string -> store:Lane_addon_store.t -> grants:grant list ->
   measure:(Yojson.Safe.t -> int) -> max_bytes:int ->
   source_id:string -> after:string option -> read
 (** Records after [after], oldest first, as many as fit: [measure] gives the
     bytes a result body takes in the frame, and the page stays within
-    [max_bytes]. A first record that does not fit alone is still the page, so
-    the delivery reports its size instead of skipping it.
+    [max_bytes]. A first record that does not fit alone is still the page. The
+    host delivery retains that complete result JSON and supplies request-bound
+    [read_result] continuations rather than skipping the record or its cursor.
 
     Board records are posts (id, author, created and updated time,
     visibility, title, body) in the granted visibilities and the comments on
-    those posts (id, post id, author, created time, body). *)
+    those posts (id, post id, author, created time, body).
+
+    Repository records are the first-parent commits of the registered
+    repository's default branch in its checkout under [base_path] (SHA,
+    author name, commit time, subject, body, changed paths against the first
+    parent), and the page names the [head] it read. The cursor is a commit
+    SHA; one the head does not reach is not allowed. A repository that is not
+    registered or cannot be read is unavailable. *)
+
+val read_file :
+  base_path:string -> store:Lane_addon_store.t -> grants:grant list ->
+  source_id:string -> commit:string -> path:string -> read
+(** One file's bytes at a commit the default branch's head reaches, under the
+    grant's [paths]: [{"status": "file", "source_id", "commit", "path",
+    "encoding", "content", "bytes", "sha256"}]. [encoding] is [utf-8] for text
+    and [base64] otherwise. The bytes are retained as a blob first, and
+    [sha256] names it. *)

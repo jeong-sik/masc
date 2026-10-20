@@ -167,40 +167,120 @@ let board_records ~visibilities =
     Ok (List.rev_append (List.map post_record posts) comments)
 
 (* The page body for the records taken so far. *)
-let page_body ~source_id ~records ~next_cursor ~complete ~sha256 =
+let page_body ?head ~source_id ~records ~next_cursor ~complete ~sha256 () =
   `Assoc
-    [ "status", `String "records"; "source_id", `String source_id; "records", `List records
-    ; "next_cursor", (match next_cursor with None -> `Null | Some cursor -> `String cursor)
-    ; "complete", `Bool complete; "sha256", `String sha256 ]
+    ([ "status", `String "records"; "source_id", `String source_id ]
+     @ (match head with None -> [] | Some head -> [ "head", `String head ])
+     @ [ "records", `List records
+       ; "next_cursor", (match next_cursor with None -> `Null | Some cursor -> `String cursor)
+       ; "complete", `Bool complete; "sha256", `String sha256 ])
 
 (* Every page has a 64-hex SHA-256; measuring with a placeholder of that size
    gives the exact size of the answered body. *)
 let sha256_placeholder = String.make 64 '0'
 
-let take_page ~measure ~max_bytes ~source_id pending =
-  (* [Yojson] writes an array as its elements joined by commas, so a page's
-     size is the size of the same body with no records, plus each record, plus
-     one comma between two. *)
+(* [items] pairs each record's cursor with the work that produces it, so a
+   reader that pays per record (a commit) stops at the first that does not fit.
+   [Yojson] writes an array as its elements joined by commas, so a page's size
+   is the size of the same body with no records, plus each record, plus one
+   comma between two. *)
+let take_page ~measure ~max_bytes ~empty_body items =
   let rec take taken bytes = function
-    | [] -> List.rev taken, true
-    | ((key, json) as record) :: rest ->
+    | [] -> Ok (List.rev taken, true)
+    | (cursor, record) :: rest ->
+      let* json = record () in
       let encoded = String.length (Yojson.Safe.to_string json) in
       let separator = match taken with [] -> 0 | _ :: _ -> 1 in
-      let base =
-        measure
-          (page_body ~source_id ~records:[] ~next_cursor:(Some (cursor_of_key key)) ~complete:false
-             ~sha256:sha256_placeholder)
-      in
-      if base + bytes + separator + encoded <= max_bytes || taken = []
-      then take (record :: taken) (bytes + separator + encoded) rest
-      else List.rev taken, false
+      let base = measure (empty_body ~next_cursor:(Some cursor)) in
+      let fits = base + bytes + separator + encoded <= max_bytes in
+      (match taken with
+       | [] -> take [ (cursor, json) ] (bytes + separator + encoded) rest
+       | _ :: _ when fits -> take ((cursor, json) :: taken) (bytes + separator + encoded) rest
+       | _ :: _ -> Ok (List.rev taken, false))
   in
-  take [] 0 pending
+  take [] 0 items
 
-let read_records ~store ~grants ~measure ~max_bytes ~source_id ~after =
-  match List.find_opt (fun grant -> String.equal (source_id_of grant) source_id) grants with
-  | None -> Not_allowed ("source " ^ source_id ^ " is not granted to this installation")
-  | Some (Repository _) -> Unavailable "this host reads no repository records yet"
+(* Retains the page's records, then answers it. *)
+let answer_page ?head ~store ~source_id ~after (taken, complete) =
+  let next_cursor = match List.rev taken with (cursor, _) :: _ -> Some cursor | [] -> after in
+  let records = List.map snd taken in
+  match
+    Eio_unix.run_in_systhread (fun () ->
+      Lane_addon_store.write_blob store (Yojson.Safe.to_string (`List records)))
+  with
+  | Error detail -> Unavailable ("the page could not be retained: " ^ detail)
+  | Ok { Lane_addon_types.sha256 = None; _ } -> Unavailable "the retained page has no digest"
+  | Ok { Lane_addon_types.sha256 = Some sha256; _ } ->
+    Page (page_body ?head ~source_id ~records ~next_cursor ~complete ~sha256 ())
+
+let git ~cwd args = Repo_git.run_git_read_only_raw ~cwd args
+
+let commit_id_shaped value =
+  (String.length value = 40 || String.length value = 64)
+  && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) value
+
+let checkout ~base_path ~repository_id =
+  let* repository = Repo_store.find ~base_path repository_id in
+  let cwd = Repo_store.local_path ~base_path repository in
+  let* head = git ~cwd [ "rev-parse"; "--verify"; "refs/heads/" ^ repository.Repo_manager_types.default_branch ^ "^{commit}" ] in
+  Ok (cwd, String.trim head)
+
+(* Whether [commit] is a commit the default branch's head reaches. *)
+let reached ~cwd ~head commit =
+  match git ~cwd [ "cat-file"; "-t"; commit ] with
+  | Ok kind when String.trim kind = "commit" ->
+    (match git ~cwd [ "merge-base"; commit; head ] with
+     | Ok base -> String.equal (String.trim base) commit
+     | Error _ -> false)
+  | Ok _ | Error _ -> false
+
+let commit_record ~cwd sha () =
+  let* header = git ~cwd [ "show"; "-s"; "-z"; "--format=%H%x00%an%x00%ct%x00%s%x00%b"; sha ] in
+  let* names = git ~cwd [ "show"; "--format="; "--name-only"; "-z"; "--diff-merges=first-parent"; sha ] in
+  let fields = String.split_on_char '\000' header in
+  match fields with
+  | [ sha; author; time; subject; body ] | [ sha; author; time; subject; body; "" ] ->
+    let* committed_at = Option.to_result ~none:("commit time of " ^ sha) (int_of_string_opt time) in
+    let paths = List.filter (fun name -> name <> "") (String.split_on_char '\000' (String.trim names)) in
+    Ok
+      (`Assoc
+         [ "kind", `String "commit"; "sha", `String sha; "author", `String author
+         ; "committed_at", `Int committed_at; "subject", `String subject; "body", `String body
+         ; "paths", `List (List.map (fun path -> `String path) paths) ])
+  | _ -> Error ("unreadable commit " ^ sha)
+
+let repository_records ~base_path ~store ~measure ~max_bytes ~source_id ~repository_id ~after =
+  match checkout ~base_path ~repository_id with
+  | Error detail -> Unavailable ("repository " ^ repository_id ^ " cannot be read: " ^ detail)
+  | Ok (cwd, head) ->
+    let range =
+      match after with
+      | None -> Ok head
+      | Some after when commit_id_shaped after && reached ~cwd ~head after -> Ok (after ^ ".." ^ head)
+      | Some _ -> Error "after is not a commit of the default branch"
+    in
+    (match range with
+     | Error reason -> Not_allowed reason
+     | Ok range ->
+       (match git ~cwd [ "rev-list"; "--first-parent"; "--reverse"; range ] with
+        | Error detail -> Unavailable ("the history cannot be read: " ^ detail)
+        | Ok listing ->
+          let shas = List.filter (fun sha -> sha <> "") (String.split_on_char '\n' listing) in
+          let empty_body ~next_cursor =
+            page_body ~head ~source_id ~records:[] ~next_cursor ~complete:false ~sha256:sha256_placeholder ()
+          in
+          (match take_page ~measure ~max_bytes ~empty_body (List.map (fun sha -> sha, commit_record ~cwd sha) shas) with
+           | Error detail -> Unavailable ("a commit cannot be read: " ^ detail)
+           | Ok page -> answer_page ~head ~store ~source_id ~after page)))
+
+let granted grants source_id = List.find_opt (fun grant -> String.equal (source_id_of grant) source_id) grants
+let not_granted source_id = Not_allowed ("source " ^ source_id ^ " is not granted to this installation")
+
+let read_records ~base_path ~store ~grants ~measure ~max_bytes ~source_id ~after =
+  match granted grants source_id with
+  | None -> not_granted source_id
+  | Some (Repository { repository_id; _ }) ->
+    repository_records ~base_path ~store ~measure ~max_bytes ~source_id ~repository_id ~after
   | Some (Board { visibilities; _ }) ->
     let after_key = Option.map key_of_cursor after in
     (match after_key with
@@ -215,18 +295,39 @@ let read_records ~store ~grants ~measure ~max_bytes ~source_id ~after =
             | Some (Some after) -> List.filter (fun (key, _) -> compare_key key after > 0) sorted
             | None | Some None -> sorted
           in
-          let taken, complete = take_page ~measure ~max_bytes ~source_id pending in
-          let next_cursor =
-            match List.rev taken with
-            | (key, _) :: _ -> Some (cursor_of_key key)
-            | [] -> after
+          let empty_body ~next_cursor =
+            page_body ~source_id ~records:[] ~next_cursor ~complete:false ~sha256:sha256_placeholder ()
           in
-          let records = List.map snd taken in
-          (match
-             Eio_unix.run_in_systhread (fun () ->
-               Lane_addon_store.write_blob store (Yojson.Safe.to_string (`List records)))
-           with
-           | Error detail -> Unavailable ("the page could not be retained: " ^ detail)
-           | Ok { Lane_addon_types.sha256 = None; _ } -> Unavailable "the retained page has no digest"
-           | Ok { Lane_addon_types.sha256 = Some sha256; _ } ->
-             Page (page_body ~source_id ~records ~next_cursor ~complete ~sha256))))
+          let items = List.map (fun (key, json) -> cursor_of_key key, fun () -> Ok json) pending in
+          (match take_page ~measure ~max_bytes ~empty_body items with
+           | Error detail -> Unavailable detail
+           | Ok page -> answer_page ~store ~source_id ~after page)))
+
+let read_file ~base_path ~store ~grants ~source_id ~commit ~path =
+  match granted grants source_id with
+  | None -> not_granted source_id
+  | Some (Board _) -> Not_allowed ("source " ^ source_id ^ " is a board; read_file reads a repository")
+  | Some (Repository { repository_id; paths; _ }) ->
+    if not (covers ~paths path) then Not_allowed ("path " ^ path ^ " is outside the grant's paths")
+    else if not (commit_id_shaped commit) then Not_allowed "commit must be a full commit id"
+    else
+      (match checkout ~base_path ~repository_id with
+       | Error detail -> Unavailable ("repository " ^ repository_id ^ " cannot be read: " ^ detail)
+       | Ok (cwd, head) ->
+         if not (reached ~cwd ~head commit) then Not_allowed "commit is not on the default branch"
+         else
+           (match git ~cwd [ "cat-file"; "blob"; commit ^ ":" ^ path ] with
+            | Error _ -> Not_allowed ("path " ^ path ^ " is not a file at that commit")
+            | Ok bytes ->
+              (match Eio_unix.run_in_systhread (fun () -> Lane_addon_store.write_blob store bytes) with
+               | Error detail -> Unavailable ("the file could not be retained: " ^ detail)
+               | Ok { Lane_addon_types.sha256 = None; _ } -> Unavailable "the retained file has no digest"
+               | Ok { Lane_addon_types.sha256 = Some sha256; _ } ->
+                 let encoding, content =
+                   if String.is_valid_utf_8 bytes then "utf-8", bytes else "base64", Base64.encode_string bytes
+                 in
+                 Page
+                   (`Assoc
+                      [ "status", `String "file"; "source_id", `String source_id; "commit", `String commit
+                      ; "path", `String path; "encoding", `String encoding; "content", `String content
+                      ; "bytes", `Int (String.length bytes); "sha256", `String sha256 ]))))

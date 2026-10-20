@@ -326,6 +326,219 @@ let test_an_ungranted_source_or_a_foreign_cursor_is_not_allowed () =
     check string "an ungranted source" "not_allowed" (text "status" (result_of "n1" worker));
     check string "a cursor this host did not give" "not_allowed" (text "status" (result_of "n2" worker)))
 
+let repository_granted = declaration ^ {|[[binding.records]]
+source_id="masc-repo"
+kind="repository"
+repository_id="masc"
+paths=["changelog.d/"]
+|}
+
+let git cwd args =
+  let command = Filename.quote_command "git" ("-C" :: cwd :: "-c" :: "user.name=Fixture" :: "-c" :: "user.email=f@example.invalid"
+                                  (* The fixture runs no hook of the machine it runs on. *)
+                                  :: "-c" :: "core.hooksPath=/dev/null" :: args) in
+  let channel = Unix.open_process_in command in
+  let output = In_channel.input_all channel in
+  match Unix.close_process_in channel with
+  | Unix.WEXITED 0 -> String.trim output
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> failf "git %s failed" (String.concat " " args)
+
+let side = ref ""
+
+(* A registered repository with three commits on main: two changelog
+   fragments and one file outside the grant. Returns the three SHAs. *)
+let repository root =
+  let dir = Filename.concat root "repos/masc" in
+  Fs_compat.mkdir_p dir;
+  ignore (git dir [ "init"; "-q"; "-b"; "main" ]);
+  let commit path bytes subject =
+    write (Filename.concat dir path) bytes;
+    ignore (git dir [ "add"; path ]);
+    ignore (git dir [ "commit"; "-q"; "-m"; subject ]);
+    git dir [ "rev-parse"; "HEAD" ]
+  in
+  let first = commit "changelog.d/1.md" "first fragment\n" "add the first fragment" in
+  let second = commit "lib/x.ml" "let x = 1\n" "add code" in
+  let third = commit "changelog.d/2.md" "second fragment\n" "add the second fragment" in
+  (* A commit only another branch reaches. *)
+  ignore (git dir [ "checkout"; "-q"; "-b"; "side" ]);
+  side := commit "changelog.d/1.md" "rewritten on a side branch\n" "rewrite on side";
+  ignore (git dir [ "checkout"; "-q"; "main" ]);
+  let repository : Repo_manager_types.repository =
+    { id = "masc"; name = "masc"; url = "file://" ^ dir; local_path = dir; aliases = []; default_branch = "main"
+    ; keepers = []; status = Repo_manager_types.Active; auto_sync = false; sync_interval = 0
+    ; created_at = 0L; updated_at = 0L } in
+  ignore (Repo_store.add ~base_path:root repository |> unwrap);
+  first, second, third
+
+let read_file id ~commit ~path =
+  `Assoc [ "kind", `String "read_file"; "request_id", `String id; "source_id", `String "masc-repo"
+         ; "commit", `String commit; "path", `String path ]
+
+let delivered id worker = List.exists (fun arguments -> text "request_id" arguments = id) !(worker.delivered)
+
+(* The package asks for each bounded continuation through the same host listing
+   that supplied the original request, then reassembles the original JSON. *)
+let capture_retained_result worker ~id ~source_id =
+  let completed = ref None and marker = ref None in
+  let bytes = Buffer.create 4096 in
+  let queue_chunk original sha256 offset =
+    worker.listing := [Lane_addon_host_request.to_json
+      (Read_result {request_id=Printf.sprintf "%s-part-%d" id offset;
+        original_request_id=original; source_id=Some source_id; sha256; offset})] in
+  worker.on_deliver := (fun arguments ->
+    check bool "every delivered frame is bounded" true
+      (String.length (Yojson.Safe.to_string arguments) <= 4096);
+    let result = member "result" arguments in
+    match member "status" result with
+    | `String "result_exceeds_frame" when text "request_id" arguments=id ->
+        marker := Some result;
+        queue_chunk id (text "retained_sha256" result) 0
+    | `String "result_chunk" when text "original_request_id" result=id ->
+        Buffer.add_string bytes (Base64.decode_exn (text "content" result));
+        if member "eof" result = `Bool true then (
+          check string "reconstructed result matches its advertised digest"
+            (text "sha256" result) (Lane_addon_store.digest (Buffer.contents bytes));
+          completed := Some (Yojson.Safe.from_string (Buffer.contents bytes)))
+        else queue_chunk id (text "sha256" result) Yojson.Safe.Util.(result |> member "next_offset" |> to_int)
+    | _ -> ());
+  completed, marker
+
+let test_a_giant_first_record_is_delivered_without_losing_the_next_record () =
+  with_installation ~declaration:board_granted (fun clock config worker _ _root ->
+    ignore (post ~body:(String.make 12000 'g') "giant");
+    ignore (post "after giant");
+    let complete, marker = capture_retained_result worker ~id:"giant-page" ~source_id:"board" in
+    worker.listing := [read "giant-page" "board"];
+    publish_lane_change ();
+    await clock (fun () -> Option.is_some !complete);
+    let result = Option.get !complete in
+    check (list string) "the oversized first record is preserved" ["giant"] (record_titles result);
+    check bool "the original page admits more records" true (member "complete" result = `Bool false);
+    check bool "the marker preserves the same cursor" true
+      (member "next_cursor" (Option.get !marker) = member "next_cursor" result);
+    worker.listing := [read ~after:(text "next_cursor" result) "after-giant" "board"];
+    publish_lane_change ();
+    await clock (fun () -> delivered "after-giant" worker);
+    check (list string) "the next record remains reachable" ["after giant"]
+      (record_titles (result_of "after-giant" worker));
+    ignore config)
+
+let test_large_text_and_binary_files_reconstruct_the_original_bytes () =
+  with_installation ~declaration:repository_granted (fun clock _config worker _ root ->
+    ignore (repository root);
+    let directory = Filename.concat root "repos/masc" in
+    List.iter (fun (id, content) ->
+      let path = "changelog.d/" ^ id in
+      write (Filename.concat directory path) content;
+      ignore (git directory ["add"; path]);
+      ignore (git directory ["commit"; "-q"; "-m"; id]);
+      let commit = git directory ["rev-parse"; "HEAD"] in
+      let complete, _marker = capture_retained_result worker ~id ~source_id:"masc-repo" in
+      worker.listing := [read_file id ~commit ~path];
+      publish_lane_change ();
+      await clock (fun () -> Option.is_some !complete);
+      let result = Option.get !complete in
+      let original = match text "encoding" result with
+        | "utf-8" -> text "content" result
+        | "base64" -> Base64.decode_exn (text "content" result)
+        | encoding -> failf "unexpected file encoding %s" encoding in
+      check string "every original file byte survived delivery" content original;
+      check string "the file digest is still the raw source digest"
+        (Lane_addon_store.digest content) (text "sha256" result))
+      ["large-text", String.make 15000 't';
+       "large-binary", String.init 15000 (fun i -> Char.chr (i mod 256))])
+
+let test_retention_failure_never_advertises_an_oversized_result () =
+  List.iter (fun blocked ->
+    with_installation ~mode:(Answer (`Assoc ["question", `String (String.make 12000 'q')]))
+      (fun clock config worker _ root ->
+        let path = Filename.concat root (".masc/lane-addons/" ^ blocked) in
+        write path "not a directory";
+        worker.listing := [exact "must-retain"];
+        publish_lane_change ();
+        await clock (fun () -> member "issue" (host_requests config) <> `Null);
+        check int "no unretained reference crossed the worker port" 0 (List.length !(worker.delivered));
+        check string "persistence failure is visible" "result_delivery_failed"
+          (text "kind" (member "issue" (host_requests config))))) ["evidence"; "host-results"]
+
+let test_retained_result_recovery_does_not_reopen_its_source () =
+  with_installation ~declaration:repository_granted (fun clock config worker _ root ->
+    ignore (repository root);
+    let directory = Filename.concat root "repos/masc" in
+    let path = "changelog.d/retained-file" in
+    write (Filename.concat directory path) (String.make 12000 'r');
+    ignore (git directory ["add"; path]);
+    ignore (git directory ["commit"; "-q"; "-m"; "retained file"]);
+    let commit = git directory ["rev-parse"; "HEAD"] in
+    let request = read_file "recover-without-source" ~commit ~path in
+    worker.listing := [request];
+    publish_lane_change ();
+    await clock (fun () -> delivered "recover-without-source" worker && cycles config >= 2);
+    let first = result_of "recover-without-source" worker in
+    check string "the original result was retained" "result_exceeds_frame" (text "status" first);
+    Unix.rename directory (directory ^ ".offline");
+    let before = cycles config in
+    worker.listing := [request];
+    publish_lane_change ();
+    await clock (fun () -> cycles config > before);
+    check int "the retained reference is delivered despite the unavailable repository" 2
+      (List.length (List.filter (fun arguments -> text "request_id" arguments="recover-without-source") !(worker.delivered)));
+    check bool "recovery uses exactly the first retained result" true
+      (result_of "recover-without-source" worker = first))
+
+let test_a_repository_is_read_by_first_parent_commits () =
+  with_installation ~declaration:repository_granted (fun clock _config worker _ root ->
+    let first, _second, third = repository root in
+    worker.listing := [ read "g1" "masc-repo" ];
+    publish_lane_change ();
+    await clock (fun () -> delivered "g1" worker);
+    let result = result_of "g1" worker in
+    let subjects = member "records" result |> Yojson.Safe.Util.to_list |> List.map (text "subject") in
+    check (list string) "oldest first" [ "add the first fragment"; "add code"; "add the second fragment" ] subjects;
+    check string "the page names the head it read" third (text "head" result);
+    (match member "records" result |> Yojson.Safe.Util.to_list with
+     | record :: _ ->
+       check string "the first commit" first (text "sha" record);
+       check bool "with its changed paths" true (member "paths" record = `List [ `String "changelog.d/1.md" ])
+     | [] -> fail "no commits");
+    check string "the page is retained" (Lane_addon_store.digest (Yojson.Safe.to_string (member "records" result)))
+      (text "sha256" result);
+    worker.listing := [ read ~after:first "g2" "masc-repo" ];
+    publish_lane_change ();
+    await clock (fun () -> delivered "g2" worker);
+    let after = member "records" (result_of "g2" worker) |> Yojson.Safe.Util.to_list |> List.map (text "subject") in
+    check (list string) "a cursor reads only later commits" [ "add code"; "add the second fragment" ] after)
+
+let test_a_file_under_the_grant_is_read_at_a_commit () =
+  with_installation ~declaration:repository_granted (fun clock _config worker _ root ->
+    let first, second, _third = repository root in
+    worker.listing := [ read_file "h1" ~commit:first ~path:"changelog.d/1.md"
+                      ; read_file "h2" ~commit:second ~path:"lib/x.ml"
+                      ; read_file "h3" ~commit:!side ~path:"changelog.d/1.md"
+                      ; read_file "h4" ~commit:first ~path:"changelog.d/2.md" ];
+    publish_lane_change ();
+    await clock (fun () -> List.length !(worker.delivered) >= 4);
+    let file = result_of "h1" worker in
+    check string "the file" "file" (text "status" file);
+    check string "its bytes" "first fragment\n" (text "content" file);
+    check string "as text" "utf-8" (text "encoding" file);
+    check string "retained" (Lane_addon_store.digest "first fragment\n") (text "sha256" file);
+    check string "a path outside the grant" "not_allowed" (text "status" (result_of "h2" worker));
+    check string "a commit the branch does not reach" "not_allowed" (text "status" (result_of "h3" worker));
+    check string "a file that did not exist then" "not_allowed" (text "status" (result_of "h4" worker)))
+
+let test_an_unregistered_repository_waits () =
+  with_installation ~declaration:repository_granted (fun clock config worker _ _root ->
+    worker.listing := [ read "u1" "masc-repo" ];
+    let before = cycles config in
+    publish_lane_change ();
+    await clock (fun () -> cycles config > before);
+    check int "nothing was delivered" 0 (List.length !(worker.delivered));
+    match member "waiting" (host_requests config) with
+    | `List [ waiting ] -> check string "it waits" "source_unavailable" (text "reason" (member "reason" waiting))
+    | _ -> fail "a read of an unregistered repository must wait")
+
 let () =
   Mirage_crypto_rng_unix.use_default ();
   run "lane add-on host request cycle"
@@ -349,4 +562,17 @@ let () =
         ; test_case "a cursor reads only what came after" `Quick test_a_cursor_reads_only_what_came_after
         ; test_case "a page holds what fits the frame" `Quick test_a_page_holds_what_fits_the_frame
         ; test_case "an ungranted source or a foreign cursor is not allowed" `Quick
-            test_an_ungranted_source_or_a_foreign_cursor_is_not_allowed ] ) ]
+            test_an_ungranted_source_or_a_foreign_cursor_is_not_allowed
+        ; test_case "a giant first record preserves the next record" `Quick
+            test_a_giant_first_record_is_delivered_without_losing_the_next_record ] )
+    ; ( "repository reads"
+      , [ test_case "a repository is read by first-parent commits" `Quick
+            test_a_repository_is_read_by_first_parent_commits
+        ; test_case "a file under the grant is read at a commit" `Quick test_a_file_under_the_grant_is_read_at_a_commit
+        ; test_case "an unregistered repository waits" `Quick test_an_unregistered_repository_waits
+        ; test_case "large text and binary files reconstruct their original bytes" `Quick
+            test_large_text_and_binary_files_reconstruct_the_original_bytes
+        ; test_case "retention failure advertises no oversized result" `Quick
+            test_retention_failure_never_advertises_an_oversized_result
+        ; test_case "retained recovery does not reopen its unavailable source" `Quick
+            test_retained_result_recovery_does_not_reopen_its_source ] ) ]

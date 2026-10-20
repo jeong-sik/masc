@@ -32,11 +32,33 @@ let test_a_read_request_is_strict () =
     ; "a cursor that is not a string", [ "request_id", `String "r"; "source_id", `String "board"; "after", `Int 3 ]
     ; "no source", [ "request_id", `String "r" ] ]
 
+let test_a_file_request_is_strict () =
+  let file fields = `Assoc [ "requests", `List [ `Assoc (("kind", `String "read_file") :: fields) ] ] in
+  (match Host.listing_of_json (file [ "request_id", `String "f"; "source_id", `String "repo"; "commit", `String "abc"; "path", `String "a.md" ]) with
+   | Ok [ Host.Read_file { path; _ } ] -> check string "the path" "a.md" path
+   | Ok _ | Error _ -> fail "a file request must decode");
+  check bool "no path is refused" true
+    (Result.is_error (Host.listing_of_json (file [ "request_id", `String "f"; "source_id", `String "repo"; "commit", `String "abc" ])))
+
 let test_the_answer_is_strict () =
   check bool "accepted" true (Host.accepted_of_json (`Assoc [ "accepted", `Bool true ]) = Ok true);
   check bool "not accepted" true (Host.accepted_of_json (`Assoc [ "accepted", `Bool false ]) = Ok false);
   List.iter (fun json -> check bool "anything else is refused" true (Result.is_error (Host.accepted_of_json json)))
     [ `Assoc []; `Assoc [ "accepted", `String "yes" ]; `Assoc [ "accepted", `Bool true; "detail", `String "x" ] ]
+
+let test_a_result_read_is_request_bound () =
+  let request : Host.t = Read_result {request_id="part"; original_request_id="page";
+    source_id=Some "board"; sha256=String.make 64 'a'; offset=4096} in
+  let listing json = Host.listing_of_json (`Assoc ["requests", `List [json]]) in
+  check bool "continuation identity roundtrips" true (listing (Host.to_json request) = Ok [request]);
+  let fields = match Host.to_json request with `Assoc fields -> fields | _ -> fail "request must be an object" in
+  List.iter (fun fields -> check bool "malformed continuation is refused" true
+      (Result.is_error (listing (`Assoc fields))))
+    [("offset", `Int (-1)) :: List.remove_assoc "offset" fields;
+     ("sha256", `String "arbitrary-hash") :: List.remove_assoc "sha256" fields;
+     List.remove_assoc "source_id" fields;
+     ("offset", `Int 0) :: fields;
+     ("max_bytes", `Int 1) :: fields]
 
 let test_a_package_cannot_export_the_host_tools () =
   List.iter (fun name ->
@@ -49,5 +71,7 @@ let () =
       , [ test_case "a listing keeps the package order" `Quick test_a_listing_keeps_the_package_order
         ; test_case "a listing is refused whole" `Quick test_a_listing_is_refused_whole
         ; test_case "a read request is strict" `Quick test_a_read_request_is_strict
+        ; test_case "a file request is strict" `Quick test_a_file_request_is_strict
         ; test_case "the answer is strict" `Quick test_the_answer_is_strict
+        ; test_case "a result read is bound to the original request" `Quick test_a_result_read_is_request_bound
         ; test_case "a package cannot export the host tools" `Quick test_a_package_cannot_export_the_host_tools ] ) ]

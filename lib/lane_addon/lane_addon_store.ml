@@ -149,6 +149,45 @@ let read_blob ?(max_bytes=max_int) t reference =
     | Read_limit_exceeded -> "retained evidence exceeds the source envelope"
     | Read_failed detail -> detail)
 
+type blob_slice = { content : string; snapshot : Fs_compat.owned_regular_file_snapshot }
+let read_blob_slice ?snapshot t reference ~offset ~max_bytes = protect (fun () ->
+  if offset < 0 || max_bytes < 0 then Error "invalid retained result slice bounds"
+  else
+    let* kind, hash = retained_address reference in
+    let* relative = match kind with
+      | Sequence -> Error "a retained host result must be a blob"
+      | Blob ->
+        let* kind = canonical_blob_kind t hash in
+        (match kind with
+         | Fs_compat.Exact_kind Unix.S_REG -> Ok (blob_path hash)
+         | Fs_compat.Exact_missing | Fs_compat.Exact_kind Unix.S_DIR -> Ok (recovery_blob_path hash)
+         | Fs_compat.Exact_unknown | Fs_compat.Exact_kind (Unix.S_CHR | Unix.S_BLK | Unix.S_LNK
+             | Unix.S_FIFO | Unix.S_SOCK) -> Error "retained result is not a regular file") in
+    let path = Filename.concat t.root relative in
+    let checked content (observed : Fs_compat.owned_regular_file_snapshot) =
+      if offset > observed.Fs_compat.file_size then Error "offset exceeds the retained result"
+      else if String.length content <> min max_bytes (observed.file_size-offset) then
+        Error "retained result ended before its recorded size"
+      else Ok {content; snapshot=observed} in
+    match snapshot with
+    | None ->
+        let* chunk = Fs_compat.load_owned_regular_file_range_with_sha256
+            ~ownership_root:t.root ~offset ~max_bytes path
+          |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
+        (match chunk with
+         | None -> Error "retained result disappeared"
+         | Some chunk when chunk.Fs_compat.sha256 <> hash -> Error "retained result digest mismatch"
+         | Some chunk -> checked chunk.content chunk.snapshot)
+    | Some expected ->
+        let* chunk = Fs_compat.load_owned_regular_file_range
+            ~ownership_root:t.root ~offset ~max_bytes path
+          |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
+        (match chunk with
+         | None -> Error "retained result disappeared"
+         | Some chunk when not (Fs_compat.equal_owned_regular_file_snapshot expected chunk.Fs_compat.snapshot) ->
+             Error "retained result snapshot changed; request a new source read"
+         | Some chunk -> checked chunk.content chunk.snapshot))
+
 type sequence_node = Empty | Record of { count : int; previous : evidence; bytes : string }
 let sequence_schema = "masc.lane-jsonl-sequence.v1"
 let read_sequence_node t reference =
@@ -468,6 +507,14 @@ let load_action = load_action_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
 let load_exact_request t ~declaration_id ~request_id =
   load_record_with ~what:"exact request record" ~sync_file:Unix.fsync ~sync_parent:Unix.fsync t
     (exact_request_path ~declaration_id ~request_id)
+
+let host_result_path ~instance_id ~request_id =
+  Filename.concat "host-results" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
+let save_host_result t ~instance_id ~request_id json =
+  write t (host_result_path ~instance_id ~request_id) (Yojson.Safe.to_string json)
+let load_host_result t ~instance_id ~request_id =
+  load_record_with ~what:"host result link" ~sync_file:Unix.fsync ~sync_parent:Unix.fsync t
+    (host_result_path ~instance_id ~request_id)
 
 type observation_write_error =
   | Observation_rejected of string

@@ -193,13 +193,22 @@ exact output 을 선언한 패키지의 worker 는 비공개 도구 둘을 한 �
  "system": "선택", "messages": ["사용자 메시지", "..."]}
 ```
 
-- 지금 host 가 아는 종류는 `exact_output` 하나다. 모르는 종류가 하나라도 있거나, 같은 `request_id` 가 두 번 나오면 그 목록 전체를 읽지 않고 instance 에 `listing_refused` 를 보인다.
+- 지금 host 가 아는 종류는 `exact_output`, `read_records`, `read_file`, `read_result` 다. 모르는 종류가 하나라도 있거나, 같은 `request_id` 가 두 번 나오면 그 목록 전체를 읽지 않고 instance 에 `listing_refused` 를 보인다.
 - host 는 다섯 사건에만 묻고 시계로 묻지 않는다. 지금 걸린 사건은 셋이다: worker 초기화가 끝났을 때, 그 instance 의 action 이 끝난 receipt 를 남겼을 때, 그 설치의 add-on lane 표가 바뀌어 게시됐을 때. 선언이 바뀌면 worker 가 다시 떠서 첫 사건이 된다. 설치 질문 답변 사건은 아직 없다.
 - 한 주기는 목록을 받아 순서대로 처리한다. host 가 이미 최종 결과를 가진 요청은 모델을 부르지 않고 그 결과를 준다. 없으면 한 번 시도하고, 결과가 최종이면 준다. 최종이 아니면 다음 사건까지 기다린다. 결과를 준 목록이 있으면 다시 목록을 받고, 아무것도 주지 않은 목록에서 끝난다. 끝나면 관측을 한 번 한다.
 - 같은 주기에 이미 준 요청이 다시 나오면 주기를 끝내고 `relisted_delivered_request` 를 보인다.
-- 결과를 담은 인자가 `max_reply_bytes` 보다 크면 결과 대신 `{"status": "result_exceeds_frame", "retained_sha256", "bytes"}` 를 준다.
+- 결과를 담은 전체 인자가 `max_reply_bytes` 보다 크면 원래 결과 JSON 바이트와 요청·instance·현재 grant 권한을 먼저 디스크에 저장한다. 성공한 뒤에만 `{"status": "result_exceeds_frame", "original_request_id", "source_id", "retained_sha256", "bytes", "encoding": "json-utf8", "complete": false}` 를 준다. 기록 페이지의 `next_cursor` 도 이 응답에 남는다. 저장 실패는 instance 의 `result_delivery_failed` 이며 참조를 보내지 않는다.
 - 최종 결과의 `status` 는 `answered`(`output`, `slot`, 선택 `usage`), `invalid_output`, `input_refused`(`kind`), `outcome_unknown`, `not_allowed`, `request_id_reused` 다. 자세한 뜻은 [운영자 퀴즈 RFC](../rfc/RFC-operator-quiz-lane.md) §4.3–4.4 에 있다.
 - 마지막 주기는 Inspect 의 instance 마다 `host_requests` 로 보인다: 주기 수, 최종이 아니어서 기다리는 요청과 그 이유, 주기를 멈춘 이유.
+
+큰 결과는 다음 요청으로 이어 읽는다. `source_id` 는 원래 기록·파일 요청의 값이고 `exact_output` 이면 `null` 이다. SHA만 아는 것으로 다른 instance 나 요청의 결과를 읽을 수 없다.
+
+```json
+{"kind": "read_result", "request_id": "r-17-part-0", "original_request_id": "r-17",
+ "source_id": null, "sha256": "<retained_sha256>", "offset": 0}
+```
+
+`result_chunk` 는 `content`(base64), `offset`, `next_offset`, `eof`, 원본의 `bytes` 와 `sha256` 을 돌려준다. 각 결과 인자 전체가 프레임 안에 들어간다. 패키지는 base64를 풀어 `eof` 까지 바이트를 합치고 원본 SHA-256을 확인한 뒤 JSON을 읽어야 한다. 그 뒤에 원본의 페이지 완료 여부와 `next_cursor` 를 적용한다. 같은 원래 요청을 다시 올리면 처음 저장한 결과를 받는다. 선언이나 grant가 바뀌면 이전 결과의 이어읽기는 거절된다. 변경 없는 저장 파일은 범위만 읽으며, 같은 SHA의 파일이 다시 게시돼 식별 정보가 바뀌면 전체 SHA를 재검증한 뒤 식별 정보를 저장한다.
 
 ### 기록 읽기
 
@@ -212,12 +221,27 @@ kind = "board"
 visibilities = ["public", "unlisted"]
 ```
 
-- `kind` 는 지금 `board` 와 `repository` 다. `board` 는 `visibilities` 가 꼭 있어야 하고 Board 의 값(`public`, `unlisted`, `internal`, `direct`)을 소문자로 쓴다. 기본값은 없다. `direct` 는 적었을 때만 읽는다.
+- `kind` 는 지금 `board` 와 `repository` 다(아래). `board` 는 `visibilities` 가 꼭 있어야 하고 Board 의 값(`public`, `unlisted`, `internal`, `direct`)을 소문자로 쓴다. 기본값은 없다. `direct` 는 적었을 때만 읽는다.
 - 이 visibility 의 글은 패키지의 exact output 에 묶인 slot 의 provider 에게 갈 수 있다. `internal` 을 넣기 전에 그 provider 가 내부 글을 받아도 되는지 확인한다.
 - 요청은 `{"kind": "read_records", "request_id", "source_id", "after"}` 다. `after` 는 이전 결과의 `next_cursor` 이거나, 처음부터 읽을 때는 없거나 `null` 이다.
 - 결과는 `{"status": "records", "source_id", "records", "next_cursor", "complete", "sha256"}` 다. 오래된 것부터, frame 에 들어가는 만큼 담는다. Board 기록은 글(id, 작성자, 작성·수정 시각, visibility, 제목, 본문)과 그 글의 댓글(id, 글 id, 작성자, 작성 시각, 본문)이다.
 - host 는 답하기 전에 `records` 배열을 Lane store 에 blob 으로 보존한다. `sha256` 은 그 blob 이름이라, 나중에 글이 고쳐지거나 만료돼도 인용한 바이트를 확인할 수 있다.
 - 권한이 없는 `source_id` 나 host 가 준 적 없는 커서는 `not_allowed` 다. Board 를 읽을 수 없으면 최종이 아니고 `source_unavailable` 로 다음 사건을 기다린다.
+
+`repository` 권한은 등록된 저장소의 기본 브랜치를 읽는다.
+
+```toml
+[[binding.records]]
+source_id = "masc-repo"
+kind = "repository"
+repository_id = "masc"
+paths = ["changelog.d/", "CHANGELOG.md"]
+```
+
+- `paths` 는 저장소 루트 기준 상대 경로다. `/` 로 끝나면 디렉터리, 아니면 파일 하나다. `..` 와 절대 경로는 거절된다.
+- `read_records` 는 기본 브랜치의 first-parent 커밋을 오래된 것부터 준다: SHA, 작성자 이름, 커밋 시각, 제목, 본문, 첫 부모 대비 바뀐 경로. 결과의 `head` 는 읽은 브랜치 끝이고, 커서는 커밋 SHA 다. 그 끝이 닿지 않는 커서는 `not_allowed` 다.
+- `read_file` 은 `{"kind": "read_file", "request_id", "source_id", "commit", "path"}` 다. 기본 브랜치 끝이 닿는 커밋에서, `paths` 안의 파일 하나의 바이트를 `{"status": "file", "source_id", "commit", "path", "encoding", "content", "bytes", "sha256"}` 로 준다. 텍스트면 `encoding` 이 `utf-8`, 아니면 `base64` 다. 바이트는 blob 으로 먼저 보존한다.
+- `paths` 밖의 파일, 기본 브랜치가 닿지 않는 커밋, 그 커밋에 없는 파일은 `not_allowed` 다. 등록되지 않았거나 읽을 수 없는 저장소는 `source_unavailable` 로 기다린다.
 
 ## 세계와 연결되는 통로
 

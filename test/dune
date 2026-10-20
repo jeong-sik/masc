@@ -4338,6 +4338,7 @@
  (deps
   test_skill_usage_stats.py
   skill_activation_event_log_fixture.py
+  ../scripts/lib/masc_base_path.py
   ../scripts/skill-usage-stats.py
   ../scripts/harness/workload/skill_activation_events.py)
  (action
@@ -5419,6 +5420,7 @@
   test_scripts_require_base_path.py
   ../scripts/lib/masc_base_path.py
   ../scripts/lib/keeper_store_layout.py
+  ../scripts/lib/recorded_tool_outcome.py
   ../scripts/analyze-keeper-execute-failures.sh
   ../scripts/audit-keeper-fleet-readiness.py
   ../scripts/bench-web-tools.py

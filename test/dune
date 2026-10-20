@@ -4534,6 +4534,7 @@
 (include stanzas/test_keeper_context_core_history.inc)
 (include stanzas/test_keeper_turn_fragments.inc)
 (include stanzas/test_keeper_turn_spend.inc)
+(include stanzas/test_keeper_cost_coverage.inc)
 (include stanzas/test_keeper_unsettled_spend.inc)
 
 (include stanzas/test_keeper_clear_admission.inc)

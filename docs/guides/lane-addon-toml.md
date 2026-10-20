@@ -227,6 +227,37 @@ detach가 확인되면 해당 source는 이후 discovery에서 빠진다. 이미
 소급해서 지우지 않는다. 이것은 실제 모델의 Skill 활용·게임 플레이를 증명하는 조건과 별개다.
 선언부터 카탈로그·원문 reader까지의 기능 테스트는 CI에서 검증하며, 실제 Keeper 활용은 후속 실측이다.
 
+## 패키지가 선언하는 exact output
+
+패키지는 host 에게 받고 싶은 답의 모양을 이름 붙여 선언할 수 있다. 답의 JSON Schema 는 패키지 안의 파일이다.
+
+```toml
+[world.exact_outputs.author]
+schema = "schemas/author.json"
+```
+
+- 이름은 `a-z`, `0-9`, `_` 로 쓰고 소문자로 시작한다.
+- `schema` 는 패키지 루트 기준 상대 경로다. symlink 를 풀어도 패키지 안이어야 한다.
+- 파일은 [세계 행동 계약](lane-world-actions.md)의 action schema 와 같은 검사를 통과하고 object 를 설명해야 한다. object 마다 `additionalProperties: false` 가 필요하다.
+- schema 는 패키지 값에 들어간다. 선언을 추가·수정·삭제하면 설치 revision 이 바뀐다. 이 표가 없는 패키지는 revision 이 그대로다.
+
+어떤 모델로 답을 받을지는 운영자가 `runtime.toml` 에서 설치마다 정한다.
+
+```toml
+[runtime.addon_exact_lanes.operator-quiz.author]
+slots = ["glm-coding.glm-5-3"]
+cli_slots = ["claude-code"]
+max_output_tokens = 8192
+```
+
+- 첫 키는 설치 선언의 `id`, 둘째 키는 출력 이름이다. 선언 `id` 가 bare key 가 아니면 따옴표로 감싼다.
+- 표의 키와 규칙은 `[runtime.exact_output_lanes.<lane>]` 와 같다. `enabled`, `slots`, `cli_slots`, `max_output_tokens`, `thinking` 을 쓰고, body deadline 이 없는 provider 의 slot 과 output-schema 채널이 없는 CLI slot 은 같은 방식으로 거절된다.
+- add-on lane 은 필수가 아니다. `enabled = false` 로 꺼도 서버는 시작하고, 그 lane 은 `Exact_lane_off` 로 답한다.
+- `runtime.toml` 은 설치 선언보다 먼저 읽힌다. 그래서 선언에 없는 이름의 표도 로드된다. 선언된 출력에 표가 없으면 그 lane 은 `Exact_lane_unconfigured` 로 답한다.
+- 계정을 제거하면 이 표의 slot 도 함께 빠지고, 켜진 lane 을 비우는 제거는 거절된다. prompt preset 도 이 표를 저장하고 되돌린다.
+
+패키지가 이 이름으로 host 에게 요청하는 방법은 [운영자 퀴즈 RFC](../rfc/RFC-operator-quiz-lane.md) §4.4(K2)에 있다.
+
 ## 세계와 연결되는 통로
 
 패키지는 TOML 설치, Skill 본문·스크립트·참조 문서 읽기, Docker 환경, 선택적인 행동 포트를 연결한다.

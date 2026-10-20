@@ -663,6 +663,43 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
          (Registry.lane_resolution_error_to_string error))
 ;;
 
+(* RFC operator-quiz §4.3 K1: an add-on installation's exact output publishes
+   in the same list as the built-in lanes. It is never required; switched off
+   it resolves to Exact_lane_off, and a declared output with no table to
+   Exact_lane_unconfigured, as a built-in lane would. *)
+let test_addon_lanes_publish_beside_builtin_lanes () =
+  let snapshot =
+    load_control_snapshot
+      (Exact_output.Full_replacement { source = "addon-lanes"; contents = replacement_catalog })
+  in
+  let author = Runtime_schema.Addon { declaration_id = "operator-quiz"; output = "author" } in
+  let grade = Runtime_schema.Addon { declaration_id = "operator-quiz"; output = "grade" } in
+  let lane owner enabled : Runtime_schema.exact_output_lane_decl =
+    { owner; enabled; slot_ids = [ replacement_target ]; cli_slot_ids = []
+    ; max_output_tokens = Some 4_096; thinking = None }
+  in
+  match
+    Registry.publish ~required_lane_ids:[ "librarian_exact" ]
+      ~lanes:[ lane (Runtime_schema.Builtin Standalone_lane.Librarian) true; lane author true; lane grade false ]
+      snapshot
+  with
+  | Error error ->
+    Alcotest.failf "add-on lanes must publish beside built-in lanes: %s"
+      (Registry.publication_error_to_string error)
+  | Ok registry ->
+    (match Registry.resolve_lane registry ~lane_id:(Runtime_schema.exact_lane_key author) with
+     | Ok { selected_slots = _ :: _; _ } -> ()
+     | Ok _ -> Alcotest.fail "an add-on lane must admit its slot"
+     | Error error ->
+       Alcotest.failf "an add-on lane must resolve: %s" (Registry.lane_resolution_error_to_string error));
+    (match Registry.resolve_lane registry ~lane_id:(Runtime_schema.exact_lane_key grade) with
+     | Error (Registry.Exact_lane_off _) -> ()
+     | Ok _ | Error _ -> Alcotest.fail "a disabled add-on lane must resolve to Exact_lane_off");
+    match Registry.resolve_lane registry ~lane_id:"operator-quiz/review" with
+    | Error (Registry.Exact_lane_unconfigured _) -> ()
+    | Ok _ | Error _ -> Alcotest.fail "an output with no table must resolve to Exact_lane_unconfigured"
+;;
+
 let test_unknown_slots_degrade_locally_and_preserve_required_lane_atomicity () =
   let snapshot =
     load_control_snapshot
@@ -1316,5 +1353,9 @@ let () =
             "a lane budget is optional and never the catalog ceiling"
             `Quick
             test_lane_output_budget_is_optional_and_never_the_catalog_ceiling
+        ; Alcotest.test_case
+            "add-on lanes publish beside built-in lanes"
+            `Quick
+            test_addon_lanes_publish_beside_builtin_lanes
         ] ) ]
 ;;

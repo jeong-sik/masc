@@ -122,7 +122,10 @@ let verb_of_json ~route value =
       Ok (B.Page_extract {tab_id;instruction;schema=List.assoc_opt "schema" fields})
   | _ -> Error "unknown browser verb"
 
-type command = Snapshot | Retire | Model_requests | Model_result of Yojson.Safe.t
+type command = Snapshot | Retire
+  | Upload_stage of {id:string;actor:string;route:B.route;verb:B.verb}
+  | Upload_discard of string
+  | Model_requests | Model_result of Yojson.Safe.t
   | Model_wait of {after:string option} | Poll of {client:B.client_info;window_sec:float}
   | Deliver of {client_id:B.client_id;id:string;payload:Yojson.Safe.t}
   | Disconnect of B.client_id
@@ -132,6 +135,9 @@ let to_json request =
   let fields = match request.command with
     | Snapshot -> ["operation",string "snapshot"]
     | Retire -> ["operation",string "retire"]
+    | Upload_stage {id;actor;route;verb} -> ["operation",string "upload_stage";"id",string id;
+        "actor",string actor;"route",route_to_json route;"command",B.verb_json verb]
+    | Upload_discard id -> ["operation",string "upload_discard";"id",string id]
     | Model_requests -> ["operation",string "model_requests"]
     | Model_result arguments -> ["operation",string "model_result";"arguments",arguments]
     | Model_wait {after} -> ["operation",string "model_wait";"after",nullable string after]
@@ -149,6 +155,15 @@ let of_json value =
   let* command = match name with
     | "snapshot" -> let* () = exact [] in Ok Snapshot
     | "retire" -> let* () = exact [] in Ok Retire
+    | "upload_stage" ->
+        let* ()=exact ["id";"actor";"route";"command"] in
+        let* id=text_field fields "id" in let* _=B.client_id_of_string id in
+        let* actor=text_field fields "actor" in
+        let* raw_route=required fields "route" in let* route=route_of_json raw_route in
+        let* command=required fields "command" in
+        let* verb=verb_of_json ~route command in Ok (Upload_stage {id;actor;route;verb})
+    | "upload_discard" -> let* ()=exact ["id"] in
+        let* id=text_field fields "id" in let* _=B.client_id_of_string id in Ok (Upload_discard id)
     | "model_requests" -> let* () = exact [] in Ok Model_requests
     | "model_result" -> let* () = exact ["arguments"] in
         let* arguments=required fields "arguments" in Ok (Model_result arguments)

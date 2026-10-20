@@ -37,3 +37,12 @@ val attach_stagehand : t -> models:bool ->
 val revoke : t -> unit
 (** First retire admission, then wake pending work and retire the owner's client
     IDs. Interrupted issued work has an unknown outcome and is never replayed. *)
+
+val attach_uploads : t -> Browser_addon_uploads.t -> (unit, string) result
+val cleanup_uploads : t -> (unit, string) result
+(** After owned backend shutdown, join staging/claims and release pending
+    snapshots. Claimed files require the original browser session's teardown. *)
+val dispatch_upload : t -> id:string -> actor:string ->
+  route:Browser_lane.route -> verb:Browser_lane.verb -> Browser_addon_wire.reply
+(** Mandatory one-use upload admission beneath the optional tool middleware.
+    Ordinary private [Issue] refuses upload commands without this grant. *)

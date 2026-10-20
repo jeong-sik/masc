@@ -1,35 +1,11 @@
 (* HIGH-RISK-UNREVIEWED: the flags that open Chromium's DevTools socket to
    extension loading and name the one origin allowed on it
    (RFC-browser-lane-stagehand §4). *)
-type owner = { pid : int; chrome : string; profile : string }
-type leftover = Stop_recorded_browser of int | Not_the_recorded_browser
-
-let lane_dir ~masc_root = Filename.concat masc_root Common.browser_lane_dirname
-let owner_record_path ~masc_root = Filename.concat (lane_dir ~masc_root) "stagehand-owner.json"
-let server_profile ~masc_root = Filename.concat (lane_dir ~masc_root) "stagehand-profile"
-
-let owner_to_string { pid; chrome; profile } =
-  Yojson.Safe.to_string (`Assoc [ "pid", `Int pid; "chrome", `String chrome; "profile", `String profile ])
-;;
-
-let owner_of_string text =
-  match Yojson.Safe.from_string text with
-  | exception Yojson.Json_error detail -> Error detail
-  | `Assoc fields ->
-    (match List.assoc_opt "pid" fields, List.assoc_opt "chrome" fields, List.assoc_opt "profile" fields with
-     | Some (`Int pid), Some (`String chrome), Some (`String profile)
-       when pid > 0 && (not (Filename.is_relative chrome)) && not (Filename.is_relative profile) ->
-       Ok { pid; chrome; profile }
-     | (Some _ | None), (Some _ | None), (Some _ | None) ->
-       Error "browser record needs a positive pid and absolute chrome and profile paths")
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error "browser record is not an object"
-;;
-
 let profile_flag profile = "--user-data-dir=" ^ profile
 
-type profile = Server_profile of string | Operator_profile of string
+type profile = Private_profile of string | Operator_profile of string
 
-let profile_path = function Server_profile path | Operator_profile path -> path
+let profile_path = function Private_profile path | Operator_profile path -> path
 
 (* The official Stagehand launcher's defaults that change behaviour here.
    An occluded window or a background tab slows its timers, which stretches
@@ -41,11 +17,11 @@ let background_flags =
   ]
 ;;
 
-(* A fresh server profile would ask macOS for Keychain access on first use,
+(* A fresh private profile would ask macOS for Keychain access on first use,
    and nobody is there to answer. An operator's profile keeps its own store:
    these flags would leave its saved logins unreadable. *)
 let keychain_flags = function
-  | Server_profile _ -> [ "--use-mock-keychain"; "--password-store=basic" ]
+  | Private_profile _ -> [ "--use-mock-keychain"; "--password-store=basic" ]
   | Operator_profile _ -> []
 ;;
 
@@ -85,17 +61,4 @@ let devtools_endpoint_of_string text =
 
 let browser_ws_url ~port ~path =
   Printf.sprintf "ws://%s:%d%s" Masc_network_defaults.masc_http_loopback_peer port path
-;;
-
-(* Chrome's own helper processes carry the same --user-data-dir, and the
-   executable path may contain spaces (a macOS app bundle), so the match is on
-   the whole executable followed by a separator, plus the profile flag. *)
-let leftover owner ~command =
-  match command with
-  | Some command
-    when String.starts_with ~prefix:(owner.chrome ^ " ") command
-         && (String_util.contains_substring command (profile_flag owner.profile ^ " ")
-             || String.ends_with ~suffix:(profile_flag owner.profile) command) ->
-    Stop_recorded_browser owner.pid
-  | Some _ | None -> Not_the_recorded_browser
 ;;

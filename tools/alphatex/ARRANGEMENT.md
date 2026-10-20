@@ -41,7 +41,9 @@ rounded to SMF microseconds per quarter note. Equal-tick events keep their
 original time/order; very short notes can become point notes. The ending is
 at least one tick, with generated note/pedal releases at the source boundary.
 This is an editing projection; original UMP precision and fractional pass cuts
-remain available on the raw take.
+remain available on the raw take. Long SMF event gaps use empty sequencer
+metadata to preserve their time across the 28-bit delta boundary; these padding
+events do not produce wire messages or change tempo.
 Paths retain internal spaces and are literal paths, without shell expansion.
 The imported asset is selected in the library. Enter places its complete source
 at the cursor, using the current compatible lane or adding a new one.

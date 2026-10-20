@@ -24,7 +24,7 @@ async function fixture(run, messages = [
     const { root, arm, context, rows, receipt, publish, input } = data
     context.project.tempo = 137; context.project.meter = [7, 8]
     context.backing = phraseBacking(context.project, context.track, true)
-    arm.renderClock.anchor.hostTime = '18446744000000000000'
+    arm.renderClock.anchor.hostTime = '10000000000000000000'
     rows.splice(0, rows.length, ...messages.map(([delta, bytes], index) => {
       const words = bytes.length === 2 && bytes[0] > 255 ? bytes : [((0x23 << 24) | (bytes[0] << 16) | (bytes[1] << 8) | (bytes[2] ?? 0)) >>> 0]
       const packet = { kind: 'midi', protocol: 2, source: '10', ordinal: String(index),
@@ -33,6 +33,12 @@ async function fixture(run, messages = [
     }))
     receipt.packets = String(rows.length)
     receipt.inputFinal.admittedPackets = receipt.inputFinal.acknowledgedPackets = receipt.packets
+    const lastDelta = messages.reduce((last, [delta]) => delta > last ? delta : last, 0n)
+    const after = (lastDelta * 125n * 48000n + 3_000_000_000n - 1n) / 3_000_000_000n + 1n
+    if (after > 4800n) {
+      Object.assign(receipt.monitorFinal.pcm.final, { renderedFrames: String(after), admittedFrames: String(after + 1024n) })
+      receipt.monitorFinal.pcm.sentFrames = String(after + 1024n)
+    }
     await publish()
     const path = join(root, 'project/song.json'), imported = await importArrangementPractice(newArrangement(), input, { projectPath: path })
     const directory = join(root, 'scratch'); await mkdir(directory)
@@ -112,3 +118,20 @@ test('unsupported attributes fail atomically; corrupt source and cancellation le
   await assert.rejects(request(job))
   assert.deepEqual(imported.project, before); assert.deepEqual(await readdir(directory), [])
 }, [[0n, [0x43953c03, 0x90012345]]]))
+
+for (const gap of [0x0fffffffn, 0x10000000n, 0x20000003n]) {
+  const host = (gap * 3n * 437956n * 1000n + 125n * 960n - 1n) / (125n * 960n)
+  test(`actual Worker preserves long SMF gaps and same-status messages at ${gap} ticks`, () => fixture(async ({ imported, path, directory, request }) => {
+    const result = await request({ kind: 'practice-midi', project: imported.project, asset: imported.asset, sourceRoot: dirname(path), directory })
+    const source = result.project.assets.at(-1).source, performance = midiSourcePattern(source)
+    assert.equal(performance.notes[0].duration, Number(gap)); assert.deepEqual(performance.diagnostics, [])
+    assert.deepEqual(performance.events.filter(event => event.kind === 'channel' && event.bytes[1] === 1).map(event => [event.tick, event.bytes[2]]), [[0, 10], [Number(gap), 20]])
+    // Editing must keep padding valid and explicit status after every meta event.
+    const editor = editorCommand(newEditor(source), `select ${performance.notes[0].id}`).editor
+    const edited = editorAction(editor, { kind: 'velocity', value: 99 }).project
+    assert.equal(midiSourcePattern(edited).notes[0].duration, Number(gap))
+    const reopened = await request({ kind: 'import-phrase', project: result.project, document: edited })
+    assert.equal(midiSourcePattern(reopened.project.assets.at(-1).source).ticks, Number(gap))
+    assert.deepEqual(await readdir(directory), [])
+  }, [[0n, [0x95,60,100]], [0n, [0xb5,1,10]], [host, [0xb5,1,20]], [host, [0x85,60,47]]]))
+}

@@ -412,10 +412,56 @@ let run_checkpoint ~restore ~base_path ~slot =
   let path = Filename.concat (Filename.concat ledger_dir "saves") (slot ^ ".json") in
   if restore then Msx_lane.restore ~path ~ledger_dir else Msx_lane.save ~path
 
+(* Whether the call names a slot at all. A save without one writes the scratch
+   slot, which only ever replaces an earlier scratch save. A restore without
+   one must not pick a slot for the caller: it replaces the machine every
+   watcher shows. *)
+let names_a_slot = function
+  | `Assoc fields -> List.mem_assoc "slot" fields
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
+
+(* The slots a restore can name: the files under saves/ whose name is a valid
+   slot. Reads nothing from the files and touches no machine; a slot's
+   contents are masc_msx_checkpoint_info's. *)
+let handle_checkpoint_list ~tool_name ~start_time ~base_path =
+  let saves_dir = Filename.concat (msx_dir ~base_path) "saves" in
+  let names =
+    match Sys.readdir saves_dir with
+    | names -> Ok (Array.to_list names)
+    | exception Sys_error _ when not (Sys.file_exists saves_dir) -> Ok []
+    | exception Sys_error message -> Error message
+  in
+  match names with
+  | Error message ->
+    refuse ~class_:Tool_result.Runtime_failure ~tool_name ~start_time
+      ("the saved checkpoints cannot be listed: " ^ message)
+  | Ok names ->
+    let slots =
+      List.filter_map
+        (fun name ->
+           if Filename.check_suffix name ".json" then
+             Result.to_option
+               (Result.map Machine_checkpoint.slot_to_string
+                  (Machine_checkpoint.slot_of_string (Filename.chop_suffix name ".json")))
+           else None)
+        names
+      |> List.sort String.compare
+    in
+    Tool_result.make_ok ~tool_name ~start_time
+      ~data:
+        (`Assoc
+          [ ( "checkpoints"
+            , `List (List.map (fun slot -> `Assoc [ ("slot", `String slot) ]) slots) )
+          ])
+      ()
+
 (* The completion travels with the observation: the checkpoint's server-side
    receipt settles from these fields, and only the worker that ran the
    checkpoint knows its change mark. *)
 let handle_checkpoint ~restore ~tool_name ~start_time ~base_path args =
+  if restore && not (names_a_slot args) then
+    handle_checkpoint_list ~tool_name ~start_time ~base_path
+  else
   match checkpoint_slot args with
   | Error message -> reject ~tool_name ~start_time message
   | Ok slot ->

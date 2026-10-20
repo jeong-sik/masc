@@ -903,6 +903,37 @@ let test_checkpoint_roundtrip () =
   check bool "corrupt checkpoint preserves ledger" true (Msx_lane.ledger () = ledger_before)
 ;;
 
+(* A restore replaces the machine every watcher shows, so a call that names no
+   slot picks none: it lists what is saved and leaves the machine alone. *)
+let test_restore_without_a_slot_lists_and_restores_nothing () =
+  with_workspace @@ fun base_path ->
+  let call name args = dispatch ~base_path name args in
+  check bool "machine loaded" true (is_completed (boot_machine base_path));
+  check bool "quick saved" true
+    (is_completed (call "masc_msx_save" ["slot", `String "quick"]));
+  check bool "campaign saved" true
+    (is_completed (call "masc_msx_save" ["slot", `String "campaign"]));
+  let stepped = frame_of (call "masc_msx_step" ["frames", `Int 13]) in
+  let history = incarnation () in
+  let listing = call "masc_msx_restore" [] in
+  check bool "the listing completes" true (is_completed listing);
+  let slots =
+    match member "checkpoints" (Tool_result.data listing) with
+    | Some (`List rows) ->
+      List.filter_map
+        (fun row ->
+          match member "slot" row with Some (`String slot) -> Some slot | _ -> None)
+        rows
+    | _ -> fail "no checkpoints in the listing"
+  in
+  check (list string) "both saved slots, sorted" [ "campaign"; "quick" ] slots;
+  check int "the machine stays where it was" stepped
+    (frame_of (call "masc_msx_screen" []));
+  check bool "the machine keeps its history" true (incarnation () = history);
+  check bool "a named slot still restores" true
+    (is_completed (call "masc_msx_restore" ["slot", `String "quick"]))
+;;
+
 let lane_observation label = function
   | Ok observation -> observation
   | Error error -> fail (label ^ ": " ^ Msx_lane.error_to_string error)
@@ -1918,6 +1949,8 @@ let () =
         ; test_case "disk image loads into the drive" `Quick test_disk_load
         ; test_case "uncertain checkpoint effect is not refused" `Quick test_unknown_checkpoint_effect_is_not_refused
         ; test_case "checkpoint survives eject and rejects corruption" `Quick test_checkpoint_roundtrip
+        ; test_case "restore without a slot lists and restores nothing" `Quick
+            test_restore_without_a_slot_lists_and_restores_nothing
         ; test_case "disk swaps retain guest writes across checkpoint restore" `Quick test_disk_swap_retains_guest_writes_and_checkpoint
         ; test_case "exported guest disk survives fresh boot" `Quick test_disk_export_survives_fresh_boot
         ; test_case "export creates the missing catalog" `Quick test_disk_export_creates_the_missing_catalog

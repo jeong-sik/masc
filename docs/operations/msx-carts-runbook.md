@@ -146,7 +146,9 @@ it. The result remains visible above the game image. F7 on a volume where
 usable. Keepers can use
 `masc_msx_save {"slot":"campaign"}` and
 `masc_msx_restore {"slot":"campaign"}` for named checkpoints. Names contain
-1–64 letters, digits, underscores or hyphens; the default is `quick`.
+1–64 letters, digits, underscores or hyphens. `masc_msx_save` without a slot
+writes `quick`; `masc_msx_restore` without a slot lists the saved checkpoints
+and restores nothing.
 
 Checkpoints live in `/state/.masc/msx/saves/` in the Add-on volume. They
 include CPU, RAM, VRAM, mounted media, cartridge SRAM, open disk-file positions

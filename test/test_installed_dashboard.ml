@@ -322,10 +322,36 @@ let test_v2_payload_corruption () =
   with_payload_fixture (fun _ root binary _ ->
     Unix.chmod (Filename.concat root "python/bin/python3") 0o644;
     check bool "runtime mode change rejected" true (unavailable (inspect binary)))
+let with_cpu_pool f =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let previous = Domain_pool_ref.get () in
+      let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      Domain_pool_ref.set pool;
+      Fun.protect
+        ~finally:(fun () -> match previous with
+          | Some previous -> Domain_pool_ref.set previous
+          | None -> Domain_pool_ref.clear_for_tests ())
+        (fun () -> f pool)))
+
+let test_pool_integrity () =
+  with_cpu_pool (fun _pool ->
+    test_exact_release ();
+    test_health_rechecks_installed_files ();
+    test_asset_symlink ();
+    test_pointer_switch ())
+
+let test_worker_and_raw_domain () =
+  with_cpu_pool (fun pool ->
+    Domain_pool.submit_cpu pool test_exact_release;
+    Domain.join (Domain.spawn test_exact_release))
+
 let () = run "Installed dashboard authority" ["distribution", List.map (fun (name, test) -> test_case name `Quick test)
   ["v2 payload contract", test_v2_payload_contract;
    "invalid v2 payload metadata", test_invalid_v2_payload_metadata;
    "v2 payload corruption", test_v2_payload_corruption;
+   "CPU pool preserves integrity checks", test_pool_integrity;
+   "single worker and raw domain", test_worker_and_raw_domain;
    "health rechecks installed files", test_health_rechecks_installed_files;
    "malformed numeric fields", test_invalid_numeric_receipt;
    "civil-time boundaries", test_civil_time_boundaries;

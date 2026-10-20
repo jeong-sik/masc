@@ -143,13 +143,31 @@ let load ~path =
     let* tool_fields = match List.assoc_opt "tools" world with
       | None -> Ok []
       | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields)
-        when List.for_all (fun (key,_) -> List.mem key ["export";"invocation"]) fields
+        when List.for_all (fun (key,_) -> List.mem key ["export";"invocation";"hooks"]) fields
           && List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok fields
       | Some ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
              | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
              | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
              | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _
-             | Otoml.TomlTableArray _ ) -> Error "world.tools accepts export and invocation only" in
+             | Otoml.TomlTableArray _ ) -> Error "world.tools accepts export, invocation and hooks only" in
+    let* tool_hooks = match List.assoc_opt "hooks" tool_fields with
+      | None -> Ok []
+      | Some (Otoml.TomlArray values) ->
+          let* hooks = List.fold_left (fun result value ->
+            let* hooks = result in
+            let* hook = match value with
+              | Otoml.TomlString name -> (match Lane_addon_tool_hooks.hook_of_string name with
+                  | Some hook -> Ok hook | None -> Error ("unknown world.tools hook: " ^ name))
+              | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+              | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+              | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTable _
+              | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ -> Error "world.tools.hooks requires names" in
+            if List.mem hook hooks then Error "duplicate world.tools hook" else Ok (hook :: hooks)) (Ok []) values in
+          Ok (List.rev hooks)
+      | Some (Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+        | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+        | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlTable _
+        | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _) -> Error "world.tools.hooks requires an array" in
     let* tool_invocation = match List.assoc_opt "invocation" tool_fields with
       | None | Some (Otoml.TomlString "direct") -> Ok Direct
       | Some (Otoml.TomlString "host_context") -> Ok Host_context
@@ -280,7 +298,7 @@ let load ~path =
       match check_resources ~runtime resources with
       | Error detail -> Error detail
       | Ok () -> Ok { id; revision; title; contributions = List.rev contributions; runtime; image; command;
-          directory = Filename.dirname path; skills_directory; action_tool; state_storage; tool_invocation; exported_tools; outputs; refresh_policy; model_access; binding_schema; presentation;
+          directory = Filename.dirname path; skills_directory; action_tool; state_storage; tool_invocation; exported_tools; tool_hooks; outputs; refresh_policy; model_access; binding_schema; presentation;
           exact_outputs; resources }
   in
   try Result.map_error (fun detail -> Invalid_manifest detail) (parse ()) with

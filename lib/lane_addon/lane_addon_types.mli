@@ -54,6 +54,7 @@ type refresh_policy = Every_hint | Source_changes
 type model_access = Model_disabled | Host_sampling
 type state_storage = Ephemeral | Persistent
 type tool_invocation = Direct | Host_context
+type tool_hook = Validate_input | Validate_output
 
 type exact_output = { name : string; schema : Yojson.Safe.t }
 (** A named exact output the package asks the host to run: [[world.exact_outputs.<name>]]
@@ -75,6 +76,9 @@ type package = {
   exported_tools : string list;
   (** Worker MCP tools explicitly published for this installation. Schemas come
       from the connected worker; a manifest alone does not make a tool callable. *)
+  tool_hooks : tool_hook list;
+  (** Selected call middleware, in declaration order. Empty preserves the
+      worker's native contract. These checks do not invoke a model. *)
   outputs : output_ports;
   refresh_policy : refresh_policy;
   model_access : model_access;

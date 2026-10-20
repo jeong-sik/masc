@@ -103,7 +103,7 @@ let resolve_snapshot_paths ~directory = function
   | value -> value
 
 let decode ~source_path ~source_revision ~id fields =
-  let allowed = ["id"; "enabled"; "run_id"; "manifest_path"; "binding"] in
+  let allowed = ["id"; "enabled"; "run_id"; "manifest_path"; "binding"; "tool_hooks"] in
   let* () = match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
     | None -> Ok () | Some (key, _) -> Error ("unknown declaration field: " ^ key) in
   let* enabled = match List.assoc_opt "enabled" fields with
@@ -119,6 +119,12 @@ let decode ~source_path ~source_revision ~id fields =
   let manifest_path = absolute_from ~directory manifest_path in
   let* package = Lane_addon_manifest.load ~path:manifest_path
     |> Result.map_error Lane_addon_manifest.error_to_string in
+  let* package = match List.assoc_opt "tool_hooks" fields with
+    | None -> Ok package
+    | Some value ->
+        let* json = json_of_toml ~path:"tool_hooks" value in
+        let* tool_hooks = Lane_addon_tool_hooks.selection_of_json json in
+        Ok {package with tool_hooks} in
   let* binding = match List.assoc_opt "binding" fields with
     | Some (Otoml.TomlTable _ | Otoml.TomlInlineTable _ as value) ->
         json_of_toml ~path:"binding" value

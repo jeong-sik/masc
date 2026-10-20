@@ -813,6 +813,29 @@ let finalize_stream_body ~http_codec body =
     Result.map_error rejected (Http_client.inject_stream_and_options body)
 ;;
 
+(* The codec module is private to this library. Exercise the actual finalizer
+   here, while the external tests keep checking the public injectors. *)
+let%test "stream finalization refuses an unstreamable body before dispatch" =
+  List.for_all
+    (fun kind ->
+       let http_codec =
+         Provider_http_codec.of_config
+           (Provider_config.make
+              ~kind ~model_id:"model" ~base_url:"https://example.invalid" ())
+       in
+       match finalize_stream_body ~http_codec "{not-json" with
+       | Error (Http_client.AcceptRejected _) -> true
+       | Ok _
+       | Error
+           (Http_client.HttpError _ | NetworkError _ | TimeoutError _
+            | ProviderTerminal _ | ProviderFailure _) -> false)
+    [ Provider_config.Anthropic
+    ; Provider_config.Ollama
+    ; Provider_config.OpenAI_compat
+    ; Provider_config.Glm
+    ]
+;;
+
 (* Serialize the exact body shape used by the built-in HTTP transport. The
    body is the provider's to accept or refuse; nothing here measures it
    against a limit of its own. *)

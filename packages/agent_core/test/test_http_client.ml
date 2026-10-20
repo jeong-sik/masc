@@ -87,30 +87,6 @@ let test_inject_stream_refusals_agree () =
     [ "not json"; "[1,2,3]"; ""; "null"; "42"; {|"text"|}; "{not-json" ]
 ;;
 
-(* A streaming request whose body cannot take the stream fields is rejected
-   before dispatch, with the same error type as other serialization failures. *)
-let test_finalize_stream_body_rejects_unstreamable_body () =
-  List.iter
-    (fun http_codec ->
-       match Complete_common.finalize_stream_body ~http_codec "{not-json" with
-       | Error (Http_client.AcceptRejected _) -> ()
-       | Error _ -> Alcotest.fail "expected AcceptRejected"
-       | Ok body -> Alcotest.failf "an unparseable body was finalized as %S" body)
-    (List.map
-       (fun kind ->
-          Provider_http_codec.of_config
-            (Provider_config.make
-               ~kind
-               ~model_id:"model"
-               ~base_url:"https://example.invalid"
-               ()))
-       [ Provider_config.Anthropic
-       ; Provider_config.Ollama
-       ; Provider_config.OpenAI_compat
-       ; Provider_config.Glm
-       ])
-;;
-
 let test_inject_stream_and_options_parity () =
   (* inject_stream_and_options must be byte-identical to the chained
      inject_stream_param >> inject_stream_options_include_usage across all
@@ -1239,10 +1215,6 @@ let () =
             "error text does not quote the body"
             `Quick
             test_injection_error_text_does_not_quote_the_body
-        ; Alcotest.test_case
-            "finalize rejects unstreamable body"
-            `Quick
-            test_finalize_stream_body_rejects_unstreamable_body
         ; Alcotest.test_case
             "and_options parity with chained"
             `Quick

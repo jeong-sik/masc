@@ -1792,6 +1792,70 @@ let () =
     | Ok _ ->
       failwith "superseded request should not survive: the task points only at the new id")
 
+(* A caller that is not the holder is refused with the holder named, whether
+   the Task is still being worked or already awaits its verdict. The refusal
+   must not touch the pending verification the holder is waiting on. *)
+
+let submit_rule_id result =
+  match Json_util.assoc_member_opt "diagnosis" (Tool_result.data result) with
+  | Some diagnosis -> Json_util.get_string diagnosis "rule_id"
+  | None -> None
+
+let () =
+  test "submit by a non-holder of a claimed task names the holder" (fun () ->
+    let ctx = make_test_ctx_with_agent "worker" in
+    let _ =
+      Task.Tool.handle_add_task
+        ~tool_name:"test_tool"
+        ~start_time:(Tool_timing.start ())
+        ctx
+        (`Assoc [ "title", `String "Held by worker" ])
+    in
+    let _ = Workspace.claim_task ctx.Task.Tool.config ~agent_name:"worker" ~task_id:"task-001" in
+    let intruder = { ctx with Task.Tool.agent_name = "intruder" } in
+    let result =
+      submit_for_verification
+        intruder
+        ~task_id:"task-001"
+        ~notes:
+          "completion_notes: finished on the holder's behalf. \
+           reviewable_evidence_ref: artifact:not-mine.json ready for review"
+    in
+    assert (not (Tool_result.is_success result));
+    assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
+    assert (submit_rule_id result = Some "task_submit_requires_current_owner");
+    assert (str_contains (Tool_result.message result) "owned by worker");
+    assert (str_contains (Tool_result.message result) "intruder cannot submit it");
+    assert (
+      Json_util.get_string (Tool_result.data result) "current_assignee" = Some "worker");
+    match (only_task ctx).Masc_domain.task_status with
+    | Masc_domain.Claimed { assignee = "worker"; _ } -> ()
+    | _ -> failwith "a refused submission must leave the task claimed by its holder")
+
+let () =
+  test "submit by a non-holder leaves the pending verification in place" (fun () ->
+    let ctx = resubmit_fixture () in
+    let pending_id, _, _ = awaiting_snapshot ctx "task-001" in
+    let intruder = { ctx with Task.Tool.agent_name = "intruder" } in
+    let result =
+      submit_for_verification
+        intruder
+        ~task_id:"task-001"
+        ~notes:
+          "completion_notes: replacing someone else's submission. \
+           reviewable_evidence_ref: artifact:not-mine.json ready for review"
+    in
+    assert (not (Tool_result.is_success result));
+    assert (submit_rule_id result = Some "task_submit_requires_current_owner");
+    assert (
+      Json_util.get_string (Tool_result.data result) "current_assignee" = Some "worker");
+    let current_id, _, assignee = awaiting_snapshot ctx "task-001" in
+    assert (String.equal pending_id current_id);
+    assert (String.equal assignee "worker");
+    match Verification.load_request ctx.Task.Tool.config.Workspace.base_path pending_id with
+    | Ok _ -> ()
+    | Error detail -> failwith ("the holder's request must survive: " ^ detail))
+
 let () =
   test "a verdict on the superseded verification is refused" (fun () ->
     let ctx = resubmit_fixture () in

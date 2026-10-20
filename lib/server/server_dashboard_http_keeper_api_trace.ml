@@ -29,13 +29,12 @@ let dedupe_thinking_lines (lines : Trajectory.trajectory_line list)
 
 let trajectory_line_to_chat_trace_step = function
   | Trajectory.Withheld_thinking entry ->
-    Some
-      (Keeper_chat_blocks.Trace_think
+    Keeper_chat_blocks.Trace_think
          { text = ""
          ; content_withheld = true
          ; ts = Some entry.ts_iso
          ; agent_core_block_index = Some entry.block_index
-         })
+         }
   | Trajectory.Tool_call entry ->
     let result =
       Option.map
@@ -44,8 +43,7 @@ let trajectory_line_to_chat_trace_step = function
           | Yojson.Json_error _ -> `String text)
         entry.result
     in
-    Some
-      (Keeper_chat_blocks.Trace_tool
+    Keeper_chat_blocks.Trace_tool
          { name = entry.tool_name
          ; tool_call_id = None
          ; execution_id =
@@ -62,7 +60,7 @@ let trajectory_line_to_chat_trace_step = function
          ; result
          ; ts = Some entry.ts_iso
          ; agent_core_block_index = None
-         })
+         }
 ;;
 
 let allowed_trace_id_set trace_ids =
@@ -110,30 +108,46 @@ let chat_trace_block_by_turn_ref ~max_lines
         Hashtbl.replace cache trace_id all_lines;
         Some all_lines)
   in
-  fun turn_ref ->
+  let block_for_turn_ref turn_ref =
     let trace_id = Ids.Turn_ref.trace_id turn_ref in
     match lines_for_trace_id trace_id with
     | None -> None
     | Some all_lines ->
       let absolute_turn = Ids.Turn_ref.absolute_turn turn_ref in
-      let trace =
+      let turn_lines =
         all_lines
         |> List.filter (function
              | Trajectory.Withheld_thinking entry -> entry.turn = absolute_turn
              | Trajectory.Tool_call entry -> entry.turn = absolute_turn)
-        |> List.filter_map trajectory_line_to_chat_trace_step
       in
-      (match trace with
+      (match turn_lines with
        | [] -> None
-       | trace ->
+       | turn_lines ->
          (* Newest steps are the ones an operator is reading toward, so the
             tail is what survives the cap. *)
-         let total = List.length trace in
+         let total = List.length turn_lines in
          let omitted = max 0 (total - chat_trace_steps_per_turn) in
-         let trace =
+         let retained_lines =
            if omitted = 0
-           then trace
-           else List.filteri (fun index _ -> index >= omitted) trace
+           then turn_lines
+           else List.drop omitted turn_lines
          in
+         (* Every decoded trajectory line contributes one step. Apply the
+            existing display window before parsing nested arguments/results
+            that would immediately be discarded. *)
+         let trace = List.map trajectory_line_to_chat_trace_step retained_lines in
          Some (Keeper_chat_blocks.Trace { trace; omitted }))
+  in
+  (* A render can ask for the same turn more than once. The trace-file cache
+     above already defines this request's observation; reuse its projection
+     too, including an absent block, without decoding nested JSON again. *)
+  let blocks = Hashtbl.create 16 in
+  fun turn_ref ->
+    let key = Ids.Turn_ref.to_string turn_ref in
+    match Hashtbl.find_opt blocks key with
+    | Some block -> block
+    | None ->
+      let block = block_for_turn_ref turn_ref in
+      Hashtbl.add blocks key block;
+      block
 ;;

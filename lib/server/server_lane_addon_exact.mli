@@ -3,7 +3,10 @@
     appraiser runs its own: the package schema with [Json_syntax] is the
     requirement, the HTTP slots run in order and an answer that does not match
     the schema advances to the next one, then [cli_slots] run as one-shot
-    official clients.
+    official clients. HTTP preserves each user/assistant role. The one-shot
+    CLI tail accepts user-only requests; an assistant turn is reported as a
+    configuration refusal without starting a CLI process. A future event can
+    retry through a newly configured HTTP slot, with the original history.
 
     How the call ends:
     - a slot's answer matches the schema: [answered];

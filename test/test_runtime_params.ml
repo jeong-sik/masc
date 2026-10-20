@@ -187,6 +187,44 @@ let () =
     Alcotest.(check int) "cleared to default" 100 (Runtime_params.get p)
   in
 
+  (* A file written by an older build can name a param this build no longer
+     registers. Restore applies the registered keys and skips that one; the
+     next persist writes only registered params, so the key leaves the file. *)
+  let test_restore_skips_unregistered_key () =
+    let tmp_dir = Filename.temp_dir "masc_test_" "" in
+    let masc_dir = Filename.concat tmp_dir Common.masc_dirname in
+    (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
+    let p =
+      Runtime_params.register
+        ~key:"test.restore_known_param"
+        ~default:(fun () -> 1)
+        ~validate:(fun _ -> Ok ())
+        ~serialize:(fun v -> `Int v)
+        ~deserialize:(fun json ->
+          match json with
+          | `Int i -> Ok i
+          | _ -> Error "expected int")
+        ()
+    in
+    let file = Filename.concat masc_dir "runtime_params.json" in
+    Fs_compat.save_file file
+      {|{ "test.no_longer_registered": 15, "test.restore_known_param": 7 }|};
+    Runtime_params.restore ~base_path:tmp_dir;
+    Alcotest.(check int) "registered key restored" 7 (Runtime_params.get p);
+    Runtime_params.persist ~base_path:tmp_dir;
+    let keys =
+      match Yojson.Safe.from_file file with
+      | `Assoc pairs -> List.map fst pairs
+      | _ -> []
+    in
+    Alcotest.(check bool) "persist drops the unregistered key" false
+      (List.mem "test.no_longer_registered" keys);
+    Runtime_params.clear p;
+    (try Sys.remove file with Sys_error _ -> ());
+    (try Sys.rmdir masc_dir with Sys_error _ -> ());
+    (try Sys.rmdir tmp_dir with Sys_error _ -> ())
+  in
+
   let test_persist_restore () =
     let tmp_dir = Filename.temp_dir "masc_test_" "" in
     let masc_dir = Filename.concat tmp_dir Common.masc_dirname in
@@ -763,6 +801,8 @@ let () =
       ( "persistence",
         [
           Alcotest.test_case "persist_restore" `Quick test_persist_restore;
+          Alcotest.test_case "restore_skips_unregistered_key" `Quick
+            test_restore_skips_unregistered_key;
           Alcotest.test_case "audit" `Quick test_audit;
           Alcotest.test_case "set_persists_to_disk" `Quick test_set_persists_to_disk;
           Alcotest.test_case "set_by_key_logs_audit" `Quick

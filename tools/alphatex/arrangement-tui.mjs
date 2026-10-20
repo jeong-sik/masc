@@ -35,6 +35,7 @@ const help = [
   ':import-practice /path/take     import original MIDI from a completed practice take',
   ':practice-backing [ASSET] restores its editable phrase backing; Enter places it, :edit-midi edits it',
   ':practice-midi [ASSET] derives the whole performance as MIDI1 / 960 PPQ; :edit-midi edits the variant',
+  ':practice-midi-region derives only the selected original practice region, restoring entry notes and pedals',
   ':practice-passes [ASSET] lists original passes; :practice-pass NUMBER [ASSET] places or replaces the selected source region',
   ':practice-region ASSET BEAT OFFSET EXTENT DIVISOR [REPEAT] places an exact fractional host cut',
   ':trim-fraction OFFSET EXTENT DIVISOR edits a practice cut; :trim returns to whole host ticks',
@@ -693,11 +694,14 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         if (accepting) { adopt(arrangementImported(editor, result)); status = value.kind === 'import-take' ? `Imported ${result.asset}; Enter opens WAV and MIDI` : `Imported ${result.asset}; Enter places it at the cursor` }
         break
       }
-      case 'practice-midi': case 'practice-backing': {
+      case 'practice-midi-region': case 'practice-midi': case 'practice-backing': {
         if (!accepting) return
-        status = value.kind === 'practice-midi' ? 'Deriving whole performance as MIDI1 / 960 PPQ…' : 'Restoring captured phrase backing…'; draw()
+        status = value.kind === 'practice-backing' ? 'Restoring captured phrase backing…' : 'Deriving performance as MIDI1 / 960 PPQ…'; draw()
         const result = await request({ ...value, project: editor.project, sourceRoot })
-        if (accepting) { adopt(arrangementImported(editor, result)); status = `${value.kind === 'practice-midi' ? 'Derived whole performance MIDI1 / 960 PPQ' : 'Restored backing'} ${result.asset}; Enter places it, :edit-midi edits it` }
+        if (accepting) {
+          adopt({ ...arrangementImported(editor, result), ...(value.kind === 'practice-midi-region' ? { tick: value.tick } : {}) })
+          status = `${value.kind === 'practice-backing' ? 'Restored backing' : value.kind === 'practice-midi-region' ? 'Derived selected region MIDI1 / 960 PPQ' : 'Derived whole performance MIDI1 / 960 PPQ'} ${result.asset}; Enter places it, :edit-midi edits it`
+        }
         break
       }
       case 'practice-passes': case 'practice-pass': {
@@ -739,7 +743,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
             // the user chose before waiting; never reinterpret it on that asset.
             result = result.selection?.kind === 'take-selection'
               ? { editor: arrangementTakeSelected(editor, result.selection) }
-              : ['practice-midi', 'practice-backing', 'practice-pass', 'practice-passes'].includes(result.effect?.kind) ? { editor, effect: result.effect } : arrangementCommand(editor, line)
+              : ['practice-midi-region', 'practice-midi', 'practice-backing', 'practice-pass', 'practice-passes'].includes(result.effect?.kind) ? { editor, effect: result.effect } : arrangementCommand(editor, line)
           }
           adopt(result.editor); if (result.effect) await effect(result.effect); else status = 'Edited'
         })

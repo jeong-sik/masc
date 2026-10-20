@@ -5,6 +5,7 @@ import { capturePaths, captureMatches, inspectCaptureAsset } from './captured-so
 import { practicePartNames } from './practice-source.mjs'
 import { practicePasses } from './practice-passes.mjs'
 import { practiceMidi } from './practice-midi.mjs'
+import { extractPracticeRegion } from './practice-region-midi.mjs'
 import { practicePaths, readPracticeFiles, inspectPracticeAsset } from './practice-source-files.mjs'
 import { readFile, open, mkdir, mkdtemp, lstat, link, rm, chmod } from 'node:fs/promises'
 import { createReadStream, createWriteStream } from 'node:fs'
@@ -197,7 +198,7 @@ export async function inspectPracticePasses(project, assetID, pass, { sourceRoot
     return { asset: assetID, ...result }
   } finally { await rm(snapshot.directory, { recursive: true, force: true }) }
 }
-export async function importPracticeMidi(project, assetID, { sourceRoot, directory = tmpdir(), signal } = {}) {
+export async function importPracticeMidi(project, assetID, { sourceRoot, directory = tmpdir(), signal, cut, nativeExecutable } = {}) {
   const snapshot = await prepareArrangementPractice(project, assetID, { sourceRoot, directory, signal })
   try {
     const asset = project.assets.find(asset => asset.id === assetID), values = {}
@@ -207,7 +208,8 @@ export async function importPracticeMidi(project, assetID, { sourceRoot, directo
       values[role] = bytes.toString('utf8')
     }
     const packets = values.events.trimEnd().split('\n').map(line => JSON.parse(line).packet)
-    const source = practiceMidi(asset, JSON.parse(values.context), packets, { signal })
+    const region = cut ? await extractPracticeRegion(asset, packets, cut, { directory: snapshot.directory, signal, executable: nativeExecutable }) : undefined
+    const source = practiceMidi(asset, JSON.parse(values.context), packets, { signal, region })
     return importPhraseDocument(project, source)
   } finally { await rm(snapshot.directory, { recursive: true, force: true }) }
 }

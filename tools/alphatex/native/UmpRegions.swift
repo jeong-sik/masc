@@ -55,6 +55,59 @@ struct UmpArrangement: Decodable {
     let regions: [UmpRegion]
 }
 
+// Offline editing uses the same original-UMP reconstruction as playback.
+// Source IDs are state addresses only: no destination or device is opened.
+struct UmpRegionExtraction: Decodable {
+    let schemaVersion: Int
+    let source: UmpRegionSource
+    let offset: String
+    let extent: String
+    let sourceDivisor: String
+    func extract() throws -> [String: Any] {
+        let bound = try umpUnsigned(source.extent), cut = try umpUnsigned(offset)
+        let length = try umpUnsigned(extent), divisor = try umpUnsigned(sourceDivisor)
+        guard schemaVersion == 1, bound > 0, length > 0, divisor > 0 else { throw MidiFailure("invalid practice extraction span") }
+        let after = try umpAdd(cut, length)
+        guard !umpRationalLess(bound, 1, after, divisor) else { throw MidiFailure("practice extraction exceeds source") }
+        let timed = try source.timeline.timedEvents()
+        guard timed.allSatisfy({ UInt128($0.ticks) < bound }) else { throw MidiFailure("practice extraction packet exceeds source") }
+        let before = timed.firstIndex { !umpRationalLess(UInt128($0.ticks), 1, cut, divisor) } ?? timed.count
+        let through = timed.firstIndex { umpRationalLess(cut, divisor, UInt128($0.ticks), 1) } ?? timed.count
+        let end = timed.firstIndex { !umpRationalLess(UInt128($0.ticks), 1, after, divisor) } ?? timed.count
+        let events = timed.map(\.event)
+        let final = try umpRestoration(events, prefixCount: end, replacing: UmpFootprint())
+        // Historical voices expiring exactly at entry have no overlap with
+        // this cut. Genuine attacks at entry remain in the original due stream.
+        let expired = Set(final.expiredNotes.filter { $0.value < through }.map(\.key))
+        let entry = try umpRestoration(events, prefixCount: before, followingCount: through - before,
+                                       preambleEndIndex: end, excludingNotes: expired, replacing: UmpFootprint())
+        func row(_ event: UmpEvent, _ position: UInt128) -> [String: Any] {
+            ["offset": String(position), "source": event.source, "words": event.words]
+        }
+        var result = entry.events.map { row($0, 0) }, acquired = entry.heldNotes
+        for index in entry.nextIndex..<end {
+            let event = events[index]
+            switch UmpMessage(event).action {
+            case .on: acquired.insert(index)
+            case .off:
+                guard let owner = final.releaseOwners[index], acquired.contains(owner) else { continue }
+                acquired.remove(owner)
+            case .kill, .release:
+                acquired = acquired.filter { UmpChannel(events[$0]) != UmpChannel(event) }
+            default: break
+            }
+            // Subtract before multiplying so a large absolute cut does not
+            // overflow merely because the small relative window fits UInt128.
+            let delta = UInt128(timed[index].ticks) - cut / divisor, remainder = cut % divisor
+            let position = remainder == 0 ? try umpMultiply(delta, divisor)
+                : try umpAdd(umpMultiply(delta - 1, divisor), divisor - remainder)
+            result.append(row(event, position))
+        }
+        return ["schemaVersion": 1, "kind": "practice-region-events", "extent": extent,
+                "sourceDivisor": sourceDivisor, "events": result]
+    }
+}
+
 // A source packet keeps its original host ticks. This window places those
 // ticks on the authored master period without rounding either clock first.
 struct UmpLoopWindow {

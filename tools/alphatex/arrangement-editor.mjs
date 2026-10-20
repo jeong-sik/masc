@@ -188,6 +188,12 @@ export function arrangementCommand(editor, line) {
       if (!editor.project.assets.some(item => item.id === asset && item.kind === 'practice')) throw new Error('Choose a raw practice take')
       return { editor, effect: { kind: command, asset } }
     }
+    case 'practice-midi-region': {
+      count(0); const clip = selectedRegion(editor)
+      if (!clip || !editor.project.assets.some(asset => asset.id === clip.asset && asset.kind === 'practice')) throw new Error('Select an original practice region first')
+      return { editor, effect: { kind: command, asset: clip.asset, tick: editor.tick,
+        cut: { offset: clip.offset, extent: clip.extent, ...(clip.sourceDivisor === undefined ? {} : { sourceDivisor: clip.sourceDivisor }) } } }
+    }
     case 'practice-passes': case 'practice-pass': {
       count(command === 'practice-pass' ? 1 : 0, command === 'practice-pass' ? 2 : 1)
       const asset = args[command === 'practice-pass' ? 1 : 0] ?? editor.asset

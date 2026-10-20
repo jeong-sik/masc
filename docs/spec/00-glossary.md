@@ -350,6 +350,13 @@ status: reference
   - 편집 경계: 노트를 다른 포트로 옮기는 편집은 거절된다(MIDI-SOURCE.md: "Moving either
     message across a MIDI Port change is rejected"). 포트는 음악 편집 대상이 아니라
     원본에 적힌 라우팅 정체성이다.
+  - 세 층 구분: `port`는 소스 파일이 정한 라우팅 번호이고, `midiOutput`은 사용자가 고른
+    하나의 출력 이름이며(포트가 여럿이면 거절된다: "Bind each source MIDI port explicitly
+    with :midi-port PORT ID"), `destination`은 그 선택이나 포트 결속에서 해석된 목적지다.
+    결속 결과는 `{ port, destination }` 쌍이다(sequencer-tui.mjs의 `portBindings`).
+    "output port"처럼 두 층을 붙인 이름은 쓰지 않는다. 출력 측 낱말은 `destination`이다
+    (midi-source-playback.mjs: "Distinct source ports require distinct destinations";
+    sequencer-tui.mjs: "Choose an audio output or a MIDI destination").
   - 이름 경계: 녹음 입력을 고르는 `--midi all|none|SOURCE_ID`의 `SOURCE_ID`는 CoreMIDI
     입력 소스 정체성이고, 이 소스 포트와 다른 층이다. 같은 모양의 낱말이 두 층에 쓰이므로
     문장에서 어느 쪽인지 밝힌다.

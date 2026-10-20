@@ -163,6 +163,12 @@ val has_newer_original_queued
 
 (** Durable cooperative checkpoint continuation, independent of provider retry. *)
 val direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, command_error) result
+
+(** [direct_native_call], [checkpoint_direct_native_call] and
+    [terminal_direct_native_call] still reach an installed Owner after
+    [begin_stopping_all] has fenced the inventory, so the child that Owner is
+    draining records its native call receipt. [bind_direct_native_call] starts
+    a new call and is refused with [Inventory_stopping] once the fence is up. *)
 val direct_native_call : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   (Keeper_native_call.state, command_error) result
 val bind_direct_native_call : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
@@ -261,7 +267,8 @@ val begin_stopping_all
   :  base_path:string
   -> ((unit, Keeper_owner.error) result list, lookup_error) result
 (** Fence the BasePath inventory, concurrently stop every Owner, and return
-    after each active child has joined its terminal persistence attempt. *)
+    after each active child has joined its terminal persistence attempt. The
+    fence refuses every lookup except the native call receipt commands above. *)
 
 val install_error_to_string : install_error -> string
 val lookup_error_to_string : lookup_error -> string

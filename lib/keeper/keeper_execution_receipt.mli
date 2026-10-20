@@ -303,6 +303,12 @@ val runtime_lane_observation_to_yojson : runtime_lane_observation -> Yojson.Safe
 (** Operator projection with derived failure summaries. The evidence's source
     failure payloads and ordering remain intact; this is not the storage codec. *)
 
+val runtime_lane_observation_of_yojson :
+  Yojson.Safe.t -> runtime_lane_observation option
+(** Decode the operator projection. Only explicit null means no receipt.
+    Invalid, missing, extra or duplicate observation fields become unreadable;
+    a separately valid source turn is retained. No current state is inferred. *)
+
 (** The newest receipt's terminal fields, read back from the store. Labels are
     prefixed so they do not collide with {!t}'s. *)
 type latest_receipt_summary =

@@ -40,3 +40,7 @@ val to_observation_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 (** Strict wire decoder: unknown/extra/duplicate fields and enum values are
     errors. An absent receipt field is not an observed empty failure list. *)
+
+val of_observation_yojson : Yojson.Safe.t -> (t, string) result
+(** Strict decoder for {!to_observation_yojson}. Derived summaries must match
+    the decoded failures. This does not change the canonical storage codec. *)

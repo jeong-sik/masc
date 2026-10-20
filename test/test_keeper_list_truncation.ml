@@ -581,6 +581,134 @@ let test_explicit_invalidation_repeats_the_obsolete_read () =
     check string "fresh result is cached" "current"
       (Yojson.Safe.Util.to_string cached))
 
+(* The actual roster envelope, not a renderer or a row-shaped shortcut, is
+   the TUI's boundary. These assertions only inspect typed state. *)
+let test_runtime_walk_store_to_tui () =
+  let module Receipt = Keeper_execution_receipt in
+  let module Evidence = Keeper_runtime_walk_evidence in
+  let refused = Agent_core.Error.Api (Llm_provider.Retry.InvalidRequest
+    {message="Prompt exceeds max length";reason=Llm_provider.Retry.Unknown_invalid_request}) in
+  let limited = Agent_core.Error.Api (Llm_provider.Retry.RateLimited
+    {message="fixture quota";retry_after=None}) in
+  let failures =
+    [ Evidence.observe_failure ~runtime_id:"missing.binding" ~attempt:0
+        ~dispatch:Runtime_attempt_dispatch.Rejected_before_dispatch
+        (Agent_core.Error.Internal "binding absent")
+    ; Evidence.observe_failure ~runtime_id:"repeated.runtime" ~attempt:1
+        ~dispatch:Runtime_attempt_dispatch.Dispatched refused
+    ; Evidence.observe_failure ~runtime_id:"repeated.runtime" ~attempt:2
+        ~dispatch:Runtime_attempt_dispatch.Dispatched limited ] in
+  let earlier = {Evidence.failures;terminal=Evidence.observe_terminal
+    ~runtime_id:"repeated.runtime" ~attempt:1 refused} in
+  let recovered = {earlier with terminal=Evidence.Terminal_not_observed} in
+  let decode json = match Tui_decode.decode_keeper_runtime_list json with
+    | Ok ([row], [], false, 1, _) -> row
+    | Ok _ -> fail "runtime walk fixture lost the roster row"
+    | Error detail -> fail detail in
+  let receipt evidence = `Assoc
+    ["trace_id",`String "historical-source";"turn_count",`Int 19;
+     "ended_at",`String "2026-10-20T00:00:00Z";
+     "runtime",`Assoc ["lane_evidence",evidence]] in
+  let patch key value = function
+    | `Assoc fields -> `Assoc ((key,value)::List.remove_assoc key fields)
+    | _ -> fail "fixture patch expected an object" in
+  let map_row transform json = match Yojson.Safe.Util.member "keepers" json with
+    | `List [row] -> patch "keepers" (`List [transform row]) json
+    | _ -> fail "fixture expected one roster row" in
+  let check_blocker row = check (option string) "history cannot clear live blocker"
+    (Some (timeout_summary ())) row.Tui_decode.kr_runtime_blocker_summary in
+  let check_source (turn : Receipt.receipt_turn) =
+    check string "source trace is not the current roster trace"
+      "historical-source" turn.receipt_trace_id;
+    check (option int) "source turn survives" (Some 19) turn.receipt_turn_count in
+  failure_roster ~before_list:register_failed_keeper
+    ~after_list:(fun config read ->
+      let store = Keeper_types_support.keeper_execution_receipt_store config "alpha" in
+      let refresh () =
+        Keeper_tool_surface.For_testing.invalidate_keeper_list_cache ();
+        read () in
+      List.iter (fun (name,evidence) ->
+        Dated_jsonl.append store (receipt evidence);
+        let row=decode (refresh ()) in
+        check_blocker row;
+        match row.kr_runtime_lane_observation with
+        | Some (Receipt.Runtime_lane_not_observed turn) ->
+          check string "only null means no capture" "no capture" name;
+          check_source turn
+        | Some (Receipt.Runtime_lane_observed {turn;evidence=actual}) ->
+          check_source turn;
+          check string "same typed evidence through store, tool envelope and TUI"
+            (Yojson.Safe.to_string evidence)
+            (Yojson.Safe.to_string (Evidence.to_yojson actual))
+        | None | Some (Receipt.Runtime_lane_unreadable _) ->
+          fail ("wrong historical reading for " ^ name))
+        ["no capture",`Null;"empty",Evidence.to_yojson Evidence.empty;
+         "earlier",Evidence.to_yojson earlier;"recovered",Evidence.to_yojson recovered];
+      let json=refresh () in
+      let view=Receipt.runtime_lane_observation_of_receipt_json (receipt (Evidence.to_yojson earlier))
+        |> Receipt.runtime_lane_observation_to_yojson in
+      let failure_patch f = match Yojson.Safe.Util.member "evidence" view with
+        | `Assoc fields ->
+          (match List.assoc "failures" fields with
+           | `List (first::rest) -> patch "evidence"
+               (`Assoc (("failures",`List (f first::rest))::List.remove_assoc "failures" fields)) view
+           | _ -> fail "fixture expected failures")
+        | _ -> fail "fixture expected evidence" in
+      let add_duplicate_summary = function
+        | `Assoc fields -> `Assoc (("summary",`String "duplicate")::fields)
+        | _ -> fail "fixture expected a failure" in
+      let terminal_patch key value = match Yojson.Safe.Util.member "evidence" view with
+        | `Assoc fields -> patch "evidence"
+            (`Assoc (("terminal",patch key value (List.assoc "terminal" fields))
+              ::List.remove_assoc "terminal" fields)) view
+        | _ -> fail "fixture expected evidence" in
+      let corrupt =
+        ["state",patch "state" (`String "future_state") view,true;
+         "extra",(match view with `Assoc fields -> `Assoc (("extra",`Null)::fields) | _ -> fail "object"),true;
+         "dispatch",failure_patch (patch "dispatch" (`String "maybe_sent")),true;
+         "ordinal",failure_patch (patch "attempt" (`Int (-1))),true;
+         "fault",failure_patch (patch "api_candidate_fault" (`Assoc ["kind",`String "future_fault"])),true;
+         "summary",failure_patch (patch "summary" (`String "invented overflow")),true;
+         "duplicate summary",failure_patch add_duplicate_summary,true;
+         "terminal summary",terminal_patch "summary" (`String "wrong terminal"),true;
+         "terminal extra",terminal_patch "extra" `Null,true;
+         "turn",patch "turn" (`String "bad identity") view,false] in
+      List.iter (fun (name,view,has_source) ->
+        let row=decode (map_row (patch "runtime_lane_observation" view) json) in
+        check_blocker row;
+        match row.kr_runtime_lane_observation with
+        | Some (Receipt.Runtime_lane_unreadable {turn;_}) ->
+          check bool (name ^ " retains only a valid source") has_source (Option.is_some turn);
+          Option.iter check_source turn
+        | None | Some (Receipt.Runtime_lane_observed _ | Receipt.Runtime_lane_not_observed _) ->
+          fail (name ^ " corruption became usable evidence")) corrupt;
+      List.iter (fun transform ->
+        let row=decode (map_row transform json) in
+        check_blocker row;
+        match row.kr_runtime_lane_observation with
+        | Some (Receipt.Runtime_lane_unreadable {turn=None;_}) -> ()
+        | None | Some (Receipt.Runtime_lane_observed _ | Receipt.Runtime_lane_not_observed _
+          | Receipt.Runtime_lane_unreadable _) -> fail "missing/duplicate observation was accepted")
+        [ (function `Assoc fields -> `Assoc (List.remove_assoc "runtime_lane_observation" fields)
+            | _ -> fail "row object")
+        ; (function `Assoc fields -> `Assoc (("runtime_lane_observation",`Null)::fields)
+            | _ -> fail "row object") ];
+      Keeper_registry.set_failure_reason ~base_path:config.Workspace.base_path "alpha" None;
+      let row=decode (refresh ()) in
+      check (option string) "current failure clears independently" None row.kr_runtime_blocker_summary;
+      match row.kr_runtime_lane_observation with
+      | Some (Receipt.Runtime_lane_observed {evidence;_}) ->
+        check int "earlier refusals remain after blocker clears" 3 (List.length evidence.failures);
+        check bool "successful fallback invents no terminal" true
+          (evidence.terminal=Evidence.Terminal_not_observed)
+      | None | Some (Receipt.Runtime_lane_not_observed _ | Receipt.Runtime_lane_unreadable _) ->
+        fail "clearing current failure discarded history")
+    (fun json ->
+      let row=decode json in
+      check_blocker row;
+      check bool "explicit no receipt is distinct from no capture" true
+        (row.kr_runtime_lane_observation=None))
+
 let () =
   run "keeper_list_truncation"
     [ ( "listing truth"
@@ -606,7 +734,8 @@ let () =
             test_absent_next_action_is_null_not_empty
         ] )
     ; ( "current failure"
-      , [ test_case "timeout without last_error" `Quick test_current_failure_without_last_error
+      , [ test_case "runtime walk store to typed TUI boundary" `Quick test_runtime_walk_store_to_tui
+        ; test_case "timeout without last_error" `Quick test_current_failure_without_last_error
         ; test_case "last_error is separate" `Quick test_last_error_is_not_the_current_failure
         ; test_case "success clears current failure" `Quick test_success_clears_current_failure_but_retains_last_error
         ; test_case "missing is not clear" `Quick test_missing_current_failure_is_not_clear

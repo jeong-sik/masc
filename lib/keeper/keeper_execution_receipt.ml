@@ -668,6 +668,71 @@ let runtime_lane_observation_to_yojson observation =
   `Assoc [ "state", `String state; "turn", turn; "evidence", evidence; "error", error ]
 ;;
 
+let runtime_lane_observation_of_yojson json =
+  let ( let* ) = Result.bind in
+  let fields expected = function
+    | `Assoc values when List.equal String.equal (List.sort String.compare expected)
+        (List.sort String.compare (List.map fst values)) -> Ok values
+    | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      Error "runtime_lane_observation fields"
+  in
+  let string key values = match List.assoc key values with
+    | `String value -> Ok value
+    | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null -> Error key in
+  let null key values = match List.assoc key values with
+    | `Null -> Ok ()
+    | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _ -> Error key in
+  let source_turn json =
+    let* values=fields ["trace_id";"turn_count";"ended_at"] json in
+    let* receipt_trace_id=string "trace_id" values in
+    let* receipt_ended_at=string "ended_at" values in
+    let* receipt_turn_count=match List.assoc "turn_count" values with
+      | `Null -> Ok None
+      | `Int value -> Ok (Some value)
+      | `Assoc _ | `Bool _ | `Float _ | `Intlit _ | `List _ | `String _ -> Error "turn_count" in
+    Ok {receipt_trace_id;receipt_turn_count;receipt_ended_at}
+  in
+  (* Independently recover a unique valid source identity even if another
+     field is corrupt. Never substitute the roster's current trace. *)
+  let turn=match json with
+    | `Assoc values ->
+      (match List.filter (fun (key, _) -> String.equal key "turn") values with
+       | [_, value] -> Result.to_option (source_turn value)
+       | [] | _ :: _ -> None)
+    | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None in
+  let decode () =
+    let* values=fields ["state";"turn";"evidence";"error"] json in
+    let* state=string "state" values in
+    match state with
+    | "observed" ->
+      let* ()=null "error" values in
+      let* turn=source_turn (List.assoc "turn" values) in
+      let* evidence=Keeper_runtime_walk_evidence.of_observation_yojson
+        (List.assoc "evidence" values) in
+      Ok (Runtime_lane_observed {turn;evidence})
+    | "not_observed" ->
+      let* ()=null "error" values in
+      let* ()=null "evidence" values in
+      let* turn=source_turn (List.assoc "turn" values) in
+      Ok (Runtime_lane_not_observed turn)
+    | "unreadable" ->
+      let* ()=null "evidence" values in
+      let* field=string "error" values in
+      let* turn=match List.assoc "turn" values with
+        | `Null -> Ok None
+        | (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _) as value ->
+          Result.map Option.some (source_turn value) in
+      Ok (Runtime_lane_unreadable {turn;field})
+    | _ -> Error "runtime_lane_observation.state"
+  in
+  match json with
+  | `Null -> None
+  | (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _) ->
+    Some (match decode () with
+      | Ok observation -> observation
+      | Error field -> Runtime_lane_unreadable {turn;field})
+;;
+
 type latest_receipt_summary =
   { latest_outcome : outcome_kind
   ; latest_terminal_reason_code : string

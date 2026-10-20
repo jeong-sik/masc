@@ -257,6 +257,13 @@ let keeper_list_row_json ~runtime_class config name =
       let runtime_blocker_signature =
         Option.bind runtime_blocker (fun blocker -> blocker.Keeper_status_bridge.signature)
       in
+      let runtime_lane_observation =
+        match Keeper_execution_receipt.latest_json config meta.name with
+        | None -> `Null
+        | Some receipt ->
+          Keeper_execution_receipt.runtime_lane_observation_of_receipt_json receipt
+          |> Keeper_execution_receipt.runtime_lane_observation_to_yojson
+      in
       let keepalive_running =
         Keeper_status_runtime.keepalive_running_of_phase registry_phase
       in
@@ -310,6 +317,7 @@ let keeper_list_row_json ~runtime_class config name =
             ("next_action", next_action);
             ("runtime_blocker_summary", Json_util.string_opt_to_json runtime_blocker_summary);
             ("runtime_blocker_signature", Json_util.string_opt_to_json runtime_blocker_signature);
+            ("runtime_lane_observation", runtime_lane_observation);
             ("keepalive_running", `Bool keepalive_running);
             ("activation_mode", Keeper_activation_mode.to_yojson meta.activation_mode);
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));

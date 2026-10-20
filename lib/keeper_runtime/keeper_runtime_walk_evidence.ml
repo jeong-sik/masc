@@ -168,16 +168,52 @@ let terminal_of_json json =
     Ok (Candidate_terminal {runtime_id;attempt;failure})
   | _ -> Error "unknown runtime walk terminal kind"
 
-let of_yojson json =
+let decode_with ~failure_decoder ~terminal_decoder json =
   let* fields=object_fields json in
   let* ()=exact_fields ["failures";"terminal"] fields in
   let* failures=match List.assoc "failures" fields with
     | `List values ->
       let rec read acc = function
         | [] -> Ok (List.rev acc)
-        | value::rest -> let* value=failure_of_json value in read (value::acc) rest in
+        | value::rest -> let* value=failure_decoder value in read (value::acc) rest in
       read [] values
     | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _ ->
       Error "runtime walk failures must be a list" in
-  let* terminal=terminal_of_json (List.assoc "terminal" fields) in
+  let* terminal=terminal_decoder (List.assoc "terminal" fields) in
   Ok {failures;terminal}
+
+let of_yojson = decode_with ~failure_decoder:failure_of_json ~terminal_decoder:terminal_of_json
+
+let with_summary ~fields:expected ~decode ~summary json =
+  let* fields=object_fields json in
+  let* ()=exact_fields ("summary"::expected) fields in
+  let* observed_summary=string_field "summary" fields in
+  let* value=decode (`Assoc (List.remove_assoc "summary" fields)) in
+  if String.equal observed_summary (summary value) then Ok value
+  else Error "runtime walk summary disagrees with the source failure"
+
+let observation_failure_of_json =
+  with_summary
+    ~fields:["attempt";"runtime_id";"dispatch";"failure";"api_candidate_fault"]
+    ~decode:failure_of_json
+    ~summary:(fun (value : failure) -> Keeper_request_failure.summary value.failure)
+
+let observation_terminal_of_json json =
+  let* fields=object_fields json in
+  let* kind=string_field "kind" fields in
+  match kind with
+  | "not_observed" -> terminal_of_json json
+  | "candidate" ->
+    let* ()=exact_fields ["kind";"runtime_id";"attempt";"failure";"summary"] fields in
+    let* summary=string_field "summary" fields in
+    let* terminal=terminal_of_json (`Assoc (List.remove_assoc "summary" fields)) in
+    (match terminal with
+     | Candidate_terminal {failure;_} ->
+       if String.equal summary (Keeper_request_failure.summary failure) then Ok terminal
+       else Error "runtime walk terminal summary disagrees with the source failure"
+     | Terminal_not_observed -> Error "runtime walk terminal is not a candidate")
+  | _ -> Error "unknown runtime walk terminal kind"
+
+let of_observation_yojson =
+  decode_with ~failure_decoder:observation_failure_of_json
+    ~terminal_decoder:observation_terminal_of_json

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""approve-guard --merge-check against a fake `gh`: admission is unchanged and
-a refusal names the failing footer part. Offline; no network, no real PR."""
+"""Source receipts and merge admission against a fake `gh`.
+Offline; no network, no real PR."""
 import json
 import os
 import pathlib
@@ -49,7 +49,8 @@ class GuardHarness(unittest.TestCase):
         self.scripts = self.tmp / "scripts"
         self.scripts.mkdir()
         for name in ("approve-guard.sh", "ci-checks.sh", "review-verdict.sh",
-                     "review-scope.py", "review-refusal.py", "_gh_merge_base.py"):
+                     "review-scope.py", "review-refusal.py", "_gh_merge_base.py",
+                     "prepare-approved-batch.py"):
             shutil.copy(HERE / name, self.scripts / name)
         # The real review-diff.py needs Git objects; the diff identity is a fixed fixture here.
         (self.scripts / "review-diff.py").write_text(f"#!/usr/bin/env python3\nprint('{DIFF}')\n")
@@ -169,6 +170,125 @@ class Case(GuardHarness):
         self.assertEqual(r.stderr, "")
         calls = (self.data / "calls.log").read_text().splitlines()
         self.assertFalse(any("/compare/" in path for path in calls))
+
+
+class SourceReceiptCase(GuardHarness):
+    def pin(self, state):
+        (self.data / "status.json").write_text(json.dumps({"statuses": [{
+            "context": "leader-selected-ci", "state": state,
+            "target_url": "https://ci.example/run/1", "description": "selected check"}]}))
+
+    def test_selection_rechecks_source_while_its_own_ci_pin_remains(self):
+        self.review(footer_line())
+        for state in ("pending", "failure", "error"):
+            with self.subTest(state=state):
+                self.pin(state)
+                # Exercise the actual selector call into the actual guard,
+                # including the runpy-loaded scope reader. No CI is executed.
+                code = ("import json,runpy,sys; m=runpy.run_path(sys.argv[1]); "
+                        "a=m['source_approval']('o/r',m['Member'](41487,sys.argv[3]),gh=sys.argv[2]); "
+                        "print(json.dumps(a.ids))")
+                result = subprocess.run(
+                    ["python3", "-c", code, str(self.scripts / "prepare-approved-batch.py"),
+                     str(self.tmp / "gh"), HEAD],
+                    env=dict(os.environ, FAKE_DIR=str(self.data)), capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout), [77])
+                merge = self.run_guard("--merge-check", "--receipt-json")
+                self.assertEqual(merge.returncode, 2)
+                self.assertIn("leader-selected CI", merge.stderr)
+                self.assertEqual(merge.stdout, "")
+
+    def test_source_receipt_keeps_source_approval_requirements(self):
+        self.pin("pending")
+        for label, footer, assoc, scope in (
+            ("stale diff", footer_line(diff="e" * 64), "COLLABORATOR", SCOPE),
+            ("bad footer", footer_line(tail=False), "COLLABORATOR", SCOPE),
+            ("untrusted", footer_line(), "CONTRIBUTOR", SCOPE),
+            ("scope missing", footer_line(), "COLLABORATOR", None),
+        ):
+            with self.subTest(label=label):
+                self.review(footer, assoc=assoc, scope=scope)
+                r = self.run_guard("--source-receipt")
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertEqual(r.stdout, "")
+        (self.data / "reviews.json").write_text("[]")
+        self.assertEqual(self.run_guard("--source-receipt").returncode, 2)
+
+    def test_source_receipt_refuses_author_approval_and_change_requests(self):
+        self.review(footer_line())
+        review = json.loads((self.data / "review.json").read_text())
+        review["user"]["login"] = "author-keeper"
+        (self.data / "review.json").write_text(json.dumps(review))
+        (self.data / "reviews.json").write_text(json.dumps([review]))
+        self.assertEqual(self.run_guard("--source-receipt").returncode, 2)
+        review["user"]["login"] = "reviewer-keeper"
+        review["state"] = "CHANGES_REQUESTED"
+        (self.data / "reviews.json").write_text(json.dumps([review]))
+        r = self.run_guard("--source-receipt")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("open CHANGES_REQUESTED", r.stderr)
+
+    def test_source_receipt_refuses_latest_negative_verdict(self):
+        self.review(footer_line())
+        for verdict in ("FAIL", "HOLD"):
+            with self.subTest(verdict=verdict):
+                (self.data / "comments.json").write_text(json.dumps([{
+                    "id": 88, "body": f"verdict: {verdict} head: {HEAD} by: reviewer-keeper",
+                    "user": {"login": "reviewer-keeper"}, "author_association": "COLLABORATOR",
+                    "created_at": "2026-10-08T03:45:54Z", "updated_at": "2026-10-08T03:45:54Z"}]))
+                r = self.run_guard("--source-receipt")
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertIn(f"latest structured verdict is {verdict}", r.stderr)
+
+    def test_source_receipt_is_not_a_release_or_publication_mode(self):
+        for extra in (["--check"], ["--merge-check"], ["--print-footer"],
+                      ["--receipt-json"], ["--body", "b"], ["--run", "1"],
+                      ["--replace-own-cr", "7"], ["--review-base", BASE], ["--review-diff", DIFF]):
+            with self.subTest(extra=extra):
+                r = self.run_guard("--source-receipt", *extra)
+                self.assertEqual(r.returncode, 2)
+                self.assertEqual(r.stdout, "")
+        self.review(footer_line())
+        pr = json.loads((self.data / "pr.json").read_text())
+        pr["head"]["ref"] = "release/v0.50.0"
+        (self.data / "pr.json").write_text(json.dumps(pr))
+        r = self.run_guard("--source-receipt")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("cannot admit a release", r.stderr)
+
+    def test_source_receipt_refuses_moved_head_or_nonready_pr(self):
+        self.review(footer_line())
+        path = self.data / "pr.json"
+        original = json.loads(path.read_text())
+        for change in ({"draft": True}, {"state": "closed"},
+                       {"head": {"sha": "a" * 40, "ref": "fix/x"}}):
+            with self.subTest(change=change):
+                path.write_text(json.dumps(original | change))
+                r = self.run_guard("--source-receipt")
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertEqual(r.stdout, "")
+
+    def test_source_receipt_refuses_diff_moving_at_consumption(self):
+        self.review(footer_line())
+        (self.scripts / "review-diff.py").write_text(
+            "import pathlib\n"
+            "p=pathlib.Path(__file__).with_suffix('.calls')\n"
+            f"print({'e' * 64!r} if p.exists() else {DIFF!r})\n"
+            "p.touch()\n")
+        r = self.run_guard("--source-receipt")
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("complete diff moved during consumption", r.stderr)
+        self.assertEqual(r.stdout, "")
+
+    def test_source_receipt_does_not_require_caller_identity_or_write(self):
+        self.review(footer_line())
+        r = self.run_guard("--source-receipt")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout), {"pr": 41487, "head": HEAD, "approval_ids": [77]})
+        calls = (self.data / "calls.log").read_text().splitlines()
+        self.assertNotIn("user", calls)
+        self.assertFalse(any("/status" in path for path in calls))
 
 
 class CheckOnlyCase(GuardHarness):

@@ -135,7 +135,7 @@ def member(value):
 def source_approval(repo, selected, *, gh):
     guard = Path(__file__).with_name("approve-guard.sh")
     result = subprocess.run(
-        ["bash", str(guard), "--merge-check", "--receipt-json",
+        ["bash", str(guard), "--source-receipt",
          "--repo", repo, "--pr", str(selected.pr), "--head", selected.head],
         text=True, capture_output=True, env=os.environ | {"GUARD_GH": gh})
     if result.returncode == 2:

@@ -4435,6 +4435,11 @@
   masc_tui_render_schedule))
 
 (test
+ (name test_tui_acting_pane_default)
+ (modules test_tui_acting_pane_default)
+ (libraries alcotest masc_tui_types masc_tui_acting_pane))
+
+(test
  (name test_tui_keeper_mark)
  (modules test_tui_keeper_mark)
  (libraries alcotest masc masc_tui_keeper_mark masc_tui_message_layout))

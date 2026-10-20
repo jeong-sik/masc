@@ -41,7 +41,8 @@ audio or accumulate an unbounded queue. Device UID, liveness, sample rate,
 channel count, hardware quantum and engine state remain pinned and checked.
 Configuration notifications and property listeners terminate a changed route.
 Full hardware validation runs at startup, after engine start, on those
-notifications (including UID changes) and before normal stop. Per-block demand
+notifications (including UID changes) and after retiring audio at normal stop.
+The final stop acknowledgement retains that device validation. Per-block demand
 and receipt check engine state and atomic render faults without synchronous
 CoreAudio device-property queries.
 

@@ -192,7 +192,7 @@ private final class PcmOutput {
         do {
             try checkRender()
             switch try JSONDecoder().decode(PcmCommand.self, from: Data(line.utf8)) {
-            case .stop: try check(); finish(); return
+            case .stop: finish(); return
             case .block(let id, let data):
                 guard let demand = pending, demand.id == id, data.count == Int(frames) * 2 * 4 else { throw PcmFailure("unexpected PCM block identity/size") }
                 let samples = data.withUnsafeBytes { bytes in
@@ -221,7 +221,12 @@ private final class PcmOutput {
         guard state != .stopped else { return }
         state = .stopped; ring.stopped.store(true, ordering: .releasing)
         engine.stop()
-        let error = failure ?? renderFailure()
+        var error = failure ?? renderFailure()
+        // Retire audio before the final device queries. A slow control-plane
+        // read at explicit stop must not starve a still-running callback.
+        if error == nil {
+            do { try check() } catch let validationError { error = validationError }
+        }
         if let configuration { NotificationCenter.default.removeObserver(configuration) }
         for (object, original, listener) in listeners {
             var key = original; AudioObjectRemovePropertyListenerBlock(object, &key, .main, listener)

@@ -1,5 +1,6 @@
 open Lane_addon_types
 module Engine = Lane_addon_engine
+module Protocol = Lane_addon_worker_protocol
 
 type error =
   | Invalid_package of string
@@ -17,18 +18,8 @@ type mount = Engine.mount = { source : string; destination : string }
 type t = {
   id : string;
   name : string;
-  instance_id : string;
-  package : package;
-  artifact_store : Lane_addon_store.t option;
-  input_history : Lane_addon_machine_history.t;
-  sampling_broker : Lane_addon_sampling.t option;
-  mutable exported_tools : Mcp_protocol.Mcp_types.tool list;
-  mutable tool_hooks : (string * Lane_addon_tool_hooks.t) list;
-  mutable action_schema : Yojson.Safe.t option;
-  mutable client : Agent_core.Mcp.t option;
+  protocol : Lane_addon_worker_protocol.t;
   cleanup : unit -> (unit, error) result;
-  mutex : Eio.Mutex.t;
-  mutable stopping : bool;
   mutable removed : bool;
 }
 
@@ -72,8 +63,14 @@ let cleanup_failure = function
 let ( let* ) = Result.bind
 let container_id t = t.id
 let container_name t = t.name
-let action_schema t = t.action_schema
-let exported_tools t = if t.stopping then [] else t.exported_tools
+let action_schema t = Protocol.action_schema t.protocol
+let exported_tools t = Protocol.exported_tools t.protocol
+let protocol_result result = Result.map_error (function
+  | Protocol.Invalid_contract detail -> Invalid_package detail
+  | Protocol.Protocol_failed detail -> Protocol_failed detail
+  | Protocol.Host_refusal refusal -> Host_refusal refusal
+  | Protocol.Invalid_observation detail -> Invalid_observation detail
+  | Protocol.Stopped -> Stopped) result
 let engine_error runtime ~operation detail = match runtime with
   | Docker -> Docker_failed { operation; detail }
   | Apple_container -> Engine_failed { runtime; operation; detail }
@@ -258,13 +255,12 @@ let holder_changed ~clock ~control_timeout_sec ~mgr ~runtime
 let stop t =
   (* Never take the observation mutex: an unresponsive observation is a
      reason to stop, not a prerequisite for stopping. *)
-  t.stopping <- true;
+  Protocol.revoke t.protocol;
   if t.removed then Ok ()
   else
     let* () = t.cleanup () in
     t.removed <- true;
-    (try Option.iter Agent_core.Mcp.close t.client with
-     | Eio.Io _ | Unix.Unix_error _ | Sys_error _ -> ());
+    Protocol.close t.protocol;
     Ok ()
 
 let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package) ?state_owner ?(mounts = [])
@@ -278,8 +274,7 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
     | Persistent, None -> Error (Invalid_package "persistent state requires a host-owned installation identity")
     | Ephemeral, Some _ -> Error (Invalid_package "package did not declare persistent state")
     | Persistent, Some _ | Ephemeral, None -> Ok () in
-  let* _ = validate_exported_tools ~action_tool:package.action_tool package.exported_tools
-    |> Result.map_error (fun detail -> Invalid_package detail) in
+  let* contract = Protocol.contract_of_package package |> protocol_result in
   let sampling_broker = sampling_handler in
   let* sampling_handler = match package.model_access, sampling_handler with
     | Model_disabled, None -> Ok None
@@ -405,12 +400,12 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
         try Eio.Flow.close source with Eio.Io _ | Unix.Unix_error _ -> ()) !stderr_source;
       stderr_source := None;
       Ok () in
-    let worker = { id; name; instance_id; package; artifact_store; input_history=Lane_addon_machine_history.create (); sampling_broker; action_schema = None; exported_tools = [];
-                   tool_hooks = []; client = None; cleanup = worker_cleanup;
-                   mutex = Eio.Mutex.create (); stopping = false; removed = false } in
+    let protocol = Protocol.create ~instance_id ~contract
+      ?artifact_store ?sampling_broker () in
+    let worker = {id;name;protocol;cleanup=worker_cleanup;removed=false} in
     let result = try
       on_created worker;
-      let* () = if worker.stopping then Error Stopped else Ok () in
+      let* () = if Protocol.revoked protocol then Error Stopped else Ok () in
       let* inspected = run ~operation:"inspect" (Engine.inspect_arguments runtime id) in
       let* inspected_id = Engine.verify_container runtime ~name ~resources:package.resources ~image_digest inspected
         |> Result.map_error (engine_error runtime ~operation:"inspect") in
@@ -429,56 +424,8 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
             ~max_response_bytes:package.resources.max_reply_bytes ?sampling_handler ()
           |> Result.map_error protocol_error in
         Eio.Flow.close stderr_w;
-        worker.client <- Some client;
-        let* () = if worker.stopping then Error Stopped else Ok () in
-        let* () = Agent_core.Mcp.initialize client |> Result.map_error protocol_error in
-        let* tools = Agent_core.Mcp.list_tools_full client |> Result.map_error protocol_error in
-        if not (List.exists (fun (tool : Mcp_protocol.Mcp_types.tool) ->
-            String.equal tool.name "lane_observe") tools) then
-          Error (Protocol_failed "package must advertise lane_observe in its initial tools/list page")
-        else if worker.stopping then Error Stopped
-        else
-          let* () = match package.action_tool with
-            | None -> Ok ()
-            | Some name ->
-                (match List.filter (fun (tool : Mcp_protocol.Mcp_types.tool) -> tool.name = name) tools with
-                 | [tool] ->
-                     let* () = Lane_addon_action.validate_schema tool.input_schema
-                       |> Result.map_error (fun detail -> Protocol_failed detail) in
-                     worker.action_schema <- Some tool.input_schema; Ok ()
-                 | _ -> Error (Protocol_failed "package must advertise exactly one configured action tool")) in
-          let* () = match package.tool_invocation with
-            | Direct -> Ok ()
-            | Host_context ->
-                if package.action_tool = Some Lane_addon_call_context.tool_name then
-                  Error (Invalid_package "caller-context control port cannot also be the action port")
-                else match List.filter (fun (tool : Mcp_protocol.Mcp_types.tool) ->
-                    String.equal tool.name Lane_addon_call_context.tool_name) tools with
-                  | [_] -> Ok ()
-                  | _ -> Error (Protocol_failed "package must advertise exactly one lane_call control tool") in
-          let* () =
-            if not (uses_host_requests package) then Ok ()
-            else
-              let advertised_once name =
-                List.length (List.filter (fun (tool : Mcp_protocol.Mcp_types.tool) ->
-                  String.equal tool.name name) tools) = 1 in
-              if advertised_once host_requests_tool && advertised_once host_result_tool then Ok ()
-              else Error (Protocol_failed
-                "a package that declares exact outputs must advertise lane_host_requests and lane_host_result once each") in
-          let* exported = List.fold_left (fun result name ->
-            let* selected = result in
-            match List.filter (fun (tool : Mcp_protocol.Mcp_types.tool) -> String.equal tool.name name) tools with
-            | [tool] -> Ok (tool :: selected)
-            | _ -> Error (Protocol_failed ("package must advertise exactly one exported tool: " ^ name)))
-            (Ok []) package.exported_tools in
-          let* tool_hooks = List.fold_left (fun result (tool : Mcp_protocol.Mcp_types.tool) ->
-            let* checks = result in
-            let* hooks = Lane_addon_tool_hooks.prepare ~hooks:package.tool_hooks tool
-              |> Result.map_error (fun detail -> Protocol_failed detail) in
-            Ok ((tool.name, hooks) :: checks)) (Ok []) exported in
-          worker.tool_hooks <- tool_hooks;
-          worker.exported_tools <- List.rev exported;
-          Ok worker
+        let* () = Protocol.initialize protocol client |> protocol_result in
+        Ok worker
       with
       | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _
         | Invalid_argument _) as exn -> Error (Protocol_failed (Printexc.to_string exn))
@@ -486,145 +433,16 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
     match result with
     | Ok _ -> result
     | Error error ->
-        Option.iter Agent_core.Mcp.close worker.client;
+        Protocol.close protocol;
         fail_start error
   end
 
 let observe t ~binding ~sources =
-  if t.stopping then Error Stopped
-  (* Cancellation must remain possible during an unresponsive request. After
-     cancellation this client is retired, so no future request can consume a
-     response belonging to the cancelled call. *)
-  else Eio.Mutex.use_ro t.mutex (fun () ->
-    if t.stopping then Error Stopped
-    else
-      let read () =
-      try
-        let* client = match t.client with
-          | Some client -> Ok client | None -> Error (Protocol_failed "worker initialization pending") in
-        let* result = Agent_core.Mcp.call_tool_full client ~name:"lane_observe"
-            ~arguments:(`Assoc ([ "binding", binding; "sources", sources ] @
-              match t.package.action_tool with None -> []
-              | Some _ -> ["context", Lane_addon_action.context t.instance_id]))
-          |> Result.map_error (fun error -> Protocol_failed (Agent_core.Error.to_string error)) in
-        if t.stopping then Error Stopped
-        else match result.Mcp_protocol.Mcp_types.is_error with
-          | Some true -> Error (Protocol_failed (Agent_core.Mcp.text_of_tool_result result))
-          (* MCP permits omission of isError; only an explicit true reports
-             tool failure. Structured observation validation remains required. *)
-          | Some false | None ->
-              match result.structured_content with
-              | None -> Error (Invalid_observation "lane_observe must return structuredContent")
-              | Some json ->
-                  let* output = Eio_unix.run_in_systhread (fun () ->
-                    Lane_addon_packet.decode ?store:t.artifact_store json)
-                    |> Result.map_error (fun detail -> Invalid_observation detail) in
-                  let has_history = List.exists (fun (row : row) -> List.mem_assoc "input_history" row.fields) output.rows in
-                  if not has_history then Ok output else
-                  let* store = match t.artifact_store with Some store -> Ok store
-                    | None -> Error (Invalid_observation "machine history requires an owned artifact store") in
-                  let* output = Lane_addon_machine_history.retain t.input_history ~store ~instance_id:t.instance_id
-                    ~max_response_bytes:t.package.resources.max_reply_bytes
-                    ~call:(fun ~name ~arguments ->
-                      if t.stopping then Error "worker stopped during input history transfer"
-                      else Agent_core.Mcp.call_tool_full client ~name ~arguments
-                        |> Result.map_error Agent_core.Error.to_string) output
-                    |> Result.map_error (fun detail -> Invalid_observation detail) in
-                  if t.stopping then Error Stopped else Ok output
-      with
-      | Eio.Cancel.Cancelled _ as exn -> t.stopping <- true; raise exn
-      | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _
-        | Invalid_argument _) as exn ->
-          if t.stopping then Error Stopped
-          else Error (Protocol_failed (Printexc.to_string exn)) in
-      match t.sampling_broker with
-      | None -> read ()
-      | Some broker -> Lane_addon_sampling.with_observation broker ~binding ~sources
-          ~on_error:(fun detail -> Invalid_observation detail) read)
+  Protocol.observe t.protocol ~binding ~sources |> protocol_result
+let act t ~arguments = Protocol.act t.protocol ~arguments |> protocol_result
+let call_exported_tool ?on_result ?authorize ?principal t ~name ~arguments =
+  Protocol.call_exported_tool ?on_result ?authorize ?principal t.protocol ~name ~arguments
+  |> protocol_result
 
-(* This call only reports transport success or the package's explicit outcome.
-   Once dispatched, errors never establish that the environment was unchanged. *)
-let act t ~arguments =
-  if t.stopping then Error Stopped
-  else Eio.Mutex.use_ro t.mutex (fun () ->
-    if t.stopping then Error Stopped
-    else try
-      let* client = match t.client with Some client -> Ok client
-        | None -> Error (Protocol_failed "worker initialization pending") in
-      let* name, schema, store = match t.package.action_tool, t.action_schema, t.artifact_store with
-        | Some name, Some schema, Some store -> Ok (name, schema, store)
-        | _ -> Error (Protocol_failed "worker does not advertise an available action port") in
-      let* arguments = Lane_addon_action.validate ~schema ~name arguments
-        |> Result.map_error (fun detail -> Protocol_failed detail) in
-      let* result = Agent_core.Mcp.call_tool_full client ~name ~arguments
-        |> Result.map_error (fun error -> Protocol_failed (Agent_core.Error.to_string error)) in
-      match result.Mcp_protocol.Mcp_types.is_error with
-      | Some true -> Error (Protocol_failed (Agent_core.Mcp.text_of_tool_result result))
-      | None | Some false ->
-          (match result.structured_content with
-           | None -> Error (Protocol_failed "action tool must return structuredContent")
-           | Some json -> Eio_unix.run_in_systhread (fun () ->
-               Lane_addon_action.decode_result ~store json)
-               |> Result.map_error (fun detail -> Protocol_failed detail))
-    with
-    | Eio.Cancel.Cancelled _ as exn -> t.stopping <- true; raise exn
-    | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _ | Invalid_argument _) as exn ->
-        Error (Protocol_failed (Printexc.to_string exn)))
-
-(* The host request tools answer the host only; no Keeper reaches them. Their
-   answer is structured content, or the call failed. *)
-let call_host_tool t ~name ~arguments =
-  if t.stopping then Error Stopped
-  else Eio.Mutex.use_ro t.mutex (fun () ->
-    if t.stopping then Error Stopped
-    else try
-      let* client = match t.client with Some client -> Ok client
-        | None -> Error (Protocol_failed "worker initialization pending") in
-      let* result = Agent_core.Mcp.call_tool_full client ~name ~arguments
-        |> Result.map_error (fun error -> Protocol_failed (Agent_core.Error.to_string error)) in
-      match result.Mcp_protocol.Mcp_types.is_error with
-      | Some true -> Error (Protocol_failed (Agent_core.Mcp.text_of_tool_result result))
-      | None | Some false ->
-          (match result.structured_content with
-           | None -> Error (Protocol_failed (name ^ " must return structuredContent"))
-           | Some json -> Ok json)
-    with
-    | Eio.Cancel.Cancelled _ as exn -> t.stopping <- true; raise exn
-    | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _ | Invalid_argument _) as exn ->
-        Error (Protocol_failed (Printexc.to_string exn)))
-
-let host_requests t = call_host_tool t ~name:host_requests_tool ~arguments:(`Assoc [])
-let host_result t ~arguments = call_host_tool t ~name:host_result_tool ~arguments
-
-let call_exported_tool ?(on_result = fun _ -> ()) ?authorize ?(principal = Lane_addon_call_context.Anonymous) t ~name ~arguments =
-  if t.stopping then Error Stopped
-  else
-      let* () = if List.exists (fun (tool : Mcp_protocol.Mcp_types.tool) ->
-          String.equal tool.name name) t.exported_tools then Ok ()
-        else Error (Protocol_failed "tool is not exported by this worker") in
-      let* client = match t.client with Some client -> Ok client
-        | None -> Error (Protocol_failed "worker initialization pending") in
-      let* hooks = match List.assoc_opt name t.tool_hooks with
-        | Some hooks -> Ok hooks
-        | None -> Error (Protocol_failed "exported tool middleware is unavailable") in
-      let* () = Lane_addon_tool_hooks.before_call hooks arguments
-        |> Result.map_error (fun detail -> Host_refusal (Lane_addon_call_context.Rejected detail)) in
-      let call ~name ~arguments =
-        Eio.Mutex.use_ro t.mutex (fun () ->
-          if t.stopping then Error "Add-on worker is stopped"
-          else Agent_core.Mcp.call_tool_full client ~name ~arguments
-            |> Result.map (fun result -> on_result result; result)
-            |> Result.map_error Agent_core.Error.to_string) in
-      try
-        let* result = Lane_addon_worker_invocation.run ~invocation:t.package.tool_invocation
-          ~authorize ~principal ~name ~arguments ~call
-        |> Result.map_error (function
-          | Lane_addon_call_context.Host_refusal refusal -> Host_refusal refusal
-          | Transport_error detail -> Protocol_failed detail) in
-        let* () = Lane_addon_tool_hooks.after_call hooks result
-          |> Result.map_error (fun detail -> Protocol_failed ("tool result rejected after dispatch: " ^ detail)) in
-        Ok result
-      with
-      | Eio.Cancel.Cancelled _ as exn -> t.stopping <- true; raise exn
-      | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _ | Invalid_argument _) as exn ->
-          Error (Protocol_failed (Printexc.to_string exn))
+let host_requests t = Protocol.host_requests t.protocol |> protocol_result
+let host_result t ~arguments = Protocol.host_result t.protocol ~arguments |> protocol_result

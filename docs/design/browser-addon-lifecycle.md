@@ -75,12 +75,14 @@ receipts remain distinct from successful contract validation.
 4. A browser worker that owns WebExtension/BiDi command queues and owned Gecko/
    Chrome execution. Core admission and artifact/model brokers remain host edges;
    built-in browser execution and tool fallback are removed.
-   The foundation now provides `masc-browser-addon-worker`: stdio serves only
-   `lane_observe`, while a host-selected private Unix socket handles concurrent
+   `masc-browser-addon-worker` publishes `browser_command` and `lane_observe`
+   on stdio. The command requires the private host-context control port and
+   uses the installation's selected input/output hooks. A host-selected private Unix socket handles concurrent
    issue/poll/result/disconnect/snapshot requests. One canonical incarnation is
    admitted per process, and every request carries it. Live execution requires
-   the already-selected client ID; no worker-side automatic route selection or
-   retry occurs. Strict codecs retain existing document, viewport, frame and
+   the already-selected client ID at dispatch. The exported tool can choose an
+   available browser for unbound work; tab/document operations require their
+   observed selection. There is no retry. Strict codecs retain existing document, viewport, frame and
    keyboard guards plus partial-effect result bodies. A nested service switch
    owns every accepted connection so idle clients cannot prevent shutdown.
    Retirement fences admission before disconnecting clients and cancelling waits.
@@ -99,6 +101,9 @@ receipts remain distinct from successful contract validation.
    service admission and requests exact worker cleanup without replay. Transport
    exchanges use the existing host control timeout plus the requested wait.
    Empty repeat polls and snapshots do not create observation activity.
+   Runtime observations read the private snapshot rather than the serialized
+   MCP command connection, so a waiting command cannot hide its running phase.
+   Both observation paths use the same typed row validation before publication.
    Normal stop, orphan recovery and slot replacement all require original socket
    cleanup after native settlement. Unknown contents or changed inodes remain
    unconfirmed; a successful historical release cannot delete a resurrected path.
@@ -108,8 +113,8 @@ receipts remain distinct from successful contract validation.
    actual descendant cleanup are connected. Next, the native host must pin
    existing HTTP host registrations to that original incarnation. Late host
    poll/result retries must never be redirected to a replacement. The proxy must
-   apply installation-selected command/result hooks; mandatory wire decoding
-   does not replace those optional hooks. Upload leases, artifacts and model
+   preserve the exported tool's installation-selected command/result hooks;
+   mandatory wire decoding does not replace those optional hooks. Upload leases, artifacts and model
    generation still require their explicit host brokers.
 5. Scoped model-generation middleware using the existing exact-output authority,
    with retained request/terminal evidence and installation-selected routes. The

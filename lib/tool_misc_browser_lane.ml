@@ -8,8 +8,6 @@
 
 open Tool_args
 
-let default_timeout_sec = 20.
-
 (* These failures come from caller-input parsing, before browser dispatch.
    Waiting for a different page cannot repair the same malformed arguments. *)
 let make_input_err ~tool_name ~start_time detail =
@@ -337,7 +335,7 @@ let handle_tabs ~base_path ~tool_name ~start_time args : Tool_result.result =
     match Browser_surface.resolve_target ~required_actions ~verb:Browser_lane.Tabs_list request with
     | Error error -> read_failure ~base_path ~tool_name ~start_time error
     | Ok (selected, target) ->
-      match Browser_lane.issue_for ~target ~verb:Browser_lane.Tabs_list ~timeout_sec:default_timeout_sec with
+      match Browser_lane.issue_for ~target ~verb:Browser_lane.Tabs_list ~timeout_sec:Browser_lane.default_timeout_sec with
       | Error error -> selection_error ~base_path ~tool_name ~start_time error
       | Ok answer ->
         answer_to_result ~lane:(Browser_lane.target_lane target) ~tool_name ~start_time (add_client ~selection:selected target answer |> with_capabilities target required_actions)
@@ -500,7 +498,7 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
             (match Browser_surface.resolve_target ~verb request with
              | Error error -> read_failure ~base_path ~tool_name ~start_time error
              | Ok (selected,target) ->
-               match Browser_lane.issue_for ~target ~verb ~timeout_sec:default_timeout_sec with
+               match Browser_lane.issue_for ~target ~verb ~timeout_sec:Browser_lane.default_timeout_sec with
                | Error error -> selection_error ~base_path ~tool_name ~start_time error
                | Ok answer -> answer_to_result ~lane:(Browser_lane.target_lane target) ~tool_name ~start_time
                    (add_client ~selection:selected target answer)))
@@ -550,7 +548,7 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
       match Browser_surface.resolve_target ~verb request with
       | Error error -> read_failure ~base_path ~tool_name ~start_time error
       | Ok (selected, target) ->
-        match Browser_lane.issue_for ~target ~verb ~timeout_sec:default_timeout_sec with
+        match Browser_lane.issue_for ~target ~verb ~timeout_sec:Browser_lane.default_timeout_sec with
         | Error error -> selection_error ~base_path ~tool_name ~start_time error
         | Ok answer ->
           answer_to_result ~lane:(Browser_lane.target_lane target) ~tool_name ~start_time (add_client ~selection:selected target answer)
@@ -695,7 +693,7 @@ let handle_interact_with_phase ?actor ~base_path ~tool_name ~start_time args =
     let surface_request : Browser_surface.request = {route=request.route;tab_id=Some request.tab_id} in
     let issued = Result.bind (Browser_surface.resolve_target ~verb surface_request) (fun (selected, target) ->
       Browser_lane.issue_for_actor ~actor ~target ~verb
-        ~timeout_sec:default_timeout_sec
+        ~timeout_sec:Browser_lane.default_timeout_sec
       |> Result.map_error (fun error -> Browser_surface.Unselected error)
       |> Result.map (fun answer -> selected, target, answer)) in
     (match issued with
@@ -723,7 +721,7 @@ let instruct_arguments = [ "action"; "instruction"; "tabId"; "schema" ]
    before the outer lane deadline. *)
 let instruct_timeout_sec =
   (float_of_int (Browser_stagehand_wire.timeout_ms Browser_stagehand_wire.sentence_timeout) /. 1000.)
-  +. default_timeout_sec
+  +. Browser_lane.default_timeout_sec
 ;;
 
 type instruct_action = Act | Observe | Extract

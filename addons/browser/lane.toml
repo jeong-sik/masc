@@ -6,6 +6,14 @@ service = "browser"
 command = ["masc-browser-addon-worker"]
 contributions = ["observe"]
 
+[world.skills]
+directory = "skills"
+
+[world.tools]
+export = ["browser_command"]
+invocation = "host_context"
+hooks = ["validate_input", "validate_output"]
+
 [world.outputs.connections]
 all_lanes = true
 

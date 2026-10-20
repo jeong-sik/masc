@@ -2190,7 +2190,17 @@ let test_committed_range_receipt_rejects_absent_snapshot () =
     ~keepers_dir
     "receipt authorized a range without a Memory snapshot";
   check bool "invalid receipt is removed" false
-    (Sys.file_exists (Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper"))
+    (Sys.file_exists (Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper"));
+  (* The range has no unread records, and it still moves aside: the receipt is
+     the record that its input was consumed. *)
+  let moved = match rejected_receipt_files ~keepers_dir with
+    | [only] ->
+      Yojson.Safe.Util.(Yojson.Safe.from_file (Filename.concat keepers_dir only)
+        |> member "receipts" |> to_list |> List.map (fun row -> row |> member "entry" |> member "range_id"))
+    | names -> Alcotest.failf "expected one rejected receipt file, found %d" (List.length names) in
+  check (list string) "the hole-less receipt is moved aside before removal"
+    [Yojson.Safe.to_string (Current.durable_range_id_to_json durable_range_id)]
+    (List.map Yojson.Safe.to_string moved)
 ;;
 
 let test_committed_range_receipt_rejects_snapshot_rollback () =
@@ -2464,7 +2474,9 @@ let test_candidate_receipt_reconciliation_preserves_first_order () =
   check bool "reconciled reads are idempotent" true
     (read_candidates ~keepers_dir a.queue_generation = expected);
   check string "an unchanged receipt set is not rewritten" reconciled
-    (Fs_compat.load_file path)
+    (Fs_compat.load_file path);
+  check (list string) "a duplicate covered by its verified twin is not moved aside" []
+    (rejected_receipt_files ~keepers_dir)
 ;;
 
 let test_candidate_set_conflict_is_atomic () =

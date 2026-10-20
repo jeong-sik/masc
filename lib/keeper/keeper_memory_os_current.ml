@@ -684,11 +684,12 @@ let remove_durable_range_receipts ~keepers_dir ~keeper_id =
   removed
 ;;
 
-(* Move undecodable receipt entries aside before the ledger is rewritten
-   without them. Recovering by destroying the only copy of the rejected
-   state is not recovery, so a sidecar write failure keeps the entries in
-   place and fails the pass: it retries instead of wedging, because the
-   next pass quarantines them again. *)
+(* Move receipt entries aside before the ledger is rewritten without them:
+   entries this binary cannot decode, and receipts the snapshot does not
+   prove. Recovering by destroying the only copy of the rejected state is
+   not recovery, so a sidecar write failure keeps the entries in place and
+   fails the pass: it retries instead of wedging, because the next pass
+   quarantines them again. Nothing reads a sidecar back. *)
 let quarantine_skipped_range_receipts ~keepers_dir ~keeper_id ~skipped =
   match skipped with
   | [] -> Ok ()
@@ -836,24 +837,29 @@ let reconcile_durable_range_receipts
     (* Archive every verified source before de-duplicating a scope or replacing
        its WAL entry. Even an otherwise redundant receipt can carry evidence. *)
     let* _ = archive_verified_holes ~keepers_dir ~keeper_id verified in
-    let unverified_holes = List.filter_map (fun (index, receipt) ->
+    (* A receipt the snapshot does not prove leaves the ledger here. It can
+       still be the only record that its input was consumed: the snapshot it
+       names may have been published and then lost, and admission counts a
+       prepared explicit receipt as consumed while its snapshot matches. So
+       every such receipt moves aside, whatever its range kind, unless a
+       verified receipt keeps the same range. *)
+    let unproven = List.filter_map (fun (index, receipt) ->
       let range_id = receipt_range_id receipt in
-      if receipt_holes range_id = []
-         || List.exists (fun known -> receipt_range_id known = range_id) verified
-      then None else Some {index;reason="unread receipt lacks a matching Memory snapshot proof";
+      if List.exists (fun known -> receipt_range_id known = range_id) verified
+      then None else Some {index;reason="receipt lacks a matching Memory snapshot proof";
         entry=durable_range_receipt_to_json receipt})
       (List.mapi (fun index receipt -> index, receipt) receipts) in
-    let* () = quarantine_skipped_range_receipts ~keepers_dir ~keeper_id ~skipped:unverified_holes in
+    let* () = quarantine_skipped_range_receipts ~keepers_dir ~keeper_id ~skipped:unproven in
     let reconciled = verified |> List.fold_left (fun kept receipt ->
            let key = range_key (receipt_range_id receipt) in
            if Hashtbl.mem seen key then kept
            else (Hashtbl.add seen key (); receipt :: kept)) []
       |> List.rev
     in
-    (* Skipped entries never reach [reconciled], so a file that only lost
-       legacy entries rewrites itself clean the first pass that reads it; a
-       file left with nothing is removed. The quarantine runs before either
-       write: the ledger must not forget bytes it has not preserved. *)
+    (* Neither skipped entries nor unproven receipts reach [reconciled], so a
+       file that lost them rewrites itself clean the first pass that reads
+       it; a file left with nothing is removed. Both quarantines run before
+       either write: the ledger must not forget bytes it has not preserved. *)
     let* () = quarantine_skipped_range_receipts ~keepers_dir ~keeper_id ~skipped in
     if receipts = reconciled && skipped = []
     then (
@@ -1678,6 +1684,9 @@ let recover_publication_locked ~keepers_dir ~keeper_id =
           if Option.map fst receipt.prior = Some current.revision then Ok (Some (current, text))
           else Error "publication prior revision conflicts; stores preserved" in
       let* () = reconcile_retraction_plan_receipt ~keepers_dir ~keeper_id ~snapshot in
+      (* The target was never published, so the receipts prepared for it
+         consumed nothing; the reconcile still moves them aside as it does
+         every receipt it drops. *)
       let* _ = reconcile_durable_range_receipts ~keepers_dir ~keeper_id ~snapshot in
       let+ () = remove_publication ~keepers_dir ~keeper_id in None
     else match content with

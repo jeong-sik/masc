@@ -679,7 +679,7 @@ let test_rejudged_commit_keeps_one_fact () = with_store (fun keepers_dir ->
 
 (* The snapshot itself is gone. Right after the loss the receipts it proved
    still refuse judgment. The next ordinary Librarian read reconciles the
-   receipt sidecar against no snapshot and drops them, and the remaining
+   receipt sidecar against no snapshot and moves them aside, and the remaining
    explicit input then joins the Memory that starts again, as durable and
    continuity input do; it is not held back for a snapshot nothing restores.
    See docs/guides/keeper-memory-limits.md, "Explicit memory writes". *)
@@ -710,6 +710,68 @@ let test_snapshot_loss_admits_remaining_input_into_new_memory () = with_store (f
     (match current with
      | Some current -> List.map (fun (f : Types.fact) -> f.claim) current.facts
      | None -> []))
+
+let rejected_receipt_files keepers_dir =
+  let prefix =
+    Filename.basename (Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper")
+    ^ ".rejected-" in
+  Sys.readdir keepers_dir |> Array.to_list
+  |> List.filter (String.starts_with ~prefix) |> List.sort String.compare
+
+(* After the snapshot loss, the explicit receipts of a and b are the only
+   record that the queue already gave those rows to Memory. The ordinary read
+   that drops them from the receipt file first moves them to a rejected file
+   with a reason; the remaining row is still judged. *)
+let test_snapshot_loss_quarantines_explicit_receipts_and_queue_proceeds () = with_store (fun keepers_dir ->
+  List.iter (fun id -> ignore (append keepers_dir id ("rule " ^ id))) ["a";"b";"c"];
+  let consumed = List.filter (fun (id : Current.explicit_candidate_id) -> id.request_id <> "c")
+    (Queue.candidate_ids (batch keepers_dir)) in
+  ignore (commit keepers_dir consumed [fact "rule a"; fact "rule b"]);
+  acknowledge keepers_dir;
+  let receipt_path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  let receipts_of file = Yojson.Safe.Util.(Yojson.Safe.from_file file |> member "receipts" |> to_list) in
+  let canonical entries =
+    List.sort String.compare (List.map (fun entry -> Yojson.Safe.to_string (Yojson.Safe.sort entry)) entries) in
+  let request_ids entries = List.sort String.compare (List.map (fun entry ->
+    Yojson.Safe.Util.(entry |> member "explicit_candidate_id" |> member "request_id" |> to_string)) entries) in
+  let committed = receipts_of receipt_path in
+  check (list string) "a and b hold committed explicit receipts" ["committed"; "committed"]
+    (List.map (fun entry -> Yojson.Safe.Util.(entry |> member "state" |> to_string)) committed);
+  check (list string) "the committed receipts name a and b" ["a"; "b"] (request_ids committed);
+  Sys.remove (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper");
+  (match Worker.For_testing.run_with ~keepers_dir ~keeper_name:"keeper"
+     ~judge:(fun _ -> fail "input judged against a receipt whose snapshot is gone") with
+   | Worker.Unavailable _ -> ()
+   | Worker.Disabled | Worker.Idle | Worker.Recheck_new_input | Worker.Settled _
+   | Worker.Pending _ -> fail "a receipt without its snapshot was accepted");
+  check bool "admission keeps the receipt file" true (Sys.file_exists receipt_path);
+  check (list string) "admission moves no receipt aside" [] (rejected_receipt_files keepers_dir);
+  ignore (Current.committed_durable_coverage ~keepers_dir ~keeper_id:"keeper"
+    ~receipt_scope:"ordinary-librarian-read" |> require);
+  check bool "the ordinary read removes the emptied receipt file" false (Sys.file_exists receipt_path);
+  let sidecar = match rejected_receipt_files keepers_dir with
+    | [only] -> only
+    | names -> failf "expected one rejected receipt file, found %d" (List.length names) in
+  let quarantined = receipts_of (Filename.concat keepers_dir sidecar) in
+  let entries = List.map (Yojson.Safe.Util.member "entry") quarantined in
+  check (list string) "the rejected file holds the committed receipts of a and b"
+    (canonical committed) (canonical entries);
+  check bool "every moved receipt names a reason" true (List.for_all (fun row ->
+    Yojson.Safe.Util.(row |> member "reason" |> to_string) <> "") quarantined);
+  let judged = ref [] in
+  let outcome = Worker.For_testing.run_with ~keepers_dir ~keeper_name:"keeper"
+    ~judge:(fun selected ->
+      judged := candidate_names selected :: !judged;
+      ignore (commit keepers_dir (Queue.candidate_ids selected) [fact "rule c"]);
+      Worker.Committed) in
+  check (list (list string)) "only the remaining row is judged" [["c"]] !judged;
+  check bool "the remaining row settles" true (outcome = Worker.Settled {has_more=false});
+  ignore (Current.committed_durable_coverage ~keepers_dir ~keeper_id:"keeper"
+    ~receipt_scope:"ordinary-librarian-read" |> require);
+  check (list string) "a later ordinary read moves nothing else aside" [sidecar]
+    (rejected_receipt_files keepers_dir);
+  check bool "the receipt file now proves only the new commit" true
+    (request_ids (receipts_of receipt_path) = ["c"]))
 
 let test_size_with_a_same_failure_is_deferred_whole () =
   let reason ~capacity ~same : Masc.Keeper_librarian_runtime.not_committed =
@@ -750,6 +812,7 @@ let () = run "durable explicit admission queue"
     test_case "lost receipts do not block the remaining input" `Quick test_lost_receipts_do_not_block_remaining_input;
     test_case "a re-judged commit keeps one fact" `Quick test_rejudged_commit_keeps_one_fact;
     test_case "snapshot loss admits remaining input into the new Memory" `Quick test_snapshot_loss_admits_remaining_input_into_new_memory;
+    test_case "snapshot loss moves explicit receipts aside and the queue proceeds" `Quick test_snapshot_loss_quarantines_explicit_receipts_and_queue_proceeds;
     test_case "sparse receipt recovery preserves deferred gap and new append" `Quick test_sparse_consumption_retains_gap_and_append;
     test_case "partial worker wakes only newly unjudged input" `Quick test_worker_partial_consumption_wakes_only_new_input;
     test_case "pending is distinct from current Memory" `Quick test_pending_is_not_current;

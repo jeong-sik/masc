@@ -160,6 +160,7 @@ export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState
   completion.catch(() => {})
   return { ready, completion,
     diagnostics() { return monitor ? { source, ...monitor.diagnostics(), failure: failure?.message ?? null } : null },
+    async inspect() { return monitor ? { source, ...await monitor.inspect(), failure: failure?.message ?? null } : null },
     stop({ admittedControls = false } = {}) {
       // View close ends native admission immediately, while controls already
       // queued before close must still decide before drained MIDI packets.

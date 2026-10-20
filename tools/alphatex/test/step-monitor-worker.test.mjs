@@ -1,0 +1,149 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdtemp, copyFile, symlink, writeFile, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, dirname, delimiter } from 'node:path'
+import { pathToFileURL, fileURLToPath } from 'node:url'
+import { Worker } from 'node:worker_threads'
+import { createHash } from 'node:crypto'
+
+const bytes = Buffer.from('worker-owned preset')
+const sound = { kind: 'vst', selection: { plugin_path: '/fixture.vst3', plugin_name: null, preset_path: null, name: 'Fixture' },
+  instrument: { identifier: 'fixture-id', version: '1' },
+  preset: { data: bytes.toString('base64'), sha256: createHash('sha256').update(bytes).digest('hex') } }
+const packet = words => ({ kind: 'midi', source: '10', protocol: 2, timestampOrigin: 'packet', words })
+// Real workers and protocol children, with device demand on a child event loop.
+// The fixture clock is a scheduling probe, not a hardware latency measurement.
+async function runtime({ pcm = 'paced', vst = 'valid' } = {}) {
+  const directory = await mkdtemp(join(tmpdir(), 'monitor-worker-'))
+  const trace = join(directory, 'events.jsonl'), workers = []
+  for (const file of ['step-monitor.mjs', 'step-monitor-worker.mjs', 'step-monitor-session.mjs',
+    'project-sound.mjs', 'pcm-output.mjs', 'vst-stream.mjs', 'session-data.mjs', 'wave-file.mjs']) {
+    await copyFile(new URL(`../${file}`, import.meta.url), join(directory, file))
+  }
+  await symlink(fileURLToPath(new URL('../node_modules', import.meta.url)), join(directory, 'node_modules'), 'dir')
+  for (const [name, fixture, mode] of [['music-pcm-output', 'pcm-output', pcm], ['masc-vst-host', 'vst-stream', vst]]) {
+    const fixtureURL = new URL(`./fixtures/${fixture}.mjs`, import.meta.url).href
+    await writeFile(join(directory, name), `#!/usr/bin/env node
+import { appendFileSync } from 'node:fs'
+const log = row => appendFileSync(${JSON.stringify(trace)}, JSON.stringify(row) + '\\n')
+log({kind:'start',name:${JSON.stringify(name)},pid:process.pid})
+process.on('exit', () => log({kind:'exit',name:${JSON.stringify(name)},pid:process.pid}))
+let text = ''
+process.stdin.on('data', chunk => {
+  text += chunk
+  let end
+  while ((end=text.indexOf('\\n'))>=0) {
+    const line=text.slice(0,end);text=text.slice(end+1)
+    const row=JSON.parse(line)
+    if(row.kind==='render') log({kind:'render',messages:row.messages})
+  }
+})
+process.argv.splice(2,0,${JSON.stringify(mode)})
+await import(${JSON.stringify(fixtureURL)})
+`, { mode: 0o755 })
+  }
+  const { openStepMonitor } = await import(pathToFileURL(join(directory, 'step-monitor.mjs')))
+  return { directory, trace,
+    open(options = {}) {
+      return openStepMonitor({ sound, output: 'owned', channel: 2, ...options,
+        createWorker(url, config) {
+          const worker = new Worker(url, { ...config, env: { ...process.env,
+            PATH: [directory, dirname(process.execPath), process.env.PATH].join(delimiter) } })
+          const record = { worker, closed: false }; workers.push(record)
+          worker.once('exit', () => { record.closed = true })
+          return worker
+        } })
+    },
+    async assertClosed() {
+      assert.ok(workers.every(record => record.closed))
+      const rows = (await readFile(trace, 'utf8')).trim().split('\n').map(JSON.parse)
+      for (const child of rows.filter(row => row.kind === 'start')) {
+        assert.throws(() => process.kill(child.pid, 0), error => error.code === 'ESRCH', `child ${child.name} is reaped`)
+      }
+      return rows
+    },
+    dispose: () => rm(directory, { recursive: true, force: true }),
+  }
+}
+
+test('worker sustains demand during a blocked terminal and retains MIDI order and final joins', async () => {
+  const fixture = await runtime(), owner = fixture.open()
+  try {
+    await owner.ready
+    const sent = owner.send(owner.prepare(packet([0x40903c00, 0xa0000000])))
+    await assert.rejects(owner.send(owner.prepare(packet([0x40904000, 0xa0000000]))), /pending monitor packet/)
+    await sent
+    const before = await owner.inspect()
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100)
+    const a = owner.inspect(), b = owner.inspect()
+    assert.equal(a, b) // one diagnostic request, not an unbounded query queue
+    const after = await a
+    assert.ok(BigInt(after.pcm.requestedBlocks) > BigInt(before.pcm.requestedBlocks))
+    assert.equal(after.pcm.final, null)
+    await owner.send(owner.prepare(packet([0x40803c00, 0])))
+    owner.stop(); await owner.completion
+    const report = owner.diagnostics()
+    assert.equal(report.worker.closed, true); assert.equal(report.worker.terminalReceived, true)
+    assert.equal(report.pcm.nativeClosed, true); assert.equal(report.pcm.settled, true)
+    assert.equal(report.pcm.final.success, true)
+    const rows = await fixture.assertClosed()
+    assert.deepEqual(rows.filter(row => row.kind === 'render').flatMap(row => row.messages).map(row => row.bytes),
+      [[0x92, 60, 80], [0x82, 60, 0]])
+    report.pcm.device.id = 'caller mutation'
+    assert.equal((await owner.inspect()).pcm.device.id, 'owned')
+  } finally { owner.stop(); await owner.completion.catch(() => {}); await fixture.dispose() }
+})
+
+test('worker stop before ready joins children and cancellation preserves uncloneable caller causes', async () => {
+  for (const reason of [null, false, 0, '', () => {}]) {
+    const fixture = await runtime({ vst: 'wait-block' }), owner = fixture.open()
+    try {
+      // The PCM prepared observation proves child startup without requiring a
+      // completed synth block or an audio-ready acknowledgement.
+      while (!(await owner.inspect()).pcm?.device) await new Promise(resolve => setImmediate(resolve))
+      owner.stop(); owner.cancel(reason)
+      await assert.rejects(owner.completion, error => error.cause === reason)
+      await assert.rejects(owner.ready)
+      await fixture.assertClosed()
+    } finally { owner.stop(); await owner.completion.catch(() => {}); await fixture.dispose() }
+  }
+})
+
+test('normal stop while the synth is opening retires children without requiring ready', async () => {
+  const fixture = await runtime({ vst: 'wait-block' }), owner = fixture.open()
+  try {
+    while (!(await owner.inspect()).pcm?.device) await new Promise(resolve => setImmediate(resolve))
+    owner.stop(); await owner.completion
+    await assert.rejects(owner.ready)
+    await fixture.assertClosed()
+    assert.equal(owner.diagnostics().worker.terminalReceived, true)
+  } finally { owner.stop(); await owner.completion.catch(() => {}); await fixture.dispose() }
+})
+
+test('unexpected worker exit is failure with unconfirmed native cleanup, never an invented final', async () => {
+  const { openStepMonitor } = await import('../step-monitor.mjs')
+  const owner = openStepMonitor({ sound, output: 'owned', channel: 0,
+    createWorker() { return new Worker('process.exit(3)', { eval: true }) } })
+  const inspected = owner.inspect()
+  await assert.rejects(owner.completion, /without confirmed cleanup/)
+  await assert.rejects(owner.ready)
+  assert.equal((await inspected).worker.closed, true)
+  assert.equal(owner.diagnostics().worker.terminalReceived, false)
+  assert.equal(owner.diagnostics().pcm, null)
+})
+
+test('worker relays output/synth faults and closed child receipts', async () => {
+  for (const mode of [{ pcm: 'identity' }, { pcm: 'fault-final' }, { vst: 'identity' }, { vst: 'crash' }]) {
+    const fixture = await runtime(mode), owner = fixture.open()
+    try {
+      await owner.ready.catch(() => {})
+      await assert.rejects(owner.completion)
+      assert.equal(owner.diagnostics().worker.closed, true)
+      assert.equal(owner.diagnostics().worker.terminalReceived, true)
+      assert.equal(owner.diagnostics().pcm.nativeClosed, true)
+      if (mode.pcm === 'fault-final') assert.equal(owner.diagnostics().pcm.final.fault, 'underrun')
+      await fixture.assertClosed()
+    } finally { owner.stop(); await owner.completion.catch(() => {}); await fixture.dispose() }
+  }
+})

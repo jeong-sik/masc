@@ -489,7 +489,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         break
       case 'step-stop': stepInput?.stop(); status = 'Draining MIDI step input'; break
       case 'step-diagnostics': {
-        const report = stepInput?.diagnostics?.() ?? lastStepReport
+        const report = await stepInput?.inspect() ?? lastStepReport
         if (!report) throw new Error('Open monitored step input before exporting diagnostics')
         await writeFile(value.path, JSON.stringify(report, null, 2) + '\n', { flag: 'wx', mode: 0o600 })
         status = `Exported ${value.path}`; break

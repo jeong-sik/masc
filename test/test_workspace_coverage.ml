@@ -2744,6 +2744,51 @@ let gc_done_task id =
    the archive, so a crash right after it loses whatever the archive does not
    hold yet. [on_task_mutation_fn] runs when the backlog commit settles: read
    the archive there. *)
+(* The restored task is in the backlog before the archive copy is dropped. An
+   archive that stops being readable in between makes the pass fail, leaves the
+   archive as it was, and the next pass drops the copy without holding the task
+   twice. *)
+let test_gc_stops_when_the_archive_cannot_be_read_to_drop_a_restored_task () =
+  with_test_env (fun config ->
+    let orphan =
+      gc_make_task
+        ~id:"task-905"
+        ~created_at:gc_ancient_ts
+        ~status:
+          (Masc_domain.AwaitingVerification
+             { assignee = "claude"
+             ; started_at = gc_ancient_ts
+             ; submitted_at = gc_ancient_ts
+             ; verification_id = "verif-905"
+             })
+    in
+    append_archive config [ orphan ];
+    let path = Workspace_utils_paths_backend.archive_path config in
+    let archive_before = Fs_compat.load_file path in
+    let broken = "this is not json" in
+    let previous = Atomic.get Workspace_hooks.on_task_mutation_fn in
+    Atomic.set Workspace_hooks.on_task_mutation_fn (fun () ->
+      Fs_compat.save_file path broken);
+    Fun.protect
+      ~finally:(fun () -> Atomic.set Workspace_hooks.on_task_mutation_fn previous)
+      (fun () ->
+        match Workspace.gc config ~days:1 () with
+        | (_ : string) -> Alcotest.fail "the pass finished although the archive could not be read"
+        | exception Workspace.Task_archive_failed detail ->
+          Alcotest.(check bool) "the error names the archive file" true
+            (str_contains detail "tasks-archive.json"));
+    Alcotest.(check string) "the unreadable archive is left as it was" broken
+      (Fs_compat.load_file path);
+    Alcotest.(check bool) "the restored task is in the backlog" true
+      (gc_backlog_has config "task-905");
+    Fs_compat.save_file path archive_before;
+    let _ = Workspace.gc config ~days:1 () in
+    Alcotest.(check bool) "the next pass drops the archive copy" false
+      (List.mem 905 (Workspace.read_archive_task_ids config));
+    Alcotest.(check bool) "the task stays in the backlog" true
+      (gc_backlog_has config "task-905"))
+;;
+
 let test_gc_archives_before_it_commits_the_backlog () =
   with_test_env (fun config ->
     write_tasks config [ gc_done_task "task-920"; gc_done_task "task-921" ];
@@ -3859,6 +3904,10 @@ let () =
             "stops before the backlog when the archive is unreadable"
             `Quick
             test_gc_stops_before_the_backlog_when_the_archive_is_unreadable
+        ; Alcotest.test_case
+            "stops when the archive cannot be read to drop a restored task"
+            `Quick
+            test_gc_stops_when_the_archive_cannot_be_read_to_drop_a_restored_task
         ; Alcotest.test_case
             "archives over a same-id row that does not decode"
             `Quick

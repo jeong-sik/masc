@@ -2199,6 +2199,11 @@ let board_score_style votes =
   else if votes < 0 then (Theme.bad ())
   else (Theme.muted ())
 
+let board_score_text votes =
+  if votes > 0 then Printf.sprintf "▲%+d" votes
+  else if votes < 0 then Printf.sprintf "▼%d" votes
+  else " 0"
+
 (* A value in brackets: [text], folded in the middle only when it runs past
    [max_cells]. Four places fitted the value with [fit_width] first, which
    pads as well as cuts, so a short one closed its bracket after a run of
@@ -2219,14 +2224,9 @@ let board_read_title ~screen ~id ~hearth ~votes ~replies =
         Printf.sprintf "  %s#%s%s" (Theme.info ()) h Ansi.reset
     | _ -> ""
   in
-  let score =
-    if votes > 0 then Printf.sprintf "▲%+d" votes
-    else if votes < 0 then Printf.sprintf "▼%d" votes
-    else " 0"
-  in
   Printf.sprintf "%s  %s%s%s%s  %s%s%s  %s💬%d%s" screen
     (Masc_tui_theme.tone Masc_tui_theme.Accent) id Ansi.reset hearth_tag
-    (board_score_style votes) score Ansi.reset
+    (board_score_style votes) (board_score_text votes) Ansi.reset
     (if replies > 0 then Theme.ok () else Ansi.dim) replies Ansi.reset
 
 

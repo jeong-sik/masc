@@ -2490,6 +2490,16 @@ type board_post = {
           dropped and never fatal to the post. *)
 }
 
+(** A comment's votes. The store counts the two directions apart and the wire
+    sends both; the pane draws their difference, the same net score a post
+    carries as [bp_votes]. *)
+type board_comment_votes = {
+  bcv_up: int;
+  bcv_down: int;
+}
+
+let board_comment_score { bcv_up; bcv_down } = bcv_up - bcv_down
+
 (** Board comment *)
 type board_comment = {
   bc_id: string;
@@ -2501,7 +2511,15 @@ type board_comment = {
   bc_author: string;
   bc_content: string;
   bc_created_at: string;
+  bc_votes: board_comment_votes;
 }
+
+(** What a Board vote is cast on. Posts and comments go to two tool routes; a
+    comment carries the post it sits under so the completion can refresh that
+    post's thread. *)
+type board_vote_target =
+  | Vote_post of string
+  | Vote_comment of { post_id: string; comment_id: string }
 
 (** One scheduled-automation row, from the dashboard schedule projection.
     [sch_status] stays a string rather than a variant: the pane projects the
@@ -8744,6 +8762,16 @@ type state = {
   mutable board_scroll: int;
   mutable board_comment_scroll: int;
   mutable board_comments_focused: bool;
+  (* The selected comment while the comments have focus, by id so a refresh
+     that adds, removes or rescores comments keeps it on the same one. It is
+     read against the open post's thread: an id that thread does not hold
+     selects nothing. *)
+  mutable board_comment_cursor: string option;
+  (* One frame's request to scroll the comment column so the selected
+     comment is on screen. j/k set it; PgUp/PgDn do not, so they still move
+     by rows through a comment longer than the column. Cleared with
+     [board_comment_landing] when a frame returns its scroll. *)
+  mutable board_comment_follow: bool;
   mutable board_mode: board_mode;
   mutable board_focus: pane_focus;
   (* Wide terminals normally keep the Board list beside the open post. [z]
@@ -8776,10 +8804,12 @@ type state = {
      why): set by the numbered attachment keys, cleared when another post
      is opened. *)
   mutable board_attachment_status: string option;
-  (* A vote armed for a second keypress: which post, and up or down. The
-     cursor can move between the two presses, so the post id is captured at
-     arm time and a press on a different row re-arms for that row. *)
-  mutable board_vote_armed: (string * bool) option;
+  (* A vote armed for a second keypress: which post or comment, and up or
+     down. The cursor can move between the two presses, so the target is
+     captured at arm time and a press on a different target re-arms for it.
+     The kind is part of the target, so an arm on a comment is never sent as
+     a post vote or the other way round. *)
+  mutable board_vote_armed: (board_vote_target * bool) option;
   mutable planning: planning_snapshot option;
   mutable planning_baseline: planning_snapshot option;
   mutable planning_error: string option;
@@ -14733,6 +14763,8 @@ let create_state
   board_scroll = 0;
   board_comment_scroll = 0;
   board_comments_focused = false;
+  board_comment_cursor = None;
+  board_comment_follow = false;
   board_mode = Board_list;
   board_focus = Right_pane;
   board_detail_wide = false;
@@ -15997,7 +16029,8 @@ let apply_clamped_scroll (state : state) = function
   | Board_read (body, comments) ->
       state.board_scroll <- body;
       state.board_comment_scroll <- comments;
-      state.board_comment_landing <- None
+      state.board_comment_landing <- None;
+      state.board_comment_follow <- false
   | Message_scroll { scroll; pin } ->
       state.msg_scroll <- max 0 scroll;
       state.msg_scroll_pin <- pin

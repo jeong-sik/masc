@@ -410,12 +410,16 @@ let approval_back =
    "[c] Reply   [v/V] Vote (+/-)   [Y] Copy Link   [Esc] Back" -- above a
    footer that spelled c, Y and Esc again and had no vote key at all, so that
    row was the only place on the screen that said v votes. *)
-let board_vote_key = b Act "v / V" "up / down" ~help:"v votes up; V votes down"
+let board_vote_key =
+  b Act "v / V" "up / down"
+    ~help:"press twice to vote: v up, V down; while reading, on the selected \
+           comment when the comments have focus, otherwise on the post"
 let board_reply_key = b Act "c" "reply" ~help:"reply (while reading)"
 let board_copy_key = b Act "Y" "copy link" ~help:"copy the selected post reference"
 let board_read_focus_key =
   b Navigate "b" "post / comments" ~detail:Detail_only
-    ~help:"switch the focused reading window"
+    ~help:"switch the focused reading window; on the comments, j/k select a \
+           comment and PgUp/PgDn scroll by rows"
 
 let fusion_caller_key = b Navigate "K" "calling Keeper"
 let fusion_board_key = b Navigate "B" "Board evidence"
@@ -1526,10 +1530,18 @@ let footer_hints_board_read ~focus_posts ~focus_comments ~full_history
     | Board_read_wide -> [ b Navigate "z" "list" ]
     | Board_read_one_pane -> []
   in
+  (* On the comments j/k move the selection, not the rows, and the vote keys
+     act on that selection: the labels say which, so v cannot be read as a
+     vote on the post above. *)
+  let vote_key =
+    if focus_comments && not focus_posts then
+      b Act "v / V" "comment up / down"
+    else board_vote_key
+  in
   hints_of_bindings
     ([ b Navigate "j/k"
          (if focus_posts then "posts"
-          else if focus_comments then "comments" else "body")
+          else if focus_comments then "comment" else "body")
      ; board_read_focus_key
      ; b Navigate "[/]" "post"
      ; b Navigate "PgUp/PgDn" "page"
@@ -1550,7 +1562,7 @@ let footer_hints_board_read ~focus_posts ~focus_comments ~full_history
         before this key existed. *)
      @ (if has_attachments then [ b Navigate "1-9" "open" ] else [])
      @ [ b Navigate "o" (if full_history then "newest 20" else "all comments") ]
-     @ [ board_vote_key
+     @ [ vote_key
        ; board_reply_key
        ; board_copy_key
        ; b Act "Left / Esc" "back"

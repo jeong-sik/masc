@@ -10,7 +10,14 @@ type source = {
   table_frame : bool;
 }
 
-type rows = { body : string array; comments : string array; initial_comment_offset : (string * int) option }
+type comment_row =
+  | Thread_note of string
+  | Comment_text of { comment_id : string; text : string }
+
+type rows = { body : string array; comments : comment_row array; initial_comment_offset : (string * int) option }
+
+let comment_gutter_cells = 2
+
 type t = { mutable retained : (source * rows) option }
 
 let close_time seconds =
@@ -44,7 +51,30 @@ let get cache ~source ~render =
 let body_line_count rows = Array.length rows.body
 let comment_line_count rows = Array.length rows.comments
 let body_line rows index = rows.body.(index)
-let comment_line rows index = rows.comments.(index)
+let comment_line rows ~gutter index =
+  match rows.comments.(index) with
+  | Thread_note text -> text
+  | Comment_text { comment_id; text } -> gutter comment_id ^ text
+
+let comment_span rows ~comment_id =
+  let owned_by_comment = function
+    | Comment_text owned -> String.equal owned.comment_id comment_id
+    | Thread_note _ -> false
+  in
+  let count = Array.length rows.comments in
+  let rec first index =
+    if index >= count then None
+    else if owned_by_comment rows.comments.(index) then Some index
+    else first (index + 1)
+  in
+  let rec past_last index =
+    if index < count && owned_by_comment rows.comments.(index) then
+      past_last (index + 1)
+    else index
+  in
+  Option.map
+    (fun first_row -> (first_row, past_last first_row - first_row))
+    (first 0)
 
 let initial_comment_offset rows ~comment_id =
   match rows.initial_comment_offset with

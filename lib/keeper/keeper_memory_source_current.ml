@@ -167,6 +167,13 @@ let render_invalidation invalidation =
     (invalidation_reason_to_string invalidation.reason)
 ;;
 
+let budget_lines = function
+  | None -> []
+  | Some (snapshot : t) ->
+    List.map (render_fact ~verified:false) snapshot.facts
+    @ List.map render_invalidation snapshot.invalidations
+;;
+
 let source_to_json source =
   `Assoc
     [ "kind", `String "file"

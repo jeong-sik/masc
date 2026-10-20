@@ -2481,20 +2481,7 @@ let update_locked_with_output
                ~keeper_id
            with
            | Error message -> Error (store_error message)
-           | Ok snapshot ->
-             let lines =
-               Option.fold
-                 ~none:[]
-                 ~some:(fun (snapshot : Keeper_memory_source_current.t) ->
-                   List.map
-                     (Keeper_memory_source_current.render_fact ~verified:false)
-                     snapshot.facts
-                   @ List.map
-                       Keeper_memory_source_current.render_invalidation
-                       snapshot.invalidations)
-                 snapshot
-             in
-             Ok lines
+           | Ok snapshot -> Ok (Keeper_memory_source_current.budget_lines snapshot)
          in
          let previous_bytes =
            Keeper_memory_os_render.facts_payload_bytes

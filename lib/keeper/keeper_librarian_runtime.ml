@@ -1061,6 +1061,26 @@ let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail =
     record_failure_io ~keepers_dir ~keeper_id ~trace_id ~kind ~detail)
 ;;
 
+(* The payload the commit measures: the facts this pass saw plus the source
+   store's lines. A memory over the budget commits only by shrinking, so a
+   pass that proposes no change cannot commit it. An unreadable source store
+   counts as not within: the full pass reads it again at commit and reports
+   the failure there. *)
+let current_memory_within_budget ~keepers_dir ~keeper_id (inp : Keeper_librarian.input) =
+  match
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      Keeper_memory_source_current.read_for_keepers_dir ~keepers_dir ~keeper_id)
+  with
+  | Error _ -> false
+  | Ok source ->
+    Keeper_memory_os_render.facts_within_budget
+      ~ordinary_facts:
+        (Option.fold ~none:[]
+           ~some:(fun (current : Keeper_librarian.current_selection) -> current.facts)
+           inp.current)
+      ~source_lines:(Keeper_memory_source_current.budget_lines source)
+;;
+
 let current_selection_registry_summary = function
   | None -> `Assoc [ "present", `Bool false; "fact_count", `Int 0 ]
   | Some (current : Keeper_librarian.current_selection) ->
@@ -1584,6 +1604,7 @@ let run_pass
                  | Context_and_memory, Memory_pass None ->
                    Keeper_librarian_context.shows_no_working_context
                      prompt_input.working_context
+                   && current_memory_within_budget ~keepers_dir ~keeper_id prompt_input
                  | (Memory_maintenance | Context_only), _
                  | Context_and_memory,
                    (Memory_pass (Some _) | Working_context_pass | Continuity_state_pass _

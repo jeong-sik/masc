@@ -3046,3 +3046,10 @@
  (public_name masc-browser-addon-worker)
  (package masc)
  (libraries masc masc.time_compat masc.fs_compat mcp_protocol.eio yojson eio eio.unix eio_main))
+
+(executable
+ (name masc_browser_process_owner)
+ (modules masc_browser_process_owner)
+ (public_name masc-browser-process-owner)
+ (package masc)
+ (libraries masc.browser_process_owner yojson eio eio_main))

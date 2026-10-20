@@ -320,6 +320,68 @@ status: reference
   [tools/alphatex/README.md](../../tools/alphatex/README.md) ·
   [tools/alphatex/CAPTURE-PLAYBACK.md](../../tools/alphatex/CAPTURE-PLAYBACK.md)
 
+**MIDI source asset (MIDI 소스 자산)**
+: `masc-alphatex --midi-file`로 들여온 SMF 0/1/2·RIFF RMID 파일을 원본 바이트 그대로
+  보관하는 편집 문서. Phrase처럼 음을 새 스키마로 다시 적지 않고, 원본 base64와
+  source-event 편집·삽입한 채널 메시지를 함께 저장하며 `--project experiment.json`으로
+  다시 연다. 고치지 않은 내보내기는 원본과 바이트가 같고, 고친 내보내기는 손댄 MTrk만
+  다시 써서 다른 SMF 청크와 RIFF 형제를 그대로 남긴다. Source ID는 트랙과 원본 이벤트
+  번호를 가리키므로, 편집은 그 원본 좌표 위에서 한다.
+  - 이름 경계: 녹음이 남긴 `Captured source`(WAV/UMP)도, 녹음 통과인 `Take`도, 음을
+    직접 찍는 `Phrase`도 아니다. 파생한 피아노 롤이나 실수 시간표는 저장본이 아니다
+    (MIDI-SOURCE.md: "Persist the source asset, not a derived piano roll or floating-point
+    schedule").
+  - 아직 아닌 것: 일반 메타데이터 편집, 소스 loop 상태, 오버더브, MIDI 2.0 변환은 별도
+    작업으로 남아 있다. 시험 통과는 완전한 MIDI 지원이나 물리 장치 지원을 뜻하지 않는다
+    (MIDI-SOURCE.md: "Its tests do not establish full MIDI or physical-device support.
+    General metadata, source-loop state, overdub and MIDI 2.0 conversion remain separate
+    work.").
+  → [tools/alphatex/MIDI-SOURCE.md](../../tools/alphatex/MIDI-SOURCE.md) ·
+  [tools/alphatex/README.md](../../tools/alphatex/README.md)
+
+**Source port (소스 포트)**
+: 소스 파일 안에 적힌 0–127 번호의 MIDI 라우팅 정체성. 물리 출력 장치 UID가 아니고,
+  재생할 때 `:midi-port PORT ID`(포트가 하나면 `:midi-output ID`)로 목적지에 명시
+  결속한다. 결속은 그 세션의 선택이라 저장 문서에 남지 않는다.
+  - 결속 규칙: 소스 포트마다 목적지를 정해야 하고, 서로 다른 소스 포트는 서로 다른
+    목적지에 묶어야 한다. 여러 포트의 wire 상태를 한 목적지로 합치는 라우팅은 없다
+    (midi-source-playback.mjs: "Distinct source ports require distinct destinations;
+    merged MIDI wire state is not supported").
+  - 편집 경계: 노트를 다른 포트로 옮기는 편집은 거절된다(MIDI-SOURCE.md: "Moving either
+    message across a MIDI Port change is rejected"). 포트는 음악 편집 대상이 아니라
+    원본에 적힌 라우팅 정체성이다.
+  - 이름 경계: 녹음 입력을 고르는 `--midi all|none|SOURCE_ID`의 `SOURCE_ID`는 CoreMIDI
+    입력 소스 정체성이고, 이 소스 포트와 다른 층이다. 같은 모양의 낱말이 두 층에 쓰이므로
+    문장에서 어느 쪽인지 밝힌다.
+  → [tools/alphatex/MIDI-SOURCE.md](../../tools/alphatex/MIDI-SOURCE.md) ·
+  [tools/alphatex/sequencer-tui.mjs](../../tools/alphatex/sequencer-tui.mjs)
+
+**Source audition (소스 오디션)**
+: 들여온 MIDI 소스의 wire 스트림을 처음부터 정해진 순서대로 내보내는 재생. 소스
+  편집기에서 Space로 시작하고 `:stop`으로 끝낸다. 원본 tempo map이나 SMPTE 시계로
+  시간을 잡고, 메타 이벤트는 소스 데이터로만 쓰며 status `FF`로 전송하지 않는다
+  (MIDI-SOURCE.md: "they are not sent as wire status FF"). 소스 clip loop은 거절된다
+  (midi-source-playback.mjs: "Source audition plays once from the beginning").
+  - 멈출 때의 소유: 이 오디션이 소유한 key-off와 이 소스가 켠 hold pedal(64/66/69)만
+    해제하고 all-notes-off를 방송하지 않는다. vendor SysEx의 기기별 부작용과 공유
+    채널의 외부 노트는 보증하지 않는다.
+  - 이름 경계: `Phrase` 미리듣기는 편집 중인 프로젝트를 SoundFont/WAV/VST로 합성해
+    들려주는 재생이고, 소스 오디션은 파일의 원래 메시지 순서를 그대로 보내는 재생이다.
+    소스 오디션은 VST 악기나 MIDI 출력을 명시해야 하고, 두 경로의 재생 동작이 같지 않다
+    (sequencer-tui.mjs: "Source audition requires a VST instrument or MIDI output").
+  - 재생 경계: pause/resume와 소스 시계 기준 seek는 채널 상태 재구성 경계를 거쳐
+    지원한다(MIDI-SOURCE.md: "Audition starts at the beginning and supports pause/resume
+    and source-clock seek"). 소스 looping은 여전히 불가능하고, 원본 앞부분에 없는 초기
+    채널값을 되돌려야 하는 seek는 거절된다(MidiTransport.swift:297, "source seek cannot
+    restore an initial channel value absent from the source prefix"). 알 수 없는 초기
+    필드와 기기 고유 부작용도 조용히 넘어가지 않고 명시적으로 실패한다.
+  - 서술 이력: #43769(`2fa99025a2`)의 MIDI-SOURCE.md는 "Pause, resume, seek and looping
+    are explicitly unavailable for source timelines"라고 적었고, #43792(`59d3653d3b`)가
+    같은 문장을 위 지원 문장으로 바꿨다. 옛 문장을 인용하면 현행 코드와 어긋나므로,
+    이 항목은 현행 main 문장만 근거로 쓴다.
+  → [tools/alphatex/MIDI-SOURCE.md](../../tools/alphatex/MIDI-SOURCE.md) ·
+  [tools/alphatex/native/MidiTransport.swift](../../tools/alphatex/native/MidiTransport.swift)
+
 **Dashboard Goals**
 : TUI 첫 화면에서 Goal의 기록된 측정값과 연결된 Task 완료 수를 별도로 요약한다.
   Goal의 실제 값은 동일한 Goal ID·기준 개정·지표·목표를 가진 관측 기록에서만 읽는다.

@@ -469,64 +469,58 @@ let handle_memory_retract_with_outcome
     ~args
 ;;
 
-(* Browser lane tools preserve selected native-client identity. The closed
-   state-layer verb set distinguishes reads from explicit-tab interactions;
-   session ownership and direct navigation stay with the lanes the server
-   owns (automation, stagehand). *)
-let handle_browser_tabs_with_outcome ~(config : Workspace.config) ~args =
-  Keeper_tool_execution.of_tool_result
-    (Tool_misc_browser_lane.handle_tabs ~base_path:config.base_path
-       ~tool_name:"masc_browser_tabs" ~start_time:(Tool_timing.start ()) args)
+(* Browser calls retain the installation's advertised tool and verified owner.
+   Scene retention and result manifests stay with this producer. *)
+let browser_tool ?upload_paths ~(config:Workspace.config) ~(meta:keeper_meta) ~tool ~tool_name args =
+  Browser_addon_tools.handle ?upload_paths ~config ~access:(Lane_addon_sources.Keeper meta.name)
+    ~principal:(Lane_addon_call_context.Keeper meta.name)
+    ~reserved:(List.map (fun (schema:Masc_domain.tool_schema) -> schema.name) Config.raw_all_tool_schemas)
+    ~keeper_name:(Some meta.name) ~tool ~tool_name ~start_time:(Tool_timing.start ()) args
+
+let handle_browser_tabs_with_outcome ~config ~meta ~args =
+  browser_tool ~config ~meta ~tool:Browser_capabilities.Tabs ~tool_name:"masc_browser_tabs" args
+  |> Keeper_tool_execution.of_tool_result
 ;;
 
-let handle_browser_read_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args =
-  let result =
-    Tool_misc_browser_lane.handle_read_with_retention ~base_path:config.base_path
-      ~keeper_name:meta.name ~tool_name:"masc_browser_read" ~start_time:(Tool_timing.start ()) args
-  in
-  (* Downloads carry normalized references to durable files. The result's
-     manifest must be persisted by this producer before provider projection,
-     just as Execute and composition results preserve their artifact roots. *)
+let handle_browser_read_with_outcome ~(config:Workspace.config) ~meta ~args =
+  let start_time=Tool_timing.start () in
+  let result=browser_tool ~config ~meta ~tool:Browser_capabilities.Read ~tool_name:"masc_browser_read" args
+    |> Tool_misc_browser_lane.retain_read_result ~base_path:config.base_path
+      ~tool_name:"masc_browser_read" ~start_time args in
   match Tool_bridge.attach_artifact_manifest ~base_path:config.base_path result with
   | Ok result -> Keeper_tool_execution.of_tool_result result
   | Error error ->
-    Log.Misc.error "browser result manifest persistence failed: %s" error.message;
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Runtime_failure
-      ~effect_disposition:Tool_result.Proven_post_effect
-      "Browser read completed, but its result manifest could not be preserved. Do not repeat the download."
+      Log.Misc.error "browser result manifest persistence failed: %s" error.message;
+      Keeper_tool_execution.failure
+        ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_post_effect
+        "Browser read completed, but its result manifest could not be preserved. Do not repeat the download."
 ;;
 
-let handle_browser_session_with_outcome ~args =
-  Keeper_tool_execution.of_tool_result
-    (Tool_misc_browser_lane.handle_session ~tool_name:"masc_browser_session"
-       ~start_time:(Tool_timing.start ()) args)
+let handle_browser_session_with_outcome ~config ~meta ~args =
+  browser_tool ~config ~meta ~tool:Browser_capabilities.Session ~tool_name:"masc_browser_session" args
+  |> Keeper_tool_execution.of_tool_result
 ;;
 
-let handle_browser_interact_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args =
-  let result, failure_effect_disposition =
-    Tool_misc_browser_lane.handle_interact_with_phase ~actor:meta.name ~base_path:config.base_path
-      ~tool_name:"masc_browser_interact" ~start_time:(Tool_timing.start ()) args in
-  Keeper_tool_execution.of_tool_result ~failure_effect_disposition result
+let handle_browser_interact_with_outcome ~config ~meta ~args =
+  browser_tool ~config ~meta ~tool:Browser_capabilities.Interact ~tool_name:"masc_browser_interact" args
+  |> Keeper_tool_execution.of_tool_result
 ;;
 
-let handle_browser_goto_with_outcome ~args =
-  Keeper_tool_execution.of_tool_result
-    (Tool_misc_browser_lane.handle_goto ~tool_name:"masc_browser_goto" ~start_time:(Tool_timing.start ()) args)
+let handle_browser_goto_with_outcome ~config ~meta ~args =
+  browser_tool ~config ~meta ~tool:Browser_capabilities.Goto ~tool_name:"masc_browser_goto" args
+  |> Keeper_tool_execution.of_tool_result
 ;;
 
-let handle_browser_instruct_with_outcome ~args =
-  let result, failure_effect_disposition =
-    Tool_misc_browser_lane.handle_instruct_with_phase ~tool_name:"masc_browser_instruct" ~start_time:(Tool_timing.start ()) args in
-  Keeper_tool_execution.of_tool_result ~failure_effect_disposition result
+let handle_browser_instruct_with_outcome ~config ~meta ~args =
+  browser_tool ~config ~meta ~tool:Browser_capabilities.Instruct ~tool_name:"masc_browser_instruct" args
+  |> Keeper_tool_execution.of_tool_result
 ;;
 
 let handle_browser_act_with_outcome ~turn_sandbox_factory ~(config : Workspace.config) ~meta ~args =
   let invoke ?upload_paths () =
-    let result, failure_effect_disposition =
-      Tool_misc_browser_lane.handle_act_with_phase ?upload_paths ~base_path:config.base_path
-        ~tool_name:"masc_browser_act" ~start_time:(Tool_timing.start ()) args in
-    Keeper_tool_execution.of_tool_result ~failure_effect_disposition result in
+    browser_tool ?upload_paths ~config ~meta ~tool:Browser_capabilities.Act
+      ~tool_name:"masc_browser_act" args
+    |> Keeper_tool_execution.of_tool_result in
   match Browser_lane.Action.parse args with
   | Ok (Browser_lane.Action.On_tab {interaction=Upload {paths;_};_}) ->
     (match Keeper_browser_upload.with_staged_paths ?turn_sandbox_factory
@@ -1802,7 +1796,8 @@ let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_m
    | (Some (Tool_schemas_misc.Misc_play_room), None)
    | (Some (Tool_schemas_misc.Misc_dos_pass), None) | (Some (Tool_schemas_misc.Misc_dos_save), None)
    | (Some (Tool_schemas_misc.Misc_dos_restore), None) ->
-     Tool_misc.dispatch ?ask_source_turn_ref ~lane_access:(Lane_addon_sources.Keeper meta.name) ctx ~name ~args)
+     Tool_misc.dispatch ?ask_source_turn_ref ~lane_access:(Lane_addon_sources.Keeper meta.name)
+       ~browser_principal:(Lane_addon_call_context.Keeper meta.name) ctx ~name ~args)
   |> dispatch_option_to_execution ~name
 ;;
 

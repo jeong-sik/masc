@@ -4,6 +4,12 @@ val lane_access_for_caller :
 (** Resolve Lane authority from the verified runtime boundary or bearer role.
     Internal runtime names must resolve to an existing Keeper; an unverified
     runtime flag, caller name, or session binding never grants Keeper access. *)
+val browser_principal_for_caller :
+  config:Workspace_utils_backend_setup.config ->
+  Mcp_server_eio_caller_identity.t -> Lane_addon_call_context.principal
+(** Browser attribution comes from the resolved internal Keeper or bearer
+    credential, never a name supplied in tool arguments. No credential means
+    anonymous browser authority even when shared tool discovery is enabled. *)
 
 (** Mcp_server_eio_execute — inner [tools/call] dispatcher.
 

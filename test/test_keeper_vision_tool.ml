@@ -2228,14 +2228,27 @@ let test_browser_screenshot_reaches_vision_reader () =
       Eio_main.run (fun env ->
         Time_compat.set_clock (Eio.Stdenv.clock env);
         Eio.Switch.run (fun sw ->
-          Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
-          Browser_lane.install_automation_executor (Some (function
-            | Browser_lane.Page_capture {tab_id=73} -> Browser_lane.Answered
-                (`Assoc ["ok",`Bool true;"data",`Assoc [
-                  "tabId",`Int 73;"url",`String "https://example.org/form";
-                  "title",`String "Form";"mimeType",`String "image/png";"viewport",viewport;"data",`String encoded]])
-            | _ -> failwith "unexpected screenshot command"));
-          Eio.Switch.on_release sw (fun () -> Browser_lane.install_activity_observer None; Browser_lane.install_automation_executor None);
+          let client suffix browser =
+            let raw="30000000-0000-4000-8000-" ^ suffix in
+            {Browser_lane.client_id=Result.get_ok (Browser_lane.client_id_of_string raw);
+              browser;version="fixture";transport=Browser_lane.Web_extension;engine_version="155.0.1"} in
+          let first=client "000000000001" Browser_lane.Firefox in
+          let second=client "000000000002" Browser_lane.Zen in
+          let live_calls=ref [] in
+          let respond ~route verb =
+            (match route with
+             | Browser_lane.Live_route (Some id) -> live_calls:=id::!live_calls;
+                 assert (id=first.client_id)
+             | Automation_route -> ()
+             | Live_route None|Stagehand_route -> failwith "unexpected screenshot route");
+            let data=match verb with
+              | Browser_lane.Page_capture {tab_id=73} -> `Assoc ["tabId",`Int 73;
+                  "url",`String "https://example.org/form";"title",`String "Form";
+                  "mimeType",`String "image/png";"viewport",viewport;"data",`String encoded]
+              | Page_elements {tab_id=Some 73} -> `Assoc ["tabId",`Int 73;"elements",`List []]
+              | _ -> failwith "unexpected screenshot command" in
+            Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",data]) in
+          Browser_addon_fixture.with_worker ~env ~config ~clients:[first;second] ~respond (fun _browser ->
           let result = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
             ~config ~meta ~args:(`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) in
           assert (result.disposition = Tool_result.Completed ());
@@ -2261,41 +2274,20 @@ let test_browser_screenshot_reaches_vision_reader () =
           ignore (Result.get_ok (Store.prune ~max_entries:1 ~dir:frames_dir ()));
           assert (not (Sys.file_exists frame_path));
           assert (Store.load ~dir:root_dir (Store.of_string handle) = Ok image_bytes);
-          let connect suffix browser =
-            let raw = "30000000-0000-4000-8000-" ^ suffix in
-            let client_id = Result.get_ok (Browser_lane.client_id_of_string raw) in
-            let info : Browser_lane.client_info = {client_id;browser;version="fixture";transport=Browser_lane.Web_extension; engine_version="155.0.1"} in
-            Eio.Switch.on_release sw (fun () ->
-              ignore (Browser_lane.disconnect_client ~client_id));
-            let initial = Browser_lane.take_command ~client_info:info ~window_sec:0.001 in
-            assert (initial = Ok None);
-            info in
-          let first = connect "000000000001" Browser_lane.Firefox in
-          let second = connect "000000000002" Browser_lane.Zen in
           let client_id = Browser_lane.client_id_to_string first.client_id in
           List.iter (fun mode ->
-            let pending = Eio.Fiber.fork_promise ~sw (fun () ->
-              Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome ~config ~meta
-                ~args:(`Assoc ["lane",`String "live";"clientId",`String client_id;
-                  "mode",`String mode;"tabId",`Int 73])) in
-            assert (Browser_lane.take_command ~client_info:second ~window_sec:0.001 = Ok None);
-            let command = match Browser_lane.take_command ~client_info:first ~window_sec:1. with
-              | Ok (Some command) -> command | _ -> failwith "selected live client received no command" in
-            let data = if mode = "screenshot" then `Assoc ["tabId",`Int 73;
-              "url",`String "https://example.org/form";"title",`String "Form";
-              "mimeType",`String "image/png";"viewport",viewport;"data",`String encoded]
-              else `Assoc ["tabId",`Int 73;"elements",`List []] in
-            assert (Browser_lane.deliver_result ~client_id:first.client_id ~id:command.id
-              ~payload:(`Assoc ["ok",`Bool true;"data",data]) = Ok ());
-            let result = match Eio.Promise.await pending with
-              | Ok result -> result | Error exn -> raise exn in
+            let result=Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome ~config ~meta
+              ~args:(`Assoc ["lane",`String "live";"clientId",`String client_id;
+                "mode",`String mode;"tabId",`Int 73]) in
+            assert (List.length !live_calls=(if mode="elements" then 1 else 2));
+            assert (not (List.mem second.client_id !live_calls));
             assert (result.disposition = Tool_result.Completed ());
             let data = match result.data with Some data -> data | None -> failwith "missing client receipt" in
             assert (assoc_string "clientId" data = client_id);
             (* The stored screenshot is rebuilt from checked fields; the
                connection's transport is one of them. *)
             assert (assoc_string "transport" data = "web_extension");
-            if mode = "screenshot" then verify_pointer_receipt "live" data) ["elements";"screenshot"]))))
+            if mode = "screenshot" then verify_pointer_receipt "live" data) ["elements";"screenshot"])))))
 
 let test_browser_screenshot_requires_keeper_owner () =
   let result = Masc.Tool_misc_browser_lane.handle_read

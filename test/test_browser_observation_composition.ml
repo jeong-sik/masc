@@ -26,25 +26,23 @@ let scene = `Assoc [
 let test_composition_retains_observation ?(fail_receipt = false) ~reject_schema () =
   let base = Filename.temp_dir "browser-composition-observation-" "" in
   Fun.protect ~finally:(fun () ->
-    Browser_lane.install_activity_observer None;
-    Browser_lane.install_automation_executor None;
     Log.reset_for_testing (); Time_compat.clear_clock (); Fs_compat.remove_tree base)
     (fun () -> Eio_main.run (fun env ->
       Time_compat.set_clock (Eio.Stdenv.clock env);
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       Log.reset_for_testing (); Log.init ~base_path:base ();
-      Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
-      Browser_lane.install_automation_executor (Some (function
+      let respond ~route:_ = function
         | Browser_lane.Page_scene {tab_id=7;view=Content;scope=None;_} ->
           Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",scene])
-        | _ -> fail "composition must perform only the observed scene read"));
+        | _ -> fail "composition must perform only the observed scene read" in
+      let config=Masc.Workspace.default_config base in
+      Browser_addon_fixture.with_worker ~env ~config ~respond (fun _browser ->
       let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () in
       let catalog = Catalog.parse composition |> Result.map_error Catalog.error_to_string |> expect in
       let plan = Catalog.instantiate ~descriptors ~args:(`Assoc []) (List.hd (Catalog.entries catalog))
         |> Result.map_error Catalog.instantiation_error_to_string |> expect in
       let meta = Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String "observer"])
         |> expect in
-      let config = Masc.Workspace.default_config base in
       let parent_invocation = Agent_core.Tool_contract.Invocation.create
         ~tool_use_id:"composition-parent" ~turn:1
         ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Serial}
@@ -132,7 +130,7 @@ let test_composition_retains_observation ?(fail_receipt = false) ~reject_schema 
       let gc = Tool_blob_maintenance.run ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~base_path:base ~mode:Observe_only
         |> Result.map_error Tool_blob_maintenance.error_to_string |> expect in
       check int "committed node roots retain the observation" 1 gc.live_references;
-      check int "retained observation is not a GC candidate" 0 gc.candidates_recorded)))
+      check int "retained observation is not a GC candidate" 0 gc.candidates_recorded))))
 
 let () = run "browser observation composition" ["production observer",[
   test_case "receipt failure prevents composition success" `Quick (test_composition_retains_observation ~fail_receipt:true ~reject_schema:false);

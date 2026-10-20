@@ -509,20 +509,20 @@ let handle_in_process ctx descriptor args =
          ~args
          ())
   | Tool_browser_tabs ->
-    Some (Keeper_tool_in_process_runtime.handle_browser_tabs_with_outcome ~config:ctx.config ~args)
+    Some (Keeper_tool_in_process_runtime.handle_browser_tabs_with_outcome ~config:ctx.config ~meta:ctx.meta ~args)
   | Tool_browser_read ->
     Some (Keeper_tool_in_process_runtime.handle_browser_read_with_outcome ~config:ctx.config ~meta:ctx.meta ~args)
   | Tool_browser_session ->
-    Some (Keeper_tool_in_process_runtime.handle_browser_session_with_outcome ~args)
+    Some (Keeper_tool_in_process_runtime.handle_browser_session_with_outcome ~config:ctx.config ~meta:ctx.meta ~args)
   | Tool_browser_goto ->
-    Some (Keeper_tool_in_process_runtime.handle_browser_goto_with_outcome ~args)
+    Some (Keeper_tool_in_process_runtime.handle_browser_goto_with_outcome ~config:ctx.config ~meta:ctx.meta ~args)
   | Tool_browser_act ->
     Some (Keeper_tool_in_process_runtime.handle_browser_act_with_outcome
       ~turn_sandbox_factory:ctx.turn_sandbox_factory ~config:ctx.config ~meta:ctx.meta ~args)
   | Tool_browser_interact ->
     Some (Keeper_tool_in_process_runtime.handle_browser_interact_with_outcome ~config:ctx.config ~meta:ctx.meta ~args)
   | Tool_browser_instruct ->
-    Some (Keeper_tool_in_process_runtime.handle_browser_instruct_with_outcome ~args)
+    Some (Keeper_tool_in_process_runtime.handle_browser_instruct_with_outcome ~config:ctx.config ~meta:ctx.meta ~args)
   | Tool_masc_control_dispatch ->
     Some
       (Keeper_tool_in_process_runtime.handle_masc_control_with_outcome

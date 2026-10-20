@@ -223,11 +223,31 @@ receipts remain distinct from successful contract validation.
    an empty list disables these model outputs. The effective package retains
    only selected names with their original schemas and canonical order; unknown,
    duplicate and malformed selections are refused. Worker input revisions include
-   that effective selection. The shared retained exact-output runner is being
-   developed in [#44203](https://github.com/jeong-sik/masc/pull/44203), whose current
-   source admits output names from the supplied effective package. Native browser
-   host-request integration and actual execution evidence are still required;
-   selecting outputs alone does not enable that broker.
+   that effective selection. This stack reuses the common typed lane ownership,
+   runtime route declarations, retained request store, failure classification,
+   exact runner and host request cycle from the first seven layers of
+   [stack #44172](https://github.com/jeong-sik/masc/pull/44216). Their feature
+   commits retain their original provenance. The unrelated Board, Ask and
+   schedule layers are outside this integration.
+
+   Native and container workers now share discovery and invocation of private
+   `lane_host_requests` / `lane_host_result` ports. The default native backend
+   uses the same declared-lane runner registered at server bootstrap. Selection
+   off creates no host port. Final answers survive replacement of the worker;
+   changed request bodies cannot reuse a denied ID. Selection-off delivery
+   refusals retain an existing original answer for later replay. Detach cancels
+   the current exact scope without closing the browser worker ahead of Retire;
+   any started request with no retained outcome remains unknown.
+
+   `test_lane_addon_exact_native` covers an actual launcher and stdio worker
+   against a loopback HTTP provider, private result delivery, selection off and
+   retained-answer reattachment. Protocol fixtures cover missing/duplicate ports
+   and unselected-port admission; a runtime fixture holds cleanup open while
+   retiring a blocked exact call. These are scenario definitions, not execution
+   evidence. The bundled browser worker still needs a concurrent model queue
+   and a request-ready wake event; initial Ready/action/registry events cannot
+   service a model request made inside a long-running browser command. Stagehand
+   owned Chrome execution and real browser/model evidence also remain.
 
 ## Completion evidence
 

@@ -3,6 +3,7 @@
 type t
 val context : instance_id:string -> automation:Browser_configuration.automation option ->
   stagehand:Browser_addon_stagehand.configuration option ->
+  live_bidi:Browser_addon_live_bidi.configuration option ->
   models:Browser_addon_models.configuration option -> (Yojson.Safe.t, string) result
 (** Selects a private per-instance socket directory without creating it. Persist
     this immutable descriptor through Native_addon_lease.prepare before mkdir. *)

@@ -64,6 +64,16 @@ val metadata : t -> (string, session_failure) result
     succeeded, and when Firefox did not say. *)
 val profile : t -> string option
 
+val process_id : t -> int option
+(** The positive [moz:processID] reported by this original session, when present.
+    This is endpoint evidence only; callers must independently verify their
+    original child and kernel owner lease before allowing browser input. *)
+
+val close_browser : t -> (unit, refusal) result
+(** Send [browser.close] once over this original pure BiDi connection. The
+    caller separately joins its original owned process and observes settlement;
+    a transport failure never authorizes replay or stopping another browser. *)
+
 (** Why a session's Firefox is not taken to run a profile. *)
 type profile_refusal =
   | Profile_unsaid  (** Firefox did not say ([moz:profile]). *)

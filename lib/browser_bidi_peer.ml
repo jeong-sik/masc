@@ -47,9 +47,9 @@ let session_failure_message = function Session_refused why | Session_failed why 
 type t = { ask : string -> Yojson.Safe.t -> (Yojson.Safe.t,refusal) result;
   session_end : unit -> (unit,session_end_failure) result; mutable session_may_exist : bool;
   mutable contexts : (string * int) list; mutable next_tab : int; mutable version : string option;
-  mutable profile : string option }
+  mutable profile : string option; mutable process_id : int option }
 let create ~session_end ~command =
-  {ask=command;session_end;session_may_exist=false;contexts=[];next_tab=0;version=None;profile=None}
+  {ask=command;session_end;session_may_exist=false;contexts=[];next_tab=0;version=None;profile=None;process_id=None}
 let command t method_ params = Result.map_error (fun refusal -> method_ ^ ": " ^ refusal_message refusal) (t.ask method_ params)
 (* Firefox keeps a session whose socket closed and takes one session at a
    time, so one left behind refuses every later connection until that Firefox
@@ -61,6 +61,7 @@ let metadata t =
   (* Firefox may hold a session from the moment it is asked for one, whether
      or not its answer arrives. There is none when it refused, and none when
      the request was never written. *)
+  t.version <- None;t.profile <- None;t.process_id <- None;
   t.session_may_exist <- true;
   match t.ask "session.new" (obj ["capabilities",obj []]) with
   | Error (Rejected Session_not_created as refused) ->
@@ -74,8 +75,14 @@ let metadata t =
        let* name = string "browserName" caps in
        if name <> "firefox" then Error "BiDi peer must be Firefox"
        else let* version=string "browserVersion" caps in t.version<-Some version;
-         t.profile <- Result.to_option (string "moz:profile" caps); Ok version)
+         t.profile <- Result.to_option (string "moz:profile" caps);
+         t.process_id <- (match field "moz:processID" caps with
+           | Some (`Int pid) when pid>1 -> Some pid
+           | None | Some _ -> None);
+         Ok version)
 let profile t = t.profile
+let process_id t = t.process_id
+let close_browser t = Result.map (fun _ -> ()) (t.ask "browser.close" (obj []))
 (* Firefox 157.0.1 reports the profile path as it was given, a link left as
    a link (2026-10-09), so both paths are resolved before they are compared.
    A path that cannot be resolved is compared as written. *)

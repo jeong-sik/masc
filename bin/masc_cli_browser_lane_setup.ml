@@ -152,20 +152,19 @@ let print_bidi_steps plan =
   then
     print_endline
       "  [browser.live] enabled = false in runtime.toml keeps the live lane off, so the \
-       server starts no Firefox. Turn it on first.";
+       browser Add-on starts no Firefox. Turn it on first.";
   print_endline
-    "  1. Restart the MASC server. It reads runtime.toml when it starts, then opens this \
-     Firefox on the profile above and attaches its host. The server must be this build or \
-     newer: an older one does not know the table.";
+    "  1. Attach the browser Lane Add-on, or detach and reattach its existing installation \
+     after restarting MASC to load runtime.toml. The Add-on owns this Firefox and its \
+     BiDi connection; its observation reports readiness or the startup refusal.";
   print_endline
     "  2. In that Firefox, log in once to the sites the Keepers work on. The profile keeps \
      the logins.";
   if Bidi_setup.port_answers plan
   then
     Printf.printf
-      "Something already answers on 127.0.0.1:%d. If that is a Firefox MASC did not start, \
-       quit it before restarting the server: one Firefox holds the port, and the host \
-       refuses a Firefox that runs another profile.\n"
+      "Something already answers on 127.0.0.1:%d. Close the browser using that port before \
+       attaching the Add-on. The Add-on starts its own Firefox and preserves the profile.\n"
       port;
   print_endline
     "Firefox's remote debugging port has no authentication: any program on this computer \

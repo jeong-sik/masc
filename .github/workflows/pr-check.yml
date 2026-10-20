@@ -18,6 +18,7 @@ on:
           - workspace-files
           - rich-workspace
           - rich-chat-workspace
+          - original-tool-result
 
 permissions:
   contents: read

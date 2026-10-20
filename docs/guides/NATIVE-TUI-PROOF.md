@@ -14,6 +14,7 @@ characters) and `native-tui-scenario`:
 | `workspace-files` | TUI, server and the three test executables | `test_repo_git`, `test_tui_workspace_entries`, `test_workspace_file_confidentiality` |
 | `rich-workspace` | TUI, server and the six test executables | The `workspace-files` suites plus `test_lsp_position`, `test_tui_music_launcher`, `test_tui_alphatex` |
 | `rich-chat-workspace` | TUI, server and the seven test executables | The `rich-workspace` suites plus `test_tui_chat_call_reader` |
+| `original-tool-result` | TUI, server and the four test executables | `test_keeper_tool_result_source`, `test_keeper_artifact_read_request`, `test_server_dashboard_http_keeper_tool_lookup`, `test_tui_chat_call_reader` |
 
 The server target is `bin/main_eio.exe`; the TUI is `bin/masc_tui.exe`.
 Each test target is `test/<suite>.exe`. Unknown scenarios are refused before
@@ -40,6 +41,15 @@ gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
   -f native-tui-source-sha=SOURCE_COMMIT_40_HEX \
   -f native-tui-scenario=rich-chat-workspace
 ```
+
+Use `original-tool-result` for the retained original-result endpoint and its
+TUI consumer. It checks exact execution/turn binding, owned trace reads and
+mutation failures, byte paging and UTF8 reconstruction, the shared artifact
+page bounds, actual HTTP Admin/workspace enforcement, and Reader ownership and
+retained state. It packages the matching server and TUI for a separate actual
+Keeper-result read. These four suites do not certify music/Code integration,
+complete producer stdout capture, or visible UI behavior. The selected source
+must contain all four targets; a missing target fails instead of reducing scope.
 
 For a workspace file-finder candidate:
 

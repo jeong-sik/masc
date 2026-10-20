@@ -28,7 +28,7 @@ jobs:
         run: |
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'source-sha must be 40 lowercase hex characters' >&2; exit 1; }
           case "$PROOF_SCENARIO" in
-            detail-ownership|workspace-files|rich-workspace|rich-chat-workspace) ;;
+            detail-ownership|workspace-files|rich-workspace|rich-chat-workspace|original-tool-result) ;;
             *) echo 'unsupported native proof scenario' >&2; exit 1 ;;
           esac
       - uses: actions/checkout@v7
@@ -75,6 +75,9 @@ jobs:
             workspace-files|rich-workspace|rich-chat-workspace)
               targets+=(bin/main_eio.exe test/test_repo_git.exe test/test_tui_workspace_entries.exe test/test_workspace_file_confidentiality.exe)
               ;;
+            original-tool-result)
+              targets+=(bin/main_eio.exe test/test_keeper_tool_result_source.exe test/test_keeper_artifact_read_request.exe test/test_server_dashboard_http_keeper_tool_lookup.exe test/test_tui_chat_call_reader.exe)
+              ;;
             *) echo 'unsupported native proof scenario' >&2; exit 1 ;;
           esac
           if [ "$PROOF_SCENARIO" = rich-workspace ] || [ "$PROOF_SCENARIO" = rich-chat-workspace ]; then
@@ -106,7 +109,7 @@ jobs:
           cp _build/default/bin/masc_tui.exe proof/masc-tui
           chmod +x proof/masc-tui
           otool -L proof/masc-tui > proof/native-dependencies.txt
-          if [ "$PROOF_SCENARIO" = workspace-files ] || [ "$PROOF_SCENARIO" = rich-workspace ] || [ "$PROOF_SCENARIO" = rich-chat-workspace ]; then
+          if [ "$PROOF_SCENARIO" = workspace-files ] || [ "$PROOF_SCENARIO" = rich-workspace ] || [ "$PROOF_SCENARIO" = rich-chat-workspace ] || [ "$PROOF_SCENARIO" = original-tool-result ]; then
             test "$(_build/default/bin/main_eio.exe build-commit)" = "$SOURCE_SHA"
             cp _build/default/bin/main_eio.exe proof/masc
             chmod +x proof/masc
@@ -122,7 +125,7 @@ jobs:
               'scenario': os.environ['PROOF_SCENARIO'],
               'platform': 'macos-arm64',
               'sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
-              'server_sha256': hashlib.sha256(Path('proof/masc').read_bytes()).hexdigest() if os.environ['PROOF_SCENARIO'] in ('workspace-files', 'rich-workspace', 'rich-chat-workspace') else None,
+              'server_sha256': hashlib.sha256(Path('proof/masc').read_bytes()).hexdigest() if os.environ['PROOF_SCENARIO'] in ('workspace-files', 'rich-workspace', 'rich-chat-workspace', 'original-tool-result') else None,
               'build_targets': Path('proof/build-targets.txt').read_text().splitlines(),
               'executed_tests': Path('proof/executed-tests.txt').read_text().splitlines(),
               'installed_runtime_verified': False,

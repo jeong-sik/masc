@@ -290,9 +290,9 @@ let with_session ?(configure = ignore) ?(answer = fun _ -> Ok model_answer) f =
           Session.attach session cdp ~extension_dir:(Sys.getcwd ())
             ~browser_cdp_url:"ws://127.0.0.1:9/devtools/browser/b"
           |> Result.map (fun init -> session, init)
-          |> Result.map_error (fun _ -> "fixture attach failed")
+          |> Result.map_error (fun _ -> Backend.Not_opened "fixture attach failed")
         in
-        let backend = Backend.create ~sw ~clock ~open_session ~call:Session.call
+        let backend = Backend.create ~sw ~clock ~open_session ~call:Session.call ~shutdown:(fun _ -> Ok ())
           ~pid:(fun _ -> 42) ~log:ignore in
         test backend stopped)
     }

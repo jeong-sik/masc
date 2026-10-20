@@ -125,7 +125,7 @@ let read_configuration directory =
   let* text=Option.to_result ~none:"missing Chrome Add-on configuration" text in
   protect (fun () -> configuration_of_json (Yojson.Safe.from_string text))
 let fresh_id () = Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ()))
-type opened = {session:Session.t; child_pid:int}
+type opened = {session:Session.t; child_pid:int;shutdown:unit -> (unit,string) result}
 let stop_grace_s = 5.
 let port_poll_s = 0.1
 let await_endpoint ~env ~profile ~process =
@@ -148,12 +148,13 @@ let await_endpoint ~env ~profile ~process =
 
 let open_session ~sw ~env ~owner ~directory ~configuration:c ~model ~headless ~log =
   let incarnation=Browser_addon_owner.incarnation owner in
+  let verify_profile ()=match c.profile with
+    | Profile.Private -> Ok () | Persistent profile -> Profile.verify profile in
+  let* extension,extension_id,instance_id,admission,child_admission=(
   let* extension=Eio_unix.run_in_systhread (fun () -> protect (fun () -> Ok (Unix.realpath c.extension))) in
   let extension_id=Browser_stagehand_wire.extension_id_of_real_path extension in
   let* ()=Eio_unix.run_in_systhread (fun () -> settle c ~incarnation ~directory) in
   let instance_id=fresh_id () in
-  let verify_profile ()=match c.profile with
-    | Profile.Private -> Ok () | Persistent profile -> Profile.verify profile in
   (* The stable child reservation precedes any profile allocation. It survives
      worker death and fences a launcher delayed past detach or failed startup. *)
   let* admission,child_admission=Eio_unix.run_in_systhread (fun () ->
@@ -162,6 +163,8 @@ let open_session ~sw ~env ~owner ~directory ~configuration:c ~model ~headless ~l
       ~cleanup_context:(Some (context c ~incarnation ~directory))) in
     let* child_admission=lease (Lease.reopen ~directories:[c.claim_directory] ~instance_id) in
     Ok (admission,child_admission)) in
+  Ok (extension,extension_id,instance_id,admission,child_admission))
+    |> Result.map_error (fun detail -> Browser_stagehand_backend.Not_opened detail) in
   let process=ref None and input=ref None in
   (* The shared profile slot may already belong to a successor after physical
      exit. Recovery/retirement stays bound to this exact original child slot. *)
@@ -257,7 +260,37 @@ let open_session ~sw ~env ~owner ~directory ~configuration:c ~model ~headless ~l
     current_session:=Some session;
     let* init=Session.attach session cdp ~extension_dir:extension ~browser_cdp_url:url
       |> Result.map_error Browser_stagehand_executor.attach_error_message in
-    Ok ({session;child_pid=receipt.child_pid},init) in
+    let shutdown () =
+      (* This closure retains the verified original connection and process.
+         EOF is not a reason to replay Browser.close; actual owner completion
+         and profile release are observed separately from the CDP answer. *)
+      let orderly () =
+        let* ()=Eio_unix.run_in_systhread (original_browser ~admission ~receipt) in
+        let* ()=match Browser_cdp.command cdp "Browser.close" (`Assoc []) with
+          | Ok _|Error (Browser_cdp.Connection_lost _) -> Ok ()
+          | Error (Command_rejected {code;message}) ->
+            Error (Printf.sprintf "Browser.close rejected (%d): %s" code message) in
+        ignore (Eio.Process.await child);
+        let* ()=retire () in
+        Eio_unix.run_in_systhread (fun () ->
+          let* ()=settled child_admission in
+          match c.profile with Profile.Private -> Ok ()
+            | Persistent profile -> Profile.before_launch profile) in
+      let result=match Eio.Time.with_timeout (Eio.Stdenv.clock env) stop_grace_s
+        (fun () -> Ok (orderly ())) with
+        | Ok result -> result
+        | Error `Timeout -> Error "original Chrome did not complete orderly shutdown within its resource grace" in
+      match result with
+      | Ok () -> Ok ()
+      | Error detail ->
+        (* Abort only the pinned original owner. A successful abort does not
+           turn the failed orderly/profile shutdown into a clean receipt. *)
+        let retirement=request_stop () in
+        ignore (Eio.Process.await child);
+        let cleanup=let* ()=retirement in
+          Eio_unix.run_in_systhread (fun () -> settled child_admission) in
+        Error (match cleanup with Ok () -> detail | Error error -> detail ^ "; abort cleanup: " ^ error) in
+    Ok ({session;child_pid=receipt.child_pid;shutdown},init) in
   let stop_failed () = Eio.Cancel.protect (fun () ->
     let retirement=request_stop () in
     Option.iter (fun child -> ignore (Eio.Process.await child)) !process;
@@ -266,9 +299,14 @@ let open_session ~sw ~env ~owner ~directory ~configuration:c ~model ~headless ~l
   match start () with
   | Ok _ as opened -> opened
   | Error detail -> (match stop_failed () with
-      | Ok () -> Error detail
-      | Error cleanup -> Error (detail ^ "; cleanup unconfirmed: " ^ cleanup))
-  | exception exn -> ignore (stop_failed ());raise exn
+      | Ok () -> Error (Browser_stagehand_backend.Not_opened detail)
+      | Error cleanup -> Error (Browser_stagehand_backend.Cleanup_unconfirmed
+          (detail ^ "; cleanup unconfirmed: " ^ cleanup)))
+  | exception exn ->
+    (match stop_failed () with
+     | Ok () -> ()
+     | Error detail -> Eio.Switch.fail sw (Failure ("partial Chrome cleanup unconfirmed: " ^ detail)));
+    raise exn
 
 let log = function
   | Session.Runtime_ready marker -> Log.Server.info "browser Add-on Chrome runtime %s ready" marker.runtime_version
@@ -303,18 +341,22 @@ let run ~env ~owner ~directory work =
   Eio.Switch.run (fun lifetime ->
     Eio.Switch.check lifetime;
     Eio.Fiber.fork ~sw:lifetime (fun () ->
+      let backend_settlement=ref (fun () -> Ok ()) in
       let outcome=try
-        Eio.Switch.run (fun sw ->
+        let result=Eio.Switch.run (fun sw ->
           let backend=Browser_stagehand_backend.create ~sw ~clock:(Eio.Stdenv.clock env)
             ~open_session:(open_session ~env ~owner ~directory ~configuration:c ~model)
-            ~call:(fun opened -> Session.call opened.session) ~pid:(fun opened -> opened.child_pid) ~log in
+            ~call:(fun opened -> Session.call opened.session)
+            ~shutdown:(fun opened -> opened.shutdown ()) ~pid:(fun opened -> opened.child_pid) ~log in
+          backend_settlement := (fun () -> Browser_stagehand_backend.settlement backend);
           let cleanup () =
             ignore (Eio.Promise.try_resolve stop ());Eio.Promise.await stopped in
           let* ()=Browser_addon_owner.attach_stagehand owner ~models:(Option.is_some selected_model)
             ~execute:(fun ~actor verb -> Browser_stagehand_backend.execute backend ?actor verb)
             ~session:(fun () -> Browser_stagehand_backend.session_observation backend) ~cleanup in
           Eio.Promise.resolve resolve_ready (Ok ());
-          Eio.Promise.await stopping;Ok ())
+          Eio.Promise.await stopping;Ok ()) in
+        (match result with Error _ -> result | Ok () -> !backend_settlement ())
       with
       | Eio.Cancel.Cancelled _ as exn ->
         ignore (Eio.Promise.try_resolve resolve_ready (Error "Chrome backend startup cancelled"));
@@ -323,10 +365,12 @@ let run ~env ~owner ~directory work =
         ignore (Eio.Promise.try_resolve resolve_ready (Error "Chrome backend startup failed"));
         ignore (Eio.Promise.try_resolve resolve_stopped (Error "Chrome backend cleanup unconfirmed"));raise exn in
       let finish () = Eio.Cancel.protect (fun () ->
-        let result=match outcome with
-          | Error _ -> outcome
-          | Ok () -> Eio_unix.run_in_systhread (fun () ->
-              settle c ~incarnation:(Browser_addon_owner.incarnation owner) ~directory) in
+        let physical=Eio_unix.run_in_systhread (fun () ->
+          settle c ~incarnation:(Browser_addon_owner.incarnation owner) ~directory) in
+        let result=match outcome,physical with
+          | Ok (),Ok () -> Ok ()
+          | Error detail,Ok ()|Ok (),Error detail -> Error detail
+          | Error detail,Error physical -> Error (detail ^ "; original child cleanup: " ^ physical) in
         ignore (Eio.Promise.try_resolve resolve_ready result);
         ignore (Eio.Promise.try_resolve resolve_stopped result)) in
       match finish () with

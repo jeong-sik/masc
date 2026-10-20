@@ -848,7 +848,13 @@ let decode_board_comment json =
   let* bc_created_at =
     required_display_any_field json [ "created_at_iso"; "created_at" ]
   in
-  Ok { bc_id; bc_parent_id; bc_author; bc_content; bc_created_at }
+  (* Required, as a post's [votes] is: the server writes both counts on every
+     comment, and a comment without them has no score to draw. *)
+  let* bcv_up = Masc.Tui_decode_fields.required_int_field json "votes_up" in
+  let* bcv_down = Masc.Tui_decode_fields.required_int_field json "votes_down" in
+  Ok
+    { bc_id; bc_parent_id; bc_author; bc_content; bc_created_at
+    ; bc_votes = { bcv_up; bcv_down } }
 
 let decode_board_comments json_list =
   Masc.Tui_decode_fields.decode_list "comments" decode_board_comment json_list

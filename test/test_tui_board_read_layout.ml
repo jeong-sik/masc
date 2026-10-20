@@ -11,7 +11,7 @@ let post =
 let comments = List.init 128 (fun index ->
   { bc_id = string_of_int index; bc_parent_id = None; bc_author = "keeper";
     bc_content = Printf.sprintf "comment-%03d 한글 **Markdown**" index;
-    bc_created_at = "2026-09-08" })
+    bc_created_at = "2026-09-08"; bc_votes = { bcv_up = 0; bcv_down = 0 } })
 
 let source : Layout.source =
   { post; detail = Detail.Ready (post, comments, None); related_posts = [post];
@@ -21,12 +21,21 @@ let source : Layout.source =
 let render source () =
   let body = [source.Layout.post.bp_body] in
   let rows = match source.detail with
-    | Detail.Ready (_, comments, _) -> List.map (fun c -> c.bc_content) comments
-    | Detail.Absent -> ["absent"]
-    | Detail.Loading -> ["loading"]
-    | Detail.Failed error -> [error]
+    | Detail.Ready (_, comments, _) ->
+        List.map (fun c ->
+          Layout.Comment_text { comment_id = c.bc_id; text = c.bc_content }) comments
+    | Detail.Absent -> [Layout.Thread_note "absent"]
+    | Detail.Loading -> [Layout.Thread_note "loading"]
+    | Detail.Failed error -> [Layout.Thread_note error]
   in
   body, rows, None
+
+(* The fixtures read text, not the selection mark. *)
+let no_gutter _comment_id = ""
+
+let row_text = function
+  | Layout.Thread_note text -> text
+  | Layout.Comment_text { text; _ } -> text
 
 let test_long_thread_scroll_reuses_rows () =
   let cache = Layout.create () in
@@ -37,7 +46,8 @@ let test_long_thread_scroll_reuses_rows () =
   for index = 0 to 127 do
     let rows = get {source with keeper_names = List.map Fun.id source.keeper_names} in
     Alcotest.(check string) "all comments remain reachable"
-      (List.nth comments index).bc_content (Layout.comment_line rows index)
+      (List.nth comments index).bc_content
+      (Layout.comment_line rows ~gutter:no_gutter index)
   done;
   Alcotest.(check int) "one layout across scrolling" 1 !renders;
   Alcotest.(check int) "entire thread retained" 128
@@ -75,7 +85,8 @@ let test_live_inputs_replace_rows () =
     let expected_body, expected_comments, _ = render changed () in
     Alcotest.(check string) (label ^ " body") (List.hd expected_body) (Layout.body_line rows 0);
     List.iteri (fun index expected ->
-      Alcotest.(check string) (label ^ " comment") expected (Layout.comment_line rows index)) expected_comments
+      Alcotest.(check string) (label ^ " comment") (row_text expected)
+        (Layout.comment_line rows ~gutter:no_gutter index)) expected_comments
   ) cases
 
 let test_failed_render_and_single_document () =

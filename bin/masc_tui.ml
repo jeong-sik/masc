@@ -15202,6 +15202,46 @@ let move_board_read_scroll state ~by =
   if state.board_comments_focused then state.board_comment_scroll <- next
   else state.board_scroll <- next
 
+(* The open post's comment ids in drawn order and the comment its read
+   landed on, while its thread is on screen. *)
+let board_read_thread state ~post_id =
+  match Board_detail.view_for state.board_detail ~post_id with
+  | Board_detail.Ready (_, comments, landing) ->
+      Some (Masc_tui_board_comment_cursor.ordered_ids comments, landing)
+  | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ -> None
+
+(* Settle the comment cursor on a drawn comment and ask the next frame to
+   bring it on screen: focusing the comments, and the first vote press on
+   one, should show the comment the keys act on. [None] while no thread is
+   drawn. *)
+let select_board_comment state ~post_id =
+  match board_read_thread state ~post_id with
+  | None -> None
+  | Some (ids, landing) ->
+      let selected =
+        Masc_tui_board_comment_cursor.select ids ~landing
+          state.board_comment_cursor
+      in
+      state.board_comment_cursor <- selected;
+      state.board_comment_follow <- true;
+      selected
+
+(* j/k on the reading. With the comments focused they step the cursor one
+   comment along the drawn thread; the frame then scrolls the least that
+   shows it. PgUp/PgDn keep scrolling by rows, and so does a wheel notch
+   that arrives as a key, so a comment longer than the column stays
+   readable. *)
+let step_board_reading state ~post_id ~by_wheel ~delta =
+  if state.board_comments_focused && not by_wheel then
+    match board_read_thread state ~post_id with
+    | None -> ()
+    | Some (ids, landing) ->
+        state.board_comment_cursor <-
+          Masc_tui_board_comment_cursor.move ids ~landing
+            state.board_comment_cursor ~delta;
+        state.board_comment_follow <- true
+  else move_board_read_scroll state ~by:delta
+
 let move_board_posts_pane state ~mailbox ~delta =
   let count = List.length (board_posts state) in
   let next = max 0 (min (count - 1) (state.board_cursor + delta)) in
@@ -16082,29 +16122,54 @@ let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
   | Planning_list -> ()
 
 
-(* The vote keys on the list row under the cursor. Two presses: the first
-   names the post and direction, the same press again sends it. The post id
-   is captured at arm time, so moving the cursor between presses re-arms
-   for the new row rather than voting on the one the operator left. *)
+(* The kind decides the route: a post vote and a comment vote are two
+   requests, and nothing here can send one as the other. *)
+let send_board_vote state ~mailbox ~(up : bool) target =
+  let launch = launch_workspace_request state ~mailbox ~boundary_error:Fun.id in
+  let report = report_action state in
+  match target with
+  | Vote_post post_id ->
+      Masc_tui_board_requests.start_board_vote state ~host:server_peer_host
+        ~report ~launch ~post_id ~up
+  | Vote_comment { post_id; comment_id } ->
+      Masc_tui_board_requests.start_board_comment_vote state
+        ~host:server_peer_host ~report ~launch ~post_id ~comment_id ~up
+
+(* The vote keys. On the list they vote on the row under the cursor; while
+   reading, on the selected comment when the comments have focus and on the
+   open post otherwise. Two presses: the first names the target and
+   direction, the same press again sends it. The target is captured at arm
+   time, kind included, so moving the cursor between presses re-arms for
+   the new target rather than voting on the one the operator left. *)
 let handle_board_vote_key state ~mailbox ~(up : bool) =
-  match state.board_mode with
-  | Board_list -> (
-      match List.nth_opt (board_posts state) state.board_cursor with
-      | None -> ()
-      | Some post -> (
-          match state.board_vote_armed with
-          | Some (armed_post, armed_up)
-            when String.equal armed_post post.bp_id && armed_up = up ->
-              state.board_vote_armed <- None;
-              Masc_tui_board_requests.start_board_vote state ~host:server_peer_host ~report:(report_action state) ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id) ~post_id:post.bp_id ~up
-          | Some _ | None ->
-              state.board_vote_armed <- Some (post.bp_id, up);
-              report_action state "system"
-                (Printf.sprintf "press %s again to vote %s on %s"
-                   (if up then "v" else "V")
-                   (if up then "up" else "down")
-                   post.bp_id)))
-  | Board_read _ | Board_compose -> ()
+  let target =
+    match state.board_mode with
+    | Board_list ->
+        Option.map
+          (fun (post : board_post) -> Vote_post post.bp_id)
+          (List.nth_opt (board_posts state) state.board_cursor)
+    | Board_read post_id
+      when state.board_focus = Right_pane && state.board_comments_focused ->
+        Option.map
+          (fun comment_id -> Vote_comment { post_id; comment_id })
+          (select_board_comment state ~post_id)
+    | Board_read post_id -> Some (Vote_post post_id)
+    | Board_compose -> None
+  in
+  match target with
+  | None -> ()
+  | Some target -> (
+      match Masc_tui_board_vote.press ~armed:state.board_vote_armed ~target ~up with
+      | Masc_tui_board_vote.Send (target, up) ->
+          state.board_vote_armed <- None;
+          send_board_vote state ~mailbox ~up target
+      | Masc_tui_board_vote.Arm (target, up) ->
+          state.board_vote_armed <- Some (target, up);
+          report_action state "system"
+            (Printf.sprintf "press %s again to vote %s on %s"
+               (if up then "v" else "V")
+               (if up then "up" else "down")
+               (Masc_tui_board_vote.describe target)))
 
 (* Cancel a schedule through the tools route. Same fiber-and-mailbox shape as
    the other writes; the server's store rules decide whether the row is still
@@ -18472,14 +18537,18 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
         ~refresh_detail:(fun post_id ->
           Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host
             ~port:state.port ~post_id ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)) result
-  | Board_vote_done result ->
+  | Board_vote_done (target, result) ->
       Masc_tui_board_updates.vote_done state ~report:(report_action state)
         ~refresh:(fun () ->
           start_http_refresh state ~host:server_peer_host
             ~port:state.port ~intent:Revalidate
             ~refresh_inflight:http_refresh_inflight
             ~scoped_refresh_inflight:http_scoped_refresh_inflight
-            ~scoped_refresh_followup ~mailbox) result
+            ~scoped_refresh_followup ~mailbox)
+        ~refresh_detail:(fun post_id ->
+          Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host
+            ~port:state.port ~post_id ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id))
+        target result
   | (Goal_transition_done result | Goal_confirmation_submitted result) as message -> (
       (match message, state.goal_confirmation with
        | Goal_confirmation_submitted _, Goal_confirmation.Submitting (_, read) ->
@@ -28856,7 +28925,10 @@ and is loaded on demand through keeper_skill.
                   (match Board_detail.view_for state.board_detail ~post_id with
                    | Board_detail.Ready (_, _ :: _, _) ->
                        state.board_comments_focused <-
-                         not state.board_comments_focused
+                         not state.board_comments_focused;
+                       if state.board_comments_focused then
+                         ignore
+                           (select_board_comment state ~post_id : string option)
                    | Board_detail.Absent | Board_detail.Loading
                    | Board_detail.Ready (_, [], _) | Board_detail.Failed _ -> ())
             | Board_list | Board_compose -> ())
@@ -30417,12 +30489,14 @@ and is loaded on demand through keeper_skill.
                  | Board_list ->
                      if state.board_cursor < List.length (board_posts state) - 1 then
                        state.board_cursor <- state.board_cursor + 1
-                 | Board_read _ ->
+                 | Board_read post_id ->
                      (match state.board_focus with
                       | Left_pane ->
                           move_board_posts_pane state ~mailbox:async_messages
                             ~delta:1
-                      | Right_pane -> move_board_read_scroll state ~by:1)
+                      | Right_pane ->
+                          step_board_reading state ~post_id
+                            ~by_wheel:(key = Some "wheel-down") ~delta:1)
                  | Board_compose -> ())
             | Planning ->
                 (match state.planning_mode with
@@ -30753,12 +30827,14 @@ and is loaded on demand through keeper_skill.
                  | Board_list ->
                      if state.board_cursor > 0 then
                        state.board_cursor <- state.board_cursor - 1
-                 | Board_read _ ->
+                 | Board_read post_id ->
                      (match state.board_focus with
                       | Left_pane ->
                           move_board_posts_pane state ~mailbox:async_messages
                             ~delta:(-1)
-                      | Right_pane -> move_board_read_scroll state ~by:(-1))
+                      | Right_pane ->
+                          step_board_reading state ~post_id
+                            ~by_wheel:(key = Some "wheel-up") ~delta:(-1))
                  | Board_compose -> ())
             | Planning ->
                 (match state.planning_mode with

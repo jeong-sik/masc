@@ -2693,6 +2693,12 @@ let post_goal_transition ~expected_workspace ~(host : string) ~(port : int)
   post_json ~host ~port ~path:"/api/v1/tools/masc_goal_transition"
     ~body:(Yojson.Safe.to_string payload)
 
+(* The direction words are the Board tool's own, so neither vote body can
+   spell one the tool does not read. *)
+let board_vote_direction ~(up : bool) =
+  Masc.Board.vote_direction_to_string
+    (if up then Masc.Board.Up else Masc.Board.Down)
+
 (** POST /api/v1/tools/masc_board_vote. [up] rides as a bool rather than a
     string so no direction word exists here to drift from the tool's. *)
 let post_board_vote ~expected_workspace ~(host : string) ~(port : int) ~(post_id : string)
@@ -2701,11 +2707,30 @@ let post_board_vote ~expected_workspace ~(host : string) ~(port : int) ~(post_id
     `Assoc
       [ expected_workspace_field expected_workspace
       ; ("post_id", `String post_id)
-      ; ("direction", `String (if up then "up" else "down"))
+      ; ("direction", `String (board_vote_direction ~up))
       ]
   in
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_vote"
     ~body:(Yojson.Safe.to_string payload)
+
+(** The body of a comment vote. No voter: the route stamps the authenticated
+    actor over whatever the body says, as it does for a post vote. *)
+let board_comment_vote_body ~expected_workspace ~(comment_id : string)
+    ~(up : bool) : Yojson.Safe.t =
+  `Assoc
+    [ expected_workspace_field expected_workspace
+    ; ("comment_id", `String comment_id)
+    ; ("direction", `String (board_vote_direction ~up))
+    ]
+
+(** POST /api/v1/tools/masc_board_comment_vote. Voting the same way twice is
+    the tool's idempotent success, not an error. *)
+let post_board_comment_vote ~expected_workspace ~(host : string) ~(port : int)
+    ~(comment_id : string) ~(up : bool) : (Yojson.Safe.t, string) result =
+  post_json ~host ~port ~path:"/api/v1/tools/masc_board_comment_vote"
+    ~body:
+      (Yojson.Safe.to_string
+         (board_comment_vote_body ~expected_workspace ~comment_id ~up))
 
 (** POST /api/v1/tools/masc_board_comment. The route stamps the author from the
     HTTP auth resolver, exactly as for a new post. *)

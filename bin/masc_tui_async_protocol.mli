@@ -564,7 +564,7 @@ type async_msg =
       sent_attachments : Masc_tui_types.board_staged_attachment list;
       result : (string, string) result;
     }
-  | Board_vote_done of (string, string) result
+  | Board_vote_done of Masc_tui_types.board_vote_target * (string, string) result
   | Goal_transition_done of (string, string) result
   | Goal_confirmation_submitted of (string, string) result
   | Goal_confirmation_loaded of

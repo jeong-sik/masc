@@ -388,6 +388,11 @@ val ask_question_viewport : Masc_tui_types.state -> string list * int
 
 val board_score_style : int -> string
 
+val board_score_text : int -> string
+(** A net Board score as the reader draws it, on the post header and on each
+    comment: an up arrow and the signed score above zero, a down arrow below,
+    a bare zero otherwise. Style it with {!board_score_style}. *)
+
 val bracketed : max_cells:int -> string -> string
 (** [\[text\]], with [text] folded in the middle only when it runs past
     [max_cells]. Never padded inside the brackets. *)

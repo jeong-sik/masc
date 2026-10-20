@@ -97,14 +97,21 @@ let new_post_done state ~reply_to ~sent_draft ~sent_attachments ~report ~refresh
          losing the text over it would make the error a dead end. *)
       state.board_post_error <- Some err
 
-let vote_done state ~report ~refresh result =
+let vote_done state ~report ~refresh ~refresh_detail target result =
   match result with
   | Ok message ->
       state.board_vote_armed <- None;
       report "system" ("Board vote: " ^ message);
-      (* The score is drawn from the list; refresh it rather than
-         waiting out the interval to see the arrow land. *)
-      refresh ()
+      (* The list row draws a post's score and the open reading draws the
+         post header and every comment's; refresh both rather than waiting
+         out the interval to see the arrow land. The comment cursor is an
+         id, so the refreshed thread keeps it on the comment just voted. *)
+      refresh ();
+      let voted_post = Masc_tui_board_vote.post_id target in
+      (match state.board_mode with
+       | Board_read open_post when String.equal open_post voted_post ->
+           refresh_detail voted_post
+       | Board_read _ | Board_list | Board_compose -> ())
   | Error err ->
       state.board_vote_armed <- None;
       report "error" ("Board vote failed: " ^ err)

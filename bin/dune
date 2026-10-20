@@ -1464,6 +1464,20 @@
  (modules masc_tui_board_comment_thread)
  (libraries masc_tui_types))
 
+;; The reader's comment cursor and the two-press vote over a typed target.
+;; Own libraries so the selection and the arm can be tested without a screen.
+(library
+ (name masc_tui_board_comment_cursor)
+ (wrapped false)
+ (modules masc_tui_board_comment_cursor)
+ (libraries masc_tui_types masc_tui_board_comment_thread))
+
+(library
+ (name masc_tui_board_vote)
+ (wrapped false)
+ (modules masc_tui_board_vote)
+ (libraries masc_tui_types))
+
 (library
  (name masc_tui_board_hearth)
  (wrapped false)
@@ -1766,7 +1780,7 @@
  (name masc_tui_board_updates)
  (wrapped false)
  (modules masc_tui_board_updates)
- (libraries masc_tui_types masc_tui_board_detail))
+ (libraries masc_tui_types masc_tui_board_detail masc_tui_board_vote))
 
 (library
  (name masc_tui_fusion_updates)
@@ -2574,6 +2588,8 @@
   masc_tui_fetched
   masc_tui_magnitude
   masc_tui_board_comment_thread
+  masc_tui_board_comment_cursor
+  masc_tui_board_vote
   masc_tui_board_hearth
   masc_tui_board_composer
   masc.board_addressing

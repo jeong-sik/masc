@@ -4601,6 +4601,7 @@
 (include stanzas/test_tui_context_tokens.inc)
 (include stanzas/test_tui_next_request_band.inc)
 (include stanzas/test_tui_board_attachments.inc)
+(include stanzas/test_tui_board_comment_vote.inc)
 (include stanzas/test_tui_board_list_reading.inc)
 (include stanzas/test_tui_async_request_details.inc)
 (include stanzas/test_tui_listing_rows_under_the_list.inc)

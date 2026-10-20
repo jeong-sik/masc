@@ -23,15 +23,24 @@ let pp_error fmt = function
    [Server_ide_lsp_proxy]'s [Lsp_proxy_limits] gives it. *)
 let initialize_timeout_sec = 10.0
 
-(* A Keeper's question blocks its turn, so this pool bounds the wait. The proxy
-   does not: there, the dashboard client owns the request timeout. Above the
-   10s a cold [initialize] gets, below any Keeper turn budget. *)
+(* Transport writes and answer/analysis observations use this request window.
+   It bounds a stalled peer, not cumulative turn time or work. The proxy's
+   dashboard client owns its own transport request policy. *)
 let request_timeout_sec = 30.0
 
 (* [Lsp_message_router] correlates answers by JSON-RPC id; [client_id] only tags
    the pending entry for fan-out to a WebSocket client, which this pool has
    none of. *)
 let pool_client_id = -1
+
+type document_readiness = Open_notification | Versioned_diagnostics
+type analysis_waiter = {
+  process : Lsp_process_manager.lsp_process;
+  uri : string;
+  version : int;
+  promise : (unit, string) result Eio.Promise.t;
+  resolver : (unit, string) result Eio.Promise.u;
+}
 
 type t =
   { sw : Eio.Switch.t
@@ -42,6 +51,10 @@ type t =
   ; servers : (key, Lsp_process_manager.lsp_process) Hashtbl.t
   ; spawn_locks : (key, Eio.Mutex.t) Hashtbl.t
   ; commands : Lsp_process_manager.servers (* which command starts each language *)
+  ; document_versions : int Atomic.t
+  ; document_locks : (key * string, Eio.Mutex.t) Hashtbl.t
+  ; analysis_locks : (key, Eio.Mutex.t) Hashtbl.t
+  ; mutable analysis_waiters : analysis_waiter list
   }
 
 let create ~sw ~clock ~proc_mgr ~servers =
@@ -53,6 +66,10 @@ let create ~sw ~clock ~proc_mgr ~servers =
   ; table_mutex = Eio.Mutex.create ()
   ; servers = Hashtbl.create 8
   ; spawn_locks = Hashtbl.create 8
+  ; document_versions = Atomic.make 1
+  ; document_locks = Hashtbl.create 8
+  ; analysis_locks = Hashtbl.create 8
+  ; analysis_waiters = []
   }
 ;;
 
@@ -66,8 +83,14 @@ let install t key proc = with_table t (fun () -> Hashtbl.replace t.servers key p
 (* The response reader calls this when the server's stdout ends. Without it a
    dead server stays in the table and every later question waits out
    [request_timeout_sec] against a process that will never answer. *)
-let forget t ((language, workspace_root) as key) ~reason =
-  with_table t (fun () -> Hashtbl.remove t.servers key);
+let forget t ((language, workspace_root) as key) ~proc ~reason =
+  with_table t (fun () ->
+    (match Hashtbl.find_opt t.servers key with
+     | Some current when current == proc -> Hashtbl.remove t.servers key
+     | None | Some _ -> ());
+    let failed,remaining=List.partition (fun waiter -> waiter.process == proc) t.analysis_waiters in
+    t.analysis_waiters <- remaining;
+    List.iter (fun waiter -> Eio.Promise.resolve waiter.resolver (Error reason)) failed);
   Log.Server.info
     "LSP pool dropped %s for %s: %s"
     (Lsp_process_manager.lang_id_of_language language)
@@ -85,6 +108,43 @@ let spawn_lock_for t key =
       lock)
 ;;
 
+let document_lock_for t key =
+  with_table t (fun () ->
+    match Hashtbl.find_opt t.document_locks key with
+    | Some lock -> lock
+    | None ->
+      let lock=Eio.Mutex.create () in
+      Hashtbl.add t.document_locks key lock;
+      lock)
+;;
+
+let analysis_lock_for t key =
+  with_table t (fun () ->
+    match Hashtbl.find_opt t.analysis_locks key with
+    | Some lock -> lock
+    | None ->
+      let lock=Eio.Mutex.create () in
+      Hashtbl.add t.analysis_locks key lock;
+      lock)
+;;
+
+let observe_analysis t proc ~method_ params =
+  let field fields name = match List.filter (fun (key,_) -> String.equal key name) fields with
+    | [_,value] -> Some value | [] | _ :: _ :: _ -> None in
+  match method_,params with
+  | "textDocument/publishDiagnostics", `Assoc fields ->
+    (match field fields "uri",field fields "version",field fields "diagnostics" with
+     | Some (`String uri),Some (`Int version),Some (`List _) ->
+       with_table t (fun () ->
+         let ready,remaining=List.partition (fun waiter ->
+           waiter.process == proc && String.equal waiter.uri uri && waiter.version=version)
+           t.analysis_waiters in
+         t.analysis_waiters <- remaining;
+         List.iter (fun waiter -> Eio.Promise.resolve waiter.resolver (Ok ())) ready)
+     | _ -> ())
+  | _ -> ()
+;;
+
 (* An answer that arrived as the window closed is the answer; the window's
    verdict stands only when none had. *)
 let await_answer ~clock ~timeout ~what promise =
@@ -93,6 +153,13 @@ let await_answer ~clock ~timeout ~what promise =
       Eio.Time.sleep clock timeout;
       Error (Printf.sprintf "%s timed out after %.0fs" what timeout))
     (fun () -> Eio.Promise.await promise)
+;;
+
+let transmit t ~timeout ~what f =
+  try Ok (Eio.Time.with_timeout_exn t.clock timeout f) with
+  | Eio.Time.Timeout -> Error (Printf.sprintf "%s write timed out after %.0fs" what timeout)
+  | Eio.Io _ as exn -> Error (Printexc.to_string exn)
+  | End_of_file -> Error "Language server closed its input"
 ;;
 
 let initialize_params ~workspace_root =
@@ -104,7 +171,8 @@ let initialize_params ~workspace_root =
          masc dies before [close] or the switch runs. Nothing branches on the
          value; it leaves for the server and never comes back. *)
     ; "processId", `Int (Unix.getpid ())
-    ; "capabilities", `Assoc []
+    ; "capabilities", `Assoc ["textDocument",`Assoc ["publishDiagnostics",`Assoc
+        ["versionSupport",`Bool true]]]
     ]
 ;;
 
@@ -143,29 +211,32 @@ let start_locked t ~key ~language ~workspace_root =
           ~sw:t.sw
           t.router
           proc
-          ~on_exit:(Some (fun ~reason -> forget t key ~reason))
-          ~on_notification:(fun ~client_id:_ ~method_ _params ->
-            (* Diagnostics and progress belong to an editor; a question and its
-               answer are all this pool carries. *)
-            Log.Server.debug "LSP pool dropped %s from %s" method_ lang_id);
-        let promise =
+          ~on_exit:(Some (fun ~reason -> forget t key ~proc ~reason))
+          ~on_notification:(fun ~client_id:_ ~method_ params ->
+            observe_analysis t proc ~method_ params);
+        let sent = transmit t ~timeout:initialize_timeout_sec ~what:"initialize" (fun () ->
           Lsp_message_router.send_request
             t.router
             proc
             ~method_:"initialize"
             ~params:(initialize_params ~workspace_root)
-            ~client_id:pool_client_id
+            ~client_id:pool_client_id)
         in
-        match
-          await_answer ~clock:t.clock ~timeout:initialize_timeout_sec ~what:"initialize" promise
+        let initialized=Result.bind sent (fun promise ->
+          await_answer ~clock:t.clock ~timeout:initialize_timeout_sec ~what:"initialize" promise) in
+        match initialized
         with
         | Error reason -> Error (Server_failed { lang_id; reason })
         | Ok _capabilities ->
-          Lsp_message_router.send_notification
+          let sent=transmit t ~timeout:initialize_timeout_sec ~what:"initialized" (fun () ->
+            Lsp_message_router.send_notification
             t.router
             proc
             ~method_:"initialized"
-            ~params:(`Assoc []);
+            ~params:(`Assoc [])) in
+          match sent with
+          | Error reason -> Error (Server_failed {lang_id;reason})
+          | Ok () ->
           install t key proc;
           installed := true;
           Log.Server.info "LSP pool started %s for %s" lang_id workspace_root;
@@ -200,10 +271,12 @@ let ask t ~language ~workspace_root ~method_ ~params =
   match ensure t ~language ~workspace_root with
   | Error _ as err -> err
   | Ok proc ->
-    let promise =
-      Lsp_message_router.send_request t.router proc ~method_ ~params ~client_id:pool_client_id
+    let sent=transmit t ~timeout:request_timeout_sec ~what:method_ (fun () ->
+      Lsp_message_router.send_request t.router proc ~method_ ~params ~client_id:pool_client_id)
     in
-    (match await_answer ~clock:t.clock ~timeout:request_timeout_sec ~what:method_ promise with
+    let answered=Result.bind sent (fun promise ->
+      await_answer ~clock:t.clock ~timeout:request_timeout_sec ~what:method_ promise) in
+    (match answered with
      | Error reason ->
        Error
          (Server_failed
@@ -215,8 +288,68 @@ let notify t ~language ~workspace_root ~method_ ~params =
   match ensure t ~language ~workspace_root with
   | Error _ as err -> err
   | Ok proc ->
-    Lsp_message_router.send_notification t.router proc ~method_ ~params;
-    Ok ()
+    transmit t ~timeout:request_timeout_sec ~what:method_ (fun () ->
+      Lsp_message_router.send_notification t.router proc ~method_ ~params)
+    |> Result.map_error (fun reason -> Server_failed
+      {lang_id=Lsp_process_manager.lang_id_of_language language;reason})
+;;
+
+let ask_document t ~language ~workspace_root ~uri ~text ~readiness ~method_ ~params =
+  (* The scope below restores protocol ownership before unlocking even when
+     cancelled, so a failed observation must not poison subsequent reads. *)
+  let run () = Eio.Mutex.use_ro (document_lock_for t ((language,workspace_root),uri)) (fun () ->
+    match ensure t ~language ~workspace_root with
+    | Error _ as error -> error
+    | Ok proc ->
+      let lang_id=Lsp_process_manager.lang_id_of_language language in
+      let failed reason=Error (Server_failed {lang_id;reason}) in
+      let version=Atomic.fetch_and_add t.document_versions 1 in
+      Eio.Switch.run (fun sw ->
+        let waiter=match readiness with
+          | Open_notification -> None
+          | Versioned_diagnostics ->
+            let promise,resolver=Eio.Promise.create () in
+            let waiter={process=proc;uri;version;promise;resolver} in
+            with_table t (fun () -> t.analysis_waiters <- waiter :: t.analysis_waiters);
+            Some waiter in
+        Eio.Switch.on_release sw (fun () ->
+          with_table t (fun () -> t.analysis_waiters <-
+            List.filter (fun current ->
+              not (current.process == proc && current.version=version)) t.analysis_waiters);
+          (* Close only the owned process. A blocked close uses the existing
+             transport deadline, then retires that process rather than holding
+             a cancelled scope or handing an open document to the next owner. *)
+          try Eio.Time.with_timeout_exn t.clock request_timeout_sec (fun () ->
+            Lsp_message_router.send_notification t.router proc
+              ~method_:"textDocument/didClose" ~params:(`Assoc ["textDocument",`Assoc ["uri",`String uri]]))
+          with exn -> (* cancel-guard-ok: release-only teardown; no work resumes *)
+            forget t (language,workspace_root) ~proc ~reason:(Printexc.to_string exn);
+            Lsp_process_manager.shutdown proc;
+            Log.Server.debug "LSP document close for %s failed: %s" lang_id (Printexc.to_string exn));
+        let opened=transmit t ~timeout:request_timeout_sec ~what:"textDocument/didOpen" (fun () ->
+          Lsp_message_router.send_notification t.router proc ~method_:"textDocument/didOpen"
+          ~params:(`Assoc ["textDocument",`Assoc ["uri",`String uri;"languageId",`String lang_id;
+            "version",`Int version;"text",`String text]])) in
+        let ready=Result.bind opened (fun () -> match waiter with
+          | None -> Ok ()
+          | Some waiter -> await_answer ~clock:t.clock ~timeout:request_timeout_sec
+              ~what:"versioned document analysis" waiter.promise) in
+        match ready with
+        | Error reason -> failed reason
+        | Ok () ->
+          let sent=transmit t ~timeout:request_timeout_sec ~what:method_ (fun () ->
+            Lsp_message_router.send_request t.router proc ~method_ ~params ~client_id:pool_client_id) in
+          let answered=Result.bind sent (fun promise ->
+            await_answer ~clock:t.clock ~timeout:request_timeout_sec ~what:method_ promise) in
+          match answered with
+          | Ok json -> Ok json
+          | Error reason -> failed reason)) in
+  match readiness with
+  | Open_notification -> run ()
+  | Versioned_diagnostics ->
+    (* Pyright holds one active References cancellation source per process.
+       Keep these reads serial so another URI cannot cancel the first one. *)
+    Eio.Mutex.use_ro (analysis_lock_for t (language,workspace_root)) run
 ;;
 
 (* Shuts every held server down. Closing the pipes is what ends the stderr
@@ -228,6 +361,11 @@ let close t =
       let held = Hashtbl.fold (fun _key proc acc -> proc :: acc) t.servers [] in
       Hashtbl.reset t.servers;
       Hashtbl.reset t.spawn_locks;
+      Hashtbl.reset t.document_locks;
+      Hashtbl.reset t.analysis_locks;
+      let waiters=t.analysis_waiters in
+      t.analysis_waiters <- [];
+      List.iter (fun waiter -> Eio.Promise.resolve waiter.resolver (Error "Language server pool closed")) waiters;
       held)
   in
   List.iter

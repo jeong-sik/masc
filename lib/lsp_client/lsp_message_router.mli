@@ -2,10 +2,11 @@
     and LSP server processes.
 
     Internal helpers ([build_request], [build_notification], [parse_response],
-    [parse_notification], [resolve_pending], [reject_all]) are intentionally
+    [parse_notification], [resolve_pending], [reject_for_process]) are intentionally
     not exposed. *)
 
 type pending_request = {
+  process : Lsp_process_manager.lsp_process;
   client_id : int;
   method_ : string;
   promise : (Yojson.Safe.t, string) result Eio.Promise.t;

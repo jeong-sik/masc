@@ -5,7 +5,8 @@
     IDs, and resolves [Eio.Promise.t] values when responses arrive. *)
 
 type pending_request =
-  { client_id : int
+  { process : Lsp_process_manager.lsp_process
+  ; client_id : int
   ; method_ : string
   ; promise : (Yojson.Safe.t, string) result Eio.Promise.t
   ; resolver : (Yojson.Safe.t, string) result Eio.Promise.u
@@ -15,7 +16,7 @@ type t =
   { next_server_id : int Atomic.t
   ; pending : (int, pending_request) Hashtbl.t
   ; mutex : Eio.Mutex.t
-    (** Guards [pending]. [send_request], [resolve_pending], and [reject_all]
+    (** Guards [pending]. [send_request], [resolve_pending], and [reject_for_process]
         may run on different Eio fibers, so every access to the hash table must
         be serialized. *)
   }
@@ -61,53 +62,65 @@ let send_request
   let request_json = build_request server_id method_ params in
   let payload = Yojson.Safe.to_string request_json in
   let promise, resolver = Eio.Promise.create () in
-  Eio.Mutex.use_rw ~protect:true router.mutex @@ fun () ->
-  Hashtbl.add router.pending server_id { client_id; method_; promise; resolver };
-  Lsp_process_manager.write_message proc payload;
+  Eio.Mutex.use_rw ~protect:true router.mutex (fun () ->
+    Hashtbl.add router.pending server_id { process=proc; client_id; method_; promise; resolver });
+  (try Lsp_process_manager.write_message proc payload with
+   | exn -> (* cancel-guard-ok: retire a possibly partial frame, then re-raise *)
+     Eio.Cancel.protect (fun () ->
+       Eio.Mutex.use_rw ~protect:true router.mutex (fun () -> Hashtbl.remove router.pending server_id));
+     Eio.Cancel.protect (fun () -> Lsp_process_manager.shutdown proc);
+     raise exn);
   promise
 ;;
 
 (** Send a JSON-RPC notification to the LSP server process.
     Notifications have no ID and expect no response. *)
 let send_notification
-      (router : t)
+      (_router : t)
       (proc : Lsp_process_manager.lsp_process)
       ~method_
       ~params
   =
   let notif_json = build_notification method_ params in
   let payload = Yojson.Safe.to_string notif_json in
-  Lsp_process_manager.write_message proc payload
+  (* Framing is serialized on this physical process, never while holding the
+     router's pending table lock or another server's write lock. *)
+  try Lsp_process_manager.write_message proc payload with
+  | exn -> (* cancel-guard-ok: a partial frame cannot be reused; no retry *)
+    Eio.Cancel.protect (fun () -> Lsp_process_manager.shutdown proc);
+    raise exn
 ;;
 
 (** Resolve a pending request by server ID. *)
 let resolve_pending
       (router : t)
+      ~proc
       (server_id : int)
       (result : (Yojson.Safe.t, string) result)
   =
   Eio.Mutex.use_rw ~protect:true router.mutex @@ fun () ->
   match Hashtbl.find_opt router.pending server_id with
-  | Some req ->
+  | Some req when req.process == proc ->
     Hashtbl.remove router.pending server_id;
     Eio.Promise.resolve req.resolver result
-  | None -> Log.Server.warn "LSP router: response for unknown server_id %d" server_id
+  | None | Some _ -> Log.Server.warn "LSP router: response for unowned server_id %d" server_id
 ;;
 
-(** Reject all pending requests with an error.
-    Used when the LSP process crashes or the connection closes. *)
-let reject_all (router : t) (reason : string) =
+(** A disconnected process cannot reject another workspace's requests. *)
+let reject_for_process (router : t) ~proc (reason : string) =
   Eio.Mutex.use_rw ~protect:true router.mutex @@ fun () ->
-  Hashtbl.iter
-    (fun server_id req ->
+  let owned=Hashtbl.fold (fun id req acc ->
+    if req.process == proc then (id,req)::acc else acc) router.pending [] in
+  List.iter
+    (fun (server_id,req) ->
+       Hashtbl.remove router.pending server_id;
        Eio.Promise.resolve req.resolver (Error reason);
        Log.Server.debug
          "LSP router: rejecting pending %s (server_id=%d, client_id=%d)"
          req.method_
          server_id
          req.client_id)
-    router.pending;
-  Hashtbl.clear router.pending
+    owned
 ;;
 
 (** Parse a JSON-RPC response, extracting [id] and [result]/[error]. *)
@@ -196,7 +209,7 @@ let start_response_reader
           let raw = Lsp_process_manager.read_message proc.stdout_r in
           let json = Yojson.Safe.from_string raw in
           match parse_response json with
-          | Some (server_id, result) -> resolve_pending router server_id result
+          | Some (server_id, result) -> resolve_pending router ~proc server_id result
           | None ->
             (match parse_notification json with
              | Some (method_, params) -> on_notification ~client_id:(-1) ~method_ params
@@ -210,8 +223,9 @@ let start_response_reader
           "LSP router: response reader for %s ended: %s"
           proc.lang_id
           reason;
-        reject_all
+        reject_for_process
           router
+          ~proc
           (Printf.sprintf "LSP process %s disconnected: %s" proc.lang_id reason);
         Option.iter (fun f -> f ~reason) on_exit)
   in

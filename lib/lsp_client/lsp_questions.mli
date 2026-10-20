@@ -7,10 +7,9 @@
 
 type question =
   | References
-      (** Measured on this tree as answering only the opened file's own
-          occurrences — one item where [rg] finds five. Kept in the type
-          because the parser reads its answers and the tests pin them, and
-          left out of the Keeper surface until #30504 says it answers. *)
+      (** Uses the language's external-index precondition where required.
+          Python also waits for the opened version's diagnostic observation
+          before asking, because cold Pyright can otherwise omit callers. *)
   | Definition
   | Hover
 
@@ -80,7 +79,10 @@ val answer_of_json : question -> Yojson.Safe.t -> (answer, string) result
 
     Opening every time rather than tracking which documents a server holds:
     the file on disk is the truth here — nothing edits a buffer in memory —
-    and a document left open would go stale the moment a tool wrote to it. *)
+    and a document left open would go stale the moment a tool wrote to it.
+    The pool owns the physical process, fresh document version, serialization
+    and close on cancellation. Python References waits for matching versioned
+    diagnostics; other questions retain their direct query behavior. *)
 val ask
   :  Lsp_workspace_pool.t
   -> language:Lsp_process_manager.language

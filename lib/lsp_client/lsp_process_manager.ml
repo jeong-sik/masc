@@ -12,6 +12,7 @@ type lsp_process =
   ; stdin_w : [ Eio.Flow.sink_ty | Eio.Resource.close_ty ] Eio.Std.r
   ; stdout_r : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r
   ; stderr_r : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r
+  ; write_mutex : Eio.Mutex.t
   }
 
 type spawn_error =
@@ -413,8 +414,9 @@ let command_exists cmd =
 let write_message (proc : lsp_process) (json : string) =
   let payload = Bytes.unsafe_of_string json in
   let header = Printf.sprintf "Content-Length: %d\r\n\r\n" (Bytes.length payload) in
-  Eio.Flow.copy_string header proc.stdin_w;
-  Eio.Flow.copy_string json proc.stdin_w
+  Eio.Mutex.use_ro proc.write_mutex (fun () ->
+    Eio.Flow.copy_string header proc.stdin_w;
+    Eio.Flow.copy_string json proc.stdin_w)
 ;;
 
 (** Read exactly [n] bytes from a flow into a string. *)
@@ -564,7 +566,7 @@ let spawn
               "LSP %s stderr reader ended: %s"
               lang_id
               (Printexc.to_string exn));
-        Ok { lang_id; proc; stdin_w; stdout_r; stderr_r }
+        Ok { lang_id; proc; stdin_w; stdout_r; stderr_r;write_mutex=Eio.Mutex.create () }
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> Error (Process_error (Printexc.to_string exn)))

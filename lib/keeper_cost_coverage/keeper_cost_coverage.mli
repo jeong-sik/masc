@@ -36,6 +36,7 @@ type error =
   | Count_overflow
   | Evidence_regressed
   | History_rewritten
+  | Evidence_inconsistent
 
 val empty : t
 val unobserved_history : known_cost_usd:float -> (t, error) result
@@ -49,3 +50,12 @@ val difference : before:t -> after:t -> (t, error) result
     owner snapshot. Reject regressed amounts/counts and erased unknown history.
     This is not an event deduplicator or a replacement for owner identity/CAS. *)
 val knowledge : t -> knowledge
+
+val error_to_string : error -> string
+val to_json : t -> Yojson.Safe.t
+val of_json : Yojson.Safe.t -> (t, string) result
+(** Current wire union: a number is a known sum with unobserved history and
+    no captured readings. An exact object carries the sum and all coverage.
+    Complete empty and priced zero are objects, never bare numbers. Malformed
+    objects are refused rather than salvaging their sum. Ordinary round trips
+    preserve unknown history; this codec does not reset or rewrite a store. *)

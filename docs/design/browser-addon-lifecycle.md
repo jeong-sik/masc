@@ -2,8 +2,9 @@
 
 The optional browser Add-on owns live command queues and Gecko automation.
 The Gecko driver starts only with an attached browser Add-on and a configured,
-enabled `[browser.automation]`. Stagehand and the Keeper live bridge still have
-server startup paths; their owned-process and model-broker migration remains.
+enabled `[browser.automation]`. Chrome/Stagehand also starts inside that worker,
+with its original native process owner and shared Exact Output broker. The Keeper
+live bridge still has a server startup path that must move to its Add-on owner.
 
 The operator selects two independent middleware boundaries:
 
@@ -307,10 +308,16 @@ receipts remain distinct from successful contract validation.
    during blocked startup and link-safe profile cleanup. Its browser executable
    is scripted; it does not establish real Chrome, extension or provider use.
    The production core Stagehand startup/executor installation has been removed.
-   The standalone browser probe still uses the separate server opener helper;
-   that probe must be moved to the Add-on/shared-Exact path before deleting the
-   helper and its PID/command-based recovery. Shared operator profiles, scoped
-   file transfers and real browser evidence remain open work.
+   The standalone Chrome probe now declares and attaches the actual bundled
+   native browser Add-on, invokes public tool handlers with selected input/output
+   hooks, and serves only a scripted provider through the shared Exact Output
+   runner. It defines real page input, session close/reopen, detach during a held
+   model command, stale-handle refusal and fresh worker reattachment. Fixture
+   events and pointer feedback are observed through the fixture's loopback HTTP
+   reports rather than an alternate session/evaluation path. The separate server
+   opener and its PID/command-based recovery have been removed. These are
+   executable scenario definitions, not a successful browser-proof run. Shared
+   operator profiles, scoped transfers and actual browser evidence remain open.
 5. Scoped model-generation middleware using the existing exact-output authority,
    with retained request/terminal evidence and installation-selected routes. The
    new package `exact_outputs` declarations are reused; observation-only sampling

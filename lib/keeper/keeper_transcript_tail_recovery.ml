@@ -41,7 +41,9 @@ let recover_keeper config name =
     let session_dir =
       Filename.concat (Keeper_types_support.session_base_dir_ config) session_id
     in
-    (match Store.load_agent_core_with_ref ~session_dir ~session_id with
+    (match
+       Store.saved_history_of_ref (Store.load_agent_core_with_ref ~session_dir ~session_id)
+     with
      | Error Store.Ref_not_found ->
        (* No canonical checkpoint: the keeper has not saved one on this trace
           (an official-client lane, or a trace whose checkpoint a purge moved
@@ -49,11 +51,15 @@ let recover_keeper config name =
           load failure logged an ERROR and counted one recovery failure on
           every boot -- 27 boots on 2026-09-22 for one such keeper. *)
        Already_dispatchable
+     | Ok (Store.History_superseded _) ->
+       (* The next turn starts fresh and does not replay this history, so no
+          tool cycle in it is open for that turn. *)
+       Already_dispatchable
      | Error
          ((Store.Ref_read_failed _ | Store.Ref_identity_invalid _
           | Store.Ref_session_mismatch _ | Store.Ref_lock_failed _) as error) ->
        Checkpoint_unavailable error
-     | Ok (checkpoint, expected_source_ref) ->
+     | Ok (Store.History_read (checkpoint, expected_source_ref)) ->
        (match Unit_.close_open_tail checkpoint.Agent_core.Checkpoint.messages with
         | Error structural -> Unparseable structural
         | Ok { Unit_.closed_tool_use_ids = []; _ } -> Already_dispatchable
@@ -105,8 +111,8 @@ let log_outcome name outcome =
       name
       detail
   | Checkpoint_unavailable error ->
-    (* The cause decides the remedy: a superseded version is a hard-cut
-       checkpoint the operator purges, a lock failure is transient. *)
+    (* The cause decides the remedy: a lock failure is transient, damaged
+       bytes are not. *)
     Log.Keeper.error
       "transcript_tail_recovery: keeper=%s canonical checkpoint unavailable: %s"
       name

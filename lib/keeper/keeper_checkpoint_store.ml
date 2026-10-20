@@ -1209,6 +1209,41 @@ let checkpoint_ref_load_error_to_string = function
       (Keeper_id.Trace_id.to_string actual)
   | Ref_lock_failed detail -> "checkpoint lock failed: " ^ detail
 
+(* A canonical an earlier [checkpoint_version] wrote is the deliberate hard
+   cut, not a failed read: the turn path starts fresh on it and the next save
+   replaces it. A reader of the saved history takes the same answer, that
+   there is no history this build reads, and settles on it. A keeper whose
+   turns save no checkpoint (an official client) never replaces the file, so
+   a reader that reported it as unreadable stopped on it at every pass for as
+   long as the trace lasted (#44446). *)
+type 'a saved_history =
+  | History_read of 'a
+  | History_superseded of { expected : int; got : int }
+
+let saved_history = function
+  | Ok value -> Ok (History_read value)
+  | Error (Superseded_version { expected; got }) -> Ok (History_superseded { expected; got })
+  | Error
+      (( Not_found
+       | Store_error _
+       | Parse_error _
+       | Newer_version _
+       | Io_error _
+       | Read_failed _
+       | Agent_core_error _ ) as error) -> Error error
+
+let saved_history_of_ref = function
+  | Ok value -> Ok (History_read value)
+  | Error (Ref_read_failed error) ->
+    (match saved_history (Error error) with
+     | Ok history -> Ok history
+     | Error error -> Error (Ref_read_failed error))
+  | Error
+      (( Ref_not_found
+       | Ref_identity_invalid _
+       | Ref_session_mismatch _
+       | Ref_lock_failed _ ) as error) -> Error error
+
 type exact_checkpoint_snapshot =
   { checkpoint : Agent_core.Checkpoint.t
   ; reference : Keeper_checkpoint_ref.t

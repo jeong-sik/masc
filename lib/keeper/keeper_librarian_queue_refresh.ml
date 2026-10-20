@@ -382,10 +382,10 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
             observe O.No_source
           | P.Source_unreadable | P.Empty_range ->
             (* Not evidence that the backlog was read. The checkpoint this
-               trace names is absent, or the prefix asked for sits at the
-               start. Releasing the width here would send the next pass back
-               at the whole backlog, which is the loop this limit exists to
-               stop. *)
+               trace names is absent or superseded, or the prefix asked for
+               sits at the start. Releasing the width here would send the
+               next pass back at the whole backlog, which is the loop this
+               limit exists to stop. *)
             observe O.No_source
         in
         (* A worker pool keeps the job closure until the job returns, so the

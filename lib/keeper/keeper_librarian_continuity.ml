@@ -110,8 +110,8 @@ let prepare_source ?previous ?end_atom ~config ~keeper_name ~trace_id () =
        | Error _ as error -> error)
     | Some _ | None ->
       C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id |> Result.map decoded in
-  match loaded with
-  | Error C.Ref_not_found -> Ok (No_source Source_unreadable)
+  match C.saved_history_of_ref loaded with
+  | Error C.Ref_not_found | Ok (C.History_superseded _) -> Ok (No_source Source_unreadable)
   | Error
       ((C.Ref_read_failed _ | C.Ref_identity_invalid _ | C.Ref_session_mismatch _
        | C.Ref_lock_failed _) as error) -> Error (match error with
@@ -120,7 +120,7 @@ let prepare_source ?previous ?end_atom ~config ~keeper_name ~trace_id () =
       | C.Ref_identity_invalid _ -> "continuity checkpoint identity invalid"
       | C.Ref_session_mismatch _ -> "continuity checkpoint trace mismatch"
       | C.Ref_lock_failed detail -> detail)
-  | Ok (source, messages, prefix) ->
+  | Ok (C.History_read (source, messages, prefix)) ->
     match S.checkpoint_prefix_range ~trace_id ~lines ~messages with
     | Error (S.Uncovered_history | S.Unmatched_history) -> Ok (No_source Source_unreadable)
     | Error

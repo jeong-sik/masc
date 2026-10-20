@@ -12,8 +12,10 @@ type no_source =
   | Drained
       (** Every completed turn the boundary log states has been read. *)
   | Source_unreadable
-      (** The checkpoint this trace names is absent, or the boundary lines do
-          not cover its prefix. The backlog is unknown, not empty. *)
+      (** The checkpoint this trace names is absent or holds a version this
+          build supersedes ({!Keeper_checkpoint_store.saved_history}), or the
+          boundary lines do not cover its prefix. The backlog is unknown, not
+          empty. *)
   | Empty_range
       (** The requested end sits at or behind the start. *)
 

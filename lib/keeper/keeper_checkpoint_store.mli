@@ -304,6 +304,27 @@ val checkpoint_ref_create_error_to_string : Keeper_checkpoint_ref.create_error -
 val checkpoint_identity_error_to_string : checkpoint_identity_error -> string
 val checkpoint_ref_load_error_to_string : checkpoint_ref_load_error -> string
 
+(** A load as a reader of the saved history takes it. A canonical an earlier
+    [checkpoint_version] wrote ([Superseded_version]) is the deliberate hard
+    cut: the turn path starts fresh on it and the next save replaces it. A
+    reader answers the same fresh state, so it settles on the file instead of
+    reporting it as unreadable at every pass. A keeper whose turns save no
+    checkpoint (an official client) never replaces it. *)
+type 'a saved_history =
+  | History_read of 'a
+  | History_superseded of { expected : int; got : int }
+
+(** The cut decision for a {!checkpoint_load_error} load. Every other error is
+    returned unchanged. *)
+val saved_history :
+  ('a, checkpoint_load_error) result -> ('a saved_history, checkpoint_load_error) result
+
+(** {!saved_history} for a load that reports {!checkpoint_ref_load_error}: the
+    cut arrives as [Ref_read_failed (Superseded_version _)]. *)
+val saved_history_of_ref :
+  ('a, checkpoint_ref_load_error) result
+  -> ('a saved_history, checkpoint_ref_load_error) result
+
 (** Exact persisted bytes from one read, their reference, and a checkpoint
     value for them. The reference's digest is always taken over those bytes.
     The value, and the trace and turn of the reference, are the decode of

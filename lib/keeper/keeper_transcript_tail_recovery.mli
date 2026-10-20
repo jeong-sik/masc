@@ -12,7 +12,8 @@
 
 type keeper_outcome =
   | Already_dispatchable
-      (** No durable metadata, no canonical checkpoint yet, or no open tail. *)
+      (** No durable metadata, no canonical checkpoint yet, a canonical of a
+          version this build supersedes, or no open tail. *)
   | Closed of { tool_use_ids : string list }
   | Unparseable of Keeper_transcript_unit.structural_error
       (** Genuine corruption — only the open tail is recoverable. *)

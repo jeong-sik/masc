@@ -17,6 +17,14 @@ type t =
      [Atomic] the test and the set are one step, so exactly one caller
      reaches the close. *)
   ; closed : bool Atomic.t
+  (* References the semantic writes of the open transaction stopped naming.
+     The transaction checks them against every owning execution before it
+     commits, and empties this either way. *)
+  ; dropped : Semantic.retained_checkpoint list Atomic.t
+  (* References committed transactions released, until
+     [take_released_checkpoints] hands them to the caller that removes the
+     files. *)
+  ; released : Semantic.retained_checkpoint list Atomic.t
   }
 
 type error =
@@ -303,17 +311,6 @@ let commit db =
   | Some Fail_after_commit ->
     let* () = exec db ~operation:"commit operation transaction" "COMMIT" in
     Error (Store_unavailable "injected uncertain operation commit")
-;;
-
-let with_transaction store f =
-  let* () = ensure_open store in
-  let* () = exec store.db ~operation:"begin operation transaction" "BEGIN IMMEDIATE" in
-  match f () with
-  | Error _ as error -> rollback store.db; error
-  | Ok value ->
-    (match commit store.db with
-     | Ok () -> Ok value
-     | Error _ as error -> rollback store.db; error)
 ;;
 
 let canonical_json field value =
@@ -804,7 +801,7 @@ let open_or_create ~path =
     | Error _ as error -> rollback db; error
   in
   match initialize_or_upgrade () with
-  | Ok () -> Ok { db; path; closed = Atomic.make false }
+  | Ok () -> Ok { db; path; closed = Atomic.make false; dropped = Atomic.make []; released = Atomic.make [] }
   | Error error -> fail error
 ;;
 
@@ -815,7 +812,7 @@ let open_existing ~path =
     let result =
       let* () = validate_schema db in
       let* () = configure db in
-      Ok { db; path; closed = Atomic.make false }
+      Ok { db; path; closed = Atomic.make false; dropped = Atomic.make []; released = Atomic.make [] }
     in
     (match result with
      | Ok _ -> result
@@ -891,6 +888,68 @@ let owns_checkpoint_references (execution : Semantic.t) =
   | Keeper_native_call.No_native_call -> false
   | Keeper_native_call.Active _ | Keeper_native_call.Terminal_unacknowledged _ -> true
 ;;
+
+(* [update_semantic] records the references one write stopped naming. *)
+let record_dropped store ~before ~after =
+  let named = List.map (fun (retained : Semantic.retained_checkpoint) -> retained.reference.sha256)
+      (Semantic.retained_checkpoints after) in
+  match List.filter (fun (retained : Semantic.retained_checkpoint) ->
+      not (List.mem retained.reference.sha256 named)) (Semantic.retained_checkpoints before) with
+  | [] -> ()
+  | dropped -> Atomic.set store.dropped (Atomic.get store.dropped @ dropped)
+;;
+
+(* The files the open transaction releases: each dropped reference whose
+   sha256 no execution owning references still names after all its writes,
+   once per file. A retained file is named by its sha256, and the startup
+   sweep keys liveness the same way over the same selection. The sweep reads
+   every keeper's store and this reads one: the hashed bytes carry the
+   checkpoint's session id, which is the keeper's trace id, so another
+   keeper's executions cannot name the same sha256. The agent name in the
+   bytes does not separate keepers; it names the runtime. *)
+let released_by_transaction store =
+  match Atomic.exchange store.dropped [] with
+  | [] -> Ok []
+  | dropped ->
+    let* rows = semantic_rows store.db ~active_only:false in
+    let live = List.filter owns_checkpoint_references rows
+      |> List.concat_map Semantic.checkpoint_references
+      |> List.map (fun (reference : Keeper_checkpoint_ref.t) -> reference.sha256) in
+    let same_file (left : Semantic.retained_checkpoint) (right : Semantic.retained_checkpoint) =
+      String.equal left.reference.sha256 right.reference.sha256
+      && Semantic.session_scope_components left.session_scope
+         = Semantic.session_scope_components right.session_scope in
+    Ok (List.fold_left (fun released (retained : Semantic.retained_checkpoint) ->
+        if List.mem retained.reference.sha256 live || List.exists (same_file retained) released
+        then released else retained :: released) [] dropped |> List.rev)
+;;
+
+(* Run [f] as one transaction. Only a COMMIT that returned success publishes
+   what the transaction released; a failed or uncertain commit releases
+   nothing, and the startup sweep removes what it left. *)
+let in_transaction store ~begin_operation ~store_error f =
+  let* () = exec store.db ~operation:begin_operation "BEGIN IMMEDIATE" |> Result.map_error store_error in
+  Atomic.set store.dropped [];
+  let committed = match f () with
+    | Error _ as error -> error
+    | Ok value ->
+      let* released = released_by_transaction store |> Result.map_error store_error in
+      let* () = commit store.db |> Result.map_error store_error in
+      Ok (value, released) in
+  Atomic.set store.dropped [];
+  match committed with
+  | Ok (value, released) ->
+    Atomic.set store.released (Atomic.get store.released @ released);
+    Ok value
+  | Error _ as error -> rollback store.db; error
+;;
+
+let with_transaction store f =
+  let* () = ensure_open store in
+  in_transaction store ~begin_operation:"begin operation transaction" ~store_error:Fun.id f
+;;
+
+let take_released_checkpoints store = Atomic.exchange store.released []
 
 type inspection_scope =
   | Outstanding_integrity_audit
@@ -1772,13 +1831,8 @@ let semantic_outstanding store =
 ;;
 let with_semantic_transaction store f =
   let* () = ensure_open store |> semantic_store_result in
-  let* () = exec store.db ~operation:"begin semantic operation transaction" "BEGIN IMMEDIATE" |> semantic_store_result in
-  match f () with
-  | Error _ as error -> rollback store.db; error
-  | Ok value ->
-      (match commit store.db |> semantic_store_result with
-       | Ok () -> Ok value
-       | Error _ as error -> rollback store.db; error)
+  in_transaction store ~begin_operation:"begin semantic operation transaction"
+    ~store_error:(fun error -> Semantic_store_error error) f
 ;;
 let semantic_canonical execution = canonical_json "semantic execution" (Semantic.to_json execution)
 
@@ -1793,7 +1847,10 @@ let insert_semantic db execution =
       let* () = bind_text db stmt ~operation:"bind initialized frame and membership" 4 bytes in
       expect_done db stmt ~operation:"persist semantic admission")
 ;;
-let update_semantic db ~expected next =
+(* Every semantic write that can stop naming a reference is this CAS: an
+   insert names only new references, and no row is deleted. *)
+let update_semantic store ~expected next =
+  let db = store.db in
   let* expected_bytes = semantic_canonical expected in
   let* bytes = semantic_canonical next in
   with_statement db ~operation:"CAS semantic execution"
@@ -1806,7 +1863,8 @@ let update_semantic db ~expected next =
       let* () = bind_int64 db stmt ~operation:"bind expected revision" 5 expected.revision in
       let* () = bind_text db stmt ~operation:"bind expected exact record" 6 expected_bytes in
       let* () = expect_done db stmt ~operation:"CAS semantic execution" in
-      if Sqlite3.changes db = 1 then Ok () else Error (Integrity_error "semantic CAS did not update its exact record"))
+      if Sqlite3.changes db = 1 then (record_dropped store ~before:expected ~after:next; Ok ())
+      else Error (Integrity_error "semantic CAS did not update its exact record"))
 ;;
 let same_source (left : Semantic.source_member) (right : Semantic.source_member) =
   left.post_id = right.post_id && left.admitted_revision = right.admitted_revision
@@ -1937,7 +1995,7 @@ let defer_direct_runtime_retry store ~now ~operation_id ~execution_digest ~conti
       let* suspended = semantic_transition ~now (Semantic.Suspend_runtime_retry continuation) execution in
       let* () = match current with
         | None -> insert_semantic store.db suspended
-        | Some current -> update_semantic store.db ~expected:current suspended in
+        | Some current -> update_semantic store ~expected:current suspended in
       requeue_continuation_with_db store.db operation) in
   match result with
   | Ok _ -> read_existing ()
@@ -1959,7 +2017,7 @@ let update_direct_runtime_retry_wait store ~now ~operation_id ~observed ~replace
       | Some expected, Some retry when retry = observed ->
         let* next = semantic_transition ~now
           (Semantic.Update_runtime_retry_wait {observed; replacement}) expected in
-        let* () = update_semantic store.db ~expected next in
+        let* () = update_semantic store ~expected next in
         Ok true
       | Some _, Some _ | Some _, None | None, Some _ | None, None -> Ok false)
 ;;
@@ -1981,7 +2039,7 @@ let resume_direct_runtime_retry store ~now ~operation_id ~observed =
         if List.exists (fun (entry : Semantic.t) -> semantic_is_running entry.phase
             && not (Keeper_execution_scope_id.equal entry.id expected.id)) outstanding
         then Error (Integrity_error "another semantic execution owns the running slot")
-        else (expected_next := Some next; update_semantic store.db ~expected next)) in
+        else (expected_next := Some next; update_semantic store ~expected next)) in
   match result with
   | Ok () -> Ok ()
   | Error (Store_unavailable _ as error) ->
@@ -2032,7 +2090,7 @@ let defer_direct_checkpoint store ~now ~operation_id ~execution_digest ~checkpoi
       let* suspended = semantic_transition ~now action execution in
       let* () = match current with
         | None -> insert_semantic store.db suspended
-        | Some current -> update_semantic store.db ~expected:current suspended in
+        | Some current -> update_semantic store ~expected:current suspended in
       let* requeued = requeue_continuation_with_db store.db operation in
       (* A cooperative yield hands the slot to already submitted input. Keep
          the operation identity/input frozen, but let newer steering run first. *)
@@ -2071,7 +2129,7 @@ let resume_direct_checkpoint store ~now ~operation_id ~observed =
         if List.exists (fun (entry : Semantic.t) -> semantic_is_running entry.phase
             && not (Keeper_execution_scope_id.equal entry.id expected.id)) outstanding
         then Error (Integrity_error "another semantic execution owns the running slot")
-        else (expected_next := Some next; update_semantic store.db ~expected next)) in
+        else (expected_next := Some next; update_semantic store ~expected next)) in
   match result with
   | Ok () -> Ok ()
   | Error (Store_unavailable _ as error) ->
@@ -2169,7 +2227,7 @@ let defer_direct_gate store ~now ~operation_id ~execution_digest ~waiting =
              semantic_transition ~now Semantic.Begin_execution ready) in
       let* suspended = semantic_transition ~now (Semantic.Suspend_gate waiting) execution in
       let* () = match current with None -> insert_semantic store.db suspended
-        | Some current -> update_semantic store.db ~expected:current suspended in
+        | Some current -> update_semantic store ~expected:current suspended in
       requeue_continuation_with_db store.db operation) in
   match result with
   | Ok _ -> readback ()
@@ -2215,7 +2273,7 @@ let defer_direct_gate_reconciliation store ~now ~operation_id ~execution_digest 
           | (Semantic.Invalid_record _ | Semantic.Revision_exhausted) as error ->
             Integrity_error (Semantic.error_to_string error)) in
       let* () = match current with None -> insert_semantic store.db suspended
-        | Some current -> update_semantic store.db ~expected:current suspended in
+        | Some current -> update_semantic store ~expected:current suspended in
       requeue_continuation_with_db store.db operation) in
   match result with
   | Ok _ -> readback ()
@@ -2241,30 +2299,6 @@ let direct_native_call store ~operation_id =
   let* operation = operation_or_unknown store.db operation_id in
   let* execution = direct_execution_with_db store.db operation in
   Ok (match execution with None -> Keeper_native_call.No_native_call | Some execution -> execution.native_call)
-
-(* The references [before] named whose sha256 no execution owning
-   checkpoint references names once [after] is written. Run inside the
-   transaction that wrote [after], so the live set is the one it commits. A
-   retained file is named by its sha256 and the sweep keys liveness the same
-   way, so a sha256 still named by any reference, of any execution, keeps it. *)
-let released_checkpoint_references db ~before ~(after : Semantic.t) =
-  let sha (reference : Keeper_checkpoint_ref.t) = reference.sha256 in
-  let still_named = List.map sha (Semantic.checkpoint_references after) in
-  let dropped = match before with
-    | None -> []
-    | Some before ->
-      List.filter (fun reference -> not (List.mem (sha reference) still_named))
-        (Semantic.checkpoint_references before) in
-  match dropped with
-  | [] -> Ok []
-  | _ :: _ ->
-    let* rows = semantic_rows db ~active_only:false in
-    let live = List.filter owns_checkpoint_references rows
-      |> List.concat_map Semantic.checkpoint_references |> List.map sha in
-    Ok (List.fold_left (fun released reference ->
-        if List.mem (sha reference) live
-           || List.exists (fun kept -> String.equal (sha kept) (sha reference)) released
-        then released else reference :: released) [] dropped |> List.rev)
 
 let update_direct_native_call store ~now ~operation_id ~execution_digest change =
   let* () = ensure_open store in
@@ -2298,13 +2332,11 @@ let update_direct_native_call store ~now ~operation_id ~execution_digest change 
           | Semantic.Native_call_unsettled -> Native_call_unsettled
           | (Semantic.Invalid_record _ | Semantic.Revision_exhausted) as error ->
             Integrity_error (Semantic.error_to_string error)) in
-      let* () = match current with
-        | None -> insert_semantic store.db next
-        | Some expected when Semantic.to_json expected = Semantic.to_json next -> Ok ()
-        | Some expected -> update_semantic store.db ~expected next in
-      let* released = released_checkpoint_references store.db ~before:current ~after:next in
-      expected_commit := Some (next, released);
-      Ok released) in
+      expected_commit := Some (next, ());
+      match current with
+      | None -> insert_semantic store.db next
+      | Some expected when Semantic.to_json expected = Semantic.to_json next -> Ok ()
+      | Some expected -> update_semantic store ~expected next) in
   confirm_semantic_transition store expected_commit result
 
 let resolve_direct_gate store ~now ~operation_id ~resolution =
@@ -2320,7 +2352,7 @@ let resolve_direct_gate store ~now ~operation_id ~resolution =
        | Some expected ->
          let* next = semantic_transition ~now (Semantic.Resolve_gate resolution) expected in
          expected_commit := Some (next, operation);
-         let* () = if next == expected then Ok () else update_semantic store.db ~expected next in
+         let* () = if next == expected then Ok () else update_semantic store ~expected next in
          Ok operation)
     | Operation.Running _ | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _ -> Error (Not_queued operation_id)) in
   confirm_semantic_transition store expected_commit result
@@ -2341,7 +2373,7 @@ let resume_direct_gate store ~now ~operation_id ~waiting ~resolution =
          if List.exists (fun (entry : Semantic.t) -> semantic_is_running entry.phase
              && not (Keeper_execution_scope_id.equal entry.id expected.id)) outstanding
          then Error (Integrity_error "another execution owns the running slot")
-         else (expected_commit := Some (next, ()); update_semantic store.db ~expected next))
+         else (expected_commit := Some (next, ()); update_semantic store ~expected next))
     | Operation.Queued | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _ -> Error (Not_running operation_id)) in
   confirm_semantic_transition store expected_commit result
 
@@ -2358,7 +2390,7 @@ let discharge_direct_gate store ~now ~operation_id ~obligation =
        | Some expected ->
          let* next = semantic_transition ~now (Semantic.Discharge_gate obligation) expected in
          expected_commit := Some (next, ());
-         update_semantic store.db ~expected next)
+         update_semantic store ~expected next)
     | Operation.Queued | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _ -> Error (Not_running operation_id)) in
   confirm_semantic_transition store expected_commit result
 
@@ -2375,13 +2407,13 @@ let reconcile_direct_gate_binding store ~now ~operation_id ~binding ~waiting =
        | Some expected ->
          let* next = semantic_transition ~now (Semantic.Reconcile_gate_binding (binding, waiting)) expected in
          expected_commit := Some (next, ());
-         update_semantic store.db ~expected next)
+         update_semantic store ~expected next)
     | Operation.Running _ | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _ ->
       Error (Not_queued operation_id)) in
   confirm_semantic_transition store expected_commit result
 
-let settle_direct_semantic_with_db db current command =
-  let* execution = direct_execution_with_db db current in
+let settle_direct_semantic store current command =
+  let* execution = direct_execution_with_db store.db current in
   match execution with
   | None -> Ok ()
   | Some {Semantic.phase = (Semantic.Preparing | Semantic.Ready | Semantic.Settled _
@@ -2405,7 +2437,7 @@ let settle_direct_semantic_with_db db current command =
       | Keeper_native_call.No_native_call | Keeper_native_call.Active _
       | Keeper_native_call.Terminal_unacknowledged (_, {Agent_core.Agent.recovery=Agent_core.Agent.Operator_repair_required _; _}) -> Ok expected in
     let* next = semantic_transition ~now (Semantic.Settle terminal) acknowledged in
-    update_semantic db ~expected next
+    update_semantic store ~expected next
 ;;
 
 let settle_batch_members_with_db db ~execution_id =
@@ -2425,7 +2457,7 @@ let persist_terminal store current command sql bind_terminal =
     Reducer.apply current command |> Result.map_error (reducer_error operation_id)
   in
   persist_and_readback store expected (fun () ->
-    let* () = settle_direct_semantic_with_db store.db current command in
+    let* () = settle_direct_semantic store current command in
     let* () = with_statement store.db ~operation:"terminalize operation" sql (fun stmt ->
       let* () = bind_terminal stmt in
       let* () = expect_done store.db stmt ~operation:"terminalize operation" in
@@ -2491,8 +2523,8 @@ let fail_running store ~now ~operation_id ~kind ~detail ~outcome_ref =
        bind_text store.db stmt ~operation:"bind failed operation" 5 (Id.to_string operation_id))
 ;;
 
-let reconcile_semantic_running_with_db db ~now =
-  let* executions = semantic_rows db ~active_only:true in
+let reconcile_semantic_running store ~now =
+  let* executions = semantic_rows store.db ~active_only:true in
   List.fold_left (fun result (execution : Semantic.t) ->
     let* count = result in
     match execution.native_call, execution.phase with
@@ -2502,7 +2534,7 @@ let reconcile_semantic_running_with_db db ~now =
         let* next = Semantic.apply ~now
           (Semantic.Require_reconciliation "process restarted during semantic execution") execution
           |> Result.map_error (fun error -> Integrity_error (Semantic.error_to_string error)) in
-        let* () = update_semantic db ~expected:execution next in
+        let* () = update_semantic store ~expected:execution next in
         Ok (count + 1)
     | (Keeper_native_call.No_native_call | Keeper_native_call.Terminal_unacknowledged _),
       (Semantic.Preparing | Semantic.Ready | Semantic.Suspended _
@@ -2543,7 +2575,7 @@ let settle_running_after_restart store ~now =
           | Some expected ->
             let* next = semantic_transition ~now
               (Semantic.Settle (Semantic.Failed "process restarted before Owner receipt acknowledgement")) expected in
-            update_semantic store.db ~expected next in
+            update_semantic store ~expected next in
         Ok (operation :: interrupted)
       | None | Some Keeper_native_call.No_native_call ->
         (match pending_checkpoint execution, pending_retry execution, gate_state execution with
@@ -2551,7 +2583,7 @@ let settle_running_after_restart store ~now =
          | Some _, _, _ | None, Some _, _ | None, None, Some _ ->
            requeue_continuation_with_db store.db operation |> Result.map (fun _ -> interrupted))) (Ok []) running in
     let interrupted = List.rev interrupted in
-    let* _reconciled = reconcile_semantic_running_with_db store.db ~now in
+    let* _reconciled = reconcile_semantic_running store ~now in
     let* count = with_statement
       store.db
       ~operation:"settle interrupted operations"

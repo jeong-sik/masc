@@ -1555,10 +1555,10 @@ let save_agent_core_if_absent ~session_dir candidate =
 ;;
 
 (* Accepted continuations are not observational rolling history: nothing
-   expires them while a semantic execution names them. A native-call commit
-   that stops naming one removes it through [release_retained];
+   expires them while a semantic execution names them. Once a journal commit
+   stops naming one, the Owner removes it through [release_retained];
    [Keeper_retained_checkpoint_sweep] removes, at server startup, what a crash
-   before that removal left and what other journal transitions stop naming. *)
+   or a failed removal left. *)
 let retained_dirname = "accepted-checkpoints"
 
 let retained_checkpoint_path ~session_dir (reference : Keeper_checkpoint_ref.t) =

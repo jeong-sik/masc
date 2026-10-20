@@ -147,7 +147,7 @@ let start_owner_with_executor_ready
   Owner.start
     ~sw
     ~store
-    ~operation_store_path:path
+    ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
     ~now
     ~operation_runner:
       (Option.map
@@ -1017,7 +1017,7 @@ let test_turn_slot_release_signals_availability () =
       (Owner.start
          ~sw
          ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-         ~operation_store_path:path
+         ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
          ~now:(fun () -> 42.0)
          ~operation_runner:
            (Some
@@ -1095,7 +1095,7 @@ let test_uncontested_turn_end_signals_nothing () =
       (Owner.start
          ~sw
          ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-         ~operation_store_path:path
+         ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
          ~now:(fun () -> 42.0)
          ~operation_runner:None
          ~on_turn_slot_released:(Some (fun () -> incr released))
@@ -2366,10 +2366,9 @@ let test_operation_id_interrupt_leaves_an_autonomous_slot_holder_alone () =
         ~call_id:"019a0010-1000-7000-8000-000000000020" ~runtime_id:"native.primary"
         ~operation_digest:operation.execution_digest ~api:(Keeper_native_call.New_input {seed_message_count=0})
         ~seed_checkpoint:checkpoint ~locator |> Result.get_ok in
-      check int "a first bind releases no checkpoint" 0
-        (List.length (Owner.bind_direct_native_call owner ~operation_id:operation.operation_id
-          ~execution_digest:operation.execution_digest ~observed:Keeper_native_call.No_native_call ~call
-          |> owner_ok));
+      Owner.bind_direct_native_call owner ~operation_id:operation.operation_id
+        ~execution_digest:operation.execution_digest ~observed:Keeper_native_call.No_native_call ~call
+        |> owner_ok;
       (* Active native call and no terminal receipt: a [Turn_exception]
          failure leaves the call for restart recovery, so the row stays
          Running. *)
@@ -2678,7 +2677,7 @@ let test_chat_interrupt_during_settle_has_nothing_to_cancel () =
   let owner = owner_ok (Owner.start ~sw
     ~keeper_name:"settle-stop"
     ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-    ~operation_store_path:path
+    ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
     ~now:(fun () -> 42.0)
     ~operation_runner:(Some runner)
     ~on_turn_slot_released:None
@@ -3197,15 +3196,14 @@ let test_startup_requeues_exact_native_call () =
       ~call_id:"019a0010-1000-7000-8000-000000000010" ~runtime_id:"native.primary"
       ~operation_digest:operation.execution_digest ~api:(Keeper_native_call.New_input {seed_message_count=0})
       ~seed_checkpoint:checkpoint ~locator |> Result.get_ok in
-    check int "a first bind releases no checkpoint" 0
-      (List.length (Keeper_chat_operation_store.update_direct_native_call seed ~now:12. ~operation_id
-        ~execution_digest:operation.execution_digest
-        (Keeper_native_call.Bind {observed=Keeper_native_call.No_native_call; call}) |> Result.get_ok));
+    Keeper_chat_operation_store.update_direct_native_call seed ~now:12. ~operation_id
+      ~execution_digest:operation.execution_digest
+      (Keeper_native_call.Bind {observed=Keeper_native_call.No_native_call; call}) |> Result.get_ok;
     Keeper_chat_operation_store.close seed |> Result.get_ok;
     Eio.Switch.run @@ fun sw ->
     let owner = Owner.start ~sw
       ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
-      ~operation_store_path:path ~now:(fun () -> 20.) ~operation_runner:None
+      ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces") ~now:(fun () -> 20.) ~operation_runner:None
       ~on_turn_slot_released:None ~keeper_name:"native-restart"
       ~initial_meta:(Some (make_meta "native-restart")) |> owner_ok in
     check int "witnessed native operation not interrupted" 0 (List.length (Owner.restart_interrupted_operations owner));
@@ -3215,32 +3213,27 @@ let test_startup_requeues_exact_native_call () =
     let observed = Owner.direct_native_call owner ~operation_id |> owner_ok in
     check bool "Owner restores exact native witness" true
       (Keeper_native_call.equal_state observed (Keeper_native_call.Active call));
-    check int "rebinding the restored call releases no checkpoint" 0
-      (List.length (Owner.bind_direct_native_call owner ~operation_id
-        ~execution_digest:operation.execution_digest ~observed ~call |> owner_ok));
+    Owner.bind_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
+      ~observed ~call |> owner_ok;
     let advanced_checkpoint = Keeper_checkpoint_ref.create
       ~trace_id:checkpoint.trace_id ~turn_count:2
       ~canonical_checkpoint_bytes:"native progress after restart" |> Result.get_ok in
-    check int "advancing off the seed keeps the seed" 0
-      (List.length (Owner.checkpoint_direct_native_call owner ~operation_id
-        ~execution_digest:operation.execution_digest ~call_id:call.call_id ~observed:checkpoint
-        ~checkpoint:advanced_checkpoint |> owner_ok));
+    Owner.checkpoint_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
+      ~call_id:call.call_id ~observed:checkpoint ~checkpoint:advanced_checkpoint |> owner_ok;
     (match Owner.checkpoint_direct_native_call owner ~operation_id
        ~execution_digest:operation.execution_digest ~call_id:call.call_id
        ~observed:checkpoint ~checkpoint:advanced_checkpoint with
      | Error (Owner.Operation_rejected (Keeper_chat_operation_store.Invalid_input _)) -> ()
      | Error error -> fail ("stale callback fenced Owner: " ^ Owner.error_to_string error)
-     | Ok _ -> fail "stale callback was accepted");
+     | Ok () -> fail "stale callback was accepted");
     (match Owner.direct_native_call owner ~operation_id |> owner_ok with
      | Keeper_native_call.Active current ->
        check bool "stale callback keeps committed checkpoint" true
          (Keeper_checkpoint_ref.equal current.checkpoint advanced_checkpoint)
      | _ -> fail "stale callback changed active native state");
-    check int "a terminal receipt keeps both references" 0
-      (List.length (Owner.terminal_direct_native_call owner ~operation_id
-        ~execution_digest:operation.execution_digest ~call_id:call.call_id
-        ~disposition:{Agent_core.Agent.outcome=Agent_core.Agent.Terminal_succeeded;
-          recovery=Agent_core.Agent.Retire} |> owner_ok));
+    Owner.terminal_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
+      ~call_id:call.call_id ~disposition:{Agent_core.Agent.outcome=Agent_core.Agent.Terminal_succeeded;
+        recovery=Agent_core.Agent.Retire} |> owner_ok;
     ignore (Owner.succeed_running_operation owner ~operation_id ~outcome_ref:"native-owner-receipt" |> owner_ok);
     check bool "Owner receipt retires native witness" true
       (Keeper_native_call.equal_state Keeper_native_call.No_native_call (Owner.direct_native_call owner ~operation_id |> owner_ok)))
@@ -3277,7 +3270,7 @@ let test_startup_interrupts_running_without_requeue () =
            (Owner.start
               ~sw
               ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-              ~operation_store_path:path
+              ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
               ~now:(fun () -> 20.0)
               ~operation_runner:None
            ~on_turn_slot_released:None
@@ -3634,7 +3627,7 @@ let test_startup_queued_waits_for_runner_readiness () =
            (Owner.start
               ~sw
               ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-              ~operation_store_path:path
+              ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
               ~now:(fun () -> 20.0)
               ~operation_runner:
                 (Some
@@ -3690,7 +3683,7 @@ let test_a_read_under_a_failed_reopen_keeps_the_cause () =
       (Owner.start
          ~sw
          ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-         ~operation_store_path:path
+         ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
          ~now:(fun () -> 42.0)
          ~operation_runner:None
          ~on_turn_slot_released:None
@@ -3851,7 +3844,7 @@ let with_recovery_store ~sw ~keeper_name ~runner ~on_turn_slot_released f =
   Eio.Switch.on_release sw (fun () -> if Sys.file_exists path then Unix.unlink path);
   let owner = owner_ok (Owner.start ~sw
     ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
-    ~operation_store_path:path ~now:(fun () -> 42.)
+    ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces") ~now:(fun () -> 42.)
     ~operation_runner:runner ~on_turn_slot_released ~keeper_name
     ~initial_meta:(Some (make_meta keeper_name))) in
   f owner path
@@ -4489,6 +4482,7 @@ let test_same_process_recreate_reopens_purged_operation_store () =
               ~sw
               ~store
               ~operation_store_path
+              ~session_root:(Filename.concat (Filename.dirname operation_store_path) "traces")
               ~now:(fun () -> 42.0)
               ~operation_runner:None
               ~on_turn_slot_released:None
@@ -5370,7 +5364,7 @@ let test_pending_chat_survives_repeated_autonomous_observations () =
     if Sys.file_exists path then Unix.unlink path);
   let owner = owner_ok (Owner.start ~sw
     ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-    ~operation_store_path:path ~now:(fun () -> 42.0)
+    ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces") ~now:(fun () -> 42.0)
     ~operation_runner:(Some Owner.
       { ready = (fun ~keeper_name:_ -> true); execute
       ; on_execution_settled = noop_execution_settled })

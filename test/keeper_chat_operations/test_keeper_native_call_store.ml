@@ -38,7 +38,7 @@ let with_store ?(before = fun _store -> ()) f =
     f path store operation)
 let mutate store operation change = Store.update_direct_native_call store ~now:3. ~operation_id
   ~execution_digest:operation.Operation.execution_digest change
-let commit store operation change = ignore (mutate store operation change |> ok : Keeper_checkpoint_ref.t list)
+let commit store operation change = mutate store operation change |> ok
 let read store = Store.direct_native_call store ~operation_id |> ok
 let bind store operation call = commit store operation (Native.Bind {observed=Native.No_native_call; call})
 let with_reopened path store f =
@@ -189,31 +189,65 @@ let test_unknown_effect_receipt_lets_the_operation_fail_but_not_complete () = wi
      fail "the unknown-effect receipt was not preserved")
 
 let shas = List.map (fun (reference : Keeper_checkpoint_ref.t) -> reference.sha256)
-let released label expected result = check (list string) label (shas expected) (shas (ok result))
+let released label expected store =
+  check (list string) label (shas expected)
+    (Store.take_released_checkpoints store
+     |> List.map (fun (retained : Keeper_semantic_execution.retained_checkpoint) -> retained.reference.sha256))
 let advance store operation ~observed ~next =
-  mutate store operation (Native.Checkpoint {call_id; observed=checkpoint observed; checkpoint=checkpoint next})
+  commit store operation (Native.Checkpoint {call_id; observed=checkpoint observed; checkpoint=checkpoint next})
+let retired_after_advancing store operation =
+  bind store operation (make_call operation);
+  advance store operation ~observed:1 ~next:2;
+  terminal store operation Agent.Retire;
+  released "the call so far released nothing" [] store
 
-let test_a_commit_releases_what_it_stopped_naming () = with_store @@ fun _path store operation ->
-  released "a first bind releases nothing" []
-    (mutate store operation (Native.Bind {observed=Native.No_native_call; call=make_call operation}));
-  released "advancing off the seed keeps the seed" [] (advance store operation ~observed:1 ~next:2);
-  released "the superseded checkpoint is released" [checkpoint 2] (advance store operation ~observed:2 ~next:3);
-  released "committing the current checkpoint again releases nothing" []
-    (advance store operation ~observed:3 ~next:3);
-  released "a terminal receipt keeps both references" []
-    (mutate store operation (Native.Terminal {call_id; disposition=disposition Agent.Retire}));
-  let observed = read store in
+let test_a_native_commit_releases_what_it_stopped_naming () = with_store @@ fun _path store operation ->
+  bind store operation (make_call operation);
+  released "a first bind releases nothing" [] store;
+  advance store operation ~observed:1 ~next:2;
+  released "advancing off the seed keeps the seed" [] store;
+  advance store operation ~observed:2 ~next:3;
+  released "the superseded checkpoint is released" [checkpoint 2] store;
+  released "a release is handed over once" [] store;
+  advance store operation ~observed:3 ~next:3;
+  released "committing the current checkpoint again releases nothing" [] store;
+  terminal store operation Agent.Retire;
+  released "a terminal receipt keeps both references" [] store;
+  commit store operation (Native.Bind {observed=read store; call=make_call ~id:next_call_id ~seed:4 operation});
   released "the next call releases the retired call's seed and latest checkpoint"
-    [checkpoint 1; checkpoint 3]
-    (mutate store operation (Native.Bind {observed; call=make_call ~id:next_call_id ~seed:4 operation}))
+    [checkpoint 1; checkpoint 3] store
 
 let test_a_replacement_seeded_from_the_retired_checkpoint_keeps_it () = with_store @@ fun _path store operation ->
-  bind store operation (make_call operation);
-  commit store operation (Native.Checkpoint {call_id; observed=checkpoint 1; checkpoint=checkpoint 2});
-  terminal store operation Agent.Retire;
-  let observed = read store in
-  released "only the retired seed is released" [checkpoint 1]
-    (mutate store operation (Native.Bind {observed; call=make_call ~id:next_call_id ~seed:2 operation}))
+  retired_after_advancing store operation;
+  commit store operation (Native.Bind {observed=read store; call=make_call ~id:next_call_id ~seed:2 operation});
+  released "only the retired seed is released" [checkpoint 1] store
+
+let test_settlement_releases_the_retired_call () = with_store @@ fun _path store operation ->
+  retired_after_advancing store operation;
+  ignore (Store.succeed_running store ~now:4. ~operation_id ~outcome_ref:"owner-receipt" |> ok);
+  released "acknowledging the receipt releases its seed and latest checkpoint"
+    [checkpoint 1; checkpoint 2] store
+
+let test_failure_settlement_releases_the_retired_call () = with_store @@ fun _path store operation ->
+  retired_after_advancing store operation;
+  ignore (settle_failed store ~now:4. |> ok);
+  released "a failed operation releases its retired call" [checkpoint 1; checkpoint 2] store
+
+(* A cooperative yield commits the canonical checkpoint and retires the native
+   call in one transaction. Here the canonical checkpoint has the bytes of the
+   call's latest one, so that file is still read and only the seed goes. *)
+let test_a_suspend_keeps_the_checkpoint_it_names () = with_store @@ fun _path store operation ->
+  retired_after_advancing store operation;
+  ignore (Store.defer_direct_checkpoint store ~now:4. ~operation_id
+            ~execution_digest:operation.Operation.execution_digest
+            ~checkpoint:(Keeper_semantic_execution.Agent_core (checkpoint 2)) |> ok);
+  released "only the seed is released" [checkpoint 1] store;
+  let resumed = claim store in
+  check bool "the deferred operation resumes" true
+    (Operation.Operation_id.equal resumed.operation_id operation_id);
+  Store.resume_direct_checkpoint store ~now:5. ~operation_id
+    ~observed:(Keeper_semantic_execution.Agent_core (checkpoint 2)) |> ok;
+  released "resuming releases the checkpoint the suspension named" [checkpoint 2] store
 
 (* Another operation of the same keeper waits on a Gate with a checkpoint whose
    bytes, and so sha256, equal one the native call supersedes. That file is
@@ -229,29 +263,35 @@ let gate_waiting_on reference store =
       ~session_scope:(Keeper_semantic_execution.session_scope [] |> value) ~obligations:[obligation]
     |> value in
   ignore (Store.defer_direct_gate store ~now:1.5 ~operation_id:gate_operation_id
-            ~execution_digest:gate_operation.Operation.execution_digest ~waiting |> ok)
+            ~execution_digest:gate_operation.Operation.execution_digest ~waiting |> ok);
+  ignore (Store.take_released_checkpoints store : Keeper_semantic_execution.retained_checkpoint list)
 
 let test_a_reference_another_execution_names_is_kept () =
   with_store ~before:(gate_waiting_on (checkpoint 2)) @@ fun _path store operation ->
   bind store operation (make_call operation);
-  commit store operation (Native.Checkpoint {call_id; observed=checkpoint 1; checkpoint=checkpoint 2});
-  released "a checkpoint the Gate wait names is kept" [] (advance store operation ~observed:2 ~next:3);
-  released "the next superseded checkpoint is released" [checkpoint 3]
-    (advance store operation ~observed:3 ~next:4)
+  advance store operation ~observed:1 ~next:2;
+  advance store operation ~observed:2 ~next:3;
+  released "a checkpoint the Gate wait names is kept" [] store;
+  advance store operation ~observed:3 ~next:4;
+  released "the next superseded checkpoint is released" [checkpoint 3] store
 
-let test_only_a_confirmed_commit_releases () = with_store @@ fun _path store operation ->
+let test_only_a_committed_transaction_releases () = with_store @@ fun _path store operation ->
   bind store operation (make_call operation);
-  commit store operation (Native.Checkpoint {call_id; observed=checkpoint 1; checkpoint=checkpoint 2});
+  advance store operation ~observed:1 ~next:2;
   Store.For_testing.fail_next_commit Store.For_testing.Fail_before_commit;
-  rejected "an uncommitted advance was reported" (advance store operation ~observed:2 ~next:3);
+  rejected "an uncommitted advance was reported"
+    (mutate store operation (Native.Checkpoint {call_id; observed=checkpoint 2; checkpoint=checkpoint 3}));
+  released "a rolled-back transaction releases nothing" [] store;
   (match read store with
    | Native.Active call ->
-     check bool "the uncommitted advance still names its source" true
+     check bool "the rolled-back advance still names its source" true
        (Keeper_checkpoint_ref.equal call.checkpoint (checkpoint 2))
    | Native.No_native_call | Native.Terminal_unacknowledged _ -> fail "failed commit changed the call");
   Store.For_testing.fail_next_commit Store.For_testing.Fail_after_commit;
-  released "a commit the readback confirms releases its superseded checkpoint" [checkpoint 2]
-    (advance store operation ~observed:2 ~next:3)
+  advance store operation ~observed:2 ~next:3;
+  released "an uncertain commit releases nothing, even once readback confirms it" [] store;
+  advance store operation ~observed:3 ~next:4;
+  released "the next commit releases only what it stopped naming" [checkpoint 3] store
 
 let () = run "native-call-owner-store" ["recovery", [
   test_case "active restart preserves exact admission" `Quick test_active_restart_preserves_seed_and_exact_identity;
@@ -263,8 +303,11 @@ let () = run "native-call-owner-store" ["recovery", [
   test_case "checkpoint deferral acknowledges only committed retirement" `Quick test_checkpoint_deferral_acknowledges_only_committed_retirement;
   test_case "checkpoint CAS, digest and commit readback" `Quick test_stale_checkpoint_digest_and_commit_readback];
   "checkpoint release", [
-  test_case "a commit releases what it stopped naming" `Quick test_a_commit_releases_what_it_stopped_naming;
+  test_case "a native commit releases what it stopped naming" `Quick test_a_native_commit_releases_what_it_stopped_naming;
   test_case "a replacement seeded from the retired checkpoint keeps it" `Quick
     test_a_replacement_seeded_from_the_retired_checkpoint_keeps_it;
+  test_case "settlement releases the retired call" `Quick test_settlement_releases_the_retired_call;
+  test_case "a failure settlement releases the retired call" `Quick test_failure_settlement_releases_the_retired_call;
+  test_case "a suspend keeps the checkpoint it names" `Quick test_a_suspend_keeps_the_checkpoint_it_names;
   test_case "a reference another execution names is kept" `Quick test_a_reference_another_execution_names_is_kept;
-  test_case "only a confirmed commit releases" `Quick test_only_a_confirmed_commit_releases]]
+  test_case "only a committed transaction releases" `Quick test_only_a_committed_transaction_releases]]

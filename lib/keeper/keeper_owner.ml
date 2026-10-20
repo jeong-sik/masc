@@ -192,8 +192,7 @@ type _ command =
       (Keeper_semantic_execution.gate_checkpoint option, error) result command
   | Direct_native_call : Operation_id.t -> (Keeper_native_call.state, error) result command
   | Update_direct_native_call :
-      {operation_id:Operation_id.t; execution_digest:string; change:Keeper_native_call.change} ->
-      (Keeper_checkpoint_ref.t list, error) result command
+      {operation_id:Operation_id.t; execution_digest:string; change:Keeper_native_call.change} -> (unit, error) result command
   | Defer_direct_checkpoint :
       { operation_id : Operation_id.t; execution_digest : string;
         checkpoint : Keeper_semantic_execution.gate_checkpoint } ->
@@ -361,6 +360,9 @@ type t =
   ; turn_in_flight : turn_in_flight option Atomic.t
   ; shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option Atomic.t
   ; mutable operation_store : Chat_operation_store.t
+  ; session_root : string
+        (* The session root of this workspace: a retained checkpoint lives
+           under [<session_root>/<scope>/<trace id>]. *)
   ; now : unit -> float
   ; closed : bool Atomic.t
   ; closed_p : unit Eio.Promise.t
@@ -982,6 +984,23 @@ let recover_operation_availability t =
              Ok ())))
 ;;
 
+(* Remove the retained files that the store's confirmed commits released.
+   This runs in the Owner fiber after the store call returns and before the
+   command's caller resumes, so the caller cannot retain the same file again
+   while it is being removed. A removal that fails is logged and its file is
+   left for [Keeper_retained_checkpoint_sweep]; the command result stands. *)
+let release_committed_checkpoints ~keeper_name ~session_root operation_store =
+  List.iter (fun ({session_scope; reference} : Keeper_semantic_execution.retained_checkpoint) ->
+    let session_dir = Keeper_semantic_execution.scoped_session_dir ~session_root session_scope
+        (Keeper_id.Trace_id.to_string reference.Keeper_checkpoint_ref.trace_id) in
+    match Keeper_checkpoint_store.release_retained ~session_dir ~reference with
+    | Ok () -> ()
+    | Error detail ->
+      Log.Keeper.warn ~keeper_name "released retained checkpoint %s was not removed: %s"
+        reference.sha256 detail)
+    (Chat_operation_store.take_released_checkpoints operation_store)
+;;
+
 (* A command is the moment the fence is re-examined, not a later wake:
    [wake_operation_drain] fires only when a keepalive starts or a deferred
    retry comes due, so a fence raised mid-day had no trigger to lift it and
@@ -992,7 +1011,12 @@ let run_operation_command t ~label f =
   match recover_operation_availability t with
   | Error error -> Error error
   | Ok () ->
-    (match run_operation_store ~label f with
+    let result = run_operation_store ~label f in
+    (* A command can commit before it fails, so its releases are taken
+       whatever it returns. *)
+    release_committed_checkpoints ~keeper_name:t.keeper_name ~session_root:t.session_root
+      t.operation_store;
+    (match result with
      | Error error -> Error (record_operation_error t error)
      | Ok value ->
        (match read_operation_projection t.operation_store ~now:(t.now ()) with
@@ -1052,6 +1076,7 @@ let start
       ~sw
       ~store
       ~operation_store_path
+      ~session_root
       ~now
       ~operation_runner
       ~on_turn_slot_released
@@ -1072,9 +1097,11 @@ let start
   let startup_result =
     let startup_now = now () in
     match
-      run_operation_store ~label:"settle Keeper chat operations after restart" (fun () ->
-        Chat_operation_store.settle_running_after_restart operation_store ~now:startup_now)
-      |> Result.map_error owner_error_of_operation_error
+      let settled =
+        run_operation_store ~label:"settle Keeper chat operations after restart" (fun () ->
+          Chat_operation_store.settle_running_after_restart operation_store ~now:startup_now) in
+      release_committed_checkpoints ~keeper_name ~session_root operation_store;
+      settled |> Result.map_error owner_error_of_operation_error
     with
     | Error _ as error -> error
     | Ok interrupted ->
@@ -1115,6 +1142,7 @@ let start
     ; turn_in_flight = Atomic.make None
     ; shutdown_operation_id = Atomic.make None
     ; operation_store
+    ; session_root
     ; now
     ; closed = Atomic.make false
     ; closed_p
@@ -1331,9 +1359,7 @@ let start
                | Some operation -> Ok operation
                | None -> Error (Chat_operation_store.Unknown_operation operation_id)
              in
-             (* A terminal receipt keeps both references of its call, so
-                this commit releases no retained checkpoint. *)
-             let* (_ : Keeper_checkpoint_ref.t list) =
+             let* () =
                Chat_operation_store.update_direct_native_call
                  t.operation_store
                  ~now:(t.now ())

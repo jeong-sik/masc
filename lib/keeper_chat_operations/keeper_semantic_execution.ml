@@ -69,6 +69,8 @@ let session_scope components =
   then Error "invalid relative session scope"
   else Ok (Session_scope components)
 let session_scope_components (Session_scope components) = components
+let scoped_session_dir ~session_root (Session_scope components) session_id =
+  List.fold_left Filename.concat session_root (components @ [session_id])
 type official_client_kind = Codex | Claude_code | Antigravity | Muse
 let official_client_kind_to_string = function
   | Codex -> "codex" | Claude_code -> "claude_code" | Antigravity -> "antigravity" | Muse -> "muse"
@@ -236,28 +238,39 @@ let is_terminal execution = match execution.phase with
   | Settled _ -> true
   | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Recovering _ | Suspended _ -> false
 let scope execution = execution.id
+type retained_checkpoint = { session_scope : session_scope; reference : Keeper_checkpoint_ref.t }
+(* A direct operation's session directory is its trace directory directly
+   under the session root, and its native call, cooperative checkpoint and
+   runtime retry read their references from there. A Gate records the scope
+   it read its session from and reads its references back under it. *)
+let root_scope = Session_scope []
+let at_root references = List.map (fun reference -> {session_scope=root_scope; reference}) references
 let gate_checkpoint_references = function Agent_core reference -> [reference] | Official_client _ -> []
-let gate_wait_references (waiting : gate_wait) =
+let gate_wait_retained (waiting : gate_wait) =
   gate_checkpoint_references waiting.checkpoint
   @ (match waiting.runtime_retry with Some retry -> [retry.checkpoint] | None -> [])
-let gate_binding_references (binding : gate_binding) =
+  |> List.map (fun reference -> {session_scope=waiting.session_scope; reference})
+let gate_binding_retained (binding : gate_binding) =
   (match binding.preparation.source with
-   | Prepared_agent_core {reference; _} -> [reference] | Prepared_official_client _ -> [])
-  @ (match binding.unconfirmed_wait with Some waiting -> gate_wait_references waiting | None -> [])
-let checkpoint_references execution =
-  Keeper_native_call.checkpoint_references execution.native_call @
+   | Prepared_agent_core {reference; _} -> [{session_scope=binding.preparation.session_scope; reference}]
+   | Prepared_official_client _ -> [])
+  @ (match binding.unconfirmed_wait with Some waiting -> gate_wait_retained waiting | None -> [])
+let retained_checkpoints execution =
+  at_root (Keeper_native_call.checkpoint_references execution.native_call) @
   match execution.phase with
   | Preparing | Ready | Running | Settled _ -> []
-  | Resuming_runtime_retry retry -> [retry.checkpoint]
-  | Resuming_gate (waiting, _) -> gate_wait_references waiting
-  | Suspended reference -> [reference]
+  | Resuming_runtime_retry retry -> at_root [retry.checkpoint]
+  | Resuming_gate (waiting, _) -> gate_wait_retained waiting
+  | Suspended reference -> at_root [reference]
   | Recovering {origin; _} ->
     (match origin with
      | Unconfirmed_sources | Confirmed_undispatched | Official_checkpointed _ | Interrupted_execution -> []
-     | Checkpointed reference -> [reference]
-     | Runtime_retry retry -> [retry.checkpoint]
-     | Gate_wait {waiting; _} -> gate_wait_references waiting
-     | Gate_binding binding -> gate_binding_references binding)
+     | Checkpointed reference -> at_root [reference]
+     | Runtime_retry retry -> at_root [retry.checkpoint]
+     | Gate_wait {waiting; _} -> gate_wait_retained waiting
+     | Gate_binding binding -> gate_binding_retained binding)
+let checkpoint_references execution =
+  List.map (fun retained -> retained.reference) (retained_checkpoints execution)
 (* Approval ids an unsettled execution may still read from the Gate store: a
    wait observes its obligations, a binding observes its approval ids, and a
    resuming wait still carries the obligation it resumed with, and an

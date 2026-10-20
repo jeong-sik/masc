@@ -231,13 +231,19 @@ val start
   :  sw:Eio.Switch.t
   -> store:store
   -> operation_store_path:string
+  -> session_root:string
   -> now:(unit -> float)
   -> operation_runner:operation_runner option
   -> on_turn_slot_released:(unit -> unit) option
   -> keeper_name:string
   -> initial_meta:Keeper_meta_contract.keeper_meta option
   -> (t, error) result
-(** [on_turn_slot_released] fires when a turn ends, the slot is still unclaimed
+(** [session_root] is the workspace's session root
+    ({!Keeper_fs.session_store_path}). After each store commit the Owner
+    removes, under it, the retained checkpoints that commit released
+    ({!Keeper_chat_operation_store.take_released_checkpoints}).
+
+    [on_turn_slot_released] fires when a turn ends, the slot is still unclaimed
     after the queued chat operation (if any) has been offered it, and the
     autonomous lane has been refused the slot since the last notification. The
     signal therefore means "the lane that lost the slot can start now", not "a
@@ -378,16 +384,11 @@ val restart_interrupted_operations : t -> Chat_operation.t list
 val direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, error) result
 val direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_native_call.state, error) result
 val bind_direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
-  observed:Keeper_native_call.state -> call:Keeper_native_call.t -> (Keeper_checkpoint_ref.t list, error) result
+  observed:Keeper_native_call.state -> call:Keeper_native_call.t -> (unit, error) result
 val checkpoint_direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
-  call_id:string -> observed:Keeper_checkpoint_ref.t -> checkpoint:Keeper_checkpoint_ref.t ->
-  (Keeper_checkpoint_ref.t list, error) result
+  call_id:string -> observed:Keeper_checkpoint_ref.t -> checkpoint:Keeper_checkpoint_ref.t -> (unit, error) result
 val terminal_direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
-  call_id:string -> disposition:Agent_core.Agent.execution_terminal_disposition ->
-  (Keeper_checkpoint_ref.t list, error) result
-(** The three native-call commits return the references the commit released,
-    as {!Keeper_chat_operation_store.update_direct_native_call} computes them.
-    The caller that owns the session directory removes their retained files. *)
+  call_id:string -> disposition:Agent_core.Agent.execution_terminal_disposition -> (unit, error) result
 val defer_direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
   checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Chat_operation.t, error) result
 val resume_direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t ->

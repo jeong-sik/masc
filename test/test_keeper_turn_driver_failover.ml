@@ -4193,7 +4193,7 @@ let test_direct_retry_owner_revalidates_recovery_and_reassignment () =
         "name", `String keeper_name; "trace_id", `String "direct-wait-trace";
         "activation_mode", `String "manual"]) |> string_ok in
       let owner = Owner.start ~sw ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
-        ~operation_store_path:path ~now ~operation_runner:(Some runner)
+        ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces") ~now ~operation_runner:(Some runner)
         ~on_turn_slot_released:None ~keeper_name ~initial_meta:(Some meta) |> ok in
       Eio.Promise.resolve resolve_owner owner;
       Owner.submit_operation owner ~operation_id ~source:(`Assoc ["kind", `String "dashboard"])

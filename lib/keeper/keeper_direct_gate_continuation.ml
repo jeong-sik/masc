@@ -65,8 +65,7 @@ let session_scope ~config ~session_dir ~session_id =
     | _ -> Error "Gate session directory does not match its checkpoint identity"
 
 let scoped_session_dir ~config scope session_id =
-  List.fold_left Filename.concat (Keeper_fs.session_base_dir config)
-    (Semantic.session_scope_components scope @ [session_id])
+  Semantic.scoped_session_dir ~session_root:(Keeper_fs.session_base_dir config) scope session_id
 
 let retained ~config ~operation_id ~session_scope ~reference =
   let session_dir = scoped_session_dir ~config session_scope

@@ -398,7 +398,7 @@ let test_interrupted_owner_without_subscriber_replays_failure () =
     Eio.Promise.resolve signal_settled execution in
   let owner = owner_ok (Owner.start ~sw
     ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-    ~operation_store_path:(Filename.concat base_path "operations.sqlite3")
+    ~operation_store_path:(Filename.concat base_path "operations.sqlite3") ~session_root:(Filename.concat (Filename.dirname (Filename.concat base_path "operations.sqlite3")) "traces")
     ~now:(fun () -> 42.)
     ~operation_runner:(Some Owner.{ ready = (fun ~keeper_name:_ -> true);
       execute; on_execution_settled })

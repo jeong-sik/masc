@@ -43,7 +43,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
            ~permission:Masc_domain.CanReadState
            httpun_request
        with
-       | Ok actor -> f (Option.map board_actor_author_for_write actor)
+       | Ok actor -> f (Option.map String.trim actor)
        | Error error -> h2_respond_auth_error error)
   in
   match httpun_meth, path with

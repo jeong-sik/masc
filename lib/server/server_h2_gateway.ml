@@ -1621,7 +1621,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             h2_reqd
             ~permission:Masc_domain.CanReadState
             (fun _state actor ->
-               let actor = Server_utils.board_actor_author_for_write actor in
+               let actor = String.trim actor in
                let result =
                  Server_board_reaction_http.targets_of_strings
                    ~target_type:
@@ -1637,7 +1637,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             h2_reqd
             ~permission:Masc_domain.CanReadState
             (fun _state actor ->
-               let actor = Server_utils.board_actor_author_for_write actor in
+               let actor = String.trim actor in
                let result =
                  Result.bind
                    (Server_board_reaction_http.target_of_strings
@@ -1654,7 +1654,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             h2_reqd
             ~permission:Masc_domain.CanVote
             (fun _state actor ->
-               let actor = Server_utils.board_actor_author_for_write actor in
+               let actor = String.trim actor in
                h2_read_body h2_reqd (fun body ->
                  let parsed =
                    match Yojson.Safe.from_string body with

@@ -463,7 +463,7 @@ let with_optional_board_reaction_actor ~base_path request reqd f =
       ~permission:Masc_domain.CanReadState
       request
   with
-  | Ok actor -> f (Option.map board_actor_author_for_write actor)
+  | Ok actor -> f (Option.map String.trim actor)
   | Error err -> respond_auth_error request reqd err
 
 let activity_http_deps : Server_activity_http.deps = { query_param; int_query_param }
@@ -502,29 +502,6 @@ let json_ensure_meta_source source = function
       Ok (`Assoc fields)
   | _non_object ->
       Error "json_ensure_meta_source: expected JSON object"
-
-let json_ensure_meta_string_field name value = function
-  | `Assoc fields ->
-      let value = String.trim value in
-      if value = "" then Ok (`Assoc fields)
-      else
-        let meta_json =
-          match List.assoc_opt "meta" fields with
-          | Some (`Assoc meta_fields as existing_meta) -> (
-              match List.assoc_opt name meta_fields with
-              | Some (`String current) when String.trim current <> "" -> existing_meta
-              | _ ->
-                  `Assoc
-                    ((name, `String value)
-                    :: List.filter (fun (k, _) -> k <> name) meta_fields))
-          | _ -> `Assoc [ (name, `String value) ]
-        in
-        let fields =
-          ("meta", meta_json) :: List.filter (fun (k, _) -> k <> "meta") fields
-        in
-        Ok (`Assoc fields)
-  | _non_object ->
-      Error "json_ensure_meta_string_field: expected JSON object"
 
 let sub_board_owner_matches ~owner (sb : Board.sub_board) =
   String.equal (Board.Agent_id.to_string sb.Board.owner) owner
@@ -980,7 +957,7 @@ let add_routes ~sw ~clock router =
        with_token_permission_auth
          ~permission:Masc_domain.CanReadState
          (fun _state actor req reqd ->
-            let actor = board_actor_author_for_write actor in
+            let actor = String.trim actor in
             let result =
               Server_board_reaction_http.targets_of_strings
                 ~target_type:(query_param req "target_type")
@@ -995,7 +972,7 @@ let add_routes ~sw ~clock router =
        with_token_permission_auth
          ~permission:Masc_domain.CanReadState
          (fun _state actor req reqd ->
-            let actor = board_actor_author_for_write actor in
+            let actor = String.trim actor in
             let result =
               Result.bind
                 (Server_board_reaction_http.target_of_strings
@@ -1011,7 +988,7 @@ let add_routes ~sw ~clock router =
        with_token_permission_auth
          ~permission:Masc_domain.CanVote
          (fun _state actor _req reqd ->
-            let actor = board_actor_author_for_write actor in
+            let actor = String.trim actor in
             Http.Request.read_body_async reqd (fun body ->
               let parsed =
                 match Yojson.Safe.from_string body with
@@ -1099,7 +1076,7 @@ let add_routes ~sw ~clock router =
                Safe_ops.json_string_opt "description" args |> Option.value ~default:""
              in
              let members = Safe_ops.json_string_list "members" args in
-             let owner = board_actor_author_for_write agent_name in
+             let owner = String.trim agent_name in
              (match
                 Result.bind (Board.sub_board_access_field_of_yojson args)
                   (fun access ->
@@ -1136,7 +1113,7 @@ let add_routes ~sw ~clock router =
                 (`Assoc [("error", `String "sub_board_id is required")])
                 reqd
          | Some sub_board_id ->
-              let owner = board_actor_author_for_write agent_name in
+              let owner = String.trim agent_name in
               (match Board_dispatch.get_sub_board ~sub_board_id with
                | Error e ->
                    Http.Response.json_value ~status:`Not_found
@@ -1180,7 +1157,7 @@ let add_routes ~sw ~clock router =
                     (`Assoc [("error", `String "sub_board_id is required")])
                     reqd
               | Some sub_board_id ->
-                  let owner = board_actor_author_for_write agent_name in
+                  let owner = String.trim agent_name in
                   (match Board_dispatch.get_sub_board ~sub_board_id with
                    | Error e ->
                        Http.Response.json_value ~status:`Not_found
@@ -1276,7 +1253,7 @@ let add_routes ~sw ~clock router =
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
              let* args = validate_write_workspace ~config:(Mcp_server.workspace_config state) args in
-             let voter = board_actor_author_for_write agent_name in
+             let voter = String.trim agent_name in
              let* args = json_upsert_string_field "voter" voter args in
              let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_vote" args in
              let ok = Tool_result.is_success result in
@@ -1308,16 +1285,8 @@ let add_routes ~sw ~clock router =
              in
              let* args = validate_write_workspace ~config:(Mcp_server.workspace_config state) args in
              let* args = json_reject_duplicate_meta args in
-             let author = board_actor_author_for_write agent_name in
+             let author = String.trim agent_name in
              let* args = json_upsert_string_field "author" author args in
-             let* args =
-               if String.equal author (String.trim agent_name) then Ok args
-               else
-                 json_ensure_meta_string_field
-                   Board_tool.author_raw_agent_name_meta_key
-                   agent_name
-                   args
-             in
              let* args = json_ensure_meta_source "dashboard_board_post" args in
              let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client
                  (Tool_name.Board_name.to_string Tool_name.Board_name.Board_post) args in
@@ -1349,7 +1318,7 @@ let add_routes ~sw ~clock router =
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
              let* args = validate_write_workspace ~config:(Mcp_server.workspace_config state) args in
-             let author = board_actor_author_for_write agent_name in
+             let author = String.trim agent_name in
              let* args = json_upsert_string_field "author" author args in
              let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_comment" args in
              let ok = Tool_result.is_success result in
@@ -1383,7 +1352,7 @@ let add_routes ~sw ~clock router =
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
              let* args = validate_write_workspace ~config:(Mcp_server.workspace_config state) args in
-             let voter = board_actor_author_for_write agent_name in
+             let voter = String.trim agent_name in
              let* args = json_upsert_string_field "voter" voter args in
              let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_comment_vote" args in
              let ok = Tool_result.is_success result in

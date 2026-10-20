@@ -30,7 +30,7 @@ let dashboard_board_payload
   =
   let limit = clamp ~min_v:1 ~max_v:500 limit in
   let offset = clamp ~min_v:0 ~max_v:5000 offset in
-  let author_filter = Option.map board_actor_author_for_write author_filter in
+  let author_filter = Option.map String.trim author_filter in
   let config_key =
     match config with
     | None -> "-"
@@ -121,7 +121,7 @@ let dashboard_memory_http_payload ?config request : Dashboard_cache.cached_paylo
     query_param request "author"
     |> Option.map String.trim
     |> Fun.flip Option.bind (fun s ->
-      if s = "" then None else Some (board_actor_author_for_write s))
+      if s = "" then None else Some s)
   in
   let sort_by = board_sort_order_of_request request in
   let exclude_system = bool_query_param request "exclude_system" ~default:false in

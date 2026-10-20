@@ -30,8 +30,7 @@ let payload ?config ~reaction_actor request
   let exclude_automation =
     bool_query_param request "exclude_automation" ~default:false
   in
-  let author_query = filter_param request "author" in
-  let author_filter = Option.map board_actor_author_for_write author_query in
+  let author_filter = filter_param request "author" in
   let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
   let offset = int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
   let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
@@ -51,7 +50,7 @@ let payload ?config ~reaction_actor request
       (key_part hearth)
       (board_sort_label sort_by)
       exclude_system exclude_automation
-      (key_part author_query)
+      (key_part author_filter)
       limit offset (key_part voter) (key_part reaction_actor)
   in
   Dashboard_cache.get_or_compute_payload cache_key

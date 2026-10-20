@@ -56,12 +56,6 @@ val parse_sort_order : string -> (sort_order, string) Result.t
     a constructor automatically updates the user-facing
     catalogue. *)
 
-(** {1 Identity meta keys} *)
-
-val author_raw_agent_name_meta_key : string
-(** Canonical board-post meta key for the raw runtime author
-    identity preserved by HTTP/MCP identity enforcement. *)
-
 (** {1 Display formatting} *)
 
 val format_timestamp_absolute : float -> string

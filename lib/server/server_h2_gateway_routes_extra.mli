@@ -32,9 +32,8 @@ val dispatch :
     - [GET /api/v1/board] — paginated post listing.  Query params:
       [hearth] / [sort_by] / [exclude_system] / [exclude_automation]
       / [author] / [limit] (clamped to [1..200]) / [offset]
-      (clamped to [0..5000]).  Author filter routes through
-      {!Server_utils.board_actor_author_for_write} so keeper
-      aliases resolve to canonical names.
+      (clamped to [0..5000]).  The author filter is the trimmed
+      query value.
     - [GET /api/v1/board/hearths] — hearth name+count list. Optional
       [exclude_system] / [exclude_automation] booleans use the same post-kind
       filter axis as the Board listing.

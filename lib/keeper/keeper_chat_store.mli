@@ -430,7 +430,9 @@ end
     and never acknowledges an input or becomes Keeper conversation memory.
     [route] (default {!Row_route.none}) is forced under the store lock only
     when the row is written, so a caller that derives it from a stored record
-    does no work for a row that is already present. *)
+    does no work for a row that is already present. It is forced in a system
+    thread while the chat file's lock is held, so it must be a pure
+    computation: no Eio effect and no I/O on this keeper's chat store. *)
 val append_request_failure_once :
   base_dir:string -> keeper_name:string ->
   delivery_key:Keeper_chat_delivery_identity.delivery_key -> content:string ->

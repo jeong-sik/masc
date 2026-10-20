@@ -250,6 +250,91 @@ let test_active_blocker_overrides_success_until_cleared () =
         (recovered |> member "disposition" |> to_string))
 ;;
 
+let test_historical_runtime_observation_projections () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  init_runtime_default_for_tests ();
+  let base_dir = temp_dir () in
+  let config = Masc.Workspace.default_config base_dir in
+  let meta = make_meta "runtime-walk-history" in
+  let entry = Masc.Keeper_registry.register_offline ~base_path:base_dir meta.name meta in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Masc.Keeper_registry.unregister_exact entry);
+      remove_tree base_dir)
+    (fun () -> with_env "MASC_BASE_PATH" base_dir @@ fun () ->
+      Masc.Keeper_registry.set_failure_reason ~base_path:base_dir meta.name
+        (Some (Masc.Keeper_registry.Exception "current failure"));
+      let store = Masc.Keeper_types_support.keeper_execution_receipt_store config meta.name in
+      let project () =
+        let trust = K.summary_json ~config ~meta in
+        let compact = Server_dashboard_http_composite_claims.composite_execution_receipt_json
+          ~config ~claim_window:(Server_dashboard_http_composite_claims.read_claim_window ())
+          ~keeper_name:meta.name in
+        let open Yojson.Safe.Util in
+        let trust_observation = trust |> member "execution" |> member "runtime_lane_observation" in
+        let compact_observation = compact |> member "runtime_lane_observation" in
+        Alcotest.(check bool) "trust and compact relay the same historical observation"
+          true (trust_observation = compact_observation);
+        Alcotest.(check string) "historical evidence cannot clear the current blocker"
+          "Alert" (trust |> member "disposition" |> to_string);
+        trust_observation
+      in
+      Alcotest.(check bool) "no stored receipt is not an observed empty walk"
+        true (project () = `Null);
+      let module Evidence = Keeper_runtime_walk_evidence in
+      let failure = Evidence.observe_failure ~runtime_id:"previous.runtime" ~attempt:0
+        ~dispatch:Runtime_attempt_dispatch.Dispatched
+        (Agent_core.Error.Api (Agent_core.Retry.InvalidRequest
+           { message="Prompt exceeds max length"; reason=Agent_core.Retry.Unknown_invalid_request })) in
+      let evidence = Evidence.to_yojson
+        { Evidence.failures=[failure]; terminal=Evidence.Terminal_not_observed } in
+      let identity =
+        [ "trace_id", `String "previous-trace"; "turn_count", `Int 2
+        ; "ended_at", `String "2026-06-01T00:00:00Z" ] in
+      let row identity runtime = `Assoc
+        (identity @ [ "terminal_reason_code", `String "success"
+                    ; "operator_disposition", `String "pass"
+                    ; "operator_disposition_reason", `String "healthy" ] @ runtime) in
+      let cases =
+        [ "explicit no capture", identity, ["runtime", `Assoc ["lane_evidence", `Null]], "not_observed", true
+        ; "observed empty", identity,
+          ["runtime", `Assoc ["lane_evidence", Evidence.to_yojson Evidence.empty]], "observed", true
+        ; "previous failure", identity, ["runtime", `Assoc ["lane_evidence", evidence]], "observed", true
+        ; "missing runtime", identity, [], "unreadable", true
+        ; "corrupt runtime", identity, ["runtime", `Bool false], "unreadable", true
+        ; "missing evidence", identity, ["runtime", `Assoc []], "unreadable", true
+        ; "corrupt evidence", identity, ["runtime", `Assoc ["lane_evidence", `List []]], "unreadable", true
+        ; "duplicate evidence", identity,
+          ["runtime", `Assoc ["lane_evidence", evidence; "lane_evidence", evidence]], "unreadable", true
+        ; "duplicate runtime", identity,
+          ["runtime", `Assoc ["lane_evidence", evidence]; "runtime", `Null], "unreadable", true
+        ; "missing identity", List.remove_assoc "trace_id" identity,
+          ["runtime", `Assoc ["lane_evidence", evidence]], "unreadable", false
+        ; "duplicate identity", ("trace_id", `String "another-trace")::identity,
+          ["runtime", `Assoc ["lane_evidence", evidence]], "unreadable", false
+        ; "missing turn", List.remove_assoc "turn_count" identity,
+          ["runtime", `Assoc ["lane_evidence", evidence]], "unreadable", false
+        ; "explicit unknown turn", ("turn_count", `Null)::List.remove_assoc "turn_count" identity,
+          ["runtime", `Assoc ["lane_evidence", evidence]], "observed", true ] in
+      List.iter (fun (label, identity, runtime, state, has_turn) ->
+        Dated_jsonl.append store (row identity runtime);
+        let observation = project () in
+        let open Yojson.Safe.Util in
+        Alcotest.(check string) (label ^ " state") state
+          (observation |> member "state" |> to_string);
+        let turn = member "turn" observation in
+        if has_turn then (
+          Alcotest.(check string) (label ^ " binds the source trace, not current meta")
+            "previous-trace" (turn |> member "trace_id" |> to_string);
+          Alcotest.(check bool) (label ^ " preserves the source turn, including explicit null")
+            true (member "turn_count" turn = List.assoc "turn_count" identity))
+        else Alcotest.(check bool) (label ^ " does not invent turn identity") true (turn = `Null);
+        if String.equal label "previous failure" then
+          Alcotest.(check bool) "earlier unclassified refusal survives both projections"
+            true (member "evidence" observation = evidence)) cases)
+;;
+
 let test_active_model_missing_attempt_is_unknown () =
   let meta = make_meta "status-runtime-missing-attempt" in
   let unknown_model_label =
@@ -1252,6 +1337,8 @@ let () =
     [ ( "status_runtime_provenance"
       , [ Alcotest.test_case "active blocker survives historical success" `Quick
             test_active_blocker_overrides_success_until_cleared
+        ; Alcotest.test_case "historical candidate evidence survives trust and compact projections"
+            `Quick test_historical_runtime_observation_projections
         ; Alcotest.test_case "trust follows structured blocker state" `Quick
             test_trust_blocker_uses_structured_state
         ; Alcotest.test_case "trust relays only a shown receipt's operator disposition"

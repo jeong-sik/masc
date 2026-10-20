@@ -579,6 +579,12 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
   `Assoc
     [
       ("completion_contract_result", Json_util.string_opt_to_json completion_contract_result);
+      ( "runtime_lane_observation",
+        match latest_receipt with
+        | None -> `Null
+        | Some receipt ->
+            Keeper_execution_receipt.runtime_lane_observation_of_receipt_json receipt
+            |> Keeper_execution_receipt.runtime_lane_observation_to_yojson );
       ( "provider_attempt_count",
         match runtime_attempt_count with
         | Some value -> `Int value

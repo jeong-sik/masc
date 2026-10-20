@@ -526,13 +526,41 @@ let search_absorbed_facts ~keepers_dir ~keeper_id ~current_ids ~answered_by ~que
       in
       { row; into; into_current = StringSet.mem into current_ids }
     in
-    (* The events sidecar grows with every search ([Retrieved] rows), so it
-       is read only when a chain of absorbed rows alone stops short of a
-       current claim; only then can a [Revised] step move it. *)
+    (* One statement per (memory_id, into): a row repeating another row's
+       memory_id and the claim its into reaches states the same thing, kept
+       once at its last write. *)
+    let statements_of resolved =
+      let last_write : (string * string, int) Hashtbl.t = Hashtbl.create 64 in
+      List.iteri
+        (fun index (m : absorbed_match) ->
+           Hashtbl.replace last_write (m.row.Keeper_memory_absorbed.memory_id, m.into) index)
+        resolved;
+      List.filteri
+        (fun index (m : absorbed_match) ->
+           Hashtbl.find_opt last_write (m.row.Keeper_memory_absorbed.memory_id, m.into) = Some index)
+        resolved
+    in
+    let answered statements =
+      let whole_query, fragments =
+        answering
+          ~claim_of:(fun (m : absorbed_match) ->
+            m.row.Keeper_memory_absorbed.fact.Keeper_memory_os_types.claim)
+          ~query
+          statements
+      in
+      whole_query @ fragments
+    in
+    (* The events sidecar grows with every search ([Retrieved] rows), so it is
+       read only when a chain of absorbed rows alone stops short of a current
+       claim in a row that answers this search; only then can a [Revised] step
+       move it. A chain that stops short in a row the query does not answer
+       never reaches the results, so it does not open the sidecar. *)
     let by_rows = List.map (resolve ~revised_to:StringMap.empty) absorbed in
+    let statements = statements_of by_rows in
+    let answered_by_rows = answered statements in
     let followed =
-      if List.for_all (fun (m : absorbed_match) -> m.into_current) by_rows
-      then Ok (by_rows, [])
+      if List.for_all (fun (m : absorbed_match) -> m.into_current) answered_by_rows
+      then Ok (statements, answered_by_rows, [])
       else (
         match
           Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -560,32 +588,15 @@ let search_absorbed_facts ~keepers_dir ~keeper_id ~current_ids ~answered_by ~que
               (StringMap.empty, [])
               event_lines
           in
-          Ok (List.map (resolve ~revised_to) absorbed, List.rev unreadable_events))
+          let statements = statements_of (List.map (resolve ~revised_to) absorbed) in
+          Ok (statements, answered statements, List.rev unreadable_events))
     in
     match followed with
     | Error _ as error -> error
-    | Ok (resolved, unreadable_events) ->
-    let last_write : (string * string, int) Hashtbl.t = Hashtbl.create 64 in
-    List.iteri
-      (fun index (m : absorbed_match) ->
-         Hashtbl.replace last_write (m.row.Keeper_memory_absorbed.memory_id, m.into) index)
-      resolved;
-    let statements =
-      List.filteri
-        (fun index (m : absorbed_match) ->
-           Hashtbl.find_opt last_write (m.row.Keeper_memory_absorbed.memory_id, m.into) = Some index)
-        resolved
-    in
-    let whole_query, fragments =
-      answering
-        ~claim_of:(fun (m : absorbed_match) ->
-          m.row.Keeper_memory_absorbed.fact.Keeper_memory_os_types.claim)
-        ~query
-        statements
-    in
+    | Ok (statements, answered_rows, unreadable_events) ->
     Ok
       { matches =
-          whole_query @ fragments
+          answered_rows
           |> List.filter (fun (m : absorbed_match) ->
             not (StringSet.mem m.into answered_by))
           |> take limit

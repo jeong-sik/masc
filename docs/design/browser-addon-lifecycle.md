@@ -143,7 +143,6 @@ receipts remain distinct from successful contract validation.
    input or falls back to builtin queues. Read/admin authorization stays at the
    HTTP boundary. Installed TUI and actual browser evidence remain separate.
 
-   The individual public core tool proxies are not yet enabled for the Add-on.
    Existing built-in startup is still active. Owned backends are
    explicitly refused until profile claims and actual descendant cleanup are
    connected. The tool proxy must
@@ -151,15 +150,26 @@ receipts remain distinct from successful contract validation.
    mandatory wire decoding does not replace those optional hooks. Upload leases, artifacts and model
    generation still require their explicit host brokers.
 
-   The prepared `Browser_addon_tools` adapter translates the existing public
+   The `Browser_addon_tools` adapter translates the existing public
    aliases into closed advertised commands while preserving capability filters,
    contextual reads, scene guards and Keeper screenshot projection. It keeps
    raw tool receipts and metadata when projection fails after dispatch, and
    partial effect phases pass to the existing Keeper adapter unchanged. The
-   public core/Keeper dispatchers still use their previous implementation until
-   the existing observation/composition/Vision/download success fixtures are
-   migrated together. This preparation layer does not prove those entrypoints
-   have switched or that its native scenarios have executed.
+   public core/Keeper dispatchers now invoke this adapter for tabs, reads,
+   sessions, navigation, structured actions, interactions and instructions.
+   The core derives its principal from verified runtime identity or credentials;
+   a caller name or tool body is not authority. Keeper producers preserve scene
+   retention, artifact manifests and scoped upload staging. Generic uploads
+   without that file authority are refused before dispatch. The bundled worker
+   still refuses transfers until its cross-process broker is connected.
+
+   The observation, composition, Vision and download-provider success fixtures
+   now use a shared native Runtime/launcher/MCP installation with the selected
+   input/output hooks. Only browser replies are scripted. Existing retained-byte,
+   manifest, target identity and partial-effect assertions remain. These fixtures
+   exercise the public producer path when run; their source alone does not prove
+   execution or support for actual browsers and transfers. Built-in startup and
+   the remaining executor helpers still need to be removed in a following unit.
 5. Scoped model-generation middleware using the existing exact-output authority,
    with retained request/terminal evidence and installation-selected routes. The
    new package `exact_outputs` declarations are reused; observation-only sampling

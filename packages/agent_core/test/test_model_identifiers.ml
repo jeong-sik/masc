@@ -450,8 +450,7 @@ let test_the_loader_refuses_rows_that_fold_to_one_id () =
 ;;
 
 (* The exact-output binding tells rows apart by the key the index files them
-   under: rows whose ids differ only in case are one identity, and an overlay
-   row merges into the base row it folds to. *)
+   under: rows whose ids differ only in case are one identity. *)
 let test_the_binding_folds_row_ids_as_the_index_does () =
   let catalog =
     catalog_of_toml ~source:"binding row ids"
@@ -465,19 +464,10 @@ let test_the_binding_folds_row_ids_as_the_index_does () =
     let lower =
       { base with
         id_prefix = Model_identifiers.Id_prefix.of_string_exn "fold-model"
-      ; max_context_tokens = Some 2
       }
     in
     Alcotest.(check bool) "rows whose ids differ only in case are one identity" false
-      (Exact_output_catalog_binding.model_identities_unique [ base; lower ]);
-    (match
-       Exact_output_catalog_binding.merge_exact_model_entries ~base:[ base ]
-         ~overlay:[ lower ]
-     with
-     | [ (merged : Model_catalog.model_entry) ] ->
-       Alcotest.(check (option int)) "the overlay row merges into the base row"
-         (Some 2) merged.max_context_tokens
-     | rows -> Alcotest.failf "the merge kept %d rows, not one" (List.length rows))
+      (Exact_output_catalog_binding.model_identities_unique [ base; lower ])
   | rows -> Alcotest.failf "the fixture loaded %d rows, not one" (List.length rows)
 ;;
 

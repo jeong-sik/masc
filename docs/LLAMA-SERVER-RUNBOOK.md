@@ -84,19 +84,30 @@ return-progress = true
 ```
 
 `[models.<model-row-id>.capabilities]` 블록은 빼면 안 된다. AGENT_CORE 내장 카탈로그에
-없는 모델은 이 블록이 있어야만 능력이 정해지고, 없으면 서버가 부팅을 거부한다
-(`lib/runtime/runtime_adapter.ml`이 블록이 없을 때 `None`을 돌려주고, `lib/runtime/runtime.ml`이 그걸
-"카탈로그에 없는 모델"로 판정한다).
+없는 모델은 이 블록이 있어야만 능력이 정해진다. 블록이 없으면 그 런타임이 꺼진다
+(`lib/runtime/runtime_adapter.ml`이 블록이 없을 때 `None`을 돌려주고,
+`lib/runtime/runtime.ml`의 `degrade_loaded_for_missing_catalog`가 그 런타임을 비활성화한다).
+서버 프로세스는 계속 뜬다. 다만 기본 런타임, 레인 후보, media failover 중 하나가 꺼진
+런타임을 가리키거나, 켜진 런타임이 하나도 남지 않으면 서버는 런타임을 하나도 싣지 않은 채
+설정 대기 상태로 시작한다(`lib/server/server_runtime_bootstrap.ml`). 배포 전 점검
+(`bin/deployment_preflight_helper.ml`)은 블록이 빠진 런타임이 하나라도 있으면 runtime.toml
+전체를 거절한다.
 
-**적지 않은 불리언은 꺼진 것으로 읽힌다.** 기준선이
-`Capabilities.default_capabilities`라서, 모델이 지원하는 것은 전부 적어야 한다
-(`lib/runtime/runtime_toml.ml`의 기본값이 `false`, `emits-usage-tokens`만 `true`).
-`max-context`·`tools-support`·`thinking-support`·`streaming`은 `[models.<model-row-id>]`
-쪽에서 읽어가므로 capabilities 블록에 다시 적지 않는다.
+**적지 않은 키는 대부분 그 런타임 wire의 기본 능력을 따른다.** 카탈로그에 없는 모델은
+`Capabilities.capabilities_of_kind wire`를 바탕으로 삼고 블록에 적은 키만 덮어쓴다
+(`lib/runtime/runtime_adapter.ml`). 따르지 않는 키가 셋 있다.
 
-`preserve-thinking = true`는 예외다. "이전 턴 reasoning을 다시 넣어라"까지만 말하고,
-**어떤 형식으로 넣을지는 runtime.toml에 적을 키가 없다.** 카탈로그 행이 없으면 그 형식이
-`No_preserve_thinking_control`로 떨어진다(`capabilities.ml`). 2절 표의
+- 이미지·오디오·비디오·멀티모달 입력은 적지 않으면 꺼진다.
+- `max-output-tokens`는 적지 않으면 값이 없다. wire 기본값을 가져오지 않는다.
+- `thinking-control-format`은 적지 않으면 `No_thinking_control`이다. wire의 형식을 가져오지 않는다.
+
+`max-context`·`tools-support`·`thinking-support`·`streaming`은 `[models.<model-row-id>]` 쪽에서
+읽어가므로 capabilities 블록에 다시 적지 않는다.
+
+`preserve-thinking = true`는 따로 알아 둘 점이 있다. "이전 턴 reasoning을 다시 넣어라"까지만
+말하고, **어떤 형식으로 넣을지는 runtime.toml에 적을 키가 없다.** 카탈로그 행이 없으면 그 형식은
+wire 기본값을 따르고, OpenAI 호환 wire의 기본값은 `No_preserve_thinking_control`이다
+(`capabilities.ml`). 2절 표의
 preserve + append-only(26 tok / 0.7s)를 실제로 받으려면 이 모델이 AGENT_CORE 내장
 카탈로그에 행을 가져야 한다. 행 없이 켜 두면 플래그만 켜진 상태가 된다.
 

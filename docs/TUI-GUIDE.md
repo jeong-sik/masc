@@ -451,11 +451,11 @@ shared direction and which custom surfaces still have separate renderers.
 
 ### The Activity pane
 
-Home keeps the Recent pane closed by default even on a wide terminal. An
-explicit `Ctrl-L` or `/activity fleet` choice opens it; that choice survives
-navigation and resizing. Other eligible surfaces retain their narrow default.
-On a short Home, decision and continuation destinations take the available
-rows before the ancillary health and completed-work context.
+Home opens the narrow Recent pane on a wide enough terminal, like every other
+surface. `Ctrl-L` cycles narrow, wide and hidden, and `/activity fleet`
+chooses the wide layout; the choice survives navigation and resizing. On a
+short Home, decision and continuation destinations take the available rows
+before the ancillary health and completed-work context.
 
 `Ctrl-L` walks the pane on the right of eligible surfaces through narrow, wide
 and hidden. Activity and Logs keep this pane off, since it would repeat their
@@ -514,8 +514,8 @@ The `Changes` tab lists the files this keeper's calls wrote, newest first.
 The first screen shows workspace health, the number of listed Keepers, two
 active Goals, Task flow, quota coverage, and up to two operator attention
 items. It leaves individual Keeper rows, Task rows, provider meters, and logs
-to their own destinations. The Recent activity pane stays hidden on this
-screen even in a wide terminal.
+to their own destinations. The Recent activity pane is open beside this screen
+on a terminal wide enough for it.
 
 For a Goal, `actual` comes only from an explicitly recorded measurement bound
 to that Goal's current criterion revision. The screen says `not recorded`,
@@ -2641,7 +2641,8 @@ incidents are not counted as operator decisions.
 
 Use j/k or the arrows to choose, then Enter to open. Long request lists window
 around the selected identity while Continue and new work remain visible; the
-heading states the shown row range. Esc from a Home-opened reader returns to
+heading states the shown row range, and a window that shows only some requests
+is drawn as plain rows, never as cards. Esc from a Home-opened reader returns to
 Home with its selection and request window retained. If the request disappears
 or its source becomes unreadable, Home requires explicit reselection. A new
 top-level navigation ends the previous reader's return context.

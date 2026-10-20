@@ -11,5 +11,9 @@ val home_selected_action : Masc_tui_types.state -> Masc_tui_types.home_action op
 val home_initial_reading_ready : Masc_tui_types.state -> Masc_tui_types.home_action option -> bool
 (** Action notices rendered before the decision window, in display order. *)
 val home_notice_lines : Masc_tui_types.state -> string list
+val home_requests_budget : Masc_tui_types.state -> chrome_budget:int -> int
+(** The rows left for the decision window out of the body's [chrome_budget]:
+    one less while the one-time help line is shown, and one less for the
+    requests link. Never negative. *)
 val home_decision_window : Masc_tui_types.state -> budget:int -> int * int
 val home_step : Masc_tui_types.state -> backwards:bool -> unit

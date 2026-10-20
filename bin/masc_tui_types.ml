@@ -16395,7 +16395,7 @@ let agenda_chrome_rows (state : state) =
    both before it lays the body out and a surface that measured only the
    composer draws one row too many -- the frame then cuts its last row, which
    is the footer. Every surface lost its key hints, version, base path and port
-   the moment a wake or a waiting keeper put the strip on screen. *)
+   the moment a wake put the strip on screen. *)
 let surface_body_rows (state : state) ~terminal_rows =
   max
     1

@@ -32735,9 +32735,11 @@ and is loaded on demand through keeper_skill.
                       if Option.is_none state.home_selected
                          && Masc_tui_home.home_initial_reading_ready state selected then
                         state.home_selected <- selected;
-                      (* The persistent requests link owns the first body row. *)
-                      let budget = max 0
-                          (Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows - 1) in
+                      (* The same budget the drawing gives the window: the
+                         help line and the requests link take body rows. *)
+                      let budget = Masc_tui_home.home_requests_budget state
+                          ~chrome_budget:
+                            (Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows) in
                       let first, _ = Masc_tui_home.home_decision_window state ~budget in
                       state.home_decision_scroll <- first
                   | Overview, `Detail_reading _ -> ()

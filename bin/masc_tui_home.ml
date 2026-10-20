@@ -272,6 +272,14 @@ let home_notice_lines state =
      | None -> []
      | Some (_, receipt) -> [" Last decision receipt · " ^ clean receipt])
 
+(* The rows Home gives its decision window: the body budget less the one-time
+   help line while it is shown and the requests link that always takes the
+   first body row. The drawing and the key loop that stores the window's first
+   row both read this, so they cannot disagree by the help line. *)
+let home_requests_budget state ~chrome_budget =
+  let help_line = if state.help_hint_shown then 0 else 1 in
+  max 0 (chrome_budget - help_line - 1)
+
 let home_decision_window state ~budget =
   let decisions = home_decision_rows state in
   let continuation = home_continue_rows state in

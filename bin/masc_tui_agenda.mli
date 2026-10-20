@@ -131,7 +131,7 @@ val waiting : t -> int
 val waiting_label : cells:int -> t -> string
 (** The badge for the surface strip, as plain text; styling belongs to the
     renderer. It names what waits, by kind and in that order of attention --
-    questions, approvals, Goals to confirm, stuck tasks -- led by the [;] key
+    questions, held calls, Goals to confirm, stuck tasks -- led by the [;] key
     that opens the panel, and is [""] when nothing waits.
 
     The longest of three spellings that fits [cells] is returned: the

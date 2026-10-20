@@ -153,12 +153,14 @@ let clock_half ~now ~localtime ~cells row =
   if room <= 0 then "" else head ^ Masc_tui_message_layout.fit_middle room said
 ;;
 
-(* One phrase per kind, questions first. The words follow the screen titles:
-   a held call is an approval on the Approvals / Questions surface, and the
-   [;] panel has the "Confirm a goal" and "Stuck on you" sections. *)
+(* One phrase per kind, questions first. The words follow the Dashboard's rows
+   and the [;] panel: a keeper's held call is a "Held call" there, and the
+   panel has the "Confirm a goal" and "Stuck on you" sections. Gate requests and
+   operator confirmations are not in the agenda, so "approval" would claim more
+   than the number counts. *)
 let waiting_phrases t =
   [ List.length (rows_of t.asking), "question", "questions"
-  ; List.length (rows_of t.blocked), "approval", "approvals"
+  ; List.length (rows_of t.blocked), "held call", "held calls"
   ; List.length (rows_of t.confirming), "goal to confirm", "goals to confirm"
   ; List.length (rows_of t.stuck), "stuck task", "stuck tasks"
   ]

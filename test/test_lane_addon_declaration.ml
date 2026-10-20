@@ -98,7 +98,7 @@ let with_fixture f =
                       exported_tools = (fun () -> []);
                       call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools"));
                       action_schema=(fun () -> None);act=(fun ~arguments:_ -> Error "read-only");
-                      stop=(fun () -> Ok ());container_id=instance_id} in ignore (on_engine (Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine")); on_created connection;Ok connection);
+                      stop=(fun () -> Ok ());container_id=instance_id;host=None} in ignore (on_engine (Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine")); on_created connection;Ok connection);
                   image_ready=(fun ~package:_ -> Ok ());
                   acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
                   recover_stop=(fun ~runtime:_ ~state_owner:_ ~instance_id:_ ~engine:_ ~container_id:_ -> Ok ());

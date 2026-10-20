@@ -1,7 +1,9 @@
 let () =
-  let socket = ref None and incarnation = ref None and bound = ref None and automation = ref false and models = ref false in
+  let socket = ref None and incarnation = ref None and bound = ref None and automation = ref false and models = ref false
+    and stagehand = ref false in
   Arg.parse [
     "--automation",Arg.Set automation,"Start the host-selected owned Gecko backend";
+    "--stagehand",Arg.Set stagehand,"Register the host-selected owned Chrome backend";
     "--models",Arg.Set models,"Attach the host-selected model request broker";
     "--socket",Arg.String (fun value -> socket:=Some value),"Host-selected private Unix socket";
     "--incarnation",Arg.String (fun value -> incarnation:=Some value),"Host-selected worker UUID";
@@ -47,5 +49,7 @@ let () =
       (fun () -> Masc.Browser_addon_service.serve ~net:(Eio.Stdenv.net env) ~owner
         ~socket_path ~max_message_bytes)
       until_stop in
+    let chrome ()=if !stagehand then Masc.Browser_addon_stagehand.run ~env ~owner
+      ~directory:(Filename.dirname socket_path) serve else serve () in
     if !automation then Masc.Browser_addon_automation.run ~env ~owner
-      ~directory:(Filename.dirname socket_path) serve else serve ()))
+      ~directory:(Filename.dirname socket_path) chrome else chrome ()))

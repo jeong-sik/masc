@@ -86,7 +86,27 @@ let test_open_and_boundary () = fixture (fun ~chrome ~gecko ~live ~extension:_ ~
   check bool "bound automatic request cannot be reselected by capabilities" true
     (Selection.resolve ~required_actions:[Cap.Type_text] ~verb:Lane.Tabs_list ~bound:true Selection.Automatic
       = Error Selection.Binding_required))
+let test_model_selection () = fixture (fun ~chrome ~gecko ~live ~extension:_ ~bidi:_ ->
+  let chrome_before= !chrome in
+  Lane.install_stagehand_executor ~models:false (Some (fun ~actor:_ _ -> incr chrome;answered));
+  let before=(!chrome,!gecko,!live) in
+  let required=["requiredActions",`List [`String "sentence_action"]] in
+  List.iter (fun result ->
+    check bool "model-off required task refuses before dispatch" true (not (Tool_result.is_success result)))
+    [tabs (`Assoc required);
+     tabs (`Assoc (("lane",`String "stagehand")::required));
+     Tools.handle_session ~tool_name:"BrowserSession" ~start_time:(Tool_timing.start ())
+       (`Assoc (("action",`String "open")::required));
+     Tools.handle_session ~tool_name:"BrowserSession" ~start_time:(Tool_timing.start ())
+       (`Assoc (("lane",`String "stagehand")::("action",`String "open")::required))];
+  check bool "no discovery or open reached any browser" true (before=(!chrome,!gecko,!live));
+  Lane.install_stagehand_executor ~models:true (Some (fun ~actor:_ _ -> incr chrome;answered));
+  check bool "selected consumer restores required task discovery" true
+    (Tool_result.is_success (tabs (`Assoc required)));
+  check int "selected consumer dispatches exactly the chosen discovery" (chrome_before+1) !chrome)
+
 let () = run "task-aware browser choice" ["scenarios",[
   test_case "HTML5, frames/downloads and hover/typing discovery" `Quick test_task_choice;
   test_case "zoom, impossible requirements and immutable explicit owners" `Quick test_zoom_and_impossible;
-  test_case "session opening and parse/binding pre-effect refusal" `Quick test_open_and_boundary]]
+  test_case "session opening and parse/binding pre-effect refusal" `Quick test_open_and_boundary;
+  test_case "selected model consumer is required before discovery and open" `Quick test_model_selection]]

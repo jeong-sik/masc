@@ -5,6 +5,8 @@
     Browser Lane verb into the calls it needs, sends them through the [call]
     it is given, and turns the replies into the lane's answer. *)
 
+val attach_error_message : Browser_stagehand_session.attach_error -> string
+
 (** masc tab ids for Stagehand page ids (CDP target ids), one table per
     backend. A page keeps its id; an id is never given to another page, in
     the same session or a later one, so a tab id read before a page closed

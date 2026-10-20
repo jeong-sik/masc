@@ -5,10 +5,17 @@ module Peer = Masc.Browser_bidi_peer
 let metadata peer = Result.map_error Peer.session_failure_message (Peer.metadata peer)
 let obj xs = `Assoc xs
 (* [check bool] on a substring of the injected script reported only the label,
-   so a wrong script arrived without the script in the log. *)
+   so a wrong script arrived without the script in the log. This form reports
+   the sizes instead of the bytes: the runtime script is long enough that two
+   copies in one log line say less than its length does. *)
 let check_contains ~name ~needle text =
   if not (String_util.contains_substring text needle) then
     Alcotest.failf "%s: %S is missing from %S" name needle text
+
+let check_declares ~name ~needle declaration =
+  if not (String_util.contains_substring declaration needle) then
+    Alcotest.failf "%s: a %d-byte needle is missing from a %d-byte declaration"
+      name (String.length needle) (String.length declaration)
 (* The session's end, with a failure as its sentence. *)
 let ended_session peer =
   Result.map_error Peer.session_end_failure_message (Peer.end_session peer)
@@ -164,7 +171,7 @@ let test_document_source () =
     check string "and carries the source" "<html></html>" (data |> member "html" |> to_string);
     (match !ran with
      | [declaration] ->
-       check_contains ~name:"one script, the shared document helper"
+       check_declares ~name:"one script, the shared document helper"
          ~needle:Browser_lane.Document.runtime declaration;
        check_contains
          ~name:"one script, ending in the shared document helper call"

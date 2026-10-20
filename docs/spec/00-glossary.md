@@ -452,11 +452,13 @@ status: reference
   - 세 층을 구분한다: **닫힌 quota 창**은 provider가 보고한 관측이고, **Runtime Rate
     Limit**은 그 후보의 프로세스 로컬 증거이며, 경로 휴식은 그 증거를 읽어 드라이버가
     정한 대기 결정이다.
-  - 시각이 있는 휴식(`Rest_dated`)은 provider가 말한 대기나 관측된 quota 창의 재개
-    시각에서 끝나고, 그 시각에 walk가 그 경로를 다시 올린다. 시각이 없는 휴식
-    (`Rest_until_answered`, `:340`)은 provider나 usage 읽기가 시각을 말하지 않은 quota
-    관측이며, 그 scope에서 답이 와야 끝난다. 이 해제는 기다림만 끝내고 순서 강등은
-    그대로 둔다(`:384`).
+  - 해제가 무엇을 푸는지는 이름(`Rest_dated`/`Rest_until_answered`)이 아니라 표시
+    `walk_promotes_at_release`가 정한다(`:335`). provider가 실제로 시각을 말한 휴식
+    (쓸 만한 retry-after가 있는 rate limit, 재개 시각이 관측된 quota 창)만 그 시각에
+    walk가 그 경로를 다시 올린다. provider가 시각을 말하지 않은 rate limit은 바닥 시각을
+    둔 `Rest_dated`가 되고, 시각 없는 quota 관측은 `Rest_until_answered`(`:340`)가 되어
+    해제 때 기다림만 끝나며 순서 강등은 성공 답까지 남는다(`:384`). `Rest_until_answered`
+    의 대기 자체도 `now`에서 굴러가는 바닥 시각으로 풀린다(`:394`).
   - 실패한 시도는 휴식이 아니다. 그 경로를 후보가 답할 때까지 뒤로 미룰 뿐, 발송을
     기다리게 하지 않는다(`:389`, `RFC-0458 §3.4`).
   - 완료 검증도 같은 저장소를 읽는다. 검증 루프는 한 후보의 실패를

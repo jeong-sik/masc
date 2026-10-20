@@ -61,10 +61,24 @@ let read_line fd =
       | _ -> if Bytes.get byte 0='\n' then Buffer.contents buffer
         else (Buffer.add_char buffer (Bytes.get byte 0);loop ()) in
   loop ()
-let spawn fixture claim script =
+let fill_pipe fd =
+  Unix.set_nonblock fd;
+  Fun.protect ~finally:(fun () -> Unix.clear_nonblock fd) (fun () ->
+    let fill bytes =
+      let rec loop () = match Unix.write fd bytes 0 (Bytes.length bytes) with
+        | 0 -> Alcotest.fail "pipe made no write progress"
+        | _ -> loop ()
+        | exception Unix.Unix_error ((Unix.EAGAIN|Unix.EWOULDBLOCK),_,_) -> ()
+        | exception Unix.Unix_error (Unix.EINTR,_,_) -> loop () in
+      loop () in
+    fill (Bytes.make 4096 'x');fill (Bytes.make 1 'x'))
+let spawn_channels ~blocked fixture claim script =
   let input,keepalive=Unix.pipe ~cloexec:true () and output,ready=Unix.pipe ~cloexec:true () in
+  List.iter (fun fd -> ignore (track fixture fd)) [input;keepalive;output;ready];
   let log=Unix.openfile (Filename.concat fixture.root "owner.log")
       [Unix.O_WRONLY;Unix.O_CREAT;Unix.O_APPEND;Unix.O_CLOEXEC] 0o600 in
+  ignore (track fixture log);
+  if blocked then fill_pipe ready;
   let command=[!launcher;"--instance";Lease.instance_id claim] @
     List.concat_map (fun directory -> ["--slot";directory]) (Lease.directories claim) @
     ["--";!owner;"--instance";Lease.instance_id claim;"--";"/usr/bin/env";"python3";"-c";script;fixture.root] in
@@ -76,8 +90,10 @@ let spawn fixture claim script =
     Unix.execv !launcher (Array.of_list command)
   | pid ->
     fixture.children<-pid::fixture.children;
-    Unix.close input;Unix.close ready;Unix.close log;
-    ignore (track fixture keepalive);ignore (track fixture output);
+    close fixture input;close fixture ready;close fixture log;
+    pid,keepalive,output
+let spawn fixture claim script =
+    let pid,keepalive,output=spawn_channels ~blocked:false fixture claim script in
     let receipt=match Owner.ready_of_json (Yojson.Safe.from_string (read_line output)) with
       | Ok value -> value | Error message -> Alcotest.fail message in
     check "bootstrap instance is original" true (receipt.instance_id=Lease.instance_id claim);
@@ -183,6 +199,30 @@ let test_not_group_leader () = with_fixture (fun fixture ->
   fixture.children<-pid::fixture.children;Unix.close log;
   check "non-owner process refuses before spawn" true (reap fixture pid=Unix.WEXITED 1);
   check "no browser child was started" false (Sys.file_exists marker))
+type stop = Term | Eof | Child_exit
+let test_blocked_bootstrap stop () = with_fixture (fun fixture ->
+  let claim=prepare fixture "blocked-bootstrap" in
+  let script=match stop with
+    | Term|Eof -> tree_script
+    | Child_exit -> {|import pathlib,sys,time
+root=pathlib.Path(sys.argv[1])
+(root/'child-ready').write_text('ready')
+while not (root/'allow-exit').exists(): time.sleep(.01)
+|} in
+  let pid,keepalive,_=spawn_channels ~blocked:true fixture claim script in
+  wait_for "browser entered with unread bootstrap output" (fun () ->
+    Sys.file_exists (Filename.concat fixture.root "child-ready")
+    && (match ok (Lease.status claim) with Lease.Live process -> process.pid=pid
+        | Awaiting_exec|Cleanup_pending _|Settled -> false));
+  (match stop with
+   | Term -> ok (Lease.request_termination claim)
+   | Eof -> close fixture keepalive
+   | Child_exit -> Out_channel.with_open_text (Filename.concat fixture.root "allow-exit")
+       (fun output -> output_string output "exit"));
+  check "bootstrap backpressure cannot prevent group termination" true
+    (reap fixture pid=Unix.WSIGNALED Sys.sigkill);
+  ok (Lease.retire claim);settled claim;
+  check "blocked bootstrap leaves no live original group" false (Posix_spawn_detached.group_id_has_members pid))
 let () =
   if Array.length Sys.argv<>3 then (prerr_endline "expected native launcher and browser process owner";exit 1);
   launcher:=Unix.realpath Sys.argv.(1);owner:=Unix.realpath Sys.argv.(2);
@@ -190,4 +230,7 @@ let () =
     Alcotest.test_case "original lease termination clears the group" `Quick test_original_lease_termination;
     Alcotest.test_case "keepalive writer crash clears the group" `Quick test_keepalive_owner_crash;
     Alcotest.test_case "normal browser exit clears descendants" `Quick test_normal_child_exit;
-    Alcotest.test_case "an unrelated group is refused before spawn" `Quick test_not_group_leader]]
+    Alcotest.test_case "an unrelated group is refused before spawn" `Quick test_not_group_leader;
+    Alcotest.test_case "TERM settles despite blocked bootstrap output" `Quick (test_blocked_bootstrap Term);
+    Alcotest.test_case "EOF settles despite blocked bootstrap output" `Quick (test_blocked_bootstrap Eof);
+    Alcotest.test_case "child exit settles despite blocked bootstrap output" `Quick (test_blocked_bootstrap Child_exit)]]

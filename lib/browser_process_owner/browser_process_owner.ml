@@ -47,15 +47,18 @@ let run ~env ~instance_id ~command ~grace_seconds ~on_ready =
       if Atomic.get stopping then finish ();
       let child=Eio.Process.spawn ~sw Posix_spawn_process_mgr.mgr ~stdin:input
         ~stdout:(Eio.Stdenv.stderr env) ~stderr:(Eio.Stdenv.stderr env) command in
-      if not (Atomic.get stopping) then on_ready {instance_id;owner_pid=pid;child_pid=Eio.Process.pid child};
       let ending=Eio.Fiber.first
-          (fun () -> ignore (Eio.Process.await child);`Child_ended)
+          (fun () ->
+            if not (Atomic.get stopping) then on_ready {instance_id;owner_pid=pid;child_pid=Eio.Process.pid child};
+            Eio.Fiber.await_cancel ())
           (fun () -> Eio.Fiber.first
-            (fun () ->
-              (try ignore (Eio.Flow.single_read (Eio.Stdenv.stdin env) (Cstruct.create 1)) with End_of_file -> ());
-              `Stop_requested)
-            (fun () -> Eio.Condition.loop_no_mutex changed (fun () ->
-              if Atomic.get stopping then Some `Stop_requested else None))) in
+            (fun () -> ignore (Eio.Process.await child);`Child_ended)
+            (fun () -> Eio.Fiber.first
+              (fun () ->
+                (try ignore (Eio.Flow.single_read (Eio.Stdenv.stdin env) (Cstruct.create 1)) with End_of_file -> ());
+                `Stop_requested)
+              (fun () -> Eio.Condition.loop_no_mutex changed (fun () ->
+                if Atomic.get stopping then Some `Stop_requested else None)))) in
       (match ending with
       | `Child_ended -> ()
       | `Stop_requested ->

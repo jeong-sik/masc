@@ -28,9 +28,7 @@ struct UmpField: Hashable {
         return address.dialect == 4 && kind.note.map { known.contains(UmpField(address: address, kind: .noteReset($0))) } == true
     }
     static let bankSelect: Set<UInt32> = [0, 32]
-    static let portamento: Set<UInt32> = [5, 37, 65]
     static let registeredPitch: UInt32 = 3
-    static let noteSelection: Set<Kind> = [.registered(0, 3), .registered(0, 4), .registered(0, 6), .registered(0, 7)]
     // A voice keeps what its Note On started with: its patch, Portamento Time
     // and On/Off glide, Tuning Program/Bank (MIDI Tuning Standard persists for
     // subsequent Note Ons, UMP v1.1.2 7.4.15), MPE Configuration, the Per-Note
@@ -38,20 +36,29 @@ struct UmpField: Hashable {
     // 7.25, from which a receiver may select the sample. Assignable controllers
     // have vendor meanings and are kept as well. A per-note reset changed every
     // per-note value. Bend, pressure and other controllers are continuous.
-    func kept(byAttackOf number: UInt32) -> Bool {
-        switch kind {
-        case .program, .bank, .assignable: return true
-        case .controller(let index): return UmpField.portamento.contains(index)
-        case .registered: return UmpField.noteSelection.contains(kind)
-        case .noteRegistered(let note, let index): return note == number && index == UmpField.registeredPitch
-        case .noteAssignable(let note, _), .noteReset(let note): return note == number
-        case .bend, .pressure, .poly, .noteBend: return false
+    // The kept channel controllers and registered parameters are this table.
+    static let keptByAttack: Set<Kind> = [.controller(5), .controller(37), .controller(65),
+                                          .registered(0, 3), .registered(0, 4), .registered(0, 6), .registered(0, 7)]
+    // Whether `message` fixes this field for later sound: a Note On keeps the
+    // values above, a Program Change applies a MIDI 1.0 Bank Select, and a
+    // Per-Note Management Detach keeps a sounding note's per-note values.
+    func kept(by message: UmpMessage, sounding: Set<UInt32>) -> Bool {
+        guard address == message.address else { return false }
+        switch message.action {
+        case .on(let number):
+            switch kind {
+            case .program, .bank, .assignable: return true
+            case .controller, .registered: return UmpField.keptByAttack.contains(kind)
+            case .noteRegistered(let note, let index): return note == number && index == UmpField.registeredPitch
+            case .noteAssignable(let note, _), .noteReset(let note): return note == number
+            case .bend, .pressure, .poly, .noteBend: return false
+            }
+        case .absolute(let kinds) where kinds.contains(.program):
+            if case .controller(let index) = kind { return address.dialect == 2 && UmpField.bankSelect.contains(index) }
+            return false
+        case .management(let number, detach: true, _) where sounding.contains(number): return kind.note == number
+        default: return false
         }
-    }
-    // MIDI 1.0 Bank Select takes effect at the next Program Change.
-    var selectsBank: Bool {
-        if case .controller(let index) = kind { return address.dialect == 2 && UmpField.bankSelect.contains(index) }
-        return false
     }
 }
 enum UmpObstacle: String, Hashable {
@@ -159,19 +166,10 @@ struct UmpFootprint {
         guard obstacles.isEmpty else { throw UmpRefusal("captured UMP reconstruction cannot restore \(obstacles.map(\.rawValue).sorted().joined(separator: ", ")); full-source playback remains available") }
     }
 }
-// A sounding voice keeps the values its Note On started with and, from a
-// Per-Note Management Detach on, its per-note values; a Program Change latches
-// MIDI 1.0 Bank Select for later Note Ons. Fields the transport changed need a
-// source baseline before these messages; other values sent later still reach
-// the voice.
+// Fields the transport changed that `message` keeps (UmpField.kept) need a
+// source baseline before it; other values sent later still reach the voice.
 func umpKeptFields(_ message: UmpMessage, sounding: Set<UInt32>, changed previous: UmpFootprint) -> [UmpField] {
-    switch message.action {
-    case .on(let number): return previous.touched.filter { $0.address == message.address && $0.kept(byAttackOf: number) }
-    case .absolute(let kinds) where kinds.contains(.program): return previous.touched.filter { $0.address == message.address && $0.selectsBank }
-    case .management(let number, detach: true, _) where sounding.contains(number):
-        return previous.touched.filter { $0.address == message.address && $0.kind.note == number }
-    default: return []
-    }
+    previous.touched.filter { $0.kept(by: message, sounding: sounding) }
 }
 struct UmpVoice {
     let number: UInt32

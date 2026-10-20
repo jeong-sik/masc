@@ -38,6 +38,30 @@ from typing import Any, Callable, Iterable
 
 SCRIPT_PATH = pathlib.Path(__file__).resolve()
 REPO_ROOT = SCRIPT_PATH.parents[3]
+sys.path.insert(0, str(REPO_ROOT / "scripts" / "lib"))
+
+from recorded_tool_outcome import RecordedCallOutcome, recorded_call_outcome  # noqa: E402
+
+
+def row_succeeded(row: dict[str, Any]) -> bool:
+    """True only for a settled success of a tool-call log row."""
+    return recorded_call_outcome(row) is RecordedCallOutcome.SUCCEEDED
+
+
+def row_success_verdict(row: dict[str, Any]) -> bool | None:
+    """True for a recorded success, False for a recorded failure, None otherwise.
+
+    Deferred, unsettled and malformed rows are neither: the assertions below
+    ask "did it succeed" and "did it fail" separately, and a row that settled
+    neither way must answer neither.
+    """
+    outcome = recorded_call_outcome(row)
+    if outcome is RecordedCallOutcome.SUCCEEDED:
+        return True
+    if outcome is RecordedCallOutcome.FAILED:
+        return False
+    return None
+
 DEFAULT_CATALOG = (
     REPO_ROOT
     / "scripts"
@@ -3168,7 +3192,7 @@ class MissionRun:
             {
                 "detail": {
                     "tool_name": row.get("tool"),
-                    "success": row.get("success"),
+                    "success": row_success_verdict(row),
                 },
                 "ts": row.get("ts"),
             }
@@ -3284,7 +3308,7 @@ class MissionRun:
             accepted_names = TOOL_ALIASES.get(tool_name, {tool_name})
             return any(
                 row.get("tool") in accepted_names
-                and row.get("success") is True
+                and row_succeeded(row)
                 and not row.get("composition_tool")
                 for row in rows_for_turn(role, turn)
             )
@@ -3297,7 +3321,7 @@ class MissionRun:
                 return False
             return any(
                 row.get("tool") in TOOL_ALIASES["tool_execute"]
-                and row.get("success") is True
+                and row_succeeded(row)
                 and not row.get("composition_tool")
                 and isinstance(row.get("output"), str)
                 and needle in row["output"]

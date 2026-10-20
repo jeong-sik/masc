@@ -75,6 +75,28 @@ receipts remain distinct from successful contract validation.
 4. A browser worker that owns WebExtension/BiDi command queues and owned Gecko/
    Chrome execution. Core admission and artifact/model brokers remain host edges;
    built-in browser execution and tool fallback are removed.
+   The foundation now provides `masc-browser-addon-worker`: stdio serves only
+   `lane_observe`, while a host-selected private Unix socket handles concurrent
+   issue/poll/result/disconnect/snapshot requests. One canonical incarnation is
+   admitted per process, and every request carries it. Live execution requires
+   the already-selected client ID; no worker-side automatic route selection or
+   retry occurs. Strict codecs retain existing document, viewport, frame and
+   keyboard guards plus partial-effect result bodies. A nested service switch
+   owns every accepted connection so idle clients cannot prevent shutdown.
+   Retirement fences admission before disconnecting clients and cancelling waits.
+   Socket paths must be absent inside a canonical, same-UID 0700 directory;
+   stdin EOF and termination signals retire the owner. The host supplies the
+   installation's native reply bound to this second transport as well.
+
+   This foundation has no package manifest or core proxy enabled. Existing
+   built-in startup is still active. Owned backends are explicitly refused here
+   until profile claims and actual descendant cleanup are connected. Next, the
+   native host must select the socket/UUID arguments after owner validation and
+   pin existing HTTP host registrations to that original incarnation. Late host
+   poll/result retries must never be redirected to a replacement. The proxy must
+   apply installation-selected command/result hooks; mandatory wire decoding
+   does not replace those optional hooks. Upload leases, artifacts and model
+   generation still require their explicit host brokers.
 5. Scoped model-generation middleware using the existing exact-output authority,
    with retained request/terminal evidence and installation-selected routes. The
    new package `exact_outputs` declarations are reused; observation-only sampling

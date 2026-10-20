@@ -10,6 +10,7 @@ type t = {
   mutable clients : B.client_id list;
   mutable automation : cleanup option;
   mutable stagehand : cleanup option;
+  mutable live : cleanup option;
   mutable models : Browser_addon_models.t option;
   mutable uploads : Browser_addon_uploads.t option;
   mutable downloads : Browser_addon_downloads.t option;
@@ -18,6 +19,7 @@ type t = {
 }
 let process_claimed = Atomic.make false
 let incarnation t = t.incarnation
+let is_retired t = match t.phase with Serving -> false | Retired -> true
 let create ~incarnation =
   match B.client_id_of_string incarnation with
   | Error message -> Error message
@@ -26,7 +28,7 @@ let create ~incarnation =
       Error "a browser owner already exists in this process"
     else
       let retired, retire = Eio.Promise.create () in
-      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=None;stagehand=None;models=None;uploads=None;downloads=None;retired;retire} in
+      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=None;stagehand=None;live=None;models=None;uploads=None;downloads=None;retired;retire} in
       B.install_activity_observer (Some (fun lane -> match t.phase,lane with
         | Serving,B.Lane_name.Live -> B.Enabled
         | Serving,B.Lane_name.Automation -> if Option.is_some t.automation then B.Enabled else B.Disabled
@@ -106,6 +108,15 @@ let attach_stagehand t ~models ~execute ~session ~cleanup =
       B.install_stagehand_executor ~models (Some execute);
       B.install_server_session_observer B.Server_stagehand (Some session);
       t.stagehand <- Some (owned_cleanup "Stagehand" cleanup);Ok ())
+let attach_live t ~client_id ~cleanup =
+  Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase,t.live with
+    | Retired,_ -> Error "browser owner is retired"
+    | Serving,Some _ -> Error "owned live BiDi backend is already attached"
+    | Serving,None ->
+      if not (List.mem client_id t.clients) then Error "live BiDi client was not registered by this owner"
+      else match List.find_opt (fun (client:B.client_info) -> client.client_id=client_id) (B.active_clients ()) with
+        | Some {transport=B.Webdriver_bidi;_} -> t.live<-Some (owned_cleanup "live BiDi" cleanup);Ok ()
+        | None | Some {transport=B.Web_extension;_} -> Error "owned live client is not an active BiDi connection")
 let revoke t =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () ->
     match t.phase with
@@ -129,14 +140,18 @@ let cleanup t =
      The lazy values retain the original result rather than replaying teardown. *)
   Eio.Cancel.protect (fun () ->
     let settle = function None -> Ok () | Some cleanup -> Eio.Lazy.force cleanup in
-    let automation,stagehand = Eio.Fiber.pair
-        (fun () -> settle t.automation) (fun () -> settle t.stagehand) in
+    let live,(automation,stagehand) = Eio.Fiber.pair
+      (fun () -> settle t.live)
+      (fun () -> Eio.Fiber.pair (fun () -> settle t.automation) (fun () -> settle t.stagehand)) in
     let uploads=cleanup_uploads t in
-    let downloads=match automation,stagehand with
-      | Ok (),Ok () -> cleanup_downloads t
-      | (Error _),(Ok ()|Error _) | Ok (),(Error _) -> Error "download cleanup requires confirmed backend teardown" in
+    let downloads=match t.downloads with
+      | None -> Ok ()
+      | Some _ -> (match live,automation,stagehand with
+          | Ok (),Ok (),Ok () -> cleanup_downloads t
+          | Error _,_,_ | Ok (),Error _,_ | Ok (),Ok (),Error _ ->
+              Error "download cleanup requires confirmed backend teardown") in
     let errors=List.filter_map (function Ok () -> None | Error detail -> Some detail)
-      [automation;stagehand;uploads;downloads] in
+      [live;automation;stagehand;uploads;downloads] in
     match errors with [] -> W.Receipt
       | _::_ -> refusal ~disposition:W.Outcome_unknown (String.concat "; " errors))
 let waiting t ~disposition run =

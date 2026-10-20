@@ -5918,83 +5918,31 @@ module Browser_lane_view = struct
     | false, [], Some _ -> Host_unlisted
     | false, _ :: _, Some _ -> Host_beside_another_bidi
     | false, _, None -> Host_connecting
-  (* What comes before the next host, by what became of the last one's
-     session. A Firefox that holds a session refuses every host until it is
-     restarted; one that holds none takes the next host as it is. A host
-     that never got a session left none, and what kept it from one is still
-     there. A refusal says Firefox held a session then, not that it holds
-     one now, so the next host is tried before a restart. A host that ended
-     a session on another profile says so first: another Firefox holds that
-     port, and the Keeper one cannot open it until that one is quit. Where
-     MASC starts the Keeper Firefox, its next start restarts a Firefox on its
-     port only when MASC's record shows MASC started it, and the operator
-     quits any other there first; a session on another port is not in its
-     way. *)
-  type host_restart = Operator_restarts | Masc_restarts_there | Masc_starts_elsewhere
-  let host_restart (keeper : Masc.Browser_bidi_host_status.keeper)
-      (entry : Masc.Browser_bidi_host_record.entry) =
-    match keeper with
-    | Masc_starts { port; _ } ->
-        if Masc.Browser_bidi_host_status.recorded_on_port entry ~port then Masc_restarts_there
-        else Masc_starts_elsewhere
-    | Lane_off | Not_configured | Not_known -> Operator_restarts
-  let not_in_the_way_of_masc =
-    "That Firefox is not on MASC's port, so it does not stop MASC's start"
-  (* Where a session is held there: what MASC's next start does about it. *)
-  let masc_held_lines = function
-    | Operator_restarts -> []
-    | Masc_restarts_there ->
-        ["MASC restarts that Firefox only if MASC's record shows MASC started it";
-         "Otherwise the operator quits it first"]
-    | Masc_starts_elsewhere -> [not_in_the_way_of_masc]
-  (* Where a session may be held there: what MASC's start after a refusal
-     does about it. *)
-  let masc_maybe_held_lines = function
-    | Operator_restarts -> []
-    | Masc_restarts_there ->
-        ["If Firefox refuses the next host, the start after restarts that Firefox";
-         "only if MASC's record shows MASC started it · or the operator quits it"]
-    | Masc_starts_elsewhere -> [not_in_the_way_of_masc]
-  let host_session_lines restart (entry : Masc.Browser_bidi_host_record.entry)
+  (* These session diagnostics concern the external manual host record.
+     Addon-managed Firefox readiness is observed separately. *)
+  let host_session_lines (entry : Masc.Browser_bidi_host_record.entry)
       (ending : Masc.Browser_bidi_host_record.ending) =
     match ending.because with
     | Profile_not_kept { expected; found = Some found } ->
-        [host_line "Another Firefox holds that port · quit it so one on the kept profile can open it";
+        [host_line "Another Firefox holds that port · the operator checks it before manual attach";
          { lead = "It runs: "; said = found; breaks = At_slashes };
          { lead = "Kept: "; said = expected; breaks = At_slashes }]
     | Profile_not_kept { expected; found = None } ->
-        [host_line "The Firefox there did not say its profile · quit it unless it runs the kept one";
+        [host_line "The external Firefox did not say its profile · check it before manual attach";
          { lead = "Kept: "; said = expected; breaks = At_slashes }]
     | Reason_only ->
-    List.map host_line
-      (match entry.attached_at, ending.session with
-       | Some _, No_session_left -> ["That Firefox takes the next host if it still runs"]
-       | None, No_session_left ->
-           (match restart with
-            | Operator_restarts ->
-                ["It got no session · check that Firefox answers at that address first"]
-            | Masc_restarts_there | Masc_starts_elsewhere ->
-                ["It got no session and left none in Firefox"])
-       | (Some _ | None), Session_left ->
-           (match restart with
-            | Operator_restarts ->
-                ["Session end not confirmed · restart that Firefox before attaching"]
-            | Masc_restarts_there | Masc_starts_elsewhere ->
-                "Session end not confirmed · that Firefox refuses hosts while it holds it"
-                :: masc_held_lines restart)
-       | (Some _ | None), Session_unknown ->
-           (match restart with
-            | Operator_restarts ->
-                ["Could not ask Firefox to end the session · restart it if it still runs"]
-            | Masc_restarts_there | Masc_starts_elsewhere ->
-                "Could not ask Firefox to end the session · it holds it if it still runs"
-                :: masc_maybe_held_lines restart)
-       | (Some _ | None), Session_refused ->
-           "Firefox refused this host a session · it held one then"
-           :: (match restart with
-               | Operator_restarts ->
-                   ["Stop a host still attached there · restart that Firefox if refused again"]
-               | Masc_restarts_there | Masc_starts_elsewhere -> masc_held_lines restart))
+        List.map host_line
+          (match entry.attached_at, ending.session with
+           | Some _, No_session_left -> ["That Firefox takes the next manual host if it still runs"]
+           | None, No_session_left ->
+               ["It got no session · check that Firefox answers at that address first"]
+           | (Some _ | None), Session_left ->
+               ["Session end not confirmed · the operator restarts it before manual attach"]
+           | (Some _ | None), Session_unknown ->
+               ["Could not end the session · the operator checks the external Firefox"]
+           | (Some _ | None), Session_refused ->
+               ["Firefox refused this manual host a session · it held one then";
+                "Stop a host still attached there · restart that Firefox if refused again"])
   (* The results the host holds no acknowledgement for: how many, and the
      last one. Without an acknowledgement the server may still have taken it,
      so the cause is said only when it settles that. *)
@@ -6016,33 +5964,11 @@ module Browser_lane_view = struct
         [host_line (Printf.sprintf "%d result%s unacknowledged · last: %s, %s%s"
            count (if count = 1 then "" else "s") verb outcome cause);
          host_line (Printf.sprintf "at %s · request %s" (host_time last.at) request)]
-  (* Where MASC starts the Keeper Firefox, what starts it takes the place of
-     the command the operator would run. A launcher that is not there yet
-     is still installed first. *)
-  let host_masc_lines ~port ~profile (standing : Masc.Browser_bidi_host_status.launcher_standing) =
-    (match standing with
-     | Launcher_installed -> []
-     | Launcher_not_installed -> [host_line "Install the browser lane in this workspace first"]
-     | Launcher_needs_reinstall ->
-         [host_line "Install the browser lane again first: its launcher is not as installed"])
-    @ [host_line "MASC starts the Keeper Firefox and its host, whichever is not running";
-       host_line
-         (Printf.sprintf "at the next server start, or a Keeper's next hover or drag · port %d" port);
-       { lead = "Profile: "; said = profile; breaks = At_slashes };
-       host_line (transport_setup_row [Browser_lane.Webdriver_bidi])]
-  (* MASC's last start, where it says something of this configuration. *)
-  let host_last_start_lines (note : Masc.Browser_bidi_host_status.last_start_note) =
-    match note with
-    | No_note -> []
-    | Start_record_unreadable detail ->
-        [host_line "MASC's last start: its record cannot be read"; host_said "Detail: " detail]
-    | Failed_start { at; not_attached } ->
-        let kind, why = match (not_attached : Masc.Browser_keeper_firefox_starter.not_attached) with
-          | Operator_needed why -> "waits for the operator", why
-          | Start_failed why -> "failed, the next tries again", why
-          | Not_listed_in_time why -> "no connection in time", why in
-        [host_line (Printf.sprintf "MASC's last start, %s: %s" (host_time at) kind);
-         host_said "Why: " why]
+  let host_addon_lines ~port ~profile =
+    [host_line (Printf.sprintf "Browser Addon manages its own Firefox · configured port %d" port);
+     { lead = "Profile: "; said = profile; breaks = At_slashes };
+     host_line "Check the Addon observation for readiness · this manual host record is independent";
+     host_line "Existing external Firefox is not adopted or restarted"]
   (* How a host is started. [address] is the one the last host was given,
      which is the one to give again while that Firefox runs; with none the
      launcher's own words stand, and say PORT for the port. A launcher that
@@ -6082,41 +6008,37 @@ module Browser_lane_view = struct
             ( Never_started | Record_missing_but_locked | Running _ | Ended _
             | Died _ | Unreadable _ )
         ; _ } -> []
-  (* Everything the picker says of the BiDi host: whether one runs, what
-     stands in the way of the next one, how one is started, and, where MASC
-     starts it, what MASC's last start left. A host that is running is not
-     told how to start one. *)
+  (* Manual host diagnostics and Addon configuration are shown separately. *)
   let bidi_host_lines t =
     match t.bidi_host with
     | Host_not_reported -> []
     | Host_report_unreadable { detail; message } ->
         (* The server's paragraph is longer than most screens have rows for,
            so where the host's state is said in full comes before it. *)
-        [host_line "BiDi host: this TUI cannot read the server's report";
+        [host_line "Manual BiDi host: this TUI cannot read the server's report";
          host_line "masc doctor reads the host's record and says where the host stands";
          host_said "Detail: " detail]
         @ (match message with None -> [] | Some message -> [host_said "Server: " message])
     | Host_reported report ->
         let attach ~address =
           match report.keeper with
-          | Masc_starts { port; profile; last_start = _ } ->
-              host_masc_lines ~port ~profile report.attach.standing
+          | Addon_managed _ -> []
           | Lane_off -> host_attach_lines ~address report.attach
           | Not_configured ->
               host_attach_lines ~address report.attach
-              @ [host_line "With [browser.live.bidi] in runtime.toml, MASC starts Firefox and host"]
+              @ [host_line "No Addon-managed live Firefox is configured in [browser.live.bidi]"]
           | Not_known -> host_attach_lines ~address report.attach in
         (match report.state with
          | Never_started ->
-             [host_line "BiDi host: none has run for this workspace"]
+             [host_line "Manual BiDi host: none has run for this workspace"]
              @ host_connection_note t @ attach ~address:None
          | Record_missing_but_locked ->
-             [host_line "BiDi host: one holds the workspace lock, but its record is missing";
+             [host_line "Manual BiDi host: one holds the workspace lock, but its record is missing";
               host_line "Do not start another host · inspect the existing process"]
          | Running entry ->
              (* The first row is the one a short screen keeps, so it says
                 where the host stands beside the list, not only that it runs. *)
-             let state name = host_line (Printf.sprintf "BiDi host: %s · pid %d" name entry.pid) in
+             let state name = host_line (Printf.sprintf "Manual BiDi host: %s · pid %d" name entry.pid) in
              let at = host_said "At: " entry.bidi_url in
              (match host_standing (listed_clients t) entry with
               | Host_serving -> [state "attached"; at]
@@ -6138,42 +6060,34 @@ module Browser_lane_view = struct
          | Ended (entry, ending) ->
              (* What to do comes before why: on a screen that holds two of
                 these rows, the step is the one that has to be there. *)
-             [host_line (Printf.sprintf "BiDi host: ended %s · pid %d" (host_time ending.at) entry.pid)]
-             @ host_session_lines (host_restart report.keeper entry) entry ending
+             [host_line (Printf.sprintf "Manual BiDi host: ended %s · pid %d" (host_time ending.at) entry.pid)]
+             @ host_session_lines entry ending
              @ host_connection_note t
              @ [host_said "Reason: " ending.reason]
              @ host_unacknowledged_lines entry
              @ attach ~address:(Some entry.bidi_url)
          | Died entry ->
-             [host_line (Printf.sprintf "BiDi host: pid %d is gone · no reason recorded" entry.pid)]
-             @ List.map host_line
-                 (match host_restart report.keeper entry with
-                  | Operator_restarts ->
-                      ["Its session may be left in Firefox · restart Firefox if a host is refused"]
-                  | (Masc_restarts_there | Masc_starts_elsewhere) as restart ->
-                      "Its session may be left in Firefox" :: masc_maybe_held_lines restart)
+             [host_line (Printf.sprintf "Manual BiDi host: pid %d is gone · no reason recorded" entry.pid)]
+             @ [host_line "Its session may be left in external Firefox · the operator checks it"]
              @ host_connection_note t
              @ host_unacknowledged_lines entry
              @ attach ~address:(Some entry.bidi_url)
          | Unreadable { detail; held = Some true } ->
              (* What to do comes before why, as for a host that ended. *)
-             [host_line "BiDi host: one runs, and its record cannot be read";
+             [host_line "Manual BiDi host: one runs, and its record cannot be read";
               host_line "Stop that host before starting another · it refuses a second one";
               host_said "Detail: " detail]
          | Unreadable { detail; held = Some false } ->
-             [host_line "BiDi host: none runs, and the last record cannot be read";
+             [host_line "Manual BiDi host: none runs, and the last record cannot be read";
               host_said "Detail: " detail]
              @ attach ~address:None
          | Unreadable { detail; held = None } ->
-             [host_line "BiDi host: could not check whether one runs";
+             [host_line "Manual BiDi host: could not check whether one runs";
               host_said "Detail: " detail])
-        @ host_last_start_lines
-            (Masc.Browser_bidi_host_status.last_start_note report.keeper report.state)
-        (* A lane that is off serves no host, whatever the host's state. *)
         @ (match report.keeper with
-           | Lane_off ->
-               [host_line "Live lane off in runtime.toml · it serves nothing, MASC starts nothing"]
-           | Masc_starts _ | Not_configured | Not_known -> [])
+           | Addon_managed { port; profile } -> host_addon_lines ~port ~profile
+           | Lane_off -> [host_line "Live lane off in runtime.toml · it serves nothing"]
+           | Not_configured | Not_known -> [])
   (* A path on rows of [max_cells], broken before a slash so each name
      stays whole. A single name longer than a row has nowhere better to
      break and is cut where the row ends, with every cell of it kept: a
@@ -6230,32 +6144,32 @@ module Browser_lane_view = struct
   let bidi_host_brief = function
     | Host_not_reported -> None
     | Host_report_unreadable _ ->
-        Some "BiDi host: this TUI cannot read the server's report · b:details"
+        Some "Manual BiDi host: this TUI cannot read the server's report · b:details"
     | Host_reported report ->
         Some (match report.state with
           | Never_started ->
               (match report.keeper with
-               | Masc_starts _ ->
-                   "BiDi host: none has run for this workspace · b:how MASC starts one"
+               | Addon_managed _ ->
+                   "Manual BiDi host: none has run · check Addon readiness · b:details"
                | Lane_off | Not_configured | Not_known ->
-                   "BiDi host: none has run for this workspace · b:how to attach")
+                   "Manual BiDi host: none has run for this workspace · b:how to attach")
           | Record_missing_but_locked ->
-              "BiDi host: lock held, record missing · b:inspect the existing process"
+              "Manual BiDi host: lock held, record missing · b:inspect the existing process"
           (* A gesture is refused for want of a listed BiDi connection, so a
              host that runs is one this server does not list. *)
           | Running { attached_at = Some _; pid; _ } ->
-              Printf.sprintf "BiDi host: pid %d attached, not listed by this server · b:details" pid
+              Printf.sprintf "Manual BiDi host: pid %d attached, not listed by this server · b:details" pid
           | Running { attached_at = None; pid; _ } ->
-              Printf.sprintf "BiDi host: pid %d is connecting · b:details" pid
+              Printf.sprintf "Manual BiDi host: pid %d is connecting · b:details" pid
           | Ended (_, ending) ->
-              Printf.sprintf "BiDi host: ended %s · b:why and what next" (host_time ending.at)
+              Printf.sprintf "Manual BiDi host: ended %s · b:why and what next" (host_time ending.at)
           | Died entry ->
-              Printf.sprintf "BiDi host: pid %d is gone, no reason recorded · b:what next" entry.pid
+              Printf.sprintf "Manual BiDi host: pid %d is gone, no reason recorded · b:what next" entry.pid
           | Unreadable { held = Some true; _ } ->
-              "BiDi host: one runs, and its record cannot be read · b:details"
+              "Manual BiDi host: one runs, and its record cannot be read · b:details"
           | Unreadable { held = Some false; _ } ->
-              "BiDi host: none runs, and the last record cannot be read · b:details"
-          | Unreadable { held = None; _ } -> "BiDi host: could not check whether one runs · b:details")
+              "Manual BiDi host: none runs, and the last record cannot be read · b:details"
+          | Unreadable { held = None; _ } -> "Manual BiDi host: could not check whether one runs · b:details")
   (* The rows a refused gesture draws: what was not sent and why, then the
      operator's next step. With a serving connection listed the step is the
      picker and fits the same row. With none listed, a gesture a BiDi

@@ -1808,10 +1808,6 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
       boot_stage "slack_poll.begin";
       Server_slack_poll_lane.start ~sw ~env ~state;
       boot_stage "slack_poll.end";
-      boot_stage "browser_keeper_firefox.begin";
-      Server_browser_keeper_firefox.start ~sw ~env ~base_path
-        ~configuration:Runtime.browser_configuration;
-      boot_stage "browser_keeper_firefox.end";
       (* In-process iMessage connector, replacing the deleted
          sidecars/imessage-bot/ Python connector. Off unless Messages.app's
          chat.db is readable — on Linux it never is, and the start function

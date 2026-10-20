@@ -47,6 +47,24 @@ let test_a_session_runs_the_expected_profile () =
       (Peer.runs_profile (session None) ~expected:profile = Error Peer.Profile_unsaid))
 
 let script_value json = obj ["type",`String "success";"result",obj ["type",`String "string";"value",`String (Yojson.Safe.to_string json)]]
+let test_owned_endpoint_identity_and_shutdown () =
+  List.iter (fun (reported,expected) ->
+    let closing=ref 0 in
+    let peer=Peer.create ~session_end:(fun () -> Ok ()) ~command:(fun method_ _ ->
+      match method_ with
+      | "session.new" -> Ok (obj ["capabilities",obj
+          (["browserName",`String "firefox";"browserVersion",`String "fixture"]
+          @ (match reported with None -> [] | Some value -> ["moz:processID",value]))])
+      | "browser.close" -> incr closing;Error (Peer.Unanswered "original socket closed")
+      | other -> failf "unexpected command %s" other) in
+    check (option int) "no process claimed before metadata" None (Peer.process_id peer);
+    (match metadata peer with Ok _ -> () | Error detail -> fail detail);
+    check (option int) "only a positive browser process identity can be verified" expected (Peer.process_id peer);
+    check bool "shutdown uncertainty is retained" true
+      (Peer.close_browser peer=Error (Peer.Unanswered "original socket closed"));
+    check int "an unanswered close is sent only once" 1 !closing)
+    [Some (`Int 42),Some 42;None,None;Some (`String "42"),None;Some (`Int 1),None]
+
 let test_context_identity () =
   let contexts=ref ["a";"b"] in
   let command method_ _ = match method_ with
@@ -974,6 +992,7 @@ let test_live_act_rejects_other_actions_before_effect () =
      obj ["action",`String "open_tab";"url",`String "javascript:alert(1)"]]
 
 let () = run "BiDi live peer" ["identity",[test_case "native keyboard release and uncertainty" `Quick test_native_keyboard_release_and_failure;
+    test_case "owned endpoint identity and uncertain shutdown" `Quick test_owned_endpoint_identity_and_shutdown;
       test_case "opaque contexts" `Quick test_context_identity;
     test_case "one unreadable tab leaves other tabs visible" `Quick test_unreadable_tab_does_not_hide_other_tabs;
     test_case "implicit read skips an unreadable tab" `Quick test_active_tab_after_unreadable_tab;

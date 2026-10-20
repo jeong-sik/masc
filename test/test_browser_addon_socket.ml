@@ -6,11 +6,11 @@ let check = Alcotest.check Alcotest.bool
 let rec remove path = match (Unix.lstat path).Unix.st_kind with
   | Unix.S_DIR -> Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);Unix.rmdir path
   | Unix.S_REG|Unix.S_LNK|Unix.S_CHR|Unix.S_BLK|Unix.S_FIFO|Unix.S_SOCK -> Unix.unlink path
-let with_claim work =
+let with_claim ?(automation=None) work =
   let directory=Filename.temp_file "browser-addon-slot-" "" in
   Unix.unlink directory;Unix.mkdir directory 0o700;
   let instance_id=Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
-  let context=ok (Socket.context ~instance_id) in
+  let context=ok (Socket.context ~instance_id ~automation) in
   let root=match context with `Assoc fields -> (match List.assoc_opt "directory" fields with
     | Some (`String root) -> root | _ -> Alcotest.fail "missing allocation directory")
     | _ -> Alcotest.fail "invalid allocation intent" in
@@ -52,8 +52,50 @@ let replaced_directory () = with_claim (fun admission directory root ->
   lease (Lease.retire admission);
   check "different directory identity is retained" true (Result.is_error (Socket.cleanup ~admission ~directory));
   check "replacement preserved" true (Sys.file_exists root))
+let owned_backend_cleanup () =
+  with_claim ~automation:(Some {Browser_configuration.driver="/usr/bin/geckodriver";binary=None})
+    (fun admission directory root ->
+      ignore (ok (Socket.acquire ~admission ~directory));
+      let profiles=Filename.concat root "profiles" and downloads=Filename.concat root "downloads" in
+      Unix.mkdir profiles 0o700;Unix.mkdir downloads 0o700;
+      Unix.mkdir (Filename.concat downloads "session") 0o700;
+      let file=Filename.concat profiles "still-in-use" in
+      Out_channel.with_open_bin file (fun out -> output_string out "preserve");
+      lease (Lease.retire admission);
+      check "missing worker receipt retains allocation" true (Result.is_error (Socket.cleanup ~admission ~directory));
+      let receipt=Filename.concat root "automation-closed.json" in
+      let write id=Out_channel.with_open_bin receipt (fun out ->
+        output_string out (Yojson.Safe.to_string (`Assoc ["incarnation",`String id]))) in
+      write "another-worker";
+      check "other worker receipt is refused" true (Result.is_error (Socket.cleanup ~admission ~directory));
+      write (Lease.instance_id admission);
+      check "receipt alone cannot discard profile contents" true (Result.is_error (Socket.cleanup ~admission ~directory));
+      check "unconfirmed profile content remains" true (Sys.file_exists file);
+      Unix.unlink file;
+      ok (Socket.cleanup ~admission ~directory);
+      check "receipt and empty trees release allocation" false (Sys.file_exists root))
+let interrupted_owned_cleanup () =
+  with_claim ~automation:(Some {Browser_configuration.driver="/usr/bin/geckodriver";binary=None})
+    (fun admission directory root ->
+      ignore (ok (Socket.acquire ~admission ~directory));
+      let receipt=Filename.concat root "automation-closed.json" in
+      Out_channel.with_open_bin receipt (fun out -> output_string out
+        (Yojson.Safe.to_string (`Assoc ["incarnation",`String (Lease.instance_id admission)])));
+      (* A known leaf cannot be removed: commit cleanup evidence, then fail
+         during deletion. Resume after some earlier leaves already disappeared. *)
+      let obstruction=Filename.concat root "webdriver.log" in
+      Unix.mkdir obstruction 0o700;
+      lease (Lease.retire admission);
+      check "interrupted deletion is reported" true (Result.is_error (Socket.cleanup ~admission ~directory));
+      List.iter (fun name -> let path=Filename.concat root name in
+        if Sys.file_exists path then Unix.unlink path) ["automation.json";"automation-closed.json"];
+      Unix.rmdir obstruction;
+      ok (Socket.cleanup ~admission ~directory);
+      check "durable cleanup evidence resumes after receipt deletion" false (Sys.file_exists root))
 let () = Alcotest.run "browser addon socket ownership" ["recovery",[
   Alcotest.test_case "original allocation recovery and historical release" `Quick cleanup_after_reopen;
   Alcotest.test_case "crash before acquisition record" `Quick interrupted_acquisition;
   Alcotest.test_case "unconfirmed socket is retained" `Quick unknown_resources;
-  Alcotest.test_case "replacement identity is retained" `Quick replaced_directory]]
+  Alcotest.test_case "replacement identity is retained" `Quick replaced_directory;
+  Alcotest.test_case "owned backend requires receipt and empty resource trees" `Quick owned_backend_cleanup;
+  Alcotest.test_case "owned cleanup resumes after interrupted file deletion" `Quick interrupted_owned_cleanup]]

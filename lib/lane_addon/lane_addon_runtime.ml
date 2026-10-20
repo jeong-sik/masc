@@ -1031,7 +1031,10 @@ let backend ~store () = match !override with
               | executable::arguments -> Ok {Lane_addon_native_worker.executable;arguments} in
             let* cleanup_context=match package.worker_service with
               | Mcp_tools -> Ok None
-              | Browser_service -> offload (fun () -> Browser_addon_socket.context ~instance_id)
+              | Browser_service -> offload (fun () -> Browser_addon_socket.context ~instance_id
+                    ~automation:(match Runtime.browser_configuration () with
+                      | Some configuration when configuration.automation_enabled -> configuration.automation
+                      | None|Some _ -> None))
                   |> Result.map Option.some |> Result.map_error (fun detail -> Lifecycle.Worker_failed detail) in
             let* admission = prepare_native ~store ~installation_id ~instance_id ~cleanup_context ~is_live_instance in
             let retire () = offload (fun () -> Native_addon_lease.retire admission) |> native_result in
@@ -1056,6 +1059,12 @@ let backend ~store () = match !override with
             let stop_worker worker=match !combined_release with
               | Some receipt -> Ok receipt
               | None ->
+                (* Orderly backend cleanup precedes the native worker's short
+                   abort grace. Unknown transport cannot authorize a replay. *)
+                (match !browser_client with
+                 | Some client when Lane_addon_native_worker.phase worker=Lane_addon_native_worker.Serving ->
+                     ignore (Browser_addon_client.call client ~on_cancel_after_dispatch:(fun () -> ()) Browser_addon_wire.Retire)
+                 | None|Some _ -> ());
                 Option.iter Browser_addon_client.revoke !browser_client;
                 let* _receipt=Lane_addon_native_worker.stop worker
                   |> Result.map_error (fun error -> Lifecycle.Cleanup_unconfirmed (Lane_addon_native_worker.error_to_string error)) in
@@ -1276,6 +1285,9 @@ let browser_services ~config ~access = Eio_context.run_on_owner_domain (fun () -
       | (Attached|Observing|Failed _|Detaching|Detached),(None|Some _) -> None))
 let call_browser_service ~config ~access ~(service:browser_service) ~command =
   with_tool_call_owner (fun () ->
+    let* ()=match command with
+      | Browser_addon_wire.Retire -> Error (Browser_addon_client.Unavailable "browser retirement belongs to its lifecycle owner")
+      | Snapshot|Poll _|Deliver _|Disconnect _|Issue _ -> Ok () in
     let root=Filename.concat (Workspace.masc_dir config) "lane-addons" in
     let* m=match Hashtbl.find_opt managers root with
       | Some m -> Ok m | None -> Error (Browser_addon_client.Unavailable "browser Add-on owner is unavailable") in
@@ -1287,7 +1299,7 @@ let call_browser_service ~config ~access ~(service:browser_service) ~command =
            | (Attached|Observing),Some client -> Ok (e,client)
            | Failed _,Some client when (match command with
                | Browser_addon_wire.Deliver _|Disconnect _ -> true
-               | Snapshot|Poll _|Issue _ -> false) -> Ok (e,client)
+               | Snapshot|Retire|Poll _|Issue _ -> false) -> Ok (e,client)
            | (Attached|Observing|Failed _|Detaching|Detached),(None|Some _) ->
                Error (Browser_addon_client.Unavailable "original browser Add-on is unavailable"))
       | None|Some _ -> Error (Browser_addon_client.Unavailable "original browser Add-on was retired") in
@@ -1303,7 +1315,7 @@ let call_browser_service ~config ~access ~(service:browser_service) ~command =
         (match persist m e with Ok () -> () | Error detail ->
           Log.Misc.error "Cancelled browser Add-on state persistence: %s" detail);
         stop_entry ~sw ~backend:(backend ~store:m.store ()) m e
-      | Snapshot|Poll _|Deliver _|Disconnect _ -> () in
+      | Snapshot|Retire|Poll _|Deliver _|Disconnect _ -> () in
     e.active_tool_calls<-e.active_tool_calls+1;
     Fun.protect ~finally:(fun () -> e.active_tool_calls<-e.active_tool_calls-1) (fun () ->
       let result=Browser_addon_client.call client ~on_cancel_after_dispatch command in
@@ -1313,7 +1325,7 @@ let call_browser_service ~config ~access ~(service:browser_service) ~command =
              | Browser_addon_wire.Poll_result {state_id;_} -> Browser_addon_client.notice_poll_state client ~state_id
              | Issue_result _ -> true
              | Receipt -> (match command with Browser_addon_wire.Disconnect _ -> true
-                 | Snapshot|Poll _|Deliver _|Issue _ -> false)
+                 | Snapshot|Retire|Poll _|Deliver _|Issue _ -> false)
              | Snapshot_result _|Service_refusal _ -> false in
            if changed && not e.stopping then wake e
        | Error (Browser_addon_client.Unavailable _) -> ()

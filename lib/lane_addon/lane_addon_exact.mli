@@ -63,8 +63,10 @@ type final =
   | Outcome_unknown
       (** A call may have been sent and no outcome was retained. *)
   | Not_allowed of { reason : string }
-      (** The manifest does not declare the output. Only a package change can
-          make the same request pass. *)
+      (** The effective package does not permit this output. A newly refused
+          request retains this final result, even after the selection changes.
+          A refusal to deliver an already retained answer leaves that original
+          answer intact; it can be delivered when the output is selected again. *)
   | Request_id_reused
 
 (** Why the add-on lane could not take a call. Nothing was sent. *)
@@ -131,6 +133,12 @@ val run :
 (** A retained [Answered] is checked against the schema the package declares
     now before it is delivered. One that no longer matches is delivered as
     [Invalid_output] and the provider is not called again.
+
+    Request identity is checked before output selection. A refused output
+    cannot reuse a retained id with another body. New refusals are retained;
+    refusing delivery of an existing final records the refusal without
+    replacing the original final. Cancellation is checked after the started
+    record is written and immediately before entering the provider call.
 
     [Error] when [declaration_id] cannot own an add-on lane, or when the
     record cannot be read or written. Nothing is delivered then. If the

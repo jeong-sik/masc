@@ -16,7 +16,8 @@ val with_claim : t -> id:string -> actor:string -> route:Browser_lane.route ->
     the worker's registered copies. Their pending scope is released on every
     exit; a WebDriver claim retains them until confirmed session teardown. *)
 val discard : t -> id:string -> unit
-(** Release only a pending grant; a consumed or browser-owned batch is untouched. *)
+(** Release only a pending grant; a consumed or browser-owned batch is untouched.
+    Retirement joins any pending release already in progress. *)
 val revoke : t -> unit
 (** Fence publication and claims without doing filesystem I/O. *)
 val cleanup : t -> (unit, string) result

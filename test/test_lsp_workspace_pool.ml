@@ -206,6 +206,8 @@ let real_server_cases =
    releases the matching analysis observation. *)
 let analysis_server = {py|
 import json, signal, sys
+from pathlib import Path
+from urllib.parse import unquote, urlsplit
 active = None
 last = None
 checks = []
@@ -272,7 +274,12 @@ while True:
         signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGUSR1})
     elif method == 'proof/analyzed':
         if active is not None: active['analyzed'] = True
-        if last is not None: diagnostics(last['uri'], last['version'])
+        # Real Pyright normalizes the URI it received before publishing. Also
+        # encode a path character differently so equality of wire strings
+        # cannot accidentally stand in for local document identity.
+        if last is not None:
+            uri = Path(unquote(urlsplit(last['uri']).path)).as_uri().replace('phrase', '%70hrase')
+            diagnostics(uri, last['version'])
     elif method == 'proof/crash': sys.exit(0)
     elif method == 'textDocument/references':
         references.append(dict(version=active['version'], params=params))
@@ -372,7 +379,9 @@ let test_analysis_process_exit () = with_analysis_server (fun sw pool root path 
   check bool "an exited server cannot publish a partial references success" true
     (match Eio.Promise.await query with
      | Ok (Error (Lsp_questions.Server (Lsp_workspace_pool.Server_failed _))) -> true
-     | Ok (Error _ | Ok _) | Error _ -> false))
+     | Ok (Error (Lsp_questions.Server (Lsp_workspace_pool.Server_unavailable _)
+                 | Unreadable_file _ | Unparsed_answer _) | Ok _)
+     | Error _ -> false))
 ;;
 
 let test_concurrent_reference_documents () = with_analysis_server (fun sw pool root first_path ->
@@ -420,7 +429,9 @@ let test_other_process_exit_preserves_request () = with_analysis_server (fun sw 
   control_notification pool peer "proof/crash";
   (match Eio.Promise.await other with
    | Ok (Error (Lsp_questions.Server (Lsp_workspace_pool.Server_failed _))) -> ()
-   | Ok (Error _ | Ok _) | Error _ -> fail "peer exit must fail its own analysis read");
+   | Ok (Error (Lsp_questions.Server (Lsp_workspace_pool.Server_unavailable _)
+               | Unreadable_file _ | Unparsed_answer _) | Ok _)
+   | Error _ -> fail "peer exit must fail its own analysis read");
   ignore (analysis_control pool root "proof/state");
   control_notification pool root "proof/releaseReferences";
   let locations=reference_answer original in
@@ -456,7 +467,7 @@ let test_blocked_writer_does_not_hold_other_process () = with_analysis_server (f
   check bool "queued writer sees an owned closed transport as a typed failure" true
     (match Eio.Promise.await queued with
      | Ok (Error (Lsp_workspace_pool.Server_failed _)) -> true
-     | Ok (Ok _ | Error _) | Error _ -> false);
+     | Ok (Ok _ | Error (Lsp_workspace_pool.Server_unavailable _)) | Error _ -> false);
   ignore (analysis_control pool root "proof/state"))
 ;;
 

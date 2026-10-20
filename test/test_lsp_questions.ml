@@ -138,10 +138,36 @@ let test_question_names_round_trip () =
     (Lsp_questions.question_of_string "rename" = None)
 ;;
 
+let test_document_uri_identity () =
+  let path = "/w/한글 # %.py" in
+  let uri = Lsp_uri.file_uri_of_path path in
+  check string "absolute file URI has an empty authority"
+    "file:///w/%ED%95%9C%EA%B8%80%20%23%20%25.py" uri;
+  check string "literal path survives encoding" path (Lsp_uri.path_of_file_uri uri);
+  List.iter (fun other ->
+    check bool "server spelling still identifies the opened document" true
+      (Lsp_uri.same_local_document uri other))
+    [ "file:/w/한글%20%23%20%25.py"
+    ; "FILE://LOCALHOST/w/%ed%95%9c%ea%b8%80%20%23%20%25.py" ];
+  List.iter (fun other ->
+    check bool "another identity cannot release document analysis" false
+      (Lsp_uri.same_local_document uri other))
+    [ "file:///w/한글%20%23%20%2525.py"
+    ; "file://remote/w/한글%20%23%20%25.py"
+    ; "file://user@localhost/w/한글%20%23%20%25.py"
+    ; "file://localhost:80/w/한글%20%23%20%25.py"
+    ; uri ^ "?revision=1"; uri ^ "#fragment"
+    ; "https:///w/한글%20%23%20%25.py"; "file:relative.py" ];
+  check bool "two non-file strings are not local document identities" false
+    (Lsp_uri.same_local_document "other" "other")
+;;
+
 let () =
   run
     "lsp_questions"
-    [ ( "locations"
+    [ ("document-uri", [test_case "server URI normalization preserves identity" `Quick
+        test_document_uri_identity])
+    ; ( "locations"
       , [ test_case "reads a list of Location" `Quick test_references_list
         ; test_case "reads a single Location" `Quick test_definition_single_location
         ; test_case "reads LocationLink" `Quick test_definition_location_link

@@ -14,6 +14,7 @@ exception Fleet_commit_uncertain of string
 exception Fleet_commit_pending of string
 exception Worker_detached
 exception Host_cycle_stopped
+exception Host_request_withdrawn
 exception Action_persistence_failed of string
 type tool_export = Lane_addon_tool_export.t = private
   { owner : Lane_addon_tool_export.owner; instance_id : string; tool : Mcp_protocol.Mcp_types.tool }
@@ -31,6 +32,7 @@ let notify_tool_change (package : package) =
 type host_port = {
   list_requests : unit -> (Yojson.Safe.t, string) result;
   deliver : arguments:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
+  await_change : (after:string option -> (Lane_addon_host_request.availability, string) result) option;
 }
 type connection = {
   observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t -> (output, string) result;
@@ -152,7 +154,8 @@ type entry = {
   mutable running : bool; mutable started : bool; mutable active_tool_calls : int; persistence_mutex : Eio.Mutex.t;
   mutable coalesced_wakes : int;
   mutable cancel_worker : (unit -> unit) option;
-  mutable cancel_exact : (unit -> unit) option;
+  mutable cancel_exact : (exn -> unit) option;
+  mutable exact_request_id : string option;
   mutable configuration : configuration_owner option;
   input_installations : string list;
   action_queue : Lane_addon_action.receipt Queue.t;
@@ -162,7 +165,7 @@ type entry = {
 }
 let retire_admission e =
   e.stopping <- true;
-  Option.iter (fun cancel -> cancel ()) e.cancel_exact
+  Option.iter (fun cancel -> cancel Worker_detached) e.cancel_exact
 
 type configuration_reading = {
   directory : string;
@@ -933,12 +936,25 @@ let run_host_cycle m e (port : host_port) =
           | Some owner, Some runner ->
              let result =
                try Eio.Cancel.sub (fun cancellation ->
-                 e.cancel_exact <- Some (fun () -> Eio.Cancel.cancel cancellation Worker_detached);
-                 Fun.protect ~finally:(fun () -> e.cancel_exact <- None) (fun () ->
+                 e.cancel_exact <- Some (Eio.Cancel.cancel cancellation);
+                 e.exact_request_id <- Some exact.Lane_addon_exact.request_id;
+                 Fun.protect ~finally:(fun () -> e.cancel_exact <- None;e.exact_request_id <- None) (fun () ->
                    check_live ();
+                   (* A queued listing can arrive after its withdrawal event.
+                      Publish the cancellation scope before a fresh read, so
+                      both that ordering and withdrawal during the read are
+                      covered without replay or a periodic poll. *)
+                   let* ()=match port.await_change with
+                    | None -> Ok ()
+                    | Some _ ->
+                        let* listing=port.list_requests () in
+                        let* requests=Lane_addon_host_request.listing_of_json listing in
+                        if not (List.exists (fun request ->
+                            Lane_addon_host_request.request_id request=exact.Lane_addon_exact.request_id) requests)
+                        then raise Host_cycle_stopped else Ok () in
                    Lane_addon_exact.run ~store:m.store ~declaration_id:owner.id ~package:e.package ~runner exact))
-               with Eio.Cancel.Cancelled Worker_detached ->
-                 (* Consume only retirement of this exact call. Worker/root
+               with Eio.Cancel.Cancelled (Worker_detached | Host_request_withdrawn) ->
+                 (* Consume only retirement/withdrawal of this exact call. Worker/root
                     cancellation must still propagate through this boundary. *)
                  Eio.Fiber.check ();
                  raise Host_cycle_stopped in
@@ -1069,6 +1085,34 @@ let run_host_cycle m e (port : host_port) =
   e.host_status <- { cycles = e.host_status.cycles + 1; waiting = List.rev !waiting;
     issue = (match outcome with Ok () -> None | Error issue -> Some issue) }
 
+let run_host_watch ~sw ~cleanup_sw ~backend m e port await_change =
+  fork_isolated ~sw (fun () ->
+    let rec watch after =
+      if e.stopping then () else
+      let changed =
+        let* state=await_change ~after in
+        let* ()=match e.exact_request_id with
+          | None -> Ok ()
+          | Some id when List.mem id state.Lane_addon_host_request.request_ids -> Ok ()
+          | Some id ->
+              (* The event may have been produced before the current dispatch.
+                 Re-read the concurrent port before withdrawing that exact call. *)
+              let* listing=port.list_requests () in
+              let* requests=Lane_addon_host_request.listing_of_json listing in
+              if e.exact_request_id=Some id && not (List.exists (fun request ->
+                  Lane_addon_host_request.request_id request=id) requests) then
+                Option.iter (fun cancel -> cancel Host_request_withdrawn) e.cancel_exact;
+              Ok () in
+        Ok state in
+      match changed with
+      | Ok state -> if not e.stopping then (wake_host e;watch (Some state.revision))
+      | Error detail -> if not e.stopping then (
+          retire_admission e;
+          failed m e (Lifecycle.Worker_failed ("model request watcher: " ^ detail));
+          wake e;
+          stop_entry ~sw:cleanup_sw ~backend m e) in
+    watch None)
+
 let observing e =
   let recovering = match e.state with Lifecycle.Failed _ -> true
     | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching _ | Lifecycle.Detached _ -> false in
@@ -1113,6 +1157,8 @@ let run ~sw backend m e =
         | Ok c ->
             e.connection <- Some {export_owner;worker=c}; e.started <- true;
             notify_tool_change e.package;
+            Option.iter (fun port -> Option.iter
+              (run_host_watch ~sw:worker_sw ~cleanup_sw:sw ~backend m e port) port.await_change) c.host;
             (match c.host, e.configuration with
              | Some _, Some owner ->
                  (* A publication that changes one of this installation's add-on
@@ -1310,6 +1356,9 @@ let backend ~store () = match !override with
             let* cleanup_context=match package.worker_service with
               | Mcp_tools -> Ok None
               | Browser_service -> offload (fun () -> Browser_addon_socket.context ~instance_id
+                    ~models:(if not (uses_host_requests package) then None else Some {
+                      Browser_addon_models.store_root=Filename.concat (Lane_addon_store.root store) "worker-model-results";
+                      outputs=package.exact_outputs})
                     ~automation:(match Runtime.browser_configuration () with
                       | Some configuration when configuration.automation_enabled -> configuration.automation
                       | None|Some _ -> None))
@@ -1364,7 +1413,7 @@ let backend ~store () = match !override with
                 | Some client ->
                     (match Browser_addon_client.call client ~on_cancel_after_dispatch:(fun () -> ()) Browser_addon_wire.Snapshot with
                      | Ok (Browser_addon_wire.Snapshot_result snapshot) -> Ok (Some snapshot)
-                     | Ok (Poll_result _|Receipt|Issue_result _|Service_refusal _) -> Error "browser service readiness was refused"
+                     | Ok (Model_reply _|Poll_result _|Receipt|Issue_result _|Service_refusal _) -> Error "browser service readiness was refused"
                      | Error (Browser_addon_client.Unavailable detail|Outcome_unknown detail) -> Error detail) in
               let* ()=if ready then browser_snapshot () |> Result.map (fun _ -> ()) else Ok () in
               let* resource = Option.to_result ~none:"native child identity is unavailable"
@@ -1372,6 +1421,26 @@ let backend ~store () = match !override with
               Ok {
                 resource;browser;
                 resolved_image=None;
+                host=(if not (uses_host_requests package) then None else match browser with
+                  | None -> Some {
+                      await_change=None;
+                      list_requests=(fun () -> Lane_addon_native_worker.host_requests worker
+                        |> Result.map_error Lane_addon_native_worker.error_to_string);
+                      deliver=(fun ~arguments -> Lane_addon_native_worker.host_result worker ~arguments
+                        |> Result.map_error Lane_addon_native_worker.error_to_string)}
+                  | Some client ->
+                      let call command=
+                        let* reply=Browser_addon_client.call client ~on_cancel_after_dispatch:(fun () -> ()) command
+                          |> Result.map_error (function Browser_addon_client.Unavailable detail|Outcome_unknown detail -> detail) in
+                        match reply with
+                        | Browser_addon_wire.Model_reply value -> Ok value
+                        | Service_refusal {message;_} -> Error message
+                        | Snapshot_result _|Poll_result _|Receipt|Issue_result _ -> Error "unexpected model broker receipt" in
+                      Some {list_requests=(fun () -> call Browser_addon_wire.Model_requests);
+                        deliver=(fun ~arguments -> call (Browser_addon_wire.Model_result arguments));
+                        await_change=Some (fun ~after ->
+                          let* value=call (Browser_addon_wire.Model_wait {after}) in
+                          Lane_addon_host_request.availability_of_json value)});
                 exported_tools=(fun () -> Lane_addon_native_worker.exported_tools worker);
                 action_schema=(fun () -> Lane_addon_native_worker.action_schema worker);
                 call_exported_tool=(fun ~on_result ~authorize ~principal ~name ~arguments ->
@@ -1389,9 +1458,6 @@ let backend ~store () = match !override with
                   | Some snapshot -> Browser_addon_observation.of_snapshot ~observed_at:(Time_compat.now ()) snapshot
                   | None -> Lane_addon_native_worker.observe worker ~binding ~sources
                       |> Result.map_error Lane_addon_native_worker.error_to_string);
-                host=(if not (uses_host_requests package) then None else Some {
-                  list_requests=(fun () -> Lane_addon_native_worker.host_requests worker |> Result.map_error Lane_addon_native_worker.error_to_string);
-                  deliver=(fun ~arguments -> Lane_addon_native_worker.host_result worker ~arguments |> Result.map_error Lane_addon_native_worker.error_to_string) });
                 stop=(fun () -> stop_worker worker);
               } in
                match Lane_addon_native_worker.start ~sw ~clock ~admission ~launcher ~contract ~command
@@ -1428,6 +1494,10 @@ let backend ~store () = match !override with
             resource=Lifecycle.Container_resource (Lane_addon_worker.container_id worker);
              resolved_image=Some (Lane_addon_worker.image_identity worker);
             browser=None;
+            host=(if not (uses_host_requests package) then None else Some {
+              await_change=None;
+              list_requests=(fun () -> Lane_addon_worker.host_requests worker |> Result.map_error Lane_addon_worker.error_to_string);
+              deliver=(fun ~arguments -> Lane_addon_worker.host_result worker ~arguments |> Result.map_error Lane_addon_worker.error_to_string)});
             exported_tools=(fun () -> Lane_addon_worker.exported_tools worker);
             call_exported_tool=(fun ~on_result ~authorize ~principal ~name ~arguments ->
               Lane_addon_worker.call_exported_tool ~on_result ?authorize ~principal worker ~name ~arguments
@@ -1438,9 +1508,6 @@ let backend ~store () = match !override with
             action_schema=(fun () -> Lane_addon_worker.action_schema worker);
             act=(fun ~arguments -> Lane_addon_worker.act worker ~arguments |> Result.map_error Lane_addon_worker.error_to_string);
             observe=(fun ~binding ~sources -> Lane_addon_worker.observe worker ~binding ~sources |> Result.map_error Lane_addon_worker.error_to_string);
-            host=(if not (uses_host_requests package) then None else Some {
-              list_requests=(fun () -> Lane_addon_worker.host_requests worker |> Result.map_error Lane_addon_worker.error_to_string);
-              deliver=(fun ~arguments -> Lane_addon_worker.host_result worker ~arguments |> Result.map_error Lane_addon_worker.error_to_string) });
             stop=(fun () ->
               let* () = Lane_addon_worker.stop worker |> Result.map_error Lane_addon_worker.cleanup_failure in
               match !recorded with
@@ -1573,7 +1640,8 @@ let browser_services ~config ~access = Eio_context.run_on_owner_domain (fun () -
 let call_browser_service ~config ~access ~(service:browser_service) ~command =
   with_tool_call_owner (fun () ->
     let* ()=match command with
-      | Browser_addon_wire.Retire -> Error (Browser_addon_client.Unavailable "browser retirement belongs to its lifecycle owner")
+      | Browser_addon_wire.Retire | Model_requests | Model_result _ | Model_wait _ ->
+          Error (Browser_addon_client.Unavailable "browser lifecycle and model ports belong to their host owner")
       | Snapshot|Poll _|Deliver _|Disconnect _|Issue _ -> Ok () in
     let root=Filename.concat (Workspace.masc_dir config) "lane-addons" in
     let* m=match Hashtbl.find_opt managers root with
@@ -1586,7 +1654,7 @@ let call_browser_service ~config ~access ~(service:browser_service) ~command =
            | (Attached|Observing),Some client -> Ok (e,client)
            | Failed _,Some client when (match command with
                | Browser_addon_wire.Deliver _|Disconnect _ -> true
-               | Snapshot|Retire|Poll _|Issue _ -> false) -> Ok (e,client)
+               | Snapshot|Retire|Model_requests|Model_result _|Model_wait _|Poll _|Issue _ -> false) -> Ok (e,client)
            | (Attached|Observing|Failed _|Detaching|Detached),(None|Some _) ->
                Error (Browser_addon_client.Unavailable "original browser Add-on is unavailable"))
       | None|Some _ -> Error (Browser_addon_client.Unavailable "original browser Add-on was retired") in
@@ -1602,7 +1670,7 @@ let call_browser_service ~config ~access ~(service:browser_service) ~command =
         (match persist m e with Ok () -> () | Error detail ->
           Log.Misc.error "Cancelled browser Add-on state persistence: %s" detail);
         stop_entry ~sw ~backend:(backend ~store:m.store ()) m e
-      | Snapshot|Retire|Poll _|Deliver _|Disconnect _ -> () in
+      | Snapshot|Retire|Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Disconnect _ -> () in
     e.active_tool_calls<-e.active_tool_calls+1;
     Fun.protect ~finally:(fun () -> e.active_tool_calls<-e.active_tool_calls-1) (fun () ->
       let result=Browser_addon_client.call client ~on_cancel_after_dispatch command in
@@ -1612,8 +1680,8 @@ let call_browser_service ~config ~access ~(service:browser_service) ~command =
              | Browser_addon_wire.Poll_result {state_id;_} -> Browser_addon_client.notice_poll_state client ~state_id
              | Issue_result _ -> true
              | Receipt -> (match command with Browser_addon_wire.Disconnect _ -> true
-                 | Snapshot|Retire|Poll _|Deliver _|Issue _ -> false)
-             | Snapshot_result _|Service_refusal _ -> false in
+                 | Snapshot|Retire|Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Issue _ -> false)
+             | Snapshot_result _|Model_reply _|Service_refusal _ -> false in
            if changed && not e.stopping then wake e
        | Error (Browser_addon_client.Unavailable _) -> ()
        | Error (Browser_addon_client.Outcome_unknown detail) ->
@@ -2307,7 +2375,7 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
     running = true; started = false; active_tool_calls = 0; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
     action_queue = Queue.create (); current_action = None;
     host_due = false; host_status = { cycles = 0; waiting = []; issue = None };
-    cancel_worker = None; cancel_exact = None; configuration; input_installations } in
+    cancel_worker = None; cancel_exact = None; exact_request_id = None; configuration; input_installations } in
   let* () = validate_live_connections m e in
   (* Construction only validates the registered host boundary. Discard this
      root-switch closure: backend.start constructs the actual callback with
@@ -3529,6 +3597,7 @@ module For_testing = struct
   type nonrec host_port = host_port = {
     list_requests : unit -> (Yojson.Safe.t, string) result;
     deliver : arguments:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
+    await_change : (after:string option -> (Lane_addon_host_request.availability, string) result) option;
   }
   type nonrec connection = connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t -> (output, string) result;

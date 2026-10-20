@@ -137,7 +137,7 @@ let final_to_json = function
 
 (* The retained record reads back only what this module wrote; anything else is
    an unreadable record, not a guess. *)
-let final_of_json json =
+let retained_final_of_json json =
   let field key = match json with `Assoc fields -> List.assoc_opt key fields | _ -> None in
   let text key = match field key with Some (`String value) -> Ok value | _ -> Error ("final " ^ key) in
   let* status = text "status" in
@@ -162,6 +162,17 @@ let final_of_json json =
   | "not_allowed" -> let* reason = text "reason" in Ok (Not_allowed { reason })
   | "request_id_reused" -> Ok Request_id_reused
   | other -> Error ("final status " ^ other)
+
+let final_of_json ~schema json =
+  let* normalized = Lane_addon_action.canonical json in
+  let* final = retained_final_of_json normalized in
+  let* encoded = Lane_addon_action.canonical (final_to_json final) in
+  let* () = if encoded = normalized then Ok () else Error "invalid or unknown final result fields" in
+  match final with
+  | Call_final (Answered {output;slot;usage}) ->
+      let* output = Lane_addon_action.validate_input ~schema ~name:"model result" output in
+      Ok (Call_final (Answered {output;slot;usage}))
+  | Call_final (Invalid_output _ | Input_refused _) | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok final
 
 let not_final_to_json = function
   | Lane_unavailable Lane_unconfigured -> `Assoc [ "reason", `String "lane_unconfigured" ]
@@ -240,7 +251,7 @@ let record_of_json = function
     let* final =
       match List.assoc_opt "final" fields with
       | Some `Null -> Ok None
-      | Some final -> final_of_json final |> Result.map Option.some
+      | Some final -> retained_final_of_json final |> Result.map Option.some
       | None -> Error "record final"
     in
     Ok { digest; request; attempts; final }

@@ -48,13 +48,20 @@ let results () =
     (ok (W.reply_of_json (W.reply_to_json reply))=reply))
     [W.Poll_result {command=None;state_id="snapshot-1"};
      W.Poll_result {command=Some {B.id="command";verb_json=B.verb_json B.Tabs_list};state_id="snapshot-2"};
-     W.Receipt;W.Snapshot_result (`Assoc []);W.Issue_result (Ok (B.Answered payload));
+     W.Receipt;W.Snapshot_result (`Assoc []);W.Model_reply (`Assoc ["requests",`List []]);W.Issue_result (Ok (B.Answered payload));
      W.Service_refusal {message="retired";disposition=W.Outcome_unknown}]
 let retirement () =
   let request={W.incarnation;command=W.Retire} in
   check bool "private retirement retains incarnation" true (W.of_json (W.to_json request)=Ok request)
+let model_ports () =
+  List.iter (fun command -> let request={W.incarnation;command} in
+    check bool "private model port retains exact incarnation and payload" true
+      (W.of_json (W.to_json request)=Ok request))
+    [W.Model_requests;W.Model_result (`Assoc ["request_id",`String "one";"result",`Assoc []]);
+     W.Model_wait {after=None};W.Model_wait {after=Some "revision"}]
 let () = run "browser addon wire" ["boundary",[
   test_case "closed verbs roundtrip" `Quick roundtrips;
   test_case "guards and competing identities" `Quick rejections;
   test_case "partial effects and receipts" `Quick results;
-  test_case "private retirement retains incarnation" `Quick retirement]]
+  test_case "private retirement retains incarnation" `Quick retirement;
+  test_case "private model ports preserve incarnation" `Quick model_ports]]

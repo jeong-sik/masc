@@ -567,7 +567,7 @@ let parse_initialize_result json =
 ;;
 
 let corpus_schema_fingerprint =
-  "sha256:c8d1a2a1866814e220fd396d382a9a75861412feee884b5021b2ee359bd3dc59"
+  "sha256:f282ad16e21520d0cda68cb190149b86e2b062eef1dd282749360c05aa3d1082"
 ;;
 
 type session =

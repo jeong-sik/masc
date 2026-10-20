@@ -1,7 +1,7 @@
 open Alcotest
 
 (* The fixtures are MSP golden transcripts copied verbatim from
-   github.com/meta-models/muse-code-sdk schema/msp/transcripts at a7c10c5
+   github.com/meta-models/muse-code-sdk schema/msp/transcripts at 22a8a56
    (MIT; see fixtures/muse_msp/README.md). Each line is
    {"dir":"client"|"server","raw":"<one wire frame>"}. *)
 
@@ -180,11 +180,6 @@ let test_capability_handshake () =
     "granted"
     true
     (init.granted_capabilities = [ Msp.Session_list_stream ]);
-  check
-    string
-    "corpus fingerprint"
-    Msp.corpus_schema_fingerprint
-    init.schema_fingerprint;
   let other_version =
     Yojson.Safe.from_string
       {|{"serverInfo":{"name":"m","version":"9"},"userAgent":"m","museHome":"/h","sessionDurability":"durable","schema":{"version":2,"fingerprint":"sha256:x"},"grantedCapabilities":[]}|}
@@ -210,6 +205,32 @@ let test_capability_handshake () =
         | `Assoc params -> List.assoc "capabilities" params
         | _ -> fail "params is not an object")
      | _ -> fail "frame is not an object")
+;;
+
+(* A host reports its stable bundle's fingerprint, which the corpus commit
+   publishes in stable/manifest.json; the transcripts' own initialize frames
+   carry a hand-authored placeholder. The handshake compares the host's value
+   with the codec's, so the codec's must be the manifest's. *)
+let test_codec_fingerprint_is_the_corpus_stable_bundle () =
+  let manifest =
+    In_channel.with_open_bin "fixtures/muse_msp/stable-manifest.json" In_channel.input_all
+    |> Yojson.Safe.from_string
+  in
+  let open Yojson.Safe.Util in
+  check int "manifest schema version" 1 (manifest |> member "schemaVersion" |> to_int);
+  check bool "stable surface" false (manifest |> member "experimental" |> to_bool);
+  check
+    string
+    "codec fingerprint"
+    (manifest |> member "fingerprint" |> to_string)
+    Msp.corpus_schema_fingerprint;
+  let result = response_result (Msp.Int_id 1) (server_frames "handshake-liststream-granted") in
+  let init = ok_or_fail (Msp.parse_initialize_result result) in
+  check
+    string
+    "host fingerprint kept verbatim"
+    (result |> member "schema" |> member "fingerprint" |> to_string)
+    init.schema_fingerprint
 ;;
 
 let test_approval_round_trip () =
@@ -559,6 +580,8 @@ let () =
       , [ test_case "text run single turn" `Quick test_text_run_single_turn
         ; test_case "client frames match corpus" `Quick test_client_frames_match_corpus
         ; test_case "capability handshake" `Quick test_capability_handshake
+        ; test_case "codec fingerprint is the corpus stable bundle" `Quick
+            test_codec_fingerprint_is_the_corpus_stable_bundle
         ; test_case "host session durability follows v1 wire contract" `Quick
             test_session_durability_follows_v1_wire_contract
         ; test_case "approval round trip" `Quick test_approval_round_trip

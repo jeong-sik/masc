@@ -8,7 +8,7 @@
 
     The source of truth is the stable MSP schema that
     github.com/meta-models/muse-code-sdk publishes ([schema/msp/msp.d.ts] at
-    a7c10c5, host 1.3.0). Every enum the schema marks open ([TurnTerminal],
+    22a8a56, host 1.4.11). Every enum the schema marks open ([TurnTerminal],
     [TurnErrorKind], [ItemKind], [ItemStatus], [ApprovalDecision], and the
     approval subject kind) decodes to a closed variant. The variant has one
     [Unrecognized_*] arm that keeps the wire value, so a later host's value
@@ -276,10 +276,14 @@ val parse_initialize_result : Yojson.Safe.t -> (initialize_result, error) result
     named at the handshake rather than by a missing field mid-turn. *)
 
 val corpus_schema_fingerprint : string
-(** The stable-surface fingerprint of the conformance corpus this codec is
-    tested against (muse-code-sdk a7c10c5). A host that reports another one
-    still speaks v1, but its frames were not the ones proven here; the
-    process client reports the difference rather than refusing it. *)
+(** The stable schema bundle fingerprint published with the conformance
+    corpus this codec is tested against (muse-code-sdk 22a8a56,
+    [schema/msp/stable/manifest.json]). A host reports its own bundle's
+    fingerprint in [initialize]; the corpus transcripts carry a hand-authored
+    placeholder instead, so this value comes from the manifest. A host that
+    reports another one still speaks v1, but its frames were not the ones
+    proven here; the process client reports the difference rather than
+    refusing it. *)
 
 type session =
   { session_id : string

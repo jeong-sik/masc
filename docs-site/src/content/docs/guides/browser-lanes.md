@@ -1,27 +1,94 @@
 ---
 title: Browser Lane Guide
-description: Connect Firefox or Zen or the Stagehand Chromium, read and interact with pages, and use the Browser Lane TUI.
+description: Connect Firefox or Zen or the Stagehand Chromium as an Addon, select validation and model hooks, and use the Browser Lane TUI.
 ---
 
-MASC has three browser sources:
+The browser Lane Addon owns the worker and its configured browser backends.
+Install it once, then select the input/output validation hooks and model
+consumers for that installation independently. Browser names and connection
+transports describe capabilities; they are not separate installation systems.
 
-- **live** connects the operator's Firefox or Zen through the browser extension
-  and OCaml native-messaging host. It uses that browser's existing tabs and login
-  session. It supports text, element lists, viewport screenshots, and explicit-tab
-  click, fill, and scroll. These interactions can change the page or trigger its
-  handlers, including navigation.
-- **automation** uses MASC's OCaml WebDriver client and geckodriver to manage a
-  separate Gecko browser session. It starts with an isolated profile, without the
-  operator's logins. Session open/close and direct URL navigation belong here.
-  The server owns this session; coordinate its use before closing a session
-  another task is using.
-- **stagehand** is a Chromium the server starts with the
-  [Stagehand](https://github.com/browserbase/stagehand) v4 extension loaded and
-  reaches over the Chrome DevTools Protocol. A Keeper tells it in one sentence
-  what to act on, observe or extract, and the Stagehand runtime chooses the
-  elements. The model it asks is answered by MASC, through an exact-output
-  lane. Like automation, the server owns the session and the browser starts
-  with an empty profile unless one is configured.
+- **live** connects an existing Firefox or Zen through its WebExtension, or
+  starts a dedicated Firefox through the Addon-owned BiDi backend. Existing
+  extension tabs keep their logins; managed Firefox uses its dedicated profile.
+  Native hover and drag require a compatible connection such as BiDi.
+- **automation** uses the worker's OCaml WebDriver client and geckodriver for an
+  isolated Gecko session. The Addon owns the driver, browser, and private profile.
+- **stagehand** uses an Addon-owned Chromium and the Stagehand extension over
+  CDP. It supports native interactions and optional sentence/model operations.
+  A configured persistent profile keeps logins; otherwise a private profile is
+  created for the owned session.
+
+For an unbound request, automatic selection considers the available browsers
+and required actions. Keep the returned browser identity for tab/document work;
+a bound tab or explicit connection does not fall back to a different browser.
+Check the reported capability inventory rather than assuming every transport
+supports every action. Safari is not a backend in this package.
+
+## Install the browser Addon
+
+Prepare the installed `masc-browser-addon-worker`, `masc-native-addon-launcher`,
+and `masc-browser-process-owner` executables on the server's PATH. Use the
+bundled package manifest at its actual location. In the active config root's
+`lane-addons/browser-work.toml`, save:
+
+```toml
+id = "browser-work"
+run_id = "browser-work"
+manifest_path = "/absolute/path/to/masc/addons/browser/lane.toml"
+tool_hooks = ["validate_input", "validate_output"]
+exact_outputs = ["locate", "stagehand"]
+
+[binding]
+sources = []
+```
+
+The default directory is `<base-path>/.masc/config/lane-addons/`; an existing
+`MASC_CONFIG_DIR` override selects another config root. Dashboard **TOML
+configuration** shows the actual directory; **New TOML / Edit TOML** edits the
+same declarations. `manifest_path` is absolute or relative to the declaration
+file, not the shell's working directory. Installation ID, worker incarnation,
+and browser `clientId` are separate identities.
+
+| Independent option | Meaning |
+| --- | --- |
+| `tool_hooks = ["validate_input"]` | Validate tool input before dispatch |
+| `tool_hooks = ["validate_output"]` | Validate the final successful structured reply after artifact mediation |
+| `tool_hooks = ["validate_input", "validate_output"]` | Enable both tool checks |
+| `tool_hooks = []` | Disable the optional tool checks |
+| `exact_outputs = ["locate"]` | Select the Gecko scene-node model consumer |
+| `exact_outputs = ["stagehand"]` | Select the Chromium structured model consumer |
+| `exact_outputs = ["locate", "stagehand"]` | Select both model consumers |
+| `exact_outputs = []` | Disable both model consumers |
+
+Omitting either array uses that package default. These are named middleware
+and declared model outputs; arbitrary executable hooks are not loaded. With
+both arrays empty, caller authorization, worker incarnation, wire decoding,
+document/viewport binding, artifact ownership, and cleanup checks still apply.
+Non-model actions remain available where the backend supports them.
+
+Selecting an output does not configure a model provider. Configure existing
+model slots separately in `runtime.toml` under
+`runtime.addon_exact_lanes.browser-work.locate` and/or
+`runtime.addon_exact_lanes.browser-work.stagehand`. Model availability and
+consumer inventory are separate observations. A missing or unavailable route
+uses the shared Exact Output waiting/cancellation policy; it does not authorize
+a different browser or input replay.
+
+Backend settings below are loaded from the resolved `runtime.toml` at server
+startup and captured when an installation attaches. Restart after changing
+those settings, and detach/reattach an existing installation to capture them.
+Installation declaration edits are reconciled at startup and on the existing
+maintenance pulse. Saving TOML is not an attachment receipt: inspect
+`desired_revision`, `applied_revision`, `phase`, and configuration issues.
+Dashboard Refresh reads that state rather than forcing reconciliation.
+
+To stop this installation, set its top-level `enabled = false` and verify
+detachment and cleanup. Removing its declaration takes effect after a complete
+config scan. The worker fences input before joining its original owned
+resources; unconfirmed cleanup remains a failure. A replacement has a fresh
+incarnation and connection IDs. External extension/manual browsers retain
+operator ownership. Persistent profile contents are preserved.
 
 ## Setup: live
 
@@ -40,24 +107,20 @@ file again and moves to the port it names only when the current server no
 longer answers and the new port does, so a server restarted on another port is
 found without reinstalling.
 
-To connect without the extension, let the MASC server start a Firefox of its own
-and attach the host to it:
+For a dedicated Firefox without the extension, configure the Addon-owned BiDi backend:
 
 ```bash
 masc browser-lane-setup --mode bidi --base-path /path/to/workspace
 ```
 
-This installs the host and writes `[browser.live.bidi]` into the workspace's
-`runtime.toml`. `--firefox`, `--profile` and `--port` update the key they name;
-keys you do not pass keep their existing values. Restart the MASC server so it reads the
-table, then log in once in that Firefox: its profile keeps the login. The port
-has no authentication, so any program on the computer can drive that Firefox.
-Give `--mode` twice for both routes. `--mode host` installs only the host and
-its launcher, for a browser you attach yourself or to bring an installed lane's
-host up to the running build; it writes no extension, manifest or `runtime.toml`.
+This prepares `[browser.live.bidi]` and the dedicated profile. Explicit
+`--firefox`, `--profile`, and `--port` replace their keys; omitted keys retain
+their values. Follow the [Firefox BiDi guide](../browser-bidi/) to attach and
+verify the managed connection. `--mode host` installs the standalone host and
+launcher for an external connection; it does not attach an Addon or start a browser.
 
-The `--mode extension` command supports macOS and Linux and registers a Mozilla native-messaging
-manifest. `--manifest-dir` selects a different manifest directory when needed.
+The `--mode extension` command supports macOS and Linux and registers a
+Mozilla native-messaging manifest. `--manifest-dir` selects a different manifest directory when needed.
 It also writes the extension to `<base-path>/.masc/browser-lane/extension/`. In
 Firefox or Zen, open `about:debugging` → **Load Temporary Add-on** and select
 `manifest.json` there. Temporary loading ends when that browser exits.
@@ -70,21 +133,21 @@ UUID, so discover and select it again.
 
 ## Setup: automation
 
-To inspect or install the host browser binaries first, run `masc prerequisite-actions firefox` and `masc prerequisite-actions geckodriver`. Then `masc browser-lane-setup --mode automation` writes the `[browser]` configuration for you. It names the
+To inspect or install the host browser binaries first, run `masc prerequisite-actions firefox` and `masc prerequisite-actions geckodriver`. Then `masc browser-lane-setup --mode automation` writes the `[browser.automation]` configuration for you. It names the
 `geckodriver` that `PATH` finds first, when it answers `--version` (`--geckodriver` names
 another; `--browser` writes `binary`), keeps values that are already there, and
 installs no host or extension. Or set the geckodriver executable in the resolved
 configuration directory's `runtime.toml` yourself, then restart MASC:
 
 ```toml
-[browser]
+[browser.automation]
 geckodriver = "/absolute/path/to/geckodriver"
 # Optional: select an installed Firefox or Zen executable.
 # binary = "/path/to/Zen.app/Contents/MacOS/zen"
 ```
 
-MASC starts that geckodriver on a free loopback port and stops it when the
-server stops, so there is no driver to run and no port to choose.
+The attached worker starts geckodriver on a free loopback port and joins its
+owned resources on detach, so there is no driver to run or port to choose.
 `geckodriver` must be an absolute path. `binary` must be an absolute path and
 requires `geckodriver`. When omitted, geckodriver discovers the browser; set it
 explicitly to select Firefox or Zen. Changing it does not select a live
@@ -111,40 +174,22 @@ extension = "/absolute/path/printed/by/the/installer"
 # profile = "/absolute/path/to/profile"
 ```
 
-All three are absolute paths. MASC loads the extension over the debugging
-connection (`Extensions.loadUnpacked`), which was verified with Chrome Canary
-156 and Chrome for Testing 154; branded Chrome refuses `--load-extension` from version 137, and whether a
-given build accepts the CDP load depends on the build. The debugging port
-listens on loopback. The origin flag permits the extension's WebSocket Origin;
-it does not exclude local clients that omit that header. Protect the host and
-any configured login profile accordingly.
+All configured paths are absolute. The worker loads the extension over CDP
+with `Extensions.loadUnpacked`; the chosen Chromium build must support that
+method. The debugging port listens on loopback. With `profile`, use an existing
+owner-only directory owned by the MASC account; its contents are preserved.
+Without it, the worker creates a private session profile.
 
-Without `profile`, each session starts from a server-owned profile that is emptied
-first; a configured profile is kept. Either way the directory is owner-only.
+`BrowserSession lane="stagehand" action="open"` opens or reuses that worker's
+session. Native input does not require a model. `BrowserInstruct` uses the
+independently selected `stagehand` consumer and installation-specific Exact
+Output route described above. A disabled consumer is refused; a selected one
+still needs a configured, available model route.
 
-The Stagehand runtime asks for a model through `llm.generate`. MASC answers it
-with the `browser_stagehand_exact` exact-output lane in `runtime.toml`: its
-slots are walked in order and a slot whose model takes no system prompt is
-skipped. Declared `cli_slots` (official subscription clients) run as
-one-shots after every HTTP slot failed, or alone when no HTTP slot takes a
-system prompt; a conversation with an assistant turn is not sent to them. The
-answer is checked to be one JSON value; the extension checks its shape against
-its own schema.
-
-The browser starts when `BrowserSession` opens with `lane="stagehand"` and
-stops on close, when the session fails, or when the server stops. A Chromium a
-crashed server left is stopped at the next start.
-
-Stagehand has one server-shared session. `BrowserSession` with `action="open"`
-reuses a live session (`reused: true`). A session whose service worker or
-connection went away is let go at once: `status` reports why under `ended`, an
-`open` in between answers "ask again", and the next `open` starts a new
-browser. Rediscover tab IDs with `BrowserTabs` after that. Do not repeat an act
-that may already have changed the page.
-
-`status` does not report who opened or is using the session. Close it only when
-the operator has confirmed it can be stopped or your task has an explicit
-exclusive session; otherwise coordinate a handoff with other users.
+Session close and Addon detach join the original resources. A failed or lost
+session keeps its end reason; rediscover the current session and tabs before
+continuing. Coordinate use before closing a shared session. An input with an
+uncertain result must not be repeated just because the connection changed.
 
 ## Keeper and MCP tools
 
@@ -154,11 +199,11 @@ Keeper-facing names use CamelCase; the MCP registration names use `masc_browser_
 | --- | --- | --- |
 | `BrowserTabs` | `masc_browser_tabs` | All three: list tabs and discover the live connection identity |
 | `BrowserRead` | `masc_browser_read` | All three: text, visible elements, scene or regions, or a viewport PNG. Frames, dialogs and downloads: automation |
-| `BrowserInteract` | `masc_browser_interact` | All three: click, fill, scroll, pointer input or follow a link in one explicit tab. activate_tab: live |
+| `BrowserInteract` | `masc_browser_interact` | Click, fill, scroll and other input in one explicit tab; native hover/drag/keyboard and zoom depend on transport capabilities |
 | `BrowserSession` | `masc_browser_session` | Automation or stagehand: open, close, or check the session |
 | `BrowserGoto` | `masc_browser_goto` | Automation or stagehand: navigate to an HTTP(S) URL |
-| `BrowserAct` | `masc_browser_act` | Automation: open/close tabs, click, fill, press, select, scroll, back, forward, or reload |
-| `BrowserInstruct` | `masc_browser_instruct` | Stagehand: act on, observe, or extract from a tab with one sentence |
+| `BrowserAct` | `masc_browser_act` | Automation: tab, form and history actions; Stagehand: tab/history actions; live BiDi: open_tab |
+| `BrowserInstruct` | `masc_browser_instruct` | Selected Stagehand consumer: act/observe/extract; selected Gecko locate consumer: observe |
 
 After discovery, pass the observed `clientId` and `tabId` to live reads and
 interactions. A `clientId` is required when several live browsers are connected;
@@ -166,8 +211,9 @@ omit it for automation.
 
 `BrowserRead` defaults to `mode="text"`, `format="text"`, and 50,000 Unicode code
 points; `maxChars` can rise to 100,000. Inspect `truncated` in the result.
-`mode="elements"` returns up to 200 visible controls with labels and observed CSS
-selectors. `format="image"` requires an explicit `tabId`; Keeper calls return a
+`mode="elements"` returns visible controls with labels and observed CSS
+selectors, subject to response bounds; inspect truncation and scope when needed.
+`format="image"` requires an explicit `tabId`; Keeper calls return a
 durable artifact handle for image analysis. Text and element reads describe the
 current rendered page, not every hidden or virtualized item.
 
@@ -175,7 +221,9 @@ current rendered page, not every hidden or virtualized item.
 `instruction` sentence (required for act and extract), a `tabId` from
 `BrowserTabs lane="stagehand"`, and for extract an optional `schema`: JSON
 Schema text for the data to return. It returns Stagehand's `data` and
-`metadata`. An act can change the page, so verify the result with Stagehand
+`metadata`. The selected Gecko `locate` consumer instead serves
+`BrowserInstruct action="observe" lane="automation"` on an observed tab.
+An act can change the page, so verify the result with Stagehand
 `observe` or `extract`; a failed act may have acted. `observe` and `extract`
 only read.
 
@@ -184,9 +232,10 @@ actions; a selector must match exactly one element. For `BrowserInteract`, pass
 `expectedUrl` from the last read to reject intervening navigation. Fill emits page
 events and does not itself press Enter or submit. Read or capture the page after
 an action, including an error, before deciding whether to retry.
-Selector click and fill emit JavaScript events (`isTrusted=false`). If a site
-requires user input, locate the control with `BrowserRead`, use viewport
-coordinates such as `click_at`, then read the page again to verify the effect.
+On BiDi and owned WebDriver, guarded semantic clicks use native pointer input;
+Stagehand uses its native click method. The WebExtension uses DOM click. Fill
+and native typing are distinct actions. Check transport capabilities and read
+the page after input to verify the application effect.
 
 ## TUI reader
 

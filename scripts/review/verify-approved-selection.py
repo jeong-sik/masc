@@ -34,7 +34,7 @@ def verify(receipt, *, repo, candidate, git_dir, gh, prepare=P.prepare):
                 for key in ("base", "candidate", "tree")
                 if receipt.get(key) != current[key]]
     if mismatch:
-        raise P.Rejected(f"{P.Reason.INVALID_SELECTION}: " + "; ".join(mismatch))
+        raise P.Rejected(P.Reason.INVALID_SELECTION, details=tuple(mismatch))
     for previous, live in zip(receipt["members"], current["members"]):
         ids = previous["approval_ids"]
         if (not isinstance(ids, list) or not ids

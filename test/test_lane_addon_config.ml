@@ -331,6 +331,80 @@ selection = "latest_completed"
     candidate ~package:"dos-world" ("[binding]\n" ^ source);
     check_error "dos-world takes no external source" path)
 
+(* The shipped operator quiz: the example declaration loads with the package's
+   own manifest, its record grants parse as operator-owned grants, and the
+   binding contract refuses a binding without the time zone R is counted in. *)
+let shipped_operator_quiz_declaration_loads () =
+  let loaded = unwrap (Config.load_file ~path:(repo_file "docs/examples/lane-addons/operator-quiz.toml")) in
+  let package = loaded.package in
+  check string "the declaration names the package" "operator-quiz" package.id;
+  check (list string) "the package declares the author output only"
+    ["author"] (List.map (fun (output : Lane_addon_types.exact_output) -> output.name) package.exact_outputs);
+  check bool "the package asks the operator" true package.operator_asks;
+  check bool "the quiz log lives on persistent state" true (package.state_storage = Lane_addon_types.Persistent);
+  check (option string) "compose and export arrive through lane_act" (Some "lane_act") package.action_tool;
+  check int "the example grants a Board and a repository" 2
+    (List.length (unwrap (Lane_addon_records.grants ~operator_owned:true loaded.binding)));
+  with_directory (fun _root _packages directory ->
+    let path = Filename.concat directory "quiz.toml" in
+    let manifest = Unix.realpath (repo_file "addons/operator-quiz/lane.toml") in
+    let declaration binding = write path (Printf.sprintf {|id = "quiz"
+run_id = "quiz"
+manifest_path = %S
+
+[binding]
+sources = []
+language = "ko"
+%s
+[[binding.records]]
+source_id = "board"
+kind = "board"
+visibilities = ["public"]
+|} manifest binding) in
+    declaration "timezone = \"Asia/Seoul\"\n";
+    ignore (unwrap (Config.load_file ~path));
+    declaration "";
+    check_error "a binding without a time zone is refused before install" path;
+    declaration "timezone = \"Asia/Seoul\"\nwindow = 3\n";
+    check_error "a binding key the package does not read is refused" path)
+
+(* The operator quiz worker itself, read with the host's own decoders: the
+   action schema the worker start checks, the observation packet, and the
+   host request listing after a compose. *)
+let operator_quiz_worker_speaks_the_host_contract () = with_directory (fun _root _packages directory ->
+  (* One JSON-RPC message per line, so no literal here spans two lines. *)
+  let binding = {|{"sources": [], "language": "ko", "timezone": "Asia/Seoul", |}
+    ^ {|"records": [{"source_id": "board", "kind": "board", "visibilities": ["public"]}]}|} in
+  let context = {|{"instance_id": "quiz-1", "incarnation": "quiz-1"}|} in
+  let calls = [
+    {|"initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}|};
+    {|"tools/list", "params": {}|};
+    Printf.sprintf {|"tools/call", "params": {"name": "lane_observe", "arguments": {"context": %s, "binding": %s, "sources": []}}|} context binding;
+    Printf.sprintf {|"tools/call", "params": {"name": "lane_act", "arguments": {"context": %s, "request_id": "act-1", "action": {"kind": "compose", "questions": 2}}}|} context;
+    {|"tools/call", "params": {"name": "lane_host_requests", "arguments": {}}|}] in
+  let input = String.concat "" (List.mapi (fun index call ->
+    Printf.sprintf {|{"jsonrpc": "2.0", "id": %d, "method": %s}|} (index + 1) call ^ "\n") calls) in
+  let state = Filename.concat directory "state" in
+  let output, input_channel = Unix.open_process_args "python3"
+    [|"python3"; repo_file "addons/operator-quiz/server.py"; "--state"; state|] in
+  output_string input_channel input;
+  close_out input_channel;
+  let lines = In_channel.input_lines output in
+  (match Unix.close_process (output, input_channel) with
+   | Unix.WEXITED 0 -> ()
+   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> fail "the quiz worker did not exit cleanly");
+  let result position = Yojson.Safe.Util.(List.nth lines position |> Yojson.Safe.from_string |> member "result") in
+  let structured position = Yojson.Safe.Util.member "structuredContent" (result position) in
+  let tools = Yojson.Safe.Util.(result 1 |> member "tools" |> to_list) in
+  let tool name = List.find (fun tool -> Yojson.Safe.Util.(member "name" tool) = `String name) tools in
+  check int "the worker advertises its four tools" 4 (List.length tools);
+  ignore (unwrap (Lane_addon_action.validate_schema (Yojson.Safe.Util.member "inputSchema" (tool "lane_act"))));
+  ignore (unwrap (Lane_addon_packet.decode (structured 2)));
+  check string "compose is confirmed" "confirmed" Yojson.Safe.Util.(structured 3 |> member "status" |> to_string);
+  (match unwrap (Lane_addon_host_request.listing_of_json (structured 4)) with
+   | [Lane_addon_host_request.Read_records {source_id = "board"; after = None; _}] -> ()
+   | _ -> fail "the first request of a session reads the granted Board from the start"))
+
 let model_access_is_explicit_and_revisioned () = with_directory (fun _root packages directory ->
   let manifest = install_package packages in
   let path = Filename.concat directory "model.toml" in
@@ -595,6 +669,8 @@ let () = run "Lane Add-on declarative composition"
      test_case "exact outputs are package schemas in the configuration identity" `Quick exact_outputs_are_package_schemas;
      test_case "operator asks are a package declaration" `Quick operator_asks_are_a_package_declaration;
      test_case "shipped DOS chain packages declare enforceable binding contracts" `Quick shipped_dos_chain_declares_binding_contracts;
+     test_case "the shipped operator quiz declaration loads with its manifest" `Quick shipped_operator_quiz_declaration_loads;
+     test_case "the operator quiz worker speaks the host contract" `Quick operator_quiz_worker_speaks_the_host_contract;
      test_case "refresh suppression is an explicit package contract" `Quick refresh_policy_is_explicit;
      test_case "package interface validates bindings before installation" `Quick package_interface;
      test_case "output ports have exact selections and semantic revisions" `Quick output_ports_are_typed_and_revisioned;

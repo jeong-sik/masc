@@ -146,7 +146,7 @@ name = "action"
 type = "object"
 description = """
 For a Lane action: the action object the installation's package schema \
-accepts, such as {"kind": "compose"}. It is checked against the worker that \
+accepts, such as {"kind": "compose", "questions": 5}. It is checked against the worker that \
 runs it, at each due time."""
 
 [[one_of]]

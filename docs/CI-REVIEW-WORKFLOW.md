@@ -215,7 +215,7 @@ in-flight detach, confirmed cleanup, fresh reattachment and stale-client refusal
 late page reads after host snapshot release, actual download bytes and durable
 download/screenshot artifacts after confirmed Addon retirement. Its fixture
 payload reader is explicit host authority, not a Keeper sandbox authorization test.
-Both use controlled loopback pages, never the operator's profile or signed-in
+All three scenarios use controlled loopback pages, never the operator's profile or signed-in
 sites. Logs, scenario receipts and screenshots show only that selected execution;
 they do not prove Safari parity, installed production behavior or full regression.
 

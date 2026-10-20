@@ -2190,9 +2190,10 @@ let test_lane_media_reroute_stays_in_lane () =
             ~first_candidate:head
             ~remaining_runtimes:[ runtime "lanevision.vision_model" ])))
 
-(* A lane candidate whose account answered a hard quota rejection moves behind
-   the live lane candidates, so the reroute picks a live one and the image walk
-   visits the exhausted one last. A text turn keeps its lane order. *)
+(* A lane candidate whose account answered a hard quota rejection rests, so
+   the reroute and the image walk leave it out and lead with the live one. The
+   rested candidate stays in the lane behind the degrade head. A text turn
+   keeps its lane order. *)
 let test_lane_media_reroute_walks_past_exhausted_candidate () =
   with_runtime_config runtime_toml_media_lane_with_two_vision_candidates (fun () ->
     Runtime_quota_window.reset_for_testing ();
@@ -2216,11 +2217,8 @@ let test_lane_media_reroute_walks_past_exhausted_candidate () =
           ~remaining_runtimes:[ lanevision; backupvision ]
       in
       Alcotest.(check (list string))
-        "the exhausted lane candidate moves behind the live one"
-        [ "primary.text_model"
-        ; "backupvision.vision_model"
-        ; "lanevision.vision_model"
-        ]
+        "the exhausted lane candidate is not a reroute candidate"
+        [ "primary.text_model"; "backupvision.vision_model" ]
         (ids candidates);
       let image_block =
         Agent_core.Types.Image
@@ -2248,23 +2246,24 @@ let test_lane_media_reroute_walks_past_exhausted_candidate () =
          Alcotest.fail "two image-capable candidates are in the lane");
       let media_walk = Runtime_agent.media_walk ~candidates [ image_block ] in
       Alcotest.(check (list string))
-        "the image walk holds the image-capable candidates, live first"
-        [ "backupvision.vision_model"; "lanevision.vision_model" ]
+        "the image walk holds the live image-capable candidate"
+        [ "backupvision.vision_model" ]
         (ids media_walk);
-      (* The text-only head is still walked after the image candidates, where
+      (* The text-only head is walked after the live image candidate, where
          per-attempt projection turns the image into a reading, so a turn whose
-         media candidates all answer 402 degrades instead of ending in an
-         error. *)
+         live media candidate answers 402 degrades instead of calling the
+         exhausted one. The lane is given in its walk order, the exhausted
+         candidate last. *)
       Alcotest.(check (list string))
-        "the turn walks the live candidate, then the exhausted one, then degrades"
+        "the turn walks the live candidate, then degrades, then the exhausted one"
         [ "backupvision.vision_model"
-        ; "lanevision.vision_model"
         ; "primary.text_model"
+        ; "lanevision.vision_model"
         ]
         (ids
            (Driver.For_testing.attempt_runtimes_for_turn
               ~media_walk
-              ~lane:[ head; lanevision; backupvision ]));
+              ~lane:[ head; backupvision; lanevision ]));
       (* The degrade tail keeps the lane's declared order. Stand-ins: the
          function orders by identity, so any three runtimes show it. *)
       Alcotest.(check (list string))
@@ -2341,8 +2340,8 @@ let test_media_turn_starts_from_the_live_walk_head () =
          Alcotest.fail "the assigned runtime takes the image");
       let media_walk = Runtime_agent.media_walk ~candidates [ image_block ] in
       Alcotest.(check (list string))
-        "the walk puts the live candidate ahead of the exhausted head"
-        [ "backupvision.vision_model"; "lanevision.vision_model" ]
+        "the walk leads with the live candidate and leaves the exhausted head out"
+        [ "backupvision.vision_model" ]
         (ids media_walk);
       Alcotest.(check (list string))
         "the turn starts from the live candidate, not the exhausted head"
@@ -2354,6 +2353,114 @@ let test_media_turn_starts_from_the_live_walk_head () =
            (Driver.For_testing.attempt_runtimes_for_turn
               ~media_walk
               ~lane:[ assigned; text_only; backupvision ]))))
+
+(* A text-only lane head and one image-capable candidate whose path rests: the
+   lane shape that sent every image turn to a weekly-limited account and back
+   to the head (2026-10-20). Each store the walk reads a rest from -- a rate
+   limit the candidate answered and its account's stated quota window -- keeps
+   the resting candidate out of the reroute until its release, so the turn
+   degrades on the serving head and reaches the resting one only after it. *)
+let test_image_turn_degrades_while_its_capable_candidate_rests () =
+  let rest_sec = 3600.0 in
+  let rests =
+    [ ( "rate limit"
+      , fun (runtime : Runtime_instance.t) ->
+          Runtime_candidate_backpressure.note_rate_limit
+            ~candidate:runtime.candidate_backpressure
+            ~retry_after:(Some rest_sec) )
+    ; ( "quota window"
+      , fun (runtime : Runtime_instance.t) ->
+          Runtime_quota_window.note_exhausted
+            ~scope:(Runtime_instance.quota_scope_of_runtime runtime)
+            ~resets_at:(Unix.gettimeofday () +. rest_sec) )
+    ]
+  in
+  List.iter
+    (fun (store, rest) ->
+       with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
+         Runtime_quota_window.reset_for_testing ();
+         Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+           let runtime id =
+             match Runtime.get_runtime_by_id id with
+             | Some runtime -> runtime
+             | None -> Alcotest.failf "missing runtime %s" id
+           in
+           let ids =
+             List.map (fun (runtime : Runtime_instance.t) -> runtime.Runtime_instance.id)
+           in
+           rest (runtime "lanevision.vision_model");
+           let image_block =
+             Agent_core.Types.Image
+               { media_type = "image/png"
+               ; data = Base64.encode_string "image"
+               ; source_type = Agent_core.Types.Base64
+               }
+           in
+           let walk = Driver.Fresh_walk_by test_recorder in
+           (* The lane as [run_agent_turn] holds it: the fresh walk's order. *)
+           let lane_at now =
+             match Driver.assignment_walk_order ~now ~walk "resilient" with
+             | Ok { Driver.order; _ } -> List.map runtime order
+             | Error _ -> Alcotest.fail "expected the resilient lane"
+           in
+           let turn_at now =
+             match lane_at now with
+             | [] -> Alcotest.fail "expected a non-empty lane"
+             | first_candidate :: remaining_runtimes ->
+               let candidates =
+                 Driver.For_testing.modality_reroute_candidates
+                   ~walk
+                   ~now
+                   ~deferred_runtime_lane:None
+                   ~first_candidate
+                   ~remaining_runtimes
+               in
+               let decision =
+                 Driver.For_testing.lane_modality_reroute_decision
+                   ~checkpoint_messages:[]
+                   ~initial_messages:[]
+                   ~goal_blocks:[ image_block ]
+                   ~first_candidate
+                   ~candidates
+               in
+               let attempts =
+                 Driver.For_testing.attempt_runtimes_for_turn
+                   ~media_walk:(Runtime_agent.media_walk ~candidates [ image_block ])
+                   ~lane:(first_candidate :: remaining_runtimes)
+               in
+               decision, ids attempts
+           in
+           let now = Unix.gettimeofday () in
+           (match turn_at now with
+            | Runtime_agent.No_capable_runtime { required }, attempts ->
+              Alcotest.(check (list string))
+                (store ^ ": the turn degrades for the image")
+                [ "image" ]
+                required;
+              Alcotest.(check (list string))
+                (store ^ ": the serving head runs first, the resting candidate after it")
+                [ "primary.text_model"; "lanevision.vision_model" ]
+                attempts
+            | Runtime_agent.Reroute { target; _ }, _ ->
+              Alcotest.failf
+                "%s: the image turn rerouted to %s while it rests"
+                store
+                target.Runtime_instance.id
+            | Runtime_agent.No_reroute_needed, _ ->
+              Alcotest.failf "%s: a text-only head must not claim the image" store);
+           match turn_at (now +. rest_sec +. 1.0) with
+           | Runtime_agent.Reroute { target; _ }, attempts ->
+             Alcotest.(check string)
+               (store ^ ": after its release the candidate takes the image again")
+               "lanevision.vision_model"
+               target.Runtime_instance.id;
+             Alcotest.(check (list string))
+               (store ^ ": the released candidate leads the turn")
+               [ "lanevision.vision_model"; "primary.text_model" ]
+               attempts
+           | (Runtime_agent.No_capable_runtime _ | Runtime_agent.No_reroute_needed), _ ->
+             Alcotest.failf "%s: a released candidate must lead the image turn" store)))
+    rests
 
 (* RFC-0440 §3: a 402 belongs to the candidate's account, so the walk moves to
    the next candidate in the same turn and does not call the first one again. *)
@@ -6952,6 +7059,10 @@ let () =
             "a media turn starts from the live walk head"
             `Quick
             test_media_turn_starts_from_the_live_walk_head;
+          Alcotest.test_case
+            "an image turn degrades while its capable candidate rests"
+            `Quick
+            test_image_turn_degrades_while_its_capable_candidate_rests;
           Alcotest.test_case
             "attempt loop moves past a 402"
             `Quick

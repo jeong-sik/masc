@@ -333,57 +333,61 @@ type next_dispatch =
    and the ordering evidence expire at the same provider boundary.
    A quota observation carries no noted time and rests from [now]. A failed
    attempt is not a rest: it demotes the path until the candidate answers and
-   never makes a dispatch wait (RFC-0458 §3.4). An id the table cannot resolve
-   is no evidence of a rest. *)
+   never makes a dispatch wait (RFC-0458 §3.4). *)
+let runtime_path_rest ~now (runtime : Runtime_instance.t) =
+  let cap_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
+  let rest_sec retry_class retry_after_hint =
+    Keeper_runtime_failure_route.path_rest_sec ~cap_sec ~retry_class ~retry_after_hint
+  in
+  let rate_limit_rest =
+    match
+      Runtime_candidate_backpressure.candidate_backpressure
+        ~now
+        ~candidate:runtime.candidate_backpressure
+    with
+    | None | Some { Runtime_candidate_backpressure.rate_limit = None; failed_attempt = _ } -> None
+    | Some
+        { Runtime_candidate_backpressure.rate_limit =
+            Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit { noted_at; retry_after })
+        ; failed_attempt = _
+        } ->
+      let promotes =
+        match Keeper_runtime_failure_route.usable_retry_after retry_after with
+        | Some _ -> true
+        | None -> false
+      in
+      Some
+        ( noted_at +. rest_sec Keeper_runtime_failure_route.Rate_limited retry_after
+        , promotes )
+  in
+  let quota_rest =
+    let scope = Runtime_instance.quota_scope_of_runtime runtime in
+    match Runtime_quota_window.active_until ~scope ~now with
+    | Some resets_at -> Some (resets_at, true)
+    | None ->
+      if Runtime_quota_window.is_exhausted ~scope ~now
+      then Some (now +. rest_sec Keeper_runtime_failure_route.Hard_quota None, false)
+      else None
+  in
+  let rest =
+    match rate_limit_rest, quota_rest with
+    | None, None -> None
+    | Some rest, None | None, Some rest -> Some rest
+    | Some (rate_limit_at, rate_limit_promotes), Some (quota_at, quota_promotes) ->
+      Some (Float.max rate_limit_at quota_at, rate_limit_promotes && quota_promotes)
+  in
+  (match rest with
+   | Some (release_at, walk_promotes_at_release) when Float.compare now release_at < 0 ->
+     Path_resting { release_at; walk_promotes_at_release }
+   | Some _ | None -> Path_serving)
+;;
+
+(* [runtime_path_rest] of the runtime the table resolves [runtime_id] to. An
+   id the table cannot resolve is no evidence of a rest. *)
 let path_rest ~now runtime_id =
   match Runtime.get_runtime_by_id runtime_id with
   | None -> Path_serving
-  | Some (runtime : Runtime_instance.t) ->
-    let cap_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
-    let rest_sec retry_class retry_after_hint =
-      Keeper_runtime_failure_route.path_rest_sec ~cap_sec ~retry_class ~retry_after_hint
-    in
-    let rate_limit_rest =
-      match
-        Runtime_candidate_backpressure.candidate_backpressure
-          ~now
-          ~candidate:runtime.candidate_backpressure
-      with
-      | None | Some { Runtime_candidate_backpressure.rate_limit = None; failed_attempt = _ } -> None
-      | Some
-          { Runtime_candidate_backpressure.rate_limit =
-              Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit { noted_at; retry_after })
-          ; failed_attempt = _
-          } ->
-        let promotes =
-          match Keeper_runtime_failure_route.usable_retry_after retry_after with
-          | Some _ -> true
-          | None -> false
-        in
-        Some
-          ( noted_at +. rest_sec Keeper_runtime_failure_route.Rate_limited retry_after
-          , promotes )
-    in
-    let quota_rest =
-      let scope = Runtime_instance.quota_scope_of_runtime runtime in
-      match Runtime_quota_window.active_until ~scope ~now with
-      | Some resets_at -> Some (resets_at, true)
-      | None ->
-        if Runtime_quota_window.is_exhausted ~scope ~now
-        then Some (now +. rest_sec Keeper_runtime_failure_route.Hard_quota None, false)
-        else None
-    in
-    let rest =
-      match rate_limit_rest, quota_rest with
-      | None, None -> None
-      | Some rest, None | None, Some rest -> Some rest
-      | Some (rate_limit_at, rate_limit_promotes), Some (quota_at, quota_promotes) ->
-        Some (Float.max rate_limit_at quota_at, rate_limit_promotes && quota_promotes)
-    in
-    (match rest with
-     | Some (release_at, walk_promotes_at_release) when Float.compare now release_at < 0 ->
-       Path_resting { release_at; walk_promotes_at_release }
-     | Some _ | None -> Path_serving)
+  | Some runtime -> runtime_path_rest ~now runtime
 ;;
 
 (* A walk dispatches its head first, so the head decides: a serving head takes
@@ -1248,12 +1252,18 @@ let dedupe_runtimes_preserve_order runtimes =
    candidate takes the image, the decision is [No_capable_runtime] and the
    per-attempt projection turns the image into a reading for the runtime that
    runs the turn. The set is held in the same quota and backpressure order the
-   lane itself uses ([demote_unavailable_candidates]): a candidate whose
-   account answered a hard quota rejection earlier moves behind the live ones,
-   so the reroute picks a live candidate instead of the first declared one. A
-   deferred lane offers no candidates: its walk dispatches the frozen suffix
-   ([lane_candidate_ids] in [run_agent_turn]), so a decision that moved the
-   head would be recorded as a reroute the walk never performs. *)
+   lane itself uses ([demote_unavailable_candidates]), and a candidate whose
+   path rests ([runtime_path_rest]: a quota window or rate limit it answered,
+   until its release) is left out: the reroute and the image walk lead with a
+   serving candidate, and when no serving candidate takes the image the
+   decision is [No_capable_runtime], so the turn degrades on the serving lane
+   head instead of dispatching to a path the provider said to rest. The
+   resting candidate keeps its place in the lane, behind the serving ones, so
+   a walk whose serving candidates all fail still reaches it. At its release
+   it leads image turns again. A deferred lane offers no candidates: its walk
+   dispatches the frozen suffix ([lane_candidate_ids] in [run_agent_turn]), so
+   a decision that moved the head would be recorded as a reroute the walk
+   never performs. *)
 let modality_reroute_candidates ~now ~walk ~deferred_runtime_lane ~first_candidate
     ~remaining_runtimes =
   match deferred_runtime_lane with
@@ -1267,11 +1277,15 @@ let modality_reroute_candidates ~now ~walk ~deferred_runtime_lane ~first_candida
            Some (Runtime_instance.quota_scope_of_runtime runtime))
          ~candidate_backpressure_of:(fun (runtime : Runtime_instance.t) ->
            Some runtime.Runtime_instance.candidate_backpressure)
+    |> List.filter (fun runtime ->
+      match runtime_path_rest ~now runtime with
+      | Path_serving -> true
+      | Path_resting _ -> false)
 
-(* The media walk (every lane candidate that takes the media, live ones first),
-   then the rest of the lane in its declared order as the degrade tail, where
-   per-attempt projection turns the image into a reading. A text turn has an
-   empty media walk and walks the lane as declared.
+(* The media walk (every serving lane candidate that takes the media, live ones
+   first), then the rest of the lane in its given order as the degrade tail,
+   where per-attempt projection turns the image into a reading. A text turn has
+   an empty media walk and walks the lane as given.
 
    The walk leads, not the lane head. When the head takes the media itself,
    [decide_modality_reroute_for_runtime_candidates] answers [No_reroute_needed]

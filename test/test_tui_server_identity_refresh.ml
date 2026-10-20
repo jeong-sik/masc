@@ -4201,7 +4201,7 @@ let test_keeper_history_request_sources_are_owned_and_independent () =
   let module Protocol = Masc_tui_async_protocol in
   let state = create_state ~workspace:"history" ~port:0 ~refresh_interval:0. () in
   let make generation = Read.create ~generation ~keeper:"alpha"
-    ~authority:state.workspace_authority ~reading:state.workspace_read_authority in
+    ~authority:state.workspace_authority ~reading:state.workspace_read_authority ~first_page:false in
   let owner = make 1 in
   state.msg_history_inflight <- Some owner;
   Read.publish owner Read.History ~ready_at_ns:11L (Error "history refused");
@@ -4239,6 +4239,36 @@ let test_keeper_history_request_sources_are_owned_and_independent () =
   Read.publish successor Read.History ~ready_at_ns:15L (Error "new history result");
   Alcotest.(check int) "successor keeps its own receipt" 1
     (List.length (Protocol.collect_owned_results state))
+;;
+
+let test_keeper_initial_page_is_not_an_explicit_older_demand () =
+  let open Masc_tui_types in
+  let module Read = Keeper_history_read in
+  let state = create_state ~workspace:"history" ~port:0 ~refresh_interval:0. () in
+  state.msg_target_keeper_name <- Some "alpha";
+  let make ~first_page generation = Read.create ~generation ~keeper:"alpha"
+    ~authority:state.workspace_authority ~reading:state.workspace_read_authority ~first_page in
+  let cold = make ~first_page:true 1 in
+  state.msg_history_inflight <- Some cold;
+  state.msg_older_loading <- true;
+  Alcotest.(check bool) "initial page has a pending slot" true (Read.page_pending cold);
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "cold preparation is not an older-page demand" true
+    (Option.is_none state.msg_older_resume);
+  let explicit = make ~first_page:false 2 in
+  state.msg_history_inflight <- Some explicit;
+  state.msg_older_loading <- true;
+  state.msg_older_cursor <- Some "original-opaque-cursor";
+  suspend_workspace_readings state;
+  Alcotest.(check (option (pair string (option string)))) "explicit paging retains its cursor"
+    (Some ("alpha", Some "original-opaque-cursor")) state.msg_older_resume;
+  let initial = make ~first_page:true 3 in
+  Read.retire_page initial;
+  Alcotest.(check bool) "explicit page replacement retires initial admission" false
+    (Read.page_pending initial);
+  Alcotest.(check bool) "retirement cannot masquerade as result settlement" false
+    (Read.settle_page initial);
+  Alcotest.(check bool) "other sources remain outstanding" true (Read.pending initial)
 ;;
 
 let () =
@@ -4414,6 +4444,8 @@ let () =
             test_overview_preview_rejects_superseded_reading
         ; Alcotest.test_case "overview preview preserves confirmed state and authority" `Quick
             test_overview_preview_preserves_confirmed_state_and_authority
+        ; Alcotest.test_case "initial page is not an explicit older demand" `Quick
+            test_keeper_initial_page_is_not_an_explicit_older_demand
         ; Alcotest.test_case "history sources publish and settle independently" `Quick
             test_keeper_history_request_sources_are_owned_and_independent
         ; Alcotest.test_case "overview completion retires previews and late delivery" `Quick

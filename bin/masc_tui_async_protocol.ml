@@ -334,6 +334,8 @@ type async_msg =
       Masc_tui_keeper_chat_projection.request * int * (Masc_tui_interrupt_signal.interrupt_signal, string) result
   | Keeper_chat_history_loaded of
       Keeper_history_read.t * Keeper_history_read.source * Keeper_history_read.result
+  | Keeper_chat_first_page_loaded of
+      Keeper_history_read.t * Keeper_history_read.page_result
   | Keeper_chat_copy_loaded of
       int * string * (Masc_tui_keeper_chat_history.decoded, string) result
   | Keeper_chat_operation_loaded of
@@ -777,12 +779,18 @@ let collect_owned_results state =
   let history = match state.msg_history_inflight with
     | None -> []
     | Some request ->
-        List.map (fun (source, (observation : Keeper_history_read.observation)) ->
+        let scoped message = Workspace_scoped (Keeper_history_read.authority request,
+          Some (Keeper_history_read.reading request), message) in
+        let rows = List.map (fun (source, (observation : Keeper_history_read.observation)) ->
           {ready_at_ns=observation.ready_at_ns;
-           message=Workspace_scoped (Keeper_history_read.authority request,
-             Some (Keeper_history_read.reading request),
-             Keeper_chat_history_loaded (request, source, observation.result))})
+           message=scoped (Keeper_chat_history_loaded (request, source, observation.result))})
           (Keeper_history_read.take_ready request) in
+        let page = Option.to_list (Option.map
+          (fun (observation : Keeper_history_read.page_observation) ->
+            {ready_at_ns=observation.ready_at_ns;
+             message=scoped (Keeper_chat_first_page_loaded (request, observation.result))})
+          (Keeper_history_read.take_page_ready request)) in
+        rows @ page in
   let receipts = List.map (fun (submission, (observation : Ask_answer_receipt.observation)) ->
     {ready_at_ns=observation.observed_ns; message=Ask_answer_receipt_ready submission})
       (pending_ask_answer_receipts state) in
@@ -871,6 +879,7 @@ let rec workspace_message_is_read = function
   | Voice_config_loaded _
   | Voice_wizard_probed _
   | Board_post_refresh_done _
+  | Keeper_chat_first_page_loaded _
   | Keeper_chat_history_loaded _
   | Keeper_chat_copy_loaded _
   | Keeper_native_tasks_loaded _
@@ -1102,6 +1111,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Keeper_chat_stream_unavailable (_, _) | Keeper_run_next_done (_, _)
     | Keeper_observed_interrupt_done (_, _, _, _)
     | Keeper_chat_interrupt_done (_, _, _)
+    | Keeper_chat_first_page_loaded (_, _)
     | Keeper_chat_history_loaded (_, _, _)
     | Keeper_chat_copy_loaded (_, _, _) | Keeper_chat_operation_loaded _
     | Keeper_chat_journal_loaded _ | Keeper_native_tasks_loaded (_, _)
@@ -1239,6 +1249,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Keeper_chat_stream_deltas (_, _) | Keeper_chat_stream_unavailable (_, _)
   | Keeper_run_next_done (_, _) | Keeper_observed_interrupt_done (_, _, _, _)
   | Keeper_chat_interrupt_done (_, _, _)
+  | Keeper_chat_first_page_loaded (_, _)
   | Keeper_chat_history_loaded (_, _, _) | Keeper_chat_copy_loaded (_, _, _)
   | Keeper_chat_operation_loaded _ | Keeper_chat_journal_loaded _
   | Keeper_native_tasks_loaded (_, _) | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _)

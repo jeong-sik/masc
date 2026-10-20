@@ -1091,17 +1091,22 @@ type keeper_chat_page = {
   kcp_older_error : string option;
 }
 
-(* One refresh owns two independent results. Workers publish before returning;
+(* Each requested source owns a result slot. Workers publish before returning;
    the UI's owned-result drain offers each slot once without a mailbox wait.
    Offering is not settlement: the request stays busy until UI admission. *)
 module Keeper_history_read : sig
   type source = History | Memory
   type result = (Masc_tui_keeper_chat_history.decoded, string) Result.t
-  type observation = { result : result; ready_at_ns : int64 }
+  type page_result = (Masc_tui_keeper_chat_history.page, Masc_tui_keeper_chat_history.page_error) Result.t
+  type 'a observed = { result : 'a; ready_at_ns : int64 }
+  type observation = result observed
+  type page_observation = page_result observed
   type t
 
   val create : generation:int -> keeper:string -> authority:workspace_authority ->
-    reading:unit ref -> t
+    reading:unit ref -> first_page:bool -> t
+  (** A first page is requested only while this Keeper has no received history.
+      An unrequested page slot is already settled and never publishes data. *)
   val generation : t -> int
   val keeper : t -> string
   val authority : t -> workspace_authority
@@ -1109,48 +1114,65 @@ module Keeper_history_read : sig
   val publish : t -> source -> ready_at_ns:int64 -> result -> unit
   val take_ready : t -> (source * observation) list
   val settle : t -> source -> bool
+  val publish_page : t -> ready_at_ns:int64 -> page_result -> unit
+  val take_page_ready : t -> page_observation option
+  val settle_page : t -> bool
+  val retire_page : t -> unit
+  (** A later explicit paging request withdraws initial-page application.
+      This is not a claim that the first-page worker stopped. *)
+  val page_pending : t -> bool
   val pending : t -> bool
 end = struct
   type source = History | Memory
   type result = (Masc_tui_keeper_chat_history.decoded, string) Result.t
-  type observation = { result : result; ready_at_ns : int64 }
-  type slot = Waiting | Ready of observation | Offered | Settled
+  type page_result = (Masc_tui_keeper_chat_history.page, Masc_tui_keeper_chat_history.page_error) Result.t
+  type 'a observed = { result : 'a; ready_at_ns : int64 }
+  type observation = result observed
+  type page_observation = page_result observed
+  type 'a slot = Waiting | Ready of 'a observed | Offered | Settled
   type t = {
     generation : int;
     keeper : string;
     authority : workspace_authority;
     reading : unit ref;
-    history : slot Atomic.t;
-    memory : slot Atomic.t;
+    history : result slot Atomic.t;
+    memory : result slot Atomic.t;
+    page : page_result slot Atomic.t;
   }
 
-  let create ~generation ~keeper ~authority ~reading =
+  let create ~generation ~keeper ~authority ~reading ~first_page =
     { generation; keeper; authority; reading;
-      history = Atomic.make Waiting; memory = Atomic.make Waiting }
+      history = Atomic.make Waiting; memory = Atomic.make Waiting;
+      page = Atomic.make (if first_page then Waiting else Settled) }
   let generation request = request.generation
   let keeper request = request.keeper
   let authority request = request.authority
   let reading request = request.reading
   let slot request = function History -> request.history | Memory -> request.memory
-  let publish request source ~ready_at_ns result =
-    ignore (Atomic.compare_and_set (slot request source) Waiting
-      (Ready {result; ready_at_ns}))
+  let publish_cell cell ~ready_at_ns result =
+    ignore (Atomic.compare_and_set cell Waiting (Ready {result; ready_at_ns}))
+  let publish request source = publish_cell (slot request source)
+  let publish_page request = publish_cell request.page
+  let take_cell cell =
+    let before = Atomic.get cell in
+    match before with
+    | Ready observation when Atomic.compare_and_set cell before Offered -> Some observation
+    | Waiting | Ready _ | Offered | Settled -> None
   let take_ready request =
     List.filter_map (fun source ->
-      let cell = slot request source in
-      let before = Atomic.get cell in
-      match before with
-      | Ready observation when Atomic.compare_and_set cell before Offered ->
-          Some (source, observation)
-      | Waiting | Ready _ | Offered | Settled -> None)
+      Option.map (fun observation -> source, observation) (take_cell (slot request source)))
       [History; Memory]
+  let take_page_ready request = take_cell request.page
   let settle request source =
     Atomic.compare_and_set (slot request source) Offered Settled
+  let settle_page request = Atomic.compare_and_set request.page Offered Settled
+  let retire_page request = Atomic.set request.page Settled
+  let unsettled cell = match Atomic.get cell with
+    | Settled -> false
+    | Waiting | Ready _ | Offered -> true
+  let page_pending request = unsettled request.page
   let pending request =
-    let unsettled source = match Atomic.get (slot request source) with
-      | Settled -> false
-      | Waiting | Ready _ | Offered -> true in
-    unsettled History || unsettled Memory
+    unsettled request.history || unsettled request.memory || unsettled request.page
 end
 
 (* The Memory lane in summary mode says where the memory ended up.
@@ -11276,8 +11298,15 @@ let suspend_workspace_readings state =
   state.keeper_calls_refresh_pending <- false;
   state.msg_file_changes_loading <- false;
   state.msg_file_changes_refresh_pending <- false;
+  let cold_page_loading = match state.msg_history_inflight with
+    | Some request -> Keeper_history_read.page_pending request
+    | None -> false in
   state.msg_history_inflight <- None;
-  if state.msg_older_loading then
+  (* A cold page is refresh preparation, not an explicit older-page demand.
+     Normal eligible history dispatch can request it again. A scrolled view
+     retains its cached source and uses explicit refresh/paging instead. *)
+  if cold_page_loading then state.msg_older_resume <- None
+  else if state.msg_older_loading then
     state.msg_older_resume <-
       (match state.msg_target_keeper_name with
        | Some keeper -> Some (keeper, state.msg_older_cursor)

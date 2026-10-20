@@ -136,6 +136,7 @@ type context_delivery =
 
 type carried_context =
   | Context_block of Prompt_block_id.t
+  | Context_section of Keeper_context_layers.source
   | Context_carrier
   | Librarian_working_state
   | Librarian_unread
@@ -673,6 +674,9 @@ let held_context_to_yojson { context; sha256 } =
   let context_fields = match context with
     | Context_block block ->
       [ "context", `String "block"; "block", `String (Prompt_block_id.to_string block) ]
+    | Context_section section ->
+      [ "context", `String "section"
+      ; "section", `String (Keeper_context_layers.source_name section) ]
     | Context_carrier -> [ "context", `String "carrier" ]
     | Librarian_working_state -> [ "context", `String "working_state" ]
     | Librarian_unread -> [ "context", `String "librarian_unread" ]
@@ -686,6 +690,10 @@ let held_context_of_yojson = function
       match List.sort compare fields with
       | [ "block", `String block; "context", `String "block"; "sha256", _ ] ->
         Prompt_block_id.of_string block |> Result.map (fun block -> Context_block block)
+      | [ "context", `String "section"; "section", `String section; "sha256", _ ] ->
+        (match Keeper_context_layers.source_of_name section with
+         | Some section -> Ok (Context_section section)
+         | None -> Error ("unknown held context section " ^ section))
       | [ "context", `String "carrier"; "sha256", _ ] -> Ok Context_carrier
       | [ "context", `String "working_state"; "sha256", _ ] -> Ok Librarian_working_state
       | [ "context", `String "librarian_unread"; "sha256", _ ] -> Ok Librarian_unread

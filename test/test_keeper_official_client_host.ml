@@ -2889,6 +2889,167 @@ let test_carried_summaries_without_a_witness_name_one_carrier () =
     (List.length (Host.carried_summaries [ Agent_core.Types.user_msg "hi" ]))
 ;;
 
+(* World State sections: a fixture whose standing sections (memory ledger,
+   wiki, own Board posts, fleet messages) and inbox section (pending messages)
+   can each be held fixed or changed between turns. *)
+module Layers = Keeper_context_layers
+
+let world_state ?(wiki = "WIKI-ONE") ?(fleet = "FLEET-ONE") ?board_posts ?mentions () =
+  Layers.assemble ~content_of:(function
+    | Layers.Workspace_memory -> Some "## Shared workspace memory ledger\nMEMORY-LEDGER\n\n"
+    | Layers.Wiki -> Some ("## Workspace wiki\n" ^ wiki ^ "\n\n")
+    | Layers.Own_board_posts ->
+      Option.map (fun posts -> "### Your Recent Board Posts (1)\n" ^ posts ^ "\n\n") board_posts
+    | Layers.Pending_mentions ->
+      Option.map (fun mention -> "### Pending Messages (1)\n" ^ mention ^ "\n\n") mentions
+    | Layers.Fleet_messages -> Some ("### Fleet Messages (1)\n" ^ fleet ^ "\n\n")
+    | _ -> None)
+  |> Layers.prepend_unattributed World_frame "## Current World State\nWORLD-FRAME\n\n"
+;;
+
+let world_state_turn ?partition_known world =
+  let partition_known = Option.value partition_known ~default:true in
+  let assembly =
+    Keeper_context_assembly.assemble
+      ~dynamic_context_partition:(if partition_known then Some world else None)
+      ~existing_extra_system_context:None
+      ~blocks:
+        [ Prompt_block_id.Dynamic_context, Layers.text world
+        ; Prompt_block_id.Temporal_summary, "CLOCK"
+        ]
+  in
+  carrier_message (Option.get assembly.extra_system_context), assembly
+;;
+
+let resume ~held (message, assembly) =
+  Host.resume_prompt ~goal:"GOAL" ~held ~composed_context:assembly [ message ]
+;;
+
+let start_holding (message, assembly) =
+  Host.start_held_context ~composed_context:assembly [ message ]
+;;
+
+let section_names sources = List.map Layers.source_name sources
+
+let contains text fragment = String_util.contains_substring text fragment
+
+let use_markdown_prompts () =
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts")
+;;
+
+(* One session: the wiki, the memory ledger and the Board posts stay the same
+   from turn to turn while the fleet messages change. Only the changed section
+   goes out, under the frame, and one line names the sections left out. *)
+let test_a_resume_sends_only_the_changed_world_state_sections () =
+  use_markdown_prompts ();
+  let first = world_state_turn (world_state ~board_posts:"POSTS-ONE" ()) in
+  let second = world_state_turn (world_state ~fleet:"FLEET-TWO" ~board_posts:"POSTS-ONE" ()) in
+  let delivery = resume ~held:(start_holding first) second in
+  check (list string) "the unchanged standing sections are left out"
+    [ "workspace_memory"; "wiki"; "own_board_posts" ]
+    (section_names delivery.unchanged_sections);
+  check bool "the unchanged wiki is not sent again" false (contains delivery.prompt "WIKI-ONE");
+  check bool "the unchanged memory ledger is not sent again" false
+    (contains delivery.prompt "MEMORY-LEDGER");
+  check bool "the unchanged Board posts are not sent again" false
+    (contains delivery.prompt "POSTS-ONE");
+  check bool "the changed fleet messages are sent" true (contains delivery.prompt "FLEET-TWO");
+  check bool "the frame heads the sections that are sent" true
+    (contains delivery.prompt "WORLD-FRAME");
+  let notice =
+    Host.unchanged_sections_notice delivery.unchanged_sections |> Result.get_ok
+  in
+  check bool "the prompt carries the line naming the left-out sections" true
+    (contains delivery.prompt notice);
+  let wiki_changed =
+    world_state_turn (world_state ~wiki:"WIKI-TWO" ~fleet:"FLEET-TWO" ~board_posts:"POSTS-ONE" ())
+  in
+  let after = resume ~held:delivery.held_context wiki_changed in
+  check (list string) "a changed wiki is no longer named as unchanged"
+    [ "workspace_memory"; "own_board_posts"; "fleet_messages" ]
+    (section_names after.unchanged_sections);
+  check bool "the changed wiki is sent" true (contains after.prompt "WIKI-TWO");
+  let same = resume ~held:after.held_context wiki_changed in
+  check string "a World State the session holds whole sends the goal alone" "GOAL" same.prompt;
+  check (list string) "nothing is named when nothing is sent" []
+    (section_names same.unchanged_sections)
+;;
+
+(* The partial World State is still the issuer's bytes: the sections it sends,
+   in order. Its attribution names the sections left out. *)
+let test_a_partial_world_state_keeps_its_issuer_attribution () =
+  use_markdown_prompts ();
+  let open Yojson.Safe.Util in
+  let first = world_state_turn (world_state ()) in
+  let second = world_state_turn (world_state ~fleet:"FLEET-TWO" ()) in
+  let delivery = resume ~held:(start_holding first) second in
+  let binding =
+    Keeper_context_submission_link.binding_to_json
+      ~slot:Runtime_official_client_write.Whole_write
+      delivery.context_projection
+      (Runtime_official_client_write.raw delivery.prompt)
+  in
+  check string "the carrier attributes to its issuer" "verified"
+    (binding |> member "issuer_attribution" |> member "status" |> to_string);
+  match binding |> member "occurrences" |> to_list with
+  | [ occurrence ] ->
+    check (list string) "the attribution names the sections left out"
+      [ "workspace_memory"; "wiki" ]
+      (occurrence |> member "source" |> member "omitted_world_state_sections"
+       |> to_option to_list |> Option.value ~default:[] |> List.map to_string)
+  | _ -> fail "the World State carrier must be one attributed occurrence"
+;;
+
+(* What arrived for this turn is sent again even when its bytes repeat: the
+   same words from someone are a new message, not a copy the session holds. *)
+let test_an_inbox_section_is_sent_on_every_resume () =
+  use_markdown_prompts ();
+  let turn = world_state_turn (world_state ~mentions:"MENTION" ()) in
+  let delivery = resume ~held:(start_holding turn) turn in
+  check bool "the repeated pending message is sent" true (contains delivery.prompt "MENTION");
+  check (list string) "every standing section is left out"
+    [ "workspace_memory"; "wiki"; "fleet_messages" ]
+    (section_names delivery.unchanged_sections)
+;;
+
+(* A session that holds nothing -- a new session, a reset, a compaction --
+   gets every section. A whole World State sent without its partition, and a
+   section that left and came back, also make the session's earlier section
+   copies stale, so those go out again too. *)
+let test_every_world_state_section_goes_out_when_the_session_may_not_hold_it () =
+  use_markdown_prompts ();
+  let with_posts = world_state_turn (world_state ~board_posts:"POSTS-ONE" ()) in
+  let fresh = resume ~held:[] with_posts in
+  check (list string) "a session holding nothing is sent every section" []
+    (section_names fresh.unchanged_sections);
+  List.iter
+    (fun body -> check bool (body ^ " is sent to a session holding nothing") true
+        (contains fresh.prompt body))
+    [ "WORLD-FRAME"; "MEMORY-LEDGER"; "WIKI-ONE"; "POSTS-ONE"; "FLEET-ONE" ];
+  let without_posts = world_state_turn (world_state ()) in
+  let gone = resume ~held:fresh.held_context without_posts in
+  let back = resume ~held:gone.held_context with_posts in
+  check bool "a section that came back is sent again" true (contains back.prompt "POSTS-ONE");
+  check (list string) "a returning section is not named as unchanged"
+    [ "workspace_memory"; "wiki"; "fleet_messages" ]
+    (section_names back.unchanged_sections);
+  let whole = resume ~held:back.held_context (world_state_turn ~partition_known:false (world_state ())) in
+  check bool "the whole World State replaces the held sections" true
+    (List.for_all
+       (fun (held : Keeper_official_client_session_store.held_context) ->
+          match held.context with
+          | Keeper_official_client_session_store.Context_section _ -> false
+          | Keeper_official_client_session_store.(
+              Context_block _ | Context_carrier | Librarian_working_state | Librarian_unread
+              | Historical_task_reference) -> true)
+       whole.held_context);
+  let after_whole = resume ~held:whole.held_context (world_state_turn (world_state ())) in
+  check (list string) "after a whole World State every section is sent again" []
+    (section_names after_whole.unchanged_sections);
+  check bool "the wiki is sent again after a whole World State" true
+    (contains after_whole.prompt "WIKI-ONE")
+;;
+
 let test_unsupported_choice_refuses_before_projection () =
   let projected = ref false in
   let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
@@ -2923,6 +3084,24 @@ let () =
             "an unwitnessed carrier is one entry"
             `Quick
             test_carried_summaries_without_a_witness_name_one_carrier
+        ] )
+    ; ( "World State sections on resume"
+      , [ test_case
+            "a resume sends only the changed sections"
+            `Quick
+            test_a_resume_sends_only_the_changed_world_state_sections
+        ; test_case
+            "a partial World State keeps its issuer attribution"
+            `Quick
+            test_a_partial_world_state_keeps_its_issuer_attribution
+        ; test_case
+            "an inbox section is sent on every resume"
+            `Quick
+            test_an_inbox_section_is_sent_on_every_resume
+        ; test_case
+            "every section goes out when the session may not hold it"
+            `Quick
+            test_every_world_state_section_goes_out_when_the_session_may_not_hold_it
         ] )
     ; ( "native posture admission (RFC-0390)"
       , [ test_case

@@ -49,6 +49,36 @@ val order_index : layer_id -> int
     a new variant forces an arm here as well as in any [content_of]. *)
 
 type unattributed = World_frame | Host_workspace_recall | Direct_turn | Unprojected_input
+
+(** What one span of a rendered world state came from: a typed layer, or text
+    the renderer adds around the layers. *)
+type source = Layer of layer_id | Unattributed of unattributed
+
+val source_name : source -> string
+(** The stable name of a source, unique across layers and unattributed text. *)
+
+val source_of_name : string -> source option
+(** Inverse of {!source_name}. An unknown name is [None]. *)
+
+(** How a resumed official-client session that already holds a section's exact
+    bytes from an earlier turn is sent that section again
+    ({!Keeper_official_client_host.resume_prompt}). A new source declares its
+    class in {!resend_on_resume}'s exhaustive match. *)
+type resend_on_resume =
+  | Sent_when_changed
+      (** Standing state. The same bytes add nothing the session does not
+          already hold, so they are left out and named as unchanged. *)
+  | Sent_every_resume
+      (** What arrived for this turn: its trigger and its inbox rows. The same
+          bytes on a later turn are a new arrival, as an operator repeating a
+          note is a new utterance, so they are always sent. *)
+  | Sent_with_other_sections
+      (** The frame that heads the sections and says the runtime assembled
+          them. It goes out whenever any section does and is left out only
+          when every section is. *)
+
+val resend_on_resume : source -> resend_on_resume
+
 type prepared_content
 (** Immutable text and the SHA-256 computed from those exact UTF8 bytes. *)
 val prepare_content : string -> prepared_content
@@ -60,6 +90,9 @@ val prepend_unattributed : unattributed -> string -> rendered -> rendered
 val prepend_prepared_unattributed : unattributed -> prepared_content -> rendered -> rendered
 val receipt_to_json : rendered -> Yojson.Safe.t
 (** Renderer-issued raw UTF8 spans, not a prepared or delivered IPC claim. *)
+val sections : rendered -> (source * string) list
+(** Every span's source and exact text, in render order. The texts concatenate
+    to {!text} byte for byte. *)
 val assemble : content_of:(layer_id -> string option) -> rendered
 (** [assemble ~content_of] renders each layer in {!ordered} via [content_of]
     and concatenates the [Some] results in order; a [None] layer contributes

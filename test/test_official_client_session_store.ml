@@ -1756,6 +1756,10 @@ let test_held_context_is_read_only_from_the_acknowledged_frontier () =
     let keeper_name = "held" in
     let held = [ { context = Context_block Prompt_block_id.Memory_os_recall;
                    sha256 = String.make 64 'd' };
+                 { context = Context_section (Keeper_context_layers.Layer Keeper_context_layers.Wiki);
+                   sha256 = String.make 64 'f' };
+                 { context = Context_section (Keeper_context_layers.Unattributed Keeper_context_layers.World_frame);
+                   sha256 = String.make 64 'c' };
                  { context = Librarian_working_state; sha256 = String.make 64 'e' } ] in
     let frontier = Some { snapshot_sha256 = String.make 64 'a'; message_count = 1;
       delivery = Held_by_vendor_session; acknowledged_turn = None; held_context = held } in

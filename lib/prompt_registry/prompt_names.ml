@@ -162,6 +162,10 @@ let keeper_context_approval_authority_footer = "keeper.context.approval_authorit
    historical dashboard name only — never a prompt key. *)
 let keeper_world_frame_frame = "keeper.world.frame.frame"
 
+(* The line a resumed official-client session gets in place of the World State
+   sections it already holds unchanged. *)
+let keeper_world_frame_unchanged_sections = "keeper.world.frame.unchanged_sections"
+
 (* Durable direct-conversation transcript block, prepended to the quoted
    recent-conversation rows in the turn context. *)
 let keeper_world_transcript_header = "keeper.world.transcript.header"

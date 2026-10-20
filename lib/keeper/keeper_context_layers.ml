@@ -84,6 +84,7 @@ let order_index = function
 
 type unattributed = World_frame | Host_workspace_recall | Direct_turn | Unprojected_input
 type source = Layer of layer_id | Unattributed of unattributed
+type resend_on_resume = Sent_when_changed | Sent_every_resume | Sent_with_other_sections
 type span = { source : source; offset : int; bytes : int; sha256 : string }
 type rendered = { text : string; spans : span list }
 type prepared_content = { content_text : string; content_sha256 : string }
@@ -141,12 +142,53 @@ let layer_name = function
   | Recent_work -> "recent_work"
   | Fleet_messages -> "fleet_messages"
 
+let unattributed_name = function
+  | World_frame -> "world_frame"
+  | Host_workspace_recall -> "host_workspace_recall"
+  | Direct_turn -> "direct_turn"
+  | Unprojected_input -> "unprojected_input"
+
+let source_name = function
+  | Layer layer -> layer_name layer
+  | Unattributed reason -> unattributed_name reason
+
+let all_unattributed = [ World_frame; Host_workspace_recall; Direct_turn; Unprojected_input ]
+
+let source_of_name name =
+  List.map (fun layer -> Layer layer) ordered
+  @ List.map (fun reason -> Unattributed reason) all_unattributed
+  |> List.find_opt (fun source -> String.equal (source_name source) name)
+
+(* See the mli. The inbox layers carry rows delivered for this turn (pending
+   messages, Board and authority events, the consumed schedule wake) and the
+   trigger says why this turn ran, so a repeat of their bytes is a new arrival.
+   Every other layer projects state that holds until it changes. A whole
+   dynamic context the renderer did not partition into layers
+   ([Direct_turn], [Unprojected_input]) keeps the class the whole
+   [Dynamic_context] block has ({!Prompt_block_id.resent_when_held}). *)
+let resend_on_resume = function
+  | Layer
+      ( Active_goals | Current_task | Approval_authority | Connected_surfaces
+      | Namespace_state | Workspace_memory | Wiki | Lane_updates | Repository_freshness
+      | Own_board_posts | Own_recent_actions | Recent_work | Fleet_messages )
+  | Unattributed (Host_workspace_recall | Direct_turn | Unprojected_input) ->
+    Sent_when_changed
+  | Layer
+      ( Autonomous_trigger | Scheduled_automation | Completion_authority
+      | Task_cancellations | Pending_mentions | Scope_messages | Board_activity ) ->
+    Sent_every_resume
+  | Unattributed World_frame -> Sent_with_other_sections
+
+let sections rendered =
+  List.map
+    (fun span -> span.source, String.sub rendered.text span.offset span.bytes)
+    rendered.spans
+
 let receipt_to_json rendered =
   let source_json = function
     | Layer layer -> `Assoc ["kind", `String "layer"; "layer", `String (layer_name layer)]
-    | Unattributed reason -> `Assoc ["kind", `String "unattributed"; "reason", `String
-        (match reason with World_frame -> "world_frame" | Host_workspace_recall -> "host_workspace_recall"
-         | Direct_turn -> "direct_turn" | Unprojected_input -> "unprojected_input")] in
+    | Unattributed reason ->
+      `Assoc ["kind", `String "unattributed"; "reason", `String (unattributed_name reason)] in
   `Assoc ["schema", `String "masc.dynamic-context-partition.v1";
     "scope", `String "renderer_raw_utf8_not_delivery";
     "bytes", `Int (String.length rendered.text); "sha256", `String (hash rendered.text);

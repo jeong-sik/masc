@@ -298,6 +298,28 @@ status: reference
   → [tools/alphatex/CAPTURED-SOURCES.md](../../tools/alphatex/CAPTURED-SOURCES.md) ·
   [tools/alphatex/README.md](../../tools/alphatex/README.md)
 
+**Audition (오디션, 미리 듣기)**
+: 소리를 내어 확인하는 행위를 통틀어 이르는 말. 같은 낱말이 서로 다른 대상을 가리키므로
+  문장에서는 무엇을 듣는지 반드시 함께 적는다. 지금 코드와 문서에서 확인되는 쓰임은 넷이다.
+  - `Source audition` — 가져온 MIDI 소스의 순서 있는 원본 메시지 열을 명시한 MIDI 출력이나
+    VST로 내보내는 재생. 처음부터 시작하고 pause/resume과 source-clock seek를 지원한다
+    (MIDI-SOURCE.md:90, README.md:311).
+  - `WAV-only audition` — 캡처 구간의 WAV만 `:play-audio`로 듣는 재생
+    (CAPTURE-AUDIO-CLOCK.md:1, README.md:334).
+  - `paired audition` — 저장한 take의 WAV와 UMP 스트림을 함께 듣는 재생
+    (CAPTURE-PLAYBACK.md:3).
+  - `solo/mute 확인` — 섞인 라우트에서 한 층만 남겨 들어 보는 확인(ARRANGEMENT.md:151).
+    들을 대상을 고르는 라우트 조작이지 재생 기능이 아니므로 "audition" 대신 이렇게 쓴다.
+  - 이름 경계: `monitoring`은 `audition`이 아니다. `:monitor`는 오디오 입력을,
+    `:midi-monitor`는 들어오는 MIDI를 다른 목적지로 계속 전달하는 상태다
+    (README.md:340, 353). 한 번 듣고 끝나는 재생과 달리 라우트가 열려 있는 동안 계속
+    흐르고 `off`로만 닫힌다. "audition monitoring"처럼 두 낱말을 겹쳐 쓰지 않는다.
+  - 이름 경계: 화면 낱말 `:play-audio`는 WAV-only audition만 가리킨다. MIDI 소스 전체를
+    듣는 일에 이 명령을 인용하지 않는다.
+  → [tools/alphatex/MIDI-SOURCE.md](../../tools/alphatex/MIDI-SOURCE.md) ·
+  [tools/alphatex/README.md](../../tools/alphatex/README.md) ·
+  [tools/alphatex/CAPTURE-PLAYBACK.md](../../tools/alphatex/CAPTURE-PLAYBACK.md)
+
 **Dashboard Goals**
 : TUI 첫 화면에서 Goal의 기록된 측정값과 연결된 Task 완료 수를 별도로 요약한다.
   Goal의 실제 값은 동일한 Goal ID·기준 개정·지표·목표를 가진 관측 기록에서만 읽는다.

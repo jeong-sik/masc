@@ -175,22 +175,33 @@ BiDi·owned WebDriver의 관측한 요소 click은 native 포인터 입력을 �
 
 ## TUI 리더
 
-`Ctrl-^`(Ctrl-Shift-6), `:` → `go Browser Lane`, 또는 Connectors의 `B`로 엽니다. 리더는 live·automation·stagehand 소스를 보여주며, 처음에는 live입니다. `b`로 Firefox/Zen 연결 선택기를 열고 `j`/`k`와 Enter로 선택합니다. 선택기의 `r`은 재탐색, Esc는 리더로 복귀입니다. 읽기와 캡처는 선택한 연결에 고정되며, 연결이 끊어지면 새 연결을 명시적으로 선택해야 합니다.
+`Ctrl-^`(Ctrl-Shift-6), `:` → `go Browser Lane`, 또는 Connectors의 `B`로 엽니다.
+처음 선택은 **Automatic**입니다. `b`로 Automatic·별도 **Work browser**·기존 로그인이 있는
+관측한 연결 중에서 고릅니다. `j`/`k`와 Enter로 선택하고 선택기의 `r`로 새로 탐색하며
+Esc로 돌아갑니다. 읽기와 캡처는 선택한 연결에 유지되고 끊어졌다면 새 연결을 명시적으로
+골라야 합니다.
+
+별도 작업 세션은 `o`로 열고 `g`로 URL을 입력합니다. 기존 로그인을 사용하려면 `b`로
+해당 연결을 고른 뒤 관측한 탭을 선택합니다. 특정 transport가 필요하면 `A`로 고급
+backend 선택을 펼칩니다. `l`/`a`/`c` 단축키는 고급 모드에서만 동작합니다.
 
 | 키 | 동작 |
 | --- | --- |
-| `l` / `a` / `c` | live / automation / stagehand 소스 |
-| `b` | live 브라우저 연결 선택 |
-| `h` | 선택한 Keeper의 브라우저 관측 기록(observation history) 열기 (`[`/`]`로 저장된 페이지 전환, `y`로 영수증·아티팩트 참조 복사) |
+| `b` | Automatic·Work browser·관측한 연결 선택 |
+| `A` | 고급 backend 선택기를 열기 |
+| `l` / `a` / `c` | 고급 모드에서만 live / automation / Stagehand 선택 |
+| `h` | 선택한 Keeper의 브라우저 관측 기록 열기 (`[`/`]`로 저장 페이지 전환, `y`로 영수증·아티팩트 참조 복사) |
 | `[` / `]` | 이전 / 다음 탭으로 이동하며 읽기 |
 | `j` / `k`, 방향키 | 페이지 텍스트 스크롤 |
 | Page Up / Page Down, Home | 페이지 스크롤 / 맨 위 |
 | `r` | 재탐색 및 새로고침 |
 | `Ctrl-O` | 선택 탭 PNG 미리보기; 아무 키로 복귀 |
-| `g` | automation·stagehand URL 입력; Enter로 이동, Esc로 취소 |
-| `o` / `x` | automation·stagehand 세션 열기 / 닫기 |
+| `g` | 소유한 작업 세션의 URL 입력; Enter로 이동, Esc로 취소 |
+| `o` / `x` | 작업 세션 열기 / 선택한 소유 작업 세션 닫기 |
 | `Ctrl-^` / Esc / Left | 리더를 숨기고 이전 화면으로 복귀 |
 
-automation 페이지는 `a`, `o`, `g` 순서로 누른 뒤 URL을 입력합니다. stagehand 페이지는 `a` 대신 `c`를 누릅니다. PNG 미리보기에는 터미널 이미지 지원이 필요하며, 미지원 시 리더가 한계를 안내합니다. 미리보기는 Keeper에게 전송하지 않습니다. TUI 키는 읽기·캡처·automation·stagehand 세션 탐색을 제공하며, 요소 조작은 위 도구로 실행합니다.
+PNG 미리보기에는 터미널 이미지 지원이 필요하며 미지원 시 한계를 안내합니다. 미리보기는
+Keeper에게 전송하지 않습니다. TUI 키는 읽기·캡처·작업 세션 탐색을 제공하고 그 밖의 조작은
+위 도구로 실행합니다. 공유 작업 세션을 닫기 전에는 사용 관계를 조율합니다.
 
 리더를 숨겨도 이 TUI 세션의 선택 탭, 텍스트 스크롤, 작성 중인 채팅 임시본은 유지됩니다. Browser 진입은 연속 음성 모드를 종료하고 전송 대기 중인 녹취를 포함한 음성 캡처를 버립니다.

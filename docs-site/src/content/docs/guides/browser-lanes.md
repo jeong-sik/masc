@@ -240,29 +240,36 @@ the page after input to verify the application effect.
 ## TUI reader
 
 Press `Ctrl-^` (Ctrl-Shift-6), use `:` → `go Browser Lane`, or press `B` from
-Connectors. The reader shows the live, automation and stagehand sources and starts on live. Use `b` to choose Firefox or Zen, move with
-`j`/`k`, and confirm with Enter; `r` reloads the chooser and Esc returns. Reads and
-screenshots pin the selected connection. A disconnected selection requires an
-explicit new choice.
+Connectors. The reader starts with **Automatic** selection. Press `b` to choose
+Automatic, a separate **Work browser**, or an observed connection with existing
+logins. Move with `j`/`k`, confirm with Enter, refresh the chooser with `r`, and
+return with Esc. Reads and captures keep the selected connection; a disconnected
+selection requires an explicit new choice.
+
+To open a separate work session, press `o`, then `g` and enter a URL. To use an
+existing login, choose that connection with `b` and select one of its observed
+tabs. Press `A` to expose the advanced backend choices when a specific transport
+is needed. The `l`/`a`/`c` shortcuts are available only in advanced mode.
 
 | Key | Action |
 | --- | --- |
-| `l` / `a` / `c` | Live / automation / stagehand source |
-| `b` | Choose a live browser connection |
+| `b` | Choose Automatic, Work browser, or an observed connection |
+| `A` | Open the chooser with advanced backend choices |
+| `l` / `a` / `c` | Advanced mode only: live / automation / Stagehand |
 | `h` | Open the selected Keeper's browser observation history (`[`/`]` switches saved pages, `y` copies receipt/artifact ref) |
 | `[` / `]` | Previous / next tab and read its page |
 | `j` / `k`, arrows | Scroll page text |
 | Page Up / Page Down, Home | Page scroll / top |
 | `r` | Rediscover and refresh |
 | `Ctrl-O` | Preview the selected tab's PNG; any key returns |
-| `g` | Enter a URL for automation or stagehand; Enter navigates, Esc cancels |
-| `o` / `x` | Open / close the automation or stagehand session |
+| `g` | Enter a URL for an owned work session; Enter navigates, Esc cancels |
+| `o` / `x` | Open a work session / close the selected owned work session |
 | `Ctrl-^` / Esc / Left | Hide the reader and return |
 
-For an automation page, use `a`, then `o`, then `g` and a URL; for a stagehand page, `c` instead of `a`. PNG previews require
-terminal image support; otherwise the reader explains the limitation. The preview
-is not sent to a Keeper. TUI keys provide reading, capture, and automation or stagehand session
-navigation; element interaction is available through the tools above.
+PNG previews require terminal image support; otherwise the reader explains the
+limitation. A preview is not sent to a Keeper. TUI keys provide reading,
+capture and work-session navigation; use the tools above for other interactions.
+Coordinate use before closing a shared work session.
 
 Hiding preserves the selected tab, text scroll, and unsent chat draft in this TUI
 session. Entering Browser ends continuous voice mode and discards pending voice

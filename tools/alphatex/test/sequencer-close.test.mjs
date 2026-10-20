@@ -114,6 +114,17 @@ test('closing a ready analysis does not reinterpret its queued Enter as a note i
   assert.equal(worker.terminated,true)
 })
 
+test('an admitted analysis export drains on close while retaining the original musical document', async () => {
+  const initial = editor.editorCommand(editor.newEditor(),'note C4 0 1').editor.project
+  const view = await controller({initialDocument:initial})
+  view.command('harmony');await flush()
+  const worker = view.observed.workers[0], job = worker.requests[0]
+  worker.emit('message',{id:job.id,ok:true,result:{rows:[{kind:'span',start:0,end:PPQ,pitches:[60],notes:['C4'],candidates:[]}]}})
+  await flush();view.command('harmony-export /analysis.json');view.signal.abort();await view.done
+  assert.ok(view.observed.writes.includes('/analysis.json'))
+  assert.deepEqual(view.observed.saved.at(-1),initial)
+})
+
 test('reopened document auditions its frozen sound without consulting the picker', async () => {
   const selection = { plugin_path: '/synth.vst3', plugin_name: null, preset_path: '/removed.vstpreset', name: 'Bass' }
   const document = editor.editorSound(editor.editorCommand(editor.newEditor(), 'note C4 0 1').editor, frozenSound(selection)).project

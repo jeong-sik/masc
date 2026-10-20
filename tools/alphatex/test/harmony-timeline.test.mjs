@@ -73,4 +73,13 @@ test('actual worker preserves original MIDI pattern, channel scope and native ti
     assert.ok(result.result.rows[0].candidates.includes('Cmaj7'))
   })
   assert.deepEqual(source,before)
+  const smpteBytes = Buffer.from(file.toUint8Array()); smpteBytes.writeUInt16BE(0xe350,12) // -29, 80 ticks/frame
+  const smpte = importMidiSource(smpteBytes), smpteBefore = structuredClone(smpte)
+  await withWorker(async job => {
+    const result = await job(smpte,{kind:'track',id:'1',channel:1},{pattern:1})
+    assert.equal(result.ok,true)
+    assert.deepEqual(result.result.axis,{per:80,label:'frames'})
+    assert.deepEqual(result.result.rows.map(row=>[row.start,row.end,row.pitches]),[[0,2002,[60,64,67,71]],[2002,4004,[]]])
+  })
+  assert.deepEqual(smpte,smpteBefore)
 })

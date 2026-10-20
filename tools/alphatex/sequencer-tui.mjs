@@ -238,7 +238,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     let output = '\x1b[H'
     for (let row = 1; row <= rows; row++) output += `\x1b[${row};1H\x1b[2K`
     lines.slice(0, rows - 2).forEach((line, row) => { output += `\x1b[${row + 1};1H${fit(line)}` })
-    output += `\x1b[${rows - 1};1H${fit(prompt !== null ? `:${prompt}` : picker.view ? '↑/↓:choose  Enter:select  /:search  e:native editor  p:preset path  Esc:return' : harmony ? '↑/↓:choose interval  Enter:go to notes  :commands  Esc/q:return' : 'Space:play  i:instrument  Enter:note  arrows:cursor  Tab:track  :commands  ?:help')}`
+    output += `\x1b[${rows - 1};1H${fit(picker.view ? '↑/↓:choose  Enter:select  /:search  e:native editor  p:preset path  Esc:return' : prompt !== null ? `:${prompt}` : harmony ? '↑/↓:choose interval  Enter:go to notes  :commands  Esc/q:return' : 'Space:play  i:instrument  Enter:note  arrows:cursor  Tab:track  :commands  ?:help')}`
     output += `\x1b[${rows};1H${fit(harmony && !picker.view ? ':harmony mix|track  :harmony-export PATH · analysis preserves the musical document' : 's:save  l:loop  r:recording  q:save/back  n:new track  m:mute  o:solo')}`
     process.stdout.write(output)
   }
@@ -563,7 +563,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   try { draw(); if (signal?.aborted) finish(); await done }
   finally {
     if (pendingDraw) clearImmediate(pendingDraw)
-    closed = true; stop(); clearHarmony(); picker.close(); clearInterval(timer); sessionAbort.abort()
+    closed = true; stop(); picker.close(); clearInterval(timer); sessionAbort.abort()
     process.stdin.off('keypress', keypress); process.stdin.off('end', onEnd)
     process.stdout.off('resize', onResize); signal?.removeEventListener('abort', onAbort)
     for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.off(name, onSignal)
@@ -583,6 +583,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         }
       }
     } finally {
+      clearHarmony()
       await rm(directory, { recursive: true, force: true })
       if (!embedded) {
         process.stdout.write('\x1b[?25h\x1b[?1049l')

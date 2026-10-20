@@ -65,6 +65,45 @@ let at_sizes run =
       size (26, columns);
       List.iter run [Layout.Origin_inline; Origin_row; Origin_bare]) [80;140])
 
+(* A held turn's calls follow the tool stance: Compact draws them as one block
+   at the first call's place, Full draws each block where it ran. Read through
+   the rows' typed journal origins, not their words. *)
+let test_held_turn_tool_blocks_follow_the_tool_stance () =
+  let state = state Layout.Origin_bare in
+  let occurrence id =
+    { Live.stream_scope = 0; block_index = Hashtbl.hash id; provider_message_id = None
+    ; tool_call_id = Some id }
+  in
+  let call id =
+    [ Live.Tool_started { occurrence = occurrence id; tool_name = "execute" }
+    ; Live.Tool_ended { occurrence = occurrence id }
+    ; Live.Tool_result { occurrence = occurrence id; execution_id = "exec-" ^ id }
+    ]
+  in
+  ignore
+    (log state ~id:"turn" ~at:1.
+       ((Live.Run_started :: call "c1")
+        @ [ Live.Text { text = "Let me check."; response = Unobserved_scope None } ]
+        @ call "c2"
+        @ [ Live.Thinking { text = "and the caller"; response = None } ]
+        @ call "c3"
+        @ [ reply "done"; Live.Run_finished ]));
+  let tool_origins visibility =
+    state.msg_tool_visibility <- visibility;
+    (Render.keeper_message_projection state ~keeper_name:"alpha" ~chat_cols:80).tagged_entries
+    |> List.filter_map (fun (tag, _) ->
+         match Render.search_anchor_of_tag tag with
+         | Some
+             (T.Search_journal
+               { origin = Masc_tui_keeper_chat_transcript.Tool_stretch _ as origin; _ }) ->
+             Some origin
+         | Some _ | None -> None)
+  in
+  let full = tool_origins T.Tools_full in
+  check int "Full draws each block where it ran" 3 (List.length full);
+  check bool "Compact draws one block, at the first block's place" true
+    (tool_origins T.Tools_compact = [ List.hd full ])
+
 let test_settled_reply_and_complete_suffix () = at_sizes (fun origin ->
   let state = state origin in
   state.msg_loaded <- [
@@ -1488,6 +1527,8 @@ let () = run "chat search projection" [
     test_case "a settled conversation keeps its measured list" `Quick
       test_a_settled_conversation_keeps_its_measured_list;
     test_case "held replies and full suffix geometry" `Quick test_settled_reply_and_complete_suffix;
+    test_case "a held turn's tool blocks follow the tool stance" `Quick
+      test_held_turn_tool_blocks_follow_the_tool_stance;
     test_case "repeated matches within one entry are newest first" `Quick
       test_repeated_matches_within_entry;
     test_case "repeat across visibility, backfill and finalization" `Quick

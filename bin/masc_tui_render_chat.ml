@@ -381,9 +381,7 @@ let fold_thinking_entry (state : state) ~chat_cols (entry : Message_layout.entry
   else entry
 
 let tool_projection_mode (state : state) =
-  match state.msg_tool_visibility with
-  | Tools_compact -> Keeper_chat_transcript.Compact
-  | Tools_results | Tools_full -> Keeper_chat_transcript.Full
+  Masc_tui_types.tool_projection_mode_of_visibility state.msg_tool_visibility
 
 (* Which text a tool block's body is. Each Ctrl-D stance writes its own rows
    from the same calls ([keeper_message_tool_rows]), so a byte offset in one
@@ -2953,8 +2951,8 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
     let shown_attempts = ref [] in
     let entries =
       List.filter_map Fun.id
-      @@ List.mapi
-           (fun entry_index (item : Keeper_chat_transcript.drawn_item) ->
+      @@ List.map
+           (fun (entry_index, (item : Keeper_chat_transcript.drawn_item)) ->
               let timeline_at = match !frontier, item.at with
                 | Some floor, Some at -> Some (Float.max floor at)
                 | Some _ as at, None | None, (Some _ as at) -> at
@@ -3099,12 +3097,20 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                   None
               | Keeper_chat_transcript.Drawn_error text ->
                   entry Message_layout.Error (label "ERROR") text)
-           (preludes @ List.filter (fun (item : Keeper_chat_transcript.drawn_item) ->
-                match item.origin with
-                  | Admission_of_request _ -> false
-                  | Text_stretch _ | Thinking_stretch _ | Tool_stretch _ | Unstreamed_skills
-                  | Reply_of_segment _ | Error_of_segment _ -> true)
-              (Keeper_chat_transcript.drawn transcript))
+           (* Compact draws the turn's calls as one block at the first
+              call's place ([Keeper_chat_transcript.gather_drawn_tools]), the
+              rule the committed rows follow too. A row keeps the index of
+              the drawn position it came from, so gathering renumbers no
+              cached text. *)
+           (Keeper_chat_transcript.gather_drawn_tools (tool_projection_mode state)
+              ~item:snd ~with_item:(fun (entry_index, _) item -> entry_index, item)
+              (List.mapi (fun entry_index item -> entry_index, item)
+                 (preludes @ List.filter (fun (item : Keeper_chat_transcript.drawn_item) ->
+                      match item.origin with
+                        | Admission_of_request _ -> false
+                        | Text_stretch _ | Thinking_stretch _ | Tool_stretch _ | Unstreamed_skills
+                        | Reply_of_segment _ | Error_of_segment _ -> true)
+                    (Keeper_chat_transcript.drawn transcript))))
     in
     { lb_log = turn_log; lb_request_id = request_id; lb_member_ids = member_ids; lb_insertion = insertion; lb_timeline_at = timeline_at;
       lb_entries = entries }

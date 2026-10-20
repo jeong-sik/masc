@@ -3484,6 +3484,7 @@
   masc_tui_keeper_chat_log
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_queue
+  masc_tui_keeper_chat_transcript
   masc_tui_types))
 
 (test

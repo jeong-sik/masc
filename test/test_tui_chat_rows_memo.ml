@@ -345,6 +345,86 @@ let test_stale_cursor_retires_retained_history_across_revisits () =
     ["row at 3"] (texts state.msg_loaded)
 ;;
 
+(* Committed tool rows of one turn, as the history decoder leaves them when
+   the turn spoke between its calls: two blocks of one call each. *)
+let tool_entry ?(request_id = "req-1") call at : Tui_types.msg_entry =
+  let module Transcript = Masc_tui_keeper_chat_transcript in
+  { (entry_at ~request_id at) with
+    me_role = Tui_types.Message_tool
+  ; me_turn_phase = Tui_types.Turn_tool
+  ; me_tool_block =
+      Some
+        (Transcript.tool_block
+           [ Transcript.make_tool_activity ~execution_id:("exec-" ^ call)
+               ~call_id:(Some call) ~tool_name:"execute" ~args:"{}"
+               ~outcome:Transcript.Returned ~duration:None ()
+           ])
+  }
+;;
+
+(* Which kind of row each committed row is, and for a tool row which calls
+   it holds: the grouping, not the words the pane draws for it. *)
+let row_shape (row : Tui_types.msg_entry) =
+  match row.me_role, row.me_tool_block with
+  | Tui_types.Message_tool, Some block ->
+      "tools["
+      ^ String.concat ","
+          (List.map
+             (fun (activity : Masc_tui_keeper_chat_transcript.tool_activity) ->
+               Option.value ~default:"-" activity.call_id)
+             block.activities)
+      ^ "]"
+  | Tui_types.Message_tool, None -> "tools[]"
+  | Tui_types.Message_keeper, _ -> "keeper"
+  | _, _ -> "other"
+;;
+
+let shapes_under state visibility =
+  state.Tui_types.msg_tool_visibility <- visibility;
+  List.map row_shape (Tui_types.chat_rows_for state "alpha")
+;;
+
+(* The rule a held log's rows follow: Compact draws a turn's calls as one
+   block, Full and Results draw each block where it was. *)
+let test_compact_gathers_a_turns_committed_tool_rows () =
+  let state = fresh_state () in
+  state.Tui_types.msg_loaded <-
+    [ tool_entry "a" 1.0
+    ; entry_at ~request_id:"req-1" 2.0
+    ; tool_entry "b" 3.0
+    ; entry_at ~request_id:"req-1" 4.0
+    ];
+  Alcotest.(check (list string)) "Compact: one block for the turn's calls"
+    [ "tools[a,b]"; "keeper"; "keeper" ]
+    (shapes_under state Tui_types.Tools_compact);
+  List.iter
+    (fun visibility ->
+      Alcotest.(check (list string))
+        ("each block stays apart under " ^ Tui_types.tool_visibility_to_string visibility)
+        [ "tools[a]"; "tools[b]"; "keeper"; "keeper" ]
+        (shapes_under state visibility))
+    [ Tui_types.Tools_results; Tui_types.Tools_full ];
+  Alcotest.(check (list string)) "back to Compact, gathered again"
+    [ "tools[a,b]"; "keeper"; "keeper" ]
+    (shapes_under state Tui_types.Tools_compact)
+;;
+
+(* A block never joins another turn's calls, nor calls whose row names no
+   turn: there is nothing to say they belong together. *)
+let test_compact_keeps_other_turns_and_unkeyed_calls_apart () =
+  let state = fresh_state () in
+  state.Tui_types.msg_loaded <-
+    [ tool_entry ~request_id:"req-1" "a" 1.0; tool_entry ~request_id:"req-2" "b" 2.0 ];
+  Alcotest.(check (list string)) "two turns, two blocks"
+    [ "tools[a]"; "tools[b]" ]
+    (shapes_under state Tui_types.Tools_compact);
+  state.Tui_types.msg_loaded <-
+    [ tool_entry ~request_id:"" "a" 1.0; tool_entry ~request_id:"" "b" 2.0 ];
+  Alcotest.(check (list string)) "rows with no turn id stay apart"
+    [ "tools[a]"; "tools[b]" ]
+    (shapes_under state Tui_types.Tools_compact)
+;;
+
 let () =
   Alcotest.run
     "tui chat rows memo"
@@ -371,6 +451,12 @@ let () =
             test_replaced_settled_logs_are_seen;
           Alcotest.test_case "a held log completed in place is seen" `Quick
             test_a_held_log_completed_in_place_is_seen
+        ] )
+    ; ( "tool gathering",
+        [ Alcotest.test_case "Compact gathers a turn's committed tool rows" `Quick
+            test_compact_gathers_a_turns_committed_tool_rows;
+          Alcotest.test_case "Compact keeps other turns and unkeyed calls apart" `Quick
+            test_compact_keeps_other_turns_and_unkeyed_calls_apart
         ] )
     ]
 ;;

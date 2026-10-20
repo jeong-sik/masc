@@ -556,15 +556,16 @@ let keeper_event_queue_health_json ~execution_snapshot () =
       ~owner_lifecycle
     |> keeper_event_queue_health_dimensions ~source_unavailable:false
 
-(* [meta_scan] is [None] exactly when there is no workspace state: no
-   Keeper is paused on disk, bootable, or an autoboot target. *)
+(* [fleet_reading] pairs the reading with the meta scan taken from it. It is
+   [None] exactly when there is no workspace state: no Keeper is paused on
+   disk, bootable, or an autoboot target. *)
 let keeper_fleet_runtime_resolution_base_fields
     ~phase_snapshot
-    ~meta_reading
-    ~meta_scan
+    ~fleet_reading
     ?(include_reaction_ledger = true)
     () =
   let base_path = runtime_base_path_opt () in
+  let meta_reading = Option.map fst fleet_reading in
   let execution_snapshot =
     match meta_reading with
     | Some reading -> keeper_execution_snapshot reading
@@ -573,8 +574,8 @@ let keeper_fleet_runtime_resolution_base_fields
   let phase_counts = phase_snapshot.counts in
   let keeper_fibers = phase_counts.running in
   let paused_scan, bootable_names, autoboot_scan =
-    match meta_scan with
-    | Some scan -> scan.paused_scan, scan.bootable_names, scan.autoboot_scan
+    match fleet_reading with
+    | Some (_, scan) -> scan.paused_scan, scan.bootable_names, scan.autoboot_scan
     | None -> empty_paused_keeper_scan, [], empty_autoboot_keeper_scan
   in
   let paused_keepers_json =
@@ -688,28 +689,25 @@ let runtime_truth_json ~build ~path_diagnostics ~keeper_fibers ~fd_accountant =
    owner set the execution snapshot classifies is read after the phases. *)
 let keeper_fleet_runtime_resolution_fields () =
   let phase_snapshot = keeper_phase_snapshot ?base_path:(runtime_base_path_opt ()) () in
-  let meta_reading =
-    Option.map
-      (fun state -> read_keeper_metas (Mcp_server.workspace_config state))
-      (current_server_state_opt ())
-  in
   (* The full projection keeps the boot path's meaning of bootable
      ([Keeper_runtime.bootable_keeper_names]); paused and autoboot come from
      the same meta scan the light projection and /health use. *)
-  let meta_scan =
+  let fleet_reading =
     Option.map
-      (fun reading ->
-        { (keeper_fleet_meta_scan reading) with
-          bootable_names = boot_path_bootable_names reading })
-      meta_reading
+      (fun state ->
+        let reading = read_keeper_metas (Mcp_server.workspace_config state) in
+        ( reading
+        , { (keeper_fleet_meta_scan reading) with
+            bootable_names = boot_path_bootable_names reading } ))
+      (current_server_state_opt ())
   in
-  keeper_fleet_runtime_resolution_base_fields ~phase_snapshot ~meta_reading ~meta_scan ()
+  keeper_fleet_runtime_resolution_base_fields ~phase_snapshot ~fleet_reading ()
   @ [ "fd_accountant", fd_accountant_snapshot_json () ]
 ;;
 
 let keeper_fleet_runtime_resolution_light_fields ?profile_snapshot () =
   let phase_snapshot = keeper_phase_snapshot ?base_path:(runtime_base_path_opt ()) () in
-  let meta_reading =
+  let fleet_reading =
     match current_server_state_opt () with
     | Some state ->
       let config = Mcp_server.workspace_config state in
@@ -719,16 +717,13 @@ let keeper_fleet_runtime_resolution_light_fields ?profile_snapshot () =
         | None ->
           Keeper_types_profile.read_keeper_profile_snapshot ~base_path:config.base_path
       in
-      Some (read_keeper_metas ~profile_snapshot config)
+      let reading = read_keeper_metas ~profile_snapshot config in
+      Some (reading, keeper_fleet_meta_scan ~include_paused_details:false reading)
     | None -> None
-  in
-  let meta_scan =
-    Option.map (keeper_fleet_meta_scan ~include_paused_details:false) meta_reading
   in
   keeper_fleet_runtime_resolution_base_fields
     ~phase_snapshot
-    ~meta_reading
-    ~meta_scan
+    ~fleet_reading
     ~include_reaction_ledger:false
     ()
   @ [ "fd_accountant", fd_accountant_snapshot_json () ]

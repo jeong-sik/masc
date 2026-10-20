@@ -29,10 +29,13 @@ val read_keeper_metas :
     Keeper's live profile load. *)
 
 val boot_path_bootable_names : keeper_meta_reading -> string list
-(** [Keeper_runtime.bootable_keeper_names] over the reading: declared Keepers
-    the boot path does not exclude and whose profile loads. Unlike the meta
-    scan's [bootable_names], a Keeper whose metadata file is unreadable counts
-    only when its profile loads. *)
+(** Declared Keepers the boot path does not exclude and whose profile loads.
+    For a reading taken without a profile snapshot ([read_keeper_metas] with
+    no [profile_snapshot]) this is the set [Keeper_runtime.bootable_keeper_names]
+    answers, in sorted order; with a snapshot the profiles come from it
+    instead of each Keeper's live load. Unlike the meta scan's
+    [bootable_names], a Keeper whose metadata file is unreadable counts only
+    when its profile loads. *)
 
 val pause_kind : Keeper_meta_contract.keeper_meta -> pause_kind
 val pause_kind_to_wire : pause_kind -> string
@@ -41,12 +44,6 @@ val empty_paused_keeper_scan : paused_keeper_scan
 val paused_keepers_health_json_of_scan :
   registry_paused_names:String.t list ->
   paused_keeper_scan ->
-  [> `Assoc of
-       (string * [> `Int of int | `List of Yojson.Safe.t list | `String of string ])
-       list
-  ]
-val paused_keepers_health_json :
-  unit ->
   [> `Assoc of
        (string * [> `Int of int | `List of Yojson.Safe.t list | `String of string ])
        list
@@ -109,8 +106,8 @@ val owner_execution_truth :
 val active_task_owner_fiber_scan_semantics : string
 val keeper_fleet_safety_health_json :
   meta_reading:keeper_meta_reading option ->
-  ?bootable_names:string list ->
-  ?autoboot_scan:autoboot_keeper_scan ->
+  bootable_names:string list ->
+  autoboot_scan:autoboot_keeper_scan ->
   ?phase_snapshot:keeper_phase_snapshot ->
   execution_snapshot:keeper_execution_snapshot ->
   ?base_path:string ->

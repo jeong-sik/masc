@@ -1617,6 +1617,66 @@ let test_fleet_projections_read_each_keeper_meta_once () =
           1.0
           health_reads))
 
+(* The full runtime resolution answers bootable with the boot path's rule.
+   [boot_path_bootable_names] must name the set
+   [Keeper_runtime.bootable_keeper_names] names; the meta scan's own
+   [bootable_names] differs for a Keeper whose meta file is unreadable and
+   whose profile does not load, so the full projection must not report it. *)
+let test_full_runtime_resolution_bootable_follows_the_boot_path () =
+  with_temp_dir "full-fleet-bootable-boot-path" (fun dir ->
+    let config_root = make_config_root dir in
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.For_testing.restore_server_state @@ previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
+        Server_auth.For_testing.restore_server_state @@ Some state;
+        let config = Mcp_server.workspace_config state in
+        let keepers_dir = Filename.concat config_root "keepers" in
+        let declare name body =
+          write_file (Filename.concat keepers_dir (name ^ ".toml")) body
+        in
+        let autonomous =
+          "[keeper]\nactivation_mode = \"autonomous\"\ninstructions = \"answer\"\n"
+        in
+        declare "unreadable" "[keeper\n";
+        let unreadable_meta = Keeper_types_profile.keeper_meta_path config "unreadable" in
+        mkdir_p (Filename.dirname unreadable_meta);
+        write_file unreadable_meta "{";
+        declare "held" autonomous;
+        write_keeper_meta_exn config (make_keeper_meta ~paused:true ~name:"held" ());
+        declare "manual"
+          "[keeper]\nactivation_mode = \"manual\"\ninstructions = \"answer\"\n";
+        declare "declared-only" autonomous;
+        let boot_path = List.sort compare (Keeper_runtime.bootable_keeper_names config) in
+        let reading = Server_routes_http_runtime_fleet_scan.read_keeper_metas config in
+        Alcotest.(check (list string))
+          "the boot path admits the declared Keepers that are not held"
+          [ "declared-only"; "example" ]
+          boot_path;
+        Alcotest.(check (list string))
+          "boot_path_bootable_names names the boot path's set"
+          boot_path
+          (Server_routes_http_runtime_fleet_scan.boot_path_bootable_names reading);
+        Alcotest.(check bool)
+          "the meta scan's own bootable counts the unreadable Keeper"
+          true
+          (List.mem "unreadable"
+             (Server_routes_http_runtime_fleet_scan.keeper_fleet_meta_scan reading)
+               .bootable_names);
+        let open Yojson.Safe.Util in
+        Alcotest.(check (list string))
+          "the full projection reports the boot path's bootable set"
+          boot_path
+          (`Assoc (Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields ())
+           |> member "keeper_fleet_safety"
+           |> member "bootable_keeper_names" |> to_list |> List.map to_string
+           |> List.sort compare)))
+
 let test_health_json_observes_owner_turn () =
   with_temp_dir "health-keeper-owner-work" (fun dir ->
     let config_root = make_config_root dir in
@@ -6357,6 +6417,9 @@ let () =
           Alcotest.test_case
             "fleet projections read each Keeper meta once"
             `Quick test_fleet_projections_read_each_keeper_meta_once;
+          Alcotest.test_case
+            "full runtime resolution bootable follows the boot path"
+            `Quick test_full_runtime_resolution_bootable_follows_the_boot_path;
           Alcotest.test_case
             "health json surfaces Keeper Owner turn"
             `Quick test_health_json_observes_owner_turn;

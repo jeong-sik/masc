@@ -3158,7 +3158,11 @@ let test_absorbed_search_reads_events_only_for_an_answered_stopped_chain () =
     Alcotest.(check bool)
       "a stopped chain in a row the query answers reads the sidecar, and the search fails"
       false
-      (List.mem_assoc "matches" fields)
+      (List.mem_assoc "matches" fields);
+    Alcotest.(check string)
+      "the search fails because the sidecar could not be read"
+      "events_read_failed"
+      (string_field "error_kind" (`Assoc fields))
   | _ -> Alcotest.fail "the search result is an object"
 ;;
 

@@ -4003,7 +4003,7 @@ status: reference
     claim에서 멈춰 `into_current=false`로 보고하지 않고 원장의 `Revised` 이벤트(`superseded_by`)를
     따라 현재 살아 있는 claim까지 연쇄 추적하여 `into_current=true`로 연결한다.
     매 검색마다 이벤트 사이드카를 읽는 부하를 막기 위해 평소에는 흡수 원장(`memory-absorbed.jsonl`)만으로
-    해결하고, 체인의 끝이 non-current일 때만 사이드카(`.memory-events.jsonl`)를 읽는다. 손상된
+    해결하고, 검색어에 답하는 행의 체인 끝이 non-current일 때만 사이드카(`.memory-events.jsonl`)를 읽는다. 손상된
     이벤트 줄은 `event_unreadable_lines`로 분리 보고된다(#38543·#38552).
   - **Keeper 삭제 시 사이드카 정리 및 캐시 무효화**: Keeper를 삭제(`purge_keeper_artifacts`)할 때 이
     사이드카 파일(`<keeper>.memory-events.jsonl`)도 함께 삭제(`Keeper_memory_events_artifact`)되고

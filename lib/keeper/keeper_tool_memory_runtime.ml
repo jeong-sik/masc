@@ -425,7 +425,8 @@ type absorbed_search =
   ; unreadable : (int * Keeper_memory_absorbed.read_error) list
   ; unreadable_events : (int * Keeper_memory_os_events.read_error) list
         (** Lines of the memory events sidecar that did not decode. A
-            [Revised] step on such a line is not followed. *)
+            [Revised] step on such a line is not followed. Empty when the
+            sidecar was not read. *)
   }
 
 let current_memory_ids facts =

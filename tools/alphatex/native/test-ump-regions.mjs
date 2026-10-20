@@ -14,6 +14,35 @@ try {
  await writeFile(join(directory,'Output.swift'),output+'\nvar sent:[(String,[UInt32])]=[];var unavailable=false;var failNext=false;var host:UInt64=0\n')
  const regions=(await readFile(new URL('UmpRegions.swift',import.meta.url),'utf8')).replaceAll('DispatchTime.now().uptimeNanoseconds','host')
  await writeFile(join(directory,'Regions.swift'),regions)
+ // Compute each expected deadline directly with unbounded rational arithmetic,
+ // independently of the production common-clock representation.
+ const startN=703687441776640000000000n,startD=1408547695956241n,ceil=(n,d)=>n/d+(n%d?1n:0n)
+ const sharedFractions=[{divisor:startD,cut:0n,repeats:1},{divisor:startD,cut:2n*startD+1n,repeats:3},
+  {divisor:125n*startD,cut:250n*startD+1n,repeats:4}].map((value,index)=>{
+  const {divisor,cut,repeats}=value,length=48000n*divisor+1n
+  const deadline=delta=>ceil(startN*3n*divisor+delta*125n*startD,startD*3n*divisor)
+  const entries=Array.from({length:repeats},(_,copy)=>deadline(BigInt(copy)*length))
+  const attacks=Array.from({length:repeats},(_,copy)=>deadline(BigInt(copy)*length+3n*divisor-cut))
+  const releases=Array.from({length:repeats},(_,copy)=>deadline(BigInt(copy)*length+4n*divisor-cut))
+  return `do {
+ var region=clip("shared-${index}",start:display(${startN},${startD}),offset:"${cut}",extent:"${length}",repeatCount:${repeats})
+ region.startNanoseconds=ExactNanoseconds(numerator:"${startN}",denominator:"${startD}");region.sourceDivisor="${divisor}"
+ let scheduler:UmpRegionTransport
+ do{scheduler=try owner([sharedSource],[region])}catch{FileHandle.standardError.write(Data("shared fractional source falsely refused: \\(error)\\n".utf8));exit(1)}
+ let c=scheduler.clips[0],entries:[UInt64]=[${entries}],attacks:[UInt64]=[${attacks}],releases:[UInt64]=[${releases}]
+ precondition(c.start==${ceil(startN,startD)} && c.end==${deadline(BigInt(repeats)*length)},"shared-clock exact outer bounds")
+ host=0;sent=[];try scheduler.stageCoordinated(at:0);try scheduler.runCoordinated(anchorNanoseconds:10)
+ for copy in entries.indices {
+  precondition(c.deadline(copy:UInt64(copy),delta:0)==entries[copy],"copy entry rounded from independent rational")
+  precondition(c.next(copy:UInt64(copy),index:0)==attacks[copy] && c.next(copy:UInt64(copy),index:1)==releases[copy],"packet deadlines retain fractional source cut")
+  precondition(c.phase(at:attacks[copy])!.copy==UInt64(copy),"exact deadline remains in its source copy")
+  host=10+attacks[copy]-1;scheduler.tick();precondition(sent.count==copy*2,"fractional attack sent early")
+  host+=1;scheduler.tick();precondition(sent.last!.1==on && sent.count==copy*2+1)
+  host=10+releases[copy];scheduler.tick();precondition(sent.last!.1==off && sent.count==copy*2+2 && scheduler.output.held.isEmpty)
+ }
+ scheduler.finish(reason:"shared-fraction",error:nil,publish:false)
+}`
+ }).join('\n')
  const main=`import Foundation
 func refuses(_ action:()throws->Void){do{try action();preconditionFailure("invalid region admitted")}catch{}}
 let on:[UInt32]=[0x43953c03,0x80012345],off:[UInt32]=[0x43853c00,0x12340000],bend:[UInt32]=[0x43e50000,0x80000000]
@@ -292,6 +321,28 @@ do {try later.stageCoordinated(at:0.05);preconditionFailure("admitted a seek bef
 precondition(later.state == .playing && later.timer != nil,"a refused seek leaves the playing owner unchanged")
 try later.stageCoordinated(at:0.15);precondition(later.state == .staged)
 later.finish(reason:"test",error:nil,publish:false)
+// Source window [1/2,5/2) ticks: both original packets stay inside. Each
+// deadline includes the original fractional cut and absolute repeat once.
+var fractional=clip(offset:"1",extent:"4",repeatCount:2);fractional.sourceDivisor="2"
+let fractionalSource=source("take",[packet(1,on),packet(2,off)],numer:125,denom:3,extent:"10")
+let fractionOwner=try owner([fractionalSource],[fractional])
+host=0;sent=[];try fractionOwner.stageCoordinated(at:0);try fractionOwner.runCoordinated(anchorNanoseconds:10)
+for (time,count) in [(UInt64(30),0),(31,1),(73,2),(115,3),(156,4)] {
+ host=time;fractionOwner.tick();precondition(sent.filter{$0.1==on || $0.1==off}.count==count)
+}
+precondition(fractionOwner.clips[0].end==167)
+fractionOwner.finish(reason:"fractional",error:nil,publish:false)
+var invalidFraction=fractional;invalidFraction.sourceDivisor="0"
+refuses{_ = try owner([fractionalSource],[invalidFraction])}
+print("UMP_FRACTIONAL_REGIONS_PASS")
+// Binary tempo placement and source subdivision share large factors. Admission
+// must not multiply those denominators twice or change cut/repeat deadlines.
+let sharedSource=source("take",[packet(3,on),packet(4,off)],numer:125,denom:3,extent:"2400001")
+var sharedWhole=clip(start:display(${startN},${startD}),extent:"48000")
+sharedWhole.startNanoseconds=ExactNanoseconds(numerator:"${startN}",denominator:"${startD}")
+_ = try owner([sharedSource],[sharedWhole])
+${sharedFractions}
+print("UMP_SHARED_FRACTIONAL_CLOCK_PASS: exact finite admission, nonzero fractional cuts, reduced source clocks, repeated deadlines and sends")
 refuses{_ = try owner([source("take",[packet(0,[0x30120102,0])])],[clip()])}
 let lost=try owner([a],[clip()]);host=0;try lost.stageCoordinated(at:0);try lost.runCoordinated(anchorNanoseconds:10);unavailable=true;host=10;lost.tick();precondition(lost.state == .stopped && lost.terminalFailure != nil)
 print("UMP_REGIONS_PASS: exact adjacent ticks and UInt64+1 end, original attributes/releases and active-copy FIFO drain, exact-entry attacks, silent staging, 2M compressed late-copy lookup, pause/seek/resume, independent overlapping scopes, sequential physical baselines, first-copy entry after earlier regions only, repeat and seek-back baselines, uncertain acquisition cleanup, unsupported/overlap admission and endpoint loss")

@@ -54,6 +54,18 @@ Source offsets/extents use whole WAV frames, original SMF ticks or decimal
 host-tick strings for raw practice recordings; project
 positions use quarter-note beats. Pattern numbers in commands start at 1.
 Trim rejects an out-of-bounds range rather than rounding or shortening it.
+For practice boundaries between whole host ticks, use
+`:practice-region ASSET BEAT OFFSET EXTENT DIVISOR [REPEAT]` or select a practice
+region and use `:trim-fraction OFFSET EXTENT DIVISOR`. Offset and extent are
+decimal integer numerators in original host ticks divided by the positive
+integer divisor. For example, `:trim-fraction 1 4 2` selects `[1/2, 5/2)` host
+ticks from the source origin. Normal `:trim` explicitly returns to whole ticks.
+These exact cuts survive move, duplicate, undo and save/reopen. They reach both
+external original-UMP playback and the captured VST's source-audio clock;
+repeats and common loops retain the fractional period without accumulating a
+rounded copy length. Packet timestamps/words remain unchanged. Update the
+installed AlphaTex/native companion together. Automatic practice-pass selection
+and alignment are subsequent work on this source-window foundation.
 `x`/Delete removes a region, `d` duplicates at the cursor, `m`/`o` toggles lane
 mute/solo, and `u`/`y` undoes/redoes document edits. `:lane-remove` retains sources.
 `:title`, `:tempo`, `:meter`, `:lane-name` and `:region-name` edit their named fields.

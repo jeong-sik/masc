@@ -46,6 +46,7 @@ struct UmpRegion: Decodable {
     let repeatCount: UInt64
     var component: CaptureRegionComponent? = nil
     var startNanoseconds: ExactNanoseconds? = nil
+    var sourceDivisor: String? = nil
 }
 struct UmpArrangement: Decodable {
     let schemaVersion: Int
@@ -60,13 +61,14 @@ struct UmpLoopWindow {
     let cycle: MidiCycle
     let period: UInt128, divisor: UInt128, masterScale: UInt128
     let sourcePeriod: UInt128, sourceEnd: UInt128, tick: UInt128
+    let unit: UInt128, subdivision: UInt128
     let offset: Int128
     let repetitions: UInt64
 
     init(cycle: MidiCycle, start: (numerator: UInt128, divisor: UInt128),
-         numer: UInt32, denom: UInt32, extent: UInt128, repetitions: UInt64) throws {
+         numer: UInt32, denom: UInt32, extent: UInt128, repetitions: UInt64, subdivision: UInt128 = 1) throws {
         guard let authoredOrigin = cycle.exactStart, start.divisor > 0, numer > 0, denom > 0,
-              extent > 0, repetitions > 0 else { throw MidiFailure("captured looping requires exact original clocks") }
+              extent > 0, repetitions > 0, subdivision > 0 else { throw MidiFailure("captured looping requires exact original clocks") }
         func gcd(_ a: UInt128, _ b: UInt128) -> UInt128 {
             var a = a, b = b
             while b > 0 { let remainder = a % b; a = b; b = remainder }
@@ -78,15 +80,17 @@ struct UmpLoopWindow {
             return (value.numerator / factor, value.divisor / factor)
         }
         let origin = reduced(authoredOrigin), start = reduced(start)
-        let reduction = gcd(UInt128(numer), UInt128(denom))
-        let sourceD = UInt128(denom) / reduction
+        let sourceDenominator = try umpMultiply(UInt128(denom), subdivision)
+        let reduction = gcd(UInt128(numer), sourceDenominator)
+        let sourceD = sourceDenominator / reduction
         let first = try lcm(cycle.divisor, origin.divisor)
         let second = try lcm(first, start.divisor)
         let divisor = try lcm(second, sourceD)
         let masterScale = divisor / cycle.divisor
         let period = try umpMultiply(cycle.period, masterScale)
-        let tick = try umpMultiply(UInt128(numer) / reduction, divisor / sourceD)
-        let sourcePeriod = try umpMultiply(extent, tick)
+        let unit = try umpMultiply(UInt128(numer) / reduction, divisor / sourceD)
+        let tick = try umpMultiply(unit, subdivision)
+        let sourcePeriod = try umpMultiply(extent, unit)
         let sourceEnd = try umpMultiply(sourcePeriod, UInt128(repetitions))
         let a = origin.numerator / origin.divisor, b = start.numerator / start.divisor
         let ar = try umpMultiply(origin.numerator % origin.divisor, divisor / origin.divisor)
@@ -103,6 +107,7 @@ struct UmpLoopWindow {
         self.cycle = cycle; self.period = period; self.divisor = divisor; self.masterScale = masterScale
         self.sourcePeriod = sourcePeriod; self.sourceEnd = sourceEnd; self.tick = tick
         self.offset = positive ? Int128(distance) : -Int128(distance); self.repetitions = repetitions
+        self.unit = unit; self.subdivision = subdivision
     }
     // Return original finite source-copy phase at an exact master remainder.
     func phase(remainder: UInt128) throws -> (copy: UInt64, local: UInt128)? {
@@ -328,6 +333,11 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
             }
             sources[source.id] = (source, timed)
         }
+        func gcd(_ a: UInt128, _ b: UInt128) -> UInt128 {
+            var a = a, b = b
+            while b > 0 { let remainder = a % b; a = b; b = remainder }
+            return a
+        }
         var admitted: [UmpRegionClip] = [], potential = UmpFootprint()
         for region in timeline.regions {
             guard !region.id.isEmpty, region.component != .audio, let (source, timed) = sources[region.source], region.repeatCount > 0 else { throw MidiFailure("invalid captured region source or repetition") }
@@ -337,22 +347,31 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
             let (startN, startD) = startFraction
             guard startN / startD <= UInt128(UInt64.max) else { throw MidiFailure("captured placement exceeds native host timeline") }
             let origin = UInt64(startN / startD), cut = try umpUnsigned(region.offset), length = try umpUnsigned(region.extent)
-            let after = try umpAdd(cut, length), bound = try umpUnsigned(source.extent)
+            let subdivision = try region.sourceDivisor.map(umpUnsigned) ?? 1
+            let after = try umpAdd(cut, length), bound = try umpMultiply(umpUnsigned(source.extent), subdivision)
+            guard subdivision > 0 else { throw MidiFailure("invalid captured source divisor") }
             guard length > 0, after <= bound else { throw MidiFailure("captured region exceeds its source bounds") }
-            let numer = try umpMultiply(UInt128(source.timeline.clock.numer), startD)
-            let denom = try umpMultiply(UInt128(source.timeline.clock.denom), startD)
-            let phaseOffset = try umpMultiply(startN % startD, UInt128(source.timeline.clock.denom))
+            // Reduce the source tick fraction before finding its common clock
+            // with placement. Shared large denominators must be scaled once.
+            let sourceDenominator = try umpMultiply(UInt128(source.timeline.clock.denom), subdivision)
+            let reduction = gcd(UInt128(source.timeline.clock.numer), sourceDenominator)
+            let sourceD = sourceDenominator / reduction
+            let denom = try umpMultiply(startD / gcd(startD, sourceD), sourceD)
+            let unit = try umpMultiply(UInt128(source.timeline.clock.numer) / reduction, denom / sourceD)
+            let numer = try umpMultiply(unit, subdivision)
+            let phaseOffset = try umpMultiply(startN % startD, denom / startD)
             let lowerBound = try umpAdd(umpMultiply(UInt128(origin), denom), phaseOffset)
             let startWide = UInt128(origin) + (phaseOffset == 0 ? 0 : 1)
             guard startWide <= UInt128(UInt64.max) else { throw MidiFailure("captured placement exceeds native host timeline") }
             let start = UInt64(startWide)
-            let period = try umpMultiply(length, numer), scaledCut = try umpMultiply(cut, numer)
-            _ = try umpMultiply(after, numer)
+            let period = try umpMultiply(length, unit), scaledCut = try umpMultiply(cut, unit)
+            _ = try umpMultiply(after, unit)
             let total = try umpMultiply(period, UInt128(region.repeatCount))
             let upperBound = try umpAdd(lowerBound, total)
             let end = upperBound / denom + (upperBound % denom == 0 ? 0 : 1)
             guard end > UInt128(start), end <= UInt128(duration) else { throw MidiFailure("captured region exceeds arrangement duration") }
-            let endIndex = timed.firstIndex { UInt128($0.ticks) >= after } ?? timed.count
+            let afterTick = after / subdivision + (after % subdivision == 0 ? 0 : 1)
+            let endIndex = timed.firstIndex { UInt128($0.ticks) >= afterTick } ?? timed.count
             let events = timed.map(\.event), scope = Set(events.prefix(endIndex).compactMap(UmpChannel.init(voice:)))
             // Every replayed prefix is part of this physical scope, even when
             // its keys were originally acquired before the cut.

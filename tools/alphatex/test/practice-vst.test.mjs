@@ -64,6 +64,29 @@ test('captured sound route derives sample-frame VST input without changing raw U
   assert.deepEqual((await loadArrangement(saved)).project, before)
 }))
 
+test('fractional host cuts reach both actual VST and raw worker plans, survive save and return to whole-tick trims', () => fixture(async ({ root, path, project, start, request }) => {
+  let editor = arrangementEditor(project)
+  editor = arrangementCommand(editor, 'select region-1').editor
+  editor = arrangementCommand(editor, 'trim-fraction 3 4800000 7').editor
+  const selected = editor.project, prepared = await start(selected).promise, plan = await json(prepared.path)
+  assert.deepEqual(plan.regions[0].sourceClock, { start: '375', end: '600000375', denominator: '21000000000' })
+  assert.equal(plan.regions[0].offsetFrames, 1); assert.equal(plan.regions[0].frameCount, 1371)
+  const raw = await request({ kind: 'prepare-capture', project: selected, sourceRoot: dirname(path), directory: root, midiOutput: '42' })
+  const external = await json(raw.path), clip = external.umpRegions.regions[0]
+  assert.equal(clip.offset, '3'); assert.equal(clip.extent, '4800000'); assert.equal(clip.sourceDivisor, '7')
+  assert.deepEqual(external.umpRegions.sources[0].timeline.clock, { origin: '18446744073708999999', numer: 125, denom: 3 })
+  const saved = join(root, 'fractional/song.json'); await saveArrangement(saved, selected, null, { sourceRoot: dirname(path) })
+  assert.deepEqual((await loadArrangement(saved)).project, selected)
+  editor = arrangementCommand(editor, 'duplicate 8').editor
+  assert.ok(editor.project.clips.every(clip => clip.sourceDivisor === '7'))
+  editor = arrangementCommand(editor, 'trim 1 48000').editor
+  assert.equal(editor.project.clips.at(-1).sourceDivisor, undefined)
+  editor = arrangementCommand(editor, 'undo').editor; assert.equal(editor.project.clips.at(-1).sourceDivisor, '7')
+  const added = arrangementCommand(editor, 'practice-region asset-1 12 3 4800000 7 2000000').editor.project.clips.at(-1)
+  assert.equal(added.sourceDivisor, '7'); assert.equal(added.repeat, 2000000)
+  for (const command of ['trim-fraction 0 1 0', 'trim-fraction 0 1 01', 'trim-fraction 0 16800008 7', 'practice-region missing 0 1 2 3']) assert.throws(() => arrangementCommand(editor, command))
+}))
+
 test('captured track controls precede same-frame raw overrides in the actual worker render input', () => fixture(async ({ project, rows, calls, start, context }) => {
   const original = structuredClone(rows), before = structuredClone(project)
   await start().promise

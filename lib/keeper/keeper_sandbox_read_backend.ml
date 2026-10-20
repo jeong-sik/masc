@@ -316,6 +316,12 @@ let run_command_with_capture ?turn_sandbox_factory
           | Error detail -> Error detail
           | Ok (status, _, _, Some files) ->
             (match status, files.stdout with
+             | Unix.WEXITED code, _
+               when code <> 0 && List.exists (fun ok -> ok = code) ok_exit_codes ->
+               (* A caller-declared non-zero exit (e.g. a read sentinel) is a
+                  classified outcome, not a capture fault; it carries no
+                  payload. *)
+               Ok (status, "")
              | Unix.WEXITED 0, Process_output_capture.Complete_file {path; byte_length} ->
                (match Fs_compat.load_owned_regular_file ~ownership_root:capture_dir path with
                 | Ok (Some bytes) when String.length bytes = byte_length -> Ok (status, bytes)
@@ -593,10 +599,8 @@ let read_raw_prefix ?turn_sandbox_factory ~config ~(meta : keeper_meta)
      host, and a directory already maps to [Not_a_file] via [! -f], so the
      sentinels are the single classifier on every profile.
 
-     Limitation: the frozen Turn_runtime binary capture only admits [WEXITED
-     0], so sentinel exits there surface as [Read_failed], not [Missing_file].
-     That profile keeps the pre-classification behavior deliberately; opening
-     exit-code reads on the capture side is future work. *)
+     The frozen Turn_runtime binary capture honours [ok_exit_codes], so the
+     sentinel exits classify as [Missing_file] / [Not_a_file] there too. *)
   match container_path_of_host ~config ~meta ~host_path with
   | Error detail -> Error (Read_failed detail)
   | Ok backend_path ->

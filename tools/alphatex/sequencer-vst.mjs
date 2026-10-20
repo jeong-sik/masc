@@ -2,6 +2,8 @@ import { projectMidi } from './sequencer-files.mjs'
 import { sequenceEvents } from './sequencer-project.mjs'
 import { midiSourcePattern, exportMidiSourcePattern } from './midi-source.mjs'
 import { nativeJob, retainRender } from './vst.mjs'
+import { renderBoundVst } from './project-sound-files.mjs'
+import { validateVstSelection } from './project-sound.mjs'
 
 export function projectVstMidi(project, options = {}) {
   if (project?.kind === 'midi-source') {
@@ -17,7 +19,7 @@ export function projectVstMidi(project, options = {}) {
 
 // One owned preparation, native child and retention operation. A failed VST
 // never starts another instrument or a fallback player.
-export function renderVstPhrase({ preparation, selection, outputPath, stateDirectory, loop = false, run = nativeJob }) {
+export function renderVstPhrase({ preparation, selection, sound, outputPath, stateDirectory, loop = false, run = nativeJob }) {
   let cancelled = false, native = null
   const check = () => {
     if (cancelled) { const error = new Error('VST phrase cancelled'); error.code = 'ABORT_ERR'; throw error }
@@ -25,8 +27,9 @@ export function renderVstPhrase({ preparation, selection, outputPath, stateDirec
   const promise = (async () => {
     const midi = await preparation.promise
     check()
-    native = run({ operation: 'render', ...selection, midi_path: midi.path, output_path: outputPath,
-      ...(loop ? { tail_seconds: 0 } : {}) })
+    const request = { operation: 'render', ...validateVstSelection(selection), midi_path: midi.path, output_path: outputPath,
+      ...(loop ? { tail_seconds: 0 } : {}) }
+    native = sound ? renderBoundVst(sound, request, { run }) : run(request)
     const result = await native.promise
     check()
     const retained = await retainRender(stateDirectory, result, midi.path)

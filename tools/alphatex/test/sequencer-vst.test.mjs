@@ -113,7 +113,7 @@ test('cancellation retires preparation and a late native completion without fall
     let complete, started, stops = 0
     const running = new Promise(resolve => { started = resolve })
     const second = renderVstPhrase({ preparation: { promise: Promise.resolve({ path: 'unused' }), cancel },
-      selection: {}, outputPath: 'unused', stateDirectory: directory, run() {
+      selection: { plugin_path: '/chosen.vst3', plugin_name: null, preset_path: null, name: 'Chosen' }, outputPath: 'unused', stateDirectory: directory, run() {
         started(); return { promise: new Promise(resolve => { complete = resolve }), cancel() { stops++ } }
       } })
     await running; second.cancel(); complete({ output_path: 'unused' })

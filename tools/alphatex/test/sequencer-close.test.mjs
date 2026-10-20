@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { EventEmitter } from 'node:events'
 import { join, resolve, dirname } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { arrangementRoute, selectArrangementRoute } from '../arrangement-playback.mjs'
 import { arrangementFromPhrase, arrangementFromMidiSource } from '../phrase-arrangement.mjs'
@@ -12,10 +12,13 @@ import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo } fr
 import { importMidiSource, midiSourcePattern } from '../midi-source.mjs'
 import { harmonyAt, PPQ } from '../sequencer-project.mjs'
 
+const frozenSound = selection => ({ kind: 'vst', selection, instrument: { identifier: 'Bass', version: '1' },
+  preset: { data: Buffer.from('frozen state').toString('base64'), sha256: createHash('sha256').update('frozen state').digest('hex') } })
+
 // Exercise actual controller decisions with owned IO substitutes. No terminal
 // output, layout, audio hardware or player behavior is asserted.
 async function controller(options = {}) {
-  const observed = { saved: [], workers: [], writes: [], copies: [], sessions: 0, players: 0, arrangements: [], pickers: [], native: [], snapshots: [] }
+  const observed = { saved: [], workers: [], writes: [], copies: [], sessions: 0, players: 0, arrangements: [], pickers: [], native: [], snapshots: [], soundCaptures: [] }
   const process = new EventEmitter()
   process.stdin = new EventEmitter()
   Object.assign(process.stdin, { isTTY: true, isRaw: false,
@@ -42,6 +45,7 @@ async function controller(options = {}) {
   globalThis[slot] = {
     process, InstrumentPicker, defaultStateDirectory: () => '/synthetic-vst',
     snapshotWriter: () => async value => { observed.snapshots.push(value) },
+    captureVstSound(selection) { observed.soundCaptures.push(selection); return options.capture?.(selection) ?? { promise: Promise.resolve(frozenSound(selection)), cancel() {} } },
     renderVstPhrase(value) { observed.native.push(value); return options.native(value) },
     mkdtemp: async () => '/synthetic-temp', rm: async () => {},
     writeFile: async path => { observed.writes.push(path) },
@@ -72,6 +76,117 @@ async function controller(options = {}) {
 }
 const flush = () => new Promise(resolve => setImmediate(resolve))
 const pitches = value => value.observed.saved.at(-1).tracks[0].notes.map(note => note.pitch)
+
+test('reopened document auditions its frozen sound without consulting the picker', async () => {
+  const selection = { plugin_path: '/synth.vst3', plugin_name: null, preset_path: '/removed.vstpreset', name: 'Bass' }
+  const document = editor.editorSound(editor.editorCommand(editor.newEditor(), 'note C4 0 1').editor, frozenSound(selection)).project
+  const view = await controller({ initialDocument: document, autoSoundfont: false,
+    native: ({ preparation }) => ({ promise: preparation.promise, cancel() {} }) })
+  view.key('space'); await flush()
+  assert.equal(view.observed.soundCaptures.length, 0); assert.equal(view.observed.pickers[0].view, null)
+  assert.deepEqual(view.observed.native[0].sound, document.sound)
+  view.key('q'); await view.done
+  assert.deepEqual(view.observed.saved.at(-1).sound, document.sound)
+})
+
+test('closing during sound capture waits for child closure and refuses late adoption/playback', async () => {
+  let complete, cancels = 0
+  const selection = { plugin_path: '/synth.vst3', plugin_name: null, preset_path: null, name: 'Bass' }
+  const view = await controller({ autoSoundfont: false, capture() {
+    return { promise: new Promise(resolve => { complete = resolve }), cancel() { cancels++ } }
+  } })
+  view.key('return'); view.key('i'); await flush()
+  view.observed.pickers[0].close(); view.observed.pickers[0].selected(selection); await flush()
+  let closed = false; view.done.then(() => { closed = true })
+  view.key('q'); await flush()
+  assert.equal(cancels, 1); assert.equal(closed, false)
+  complete(frozenSound(selection)); await view.done
+  assert.equal(view.observed.saved.at(-1).sound, undefined)
+  assert.equal(view.observed.native.length, 0); assert.equal(view.observed.players, 0)
+})
+
+test('stop and MIDI route selection retire a pending snapshot while editor decisions remain live', async () => {
+  let complete, cancels = 0
+  const selection = { plugin_path: '/synth.vst3', plugin_name: null, preset_path: null, name: 'Bass' }
+  const view = await controller({ autoSoundfont: false, capture() {
+    return { promise: new Promise(resolve => { complete = resolve }), cancel() { cancels++ } }
+  } })
+  view.key('return'); view.key('i'); await flush()
+  view.observed.pickers[0].close(); view.observed.pickers[0].selected(selection); await flush()
+  view.command('stop'); view.command('midi-output -123'); view.key('up'); view.key('return'); view.key('s'); await flush()
+  assert.equal(cancels, 1); assert.deepEqual(pitches(view), [60, 61])
+  complete(frozenSound(selection)); await flush()
+  view.command('play'); await flush()
+  const request = view.observed.workers[0].requests.at(-1)
+  assert.equal(request.options.format, 'midi'); assert.equal(request.options.midiOutput, '-123')
+  assert.equal(request.project.sound, undefined); assert.equal(view.observed.native.length, 0)
+  view.key('q'); await view.done
+})
+
+test('preview failure after sound adoption does not discard the next admitted edit', async () => {
+  let complete
+  const selection = { plugin_path: '/synth.vst3', plugin_name: null, preset_path: null, name: 'Bass' }
+  const view = await controller({ autoSoundfont: false, capture() {
+    return { promise: new Promise(resolve => { complete = resolve }), cancel() {} }
+  } })
+  view.key('return'); view.key('i'); await flush()
+  view.observed.pickers[0].close(); view.observed.pickers[0].selected(selection); await flush()
+  view.observed.workers[0].emit('error', new Error('worker failed during snapshot'))
+  complete(frozenSound(selection)); await flush()
+  view.command('title Admitted after preview failure'); view.key('q'); await view.done
+  assert.equal(view.observed.saved.at(-1).title, 'Admitted after preview failure')
+  assert.deepEqual(view.observed.saved.at(-1).sound, frozenSound(selection))
+  assert.equal(view.observed.players, 0)
+})
+
+test('edits, undo, loop and Space keep a pending sound capture for adoption', async () => {
+  let complete, cancels = 0
+  const lead = { plugin_path: '/lead.vst3', plugin_name: null, preset_path: null, name: 'Lead' }
+  const bass = { plugin_path: '/bass.vst3', plugin_name: null, preset_path: null, name: 'Bass' }
+  const document = editor.editorSound(editor.editorCommand(editor.newEditor(), 'note C4 0 1').editor, frozenSound(lead)).project
+  const view = await controller({ initialDocument: document, autoSoundfont: false,
+    capture() { return { promise: new Promise(resolve => { complete = resolve }), cancel() { cancels++ } } },
+    native: ({ preparation }) => ({ promise: preparation.promise, cancel() {} }) })
+  view.key('i'); await flush()
+  view.observed.pickers[0].close(); view.observed.pickers[0].selected(bass); await flush()
+  for (const name of ['up', 'return', 'u', 'l', 'space', 'space']) view.key(name)
+  view.command('title Edited during capture'); await flush()
+  complete(frozenSound(bass)); await flush()
+  view.key('q'); await view.done
+  assert.deepEqual(view.observed.saved.at(-1).sound, frozenSound(bass)); assert.equal(cancels, 0)
+  assert.deepEqual(view.observed.native.map(row => row.sound), [frozenSound(lead), frozenSound(bass)])
+  assert.equal(view.observed.saved.at(-1).title, 'Edited during capture'); assert.deepEqual(pitches(view), [60])
+})
+
+test('adopting a captured sound replaces a playing preview of the previous sound', async () => {
+  let complete
+  const lead = { plugin_path: '/lead.vst3', plugin_name: null, preset_path: null, name: 'Lead' }
+  const bass = { plugin_path: '/bass.vst3', plugin_name: null, preset_path: null, name: 'Bass' }
+  const document = editor.editorSound(editor.editorCommand(editor.newEditor(), 'note C4 0 1').editor, frozenSound(lead)).project
+  const requests = [], calls = []
+  const view = await controller({ initialDocument: document, autoSoundfont: false,
+    capture() { return { promise: new Promise(resolve => { complete = resolve }), cancel() {} } },
+    native: ({ preparation, selection }) => ({ cancel() {}, promise: preparation.promise.then(() => ({ path: `/synthetic/${selection.name}.wav`,
+      duration: 1, phraseDuration: 1, vst: { output_path: `/synthetic/${selection.name}.wav` }, selection })) }),
+    playback(request) {
+      requests.push(request)
+      let finish; const completion = new Promise(resolve => { finish = resolve })
+      return { ready: Promise.resolve(), completion, status() {}, pause() { calls.push('pause') },
+        resume() { calls.push('resume') }, stop() { calls.push('stop') }, terminate() { finish() } }
+    } })
+  view.key('i'); await flush()
+  view.observed.pickers[0].close(); view.observed.pickers[0].selected(bass); await flush()
+  view.key('space'); await flush()
+  const worker = view.observed.workers[0], job = worker.requests[0]
+  worker.emit('message', { id: job.id, ok: true, result: { path: job.path } }); await flush()
+  requests[0].onEvent({ kind: 'playing', currentTime: 0, duration: 1 })
+  complete(frozenSound(bass)); await flush()
+  const adopted = [...calls]
+  view.key('q'); await view.done
+  assert.deepEqual(adopted, ['stop'])
+  assert.deepEqual(view.observed.native.map(row => row.sound), [frozenSound(lead), frozenSound(bass)])
+  assert.deepEqual(view.observed.snapshots.find(row => row.state === 'stop_requested').selection, lead)
+})
 
 test('close drains admitted note edits and refuses keys arriving after close', async () => {
   const view = await controller()
@@ -337,7 +452,7 @@ test('WAV export prepares the selected SMF2 pattern with the chosen VST', async 
   assert.equal(worker.requests.length, 2)
   assert.equal(job.options.format, 'vst-midi')
   assert.equal(job.options.pattern, 1)
-  assert.deepEqual(job.project, source)
+  assert.deepEqual(job.project, { ...source, sound: frozenSound(selection) })
   assert.deepEqual(view.observed.native.at(-1).selection, selection)
   worker.emit('message', { id: job.id, ok: true, result: { path: job.path, duration: 0.5 } })
   await flush()

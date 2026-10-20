@@ -117,6 +117,10 @@ sources=[]
         let disabled_id=text "instance_id" (Option.get (current ())) in
         configure true;
         await (fun () -> match current () with Some item -> text "instance_id" item<>disabled_id && ready "received." | None -> false);
+        let replacement=Option.get (current ()) in
+        let replayed=Yojson.Safe.from_file (Option.get (path "received." replacement)) |> member "result" in
+        check string "replacement receives the retained successful answer" "answered" (text "status" replayed);
+        check bool "replacement receives the original structured output" true (member "output" replayed=answer);
         check int "retained answer reaches replacement without a new call" 1 (F.post_count server);
         Sys.remove declaration;ignore (R.reconcile_configuration ~config ~directory |> ok);
         await (fun () -> current ()=None))))))))))

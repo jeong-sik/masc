@@ -9,7 +9,7 @@
 \* turn as Done.
 \*
 \* Sibling specs cover orthogonal angles:
-\*   - KeeperTurnCycle (3-axis: turn_phase / decision_stage / runtime_state)
+\*   - KeeperTurnCycle (turn_phase / decision_stage axes plus the attempt outcome)
 \*     models cross-axis synchronization for the *live* observation record.
 \*   - Agent Core bridge tests cover the cancel/error boundary.
 \*

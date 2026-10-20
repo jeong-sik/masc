@@ -46,79 +46,6 @@ let test_bug_derive_phase_mismatch_caught () =
     invariant_holds
 ;;
 
-(* ============================================================
-   3. KeeperTurnCycle / BugSelectingWithoutToolPolicy
-   ============================================================ *)
-
-type runtime_state_tc =
-  | Cs_idle
-  | Cs_selecting
-  | Cs_trying
-  | Cs_done
-  | Cs_exhausted
-
-type turn_phase_tc =
-  | Tp_idle
-  | Tp_prompting
-  | Tp_executing
-  | Tp_finalizing
-
-type decision_stage_tc =
-  | Ds_undecided
-  | Ds_guard_ok
-  | Ds_tool_policy_selected
-
-(* TLA+ SelectingRequiresToolPolicy ==
-     runtime_state = "selecting" =>
-       turn_live /\ turn_phase = "prompting"
-       /\ decision_stage = "tool_policy_selected" *)
-let check_selecting_requires_tool_policy
-    ~(runtime_state : runtime_state_tc)
-    ~(turn_live : bool)
-    ~(turn_phase : turn_phase_tc)
-    ~(decision_stage : decision_stage_tc)
-  =
-  match runtime_state with
-  | Cs_selecting ->
-    turn_live && turn_phase = Tp_prompting && decision_stage = Ds_tool_policy_selected
-  | _ -> true
-;;
-
-let test_bug_selecting_without_tool_policy_caught () =
-  let invariant_holds =
-    check_selecting_requires_tool_policy
-      ~runtime_state:Cs_selecting
-      ~turn_live:true
-      ~turn_phase:Tp_prompting
-      ~decision_stage:Ds_guard_ok
-  in
-  Alcotest.(check bool)
-    "SelectingRequiresToolPolicy violated by BugSelectingWithoutToolPolicy"
-    false
-    invariant_holds
-;;
-
-(* Sanity tests — clean states must hold *)
-
-let test_clean_holds_selecting_with_tool_policy () =
-  Alcotest.(check bool)
-    "Selecting with tool_policy is fine"
-    true
-    (check_selecting_requires_tool_policy
-       ~runtime_state:Cs_selecting
-       ~turn_live:true
-       ~turn_phase:Tp_prompting
-       ~decision_stage:Ds_tool_policy_selected);
-  Alcotest.(check bool)
-    "Idle runtime unconditional"
-    true
-    (check_selecting_requires_tool_policy
-       ~runtime_state:Cs_idle
-       ~turn_live:false
-       ~turn_phase:Tp_idle
-       ~decision_stage:Ds_undecided)
-;;
-
 (* ── Test runner ─────────────────────────────────────────── *)
 let () =
   Alcotest.run
@@ -128,16 +55,6 @@ let () =
             "BugDerivePhaseMismatch caught"
             `Quick
             test_bug_derive_phase_mismatch_caught
-        ] )
-    ; ( "KeeperTurnCycle"
-      , [ Alcotest.test_case
-            "BugSelectingWithoutToolPolicy caught"
-            `Quick
-            test_bug_selecting_without_tool_policy_caught
-        ; Alcotest.test_case
-            "clean states hold"
-            `Quick
-            test_clean_holds_selecting_with_tool_policy
         ] )
     ]
 ;;

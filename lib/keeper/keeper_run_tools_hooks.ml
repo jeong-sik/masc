@@ -1272,14 +1272,13 @@ let assemble_hooks
                    ~base_path:config.base_path
                    meta.name
                    (Keeper_registry.Packed Keeper_registry.Turn_routing);
-                 (* KeeperTurnCycle spec: SelectToolPolicy, then
-                   EnterExecuting.  The spec invariant
-                   [ExecutingRequiresToolPolicy] needs
-                   [decision_stage = Decision_tool_policy_selected]
-                   before the phase becomes executing, so the stage is
-                   written here, in the disclosure hook, and
-                   [mark_turn_provider_attempt_started] writes it again
-                   together with the executing phase. *)
+                 (* [mark_turn_provider_attempt_started] writes the
+                   decision stage and then the executing phase
+                   (KeeperTurnCycle: SelectToolPolicy, EnterExecuting).
+                   The stage and the routing phase are also written
+                   above, so a reader between the two calls sees
+                   routing with the policy already selected.  The spec
+                   does not model the routing phase. *)
                  Keeper_registry.mark_turn_provider_attempt_started
                    ~observation_token
                    ~base_path:config.base_path

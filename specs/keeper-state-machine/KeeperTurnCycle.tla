@@ -51,8 +51,10 @@
 (*    keeper_unified_turn_execution.ml                                     *)
 (*      set_turn_selected_model  (RuntimeDone)                             *)
 (*                                                                         *)
-(*   keeper_run_tools.ml wrote two of these through a BeforeTurnParams     *)
-(*   disclosure hook. It writes none of them now.                          *)
+(*   keeper_run_tools_hooks.ml (disclosure hook) writes the decision stage *)
+(*   and moves the phase to routing before it calls                        *)
+(*   mark_turn_provider_attempt_started. That path comes from routing,     *)
+(*   which this spec does not model (see "Out-of-scope" below).            *)
 (*                                                                         *)
 (*   mark_turn_provider_attempt_started writes two axes in this order:     *)
 (*   set_turn_decision_stage tool_policy_selected (SelectToolPolicy), then *)
@@ -64,9 +66,9 @@
 (*   - KeeperDecisionPipeline   covers decision_stage up to entering       *)
 (*     executing, without the attempt outcome.                             *)
 (*   - This spec adds the attempt outcome (RuntimeDone, RuntimeExhausted,  *)
-(*     finalizing) and selected_model_bound, and the cross-axis            *)
-(*     invariants ExecutingRequiresToolPolicy and                          *)
-(*     FinalizingRequiresToolPolicy.                                       *)
+(*     finalizing) and selected_model_bound. ExecutingRequiresToolPolicy   *)
+(*     here and ExecutingRequiresDecisionBoundary there state the same     *)
+(*     property over the same two variables.                               *)
 (*   - handoff is an orthogonal lifecycle event outside this turn model.  *)
 (*                                                                         *)
 (* Adding new constructors:                                                *)
@@ -83,7 +85,7 @@
 (*     TurnPhaseSet on line ~127 includes both members since iter 28       *)
 (*     (#14793) for typed exhaustiveness — but the spec's Next disjunction *)
 (*     defines no actions transitioning *into* either phase.  Reachable    *)
-(*     state graph stays at 10 distinct states (depth 6); routing/         *)
+(*     state graph is 8 distinct states (depth 6); routing/                *)
 (*     exhausted are vacuously satisfied by cross-axis invariants.         *)
 (*                                                                         *)
 (*     OCaml `keeper_registry_types.ml`'s `module Turn_phase_transition` (GADT-encoded turn_phase transitions) declares the cross-state transitions *)
@@ -106,6 +108,13 @@
 (*     nal, HardQuotaTerminalImmediate, TryNextProgresses), so the        *)
 (*     keeper-projection in KTC can remain a coverage-narrow type-only    *)
 (*     surface until R-B-2.{a,b} lands a deliberate action set.            *)
+(*                                                                         *)
+(*   - the terminal-error edge prompting -> finalizing. In the code,       *)
+(*     Keeper_unified_turn_terminal_error.handle sets finalizing without   *)
+(*     writing the decision stage, for example when the dispatch           *)
+(*     authority rejects before the attempt starts. So finalizing does     *)
+(*     not imply tool_policy_selected there, and this spec states no       *)
+(*     such invariant.                                                     *)
 
 EXTENDS TLC
 
@@ -152,8 +161,7 @@ ActionSet    == {
 InvariantSet == {
     "NoLiveTurnClearsState",
     "IdleRequiresNotLive",
-    "ExecutingRequiresToolPolicy",
-    "FinalizingRequiresToolPolicy"
+    "ExecutingRequiresToolPolicy"
 }
 
 TypeOK ==
@@ -301,17 +309,11 @@ ExecutingRequiresToolPolicy ==
         /\ turn_live
         /\ decision_stage = "tool_policy_selected"
 
-FinalizingRequiresToolPolicy ==
-    turn_phase = "finalizing" =>
-        /\ turn_live
-        /\ decision_stage = "tool_policy_selected"
-
 Safety ==
     /\ TypeOK
     /\ NoLiveTurnClearsState
     /\ IdleRequiresNotLive
     /\ ExecutingRequiresToolPolicy
-    /\ FinalizingRequiresToolPolicy
 
 (* Wrapper for buggy cfg — must be defined AFTER the invariant it references. *)
 ExecutingRequiresToolPolicyMustHold == ExecutingRequiresToolPolicy

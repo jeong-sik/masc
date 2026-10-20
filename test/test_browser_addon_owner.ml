@@ -62,6 +62,11 @@ let scenario () = Eio_main.run (fun env ->
     let chrome_closing,begin_chrome_close=Eio.Promise.create ()
     and chrome_settled,finish_chrome_close=Eio.Promise.create () in
     let chrome_entered,enter_chrome=Eio.Promise.create () and chrome_wait,_=Eio.Promise.create () in
+    Fun.protect ~finally:(fun () ->
+      (* Release test-owned barriers before the switch joins protected cleanup,
+         including when an assertion or the test's liveness guard fails. *)
+      ignore (Eio.Promise.try_resolve finish_close ());
+      ignore (Eio.Promise.try_resolve finish_chrome_close ())) (fun () ->
     let automation_calls=ref 0 and automation_cleanups=ref 0 and chrome_cleanups=ref 0
     and chrome_calls=ref 0 and chrome_actors=ref [] in
     ok (Owner.attach_automation owner ~locate:false
@@ -152,5 +157,5 @@ let scenario () = Eio_main.run (fun env ->
       (pre_effect (send (W.Poll {client;window_sec=2.})));
     check int "retirement removed clients" 0 (List.length (B.connected_clients ()));
     check bool "same process cannot acquire a replacement registry" true
-      (Result.is_error (Owner.create ~incarnation:other_incarnation)))))
+      (Result.is_error (Owner.create ~incarnation:other_incarnation))))))
 let () = run "browser addon owner" ["lifecycle",[test_case "concurrent queue and retirement" `Quick scenario]]

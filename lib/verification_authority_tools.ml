@@ -209,22 +209,23 @@ let children path =
    here is a fact about this tree, and it is a fact about main only when the
    tree is known to hold main's commit. [Current] is the one case where the
    local ref was seen to move within the freshness window, and it still does
-   not read the remote. *)
+   not read the remote. [Ahead], [Behind] and [Diverged] carry no observation
+   time, so each says the ref may itself be behind the remote. *)
 let describe_standing : Keeper_sandbox_control.checkout_freshness -> string = function
   | Keeper_sandbox_control.Current { target_ref; upstream_head; age_s; _ } ->
     Printf.sprintf
-      "HEAD equals local %s (%s), updated %ds ago; the remote was not compared"
+      "HEAD equals local %s (%s), last observed moving %ds ago; the remote was not compared"
       target_ref upstream_head age_s
   | Keeper_sandbox_control.Stale_ref { target_ref; upstream_head; age_s; _ } ->
     Printf.sprintf
-      "HEAD equals local %s (%s), but that ref was last updated %s; it may be behind the remote"
+      "HEAD equals local %s (%s), but that ref was last observed moving %s; it may be behind the remote"
       target_ref upstream_head
       (match age_s with
        | Some seconds -> Printf.sprintf "%ds ago" seconds
        | None -> "at an unknown time")
   | Keeper_sandbox_control.Ahead { target_ref; upstream_head; ahead } ->
     Printf.sprintf
-      "HEAD is %d commit(s) ahead of local %s (%s); the remote was not compared"
+      "HEAD is %d commit(s) ahead of local %s (%s); that ref may be behind the remote"
       ahead target_ref upstream_head
   | Keeper_sandbox_control.Behind { target_ref; upstream_head; behind } ->
     Printf.sprintf
@@ -235,16 +236,34 @@ let describe_standing : Keeper_sandbox_control.checkout_freshness -> string = fu
       "HEAD is %d commit(s) ahead and %d behind local %s (%s); files absent here may exist on that branch"
       ahead behind target_ref upstream_head
   | Keeper_sandbox_control.Freshness_unavailable reason ->
-    Printf.sprintf "no comparison with main (%s); do not treat this tree as main" reason
+    (* A git error can span lines; the layout indents only a line's first row. *)
+    Printf.sprintf
+      "no comparison with main (%s); do not treat this tree as main"
+      (String.concat " " (String.split_on_char '\n' (String.trim reason)))
 ;;
 
-let describe_checkout (row : Keeper_sandbox_control.freshness_row) =
+let checkout_marker = "(git checkout — a repository-relative path is rooted here)"
+
+let describe_checkout (row : Keeper_sandbox_control.identity_row) =
   Printf.sprintf
-    "  %s/    (git checkout — a repository-relative path is rooted here) branch=%s head=%s; %s"
-    row.Keeper_sandbox_control.row_checkout_path
-    (Option.value row.Keeper_sandbox_control.row_branch ~default:"unreadable (detached HEAD or failed probe)")
-    (Option.value row.Keeper_sandbox_control.row_head ~default:"unreadable")
-    (describe_standing row.Keeper_sandbox_control.row_freshness)
+    "  %s/    %s branch=%s head=%s; %s"
+    row.Keeper_sandbox_control.identity_checkout_path
+    checkout_marker
+    (match row.Keeper_sandbox_control.identity_branch with
+     | Some "HEAD" -> "HEAD (detached)"
+     | Some branch -> branch
+     | None -> "unreadable")
+    (Option.value row.Keeper_sandbox_control.identity_head ~default:"unreadable")
+    (describe_standing row.Keeper_sandbox_control.identity_freshness)
+;;
+
+(* Remote discovery describes the producer's actual endpoint tree. Its paths
+   are not host checkout paths, so host git probes cannot establish identity. *)
+let describe_unprobed_checkout (checkout : Keeper_playground_checkouts.checkout) =
+  Printf.sprintf
+    "  %s/    %s identity not probed on the producer endpoint; no comparison with main, do not treat this tree as main"
+    checkout.relative_path
+    checkout_marker
 ;;
 
 let checkout_lines ~describe discovery =
@@ -300,7 +319,7 @@ let root_layout t =
     let* entry_lines = entry_lines_of t.ownership_root ~cap:root_entry_cap in
     let* checkout_lines = checkout_lines
       ~describe:(fun checkouts -> List.map describe_checkout
-        (Keeper_sandbox_control.host_checkout_freshness_rows ~config:t.config checkouts))
+        (Keeper_sandbox_control.checkout_identity_rows ~config:t.config checkouts))
       (Keeper_playground_checkouts.discover ~root:t.ownership_root) in
     Ok (Task.Anti_rationalization.Producer_tree (entry_lines @ checkout_lines))
   in
@@ -313,10 +332,7 @@ let root_layout t =
          ~timeout_sec:Repo_git.inspection_timeout_sec ~config:t.config ~meta ()
          |> Result.map_error Keeper_playground_checkouts.scan_error_to_string in
        let* checkout_lines = checkout_lines
-         ~describe:(List.map (fun (checkout : Keeper_playground_checkouts.checkout) ->
-           Printf.sprintf
-             "  %s/    (git checkout — a repository-relative path is rooted here) identity not probed on the producer endpoint; no comparison with main"
-             checkout.relative_path))
+         ~describe:(List.map describe_unprobed_checkout)
          (Ok layout.discovery) in
        Ok (Task.Anti_rationalization.Producer_tree
          (entry_lines layout.entries ~cap:root_entry_cap @ checkout_lines)))

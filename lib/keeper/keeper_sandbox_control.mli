@@ -83,21 +83,34 @@ type freshness_row = {
   row_checkout_path : string;
       (** Playground-relative path — the cwd the keeper passes to its tools.
           Basenames collide across a playground; paths do not. *)
-  row_branch : string option;
-      (** [None] when the branch probe failed, which includes a detached HEAD. *)
-  row_head : string option;  (** Full HEAD SHA; [None] when the probe failed. *)
+  row_branch : string option;  (** [None] when the branch probe failed. *)
   row_changed_files : int option;  (** [None] when the status probe failed. *)
   row_freshness : checkout_freshness;
 }
 
-val host_checkout_freshness_rows :
+(** One checkout's identity for a reader of its files. Unlike
+    {!freshness_row} it carries no working-tree status: [git status] runs the
+    repository's configured fsmonitor and can reach a promisor remote, so a
+    verifier reading a producer's checkout does not run it. *)
+type identity_row = {
+  identity_checkout_path : string;
+      (** Playground-relative path, as in {!freshness_row}. *)
+  identity_branch : string option;
+      (** [None] when the branch probe failed. A detached HEAD answers [Some "HEAD"]. *)
+  identity_head : string option;  (** Full HEAD SHA; [None] when the probe failed. *)
+  identity_freshness : checkout_freshness;
+      (** Where HEAD stands against the local tracking ref, or why that is unknown.
+          A path that is not the top of its own git repository is
+          [Freshness_unavailable], with no branch and no HEAD. *)
+}
+
+val checkout_identity_rows :
   ?inspection_budget_sec:float ->
   config:Workspace.config ->
   Keeper_playground_checkouts.checkout list ->
-  freshness_row list
-(** Measure checkouts that a host-side reader already discovered, with the same
-    probe {!checkout_freshness_rows} runs on a Keeper's own tree. No git
-    command it runs fetches or reaches the network. [?inspection_budget_sec]
+  identity_row list
+(** Measure checkouts that a host-side reader already discovered. Reads the
+    local clone only: no fetch, no working-tree status. [?inspection_budget_sec]
     bounds the total git subprocess time across the list (default
     {!Repo_git.inspection_timeout_sec}). *)
 

@@ -724,8 +724,15 @@ let run_git_lines ~cwd args =
     Alcotest.failf "git %s failed: %s" (String.concat " " args) error
 ;;
 
+(* The commit hooks and signing a developer's global git config installs would
+   block or prompt inside a throwaway repository. *)
 let git_commit ~cwd message =
-  ignore (run_git_lines ~cwd [ "commit"; "--allow-empty"; "-m"; message ])
+  ignore
+    (run_git_lines ~cwd
+       [ "-c"; "core.hooksPath=/dev/null"
+       ; "-c"; "commit.gpgsign=false"
+       ; "commit"; "--allow-empty"; "-m"; message
+       ])
 ;;
 
 let git_head ~cwd =
@@ -754,7 +761,7 @@ let layout_line layout ~affix =
    is missing from main. A tree the catalog cannot compare with main must say
    so, and it must carry the commit it holds. *)
 let test_root_layout_names_head_and_refuses_to_call_an_uncompared_tree_current () =
-  with_surface (fun config surface ->
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
     let root = producer_playground config producer in
     let checkout = Filename.concat root "repos/unregistered" in
     init_git_checkout checkout;
@@ -767,6 +774,10 @@ let test_root_layout_names_head_and_refuses_to_call_an_uncompared_tree_current (
     Alcotest.(check bool) "names the HEAD commit" true (holds ("head=" ^ head));
     Alcotest.(check bool) "names the branch" true (holds "branch=main");
     Alcotest.(check bool)
+      "does not run the working-tree status probe"
+      false
+      (holds "dirty");
+    Alcotest.(check bool)
       "says no comparison with main was made"
       true
       (holds "no comparison with main");
@@ -778,7 +789,7 @@ let test_root_layout_names_head_and_refuses_to_call_an_uncompared_tree_current (
 
 (* The observed incident: a tree behind main, read as main, rejected merged work. *)
 let test_root_layout_reports_a_checkout_behind_its_tracking_ref () =
-  with_surface (fun config surface ->
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
     let root = producer_playground config producer in
     let checkout = Filename.concat root "repos/masc" in
     init_git_checkout checkout;
@@ -827,6 +838,43 @@ let test_root_layout_reports_a_checkout_behind_its_tracking_ref () =
       "does not describe the tree as equal to main"
       false
       (holds "HEAD equals"))
+;;
+
+(* A detached HEAD answers the literal [HEAD]; the line says so instead of
+   presenting it as a branch name. *)
+let test_root_layout_marks_a_detached_head () =
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
+    let root = producer_playground config producer in
+    let checkout = Filename.concat root "repos/detached" in
+    init_git_checkout checkout;
+    git_commit ~cwd:checkout "first";
+    let head = git_head ~cwd:checkout in
+    ignore (run_git_lines ~cwd:checkout [ "checkout"; "-q"; "--detach"; head ]);
+    let line =
+      layout_line (VAT.root_layout surface |> require_layout) ~affix:"repos/detached/"
+    in
+    Alcotest.(check bool)
+      "a detached HEAD is named as such"
+      true
+      (Astring.String.is_infix ~affix:"branch=HEAD (detached)" line))
+;;
+
+(* A producer whose tree is on its endpoint has no checkout on this host to
+   describe: the line must not name a commit read from the host directory. *)
+let test_root_layout_does_not_probe_a_tree_on_the_producers_endpoint () =
+  with_surface (fun config surface ->
+    let root = producer_playground config producer in
+    let checkout = Filename.concat root "repos/remote" in
+    init_git_checkout checkout;
+    git_commit ~cwd:checkout "first";
+    let head = git_head ~cwd:checkout in
+    let line =
+      layout_line (VAT.root_layout surface |> require_layout) ~affix:"repos/remote/"
+    in
+    let holds affix = Astring.String.is_infix ~affix line in
+    Alcotest.(check bool) "says the identity was not probed" true (holds "identity not probed");
+    Alcotest.(check bool) "does not name a host commit" false (holds head);
+    Alcotest.(check bool) "still marks the checkout" true (holds "git checkout"))
 ;;
 
 let test_prompt_states_the_root_and_not_a_repository () =
@@ -1417,6 +1465,14 @@ let () =
             "root layout reports a checkout behind its tracking ref"
             `Quick
             test_root_layout_reports_a_checkout_behind_its_tracking_ref
+        ; Alcotest.test_case
+            "root layout marks a detached HEAD"
+            `Quick
+            test_root_layout_marks_a_detached_head
+        ; Alcotest.test_case
+            "root layout does not probe a tree on the producer's endpoint"
+            `Quick
+            test_root_layout_does_not_probe_a_tree_on_the_producers_endpoint
         ; Alcotest.test_case
             "root_layout fails closed when discovery is unavailable"
             `Quick

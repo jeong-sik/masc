@@ -37,7 +37,7 @@ val root_layout : t -> (Task.Anti_rationalization.lookup_root, string) result
     every checkout returned by the shared checkout-discovery authority. Host
     checkout lines carry their branch, HEAD commit and position against the
     local tracking ref; an uncompared checkout is never described as current.
-    The identity probe reads only the local clone and never fetches.
+    The identity probe reads only the local clone: no fetch or working-tree status.
     Endpoint-owned Keepers are observed on their attached endpoint, matching
     Read/Grep; their host bookkeeping directory is never a layout fallback.
     Their checkout identities are not probed on the host.

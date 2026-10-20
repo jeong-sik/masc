@@ -187,7 +187,7 @@ export function voiceLedProgression(symbols, { mode, low, high }) {
     let rows = []
     if (mode === 'rootless') {
       if (chord.bass) throw new Error('Rootless voicing does not support an explicit slash-chord bass')
-      rows = Voicing.search(symbol, [Note.fromMidi(low), Note.fromMidi(high)], VoicingDictionary.lefthand).map(notes => notes.map(pitch))
+      rows = Voicing.search(symbol, [Note.fromMidi(low), Note.fromMidi(high)], VoicingDictionary.lefthand).map(notes => notes.map(Note.midi))
     } else {
       const tonic = Note.chroma(chord.tonic)
       // The new range search uses one instance of each chord pitch class in
@@ -200,7 +200,7 @@ export function voiceLedProgression(symbols, { mode, low, high }) {
         for (let octave = first; octave <= last; octave++) rows.push(shape.map(value => tonic + octave * 12 + value))
       }
     }
-    rows = rows.filter(row => row.length && row.every((value, i) => value >= low && value <= high && (!i || value > row[i - 1]))
+    rows = rows.filter(row => row.length && row.every((value, i) => Number.isSafeInteger(value) && value >= low && value <= high && (!i || value > row[i - 1]))
       && (!chord.bass || row[0] % 12 === Note.chroma(chord.bass)))
     rows = [...new Map(rows.map(row => [row.join(','), row])).values()].sort((a, b) => {
       for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return a[i] - b[i]

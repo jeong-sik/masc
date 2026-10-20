@@ -84,6 +84,10 @@ test('slash bass, exact MIDI edges and constant voice count constrain the select
   assert.deepEqual(chordVoicing('C9', { mode: 'close', octave: 4 }), [60,64,67,70,74])
   assert.deepEqual(voiceLedProgression(['C'], { mode: 'close', low: 0, high: 7 }), [[0,4,7]])
   assert.deepEqual(voiceLedProgression(['B'], { mode: 'close', low: 119, high: 127 }), [[119,123,126]])
+  assert.deepEqual(voiceLedProgression(['Cmaj7'], { mode: 'rootless', low: 0, high: 14 }), [[4,7,11,14]])
+  assert.deepEqual(voiceLedProgression(['Dm7', 'G7', 'Cmaj7'], { mode: 'rootless', low: 113, high: 127 }),
+    [[113,117,120,124], [113,117,119,124], [119,122,124,127]])
+  assert.throws(() => voiceLedProgression(['Cmaj7'], { mode: 'rootless', low: 127, high: 127 }), /No rootless voicing/)
   assert.throws(() => voiceLedProgression(['Cmaj7', 'Dm'], { mode: 'close', low: 48, high: 84 }), /constant number/)
   assert.throws(() => voiceLedProgression(['G7#9', 'Cmaj7'], { mode: 'rootless', low: 48, high: 84 }), /constant number/)
 })

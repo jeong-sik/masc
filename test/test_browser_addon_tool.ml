@@ -39,7 +39,9 @@ let hook_contract () =
     {content=[];is_error=Some false;_meta=None;structured_content=Some (`Assoc [
       "reply",`String "issue";"answer",`Assoc ["status",`String "answered";"payload",payload];
       "browserSelection",`Assoc ["lane",`String "live";"reason",`String "explicit_browser";
-        "clientId",`String (B.client_id_to_string client_id)]])} in
+        "clientId",`String (B.client_id_to_string client_id)];
+      "browserConnection",`Assoc ["clientId",`String (B.client_id_to_string client_id);
+        "transport",`String "webdriver_bidi"]])} in
   ignore (ok (Hooks.after_call hooks (reply (`Assoc ["ok",`Bool true;
     "data",`Assoc ["arbitrary_browser_result",`List [`String "kept"]]]))));
   check bool "successful output must affirm ok" true
@@ -81,6 +83,22 @@ let scenario () = Eio_main.run (fun env ->
     check bool "result accepted while tool waits" true
       (send (W.Deliver {client_id;id=issued.id;payload})=W.Receipt);
     let result=Eio.Promise.await_exn pending in
+    let binding=match result.structured_content with
+      | Some (`Assoc fields) -> ok (Masc.Browser_binding.of_json (`Assoc
+          (List.filter (fun (key,_) -> List.mem key ["browserSelection";"browserConnection"]) fields)))
+      | None|Some _ -> fail "receipt must retain its connection" in
+    let projected=Masc.Browser_binding.annotate binding (`Assoc [
+      "clientId",`String "forged";"clientId",`String "forged-again";
+      "transport",`String "web_extension";"lane",`String "automation"]) in
+    check string "page fields cannot forge the admitted client" (B.client_id_to_string client_id)
+      Yojson.Safe.Util.(projected |> member "clientId" |> to_string);
+    check string "page fields cannot forge its transport" "webdriver_bidi"
+      Yojson.Safe.Util.(projected |> member "transport" |> to_string);
+    check bool "receipt rejects a mismatched connection" true
+      (Result.is_error (Masc.Browser_binding.of_json (`Assoc [
+        "browserSelection",Masc.Browser_selection.to_json (Masc.Browser_binding.selected binding);
+        "browserConnection",`Assoc ["clientId",`String "0c000000-0000-4000-8000-000000000002";
+          "transport",`String "webdriver_bidi"]])));
     check (option bool) "partial is a failed call" (Some true) result.is_error;
     check bool "partial payload is retained" true
       (Option.exists (fun data -> Yojson.Safe.Util.(data |> member "answer" |> member "payload")=payload)

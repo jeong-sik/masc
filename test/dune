@@ -4594,6 +4594,7 @@
 (include stanzas/test_librarian_journal_failures.inc)
 
 (include stanzas/test_keeper_raw_trace_reader.inc)
+(include stanzas/test_keeper_tool_result_source.inc)
 
 (include stanzas/test_keeper_prompt_capture.inc)
 (include stanzas/test_keeper_provider_input_snapshot.inc)

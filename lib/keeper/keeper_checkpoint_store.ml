@@ -1370,6 +1370,96 @@ let with_agent_core_exact_snapshot ~session_dir ~session_id f =
 let load_agent_core_exact_snapshot ~session_dir ~session_id =
   with_agent_core_exact_snapshot ~session_dir ~session_id Fun.id
 
+(* Only an exact snapshot names its source, so the trace and turn in the
+   reference were read from the same bytes its digest covers: equal digests
+   mean the file still holds those bytes, and decoding them again would give
+   the value the caller already holds. *)
+type exact_source = Keeper_checkpoint_ref.t
+
+let exact_snapshot_source snapshot = snapshot.reference
+
+type exact_snapshot_since =
+  | Unchanged_source
+  | Changed_source of exact_checkpoint_snapshot
+
+(* Bytes read under the session lock whose digest differs from a known
+   source, kept with that digest so their decode does not hash them again. *)
+type changed_bytes =
+  { changed_path : string
+  ; changed_identity_before : canonical_identity
+  ; changed_session_id : Keeper_id.Trace_id.t
+  ; changed_canonical_bytes : string
+  ; changed_sha256 : string
+  }
+
+type exact_bytes_since =
+  | Unchanged_bytes
+  | Changed_bytes of changed_bytes
+
+let read_since_locked ~session_dir ~(known : exact_source) =
+  let canonical_path =
+    agent_core_checkpoint_path
+      ~session_dir
+      ~session_id:(Keeper_id.Trace_id.to_string known.trace_id)
+  in
+  match load_canonical_bytes_strict canonical_path with
+  | Error error -> Error (Ref_read_failed error)
+  | Ok None -> Error Ref_not_found
+  | Ok (Some (identity_before, canonical_bytes)) ->
+    let sha256 =
+      offload_checkpoint_cpu (fun () ->
+        Keeper_checkpoint_ref.sha256_of_canonical_bytes canonical_bytes)
+    in
+    if String.equal sha256 known.sha256
+    then Ok Unchanged_bytes
+    else
+      Ok
+        (Changed_bytes
+           { changed_path = canonical_path
+           ; changed_identity_before = identity_before
+           ; changed_session_id = known.trace_id
+           ; changed_canonical_bytes = canonical_bytes
+           ; changed_sha256 = sha256
+           })
+
+let decode_changed_bytes changed =
+  match decode_checkpoint_off_scheduler changed.changed_canonical_bytes with
+  | Error error -> Error (Ref_read_failed (classify_core_error error))
+  | Ok (checkpoint : Agent_core.Checkpoint.t) ->
+    publish_summary_after_parse
+      ~canonical_path:changed.changed_path
+      ~identity_before:(Some changed.changed_identity_before)
+      checkpoint;
+    (match Keeper_id.Trace_id.of_string checkpoint.session_id with
+     | Error reason -> Error (Ref_identity_invalid (Session_id_invalid reason))
+     | Ok trace_id when not (Keeper_id.Trace_id.equal trace_id changed.changed_session_id) ->
+       Error (Ref_session_mismatch { expected = changed.changed_session_id; actual = trace_id })
+     | Ok trace_id ->
+       (match
+          Keeper_checkpoint_ref.of_persisted
+            ~trace_id ~turn_count:checkpoint.turn_count ~sha256:changed.changed_sha256
+        with
+        | Error error -> Error (Ref_identity_invalid (Ref_create_failed error))
+        | Ok reference ->
+          Ok { checkpoint; reference; canonical_bytes = changed.changed_canonical_bytes }))
+
+let read_agent_core_exact_bytes_since ~session_dir ~known =
+  match with_session_lock ~session_dir (fun session_dir -> read_since_locked ~session_dir ~known) with
+  | Ok result -> result
+  | Error detail -> Error (Ref_lock_failed detail)
+
+let with_agent_core_exact_snapshot_since ~session_dir ~known f =
+  match
+    with_session_lock ~session_dir (fun session_dir ->
+      match read_since_locked ~session_dir ~known with
+      | Error _ as error -> error
+      | Ok Unchanged_bytes -> Ok (f Unchanged_source)
+      | Ok (Changed_bytes changed) ->
+        Result.map (fun snapshot -> f (Changed_source snapshot)) (decode_changed_bytes changed))
+  with
+  | Ok result -> result
+  | Error detail -> Error (Ref_lock_failed detail)
+
 let load_agent_core_with_ref ~session_dir ~session_id =
   load_agent_core_exact_snapshot ~session_dir ~session_id
   |> Result.map (fun snapshot ->

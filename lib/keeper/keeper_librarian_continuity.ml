@@ -23,6 +23,11 @@ type prepared =
   { trace_id : string
   ; lines : (int * (B.record, B.read_error) result) list
   ; messages : Agent_core.Types.message list
+  ; source : C.exact_source
+      (* The checkpoint bytes [messages] were decoded from. *)
+  ; covered_prefix : S.prefix_digest option
+      (* The previous snapshot's verified prefix digest over [messages], when
+         it fits; the capture extends it by this unit's atoms. *)
   ; previous : stored
   ; previous_state : string option
   ; previous_unread_messages : Keeper_librarian_unread.t list
@@ -72,10 +77,10 @@ let read_in ~keepers_dir ~keeper_name =
   | Undecodable { reason } -> Error (S.error_to_string (S.Invalid_snapshot reason))
 let read ~config ~keeper_name =
   read_in ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_name
-let prepare_source ?end_atom ~config ~keeper_name ~trace_id () =
+let prepare_source ?previous ?end_atom ~config ~keeper_name ~trace_id () =
   let* lines = B.read ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name in
   let* stored = load ~config ~keeper_name in
-  let previous = match stored with
+  let previous_snapshot = match stored with
     | Saved snapshot -> Some snapshot
     | Absent -> None
     | Undecodable { reason } ->
@@ -86,10 +91,26 @@ let prepare_source ?end_atom ~config ~keeper_name ~trace_id () =
   let progress = Option.map (fun (snapshot : S.t) ->
     {Keeper_librarian_progress.position =
       {trace_id=snapshot.trace_id;end_atom=snapshot.end_atom;last_atom_digest=snapshot.last_atom_digest};
-     boundary_lines_seen=snapshot.end_boundary_line}) previous in
+     boundary_lines_seen=snapshot.end_boundary_line}) previous_snapshot in
   if not (R.may_have_unread ~trace_id ~lines ~progress) then Ok (No_source Drained) else
   let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
-  match C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id with
+  (* The round before, in the same lane walk, holds an exact snapshot of this
+     trace. While the file still holds those bytes its decoded messages are
+     the ones that round read, so neither the decode nor the covered prefix's
+     digest is repeated; changed bytes are decoded and digested in full.
+     Nothing reads [previous] after the hash, so on changed bytes the round
+     before's checkpoint can be collected before the new one is decoded. *)
+  let decoded checkpoint =
+    C.exact_snapshot_source checkpoint, C.exact_snapshot_messages checkpoint, None in
+  let loaded = match previous with
+    | Some (previous : prepared) when String.equal previous.trace_id trace_id ->
+      (match C.read_agent_core_exact_bytes_since ~session_dir ~known:previous.source with
+       | Ok C.Unchanged_bytes -> Ok (previous.source, previous.messages, previous.covered_prefix)
+       | Ok (C.Changed_bytes changed) -> C.decode_changed_bytes changed |> Result.map decoded
+       | Error _ as error -> error)
+    | Some _ | None ->
+      C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id |> Result.map decoded in
+  match loaded with
   | Error C.Ref_not_found -> Ok (No_source Source_unreadable)
   | Error
       ((C.Ref_read_failed _ | C.Ref_identity_invalid _ | C.Ref_session_mismatch _
@@ -99,8 +120,7 @@ let prepare_source ?end_atom ~config ~keeper_name ~trace_id () =
       | C.Ref_identity_invalid _ -> "continuity checkpoint identity invalid"
       | C.Ref_session_mismatch _ -> "continuity checkpoint trace mismatch"
       | C.Ref_lock_failed detail -> detail)
-  | Ok checkpoint ->
-    let messages = C.exact_snapshot_messages checkpoint in
+  | Ok (source, messages, prefix) ->
     match S.checkpoint_prefix_range ~trace_id ~lines ~messages with
     | Error (S.Uncovered_history | S.Unmatched_history) -> Ok (No_source Source_unreadable)
     | Error
@@ -108,15 +128,15 @@ let prepare_source ?end_atom ~config ~keeper_name ~trace_id () =
          | S.Invalid_snapshot _ | S.Read_failed _ | S.Write_failed _) as error) ->
       Error (S.error_to_string error)
     | Ok range ->
-      let fitting_previous = match previous with
-        | Some snapshot -> (match S.restore ~trace_id ~lines ~messages snapshot with
-            | Ok restored -> Some (snapshot, restored.working_state)
+      let fitting_previous = match previous_snapshot with
+        | Some snapshot -> (match S.restore ?prefix ~trace_id ~lines ~messages snapshot with
+            | Ok restored -> Some (snapshot, restored.working_state, restored.covered_prefix)
             | Error _ -> None)
         | None -> None in
-      let previous_state, previous_unread_messages, start_atom = match fitting_previous with
-        | Some ((snapshot : S.t), working_state) ->
-          Some working_state, snapshot.unread_messages, snapshot.end_atom
-        | None -> None, [], 0 in
+      let previous_state, previous_unread_messages, start_atom, covered_prefix = match fitting_previous with
+        | Some ((snapshot : S.t), working_state, covered_prefix) ->
+          Some working_state, snapshot.unread_messages, snapshot.end_atom, Some covered_prefix
+        | None -> None, [], 0, None in
       (* A rewrite from atom 0 must not move a request's start back
          (RFC keeper-context-window-in-tokens §13.4). While it catches up,
          the snapshot carries where a request starts without it -- the
@@ -142,7 +162,7 @@ let prepare_source ?end_atom ~config ~keeper_name ~trace_id () =
             (Keeper_librarian_progress.read_error_to_string error);
           range.end_atom in
       let catch_up_target = match fitting_previous with
-        | Some ((snapshot : S.t), _) ->
+        | Some ((snapshot : S.t), _, _) ->
           Option.map (fun _ -> start_without_snapshot ()) snapshot.catch_up_end_atom
         | None -> Some (start_without_snapshot ()) in
       let cuts = R.cut_lines ~trace_id ~lines ~messages range
@@ -187,7 +207,7 @@ let prepare_source ?end_atom ~config ~keeper_name ~trace_id () =
               ~end_atom:receipt.end_atom ~messages receipt.unread_messages in
             Keeper_librarian_unread.merge previous_unread_messages receipt.unread_messages in
         let unread = R.slice messages {range with R.start_atom; end_atom} in
-        Ok (Ready {trace_id;lines;messages;previous=stored;previous_state;previous_unread_messages;recovery_receipt;range;cuts;covering_cut;start_atom;end_atom;unread;
+        Ok (Ready {trace_id;lines;messages;source;covered_prefix;previous=stored;previous_state;previous_unread_messages;recovery_receipt;range;cuts;covering_cut;start_atom;end_atom;unread;
                   catch_up_target})
 
 (* The reason an empty source was empty is dropped here: a caller that only
@@ -362,15 +382,21 @@ let previous_unread_messages prepared = prepared.previous_unread_messages
 let prompt_json prepared =
   `Assoc ["previous_working_state", (match prepared.previous_state with None -> `Null | Some text -> `String text);
     "unread_messages", Keeper_librarian_unread.list_to_json prepared.previous_unread_messages]
+(* The prefix a unit read, in the given messages: every pinned message and
+   the atoms before its covering cut. *)
+let read_prefix ~prepared messages =
+  W.annotate messages |> fst |> List.filter_map (fun (message,label) ->
+    match label with
+    | W.Pinned -> Some message
+    | W.Atom atom -> if atom < prepared.covering_cut.cut_end_atom then Some message else None)
 let capture_snapshot ~prepared ~unread_messages ~working_state =
   (* Capture against this work unit's actual completed turn, not a later
      backlog boundary. Keep the full frozen checkpoint in [prepared] for
-     Memory coverage checks; only this capture view ends at the chosen cut. *)
-  let messages = W.annotate prepared.messages |> fst |> List.filter_map (fun (message, label) ->
-    match label with
-    | W.Pinned -> Some message
-    | W.Atom atom -> if atom < prepared.covering_cut.cut_end_atom then Some message else None) in
-  S.capture_checkpoint_prefix ~unread_messages ~end_atom:prepared.end_atom
+     Memory coverage checks; only this capture view ends at the chosen cut.
+     The view holds the same message values, so the covered prefix digest
+     extends over them. *)
+  let messages = read_prefix ~prepared prepared.messages in
+  S.capture_checkpoint_prefix ?prefix:prepared.covered_prefix ~unread_messages ~end_atom:prepared.end_atom
     ~catch_up_end_atom:prepared.catch_up_target
     ~trace_id:prepared.trace_id ~lines:prepared.lines ~messages
     ~working_state () |> Result.map_error S.error_to_string
@@ -382,9 +408,11 @@ let save_snapshot ~config ~keeper_name snapshot =
   S.save ~path:(path ~config ~keeper_name) snapshot |> Result.map_error S.error_to_string
 let with_original_source ~config ~keeper_name ~prepared publish =
   let session_dir = Filename.concat (Keeper_fs.session_store_path config) prepared.trace_id in
-  let locked = C.with_agent_core_exact_snapshot ~session_dir ~session_id:prepared.trace_id
-    (fun current ->
-      let current_messages = C.exact_snapshot_messages current in
+  let locked = C.with_agent_core_exact_snapshot_since ~session_dir ~known:prepared.source
+    (fun since ->
+      let current_messages = match since with
+        | C.Unchanged_source -> prepared.messages
+        | C.Changed_source current -> C.exact_snapshot_messages current in
       (* Completed boundary rows only append during the serial lane. Purge
          first cancels/awaits that lane. A suffix append cannot change this
          prefix; reread the real log rather than reconstructing its witnesses. *)
@@ -394,16 +422,24 @@ let with_original_source ~config ~keeper_name ~prepared publish =
         else Error "continuity boundary prefix changed during message inference" in
       let* range_now = S.checkpoint_prefix_range ~trace_id:prepared.trace_id ~lines ~messages:current_messages
         |> Result.map_error S.error_to_string in
-      let prefix_messages messages =
-        W.annotate messages |> fst |> List.filter_map (fun (message,label) ->
-          match label with
-          | W.Pinned -> Some (Agent_core.Checkpoint.message_to_json message)
-          | W.Atom atom -> if atom < prepared.covering_cut.cut_end_atom
-            then Some (Agent_core.Checkpoint.message_to_json message) else None) in
+      (* Unchanged bytes decode to the messages the unit read. Changed bytes
+         are compared one message at a time with the whole-prefix check's
+         equality: a pair passes when its checkpoint JSON trees are equal.
+         Values equal under [=] give trees equal under [=], so the first test
+         only spares building the trees and accepts nothing the tree compare
+         refuses. Neither test is byte equality: [0.0] and [-0.0] pass both,
+         though they encode one byte apart. *)
+      let read_prefix_unchanged = match since with
+        | C.Unchanged_source -> true
+        | C.Changed_source _ ->
+          List.equal (fun current original -> current = original
+            || Agent_core.Checkpoint.message_to_json current
+               = Agent_core.Checkpoint.message_to_json original)
+            (read_prefix ~prepared current_messages) (read_prefix ~prepared prepared.messages) in
       let* () =
         if range_now.history_start_boundary_line=prepared.range.history_start_boundary_line
            && range_now.end_atom >= prepared.end_atom
-           && prefix_messages current_messages=prefix_messages prepared.messages then Ok ()
+           && read_prefix_unchanged then Ok ()
         else Error "continuity checkpoint prefix changed during message inference" in
       publish ()) in
   match locked with

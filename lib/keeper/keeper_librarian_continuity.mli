@@ -21,13 +21,19 @@ type source =
   | Ready of prepared
   | No_source of no_source
 
-val prepare_source : ?end_atom:int -> config:Workspace.config -> keeper_name:string ->
-  trace_id:string -> unit -> (source, string) result
+val prepare_source : ?previous:prepared -> ?end_atom:int -> config:Workspace.config ->
+  keeper_name:string -> trace_id:string -> unit -> (source, string) result
 (** Read boundaries before the locked checkpoint. Supply previous valid state
     plus the suffix through the next real completed turn. Capacity is a ceiling,
     not a reason to include later turns. An explicit [end_atom] selects a prefix;
     an unpublished exact Memory receipt takes precedence over either choice.
     Pending in-flight atoms are excluded.
+
+    [previous] is the unit the caller's last round of this trace read. While
+    the checkpoint file still holds the bytes it was decoded from, its
+    messages are used again instead of a decode, and the snapshot that round
+    committed is verified by extending that unit's prefix digest. Any other
+    file is decoded and verified in full; the result is the same either way.
 
     A snapshot file that cannot be decoded is logged with its decode reason
     and treated as absent: the source starts at atom 0 and {!commit} replaces

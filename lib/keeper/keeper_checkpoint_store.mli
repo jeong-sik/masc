@@ -353,6 +353,52 @@ val load_agent_core_exact_snapshot :
   session_id:string ->
   (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
 
+(** The bytes one exact snapshot was decoded from, named by their digest. It
+    is made only from an exact snapshot, never from a stored record. *)
+type exact_source
+
+val exact_snapshot_source : exact_checkpoint_snapshot -> exact_source
+
+type exact_snapshot_since =
+  | Unchanged_source
+      (** The file holds exactly the known bytes; their decoded value is the
+          one the caller already holds. Nothing was decoded. *)
+  | Changed_source of exact_checkpoint_snapshot
+      (** The file holds other bytes, decoded once. *)
+
+(** {!with_agent_core_exact_snapshot} for a caller that already holds one
+    exact snapshot of this session: under the same session lock the file is
+    hashed, and decoded only when its bytes differ from [known]. A missing
+    file is [Ref_not_found]. *)
+val with_agent_core_exact_snapshot_since :
+  session_dir:string ->
+  known:exact_source ->
+  (exact_snapshot_since -> 'a) ->
+  ('a, checkpoint_ref_load_error) result
+
+(** Bytes read under the session lock that differ from a known source. *)
+type changed_bytes
+
+type exact_bytes_since =
+  | Unchanged_bytes
+      (** The file holds exactly the known bytes. Nothing was decoded. *)
+  | Changed_bytes of changed_bytes
+      (** Other bytes, read and hashed but not decoded yet. *)
+
+(** Read and hash the file under the session lock and release the lock
+    without decoding. A caller that holds the known snapshot's decoded value
+    can drop it before {!decode_changed_bytes} builds the new one, so the two
+    are not alive together. A missing file is [Ref_not_found]. *)
+val read_agent_core_exact_bytes_since :
+  session_dir:string ->
+  known:exact_source ->
+  (exact_bytes_since, checkpoint_ref_load_error) result
+
+(** Decode bytes {!read_agent_core_exact_bytes_since} found changed, with the
+    digest it already took. *)
+val decode_changed_bytes :
+  changed_bytes -> (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
+
 (** Load one canonical checkpoint and its exact source identity from the same
     locked byte snapshot. No size, mtime, timestamp, or process cache
     participates in the identity. *)

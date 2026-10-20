@@ -358,7 +358,10 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
         external_capture := Some (cursor,through);
         Ok observations in
     Ok { input with counterpart_observations } in
-  let rec next () =
+  (* [previous] is the unit this walk's last round committed: the next round
+     reuses its checkpoint read and prefix digest while the checkpoint file
+     holds the same bytes. A new walk starts without one. *)
+  let rec next ?previous () =
     observe O.Checking;
     match Env_config.KeeperMemoryOs.librarian_config_state () with
     | Disabled | Invalid -> observe O.Disabled
@@ -385,8 +388,15 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
                stop. *)
             observe O.No_source
         in
+        (* A worker pool keeps the job closure until the job returns, so the
+           closure takes [previous] out of a cell rather than capturing it:
+           the source then drops the round before's checkpoint once it knows
+           the file changed, before decoding the new one. *)
+        let handed = ref previous in
         match Domain_pool_ref.submit_io_or_inline (fun () ->
-          P.prepare_source ~config ~keeper_name ~trace_id:current_trace ()) with
+          let previous = !handed in
+          handed := None;
+          P.prepare_source ?previous ~config ~keeper_name ~trace_id:current_trace ()) with
         | Error detail -> report O.Source_unavailable O.Source_read_failed detail
         | Ok (P.No_source no_source) -> settle_no_source no_source
         | Ok (P.Ready prepared) ->
@@ -494,7 +504,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
         ~base_path ~keepers_dir ~keeper_id:keeper_name
         ~expected_revision:(Option.map (fun (value : Keeper_memory_os_current.t) -> value.revision) current)
         input;
-      if !saved && not (has_waiting ()) then next ()
+      if !saved && not (has_waiting ()) then next ~previous:selected ()
       else if !saved then Log.Keeper.info ~keeper_name
         "continuity round committed; yielding to the waiting Librarian unit"
       else
@@ -649,7 +659,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
             forget_input_capacity ~config ~keeper_name; capacity := None
           | Some (Runtime.Cli_slot _) | None -> ());
          observe O.Committed;
-         if not (has_waiting ()) then next ())
+         if not (has_waiting ()) then next ~previous:selected ())
   and message_floor ~selected ~(input : Keeper_librarian.input) =
     let module H = Keeper_librarian_task_context in
     let module Unread = Keeper_librarian_unread in
@@ -738,7 +748,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
       Eio.Fiber.check ();
       (match published with
        | Error _ -> ()
-       | Ok _ -> if not (has_waiting ()) then next ())
+       | Ok _ -> if not (has_waiting ()) then next ~previous:selected ())
   in
   try next () with
   | Eio.Cancel.Cancelled _ as exn -> observe O.Cancelled; raise exn

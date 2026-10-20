@@ -383,6 +383,64 @@ let test_unread_snapshot_source_binding () =
   check bool "one durable replacement preserves state, coverage and exact holes" true (loaded = decoded)
 ;;
 
+let digest_prefix_atoms = 64
+let digest_prefix_atom_bytes = 16 * 1024
+
+(* The digest a restore verified extends, over the same message values, to a
+   later end without encoding the covered atoms again, and gives the digest a
+   full read gives. *)
+let test_a_verified_prefix_digest_extends_over_the_same_values () =
+  (* [Gc.allocated_bytes] counts this domain alone, so the bound below
+     measures the work only while no worker pool would run it elsewhere. *)
+  check bool "no worker pool is installed" true (Option.is_none (Domain_pool_ref.get ()));
+  let atoms = List.init digest_prefix_atoms (fun atom ->
+    msg T.User (Printf.sprintf "atom %d %s" atom (String.make digest_prefix_atom_bytes 'd'))) in
+  let messages = pinned :: atoms in
+  let lines = [1, boundary ~fresh:false messages] in
+  let capture ?prefix end_atom =
+    S.capture_checkpoint_prefix ?prefix ~unread_messages:[] ~end_atom ~catch_up_end_atom:None
+      ~trace_id ~lines ~messages ~working_state:state () |> require in
+  let before_last = capture (digest_prefix_atoms - 1) in
+  let verified = S.restore ~trace_id ~lines ~messages before_last |> require in
+  let whole = capture digest_prefix_atoms in
+  let covered_bytes = float_of_int ((digest_prefix_atoms - 1) * digest_prefix_atom_bytes) in
+  let allocated f =
+    let before = Gc.allocated_bytes () in
+    let value = f () in
+    value, Gc.allocated_bytes () -. before in
+  let extended, capture_bytes = allocated (fun () ->
+    capture ~prefix:verified.covered_prefix digest_prefix_atoms) in
+  check string "the extended digest is the full digest" whole.prefix_sha256 extended.prefix_sha256;
+  check bool "the extension does not encode the covered atoms" true (capture_bytes < covered_bytes);
+  let restored, restore_bytes = allocated (fun () ->
+    S.restore ~prefix:verified.covered_prefix ~trace_id ~lines ~messages whole |> require) in
+  check bool "a restore over the same values keeps its answer" true
+    ((S.restore ~trace_id ~lines ~messages whole |> require).messages = restored.messages);
+  check bool "the restore does not encode the covered atoms" true (restore_bytes < covered_bytes)
+
+(* A digest kept with other values, even equal ones, is never trusted: [0.0]
+   and [-0.0] compare equal and encode one byte apart, so the whole prefix is
+   read again and the change refuses the snapshot. *)
+let test_a_prefix_digest_over_other_values_is_read_again () =
+  let call zero = T.make_message ~role:T.Assistant
+    [T.ToolUse {id = "measure-1"; name = "measure"; input = `Assoc ["offset", `Float zero]}] in
+  let history zero = [pinned; user; call zero; msg T.User "Report the offset."; assistant] in
+  let original = history 0.0 and signed = history (-0.0) in
+  check bool "the two histories compare equal" true (original = signed);
+  let lines = [1, boundary original] in
+  let snapshot = S.capture_checkpoint_prefix ~unread_messages:[] ~catch_up_end_atom:None ~trace_id ~lines
+      ~messages:original ~working_state:state () |> require in
+  let verified = S.restore ~trace_id ~lines ~messages:original snapshot |> require in
+  (match S.restore ~prefix:verified.covered_prefix ~trace_id ~lines ~messages:signed snapshot with
+   | Error S.Prefix_changed -> ()
+   | Ok _ | Error _ -> fail "a digest of other values was trusted");
+  (match S.restore ~trace_id ~lines ~messages:signed snapshot with
+   | Error S.Prefix_changed -> ()
+   | Ok _ | Error _ -> fail "the full read accepts other bytes");
+  let copied = List.map (fun (message : T.message) -> {message with role = message.role}) original in
+  check bool "equal bytes in other values still fit" true
+    (Result.is_ok (S.restore ~prefix:verified.covered_prefix ~trace_id ~lines ~messages:copied snapshot))
+
 let () = run "offline continuity snapshot"
   ["pair", [test_case "unread source binding and atomic pair" `Quick test_unread_snapshot_source_binding;
             test_case "captured partial prefix" `Quick test_captured_partial_prefix;
@@ -395,4 +453,6 @@ let () = run "offline continuity snapshot"
             test_case "strict codec" `Quick test_exact_codec;
             test_case "catch-up target codec" `Quick test_catch_up_target_codec;
             test_case "atomic file pair" `Quick test_file_pair;
-            test_case "prefix hash on the pool" `Quick test_prefix_hash_leaves_the_callers_domain]]
+            test_case "prefix hash on the pool" `Quick test_prefix_hash_leaves_the_callers_domain;
+            test_case "verified prefix digest extends" `Quick test_a_verified_prefix_digest_extends_over_the_same_values;
+            test_case "other values are read again" `Quick test_a_prefix_digest_over_other_values_is_read_again]]

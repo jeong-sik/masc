@@ -31,10 +31,23 @@ type error =
   | Read_failed of string
   | Write_failed of string
 
+module Hash = Digestif.SHA256
+
+(* [prefix_sha256] is SHA-256 over the compact JSON array of the atom messages
+   [0, end_atom). This is the hash state before the closing bracket, with the
+   very message values it was fed, so a later end on the same values only
+   feeds the atoms that follow. *)
+type prefix_digest =
+  { digest_end_atom : int
+  ; fed : Agent_core.Types.message list
+  ; open_array : Hash.ctx
+  }
+
 type restored =
   { working_state : string
   ; unread_messages : Keeper_librarian_unread.t list
   ; messages : Agent_core.Types.message list
+  ; covered_prefix : prefix_digest
   }
 
 let error_to_string = function
@@ -190,29 +203,50 @@ let checkpoint_prefix_range ~trace_id ~lines ~messages =
     source_range ~trace_id ~lines ~messages
 ;;
 
-let prefix_sha256 messages range =
-  (* Hash the same compact JSON array without materializing the whole prefix
-     as a JSON tree and then a string. Only one encoded message is needed at
-     a time; range selection still owns the atom and pinned-message rules.
-     Encoding every covered message is the cost: a 107.7 MB prefix of 33,234
-     messages took 1.2-1.8 s and allocated 471 MB (2026-10-17). It runs on the
-     shared CPU pool, so a caller on the main domain -- the next-request
-     forecast -- does not hold every other request for that long. *)
-  let module Hash = Digestif.SHA256 in
-  let rec feed buf ctx = function
-    | [] -> Hash.feed_string ctx "]" |> Hash.get |> Hash.to_hex
-    | message :: rest ->
+let empty_prefix_digest =
+  { digest_end_atom = 0; fed = []; open_array = Hash.feed_string (Hash.init ()) "[" }
+;;
+
+(* Hash the same compact JSON array without materializing the whole prefix
+   as a JSON tree and then a string. Only one encoded message is needed at
+   a time; range selection still owns the atom and pinned-message rules.
+   Encoding every covered message is the cost: a 107.7 MB prefix of 33,234
+   messages took 1.2-1.8 s and allocated 471 MB (2026-10-17). It runs on the
+   shared CPU pool, so a caller on the main domain -- the next-request
+   forecast -- does not hold every other request for that long.
+
+   A [prefix] fed these same message values, physically, through an end at
+   or before this one is extended by the atoms after its end alone: the
+   encoding is a function of the value, so the bytes it fed are the bytes
+   this prefix starts with. Equal-looking values decoded from other bytes
+   are not the same values -- [0.0] and [-0.0] compare equal and encode one
+   byte apart -- so any other [prefix] is ignored and every atom is fed. *)
+let prefix_digest ?prefix messages (range : R.range) =
+  let feed buf digest added =
+    let _, open_array = List.fold_left (fun (first, ctx) message ->
       let encoded = Agent_core.Checkpoint.message_to_json message |> Yojson.Safe.to_string ~buf in
-      let ctx = Hash.feed_string ctx encoded in
-      let ctx = match rest with [] -> ctx | _ :: _ -> Hash.feed_string ctx "," in
-      feed buf ctx rest
-  in
+      let ctx = if first then ctx else Hash.feed_string ctx "," in
+      false, Hash.feed_string ctx encoded)
+      (List.is_empty digest.fed, digest.open_array) added in
+    { digest_end_atom = range.end_atom; fed = digest.fed @ added; open_array } in
   Domain_pool_ref.submit_cpu_or_inline (fun () ->
     (* One private buffer per job avoids growing a fresh buffer for every
        message. Yojson clears it between encodings; no bytes or mutable
        buffer are shared across jobs. *)
     let buf = Buffer.create 256 in
-    feed buf (Hash.feed_string (Hash.init ()) "[") (R.slice messages range))
+    let reusable = match prefix with
+      | Some prefix when range.start_atom = 0 && prefix.digest_end_atom <= range.end_atom ->
+        let same = R.slice messages {range with R.end_atom = prefix.digest_end_atom} in
+        if List.equal ( == ) same prefix.fed then Some prefix else None
+      | Some _ | None -> None in
+    match reusable with
+    | Some prefix ->
+      feed buf prefix (R.slice messages {range with R.start_atom = prefix.digest_end_atom})
+    | None -> feed buf empty_prefix_digest (R.slice messages range))
+;;
+
+let prefix_digest_hex digest =
+  Hash.feed_string digest.open_array "]" |> Hash.get |> Hash.to_hex
 ;;
 
 (* Only the lines of the history's current generation can witness where it
@@ -224,7 +258,7 @@ let generation_lines ~history_start_boundary_line lines =
   List.filter (fun (line, _) -> line >= history_start_boundary_line) lines
 ;;
 
-let capture_range ~origin ?end_atom ~unread_messages ~catch_up_end_atom ~trace_id ~lines ~messages ~working_state range =
+let capture_range ?prefix ~origin ?end_atom ~unread_messages ~catch_up_end_atom ~trace_id ~lines ~messages ~working_state range =
   let end_atom = Option.value end_atom ~default:range.R.end_atom in
   let catch_up_end_atom =
     match catch_up_end_atom with
@@ -259,7 +293,7 @@ let capture_range ~origin ?end_atom ~unread_messages ~catch_up_end_atom ~trace_i
     ; end_turn_ref
     ; end_atom
     ; last_atom_digest
-    ; prefix_sha256 = prefix_sha256 messages {range with R.end_atom; last_atom_digest}
+    ; prefix_sha256 = prefix_digest_hex (prefix_digest ?prefix messages {range with R.end_atom; last_atom_digest})
     ; working_state
     ; unread_messages
     ; catch_up_end_atom
@@ -271,12 +305,12 @@ let capture ~unread_messages ~trace_id ~lines ~messages ~working_state =
   capture_range ~origin:Witnessed_history ~unread_messages ~catch_up_end_atom:None ~trace_id ~lines ~messages ~working_state range
 ;;
 
-let capture_checkpoint_prefix ?end_atom ~unread_messages ~catch_up_end_atom ~trace_id ~lines ~messages ~working_state () =
+let capture_checkpoint_prefix ?prefix ?end_atom ~unread_messages ~catch_up_end_atom ~trace_id ~lines ~messages ~working_state () =
   let* range = checkpoint_prefix_range ~trace_id ~lines ~messages in
-  capture_range ~origin:Captured_checkpoint_prefix ?end_atom ~unread_messages ~catch_up_end_atom ~trace_id ~lines ~messages ~working_state range
+  capture_range ?prefix ~origin:Captured_checkpoint_prefix ?end_atom ~unread_messages ~catch_up_end_atom ~trace_id ~lines ~messages ~working_state range
 ;;
 
-let restore ~trace_id ~lines ~messages (snapshot : t) =
+let restore ?prefix ~trace_id ~lines ~messages (snapshot : t) =
   if not (String.equal trace_id snapshot.trace_id) then Error Trace_mismatch
   else
     let source = match snapshot.origin with Witnessed_history -> source_range | Captured_checkpoint_prefix -> checkpoint_prefix_range in
@@ -302,7 +336,8 @@ let restore ~trace_id ~lines ~messages (snapshot : t) =
     else
       let covered = { range with R.end_atom = snapshot.end_atom;
         last_atom_digest = snapshot.last_atom_digest } in
-      if not (String.equal (prefix_sha256 messages covered) snapshot.prefix_sha256)
+      let covered_prefix = prefix_digest ?prefix messages covered in
+      if not (String.equal (prefix_digest_hex covered_prefix) snapshot.prefix_sha256)
       then Error Prefix_changed
       else
         let* () = Keeper_librarian_unread.validate_atom_history ~trace_id
@@ -314,7 +349,8 @@ let restore ~trace_id ~lines ~messages (snapshot : t) =
           match label with
           | Window.Pinned -> Some message
           | Window.Atom atom -> if atom >= snapshot.end_atom then Some message else None) labelled in
-        Ok { working_state = snapshot.working_state; unread_messages = snapshot.unread_messages; messages }
+        Ok { working_state = snapshot.working_state; unread_messages = snapshot.unread_messages; messages;
+             covered_prefix }
 ;;
 
 let save ~path snapshot =

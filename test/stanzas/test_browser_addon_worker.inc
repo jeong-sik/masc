@@ -21,4 +21,4 @@
 (test
  (name test_browser_addon_client)
  (modules test_browser_addon_client)
- (libraries masc masc.browser_lane masc.eio_context alcotest eio eio_main yojson unix))
+ (libraries masc masc.browser_lane masc.masc_eio_context alcotest eio eio_main yojson unix))

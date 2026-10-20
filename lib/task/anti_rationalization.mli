@@ -98,8 +98,22 @@ type review_result =
   ; gate : gate
   ; fallback_reason : string option
   ; retryable_runtimes : string list
-        (** Actual candidates that reported a typed retryable error, in attempt
-            order. The final diagnostic runtime does not own their retry time. *)
+        (** Actual candidates whose typed failure passes with time, in attempt
+            order, and the only authority for reviewing the same submission
+            again without a producer or an operator acting. A candidate is
+            named here for a transient error ({!Agent_core.Error.is_retryable})
+            or for a provider rest whose end is known: a rate limit, or a hard
+            quota with a stated reset, read off
+            {!Keeper_runtime_failure_route.route_of_error}. How long the retry
+            waits is not carried: the scheduler reads each candidate's recorded
+            path rest when it arms the retry ([Verification_retry.delay]). A
+            later non-retryable fallback cannot mask an earlier candidate, and
+            the final diagnostic runtime does not own their retry time. Empty
+            for a produced verdict, a reply without a verdict from candidates
+            that never failed transiently, a prompt or slot resolution
+            failure, and every failure that time alone does not change:
+            nothing about those outcomes says a repeat of the same request
+            would end differently. *)
   ; model_absent_runtimes : string list
         (** Actual candidates whose typed refusal was model-absence
             ({!Keeper_runtime_failure_route.core_error_is_model_absent}: a
@@ -108,17 +122,6 @@ type review_result =
             are kept out of [retryable_runtimes] and named here so the
             deferral records per-candidate outcomes, not only the last
             candidate's error (2026-10-07 audit F-02). *)
-  ; evaluator_error_retryable : bool option
-        (** [Some true] when a verdict-less exhausted lane observed at least
-            one typed retryable {!Agent_core.Error.t}; a later non-retryable
-            fallback cannot mask that transient candidate. [Some false] when
-            typed evaluator errors existed but all were non-retryable. [None]
-            for a produced verdict, an invalid-verdict-only reply, or a prompt
-            or slot resolution failure. [None] is not "retry": nothing about
-            those outcomes says a repeat of the same request would end
-            differently. This was once a plain [bool] defaulting to [true],
-            which is why an [Invalid_verdict] review re-ran on the maintenance
-            pulse forever without telling anyone. *)
   }
 
 val run

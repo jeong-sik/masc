@@ -762,23 +762,30 @@ let test_retry_waits_out_a_resting_slot () =
   Alcotest.(check (float 0.0)) "all resting candidates wait until the first can serve" 300.0
     (delay [resting 121000.0; resting 1300.0])
 
+let not_reviewed_stop ~retryable_runtimes =
+  CA.For_testing.Not_reviewed
+    { gate = "evaluator_unavailable"
+    ; detail = "Payment required"
+    ; evaluator_runtime = "ollama_cloud.deepseek"
+    ; retryable_runtimes
+    ; model_absent_runtimes = []
+    }
+;;
+
 (* Audit U2 (2026-09-12) and its Codex review: the Board sentence is
    projected from the scheduler's answer, not from the attempt's request. A
    timer this stall armed names the lane interval; a timer it joined, or one
    already holding its key, names no number it does not hold. *)
 let test_system_llm_retry_disposition_is_typed () =
   let module For_testing = CA.For_testing in
-  (match For_testing.retry_request_of_evaluator_retryable (Some true) with
+  (match For_testing.retry_request_of_stop_cause (not_reviewed_stop ~retryable_runtimes:[ "slot" ]) with
    | For_testing.Retry_requested -> ()
    | For_testing.No_retry_requested ->
-     Alcotest.fail "typed retryable evaluator failure must request a retry");
-  List.iter
-    (fun retryable ->
-       match For_testing.retry_request_of_evaluator_retryable retryable with
-       | For_testing.No_retry_requested -> ()
-       | For_testing.Retry_requested ->
-         Alcotest.fail "non-retryable or unclassified deferral must request nothing")
-    [ Some false; None ];
+     Alcotest.fail "a candidate whose failure passes with time must request a retry");
+  (match For_testing.retry_request_of_stop_cause (not_reviewed_stop ~retryable_runtimes:[]) with
+   | For_testing.No_retry_requested -> ()
+   | For_testing.Retry_requested ->
+     Alcotest.fail "a review with no such candidate must request nothing");
   let disposition =
     For_testing.stall_disposition_of_scheduling ~retry_interval_sec:60.0
   in
@@ -815,25 +822,14 @@ let root_unreadable_stop =
 
 let commit_failed_stop = CA.For_testing.Commit_failed { detail = "cas mismatch" }
 
-let not_reviewed_stop ~retry =
-  CA.For_testing.Not_reviewed
-    { gate = "evaluator_unavailable"
-    ; detail = "Payment required"
-    ; evaluator_runtime = "ollama_cloud.deepseek"
-    ; retryable_runtimes = ["ollama_cloud.deepseek"]
-    ; model_absent_runtimes = []
-    ; retry
-    }
-;;
-
 let raised_stop = CA.For_testing.Raised { detail = "Failure(\"boom\")" }
-let retryable_stop = not_reviewed_stop ~retry:CA.For_testing.Retry_requested
+let retryable_stop = not_reviewed_stop ~retryable_runtimes:[ "ollama_cloud.deepseek" ]
 
 (* Every constructor once, each with the label its line must carry. *)
 let stop_causes_with_labels =
   [ root_unreadable_stop, "Infrastructure_unavailable{stage=review_preparation}"
   ; commit_failed_stop, "Commit_failed"
-  ; ( not_reviewed_stop ~retry:CA.For_testing.No_retry_requested
+  ; ( not_reviewed_stop ~retryable_runtimes:[]
     , "Not_reviewed{gate=evaluator_unavailable,slot=ollama_cloud.deepseek}" )
   ; raised_stop, "Raised"
   ]
@@ -1323,7 +1319,7 @@ let test_system_llm_review_notes_are_metadata_only () =
     ; generator_runtime = None
     ; gate = Masc.Task.Anti_rationalization.Structured_tool
     ; fallback_reason = None
-    ; retryable_runtimes = []; model_absent_runtimes = []; evaluator_error_retryable = None
+    ; retryable_runtimes = []; model_absent_runtimes = []
     }
   in
   let notes =
@@ -4723,7 +4719,7 @@ let test_an_unreadable_image_body_is_named_in_the_review_record () =
         ; generator_runtime = None
         ; gate = Masc.Task.Anti_rationalization.Structured_tool
         ; fallback_reason = None
-        ; retryable_runtimes = []; model_absent_runtimes = []; evaluator_error_retryable = None
+        ; retryable_runtimes = []; model_absent_runtimes = []
         }
       in
       let notes =

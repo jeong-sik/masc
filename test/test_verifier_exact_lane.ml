@@ -174,11 +174,9 @@ let test_exhaustion_preserves_any_retryable_attempt () =
          "the last attempted slot is the reported evaluator runtime"
          "slot-b"
          result.evaluator_runtime;
-       Alcotest.(check (option bool))
-         "a transient slot is not masked by a later non-retryable fallback"
-         (Some true)
-         result.evaluator_error_retryable;
-       Alcotest.(check (list string)) "retry follows the transient candidate, not the final diagnostic"
+       Alcotest.(check (list string))
+         "a transient slot is not masked by a later non-retryable fallback, and the retry \
+          follows it, not the final diagnostic"
          ["slot-a"] result.retryable_runtimes;
        Alcotest.(check bool) "no fabricated verdict" true (Option.is_none result.verdict))
 ;;
@@ -200,11 +198,9 @@ let test_nested_runtime_retryable_attempt_survives_terminal_error () =
          budget_refusal)
     (fun () ->
        let result = review () in
-       Alcotest.(check (option bool))
-         "a nested transient candidate is not masked by its terminal fallback"
-         (Some true)
-         result.evaluator_error_retryable;
-       Alcotest.(check (list string)) "nested candidate retains its own rest identity"
+       Alcotest.(check (list string))
+         "a nested transient candidate is not masked by its terminal fallback and keeps its \
+          own rest identity"
          ["glm.test-model"] result.retryable_runtimes;
        Alcotest.(check string)
          "terminal fallback remains the reported reason"
@@ -243,11 +239,172 @@ let test_exhaustion_reports_all_nonretryable_attempts () =
     (fun () ->
        let result = review () in
        Alcotest.(check (list string)) "both slots tried" [ "slot-a"; "slot-b" ] !calls;
-       Alcotest.(check (option bool))
-         "all typed evaluator errors are non-retryable"
-         (Some false)
-       result.evaluator_error_retryable;
-       Alcotest.(check (list string)) "no retryable candidate invented" [] result.retryable_runtimes)
+       Alcotest.(check (list string))
+         "all typed evaluator errors are non-retryable, so no retryable candidate is invented"
+         [] result.retryable_runtimes)
+;;
+
+(* task-2402 (2026-10-20): the review's last slot answered a 429 hard quota
+   that stated a 2,025-second reset, and the review stopped for good because
+   the in-call retry predicate calls every [HardQuota] non-retryable. The
+   constitution keeps an awaiting submission reviewed with no retry cap,
+   waiting only until a refusing slot's provider rest ends. Two catalog rows,
+   so one path can rest on its own quota scope while the other serves. *)
+let resting_slot = "quota_slot.test_model"
+let serving_slot = "serving_slot.test_model"
+
+let with_rest_runtimes f =
+  let saved = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "verifier-provider-rest-" ".toml" in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime_quota_window.reset_for_testing ();
+      Runtime.For_testing.restore saved;
+      Sys.remove path)
+    (fun () ->
+       Out_channel.with_open_bin path (fun out -> output_string out {|[runtime]
+default = "quota_slot.test_model"
+[providers.quota_slot]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[providers.serving_slot]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:2/v1"
+[models.test_model]
+api-name = "test-model"
+max-context = 200000
+tools-support = true
+[quota_slot.test_model]
+[serving_slot.test_model]
+|});
+       (match Runtime.init_default ~config_path:path with
+        | Ok () -> ()
+        | Error detail -> Alcotest.fail detail);
+       Runtime_quota_window.reset_for_testing ();
+       f ())
+;;
+
+let claude_code_hard_quota ~retry_after =
+  Agent_core.Error.Provider
+    (Llm_provider.Error.HardQuota
+       { provider = "claude_code"
+       ; retry_after
+       ; detail = "Claude Code quota blocked (rate_limit=rejected api_status=429)"
+       })
+;;
+
+(* The walk inside a slot reports its own candidate's failure before the slot
+   answers with the same error, which is the live shape; a slot whose walk
+   reports nothing is classified from its terminal error alone. *)
+let failing_slot_reviewer ~reports_attempt error =
+  fun ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_ ?goal_blocks:_
+      ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error () ->
+    if reports_attempt
+    then
+      on_runtime_attempt_error
+        ~runtime_id:evaluator_runtime
+        ~attempt:0
+        ~dispatch:Masc.Keeper_attempt_dispatch.Dispatched
+        error;
+    Error error
+;;
+
+let reviewed_stop ~slot ~reports_attempt error =
+  with_lane_and_reviewer
+    ~slots:(fun () -> Ok [ slot ])
+    ~reviewer:(failing_slot_reviewer ~reports_attempt error)
+    (fun () -> Masc.Completion_authority_agent.For_testing.not_reviewed_of_result (review ()))
+;;
+
+let test_a_provider_rest_retries_the_review_when_the_rest_ends () =
+  let module CA = Masc.Completion_authority_agent.For_testing in
+  let rest_sec = 2024.751 in
+  with_rest_runtimes (fun () ->
+    List.iter
+      (fun reports_attempt ->
+         let label = if reports_attempt then "walk-reported" else "terminal-only" in
+         let cause =
+           reviewed_stop
+             ~slot:resting_slot
+             ~reports_attempt
+             (claude_code_hard_quota ~retry_after:(Some rest_sec))
+         in
+         (match cause with
+          | CA.Not_reviewed { retryable_runtimes; _ } ->
+            Alcotest.(check (list string))
+              (label ^ ": the resting slot can review again")
+              [ resting_slot ]
+              retryable_runtimes
+          | CA.Infrastructure_unavailable _ | CA.Commit_failed _ | CA.Raised _ ->
+            Alcotest.fail "a verdict-less review is recorded as Not_reviewed");
+         (match CA.retry_request_of_stop_cause cause with
+          | CA.Retry_requested -> ()
+          | CA.No_retry_requested ->
+            Alcotest.failf "%s: a provider rest with a stated reset stopped the review" label);
+         let now = Unix.gettimeofday () in
+         (* What the provider walk records for this refusal
+            ([Keeper_turn_driver]: [note_quota]), at the reset it stated. *)
+         Runtime_quota_window.note_exhausted
+           ~scope:(Option.get (Runtime.quota_scope_of_runtime_id resting_slot))
+           ~resets_at:(now +. rest_sec);
+         let delay = CA.retry_delay_sec ~retry_interval_sec:60.0 ~now cause in
+         Alcotest.(check (float 0.001))
+           (label ^ ": the retry waits until the stated reset, not the pulse")
+           rest_sec
+           delay;
+         (match CA.stall_disposition_of_scheduling ~retry_interval_sec:delay (CA.Retry_admitted CA.Armed_timer) with
+          | Masc.Verification_protocol.Retry_scheduled
+              { delay = Masc.Verification_protocol.Full_interval { seconds } } ->
+            Alcotest.(check (float 0.001))
+              (label ^ ": the stall is announced as a retry at the reset")
+              rest_sec
+              seconds
+          | Masc.Verification_protocol.Retry_scheduled { delay = Masc.Verification_protocol.Shared_timer }
+          | Masc.Verification_protocol.No_retry_armed ->
+            Alcotest.fail "an armed rest timer must be announced with its delay");
+         (match cause with
+          | CA.Not_reviewed fields ->
+            let with_serving_slot =
+              CA.Not_reviewed
+                { fields with retryable_runtimes = [ resting_slot; serving_slot ] }
+            in
+            Alcotest.(check (float 0.001))
+              (label ^ ": a candidate that already serves keeps the pulse")
+              60.0
+              (CA.retry_delay_sec ~retry_interval_sec:60.0 ~now with_serving_slot)
+          | CA.Infrastructure_unavailable _ | CA.Commit_failed _ | CA.Raised _ -> ());
+         Runtime_quota_window.reset_for_testing ())
+      [ true; false ])
+;;
+
+(* Failures that time alone does not change still stop and leave the move to
+   the producer or the operator: a refused credential, a configuration error,
+   a quota that named no end, and a run refused by a declared tool-round
+   ceiling, which the same input meets again after the whole run repeats. *)
+let test_failures_time_does_not_change_still_stop_the_review () =
+  let module CA = Masc.Completion_authority_agent.For_testing in
+  List.iter
+    (fun (label, error) ->
+       let cause = reviewed_stop ~slot:"slot-a" ~reports_attempt:true error in
+       (match cause with
+        | CA.Not_reviewed { retryable_runtimes; _ } ->
+          Alcotest.(check (list string)) (label ^ ": no candidate can review again") []
+            retryable_runtimes
+        | CA.Infrastructure_unavailable _ | CA.Commit_failed _ | CA.Raised _ ->
+          Alcotest.fail "a verdict-less review is recorded as Not_reviewed");
+       match CA.retry_request_of_stop_cause cause with
+       | CA.No_retry_requested -> ()
+       | CA.Retry_requested -> Alcotest.failf "%s armed a retry" label)
+    [ ( "auth refused"
+      , Agent_core.Error.Api (Agent_core.Error.Retry.AuthError { message = "invalid api key" }) )
+    ; ( "invalid config"
+      , Agent_core.Error.Config
+          (Agent_core.Error.InvalidConfig { field = "verification.system"; detail = "missing" }) )
+    ; "hard quota with no stated reset", claude_code_hard_quota ~retry_after:None
+    ; ( "tool-round ceiling"
+      , Agent_core.Error.Agent
+          (Agent_core.Error.ToolRoundLimitExceeded { rounds = 15; limit = 15 }) )
+    ]
 ;;
 
 (* RFC-0436 §4.3: recorded images ride to the reviewer as attached blocks
@@ -318,13 +475,13 @@ let test_unconfigured_lane_is_unavailable_not_rerouted () =
          "unresolved"
          result.evaluator_runtime;
        (* An unconfigured lane produces no evaluator call, so there is no
-          typed error to classify. That is [None], not "retry": the lane is
+          typed error to classify and no candidate to retry: the lane is
           missing from configuration and repeating the review on a timer
           would not add it. *)
-       Alcotest.(check (option bool))
+       Alcotest.(check (list string))
          "no evaluator error to classify"
-         None
-         result.evaluator_error_retryable;
+         []
+         result.retryable_runtimes;
        match result.fallback_reason with
        | Some detail ->
          Alcotest.(check bool)
@@ -996,6 +1153,14 @@ let () =
             "exhaustion reports all non-retryable attempts"
             `Quick
             test_exhaustion_reports_all_nonretryable_attempts
+        ; Alcotest.test_case
+            "a provider rest retries the review when the rest ends"
+            `Quick
+            test_a_provider_rest_retries_the_review_when_the_rest_ends
+        ; Alcotest.test_case
+            "failures time does not change still stop the review"
+            `Quick
+            test_failures_time_does_not_change_still_stop_the_review
         ; Alcotest.test_case
             "recorded images ride to the reviewer as blocks"
             `Quick

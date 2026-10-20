@@ -402,14 +402,14 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
   let phase_counts = phase_snapshot.counts in
   let keeper_fibers = phase_counts.running in
   let server_state = current_server_state_opt () in
-  (* Single-pass fleet meta scan: reads each keeper meta file once,
-     shared by paused-keepers and fleet-safety sections. *)
-  let fleet_meta_scan =
-    match server_state with
-    | Some state ->
-      Some (keeper_fleet_meta_scan (Mcp_server.workspace_config state))
-    | None -> None
+  (* One read of each keeper meta file, shared by the paused-keepers,
+     execution and fleet-safety sections. *)
+  let meta_reading =
+    Option.map
+      (fun state -> read_keeper_metas (Mcp_server.workspace_config state))
+      server_state
   in
+  let fleet_meta_scan = Option.map keeper_fleet_meta_scan meta_reading in
   let keeper_identity_drift_json =
     compute_section ~name:"keeper_identity_drift" ?section_timings_ref
       (fun () ->
@@ -481,9 +481,8 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
       keeper_hitl_gate_health_json
   in
   let execution_snapshot =
-    match server_state with
-    | Some state ->
-      keeper_execution_snapshot (Mcp_server.workspace_config state)
+    match meta_reading with
+    | Some reading -> keeper_execution_snapshot reading
     | None -> empty_keeper_execution_snapshot
   in
   let keeper_event_queue_json =
@@ -516,6 +515,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
         match fleet_meta_scan with
         | Some scan ->
           keeper_fleet_safety_health_json
+            ~meta_reading
             ~bootable_names:scan.bootable_names
             ~autoboot_scan:scan.autoboot_scan
             ~phase_snapshot
@@ -526,6 +526,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
             ()
         | None ->
           keeper_fleet_safety_health_json
+            ~meta_reading
             ~phase_snapshot
             ~execution_snapshot
             ?base_path

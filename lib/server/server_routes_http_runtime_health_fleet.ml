@@ -557,16 +557,15 @@ let keeper_event_queue_health_json ~execution_snapshot () =
     |> keeper_event_queue_health_dimensions ~source_unavailable:false
 
 let keeper_fleet_runtime_resolution_base_fields
-    ?profile_snapshot
+    ~meta_reading
     ?meta_scan
     ?(include_reaction_ledger = true)
     () =
   let base_path = runtime_base_path_opt () in
   let phase_snapshot = keeper_phase_snapshot ?base_path () in
   let execution_snapshot =
-    match current_server_state_opt () with
-    | Some state ->
-      keeper_execution_snapshot ?profile_snapshot (Mcp_server.workspace_config state)
+    match meta_reading with
+    | Some reading -> keeper_execution_snapshot reading
     | None -> empty_keeper_execution_snapshot
   in
   let phase_counts = phase_snapshot.counts in
@@ -583,7 +582,7 @@ let keeper_fleet_runtime_resolution_base_fields
     match meta_scan with
     | Some scan ->
       keeper_fleet_safety_health_json
-        ?profile_snapshot
+        ~meta_reading
         ~bootable_names:scan.bootable_names
         ~autoboot_scan:scan.autoboot_scan
         ~phase_snapshot
@@ -594,7 +593,7 @@ let keeper_fleet_runtime_resolution_base_fields
         ()
   | None ->
       keeper_fleet_safety_health_json
-        ?profile_snapshot
+        ~meta_reading
         ~phase_snapshot
         ~execution_snapshot
         ?base_path
@@ -693,30 +692,34 @@ let runtime_truth_json ~build ~path_diagnostics ~keeper_fibers ~fd_accountant =
 ;;
 
 let keeper_fleet_runtime_resolution_fields () =
-  keeper_fleet_runtime_resolution_base_fields ()
+  let meta_reading =
+    Option.map
+      (fun state -> read_keeper_metas (Mcp_server.workspace_config state))
+      (current_server_state_opt ())
+  in
+  keeper_fleet_runtime_resolution_base_fields ~meta_reading ()
   @ [ "fd_accountant", fd_accountant_snapshot_json () ]
 ;;
 
 let keeper_fleet_runtime_resolution_light_fields ?profile_snapshot () =
-  let profile_snapshot =
-    match profile_snapshot, current_server_state_opt () with
-    | Some _, _ -> profile_snapshot
-    | None, Some state -> Some (Keeper_types_profile.read_keeper_profile_snapshot
-        ~base_path:(Mcp_server.workspace_config state).base_path)
-    | None, None -> None
-  in
-  let meta_scan =
+  let meta_reading =
     match current_server_state_opt () with
     | Some state ->
-      Some
-        (keeper_fleet_meta_scan
-           ?profile_snapshot
-           ~include_paused_details:false
-           (Mcp_server.workspace_config state))
+      let config = Mcp_server.workspace_config state in
+      let profile_snapshot =
+        match profile_snapshot with
+        | Some snapshot -> snapshot
+        | None ->
+          Keeper_types_profile.read_keeper_profile_snapshot ~base_path:config.base_path
+      in
+      Some (read_keeper_metas ~profile_snapshot config)
     | None -> None
   in
+  let meta_scan =
+    Option.map (keeper_fleet_meta_scan ~include_paused_details:false) meta_reading
+  in
   keeper_fleet_runtime_resolution_base_fields
-    ?profile_snapshot
+    ~meta_reading
     ?meta_scan
     ~include_reaction_ledger:false
     ()

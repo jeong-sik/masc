@@ -1538,6 +1538,58 @@ let test_health_json_surfaces_durable_paused_keepers () =
             true
             (reaction_ledger |> member "operator_action_required" |> to_bool)))
 
+(* The dashboard snapshot rebuilds the light runtime resolution every tick.
+   Its paused/autoboot scan, its execution owners and its active-task
+   bindings all name a Keeper that is declared, persisted and queue-holding,
+   and that Keeper's metadata file is read once for the three of them. The
+   reads are counted through the fail-open decode counter: a metadata file
+   that is JSON but not a Keeper meta bumps it on every read. *)
+let test_light_runtime_resolution_reads_each_keeper_meta_once () =
+  with_temp_dir "light-fleet-meta-read-once" (fun dir ->
+    let config_root = make_config_root dir in
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.For_testing.restore_server_state @@ previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
+        Server_auth.For_testing.restore_server_state @@ Some state;
+        let config = Mcp_server.workspace_config state in
+        let keeper_name = "example" in
+        let meta_path = Keeper_types_profile.keeper_meta_path config keeper_name in
+        mkdir_p (Filename.dirname meta_path);
+        write_file meta_path "{}";
+        let queue_dir =
+          Filename.concat (Workspace.keepers_runtime_dir config) keeper_name
+        in
+        mkdir_p queue_dir;
+        write_file
+          (Filename.concat queue_dir Keeper_event_queue_persistence.snapshot_filename)
+          "{}";
+        let undecodable_meta_reads () =
+          Otel_metric_store.metric_value_or_zero
+            Keeper_metrics.(to_string MetaReadFailures)
+            ~labels:[ ("keeper", "aggregate"); ("site", "meta_parse") ]
+            ()
+        in
+        let before = undecodable_meta_reads () in
+        let light =
+          `Assoc
+            (Server_routes_http_runtime.keeper_fleet_runtime_resolution_light_fields ())
+        in
+        let open Yojson.Safe.Util in
+        Alcotest.(check int) "the declared Keeper is an autoboot target"
+          1
+          (light |> member "keeper_fleet_safety"
+           |> member "autoboot_enabled_keeper_count" |> to_int);
+        Alcotest.(check (float 0.0))
+          "one read of the Keeper's metadata per light projection"
+          1.0
+          (undecodable_meta_reads () -. before)))
+
 let test_health_json_observes_owner_turn () =
   with_temp_dir "health-keeper-owner-work" (fun dir ->
     let config_root = make_config_root dir in
@@ -2027,6 +2079,8 @@ let test_health_json_keeps_awaiting_verification_in_system_llm_lane () =
         in
         let fleet_safety =
           Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+            ~meta_reading:
+              (Some (Server_routes_http_runtime_fleet_scan.read_keeper_metas config))
             ~bootable_names:[]
             ~autoboot_scan:
               Server_routes_http_runtime_fleet_scan.empty_autoboot_keeper_scan
@@ -2364,6 +2418,8 @@ let test_health_json_owner_rows_answer_from_each_keepers_own_reads () =
         in
         let fleet_safety =
           Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+            ~meta_reading:
+              (Some (Server_routes_http_runtime_fleet_scan.read_keeper_metas config))
             ~bootable_names:[]
             ~autoboot_scan:
               Server_routes_http_runtime_fleet_scan.empty_autoboot_keeper_scan
@@ -2443,6 +2499,8 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
         in
         let fleet_safety =
           Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+            ~meta_reading:
+              (Some (Server_routes_http_runtime_fleet_scan.read_keeper_metas config))
             ~bootable_names:[]
             ~autoboot_scan:
               Server_routes_http_runtime_fleet_scan.empty_autoboot_keeper_scan
@@ -2502,6 +2560,8 @@ let test_health_json_degrades_recovery_backed_owner_scan () =
         in
         let fleet_safety =
           Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+            ~meta_reading:
+              (Some (Server_routes_http_runtime_fleet_scan.read_keeper_metas config))
             ~bootable_names:[]
             ~autoboot_scan:
               Server_routes_http_runtime_fleet_scan.empty_autoboot_keeper_scan
@@ -2699,7 +2759,7 @@ let test_health_json_capacity_uses_execution_snapshot () =
         { owners = []; executable_names = [ "running-a" ] }
       in
       let fleet_safety =
-        Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+        Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json ~meta_reading:None
           ~bootable_names:target_names
           ~autoboot_scan:
             { autoboot_names = target_names; read_errors = [] }
@@ -2776,9 +2836,12 @@ let test_health_json_keeps_in_flight_running_keeper_executable () =
               ~base_path:dir
               ~keeper_name
               (fun () ->
+                let meta_reading =
+                  Server_routes_http_runtime_fleet_scan.read_keeper_metas config
+                in
                 let execution_snapshot =
                   Server_routes_http_runtime_fleet_scan.keeper_execution_snapshot
-                    config
+                    meta_reading
                 in
                 let phase_snapshot =
                   Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot
@@ -2786,7 +2849,7 @@ let test_health_json_keeps_in_flight_running_keeper_executable () =
                     ()
                 in
                 Server_routes_http_runtime_fleet_scan
-                .keeper_fleet_safety_health_json
+                .keeper_fleet_safety_health_json ~meta_reading:(Some meta_reading)
                   ~bootable_names:[ keeper_name ]
                   ~autoboot_scan:
                     { autoboot_names = [ keeper_name ]; read_errors = [] }
@@ -2987,7 +3050,7 @@ let test_fleet_official_client_recovery ~paused ~autoboot () =
                  ; reason = Keeper_internal_error.Effect_fenced }));
       let snapshot = Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot ~base_path:dir () in
       let names = List.map (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.name) metas in
-      let json = Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+      let json = Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json ~meta_reading:None
           ~base_path:dir ~bootable_names:names
           ~autoboot_scan:{ autoboot_names = (if autoboot then names else []); read_errors = [] }
           ~phase_snapshot:snapshot ~phase_counts:snapshot.counts
@@ -3079,7 +3142,7 @@ let test_fleet_official_client_recovery_clears_after_success reason () =
         let snapshot =
           Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot ~base_path:dir ()
         in
-        Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+        Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json ~meta_reading:None
           ~base_path:dir ~bootable_names:[ meta.name ]
           ~autoboot_scan:{ autoboot_names = [ meta.name ]; read_errors = [] }
           ~phase_snapshot:snapshot ~phase_counts:snapshot.counts
@@ -3157,7 +3220,7 @@ let test_manual_keeper_failure_health ~paused ~phase ~reason
        | _ -> Alcotest.fail "fixture requires Running or Failing");
       let snapshot = Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot ~base_path:dir () in
       let executable_names = if paused then [] else [ meta.name ] in
-      let json = Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+      let json = Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json ~meta_reading:None
           ~base_path:dir ~bootable_names:[ meta.name ]
           ~autoboot_scan:{ autoboot_names = []; read_errors = [] }
           ~phase_snapshot:snapshot ~phase_counts:snapshot.counts
@@ -3239,7 +3302,7 @@ let test_health_json_blocks_terminal_configuration_failures () =
     { owners = []; executable_names = [ keeper_name ] }
   in
   let fleet_safety =
-    Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+    Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json ~meta_reading:None
       ~bootable_names:[ keeper_name ]
       ~autoboot_scan:{ autoboot_names = [ keeper_name ]; read_errors = [] }
       ~phase_snapshot
@@ -3291,7 +3354,7 @@ let test_health_json_blocks_terminal_configuration_failures () =
     }
   in
   let partial =
-    Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+    Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json ~meta_reading:None
       ~bootable_names:[ keeper_name; healthy_name ]
       ~autoboot_scan:
         { autoboot_names = [ keeper_name; healthy_name ]; read_errors = [] }
@@ -3325,7 +3388,7 @@ let test_health_json_blocks_all_target_operator_recovery () =
       ; official_client_recovery_required_names = recovery_names
       }
     in
-    Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+    Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json ~meta_reading:None
       ~bootable_names:target_names
       ~autoboot_scan:{ autoboot_names = target_names; read_errors = [] }
       ~phase_snapshot
@@ -3375,7 +3438,7 @@ let test_health_json_counts_configuration_blocker_outside_autoboot () =
     }
   in
   let fleet_safety =
-    Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+    Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json ~meta_reading:None
       ~bootable_names:[ keeper_name ]
       ~autoboot_scan:{ autoboot_names = []; read_errors = [] }
       ~phase_snapshot
@@ -6264,6 +6327,9 @@ let () =
           Alcotest.test_case
             "health json surfaces durable paused keepers"
             `Quick test_health_json_surfaces_durable_paused_keepers;
+          Alcotest.test_case
+            "light runtime resolution reads each Keeper meta once"
+            `Quick test_light_runtime_resolution_reads_each_keeper_meta_once;
           Alcotest.test_case
             "health json surfaces Keeper Owner turn"
             `Quick test_health_json_observes_owner_turn;

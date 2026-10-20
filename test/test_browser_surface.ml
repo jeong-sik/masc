@@ -32,8 +32,11 @@ let test_tool_input_recovery () =
       let interact id = `Assoc ["lane",`String "live";"clientId",`String id;
         "tabId",`Int 1;"action",`String "follow_link";"expectedUrl",`String "https://example.org/";
         "documentId",`String "observed";"nodeId",`String "link"] in
-      let read fields = Tools.handle_read ~base_path:no_workspace ~tool_name:"BrowserRead" ~start_time:(Tool_timing.start ())
-        (`Assoc (["tabId",`Int 1] @ fields)) in
+      let read fields =
+        let fields = if List.mem_assoc "clientId" fields then fields
+          else ("clientId", `String valid_id) :: fields in
+        Tools.handle_read ~base_path:no_workspace ~tool_name:"BrowserRead" ~start_time:(Tool_timing.start ())
+          (`Assoc (["tabId",`Int 1] @ fields)) in
       let cases = [
         "malformed connection in tabs", (fun () -> Tools.handle_tabs ~base_path:no_workspace ~tool_name:"BrowserTabs"
           ~start_time:(Tool_timing.start ()) (input_id invalid_id));
@@ -431,8 +434,15 @@ let test_off_precedes_client_guidance () =
       let connect client =
         ignore (Lane.take_command ~client_info:client ~window_sec:0.001);
         Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:client.Lane.client_id)) in
+      (* This scenario addresses the live lane explicitly. Automatic selection
+         can choose another backend and is not a live activity observation. *)
+      let live fields = ("lane", `String "live") :: fields in
+      let bound_live fields =
+        let fields = if List.mem_assoc "clientId" fields then fields
+          else ("clientId", `String "50000000-0000-4000-8000-000000000004") :: fields in
+        live fields in
       let tabs fields = Tools.handle_tabs ~base_path:no_workspace ~tool_name:"BrowserTabs"
-        ~start_time:(Tool_timing.start ()) (`Assoc fields) in
+        ~start_time:(Tool_timing.start ()) (`Assoc (live fields)) in
       let check_off name result =
         check bool (name ^ " is a workflow rejection") true
           (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
@@ -447,9 +457,9 @@ let test_off_precedes_client_guidance () =
       let check_requests name fields =
         check_off (name ^ " tabs") (tabs fields);
         check_off (name ^ " scene") (Tools.handle_read ~base_path:no_workspace ~tool_name:"BrowserRead"
-          ~start_time:(Tool_timing.start ()) (`Assoc (fields @ ["mode",`String "scene";"tabId",`Int 1])));
+          ~start_time:(Tool_timing.start ()) (`Assoc (bound_live fields @ ["mode",`String "scene";"tabId",`Int 1])));
         let result, phase = Tools.handle_interact_with_phase ~base_path:no_workspace ~tool_name:"BrowserInteract"
-          ~start_time:(Tool_timing.start ()) (`Assoc (fields @ ["tabId",`Int 1;"action",`String "click";
+          ~start_time:(Tool_timing.start ()) (`Assoc (bound_live fields @ ["tabId",`Int 1;"action",`String "click";
             "selector",`String "a";"expectedUrl",`String "https://example.org/"])) in
         check bool (name ^ " interaction has no effect") true (phase = Tool_result.Proven_pre_effect);
         check_off (name ^ " interact") result in

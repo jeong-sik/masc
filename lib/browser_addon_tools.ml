@@ -161,7 +161,7 @@ let handle ?upload_paths ~config ~access ~principal ~reserved ~keeper_name ~tool
         match Host.connect ~config ~access ~principal ~reserved with
         | Error error -> Host.error_result ~start_time error
         | Ok host ->
-            match Host.issue ~required_actions:request.required_actions host ~preference:request.preference request.verb with
+            match Host.issue ?upload_paths ~required_actions:request.required_actions host ~preference:request.preference request.verb with
             | Error result -> result
             | Ok receipt ->
                 (match project ~base_path:config.Workspace.base_path ~keeper_name ~started request receipt with

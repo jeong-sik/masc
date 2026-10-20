@@ -137,6 +137,15 @@ let test_recorded_log_row () =
     check bool "a logged refusal keeps its next step" true (sentence <> "")
   | Some _ | None -> fail "the logged refusal did not read back"
 
+(* Browser choice writes these codes and the TUI looks them up: each case
+   reads back as itself, so two cases can never share a code. *)
+let test_choice_codes_read_back () =
+  List.iter (fun case ->
+    let code = Lane.choice_case_code case in
+    check bool (code ^ " reads back as its own case") true
+      (Lane.choice_case_of_code code = Some case))
+    Lane.all_of_choice_case
+
 let test_other_results_are_left_alone () =
   List.iter (fun (name, text) ->
     check bool name true (Rejection.of_result text = None))
@@ -161,4 +170,5 @@ let () =
     [ "decode",
       [ test_case "refusals read back from what the Keeper was told" `Quick test_refusals_read_back
       ; test_case "a logged refusal row" `Quick test_recorded_log_row
+      ; test_case "every choice code reads back as its case" `Quick test_choice_codes_read_back
       ; test_case "other results are left alone" `Quick test_other_results_are_left_alone ] ]

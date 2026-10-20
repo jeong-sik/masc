@@ -28,7 +28,7 @@ let output_schema = object_schema ~required:["reply";"answer";"browserSelection"
   "browserConnection",object_schema ~open_fields:true ~required:[] []]
 let definition : S.tool = {name="browser_command";
   title=Some "Browser";description=Some
-    "Use an installed browser Add-on. Send one closed browser command. With no tab/document binding, browser choice is automatic; retain the returned lane/clientId for later bound commands. No JavaScript or debug-protocol escape hatch. Uploads require a host snapshot grant; downloads require a host artifact broker.";
+    "Use an installed browser Add-on. Send one closed browser command. With no tab/document binding, browser choice is automatic; retain the returned lane/clientId for later bound commands. No JavaScript or debug-protocol escape hatch. Uploads require a host snapshot grant; completed owned downloads are finalized into host artifacts.";
   input_schema;output_schema=Some output_schema;annotations=None;icon=None;execution=None}
 let parse json =
   let* fields=match json with
@@ -73,6 +73,7 @@ let parse json =
     | Some (`String raw) -> let* id=B.client_id_of_string raw in Ok (Some (B.client_id_to_string id))
     | Some _ -> Error "uploadId must be a canonical host grant UUID" in
   Ok (preference,verb,required_actions,upload_id)
+let command arguments = parse arguments |> Result.map (fun (_,verb,_,_) -> verb)
 let bound = function
   | B.Page_read {tab_id;_}|Page_elements {tab_id} -> Option.is_some tab_id
   | Page_act (B.Action.Open_tab _) | Tabs_list | Session_open _ | Session_status -> false
@@ -82,13 +83,12 @@ let transferable verb upload_id = match verb,upload_id with
   | B.Page_act (B.Action.On_tab {interaction=B.Action.Upload _;_}),Some _ -> Ok ()
   | Page_act (B.Action.On_tab {interaction=B.Action.Upload _;_}),None ->
       Error "upload requires a private host snapshot grant; no command was dispatched"
-  | Page_downloads _,_ -> Error "browser downloads require the host artifact broker; no command was dispatched"
-  | (Tabs_list|Page_read _|Page_document _|Page_capture _|Page_scene _|Page_interact _
+  | (Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_capture _|Page_scene _|Page_interact _
   | Session_open _|Session_close|Session_status|Page_goto _|Page_elements _
   | Page_act (B.Action.Open_tab _)
   | Page_act (B.Action.On_tab {interaction=(Click _|Fill _|Press _|Scroll _|Select _|Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog);_})
   | Page_context _|Page_instruct _|Page_locate _|Page_extract _),None -> Ok ()
-  | (Tabs_list|Page_read _|Page_document _|Page_capture _|Page_scene _|Page_interact _
+  | (Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_capture _|Page_scene _|Page_interact _
     |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act (Open_tab _
       |On_tab {interaction=Click _|Fill _|Press _|Scroll _|Select _|Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog;_})
     |Page_context _|Page_instruct _|Page_locate _|Page_extract _),Some _ -> Error "uploadId applies only to an upload command"
@@ -141,7 +141,7 @@ let invoke ~owner ~principal arguments =
       | Service_refusal {disposition=W.Not_started;_}|Issue_result (Error _)
       | Issue_result (Ok (B.Lane_absent|Rejected_before_effect _)) -> true,Tool_result.Proven_pre_effect
       | Service_refusal {disposition=W.Outcome_unknown;_}|Issue_result (Ok (B.Timed_out|Refused _|Answered _))
-      | Snapshot_result _|Model_reply _|Poll_result _|Receipt -> true,Tool_result.Effect_outcome_unknown in
+      | Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt -> true,Tool_result.Effect_outcome_unknown in
     let disposition=if B.verb_is_read verb then Tool_result.Proven_pre_effect else disposition in
     result ~start_time ~failed ~disposition data "browser command failed; inspect its original receipt before further input" in
   match run () with

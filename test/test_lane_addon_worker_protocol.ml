@@ -27,6 +27,8 @@ for line in sys.stdin:
             result["tools"] += [{"name":name,"inputSchema":{"type":"object"}} for name in ["lane_host_requests","lane_host_result"]]
         if len(sys.argv) > 2 and sys.argv[2] == "duplicate":
             result["tools"].append({"name":"lane_host_requests","inputSchema":{"type":"object"}})
+        if len(sys.argv) > 2 and sys.argv[2] == "context":
+            result["tools"].append({"name":"lane_call","inputSchema":{"type":"object"}})
     elif method == "tools/call":
         params = request["params"]
         if len(sys.argv) > 1:
@@ -34,7 +36,13 @@ for line in sys.stdin:
         if params["name"] == "lane_observe": value = {"rows":[],"coverage":[]}
         elif params["name"] == "lane_host_requests": value = {"requests":[]}
         elif params["name"] == "lane_host_result": value = {"accepted":True}
-        else: value = {"value":params["arguments"]["value"]+1}
+        else:
+            arguments = params["arguments"]
+            if params["name"] == "lane_call":
+                assert arguments["tool"] == "increment"
+                assert arguments["caller"] == {"kind":"keeper","name":"receipt-finalizer"}
+                arguments = arguments["arguments"]
+            value = {"value":arguments["value"]+1}
         result = {"content":[],"structuredContent":value}
     else: raise RuntimeError(method)
     print(json.dumps({"jsonrpc":"2.0","id":request["id"],"result":result}),flush=True)
@@ -181,8 +189,116 @@ let discovery_race ~cancel () = Eio_main.run (fun env -> Eio.Switch.run (fun sw 
       check int "retired discovery keeps exports unavailable" 0 (List.length (Protocol.exported_tools protocol));
       check bool "retired discovery cannot be revived" true (Result.is_error (Protocol.initialize protocol client)))))))
 
+let with_finalizer_fixture ~hooks ~invocation run = Eio_main.run (fun env ->
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 15. (fun () -> Eio.Switch.run (fun sw ->
+    let calls=Filename.temp_file "addon-finalizer-" ".calls" in
+    Fun.protect ~finally:(fun () -> Sys.remove calls) (fun () ->
+      let contract=require (Protocol.contract ~host_requests:false ~action_tool:None
+        ~tool_invocation:invocation ~exported_tools:["increment"] ~tool_hooks:hooks ~max_reply_bytes:4096) in
+      let protocol=Protocol.create ~instance_id:"finalizer-test" ~contract () in
+      let client=require (Agent_core.Mcp.connect ~sw ~mgr:(Eio.Stdenv.process_mgr env)
+        ~command:"python3" ~args:["-c";server;calls;"context"] ~max_response_bytes:4096 ()) in
+      Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () -> Protocol.close protocol)) (fun () ->
+        require (Protocol.initialize protocol client);
+        run protocol (fun () -> In_channel.with_open_bin calls In_channel.input_all))))))
+
+let finalized_receipt () = with_finalizer_fixture
+  ~hooks:[Lane_addon_types.Validate_input;Validate_output] ~invocation:Lane_addon_types.Host_context
+  (fun protocol calls ->
+    let raw=ref [] and finalized=ref 0 in
+    let arguments=`Assoc ["value",`Int 4] and principal=Lane_addon_call_context.Keeper "receipt-finalizer" in
+    let finalize_result ~name ~arguments:observed_arguments ~principal:observed_principal
+        ~(result:Mcp_protocol.Mcp_types.tool_result) =
+      incr finalized;
+      check string "finalizer sees public tool, not lane_call" "increment" name;
+      check bool "finalizer keeps original arguments" true (observed_arguments=arguments);
+      check bool "finalizer keeps verified original caller" true (observed_principal=principal);
+      check int "raw observer runs before finalizer exactly once" 1 (List.length !raw);
+      check bool "original raw result remains available" true
+        (result.structured_content=Some (`Assoc ["value",`Int 5]) && !raw=[result]);
+      ignore (require (Protocol.observe protocol ~binding:(`Assoc []) ~sources:(`Assoc [])));
+      Ok {result with structured_content=Some (`Assoc ["value",`Int 9]);
+        _meta=Some (`Assoc ["hostReceipt",`String "retained"])} in
+    let answer=require (Protocol.call_exported_tool ~on_result:(fun result -> raw:=result :: !raw)
+      ~finalize_result ~principal protocol ~name:"increment" ~arguments) in
+    check int "finalizer runs once after invocation" 1 !finalized;
+    check bool "caller gets the finalized receipt" true
+      (answer.structured_content=Some (`Assoc ["value",`Int 9])
+       && answer._meta=Some (`Assoc ["hostReceipt",`String "retained"]));
+    check string "finalizer can reenter this protocol outside the RPC mutex"
+      "lane_call\nlane_observe\n" (calls ()))
+
+let finalized_output ~hooks ~accepted () = with_finalizer_fixture ~hooks
+  ~invocation:Lane_addon_types.Direct (fun protocol calls ->
+    let finalized=ref 0 and raw=ref None in
+    let result=Protocol.call_exported_tool ~on_result:(fun result -> raw:=Some result)
+      ~finalize_result:(fun ~name:_ ~arguments:_ ~principal:_ ~result ->
+        incr finalized;Ok {result with structured_content=Some (`Assoc ["value",`String "host-invalid"])})
+      protocol ~name:"increment" ~arguments:(`Assoc ["value",`Int 4]) in
+    check int "finalizer is mandatory even with hooks disabled" 1 !finalized;
+    check bool "raw receipt was observed before host transformation" true
+      (Option.map (fun (result:Mcp_protocol.Mcp_types.tool_result) -> result.structured_content) !raw
+        =Some (Some (`Assoc ["value",`Int 5])));
+    check bool "output hook validates the final receipt" accepted
+      (match result with Ok reply -> reply.structured_content=Some (`Assoc ["value",`String "host-invalid"])
+       | Error (Protocol.Protocol_failed _) -> false
+       | Error (Invalid_contract _|Host_refusal _|Invalid_observation _|Stopped) -> fail "unexpected refusal boundary");
+    check string "validation never replays the effect" "increment\n" (calls ()))
+
+exception Finalization_failed
+let finalizer_refusal () = with_finalizer_fixture ~hooks:[] ~invocation:Lane_addon_types.Direct
+  (fun protocol calls ->
+    let raw=ref 0 and finalized=ref 0 in
+    let refused=Protocol.call_exported_tool ~on_result:(fun _ -> incr raw)
+      ~finalize_result:(fun ~name:_ ~arguments:_ ~principal:_ ~result:_ ->
+        incr finalized;Error "artifact persistence refused")
+      protocol ~name:"increment" ~arguments:(`Assoc ["value",`Int 4]) in
+    check bool "host refusal is a post-dispatch protocol error" true
+      (match refused with Error (Protocol.Protocol_failed _) -> true
+       | Ok _|Error (Invalid_contract _|Host_refusal _|Invalid_observation _|Stopped) -> false);
+    check int "raw effect receipt is still observed" 1 !raw;
+    check int "refused finalizer runs only once" 1 !finalized;
+    check string "host failure never repeats the worker call" "increment\n" (calls ());
+    let raised=Protocol.call_exported_tool
+      ~finalize_result:(fun ~name:_ ~arguments:_ ~principal:_ ~result:_ -> raise Finalization_failed)
+      protocol ~name:"increment" ~arguments:(`Assoc ["value",`Int 8]) in
+    check bool "unexpected host finalization exception stays a post-dispatch failure" true
+      (match raised with Error (Protocol.Protocol_failed _) -> true
+       | Ok _|Error (Invalid_contract _|Host_refusal _|Invalid_observation _|Stopped) -> false);
+    check string "a second explicit call dispatches once without replay"
+      "increment\nincrement\n" (calls ()))
+
+let cancelled_finalizer () = with_finalizer_fixture ~hooks:[] ~invocation:Lane_addon_types.Direct
+  (fun protocol calls ->
+    let entered,enter=Eio.Promise.create () in
+    let raw=ref 0 and cancelled=ref false in
+    ignore (Eio.Fiber.first
+      (fun () -> try
+        ignore (Protocol.call_exported_tool ~on_result:(fun _ -> incr raw)
+          ~finalize_result:(fun ~name:_ ~arguments:_ ~principal:_ ~result:_ ->
+            Eio.Promise.resolve enter ();Eio.Fiber.await_cancel ())
+          protocol ~name:"increment" ~arguments:(`Assoc ["value",`Int 4]));
+        fail "blocked finalizer unexpectedly returned"
+       with Eio.Cancel.Cancelled _ as exn -> cancelled:=true;raise exn)
+      (fun () -> Eio.Promise.await entered) : unit);
+    check bool "finalizer cancellation propagates" true !cancelled;
+    check bool "cancelled finalization revokes original protocol" true (Protocol.revoked protocol);
+    check bool "stale input cannot dispatch after cancellation" true
+      (match Protocol.call_exported_tool protocol ~name:"increment" ~arguments:(`Assoc ["value",`Int 4]) with
+       | Error Protocol.Stopped -> true
+       | Ok _|Error (Invalid_contract _|Protocol_failed _|Host_refusal _|Invalid_observation _) -> false);
+    check int "cancelled finalization keeps the one raw reply" 1 !raw;
+    check string "cancelled effect is never replayed" "increment\n" (calls ()))
+
 let () = run "Addon engine-independent MCP admission"
   ["protocol",[test_case "actual standalone stdio server preserves admission and hook contracts" `Quick standalone_protocol;
+    test_case "host finalization retains original context and allows another RPC" `Quick finalized_receipt;
+    test_case "selected output hook validates finalized receipt" `Quick
+      (finalized_output ~hooks:[Lane_addon_types.Validate_output] ~accepted:false);
+    test_case "finalization remains mandatory with all hooks disabled" `Quick
+      (finalized_output ~hooks:[] ~accepted:true);
+    test_case "host finalization refusal preserves raw receipt without replay" `Quick finalizer_refusal;
+    test_case "host finalization cancellation revokes admission" `Quick cancelled_finalizer;
     test_case "late discovery failure retires action and observation admission" `Quick failed_discovery_retires_admission;
     test_case "discovery cancellation permanently retires admission" `Quick (discovery_race ~cancel:true);
     test_case "revoke during discovery prevents late publication" `Quick (discovery_race ~cancel:false);

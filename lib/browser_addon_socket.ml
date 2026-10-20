@@ -1,5 +1,5 @@
 let ( let* ) = Result.bind
-type t = {path:string;incarnation:string;automation:bool;models:bool;stagehand:bool}
+type t = {path:string;incarnation:string;automation:bool;models:bool;stagehand:bool;device:int;inode:int}
 type acquisition = Missing | Acquired of int * int | Cleaning of int * int | Released
 let socket_path t = t.path
 let arguments t ~max_message_bytes = ["--socket";t.path;"--incarnation";t.incarnation;
@@ -89,7 +89,33 @@ let acquire ~admission ~directory = protect (fun () ->
     | Some c -> Fs_compat.save_file_atomic_strict (Filename.concat root "stagehand.json")
         (Yojson.Safe.to_string (Browser_addon_stagehand.configuration_to_json c)) in
   Ok {path=Filename.concat root "s";incarnation=Native_addon_lease.instance_id admission;
-    automation=Option.is_some automation;models=Option.is_some models;stagehand=Option.is_some stagehand})
+    automation=Option.is_some automation;models=Option.is_some models;stagehand=Option.is_some stagehand;
+    device=info.st_dev;inode=info.st_ino})
+let with_download_snapshot t (descriptor:Browser_addon_downloads.descriptor) consume = protect (fun () ->
+  let allocation=Filename.dirname t.path in
+  let root=Filename.concat allocation "download-snapshots" in
+  let directory path ~device ~inode =
+    let info=Unix.lstat path in
+    if info.Unix.st_kind=Unix.S_DIR && info.st_uid=Unix.geteuid () && info.st_perm=0o700
+      && info.st_dev=device && info.st_ino=inode && Unix.realpath path=path then Ok ()
+    else Error "original browser download allocation changed" in
+  let roots () =
+    let* ()=directory allocation ~device:t.device ~inode:t.inode in
+    directory root ~device:descriptor.root_device ~inode:descriptor.root_inode in
+  let valid (info:Unix.stats) = info.st_kind=Unix.S_REG && info.st_uid=Unix.geteuid ()
+    && info.st_perm=0o600 && info.st_nlink=1 && info.st_dev=descriptor.device
+    && info.st_ino=descriptor.inode && info.st_size=descriptor.bytes in
+  let* path=Browser_addon_downloads.snapshot_path ~directory:allocation ~snapshot_id:descriptor.snapshot_id in
+  let* ()=roots () in
+  if not (valid (Unix.lstat path)) then Error "download snapshot identity changed" else
+  let source=Unix.openfile path [Unix.O_RDONLY;Unix.O_NONBLOCK;Unix.O_CLOEXEC] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close source) (fun () ->
+    if not (valid (Unix.fstat source)) then Error "opened download snapshot identity changed" else
+    let* ()=roots () in
+    let* value=consume source in
+    let* ()=roots () in
+    if not (valid (Unix.fstat source)) || not (valid (Unix.lstat path)) then
+      Error "download snapshot changed during import" else Ok value))
 let private_root root info = info.Unix.st_kind=Unix.S_DIR && info.st_uid=Unix.geteuid ()
   && info.st_perm=0o700 && Unix.realpath root=root
 (* Only empty directory trees may be removed. Files, links and uncertain
@@ -108,6 +134,7 @@ let cleanup_contents ~admission ~root ~automation ~models ~stagehand ~confirmed 
     let* text=Option.to_result ~none:("missing " ^ name) text in
     Ok (Yojson.Safe.from_string text) in
   let* ()=empty_tree (Filename.concat root "uploads") in
+  let* ()=empty_tree (Filename.concat root "download-snapshots") in
   let names=Sys.readdir root |> Array.to_list in
   let* ()=match models with
     | None -> if List.mem "models.json" names then Error "undeclared browser model configuration" else Ok ()

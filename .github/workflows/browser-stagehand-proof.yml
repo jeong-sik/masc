@@ -1,4 +1,4 @@
-name: Stagehand Browser Proof
+name: Native Browser Addon Proof
 
 on:
   workflow_dispatch:
@@ -7,29 +7,39 @@ on:
         description: 'Exact source commit containing the browser Add-on and probe'
         required: true
         type: string
-  # Keep a main-scoped macOS opam cache available for pull requests.
+      browser:
+        description: 'Real browser to exercise through the installed native Addon'
+        required: true
+        type: choice
+        options:
+          - chromium
+          - firefox
+        default: chromium
 permissions:
   contents: read
 
 concurrency:
-  group: browser-stagehand-proof-${{ github.ref }}
-  cancel-in-progress: true
+  group: browser-addon-proof-${{ github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   macos-stagehand:
-    # This proves extension loading and Chromium control on the operator's
-    # supported macOS host, not only on a portable Linux runner.
     runs-on: macos-14
     timeout-minutes: 60
+    env:
+      PROBE_TARGET: ${{ inputs.browser == 'firefox' && 'browser_addon_firefox_probe' || 'stagehand_browser_probe' }}
     steps:
       - name: Require an exact browser source candidate
         env:
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          PROOF_BROWSER: ${{ inputs.browser }}
         run: |
           python3 - <<'PYCODE'
           import os, re
           if not re.fullmatch(r"[0-9a-f]{40}", os.environ["CANDIDATE_SHA"]):
               raise SystemExit("candidate_sha must be a full 40-character source commit")
+          if os.environ["PROOF_BROWSER"] not in ("chromium", "firefox"):
+              raise SystemExit("browser must be chromium or firefox")
           PYCODE
 
       - uses: actions/checkout@v7
@@ -67,7 +77,7 @@ jobs:
       - name: Build the native browser Add-on proof inputs
         run: >-
           opam exec -- dune build --release
-          test/stagehand_browser_probe.exe
+          "test/$PROBE_TARGET.exe"
           bin/masc_native_addon_launcher.exe
           bin/masc_browser_process_owner.exe
           bin/masc_browser_addon_worker.exe
@@ -76,22 +86,36 @@ jobs:
       # --load-extension from 137, and 154 is the build the CDP extension load
       # was checked on (docs/evidence/browser-stagehand-cdp-20260924).
       - name: Install Chrome for Testing
+        if: inputs.browser == 'chromium'
         run: |
           npx --yes @puppeteer/browsers@3.2.3 install chrome@154.0.8037.57 --path "$RUNNER_TEMP/chrome-for-testing" > "$RUNNER_TEMP/chrome-for-testing.txt"
           echo "CHROME_FOR_TESTING=$(tail -1 "$RUNNER_TEMP/chrome-for-testing.txt" | sed 's/^[^ ]* //')" >> "$GITHUB_ENV"
 
-      - name: Exercise the Stagehand lane in a real Chromium
+      - name: Install Firefox
+        if: inputs.browser == 'firefox'
+        run: |
+          if [[ ! -x /Applications/Firefox.app/Contents/MacOS/firefox ]]; then
+            brew install --cask firefox
+          fi
+
+      - name: Retain the exact proof inputs
         env:
           PROOF_WORKFLOW_COMMIT: ${{ github.sha }}
+          PROOF_BROWSER: ${{ inputs.browser }}
         run: |
-          mkdir -p proof/stagehand
-          git rev-parse HEAD > proof/stagehand/SOURCE_COMMIT
-          printf '%s\n' "$PROOF_WORKFLOW_COMMIT" > proof/stagehand/WORKFLOW_COMMIT
-          shasum -a 256 \
-            _build/default/test/stagehand_browser_probe.exe \
-            _build/default/bin/masc_native_addon_launcher.exe \
-            _build/default/bin/masc_browser_process_owner.exe \
-            _build/default/bin/masc_browser_addon_worker.exe > proof/stagehand/SHA256SUMS
+          mkdir -p proof/native-browser/binaries
+          git rev-parse HEAD > proof/native-browser/SOURCE_COMMIT
+          printf '%s\n' "$PROOF_WORKFLOW_COMMIT" > proof/native-browser/WORKFLOW_COMMIT
+          printf '%s\n' "$PROOF_BROWSER" > proof/native-browser/BROWSER
+          cp "_build/default/test/$PROBE_TARGET.exe" proof/native-browser/binaries/
+          cp _build/default/bin/masc_native_addon_launcher.exe proof/native-browser/binaries/
+          cp _build/default/bin/masc_browser_process_owner.exe proof/native-browser/binaries/
+          cp _build/default/bin/masc_browser_addon_worker.exe proof/native-browser/binaries/
+          (cd proof/native-browser && shasum -a 256 binaries/*.exe > SHA256SUMS)
+
+      - name: Exercise the Stagehand lane in a real Chromium
+        if: inputs.browser == 'chromium'
+        run: |
           python3 scripts/probe-stagehand.py \
             --chrome "$CHROME_FOR_TESTING" \
             --probe _build/default/test/stagehand_browser_probe.exe \
@@ -99,12 +123,24 @@ jobs:
             --guardian _build/default/bin/masc_browser_process_owner.exe \
             --worker _build/default/bin/masc_browser_addon_worker.exe \
             --base-path "$RUNNER_TEMP/stagehand-workspace" \
-            --out proof/stagehand
+            --out proof/native-browser
 
-      - name: Upload Stagehand proof
+      - name: Exercise owned Firefox input, retirement and reattachment
+        if: inputs.browser == 'firefox'
+        run: |
+          MOZ_HEADLESS=1 /Applications/Firefox.app/Contents/MacOS/firefox --version > proof/native-browser/BROWSER_VERSION
+          python3 scripts/probe-browser-addon-firefox.py \
+            --firefox /Applications/Firefox.app/Contents/MacOS/firefox \
+            --probe _build/default/test/browser_addon_firefox_probe.exe \
+            --launcher _build/default/bin/masc_native_addon_launcher.exe \
+            --guardian _build/default/bin/masc_browser_process_owner.exe \
+            --worker _build/default/bin/masc_browser_addon_worker.exe \
+            --out proof/native-browser
+
+      - name: Upload native browser proof
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: masc-stagehand-browser-proof-macos-arm64-${{ inputs.candidate_sha }}
-          path: proof/stagehand/
+          name: masc-browser-addon-${{ inputs.browser }}-proof-macos-arm64-${{ inputs.candidate_sha }}
+          path: proof/native-browser/
           if-no-files-found: ignore

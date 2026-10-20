@@ -385,21 +385,27 @@ quota 응답만 확인됐거나 시도 중 인증 주인이 바뀔 수 있어 �
 type quota_write_owner =
   | Captured of Runtime_quota_window.load_time_scope
       (* Codex 가 아닌 후보: dispatch 전에 잡은 scope. 지금과 같다 *)
-  | Codex_run of { home : string; read : Runtime_codex_account.read }
+  | Codex_run of
+      { home : string
+      ; source : Runtime_codex_home_account.source
+          (* 이 시도가 포착한 자격 증명 세대의 출처. 홈 미확인 기록을 누가 지울 수 있는지 가른다 *)
+      ; read : Runtime_codex_account.read }
 
 let scopes_to_write = function
   | Captured s -> Load_time s, []
-  | Codex_run { home; read = Stated k } -> Codex_account k, [ Codex_home_account_not_stated home ]
-  | Codex_run { home; read = Identity_unconfirmed | Not_stated | Not_applicable | Read_failed _ } ->
+  | Codex_run { home; read = Stated k; source = _ } -> Codex_account k, [ Codex_home_account_not_stated home ]
+  | Codex_run { home; read = Identity_unconfirmed | Not_stated | Not_applicable | Read_failed _; source = _ } ->
     Codex_home_account_not_stated home, []
 ```
 
 - 사용량 소진(`usageLimitExceeded`)은 `scopes_to_write` 의 첫 scope 에 `note_observed_exhausted` 로 적는다.
 - `sessionBudgetExceeded` 는 계정 증거가 아니다. 읽기와 관계없이 `Codex_home_account_not_stated home` 에 적는다.
   지금 이것을 홈 scope 에 적는 동작과 같은 결과다. 넓히지도 좁히지도 않는다 (결정 7).
-- 성공(`note_succeeded`)은 `scopes_to_write` 의 scope 를 모두 지운다.
-  계정을 확인한 turn 은 계정 기록과 그 홈의 미확인 기록을 함께 지운다. 그 홈으로 통과했으니 그 홈의 "알 수 없는 계정이 소진" 증거도 틀렸다.
-  계정을 확인하지 못한 turn 은 그 홈의 미확인 기록만 지운다. 어느 계정이 답했는지 모르므로 계정 기록은 건드리지 않는다.
+- 홈 미확인 기록(`Codex_home_account_not_stated home`)은 쓴 시도의 `source` 가 포착한 자격 증명 세대를 함께 남긴다.
+- 성공(`note_succeeded`)은 `scopes_to_write` 의 첫 scope 를 지운다. 홈 미확인 기록은 그 성공이 포착한 세대가 기록의 세대와 같거나 더 새로울 때만 지운다.
+  성공 쪽이 더 옛 세대이거나 세대 순서를 증명하지 못하면 지우지 않는다. 옛 세대로 통과한 turn 은 새 세대에서 난 "알 수 없는 계정이 소진" 증거가 틀렸다는 근거가 못 된다.
+  계정을 확인한 turn 은 계정 기록을 지우고, 그 홈의 미확인 기록은 위 조건을 만족할 때만 함께 지운다.
+  계정을 확인하지 못한 turn 은 같은 조건으로 그 홈의 미확인 기록만 지운다. 어느 계정이 답했는지 모르므로 계정 기록은 건드리지 않는다.
 - 사용량 창(`account/rateLimits/updated` 알림과 turn 안 읽기의 창)은 첫 scope 에 적는다.
   알림이 읽기의 답보다 먼저 오면 turn 이 끝날 때 한꺼번에 적는다. 알림 창을 먼저 홈에 적고 나중에 옮기지 않는다.
 - turn 안 읽기의 결과는 출처가 확인됐을 때 그 출처의 ticket 으로 `observe` 에도 넘긴다.
@@ -573,7 +579,8 @@ constitution 의 testing 절에 따라 기능 단위로 본다. 기존 가짜 ap
 | 답이 순서를 바꿔 옴 | 읽기의 답이 `thread/start` 답보다 늦게, 또는 먼저 와도 protocol 오류가 나지 않는다. 다른 모르는 id 는 여전히 오류다 |
 | ChatGPT 가 아닌 로그인 | `account/read` 가 `apiKey` 를 답하면 읽기를 보내지 않는다 |
 | `sessionBudgetExceeded` | 계정을 확인한 turn 이라도 홈 미확인 scope 에만 적고 계정 scope 에는 적지 않는다 |
-| 성공이 지우는 것 | 계정을 확인한 turn 의 성공은 계정 기록과 홈 미확인 기록을 지운다. 확인 못 한 turn 의 성공은 홈 미확인 기록만 지운다 |
+| 성공이 지우는 것 | 계정을 확인한 turn 의 성공은 계정 기록을 지우고, 같은 세대이거나 더 새로운 세대일 때만 홈 미확인 기록도 지운다. 확인 못 한 turn 의 성공은 같은 조건으로 홈 미확인 기록만 지운다 |
+| 옛 세대의 성공 | 홈 H 의 세대 1 에서 계정 X 를 확인한 turn 이 멈춘 사이 H 가 세대 2(계정 Y)로 바뀌고, 세대 2 의 turn 이 계정을 확인하지 못한 채 `usageLimitExceeded` 를 받아 H 의 미확인 기록이 남는다. 이어서 세대 1 의 turn 이 X 로 성공한다. X 의 계정 기록은 지워지고 H 의 미확인 기록은 남아서 H 후보는 계속 뒤에 있다. 세대 2 의 성공은 그 기록을 지운다. 세대 순서를 증명하지 못한 성공은 기록을 지우지 않는다 |
 | resolved JSON 과 observe 경합 | 응답을 만드는 도중 `observe` 가 끼어도 응답은 500 없이 한 스냅숏으로 일관된다 |
 | 식별자 노출 | 가짜 계정 id·email 문자열이 resolved JSON, 로그 줄, TUI 캡처 어디에도 나오지 않는다 |
 
@@ -585,6 +592,7 @@ constitution 의 testing 절에 따라 기능 단위로 본다. 기존 가짜 ap
 - 미확인 증거를 홈이 마지막으로 가리킨 계정에 붙이면 "계정 미확인" 이 실패해야 한다.
 - turn 안 읽기를 기다리게 되돌리면 "읽기가 멈춤" 이 실패해야 한다.
 - 세대 대신 요청 순번만으로 홈을 갱신하면 "옛 프로세스의 새 요청" 이 실패해야 한다.
+- 성공이 세대를 보지 않고 홈 미확인 기록을 지우게 하면 "옛 세대의 성공" 이 실패해야 한다.
 - 같은 프로세스 또는 앞뒤 email 일치만으로 귀속을 확정하면 사용자 변경·X→Y→X 시험이 실패해야 한다.
 
 추가한 세 시나리오는 구현의 수용 시험 계획이다. 실제 multi-seat 계정으로 재현했거나 구현 시험을 실행했다는 주장이 아니다.
@@ -611,7 +619,7 @@ constitution 의 testing 절에 따라 기능 단위로 본다. 기존 가짜 ap
    이 단계에서 기록은 아직 `Codex_home_account_not_stated home` 에 적는다. 계정 scope 에는 기록이 없으므로 동작은 지금과 같다.
 3. **기록이 계정에 붙는다** (2 위) — `quota_write_owner` 를 `run_attempt` 가 돌려주고 turn driver·Fusion·Codex turn 이 그 값으로 적는다.
    사용량 창도 계정에 적는다. `sessionBudgetExceeded` 는 홈에 남긴다. Codex turn 의 scope 재계산을 지운다.
-   시험: 홈 둘·재로그인·재로그인 뒤 읽기 실패·늦은 읽기·옛 프로세스의 새 요청·사용자 변경·미확인·성공·session budget, 위 변이 시험.
+   시험: 홈 둘·재로그인·재로그인 뒤 읽기 실패·늦은 읽기·옛 프로세스의 새 요청·사용자 변경·미확인·성공·옛 세대의 성공·session budget, 위 변이 시험.
 4. **표면** (3 위) — resolved JSON 스냅숏, 묶음별 소진·주인 종류, runtime 줄 `usage_scope`. TUI decode·Overview, dashboard schema 를 같은 PR 에서 바꾼다.
    glossary 의 "닫힌 quota 창"·"Provider Usage Window" 항목과 `docs/spec/14-configuration.md`. 시험: 식별자 노출, 경합, TUI 캡처.
 5. **재로그인 알아채기** (2 위, 결정 3 에 따라) — 로그인 세션 완료 때 읽기, 운영자 다시 읽기 요청, setup 화면의 "같은 계정" 표시.

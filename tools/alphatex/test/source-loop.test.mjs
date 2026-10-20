@@ -62,7 +62,7 @@ test('source range is session-local, survives note/tempo undo, and resets for an
   const project=source(), before=structuredClone(project)
   let editor=newEditor(project), history=editor.undo
   const result=editorCommand(editor,'loop .375 .875');editor=result.editor
-  assert.equal(result.effect.kind,'source-loop');assert.equal(editor.project,project);assert.equal(editor.undo,history)
+  assert.equal(result.effect.kind,'loop');assert.equal(editor.project,project);assert.equal(editor.undo,history)
   assert.deepEqual(editor.sourceLoop,{start:360,end:840})
   editor=editorCommand(editor,'transpose 2').editor
   editor=editorCommand(editor,'tempo 100 0').editor

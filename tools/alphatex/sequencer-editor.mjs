@@ -184,7 +184,8 @@ function runCommand(editor, line) {
     const voice = next.project.tracks[next.track].notes.find(note => note.id === selected?.id)
     return { editor: voice ? { ...next, pitch: voice.pitch } : next }
   }
-  return { editor: command === 'track-add' ? { ...next, track: next.project.tracks.length - 1 } : next }
+  return { editor: command === 'track-add' ? { ...next, track: next.project.tracks.length - 1 } : next,
+    ...(command === 'loop' ? { effect: { kind: 'loop' } } : {}) }
 }
 
 export const editorView = editor => editor.view ?? editor.project

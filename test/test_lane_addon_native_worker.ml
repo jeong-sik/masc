@@ -146,6 +146,36 @@ let cancelled_call () = with_fixture (fun env sw root ->
   assert_released worker (await_release clock worker);
   check string "effectful call was never replayed" "increment\n" (read root "calls"))
 
+let cancelled_finalizer () = with_fixture (fun env sw root ->
+  let clock=Eio.Stdenv.clock env in
+  let worker=require (Native.start ~sw ~clock ~grace_seconds:0.02
+    ~admission:(admission root "native-finalizer-cancel") ~launcher:!launcher
+    ~contract:(contract ()) ~command:(command root "normal") ()) in
+  let entered,enter=Eio.Promise.create () in
+  let raw=ref 0 and cancelled=ref false in
+  let arguments=`Assoc ["value",`Int 4] and principal=Lane_addon_call_context.Keeper "uploader" in
+  ignore (Eio.Fiber.first
+    (fun () -> try
+      ignore (Native.call_exported_tool ~on_result:(fun _ -> incr raw) ~principal
+        ~finalize_result:(fun ~name ~arguments:observed_arguments ~principal:observed_principal ~result ->
+          check string "native forwards original tool identity" "increment" name;
+          check bool "native forwards original arguments and principal" true
+            (observed_arguments=arguments && observed_principal=principal);
+          check bool "native finalizer receives original raw result" true
+            (result.structured_content=Some (`Assoc ["value",`Int 5]));
+          ignore (require (Native.observe worker ~binding:(`Assoc []) ~sources:(`Assoc [])));
+          Eio.Promise.resolve enter ();Eio.Fiber.await_cancel ())
+        worker ~name:"increment" ~arguments);
+      fail "blocked native finalizer unexpectedly returned"
+     with Eio.Cancel.Cancelled _ as exn -> cancelled:=true;raise exn)
+    (fun () -> Eio.Promise.await entered) : unit);
+  check bool "native finalizer cancellation propagates" true !cancelled;
+  check int "native raw result callback runs once" 1 !raw;
+  (* No explicit stop: cancellation must request cleanup of this original child. *)
+  assert_released worker (await_release clock worker);
+  check string "reentrant observation works and effect is not replayed"
+    "increment\nlane_observe\n" (read root "calls"))
+
 let cancelled_start () = with_fixture (fun env sw root ->
   let clock = Eio.Stdenv.clock env in
   let created, set_created = Eio.Promise.create () in
@@ -279,6 +309,7 @@ let () =
     test_case "shared contracts, cwd, environment and owned descendant release" `Quick native_lifecycle;
     test_case "stop interrupts actual blocked discovery" `Quick discovery_stop;
     test_case "cancelled tool call cleans up without an explicit stop" `Quick cancelled_call;
+    test_case "cancelled host finalization cleans up the original child" `Quick cancelled_finalizer;
     test_case "cancelled startup cleans up without an explicit stop" `Quick cancelled_start;
     test_case "already-cancelled owner cannot leave startup pending" `Quick cancelled_owner;
     test_case "historical receipt cannot affect a replacement" `Quick replacement_preserves_receipt;

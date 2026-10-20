@@ -11,6 +11,11 @@ type command =
   | Upload_discard of string
 (** Private host-authorized file preparation only. A stage receipt grants no
     browser input; the ordinary exported command must consume the exact grant. *)
+  | Download_claim of { id:string; actor:string; route:Browser_lane.route; verb:Browser_lane.verb }
+  | Download_commit of { id:string; actor:string; route:Browser_lane.route; verb:Browser_lane.verb; receipt:Yojson.Safe.t }
+  | Download_release of { id:string; actor:string; route:Browser_lane.route; verb:Browser_lane.verb }
+(** Private artifact transfer. Settlement of an exact existing claim remains
+    available during retirement; it cannot admit another browser command. *)
   | Model_requests
   | Model_result of Yojson.Safe.t
   | Model_wait of { after : string option }
@@ -44,6 +49,7 @@ type disposition = Not_started | Outcome_unknown
 type reply =
   | Snapshot_result of Yojson.Safe.t
   | Model_reply of Yojson.Safe.t
+  | Download_reply of Browser_addon_downloads.claim
   | Poll_result of { command : Browser_lane.issued option; state_id : string }
   | Receipt
   | Issue_result of (Browser_lane.answer, Browser_lane.selection_error) result

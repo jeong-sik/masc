@@ -10,6 +10,12 @@ val acquire : admission:Native_addon_lease.t -> directory:string -> (t, string) 
 (** Before payload spawn, acquire the directory selected by the original native
     reservation and persist its exact identity in that host claim slot. *)
 val socket_path : t -> string
+val with_download_snapshot : t -> Browser_addon_downloads.descriptor ->
+  (Unix.file_descr -> ('a, string) result) -> ('a, string) result
+(** Blocking host import scope. Pin the original acquired allocation, private
+    snapshot root and regular descriptor, and recheck them after the callback.
+    The worker supplies a UUID and identity/digest, never a pathname. The callback
+    must consume this descriptor without reopening a path. *)
 val arguments : t -> max_message_bytes:int -> string list
 val cleanup : admission:Native_addon_lease.t -> directory:string -> (unit, string) result
 (** Existing claim must be Settled. The original native reservation decides

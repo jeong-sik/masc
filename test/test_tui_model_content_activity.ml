@@ -31,7 +31,7 @@ let test_overlap_uses_event_order () =
   (* Wall clock moves backwards. The last event, not the biggest clock, owns
      the label; stopping it returns to the newest remaining active event. *)
   List.iter (fun (now,delta) -> T.apply ~now t delta)
-    [90.,L.Text {text="A"; response=Unobserved_scope (None)}; 90.,observed (); 80.,L.Thinking {text="R";response=None};
+    [90.,L.Text {text="A"; response=Unobserved_scope (None)}; 90.,observed (); 80.,L.Thinking {text="R";index=0;response=None};
      80.,observed ~index:1 ~channel:E.Model_thinking ();
      70.,L.Text {text="B"; response=Unobserved_scope (None)}; 70.,observed ~index:2 ()];
   assert_signal t "STREAMING";
@@ -431,7 +431,7 @@ let test_details_production_identity () =
 let test_owned_thinking_lifecycle () =
   let t = create () in
   let think generation scope text = L.Thinking {text;
-    response=Some {E.response_generation=generation;response_scope=scope}} in
+    index=0;response=Some {E.response_generation=generation;response_scope=scope}} in
   T.apply ~now:1. t (think 2 0 "current");
   check bool "owned reasoning establishes current response" true
     ((T.response_metadata t).owner=Some (2,0));
@@ -453,7 +453,7 @@ let test_owned_thinking_lifecycle () =
   check string "new generation reasoning survives reused scope" (retry_body ^ "fresh") (T.thinking t);
   check bool "new generation reasoning is observed activity" true
     (T.model_activity t=Some T.Activity_reasoning);
-  T.apply ~now:11. t (L.Thinking {text="unbound";response=None});
+  T.apply ~now:11. t (L.Thinking {text="unbound";index=0;response=None});
   check string "unobserved owner preserves authored bytes" (retry_body ^ "freshunbound") (T.thinking t);
   T.apply ~now:12. t L.Run_finished;
   T.apply ~now:13. t (think 4 0 "late");
@@ -464,7 +464,7 @@ let test_owned_thinking_refines_unbound_text_scope () =
   T.apply ~now:0. t L.Run_started;
   T.apply ~now:1. t (L.Text {text="Let me look."; response=Unobserved_scope (Some 0)});
   T.apply ~now:2. t (L.Thinking {text="checking";
-    response=Some {E.response_generation=2; response_scope=0}});
+    index=0;response=Some {E.response_generation=2; response_scope=0}});
   check bool "refinement records the owned response" true
     ((T.response_metadata t).owner=Some (2,0));
   T.apply ~now:3. t (L.Reply_details {terminal_stream_scope=None; reply="Let me look.";
@@ -480,7 +480,7 @@ let test_owned_stop_closes_response_without_current_activity () =
   let stop generation scope = L.Stream_model_stopped
     (Some {E.response_generation=generation; response_scope=scope}) in
   let think generation scope text = L.Thinking {text;
-    response=Some {E.response_generation=generation; response_scope=scope}} in
+    index=0;response=Some {E.response_generation=generation; response_scope=scope}} in
   T.apply ~now:1. t (stop 2 0);
   T.apply ~now:2. t (think 2 0 "late");
   check string "reasoning cannot join a response that already stopped" "" (T.thinking t);
@@ -509,7 +509,7 @@ let test_owned_thinking_protocol () =
   let _, projected = Server_keeper_chat_agui_projection.project ~timestamp:0.
     ~redact_text:Fun.id Server_keeper_chat_agui_projection.initial event in
   let wire = Option.fold ~none:"" ~some:(Ag_ui.event_to_sse ~id:1) projected in
-  let expected = L.Thinking {text="reason";response=Some {E.response_generation=7;response_scope=0}} in
+  let expected = L.Thinking {text="reason";index=0;response=Some {E.response_generation=7;response_scope=0}} in
   check bool "owned thinking journal/live identity agree" true
     (Log.delta_of_journaled event=Some expected
      && match L.feed (L.create ()) wire with [{delta;_}] -> delta=expected | _ -> false);
@@ -526,6 +526,28 @@ let test_owned_thinking_protocol () =
      ["response",`Assoc ["content_generation",`Int 7;"stream_scope",`Int (-1)]];
      ["response",E.response_identity_to_json {response_generation=7;response_scope=0};
       "response",E.response_identity_to_json {response_generation=8;response_scope=0}]]
+
+(* The block index rides the journal and the live wire alike, so a replay and a
+   live view of one stream split reasoning blocks in the same places (#37717).
+   The wire always sends it; a row without one is a row this reader cannot place. *)
+let test_thinking_block_index_survives_journal_and_wire () =
+  let wire fields =
+    "data: " ^ Yojson.Safe.to_string (`Assoc ["type",`String "CUSTOM";
+      "name",`String "KEEPER_THINKING_DELTA";
+      "value",`Assoc (["delta",`String "x"]@fields)]) ^ "\n\n" in
+  let decoded fields = match L.feed (L.create ()) (wire fields) with
+    | [{delta;_}] -> Some delta
+    | _ -> None in
+  let expected = L.Thinking {text="x";index=5;response=None} in
+  check bool "the journal keeps the block index" true
+    (Log.delta_of_journaled (E.Agent_core_thinking_delta {response=None;index=5;delta="x"})
+     = Some expected);
+  check bool "the live wire keeps the block index" true
+    (decoded ["index",`Int 5] = Some expected);
+  List.iter (fun fields ->
+    check bool "a missing, negative or non-integer index is undecodable" true
+      (match decoded fields with Some (L.Undecodable _) -> true | _ -> false))
+    [[]; ["index",`Int (-1)]; ["index",`String "5"]]
 
 let test_owned_text_lifecycle () =
   let t = create () in
@@ -608,6 +630,7 @@ let () = run "model content activity"
   ["boundaries", [test_case "owned text lifecycle" `Quick test_owned_text_lifecycle;
     test_case "owned text protocol" `Quick test_owned_text_protocol;
     test_case "owned thinking lifecycle" `Quick test_owned_thinking_lifecycle;
+    test_case "thinking block index survives journal and wire" `Quick test_thinking_block_index_survives_journal_and_wire;
     test_case "owned thinking refines unbound text scope" `Quick test_owned_thinking_refines_unbound_text_scope;
     test_case "owned stop closes response without current activity" `Quick test_owned_stop_closes_response_without_current_activity;
     test_case "owned thinking protocol" `Quick test_owned_thinking_protocol;

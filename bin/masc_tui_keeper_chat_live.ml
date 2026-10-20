@@ -50,7 +50,11 @@ type delta =
       ; stop_reason : Agent_core.Types.stop_reason option
       }
   | Text of {text : string; response : Masc.Keeper_chat_events.text_response}
-  | Thinking of {text : string; response : Masc.Keeper_chat_events.response_identity option}
+  | Thinking of
+      { text : string
+      ; index : int
+      ; response : Masc.Keeper_chat_events.response_identity option
+      }
   | Native_tool_started of
       { occurrence : tool_occurrence; tool_name : string option }
   | Native_tool_progress of
@@ -261,8 +265,14 @@ let custom_deltas_unvalidated fields =
       | Some value ->
           (match Masc.Keeper_chat_events.optional_response_identity_of_fields value with
            | Error detail -> [Undecodable detail]
-           | Ok response -> required ~event:"KEEPER_THINKING_DELTA" ~field:"delta" value
-               (fun text -> Thinking {text;response})))
+           | Ok response ->
+               (* The provider's content block index is what tells two adjacent
+                  reasoning blocks of one response apart (#37717). *)
+               (match nonnegative_int_field value "index" with
+                | None -> [ Undecodable "KEEPER_THINKING_DELTA has no nonnegative index" ]
+                | Some index ->
+                    required ~event:"KEEPER_THINKING_DELTA" ~field:"delta" value
+                      (fun text -> Thinking {text;index;response}))))
   | Some "KEEPER_CHAT_OPERATION_ACCEPTED" -> (
       let event = "KEEPER_CHAT_OPERATION_ACCEPTED" in
       match List.assoc_opt "value" fields with

@@ -252,7 +252,7 @@ let test_compact_progress_follows_working_execution () =
   let active = inflight ~request_id:"active-execution" ~at:1. () in
   Tui.turn_log_add ~now:2. active.log ~seq:(Some 0) Live.Run_started;
   Tui.turn_log_add ~now:3. active.log ~seq:(Some 1)
-    (Live.Thinking {text="Consider the observed state";response=None});
+    (Live.Thinking {text="Consider the observed state";index=0;response=None});
   let pending = inflight ~request_id:"new-pending-input" ~at:4. () in
   Tui.turn_log_add ~now:4. pending.log ~seq:(Some 0)
     (Live.Accepted {admission=Live.Queued; queue_length=1; interactive=None});

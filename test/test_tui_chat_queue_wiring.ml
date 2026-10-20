@@ -2469,7 +2469,7 @@ let test_a_settled_log_holds_its_turn_in_the_timeline () =
   state.msg_settled_logs <-
     [ settled_log ~request_id:"held"
         [ Live.Run_started
-        ; Live.Thinking {text="thought about it";response=None}
+        ; Live.Thinking {text="thought about it";index=0;response=None}
         ; Live.Text {text="answered"; response=Unobserved_scope (None)}
         ; Live.Reply_details
             { terminal_stream_scope = None; reply = "answered"
@@ -4975,7 +4975,7 @@ let test_batch_reply_follows_all_original_inputs () =
     in
     verify_bound_inputs ();
     state.msg_reasoning_visibility <- Tui_types.Reasoning_hidden;
-    Tui_types.turn_log_add ~now:3. owner ~seq:None (Live.Thinking {text="hidden thought";response=None});
+    Tui_types.turn_log_add ~now:3. owner ~seq:None (Live.Thinking {text="hidden thought";index=0;response=None});
     verify_bound_inputs ();
     let invalid = Tui_types.turn_log_create ~keeper_name:"alpha"
         ~request_id:"unrelated-request" ~started_at:3. in
@@ -5032,7 +5032,7 @@ let test_observed_checkpoint_retains_earlier_output () =
     let occurrence : Live.tool_occurrence =
       {stream_scope=0; block_index=1; provider_message_id=None; tool_call_id=Some "before-checkpoint"} in
     let log = settled_log ~request_id:"observed-checkpoint"
-        [Live.Run_started; Live.Thinking {text="THINKING_BEFORE_CHECKPOINT";response=None};
+        [Live.Run_started; Live.Thinking {text="THINKING_BEFORE_CHECKPOINT";index=0;response=None};
          Live.Tool_started {occurrence; tool_name="Inspect_before_checkpoint"};
          Live.Tool_ended {occurrence}; Live.Text {text="TEXT_BEFORE_CHECKPOINT"; response=Unobserved_scope (None)};
          Live.Reply_details {terminal_stream_scope = None; reply=""; turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
@@ -5463,7 +5463,7 @@ let test_delivery_states_and_observed_work_are_identifiable () =
           (List.map (fun (entry : Layout.entry) -> entry.body) bodies))
         [Layout.Origin_inline; Origin_bare; Origin_row];
       state.msg_origin_display <- Layout.Origin_inline;
-      Tui_types.turn_log_add ~now:4. entry.log ~seq:(Some 1) (Live.Thinking {text="OBSERVED_THOUGHT";response=None});
+      Tui_types.turn_log_add ~now:4. entry.log ~seq:(Some 1) (Live.Thinking {text="OBSERVED_THOUGHT";index=0;response=None});
       let occurrence : Live.tool_occurrence =
         {stream_scope=0; block_index=1; provider_message_id=None; tool_call_id=Some "native-read"} in
       Tui_types.turn_log_add ~now:5. entry.log ~seq:(Some 2)

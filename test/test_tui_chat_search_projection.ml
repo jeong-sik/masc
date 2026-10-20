@@ -85,7 +85,7 @@ let test_held_turn_tool_blocks_follow_the_tool_stance () =
        ((Live.Run_started :: call "c1")
         @ [ Live.Text { text = "Let me check."; response = Unobserved_scope None } ]
         @ call "c2"
-        @ [ Live.Thinking { text = "and the caller"; response = None } ]
+        @ [ Live.Thinking { text = "and the caller"; index=0;response = None } ]
         @ call "c3"
         @ [ reply "done"; Live.Run_finished ]));
   let tool_origins visibility =
@@ -294,7 +294,7 @@ let test_repeat_survives_reasoning_visibility_and_backfill () = at_sizes (fun or
     ~text:"MATCH_HISTORY" 1.];
   let held = log state ~id:"running" ~at:10.
     [Live.Run_started; Live.Text {text="MATCH_PROGRESS"; response=Unobserved_scope (None)};
-     Live.Thinking {text="MATCH_REASONING";response=None}; Live.Text {text="MATCH_REPLY"; response=Unobserved_scope (None)}] in
+     Live.Thinking {text="MATCH_REASONING";index=0;response=None}; Live.Text {text="MATCH_REPLY"; response=Unobserved_scope (None)}] in
   let latest = find state "MATCH_" in
   let thought = find ~older:latest state "MATCH_" in
   check bool "repeating search visits a distinct journal stretch" true

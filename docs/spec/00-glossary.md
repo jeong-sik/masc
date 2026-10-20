@@ -277,8 +277,6 @@ status: reference
     "지역"과 이 도구의 "구간"은 다른 뜻이므로, 음악 도구 문서에서 region은 항상
     이 자리로 읽는다. 반복은 자리의 속성이다: "repetition of the loop region"(README)은
     하나의 자리가 여러 번 이어지는 것이고, 복제된 자리와는 다르다.
-  - 이름 경계: `loop region`은 새 개념이 아니라 반복 속성을 가진 Region 하나다. 반복
-    구간을 따로 부르는 낱말이 아니므로 `Region`의 특수한 경우로 읽는다.
   → [tools/alphatex/README.md](../../tools/alphatex/README.md) ·
   [tools/alphatex/CAPTURE-UMP-REGIONS.md](../../tools/alphatex/CAPTURE-UMP-REGIONS.md) ·
   [tools/alphatex/ARRANGEMENT.md](../../tools/alphatex/ARRANGEMENT.md)

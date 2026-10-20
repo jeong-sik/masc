@@ -120,7 +120,7 @@ test('a stopped monitor retains its owned diagnostic receipt for explicit export
   let complete
   const view = await controller({ openStepInput() {
     return { ready:Promise.resolve({source:{name:'Keyboard'}}), completion:new Promise(resolve=>{complete=resolve}),
-      stop() { complete() }, diagnostics() { return structuredClone(report) } }
+      stop() { complete() }, diagnostics() { return structuredClone(report) }, async inspect() { return structuredClone(report) } }
   } })
   try {
     view.command('step-input -17 --monitor'); await flush(); await flush()

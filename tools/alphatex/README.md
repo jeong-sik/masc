@@ -52,7 +52,7 @@ The continuous VST synthesis and [device-clocked PCM output](native/PCM-OUTPUT.m
 layers support live-audition integration. The PCM companion requires macOS15+
 and Swift6. It uses the selected output's sample rate and hardware buffer size,
 pins that device, and reports underrun rather than silently queuing late audio.
-These layers do not yet enable live keyboard monitoring in the piano-roll UI.
+The piano-roll UI uses these layers for explicit monitored step input.
 Loading, licensing, rendering and silent-output failures are reported without
 substituting another instrument. Cubase-bundled instruments such as Retrologue
 and HALion Sonic appear when installed; usable sounds still depend on the user's
@@ -137,6 +137,14 @@ same single MIDI input for note editing and listening. Input arms after the
 selected output has started with the VST's captured preset. No fallback sound
 or output is substituted on failure.
 
+A dedicated worker owns the VST stream and device-clocked PCM requests, so
+synchronous terminal editing or drawing does not have to answer each audio
+block. The terminal sends one admitted MIDI packet at a time; device demands
+continue independently while the terminal is busy. Stop and cancellation join
+the synth, output and worker before the input owner finishes. This separation
+does not guarantee that a plug-in or the operating system can always meet the
+device deadline.
+
 Monitoring maps supported MIDI1/MIDI2 channel notes, sustain/CC, pressure and
 pitch bend to the selected track/channel. MIDI2 values are reduced to MIDI1
 resolution for the VST; incoming bank/program changes are ignored so the saved
@@ -158,6 +166,11 @@ age of an outstanding request at teardown. These observations include IPC and
 scheduling delay; they do not by themselves prove which component caused a stall.
 If the native process dies without a valid final receipt, `final` stays null.
 Diagnostics never turn missing audio into successful playback.
+Active export requests a fresh worker observation; its `observedAt` identifies
+the sampling instant. Internal synchronous diagnostics retain the last worker
+message. `worker.closed` and `terminalReceived` distinguish actual worker exit
+from an acknowledged cleanup. An unexpected exit without that receipt remains
+a failure and does not invent native closure or a successful final report.
 
 `:step-length VALUE` changes only the next input length, without editing an
 existing note or adding undo history. `:step-rest [VALUE]` advances the cursor

@@ -584,10 +584,19 @@ let read_raw_prefix ?turn_sandbox_factory ~config ~(meta : keeper_meta)
     Error (Read_failed "Raw prefix byte limit must be positive")
   else
   (* Binary capture must retain exact bytes; limiting its text projection would
-     corrupt media. Bound the producing command instead. [read_file] classifies
-     a missing path with sentinel exit codes from the read script; the raw
-     prefix is the same classification without the line window, including the
-     host [Unix.stat] pre-check for shared trees. *)
+     corrupt media. Bound the producing command instead ([head -c] below) and
+     capture with [max_bytes:None] so remote stays on [Binary_bytes] and the
+     runtimes stay on their output-file capture. [read_file] classifies a
+     missing path with sentinel exit codes from the read script; the raw
+     prefix is the same classification without the line window. There is no
+     host [Unix.stat] pre-check: a docker host path may not exist on this
+     host, and a directory already maps to [Not_a_file] via [! -f], so the
+     sentinels are the single classifier on every profile.
+
+     Limitation: the frozen Turn_runtime binary capture only admits [WEXITED
+     0], so sentinel exits there surface as [Read_failed], not [Missing_file].
+     That profile keeps the pre-classification behavior deliberately; opening
+     exit-code reads on the capture side is future work. *)
   match container_path_of_host ~config ~meta ~host_path with
   | Error detail -> Error (Read_failed detail)
   | Ok backend_path ->
@@ -598,7 +607,7 @@ let read_raw_prefix ?turn_sandbox_factory ~config ~(meta : keeper_meta)
       let missing_exit = read_window_missing_exit
       and not_a_file_exit = read_window_not_a_file_exit in
       match
-        run_command_with_status ?turn_sandbox_factory ~config ~meta
+        run_command_with_capture ?turn_sandbox_factory ~config ~meta
           ~ok_exit_codes:[ 0; missing_exit; not_a_file_exit ]
           ~command_argv:
             [ "sh"
@@ -610,7 +619,7 @@ let read_raw_prefix ?turn_sandbox_factory ~config ~(meta : keeper_meta)
             ; backend_path
             ; string_of_int (max 0 max_bytes)
             ]
-          ~max_bytes ~timeout_sec ()
+          ~max_bytes:None ~timeout_sec ()
       with
       | Error detail -> Error (Read_failed detail)
       | Ok (Unix.WEXITED 0, bytes) -> Ok bytes
@@ -634,28 +643,4 @@ let read_raw_prefix ?turn_sandbox_factory ~config ~(meta : keeper_meta)
              (Printf.sprintf "%s_read_failed: unexpected status for %s"
                 profile_label host_path))
     in
-    if
-      Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile
-      = Keeper_types_profile_sandbox.Endpoint_owned
-    then read_with_sentinels ()
-    else
-      (* A shared tree is also on this host, so a missing path is refused
-         before a sandbox process is spent on it. *)
-      match Unix.stat host_path with
-      | { Unix.st_kind = Unix.S_DIR; _ } ->
-        Error
-          (Not_a_file
-             (Printf.sprintf
-                "%s_read_failed: path_is_directory: %s (Read requires a file; to \
-                 list a directory use Execute with ls, e.g. argv=['ls','-la','%s'])"
-                profile_label host_path host_path))
-      | { Unix.st_kind =
-            ( Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
-            | Unix.S_SOCK )
-          ; _
-          } -> read_with_sentinels ()
-      | exception Unix.Unix_error (error, operation, argument) ->
-        Error
-          (Read_failed
-             (Printf.sprintf "%s_read_failed: %s(%s): %s" profile_label
-                operation argument (Unix.error_message error)))
+    read_with_sentinels ()

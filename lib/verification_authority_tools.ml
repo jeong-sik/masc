@@ -492,6 +492,9 @@ let media_result t tool ~name ~args ~start_time =
                 result)
        in
        (match bytes with
+        (* Unreachable today: [bytes] above wraps every error as [Read_failed].
+           Kept for exhaustiveness; [Workflow_rejection] stays the right class
+           if a future refactor lets these variants through. *)
         | Error (Keeper_sandbox_read_backend.Missing_file detail)
         | Error (Keeper_sandbox_read_backend.Not_a_file detail) ->
           Some (Tool_result.error ~failure_class:Tool_result.Workflow_rejection

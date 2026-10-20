@@ -1463,12 +1463,22 @@ let test_read_of_a_declared_path_asks_the_endpoint_for_that_path () =
        | Error error -> Alcotest.fail error
        | Ok (request, _stdin) -> request.argv)
   in
-  let prefix path = [ "head"; "-c"; "4096"; path ] in
-  Alcotest.(check (list string)) "an absolute declared path"
-    (prefix "/app/drift_monitor/windowing.py")
+  let check_prefix label path argv =
+    match argv with
+    | [ "sh"; "-c"; script; "sh"; actual_path; "4096" ] ->
+      Alcotest.(check string) (label ^ " path") path actual_path;
+      Alcotest.(check bool) (label ^ " sentinel guards missing paths") true
+        (String_util.contains_substring script "if [ ! -e ");
+      Alcotest.(check bool) (label ^ " sentinel guards non-files") true
+        (String_util.contains_substring script "if [ ! -f ");
+      Alcotest.(check bool) (label ^ " command bounds bytes") true
+        (String_util.contains_substring script "head -c ")
+    | _ ->
+      Alcotest.failf "%s: unexpected argv: %s" label (String.concat " " argv)
+  in
+  check_prefix "an absolute declared path" "/app/drift_monitor/windowing.py"
     (read ~path:"/app/drift_monitor/windowing.py" ());
-  Alcotest.(check (list string)) "a relative path under a declared cwd"
-    (prefix "/app/data/reference_embeddings.npy")
+  check_prefix "a relative path under a declared cwd" "/app/data/reference_embeddings.npy"
     (read ~cwd:"/app" ~path:"data/reference_embeddings.npy" ())
 
 (* analyze_image reads a generated image through this prefix. The endpoint's
@@ -2914,8 +2924,10 @@ let test_raw_prefix_bounds_command_and_preserves_binary () =
 case "$1" in
   info|image) printf '[]\n'; exit 0;;
   run)
-    while [ "$#" -gt 0 ] && [ "$1" != head ]; do shift; done
-    [ "$#" -eq 4 ] && [ "$2" = -c ] && [ "$3" = 4 ] || exit 2
+    while [ "$#" -gt 0 ] && [ "$1" != -c ]; do shift; done
+    [ "$#" -eq 5 ] || exit 2
+    case "$2" in *'head -c '*) ;; *) exit 2;; esac
+    [ "$5" = 4 ] || exit 2
     printf '\377PNG'
     exit 0;;
   *) exit 2;;

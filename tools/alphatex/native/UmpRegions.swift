@@ -333,6 +333,11 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
             }
             sources[source.id] = (source, timed)
         }
+        func gcd(_ a: UInt128, _ b: UInt128) -> UInt128 {
+            var a = a, b = b
+            while b > 0 { let remainder = a % b; a = b; b = remainder }
+            return a
+        }
         var admitted: [UmpRegionClip] = [], potential = UmpFootprint()
         for region in timeline.regions {
             guard !region.id.isEmpty, region.component != .audio, let (source, timed) = sources[region.source], region.repeatCount > 0 else { throw MidiFailure("invalid captured region source or repetition") }
@@ -346,10 +351,15 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
             let after = try umpAdd(cut, length), bound = try umpMultiply(umpUnsigned(source.extent), subdivision)
             guard subdivision > 0 else { throw MidiFailure("invalid captured source divisor") }
             guard length > 0, after <= bound else { throw MidiFailure("captured region exceeds its source bounds") }
-            let unit = try umpMultiply(UInt128(source.timeline.clock.numer), startD)
+            // Reduce the source tick fraction before finding its common clock
+            // with placement. Shared large denominators must be scaled once.
+            let sourceDenominator = try umpMultiply(UInt128(source.timeline.clock.denom), subdivision)
+            let reduction = gcd(UInt128(source.timeline.clock.numer), sourceDenominator)
+            let sourceD = sourceDenominator / reduction
+            let denom = try umpMultiply(startD / gcd(startD, sourceD), sourceD)
+            let unit = try umpMultiply(UInt128(source.timeline.clock.numer) / reduction, denom / sourceD)
             let numer = try umpMultiply(unit, subdivision)
-            let denom = try umpMultiply(umpMultiply(UInt128(source.timeline.clock.denom), startD), subdivision)
-            let phaseOffset = try umpMultiply(umpMultiply(startN % startD, UInt128(source.timeline.clock.denom)), subdivision)
+            let phaseOffset = try umpMultiply(startN % startD, denom / startD)
             let lowerBound = try umpAdd(umpMultiply(UInt128(origin), denom), phaseOffset)
             let startWide = UInt128(origin) + (phaseOffset == 0 ? 0 : 1)
             guard startWide <= UInt128(UInt64.max) else { throw MidiFailure("captured placement exceeds native host timeline") }

@@ -317,6 +317,8 @@ type async_msg =
       Masc_tui_keeper_chat_projection.request * int * (Masc_tui_interrupt_signal.interrupt_signal, string) result
   | Keeper_chat_history_loaded of
       Keeper_history_read.t * Keeper_history_read.source * Keeper_history_read.result
+  | Keeper_chat_first_page_loaded of
+      Keeper_history_read.t * Keeper_history_read.page_result
   | Keeper_chat_copy_loaded of
       int * string * (Masc_tui_keeper_chat_history.decoded, string) result
   | Keeper_chat_operation_loaded of

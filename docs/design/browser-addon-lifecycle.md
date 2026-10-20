@@ -150,6 +150,16 @@ receipts remain distinct from successful contract validation.
    preserve the exported tool's installation-selected command/result hooks;
    mandatory wire decoding does not replace those optional hooks. Upload leases, artifacts and model
    generation still require their explicit host brokers.
+
+   The prepared `Browser_addon_tools` adapter translates the existing public
+   aliases into closed advertised commands while preserving capability filters,
+   contextual reads, scene guards and Keeper screenshot projection. It keeps
+   raw tool receipts and metadata when projection fails after dispatch, and
+   partial effect phases pass to the existing Keeper adapter unchanged. The
+   public core/Keeper dispatchers still use their previous implementation until
+   the existing observation/composition/Vision/download success fixtures are
+   migrated together. This preparation layer does not prove those entrypoints
+   have switched or that its native scenarios have executed.
 5. Scoped model-generation middleware using the existing exact-output authority,
    with retained request/terminal evidence and installation-selected routes. The
    new package `exact_outputs` declarations are reused; observation-only sampling

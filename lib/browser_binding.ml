@@ -1,12 +1,14 @@
 module B = Browser_lane
-type t = {selected:Browser_selection.selected;connection_fields:(string * Yojson.Safe.t) list}
+type t = {selected:Browser_selection.selected;connection_fields:(string * Yojson.Safe.t) list;
+  backend:Browser_capabilities.backend}
 let ( let* ) = Result.bind
 let selected t=t.selected
 let connection_fields t=t.connection_fields
+let backend t=t.backend
 let same_connection left right = left.selected.route=right.selected.route
   && left.connection_fields=right.connection_fields
 let of_target selected target = {selected=Browser_selection.bind_target selected target;
-  connection_fields=B.target_connection_fields target}
+  connection_fields=B.target_connection_fields target;backend=Browser_capabilities.backend_of_target target}
 let object_ keys = function
   | `Assoc fields when List.sort String.compare (List.map fst fields)=List.sort String.compare keys -> Ok fields
   | _ -> Error "invalid or duplicate browser binding fields"
@@ -29,7 +31,13 @@ let of_json value =
     | B.Live_route (Some id),Some (`String actual) when B.client_id_to_string id=actual -> Ok ()
     | (Automation_route|Stagehand_route),Some `Null -> Ok ()
     | (Live_route _|Automation_route|Stagehand_route),(None|Some _) -> Error "browser selection and connection disagree" in
-  Ok {selected={Browser_selection.route;reason};connection_fields}
+  let* backend=match route,List.assoc_opt "transport" connection_fields with
+    | B.Automation_route,None -> Ok Browser_capabilities.Owned_gecko
+    | Stagehand_route,None -> Ok Browser_capabilities.Owned_chromium
+    | Live_route _,Some (`String raw) -> B.live_transport_of_string raw
+        |> Result.map (fun transport -> Browser_capabilities.Connected transport)
+    | (Live_route _|Automation_route|Stagehand_route),(None|Some _) -> Error "invalid browser connection transport" in
+  Ok {selected={Browser_selection.route;reason};connection_fields;backend}
 let to_json t=`Assoc ["browserSelection",Browser_selection.to_json t.selected;
   "browserConnection",`Assoc t.connection_fields]
 let annotate t = function

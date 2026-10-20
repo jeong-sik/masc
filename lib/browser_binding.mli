@@ -7,6 +7,8 @@ val of_json : Yojson.Safe.t -> (t, string) result
 val to_json : t -> Yojson.Safe.t
 val selected : t -> Browser_selection.selected
 val connection_fields : t -> (string * Yojson.Safe.t) list
+val backend : t -> Browser_capabilities.backend
+(** The implemented capability catalog for the admitted connection. *)
 val same_connection : t -> t -> bool
 val annotate : t -> Yojson.Safe.t -> Yojson.Safe.t
 (** Replace every page-supplied source/lane/selection/connection field with the

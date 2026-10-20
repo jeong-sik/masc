@@ -41,10 +41,14 @@ module FileSystem : sig
 
   (** Core operations *)
   val get : t -> string -> string result
+  (** Payload writes through Unix-backed file capabilities run on a system
+      thread, keeping the caller's Eio scheduler available during disk I/O.
+      The write completes before the temporary file is closed and renamed. *)
   val set : t -> string -> string -> unit result
   val exists : t -> string -> bool
   val delete : t -> string -> unit result
   val list_keys : t -> prefix:string -> string list result
+  (** Uses the same payload-write boundary as [set]. *)
   val set_if_not_exists : t -> string -> string -> bool result
 
   (** Lock operations *)

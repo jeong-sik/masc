@@ -276,6 +276,28 @@ module FileSystem = struct
       Log.Backend.warn "[EioFS] decompress fallback for %s" context;
     decompressed
 
+  (* eio_posix issues regular-file writev on the calling scheduler thread.
+     Keep path resolution and lifetime under the original capability/switch,
+     but pin its descriptor while the blocking payload write runs elsewhere.
+     run_in_systhread joins the job before returning; no descriptor, rename
+     or temporary-file cleanup can race an abandoned payload writer. *)
+  let save_payload path content =
+    Eio.Path.with_open_out ~create:(`Or_truncate 0o644) path (fun flow ->
+      match Eio_unix.Resource.fd_opt flow with
+      | None -> Eio.Flow.copy_string content flow
+      | Some fd ->
+        Eio_unix.run_in_systhread ~label:"backend-save-payload" (fun () ->
+          Eio_unix.Fd.use_exn "backend-save-payload" fd (fun unix_fd ->
+            let length = String.length content in
+            let rec write offset =
+              if offset < length then
+                match Unix.write_substring unix_fd content offset (length - offset) with
+                | 0 -> raise (Unix.Unix_error (Unix.EIO, "write", ""))
+                | written -> write (offset + written)
+                | exception Unix.Unix_error (Unix.EINTR, _, _) -> write offset
+            in
+            write 0)))
+
   (** Get value by key (auto-decompresses ZSTD if detected).
 
       Reads run lock-free: writers in this module go through a sibling
@@ -326,7 +348,7 @@ module FileSystem = struct
       try
         _ensure_parent_dir ~log_errors:true path;
         let compressed = _compress value in
-        Eio.Path.save ~create:(`Or_truncate 0o644) tmp_path compressed;
+        save_payload tmp_path compressed;
         Eio.Path.rename tmp_path path;
         ki_replace t key ();
         Ok ()
@@ -570,7 +592,7 @@ module FileSystem = struct
       let publish_new () =
         try
           _ensure_parent_dir ~log_errors:true path;
-          Eio.Path.save ~create:(`Or_truncate 0o644) tmp_path compressed;
+          save_payload tmp_path compressed;
           Eio.Path.rename tmp_path path;
           ki_replace t key ();
           Ok true

@@ -6884,7 +6884,7 @@ let row_list (state : state) : row_list option =
    these came to have no way to reach their own ends -- a post with three
    hundred comments took a page key held down, and the way back up took it
    held down again. *)
-let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
+let reading_pane (state : state) ~cols : (int -> Masc_tui_types.clamped_scroll) option
     =
   let pane f = Some f in
   match state.view with
@@ -6918,7 +6918,7 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
       else None
   | Board ->
       (match state.board_mode with
-       | Board_read _ when state.board_focus = Right_pane ->
+       | Board_read _ when Masc_tui_types.board_read_focus state ~cols = Right_pane ->
            pane (fun v ->
              if state.board_comments_focused then
                Board_read (state.board_scroll, v)
@@ -16139,7 +16139,7 @@ let send_board_vote state ~mailbox ~(up : bool) target =
    direction, the same press again sends it. The target is captured at arm
    time, kind included, so moving the cursor between presses re-arms for
    the new target rather than voting on the one the operator left. *)
-let handle_board_vote_key state ~mailbox ~(up : bool) =
+let handle_board_vote_key state ~cols ~mailbox ~(up : bool) =
   let target =
     match state.board_mode with
     | Board_list ->
@@ -16147,7 +16147,8 @@ let handle_board_vote_key state ~mailbox ~(up : bool) =
           (fun (post : board_post) -> Vote_post post.bp_id)
           (List.nth_opt (board_posts state) state.board_cursor)
     | Board_read post_id
-      when state.board_focus = Right_pane && state.board_comments_focused ->
+      when Masc_tui_types.board_read_focus state ~cols = Right_pane
+           && state.board_comments_focused ->
         Option.map
           (fun comment_id -> Vote_comment { post_id; comment_id })
           (select_board_comment state ~post_id)
@@ -29063,7 +29064,8 @@ and is loaded on demand through keeper_skill.
        | Some "b" when state.view = Board ->
            (match state.board_mode with
             | Board_read post_id ->
-                if state.board_focus = Left_pane then begin
+                if Masc_tui_types.board_read_focus state ~cols:terminal_columns = Left_pane
+                then begin
                   state.board_focus <- Right_pane;
                   state.board_comments_focused <- false
                 end else
@@ -29601,7 +29603,7 @@ and is loaded on demand through keeper_skill.
               && (match state.board_mode with
                   | Board_read _ -> true
                   | Board_list | Board_compose -> false)
-              && state.board_focus = Left_pane ->
+              && Masc_tui_types.board_read_focus state ~cols:terminal_columns = Left_pane ->
            let count = List.length (board_posts state) in
            let target = if key = Some "end" then count - 1 else 0 in
            step_board_read state ~mailbox:async_messages
@@ -29622,14 +29624,15 @@ and is loaded on demand through keeper_skill.
           somewhere the reader cannot see. The pane reports its own clamp, so
           End names a row past the end and the frame corrects it -- the same
           report its j/k already relies on. *)
-       | Some ("home" | "end") when Option.is_some (reading_pane state) ->
+       | Some ("home" | "end")
+         when Option.is_some (reading_pane state ~cols:terminal_columns) ->
            Option.iter
              (fun clamped ->
                apply_clamped_scroll state
                  (clamped
                     (if key = Some "end" then Masc_tui_types.clamped_scroll_end
                      else 0)))
-             (reading_pane state)
+             (reading_pane state ~cols:terminal_columns)
        (* Every other list. The two surfaces above answer first because their
           rows are drawn newest first, so their Home is the live end rather
           than the first row -- the rest read oldest first and take the plain
@@ -29703,7 +29706,7 @@ and is loaded on demand through keeper_skill.
                        max 0
                          (min (count - 1) (state.board_cursor + (direction * page)))
                  | Board_read _ ->
-                     (match state.board_focus with
+                     (match Masc_tui_types.board_read_focus state ~cols:terminal_columns with
                       | Left_pane ->
                           move_board_posts_pane state ~mailbox:async_messages
                             ~delta:(direction * page)
@@ -30635,7 +30638,7 @@ and is loaded on demand through keeper_skill.
                      if state.board_cursor < List.length (board_posts state) - 1 then
                        state.board_cursor <- state.board_cursor + 1
                  | Board_read post_id ->
-                     (match state.board_focus with
+                     (match Masc_tui_types.board_read_focus state ~cols:terminal_columns with
                       | Left_pane ->
                           move_board_posts_pane state ~mailbox:async_messages
                             ~delta:1
@@ -30973,7 +30976,7 @@ and is loaded on demand through keeper_skill.
                      if state.board_cursor > 0 then
                        state.board_cursor <- state.board_cursor - 1
                  | Board_read post_id ->
-                     (match state.board_focus with
+                     (match Masc_tui_types.board_read_focus state ~cols:terminal_columns with
                       | Left_pane ->
                           move_board_posts_pane state ~mailbox:async_messages
                             ~delta:(-1)
@@ -31792,7 +31795,7 @@ and is loaded on demand through keeper_skill.
            (* Lowercase votes up, uppercase votes down -- the shift is the
               direction, so neither reading needs a second keypress to
               choose one. *)
-           handle_board_vote_key state ~mailbox:async_messages
+           handle_board_vote_key state ~cols:terminal_columns ~mailbox:async_messages
              ~up:(match key with Some "v" -> true | _ -> false)
        | Some "x" | Some "X" when state.view = Schedules ->
            (* Two presses, like every irreversible action here: the first

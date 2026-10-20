@@ -128,6 +128,90 @@ let overview_header (state : state) =
     (Terminal_text.single_line state.workspace) Ansi.reset
     (connection_badge state)
 
+(* On a terminal wide and tall enough for it the Dashboard draws its readings as
+   cards: what needs a decision and what to continue on the left, the status
+   readings on the right. The selected decision is written out in full inside
+   its card, where the list row can only show the start of it.
+
+   Narrower or shorter terminals keep the plain rows. The cards cost rows --
+   four borders and a gap against the two headings and a blank -- so they are
+   drawn only when the decisions the window already chose fit in them, and the
+   window itself is the plain layout's, so the keys that scroll it and the
+   frame that draws it still agree. *)
+let overview_card_gap = 2
+let overview_card_min_width = 44
+let overview_card_row_gap = 1
+(* A divider and one line of the selected decision: with fewer spare rows the
+   written-out decision is not worth the rows it takes from the list. *)
+let overview_card_detail_min_rows = 3
+(* A card's two borders. *)
+let overview_card_border_rows = 2
+
+let overview_cards ~inner ~rows ~selected ~decisions ~decision_title
+    ~continuation ~status =
+  let columns =
+    Masc_tui_card.columns_that_fit ~inner_width:inner ~gap:overview_card_gap
+      ~min_card_width:overview_card_min_width ~max_columns:2
+  in
+  let shown = List.length decisions in
+  (* What the decisions card takes before the selected decision is written
+     out, and what is left of the body for that. *)
+  let decision_base = overview_card_border_rows + max 1 shown in
+  let continue_height = overview_card_border_rows + List.length continuation in
+  let detail_room =
+    rows - decision_base - overview_card_row_gap - continue_height
+  in
+  let row_of ~cells (action, label) =
+    if Some action = selected then
+      Masc_tui_theme.selection ^ Message_layout.fit_width label cells ^ Ansi.reset
+    else label
+  in
+  let detail ~cells =
+    match List.find_opt (fun (action, _) -> Some action = selected) decisions with
+    | Some (_, label) when detail_room >= overview_card_detail_min_rows ->
+        let room = detail_room - 1 in
+        let lines =
+          Message_layout.wrap_words ~max_cells:(max 1 cells)
+            (Terminal_text.single_line label)
+        in
+        let lines =
+          if List.length lines <= room then lines
+          else List.take (room - 1) lines @ [ "…" ]
+        in
+        (Theme.recede () ^ draw_hline cells ^ Ansi.reset) :: lines
+    | Some _ | None -> []
+  in
+  let decision_card =
+    { Masc_tui_card.title = decision_title
+    ; body =
+        (fun ~cells ->
+           match decisions with
+           (* The cards are drawn only where the window holds a decision or
+              there is none to hold, so an empty list means none waits. *)
+           | [] -> [ Theme.recede () ^ "No decision is waiting on you." ^ Ansi.reset ]
+           | _ :: _ -> List.map (row_of ~cells) decisions @ detail ~cells)
+    }
+  in
+  let continue_card =
+    { Masc_tui_card.title = "Continue"
+    ; body = (fun ~cells -> List.map (row_of ~cells) continuation)
+    }
+  in
+  let status_card =
+    { Masc_tui_card.title = "Status"; body = (fun ~cells -> status ~cells) }
+  in
+  if columns < 2 then None
+  else
+    let style =
+      { Masc_tui_card.edge = Theme.recede ()
+      ; title_style = Ansi.bold
+      ; reset = Ansi.reset
+      }
+    in
+    Masc_tui_card.grid ~style ~inner_width:inner ~gap:overview_card_gap
+      ~row_gap:overview_card_row_gap ~max_rows:rows
+      [ [ decision_card; continue_card ]; [ status_card ] ]
+
 let render_overview (state : state) =
   let terminal_rows, full_cols = get_terminal_size () in
   let sidebar =
@@ -224,6 +308,31 @@ let render_overview (state : state) =
          when the queue contains more rows than the viewport. *)
       let essential_rows = List.length actions + 2 + warning_rows in
       if budget >= essential_rows && (all_decisions = [] || capacity > 0) then begin
+        let card_rows =
+          let status ~cells =
+            let wrapped line =
+              Message_layout.wrap_words ~max_cells:(max 1 cells)
+                (Terminal_text.single_line line)
+            in
+            List.concat_map wrapped [ String.trim health ]
+            @ List.map (fun line -> Theme.recede () ^ line ^ Ansi.reset)
+                (wrapped (String.trim work))
+            @ List.concat_map wrapped
+                (Masc_tui_candle.summary_lines state.candle_observation)
+          in
+          overview_cards ~inner:(framed_inner_width cols)
+            ~rows:(budget - warning_rows) ~selected ~decisions
+            ~decision_title:
+              (if List.length decisions = List.length all_decisions
+               then "Needs your decision"
+               else Printf.sprintf "Needs your decision · rows %d-%d/%d · j/k for more"
+                   (first + 1) (first + List.length decisions)
+                   (List.length all_decisions))
+            ~continuation ~status
+        in
+        match card_rows with
+        | Some rows -> List.iter c.push rows
+        | None ->
         let spare = budget - essential_rows in
         (* Action outcomes stay above the destinations they affect. Passive
            health/history context follows the destinations, using only spare

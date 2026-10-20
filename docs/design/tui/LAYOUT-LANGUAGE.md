@@ -18,6 +18,10 @@ stay at the bottom. Each area answers one question.
   counts, metadata and hints through the existing theme tokens.
 - Separate adjacent panes with one quiet edge. Full-screen content needs no
   enclosing box. Overlays can retain a frame so they remain recognisable.
+  A screen that shows several independent readings side by side, such as
+  Dashboard, titles each reading with a card. The card is a box with its title
+  in the top edge; it is not a frame around the screen, and a screen with one
+  reading still has no box.
 - Only the row that owns keyboard focus gets a full selection band. With a
   known palette it is a quiet neutral tint; without colours or a usable palette
   it uses reverse video. Keep a caret on the open selection in both modes.

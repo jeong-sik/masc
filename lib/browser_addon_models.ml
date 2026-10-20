@@ -3,7 +3,9 @@ module Store = Lane_addon_store
 let ( let* ) = Result.bind
 type configuration = {store_root:string; outputs:Lane_addon_types.exact_output list}
 let configuration_to_json configuration = `Assoc ["store_root",`String configuration.store_root;
-  "outputs",`Assoc (List.map (fun (output:Lane_addon_types.exact_output) -> output.name,output.schema) configuration.outputs)]
+  "outputs",`Assoc (List.map (fun (output:Lane_addon_types.exact_output) -> output.name,
+    `Assoc ["schema",output.schema;"request_schema",`Bool (match output.request_schema with
+      | Package_schema_only -> false | Consumer_request_schema -> true)]) configuration.outputs)]
 let configuration_of_json = function
   | `Assoc fields when List.sort String.compare (List.map fst fields)=["outputs";"store_root"] ->
       let* store_root = match List.assoc "store_root" fields with
@@ -14,23 +16,31 @@ let configuration_of_json = function
             let names=List.map fst outputs in
             let* () = if List.length names=List.length (List.sort_uniq String.compare names) then Ok ()
               else Error "duplicate browser model output" in
-            List.fold_right (fun (name,schema) acc -> let* rest=acc in
+            List.fold_right (fun (name,value) acc -> let* rest=acc in
               let* ()=if Runtime_schema.exact_output_name_valid name then Ok () else Error "invalid browser model output" in
+              let* schema,request_schema = match value with
+                | `Assoc fields when List.sort String.compare (List.map fst fields)=["request_schema";"schema"] ->
+                    (match List.assoc "request_schema" fields with
+                     | `Bool allowed -> Ok (List.assoc "schema" fields,
+                         if allowed then Lane_addon_types.Consumer_request_schema else Package_schema_only)
+                     | _ -> Error "browser model request_schema must be boolean")
+                | _ -> Error "browser model output requires schema and request_schema" in
               let* ()=Lane_addon_action.validate_value_schema schema in
-              Ok ({Lane_addon_types.name;schema}::rest)) outputs (Ok [])
+              Ok ({Lane_addon_types.name;schema;request_schema}::rest)) outputs (Ok [])
         | _ -> Error "browser model outputs must be an object" in
       Ok {store_root;outputs}
   | _ -> Error "invalid browser model configuration"
 type error = Retired | Output_disabled of string | Request_in_use
-  | Receipt_failed of string | Invalid_result of string
+  | Receipt_failed of string | Invalid_result of string | Schema_refused of string
 let error_to_string = function
   | Retired -> "browser model owner is retired"
   | Output_disabled name -> "browser model output is disabled: " ^ name
   | Request_in_use -> "browser model request id was already used"
   | Receipt_failed detail -> "browser model receipt failed: " ^ detail
   | Invalid_result detail -> "invalid browser model result: " ^ detail
+  | Schema_refused detail -> "browser model request schema refused: " ^ detail
 type outcome = Final of Exact.final | Exceeds_frame of {sha256:string;bytes:int}
-type pending = {request:Exact.request; schema:Yojson.Safe.t;
+type pending = {request:Exact.request; output:Lane_addon_types.exact_output;
   resolve:(outcome,error) result Eio.Promise.u}
 type phase = Serving | Closed
 type t = {incarnation:string; configuration:configuration; store:Store.t;
@@ -38,10 +48,10 @@ type t = {incarnation:string; configuration:configuration; store:Store.t;
   used:(string,unit) Hashtbl.t; mutable revision:int64; changed:Eio.Condition.t;
   receipts:Eio.Mutex.t}
 let incarnation t = t.incarnation
-let output_schema t ~name = match t.phase with
+let output t ~name = match t.phase with
   | Closed -> None
   | Serving -> List.find_opt (fun (output:Lane_addon_types.exact_output) -> output.name=name)
-      t.configuration.outputs |> Option.map (fun (output:Lane_addon_types.exact_output) -> output.schema)
+      t.configuration.outputs
 let create ~incarnation ~configuration =
   let* _ = Browser_lane.client_id_of_string incarnation in
   let* configuration = configuration_of_json (configuration_to_json configuration) in
@@ -57,9 +67,10 @@ let request t request = match t.phase with
       match List.find_opt (fun (output:Lane_addon_types.exact_output) -> output.name=request.Exact.output) t.configuration.outputs with
       | None -> Error (Output_disabled request.output)
       | Some output ->
+          let* _ = Exact.schema_for_request ~output request |> Result.map_error (fun detail -> Schema_refused detail) in
           if Hashtbl.mem t.used request.request_id then Error Request_in_use else
           let answer,resolve=Eio.Promise.create () in
-          let pending={request;schema=output.schema;resolve} in
+          let pending={request;output;resolve} in
           Hashtbl.add t.used request.request_id ();
           t.pending<-t.pending @ [request.request_id,pending];changed t;
           Fun.protect ~finally:(fun () -> withdraw t request.request_id pending) (fun () -> Eio.Promise.await answer)
@@ -78,7 +89,8 @@ let retire t = match t.phase with
       t.phase<-Closed;
       let pending=t.pending in t.pending<-[];changed t;
       List.iter (fun (_,pending) -> ignore (Eio.Promise.try_resolve pending.resolve (Error Retired))) pending
-let decode_result ~schema result =
+let decode_result ~output ~request result =
+  let* _ = Exact.schema_for_request ~output request in
   match result with
   | `Assoc fields when List.sort String.compare (List.map fst fields)=["bytes";"retained_sha256";"status"]
       && List.assoc "status" fields=`String "result_exceeds_frame" ->
@@ -86,7 +98,14 @@ let decode_result ~schema result =
        | `Int bytes,`String sha256 when bytes>0 && String.length sha256=64 &&
            String.for_all (function '0'..'9'|'a'..'f' -> true | _ -> false) sha256 -> Ok (Exceeds_frame {sha256;bytes})
        | _ -> Error "invalid oversized model result")
-  | _ -> Exact.final_of_json ~schema result |> Result.map (fun final -> Final final)
+  | _ ->
+      let* final = Exact.final_of_json ~schema:output.Lane_addon_types.schema result in
+      let* final = match final with
+        | Exact.Call_final (Answered {output=answer;slot;usage}) ->
+            let* answer = Exact.validate_answer ~output request (Exact.checked_json answer) in
+            Ok (Exact.Call_final (Answered {output=answer;slot;usage}))
+        | (Call_final (Invalid_output _|Input_refused _)|Outcome_unknown|Not_allowed _|Request_id_reused) as final -> Ok final in
+      Ok (Final final)
 let delivery_arguments = function
   | `Assoc fields when List.sort String.compare (List.map fst fields)=["request_id";"result"] ->
       (match List.assoc "request_id" fields with
@@ -111,7 +130,7 @@ let deliver t ~arguments =
               |> Result.map_error (fun detail -> Receipt_failed detail) in
             let* output=List.find_opt (fun (output:Lane_addon_types.exact_output) -> output.name=original.output)
               t.configuration.outputs |> Option.to_result ~none:(Output_disabled original.output) in
-            let* _=decode_result ~schema:output.schema result |> Result.map_error (fun detail -> Invalid_result detail) in
+            let* _=decode_result ~output ~request:original result |> Result.map_error (fun detail -> Invalid_result detail) in
             if original.request_id=request_id
               && List.assoc "request_digest" fields=`String (Exact.digest original)
               && List.assoc "incarnation" fields=`String t.incarnation
@@ -122,7 +141,7 @@ let deliver t ~arguments =
         | Some _,_ -> Error (Receipt_failed "invalid retained browser model receipt")
         | None,None -> Ok None
         | None,Some pending ->
-            let* outcome=decode_result ~schema:pending.schema result |> Result.map_error (fun detail -> Invalid_result detail) in
+            let* outcome=decode_result ~output:pending.output ~request:pending.request result |> Result.map_error (fun detail -> Invalid_result detail) in
             Ok (Some (pending,outcome)) in
       match pending with
       | None -> Ok (Option.is_some retained)

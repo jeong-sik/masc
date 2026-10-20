@@ -182,7 +182,7 @@ describe('inferTransitionReason', () => {
   })
 
   it('returns Korean reason for KCL to exhausted', () => {
-    const result = inferTransitionReason('KCL', 'trying', 'exhausted')
+    const result = inferTransitionReason('KCL', 'executing', 'exhausted')
     expect(result).toContain('소진')
   })
 
@@ -319,7 +319,7 @@ describe('deriveStateEntries', () => {
   it('handles all 4 lanes', () => {
     const observations = [
       obs({ ts: 100 }),
-      obs({ ts: 200, phase: 'Running', turn: 'executing', decision: 'guard_ok', runtime: 'trying' }),
+      obs({ ts: 200, phase: 'Running', turn: 'executing', decision: 'guard_ok', runtime: 'executing' }),
     ]
     const result = deriveStateEntries(observations)
     expect(result!.phase).toBe(200)

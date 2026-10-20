@@ -85,8 +85,6 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   tool_policy_selected: 'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   // KCL + shared keys (idle, exhausted, done)
   idle:         'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
-  selecting:    'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
-  trying:       'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
   done:         'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
   exhausted:    'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
 }
@@ -546,7 +544,7 @@ export function pushObservation(
  * and on the current value of
  * each of the six FSM axes so an operator can isolate a single
  * keeper by name, or every keeper currently in a specific state
- * (e.g. `trying`, `Draining`, `warning`).
+ * (e.g. `executing`, `Draining`, `warning`).
  *
  * Empty/whitespace query returns the input reference unchanged so
  * useMemo callers keep identity for the non-filtering path and
@@ -830,7 +828,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
         <${TextInput}
           type="search"
           value=${query}
-          placeholder="name / 상태 필터 (예: gen12, trying)"
+          placeholder="name / 상태 필터 (예: gen12, executing)"
           ariaLabel="Keeper 필터"
           testId="fleet-fsm-matrix-filter"
           onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}

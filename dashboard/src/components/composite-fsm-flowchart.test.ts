@@ -6,6 +6,7 @@ import {
   COMPOSITE_FSM_TLA_SPEC_PATHS,
   buildCompositeFsmMermaid,
 } from './composite-fsm-flowchart'
+import { serverRuntimeStates } from './keeper-runtime-wire-states.test-fixture'
 
 function repoRoot(): string {
   const cwd = process.cwd()
@@ -37,6 +38,18 @@ describe('buildCompositeFsmMermaid', () => {
     // them as distinct nodes.
     expect(src).toContain('ktc_idle["idle"]')
     expect(src).toContain('kcl_idle["idle"]')
+  })
+
+  it('draws the KCL states the server sends and no others', () => {
+    const kcl = /subgraph KCL [\s\S]*?\n {2}end/.exec(src)?.[0] ?? ''
+    const drawn = [...kcl.matchAll(/\w+\["([^"]+)"\]/g)].map(m => m[1]!)
+    expect([...drawn].sort()).toEqual([...serverRuntimeStates()].sort())
+  })
+
+  it('gives every KCL node an edge or class refers to a label', () => {
+    const referenced = new Set(src.match(/\bkcl_\w+/g))
+    const labelled = new Set([...src.matchAll(/\b(kcl_\w+)\["/g)].map(m => m[1]))
+    expect([...referenced].sort()).toEqual([...labelled].sort())
   })
 
   it('covers the full KSM state surface (8 phases)', () => {

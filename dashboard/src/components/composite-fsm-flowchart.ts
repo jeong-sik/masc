@@ -65,11 +65,13 @@ const MERMAID_COMPOSITE: string = `flowchart TB
   %% ─ KCL (Runtime lifecycle, 5 states) ───────────────────
   subgraph KCL ["Runtime · KCL"]
     direction LR
-    kcl_idle["idle"] --> kcl_selecting["selecting"]
-    kcl_selecting --> kcl_trying["trying"]
-    kcl_trying --> kcl_selecting
-    kcl_trying --> kcl_done["done"]
-    kcl_trying --> kcl_exhausted["exhausted"]
+    kcl_idle["idle"] --> kcl_routing["routing"]
+    kcl_idle --> kcl_executing["executing"]
+    kcl_routing --> kcl_executing
+    kcl_executing --> kcl_routing
+    kcl_executing --> kcl_done["done"]
+    kcl_routing --> kcl_exhausted["exhausted"]
+    kcl_executing --> kcl_exhausted
   end
 
   %% Mermaid classDef parser does not support CSS var() — values must be
@@ -83,7 +85,7 @@ const MERMAID_COMPOSITE: string = `flowchart TB
 
   class ksm_stopped terminal
   class ksm_running,ksm_paused,ktc_idle,kcl_idle stable
-  class ksm_draining,ksm_restarting,ktc_prompting,ktc_executing,ktc_finalizing,kcl_selecting,kcl_trying motion
+  class ksm_draining,ksm_restarting,ktc_prompting,ktc_executing,ktc_finalizing,kcl_routing,kcl_executing motion
   class ksm_failing,ksm_crashed,kcl_exhausted error
 `
 

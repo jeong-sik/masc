@@ -35,7 +35,7 @@ describe('isTransitionInSegment', () => {
   const baseSegment = {
     field: 'KCL',
     laneKey: 'runtime' as const,
-    value: 'trying',
+    value: 'executing',
     from: 1000,
     to: 2000,
   }
@@ -67,8 +67,8 @@ describe('isTransitionInSegment', () => {
 
 describe('filterTransitionHistory', () => {
   const sample: TransitionHistoryEntry[] = [
-    { ts: 1000, field: 'KCL', from: 'idle', to: 'trying' },
-    { ts: 1100, field: 'KCL', from: 'trying', to: 'idle' },
+    { ts: 1000, field: 'KCL', from: 'idle', to: 'executing' },
+    { ts: 1100, field: 'KCL', from: 'executing', to: 'idle' },
     { ts: 1200, field: 'KTC', from: 'Idle', to: 'Running' },
     { ts: 1300, field: 'KSM', from: 'Stable', to: 'Draining' },
     { ts: 1500, field: 'KDP', from: 'guard_ok', to: 'tool_policy_selected' },
@@ -100,8 +100,8 @@ describe('filterTransitionHistory', () => {
     expect(result[0]?.to).toBe('Draining')
   })
 
-  it('matches substring across fields (trying matches both from and to)', () => {
-    const result = filterTransitionHistory(sample, 'trying')
+  it('matches substring across fields (executing matches both from and to)', () => {
+    const result = filterTransitionHistory(sample, 'executing')
     expect(result).toHaveLength(2)
     expect(result.map(e => e.ts)).toEqual([1000, 1100])
   })

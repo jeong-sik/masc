@@ -153,8 +153,6 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   tool_policy_selected: '도구 목록 적용',
   // KCL + shared keys (idle, exhausted, done)
   idle: '대기',
-  selecting: '선택 중',
-  trying: '시도 중',
   done: '완료',
   exhausted: '소진',
   // KSM

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { DashboardScheduledAutomationRequest } from '../../api'
 import type { KeeperLifecycleEvent } from '../../api/keeper'
 import type { CompositeObservation, SwimlaneSegment } from '../fsm-hub-types'
+import { serverRuntimeStates } from '../keeper-runtime-wire-states.test-fixture'
 import { queueDrainStatusOf } from '../schedule/queue-drain-status'
 import {
   DRAIN_PRESENT,
@@ -102,6 +103,15 @@ describe('laneReading', () => {
     expect(reading?.meaning).toBe('상태만 확인됨')
     expect(laneValueLabel('brand_new_state')).toBe('brand_new_state')
     expect(laneValueTone('brand_new_state')).toBe('info')
+  })
+
+  it('reads every runtime state the server sends from the closed vocabulary', () => {
+    const fallback = laneReading([observation(NOW - 10, { runtime: 'brand_new_state' })], 'runtime', false, NOW)
+    for (const state of serverRuntimeStates()) {
+      const reading = laneReading([observation(NOW - 10, { runtime: state })], 'runtime', false, NOW)
+      expect(reading?.meaning, state).not.toBe(fallback?.meaning)
+      expect(laneValueLabel(state), state).not.toBe(state)
+    }
   })
 })
 

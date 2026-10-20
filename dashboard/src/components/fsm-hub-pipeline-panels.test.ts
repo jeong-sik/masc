@@ -21,7 +21,7 @@ describe('filterObservedLanes', () => {
   const lanes: ObservedLaneSummary[] = [
     makeLane({ field: 'KTC', label: '턴 주기', value: 'idle', meaning: 'Waiting for the next heartbeat cycle' }),
     makeLane({ field: 'KDP', label: '의사결정', value: 'guard_ok', meaning: 'All safety guards passed' }),
-    makeLane({ field: 'KCL', label: '런타임', value: 'trying', meaning: 'Attempting inference with the selected provider' }),
+    makeLane({ field: 'KCL', label: '런타임', value: 'executing', meaning: 'Attempting inference with the selected provider' }),
   ]
 
   it('returns the input reference when query is empty', () => {
@@ -43,7 +43,7 @@ describe('filterObservedLanes', () => {
   })
 
   it('matches by value substring', () => {
-    const result = filterObservedLanes(lanes, 'trying')
+    const result = filterObservedLanes(lanes, 'executing')
     expect(result.map(l => l.field)).toEqual(['KCL'])
   })
 
@@ -62,7 +62,7 @@ describe('filterObservedLanes', () => {
 
   it('does not mutate the input array', () => {
     const copy = lanes.slice()
-    filterObservedLanes(lanes, 'trying')
+    filterObservedLanes(lanes, 'executing')
     expect(lanes).toEqual(copy)
   })
 

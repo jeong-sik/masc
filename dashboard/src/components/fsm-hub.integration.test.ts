@@ -241,7 +241,7 @@ describe('FSM Hub integration — API response shape', () => {
         ts: 110,
         turn: 'executing' satisfies KeeperCompositeSnapshot['turn_phase'],
         decision: 'guard_ok' satisfies KeeperCompositeSnapshot['decision']['stage'],
-        runtime: 'trying' satisfies KeeperCompositeSnapshot['runtime']['state'],
+        runtime: 'executing' satisfies KeeperCompositeSnapshot['runtime']['state'],
       }
       const segments = deriveSwimlaneSegments([obsIdle, obsLive], 'decision', 200)
       expect(segments).toHaveLength(2)

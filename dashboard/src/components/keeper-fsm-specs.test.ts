@@ -6,11 +6,13 @@ import {
   turnFsmTlaSymbol,
   TURN_FSM_STATES,
 } from './keeper-fsm-specs'
+import { serverRuntimeStates } from './keeper-runtime-wire-states.test-fixture'
 
 // State alphabets the dashboard renders. These must stay in lockstep with
 // the OCaml runtime: KSM ← keeper_state_machine.ml `type phase` (8 ctors),
-// KTC ← keeper_registry.ml `type turn_phase` (6 ctors), KDP/KCL ← the
-// matching keeper_registry.ml sub-FSM types. If you change one of these
+// KTC ← keeper_registry.ml `type turn_phase` (6 ctors), KDP ← the matching
+// keeper_registry.ml sub-FSM type, KCL ← keeper_composite_observer.ml
+// `live_runtime_state`. If you change one of these
 // arrays you almost certainly need a matching change on the OCaml side and
 // in dashboard/src/api/schemas/keeper-composite.ts.
 const KSM_STATES = [
@@ -20,7 +22,7 @@ const KSM_STATES = [
 ]
 const KTC_STATES = ['idle', 'prompting', 'routing', 'executing', 'finalizing', 'exhausted']
 const KDP_STATES = ['undecided', 'guard_ok', 'tool_policy_selected']
-const KCL_STATES = ['idle', 'selecting', 'trying', 'done', 'exhausted']
+const KCL_STATES = ['idle', 'routing', 'executing', 'done', 'exhausted']
 
 describe('buildCompositeFsmSpec', () => {
   const defaultParams = {
@@ -58,6 +60,12 @@ describe('buildCompositeFsmSpec', () => {
     const spec = buildCompositeFsmSpec(defaultParams)
     const ids = spec.nodes.filter(n => n.parent === 'KCL').map(n => n.id.split(':')[1])
     expect(ids).toEqual(KCL_STATES)
+  })
+
+  it('creates the KCL cluster from the runtime states the server sends', () => {
+    const spec = buildCompositeFsmSpec(defaultParams)
+    const ids = spec.nodes.filter(n => n.parent === 'KCL').map(n => n.id.split(':')[1]!)
+    expect([...ids].sort()).toEqual([...serverRuntimeStates()].sort())
   })
 
   it('total node count = 4 parents + 22 children = 26', () => {

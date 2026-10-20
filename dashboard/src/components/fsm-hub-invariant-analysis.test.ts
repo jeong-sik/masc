@@ -196,30 +196,6 @@ describe('deriveOperationalInsight', () => {
     expect(insight.detail).toContain('아직 완료된 turn')
   })
 
-  it('reports info when runtime is selecting', () => {
-    const insight = deriveOperationalInsight(
-      makeSnapshot({
-        runtime: { state: 'selecting' },
-      }),
-      noObservations,
-      now,
-    )
-    expect(insight.tone).toBe('info')
-    expect(insight.headline).toContain('Provider')
-  })
-
-  it('reports info when runtime is trying', () => {
-    const insight = deriveOperationalInsight(
-      makeSnapshot({
-        runtime: { state: 'trying' },
-      }),
-      noObservations,
-      now,
-    )
-    expect(insight.tone).toBe('info')
-    expect(insight.headline).toContain('Provider')
-  })
-
   it('reports info for normal live turn (happy path)', () => {
     const insight = deriveOperationalInsight(
       makeSnapshot({
@@ -232,6 +208,22 @@ describe('deriveOperationalInsight', () => {
     )
     expect(insight.tone).toBe('info')
     expect(insight.headline).toContain('progressing normally')
+  })
+
+  // The server computes the runtime state from the turn phase, so a live turn
+  // reads the same whichever runtime state it carries.
+  it.each(['routing', 'executing'] as const)('reads the %s turn from its turn phase, not its runtime state', phase => {
+    const read = (runtime: string) => deriveOperationalInsight(
+      makeSnapshot({ is_live: true, turn_phase: phase, runtime: { state: runtime } }),
+      noObservations,
+      now,
+    )
+    const { tone, headline, nextStep } = read(phase)
+    expect({ tone, headline, nextStep }).toEqual({
+      tone: read('idle').tone,
+      headline: read('idle').headline,
+      nextStep: read('idle').nextStep,
+    })
   })
 
   it('includes evidence array with KSM/KTC/KDP', () => {

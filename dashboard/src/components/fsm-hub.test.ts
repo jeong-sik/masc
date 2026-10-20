@@ -185,11 +185,11 @@ describe('fsm-hub derived state', () => {
     const observations = [
       observation({ ts: 1 }),
       observation({ ts: 2, phase: 'Failing', turn: 'executing' }),
-      observation({ ts: 3, phase: 'Failing', turn: 'executing', runtime: 'trying' }),
+      observation({ ts: 3, phase: 'Failing', turn: 'executing', runtime: 'executing' }),
     ]
 
     expect(deriveTransitionHistory(observations)).toEqual([
-      { ts: 3, from: 'idle', to: 'trying', field: 'KCL' },
+      { ts: 3, from: 'idle', to: 'executing', field: 'KCL' },
       { ts: 2, from: 'idle', to: 'executing', field: 'KTC' },
       { ts: 2, from: 'Running', to: 'Failing', field: 'KSM' },
     ])
@@ -239,7 +239,7 @@ describe('fsm-hub derived state', () => {
       observation({ ts: 1, phase: 'Running' }),
       observation({ ts: 2, phase: 'Running', turn: 'executing' }),
       observation({ ts: 3, phase: 'Failing' }),
-      observation({ ts: 4, phase: 'Failing', runtime: 'trying' }),
+      observation({ ts: 4, phase: 'Failing', runtime: 'executing' }),
     ]
 
     expect(derivePhaseLog(observations)).toEqual([
@@ -313,8 +313,8 @@ describe('inferTransitionReason', () => {
       .toBe('턴이 시작되었습니다 — runtime 호출 진행')
   })
 
-  it('attributes KCL idle→trying to runtime call', () => {
-    expect(inferTransitionReason('KCL', 'idle', 'trying'))
+  it('attributes KCL idle→executing to runtime call', () => {
+    expect(inferTransitionReason('KCL', 'idle', 'executing'))
       .toMatch(/runtime/)
   })
 
@@ -367,7 +367,7 @@ describe('deriveLaneDwellHistograms', () => {
   it('pct sums to 100 for each lane', () => {
     const observations = [
       observation({ ts: 10, runtime: 'idle' }),
-      observation({ ts: 30, runtime: 'trying' }),
+      observation({ ts: 30, runtime: 'executing' }),
       observation({ ts: 50, runtime: 'idle' }),
     ]
     const histograms = deriveLaneDwellHistograms(observations, 60)
@@ -396,7 +396,7 @@ describe('deriveStateEntries', () => {
     const observations = [
       observation({ ts: 100, phase: 'Running', turn: 'idle', decision: 'undecided', runtime: 'idle' }),
       observation({ ts: 110, phase: 'Running', turn: 'prompting', decision: 'undecided', runtime: 'idle' }),
-      observation({ ts: 120, phase: 'Running', turn: 'executing', decision: 'guard_ok', runtime: 'selecting' }),
+      observation({ ts: 120, phase: 'Running', turn: 'executing', decision: 'guard_ok', runtime: 'routing' }),
       observation({ ts: 130, phase: 'Draining', turn: 'executing', decision: 'guard_ok', runtime: 'done' }),
     ]
     const entries = deriveStateEntries(observations)

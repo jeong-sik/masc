@@ -339,7 +339,7 @@ describe('runtimeAttentionForSnapshot', () => {
       is_live: true,
       turn_phase: 'executing',
       decision: { stage: 'tool_policy_selected' },
-      runtime: { state: 'trying' },
+      runtime: { state: 'executing' },
       live_turn: {
         turn_id: 42,
         started_at: generatedAt - 30,
@@ -649,7 +649,7 @@ describe('filterKeeperSnapshots', () => {
   const beta = snapshot({
     name: 'gen14-beta',
     phase: 'Draining',
-    runtime: { state: 'trying' },
+    runtime: { state: 'executing' },
   })
   const gamma = snapshot({
     name: 'gen12-gamma',
@@ -676,7 +676,7 @@ describe('filterKeeperSnapshots', () => {
   })
 
   it('matches runtime (KCL) axis value', () => {
-    const out = filterKeeperSnapshots(rows, 'trying')
+    const out = filterKeeperSnapshots(rows, 'executing')
     expect(out.map(inferKeeperNameFrom)).toEqual(['gen14-beta'])
   })
 

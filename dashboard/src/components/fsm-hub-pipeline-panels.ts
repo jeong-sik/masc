@@ -27,7 +27,7 @@ import { buildCompositeFsmSpec } from './keeper-fsm-specs'
  * Case-insensitive substring match on `lane.field`, `lane.label`,
  * `lane.value`, and `lane.meaning` in that order so operators can isolate
  * one sub-FSM by its short code (`KCL`), by its Korean label
- * (`런타임`), by the current state value (`trying`, `idle`), or by a
+ * (`런타임`), by the current state value (`executing`, `idle`), or by a
  * keyword in the explanatory meaning.
  *
  * Empty/whitespace query returns the input reference unchanged so
@@ -235,8 +235,6 @@ const STATE_DESCRIPTIONS: Record<string, string> = {
   guard_ok: '모든 safety guard 통과, 도구 실행으로 진행',
   tool_policy_selected: '도구 목록 적용됨, 도구 필터링 완료',
   // KCL (Runtime)
-  selecting: 'runtime 목록에서 최적 provider 선택 중',
-  trying: '선택된 provider 로 inference 시도 중',
   done: 'Provider 가 정상 응답함',
   exhausted: 'runtime 의 모든 provider 실패',
   // KSM (Phase) — wire format is lowercase per phase_to_string.

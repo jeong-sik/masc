@@ -333,7 +333,7 @@ export type TransitionHistoryEntry = {
  * Case-insensitive substring match on `entry.field`, `entry.from`, and
  * `entry.to` in that order so operators can isolate one lane (e.g.
  * `KCL`), or every transition that landed on / departed from a specific
- * state (e.g. `trying`, `idle`, `Draining`).
+ * state (e.g. `executing`, `idle`, `Draining`).
  *
  * Empty/whitespace query returns the input reference unchanged so
  * `useMemo` keeps referential equality for the non-filtering path.
@@ -446,8 +446,8 @@ export function TransitionTrail({
 
 /** Top-N transition frequency ranking. Surfaces the (from → to) pairs the
     keeper takes most often inside the in-memory observation window — useful
-    for spotting churn (e.g. KCL idle ↔ trying repeating means runtime is
-    flapping) and for confirming the keeper exercises every lane it owns. */
+    for spotting churn (e.g. KSM running ↔ failing repeating means the keeper
+    is flapping) and for confirming the keeper exercises every lane it owns. */
 export function TopTransitionsPanel({
   transitions,
   hoveredSegment,

@@ -20,7 +20,7 @@ interface CompositeFsmParams {
   phase: string            // KSM — offline | running | failing | draining | paused | stopped | crashed | restarting
   turnPhase: string        // KTC — idle | prompting | routing | executing | finalizing | exhausted
   decisionStage: string    // KDP — undecided | guard_ok | tool_policy_selected
-  runtimeState: string     // KCL — idle | selecting | trying | done | exhausted
+  runtimeState: string     // KCL — idle | routing | executing | done | exhausted
 }
 
 const KSM_STATES = [
@@ -30,7 +30,7 @@ const KSM_STATES = [
 ]
 const KTC_STATES = ['idle', 'prompting', 'routing', 'executing', 'finalizing', 'exhausted']
 const KDP_STATES = ['undecided', 'guard_ok', 'tool_policy_selected']
-const KCL_STATES = ['idle', 'selecting', 'trying', 'done', 'exhausted']
+const KCL_STATES = ['idle', 'routing', 'executing', 'done', 'exhausted']
 
 export const TURN_FSM_STATES = [
   'idle',

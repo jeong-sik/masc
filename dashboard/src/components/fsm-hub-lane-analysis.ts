@@ -29,11 +29,6 @@ export function isObservedStall(
     if (value === 'finalizing') return observedForSec >= 30
     return false
   }
-  if (key === 'runtime') {
-    if (value === 'selecting') return observedForSec >= 30
-    if (value === 'trying') return observedForSec >= 45
-    return false
-  }
   return false
 }
 
@@ -92,10 +87,10 @@ function laneMeaning(
       switch (value) {
         case 'idle':
           return { tone: 'ok', meaning: 'provider/runtime 실행 중 아님' }
-        case 'selecting':
+        case 'routing':
           return { tone: 'info', meaning: 'provider routing 이 다음 execution path 선택 중' }
-        case 'trying':
-          return { tone: 'info', meaning: 'provider execution 진행 중' }
+        case 'executing':
+          return { tone: 'info', meaning: 'model/tool execution 진행 중' }
         case 'done':
           return { tone: 'ok', meaning: 'runtime 가 이번 turn 의 provider 결과 수락' }
         case 'exhausted':

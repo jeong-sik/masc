@@ -64,7 +64,7 @@ export const LANE_QUEUE_LANES: readonly LaneQueueLaneDef[] = [
 const LANE_VALUE_LABELS: Record<string, string> = {
   running: '실행 중', failing: '문제 발생', draining: '정리 중',
   idle: '쉬는 중', prompting: '준비 중', executing: '작업 중', finalizing: '마무리', undecided: '미결정', guard_ok: '점검 통과',
-  tool_policy_selected: '도구 확정', selecting: '경로 선택', trying: '모델 호출 중', done: '완료', exhausted: '가능한 경로 없음',
+  tool_policy_selected: '도구 확정', routing: '경로 선택', done: '완료', exhausted: '가능한 경로 없음',
 }
 
 export function laneValueLabel(value: string): string {
@@ -78,7 +78,7 @@ const LANE_VALUE_TONES: Record<string, LaneSegmentTone> = {
   running: 'info', failing: 'bad', draining: 'warn',
   idle: 'idle', prompting: 'info', executing: 'info', finalizing: 'info',
   undecided: 'idle', guard_ok: 'ok', tool_policy_selected: 'info',
-  selecting: 'info', trying: 'info', done: 'ok', exhausted: 'bad',
+  routing: 'info', done: 'ok', exhausted: 'bad',
 }
 
 export function laneValueTone(value: string): LaneSegmentTone {
@@ -106,8 +106,8 @@ const LANE_MEANING: Record<LaneKey, Record<string, (live: boolean) => string>> =
   },
   runtime: {
     idle: () => '모델을 부르고 있지 않다',
-    selecting: () => '어떤 모델로 부를지 고르는 중',
-    trying: () => '모델 응답을 기다리는 중',
+    routing: () => '어떤 모델로 부를지 고르는 중',
+    executing: () => '모델을 부르거나 도구를 쓰는 중',
     done: () => '모델 응답을 받아 처리했다',
     exhausted: () => '쓸 수 있는 모델이 없다 — 사람이 손대야 한다',
   },
@@ -133,8 +133,8 @@ const LANE_MEANING_DEV: Record<LaneKey, Record<string, (live: boolean) => string
   },
   runtime: {
     idle: () => 'provider/runtime 실행 중 아님',
-    selecting: () => 'provider routing 이 다음 execution path 선택 중',
-    trying: () => 'provider execution 진행 중',
+    routing: () => 'provider routing 이 다음 execution path 선택 중',
+    executing: () => 'model/tool execution 진행 중',
     done: () => 'runtime 가 이번 turn 의 provider 결과 수락',
     exhausted: () => 'runtime 옵션 모두 소진 — 사용 가능한 path 없음',
   },

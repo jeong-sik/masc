@@ -5738,6 +5738,11 @@
  (libraries masc_tui_types masc yojson masc.masc_tool_blob_store))
 
 (test
+ (name test_lane_addon_asks)
+ (modules test_lane_addon_asks)
+ (libraries masc_test_deps masc.fs_compat eio eio_main yojson unix))
+
+(test
  (name test_lane_addon_records)
  (modules test_lane_addon_records)
  (libraries masc_test_deps yojson))

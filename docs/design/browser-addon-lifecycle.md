@@ -1,8 +1,9 @@
 # Browser execution as an optional Lane Add-on
 
-The browser executor currently starts inside the MASC server. Disabling request
-admission or detaching an observer does not detach that executor. The requested
-change moves execution, sessions and owned processes into an optional Add-on.
+The optional browser Add-on owns live command queues and Gecko automation.
+The Gecko driver starts only with an attached browser Add-on and a configured,
+enabled `[browser.automation]`. Stagehand and the Keeper live bridge still have
+server startup paths; their owned-process and model-broker migration remains.
 
 The operator selects two independent middleware boundaries:
 
@@ -143,9 +144,36 @@ receipts remain distinct from successful contract validation.
    input or falls back to builtin queues. Read/admin authorization stays at the
    HTTP boundary. Installed TUI and actual browser evidence remain separate.
 
-   Existing built-in startup is still active. Owned backends are
-   explicitly refused until profile claims and actual descendant cleanup are
-   connected. The tool proxy must
+   Gecko automation now runs inside the native browser worker. Its driver and
+   optional binary are snapshotted by the host at attachment and retained in the
+   original immutable cleanup descriptor. The host writes the worker spec inside
+   its per-incarnation allocation. Profiles and staged downloads belong to that
+   allocation; this unit accepts no shared or operator profile. Only a ready
+   driver publishes an executor, session observer and document observer. Typed
+   worker inventory carries registration and the actual open/closed/unknown
+   session separately, so automatic browser selection can choose this backend.
+   Core Gecko startup and PID/command-line-based orphan killing are removed.
+
+   Normal detach sends private `Retire` before native termination: admission is
+   revoked, the session is closed through an independent HTTP pool, and the
+   exact driver child is reaped before an incarnation-bound cleanup receipt is
+   persisted. Retirement waits for this completion rather than the quick
+   control timeout or the native worker's short abort grace. Stdin EOF and
+   termination signals also join backend cleanup. Interrupted session creation
+   and lost session authority remain sticky; later success cannot erase them.
+   The host additionally requires native group settlement, the original
+   allocation inode, its unchanged spec and empty profile/download directory
+   trees. It removes only known regular files, the socket and empty directories.
+   Missing receipts, changed identity or downloaded bytes retain the allocation
+   and refuse replacement. It does not infer escaped-descendant absence from
+   a process-group check or force-delete profiles after a crash. Mozilla also
+   documents interrupted-session profile retention in
+   [geckodriver profiles](https://firefox-source-docs.mozilla.org/testing/geckodriver/Profiles.html).
+   Downloads are staged privately but publication/upload and shared persistent
+   profiles still require their host brokers. Stagehand remains unavailable in
+   this worker until its model and process ownership are connected.
+
+   The tool proxy must
    preserve the exported tool's installation-selected command/result hooks;
    mandatory wire decoding does not replace those optional hooks. Upload leases, artifacts and model
    generation still require their explicit host brokers.

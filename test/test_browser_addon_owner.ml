@@ -58,7 +58,25 @@ let scenario () = Eio_main.run (fun env ->
     let poll = Eio.Fiber.fork_promise ~sw (fun () -> send (W.Poll {client;window_sec=2.})) in
     let pending = Eio.Fiber.fork_promise ~sw issue in
     let issued = command (Eio.Promise.await_exn poll) in
-    Owner.revoke owner;
+    let closing,begin_close=Eio.Promise.create () and settled,finish_close=Eio.Promise.create () in
+    let automation_calls=ref 0 in
+    ok (Owner.attach_automation owner
+      ~execute:(fun _ -> incr automation_calls;B.Answered (`Assoc ["ok",`Bool true;"data",`Null]))
+      ~session:(fun () -> B.Browser_closed)
+      ~document:(fun ~tab_id:_ -> B.Rejected_before_effect "no document")
+      ~cleanup:(fun () -> ignore (Eio.Promise.try_resolve begin_close ());Eio.Promise.await settled;Ok ()));
+    let owned=Owner.snapshot owner |> Yojson.Safe.Util.member "owned_backends" |> Masc.Browser_addon_inventory.owned_of_json |> ok in
+    check bool "ready backend is visible without inventing an open session" true
+      (let automation,_=owned in automation.registered && automation.session=B.Browser_closed);
+    ignore (send (W.Issue {route=B.Automation_route;verb=B.Session_status;actor=Some "keeper";timeout_sec=2.;only_if_idle=false}));
+    check int "owned backend command dispatched once" 1 !automation_calls;
+    let retired=Eio.Fiber.fork_promise ~sw (fun () -> send W.Retire) in
+    Eio.Promise.await closing;
+    check bool "retirement waits for backend cleanup" true (Eio.Promise.peek retired=None);
+    check bool "retirement fences new input before cleanup" true
+      (pre_effect (send (W.Issue {route=B.Automation_route;verb=B.Session_status;actor=None;timeout_sec=2.;only_if_idle=false})));
+    Eio.Promise.resolve finish_close ();
+    check bool "retirement receipt follows cleanup" true (receipt (Eio.Promise.await_exn retired));
     let result = Eio.Promise.await_exn pending in
     check bool "retirement does not prove no effect" true
       (match result with

@@ -122,7 +122,7 @@ let verb_of_json ~route value =
       Ok (B.Page_extract {tab_id;instruction;schema=List.assoc_opt "schema" fields})
   | _ -> Error "unknown browser verb"
 
-type command = Snapshot | Poll of {client:B.client_info;window_sec:float}
+type command = Snapshot | Retire | Poll of {client:B.client_info;window_sec:float}
   | Deliver of {client_id:B.client_id;id:string;payload:Yojson.Safe.t}
   | Disconnect of B.client_id
   | Issue of {route:B.route;verb:B.verb;actor:string option;timeout_sec:float;only_if_idle:bool}
@@ -130,6 +130,7 @@ type request = {incarnation:string;command:command}
 let to_json request =
   let fields = match request.command with
     | Snapshot -> ["operation",string "snapshot"]
+    | Retire -> ["operation",string "retire"]
     | Poll {client;window_sec} -> ["operation",string "poll";"client",client_to_json client;"window_sec",`Float window_sec]
     | Deliver {client_id;id;payload} -> ["operation",string "deliver";"clientId",string (B.client_id_to_string client_id);"id",string id;"payload",payload]
     | Disconnect client_id -> ["operation",string "disconnect";"clientId",string (B.client_id_to_string client_id)]
@@ -143,6 +144,7 @@ let of_json value =
   let client_id () = let* text = text_field fields "clientId" in B.client_id_of_string text in
   let* command = match name with
     | "snapshot" -> let* () = exact [] in Ok Snapshot
+    | "retire" -> let* () = exact [] in Ok Retire
     | "poll" -> let* () = exact ["client";"window_sec"] in let* raw = required fields "client" in
         let* client = client_of_json raw in let* raw = required fields "window_sec" in let* window_sec = positive raw in Ok (Poll {client;window_sec})
     | "deliver" -> let* () = exact ["clientId";"id";"payload"] in let* client_id = client_id () in

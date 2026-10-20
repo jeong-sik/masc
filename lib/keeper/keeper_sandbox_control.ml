@@ -412,10 +412,13 @@ let target_ref_stale_after_s = Keeper_sandbox_remote_checkouts.target_ref_stale_
 
 (* A tracking ref's reflog records when its local value last moved. A managed
    no-op fetch leaves it untouched, so read the fetch owner's per-ref receipt.
-   Neither probe fetches. *)
+   Neither probe fetches. [log.showSignature] is turned off because the
+   repository's own config would otherwise name the program that verifies a
+   signed tip commit, and a checkout's config is not the host's to run. *)
 let reflog_moved_at_unix ~budget ~cwd target_ref =
   match first_git_line ~budget ~cwd
-          [ "reflog"; "show"; "-1"; "--date=unix"; "--format=%gd"; target_ref ] with
+          [ "-c"; "log.showSignature=false"
+          ; "reflog"; "show"; "-1"; "--date=unix"; "--format=%gd"; target_ref ] with
   | Error _ -> None
   | Ok line ->
     (match String.rindex_opt line '{', String.rindex_opt line '}' with
@@ -842,9 +845,10 @@ let repository_checkouts_json ~include_repository_checkouts ~config ~meta =
 (* What a reader of a checkout's files needs to know about the commit it is
    reading. It stops short of the working tree: [git status] runs the
    repository's own configured fsmonitor and can reach a promisor remote, and
-   the checkouts a verifier reads belong to the producer under review. A probe
-   that did not answer is no value, and [identity_freshness] says whether the
-   rest of the row can be trusted. *)
+   the checkouts a verifier reads belong to the producer under review. The
+   probes that remain read refs and objects only (the reflog probe turns
+   [log.showSignature] off). A probe that did not answer is no value, and
+   [identity_freshness] says whether the rest of the row can be trusted. *)
 type identity_row = {
   identity_checkout_path : string;
   identity_branch : string option;

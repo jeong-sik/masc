@@ -190,24 +190,27 @@ let with_surface ?(sandbox_profile = "remote_ssh") ?ssh_script f =
     | Error reason -> Alcotest.failf "surface creation failed: %s" reason
     | Ok surface -> f config surface
   in
-  if remote
-  then (
-    (* The SSH runner spawns through [Process_eio], which answers "initialized
-       Eio runtime required" until it holds this run's process manager. The
-       Docker route reaches its backend without it, which is why only this
-       branch pays for it. *)
-    let clock = Eio.Stdenv.clock env in
-    Eio_context.set_clock clock;
-    Eio_context.set_switch sw;
-    Process_eio.init
-      ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / Sys.getcwd ())
-      ~proc_mgr:(Eio.Stdenv.process_mgr env)
-      ~clock;
-    (* The bootstrap preflight ends in [gh auth status], which a fixture
-       endpoint cannot answer; the read path under test never needed it. *)
-    with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" (fun () ->
-      with_fake_ssh ?script:ssh_script run))
-  else run ()
+  (* The SSH runner spawns through [Process_eio], which answers "initialized
+     Eio runtime required" until it holds this run's process manager. The
+     checkout probes spawn git through it as well, so every profile holds this
+     run's manager, and none leaves it behind for the next test. *)
+  let clock = Eio.Stdenv.clock env in
+  Process_eio.init
+    ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / Sys.getcwd ())
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock;
+  Fun.protect
+    ~finally:Process_eio.reset_for_testing
+    (fun () ->
+      if remote
+      then (
+        Eio_context.set_clock clock;
+        Eio_context.set_switch sw;
+        (* The bootstrap preflight ends in [gh auth status], which a fixture
+           endpoint cannot answer; the read path under test never needed it. *)
+        with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" (fun () ->
+          with_fake_ssh ?script:ssh_script run))
+      else run ())
 ;;
 
 let require_root = function
@@ -774,10 +777,6 @@ let test_root_layout_names_head_and_refuses_to_call_an_uncompared_tree_current (
     Alcotest.(check bool) "names the HEAD commit" true (holds ("head=" ^ head));
     Alcotest.(check bool) "names the branch" true (holds "branch=main");
     Alcotest.(check bool)
-      "does not run the working-tree status probe"
-      false
-      (holds "dirty");
-    Alcotest.(check bool)
       "says no comparison with main was made"
       true
       (holds "no comparison with main");
@@ -857,6 +856,54 @@ let test_root_layout_marks_a_detached_head () =
       "a detached HEAD is named as such"
       true
       (Astring.String.is_infix ~affix:"branch=HEAD (detached)" line))
+;;
+
+(* [git -C <path>] walks up to the enclosing repository when [<path>] holds a
+   [.git] entry that is not a valid repository. The line must not vouch for the
+   enclosing repository's commit as this checkout's. *)
+let test_root_layout_does_not_report_the_enclosing_repository_for_a_broken_checkout () =
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
+    let root = producer_playground config producer in
+    (* Above the producer root, so checkout discovery (which scans downward
+       from the root) does not take the enclosing repository for a checkout. *)
+    let enclosing = Filename.dirname root in
+    init_git_checkout enclosing;
+    git_commit ~cwd:enclosing "enclosing";
+    let enclosing_head = git_head ~cwd:enclosing in
+    make_checkout root "repos/broken";
+    let line =
+      layout_line (VAT.root_layout surface |> require_layout) ~affix:"repos/broken/"
+    in
+    let holds affix = Astring.String.is_infix ~affix line in
+    Alcotest.(check bool)
+      "says the path is not its own repository"
+      true
+      (holds "not the top of its own git repository");
+    Alcotest.(check bool)
+      "does not name the enclosing repository's commit"
+      false
+      (holds enclosing_head))
+;;
+
+(* The identity probe reads refs and objects. A producer controls the config of
+   its own checkout, so a configured fsmonitor must not run on the host. *)
+let test_root_layout_does_not_run_a_checkouts_configured_fsmonitor () =
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
+    let root = producer_playground config producer in
+    let checkout = Filename.concat root "repos/hooked" in
+    init_git_checkout checkout;
+    git_commit ~cwd:checkout "first";
+    let marker = Filename.concat root "fsmonitor-ran" in
+    let script = Filename.concat root "fsmonitor.sh" in
+    Out_channel.with_open_text script (fun channel ->
+      Printf.fprintf channel "#!/bin/sh\ntouch %s\n" (Filename.quote marker));
+    Unix.chmod script 0o755;
+    ignore (run_git_lines ~cwd:checkout [ "config"; "core.fsmonitor"; script ]);
+    ignore (VAT.root_layout surface |> require_layout);
+    Alcotest.(check bool)
+      "the configured fsmonitor command did not run"
+      false
+      (Sys.file_exists marker))
 ;;
 
 (* A producer whose tree is on its endpoint has no checkout on this host to
@@ -1469,6 +1516,14 @@ let () =
             "root layout marks a detached HEAD"
             `Quick
             test_root_layout_marks_a_detached_head
+        ; Alcotest.test_case
+            "root layout does not report the enclosing repository for a broken checkout"
+            `Quick
+            test_root_layout_does_not_report_the_enclosing_repository_for_a_broken_checkout
+        ; Alcotest.test_case
+            "root layout does not run a checkout's configured fsmonitor"
+            `Quick
+            test_root_layout_does_not_run_a_checkouts_configured_fsmonitor
         ; Alcotest.test_case
             "root layout does not probe a tree on the producer's endpoint"
             `Quick

@@ -210,7 +210,8 @@ let children path =
    tree is known to hold main's commit. [Current] is the one case where the
    local ref was seen to move within the freshness window, and it still does
    not read the remote. [Ahead], [Behind] and [Diverged] carry no observation
-   time, so each says the ref may itself be behind the remote. *)
+   time: [Ahead] says the ref may itself be behind the remote, and [Behind]
+   and [Diverged] say files absent here may exist on that branch. *)
 let describe_standing : Keeper_sandbox_control.checkout_freshness -> string = function
   | Keeper_sandbox_control.Current { target_ref; upstream_head; age_s; _ } ->
     Printf.sprintf

@@ -20,6 +20,10 @@ all_lanes = true
 [world.exact_outputs.locate]
 schema = "schemas/locate.json"
 
+[world.exact_outputs.stagehand]
+schema = "schemas/stagehand.json"
+request_schema = true
+
 [resources]
 max_reply_bytes = 4194304
 

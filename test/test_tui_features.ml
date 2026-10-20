@@ -86,7 +86,7 @@ let feature_opener_is_spelled row =
    [Masc_tui_command.catalog] must either join [Masc_tui_features] or be
    listed here explicitly. *)
 let catalog_commands_outside_sheet =
-  [ "about"; "activity"; "approve"; "changes"; "cost"; "deny"; "features"
+  [ "about"; "activity"; "approve"; "calls"; "changes"; "cost"; "deny"; "features"
   ; "fleet-memory"; "help"; "links"; "login"; "memory"; "metrics"; "preset"
   ; "preview"; "settings"; "task"; "thinking"; "tools" ]
 

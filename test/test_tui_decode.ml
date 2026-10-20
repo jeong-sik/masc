@@ -4159,6 +4159,7 @@ let test_decode_skill_activations_keeps_exact_receipt_and_origin () =
             [ "kind", `String "task_composition"
             ; "task_ids", `List [ `String "task-470"; `String "task-held" ]
             ] )
+      ; "execution_id", `String "exec-run-checks"
       ; "tool_name", `String "run-checks"
       ]
   in
@@ -4199,6 +4200,7 @@ let test_decode_skill_activations_keeps_exact_receipt_and_origin () =
             (`Assoc
                [ "kind", `String "composition"
                ; "origin", `Assoc [ "kind", `String "session_composition" ]
+               ; "execution_id", `String "exec-summarize"
                ; "tool_name", `String "summarize"
                ])
           ()

@@ -122,7 +122,10 @@
   (mirage-crypto (>= 1.0))
   (mirage-crypto-rng (>= 1.0))
   (mirage-crypto-pk (>= 1.0))
-  (x509 (>= 1.0))
+  ; Upper bound, not just a floor. x509 1.2.0 types the CN constructor as
+  ; Common_name.t; 1.0.6 (locked) through 1.1.1 take a string, which is what
+  ; packages/agent_core/test/test_tls_cancellability.ml passes.
+  (x509 (and (>= 1.0) (< 1.2)))
   (integers (>= 0.7))
   (zstd (>= 0.4))
   (decompress (>= 1.5.3))

@@ -189,7 +189,6 @@ let reduce_event ~nodes ~edges (value : event) =
        ensure_edge edges ~source ~target ~kind:Calls_tool ~active:false
          ~ts_iso:value.ts_iso ~meta:value.payload
      | None, _ | _, None -> ())
-  | Some Agent_session_bound_event -> set_subject_status Active
   | Some (Task_event Event_kind.Task.Created) ->
       set_subject_status Todo;
       (match (actor_id, subject_id) with

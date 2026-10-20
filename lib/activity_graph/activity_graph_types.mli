@@ -45,11 +45,9 @@ val all_tool_execution_event_kinds : tool_execution_event_kind list
 
 (** The event kinds the graph reducer and the span builder act on, decoded
     once from an event's [kind]. The task, message and board families are
-    {!Event_kind}'s; ["agent.session_bound"] is in a family it does not cover
-    yet. *)
+    {!Event_kind}'s. *)
 type drawn_event_kind =
   | Tool_execution_event of tool_execution_event_kind
-  | Agent_session_bound_event
   | Task_event of Event_kind.Task.t
   | Message_event of Event_kind.Message.t
   | Board_event of Event_kind.Board.t
@@ -97,9 +95,7 @@ type graph_edge = {
   meta : Yojson.Safe.t;
 }
 
-type agent_span_kind =
-  | Task_span
-  | Presence_span
+type agent_span_kind = Task_span
 
 (** The span's [kind] on the wire. *)
 val agent_span_kind_to_string : agent_span_kind -> string

@@ -1130,7 +1130,6 @@ let graph_json config ?(kinds = []) ?(limit = 500)
 (* Span start events paired with their matching end events *)
 let span_start_kind = function
   | Some (Task_event Event_kind.Task.(Claimed | Started)) -> Some Task_span
-  | Some Agent_session_bound_event -> Some Presence_span
   | Some
       (Task_event
          Event_kind.Task.(
@@ -1170,7 +1169,6 @@ let span_end_classification = function
          Event_kind.Task.(
            ( Created | Claimed | Started | Submit_for_verification | Rejected
            | Linked )))
-  | Some Agent_session_bound_event
   | Some (Tool_execution_event (External_tool_called | Keeper_in_turn_tool_executed))
   | Some (Message_event Event_kind.Message.(Broadcast | Mentioned))
   | Some (Board_event Event_kind.Board.(Posted | Commented | Voted | Deleted))

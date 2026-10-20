@@ -8,9 +8,10 @@ type request =
   ; output : string
   ; system : string option
   ; messages : message list
+  ; schema : Yojson.Safe.t option
   }
 
-let request_keys = [ "kind"; "request_id"; "output"; "system"; "messages" ]
+let request_keys = [ "kind"; "request_id"; "output"; "system"; "messages"; "schema" ]
 
 let message_of_json = function
   | `Assoc fields when List.sort String.compare (List.map fst fields) = [ "role"; "text" ] ->
@@ -69,7 +70,11 @@ let request_of_json = function
           values (Ok [])
       | Some _ | None -> Error "messages requires at least one conversation message"
     in
-    Ok { request_id; output; system; messages }
+    let* schema = match List.assoc_opt "schema" fields with
+      | None -> Ok None
+      | Some (`Assoc _ as schema) -> Lane_addon_action.canonical schema |> Result.map Option.some
+      | Some _ -> Error "request schema must be a JSON object" in
+    Ok { request_id; output; system; messages; schema }
   | _ -> Error "an exact_output request must be an object"
 
 let request_to_json request =
@@ -79,7 +84,8 @@ let request_to_json request =
      ; "output", `String request.output
      ]
      @ (match request.system with None -> [] | Some system -> [ "system", `String system ])
-     @ [ "messages", `List (List.map message_to_json request.messages) ])
+     @ [ "messages", `List (List.map message_to_json request.messages) ]
+     @ (match request.schema with None -> [] | Some schema -> ["schema",schema]))
 
 let digest request = Lane_addon_store.digest (Yojson.Safe.to_string (request_to_json request))
 
@@ -89,6 +95,23 @@ let digest request = Lane_addon_store.digest (Yojson.Safe.to_string (request_to_
 type checked = Yojson.Safe.t
 
 let checked_json checked = checked
+
+let schema_for_request ~(output:Lane_addon_types.exact_output) request =
+  if output.name <> request.output then Error "exact output name does not match the request"
+  else match request.schema,output.request_schema with
+    | None,(Package_schema_only|Consumer_request_schema) -> Ok output.schema
+    | Some _,Package_schema_only -> Error "the package output does not permit a consumer request schema"
+    | Some schema,Consumer_request_schema -> Ok schema
+
+let validate_answer ~output request answer =
+  let* _ = schema_for_request ~output request in
+  let* answer = Lane_addon_action.validate_input ~schema:output.Lane_addon_types.schema ~name:request.output answer in
+  match request.schema with
+  | None -> Ok answer
+  | Some schema ->
+      match Lane_addon_exact_shape.issue ~at:"$" schema answer with
+      | None -> Ok answer
+      | Some issue -> Error (Lane_addon_exact_shape.to_string issue)
 
 type input_refusal =
   | Input_capacity
@@ -297,11 +320,8 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner req
             let unknown = {previous with final = Some Outcome_unknown} in
             let* () = save unknown in Ok unknown
         | None | Some (Call_final _ | Outcome_unknown | Not_allowed _ | Request_id_reused) -> Ok previous in
-      match List.find_opt
-        (fun (declared : Lane_addon_types.exact_output) -> String.equal declared.name request.output)
-        package.exact_outputs with
-      | None ->
-        let refusal = Not_allowed {reason = "the effective package declares no exact output " ^ request.output} in
+      let deny reason =
+        let refusal = Not_allowed {reason} in
         let record = match previous.final with
           | None -> {previous with final = Some refusal}
           | Some (Not_allowed _) -> previous
@@ -309,24 +329,31 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner req
               (* A selection change cannot erase the original provider result. *)
               {previous with attempts = previous.attempts @ [Some (final_to_json refusal)]} in
         let* () = save record in
-        Ok (Final refusal)
+        Ok (Final refusal) in
+      match List.find_opt
+        (fun (declared : Lane_addon_types.exact_output) -> String.equal declared.name request.output)
+        package.exact_outputs with
+      | None -> deny ("the effective package declares no exact output " ^ request.output)
       | Some declared ->
+        match schema_for_request ~output:declared request with
+        | Error reason -> deny reason
+        | Ok schema ->
         let* lane = Runtime_schema.addon_lane ~declaration_id ~output:request.output in
         let lane_key = Runtime_schema.exact_lane_key (Runtime_schema.Addon lane) in
-        let validate answer = Lane_addon_action.validate_input ~schema:declared.schema ~name:request.output answer in
+        let validate answer = validate_answer ~output:declared request answer in
         let deliver = function
           | Call_final (Answered {output; slot; usage}) ->
               (match validate (checked_json output) with
                | Ok output -> Call_final (Answered {output; slot; usage})
                | Error detail -> Call_final (Invalid_output
-                   {detail = "the retained answer does not match the schema the package declares now: " ^ detail}))
+                   {detail = "the retained answer does not match the current package baseline or original request shape: " ^ detail}))
           | (Call_final (Invalid_output _ | Input_refused _) | Outcome_unknown | Not_allowed _ | Request_id_reused)
             as final -> final in
         match previous.final with
         | Some final -> Ok (Final (deliver final))
         | None ->
           Eio.Fiber.check ();
-          match runner ~lane_key ~schema:declared.schema request with
+          match runner ~lane_key ~schema request with
           | Error unavailable ->
             let reason = Lane_unavailable unavailable in
             let* () = save {previous with attempts = previous.attempts @ [Some (not_final_to_json reason)]} in

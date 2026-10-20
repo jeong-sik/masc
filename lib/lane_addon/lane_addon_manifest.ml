@@ -77,14 +77,30 @@ let exact_outputs ~directory world =
     let* () = if valid_name name then Ok ()
       else Error ("world.exact_outputs." ^ name ^ " requires a name of a-z, 0-9 and _ starting with a letter") in
     match value with
-    | Otoml.TomlTable ["schema", Otoml.TomlString path]
-    | Otoml.TomlInlineTable ["schema", Otoml.TomlString path] ->
-        let* schema = read_schema name path in Ok { name; schema }
+    | Otoml.TomlTable fields | Otoml.TomlInlineTable fields
+      when List.for_all (fun (key,_) -> List.mem key ["schema";"request_schema"]) fields
+        && List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields)) ->
+        let* path = match List.assoc_opt "schema" fields with
+          | Some (Otoml.TomlString path) -> Ok path
+          | None | Some (Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+              | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+              | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
+              | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _) ->
+              Error ("world.exact_outputs." ^ name ^ " requires a schema path") in
+        let* request_schema = match List.assoc_opt "request_schema" fields with
+          | None | Some (Otoml.TomlBoolean false) -> Ok Package_schema_only
+          | Some (Otoml.TomlBoolean true) -> Ok Consumer_request_schema
+          | Some (Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+              | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+              | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
+              | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _) ->
+              Error ("world.exact_outputs." ^ name ^ ".request_schema requires a boolean") in
+        let* schema = read_schema name path in Ok { name; schema; request_schema }
     | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
-    | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+              | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
     | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTable _
     | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ ->
-        Error ("world.exact_outputs." ^ name ^ " requires only a schema path") in
+        Error ("world.exact_outputs." ^ name ^ " accepts a schema path and optional request_schema boolean") in
   match List.assoc_opt "exact_outputs" world with
   | None -> Ok []
   | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields) ->

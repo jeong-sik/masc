@@ -322,6 +322,14 @@ slots = ["ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
   are outside this contract. A one-shot CLI accepts user-only history; assistant
   history receives a configuration refusal before CLI dispatch and remains open
   for a later event with a capable HTTP configuration.
+- a package output may grant `request_schema = true` explicitly. A canonical
+  request `schema` then supplies the model requirement while the package baseline
+  remains enforced. Shared HTTP/CLI candidate validation, retained delivery and
+  the browser worker receipt use the same partial required-key/primitive/anyOf
+  guard; the consuming SDK validates the complete dialect before acting. The
+  request schema participates in the digest and the grant in worker identity.
+  Revoking it refuses delivery without overwriting a retained answer or unknown
+  outcome. Installation selection preserves package authority.
 
 **Retention.** The host retains the request in the Lane store before the first provider call, and every attempt's outcome after it, keyed by declaration id and request id with a digest of the request. This is the same order `Lane_addon_sampling` already keeps (`lib/lane_addon/lane_addon_sampling.mli:1-7`; `docs/design/lane-addon-model-boundary.md:65-86`). A request listed again after a restart gets its retained final result. The model is not called twice for a request that already has one.
 

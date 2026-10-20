@@ -54,9 +54,9 @@ let admitted_models t =
     | Serving,None -> Error (Browser_addon_models.Output_disabled "model broker")
     | Serving,Some models -> Ok models)
 let generate t request = Result.bind (admitted_models t) (fun models -> Browser_addon_models.request models request)
-let model_output_schema t ~name = match admitted_models t with
+let model_output t ~name = match admitted_models t with
   | Error _ -> None
-  | Ok models -> Browser_addon_models.output_schema models ~name
+  | Ok models -> Browser_addon_models.output models ~name
 let attach_automation t ~locate ~execute ~session ~document ~cleanup =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase,t.automation with
     | Retired,_ -> Error "browser owner is retired"

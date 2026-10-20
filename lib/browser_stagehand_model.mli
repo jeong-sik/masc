@@ -137,7 +137,7 @@ type cli_tail =
   | Cli_tail_exhausted of Keeper_lane_cli_oneshot.failure list
       (** Every CLI slot failed, in walk order. *)
 
-type output_shape_issue =
+type output_shape_issue = Lane_addon_exact_shape.issue =
   | Missing_required_key of string
   | Incompatible_required_shape of string
 

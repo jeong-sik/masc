@@ -249,8 +249,29 @@ schema = "schemas/author.json"
 
 - 이름은 `a-z`, `0-9`, `_` 로 쓰고 소문자로 시작한다.
 - `schema` 는 패키지 루트 기준 상대 경로다. symlink 를 풀어도 패키지 안이어야 한다.
-- 파일은 [세계 행동 계약](lane-world-actions.md)의 action schema 와 같은 검사를 통과하고 object 를 설명해야 한다. object 마다 `additionalProperties: false` 가 필요하다.
-- schema 는 패키지 값에 들어간다. 선언을 추가·수정·삭제하면 설치 revision 이 바뀐다. 이 표가 없는 패키지는 revision 이 그대로다.
+- 파일은 지원되는 출력 schema 검사를 통과하고 object를 설명해야 한다. object마다
+  명시적인 `additionalProperties` 정책이 필요하며, 출력 계약은 `true`도 허용한다.
+- schema와 요청별 schema 권한은 패키지 값에 들어간다. 선언을 추가·수정·삭제하면
+  설치 revision이 바뀐다. 이 표가 없는 패키지는 revision이 그대로다.
+
+요청마다 다른 모델 응답 schema를 사용하는 SDK 패키지는 해당 출력에만 권한을 선언한다.
+
+```toml
+[world.exact_outputs.extract]
+schema = "schemas/extract-baseline.json"
+request_schema = true
+```
+
+`request_schema`를 생략하거나 `false`로 두면 패키지 schema만 사용한다. `true`는
+worker 요청의 선택적인 `schema` JSON object를 모델 요구사항으로 쓸 수 있게 한다.
+이 경우에도 패키지 baseline은 항상 검사한다. 추가로 요청 schema의 필수 object 키,
+방문한 기본 타입과 `anyOf`를 부분 검사한다. `$ref`, 배열 items, enum 등 전체 dialect의
+검증은 결과를 사용하는 SDK가 맡는다. 이 부분 검사를 전체 JSON Schema 검증으로
+해석하면 안 된다. 모델 경로는 기존 `Json_syntax` Exact Output runner를 재사용한다.
+
+설치의 `exact_outputs` 선택은 이 패키지 권한을 보존하며 새 권한을 만들지 않는다.
+입력·출력 tool hook의 선택은 이 모델 권한과 별개다. Worker 설정에도 baseline과 권한을
+함께 고정하므로, 권한 변경은 이전 incarnation의 요청에 조용히 적용되지 않는다.
 
 어떤 모델로 답을 받을지는 운영자가 `runtime.toml` 에서 설치마다 정한다.
 
@@ -291,6 +312,10 @@ host가 호출하지 않는다.
 - CLI one-shot 경로는 사용자 메시지만 순서대로 합쳐 보낸다. Assistant 이력이 있으면
   CLI를 실행하기 전에 configuration refusal로 남긴다. 이력을 사용자 발화로 바꾸지 않으며,
   HTTP 슬롯 설정이 바뀐 다음 사건에 원래 요청을 다시 시도할 수 있다.
+- 권한을 가진 요청만 선택적인 `schema` object를 보낼 수 있다. 정규화된 schema도
+  digest에 포함되므로 같은 ID로 schema를 바꿀 수 없다. 권한 철회는 보관한 답을 지우지
+  않고 전달만 거절한다. 권한 복구 후에는 원래 답을 현재 baseline과 원래 부분 구조로
+  다시 검사하며, 결과가 불확실했던 호출은 재전송하지 않는다.
 - 지금 host 가 아는 종류는 `exact_output` 하나다. 모르는 종류가 하나라도 있거나, 같은 `request_id` 가 두 번 나오면 그 목록 전체를 읽지 않고 instance 에 `listing_refused` 를 보인다.
 - host 는 다섯 사건에만 묻고 시계로 묻지 않는다. 지금 걸린 사건은 셋이다: worker 초기화가 끝났을 때, 그 instance 의 action 이 끝난 receipt 를 남겼을 때, 그 설치의 add-on lane 표가 바뀌어 게시됐을 때. 선언이 바뀌면 worker 가 다시 떠서 첫 사건이 된다. 설치 질문 답변 사건은 아직 없다.
 - 한 주기는 목록을 받아 순서대로 처리한다. host 가 이미 최종 결과를 가진 요청은 모델을 부르지 않고 그 결과를 준다. 없으면 한 번 시도하고, 결과가 최종이면 준다. 최종이 아니면 다음 사건까지 기다린다. 결과를 준 목록이 있으면 다시 목록을 받고, 아무것도 주지 않은 목록에서 끝난다. 끝나면 관측을 한 번 한다.

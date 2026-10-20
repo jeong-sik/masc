@@ -50,10 +50,10 @@ let generate owner ~scene:(scene:Browser_scene.t) ~instruction =
   | Final ((Call_final (Invalid_output _|Input_refused _)|Outcome_unknown|Not_allowed _|Request_id_reused) as final) ->
       Error ("browser locate model did not answer: " ^ Yojson.Safe.to_string (Exact.final_to_json final))
   | Exceeds_frame {sha256;bytes} -> Error (Printf.sprintf "browser locate model result exceeds its frame (%d bytes, retained %s)" bytes sha256)
-let for_owner owner = match Browser_addon_owner.model_output_schema owner ~name:output_name with
+let for_owner owner = match Browser_addon_owner.model_output owner ~name:output_name with
   | None -> Ok None
   | Some selected ->
-      let* selected=Lane_addon_action.canonical selected in
+      let* selected=Lane_addon_action.canonical selected.Lane_addon_types.schema in
       let* expected=Lane_addon_action.canonical schema in
       if selected=expected then Ok (Some (generate owner))
       else Error "browser locate Exact Output schema differs from its consumer contract"

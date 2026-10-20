@@ -206,6 +206,7 @@ let real_server_cases =
    releases the matching analysis observation. *)
 let analysis_server = {py|
 import json, signal, sys
+signal.signal(signal.SIGUSR1, lambda *_: None)
 active = None
 last = None
 checks = []
@@ -257,6 +258,7 @@ while True:
         if active is None or len(versions) < opened: checks.append((msg['id'], opened))
         else: answer(msg['id'])
     elif method == 'proof/state': answer(msg['id'])
+    elif method == 'proof/payload': answer(msg['id'])
     elif method == 'proof/awaitReference':
         if references: answer(msg['id'])
         else: reference_checks.append(msg['id'])
@@ -457,6 +459,31 @@ let test_blocked_writer_does_not_hold_other_process () = with_analysis_server (f
   ignore (analysis_control pool root "proof/state"))
 ;;
 
+let test_cancel_queued_writer_preserves_active_frame () = with_analysis_server (fun sw pool root _path ->
+  let proc=Lsp_workspace_pool.ensure pool ~language:Lsp_process_manager.Python
+      ~workspace_root:root |> pool_result in
+  ignore (analysis_control pool root "proof/blockInput");
+  let active=Eio.Fiber.fork_promise ~sw (fun () ->
+    Lsp_workspace_pool.ask pool ~language:Lsp_process_manager.Python ~workspace_root:root
+      ~method_:"proof/payload" ~params:(`Assoc ["body",`String (String.make 1_048_576 'x')])) in
+  Eio.Fiber.yield ();
+  check bool "the active frame is still being written" false (Eio.Promise.is_resolved active);
+  let cancellation,resolve=Eio.Promise.create () in
+  let queued=Eio.Fiber.fork_promise ~sw (fun () -> Eio.Cancel.sub (fun context ->
+    Eio.Promise.resolve resolve context;
+    Lsp_workspace_pool.ask pool ~language:Lsp_process_manager.Python ~workspace_root:root
+      ~method_:"proof/state" ~params:(`Assoc []))) in
+  let context=Eio.Promise.await cancellation in
+  Eio.Fiber.yield ();
+  Eio.Cancel.cancel context Exit;
+  (match Eio.Promise.await queued with
+   | Error (Eio.Cancel.Cancelled _) -> ()
+   | Ok _ | Error _ -> fail "queued write cancellation must propagate");
+  Eio.Process.signal proc.proc Sys.sigusr1;
+  check bool "cancelling an unstarted writer cannot retire the active frame owner" true
+    (match Eio.Promise.await active with Ok (Ok _) -> true | Ok (Error _) | Error _ -> false))
+;;
+
 (* #36431: an answer whose last byte and the deadline land in the same
    scheduler pass. The mock clock queues the watcher's wake ahead of the
    work's on purpose -- set_time past the deadline, then resolve -- so an
@@ -545,6 +572,7 @@ let () =
         ; test_case "concurrent References retain their document owners" `Quick test_concurrent_reference_documents
         ; test_case "peer EOF preserves another process request" `Quick test_other_process_exit_preserves_request
         ; test_case "a blocked writer does not hold another process" `Quick test_blocked_writer_does_not_hold_other_process
+        ; test_case "queued cancellation preserves the active frame" `Quick test_cancel_queued_writer_preserves_active_frame
         ] )
     ; ( "initialize deadline"
       , [ test_case

@@ -60,6 +60,12 @@ let request_to_json request =
 
 let digest request = Lane_addon_store.digest (Yojson.Safe.to_string (request_to_json request))
 
+(* Only [run]'s validate function and the retained record this module wrote
+   make one. *)
+type checked = Yojson.Safe.t
+
+let checked_json checked = checked
+
 type input_refusal =
   | Input_capacity
   | Context_overflow
@@ -69,17 +75,20 @@ type input_refusal =
 type usage = { input_tokens : int; output_tokens : int }
 
 type final =
-  | Answered of { output : Yojson.Safe.t; slot : string; usage : usage option }
+  | Answered of { output : checked; slot : string; usage : usage option }
   | Invalid_output of { detail : string }
   | Input_refused of input_refusal
   | Outcome_unknown
   | Not_allowed of { reason : string }
   | Request_id_reused
 
-type not_final =
+type lane_unavailable =
   | Lane_unconfigured
   | Lane_off
   | No_admitted_slots
+
+type not_final =
+  | Lane_unavailable of lane_unavailable
   | Provider_unavailable of { detail : string }
   | Provider_auth_refused of { detail : string }
   | Attempt_in_progress
@@ -145,16 +154,17 @@ let final_of_json json =
   | other -> Error ("final status " ^ other)
 
 let not_final_to_json = function
-  | Lane_unconfigured -> `Assoc [ "reason", `String "lane_unconfigured" ]
-  | Lane_off -> `Assoc [ "reason", `String "lane_off" ]
-  | No_admitted_slots -> `Assoc [ "reason", `String "no_admitted_slots" ]
+  | Lane_unavailable Lane_unconfigured -> `Assoc [ "reason", `String "lane_unconfigured" ]
+  | Lane_unavailable Lane_off -> `Assoc [ "reason", `String "lane_off" ]
+  | Lane_unavailable No_admitted_slots -> `Assoc [ "reason", `String "no_admitted_slots" ]
   | Provider_unavailable { detail } ->
     `Assoc [ "reason", `String "provider_unavailable"; "detail", `String detail ]
   | Provider_auth_refused { detail } ->
     `Assoc [ "reason", `String "provider_auth_refused"; "detail", `String detail ]
   | Attempt_in_progress -> `Assoc [ "reason", `String "attempt_in_progress" ]
 
-type runner = lane_key:string -> schema:Yojson.Safe.t -> request -> attempt
+type call = validate:(Yojson.Safe.t -> (checked, string) result) -> attempt
+type runner = lane_key:string -> schema:Yojson.Safe.t -> request -> (call, lane_unavailable) result
 
 (* One record per declaration and request: the request, its digest, every
    attempt in order (an attempt with no outcome was started and never
@@ -196,9 +206,10 @@ let record_of_json = function
     Ok { digest; request; attempts; final }
   | _ -> Error "record must be an object"
 
-(* Requests a runner is working on in this process. A started attempt that is
-   not here was cut off by a crash or a cancellation. *)
-let in_flight : (string * string, unit) Hashtbl.t = Hashtbl.create 16
+(* Requests this process is running, by store root, declaration and request.
+   Only the base-path lease holder runs requests (see the interface), so a
+   started attempt that is not here was cut off by a crash or a cancellation. *)
+let in_flight : (string * string * string, unit) Hashtbl.t = Hashtbl.create 16
 let in_flight_lock = Mutex.create ()
 
 let claim key =
@@ -217,38 +228,35 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner req
     Ok (Final (Not_allowed { reason = "the package manifest declares no exact output " ^ request.output }))
   | Some declared ->
     let request_id = request.request_id in
-    let digest = digest request in
-    let key = declaration_id, request_id in
-    let save record =
-      Eio_unix.run_in_systhread (fun () ->
-        Lane_addon_store.save_exact_request store ~declaration_id ~request_id
-          (record_to_json ~declaration_id ~request_id record))
-    in
-    let* retained =
-      Eio_unix.run_in_systhread (fun () ->
-        Lane_addon_store.load_exact_request store ~declaration_id ~request_id)
-    in
-    let* retained =
-      match retained with
-      | None -> Ok None
-      | Some json -> record_of_json json |> Result.map Option.some
-    in
-    let started record = List.exists Option.is_none record.attempts in
-    match retained with
-    | Some record when not (String.equal record.digest digest) -> Ok (Final Request_id_reused)
-    | Some { final = Some final; _ } -> Ok (Final final)
-    | Some record when started record ->
-      if claim key
-      then
-        Fun.protect ~finally:(fun () -> release key) (fun () ->
+    let key = Lane_addon_store.root store, declaration_id, request_id in
+    (* Claimed before the record is read, so no other run of this request can
+       finish between the read and the claim. *)
+    if not (claim key)
+    then Ok (Not_final Attempt_in_progress)
+    else
+      Fun.protect ~finally:(fun () -> release key) (fun () ->
+        let digest = digest request in
+        let save record =
+          Eio_unix.run_in_systhread (fun () ->
+            Lane_addon_store.save_exact_request store ~declaration_id ~request_id
+              (record_to_json ~declaration_id ~request_id record))
+        in
+        let* retained =
+          Eio_unix.run_in_systhread (fun () ->
+            Lane_addon_store.load_exact_request store ~declaration_id ~request_id)
+        in
+        let* retained =
+          match retained with
+          | None -> Ok None
+          | Some json -> record_of_json json |> Result.map Option.some
+        in
+        match retained with
+        | Some record when not (String.equal record.digest digest) -> Ok (Final Request_id_reused)
+        | Some { final = Some final; _ } -> Ok (Final final)
+        | Some record when List.exists Option.is_none record.attempts ->
           let* () = save { record with final = Some Outcome_unknown } in
-          Ok (Final Outcome_unknown))
-      else Ok (Not_final Attempt_in_progress)
-    | None | Some _ ->
-      if not (claim key)
-      then Ok (Not_final Attempt_in_progress)
-      else
-        Fun.protect ~finally:(fun () -> release key) (fun () ->
+          Ok (Final Outcome_unknown)
+        | None | Some _ ->
           let previous =
             match retained with
             | Some record -> record
@@ -256,32 +264,41 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner req
           in
           let* lane = Runtime_schema.addon_lane ~declaration_id ~output:request.output in
           let lane_key = Runtime_schema.exact_lane_key (Runtime_schema.Addon lane) in
-          let started = { previous with attempts = previous.attempts @ [ None ] } in
-          let* () = save started in
-          (* An exception may come after the request left, so it ends the request
-             as Outcome_unknown; its text stays in the attempt as evidence. *)
-          let attempt, raised =
-            match runner ~lane_key ~schema:declared.schema request with
-            | attempt -> attempt, None
-            | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-            | exception exn -> Final Outcome_unknown, Some (Printexc.to_string exn)
-          in
-          let with_raised = function
-            | `Assoc fields ->
-              `Assoc (fields @ match raised with None -> [] | Some text -> [ "exception", `String text ])
-            | json -> json
-          in
-          (* No yielding operation may separate the attempt from its record. *)
-          Eio.Cancel.protect (fun () ->
-            let finished =
-              match attempt with
-              | Final final ->
-                { started with
-                  attempts = previous.attempts @ [ Some (with_raised (final_to_json final)) ]
-                ; final = Some final
-                }
-              | Not_final reason ->
-                { started with attempts = previous.attempts @ [ Some (not_final_to_json reason) ] }
+          match runner ~lane_key ~schema:declared.schema request with
+          | Error unavailable ->
+            (* Nothing was sent, so no attempt is marked as started. *)
+            let reason = Lane_unavailable unavailable in
+            let* () = save { previous with attempts = previous.attempts @ [ Some (not_final_to_json reason) ] } in
+            Ok (Not_final reason)
+          | Ok call ->
+            let* () = save { previous with attempts = previous.attempts @ [ None ] } in
+            let validate answer =
+              Lane_addon_action.validate_input ~schema:declared.schema ~name:request.output answer
             in
-            let* () = save finished in
-            Ok attempt))
+            (* An exception may come after the request left, so it ends the
+               request as Outcome_unknown; its text stays in the attempt. *)
+            let attempt, raised =
+              match call ~validate with
+              | attempt -> attempt, None
+              | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+              | exception exn -> Final Outcome_unknown, Some (Printexc.to_string exn)
+            in
+            let with_raised = function
+              | `Assoc fields ->
+                `Assoc (fields @ match raised with None -> [] | Some text -> [ "exception", `String text ])
+              | json -> json
+            in
+            (* No yielding operation may separate the attempt from its record. *)
+            Eio.Cancel.protect (fun () ->
+              let finished =
+                match attempt with
+                | Final final ->
+                  { previous with
+                    attempts = previous.attempts @ [ Some (with_raised (final_to_json final)) ]
+                  ; final = Some final
+                  }
+                | Not_final reason ->
+                  { previous with attempts = previous.attempts @ [ Some (not_final_to_json reason) ] }
+              in
+              let* () = save finished in
+              Ok attempt))

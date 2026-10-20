@@ -188,7 +188,7 @@ type sweep_retry = {
   first_refused_at : string;
 }
 
-type manager = { store : Lane_addon_store.t; base_path : string; entries : (string, entry) Hashtbl.t;
+type manager = { store : Lane_addon_store.t; base_path : string; artifact_store : Tool_blob_store.t; entries : (string, entry) Hashtbl.t;
   recovering : (string, recovery) Hashtbl.t;
   configuration_mutex : Eio.Mutex.t; action_mutex : Eio.Mutex.t; broadcast_mutex : Eio.Mutex.t;
   fleet_journals : (string, unit) Hashtbl.t;
@@ -1324,7 +1324,7 @@ let native_package_ready (package : package) =
       let candidate = if Filename.is_relative command && String.contains command '/'
         then Filename.concat package.directory command else command in
       if Executable_path.command_available candidate then Ok () else Error "native Add-on executable is unavailable"
-let backend ~store () = match !override with
+let backend ~store ~artifact_store () = match !override with
   | Some backend -> backend
   | None ->
     let clock = Eio_context.get_clock_opt () in
@@ -1413,11 +1413,14 @@ let backend ~store () = match !override with
                 | Some client ->
                     (match Browser_addon_client.call client ~on_cancel_after_dispatch:(fun () -> ()) Browser_addon_wire.Snapshot with
                      | Ok (Browser_addon_wire.Snapshot_result snapshot) -> Ok (Some snapshot)
-                     | Ok (Model_reply _|Poll_result _|Receipt|Issue_result _|Service_refusal _) -> Error "browser service readiness was refused"
+                     | Ok (Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _|Service_refusal _) -> Error "browser service readiness was refused"
                      | Error (Browser_addon_client.Unavailable detail|Outcome_unknown detail) -> Error detail) in
               let* ()=if ready then browser_snapshot () |> Result.map (fun _ -> ()) else Ok () in
               let* resource = Option.to_result ~none:"native child identity is unavailable"
                 (Lane_addon_native_worker.process_identity worker) in
+              let finalize_result=match socket,browser with
+                | Some socket,Some client -> Some (Browser_addon_artifacts.finalize ~socket ~client ~store:artifact_store)
+                | None,None | Some _,None | None,Some _ -> None in
               Ok {
                 resource;browser;
                 host=(if not (uses_host_requests package) then None else match browser with
@@ -1434,7 +1437,7 @@ let backend ~store () = match !override with
                         match reply with
                         | Browser_addon_wire.Model_reply value -> Ok value
                         | Service_refusal {message;_} -> Error message
-                        | Snapshot_result _|Poll_result _|Receipt|Issue_result _ -> Error "unexpected model broker receipt" in
+                        | Snapshot_result _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> Error "unexpected model broker receipt" in
                       Some {list_requests=(fun () -> call Browser_addon_wire.Model_requests);
                         deliver=(fun ~arguments -> call (Browser_addon_wire.Model_result arguments));
                         await_change=Some (fun ~after ->
@@ -1443,7 +1446,7 @@ let backend ~store () = match !override with
                 exported_tools=(fun () -> Lane_addon_native_worker.exported_tools worker);
                 action_schema=(fun () -> Lane_addon_native_worker.action_schema worker);
                 call_exported_tool=(fun ~on_result ~authorize ~principal ~name ~arguments ->
-                  Lane_addon_native_worker.call_exported_tool ~on_result ?authorize ~principal worker ~name ~arguments
+                  Lane_addon_native_worker.call_exported_tool ~on_result ?authorize ~principal ?finalize_result worker ~name ~arguments
                   |> Result.map_error (function
                     | Lane_addon_native_worker.Protocol (Lane_addon_worker_protocol.Host_refusal refusal) -> Lane_addon_call_context.Host_refusal refusal
                     | (Lane_addon_native_worker.Invalid_specification _ | Start_failed _ | Admission _
@@ -1546,7 +1549,8 @@ let manager config =
   let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
   match Hashtbl.find_opt managers root with
   | Some m -> m
-  | None -> let m = { store = Lane_addon_store.create ~root; base_path = config.base_path; entries = Hashtbl.create 8;
+  | None -> let m = { store = Lane_addon_store.create ~root; base_path = config.base_path;
+                     artifact_store=Tool_blob_store.create ~base_path:config.Workspace.base_path; entries = Hashtbl.create 8;
                      recovering = Hashtbl.create 4; configuration_mutex = Eio.Mutex.create ();
                      action_mutex = Eio.Mutex.create (); broadcast_mutex = Eio.Mutex.create ();
                      fleet_journals=Hashtbl.create 8;
@@ -1637,7 +1641,7 @@ let browser_services ~config ~access = Eio_context.run_on_owner_domain (fun () -
 let call_browser_service ~config ~access ~(service:browser_service) ~command =
   with_tool_call_owner (fun () ->
     let* ()=match command with
-      | Browser_addon_wire.Retire | Model_requests | Model_result _ | Model_wait _ ->
+      | Browser_addon_wire.Retire | Download_claim _|Download_commit _|Download_release _|Model_requests | Model_result _ | Model_wait _ ->
           Error (Browser_addon_client.Unavailable "browser lifecycle and model ports belong to their host owner")
       | Snapshot|Upload_stage _|Upload_discard _|Poll _|Deliver _|Disconnect _|Issue _ -> Ok () in
     let root=Filename.concat (Workspace.masc_dir config) "lane-addons" in
@@ -1651,7 +1655,7 @@ let call_browser_service ~config ~access ~(service:browser_service) ~command =
            | (Attached|Observing),Some client -> Ok (e,client)
            | Failed _,Some client when (match command with
                | Browser_addon_wire.Deliver _|Disconnect _|Upload_discard _ -> true
-               | Snapshot|Retire|Upload_stage _|Model_requests|Model_result _|Model_wait _|Poll _|Issue _ -> false) -> Ok (e,client)
+               | Snapshot|Retire|Upload_stage _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Poll _|Issue _ -> false) -> Ok (e,client)
            | (Attached|Observing|Failed _|Detaching|Detached),(None|Some _) ->
                Error (Browser_addon_client.Unavailable "original browser Add-on is unavailable"))
       | None|Some _ -> Error (Browser_addon_client.Unavailable "original browser Add-on was retired") in
@@ -1666,8 +1670,8 @@ let call_browser_service ~config ~access ~(service:browser_service) ~command =
         notify_tool_change e.package;
         (match persist m e with Ok () -> () | Error detail ->
           Log.Misc.error "Cancelled browser Add-on state persistence: %s" detail);
-        stop_entry ~sw ~backend:(backend ~store:m.store ()) m e
-      | Snapshot|Retire|Upload_stage _|Upload_discard _|Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Disconnect _ -> () in
+        stop_entry ~sw ~backend:(backend ~store:m.store ~artifact_store:m.artifact_store ()) m e
+      | Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Disconnect _ -> () in
     e.active_tool_calls<-e.active_tool_calls+1;
     Fun.protect ~finally:(fun () -> e.active_tool_calls<-e.active_tool_calls-1) (fun () ->
       let result=Browser_addon_client.call client ~on_cancel_after_dispatch command in
@@ -1677,8 +1681,8 @@ let call_browser_service ~config ~access ~(service:browser_service) ~command =
              | Browser_addon_wire.Poll_result {state_id;_} -> Browser_addon_client.notice_poll_state client ~state_id
              | Issue_result _ -> true
              | Receipt -> (match command with Browser_addon_wire.Disconnect _ -> true
-                 | Snapshot|Retire|Upload_stage _|Upload_discard _|Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Issue _ -> false)
-             | Snapshot_result _|Model_reply _|Service_refusal _ -> false in
+                 | Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Issue _ -> false)
+             | Snapshot_result _|Model_reply _|Download_reply _|Service_refusal _ -> false in
            if changed && not e.stopping then wake e
        | Error (Browser_addon_client.Unavailable _) -> ()
        | Error (Browser_addon_client.Outcome_unknown detail) ->
@@ -1702,7 +1706,7 @@ let call_exported_tool_with_authority ~on_complete ~on_result ~authorize ~princi
       | _ -> Error (Unavailable "Add-on tool connection is unavailable") in
     let* sw = match Eio_context.get_root_switch_opt () with
       | Some sw -> Ok sw | None -> Error (Unavailable "Add-on background owner is unavailable") in
-    let worker_backend = backend ~store:m.store () in
+    let worker_backend = backend ~store:m.store ~artifact_store:m.artifact_store () in
     e.active_tool_calls <- e.active_tool_calls + 1;
     Fun.protect ~finally:(fun () -> e.active_tool_calls <- e.active_tool_calls - 1) (fun () ->
     try
@@ -1997,7 +2001,7 @@ let historical_detach ~sw ?(wait = false) m fields =
     let* () = match intent with
       | Ok () -> Ok ()
       | Error message -> Hashtbl.replace m.recovering id (Cleanup_request_failed (fields,message)); Error message in
-    let backend = backend ~store:m.store () in
+    let backend = backend ~store:m.store ~artifact_store:m.artifact_store () in
     let finished = ref None in
     run_recovery ~sw ~wait m ~id ~on_failure:(fun detail -> Cleanup_unconfirmed (fields,detail)) (fun () ->
       let result = match authority with
@@ -2328,7 +2332,7 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
      would fail the same way on every attempt and leave an instance behind each
      time (#37897). Every caller looks first, so a declaration and a direct
      Attach both stop before an instance exists. *)
-  let* () = (backend ~store:m.store ()).package_ready ~package in
+  let* () = (backend ~store:m.store ~artifact_store:m.artifact_store ()).package_ready ~package in
   (* Record grants are checked before an instance exists (RFC operator-quiz
      §4.5): only an operator-owned declaration may hold them. *)
   let* (_ : Lane_addon_records.grant list) =
@@ -2364,7 +2368,7 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
     ~instance_id:e.instance_id ~package ~binding in
   let* () = persist m e in
   Hashtbl.add m.entries e.instance_id e;
-  wake e; run ~sw (backend ~store:m.store ()) m e;
+  wake e; run ~sw (backend ~store:m.store ~artifact_store:m.artifact_store ()) m e;
   Ok (entry_json e)
 
 let detach_entry ~sw m e =
@@ -2377,7 +2381,7 @@ let detach_entry ~sw m e =
     retire_admission e;
     e.state <- Lifecycle.Detaching earlier; notify_tool_change e.package; wake e;
     wake_dependents m e;
-    stop_entry ~sw ~backend:(backend ~store:m.store ()) m e);
+    stop_entry ~sw ~backend:(backend ~store:m.store ~artifact_store:m.artifact_store ()) m e);
   let* () = persist m e in Ok (entry_json e)
 
 let configuration_directory config =
@@ -3179,7 +3183,7 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
     (* A failure whose variant says the attempt would only repeat the refusal
        is left alone until its condition holds. That is one cheap read, not a
        cleanup, a persisted write or an event per beat. *)
-    let engine_control = backend ~store:m.store () in
+    let engine_control = backend ~store:m.store ~artifact_store:m.artifact_store () in
     let waiting ~runtime = function
       | Lifecycle.Failed failed ->
           (match Lifecycle.heal failed.cause with

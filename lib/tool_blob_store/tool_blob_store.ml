@@ -535,13 +535,8 @@ let same_ingest_source (before : Unix.stats) (after : Unix.stats) =
   && before.st_ctime = after.st_ctime
 ;;
 
-let put_file_durable_blocking_with ~after_hash t ~path:source_path ~mime =
+let ingest_open_file_blocking ~after_hash ~expected_sha256 t ~source_path ~source_fd ~mime =
     try
-      (* Nonblocking open lets the regular-file check reject a FIFO without
-         waiting for a writer. It has no effect on a regular spool file. *)
-      let source_fd =
-        Unix.openfile source_path [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0
-      in
       let source, source_stat =
         match
           let source_stat = Unix.fstat source_fd in
@@ -571,11 +566,16 @@ let put_file_durable_blocking_with ~after_hash t ~path:source_path ~mime =
                  ("tool_blob_store.put_file_durable: source changed during ingestion: "
                   ^ source_path))
         in
+        seek_in source 0;
         let buffer = Bytes.create Sys.io_buffer_size in
         let digest, bytes, preview = scan_file_for_ingest ~buffer ~copy_to:None source in
         check_source_snapshot ();
         after_hash ();
         let sha256 = Digestif.SHA256.to_hex digest in
+        (match expected_sha256 with
+         | Some expected when not (String.equal expected sha256) ->
+             raise (Sys_error "tool_blob_store: descriptor contents do not match the granted digest")
+         | Some _ | None -> ());
         let reference =
           match Tool_output.make_artifact_ref ~sha256 ~bytes ~preview ~mime with
           | Ok reference -> reference
@@ -623,6 +623,20 @@ let put_file_durable_blocking_with ~after_hash t ~path:source_path ~mime =
               (Printexc.to_string exception_)))
         backtrace
 ;;
+
+let put_file_durable_blocking_with ~after_hash t ~path ~mime =
+  (* Nonblocking open rejects a FIFO without waiting for a writer. *)
+  let source_fd = try Unix.openfile path [Unix.O_RDONLY;Unix.O_NONBLOCK;Unix.O_CLOEXEC] 0
+    with Unix.Unix_error _ as exn ->
+      raise (Sys_error (Printf.sprintf "tool_blob_store.put_file_durable %s: %s" path (Printexc.to_string exn))) in
+  ingest_open_file_blocking ~after_hash ~expected_sha256:None t
+    ~source_path:path ~source_fd ~mime
+
+let put_file_descriptor_durable_blocking t ~source ~expected_sha256 ~mime =
+  let source_fd = try Unix.dup ~cloexec:true source with Unix.Unix_error _ as exn ->
+    raise (Sys_error ("tool_blob_store.put_file_descriptor_durable: " ^ Printexc.to_string exn)) in
+  ingest_open_file_blocking ~after_hash:(fun () -> ())
+    ~expected_sha256:(Some expected_sha256) t ~source_path:"<granted descriptor>" ~source_fd ~mime
 
 let put_file_durable_with ~after_hash t ~path ~mime =
   Eio_guard.run_in_systhread ~label:"tool-blob-put-file-durable" (fun () ->

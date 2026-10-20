@@ -280,8 +280,9 @@ val duration_of_completion :
 val elapsed_text : float -> string option
 (** A duration in milliseconds, spelled by
     {!Masc_tui_message_layout.elapsed_text}: [32ms], [1.2s], [2m05s],
-    [1h02m]. A negative duration is [None], and every caller draws it the
-    way it draws a duration the feed did not give. *)
+    [1h02m]. A duration that is not a usable span (negative, NaN, infinite) is
+    [None], and every caller draws it the way it draws a duration the feed did
+    not give. *)
 
 val evidence_fields : entry -> (string * string option) list
 (** Producer references from one immutable observer event. Missing IDs and

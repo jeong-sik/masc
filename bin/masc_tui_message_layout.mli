@@ -931,12 +931,8 @@ val elapsed_text : float -> string option
     from a minute up -- [6m55s], [1h02m], [8d15h]. The tenths stay only while
     a reader is comparing them; past a minute they are noise and the ladder
     takes over. A negative duration is [None], as a backwards {!age_text} is:
-    a clock that disagreed with itself, not a call that took no time. *)
-
-val clamped_elapsed_text : float -> string
-(** {!elapsed_text}'s ladder with a negative duration read as zero, [0ms].
-    Only for a caller that clamps on purpose; anything drawing a duration it
-    was handed uses {!elapsed_text}, which says nothing for a negative. *)
+    a clock that disagreed with itself, not a call that took no time. So is a
+    NaN, an infinite one, or one past 10^15 seconds. *)
 
 val age_text : now:float -> since:float -> string option
 (** How long something has been outstanding, as {!span_text}.
@@ -944,5 +940,6 @@ val age_text : now:float -> since:float -> string option
     An age, not a countdown: it says how long a thing has been going so a
     reader can tell slow from stuck. Rendered from a clock the caller passes
     rather than one read here, so a test can state the instant and two rows in
-    one frame can share a single read. A clock that moved backwards says
-    nothing rather than a negative age. *)
+    one frame can share a single read. A clock that moved backwards, or a
+    stamp that is not a number or is absurdly far off, says nothing rather
+    than an age. *)

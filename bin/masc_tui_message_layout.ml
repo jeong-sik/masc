@@ -2358,17 +2358,28 @@ let span_text seconds =
    {!span_text}'s truncation would draw right after "59.9s".
 
    A negative duration is a clock that disagreed with itself, not a call that
-   took no time: drawing it "0ms" would say the call was instant. It reads as
-   nothing, as a backwards {!age_text} does, and the caller draws the
-   placeholder its own cell uses for a missing value. *)
+   took no time: drawing it "0ms" would say the call was instant. A NaN, an
+   infinite or an absurdly long one is not a duration at all, and
+   [int_of_float] of such a value is not defined. All of them read as nothing,
+   as a backwards {!age_text} does, and the caller draws the placeholder its
+   own cell uses for a missing value. *)
 let milliseconds_in_a_second = 1000.
 let tenths_in_a_second = 10.
 let tenths_in_a_minute = 600.
 
-(* The ladder alone, for a caller that has already said what a negative
-   means to it by clamping one to zero. [Float.max] also turns [-0.] into
-   [+0.], which would otherwise print "-0ms". *)
-let clamped_elapsed_text seconds =
+(* [int_of_float] is defined only below 2^62, about 4.6e18, and the ladder
+   reads a span as whole seconds. Far below that, past this many seconds
+   (thirty million years), a value is a malformed stamp or duration, not a span. *)
+let longest_readable_span_seconds = 1e15
+
+(* Whether a difference of two clocks, or a duration someone handed over, is a
+   span a reader can use. NaN fails both comparisons and an infinity fails the
+   second. *)
+let is_readable_span seconds =
+  seconds >= 0. && seconds <= longest_readable_span_seconds
+
+(* [Float.max] turns [-0.] into [+0.], which would otherwise print "-0ms". *)
+let elapsed_ladder seconds =
   let seconds = Float.max 0. seconds in
   let milliseconds = Float.round (seconds *. milliseconds_in_a_second) in
   if milliseconds < milliseconds_in_a_second then
@@ -2380,10 +2391,11 @@ let clamped_elapsed_text seconds =
     else span_text (tenths /. tenths_in_a_second)
 
 let elapsed_text seconds =
-  if seconds < 0. then None else Some (clamped_elapsed_text seconds)
+  if is_readable_span seconds then Some (elapsed_ladder seconds) else None
 
 let age_text ~now ~since =
   let seconds = now -. since in
-  (* A clock that moved backwards says nothing rather than a negative age. The
-     row that shows this has no way to draw "-4s" a reader could use. *)
-  if seconds < 0. then None else Some (span_text seconds)
+  (* A clock that moved backwards, or a stamp that is not a number, says
+     nothing rather than an age. The row that shows this has no way to draw
+     "-4s" a reader could use. *)
+  if is_readable_span seconds then Some (span_text seconds) else None

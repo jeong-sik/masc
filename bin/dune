@@ -1235,6 +1235,7 @@
   masc_tui_observer
   masc_tui_message_layout
   masc_tui_roster_pane
+  masc_tui_theme
   ; the pane opens only where a surface keeps the Keepers list's flag
   ; columns inside its frame; both are leaf layout facts below this library.
   masc_tui_frame

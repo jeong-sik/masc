@@ -411,6 +411,10 @@
       비동기 접수와 완료를 구분하고 반환된 details.uuid 의 비동기 결과 및 각 PR 의 merged 상태·병합 커밋을 확인한다.
       --auto 와 --admin 을 쓰지 않는다. 구체 절차는 docs/guides/NATIVE-GITHUB-STACKS.md 를 따른다.
     </merge>
+    <merge_compile note="2026-10-20 내부 규약 제안 #26 채택(운영자 예, ask687e018ed5943975). 확정·근거는 Board 타래 p-8055697a68bd25d4e7b48c977b0088b8 c-9db1db2113e490abf1ab99d984063ea6 이다.">
+      문서 전용 PR(docs/**, changelog.d/** 만 바꾸는 PR)에서 merge-compile advisory "head 가 main 보다 뒤처짐"은 restack 으로 없애지 않고 그대로 둔다. 단 PR 이 DIRTY 면 restack 이 아니라 순서 교환을 먼저 시도하고, 코드 PR 은 restack 우선이며, MASC_MERGE_COMPILE_ENFORCE=1 이 켜지면 이 조항은 재판정한다. 이 조항은 base 가 움직여 approve-guard 의 review-base/diff identity 재판정이 필요한 경우를 면제하지 않는다. 재승인 비용이 사라질 별도 리뷰어 신원이 생기면 다시 판정한다.
+      운용 규칙: ENFORCE 를 켜는 변경은 켜기 전에 이 조항에 기대어 열려 있는 문서 PR 목록을 Board 에 한 번 적고, 그 목록의 재판정을 같은 변경에 포함한다.
+    </merge_compile>
     <evidence_basis note="2026-10-06 내부 규약 제안 #14 채택 문구를 코딩 에이전트 계약으로 옮긴 것이다. 재읽기 의무일 뿐 강제 대기·스냅샷·상시 폴링을 만들지 않는다.">
       리뷰·승인을 인용하기 직전에 그 본문 첫 줄 판정 줄의 head 40자와 approve-guard footer 의 40자가 대상 head 와 같은지 확인한다.
       commit_id 일치만으로는 결속으로 세지 않는다. 어긋나면 이월 표기로만 인용한다.

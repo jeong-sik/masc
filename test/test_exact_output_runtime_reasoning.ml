@@ -237,7 +237,7 @@ let publish_thinking_lane ~binding ~thinking =
     |> require_ok "resolver snapshot" in
   Registry.publish
     ~lanes:
-      [ { Runtime_schema.id = "board_attention_exact"
+      [ { Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Board_attention
         ; enabled = true
         ; slot_ids = [ target.target_ref ]
         ; cli_slot_ids = []

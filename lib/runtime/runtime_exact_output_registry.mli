@@ -5,7 +5,6 @@ type publication_error =
   | Registry_not_published
   | Publication_busy
   | Replacement_base_changed
-  | Blank_lane_id of { position : int }
   | Duplicate_lane_id of
       { position : int
       ; lane_id : string

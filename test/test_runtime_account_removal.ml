@@ -256,7 +256,7 @@ let test_disabled_exact_lane_can_lose_last_account () =
     let config = loaded result.text in
     Alcotest.(check bool) "account provider removed" false
       (List.exists (fun (p : S.provider) -> p.id="codex_acct1") config.providers);
-    let lane = List.find (fun (lane : S.exact_output_lane_decl) -> lane.id="librarian_exact") config.exact_output_lane_decls in
+    let lane = List.find (fun (lane : S.exact_output_lane_decl) -> (Runtime_schema.exact_lane_key lane.owner)="librarian_exact") config.exact_output_lane_decls in
     Alcotest.(check bool) "optional lane remains explicitly off" false lane.enabled;
     Alcotest.(check (list string)) "HTTP candidates removed" [] lane.slot_ids;
     Alcotest.(check (list string)) "CLI candidates removed" [] lane.cli_slot_ids)

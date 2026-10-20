@@ -1796,7 +1796,7 @@ let test_repo_runtime_toml_loads () =
 let lane_signatures =
   config.exact_output_lane_decls
   |> List.map (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-    lane.id, lane.slot_ids)
+    (Runtime_schema.exact_lane_key lane.owner), lane.slot_ids)
   |> List.sort (fun (left, _) (right, _) -> String.compare left right)
 in
 check
@@ -1838,7 +1838,7 @@ check
 List.iter
   (fun (lane : Runtime_schema.exact_output_lane_decl) ->
      check bool
-       (Printf.sprintf "%s has at least one target" lane.id)
+       (Printf.sprintf "%s has at least one target" (Runtime_schema.exact_lane_key lane.owner))
        true
        (not (List.is_empty lane.slot_ids)))
   config.exact_output_lane_decls);
@@ -1974,7 +1974,7 @@ let assert_mandatory_exact_output_lanes_declared ~label path =
          match
            List.find_opt
              (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-                String.equal lane.id lane_id)
+                String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id)
              config.exact_output_lane_decls
          with
          | None ->
@@ -2050,7 +2050,8 @@ let test_boot_reports_every_unusable_mandatory_exact_output_lane_at_once () =
     |> List.map mandatory_lane_violation_pair
   in
   let lane_decl ?(slot_ids = []) ?(cli_slot_ids = []) id =
-    { Runtime_schema.id; enabled = true; slot_ids; cli_slot_ids; max_output_tokens = None; thinking = None }
+    { Runtime_schema.owner = Option.get (Runtime_schema.exact_lane_owner_of_key id)
+    ; enabled = true; slot_ids; cli_slot_ids; max_output_tokens = None; thinking = None }
   in
   match lane_ids with
   | [] | [ _ ] -> fail "this case needs at least two mandatory lanes"
@@ -2123,7 +2124,7 @@ let exact_slots_missing_body_deadline (config : Runtime_schema.config) =
             | Some { Runtime_schema.transport = Runtime_schema.Http _; exact_body_timeout_s = Some _; _ } ->
               None
             | Some { Runtime_schema.transport = Runtime_schema.Http _; exact_body_timeout_s = None; id; _ } ->
-              Some (Printf.sprintf "%s slot %s (provider %s)" lane.id slot_id id))
+              Some (Printf.sprintf "%s slot %s (provider %s)" (Runtime_schema.exact_lane_key lane.owner) slot_id id))
          lane.slot_ids)
     config.exact_output_lane_decls
 ;;
@@ -2222,7 +2223,7 @@ let test_release_evidence_fixture_lanes_resolve_without_environment_credentials 
          match
            List.find_opt
              (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-                String.equal lane.id lane_id)
+                String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id)
              config.exact_output_lane_decls
          with
          | None ->
@@ -2327,7 +2328,7 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
                  | Error _ ->
                    failf
                      "exact-output lane %s target %s must resolve with fixture credentials"
-                     lane.id
+                     (Runtime_schema.exact_lane_key lane.owner)
                      target_ref
                  | Ok target ->
                    (match
@@ -2340,12 +2341,12 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
                     | Error _ ->
                       failf
                         "exact-output lane %s target %s must satisfy Json_syntax"
-                        lane.id
+                        (Runtime_schema.exact_lane_key lane.owner)
                         target_ref))
               | Error _ ->
                 failf
                   "exact-output lane %s target %s must exist in the frozen catalog"
-                  lane.id
+                  (Runtime_schema.exact_lane_key lane.owner)
                   target_ref)
            lane.slot_ids)
       config.exact_output_lane_decls
@@ -4505,7 +4506,7 @@ let gaps_after_boot_load content =
 let gap_triples gaps =
   List.map
     (fun (gap : Runtime_config_error.exact_slot_body_deadline_gap) ->
-       Printf.sprintf "%s/%s/%s" gap.lane_id gap.slot_id gap.provider_id)
+       Printf.sprintf "%s/%s/%s" (Runtime_schema.exact_lane_key gap.owner) gap.slot_id gap.provider_id)
     gaps
 ;;
 
@@ -4680,7 +4681,7 @@ let test_catalog_and_gap_degradation_name_both_reasons () =
     }
   in
   let exact_slots : Runtime_config_error.exact_slot_degradation =
-    { gaps = [ { lane_id = "librarian_exact"; slot_id = "local.sample"; provider_id = "local" } ]
+    { gaps = [ { owner = Runtime_schema.Builtin Standalone_lane.Librarian; slot_id = "local.sample"; provider_id = "local" } ]
     ; emptied_lane_ids = [ "librarian_exact" ]
     }
   in

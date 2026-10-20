@@ -25,7 +25,7 @@ let ( let* ) = Result.bind
 module Override = Prompt_override_persistence
 
 type lane =
-  { id : string
+  { owner : Runtime_schema.exact_lane_owner
   ; enabled : bool
   ; slots : string list
   ; cli_slots : string list
@@ -265,7 +265,7 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
           (List.map
              (fun (l : lane) ->
                `Assoc
-                 [ "id", `String l.id
+                 [ "id", `String (Runtime_schema.exact_lane_key l.owner)
                  ; "enabled", `Bool l.enabled
                  ; "slots", strings l.slots
                  ; "cli_slots", strings l.cli_slots
@@ -339,7 +339,7 @@ let runtime_to_json ~assignments ~lanes : Yojson.Safe.t =
       , `Assoc
           (List.map
              (fun lane ->
-               lane.id, `Assoc [ "enabled", `Bool lane.enabled; "slots", strings lane.slots; "cli_slots", strings lane.cli_slots ])
+               Runtime_schema.exact_lane_key lane.owner, `Assoc [ "enabled", `Bool lane.enabled; "slots", strings lane.slots; "cli_slots", strings lane.cli_slots ])
              lanes) )
     ]
 ;;
@@ -383,7 +383,12 @@ let runtime_of_json (json : Yojson.Safe.t) =
               in
               let* slots = string_list_field lane_fields "slots" in
               let* cli_slots = string_list_field lane_fields "cli_slots" in
-              Ok ({ id; enabled; slots; cli_slots } :: acc)
+              let* owner =
+                Option.to_result
+                  ~none:("lane " ^ id ^ " is not an exact-output lane")
+                  (Runtime_schema.exact_lane_owner_of_key id)
+              in
+              Ok ({ owner; enabled; slots; cli_slots } :: acc)
             | _ -> Error ("lane " ^ id ^ " must be an object"))
           (Ok [])
           pairs
@@ -464,7 +469,7 @@ let runtime_of_text text =
     let lanes =
       List.map
         (fun (d : Runtime_schema.exact_output_lane_decl) ->
-          { id = d.Runtime_schema.id
+          { owner = d.Runtime_schema.owner
           ; enabled = d.Runtime_schema.enabled
           ; slots = d.Runtime_schema.slot_ids
           ; cli_slots = d.Runtime_schema.cli_slot_ids
@@ -776,10 +781,9 @@ let restore_instructions ~base_path instructions =
   |> finish
 ;;
 
-let lanes_table_prefix = Runtime_toml_namespace.(path Runtime) "exact_output_lanes."
 
 let lane_holds ~current_lanes lane =
-  match List.find_opt (fun current -> String.equal current.id lane.id) current_lanes with
+  match List.find_opt (fun current -> Runtime_schema.equal_exact_lane_owner current.owner lane.owner) current_lanes with
   | Some current -> current.enabled = lane.enabled && current.slots = lane.slots && current.cli_slots = lane.cli_slots
   | None -> false
 ;;
@@ -813,9 +817,9 @@ let runtime_text_with ~current_assignments ~current_lanes ~assignments ~lanes co
       if lane_holds ~current_lanes lane
       then content
       else (
-        let path = lanes_table_prefix ^ lane.id in
+        let path = Runtime_schema.exact_lane_table_name lane.owner in
         let content = Toml_line_editor.edit_table_bool content ~path ~key:"enabled" ~value:lane.enabled in
-        match List.find_opt (fun current -> current.id = lane.id) current_lanes with
+        match List.find_opt (fun current -> Runtime_schema.equal_exact_lane_owner current.owner lane.owner) current_lanes with
         | Some current when current.slots = lane.slots && current.cli_slots = lane.cli_slots -> content
         | Some _ | None ->
           let content =

@@ -123,7 +123,7 @@ let publish_lane ?(cli_slot_ids = []) ?(max_output_tokens = Some 4_096) slot_ids
   match
     Runtime.publish_exact_output_registry
       ~lanes:
-        [ { Runtime_schema.id = Worker.For_testing.lane_id
+        [ { Runtime_schema.owner = Option.get (Runtime_schema.exact_lane_owner_of_key (Worker.For_testing.lane_id))
           ; enabled = true
           ; slot_ids
           ; cli_slot_ids

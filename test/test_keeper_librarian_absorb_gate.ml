@@ -555,7 +555,7 @@ let run_runtime_evidence () =
     let resolver = Fixture.resolver_snapshot ~source:"absorb-gate-fixture"
       [ { Fixture.id = "librarian-absorb-fixture"; base_url = librarian.base_url } ] in
     (match Runtime_exact_output_registry.publish
-      ~lanes:[ { Runtime_schema.id = "librarian_exact"
+      ~lanes:[ { Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Librarian
                ; enabled = true
                ; slot_ids = [ "librarian-absorb-fixture" ]
                ; cli_slot_ids = []
@@ -2188,7 +2188,7 @@ let test_the_runtime_does_not_save_a_copy ~fail_reverse () =
   let resolver = Fixture.resolver_snapshot ~source:"copy-claim-fixture"
     [ { Fixture.id = "librarian-copy-fixture"; base_url = librarian.base_url } ] in
   (match Runtime_exact_output_registry.publish
-    ~lanes:[ { Runtime_schema.id = "librarian_exact"
+    ~lanes:[ { Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Librarian
              ; enabled = true
              ; slot_ids = [ "librarian-copy-fixture" ]
              ; cli_slot_ids = []
@@ -2301,7 +2301,7 @@ let check_failed_absorb_evaluations ~status ~body ~failure_code ~diagnostic () =
   let resolver = Fixture.resolver_snapshot ~source:"payment-failure-fixture"
     [ { Fixture.id = "librarian-payment-fixture"; base_url = librarian.base_url } ] in
   (match Runtime_exact_output_registry.publish
-    ~lanes:[ { Runtime_schema.id = "librarian_exact"
+    ~lanes:[ { Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Librarian
              ; enabled = true
              ; slot_ids = [ "librarian-payment-fixture" ]
              ; cli_slot_ids = []

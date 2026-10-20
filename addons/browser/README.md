@@ -35,6 +35,23 @@ never assigned to a replacement. A temporary observation failure returns
 unavailable and requests an observation refresh; confirmed retirement tells the
 host to open a fresh connection. There is no built-in queue fallback.
 
+The authenticated `POST /api/v1/dashboard/browser-lane/command` endpoint accepts
+the same `browser_command` arguments. It requires the existing Dashboard admin
+permission and uses the authorized actor, rather than an identity in the body.
+For example, its JSON body can be:
+
+```json
+{"command":{"verb":"tabs.list","args":{}}}
+```
+
+The HTTP response's `data` is the original MCP tool result. Check its `isError`,
+`structuredContent` and `_meta` before further input; an accepted HTTP request
+does not mean the browser operation succeeded. This endpoint accesses shared
+installations only and uses their selected input/output hooks. A workflow that
+holds a host handle retains its original service and exported-tool generation;
+it cannot follow a replacement. Existing individual Dashboard routes and the
+TUI browser screens still need to switch to this host path.
+
 Install a declaration using the active configuration directory described in the
 [TOML guide](../../docs/guides/lane-addon-toml.md), pointing `manifest_path` at
 this package's actual absolute path or a path relative to that declaration:

@@ -122,8 +122,17 @@ receipts remain distinct from successful contract validation.
    observation failure; the host does not resend a result after a reached HTTP
    refusal. Only typed stopping/detached authority retires it.
 
-   The public core tool proxy and Dashboard inventory are not yet enabled for
-   the Add-on. Existing built-in startup is still active. Owned backends are
+   `Browser_addon_host` binds the typed browser service and the advertised
+   command to the same exact owner. Its call uses ordinary host-mediated tool
+   execution, retaining selected hooks, visibility and reserved-name checks.
+   The Dashboard `/browser-lane/command` endpoint uses this path for a shared
+   installation and supplies its authorized actor outside the request body.
+   It returns the complete MCP receipt, including error/effect metadata.
+   A retained host handle cannot follow a replacement export or socket.
+
+   The individual public core tool proxies, existing Dashboard observation
+   routes and inventory are not yet enabled for the Add-on. Existing built-in
+   startup is still active. Owned backends are
    explicitly refused until profile claims and actual descendant cleanup are
    connected. The tool proxy must
    preserve the exported tool's installation-selected command/result hooks;

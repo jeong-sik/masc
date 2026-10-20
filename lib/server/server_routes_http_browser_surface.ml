@@ -10,6 +10,30 @@ let read_body request reqd f =
     match Yojson.Safe.from_string body with
     | exception Yojson.Json_error detail -> reply request reqd (Error detail)
     | json -> reply request reqd (f json))
+(* Public browser commands enter the same advertised-tool middleware as Keeper
+   calls. The HTTP authorization boundary supplies the actor; request fields
+   cannot choose a private installation or provide a control envelope. *)
+let command ~config ~principal arguments =
+  let reserved=List.map (fun (schema:Masc_domain.tool_schema) -> schema.name) Config.raw_all_tool_schemas in
+  let result=Result.bind (Browser_addon_host.connect ~config
+    ~access:Lane_addon_sources.Unauthenticated ~principal ~reserved)
+    (fun host -> Browser_addon_host.call host ~arguments) in
+  match result with
+  | Ok result -> Mcp_protocol.Mcp_types.tool_result_to_yojson result
+  | Error error ->
+      let class_,effect_disposition,message=match error with
+        | Lane_addon_runtime.Unavailable message -> Tool_result.Dependency_unavailable,Tool_result.Proven_pre_effect,message
+        | Outcome_unknown message -> Tool_result.Runtime_failure,Tool_result.Effect_outcome_unknown,message
+        | Host_refusal refusal ->
+            let class_,message=match refusal with
+              | Lane_addon_call_context.Rejected message|Activity_disabled message -> Tool_result.Workflow_rejection,message
+              | Unavailable message|Activity_unobserved message -> Tool_result.Dependency_unavailable,message in
+            class_,Tool_result.Proven_pre_effect,message in
+      let failure=Tool_result.make_err ~tool_name:Browser_addon_tool.definition.name
+        ~start_time:(Tool_timing.start ()) ~class_ ~effect_disposition message in
+      Mcp_protocol.Mcp_types.tool_result_to_yojson {
+        content=[TextContent {type_="text";text=message;annotations=None}];
+        is_error=Some true;structured_content=None;_meta=Lane_addon_tool_result.metadata failure}
 (* The same choice policy serves the UI and Keeper tools. Selection itself
    never opens, navigates or closes a browser. *)
 let server_selection ~verb fields =
@@ -84,6 +108,11 @@ let clients_listing ~base_path =
         "work",decision (Browser_lane.Session_open {headless=Some false})] ]
 let add_routes router =
   router
+  |> Http.Router.post "/api/v1/dashboard/browser-lane/command"
+      (with_token_permission_auth ~permission:Masc_domain.CanAdmin (fun state agent_name request reqd ->
+         let config=Mcp_server.workspace_config state in
+         read_body request reqd (fun arguments -> Ok (command ~config
+           ~principal:(Lane_addon_call_context.Host_actor agent_name) arguments))))
   |> Http.Router.get "/api/v1/dashboard/browser-lane/clients"
       (with_permission_auth ~permission:Masc_domain.CanReadState (fun state request reqd ->
          reply request reqd

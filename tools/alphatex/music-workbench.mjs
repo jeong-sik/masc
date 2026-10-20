@@ -241,7 +241,9 @@ export async function viewMusic(options = {}) {
     const footer = model.search ? `/${model.query} · ↑/↓ choose · Enter open · Esc cancel · Ctrl-U clear`
       : prompt === null ? '↑/↓ choose · Enter open · / search · r refresh · :open PATH · :midi PATH · :session PATH' : ':' + prompt
     output += `\x1b[${rows - 1};1H${cliTruncate(safeText(footer), Math.max(0, columns - 1))}`
-    output += `\x1b[${rows};1H${cliTruncate('Ctrl-L:status · q / Esc: return', Math.max(0, columns - 1))}`
+    const statusKeys = model.search ? 'Ctrl-L:status'
+      : model.query ? 'Ctrl-L:status · q: return · Esc: clear search' : 'Ctrl-L:status · q / Esc: return'
+    output += `\x1b[${rows};1H${cliTruncate(statusKeys, Math.max(0, columns - 1))}`
     process.stdout.write(output)
   }
   function keypress(text, key = {}) {

@@ -464,7 +464,7 @@ let guided_actions () =
   let input = UI.Action.arguments ~instance_id:request.instance_id ~request_id:request.request_id
     ~action:request.action |> UI.Action.canonical |> ok in
   let receipt : UI.Action.receipt = {instance_id=request.instance_id;incarnation=request.incarnation;
-    request_id=request.request_id;requester="operator";executor=Some "worker";
+    request_id=request.request_id;requester="operator";executor=Some (Masc.Lane_addon_lifecycle.Container_resource "worker");
     input_sha256=UI.Action.input_digest input;action=request.action;state=UI.Action.Confirmed;
     result=Some (`Assoc []);detail=None} in
   ignore (UI.action_receipt request (UI.Action.to_json receipt) |> ok);

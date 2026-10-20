@@ -57,7 +57,7 @@ type worker = { calls : string list ref; barrier : unit Eio.Promise.t option ref
 let output : Lane_addon_types.output = { rows = []; coverage = [] }
 
 let backend worker : Runtime.For_testing.backend = {
-  start = (fun ~sw:_ ~state_owner:_ ~instance_id ~package:_ ~binding:_ ~on_engine ~is_live_instance:_ ~on_created ->
+  start = (fun ~sw:_ ~state_owner:_ ~instance_id ~installation_id:_ ~package:_ ~binding:_ ~on_authority ~is_live_instance:_ ~on_created ->
     let connection : Runtime.For_testing.connection = {
       observe = (fun ~binding:_ ~sources:_ -> Ok output);
       exported_tools = (fun () -> []);
@@ -68,15 +68,27 @@ let backend worker : Runtime.For_testing.backend = {
         worker.calls := text "request_id" arguments :: !(worker.calls);
         Option.iter Eio.Promise.await !(worker.barrier);
         Ok { Lane_addon_action.status = Package_confirmed; result = obj [ "composed", `Bool true ]; output });
-      stop = (fun () -> Ok ()); container_id = instance_id; host = None } in
-    ignore (on_engine (Lane_addon_lifecycle.Docker_engine "fixture-engine"));
+      stop = (fun () -> Ok (Lane_addon_lifecycle.Released
+        { engine = Lane_addon_lifecycle.Docker_engine "fixture-engine"; container_id = Some instance_id }));
+      resource = Lane_addon_lifecycle.Container_resource instance_id; host = None } in
+    ignore (on_authority (Lane_addon_lifecycle.Container_authority
+      { runtime = Lane_addon_types.Docker; engine = Lane_addon_lifecycle.Docker_engine "fixture-engine" }));
     on_created connection; Ok connection);
   (* A package whose image is not ready never gets a worker: declared and
      enabled, with no live instance. *)
-  image_ready = (fun ~(package : Lane_addon_types.package) ->
+  package_ready = (fun ~(package : Lane_addon_types.package) ->
     if String.equal package.id "broken-package" then Error "image is not loaded" else Ok ());
   acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
-  recover_stop = (fun ~runtime:_ ~state_owner:_ ~instance_id:_ ~engine:_ ~container_id:_ -> Ok ());
+  recover_stop = (fun ~state_owner:_ ~instance_id:_ ~authority ~resource ->
+    match authority, resource with
+    | Lane_addon_lifecycle.Container_authority { engine; _ }, None ->
+      Ok (Lane_addon_lifecycle.Released { engine; container_id = None })
+    | Lane_addon_lifecycle.Container_authority { engine; _ },
+        Some (Lane_addon_lifecycle.Container_resource id) ->
+      Ok (Lane_addon_lifecycle.Released { engine; container_id = Some id })
+    | Lane_addon_lifecycle.Container_authority _, Some (Lane_addon_lifecycle.Native_resource _)
+    | Lane_addon_lifecycle.Native_admission _, (None | Some _) ->
+      Error (Lane_addon_lifecycle.Cleanup_unconfirmed "container fixture cannot release native resources"));
   condition_met = (fun ~runtime:_ _ -> true);
   sweep = (fun ~runtime:_ ~is_live_instance:_ -> Ok []) }
 

@@ -36,16 +36,20 @@ receipts remain distinct from successful contract validation.
    cancelled startup or calls request cleanup, and exports are revoked before
    cleanup. Release requires an exited exact child and no observed live group
    members. Its required durable admission now comes from host-owned installation
-   and resource slots. Native Runtime selection, browser-profile claim selection
-   and cleanup of descendants that leave that group remain to be wired.
+   and resource slots. Browser-profile claim selection and cleanup of
+   descendants that leave that group remain to be wired.
    Package declarations now separate `Container` from `Host_process`. A
    `runtime = "host_process"` manifest declares only `resources.max_reply_bytes`;
    image, CPU, memory and PID-limit fields are rejected. Shared protocol, source
    acquisition and sampling consume the execution-independent reply envelope.
    Container entrypoints refine the execution type before issuing engine
-   commands. Native installation startup remains unavailable until its durable
-   ownership and restart recovery are connected; a parsed manifest is not a
-   running native installation.
+   commands. Runtime now selects native startup for host-process installations,
+   records native admission before spawn, and derives its private claim slot from
+   the installation identity. Lost handles reopen that exact admission; an orphan
+   reservation is retired before a fresh incarnation can start. Resource and
+   action receipts distinguish actual containers from native process identities.
+   Native persistent storage and observation sampling are explicitly refused
+   before admission until their host-directory and broker contracts are wired.
    The separate `Native_addon_lease` library and
    `masc-native-addon-launcher` executable provide durable slot admission. The
    host prepares private installation/resource directories before launch; the
@@ -62,8 +66,10 @@ receipts remain distinct from successful contract validation.
    signals the exact owned process independently of blocked gate I/O. Retirement
    and process cleanup join before release, and only an observed settled claim
    creates a retained receipt. A late validation cannot restore a retired worker.
-   Runtime installation selection remains separate. The payload must preserve inherited lease
-   descriptors; trusted native execution is not container isolation. This follows
+   Reopening admission never recreates missing records or readmits an old ID.
+   The namespace and its parent directories are synchronized before admission.
+   The payload must preserve inherited lease descriptors; trusted native
+   execution is not container isolation. This follows
    [POSIX exec/descriptor semantics](https://pubs.opengroup.org/onlinepubs/9799919799/functions/exec.html):
    closing a descriptor for a process-owned lease inode releases its locks.
 4. A browser worker that owns WebExtension/BiDi command queues and owned Gecko/

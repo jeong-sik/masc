@@ -579,12 +579,12 @@ describe('optional Lane Add-on surface', () => {
     expect(api.fetchLaneAddonAction).not.toHaveBeenCalled()
     expect(api.fetchLaneAddons).toHaveBeenCalledTimes(1)
 
-    api.fetchLaneAddonAction.mockResolvedValueOnce(parseLaneAddonActionReceipt({ ...actionReceipt, request_id: request.request_id, state: 'running', executor: 'worker-7' }))
+    api.fetchLaneAddonAction.mockResolvedValueOnce(parseLaneAddonActionReceipt({ ...actionReceipt, request_id: request.request_id, state: 'running', executor: { kind: 'container', id: 'worker-7' } }))
     fireEvent.click(screen.getByRole('button', { name: 'Check request status' }))
     await screen.findByText('Running')
     expect(api.fetchLaneAddonAction).toHaveBeenCalledWith(request, expect.any(AbortSignal))
     api.fetchLaneAddonAction.mockResolvedValueOnce(parseLaneAddonActionReceipt({ ...actionReceipt, request_id: request.request_id,
-      state: 'confirmed', executor: 'worker-7', result: { accepted_operation: 'publish' } }))
+      state: 'confirmed', executor: { kind: 'container', id: 'worker-7' }, result: { accepted_operation: 'publish' } }))
     fireEvent.click(screen.getByRole('button', { name: 'Check request status' }))
     await screen.findByText('Package confirmed returned result')
     expect(screen.getByText(/Completion of the surrounding task requires separate evidence/)).toBeTruthy()

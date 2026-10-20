@@ -2,7 +2,7 @@ let ( let* ) = Result.bind
 type state = Queued | Running | Confirmed | Failed_before_effect | Outcome_unknown
 type receipt = {
   instance_id : string; incarnation : string; request_id : string; requester : string;
-  executor : string option; input_sha256 : string; action : Yojson.Safe.t;
+  executor : Lane_addon_lifecycle.resource option; input_sha256 : string; action : Yojson.Safe.t;
   state : state; result : Yojson.Safe.t option; detail : string option;
 }
 type package_status = Package_confirmed | Package_failed_before_effect | Package_outcome_unknown
@@ -12,7 +12,7 @@ let state_name = function Queued -> "queued" | Running -> "running" | Confirmed 
 let optional f = Option.fold ~none:`Null ~some:f
 let to_json (r : receipt) = `Assoc ["instance_id", `String r.instance_id;
   "incarnation", `String r.incarnation; "request_id", `String r.request_id;
-  "requester", `String r.requester; "executor", optional (fun value -> `String value) r.executor;
+  "requester", `String r.requester; "executor", optional Lane_addon_lifecycle.resource_to_json r.executor;
   "input_sha256", `String r.input_sha256; "action", r.action;
   "state", `String (state_name r.state); "result", optional Fun.id r.result;
   "detail", optional (fun value -> `String value) r.detail]
@@ -58,7 +58,10 @@ let of_json json =
   let* input_sha256 = text fields "input_sha256" in
   let nullable_text name = match List.assoc name fields with `Null -> Ok None
     | _ -> text fields name |> Result.map Option.some in
-  let* executor = nullable_text "executor" in let* detail = nullable_text "detail" in
+  let* executor = match List.assoc "executor" fields with
+    | `Null -> Ok None
+    | value -> Lane_addon_lifecycle.resource_of_json value |> Result.map Option.some in
+  let* detail = nullable_text "detail" in
   let* state = match List.assoc "state" fields with
     | `String "queued" -> Ok Queued | `String "running" -> Ok Running
     | `String "confirmed" -> Ok Confirmed | `String "failed_before_effect" -> Ok Failed_before_effect

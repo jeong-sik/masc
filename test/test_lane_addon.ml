@@ -17,6 +17,7 @@ module Store = Lane_addon_store
 module Fake = Lane_addon_fake_engine
 module Lifecycle = Lane_addon_lifecycle
 
+let ( let* ) = Result.bind
 let unwrap = function Ok value -> value | Error message -> fail message
 let member key json = Yojson.Safe.Util.member key json
 let text key json = member key json |> Yojson.Safe.Util.to_string
@@ -62,7 +63,9 @@ let make_backend ?observe_step () =
   let proven ~engine work =
     Lane_addon_slot.proven (Fake.port state.world) ~expected:engine ~lift:Fun.id work in
   let backend : Runtime.For_testing.backend = {
-    start = (fun ~sw ~state_owner:_ ~instance_id ~(package : Types.package) ~binding ~on_engine ~is_live_instance:_ ~on_created ->
+    start = (fun ~sw ~state_owner:_ ~instance_id ~installation_id:_ ~(package : Types.package) ~binding ~on_authority ~is_live_instance:_ ~on_created ->
+      let* container = Types.container package
+        |> Result.map_error (fun detail -> Lifecycle.Worker_failed detail) in
       match (Fake.port state.world).read_engine () with
       | Error (Lifecycle.Unreachable detail) -> Error (Lifecycle.Engine_unreachable detail)
       | Error (Lifecycle.Identity_unreadable detail) -> Error (Lifecycle.Worker_failed detail)
@@ -77,7 +80,7 @@ let make_backend ?observe_step () =
           "inputSchema",`Assoc ["type",`String "object"]]) with
         | Ok tool -> tool | Error message -> fail message) package.exported_tools in
       let connection : Runtime.For_testing.connection = {
-        host = None; container_id = Store.digest instance_id;
+        host = None; resource = Lifecycle.Container_resource (Store.digest instance_id);
         exported_tools = (fun () -> exported_tools);
         call_exported_tool = (fun ~on_result:_ ~authorize ~principal ~name:_ ~arguments:_ ->
           state.principals := principal :: !(state.principals);
@@ -113,7 +116,8 @@ let make_backend ?observe_step () =
           else
             proven ~engine (fun () -> Fake.remove state.world (Store.digest instance_id); Ok ())
             |> Result.map (fun () ->
-              if not !stopped then (stopped := true; Eio.Promise.resolve release ())))
+              if not !stopped then (stopped := true; Eio.Promise.resolve release ());
+              Lifecycle.Released {engine;container_id=Some (Store.digest instance_id)}))
       } in
       if package.id = "start-error" then Error (Masc.Lane_addon_lifecycle.Worker_failed "startup unavailable")
       else if package.id = "start-gated" then begin
@@ -123,7 +127,7 @@ let make_backend ?observe_step () =
         Eio.Promise.await (fst state.start_gate);
         Error (Masc.Lane_addon_lifecycle.Worker_failed "startup unavailable")
       end else begin
-        (match on_engine engine with
+        (match on_authority (Lifecycle.Container_authority {runtime=container.runtime;engine}) with
          | Ok () -> ()
          | Error detail -> fail ("engine persistence: " ^ detail));
         ignore (Fake.add (Fake.current state.world) ~id:(Store.digest instance_id)
@@ -134,15 +138,21 @@ let make_backend ?observe_step () =
           (Eio.Promise.await released; Error (Masc.Lane_addon_lifecycle.Worker_failed "initialization stopped"))
         else Ok connection
       end);
-    image_ready = (fun ~package ->
+    package_ready = (fun ~package ->
       if package.id = "image-missing" then Error "image fixture/image is not on this host" else Ok ());
     acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ ->
       Ok (`List [`Assoc ["original_bytes", `String "captured source before rotation"]]));
-    recover_stop = (fun ~runtime:_ ~state_owner:_ ~instance_id ~engine ~container_id ->
+    recover_stop = (fun ~state_owner:_ ~instance_id ~authority ~resource ->
+      match authority,resource with
+      | Lifecycle.Native_admission _,_ | Lifecycle.Container_authority _,Some (Lifecycle.Native_resource _) ->
+          Error (Lifecycle.Cleanup_unconfirmed "container fixture requires container authority")
+      | Lifecycle.Container_authority {engine;runtime=_},(None | Some (Lifecycle.Container_resource _)) ->
+      let container_id = Option.bind resource Lifecycle.container_id in
       match container_id with
       | Some id when id = Store.digest instance_id ->
           proven ~engine (fun () -> Fake.remove state.world id; Ok ())
-          |> Result.map (fun () -> state.recovery := (instance_id, id) :: !(state.recovery))
+          |> Result.map (fun () -> state.recovery := (instance_id, id) :: !(state.recovery);
+              Lifecycle.Released {engine;container_id=Some id})
       | Some _ | None -> Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "owner mismatch"));
     condition_met = (fun ~runtime:_ condition -> Fake.condition_met state.world condition);
     sweep = (fun ~runtime:_ ~is_live_instance:_ -> Ok [])

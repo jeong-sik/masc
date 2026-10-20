@@ -19,6 +19,20 @@ val engine_equal : engine -> engine -> bool
 val engine_to_string : engine -> string
 val engine_to_json : engine -> Yojson.Safe.t
 val engine_of_json : Yojson.Safe.t -> (engine, string) result
+type authority =
+  | Container_authority of { runtime : Lane_addon_types.runtime; engine : engine }
+  | Native_admission of { installation_id : string }
+(** Retained before creating a container or launching a native payload. Native
+    claim paths are recomputed by the host from its store and installation key. *)
+type resource =
+  | Container_resource of string
+  | Native_resource of { pid : int; started : string option }
+val authority_to_json : authority -> Yojson.Safe.t
+val authority_of_json : Yojson.Safe.t -> (authority, string) result
+val resource_to_json : resource -> Yojson.Safe.t
+val resource_of_json : Yojson.Safe.t -> (resource, string) result
+val resource_to_string : resource -> string
+val container_id : resource -> string option
 
 (** The engine a later command reached when it was not the recorded one. *)
 type observed_engine =
@@ -64,14 +78,15 @@ type failure =
     never replaced by its own cleanup. *)
 type failed = { cause : failure; first : failure option }
 
-(** What a confirmed release stands on. [Never_created] is true only when no
-    create was ever issued: the engine is recorded before the first create, so
-    a record with no engine has never reached one. [Released] names the
-    recorded engine that answered, and the container when one was known; an
-    absence read from any other engine is never recorded as a release. *)
+(** What a confirmed release stands on. [Never_created] requires no recorded
+    execution authority and no resource. [Released] names the recorded engine
+    that confirmed container absence. [Native_released] names the exact
+    installation and incarnation whose admission is retired and settled. *)
 type release =
   | Never_created
   | Released of { engine : engine; container_id : string option }
+  | Native_released of { installation_id : string; instance_id : string }
+      (** Native retirement and actual admission settlement were confirmed. *)
 
 (** [Detaching] keeps the failure that was in place when the detach began. *)
 type state =

@@ -6,7 +6,7 @@ type receipt = {
   incarnation : string;
   request_id : string;
   requester : string;
-  executor : string option;
+  executor : Lane_addon_lifecycle.resource option;
   input_sha256 : string;
   action : Yojson.Safe.t;
   state : state;

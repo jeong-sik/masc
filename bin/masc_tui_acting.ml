@@ -46,8 +46,8 @@ let visible filter (event : Observer.event) =
   | Everything -> true
   | Turns | Actions -> (
       match event with
-      (* A container that would not start, or whose removal nobody can show,
-         is a failure the operator acts on. One that started or was removed
+      (* A resource that could not be acquired, or whose release nobody can show,
+         is a failure the operator acts on. One acquired or released
          is the lane runtime doing its job, and is state. *)
       | Observer.Lane_resource { Observer.lr_lifecycle; _ } -> (
           match lr_lifecycle with
@@ -440,10 +440,10 @@ let label_of_event (event : Observer.event) =
   | Observer.Fusion_run_status _ -> "fusion"
   | Observer.Lane_resource resource -> (
       match resource.Observer.lr_lifecycle with
-      | Masc.Lane_addon_resource_events.Acquired -> "container up"
-      | Masc.Lane_addon_resource_events.Acquire_failed -> "container failed"
-      | Masc.Lane_addon_resource_events.Release_confirmed -> "container removed"
-      | Masc.Lane_addon_resource_events.Release_incomplete -> "removal unproven")
+      | Masc.Lane_addon_resource_events.Acquired -> "resource acquired"
+      | Masc.Lane_addon_resource_events.Acquire_failed -> "acquisition failed"
+      | Masc.Lane_addon_resource_events.Release_confirmed -> "resource released"
+      | Masc.Lane_addon_resource_events.Release_incomplete -> "release unconfirmed")
   | Observer.Internal_agent_runs_changed -> "internal runs"
   | Observer.Snapshot _ -> "snapshot"
   | Observer.Other name -> name
@@ -1049,7 +1049,7 @@ let file_member ~existing ~keeper ~at ~session ~keeper_turn member =
    the flat view does. The ring holds up to [acting_retained_entries] +
    [acting_retained_quiet] entries and this runs on every frame, so chunks live in a per-keeper table:
    attaching costs the keeper's own chunk count, not the whole screen. *)
-(* What a lane container row folds on under [Turns]: the same package ending
+(* What a lane worker row folds on under [Turns]: the same package ending
    the same way for the same reason is one row, however many times it
    happened. Every other event is listed so a new kind has to say which side
    it is on. *)
@@ -1107,7 +1107,7 @@ let fold_chunks ~traces entries =
   in
   let chunks : (string, chunk list) Hashtbl.t = Hashtbl.create 16 in
   let plains = ref [] in
-  (* A lane container that keeps failing the same way fails once a few
+  (* A lane worker that keeps failing the same way fails once a few
      seconds; one row per failure would bury the turns this scope is for, the
      way one row per lifecycle event would bury a turn. Folded like a turn:
      the newest occurrence stands for the rest. *)

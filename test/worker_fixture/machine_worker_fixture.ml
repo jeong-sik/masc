@@ -28,17 +28,25 @@ let with_worker ?other_backend ~machine ~create ~clock ~sw ~base_path f =
       let rpc ~name ~arguments = Client.call_tool client ~name ~arguments () in
       let call name arguments = Eio.Mutex.use_ro mutex (fun () -> rpc ~name ~arguments) in
       let backend : R.For_testing.backend = {
-        image_ready=(fun ~package:_ -> Ok ());
-        recover_stop=(fun ~runtime:_ ~state_owner:_ ~instance_id:_ ~engine:_ ~container_id:_ -> Ok ());
+        package_ready=(fun ~package:_ -> Ok ());
+        recover_stop=(fun ~state_owner:_ ~instance_id:_ ~authority ~resource ->
+      match authority,resource with
+      | Masc.Lane_addon_lifecycle.Container_authority {engine;_},None ->
+          Ok (Masc.Lane_addon_lifecycle.Released {engine;container_id=None})
+      | Masc.Lane_addon_lifecycle.Container_authority {engine;_},Some (Masc.Lane_addon_lifecycle.Container_resource id) ->
+          Ok (Masc.Lane_addon_lifecycle.Released {engine;container_id=Some id})
+      | Masc.Lane_addon_lifecycle.Container_authority _,Some (Masc.Lane_addon_lifecycle.Native_resource _)
+      | Masc.Lane_addon_lifecycle.Native_admission _,(None | Some _) ->
+          Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "container fixture cannot release native resources"));
         condition_met = (fun ~runtime:_ _ -> true);
         sweep = (fun ~runtime:_ ~is_live_instance:_ -> Ok []);
         acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
-        start=(fun ~sw:_ ~state_owner:_ ~instance_id ~(package : Masc.Lane_addon_types.package) ~binding:_ ~on_engine ~is_live_instance:_ ~on_created ->
+        start=(fun ~sw:_ ~state_owner:_ ~instance_id ~installation_id:_ ~(package : Masc.Lane_addon_types.package) ~binding:_ ~on_authority ~is_live_instance:_ ~on_created ->
           let store = Masc.Lane_addon_store.create
             ~root:(Filename.concat (Masc.Workspace.masc_dir config) "lane-addons") in
           let history = Masc.Lane_addon_machine_history.create () in
           let connection : R.For_testing.connection = {
-            host = None; container_id=instance_id;
+            host = None; resource=Masc.Lane_addon_lifecycle.Container_resource instance_id;
             exported_tools=(fun () -> List.filter (fun (tool : S.tool) ->
               List.mem tool.name package.exported_tools) tools);
             call_exported_tool=(fun ~on_result ~authorize ~principal ~name ~arguments ->
@@ -57,18 +65,18 @@ let with_worker ?other_backend ~machine ~create ~clock ~sw ~base_path f =
                 ~max_response_bytes:(Lane_addon_types.max_reply_bytes package) ~call:rpc output));
             action_schema=(fun () -> None);
             act=(fun ~arguments:_ -> Error "no fixture action port");
-            stop=(fun () -> Ok ())
+            stop=(fun () -> Ok (Masc.Lane_addon_lifecycle.Released {engine=Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine";container_id=Some (instance_id)}))
           } in
-          ignore (on_engine (Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine"));
+          ignore (on_authority (Masc.Lane_addon_lifecycle.Container_authority {runtime=Masc.Lane_addon_types.Docker;engine=Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine"}));
           on_created connection; Ok connection)
       } in
       let backend = match other_backend with
         | None -> backend
         | Some (other : R.For_testing.backend) ->
-            { other with start=(fun ~sw ~state_owner ~instance_id ~package ~binding ~on_engine ~is_live_instance ~on_created ->
+            { other with start=(fun ~sw ~state_owner ~instance_id ~installation_id ~package ~binding ~on_authority ~is_live_instance ~on_created ->
                 let selected = if package.Masc.Lane_addon_types.id = machine ^ "-fixture"
                   then backend else other in
-                selected.start ~sw ~state_owner ~instance_id ~package ~binding ~on_engine ~is_live_instance ~on_created) }
+                selected.start ~sw ~state_owner ~instance_id ~installation_id ~package ~binding ~on_authority ~is_live_instance ~on_created) }
       in
       R.For_testing.with_backend backend (fun () ->
         let manifest = Filename.concat base_path (machine ^ "-fixture.toml") in

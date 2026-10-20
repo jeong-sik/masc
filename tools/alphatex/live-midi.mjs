@@ -146,8 +146,12 @@ export async function openLiveMidi({ routes, reserved, signal, onEvent = () => {
       closed = true; signal?.removeEventListener('abort', abort); lines.close()
       if (failure || code !== 0 || !final) {
         const error = failure ?? new Error(detail || `Live MIDI closed without finalization: ${code ?? exitSignal}`)
+        for (const waiter of setWaiters.splice(0)) waiter.reject(error)
         rejectReady(error); rejectDone(error)
       } else {
+        // A set with no ack at a clean close must still settle: resolving
+        // would lie about admission, so reject and let the caller re-queue.
+        for (const waiter of setWaiters.splice(0)) waiter.reject(new Error('Live MIDI owner is closed'))
         if (!started) rejectReady(new Error('Live MIDI stopped before admission'))
         resolveDone(final)
       }

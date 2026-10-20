@@ -41,6 +41,16 @@ test('abort during live ownership waits for close; aborted preparation opens no 
  signal.abort();assert.ok(p.kills.includes('SIGTERM'));let closed=false;handle.completion.then(()=>{closed=true});await flush();assert.equal(closed,false)
  p.stdout.write(JSON.stringify(state('stopped',{success:true}))+'\n');p.emit('close',0,null);await handle.completion
 })
+test('a set with no ack rejects on child close instead of hanging',async()=>{
+ for(const variant of ['clean','code']) {
+  const p=child(),handle=await openLiveMidi({routes,reserved:[],spawnProcess:()=>p})
+  p.stdout.write(JSON.stringify(state())+'\n');await handle.ready
+  const unsettled=assert.rejects(handle.set(routes,[],[]),{message:variant==='clean'?'Live MIDI owner is closed':/closed without finalization/})
+  const done=variant==='code'?assert.rejects(handle.completion):handle.completion
+  if(variant==='clean')p.stdout.write(JSON.stringify(state('stopped',{success:true}))+'\n')
+  p.emit('close',variant==='code'?1:0,null);await unsettled;await done
+ }
+})
 test('backing inspection validates native claims and owns failed/cancelled process closure',async()=>{
  for(const variant of ['success','cancel','format','missing']) {
   const p=child(),controller=new AbortController(),pending=backingMidiClaims({path:'/private/plan',format:'hybrid-arrangement',signal:controller.signal,spawnProcess:()=>p})

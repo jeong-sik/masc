@@ -298,8 +298,9 @@ struct SourceChase {
         }
         // Replaying the final program before every held Note On would change
         // voices that began under an earlier patch, including pedal-held notes.
-        // Refuse that reconstruction until per-note patch replay is supported.
-        guard channels.values.allSatisfy({ state in state.notes.allSatisfy { $0.program == state.program } }) else {
+        // Refuse that reconstruction until per-note patch replay is supported;
+        // an entry without notes replays no Note On and needs no refusal.
+        guard !notes || channels.values.allSatisfy({ state in state.notes.allSatisfy { $0.program == state.program } }) else {
             throw MidiFailure("source state reconstruction cannot restore held notes across program or bank changes")
         }
         var result = history
@@ -1034,10 +1035,13 @@ final class MidiTransport {
         let prior = sourceModel.scoped(to: regionScopes[index])
         guard prior.touched.isSubset(of: entry.safeKnown) else { throw MidiFailure("MIDI region seek needs a source baseline before sounding keys on a previously changed channel") }
         var permitted = prior; permitted.touched.formIntersection(prefix.known)
+        // A wrap cut begins a copy only for its due native batch. Its prefix
+        // keys end at that cut, so chase channel state alone: their attacks
+        // stay unacquired while the source model keeps their FIFO origins.
         for (port, bytes) in try prefix.bootstrap(replacing: permitted, notes: notes) { try sourceSend(bytes, port: port) }
         if cycle != nil {
             for address in regionScopes[index] {
-                cycleAcquired[address] = Set((prefix.channels[address]?.notes ?? []).filter(\.held).compactMap(\.origin))
+                cycleAcquired[address] = notes ? Set((prefix.channels[address]?.notes ?? []).filter(\.held).compactMap(\.origin)) : []
             }
         }
         sourceModel.replace(prefix, addresses: regionScopes[index])
@@ -1146,16 +1150,8 @@ final class MidiTransport {
             let region = timeline.regions[action.region]
             switch action.kind {
             case .begin:
-                // A cut enters an owner mid-region, so the prefix notes must not be re-sent:
-                // the live state at the cut is not the source's opening state. A normal start
-                // (no cut) reconstructs the prefix as before, notes included, so a note held
-                // across `sourceStart` is re-established.
-                if let cut {
-                    if cycle == nil || action.seconds >= cut { regionCursors[action.region] = MidiRegionCursor(copy: region.spec.repeatCount) }
-                    else { try beginRegion(action.region, at: region.spec.sourceStart, notes: false) }
-                } else {
-                    try beginRegion(action.region, at: region.spec.sourceStart, notes: true)
-                }
+                if let cut, cycle == nil || action.seconds >= cut { regionCursors[action.region] = MidiRegionCursor(copy: region.spec.repeatCount) }
+                else { try beginRegion(action.region, at: region.spec.sourceStart, notes: cut == nil) }
             case .end:
                 try sourceSilence(addresses: regionScopes[action.region])
                 for address in regionScopes[action.region] { sourceModel.channels[address]?.notes.removeAll() }

@@ -80,6 +80,24 @@ func stop(_ owner:UmpLoopTransport){owner.finish(reason:"test",error:nil,publish
  try observe(seek,50_000_100);precondition(sent.map{$0.1}==[off]);let oldToken=seek.generation
  try seek.stageCoordinated(at:0);let count=sent.count;seek.continueBatch(oldToken);precondition(sent.count==count && seek.state == .staged);stop(seek)
  print("UMP_LOOP_ENTRY_WINDOW_STAGE_PASS")
+ // A late batch may enter an instance whose end is also due. Its voice held
+ // to that end has no native time before the close and is not re-attacked.
+ let cutClock=try MidiCycle(start:0,end:0.6125,duration:0.6125,period:612_500_000,divisor:1,exactStart:(0,1))
+ let heldToEnd=source([packet(100_000_000,on),packet(124_000_000,off)],extent:"125000000")
+ for active in [true,false] { for late:UInt64 in [0,1,2_000_000] {
+  let o=try owner([heldToEnd],[region(extent:"125000000",repeats:8)],cycle:cutClock);try start(o)
+  if active {try observe(o,100);try observe(o,490_000_100);sent=[]}
+  try observe(o,612_500_100+late)
+  print("UMP_LOOP_LATE_CLOSE ACTIVE",active,"LATE",late,"SENT",sent.map{$0.1})
+  precondition(sent.map{$0.1} == (active ? [off]:[]),"late batch re-attacked a voice held to an instance end due in the same batch")
+  precondition(o.state == .playing && o.output.held.isEmpty);stop(o)
+ }}
+ // The trim ends before the original Off, so every copy holds its voice to
+ // an inner copy end. A late first batch at that exact end stays silent.
+ let inner=try owner([heldToEnd],[region(extent:"110000000",repeats:8)],cycle:cutClock);try start(inner)
+ try observe(inner,110_000_100);print("UMP_LOOP_LATE_CLOSE INNER SENT",sent.map{$0.1})
+ precondition(sent.isEmpty && inner.output.held.isEmpty,"late first batch re-attacked a voice held to an inner copy end");stop(inner)
+ print("UMP_LOOP_LATE_CLOSE_PASS: late batches at an exact wrap or inner copy end keep voices held to that end silent; acquired releases and 1 ns-late wraps unchanged")
  let normal=try MidiCycle(start:0,end:1,duration:1,period:1_000_000_000,divisor:1,exactStart:(0,1))
  let fifo=source([packet(100_000_000,on),packet(200_000_000,[0x43953c03,0x90012345]),packet(300_000_000,off),packet(800_000_000,[0x43853c00,0x45670000])])
  for fail in [false,true] {
@@ -112,6 +130,12 @@ func stop(_ owner:UmpLoopTransport){owner.finish(reason:"test",error:nil,publish
  let disjoint=try owner([scopeA,scopeB],[region("scopeA",source:"scopeA"),region("scopeB",source:"scopeB")],cycle:offsetClock)
  precondition(disjoint.plan.clips[0].shapes.flatMap{$0.scope}.allSatisfy{$0.channel==0x03050000},"expired prefix key reserved an unowned channel")
  try start(disjoint);try observe(disjoint,100_000_100);precondition(sent.map{$0.1}.contains(on) && sent.map{$0.1}.contains(liveOn));stop(disjoint)
+ // Timing words carry no channel: their status bits must not claim channel 8.
+ let eighthOn:[UInt32]=[0x43983c00,0x80000000],eighthOff:[UInt32]=[0x43883c00,0x12340000]
+ let clocked=source([packet(0,[0x13f80000]),packet(0,[0x00201234]),packet(50_000_000,on),packet(200_000_000,off)],id:"clocked")
+ let eighth=source([packet(50_000_000,eighthOn),packet(200_000_000,eighthOff)],id:"eighth")
+ let timing=try owner([clocked,eighth],[region("clocked",source:"clocked",extent:"400000000"),region("eighth",source:"eighth",extent:"400000000")],cycle:normal)
+ precondition(timing.plan.clips[0].shapes.flatMap{$0.scope}.allSatisfy{$0.channel==0x03050000},"timing words claimed a channel")
  print("UMP_LOOP_FAR_LOOKUP_SCOPE_HANDOFF_PASS")
  let huge:UInt64=1_000_000_000_000_000_000
  let baseBend:[UInt32]=[0x43e50000,0x80000000],motion:[UInt32]=[0x43e50000,0x87654321]

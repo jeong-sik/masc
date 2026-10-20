@@ -816,6 +816,11 @@ let perform_action m e (c : connection) (queued : Lane_addon_action.receipt) =
        | Ok () -> ()
        | Error message -> raise (Action_persistence_failed ("action result persistence: " ^ message)))
 
+(* Only an operator-owned TOML declaration may hold record grants. *)
+let operator_owned ~configuration ~source_access = match configuration, source_access with
+  | Some _, Lane_addon_sources.Operator_configuration -> true
+  | Some _, (Lane_addon_sources.Keeper _ | Lane_addon_sources.Unauthenticated) | None, _ -> false
+
 let host_issue_to_json = function
   | Listing_failed detail -> `Assoc ["kind", `String "listing_failed"; "detail", `String detail]
   | Listing_refused detail -> `Assoc ["kind", `String "listing_refused"; "detail", `String detail]
@@ -836,8 +841,7 @@ let host_status_json status =
 (* The frame the worker connection accepts is the package's [max_reply_bytes]
    (RFC-0471 row 1). What is measured is the arguments object the host sends;
    the JSON-RPC envelope around it is not counted. *)
-let delivery_arguments e ~request_id final =
-  let result = Lane_addon_exact.final_to_json final in
+let delivery_arguments e ~request_id result =
   let arguments = Lane_addon_host_request.result_arguments ~request_id ~result in
   if String.length (Yojson.Safe.to_string arguments) <= e.package.resources.max_reply_bytes then arguments
   else
@@ -850,22 +854,43 @@ let delivery_arguments e ~request_id final =
 (* One cycle (RFC operator-quiz §4.4): list, deliver what is final or try each
    request once, list again until a listing delivers nothing. The host keeps
    no list of pending requests; [host_status] only shows the last cycle. *)
+(* What one try of a request gives: a final result body to deliver, or the
+   reason it waits for the next event. *)
+type host_attempt = Deliver of Yojson.Safe.t | Wait of Yojson.Safe.t
+
 let run_host_cycle m e (port : host_port) =
   let delivered = Hashtbl.create 8 and tried = Hashtbl.create 8 in
   let waiting = ref [] in
   let try_request = function
     | Lane_addon_host_request.Exact_output exact ->
-        (match e.configuration, !exact_runner with
-         | None, _ ->
-             (* A manual Attach has no declaration id, so it owns no add-on lane. *)
-             Ok (Lane_addon_exact.Not_final (Lane_addon_exact.Lane_unavailable Lane_addon_exact.Lane_unconfigured))
-         | Some _, None -> Error No_exact_runner
-         | Some owner, Some runner ->
-             Lane_addon_exact.run ~store:m.store ~declaration_id:owner.id ~package:e.package ~runner exact
-             |> Result.map_error (fun detail ->
-               Exact_record_failed {request_id = exact.Lane_addon_exact.request_id; detail})) in
-  let deliver request_id final =
-    let* answer = port.deliver ~arguments:(delivery_arguments e ~request_id final)
+        let attempt = match e.configuration, !exact_runner with
+          | None, _ ->
+              (* A manual Attach has no declaration id, so it owns no add-on lane. *)
+              Ok (Lane_addon_exact.Not_final (Lane_addon_exact.Lane_unavailable Lane_addon_exact.Lane_unconfigured))
+          | Some _, None -> Error No_exact_runner
+          | Some owner, Some runner ->
+              Lane_addon_exact.run ~store:m.store ~declaration_id:owner.id ~package:e.package ~runner exact
+              |> Result.map_error (fun detail ->
+                Exact_record_failed {request_id = exact.Lane_addon_exact.request_id; detail}) in
+        Result.map (function
+          | Lane_addon_exact.Final final -> Deliver (Lane_addon_exact.final_to_json final)
+          | Lane_addon_exact.Not_final reason -> Wait (Lane_addon_exact.not_final_to_json reason)) attempt
+    | Lane_addon_host_request.Read_records {request_id; source_id; after} ->
+        let not_allowed reason = Deliver (`Assoc ["status", `String "not_allowed"; "reason", `String reason]) in
+        (match Lane_addon_records.grants ~operator_owned:(operator_owned ~configuration:e.configuration
+            ~source_access:e.source_access) e.binding with
+         | Error reason -> Ok (not_allowed reason)
+         | Ok grants ->
+             let measure result = String.length (Yojson.Safe.to_string
+               (Lane_addon_host_request.result_arguments ~request_id ~result)) in
+             match Lane_addon_records.read_records ~store:m.store ~grants ~measure
+               ~max_bytes:e.package.resources.max_reply_bytes ~source_id ~after with
+             | Lane_addon_records.Page body -> Ok (Deliver body)
+             | Lane_addon_records.Not_allowed reason -> Ok (not_allowed reason)
+             | Lane_addon_records.Unavailable detail ->
+                 Ok (Wait (`Assoc ["reason", `String "source_unavailable"; "detail", `String detail]))) in
+  let deliver request_id result =
+    let* answer = port.deliver ~arguments:(delivery_arguments e ~request_id result)
       |> Result.map_error (fun detail -> Result_delivery_failed {request_id; detail}) in
     Lane_addon_host_request.accepted_of_json answer
     |> Result.map (fun (_accepted : bool) -> ())
@@ -883,14 +908,14 @@ let run_host_cycle m e (port : host_port) =
           else
             let* attempt = try_request request in
             match attempt with
-            | Lane_addon_exact.Final final ->
-                let* () = deliver request_id final in
+            | Deliver result ->
+                let* () = deliver request_id result in
                 Hashtbl.replace delivered request_id ();
                 each true rest
-            | Lane_addon_exact.Not_final reason ->
+            | Wait reason ->
                 (* Tried at most once per cycle, so it cannot keep a cycle running. *)
                 Hashtbl.replace tried request_id ();
-                waiting := (request_id, Lane_addon_exact.not_final_to_json reason) :: !waiting;
+                waiting := (request_id, reason) :: !waiting;
                 each delivered_any rest in
     let* delivered_any = each false requests in
     if delivered_any then pass () else Ok () in
@@ -1814,10 +1839,8 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
   let* () = (backend ~store:m.store ()).image_ready ~package in
   (* Record grants are checked before an instance exists (RFC operator-quiz
      §4.5): only an operator-owned declaration may hold them. *)
-  let operator_owned = match configuration, source_access with
-    | Some _, Lane_addon_sources.Operator_configuration -> true
-    | Some _, (Lane_addon_sources.Keeper _ | Lane_addon_sources.Unauthenticated) | None, _ -> false in
-  let* (_ : Lane_addon_records.grant list) = Lane_addon_records.grants ~operator_owned binding in
+  let* (_ : Lane_addon_records.grant list) =
+    Lane_addon_records.grants ~operator_owned:(operator_owned ~configuration ~source_access) binding in
   let* () = match configuration, package.state_storage with
     | None, _ | Some _, Ephemeral -> Ok ()
     | Some owner, Persistent ->

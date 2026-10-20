@@ -5197,7 +5197,7 @@
 (test
  (name test_installed_dashboard)
  (modules test_installed_dashboard)
- (libraries masc_test_deps ptime masc.time_codec))
+ (libraries masc_test_deps ptime masc.time_codec masc_core eio eio_main))
 
 (include stanzas/test_keeper_repetition_scope.inc)
 

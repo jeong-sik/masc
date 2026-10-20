@@ -66,3 +66,21 @@ val live_workspace_precondition :
     workspace, they are removed. A different workspace is a [`Conflict] and a
     lone or malformed one a [`Bad_request]; the read is not served in either
     case. *)
+
+val asks_payload :
+  config:Workspace.config -> include_resolved:bool -> (Yojson.Safe.t, string) result
+(** [GET /api/v1/lane-addons/asks]: every installation's questions, by
+    declaration id and then in the order asked, with the Keeper question and
+    resolution wire form. Only open questions unless [include_resolved]. *)
+
+val handle_asks : Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** The list route after its read gate. It takes [include_resolved] and the
+    {!live_workspace_precondition} pair, and refuses any other parameter. *)
+
+val handle_ask_answer :
+  actor:string -> Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** [POST /api/v1/lane-addons/ask-answer] after its admin gate. The body is
+    [declaration_id], [ask_id], [answers] and an optional [session_id]; the
+    responder is the Dashboard surface with [actor]. A missing question is 404,
+    one already answered or withdrawn is 409 with the recorded state, answers
+    that do not fit the questions are 400 with every reason. *)

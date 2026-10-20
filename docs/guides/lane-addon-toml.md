@@ -218,6 +218,8 @@ manifest 에 `[world.asks] operator = true` 가 있는 패키지는 운영자에
 - host 는 같은 `request_id` 의 질문을 한 번만 기록한다. 같은 id 로 다른 질문을 내면 `request_id_reused` 다.
 - 운영자가 답할 때까지 결과는 주지 않고 `awaiting_operator` 로 기다린다. 답하면 그 설치의 주기가 돌아 `{"status": "answered", "answers", "responder", "answered_at"}` 를 준다. worker 가 내려가 있으면 답은 저장돼 있다가 다음 worker 가 질문을 다시 낼 때 전달된다.
 - 철회는 패키지만 한다: `{"kind": "withdraw_ask", "request_id", "ask_id", "reason"}`. 결과는 `withdrawn` 이고, 이미 답한 질문이면 `already_answered` 다. 그 뒤 질문 자체도 `{"status": "withdrawn"}` 로 끝난다.
+- 열린 질문은 `GET /api/v1/lane-addons/asks` 로 본다. 답한 질문과 철회한 질문까지 보려면 `include_resolved=true` 를 붙인다. 질문과 상태는 Keeper 질문 목록과 같은 모양이고, 각 줄에 `declaration_id` 와 `title` 이 붙는다.
+- 답은 `POST /api/v1/lane-addons/ask-answer` 에 `{"declaration_id", "ask_id", "answers", "session_id"}` 로 보낸다. `answers` 는 Keeper 질문에 답할 때와 같다. 운영자(admin) 토큰만 답할 수 있고, Keeper 토큰은 403 이다. 없는 질문은 404, 이미 답했거나 철회된 질문은 409, 질문에 맞지 않는 답은 400 이다.
 - `[world.asks]` 가 없는 패키지나 수동 Attach 의 질문은 `not_allowed` 다.
 - 기한은 없다. 열린 질문은 답하거나 철회할 때까지 열려 있다.
 

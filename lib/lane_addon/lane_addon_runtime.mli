@@ -209,6 +209,20 @@ val installation_questions :
   config:Workspace.config -> ((string * Lane_addon_asks.row list) list, string) result
 (** Every declaration's questions, by declaration id, in the order asked. *)
 
+type host_issue =
+  | Listing_failed of string
+  | Listing_refused of string
+  | Relisted_delivered_request of string
+  | Result_delivery_failed of { request_id : string; detail : string }
+  | Exact_record_failed of { request_id : string; detail : string }
+  | Ask_record_failed of { request_id : string; detail : string }
+  | No_exact_runner
+(** What stopped an instance's last host request cycle (RFC operator-quiz
+    §4.4). A detail is the failure's own text and may be blank. *)
+
+val host_issue_to_json : host_issue -> Yojson.Safe.t
+(** The [issue] of an instance's [host_requests] in the inspect payload. *)
+
 module For_testing : sig
   val with_cleanup_writer :
     (store:Lane_addon_store.t -> instance_id:string -> Yojson.Safe.t option ->

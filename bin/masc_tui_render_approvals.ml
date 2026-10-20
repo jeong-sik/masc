@@ -284,7 +284,9 @@ let draw_ask_answer_feedback buf cols (state : state) =
            | None -> "Original asking turn: not recorded"
            | Some reference -> Printf.sprintf "Original asking turn: #%d" (Ids.Turn_ref.absolute_turn reference) in
          box_wrapped_field buf cols ~head:"  " ~style:Ansi.dim source
-     | Decode.Ask_installation _ -> ());
+     | Decode.Ask_installation { ai_title; _ } ->
+         box_wrapped_field buf cols ~head:"  " ~style:Ansi.dim
+           ("g: open " ^ Terminal_text.single_line ai_title ^ " Results"));
     Option.iter (fun reading ->
       let observed = Ask_projection.followup_view reading in
       let pending source = match source.Ask_projection.fo_state with

@@ -3,12 +3,35 @@ module Document = Masc_tui_lane_declaration
 module Action = Masc.Lane_addon_action
 module Application = Masc_tui_lane_application
 type runtime_presence = Live_entry | Retained_binding | Presence_unknown
+type host_wait =
+  | Host_wait_exact of Masc.Lane_addon_exact.not_final
+  | Host_wait_operator
+  | Host_wait_source of string
+type host_issue =
+  | Host_listing_failed of string
+  | Host_listing_refused of string
+  | Host_relisted_delivered_request of string
+  | Host_result_delivery_failed of { request_id : string; detail : string }
+  | Host_exact_record_failed of { request_id : string; detail : string }
+  | Host_ask_record_failed of { request_id : string; detail : string }
+  | Host_no_exact_runner
+type host_requests = {
+  hr_cycles : int;
+  hr_waiting : (string * host_wait) list;
+  hr_issue : host_issue option;
+}
+(** The live instance's last host request cycle: how many passes it ran,
+    the requests left waiting and why, and what stopped it. A projection;
+    nothing here decides. *)
 type instance = {
   id : string; run_id : string; addon_id : string; title : string;
   revision : string; phase : Row.phase; runtime_presence : runtime_presence;
   observation_seq : int; rows_count : int;
   installation_id : string option; source_path : string option; configuration_revision : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
   skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
+  host_requests : (host_requests, string) result option;
+      (** [None]: the Inspect row carries none (a retained run). An unreadable
+          value is [Error] for this field alone, so the rest still shows. *)
 }
 type declaration_origin = Parsed_declaration | Issue_only
 type declaration = {
@@ -85,6 +108,24 @@ val installation_reading : t -> installation_reading
 val initial : t
 val parse_request : string -> (request, string) result
 val decode : Yojson.Safe.t -> (snapshot, string) result
+type read_target =
+  | Read_screen  (** Applies to whatever screen the view shows. *)
+  | Read_detail of string * string
+      (** Opened for this instance's detail; void once the screen leaves it. *)
+  | Read_installation_results of string
+      (** Started by a jump to this installation's Results. The jump is
+          carried by the read that serves it, so it ends with that read. *)
+
+val read_still_wanted : t -> showing:bool -> read_target -> bool
+(** Whether a read's answer still applies to the view. [showing] is whether
+    the Add-ons screen is open: a jump answered after the operator left, or
+    after they opened something else, is not taken. *)
+
+val installation_results : t -> installation_id:string -> t
+(** On a snapshot read for the jump: opens the Results of the installation's
+    live worker with its first result selected. A retained run is not where
+    the reveal appears, so without a live worker the view stays and says so. *)
+
 val decode_configuration : Yojson.Safe.t -> (configuration, string) result
 val begin_application_read : t -> (t * Application.ticket) option
 val finish_application_read : t -> Application.ticket -> (configuration, string) result -> t

@@ -177,6 +177,28 @@ let not_final_to_json = function
     `Assoc [ "reason", `String "provider_configuration_refused"; "detail", `String detail ]
   | Attempt_in_progress -> `Assoc [ "reason", `String "attempt_in_progress" ]
 
+let not_final_of_json json =
+  let fields = match json with `Assoc fields -> fields | _ -> [] in
+  let detail () = match List.assoc_opt "detail" fields with
+    | Some (`String detail) -> Ok detail
+    | Some _ | None -> Error "a not-final reason with a detail needs it as a string" in
+  let only keys = List.sort String.compare (List.map fst fields) = List.sort String.compare keys in
+  match List.assoc_opt "reason" fields with
+  | Some (`String "lane_unconfigured") when only ["reason"] -> Ok (Lane_unavailable Lane_unconfigured)
+  | Some (`String "lane_off") when only ["reason"] -> Ok (Lane_unavailable Lane_off)
+  | Some (`String "no_admitted_slots") when only ["reason"] -> Ok (Lane_unavailable No_admitted_slots)
+  | Some (`String "attempt_in_progress") when only ["reason"] -> Ok Attempt_in_progress
+  | Some (`String "lane_registry_unavailable") when only ["reason"; "detail"] ->
+    let* detail = detail () in Ok (Lane_unavailable (Lane_registry_unavailable { detail }))
+  | Some (`String "provider_unavailable") when only ["reason"; "detail"] ->
+    let* detail = detail () in Ok (Provider_refused (Provider_unavailable { detail }))
+  | Some (`String "provider_auth_refused") when only ["reason"; "detail"] ->
+    let* detail = detail () in Ok (Provider_refused (Provider_auth_refused { detail }))
+  | Some (`String "provider_configuration_refused") when only ["reason"; "detail"] ->
+    let* detail = detail () in Ok (Provider_refused (Provider_configuration_refused { detail }))
+  | Some (`String reason) -> Error ("not a not-final reason of this host: " ^ reason)
+  | Some _ | None -> Error "a not-final reason is an object with a string reason"
+
 type call_outcome =
   | Call_ended of call_final
   | Call_refused of provider_refusal

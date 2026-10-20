@@ -2,6 +2,11 @@ open Alcotest
 open Masc
 module Native = Lane_addon_native_worker
 module Protocol = Lane_addon_worker_protocol
+let launcher = ref ""
+let admission root instance_id =
+  Eio_unix.run_in_systhread (fun () -> Native_addon_lease.prepare
+    ~directories:[Filename.concat root "slot"] ~instance_id)
+  |> (function Ok value -> value | Error error -> fail (Native_addon_lease.error_to_string error))
 
 let server = {|import json,os,signal,sys,time
 root,mode = sys.argv[1:3]
@@ -25,6 +30,9 @@ for line in sys.stdin:
         result = {"protocolVersion":"2025-11-25","capabilities":{"tools":{}},
             "serverInfo":{"name":"native-lifecycle-fixture","version":"1"}}
     elif method == "tools/list":
+        if mode == "validation_gate":
+            open(os.path.join(root,"before-list-reply"),"w").close()
+            while not os.path.exists(os.path.join(root,"gate-held")): time.sleep(.01)
         if mode == "discovery":
             open(os.path.join(root,"waiting"),"w").close()
             while True: time.sleep(0.01)
@@ -48,13 +56,16 @@ let contract () = require (Protocol.contract ~host_requests:false ~action_tool:N
   ~tool_hooks:[Lane_addon_types.Validate_input;Validate_output] ~max_reply_bytes:4096)
 let command root mode : Native.command =
   {executable="python3";arguments=["-c";server;root;mode]}
+let rec remove path =
+  match (Unix.lstat path).Unix.st_kind with
+  | Unix.S_DIR -> Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);Unix.rmdir path
+  | Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> Unix.unlink path
 let with_fixture run =
   let root = Filename.temp_file "addon-native-" ".dir" in
   Sys.remove root;
   Unix.mkdir root 0o700;
   Fun.protect ~finally:(fun () ->
-    Array.iter (fun name -> Sys.remove (Filename.concat root name)) (Sys.readdir root);
-    Unix.rmdir root) (fun () -> Eio_main.run (fun env ->
+    remove root) (fun () -> Eio_main.run (fun env ->
       Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 15. (fun () ->
         Eio.Switch.run (fun sw -> run env sw root))))
 let read root name = In_channel.with_open_bin (Filename.concat root name) In_channel.input_all
@@ -79,7 +90,7 @@ let native_lifecycle () = with_fixture (fun env sw root ->
   let clock = Eio.Stdenv.clock env in
   let cwd = Eio.Path.(Eio.Stdenv.fs env / root) in
   let worker = require (Native.start ~sw ~clock ~grace_seconds:0.02
-    ~instance_id:"native-lifecycle" ~contract:(contract ()) ~command:(command root "descendant")
+    ~admission:(admission root "native-lifecycle") ~launcher:!launcher ~contract:(contract ()) ~command:(command root "descendant")
     ~cwd ~env:(Array.append (Unix.environment ()) [|"MASC_NATIVE_TEST=present"|]) ()) in
   wait_for clock (marker root "child");
   let spawned = Yojson.Safe.from_string (read root "spawned") in
@@ -111,7 +122,7 @@ let discovery_stop () = with_fixture (fun env sw root ->
     check int "discovery publishes no exports" 0 (List.length (Native.exported_tools worker));
     Native.request_stop worker) in
   check bool "stop interrupts blocked discovery" true
-    (match Native.start ~sw ~clock ~grace_seconds:0.02 ~instance_id:"native-discovery"
+    (match Native.start ~sw ~clock ~grace_seconds:0.02 ~admission:(admission root "native-discovery") ~launcher:!launcher
       ~contract:(contract ()) ~command:(command root "discovery")
       ~on_created:(fun worker -> Eio.Promise.resolve set_created worker;Ok ()) () with
       | Error Native.Stopped -> true | _ -> false);
@@ -122,7 +133,7 @@ let discovery_stop () = with_fixture (fun env sw root ->
 let cancelled_call () = with_fixture (fun env sw root ->
   let clock = Eio.Stdenv.clock env in
   let worker = require (Native.start ~sw ~clock ~grace_seconds:0.02
-    ~instance_id:"native-call-cancel" ~contract:(contract ()) ~command:(command root "tool") ()) in
+    ~admission:(admission root "native-call-cancel") ~launcher:!launcher ~contract:(contract ()) ~command:(command root "tool") ()) in
   let cancelled = ref false in
   ignore (Eio.Fiber.first
     (fun () -> try
@@ -141,7 +152,7 @@ let cancelled_start () = with_fixture (fun env sw root ->
   let cancelled = ref false in
   ignore (Eio.Fiber.first
     (fun () -> try
-      ignore (Native.start ~sw ~clock ~grace_seconds:0.02 ~instance_id:"native-start-cancel"
+      ignore (Native.start ~sw ~clock ~grace_seconds:0.02 ~admission:(admission root "native-start-cancel") ~launcher:!launcher
         ~contract:(contract ()) ~command:(command root "discovery")
         ~on_created:(fun worker -> Eio.Promise.resolve set_created worker;Ok ()) ());
       fail "blocked start unexpectedly returned"
@@ -154,6 +165,7 @@ let cancelled_start () = with_fixture (fun env sw root ->
 exception Owner_cancelled
 let cancelled_owner () = with_fixture (fun env sw root ->
   let clock = Eio.Stdenv.clock env in
+  let claim = admission root "cancelled-owner" in
   let offered,set_offered = Eio.Promise.create () in
   let leave,set_leave = Eio.Promise.create () in
   Eio.Switch.check sw;
@@ -169,15 +181,98 @@ let cancelled_owner () = with_fixture (fun env sw root ->
     check bool "already-cancelled owner is refused before scheduling" true
       (try
         ignore (Native.start ~sw:owner_sw ~clock ~grace_seconds:0.02
-          ~instance_id:"cancelled-owner" ~contract:(contract ()) ~command:(command root "normal") ());
+          ~admission:claim ~launcher:!launcher ~contract:(contract ()) ~command:(command root "normal") ());
         false
        with Eio.Cancel.Cancelled _ -> true);
-    check bool "cancelled owner never spawns a process" false (marker root "spawned" ())))
+    check bool "cancelled owner never spawns a process" false (marker root "spawned" ());
+    require (Eio_unix.run_in_systhread (fun () -> Native_addon_lease.retire claim));
+    check bool "caller retains untransferred admission" true
+      (Eio_unix.run_in_systhread (fun () -> Native_addon_lease.status claim)=Ok Native_addon_lease.Settled)))
 
-let () = run "Native Addon live process ownership"
+let replacement_preserves_receipt () = with_fixture (fun env sw root ->
+  let clock = Eio.Stdenv.clock env in
+  let first = require (Native.start ~sw ~clock ~grace_seconds:0.02
+    ~admission:(admission root "first") ~launcher:!launcher ~contract:(contract ())
+    ~command:(command root "normal") ()) in
+  let released = require (Native.stop first) in
+  let second = require (Native.start ~sw ~clock ~grace_seconds:0.02
+    ~admission:(admission root "second") ~launcher:!launcher ~contract:(contract ())
+    ~command:(command root "normal") ()) in
+  check int "historical receipt stays bound to original child" released.pid
+    (require (Native.stop first)).pid;
+  check bool "old calls cannot target replacement" true
+    (match Native.call_exported_tool first ~name:"increment" ~arguments:(`Assoc ["value",`Int 2]) with
+     | Error (Native.Protocol Protocol.Stopped) -> true | _ -> false);
+  let reply = require (Native.call_exported_tool second ~name:"increment" ~arguments:(`Assoc ["value",`Int 8])) in
+  check bool "replacement remains usable" true (reply.structured_content=Some (`Assoc ["value",`Int 9]));
+  assert_released second (require (Native.stop second)))
+
+let failed_retirement_still_reaps () = with_fixture (fun env sw root ->
+  let clock = Eio.Stdenv.clock env in
+  let claim = admission root "retirement-failure" in
+  let created = ref None in
+  let result = Native.start ~sw ~clock ~grace_seconds:0.02 ~admission:claim
+    ~launcher:!launcher ~contract:(contract ()) ~command:(command root "normal")
+    ~on_created:(fun worker ->
+      created := Some worker;
+      wait_for clock (marker root "spawned");
+      check int "pre-discovery exports stay unavailable" 0 (List.length (Native.exported_tools worker));
+      Unix.chmod (Filename.concat root "slot") 0o755;
+      Error "fixture refuses publication") () in
+  Unix.chmod (Filename.concat root "slot") 0o700;
+  check bool "retirement failure remains unconfirmed" true
+    (match result with Error (Native.Cleanup_unconfirmed _) -> true | Ok _ | Error _ -> false);
+  let pid = Yojson.Safe.Util.(Yojson.Safe.from_string (read root "spawned") |> member "pid" |> to_int) in
+  check bool "failed retirement does not skip group cleanup" false
+    (Posix_spawn_detached.group_id_has_members pid);
+  (match created with
+   | {contents=Some worker} ->
+       check int "failed owner exports remain revoked" 0 (List.length (Native.exported_tools worker));
+       check bool "failure never becomes a release receipt" true
+         (match Native.release worker with Some (Error (Native.Cleanup_unconfirmed _)) -> true | _ -> false)
+   | {contents=None} -> fail "missing exact created worker");
+  require (Eio_unix.run_in_systhread (fun () -> Native_addon_lease.retire claim)))
+
+let blocked_validation_still_stops () = with_fixture (fun env sw root ->
+  let clock = Eio.Stdenv.clock env in
+  let claim = admission root "validation-gate" in
+  let release_gate () = Out_channel.with_open_bin (Filename.concat root "release-gate")
+    (fun channel -> output_string channel "release") in
+  Fun.protect ~finally:release_gate (fun () ->
+    let created,set_created = Eio.Promise.create () in
+    Eio.Switch.check sw;
+    let starting = Eio.Fiber.fork_promise ~sw (fun () ->
+      Native.start ~sw ~clock ~grace_seconds:0.02 ~admission:claim ~launcher:!launcher
+        ~contract:(contract ()) ~command:(command root "validation_gate")
+        ~on_created:(fun worker -> Eio.Promise.resolve set_created worker;Ok ()) ()) in
+    let worker = Eio.Promise.await created in
+    wait_for clock (marker root "before-list-reply");
+    let blocker_script = "import fcntl,pathlib,sys,time\nroot=pathlib.Path(sys.argv[1])\nf=(root/'slot'/'gate').open('r+')\nfcntl.lockf(f,fcntl.LOCK_EX)\n(root/'gate-held').write_text('held')\nwhile not (root/'release-gate').exists(): time.sleep(.01)" in
+    let blocker = Eio.Process.spawn ~sw (Eio.Stdenv.process_mgr env)
+      ["python3";"-c";blocker_script;root] in
+    wait_for clock (marker root "gate-held");
+    wait_for clock (fun () -> Native.phase worker=Native.Validating_owner);
+    Native.request_stop worker;
+    let pid = Yojson.Safe.Util.(Yojson.Safe.from_string (read root "spawned") |> member "pid" |> to_int) in
+    wait_for clock (fun () -> not (Posix_spawn_detached.group_id_has_members pid));
+    check bool "owned child exits while unrelated gate remains held" false (marker root "release-gate" ());
+    check bool "blocked retirement cannot fabricate release" true (Native.release worker=None);
+    release_gate ();
+    check bool "late validation cannot restore serving" true
+      (match Eio.Promise.await_exn starting with Error _ -> true | Ok _ -> false);
+    assert_released worker (await_release clock worker);
+    check bool "unrelated holder exits by its own release" true (Eio.Process.await blocker=`Exited 0)))
+
+let () =
+  if Array.length Sys.argv <> 2 then failwith "expected actual native Addon launcher path";
+  launcher := Unix.realpath Sys.argv.(1);
+  run ~argv:[|Sys.argv.(0)|] "Native Addon live process ownership"
   ["ownership",[
     test_case "shared contracts, cwd, environment and owned descendant release" `Quick native_lifecycle;
     test_case "stop interrupts actual blocked discovery" `Quick discovery_stop;
     test_case "cancelled tool call cleans up without an explicit stop" `Quick cancelled_call;
     test_case "cancelled startup cleans up without an explicit stop" `Quick cancelled_start;
-    test_case "already-cancelled owner cannot leave startup pending" `Quick cancelled_owner]]
+    test_case "already-cancelled owner cannot leave startup pending" `Quick cancelled_owner;
+    test_case "historical receipt cannot affect a replacement" `Quick replacement_preserves_receipt;
+    test_case "failed retirement still reaps owned process" `Quick failed_retirement_still_reaps;
+    test_case "blocked validation still stops exact child" `Quick blocked_validation_still_stops]]

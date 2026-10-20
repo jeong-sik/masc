@@ -1,7 +1,6 @@
 (** Live ownership of a host-process Addon. Uses the shared MCP protocol and
     an owned foreground process group; makes no container isolation claim.
-    Caller admission and durable slot/restart recovery remain separate from
-    this live handle. Descendants deliberately leaving the group are outside
+    Requires durable admission before scheduling. Descendants leaving the group are outside
     its release receipt and need their package's explicit resource cleanup. *)
 type command = { executable : string; arguments : string list }
 type release = {
@@ -11,17 +10,23 @@ type release = {
   exit_status : Eio.Process.exit_status;
 }
 type error = Invalid_specification of string | Start_failed of string
+  | Admission of Native_addon_lease.error
   | Protocol of Lane_addon_worker_protocol.error | Cleanup_unconfirmed of string
   | Stopped
 type t
+type phase = Initializing | Validating_owner | Serving | Retired
+val phase : t -> phase
 val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock ->
-  grace_seconds:float -> instance_id:string ->
+  grace_seconds:float -> admission:Native_addon_lease.t -> launcher:string ->
   contract:Lane_addon_worker_protocol.contract -> command:command ->
   ?cwd:Eio.Fs.dir_ty Eio.Path.t -> ?env:string array ->
   ?artifact_store:Lane_addon_store.t ->
   ?on_created:(t -> (unit, string) result) -> unit -> (t, error) result
 (** The switch belongs to the host owner, not a Keeper turn. Calls are admitted
-    only after discovery succeeds. [on_created] runs before discovery and can
+    only after discovery and exact kernel-owner validation succeed. Instance ID
+    comes from [admission]; [launcher] is the trusted installed host executable.
+    Scheduling transfers this claim to one host owner; before scheduling, errors
+    or cancellation leave retirement to the caller. [on_created] runs before discovery and can
     retain this exact handle or request stop while initialization is blocked.
     Cancellation of startup or an operation requests background cleanup and
     propagates. No retry.
@@ -30,10 +35,15 @@ val request_stop : t -> unit
 (** Non-blocking revocation and stop request, including from [on_created]. *)
 val stop : t -> (release, error) result
 (** Revoke first, then terminate/reap the owned group. A release is returned
-    only after the exact child exit and an observed empty process group.
+    only after exact child exit, durable retirement and admission settlement.
+    Retirement and owned-group cleanup run concurrently so a launcher holding
+    its gates cannot prevent its own termination. Neither alone proves release.
     Repeated calls await the same completion; they never restart a command. *)
 val release : t -> (release, error) result option
+(** A confirmed receipt remains evidence for this original incarnation after
+    replacement. Pending checks may yield for kernel/file observations. *)
 val exported_tools : t -> Mcp_protocol.Mcp_types.tool list
+val action_schema : t -> Yojson.Safe.t option
 val observe : t -> binding:Yojson.Safe.t -> sources:Yojson.Safe.t ->
   (Lane_addon_types.output, error) result
 val act : t -> arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, error) result

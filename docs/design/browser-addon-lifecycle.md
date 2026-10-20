@@ -35,9 +35,9 @@ receipts remain distinct from successful contract validation.
    without a container engine. Its host switch owns a foreground process group;
    cancelled startup or calls request cleanup, and exports are revoked before
    cleanup. Release requires an exited exact child and no observed live group
-   members. The handle does not establish durable admission/restart recovery,
-   profile ownership, or cleanup of descendants that leave that group. Native
-   runtime selection and those resource contracts remain to be wired.
+   members. Its required durable admission now comes from host-owned installation
+   and resource slots. Native Runtime selection, browser-profile claim selection
+   and cleanup of descendants that leave that group remain to be wired.
    Package declarations now separate `Container` from `Host_process`. A
    `runtime = "host_process"` manifest declares only `resources.max_reply_bytes`;
    image, CPU, memory and PID-limit fields are rejected. Shared protocol, source
@@ -56,8 +56,13 @@ receipts remain distinct from successful contract validation.
    refusal, not evidence of a new instance. Partial preparation requires a fresh
    ID. Retirement fences late launchers before identity-bound TERM; settlement
    requires no holder, no original process and no live foreground group.
-   This admission component is not yet connected to the live native worker or
-   Runtime installation selection. Its payload must preserve inherited lease
+   The live native worker now requires this admission and the installed launcher;
+   its instance ID comes only from the admission. MCP discovery and observed
+   kernel ownership must both succeed before tools become visible. A stop watcher
+   signals the exact owned process independently of blocked gate I/O. Retirement
+   and process cleanup join before release, and only an observed settled claim
+   creates a retained receipt. A late validation cannot restore a retired worker.
+   Runtime installation selection remains separate. The payload must preserve inherited lease
    descriptors; trusted native execution is not container isolation. This follows
    [POSIX exec/descriptor semantics](https://pubs.opengroup.org/onlinepubs/9799919799/functions/exec.html):
    closing a descriptor for a process-owned lease inode releases its locks.

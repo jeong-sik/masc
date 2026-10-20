@@ -439,6 +439,9 @@ let to_json_with_operator_disposition
           ; "selected_model", string_opt_json receipt.runtime_selected_model
           ; "attempt_count", `Int receipt.runtime_attempt_count
           ; "lane_attempt_count", `Int receipt.runtime_lane_attempt_count
+          ; "lane_evidence", (match receipt.runtime_lane_evidence with
+              | Some evidence -> Keeper_runtime_walk_evidence.to_yojson evidence
+              | None -> `Null)
           ; "fallback_applied", `Bool receipt.runtime_fallback_applied
           ; "outcome", `String (runtime_outcome_to_string receipt.runtime_outcome)
           ; "agent_core_internal_runtime_allowed", `Bool receipt.agent_core_internal_runtime_allowed

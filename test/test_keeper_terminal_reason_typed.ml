@@ -166,6 +166,7 @@ let roundtrip_corpus =
   ; ""
   ]
 
+
 let () =
   List.iter
     (fun s ->
@@ -336,6 +337,7 @@ let base_receipt : R.t =
   ; runtime_selected_model = None
   ; runtime_attempt_count = 1
   ; runtime_lane_attempt_count = 1
+  ; runtime_lane_evidence = None
   ; runtime_fallback_applied = false
   ; runtime_outcome = R.Runtime_completed
   ; agent_core_internal_runtime_allowed = true
@@ -351,6 +353,28 @@ let base_receipt : R.t =
   ; extra_system_context_computed_size = None
   }
 ;;
+
+let () =
+  let module Evidence = Keeper_runtime_walk_evidence in
+  let errors =
+    [Evidence.observe_failure ~runtime_id:"first.runtime" ~attempt:0
+       ~dispatch:Runtime_attempt_dispatch.Dispatched
+       (Agent_core.Error.Api (Agent_core.Retry.InvalidRequest
+         {message="Prompt exceeds max length";reason=Agent_core.Retry.Unknown_invalid_request}));
+     Evidence.observe_failure ~runtime_id:"last.runtime" ~attempt:1
+       ~dispatch:Runtime_attempt_dispatch.Dispatched
+       (Agent_core.Error.Api (Agent_core.Retry.RateLimited {message="quota";retry_after=None}))] in
+  let evidence = {Evidence.failures=errors;terminal=Evidence.Terminal_not_observed} in
+  let receipt={base_receipt with runtime_lane_evidence=Some evidence;
+    runtime_lane_attempt_count=2;runtime_fallback_applied=true} in
+  let json=R.to_json receipt in
+  let encoded=Yojson.Safe.Util.(json |> member "runtime" |> member "lane_evidence") in
+  check "canonical receipt preserves ordered earlier candidate failures"
+    (Evidence.of_yojson encoded=Ok evidence);
+  let not_observed=Yojson.Safe.Util.(R.to_json base_receipt |> member "runtime" |> member "lane_evidence") in
+  check "a receipt without captured walk does not claim an empty walk" (not_observed=`Null)
+;;
+
 
 let () =
   List.iter

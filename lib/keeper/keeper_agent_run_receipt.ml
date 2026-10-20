@@ -81,6 +81,7 @@ let finalize
     ~receipt_stop_reason_ref
     ~receipt_runtime_observation_ref
     ~receipt_lane_attempt_index_ref
+    ~(runtime_lane_evidence : Keeper_runtime_walk_evidence.t option)
     ~receipt_response_text_present_ref
     ~(spend : Keeper_turn_spend.attempt list)
     () =
@@ -185,6 +186,7 @@ let finalize
          fallback_applied=true. The index of the candidate that won is one less
          than the number routed, and the turn already has it. *)
     ; runtime_lane_attempt_count = lane_attempt_count
+    ; runtime_lane_evidence
     ; runtime_fallback_applied = lane_failover_applied
     ; runtime_outcome
     ; agent_core_internal_runtime_allowed =

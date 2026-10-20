@@ -216,6 +216,7 @@ let record_pre_dispatch_terminal_observation
       (* One candidate is the floor: a turn that ran routed to something. A
          pre-dispatch receipt that never routed is the caller's to override. *)
     ; runtime_lane_attempt_count = 1
+    ; runtime_lane_evidence = None
     ; runtime_fallback_applied = false
     ; runtime_outcome = Keeper_execution_receipt.Runtime_not_dispatched
       (* A pre-dispatch receipt never reached a provider, so it took up no

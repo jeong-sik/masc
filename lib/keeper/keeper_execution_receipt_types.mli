@@ -59,6 +59,9 @@ type t = {
           that one belongs to the runtime that won, and on a failover the
           receipt showed 1 beside [runtime_fallback_applied = true] while the
           manifest recorded two routings. 1 when nothing failed over. *)
+  runtime_lane_evidence : Keeper_runtime_walk_evidence.t option;
+      (** Ordered candidate failures and actual terminal origin observed by
+          AgentRun. [None] means not captured, never an observed empty walk. *)
   runtime_fallback_applied : bool;
   runtime_outcome : runtime_outcome;
   agent_core_internal_runtime_allowed : bool;

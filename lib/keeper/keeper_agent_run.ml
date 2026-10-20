@@ -976,9 +976,14 @@ let run_turn
       ~turn_kind ~input_speaker ~world_observation ~hitl_resolution
       ~history_assistant_source in
   let deferred_runtime_lane_ref = ref None in
+  let runtime_failures_rev = ref [] in
+  let runtime_terminal = ref Keeper_runtime_walk_evidence.Terminal_not_observed in
+  let runtime_walk_observed = ref false in
   let record_produced_checkpoint ~runtime_id ~attempt checkpoint =
     Option.iter (fun callback -> callback ~runtime_id ~attempt checkpoint) on_produced_checkpoint in
   let record_runtime_lane_terminal_error (error : Keeper_turn_driver.lane_terminal_error) =
+    runtime_terminal := Keeper_runtime_walk_evidence.observe_terminal
+      ~runtime_id:error.origin_runtime_id ~attempt:error.origin_attempt error.lane_error;
     Option.iter (record_produced_checkpoint ~runtime_id:error.origin_runtime_id ~attempt:error.origin_attempt)
       error.checkpoint_after;
     Option.iter (fun callback -> callback error) on_runtime_lane_terminal_error in
@@ -1918,6 +1923,7 @@ let run_turn
                    boundaries settle the lane, while usage remains observational. *)
                 dispatch_input
                   ~dispatch:(fun ~checkpoint initial_messages ->
+                    runtime_walk_observed := true;
                     Keeper_turn_driver.run_named
                       ~on_memory_capacity_refusal:s.Keeper_run_tools.on_memory_capacity_refusal
                       ~input_policy:meta.input_policy
@@ -2016,6 +2022,9 @@ let run_turn
                            s.Keeper_run_tools.on_runtime_attempt attempt)
                       ~on_runtime_attempt_error:
                         (fun ~runtime_id ~attempt ~dispatch error ->
+                           runtime_failures_rev :=
+                             Keeper_runtime_walk_evidence.observe_failure
+                               ~runtime_id ~attempt ~dispatch error :: !runtime_failures_rev;
                            Keeper_turn_preview.note_failure ~writer:preview
                              ~now:(Time_compat.now ()) ~runtime_id
                              (Agent_core.Error.to_string error);
@@ -2463,6 +2472,11 @@ let run_turn
            ~receipt_stop_reason_ref
            ~receipt_runtime_observation_ref
            ~receipt_lane_attempt_index_ref
+           ~runtime_lane_evidence:
+             (if !runtime_walk_observed then
+                Some {Keeper_runtime_walk_evidence.failures=List.rev !runtime_failures_rev;
+                      terminal= !runtime_terminal}
+              else None)
            ~receipt_response_text_present_ref
            ~spend:(s.Keeper_run_tools.spend_attempts ())
            ()

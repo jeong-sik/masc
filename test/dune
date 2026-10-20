@@ -157,6 +157,8 @@
  (modules test_keeper_request_failure)
  (libraries masc_test_deps))
 
+(include stanzas/test_keeper_runtime_walk_evidence.inc)
+
 (test
  (name test_keeper_tool_execute_script_paths)
  (modules test_keeper_tool_execute_script_paths)

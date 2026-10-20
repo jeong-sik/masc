@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 const directory=await mkdtemp(join(tmpdir(),'masc-live-midi-reservations-'))
 try {
- const names=['MidiTransport','UmpTransport','UmpOutput','UmpState','UmpLiveInput','UmpRegions','HybridMidiTransport','UmpLoopTransport','CaptureAudioClock','WaveLoopClock','PulseAudioClock','PulseLoopClock','LiveMidiReservations','LiveMidiMain']
+ const names=['MidiTransport','UmpTransport','UmpOutput','UmpState','UmpLiveInput','UmpRegions','HybridMidiTransport','UmpLoopTransport','CaptureAudioClock','SourceAudioClock','WaveLoopClock','PulseAudioClock','PulseLoopClock','LiveMidiReservations','LiveMidiMain']
  let result=spawnSync('xcrun',['swiftc','-parse-as-library','-D','MIDI_LIBRARY',...names.map(name=>new URL(name+'.swift',import.meta.url).pathname),'-o',join(directory,'probe'),'-framework','CoreMIDI'],{encoding:'utf8'})
  assert.equal(result.status,0,result.stderr)
  let serial=0

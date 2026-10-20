@@ -8,14 +8,15 @@ val configuration_to_json : configuration -> Yojson.Safe.t
 val configuration_of_json : Yojson.Safe.t -> (configuration, string) result
 type t
 type error = Retired | Output_disabled of string | Request_in_use
-  | Receipt_failed of string | Invalid_result of string
+  | Receipt_failed of string | Invalid_result of string | Schema_refused of string
 val error_to_string : error -> string
 type outcome = Final of Lane_addon_exact.final
   | Exceeds_frame of { sha256 : string; bytes : int }
 val create : incarnation:string -> configuration:configuration -> (t, string) result
 val incarnation : t -> string
-val output_schema : t -> name:string -> Yojson.Safe.t option
-(** Effective selected schema while serving; no provider or filesystem access. *)
+val output : t -> name:string -> Lane_addon_types.exact_output option
+(** Effective selected baseline and request-schema grant while serving; no
+    provider or filesystem access. Both are pinned to this incarnation. *)
 val request : t -> Lane_addon_exact.request -> (outcome, error) result
 (** Publishes one request and waits. Completion/cancellation withdraws only
     this waiter and signals a new availability revision. No input is replayed. *)

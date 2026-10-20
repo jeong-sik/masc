@@ -3495,12 +3495,13 @@ let read_ndjson
 ;;
 
 type body_injection_error =
-  | Body_not_json of { detail : string }
+  | Body_not_json
   | Body_not_object
 
+(* No parser message here: Yojson quotes a fragment of the text it rejected,
+   and this body is the prompt payload. *)
 let body_injection_error_to_string = function
-  | Body_not_json { detail } ->
-    Printf.sprintf "request body is not valid JSON: %s" detail
+  | Body_not_json -> "request body is not valid JSON"
   | Body_not_object -> "request body is not a JSON object"
 ;;
 
@@ -3512,7 +3513,7 @@ let inject_into_object_body body_str inject =
   | `Assoc fields -> Ok (Yojson.Safe.to_string (`Assoc (inject fields)))
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
     Error Body_not_object
-  | exception Yojson.Json_error detail -> Error (Body_not_json { detail })
+  | exception Yojson.Json_error _ -> Error Body_not_json
 ;;
 
 let inject_stream_param body_str =

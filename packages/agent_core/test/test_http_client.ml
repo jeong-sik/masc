@@ -33,9 +33,26 @@ let test_inject_stream_param_existing_stream () =
 
 let test_inject_stream_param_non_json () =
   match Http_client.inject_stream_param "not json" with
-  | Error (Http_client.Body_not_json _) -> ()
+  | Error Http_client.Body_not_json -> ()
   | Error Http_client.Body_not_object -> Alcotest.fail "unparseable text is not JSON at all"
   | Ok body -> Alcotest.failf "an unparseable body was accepted as %S" body
+;;
+
+(* The rejection text reaches [AcceptRejected.reason] and the logs, and the
+   body is the prompt payload, so it must not quote any of it. *)
+let test_injection_error_text_does_not_quote_the_body () =
+  let secret = "sk-secret-prompt-fragment" in
+  List.iter
+    (fun body ->
+       match Http_client.inject_stream_param body with
+       | Ok accepted -> Alcotest.failf "a malformed body was accepted as %S" accepted
+       | Error error ->
+         let text = Http_client.body_injection_error_to_string error in
+         Alcotest.(check bool)
+           ("error text omits the body " ^ body)
+           false
+           (Util.contains_substring_ci ~haystack:text ~needle:secret))
+    [ {|{"prompt":"|} ^ secret ^ {|" oops}|}; "[\"" ^ secret ^ "\"]" ]
 ;;
 
 let test_inject_stream_param_empty () =
@@ -49,7 +66,7 @@ let test_inject_stream_param_empty () =
 let test_inject_stream_param_array () =
   match Http_client.inject_stream_param "[1,2,3]" with
   | Error Http_client.Body_not_object -> ()
-  | Error (Http_client.Body_not_json _) -> Alcotest.fail "an array is valid JSON"
+  | Error Http_client.Body_not_json -> Alcotest.fail "an array is valid JSON"
   | Ok body -> Alcotest.failf "a JSON array was accepted as %S" body
 ;;
 
@@ -79,11 +96,19 @@ let test_finalize_stream_body_rejects_unstreamable_body () =
        | Error (Http_client.AcceptRejected _) -> ()
        | Error _ -> Alcotest.fail "expected AcceptRejected"
        | Ok body -> Alcotest.failf "an unparseable body was finalized as %S" body)
-    [ Provider_http_codec.Anthropic_messages
-    ; Provider_http_codec.Ollama_chat
-    ; Provider_http_codec.Openai_chat
-    ; Provider_http_codec.Glm_chat
-    ]
+    (List.map
+       (fun kind ->
+          Provider_http_codec.of_config
+            (Provider_config.make
+               ~kind
+               ~model_id:"model"
+               ~base_url:"https://example.invalid"
+               ()))
+       [ Provider_config.Anthropic
+       ; Provider_config.Ollama
+       ; Provider_config.OpenAI_compat
+       ; Provider_config.Glm
+       ])
 ;;
 
 let test_inject_stream_and_options_parity () =
@@ -1210,6 +1235,10 @@ let () =
         ; Alcotest.test_case "empty object" `Quick test_inject_stream_param_empty
         ; Alcotest.test_case "array" `Quick test_inject_stream_param_array
         ; Alcotest.test_case "refusals agree" `Quick test_inject_stream_refusals_agree
+        ; Alcotest.test_case
+            "error text does not quote the body"
+            `Quick
+            test_injection_error_text_does_not_quote_the_body
         ; Alcotest.test_case
             "finalize rejects unstreamable body"
             `Quick

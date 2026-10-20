@@ -185,6 +185,10 @@ val answer_of_success : Agent_core.Exact_output.success -> Yojson.Safe.t
     report (#38669). Cache-write tokens have no field in [LLMUsage] and are
     already inside [input_tokens]. *)
 
+val answer_of_output : ?usage:Agent_core.Types.api_usage -> Yojson.Safe.t -> Yojson.Safe.t
+(** The same structured protocol answer, without coupling the formatter to a
+    provider flow. Missing/unreported usage is omitted by the same rules. *)
+
 val create
   :  ?cli_runner:Keeper_lane_cli_oneshot.runner
   -> ?on_refusal:(refusal -> unit)

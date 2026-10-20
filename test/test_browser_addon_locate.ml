@@ -26,7 +26,8 @@ let scenario manifest =
     Eio.Time.with_timeout_exn clock 15. (fun () ->
     Eio_context.with_test_env ~sw ~clock ~net:(Eio.Stdenv.net env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
       let package=Lane_addon_manifest.load ~path:manifest |> ok in
-      check int "bundled package declares its model consumer" 1 (List.length package.exact_outputs);
+      check bool "bundled package declares its locate model consumer" true
+        (List.exists (fun (output:Lane_addon_types.exact_output) -> output.name="locate") package.exact_outputs);
       let incarnation="0b000000-0000-4000-8000-000000000009" in
       let owner=Owner.create ~incarnation |> ok in
       check bool "no selected output exposes no model consumer" true (Browser_addon_locate.for_owner owner=Ok None);

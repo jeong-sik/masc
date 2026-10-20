@@ -20,7 +20,7 @@ val owned_name : Lane_addon_types.runtime -> string -> string
 val valid_id : string -> bool
 val mount_argument : Lane_addon_types.runtime -> mount -> (string, string) result
 val create_arguments :
-  Lane_addon_types.package -> name:string -> instance_id:string -> state_owner:string option ->
+  Lane_addon_types.container -> command:string list -> name:string -> instance_id:string -> state_owner:string option ->
   scope:string option -> image:string ->
   package_mount:string -> mounts:string list -> state_mounts:string list -> string list
 val start_arguments : Lane_addon_types.runtime -> string -> string list

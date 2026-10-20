@@ -1,6 +1,7 @@
 open Lane_addon_types
 let ( let* ) = Result.bind
 type error = Invalid_manifest of string | Io_failure of string
+type execution_kind = Container_runtime of runtime | Host_runtime
 let error_to_string = function Invalid_manifest detail | Io_failure detail -> detail
 let output_ports world =
   let parse_port (id, value) =
@@ -253,17 +254,18 @@ let load ~path =
     let* id = text ["id"] in
     let* revision = text ["revision"] in
     let* title = text ["title"] in
-    let* image = text ["image"] in
     let* runtime = match Otoml.find_opt document Fun.id ["runtime"] with
-      | None -> Ok Docker
+      | None -> Ok (Container_runtime Docker)
+      | Some (Otoml.TomlString "host_process") -> Ok Host_runtime
       | Some (Otoml.TomlString value) ->
-          Option.to_result ~none:"runtime requires docker or apple_container" (runtime_of_string value)
+          Option.to_result ~none:"runtime requires docker, apple_container or host_process" (runtime_of_string value)
+          |> Result.map (fun runtime -> Container_runtime runtime)
       | Some (Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
              | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
              | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
              | Otoml.TomlTable _ | Otoml.TomlInlineTable _
              | Otoml.TomlTableArray _) ->
-          Error "runtime requires docker or apple_container" in
+          Error "runtime requires docker, apple_container or host_process" in
     let* command = read ["command"] (Otoml.get_array Otoml.get_string) in
     let* names = read ["contributions"] (Otoml.get_array Otoml.get_string) in
     let* contributions =
@@ -278,28 +280,44 @@ let load ~path =
       | true, Some tool when tool <> "lane_observe" -> Ok ()
       | false, None -> Ok ()
       | _ -> Error "act contribution requires a distinct world.actions.tool, and vice versa" in
-    let* cpus = read ["resources"; "cpus"] (Otoml.get_float ~strict:false) in
-    let* memory = read ["resources"; "memory_bytes"] Otoml.get_integer in
-    let* pids = match Otoml.find_opt document Fun.id ["resources"; "pids"] with
-      | None -> Ok None
-      | Some (Otoml.TomlInteger value) -> Ok (Some value)
-      | Some (Otoml.TomlString _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
-             | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
-             | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
-             | Otoml.TomlTable _ | Otoml.TomlInlineTable _
-             | Otoml.TomlTableArray _) ->
-          Error "resources.pids requires an integer" in
     let* max_reply_bytes = read ["resources"; "max_reply_bytes"] Otoml.get_integer in
-    if command = [] || List.exists (fun arg -> String.trim arg = "") command
-    then Error "command requires non-blank argv entries"
+    let* execution = match runtime with
+      | Host_runtime ->
+          let* () = match Otoml.find_opt document Fun.id ["image"] with
+            | None -> Ok ()
+            | Some _ -> Error "host_process must omit image" in
+          let* () = match Otoml.find_opt document Fun.id ["resources"] with
+            | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields) ->
+                (match fields with ["max_reply_bytes", _] -> Ok ()
+                 | _ -> Error "host_process resources accept only max_reply_bytes")
+            | None | Some (Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+              | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+              | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+              | Otoml.TomlTableArray _) -> Error "host_process resources accept only max_reply_bytes" in
+          if max_reply_bytes <= 0 then Error "max_reply_bytes must be positive"
+          else Ok (Host_process {max_reply_bytes})
+      | Container_runtime runtime ->
+          let* image = text ["image"] in
+          let* cpus = read ["resources"; "cpus"] (Otoml.get_float ~strict:false) in
+          let* memory = read ["resources"; "memory_bytes"] Otoml.get_integer in
+          let* pids = match Otoml.find_opt document Fun.id ["resources"; "pids"] with
+            | None -> Ok None
+            | Some (Otoml.TomlInteger value) -> Ok (Some value)
+            | Some (Otoml.TomlString _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+                   | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+                   | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+                   | Otoml.TomlTable _ | Otoml.TomlInlineTable _
+                   | Otoml.TomlTableArray _) -> Error "resources.pids requires an integer" in
+          let resources = {cpus;memory_bytes=Int64.of_int memory;pids;max_reply_bytes} in
+          let* () = check_resources ~runtime resources in
+          Ok (Container {runtime;image;resources}) in
+    if command = [] || List.exists (fun arg -> String.trim arg = "" || String.contains arg '\000') command
+    then Error "command requires non-blank argv entries without NUL"
     else if contributions = [] then Error "at least one contribution is required"
-    else
-      let resources = { cpus; memory_bytes = Int64.of_int memory; pids; max_reply_bytes } in
-      match check_resources ~runtime resources with
-      | Error detail -> Error detail
-      | Ok () -> Ok { id; revision; title; contributions = List.rev contributions; runtime; image; command;
-          directory = Filename.dirname path; skills_directory; action_tool; state_storage; tool_invocation; exported_tools; tool_hooks; outputs; refresh_policy; model_access; binding_schema; presentation;
-          exact_outputs; resources }
+    else Ok { id; revision; title; contributions = List.rev contributions; execution; command;
+      directory = Filename.dirname path; skills_directory; action_tool; state_storage;
+      tool_invocation; exported_tools; tool_hooks; outputs; refresh_policy; model_access;
+      binding_schema; presentation; exact_outputs }
   in
   try Result.map_error (fun detail -> Invalid_manifest detail) (parse ()) with
   | Sys_error message -> Error (Io_failure message)

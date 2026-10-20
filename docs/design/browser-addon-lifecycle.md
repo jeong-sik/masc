@@ -37,7 +37,15 @@ receipts remain distinct from successful contract validation.
    cleanup. Release requires an exited exact child and no observed live group
    members. The handle does not establish durable admission/restart recovery,
    profile ownership, or cleanup of descendants that leave that group. Native
-   manifest/runtime selection and those resource contracts remain to be wired.
+   runtime selection and those resource contracts remain to be wired.
+   Package declarations now separate `Container` from `Host_process`. A
+   `runtime = "host_process"` manifest declares only `resources.max_reply_bytes`;
+   image, CPU, memory and PID-limit fields are rejected. Shared protocol, source
+   acquisition and sampling consume the execution-independent reply envelope.
+   Container entrypoints refine the execution type before issuing engine
+   commands. Native installation startup remains unavailable until its durable
+   ownership and restart recovery are connected; a parsed manifest is not a
+   running native installation.
 4. A browser worker that owns WebExtension/BiDi command queues and owned Gecko/
    Chrome execution. Core admission and artifact/model brokers remain host edges;
    built-in browser execution and tool fallback are removed.

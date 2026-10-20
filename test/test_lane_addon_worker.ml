@@ -336,13 +336,18 @@ let with_fixture f =
 
 let package directory mode : Types.package = {
   id = "worker-test"; revision = "fixture-1"; title = "Worker test";
-  contributions = [ Types.Observe ]; runtime = Types.Docker; image = "fixture/image";
+  contributions = [ Types.Observe ];
+  execution = Types.Container {runtime=Types.Docker;image="fixture/image";
+    resources={cpus=0.5;memory_bytes=67_108_864L;pids=Some 16;max_reply_bytes=4096}};
   command = [ "observer"; mode ]; directory; skills_directory = None; action_tool = None; state_storage=Types.Ephemeral;tool_invocation=Types.Direct; exported_tools = []; outputs = [];
   binding_schema=None;presentation=Masc.Lane_addon_presentation.empty;refresh_policy=Types.Every_hint;
   model_access=Types.Model_disabled; exact_outputs = []; tool_hooks = [];
-  resources = { cpus = 0.5; memory_bytes = 67_108_864L;
-                pids = Some 16; max_reply_bytes = 4096 };
 }
+
+let container package = match Types.container package with Ok value -> value | Error detail -> fail detail
+let execution_with_reply_bytes package max_reply_bytes =
+  let container = container package in
+  Types.Container {container with resources={container.resources with max_reply_bytes}}
 
 let unwrap = function Ok value -> value | Error error -> fail (Worker.error_to_string error)
 (* The identities the two fixtures report until a test changes them. *)
@@ -366,9 +371,10 @@ let with_apple_fixture f = with_fixture (fun env sw dir _ ->
 
 let start_apple ?state_owner ?(instance_id = Random_id.uuid_v7 ()) env sw dir command mode =
   let base = package dir mode in
-  let package = { base with runtime = Types.Apple_container;
+  let package = { base with
     state_storage = (match state_owner with None -> Types.Ephemeral | Some _ -> Types.Persistent);
-    resources = {base.resources with cpus = 1.; pids = None} } in
+    execution = Types.Container {(container base) with runtime=Types.Apple_container;
+      resources={(container base).resources with cpus=1.;pids=None}} } in
   Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
     ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id ~package ?state_owner
     ~container_command:command ()
@@ -448,7 +454,7 @@ let test_apple_create_receipt_and_verified_resources () =
     write (Filename.concat dir "daemon-unavailable") "offline";
     let base = package dir "good" in
     (match Worker.inspect_image ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
-       ~mgr:(Eio.Stdenv.process_mgr env) ~package:{base with runtime=Types.Apple_container}
+       ~mgr:(Eio.Stdenv.process_mgr env) ~package:{base with execution=Types.Container {(container base) with runtime=Types.Apple_container}}
        ~container_command:command () with
      | Error (Worker.Engine_failed {runtime=Types.Apple_container;_}) -> ()
      | _ -> fail "Apple image failure lost its runtime identity");
@@ -981,8 +987,9 @@ let test_an_apple_dead_predecessor_is_cleared_from_the_writer_slot () =
     let base = package dir "good" in
     let fresh = unwrap (Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
       ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"new-writer"
-      ~package:{base with runtime = Types.Apple_container; state_storage = Types.Persistent;
-                resources = {base.resources with cpus = 1.; pids = None}}
+      ~package:{base with state_storage=Types.Persistent;
+                execution=Types.Container {(container base) with runtime=Types.Apple_container;
+                  resources={(container base).resources with cpus=1.;pids=None}}}
       ~state_owner:owner ~is_live_instance:(fun id -> String.equal id "new-writer")
       ~container_command:command ()) in
     let labels = match List.assoc "configuration" (read_container path) with
@@ -1137,6 +1144,22 @@ let test_world_action_artifact_ingress () = with_fixture (fun env sw dir docker 
   check bool "detach preserves retained artifact bytes" true
     (Masc.Lane_addon_store.read_blob store reference = Ok bytes))
 
+let test_native_package_never_reaches_container_control () = with_fixture (fun env sw dir docker ->
+  let native = {(package dir "good") with execution=Types.Host_process {max_reply_bytes=4096}} in
+  let recorded = ref false in
+  let is_refused = function Error (Worker.Invalid_package _) -> true | Ok _ | Error _ -> false in
+  check bool "native image inspection is refused before engine control" true
+    (is_refused (Worker.inspect_image ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+      ~mgr:(Eio.Stdenv.process_mgr env) ~package:native ~docker_command:docker ()));
+  check bool "native execution is never coerced into a container" true
+    (is_refused (Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+      ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"native-container-boundary"
+      ~package:native ~docker_command:docker
+      ~on_engine:(fun _ -> recorded := true;Ok ()) ()));
+  check bool "no engine ownership was recorded" false !recorded;
+  check bool "no container was created" false
+    (Array.exists (fun path -> Filename.check_suffix path ".json") (Sys.readdir dir)))
+
 let test_image_preview_does_not_create_worker () = with_fixture (fun env _sw dir docker ->
   let inspect () = Worker.inspect_image ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
@@ -1151,10 +1174,10 @@ let test_image_preview_does_not_create_worker () = with_fixture (fun env _sw dir
    bound must not decide whether an image can be inspected. *)
 let test_docker_control_ignores_the_package_reply_bound () = with_fixture (fun env _sw dir docker ->
   let small = package dir "good" in
-  let small = {small with resources={small.resources with max_reply_bytes=16}} in
+  let small = {small with execution=execution_with_reply_bytes small (16)} in
   let identity = "sha256:" ^ String.make 64 'a' in
   check bool "the engine reply is longer than the declared reply bound" true
-    (String.length identity > small.resources.max_reply_bytes);
+    (String.length identity > (Types.max_reply_bytes small));
   check string "image identity is returned" identity
     (unwrap (Worker.inspect_image ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
@@ -1632,7 +1655,7 @@ let test_sampling_response_bound_and_directory_durability () = with_fixture (fun
   let answer : S.create_message_result = {role=Assistant;content=Text {type_="text";text="answer"};
     model="model";stop_reason=Some "endTurn";_meta=None} in
   let p = {(package dir "sampling") with model_access=Types.Host_sampling;
-    resources={(package dir "sampling").resources with max_reply_bytes=65536}} in
+    execution=execution_with_reply_bytes (package dir "sampling") 65536} in
   let params = match S.create_message_params_of_yojson (`Assoc ["messages",`List [];"maxTokens",`Int 1]) with
     | Ok value -> value | Error detail -> fail detail in
   let run p =
@@ -1643,13 +1666,13 @@ let test_sampling_response_bound_and_directory_durability () = with_fixture (fun
     run_sampling_observation broker handler params in
   let first = match run p with Ok value -> value | Error detail -> fail detail in
   let size = String.length (Yojson.Safe.to_string (S.create_message_result_to_yojson first)) in
-  let bounded = {p with resources={p.resources with max_reply_bytes=size-1}} in
+  let bounded = {p with execution=execution_with_reply_bytes p (size-1)} in
   let result = run bounded in
   check bool "host reply including receipt metadata obeys package envelope" true (Result.is_error result);
   (match result with
    | Error detail ->
        check bool "overflow refusal also fits without echoing receipt metadata" true
-         (String.length (Yojson.Safe.to_string (`String detail)) <= bounded.resources.max_reply_bytes);
+         (String.length (Yojson.Safe.to_string (`String detail)) <= (Types.max_reply_bytes bounded));
        let terminal = Yojson.Safe.from_string detail in
        check string "metadata overflow returns an indexed invalid response" "invalid_response"
          Yojson.Safe.Util.(terminal |> member "status" |> to_string);
@@ -1657,7 +1680,7 @@ let test_sampling_response_bound_and_directory_durability () = with_fixture (fun
            Yojson.Safe.Util.(terminal |> member "evidence" |> member "outcome") with
          | Ok value -> value | Error message -> fail message in
        let bytes = match Store.read_blob_bounded
-           ~budget:(Store.read_budget ~max_bytes:bounded.resources.max_reply_bytes) store reference with
+           ~budget:(Store.read_budget ~max_bytes:(Types.max_reply_bytes bounded)) store reference with
          | Ok bytes -> bytes | Error _ -> fail "metadata overflow outcome unavailable" in
        check string "metadata overflow callback matches retained status" "invalid_response"
          Yojson.Safe.Util.(Yojson.Safe.from_string bytes |> member "status" |> to_string);
@@ -1710,7 +1733,7 @@ let test_receipt_projection_reads_shared_outcome_once () = with_fixture (fun _en
   let store = Store.create ~root:(Filename.concat dir "large-model-evidence") in
   let max_bytes = 4 * 1024 * 1024 in
   let package = {(package dir "sampling") with model_access=Types.Host_sampling;
-    resources={(package dir "sampling").resources with max_reply_bytes=max_bytes}} in
+    execution=execution_with_reply_bytes (package dir "sampling") max_bytes} in
   let answer : S.create_message_result = {role=Assistant;
     content=Text {type_="text";text=String.make (3 * 1024 * 1024) 'x'};
     model="large-model";stop_reason=None;_meta=None} in
@@ -1765,7 +1788,7 @@ let test_sampling_attestation_binds_exact_utf8_and_image_data () = with_fixture 
           observed_at=1.;subject_id="subject";clock=None;actor=None;fields=[];evidence;related_ids=[]}];coverage=[]})
         (handler params))) in
     let receipt = require (Sampling.retained_receipts ~store ~instance_id:"content-worker"
-      ~max_bytes:package.resources.max_reply_bytes output) |> List.hd in
+      ~max_bytes:(Types.max_reply_bytes package) output) |> List.hd in
     let attested = Yojson.Safe.Util.(receipt |> member "terminal" |> member "response_attestation") in
     check string "attestation hashes exact UTF-8 content bytes" expected
       Yojson.Safe.Util.(attested |> member "content" |> member digest_key |> to_string);
@@ -1793,7 +1816,7 @@ let test_large_sampling_sources_fit_without_duplicate_response_bodies () = with_
   let store = Store.create ~root:(Filename.concat dir "sampling-source-envelope") in
   let max_bytes = 4 * 1024 * 1024 in
   let package = {(package dir "sampling") with model_access=Types.Host_sampling;
-    resources={(package dir "sampling").resources with max_reply_bytes=max_bytes}} in
+    execution=execution_with_reply_bytes (package dir "sampling") max_bytes} in
   let params = require (S.create_message_params_of_yojson
     (`Assoc ["messages",`List [];"maxTokens",`Int 1])) in
   let make index =
@@ -1963,7 +1986,7 @@ let test_stored_outcome_is_not_measured_against_the_reply_bound () = with_fixtur
     `Assoc ["request",placeholder;"outcome",placeholder]])} in
   let reply_size = String.length (Yojson.Safe.to_string (S.create_message_result_to_yojson reply)) in
   let p = {(package dir "sampling") with model_access=Types.Host_sampling;
-    resources={(package dir "sampling").resources with max_reply_bytes=reply_size}} in
+    execution=execution_with_reply_bytes (package dir "sampling") reply_size} in
   (* The stored outcome also names its route, which the worker's reply does not. *)
   let long_route = String.make 400 'r' in
   let broker = match Sampling.create ~store ~package:p ~instance_id:"stored-outcome" ~route:long_route
@@ -2018,7 +2041,7 @@ let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _e
   check bool "host failure outcome is indexed as finished" true
     (List.for_all (fun row -> Yojson.Safe.Util.member "state" row = `String "finished") host_error_rows);
   let reply_size = String.length host_error_reply in
-  let bounded_p = {p with resources={p.resources with max_reply_bytes=reply_size-1}} in
+  let bounded_p = {p with execution=execution_with_reply_bytes p (reply_size-1)} in
   let invoke_bounded instance_id answer =
     let broker = match Sampling.create ~store ~package:bounded_p ~instance_id ~route:"r"
       ~invoke:(fun ~route:_ ~request:_ _ -> answer) () with Ok value -> value | Error detail -> fail detail in
@@ -2030,7 +2053,7 @@ let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _e
   (match overflow_result with
    | Error refusal ->
        check bool "overflow error refusal obeys package byte envelope" true
-         (String.length (Yojson.Safe.to_string (`String refusal)) <= bounded_p.resources.max_reply_bytes);
+         (String.length (Yojson.Safe.to_string (`String refusal)) <= (Types.max_reply_bytes bounded_p));
        check string "overflow error returns compact bounded refusal"
          "sampling failed; outcome retained" refusal
    | Ok _ -> fail "oversized error reply accepted");
@@ -2101,7 +2124,7 @@ let test_sampling_blob_failure_keeps_request_evidence () = List.iter (fun block_
         check string "storage failure is not an invented model failure" "retention_error"
           Yojson.Safe.Util.(json |> member "status" |> to_string);
         check bool "storage error respects the package byte envelope" true
-          (String.length (Yojson.Safe.to_string (`String bytes)) <= p.resources.max_reply_bytes);
+          (String.length (Yojson.Safe.to_string (`String bytes)) <= (Types.max_reply_bytes p));
         Yojson.Safe.Util.member "evidence" json in
   let request = match Types.evidence_of_json (Yojson.Safe.Util.member "request" refs) with
     | Ok value -> value | Error detail -> fail detail in
@@ -2124,7 +2147,7 @@ let test_sampling_blob_failure_keeps_request_evidence () = List.iter (fun block_
       kind=Types.Value;title="answer";observed_at=1.;subject_id="analysis";clock=None;
       actor=None;fields=[];evidence=[request;outcome];related_ids=[]}];coverage=[]} in
     let receipts = match Sampling.retained_receipts ~store ~instance_id:"blob-failure"
-      ~max_bytes:p.resources.max_reply_bytes output with
+      ~max_bytes:(Types.max_reply_bytes p) output with
       | Ok value -> value | Error detail -> fail detail in
     check int "downstream projection resolves the recovered outcome" 1 (List.length receipts);
     check string "receipt keeps actual model identity" "actual-model"
@@ -2138,7 +2161,7 @@ let test_sampling_blob_failure_keeps_request_evidence () = List.iter (fun block_
         (Result.is_ok (Store.read_blob store request));
       check bool "bounded canonical read ignores broken recovery directory" true
         (Result.is_ok (Store.read_blob_bounded
-          ~budget:(Store.read_budget ~max_bytes:p.resources.max_reply_bytes) store request))))) [false;true]
+          ~budget:(Store.read_budget ~max_bytes:(Types.max_reply_bytes p)) store request))))) [false;true]
 
 let test_sampling_retention_error_carries_receipt () = with_fixture (fun _env _sw dir _docker ->
   let module Store = Masc.Lane_addon_store in
@@ -2152,7 +2175,7 @@ let test_sampling_retention_error_carries_receipt () = with_fixture (fun _env _s
   let max_reply_bytes = String.length raw_receipt in
   let base = package dir "sampling" in
   let p = {base with model_access=Types.Host_sampling;
-    resources={base.resources with max_reply_bytes}} in
+    execution=execution_with_reply_bytes base max_reply_bytes} in
   let params = require (S.create_message_params_of_yojson
     (`Assoc ["messages", `List []; "maxTokens", `Int 1])) in
   let calls = ref 0 in
@@ -2494,6 +2517,7 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "sampling refuses nonfinite retained evidence" `Quick test_sampling_refuses_nonfinite_evidence;
   test_case "known sampling outcomes survive cancellation" `Quick test_known_sampling_outcome_survives_cancellation;
   test_case "declared sampling requires the exact host callback" `Quick test_declared_sampling_requires_exact_host_callback;
+  test_case "native package never reaches container control" `Quick test_native_package_never_reaches_container_control;
   test_case "image preview is read only and preserves engine failures" `Quick test_image_preview_does_not_create_worker;
   test_case "docker control ignores the package reply bound" `Quick test_docker_control_ignores_the_package_reply_bound;
   test_case "world action and binary artifact ingress" `Quick test_world_action_artifact_ingress;

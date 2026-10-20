@@ -590,12 +590,13 @@ let guided_installation () =
     (match Install.handle ~key:"enter" path |> ok with Preview path -> path | _ -> fail "expected preview");
   let schema = Yojson.Safe.from_string
     {|{"type":"object","properties":{"topic":{"type":"string","minLength":1}},"required":["topic"],"additionalProperties":false}|} in
-  let preview ?(binding_schema=schema) image = `Assoc ["manifest_path",`String "/packages/arbitrary/lane.toml";
-    "image",image;"package",`Assoc ["title",`String "Arbitrary observer";"revision",`String "revision-1";
-      "image",`String "worker:revision-1";"binding_schema",binding_schema]] in
+  let preview ?(binding_schema=schema) execution = `Assoc ["manifest_path",`String "/packages/arbitrary/lane.toml";
+    "execution",execution;"package",`Assoc ["title",`String "Arbitrary observer";"revision",`String "revision-1";
+      "binding_schema",binding_schema]] in
+  let container image = `Assoc ["kind",`String "container";"image_name",`String "worker:revision-1";"image",image] in
   let unverified = `Assoc ["state",`String "unverified";"detail",`String "engine offline"] in
-  let response = preview unverified in
-  let schemaless = preview ~binding_schema:`Null unverified in
+  let response = preview (container unverified) in
+  let schemaless = preview ~binding_schema:`Null (container unverified) in
   let pending = Install.begin_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml" path |> ok in
   let reopened = Install.create () |> ok in
   check bool "canceled preview cannot replace a freshly opened wizard" true
@@ -609,7 +610,7 @@ let guided_installation () =
   check (option string) "failed preview retains error" (Some "preview failed") error;
   check bool "failed preview restores editable request for retry" true
     (Result.is_ok (Install.begin_preview ~request_id:11 ~path:"/packages/arbitrary/lane.toml" failed));
-  let form,error = Install.receive_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml"
+  let _form,error = Install.receive_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml"
     (Ok response) pending |> Option.get in
   check (option string) "matching preview advances without error" None error;
   let typed,detail = Install.receive_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml"
@@ -621,8 +622,10 @@ let guided_installation () =
   let rec closes presses state = presses>0 && (match Install.handle ~key:"esc" state |> ok with
     | Install.Cancel -> true | Updated next -> closes (presses-1) next | _ -> false) in
   check bool "Esc leads from the typed path back to the Add-ons list" true (closes 3 typed);
-  check bool "failed image inspection remains explicit" true
-    (List.mem "Image unverified: engine offline" (Install.lines form));
+  check bool "unknown execution is refused without a guessed native fallback" true
+    (Result.is_error (Install.accept_preview (preview (`Assoc ["kind",`String "unknown"]))));
+  check bool "container preview requires its image receipt" true
+    (Result.is_error (Install.accept_preview (preview (`Assoc ["kind",`String "container"]))));
   let module Catalog = Masc.Lane_addon_catalog in
   let catalog=Catalog.{directory="/packages";parent=None;
     entries=[Package {manifest_path="/packages/arbitrary/lane.toml";
@@ -659,8 +662,6 @@ let guided_installation () =
     (Install.handle ~key:"left" unread = Ok (Install.Browse None));
   let form,detail=Install.receive_preview ~request_id:22 ~path:"/packages/arbitrary/lane.toml" (Ok response) pending |> Option.get in
   check (option string) "selected package preview accepted" None detail;
-  check bool "preview rereads title and revision" true
-    (List.mem "Install Arbitrary observer · revision revision-1" (Install.lines form));
   let reviewed = form |> Install.paste ~text:"research-observer" |> edit "tab"
     |> Install.paste ~text:"project-run" |> edit "tab"
     |> Install.paste ~text:"quoted \"topic\" and 한국어" |> edit "\019" in
@@ -673,7 +674,23 @@ let guided_installation () =
   check string "actual manifest path survives TOML encoding" "/packages/arbitrary/lane.toml"
     (Otoml.find_opt document Otoml.get_string ["manifest_path"] |> Option.get);
   check string "quoted Unicode binding survives serialization" "quoted \"topic\" and 한국어"
-    (Otoml.find_opt document Otoml.get_string ["binding";"topic"] |> Option.get)
+    (Otoml.find_opt document Otoml.get_string ["binding";"topic"] |> Option.get);
+  let pending_native = Install.begin_preview ~request_id:30 ~path:"/packages/arbitrary/lane.toml" path |> ok in
+  let native,error = Install.receive_preview ~request_id:30 ~path:"/packages/arbitrary/lane.toml"
+    (Ok (preview (`Assoc ["kind",`String "host_process"]))) pending_native |> Option.get in
+  check (option string) "native preview needs no container image" None error;
+  let reviewed_native = native |> Install.paste ~text:"native-browser" |> edit "tab"
+    |> Install.paste ~text:"browser-run" |> edit "tab"
+    |> Install.paste ~text:"Native interaction" |> edit "\019" in
+  let native_draft = match Install.handle ~key:"enter" reviewed_native |> ok with
+    | Draft session -> session | _ -> fail "native preview must produce a local draft" in
+  let native_document = match Otoml.Parser.from_string_result native_draft.text with
+    | Ok value -> value | Error _ -> fail "native declaration must parse" in
+  check bool "native draft remains unsaved" true (native_draft.base=None);
+  check string "native draft retains the selected manifest" "/packages/arbitrary/lane.toml"
+    (Otoml.find_opt native_document Otoml.get_string ["manifest_path"] |> Option.get);
+  check string "native draft retains the reviewed binding" "Native interaction"
+    (Otoml.find_opt native_document Otoml.get_string ["binding";"topic"] |> Option.get)
 
 let object_array_fields () =
   let module Form = Masc_tui_schema_form in

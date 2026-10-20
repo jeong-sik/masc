@@ -25,7 +25,7 @@ let with_observation t ~binding ~sources ~on_error run =
       Fun.protect ~finally:(fun () -> t.observation := Outside_observation) (fun () ->
         let* (output : Types.output) = run () in
         let* () = Eio_unix.run_in_systhread (fun () ->
-          let budget = Store.read_budget ~max_bytes:t.package.resources.max_reply_bytes in
+          let budget = Store.read_budget ~max_bytes:(Lane_addon_types.max_reply_bytes t.package) in
           List.fold_left (fun result (reference : Types.evidence) ->
             let* () = result in
             (* Other evidence may be arbitrary bytes. Only this broker's own
@@ -159,7 +159,7 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
     let outcome = match outcome with
       | Answer answer ->
           (match Eio_unix.run_in_systhread (fun () ->
-            validate_response ~max_bytes:package.resources.max_reply_bytes answer) with
+            validate_response ~max_bytes:(Lane_addon_types.max_reply_bytes package) answer) with
            | Error detail -> Invalid_response (answer, detail)
            | Ok _ when String.trim answer.S.model = "" ->
                Invalid_response (answer, "host response has no model identity")
@@ -194,7 +194,7 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
           | Answer answer ->
               let references = `Assoc ["request",Types.evidence_to_json request;
                 "outcome",Types.evidence_to_json (Store.blob_reference bytes)] in
-              (match encode_bounded ~max_bytes:package.resources.max_reply_bytes
+              (match encode_bounded ~max_bytes:(Lane_addon_types.max_reply_bytes package)
                   (S.create_message_result_to_yojson (response_with_references answer references)) with
                | Ok _ -> Ok (outcome, bytes)
                | Error detail ->
@@ -223,7 +223,7 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
         let references = `Assoc ["request",Types.evidence_to_json request;
           "outcome",Types.evidence_to_json evidence] in
         let* _ = Store.write_sampling_blob store bytes |> Result.map_error (fun _ ->
-          match encode_bounded ~max_bytes:package.resources.max_reply_bytes
+          match encode_bounded ~max_bytes:(Lane_addon_types.max_reply_bytes package)
             (`Assoc ["status",`String "retention_error";"evidence",references]) with
           | Ok bytes -> bytes
           | Error _ -> "sampling outcome retained in recovery index") in
@@ -243,7 +243,7 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
           | Invocation_exception _ -> "outcome_unknown" | Answer _ -> "answered" in
         let reply = `Assoc ["status",`String status;"evidence",references] in
         (match Eio_unix.run_in_systhread (fun () ->
-           encode_bounded ~max_bytes:package.resources.max_reply_bytes reply) with
+           encode_bounded ~max_bytes:(Lane_addon_types.max_reply_bytes package) reply) with
          | Ok bytes -> Error bytes
          | Error _ -> Error "sampling failed; outcome retained") in
     run () in

@@ -50,6 +50,8 @@ type resources = {
     reader, the retained binding reader and the Docker worker all use it, so a
     declaration is refused where it is read rather than where it is installed. *)
 val check_resources : ?runtime:runtime -> resources -> (unit, string) result
+type container = { runtime : runtime; image : string; resources : resources }
+type execution = Container of container | Host_process of { max_reply_bytes : int }
 type refresh_policy = Every_hint | Source_changes
 type model_access = Model_disabled | Host_sampling
 type state_storage = Ephemeral | Persistent
@@ -66,8 +68,7 @@ type package = {
   revision : string;
   title : string;
   contributions : contribution list;
-  runtime : runtime;
-  image : string;
+  execution : execution;
   command : string list;
   directory : string;
   action_tool : string option;
@@ -87,8 +88,13 @@ type package = {
   skills_directory : Skill_resource_path.t option;
   exact_outputs : exact_output list;
   (** Unique names in name order. *)
-  resources : resources;
 }
+val max_reply_bytes : package -> int
+(** Transport/data envelope, independent of execution isolation. *)
+val container : package -> (container, string) result
+(** Refine a package at a container-only boundary; host processes have no image
+    or container resource declaration. *)
+val container_runtime : package -> runtime option
 val validate_exported_tools : action_tool:string option -> string list -> (string list, string) result
 (** Validate exact names, exclude worker control ports, and canonicalize order. *)
 

@@ -180,7 +180,7 @@ let test_namespaced_output_fits_declared_capacity () =
       let manifest = manifest root in
       let package = Lane_addon_manifest.load ~path:manifest
         |> Result.map_error Lane_addon_manifest.error_to_string |> unwrap in
-      let cap = package.resources.max_reply_bytes in
+      let cap = (Lane_addon_types.max_reply_bytes package) in
       let _path = declare directory manifest "near-limit" "[]" in
       reconcile config directory;
       let id = active config "near-limit" |> text "instance_id" in
@@ -555,7 +555,7 @@ let test_native_msx_history_crosses_worker_freeze_and_detach () =
     if List.mem "masc_msx_screen" package.exported_tools then
       match !machine with
       | Some (store, client) -> msx_worker_output ~store ~history ~instance_id
-          ~max_response_bytes:package.resources.max_reply_bytes client
+          ~max_response_bytes:(Lane_addon_types.max_reply_bytes package) client
       | None -> fail "MSX worker observed before its client connected"
     else msx_observer ~binding ~sources in
   with_fixture ~produce_package (fun clock config root _directory _received _stopped ->

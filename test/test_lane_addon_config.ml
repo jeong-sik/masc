@@ -539,8 +539,8 @@ max_reply_bytes = 4096
     Lane_addon_manifest.load ~path in
   let apple = match load "apple_container" "1" "67108864" "" with
     | Ok package -> package | Error error -> fail (Lane_addon_manifest.error_to_string error) in
-  check bool "explicit microVM runtime" true (apple.runtime = Lane_addon_types.Apple_container);
-  check bool "no imaginary PID cgroup" true (apple.resources.pids = None);
+  check bool "explicit microVM runtime" true ((unwrap (Lane_addon_types.container apple)).runtime = Lane_addon_types.Apple_container);
+  check bool "no imaginary PID cgroup" true ((unwrap (Lane_addon_types.container apple)).resources.pids = None);
   List.iter (fun (runtime,cpus,memory,pids) ->
     check bool "unsupported resource contract refused" true
       (Result.is_error (load runtime cpus memory pids)))
@@ -553,6 +553,47 @@ max_reply_bytes = 4096
     | Ok package -> package | Error error -> fail (Lane_addon_manifest.error_to_string error) in
   check bool "Docker serialized identity remains unchanged" true
     (Yojson.Safe.Util.member "runtime" (Lane_addon_types.package_to_json docker) = `Null))
+
+let native_execution_has_no_container_claims () = with_directory (fun _root packages _directory ->
+  let path = Filename.concat packages "native-probe.toml" in
+  let load ?(image="") resources =
+    write path (Printf.sprintf {|id = "native-probe"
+revision = "fixture-1"
+title = "Native probe"
+runtime = "host_process"
+%s
+command = ["python3", "server.py"]
+contributions = ["observe"]
+[world.tools]
+export = ["native_increment"]
+hooks = ["validate_input", "validate_output"]
+[resources]
+%s
+|} image resources);
+    Lane_addon_manifest.load ~path in
+  let native = match load "max_reply_bytes = 4096" with
+    | Ok package -> package | Error error -> fail (Lane_addon_manifest.error_to_string error) in
+  check bool "host execution is a distinct specification" true
+    (match native.execution with Lane_addon_types.Host_process {max_reply_bytes=4096} -> true
+      | Host_process _ | Container _ -> false);
+  check int "shared protocol reads native envelope" 4096 (Lane_addon_types.max_reply_bytes native);
+  check bool "container API cannot coerce native execution" true (Result.is_error (Lane_addon_types.container native));
+  check (list string) "native exports belong to its shared contract" ["native_increment"] native.exported_tools;
+  check bool "native selects both validation hooks" true
+    (native.tool_hooks = [Lane_addon_types.Validate_input;Validate_output]);
+  let serialized = Lane_addon_types.package_to_json native in
+  check bool "native output has no image claim" true (Yojson.Safe.Util.member "image" serialized = `Null);
+  check bool "native output declares only its actual envelope" true
+    (Yojson.Safe.Util.member "resources" serialized = `Assoc ["max_reply_bytes",`Int 4096]);
+  List.iter (fun resources -> check bool "native rejects unenforced or invalid declarations" true
+    (Result.is_error (load resources)))
+    ["max_reply_bytes = 4096\ncpus = 1";
+     "max_reply_bytes = 4096\nmemory_bytes = 67108864";
+     "max_reply_bytes = 4096\npids = 16";
+     "max_reply_bytes = 4096\nother = 1";
+     "max_reply_bytes = 0";"max_reply_bytes = -1";"cpus = 1"];
+  check bool "native refuses an image rather than ignoring it" true
+    (Result.is_error (load ~image:"image = \"unused\"" "max_reply_bytes = 4096")))
 
 let tool_exports_are_explicit_and_revisioned () = with_directory (fun _root packages directory ->
   let manifest = install_package packages in
@@ -595,7 +636,8 @@ path = "/host"|} ])
 
 let () = run "Lane Add-on declarative composition"
   ["configuration",
-    [test_case "runtime resources name only enforceable limits" `Quick runtime_selects_enforceable_resources;
+    [test_case "native execution declares no container isolation" `Quick native_execution_has_no_container_claims;
+      test_case "runtime resources name only enforceable limits" `Quick runtime_selects_enforceable_resources;
      test_case "persistent state is explicit and revisioned" `Quick persistent_state_is_explicit_and_revisioned;
      test_case "tool exports are explicit and revisioned" `Quick tool_exports_are_explicit_and_revisioned;
      test_case "judge source schema is enforced before worker start" `Quick judge_source_schema_is_enforced;

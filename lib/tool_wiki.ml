@@ -151,7 +151,10 @@ let handle_read ~tool_name ~start_time ctx args : Tool_result.result =
        survives slugification. A page whose header does not read is listed
        by filename, so it resolves by filename and has no title to match. The
        query is lowercased once. Content read for title-matching is cached so
-       the chosen file is not read twice. *)
+       the chosen file is not read twice. The index tells a Keeper to read a
+       page by its file name without [.md], so a page with exactly that name
+       wins over a page whose name or title only contains the query:
+       [setlist] opens [setlist.md], not [pm-setlist.md], which sorts first. *)
     let topic_lc = String.lowercase_ascii topic in
     let files = list_pages ~base_path:ctx.base_path in
     let title_matches content =
@@ -160,18 +163,26 @@ let handle_read ~tool_name ~start_time ctx args : Tool_result.result =
         string_contains ~needle:topic_lc (String.lowercase_ascii (fm.title :> string))
       | Error _ -> false
     in
+    let is_exact_name path =
+      String.equal
+        (String.lowercase_ascii (Filename.remove_extension (Filename.basename path)))
+        topic_lc
+    in
     let matched =
-      List.find_map
-        (fun path ->
-          let base_lc = String.lowercase_ascii (Filename.basename path) in
-          if string_contains ~needle:topic_lc base_lc
-          then Some (path, None)
-          else (
-            match In_channel.with_open_text path In_channel.input_all with
-            | content when title_matches content -> Some (path, Some content)
-            | _ -> None
-            | exception Sys_error _ -> None))
-        files
+      match List.find_opt is_exact_name files with
+      | Some path -> Some (path, None)
+      | None ->
+        List.find_map
+          (fun path ->
+            let base_lc = String.lowercase_ascii (Filename.basename path) in
+            if string_contains ~needle:topic_lc base_lc
+            then Some (path, None)
+            else (
+              match In_channel.with_open_text path In_channel.input_all with
+              | content when title_matches content -> Some (path, Some content)
+              | _ -> None
+              | exception Sys_error _ -> None))
+          files
     in
     match matched with
     | None ->

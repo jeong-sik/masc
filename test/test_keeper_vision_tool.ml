@@ -2631,7 +2631,7 @@ let test_native_image_admission_continues_turn () =
             | _ -> false) blocks in
           assert (saw_pixels = accepts_image_input)))))) [true; false]
 
-let () =
+let run_all () =
   test_native_image_admission_continues_turn ();
   test_native_image_read_artifact_and_authority ();
   test_native_image_admission ();
@@ -2701,3 +2701,11 @@ let () =
   test_vision_candidates_follow_quota_window ();
   test_vision_402_marks_the_account_exhausted_and_moves_on ();
   print_endline "test_keeper_vision_tool: all assertions passed"
+
+let () =
+  match Array.to_list Sys.argv with
+  | [_] -> run_all ()
+  | [_; "--browser-screenshot"] ->
+      test_browser_screenshot_reaches_vision_reader ();
+      print_endline "test_keeper_vision_tool: browser screenshot scenario passed"
+  | _ -> invalid_arg "usage: test_keeper_vision_tool.exe [--browser-screenshot]"

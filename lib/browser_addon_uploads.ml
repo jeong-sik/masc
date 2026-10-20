@@ -3,7 +3,7 @@ module Lease = B.Upload_lease
 let ( let* ) = Result.bind
 type grant = {actor:string;route:B.route;verb:B.verb;snapshot:Lease.snapshot}
 type preparation = Staging | Withdrawn
-type state = Preparing of preparation | Pending of grant | Claimed | Consumed
+type state = Preparing of preparation | Pending of grant | Claimed | Releasing | Consumed
 type t = {directory:string;device:int;inode:int;mutex:Mutex.t;changed:Condition.t;
   cleanup_mutex:Mutex.t;mutable settled:bool;
   mutable serving:bool;grants:(string,state) Hashtbl.t}
@@ -69,7 +69,7 @@ let stage t ~id ~actor ~route ~verb = protect (fun () ->
   Fun.protect ~finally:(fun () -> locked t (fun () ->
     (match Hashtbl.find_opt t.grants id with
      | Some (Preparing _) -> Hashtbl.replace t.grants id Consumed
-     | None|Some (Pending _|Claimed|Consumed) -> ());
+     | None|Some (Pending _|Claimed|Releasing|Consumed) -> ());
     Condition.broadcast t.changed)) (fun () ->
     let* ()=check t in
     let files=List.map (fun path -> Filename.basename path,(fun () -> source path)) paths in
@@ -90,7 +90,7 @@ let with_claim t ~id ~actor ~route ~verb f =
     match Hashtbl.find_opt t.grants id with
     | Some (Pending grant) when grant.actor=actor && grant.route=route && grant.verb=verb ->
         Hashtbl.replace t.grants id Claimed;Ok grant
-    | None|Some (Preparing _|Pending _|Claimed|Consumed) -> Error "upload grant is absent, consumed or belongs to another command") in
+    | None|Some (Preparing _|Pending _|Claimed|Releasing|Consumed) -> Error "upload grant is absent, consumed or belongs to another command") in
   let* grant=grant in
   let finish () = Eio.Cancel.protect (fun () ->
     Fun.protect ~finally:(fun () -> locked t (fun () ->
@@ -107,11 +107,14 @@ let with_claim t ~id ~actor ~route ~verb f =
     | Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> Error "grant command is not an upload")
 let discard t ~id =
   let snapshot=locked t (fun () -> match Hashtbl.find_opt t.grants id with
-    | Some (Pending grant) -> Hashtbl.replace t.grants id Consumed;Some grant.snapshot
+    | Some (Pending grant) -> Hashtbl.replace t.grants id Releasing;Some grant.snapshot
     | Some (Preparing _) -> Hashtbl.replace t.grants id (Preparing Withdrawn);None
     | None -> Hashtbl.add t.grants id Consumed;None
-    | Some (Claimed|Consumed) -> None) in
-  Option.iter Lease.release snapshot
+    | Some (Claimed|Releasing|Consumed) -> None) in
+  Option.iter (fun snapshot ->
+    Fun.protect ~finally:(fun () -> locked t (fun () ->
+      Hashtbl.replace t.grants id Consumed;Condition.broadcast t.changed))
+      (fun () -> Lease.release snapshot)) snapshot
 let revoke t = locked t (fun () -> t.serving<-false)
 let cleanup t = protect (fun () ->
   Mutex.lock t.cleanup_mutex;
@@ -124,11 +127,11 @@ let cleanup t = protect (fun () ->
       revoke t;
       let snapshots=locked t (fun () ->
         let preparing ()=Hashtbl.fold (fun _ state waiting -> match state with
-          | Preparing _|Claimed -> true | Pending _|Consumed -> waiting) t.grants false in
+          | Preparing _|Claimed|Releasing -> true | Pending _|Consumed -> waiting) t.grants false in
         while preparing () do Condition.wait t.changed t.mutex done;
         let snapshots=Hashtbl.fold (fun id state acc -> match state with
           | Pending grant -> (id,grant.snapshot)::acc
-          | Preparing _|Claimed|Consumed -> acc) t.grants [] in
+          | Preparing _|Claimed|Releasing|Consumed -> acc) t.grants [] in
         List.iter (fun (id,_) -> Hashtbl.replace t.grants id Consumed) snapshots;
         List.map snd snapshots) in
       List.iter Lease.release snapshots;

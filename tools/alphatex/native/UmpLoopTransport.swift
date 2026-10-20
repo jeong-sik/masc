@@ -99,7 +99,7 @@ struct UmpLoopClip {
 // most first-partial/full-middle/last-partial shapes describe finite copies;
 // no repeated packet arrays or copy-count-sized state are constructed.
 struct UmpLoopPlan {
-    let cycle: MidiCycle, clips: [UmpLoopClip], bindings: [UmpBinding]
+    let cycle: MidiCycle, clips: [UmpLoopClip], bindings: [UmpBinding], compatibleEvents: [UmpEvent]
     init(timeline: UmpArrangement, cycle: MidiCycle) throws {
         guard timeline.schemaVersion == 1, timeline.duration.isFinite, timeline.duration > 0,
               !timeline.sources.isEmpty, !timeline.regions.isEmpty,
@@ -116,7 +116,7 @@ struct UmpLoopPlan {
             }
             sources[source.id] = (source, timed)
         }
-        var clips: [UmpLoopClip] = [], potential = UmpFootprint()
+        var clips: [UmpLoopClip] = [], potential = UmpFootprint(), wireEvents: [UmpEvent] = []
         for region in timeline.regions {
             guard !region.id.isEmpty, region.component != .audio, let (source, timed) = sources[region.source], region.repeatCount > 0 else {
                 throw MidiFailure("invalid captured loop region")
@@ -154,6 +154,7 @@ struct UmpLoopPlan {
                     }
                     let scope = Set(effects.compactMap(UmpChannel.init(voice:)))
                     for event in effects { potential.observe(UmpMessage(event)) }
+                    wireEvents.append(contentsOf: effects)
                     clip.shapes.append(UmpLoopShape(first: from, last: to, scope: scope))
                 }
             }
@@ -183,6 +184,7 @@ struct UmpLoopPlan {
         let destinations = Set(clips.flatMap { $0.shapes.flatMap { $0.scope.map(\.source) } })
         self.cycle = cycle; self.clips = clips
         self.bindings = destinations.sorted().map { UmpBinding(source: $0, destination: $0) }
+        self.compatibleEvents = wireEvents
     }
 }
 
@@ -201,7 +203,7 @@ final class UmpLoopTransport: CoordinatedMidiTransport {
         let clip: Int, instance: UmpLoopInstance, phase: UInt128, kind: Kind
     }
     init(timeline: UmpArrangement, cycle: MidiCycle) throws {
-        plan = try UmpLoopPlan(timeline: timeline, cycle: cycle); output = UmpOutput(bindings: plan.bindings)
+        plan = try UmpLoopPlan(timeline: timeline, cycle: cycle); output = UmpOutput(bindings: plan.bindings, compatibleEvents: plan.compatibleEvents)
     }
     func prepare() throws {
         output.onFailure = { [weak self] error in self?.finish(reason: "destination-unavailable", error: error, publish: false) }

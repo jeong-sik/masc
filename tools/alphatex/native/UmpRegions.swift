@@ -239,6 +239,26 @@ struct UmpRegionClip {
         return try umpRestoration(events, prefixCount: before, followingCount: through - before,
                                   preambleEndIndex: endIndex, excludingNotes: expired, replacing: previous)
     }
+    // Only effects reachable from the selected cut are projected. Fully expired
+    // historical voices are not replayed, even if their attributes need MIDI2.
+    func wireEffects() throws -> [UmpEvent] {
+        let entry = try restore(at: cut, replacing: UmpFootprint())
+        var acquired = entry.heldNotes, effects = entry.events
+        for ordinal in entry.nextIndex..<endIndex {
+            let event = events[ordinal]
+            switch UmpMessage(event).action {
+            case .on: acquired.insert(ordinal)
+            case .off:
+                guard let owner = releaseOwners[ordinal], acquired.contains(owner) else { continue }
+                acquired.remove(owner)
+            case .kill, .release:
+                acquired = acquired.filter { UmpChannel(events[$0]) != UmpChannel(event) }
+            default: break
+            }
+            effects.append(event)
+        }
+        return effects
+    }
     func phase(at position: UInt64) -> (copy: UInt64, time: UInt128)? {
         guard position >= start, position < end else { return nil }
         let value = UInt128(position - origin) * denom - phaseOffset
@@ -361,7 +381,8 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
             admitted[index] = clip
         }
         clips = admitted
-        output = UmpOutput(bindings: destinations.map { UmpBinding(source: $0, destination: $0) })
+        output = UmpOutput(bindings: destinations.map { UmpBinding(source: $0, destination: $0) },
+            compatibleEvents: try admitted.flatMap { try $0.wireEffects() })
     }
     func prepare() throws {
         output.onFailure = { [weak self] error in self?.finish(reason: "destination-unavailable", error: error, publish: false) }

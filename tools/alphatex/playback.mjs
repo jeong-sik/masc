@@ -66,7 +66,7 @@ export function openPlayback({ path, output, midiOutput, midiBindings, loop = fa
   const selection = mixed || midiOutput === undefined ? (output === undefined ? [] : ['--output', output]) : ['--destination', midiOutput]
   const args = ['play', '--file', path, ...selection, ...(loop ? ['--loop'] : [])]
   const child = spawnProcess(executable, args, { stdio: ['pipe', 'pipe', 'pipe'] })
-  let failure = null, final = null, current = null, firstDevice = null, loopBindings = null, started = false, closed = false, stopping = false, detail = ''
+  let failure = null, final = null, current = null, firstDevice = null, loopBindings = null, nativeBindings = null, started = false, closed = false, stopping = false, detail = ''
   let resolveReady, rejectReady, resolveDone, rejectDone
   const epochs = new Map()
   function rejectEpochs(error) { for (const pending of epochs.values()) pending.reject(error); epochs.clear() }
@@ -125,6 +125,15 @@ export function openPlayback({ path, output, midiOutput, midiBindings, loop = fa
               || binding.device?.id !== midiBindings[index].destination || binding.device.kind !== 'midi'
               || binding.device.protocol !== (hybrid ? midiBindings[index].protocol : captured ? 2 : 1) || typeof binding.device.name !== 'string')) {
           throw new Error('Playback source ports differ from the selected bindings')
+        }
+        if (captured || hybrid) {
+          // protocol identifies the source owner family; nativeProtocol pins
+          // the actual destination independently of that logical identity.
+          const reached = event.bindings.filter(binding => binding.device.protocol === 2)
+          if (reached.some(binding => ![1, 2].includes(binding.device.nativeProtocol))) throw new Error('Missing captured MIDI native protocol')
+          const identity = JSON.stringify(reached.map(binding => [binding.device.id, binding.device.nativeProtocol]))
+          if (nativeBindings !== null && nativeBindings !== identity) throw new Error('Playback changed its captured MIDI native protocol')
+          nativeBindings ??= identity
         }
       }
       if (selectedID !== undefined && event.device.id !== selectedID || firstDevice !== null && event.device.id !== firstDevice) {

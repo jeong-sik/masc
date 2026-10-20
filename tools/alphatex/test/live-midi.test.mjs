@@ -61,3 +61,9 @@ test('backing inspection validates native claims and owns failed/cancelled proce
   if(rejected)await rejected;else assert.deepEqual(await pending,[{destination:'42',scope:routes[0].scope}])
  }
 })
+
+test('backing native protocol survives private live plans and malformed protocol is refused',()=>{
+ const reserved=[{destination:'42',scope:{kind:'channels',channels:[{group:0,channel:5}]},nativeProtocol:1}]
+ assert.deepEqual(liveMidiPlan(routes,reserved).reserved,reserved)
+ assert.throws(()=>liveMidiPlan(routes,[{...reserved[0],nativeProtocol:3}]),/native protocol/)
+})

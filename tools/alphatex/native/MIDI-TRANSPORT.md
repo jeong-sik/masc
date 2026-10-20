@@ -79,6 +79,34 @@ decisions, seek boundaries, send-time phase accounting and preparation admission
 It does not register CoreMIDI clients, enumerate devices or send hardware MIDI;
 actual endpoint timing and delivery require a separate runtime probe.
 
+## Captured playback on MIDI1 destinations
+
+Captured playback retains its raw UMP recording and original clock. At preparation,
+the output owner pins the destination's native protocol. Native MIDI2 destinations
+receive the original words. Native MIDI1 destinations accept validated MIDI1 channel,
+system and SysEx7 messages, plus MIDI2 note, pressure, ordinary controller, pitch and
+program messages whose values are exact images of the UMP specification's canonical
+MIDI1 upscaling. Bank-valid program messages expand to an ordered bank MSB, bank LSB
+and program batch at the original deadline. No timestamp or saved asset is rewritten.
+
+High-resolution values outside that exact image, note attributes, per-note/compound
+state, mixed channel dialects and independent groups on one MIDI1 output are refused
+before playback. One admitted group projects to physical group zero; hybrid and live
+reservations use that physical address. Finite trims and loops profile only reachable
+restoration and selected raw effects. Fully expired voices and unreachable suffixes
+do not require conversion. Seek/chase retains its separate source-state refusals.
+
+The binding ACK retains `protocol: 2` as the captured owner family and reports the
+actual pinned `nativeProtocol: 1` or `2` separately. JavaScript validates both and
+rejects protocol changes during ownership. Backing reservation claims carry the
+native protocol when captured groups depend on it; live admission and forwarding
+revalidate that descriptor. Live input remains native MIDI2 only because its future
+message compatibility cannot be profiled in advance.
+
+`node tools/alphatex/native/test-midi1-output.mjs` checks the exact inverse domain
+and delivery through owned private CoreMIDI MIDI1/MIDI2 endpoints. It does not prove
+physical hardware, acoustic output or the visible Ghostty UI.
+
 ## Live UMP input backend
 
 `music-midi-live --plan LIVE_MIDI_JSON` opens selected CoreMIDI sources and

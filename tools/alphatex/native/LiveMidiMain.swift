@@ -17,7 +17,11 @@ import CoreMIDI
                 guard args.count == 5, args[1] == "--file", args[3] == "--format" else { throw MidiFailure("usage: music-midi-live reservations --file PLAN --format FORMAT") }
                 let claims = try liveMidiReservations(Data(contentsOf: URL(fileURLWithPath: args[2])), format: args[4])
                 try emit(["kind": "reservations", "schemaVersion": 1, "format": args[4],
-                          "reserved": claims.map { ["destination": $0.destination, "scope": $0.scope.json] }])
+                          "reserved": claims.map { claim -> [String: Any] in
+                              var value: [String: Any] = ["destination": claim.destination, "scope": claim.scope.json]
+                              if let wire = claim.nativeProtocol { value["nativeProtocol"] = wire }
+                              return value
+                          }])
                 return
             }
             guard args.count == 2, args[0] == "--plan" else { throw MidiFailure("usage: music-midi-live --plan LIVE_MIDI_JSON") }

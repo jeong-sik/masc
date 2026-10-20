@@ -23,6 +23,20 @@ func source(_ id:String,_ rows:[UmpPacket],numer:UInt32=1,denom:UInt32=1,extent:
 }
 func clip(_ id:String="clip",source:String="take",start:Double=0,offset:String="0",extent:String="1000000000",repeatCount:UInt64=1)->UmpRegion{UmpRegion(id:id,source:source,startSeconds:start,offset:offset,extent:extent,repeatCount:repeatCount)}
 func owner(_ sources:[UmpRegionSource],_ clips:[UmpRegion],duration:Double=1)throws->UmpRegionTransport{try UmpRegionTransport(timeline:UmpArrangement(schemaVersion:1,duration:duration,sources:sources,regions:clips))}
+// MIDI1 profiles include the selected wire/restoration domain, not expired
+// attribute-bearing history or an unreachable high-resolution suffix.
+let legacyHistory=source("take",[packet(0,on),packet(100_000_000,off),packet(200_000_000,[0x43953e00,0x80000000]),packet(300_000_000,[0x43853e00,0]),packet(900_000_000,bend)])
+let compatible=try owner([legacyHistory],[clip(offset:"150000000",extent:"250000000")])
+var profile=UmpMidi1Profile();for row in compatible.output.compatibleEvents! {profile.observe(row)}
+try profile.validate();precondition(compatible.output.compatibleEvents!.map{$0.words}==[[0x43953e00,0x80000000],[0x43853e00,0]])
+let heldHistory=try owner([legacyHistory],[clip(offset:"50000000",extent:"350000000")])
+var heldProfile=UmpMidi1Profile();for row in heldHistory.output.compatibleEvents! {heldProfile.observe(row)}
+refuses{try heldProfile.validate()}
+for offset in ["0","100000000"] {
+ let boundary=try owner([source("take",[packet(UInt64(offset)!,on),packet(200_000_000,off)])],[clip(offset:offset,extent:"300000000")])
+ var boundaryProfile=UmpMidi1Profile();for row in boundary.output.compatibleEvents! {boundaryProfile.observe(row)}
+ refuses{try boundaryProfile.validate()}
+}
 // Project-zero crops retain an exact absolute phase across a partial head and
 // a compressed tail. Each absolute deadline rounds once, including when the
 // first retained host tick is itself a fractional nanosecond after zero.

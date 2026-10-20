@@ -2,7 +2,7 @@ import Foundation
 import CoreMIDI
 
 // Both native MIDI owners run on the audio owner's main lifecycle. Their
-// protocols and state models remain distinct; no UMP is translated to bytes.
+// source/state models remain distinct; the output owns faithful wire projection.
 protocol CoordinatedMidiTransport: AnyObject {
     var anchor: UInt64 { get }
     var terminalFailure: Error? { get }
@@ -131,7 +131,7 @@ final class UmpTransport: CoordinatedMidiTransport {
     var pendingRestore = false
     let output: UmpOutput
     init(timeline: UmpTimeline) throws {
-        self.timeline = timeline; events = try timeline.events(); output = UmpOutput(bindings: timeline.bindings)
+        self.timeline = timeline; events = try timeline.events(); output = UmpOutput(bindings: timeline.bindings, compatibleEvents: events)
     }
     func prepare() throws {
         output.onFailure = { [weak self] error in self?.finish(reason: "destination-unavailable", error: error, publish: false) }

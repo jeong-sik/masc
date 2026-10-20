@@ -1,6 +1,104 @@
 import Foundation
 import CoreMIDI
 
+enum UmpNativeProtocol: Int32 { case midi1 = 1, midi2 = 2 }
+func umpNativeProtocol(_ uid: String) throws -> UmpNativeProtocol {
+    let destination = try selectedDestination(uid: uid)
+    var value: Int32 = 0
+    try checked(MIDIObjectGetIntegerProperty(destination.endpoint, kMIDIPropertyProtocolID, &value), "read MIDI destination protocol")
+    guard let result = UmpNativeProtocol(rawValue: value) else { throw MidiFailure("unknown MIDI destination protocol") }
+    return result
+}
+
+// UMP v1.1.2 Appendix D.1.3: canonical min-center-max upscaling. An inverse
+// is admitted only when every bit agrees; arbitrary precision is never rounded.
+func umpScaleUp(_ value: UInt32, from: Int, to: Int) -> UInt32 {
+    var result = value << (to - from)
+    if value > UInt32(1 << (from - 1)) {
+        var repeated = (value & UInt32((1 << (from - 1)) - 1)) << (to - 2 * from + 1)
+        while repeated != 0 { result |= repeated; repeated >>= from - 1 }
+    }
+    return result
+}
+func umpExactDown(_ value: UInt32, from: Int, to: Int) throws -> UInt32 {
+    let result = value >> (from - to)
+    guard umpScaleUp(result, from: to, to: from) == value else { throw MidiFailure("captured MIDI precision requires a native MIDI 2.0 output") }
+    return result
+}
+
+// Project one message to group-zero MIDI1 UMP. Returning several words is one
+// atomic due batch (bank MSB, bank LSB, program), not repeated source events.
+func umpMidi1Words(_ words: [UInt32]) throws -> [UInt32] {
+    guard let word = words.first, words.count == umpMessageWordCounts[Int(word >> 28)] else { throw MidiFailure("invalid UMP wire projection") }
+    let type = word >> 28, status = word >> 20 & 15, byte = word >> 8 & 255
+    let prefix: UInt32 = 0x20000000 | (word & 0x00ff0000)
+    switch type {
+    case 1:
+        let system = word >> 16 & 255, data = word & 0xffff
+        guard ([0xf1, 0xf3].contains(system) && data & 0x80ff == 0
+          || system == 0xf2 && data & 0x8080 == 0
+          || [0xf6, 0xf8, 0xfa, 0xfb, 0xfc, 0xfe, 0xff].contains(system) && data == 0) else { throw MidiFailure("invalid MIDI1 system message") }
+        return [word & 0xf0ffffff]
+    case 2:
+        guard (8...14).contains(status), byte < 128, word & 0x80 == 0,
+          ![12,13].contains(status) || word & 255 == 0 else { throw MidiFailure("invalid MIDI1 channel message") }
+        return [word & 0xf0ffffff]
+    case 3:
+        let count = Int(word >> 16 & 15)
+        let bytes = [word >> 8 & 255, word & 255, words[1] >> 24, words[1] >> 16 & 255, words[1] >> 8 & 255, words[1] & 255]
+        guard status <= 3, count <= 6, bytes.prefix(count).allSatisfy({ $0 < 128 }), bytes.dropFirst(count).allSatisfy({ $0 == 0 }) else { throw MidiFailure("invalid MIDI1 SysEx7 message") }
+        return [word & 0xf0ffffff, words[1]]
+    case 4:
+        let data = words[1]
+        switch status {
+        case 8,9:
+            guard byte < 128, word & 255 == 0, data & 0xffff == 0 else { throw MidiFailure("captured note attributes require a native MIDI 2.0 output") }
+            let velocity = try umpExactDown(data >> 16, from: 16, to: 7)
+            guard status != 9 || velocity > 0 else { throw MidiFailure("MIDI2 zero-velocity Note On cannot be represented faithfully by MIDI1") }
+            return [prefix | byte << 8 | velocity]
+        case 10,11:
+            guard byte < 128, word & 255 == 0 else { throw MidiFailure("invalid captured MIDI2 controller fields") }
+            guard status != 11 || ![0,6,32,38,96,97,98,99,100,101].contains(byte) else { throw MidiFailure("captured compound controller state requires a native MIDI 2.0 output") }
+            return [try prefix | byte << 8 | umpExactDown(data, from: 32, to: 7)]
+        case 12:
+            guard word & 0xfffe == 0, data & 0x80ff8080 == 0, word & 1 != 0 || data & 0xffff == 0 else { throw MidiFailure("invalid captured MIDI2 program fields") }
+            let program = 0x20c00000 | word & 0x000f0000 | data >> 16 & 0x7f00
+            return word & 1 == 0 ? [program] : [0x20b00000 | word & 0x000f0000 | data >> 8 & 127,
+                0x20b02000 | word & 0x000f0000 | data & 127, program]
+        case 13:
+            guard word & 0xffff == 0 else { throw MidiFailure("invalid captured MIDI2 pressure fields") }
+            return [try prefix | umpExactDown(data, from: 32, to: 7) << 8]
+        case 14:
+            guard word & 0xffff == 0 else { throw MidiFailure("invalid captured MIDI2 pitch fields") }
+            let bend = try umpExactDown(data, from: 32, to: 14)
+            return [prefix | (bend & 127) << 8 | bend >> 7]
+        default: throw MidiFailure("captured per-note or compound MIDI2 state requires a native MIDI 2.0 output")
+        }
+    default: throw MidiFailure("captured UMP message has no faithful MIDI1 wire representation")
+    }
+}
+
+struct UmpMidi1Profile {
+    var groups = Set<UInt32>()
+    var failure: Error?
+    var dialects: [UInt32: UInt32] = [:]
+    mutating func observe(_ event: UmpEvent) {
+        groups.insert(event.words[0] >> 24 & 15)
+        do {
+            _ = try umpMidi1Words(event.words)
+            let word = event.words[0], type = word >> 28, channel = word & 0x0f0f0000
+            if type == 2 || type == 4 {
+                if let prior = dialects[channel], prior != type { throw MidiFailure("mixed captured channel dialects require a native MIDI 2.0 output") }
+                dialects[channel] = type
+            }
+        } catch { failure = failure ?? error }
+    }
+    func validate() throws {
+        if let failure { throw failure }
+        guard groups.count <= 1 else { throw MidiFailure("independent captured UMP groups require separate MIDI1 outputs") }
+    }
+}
+
 // The effect owner pins destinations and retains uncertain acquisitions. Source
 // and region schedulers own their clocks; releasing one scope keeps the shared
 // port and other channels alive.
@@ -25,12 +123,14 @@ final class UmpOutput {
     var footprint = UmpFootprint()
     var client = MIDIClientRef(), port = MIDIPortRef()
     var selected: [String: Destination] = [:]
+    var nativeProtocols: [String: UmpNativeProtocol] = [:]
+    let compatibleEvents: [UmpEvent]?
     // Keys include physical endpoint, group, channel, message dialect and note.
     // Retain uncertain acquisitions/releases until a successful cleanup send.
     struct Key: Hashable { let source: String; let prefix: UInt32; let number: UInt32 }
     var held: [Key: Int] = [:], pedals = Set<Key>()
     var exclusive = Set<Key>()
-    init(bindings: [UmpBinding]) { self.bindings = bindings }
+    init(bindings: [UmpBinding], compatibleEvents: [UmpEvent]? = nil) { self.bindings = bindings; self.compatibleEvents = compatibleEvents }
     func prepare() throws {
         guard Thread.isMainThread else { throw MidiFailure("UMP preparation requires the main lifecycle") }
         do {
@@ -41,12 +141,25 @@ final class UmpOutput {
                 }
             }), "create UMP output client")
             for binding in bindings { selected[binding.source] = try selectedDestination(uid: binding.destination) }
+            var profiles: [String: UmpMidi1Profile] = [:]
+            for event in compatibleEvents ?? [] {
+                guard let binding = bindings.first(where: { $0.source == event.source }) else { throw MidiFailure("unbound MIDI1 compatibility profile") }
+                profiles[binding.destination, default: UmpMidi1Profile()].observe(event)
+            }
+            for binding in bindings {
+                let wire = try umpNativeProtocol(binding.destination)
+                if wire == .midi1 {
+                    guard compatibleEvents != nil else { throw MidiFailure("open-ended UMP input requires a native MIDI 2.0 output") }
+                    try (profiles[binding.destination] ?? UmpMidi1Profile()).validate()
+                }
+                nativeProtocols[binding.destination] = wire
+            }
             try checkDestinations()
             try checked(MIDIOutputPortCreate(client, "MASC captured UMP output" as CFString, &port), "create UMP output port")
         } catch {
             if port != 0 { MIDIPortDispose(port); port = 0 }
             if client != 0 { MIDIClientDispose(client); client = 0 }
-            selected.removeAll(); throw error
+            selected.removeAll(); nativeProtocols.removeAll(); throw error
         }
     }
     func checkDestinations() throws {
@@ -54,16 +167,19 @@ final class UmpOutput {
             try checkPinnedDestination(destination)
             var protocolID: Int32 = 0
             try checked(MIDIObjectGetIntegerProperty(destination.endpoint, kMIDIPropertyProtocolID, &protocolID), "read selected UMP protocol")
-            guard protocolID == 2 else { throw MidiFailure("selected capture output must use native MIDI 2.0; lossy protocol conversion is not selected") }
+            guard protocolID == nativeProtocols[String(destination.uid)]?.rawValue else { throw MidiFailure("selected capture output changed its native MIDI protocol") }
         }
     }
     func send(_ words: [UInt32], source: String) throws {
         guard let destination = selected[source], !words.isEmpty, words.count <= 4 else { throw MidiFailure("invalid UMP send owner or message size") }
+        try checkPinnedDestination(destination)
+        guard let wire = nativeProtocols[String(destination.uid)], try umpNativeProtocol(String(destination.uid)) == wire else { throw MidiFailure("captured output protocol changed before send") }
+        let payload = try wire == .midi1 ? umpMidi1Words(words) : words
         let capacity = MemoryLayout<MIDIEventList>.size
         let storage = UnsafeMutableRawPointer.allocate(byteCount: capacity, alignment: MemoryLayout<MIDIEventList>.alignment)
         defer { storage.deallocate() }
-        let list = storage.assumingMemoryBound(to: MIDIEventList.self), packet = MIDIEventListInit(list, ._2_0)
-        try words.withUnsafeBufferPointer { buffer in
+        let list = storage.assumingMemoryBound(to: MIDIEventList.self), packet = MIDIEventListInit(list, wire == .midi1 ? ._1_0 : ._2_0)
+        try payload.withUnsafeBufferPointer { buffer in
             guard MIDIEventListAdd(list, capacity, packet, 0, buffer.count, buffer.baseAddress!) != nil else { throw MidiFailure("UMP event list cannot hold a complete message") }
             // Only due events are submitted: no future CoreMIDI work survives stop.
             try checked(MIDISendEventList(port, destination.endpoint, list), "send captured UMP")
@@ -149,7 +265,7 @@ final class UmpOutput {
         for binding in bindings where !destinations.contains(binding.destination) { destinations.append(binding.destination) }
         return destinations.enumerated().compactMap { port, uid in
             guard let destination = selected.values.first(where: { String($0.uid) == uid }) else { return nil }
-            return ["port": port, "device": ["kind": "midi", "protocol": 2, "id": uid, "name": destination.name]]
+            return ["port": port, "device": ["kind": "midi", "protocol": 2, "nativeProtocol": nativeProtocols[uid]!.rawValue, "id": uid, "name": destination.name]]
         }
     }
     func close() throws {

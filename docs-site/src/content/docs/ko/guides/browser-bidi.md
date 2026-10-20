@@ -1,120 +1,98 @@
 ---
-title: Browser Lane BiDi 자동 기동
-description: runtime.toml 설정으로 Keeper Firefox와 WebDriver BiDi 호스트를 자동 기동합니다.
+title: Firefox BiDi 브라우저 Addon
+description: 전용 Firefox를 설정하고 브라우저 Addon을 부착한 뒤 소유한 BiDi 연결을 확인합니다.
 ---
 
-## 개요
+브라우저 Addon은 전용 Firefox를 띄우고 WebDriver BiDi 연결을 소유할 수 있습니다.
+backend를 설정한 뒤 [Browser Lane 안내](../browser-lanes/#브라우저-addon-설치)에 따라
+Addon을 부착합니다. 서버는 설정을 읽고, 부착된 worker가 브라우저의 수명을 관리합니다.
 
-`runtime.toml`에 `[browser.live.bidi]` 테이블을 선언하면 MASC 서버가 기동할 때나 Keeper가 `hover_at` 또는 `drag` 액션을 요청할 때 전용 프로필의 Firefox와 WebDriver BiDi 호스트를 자동으로 데몬(detached) 프로세스로 띄우고 상태를 관리합니다.
+## Firefox와 프로필 준비
 
----
+설치된 Firefox 실행 파일과 MASC 실행 계정이 소유하는 기존 전용 프로필 디렉터리를
+사용합니다. 프로필 권한은 `0700`이어야 합니다. 설정 명령은 없는 프로필을 `0700`으로
+만들고 runtime 테이블을 기록합니다. 이미 있는 프로필의 권한은 바꾸지 않으므로
+실행 전에 해당 전용 디렉터리의 소유자와 권한을 확인합니다.
 
-## 켜는 법: 설정 및 CLI
+```bash
+masc browser-lane-setup --mode bidi --base-path /path/to/workspace \
+  --firefox /absolute/path/to/firefox \
+  --profile /absolute/path/to/dedicated-firefox-profile \
+  --port 9222
+```
 
-### 1. TOML 직접 설정
-`<base-path>/.masc/config/runtime.toml`을 편집합니다:
+명시한 `--firefox`, `--profile`, `--port`는 기존 키를 갱신하고, 생략한 키는 기존 값을
+유지합니다. `--base-path`는 `.masc`를 포함하는 워크스페이스입니다. `MASC_CONFIG_DIR`로
+설정 루트를 바꿨다면 그곳의 실제 `runtime.toml`을 편집합니다. 같은 테이블을 덧붙이지
+말고 기존 테이블을 수정합니다.
 
 ```toml
 [browser.live]
 enabled = true
 
 [browser.live.bidi]
-firefox = "/Applications/Firefox.app/Contents/MacOS/firefox"  # Firefox 바이너리 절대 경로
-profile = "/Users/you/masc-keeper-firefox-profile"           # 전용 프로필 디렉터리
-port = 9222                                                 # 선택 사항, 기본값 9222
-```
-
-### 2. CLI 설정 도구 (`masc browser-lane-setup`)
-CLI 설정 명령으로 테이블을 기록하고 호스트 래퍼를 자동 설치할 수도 있습니다:
-
-```bash
-masc browser-lane-setup --mode bidi \
-  --firefox "/Applications/Firefox.app/Contents/MacOS/firefox" \
-  --profile "/Users/you/masc-keeper-firefox-profile" \
-  --port 9222
-```
-*참고: `[browser.live.bidi]`가 이미 있을 때 `browser-lane-setup --mode bidi`는 전달하지 않은 키의 기존 값을 보존하며, `--firefox`, `--profile`, `--port`로 명시한 키는 전달한 값으로 갱신합니다.*
-
-### 주요 코드 및 모듈 좌표
-- `lib/browser_keeper_firefox.ml` / `lib/browser_keeper_firefox.mli`: `--no-remote --remote-debugging-port` 옵션으로 Firefox를 기동하는 로직.
-- `lib/browser_host/browser_host.ml`: BiDi 호스트 런처 및 프로세스 잠금 관리.
-- `lib/browser_bidi_peer.ml`: WebDriver BiDi 피어 연결 및 프로필 검증.
-- `lib/browser_bidi_host_status.ml`: `bidiHost` 상태 보고 (`masc_starts`, `lane_off`, `not_configured`, `not_known`).
-
----
-
-## 활성화 조건과 진단 수명주기
-
-### 활성화 조건
-- **서버 시작 시 기동**: MASC 부팅 시 `[browser.live.bidi]`가 존재하고 `[browser.live] enabled = true`이면 지정된 포트를 확인하고, 응답이 없으면 Firefox와 BiDi 호스트를 띄웁니다.
-- **온디맨드 자동 복구**: 운영 중 Firefox나 호스트가 종료되더라도 Keeper가 `hover_at` 또는 `drag` 도구를 호출하면 끊어진 연결을 감지하고 단일 실행(single-flight)으로 재기동합니다.
-- **분리된(Detached) 프로세스 수명주기**: Firefox와 호스트 모두 독립 프로세스 그룹(`Posix_spawn_detached`)으로 실행되어, 서버를 재시작하거나 배포해도 Keeper 브라우저 창은 그대로 유지됩니다.
-
-### 실패 증상 및 진단
-- **시작 감사 저널**: 모든 기동 시도는 타임스탬프, 포트, 프로필 경로, 결과 상태와 함께 `.masc/browser-lane/keeper-firefox-start.json`에 기록됩니다.
-- **로그 파일**:
-  - Firefox 출력: `.masc/browser-lane/keeper-firefox.log` (새 실행마다 `keeper-firefox.log.1`로 회전).
-  - BiDi 호스트 출력: `.masc/browser-lane/bidi-host.log` (`bidi-host.log.1`로 회전).
-- **프로필 잠금 충돌**: Firefox는 같은 프로필 디렉터리에 여러 인스턴스를 허용하지 않습니다. 다른 Firefox 인스턴스가 이미 프로필을 잡고 있으면 새 프로세스는 즉시 종료 코드 0으로 끝나고 포트 대기가 30초 후 타임아웃됩니다.
-- **호스트 잠금 충돌**: 지정된 포트에서 이미 호스트가 잠금을 보유 중이면(`Host_running` 또는 `Host_address_unknown`) 서버는 중복 호스트를 띄우지 않습니다.
-- **TUI 및 Doctor 보고**:
-  - `masc doctor`는 MASC가 브라우저를 관리 중인지와 최근 실패 원인을 보고합니다.
-  - TUI Browser Lane 선택기는 `bidiHost` 상태(`masc_starts` 및 포트·프로필, `lane_off`, `not_configured`)를 표시합니다.
-
----
-
-## 실행 예시
-
-### 1. 프로필 및 설정 초기화
-```bash
-# 격리된 Firefox 프로필 디렉터리 생성
-mkdir -p "$HOME/.masc/browser-lane/firefox-profile"
-
-# runtime.toml에 설정 추가 ($HOME이 위 경로로 확장됨)
-cat << EOF >> .masc/config/runtime.toml
-
-[browser.live]
-enabled = true
-
-[browser.live.bidi]
-firefox = "/Applications/Firefox.app/Contents/MacOS/firefox"
-profile = "$HOME/.masc/browser-lane/firefox-profile"
+firefox = "/absolute/path/to/firefox"
+profile = "/absolute/path/to/dedicated-firefox-profile"
 port = 9222
-EOF
 ```
 
-### 2. 서버 기동 및 확인
-```bash
-# MASC 서버 시작
-masc start --base-path . --port 8935
+포트 기본값은 `9222`입니다. 부착 전에 포트를 비우고 해당 전용 프로필을 사용 중인
+Firefox를 닫습니다. 점유된 포트는 거부하며, 거기서 실행 중인 브라우저를 소유한
+자식으로 가져오지 않습니다. 관리되는 Firefox에서 한 번 로그인하면 전용 프로필에
+유지됩니다. loopback 디버깅 포트에는 인증이 없어서 다른 로컬 프로그램도 브라우저를
+조작하고 쿠키를 읽을 수 있으므로 에이전트가 사용할 사이트에 한정한 프로필을 씁니다.
 
-# 다른 터미널에서 진단 상태 확인
-masc doctor --base-path .
+## 부착과 확인
 
-# 기동 감사 영수증 확인
-cat .masc/browser-lane/keeper-firefox-start.json
+1. `runtime.toml`을 바꿨다면 MASC를 재시작해 backend 설정을 읽게 합니다.
+2. [설치 안내](../browser-lanes/#브라우저-addon-설치)에 따라 활성 설정 루트의
+   `lane-addons/`에 번들 브라우저 패키지를 설치합니다. 기존 설치는 detach 후 새
+   인스턴스로 부착해야 바뀐 backend 설정을 캡처합니다.
+3. 설치의 `desired_revision`, `applied_revision`, `phase`, 설정 오류를 확인합니다.
+   TOML 저장이나 `bidiHost` 설정 표시만으로 worker 부착·연결 준비가 증명되지는 않습니다.
+4. `BrowserTabs`로 연결과 탭을 탐색합니다. 관측한 `clientId`와 `tabId`를 이후 읽기·조작에
+   유지합니다. 일반 HTTP(S) 페이지를 읽고 새 viewport를 캡처한 뒤 포인터 입력을 보냅니다.
 
-# 라이브 호스트 로그 확인
-tail -n 20 .masc/browser-lane/bidi-host.log
-```
+worker는 원래 process owner, 커널 lease, 자식의 생성·그룹 정보, 프로필 identity,
+BiDi `moz:processID`를 확인한 뒤 연결을 공개합니다. 설정한 Firefox가 시작에 실패하면
+해당 설치는 Ready가 되지 않으며 함께 시작한 다른 backend의 정리도 기다립니다.
+비공개 worker 할당 디렉터리에 `live-firefox.log`가 있습니다. 창이 보인다는 사실과
+구분해 Addon 관측에서 준비 상태와 실패를 확인합니다.
 
----
+## 관리되는 브라우저 종료와 변경
 
-## 끄는 법 및 되돌리는 법
+설치 TOML 최상위에 `enabled = false`를 설정하고 reconciliation이 detach하도록 합니다.
+파일은 서버 시작과 기존 maintenance pulse에서 읽습니다. Dashboard Refresh는 결과를
+읽으며 즉시 반영을 강제하지 않습니다. 프로필이나 포트를 재사용하기 전에 detached
+상태와 정리 결과를 확인합니다. 선언 삭제는 완전한 설정 목록을 읽은 뒤 반영하며,
+읽지 못한 목록으로 제거를 결정하지 않습니다.
 
-- **설정에서 비활성화**: `runtime.toml`에서 `[browser.live.bidi]`를 지우거나 주석 처리하거나, `[browser.live] enabled = false`로 설정하면 서버가 더 이상 브라우저 프로세스를 띄우지 않습니다.
-- **실행 중인 데몬 종료**:
-  ```bash
-  # 분리 실행 중인 프로세스 종료
-  pkill -f "firefox.*--remote-debugging-port 9222"
-  pkill -f "masc[-_]browser[-_]host.*--bidi-url"
-  ```
-- **수동 호스트로 복귀**: Firefox를 `--remote-debugging-port 9222`로 직접 띄우고 `masc-browser-host --bidi-url ws://127.0.0.1:9222/session`을 실행합니다.
+detach는 새 입력을 차단한 뒤 원래 peer와 자식의 정리를 기다립니다. 정상 종료는
+`browser.close`를 한 번 보내고, 실패하면 결과 불확실 상태를 보존합니다. 프로필 내용과
+안정된 claim 파일은 유지합니다. 종료된 연결은 재사용할 수 없으므로 재부착 후 새
+인스턴스의 연결을 탐색합니다. 결과가 불확실한 입력은 자동 재실행하지 않습니다.
 
----
+`[browser.live] enabled = false`는 다음 부착에서 이 backend를 제외합니다. 이미 설정을
+캡처한 worker를 종료하지는 않습니다. 해당 설치의 Addon lifecycle로 종료합니다.
 
-## 상태 및 알려진 한계
+## 외부 Firefox 연결
 
-- **지원 상태**: v0.52.0에 도입되었습니다. Remote Agent를 지원하는 Firefox 157.0.1 이상이 필요합니다.
-- **전용 프로필 필수**: 반드시 전용 프로필 경로를 지정해야 합니다. 평소 쓰는 기본 프로필을 지정하면 개인 브라우저가 이미 실행 중일 때 실패합니다(`--firefox-profile` 가드).
-- **루프백 제한**: WebSocket BiDi URL은 보안을 위해 루프백(`127.0.0.1`)으로만 제한되며 원격 호스트는 거부됩니다.
+직접 띄운 Firefox와
+`masc-browser-host --bidi-url ws://127.0.0.1:9222/session`은 명시적인 외부 연결입니다.
+`masc browser-lane-setup --mode host --base-path /path/to/workspace`로 launcher를
+설치한 뒤 부착된 브라우저 Addon에 연결합니다. 그 브라우저의 프로세스 수명은 운영자가
+관리합니다. 수동 host의 연결 진단과 관리되는 Addon의 준비 상태는 별개입니다.
+
+## 조작 범위
+
+BiDi는 읽을 수 있는 페이지에서 native hover·포인터·키보드·관측한 요소 조작을 제공합니다.
+Firefox 내부 페이지는 스크립트를 거부해 `unavailableTabs`와 `complete: false`로 남을 수
+있으며, 다른 읽을 수 있는 탭은 계속 사용할 수 있습니다. 관측한 `clientId`와 HTTP(S)
+URL로 `BrowserAct action="open_tab" lane="live"`를 명시하면 기존 탭을 바꾸지 않고
+새 탭을 만들 수 있습니다.
+
+hover 후 다시 읽거나 캡처해 드러난 컨트롤을 찾습니다. drag 후에는 애플리케이션 상태를
+확인합니다. 입력 영수증만으로 페이지가 drop을 수락했다고 볼 수는 없습니다. 다른 동작은
+연결이 보고한 capability로 확인합니다. 브라우저 zoom·upload 등의 기능은 transport마다
+같지 않습니다. Addon lifecycle 시나리오는 scripted BiDi peer를 사용하므로 모든 설치된
+Firefox 빌드나 사이트에서의 동작을 증명하지 않습니다.

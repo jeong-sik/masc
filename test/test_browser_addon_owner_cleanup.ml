@@ -16,14 +16,27 @@ let scenario () = Eio_main.run (fun env ->
     let send ()=Owner.dispatch owner {W.incarnation;command=W.Retire} in
     let automation_started,start_automation=Eio.Promise.create ()
     and chrome_started,start_chrome=Eio.Promise.create ()
+    and live_started,start_live=Eio.Promise.create ()
+    and live_settled,settle_live=Eio.Promise.create ()
     and automation_settled,settle_automation=Eio.Promise.create ()
     and chrome_settled,settle_chrome=Eio.Promise.create () in
     Fun.protect ~finally:(fun () ->
       (* These test barriers must not outlive a failed assertion or cancellation;
          protected production cleanup is joined by the enclosing switch. *)
       ignore (Eio.Promise.try_resolve settle_automation ());
+      ignore (Eio.Promise.try_resolve settle_live ());
       ignore (Eio.Promise.try_resolve settle_chrome ())) (fun () ->
-    let automation_calls=ref 0 and chrome_calls=ref 0 in
+    let automation_calls=ref 0 and chrome_calls=ref 0 and live_calls=ref 0 in
+    let client_id=ok (B.client_id_of_string "0b000000-0000-4000-8000-000000000004") in
+    check bool "unregistered clients grant no owned cleanup" true
+      (Result.is_error (Owner.attach_live owner ~client_id ~cleanup:(fun () -> fail "foreign cleanup")));
+    let client:B.client_info={client_id;browser=B.Firefox;version="fixture";
+      engine_version="fixture";transport=B.Webdriver_bidi} in
+    (match Owner.dispatch owner {W.incarnation;command=W.Poll {client;window_sec=0.001}} with
+     | W.Poll_result _ -> ()
+     | Service_refusal _|Snapshot_result _|Model_reply _|Download_reply _|Receipt|Issue_result _ -> fail "live registration refused");
+    ok (Owner.attach_live owner ~client_id ~cleanup:(fun () ->
+      incr live_calls;Eio.Promise.resolve start_live ();Eio.Promise.await live_settled;Ok ()));
     ok (Owner.attach_automation owner ~locate:false
       ~execute:(fun _ -> fail "retirement must not dispatch browser input")
       ~session:(fun () -> B.Browser_closed)
@@ -41,7 +54,9 @@ let scenario () = Eio_main.run (fun env ->
         Eio.Promise.resolve cancel context;
         let reply=send () in Eio.Fiber.check ();Some reply)
       with Eio.Cancel.Cancelled _ -> Eio.Fiber.check ();None) in
-    Eio.Promise.await automation_started;Eio.Promise.await chrome_started;
+    Eio.Promise.await automation_started;Eio.Promise.await chrome_started;Eio.Promise.await live_started;
+    check bool "retirement fences original live client before joining it" true
+      (not (List.exists (fun (client:B.client_info) -> client.client_id=client_id) (B.active_clients ())));
     Eio.Cancel.cancel (Eio.Promise.await cancelling) Exit;
     let second=Eio.Fiber.fork_promise ~sw send in
     Eio.Fiber.yield ();
@@ -50,6 +65,9 @@ let scenario () = Eio_main.run (fun env ->
     Eio.Fiber.yield ();
     check bool "one failed cleanup cannot skip the other" true (Eio.Promise.peek second=None);
     Eio.Promise.resolve settle_chrome ();
+    Eio.Fiber.yield ();
+    check bool "live child settlement is joined too" true (Eio.Promise.peek second=None);
+    Eio.Promise.resolve settle_live ();
     check bool "caller cancellation propagates after cleanup" true (Eio.Promise.await_exn first=None);
     let reply=Eio.Promise.await_exn second in
     check bool "cleanup failures cannot become a retirement receipt" true (unknown reply);
@@ -60,6 +78,7 @@ let scenario () = Eio_main.run (fun env ->
        | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
     check bool "repeated Retire retains the same failure" true (send ()=reply);
     check int "failed automation cleanup is not replayed" 1 !automation_calls;
+    check int "owned live cleanup is not replayed" 1 !live_calls;
     check int "raised Chrome cleanup is not replayed" 1 !chrome_calls))))
 
 let () = run "browser addon cleanup" ["lifecycle",[

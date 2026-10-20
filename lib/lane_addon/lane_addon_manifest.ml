@@ -42,6 +42,53 @@ let output_ports world =
   | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
   | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
   | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> Error "world.outputs must be a table"
+(* [[world.exact_outputs.<name>]] schema = "<path>": the schema file ships in the
+   package, so it is read here and becomes part of the package value. The path is
+   package-relative like world.skills.directory and must stay inside the package
+   after symlinks resolve. *)
+let exact_outputs ~directory world =
+  let valid_name name =
+    name <> "" && (match name.[0] with 'a' .. 'z' -> true | _ -> false)
+    && String.for_all (function 'a' .. 'z' | '0' .. '9' | '_' -> true | _ -> false) name in
+  let read_schema name path =
+    let label = "world.exact_outputs." ^ name ^ ".schema" in
+    let* relative = Skill_resource_path.of_string path
+      |> Result.map_error (fun error -> label ^ ": " ^ Skill_resource_path.error_to_string error) in
+    let resolved = Unix.realpath (Skill_resource_path.append_to ~root:directory relative) in
+    let* () = if String.starts_with ~prefix:(directory ^ Filename.dir_sep) resolved then Ok ()
+      else Error (label ^ " resolves outside the package directory") in
+    let* schema = try Ok (Yojson.Safe.from_file resolved)
+      with Yojson.Json_error detail -> Error (label ^ ": " ^ detail) in
+    let* () = Lane_addon_action.validate_value_schema schema
+      |> Result.map_error (fun detail -> label ^ ": " ^ detail) in
+    match schema with
+    | `Assoc fields when List.assoc_opt "type" fields = Some (`String "object") -> Ok schema
+    | _ -> Error (label ^ " must describe an object") in
+  let parse_output (name, value) =
+    let* () = if valid_name name then Ok ()
+      else Error ("world.exact_outputs." ^ name ^ " requires a name of a-z, 0-9 and _ starting with a letter") in
+    match value with
+    | Otoml.TomlTable ["schema", Otoml.TomlString path]
+    | Otoml.TomlInlineTable ["schema", Otoml.TomlString path] ->
+        let* schema = read_schema name path in Ok { name; schema }
+    | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+    | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+    | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTable _
+    | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ ->
+        Error ("world.exact_outputs." ^ name ^ " requires only a schema path") in
+  match List.assoc_opt "exact_outputs" world with
+  | None -> Ok []
+  | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields) ->
+      let names = List.map fst fields in
+      if fields = [] || List.length names <> List.length (List.sort_uniq String.compare names)
+      then Error "world.exact_outputs requires unique named outputs"
+      else List.fold_left (fun result field ->
+        let* outputs = result in let* output = parse_output field in Ok (output :: outputs)) (Ok []) fields
+        |> Result.map (List.sort (fun (a : exact_output) b -> String.compare a.name b.name))
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+  | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+  | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> Error "world.exact_outputs must be a table"
 let load ~path =
   let parse () =
     let path = Unix.realpath path in
@@ -62,8 +109,8 @@ let load ~path =
       | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields) ->
           let names = List.map fst fields in
           if List.length names <> List.length (List.sort_uniq String.compare names)
-             || List.exists (fun key -> key <> "skills" && key <> "actions" && key <> "outputs" && key <> "tools" && key <> "state") names
-          then Error "world accepts skills, actions, outputs, tools and state tables" else Ok fields
+             || List.exists (fun key -> not (List.mem key ["skills"; "actions"; "outputs"; "tools"; "state"; "exact_outputs"])) names
+          then Error "world accepts skills, actions, outputs, tools, state and exact_outputs tables" else Ok fields
       | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
       | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
       | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _)
@@ -131,6 +178,7 @@ let load ~path =
       | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _) | Some (Otoml.TomlTable _)
       | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error "world.state requires only mode = persistent or ephemeral" in
     let* outputs = output_ports world in
+    let* exact_outputs = exact_outputs ~directory:(Filename.dirname path) world in
     let* interface = match Otoml.find_opt document Fun.id ["interface"] with
       | None -> Ok []
       | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields)
@@ -224,7 +272,7 @@ let load ~path =
       | Error detail -> Error detail
       | Ok () -> Ok { id; revision; title; contributions = List.rev contributions; runtime; image; command;
           directory = Filename.dirname path; skills_directory; action_tool; state_storage; tool_invocation; exported_tools; outputs; refresh_policy; model_access; binding_schema; presentation;
-          resources }
+          exact_outputs; resources }
   in
   try Result.map_error (fun detail -> Invalid_manifest detail) (parse ()) with
   | Sys_error message -> Error (Io_failure message)

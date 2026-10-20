@@ -54,6 +54,12 @@ type refresh_policy = Every_hint | Source_changes
 type model_access = Model_disabled | Host_sampling
 type state_storage = Ephemeral | Persistent
 type tool_invocation = Direct | Host_context
+
+type exact_output = { name : string; schema : Yojson.Safe.t }
+(** A named exact output the package asks the host to run: [[world.exact_outputs.<name>]]
+    in the manifest, with the JSON Schema read from the package file it names. The
+    operator binds its slots per installation in [runtime.toml]. *)
+
 type package = {
   id : string;
   revision : string;
@@ -75,6 +81,8 @@ type package = {
   binding_schema : Yojson.Safe.t option;
   presentation : Lane_addon_presentation.t;
   skills_directory : Skill_resource_path.t option;
+  exact_outputs : exact_output list;
+  (** Unique names in name order. *)
   resources : resources;
 }
 val validate_exported_tools : action_tool:string option -> string list -> (string list, string) result

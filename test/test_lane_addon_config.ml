@@ -352,6 +352,61 @@ let model_access_is_explicit_and_revisioned () = with_directory (fun _root packa
     write manifest (package () ^ "\n[interface]\nmodel_access = " ^ value ^ "\n");
     check_error "unknown or untyped model access is rejected" path) ["\"auto\"";"true"])
 
+let exact_outputs_are_package_schemas () = with_directory (fun root packages directory ->
+  let manifest = install_package packages in
+  let path = Filename.concat directory "quiz.toml" in
+  write path (declaration msx_binding);
+  let schemas = Filename.concat packages "schemas" in
+  Unix.mkdir schemas 0o700;
+  let author = {|{"type":"object","properties":{"questions":{"type":"array","items":{"type":"string"}}},"required":["questions"],"additionalProperties":false}|} in
+  write (Filename.concat schemas "author.json") author;
+  write (Filename.concat schemas "grade.json") {|{"type":"object","properties":{"verdict":{"type":"string","enum":["correct","incorrect"]}},"additionalProperties":false}|};
+  let with_outputs tables = write manifest (package () ^ "\n" ^ tables) in
+  let initial = unwrap (Config.load_file ~path) in
+  check int "a package without the table declares no exact output" 0
+    (List.length initial.package.exact_outputs);
+  check bool "and its package value carries no exact_outputs key, so its revision is unchanged" true
+    (Yojson.Safe.Util.member "exact_outputs" (Lane_addon_types.package_to_json initial.package) = `Null);
+  with_outputs {|[world.exact_outputs.grade]
+schema = "schemas/grade.json"
+[world.exact_outputs.author]
+schema = "schemas/author.json"
+|};
+  let declared = unwrap (Config.load_file ~path) in
+  check (list string) "outputs are listed in name order" ["author"; "grade"]
+    (List.map (fun (output : Lane_addon_types.exact_output) -> output.name) declared.package.exact_outputs);
+  check bool "the schema is the file's JSON" true
+    ((List.hd declared.package.exact_outputs).schema = Yojson.Safe.from_string author);
+  check bool "declaring exact outputs changes the configuration identity" false
+    (initial.revision = declared.revision);
+  write (Filename.concat schemas "grade.json") {|{"type":"object","properties":{"verdict":{"type":"string"}},"additionalProperties":false}|};
+  let edited = unwrap (Config.load_file ~path) in
+  check bool "editing a schema file changes the configuration identity" false
+    (declared.revision = edited.revision);
+  write manifest (package ());
+  check string "removing the table returns to the first identity" initial.revision
+    (unwrap (Config.load_file ~path)).revision;
+  write (Filename.concat schemas "text.json") {|{"type":"string"}|};
+  write (Filename.concat schemas "pattern.json") {|{"type":"object","patternProperties":{"^a":{"type":"string"}},"additionalProperties":false}|};
+  write (Filename.concat schemas "broken.json") {|{"type":"object",|};
+  write (Filename.concat root "outside.json") author;
+  Unix.symlink (Filename.concat root "outside.json") (Filename.concat schemas "escape.json");
+  List.iter (fun (label, tables) ->
+    with_outputs tables;
+    check_error label path)
+    [ "an upper-case name", "[world.exact_outputs.Author]\nschema = \"schemas/author.json\"\n";
+      "a name starting with a digit", "[world.exact_outputs.2nd]\nschema = \"schemas/author.json\"\n";
+      "a key beside schema", "[world.exact_outputs.author]\nschema = \"schemas/author.json\"\nmodel = \"x\"\n";
+      "no schema", "[world.exact_outputs.author]\n";
+      "an empty table", "[world.exact_outputs]\n";
+      "a parent path", "[world.exact_outputs.author]\nschema = \"../outside.json\"\n";
+      "an absolute path", Printf.sprintf "[world.exact_outputs.author]\nschema = %S\n" (Filename.concat root "outside.json");
+      "a missing file", "[world.exact_outputs.author]\nschema = \"schemas/absent.json\"\n";
+      "a symlink out of the package", "[world.exact_outputs.author]\nschema = \"schemas/escape.json\"\n";
+      "invalid JSON", "[world.exact_outputs.author]\nschema = \"schemas/broken.json\"\n";
+      "a schema that is not an object", "[world.exact_outputs.author]\nschema = \"schemas/text.json\"\n";
+      "an unsupported keyword", "[world.exact_outputs.author]\nschema = \"schemas/pattern.json\"\n" ])
+
 let assembled_fusion_declarations () =
   List.iter (fun name ->
     let loaded = unwrap (Config.load_file ~path:(repo_file
@@ -508,6 +563,7 @@ let () = run "Lane Add-on declarative composition"
      test_case "judge source schema is enforced before worker start" `Quick judge_source_schema_is_enforced;
      test_case "assembled Fusion declarations load with explicit model boundaries" `Quick assembled_fusion_declarations;
      test_case "model access is explicit and changes configuration identity" `Quick model_access_is_explicit_and_revisioned;
+     test_case "exact outputs are package schemas in the configuration identity" `Quick exact_outputs_are_package_schemas;
      test_case "shipped DOS chain packages declare enforceable binding contracts" `Quick shipped_dos_chain_declares_binding_contracts;
      test_case "refresh suppression is an explicit package contract" `Quick refresh_policy_is_explicit;
      test_case "package interface validates bindings before installation" `Quick package_interface;

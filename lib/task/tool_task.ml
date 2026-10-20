@@ -147,7 +147,11 @@ and handle_transition ~tool_name ~start_time ctx args =
      [task_assignee_of_status] states (Claimed, InProgress, AwaitingVerification)
      have a holder; a Todo or terminal Task goes to the lifecycle, whose message
      and valid_next_actions hint stay as they were. The holder may resubmit its
-     own AwaitingVerification Task: that supersede is the lifecycle's to allow. *)
+     own AwaitingVerification Task: that supersede is the lifecycle's to allow.
+
+     The holder test here ([Workspace.same_task_actor]) and the lifecycle's
+     [same_agent] are the same function. If one is ever redefined, redefine
+     the other with it, or the tool refuses what the lifecycle would accept. *)
   let owner_requirement =
     match action with
     | Masc_domain.Release ->

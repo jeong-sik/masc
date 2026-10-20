@@ -21,4 +21,5 @@ val generate_unique : string -> string
 val extract_agent_type : string -> string option
 (** [extract_agent_type name] extracts the stable agent prefix from a generated
     nickname. A bare name is its own type. A dashed name that does not end in an
-    adjective and an animal from the shared word lists has no prefix. *)
+    adjective and an animal from the shared word lists, optionally followed by a
+    four-digit hex suffix, has no prefix. *)

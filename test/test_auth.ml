@@ -519,6 +519,22 @@ let test_verify_token_allows_generated_alias_for_token_owner_prefix () =
   | Error _, _ ->
       fail "create_token should succeed"
 
+(* The owner-alias fallback maps only a generated nickname to the credential of
+   its stable prefix. The last segment of any other dashed name is not an owner,
+   so the token of "bar" must not authenticate "foo-bar". *)
+let test_verify_token_rejects_dashed_name_that_ends_in_the_token_owner () =
+  let dir = setup_test_workspace () in
+  let result =
+    match Auth.create_token dir ~agent_name:"bar" ~role:Masc_domain.Worker with
+    | Ok (raw_token, _) -> Auth.verify_token dir ~agent_name:"foo-bar" ~token:raw_token
+    | Error e -> Error e
+  in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok cred ->
+      fail (Printf.sprintf "the token of bar authenticated foo-bar as %s" cred.agent_name)
+  | Error _ -> ()
+
 let test_resolve_agent_from_token () =
   let dir = setup_test_workspace () in
   let create_result = Auth.create_token dir ~agent_name:"resolver" ~role:Masc_domain.Worker in
@@ -1405,6 +1421,8 @@ let () =
         test_verify_token_reports_token_owner_on_agent_mismatch;
       test_case "verify token allows generated alias for owner prefix" `Quick
         test_verify_token_allows_generated_alias_for_token_owner_prefix;
+      test_case "dashed name ending in the token owner is rejected" `Quick
+        test_verify_token_rejects_dashed_name_that_ends_in_the_token_owner;
       test_case "resolve agent from token" `Quick test_resolve_agent_from_token;
       test_case "list credentials" `Quick test_list_credentials;
       test_case "delete credential" `Quick test_delete_credential;

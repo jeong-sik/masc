@@ -763,10 +763,11 @@ let test_autocomplete_unique_prefix () =
   check (option string) "/th -> /thinking " (Some "/thinking ") (Command.autocomplete "/th");
   check (option string) "/ta -> /task " (Some "/task ") (Command.autocomplete "/ta");
   check (option string) "/se -> /settings" (Some "/settings") (Command.autocomplete "/se");
-  (* Two words each, so neither is a unique prefix any more: [m] stops at the
-     shared "me" of memory and metrics, and [c] has nothing shared past the
-     letter itself, so it offers the catalog's first c-word (cost, today). *)
-  check (option string) "/m -> /me" (Some "/me") (Command.autocomplete "/m");
+  (* Several matches: [play i] stops at the "invite" that invite and invites
+     share, and [c] has nothing shared past the letter itself, so it offers
+     the catalog's first c-word (cost, today). *)
+  check (option string) "/play i -> /play invite" (Some "/play invite")
+    (Command.autocomplete "/play i");
   check (option string) "/c -> /cost" (Some "/cost") (Command.autocomplete "/c");
   check (option string) "/h -> /help" (Some "/help") (Command.autocomplete "/h");
   check (option string) "/zork -> None" None (Command.autocomplete "/zork")

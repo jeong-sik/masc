@@ -3,6 +3,7 @@ import { validateSound } from './project-sound.mjs'
 import { openVstStream } from './vst-stream.mjs'
 import { openPcmOutput } from './pcm-output.mjs'
 import { randomUUID } from 'node:crypto'
+import { backingClock } from './phrase-backing.mjs'
 
 // Audition is a declared MIDI1 projection to one selected editor channel. The
 // raw recorder owns precision/timestamps; this path plays the next device block.
@@ -54,7 +55,7 @@ export function monitorPacket(packet, channel, held = new Map()) {
 
 // One slot is sufficient: the MIDI input owner awaits send() before admitting
 // its next packet. Audio demand consumes that slot without entering the UI queue.
-export function openMonitorSession({ sound, output, channel, signal,
+export function openMonitorSession({ sound, output, channel, signal, backing,
   openOutput = openPcmOutput, openSynth = openVstStream, id = randomUUID() }) {
   validateSound(sound)
   if (sound.kind !== 'vst') throw new Error('Choose a VST instrument before monitored step input')
@@ -63,7 +64,9 @@ export function openMonitorSession({ sound, output, channel, signal,
   signal?.throwIfAborted()
   const cancellation = new AbortController()
   const stopped = new Error('Step monitor stopped')
-  let synth = null, pcm = null, slot = null, held = new Map(), stopping = false, failure = null
+  const voices = []
+  let pcm = null, slot = null, clock = null, held = new Map(), stopping = false, failure = null
+  let peak = 0, clippedSamples = 0n
   let resolveReady, rejectReady
   const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject })
   ready.catch(() => {})
@@ -71,7 +74,8 @@ export function openMonitorSession({ sound, output, channel, signal,
     failure ??= reason instanceof Error ? reason : new Error('Step monitor failed', { cause: reason })
     cancellation.abort(failure); rejectReady(failure)
     slot?.reject(failure); slot = null
-    pcm?.cancel(failure); synth?.cancel(failure)
+    pcm?.cancel(failure)
+    for (const voice of voices) voice.owner.cancel(failure)
   }
   const abort = () => fail(signal.reason)
   signal?.addEventListener('abort', abort, { once: true })
@@ -79,17 +83,34 @@ export function openMonitorSession({ sound, output, channel, signal,
   try {
     pcm = openOutput({ output, signal: cancellation.signal,
       onEvent(event) { if (event.kind === 'playing' && !stopping) resolveReady(device) },
-      async provideBlock({ frames, sampleRate, signal: producer }) {
+      async provideBlock({ frames, sampleRate, startFrame, signal: producer }) {
         producer.throwIfAborted()
-        if (!synth) {
-          synth = openSynth(sound, { sampleRate, signal: cancellation.signal })
-          synth.completion.catch(error => { if (error !== stopped) fail(error) })
+        if (!voices.length) {
+          if (backing) clock = backingClock(backing, sampleRate)
+          for (const voiceChannel of [channel, ...(backing?.channels ?? [])]) {
+            const owner = openSynth(sound, { sampleRate, signal: cancellation.signal })
+            voices.push({ channel: voiceChannel, owner })
+            owner.completion.catch(error => { if (error !== stopped) fail(error) })
+          }
         }
-        await synth.ready
+        await Promise.all(voices.map(voice => voice.owner.ready))
         producer.throwIfAborted()
         const admitted = slot; slot = null
         try {
-          const block = await synth.render(frames, admitted?.messages ?? [])
+          const messages = clock ? [...clock.block(startFrame, frames), ...(admitted?.messages ?? [])]
+            .sort((a, b) => a.frame - b.frame) : admitted?.messages ?? []
+          // Dedicated instances retain independent same-pitch voices even when
+          // a plug-in treats MIDI channels as omni. One device demand clocks all.
+          const blocks = await Promise.all(voices.map(voice => voice.owner.render(frames,
+            clock ? messages.filter(message => (message.bytes[0] & 15) === voice.channel) : messages)))
+          const block = blocks[0]
+          if (clock) for (let offset = 0; offset < block.length; offset += 4) {
+            let sample = 0
+            for (const pcm of blocks) sample += pcm.readFloatLE(offset)
+            peak = Math.max(peak, Math.abs(sample))
+            if (Math.abs(sample) > 1) clippedSamples++
+            block.writeFloatLE(sample, offset)
+          }
           producer.throwIfAborted()
           admitted?.resolve()
           return block
@@ -111,9 +132,9 @@ export function openMonitorSession({ sound, output, channel, signal,
       stopping = true
       rejectReady(failure ?? new Error('Step monitor stopped before playback'))
       slot?.resolve(); slot = null; held.clear()
-      if (synth) {
-        if (!failure) synth.stop()
-        try { await synth.completion } catch (error) { if (error !== stopped) fail(error) }
+      if (!failure) for (const voice of voices) voice.owner.stop()
+      for (const voice of voices) {
+        try { await voice.owner.completion } catch (error) { if (error !== stopped) fail(error) }
       }
       signal?.removeEventListener('abort', abort)
     }
@@ -127,7 +148,10 @@ export function openMonitorSession({ sound, output, channel, signal,
       return { schemaVersion: 1, kind: 'step-monitor', id, channel,
         sound: { name: sound.selection.name, identifier: sound.instrument.identifier,
           version: sound.instrument.version, presetSHA256: sound.preset.sha256 },
-        pcm: pcm.diagnostics() }
+        pcm: pcm.diagnostics(), ...(backing ? { backing: {
+          ...(clock?.diagnostics() ?? { track: backing.track, channel: backing.channel, producedFrames: '0' }),
+          channels: backing.channels, instances: voices.length, peak, clippedSamples: String(clippedSamples),
+        } } : {}) }
     },
     prepare(packet) { return monitorPacket(packet, channel, held) },
     send(prepared) {
@@ -141,7 +165,8 @@ export function openMonitorSession({ sound, output, channel, signal,
     stop() {
       if (stopping) return
       stopping = true; slot?.resolve(); slot = null
-      pcm.stop(); synth?.cancel(stopped)
+      pcm.stop()
+      for (const voice of voices) voice.owner.cancel(stopped)
     },
     cancel: fail,
   }

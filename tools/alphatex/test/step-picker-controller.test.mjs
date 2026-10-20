@@ -1,4 +1,5 @@
 import {MidiSourcePicker as ActualMidiSourcePicker}from '../midi-source-picker.mjs'
+import {phraseBacking} from '../phrase-backing.mjs'
 import {sameStepContext,stepControl}from '../step-input.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -29,7 +30,7 @@ async function controller(options = {}) {
   }
   const slot = `sequencer-${randomUUID()}`
   globalThis[slot] = {
-    process, sameStepContext, stepControl, ...editor, Worker, InstrumentPicker,
+    process, sameStepContext, stepControl, phraseBacking, ...editor, Worker, InstrumentPicker,
     openStepInput(request) {
       observed.inputs++
       if (options.openStepInput) return options.openStepInput(request)
@@ -112,6 +113,26 @@ test('monitored explicit UID refuses a MIDI output route without opening another
     view.command('step-input -17 --monitor'); await flush()
     assert.equal(view.observed.inputs, 0)
     view.key('q'); await view.done
+  } finally { view.signal.abort(); await view.done }
+})
+
+test('practice picker owns free-play mode and frozen backing, and saving retains the phrase', async () => {
+  const requests = []
+  let complete
+  const initial = { ...editor.newEditor().project, sound: { kind: 'soundfont' } }
+  const view = await controller({ initialDocument: initial, output: 'chosen-device', sources: [{id:'-17',name:'Keyboard'}],
+    openStepInput(request) {
+      requests.push(request)
+      return { ready: Promise.resolve({source:{name:'Keyboard'},monitoring:true,practice:true}),
+        completion: new Promise(resolve => { complete = resolve }), stop() { complete() } }
+    } })
+  try {
+    view.command('practice-input'); view.key('return'); await flush(); await flush()
+    assert.equal(requests.length, 1); assert.equal(requests[0].practice, true)
+    assert.deepEqual(requests[0].audio.backing, phraseBacking(initial, 'track-1'))
+    assert.equal(requests[0].audio.output, 'chosen-device')
+    view.command('step-stop'); await flush(); view.key('q'); await view.done
+    assert.deepEqual(view.observed.saved.at(-1), initial)
   } finally { view.signal.abort(); await view.done }
 })
 

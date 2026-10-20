@@ -120,7 +120,8 @@ export function stepPacket(editor, pending, packet) {
 // nor a context cancellation awaits completion inside that queue: an admitted
 // packet may itself be waiting to enter the queue.
 export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState = () => {},
-  audio, openMonitor = openStepMonitor, openInput = openMidiInput }) {
+  audio, practice = false, openMonitor = openStepMonitor, openInput = openMidiInput }) {
+  if (practice && !audio) throw new Error('Practice input requires VST monitoring')
   const { channel } = target(getEditor())
   const cancellation = new AbortController()
   const stopped = new Error('Step input stopped before arming')
@@ -135,6 +136,7 @@ export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState
       const prepared = monitor?.prepare(packet)
       await enqueue(() => {
         signal.throwIfAborted()
+        if (practice) { onState({ kind: 'input', held: prepared.held.size }); return }
         const result = stepPacket(getEditor(), pending, packet)
         pending = result.pending
         if (result.inserted) adoptEditor(result.editor, result.inserted)
@@ -144,7 +146,7 @@ export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState
       if (monitor) await monitor.send(prepared)
     } })
     const info = await input.ready
-    return { ...info, ...(monitor ? { monitoring: true } : {}) }
+    return { ...info, ...(monitor ? { monitoring: true } : {}), ...(practice ? { practice: true } : {}) }
   })()
   ready.catch(() => {})
   const completion = (async () => {
@@ -158,7 +160,7 @@ export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState
     if (failure) throw failure
   })()
   completion.catch(() => {})
-  return { ready, completion,
+  return { kind: practice ? 'practice-input' : 'step-input', ready, completion,
     diagnostics() { return monitor ? { source, ...monitor.diagnostics(), failure: failure?.message ?? null } : null },
     async inspect() { return monitor ? { source, ...await monitor.inspect(), failure: failure?.message ?? null } : null },
     stop({ admittedControls = false } = {}) {
@@ -169,6 +171,7 @@ export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState
       input?.stop(); monitor?.stop()
     },
     control(action) {
+      if (practice) throw new Error('Stop practice input before changing step-entry controls')
       cancellation.signal.throwIfAborted()
       if (controlsStopped || pending !== null) throw new Error('Release all keys and finish draining before changing step input')
       return stepControl(getEditor(), action)

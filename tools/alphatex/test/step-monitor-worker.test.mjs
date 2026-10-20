@@ -6,6 +6,8 @@ import { join, dirname, delimiter } from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { Worker } from 'node:worker_threads'
 import { createHash } from 'node:crypto'
+import { newProject } from '../sequencer-project.mjs'
+import { phraseBacking } from '../phrase-backing.mjs'
 
 const bytes = Buffer.from('worker-owned preset')
 const sound = { kind: 'vst', selection: { plugin_path: '/fixture.vst3', plugin_name: null, preset_path: null, name: 'Fixture' },
@@ -18,7 +20,7 @@ async function runtime({ pcm = 'paced', vst = 'valid' } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'monitor-worker-'))
   const trace = join(directory, 'events.jsonl'), workers = []
   for (const file of ['step-monitor.mjs', 'step-monitor-worker.mjs', 'step-monitor-session.mjs',
-    'project-sound.mjs', 'pcm-output.mjs', 'vst-stream.mjs', 'session-data.mjs', 'wave-file.mjs']) {
+    'phrase-backing.mjs', 'sequencer-project.mjs', 'project-sound.mjs', 'pcm-output.mjs', 'vst-stream.mjs', 'session-data.mjs', 'wave-file.mjs']) {
     await copyFile(new URL(`../${file}`, import.meta.url), join(directory, file))
   }
   await symlink(fileURLToPath(new URL('../node_modules', import.meta.url)), join(directory, 'node_modules'), 'dir')
@@ -36,7 +38,8 @@ process.stdin.on('data', chunk => {
   while ((end=text.indexOf('\\n'))>=0) {
     const line=text.slice(0,end);text=text.slice(end+1)
     const row=JSON.parse(line)
-    if(row.kind==='render') log({kind:'render',messages:row.messages})
+    if(row.kind==='render') log({kind:'render',pid:process.pid,messages:row.messages})
+    if(row.kind==='block') { const pcm=Buffer.from(row.pcm,'base64');log({kind:'pcm',samples:[pcm.readFloatLE(0),pcm.readFloatLE(4)]}) }
   }
 })
 process.argv.splice(2,0,${JSON.stringify(mode)})
@@ -110,13 +113,71 @@ test('worker stop before ready joins children and cancellation preserves unclone
   }
 })
 
-test('normal stop while the synth is opening retires children without requiring ready', async () => {
-  const fixture = await runtime({ vst: 'wait-block' }), owner = fixture.open()
+test('one device worker combines live notes with absolute-frame backing across fractional loop boundaries', async () => {
+  const project = newProject()
+  project.tempo = 600000; project.length = 960; project.loop = { start: 0, end: 960 }
+  project.tracks[0].channel = 2
+  project.tracks[0].notes = [{ id: 'excluded', pitch: 99, start: 0, duration: 960, velocity: 100 }]
+  project.tracks.push({ ...project.tracks[0], id: 'backing', channel: 1,
+    notes: [{ id: 'bass', pitch: 48, start: 0, duration: 960, velocity: 80 }] })
+  const fixture = await runtime(), owner = fixture.open({ backing: phraseBacking(project, 'track-1', true) })
   try {
-    while (!(await owner.inspect()).pcm?.device) await new Promise(resolve => setImmediate(resolve))
+    await owner.ready
+    await owner.send(owner.prepare(packet([0x40903c00, 0xa0000000])))
+    while (BigInt((await owner.inspect()).pcm.requestedBlocks) < 5n) await new Promise(resolve => setImmediate(resolve))
+    await owner.send(owner.prepare(packet([0x40803c00, 0])))
+    owner.stop(); await owner.completion
+    const rows = await fixture.assertClosed(), renders = rows.filter(row => row.kind === 'render')
+    const frames = new Map()
+    const notes = renders.flatMap(row => {
+      const start = frames.get(row.pid) ?? 0; frames.set(row.pid, start + 8)
+      return row.messages.map(message => ({ ...message, pid: row.pid, at: start + message.frame }))
+    })
+    assert.deepEqual(notes.filter(row => row.bytes[0] === 0x91).slice(0, 7).map(row => row.at), [0, 5, 10, 14, 19, 24, 29])
+    const boundary = notes.filter(row => row.at === 5 && (row.bytes[0] & 15) === 1 && row.bytes[1] === 48)
+    assert.deepEqual(boundary.map(row => row.bytes[0]), [0x81, 0x91])
+    assert.ok(notes.some(row => row.bytes[0] === 0x92 && row.bytes[1] === 60))
+    assert.ok(notes.some(row => row.bytes[0] === 0x82 && row.bytes[1] === 60))
+    assert.ok(notes.every(row => row.bytes[1] !== 99))
+    assert.equal(owner.diagnostics().backing.channel, 2)
+    assert.equal(owner.diagnostics().backing.instances, 2)
+    assert.equal(owner.diagnostics().backing.peak, .5)
+    assert.equal(owner.diagnostics().backing.clippedSamples, '0')
+    assert.ok(rows.filter(row => row.kind === 'pcm').every(row => row.samples[0] === .5 && row.samples[1] === -.25))
+    const live = notes.find(row => row.bytes[0] === 0x92 && row.bytes[1] === 60)
+    const backing = notes.find(row => row.bytes[0] === 0x91 && row.bytes[1] === 48)
+    assert.notEqual(live.pid, backing.pid)
+    assert.equal(new Set(rows.filter(row => row.kind === 'start' && row.name === 'music-pcm-output').map(row => row.pid)).size, 1)
+  } finally { owner.stop(); await owner.completion.catch(() => {}); await fixture.dispose() }
+})
+
+test('normal stop while the synth is opening retires children without requiring ready', async () => {
+  const project = newProject()
+  project.tracks[0].channel = 2
+  project.tracks.push({ ...project.tracks[0], id: 'backing', channel: 1,
+    notes: [{ id: 'bass', pitch: 48, start: 0, duration: 960, velocity: 80 }] })
+  const fixture = await runtime({ vst: 'wait-block' }), owner = fixture.open({ backing: phraseBacking(project, 'track-1') })
+  try {
+    while ((await owner.inspect()).backing?.instances !== 2) await new Promise(resolve => setImmediate(resolve))
     owner.stop(); await owner.completion
     await assert.rejects(owner.ready)
     await fixture.assertClosed()
+    assert.equal(owner.diagnostics().worker.terminalReceived, true)
+    assert.equal(owner.diagnostics().backing.instances, 2)
+  } finally { owner.stop(); await owner.completion.catch(() => {}); await fixture.dispose() }
+})
+
+test('practice synth failure joins every independent instance and its one output', async () => {
+  const project = newProject()
+  project.tracks[0].channel = 2
+  project.tracks.push({ ...project.tracks[0], id: 'backing', channel: 1,
+    notes: [{ id: 'bass', pitch: 48, start: 0, duration: 960, velocity: 80 }] })
+  const fixture = await runtime({ vst: 'identity' }), owner = fixture.open({ backing: phraseBacking(project, 'track-1') })
+  try {
+    await assert.rejects(owner.ready); await assert.rejects(owner.completion)
+    await fixture.assertClosed()
+    assert.equal(owner.diagnostics().backing.instances, 2)
+    assert.equal(owner.diagnostics().pcm.nativeClosed, true)
     assert.equal(owner.diagnostics().worker.terminalReceived, true)
   } finally { owner.stop(); await owner.completion.catch(() => {}); await fixture.dispose() }
 })

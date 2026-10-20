@@ -18,11 +18,13 @@ import { defaultStateDirectory, snapshotWriter } from './vst.mjs'
 import { renderVstPhrase } from './sequencer-vst.mjs'
 import { captureVstSound } from './project-sound-files.mjs'
 import { openStepInput, sameStepContext, stepControl } from './step-input.mjs'
+import { phraseBacking } from './phrase-backing.mjs'
 import { MidiSourcePicker } from './midi-source-picker.mjs'
 
 const help = [
   ':step-input chooses a MIDI keyboard; :step-input SOURCE_UID arms it directly; :step-stop drains.',
   ':step-input [SOURCE_UID] --monitor also plays the selected VST through the audio output.',
+  ':practice-input [SOURCE_UID] plays live on this track while the other audible phrase tracks repeat; no note edits.',
   ':step-diagnostics PATH exports the current/last monitor output counters and failure.',
   ':step-length 1/3 sets next note length; :step-rest [LENGTH] moves without editing notes.',
   'Lengths/rests use beats or source SMPTE frames; release held keys before changing them.',
@@ -150,7 +152,8 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     failed: error => { status = `VST: ${error.message}`; draw() } })
   const sourcePicker = new MidiSourcePicker({ notify: draw, selected(source) {
     const monitor = openedSourceMenuOwner?.monitor === true
-    task = task.then(() => { if (accepting && !closed && !suspended) startStepInput(source, monitor) })
+    const practice = openedSourceMenuOwner?.practice === true
+    task = task.then(() => { if (accepting && !closed && !suspended) startStepInput(source, monitor, practice) })
       .catch(error => { status = error.message }).finally(draw)
   } })
   function fit(text) {
@@ -184,15 +187,15 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     const selection = new Set(selectedNotes(editor).map(note => note.id))
     const at = editorHarmony(editor)
     const lines = [
-      `${project.title}${dirty() ? ' *' : ''} · ${project.timingLabel ?? `${project.tempo} BPM`} · ${project.meter.join('/')} · ${(project.displayLength ?? project.length) / per} ${axis.label} · ${transport.kind}${loop ? ' · LOOP' : ''}`,
+      `${project.title}${dirty() ? ' *' : ''} · ${project.timingLabel ?? `${project.tempo} BPM`} · ${project.meter.join('/')} · ${(project.displayLength ?? project.length) / per} ${axis.label} · ${stepInput?.kind === 'practice-input' ? 'practicing' : transport.kind}${loop ? ' · LOOP' : ''}`,
       `Track ${editor.track + 1}/${project.tracks.length}: ${track.name} · ${track.detail ?? `ch ${track.channel + 1} · program ${track.program} · level ${track.level} · pan ${track.pan}`}${track.muted ? ' · MUTED' : ''}${track.solo ? ' · SOLO' : ''} · ${track.notes.length} notes`,
       `Cursor ${editor.tick / per} · ${Note.fromMidi(editor.pitch)} · grid ${editor.step / per} · length ${(current?.duration ?? editor.duration) / per} · input length ${editor.duration / per} · velocity ${current?.velocity ?? editor.velocity}${selection.size ? ` · ${selection.size} selected` : ''}${editor.noteClipboard ? ` · ${editor.noteClipboard.notes.length} copied` : ''}`,
-      `Chord candidates: ${at.candidates.join(' / ') || '—'} · ${at.notes.join(' ')} · ${stepInput ? `MIDI step · ${stepHeld} held · ` : ''}${status}`,
+      `Chord candidates: ${at.candidates.join(' / ') || '—'} · ${at.notes.join(' ')} · ${stepInput ? `${stepInput.kind === 'practice-input' ? 'MIDI practice' : 'MIDI step'} · ${stepHeld} held · ` : ''}${status}`,
     ]
     if (sourcePicker.view) {
       lines.length = 0
       const view = sourcePicker.view
-      lines.push('Choose MIDI step-input source', status)
+      lines.push(openedSourceMenuOwner?.practice ? 'Choose live practice MIDI source' : 'Choose MIDI step-input source', status)
       if (view.kind === 'loading') lines.push('Reading MIDI sources…')
       else if (view.kind === 'failed') lines.push(view.error)
       else {
@@ -334,13 +337,15 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     if (previous.project !== editor.project || previous.pattern !== editor.pattern || previous.track !== editor.track || previous.channel !== editor.channel) clearHarmony()
     if (stepInput && !sameStepContext(previous, editor)) stepInput.cancel()
   }
-  function startStepInput(source, monitor = false) {
+  function startStepInput(source, monitor = false, practice = false) {
     if (!accepting || closed || suspended || childTask) return
     if (stepInput) throw new Error('Stop the previous step input before starting another')
     if (monitor && (selectedMidiOutput !== undefined || portBindings.length)) throw new Error('Select :audio before VST input monitoring')
+    const backing = practice ? phraseBacking(editor.project, editorView(editor).tracks[editor.track].id, loop) : undefined
     stop(); clearHarmony(); showHelp = false
     const owner = openStepInput({ source, getEditor: () => editor,
-      ...(monitor ? { audio: { sound: audioInstrument(), output: selectedOutput } } : {}),
+      ...(monitor ? { audio: { sound: audioInstrument(), output: selectedOutput, ...(backing ? { backing } : {}) } } : {}),
+      ...(practice ? { practice: true } : {}),
       enqueue(action) {
         const decision = task.then(action)
         task = decision.catch(error => { status = error.message }).finally(draw)
@@ -349,10 +354,11 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       adoptEditor(next, count) { editor = next; clearHarmony(); status = `Inserted ${count} step notes` },
       onState(state) { stepHeld = state.held; draw() } })
     stepInput = owner; stepOwners.add(owner)
-    status = 'Opening MIDI step input'
-    owner.ready.then(info => { if (stepInput === owner && accepting && !closed) { status = `Step input${info.monitoring ? ' · VST monitor' : ''}: ${info.source.name}`; draw() } }, () => {})
-    owner.completion.then(() => { status = 'Step input stopped' },
-      error => { status = `Step input stopped: ${error.message}` }).finally(() => {
+    status = practice ? 'Opening live practice input and backing' : 'Opening MIDI step input'
+    owner.ready.then(info => { if (stepInput === owner && accepting && !closed) { status = `${info.practice ? 'Practice input' : 'Step input'}${info.monitoring ? ' · VST monitor' : ''}: ${info.source.name}`; draw() } }, () => {})
+    const inputName = practice ? 'Practice input' : 'Step input'
+    owner.completion.then(() => { status = `${inputName} stopped` },
+      error => { status = `${inputName} stopped: ${error.message}` }).finally(() => {
       const report = owner.diagnostics?.()
       if (report) lastStepReport = report
       stepOwners.delete(owner)
@@ -480,7 +486,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     if (!accepting && ['play', 'record', 'wave', 'arrange', 'step-input'].includes(value.kind)) return
     switch (value.kind) {
       case 'step-input':
-        if (value.source !== undefined) startStepInput(value.source, value.monitor)
+        if (value.source !== undefined) startStepInput(value.source, value.monitor, value.practice)
         else {
           if (sourceMenuOwner !== menuOwner) return
           if (stepInput) throw new Error('Use :step-stop before choosing another MIDI source')
@@ -572,7 +578,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         let admittedEffect
         try { admittedEffect = stepInputEffect(line) }
         catch (error) { status = error.message; draw(); return }
-        const menuOwner = admittedEffect?.kind === 'step-input' && admittedEffect.source === undefined ? { monitor: admittedEffect.monitor === true } : null
+        const menuOwner = admittedEffect?.kind === 'step-input' && admittedEffect.source === undefined ? { monitor: admittedEffect.monitor === true, practice: admittedEffect.practice === true } : null
         if (menuOwner) sourceMenuOwner = menuOwner
         task = task.then(async () => {
           // This command was admitted before close; retain its editor decision.
@@ -635,7 +641,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
           if (accepting && !suspended && !childTask) { stop(); picker.open() }; break
         case 's': await save(); break
         case 'r': await effect({ kind: 'record' }); break
-        case 'l': if (editor.project.kind === 'midi-source') throw new Error('MIDI source clip looping requires the arrangement transport'); stopPlayback(); loop = !loop; break
+        case 'l': if (editor.project.kind === 'midi-source') throw new Error('MIDI source clip looping requires the arrangement transport'); stepInput?.stop(); stopPlayback(); loop = !loop; break
         case 'tab': editor = editorAction(editor, { kind: 'track' }); break
         case 'return':
           if (editor.eventView) {

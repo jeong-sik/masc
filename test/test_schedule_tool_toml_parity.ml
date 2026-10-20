@@ -2,10 +2,11 @@
     masc_schedule_update shares with create, and what the deferred listing says.
 
     [masc_schedule_create] has since moved on purpose: the payload envelope was
-    replaced by the fields it wrapped, and the two the runtime cannot proceed
-    without are now declared mandatory. Its entry is the shape after that
-    change, not the pre-migration one. The other three are still the original
-    pins.
+    replaced by the fields it wrapped. A Keeper wake gives keeper_name and
+    message, and a Lane action installation_id and action, so the schema
+    requires neither pair and the tool refuses a call with neither or with
+    fields of both. Its entry is the shape after that change, not the
+    pre-migration one. The other three are still the original pins.
 
     The enum arrays are literals in TOML -- nothing there can read an OCaml
     variant. [test_enum_mirror_sync] already compares each of the six against
@@ -75,7 +76,7 @@ let test_update_reuses_create_fields_and_requires_identity () =
     (object_fields "properties" create)
     (object_fields "properties" update);
   check (list string) "update schema requires identity"
-    [ "schedule_id"; "keeper_name"; "message" ]
+    [ "schedule_id" ]
     (required_fields update)
 ;;
 

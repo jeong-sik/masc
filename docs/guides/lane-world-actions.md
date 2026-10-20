@@ -163,6 +163,11 @@ installation's live worker at each due time:
  "body": {"installation_id": "operator-quiz", "action": {"kind": "compose"}}}
 ```
 
+Create one with `masc_schedule_create` (and change it with
+`masc_schedule_update`) by giving `installation_id` and `action` instead of
+`keeper_name` and `message`; the tool refuses a call that gives fields of both.
+The recurrence and due-time fields are the same as for a Keeper wake.
+
 `installation_id` is the declaration id. Creation checks only that it is not
 blank and that `action` is an object. Whether the action fits the package's
 schema is checked when the occurrence is dispatched, against the worker that

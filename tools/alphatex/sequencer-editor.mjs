@@ -114,6 +114,11 @@ export function editorCommand(editor, line) {
       if (tick >= editor.project.length) throw new Error('Cursor outside project')
       return { editor: { ...editor, tick, pitch: pitch(args[1]) } }
     }
+    case 'harmony':
+      count(0, 1)
+      if (args[0] !== undefined && !['mix', 'track'].includes(args[0])) throw new Error('Use :harmony mix or :harmony track')
+      return { editor, effect: { kind: 'harmony', scope: args[0] ?? 'mix' } }
+    case 'harmony-export': count(1, Number.MAX_SAFE_INTEGER); return { editor, effect: { kind: 'harmony-export', path: args.join(' ') } }
     case 'save': case 'play': case 'stop': case 'record': case 'help': case 'arrange':
       count(0); return { editor, effect: { kind: command } }
     case 'save-as': case 'export': case 'wave': case 'output': case 'midi-output':

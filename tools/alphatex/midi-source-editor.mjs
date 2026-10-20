@@ -307,6 +307,11 @@ export function sourceCommand(editor,line) {
       count(2);const tick=units(args[0]);if(tick>=editor.view.length)throw new Error('Cursor outside MIDI source')
       return {editor:{...editor,tick,pitch:pitch(args[1]),selectedID:undefined}}
     }
+    case 'harmony':
+      count(0,1)
+      if (args[0] !== undefined && !['mix','track'].includes(args[0])) throw new Error('Use :harmony mix or :harmony track')
+      return {editor,effect:{kind:'harmony',scope:args[0]??'mix'}}
+    case 'harmony-export': count(1,Number.MAX_SAFE_INTEGER);return {editor,effect:{kind:'harmony-export',path:args.join(' ')}}
     case 'title':count(1,Number.MAX_SAFE_INTEGER);return {editor:sourceEditor({...editor.project,name:args.join(' ')},{...editor,undo:[...editor.undo,editor.project],redo:[]})}
     case 'undo':case 'redo':count(0);return {editor:sourceAction(editor,{kind:command})}
     case 'save':case 'play':case 'stop':case 'record':case 'help':case 'audio':case 'arrange':count(0);return {editor,effect:{kind:command}}

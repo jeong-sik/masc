@@ -3,12 +3,33 @@ import { parentPort } from 'node:worker_threads'
 import { writeFileSync } from 'node:fs'
 import { sourceMidiTimeline } from './midi-source-playback.mjs'
 import { projectMidiTimeline } from './sequencer-midi.mjs'
+import { newEditor, editorView, editorAxis } from './sequencer-editor.mjs'
+import { activeTracks, harmonyTimeline } from './sequencer-project.mjs'
 parentPort.on('message', async job => {
   try {
     const cancelled = () => Atomics.load(new Int32Array(job.cancel), 0) !== 0
     let result
     if (cancelled()) throw new Error('Preparation cancelled')
-    if (job.options.format === 'arrangement') {
+    if (job.options.format === 'harmony') {
+      const editor = newEditor(job.project, { pattern: job.options.pattern }), view = editorView(editor)
+      if (job.project.kind === 'midi-source' && !editor.performance) throw new Error('Choose a MIDI pattern before harmony analysis')
+      const scope = job.options.scope
+      let tracks
+      switch (scope?.kind) {
+        case 'mix': tracks = job.project.kind === 'midi-source' ? view.tracks : activeTracks(job.project); break
+        case 'track': {
+          const track = view.tracks.find(track => track.id === scope.id)
+          if (!track) throw new Error('Analysis track no longer exists')
+          if (scope.channel !== undefined && (job.project.kind !== 'midi-source' || !Number.isInteger(scope.channel) || scope.channel < 0 || scope.channel > 15)) throw new Error('Invalid analysis channel')
+          tracks = [track]; break
+        }
+        default: throw new Error('Unknown harmony analysis scope')
+      }
+      const notes = tracks.flatMap(track => track.notes).filter(note => scope.channel === undefined || note.channel === scope.channel)
+      result = { kind: 'harmonic-analysis', schemaVersion: 1, title: view.title, scope, axis: editorAxis(editor),
+        rows: harmonyTimeline(notes, view.displayLength ?? view.length, { cancelled }) }
+      if (cancelled()) throw new Error('Harmony analysis cancelled')
+    } else if (job.options.format === 'arrangement') {
       result = job.project.kind === 'midi-source' ? arrangementFromMidiSource(job.project, job.options) : arrangementFromPhrase(job.project)
       if (cancelled()) throw new Error('Arrangement preparation cancelled')
     } else if (job.options.format === 'vst-midi') {

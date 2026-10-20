@@ -88,6 +88,52 @@ export function harmonyAt(project, tick, { all = false } = {}) {
   const pitches = [...new Set(notes.map(note => note.pitch))].sort((a, b) => a - b)
   return { pitches, notes: pitches.map(Note.fromMidi), candidates: Chord.detect(pitches.map(Note.fromMidi)) }
 }
+
+// Sweep exact key intervals, without grouping nearby attacks or inferring pedal
+// durations. Counts retain shared keys until their last overlapping voice ends.
+export function harmonyTimeline(notes, end, { cancelled = () => false } = {}) {
+  int(end, 'analysis end')
+  const boundaries = new Map([[0, { deltas: [], points: [] }], [end, { deltas: [], points: [] }]])
+  const edge = tick => {
+    if (!boundaries.has(tick)) boundaries.set(tick, { deltas: [], points: [] })
+    return boundaries.get(tick)
+  }
+  const check = () => { if (cancelled()) throw new Error('Harmony analysis cancelled') }
+  for (const note of notes) {
+    check()
+    int(note.pitch, 'analysis pitch', 0, 127)
+    int(note.start, 'analysis note start', 0, end)
+    int(note.duration, 'analysis note duration', 0, end - note.start)
+    if (note.duration === 0) edge(note.start).points.push(note.pitch)
+    else {
+      edge(note.start).deltas.push([note.pitch, 1])
+      edge(note.start + note.duration).deltas.push([note.pitch, -1])
+    }
+  }
+  const ticks = [...boundaries.keys()].sort((a, b) => a - b), held = new Map(), rows = []
+  const row = (kind, start, finish, pitches) => {
+    const names = pitches.map(Note.fromMidi)
+    return { kind, start, end: finish, pitches, notes: names, candidates: Chord.detect(names) }
+  }
+  for (const [index, tick] of ticks.entries()) {
+    check()
+    const { deltas, points } = boundaries.get(tick)
+    for (const [key, delta] of deltas) {
+      const count = (held.get(key) ?? 0) + delta
+      if (count === 0) held.delete(key)
+      else held.set(key, count)
+    }
+    const pitches = [...held.keys()].sort((a, b) => a - b)
+    if (points.length) rows.push(row('point', tick, tick, [...new Set([...pitches, ...points])].sort((a, b) => a - b)))
+    const finish = ticks[index + 1]
+    if (finish === undefined) continue
+    const previous = rows.at(-1)
+    if (previous?.kind === 'span' && previous.end === tick && previous.pitches.length === pitches.length
+      && previous.pitches.every((key, i) => key === pitches[i])) previous.end = finish
+    else rows.push(row('span', tick, finish, pitches))
+  }
+  return rows
+}
 // Tonal supplies chord spelling/intervals and rootless dictionaries. The explicit
 // register and inversion remain the musician's choices; candidates are not verdicts.
 export function chordVoicing(symbol, { mode = 'close', octave = 4, inversion = 0, previous = [] } = {}) {

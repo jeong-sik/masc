@@ -34,6 +34,8 @@ const help = [
   ':note C4 0 1 96              pitch, beat, duration, optional velocity',
   ':chord Cmaj7 0 4 drop2 4 0  symbol, beat, duration, mode, octave, inversion',
   ':revoice Cmaj7 drop2 4 0  change cursor voices; retain timing/dynamics; u:compare',
+  ':harmony mix|track lists key-set changes; arrows choose, Enter returns to notes, Esc closes',
+  ':harmony-export PATH saves the complete ready analysis without replacing a file',
   ':progression 0 4 rootless Dm7 G7 Cmaj7',
   ':tempo 120    :length 32    :meter 3 4    :loop 4 12',
   ':transpose -12    :quantize 0.25    :duplicate 8   (selected track)',
@@ -71,6 +73,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   const initialSnapshot = editor.project
   let saved = loaded?.project, status = 'Enter a note or :help', prompt = null, showHelp = false
   let loop = false, accepting = true, closed = false, suspended = false, task = Promise.resolve(), childTask = null
+  let harmony = null
   let selectedOutput = output
   let selectedMidiOutput = midiOutput, portBindings = structuredClone(initialPortBindings)
   const sessionAbort = new AbortController()
@@ -120,6 +123,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       // Stop the previous sound's preview while its selection still describes
       // it, so play() renders the adopted sound instead of pausing the old one.
       stopPlayback()
+      clearHarmony()
       editor = editorSound(editor, sound)
       selectedMidiOutput = undefined; portBindings = []
       status = sound.kind === 'vst' ? `Selected ${sound.selection.name}` : 'Selected SoundFont'
@@ -171,6 +175,19 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       const items = picker.items(), height = Math.max(1, rows - 6)
       const start = Math.max(0, picker.view.cursor - height + 1)
       for (let i = start; i < Math.min(items.length, start + height); i++) lines.push(`${i === picker.view.cursor ? '›' : ' '} ${items[i].name}`)
+    } else if (harmony) {
+      lines[3] = `Harmony · ${harmony.scope.kind === 'mix' ? 'audible mix' : 'selected track/channel'} · exact key durations · candidates`
+      if (harmony.kind === 'loading') lines.push('Analyzing in worker…')
+      else if (harmony.kind === 'failed') lines.push(harmony.error)
+      else {
+        const capacity = Math.max(1, rows - 9)
+        const first = Math.max(0, harmony.cursor - capacity + 1)
+        for (const [index, row] of harmony.result.rows.slice(first, first + capacity).entries()) {
+          const at = row.kind === 'point' ? `${row.start / per} point` : `${row.start / per}–${row.end / per}`
+          lines.push(`${first + index === harmony.cursor ? '›' : ' '} ${at} ${axis.label} · ${row.candidates.join(' / ') || (row.pitches.length ? 'unclassified' : 'rest')} · ${row.notes.join(' ')}`)
+        }
+        if (!harmony.result.rows.length) lines.push('No key intervals in this performance')
+      }
     } else if (showHelp) lines.push(...help)
     else if (editor.project.kind === 'midi-source' && editor.eventView === 'tempo') {
       const events = sourceTempos(editor), capacity = Math.max(1, rows - 9)
@@ -221,8 +238,8 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     let output = '\x1b[H'
     for (let row = 1; row <= rows; row++) output += `\x1b[${row};1H\x1b[2K`
     lines.slice(0, rows - 2).forEach((line, row) => { output += `\x1b[${row + 1};1H${fit(line)}` })
-    output += `\x1b[${rows - 1};1H${fit(picker.view ? '↑/↓:choose  Enter:select  /:search  e:native editor  p:preset path  Esc:return' : prompt === null ? 'Space:play  i:instrument  Enter:note  arrows:cursor  Tab:track  :commands  ?:help' : `:${prompt}`)}`
-    output += `\x1b[${rows};1H${fit('s:save  l:loop  r:recording  q:save/back  n:new track  m:mute  o:solo')}`
+    output += `\x1b[${rows - 1};1H${fit(picker.view ? '↑/↓:choose  Enter:select  /:search  e:native editor  p:preset path  Esc:return' : prompt !== null ? `:${prompt}` : harmony ? '↑/↓:choose interval  Enter:go to notes  :commands  Esc/q:return' : 'Space:play  i:instrument  Enter:note  arrows:cursor  Tab:track  :commands  ?:help')}`
+    output += `\x1b[${rows};1H${fit(harmony && !picker.view ? ':harmony mix|track  :harmony-export PATH · analysis preserves the musical document' : 's:save  l:loop  r:recording  q:save/back  n:new track  m:mute  o:solo')}`
     process.stdout.write(output)
   }
   function stop() {
@@ -244,11 +261,40 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   function render(snapshot, options = {}) {
     if (!accepting) throw new Error('Sequencer is closing')
     if (workerFailure) throw new Error(workerFailure)
-    if (snapshot.kind === 'midi-source' && !['midi', 'vst-midi', 'arrangement'].includes(options.format)) throw new Error('Source audition requires a VST instrument or MIDI output')
+    if (snapshot.kind === 'midi-source' && !['midi', 'vst-midi', 'arrangement', 'harmony'].includes(options.format)) throw new Error('Source audition requires a VST instrument or MIDI output')
     const id = ++jobNumber, cancel = new Int32Array(new SharedArrayBuffer(4)), path = join(directory, `${id}.${options.format === 'midi' ? 'json' : options.format === 'vst-midi' ? 'mid' : 'wav'}`)
     const promise = new Promise((resolve, reject) => { jobs.set(id, { resolve, reject, cancel }) })
     worker.postMessage({ id, path, project: snapshot, cancel: cancel.buffer, options: { ...options, soundfontPath } })
     return { promise, cancel }
+  }
+  function clearHarmony() {
+    if (harmony?.kind === 'loading') Atomics.store(harmony.job.cancel, 0, 1)
+    harmony = null
+  }
+  function analyze(scope) {
+    clearHarmony(); showHelp = false
+    const selectedScope = scope === 'mix' ? { kind: 'mix' } : { kind: 'track',
+      id: editorView(editor).tracks[editor.track].id, ...(editor.channel === undefined ? {} : { channel: editor.channel }) }
+    let job
+    try { job = render(editor.project, { format: 'harmony', pattern: editor.pattern, scope: selectedScope }) }
+    catch (error) {
+      // An admitted analysis keeps its note keys even when preparation cannot
+      // start (including close). Otherwise a queued Enter edits the document.
+      harmony = { kind: 'failed', scope: selectedScope, error: error.message }
+      return
+    }
+    const owner = { kind: 'loading', scope: selectedScope, job }
+    harmony = owner
+    job.promise.then(result => {
+      if (harmony !== owner || closed || !accepting) return
+      const cursor = result.rows.findIndex(row => row.start <= editor.tick && (row.kind === 'point' ? row.start === editor.tick : editor.tick < row.end))
+      harmony = { kind: 'ready', scope: selectedScope, result, cursor: Math.max(0, cursor) }
+    }).catch(error => {
+      if (harmony === owner && !closed) harmony = { kind: 'failed', scope: selectedScope, error: error.message }
+    }).finally(draw)
+  }
+  function changedContext(previous) {
+    if (previous.project !== editor.project || previous.pattern !== editor.pattern || previous.track !== editor.track || previous.channel !== editor.channel) clearHarmony()
   }
   function renderAudio(snapshot, options = {}) {
     if (!snapshot.sound) throw new Error('Choose an instrument with i before exporting audio')
@@ -321,7 +367,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   }
   async function record() {
     if (!accepting) return
-    stop(); suspended = true; process.stdin.off('keypress', keypress)
+    stop(); clearHarmony(); suspended = true; process.stdin.off('keypress', keypress)
     try {
       const { viewSession } = await import('./music-session.mjs')
       if (accepting && !closed) await viewSession({ root: sessionRoot, input, midi, embedded: true, signal: sessionAbort.signal })
@@ -332,7 +378,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   }
   function arrange() {
     if (!accepting || childTask) return
-    stop()
+    stop(); clearHarmony()
     const expected = generation, snapshot = editor.project
     const route = arrangementRoute({ output: selectedOutput, midiOutput: selectedMidiOutput })
     const bindings = structuredClone(portBindings)
@@ -366,6 +412,11 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   async function effect(value) {
     if (!accepting && ['play', 'record', 'wave', 'arrange'].includes(value.kind)) return
     switch (value.kind) {
+      case 'harmony': analyze(value.scope); break
+      case 'harmony-export':
+        if (harmony?.kind !== 'ready') throw new Error('Open a ready :harmony analysis before exporting')
+        await writeFile(value.path, JSON.stringify(harmony.result, null, 2) + '\n', { flag: 'wx', mode: 0o600 })
+        status = `Exported ${value.path}`; break
       case 'arrange': arrange(); break
       case 'save': await save(); break
       case 'save-as': await save(value.path); break
@@ -419,20 +470,38 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
           // effect() separately refuses new playback/recording/WAV work.
           const result = editorCommand(editor, line)
           if (result.editor.project !== editor.project || result.editor.pattern !== editor.pattern) stopPlayback()
-          editor = result.editor
+          const previous = editor; editor = result.editor; changedContext(previous)
           if (result.effect) await effect(result.effect)
           else status = 'Edited'
         }).catch(error => { status = error.message }).finally(draw)
       } else if (text && !key.ctrl && !key.meta) prompt += safeText(text)
       draw(); return
     }
-    if (['q', 'escape'].includes(key.name)) { finish(); return }
     if (text === ':') { prompt = ''; draw(); return }
-    if (text === '?') { showHelp = !showHelp; draw(); return }
-    if (key.name === 'n') { prompt = 'track-add '; draw(); return }
+    if (harmony && ['q', 'escape'].includes(key.name)) {
+      task = task.then(clearHarmony).finally(draw)
+      return
+    }
+    if (['q', 'escape'].includes(key.name)) { finish(); return }
+    if (text === '?') { clearHarmony(); showHelp = !showHelp; draw(); return }
+    if (key.name === 'n' && !harmony) { prompt = 'track-add '; draw(); return }
+    const analysisKey = harmony !== null
     task = task.then(async () => {
       // Drain admitted editor decisions even after input admission closes.
-      const original = editor.project
+      if (closed && analysisKey) return
+      if (harmony) {
+        if (harmony.kind === 'ready') {
+          if (key.name === 'up' || key.name === 'down') harmony.cursor = Math.max(0, Math.min(harmony.result.rows.length - 1, harmony.cursor + (key.name === 'down' ? 1 : -1)))
+          else if (key.name === 'return') {
+            const row = harmony.result.rows[harmony.cursor]
+            if (row) editor = { ...editorAction(editor, { kind: 'move', ticks: row.start - editor.tick,
+              pitches: (row.pitches[0] ?? editor.pitch) - editor.pitch }), eventView: undefined }
+            clearHarmony()
+          }
+        }
+        return
+      }
+      const previous = editor, original = editor.project
       const tempoView = editor.eventView === 'tempo'
       switch (key.name) {
         case 'space': play(); break
@@ -465,6 +534,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
           else if (['+', '=', '-'].includes(text)) editor = editorAction(editor, { kind: 'velocity', value: (selectedNote(editor)?.velocity ?? editor.velocity) + (text === '-' ? -1 : 1) })
       }
       if (original !== editor.project) { stopPlayback(); status = 'Edited' }
+      changedContext(previous)
     }).catch(error => { status = error.message }).finally(draw)
   }
   worker.on('message', message => {
@@ -520,6 +590,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         }
       }
     } finally {
+      clearHarmony()
       await rm(directory, { recursive: true, force: true })
       if (!embedded) {
         process.stdout.write('\x1b[?25h\x1b[?1049l')

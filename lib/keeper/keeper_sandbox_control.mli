@@ -16,6 +16,13 @@ val parse_stop_scope : string -> (stop_scope, string) result
 
 val stop_scope_to_string : stop_scope -> string
 
+val ensure_host_root : string -> (unit, string) result
+(** Make [path] an existing directory for use as a Docker bind-mount source.
+    A missing path is created with its parents. An existing regular file or
+    device is an [Error] naming what it is; so is a path that cannot be
+    inspected or created, and a symbolic link that points nowhere. A link to a
+    directory counts as that directory. *)
+
 val start_managed_container :
   config:Workspace.config ->
   meta:keeper_meta ->

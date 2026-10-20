@@ -3,10 +3,11 @@ let ( let* ) = Result.bind
 type t =
   | Exact_output of Lane_addon_exact.request
   | Read_records of { request_id : string; source_id : string; after : string option }
+  | Read_file of { request_id : string; source_id : string; commit : string; path : string }
 
 let request_id = function
   | Exact_output request -> request.Lane_addon_exact.request_id
-  | Read_records { request_id; _ } -> request_id
+  | Read_records { request_id; _ } | Read_file { request_id; _ } -> request_id
 
 let text fields key =
   match List.assoc_opt key fields with
@@ -27,12 +28,23 @@ let read_records fields =
     in
     Ok (Read_records { request_id; source_id; after })
 
+let read_file fields =
+  match List.find_opt (fun (key, _) -> not (List.mem key [ "kind"; "request_id"; "source_id"; "commit"; "path" ])) fields with
+  | Some (key, _) -> Error ("a read_file request has no key " ^ key)
+  | None ->
+    let* request_id = text fields "request_id" in
+    let* source_id = text fields "source_id" in
+    let* commit = text fields "commit" in
+    let* path = text fields "path" in
+    Ok (Read_file { request_id; source_id; commit; path })
+
 let request_of_json = function
   | `Assoc fields as json ->
     (match List.assoc_opt "kind" fields with
      | Some (`String "exact_output") ->
        Lane_addon_exact.request_of_json json |> Result.map (fun request -> Exact_output request)
      | Some (`String "read_records") -> read_records fields
+     | Some (`String "read_file") -> read_file fields
      | Some (`String kind) -> Error ("this host has no request kind " ^ kind)
      | Some _ | None -> Error "a host request requires a string kind")
   | _ -> Error "a host request must be an object"

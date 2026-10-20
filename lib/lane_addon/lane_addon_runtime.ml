@@ -177,7 +177,7 @@ type sweep_retry = {
   first_refused_at : string;
 }
 
-type manager = { store : Lane_addon_store.t; entries : (string, entry) Hashtbl.t;
+type manager = { store : Lane_addon_store.t; base_path : string; entries : (string, entry) Hashtbl.t;
   recovering : (string, recovery) Hashtbl.t;
   configuration_mutex : Eio.Mutex.t; action_mutex : Eio.Mutex.t; broadcast_mutex : Eio.Mutex.t;
   fleet_journals : (string, unit) Hashtbl.t;
@@ -861,6 +861,12 @@ type host_attempt = Deliver of Yojson.Safe.t | Wait of Yojson.Safe.t
 let run_host_cycle m e (port : host_port) =
   let delivered = Hashtbl.create 8 and tried = Hashtbl.create 8 in
   let waiting = ref [] in
+  let not_allowed reason = Deliver (`Assoc ["status", `String "not_allowed"; "reason", `String reason]) in
+  let read_answer = function
+    | Lane_addon_records.Page body -> Ok (Deliver body)
+    | Lane_addon_records.Not_allowed reason -> Ok (not_allowed reason)
+    | Lane_addon_records.Unavailable detail ->
+        Ok (Wait (`Assoc ["reason", `String "source_unavailable"; "detail", `String detail])) in
   let try_request = function
     | Lane_addon_host_request.Exact_output exact ->
         let attempt = match e.configuration, !exact_runner with
@@ -876,19 +882,21 @@ let run_host_cycle m e (port : host_port) =
           | Lane_addon_exact.Final final -> Deliver (Lane_addon_exact.final_to_json final)
           | Lane_addon_exact.Not_final reason -> Wait (Lane_addon_exact.not_final_to_json reason)) attempt
     | Lane_addon_host_request.Read_records {request_id; source_id; after} ->
-        let not_allowed reason = Deliver (`Assoc ["status", `String "not_allowed"; "reason", `String reason]) in
         (match Lane_addon_records.grants ~operator_owned:(operator_owned ~configuration:e.configuration
             ~source_access:e.source_access) e.binding with
          | Error reason -> Ok (not_allowed reason)
          | Ok grants ->
              let measure result = String.length (Yojson.Safe.to_string
                (Lane_addon_host_request.result_arguments ~request_id ~result)) in
-             match Lane_addon_records.read_records ~store:m.store ~grants ~measure
-               ~max_bytes:e.package.resources.max_reply_bytes ~source_id ~after with
-             | Lane_addon_records.Page body -> Ok (Deliver body)
-             | Lane_addon_records.Not_allowed reason -> Ok (not_allowed reason)
-             | Lane_addon_records.Unavailable detail ->
-                 Ok (Wait (`Assoc ["reason", `String "source_unavailable"; "detail", `String detail]))) in
+             read_answer (Lane_addon_records.read_records ~base_path:m.base_path ~store:m.store ~grants ~measure
+               ~max_bytes:e.package.resources.max_reply_bytes ~source_id ~after))
+    | Lane_addon_host_request.Read_file {request_id = _; source_id; commit; path} ->
+        (match Lane_addon_records.grants ~operator_owned:(operator_owned ~configuration:e.configuration
+            ~source_access:e.source_access) e.binding with
+         | Error reason -> Ok (not_allowed reason)
+         | Ok grants ->
+             read_answer (Lane_addon_records.read_file ~base_path:m.base_path ~store:m.store ~grants
+               ~source_id ~commit ~path)) in
   let deliver request_id result =
     let* answer = port.deliver ~arguments:(delivery_arguments e ~request_id result)
       |> Result.map_error (fun detail -> Result_delivery_failed {request_id; detail}) in
@@ -1144,7 +1152,7 @@ let manager config =
   let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
   match Hashtbl.find_opt managers root with
   | Some m -> m
-  | None -> let m = { store = Lane_addon_store.create ~root; entries = Hashtbl.create 8;
+  | None -> let m = { store = Lane_addon_store.create ~root; base_path = config.base_path; entries = Hashtbl.create 8;
                      recovering = Hashtbl.create 4; configuration_mutex = Eio.Mutex.create ();
                      action_mutex = Eio.Mutex.create (); broadcast_mutex = Eio.Mutex.create ();
                      fleet_journals=Hashtbl.create 8;

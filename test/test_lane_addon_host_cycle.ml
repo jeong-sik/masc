@@ -326,6 +326,109 @@ let test_an_ungranted_source_or_a_foreign_cursor_is_not_allowed () =
     check string "an ungranted source" "not_allowed" (text "status" (result_of "n1" worker));
     check string "a cursor this host did not give" "not_allowed" (text "status" (result_of "n2" worker)))
 
+let repository_granted = declaration ^ {|[[binding.records]]
+source_id="masc-repo"
+kind="repository"
+repository_id="masc"
+paths=["changelog.d/"]
+|}
+
+let git cwd args =
+  let command = Filename.quote_command "git" ("-C" :: cwd :: "-c" :: "user.name=Fixture" :: "-c" :: "user.email=f@example.invalid"
+                                  (* The fixture runs no hook of the machine it runs on. *)
+                                  :: "-c" :: "core.hooksPath=/dev/null" :: args) in
+  let channel = Unix.open_process_in command in
+  let output = In_channel.input_all channel in
+  match Unix.close_process_in channel with
+  | Unix.WEXITED 0 -> String.trim output
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> failf "git %s failed" (String.concat " " args)
+
+let side = ref ""
+
+(* A registered repository with three commits on main: two changelog
+   fragments and one file outside the grant. Returns the three SHAs. *)
+let repository root =
+  let dir = Filename.concat root "repos/masc" in
+  Fs_compat.mkdir_p dir;
+  ignore (git dir [ "init"; "-q"; "-b"; "main" ]);
+  let commit path bytes subject =
+    write (Filename.concat dir path) bytes;
+    ignore (git dir [ "add"; path ]);
+    ignore (git dir [ "commit"; "-q"; "-m"; subject ]);
+    git dir [ "rev-parse"; "HEAD" ]
+  in
+  let first = commit "changelog.d/1.md" "first fragment\n" "add the first fragment" in
+  let second = commit "lib/x.ml" "let x = 1\n" "add code" in
+  let third = commit "changelog.d/2.md" "second fragment\n" "add the second fragment" in
+  (* A commit only another branch reaches. *)
+  ignore (git dir [ "checkout"; "-q"; "-b"; "side" ]);
+  side := commit "changelog.d/1.md" "rewritten on a side branch\n" "rewrite on side";
+  ignore (git dir [ "checkout"; "-q"; "main" ]);
+  let repository : Repo_manager_types.repository =
+    { id = "masc"; name = "masc"; url = "file://" ^ dir; local_path = dir; aliases = []; default_branch = "main"
+    ; keepers = []; status = Repo_manager_types.Active; auto_sync = false; sync_interval = 0
+    ; created_at = 0L; updated_at = 0L } in
+  ignore (Repo_store.add ~base_path:root repository |> unwrap);
+  first, second, third
+
+let read_file id ~commit ~path =
+  `Assoc [ "kind", `String "read_file"; "request_id", `String id; "source_id", `String "masc-repo"
+         ; "commit", `String commit; "path", `String path ]
+
+let delivered id worker = List.exists (fun arguments -> text "request_id" arguments = id) !(worker.delivered)
+
+let test_a_repository_is_read_by_first_parent_commits () =
+  with_installation ~declaration:repository_granted (fun clock _config worker _ root ->
+    let first, _second, third = repository root in
+    worker.listing := [ read "g1" "masc-repo" ];
+    publish_lane_change ();
+    await clock (fun () -> delivered "g1" worker);
+    let result = result_of "g1" worker in
+    let subjects = member "records" result |> Yojson.Safe.Util.to_list |> List.map (text "subject") in
+    check (list string) "oldest first" [ "add the first fragment"; "add code"; "add the second fragment" ] subjects;
+    check string "the page names the head it read" third (text "head" result);
+    (match member "records" result |> Yojson.Safe.Util.to_list with
+     | record :: _ ->
+       check string "the first commit" first (text "sha" record);
+       check bool "with its changed paths" true (member "paths" record = `List [ `String "changelog.d/1.md" ])
+     | [] -> fail "no commits");
+    check string "the page is retained" (Lane_addon_store.digest (Yojson.Safe.to_string (member "records" result)))
+      (text "sha256" result);
+    worker.listing := [ read ~after:first "g2" "masc-repo" ];
+    publish_lane_change ();
+    await clock (fun () -> delivered "g2" worker);
+    let after = member "records" (result_of "g2" worker) |> Yojson.Safe.Util.to_list |> List.map (text "subject") in
+    check (list string) "a cursor reads only later commits" [ "add code"; "add the second fragment" ] after)
+
+let test_a_file_under_the_grant_is_read_at_a_commit () =
+  with_installation ~declaration:repository_granted (fun clock _config worker _ root ->
+    let first, second, _third = repository root in
+    worker.listing := [ read_file "h1" ~commit:first ~path:"changelog.d/1.md"
+                      ; read_file "h2" ~commit:second ~path:"lib/x.ml"
+                      ; read_file "h3" ~commit:!side ~path:"changelog.d/1.md"
+                      ; read_file "h4" ~commit:first ~path:"changelog.d/2.md" ];
+    publish_lane_change ();
+    await clock (fun () -> List.length !(worker.delivered) >= 4);
+    let file = result_of "h1" worker in
+    check string "the file" "file" (text "status" file);
+    check string "its bytes" "first fragment\n" (text "content" file);
+    check string "as text" "utf-8" (text "encoding" file);
+    check string "retained" (Lane_addon_store.digest "first fragment\n") (text "sha256" file);
+    check string "a path outside the grant" "not_allowed" (text "status" (result_of "h2" worker));
+    check string "a commit the branch does not reach" "not_allowed" (text "status" (result_of "h3" worker));
+    check string "a file that did not exist then" "not_allowed" (text "status" (result_of "h4" worker)))
+
+let test_an_unregistered_repository_waits () =
+  with_installation ~declaration:repository_granted (fun clock config worker _ _root ->
+    worker.listing := [ read "u1" "masc-repo" ];
+    let before = cycles config in
+    publish_lane_change ();
+    await clock (fun () -> cycles config > before);
+    check int "nothing was delivered" 0 (List.length !(worker.delivered));
+    match member "waiting" (host_requests config) with
+    | `List [ waiting ] -> check string "it waits" "source_unavailable" (text "reason" (member "reason" waiting))
+    | _ -> fail "a read of an unregistered repository must wait")
+
 let () =
   Mirage_crypto_rng_unix.use_default ();
   run "lane add-on host request cycle"
@@ -349,4 +452,9 @@ let () =
         ; test_case "a cursor reads only what came after" `Quick test_a_cursor_reads_only_what_came_after
         ; test_case "a page holds what fits the frame" `Quick test_a_page_holds_what_fits_the_frame
         ; test_case "an ungranted source or a foreign cursor is not allowed" `Quick
-            test_an_ungranted_source_or_a_foreign_cursor_is_not_allowed ] ) ]
+            test_an_ungranted_source_or_a_foreign_cursor_is_not_allowed ] )
+    ; ( "repository reads"
+      , [ test_case "a repository is read by first-parent commits" `Quick
+            test_a_repository_is_read_by_first_parent_commits
+        ; test_case "a file under the grant is read at a commit" `Quick test_a_file_under_the_grant_is_read_at_a_commit
+        ; test_case "an unregistered repository waits" `Quick test_an_unregistered_repository_waits ] ) ]

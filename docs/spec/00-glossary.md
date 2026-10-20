@@ -332,13 +332,43 @@ status: reference
     직접 찍는 `Phrase`도 아니다. 파생한 피아노 롤이나 실수 시간표는 저장본이 아니다
     (MIDI-SOURCE.md: "Persist the source asset, not a derived piano roll or floating-point
     schedule").
-  - 아직 아닌 것: 일반 메타데이터 편집, 소스 loop 상태, 오버더브, MIDI 2.0 변환은 별도
-    작업으로 남아 있다. 시험 통과는 완전한 MIDI 지원이나 물리 장치 지원을 뜻하지 않는다
-    (MIDI-SOURCE.md: "Its tests do not establish full MIDI or physical-device support.
-    General metadata, source-loop state, overdub and MIDI 2.0 conversion remain separate
-    work.").
+  - 지금 고칠 수 있는 소스 메타데이터는 둘이다: tempo map(`editMidiSourceTempos`, Set Tempo
+    FF51)과 박자표 지도(**Source meter map**). 포트·끝 표식·불투명 메타데이터는 고치지 않고
+    원본 그대로 보존한다. 세션 국소 소스 구간 루프(`:loop START END`)는 생겼지만 그 선택은
+    문서에 저장되지 않는다(MIDI-SOURCE.md: "The loop selection does not change the source
+    document or MIDI/WAV export").
+  - 아직 아닌 것: 일반 메타데이터 편집, 오버더브, MIDI 2.0 편집은 별도 작업으로 남아 있다.
+    시험 통과는 완전한 MIDI 지원이나 물리 장치 지원을 뜻하지 않는다(MIDI-SOURCE.md: "Its
+    tests do not establish full MIDI or physical-device support. General metadata, overdub
+    and MIDI 2.0 editing remain separate work.").
   → [tools/alphatex/MIDI-SOURCE.md](../../tools/alphatex/MIDI-SOURCE.md) ·
   [tools/alphatex/README.md](../../tools/alphatex/README.md)
+
+**Source meter map (소스 박자표 지도)**
+: 들여온 SMF 소스가 이벤트로 적어 둔 박자표(FF58)를 읽고 고치는 편집 표면. 이벤트 하나는
+  분자·분모의 2의 거듭제곱·MIDI 클록/클릭·표기 32분음/4분음 네 값이고(`meterEvent`,
+  `meterBytes`), 소스 편집기는 `:meters` 목록에서 Up/Down 으로 고르고 Shift+Left/Right 로
+  옮기며 Enter 로 고치고 Delete 로 지운다. `:meter NUM DEN [AT [CLOCKS NOTATED32NDS]]` 는
+  커서나 지정한 소스 위치에 넣거나 바꾸고, `:meter-event ID`·`:meter-value`·`:meter-move`·
+  `:meter-remove` 는 골라 둔 이벤트를 다룬다(`sourceMeters`·`sourceMeterAt`·`selectedMeter`,
+  `editMidiSourceMeters`). 새 이벤트의 보조 두 값은 클릭당 24 MIDI 클록과 4분음당 8표기
+  32분음이 기본값이고, 분자·분모만 고치면 보조 값은 그대로 남는다.
+  - 위치 단위: 자리는 PPQ면 4분음표 박, SMPTE면 프레임이다. 박자표를 고쳐도 음의 tick,
+    tempo 적분, 재생 초는 바뀌지 않는다(MUSIC-SEQUENCER.md: "Positions remain quarter-note
+    beats for PPQ and frames for SMPTE, without changing note timestamps, tempo integration
+    or playback seconds").
+  - 이름 경계: tempo map(`editMidiSourceTempos`, Set Tempo FF51)은 다른 메타데이터 종류다.
+    alphaTex 악보의 `\ts` 헤더는 표기 텍스트 층이라 이 지도와 다른 층이다. 어레인지먼트의
+    `meter`(분자·분모 쌍, `editArrangement`의 `meter` 편집)는 프로젝트 값이고, 소스에서
+    넘겨받을 때 편집기와 같은 마지막 tick 0 박자표를 읽는다. 다만 count-in 같은 실제 클록
+    입장은 그 범위 밖 박자를 거절할 수 있다.
+  - 아직 아닌 것: 마디 기반 이동이나 메트로놈을 더하지 않는다(MUSIC-SEQUENCER.md: "This
+    edits SMF metadata; it does not add bar-based navigation or a metronome"). 같은 tick 에
+    박자표가 여럿이면 이벤트를 명시적으로 골라야 하고, 알아보지 못한 메타데이터는 불투명한
+    채로 남는다.
+  → [tools/alphatex/midi-source.mjs](../../tools/alphatex/midi-source.mjs) ·
+  [tools/alphatex/midi-source-editor.mjs](../../tools/alphatex/midi-source-editor.mjs) ·
+  [docs/design/tui/MUSIC-SEQUENCER.md](../../docs/design/tui/MUSIC-SEQUENCER.md)
 
 **Source port (소스 포트)**
 : 소스 파일 안에 적힌 0–127 번호의 MIDI 라우팅 정체성. 물리 출력 장치 UID가 아니고,

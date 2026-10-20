@@ -284,7 +284,7 @@ let require_replacement_base_changed label = function
 ;;
 
 let transaction_lanes lane_id : Runtime_schema.exact_output_lane_decl list =
-  [ { id = lane_id
+  [ { owner = Option.get (Runtime_schema.exact_lane_owner_of_key (lane_id))
     ; enabled = true
     ; slot_ids = [ replacement_target ]
     ; cli_slot_ids = []
@@ -363,7 +363,7 @@ let test_closed_registry_transaction () =
          { source = "<fixture:replacement-catalog>"; contents = replacement_catalog })
   in
   let baseline =
-    match Registry.publish ~lanes:(transaction_lanes "transaction-a") snapshot with
+    match Registry.publish ~lanes:(transaction_lanes "librarian_exact") snapshot with
     | Ok registry -> registry
     | Error error ->
       Alcotest.failf
@@ -385,7 +385,7 @@ let test_closed_registry_transaction () =
   in
   (match
      Registry.transact_replacement
-       (prepare "transaction-b")
+       (prepare "board_attention_exact")
        ~apply_write:(fun () ->
          Registry.current ()
          |> require_publication_busy "transaction callback acquisition";
@@ -404,11 +404,11 @@ let test_closed_registry_transaction () =
     (baseline == unchanged);
   require_transaction_lane
     "abort preserves lane"
-    ~lane_id:"transaction-a"
+    ~lane_id:"librarian_exact"
     unchanged;
   (match
      Registry.transact_replacement
-       (prepare "transaction-b")
+       (prepare "board_attention_exact")
        ~apply_write:(fun () -> Registry.Committed ())
    with
    | Ok (Registry.Committed ()) -> ()
@@ -424,7 +424,7 @@ let test_closed_registry_transaction () =
     (not (baseline == committed));
   require_transaction_lane
     "commit publishes final lane"
-    ~lane_id:"transaction-b"
+    ~lane_id:"board_attention_exact"
     committed
 ;;
 
@@ -435,9 +435,9 @@ let test_registry_availability_wakes () =
     (Exact_output.Full_replacement { source = "availability"; contents = replacement_catalog }) in
   let accept result = match result with Ok value -> value
     | Error error -> Alcotest.fail (Registry.publication_error_to_string error) in
-  let publish () = accept (Registry.publish ~lanes:(transaction_lanes "available") snapshot) in
+  let publish () = accept (Registry.publish ~lanes:(transaction_lanes "librarian_exact") snapshot) in
   let wakes = ref 0 in
-  let unsubscribe = Registry.subscribe_lane_changes ~lane_id:"available" (fun () -> incr wakes) in
+  let unsubscribe = Registry.subscribe_lane_changes ~lane_id:"librarian_exact" (fun () -> incr wakes) in
   Fun.protect ~finally:unsubscribe (fun () ->
     let expect label count = Alcotest.(check int) label count !wakes in
     ignore (publish ());

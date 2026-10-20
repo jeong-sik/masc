@@ -47,7 +47,7 @@ let project lanes =
   Yojson.Safe.Util.(json |> member "hitl" |> member "judge_lane")
 
 let lane slot_ids cli_slot_ids : Runtime_schema.exact_output_lane_decl =
-  { id = Masc.Hitl_summary_worker.lane_id
+  { owner = Option.get (Runtime_schema.exact_lane_owner_of_key (Masc.Hitl_summary_worker.lane_id))
   ; enabled = true
   ; slot_ids
   ; cli_slot_ids

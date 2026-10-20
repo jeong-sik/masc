@@ -116,7 +116,7 @@ let test_keeper_preference_reorders_the_librarian_lane () =
   (match
      Runtime_exact_output_registry.publish
        ~lanes:
-         [ { Runtime_schema.id = "librarian_exact"
+         [ { Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Librarian
            ; enabled = true
            ; slot_ids = [ "librarian-default"; "librarian-preferred" ]
            ; cli_slot_ids = []
@@ -272,7 +272,7 @@ let test_context_commits_when_memory_store_fails () =
   (match
      Runtime_exact_output_registry.publish
        ~lanes:
-         [ { Runtime_schema.id = "librarian_exact"
+         [ { Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Librarian
            ; enabled = true
            ; slot_ids = [ "librarian-context" ]
            ; cli_slot_ids = []
@@ -388,7 +388,7 @@ let test_memory_commits_when_working_contexts_slip slip () =
   (match
      Runtime_exact_output_registry.publish
        ~lanes:
-         [ { Runtime_schema.id = "librarian_exact"
+         [ { Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Librarian
            ; enabled = true
            ; slot_ids = [ "librarian-answering"; "librarian-successor" ]
            ; cli_slot_ids = []
@@ -520,7 +520,7 @@ let test_excluded_last_slot_preserves_domain_failure () =
     (match
        Runtime_exact_output_registry.publish
          ~lanes:
-           [ { Runtime_schema.id = "librarian_exact"
+           [ { Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Librarian
              ; enabled = true
              ; slot_ids = slots
              ; cli_slot_ids = []

@@ -313,7 +313,7 @@ let test_a_missing_appraiser_lane_keeps_the_confirmed_obligation () =
   enable_candle config;
   let snapshot = Exact_fixture.resolver_snapshot ~source:config.base_path [] in
   ignore
-    (Exact_fixture.publish_registry ~lane_id:"goal_verifier" ~slot_ids:[]
+    (Exact_fixture.publish_registry ~lane_id:"verifier_exact" ~slot_ids:[]
        ~cli_slot_ids:[ Exact_fixture.cli_primary_runtime ] snapshot : Registry.t);
   (match Registry.current () with
    | Ok _ -> ()

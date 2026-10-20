@@ -786,9 +786,9 @@ let test_published_appraiser_repair_releases_rejected_payout ~in_flight () =
     let publish ?(unrelated = false) id base_url =
       let snapshot = F.resolver_snapshot ~source:config.base_path [{F.id; base_url}] in
       let lane : Runtime_schema.exact_output_lane_decl =
-        {id="candle_appraiser";enabled = true; slot_ids=[id];cli_slot_ids=[];
+        {owner = Runtime_schema.Builtin Standalone_lane.Candle_appraiser;enabled = true; slot_ids=[id];cli_slot_ids=[];
          max_output_tokens=Some F.fixture_max_output_tokens;thinking=None} in
-      let lanes = if unrelated then [lane; {lane with id="other-lane"}] else [lane] in
+      let lanes = if unrelated then [lane; {lane with owner = Runtime_schema.Builtin Standalone_lane.Librarian}] else [lane] in
       match R.publish ~lanes snapshot with
       | Ok _ -> () | Error error -> fail (R.publication_error_to_string error) in
     publish "refused-slot" refused.base_url;
@@ -953,7 +953,7 @@ let test_declaration_probe_retains_usable_baseline () =
    | Ok () -> () | Error _ -> fail "reservation abort failed");
   ignore (registry_ok (R.unpublish ()));
   check bool "unpublished registry is not a change" false (probe ());
-  publish ~lane_id:"other-lane" "slot-b";
+  publish ~lane_id:"librarian_exact" "slot-b";
   check bool "missing Candle declaration is not a change" false (probe ());
   publish "slot-a";
   check bool "same declaration after missing stays unchanged" false (probe ());

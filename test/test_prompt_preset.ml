@@ -165,7 +165,7 @@ let test_capture_save_load_round_trip () =
       snapshot.Preset.assignments;
     check (list string) "the exact-output lanes are captured"
       [ "librarian_exact"; "hitl_auto_judge" ]
-      (List.map (fun (l : Preset.lane) -> l.Preset.id) snapshot.Preset.lanes);
+      (List.map (fun (l : Preset.lane) -> (Runtime_schema.exact_lane_key l.owner)) snapshot.Preset.lanes);
     or_fail (Preset.save ~base_path snapshot);
     let loaded = or_fail (Preset.load ~base_path "morning") in
     check string "description survives" "as of 09:00" loaded.Preset.description;
@@ -593,13 +593,13 @@ let test_runtime_text_transform () =
     Preset.runtime_text_with
       ~current_assignments:[ "routingtest", "openai.gpt"; "budgettest", "openai.gpt" ]
       ~current_lanes:
-        [ { Preset.id = "librarian_exact"; enabled = true; slots = [ "openai.gpt"; "runpod_mtp.qwen" ]; cli_slots = [] }
-        ; { Preset.id = "hitl_auto_judge"; enabled = true; slots = [ "openai.gpt" ]; cli_slots = [] }
+        [ { Preset.owner = Runtime_schema.Builtin Standalone_lane.Librarian; enabled = true; slots = [ "openai.gpt"; "runpod_mtp.qwen" ]; cli_slots = [] }
+        ; { Preset.owner = Runtime_schema.Builtin Standalone_lane.Hitl_auto_judge; enabled = true; slots = [ "openai.gpt" ]; cli_slots = [] }
         ]
       ~assignments:[ "routingtest", "runpod_mtp.qwen" ]
       ~lanes:
-        [ { Preset.id = "librarian_exact"; enabled = true; slots = [ "runpod_mtp.qwen" ]; cli_slots = [] }
-        ; { Preset.id = "hitl_auto_judge"; enabled = true; slots = [ "openai.gpt" ]; cli_slots = [] }
+        [ { Preset.owner = Runtime_schema.Builtin Standalone_lane.Librarian; enabled = true; slots = [ "runpod_mtp.qwen" ]; cli_slots = [] }
+        ; { Preset.owner = Runtime_schema.Builtin Standalone_lane.Hitl_auto_judge; enabled = true; slots = [ "openai.gpt" ]; cli_slots = [] }
         ]
       runtime_fixture
   in
@@ -647,7 +647,7 @@ let test_saved_lane_activity_shape () =
      | Ok legacy ->
        Alcotest.(check bool) "a legacy preset lists lanes" true (legacy.Preset.lanes <> []);
        List.iter (fun (lane : Preset.lane) ->
-         Alcotest.(check bool) ("legacy lane " ^ lane.id ^ " is enabled") true lane.enabled)
+         Alcotest.(check bool) ("legacy lane " ^ (Runtime_schema.exact_lane_key lane.owner) ^ " is enabled") true lane.enabled)
          legacy.Preset.lanes
      | Error detail -> Alcotest.failf "a legacy preset without activity must load: %s" detail);
     (* A present value that is not a boolean is still refused, not coerced. *)
@@ -691,7 +691,7 @@ let test_restore_preserves_lane_activity_and_autosave () =
       let saved = or_fail (Preset.capture ~base_path ~name:"activity" ~description:"") in
       or_fail (Preset.save ~base_path saved);
       let loaded = or_fail (Preset.load ~base_path "activity") in
-      let librarian lanes = List.find (fun (lane : Preset.lane) -> lane.id = "librarian_exact") lanes in
+      let librarian lanes = List.find (fun (lane : Preset.lane) -> (Runtime_schema.exact_lane_key lane.owner) = "librarian_exact") lanes in
       check bool "saved activity survives preset JSON" saved_enabled (librarian loaded.lanes).enabled;
       set_activity (not saved_enabled);
       check bool "same candidates with changed activity are a drift" false

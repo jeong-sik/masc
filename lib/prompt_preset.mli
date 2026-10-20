@@ -7,7 +7,7 @@
     prompt files: boot re-syncs those from the binary. *)
 
 type lane =
-  { id : string
+  { owner : Runtime_schema.exact_lane_owner
   ; enabled : bool
   ; slots : string list
   ; cli_slots : string list

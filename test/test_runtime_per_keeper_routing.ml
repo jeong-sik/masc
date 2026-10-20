@@ -970,7 +970,7 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
         else Some ([ runtime_id ], [])
       in
       match
-        List.find_opt (fun (lane : Runtime_schema.exact_output_lane_decl) -> String.equal lane.id id)
+        List.find_opt (fun (lane : Runtime_schema.exact_output_lane_decl) -> String.equal (Runtime_schema.exact_lane_key lane.owner) id)
           config.exact_output_lane_decls,
         expected
       with
@@ -992,10 +992,10 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
          Standalone_lane.all);
     Alcotest.(check bool) "shared-memory curator is explicitly configured" false
       (List.exists (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-         String.equal lane.id "workspace_curator_exact") config.exact_output_lane_decls);
+         String.equal (Runtime_schema.exact_lane_key lane.owner) "workspace_curator_exact") config.exact_output_lane_decls);
     Alcotest.(check bool) "Candle appraisal is explicitly configured" false
       (List.exists (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-         String.equal lane.id (Standalone_lane.to_id Standalone_lane.Candle_appraiser))
+         String.equal (Runtime_schema.exact_lane_key lane.owner) (Standalone_lane.to_id Standalone_lane.Candle_appraiser))
          config.exact_output_lane_decls)
 ;;
 
@@ -1055,7 +1055,7 @@ let test_first_run_writes_the_exact_deadline_on_a_provider_without_one () =
       (Some [ "openai.gpt" ])
       (List.find_map
          (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-            if String.equal lane.id (Standalone_lane.to_id Runtime.Librarian)
+            if String.equal (Runtime_schema.exact_lane_key lane.owner) (Standalone_lane.to_id Runtime.Librarian)
             then Some lane.slot_ids
             else None)
          config.exact_output_lane_decls);
@@ -1115,7 +1115,7 @@ let test_first_run_writes_a_client_without_an_output_schema_channel_into_no_slot
           config.default_runtime_id;
         List.iter
           (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-             Alcotest.(check bool) (lane.id ^ " does not list Muse Code") false
+             Alcotest.(check bool) ((Runtime_schema.exact_lane_key lane.owner) ^ " does not list Muse Code") false
                (List.mem muse_serve_runtime_id (lane.slot_ids @ lane.cli_slot_ids)))
           config.exact_output_lane_decls))
 ;;
@@ -1492,7 +1492,7 @@ let exact_lane_slots path lane =
   | Ok config ->
     (match
        List.find_opt
-         (fun (decl : Runtime_schema.exact_output_lane_decl) -> String.equal decl.id lane)
+         (fun (decl : Runtime_schema.exact_output_lane_decl) -> String.equal (Runtime_schema.exact_lane_key decl.owner) lane)
          config.Runtime_schema.exact_output_lane_decls
      with
      | Some decl -> decl.slot_ids
@@ -1778,7 +1778,7 @@ let exact_lane_cli_slots path lane =
   | Ok config ->
     (match
        List.find_opt
-         (fun (decl : Runtime_schema.exact_output_lane_decl) -> String.equal decl.id lane)
+         (fun (decl : Runtime_schema.exact_output_lane_decl) -> String.equal (Runtime_schema.exact_lane_key decl.owner) lane)
          config.Runtime_schema.exact_output_lane_decls
      with
      | Some decl -> decl.cli_slot_ids
@@ -2017,7 +2017,7 @@ let test_exact_cli_replacement_preserves_declared_groups () =
         | Error _ -> Alcotest.fail "replacement fixture must parse"
         | Ok config ->
           match List.find_opt (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-              lane.id = "board_attention_exact") config.exact_output_lane_decls with
+              (Runtime_schema.exact_lane_key lane.owner) = "board_attention_exact") config.exact_output_lane_decls with
           | Some lane -> lane
           | None -> Alcotest.fail "replacement lost the declared exact lane"
       in
@@ -3964,7 +3964,7 @@ let test_a_cli_slot_naming_a_client_without_an_output_schema_channel_is_refused 
   match Runtime.load_list ~config_path:path with
   | Error
       (Runtime_config_error.Exact_lane_cli_slot_unservable
-        { lane_id = "librarian_exact"
+        { owner = Runtime_schema.Builtin Standalone_lane.Librarian
         ; slot_id
         ; provider_id = "muse_code"
         ; reason = Runtime_config_error.Client_without_output_schema

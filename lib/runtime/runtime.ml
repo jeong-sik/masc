@@ -23,7 +23,6 @@ let fusion_table = Runtime_toml_namespace.(key Fusion)
 let providers_table = Runtime_toml_namespace.(key Providers)
 let assignments_table = Runtime_toml_namespace.(path Runtime) "assignments"
 let lanes_table = Runtime_toml_namespace.(path Runtime) "lanes"
-let exact_output_lanes_table = Runtime_toml_namespace.(path Runtime) "exact_output_lanes"
 
 include Runtime_config_projection
 
@@ -49,8 +48,8 @@ type exact_lane = Standalone_lane.t =
 
 (* One [runtime.exact_output_lanes.<lane>].<key> reference, named the way
    every reference-list builder in this file names one. *)
-let exact_lane_reference ~lane_id ~key id =
-  { site = Printf.sprintf "[%s.%s].%s" exact_output_lanes_table lane_id key
+let exact_lane_reference ~owner ~key id =
+  { site = Printf.sprintf "[%s].%s" (Runtime_schema.exact_lane_table_name owner) key
   ; shape = List_entry
   ; id
   ; domain = Runtime_only
@@ -101,11 +100,11 @@ let verifier_exact_slot_references
   match
     List.find_opt
       (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-         String.equal lane.id (Standalone_lane.to_id Verifier))
+         Runtime_schema.equal_exact_lane_owner lane.owner (Runtime_schema.Builtin Verifier))
       decls
   with
   | None -> []
-  | Some lane -> List.map (exact_lane_reference ~lane_id:lane.id ~key:"slots") lane.slot_ids
+  | Some lane -> List.map (exact_lane_reference ~owner:lane.owner ~key:"slots") lane.slot_ids
 ;;
 
 (* Every declared exact-output lane's [cli_slots], over every lane
@@ -118,7 +117,7 @@ let exact_lane_cli_slot_references
   =
   List.concat_map
     (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-       List.map (exact_lane_reference ~lane_id:lane.id ~key:"cli_slots") lane.cli_slot_ids)
+       List.map (exact_lane_reference ~owner:lane.owner ~key:"cli_slots") lane.cli_slot_ids)
     decls
 ;;
 
@@ -151,7 +150,7 @@ let exact_lane_cli_slot_gaps
          | Some r ->
            let gap reason =
              Some
-               { lane_id = lane.id
+               { owner = lane.owner
                ; slot_id
                ; provider_id = r.provider.Runtime_schema.id
                ; reason
@@ -237,7 +236,7 @@ let exact_slot_body_deadline_gaps_of
     match List.find_opt (fun (r : t) -> String.equal r.id slot_id) runtimes with
     | Some r when exact_slot_lacks_body_deadline ~target_source r ->
       Some
-        ({ lane_id = lane.id; slot_id; provider_id = r.provider.Runtime_schema.id }
+        ({ owner = lane.owner; slot_id; provider_id = r.provider.Runtime_schema.id }
          : exact_slot_body_deadline_gap)
     | Some _ | None -> None
   in
@@ -254,7 +253,7 @@ let same_exact_slot_body_deadline_gap
     (left : exact_slot_body_deadline_gap)
     (right : exact_slot_body_deadline_gap)
   =
-  String.equal left.lane_id right.lane_id
+  Runtime_schema.equal_exact_lane_owner left.owner right.owner
   && String.equal left.slot_id right.slot_id
   && String.equal left.provider_id right.provider_id
 ;;
@@ -270,13 +269,14 @@ let exact_lanes_emptied_by_gaps
   let is_gap (lane : Runtime_schema.exact_output_lane_decl) slot_id =
     List.exists
       (fun (gap : exact_slot_body_deadline_gap) ->
-         String.equal gap.lane_id lane.id && String.equal gap.slot_id slot_id)
+         Runtime_schema.equal_exact_lane_owner gap.owner lane.owner && String.equal gap.slot_id slot_id)
       gaps
   in
   List.filter_map
     (fun (lane : Runtime_schema.exact_output_lane_decl) ->
        match lane.slot_ids, lane.cli_slot_ids with
-       | _ :: _, [] when List.for_all (is_gap lane) lane.slot_ids -> Some lane.id
+       | _ :: _, [] when List.for_all (is_gap lane) lane.slot_ids ->
+         Some (Runtime_schema.exact_lane_key lane.owner)
        | _ :: _, [] | [], _ | _ :: _, _ :: _ -> None)
     decls
 ;;
@@ -2123,7 +2123,8 @@ let warn_rejected_exact_output_slots registry =
   let left_out_for_deadline (slot : Runtime_exact_output_registry.rejected_slot) =
     List.exists
       (fun (gap : exact_slot_body_deadline_gap) ->
-         String.equal gap.lane_id slot.lane_id && String.equal gap.slot_id slot.slot_id)
+         String.equal (Runtime_schema.exact_lane_key gap.owner) slot.lane_id
+         && String.equal gap.slot_id slot.slot_id)
       gaps
   in
   let all_rejected = Runtime_exact_output_registry.rejected_slots registry in
@@ -2355,7 +2356,6 @@ let plan_exact_output_commit ~config_path ~runtimes ~lanes =
   | Error
       (( Runtime_exact_output_registry.Publication_busy
        | Runtime_exact_output_registry.Replacement_base_changed
-       | Runtime_exact_output_registry.Blank_lane_id _
        | Runtime_exact_output_registry.Duplicate_lane_id _
        | Runtime_exact_output_registry.Empty_lane _
        | Runtime_exact_output_registry.Blank_lane_slot _
@@ -2486,7 +2486,8 @@ let exact_output_report_view () =
   , List.sort
       compare
       (List.map
-         (fun (gap : exact_slot_body_deadline_gap) -> gap.lane_id, gap.slot_id, gap.provider_id)
+         (fun (gap : exact_slot_body_deadline_gap) ->
+            Runtime_schema.exact_lane_key gap.owner, gap.slot_id, gap.provider_id)
          degradation.gaps)
   , List.sort String.compare degradation.emptied_lane_ids
   , Option.map
@@ -3153,7 +3154,7 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
         let declared_verifier_lane =
           List.find_opt
             (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-               String.equal lane.id (Standalone_lane.to_id Verifier))
+               Runtime_schema.equal_exact_lane_owner lane.owner (Runtime_schema.Builtin Verifier))
             config.exact_output_lane_decls
         in
         let declared_lane_ids =
@@ -3198,8 +3199,7 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
         let next =
           List.fold_left
             (fun content lane ->
-              let lane_id = Standalone_lane.to_id lane in
-              let path = runtime_table ^ ".exact_output_lanes." ^ lane_id in
+              let path = Runtime_schema.exact_lane_table_name (Runtime_schema.Builtin lane) in
               let lane_slots, lane_cli_slots = lane_slot_values lane in
               if lane_slots = [] && lane_cli_slots = []
               then content

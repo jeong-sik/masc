@@ -112,7 +112,7 @@ let test_cancel ?(observer_checks = true) ?(closed_pool = false) ~base_path ~reg
   let resolver = Fixture.resolver_snapshot ~source:"cancel-fixture"
     [ { Fixture.id = "cancel-librarian-fixture"; base_url = librarian.base_url } ] in
   (match Runtime_exact_output_registry.publish
-      ~lanes:[ { Runtime_schema.id = "librarian_exact"
+      ~lanes:[ { Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Librarian
                ; enabled = true
                ; slot_ids = [ "cancel-librarian-fixture" ]
                ; cli_slot_ids = []

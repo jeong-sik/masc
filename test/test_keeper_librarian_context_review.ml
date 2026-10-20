@@ -145,7 +145,7 @@ let test_case ~base_path ~registry scenario () =
     (Cohttp_eio.Server.make ~callback:handler ()) ~on_error:(fun exn -> raise exn));
   let resolver = Fixture.resolver_snapshot ~source:"context-review-fixture"
       [{Fixture.id = "context-librarian"; base_url = librarian.base_url}] in
-  (match Runtime_exact_output_registry.publish ~lanes:[{Runtime_schema.id = "librarian_exact";
+  (match Runtime_exact_output_registry.publish ~lanes:[{Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Librarian;
       enabled = true; slot_ids = ["context-librarian"]; cli_slot_ids = []; max_output_tokens = Some 4_096; thinking = None}] resolver with
    | Ok _ -> () | Error error -> Alcotest.fail (Runtime_exact_output_registry.publication_error_to_string error));
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-context-key") @@ fun () ->

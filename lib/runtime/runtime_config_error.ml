@@ -32,7 +32,7 @@ type resolution_failure =
 (* One exact-output lane slot whose HTTP provider declares no
    [exact-body-timeout-s] (rule 3 of RFC-runtime-two-layers, #38779). *)
 type exact_slot_body_deadline_gap =
-  { lane_id : string
+  { owner : Runtime_schema.exact_lane_owner
   ; slot_id : string
   ; provider_id : string
   }
@@ -60,7 +60,7 @@ type exact_lane_cli_slot_unservable_reason =
   | Client_without_output_schema
 
 type exact_lane_cli_slot_unservable =
-  { lane_id : string
+  { owner : Runtime_schema.exact_lane_owner
   ; slot_id : string
   ; provider_id : string
   ; reason : exact_lane_cli_slot_unservable_reason
@@ -138,9 +138,9 @@ let resolution_suffix (resolution : resolution_failure) : string =
    and the startup degradation report. *)
 let exact_slot_body_deadline_gap_to_string (gap : exact_slot_body_deadline_gap) =
   Printf.sprintf
-    "[runtime.exact_output_lanes.%s] slot %S runs on provider %S; add %s = %s to \
+    "[%s] slot %S runs on provider %S; add %s = %s to \
      [providers.%s]"
-    gap.lane_id
+    (Runtime_schema.exact_lane_table_name gap.owner)
     gap.slot_id
     gap.provider_id
     Runtime_schema.exact_body_timeout_s_key
@@ -150,7 +150,7 @@ let exact_slot_body_deadline_gap_to_string (gap : exact_slot_body_deadline_gap) 
 
 let exact_slot_body_deadline_gap_to_yojson (gap : exact_slot_body_deadline_gap) =
   `Assoc
-    [ "lane_id", `String gap.lane_id
+    [ "lane_id", `String (Runtime_schema.exact_lane_key gap.owner)
     ; "slot_id", `String gap.slot_id
     ; "provider_id", `String gap.provider_id
     ; "missing_key", `String Runtime_schema.exact_body_timeout_s_key
@@ -277,28 +277,28 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
        |> List.map (fun gap -> "  " ^ exact_slot_body_deadline_gap_to_string gap)
        |> String.concat "\n")
   | Exact_lane_cli_slot_unservable
-      { lane_id; slot_id; provider_id; reason = Not_an_official_client } ->
+      { owner; slot_id; provider_id; reason = Not_an_official_client } ->
     Printf.sprintf
-      "%s: [runtime.exact_output_lanes.%s].cli_slots entry %S is provider %S, \
+      "%s: [%s].cli_slots entry %S is provider %S, \
        dispatched over HTTP rather than an official-client CLI; cli_slots \
        dispatches through the official-client CLI alone \
        (Keeper_lane_cli_oneshot), so move this id to slots or replace it with \
        an official-client runtime (protocol = \"claude-code\" / \
        \"codex-app-server\" / \"antigravity-cli\")"
       config_path
-      lane_id
+      (Runtime_schema.exact_lane_table_name owner)
       slot_id
       provider_id
   | Exact_lane_cli_slot_unservable
-      { lane_id; slot_id; provider_id; reason = Client_without_output_schema } ->
+      { owner; slot_id; provider_id; reason = Client_without_output_schema } ->
     Printf.sprintf
-      "%s: [runtime.exact_output_lanes.%s] entry %S is provider %S, \
+      "%s: [%s] entry %S is provider %S, \
        whose client has no output-schema channel; exact-output lanes require \
        the selected client to accept a JSON Schema, so \
        remove this id or replace it with protocol = \"claude-code\" / \
        \"codex-app-server\" / \"antigravity-cli\""
       config_path
-      lane_id
+      (Runtime_schema.exact_lane_table_name owner)
       slot_id
       provider_id
 ;;

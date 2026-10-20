@@ -434,8 +434,25 @@ type lane_decl =
   }
 [@@deriving show, eq]
 
+type exact_lane_owner =
+  | Builtin of
+      (Standalone_lane.t
+      [@printer fun fmt lane -> Format.pp_print_string fmt (Standalone_lane.to_id lane)]
+      [@equal Standalone_lane.equal])
+[@@deriving show, eq]
+
+let exact_lane_key = function Builtin lane -> Standalone_lane.to_id lane
+
+let exact_lane_owner_of_key key = Option.map (fun lane -> Builtin lane) (Standalone_lane.of_id key)
+
+let exact_lane_table_path = function
+  | Builtin lane ->
+    [ Runtime_toml_namespace.(key Runtime); "exact_output_lanes"; Standalone_lane.to_id lane ]
+
+let exact_lane_table_name owner = String.concat "." (exact_lane_table_path owner)
+
 type exact_output_lane_decl =
-  { id : string
+  { owner : exact_lane_owner
   ; enabled : bool
   ; slot_ids : string list
   ; cli_slot_ids : string list

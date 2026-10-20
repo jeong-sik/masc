@@ -439,8 +439,13 @@ let publish_registry
       ~slot_ids
       resolver_snapshot
   =
+  let owner =
+    match Runtime_schema.exact_lane_owner_of_key lane_id with
+    | Some owner -> owner
+    | None -> Alcotest.failf "exact-output registry fixture: %S is not an exact-output lane" lane_id
+  in
   let lane : Runtime_schema.exact_output_lane_decl =
-    { id = lane_id; enabled = true; slot_ids; cli_slot_ids; max_output_tokens; thinking = None }
+    { owner; enabled = true; slot_ids; cli_slot_ids; max_output_tokens; thinking = None }
   in
   match Runtime_exact_output_registry.publish ~lanes:[ lane ] resolver_snapshot with
   | Ok registry -> registry

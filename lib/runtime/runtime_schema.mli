@@ -366,8 +366,34 @@ type lane_decl =
   }
 [@@deriving show, eq]
 
+(** Who owns an exact-output lane. The owner, not a free string, names the
+    lane's table under [runtime] and its registry key, so a reader that needs
+    either matches on the owner. Every lane today is a built-in standalone
+    lane. *)
+type exact_lane_owner =
+  | Builtin of
+      (Standalone_lane.t
+      [@printer fun fmt lane -> Format.pp_print_string fmt (Standalone_lane.to_id lane)]
+      [@equal Standalone_lane.equal])
+[@@deriving show, eq]
+
+val exact_lane_key : exact_lane_owner -> string
+(** The key the exact-output registry, its errors and the wires carry:
+    {!Standalone_lane.to_id} for a built-in lane. *)
+
+val exact_lane_owner_of_key : string -> exact_lane_owner option
+(** The owner whose {!exact_lane_key} is the argument. A key no lane has is
+    [None]. *)
+
+val exact_lane_table_path : exact_lane_owner -> string list
+(** The lane's table in the runtime file, from the root:
+    [["runtime"; "exact_output_lanes"; id]] for a built-in lane. *)
+
+val exact_lane_table_name : exact_lane_owner -> string
+(** {!exact_lane_table_path} joined with dots, as a message names the table. *)
+
 type exact_output_lane_decl =
-  { id : string
+  { owner : exact_lane_owner
   ; enabled : bool
         (** Whether new work may acquire this lane. Omitting [enabled] in TOML
             means true. False preserves its candidates and request settings;

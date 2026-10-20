@@ -2797,11 +2797,11 @@ let parse_lanes (toml : Otoml.t) : (Runtime_schema.lane_decl list, parse_error l
     Error (error (Ns.(path Runtime) "lanes") "[runtime.lanes] must be a table of lane tables")
 ;;
 
-let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
+let parse_exact_output_lane ~(owner : Runtime_schema.exact_lane_owner) (tbl : Otoml.t)
   : (Runtime_schema.exact_output_lane_decl, parse_error list) result
   =
   let ( let* ) = Result.bind in
-  let path = Ns.(path Runtime) ("exact_output_lanes." ^ id) in
+  let path = Runtime_schema.exact_lane_table_name owner in
   let unknown_key_errors =
     match tbl with
     | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
@@ -2906,10 +2906,11 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
   in
   let* enabled = enabled_result in
   let* () =
-    match Standalone_lane.of_id id with
-    | Some lane when not enabled && Standalone_lane.obligation lane = Standalone_lane.Required ->
+    match owner with
+    | Runtime_schema.Builtin lane
+      when not enabled && Standalone_lane.obligation lane = Standalone_lane.Required ->
       Error (error (path ^ ".enabled") "required exact-output lane cannot be disabled")
-    | Some _ | None -> Ok ()
+    | Runtime_schema.Builtin _ -> Ok ()
   in
   match unknown_key_errors, slots_result with
   | _ :: _, Error slot_errors -> Error (slot_errors @ unknown_key_errors)
@@ -2940,7 +2941,7 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
         (match validate_cli 1 [] cli_slot_ids with
          | Error _ as error -> error
          | Ok () ->
-           Ok { Runtime_schema.id; enabled; slot_ids; cli_slot_ids; max_output_tokens; thinking })
+           Ok { Runtime_schema.owner; enabled; slot_ids; cli_slot_ids; max_output_tokens; thinking })
       | slot_id :: rest ->
         if String.equal (String.trim slot_id) ""
         then
@@ -2976,19 +2977,19 @@ let parse_exact_output_lanes (toml : Otoml.t)
                never be read: the standalone-lane projection draws one row per
                [Standalone_lane.t], so a misspelt lane vanished from every
                surface while the real lane read as unconfigured. *)
-            | (Otoml.TomlTable _ | Otoml.TomlInlineTable _)
-              when Option.is_none (Standalone_lane.of_id id) ->
-              Error
-                (error
-                   (Ns.(path Runtime) ("exact_output_lanes." ^ id))
-                   (Printf.sprintf
-                      "unknown exact-output lane %S; expected one of %s"
-                      id
-                      (String.concat
-                         ", "
-                         (List.map Standalone_lane.to_id Standalone_lane.all))))
             | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
-              parse_exact_output_lane ~id value
+              (match Standalone_lane.of_id id with
+               | Some lane -> parse_exact_output_lane ~owner:(Runtime_schema.Builtin lane) value
+               | None ->
+                 Error
+                   (error
+                      (Ns.(path Runtime) ("exact_output_lanes." ^ id))
+                      (Printf.sprintf
+                         "unknown exact-output lane %S; expected one of %s"
+                         id
+                         (String.concat
+                            ", "
+                            (List.map Standalone_lane.to_id Standalone_lane.all)))))
             | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
             | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
             | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> Error

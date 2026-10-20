@@ -133,7 +133,7 @@ let mandatory_exact_output_lane_violations lanes =
        match
          List.find_opt
            (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-              String.equal lane.id lane_id)
+              String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id)
            lanes
        with
        | None -> Some (Mandatory_lane_missing { lane_id })

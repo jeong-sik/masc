@@ -205,6 +205,28 @@ class Adapter:
             self.db.execute("UPDATE deliveries SET state='result',result=? WHERE kind=? AND id=?",
                             (json.dumps(result, sort_keys=True), kind, identity))
 
+    def close_dead_session_jobs(self, boot, service, live):
+        """Close submitted jobs whose session vanished from a status poll.
+
+        A job stays submitted while its service-side operation is prepared or
+        dispatched; without liveness, a dead session's jobs wait forever and
+        could execute late after a reconnect. A current-boot, current-service
+        plugin job whose session is absent from this poll is closed with a
+        failure instead of being left submitted. Rest jobs carry no session,
+        and other boots/services keep their read-reconciliation path.
+        """
+        rows = self.db.execute(
+            "SELECT * FROM deliveries WHERE state='submitted' AND kind!='rest' AND boot=? AND service=?",
+            (boot, service)).fetchall()
+        for row in rows:
+            try:
+                session = json.loads(row["command"]).get("session_id")
+            except ValueError:
+                session = None
+            if session not in live:
+                self.store_result(row["kind"], row["id"],
+                                  self.failure("Figma session is no longer live; job closed without execution"))
+
     @staticmethod
     def failure(error):
         return {"ok": False, "payload": {"status": "outcome_unknown", "error": str(error)}}
@@ -264,9 +286,11 @@ class Adapter:
         self.client.max_bytes = status["max_request_bytes"]
         self.collect()
         sessions = self.figma.call("/v1/status", {}).get("sessions", [])
+        live = set()
         for session in sessions:
             if not isinstance(session, dict) or not all(key in session for key in (*DOCUMENT_FIELDS, "session_id")):
                 raise ServiceRefused("Figma service session is missing its document context")
+            live.add(session["session_id"])
             document = {key: session[key] for key in DOCUMENT_FIELDS}
             self.client.call("masc_figma_relay", {"kind": "session", "worker_boot_id": boot,
                              "session_id": session["session_id"], "document": document})
@@ -283,6 +307,7 @@ class Adapter:
                 except ServiceRefused as error:
                     self.store_result("plugin", command["id"], self.failure(error))
                 # Transport uncertainty remains submitted and is reconciled by reads.
+        self.close_dead_session_jobs(boot, info["service_id"], live)
         answer = self.client.call("masc_figma_relay", {"kind": "rest_poll", "worker_boot_id": boot})
         command = answer.get("command")
         if command is not None and self.remember(command, boot, info["service_id"], "rest"):

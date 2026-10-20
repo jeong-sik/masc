@@ -5912,6 +5912,11 @@
 (include stanzas/test_candle_appraiser_transport.inc)
 
 (test
+ (name test_exact_lane_failure)
+ (modules test_exact_lane_failure)
+ (libraries masc_test_deps masc.server))
+
+(test
  (name test_lane_addon_broadcast_delivery)
  (modules test_lane_addon_broadcast_delivery)
  (libraries masc masc.fs_compat masc.keeper_chat_delivery_identity alcotest unix yojson))

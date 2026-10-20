@@ -339,4 +339,17 @@ val help_sections :
 (** The help overlay's sections: Global first, then one section per surface
     that declares bindings, titled with the strip's spelling. *)
 
+type reference_section = {
+  section_title : string;
+  section_rows : (string * string) list;
+      (** key and help sentence, the same rows {!help_sections} lists *)
+  section_notes : string list;
+      (** Markdown paragraphs printed after the table, in order *)
+}
+
+val reference_sections : unit -> reference_section list
+(** docs/guides/TUI-KEYS.md, section by section: {!help_sections} in the
+    sheet's order, plus the paragraphs a section's surface keeps for the
+    document. The [?] sheet does not draw those paragraphs. *)
+
 val footer_hints_browser_lane : string

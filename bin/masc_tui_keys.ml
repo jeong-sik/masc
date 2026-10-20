@@ -318,6 +318,15 @@ let listing_next = b Meta "Tab" "next"
 let listing_quit = b Meta "q" "quit"
 let listing_meta = [ listing_refresh; listing_next; listing_quit ]
 
+(* Tools' [r] keeps the listing's footer word, but what it reloads follows
+   what is open there -- the original Task, the original request, or the
+   list -- and the sheet says which. A binding of its own, so
+   [sheet_bindings] keeps it where it drops the shared tail. *)
+let tools_refresh =
+  b Meta "r" "refresh"
+    ~help:"refresh the open original Task body/history, original request \
+           detail, or Tools list"
+
 let keeper_actions =
   [ b Act "c" "chat" ~help:"chat with the keeper"
   ; b Act "l" "logs"
@@ -951,12 +960,14 @@ let for_surface = function
       ; b Navigate "PgUp/PgDn" "page"
           ~help:"a page of the list, or of the text when it is focused"
       ; b Navigate "Home/End" "top/bottom"
-          ~help:"the first or last resource, or the ends of the text when it                  is focused"
+          ~help:"the first or last resource, or the ends of the text when it \
+                 is focused"
       ; b Act "Enter" "read" ~help:"read the selected resource"
       ; b Act "Esc" "back"
           ~help:"the text hands back to the list; the list leaves for System"
       ; b Search "/" "find"
-          ~help:"jump the cursor to a matching resource name; the list has to                  be focused for there to be a cursor to land"
+          ~help:"jump the cursor to a matching resource name; the list has to \
+                 be focused for there to be a cursor to land"
       ; b Search "n / N" "next / previous match"
       ; b Meta "r" "reload"
       ; b Meta "Tab" "next"
@@ -1025,16 +1036,20 @@ let for_surface = function
       ; b Navigate "Home/End" "top/bottom"
       ; b Navigate "p" "section"
           ~help:"available / async runs / receipts / usage / all tools"
-      ; b Navigate "J/K" "Skill" ~help:"select a published Skill"
+      ; b Navigate "J/K" "Skill"
+          ~help:"in async runs, select an original request; otherwise select \
+                 a published Skill"
       ; b Navigate "[ / ]" "Keeper" ~help:"change the effective Keeper surface"
       ; b Act "c / C" "new Skill"
           ~help:"open $EDITOR on a template for a new Skill; c starts an \
                  instruction Skill, C starts a composition Skill"
       ; b Act "e" "edit Skill"
           ~help:"open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish"
-      ; b Act "Esc" "system" ~help:"back to the System surface it hangs off"
+      ; b Act "Esc" "system"
+          ~help:"return from original Task to request, then request to list; \
+                 otherwise back to the System surface it hangs off"
       ]
-      @ listing_meta
+      @ [ tools_refresh; listing_next; listing_quit ]
   | System_logs ->
       [ b Navigate "e" "Events"
       ; b Navigate "j/k" "move / scroll"
@@ -1745,6 +1760,181 @@ let help_surfaces : (string * surface) list =
   ; "Connectors", Connectors
   ]
 
+(* The paragraphs docs/guides/TUI-KEYS.md prints under a section's table, in
+   the order they read there. A key whose behaviour outgrows its one-line
+   help cell -- what an asynchronous save keeps, what a retained observation
+   means -- is explained here because that document is generated from this
+   module: a paragraph written into it by hand fails [test_tui_keys_doc], and
+   regenerating deletes it. Each paragraph is Markdown, with the line breaks
+   the document prints.
+
+   Keyed by surface, the same key as the section, so a paragraph cannot land
+   under a title that merely reads alike. Reference only: the [?] sheet lists
+   keys and does not draw these. *)
+let reference_notes : surface -> string list = function
+  | Keepers Keeper_list ->
+      (* The last paragraph also explains the Runtime catalogue, Overview and
+         Board readers. It reads under Keepers because the reference has
+         carried it there. *)
+      [ "Keeper settings `e` reads a fresh snapshot asynchronously before opening the\n\
+         external editor. After the editor returns, workspace rechecking and the guarded\n\
+         save also run asynchronously; navigation stays available while the receipt is\n\
+         pending. Repeated `e` shares that pending save. The footer retains progress or\n\
+         failure for the selected Keeper, and a late receipt cannot refresh another Keeper."
+      ; "After a refusal or unconfirmed result, `e` reads current settings and restores\n\
+         only your changed values for review in the editor. Untouched fields use current\n\
+         values. The old revision and context-shrink confirmation are not reused; saving\n\
+         requires the new editor roundtrip. Original input and receipts stay with their\n\
+         operation. Sandbox shortcuts use the same owned save operation: they read current\n\
+         settings and the required revision before sending the selected profile. Repeated\n\
+         keys share a pending same-Keeper save; selecting a new profile never rewrites it.\n\
+         An already observed matching profile sends no POST. Failed shortcuts retain their\n\
+         selection; an explicit next key rereads current before another save. Retained editor\n\
+         changes survive shortcut operations. The external editor keeps its own terminal\n\
+         interaction. Runtime and painted latency remain unmeasured."
+      ; "Keeper Runtime picker assignments also retain an owned operation: original\n\
+         Keeper, workspace, concrete Runtime or clear-to-default choice, current snapshot,\n\
+         and assignment revision. Navigation stays available; a pending same-Keeper\n\
+         Settings, Sandbox or assignment save prevents another dispatch without closing\n\
+         the picker. Different Keepers retain independent operations. The existing config\n\
+         read and assignment POST remain the two logical save requests. Local workspace\n\
+         and read authority are checked again before POST; server assignment CAS remains\n\
+         the write precondition. This adds no atomic server workspace precondition."
+      ; "Progress, warnings, conflicts and uncertain outcomes stay with the original\n\
+         operation for this TUI session. Cancellation before possible dispatch is not-sent;\n\
+         after possible dispatch it is unconfirmed. HTTP 400 can include an IO failure,\n\
+         so it does not prove that no write happened. Explicitly choosing again reads\n\
+         current revision; the old request never resends itself. A committed receipt proves\n\
+         configured assignment and the application results it reports, not which Runtime\n\
+         is executing a current Keeper turn. Execution and painted latency remain unmeasured."
+      ; "Runtime catalogue consumers share an in-flight catalogue read for the same\n\
+         workspace. Explicit refresh and post-save demand wait for one fresh follow-up\n\
+         after that read, rather than starting overlapping catalogue requests. Further\n\
+         refreshes during the follow-up may require another read. Last observed rows stay\n\
+         visible with refreshing/stale status and the latest refresh failure. A successful\n\
+         empty response completes the read; it does not keep saying loading. Exact slot\n\
+         replacement still waits for a fresh catalogue. Nested pickers and recent-context\n\
+         catalogue demand resume after workspace reconfirmation. A different workspace\n\
+         clears the old rows and demand. This sharing covers the catalogue launcher;\n\
+         Overview and the Runtime operator surface retain their separate readers.\n\
+         Catalogue rows, configured default route and Keeper assignments share one\n\
+         validated observation. A missing usage-window observation stays an explicit\n\
+         unknown alongside an otherwise usable catalogue.\n\
+         Overview keeps catalogue and usage availability independent: valid usage remains\n\
+         available after catalogue validation fails, and usage failure leaves healthy\n\
+         catalogue rows usable. Both observations belong to the same response; a failed\n\
+         usage read does not borrow a prior response's quota identity.\n\
+         Full-refresh progress labels a composed read as partial when one returned result\n\
+         failed, naming both failed and received components. This covers Runtime\n\
+         catalogue/usage, Board posts/hearths and available Keeper roster/Candle results.\n\
+         Partial is separate from full receipt; unfinished logical readers remain interrupted when\n\
+         the refresh stops. These notices do not grant action authority or confirm Task completion.\n\
+         Board also reports its posts/hearth readers before the pair returns. A completed\n\
+         child remains visible when its parent fails or stops. A caught child cancellation\n\
+         is interrupted; a started child without a terminal observation is unfinished.\n\
+         Child intervals describe those observations, not proven worker exit or screen paint.\n\
+         Board posts and hearth data also arrive independently under their original request.\n\
+         Ready posts do not wait for the census; a pending or failed census retains its\n\
+         last successful value. One dataset does not consume its sibling's result, and a\n\
+         terminal bundle does not replay early data. Board remains pending while either\n\
+         dataset is outstanding. These are UI-state rules; actual paint latency is unmeasured.\n\
+         Census now distinguishes not read, initial reading, received (including empty),\n\
+         unavailable and a retained observation after failure. Refreshing/stale values stay\n\
+         available for hearth navigation; the census row and palette identify them as last\n\
+         observed. Header/sidebar totals use only a received census without a pending census\n\
+         read. A collector ending without a census result records unavailability. Workspace\n\
+         withdrawal clears census values and candidates along with other Board data.\n\
+         The post list has its own typed observation and pending slot. Initial loading,\n\
+         not read, received empty and failed are distinct. Refresh/failure retains posts,\n\
+         selected identity and compose input; list/sidebar and palette qualify retained\n\
+         posts as last observed. A detail response enriches one matching row while keeping\n\
+         the list's failure and pending ownership. Missing terminal results remain\n\
+         unavailable, and workspace withdrawal clears list candidates. Changing sort/hearth\n\
+         keeps the old listing with its original query until a new one succeeds, even if the\n\
+         old result was empty. The listing/sidebar and palette qualify that observation;\n\
+         its sort explanation, age column and census total use the observed query. Requested\n\
+         controls stay separate, and detail enrichment does not relabel the list.\n\
+         Admission diagnostics additionally keep the response's query, the controls at\n\
+         application and the retained listing's query separate for success/failure. Missing\n\
+         owned terminal data has no invented response query. These are request-linked log\n\
+         fields; actual runtime logs and visible behavior remain separate evidence.\n\
+         Full/navigation dispatch diagnostics also retain the original and current source\n\
+         request through cold identity handoff. Planned Board conditions stay fixed even\n\
+         if controls move; an originally non-Board read stays unrequested in that context.\n\
+         Dispatch/rebind/cleanup observations are separate from actual HTTP starts, received\n\
+         data and paint. A missing finish record remains an unfinished observation."
+      ]
+  | Config ->
+      [ "Runtime model and account form saves keep input and its opening revision while\n\
+         workspace checks, source reading, preview and guarded commit run outside the\n\
+         key handler. Repeated submission shares the pending operation. During a pending\n\
+         save, Esc leaves the form and keeps its operation; reopening Models with e/c or\n\
+         runtime.toml with a restores the original input. A disconnected commit remains\n\
+         unconfirmed and cannot be submitted again from that retained form. Ctrl-X closes\n\
+         a retained terminal form and rereads configuration; the next open starts fresh.\n\
+         The original receipt stays in session history. Confirmed account saves retain\n\
+         their sign-in command in the session log. File commit, durability and runtime\n\
+         application remain separate facts. Runtime and painted input latency are unmeasured."
+      ; "The runtime.toml editor also returns to the input loop before its save finishes;\n\
+         S retries a retained draft through the same owned asynchronous save. Its original\n\
+         path, source revision and complete edited text are submitted together. Repeated\n\
+         saves wait for the existing operation. Navigation keeps the draft; a late receipt\n\
+         can complete only its original editing intent, including after ordinary source\n\
+         refreshes, and cannot delete a later edit with the same text."
+      ; "After an unconfirmed commit or durability result, older comparisons and already\n\
+         in-flight reads cannot authorize retry. Read current with r, then explicitly use\n\
+         u to keep your text and choose that revision, or U to replace the text. Choosing\n\
+         a new base from a pre-outcome reading also cannot bypass revalidation. X discards\n\
+         only the local draft; it does not claim that a pending server write was cancelled.\n\
+         These changes do not make the external editor itself asynchronous or establish\n\
+         measured key/paint latency."
+      ; "Config source observations prepare whole-source tokenization, terminal sanitization\n\
+         and the model table together from one immutable reading before UI admission.\n\
+         Preparation uses the shared CPU path: the model table consumes already interpreted\n\
+         server declarations instead of reparsing Runtime source or expanding local credential\n\
+         homes. It reads no UI, environment, request ownership or palette state. The server\n\
+         model envelope must match the reading's exact path and revision. Missing, unavailable\n\
+         or malformed model evidence stays failed; source and other observations remain usable.\n\
+         Source-only form parsing still retains Runtime's environment effects.\n\
+         Account-group/model interpretation failure leaves the source available; email\n\
+         observation failure stays independent. Model selection and source revision come\n\
+         from that same reading."
+      ; "Ordinary refreshes reuse an unchanged retained draft's existing tokenization and\n\
+         the matching observation's current-file projection. Sharing tokenization does\n\
+         not share editing ownership, adopt a revision or authorize retry. Existing\n\
+         workspace/read authority, generation checks and queued follow-up policy still\n\
+         control admission. Diagnostic clocks distinguish request start, prepared result\n\
+         and UI admission decision; these are not painted-frame or key-latency evidence."
+      ]
+  | Approvals ->
+      [ "When a selected question is too tall for the compact Approvals panel, it keeps\n\
+         a short preview from the original question instead of disappearing behind a\n\
+         hidden-question count. Where space permits, the preview points to `a` for the\n\
+         complete Ask and its answers. The preview does not select or submit an answer;\n\
+         the existing answer reader keeps the full prompt, choices and draft. With only\n\
+         one content row, the selected preview takes that row; with none, no extra hidden\n\
+         count is drawn beyond the available space."
+      ]
+  | Tools ->
+      [ "Work Task detail and Tools original Task detail use source-bound history pages.\n\
+         `H` extends the captured prefix; a failed page retains the same cursor for an\n\
+         explicit retry. `r` requests a fresh latest prefix while keeping the prior\n\
+         observation visible. The page demand follows terminal height, with no total\n\
+         history cap. Exhaustion means the observed stored prefix ended; retained-away\n\
+         history and Task completion are separate facts. Tools cadence does not reset a\n\
+         paged history. A source change can refuse the cursor; use `r` to read anew."
+      ; "Task body and history prepare independently. Their notices distinguish waiting\n\
+         to start, arranging the text, waiting for the prepared result, and waiting for\n\
+         the display state to update. An earlier display stays labelled while a newer\n\
+         one is prepared. These stages describe display preparation, not Task progress\n\
+         or completion."
+      ]
+  | Keepers (Keeper_detail | Keeper_message | Keeper_logs | Keeper_calls
+            | Keeper_runtime_pick)
+  | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Planning
+  | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes
+  | Connectors | Runtime | Resources | System_logs -> []
+
 let entries bindings =
   List.map
     (fun { key; label; help; _ } -> (key, Option.value help ~default:label))
@@ -1812,7 +2002,8 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
           ~help:"open the app-registration form for it -- it asks for a Client ID"
       ; b Act "D D" "disconnect"
           ~help:
-            "twice: forget the stored token, drop the tools it attached, and ask \n             the provider to revoke what it still holds"
+            "twice: forget the stored token, drop the tools it attached, and ask \
+             the provider to revoke what it still holds"
       ; b Search "/" "filter"
       ; b Meta "R" "refresh"
       ]
@@ -1882,7 +2073,34 @@ let sheet_bindings surface =
     (fun binding -> not (List.mem binding listing_meta))
     (for_surface surface)
 
-let help_sections ?current () =
+(* Keys Tools answers only in its async runs pane, and Work only with a Task
+   detail open. The Tools footer is one row for all five panes and the Goals
+   footer never has a Task detail under it, so listing these in
+   [for_surface] would advertise them where they do nothing. The sheet
+   carries them, each sentence naming where the key answers. *)
+let tools_async_bindings =
+  [ b Act "Enter" "read request"
+      ~help:"in async runs, read the selected original request"
+  ; b Navigate "t / T" "source Task"
+      ~help:"from async request detail, read its original source Task and history"
+  ; b Navigate "H" "earlier history"
+      ~help:"from original Task detail, read earlier stored history; retains \
+             the observed prefix on failure"
+  ; b Act "o / O" "exact lookup"
+      ~help:"in async runs, edit the original submitter, request ID and \
+             target Keeper for an exact lookup"
+  ]
+
+let work_task_detail_bindings =
+  [ b Navigate "H" "earlier history"
+      ~help:"in Task detail, extend the observed history with its known \
+             earlier page"
+  ]
+
+(* Each section with the surface it answers for; Global and the mark legends
+   answer for none. The sheet reads the sections, the key reference reads the
+   surface as well, for the paragraphs under a table. *)
+let located_sections ?current () =
   let sections =
     List.map
       (fun (title, surface) ->
@@ -1915,10 +2133,12 @@ let help_sections ?current () =
                    (fun (key, help) -> (key, "in the fact detail: " ^ help))
                    (entries bindings_memory_fact_detail)
            | Lanes -> entries [preflight_detail_binding]
+           | Planning -> entries work_task_detail_bindings
+           | Tools -> entries tools_async_bindings
            | Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick))))
-           | Overview | Acting | Metrics | Clients | Board | Approvals | Planning | Schedules
+           | Overview | Acting | Metrics | Clients | Board | Approvals | Schedules
            | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime
-           | Config | Resources | Tools | System_logs -> []
+           | Config | Resources | System_logs -> []
          in
          (surface, (title, entries (sheet_bindings surface) @ tab_entries)))
       help_surfaces
@@ -1929,9 +2149,9 @@ let help_sections ?current () =
     | Some current ->
         List.partition (fun (surface, _) -> surface = current) sections
   in
-  List.map (fun (_, (title, keys)) -> (title ^ here_marker, keys)) here
-  @ ("Global", entries global)
-    :: (List.map (fun (_, section) -> section) rest
+  List.map (fun (surface, (title, keys)) -> (Some surface, (title ^ here_marker, keys))) here
+  @ (None, ("Global", entries global))
+    :: (List.map (fun (surface, section) -> (Some surface, section)) rest
         (* The marks last, as reference, the way the slash commands read as
            reference. One reader of them has no words beside it: the Keepers
            rows draw each glyph with its status word and so does the chat
@@ -1945,7 +2165,8 @@ let help_sections ?current () =
            read it. Its shape is already the sheet's: a mark, and what it
            means. Last rather than beside Global because the section order up
            to there is asserted. *)
-        @ [ ("Keeper marks", Masc_tui_keeper_mark.legend)
+        @ List.map (fun section -> (None, section))
+        [ ("Keeper marks", Masc_tui_keeper_mark.legend)
           (* The Keepers header words and the Mode S letters. They were two
              rows above every roster: an empty roster spent them on columns
              it had nothing in, a narrow one on columns it did not draw, and
@@ -1985,6 +2206,28 @@ let help_sections ?current () =
           ; ("Prompt marks", Masc_tui_config_mark.prompt_legend)
           ; ("Param marks", Masc_tui_config_mark.param_legend)
           ])
+
+let help_sections ?current () = List.map snd (located_sections ?current ())
+
+type reference_section = {
+  section_title : string;
+  section_rows : (string * string) list;
+  section_notes : string list;
+}
+
+(* The sheet's sections in the sheet's order, each with the paragraphs
+   [reference_notes] keeps for its surface. The rows are the sheet's rows, so
+   the document and [?] cannot list different keys. *)
+let reference_sections () =
+  List.map
+    (fun (surface, (section_title, section_rows)) ->
+       let section_notes =
+         match surface with
+         | Some surface -> reference_notes surface
+         | None -> []
+       in
+       { section_title; section_rows; section_notes })
+    (located_sections ())
 
 let workspace_activity_bindings ~context =
   [ b Navigate "j/k" (if context then "scroll" else "select")

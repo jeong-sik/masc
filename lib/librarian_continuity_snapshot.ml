@@ -199,16 +199,20 @@ let prefix_sha256 messages range =
      shared CPU pool, so a caller on the main domain -- the next-request
      forecast -- does not hold every other request for that long. *)
   let module Hash = Digestif.SHA256 in
-  let rec feed ctx = function
+  let rec feed buf ctx = function
     | [] -> Hash.feed_string ctx "]" |> Hash.get |> Hash.to_hex
     | message :: rest ->
-      let encoded = Agent_core.Checkpoint.message_to_json message |> Yojson.Safe.to_string in
+      let encoded = Agent_core.Checkpoint.message_to_json message |> Yojson.Safe.to_string ~buf in
       let ctx = Hash.feed_string ctx encoded in
       let ctx = match rest with [] -> ctx | _ :: _ -> Hash.feed_string ctx "," in
-      feed ctx rest
+      feed buf ctx rest
   in
   Domain_pool_ref.submit_cpu_or_inline (fun () ->
-    feed (Hash.feed_string (Hash.init ()) "[") (R.slice messages range))
+    (* One private buffer per job avoids growing a fresh buffer for every
+       message. Yojson clears it between encodings; no bytes or mutable
+       buffer are shared across jobs. *)
+    let buf = Buffer.create 256 in
+    feed buf (Hash.feed_string (Hash.init ()) "[") (R.slice messages range))
 ;;
 
 (* Only the lines of the history's current generation can witness where it

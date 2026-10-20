@@ -22,13 +22,13 @@ let schema =
 
 let package : Types.package =
   { id = "operator-quiz"; revision = "1"; title = "Exact runner fixture"
-  ; contributions = [ Types.Observe ]; image = "unused"; command = [ "unused" ]
-  ; directory = "/nonexistent"; skills_directory = None; action_tool = None; runtime = Types.Docker
-  ; state_storage = Types.Ephemeral; tool_invocation = Types.Direct; exported_tools = []; outputs = []
+  ; contributions = [ Types.Observe ]; worker_service=Types.Mcp_tools; command = [ "unused" ]
+  ; directory = "/nonexistent"; skills_directory = None; action_tool = None
+  ; state_storage = Types.Ephemeral; tool_invocation = Types.Direct; tool_hooks=[]; exported_tools = []; outputs = []
   ; refresh_policy = Types.Every_hint; model_access = Types.Model_disabled
   ; exact_outputs = [ { Types.name = "author"; schema } ]
   ; binding_schema = None; presentation = Lane_addon_presentation.empty
-  ; resources = { cpus = 0.5; memory_bytes = 134217728L; pids = Some 16; max_reply_bytes = 65536 } }
+  ; execution=Types.Host_process {max_reply_bytes=65536} }
 
 let request id =
   match

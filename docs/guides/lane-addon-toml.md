@@ -256,7 +256,27 @@ max_output_tokens = 8192
 - `runtime.toml` 은 설치 선언보다 먼저 읽힌다. 그래서 선언에 없는 이름의 표도 로드된다. 선언된 출력에 표가 없으면 그 lane 은 `Exact_lane_unconfigured` 로 답한다.
 - 계정을 제거하면 이 표의 slot 도 함께 빠지고, 켜진 lane 을 비우는 제거는 거절된다. prompt preset 도 이 표를 저장하고 되돌린다.
 
-패키지가 이 이름으로 host 에게 요청하는 방법은 [운영자 퀴즈 RFC](../rfc/RFC-operator-quiz-lane.md) §4.4(K2)에 있다.
+### host 에게 요청하기
+
+exact output 을 선언한 패키지의 worker 는 비공개 도구 둘을 한 번씩 광고해야 한다. 하나라도 없으면 worker 가 시작하지 않는다. 두 도구는 export 할 수 없다.
+
+- `lane_host_requests`: 인자가 없다. 패키지가 기다리는 요청 전부를 `{"requests": [...]}` 로 돌려준다.
+- `lane_host_result`: `{"request_id", "result"}` 를 받고 `{"accepted": bool}` 로 답한다. 결과를 소비하는 기록을 패키지가 디스크에 쓴 뒤에만 `true` 로 답한다.
+
+요청 하나는 다음과 같다. 다른 키, 빈 id, 메시지가 없는 요청은 거절된다.
+
+```json
+{"kind": "exact_output", "request_id": "r-17", "output": "author",
+ "system": "선택", "messages": ["사용자 메시지", "..."]}
+```
+
+- 지금 host 가 아는 종류는 `exact_output` 하나다. 모르는 종류가 하나라도 있거나, 같은 `request_id` 가 두 번 나오면 그 목록 전체를 읽지 않고 instance 에 `listing_refused` 를 보인다.
+- host 는 다섯 사건에만 묻고 시계로 묻지 않는다. 지금 걸린 사건은 셋이다: worker 초기화가 끝났을 때, 그 instance 의 action 이 끝난 receipt 를 남겼을 때, 그 설치의 add-on lane 표가 바뀌어 게시됐을 때. 선언이 바뀌면 worker 가 다시 떠서 첫 사건이 된다. 설치 질문 답변 사건은 아직 없다.
+- 한 주기는 목록을 받아 순서대로 처리한다. host 가 이미 최종 결과를 가진 요청은 모델을 부르지 않고 그 결과를 준다. 없으면 한 번 시도하고, 결과가 최종이면 준다. 최종이 아니면 다음 사건까지 기다린다. 결과를 준 목록이 있으면 다시 목록을 받고, 아무것도 주지 않은 목록에서 끝난다. 끝나면 관측을 한 번 한다.
+- 같은 주기에 이미 준 요청이 다시 나오면 주기를 끝내고 `relisted_delivered_request` 를 보인다.
+- 결과를 담은 인자가 `max_reply_bytes` 보다 크면 결과 대신 `{"status": "result_exceeds_frame", "retained_sha256", "bytes"}` 를 준다.
+- 최종 결과의 `status` 는 `answered`(`output`, `slot`, 선택 `usage`), `invalid_output`, `input_refused`(`kind`), `outcome_unknown`, `not_allowed`, `request_id_reused` 다. 자세한 뜻은 [운영자 퀴즈 RFC](../rfc/RFC-operator-quiz-lane.md) §4.3–4.4 에 있다.
+- 마지막 주기는 Inspect 의 instance 마다 `host_requests` 로 보인다: 주기 수, 최종이 아니어서 기다리는 요청과 그 이유, 주기를 멈춘 이유.
 
 ## 세계와 연결되는 통로
 

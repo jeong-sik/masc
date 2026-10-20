@@ -41,7 +41,7 @@ type fixture = {config:Workspace.config; root:string; calls:int ref; observes:in
   outcome:outcome ref; barrier:unit Eio.Promise.t option ref}
 let backend fixture : Runtime.For_testing.backend = {
   start=(fun ~sw:_ ~state_owner:_ ~instance_id ~installation_id:_ ~(package:Types.package) ~binding:_ ~on_authority ~is_live_instance:_ ~on_created ->
-    let connection : Runtime.For_testing.connection = {browser=None;
+    let connection : Runtime.For_testing.connection = {browser=None;host=None;
       resource=Masc.Lane_addon_lifecycle.Container_resource (Store.digest instance_id);
       exported_tools = (fun () -> []);
       call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools"));

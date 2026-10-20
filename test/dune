@@ -5779,6 +5779,11 @@
  (libraries masc_tui_types masc yojson masc.masc_tool_blob_store))
 
 (test
+ (name test_lane_addon_host_cycle)
+ (modules test_lane_addon_host_cycle)
+ (libraries masc_test_deps exact_output_fixture eio eio_main yojson unix))
+
+(test
  (name test_lane_addon_host_request)
  (modules test_lane_addon_host_request)
  (libraries masc_test_deps yojson))

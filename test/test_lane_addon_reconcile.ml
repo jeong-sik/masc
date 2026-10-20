@@ -104,7 +104,7 @@ let make_backend () =
           record (Startup_failed instance_id);
           Error (Lifecycle.Worker_failed detail)
       | Ok engine ->
-      let connection : Runtime.For_testing.connection = {browser=None;
+      let connection : Runtime.For_testing.connection = {browser=None;host=None;
         resource = Lifecycle.Container_resource container_id;
         exported_tools = (fun () -> []);
         call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools"));

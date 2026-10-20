@@ -6,6 +6,10 @@ val error_to_string : error -> string
 val register_delivery_handler :
   (config:Workspace.config -> caller:string -> keeper_name:string -> prompt:string ->
     (Yojson.Safe.t, string) result) -> unit
+val register_exact_runner : Lane_addon_exact.runner -> unit
+(** Server-owned runner for packages' exact-output requests, registered before
+    configuration maintenance. Without it a declared installation's exact
+    request ends its host request cycle with [no_exact_runner]. *)
 val register_sampling_factory :
   (sw:Eio.Switch.t -> store:Lane_addon_store.t -> instance_id:string ->
     package:Lane_addon_types.package -> binding:Yojson.Safe.t ->
@@ -189,6 +193,11 @@ module For_testing : sig
       (unit, string) result) -> (unit -> 'a) -> 'a
   (** Terminal historical cleanup persistence. [None] removes a never-started
       binding; [Some json] persists its final phase. Captured before offload. *)
+  type host_port = {
+    list_requests : unit -> (Yojson.Safe.t, string) result;
+    deliver : arguments:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
+  }
+  (** A worker's two private host request tools, answers undecoded. *)
   type connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t ->
       (Lane_addon_types.output, string) result;
@@ -200,6 +209,7 @@ module For_testing : sig
     stop : unit -> (Lane_addon_lifecycle.release, Lane_addon_lifecycle.failure) result;
     resource : Lane_addon_lifecycle.resource;
     browser : Browser_addon_client.t option;
+  host : host_port option;
   }
   type backend = {
     start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> installation_id:string -> package:Lane_addon_types.package -> binding:Yojson.Safe.t ->

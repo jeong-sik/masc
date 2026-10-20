@@ -53,7 +53,7 @@ let make_backend () =
       let released, release = Eio.Promise.create () in
       let stopped = ref false in
       Hashtbl.add state.modes instance_id package.id;
-      let connection : Runtime.For_testing.connection = {browser=None;
+      let connection : Runtime.For_testing.connection = {browser=None;host=None;
         resource = Masc.Lane_addon_lifecycle.Container_resource (Store.digest instance_id);
         exported_tools = (fun () -> []);
         call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools"));

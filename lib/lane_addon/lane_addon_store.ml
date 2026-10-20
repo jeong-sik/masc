@@ -164,7 +164,7 @@ let read_blob_slice ?snapshot t reference ~offset ~max_bytes = protect (fun () -
          | Fs_compat.Exact_unknown | Fs_compat.Exact_kind (Unix.S_CHR | Unix.S_BLK | Unix.S_LNK
              | Unix.S_FIFO | Unix.S_SOCK) -> Error "retained result is not a regular file") in
     let path = Filename.concat t.root relative in
-    let checked content observed =
+    let checked content (observed : Fs_compat.owned_regular_file_snapshot) =
       if offset > observed.Fs_compat.file_size then Error "offset exceeds the retained result"
       else if String.length content <> min max_bytes (observed.file_size-offset) then
         Error "retained result ended before its recorded size"

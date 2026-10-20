@@ -717,6 +717,118 @@ let test_root_layout_reports_entries_and_discovered_checkouts () =
       (holds "artifacts"))
 ;;
 
+let run_git_lines ~cwd args =
+  match Repo_git.run_git ~cwd args with
+  | Ok lines -> lines
+  | Error error ->
+    Alcotest.failf "git %s failed: %s" (String.concat " " args) error
+;;
+
+let git_commit ~cwd message =
+  ignore (run_git_lines ~cwd [ "commit"; "--allow-empty"; "-m"; message ])
+;;
+
+let git_head ~cwd =
+  match run_git_lines ~cwd [ "rev-parse"; "HEAD" ] with
+  | [ sha ] -> sha
+  | lines -> Alcotest.failf "unexpected rev-parse output: %s" (String.concat "|" lines)
+;;
+
+let init_git_checkout checkout =
+  Fs_compat.mkdir_p checkout;
+  ignore (run_git_lines ~cwd:checkout [ "init"; "-b"; "main" ]);
+  ignore (run_git_lines ~cwd:checkout [ "config"; "user.email"; "test@example.com" ]);
+  ignore (run_git_lines ~cwd:checkout [ "config"; "user.name"; "Test" ])
+;;
+
+let layout_line layout ~affix =
+  match
+    List.find_opt (fun entry -> Astring.String.is_infix ~affix entry) layout
+  with
+  | Some line -> line
+  | None ->
+    Alcotest.failf "no layout line names %s: %s" affix (String.concat " / " layout)
+;;
+
+(* The judge reads this line to decide whether a file missing from a checkout
+   is missing from main. A tree the catalog cannot compare with main must say
+   so, and it must carry the commit it holds. *)
+let test_root_layout_names_head_and_refuses_to_call_an_uncompared_tree_current () =
+  with_surface (fun config surface ->
+    let root = producer_playground config producer in
+    let checkout = Filename.concat root "repos/unregistered" in
+    init_git_checkout checkout;
+    git_commit ~cwd:checkout "first";
+    let head = git_head ~cwd:checkout in
+    let line =
+      layout_line (VAT.root_layout surface |> require_layout) ~affix:"repos/unregistered/"
+    in
+    let holds affix = Astring.String.is_infix ~affix line in
+    Alcotest.(check bool) "names the HEAD commit" true (holds ("head=" ^ head));
+    Alcotest.(check bool) "names the branch" true (holds "branch=main");
+    Alcotest.(check bool)
+      "says no comparison with main was made"
+      true
+      (holds "no comparison with main");
+    Alcotest.(check bool)
+      "does not describe the tree as equal to main"
+      false
+      (holds "HEAD equals"))
+;;
+
+(* The observed incident: a tree behind main, read as main, rejected merged work. *)
+let test_root_layout_reports_a_checkout_behind_its_tracking_ref () =
+  with_surface (fun config surface ->
+    let root = producer_playground config producer in
+    let checkout = Filename.concat root "repos/masc" in
+    init_git_checkout checkout;
+    ignore
+      (run_git_lines ~cwd:checkout
+         [ "remote"; "add"; "origin"; "https://example.invalid/masc.git" ]);
+    git_commit ~cwd:checkout "first";
+    let behind_head = git_head ~cwd:checkout in
+    git_commit ~cwd:checkout "second";
+    let upstream_head = git_head ~cwd:checkout in
+    ignore
+      (run_git_lines ~cwd:checkout [ "update-ref"; "refs/remotes/origin/main"; "HEAD" ]);
+    ignore (run_git_lines ~cwd:checkout [ "reset"; "-q"; "--hard"; behind_head ]);
+    let repository : Repo_manager_types.repository =
+      { id = "masc"
+      ; name = "masc"
+      ; url = "https://example.invalid/masc.git"
+      ; local_path = checkout
+      ; aliases = []
+      ; default_branch = "main"
+      ; keepers = []
+      ; status = Repo_manager_types.Active
+      ; auto_sync = false
+      ; sync_interval = 0
+      ; created_at = Int64.zero
+      ; updated_at = Int64.zero
+      }
+    in
+    (match Repo_store.save_all ~base_path:config.base_path [ repository ] with
+     | Ok () -> ()
+     | Error error -> Alcotest.failf "failed to seed repository catalog: %s" error);
+    let line =
+      layout_line (VAT.root_layout surface |> require_layout) ~affix:"repos/masc/"
+    in
+    let holds affix = Astring.String.is_infix ~affix line in
+    Alcotest.(check bool) "names the HEAD it holds" true (holds ("head=" ^ behind_head));
+    Alcotest.(check bool)
+      "names the tracking ref commit it is behind"
+      true
+      (holds ("(" ^ upstream_head ^ ")"));
+    Alcotest.(check bool)
+      "states how far behind the tracking ref it is"
+      true
+      (holds "1 commit(s) behind local origin/main");
+    Alcotest.(check bool)
+      "does not describe the tree as equal to main"
+      false
+      (holds "HEAD equals"))
+;;
+
 let test_prompt_states_the_root_and_not_a_repository () =
   with_surface ~sandbox_profile:"docker" (fun config surface ->
     let root = producer_playground config producer in
@@ -1297,6 +1409,14 @@ let () =
             "root_layout reports entries and discovered checkouts"
             `Quick
             test_root_layout_reports_entries_and_discovered_checkouts
+        ; Alcotest.test_case
+            "root layout names HEAD and refuses to call an uncompared tree current"
+            `Quick
+            test_root_layout_names_head_and_refuses_to_call_an_uncompared_tree_current
+        ; Alcotest.test_case
+            "root layout reports a checkout behind its tracking ref"
+            `Quick
+            test_root_layout_reports_a_checkout_behind_its_tracking_ref
         ; Alcotest.test_case
             "root_layout fails closed when discovery is unavailable"
             `Quick

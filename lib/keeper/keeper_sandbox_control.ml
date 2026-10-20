@@ -648,6 +648,7 @@ let checkout_json (inspection : checkout_inspection) =
 type freshness_row = {
   row_checkout_path : string;
   row_branch : string option;
+  row_head : string option;
   row_changed_files : int option;
   row_freshness : checkout_freshness;
 }
@@ -670,6 +671,10 @@ let freshness_row_of_inspection (inspection : checkout_inspection) =
   { row_checkout_path =
       inspection.inspected.Keeper_playground_checkouts.relative_path
   ; row_branch = row_branch_of_probe inspection.branch
+  ; row_head =
+      (match inspection.head with
+       | Ok head -> Some head
+       | Error (_ : string) -> None)
   ; row_changed_files =
       (match inspection.dirty with
        | Ok (_, changed_files) -> Some changed_files
@@ -831,6 +836,21 @@ let repository_checkouts_json ~include_repository_checkouts ~config ~meta =
     `Assoc [ "state", `String "not_inspected"; "entries", `List [] ]
 ;;
 
+let host_checkout_freshness_rows
+    ?(inspection_budget_sec = Repo_git.inspection_timeout_sec)
+    ~(config : Workspace.config)
+    checkouts
+  =
+  let catalog = Repo_store.load_all ~base_path:config.base_path in
+  let budget =
+    Repo_git.Inspection_budget.create ~timeout_sec:inspection_budget_sec ()
+  in
+  List.map
+    (fun checkout ->
+       freshness_row_of_inspection (inspect_checkout ~budget ~catalog checkout))
+    checkouts
+;;
+
 let checkout_freshness_rows
     ?(inspection_budget_sec = Repo_git.inspection_timeout_sec)
     ~(config : Workspace.config)
@@ -846,13 +866,11 @@ let checkout_freshness_rows
     (match Keeper_playground_checkouts.discover ~root:sandbox_abs with
      | Error scan_error -> Error scan_error
      | Ok discovery ->
-       let budget =
-         Repo_git.Inspection_budget.create ~timeout_sec:inspection_budget_sec ()
-       in
        Ok
-         (Keeper_playground_checkouts.found discovery
-          |> List.map (fun checkout ->
-            freshness_row_of_inspection (inspect_checkout ~budget ~catalog checkout))))
+         (host_checkout_freshness_rows
+            ~inspection_budget_sec
+            ~config
+            (Keeper_playground_checkouts.found discovery)))
   | Endpoint_owned ->
     match
       Keeper_sandbox_remote_checkouts.discover_and_inspect

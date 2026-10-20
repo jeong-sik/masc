@@ -83,10 +83,23 @@ type freshness_row = {
   row_checkout_path : string;
       (** Playground-relative path — the cwd the keeper passes to its tools.
           Basenames collide across a playground; paths do not. *)
-  row_branch : string option;  (** [None] when the branch probe failed. *)
+  row_branch : string option;
+      (** [None] when the branch probe failed, which includes a detached HEAD. *)
+  row_head : string option;  (** Full HEAD SHA; [None] when the probe failed. *)
   row_changed_files : int option;  (** [None] when the status probe failed. *)
   row_freshness : checkout_freshness;
 }
+
+val host_checkout_freshness_rows :
+  ?inspection_budget_sec:float ->
+  config:Workspace.config ->
+  Keeper_playground_checkouts.checkout list ->
+  freshness_row list
+(** Measure checkouts that a host-side reader already discovered, with the same
+    probe {!checkout_freshness_rows} runs on a Keeper's own tree. No git
+    command it runs fetches or reaches the network. [?inspection_budget_sec]
+    bounds the total git subprocess time across the list (default
+    {!Repo_git.inspection_timeout_sec}). *)
 
 val checkout_freshness_rows :
   ?inspection_budget_sec:float ->

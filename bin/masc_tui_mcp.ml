@@ -161,7 +161,7 @@ let display_name (resource : resource) =
 
 type resource_content_kind =
   | Resource_text of string
-  | Resource_blob of { base64_bytes : int }
+  | Resource_blob of { base64 : string }
 
 type resource_content = {
   rc_uri : string option;
@@ -335,7 +335,7 @@ let resource_contents_of_body ~request_id body =
                           { rc_uri = string_field fields "uri"
                           ; rc_mime_type = string_field fields "mimeType"
                           ; rc_kind =
-                              Resource_blob { base64_bytes = String.length blob }
+                              Resource_blob { base64 = blob }
                           }
                     | None -> None))
             | _ -> None)

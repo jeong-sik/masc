@@ -6350,3 +6350,8 @@
  (name test_tui_code_draft)
  (modules test_tui_code_draft)
  (libraries alcotest masc_tui_code_draft masc_tui_editor unix))
+
+(test
+ (name test_tui_resource_images)
+ (modules test_tui_resource_images)
+ (libraries alcotest yojson masc_tui_mcp masc_tui_resource_images masc_tui_image_preview))

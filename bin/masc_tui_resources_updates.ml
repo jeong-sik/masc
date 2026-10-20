@@ -101,6 +101,7 @@ let read_done state ~uri result =
            contents
        in
        state.resource_content <- Some (uri, contents);
+       state.resource_image_cursor <- 0;
        state.resource_content_error <- None
      | Error detail -> state.resource_content_error <- Some (uri, detail))
   | Some _ | None -> ()

@@ -51,7 +51,7 @@ let pretty_resource_text ~mime text =
   | None -> text
 
 let resource_document (resource : Masc_tui_mcp.resource)
-    (contents : Masc_tui_mcp.resource_content list option) ~error ~requested =
+    (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor =
   let present = function
     | Some text when String.trim text <> "" -> text
     | Some _ | None -> "not supplied"
@@ -77,10 +77,11 @@ let resource_document (resource : Masc_tui_mcp.resource)
       match part.rc_kind with
       | Masc_tui_mcp.Resource_text text ->
           pretty_resource_text ~mime:part_mime text
-      | Masc_tui_mcp.Resource_blob { base64_bytes } ->
+      | Masc_tui_mcp.Resource_blob { base64 } ->
           Printf.sprintf
-            "Binary data · `%s` · %d base64 bytes · preview unavailable"
-            part_mime base64_bytes
+            "%s · `%s` · %d base64 bytes"
+            (if Masc_tui_resource_images.is_image part_mime then "Image data" else "Binary data")
+            part_mime (String.length base64)
     in
     match contents with
     | Some (_ :: _ :: _) ->
@@ -93,8 +94,13 @@ let resource_document (resource : Masc_tui_mcp.resource)
     | None, None when requested -> "(reading resource…)"
     | None, None -> "(Enter reads the selected resource.)"
     | None, Some parts ->
-        parts |> List.mapi (fun index part -> part_document (index + 1) part)
-        |> String.concat "\n\n"
+        let images = Masc_tui_resource_images.images ~mime_type:resource.mime_type parts in
+        let selection = match List.nth_opt images image_cursor with
+          | Some (part, _) -> Printf.sprintf "Image %d/%d · part %d · ,/.: select · Ctrl-O: preview\n\n"
+              (image_cursor + 1) (List.length images) part
+          | None -> "" in
+        selection ^ (parts |> List.mapi (fun index part -> part_document (index + 1) part)
+        |> String.concat "\n\n")
   in
   metadata ^ "\n\n---\n\n" ^ body
 
@@ -229,7 +235,7 @@ let render_resources (state : state) =
            Message_layout.wrap_body ~markdown:document_markdown
              ~max_cells:(max 1 (framed_inner_width pane_cols - 4))
              ~sanitize:Terminal_text.single_line
-             (resource_document resource contents ~error ~requested)
+             (resource_document resource contents ~error ~requested ~image_cursor:state.resource_image_cursor)
          in
          let total_lines = List.length rendered in
          let max_scroll = max 0 (total_lines - content_height) in

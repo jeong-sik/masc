@@ -402,8 +402,14 @@ resource; `Enter` reads one beside the
 list. The detail starts with the server's description, full URI, MIME type,
 and declared byte size, then the payload. JSON is pretty-printed; JSON, TOML,
 and YAML payloads use the shared code lexer, while Markdown uses the same
-renderer as chat and Board; binary parts report their encoded size instead of
-pretending to render content. With detail focused, `[`/`]` read the previous
+renderer as chat and Board. Image parts retain their original encoded bytes:
+with detail focused, `,`/`.` selects an image and `Ctrl-O` previews it through
+the same terminal image presenter as chat. SVG text parts are also supported.
+Other binary parts report their encoded size. Previews use the retained content,
+not the resource URI as a local path, and require terminal image support.
+Reading the resource again, opening another resource or changing workspace withdraws the earlier
+image source; late results cannot take over the new reading.
+With detail focused, `[`/`]` read the previous
 or next resource without returning to the list. Responses are URI-stamped, so
 a slow older read cannot replace a newer selection. `Ctrl-W` switches between
 list and detail, and `j`/`k` move whichever pane has focus. The selected

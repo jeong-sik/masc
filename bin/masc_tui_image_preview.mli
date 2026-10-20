@@ -29,6 +29,10 @@ val output_image : name:string -> src:string -> preview
 val inline_svg : name:string -> string -> preview
 (** SVG markup supplied by the canonical SVG block, never a local path. *)
 
+val inline_payload : name:string -> base64:string -> preview
+(** Retained encoded image bytes, never a URL or filesystem path. Decode and
+    validate only in the existing off-thread image acquisition boundary. *)
+
 val mermaid : name:string -> string -> preview
 (** Exact source for the offline Pele renderer. No parsing or process work. *)
 

@@ -982,6 +982,10 @@ let for_surface = function
           ~help:"the first or last resource, or the ends of the text when it \
                  is focused"
       ; b Act "Enter" "read" ~help:"read the selected resource"
+      ; b Navigate ", / ." "image" ~detail:Detail_only
+          ~help:"select the previous or next image part in the loaded resource"
+      ; b Act "Ctrl-O" "preview image" ~detail:Detail_only
+          ~help:"open the selected image from the retained resource bytes"
       ; b Act "Esc" "back"
           ~help:"the text hands back to the list; the list leaves for System"
       ; b Search "/" "find"

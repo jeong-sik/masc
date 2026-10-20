@@ -1,6 +1,3 @@
-(* This standalone fixture explicitly enables new Browser work. *)
-let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled))
-
 open Alcotest
 module Observation = Masc.Browser_observation
 module Runtime = Masc.Keeper_tool_in_process_runtime
@@ -37,23 +34,21 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
     Eio.Switch.run (fun sw ->
       let current = ref (match data "alpha" (String.make 8000 'a' ^ "한글🙂") with
         | `Assoc fields -> `Assoc (fields @ [
-            "source", `String "live";
-            "clientId", `String "11111111-1111-4111-8111-111111111111";
             "source", `String "backend-conflict";
             "clientId", `Null;
             "transport", `String "backend-conflict";
-            "elapsed_ms", `Float (-1.); "elapsed_ms", `Float (-2.)])
+            "elapsed_ms", `Float (-2.)])
         | _ -> assert false) in
-      Browser_lane.install_automation_executor (Some (function
+      let respond ~route:_ = function
         | Browser_lane.Page_scene {tab_id=7;view;scope=None;_} ->
           let fields = match !current with `Assoc fields -> fields | _ -> fail "scene object required" in
           let data = `Assoc (("view", `String (match view with Content -> "content" | Regions -> "regions"))
             :: List.remove_assoc "view" fields) in
           Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",data])
-        | _ -> fail "observation used an unexpected browser action"));
-      Eio.Switch.on_release sw (fun () -> Browser_lane.install_automation_executor None);
-      let meta = Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String "reader"]) |> ok in
+        | _ -> fail "observation used an unexpected browser action" in
       let config = Masc.Workspace.default_config base in
+      Browser_addon_fixture.with_worker ~env ~config ~respond (fun browser ->
+      let meta = Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String "reader"]) |> ok in
       let args = `Assoc ["lane",`String "automation";"tabId",`Int 7;"mode",`String "scene"] in
       let execution = Runtime.handle_browser_read_with_outcome ~config ~meta ~args in
       check bool "actual Keeper producer completed" true (execution.disposition=Tool_result.Completed ());
@@ -88,7 +83,7 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
         (Tool_output.normalized_artifact_refs_in_json (Tool_result.to_json result)=[]);
       let generic_read mode =
         let args = `Assoc ["lane",`String "automation";"tabId",`Int 7;"mode",`String mode] in
-        match Masc.Tool_misc.dispatch
+        match Masc.Tool_misc.dispatch ~browser_principal:(Lane_addon_call_context.Host_actor "reader")
           { config; agent_name="reader"; help_schemas=[] }
           ~name:"masc_browser_read" ~args with
         | Some result -> result | None -> fail "generic MCP dispatch did not resolve browser read" in
@@ -113,7 +108,7 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
         (Yojson.Safe.from_string (fetch base (retained_reference generic_regions))) |> ok in
       check bool "bound MCP retains regions view" true (regions.scene.view=Browser_lane.Regions);
       current := data "gamma" "Later page";
-      Browser_lane.install_automation_executor None;
+      Browser_addon_fixture.detach browser;
       let historical = Observation.of_json (Yojson.Safe.from_string (fetch base reference)) |> ok in
       check string "page survives after browser moves and disconnects" "alpha" historical.scene.document_id;
       check int "same observed tab retained" 7 historical.tab_id;
@@ -144,7 +139,7 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
         |> List.map (fun result -> (retained_reference result).Tool_output.sha256)
         |> List.sort_uniq String.compare in
       check int "existing tool-call registry retains every read" (List.length distinct_roots) sweep.live_references;
-      check int "referenced scene is not a deletion candidate" 0 sweep.candidates_recorded)))
+      check int "referenced scene is not a deletion candidate" 0 sweep.candidates_recorded))))
 
 let test_invalid_or_unpersisted_scene_has_no_reference () = with_base (fun base ->
   let scene = routed (data "alpha" "visible") in
@@ -183,16 +178,17 @@ let test_generic_retention_failure_preserves_read_receipt () = with_base (fun ba
   Eio_main.run (fun env ->
     Time_compat.set_clock (Eio.Stdenv.clock env);
     let reads = ref 0 in
-    Browser_lane.install_automation_executor (Some (function
+    let respond ~route:_ = function
       | Browser_lane.Page_scene {tab_id=7;view=Content;scope=None;_} ->
         incr reads;
         Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",data "alpha" "Already read"])
-      | _ -> fail "retention failure must not replay navigation or interaction"));
-    Fun.protect ~finally:(fun () -> Browser_lane.install_automation_executor None) (fun () ->
+      | _ -> fail "retention failure must not replay navigation or interaction" in
+    let config=Masc.Workspace.default_config base in
+    Browser_addon_fixture.with_worker ~env ~config ~respond (fun _browser ->
       let root = Tool_blob_store.root_dir (Tool_blob_store.create ~base_path:base) in
       Fs_compat.mkdir_p (Filename.dirname root);
       Out_channel.with_open_bin root (fun out -> output_string out "occupied");
-      let result = match Masc.Tool_misc.dispatch
+      let result = match Masc.Tool_misc.dispatch ~browser_principal:(Lane_addon_call_context.Host_actor "reader")
         {config=Masc.Workspace.default_config base;agent_name="reader";help_schemas=[]}
         ~name:"masc_browser_read"
         ~args:(`Assoc ["lane",`String "automation";"tabId",`Int 7;"mode",`String "scene"]) with
@@ -217,13 +213,14 @@ let test_generic_retention_failure_preserves_read_receipt () = with_base (fun ba
 let test_external_read_creates_no_hidden_blob () = with_base (fun base ->
   Eio_main.run (fun env ->
     Time_compat.set_clock (Eio.Stdenv.clock env);
-    Browser_lane.install_automation_executor (Some (function
+    let respond ~route:_ = function
       | Browser_lane.Page_scene _ ->
           Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",data "external" "visible"])
-      | _ -> fail "unexpected external action"));
-    Fun.protect ~finally:(fun () -> Browser_lane.install_automation_executor None) (fun () ->
+      | _ -> fail "unexpected external action" in
+    let config=Masc.Workspace.default_config base in
+    Browser_addon_fixture.with_worker ~env ~config ~respond (fun _browser ->
       let args = `Assoc ["lane",`String "automation";"tabId",`Int 7;"mode",`String "scene"] in
-      let result = match Masc.Tool_misc.dispatch
+      let result = match Masc.Tool_misc.dispatch ~browser_principal:(Lane_addon_call_context.Host_actor "reader")
           {config=Masc.Workspace.default_config base;agent_name="reader";help_schemas=[]}
           ~name:"masc_browser_read" ~args with
         | Some result -> result | None -> fail "browser read not dispatched" in

@@ -1,7 +1,7 @@
 open Alcotest
 
 (* The fixtures are MSP golden transcripts copied verbatim from
-   github.com/meta-models/muse-code-sdk schema/msp/transcripts at a7c10c5
+   github.com/meta-models/muse-code-sdk schema/msp/transcripts at 22a8a56
    (MIT; see fixtures/muse_msp/README.md). Each line is
    {"dir":"client"|"server","raw":"<one wire frame>"}. *)
 
@@ -180,11 +180,6 @@ let test_capability_handshake () =
     "granted"
     true
     (init.granted_capabilities = [ Msp.Session_list_stream ]);
-  check
-    string
-    "corpus fingerprint"
-    Msp.corpus_schema_fingerprint
-    init.schema_fingerprint;
   let other_version =
     Yojson.Safe.from_string
       {|{"serverInfo":{"name":"m","version":"9"},"userAgent":"m","museHome":"/h","sessionDurability":"durable","schema":{"version":2,"fingerprint":"sha256:x"},"grantedCapabilities":[]}|}
@@ -210,6 +205,32 @@ let test_capability_handshake () =
         | `Assoc params -> List.assoc "capabilities" params
         | _ -> fail "params is not an object")
      | _ -> fail "frame is not an object")
+;;
+
+(* A host reports its stable bundle's fingerprint, which the corpus commit
+   publishes in stable/manifest.json; the transcripts' own initialize frames
+   carry a hand-authored placeholder. The handshake compares the host's value
+   with the codec's, so the codec's must be the manifest's. *)
+let test_codec_fingerprint_is_the_corpus_stable_bundle () =
+  let manifest =
+    In_channel.with_open_bin "fixtures/muse_msp/stable-manifest.json" In_channel.input_all
+    |> Yojson.Safe.from_string
+  in
+  let open Yojson.Safe.Util in
+  check int "manifest schema version" 1 (manifest |> member "schemaVersion" |> to_int);
+  check bool "stable surface" false (manifest |> member "experimental" |> to_bool);
+  check
+    string
+    "codec fingerprint"
+    (manifest |> member "fingerprint" |> to_string)
+    Msp.corpus_schema_fingerprint;
+  let result = response_result (Msp.Int_id 1) (server_frames "handshake-liststream-granted") in
+  let init = ok_or_fail (Msp.parse_initialize_result result) in
+  check
+    string
+    "host fingerprint kept verbatim"
+    (result |> member "schema" |> member "fingerprint" |> to_string)
+    init.schema_fingerprint
 ;;
 
 let test_approval_round_trip () =
@@ -314,6 +335,73 @@ let test_compaction_members_are_decoded () =
      | Error error -> fail (Msp.error_to_string error))
   | Ok _ -> fail "a notification decoded as another frame"
   | Error error -> fail (Msp.error_to_string error)
+;;
+
+let message_phase =
+  testable
+    (fun ppf -> function
+       | Msp.Commentary -> Format.pp_print_string ppf "commentary"
+       | Msp.Final_answer -> Format.pp_print_string ppf "finalAnswer"
+       | Msp.Unrecognized_message_phase wire -> Format.fprintf ppf "unrecognized %S" wire)
+    ( = )
+;;
+
+let agent_message_completed members =
+  Printf.sprintf
+    {|{"jsonrpc":"2.0","method":"item/completed","params":{"sessionId":"s-1","viewCursor":"v:6","item":{"itemId":"m-1","kind":"agentMessage","turnId":"t-1","revision":2,"status":"completed","text":"done"%s}}}|}
+    members
+;;
+
+let decoded_notification line =
+  match Msp.parse_wire_line line with
+  | Ok (Msp.Notification { method_; params }) -> Msp.parse_notification ~method_ params
+  | Ok _ -> fail "a notification decoded as another frame"
+  | Error error -> fail (Msp.error_to_string error)
+;;
+
+let completed_agent_phases notifications =
+  List.filter_map
+    (function
+      | Msp.Item_completed { item = { kind = Msp.Agent_message; message_phase; _ }; _ } ->
+        Some message_phase
+      | _ -> None)
+    notifications
+;;
+
+(* The 1.4.11 host labels the message it answers with; the single-turn
+   transcript was recorded before the member existed and carries none. *)
+let test_corpus_message_phases () =
+  check
+    (list (option message_phase))
+    "a 1.4.11 answer"
+    [ Some Msp.Final_answer ]
+    (completed_agent_phases (notifications "provider-failure-turn"));
+  check
+    (list (option message_phase))
+    "a message recorded before the member"
+    [ None ]
+    (completed_agent_phases (notifications "text-run-single-turn"))
+;;
+
+let test_message_phase_is_decoded () =
+  List.iter
+    (fun (members, expected) ->
+       match decoded_notification (agent_message_completed members) with
+       | Ok notification ->
+         check
+           (list (option message_phase))
+           members
+           [ expected ]
+           (completed_agent_phases [ notification ])
+       | Error error -> fail (Msp.error_to_string error))
+    [ {|,"messagePhase":"commentary"|}, Some Msp.Commentary
+    ; {|,"messagePhase":"finalAnswer"|}, Some Msp.Final_answer
+    ; {|,"messagePhase":"recap"|}, Some (Msp.Unrecognized_message_phase "recap")
+    ; "", None
+    ];
+  match decoded_notification (agent_message_completed {|,"messagePhase":5|}) with
+  | Ok _ -> fail "a non-string messagePhase was decoded"
+  | Error _ -> ()
 ;;
 
 let parse_error line =
@@ -559,6 +647,8 @@ let () =
       , [ test_case "text run single turn" `Quick test_text_run_single_turn
         ; test_case "client frames match corpus" `Quick test_client_frames_match_corpus
         ; test_case "capability handshake" `Quick test_capability_handshake
+        ; test_case "codec fingerprint is the corpus stable bundle" `Quick
+            test_codec_fingerprint_is_the_corpus_stable_bundle
         ; test_case "host session durability follows v1 wire contract" `Quick
             test_session_durability_follows_v1_wire_contract
         ; test_case "approval round trip" `Quick test_approval_round_trip
@@ -566,10 +656,12 @@ let () =
         ; test_case "unknown item kind is kept" `Quick test_unknown_item_kind_is_kept
         ; test_case "compaction members are decoded" `Quick
             test_compaction_members_are_decoded
+        ; test_case "corpus message phases" `Quick test_corpus_message_phases
         ] )
     ; ( "codec"
       , [ test_case "wire refusals" `Quick test_wire_refusals
         ; test_case "delta fields" `Quick test_delta_fields
+        ; test_case "message phase is decoded" `Quick test_message_phase_is_decoded
         ; test_case "usage read" `Quick test_usage_read
         ; test_case "session config carries bridge" `Quick test_session_config_carries_bridge
         ; test_case "reasoning effort round trip" `Quick test_reasoning_effort_round_trip

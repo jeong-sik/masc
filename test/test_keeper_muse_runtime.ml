@@ -767,6 +767,18 @@ if SCENARIO == "no_message":
     # The model reasoned and ended without writing a message.
     notify("turn/completed", {"sessionId": SESSION, "turnId": turn_id, "terminal": "completed"})
     drain()
+if SCENARIO in ["commentary_only", "commentary_then_answer"]:
+    # Muse 1.4.11 labels narration before a tool call as commentary.
+    item("item/completed", {"itemId": "m-c", "kind": "agentMessage", "turnId": turn_id,
+                            "revision": 1, "status": "completed",
+                            "text": "Running the suite now.", "messagePhase": "commentary"})
+    built_in_tool("tc-1", "read_file", "call-native-1")
+    if SCENARIO == "commentary_then_answer":
+        item("item/completed", {"itemId": "m-a", "kind": "agentMessage", "turnId": turn_id,
+                                "revision": 1, "status": "completed",
+                                "text": "Suite passed.", "messagePhase": "finalAnswer"})
+    notify("turn/completed", {"sessionId": SESSION, "turnId": turn_id, "terminal": "completed"})
+    drain()
 if SCENARIO in ["gap_no_message", "gap_then_message"]:
     notify("view/gap", {"sessionId": SESSION, "after": "v:0", "next": "v:9"})
     if SCENARIO == "gap_then_message":
@@ -2305,6 +2317,21 @@ let test_a_turn_without_a_message_settles_with_no_content () =
            ~policy:Keeper_tooling.Response.Require_progress result.response))
 ;;
 
+(* Narration the model declared as commentary is not its answer: a turn
+   that ends after it with no final answer settles like one with no message. *)
+let test_commentary_is_never_the_reply () =
+  with_scripted_host ~fixture:(scenario "commentary_only") (fun ~base_path ->
+    let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+    match run.outcome.result with
+    | Error error -> fail (Agent_core.Error.to_string error)
+    | Ok result -> check int "no content block" 0 (List.length result.response.content));
+  with_scripted_host ~fixture:(scenario "commentary_then_answer") (fun ~base_path ->
+    let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+    match run.outcome.result with
+    | Ok result -> check string "the final answer" "Suite passed." (response_text result)
+    | Error error -> fail (Agent_core.Error.to_string error))
+;;
+
 (* A turn whose final message MASC may have missed must not read as the
    model's silence: the reply could exist on the host. *)
 let test_an_unobserved_final_message_is_not_silence () =
@@ -2910,6 +2937,7 @@ let () =
         ; test_case "completed message suffix is forwarded once" `Quick test_completed_message_suffix_is_forwarded_once
         ; test_case "a turn without a message settles with no content" `Quick
             test_a_turn_without_a_message_settles_with_no_content
+        ; test_case "commentary is never the reply" `Quick test_commentary_is_never_the_reply
         ; test_case "an unobserved final message is not silence" `Quick
             test_an_unobserved_final_message_is_not_silence
         ; test_case "a message completed after a gap is kept" `Quick

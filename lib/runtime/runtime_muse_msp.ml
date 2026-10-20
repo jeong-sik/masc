@@ -567,7 +567,7 @@ let parse_initialize_result json =
 ;;
 
 let corpus_schema_fingerprint =
-  "sha256:c8d1a2a1866814e220fd396d382a9a75861412feee884b5021b2ee359bd3dc59"
+  "sha256:f282ad16e21520d0cda68cb190149b86e2b062eef1dd282749360c05aa3d1082"
 ;;
 
 type session =
@@ -857,6 +857,17 @@ let parse_compaction stage fields =
     }
 ;;
 
+type message_phase =
+  | Commentary
+  | Final_answer
+  | Unrecognized_message_phase of string
+
+let message_phase_of_string = function
+  | "commentary" -> Commentary
+  | "finalAnswer" -> Final_answer
+  | other -> Unrecognized_message_phase other
+;;
+
 type item =
   { item_id : string
   ; kind : item_kind
@@ -864,6 +875,7 @@ type item =
   ; revision : int
   ; turn_id : string option
   ; text : string option
+  ; message_phase : message_phase option
   ; tool : string option
   ; call_id : string option
   ; args : string option
@@ -899,6 +911,21 @@ let parse_item stage json =
     | Reminder_child
     | Unrecognized_item_kind _ -> Ok None
   in
+  let* message_phase =
+    match kind with
+    | Agent_message ->
+      let* phase = optional_string stage "messagePhase" fields in
+      Ok (Option.map message_phase_of_string phase)
+    | User_message
+    | Reasoning
+    | Tool_call
+    | User_shell
+    | Subagent
+    | Workflow
+    | Reminder_child
+    | Compaction
+    | Unrecognized_item_kind _ -> Ok None
+  in
   Ok
     ({ item_id
     ; kind
@@ -906,6 +933,7 @@ let parse_item stage json =
     ; revision
     ; turn_id
     ; text
+    ; message_phase
     ; tool
     ; call_id
     ; args

@@ -8,9 +8,10 @@
 
     The source of truth is the stable MSP schema that
     github.com/meta-models/muse-code-sdk publishes ([schema/msp/msp.d.ts] at
-    a7c10c5, host 1.3.0). Every enum the schema marks open ([TurnTerminal],
-    [TurnErrorKind], [ItemKind], [ItemStatus], [ApprovalDecision], and the
-    approval subject kind) decodes to a closed variant. The variant has one
+    22a8a56, host 1.4.11). Every enum the schema marks open ([TurnTerminal],
+    [TurnErrorKind], [ItemKind], [ItemStatus], [MessagePhase],
+    [ApprovalDecision], and the approval subject kind) decodes to a closed
+    variant. The variant has one
     [Unrecognized_*] arm that keeps the wire value, so a later host's value
     is reported as itself rather than taken for a value MASC knows. The
     enums the schema closes ([ApprovalMode], [ReasoningEffort]) have no such
@@ -276,10 +277,14 @@ val parse_initialize_result : Yojson.Safe.t -> (initialize_result, error) result
     named at the handshake rather than by a missing field mid-turn. *)
 
 val corpus_schema_fingerprint : string
-(** The stable-surface fingerprint of the conformance corpus this codec is
-    tested against (muse-code-sdk a7c10c5). A host that reports another one
-    still speaks v1, but its frames were not the ones proven here; the
-    process client reports the difference rather than refusing it. *)
+(** The stable schema bundle fingerprint published with the conformance
+    corpus this codec is tested against (muse-code-sdk 22a8a56,
+    [schema/msp/stable/manifest.json]). A host reports its own bundle's
+    fingerprint in [initialize]; the corpus transcripts carry a hand-authored
+    placeholder instead, so this value comes from the manifest. A host that
+    reports another one still speaks v1, but its frames were not the ones
+    proven here; the process client reports the difference rather than
+    refusing it. *)
 
 type session =
   { session_id : string
@@ -408,10 +413,24 @@ type compaction =
   ; reason : string option  (** Display text only; never branched on. *)
   }
 
+(** The phase the model declared when it committed an agent message
+    ([MessagePhase]); open on the wire. A turn may narrate before and between
+    tool calls ([Commentary]) and then answer ([Final_answer]); the phase,
+    not the message's position in the turn, marks the answer. The host sets
+    it on the completed item and leaves it out of [item/started]. On a
+    completed item the schema reads an absent or unrecognized phase as
+    ["finalAnswer"]; a host that predates the member sends none. *)
+type message_phase =
+  | Commentary
+  | Final_answer
+  | Unrecognized_message_phase of string
+
 (** One transcript item at one revision. Only the members MASC projects are
-    decoded; the schema keeps the rest open. [text] is the accumulated reply
-    on an [Agent_message]. [tool], [call_id], [args] (the model's argument
-    JSON, verbatim) and [visible_output] belong to a [Tool_call]. *)
+    decoded; the schema keeps the rest open. [text] is the accumulated text
+    of an [Agent_message], and [message_phase] its declared phase ([Some]
+    only on an [Agent_message] that carries one). [tool], [call_id], [args]
+    (the model's argument JSON, verbatim) and [visible_output] belong to a
+    [Tool_call]. *)
 type item =
   { item_id : string
   ; kind : item_kind
@@ -419,6 +438,7 @@ type item =
   ; revision : int
   ; turn_id : string option
   ; text : string option
+  ; message_phase : message_phase option
   ; tool : string option
   ; call_id : string option
   ; args : string option

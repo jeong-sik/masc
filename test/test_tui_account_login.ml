@@ -562,8 +562,8 @@ let partly_checked_save () =
 let foreign_escapes_never_reach_the_terminal () =
   let only line = match Sgr_text.parse line with [ runs ] -> runs | lines -> fail (Printf.sprintf "%d lines" (List.length lines)) in
   let hostile = only "a\027[2J\027[5;5Hb\027]8;;https://evil.example/\027\\link\027]8;;\027\\c\027[?25ld\027(Be\027]0;title\007f\0277g" in
-  check string "cursor moves, titles and charsets are dropped, a hyperlink's text is kept and its address follows it"
-    "ablink (https://evil.example/)cdefg" (Sgr_text.text hostile);
+  check string "cursor moves, titles and charsets are dropped, a hyperlink's text is kept and its address ends the line"
+    "ablinkcdefg (https://evil.example/)" (Sgr_text.text hostile);
   check bool "nothing the client wrote is sent as an escape" false
     (String.contains (Sgr_text.render ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text hostile) '\027');
   check string "a sequence the stream ends inside waits for the rest" "x" (Sgr_text.text (only "x\027[9"));
@@ -598,31 +598,67 @@ let sgr_text_keeps_what_the_operator_reads () =
     | [ run ] -> check bool name true (background run)
     | runs -> fail (Printf.sprintf "%s: %d runs" name (List.length runs)))
     [ "SGR 40-47", "\027[30;47mX"; "SGR 100-107", "\027[100mX"; "SGR 48;5", "\027[48;5;7mX";
-      "SGR 48;2", "\027[48;2;1;2;3mX"; "SGR 48:2", "\027[48:2::1:2:3mX" ];
+      "SGR 48;2", "\027[48;2;1;2;3mX"; "SGR 48:2", "\027[48:2::1:2:3mX";
+      "a 48 too short to read is still a background", "\027[31;48;5mX";
+      "a 48 of the wrong shape is still a background", "\027[31;48;5:7mX" ];
   (match only "\027[47mA\027[49mB\027[47mC\027[0mD" with
    | [ a; b; c; d ] ->
      check (list bool) "49 and 0 end the background" [ true; false; true; false ]
        (List.map background [ a; b; c; d ])
    | runs -> fail (Printf.sprintf "%d runs" (List.length runs)));
+  let drawn input = Sgr_text.render ~sanitize:Fun.id (only input) in
+  check string "a foreground chosen for a background is not drawn" "X" (drawn "\027[31;47mX");
+  (* Under NO_COLOR the foreground escape is empty and nothing is drawn. *)
+  check string "the same foreground without a background is"
+    (if String.length Sgr.red = 0 then "X" else Sgr.red ^ "X" ^ Sgr.reset) (drawn "\027[31mX");
   let address = "https://login.example/device?code=ABCD-EFGH" in
-  let linked text = "\027]8;;" ^ address ^ "\027\\" ^ text ^ "\027]8;;\027\\" in
-  let shown = text ("Open " ^ linked "the login page" ^ " now") in
-  check bool "a link's text stays" true (contains shown "Open the login page");
-  check bool "its address follows" true (contains shown address);
-  check string "a link whose text is its address is not repeated" address (text (linked address));
-  check bool "BEL ends the link too, and its parameters are not part of the address" true
-    (contains (text "\027]8;id=7;https://b.example/\007b\027]8;;\007") "https://b.example/");
-  check bool "an address with a semicolon is kept whole" true
-    (contains (text "\027]8;;https://c.example/?a=b;c\027\\c\027]8;;\027\\") "https://c.example/?a=b;c");
+  let open_link uri = "\027]8;;" ^ uri ^ "\027\\" in
+  let close_link = "\027]8;;\027\\" in
+  let linked uri text = open_link uri ^ text ^ close_link in
+  check string "a link's address follows the line, so the text after the link keeps its place"
+    ("Open the login page and enter ABCD-EFGH (" ^ address ^ ")")
+    (text ("Open " ^ linked address "the login page" ^ " and enter ABCD-EFGH"));
+  check string "a link whose text is its address is not repeated" address (text (linked address address));
+  check string "BEL ends the link too, and its parameters are not part of the address"
+    "b (https://b.example/)" (text "\027]8;id=7;https://b.example/\007b\027]8;;\007");
+  check string "an address with a semicolon is kept whole" "c (https://c.example/?a=b;c)"
+    (text (linked "https://c.example/?a=b;c" "c"));
+  check string "two links list their addresses in order" "A and B (https://a.example/) (https://b.example/)"
+    (text (linked "https://a.example/" "A" ^ " and " ^ linked "https://b.example/" "B"));
+  check string "one address is listed once" "A B (https://a.example/)"
+    (text (linked "https://a.example/" "A" ^ " " ^ linked "https://a.example/" "B"));
+  check string "a link with no text lists only its address" "(https://e.example/)"
+    (text (linked "https://e.example/" ""));
+  check string "a link still open when the text ends adds nothing yet" "abc" (text (open_link address ^ "abc"));
+  (match Sgr_text.parse (open_link "http://a.b/cdef" ^ "http://a.b/\ncdef" ^ close_link) with
+   | [ first; second ] ->
+     check string "a link's text goes on over a line end" "http://a.b/" (Sgr_text.text first);
+     check string "and when it adds up to the address nothing is repeated" "cdef" (Sgr_text.text second)
+   | lines -> fail (Printf.sprintf "%d lines" (List.length lines)));
+  (match Sgr_text.parse (open_link "https://u.example/" ^ "one\ntwo" ^ close_link ^ " tail") with
+   | [ first; second ] ->
+     check string "the first line of a link across a line end shows no address" "one" (Sgr_text.text first);
+     check string "the address follows the line the link ends on" "two tail (https://u.example/)"
+       (Sgr_text.text second)
+   | lines -> fail (Printf.sprintf "%d lines" (List.length lines)));
   check bool "an unrelated OSC adds nothing" true (text "a\027]0;title\007b" = "ab");
   (match Sgr_text.parse "a\027\nb" with
    | [ first; second ] ->
      check string "an ESC ending a finished line stays in the text" "a\027" (Sgr_text.text first);
      check string "the next line is its own" "b" (Sgr_text.text second)
    | lines -> fail (Printf.sprintf "%d lines" (List.length lines)));
+  List.iter (fun (name, input, expected) ->
+    match Sgr_text.parse input with
+    | [ first; _ ] -> check string name expected (Sgr_text.text first)
+    | lines -> fail (Printf.sprintf "%s: %d lines" name (List.length lines)))
+    [ "a CSI a finished line ends inside stays in the text", "a\027[31\nb", "a\027[31";
+      "an OSC a finished line ends inside stays in the text", "a\027]0;t\nb", "a\027]0;t";
+      "a charset designation a finished line ends inside stays in the text", "a\027(\nb", "a\027(" ];
   check string "an ESC ending the line still being written waits for the rest" "a" (text "a\027");
   check string "CAN ends an OSC string" "avisible" (text "a\027]0;t\024visible");
-  check string "SUB ends a CSI" "avisible" (text "a\027[3\026visible")
+  check string "SUB ends a CSI" "avisible" (text "a\027[3\026visible");
+  check string "CAN ends an ESC that has nothing after it yet" "avisible" (text "a\027\024visible");
+  check string "CAN ends a charset designation" "avisible" (text "a\027(\024visible")
 (* The server reads each account's email from its client's login file; each
    client's account list leads every row with it so the operator can tell
    accounts apart. *)

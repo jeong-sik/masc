@@ -176,7 +176,8 @@ type row =
           chose. *)
 val lines : t -> row list
 val row_text : row -> string
-(** The row's characters without colour. *)
+(** The row's characters without colour, and the address of each link of
+    the client's output that closed on it. *)
 (** Finished and failed results wrap every row, start at the summary, and
     retain a separate scroll position. Rendering clamps it to the current
     viewport and includes an overflow indicator when space allows. *)

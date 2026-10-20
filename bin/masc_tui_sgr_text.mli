@@ -12,9 +12,9 @@
     any other complete sequence -- a cursor move, an OSC 8 hyperlink's
     brackets, a window title -- is dropped, and what is left of the text still
     goes through the caller's sanitizer. The one thing kept of an OSC 8
-    hyperlink is its address, which follows the link's text as ordinary text
-    unless the text is the address: what the program drew can differ from
-    where the link goes. *)
+    hyperlink is its address, which ends the line the link closes on, as
+    ordinary text, unless the link's text is the address: what the program
+    drew can differ from where the link goes. *)
 
 type colour =
   | Black
@@ -61,16 +61,19 @@ type line = run list
 
 val parse : string -> line list
 (** One line per LF, as [String.split_on_char '\n'] cuts it, so [""] is one
-    empty line. The pen carries over a line end the way it does on a
-    terminal. A sequence the text ends inside is dropped: the process is
-    still writing, and the next read has the rest of it. An ESC that starts
-    no sequence stays in the text, for the sanitizer to show; that includes an
-    ESC that ends a line whose LF has arrived. CAN and SUB cancel the sequence
-    they arrive in: what was read of it is dropped and the text after them
-    shows. *)
+    empty line. The pen, and a link still open, carry over a line end the way
+    they do on a terminal. A sequence the text ends inside, on the line still
+    being written, is dropped: the process is still writing, and the next
+    read has the rest of it. An ESC that starts no sequence stays in the
+    text, for the sanitizer to show; so does one whose sequence a line with
+    its LF ends inside, since the sequence cannot go on after the LF. CAN and
+    SUB cancel the sequence they arrive in: what was read of it is dropped
+    and the text after them shows. A link the text ends inside adds its
+    address once it closes. *)
 
 val text : line -> string
-(** The line's characters without their pens. *)
+(** The line's characters without their pens, and the address of each link
+    that closed on it. *)
 
 val render : sanitize:(string -> string) -> line -> string
 (** The line drawn with {!Masc_tui_theme.Sgr}, each run's text put through

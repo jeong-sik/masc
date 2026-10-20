@@ -138,7 +138,9 @@ let code pen = function
    (underline colour) is read only so the numbers after them are not taken for
    codes of their own -- a background's 5 and palette index 1 are not "blink,
    then bold". An extended colour whose shape is wrong ends the list: which of
-   the numbers after it are codes can no longer be told. *)
+   the numbers after it are codes can no longer be told. A background of a
+   wrong shape still counts as one: a terminal may draw it, and leaving the
+   foreground out is the error that stays readable. *)
 let rec apply pen = function
   | [] -> pen
   | Code 38 :: Code 5 :: Code index :: rest -> apply (with_foreground pen (indexed index)) rest
@@ -149,7 +151,8 @@ let rec apply pen = function
     apply { pen with background = true } rest
   | Code 58 :: Code 5 :: Code _ :: rest -> apply pen rest
   | Code 58 :: Code 2 :: Code _ :: Code _ :: Code _ :: rest -> apply pen rest
-  | Code (38 | 48 | 58) :: _ -> pen
+  | Code (38 | 58) :: _ -> pen
+  | Code 48 :: _ -> { pen with background = true }
   | Code value :: rest -> apply (code pen value) rest
   | Sub [ 38; 5; index ] :: rest -> apply (with_foreground pen (indexed index)) rest
   | (Sub [ 38; 2; red; green; blue ] | Sub [ 38; 2; _; red; green; blue ]) :: rest ->
@@ -170,7 +173,7 @@ type escape =
   | Operating_system_command of string * int
       (** An OSC string that ended in BEL or ST: its payload, and the index
           after it. *)
-  | Unfinished  (** The line ends inside it. *)
+  | Unfinished  (** The text ends inside it, on the line still being written. *)
   | Not_a_sequence  (** A byte no sequence may hold follows; the ESC is text. *)
 
 let esc = '\027'
@@ -241,25 +244,33 @@ let designation line ~from =
       let byte = line.[index] in
       if is_intermediate_byte byte then scan (index + 1)
       else if is_escape_final_byte byte then Dropped (index + 1)
+      else if cancels byte then Dropped (index + 1)
       else Not_a_sequence
   in
   scan from
 
-(* An ESC that ends a line already finished by its LF starts nothing: the
-   sequence cannot continue on the next line, so it stays in the text for the
-   sanitizer. On the line still being written it waits for the rest. *)
-let escape_at line index ~complete =
+let escape_sequence line index =
   let length = String.length line in
-  if index + 1 >= length then (if complete then Not_a_sequence else Unfinished)
+  if index + 1 >= length then Unfinished
   else
     let from = index + 2 in
     match line.[index + 1] with
     | '[' -> control_sequence line ~from
     | ']' -> string_sequence line ~from ~bel_ends:true
     | 'P' | 'X' | '^' | '_' -> string_sequence line ~from ~bel_ends:false
+    | byte when cancels byte -> Dropped from
     | byte when is_intermediate_byte byte -> designation line ~from
     | byte when is_escape_final_byte byte -> Dropped from
     | _ -> Not_a_sequence
+
+(* A sequence that a line already finished by its LF ends inside cannot
+   continue on the next line, so its ESC stays in the text for the sanitizer
+   and the bytes after it show. On the line still being written the rest may
+   arrive with the next read, and the sequence waits for it. *)
+let escape_at line index ~complete =
+  match escape_sequence line index with
+  | Unfinished when complete -> Not_a_sequence
+  | (Pen_change _ | Dropped _ | Operating_system_command _ | Unfinished | Not_a_sequence) as found -> found
 
 (* ── Hyperlinks ───────────────────────────────────────────────────────── *)
 
@@ -279,27 +290,36 @@ let hyperlink_of_payload payload =
 
 (* ── Lines ────────────────────────────────────────────────────────────── *)
 
-(* The link is shown as its address after its text, unless the text is the
-   address: the drawn text can differ from where the link goes, and the
-   operator needs the address to read or copy it. *)
-let link_address uri = " (" ^ uri ^ ")"
+(* The link a line ends inside carries over the line end, as the pen does: its
+   text goes on on the next line. [shown] is what the link has shown so far. *)
+type open_link =
+  { uri : string
+  ; shown : Buffer.t
+  }
 
-let read_line ~complete pen line =
+(* Where the link goes follows the line's text, unless the link's text is the
+   address: the drawn text can differ from where the link goes, and the
+   operator needs the address to read or copy it. Behind the text, so what
+   comes after the link on the line stays where the program put it. A link
+   still open when the text ends adds nothing yet: while a plain address is
+   still arriving its text is not the address, and showing it twice for a
+   moment would flicker. *)
+let read_line ~complete (pen, link) line =
   let length = String.length line in
   let buffer = Buffer.create length in
-  let link_text = Buffer.create 0 in
-  let link = ref None in
+  let link = ref link in
+  let addresses = ref [] in
   let add_char char =
     Buffer.add_char buffer char;
-    if Option.is_some !link then Buffer.add_char link_text char
+    Option.iter (fun open_link -> Buffer.add_char open_link.shown char) !link
   in
   let finish_link () =
     (match !link with
-     | Some uri when not (String.equal (Buffer.contents link_text) uri) ->
-       Buffer.add_string buffer (link_address uri)
+     | Some { uri; shown }
+       when (not (String.equal (Buffer.contents shown) uri)) && not (List.mem uri !addresses) ->
+       addresses := uri :: !addresses
      | Some _ | None -> ());
-    link := None;
-    Buffer.clear link_text
+    link := None
   in
   let close pen runs =
     if Buffer.length buffer = 0 then runs
@@ -309,11 +329,17 @@ let read_line ~complete pen line =
       run :: runs
     end
   in
+  let finish pen runs =
+    (match !addresses with
+     | [] -> ()
+     | listed ->
+       if Buffer.length buffer > 0 || not (List.is_empty runs) then Buffer.add_char buffer ' ';
+       Buffer.add_string buffer
+         (String.concat " " (List.rev_map (fun uri -> "(" ^ uri ^ ")") listed)));
+    (pen, !link), List.rev (close pen runs)
+  in
   let rec walk index pen runs =
-    if index >= length then begin
-      finish_link ();
-      pen, List.rev (close pen runs)
-    end
+    if index >= length then finish pen runs
     else if Char.equal line.[index] esc then begin
       match escape_at line index ~complete with
       | Pen_change (parameters, next) ->
@@ -325,13 +351,11 @@ let read_line ~complete pen line =
          | Some Link_close -> finish_link ()
          | Some (Link_open uri) ->
            finish_link ();
-           link := Some uri
+           link := Some { uri; shown = Buffer.create 0 }
          | None -> ());
         walk next pen runs
       | Dropped next -> walk next pen runs
-      | Unfinished ->
-        finish_link ();
-        pen, List.rev (close pen runs)
+      | Unfinished -> finish pen runs
       | Not_a_sequence ->
         add_char esc;
         walk (index + 1) pen runs
@@ -348,10 +372,10 @@ let parse text =
   let last = List.length pieces - 1 in
   let _, _, lines =
     List.fold_left
-      (fun (index, pen, lines) line ->
-        let pen, runs = read_line ~complete:(index < last) pen line in
-        index + 1, pen, runs :: lines)
-      (0, plain, [])
+      (fun (index, state, lines) line ->
+        let state, runs = read_line ~complete:(index < last) state line in
+        index + 1, state, runs :: lines)
+      (0, (plain, None), [])
       pieces
   in
   List.rev lines

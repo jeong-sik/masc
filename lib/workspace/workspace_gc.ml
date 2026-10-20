@@ -153,7 +153,9 @@ let archive_terminal_tasks config ~days () =
           (fun (t : task) -> if List.mem t.id archived_ids then None else Some t.id)
           orphaned
       in
-      if stale_orphan_ids <> [] then drop_archive_tasks config ~ids:stale_orphan_ids;
+      (match drop_archive_tasks config ~ids:stale_orphan_ids with
+       | Ok () -> ()
+       | Error detail -> raise (Task_archive_failed detail));
       live_tasks_after_gc, archived_tasks, restored)
   in
   let stale_count = List.length archived_tasks in

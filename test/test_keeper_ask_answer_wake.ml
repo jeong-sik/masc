@@ -896,7 +896,7 @@ let test_followup_keeps_original_task_through_archive_and_read_failure () =
   let cancelled : Masc_domain.task_status = Cancelled {cancelled_by="operator";cancelled_at=at;reason=None} in
   Workspace_task_id.append_archive_tasks config [{original with task_status=cancelled}] |> Result.get_ok;
   check_status "archive rewrite invalidates index" Workspace_query.Task_archive cancelled;
-  Workspace_task_id.drop_archive_tasks config ~ids:[original_id];
+  Workspace_task_id.drop_archive_tasks config ~ids:[original_id] |> Result.get_ok;
   check bool "missing remains unobserved" true
     (match (observe ask).linked_task with Task_missing id -> id=original_id
      | Task_unlinked | Task_observed _ | Task_unavailable _ -> false);
@@ -914,7 +914,7 @@ let test_followup_keeps_original_task_through_archive_and_read_failure () =
     (match (observe ask).linked_task with Task_unavailable _ -> true
      | Task_unlinked | Task_observed _ | Task_missing _ -> false);
   replace [{original with task_status=in_progress}];
-  Workspace_task_id.drop_archive_tasks config ~ids:[original_id];
+  Workspace_task_id.drop_archive_tasks config ~ids:[original_id] |> Result.get_ok;
   check_status "restored primary" Workspace_query.Task_backlog in_progress;
   replace [{original with task_status=done_status}];
   write_archive [original_json];

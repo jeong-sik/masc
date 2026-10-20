@@ -2921,6 +2921,32 @@ let test_append_archive_tasks_refuses_a_file_that_is_not_an_archive () =
     ]
 ;;
 
+(* The same files stay as they were when rows are dropped: rewriting the
+   archive from what could not be read would erase every row it holds. *)
+let test_drop_archive_tasks_refuses_a_file_that_is_not_an_archive () =
+  List.iter
+    (fun (label, content) ->
+      with_test_env (fun config ->
+        let path = archive_file config in
+        Fs_compat.save_file path content;
+        (match Workspace_task_id.drop_archive_tasks config ~ids:[ "task-930" ] with
+         | Ok () -> Alcotest.fail (label ^ ": the drop reported success on an archive it cannot read")
+         | Error detail ->
+           Alcotest.(check bool)
+             (label ^ ": the error names the archive file")
+             true
+             (str_contains detail "tasks-archive.json"));
+        Alcotest.(check string)
+          (label ^ ": the file is untouched")
+          content
+          (Fs_compat.load_file path)))
+    [ "not json", "this is not json"
+    ; "blank", ""
+    ; "no tasks list", {|{"last_updated":"2026-01-01T00:00:00Z"}|}
+    ; "tasks is not a list", {|{"tasks":"task-1"}|}
+    ]
+;;
+
 let archive_rows config =
   match Yojson.Safe.from_string (Fs_compat.load_file (archive_file config)) with
   | `Assoc fields ->
@@ -3869,6 +3895,8 @@ let () =
             "append refuses a file that is not an archive"
             `Quick
             test_append_archive_tasks_refuses_a_file_that_is_not_an_archive
+        ; Alcotest.test_case "drop refuses a file that is not an archive" `Quick
+            test_drop_archive_tasks_refuses_a_file_that_is_not_an_archive
         ; Alcotest.test_case
             "append keeps the rows it does not replace"
             `Quick

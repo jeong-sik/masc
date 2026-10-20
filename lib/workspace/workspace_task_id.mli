@@ -57,9 +57,12 @@ val read_orphaned_nonterminal_tasks :
 
 (** Remove archive entries whose task id is in [ids], under the archive lock.
     Entries without an [id] field are preserved (an unreadable line is never
-    silently dropped).  No-op on []. *)
+    silently dropped).  A file that cannot be read, is blank, does not parse,
+    or has no [tasks] list is an [Error] and is left as it was, never replaced
+    by a new archive of the rows that could be read.  [Ok ()] without touching
+    the file when [ids] is empty. *)
 val drop_archive_tasks :
-  Workspace_utils_backend_setup.config -> ids:string list -> unit
+  Workspace_utils_backend_setup.config -> ids:string list -> (unit, string) result
 
 (** Next task number =
     [max(existing backlog ids, deletion receipt ids, archive ids,

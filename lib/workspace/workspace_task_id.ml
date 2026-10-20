@@ -164,24 +164,34 @@ let read_orphaned_nonterminal_tasks config : task list =
 
 (** Remove archive entries whose task id is in [ids], under the archive lock.
     Entries without an [id] field are preserved — an unreadable archive line is
-    never silently dropped.  No-op on []. *)
+    never silently dropped.  An archive that cannot be read is an [Error] and
+    is left as it was, because rewriting it from what could not be read would
+    erase every row.  No-op on []. *)
 let drop_archive_tasks config ~ids =
-  if ids = [] then ()
+  if ids = [] then Ok ()
   else
     let arch_path = archive_path config in
     with_file_lock config arch_path (fun () ->
-      let entries = archive_entries_of_json (read_json config arch_path) in
-      let kept = List.filter (fun entry ->
-        match Json_util.get_string entry "id" with
-        | Some id -> not (List.mem id ids)
-        | None -> true
-      ) entries in
-      let archive_json = `Assoc [
-        ("tasks", `List kept);
-        ("last_updated", `String (now_iso ()));
-      ] in
-      Fun.protect ~finally:(fun () -> File_version_cache.forget archive_status_cache arch_path)
-        (fun () -> write_json config arch_path archive_json))
+      match read_archive_entries_for_write config with
+      | Error detail ->
+        Error
+          (Printf.sprintf
+             "tasks-archive.json could not be read, so nothing was dropped: %s"
+             detail)
+      | Ok entries ->
+        let kept = List.filter (fun entry ->
+          match Json_util.get_string entry "id" with
+          | Some id -> not (List.mem id ids)
+          | None -> true
+        ) entries in
+        let archive_json = `Assoc [
+          ("tasks", `List kept);
+          ("last_updated", `String (now_iso ()));
+        ] in
+        Fun.protect ~finally:(fun () -> File_version_cache.forget archive_status_cache arch_path)
+          (fun () -> write_json_result config arch_path archive_json)
+        |> Result.map_error (fun detail ->
+             Printf.sprintf "tasks-archive.json could not be written: %s" detail))
 
 let task_ids_of_event_json json =
   [ Json_util.get_string json "task"; Json_util.get_string json "task_id" ]

@@ -25,9 +25,9 @@ too. An explicit `lane = "live"` tab creation requires the observed `clientId`.
 
 `Browser_addon_tools` prepares the existing public browser aliases for this host
 path, retaining contextual/scene/screenshot projections, capability receipts,
-caller attribution and producer effect metadata. This adapter is not yet wired
-into the public core/Keeper dispatchers. Their existing retention, Vision,
-composition and download fixtures must move with that next routing layer.
+caller attribution and producer effect metadata. Public core/Keeper dispatchers
+use this adapter. Screenshot retention and Vision handles belong to the served
+Workspace; download and upload ownership still require a transfer broker.
 
 The worker publishes connection observations through MCP. Its separate private
 socket lets browser commands wait while client polls and results use other
@@ -89,12 +89,28 @@ sources = []
 ```
 
 The installed native host and browser extension/BiDi peer still need the same
-workspace token. This package does not yet start Firefox, Chrome or Safari,
-transfer profiles or publish browser artifacts. Built-in public tool routing
-and built-in startup still need to move to the Add-on. This is not yet a complete
-operator-browser replacement.
+workspace token. When automation is configured, the worker starts its owned
+Gecko driver with a private profile and download directory. Detach confirms
+driver and descendant settlement before releasing that allocation. Stagehand
+Chrome ownership and built-in live browser startup remain to be moved. This is
+not yet a complete operator-browser replacement.
 
-Input/output middleware validates tool contracts without calling an LLM. The
-separately selectable LLM Exact Output broker still needs its scoped browser
-integration. Follow the remaining integration in
+Input/output middleware validates tool contracts without calling an LLM. LLM
+Exact Output is selected separately through a package's declared outputs and an
+installation's `exact_outputs` override. For selected outputs, the host supplies
+an immutable private model configuration. Worker requests use concurrent private
+socket ports, so a command waiting for a model does not block its result. An
+event wait wakes the shared Exact Output runner without periodic polling.
+Cancelling the original command withdraws its request and cancels that Exact
+scope; detach fences all pending model work. No input is replayed.
+
+Before waking the original waiter, the worker retains a receipt under the host's
+Add-on store, outside the disposable browser allocation. This records model
+result receipt, not browser action completion. Identical duplicate deliveries
+are acknowledged and conflicting results are refused. The worker has no model
+credentials or provider route resolution.
+
+The bundled package has no declared model outputs or browser model consumer yet.
+This queue does not establish `page.locate` or Stagehand model support. Actual
+browser/model execution evidence also remains. Follow this work in
 [issue #44150](https://github.com/jeong-sik/masc/issues/44150).

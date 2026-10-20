@@ -59,10 +59,23 @@ let serve ~net ~owner ~socket_path ~max_message_bytes =
         Eio.Flow.copy_string (text ^ "\n") flow)
   done)
 let mcp owner =
+  let model_ports server =
+    if not (Owner.models_enabled owner) then server else
+    let add server name command = Server.tool name
+      ~description:"Private model host broker; never export to a model."
+      ~input_schema:(`Assoc ["type",`String "object"]) (fun _context _name arguments ->
+        let command=command (Option.value ~default:(`Assoc []) arguments) in
+        match Owner.dispatch owner {W.incarnation=Owner.incarnation owner;command} with
+        | W.Model_reply value -> Ok {S.content=[];is_error=Some false;structured_content=Some value;_meta=None}
+        | W.Service_refusal {message;_} -> Error message
+        | Snapshot_result _|Poll_result _|Receipt|Issue_result _ -> Error "unexpected model broker reply") server in
+    add server Lane_addon_types.host_requests_tool (fun _ -> W.Model_requests)
+    |> fun server -> add server Lane_addon_types.host_result_tool (fun arguments -> W.Model_result arguments) in
   let schema = `Assoc ["type",`String "object";"properties",`Assoc [
     "binding",`Assoc ["type",`String "object"];
     "sources",`Assoc ["type",`String "array"]]] in
   Server.create ~name:"masc-browser-addon" ~version:"0.1.0" ()
+  |> model_ports
   |> Server.add_tool Browser_addon_tool.definition (fun _context _name arguments ->
     Ok (Browser_addon_tool.invoke ~owner ~principal:Lane_addon_call_context.Anonymous
       (Option.value ~default:(`Assoc []) arguments)))

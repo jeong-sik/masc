@@ -131,6 +131,18 @@ test('sustain and sostenuto restore released sounding voices and preserve pedal 
   [3n, [0xb5, 64, 127]], [4n, [0x95, 62, 90]], [5n, [0x85, 62, 43]],
   [500000n, [0xb5, 66, 0]], [700000n, [0xb5, 64, 0]]]))
 
+test('a historical key ending exactly at entry is omitted while genuine entry attacks and point notes remain', () => fixture(async data => {
+  const result = await derive(data, { offset: '1000000', extent: '2000000' })
+  const source = result.project.assets.at(-1).source, pattern = midiSourcePattern(source)
+  assert.deepEqual(pattern.diagnostics, [])
+  assert.deepEqual(pattern.notes.map(({ pitch, start, duration }) => ({ pitch, start, duration })).sort((a, b) => a.pitch - b.pitch), [
+    { pitch: 62, start: 0, duration: 0 }, { pitch: 64, start: 0, duration: 91 },
+  ])
+  assert.deepEqual(wire(source).filter(event => [0x90, 0x80].includes(event.bytes[0] & 0xf0)).map(event => event.bytes[1]), [62, 62, 64, 64])
+}, [[0n, [0x43953c03, 0x90012345]], [1000000n, [0x43853c00, 0]],
+  [1000000n, [0x43953e00, 0xc8000000]], [1000000n, [0x43853e00, 0]],
+  [1000001n, [0x43954000, 0xb4000000]], [2000000n, [0x43854000, 0x5e000000]]]))
+
 test('exclusive end clips held keys and MIDI2 values project only within the selected window', () => fixture(async data => {
   const result = await derive(data, { offset: '0', extent: '1000000' })
   const source = result.project.assets.at(-1).source, pattern = midiSourcePattern(source)

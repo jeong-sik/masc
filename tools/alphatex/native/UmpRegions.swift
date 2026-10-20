@@ -75,9 +75,12 @@ struct UmpRegionExtraction: Decodable {
         let through = timed.firstIndex { umpRationalLess(cut, divisor, UInt128($0.ticks), 1) } ?? timed.count
         let end = timed.firstIndex { !umpRationalLess(UInt128($0.ticks), 1, after, divisor) } ?? timed.count
         let events = timed.map(\.event)
-        let entry = try umpRestoration(events, prefixCount: before, followingCount: through - before,
-                                       preambleEndIndex: end, replacing: UmpFootprint())
         let final = try umpRestoration(events, prefixCount: end, replacing: UmpFootprint())
+        // Historical voices expiring exactly at entry have no overlap with
+        // this cut. Genuine attacks at entry remain in the original due stream.
+        let expired = Set(final.expiredNotes.filter { $0.value < through }.map(\.key))
+        let entry = try umpRestoration(events, prefixCount: before, followingCount: through - before,
+                                       preambleEndIndex: end, excludingNotes: expired, replacing: UmpFootprint())
         func row(_ event: UmpEvent, _ position: UInt128) -> [String: Any] {
             ["offset": String(position), "source": event.source, "words": event.words]
         }

@@ -30,7 +30,7 @@ let scenario () = Eio_main.run (fun env ->
       ~document:(fun ~tab_id:_ -> fail "retirement must not read a page")
       ~cleanup:(fun () -> incr automation_calls;Eio.Promise.resolve start_automation ();
         Eio.Promise.await automation_settled;Error "automation settlement unconfirmed"));
-    ok (Owner.attach_stagehand owner
+    ok (Owner.attach_stagehand owner ~models:true
       ~execute:(fun ~actor:_ _ -> fail "retirement must not dispatch Chrome input")
       ~session:(fun () -> B.Browser_closed)
       ~cleanup:(fun () -> incr chrome_calls;Eio.Promise.resolve start_chrome ();

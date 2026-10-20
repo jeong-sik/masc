@@ -132,6 +132,49 @@ let test_chat_trace_block_by_turn_ref_reads_allowed_trace_ids () =
       (Option.is_none (trace_block_by_turn_ref disallowed_ref)))
 ;;
 
+let test_chat_trace_window_preserves_payload_and_snapshot () =
+  with_temp_dir (fun dir ->
+    let config = Workspace.default_config dir in
+    let masc_root = Workspace.masc_dir config in
+    let keeper_name = "keeper-chat-window" in
+    let trace_id = "trace-window" in
+    let rows = List.init 230 (fun index ->
+      T.Tool_call
+        { ts = float_of_int index; ts_iso = string_of_int index; turn = 1; round = 1
+        ; tool_name = "tool-" ^ string_of_int index
+        ; args_json = if index = 30 then "plain args" else "{\"index\":1}"
+        ; gate_decision = T.Pass
+        ; result = Some (if index = 31 then "plain result" else "{\"ok\":true}")
+        ; duration_ms = index; error = None; execution_id = Some ("execution-" ^ string_of_int index)
+        }) in
+    let path = T.trajectory_path masc_root keeper_name trace_id in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    Fs_compat.save_file path
+      (rows |> List.map (fun row -> Yojson.Safe.to_string (T.trajectory_line_to_json row) ^ "\n")
+       |> String.concat "");
+    let resolve () = Trace.chat_trace_block_by_turn_ref ~max_lines:500 ~config
+      ~keeper_name ~allowed_trace_ids:[trace_id] in
+    let read = resolve () in
+    let turn = Ids.Turn_ref.make ~trace_id ~absolute_turn:1 in
+    (match read turn with
+     | Some (Keeper_chat_blocks.Trace {trace; omitted}) ->
+       check int "only the newest steps are displayed" 200 (List.length trace);
+       check int "omission count describes the same window" 30 omitted;
+       (match trace with
+        | Keeper_chat_blocks.Trace_tool first :: Keeper_chat_blocks.Trace_tool second :: _ ->
+          check string "first retained step" "tool-30" first.name;
+          check bool "invalid argument JSON stays literal" true (first.args = Some (`String "plain args"));
+          check bool "invalid result JSON stays literal" true (second.result = Some (`String "plain result"))
+        | _ -> fail "expected retained tool steps")
+     | _ -> fail "expected one trace block");
+    let absent = Ids.Turn_ref.make ~trace_id ~absolute_turn:2 in
+    check bool "absent turn" true (Option.is_none (read absent));
+    T.append_withheld_thinking ~masc_root ~keeper_name ~trace_id
+      {ts=300.; ts_iso="later"; turn=2; block_index=0; reasoning_kind=T.Thinking_block; char_count=1};
+    check bool "one render keeps its original trace observation" true (Option.is_none (read absent));
+    check bool "the next render observes the appended turn" true (Option.is_some (resolve () absent)))
+;;
+
 let string_member key = function
   | `Assoc fields -> (
     match List.assoc_opt key fields with
@@ -1122,6 +1165,8 @@ let () =
              "reads allowed trace ids"
              `Quick
              test_chat_trace_block_by_turn_ref_reads_allowed_trace_ids
+         ; test_case "retained payload and per-render snapshot" `Quick
+             test_chat_trace_window_preserves_payload_and_snapshot
          ] )
     ; ( "runtime_lens_swimlane"
       , [ test_case

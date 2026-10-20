@@ -69,23 +69,34 @@ type tool_record_outcome =
   | Deferred
   | Unsettled
   | Lifecycle_event
+  | Composition_summary
   | Malformed_outcome
 
 (* Lifecycle markers are not invocation outcomes and never enter the quality
-   denominator. An invocation row's outcome is read by the rule every
-   tool-call log reader shares ({!Tool_result.recorded_call_outcome}). *)
+   denominator. Neither does a composition's summary row: each of its steps is
+   already a [tool_call] row of its own, so counting the summary too would read
+   one composition as the step count plus one calls. An invocation row's
+   outcome is read by the rule every tool-call log reader shares
+   ({!Tool_result.recorded_call_outcome}). *)
 let tool_outcome_of_record record =
+  let invocation () =
+    match Tool_result.recorded_call_outcome record with
+    | Tool_result.Recorded_succeeded -> Settled true
+    | Tool_result.Recorded_failed -> Settled false
+    | Tool_result.Recorded_deferred -> Deferred
+    | Tool_result.Recorded_unsettled -> Unsettled
+    | Tool_result.Recorded_malformed -> Malformed_outcome
+  in
   match record with
   | `Assoc fields ->
     (match List.assoc_opt "record_kind" fields with
-     | Some (`String "lifecycle_event") -> Lifecycle_event
-     | Some (`String ("tool_call" | "composition_run")) | None ->
-       (match Tool_result.recorded_call_outcome record with
-        | Tool_result.Recorded_succeeded -> Settled true
-        | Tool_result.Recorded_failed -> Settled false
-        | Tool_result.Recorded_deferred -> Deferred
-        | Tool_result.Recorded_unsettled -> Unsettled
-        | Tool_result.Recorded_malformed -> Malformed_outcome)
+     | None -> invocation ()
+     | Some (`String kind) ->
+       (match Keeper_tool_call_log.record_kind_of_string kind with
+        | Some Keeper_tool_call_log.Tool_call -> invocation ()
+        | Some Keeper_tool_call_log.Composition_run -> Composition_summary
+        | Some Keeper_tool_call_log.Lifecycle_event -> Lifecycle_event
+        | None -> Malformed_outcome)
      | Some _ -> Malformed_outcome)
   | _ -> Malformed_outcome
 
@@ -207,7 +218,7 @@ let summarize ~sampling records : Yojson.Safe.t =
     List.fold_left
       (fun (deferred, unsettled, malformed, acc) record ->
         match tool_outcome_of_record record, result_bytes_of_record record with
-        | Lifecycle_event, _ -> deferred, unsettled, malformed, acc
+        | (Lifecycle_event | Composition_summary), _ -> deferred, unsettled, malformed, acc
         | _, None -> deferred, unsettled, malformed + 1, acc
         | Settled success, Some result_bytes ->
           deferred, unsettled, malformed, (record, result_bytes, success) :: acc

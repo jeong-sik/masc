@@ -1,6 +1,6 @@
 # 운영자 퀴즈
 
-운영자 퀴즈(`operator-quiz`)는 이 워크스페이스의 Board 글과 changelog 조각을 읽고, 운영자에게 객관식 문제를 내는 Lane Add-on 패키지다. 문제는 Approvals 에 나오고, 답하면 바로 채점된다. 틀린 문제는 다음 날 이후에 다시 나올 수 있다.
+운영자 퀴즈(`operator-quiz`)는 이 워크스페이스의 Board 글과 changelog 조각을 읽고, 운영자에게 선택형 문제와 서술형 문제를 내는 Lane Add-on 패키지다. 문제는 Approvals 에 나온다. 선택지로 고른 답은 바로 채점되고, 글로 쓴 답은 `grade` 출력이 채점한다. 틀린 문제는 다음 날 이후에 다시 나올 수 있다.
 
 설계와 근거는 [운영자 퀴즈 RFC](../rfc/RFC-operator-quiz-lane.md)에 있다. 이 문서는 켜고, 시간을 정하고, 결과를 읽는 방법만 다룬다.
 
@@ -10,7 +10,7 @@
 2. 패키지가 host 에게 기록을 한 번에 하나씩 요청한다. 지난번에 질문까지 간 세션이 멈춘 자리부터 읽는다. 실패했거나 다음 세션으로 대체된 세션이 읽은 기록은 다시 읽는다.
 3. 다 읽으면 `author` 출력을 한 번 요청한다. 읽은 기록, 지난 문제들의 풀이 기록, 문제 수, 언어를 함께 보낸다. 새 기록이 없어도 지난 문제가 있으면 요청한다. 이때 `author` 는 지난 문제를 그 출처 그대로 다시 낼 수 있다.
    - 요청 하나에 다 들어가지 않으면 가장 최근에 읽은 기록만 담는다. 그래서 worker 는 읽는 동안 결과의 요약(상태, cursor, 커밋과 경로)만 메모리에 두고, 본문은 이때 보관한 페이지에서 최근 것부터 요청에 들어가는 만큼만 다시 읽는다. 퀴즈를 오래 꺼 두었다가 다시 켜도 worker 메모리는 요청 하나 크기 근처에 머문다.
-4. 돌아온 문제마다 확인한다. 정답 선택지가 선택지 안에 있는지, `single` 이 정답을 하나만 갖는지, 인용문이 그 기록의 보관된 바이트에 글자 그대로 있는지 본다. 통과하지 못한 문제는 이유와 함께 버린다. 하나도 통과하지 못하면 세션은 `no_question_passed` 로 끝난다.
+4. 돌아온 문제마다 확인한다. 선택형 문제는 선택지가 둘 이상인지, 정답 선택지가 선택지 안에 있는지, `single` 이 정답을 하나만 갖는지 본다. 서술형 문제(`text`)는 선택지와 정답 key 없이, 맞는 답이 말해야 할 점(rubric)을 갖는지 본다. 어느 쪽이든 인용문이 그 기록의 보관된 바이트에 글자 그대로 있는지 본다. 통과하지 못한 문제는 이유와 함께 버린다. 하나도 통과하지 못하면 세션은 `no_question_passed` 로 끝난다.
 5. 통과한 문제와 정답을 로그에 먼저 쓴다. 그다음에 정답과 출처를 뺀 질문을 Approvals 에 낸다.
 6. 운영자가 답하면 선택지로 바로 채점하고, Results 에 공개(reveal) 행이 생긴다.
 
@@ -100,7 +100,7 @@ Results 에 다섯 lane 이 나온다.
 | lane | 한 행 | 보는 것 |
 |---|---|---|
 | `quiz/sessions` | `compose` 하나 | 상태, 맞음·틀림·건너뜀·채점 대기·열림 수, 실패 이유 |
-| `quiz/questions` | 답한 문제 하나 | 내 답, 정답, 판정과 판정한 쪽(`key` 또는 `judgment`), 판정 기록, 채점 상태, 출처의 인용문과 hash |
+| `quiz/questions` | 답한 문제 하나 | 내 답, 정답(선택형은 `choices`, 서술형은 `rubric`), 판정과 판정한 쪽(`key` 또는 `judgment`), 판정 기록, 채점 상태, 출처의 인용문과 hash |
 | `quiz/topics` | 주제 하나 | 문제 수, 풀이 수, 놓친 수, 아직 못 맞힌 문제와 그 출처 |
 | `quiz/items` | 복습 항목 하나 | 풀이 기록, 마지막 판정, 연속으로 맞힌 횟수 |
 | `quiz/measures` | 하나 | R, P, G, 점수, 버린 문제 수, 실패한 세션 수(이유별) |
@@ -145,8 +145,26 @@ Results 에 다섯 lane 이 나온다.
 
 `export` action 은 로그 전체를 host Lane store 에 artifact 로 보관하고 그 SHA-256 을 돌려준다. 주기적으로 받으려면 `{"installation_id": "operator-quiz", "action": {"kind": "export"}}` Schedule 을 따로 만든다. 기본으로 만들어지는 Schedule 은 없다. 내보낸 로그로 패키지를 되살리는 기능은 아직 없다.
 
+### 정답 모양이 바뀐 revision 으로 올릴 때
+
+서술형 문제가 들어오면서 `posed` 의 정답이 `{"kind": ...}` 객체로 기록된다. 그 전 package 가 쓴 `log.jsonl` 은 새 package 가 읽지 못한다. 읽지 못한 log 로는 답도 관측도 받지 않는다. 그래서 새 revision 을 설치하기 전에 log 를 옮겨 두고 빈 log 로 시작한다.
+
+1. 남겨 둘 기록이 있으면 먼저 `export` action 으로 host Lane store 에 보관한다.
+2. 설치 선언에 `enabled = false` 를 적고, 그 설치의 worker 가 detached 가 될 때까지 기다린다.
+3. 설치 volume 안의 `/state/operator-quiz` 를 다른 이름으로 옮긴다. volume 이름은 마지막 worker 컨테이너(`GET /api/v1/lane-addons` 의 `container_id`)의 mount 에서 읽는다.
+
+   ```sh
+   docker inspect <container_id> --format '{{range .Mounts}}{{.Name}} {{end}}'
+   docker run --rm -v <volume>:/state --entrypoint mv masc-lane-operator-quiz:0.1.0 /state/operator-quiz /state/operator-quiz-<날짜>
+   ```
+
+4. `manifest_path` 를 새 package 로 바꾸고 `enabled = false` 를 지운다.
+
+- 옮긴 log 는 volume 안에 그대로 남는다. 새 package 는 그 파일을 읽지 않는다.
+- 옮기기 전에 답한 문제의 풀이와 판정은 옮긴 log 에만 있다. 새 package 의 R, G, P 는 빈 log 에서 다시 센다.
+
 ## 지금의 한계
 
 - 기록 종류는 Board 글·댓글과 `repository` 권한의 파일이다. wiki, PR, 커밋 인용은 다음 단계다.
-- rubric 이 있는 서술형 문제와 이의 제기(`dispute`)는 다음 단계다. 지금은 선택형 문제에 직접 쓴 답을 `grade` 출력으로 채점한다.
+- 이의 제기(`dispute`)는 다음 단계다.
 - 관측 출력은 쌓인 모든 행을 담는다. 문제가 아주 많이 쌓여 `max_reply_bytes` 를 넘으면 관측이 실패로 보인다.

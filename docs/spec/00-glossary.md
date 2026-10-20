@@ -2288,7 +2288,7 @@ status: reference
   [Declaration application observations](lane-application-observation.md)
 
 **Operator quiz (운영자 퀴즈)**
-: 이 워크스페이스의 기록(Board 글·댓글, `repository` 권한의 파일)으로 운영자에게 객관식 문제를
+: 이 워크스페이스의 기록(Board 글·댓글, `repository` 권한의 파일)으로 운영자에게 선택형·서술형 문제를
   내는 Lane Add-on 패키지(`operator-quiz`). Schedule 이 보내는 `compose` action 이 세션을 열고,
   패키지는 host 요청(`read_records`·`read_file`·`exact_output author`·`ask`)으로 기록을 읽고
   문제를 받아 Approvals 에 질문한다. 선택지로 고른 답은 정답 key 로, 직접 쓴 답은

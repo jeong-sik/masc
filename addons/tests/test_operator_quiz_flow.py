@@ -126,11 +126,11 @@ class FakeHost:
         raise AssertionError("the package kept listing new requests")
 
 
-def draft(record: dict, quote: str, *, key=("a",), mode="single", reask=(), topic="ledger") -> dict:
+def draft(record: dict, quote: str, *, key=("a",), mode="single", reask=(), topic="ledger", rubric=()) -> dict:
     return {"topic": topic, "header": "Ledger", "prompt": "What does it hold?", "mode": mode,
             "choices": [{"choice_id": "a", "label": "Facts"}, {"choice_id": "b", "label": "Plans"},
                         {"choice_id": "c", "label": "Both"}],
-            "key": list(key), "reask_of": list(reask),
+            "key": list(key), "rubric": list(rubric), "reask_of": list(reask),
             "sources": [{"kind": record["kind"], "source_id": record["source_id"], "pin": record["pin"],
                          "quote": quote}]}
 
@@ -229,7 +229,7 @@ class Compose(Base):
         session = self.session(session_id)
         self.assertEqual([r.reason for r in session.rejected],
                          ["a key choice id is not one of its choices", "a single question has exactly one key"])
-        self.assertEqual([p.key for p in session.posed], [("a", "b")])
+        self.assertEqual([p.key for p in session.posed], [q.ChoiceKey(("a", "b"))])
 
     def test_drafts_beyond_the_requested_count_are_dropped(self):
         session_id = self.compose(questions=1)
@@ -399,6 +399,70 @@ class Judging(Base):
         self.answer(session_id, q.Chose(("a",)))
         self.assertEqual(self.grade_requests(), [])
         self.assertEqual(self.session(session_id).grading, ())
+
+
+def text_draft(record: dict, quote: str, points=("the ledger records facts",)) -> dict:
+    return draft(record, quote, mode="text", key=(), rubric=points) | {"choices": []}
+
+
+class Rubrics(Base):
+    """A question answered in words, graded against its rubric (RFC §6.2)."""
+    def asked(self, make=lambda p: text_draft(p["material"][0], "the ledger records facts")):
+        session_id = self.compose()
+        self.host.author = answering(make)
+        self.host.run(self.flow)
+        return session_id
+
+    def test_a_text_question_is_asked_with_no_choices_and_graded_by_its_rubric(self):
+        session_id = self.asked()
+        (ask,) = [r for r in self.flow.listing() if r["kind"] == "ask"]
+        (question,) = ask["questions"]
+        self.assertEqual((question["choices"], question["free_text"]), ([], f.WRITTEN))
+        self.assertNotIn("the ledger records facts", json.dumps(ask))
+        self.answer(session_id, q.Wrote("it keeps facts"))
+        (request,) = [r for r in self.flow.listing() if r["kind"] == "exact_output"]
+        self.assertEqual(json.loads(request["messages"][0])["expected"],
+                         {"kind": "rubric", "points": ["the ledger records facts"]})
+        self.host.grade = judging("correct")
+        self.host.run(self.flow)
+        session = self.session(session_id)
+        posed = session.posed[0]
+        self.assertEqual(posed.key, q.Rubric(("the ledger records facts",)))
+        self.assertEqual(g.verdict(posed, q.Wrote("it keeps facts"), session.judgments_of("q1")), g.CORRECT)
+
+    def test_a_skipped_text_question_is_a_miss(self):
+        session_id = self.asked()
+        self.answer(session_id, q.Skipped())
+        (item,) = g.items(self.flow.sessions())
+        self.assertTrue(item.open_debt)
+
+    def test_a_choice_answer_to_a_text_question_is_refused(self):
+        session_id = self.asked()
+        ask_id = self.session(session_id).ask_id
+        chose = {"status": "answered", "answered_at": 1.0,
+                 "responder": {"surface": "dashboard", "actor_id": None, "display_name": None},
+                 "answers": [{"question_id": "q1", "response": {"kind": "chose", "choice_ids": ["a"]}}]}
+        with self.assertRaises(f.InvalidResult):
+            self.flow.deliver(ask_id, chose)
+        self.assertEqual(self.session(session_id).state, "asked")
+
+    def test_each_mode_keeps_its_own_shape(self):
+        record = {"kind": "board_post", "source_id": "board", "pin": "p-1"}
+        cases = [
+            (text_draft(record, "the ledg") | {"choices": [{"choice_id": "a", "label": "Facts"}]},
+             "a text question has no choices and no key"),
+            (text_draft(record, "the ledg", points=()), "a text question names the points its answer must state"),
+            (text_draft(record, "the ledg", points=(" ",)), "a text question names the points its answer must state"),
+            (draft(record, "the ledg", rubric=("facts",)), "a choice question has a key, not a rubric"),
+            (draft(record, "the ledg") | {"choices": [{"choice_id": "a", "label": "Facts"}]},
+             "a choice question offers at least two choices"),
+            (draft(record, "the ledg", key=()), "a choice question names its key"),
+        ]
+        material = [{"kind": "board_post", "source_id": "board", "pin": "p-1", "sha256": "0" * 64,
+                     "title": "post 1", "text": "the ledger records facts"}]
+        for candidate, reason in cases:
+            with self.subTest(reason):
+                self.assertEqual(f.check_draft(candidate, material, {}), reason)
 
 
 class Repetition(Base):
@@ -778,7 +842,7 @@ class Grading(unittest.TestCase):
                 "free_text": {"kind": "choices_only"}, "choices": []}
 
     def posed(self, key, item="i-1", question_id="q1", session="s1"):
-        return q.Posed(session, f"{session}-ask", question_id, item, "t", self.QUESTION, key, ())
+        return q.Posed(session, f"{session}-ask", question_id, item, "t", self.QUESTION, q.ChoiceKey(key), ())
 
     def test_a_choice_is_right_only_with_the_exact_key_set(self):
         multi = self.posed(("a", "b"))

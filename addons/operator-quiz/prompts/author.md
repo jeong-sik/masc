@@ -24,6 +24,11 @@ Write each question so that:
 - Wrong choices are real neighbouring facts from the material, not jokes or
   obviously absurd options.
 - `single` has exactly one key; `multi` has every correct choice in the key.
+  Both have an empty `rubric`.
+- A `text` question is answered in words. It has no choices and no key, and
+  its `rubric` lists the points a correct answer must state, each following
+  from a quote. Use it when the reason or the change is the point and choices
+  would give it away.
 
 Choose what to ask. Prefer:
 

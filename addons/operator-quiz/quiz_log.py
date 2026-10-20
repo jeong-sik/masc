@@ -186,6 +186,50 @@ class Answer:
         return Answer(_text(fields["question_id"], "answer.question_id"), response_of_json(fields["response"]))
 
 
+# -- What a question was asked with as its expected answer (RFC §4.9 Posed):
+#    the correct choice ids, or the points a written answer must state. ------
+
+@dataclass(frozen=True, slots=True)
+class ChoiceKey:
+    choice_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Rubric:
+    points: tuple[str, ...]
+
+
+Key = Union[ChoiceKey, Rubric]
+
+
+def key_to_json(key: Key) -> dict:
+    match key:
+        case ChoiceKey(choice_ids):
+            return {"kind": "choices", "choice_ids": list(choice_ids)}
+        case Rubric(points):
+            return {"kind": "rubric", "points": list(points)}
+
+
+def key_of_json(value: Any) -> Key:
+    if not isinstance(value, dict):
+        raise LogError("key must be an object")
+    match value.get("kind"):
+        case "choices":
+            fields = _exact(value, {"kind", "choice_ids"}, "key")
+            ids = _texts(fields["choice_ids"], "key.choice_ids")
+            if not ids:
+                raise LogError("key.choice_ids must name a choice")
+            return ChoiceKey(ids)
+        case "rubric":
+            fields = _exact(value, {"kind", "points"}, "key")
+            points = _texts(fields["points"], "key.points")
+            if not points:
+                raise LogError("key.points must name a point")
+            return Rubric(points)
+        case other:
+            raise LogError(f"key.kind {other!r} is not choices or rubric")
+
+
 # -- A judgment the grade output brings (RFC §6.2, §6.4). A void question or
 #    key is not an attempt; the judgment's rationale says what is wrong. ----
 
@@ -384,7 +428,7 @@ class Posed:
     item_id: str
     topic: str
     question: dict  # the Keeper question wire form, as asked
-    key: tuple[str, ...]  # the correct choice ids
+    key: Key
     sources: tuple[Source, ...]
 
 
@@ -456,7 +500,7 @@ def event_to_json(event: Event) -> dict:
                     "output": output, "digest": digest}
         case Posed(session_id, ask_id, question_id, item_id, topic, question, key, sources):
             return {"event": "posed", "session_id": session_id, "ask_id": ask_id, "question_id": question_id,
-                    "item_id": item_id, "topic": topic, "question": question, "key": list(key),
+                    "item_id": item_id, "topic": topic, "question": question, "key": key_to_json(key),
                     "sources": [source.to_json() for source in sources]}
         case DraftRejected(session_id, request_id, index, reason):
             return {"event": "draft_rejected", "session_id": session_id, "request_id": request_id,
@@ -511,7 +555,7 @@ def event_of_json(value: Any) -> Event:
                 raise LogError("posed.sources must be an array")
             return Posed(_text(f["session_id"], "session_id"), _text(f["ask_id"], "ask_id"),
                          _text(f["question_id"], "question_id"), _text(f["item_id"], "item_id"),
-                         _text(f["topic"], "topic"), f["question"], _texts(f["key"], "key"),
+                         _text(f["topic"], "topic"), f["question"], key_of_json(f["key"]),
                          tuple(Source.of_json(source) for source in f["sources"]))
         case "draft_rejected":
             f = _exact(value, {"event", "session_id", "request_id", "index", "reason"}, "draft_rejected")
@@ -803,6 +847,10 @@ def fold(events: list[Event]) -> list[Session]:
                 current = sessions[by_ask[ask_id]]
                 if current["state"] != "asked":
                     raise LogError(f"answer_received for session {current['session_id']}, which is {current['state']}")
+                # A question asked with a rubric has no choices to choose.
+                rubric = {p.question_id for p in current["posed"] if isinstance(p.key, Rubric)}
+                if any(isinstance(a.response, Chose) and a.question_id in rubric for a in event.answers):
+                    raise LogError(f"answer_received chooses on a question of ask {ask_id} that has no choices")
                 current["state"] = "answered"
                 current["answer"] = event
             case GradeRequested(ask_id=ask_id, question_id=question_id, request_id=request_id) \

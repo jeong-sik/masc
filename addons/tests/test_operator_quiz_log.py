@@ -25,7 +25,7 @@ def opened(session_id="s1", action="act-1", questions=1):
 
 
 def posed(session_id="s1", ask_id="ask-1", question_id="q1"):
-    return q.Posed(session_id, ask_id, question_id, "item-1", "ledger", QUESTION, ("a",), (SOURCE,))
+    return q.Posed(session_id, ask_id, question_id, "item-1", "ledger", QUESTION, q.ChoiceKey(("a",)), (SOURCE,))
 
 
 def answered(ask_id="ask-1", choice="a"):
@@ -134,6 +134,17 @@ class Sessions(unittest.TestCase):
         judged = q.Judged("ask-1", "q1", q.Correct(), "facts", "g-0")
         (session,) = q.fold(events + [judged])
         self.assertEqual((session.outstanding_grade("q1"), session.judgments_of("q1")), (None, (judged,)))
+
+    def test_a_rubric_key_reads_back_and_takes_no_choice_answer(self):
+        rubric = q.Posed("s1", "ask-1", "q1", "item-1", "ledger", QUESTION | {"choices": []},
+                         q.Rubric(("facts",)), (SOURCE,))
+        self.assertEqual(q.event_of_json(q.event_to_json(rubric)), rubric)
+        with self.assertRaises(q.LogError):
+            q.fold([opened("s1", "act-1", 1), rubric, answered()])
+        written = q.AnswerReceived("ask-1", (q.Answer("q1", q.Wrote("facts")),), {"surface": "tui"}, 2.0)
+        self.assertEqual([s.state for s in q.fold([opened("s1", "act-1", 1), rubric, written])], ["answered"])
+        with self.assertRaises(q.LogError):
+            q.key_of_json({"kind": "rubric", "points": []})
 
     def test_an_unknown_grade_failure_or_judgment_kind_is_an_error(self):
         line = q.event_to_json(q.GradeFailed("ask-1", "q1", "g-0", "outcome_unknown", None))

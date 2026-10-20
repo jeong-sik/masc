@@ -124,7 +124,7 @@ def question_rows(session: q.Session) -> list[dict]:
         by = "judgment" if judgments else "key" if verdict in GRADED else None
         fields = {"session_id": session.session_id, "ask_id": posed.ask_id, "question_id": posed.question_id,
                   "item_id": posed.item_id, "topic": posed.topic, "question": posed.question,
-                  "response": q.response_to_json(responses[posed.question_id]), "key": list(posed.key),
+                  "response": q.response_to_json(responses[posed.question_id]), "key": q.key_to_json(posed.key),
                   "verdict": verdict, "by": by,
                   "judgments": [{"judgment": q.judgment_to_json(j.judgment), "rationale": j.rationale,
                                  "request_id": j.request_id} for j in judgments],

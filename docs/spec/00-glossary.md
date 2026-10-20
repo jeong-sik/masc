@@ -280,7 +280,8 @@ status: reference
     새 개념이 아니라 반복을 가진 Region, 곧 이 항목의 특수한 경우이고, 따로 표제어를
     세우지 않는다. 코드도 같다: UMP 루프 계획은 `timeline.regions`의 각 항목에서
     `repeatCount`를 읽어 클립을 만들고, 0이면 "invalid captured loop region"으로
-    거절한다(`UmpLoopTransport.swift`).
+    거절한다(`UmpLoopTransport.swift`). 브라우저 장면이 문서 구조에서 갈라 읽는 구역은
+    이 낱말이 아니며 **Browser Scene Region** 항목이 맡는다.
   → [tools/alphatex/README.md](../../tools/alphatex/README.md) ·
   [tools/alphatex/CAPTURE-UMP-REGIONS.md](../../tools/alphatex/CAPTURE-UMP-REGIONS.md) ·
   [tools/alphatex/ARRANGEMENT.md](../../tools/alphatex/ARRANGEMENT.md)
@@ -2103,6 +2104,30 @@ status: reference
   → [Browser_capabilities](../../lib/browser_capabilities.mli) ·
   [Browser_selection](../../lib/browser_selection.mli) ·
   [browser-action-catalog 설계](../../docs/design/browser-action-catalog.md)
+
+**Browser Scene Region (브라우저 장면 구역)**
+: 브라우저 장면(`Browser_scene`)이 문서 구조에서 갈라 읽는 의미 구역. 구역 역할
+  (`Browser_scene.region_role`)은 닫힌 열다섯 값이다 — `Main`·`Navigation`·`Complementary`·
+  `Named_region`·`Section`·`Article`·`Header`·`Footer`·`Search`·`Form`·`Log`·`Banner`·
+  `Content_info`·`Scroll_area`·`Unknown of string`. 역할 이름은 브라우저가 문자열로 보내고,
+  그 경계에서 한 번 분류한다(`region_role_of_string`). `Unknown`은 이름 붙지 않은 역할을
+  지우지 않고 그대로 들고 있되 암묵적 대상이 되지 않는다. 장면 view는 둘이고
+  (`Browser_lane.scene_view` = `Content`·`Regions`, 요청 JSON의 `view`는 `"content"`·
+  `"regions"`), 노드는 자기 조상 구역을 `ancestor_region`(`{node_id; role; label}`)으로
+  싣는다. 노드 종류 `Region of region_role`도 같은 역할 집합을 쓴다.
+  - 공개 동작 이름: `read_regions`(`Browser_capabilities`)가 `regions` view를 요청하는
+    조건부 동작이다(`conditional ~mode:"regions" Read`). 관측한 구역 참조를 그대로 받아
+    범위를 좁힌 읽기에 쓰라고 요구한다.
+  - 이름 경계: 이 구역은 어레인지먼트의 `Region`(구간)이 아니다 — 같은 낱말, 다른 축이다.
+    브라우저 쪽 region은 접근성 역할 이름(landmark role)에서 온 문서 구조 단위이고, 음악
+    쪽 `Region`은 시간축 위의 자리다. 문장에서 어느 쪽인지 정해지지 않으면 `region`만 쓰지
+    않고 "장면 구역"·"어레인지먼트 구간"으로 적는다.
+  - 이름 경계: 실시간 연결 역량(`Browser_lane.live_capability`)에는 `Scene_read` 하나만
+    있고 `read_regions`에 대응하는 별도 역량은 없다. 그 동작의 지원 여부는 동작 카탈로그의
+    조건부 항목이 말한다 — 두 축을 섞어 "`read_regions` 역량"이라고 부르지 않는다.
+  → [Browser_scene](../../lib/browser_scene.mli) ·
+  [Browser_lane](../../lib/browser_lane/browser_lane.ml) ·
+  [Browser_capabilities](../../lib/browser_capabilities.ml)
 
 **Keeper Firefox Start Record (Keeper Firefox 시작 기록)**
 : `runtime.toml`의 `[browser.live.bidi]`로 live lane이 켜져 있으면 MASC가 다음 서버 시작 또는 Keeper의 다음 hover·drag 때 Keeper Firefox와 그 BiDi host를 직접 시작한다. 이때 시작이 어떻게 끝났는지를 `<base>/.masc/browser-lane/keeper-firefox-start.json`에 한 entry로 통째로 갈아 쓰는 기록(RFC-browser-keeper-firefox §3.7, #42235·#42250). entry는 끝난 시각·포트·프로필·결과(`Attached`/`Not_attached`)를 담고, `Not_attached`의 사유는 한 줄짜리 인쇄 가능 문자열 최대 1024바이트(`message_limit_bytes`)로 잘린다. 경계가 세 군데 있다. (1) 이 기록은 상태 문장만 읽는다 — 시작을 막는 장치가 아니다. (2) MASC는 자기 기록이 "MASC가 시작했다"고 말하는 Firefox만 재시작을 약속한다. 다른 경로로 띄운 Firefox는 운영자가 먼저 종료한다. (3) 다른 포트의 Firefox는 이 시작을 막지 않는다. 상태 표의 `keeper` 행은 시작 주체를 `kind`로 말하고 `masc_starts`는 설정된 포트·프로필과 `last_start`(`absent`/`recorded`/`unreadable`)를 실는다.

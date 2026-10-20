@@ -4,6 +4,11 @@
 # The report reader independently checks this pass equation against status,
 # verify_exit and regression_exit.
 
+coding_eval_operation_id() {
+  jq -ce '.operation_id | if type == "string" and length > 0
+    then . else error("keeper admission returned no operation_id string") end'
+}
+
 evidence_row() {
   jq -cn \
     --arg case_id "$1" \
@@ -24,10 +29,12 @@ evidence_row() {
     --argjson edited_source_files "${16}" \
     --argjson edited_target_files "${17}" \
     --argjson build_exit "${18}" \
+    --argjson operation_id "${19}" \
     '{
       case_id: $case_id,
       run_index: $run_index,
       run_id: $run_id,
+      operation_id: $operation_id,
       provider: $provider,
       model: $model,
       status: $status,

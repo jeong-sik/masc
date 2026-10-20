@@ -53,10 +53,17 @@ evidence already exists, so sharded and resumed collection is the normal
 path (RFC-0396 D4).
 
 `runs.jsonl` contains the coding report's measured fields. It does not create
-Task/request, provider-attempt or independent-verdict IDs, and a model name is
+Task, provider-attempt or independent-verdict IDs, and a model name is
 not an artifact revision. The report reader consumes the same row producer as
 the harness. These coding results alone cannot qualify the reliable-change G1
 acceptance contract. The optional `--manifest` checker invocation does not fill
 the missing joins; G1 needs observations from the actual runtime and verifier
 producers. `--execution-mode matrix` does not supply controlled provider
 responses or turn a live coding episode into a G1 matrix fixture.
+
+The row's `operation_id` is copied from the actual `masc_keeper_msg` admission
+response saved in `runs/<run-id>/msg-submit.json`. It identifies the same
+durable chat operation the harness polls. It remains attached when later
+verification fails or the episode times out; it is null when no accepted
+identity was observed. The report validates it with the runtime's canonical
+operation-ID type. This observation does not claim a Task or verification ID.

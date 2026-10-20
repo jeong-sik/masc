@@ -5,4 +5,4 @@
  (name coding_eval_lib)
  (wrapped false)
  (modules coding_eval_case coding_eval_report)
- (libraries masc_test_deps))
+ (libraries masc_test_deps masc_keeper_operation_identity))

@@ -139,6 +139,20 @@ Results 에 다섯 lane 이 나온다.
 
 입력이 크다고 거절되면 패키지는 먼저 아직 못 맞힌 문제만 풀이 기록으로 보낸다(`history_scope = open_debt_only`). 그래도 크면 자료를 새것 절반으로 줄이고, 거절될 때마다 다시 반으로 줄인다. 빠진 오래된 절반은 이 세션에서 묻지 않는다. 요청이 frame 보다 클 때도 같은 방식으로 줄인다.
 
+## 판정에 이의 제기하기
+
+판정이 틀렸다고 보면 `dispute` action 을 보낸다. 선택지로 채점된 답도, `grade` 가 판정한 답도 낼 수 있다.
+
+```json
+{"kind": "dispute", "ask_id": "s-…-ask", "question_id": "q1", "note": "그 글은 계획도 기록한다고 적혀 있다"}
+```
+
+- `ask_id` 와 `question_id` 는 `quiz/questions` 행에 있다. TUI 에서는 Lane Add-on 화면의 `A` 로 명령을 열고 `act {…}` 로 보낸다. Keeper 는 `masc_lane_act` 로 같은 action 을 보낼 수 있다.
+- 패키지는 `Disputed` 를 남기고 `grade` 요청을 하나 낸다. 이 요청에는 메모, 지금의 판정, 패키지가 읽어 둔 출처 원문이 들어간다.
+- 결과는 새 `Judged` 다. 정답 key 로 낸 판정보다 앞서고, 판정 기록에 모두 남는다. 이미 있던 판정을 바꾸면 G 에 센다.
+- 같은 action 을 다시 보내도 아무것도 쓰지 않고 같은 요청을 가리킨다. 그 질문에 아직 결과를 기다리는 `grade` 요청이 있거나, 답한 질문이 아니거나, 메모가 비어 있으면 `failed_before_effect` 로 거절한다.
+- 판정이 최종 실패로 끝난 질문도 `dispute` 로 바로 다시 채점을 요청할 수 있다.
+
 ## 백업과 volume
 
 정답, 풀이 기록, 판정은 설치 volume 의 `/state/operator-quiz/log.jsonl` 에만 있다. volume 을 잃으면 함께 사라진다. host 에 남는 기록(질문, 답, 보관한 페이지, exact 결과)으로는 정답을 다시 만들 수 없다.
@@ -166,5 +180,4 @@ Results 에 다섯 lane 이 나온다.
 ## 지금의 한계
 
 - 기록 종류는 Board 글·댓글과 `repository` 권한의 파일이다. wiki, PR, 커밋 인용은 다음 단계다.
-- 이의 제기(`dispute`)는 다음 단계다.
 - 관측 출력은 쌓인 모든 행을 담는다. 문제가 아주 많이 쌓여 `max_reply_bytes` 를 넘으면 관측이 실패로 보인다.

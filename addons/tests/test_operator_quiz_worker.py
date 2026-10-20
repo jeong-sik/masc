@@ -194,6 +194,28 @@ class WorkerCase(unittest.TestCase):
         self.assertEqual((reveal["fields"]["verdict"], reveal["fields"]["by"]), ("correct", "judgment"))
         self.assertEqual(worker.ok("lane_host_requests", {}), {"requests": []})
 
+    def test_a_dispute_through_the_worker_lists_a_grade_request(self):
+        worker = self.start()
+        worker.observe()
+        worker.act("act-1", {"kind": "compose", "questions": 1})
+        self.host.author = answering(first_quote)
+        worker.run_host(self.host)
+        (ask,) = worker.ok("lane_host_requests", {})["requests"]
+        self.host.answers[ask["request_id"]] = {
+            "status": "answered", "responder": {"surface": "dashboard", "actor_id": None, "display_name": None},
+            "answered_at": 1_800_000_000.0,
+            "answers": [{"question_id": "q1", "response": {"kind": "chose", "choice_ids": ["a"]}}]}
+        worker.run_host(self.host)
+        refused = worker.act("d-0", {"kind": "dispute", "ask_id": ask["request_id"], "question_id": "q1"})
+        self.assertEqual(refused["status"], "failed_before_effect")
+        disputed = worker.act("d-1", {"kind": "dispute", "ask_id": ask["request_id"], "question_id": "q1",
+                                      "note": "the post says plans too"})
+        self.assertEqual(disputed["status"], "confirmed")
+        (request,) = worker.ok("lane_host_requests", {})["requests"]
+        self.assertEqual(request["request_id"], disputed["result"]["grade_request_id"])
+        (reveal,) = self.rows(disputed["output"], "quiz/questions")
+        self.assertEqual(reveal["fields"]["disputes"], [{"note": "the post says plans too", "action_request_id": "d-1"}])
+
     def test_a_result_for_no_listed_request_is_not_accepted_and_a_malformed_one_is_an_error(self):
         worker = self.start()
         worker.observe()

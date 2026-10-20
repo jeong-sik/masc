@@ -52,6 +52,10 @@ class InvalidBinding(ValueError):
     """The installation's binding does not name what a session reads."""
 
 
+class DisputeRefused(ValueError):
+    """A dispute this package cannot take; nothing was written."""
+
+
 @dataclass(frozen=True, slots=True)
 class Prompts:
     author: str
@@ -493,7 +497,57 @@ class Flow:
 
     # -- the grade request --------------------------------------------------
 
-    def _request_grade(self, session: q.Session, posed: q.Posed, response: q.Response) -> list[q.Event]:
+    def dispute(self, action_request_id: str, ask_id: str, question_id: str, note: str) -> str:
+        """The operator's words about one answered question (§6.4): a
+        Disputed and a new grade request with the note, the verdict it
+        disputes and the bytes this package read for each source. The same
+        action again writes nothing and names the same request."""
+        sessions = self.sessions()
+        for session in sessions:
+            for index, event in enumerate(session.grading):
+                if isinstance(event, q.Disputed) and event.action_request_id == action_request_id:
+                    following = session.grading[index + 1]
+                    if not isinstance(following, q.GradeRequested):
+                        raise q.LogError(f"dispute {action_request_id} has no grade request after it")
+                    return following.request_id
+        if not note.strip():
+            raise DisputeRefused("a dispute says what is wrong with the grade")
+        session = next((s for s in sessions if s.ask_id == ask_id and s.state == "answered"), None)
+        posed = next((p for p in session.posed if p.question_id == question_id), None) if session else None
+        if session is None or session.answer is None or posed is None:
+            raise DisputeRefused(f"{ask_id}/{question_id} is not an answered question of this package")
+        if session.outstanding_grade(question_id) is not None:
+            raise DisputeRefused(f"a grade request for {ask_id}/{question_id} is still waiting")
+        response = dict(zip((p.question_id for p in session.posed),
+                            _responses(session.answer, session.posed)))[question_id]
+        prior = g.verdict(posed, response, session.judgments_of(question_id))
+        texts = self._record_texts(sessions, posed.sources)
+        records = [texts[(s.kind, s.source_id, s.pin)] for s in posed.sources if (s.kind, s.source_id, s.pin) in texts]
+        disputed = q.Disputed(ask_id, question_id, note, action_request_id)
+        requested = self._request_grade(session, posed, response,
+                                        dispute={"note": note, "prior_verdict": prior, "records": records})
+        self.log.append([disputed, *requested])
+        return requested[0].request_id
+
+    def _record_texts(self, sessions: list[q.Session],
+                      sources: tuple[q.Source, ...]) -> dict[tuple[str, str, str], dict]:
+        """The records of the pages [sources] were checked against, by kind,
+        source and pin, with the bytes read and their page digest. Only
+        those pages are read back from disk, never every page read."""
+        cited = {source.sha256 for source in sources}
+        out: dict[tuple[str, str, str], dict] = {}
+        for session in sessions:
+            for read in self._session_reads(session):
+                if read["result"] is None or read["result"].get("sha256") not in cited:
+                    continue
+                whole = reads([(digest, self.pages.read(digest)) for digest in read["digests"]])
+                for record in material(whole):
+                    out[(record["kind"], record["source_id"], record["pin"])] = {
+                        key: record[key] for key in ("kind", "source_id", "pin", "sha256", "title", "text")}
+        return out
+
+    def _request_grade(self, session: q.Session, posed: q.Posed, response: q.Response,
+                       dispute: dict | None = None) -> list[q.Event]:
         """Writes the body of a grade request for one answered question and
         returns the event that names it (§6.2): the question, the labels of
         its key choices as recorded before the answer, the sources with their
@@ -514,7 +568,8 @@ class Flow:
                    "sources": [source.to_json() for source in posed.sources],
                    "answer": q.response_to_json(response),
                    "judgments": [{"judgment": q.judgment_to_json(j.judgment), "rationale": j.rationale}
-                                 for j in judgments]}
+                                 for j in judgments],
+                   "dispute": dispute}
         asked = sum(isinstance(e, q.GradeRequested) for e in session.grading_of(posed.question_id))
         request_id = f"{posed.ask_id}-{GRADE}-{posed.question_id}-{asked}"
         body = {"kind": "exact_output", "request_id": request_id, "output": GRADE, "system": self.prompts.grade,
@@ -784,7 +839,7 @@ class Flow:
         return q.Judged(request.ask_id, request.question_id, judgment, output["rationale"], request.request_id)
 
 
-def _needs_grade(grading: tuple[q.GradeRequested | q.Judged | q.GradeFailed, ...], response: q.Response) -> bool:
+def _needs_grade(grading: tuple[q.Grading, ...], response: q.Response) -> bool:
     """Whether a compose asks for this answered question's grade again."""
     if grading:
         return isinstance(grading[-1], q.GradeFailed)

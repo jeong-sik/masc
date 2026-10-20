@@ -465,6 +465,79 @@ class Rubrics(Base):
                 self.assertEqual(f.check_draft(candidate, material, {}), reason)
 
 
+class Disputes(Base):
+    """The operator's words about a grade (RFC §6.4)."""
+    def chose(self, choice="a"):
+        session_id = self.compose()
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        self.answer(session_id, q.Chose((choice,)))
+        return session_id, self.session(session_id).ask_id
+
+    def grade_requests(self):
+        return [r for r in self.flow.listing() if r["kind"] == "exact_output" and r["output"] == f.GRADE]
+
+    def test_a_disputed_choice_is_graded_again_and_the_judgment_overrides_the_key(self):
+        session_id, ask_id = self.chose("a")
+        request_id = self.flow.dispute("d-1", ask_id, "q1", "the post says plans too")
+        (request,) = self.grade_requests()
+        self.assertEqual(request["request_id"], request_id)
+        dispute = json.loads(request["messages"][0])["dispute"]
+        self.assertEqual((dispute["note"], dispute["prior_verdict"]), ("the post says plans too", g.CORRECT))
+        self.assertEqual([r["text"] for r in dispute["records"]], ["the ledger records facts"])
+        self.host.grade = judging("incorrect", "facts only; the key was right but the answer missed plans")
+        self.host.run(self.flow)
+        session = self.session(session_id)
+        posed = session.posed[0]
+        self.assertEqual(g.verdict(posed, q.Chose(("a",)), session.judgments_of("q1")), g.INCORRECT)
+        self.assertEqual(g.changed_verdicts(posed, q.Chose(("a",)), session.judgments_of("q1")), 1)
+
+    def test_a_dispute_reads_back_only_the_page_its_question_cites(self):
+        session_id, ask_id = self.chose()
+        cited, other = (event.digest for event in self.session(session_id).material)
+        read = self.flow.pages.read
+        loaded = []
+        self.flow.pages.read = lambda key: loaded.append(key) or read(key)
+        self.flow.dispute("d-1", ask_id, "q1", "plans too")
+        self.assertIn(cited, loaded)
+        self.assertNotIn(other, loaded)
+
+    def test_the_same_dispute_again_writes_nothing(self):
+        _, ask_id = self.chose()
+        first = self.flow.dispute("d-1", ask_id, "q1", "plans too")
+        events = len(q.Log(self.state).read())
+        self.assertEqual(self.flow.dispute("d-1", ask_id, "q1", "plans too"), first)
+        self.assertEqual(len(q.Log(self.state).read()), events)
+
+    def test_a_dispute_that_cannot_be_taken_is_refused_and_writes_nothing(self):
+        _, ask_id = self.chose()
+        events = len(q.Log(self.state).read())
+        with self.assertRaises(f.DisputeRefused):
+            self.flow.dispute("d-0", ask_id, "q1", "  ")
+        self.assertEqual(len(q.Log(self.state).read()), events)
+        self.flow.dispute("d-1", ask_id, "q1", "plans too")
+        events = len(q.Log(self.state).read())
+        for label, args in [("a grade still waits", ("d-2", ask_id, "q1", "again")),
+                            ("no such question", ("d-3", ask_id, "q9", "x")),
+                            ("no such ask", ("d-4", "s-0-ask", "q1", "x"))]:
+            with self.subTest(label):
+                with self.assertRaises(f.DisputeRefused):
+                    self.flow.dispute(*args)
+        self.assertEqual(len(q.Log(self.state).read()), events)
+
+    def test_a_dispute_after_a_final_grade_failure_lists_a_new_request(self):
+        session_id = self.compose()
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        self.answer(session_id, q.Wrote("facts"))
+        self.host.grade = lambda payload: {"status": "outcome_unknown"}
+        self.host.run(self.flow)
+        self.assertEqual(self.grade_requests(), [])
+        self.flow.dispute("d-1", self.session(session_id).ask_id, "q1", "please grade it")
+        (request,) = self.grade_requests()
+        self.assertTrue(request["request_id"].endswith("-grade-q1-1"))
+
+
 class Repetition(Base):
     def test_a_session_with_no_new_record_still_asks_a_missed_item_again(self):
         first = self.compose("act-1")

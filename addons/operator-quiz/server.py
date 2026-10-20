@@ -40,10 +40,17 @@ ACTION_SCHEMA = {
         "context": CONTEXT_SCHEMA, "request_id": TEXT,
         "action": {"type": "object", "additionalProperties": False, "required": ["kind"],
                    "properties": {
-                       "kind": {"type": "string", "enum": ["compose", "export"],
-                                "description": "compose starts a session; export returns the whole log"},
+                       "kind": {"type": "string", "enum": ["compose", "dispute", "export"],
+                                "description": "compose starts a session; dispute asks for one answered "
+                                               "question to be graded again; export returns the whole log"},
                        "questions": {"type": "integer", "minimum": 1,
-                                     "description": "compose only: how many questions to write"}}}}}
+                                     "description": "compose only: how many questions to write"},
+                       "ask_id": {"type": "string", "minLength": 1,
+                                  "description": "dispute only: the answered question's ask"},
+                       "question_id": {"type": "string", "minLength": 1,
+                                       "description": "dispute only: the question within that ask"},
+                       "note": {"type": "string", "minLength": 1,
+                                "description": "dispute only: what is wrong with the grade"}}}}}
 OBSERVE_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["context", "binding", "sources"],
                   "properties": {"context": CONTEXT_SCHEMA, "binding": {"type": "object"},
                                  "sources": {"type": "array", "items": {"type": "object"}}}}
@@ -153,6 +160,17 @@ class Worker:
                     except (InvalidInput, q.LogError):
                         output = {"rows": [], "coverage": []}
                     return {"status": "confirmed", "result": {"session_id": session_id}, "output": output}
+                case "dispute":
+                    fields = {"kind", "ask_id", "question_id", "note"}
+                    if set(action) != fields or not all(isinstance(action[k], str) for k in fields - {"kind"}):
+                        return self.refuse(request_id, "dispute names exactly ask_id, question_id and note")
+                    try:
+                        grade_request_id = self.flow.dispute(request_id, action["ask_id"], action["question_id"],
+                                                             action["note"])
+                    except f.DisputeRefused as error:
+                        return self.refuse(request_id, str(error))
+                    return {"status": "confirmed", "result": {"grade_request_id": grade_request_id},
+                            "output": self.observation()}
                 case "export":
                     if set(action) != {"kind"}:
                         return self.refuse(request_id, "export takes no other field")
@@ -200,7 +218,8 @@ TOOLS = [
      "inputSchema": OBSERVE_SCHEMA, "outputSchema": OUTPUT_SCHEMA,
      "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True,
                      "openWorldHint": False}},
-    {"name": "lane_act", "description": "compose: start a quiz session; export: return the whole log.",
+    {"name": "lane_act", "description": "compose: start a quiz session; dispute: grade one answered question "
+                                        "again with a note; export: return the whole log.",
      "inputSchema": ACTION_SCHEMA,
      "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True,
                      "openWorldHint": False}},

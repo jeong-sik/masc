@@ -110,7 +110,7 @@ def grading_state(session: q.Session, question_id: str) -> dict | None:
             return {"state": "waiting", "request_id": request_id}
         case q.GradeFailed(request_id=request_id, kind=kind, detail=detail):
             return {"state": "failed", "request_id": request_id, "kind": kind, "detail": detail}
-        case q.Judged() | None:
+        case q.Judged() | q.Disputed() | None:
             return None
 
 
@@ -129,6 +129,8 @@ def question_rows(session: q.Session) -> list[dict]:
                   "judgments": [{"judgment": q.judgment_to_json(j.judgment), "rationale": j.rationale,
                                  "request_id": j.request_id} for j in judgments],
                   "grading": grading_state(session, posed.question_id),
+                  "disputes": [{"note": d.note, "action_request_id": d.action_request_id}
+                               for d in session.disputes_of(posed.question_id)],
                   "sources": [source.to_json() for source in posed.sources]}
         title = {g.CORRECT: "맞음", g.INCORRECT: "틀림", g.SKIPPED: "건너뜀",
                  g.AWAITING_JUDGMENT: "채점 대기", g.VOID: "무효"}[verdict]

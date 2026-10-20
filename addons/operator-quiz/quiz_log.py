@@ -391,7 +391,7 @@ def failure_of_json(value: Any) -> Failure:
             raise LogError(f"reason.kind {other!r} is not a session failure")
 
 
-# -- Events (RFC §4.9 Log). Disputed arrives with the dispute action. -------
+# -- Events (RFC §4.9 Log). -------------------------------------------------
 
 @dataclass(frozen=True, slots=True)
 class SessionOpened:
@@ -482,8 +482,20 @@ class GradeFailed:
     detail: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class Disputed:
+    """The operator's words about a grade (RFC §6.4); the grade request it
+    leads to is written with it."""
+    ask_id: str
+    question_id: str
+    note: str
+    action_request_id: str
+
+
+Grading = Union[GradeRequested, Judged, GradeFailed, Disputed]
+
 Event = Union[SessionOpened, MaterialRead, ExactRequested, Posed, DraftRejected, SessionFailed, AnswerReceived,
-              GradeRequested, Judged, GradeFailed]
+              GradeRequested, Judged, GradeFailed, Disputed]
 
 
 def event_to_json(event: Event) -> dict:
@@ -520,6 +532,9 @@ def event_to_json(event: Event) -> dict:
         case GradeFailed(ask_id, question_id, request_id, kind, detail):
             return {"event": "grade_failed", "ask_id": ask_id, "question_id": question_id,
                     "request_id": request_id, "kind": kind, "detail": detail}
+        case Disputed(ask_id, question_id, note, action_request_id):
+            return {"event": "disputed", "ask_id": ask_id, "question_id": question_id, "note": note,
+                    "action_request_id": action_request_id}
 
 
 def event_of_json(value: Any) -> Event:
@@ -589,6 +604,10 @@ def event_of_json(value: Any) -> Event:
             detail = None if f["detail"] is None else _text(f["detail"], "grade_failed.detail")
             return GradeFailed(_text(f["ask_id"], "ask_id"), _text(f["question_id"], "question_id"),
                                _text(f["request_id"], "request_id"), kind, detail)
+        case "disputed":
+            f = _exact(value, {"event", "ask_id", "question_id", "note", "action_request_id"}, "disputed")
+            return Disputed(_text(f["ask_id"], "ask_id"), _text(f["question_id"], "question_id"),
+                            _text(f["note"], "note"), _text(f["action_request_id"], "action_request_id"))
         case other:
             raise LogError(f"event {other!r} is not an event of this package")
 
@@ -761,17 +780,20 @@ class Session:
     rejected: tuple[DraftRejected, ...]
     posed: tuple[Posed, ...]
     answer: AnswerReceived | None
-    grading: tuple[GradeRequested | Judged | GradeFailed, ...]  # in log order
+    grading: tuple[Grading, ...]  # in log order
 
     @property
     def ask_id(self) -> str | None:
         return self.posed[0].ask_id if self.posed else None
 
-    def grading_of(self, question_id: str) -> tuple[GradeRequested | Judged | GradeFailed, ...]:
+    def grading_of(self, question_id: str) -> tuple[Grading, ...]:
         return tuple(event for event in self.grading if event.question_id == question_id)
 
     def judgments_of(self, question_id: str) -> tuple[Judged, ...]:
         return tuple(event for event in self.grading_of(question_id) if isinstance(event, Judged))
+
+    def disputes_of(self, question_id: str) -> tuple[Disputed, ...]:
+        return tuple(event for event in self.grading_of(question_id) if isinstance(event, Disputed))
 
     def outstanding_grade(self, question_id: str) -> GradeRequested | None:
         """The grade request for this question that has no result yet."""
@@ -787,6 +809,7 @@ def fold(events: list[Event]) -> list[Session]:
     order: list[str] = []
     by_ask: dict[str, str] = {}
     grade_requests: set[str] = set()
+    disputes: set[str] = set()
 
     def session(session_id: str, label: str) -> dict:
         if session_id not in sessions:
@@ -853,6 +876,19 @@ def fold(events: list[Event]) -> list[Session]:
                     raise LogError(f"answer_received chooses on a question of ask {ask_id} that has no choices")
                 current["state"] = "answered"
                 current["answer"] = event
+            case Disputed(ask_id=ask_id, question_id=question_id, action_request_id=action_request_id):
+                if ask_id not in by_ask or sessions[by_ask[ask_id]]["state"] != "answered":
+                    raise LogError(f"disputed for ask {ask_id}, which no answered session posed")
+                current = sessions[by_ask[ask_id]]
+                if all(p.question_id != question_id for p in current["posed"]):
+                    raise LogError(f"disputed for question {question_id}, which ask {ask_id} did not pose")
+                earlier = [e for e in current["grading"] if e.question_id == question_id]
+                if earlier and isinstance(earlier[-1], GradeRequested):
+                    raise LogError(f"disputed for {ask_id}/{question_id} while {earlier[-1].request_id} waits")
+                if action_request_id in disputes:
+                    raise LogError(f"dispute action {action_request_id} was written twice")
+                disputes.add(action_request_id)
+                current["grading"].append(event)
             case GradeRequested(ask_id=ask_id, question_id=question_id, request_id=request_id) \
                     | Judged(ask_id=ask_id, question_id=question_id, request_id=request_id) \
                     | GradeFailed(ask_id=ask_id, question_id=question_id, request_id=request_id):

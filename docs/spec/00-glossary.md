@@ -2292,7 +2292,8 @@ status: reference
   내는 Lane Add-on 패키지(`operator-quiz`). Schedule 이 보내는 `compose` action 이 세션을 열고,
   패키지는 host 요청(`read_records`·`read_file`·`exact_output author`·`ask`)으로 기록을 읽고
   문제를 받아 Approvals 에 질문한다. 선택지로 고른 답은 정답 key 로, 직접 쓴 답은
-  `exact_output grade` 의 판정(`Judged`)으로 채점한다. 정답과 풀이 기록은 패키지의 persistent volume 에 있는
+  `exact_output grade` 의 판정(`Judged`)으로 채점한다. 운영자가 `dispute` action 으로
+  이의를 내면 다시 판정하고, 새 `Judged` 가 앞선 판정보다 앞선다. 정답과 풀이 기록은 패키지의 persistent volume 에 있는
   로그(`/state/operator-quiz/log.jsonl`)에만 있고, 행(`quiz/sessions`·`quiz/questions`·
   `quiz/topics`·`quiz/items`·`quiz/measures`)은 모두 그 로그에서 계산한 projection 이다.
   - **세션**: `writing → asked → answered`, 또는 닫힌 이유 하나로 `failed`, 질문 전에 다음

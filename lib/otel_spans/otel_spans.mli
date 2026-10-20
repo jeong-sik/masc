@@ -53,13 +53,17 @@ val setup_exporter
 val port_of_uri : Uri.t -> int
 
 (** Why [probe_endpoint] could not reach the collector. [No_address] is a
-    host that resolved to nothing; [Probe_raised] carries the exception the
-    resolver or the connect raised (refused, unreachable, unknown host). *)
+    host that resolved to nothing, which is also how [Unix.getaddrinfo]
+    reports an unknown host or a resolver failure. [Probe_raised] carries the
+    exception the connect (or the resolver call itself) raised, such as a
+    refused or unreachable connection. *)
 type probe_failure =
   | No_address
   | Probe_raised of exn
 
-(** One-line text of a [probe_failure], for the health-check log lines. *)
+(** Text of a [probe_failure] for the health-check log lines. A
+    [Probe_raised] text is [Printexc.to_string] of the exception and can span
+    two lines. *)
 val probe_failure_to_string : probe_failure -> string
 
 (** [probe_endpoint ~env endpoint] resolves the host of [endpoint], opens a TCP

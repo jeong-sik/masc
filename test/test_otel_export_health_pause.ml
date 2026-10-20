@@ -228,12 +228,27 @@ let test_probe_returns_the_reason_it_failed () =
   | Error (Otel_spans.Probe_raised _ as failure) ->
     check
       bool
-      "the failure has a readable reason"
+      "the failure names the refused connection"
       true
-      (String.length (Otel_spans.probe_failure_to_string failure) > 0)
+      (contains ~needle:"Connection_failure" (Otel_spans.probe_failure_to_string failure))
   | Error Otel_spans.No_address ->
     Alcotest.fail "a literal loopback address resolved to nothing"
   | Ok () -> Alcotest.fail "probe reached a closed listener"
+;;
+
+let test_probe_failure_text_tells_the_cases_apart () =
+  check
+    string
+    "a raised exception is carried as its own text"
+    (Printexc.to_string Exit)
+    (Otel_spans.probe_failure_to_string (Otel_spans.Probe_raised Exit));
+  check
+    bool
+    "no address reads differently from a raised exception"
+    false
+    (String.equal
+       (Otel_spans.probe_failure_to_string Otel_spans.No_address)
+       (Otel_spans.probe_failure_to_string (Otel_spans.Probe_raised Exit)))
 ;;
 
 let () =
@@ -252,6 +267,10 @@ let () =
             "probe returns the reason it failed"
             `Quick
             test_probe_returns_the_reason_it_failed
+        ; test_case
+            "probe failure text tells the cases apart"
+            `Quick
+            test_probe_failure_text_tells_the_cases_apart
         ] )
     ]
 ;;

@@ -1745,9 +1745,10 @@ through their selected VST sounds. Output is 44.1 kHz float WAV; discrete source
 channels are retained, mono feeds each output channel, and the mix is not
 normalized. A peak above 0 dBFS is reported while the float samples are preserved.
 Existing files are never replaced. `:stop`, a new playback, a project edit,
-Save As, or closing the view cancels pending export and waits for its worker
-cleanup. Capture MIDI cannot be silently omitted: record its instrument return,
-or split the take and mute its MIDI component to export the recorded audio.
+Save As, or closing the view cancels pending export; its private files are
+removed after worker cleanup. To export a capture containing MIDI, split the
+take and mute its MIDI component. Record the instrument return as audio when
+you want its synthesized sound included in the WAV.
 Arrangement MIDI-file export remains unconnected.
 
 In Keeper chat, `/score [N]` opens a frozen alphaTex block in the same terminal

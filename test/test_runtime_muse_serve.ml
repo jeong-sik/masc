@@ -16,8 +16,9 @@ type step =
   | Stderr of string
   | Exit_with of int
   | Mark_spawned of string
-  | Exit_slowly_on_term of float
-      (** Stay up until SIGTERM, then take this many seconds to exit. *)
+  | Trap_term of { marker : string; exit_delay_s : float }
+      (** On SIGTERM, touch [marker], take [exit_delay_s] to exit, then exit. *)
+  | Idle_until_killed
   | Expect_launch of { home : string; native_read : bool }
 
 let init_frame ~granted =
@@ -126,9 +127,11 @@ let script_text ~capture steps =
       | Stderr text -> line (Printf.sprintf "printf '%%s\\n' %s >&2" (shell_quote text))
       | Exit_with code -> line (Printf.sprintf "exit %d" code)
       | Mark_spawned path -> line (Printf.sprintf "touch %s" (shell_quote path))
-      | Exit_slowly_on_term seconds ->
-        line (Printf.sprintf "trap 'sleep %g; exit 0' TERM" seconds);
-        line "while :; do sleep 0.05; done"
+      | Trap_term { marker; exit_delay_s } ->
+        line
+          (Printf.sprintf "trap 'touch %s; sleep %g; exit 0' TERM" (shell_quote marker)
+             exit_delay_s)
+      | Idle_until_killed -> line "while :; do sleep 0.05; done"
       | Expect_launch { home; native_read } ->
         let home = Unix.realpath home in
         List.iter
@@ -1313,35 +1316,64 @@ let fail_if_blocked_for seconds f =
 ;;
 
 let host_exit_delay_s = 0.5
-let owner_cancel_after_s = 0.25
 let run_turn_return_deadline_s = 20
+let sigterm_wait_deadline_s = 15.
+let marker_poll_s = 0.01
 
+(* The host installs its trap before it ends the turn, and the owner is
+   cancelled once the trap has run: the cancel arrives while the host is
+   exiting, after the cleanup began, whatever the machine's speed. *)
 let test_run_turn_returns_when_the_owner_is_cancelled_while_the_host_exits () =
-  with_script
-    (handshake_and_session ~granted:[]
-     @ [ Write agent_started
-       ; Write agent_completed
-       ; Write turn_completed
-       ; Exit_slowly_on_term host_exit_delay_s
-       ])
-    (fun ~dir ~requests:_ ->
-      fail_if_blocked_for run_turn_return_deadline_s (fun () ->
-        Eio_main.run (fun env ->
-          let clock = Eio.Stdenv.clock env in
-          Eio.Fiber.first
-            (fun () ->
-              let (_ : (Serve.turn_result, Serve.error) result) =
-                Serve.run_turn
-                  ~mgr:(Eio.Stdenv.process_mgr env)
-                  ~clock
-                  ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
-                  (config ())
-                  ~workspace_root:"/w"
-                  ~prompt:"say MASC_MUSE_OK"
-                  ~images:[]
+  let marker = Filename.temp_file "masc-muse-term-" "" in
+  Sys.remove marker;
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists marker then Sys.remove marker)
+    (fun () ->
+      with_script
+        (handshake_and_session ~granted:[]
+         @ [ Write agent_started
+           ; Trap_term { marker; exit_delay_s = host_exit_delay_s }
+           ; Write agent_completed
+           ; Write turn_completed
+           ; Idle_until_killed
+           ])
+        (fun ~dir ~requests:_ ->
+          fail_if_blocked_for run_turn_return_deadline_s (fun () ->
+            Eio_main.run (fun env ->
+              let clock = Eio.Stdenv.clock env in
+              let rec wait_for_sigterm () =
+                if not (Sys.file_exists marker)
+                then (
+                  Eio.Time.sleep clock marker_poll_s;
+                  wait_for_sigterm ())
               in
-              ())
-            (fun () -> Eio.Time.sleep clock owner_cancel_after_s))))
+              let cancelled_the_owner =
+                Eio.Fiber.first
+                  (fun () ->
+                    let (_ : (Serve.turn_result, Serve.error) result) =
+                      Serve.run_turn
+                        ~mgr:(Eio.Stdenv.process_mgr env)
+                        ~clock
+                        ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
+                        (config ())
+                        ~workspace_root:"/w"
+                        ~prompt:"say MASC_MUSE_OK"
+                        ~images:[]
+                    in
+                    false)
+                  (fun () ->
+                    match
+                      Eio.Time.with_timeout clock sigterm_wait_deadline_s (fun () ->
+                        wait_for_sigterm ();
+                        Ok ())
+                    with
+                    | Ok () -> true
+                    | Error `Timeout -> false)
+              in
+              check bool
+                "the owner was cancelled after the host received SIGTERM"
+                true
+                cancelled_the_owner))))
 ;;
 
 let () =

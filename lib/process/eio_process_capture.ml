@@ -108,7 +108,15 @@ let reap_proc_with_clock ~sw clock proc =
        | `Still_running ->
          Log.Misc.warn
            "[Process_eio] child not reaped %.1fs after SIGKILL; leaving it to the switch release hook"
-           child_exit_grace_seconds)
+           child_exit_grace_seconds
+       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+       | exception exn ->
+         (* The status can no longer be read (a [waitpid] that failed after the
+            child was reaped elsewhere). The caller is stopping a host and runs
+            this from a finalizer, where an exception replaces its result. *)
+         Log.Misc.warn
+           "[Process_eio] child status unreadable after SIGKILL; leaving it to the switch release hook: %s"
+           (Printexc.to_string exn))
   in
   signal_best_effort Sys.sigterm;
   match await_within_grace () with

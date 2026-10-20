@@ -121,6 +121,11 @@ private final class PcmOutput {
               engine.outputNode.auAudioUnit.deviceID == device,
               engine.outputNode.outputFormat(forBus: 0).sampleRate == rate,
               engine.outputNode.outputFormat(forBus: 0).channelCount == channels else { throw PcmFailure("selected PCM output changed or disappeared") }
+        try checkRender()
+    }
+    // Property observers own hardware revalidation. Audio demand must not issue
+    // synchronous device-property queries while its next block is due.
+    func checkRender() throws {
         if state == .playing && !engine.isRunning { throw PcmFailure("PCM output engine stopped") }
         if let failure = renderFailure() { throw failure }
     }
@@ -153,9 +158,10 @@ private final class PcmOutput {
         try check()
         notifications.setEventHandler { [weak self] in
             guard let self, self.state != .stopped else { return }
-            do { try self.check(); try self.request() } catch { self.finish(error) }
+            do { try self.checkRender(); try self.request() } catch { self.finish(error) }
         }
         try monitor(device, address(kAudioDevicePropertyDeviceIsAlive))
+        try monitor(device, address(kAudioDevicePropertyDeviceUID))
         try monitor(device, address(kAudioDevicePropertyBufferFrameSize))
         try monitor(device, address(kAudioDevicePropertyNominalSampleRate))
         try monitor(device, address(kAudioDevicePropertyStreamConfiguration, kAudioObjectPropertyScopeOutput))
@@ -184,9 +190,9 @@ private final class PcmOutput {
     func receive(_ line: String) {
         guard state != .stopped else { return }
         do {
-            try check()
+            try checkRender()
             switch try JSONDecoder().decode(PcmCommand.self, from: Data(line.utf8)) {
-            case .stop: finish(); return
+            case .stop: try check(); finish(); return
             case .block(let id, let data):
                 guard let demand = pending, demand.id == id, data.count == Int(frames) * 2 * 4 else { throw PcmFailure("unexpected PCM block identity/size") }
                 let samples = data.withUnsafeBytes { bytes in

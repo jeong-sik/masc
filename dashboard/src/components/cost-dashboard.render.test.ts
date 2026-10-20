@@ -68,6 +68,38 @@ function keeperMetrics({
   }
 }
 
+// The value and the note of one stat tile, found by its label.
+function tile(container: HTMLElement, label: string): { value: string; note: string } {
+  const cell = Array.from(container.querySelectorAll('.kpi-cell'))
+    .find(el => el.querySelector('.kpi-label')?.textContent === label)
+  if (!cell) throw new Error(`no tile labelled ${label}`)
+  return {
+    value: cell.querySelector('.kpi-value')?.textContent ?? '',
+    note: cell.querySelector('.kpi-delta')?.textContent ?? '',
+  }
+}
+
+// A keeper row the server wrote for a store it could not read at all.
+function unreadKeeper(keeper_name: string) {
+  return {
+    keeper_name,
+    metrics_read: { state: 'failed', reason: 'disk read failed' } as KeeperMetricsRead,
+    total_cost_usd: null,
+    cost_reported_samples: 0,
+    cost_unreported_samples: 0,
+    cost_unread_samples: 0,
+    total_input_tokens: null,
+    total_output_tokens: null,
+    total_tokens: null,
+    tokens_reported_samples: 0,
+    tokens_unreported_samples: 0,
+    tokens_unread_samples: 0,
+    p50_latency_ms: null,
+    p95_latency_ms: null,
+    sample_count: 0,
+  }
+}
+
 async function waitFor(assertion: () => boolean, label: string): Promise<void> {
   for (let i = 0; i < 100; i += 1) {
     if (assertion()) return
@@ -472,14 +504,46 @@ describe('CostDashboard route-backed focus behavior', () => {
 
     const row = container.querySelector('tr[data-keeper-metrics-read="failed"]')
     expect(row?.textContent).toContain('unreadable-keeper')
-    // The reason is on the row and no cost, token or "미보고" figure stands in for it.
+    // The reason is on the row, and none of the value cells holds a number
+    // ("$0", "0") or the "not reported" word standing in for the unread store.
     expect(row?.querySelector('[data-testid="keeper-cost-missing"]')?.textContent).toContain('disk read failed')
-    expect(row?.textContent).not.toContain('미보고')
-    expect(row?.textContent).not.toContain('$0')
-    // The team total is a lower bound: the unreadable keeper is named beside it.
-    expect(container.textContent).toContain('≥ ')
-    expect(container.textContent).toContain('unreadable-keeper')
+    const valueCells = Array.from(row?.querySelectorAll('td') ?? []).slice(0, 3).map(td => td.textContent ?? '')
+    expect(valueCells).toHaveLength(3)
+    for (const cell of valueCells) expect(cell).not.toMatch(/\d|미보고/)
+    // The team total counts only the readable keeper, and each tile says so.
+    expect(tile(container, 'Total Cost').value.startsWith('≥ ')).toBe(true)
+    expect(tile(container, 'Total Cost').note).toContain('unreadable-keeper')
+    expect(tile(container, 'Tokens In / Out').value.startsWith('≥ ')).toBe(true)
+    expect(tile(container, 'Tokens In / Out').note).toContain('unreadable-keeper')
+    // The slowest keeper may be the unread one, so the max is a floor and the
+    // budget claim is not made for every keeper.
+    expect(tile(container, 'p95 Latency (max)').value.startsWith('≥ ')).toBe(true)
+    expect(tile(container, 'p95 Latency (max)').note).not.toBe('within budget')
     expect(container.querySelector('tr[data-keeper-metrics-read="read"]')?.textContent).toContain('readable-keeper')
+  })
+
+  it('shows no figure at all when no keeper store could be read', async () => {
+    apiMocks.fetchKeeperCostMetrics.mockResolvedValue(keeperMetrics({
+      keepers: [unreadKeeper('first-unread'), unreadKeeper('second-unread')],
+    }))
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'cost', focus: 'agent' },
+      postId: null,
+    }
+
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => container.textContent?.includes('first-unread') ?? false, 'keeper metrics')
+
+    // Not "$0", not "미보고" (a null the runtime reported), not "0ms within budget".
+    for (const label of ['Total Cost', 'Tokens In / Out', 'p50 Latency (avg)', 'p95 Latency (max)']) {
+      expect(tile(container, label).value, label).not.toMatch(/\d|미보고/)
+    }
+    expect(tile(container, 'p95 Latency (max)').note).not.toBe('within budget')
+    expect(tile(container, 'Total Cost').note).toContain('first-unread')
+    expect(tile(container, 'Total Cost').note).toContain('second-unread')
   })
 
   it('marks a keeper total with bad lines as at least that much', async () => {
@@ -519,11 +583,13 @@ describe('CostDashboard route-backed focus behavior', () => {
     const cells = Array.from(row?.querySelectorAll('td') ?? []).map(td => td.textContent?.trim() ?? '')
     // Tokens in, tokens out and cost are all "at least".
     expect(cells.slice(0, 3).every(cell => cell.startsWith('≥ '))).toBe(true)
+    // The note carries both counts the server sent, whatever the wording.
     const note = row?.querySelector('[data-testid="keeper-cost-missing"]')?.textContent ?? ''
-    expect(note).toContain('3')
-    expect(note).toContain('1')
-    // The team tile says so too.
-    expect(container.textContent).toContain('≥ $')
+    expect((note.match(/\d+/g) ?? []).sort()).toEqual(['1', '3'])
+    // Each team tile is a floor too, not only the keeper's own row.
+    expect(tile(container, 'Total Cost').value.startsWith('≥ ')).toBe(true)
+    expect(tile(container, 'Tokens In / Out').value.startsWith('≥ ')).toBe(true)
+    expect(tile(container, 'Total Cost').note).toContain('torn-keeper')
   })
 
   it('shows no lower-bound mark when every store was read in full', async () => {
@@ -539,6 +605,7 @@ describe('CostDashboard route-backed focus behavior', () => {
     await waitFor(() => container.textContent?.includes('sangsu') ?? false, 'keeper metrics')
 
     expect(container.textContent).not.toContain('≥ ')
+    expect(tile(container, 'p95 Latency (max)').note).toBe('within budget')
   })
 
 })

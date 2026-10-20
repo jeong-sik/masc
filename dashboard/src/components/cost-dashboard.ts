@@ -28,7 +28,7 @@ import {
   type DashboardFeedMetadata,
 } from '../api/dashboard'
 import { terminalReasonCodeLabel } from './fsm-hub-types'
-import { keeperCostReadCoverage, type KeeperCostReadCoverage } from './cost/keeper-cost-read-coverage'
+import { keeperCostReadCoverage, keeperReadCompleteness, type KeeperCostReadCoverage } from './cost/keeper-cost-read-coverage'
 import { LoadingState, ErrorState } from './common/feedback-state'
 import { StatTile } from './common/stat-tile'
 import { FilterChips } from './common/filter-chips'
@@ -293,7 +293,7 @@ const modelTotals = computed(() => {
   const reasoningRatio = totalOut > 0 ? totalReasoning / totalOut : null
   const errorRate = (totalSuccess + totalError) > 0 ? totalError / (totalSuccess + totalError) : null
   const avgTtfrc = ttfrcCount > 0 ? Math.round(ttfrcSum / ttfrcCount) : null
-  return { totalCost, totalIn, totalOut, totalCache, totalCacheCreation, totalReasoning, totalSuccess, totalError, cacheRatio, reasoningRatio, errorRate, avgTtfrc, p50Avg, p95Max, count: data.length }
+  return { totalCost, totalIn, totalOut, totalCache, totalCacheCreation, totalReasoning, totalSuccess, totalError, cacheRatio, reasoningRatio, errorRate, avgTtfrc, p50Avg, p95Max, readCoverage: null, count: data.length }
 })
 
 const keeperTotals = computed(() => {
@@ -311,7 +311,7 @@ const keeperTotals = computed(() => {
   let tokensUnreadSamples = 0
   let p50Sum = 0
   let p50Count = 0
-  let p95Max = 0
+  let p95Max: number | null = null
   const readCoverage = keeperCostReadCoverage(data)
   for (const k of data) {
     if (k.total_cost_usd != null) reportedCost += k.total_cost_usd
@@ -327,9 +327,10 @@ const keeperTotals = computed(() => {
       p50Sum += k.p50_latency_ms
       p50Count += 1
     }
-    if (k.p95_latency_ms != null && k.p95_latency_ms > p95Max) p95Max = k.p95_latency_ms
+    if (k.p95_latency_ms != null && (p95Max === null || k.p95_latency_ms > p95Max)) p95Max = k.p95_latency_ms
   }
-  const p50Avg = p50Count > 0 ? Math.round(p50Sum / p50Count) : 0
+  // No keeper has a latency (every store unread, or no turns): unknown, not 0ms.
+  const p50Avg = p50Count > 0 ? Math.round(p50Sum / p50Count) : null
   // No keeper reported a cost in this window: the total is unknown, not $0.
   const totalCost = costReportedSamples > 0 ? reportedCost : null
   // Same for tokens: no keeper reported usage means unknown, not 0 tokens.
@@ -347,7 +348,7 @@ function compareKeeperCost(a: KeeperCostMetric, b: KeeperCostMetric): number {
 }
 
 function costTileNote(
-  t: { count: number; costUnreportedSamples?: number; costUnreadSamples?: number; readCoverage?: KeeperCostReadCoverage },
+  t: { count: number; costUnreportedSamples?: number; costUnreadSamples?: number; readCoverage: KeeperCostReadCoverage | null },
   mode: ViewMode,
 ): string {
   const scope = `${t.count} ${mode === 'model' ? 'runtime lanes' : 'keepers'}`
@@ -359,7 +360,7 @@ function costTileNote(
 }
 
 function tokenTileNote(
-  t: { count: number; tokensUnreportedSamples?: number; tokensUnreadSamples?: number; readCoverage?: KeeperCostReadCoverage },
+  t: { count: number; tokensUnreportedSamples?: number; tokensUnreadSamples?: number; readCoverage: KeeperCostReadCoverage | null },
 ): string {
   return [
     'aggregated window',
@@ -370,7 +371,7 @@ function tokenTileNote(
 
 // Keepers whose metrics the server could not read in full. A total over them is
 // a lower bound, so the tile says so beside the number.
-function readCoverageNotes(coverage: KeeperCostReadCoverage | undefined): string[] {
+function readCoverageNotes(coverage: KeeperCostReadCoverage | null): string[] {
   const notes: string[] = []
   if (coverage && coverage.unreadKeepers.length > 0) {
     notes.push(`${coverage.unreadKeepers.length}개 Keeper 저장소 읽지 못함(${coverage.unreadKeepers.join(', ')}) — 합계에서 빠짐`)
@@ -381,13 +382,28 @@ function readCoverageNotes(coverage: KeeperCostReadCoverage | undefined): string
   return notes
 }
 
-function isLowerBound(coverage: KeeperCostReadCoverage | undefined): boolean {
-  return coverage !== undefined && (coverage.unreadKeepers.length > 0 || coverage.partialKeepers.length > 0)
+function isLowerBound(coverage: KeeperCostReadCoverage | null): boolean {
+  return coverage !== null && (coverage.unreadKeepers.length > 0 || coverage.partialKeepers.length > 0)
 }
 
 // "≥ " marks a figure that counts only what the server could read.
-function lowerBoundPrefix(coverage: KeeperCostReadCoverage | undefined): string {
+function lowerBoundPrefix(coverage: KeeperCostReadCoverage | null): string {
   return isLowerBound(coverage) ? '≥ ' : ''
+}
+
+// Every keeper's store failed: nothing was read, so no total of any kind is known.
+function nothingRead(coverage: KeeperCostReadCoverage | null, keeperCount: number): boolean {
+  return coverage !== null && keeperCount > 0 && coverage.unreadKeepers.length === keeperCount
+}
+
+const UNREAD_VALUE = '읽지 못함'
+
+// "within budget" is a claim about every keeper; with some unread it can only be
+// said of the ones that were read.
+function p95TileNote(p95Max: number | null, coverage: KeeperCostReadCoverage | null): string {
+  if (p95Max === null) return 'no latency read'
+  if (p95Max > 8000) return 'over 8s budget'
+  return isLowerBound(coverage) ? 'within budget among keepers read' : 'within budget'
 }
 
 // "미보고" is the runtime's null; "못 읽음" is a row the server could not
@@ -573,11 +589,12 @@ function KeeperRow({
   const overBudget = p95 != null && p95 > 8000
   const unreported = keeper.cost_unreported_samples
   const unread = keeper.cost_unread_samples
-  const storeUnread = keeper.metrics_read.state === 'failed'
+  const completeness = keeperReadCompleteness(keeper.metrics_read)
+  const storeUnread = completeness === 'unread'
   const readNote = keeperReadNote(keeper.metrics_read)
   // A sum over a store with bad lines counts only the readable ones.
-  const bound = readNote !== null && !storeUnread ? '≥ ' : ''
-  const unreadCell = html`<span class="text-[var(--color-status-warn)]">읽지 못함</span>`
+  const bound = completeness === 'partial' ? '≥ ' : ''
+  const unreadCell = html`<span class="text-[var(--color-status-warn)]">${UNREAD_VALUE}</span>`
   const tokensCell = (n: number | null) => storeUnread ? unreadCell : n == null ? '미보고' : `${bound}${formatCostTokens(n)}`
 
   return html`
@@ -1210,14 +1227,15 @@ function CostDashboardContent({ view }: { view: CostView }) {
           <div class="grid grid-cols-2 gap-2 md:grid-cols-4">
             <${StatTile}
               label="Total Cost"
-              value=${t.totalCost == null ? '미보고' : `${lowerBoundPrefix('readCoverage' in t ? t.readCoverage : undefined)}${formatCost(t.totalCost)}`}
+              value=${nothingRead(t.readCoverage, t.count) ? UNREAD_VALUE : t.totalCost == null ? '미보고' : `${lowerBoundPrefix(t.readCoverage)}${formatCost(t.totalCost)}`}
               status="ok"
               delta=${{ direction: 'up', text: costTileNote(t, mode) }}
             />
             <${StatTile}
               label="Tokens In / Out"
               value=${(() => {
-                const bound = lowerBoundPrefix('readCoverage' in t ? t.readCoverage : undefined)
+                if (nothingRead(t.readCoverage, t.count)) return UNREAD_VALUE
+                const bound = lowerBoundPrefix(t.readCoverage)
                 const side = (n: number | null) => n == null ? formatReportedTokens(n) : `${bound}${formatReportedTokens(n)}`
                 return `${side(t.totalIn)} / ${side(t.totalOut)}`
               })()}
@@ -1248,14 +1266,14 @@ function CostDashboardContent({ view }: { view: CostView }) {
             />
             <${StatTile}
               label="p50 Latency (avg)"
-              value=${`${Math.round(t.p50Avg)}ms`}
-              delta=${{ direction: 'flat', text: 'across entries' }}
+              value=${t.p50Avg == null ? '—' : `${Math.round(t.p50Avg)}ms`}
+              delta=${{ direction: 'flat', text: isLowerBound(t.readCoverage) ? 'across the keepers that were read' : 'across entries' }}
             />
             <${StatTile}
               label="p95 Latency (max)"
-              value=${`${Math.round(t.p95Max)}ms`}
-              status=${t.p95Max > 8000 ? 'crit' : undefined}
-              delta=${{ direction: t.p95Max > 8000 ? 'down' : 'flat', text: t.p95Max > 8000 ? 'over 8s budget' : 'within budget' }}
+              value=${t.p95Max == null ? '—' : `${lowerBoundPrefix(t.readCoverage)}${Math.round(t.p95Max)}ms`}
+              status=${t.p95Max != null && t.p95Max > 8000 ? 'crit' : undefined}
+              delta=${{ direction: t.p95Max != null && t.p95Max > 8000 ? 'down' : 'flat', text: p95TileNote(t.p95Max, t.readCoverage) }}
             />
           </div>
         ` : null}

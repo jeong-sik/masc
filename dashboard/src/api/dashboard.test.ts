@@ -5591,6 +5591,13 @@ describe('fetchKeeperCostMetrics', () => {
     return result
   }
 
+  // One row the decoder cannot read fails the payload; the list is never
+  // returned a keeper short.
+  async function expectRowRejected(bad: unknown, good: unknown) {
+    stubRawKeeperCosts([good, bad])
+    await expect(fetchKeeperCostMetrics(60)).rejects.toThrow('유효하지 않은 keeper cost metrics payload')
+  }
+
   function stubCostPayload(raw: unknown) {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(raw), {
       status: 200, headers: { 'Content-Type': 'application/json' },
@@ -5666,17 +5673,17 @@ describe('fetchKeeperCostMetrics', () => {
     expect(result.keepers[0]?.cost_unreported_samples).toBe(2)
   })
 
-  it('drops a keeper row whose total cost disagrees with its reported count', async () => {
-    stubKeeperCosts([
+  it('rejects the payload when a keeper total cost disagrees with its reported count', async () => {
+    const good = { metrics_read: readInFull, keeper_name: 'consistent', total_cost_usd: null, cost_reported_samples: 0, cost_unreported_samples: 2, cost_unread_samples: 0, ...reportedTokens, sample_count: 2 }
+    const rows = [
       { keeper_name: 'reported-but-no-total', cost_reported_samples: 2, cost_unreported_samples: 0, cost_unread_samples: 0, ...reportedTokens, sample_count: 2 },
       { keeper_name: 'reported-but-null-total', total_cost_usd: null, cost_reported_samples: 1, cost_unreported_samples: 0, cost_unread_samples: 0, ...reportedTokens, sample_count: 1 },
       { keeper_name: 'total-but-none-reported', total_cost_usd: 0.5, cost_reported_samples: 0, cost_unreported_samples: 2, cost_unread_samples: 0, ...reportedTokens, sample_count: 2 },
-      { keeper_name: 'consistent', total_cost_usd: null, cost_reported_samples: 0, cost_unreported_samples: 2, cost_unread_samples: 0, ...reportedTokens, sample_count: 2 },
-    ])
+    ]
+    for (const row of rows) await expectRowRejected({ metrics_read: readInFull, ...row }, good)
 
-    const result = await readyKeeperCosts()
-
-    expect(result.keepers.map(k => k.keeper_name)).toEqual(['consistent'])
+    stubRawKeeperCosts([good])
+    expect((await readyKeeperCosts()).keepers.map(k => k.keeper_name)).toEqual(['consistent'])
   })
 
   // Token and cost fields of a keeper with nothing to report; only metrics_read varies.
@@ -5719,19 +5726,19 @@ describe('fetchKeeperCostMetrics', () => {
     expect(result.keepers[0]?.metrics_read).toEqual({ state: 'read', malformed_rows: 3, unread_turn_rows: 2 })
   })
 
-  it('drops a keeper row whose metrics_read is missing or not one the server writes', async () => {
-    stubRawKeeperCosts([
+  it('rejects the payload when a keeper metrics_read is missing or not one the server writes', async () => {
+    const good = { ...emptyKeeper, keeper_name: 'fine', metrics_read: readInFull }
+    const rows = [
       { ...emptyKeeper, keeper_name: 'missing' },
       { ...emptyKeeper, keeper_name: 'unknown-state', metrics_read: { state: 'partial' } },
       { ...emptyKeeper, keeper_name: 'negative', metrics_read: { state: 'read', malformed_rows: -1, unread_turn_rows: 0 } },
       { ...emptyKeeper, keeper_name: 'no-turn-count', metrics_read: { state: 'read', malformed_rows: 0 } },
       { ...emptyKeeper, keeper_name: 'no-reason', metrics_read: { state: 'failed' } },
-      { ...emptyKeeper, keeper_name: 'fine', metrics_read: readInFull },
-    ])
+    ]
+    for (const row of rows) await expectRowRejected(row, good)
 
-    const result = await readyKeeperCosts()
-
-    expect(result.keepers.map(k => k.keeper_name)).toEqual(['fine'])
+    stubRawKeeperCosts([good])
+    expect((await readyKeeperCosts()).keepers.map(k => k.keeper_name)).toEqual(['fine'])
   })
 
   it('keeps unreported token totals as null and the unread counts apart', async () => {
@@ -5762,26 +5769,20 @@ describe('fetchKeeperCostMetrics', () => {
     expect(result.keepers[0]?.cost_unread_samples).toBe(1)
   })
 
-  it('drops a keeper row whose token totals disagree with its reported count', async () => {
+  it('rejects the payload when keeper token totals disagree with their reported count', async () => {
     const costFields = { total_cost_usd: null, cost_reported_samples: 0, cost_unreported_samples: 1, cost_unread_samples: 0, sample_count: 1 }
-    stubKeeperCosts([
+    const good = { metrics_read: readInFull, keeper_name: 'consistent', ...costFields, ...reportedTokens }
+    const rows = [
       { keeper_name: 'reported-but-null-tokens', ...costFields, ...reportedTokens, total_tokens: null },
       { keeper_name: 'tokens-but-none-reported', ...costFields, ...reportedTokens, tokens_reported_samples: 0, tokens_unreported_samples: 1 },
       { keeper_name: 'no-unread-count', ...costFields, ...reportedTokens, tokens_unread_samples: undefined },
-      { keeper_name: 'consistent', ...costFields, ...reportedTokens },
-    ])
-
-    const result = await readyKeeperCosts()
-
-    expect(result.keepers.map(k => k.keeper_name)).toEqual(['consistent'])
+    ]
+    for (const row of rows) await expectRowRejected({ metrics_read: readInFull, ...row }, good)
   })
 
-  it('drops a keeper row that does not say how many samples reported a cost', async () => {
-    stubKeeperCosts([{ keeper_name: 'keeper-alpha', total_cost_usd: 0.5, sample_count: 2 }])
-
-    const result = await readyKeeperCosts()
-
-    expect(result.keepers).toEqual([])
+  it('rejects the payload when a keeper does not say how many samples reported a cost', async () => {
+    const good = { metrics_read: readInFull, keeper_name: 'consistent', total_cost_usd: null, cost_reported_samples: 0, cost_unreported_samples: 1, cost_unread_samples: 0, ...reportedTokens, sample_count: 1 }
+    await expectRowRejected({ metrics_read: readInFull, keeper_name: 'keeper-alpha', total_cost_usd: 0.5, sample_count: 2 }, good)
   })
 })
 

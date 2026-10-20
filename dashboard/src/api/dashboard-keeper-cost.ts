@@ -92,7 +92,7 @@ function reportedSum(raw: unknown, reportedSamples: number): number | null | und
   return sum
 }
 
-// A state the producer does not write is a payload this decoder cannot trust.
+// A state the producer does not write is a row this decoder cannot trust.
 function decodeMetricsRead(raw: unknown): KeeperMetricsRead | null {
   if (!isRecord(raw)) return null
   if (raw.state === 'read') {
@@ -165,12 +165,19 @@ function decodeKeeperCostMetricsResponse(raw: unknown): KeeperCostMetricsRespons
     return { state: 'pending', window_minutes: window }
   }
   if (raw.state !== undefined || !Array.isArray(raw.keepers)) return null
+  // A row this decoder cannot read fails the whole payload. Dropping it leaves
+  // the list a keeper short with nothing saying so, and a list that lost every
+  // row reads as "no cost recorded in this window".
+  const keepers: KeeperCostMetric[] = []
+  for (const row of raw.keepers) {
+    const metric = decodeKeeperCostMetric(row)
+    if (metric === null) return null
+    keepers.push(metric)
+  }
   return {
     state: 'ready',
     window_minutes: asNumber(raw.window_minutes),
-    keepers: asRecordArray(raw.keepers)
-      .map(decodeKeeperCostMetric)
-      .filter((metric): metric is KeeperCostMetric => metric !== null),
+    keepers,
     generated_at: asNumber(raw.generated_at) ?? null,
   }
 }

@@ -869,6 +869,34 @@ for base in [cutReleaseBase,cutProgramBase] {
  precondition(notes.isEmpty,"cut entry sounded or released a key it never sent")
 }
 print("COMMON_MIDI_WRAP_CUT_ENTRY_OWNERSHIP_PASS: a notes-free cut entry acquires nothing, so its same-batch original release stays silent, and it does not refuse a key held across a program change")
+// A copy whose key is still sounding at its end releases it before any owner
+// that begins at that instant: the region's next copy, a notes-free cut entry
+// on a late wrap, or another region on the same channel. The begin may then
+// reset cycleAcquired for those channels without erasing a sounding key.
+let heldEndSource=asset("heldEnd",[
+ ["seconds":0,"port":2,"bytes":[0xc0,0]],
+ ["seconds":0,"port":2,"bytes":[0x90,84,100]],
+ ["seconds":0.2,"port":2,"bytes":[0x80,84,70]]])
+let heldEndBase=try arrangement([heldEndSource],[clip("heldEnd","heldEnd",from:0,to:0.125,repeatCount:8)],duration:1)
+let heldEndAdjacent=try arrangement([heldEndSource],[clip("heldEndA","heldEnd",from:0,to:0.125,repeatCount:2),
+ clip("heldEndB","heldEnd",start:0.25,from:0.05,to:0.175,repeatCount:1)],duration:1)
+for (base,cut,boundary) in [(heldEndBase,false,0.125),(heldEndBase,true,0.5),(heldEndAdjacent,false,0.25)] {
+ let owner=try MidiTransport(timeline:base.timeline,uid:"1",loop:true,coordinated:true,cycle:heldCutCycle)
+ owner.prepared=true;owner.destination=base.destination;owner.sourceDestinations=base.sourceDestinations
+ reset(0);reviewWire=[];try owner.stageCoordinated(at:0);try owner.runCoordinated(anchorNanoseconds:1_000_000_000)
+ reviewClock=1_000_000_000;owner.tick()
+ for edge in stride(from:0.125,to:boundary,by:0.125) {
+  reviewClock=try heldCutCycle.deadline(position:edge,index:0,offset:0,anchor:1_000_000_000);owner.tick()
+ }
+ precondition(owner.sourceHeld[0]?[84]==1,"the ending copy does not hold the key")
+ reviewWire=[]
+ reviewClock=try heldCutCycle.deadline(position:cut ? heldCutCycle.end:boundary,index:0,offset:0,anchor:1_000_000_000);owner.tick()
+ let wire=reviewWire.map(\.1), notes=wire.filter { $0[0]&0xe0==0x80 }
+ precondition(notes == [[0x80,84,0],[0x90,84,100]],"the ending copy's sounding key was not released exactly once before the next owner's attack")
+ precondition(wire.first == [0x80,84,0],"the next owner began before the ending copy released its sounding key")
+ precondition(owner.state == .playing && owner.terminalFailure==nil && owner.sourceHeld[0]?[84]==1 && owner.cycleIndex==(cut ? 1:0))
+}
+print("COMMON_MIDI_END_RELEASES_HELD_PASS: a copy's end releases a key it still holds, once, before the next copy, a cut entry at the wrap or an adjacent region on the channel begins")
 let zeroBase=try arrangement([asset("zero",[
     ["seconds":0,"port":2,"bytes":[0xc0,0]],
     ["seconds":0.3,"port":2,"bytes":[0x90,74,80,0x80,74,77]]])],[clip("zero","zero",from:0,to:1,repeatCount:1)],duration:1)

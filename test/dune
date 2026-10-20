@@ -3321,7 +3321,8 @@
 (test
  (name test_keeper_vision_tool)
  (modules test_keeper_vision_tool)
- (libraries masc_test_deps masc.runtime masc.browser_lane))
+ (libraries browser_addon_fixture masc_test_deps masc.runtime masc.browser_lane)
+ (deps ../bin/masc_native_addon_launcher.exe))
 
 (test
  (name test_keeper_portrait_read)

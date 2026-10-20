@@ -24,7 +24,8 @@ val create : directory:string -> (t, string) result
 val publish : t -> string -> (Yojson.Safe.t, string) result
 (** Copy one completed, session-owned source with bounded streaming memory.
     The returned opaque snapshot marker may be cached by the BiDi connection.
-    Original source identity and contents are checked across the copy. *)
+    Original source identity and contents are checked across the copy. The
+    broker retains its read-only original descriptor until retirement. *)
 val bind : t -> actor:string -> route:Browser_lane.route -> verb:Browser_lane.verb ->
   Yojson.Safe.t -> (Yojson.Safe.t, string) result
 (** Bind [Page_downloads] rows to this call, replacing private snapshot markers
@@ -49,9 +50,16 @@ val release : t -> id:string -> actor:string -> route:Browser_lane.route ->
 (** Settle this exact claim without publication, including after revocation.
     This never authorizes another caller or deletes the original download. *)
 val revoke : t -> unit
+val abandon : t -> (unit, string) result
+(** Revoke and join preparations and claims, then close private original-file
+    descriptors without deleting files. Record unconfirmed backend teardown as
+    a sticky cleanup failure. This cannot confer deletion authority later. *)
 val cleanup : t -> (unit, string) result
 (** Revoke new work and join preparations and claims. Call only after confirmed
     original backend teardown. Remove only broker snapshots and committed
-    original sources whose exact identities remain unchanged. Unpublished,
+    original sources whose pinned inode, owner, permissions and published bytes
+    remain unchanged. Historical mtime/ctime may differ; the current properties
+    must remain stable across content verification. Close all original-file
+    descriptors on success or sticky failure. Unpublished,
     partial, replaced or unknown resources remain and cleanup reports error.
     A failed cleanup stays unconfirmed on later calls. *)

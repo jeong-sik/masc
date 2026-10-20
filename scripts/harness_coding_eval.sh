@@ -849,7 +849,7 @@ run_one() {
           finish_status="transport_error"
           error_text="keeper_msg returned no operation_id"
         else
-          local poll_deadline result_json op_state
+          local poll_deadline result_json op_state observed_operation_id identity_error=""
           poll_deadline=$(( start_epoch + timeout_sec ))
           result_json=""
           while [[ "$(date +%s)" -lt "${poll_deadline}" ]]; do
@@ -858,6 +858,17 @@ run_one() {
                 '{target:{kind:"keeper", name:$name}, operation_id:$op}')" 20; then
               local status_payload
               status_payload="$(tool_result_json)"
+              # Only a response that names the admitted operation may settle
+              # it. A missing, malformed or foreign id is a failed observation
+              # that keeps the response for the reader; the prepared workspace
+              # is still verified below, but the episode cannot pass on it.
+              observed_operation_id="$(printf '%s' "${status_payload}" \
+                | jq -r '.operation_id // empty' 2>/dev/null || true)"
+              if [[ "${observed_operation_id}" != "${operation_id}" ]]; then
+                printf '%s' "${status_payload}" > "${run_dir}/operation-status-mismatch.json"
+                identity_error="operation status named '${observed_operation_id:-<none>}', not the admitted '${operation_id}'"
+                break
+              fi
               op_state="$(printf '%s' "${status_payload}" | jq -r '.state // empty')"
               case "${op_state}" in
                 Succeeded|Failed|Cancelled)
@@ -868,7 +879,10 @@ run_one() {
             fi
             sleep "${POLL_INTERVAL_SEC}"
           done
-          if [[ -z "${result_json}" ]]; then
+          if [[ -n "${identity_error}" ]]; then
+            finish_status="transport_error"
+            error_text="${identity_error}"
+          elif [[ -z "${result_json}" ]]; then
             finish_status="timeout"
             error_text="episode did not finish within ${timeout_sec}s"
           else

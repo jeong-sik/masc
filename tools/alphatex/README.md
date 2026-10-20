@@ -267,6 +267,47 @@ and rootless, followed by octave and inversion. Tonal supplies chord candidates,
 intervals and the rootless dictionary. Candidates at the cursor include bass and
 inversions but do not assert a unique harmonic interpretation. `transpose -12`,
 `quantize 0.25` and `duplicate 8` operate on the selected track transactionally.
+
+For part of a phrase, `:select-notes START END [LOW HIGH]` selects complete notes
+whose onsets lie in `[START, END)` and whose keys lie in the inclusive pitch range
+(for example, `:select-notes 0 4 C3 B4`). It keeps their full lengths, including
+tails beyond END. `:select-all` selects the current track/channel, including
+zero-duration source notes. The piano roll marks selected notes and reports their
+count. Cursor movement retains the selection; changing track, source channel,
+pattern, entering an event view, or undo/redo clears it. Esc or `:clear-selection`
+clears it before further single-note insertion.
+
+`:copy-notes` snapshots the selection into this editor session's note clipboard.
+`:cut-notes` copies and removes it in one document revision; `:delete-notes`
+removes it. `:paste-notes [AT [SEMITONES]]` pastes at the cursor or explicit
+position, optionally transposed, and selects the new notes. A range selection's
+START anchors the copy, retaining leading silence; select-all anchors its first
+onset. Pasting across tracks uses the target phrase track's instrument/channel.
+`:move-notes OFFSET SEMITONES` moves all selected notes together. Every document
+operation is one undo step; overlap, register, timing or route errors leave the
+document and clipboard unchanged. The clipboard survives track/pattern changes
+and undo/redo but is not saved in the musical document or shared with other editor
+sessions or the operating system.
+
+Ctrl+A selects all; Alt+C/X/V copies/cuts/pastes when the terminal forwards Alt as
+Meta (the commands always work). Ctrl+C retains its exit action. Shift+arrows
+move the selected group using original integer ticks; x/Delete removes the group.
+Enter requires clearing a selection before toggling one cursor note. Length and
+velocity keys still edit the single cursor note; `:transpose`, `:quantize` and
+`:duplicate` still apply to the complete track.
+
+Imported MIDI uses its original PPQ/SMPTE units for selection and paste positions.
+Copies retain onset offsets, durations (including points), attack/release dynamics
+and NoteOff versus zero-velocity NoteOn release form. Without an explicit target
+`:channel`, source copies keep their channels; a selected channel remaps the
+copied notes together. Source-port changes at either pasted endpoint are refused.
+These commands select and copy **notes**: controller, pressure, program, tempo,
+SysEx and other original events remain in place, including keyed poly-pressure.
+Use the expression/tempo editor for those events. Copying notes does not claim to
+reproduce pedal-extended sound or an instrument's state at a new position.
+
+The note-versus-region distinction also appears in the
+[Ardour note selection manual](https://manual.ardour.org/editing-and-arranging/edit-midi/note-selection/).
 `tempo 120`, `length 32` and `meter 3 4` set project timing. MIDI/WAV export refuses
 existing files. `level 100` and `pan 64` set the selected track's MIDI volume and
 pan (0–127; pan 64 is center). Dense mixes can clip; lower track levels when the

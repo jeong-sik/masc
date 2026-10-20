@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { emitKeypressEvents } from 'node:readline'
 import { Worker } from 'node:worker_threads'
 import { Note } from 'tonal'
-import { newEditor, editorCommand, editorAction, selectedNote, editorView, editorAxis, editorHarmony, editorSound } from './sequencer-editor.mjs'
+import { newEditor, editorCommand, editorAction, selectedNote, selectedNotes, editorView, editorAxis, editorHarmony, editorSound } from './sequencer-editor.mjs'
 import { loadProject, saveProject, projectMidi } from './sequencer-files.mjs'
 import { sourceTickAtSeconds, sourceSecondsAtTick } from './midi-source-playback.mjs'
 import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo } from './midi-source-editor.mjs'
@@ -27,6 +27,9 @@ const help = [
   ':arrange snapshots this phrase into backing; q returns to this draft',
   'Source seek/resume restores channel state; unknown initial or opaque device state is an error.',
   'Arrow keys: time/pitch; Shift+arrows: move note; Enter/x: insert/remove note',
+  ':select-notes START END [LOW HIGH] selects onsets; :select-all; Esc clears selection',
+  'Ctrl+A: select all; Alt+C/X/V: copy/cut/paste notes; Shift+arrows and x/Delete act on selected notes',
+  ':copy-notes :cut-notes :paste-notes [AT [SEMITONES]] :delete-notes :move-notes OFFSET SEMITONES',
   'Tab: track; n: new track; m: mute; o: solo; u/y: undo/redo',
   '[/]: halve/double note length; +/-: velocity; g: grid; l: loop; Space: play/pause',
   's: save; r: recording; q/Esc: save and return; : opens command input',
@@ -161,11 +164,12 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     if (closed || suspended) return
     const rows = process.stdout.rows || 24, cols = Math.max(1, (process.stdout.columns || 80) - 8)
     const project = editorView(editor), axis = editorAxis(editor), per = axis.per, track = project.tracks[editor.track], current = selectedNote(editor)
+    const selection = new Set(selectedNotes(editor).map(note => note.id))
     const at = editorHarmony(editor)
     const lines = [
       `${project.title}${dirty() ? ' *' : ''} · ${project.timingLabel ?? `${project.tempo} BPM`} · ${project.meter.join('/')} · ${(project.displayLength ?? project.length) / per} ${axis.label} · ${transport.kind}${loop ? ' · LOOP' : ''}`,
       `Track ${editor.track + 1}/${project.tracks.length}: ${track.name} · ${track.detail ?? `ch ${track.channel + 1} · program ${track.program} · level ${track.level} · pan ${track.pan}`}${track.muted ? ' · MUTED' : ''}${track.solo ? ' · SOLO' : ''} · ${track.notes.length} notes`,
-      `Cursor ${editor.tick / per} · ${Note.fromMidi(editor.pitch)} · grid ${editor.step / per} · length ${(current?.duration ?? editor.duration) / per} · velocity ${current?.velocity ?? editor.velocity}`,
+      `Cursor ${editor.tick / per} · ${Note.fromMidi(editor.pitch)} · grid ${editor.step / per} · length ${(current?.duration ?? editor.duration) / per} · velocity ${current?.velocity ?? editor.velocity}${selection.size ? ` · ${selection.size} selected` : ''}${editor.noteClipboard ? ` · ${editor.noteClipboard.notes.length} copied` : ''}`,
       `Chord candidates: ${at.candidates.join(' / ') || '—'} · ${at.notes.join(' ')} · ${status}`,
     ]
     if (picker.view) {
@@ -224,7 +228,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
           if (note.pitch !== pitch) continue
           const left = Math.max(0, Math.floor((note.start - first) / editor.step))
           const right = Math.min(cols - 1, Math.ceil((note.start + note.duration - first) / editor.step) - 1)
-          for (let x = left; x <= right; x++) cells[x] = first + x * editor.step <= note.start ? '█' : '━'
+          for (let x = left; x <= right; x++) cells[x] = selection.has(note.id) ? '▓' : first + x * editor.step <= note.start ? '█' : '━'
         }
         const cursor = Math.floor((editor.tick - first) / editor.step)
         if (pitch === editor.pitch) cells[cursor] = current ? '◆' : '◇'
@@ -482,6 +486,10 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       task = task.then(clearHarmony).finally(draw)
       return
     }
+    if (key.name === 'escape' && selectedNotes(editor).length) {
+      task = task.then(() => { editor = editorCommand(editor, 'clear-selection').editor }).finally(draw)
+      return
+    }
     if (['q', 'escape'].includes(key.name)) { finish(); return }
     if (text === '?') { clearHarmony(); showHelp = !showHelp; draw(); return }
     if (key.name === 'n' && !harmony) { prompt = 'track-add '; draw(); return }
@@ -502,6 +510,13 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         return
       }
       const previous = editor, original = editor.project
+      if ((key.ctrl && key.name === 'a') || (key.meta && ['c', 'x', 'v'].includes(key.name))) {
+        const command = { a: 'select-all', c: 'copy-notes', x: 'cut-notes', v: 'paste-notes' }[key.name]
+        editor = editorCommand(editor, command).editor
+        if (editor.project !== original) { stopPlayback(); changedContext(previous); status = 'Edited selected notes' }
+        else status = 'Note selection updated'
+        return
+      }
       const tempoView = editor.eventView === 'tempo'
       switch (key.name) {
         case 'space': play(); break

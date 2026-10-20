@@ -1,6 +1,8 @@
 import { newProject, validateProject, editProject, beats, pitch, PPQ, harmonyAt } from './sequencer-project.mjs'
 import { sourceEditor, sourceSelected, sourceAction, sourceCommand, sourceHarmony } from './midi-source-editor.mjs'
 import { validateSound } from './project-sound.mjs'
+import { noteSelectionCommand, retainNoteSelection, selectedNotes, moveSelectedNotes } from './note-selection.mjs'
+export { selectedNotes } from './note-selection.mjs'
 
 export function editorSound(editor, sound) {
   validateSound(sound)
@@ -29,6 +31,17 @@ function apply(editor, edit) {
   return { ...editor, project, undo: [...editor.undo, editor.project], redo: [] }
 }
 export function editorAction(editor, action) {
+  const selection = selectedNotes(editor)
+  let next
+  if (selection.length && action.kind === 'remove') next = noteSelectionCommand(editor, 'delete-notes', [])
+  else if (selection.length && action.kind === 'move-note') {
+    // Typed raw-tick keyboard movement must not round-trip through decimal beats.
+    next = moveSelectedNotes(editor, action.ticks ?? 0, action.pitches ?? 0)
+  } else if (selection.length && action.kind === 'toggle-note') throw new Error('Clear the note selection before inserting or toggling one note')
+  else next = act(editor, action)
+  return retainNoteSelection(editor, next, { history: ['undo', 'redo'].includes(action.kind) })
+}
+function act(editor, action) {
   if (editor.project.kind === 'midi-source') return sourceAction(editor, action)
   const note = selectedNote(editor)
   switch (action.kind) {
@@ -81,6 +94,12 @@ export function editorAction(editor, action) {
 
 // A small exact command grammar. Commands yield typed effects; the terminal owns IO.
 export function editorCommand(editor, line) {
+  const [command, ...args] = line.trim().split(/\s+/)
+  const selected = noteSelectionCommand(editor, command, args)
+  const result = selected === undefined ? runCommand(editor, line) : { editor: selected }
+  return { ...result, editor: retainNoteSelection(editor, result.editor, { history: ['undo', 'redo'].includes(command) }) }
+}
+function runCommand(editor, line) {
   if (editor.project.kind === 'midi-source') return sourceCommand(editor, line)
   const [command, ...args] = line.trim().split(/\s+/)
   const count = (min, max = min) => {

@@ -65,6 +65,16 @@ row returns to that tick for further edits; analysis itself never changes the
 musical document. Context changes cancel obsolete work, close joins the worker,
 and complete candidate data can be exported without overwriting an existing file.
 
+Piano-roll note selections belong to one track/pattern/channel and contain exact
+note IDs, with a copy anchor in native ticks. Range selection admits note onsets,
+not clipped tails; select-all includes point notes. Session-private clipboard
+snapshots preserve rhythm/dynamics and source NoteOff wire form/release velocity.
+Paste and group moves validate one whole candidate before a single undo revision;
+source port and note-off pairing checks remain authoritative. Non-note events stay
+in place. Context/history transitions clear selections while retaining independent
+clipboard contents. TUI commands and forwarded shortcuts share these decisions;
+admitted clipboard edits drain through close before saving.
+
 Native WAV preview uses AVAudioEngine/PlayerNode buffers with pause, seek and
 looping, pinned to a CoreAudio output. External MIDI preview uses a separately
 owned CoreMIDI sender and pins a destination by unique ID. It projects the same
@@ -87,7 +97,7 @@ This stack is one step toward the full destination. Further work remains:
   arrangement playback, and low-latency monitoring/recording.
 - Connect the independently developed VST instrument/preset host (#43684) to project
   playback without changing the selected instrument on an error.
-- Piano-roll selections, copy/paste, step/live recording, automation,
+- Step/live recording, automation,
   flexible tempo/meter maps, metronome/count-in and practice feedback.
 - Verify real MIDI and audio hardware and the actual Ghostty UI. Loopback/virtual
   sources, PCM files and terminal controller evidence prove narrower behaviors.

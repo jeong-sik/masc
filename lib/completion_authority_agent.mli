@@ -85,8 +85,12 @@ module For_testing : sig
 
   (** Why a review stopped without a verdict. The registry row, the WARN
       line and the Board notice are all read off this sum. Only
-      [Not_reviewed] carries a retry request: the evaluator's typed error is
-      the only automatic-retry authority, so no other stop can ask for one. *)
+      [Not_reviewed] can request a retry: the evaluator's typed candidate
+      failures are the only automatic-retry authority, so no other stop can
+      ask for one. [retryable_runtimes] names the candidates whose failure
+      passes with time (a transient error, or a provider rest whose end is
+      known); a non-empty list is the request, and their recorded path rests
+      date it. *)
   type stop_cause =
     | Infrastructure_unavailable of
         { stage : Verification_run_registry.infrastructure_stage
@@ -99,7 +103,6 @@ module For_testing : sig
         ; evaluator_runtime : string
         ; retryable_runtimes : string list
         ; model_absent_runtimes : string list
-        ; retry : retry_request
         }
     | Raised of { detail : string }
 
@@ -111,13 +114,24 @@ module For_testing : sig
     | Committed
     | Stalled of stop_cause
 
-  val retry_request_of_evaluator_retryable : bool option -> retry_request
-  (** [Some true] is the only automatic-retry authority. [Some false] and
-      [None] request nothing, preserving the producer/operator contract. *)
+  val not_reviewed_of_result : Task.Anti_rationalization.review_result -> stop_cause
+  (** The stop a verdict-less review records: [Not_reviewed] with the
+      evaluator's gate, its fallback reason (the gate name when it gave
+      none), its terminal runtime and its per-candidate outcomes. *)
 
   val retry_request_of_stop_cause : stop_cause -> retry_request
-  (** The request a stop carries: [Not_reviewed]'s own, [No_retry_requested]
-      for every other constructor. *)
+  (** [Retry_requested] for a [Not_reviewed] that names at least one
+      candidate whose failure passes with time; [No_retry_requested] for an
+      empty list and for every other constructor, preserving the
+      producer/operator contract. *)
+
+  val retry_delay_sec : retry_interval_sec:float -> now:float -> stop_cause -> float
+  (** How long the retry a stop requests waits: for [Not_reviewed],
+      [Verification_retry.delay] over its [retryable_runtimes] — the
+      [retry_interval_sec] pulse while one of them serves, otherwise until
+      the earliest of their recorded path rests ends; [retry_interval_sec]
+      for every other stop. Reads the runtime table and the rest stores at
+      [now]. *)
 
   val stop_cause_label : stop_cause -> string
   (** The constructor name with the payload an operator filters on, e.g.

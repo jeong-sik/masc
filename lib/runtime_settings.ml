@@ -495,7 +495,6 @@ let surfaces =
         "keeper.turn.temperature";
         "keeper.turn.batch_limit";
         "keeper.turn.enable_thinking";
-        "keeper.turn.max_tool_rounds";
         "keeper.tool_search.carry_window";
       ];
     };

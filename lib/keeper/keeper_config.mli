@@ -119,13 +119,6 @@ val keeper_status_fast_default : unit -> bool
 val keeper_enable_thinking : unit -> bool option
 (** Explicit fleet request override; absent configuration preserves provider defaults. *)
 
-(** Ceiling on tool-continuation rounds in one keeper turn. [None] leaves the
-    AGENT_CORE run loop unbounded, which is what it was. Reaching the ceiling
-    fails the run with [ToolRoundLimitExceeded] rather than returning a
-    truncated run as a finished one. Hot-reloadable via
-    [keeper.turn.max_tool_rounds]; 0 means unbounded. *)
-val keeper_max_tool_rounds : unit -> int option
-
 (** How far back through a conversation a deferred tool's most recent call may
     be and still be placed with its argument schema, counted in tool calls of
     any tool. A tool further back than this is shown by name in the listing

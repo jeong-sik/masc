@@ -118,8 +118,9 @@ type review_result =
   ; gate : gate
   ; fallback_reason : string option
   ; retryable_runtimes : string list
-        (** Actual candidates that reported a typed retryable error, in attempt
-            order. The final diagnostic runtime does not own their retry time. *)
+        (** Actual candidates whose typed failure passes with time, in attempt
+            order: a transient error, or a provider rest whose end is known.
+            The final diagnostic runtime does not own their retry time. *)
   ; model_absent_runtimes : string list
         (** Actual candidates whose typed refusal was model-absence
             ({!Keeper_runtime_failure_route.core_error_is_model_absent}: a
@@ -128,7 +129,6 @@ type review_result =
             are kept out of [retryable_runtimes] and named here so the
             deferral records per-candidate outcomes, not only the last
             candidate's error (2026-10-07 audit F-02). *)
-  ; evaluator_error_retryable : bool option
   }
 
 (* ================================================================ *)
@@ -525,6 +525,63 @@ let resolve_evaluator_slots = function
 
 let unresolved_evaluator_runtime = "unresolved"
 
+(* The caller reads the walk's stores; this library sits below the walk. *)
+type provider_rest =
+  | Rests_until_stated_end
+  | No_stated_rest
+
+(* What one candidate's failure says about reviewing the same submission
+   again with nothing changed by a producer or an operator.
+
+   [Reviews_again]: the failure passes with time. Either the call itself can
+   be repeated as it is ([Agent_core.Error.is_retryable]: a dropped
+   transport, a 5xx, a deadline, a throttle), or the provider has stated when
+   the candidate's path serves again and that time is still ahead. The walk
+   records that statement when the provider refuses: the reset a hard quota
+   states, or the reset of a spent usage window it reads after a 403 or after
+   a 429 that named no wait. [provider_rest] reads it back from the same
+   stores [Verification_retry.delay] dates the retry from, so the error
+   class or status that carried the refusal does not decide.
+   [Agent_core.Error.is_retryable] cannot answer the second question: it
+   drives the retry loop inside one call, where repeating a spent quota at
+   once is pointless, so it answers [false] for every [HardQuota] and every
+   403 (task-2402, 2026-10-20: a 429 hard quota with a 2,025-second reset
+   stopped the review for good).
+
+   Reading the recorded rest is not a gate on past evidence. The window is
+   the provider's own current statement about when this path serves again,
+   read when the failure is reported after the walk records it. The failure's
+   eligibility to be reviewed again survives a later candidate outliving that
+   window; the current rest still dates the next dispatch. This classification
+   only requests another review, never gates whether one may run.
+
+   [Model_absent]: a retired or unknown model, permanent for the unchanged
+   request.
+
+   [Producer_must_act]: nothing that time alone changes -- a credential, a
+   configuration, a refused request body, an account refusal or a quota with
+   no stated end. The same input meets the same refusal, so a timer would
+   only repeat the whole run. *)
+type candidate_failure =
+  | Reviews_again
+  | Model_absent
+  | Producer_must_act
+
+let candidate_failure ~provider_rest ~runtime_id error =
+  if Keeper_runtime_failure_route.core_error_is_model_absent error
+  then Model_absent
+  else if Agent_core.Error.is_retryable error
+  then Reviews_again
+  else (
+    match provider_rest runtime_id with
+    | Rests_until_stated_end -> Reviews_again
+    | No_stated_rest -> Producer_must_act)
+;;
+
+let append_unique left right =
+  List.fold_left (fun ids id -> if List.mem id ids then ids else ids @ [ id ]) left right
+;;
+
 let run
       ?evaluator_runtime
       ?generator_runtime
@@ -540,6 +597,7 @@ let run
          the whole goal, as before. *)
       ?goal_blocks
       ~(lookup : lookup_surface)
+      ~(provider_rest : string -> provider_rest)
       ~base_path
       ()
   : review_result
@@ -564,7 +622,6 @@ let run
       ; fallback_reason = Some reason
       ; retryable_runtimes = []
       ; model_absent_runtimes = []
-      ; evaluator_error_retryable = None
       }
   | Ok [] ->
     (* [resolve_evaluator_slots] never yields an empty list; this arm keeps the
@@ -582,7 +639,6 @@ let run
       ; fallback_reason = Some reason
       ; retryable_runtimes = []
       ; model_absent_runtimes = []
-      ; evaluator_error_retryable = None
       }
   | Ok (((first_slot, _) as first_candidate) :: rest_slots) ->
     (match render_prompt () with
@@ -602,7 +658,6 @@ let run
          ; fallback_reason = Some detail
          ; retryable_runtimes = []
          ; model_absent_runtimes = []
-         ; evaluator_error_retryable = None
          }
      | Ok prompt ->
        (* The rendered prompt rides as the first block; attached evidence
@@ -627,20 +682,20 @@ let run
           a reply without exactly one valid verdict tool call — yields to the
           next slot. The terminal runtime/reason describes the last attempt,
           while retryability aggregates every typed evaluator error: one
-          transient slot must not be masked by a later statically unavailable
-          fallback. The same aggregation includes typed failures from the
-          runtime candidates inside each slot, while the slot's terminal error
-          remains the operator-facing reason. A single-slot lane still reports
-          exactly what the pre-lane path reported. Model-absence is classified
-          by the Domain A route, not by message text: a retired or unknown
-          model is permanent for the unchanged request, so it names the
-          deferral's permanent set and can never arm its retry. *)
+          slot whose failure passes with time must not be masked by a later
+          statically unavailable fallback. The same aggregation includes typed
+          failures from the runtime candidates inside each slot, while the
+          slot's terminal error remains the operator-facing reason. A
+          single-slot lane still reports exactly what the pre-lane path
+          reported. Each failure is classified by [candidate_failure] from its
+          typed error and the candidate's recorded provider rest, never by
+          message text: a retired or unknown model is permanent for the
+          unchanged request, so it names the deferral's permanent set and can
+          never arm its retry. *)
        let run_attempt (slot, candidate_kind) =
-         let retryable_runtimes = ref [] in
-         let model_absent_runtimes = ref [] in
-         let attempt_observed = ref false in
-         try
-           let result =
+         let attempt_failures = ref [] in
+         let result =
+           try
              (Atomic.get run_llm_reviewer_fn)
                ~base_path
                ?sw
@@ -653,29 +708,32 @@ let run
                ~on_tool_result
                ~on_runtime_attempt_error:
                  (fun ~runtime_id ~attempt:_ ~dispatch:_ error ->
-                    attempt_observed := true;
-                    if Keeper_runtime_failure_route.core_error_is_model_absent error
-                       && not (List.mem runtime_id !model_absent_runtimes)
-                    then model_absent_runtimes := !model_absent_runtimes @ [ runtime_id ];
-                    if Agent_core.Error.is_retryable error
-                       && not (Keeper_runtime_failure_route.core_error_is_model_absent error)
-                       && not (List.mem runtime_id !retryable_runtimes)
-                    then retryable_runtimes := !retryable_runtimes @ [ runtime_id ])
+                    let failure = candidate_failure ~provider_rest ~runtime_id error in
+                    attempt_failures := !attempt_failures @ [ runtime_id, failure ])
                ()
-           in
-           result, !retryable_runtimes, !model_absent_runtimes, !attempt_observed
-         with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn ->
-           ( Error
+           with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | exn ->
+             Error
                (Agent_core.Error.Internal
                   (Printf.sprintf
                      "review evaluator raised unexpectedly: %s"
                      (Printexc.to_string exn)))
-           , !retryable_runtimes, !model_absent_runtimes, !attempt_observed )
-       in
-       let append_unique left right =
-         List.fold_left (fun ids id -> if List.mem id ids then ids else ids @ [id]) left right
+         in
+         (* The walk reports after recording the refusal's rest. Retain that
+            classification here: another candidate in this slot can outlive
+            the stated reset and prune it before the slot answers. *)
+         let retryable_runtimes, model_absent_runtimes =
+           List.fold_left
+             (fun (retryable, model_absent) (runtime_id, failure) ->
+                match failure with
+                | Reviews_again -> append_unique retryable [ runtime_id ], model_absent
+                | Model_absent -> retryable, append_unique model_absent [ runtime_id ]
+                | Producer_must_act -> retryable, model_absent)
+             ([], [])
+             !attempt_failures
+         in
+         result, retryable_runtimes, model_absent_runtimes, !attempt_failures <> []
        in
        let rec attempt ~retryable_runtimes ~model_absent_runtimes ((slot, _) as candidate) remaining =
          match run_attempt candidate with
@@ -699,7 +757,6 @@ let run
              ; fallback_reason = None
              ; retryable_runtimes = []
              ; model_absent_runtimes = []
-         ; evaluator_error_retryable = None
              }
          | Ok {verdict=None;selected_runtime_id=slot}, nested_retryable_runtimes, nested_model_absent, _ ->
            let retryable_runtimes = append_unique retryable_runtimes nested_retryable_runtimes in
@@ -728,24 +785,24 @@ let run
                 ; fallback_reason = Some detail
                 ; retryable_runtimes
                 ; model_absent_runtimes
-                ; evaluator_error_retryable =
-                    (if retryable_runtimes <> []
-                     then Some true
-                     else None)
                 })
          | Error error, nested_retryable_runtimes, nested_model_absent, attempt_observed ->
            let detail = Agent_core.Error.to_string error in
+           let slot_failure = candidate_failure ~provider_rest ~runtime_id:slot error in
            let slot_model_absent =
-             if Keeper_runtime_failure_route.core_error_is_model_absent error then [ slot ] else []
+             match slot_failure with
+             | Model_absent -> [ slot ]
+             | Reviews_again | Producer_must_act -> []
            in
-           let candidate_retries =
-             append_unique nested_retryable_runtimes
-               (if not attempt_observed
-                   && Agent_core.Error.is_retryable error
-                   && slot_model_absent = []
-                then [ slot ]
-                else [])
+           (* Once the walk reported its own candidates, they own the retry:
+              the slot's terminal error describes the lane, not a path that
+              can be dated. *)
+           let slot_retries =
+             match slot_failure, attempt_observed with
+             | Reviews_again, false -> [ slot ]
+             | Reviews_again, true | (Model_absent | Producer_must_act), _ -> []
            in
+           let candidate_retries = append_unique nested_retryable_runtimes slot_retries in
            let retryable = candidate_retries <> [] in
            let retryable_runtimes = append_unique retryable_runtimes candidate_retries in
            let model_absent_runtimes =
@@ -782,8 +839,6 @@ let run
                 ; fallback_reason = Some detail
                 ; retryable_runtimes
                 ; model_absent_runtimes
-                ; evaluator_error_retryable =
-                    Some exhausted_retryable
                 })
        in
        attempt ~retryable_runtimes:[] ~model_absent_runtimes:[] first_candidate rest_slots)
@@ -801,6 +856,7 @@ let review
       ~(question : verdict_question)
       ~(lookup : lookup_surface)
       ~(lookup_root : lookup_root)
+      ~provider_rest
       ~base_path
       (req : review_request)
   : review_result
@@ -831,6 +887,7 @@ let review
       Log.Task.warn "task_id=%s [task-completion-review] %s" req.task_id message)
     ~render_prompt:(fun () -> build_prompt ~question ~lookup ~lookup_root req)
     ~lookup:lookup_for_judge
+    ~provider_rest
     ~base_path
     ()
 ;;

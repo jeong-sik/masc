@@ -53,6 +53,7 @@ let review () =
       }
     ~lookup
     ~lookup_root
+    ~provider_rest:Masc.Verification_retry.provider_rest
     ~base_path:(Filename.get_temp_dir_name ())
     request
 
@@ -76,7 +77,8 @@ let test_explicit_base_path_reaches_reviewer () =
               ; evidence_posture = AR.Note_only
               ; few_shot_block = ""
               }
-            ~lookup ~lookup_root ~base_path:expected request);
+            ~lookup ~lookup_root ~provider_rest:Masc.Verification_retry.provider_rest
+            ~base_path:expected request);
        match !received with
        | Some actual ->
          Alcotest.(check string) "review uses the caller BasePath" expected actual
@@ -142,8 +144,7 @@ let test_evaluator_failure_is_unavailable_not_reject () =
    already exceeds the target's whole budget cannot be fixed by trying again
    with the same request, so [Agent_core.Error.is_retryable] already reports
    [false] for it (it is an [Agent (HookExecutionFailed _)]). [review] must
-   carry that through as [evaluator_error_retryable = Some false] rather than default to the
-   always-retry [true] every other gate uses. *)
+   name no candidate that could review again, so nothing arms a retry. *)
 let test_structural_budget_failure_is_not_retryable () =
   with_reviewer
     (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
@@ -164,15 +165,15 @@ let test_structural_budget_failure_is_not_retryable () =
          "gate"
          "evaluator_unavailable"
          (AR.gate_to_string result.gate);
-       Alcotest.(check (option bool))
+       Alcotest.(check (list string))
          "classified non-retryable"
-         (Some false)
-         result.evaluator_error_retryable)
+         []
+         result.retryable_runtimes)
 ;;
 
 (* Contrast case: a rate limit is exactly the kind of failure retrying is
    supposed to absorb ([Agent_core.Error.is_retryable] reports [true] for
-   [Api (RateLimited _)]), so the always-retry default must survive here. *)
+   [Api (RateLimited _)]), so the slot is named as able to review again. *)
 let test_rate_limit_failure_stays_retryable () =
   with_reviewer
     (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
@@ -186,10 +187,10 @@ let test_rate_limit_failure_stays_retryable () =
          "gate"
          "evaluator_unavailable"
          (AR.gate_to_string result.gate);
-       Alcotest.(check (option bool))
+       Alcotest.(check (list string))
          "classified retryable"
-         (Some true)
-         result.evaluator_error_retryable)
+         [ "task-reviewer" ]
+         result.retryable_runtimes)
 ;;
 
 let test_reject_without_reason_is_malformed () =
@@ -384,6 +385,7 @@ let test_successful_lookup_is_exposed_to_the_reviewer () =
              }
            ~lookup
            ~lookup_root
+           ~provider_rest:Masc.Verification_retry.provider_rest
            ~base_path:(Filename.get_temp_dir_name ())
            request
        in

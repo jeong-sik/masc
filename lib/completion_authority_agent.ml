@@ -585,8 +585,9 @@ type retry_scheduling =
     is left waiting on a producer, an operator, or the lane's own retry; the
     registry row, the WARN line and the Board notice are all read off this
     sum, so none of them can say something the others do not. Only
-    [Not_reviewed] carries a retry request: the evaluator's typed error is
-    the only automatic-retry authority, so no other stop can ask for one. *)
+    [Not_reviewed] can request a retry: the evaluator's typed candidate
+    failures are the only automatic-retry authority, so no other stop can ask
+    for one. *)
 type stop_cause =
   | Infrastructure_unavailable of
       { stage : Verification_run_registry.infrastructure_stage
@@ -598,12 +599,15 @@ type stop_cause =
       ; detail : string
       ; evaluator_runtime : string
       ; retryable_runtimes : string list
+          (** Candidates whose typed failure passes with time: a transient
+              error, or a provider rest whose end is known
+              ([Task.Anti_rationalization.review_result]). A non-empty list
+              requests the retry, and their recorded path rests date it. *)
       ; model_absent_runtimes : string list
           (** Candidates whose typed refusal was model-absence (a retired or
               unknown model): permanent for the unchanged request, excluded
               from [retryable_runtimes], and named here so the stall record
               carries per-candidate outcomes (2026-10-07 audit F-02). *)
-      ; retry : retry_request
       }
   | Raised of { detail : string }
 
@@ -611,16 +615,13 @@ type process_outcome =
   | Committed
   | Stalled of stop_cause
 
-(* The one place that reads the evaluator's retryability. [Some true] is the
-   only automatic-retry authority; [Some false] and [None] leave the next move
-   to the producer, the operator, or the whole-backlog sweep. *)
-let retry_request_of_evaluator_retryable : bool option -> retry_request = function
-  | Some true -> Retry_requested
-  | Some false | None -> No_retry_requested
-;;
-
+(* The one place that reads the evaluator's retryability. A candidate whose
+   failure passes with time is the only automatic-retry authority; a review
+   with none leaves the next move to the producer, the operator, or the
+   whole-backlog sweep. *)
 let retry_request_of_stop_cause : stop_cause -> retry_request = function
-  | Not_reviewed { retry; _ } -> retry
+  | Not_reviewed { retryable_runtimes = _ :: _; _ } -> Retry_requested
+  | Not_reviewed { retryable_runtimes = []; _ }
   | Infrastructure_unavailable _ | Commit_failed _ | Raised _ -> No_retry_requested
 ;;
 
@@ -639,6 +640,32 @@ let registry_outcome_of_stop_cause : stop_cause -> Verification_run_registry.out
     in
     Verification_run_registry.Not_reviewed { gate; detail }
   | Raised { detail } -> Verification_run_registry.Raised { detail }
+;;
+
+(* No verdict means nobody judged this submission. Whether the lane retries
+   on its own is read off the evaluator's typed candidate failures that this
+   cause carries; the WARN line and the Board notice follow in
+   [process_task], after the run row is recorded and the scheduler has
+   answered, so both describe the timer that exists rather than the one this
+   attempt asked for. *)
+let not_reviewed_of_result (result : Task.Anti_rationalization.review_result) =
+  let gate = Task.Anti_rationalization.gate_to_string result.gate in
+  (* Both arms are real descriptions, not a default standing in for an
+     unknown: the reviewer's own fallback text when it produced one, the gate
+     name when it did not. Written as a match so neither arm hides inside an
+     [Option.value ~default]. *)
+  let detail =
+    match result.fallback_reason with
+    | Some reason -> reason
+    | None -> gate
+  in
+  Not_reviewed
+    { gate
+    ; detail
+    ; evaluator_runtime = result.evaluator_runtime
+    ; retryable_runtimes = result.retryable_runtimes
+    ; model_absent_runtimes = result.model_absent_runtimes
+    }
 ;;
 
 (* The constructor name plus the payload an operator filters on. The line
@@ -909,6 +936,7 @@ let process_task_once
                 ~sw:(Some runtime.sw)
                 ~lookup
                 ~lookup_root
+                ~provider_rest:Verification_retry.provider_rest
                 ~question
                 ~on_tool_result
                 prepared.review_request
@@ -926,32 +954,7 @@ let process_task_once
             let evaluator_runtime = result.evaluator_runtime in
             match result.verdict with
        | None ->
-         let gate = Task.Anti_rationalization.gate_to_string result.gate in
-         (* Both arms are real descriptions, not a default standing in for an
-            unknown: the reviewer's own fallback text when it produced one, the
-            gate name when it did not. Written as a match so neither arm hides
-            inside an [Option.value ~default]. *)
-         let detail =
-           match result.fallback_reason with
-           | Some reason -> reason
-           | None -> gate
-         in
-         (* No verdict means nobody judged this submission. Whether the lane
-            retries on its own is read here from the typed evaluator error;
-            the WARN line and the Board notice follow in [process_task],
-            after this row is recorded and the scheduler has answered, so
-            both describe the timer that exists rather than the one this
-            attempt asked for. *)
-         let cause =
-           Not_reviewed
-             { gate
-             ; detail
-             ; evaluator_runtime
-             ; retryable_runtimes = result.retryable_runtimes
-             ; model_absent_runtimes = result.model_absent_runtimes
-             ; retry = retry_request_of_evaluator_retryable result.evaluator_error_retryable
-             }
-         in
+         let cause = not_reviewed_of_result result in
          complete ~evaluator_runtime (Stalled cause, registry_outcome_of_stop_cause cause)
        | Some review_verdict ->
          let verdict = completion_verdict_of_review review_verdict in
@@ -1081,14 +1084,14 @@ let schedule_retry_scope (runtime : runtime) ~delay_sec scope =
     scope
 ;;
 
-(* Retry when any candidate that actually reported a transient failure can
-   serve again. The last diagnostic may name a different, long-resting slot. *)
-let retry_delay_sec (runtime : runtime) = function
+(* Retry when the first candidate whose failure passes with time can serve
+   again: at the pulse when one already serves, or when the earliest recorded
+   path rest ends (a provider's stated rate-limit or quota reset). The last
+   diagnostic may name a different, long-resting slot. *)
+let retry_delay_sec ~retry_interval_sec ~now = function
   | Not_reviewed { retryable_runtimes; _ } ->
-    let now = Eio.Time.now runtime.clock in
-    Verification_retry.delay ~retry_interval_sec:runtime.retry_interval_sec ~now retryable_runtimes
-  | Infrastructure_unavailable _ | Commit_failed _ | Raised _ ->
-    runtime.retry_interval_sec
+    Verification_retry.delay ~retry_interval_sec ~now retryable_runtimes
+  | Infrastructure_unavailable _ | Commit_failed _ | Raised _ -> retry_interval_sec
 ;;
 
 (* A retry that only waits the pulse joins the shared timer. One that must
@@ -1121,12 +1124,14 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
   let key = { task_id = task.id; verification_id } in
   if claim_review runtime key
   then (
-    (* A retryable evaluator failure has no producer action that can legally
-       advance the Task: it is still [AwaitingVerification]. Re-arm the
-       application-owned scan after the durable run observation is recorded,
-       then say what the scheduler did — in the log first, then on the Board.
-       Every other stall keeps the producer/operator contract, and restart
-       recovery still comes from [start]'s initial pending scan. *)
+    (* An evaluator failure that passes with time -- a transient error, or a
+       path resting until a time its provider stated -- has no producer
+       action that can legally advance the Task: it is still
+       [AwaitingVerification]. Re-arm the application-owned scan after the
+       durable run observation is recorded, then say what the scheduler did —
+       in the log first, then on the Board. Every other stall keeps the
+       producer/operator contract, and restart recovery still comes from
+       [start]'s initial pending scan. *)
     let outcome : process_outcome =
       Fun.protect
         ~finally:(fun () -> release_review runtime key)
@@ -1135,15 +1140,24 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
     match outcome with
     | Committed -> ()
     | Stalled cause ->
-      (* Nothing schedules another look at a key that requests no retry: the
-         scope rule admits it again only through a fresh submission, or
-         through the sweep, which is armed at boot and after a failed backlog
-         read rather than on a timer. So the Task sits in
-         [AwaitingVerification] until a producer or operator acts, and the
-         registry row alone reaches no one: every stop is promoted to the
-         Board, where the producer Keeper and the operator read it and decide
-         whether to resubmit. *)
-      let delay_sec = retry_delay_sec runtime cause in
+      (* A key requests a retry whenever one candidate's failure passes with
+         time, and a provider rest dates that retry at the rest's end rather
+         than stopping it. A key that requests none had only failures time
+         does not change -- a credential, a configuration, a refused request,
+         an account refusal or a quota with no stated end -- and nothing
+         schedules another look at it: the scope rule admits it again only
+         through a fresh submission, or through the sweep, which is armed at
+         boot and after a failed backlog read rather than on a timer. So that
+         Task sits in [AwaitingVerification] until a producer or operator
+         acts, and the registry row alone reaches no one: every stop is
+         promoted to the Board, where the producer Keeper and the operator
+         read it and decide whether to resubmit. *)
+      let delay_sec =
+        retry_delay_sec
+          ~retry_interval_sec:runtime.retry_interval_sec
+          ~now:(Eio.Time.now runtime.clock)
+          cause
+      in
       let scheduling =
         match retry_request_of_stop_cause cause with
         | No_retry_requested -> Retry_not_requested
@@ -1379,7 +1393,6 @@ module For_testing = struct
         ; evaluator_runtime : string
         ; retryable_runtimes : string list
         ; model_absent_runtimes : string list
-        ; retry : retry_request
         }
     | Raised of { detail : string }
 
@@ -1387,8 +1400,9 @@ module For_testing = struct
     | Committed
     | Stalled of stop_cause
 
-  let retry_request_of_evaluator_retryable = retry_request_of_evaluator_retryable
+  let not_reviewed_of_result = not_reviewed_of_result
   let retry_request_of_stop_cause = retry_request_of_stop_cause
+  let retry_delay_sec = retry_delay_sec
   let stall_disposition_of_scheduling = stall_disposition_of_scheduling
   let stop_cause_label = stop_cause_label
   let stalled_gate = stalled_gate

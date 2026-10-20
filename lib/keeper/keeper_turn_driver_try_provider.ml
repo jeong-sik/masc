@@ -2336,9 +2336,6 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                turns. An official client runs its tools inside one provider
                call, so its attempt has no such boundary. *)
             yield_on_tool = true
-            (* Read per turn rather than captured at boot so the ceiling can be
-               tuned through the runtime-params API without a restart. *)
-          ; max_tool_rounds = Keeper_config.keeper_max_tool_rounds ()
           }
   in
   (* The caller's cell when it has one, because the turn's tools captured it

@@ -16,6 +16,7 @@ characters) and `native-tui-scenario`:
 | `rich-chat-workspace` | TUI, server and the seven test executables | The `rich-workspace` suites plus `test_tui_chat_call_reader` |
 | `original-tool-result` | TUI, server and the four test executables | `test_keeper_tool_result_source`, `test_tool_output_washing_e2e`, `test_server_dashboard_http_keeper_tool_lookup`, `test_tui_chat_call_reader` |
 | `code-references` | TUI, server and the five test executables | `test_lsp_workspace_pool`, `test_lsp_questions`, `test_lsp_message_router`, `test_lsp_process_manager`, `test_server_ide_lsp_proxy` |
+| `resource-reading` | TUI, server and the four test executables | `test_tui_published_reports`, `test_tui_resource_document_search`, `test_tui_resource_image_admission`, `test_tui_resource_images` |
 
 The server target is `bin/main_eio.exe`; the TUI is `bin/masc_tui.exe`.
 Every scenario also builds `bin/masc_tui_keys_doc_cli.exe`, the canonical key
@@ -72,6 +73,23 @@ gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
   -f native-tui-scenario=code-references
 ```
 
+Use `resource-reading` for a Resources report, body-search or image candidate.
+The four suites check exact report revision requests and read ownership,
+withdrawal and refusal, admitted original document search, logical search
+position after scroll clamping, original multipart image admission and source
+conservation. They check requests, stored state and decisions; they do not
+assert screen wording, layout or row order. The matching server and TUI are
+packaged for separate API and terminal observations. These suites do not
+exercise the actual search keyboard loop, present images in a terminal or
+establish a live report publication. All four targets must exist in the selected
+source; a missing target fails rather than reducing the scope.
+
+```sh
+gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
+  -f native-tui-source-sha=SOURCE_COMMIT_40_HEX \
+  -f native-tui-scenario=resource-reading
+```
+
 For a workspace file-finder candidate:
 
 ```sh
@@ -90,7 +108,7 @@ result. An accepted request or running job is not a passing result.
 
 The artifact is named `tui-macos-arm64-<source SHA>-<run ID>`. It retains build
 targets, logs, completed suite names, native dependency lists and `receipt.json`.
-The TUI's embedded `--build-commit` must equal the selected source. The workspace
+The TUI's embedded `--build-commit` must equal the selected source. The server-bearing
 scenarios also check the server's `build-commit` and include it as `masc`, with
 its own digest and dependency list. The receipt records source SHA, workflow
 SHA, scenario and both binary digests; the existing TUI `sha256` field remains.

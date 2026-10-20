@@ -20,6 +20,7 @@ on:
           - rich-chat-workspace
           - original-tool-result
           - code-references
+          - resource-reading
 
 permissions:
   contents: read

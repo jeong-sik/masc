@@ -30,7 +30,8 @@ let refusal = function
 
 (* The provider failures without their own answer here are transient exactly
    when AGENT_CORE's retry policy says so; otherwise they keep the class their
-   variant names. *)
+   variant names. A failure with no named cause then reads as
+   [Configuration_refused] (see the mli). *)
 let completion (error : Http.http_error) =
   let unless_retryable failure =
     if Agent_core.Llm_provider.Error.is_retryable (Agent_core.Llm_provider.Error.of_http_error error)
@@ -102,9 +103,9 @@ let codex_error = function
      | Runtime_codex_app_server.Codex_error_info.Response_too_many_failed_attempts _
      | Runtime_codex_app_server.Codex_error_info.Active_turn_not_steerable _
      | Runtime_codex_app_server.Codex_error_info.Unrecognized _ -> Transient)
-  | Runtime_codex_app_server.Turn_failed {codex_error_info=None;_}
   (* Admission also wraps transient model/list transport failures. *)
   | Runtime_codex_app_server.Reasoning_effort_admission_failed _
+  | Runtime_codex_app_server.Turn_failed {codex_error_info=None;_}
   | Runtime_codex_app_server.Spawn_failed _
   | Runtime_codex_app_server.Turn_input_write_failed _
   | Runtime_codex_app_server.Protocol_error _

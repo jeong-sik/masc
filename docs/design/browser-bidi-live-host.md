@@ -3,9 +3,9 @@
 `masc-browser-host --bidi-url ws://127.0.0.1:9222/session` opts into a
 Firefox Remote Agent that the operator explicitly enabled. Without this option
 the executable continues using WebExtension native messaging stdin/stdout.
-The endpoint must be loopback. MASC starts that Firefox only for a workspace
-whose `runtime.toml` names it (below); it does not copy a profile, change
-preferences, or obtain application tokens.
+The endpoint must be loopback. The browser Add-on can own a configured Firefox
+and its in-process BiDi peer (below). The standalone host is an explicit external
+connection; neither mode copies a login profile or obtains application tokens.
 
 ## Inspecting unavailable tabs
 
@@ -20,10 +20,10 @@ existing tab merely to make the listing complete.
 
 ## Attaching a connection
 
-### Let the MASC server start both
+### Let the browser Add-on own Firefox
 
-With this table in the workspace's `runtime.toml`, the MASC server starts the
-Firefox and the host when it starts (RFC-browser-keeper-firefox):
+The attached browser Lane Add-on starts Firefox when the live lane is enabled
+and the workspace's `runtime.toml` contains:
 
 ```toml
 [browser.live.bidi]
@@ -32,122 +32,36 @@ profile = "/Users/you/masc-keeper-firefox-profile"
 # port = 9222
 ```
 
-`masc browser-lane-setup --mode bidi --base-path DIR` installs the lane's host
-and launcher and writes this table. It names the first Firefox that answers
-`--version` (`firefox` on `PATH`, then the macOS application bundle) unless
-`--firefox` names one, opens `masc-keeper-firefox-profile` in the home
-directory unless `--profile` names another, and writes no `port` unless `--port`
-names one. A table that is already in `runtime.toml` keeps its values: each one
-changes only when its option is given, and the line it is rewritten on loses its
-trailing comment. Every other line stays as it was. A table written inline or
-with dotted keys is not edited: the command refuses and leaves the file as it
-was. The server reads the table when it starts, so restart it afterwards, and it
-starts the Firefox only while `[browser.live] enabled` is not `false`.
+`masc browser-lane-setup --mode bidi --base-path DIR` prepares this table and
+profile. Explicit `--firefox`, `--profile` and `--port` options replace their
+corresponding existing values. Restart MASC to load the configuration, then
+attach the browser Add-on or detach and reattach its installation. Log in once
+in that Firefox; the dedicated profile preserves its logins.
 
-- It starts only what is missing. A port that already answers gets no second
-  Firefox, and a host holding the host lock gets no second host.
-- It starts Firefox only together with a host. It starts neither when the
-  browser lane is not installed, or not as its installation wrote it; when
-  the host holding the lock was given another port, or its record cannot be
-  read to say which; or when that host is on this port, since a host
-  attaches to Firefox once, when it starts. A workspace has one host, so
-  such a host is stopped first; one whose Firefox is gone ends by itself,
-  and the next server start opens both. Firefox's port lets any local
-  process drive it, so it is not opened for nothing.
-- A Firefox the server started and left with no host is stopped through its
-  process group: one whose port did not open within the 30 seconds, and one
-  whose host could not be started. It gets SIGTERM, then SIGKILL after 5
-  seconds. A Firefox whose port answered before the server looked is never
-  touched.
-- A host that leaves in order writes its ending before it gives up the
-  lock. A server that starts in between waits up to 5 seconds for the lock,
-  so the host it starts is not refused; a lock still held then starts
-  nothing.
-- Both run apart from the server, so a server restart leaves them running.
-  Firefox writes to `.masc/browser-lane/keeper-firefox.log` and the host to
-  `.masc/browser-lane/bidi-host.log`. Each start moves the last run's log to
-  `<name>.1`, over the one before; within one run a log keeps growing, by a
-  line every five seconds from a host whose server is away. The server log
-  says what it started and why it did not.
-- The host is started with the workspace's installed `launch`, so the browser
-  lane is installed first (step 2 below). It is not given the server's
-  `MASC_HTTP_BASE_URL` or `MASC_HTTP_PORT`, which would fix its server
-  address over `connection.toml`.
-- The host is also given the profile (`--firefox-profile`). Firefox reports
-  the profile it runs with the session (`moz:profile`; Firefox 157.0.1 gives
-  the path as it was given, so both paths are resolved first). A host whose
-  Firefox runs another profile ends that session and stops, and its record
-  says which profile it found. So a port that answers because the everyday
-  Firefox was started with `--remote-debugging-port` does not give a Keeper
-  that profile; it gets a session that is ended at once.
-- The server records the Firefox it starts in
-  `.masc/browser-lane/keeper-firefox.json` right away, before waiting for
-  its port: its process group, when its first process started, the profile
-  and the port. A Firefox it cannot record is stopped, and no host is
-  started for it. The record is removed when that Firefox is stopped or
-  ends before its port answers. A server starts no Firefox over a record
-  whose group may still run, or over a record it cannot read: a server
-  that ended while its Firefox was opening the port leaves one, and a
-  second Firefox on the same profile would end at once and take that
-  record with it.
-- While the server runs, a Keeper's hover or drag that no listed connection
-  serves has the server start what is missing the same way, one start at a
-  time, and wait up to 15 seconds for the BiDi connection. The request
-  itself is not sent there; the answer names the connection and what was
-  started (`bidiConnection`) and asks the Keeper to list its tabs and
-  observe again, or says why none was shown and what a retry does
-  (`bidiStartFailed`: `operator_needed`, `start_failed`,
-  `not_listed_in_time`). Reads, clicks and scrolls start nothing. A host
-  that ends before its connection is listed has the Firefox started for it
-  stopped, at a server start as at a request.
-- A start whose port answers, after a last host that ended on that port
-  with its session `left` or `refused`, restarts that Firefox when the
-  record shows it is the one MASC started and it started no later than that
-  host ended: Firefox refuses every new host while it holds that session.
-  The profile keeps the operator's logins. The new Firefox is started once
-  the stopped one's group is empty and its port no longer answers; until
-  then the record keeps naming the stopped one. Any
-  other Firefox is left running, the server log says why, and a host is
-  started for it all the same.
-- Each start that ends, at a server start or for a Keeper's request, is
-  written to `.masc/browser-lane/keeper-firefox-start.json`: when, and
-  whether a connection was listed (with what was started) or why not
-  (`operator_needed`, `start_failed` or `not_listed_in_time`, with the
-  message, kept as one printable line of at most 1024 bytes), for the port
-  and profile it was started for. Only the status sentences read it.
-- Where `runtime.toml` has the table and the live lane is on, `masc doctor`,
-  the connection list and a Keeper's rejection say that MASC starts the
-  Keeper Firefox and its host at the next server start or the next hover or
-  drag, in place of the operator's steps, and name the last start's failure
-  for the same port and profile when it is newer than what the host record
-  says since (a host's end, a dead host's attach, a running host's start).
-  With no table they add that writing one makes MASC start both; with the
-  live lane off they say first that MASC starts nothing. The server reads
-  the configuration it loaded; `masc doctor` reads the workspace's
-  `runtime.toml` and uses it only when the whole file loads.
-- `[browser.live] enabled = false`, or a `runtime.toml` without the table,
-  starts nothing, and stops the Firefox that record names when it is shown
-  to be the one MASC started: the process its group is numbered after still
-  runs, started when the recorded one started, in that group. Anything else
-  is left running and the server log says why; the operator closes it. The
-  host ends with its Firefox. A server that could not load `runtime.toml`
-  stops nothing. Before each signal the server checks again that the
-  number still names that group, and a group whose processes it may not
-  signal is never taken for gone.
-- The operator still logs in once, in that Firefox, to the sites a Keeper
-  works on; the profile keeps the login.
-- A Firefox that exits before its port answers, leaving nothing in its process
-  group, is reported as such. A clean exit (status 0) keeps waiting within
-  the existing 30-second startup deadline: Firefox can replace its first
-  process during an update and open the port from another process group.
-  If that port answers, the host verifies the configured profile before
-  attaching. The replacement outside the recorded group is not claimed or
-  stopped as a process MASC owns. If no port answers, a clean exit is
-  reported at the deadline. Firefox 157.0.1 also exits with status 0 when
-  another Firefox has the profile open; in that case quit that Firefox
-  first. An unsuccessful exit ends the wait once its group is empty.
-- Write the table only once a server that reads it is installed:
-  `runtime.toml` refuses a key it does not know.
+The Add-on captures this configuration in its original native reservation
+before allocating the worker. It acquires a shared profile lease and a child
+claim, launches a foreground process owner, and verifies that exact owner's
+kernel lease, child birth/group, reported profile and `moz:processID`. A port
+already in use is a refusal. An external browser is never adopted as an owned
+child. A profile already in use must be closed by its operator before attachment.
+
+The verified peer registers one client UUID directly in the original worker.
+Its commands, actors and results stay on that connection. A lost or retired
+client is terminal; it is never re-registered under a fresh UUID and browser
+input is never replayed. Starting a configured Firefox is part of worker
+readiness: startup failure prevents that installation from becoming ready and
+joins its other configured backends.
+
+Detaching revokes admission before joining the original peer and browser. An
+orderly shutdown sends `browser.close` once and waits for the original owner
+and native claim settlement. Failed or cancelled shutdown aborts only that
+original owner and retains an unconfirmed result. Profile contents and stable
+claim files are preserved. The worker log is `live-firefox.log` in its private
+per-incarnation allocation; Add-on observations report readiness or failure.
+
+The server has no independent Firefox startup job. `[browser.live] enabled =
+false` leaves this backend unconfigured on the next attachment. Existing
+instances retain their captured configuration until detached.
 
 ### By hand
 
@@ -199,7 +113,7 @@ Without the table the operator does both steps.
    follows it, so it does not depend on the `PATH`.
 
    Adding `--firefox-profile <profile>` makes the host end a session with a
-   Firefox on any other profile, as the server-started host does.
+   Firefox on any other profile, before accepting any page input.
 
    `masc-browser-host --base-path "$BASE_PATH" --bidi-url ...` is the same
    host when the executable is on the `PATH`. Set `BASE_PATH` before it: an
@@ -410,10 +324,9 @@ does next:
     is another.
   - `attach`: the host command as `launcher` and `arguments`, and
     `launcher_state` (`installed`, `not_installed`, `needs_reinstall`).
-  - `keeper`: who starts the Keeper Firefox and its host, by `kind`.
-    `masc_starts` carries the configured `port` and `profile`, and
-    `last_start`: `absent`, `recorded` with the `entry` of
-    `keeper-firefox-start.json`, or `unreadable` with its `detail`.
+  - `keeper`: the configured browser ownership, by `kind`.
+    `addon_managed` carries the configured `port` and `profile`. The attached
+    Add-on observation supplies actual worker and connection readiness.
     `lane_off`, `not_configured` (no `[browser.live.bidi]`) and `not_known`
     (no configuration was read) carry nothing more.
   - `message`: the paragraph the doctor prints.

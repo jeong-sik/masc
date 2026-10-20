@@ -61,7 +61,7 @@ while True:
       let browser:Browser_configuration.stagehand={chrome=executable;extension=root;profile=Some profile_path} in
       let c=ok (Chrome.configuration ~browser ~launcher ~guardian ~claim_directory:(Filename.concat root "child-slot")) in
       configuration:=Some c;
-      let context=ok (Socket.context ~instance_id:incarnation ~automation:None ~models:None ~stagehand:(Some c)) in
+      let context=ok (Socket.context ~live_bidi:None ~instance_id:incarnation ~automation:None ~models:None ~stagehand:(Some c)) in
       let admission=lease (Lease.prepare ~directories:[worker_slot] ~instance_id:incarnation ~cleanup_context:(Some context)) in
       original:=Some admission;
       let allocation=ok (Socket.acquire ~admission ~directory:worker_slot) in

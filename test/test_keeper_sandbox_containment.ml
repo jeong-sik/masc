@@ -205,9 +205,7 @@ let test_host_root_refuses_a_symlink_that_points_nowhere () =
   with_tmp_base @@ fun base ->
   let root = Filename.concat base "alice" in
   Unix.symlink (Filename.concat base "missing") root;
-  match Keeper_sandbox_control.ensure_host_root root with
-  | Ok () -> Alcotest.fail "a link to nothing was accepted as a host root"
-  | Error _ -> ()
+  host_root_error ~needle:"points nowhere" (Keeper_sandbox_control.ensure_host_root root)
 
 let test_host_root_reports_a_parent_that_is_not_a_directory () =
   with_tmp_base @@ fun base ->

@@ -40,7 +40,27 @@ let ensure_host_root path =
   let kind () =
     match Unix.stat path with
     | stats -> Ok (Some stats.Unix.st_kind)
-    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+      (* [stat] follows links, so a missing target is also what a link that
+         points nowhere reports. Name that case instead of creating over it. *)
+      (match Unix.lstat path with
+       | { Unix.st_kind = Unix.S_LNK; _ } ->
+         Error
+           (Printf.sprintf
+              "sandbox host root %s is a symbolic link that points nowhere"
+              path)
+       | { Unix.st_kind =
+             ( Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO
+             | Unix.S_SOCK )
+         ; _
+         } -> Ok None
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+       | exception Unix.Unix_error (error, _, _) ->
+         Error
+           (Printf.sprintf
+              "sandbox host root %s cannot be inspected: %s"
+              path
+              (Unix.error_message error)))
     | exception Unix.Unix_error (error, _, _) ->
       Error
         (Printf.sprintf
@@ -64,6 +84,8 @@ let ensure_host_root path =
   match existing with
   | Some _ -> require_directory existing
   | None ->
+    (* [mkdir_p] treats EEXIST as success, so two start requests creating the
+       same root at once both reach the second [kind] check below. *)
     let* () =
       match Fs_compat.mkdir_p path with
       | () -> Ok ()

@@ -950,7 +950,9 @@ let prepare_native ~store ~installation_id ~instance_id ~is_live_instance =
   let* old = offload (fun () ->
     match directories with
     | [directory] -> (match Unix.lstat directory with
-        | _ -> Native_addon_lease.current ~directories |> Result.map Option.some
+        | _ -> Native_addon_lease.recover_preparation ~directory |> Result.map (function
+            | Native_addon_lease.Unpublished -> None
+            | Current claim -> Some claim)
         | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok None)
     | [] | _::_::_ -> Error (Native_addon_lease.Invalid_claim "native installation must have one host-selected slot"))
     |> native_result in

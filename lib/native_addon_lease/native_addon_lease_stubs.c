@@ -4,6 +4,8 @@
 #include <caml/unixsupport.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
+#include <stdatomic.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -50,6 +52,43 @@ CAMLprim value masc_native_lease_holder(value descriptor) {
   if (fcntl(Int_val(descriptor), F_GETLK, &lock) < 0)
     caml_uerror("native lease F_GETLK", Nothing);
   CAMLreturn(Val_int(lock.l_type == F_UNLCK ? 0 : lock.l_pid));
+}
+CAMLprim value masc_native_lease_replace(value directory, value name, value bytes) {
+  CAMLparam3(directory, name, bytes);
+  static _Atomic unsigned long sequence = 0;
+  char temporary[96];
+  int root = Int_val(directory), fd;
+  do {
+    unsigned long next = atomic_fetch_add_explicit(&sequence, 1, memory_order_relaxed) + 1;
+    snprintf(temporary, sizeof(temporary), ".pending-%ld-%lu", (long)getpid(), next);
+    fd = openat(root, temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+  } while (fd < 0 && errno == EEXIST);
+  if (fd < 0) caml_uerror("native metadata temporary", name);
+  mlsize_t offset = 0, length = caml_string_length(bytes);
+  while (offset < length) {
+    ssize_t written = write(fd, String_val(bytes) + offset, length - offset);
+    if (written < 0 && errno == EINTR) continue;
+    if (written <= 0) {
+      int saved = written == 0 ? EIO : errno;
+      close(fd); unlinkat(root, temporary, 0); errno = saved;
+      caml_uerror("native metadata write", name);
+    }
+    offset += written;
+  }
+  if (fsync(fd) < 0) {
+    int saved = errno; close(fd); unlinkat(root, temporary, 0); errno = saved;
+    caml_uerror("native metadata fsync", name);
+  }
+  if (close(fd) < 0) {
+    int saved = errno; unlinkat(root, temporary, 0); errno = saved;
+    caml_uerror("native metadata close", name);
+  }
+  if (renameat(root, temporary, root, String_val(name)) < 0) {
+    int saved = errno; unlinkat(root, temporary, 0); errno = saved;
+    caml_uerror("native metadata publish", name);
+  }
+  if (fsync(root) < 0) caml_uerror("native metadata directory fsync", name);
+  CAMLreturn(Val_unit);
 }
 CAMLprim value masc_native_lease_group_leader(value unit) {
   (void)unit;

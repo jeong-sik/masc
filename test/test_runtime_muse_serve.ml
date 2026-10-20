@@ -1154,6 +1154,59 @@ let test_completed_message_presence () =
     [[], None; [Write blank], Some ""]
 ;;
 
+let phased_message ~item_id ?phase text =
+  let phase =
+    match phase with
+    | None -> ""
+    | Some phase -> Printf.sprintf {|,"messagePhase":%S|} phase
+  in
+  Printf.sprintf
+    {|{"jsonrpc":"2.0","method":"item/completed","params":{"sessionId":"s-1","viewCursor":"v:8","item":{"itemId":%S,"kind":"agentMessage","turnId":"t-1","revision":2,"status":"completed","text":%S%s}}}|}
+    item_id text phase
+;;
+
+(* Muse 1.4.11 declares each agent message's phase; the phase, not the
+   message's position, marks the answer. Narration still reaches the stream. *)
+let test_message_phase_marks_the_answer () =
+  let narration = phased_message ~item_id:"m-c" ~phase:"commentary" "Running the suite now." in
+  let answer = phased_message ~item_id:"m-a" ~phase:"finalAnswer" "Suite passed." in
+  List.iter
+    (fun (name, frames, expected) ->
+       let completed = ref [] in
+       run_scripted
+         ~on_stream_event:(function
+           | Serve.Text_completed { item_id; _ } -> completed := item_id :: !completed
+           | _ -> ())
+         (handshake_and_session ~granted:[] @ List.map (fun frame -> Write frame) frames
+          @ [ Write turn_completed ])
+         (fun result _ ->
+            match result with
+            | Ok turn ->
+              check (option string) name expected turn.text;
+              check bool (name ^ ": narration reaches the stream") true
+                (List.mem "m-c" !completed)
+            | Error error -> fail (Serve.error_to_string error)))
+    [ "narration then a tool call gives no answer"
+    , [ narration; tool_started; tool_completed ]
+    , None
+    ; "the answer after narration", [ narration; answer ], Some "Suite passed."
+    ; "the answer before trailing narration", [ answer; narration ], Some "Suite passed."
+    ; "an unrecognized phase reads as an answer"
+    , [ narration; phased_message ~item_id:"m-r" ~phase:"recap" "Recap." ]
+    , Some "Recap."
+    ];
+  run_scripted
+    (handshake_and_session ~granted:[]
+     @ [ Write (phased_message ~item_id:"m-1" "checking.")
+       ; Write (phased_message ~item_id:"m-2" "MASC_MUSE_OK")
+       ; Write turn_completed
+       ])
+    (fun result _ ->
+       match result with
+       | Ok turn -> check (option string) "no phase keeps the newest message" (Some "MASC_MUSE_OK") turn.text
+       | Error error -> fail (Serve.error_to_string error))
+;;
+
 let test_stream_callback_preserves_reserved_controls () =
   let event = Serve.Turn_finished { text = "" } in
   let propagated name exn =
@@ -1177,6 +1230,7 @@ let () =
     "runtime_muse_serve"
     [ ( "turn"
       , [ test_case "completed message presence" `Quick test_completed_message_presence
+        ; test_case "message phase marks the answer" `Quick test_message_phase_marks_the_answer
         ; test_case "stream callback preserves reserved controls" `Quick
             test_stream_callback_preserves_reserved_controls
         ; test_case "turn with tool and approval" `Quick test_turn_with_tool_and_approval

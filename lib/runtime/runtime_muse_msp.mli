@@ -9,8 +9,9 @@
     The source of truth is the stable MSP schema that
     github.com/meta-models/muse-code-sdk publishes ([schema/msp/msp.d.ts] at
     22a8a56, host 1.4.11). Every enum the schema marks open ([TurnTerminal],
-    [TurnErrorKind], [ItemKind], [ItemStatus], [ApprovalDecision], and the
-    approval subject kind) decodes to a closed variant. The variant has one
+    [TurnErrorKind], [ItemKind], [ItemStatus], [MessagePhase],
+    [ApprovalDecision], and the approval subject kind) decodes to a closed
+    variant. The variant has one
     [Unrecognized_*] arm that keeps the wire value, so a later host's value
     is reported as itself rather than taken for a value MASC knows. The
     enums the schema closes ([ApprovalMode], [ReasoningEffort]) have no such
@@ -412,10 +413,24 @@ type compaction =
   ; reason : string option  (** Display text only; never branched on. *)
   }
 
+(** The phase the model declared when it committed an agent message
+    ([MessagePhase]); open on the wire. A turn may narrate before and between
+    tool calls ([Commentary]) and then answer ([Final_answer]); the phase,
+    not the message's position in the turn, marks the answer. The host sets
+    it on the completed item and leaves it out of [item/started]. On a
+    completed item the schema reads an absent or unrecognized phase as
+    ["finalAnswer"]; a host that predates the member sends none. *)
+type message_phase =
+  | Commentary
+  | Final_answer
+  | Unrecognized_message_phase of string
+
 (** One transcript item at one revision. Only the members MASC projects are
-    decoded; the schema keeps the rest open. [text] is the accumulated reply
-    on an [Agent_message]. [tool], [call_id], [args] (the model's argument
-    JSON, verbatim) and [visible_output] belong to a [Tool_call]. *)
+    decoded; the schema keeps the rest open. [text] is the accumulated text
+    of an [Agent_message], and [message_phase] its declared phase ([Some]
+    only on an [Agent_message] that carries one). [tool], [call_id], [args]
+    (the model's argument JSON, verbatim) and [visible_output] belong to a
+    [Tool_call]. *)
 type item =
   { item_id : string
   ; kind : item_kind
@@ -423,6 +438,7 @@ type item =
   ; revision : int
   ; turn_id : string option
   ; text : string option
+  ; message_phase : message_phase option
   ; tool : string option
   ; call_id : string option
   ; args : string option

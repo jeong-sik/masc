@@ -330,6 +330,73 @@ let test_compaction_members_are_decoded () =
   | Error error -> fail (Msp.error_to_string error)
 ;;
 
+let message_phase =
+  testable
+    (fun ppf -> function
+       | Msp.Commentary -> Format.pp_print_string ppf "commentary"
+       | Msp.Final_answer -> Format.pp_print_string ppf "finalAnswer"
+       | Msp.Unrecognized_message_phase wire -> Format.fprintf ppf "unrecognized %S" wire)
+    ( = )
+;;
+
+let agent_message_completed members =
+  Printf.sprintf
+    {|{"jsonrpc":"2.0","method":"item/completed","params":{"sessionId":"s-1","viewCursor":"v:6","item":{"itemId":"m-1","kind":"agentMessage","turnId":"t-1","revision":2,"status":"completed","text":"done"%s}}}|}
+    members
+;;
+
+let decoded_notification line =
+  match Msp.parse_wire_line line with
+  | Ok (Msp.Notification { method_; params }) -> Msp.parse_notification ~method_ params
+  | Ok _ -> fail "a notification decoded as another frame"
+  | Error error -> fail (Msp.error_to_string error)
+;;
+
+let completed_agent_phases notifications =
+  List.filter_map
+    (function
+      | Msp.Item_completed { item = { kind = Msp.Agent_message; message_phase; _ }; _ } ->
+        Some message_phase
+      | _ -> None)
+    notifications
+;;
+
+(* The 1.4.11 host labels the message it answers with; the single-turn
+   transcript was recorded before the member existed and carries none. *)
+let test_corpus_message_phases () =
+  check
+    (list (option message_phase))
+    "a 1.4.11 answer"
+    [ Some Msp.Final_answer ]
+    (completed_agent_phases (notifications "provider-failure-turn"));
+  check
+    (list (option message_phase))
+    "a message recorded before the member"
+    [ None ]
+    (completed_agent_phases (notifications "text-run-single-turn"))
+;;
+
+let test_message_phase_is_decoded () =
+  List.iter
+    (fun (members, expected) ->
+       match decoded_notification (agent_message_completed members) with
+       | Ok notification ->
+         check
+           (list (option message_phase))
+           members
+           [ expected ]
+           (completed_agent_phases [ notification ])
+       | Error error -> fail (Msp.error_to_string error))
+    [ {|,"messagePhase":"commentary"|}, Some Msp.Commentary
+    ; {|,"messagePhase":"finalAnswer"|}, Some Msp.Final_answer
+    ; {|,"messagePhase":"recap"|}, Some (Msp.Unrecognized_message_phase "recap")
+    ; "", None
+    ];
+  match decoded_notification (agent_message_completed {|,"messagePhase":5|}) with
+  | Ok _ -> fail "a non-string messagePhase was decoded"
+  | Error _ -> ()
+;;
+
 let parse_error line =
   match Msp.parse_wire_line line with
   | Ok _ -> failf "expected %s to be refused" line
@@ -582,10 +649,12 @@ let () =
         ; test_case "unknown item kind is kept" `Quick test_unknown_item_kind_is_kept
         ; test_case "compaction members are decoded" `Quick
             test_compaction_members_are_decoded
+        ; test_case "corpus message phases" `Quick test_corpus_message_phases
         ] )
     ; ( "codec"
       , [ test_case "wire refusals" `Quick test_wire_refusals
         ; test_case "delta fields" `Quick test_delta_fields
+        ; test_case "message phase is decoded" `Quick test_message_phase_is_decoded
         ; test_case "usage read" `Quick test_usage_read
         ; test_case "session config carries bridge" `Quick test_session_config_carries_bridge
         ; test_case "reasoning effort round trip" `Quick test_reasoning_effort_round_trip

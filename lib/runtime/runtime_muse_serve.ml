@@ -879,8 +879,9 @@ type turn_state =
         message may have been dropped. Turn-local, unlike [observed_usage]. *)
   }
 
-(* A turn that completes with no completed agent message is how the host
-   says the model wrote nothing, and MASC may settle that as a quiet final.
+(* A turn that completes with no completed final-answer message is how the
+   host says the model gave no answer, and MASC may settle that as a quiet
+   final; narration the model committed on the way does not change that.
    The reading holds only when MASC saw the whole turn: a view gap can drop
    the message's [item/completed], and an agent message still open at the
    terminal never delivered its text. MSP offers no way to re-read dropped
@@ -1064,14 +1065,18 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
             }
         | Msp.Agent_message ->
           Option.iter (fun text -> emit (Text_completed {item_id=item.Msp.item_id; text})) item.Msp.text;
-          continue
-            { state with
-              open_items
-            ; final_text =
-                (match item.Msp.text with
-                 | Some text -> Some text
-                 | None -> state.final_text)
-            }
+          (* The declared phase marks the answer, not the message's position:
+             narration stays in the stream and never becomes the reply. The
+             schema reads an absent or unrecognized phase on a completed item
+             as a final answer, so those keep the newest such message. *)
+          let final_text =
+            match item.Msp.message_phase, item.Msp.text with
+            | (None | Some (Msp.Final_answer | Msp.Unrecognized_message_phase _)), Some text ->
+              Some text
+            | (None | Some (Msp.Final_answer | Msp.Unrecognized_message_phase _)), None
+            | Some Msp.Commentary, (Some _ | None) -> state.final_text
+          in
+          continue { state with open_items; final_text }
         | Msp.Compaction ->
           Option.iter (fun compaction -> emit (Compaction_observed compaction))
             item.Msp.compaction;

@@ -234,10 +234,10 @@ kind = "board"
 visibilities = ["public", "unlisted"]
 ```
 
-- `kind` 는 지금 `board` 와 `repository` 다(아래). `board` 는 `visibilities` 가 꼭 있어야 하고 Board 의 값(`public`, `unlisted`, `internal`, `direct`)을 소문자로 쓴다. 기본값은 없다. `direct` 는 적었을 때만 읽는다.
+- `kind` 는 지금 `board`, `repository`, `wiki` 다(아래). `board` 는 `visibilities` 가 꼭 있어야 하고 Board 의 값(`public`, `unlisted`, `internal`, `direct`)을 소문자로 쓴다. 기본값은 없다. `direct` 는 적었을 때만 읽는다.
 - 이 visibility 의 글은 패키지의 exact output 에 묶인 slot 의 provider 에게 갈 수 있다. `internal` 을 넣기 전에 그 provider 가 내부 글을 받아도 되는지 확인한다.
 - 요청은 `{"kind": "read_records", "request_id", "source_id", "after"}` 다. `after` 는 이전 결과의 `next_cursor` 이거나, 처음부터 읽을 때는 없거나 `null` 이다.
-- 아직 커서가 없는 패키지는 `after` 대신 `since`(Unix 시각, 초)를 보내 그때부터 만든 기록만 읽는다. Board 는 글·댓글을 쓴 시각, `repository` 는 커밋 시각으로 판다. 둘을 같이 보내면 그 요청은 잘못된 요청이다. 그 시각 뒤로 기록이 없으면 `records` 는 비고 `next_cursor` 는 `null` 이다.
+- 아직 커서가 없는 패키지는 `after` 대신 `since`(Unix 시각, 초)를 보내 그때부터 만든 기록만 읽는다. Board 는 글·댓글을 쓴 시각, `repository` 는 커밋 시각, `wiki` 는 `log.md` 에 찍힌 분으로 판다. 둘을 같이 보내면 그 요청은 잘못된 요청이다. 그 시각 뒤로 기록이 없으면 `records` 는 비고 `next_cursor` 는 `null` 이다.
 - 결과는 `{"status": "records", "source_id", "records", "next_cursor", "complete", "sha256"}` 다. 오래된 것부터, frame 에 들어가는 만큼 담는다. Board 기록은 글(id, 작성자, 작성·수정 시각, visibility, 제목, 본문)과 그 글의 댓글(id, 글 id, 작성자, 작성 시각, 본문)이다.
 - host 는 답하기 전에 `records` 배열을 Lane store 에 blob 으로 보존한다. `sha256` 은 그 blob 이름이라, 나중에 글이 고쳐지거나 만료돼도 인용한 바이트를 확인할 수 있다.
 - 권한이 없는 `source_id` 나 host 가 준 적 없는 커서는 `not_allowed` 다. Board 를 읽을 수 없으면 최종이 아니고 `source_unavailable` 로 다음 사건을 기다린다.
@@ -256,6 +256,21 @@ paths = ["changelog.d/", "CHANGELOG.md"]
 - `read_records` 는 기본 브랜치의 first-parent 커밋을 오래된 것부터 준다: SHA, 작성자 이름, 커밋 시각, 제목, 본문, 첫 부모 대비 바뀐 경로. 결과의 `head` 는 읽은 브랜치 끝이고, 커서는 커밋 SHA 다. 그 끝이 닿지 않는 커서는 `not_allowed` 다.
 - `read_file` 은 `{"kind": "read_file", "request_id", "source_id", "commit", "path"}` 다. 기본 브랜치 끝이 닿는 커밋에서, `paths` 안의 파일 하나의 바이트를 `{"status": "file", "source_id", "commit", "path", "encoding", "content", "bytes", "sha256"}` 로 준다. 텍스트면 `encoding` 이 `utf-8`, 아니면 `base64` 다. 바이트는 blob 으로 먼저 보존한다.
 - `paths` 밖의 파일, 기본 브랜치가 닿지 않는 커밋, 그 커밋에 없는 파일은 `not_allowed` 다. 등록되지 않았거나 읽을 수 없는 저장소는 `source_unavailable` 로 기다린다.
+
+`wiki` 권한은 이 workspace 의 wiki 를 읽는다. `source_id` 와 `kind` 말고 다른 키는 없다.
+
+```toml
+[[binding.records]]
+source_id = "wiki"
+kind = "wiki"
+```
+
+- wiki 는 page 마다 본문을 하나만 두고, 고치면 그 본문을 바꾼다. 쓴 순서는 `log.md` 에만 남는다.
+- 그래서 `read_records` 는 page 를 그 page 의 마지막 `log.md` 줄 자리에서 한 번씩 준다: 이름, revision, 제목, 요약, 작성자, 지금 본문. 커서 뒤에 고친 page 는 새 revision 으로 다시 나온다.
+- 지난 revision 의 본문은 그때 읽어 보존한 blob 에만 있다. page 가 지워졌거나 header 를 읽을 수 없으면 그 줄은 기록을 내지 않는다.
+- 커서는 `log.md` 줄 하나를 위치와 page, revision 으로 가리킨다. 지금 log 의 그 위치에 같은 줄이 없으면 `not_allowed` 다. `log.md` 가 없는 wiki 는 기록이 없고, 파일을 읽을 수 없으면 `source_unavailable` 로 기다린다.
+- `since` 는 page 의 마지막 `log.md` 줄에 찍힌 분으로 판다. log 는 분까지만 찍으므로 그 시각보다 1분 안쪽 앞에 쓴 page 도 같이 읽는다. 찍힌 시각을 읽을 수 없는 줄은 읽지 못한 줄로 세고 기록을 내지 않는다.
+- `read_file` 은 `wiki` 를 읽지 않는다(`not_allowed`).
 
 ## 세계와 연결되는 통로
 

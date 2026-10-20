@@ -13,6 +13,8 @@ type grant =
       (** First-parent commits of a registered repository's default branch,
           and files under [paths]. A path that ends in [/] covers a directory;
           any other path names one file. *)
+  | Wiki of { source_id : string }
+      (** The workspace wiki's pages, in the order its [log.md] wrote them. *)
 
 val source_id : grant -> string
 
@@ -22,7 +24,8 @@ val grants : operator_owned:bool -> Yojson.Safe.t -> (grant list, string) result
     TOML declaration. Every
     grant is checked: a closed kind, a unique non-blank [source_id], a
     non-empty [visibilities] for [board], and relative [paths] with no [..]
-    for [repository]. Any other key is refused. *)
+    for [repository]. A [wiki] grant has no other key. Any other key is
+    refused. *)
 
 val covers : paths:string list -> string -> bool
 (** Whether a repository-relative file path falls under a grant's [paths]. *)
@@ -47,9 +50,11 @@ type start =
   | After of string  (** A cursor this host gave in an earlier result. *)
   | Since of float
       (** Records made at or after this Unix time: a Board post's or
-          comment's creation time, a commit's commit time. A package that
-          has no cursor yet reads what happened since it began, not the
-          whole history. *)
+          comment's creation time, a commit's commit time, the minute of a
+          wiki page's latest log line. The wiki log stamps only the minute,
+          so a page written up to a minute before this time is also read. A
+          package that has no cursor yet reads what happened since it began,
+          not the whole history. *)
 
 val read_records :
   base_path:string -> store:Lane_addon_store.t -> grants:grant list ->
@@ -70,7 +75,19 @@ val read_records :
     author name, commit time, subject, body, changed paths against the first
     parent), and the page names the [head] it read. The cursor is a commit
     SHA; one the head does not reach is not allowed. A repository that is not
-    registered or cannot be read is unavailable. *)
+    registered or cannot be read is unavailable.
+
+    Wiki records are pages (name, revision, title, summary, author, body).
+    The wiki keeps one body per page and replaces it on update, and its
+    [log.md] is the only record of the order pages were written in. Each page
+    is read once, at its latest log line, with the header and body it holds
+    now, so a page updated after the cursor comes again with its new
+    revision. An older revision is readable only from a page retained
+    earlier. A log line whose page is gone or whose header does not read
+    gives no record. The cursor names a log line by its position and its
+    page and revision; one the log no longer holds at that position is not
+    allowed. A wiki with no [log.md] has no records; one whose files cannot
+    be read is unavailable. *)
 
 val read_file :
   base_path:string -> store:Lane_addon_store.t -> grants:grant list ->
@@ -79,4 +96,4 @@ val read_file :
     grant's [paths]: [{"status": "file", "source_id", "commit", "path",
     "encoding", "content", "bytes", "sha256"}]. [encoding] is [utf-8] for text
     and [base64] otherwise. The bytes are retained as a blob first, and
-    [sha256] names it. *)
+    [sha256] names it. A [board] or [wiki] source is not allowed. *)

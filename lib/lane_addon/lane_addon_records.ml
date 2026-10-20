@@ -3,8 +3,10 @@ let ( let* ) = Result.bind
 type grant =
   | Board of { source_id : string; visibilities : Board_types.visibility list }
   | Repository of { source_id : string; repository_id : string; paths : string list }
+  | Wiki of { source_id : string }
 
-let source_id = function Board { source_id; _ } | Repository { source_id; _ } -> source_id
+let source_id = function
+  | Board { source_id; _ } | Repository { source_id; _ } | Wiki { source_id } -> source_id
 let source_id_of = source_id
 
 let exact_keys keys fields =
@@ -63,6 +65,9 @@ let grant_of_json = function
        (match List.find_opt (fun path -> not (valid_path path)) paths with
         | Some path -> Error ("paths must stay inside the repository: " ^ path)
         | None -> Ok (Repository { source_id; repository_id; paths }))
+     | Some (`String "wiki") ->
+       let* () = exact_keys [ "source_id"; "kind" ] fields in
+       Ok (Wiki { source_id })
      | Some (`String kind) -> Error ("this host has no record kind " ^ kind)
      | Some _ | None -> Error "a record grant requires a string kind")
   | _ -> Error "a record grant must be an object"
@@ -307,6 +312,94 @@ let repository_records ~base_path ~store ~measure ~max_bytes ~source_id ~reposit
         | Error detail -> Unavailable ("a commit cannot be read: " ^ detail)
         | Ok page -> answer_page ~head ~store ~source_id ~start page))
 
+(* A wiki log line read up to and including [position] lines, with the page
+   and revision that line names. The host checks all three against the log
+   it reads now, so a log that was rewritten refuses the cursor. *)
+let wiki_cursor ~position (line : Wiki_log.line) = Printf.sprintf "%d|%s|%d" position line.page line.revision
+
+let wiki_position lines cursor =
+  match String.index_opt cursor '|' with
+  | None -> None
+  | Some bar ->
+    (match int_of_string_opt (String.sub cursor 0 bar) with
+     | Some position when position >= 1 && position <= Array.length lines ->
+       if String.equal (wiki_cursor ~position lines.(position - 1)) cursor then Some position else None
+     | Some _ | None -> None)
+
+let wiki_log ~root =
+  match Fs_compat.load_file_opt (Filename.concat root Wiki_journal.log_file) with
+  | exception Sys_error detail -> Error detail
+  | None -> Ok [||]
+  | Some content -> Ok (Array.of_list (Wiki_log.parse content).Wiki_log.lines)
+
+(* The page as it is now, or [None] when no page by that name reads. *)
+let wiki_page ~root name =
+  match Wiki_page_name.validate_page_name name with
+  | Error _ -> Ok None
+  | Ok name ->
+    (match Fs_compat.load_file_opt (Filename.concat root (name ^ ".md")) with
+     | exception Sys_error detail -> Error detail
+     | None -> Ok None
+     | Some content ->
+       (match Wiki_page.parse_frontmatter content with
+        | Error _ -> Ok None
+        | Ok (header : Wiki_page.frontmatter) ->
+          Ok
+            (Some
+               (`Assoc
+                  [ "kind", `String "page"; "name", `String name; "revision", `Int header.revision
+                  ; "title", `String (header.title :> string); "summary", `String (header.summary :> string)
+                  ; "author", `String (header.author :> string); "body", `String (Wiki_page.page_body content) ]))))
+
+(* Which log positions a read may answer from. The log stamps only the
+   minute, so a [Since] read keeps a line whose minute ends after that time:
+   a page written in the same minute is not missed, at the cost of one
+   written up to a minute before. *)
+let wiki_window lines start =
+  match start with
+  | From_beginning -> Ok (fun _ -> true)
+  | After cursor ->
+    (match wiki_position lines cursor with
+     | Some position -> Ok (fun index -> index >= position)
+     | None -> Error "after is not a cursor this host gave")
+  | Since at -> Ok (fun index -> lines.(index).Wiki_log.written_at +. 60. > at)
+
+let wiki_records ~base_path ~store ~measure ~max_bytes ~source_id ~start =
+  let root = Config_dir_resolver.wiki_dir ~base_path in
+  match wiki_log ~root with
+  | Error detail -> Unavailable ("the wiki log cannot be read: " ^ detail)
+  | Ok lines ->
+    (match wiki_window lines start with
+     | Error reason -> Not_allowed reason
+     | Ok within ->
+       let latest = Hashtbl.create (Array.length lines) in
+       Array.iteri (fun position (line : Wiki_log.line) -> Hashtbl.replace latest line.page position) lines;
+       let pending =
+         List.filter
+           (fun position -> within position && Hashtbl.find_opt latest lines.(position).Wiki_log.page = Some position)
+           (List.init (Array.length lines) Fun.id)
+       in
+       let items =
+         List.fold_right
+           (fun position acc ->
+              let* acc = acc in
+              let line = lines.(position) in
+              let* page = wiki_page ~root line.Wiki_log.page in
+              match page with
+              | None -> Ok acc
+              | Some json -> Ok ((wiki_cursor ~position:(position + 1) line, fun () -> Ok json) :: acc))
+           pending (Ok [])
+       in
+       (match items with
+        | Error detail -> Unavailable ("a wiki page cannot be read: " ^ detail)
+        | Ok items ->
+          let empty_body ~next_cursor =
+            page_body ~source_id ~records:[] ~next_cursor ~complete:false ~sha256:sha256_placeholder ()
+          in
+          (match take_page ~measure ~max_bytes ~empty_body items with
+           | Error detail -> Unavailable detail
+           | Ok page -> answer_page ~store ~source_id ~start page)))
+
 let granted grants source_id = List.find_opt (fun grant -> String.equal (source_id_of grant) source_id) grants
 let not_granted source_id = Not_allowed ("source " ^ source_id ^ " is not granted to this installation")
 
@@ -325,6 +418,7 @@ let read_records ~base_path ~store ~grants ~measure ~max_bytes ~source_id ~start
   | None -> not_granted source_id
   | Some (Repository { repository_id; _ }) ->
     repository_records ~base_path ~store ~measure ~max_bytes ~source_id ~repository_id ~start
+  | Some (Wiki _) -> wiki_records ~base_path ~store ~measure ~max_bytes ~source_id ~start
   | Some (Board { visibilities; _ }) ->
     (match board_pending start with
      | Error reason -> Not_allowed reason
@@ -346,6 +440,7 @@ let read_file ~base_path ~store ~grants ~source_id ~commit ~path =
   match granted grants source_id with
   | None -> not_granted source_id
   | Some (Board _) -> Not_allowed ("source " ^ source_id ^ " is a board; read_file reads a repository")
+  | Some (Wiki _) -> Not_allowed ("source " ^ source_id ^ " is a wiki; read_file reads a repository")
   | Some (Repository { repository_id; paths; _ }) ->
     if not (covers ~paths path) then Not_allowed ("path " ^ path ^ " is outside the grant's paths")
     else if not (commit_id_shaped commit) then Not_allowed "commit must be a full commit id"

@@ -575,6 +575,153 @@ let test_an_unregistered_repository_waits () =
     | `List [ waiting ] -> check string "it waits" "source_unavailable" (text "reason" (member "reason" waiting))
     | _ -> fail "a read of an unregistered repository must wait")
 
+let wiki_granted = declaration ^ {|[[binding.records]]
+source_id="wiki"
+kind="wiki"
+|}
+
+(* Pages are written through the wiki's own tools, so the fixture has the
+   same files and [log.md] lines a Keeper's writes leave. *)
+let wiki root name args =
+  match Tool_wiki.dispatch { Tool_wiki.base_path = root; agent_name = "operator" } ~name ~args:(`Assoc args) with
+  | Some result when Tool_result.is_success result -> ()
+  | Some result -> fail (Tool_result.message result)
+  | None -> failf "no wiki tool %s" name
+
+let create_page ?(body = "body\n") root page =
+  wiki root "masc_wiki_create"
+    [ "page", `String page; "title", `String ("Title of " ^ page); "summary", `String "One line"
+    ; "source", `String "research"; "body", `String body ]
+
+let update_page root page ~base_revision body =
+  wiki root "masc_wiki_update"
+    [ "page", `String page; "base_revision", `Int base_revision; "body", `String body; "note", `String "edit" ]
+
+let page_versions result =
+  member "records" result |> Yojson.Safe.Util.to_list
+  |> List.map (fun record ->
+    Printf.sprintf "%s r%d %S" (text "name" record) (Yojson.Safe.Util.to_int (member "revision" record)) (text "body" record))
+
+let read_wiki clock worker ?after ?since id =
+  worker.listing := [ read ?after ?since id "wiki" ];
+  publish_lane_change ();
+  await clock (fun () -> delivered id worker);
+  result_of id worker
+
+let test_a_wiki_grant_has_no_other_key () =
+  let binding records = `Assoc [ "records", `List records ] in
+  let wiki_grant extra = `Assoc ([ "source_id", `String "wiki"; "kind", `String "wiki" ] @ extra) in
+  (match Lane_addon_records.grants ~operator_owned:true (binding [ wiki_grant [] ]) with
+   | Ok [ Lane_addon_records.Wiki { source_id = "wiki" } ] -> ()
+   | Ok _ | Error _ -> fail "a wiki grant names only its source_id");
+  check bool "a wiki grant with paths is refused" true
+    (Result.is_error (Lane_addon_records.grants ~operator_owned:true
+                        (binding [ wiki_grant [ "paths", `List [ `String "a/" ] ] ])))
+
+let test_a_granted_wiki_is_read_by_each_pages_latest_log_line () =
+  with_installation ~declaration:wiki_granted (fun clock _config worker _ root ->
+    create_page ~body:"first body\n" root "alpha";
+    create_page ~body:"beta body\n" root "beta";
+    update_page root "alpha" ~base_revision:1 "second body\n";
+    let result = read_wiki clock worker "w1" in
+    check string "a page" "records" (text "status" result);
+    check (list string) "each page once, at its latest line, as it is now"
+      [ {|beta r1 "beta body\n"|}; {|alpha r2 "second body\n"|} ] (page_versions result);
+    check bool "the whole wiki was read" true (member "complete" result = `Bool true);
+    let bytes = Yojson.Safe.to_string (member "records" result) in
+    check string "the result names the retained page" (Lane_addon_store.digest bytes) (text "sha256" result);
+    let store = Lane_addon_store.create ~root:(Filename.concat root ".masc/lane-addons") in
+    check bool "and the page is retained" true
+      (Lane_addon_store.read_blob store (Lane_addon_store.blob_reference bytes) = Ok bytes))
+
+let test_a_wiki_cursor_pages_revisions_forward () =
+  with_installation ~declaration:wiki_granted (fun clock _config worker _ root ->
+    create_page ~body:"alpha one\n" root "alpha";
+    create_page ~body:"beta one\n" root "beta";
+    let first = read_wiki clock worker "v1" in
+    update_page root "alpha" ~base_revision:1 "alpha two\n";
+    let second = read_wiki clock worker ~after:(text "next_cursor" first) "v2" in
+    check (list string) "only the newer revision" [ {|alpha r2 "alpha two\n"|} ] (page_versions second);
+    let third = read_wiki clock worker ~after:(text "next_cursor" second) "v3" in
+    check (list string) "nothing after the last line" [] (page_versions third);
+    check bool "and that is the whole wiki" true (member "complete" third = `Bool true);
+    check string "the cursor stays where it was" (text "next_cursor" second) (text "next_cursor" third))
+
+(* The log stamps only the minute, so a since read keeps a page written in
+   that minute and drops one whose minute ended before that time. *)
+let test_a_since_read_of_the_wiki_compares_log_minutes () =
+  with_installation ~declaration:wiki_granted (fun clock _config worker _ root ->
+    create_page ~body:"old\n" root "alpha";
+    create_page ~body:"new\n" root "beta";
+    let log = Filename.concat (Config_dir_resolver.wiki_dir ~base_path:root) Wiki_journal.log_file in
+    let restamped =
+      In_channel.with_open_text log In_channel.input_all
+      |> String.split_on_char '\n'
+      |> List.map (fun line ->
+        let page = List.nth_opt (String.split_on_char '|' line) 1 |> Option.map String.trim in
+        if String.starts_with ~prefix:"## [" line && page = Some "alpha"
+        then "## [2020-01-01 00:00" ^ String.sub line 20 (String.length line - 20)
+        else line)
+      |> String.concat "\n"
+    in
+    Out_channel.with_open_text log (fun channel -> Out_channel.output_string channel restamped);
+    let beta =
+      match List.find_opt (fun (line : Wiki_log.line) -> line.page = "beta") (Wiki_log.parse restamped).lines with
+      | Some line -> line.written_at
+      | None -> fail "beta has a log line"
+    in
+    check (list string) "a page from that minute is read, an older one is not"
+      [ {|beta r1 "new\n"|} ] (page_versions (read_wiki clock worker ~since:(beta +. 59.) "t1"));
+    let later = read_wiki clock worker ~since:(beta +. 60.) "t2" in
+    check (list string) "nothing after that minute" [] (page_versions later);
+    check bool "and no cursor to give" true (member "next_cursor" later = `Null);
+    check (list string) "time zero reads every page"
+      [ {|alpha r1 "old\n"|}; {|beta r1 "new\n"|} ] (page_versions (read_wiki clock worker ~since:0. "t3")))
+
+let test_wiki_pages_hold_what_fits_the_frame () =
+  with_installation ~declaration:wiki_granted (fun clock _config worker _ root ->
+    List.iter (fun page -> create_page ~body:(String.make 1500 'x') root page) [ "one"; "two"; "three" ];
+    worker.on_deliver := (fun arguments ->
+      let result = member "result" arguments in
+      if text "request_id" arguments = "x1" && member "complete" result = `Bool false then
+        worker.listing := [ read ~after:(text "next_cursor" result) "x2" "wiki" ]);
+    worker.listing := [ read "x1" "wiki" ];
+    publish_lane_change ();
+    await clock (fun () -> delivered "x2" worker);
+    let names id = member "records" (result_of id worker) |> Yojson.Safe.Util.to_list |> List.map (text "name") in
+    check bool "the first page is not the whole wiki" true (member "complete" (result_of "x1" worker) = `Bool false);
+    check (list string) "the pages together hold every page once" [ "one"; "two"; "three" ] (names "x1" @ names "x2");
+    List.iter (fun arguments ->
+        check bool "every delivery fits the frame" true (String.length (Yojson.Safe.to_string arguments) <= 4096))
+      !(worker.delivered))
+
+let test_a_page_that_is_gone_or_does_not_read_gives_no_record () =
+  with_installation ~declaration:wiki_granted (fun clock _config worker _ root ->
+    let empty = read_wiki clock worker "z0" in
+    check (list string) "a wiki with no log has no records" [] (page_versions empty);
+    check bool "and is complete" true (member "complete" empty = `Bool true);
+    create_page ~body:"kept\n" root "kept";
+    create_page root "gone";
+    create_page root "broken";
+    Sys.remove (Tool_wiki.page_path ~base_path:root "gone");
+    Out_channel.with_open_text (Tool_wiki.page_path ~base_path:root "broken")
+      (fun channel -> Out_channel.output_string channel "no header");
+    check (list string) "only the page that reads" [ {|kept r1 "kept\n"|} ] (page_versions (read_wiki clock worker "z1")))
+
+let test_a_wiki_refuses_a_cursor_it_did_not_give_and_read_file () =
+  with_installation ~declaration:wiki_granted (fun clock _config worker _ root ->
+    create_page root "alpha";
+    let file id = `Assoc [ "kind", `String "read_file"; "request_id", `String id; "source_id", `String "wiki"
+                         ; "commit", `String (String.make 40 'a'); "path", `String "alpha.md" ] in
+    worker.listing := [ read ~after:"1|beta|1" "y1" "wiki"; read ~after:"2|alpha|1" "y2" "wiki"
+                      ; read ~after:"01|alpha|1" "y3" "wiki"; file "y4" ];
+    publish_lane_change ();
+    await clock (fun () -> List.length !(worker.delivered) >= 4);
+    check string "a line the log does not hold there" "not_allowed" (text "status" (result_of "y1" worker));
+    check string "a position past the log" "not_allowed" (text "status" (result_of "y2" worker));
+    check string "another spelling of a cursor" "not_allowed" (text "status" (result_of "y3" worker));
+    check string "read_file on a wiki" "not_allowed" (text "status" (result_of "y4" worker)))
+
 let asking_manifest = manifest ^ {|[world.asks]
 operator=true
 |}
@@ -717,6 +864,18 @@ let () =
             test_retention_failure_never_advertises_an_oversized_result
         ; test_case "retained recovery does not reopen its unavailable source" `Quick
             test_retained_result_recovery_does_not_reopen_its_source ] )
+    ; ( "wiki reads"
+      , [ test_case "a wiki grant has no other key" `Quick test_a_wiki_grant_has_no_other_key
+        ; test_case "a granted wiki is read by each page's latest log line" `Quick
+            test_a_granted_wiki_is_read_by_each_pages_latest_log_line
+        ; test_case "a wiki cursor pages revisions forward" `Quick test_a_wiki_cursor_pages_revisions_forward
+        ; test_case "a since read of the wiki compares log minutes" `Quick
+            test_a_since_read_of_the_wiki_compares_log_minutes
+        ; test_case "wiki pages hold what fits the frame" `Quick test_wiki_pages_hold_what_fits_the_frame
+        ; test_case "a page that is gone or does not read gives no record" `Quick
+            test_a_page_that_is_gone_or_does_not_read_gives_no_record
+        ; test_case "a wiki refuses a cursor it did not give and read_file" `Quick
+            test_a_wiki_refuses_a_cursor_it_did_not_give_and_read_file ] )
     ; ( "asks"
       , [ test_case "a question waits for the operator and the answer starts a cycle" `Quick
             test_a_question_waits_for_the_operator_and_the_answer_starts_a_cycle

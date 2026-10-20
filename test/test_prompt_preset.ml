@@ -713,16 +713,19 @@ let test_restore_preserves_lane_activity_and_autosave () =
 ;;
 
 (* The overrides file is read through [Fs_compat], so inside Eio the read runs
-   on a system thread and does not hold the server's domain (#39273). The
-   outcomes are the ones the inline read gave: a value, a typed read failure
-   for a missing file, a typed JSON failure for a broken one. *)
+   on a system thread and another fiber runs while it is read (#39273). A read
+   made in place would finish before the second fiber starts. The outcomes are
+   the ones the in-place read gave: a value, a typed read failure for a missing
+   file, a typed JSON failure for a broken one. *)
 let test_override_load_reads_under_an_installed_eio_fs () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
+    ~finally:(fun () ->
+      Fs_compat.clear_fs ();
+      cleanup_dir dir)
     (fun () ->
       let path = Filename.concat dir "prompt_overrides.json" in
       let entry =
@@ -735,10 +738,21 @@ let test_override_load_reads_under_an_installed_eio_fs () =
       (match Override.save ~path [ entry ] with
        | Ok () -> ()
        | Error error -> Alcotest.fail (Override.error_to_string error));
-      (match Override.load ~path with
-       | Ok [ loaded ] -> Alcotest.(check string) "the saved value is read back" "edited" loaded.Override.value
-       | Ok entries -> Alcotest.failf "expected one entry, read %d" (List.length entries)
-       | Error error -> Alcotest.fail (Override.error_to_string error));
+      let other_fiber_ran = ref false in
+      let other_fiber_ran_before_load_returned = ref false in
+      Eio.Fiber.both
+        (fun () ->
+          (match Override.load ~path with
+           | Ok [ loaded ] ->
+             Alcotest.(check string) "the saved value is read back" "edited" loaded.Override.value
+           | Ok entries -> Alcotest.failf "expected one entry, read %d" (List.length entries)
+           | Error error -> Alcotest.fail (Override.error_to_string error));
+          other_fiber_ran_before_load_returned := !other_fiber_ran)
+        (fun () -> other_fiber_ran := true);
+      Alcotest.(check bool)
+        "another fiber runs while the file is read"
+        true
+        !other_fiber_ran_before_load_returned;
       (match Override.load ~path:(Filename.concat dir "absent.json") with
        | Error (Override.Read_failed _) -> ()
        | Ok _ | Error _ -> Alcotest.fail "a missing file is a read failure");

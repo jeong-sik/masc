@@ -93,7 +93,7 @@ try {
 
   // Refusal must never acquire cleanup authority over a pre-existing output,
   // including a symlink's target. Exercise both a publishable plan and one
-  // that fails after part creation, where cleanup used to be dangerous.
+  // that would fail during writing if ownership were incorrectly acquired.
   const sentinel = Buffer.from('\u0000owned source\r\n한글 cafe\u0301🙂\n')
   for (const kind of ['empty-directory', 'nonempty-directory', 'symlink']) {
     for (const value of [plan, unknown]) {

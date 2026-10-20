@@ -415,7 +415,10 @@ val read_agent_core_exact_bytes_since :
 (** Decode bytes {!read_agent_core_exact_bytes_since} found changed, with the
     digest it already took. When they were read from a file whose identity a
     Keeper's lineage holds, that lineage's value is handed out instead, as
-    {!exact_checkpoint_snapshot} describes. *)
+    {!exact_checkpoint_snapshot} describes. The lock is released between the
+    read and the decode, so a later file that reuses the read file's inode
+    with the same size and mtime is one more false match for that identity
+    rule (#43575). *)
 val decode_changed_bytes :
   changed_bytes -> (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
 

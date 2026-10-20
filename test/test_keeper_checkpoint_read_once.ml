@@ -235,6 +235,30 @@ let test_a_changed_source_since_a_snapshot_uses_the_kept_decode () = with_sessio
   | Ok Store.Unchanged_bytes -> fail "the changed bytes were read as unchanged"
   | Error error -> failf "the changed read failed: %s" (Store.checkpoint_ref_load_error_to_string error))
 
+(* A save lands between the unlocked read and its decode. The decode answers
+   for the bytes it was handed, matched by the identity they were read under:
+   the lineage now holds the newer file's value, so the bytes are decoded. *)
+let test_a_decode_after_a_later_save_answers_for_the_bytes_read () = with_session (fun session_dir ->
+  save_for_keeper ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:1 ~marker:"known");
+  let known = Store.exact_snapshot_source (load_snapshot ~session_dir "the known snapshot did not load") in
+  save_for_keeper ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:2 ~marker:"read");
+  let read_bytes = read_file (canonical_path session_dir) in
+  match Store.read_agent_core_exact_bytes_since ~session_dir ~known with
+  | Ok Store.Unchanged_bytes -> fail "the changed bytes were read as unchanged"
+  | Error error -> failf "the changed read failed: %s" (Store.checkpoint_ref_load_error_to_string error)
+  | Ok (Store.Changed_bytes changed) ->
+    save_for_keeper ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:3 ~marker:"later");
+    let later = load_value ~session_dir "the later value did not load" in
+    match Store.decode_changed_bytes changed with
+    | Error error -> failf "the changed decode failed: %s" (Store.checkpoint_ref_load_error_to_string error)
+    | Ok snapshot ->
+      check int "the snapshot is the turn that was read" 2
+        (Store.exact_snapshot_reference snapshot).turn_count;
+      check string "the reference is the digest of the bytes read" (one_shot_sha256 read_bytes)
+        (Store.exact_snapshot_reference snapshot).sha256;
+      check bool "the messages are not the later save's value" true
+        (Store.exact_snapshot_messages snapshot != later.messages))
+
 (* The file is unreadable inside [f], so an answer proves the store did not
    read it. *)
 let while_unreadable path f =
@@ -301,5 +325,7 @@ let () =
             test_a_snapshot_behind_a_replaced_file_decodes_it
         ; test_case "a changed source since a snapshot uses the kept decode" `Quick
             test_a_changed_source_since_a_snapshot_uses_the_kept_decode
+        ; test_case "a decode after a later save answers for the bytes read" `Quick
+            test_a_decode_after_a_later_save_answers_for_the_bytes_read
         ] )
     ]

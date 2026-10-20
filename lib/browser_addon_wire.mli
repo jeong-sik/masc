@@ -4,6 +4,9 @@
     a browser operation or supplies a fallback route. *)
 type command =
   | Snapshot
+  | Retire
+(** Private lifecycle control. Retires admission and waits for owned backend
+    cleanup; never export through ordinary browser ingress or model tools. *)
   | Poll of { client : Browser_lane.client_info; window_sec : float }
   | Deliver of { client_id : Browser_lane.client_id; id : string; payload : Yojson.Safe.t }
   | Disconnect of Browser_lane.client_id

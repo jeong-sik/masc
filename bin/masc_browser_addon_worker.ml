@@ -1,6 +1,7 @@
 let () =
-  let socket = ref None and incarnation = ref None and bound = ref None in
+  let socket = ref None and incarnation = ref None and bound = ref None and automation = ref false in
   Arg.parse [
+    "--automation",Arg.Set automation,"Start the host-selected owned Gecko backend";
     "--socket",Arg.String (fun value -> socket:=Some value),"Host-selected private Unix socket";
     "--incarnation",Arg.String (fun value -> incarnation:=Some value),"Host-selected worker UUID";
     "--max-message-bytes",Arg.Int (fun value -> bound:=Some value),"Native installation reply bound"]
@@ -29,7 +30,9 @@ let () =
           if Atomic.get stopping then Some () else None)) with
       | () -> revoke ()
       | exception exn -> Eio.Cancel.protect revoke; raise exn in
-    Eio.Fiber.first
+    let serve () = Eio.Fiber.first
       (fun () -> Masc.Browser_addon_service.serve ~net:(Eio.Stdenv.net env) ~owner
         ~socket_path ~max_message_bytes)
-      until_stop))
+      until_stop in
+    if !automation then Masc.Browser_addon_automation.run ~env ~owner
+      ~directory:(Filename.dirname socket_path) serve else serve ()))

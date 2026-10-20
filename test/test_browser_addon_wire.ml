@@ -50,7 +50,11 @@ let results () =
      W.Poll_result {command=Some {B.id="command";verb_json=B.verb_json B.Tabs_list};state_id="snapshot-2"};
      W.Receipt;W.Snapshot_result (`Assoc []);W.Issue_result (Ok (B.Answered payload));
      W.Service_refusal {message="retired";disposition=W.Outcome_unknown}]
+let retirement () =
+  let request={W.incarnation;command=W.Retire} in
+  check bool "private retirement retains incarnation" true (W.of_json (W.to_json request)=Ok request)
 let () = run "browser addon wire" ["boundary",[
   test_case "closed verbs roundtrip" `Quick roundtrips;
   test_case "guards and competing identities" `Quick rejections;
-  test_case "partial effects and receipts" `Quick results]]
+  test_case "partial effects and receipts" `Quick results;
+  test_case "private retirement retains incarnation" `Quick retirement]]

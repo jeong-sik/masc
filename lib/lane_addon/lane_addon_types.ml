@@ -44,6 +44,7 @@ type refresh_policy = Every_hint | Source_changes
 type model_access = Model_disabled | Host_sampling
 type state_storage = Ephemeral | Persistent
 type tool_invocation = Direct | Host_context
+type exact_output = { name : string; schema : Yojson.Safe.t }
 type package = {
   id : string; revision : string; title : string; contributions : contribution list;
   runtime : runtime;
@@ -57,7 +58,8 @@ type package = {
   model_access : model_access;
   binding_schema : Yojson.Safe.t option;
   presentation : Lane_addon_presentation.t;
-  skills_directory : Skill_resource_path.t option; resources : resources;
+  skills_directory : Skill_resource_path.t option;
+  exact_outputs : exact_output list; resources : resources;
 }
 let validate_exported_tools ~action_tool names =
   if List.exists (fun name -> String.trim name = "" || String.trim name <> name) names then
@@ -194,8 +196,12 @@ let output_selection_to_json = function
 let output_ports_to_json ports =
   `Assoc (List.map (fun (id, selection) -> id, output_selection_to_json selection) ports)
 let package_to_json (p : package) =
+  (* runtime and exact_outputs are written only when they differ from what a
+     package without the key means, so such a package keeps its revision. *)
   `Assoc ((match p.runtime with Docker -> []
       | Apple_container -> ["runtime", string (runtime_to_string p.runtime)])
+    @ (match p.exact_outputs with [] -> []
+      | outputs -> ["exact_outputs", `Assoc (List.map (fun output -> output.name, output.schema) outputs)])
     @ ["id", string p.id; "revision", string p.revision; "title", string p.title;
     "contributions", strings (List.map (function Observe -> "observe" | Derive -> "derive" | Act -> "act") p.contributions);
     "image", string p.image; "command", strings p.command; "directory", string p.directory;

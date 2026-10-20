@@ -841,33 +841,29 @@ let host_status_json status =
 (* The frame the worker connection accepts is the package's [max_reply_bytes]
    (RFC-0471 row 1). What is measured is the arguments object the host sends;
    the JSON-RPC envelope around it is not counted. *)
-let delivery_arguments e ~request_id result =
-  let arguments = Lane_addon_host_request.result_arguments ~request_id ~result in
-  if String.length (Yojson.Safe.to_string arguments) <= e.package.resources.max_reply_bytes then arguments
-  else
-    let bytes = Yojson.Safe.to_string result in
-    Lane_addon_host_request.result_arguments ~request_id
-      ~result:(`Assoc ["status", `String "result_exceeds_frame";
-                       "retained_sha256", `String (Lane_addon_store.digest bytes);
-                       "bytes", `Int (String.length bytes)])
-
 (* One cycle (RFC operator-quiz §4.4): list, deliver what is final or try each
    request once, list again until a listing delivers nothing. The host keeps
    no list of pending requests; [host_status] only shows the last cycle. *)
 (* What one try of a request gives: a final result body to deliver, or the
    reason it waits for the next event. *)
-type host_attempt = Deliver of Yojson.Safe.t | Wait of Yojson.Safe.t
+type host_attempt = Deliver of Yojson.Safe.t | Restore of Yojson.Safe.t | Wait of Yojson.Safe.t
 
 let run_host_cycle m e (port : host_port) =
   let delivered = Hashtbl.create 8 and tried = Hashtbl.create 8 in
   let waiting = ref [] in
+  let current_owner () : Lane_addon_host_delivery.owner = {
+    instance_id=e.instance_id;
+    authority=`Assoc ["configuration", Option.fold ~none:`Null ~some:configuration_owner_json e.configuration;
+      "source_access", Lane_addon_sources.access_to_json e.source_access; "binding", e.binding];
+  } in
+  let owner = current_owner () in
   let not_allowed reason = Deliver (`Assoc ["status", `String "not_allowed"; "reason", `String reason]) in
   let read_answer = function
     | Lane_addon_records.Page body -> Ok (Deliver body)
     | Lane_addon_records.Not_allowed reason -> Ok (not_allowed reason)
     | Lane_addon_records.Unavailable detail ->
         Ok (Wait (`Assoc ["reason", `String "source_unavailable"; "detail", `String detail])) in
-  let try_request = function
+  let produce = function
     | Lane_addon_host_request.Exact_output exact ->
         let attempt = match e.configuration, !exact_runner with
           | None, _ ->
@@ -896,13 +892,36 @@ let run_host_cycle m e (port : host_port) =
          | Error reason -> Ok (not_allowed reason)
          | Ok grants ->
              read_answer (Lane_addon_records.read_file ~base_path:m.base_path ~store:m.store ~grants
-               ~source_id ~commit ~path)) in
-  let deliver request_id result =
-    let* answer = port.deliver ~arguments:(delivery_arguments e ~request_id result)
+               ~source_id ~commit ~path))
+    | Lane_addon_host_request.Read_result {request_id; original_request_id; source_id; sha256; offset} ->
+        (match offload (fun () -> Lane_addon_host_delivery.read ~store:m.store ~owner ~request_id
+            ~original_request_id ~source_id ~sha256 ~offset ~max_bytes:e.package.resources.max_reply_bytes) with
+         | Ok body -> Ok (Deliver body)
+         | Error (Lane_addon_host_delivery.Refused reason) -> Ok (not_allowed reason)
+         | Error (Storage_failed detail) -> Error (Result_delivery_failed {request_id; detail})) in
+  let try_request request =
+    let request_id = Lane_addon_host_request.request_id request in
+    let* retained = offload (fun () -> Lane_addon_host_delivery.restore ~store:m.store ~owner ~request
+        ~max_bytes:e.package.resources.max_reply_bytes)
+      |> Result.map_error (function
+        | Lane_addon_host_delivery.Refused detail | Storage_failed detail -> Result_delivery_failed {request_id; detail}) in
+    match retained with Some arguments -> Ok (Restore arguments) | None -> produce request in
+  let deliver_arguments ~request_id arguments =
+    let* () = if e.stopping || (current_owner ()).authority <> owner.authority then
+        Error (Result_delivery_failed {request_id; detail="installation authority changed before result delivery"})
+      else Ok () in
+    let* answer = port.deliver ~arguments
       |> Result.map_error (fun detail -> Result_delivery_failed {request_id; detail}) in
     Lane_addon_host_request.accepted_of_json answer
     |> Result.map (fun (_accepted : bool) -> ())
     |> Result.map_error (fun detail -> Result_delivery_failed {request_id; detail}) in
+  let deliver request result =
+    let request_id = Lane_addon_host_request.request_id request in
+    let* arguments = offload (fun () -> Lane_addon_host_delivery.arguments ~store:m.store ~owner ~request
+        ~max_bytes:e.package.resources.max_reply_bytes ~result)
+      |> Result.map_error (function
+        | Lane_addon_host_delivery.Refused detail | Storage_failed detail -> Result_delivery_failed {request_id; detail}) in
+    deliver_arguments ~request_id arguments in
   let rec pass () =
     let* listing = port.list_requests () |> Result.map_error (fun detail -> Listing_failed detail) in
     let* requests = Lane_addon_host_request.listing_of_json listing
@@ -916,8 +935,12 @@ let run_host_cycle m e (port : host_port) =
           else
             let* attempt = try_request request in
             match attempt with
+            | Restore arguments ->
+                let* () = deliver_arguments ~request_id arguments in
+                Hashtbl.replace delivered request_id ();
+                each true rest
             | Deliver result ->
-                let* () = deliver request_id result in
+                let* () = deliver request result in
                 Hashtbl.replace delivered request_id ();
                 each true rest
             | Wait reason ->

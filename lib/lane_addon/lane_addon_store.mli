@@ -16,6 +16,21 @@ val write_sampling_blob : t -> string -> (Lane_addon_types.evidence, string) res
     same immutable address. Success requires a durable write. *)
 val read_blob : ?max_bytes:int -> t -> Lane_addon_types.evidence -> (string, string) result
 (** [max_bytes] rejects a retained file before allocating its complete body. *)
+type blob_slice = { content : string; snapshot : Fs_compat.owned_regular_file_snapshot }
+val read_blob_slice : ?snapshot:Fs_compat.owned_regular_file_snapshot ->
+  t -> Lane_addon_types.evidence -> offset:int -> max_bytes:int ->
+  (blob_slice, string) result
+(** Without [snapshot], hash the complete blob once and return its validated
+    descriptor snapshot. With that witness, read only the bounded slice and
+    reject any snapshot change. A consumer reconstructs the advertised full SHA
+    after paging; a hash alone never supplies this witness. Zero bytes captures
+    or verifies the witness without retaining body bytes. *)
+val save_host_result : t -> instance_id:string -> request_id:string -> Yojson.Safe.t ->
+  (unit, string) result
+val load_host_result : t -> instance_id:string -> request_id:string ->
+  (Yojson.Safe.t option, string) result
+(** Durable host-result authority link, addressed by instance and original request,
+    never by a package-supplied blob hash. Same verification as action receipts. *)
 type read_budget
 type bounded_read_error = Read_limit_exceeded | Read_failed of string
 val read_budget : max_bytes:int -> read_budget

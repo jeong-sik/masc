@@ -11,8 +11,16 @@ type t =
           an earlier result. [None] reads from the beginning. *)
   | Read_file of { request_id : string; source_id : string; commit : string; path : string }
       (** One file's bytes at a commit of a granted repository. *)
+  | Read_result of {
+      request_id : string; original_request_id : string; source_id : string option;
+      sha256 : string; offset : int;
+    }
+      (** A bounded slice of a result already retained for this same installation,
+          original request and source. The advertised SHA alone grants no read. *)
 
 val request_id : t -> string
+val to_json : t -> Yojson.Safe.t
+(** Exact request identity retained with an oversized result. *)
 
 val listing_of_json : Yojson.Safe.t -> (t list, string) result
 (** Exactly [{"requests": [...]}], in the package's order. *)

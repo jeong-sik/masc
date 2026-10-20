@@ -47,8 +47,9 @@ val read_records :
   source_id:string -> after:string option -> read
 (** Records after [after], oldest first, as many as fit: [measure] gives the
     bytes a result body takes in the frame, and the page stays within
-    [max_bytes]. A first record that does not fit alone is still the page, so
-    the delivery reports its size instead of skipping it.
+    [max_bytes]. A first record that does not fit alone is still the page. The
+    host delivery retains that complete result JSON and supplies request-bound
+    [read_result] continuations rather than skipping the record or its cursor.
 
     Board records are posts (id, author, created and updated time,
     visibility, title, body) in the granted visibilities and the comments on

@@ -46,6 +46,20 @@ let test_the_answer_is_strict () =
   List.iter (fun json -> check bool "anything else is refused" true (Result.is_error (Host.accepted_of_json json)))
     [ `Assoc []; `Assoc [ "accepted", `String "yes" ]; `Assoc [ "accepted", `Bool true; "detail", `String "x" ] ]
 
+let test_a_result_read_is_request_bound () =
+  let request : Host.t = Read_result {request_id="part"; original_request_id="page";
+    source_id=Some "board"; sha256=String.make 64 'a'; offset=4096} in
+  let listing json = Host.listing_of_json (`Assoc ["requests", `List [json]]) in
+  check bool "continuation identity roundtrips" true (listing (Host.to_json request) = Ok [request]);
+  let fields = match Host.to_json request with `Assoc fields -> fields | _ -> fail "request must be an object" in
+  List.iter (fun fields -> check bool "malformed continuation is refused" true
+      (Result.is_error (listing (`Assoc fields))))
+    [("offset", `Int (-1)) :: List.remove_assoc "offset" fields;
+     ("sha256", `String "arbitrary-hash") :: List.remove_assoc "sha256" fields;
+     List.remove_assoc "source_id" fields;
+     ("offset", `Int 0) :: fields;
+     ("max_bytes", `Int 1) :: fields]
+
 let test_a_package_cannot_export_the_host_tools () =
   List.iter (fun name ->
       check bool name true (Result.is_error (Types.validate_exported_tools ~action_tool:None [ name ])))
@@ -59,4 +73,5 @@ let () =
         ; test_case "a read request is strict" `Quick test_a_read_request_is_strict
         ; test_case "a file request is strict" `Quick test_a_file_request_is_strict
         ; test_case "the answer is strict" `Quick test_the_answer_is_strict
+        ; test_case "a result read is bound to the original request" `Quick test_a_result_read_is_request_bound
         ; test_case "a package cannot export the host tools" `Quick test_a_package_cannot_export_the_host_tools ] ) ]

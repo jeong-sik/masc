@@ -466,6 +466,11 @@ let test_settlement_replay_requires_durable_authority () =
           | E.Found task -> E.Found {task with status}
           | E.Deleted -> E.Deleted) c.tasks}}
     | _ -> fail "expected Candidates" in
+  (* A candidate id that no observed Snapshot-linked task backs. *)
+  let ghost_candidate = match candidates.body with
+    | E.Candidates c -> {candidates with body=E.Candidates
+        {c with candidate_task_ids = "ghost-task" :: c.candidate_task_ids}}
+    | _ -> fail "expected Candidates" in
   let unlinked = match snapshot.body with
     | E.Snapshot s -> {snapshot with body=E.Snapshot {s with linked_task_ids=[]}}
     | _ -> fail "expected Snapshot" in
@@ -503,6 +508,7 @@ let test_settlement_replay_requires_durable_authority () =
     ; [snapshot;owed;candidates;paid wrong_run]
     ; [snapshot;owed;candidates;paid payment;paid payment]
     ; [unlinked;owed;candidates;paid payment]
+    ; [snapshot;owed;ghost_candidate;paid payment]
     ];
   (* The candidate list of a stored Candidates row was decided under the window
      of its time. A new settlement is held to today's window, but a stored one
@@ -513,8 +519,8 @@ let test_settlement_replay_requires_durable_authority () =
       refuses_append config healthy suffix;
       let stored = stored_text healthy suffix in
       Fs_compat.save_file (ledger_path config) stored;
-      check bool "the recorded candidate list is credited on read" true
-        (int_of_string U.(member "balance_milli" (balance config "keeper-a") |> to_string) > 1000);
+      check string "the recorded candidate list is credited on read, on top of the healthy 1000" "2000"
+        U.(member "balance_milli" (balance config "keeper-a") |> to_string);
       check string "reading does not rewrite the stored settlement" stored (bytes config)))
     [ [snapshot;owed;candidate_status E.Todo;paid payment]
     ; [snapshot;owed;candidate_status (E.Done {completed_at=ok (Candle_time.of_rfc3339 "1970-01-01T00:00:00Z")});paid payment]

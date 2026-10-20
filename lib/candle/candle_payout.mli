@@ -76,7 +76,7 @@ val validate_settlement : waiting -> Candle_event.t list -> Candle_event.body ->
     eligibility within the confirmed window, durable candidate Task coverage,
     unique relation decisions and exactly the eligible related Keeper recipients.
     Payment arithmetic alone cannot prove recipient eligibility. Call before the
-    atomic append, or against the preceding ledger when validating a fold. *)
+    atomic append. *)
 
 val validate_record : Candle_event.t list -> Candle_event.body -> (unit, string) result
 (** Admit a new settlement against preceding rows in file order, under today's

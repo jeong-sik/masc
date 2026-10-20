@@ -220,11 +220,11 @@ test('captured audio-only playback owns its one-shot or authored-loop clock and 
  }
 })
 
-test('paired captured-region playback validates the common clock and native MIDI2 endpoint binding', async () => {
+test('paired captured-region playback validates the common clock, captured owner and native endpoint binding', async () => {
   const format = 'capture-arrangement', bindings = [{ port: 0, destination: '42' }]
   const f = fixture({ format, midiOutput: '42', midiBindings: bindings })
   assert.equal(f.executable, arrangementTransportPath)
-  const values = { format, clock: { kind: 'mach-host-time' }, bindings: [{ port: 0, device: { kind: 'midi', protocol: 2, id: '42', name: 'Original UMP' } }] }
+  const values = { format, clock: { kind: 'mach-host-time' }, bindings: [{ port: 0, device: { kind: 'midi', protocol: 2, nativeProtocol: 2, id: '42', name: 'Original UMP' } }] }
   f.event('playing', values); await f.playback.ready
   f.playback.pause(); f.event('paused', values); f.playback.seek(.5); f.playback.resume(); f.event('playing', values)
   f.playback.stop(); f.event('stopped', values); f.close(); await f.playback.completion
@@ -236,7 +236,7 @@ test('paired captured-region playback validates the common clock and native MIDI
 
 test('hybrid playback binds each stream protocol independently, including one destination with distinct streams',async()=>{
   const options={format:'hybrid-arrangement',midiOutput:'42',midiBindings:[{port:0,destination:'42',protocol:1},{port:1,destination:'42',protocol:2}]}
-  const bindings=[{port:0,device:{id:'42',kind:'midi',name:'SMF',protocol:1}},{port:1,device:{id:'42',kind:'midi',name:'UMP',protocol:2}}]
+  const bindings=[{port:0,device:{id:'42',kind:'midi',name:'SMF',protocol:1}},{port:1,device:{id:'42',kind:'midi',name:'UMP',protocol:2,nativeProtocol:2}}]
   const f=fixture(options);assert.equal(f.executable,arrangementTransportPath)
   f.event('playing',{format:options.format,clock:{kind:'mach-host-time'},bindings});await f.playback.ready
   f.playback.pause();f.playback.seek(.5);f.playback.resume()
@@ -255,7 +255,7 @@ test('paired and hybrid loops pin only selected acquired streams through control
   const selected=hybrid?[{port:0,destination:'42',protocol:1},{port:1,destination:'42',protocol:2},{port:2,destination:'43',protocol:2}]
     :[{port:0,destination:'42'},{port:1,destination:'43'}]
   const options={format,loop:true,midiOutput:'42',midiBindings:selected}
-  const binding=(id,protocol,port=0)=>({port,device:{id,protocol,kind:'midi',name:'Selected'}})
+  const binding=(id,protocol,port=0)=>({port,device:{id,protocol,...(protocol===2?{nativeProtocol:2}:{}),kind:'midi',name:'Selected'}})
   const bindings=hybrid?[binding('42',1),binding('42',2,1)]:[binding('43',2)]
   const state={format,loop:true,clock:{kind:'mach-host-time'},bindings}
   const f=fixture(options);assert.ok(f.args.includes('--loop'))
@@ -294,4 +294,24 @@ test('WAV arrangement loop keeps its native owner, audio selection and explicit 
  f.playback.pause();f.event('paused',state);f.playback.seek(0);f.playback.resume();f.event('playing',state)
  f.playback.stop();f.event('stopped',state);f.close();await f.playback.completion
  assert.deepEqual(f.commands,[{kind:'pause'},{kind:'seek',seconds:0},{kind:'resume'},{kind:'stop'}])
+})
+
+test('captured output accepts native MIDI1 with its owner identity intact and rejects missing or changing wire identity', async () => {
+ for (const loop of [false,true]) for (const hybrid of [false,true]) {
+  const format=hybrid?'hybrid-arrangement':'capture-arrangement'
+  const selected=hybrid?[{port:0,destination:'42',protocol:1},{port:1,destination:'42',protocol:2}]:[{port:0,destination:'42'}]
+  const captured={port:hybrid?1:0,device:{id:'42',kind:'midi',name:'Captured',protocol:2,nativeProtocol:1}}
+  const bindings=hybrid?[{port:0,device:{id:'42',kind:'midi',name:'SMF',protocol:1}},captured]:[captured]
+  const options={format,loop,midiOutput:'42',midiBindings:selected}
+  const state={format,loop,clock:{kind:'mach-host-time'},bindings}
+  const f=fixture(options);f.event('playing',state);await f.playback.ready
+  f.event('paused',state);f.event('playing',state);f.event('stopped',state);f.close();await f.playback.completion
+  for (const nativeProtocol of [undefined,0,3]) {
+   const g=fixture(options);g.event('playing',{...state,bindings:bindings.map(b=>b===captured?{...b,device:{...b.device,nativeProtocol}}:b)});g.close(1)
+   await assert.rejects(g.playback.completion,/native protocol/)
+  }
+  const g=fixture(options);g.event('playing',state);await g.playback.ready
+  g.event('paused',{...state,bindings:bindings.map(b=>b===captured?{...b,device:{...b.device,nativeProtocol:2}}:b)});g.close(1)
+  await assert.rejects(g.playback.completion,/changed its captured/)
+ }
 })

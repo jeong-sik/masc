@@ -1,20 +1,33 @@
-(** The framed box's geometry: one border, and the numbers that describe it.
+(** The frame's geometry: the margin around every row, and the numbers that
+    follow from it.
 
-    Every helper that draws the box and every caller that lays a row out before
-    handing it over has to agree on the same measurements. They did not agree
-    by sharing a number; they agreed by each spelling one out. [cols - 4]
-    appeared fifteen times, [cols - 2] four, [rows - 5] ten more, across three
-    modules that could not see each other's copy.
+    Every helper that draws the frame and every caller that lays a row out
+    before handing it over has to agree on the same measurements. They did not
+    agree by sharing a number; they agreed by each spelling one out, fifteen
+    times for the content width alone, across three modules that could not see
+    each other's copy.
 
     The agenda panel is what made the case. Its rows were measured against the
     terminal's width and then cut on the way through the frame, which fits them
     to the inner width -- the number it had to match was four lines away in
     another module, unnamed. *)
 
-(** A row is drawn as border, pad, content, pad, border, and it spans the
-    terminal. The two cells of border and two of padding are not exported:
-    nothing outside needs to count them, and a caller that wants the content's
-    width should ask {!inner_width} rather than assemble it. *)
+(** A row is drawn as margin, content, margin, and it spans the terminal. A
+    full-screen surface leaves the margin blank; an overlay draws its border
+    glyph in the margin's outermost cell. A caller that wants the content's
+    width asks {!inner_width} rather than assembling it from these. *)
+
+val margin_cells : int
+(** Cells between the terminal's edge and a row's content, on each side. *)
+
+val border_padding_cells : int
+(** Blank cells an overlay draws between its border glyph and the content:
+    the margin less the cell the glyph takes. *)
+
+val content_column : int
+(** Where a row's content starts, in cells from the terminal's left edge
+    (0-based): the left margin. A picture placed over body rows, and a caret
+    placed in a row's text, count from here. *)
 
 val chrome_rows : int
 (** Top border, title, divider, bottom border, footer: the rows a framed panel

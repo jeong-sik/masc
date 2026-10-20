@@ -464,7 +464,7 @@ let render_runtime_detail (state : state) target =
        ~lead:(Lead_text (screen_title runtime_detail_title ^ "  "))
        ~id:target_label ~after:"" ~tail:(connection_badge state));
   box_divider buf cols;
-  let lines = runtime_detail_lines state target ~width:(max 1 (cols - 8)) in
+  let lines = runtime_detail_lines state target ~width:(max 1 (framed_inner_width cols - 4)) in
   let total = List.length lines in
   let content_height = max 1 (rows - 5) in
   let max_scroll = max 0 (total - content_height) in
@@ -1107,7 +1107,7 @@ let provider_history_lines ~cols (state : state) =
                       (String.length scope_id)))
         | Some account -> Overview_providers.scope_name account
       in
-      let width = max 1 (cols - 7) in
+      let width = max 1 (framed_inner_width cols - 3) in
       let minimum_card_cells = max 64 (7 + days * 2 + 4) in
       let paired = width >= 2 * minimum_card_cells + 2 in
       let card_width = if paired then (width - 2) / 2 else width in
@@ -1174,7 +1174,7 @@ let usage_lines ~cols (state : state) =
             ~providers:(usage_providers_reading state) ~runtimes:state.overview_quota
             ~account_emails:state.overview_account_emails
             ~show_unusable:state.usage_show_unusable
-            ~now:(Unix.gettimeofday ()) ~width:(max 20 (cols - 4)) with
+            ~now:(Unix.gettimeofday ()) ~width:(max 20 (framed_inner_width cols)) with
     | Some section -> section.title :: section.lines
     (* [section] answers [None] only before the first read. *)
     | None -> [ " Plan usage · not observed" ]
@@ -1218,7 +1218,7 @@ let usage_lines ~cols (state : state) =
               "unavailable (no complete window)"
           | None -> "unreported"
         in
-        let width = max 1 (cols - 7) in
+        let width = max 1 (framed_inner_width cols - 3) in
         let bar_cells = min 32 (max 1 (width - 2)) in
         let meter value highest row =
           match value row with
@@ -1260,7 +1260,7 @@ let usage_lines ~cols (state : state) =
                   | Keeper_usage_failed reason ->
                       "unavailable: " ^ Terminal_text.single_line reason
                 in
-                let width = max 1 (cols - 7) in
+                let width = max 1 (framed_inner_width cols - 3) in
                 let heading = Masc_tui_message_layout.fit_middle width
                     (Terminal_text.single_line row.kur_name) in
                 [ "   " ^ Theme.info () ^ Ansi.bold ^ heading ^ Ansi.reset ]
@@ -1309,7 +1309,7 @@ let usage_lines ~cols (state : state) =
         let missing = match state.overview_providers, account with
           | Providers_read _, None -> ["Account absent from the current inventory; selection retained."]
           | Providers_read _, Some _ | (Providers_unread | Providers_failed _), _ -> [] in
-        Masc_tui_text_block.rows ~max_cells:(max 1 (cols - 6))
+        Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols - 2))
           (String.concat "\n" (("Account · " ^ label ^ " · f:choose · a:all accounts") :: missing))
         @ [""] in
   match state.usage_section with

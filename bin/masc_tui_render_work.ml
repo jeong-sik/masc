@@ -1619,7 +1619,7 @@ let render_schedule_list (state : state) =
           | Some (schedule_id, err) ->
               c.push
                 ((Theme.bad ()) ^ "  "
-                ^ fit_width (Terminal_text.single_line (schedule_id ^ ": " ^ err)) (cols - 8)
+                ^ fit_width (Terminal_text.single_line (schedule_id ^ ": " ^ err)) (framed_inner_width cols - 4)
                 ^ Ansi.reset)
           | None -> ())
        end))

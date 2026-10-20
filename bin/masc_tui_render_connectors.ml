@@ -287,7 +287,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                     | Some context when context.target = target ->
                         "Selected " ^ Masc.Browser_scene.region_role_to_string context.role
                         ^ " · " ^ fit_width (Terminal_text.single_line context.label)
-                            (max 8 (cols - 32))
+                            (max 8 (framed_inner_width cols - 28))
                     | None | Some _ -> "Selected region")
                | Content, None -> "Page content" in
              let viewport = Printf.sprintf "page scroll x=%.0f y=%.0f"

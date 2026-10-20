@@ -52,16 +52,13 @@ let board_document_markdown ~width body =
    for the widest [span_text] draws, "99d23h": a board's oldest live threads are
    days old, so the day tier is the one it holds. *)
 
-(* Four cells of lead sit ahead of the mark on the header and on every row, so
-   the table gets what the frame leaves less those four. Summing the widths and
-   their gaps by hand is what the column description replaced: the sum was
+(* The header and every row start with the kind mark at the frame's content
+   column, so the table gets the frame's whole inner width. Summing the widths
+   and their gaps by hand is what the column description replaced: the sum was
    written once for the rows and once for the header, and the two drifted until
    REPLIES sat past the right edge whatever the title was sized to. *)
-let board_table_lead = 4
-
 let board_layout ~cols =
-  Render_schedule.board_layout
-    ~inner_width:(max 0 (framed_inner_width cols - board_table_lead))
+  Render_schedule.board_layout ~inner_width:(framed_inner_width cols)
 
 (* Colour here, the glyph in {!Masc_tui_board_kind_mark}, which the help sheet
    reads from the same function. Nothing explained these marks anywhere before:
@@ -92,7 +89,7 @@ let render_board_compose (state : state) =
   let kind_line =
     match state.board_compose_reply_to with
     | Some post_id ->
-        Printf.sprintf "  comment on %s"
+        Printf.sprintf "comment on %s"
           (Terminal_text.single_line post_id)
     | None ->
         let hearth_label =
@@ -100,7 +97,7 @@ let render_board_compose (state : state) =
           | Some h -> "#" ^ h
           | None -> "(default)"
         in
-        Printf.sprintf "  first line: title  rest: body  hearth: %s" hearth_label
+        Printf.sprintf "first line: title  rest: body  hearth: %s" hearth_label
   in
   let header = Printf.sprintf "%s  %s[%s]%s  %s  %s(%s, %s)%s"
     (screen_title " MASC Board")
@@ -119,7 +116,7 @@ let render_board_compose (state : state) =
     match state.board_compose_reply_to, state.board_compose_attachments with
     | None, _ :: _ ->
         Some
-          (Printf.sprintf "  attachments: %s"
+          (Printf.sprintf "attachments: %s"
              (String.concat " \xc2\xb7 "
                 (List.map
                    (fun (staged : board_staged_attachment) ->
@@ -136,8 +133,11 @@ let render_board_compose (state : state) =
   let attach_input_line =
     match state.board_compose_attach_input with
     | Some input ->
-        let label = "  attach file: " in
-        let room = max 1 (cols - 8 - String.length label - 1) in
+        let label = "attach file: " in
+        let room =
+          max 1
+            (Board_composer.draft_cells ~cols - Message_layout.display_width label)
+        in
         let path = Terminal_text.single_line (Buffer.contents input) in
         let shown = Message_layout.truncate_middle room path in
         Some (label ^ shown ^ Ansi.reverse ^ " " ^ Ansi.reset)
@@ -157,12 +157,12 @@ let render_board_compose (state : state) =
   (match state.board_post_error with
    | Some err ->
        box_line buf cols
-         ((Theme.bad ()) ^ "  "
-         ^ fit_width (Terminal_text.single_line err) (cols - 8)
+         ((Theme.bad ())
+         ^ fit_width (Terminal_text.single_line err) (framed_inner_width cols)
          ^ Ansi.reset)
    | None -> ());
   box_divider buf cols;
-  let text_width = max 10 (cols - 8) in
+  let text_width = Board_composer.draft_cells ~cols in
   let draft_lines =
     raw_lines
     |> List.concat_map (fun line ->
@@ -184,9 +184,7 @@ let render_board_compose (state : state) =
     else draft_lines
   in
   List.iter
-    (fun line ->
-       box_line buf cols
-         ("  " ^ fit_width line (cols - 8)))
+    (fun line -> box_line buf cols (fit_width line text_width))
     visible_lines;
   for _ = List.length visible_lines to content_height - 1 do
     box_line buf cols ""
@@ -263,7 +261,7 @@ let board_hearth_census_line ~cols (state : state) =
     | Masc_tui_fetched.Stale _ | Failed _ -> Theme.bad ()
     | Absent | Loading | Ready _ -> Ansi.dim in
   let notice text = tone
-    ^ Message_layout.truncate_middle (framed_inner_width cols) ("  hearths · " ^ text) ^ Ansi.reset in
+    ^ Message_layout.truncate_middle (framed_inner_width cols) ("hearths · " ^ text) ^ Ansi.reset in
   match Masc_tui_fetched.value observation with
   | None -> notice (match status with Some text -> text | None -> "census not observed")
   | Some [] -> notice (match status with Some text -> "last census empty; " ^ text | None -> "census empty")
@@ -310,12 +308,13 @@ let board_hearth_census_line ~cols (state : state) =
         Printf.sprintf "   %s" (Masc_tui_message_layout.count_noun total "post")
       in
       let dropped_note count = Printf.sprintf "%s+%d" census_separator count in
+      let label_gap = " " in
       let label=match status with
         | None -> "hearths"
         | Some text -> Message_layout.truncate_middle
-            (max 0 (framed_inner_width cols - cells "   " - cells tail
+            (max 0 (framed_inner_width cols - cells label_gap - cells tail
               - cells (dropped_note (List.length hearths)))) ("hearths · " ^ text) in
-      let lead = "  " ^ label ^ " " in
+      let lead = label ^ label_gap in
       let room = framed_inner_width cols - cells lead - cells tail in
       (* The hearths that fit in [budget] cells, in census order, and how many
          are left over. *)
@@ -355,7 +354,7 @@ let board_hearth_census_line ~cols (state : state) =
         List.map entry kept
         |> String.concat (Ansi.dim ^ census_separator ^ Ansi.reset)
       in
-      Printf.sprintf "  %s%s%s %s%s%s" tone label Ansi.reset shown
+      Printf.sprintf "%s%s%s%s%s%s%s" tone label Ansi.reset label_gap shown
         (match note with
          | None -> ""
          | Some note -> Printf.sprintf "%s%s%s" Ansi.dim note Ansi.reset)
@@ -456,7 +455,7 @@ let render_board_list (state : state) =
                sheet under [?]. *)
             c.push_styled ~style:(Theme.recede ())
               (board_heading_with_tail ~cols
-                 (Printf.sprintf "  %sSort [s]: %s"
+                 (Printf.sprintf "%sSort [s]: %s"
                     (match board_posts_status state with None -> "" | Some status -> status ^ " · ")
                     (board_sort_explanation query.bq_sort))
                  " · H:choose hearth"))
@@ -466,13 +465,12 @@ let render_board_list (state : state) =
                 (max 0 (min state.board_cursor (count - 1))) with
             | None -> c.push_empty ()
             | Some post ->
-                c.push ("  Selected post · " ^ Ansi.bold
+                c.push ("Selected post · " ^ Ansi.bold
                   ^ Terminal_text.single_line post.bp_title ^ Ansi.reset))
         ; c.push_divider
         ; (fun () ->
             c.push_styled ~style:(Theme.recede ())
-              (String.make board_table_lead ' '
-               ^ Render_schedule.board_header_row ~age_header ~layout))
+              (Render_schedule.board_header_row ~age_header ~layout))
         ; c.push_divider
         ]
       in
@@ -574,9 +572,7 @@ let render_board_list (state : state) =
               }
             in
             let content =
-              String.make board_table_lead ' '
-              ^ Render_schedule.board_row ~styles ~age_header ~layout
-                  values
+              Render_schedule.board_row ~styles ~age_header ~layout values
             in
             if is_selected then
               c.push_selected (Masc_tui_theme.strip_sgr content)
@@ -733,7 +729,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
     (if state.board_focus = Right_pane && not state.board_comments_focused
      then "> " else "  ")
     Ansi.bold
-    (fit_width (Terminal_text.single_line post.bp_title) (cols - 6))
+    (fit_width (Terminal_text.single_line post.bp_title) (framed_inner_width cols - 2))
     Ansi.reset
   in
   box_line buf cols title_line;
@@ -810,7 +806,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
   let document =
     Board_read_layout.get board_read_layout ~source ~render:(fun () ->
       (* Body lines *)
-      let text_width = body_wrap_cols - 8 in
+      let text_width = framed_inner_width body_wrap_cols - 4 in
       (* Sanitised a line at a time. A newline is a control byte, so sanitising the
          body whole escaped every break and the post arrived as one unbroken run
          with "\x0A" printed through it. *)
@@ -861,7 +857,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                  Printf.sprintf "  %s%-10s %s%s" Ansi.reset
                    (Link.kind_label kind)
                    (fit_width (Terminal_text.single_line id)
-                      (max 8 (body_wrap_cols - 16)))
+                      (max 8 (framed_inner_width body_wrap_cols - 12)))
                    Ansi.reset)
                referenced
       in
@@ -880,7 +876,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                      (fit_width (Terminal_text.single_line other.bp_id) 12)
                      Ansi.dim
                      (fit_width (Terminal_text.single_line other.bp_title)
-                        (max 8 (body_wrap_cols - 26)))
+                        (max 8 (framed_inner_width body_wrap_cols - 22)))
                      Ansi.reset))
       in
       (* The post's own attachments, ahead of the derived references: what
@@ -901,7 +897,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                  Printf.sprintf "  [%d] %s%s%s" (index + 1) Ansi.reset
                    (fit_width
                       (Terminal_text.single_line (Board_attachments.label entry))
-                      (max 8 (body_wrap_cols - 12)))
+                      (max 8 (framed_inner_width body_wrap_cols - 8)))
                    Ansi.reset)
                attachments
       in

@@ -96,6 +96,29 @@ let test_addressing_analysis () =
     (match addr4 with Composer.Unsupported_broadcast _ -> true | _ -> false)
 ;;
 
+(* The caret is where the next character goes: one cell past the text, with
+   the text starting at the frame's content column. Read from the frame's
+   constants, so narrowing the margin moves the caret with the text instead
+   of leaving it where a hand-added count put it. *)
+let test_caret_follows_the_frame_margin () =
+  let cols = 80 and chrome_top_rows = 7 in
+  let caret visible_lines =
+    snd (Composer.compute_caret_position ~chrome_top_rows ~cols ~visible_lines)
+  in
+  Alcotest.(check int) "the draft starts at the frame's content column"
+    (1 + Masc_tui_frame.content_column) Composer.draft_first_column;
+  Alcotest.(check int) "an empty draft puts the caret on the first draft cell"
+    Composer.draft_first_column (caret []);
+  Alcotest.(check int) "the caret sits one cell past the typed text"
+    (Composer.draft_first_column + String.length "hello") (caret [ "hello" ]);
+  let full = String.make (Composer.draft_cells ~cols) 'x' in
+  Alcotest.(check int) "a full row and its caret fill the frame's inner width"
+    (Masc_tui_frame.inner_width ~cols)
+    (caret [ full ] - Composer.draft_first_column + 1);
+  Alcotest.(check int) "after a full row the caret takes the last content cell"
+    (cols - Masc_tui_frame.margin_cells) (caret [ full ])
+;;
+
 let () =
   Alcotest.run "tui board composer"
     [ ( "strip_prefix"
@@ -108,6 +131,8 @@ let () =
       , [ Alcotest.test_case "addressing analysis" `Quick test_addressing_analysis
         ;] )
     ; ( "caret"
-      , [] )
+      , [ Alcotest.test_case "caret follows the frame margin" `Quick
+            test_caret_follows_the_frame_margin
+        ] )
     ]
 ;;

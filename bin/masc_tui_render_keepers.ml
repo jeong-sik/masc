@@ -1848,7 +1848,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       | Detail_info -> info_lines ()
       | Detail_items -> item_lines ()
       | Detail_sandbox ->
-          let width = max 24 (cols - 8) in
+          let width = max 24 (framed_inner_width cols - 4) in
           let status =
             stamped_or
               (Option.map

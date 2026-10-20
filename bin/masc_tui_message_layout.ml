@@ -624,9 +624,9 @@ let chat_input_prompt_prefix = "  > "
 
 let chat_input_prompt_cells = display_width chat_input_prompt_prefix
 
-(* The pane draws its rows inside the box, which spends its border and the
-   space after it before any content starts. *)
-let chat_input_box_cells = 2
+(* The pane draws its rows inside the frame, which spends its margin before
+   any content starts. *)
+let chat_input_box_cells = Masc_tui_frame.content_column
 
 (* One authority for the rows that never belong to message history: box top,
    navigation header, operational identity header, header divider, input
@@ -676,7 +676,7 @@ let scroll_position ~scrolled_back ~older_exist =
   else Some "(start)"
 
 let input_cursor_column ~terminal_cols ~input_cells =
-  let last_column = Int.max 1 (terminal_cols - 1) in
+  let last_column = Int.max 1 (terminal_cols - Masc_tui_frame.margin_cells) in
   (* Three things sit left of the caret: the box, the prompt, and what was
      typed -- and the caret goes one cell past the last of them. Deriving this
      from the prompt alone put it on the prompt's own ">" instead of after the
@@ -923,9 +923,9 @@ let align_role_label ?(column = chat_role_label_column) ~style label =
   else mark ^ " " ^ fit_middle inner label
 
 (* #32984: the width gate below is derived from a chat row's fixed chrome,
-   not chosen. Before its body, a row pays the frame's border and padding
-   (4 cells -- [Masc_tui_frame.inner_width] is [cols - 4], pinned in the
-   layout tests), the body indent (2, in {!rows_of_entry}), the turn rail
+   not chosen. Before its body, a row pays the frame's margin either side
+   ([Masc_tui_frame.outer_width] adds it), the body indent (2, in
+   {!rows_of_entry}), the turn rail
    ({!turn_rail_cells}), and the speaker/tool label column at its floor
    ({!chat_role_label_column}). What remains is the body, and a body reads
    when it keeps twenty cells: three or four English words per row, so a
@@ -941,7 +941,9 @@ let align_role_label ?(column = chat_role_label_column) ~style label =
 let chat_readable_body_cells = 20
 
 let chat_min_terminal_cols =
-  4 + 2 + turn_rail_cells + chat_role_label_column + chat_readable_body_cells
+  Masc_tui_frame.outer_width
+    ~inner:
+      (2 + turn_rail_cells + chat_role_label_column + chat_readable_body_cells)
 
 let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
   (* The fixed chrome costs eight rows. The title and operational identity use

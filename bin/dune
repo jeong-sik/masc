@@ -990,7 +990,9 @@
  (wrapped false)
  (modules masc_tui_message_layout masc_tui_grapheme_segmentation)
  (private_modules masc_tui_grapheme_segmentation)
- (libraries uucp uuseg))
+ ; masc_tui_frame for the margin the chat composer's caret and the chat
+ ; pane's width gate count from.
+ (libraries masc_tui_frame uucp uuseg))
 
 (library
  (name masc_tui_tool_detail)
@@ -1501,6 +1503,7 @@
   masc_tui_board_hearth
   masc_tui_message_layout
   masc_tui_ansi
+  masc_tui_frame
   masc_tui_theme
   masc.board_addressing))
 
@@ -2946,7 +2949,7 @@
  (name masc_tui_identity_model)
  (wrapped false)
  (modules masc_tui_identity_model)
- (libraries masc_tui_pick_list masc_tui_message_layout yojson))
+ (libraries masc_tui_frame masc_tui_pick_list masc_tui_message_layout yojson))
 
 (library
  (name masc_tui_render_identity)

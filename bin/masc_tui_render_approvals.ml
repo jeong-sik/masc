@@ -18,7 +18,7 @@ module Rows = Masc_tui_rows
    carrying a page of code read as its first forty characters and there was
    no second screen. This is that screen. *)
 let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_approvals_model.approval_row) buf =
-  let width = max 8 (cols - 6) in
+  let width = max 8 (framed_inner_width cols - 2) in
   (* [Approval_detail.of_fields] makes every value terminal-safe. *)
   let lines =
     Approval_detail.of_fields ~width
@@ -134,7 +134,7 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_ap
       | Some label ->
         (* The name is bold, what sits beside it is not: the row carries both
            now, and bolding the whole of it would weight the value too. *)
-        let drawn = fit_width text (cols - 6) in
+        let drawn = fit_width text (framed_inner_width cols - 2) in
         let name = String.length label in
         (* Split only where the whole name survived the cut. A narrow pane
            can end the row inside the name, and [fit_width]'s ellipsis is
@@ -146,7 +146,7 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_ap
                (String.sub drawn name (String.length drawn - name))
            else Printf.sprintf "  %s%s%s" Ansi.bold drawn Ansi.reset)
       | None ->
-        box_line buf cols (Printf.sprintf "  %s" (fit_width text (cols - 6))))
+        box_line buf cols (Printf.sprintf "  %s" (fit_width text (framed_inner_width cols - 2))))
     drawn;
   for _ = 1 to content_height - List.length drawn do
     box_empty buf cols
@@ -538,11 +538,11 @@ let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
                 | Deny -> "n"
               in
               Printf.sprintf "  %sPress %s again: %s%s" (Theme.warn ()) key
-                (fit_width (Terminal_text.single_line a.ap_summary) (cols - 22))
+                (fit_width (Terminal_text.single_line a.ap_summary) (framed_inner_width cols - 18))
                 Ansi.reset
           | _ ->
               let summary =
-                fit_width (Terminal_text.single_line a.ap_summary) (max 8 (cols - 34))
+                fit_width (Terminal_text.single_line a.ap_summary) (max 8 (framed_inner_width cols - 30))
               in
               Printf.sprintf "  %s%s%s  %s[y] Approve  [n] Reject%s"
                 Ansi.dim summary Ansi.reset
@@ -560,14 +560,14 @@ let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
           (Theme.warn ())
           (fit_width
              (Terminal_text.single_line held.kta_question)
-             (max 8 (cols - 28)))
+             (max 8 (framed_inner_width cols - 24)))
           Ansi.reset
           (Theme.info ()) Ansi.reset
           Ansi.dim
           (fit_width
              (Terminal_text.single_line_or ~default:"(not provided)"
                 held.kta_because)
-             (max 8 (cols - 12)))
+             (max 8 (framed_inner_width cols - 8)))
           Ansi.reset
     | Some (Masc_tui_approvals_model.Gate_row pending) ->
         (* A durable Gate ask: it keeps until answered, and the answer goes
@@ -598,7 +598,7 @@ let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
             keeper
             (fit_width
                (Terminal_text.single_line pending.Tui_decode.gp_display_tool)
-               (max 8 (cols - 56 - Message_layout.display_width keeper
+               (max 8 (framed_inner_width cols - 52 - Message_layout.display_width keeper
                        - Message_layout.display_width phase)))
             phase
             Ansi.reset
@@ -617,14 +617,14 @@ let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
              in
              Printf.sprintf "%s\n  %sreason: %s%s\n  %s%s%s"
                headline Ansi.dim
-               (fit_width detail (max 8 (cols - 12))) Ansi.reset
-               Ansi.dim (fit_width next (max 8 (cols - 4))) Ansi.reset
+               (fit_width detail (max 8 (framed_inner_width cols - 8))) Ansi.reset
+               Ansi.dim (fit_width next (max 8 (framed_inner_width cols))) Ansi.reset
          | Gate_human_required ->
              (match pending.gp_judge_advice with
               | Some advice ->
                   Printf.sprintf "%s\n  %sjudge: %s%s"
                     headline Ansi.dim
-                    (fit_width (Terminal_text.single_line advice.rationale) (max 8 (cols - 11)))
+                    (fit_width (Terminal_text.single_line advice.rationale) (max 8 (framed_inner_width cols - 7)))
                     Ansi.reset
               | None -> headline)
          | Gate_queued | Gate_judging -> headline)
@@ -671,7 +671,7 @@ let approval_metadata_lines (state : state) ~approvals ~cols =
               (Terminal_text.short_timestamp approval.ap_created_at)
           ; Printf.sprintf "expires=%s" expires ]
         , Printf.sprintf "  %spayload=%s%s" Ansi.dim
-            (fit_width payload (max 8 (cols - 12)))
+            (fit_width payload (max 8 (framed_inner_width cols - 8)))
             Ansi.reset )
     | Some (Masc_tui_approvals_model.Keeper_tool_row held) ->
         ( [ Printf.sprintf "keeper=%s"
@@ -681,7 +681,7 @@ let approval_metadata_lines (state : state) ~approvals ~cols =
         , Printf.sprintf "  %sargs=%s%s" Ansi.dim
             (fit_width
                (Terminal_text.preview_line held.kta_args)
-               (max 8 (cols - 9)))
+               (max 8 (framed_inner_width cols - 5)))
             Ansi.reset )
     | Some (Masc_tui_approvals_model.Gate_row pending) ->
         (* The keeper name is not repeated here: the line directly above is
@@ -726,7 +726,7 @@ let approval_metadata_lines (state : state) ~approvals ~cols =
             (fit_width
                (Terminal_text.single_line_or ~default:"(no input preview)"
                   pending.Tui_decode.gp_input_preview)
-               (max 8 (cols - 10)))
+               (max 8 (framed_inner_width cols - 6)))
             Ansi.reset )
   in
   let metadata_rows =

@@ -5020,7 +5020,10 @@ let render_keeper_message (state : state) =
        box_divider chat_buf chat_cols);
     let input = Masc_tui_message_input.contents state.msg_input in
     let composer = Message_layout.composer_window
-      ~max_rows:Message_layout.composer_max_rows ~max_cells:(max 0 (chat_cols - 8))
+      ~max_rows:Message_layout.composer_max_rows
+      ~max_cells:
+        (max 0
+           (framed_inner_width chat_cols - Message_layout.chat_input_prompt_cells))
       ~cursor:(Masc_tui_message_input.cursor state.msg_input) input in
     (* Where the composer landed, not where a second copy of the pane's
        arithmetic predicted it would. The prediction only held while every row
@@ -5226,9 +5229,9 @@ let render_keeper_message (state : state) =
           | Updates _, None -> ["Enter:update"]
           | Sends, _ -> [] in
         (match context_hints with
-         | [] -> Masc_tui_footer.minimal_chat_hints ~max_cells:(max 0 (chat_cols - 4))
+         | [] -> Masc_tui_footer.minimal_chat_hints ~max_cells:(max 0 (framed_inner_width chat_cols))
              ~enter_hint ~escape_hint
-         | _ :: _ -> Masc_tui_footer.minimal_context_chat_hints ~max_cells:(max 0 (chat_cols - 4))
+         | _ :: _ -> Masc_tui_footer.minimal_context_chat_hints ~max_cells:(max 0 (framed_inner_width chat_cols))
              ~context_hints ~escape_hint)
       else if chat_cols < 120 then
         let compact_enter_hint =

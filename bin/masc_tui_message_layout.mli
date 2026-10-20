@@ -649,8 +649,8 @@ val scroll_position : scrolled_back:int -> older_exist:bool -> string option
     on. *)
 
 val input_cursor_column : terminal_cols:int -> input_cells:int -> int
-(** One-based cursor column after [input_cells] visible cells, clamped to the spacer
-    immediately before the right border. Measured from the prefix the pane
+(** One-based cursor column after [input_cells] visible cells, clamped to the
+    last cell before the frame's right margin. Measured from the prefix the pane
     renders ([chat_input_prompt_prefix]), so the caret lands where the typed
     text ends. *)
 

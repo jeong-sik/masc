@@ -329,7 +329,7 @@ let render_exact_lane_provider_editor (state : state) editor =
         (match List.nth_opt picker.rlp_choices offset with
          | Some (Masc_tui_types.Runtime_choice runtime) ->
            box_line_styled buf cols ~style:(Theme.recede ())
-             ("  " ^ Masc_tui_message_layout.truncate_middle (max 1 (cols - 6))
+             ("  " ^ Masc_tui_message_layout.truncate_middle (max 1 (framed_inner_width cols - 2))
                 (Terminal_text.single_line ("Connection " ^ runtime.ro_provider_id ^ " · Selected " ^ runtime.ro_id)))
          | Some (Masc_tui_types.Lane_choice _) | None -> ())
       | None -> ());
@@ -424,7 +424,7 @@ let render_exact_lane_provider_editor (state : state) editor =
                 (Terminal_text.single_line (runtime_quota_scope_label runtime)) ^ suffix)
          | None -> box_line_styled buf cols ~style:(Theme.warn ()) "  Model details unavailable");
         box_line_styled buf cols ~style:(Theme.recede ())
-          ("  " ^ Masc_tui_message_layout.truncate_middle (max 1 (cols - 6)) identity));
+          ("  " ^ Masc_tui_message_layout.truncate_middle (max 1 (framed_inner_width cols - 2)) identity));
      box_line_styled buf cols ~style:(Theme.recede ())
        "  arrows/j/k select · r replace model/effort · a add fallback · 1 first in group";
      box_line_styled buf cols ~style:(Theme.recede ())
@@ -1629,8 +1629,8 @@ let render_lane_run_detail (state : state) ~run_id =
       else begin
         let lines =
           if compact_preflight then
-            inspection_output_lines ~details:false ~width:(max 1 (cols - 8)) detail
-          else lane_run_stacked_lines ~details:state.lane_run_preflight_details ~width:(max 1 (cols - 8)) detail
+            inspection_output_lines ~details:false ~width:(max 1 (framed_inner_width cols - 4)) detail
+          else lane_run_stacked_lines ~details:state.lane_run_preflight_details ~width:(max 1 (framed_inner_width cols - 4)) detail
         in
         let max_scroll =
           if content_height = 0

@@ -124,7 +124,7 @@ let lines ~cols (view : view) =
            or copied, so the login stopped there. The TUI opens it as well --
            this is what is left when the machine has no opener. *)
          let url = Terminal_text.single_line login.ils_url in
-         let width = max 20 (cols - 6) in
+         let width = max 20 (framed_inner_width cols - 2) in
          let rec fold at acc =
            if at >= String.length url
            then List.rev acc

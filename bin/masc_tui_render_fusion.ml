@@ -847,13 +847,13 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
          | Some original when original.fhd_reference.fhe_post_id = reference.fhe_post_id
                               && original.fhd_reference.fhe_run_id = reference.fhe_run_id ->
              (if Option.is_some state.fusion_detail_error then [ Theme.warn (), "  Previous Board reading retained" ] else [])
-             @ fusion_historical_lines ~width:(max 1 (cols - 8)) original
+             @ fusion_historical_lines ~width:(max 1 (framed_inner_width cols - 4)) original
          | Some _ | None -> [ Ansi.dim, "  (waiting for the selected Board original; r retries)" ])
     | Fusion_list | Fusion_detail _ ->
         (match detail, state.fusion_detail_error with
          | None, None -> [ Ansi.dim, "  (loading exact Fusion detail)" ]
          | None, Some _ -> [ Ansi.dim, page_failed_note ]
-         | Some detail, (Some _ | None) -> fusion_detail_lines ~width:(max 1 (cols - 8)) detail)
+         | Some detail, (Some _ | None) -> fusion_detail_lines ~width:(max 1 (framed_inner_width cols - 4)) detail)
   in
   let total = List.length lines in
   let max_scroll = max 0 (total - content_height) in

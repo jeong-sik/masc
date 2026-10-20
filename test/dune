@@ -5623,7 +5623,8 @@
 (test
  (name test_browser_addon_stagehand)
  (modules test_browser_addon_stagehand)
- (libraries masc_test_deps masc.browser_lane masc.browser_configuration masc.native_addon_lease)
+ (libraries masc_test_deps masc.browser_lane masc.browser_configuration masc.native_addon_lease
+  masc.browser_process_owner masc_process)
  (deps ../bin/masc_native_addon_launcher.exe ../bin/masc_browser_process_owner.exe)
  (action (run %{test} %{dep:../bin/masc_native_addon_launcher.exe} %{dep:../bin/masc_browser_process_owner.exe})))
 

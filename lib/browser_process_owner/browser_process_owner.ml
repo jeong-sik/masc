@@ -1,26 +1,42 @@
-type ready = { instance_id : string; owner_pid : int; child_pid : int }
+type ready = { instance_id : string; owner_pid : int; child_pid : int;
+  child_started : string }
 let valid_instance value = String.trim value<>"" && not (String.contains value '\000')
-let ready_to_json value = `Assoc ["version",`Int 1;"instance_id",`String value.instance_id;
-  "owner_pid",`Int value.owner_pid;"child_pid",`Int value.child_pid]
+let ready_to_json value = `Assoc ["version",`Int 2;"instance_id",`String value.instance_id;
+  "owner_pid",`Int value.owner_pid;"child_pid",`Int value.child_pid;
+  "child_started",`String value.child_started]
 let ready_of_json = function
   | `Assoc fields when List.sort String.compare (List.map fst fields)=
-      ["child_pid";"instance_id";"owner_pid";"version"] ->
+      ["child_pid";"child_started";"instance_id";"owner_pid";"version"] ->
     (match List.assoc_opt "version" fields,List.assoc_opt "instance_id" fields,
-      List.assoc_opt "owner_pid" fields,List.assoc_opt "child_pid" fields with
-     | Some (`Int 1),Some (`String instance_id),Some (`Int owner_pid),Some (`Int child_pid)
-       when valid_instance instance_id && owner_pid>1 && child_pid>1 && owner_pid<>child_pid ->
-       Ok {instance_id;owner_pid;child_pid}
+      List.assoc_opt "owner_pid" fields,List.assoc_opt "child_pid" fields,
+      List.assoc_opt "child_started" fields with
+     | Some (`Int 2),Some (`String instance_id),Some (`Int owner_pid),Some (`Int child_pid),Some (`String child_started)
+       when valid_instance instance_id && valid_instance child_started
+         && owner_pid>1 && child_pid>1 && owner_pid<>child_pid ->
+       Ok {instance_id;owner_pid;child_pid;child_started}
      | _ -> Error "invalid browser process bootstrap receipt")
   | _ -> Error "invalid browser process bootstrap fields"
 type error = Invalid_instance | Invalid_command | Invalid_grace
   | Not_group_leader | Group_unavailable of string
+  | Child_identity_unavailable | Child_identity_changed
 let error_to_string = function
   | Invalid_instance -> "browser process instance must be nonblank without NUL"
   | Invalid_command -> "browser process command must name an absolute executable without NUL"
   | Invalid_grace -> "browser process cleanup grace must be finite and non-negative"
   | Not_group_leader -> "browser process owner must lead its own foreground group"
   | Group_unavailable detail -> "browser process group cannot be observed: " ^ detail
+  | Child_identity_unavailable -> "original browser child identity cannot be observed"
+  | Child_identity_changed -> "browser child incarnation or foreground group changed"
 let ( let* ) = Result.bind
+let verify_child receipt =
+  let* ()=match Posix_spawn_detached.process_start receipt.child_pid with
+    | Some started when receipt.child_pid>1 && started=receipt.child_started -> Ok ()
+    | Some _ -> Error Child_identity_changed
+    | None -> Error Child_identity_unavailable in
+  let* group=Posix_spawn_detached.group_of_pid receipt.child_pid
+    |> Result.map_error (fun detail -> Group_unavailable detail) in
+  if receipt.owner_pid>1 && group=receipt.owner_pid && receipt.child_pid<>receipt.owner_pid
+  then Ok () else Error Child_identity_changed
 let run ~env ~instance_id ~command ~grace_seconds ~on_ready =
   let* ()=if valid_instance instance_id then Ok () else Error Invalid_instance in
   let* ()=match command with
@@ -47,9 +63,12 @@ let run ~env ~instance_id ~command ~grace_seconds ~on_ready =
       if Atomic.get stopping then finish ();
       let child=Eio.Process.spawn ~sw Posix_spawn_process_mgr.mgr ~stdin:input
         ~stdout:(Eio.Stdenv.stderr env) ~stderr:(Eio.Stdenv.stderr env) command in
+      let child_pid=Eio.Process.pid child in
+      let* child_started=Posix_spawn_detached.process_start child_pid
+        |> Option.to_result ~none:Child_identity_unavailable in
       let ending=Eio.Fiber.first
           (fun () ->
-            if not (Atomic.get stopping) then on_ready {instance_id;owner_pid=pid;child_pid=Eio.Process.pid child};
+            if not (Atomic.get stopping) then on_ready {instance_id;owner_pid=pid;child_pid;child_started};
             Eio.Fiber.await_cancel ())
           (fun () -> Eio.Fiber.first
             (fun () -> ignore (Eio.Process.await child);`Child_ended)

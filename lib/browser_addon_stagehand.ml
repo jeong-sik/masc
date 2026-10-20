@@ -34,6 +34,29 @@ let configuration_of_json = function
 let protect work = try work () with
   | (Unix.Unix_error _ | Sys_error _ | Yojson.Json_error _) as exn -> Error (Printexc.to_string exn)
 let lease result = Result.map_error Lease.error_to_string result
+let original_browser ~admission ~(receipt:Browser_process_owner.ready) () =
+  let* status=lease (Lease.status admission) in
+  match status with
+  | Lease.Live identity when identity.pid=receipt.owner_pid
+      && identity.instance_id=receipt.instance_id && receipt.instance_id=Lease.instance_id admission ->
+    Browser_process_owner.verify_child receipt |> Result.map_error Browser_process_owner.error_to_string
+  | Awaiting_exec | Live _ | Cleanup_pending _ | Settled ->
+    Error "Chrome connection lost its original kernel owner lease"
+let verify_browser ~admission ~receipt cdp =
+  let original () = Eio_unix.run_in_systhread (original_browser ~admission ~receipt) in
+  let result=
+    let* ()=original () in
+    let* process_info=Browser_cdp.command cdp "SystemInfo.getProcessInfo" (`Assoc [])
+      |> Result.map_error (function
+        | Browser_cdp.Command_rejected {code;message} ->
+          Printf.sprintf "Chrome process identity rejected (%d): %s" code message
+        | Connection_lost detail -> "Chrome process identity connection ended: " ^ detail) in
+    let* pid=Browser_cdp.browser_process_id_of_json process_info in
+    let* ()=if pid=receipt.child_pid then Ok ()
+      else Error "Chrome debugging endpoint belongs to another browser process" in
+    original () in
+  (match result with Ok () -> () | Error detail -> Browser_cdp.lost cdp detail);
+  result
 let context ~incarnation ~directory = `Assoc ["kind",`String "browser_addon_chrome";
   "incarnation",`String incarnation;"directory",`String directory]
 let original c ~incarnation ~directory = protect (fun () ->
@@ -172,24 +195,27 @@ let open_session ~sw ~env ~owner ~directory ~configuration:c ~model ~headless ~l
         | line -> protect (fun () -> Browser_process_owner.ready_of_json (Yojson.Safe.from_string line))
         | exception End_of_file -> Error "Chrome owner ended without a bootstrap receipt")
       (fun () -> ignore (Eio.Process.await child);Error "Chrome owner exited before bootstrap") in
-    let* status=Eio_unix.run_in_systhread (fun () -> lease (Lease.status admission)) in
-    let* ()=match status with
-      | Lease.Live identity when identity.pid=Eio.Process.pid child && receipt.owner_pid=identity.pid
-          && receipt.instance_id=instance_id -> Ok ()
-      | Awaiting_exec | Live _ | Cleanup_pending _ | Settled -> Error "Chrome owner failed its original kernel lease check" in
+    let* ()=if receipt.owner_pid=Eio.Process.pid child && receipt.instance_id=instance_id
+      then Ok () else Error "Chrome bootstrap does not name its original process owner" in
+    let* ()=Eio_unix.run_in_systhread (original_browser ~admission ~receipt) in
     Eio.Flow.close ready_read;
     let* port,path=await_endpoint ~env ~profile ~process:child in
     let url=Process.browser_ws_url ~port ~path in
+    (* No extension event handler or model callback is installed until the
+       connection has independently identified the original browser child. *)
+    let current_session=ref None in
+    let* cdp=Browser_cdp.connect ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
+      ~url ~max_message:(64*1024*1024)
+      ~command_deadline_s:Browser_lane.Stagehand_open_budget.cdp_command_deadline_s
+      ~on_event:(fun event -> Option.iter (fun session -> Session.on_cdp_event session event) !current_session) in
+    let* ()=verify_browser ~admission ~receipt cdp in
     let session=Session.create ~sw ~clock:(Eio.Stdenv.clock env)
       ~worker_wait_s:Browser_lane.Stagehand_open_budget.service_worker_wait_s
       ~init_answer_s:Browser_lane.Stagehand_open_budget.init_answer_s
       (* Matches the existing session's bound for a caller-abandoned extension
          request. It never bounds ongoing agent/model work. *)
       ~abandoned_answer_s:30. ~model ~log in
-    let* cdp=Browser_cdp.connect ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
-      ~url ~max_message:(64*1024*1024)
-      ~command_deadline_s:Browser_lane.Stagehand_open_budget.cdp_command_deadline_s
-      ~on_event:(Session.on_cdp_event session) in
+    current_session:=Some session;
     let* init=Session.attach session cdp ~extension_dir:extension ~browser_cdp_url:url
       |> Result.map_error Browser_stagehand_executor.attach_error_message in
     Ok ({session;child_pid=receipt.child_pid},init) in

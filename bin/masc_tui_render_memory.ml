@@ -924,10 +924,10 @@ let memory_fact_detail_lines ~cols row =
   let parts = memory_fact_detail_parts ~cols row in
   fact_detail_prefix parts (fact_detail_line_count parts)
 
-(* The fleet header above the sort row: the Total, Ordinary and Librarian
-   readings, each wrapped to the frame. Its row count depends on the width, so
-   the list's height is worked out from these same rows ([memory_overview_scrolled])
-   rather than from a fixed count of header lines. *)
+(* The fleet header above the sort row: the Total, Ordinary, Source and
+   Librarian readings, each wrapped to the frame. Its row count depends on the
+   width, so the list's height is worked out from these same rows
+   ([memory_overview_scrolled]) rather than from a fixed count of header lines. *)
 let memory_fleet_header_rows ~cols (state : state) : string list =
   (* A failed first read has no counts. The error row below owns the cause;
      keep these two labelled values unavailable without repeating its verdict.
@@ -989,6 +989,14 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
              snapshot.mhs_total_observed_facts snapshot.mhs_total_derived_facts
          ; Masc_tui_message_layout.count_noun
              snapshot.mhs_total_support_invalidations "support invalidation"
+         ]
+       (* The source-bound snapshot is stored and invalidated apart from the
+          ordinary facts above, and each Keeper's detail already prints its own
+          count. Without this row the fleet header read "0 support
+          invalidations" while the source side held the only ones (#38446). *)
+       @ labelled "Source:"
+         [ Masc_tui_message_layout.count_noun
+             snapshot.mhs_total_source_invalidations "invalidation"
          ]
        @ labelled "Librarian:"
          [ (match snapshot.mhs_total_librarian_unread_turns with

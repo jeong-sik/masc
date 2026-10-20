@@ -26530,7 +26530,7 @@ and is loaded on demand through keeper_skill.
                              when not (String.equal aam_ask_id ask_id) ->
                                leave_ask_answering state
                            | Ask_answering _ | Ask_browsing -> ());
-                          state.ask_cursor <- cursor;
+                          state.ask_cursor <- Ask.On cursor;
                           enter_ask_answering state)
                  | Some
                      { Masc_tui_agenda.goes_to =

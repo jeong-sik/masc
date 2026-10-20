@@ -7,9 +7,9 @@
     set until an external rewrite fixed the file.
 
     Two behaviors are pinned here at the scan/store level:
-    1. A non-canonical enumerated field with a canonical default is
-       auto-repaired in place through the normal serializer, so the keeper
-       rejoins the keepalive set without operator intervention.
+    1. A reader decodes and never writes: a non-canonical enumerated value
+       reads as not current and the file keeps its bytes and mtime, and the
+       Owner's writer persists only values the exact decoder reads back.
     2. The parse-failure WARN is emitted on state transitions (new failure,
        changed reason, recovery) — not on every periodic iteration. *)
 
@@ -115,92 +115,114 @@ let infos entries =
   List.filter (fun (entry : Log.Ring.entry) -> entry.level = Log.Info) entries
 ;;
 
-let test_auto_repair_unbricks_keepalive () =
-  with_temp_workspace @@ fun config ->
-  let name = "meta-repair-canary" in
-  write_keeper_toml config name;
-  let path =
-    write_corrupted_meta config name ~field:"last_proactive_outcome" ~value:(`String "")
-  in
-  (* Sentinel values prove the repair rewrites only the offending field. *)
-  let corrupted =
-    Yojson.Safe.from_string (Masc_test_deps.read_file path)
-    |> replace_field "instructions" (`String "keep me")
-    |> replace_field "total_turns" (`Int 41)
-  in
-  write_file path (Yojson.Safe.pretty_to_string corrupted);
-  let base_seq = latest_seq () in
-  (* The keepalive scan is the path that dropped the keeper in the incident. *)
-  let names = Keeper_meta_store.keepalive_keeper_names config in
-  check
-    (list string)
-    "keeper rejoins keepalive set after auto-repair"
-    [ name ]
-    names;
-  (* The file was rewritten through the normal serializer: the offending
-     field carries its canonical default, every other field survives. *)
-  (match Yojson.Safe.from_string (Masc_test_deps.read_file path) with
-   | `Assoc fields ->
-     check
-       string
-       "last_proactive_outcome reset to canonical default"
-       "never_started"
-       (match List.assoc "last_proactive_outcome" fields with
-        | `String value -> value
-        | other -> Yojson.Safe.to_string other);
-     check
-       string
-       "instructions preserved"
-       "keep me"
-       (match List.assoc "instructions" fields with
-        | `String value -> value
-        | other -> Yojson.Safe.to_string other);
-     check
-       int
-       "total_turns preserved"
-       41
-       (match List.assoc "total_turns" fields with
-        | `Int value -> value
-        | _ -> -1)
-   | _ -> fail "repaired meta file is not a JSON object");
-  (* The read path serves the repaired meta. *)
-  (match Keeper_meta_store.read_meta config name with
-   | Ok (Some meta) ->
-     check
-       int
-       "read_meta returns repaired snapshot"
-       41
-       meta.Keeper_meta_contract.runtime.usage.total_turns
-   | Ok None -> fail "read_meta lost the keeper after repair"
-   | Error detail -> failf "read_meta still rejects repaired meta: %s" detail);
-  (* Exactly one repair WARN; a second scan of the now-healthy file is
-     silent. *)
-  let first_scan_entries = entries_about name (keeper_entries_since base_seq) in
-  check
-    int
-    "one auto-repair WARN per repair"
-    1
-    (List.length
-       (warns first_scan_entries
-        |> List.filter (fun (entry : Log.Ring.entry) ->
-             Astring.String.is_infix ~affix:"auto-repaired" entry.message)));
-  let second_seq = latest_seq () in
-  let names = Keeper_meta_store.keepalive_keeper_names config in
-  check (list string) "keeper stays in keepalive set" [ name ] names;
-  check
-    int
-    "second scan of repaired file logs nothing"
-    0
-    (List.length (entries_about name (keeper_entries_since second_seq)))
+(* Spellings [proactive_cycle_outcome_of_string] does not read back: the
+   empty value of the 2026-08-16 incident, labels in another case or with
+   surrounding whitespace, and a value that names no outcome. *)
+let non_canonical_outcomes = [ ""; "SILENT"; " UNKNOWN"; "not-an-outcome" ]
+
+(* A past mtime no write can keep: a rewrite, atomic or in place, stamps the
+   file with the current time. *)
+let pinned_mtime = 1_000_000_000.0
+
+let file_mtime path = (Unix.stat path).Unix.st_mtime
+
+(* A reader decodes and never writes. A non-canonical enumerated value is a
+   file this binary does not decode as current: it reads as not current with
+   the decoder's own detail, and the file keeps its bytes and mtime through
+   the direct read and through the periodic scans that read the same file. *)
+let test_non_canonical_outcome_is_read_without_writing () =
+  List.iteri
+    (fun index raw ->
+       with_temp_workspace
+       @@ fun config ->
+       let name = Printf.sprintf "meta-read-only-%d" index in
+       write_keeper_toml config name;
+       let path =
+         write_corrupted_meta
+           config
+           name
+           ~field:"last_proactive_outcome"
+           ~value:(`String raw)
+       in
+       Unix.utimes path pinned_mtime pinned_mtime;
+       let before = Masc_test_deps.read_file path in
+       let decoder_detail =
+         match Keeper_meta_json.meta_of_json (Yojson.Safe.from_string before) with
+         | Error detail -> detail
+         | Ok _ -> failf "%S decoded as a current outcome" raw
+       in
+       (match Keeper_meta_store.read_meta_file_path_presence path with
+        | Ok (Keeper_meta_store.Meta_not_current detail) ->
+          check string (Printf.sprintf "%S: the decoder's detail" raw) decoder_detail detail
+        | Ok (Keeper_meta_store.Meta_present _) ->
+          failf "%S: a non-canonical outcome was served as current" raw
+        | Ok Keeper_meta_store.Meta_absent -> failf "%S: the file was not seen" raw
+        | Error detail -> failf "%S: the read was refused: %s" raw detail);
+       ignore (Keeper_meta_store.keepalive_keeper_names config);
+       ignore (Keeper_meta_store.persistent_agent_names config);
+       (match Keeper_meta_store.read_meta config name with
+        | Ok None -> ()
+        | Ok (Some _) -> failf "%S: read_meta served a non-current meta" raw
+        | Error detail -> failf "%S: read_meta refused instead of reading as absent: %s" raw detail);
+       check string (Printf.sprintf "%S: bytes unchanged" raw) before
+         (Masc_test_deps.read_file path);
+       check (float 0.) (Printf.sprintf "%S: mtime unchanged" raw) pinned_mtime
+         (file_mtime path))
+    non_canonical_outcomes
 ;;
+
+(* The writer side of the same rule: every outcome the Owner persists through
+   [replace_snapshot] comes back from the exact decoder, so no file this binary
+   writes is one a reader has to turn away. *)
+let test_every_persisted_outcome_decodes_exactly () =
+  with_temp_workspace
+  @@ fun config ->
+  let name = "meta-writer-canary" in
+  let meta =
+    match Masc_test_deps.meta_of_json_fixture (`Assoc [ ("name", `String name) ]) with
+    | Ok meta -> meta
+    | Error detail -> failf "fixture meta: %s" detail
+  in
+  let path = keeper_meta_path config name in
+  List.iter
+    (fun outcome ->
+       let label = Keeper_meta_contract.proactive_cycle_outcome_to_string outcome in
+       let written =
+         { meta with
+           Keeper_meta_contract.runtime =
+             { meta.Keeper_meta_contract.runtime with
+               Keeper_meta_contract.proactive_rt =
+                 { meta.Keeper_meta_contract.runtime.proactive_rt with
+                   Keeper_meta_contract.last_outcome = outcome
+                 }
+             }
+         }
+       in
+       (match Keeper_meta_store.replace_snapshot config written with
+        | Ok () -> ()
+        | Error detail -> failf "%s: the Owner write failed: %s" label detail);
+       match
+         Keeper_meta_json.meta_of_json
+           (Yojson.Safe.from_string (Masc_test_deps.read_file path))
+       with
+       | Ok read ->
+         check
+           bool
+           (label ^ ": the persisted outcome reads back as itself")
+           true
+           (read.Keeper_meta_contract.runtime.proactive_rt.last_outcome = outcome)
+       | Error detail ->
+         failf "%s: the Owner wrote a meta the exact decoder refuses: %s" label detail)
+    Keeper_meta_contract.all_proactive_cycle_outcomes
+;;
+
 
 let test_scan_warns_on_state_transitions_only () =
   with_temp_workspace @@ fun config ->
   let name = "meta-dedupe-canary" in
   write_keeper_toml config name;
   (* [generation] is a field this binary no longer writes (#29590), so the
-     file is undecodable; there is no canonical default to repair to. Since
-     #29610 the reader fails open — one WARN names the loss and the meta
+     file is undecodable. Since #29610 the reader fails open — one WARN names the loss and the meta
      reads as absent — and that WARN is deduped on the (path, detail)
      state. *)
   let path = write_corrupted_meta config name ~field:"generation" ~value:(`Int 0) in
@@ -278,55 +300,8 @@ let test_non_enumerated_corruption_reads_as_absent () =
   check string "corrupt file is not rewritten" before (Masc_test_deps.read_file path)
 ;;
 
-(* The repair trims and lowercases before it looks for a label, so [raw] is a
-   recognized value with a spelling defect — the operator intent is
-   unambiguous and repair must keep it, not reset to the field default. *)
-let check_misspelling_repairs_to ~name ~raw ~expected =
-  with_temp_workspace @@ fun config ->
-  write_keeper_toml config name;
-  let path =
-    write_corrupted_meta
-      config
-      name
-      ~field:"last_proactive_outcome"
-      ~value:(`String raw)
-  in
-  (match Keeper_meta_store.read_meta config name with
-   | Ok (Some meta) ->
-     check
-       string
-       "last_proactive_outcome keeps recognized intent"
-       expected
-       (Keeper_meta_contract.proactive_cycle_outcome_to_string
-          meta.runtime.proactive_rt.last_outcome)
-   | Ok None -> fail "read_meta lost the keeper"
-   | Error detail -> failf "recognized misspelling was rejected: %s" detail);
-  (match Yojson.Safe.from_string (Masc_test_deps.read_file path) with
-   | `Assoc fields ->
-     check
-       string
-       "persisted outcome is the canonical spelling"
-       expected
-       (match List.assoc "last_proactive_outcome" fields with
-        | `String value -> value
-        | other -> Yojson.Safe.to_string other)
-   | _ -> fail "repaired meta file is not a JSON object")
-;;
-
-let test_recognized_misspelling_repairs_to_canonical_spelling () =
-  check_misspelling_repairs_to ~name:"meta-spelling-canary" ~raw:"SILENT"
-    ~expected:"silent"
-;;
-
-(* ["unknown"] is a label like the others, so its misspelling is kept too
-   rather than reset to the field default. *)
-let test_misspelled_unknown_repairs_to_unknown () =
-  check_misspelling_repairs_to ~name:"meta-spelling-unknown" ~raw:" UNKNOWN"
-    ~expected:"unknown"
-;;
-
-(* The deployment gate and the runtime read share one decode decision
-   ([Keeper_meta_store.decode_current_meta_with_repair]); this pins that the
+(* The deployment gate and the runtime read share one decode
+   ([Keeper_meta_json.meta_of_json]); this pins that the
    gate passes a file exactly when the runtime would serve it, names a
    rejection in the words the runtime logs, and never writes. The corpus is
    derived from the writer's current field set, so a schema change reshapes it
@@ -338,12 +313,7 @@ let test_gate_verdict_matches_runtime_read () =
   let path = keeper_meta_path config name in
   let current () = Masc_test_deps.current_meta_json_fixture ~name () in
   let write_json json = write_file path (Yojson.Safe.pretty_to_string json) in
-  (* The production callers all scope the repair write to the workspace root. *)
-  let runtime_read () =
-    Keeper_meta_store.read_meta_file_path
-      ~ownership_root:config.Workspace.base_path
-      path
-  in
+  let runtime_read () = Keeper_meta_store.read_meta_file_path path in
   let expect_accepted label =
     let before = Masc_test_deps.read_file path in
     (match Keeper_meta_store.validate_current_meta_file_result path with
@@ -390,11 +360,11 @@ let test_gate_verdict_matches_runtime_read () =
        write_json (current () |> remove_field key);
        expect_not_current ("missing " ^ key))
     Keeper_meta_json.current_field_names;
-  (* The issue #28844 shape: the runtime repairs it in place and serves it,
-     so the gate passes it without writing — the repair stays the runtime's. *)
+  (* The issue #28844 shape: the runtime reads it as absent and leaves it in
+     place, so the gate rejects it in the runtime's words. *)
   write_json
     (current () |> replace_field "last_proactive_outcome" (`String "not-an-outcome"));
-  expect_accepted "non-canonical enumerated value";
+  expect_not_current "non-canonical enumerated value";
   (* Not JSON: the runtime read returns [Error] (the boot path refuses the
      keeper instead of re-materialising it), and the gate names that class. *)
   let pretty = Yojson.Safe.pretty_to_string (current ()) in
@@ -436,17 +406,13 @@ let () =
         ] )
     ; ( "issue-28844"
       , [ test_case
-            "non-canonical enumerated field is auto-repaired and keeper rejoins keepalive"
+            "non-canonical enumerated field is read without writing"
             `Quick
-            test_auto_repair_unbricks_keepalive
+            test_non_canonical_outcome_is_read_without_writing
         ; test_case
-            "recognized misspelling repairs to its canonical spelling"
+            "every persisted outcome decodes exactly"
             `Quick
-            test_recognized_misspelling_repairs_to_canonical_spelling
-        ; test_case
-            "misspelled unknown repairs to unknown"
-            `Quick
-            test_misspelled_unknown_repairs_to_unknown
+            test_every_persisted_outcome_decodes_exactly
         ; test_case
             "scan WARN is emitted on state transitions only"
             `Quick

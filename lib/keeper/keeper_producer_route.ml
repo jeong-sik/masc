@@ -20,7 +20,6 @@ let resolve ~(config : Workspace_utils_backend_setup.config) producer =
     else (
       match
         Keeper_meta_store.read_meta_file_path_presence
-          ~ownership_root:config.Workspace.base_path
           (Keeper_types_profile.keeper_meta_path config name)
       with
       | Ok (Keeper_meta_store.Meta_present _) -> Ok (Keeper name)

@@ -29,10 +29,8 @@ let settle_durable_remove path = function
 ;;
 
 (** The one durable snapshot write: normal serializer plus atomic durable
-    commit.  Both the Owner write path ([replace_snapshot]) and the
-    enumerated-field auto-repair in [read_meta_file_path] go through here, so
-    a repaired file is byte-identical in shape to any other persisted
-    snapshot. *)
+    commit.  The Owner write path ([replace_snapshot]) is its only caller;
+    every reader in this module decodes and never writes. *)
 let persist_snapshot ?ownership_root path meta =
   let payload = meta |> meta_to_json |> Yojson.Safe.pretty_to_string in
   Keeper_fs.save_bytes_durable_atomic ?ownership_root path payload
@@ -54,7 +52,6 @@ let persist_snapshot ?ownership_root path meta =
 module Problem_report_state = struct
   type site =
     | Meta_read
-    | Meta_repair
     | Keepalive_scan
     | Persistent_scan
 
@@ -125,7 +122,6 @@ module Problem_report_state = struct
 
   let site_to_string = function
     | Meta_read -> "meta_read"
-    | Meta_repair -> "meta_repair"
     | Keepalive_scan -> "keepalive_scan"
     | Persistent_scan -> "persistent_scan"
   ;;
@@ -159,61 +155,17 @@ module Problem_report_state = struct
   ;;
 end
 
-(** The current-schema decode decision, shared by the runtime read and the
-    deployment gate so the two cannot drift: the exact decode first, then the
-    enumerated-field repair of issue #28844 followed by a redecode.  No I/O —
-    persisting a repair is the runtime caller's step.  [Error] carries the
-    detail the runtime reports when it fails open, so the gate names a
-    rejection in the runtime's own words. *)
-type decoded_meta =
-  | Exact of keeper_meta
-  | Repaired of
-      { meta : keeper_meta
-      ; decode_error : string
-      ; repair_detail : string
-      }
-
-let decode_current_meta_with_repair json : (decoded_meta, string) result =
-  match meta_of_json json with
-  | Ok meta -> Ok (Exact meta)
-  | Error e ->
-    (match repair_non_canonical_enum_fields json with
-     | None -> Error e
-     | Some (repaired_json, repairs) ->
-       let repair_detail =
-         repairs
-         |> List.map (fun (repair : enum_field_repair) ->
-           Printf.sprintf
-             "%s %S -> %S"
-             repair.field
-             repair.previous_value
-             repair.repaired_value)
-         |> String.concat ", "
-       in
-       (match meta_of_json repaired_json with
-        | Ok meta -> Ok (Repaired { meta; decode_error = e; repair_detail })
-        | Error redecode_detail ->
-          (* Resetting the enumerated fields did not make the file
-             decodable; the original failure stands, with the new decode
-             error attached when it differs. *)
-          Error
-            (if String.equal redecode_detail e
-             then e
-             else
-               Printf.sprintf
-                 "%s; auto-repair of %s did not decode: %s"
-                 e
-                 repair_detail
-                 redecode_detail)))
-;;
-
 type meta_presence =
   | Meta_absent
   | Meta_present of Keeper_meta_contract.keeper_meta
   | Meta_not_current of string
 
-let read_meta_file_path_presence ?ownership_root path : (meta_presence, string) result =
-  (* Fail open. A meta this binary cannot read is an absent meta, not a dead
+let read_meta_file_path_presence path : (meta_presence, string) result =
+  (* A reader decodes and never writes: the per-Keeper Owner is the only
+     writer of this file, and it writes through [meta_to_json], whose every
+     label is one the decoder reads back.
+
+     Fail open. A meta this binary cannot read is an absent meta, not a dead
      keeper: the TOML declaration carries the whole setup, so the boot path
      re-materialises one. Refusing instead took the fleet down three times on
      2026-08-23 (#29490, #29601, and the generation/last_blocker removal),
@@ -246,46 +198,16 @@ let read_meta_file_path_presence ?ownership_root path : (meta_presence, string) 
     match Safe_ops.read_json_file_safe path with
     | Error e -> Error e
     | Ok json ->
-      (match decode_current_meta_with_repair json with
-       | Ok (Exact meta) ->
+      (match meta_of_json json with
+       | Ok meta ->
          if Problem_report_state.note_recovered ~site:Meta_read ~path
          then Log.Keeper.info "keeper meta parse recovered for %s" path;
-         Problem_report_state.clear ~site:Meta_repair ~path;
          Ok (Meta_present meta)
-       | Ok (Repaired { meta = repaired_meta; decode_error; repair_detail }) ->
-         (* Issue #28844: a non-canonical enumerated field used to brick every
-            reader until something external rewrote the file.  When the
-            corruption is confined to fields with a canonical default, repair
-            in place through the normal serializer and proceed.  A live
-            writer that keeps re-corrupting the file with the same content
-            re-triggers the (idempotent) repair write each cycle, but the
-            WARN is deduped on the repair detail via [Meta_repair], so the
-            log storm does not return; the residual cost is one atomic
-            rewrite of a small file per scan against an active corrupter. *)
-         (match persist_snapshot ?ownership_root path repaired_meta with
-          | Ok () ->
-            if Problem_report_state.should_report
-                 ~site:Meta_repair
-                 ~path
-                 ~detail:repair_detail
-            then
-              Log.Keeper.warn
-                "keeper meta auto-repaired %s: %s"
-                path
-                repair_detail;
-            Ok (Meta_present repaired_meta)
-          | Error write_detail ->
-            fail_open
-              (Printf.sprintf
-                 "%s; auto-repair of %s failed to persist: %s"
-                 decode_error
-                 repair_detail
-                 write_detail))
        | Error detail -> fail_open detail))
 ;;
 
-let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta option, string) result =
-  read_meta_file_path_presence ?ownership_root path
+let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string) result =
+  read_meta_file_path_presence path
   |> Result.map (function
     | Meta_present meta -> Some meta
     | Meta_absent | Meta_not_current _ -> None)
@@ -304,20 +226,17 @@ let read_meta_file_path_read_only ~ownership_root path =
     (match Yojson.Safe.from_string contents with
      | exception Yojson.Json_error detail -> Error (Unreadable detail)
      | json ->
-       (match decode_current_meta_with_repair json with
-        | Ok (Exact meta) -> Ok (Some meta)
-        | Ok (Repaired { decode_error; _ }) ->
-          Error (Not_current decode_error)
+       (match meta_of_json json with
+        | Ok meta -> Ok (Some meta)
         | Error detail -> Error (Not_current detail)))
 ;;
 
 let validate_current_meta_file_result path : (unit, current_meta_rejection) result =
-  (* Deploy-gate twin of [read_meta_file_path]: the same decode decision
-     through [decode_current_meta_with_repair], minus the fail-open and the
-     repair write. [Not_current] fires exactly when the runtime would read
-     the file as absent and re-materialise the Keeper from its declaration
-     (#29610), losing the accumulated counters and the persisted task
-     binding; [Unreadable] when [read_meta_file_path] itself returns [Error]
+  (* Deploy-gate twin of [read_meta_file_path]: the same decode
+     ([meta_of_json]) minus the fail-open. [Not_current] fires exactly when
+     the runtime would read the file as absent and re-materialise the Keeper
+     from its declaration (#29610), losing the accumulated counters and the
+     persisted task binding; [Unreadable] when [read_meta_file_path] itself returns [Error]
      and the boot path refuses the keeper. The deployment preflight runs this
      between the previous runtime's stop and the next one's start — the
      writer lease has to be free — so a rejection holds the plane down until
@@ -329,8 +248,8 @@ let validate_current_meta_file_result path : (unit, current_meta_rejection) resu
     match Safe_ops.read_json_file_safe path with
     | Error detail -> Error (Unreadable detail)
     | Ok json ->
-      (match decode_current_meta_with_repair json with
-       | Ok (Exact _ | Repaired _) -> Ok ()
+      (match meta_of_json json with
+       | Ok _ -> Ok ()
        | Error detail -> Error (Not_current detail))
 ;;
 
@@ -475,7 +394,6 @@ let persisted_keeper_for_mention_target config ~mention_target =
   let read_effective keeper_name =
     match
       read_meta_file_path
-        ~ownership_root:config.Workspace.base_path
         (keeper_meta_path config keeper_name)
     with
     | Error _ as error -> error
@@ -570,7 +488,7 @@ let keepalive_keeper_names config =
   |> List.filter_map (fun name ->
     let path = keeper_meta_path config name in
     match
-      read_meta_file_path ~ownership_root:config.Workspace.base_path path
+      read_meta_file_path path
     with
     | Ok (Some meta)
       when (not meta.paused) && effective_autoboot_enabled config name meta ->
@@ -615,7 +533,7 @@ let persistent_agent_names config =
   |> List.filter_map (fun name ->
     let path = keeper_meta_path config name in
     match
-      read_meta_file_path ~ownership_root:config.Workspace.base_path path
+      read_meta_file_path path
     with
     | Ok (Some meta)
       when (not meta.paused) && effective_autoboot_enabled config name meta ->
@@ -652,7 +570,6 @@ let read_meta_resolved config name : ((string * Keeper_meta_contract.keeper_meta
   then Ok None
   else
     read_meta_file_path
-      ~ownership_root:config.Workspace.base_path
       (keeper_meta_path config requested_name)
     |> Result.map (Option.map (fun meta -> requested_name, meta))
 ;;
@@ -663,7 +580,6 @@ let read_meta_presence config name : (meta_presence, string) result =
   then Ok Meta_absent
   else
     read_meta_file_path_presence
-      ~ownership_root:config.Workspace.base_path
       (keeper_meta_path config requested_name)
 ;;
 
@@ -717,7 +633,6 @@ let read_effective_meta_presence_named config name
     let presence =
       match
         read_meta_file_path_presence
-          ~ownership_root:config.Workspace.base_path
           (keeper_meta_path config requested_name)
       with
       | Error _ as err -> err

@@ -8,18 +8,13 @@
     the file does not exist. Unknown top-level keys are rejected with a
     reset-required error.
 
-    Issue #28844: a non-canonical value in an enumerated field with a
-    canonical default (e.g. [last_proactive_outcome]) is auto-repaired in
-    place through the normal serializer and the read proceeds; all other
-    corruption keeps failing loud and the file is left untouched.
-    [ownership_root] scopes the durable directory-chain fsync of the repair
-    write when the caller knows the workspace root.
+    The read decodes and never writes: a file that does not decode as the
+    current schema is left exactly as it is and reads as absent.
 
     The parse-failure WARN is emitted on state transitions (new failure,
     changed failure reason, recovery) per (site, path), not on every
     repeated read of the same broken file. *)
 val read_meta_file_path :
-  ?ownership_root:string ->
   string ->
   (Keeper_meta_contract.keeper_meta option, string) result
 
@@ -28,18 +23,16 @@ val read_meta_file_path :
 type meta_presence =
   | Meta_absent  (** No file at the path. *)
   | Meta_present of Keeper_meta_contract.keeper_meta
-      (** The file decodes, directly or after the enumerated-field repair. *)
+      (** The file decodes as the current schema. *)
   | Meta_not_current of string
       (** A file is at the path but this binary does not decode it as the
-          current schema, or its repair could not be persisted.
-          [read_meta_file_path] reads it as absent and the boot path
-          re-materialises the Keeper from its declaration. The string is the
-          decode detail the runtime logs. *)
+          current schema. [read_meta_file_path] reads it as absent and the
+          boot path re-materialises the Keeper from its declaration. The
+          string is the decode detail the runtime logs. *)
 
-(** [read_meta_file_path] with the presence kept; the same decode decision,
-    repair write, and failure reporting. *)
-val read_meta_file_path_presence :
-  ?ownership_root:string -> string -> (meta_presence, string) result
+(** [read_meta_file_path] with the presence kept; the same decode decision
+    and failure reporting, and no write. *)
+val read_meta_file_path_presence : string -> (meta_presence, string) result
 
 (** Why the deployment gate rejects a persisted Keeper meta, split by what
     the boot path does with the same file.  The two classes need different
@@ -51,27 +44,24 @@ type current_meta_rejection =
           returns [Error] for it and the boot path refuses the Keeper
           outright.  The lossless fix is restoring the file from backup. *)
   | Not_current of string
-      (** The JSON does not decode as the current schema, even after the
-          enumerated-field repair.  The boot path reads it as absent and
-          re-materialises the Keeper from its declaration (#29610), losing
-          the accumulated counters and the persisted task binding.  The
-          lossless fix is stripping fields outside the current schema or
-          filling missing ones. *)
+      (** The JSON does not decode as the current schema.  The boot path
+          reads it as absent and re-materialises the Keeper from its
+          declaration (#29610), losing the accumulated counters and the
+          persisted task binding.  The lossless fix is stripping fields
+          outside the current schema or filling missing ones. *)
 
 val read_meta_file_path_read_only :
   ownership_root:string ->
   string ->
   (Keeper_meta_contract.keeper_meta option, current_meta_rejection) result
-(** Strict no-follow snapshot read. It does not apply enumerated-field repair
-    or update failure-reporting state. *)
+(** Strict no-follow snapshot read. It does not update failure-reporting
+    state. *)
 
-(** Deploy-gate twin of [read_meta_file_path]: the same decode decision
-    (exact decode, then the issue #28844 enumerated-field repair with a
-    redecode), shared with the runtime read so the two cannot drift, minus
-    the fail-open and the repair write.  [Ok ()] when the runtime would keep
-    the snapshot, directly or after repairing it in place, or when there is
-    no file at [path]; [Error] carries the class above and the same detail
-    the runtime logs.  The deployment preflight runs this between the
+(** Deploy-gate twin of [read_meta_file_path]: the same exact decode,
+    shared with the runtime read so the two cannot drift, minus the
+    fail-open.  [Ok ()] when the runtime would keep the snapshot, or when
+    there is no file at [path]; [Error] carries the class above and the same
+    detail the runtime logs.  The deployment preflight runs this between the
     previous runtime's stop and the next one's start, so a rejection holds
     the plane down until the operator repairs the file and redeploys. *)
 val validate_current_meta_file_result :
@@ -190,7 +180,6 @@ val remove_snapshot : Workspace.config -> name:string -> (unit, string) result
 module Problem_report_state : sig
   type site =
     | Meta_read
-    | Meta_repair
     | Keepalive_scan
     | Persistent_scan
 

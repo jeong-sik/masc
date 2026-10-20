@@ -85,12 +85,10 @@ let test_an_off_canon_meta_is_not_rewritten () =
       false
       (Route.has_no_queue_without_writing ~config producer);
     Alcotest.(check string) "and the file is exactly as it was" bytes (read_bytes path);
-    (* The repairing reader does write, which is why the caller under the lock
-       must not use it. If this stops being true the in-lock reader can go. *)
     (match Route.resolve ~config producer with
      | Ok _ | Error _ -> ());
-    Alcotest.(check bool) "the repairing read rewrote the same file" true
-      (not (String.equal bytes (read_bytes path))))
+    Alcotest.(check string) "and resolve leaves it as it was too" bytes
+      (read_bytes path))
 
 (* A file that is not JSON at all reaches neither decoder's repair path, and
    the answer is still "there may be a Keeper here". *)

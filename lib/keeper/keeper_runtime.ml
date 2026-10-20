@@ -179,7 +179,6 @@ let autoboot_exclusion_reason_of_reads
 let autoboot_exclusion_reason ?profile_snapshot config name =
   match
     read_meta_file_path
-      ~ownership_root:config.Workspace.base_path
       (keeper_meta_path config name)
   with
   | Ok meta ->

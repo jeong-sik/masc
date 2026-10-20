@@ -15,6 +15,7 @@ module Tools = Browser_addon_tools
 
 let failures = ref []
 let steps = ref []
+let ( let* ) = Result.bind
 
 let record name outcome =
   steps := (name, Result.is_ok outcome) :: !steps;
@@ -75,18 +76,42 @@ let scripted_value ~schema ~text =
   else Error ("no scripted answer for " ^ String.concat "," props)
 ;;
 
-let scripted_http body =
+let scripted_input body =
   try
     let request=Yojson.Safe.from_string body in
     let open Yojson.Safe.Util in
-    let schema=request |> member "response_format" |> member "json_schema" |> member "schema" in
-    let text=request |> member "messages" |> to_list
-      |> List.map (fun message -> message |> member "content" |> to_string) |> String.concat "\n" in
-    match scripted_value ~schema ~text with
+    if (request |> member "response_format" |> member "type") <> `String "json_object" then
+      Error "the shared Exact Output fixture requires its declared JSON mode"
+    else
+      let messages=request |> member "messages" |> to_list in
+      match List.rev messages with
+      | [] -> Error "the shared Exact Output request has no schema instruction"
+      | instruction::reversed ->
+        let text=instruction |> member "content" |> to_string in
+        (* This fixture decodes only the public formatter's complete canonical
+           instruction. A JSON fragment in page text cannot select a schema.
+           JSON mode carries syntax on the wire and schema in this final turn. *)
+        let* start=String.index_opt text '{'
+          |> Option.to_result ~none:"the schema instruction has no object" in
+        let schema=Yojson.Safe.from_string (String.sub text start (String.length text-start)) in
+        let requirement=Agent_core.Exact_output.make_output_requirement ~schema
+          ~minimum_guarantee:Agent_core.Exact_output.Json_syntax in
+        if (instruction |> member "role") <> `String "user"
+           || text<>Agent_core.Exact_output.schema_instruction_text requirement then
+          Error "the final message is not the shared Exact Output schema instruction"
+        else
+          let text=List.rev reversed
+            |> List.map (fun message -> message |> member "content" |> to_string)
+            |> String.concat "\n" in
+          Ok (schema,text)
+  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+    Error "invalid fixture model request"
+;;
+
+let scripted_http body =
+  match Result.bind (scripted_input body) (fun (schema,text) -> scripted_value ~schema ~text) with
     | Ok value -> `OK,F.openai_response value
     | Error message -> `Bad_request,Yojson.Safe.to_string (`Assoc ["error",`Assoc ["message",`String message]])
-  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
-    `Bad_request,{|{"error":{"message":"invalid fixture model request"}}|}
 ;;
 
 let tool name result =
@@ -94,7 +119,6 @@ let tool name result =
   else Error (name ^ ": " ^ Tool_result.message result)
 ;;
 
-let ( let* ) = Result.bind
 let string_at keys json =
   List.fold_left (fun json key -> Yojson.Safe.Util.member key json) json keys
   |> Yojson.Safe.Util.to_string_option
@@ -151,9 +175,13 @@ let () =
   let principal=Lane_addon_call_context.Host_actor "stagehand-probe" in
   let held,resolve_held=Eio.Promise.create () and released,release=Eio.Promise.create () in
   let hold=ref false in
-  let provider=F.start_server ~sw ~net ~clock (F.Reply_with (fun _ body ->
+  let provider_responses=ref [] in
+  let provider=F.start_server ~sw ~net ~clock (F.Reply_with (fun index body ->
     if !hold then (ignore (Eio.Promise.try_resolve resolve_held ());Eio.Promise.await released);
-    scripted_http body)) in
+    let status,response=scripted_http body in
+    provider_responses:=`Assoc ["request_index",`Int index;
+      "status",`Int (Cohttp.Code.code_of_status status);"body",`String response]::!provider_responses;
+    status,response)) in
   ignore (F.publish_registry ~lane_id:"browser/stagehand" ~slot_ids:["probe"]
     (F.resolver_snapshot ~source:base_path [{F.id="probe";base_url=provider.base_url}]) : Runtime_exact_output_registry.t);
   R.register_exact_runner (Server_lane_addon_exact.runner ~base_path);
@@ -468,6 +496,8 @@ let () =
   let proof = `Assoc [
     "steps",`List (List.rev_map (fun (name,ok) -> `Assoc ["step",`String name;"ok",`Bool ok]) !steps);
     "model_requests",`Int (F.post_count provider);"isolated_base_path",`String base_path;
+    "provider_requests",`List (List.map (fun body -> `String body) (F.request_bodies provider));
+    "provider_responses",`List (List.rev !provider_responses);
     "first_instance",`String first.instance_id;"replacement_instance",`String replacement.instance_id;
     "model_transport",`String "shared Exact Output runner through loopback HTTP"] in
   Out_channel.with_open_bin (Filename.concat out "stagehand-proof.json") (fun channel ->

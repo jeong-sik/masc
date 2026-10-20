@@ -8,10 +8,11 @@
     to read the list out loud (schedule ["edgar-45min-check"], cron
     ["45 8-23 * * *"], "다음 일정과 해야 할 일을 알림으로 전달하시오").
 
-    The strip is one row above the composer, and it is not drawn at all when
-    there is nothing to say -- the rule the surface strip's ring counts
-    already follow, where an always-on badge would be texture rather than
-    information.
+    The strip is one row above the composer and holds the next wake. It is not
+    drawn at all when nothing is scheduled -- the rule the surface strip's ring
+    counts already follow, where an always-on badge would be texture rather
+    than information. What waits on the operator is {!waiting_label}, which the
+    surface strip at the top of every frame draws.
 
     {!rows_taken} is how that decision reaches both the frame and the keypress
     bound. A row the drawing adds while the bound counts rows without it is
@@ -118,34 +119,30 @@ val project :
     order the projection sorted it, longest wait first. *)
 
 val rows_taken : t -> int
-(** [1] while the strip has something to say, [0] otherwise. The surface gets
-    the row back when it is [0]. An open question, a Goal to confirm and a
-    stuck task each count as something to say, so the strip stays up while
-    any of them is left. *)
-
-val questions_waiting : t -> int
-(** How many asks wait on the operator's answer: one per ask, however many
-    questions it holds, and [0] for a list that was not read. The frames that
-    draw no strip say this in their footer. *)
+(** [1] while a wake is coming, [0] otherwise. The surface gets the row back
+    when it is [0]. Work waiting on the operator does not take this row: it is
+    on the surface strip, which every frame has. *)
 
 val waiting : t -> int
-(** The number the strip's badge shows: held calls, open questions, Goals to
-    confirm and stuck tasks together. A list that was not read adds nothing. *)
+(** Held calls, open questions, Goals to confirm and stuck tasks together. An
+    open ask counts once however many questions it holds. A list that was not
+    read adds nothing. *)
 
-(** The strip's two halves, as plain text. Styling belongs to the renderer;
-    what goes in each half belongs here. *)
-type strip =
-  { clock : string  (** the next wake, or [""] when nothing is scheduled *)
-  ; waiting : string
-        (** the badge, or [""] when nothing waits on the operator. One count
-            over blocked keepers, open questions, Goals to confirm and stuck
-            tasks together: all answer "is anything waiting on me", and
-            several badges would be an addition the operator has to do. *)
-  }
+val waiting_label : cells:int -> t -> string
+(** The badge for the surface strip, as plain text; styling belongs to the
+    renderer. It names what waits, by kind and in that order of attention --
+    questions, approvals, Goals to confirm, stuck tasks -- led by the [;] key
+    that opens the panel, and is [""] when nothing waits.
+
+    The longest of three spellings that fits [cells] is returned: the
+    sentence, the kinds alone, the {!waiting} total alone. The total is
+    returned even when it does not fit, so the badge never disappears; the
+    caller makes room for it. *)
 
 val strip :
-  now:float -> localtime:(float -> Unix.tm) -> cols:int -> t -> strip option
-(** [None] exactly when {!rows_taken} is [0].
+  now:float -> localtime:(float -> Unix.tm) -> cols:int -> t -> string option
+(** The row above the composer: the next wake, or [None] exactly when
+    {!rows_taken} is [0].
 
     A wake that falls on a later day says so. Rendering tomorrow's 08:00 as a
     bare ["08:00"] at 23:50 reads as eight minutes away. *)

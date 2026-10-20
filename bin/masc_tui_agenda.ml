@@ -100,34 +100,24 @@ let project ~scheduled ~awaiting ~asking ~confirming ~stalled =
 
 let next t = match rows_of t.coming with row :: _ -> Some row | [] -> None
 
-let questions_waiting t = List.length (rows_of t.asking)
-
-(* One number for all four: a keeper holding a tool call, a question a keeper
-   asked, a Goal waiting for confirmation and a task only the operator can
-   move are the same answer to "is anything waiting on me", and badges beside
-   each other would make the operator add them up. *)
+(* A keeper holding a tool call, a question a keeper asked, a Goal waiting for
+   confirmation and a task only the operator can move all wait on the operator,
+   and each asks for a different thing. The badge names them one by one
+   ([waiting_label]); this total is what it falls back to when there is no room
+   to name them. *)
 let waiting t =
   List.length (rows_of t.blocked)
-  + questions_waiting t
+  + List.length (rows_of t.asking)
   + List.length (rows_of t.confirming)
   + List.length (rows_of t.stuck)
 
-(* One predicate, two readers: the row the frame draws and the row the
-   keypress bound subtracts are the same row or neither exists. A section
-   that was never read has no row to name, so the strip stays down for it
-   the same way; the overlay is where the difference is said. *)
-let is_silent t =
-  rows_of t.coming = []
-  && rows_of t.blocked = []
-  && rows_of t.asking = []
-  && rows_of t.confirming = []
-  && rows_of t.stuck = []
-let rows_taken t = if is_silent t then 0 else 1
-
-type strip =
-  { clock : string
-  ; waiting : string
-  }
+(* Only a wake takes the row above the composer: what waits on the operator is
+   on the surface strip at the top of every frame. One predicate, two readers:
+   the row the frame draws and the row the keypress bound subtracts are the
+   same row or neither exists. A section that was never read has no row to
+   name, so the row stays down for it the same way; the overlay is where the
+   difference is said. *)
+let rows_taken t = if rows_of t.coming = [] then 0 else 1
 
 let same_day (a : Unix.tm) (b : Unix.tm) =
   a.Unix.tm_year = b.Unix.tm_year && a.Unix.tm_yday = b.Unix.tm_yday
@@ -163,39 +153,51 @@ let clock_half ~now ~localtime ~cells row =
   if room <= 0 then "" else head ^ Masc_tui_message_layout.fit_middle room said
 ;;
 
-(* The [label·count] shape the surface strip hangs a count on a ring entry
-   with ("Work·3"), so two counts on one screen read as one vocabulary.
-
-   The count of work waiting on the operator is here rather than on a ring
-   entry. Approvals is not on the ring, and the strip windows the ring around
-   the active entry, so at eighty columns an entry far from it drops out with
-   its count. This row is not windowed, so the count is on screen from
-   wherever the operator is standing. *)
-let waiting_half waiting =
-  if waiting <= 0 then ""
-  else
-    (* The key in front of the count. The panel behind [;] is the only screen
-       that lists this work, and the footer that names [;] is among the first
-       things a narrow terminal gives up -- so the one count that is never
-       windowed carries its own door. *)
-    Printf.sprintf "; Awaiting you\xc2\xb7%d" waiting
+(* One phrase per kind, questions first. The words follow the screen titles:
+   a held call is an approval on the Approvals / Questions surface, and the
+   [;] panel has the "Confirm a goal" and "Stuck on you" sections. *)
+let waiting_phrases t =
+  [ List.length (rows_of t.asking), "question", "questions"
+  ; List.length (rows_of t.blocked), "approval", "approvals"
+  ; List.length (rows_of t.confirming), "goal to confirm", "goals to confirm"
+  ; List.length (rows_of t.stuck), "stuck task", "stuck tasks"
+  ]
+  |> List.filter_map (fun (count, one, many) ->
+    if count <= 0 then None
+    else Some (Printf.sprintf "%d %s" count (if count = 1 then one else many)))
 ;;
 
+(* What waits on the operator, by kind, for the surface strip at the top of
+   every frame. The key leads the badge. The panel behind [;] is the only
+   screen that lists this work, and the footer that names [;] is among the
+   first things a narrow terminal gives up, so the badge carries its own door.
+
+   Three spellings, longest first, and the first that fits [cells] is drawn:
+   the sentence, the kinds alone, the total alone. The total is the last
+   resort and is returned even when it does not fit, because a badge that
+   vanishes is worse than one the ring has to make room for. *)
+let waiting_label ~cells t =
+  match waiting_phrases t with
+  | [] -> ""
+  | phrases ->
+    let listed = String.concat " \xc2\xb7 " phrases in
+    let spellings =
+      [ "; Awaiting you: " ^ listed
+      ; "; " ^ listed
+      ]
+    in
+    let total = Printf.sprintf "; %d waiting" (waiting t) in
+    let fits text = Masc_tui_message_layout.display_width text <= cells in
+    (match List.find_opt fits spellings with
+     | Some text -> text
+     | None -> total)
+;;
+
+(* The row above the composer: the next wake, or nothing. *)
 let strip ~now ~localtime ~cols t =
-  if is_silent t
-  then None
-  else begin
-    let waiting = waiting_half (waiting t) in
-    let reserved =
-      if waiting = "" then 0 else Masc_tui_message_layout.display_width waiting + 2
-    in
-    let clock =
-      match next t with
-      | None -> ""
-      | Some row -> clock_half ~now ~localtime ~cells:(max 0 (cols - reserved)) row
-    in
-    Some { clock; waiting }
-  end
+  match next t with
+  | None -> None
+  | Some row -> Some (clock_half ~now ~localtime ~cells:cols row)
 ;;
 
 type tone =

@@ -62,18 +62,13 @@ type status_item =
       { gerund : string
       ; keeper : string
       }
-  (* Asks Keepers put to the operator that nobody has answered, one per ask.
-     Said by the frames that draw no agenda row -- the chat, the Board
-     composer, the narrow Keeper navigation -- where the agenda's count of
-     the same asks is not on screen. Zero draws nothing. *)
-  | Questions_waiting of int
   | Port of int
 
 (* A working surface needs decisions and warnings. Passive diagnostics and
    other Keepers' activity have their own System/Activity surfaces. *)
 let needs_operator = function
   | Workspace_mismatch _ | Workspace_unconfirmed | Server_worktree_binary | Tui_build_mismatch _
-  | Keeper_action_armed _ | Keeper_action_running _ | Questions_waiting _ -> true
+  | Keeper_action_armed _ | Keeper_action_running _ -> true
   | Refresh_interval _ | Server_build _ | Server_base_path _
   | Keeper_answering _ | Keeper_answered _ | Port _ -> false
 
@@ -99,10 +94,6 @@ type retention =
      thing, which stays true on the next frame; an armed action is a question
      waiting for one keypress and gone after any other. *)
   | Armed_action
-  (* A Keeper stopped until the operator answers it. Leads the row for the
-     reason a conflict does: the tail is given up before a single key, and on
-     the frames that say it the keys fill the row. *)
-  | Operator_question
   (* Last to go. A footer with no room for the port still has room to say the
      screen is reading two different workspaces. *)
   | Workspace_conflict
@@ -179,14 +170,6 @@ let status_item_projection = function
       { text = Printf.sprintf "%s %s\xe2\x80\xa6" gerund keeper
       ; retention = Armed_action
       }
-  (* The agenda strip's [label·count] shape, so the two places that
-     count waiting work read as one vocabulary. *)
-  | Questions_waiting count when count > 0 ->
-    Some
-      { text = Printf.sprintf "Questions for you\xc2\xb7%d" count
-      ; retention = Operator_question
-      }
-  | Questions_waiting _ -> None
   | Keeper_answering { names = []; _ } -> None
   | Keeper_answering { names = name :: rest; lead_elapsed_s } ->
     let elapsed =
@@ -283,7 +266,7 @@ let omission_order =
    none: nothing else on any surface says the server is not this build. *)
 let leads_the_row item =
   match item.retention with
-  | Armed_action | Operator_question | Workspace_conflict | Build_conflict
+  | Armed_action | Workspace_conflict | Build_conflict
   | Worktree_conflict ->
     true
   | Endpoint_identity | Workspace_identity | Build_identity | Refresh_context
@@ -291,14 +274,11 @@ let leads_the_row item =
 
 (* An armed action first: it is the only one of these the next keypress can
    lose. Then the wrong-workspace read, which decides whether anything on the
-   screen can be answered at all. Then a question a Keeper is stopped on, ahead
-   of the binary disagreement and the generic worktree provenance warning,
-   which describe the build rather than work waiting on the operator. Caller
-   list order does not establish retention priority. *)
+   screen can be answered at all. Caller list order does not establish
+   retention priority. *)
 let conflict_order =
   [ Armed_action
   ; Workspace_conflict
-  ; Operator_question
   ; Build_conflict
   ; Worktree_conflict
   ]

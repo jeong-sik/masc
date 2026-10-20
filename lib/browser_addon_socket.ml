@@ -107,6 +107,7 @@ let cleanup_contents ~admission ~root ~automation ~models ~stagehand ~confirmed 
       |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
     let* text=Option.to_result ~none:("missing " ^ name) text in
     Ok (Yojson.Safe.from_string text) in
+  let* ()=empty_tree (Filename.concat root "uploads") in
   let names=Sys.readdir root |> Array.to_list in
   let* ()=match models with
     | None -> if List.mem "models.json" names then Error "undeclared browser model configuration" else Ok ()

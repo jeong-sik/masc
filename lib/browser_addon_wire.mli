@@ -7,6 +7,10 @@ type command =
   | Retire
 (** Private lifecycle control. Retires admission and waits for owned backend
     cleanup; never export through ordinary browser ingress or model tools. *)
+  | Upload_stage of { id:string; actor:string; route:Browser_lane.route; verb:Browser_lane.verb }
+  | Upload_discard of string
+(** Private host-authorized file preparation only. A stage receipt grants no
+    browser input; the ordinary exported command must consume the exact grant. *)
   | Model_requests
   | Model_result of Yojson.Safe.t
   | Model_wait of { after : string option }

@@ -46,7 +46,7 @@ let snapshot t =
   | Model_reply _|Receipt|Issue_result _|Poll_result _ -> Error (Browser_addon_client.Outcome_unknown "unexpected browser snapshot reply")
 type receipt = {binding:Browser_binding.t;data:Yojson.Safe.t;
   raw_result:Mcp_protocol.Mcp_types.tool_result}
-let issue ?(required_actions=[]) t ~preference verb =
+let issue ?upload_paths ?(required_actions=[]) t ~preference verb =
   let start_time=Tool_timing.start () in
   let fail ?metadata ?(data=`Null) ~class_ ~effect_disposition message =
     Error (Tool_result.make_err ~tool_name:Browser_addon_tool.definition.name ~start_time
@@ -59,7 +59,38 @@ let issue ?(required_actions=[]) t ~preference verb =
     | Exact Stagehand_route -> ["lane",`String "stagehand"] in
   let required=match required_actions with [] -> [] | _::_ -> ["requiredActions",`List
     (List.map (fun action -> `String (Browser_capabilities.operation_name action)) required_actions)] in
-  match call t ~arguments:(`Assoc (route_fields @ required @ ["command",Browser_lane.verb_json verb])) with
+  let upload=match verb with
+    | Browser_lane.Page_act (Browser_lane.Action.On_tab {interaction=Upload {paths;_};_}) -> Some paths
+    | Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_capture _|Page_scene _|Page_interact _
+    |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _
+    |Page_act (Open_tab _|On_tab {interaction=Click _|Fill _|Press _|Scroll _|Select _|Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog;_})
+    |Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> None in
+  let preparation=match upload,upload_paths,preference with
+    | None,None,_ -> Ok None
+    | Some paths,Some supplied,Browser_selection.Exact Browser_lane.Automation_route
+        when paths=supplied && Browser_lane.Upload_lease.pending ~paths ->
+        Ok (Some (Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ()))))
+    | (None|Some _),(None|Some _),(Browser_selection.Automatic|Exact (Live_route _|Automation_route|Stagehand_route)) -> Error "upload requires an exact pending host snapshot batch and owned automation route" in
+  let* upload_id=match preparation with
+    | Ok id -> Ok id | Error detail -> fail ~class_:Tool_result.Workflow_rejection
+        ~effect_disposition:Tool_result.Proven_pre_effect detail in
+  let discard ()=Option.iter (fun id -> Eio.Cancel.protect (fun () ->
+    ignore (R.call_browser_service ~config:t.config ~access:t.access ~service:t.service
+      ~command:(Browser_addon_wire.Upload_discard id)))) upload_id in
+  Fun.protect ~finally:discard (fun () ->
+  let* ()=match upload_id with
+    | None -> Ok ()
+    | Some id ->
+      match R.call_browser_service ~config:t.config ~access:t.access ~service:t.service
+        ~command:(Browser_addon_wire.Upload_stage {id;actor=Lane_addon_call_context.actor_label t.principal;
+          route=Browser_lane.Automation_route;verb}) with
+      | Ok Browser_addon_wire.Receipt -> Ok ()
+      | Ok _ -> fail ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
+          "worker upload staging was refused; no browser command was dispatched"
+      | Error error -> fail ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect
+          (match error with Browser_addon_client.Unavailable detail|Outcome_unknown detail -> detail) in
+  let grant=match upload_id with None -> []|Some id -> ["uploadId",`String id] in
+  match call t ~arguments:(`Assoc (route_fields @ required @ grant @ ["command",Browser_lane.verb_json verb])) with
   | Error error -> Error (error_result ~start_time error)
   | Ok result ->
       let raw=Mcp_protocol.Mcp_types.tool_result_to_yojson result in
@@ -93,4 +124,4 @@ let issue ?(required_actions=[]) t ~preference verb =
       match decode () with
       | Ok receipt -> Ok receipt
       | Error detail -> fail ?metadata:result._meta ~data:raw ~class_:Tool_result.Runtime_failure
-          ~effect_disposition:Tool_result.Effect_outcome_unknown detail
+          ~effect_disposition:Tool_result.Effect_outcome_unknown detail)

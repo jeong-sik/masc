@@ -148,7 +148,7 @@ let repeated_instance () =
 let disabled_is_desired_not_cleanup_proof () =
   let declaration enabled = object_ ["kind",str "valid";"enabled",`Bool enabled;
     "installation_id",str "observer";"run_id",str "run";"package_id",str "custom-package";
-    "title",str "Observer";"desired_revision",str "same-payload"] in
+    "title",str "Observer";"desired_revision",str "same-payload";"exact_outputs",`List []] in
   let payload = snapshot [declared ~instances:[instance ~phase:"failed" "worker"] (declaration false)] in
   let observed = ok (Decode.decode payload) in
   let row = find "declaration//config/broken.toml" observed in
@@ -185,6 +185,47 @@ let disabled_exact_keeps_candidates_and_finishing_work () =
   rejects "off and running status contradict" (make (off |> set "status" (str "running")));
   rejects "off declarations must agree" (make (off |> set "declared_slots" (strings ["other"])))
 
+(* A package row's exact outputs (RFC operator-quiz §4.8): what the wire
+   carries, which one [ / ] chooses, and the runtime.toml table e opens. *)
+let quiz_declaration outputs = object_ ["kind",str "valid";"enabled",`Bool true;
+  "installation_id",str "operator-quiz";"run_id",str "operator-quiz";"package_id",str "operator-quiz";
+  "title",str "Operator quiz";"desired_revision",str "r1";"exact_outputs",`List outputs]
+let output name source configuration = object_ ["output",str name;"source",str source;"configuration",configuration]
+let quiz_outputs = [output "author" "declared" configuration;
+  output "grade" "declared" (object_ ["kind",str "unconfigured";"detail",str "no table"]);
+  output "legacy" "table_only" (object_ ["kind",str "off";"declared_slots",strings [];"declared_cli_slots",strings []])]
+
+let exact_outputs_are_chosen_by_name_and_open_their_table () =
+  let row = find "declaration//config/broken.toml" (ok (Decode.decode (snapshot [declared (quiz_declaration quiz_outputs)]))) in
+  let chosen selected = Option.map (fun (_, (o : Decode.exact_output)) -> o.output)
+      (Display.selected_exact_output ~selected row) in
+  Alcotest.(check (option string)) "nothing chosen is the first" (Some "author") (chosen None);
+  Alcotest.(check (option string)) "a name the row no longer lists is the first" (Some "author") (chosen (Some "gone"));
+  let step selected direction = Option.map snd (Display.step_exact_output ~selected ~direction row) in
+  Alcotest.(check (list (option string))) "steps move by one and stay at the ends"
+    [Some "grade"; Some "legacy"; Some "legacy"; Some "author"]
+    [step None 1; step (Some "grade") 1; step (Some "legacy") 1; step (Some "author") (-1)];
+  (match Display.selected_exact_output ~selected:(Some "grade") row with
+   | Some (installation_id, (grade : Decode.exact_output)) ->
+       Alcotest.(check bool) "the wire keeps source and lane state" true
+         (grade.source = Decode.Declared && (match grade.configuration with Decode.Unconfigured _ -> true | _ -> false));
+       Alcotest.(check (list string)) "e opens the output's own table"
+         ["runtime"; "addon_exact_lanes"; "operator-quiz"; "grade"]
+         (ok (Display.exact_output_table_path ~installation_id grade))
+   | None -> Alcotest.fail "the row lists exact outputs");
+  let empty = find "declaration//config/broken.toml" (ok (Decode.decode (snapshot [declared (quiz_declaration [])]))) in
+  Alcotest.(check bool) "a package with no exact output offers none" true
+    (Option.is_none (Display.selected_exact_output ~selected:None empty))
+
+let exact_outputs_wire_is_strict () =
+  let with_outputs outputs = snapshot [declared (quiz_declaration outputs)] in
+  rejects "an output listed twice" (with_outputs [output "author" "declared" configuration; output "author" "table_only" configuration]);
+  rejects "an unknown source" (with_outputs [output "author" "guessed" configuration]);
+  rejects "an unknown lane state" (with_outputs [output "author" "declared" (object_ ["kind",str "maybe"])]);
+  rejects "a valid declaration without the list"
+    (snapshot [declared (match quiz_declaration [] with
+       | `Assoc fields -> `Assoc (List.remove_assoc "exact_outputs" fields) | other -> other)])
+
 let () = Alcotest.run "TUI Lane inventory" ["wire and display",[
   Alcotest.test_case "machine activity and publication remain independent" `Quick machine_activity_and_publication_are_independent;
   Alcotest.test_case "browser activity and registration remain independent" `Quick browser_activity_and_backend_are_independent;
@@ -197,4 +238,7 @@ let () = Alcotest.run "TUI Lane inventory" ["wire and display",[
   Alcotest.test_case "embedded exact decoder retained" `Quick malformed_embedded_exact;
   Alcotest.test_case "overview agrees with exact detail" `Quick exact_overview_agrees;
   Alcotest.test_case "instance ownership unique" `Quick repeated_instance;
+  Alcotest.test_case "exact outputs are chosen by name and open their table" `Quick
+    exact_outputs_are_chosen_by_name_and_open_their_table;
+  Alcotest.test_case "exact outputs wire is strict" `Quick exact_outputs_wire_is_strict;
 ]]

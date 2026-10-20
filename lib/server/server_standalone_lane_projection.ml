@@ -968,6 +968,8 @@ let live_lane_configuration registry lane_id =
 type observation = {
   now : float;
   resolve_lane : string -> lane_configuration;
+  resolve_addon : Runtime_schema.addon_lane -> lane_configuration;
+  addon_lanes : Runtime_schema.addon_lane list;
   jev_readiness : Typesafeai_config.readiness;
   exact_runs_total : int;
   exact_runs : Exact_lane_run_registry.run list;
@@ -984,6 +986,13 @@ let observe () =
       Registry_unavailable
         (Runtime_exact_output_registry.publication_error_to_string error)
   in
+  let resolve_addon addon = resolve_lane (Runtime_schema.exact_lane_key (Runtime_schema.Addon addon)) in
+  let addon_lanes = match registry_result with
+    | Error _ -> []
+    | Ok registry ->
+        List.filter_map (fun (lane : Runtime_schema.exact_output_lane_decl) -> match lane.owner with
+          | Runtime_schema.Addon addon -> Some addon
+          | Runtime_schema.Builtin _ -> None) (Runtime_exact_output_registry.declared_lanes registry) in
   let configurations = List.map (fun lane ->
     let id = Standalone_lane.to_id lane in id,resolve_lane id) Standalone_lane.all in
   let resolve_lane lane_id = match List.assoc_opt lane_id configurations with
@@ -1008,13 +1017,18 @@ let observe () =
       []
       exact_run_source
   in
-  { now=Time_compat.now (); resolve_lane; jev_readiness=Typesafeai_config.readiness ();
+  { now=Time_compat.now (); resolve_lane; resolve_addon; addon_lanes;
+    jev_readiness=Typesafeai_config.readiness ();
     exact_runs_total=List.length exact_run_source; exact_runs;
     verification_runs=Verification_run_registry.list_runs (Verification_run_registry.global ());
     goal_verification_runs=retained_goal_reviews () }
 ;;
 
 let configuration observation lane = observation.resolve_lane (Standalone_lane.to_id lane)
+let addon_configuration observation addon = observation.resolve_addon addon
+let addon_tables observation ~declaration_id =
+  List.filter_map (fun (addon : Runtime_schema.addon_lane) ->
+    if String.equal addon.declaration_id declaration_id then Some addon.output else None) observation.addon_lanes
 let observation_to_json observation =
   snapshot_json_with ~now:observation.now ~resolve_lane:observation.resolve_lane
     ~jev_readiness:observation.jev_readiness ~exact_runs_total:observation.exact_runs_total

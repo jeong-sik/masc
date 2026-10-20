@@ -5,8 +5,19 @@ type selection =
   | Machine of Machine_lane.t
   | Declaration of string
   | Manual_instance of { instance_id : string; incarnation : string }
+(** Where a Lane Add-on exact output comes from: the package declares it, or
+    runtime.toml has a [runtime.addon_exact_lanes] table for an output the
+    package does not declare. *)
+type exact_output_source = Declared | Table_only
+type exact_output = {
+  output : string;
+  source : exact_output_source;
+  configuration : Server_standalone_lane_projection.lane_configuration;
+}
 type declaration =
-  | Valid of Lane_addon_config.declaration
+  | Valid of { declaration : Lane_addon_config.declaration; exact_outputs : exact_output list }
+      (** [exact_outputs]: the package's declared outputs in manifest order,
+          then the tables runtime.toml has for outputs it does not declare. *)
   | Invalid of string list
   | Absent
   | Unobserved
@@ -35,6 +46,10 @@ val to_json : t -> Yojson.Safe.t
 module For_testing : sig
   val machine_publication : (Lane_addon_runtime.export_observation option, string) result -> machine_publication
   val package_rows : declarations:Lane_addon_config.snapshot ->
-    instances:Lane_addon_runtime.inventory_instance list -> row list
+    instances:Lane_addon_runtime.inventory_instance list ->
+    exact_outputs:(Lane_addon_config.declaration -> exact_output list) -> row list
+  val exact_outputs :
+    configuration:(Runtime_schema.addon_lane -> Server_standalone_lane_projection.lane_configuration) ->
+    tables:(declaration_id:string -> string list) -> Lane_addon_config.declaration -> exact_output list
   val row_to_json : row -> Yojson.Safe.t
 end

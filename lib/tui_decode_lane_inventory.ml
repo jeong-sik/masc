@@ -15,10 +15,14 @@ type configuration =
   | Unconfigured of string
   | Registry_unavailable of string
 
+type exact_output_source = Declared | Table_only
+type exact_output = { output : string; source : exact_output_source; configuration : configuration }
+
 type declaration =
   | Valid of {
       installation_id : string; enabled : bool; run_id : string; package_id : string;
       title : string; desired_revision : string;
+      exact_outputs : exact_output list;
     }
   | Invalid of string list
   | Absent
@@ -125,16 +129,33 @@ let configuration json =
   | "unavailable" -> let* f = fields ["kind";"detail"] json in Result.map (fun detail -> Registry_unavailable detail) (get string "detail" f)
   | other -> error ("unknown exact configuration " ^ other)
 
+let exact_output json =
+  let* f = fields ["output";"source";"configuration"] json in
+  let* output = get nonblank "output" f in
+  let* source = get (function
+    | `String "declared" -> Ok Declared
+    | `String "table_only" -> Ok Table_only
+    | _ -> error "unknown exact output source") "source" f in
+  let* configuration = get configuration "configuration" f in
+  Ok {output;source;configuration}
+
+let exact_outputs json =
+  let* outputs = list exact_output json in
+  let names = List.map (fun (o : exact_output) -> o.output) outputs in
+  if List.length (List.sort_uniq String.compare names) <> List.length names
+  then error "an exact output is listed twice" else Ok outputs
+
 let declaration json =
   let* tag = kind json in
   match tag with
   | "valid" ->
-      let* f = fields ["kind";"enabled";"installation_id";"run_id";"package_id";"title";"desired_revision"] json in
+      let* f = fields ["kind";"enabled";"installation_id";"run_id";"package_id";"title";"desired_revision";"exact_outputs"] json in
       let* enabled = get bool "enabled" f in
       let* installation_id = get nonblank "installation_id" f in let* run_id = get nonblank "run_id" f in
       let* package_id = get nonblank "package_id" f in let* title = get nonblank "title" f in
       let* desired_revision = get nonblank "desired_revision" f in
-      Ok (Valid {installation_id;enabled;run_id;package_id;title;desired_revision})
+      let* exact_outputs = get exact_outputs "exact_outputs" f in
+      Ok (Valid {installation_id;enabled;run_id;package_id;title;desired_revision;exact_outputs})
   | "invalid" -> let* f = fields ["kind";"messages"] json in
       let* messages = get (list string) "messages" f in
       if messages = [] then error "invalid declaration has no diagnostics" else Ok (Invalid messages)

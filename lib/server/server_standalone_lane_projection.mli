@@ -36,6 +36,14 @@ val snapshot_json : unit -> Yojson.Safe.t
 type observation
 val observe : unit -> observation
 val configuration : observation -> Standalone_lane.t -> lane_configuration
+val addon_configuration : observation -> Runtime_schema.addon_lane -> lane_configuration
+(** A Lane Add-on exact output's lane, read from the same capture as the
+    built-in lanes: [Unconfigured] when runtime.toml has no table for it. *)
+
+val addon_tables : observation -> declaration_id:string -> string list
+(** The outputs runtime.toml has a [runtime.addon_exact_lanes] table for under
+    [declaration_id], in file order. When the registry cannot be read no
+    table is listed, and each output's {!addon_configuration} says why. *)
 val observation_to_json : observation -> Yojson.Safe.t
 (** A single immutable admission/run capture shared by the standalone detail
     snapshot and the common inventory; never reparse rendered JSON. *)

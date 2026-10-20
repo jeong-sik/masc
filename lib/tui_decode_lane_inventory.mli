@@ -19,10 +19,16 @@ type configuration =
   | Unconfigured of string
   | Registry_unavailable of string
 
+(** A Lane Add-on exact output and its lane: one the package declares, or a
+    runtime.toml table for an output it does not declare. *)
+type exact_output_source = Declared | Table_only
+type exact_output = { output : string; source : exact_output_source; configuration : configuration }
+
 type declaration =
   | Valid of {
       installation_id : string; enabled : bool; run_id : string; package_id : string;
       title : string; desired_revision : string;
+      exact_outputs : exact_output list;  (** Declared ones in manifest order, then table-only ones. *)
     }
   | Invalid of string list
   | Absent

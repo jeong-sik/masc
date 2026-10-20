@@ -123,7 +123,7 @@ def register(manifests, base, name):
 # knows neither subcommand.
 def preflight_helper(build, verdict_exit=0, unnamed_workspace=None, old=False,
                      resolve_failure=False, stores_exit=0, resolve_failure_silent=False,
-                     resolve_notice=None, resolve_hang=False):
+                     resolve_notice=None, resolve_hang=False, named_unresolved=False):
     path = build / "deployment_preflight_helper.exe"
     if unnamed_workspace is None:
         unnamed = "printf 'workspace=none\\n'"
@@ -142,7 +142,8 @@ def preflight_helper(build, verdict_exit=0, unnamed_workspace=None, old=False,
                "  resolve-workspace)\n"
                + notice + hang +
                "    if [ \"$2\" = --base-path ]; then\n"
-               "      printf 'workspace=resolved\\nroot=%s\\nsource=explicit_cli\\n' \"$3\"\n"
+               + ("      printf 'workspace=none\\n'\n" if named_unresolved else
+                  "      printf 'workspace=resolved\\nroot=%s\\nsource=explicit_cli\\n' \"$3\"\n") +
                f"    else {unnamed}; fi ;;\n")
     validate = ("" if old else
                 f"  validate-runtime-config) echo 'runtime.toml fixture verdict'; exit {verdict_exit} ;;\n"
@@ -187,7 +188,7 @@ class LocalBuildInstall(unittest.TestCase):
     # An install that cannot run the check stops before it replaces a binary or
     # cleans the build tree, so the selected workspace and the build stay.
     def test_a_build_without_a_current_helper_installs_and_cleans_nothing(self):
-        for helper_kind in ("missing", "old"):
+        for helper_kind in ("missing", "old", "no_workspace"):
             with self.subTest(helper_kind=helper_kind), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary).resolve()
                 checkout = root / "checkout"
@@ -205,6 +206,8 @@ class LocalBuildInstall(unittest.TestCase):
                 if helper_kind == "old":
                     preflight_helper(build, old=True)
                     executable(scripts / "check-runtime-deployment-preflight.sh", "fixture-preflight")
+                if helper_kind == "no_workspace":
+                    preflight_helper(build)
                 artifact = build_root / "cache-artifact"
                 artifact.write_text("regenerable")
                 wrapper = scripts / "dune-local.sh"
@@ -215,15 +218,19 @@ class LocalBuildInstall(unittest.TestCase):
                     'if [ "$1" = clean ]; then rm -rf "$repo/_build"; fi\n')
                 wrapper.chmod(0o755)
                 prefix = root / "prefix"
+                command = ["bash", str(scripts / SCRIPT.name), "--prefix", str(prefix),
+                           "--manifest-dir", str(root / "absent-manifests")]
+                if helper_kind != "no_workspace":
+                    command += ["--base-path", str(selected)]
                 result = subprocess.run(
-                    ["bash", str(scripts / SCRIPT.name), "--prefix", str(prefix),
-                     "--manifest-dir", str(root / "absent-manifests"),
-                     "--base-path", str(selected)],
+                    command,
                     cwd=root,
                     env=dict(unnamed_env(root), MASC_DUNE_LOCK_HELD="1"),
                     capture_output=True, text=True)
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertIn("nothing installed", result.stderr)
+                # The build ran here, so --skip-build is not advice for this run.
+                self.assertNotIn("--skip-build", result.stderr)
                 self.assertFalse(prefix.exists(), "a binary was installed without the check")
                 self.assertEqual(state.read_text(), "operator state")
                 self.assertTrue(artifact.exists(), "the build tree was cleaned after a refused install")
@@ -816,6 +823,7 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertIn(str(build / "deployment_preflight_helper.exe"), result.stderr)
             self.assertIn("is missing", result.stderr)
+            self.assertIn("drop --skip-build", result.stderr)
             self.assertIn("nothing installed", result.stderr)
             self.assertFalse(prefix.exists(), "a binary was installed without the helper")
 
@@ -838,6 +846,25 @@ class LocalBuildInstall(unittest.TestCase):
             # when missing preflight support refuses the installation.
             self.assertNotIn("unexpected helper call", result.stderr)
             self.assertFalse(prefix.exists(), "a binary was installed by a helper that cannot check")
+
+    def test_a_base_path_the_helper_cannot_resolve_installs_nothing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            binaries(build)
+            preflight_helper(build, named_unresolved=True)
+            prefix = root / "prefix"
+            named = workspace(root)
+            result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--base-path", str(named)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            # The user did pass --base-path, so the advice is not to pass it.
+            self.assertIn(f"could not resolve --base-path {named}", result.stderr)
+            self.assertNotIn("Pass --base-path", result.stderr)
+            self.assertFalse(prefix.exists(), "a binary was installed for a workspace nobody resolved")
 
     def test_new_helper_workspace_lookup_failure_installs_nothing(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -1089,9 +1116,9 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertTrue((prefix / "masc-check-runtime-deployment-preflight").is_file())
             self.assertIn("masc-deployment-preflight-helper", result.stdout)
 
-    # A prefix that already holds an older pair from a previous install must
-    # not be left running that stale gate against an upgraded server: that is
-    # the exact mismatch #39224 reports, just reached through --skip-build.
+    # A prefix that already holds an older pair from a previous install is not
+    # touched when the install is refused for want of a helper: the stale gate
+    # stays callable only with the server it was installed with (#39224).
     def test_no_helper_with_a_pre_existing_pair_refuses_and_installs_nothing(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
@@ -1111,11 +1138,12 @@ class LocalBuildInstall(unittest.TestCase):
                                     capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("is missing", result.stderr)
+            self.assertIn("nothing installed", result.stderr)
             self.assertIn(str(build / "deployment_preflight_helper.exe"), result.stderr)
             self.assertEqual(old_gate.read_text(), before_gate, "stale gate was touched")
             self.assertEqual(old_helper.read_text(), before_helper, "stale helper was touched")
             self.assertEqual(old_masc.read_text(), before_masc,
-                              "server was upgraded while the stale pair stayed callable")
+                              "the server was replaced by an install that was refused")
 
 
 if __name__ == "__main__":

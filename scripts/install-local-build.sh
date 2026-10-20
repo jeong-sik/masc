@@ -33,7 +33,9 @@
 # as the deploy preflight does (#43483). A refusal leaves every binary and
 # process as it was. An install that cannot run the check stops the same way,
 # with exit status 2: no workspace found, no helper in --build-dir, or a helper
-# that predates the check.
+# that predates the check. A workspace that does not exist yet has no
+# runtime.toml to judge (the server creates it on its first start), so the
+# install says so and goes on.
 #
 # The guest exec shim of a microVM workspace goes with the server too. The
 # release installer places it (RFC-0427 B-2); a workspace deployed from local
@@ -133,8 +135,13 @@ fi
 # still change a value this build refuses. The helper names the workspace the
 # way masc does; this script only reads its answer.
 preflight_helper="$build_dir/deployment_preflight_helper.exe"
+if [ "$skip_build" = true ]; then
+  build_hint="Build it, or drop --skip-build."
+else
+  build_hint="Build it into $build_dir."
+fi
 if [ ! -x "$preflight_helper" ]; then
-  echo "install-local-build: runtime.toml not checked: $preflight_helper is missing; nothing installed. Build it, or drop --skip-build." >&2
+  echo "install-local-build: runtime.toml not checked: $preflight_helper is missing; nothing installed. $build_hint" >&2
   exit 2
 else
   resolve_args=(resolve-workspace)
@@ -209,11 +216,15 @@ else
       fi
       ;;
     none)
-      echo "install-local-build: runtime.toml not checked: no workspace found; nothing installed. Pass --base-path DIR or set MASC_BASE_PATH." >&2
+      if [ -n "$base_path" ]; then
+        echo "install-local-build: runtime.toml not checked: $preflight_helper could not resolve --base-path $base_path to a workspace; nothing installed." >&2
+      else
+        echo "install-local-build: runtime.toml not checked: no workspace found; nothing installed. Pass --base-path DIR or set MASC_BASE_PATH." >&2
+      fi
       exit 2
       ;;
     old_helper)
-      echo "install-local-build: runtime.toml not checked: $preflight_helper predates the check (no resolve-workspace); nothing installed. Build it, or drop --skip-build." >&2
+      echo "install-local-build: runtime.toml not checked: $preflight_helper predates the check (no resolve-workspace); nothing installed. $build_hint" >&2
       exit 2
       ;;
     *)

@@ -29,7 +29,7 @@ let with_fixture work =
       ignore (Unix.waitpid [] pid)) !(fixture.children);
     remove root) (fun () -> work fixture)
 let path fixture name = Filename.concat fixture.root name
-let prepare directories instance_id = ok (Lease.prepare ~directories ~instance_id)
+let prepare directories instance_id = ok (Lease.prepare ~cleanup_context:None ~directories ~instance_id)
 let spawn fixture claim arguments =
   let argv = Array.of_list (!launcher :: "--instance" :: Lease.instance_id claim ::
     List.concat_map (fun directory -> ["--slot";directory]) (Lease.directories claim) @
@@ -79,15 +79,15 @@ let test_pending_replacement () = with_fixture (fun fixture ->
   let b = prepare [directory] "b" in
   denied_launcher fixture a "old-a";
   rejected (Lease.retire a);
-  rejected (Lease.prepare ~directories:[directory] ~instance_id:"a");
+  rejected (Lease.prepare ~cleanup_context:None ~directories:[directory] ~instance_id:"a");
   ok (Lease.retire b);settled b;
   denied_launcher fixture b "retired-b";
-  rejected (Lease.prepare ~directories:[directory] ~instance_id:"b"))
+  rejected (Lease.prepare ~cleanup_context:None ~directories:[directory] ~instance_id:"b"))
 let test_live_restart_and_replay () = with_fixture (fun fixture ->
   let directories = [path fixture "installation";path fixture "profile"] in
   let a = prepare directories "a" in
   let pid_a = start fixture a "a-started" in
-  rejected (Lease.prepare ~directories ~instance_id:"b");
+  rejected (Lease.prepare ~cleanup_context:None ~directories ~instance_id:"b");
   stop fixture a pid_a;
   let b = prepare (List.rev directories) "b" in
   let pid_b = start fixture b "b-started" in
@@ -95,7 +95,7 @@ let test_live_restart_and_replay () = with_fixture (fun fixture ->
   check "stale stop preserves replacement" true (Option.is_some (running b));
   stop fixture b pid_b;
   (* Both latest receipts now name B; durable history must still fence A. *)
-  rejected (Lease.prepare ~directories ~instance_id:"a");
+  rejected (Lease.prepare ~cleanup_context:None ~directories ~instance_id:"a");
   denied_launcher fixture a "replayed-a";
   let c = prepare directories "c" in
   let pid_c = start fixture c "c-started" in
@@ -106,7 +106,7 @@ let test_retired_pending_replay () = with_fixture (fun fixture ->
   ok (Lease.retire a);settled a;
   let b = prepare directories "b" in
   ok (Lease.retire b);settled b;
-  rejected (Lease.prepare ~directories ~instance_id:"a");
+  rejected (Lease.prepare ~cleanup_context:None ~directories ~instance_id:"a");
   denied_launcher fixture a "retired-a-replay")
 let test_interrupted_history () =
   List.iter (fun contents -> with_fixture (fun fixture ->
@@ -118,7 +118,7 @@ let test_interrupted_history () =
     write (Filename.concat directory ("instance-" ^ digest ^ ".json")) contents;
     let b = prepare [directory] "b" in
     ok (Lease.retire b);settled b;
-    rejected (Lease.prepare ~directories:[directory] ~instance_id:"a");
+    rejected (Lease.prepare ~cleanup_context:None ~directories:[directory] ~instance_id:"a");
     denied_launcher fixture a "interrupted-a-replay")) ["";"{\"instance_id\":"]
 let test_partial_slot_replacement () = with_fixture (fun fixture ->
   let first = path fixture "first" and second = path fixture "second" in
@@ -144,7 +144,7 @@ let test_leftover_group () = with_fixture (fun fixture ->
   check "live group prevents release" true
     (match ok (Lease.status a) with Lease.Cleanup_pending _ -> true
      | Lease.Awaiting_exec | Lease.Live _ | Lease.Settled -> false);
-  rejected (Lease.prepare ~directories ~instance_id:"b");
+  rejected (Lease.prepare ~cleanup_context:None ~directories ~instance_id:"b");
   write release "release";settled a;
   let b = prepare directories "b" in ok (Lease.retire b);settled b)
 let test_receipt_not_signal_authority () = with_fixture (fun fixture ->
@@ -162,13 +162,13 @@ let test_receipt_not_signal_authority () = with_fixture (fun fixture ->
 let test_private_inodes () = with_fixture (fun fixture ->
   let directory = path fixture "real" in Unix.mkdir directory 0o700;
   let alias = path fixture "symlink" in Unix.symlink directory alias;
-  rejected (Lease.prepare ~directories:[alias] ~instance_id:"a");
+  rejected (Lease.prepare ~cleanup_context:None ~directories:[alias] ~instance_id:"a");
   Unix.chmod directory 0o755;
-  rejected (Lease.prepare ~directories:[directory] ~instance_id:"b");
+  rejected (Lease.prepare ~cleanup_context:None ~directories:[directory] ~instance_id:"b");
   Unix.chmod directory 0o700;
   let sentinel = path fixture "sentinel" in write sentinel "preserve";
   Unix.link sentinel (Filename.concat directory "lease");
-  rejected (Lease.prepare ~directories:[directory] ~instance_id:"c");
+  rejected (Lease.prepare ~cleanup_context:None ~directories:[directory] ~instance_id:"c");
   let channel = open_in sentinel in
   let contents = Fun.protect ~finally:(fun () -> close_in channel) (fun () -> really_input_string channel 8) in
   Alcotest.check Alcotest.string "unrelated inode preserved" "preserve" contents)
@@ -204,7 +204,7 @@ let test_reopen_never_creates () = with_fixture (fun fixture ->
 let test_namespace_sync_failure () = with_fixture (fun fixture ->
   let directory = path fixture "slot" in
   let observed = ref None in
-  rejected (Lease.For_testing.prepare ~directories:[directory] ~instance_id:"a"
+  rejected (Lease.For_testing.prepare ~cleanup_context:None ~directories:[directory] ~instance_id:"a"
     ~sync_ancestry:(fun parent ->
       observed := Some parent;
       raise (Unix.Unix_error (Unix.EIO,"fsync",parent))));
@@ -237,7 +237,7 @@ let test_partial_preparation_recovery () =
          check "interrupted reservation remains permanently fenced" true (interrupted=`Reservation);
          settled previous;
          denied_launcher fixture previous "interrupted-replay";
-         rejected (Lease.prepare ~directories:[directory] ~instance_id:"interrupted"));
+         rejected (Lease.prepare ~cleanup_context:None ~directories:[directory] ~instance_id:"interrupted"));
     List.iter (fun (name,before) -> match before with
       | None -> () | Some expected -> check "stable synchronization inode preserved" true (inode name=Some expected))
       ["gate",gate;"lease",lease];
@@ -261,6 +261,24 @@ let test_preparation_recovery_refuses_uncertain_authority () = with_fixture (fun
   rejected (Lease.recover_preparation ~directory);
   check "damaged published authority is not repaired" true
     (In_channel.with_open_bin intent In_channel.input_all="{"))
+let test_cleanup_context () = with_fixture (fun fixture ->
+  let directories=[path fixture "installation";path fixture "profile"] in
+  let context=Some (`Assoc ["kind",`String "fixture-resource";"path",`String fixture.root]) in
+  let claim=ok (Lease.prepare ~directories ~instance_id:"context" ~cleanup_context:context) in
+  check "descriptor retained before launch" true (ok (Lease.cleanup_context claim)=context);
+  let pid=start fixture claim "context-started" in
+  check "launcher consumption preserves descriptor" true (ok (Lease.cleanup_context claim)=context);
+  stop fixture claim pid;
+  let recovered=ok (Lease.current ~directories) in
+  check "retirement and recovery preserve descriptor" true (ok (Lease.cleanup_context recovered)=context);
+  let directory=List.hd (Lease.directories claim) in
+  let file=Filename.concat directory
+    ("instance-" ^ Digestif.SHA256.(to_hex (digest_string "context")) ^ ".json") in
+  let fields=match Yojson.Safe.from_file file with `Assoc fields -> fields | _ -> Alcotest.fail "expected history" in
+  write file (Yojson.Safe.to_string (`Assoc (List.remove_assoc "cleanup_context" fields)));
+  rejected (Lease.cleanup_context claim);
+  rejected (Lease.reopen ~directories ~instance_id:"context"))
+
 let () =
   if Array.length Sys.argv <> 2 then failwith "expected actual native Addon launcher path";
   launcher := Unix.realpath Sys.argv.(1);
@@ -279,4 +297,5 @@ let () =
        "reopen never recreates missing authority",test_reopen_never_creates;
        "namespace sync failure refuses admission",test_namespace_sync_failure;
        "interrupted preparation recovers without readmission",test_partial_preparation_recovery;
-       "preparation recovery refuses consumed and damaged authority",test_preparation_recovery_refuses_uncertain_authority]]
+       "preparation recovery refuses consumed and damaged authority",test_preparation_recovery_refuses_uncertain_authority;
+       "cleanup descriptor survives launcher and retirement",test_cleanup_context]]

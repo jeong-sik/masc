@@ -46,7 +46,8 @@ let results () =
      Error (B.Transport_unsupported {client_id=id;transport=B.Web_extension;capability=B.Trusted_hover})];
   List.iter (fun reply -> check bool "service reply retained" true
     (ok (W.reply_of_json (W.reply_to_json reply))=reply))
-    [W.Poll_result None;W.Poll_result (Some {B.id="command";verb_json=B.verb_json B.Tabs_list});
+    [W.Poll_result {command=None;state_id="snapshot-1"};
+     W.Poll_result {command=Some {B.id="command";verb_json=B.verb_json B.Tabs_list};state_id="snapshot-2"};
      W.Receipt;W.Snapshot_result (`Assoc []);W.Issue_result (Ok (B.Answered payload));
      W.Service_refusal {message="retired";disposition=W.Outcome_unknown}]
 let () = run "browser addon wire" ["boundary",[

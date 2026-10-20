@@ -31,7 +31,7 @@ val client_of_json : Yojson.Safe.t -> (Browser_lane.client_info, string) result
 type disposition = Not_started | Outcome_unknown
 type reply =
   | Snapshot_result of Yojson.Safe.t
-  | Poll_result of Browser_lane.issued option
+  | Poll_result of { command : Browser_lane.issued option; state_id : string }
   | Receipt
   | Issue_result of (Browser_lane.answer, Browser_lane.selection_error) result
   | Service_refusal of { message : string; disposition : disposition }

@@ -57,6 +57,7 @@ type model_access = Model_disabled | Host_sampling
 type state_storage = Ephemeral | Persistent
 type tool_invocation = Direct | Host_context
 type tool_hook = Validate_input | Validate_output
+type worker_service = Mcp_tools | Browser_service
 
 type exact_output = { name : string; schema : Yojson.Safe.t }
 (** A named exact output the package asks the host to run: [[world.exact_outputs.<name>]]
@@ -69,6 +70,7 @@ type package = {
   title : string;
   contributions : contribution list;
   execution : execution;
+  worker_service : worker_service;
   command : string list;
   directory : string;
   action_tool : string option;

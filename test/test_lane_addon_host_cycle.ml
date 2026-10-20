@@ -79,7 +79,7 @@ let port worker : Runtime.For_testing.host_port = {
 
 let backend worker : Runtime.For_testing.backend = {
   start = (fun ~sw:_ ~state_owner:_ ~instance_id ~installation_id:_ ~package:_ ~binding:_ ~on_authority ~is_live_instance:_ ~on_created ->
-    let connection : Runtime.For_testing.connection = {
+    let connection : Runtime.For_testing.connection = {browser=None;
       observe = (fun ~binding:_ ~sources:_ -> incr worker.observations; Ok { rows = []; coverage = [] });
       exported_tools = (fun () -> []);
       call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ ->

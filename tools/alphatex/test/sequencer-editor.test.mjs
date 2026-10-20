@@ -98,6 +98,12 @@ test('loading a saved arrangement dispatches before phrase terminal or backgroun
     assert.equal(dispatched[0].loaded.path, path)
     assert.deepEqual(dispatched[0].loaded.project, newArrangement())
     assert.equal(dispatched[0].stateDirectory, defaultStateDirectory())
+    const stateDirectory = join(directory, 'chosen-vst-state')
+    await viewSequencer({ path, root: directory, stateDirectory })
+    assert.equal(dispatched.length, 2)
+    assert.equal(dispatched[1].loaded.path, path)
+    assert.deepEqual(dispatched[1].loaded.project, newArrangement())
+    assert.equal(dispatched[1].stateDirectory, stateDirectory)
     assert.deepEqual(ownership, { raw: [], workers: 0, temporary: 0 })
   } finally { delete globalThis[slot]; await rm(directory, { recursive: true, force: true }) }
 })

@@ -971,6 +971,9 @@ final class MidiTransport {
     func apply(_ event: Event) throws {
         // A failed send cannot prove the destination missed the Note On, so the
         // key is owned before sending. It is released only after a sent Note Off.
+        // Every caller funnels a throw to finish(), which silences held and
+        // stops the transport, so a key whose send failed never meets a later
+        // reconcile.
         if event.kind == .on { held[event.key] = event }
         try send(event.bytes())
         if event.kind == .off { held.removeValue(forKey: event.key) }

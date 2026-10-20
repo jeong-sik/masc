@@ -89,7 +89,9 @@ type package = {
   presentation : Lane_addon_presentation.t;
   skills_directory : Skill_resource_path.t option;
   exact_outputs : exact_output list;
-  (** Unique names in name order. *)
+  (** Unique names in name order. A manifest contains all declared outputs;
+      an installation contains only those selected by its [exact_outputs]
+      override. Schema contents always come from the package. *)
 }
 val max_reply_bytes : package -> int
 (** Transport/data envelope, independent of execution isolation. *)

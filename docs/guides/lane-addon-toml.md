@@ -107,6 +107,39 @@ revision과 worker 교체에 반영된다. 이 선택은 LLM을 호출하거나 
 않는다. 브라우저 실행기와 모델 Hook의 분리 진행은
 [설계](../design/browser-addon-lifecycle.md)와 [#44150](https://github.com/jeong-sik/masc/issues/44150)에서 추적한다.
 
+## LLM Exact Output 선택
+
+패키지가 `[world.exact_outputs.<name>]`으로 선언한 모델 출력은 설치 TOML의
+최상위 `exact_outputs` 배열에서 따로 선택한다. 키를 생략하면 패키지에 선언된
+출력 전체를 사용하고, `exact_outputs = []`이면 해당 설치의 모든 Exact Output을
+끈다. 예를 들어 `plan`과 `extract`를 선언한 패키지에서 다음 설정은 `plan`만
+선택하고 선택적인 도구 입력·출력 검사는 끈다.
+
+```toml
+id = "browser-planner"
+run_id = "browser-work"
+manifest_path = "../packages/browser-planner/lane.toml"
+exact_outputs = ["plan"]
+tool_hooks = []
+
+[binding]
+sources = []
+```
+
+이 예제의 패키지는 출력 선언을 갖춘 별도 패키지를 가정한다. 함께 제공하는
+`addons/browser`가 모델 계획이나 extraction을 이미 수행한다는 뜻은 아니다.
+선택 배열에는 패키지가 선언한 이름만 한 번씩 쓴다. 스키마나 모델·자격 증명을
+설치 배열에서 주입할 수 없다. 이름 순서는 패키지 순서로 정규화하며, 유효 선택이
+같으면 worker revision도 같다. 선택을 바꾸면 설치 revision에 반영돼 기존 worker와
+교체 worker를 구분한다. 이 설정은 `tool_hooks`와 observation sampling의
+`model_access`를 바꾸지 않는다. 권한과 필수 wire 검증도 그대로 적용한다.
+
+이 층은 설치의 유효 패키지에 허용된 출력만 남기는 설정 경계다. 공용 Exact-output
+실행기는 [#44203](https://github.com/jeong-sik/masc/pull/44203)에서 별도로 개발 중이며,
+브라우저 native worker의 host 요청 연결과 실제 모델·브라우저 실행 증명은
+[#44150](https://github.com/jeong-sik/masc/issues/44150)에 남아 있다. 선택 설정이
+읽혔다는 사실만으로 모델 호출 지원을 판정하지 않는다.
+
 ## 반영 시점과 화면 읽기
 
 서버 시작 시 한 번 읽고, 기존 maintenance cadence를 쓰는 독립 Pulse에서 다시 읽는다.

@@ -30,14 +30,15 @@ let normalize_path path =
   |> Keeper_alerting_path.strip_trailing_slashes
 
 (* The source of the Docker bind mount. [Sys.file_exists] is also true for a
-   regular file and for a symlink, and a symlink as the last component would
-   point the mount somewhere else, so an existing entry must be a real
-   directory, inspected without following it. A failed creation is an [Error]
-   for the start request instead of an exception out of it. *)
+   regular file or a device, so an existing entry must resolve to a directory.
+   [host_root] has already been through [normalize_path], which resolves a
+   symbolic link, so a link reaches this check only when it points nowhere,
+   and that is not a directory either. A failed creation is an [Error] for the
+   start request instead of an exception out of it. *)
 let ensure_host_root path =
   let ( let* ) = Result.bind in
   let kind () =
-    match Unix.lstat path with
+    match Unix.stat path with
     | stats -> Ok (Some stats.Unix.st_kind)
     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
     | exception Unix.Unix_error (error, _, _) ->
@@ -49,7 +50,9 @@ let ensure_host_root path =
   in
   let require_directory = function
     | Some Unix.S_DIR -> Ok ()
-    | Some other ->
+    | Some
+        ((Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK)
+         as other) ->
       Error
         (Printf.sprintf
            "sandbox host root %s is %s, not a directory"

@@ -225,7 +225,22 @@ let test_agent_elicit_input_without_callback_pauses () =
     Alcotest.(check bool) "request_id non-empty" true (String.length input.request_id > 0);
     let state_after_pause = Agent.state agent in
     Alcotest.(check int) "prompt retained" 1 (List.length state_after_pause.messages);
-    Agent.provide_input agent input (Hooks.Answer (`Assoc [ "env", `String "prod" ]));
+    let pending = Option.get (Agent.pending_input agent) in
+    Alcotest.(check string) "owned request identity" input.request_id pending.request.request_id;
+    let persisted = Checkpoint.to_string (Agent.checkpoint agent) in
+    Agent.close agent;
+    let restored = Agent.resume ~net:env#net
+      ~checkpoint:(Result.get_ok (Checkpoint.of_string persisted))
+      ~options () in
+    Alcotest.(check bool) "pending survives checkpoint and Agent cleanup" true
+      (Agent.pending_input restored = Some pending);
+    let forged_question = {pending with request={pending.request with question="tampered"}} in
+    Alcotest.(check bool) "exact response accepted" true
+      (Agent.provide_input restored forged_question (Hooks.Answer (`Assoc [ "env", `String "prod" ])) = Ok ());
+    Alcotest.(check bool) "pending consumed" true (Agent.pending_input restored = None);
+    Alcotest.(check bool) "repeated response refused" true
+      (Agent.provide_input restored pending Hooks.Declined = Error Agent_input_request.No_pending_request);
+    let agent = restored in
     let state_after_input = Agent.state agent in
     Alcotest.(check int) "input appended" 2 (List.length state_after_input.messages);
     (match List.rev state_after_input.messages with
@@ -254,11 +269,106 @@ let test_agent_elicit_input_without_callback_pauses () =
    | _ -> Alcotest.fail "expected AgentInputRequired lifecycle event")
 ;;
 
+let test_current_wait_survives_rejection_and_replacement () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let request : Hooks.elicitation_request =
+    {question="question";schema=None;timeout_s=None} in
+  let before_turn = function
+    | Hooks.BeforeTurn _ -> Hooks.ElicitInput request
+    | _ -> Hooks.Continue in
+  let options = {Agent.default_options with
+    hooks={Hooks.empty with before_turn=Some before_turn}} in
+  let config = {(Types.default_config ~model:"input-only") with name="same-name"} in
+  let agent = Agent.create ~net:env#net ~config ~options () in
+  let paused = function
+    | Error (Error.Agent (Error.InputRequired _)) -> Option.get (Agent.pending_input agent)
+    | Ok _ -> Alcotest.fail "expected pause before provider"
+    | Error error -> Alcotest.fail (Error.to_string error) in
+  let a = paused (Agent.run ~sw agent "original") in
+  let rejected = Agent.run ~sw ~on_yield:(fun () -> ()) agent "invalid callbacks" in
+  Alcotest.(check bool) "unpaired callback rejected" true (Result.is_error rejected);
+  Alcotest.(check bool) "Started before validation cannot erase wait" true
+    (Agent.pending_input agent = Some a);
+  let before = Agent.state agent in
+  let b = paused (Agent.run_turn_stream ~sw ~on_event:ignore agent) in
+  Alcotest.(check bool) "low-level continuation has a distinct run" true
+    (not (String.equal a.run_id b.run_id));
+  Alcotest.(check bool) "replacement request is distinct" true
+    (not (String.equal a.request.request_id b.request.request_id));
+  Alcotest.(check bool) "late A refused" true
+    (Agent.provide_input agent a (Hooks.Answer (`String "old")) = Error Agent_input_request.Request_not_current);
+  Alcotest.(check bool) "late A leaves B and messages unchanged" true
+    (Agent.pending_input agent = Some b && Agent.state agent = before);
+  Alcotest.(check bool) "explicit decline settles B" true
+    (Agent.provide_input agent b Hooks.Declined = Ok ());
+  Alcotest.(check bool) "decline has no synthetic message" true
+    (Agent.pending_input agent = None && Agent.state agent = before);
+  let c = paused (Agent.run_turn_stream ~sw ~on_event:ignore agent) in
+  Alcotest.(check bool) "explicit timeout response settles C" true
+    (Agent.provide_input agent c Hooks.Timeout = Ok ());
+  Alcotest.(check bool) "timeout has no synthetic message" true
+    (Agent.pending_input agent = None && Agent.state agent = before)
+;;
+
+let test_checkpoint_delta_retains_current_wait () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let request : Hooks.elicitation_request = {question="question";schema=None;timeout_s=None} in
+  let before_turn = function Hooks.BeforeTurn _ -> Hooks.ElicitInput request | _ -> Hooks.Continue in
+  let options = {Agent.default_options with hooks={Hooks.empty with before_turn=Some before_turn}} in
+  let config = {(Types.default_config ~model:"input-only") with name="same-name"} in
+  let a = Agent.create ~net:env#net ~config ~options () in
+  let b = Agent.create ~net:env#net ~config ~options () in
+  ignore (Agent.run ~sw a "first"); ignore (Agent.run ~sw b "second");
+  let pa = Option.get (Agent.pending_input a) and pb = Option.get (Agent.pending_input b) in
+  Alcotest.(check bool) "same-name agents have independent originating runs" true
+    (not (String.equal pa.run_id pb.run_id));
+  Alcotest.(check bool) "another Agent's response cannot settle A" true
+    (Agent.provide_input a pb Hooks.Declined = Error Agent_input_request.Request_not_current);
+  let before = Agent.checkpoint a in
+  let after = {before with Checkpoint.pending_input=Some pb} in
+  let delta = Checkpoint.compute_delta before after in
+  let decoded = Result.get_ok (Checkpoint.delta_of_json (Checkpoint.delta_to_json delta)) in
+  let restored = Result.get_ok (Checkpoint.apply_delta before decoded) in
+  Alcotest.(check bool) "delta retains exact pending proof" true (restored.pending_input = Some pb);
+  let cleared = {after with Checkpoint.pending_input=None} in
+  let restored = Result.get_ok (Checkpoint.apply_delta after (Checkpoint.compute_delta after cleared)) in
+  Alcotest.(check bool) "delta records settlement" true (restored.pending_input = None)
+;;
+
+let test_accepted_resume_failure_consumes_old_wait () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let waiting = ref true in
+  let request : Hooks.elicitation_request = {question="question";schema=None;timeout_s=None} in
+  let before_turn = function
+    | Hooks.BeforeTurn _ when !waiting -> Hooks.ElicitInput request
+    | _ -> Hooks.Continue in
+  let before_turn_params _ = Hooks.HookFailed {stage=Hooks.Before_turn_params;detail="fixture failure after accepted input"} in
+  let options = {Agent.default_options with
+    hooks={Hooks.empty with before_turn=Some before_turn;before_turn_params=Some before_turn_params}} in
+  let agent = Agent.create ~net:env#net ~config:(Types.default_config ~model:"input-only") ~options () in
+  ignore (Agent.run ~sw agent "original");
+  let pending = Option.get (Agent.pending_input agent) in
+  waiting := false;
+  let result = Agent.run_turn_stream ~sw ~on_event:ignore agent in
+  Alcotest.(check bool) "later typed stage fails before provider dispatch" true
+    (match result with
+     | Error (Error.Agent (Error.HookExecutionFailed {hook_name;_})) -> String.equal hook_name "before_turn_params"
+     | Error _ | Ok _ -> false);
+  Alcotest.(check bool) "accepted low-level resume consumed old wait" true
+    (Agent.pending_input agent = None);
+  Alcotest.(check bool) "old answer cannot apply after terminal failure" true
+    (Agent.provide_input agent pending Hooks.Declined = Error Agent_input_request.No_pending_request)
+;;
+
 let () =
   let open Alcotest in
   run
     "Elicitation"
-    [ ( "types"
+    [ ( "owned current input"
+      , [ test_case "rejected resume and stale response preserve current wait" `Quick test_current_wait_survives_rejection_and_replacement
+        ; test_case "concurrent same-name runs and durable deltas" `Quick test_checkpoint_delta_retains_current_wait
+        ; test_case "accepted low-level resume then failure consumes old wait" `Quick test_accepted_resume_failure_consumes_old_wait ] )
+    ; ( "types"
       , [ test_case "request basic" `Quick test_elicitation_request_basic
         ; test_case "request with schema" `Quick test_elicitation_request_with_schema
         ; test_case "response answer" `Quick test_elicitation_response_answer

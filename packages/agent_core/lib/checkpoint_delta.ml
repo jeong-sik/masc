@@ -174,6 +174,8 @@ let compute_delta (before : t) (after : t) =
   then push (Replace_mcp_sessions after.mcp_sessions);
   if before.working_context <> after.working_context
   then push (Replace_working_context after.working_context);
+  if before.pending_input <> after.pending_input
+  then push (Replace_pending_input after.pending_input);
   { delta_version
   ; base_checkpoint_version = checkpoint_version
   ; base_checkpoint_hash = Checkpoint_codec.checkpoint_hash before
@@ -241,6 +243,7 @@ let apply_delta base delta =
         | Patch_context diff ->
           Ok { checkpoint with context = apply_context_patch checkpoint.context diff }
         | Replace_mcp_sessions mcp_sessions -> Ok { checkpoint with mcp_sessions }
+        | Replace_pending_input pending_input -> Ok { checkpoint with pending_input }
         | Replace_working_context working_context ->
           Ok { checkpoint with working_context }
       in

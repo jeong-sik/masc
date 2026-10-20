@@ -18,6 +18,7 @@ let safe_publish bus event = Pipeline_common.safe_publish ~log:_stage_log bus ev
 let stage_input ?raw_trace_run ?clock ~turn agent =
   let ts = Pipeline_common.timestamp_now ?clock () in
   set_lifecycle agent ~ready_at:ts Ready;
+  let previous_pending = agent.pending_input in
   let before_decision =
     invoke_hook_with_trace
       agent
@@ -27,7 +28,7 @@ let stage_input ?raw_trace_run ?clock ~turn agent =
       agent.options.hooks.before_turn
       (Hooks.BeforeTurn { turn; messages = agent.state.messages })
   in
-  match before_decision with
+  let prepared = match before_decision with
   | Hooks.ElicitInput req ->
     (match agent.options.elicitation with
      | Some cb ->
@@ -57,7 +58,6 @@ let stage_input ?raw_trace_run ?clock ~turn agent =
        let input_required =
          Agent_elicitation.input_required_of_request
            ~agent_name:agent.state.config.name
-           ~turn
            ~created_at:ts
            req
        in
@@ -97,6 +97,15 @@ let stage_input ?raw_trace_run ?clock ~turn agent =
          ~hook_name:"before_turn"
          ~stage:Hooks.Before_turn
          ~decision:before_decision)
+  in
+  match prepared with
+  | Error _ as error -> error
+  | Ok () ->
+    (* The accepted input stage is shared by sync, streaming, low-level and
+       restored execution drivers. Started/validation rejection never gets
+       here; a replacement that arrived during a callback remains current. *)
+    clear_pending_input agent previous_pending;
+    Ok ()
 ;;
 
 

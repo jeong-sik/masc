@@ -67,6 +67,7 @@ module Image_generation = Llm_provider.Image_generation
 module Speech_generation = Llm_provider.Speech_generation
 module Retry = Llm_provider.Retry
 module Error = Agent_core_base.Error
+module Agent_input_request = Agent_core_base.Agent_input_request
 module Error_domain = Error_domain
 module Hooks = Agent_core_base.Hooks
 module Tracing = Tracing

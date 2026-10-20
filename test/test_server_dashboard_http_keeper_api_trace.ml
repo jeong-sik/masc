@@ -483,7 +483,7 @@ let make_inventory_checkpoint ~session_id ~turn_count ~created_at =
     ; response_format = Agent_core.Types.Off
     ; cache_system_prompt = false
     ; context = Agent_core.Context.create_sync ()
-    ; mcp_sessions = []
+    ; pending_input = None; mcp_sessions = []
     ; working_context = None
     }
 ;;

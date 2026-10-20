@@ -1030,7 +1030,7 @@ let checkpoint_with_messages
   ; reasoning_effort = None
   ; cache_system_prompt = false
   ; context = Agent_core.Context.create ()
-  ; mcp_sessions = []
+  ; pending_input = None; mcp_sessions = []
   ; working_context = None
   }
 ;;

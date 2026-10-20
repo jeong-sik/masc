@@ -42,7 +42,7 @@ let make_checkpoint
   ; reasoning_effort
   ; cache_system_prompt = false
   ; context
-  ; mcp_sessions = []
+  ; pending_input = None; mcp_sessions = []
   ; working_context = None
   }
 ;;

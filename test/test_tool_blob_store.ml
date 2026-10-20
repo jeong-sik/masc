@@ -1597,7 +1597,7 @@ let test_maintenance_reads_chat_operation_store_and_prepared_gate_checkpoint () 
                 ; reasoning_effort = None
                 ; cache_system_prompt = false
                 ; context = Agent_core.Context.create_sync ()
-                ; mcp_sessions = []
+                ; pending_input = None; mcp_sessions = []
                 ; working_context = None
                 }
           in

@@ -17,7 +17,7 @@ let checkpoint messages : Agent_core.Checkpoint.t =
   ; temperature = None; top_p = None; top_k = None; min_p = None
   ; reasoning_effort = None; enable_thinking = None; preserve_thinking = None
   ; response_format = Agent_core.Types.Off; cache_system_prompt = false
-  ; context = Agent_core.Context.create_sync (); mcp_sessions = []; working_context = None
+  ; context = Agent_core.Context.create_sync (); pending_input = None; mcp_sessions = []; working_context = None
   }
 
 let save session_dir messages =

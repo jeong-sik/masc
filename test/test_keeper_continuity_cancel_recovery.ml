@@ -20,7 +20,7 @@ let checkpoint messages : Agent_core.Checkpoint.t =
    tools=[];tool_choice=None;disable_parallel_tool_use=false;temperature=None;
    top_p=None;top_k=None;min_p=None;reasoning_effort=None;enable_thinking=None;
    preserve_thinking=None;response_format=T.Off;cache_system_prompt=false;
-   context=Agent_core.Context.create_sync ();mcp_sessions=[];working_context=None}
+   context=Agent_core.Context.create_sync ();pending_input = None; mcp_sessions = [];working_context=None}
 
 exception Cancel_after_memory
 

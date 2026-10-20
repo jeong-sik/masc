@@ -796,7 +796,7 @@ let checkpoint_with_messages messages : Agent_core.Checkpoint.t =
     cache_system_prompt = false;
 
     context = Agent_core.Context.create_sync ();
-    mcp_sessions = [];
+    pending_input = None; mcp_sessions = [];
     working_context = None;
   }
 

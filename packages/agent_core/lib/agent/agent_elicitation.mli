@@ -6,7 +6,6 @@
 
 val input_required_of_request
   :  agent_name:string
-  -> turn:int
   -> ?created_at:float
   -> Hooks.elicitation_request
   -> Error.input_required
@@ -17,10 +16,11 @@ val message_of_response
   -> Hooks.elicitation_response
   -> Types.message option
 
-(** [true] only when an external User message was appended. *)
+(** Settle the exact current run/request and optionally append its canonical
+    response message under the Agent state lock. *)
 val apply_response
   :  ?metadata:Types.metadata
   -> Agent_types.t
-  -> Error.input_required
+  -> Agent_input_request.pending
   -> Hooks.elicitation_response
-  -> bool
+  -> (unit, Agent_input_request.settlement_error) result

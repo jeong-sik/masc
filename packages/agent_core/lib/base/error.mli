@@ -17,7 +17,7 @@ type api_error = Retry.api_error
 (** Provider/runtime errors — same type as {!Llm_provider.Error.provider_error}. *)
 type provider_error = Llm_provider.Error.provider_error
 
-type input_required =
+type input_required = Agent_input_request.t =
   { request_id : string
   ; participant_name : string option
   ; question : string

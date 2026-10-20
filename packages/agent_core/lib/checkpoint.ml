@@ -32,6 +32,7 @@ type t = Checkpoint_types.t =
   ; context : Context.t
   ; mcp_sessions : Mcp_session.info list
   ; working_context : Yojson.Safe.t option
+  ; pending_input : Agent_input_request.pending option
   }
 
 type message_splice = Checkpoint_types.message_splice =
@@ -76,6 +77,7 @@ type delta_op = Checkpoint_types.delta_op =
   | Patch_context of Context.diff
   | Replace_mcp_sessions of Mcp_session.info list
   | Replace_working_context of Yojson.Safe.t option
+  | Replace_pending_input of Agent_input_request.pending option
 
 type delta = Checkpoint_types.delta =
   { delta_version : int
@@ -99,15 +101,15 @@ let content_block_to_json_result ~scope block =
   let ( let* ) = Result.bind in
   let* json = Checkpoint_codec.checkpoint_content_block_to_json_result ~scope block in
   let* () = Checkpoint_codec.validate_checkpoint_json ~context:scope json in
-  let* _ = Checkpoint_v11_contract.validate_content_block
-      ~scope:(Checkpoint_v11_contract.Root scope) json in
+  let* _ = Checkpoint_contract.validate_content_block
+      ~scope:(Checkpoint_contract.Root scope) json in
   Ok json
 
 let content_block_of_json json =
   let ( let* ) = Result.bind in
   let* () = Checkpoint_codec.validate_checkpoint_json ~context:"Checkpoint content block" json in
-  let* _ = Checkpoint_v11_contract.validate_content_block
-      ~scope:(Checkpoint_v11_contract.Root "Checkpoint content block") json in
+  let* _ = Checkpoint_contract.validate_content_block
+      ~scope:(Checkpoint_contract.Root "Checkpoint content block") json in
   Checkpoint_codec.content_block_of_json_strict json
 
 let message_to_json = Checkpoint_codec.message_to_json
@@ -115,7 +117,7 @@ let message_to_json = Checkpoint_codec.message_to_json
 let message_of_json json =
   let ( let* ) = Result.bind in
   let* () = Checkpoint_codec.validate_checkpoint_json ~context:"Checkpoint message" json in
-  let* _ = Checkpoint_v11_contract.validate_message 0 json in
+  let* _ = Checkpoint_contract.validate_message 0 json in
   try Checkpoint_codec.message_of_json json with
   | Yojson.Safe.Util.Type_error (detail, _) | Yojson.Json_error detail | Failure detail ->
     Error (Error.Serialization (JsonParseError { detail = "Checkpoint.message_of_json: " ^ detail }))

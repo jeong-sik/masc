@@ -15,7 +15,7 @@ let checkpoint messages : Agent_core.Checkpoint.t =
    tools=[];tool_choice=None;disable_parallel_tool_use=false;temperature=None;
    top_p=None;top_k=None;min_p=None;reasoning_effort=None;enable_thinking=None;
    preserve_thinking=None;response_format=Agent_core.Types.Off;cache_system_prompt=false;
-   context=Agent_core.Context.create_sync ();mcp_sessions=[];working_context=None}
+   context=Agent_core.Context.create_sync ();pending_input = None; mcp_sessions = [];working_context=None}
 let message text = Agent_core.Types.make_message ~role:Agent_core.Types.User [Agent_core.Types.Text text]
 let with_source f =
   Eio_main.run @@ fun env -> Fs_compat.set_fs (Eio.Stdenv.fs env);

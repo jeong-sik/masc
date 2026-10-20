@@ -172,6 +172,7 @@ let checkpoint_gen =
     ; reasoning_effort
     ; cache_system_prompt
     ; context
+    ; pending_input = None
     ; mcp_sessions
     ; working_context
     }
@@ -216,7 +217,7 @@ let make_unit_checkpoint
   ; reasoning_effort = None
   ; cache_system_prompt = false
   ; context
-  ; mcp_sessions = []
+  ; pending_input = None; mcp_sessions = []
   ; working_context
   }
 ;;

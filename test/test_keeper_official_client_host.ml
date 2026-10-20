@@ -2333,7 +2333,7 @@ let persistence_checkpoint ~session_id =
     ; reasoning_effort = None
     ; cache_system_prompt = false
     ; context = Agent_core.Context.create_sync ()
-    ; mcp_sessions = []
+    ; pending_input = None; mcp_sessions = []
     ; working_context = None
     }
 ;;

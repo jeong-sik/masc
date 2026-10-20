@@ -12,30 +12,20 @@
 let _log = Log.create ~module_name:"agent_lifecycle_events" ()
 
 let publish_started ~event_bus ~agent_name ~correlation_id =
-  match event_bus with
-  | None -> None
-  | Some bus ->
-    let correlation_id =
-      match correlation_id with
-      | Some session_id -> session_id
-      | None -> Event_bus.fresh_id ()
-    in
-    let run_id = Event_bus.fresh_id () in
-    (try
-       Event_bus.publish
-         bus
-         (Event_bus.mk_event
-            ~correlation_id
-            ~run_id
-            (AgentStarted { agent_name; task_id = run_id }))
-     with
-     | exn ->
-       Llm_provider.Reserved_exn.reraise_if_reserved exn;
-       Log.warn
-         _log
-         "Event_bus.publish failed (AgentStarted)"
-         [ Log.S ("error", Printexc.to_string exn) ]);
-    Some (correlation_id, run_id)
+  let correlation_id = match correlation_id with
+    | Some id -> id | None -> Event_bus.fresh_id () in
+  let run_id = Event_bus.fresh_id () in
+  (match event_bus with
+   | None -> ()
+   | Some bus ->
+     (try Event_bus.publish bus
+        (Event_bus.mk_event ~correlation_id ~run_id
+           (AgentStarted {agent_name;task_id=run_id}))
+      with exn ->
+        Llm_provider.Reserved_exn.reraise_if_reserved exn;
+        Log.warn _log "Event_bus.publish failed (AgentStarted)"
+          [Log.S ("error",Printexc.to_string exn)]));
+  correlation_id, run_id
 ;;
 
 type outcome =
@@ -46,7 +36,7 @@ type outcome =
 
 let publish_finished ~event_bus ~agent_name ~started ~current_run_id ~outcome ~elapsed =
   match event_bus, started with
-  | Some bus, Some (correlation_id, started_run_id) ->
+  | Some bus, (correlation_id, started_run_id) ->
     let run_id =
       match current_run_id with
       | Some run_id -> run_id
@@ -83,7 +73,7 @@ let publish_finished ~event_bus ~agent_name ~started ~current_run_id ~outcome ~e
        publish
          "AgentFailed"
          (AgentFailed { agent_name; task_id = started_run_id; error; elapsed }))
-  | None, _ | Some _, None -> ()
+  | None, _ -> ()
 ;;
 
 let validate_run_callbacks ~on_yield ~on_resume =
@@ -104,6 +94,7 @@ let with_run_lifecycle_events
       ~raw_trace
       ~current_run_id
       ~classify
+      ?(on_outcome = fun ~run_id:_ _ -> ())
       f
   =
   let started_at = Unix.gettimeofday () in
@@ -117,12 +108,14 @@ let with_run_lifecycle_events
      exception is re-raised with the captured backtrace. *)
   match f () with
   | result ->
+    let outcome = classify result in
+    on_outcome ~run_id:(snd started) outcome;
     publish_finished
       ~event_bus
       ~agent_name
       ~started
       ~current_run_id:(current_run_id ())
-      ~outcome:(classify result)
+      ~outcome
       ~elapsed:(Unix.gettimeofday () -. started_at);
     result
   | exception exn ->

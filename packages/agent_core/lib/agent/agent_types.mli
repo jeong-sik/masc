@@ -228,6 +228,7 @@ type t =
   { mu : Eio.Mutex.t
   ; mutable state : Types.agent_state
   ; mutable lifecycle : lifecycle_snapshot option
+  ; mutable pending_input : Agent_input_request.pending option
   ; mutable tools : Tool_set.t
       (** Widened during a turn by {!extend_tools} and never narrowed. *)
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -248,6 +249,9 @@ val default_options : options
 
 val state : t -> Types.agent_state
 val lifecycle : t -> lifecycle_snapshot option
+val pending_input : t -> Agent_input_request.pending option
+val clear_pending_input : t -> Agent_input_request.pending option -> unit
+(** Clear only the captured current run/request. A replacement remains owned. *)
 val tools : t -> Tool_set.t
 
 val extend_tools : ?order:string list -> t -> Tool.t list -> unit

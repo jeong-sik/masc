@@ -53,6 +53,7 @@ let build_resume ~(checkpoint : Checkpoint.t) ?(eio_context = false) ?config ?co
 let build_checkpoint
       ?(session_id = "")
       ?working_context
+      ~pending_input
       ~(state : agent_state)
       ~(tools : Tool_set.t)
       ~(context : Context.t)
@@ -84,5 +85,6 @@ let build_checkpoint
   ; context = Context.copy context
   ; mcp_sessions = Mcp_session.capture_all mcp_clients
   ; working_context
+  ; pending_input
   }
 ;;

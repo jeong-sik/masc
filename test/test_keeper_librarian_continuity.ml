@@ -43,6 +43,42 @@ let record_memory config = record_prepared_memory config (prepare config |> some
 let commit config prepared text =
   record_prepared_memory config prepared;
   P.commit ~new_unread_messages:[] ~config ~keeper_name ~prepared ~working_state:text |> get
+let test_source_spans_keep_tool_atoms_and_pinned_context () =
+  with_source @@ fun _env config save _append boundary ->
+  let module T = Agent_core.Types in
+  let pinned = T.make_message ~role:T.System [T.Text "Pinned context"] in
+  let user = message "Read the original result" in
+  let call = T.make_message ~role:T.Assistant
+    [T.ToolUse {id="read-1";name="read_file";input=`Assoc ["path",`String "source.ml"]}] in
+  let result = { (T.make_message ~role:T.Tool
+    [T.ToolResult {tool_use_id="read-1";content="Original result";outcome=T.Tool_succeeded;
+      json=None;content_blocks=None}]) with tool_call_id=Some "read-1" } in
+  let answer = T.make_message ~role:T.Assistant [T.Text "Original answer"] in
+  let followup = message "Continue" in
+  let final = T.make_message ~role:T.Assistant [T.Text "Continued answer"] in
+  let first = [pinned;user;call;pinned;result] in
+  let second = first @ [answer] in
+  let full = second @ [pinned;followup;final;pinned] in
+  save full;
+  boundary ~fresh:true 1 first;
+  boundary ~fresh:false 2 second;
+  boundary ~fresh:false 3 full;
+  let prepared = P.prepare ~end_atom:5 ~config ~keeper_name ~trace_id () |> get |> some in
+  let messages ?(include_unread=true) prepared =
+    P.source_spans ~include_unread prepared |> List.map snd |> List.filter ((<>) []) in
+  check bool "tool results stay with their atom, pinned context stays out" true
+    (messages prepared = [[user;call;result];[answer];[followup;final]]);
+  check bool "empty unread set preserves the same partition" true
+    (messages ~include_unread:false prepared = messages prepared);
+  let prefix = P.select_prefix ~end_atom:4 prepared |> get in
+  check bool "partial final turn preserves earlier complete tool atom" true
+    (messages prefix = [[user;call;result];[answer];[followup]]);
+  let first = P.select_prefix ~end_atom:2 prepared |> get in
+  ignore (commit config first "The original tool result was read.");
+  let suffix = P.prepare ~end_atom:5 ~config ~keeper_name ~trace_id () |> get |> some in
+  check bool "nonzero source start retains only later turns" true
+    (messages suffix = [[answer];[followup;final]])
+
 let test_prefix_selection_keeps_frozen_source_and_publication_checks () =
   with_source @@ fun _env config save _append boundary ->
   let prefix = List.map message ["A"; "B"] in
@@ -2303,6 +2339,8 @@ let () = run "production continuity pair"
       test_a_quota_then_a_refused_answer_keeps_width;
     test_case "reports in one pass keep any size verdict" `Quick
       test_reports_in_one_pass_keep_any_size_verdict;
+    test_case "source spans retain tool atoms and exclude pinned context" `Quick
+      test_source_spans_keep_tool_atoms_and_pinned_context;
     test_case "normal witnessed coverage" `Quick test_ordinary_witnessed_coverage;
     test_case "split only an oversized work unit" `Quick test_fit_splits_only_oversized_work_unit;
     test_case "fit preserves exact Memory recovery" `Quick test_fit_keeps_exact_recovery_range;

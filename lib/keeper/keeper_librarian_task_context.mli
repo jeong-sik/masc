@@ -15,10 +15,11 @@ type scope = { source : source; attribution : attribution }
 type t = { scope : scope; first_message : int; after_message : int;
   first_tool_observation : int; after_tool_observation : int }
 
-val atom_spans : trace_id:string -> messages:Agent_core.Types.message list ->
+val atom_spans : trace_id:string -> digest_at:(int -> string option) ->
   start_atom:int -> end_atom:int -> boundary:Keeper_turn_boundaries.record option -> scope list
 (** The selection is already validated by the range owner. Attribute only the
     intersection with the boundary's witnessed admission start. A missing start
     leaves an explicit gap and boundary-only evidence; it never borrows context
-    from the last turn for earlier atoms. No I/O. *)
+    from the last turn for earlier atoms. [digest_at] belongs to that same
+    frozen history and can be shared across its boundary checks. No I/O. *)
 val to_json : t list -> Yojson.Safe.t

@@ -226,42 +226,54 @@ let unread_message prepared ~source ~reasons =
    covering turn, or an exact receipt may cover several turns. *)
 let source_spans ?(include_unread=true) prepared =
   let module H = Keeper_librarian_task_context in
-  (* These cuts were validated against this immutable source during prepare.
-     Keep the full list: a selected prefix can stop inside a completed turn. *)
-  let cuts = prepared.cuts in
-  let _, reversed = List.fold_left (fun (start_atom, reversed) (cut : R.atom_cut) ->
+  let module Lines = Map.Make (Int) in
+  (* Scopes partition this frozen history in atom order. Label it once and
+     pass the remaining suffix on, rather than slicing the full checkpoint
+     again for every historical turn and attribution gap. *)
+  let labelled, _ = W.annotate prepared.messages in
+  let digest_at = W.atom_opening_digest prepared.messages in
+  let boundaries = List.fold_left (fun indexed (line, read) ->
+    match read with
+    | Ok boundary -> Lines.add line boundary indexed
+    | Error _ -> indexed) Lines.empty prepared.lines in
+  let omitted atom position message =
+    List.exists (fun (hole : Keeper_librarian_unread.t) ->
+      match hole.source with
+      | Keeper_librarian_unread.Atom source ->
+        source.trace_id=prepared.trace_id
+        && source.history_start_boundary_line=prepared.range.history_start_boundary_line
+        && source.atom=atom && source.message_in_atom=position
+        && source.message_sha256=Keeper_librarian_unread.message_digest message
+      | Keeper_librarian_unread.Official_turn _ -> false) prepared.previous_unread_messages in
+  let rec take_span ~start_atom ~end_atom (remaining, last_atom, next_position) retained =
+    match remaining with
+    | [] -> List.rev retained, ([], last_atom, next_position)
+    | (_, W.Pinned) :: rest ->
+      take_span ~start_atom ~end_atom (rest, last_atom, next_position) retained
+    | (_, W.Atom atom) :: _ when atom >= end_atom ->
+      List.rev retained, (remaining, last_atom, next_position)
+    | (message, W.Atom atom) :: rest ->
+      let position = if last_atom=Some atom then next_position else 0 in
+      let retained =
+        if atom >= start_atom && (include_unread || not (omitted atom position message))
+        then message :: retained else retained in
+      take_span ~start_atom ~end_atom (rest, Some atom, position+1) retained in
+  (* Keep every validated cut: a selected prefix may stop inside its
+     covering turn, and an exact receipt may cover several turns. *)
+  let _, _, reversed = List.fold_left (fun (start_atom, cursor, reversed) (cut : R.atom_cut) ->
     let end_atom = min prepared.end_atom cut.cut_end_atom in
-    if end_atom <= start_atom then start_atom, reversed else
-    let boundary = match List.assoc_opt cut.cut_line prepared.lines with
-      | Some (Ok boundary) -> Some boundary | Some (Error _) | None -> None in
-    let scopes = H.atom_spans ~trace_id:prepared.trace_id ~messages:prepared.messages
+    if end_atom <= start_atom then start_atom, cursor, reversed else
+    let boundary = Lines.find_opt cut.cut_line boundaries in
+    let scopes = H.atom_spans ~trace_id:prepared.trace_id ~digest_at
       ~start_atom ~end_atom ~boundary in
-    let spans = List.map (fun scope ->
-      let messages = match scope.H.source with
+    let cursor, reversed = List.fold_left (fun (cursor, reversed) scope ->
+      let messages, cursor = match scope.H.source with
         | H.Atom_span {start_atom;end_atom;_} ->
-          let selected = R.slice prepared.messages {prepared.range with R.start_atom;end_atom} in
-          if include_unread then selected else
-          let labelled, _ = W.annotate prepared.messages in
-          let _, _, retained = List.fold_left (fun (last_atom, next_position, retained) (message,label) ->
-            match label with
-            | W.Pinned -> last_atom, next_position, retained
-            | W.Atom atom ->
-              let position = if last_atom=Some atom then next_position else 0 in
-              let omitted = List.exists (fun (hole : Keeper_librarian_unread.t) ->
-                match hole.source with
-                | Keeper_librarian_unread.Atom source ->
-                  source.trace_id=prepared.trace_id
-                  && source.history_start_boundary_line=prepared.range.history_start_boundary_line
-                  && source.atom=atom && source.message_in_atom=position
-                  && source.message_sha256=Keeper_librarian_unread.message_digest message
-                | Keeper_librarian_unread.Official_turn _ -> false) prepared.previous_unread_messages in
-              Some atom, position+1, if atom >= start_atom && atom < end_atom && not omitted
-                then message :: retained else retained) (None,0,[]) labelled in
-          List.rev retained
-        | H.Boundary_only | H.Official_turn -> [] in
-      scope, messages) scopes in
-    end_atom, List.rev_append spans reversed)
-    (prepared.start_atom, []) cuts in
+          take_span ~start_atom ~end_atom cursor []
+        | H.Boundary_only | H.Official_turn -> [], cursor in
+      cursor, (scope, messages) :: reversed) (cursor, reversed) scopes in
+    end_atom, cursor, reversed)
+    (prepared.start_atom, (labelled, None, 0), []) prepared.cuts in
   List.rev reversed
 
 type turn_window = { after : float option; through : float }

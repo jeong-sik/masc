@@ -345,8 +345,9 @@ let directive_body ~(expected_workspace : Decode.server_identity) ~operator_oper
   in
   Yojson.Safe.to_string (`Assoc
     (("expected_workspace", `Assoc
-      [ "base_path", `String expected_workspace.sid_base_path
-      ; "masc_root", `String expected_workspace.sid_masc_root ]) :: fields))
+      [ "base_path", `String (Decode.Canonical_path.to_string expected_workspace.sid_base_path)
+      ; "masc_root", `String (Decode.Canonical_path.to_string expected_workspace.sid_masc_root) ])
+     :: fields))
 
 let mint_operation_id ~keeper ~serial =
   Printf.sprintf "masc-tui-resume-%s-%d" keeper serial

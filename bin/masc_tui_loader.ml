@@ -979,8 +979,8 @@ let load_workspace_approvals ~(expected_workspace : Tui_decode.server_identity)
   let ( let* ) = Result.bind in
   let* json = fetch_operator_snapshot ~host ~port in
   Masc_tui_operator_projection.decode_workspace_snapshot
-    ~expected_base_path:(Masc_tui_types.canonical_path expected_workspace.sid_base_path)
-    ~expected_masc_root:(Masc_tui_types.canonical_path expected_workspace.sid_masc_root)
+    ~expected_base_path:(Canonical_path.to_string expected_workspace.sid_base_path)
+    ~expected_masc_root:(Canonical_path.to_string expected_workspace.sid_masc_root)
     json
 
 (** Load the runtime catalogue, lanes, and keeper assignments for the picker. *)

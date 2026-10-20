@@ -704,9 +704,9 @@ let get_msx_json ~host ~port ~path = get_json_decoded ~decode:decode_msx_json ~h
    confirmed. The server compares both canonical paths with its own and
    answers 409 when another workspace answers on the same port. *)
 let expected_workspace_query (expected : Masc.Tui_decode.server_identity) =
-  let canonical value = Uri.pct_encode ~component:`Query_value (Masc_tui_types.canonical_path value) in
+  let encoded value = Uri.pct_encode ~component:`Query_value (Masc.Tui_decode.Canonical_path.to_string value) in
   Printf.sprintf "expected_base_path=%s&expected_masc_root=%s"
-    (canonical expected.sid_base_path) (canonical expected.sid_masc_root)
+    (encoded expected.sid_base_path) (encoded expected.sid_masc_root)
 
 let fetch_machine_live ?expected_workspace ~(host : string) ~(port : int)
     (source : Masc.Machine_lane.t) ~(since : Masc_tui_machine_live.mark option) :
@@ -881,8 +881,8 @@ let post_setup_json ~host ~port ~path ~body =
 (* Shared mutation envelope: the server compares canonical workspace paths. *)
 let expected_workspace_field (identity : Masc.Tui_decode.server_identity) =
   "expected_workspace", `Assoc
-    [ "base_path", `String (Masc_tui_types.canonical_path identity.sid_base_path)
-    ; "masc_root", `String (Masc_tui_types.canonical_path identity.sid_masc_root) ]
+    [ "base_path", `String (Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path)
+    ; "masc_root", `String (Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root) ]
 
 let msx_write_body ~expected_workspace fields =
   Yojson.Safe.to_string (`Assoc (expected_workspace_field expected_workspace :: fields))
@@ -949,8 +949,8 @@ type checkpoint_error =
 
 let decode_checkpoint_receipt ~expected_workspace ~operation_id ~restore ~slot json =
   Masc.Tui_decode.decode_msx_checkpoint_receipt ~operation_id ~restore ~slot
-    ~base_path:(Masc_tui_types.canonical_path expected_workspace.Masc.Tui_decode.sid_base_path)
-    ~masc_root:(Masc_tui_types.canonical_path expected_workspace.sid_masc_root) json
+    ~base_path:(Masc.Tui_decode.Canonical_path.to_string expected_workspace.Masc.Tui_decode.sid_base_path)
+    ~masc_root:(Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root) json
 
 let post_msx_checkpoint ~expected_workspace ~operation_id ~host ~port ~restore ~slot =
   let path = if restore then "/api/v1/msx/restore" else "/api/v1/msx/save" in
@@ -1030,8 +1030,8 @@ let keeper_chat_body ?expected_workspace ~admission_intent ~since_seq request =
   let payload = match expected_workspace, payload with
     | Some (expected : Masc.Tui_decode.server_identity), `Assoc fields ->
         `Assoc (("expected_workspace", `Assoc
-          [ "base_path", `String expected.sid_base_path
-          ; "masc_root", `String expected.sid_masc_root ]) :: fields)
+          [ "base_path", `String (Masc.Tui_decode.Canonical_path.to_string expected.sid_base_path)
+          ; "masc_root", `String (Masc.Tui_decode.Canonical_path.to_string expected.sid_masc_root) ]) :: fields)
     | None, _ | Some _, _ -> payload in
   Yojson.Safe.to_string payload
 ;;
@@ -1966,8 +1966,8 @@ let post_keeper_tool_approval ~(expected_workspace : Masc.Tui_decode.server_iden
     (tool_approval_answer, string) result =
   let expected_fields =
     [ ("expected_workspace", `Assoc
-         [ ("base_path", `String (Masc_tui_types.canonical_path expected_workspace.sid_base_path))
-         ; ("masc_root", `String (Masc_tui_types.canonical_path expected_workspace.sid_masc_root)) ]) ]
+         [ ("base_path", `String (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_base_path))
+         ; ("masc_root", `String (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root)) ]) ]
   in
   let body =
     Yojson.Safe.to_string
@@ -2066,9 +2066,9 @@ let fetch_keeper_runtimes ~(host : string) ~(port : int)
     ~(expected_workspace : Masc.Tui_decode.server_identity) :
     (int * string, string) result =
   http_get ~host ~port ~path:("/api/v1/gate/keepers?detailed=true&expected_workspace="
-    ^ percent_encode_path_segment (Masc_tui_types.canonical_path expected_workspace.sid_base_path)
+    ^ percent_encode_path_segment (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_base_path)
     ^ "&expected_masc_root="
-    ^ percent_encode_path_segment (Masc_tui_types.canonical_path expected_workspace.sid_masc_root))
+    ^ percent_encode_path_segment (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root))
 
 (** POST a keeper lifecycle action ([boot] / [shutdown]).
 
@@ -2091,9 +2091,6 @@ let post_keeper_directive ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(action : string)
     ~(operator_operation_id : string) ~(expected_workspace : Masc.Tui_decode.server_identity)
     : (int * string, string) result =
-  let expected_workspace = { expected_workspace with
-    sid_base_path = Masc_tui_types.canonical_path expected_workspace.sid_base_path;
-    sid_masc_root = Masc_tui_types.canonical_path expected_workspace.sid_masc_root } in
   let path =
     Printf.sprintf "/api/v1/keepers/%s/directive"
       (percent_encode_path_segment keeper_name)
@@ -2442,8 +2439,8 @@ let post_dashboard_gate_resolve ~(host : string) ~(port : int)
          ([ ("id", `String approval_id)
           ; ("decision", `String (if approve then "approve" else "reject"))
           ; ("expected_workspace", `Assoc
-               [ "base_path", `String expected_workspace.sid_base_path
-               ; "masc_root", `String expected_workspace.sid_masc_root ])
+               [ "base_path", `String (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_base_path)
+               ; "masc_root", `String (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root) ])
           ]
          @ match reason with
            | None -> []
@@ -2467,8 +2464,8 @@ let post_dashboard_gate_retry ~(host : string) ~(port : int)
   in
   let body = Yojson.Safe.to_string (`Assoc
     (("expected_workspace", `Assoc
-      [ "base_path", `String expected_workspace.sid_base_path
-      ; "masc_root", `String expected_workspace.sid_masc_root ]) :: fields)) in
+      [ "base_path", `String (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_base_path)
+      ; "masc_root", `String (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root) ]) :: fields)) in
   match post_json ~host ~port ~path:"/api/v1/dashboard/gate/retry" ~body with
   | Error detail -> Error detail
   | Ok json -> expect_ok_true ~what:"gate retry" json
@@ -2962,7 +2959,8 @@ let post_keeper_up ~(host : string) ~(port : int) ~(keeper_name : string)
   match expected_workspace with
   | None -> Post_refused "Cannot create: workspace identity is unverified"
   | Some identity
-    when String.equal identity.sid_base_path "" || String.equal identity.sid_masc_root "" ->
+    when Masc.Tui_decode.Canonical_path.is_empty identity.sid_base_path
+         || Masc.Tui_decode.Canonical_path.is_empty identity.sid_masc_root ->
       Post_refused "Cannot create: workspace identity is incomplete"
   | Some identity ->
     (match Yojson.Safe.from_string declaration_json with
@@ -2971,8 +2969,8 @@ let post_keeper_up ~(host : string) ~(port : int) ~(keeper_name : string)
        (* Bind the mutation itself to the probe. A replacement server on the
           same port must reject before dispatching any Keeper operation. *)
        let expected = `Assoc
-         [ "base_path", `String identity.sid_base_path
-         ; "masc_root", `String identity.sid_masc_root ] in
+         [ "base_path", `String (Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path)
+         ; "masc_root", `String (Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root) ] in
        let body = Yojson.Safe.to_string (`Assoc
          (("expected_workspace", expected) :: List.remove_assoc "expected_workspace" fields)) in
        http_post_with_timeout ~timeout_sec:keeper_config_save_timeout_sec
@@ -3728,8 +3726,8 @@ let fetch_keeper_asks ?keeper_name ~(expected_workspace : Masc.Tui_decode.server
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | json -> Masc.Tui_decode_asks.decode_asks_snapshot
-          ~expected_base_path:(Masc_tui_types.canonical_path expected_workspace.sid_base_path)
-          ~expected_masc_root:(Masc_tui_types.canonical_path expected_workspace.sid_masc_root) json
+          ~expected_base_path:(Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_base_path)
+          ~expected_masc_root:(Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root) json
       | exception Yojson.Json_error detail -> Error ("asks were not JSON: " ^ detail))
 
 exception Ask_followup_protocol_error of string
@@ -3741,8 +3739,8 @@ let observe_keeper_ask_followup ~clock ~(expected_workspace : Masc.Tui_decode.se
       "/api/v1/keepers/asks?name=%s&answer_progress_for=%s&answer_progress_stream=true&%s"
       (percent_encode_query_value keeper_name) (percent_encode_query_value ask_id)
       (expected_workspace_query expected_workspace) in
-  let expected_base_path = Masc_tui_types.canonical_path expected_workspace.sid_base_path
-  and expected_masc_root = Masc_tui_types.canonical_path expected_workspace.sid_masc_root in
+  let expected_base_path = Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_base_path
+  and expected_masc_root = Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root in
   let decoder = Sse_wire.create_decoder () in
   let reading = ref (Ok Decode.empty_ask_followup_stream) in
   let reject detail = reading := Error detail; raise (Ask_followup_protocol_error detail) in

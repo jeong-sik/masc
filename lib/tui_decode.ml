@@ -4689,12 +4689,28 @@ type server_scheduler_health = {
   ssch_pool_domains : int option;
 }
 
+module Canonical_path = struct
+  type t = string
+
+  let of_path path =
+    if String.equal path ""
+    then ""
+    else
+      try Unix.realpath path with
+      | Unix.Unix_error _ -> path
+  ;;
+
+  let equal = String.equal
+  let to_string path = path
+  let is_empty path = String.equal path ""
+end
+
 type server_identity = {
   sid_version : string;
   sid_binary_commit : string;
   sid_binary_commit_age_s : float option;
-  sid_base_path : string;
-  sid_masc_root : string;
+  sid_base_path : Canonical_path.t;
+  sid_masc_root : Canonical_path.t;
   sid_executable_in_worktree : bool option;
   sid_state_ready : bool option;
   sid_uptime : string option;
@@ -4816,8 +4832,11 @@ let decode_server_identity json =
          | _ -> "")
     ; sid_binary_commit = string_in build "binary_commit"
     ; sid_binary_commit_age_s
-    ; sid_base_path = string_in paths "effective_base_path"
-    ; sid_masc_root = string_in paths "effective_masc_root"
+    (* The two paths are resolved here, once per reading, so every later
+       workspace check on this identity compares strings without a lookup.
+       The TUI runs this decode on its CPU pool, off the frame loop. *)
+    ; sid_base_path = Canonical_path.of_path (string_in paths "effective_base_path")
+    ; sid_masc_root = Canonical_path.of_path (string_in paths "effective_masc_root")
     ; sid_executable_in_worktree
     ; sid_state_ready
     ; sid_uptime

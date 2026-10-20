@@ -1628,16 +1628,16 @@ type pending_msx_checkpoint = {
 module Checkpoint_pending = Masc_tui_msx_checkpoint_pending
 let pending_msx_checkpoints : pending_msx_checkpoint list ref = ref []
 let checkpoint_storage_errors : (string, string) Hashtbl.t = Hashtbl.create 4
-let checkpoint_root workspace = Masc_tui_types.canonical_path workspace.Tui_decode.sid_masc_root
+let checkpoint_root workspace = Tui_decode.Canonical_path.to_string workspace.Tui_decode.sid_masc_root
 let checkpoint_binding pending =
   Result.map (fun operation_id ->
     {Checkpoint_pending.operation_id; restore=pending.checkpoint_restore; slot=pending.checkpoint_slot;
-     base_path=Masc_tui_types.canonical_path pending.checkpoint_workspace.sid_base_path;
+     base_path=Tui_decode.Canonical_path.to_string pending.checkpoint_workspace.sid_base_path;
      masc_root=checkpoint_root pending.checkpoint_workspace})
     (Keeper_operation_id.of_string pending.checkpoint_operation_id)
 let recover_checkpoints state workspace =
   let root = checkpoint_root workspace in
-  let base_path = Masc_tui_types.canonical_path workspace.Tui_decode.sid_base_path in
+  let base_path = Tui_decode.Canonical_path.to_string workspace.Tui_decode.sid_base_path in
   (* Other TUI processes can publish an unresolved intent after our first read.
      Read the shared inventory on every write-admission check. *)
   if Result.is_ok (Masc_tui_types.workspace_change_origin state) then
@@ -1646,13 +1646,15 @@ let recover_checkpoints state workspace =
         Hashtbl.replace checkpoint_storage_errors root detail;
         state.msx_notice <- Some ("Checkpoint intent storage unavailable; machine changes blocked: " ^ detail)
     | Ok bindings ->
+        (* [load] keeps only bindings under [root], and the filter keeps only
+           those under [base_path], so each one names [workspace]'s paths. *)
         let recovered = List.map (fun (binding : Checkpoint_pending.binding) ->
           {checkpoint_operation_id=Keeper_operation_id.to_string binding.operation_id;
            checkpoint_restore=binding.restore; checkpoint_slot=binding.slot;
-           checkpoint_workspace={workspace with sid_base_path=binding.base_path; sid_masc_root=binding.masc_root}})
+           checkpoint_workspace=workspace})
           (List.filter (fun (binding : Checkpoint_pending.binding) -> binding.base_path=base_path) bindings) in
         pending_msx_checkpoints := recovered @ List.filter (fun pending ->
-          Masc_tui_types.canonical_path pending.checkpoint_workspace.sid_base_path <> base_path
+          Tui_decode.Canonical_path.to_string pending.checkpoint_workspace.sid_base_path <> base_path
           || checkpoint_root pending.checkpoint_workspace <> root) !pending_msx_checkpoints;
         Hashtbl.remove checkpoint_storage_errors root;
         if recovered <> [] then
@@ -1663,8 +1665,8 @@ let checkpoint_for_workspace state =
   | Some workspace ->
       recover_checkpoints state workspace;
       List.find_opt (fun pending ->
-        Masc_tui_types.canonical_path pending.checkpoint_workspace.sid_base_path =
-          Masc_tui_types.canonical_path workspace.sid_base_path
+        Tui_decode.Canonical_path.equal pending.checkpoint_workspace.sid_base_path
+          workspace.sid_base_path
         && checkpoint_root pending.checkpoint_workspace = checkpoint_root workspace)
         !pending_msx_checkpoints
 let remember_checkpoint pending =
@@ -1705,14 +1707,10 @@ let same_server_workspace (expected : Tui_decode.server_identity)
     (actual : Tui_decode.server_identity) =
   expected.sid_state_ready <> Some false
   && actual.sid_state_ready <> Some false
-  && not (String.equal expected.sid_base_path "")
-  && not (String.equal expected.sid_masc_root "")
-  && String.equal
-       (Masc_tui_types.canonical_path expected.sid_base_path)
-       (Masc_tui_types.canonical_path actual.sid_base_path)
-  && String.equal
-       (Masc_tui_types.canonical_path expected.sid_masc_root)
-       (Masc_tui_types.canonical_path actual.sid_masc_root)
+  && not (Tui_decode.Canonical_path.is_empty expected.sid_base_path)
+  && not (Tui_decode.Canonical_path.is_empty expected.sid_masc_root)
+  && Tui_decode.Canonical_path.equal expected.sid_base_path actual.sid_base_path
+  && Tui_decode.Canonical_path.equal expected.sid_masc_root actual.sid_masc_root
 
 let probe_expected_workspace ~host ~port expected =
   match Masc_tui_loader.load_server_identity ~host ~port with
@@ -4651,7 +4649,8 @@ let launch_keeper_items ?(keep_observed_account = false) state ~mailbox keeper_n
     (fun () ->
       let path = "/api/v1/keepers/"
         ^ Masc_tui_http.percent_encode_path_segment keeper_name ^ "/items?expected_workspace="
-        ^ Masc_tui_http.percent_encode_query_value identity.Tui_decode.sid_base_path in
+        ^ Masc_tui_http.percent_encode_query_value
+            (Tui_decode.Canonical_path.to_string identity.Tui_decode.sid_base_path) in
       let ( let* ) = Result.bind in
       let* json = Masc_tui_http.get_json ~host ~port ~path in
       Masc_tui_keeper_items.decode ~keeper_name json)
@@ -4665,8 +4664,7 @@ let visible_item_revision state =
         | Unobserved | Invalid _ | Absent -> None in
       Some (keeper.k_name, keeper_item_revision state keeper.k_name, balance,
         Option.map (fun identity ->
-          (Masc_tui_types.canonical_path identity.Tui_decode.sid_base_path,
-           Masc_tui_types.canonical_path identity.sid_masc_root,
+          (identity.Tui_decode.sid_base_path, identity.sid_masc_root,
            identity.sid_state_ready)) state.server_identity)
   | (Keepers (Keeper_detail), Detail_items, None)
   | (Keepers (Keeper_detail), (Detail_info | (Detail_sandbox | (Detail_instructions | (Detail_secrets | (Detail_github | (Detail_identity | (Detail_channels | (Detail_automation | Detail_runs)))))))), _)
@@ -5201,7 +5199,7 @@ let launch_lane_addons ?initial_detail state ~mailbox request =
   let broadcast_path=Filename.concat
     (Common.masc_dir_from_base_path ~base_path:state.local_base_path) "tui-lane-broadcast.jsonl" in
   let broadcast_scope=Masc_tui_types.broadcast_workspace_scope
-    ~local_base_path:state.local_base_path state.server_identity in
+    ~local_paths:state.local_workspace_paths state.server_identity in
   let broadcast_workspace_verified=state.workspace_identity=Masc_tui_types.Workspace_identity_match in
   let authority = state.workspace_authority in
   let identity = state.server_identity in
@@ -9244,8 +9242,8 @@ let launch_task_dispatch state ~mailbox ~keeper_name ~title ~body ~original =
             let* () = check_workspace_request ~prior_contact:Masc_tui_server_lifecycle.Server_reached state ~mailbox ~authority ~identity ~host ~port () in
             let arguments =
               ("expected_workspace", `Assoc
-                [ "base_path", `String expected_workspace.sid_base_path
-                ; "masc_root", `String expected_workspace.sid_masc_root ])
+                [ "base_path", `String (Tui_decode.Canonical_path.to_string expected_workspace.sid_base_path)
+                ; "masc_root", `String (Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root) ])
               :: ("title", `String title)
               ::
               (if String.trim body = "" then []
@@ -12850,10 +12848,8 @@ let same_currency_workspace source current =
   | Some source, Some current
     when source.Tui_decode.sid_state_ready <> Some false
       && current.Tui_decode.sid_state_ready <> Some false ->
-      String.equal (Masc_tui_types.canonical_path source.Tui_decode.sid_base_path)
-        (Masc_tui_types.canonical_path current.Tui_decode.sid_base_path)
-      && String.equal (Masc_tui_types.canonical_path source.Tui_decode.sid_masc_root)
-        (Masc_tui_types.canonical_path current.Tui_decode.sid_masc_root)
+      Tui_decode.Canonical_path.equal source.Tui_decode.sid_base_path current.Tui_decode.sid_base_path
+      && Tui_decode.Canonical_path.equal source.Tui_decode.sid_masc_root current.Tui_decode.sid_masc_root
   | _ -> false
 
 let withdraw_currency_authority state =
@@ -13482,7 +13478,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
   state.server_identity <- Masc_tui_types.server_identity_of_refresh reading;
   state.workspace_identity <-
     Masc_tui_types.workspace_identity_of_refresh
-      ~local_base_path:state.local_base_path reading;
+      ~local_paths:state.local_workspace_paths reading;
   if state.workspace_identity <> Workspace_identity_match then begin
     state.goal_action_pending <- None;
     (* Withdraw decision authority even when this refresh did not ask for
@@ -13668,7 +13664,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
 let apply_server_identity_reading state ~mailbox reading =
   match
     Masc_tui_types.next_workspace_identity ~previous:state.workspace_identity
-      ~local_base_path:state.local_base_path reading
+      ~local_paths:state.local_workspace_paths reading
   with
   | Workspace_identity_match_unconfirmed _ as unconfirmed ->
     state.workspace_identity <- unconfirmed;
@@ -18395,7 +18391,8 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                   state.runtime_account_form <- Some (Masc_tui_runtime_account_form.refused form
                     (runtime_form_outcome_detail outcome))
             end;
-            let origin = if current then "" else " (" ^ request.rfs_workspace.sid_base_path ^ ")" in
+            let origin = if current then "" else
+                " (" ^ Tui_decode.Canonical_path.to_string request.rfs_workspace.sid_base_path ^ ")" in
             report_action state (match outcome with Form_saved _ -> "system"
               | Form_not_sent _ | Form_invalid_account _ | Form_refused _
               | Form_conflict _ | Form_unconfirmed _ -> "error")
@@ -18434,7 +18431,8 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
           let focus = take_keeper_creation_focus state request in
           let current = keeper_creation_origin_current state request in
           let prefix = if current then request.kcr_keeper ^ ": "
-            else request.kcr_keeper ^ " (" ^ request.kcr_workspace.sid_base_path ^ "): " in
+            else request.kcr_keeper ^ " ("
+              ^ Tui_decode.Canonical_path.to_string request.kcr_workspace.sid_base_path ^ "): " in
           (match outcome with
            | Creation_created ->
                let cleared = clear_created_keeper_draft state request in
@@ -18490,7 +18488,8 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                    requires ready authority before issuing the lookup. *)
                 let current_workspace = match state.server_identity with
                   | None -> true
-                  | Some current when current.sid_base_path = "" || current.sid_masc_root = "" -> true
+                  | Some current when Tui_decode.Canonical_path.is_empty current.sid_base_path
+                                      || Tui_decode.Canonical_path.is_empty current.sid_masc_root -> true
                   | Some current -> same_server_workspace origin current in
                 let pending_workspace = match state.connector_unbind_offer_origin with
                   | None -> true

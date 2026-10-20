@@ -4,7 +4,8 @@ module C = Masc_tui_collab
 
 let identity name : Masc.Tui_decode.server_identity =
   {sid_version = "test"; sid_binary_commit = "test"; sid_binary_commit_age_s = None;
-   sid_base_path = "/fixture/" ^ name; sid_masc_root = "/fixture/" ^ name ^ "/.masc";
+   sid_base_path = Masc.Tui_decode.Canonical_path.of_path ("/fixture/" ^ name);
+   sid_masc_root = Masc.Tui_decode.Canonical_path.of_path ("/fixture/" ^ name ^ "/.masc");
    sid_executable_in_worktree = None; sid_state_ready = Some true; sid_uptime = None;
    sid_sse_clients = None; sid_gc = None; sid_scheduler = None}
 let current state name =

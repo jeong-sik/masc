@@ -1,11 +1,14 @@
 module Tui_decode = Masc.Tui_decode
 
+let canonical = Tui_decode.Canonical_path.of_path
+let local_paths = Masc_tui_types.local_workspace_paths_of_base_path
+
 let identity base_path : Tui_decode.server_identity =
   { Tui_decode.sid_version = "0.24.0"
   ; sid_binary_commit = "abc1234"
   ; sid_binary_commit_age_s = Some 10.
-  ; sid_base_path = base_path
-  ; sid_masc_root = base_path ^ "/.masc"
+  ; sid_base_path = canonical base_path
+  ; sid_masc_root = canonical (base_path ^ "/.masc")
   ; sid_executable_in_worktree = Some false
   ; sid_state_ready = Some true
   ; sid_uptime = None
@@ -25,7 +28,7 @@ let test_same_endpoint_restart_replaces_a_with_b () =
   | None -> Alcotest.fail "a successful B probe removed the identity"
   | Some reading ->
     Alcotest.(check string) "current base path" "/b"
-      reading.Tui_decode.sid_base_path
+      (Tui_decode.Canonical_path.to_string reading.Tui_decode.sid_base_path)
 
 let test_failed_probe_is_unread_not_stale () =
   Alcotest.(check bool) "failed probe has no current identity" true
@@ -50,16 +53,65 @@ let test_workspace_identity_matches_canonical_paths () =
             (Ok (identity dir)));
        match
          Masc_tui_types.workspace_identity_of_refresh
-           ~local_base_path:alias
+           ~local_paths:(local_paths alias)
            (Ok (identity dir))
        with
        | Masc_tui_types.Workspace_identity_match -> ()
        | _ -> Alcotest.fail "canonical aliases did not match")
 
+(* The paths are resolved when a reading is decoded and when the state is
+   made, so a later workspace check reads no filesystem: deleting the alias and
+   the directory after that changes no answer. A check that resolved the
+   paths itself would now see two unresolvable strings that differ. *)
+let test_workspace_checks_compare_paths_resolved_at_decode () =
+  let dir = Filename.temp_file "tui-workspace-resolved-" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  Unix.mkdir (Filename.concat dir ".masc") 0o755;
+  let alias = dir ^ "-alias" in
+  let decoded base_path =
+    match
+      Tui_decode.decode_server_identity
+        (`Assoc
+           [ ("version", `String "0.24.0")
+           ; ( "paths"
+             , `Assoc
+                 [ ("effective_base_path", `String base_path)
+                 ; ("effective_masc_root", `String (Filename.concat base_path ".masc")) ] )
+           ; ("startup", `Assoc [ ("state_ready", `Bool true) ]) ])
+    with
+    | Ok identity -> identity
+    | Error detail -> Alcotest.fail detail
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.remove alias with Sys_error _ -> ());
+      (try Unix.rmdir (Filename.concat dir ".masc") with Unix.Unix_error _ -> ());
+      try Unix.rmdir dir with Unix.Unix_error _ -> ())
+    (fun () ->
+       Unix.symlink dir alias;
+       let through_alias = decoded alias in
+       let direct = decoded dir in
+       let local = local_paths alias in
+       Sys.remove alias;
+       Unix.rmdir (Filename.concat dir ".masc");
+       Unix.rmdir dir;
+       Alcotest.(check string) "the decode resolved the alias to the directory"
+         (Tui_decode.Canonical_path.to_string direct.sid_base_path)
+         (Tui_decode.Canonical_path.to_string through_alias.sid_base_path);
+       Alcotest.(check bool) "request authority matches with both paths gone" true
+         (Masc_tui_types.server_workspace_matches ~expected:(Some through_alias)
+            (Ok direct));
+       match
+         Masc_tui_types.workspace_identity_of_refresh ~local_paths:local (Ok direct)
+       with
+       | Masc_tui_types.Workspace_identity_match -> ()
+       | _ -> Alcotest.fail "the local workspace no longer matched once its paths were gone")
+
 let test_workspace_identity_mismatch_keeps_both_paths () =
   match
     Masc_tui_types.workspace_identity_of_refresh
-      ~local_base_path:"/workspace/local"
+      ~local_paths:(local_paths "/workspace/local")
       (Ok (identity "/workspace/server"))
   with
   | Masc_tui_types.Workspace_identity_mismatch
@@ -74,8 +126,8 @@ let test_workspace_identity_mismatch_keeps_both_paths () =
 let test_workspace_identity_compares_the_masc_root () =
   let base = "/workspace/local" in
   let classify masc_root =
-    Masc_tui_types.workspace_identity_of_refresh ~local_base_path:base
-      (Ok { (identity base) with Tui_decode.sid_masc_root = masc_root })
+    Masc_tui_types.workspace_identity_of_refresh ~local_paths:(local_paths base)
+      (Ok { (identity base) with Tui_decode.sid_masc_root = canonical masc_root })
   in
   let is_match = function
     | Masc_tui_types.Workspace_identity_match -> true
@@ -90,14 +142,14 @@ let test_workspace_identity_compares_the_masc_root () =
 
 let test_broadcast_retry_scope_follows_verified_workspace () =
   let scope reading = Masc_tui_types.broadcast_workspace_scope
-    ~local_base_path:"/workspace/local" reading in
+    ~local_paths:(local_paths "/workspace/local") reading in
   let original = identity "/workspace/local" in
   let restarted = { original with Tui_decode.sid_binary_commit = "after-restart";
     sid_uptime = Some "new process" } in
   Alcotest.(check (option string)) "port-independent workspace retry scope"
     (scope (Some original)) (scope (Some restarted));
   Alcotest.(check bool) "another MASC store has another scope" true
-    (scope (Some original) <> scope (Some { restarted with sid_masc_root = "/workspace/other/.masc" }));
+    (scope (Some original) <> scope (Some { restarted with sid_masc_root = canonical "/workspace/other/.masc" }));
   Alcotest.(check (option string)) "foreign workspace refuses admission" None
     (scope (Some (identity "/workspace/foreign")));
   Alcotest.(check (option string)) "unread server refuses admission" None (scope None);
@@ -126,14 +178,14 @@ let test_detail_intents_wait_for_comparable_identity () =
        && state.keeper_sandbox_logs_origin = Some origin)
   in
   apply (Error "health unavailable"); retained "failed probe";
-  apply (Ok { origin with sid_base_path = "" }); retained "missing base";
-  apply (Ok { origin with sid_masc_root = "" }); retained "missing root";
-  apply (Ok { origin with sid_base_path = ""; sid_masc_root = "";
+  apply (Ok { origin with sid_base_path = canonical "" }); retained "missing base";
+  apply (Ok { origin with sid_masc_root = canonical "" }); retained "missing root";
+  apply (Ok { origin with sid_base_path = canonical ""; sid_masc_root = canonical "";
     sid_state_ready = Some false }); retained "booting unread";
   apply (Ok origin); retained "same workspace recovery";
   (* Same Keeper name and base, different runtime store: no inherited log
      request or post-action offer may become an action in that new store. *)
-  apply (Ok { origin with sid_masc_root = "/workspace/a/another-masc-root" });
+  apply (Ok { origin with sid_masc_root = canonical "/workspace/a/another-masc-root" });
   Alcotest.(check bool) "foreign root retires detail focus" true
     (state.detail_focus_recovery = None);
   Alcotest.(check (list string)) "foreign root clears connector intent"
@@ -150,9 +202,9 @@ let test_detail_intents_wait_for_comparable_identity () =
 
 let test_same_base_with_different_masc_root_cannot_restore_inputs () =
   let a = identity "/workspace/shared" in
-  let b = { a with sid_masc_root = "/workspace/other-store/.masc" } in
+  let b = { a with sid_masc_root = canonical "/workspace/other-store/.masc" } in
   (match Masc_tui_types.workspace_identity_of_refresh
-      ~local_base_path:"/workspace/shared" (Ok b) with
+      ~local_paths:(local_paths "/workspace/shared") (Ok b) with
    | Masc_tui_types.Workspace_identity_mismatch _ -> ()
    | _ -> Alcotest.fail "a different MASC root authorized local metadata");
   let key identity = Masc_tui_types.workspace_input_identity_of_server (Some identity) in
@@ -192,14 +244,14 @@ let test_request_authority_requires_complete_current_identity () =
     (accepts (Ok { before with sid_uptime = Some "30s" }));
   Alcotest.(check bool) "different base" false (accepts (Ok (identity "/b")));
   Alcotest.(check bool) "different runtime root" false
-    (accepts (Ok { before with sid_masc_root = "/a/other-root" }));
+    (accepts (Ok { before with sid_masc_root = canonical "/a/other-root" }));
   Alcotest.(check bool) "booting successor" false
     (accepts (Ok { before with sid_state_ready = Some false }));
   Alcotest.(check bool) "unavailable successor" false (accepts (Error "unavailable"));
   Alcotest.(check bool) "no prior identity" false
     (Masc_tui_types.server_workspace_matches ~expected:None (Ok before));
   Alcotest.(check bool) "missing root cannot authorize" false
-    (let incomplete = { before with sid_masc_root = "" } in
+    (let incomplete = { before with sid_masc_root = canonical "" } in
      Masc_tui_types.server_workspace_matches ~expected:(Some incomplete) (Ok incomplete))
 
 let test_detail_focus_waits_for_authoritative_roster () =
@@ -237,7 +289,7 @@ let test_detail_focus_waits_for_authoritative_roster () =
     state.view <- Keepers Keeper_list
   in
   let state = suspended () in
-  reconcile_detail_intent_origins state (Ok {origin with sid_masc_root=""});
+  reconcile_detail_intent_origins state (Ok {origin with sid_masc_root=canonical ""});
   Alcotest.(check bool) "incomplete identity cannot restore" false (restore_keeper_detail_focus state);
   Alcotest.(check int) "navigation retains no untrusted rows" 0 (List.length state.keepers);
   ready state [keeper "focused";keeper "other"];
@@ -259,7 +311,7 @@ let test_detail_focus_waits_for_authoritative_roster () =
   Alcotest.(check bool) "missing name cannot reopen another Keeper" false (restore_keeper_detail_focus missing);
   Alcotest.(check bool) "trusted absence retires intent" true (missing.detail_focus_recovery=None);
   let foreign = suspended () in
-  reconcile_detail_intent_origins foreign (Ok {origin with sid_masc_root="/workspace/a/foreign"});
+  reconcile_detail_intent_origins foreign (Ok {origin with sid_masc_root=canonical "/workspace/a/foreign"});
   ready foreign [keeper "focused"];
   Alcotest.(check bool) "foreign store retires intent even after returning" false (restore_keeper_detail_focus foreign)
 
@@ -269,7 +321,7 @@ let test_detail_focus_waits_for_authoritative_roster () =
 let test_unread_after_a_match_keeps_it_unconfirmed () =
   let local = "/workspace/local" in
   let next previous reading =
-    Masc_tui_types.next_workspace_identity ~previous ~local_base_path:local reading
+    Masc_tui_types.next_workspace_identity ~previous ~local_paths:(local_paths local) reading
   in
   let label = function
     | Masc_tui_types.Workspace_identity_unread -> "unread"
@@ -329,11 +381,11 @@ let test_partial_identity_keeps_definite_mismatches () =
   let local = "/workspace/a" in
   let original = identity local in
   let different_partial_paths =
-    [ { original with sid_base_path = "/workspace/b"; sid_masc_root = "" }
-    ; { original with sid_base_path = ""; sid_masc_root = "/workspace/b/.masc" } ] in
+    [ { original with sid_base_path = canonical "/workspace/b"; sid_masc_root = canonical "" }
+    ; { original with sid_base_path = canonical ""; sid_masc_root = canonical "/workspace/b/.masc" } ] in
   List.iter (fun observed ->
     List.iter (fun previous ->
-      match Masc_tui_types.next_workspace_identity ~previous ~local_base_path:local (Ok observed) with
+      match Masc_tui_types.next_workspace_identity ~previous ~local_paths:(local_paths local) (Ok observed) with
       | Masc_tui_types.Workspace_identity_mismatch _ -> ()
       | Workspace_identity_unread | Workspace_identity_match
       | Workspace_identity_match_unconfirmed _ ->
@@ -343,7 +395,7 @@ let test_partial_identity_keeps_definite_mismatches () =
     different_partial_paths;
   List.iter (fun observed ->
     match Masc_tui_types.next_workspace_identity
-        ~previous:Workspace_identity_match ~local_base_path:local
+        ~previous:Workspace_identity_match ~local_paths:(local_paths local)
         (Ok { observed with sid_state_ready = Some false }) with
     | Masc_tui_types.Workspace_identity_unread -> ()
     | Workspace_identity_match | Workspace_identity_mismatch _
@@ -352,11 +404,11 @@ let test_partial_identity_keeps_definite_mismatches () =
     different_partial_paths;
   List.iter (fun observed ->
     match Masc_tui_types.next_workspace_identity
-        ~previous:Workspace_identity_match ~local_base_path:local (Ok observed) with
+        ~previous:Workspace_identity_match ~local_paths:(local_paths local) (Ok observed) with
     | Masc_tui_types.Workspace_identity_match_unconfirmed _ -> ()
     | Workspace_identity_unread | Workspace_identity_match | Workspace_identity_mismatch _ ->
       Alcotest.fail "a missing path without contradictory evidence must stay unconfirmed")
-    [ { original with sid_base_path = "" }; { original with sid_masc_root = "" } ]
+    [ { original with sid_base_path = canonical "" }; { original with sid_masc_root = canonical "" } ]
 
 let test_deletion_inventory_waits_for_reconfirmed_workspace () =
   let open Masc_tui_types in
@@ -385,7 +437,7 @@ let test_deletion_inventory_waits_for_reconfirmed_workspace () =
   state.keeper_deletions_cursor <- 1;
   let before_failure = begin_read () in
   state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
-      ~local_base_path:state.local_base_path (Error "health unavailable");
+      ~local_paths:state.local_workspace_paths (Error "health unavailable");
   (* The identity transition retires only the request, not its cached rows. *)
   suspend_keeper_deletions_read state;
   let check_preserved label =
@@ -402,7 +454,7 @@ let test_deletion_inventory_waits_for_reconfirmed_workspace () =
   apply_keeper_deletions_read state ~generation:state.keeper_deletions_generation (Error "HTTP 503");
   check_preserved "failed unconfirmed read";
   state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
-      ~local_base_path:state.local_base_path (Ok (identity "/workspace/a"));
+      ~local_paths:state.local_workspace_paths (Ok (identity "/workspace/a"));
   apply_keeper_deletions_read state ~generation:before_failure (Ok b);
   check_preserved "late response remains stale after A reconfirms";
   let refreshed = { a with operations = [ selected; first ] } in
@@ -470,7 +522,7 @@ let test_uncertain_identity_retires_reads_not_admitted_operations () =
   state.keeper_queue_inflight <- ["reading"; "writing"];
   state.keeper_queue_readings <- ["reading"];
   state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
-      ~local_base_path:state.local_base_path (Error "health failed");
+      ~local_paths:state.local_workspace_paths (Error "health failed");
   suspend_workspace_readings state;
   Alcotest.(check bool) "old Board/mode read is inadmissible during uncertainty" false
     (admitted Workspace_observation);
@@ -498,7 +550,7 @@ let test_uncertain_identity_retires_reads_not_admitted_operations () =
    | Detail.Ready (shown, _, _) -> Alcotest.(check string) "A stays on screen" a.bp_body shown.bp_body
    | Detail.Absent | Detail.Loading | Detail.Failed _ -> Alcotest.fail "retirement erased A's detail");
   state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
-      ~local_base_path:state.local_base_path (Ok (identity "/workspace/a"));
+      ~local_paths:state.local_workspace_paths (Ok (identity "/workspace/a"));
   Alcotest.(check bool) "reconfirming A cannot revive B's old read stamp" false
     (admitted Workspace_observation);
   Alcotest.(check bool) "a read dispatched during uncertainty cannot enter on reconfirmation" false
@@ -523,10 +575,10 @@ let test_operation_receipt_outlives_queued_followup_read () =
      the combined result is already queued, before health failure applies. *)
   let queued = ("saved-A-revision", Ok "B's follow-up snapshot") in
   state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
-      ~local_base_path:state.local_base_path (Error "health failed");
+      ~local_paths:state.local_workspace_paths (Error "health failed");
   suspend_workspace_readings state;
   state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
-      ~local_base_path:state.local_base_path (Ok (identity "/workspace/a"));
+      ~local_paths:state.local_workspace_paths (Ok (identity "/workspace/a"));
   let receipt, observation = workspace_operation_reply state ~authority ~reading queued in
   Alcotest.(check string) "POST revision receipt survives reconfirmation" "saved-A-revision" receipt;
   Alcotest.(check bool) "queued GET snapshot stays retired after A returns" true (Result.is_error observation);
@@ -627,7 +679,7 @@ let test_discarded_bundle_retires_readings_before_reconfirming_a () =
   let latest = retire_refused_workspace_readings state ~detail:"mixed workspace bundle"
       (Some (Ok (identity "/workspace/a"))) in
   state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
-      ~local_base_path:state.local_base_path latest;
+      ~local_paths:state.local_workspace_paths latest;
   Alcotest.(check bool) "A is confirmed again" true (server_authority_ready state);
   Alcotest.(check bool) "independent B response cannot enter the reconfirmed A screen" false
     (workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation);
@@ -642,7 +694,7 @@ let test_preset_selection_waits_without_owning_an_unconfirmed_read () =
       ~port:0 ~refresh_interval:0. () in
   state.server_identity <- Some (identity "/workspace/a");
   state.workspace_identity <- next_workspace_identity ~previous:Workspace_identity_match
-      ~local_base_path:state.local_base_path (Error "health unavailable");
+      ~local_paths:state.local_workspace_paths (Error "health unavailable");
   Alcotest.(check bool) "unconfirmed selection does not start a read" true
     (Option.is_none (begin_preset_detail_read state ~name:"selected-preset"));
   Alcotest.(check bool) "no stuck Loading owner is created" true
@@ -701,7 +753,7 @@ let test_task_receipts_wait_for_identity_and_roster () =
   Alcotest.(check bool) "later refresh cannot send it twice" true
     (take_task_followups state ~ready:(fun _ -> true) = ([], []));
   remember_task_followup state ~expected_workspace:origin handoff;
-  state.server_identity <- Some {origin with sid_masc_root="/workspace/other/.masc";
+  state.server_identity <- Some {origin with sid_masc_root=canonical "/workspace/other/.masc";
     sid_state_ready=Some false};
   state.workspace_identity <- Workspace_identity_unread;
   let run, withdrawn = take_task_followups state ~ready:(fun _ -> true) in
@@ -1031,9 +1083,9 @@ let test_initial_probe_requires_current_cold_workspace () =
     Alcotest.(check bool) "foreign incomplete or booting probes cannot hand off" false
       (admitted candidate))
     [ identity "/workspace/foreign"
-    ; {early.ea_identity with sid_masc_root = "/workspace/foreign/.masc"}
-    ; {early.ea_identity with sid_masc_root = ""}
-    ; {early.ea_identity with sid_base_path = ""}
+    ; {early.ea_identity with sid_masc_root = canonical "/workspace/foreign/.masc"}
+    ; {early.ea_identity with sid_masc_root = canonical ""}
+    ; {early.ea_identity with sid_base_path = canonical ""}
     ; {early.ea_identity with sid_state_ready = Some false}
     ; {early.ea_identity with sid_state_ready = None} ];
   List.iter (fun workspace ->
@@ -1102,7 +1154,7 @@ let test_unadmitted_cold_asks_defer_without_consuming_the_read () =
 let test_early_asks_reject_foreign_stale_and_retired_authority () =
   let open Masc_tui_types in
   let state, early = early_asks_fixture () in
-  let wrong_root = { early.ea_identity with sid_masc_root = "/workspace/foreign/.masc" } in
+  let wrong_root = { early.ea_identity with sid_masc_root = canonical "/workspace/foreign/.masc" } in
   Alcotest.(check bool) "same endpoint with a foreign root is refused" true
     (take_early_asks_observation state {early with ea_identity = wrong_root} = None);
   let ticket = Http_refresh_order.dispatch state.http_refresh_order in
@@ -1487,7 +1539,7 @@ let test_early_roster_settles_before_slow_siblings_once () =
 let test_early_roster_preserves_read_ownership () =
   let open Masc_tui_types in
   let state,early = early_roster_fixture () in
-  let foreign={early.er_identity with sid_masc_root="/workspace/foreign/.masc"} in
+  let foreign={early.er_identity with sid_masc_root=canonical "/workspace/foreign/.masc"} in
   Alcotest.(check bool) "foreign endpoint cannot admit roster" true
     (take_early_keeper_roster_observation state {early with er_identity=foreign}=None);
   let failure={early.er_observation with
@@ -2120,7 +2172,7 @@ let test_answer_receipt_survives_full_mailbox_and_worker_cancellation () =
        ~asks:(Error "late failure")));
   let final_message = P.ask_answer_completion_message final_owner final_fact in
   state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
-    ~local_base_path:state.local_base_path (Error "identity temporarily unavailable");
+    ~local_paths:state.local_workspace_paths (Error "identity temporarily unavailable");
   suspend_workspace_readings state;
   (match final_message with
    | P.Workspace_scoped (authority, reading, inner) ->
@@ -2708,7 +2760,7 @@ let test_response_decode_keeps_cache_and_typed_results () = with_response_decode
   Alcotest.(check int) "304 reuses parsed JSON without another raw decode" 1 (Atomic.get parsed);
   Alcotest.(check bool) "typed identity survives conditional reuse unchanged" true
     (first=unchanged && match first with
-      | Ok value -> value.Tui_decode.sid_base_path="/workspace/decode"
+      | Ok value -> value.Tui_decode.sid_base_path=canonical "/workspace/decode"
       | Error _ -> false))
 
 let test_decode_completion_cannot_consume_new_navigation () = with_response_decode_pool (fun () ->
@@ -3161,7 +3213,7 @@ let test_settings_preparation_retires_focus_and_workspace_owners () =
     (reconcile_keeper_settings_editor state ~available:true
       && not (take_keeper_settings_editor_read state active (Ok (keeper_settings_snapshot ()))));
   let active = keeper_settings_request state in
-  state.server_identity <- Some {(identity state.local_base_path) with sid_masc_root="/other/.masc"};
+  state.server_identity <- Some {(identity state.local_base_path) with sid_masc_root=canonical "/other/.masc"};
   Alcotest.(check bool) "same base path with different runtime root cannot borrow the document" true
     (reconcile_keeper_settings_editor state ~available:true
       && not (take_keeper_settings_editor_read state active (Ok (keeper_settings_snapshot ()))))
@@ -3937,7 +3989,7 @@ let test_owned_results_progress_between_shared_queue_prefixes () =
   let apply = function
     | Event.Withdraw_reading ->
         state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
-          ~local_base_path:state.local_base_path (Error "identity unavailable");
+          ~local_paths:state.local_workspace_paths (Error "identity unavailable");
         suspend_workspace_readings state;
         Eio.Stream.add mailbox Event.Shared_traffic
     | Event.Shared_traffic -> Eio.Stream.add mailbox Event.Shared_traffic
@@ -4408,6 +4460,8 @@ let () =
             test_failed_probe_is_unread_not_stale
         ; Alcotest.test_case "canonical aliases match" `Quick
             test_workspace_identity_matches_canonical_paths
+        ; Alcotest.test_case "workspace checks compare paths resolved at decode" `Quick
+            test_workspace_checks_compare_paths_resolved_at_decode
         ; Alcotest.test_case "workspace identity compares the masc root" `Quick
             test_workspace_identity_compares_the_masc_root
         ; Alcotest.test_case "mismatch preserves both paths" `Quick

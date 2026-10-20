@@ -1413,12 +1413,28 @@ type server_scheduler_health = {
   ssch_pool_domains : int option;
 }
 
+(** A workspace path resolved once, where it enters the TUI. [of_path] runs
+    [Unix.realpath]; a path it cannot resolve is kept as given, and [""] stays
+    [""] without a lookup. [equal] is a string equality and does not touch the
+    filesystem, so a workspace check made on every frame costs no syscall. *)
+module Canonical_path : sig
+  type t = private string
+
+  val of_path : string -> t
+  val equal : t -> t -> bool
+  val to_string : t -> string
+
+  val is_empty : t -> bool
+  (** The server reported no path. *)
+end
+
 type server_identity = {
   sid_version : string;
   sid_binary_commit : string;
   sid_binary_commit_age_s : float option;
-  sid_base_path : string;
-  sid_masc_root : string;
+  sid_base_path : Canonical_path.t;
+  sid_masc_root : Canonical_path.t;
+      (** Both paths are resolved by {!decode_server_identity}. *)
   sid_executable_in_worktree : bool option;
       (** Whether the server's executable resolved inside [.worktrees/]
           (health [build.executable_in_worktree]). [None] on an older server

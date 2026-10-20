@@ -951,7 +951,7 @@ let config_path_note (state : state) =
       let shown =
         match state.server_identity with
         | Some identity ->
-            path_from_root ~root:identity.Tui_decode.sid_masc_root path
+            path_from_root ~root:(Canonical_path.to_string identity.Tui_decode.sid_masc_root) path
         | None -> path
       in
       Ansi.dim ^ shown ^ Ansi.reset
@@ -1233,8 +1233,10 @@ let config_identity_rows ~cols (state : state) =
   let rows = match state.server_identity with
   | None -> [Printf.sprintf "  port :%d · server identity unread" state.port]
   | Some identity ->
-      let base = Terminal_text.single_line identity.Tui_decode.sid_base_path in
-      let masc = Terminal_text.single_line identity.Tui_decode.sid_masc_root in
+      let base =
+        Terminal_text.single_line (Canonical_path.to_string identity.Tui_decode.sid_base_path) in
+      let masc =
+        Terminal_text.single_line (Canonical_path.to_string identity.Tui_decode.sid_masc_root) in
       let masc =
         let prefix = base ^ "/" in
         let prefix_len = String.length prefix in

@@ -2218,7 +2218,7 @@
  (wrapped false)
  (modules masc_tui_workspace_read)
  (libraries masc masc.masc_core masc.http_client masc.fs_compat masc_tui_types
-  masc_tui_kept_reads eio uri yojson))
+  masc_tui_kept_reads masc_tui_response_decode eio uri yojson))
 
 ;; The loader, its HTTP surface, and schedule decoding turn the local
 ;; workspace and Keeper metadata into the state the TUI admits. They are a

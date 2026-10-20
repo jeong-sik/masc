@@ -610,12 +610,23 @@ type local_workspace_reading =
   | Local_workspace_read
   | Local_workspace_failed of string
 
-let canonical_path path =
-  if String.equal path ""
-  then ""
-  else
-    try Unix.realpath path with
-    | Unix.Unix_error _ -> path
+module Canonical_path = Tui_decode.Canonical_path
+
+(* This TUI's own workspace, resolved once when the state is created; the
+   server's side is resolved when its reading is decoded. *)
+type local_workspace_paths =
+  { lw_base_path : Canonical_path.t
+  ; lw_masc_root : Canonical_path.t
+  }
+
+let local_workspace_paths_of_base_path base_path =
+  let lw_base_path = Canonical_path.of_path base_path in
+  { lw_base_path
+  ; lw_masc_root =
+      Canonical_path.of_path
+        (Common.masc_dir_from_base_path
+           ~base_path:(Canonical_path.to_string lw_base_path))
+  }
 ;;
 
 (* A bundle or action belongs to one complete server workspace identity.
@@ -624,36 +635,41 @@ let canonical_path path =
 let server_workspace_matches ~expected reading =
   match expected, reading with
   | Some before, Ok after ->
-      before.Tui_decode.sid_base_path <> "" && before.sid_masc_root <> ""
-      && String.equal (canonical_path before.sid_base_path) (canonical_path after.Tui_decode.sid_base_path)
-      && String.equal (canonical_path before.sid_masc_root) (canonical_path after.sid_masc_root)
+      not (Canonical_path.is_empty before.Tui_decode.sid_base_path)
+      && not (Canonical_path.is_empty before.sid_masc_root)
+      && Canonical_path.equal before.sid_base_path after.Tui_decode.sid_base_path
+      && Canonical_path.equal before.sid_masc_root after.sid_masc_root
       && not (server_is_booting reading)
   | None, (Ok _ | Error _) | Some _, Error _ -> false
 ;;
 
 (* What the paths alone say, booting or not. *)
-let workspace_identity_of_paths ~local_base_path (identity : Tui_decode.server_identity) =
-  let local_base_path = canonical_path local_base_path in
-  let server_base_path = canonical_path identity.sid_base_path in
-  let local_masc_root = canonical_path
-    (Common.masc_dir_from_base_path ~base_path:local_base_path) in
-  let server_masc_root = canonical_path identity.sid_masc_root in
-  if String.equal local_base_path ""
+let workspace_identity_of_paths ~local_paths (identity : Tui_decode.server_identity) =
+  let local_base_path = local_paths.lw_base_path in
+  let server_base_path = identity.sid_base_path in
+  let server_masc_root = identity.sid_masc_root in
+  if Canonical_path.is_empty local_base_path
   then Workspace_identity_unread
   else if
-    (server_base_path <> "" && not (String.equal local_base_path server_base_path))
-    || (server_masc_root <> "" && not (String.equal local_masc_root server_masc_root))
-  then Workspace_identity_mismatch { local_base_path; server_base_path }
-  else if String.equal server_base_path "" || String.equal server_masc_root ""
+    (not (Canonical_path.is_empty server_base_path)
+     && not (Canonical_path.equal local_base_path server_base_path))
+    || (not (Canonical_path.is_empty server_masc_root)
+        && not (Canonical_path.equal local_paths.lw_masc_root server_masc_root))
+  then
+    Workspace_identity_mismatch
+      { local_base_path = Canonical_path.to_string local_base_path
+      ; server_base_path = Canonical_path.to_string server_base_path
+      }
+  else if Canonical_path.is_empty server_base_path || Canonical_path.is_empty server_masc_root
   then Workspace_identity_unread
   else Workspace_identity_match
 ;;
 
-let workspace_identity_of_refresh ~local_base_path reading =
+let workspace_identity_of_refresh ~local_paths reading =
   match reading with
   | Error _ -> Workspace_identity_unread
   | Ok _ when server_is_booting reading -> Workspace_identity_unread
-  | Ok identity -> workspace_identity_of_paths ~local_base_path identity
+  | Ok identity -> workspace_identity_of_paths ~local_paths identity
 ;;
 
 let unconfirmed_identity_reason reading =
@@ -668,17 +684,17 @@ let unconfirmed_identity_reason reading =
    read that names a different workspace withdraws what the match authorized.
    A booting server's paths do name its workspace: one that names another
    workspace answers unread, so the match is withdrawn as before. *)
-let next_workspace_identity ~previous ~local_base_path reading =
+let next_workspace_identity ~previous ~local_paths reading =
   let names_another_workspace =
     match reading with
     | Ok identity ->
-      (match workspace_identity_of_paths ~local_base_path identity with
+      (match workspace_identity_of_paths ~local_paths identity with
        | Workspace_identity_mismatch _ -> true
        | Workspace_identity_unread | Workspace_identity_match
        | Workspace_identity_match_unconfirmed _ -> false)
     | Error _ -> false
   in
-  match workspace_identity_of_refresh ~local_base_path reading, previous with
+  match workspace_identity_of_refresh ~local_paths reading, previous with
   | Workspace_identity_unread
   , (Workspace_identity_match | Workspace_identity_match_unconfirmed _)
     when not names_another_workspace ->
@@ -696,14 +712,18 @@ let next_workspace_identity ~previous ~local_base_path reading =
 (* A Broadcast retry belongs to the verified workspace store, not to the
    TCP port that happened to serve it. Include the server's resolved MASC
    root because two stores under one base path cannot share a request ID. *)
-let broadcast_workspace_scope ~local_base_path identity =
+let broadcast_workspace_scope ~local_paths identity =
   match identity with
   | Some reading when reading.Tui_decode.sid_state_ready <> Some false ->
-    let local = canonical_path local_base_path in
-    let server = canonical_path reading.sid_base_path in
-    let root = canonical_path reading.sid_masc_root in
-    if local <> "" && String.equal local server && root <> ""
-    then Some (Yojson.Safe.to_string (`List [`String server; `String root]))
+    let local = local_paths.lw_base_path in
+    let server = reading.sid_base_path in
+    let root = reading.sid_masc_root in
+    if not (Canonical_path.is_empty local) && Canonical_path.equal local server
+       && not (Canonical_path.is_empty root)
+    then
+      Some (Yojson.Safe.to_string
+        (`List [`String (Canonical_path.to_string server);
+                `String (Canonical_path.to_string root)]))
     else None
   | Some _ | None -> None
 ;;
@@ -712,10 +732,10 @@ let broadcast_workspace_scope ~local_base_path identity =
    match/mismatch is a permission classification, not a durable input key. *)
 let workspace_input_identity_of_server = function
   | Some identity when identity.Tui_decode.sid_state_ready <> Some false ->
-      let wi_base_path = canonical_path identity.sid_base_path in
-      let wi_masc_root = canonical_path identity.sid_masc_root in
-      if wi_base_path = "" || wi_masc_root = "" then None
-      else Some { wi_base_path; wi_masc_root }
+      if Canonical_path.is_empty identity.sid_base_path
+         || Canonical_path.is_empty identity.sid_masc_root then None
+      else Some { wi_base_path = Canonical_path.to_string identity.sid_base_path;
+                  wi_masc_root = Canonical_path.to_string identity.sid_masc_root }
   | Some _ | None -> None
 ;;
 
@@ -8126,6 +8146,9 @@ type state = {
      a failed probe returns the display to unread rather than showing stale. *)
   mutable server_identity: Tui_decode.server_identity option;
   local_base_path: string;
+  (* [local_base_path] and its MASC root, resolved when this state is made.
+     Workspace checks compare these with [server_identity]. *)
+  local_workspace_paths: local_workspace_paths;
   mutable workspace_identity: workspace_identity;
   mutable workspace_authority: workspace_authority;
   mutable workspace_read_authority: unit ref;
@@ -9500,7 +9523,7 @@ let can_admit_initial_http_identity (state : state) ~ticket ~authority identity 
   && Http_refresh_order.is_current state.http_refresh_order ticket
   && state.workspace_authority = authority
   && identity.Tui_decode.sid_state_ready = Some true
-  && workspace_identity_of_refresh ~local_base_path:state.local_base_path
+  && workspace_identity_of_refresh ~local_paths:state.local_workspace_paths
        (Ok identity) = Workspace_identity_match
 
 let accept_http_progress (state : state) observation =
@@ -9531,7 +9554,7 @@ let accept_overview_preview (state : state) preview =
   if Option.is_some state.http_refresh_started_ns
      && Http_refresh_order.is_current state.http_refresh_order preview.op_ticket
      && preview.op_authority = state.workspace_authority
-     && workspace_identity_of_refresh ~local_base_path:state.local_base_path
+     && workspace_identity_of_refresh ~local_paths:state.local_workspace_paths
           (Ok preview.op_identity) = Workspace_identity_match then
     state.overview_preview <- Some preview
 
@@ -9778,7 +9801,7 @@ let can_admit_http_read (state : state) ~ticket ~authority identity =
   && authority = state.workspace_authority
   && state.workspace_identity = Workspace_identity_match
   && server_workspace_matches ~expected:state.server_identity (Ok identity)
-  && workspace_identity_of_refresh ~local_base_path:state.local_base_path
+  && workspace_identity_of_refresh ~local_paths:state.local_workspace_paths
        (Ok identity) = Workspace_identity_match
 
 let can_admit_early_http_read (state : state) ~ticket ~authority identity =
@@ -10174,8 +10197,8 @@ let server_authority_ready state =
   match state.server_identity with
   | Some identity ->
       identity.Tui_decode.sid_state_ready <> Some false
-      && not (String.equal identity.sid_base_path "")
-      && not (String.equal identity.sid_masc_root "")
+      && not (Canonical_path.is_empty identity.sid_base_path)
+      && not (Canonical_path.is_empty identity.sid_masc_root)
   | None -> false
 
 let chat_call_origin_current state origin =
@@ -10227,12 +10250,10 @@ let take_task_followups state ~ready =
   let foreign held =
     held.tf_authority <> state.workspace_authority
     || match state.server_identity with
-       | Some current when current.Tui_decode.sid_base_path <> ""
-                           && current.sid_masc_root <> "" ->
-           not (String.equal (canonical_path held.tf_workspace.sid_base_path)
-                  (canonical_path current.sid_base_path)
-                && String.equal (canonical_path held.tf_workspace.sid_masc_root)
-                     (canonical_path current.sid_masc_root))
+       | Some current when not (Canonical_path.is_empty current.Tui_decode.sid_base_path)
+                           && not (Canonical_path.is_empty current.sid_masc_root) ->
+           not (Canonical_path.equal held.tf_workspace.sid_base_path current.sid_base_path
+                && Canonical_path.equal held.tf_workspace.sid_masc_root current.sid_masc_root)
        | Some _ | None -> false
   in
   let run, withdrawn, waiting = List.fold_left (fun (run, withdrawn, waiting) held ->
@@ -10443,8 +10464,8 @@ let keeper_settings_target state =
       when server_authority_ready state ->
       Option.map (fun (keeper : keeper) -> {
         ksk_authority=state.workspace_authority;
-        ksk_base_path=canonical_path expected.Tui_decode.sid_base_path;
-        ksk_masc_root=canonical_path expected.sid_masc_root;
+        ksk_base_path=Canonical_path.to_string expected.Tui_decode.sid_base_path;
+        ksk_masc_root=Canonical_path.to_string expected.sid_masc_root;
         ksk_keeper=keeper.k_name;ksk_surface=surface;
         ksk_tab=(if surface=Keepers Keeper_detail then Some state.detail_tab else None)
       }) (List.nth_opt state.keepers state.keeper_cursor)
@@ -10496,7 +10517,8 @@ let runtime_assignment_target_key state =
   | Keepers Keeper_runtime_pick,Some keeper,Some workspace
       when state.workspace_identity=Workspace_identity_match && server_authority_ready state ->
       Some {ksk_authority=state.workspace_authority;
-        ksk_base_path=canonical_path workspace.sid_base_path;ksk_masc_root=canonical_path workspace.sid_masc_root;
+        ksk_base_path=Canonical_path.to_string workspace.sid_base_path;
+        ksk_masc_root=Canonical_path.to_string workspace.sid_masc_root;
         ksk_keeper=keeper;ksk_surface=state.view;ksk_tab=None}
   | Keepers Keeper_runtime_pick,_,_ -> None
   | (Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
@@ -11287,10 +11309,8 @@ let identity_expectation_workspace_matches ~(origin : Tui_decode.server_identity
   match state.server_identity with
   | None -> false
   | Some current ->
-      String.equal (canonical_path origin.sid_base_path)
-        (canonical_path current.sid_base_path)
-      && String.equal (canonical_path origin.sid_masc_root)
-           (canonical_path current.sid_masc_root)
+      Canonical_path.equal origin.sid_base_path current.sid_base_path
+      && Canonical_path.equal origin.sid_masc_root current.sid_masc_root
 
 let identity_expectations_for_keeper (state : state) keeper_name =
   List.filter
@@ -11314,12 +11334,11 @@ let reconcile_detail_intent_origins (state : state) reading =
   match reading with
   | Error _ -> ()
   | Ok (current : Tui_decode.server_identity) ->
-      if current.sid_base_path <> "" && current.sid_masc_root <> "" then begin
+      if not (Canonical_path.is_empty current.sid_base_path)
+         && not (Canonical_path.is_empty current.sid_masc_root) then begin
         let belongs (candidate : Tui_decode.server_identity) =
-          String.equal (canonical_path candidate.sid_base_path)
-            (canonical_path current.sid_base_path)
-          && String.equal (canonical_path candidate.sid_masc_root)
-               (canonical_path current.sid_masc_root)
+          Canonical_path.equal candidate.sid_base_path current.sid_base_path
+          && Canonical_path.equal candidate.sid_masc_root current.sid_masc_root
         in
         (* Expectations survive a workspace change only if they belong to the
            workspace the read just confirmed. Compared against [current]
@@ -11333,10 +11352,8 @@ let reconcile_detail_intent_origins (state : state) reading =
         let foreign = function
           | None -> false
           | Some (origin : Tui_decode.server_identity) ->
-              not (String.equal (canonical_path origin.sid_base_path)
-                     (canonical_path current.sid_base_path)
-                   && String.equal (canonical_path origin.sid_masc_root)
-                        (canonical_path current.sid_masc_root))
+              not (Canonical_path.equal origin.sid_base_path current.sid_base_path
+                   && Canonical_path.equal origin.sid_masc_root current.sid_masc_root)
         in
         (match state.detail_focus_recovery with
          | Some (origin, _, _) when foreign (Some origin) -> state.detail_focus_recovery <- None
@@ -13406,8 +13423,8 @@ let runtime_form_is_attached state request =
   | Model_form_draft form -> focused && Option.exists (fun current -> current == form) state.runtime_model_form
   | Account_form_draft form -> focused && Option.exists (fun current -> current == form) state.runtime_account_form
   | Config_document_draft session ->
-      let workspace = canonical_path request.rfs_workspace.sid_base_path,
-        canonical_path request.rfs_workspace.sid_masc_root in
+      let workspace = Canonical_path.to_string request.rfs_workspace.sid_base_path,
+        Canonical_path.to_string request.rfs_workspace.sid_masc_root in
       List.exists (fun edit -> edit.rce_workspace=workspace
         && Masc_tui_runtime_config_edit.same_draft edit.rce_session session) state.runtime_config_edits
 
@@ -14446,6 +14463,7 @@ let create_state
   keeper_message_focus = Right_pane;
   server_identity = None;
   local_base_path;
+  local_workspace_paths = local_workspace_paths_of_base_path local_base_path;
   workspace_authority = Workspace_authority 0;
   workspace_read_authority = ref ();
   workspace_cancellations = [];
@@ -16228,7 +16246,8 @@ let sync_task_documents state ~cols =
           let Workspace_authority workspace_revision=state.workspace_authority in
           let workspace_fingerprint=Option.map (fun (identity : Tui_decode.server_identity) ->
             Digestif.SHA256.(digest_string (Yojson.Safe.to_string (`List
-              [`String identity.sid_base_path;`String identity.sid_masc_root])) |> to_hex)) state.server_identity in
+              [`String (Canonical_path.to_string identity.sid_base_path);
+               `String (Canonical_path.to_string identity.sid_masc_root)])) |> to_hex)) state.server_identity in
           let tdr_observation=Observation.create {source;part;columns=cols;
             generation=Masc_tui_fetched.request_id tdr_ticket;workspace_revision;workspace_fingerprint} in
           let request={tdr_ticket;tdr_reading=state.workspace_read_authority;tdr_job=ref ();tdr_observation} in
@@ -16484,8 +16503,8 @@ let board_read_layout ~cols ~wide =
    can expose one. The colored rows are a rendering cache of that session text. *)
 let runtime_config_workspace (state : state) =
   Option.map (fun identity ->
-    canonical_path identity.Tui_decode.sid_base_path,
-    canonical_path identity.Tui_decode.sid_masc_root) state.server_identity
+    Canonical_path.to_string identity.Tui_decode.sid_base_path,
+    Canonical_path.to_string identity.Tui_decode.sid_masc_root) state.server_identity
 
 let browser_activity_session (state : state) owner =
   List.find_opt (fun session -> Masc_tui_browser_activity.same_owner owner
@@ -16577,8 +16596,8 @@ let discard_runtime_config_edit (state : state) ~workspace ~path =
 let release_runtime_document_recovery state ~workspace ~path =
   state.runtime_form_saves <- Runtime_form_saves.map (fun attempt ->
     let request = attempt.rfa_request in
-    let origin = canonical_path request.rfs_workspace.sid_base_path,
-      canonical_path request.rfs_workspace.sid_masc_root in
+    let origin = Canonical_path.to_string request.rfs_workspace.sid_base_path,
+      Canonical_path.to_string request.rfs_workspace.sid_masc_root in
     match request.rfs_draft with
     | Config_document_draft session when origin=workspace && String.equal session.base.path path ->
         if Option.exists (fun token -> token == request.rfs_token) state.runtime_form_save_focus
@@ -16594,8 +16613,8 @@ let release_runtime_document_recovery state ~workspace ~path =
 let apply_runtime_document_save state request status =
   match request.rfs_draft, status with
   | Config_document_draft submitted, Form_finished (_, outcome) ->
-      let workspace = canonical_path request.rfs_workspace.sid_base_path,
-        canonical_path request.rfs_workspace.sid_masc_root in
+      let workspace = Canonical_path.to_string request.rfs_workspace.sid_base_path,
+        Canonical_path.to_string request.rfs_workspace.sid_masc_root in
       let module Edit = Masc_tui_runtime_config_edit in
       let uncertain = match outcome with
         | Form_unconfirmed _ -> true

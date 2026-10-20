@@ -91,7 +91,7 @@ let test_original_questions_are_bound_to_receiving_workspace () =
             check (option string) "TUI decodes original source without current Keeper state"
               (Some "original-ask-trace#17") (Option.map Ids.Turn_ref.to_string row.ar_source_turn_ref);
           check string "original ask survives the wire" ask.ask_id row.ar_id;
-          check string "original Keeper survives the wire" name row.ar_keeper;
+          check string "original Keeper survives the wire" name (Masc.Tui_decode_asks.ask_asker_label row.ar_asker);
           (match row.ar_questions with
            | [question] -> (match question.aq_choices with
              | [choice] -> check string "answer still names original choice" "later" choice.ac_id

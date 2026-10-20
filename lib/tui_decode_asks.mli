@@ -39,8 +39,17 @@ type ask_resolution =
       aw_withdrawn_at : float;
     }
 
+type ask_asker =
+  | Ask_keeper of string  (** the Keeper's name *)
+  | Ask_installation of { ai_declaration_id : string; ai_title : string }
+      (** A Lane Add-on installation, named by its declaration id; the title is
+          the package's. It has no turn: [ar_source_turn_ref] is [None]. *)
+
+val ask_asker_label : ask_asker -> string
+(** The Keeper's name or the installation's title. *)
+
 type ask_row = {
-  ar_keeper : string;
+  ar_asker : ask_asker;
   ar_id : string;
   ar_asked_at : float;
   ar_source_turn_ref : Ids.Turn_ref.t option;
@@ -52,6 +61,17 @@ type ask_row = {
   ar_questions : ask_question list;
   ar_resolution : ask_resolution;
 }
+
+type ask_key = { ak_asker : ask_asker; ak_id : string }
+(** Which question a row is on this surface. A Keeper's ask id is unique in
+    the workspace, but an installation's is the request id its package chose,
+    unique only within that installation, so the asker is part of the key. *)
+
+val ask_key : ask_row -> ask_key
+
+val equal_ask_key : ask_key -> ask_key -> bool
+(** Two installations are the same asker when their declaration ids are equal;
+    the title is the package's and does not name the installation. *)
 
 type asks_snapshot = {
   asn_keeper : string option;
@@ -71,6 +91,33 @@ val decode_asks_snapshot :
     [base_path] and one [masc_root]; missing, duplicate or foreign identity is
     an error even when the question list is empty. Exactly one [state_ready]
     field must be [true]; a booting or unverified response cannot clear questions. *)
+
+val decode_installation_asks : Yojson.Safe.t -> (ask_row list, string) result
+(** Exactly [{"asks": [...]}] from [GET /api/v1/lane-addons/asks]. Each row
+    has exactly the installation's [declaration_id], the package [title],
+    [ask_id], [asked_at], [context], [questions] and [resolution]; questions
+    and resolutions decode as Keeper rows do. The server checks the workspace
+    from the request's expected paths and refuses a mismatch with 409. *)
+
+val with_installation_asks : asks_snapshot -> ask_row list -> asks_snapshot
+(** The Keeper snapshot followed by the installations' rows, with the open
+    count raised by the installation rows that are open. *)
+
+type installation_answer_receipt =
+  | Installation_answer_recorded
+  | Installation_answer_already_answered of { iaa_answered_at : float }
+      (** Another answer was recorded first; the submitted choices are not it. *)
+  | Installation_answer_withdrawn of { iaw_withdrawn_at : float }
+  | Installation_answer_refused of string
+      (** Unknown question (404) or answers that do not fit it (400). *)
+
+val decode_installation_answer_receipt :
+  expected_declaration_id:string -> expected_ask_id:string -> status_code:int ->
+  Yojson.Safe.t -> (installation_answer_receipt, string) result
+(** [POST /api/v1/lane-addons/ask-answer]. A 200 must name the requested
+    declaration and ask. Any status other than 200, 400, 404 and 409 is
+    [Error]: recording is unconfirmed, not refused. 401 and 403 are read by
+    the caller as refusals before decoding. *)
 
 type ask_answer_delivery =
   | Ask_wake_stored
@@ -192,6 +239,12 @@ type ask_answer_receipt =
       (** The append succeeded, but its first winner could not be read.
           Do not attribute the submitted choices to the canonical answer. *)
   | Ask_answer_refused of string
+
+type answer_receipt =
+  | Keeper_answer_receipt of ask_answer_receipt
+  | Installation_answer_receipt of installation_answer_receipt
+(** The receipt of the route the asker's answer goes to. A Keeper's answer
+    wakes the Keeper; an installation's answer starts its host request cycle. *)
 
 val decode_ask_answer_receipt :
   expected_ask_id:string ->

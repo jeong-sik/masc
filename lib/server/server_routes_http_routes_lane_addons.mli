@@ -3,6 +3,26 @@
 val add_routes : sw:Eio.Switch.t -> clock:float Eio.Time.clock_ty Eio.Resource.t -> Http_server_eio.Router.t -> Http_server_eio.Router.t
 
 val decode_body : string -> (Yojson.Safe.t, string) result
+
+(** {2 Installation questions}
+
+    The wire of [GET /api/v1/lane-addons/asks] and
+    [POST /api/v1/lane-addons/ask-answer], exposed so the TUI's decoders are
+    checked against what this server writes. *)
+
+val installation_ask_json :
+  declaration_id:string -> string * (Lane_addon_asks.ask * Keeper_ask.resolution) -> Yojson.Safe.t
+
+val decode_ask_answer :
+  string -> (string * string * (string * Keeper_ask.response) list * string option, string) result
+(** The answer body: exactly [declaration_id], [ask_id], [answers] and an
+    optional [session_id]; any other field is refused. *)
+
+val ask_answer_recorded_json : declaration_id:string -> ask_id:string -> answer_count:int -> Yojson.Safe.t
+
+val ask_answer_failure_response :
+  ask_id:string -> Lane_addon_asks.answer_failure ->
+  [> `Bad_request | `Conflict | `Internal_server_error | `Not_found ] * Yojson.Safe.t
 val decode_slice_query : (string * string) list -> (Yojson.Safe.t, string) result
 
 val decode_inspect_query : (string * string) list -> (Yojson.Safe.t, string) result

@@ -1048,7 +1048,7 @@ let early_asks_fixture () =
   let snapshot : Masc.Tui_decode_asks.asks_snapshot =
     { asn_keeper = None; asn_open_count = 1
     ; asn_rows =
-        [{ ar_keeper = "alpha"; ar_id = "ask-1"; ar_asked_at = 1.; ar_source_turn_ref = None; ar_context = None
+        [{ ar_asker = Ask_keeper "alpha"; ar_id = "ask-1"; ar_asked_at = 1.; ar_source_turn_ref = None; ar_context = None
          ; ar_questions =
              [{ aq_id = "q1"; aq_header = "Choice"; aq_prompt = "Continue?"
               ; aq_mode = Masc.Tui_decode_asks.Ask_single
@@ -2010,12 +2010,12 @@ let test_question_origin_survives_answer_and_workspace_change () =
   let original = match snapshot.asn_rows with
     | [row] -> {row with ar_source_turn_ref=Some original_ref}
     | _ -> Alcotest.fail "one original question" in
-  let origin = Ask.origin_of_row original in
+  let origin = Ask.origin_of_row original |> Option.get in
   toggle_ask_origin state origin;
   let submission : ask_submission =
     {as_request=ref ();as_started_ns=0L;as_receipt=Ask_answer_receipt.create ();
      as_completion=Ask_answer_completion.create ();as_reading=Some state.workspace_read_authority;as_authority=state.workspace_authority;
-     as_keeper_name=original.ar_keeper;as_ask_id=original.ar_id;as_answered_label="private choice";
+     as_asker=original.ar_asker;as_ask_id=original.ar_id;as_answered_label="private choice";
      as_source_turn_ref=original.ar_source_turn_ref} in
   begin_ask_submission_state ~submission state;
   let later = {original with ar_id="later-question";
@@ -2023,13 +2023,14 @@ let test_question_origin_survives_answer_and_workspace_change () =
   state.asks_snapshot <- Some {snapshot with asn_rows=[later]};
   state.asks_error <- Some "reread unavailable";
   let feedback = retain_ask_answer_feedback state submission
-      (Ok (Masc.Tui_decode_asks.Ask_answer_recorded Masc.Tui_decode_asks.Ask_wake_stored))
+      (Ok (Masc.Tui_decode_asks.Keeper_answer_receipt
+             (Masc.Tui_decode_asks.Ask_answer_recorded Masc.Tui_decode_asks.Ask_wake_stored)))
       |> Option.get in
   Alcotest.(check (option string)) "receipt preserves the transmitted question's source"
     (Some "original-question-source#17") (Option.map Ids.Turn_ref.to_string feedback.af_source_turn_ref);
   Alcotest.(check bool) "a later selected question does not replace opened original diagnostics" true
     (Option.exists (Ask.same_origin origin) (current_ask_origin state));
-  let json = Ask.origin_to_json (Ask.origin_of_feedback feedback) in
+  let json = Ask.origin_to_json (Ask.origin_of_feedback feedback |> Option.get) in
   Alcotest.(check string) "source telemetry belongs to the original question"
     original.ar_id Yojson.Safe.Util.(json |> member "ask_id" |> to_string);
   let Workspace_authority generation = state.workspace_authority in
@@ -2038,7 +2039,7 @@ let test_question_origin_survives_answer_and_workspace_change () =
     (current_ask_origin state=None);
   Alcotest.(check bool) "previous receipt cannot supply a new workspace source" true
     (current_ask_answer_feedback state=None);
-  let unknown = Ask.origin_of_row {later with ar_source_turn_ref=None} in
+  let unknown = Ask.origin_of_row {later with ar_source_turn_ref=None} |> Option.get in
   state.workspace_identity <- Workspace_identity_unread;
   toggle_ask_origin state unknown;
   Alcotest.(check bool) "unconfirmed workspace cannot open source from an old row" true
@@ -2060,10 +2061,10 @@ let test_answer_receipt_has_one_original_submission_owner () =
   let submission ask_id : ask_submission =
     { as_request = ref (); as_started_ns = 10L; as_receipt=Ask_answer_receipt.create ();
       as_completion=Ask_answer_completion.create ();as_reading=Some state.workspace_read_authority; as_authority = state.workspace_authority;
-      as_keeper_name = "reader"; as_ask_id = ask_id; as_source_turn_ref = None; as_answered_label = "reader: choice" } in
+      as_asker = Decode.Ask_keeper "reader"; as_ask_id = ask_id; as_source_turn_ref = None; as_answered_label = "reader: choice" } in
   let first = submission "first" in
   begin_ask_submission_state ~submission:first state;
-  let receipt = Ok (Decode.Ask_answer_recorded Decode.Ask_wake_stored) in
+  let receipt = Ok (Decode.Keeper_answer_receipt (Decode.Ask_answer_recorded Decode.Ask_wake_stored)) in
   let feedback = match retain_ask_answer_feedback state first receipt with
     | Some feedback -> feedback
     | None -> Alcotest.fail "current original receipt was not retained" in
@@ -2134,14 +2135,14 @@ let test_answer_receipt_survives_full_mailbox_and_worker_cancellation () =
   let submission name : ask_submission =
     {as_request=ref ();as_started_ns=10L;as_receipt=R.create ();
      as_completion=C.create ();as_reading=Some state.workspace_read_authority;
-     as_authority=state.workspace_authority;as_keeper_name="reader";as_ask_id=name;
+     as_authority=state.workspace_authority;as_asker=Decode.Ask_keeper "reader";as_ask_id=name;
      as_answered_label="original choice";as_source_turn_ref=Some source} in
   let original = submission "original" in
   begin_ask_submission_state ~submission:original state;
   let mailbox = Eio.Stream.create 1 in
   Eio.Stream.add mailbox ();
   let entered, enter = Eio.Promise.create () and cancellation, set_cancellation = Eio.Promise.create () in
-  let receipt = Ok (Decode.Ask_answer_recorded Decode.Ask_wake_stored) in
+  let receipt = Ok (Decode.Keeper_answer_receipt (Decode.Ask_answer_recorded Decode.Ask_wake_stored)) in
   let reread = Ok {Decode.asn_keeper=None;asn_open_count=0;asn_rows=[]} in
   let worker = Eio.Fiber.fork_promise ~sw (fun () ->
     Eio.Cancel.sub (fun context ->
@@ -2289,11 +2290,11 @@ let answer_followup_state () =
   state.server_identity <- Some (identity state.local_base_path);
   let submission name : ask_submission = {as_request=ref ();as_started_ns=0L;as_receipt=Ask_answer_receipt.create ();
       as_completion=Ask_answer_completion.create ();as_reading=Some state.workspace_read_authority;as_authority=state.workspace_authority;
-      as_keeper_name="alpha";as_ask_id=name;as_source_turn_ref=None;as_answered_label="choice"} in
+      as_asker=Masc.Tui_decode_asks.Ask_keeper "alpha";as_ask_id=name;as_source_turn_ref=None;as_answered_label="choice"} in
   let first = submission "original" in
   begin_ask_submission_state ~submission:first state;
   ignore (retain_ask_answer_feedback state first
-    (Ok (Masc.Tui_decode_asks.Ask_answer_recorded Ask_wake_stored)));
+    (Ok (Masc.Tui_decode_asks.Keeper_answer_receipt (Ask_answer_recorded Ask_wake_stored))));
   state, submission
 
 let test_answer_followup_retains_current_source_observations () =
@@ -2303,7 +2304,7 @@ let test_answer_followup_retains_current_source_observations () =
   let state, _ = answer_followup_state () in
   let original = original_answer_followup_identity () in
   let begin_read () = match begin_ask_followup_read state with
-    | Some value -> value | None -> Alcotest.fail "confirmed original answer did not own a read" in
+    | Some (request, owner, _keeper) -> request, owner | None -> Alcotest.fail "confirmed original answer did not own a read" in
   let admit request owner event = match take_ask_followup_event state request owner event with
     | Some (Ok _) -> () | Some (Error detail) -> Alcotest.fail detail
     | None -> Alcotest.fail "current source was not admitted" in
@@ -2415,7 +2416,7 @@ let test_answer_followup_withdraws_reader_without_borrowing_successor () =
   let module Decode = Masc.Tui_decode_asks in
   let state, submission = answer_followup_state () in
   let begin_read () = match begin_ask_followup_read state with
-    | Some value -> value | None -> Alcotest.fail "expected current follow-up reader" in
+    | Some (request, owner, _keeper) -> request, owner | None -> Alcotest.fail "expected current follow-up reader" in
   let original = original_answer_followup_identity () in
   let retired, old_owner = begin_read () in
   let old_cancelled = ref None in
@@ -2424,7 +2425,7 @@ let test_answer_followup_withdraws_reader_without_borrowing_successor () =
   begin_ask_submission_state ~submission:second state;
   Alcotest.(check bool) "new answer cancels original worker and awaits its own canonical receipt" true
     (Option.is_some !old_cancelled && Option.is_none (begin_ask_followup_read state));
-  ignore (retain_ask_answer_feedback state second (Ok (Decode.Ask_answer_recorded Ask_wake_stored)));
+  ignore (retain_ask_answer_feedback state second (Ok (Decode.Keeper_answer_receipt (Ask_answer_recorded Ask_wake_stored))));
   let current, owner = begin_read () in
   let successor_cancelled = ref None in
   supersede_ask_followup_worker state (Some (current, fun detail -> successor_cancelled:=Some detail)) ~detail:"superseded";
@@ -3914,10 +3915,11 @@ let test_owned_results_progress_between_shared_queue_prefixes () =
   let make_submission name : ask_submission =
     {as_request=ref ();as_started_ns=10L;as_receipt=Ask_answer_receipt.create ();
      as_completion=Ask_answer_completion.create ();as_reading=Some state.workspace_read_authority;
-     as_authority=state.workspace_authority;as_keeper_name=keeper.k_name;as_ask_id=name;
+     as_authority=state.workspace_authority;as_asker=Masc.Tui_decode_asks.Ask_keeper keeper.k_name;as_ask_id=name;
      as_answered_label="original choice";as_source_turn_ref=None} in
   let superseded = make_submission "superseded" and current = make_submission "current" in
-  let receipt = Ok (Masc.Tui_decode_asks.Ask_answer_recorded Masc.Tui_decode_asks.Ask_wake_stored) in
+  let receipt = Ok (Masc.Tui_decode_asks.Keeper_answer_receipt
+                      (Masc.Tui_decode_asks.Ask_answer_recorded Masc.Tui_decode_asks.Ask_wake_stored)) in
   let asks = Ok {Masc.Tui_decode_asks.asn_keeper=None;asn_open_count=0;asn_rows=[]} in
   List.iter (fun submission ->
     begin_ask_submission_state ~submission state;

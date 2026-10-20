@@ -903,8 +903,6 @@ let test_checkpoint_roundtrip () =
   check bool "corrupt checkpoint preserves ledger" true (Msx_lane.ledger () = ledger_before)
 ;;
 
-(* A restore replaces the machine every watcher shows, so a call that names no
-   slot picks none: it lists what is saved and leaves the machine alone. *)
 let listed_slots listing =
   match member "checkpoints" (Tool_result.data listing) with
   | Some (`List rows) ->
@@ -915,6 +913,8 @@ let listed_slots listing =
   | _ -> fail "no checkpoints in the listing"
 ;;
 
+(* A restore replaces the machine every watcher shows, so a call that names no
+   slot picks none: it lists what is saved and leaves the machine alone. *)
 let test_restore_without_a_slot_lists_and_restores_nothing () =
   with_workspace @@ fun base_path ->
   let call name args = dispatch ~base_path name args in

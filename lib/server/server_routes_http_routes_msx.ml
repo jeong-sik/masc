@@ -284,8 +284,8 @@ let activity_json ~config:_ =
    to list the saved slots; a restore route has no listing to answer with, and
    its receipt binds one slot. *)
 let restore_names_no_slot ~restore = function
-  | `Assoc [] -> restore
-  | `Assoc (_ :: _) | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
+  | `Assoc fields -> restore && not (List.mem_assoc "slot" fields)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 
 let checkpoint_legacy_response ~(config : Workspace.config) ~restore ~body =
   match decode_write_body ~config ~body with

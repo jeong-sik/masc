@@ -145,6 +145,24 @@ Results 에 다섯 lane 이 나온다.
 
 `export` action 은 로그 전체를 host Lane store 에 artifact 로 보관하고 그 SHA-256 을 돌려준다. 주기적으로 받으려면 `{"installation_id": "operator-quiz", "action": {"kind": "export"}}` Schedule 을 따로 만든다. 기본으로 만들어지는 Schedule 은 없다. 내보낸 로그로 패키지를 되살리는 기능은 아직 없다.
 
+### 정답 모양이 바뀐 revision 으로 올릴 때
+
+서술형 문제가 들어오면서 `posed` 의 정답이 `{"kind": ...}` 객체로 기록된다. 그 전 package 가 쓴 `log.jsonl` 은 새 package 가 읽지 못한다. 읽지 못한 log 로는 답도 관측도 받지 않는다. 그래서 새 revision 을 설치하기 전에 log 를 옮겨 두고 빈 log 로 시작한다.
+
+1. 남겨 둘 기록이 있으면 먼저 `export` action 으로 host Lane store 에 보관한다.
+2. 설치 선언에 `enabled = false` 를 적고, 그 설치의 worker 가 detached 가 될 때까지 기다린다.
+3. 설치 volume 안의 `/state/operator-quiz` 를 다른 이름으로 옮긴다. volume 이름은 마지막 worker 컨테이너(`GET /api/v1/lane-addons` 의 `container_id`)의 mount 에서 읽는다.
+
+   ```sh
+   docker inspect <container_id> --format '{{range .Mounts}}{{.Name}} {{end}}'
+   docker run --rm -v <volume>:/state --entrypoint mv masc-lane-operator-quiz:0.1.0 /state/operator-quiz /state/operator-quiz-<날짜>
+   ```
+
+4. `manifest_path` 를 새 package 로 바꾸고 `enabled = false` 를 지운다.
+
+- 옮긴 log 는 volume 안에 그대로 남는다. 새 package 는 그 파일을 읽지 않는다.
+- 옮기기 전에 답한 문제의 풀이와 판정은 옮긴 log 에만 있다. 새 package 의 R, G, P 는 빈 log 에서 다시 센다.
+
 ## 지금의 한계
 
 - 기록 종류는 Board 글·댓글과 `repository` 권한의 파일이다. wiki, PR, 커밋 인용은 다음 단계다.

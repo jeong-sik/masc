@@ -127,20 +127,24 @@ module For_testing : sig
     generation:int -> Yojson.Safe.t -> bool
 
   type execution_attempt
-  (** One forced-refresh attempt at publishing the execution surface: the
-      generation it began under, and whether it published an answer. *)
+  (** One attempt at publishing the execution surface: the generation it began
+      under and its place in the order of attempts. Attempts that run at once
+      share a generation; the one that began later is the newer, and the
+      outcome of an older attempt is not published over a newer attempt's. *)
 
   val begin_execution_attempt : unit -> execution_attempt
 
   val publish_execution_attempt_success : execution_attempt -> Yojson.Safe.t -> bool
+  (** [false] when the surface was invalidated since the attempt began, or a
+      newer attempt has already published. *)
 
   val publish_execution_attempt_failure : execution_attempt -> exn -> bool
-  (** Publishes [exn] only while this attempt has published no answer. What an
-      attempt does after publishing -- refreshing the light body, and the
-      window around the whole attempt -- must not replace the answer this
-      attempt already recorded. Another attempt on the same generation is a
-      different attempt and is not covered by this; see the concurrent-force
-      note in the implementation. *)
+  (** Publishes [exn] unless the surface was invalidated since the attempt
+      began, this attempt has already published an answer, or a newer attempt
+      has published anything. What an attempt does after publishing --
+      refreshing the light body, and the window around the whole attempt --
+      must not replace the answer this attempt already recorded, and the
+      outcome of an older read must not replace a newer one. *)
 
   val cached_representation :
     config:Workspace.config -> Httpun.Request.t ->

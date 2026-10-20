@@ -1,5 +1,8 @@
-(* The guard on one forced-refresh attempt at publishing the execution
-   surface: it publishes a failure only while it has published no answer.
+(* The guard on attempts at publishing the execution surface. An attempt
+   publishes a failure only while it has published no answer, and attempts
+   that run at once under one generation are ordered by when they began: the
+   outcome of an attempt that began earlier never replaces the outcome of one
+   that began later.
 
    The attempt publishes what it computed, then refreshes the light body from
    it, and the whole attempt runs under a window. Both the refresh and the
@@ -30,6 +33,12 @@ let a_failure_that_ends_an_attempt () =
 ;;
 
 let surface () = Server_dashboard_http_cache.snapshot Execution.execution_cache
+
+let published_marker () =
+  match Server_dashboard_http_cache.cached_surface_json Execution.execution_cache with
+  | `Assoc fields -> (match List.assoc_opt "marker" fields with Some (`String m) -> Some m | _ -> None)
+  | _ -> None
+;;
 
 let test_a_published_answer_survives_its_attempts_own_failure () =
   with_execution_surface
@@ -67,6 +76,66 @@ let test_an_attempt_that_answered_nothing_publishes_its_failure () =
     (Option.is_some (surface ()).last_error)
 ;;
 
+(* Two forced refreshes admitted without an invalidation between them share
+   one generation. The one that began later answered; the one that began
+   earlier then fails. Its failure describes an older read and must not mark
+   the later success as an error. *)
+let test_an_older_attempts_failure_does_not_replace_a_newer_attempts_answer () =
+  with_execution_surface
+  @@ fun () ->
+  let older = Attempt.begin_execution_attempt () in
+  let newer = Attempt.begin_execution_attempt () in
+  Alcotest.(check bool)
+    "the newer attempt publishes its answer"
+    true
+    (Attempt.publish_execution_attempt_success newer (`Assoc [ "marker", `String "newer" ]));
+  Alcotest.(check bool)
+    "the older attempt's failure is not published over it"
+    false
+    (Attempt.publish_execution_attempt_failure older (a_failure_that_ends_an_attempt ()));
+  let surface = surface () in
+  Alcotest.(check (option string)) "no error was recorded" None surface.last_error;
+  Alcotest.(check (option string)) "the newer answer stands" (Some "newer") (published_marker ())
+;;
+
+let test_an_older_attempts_answer_does_not_replace_a_newer_attempts_answer () =
+  with_execution_surface
+  @@ fun () ->
+  let older = Attempt.begin_execution_attempt () in
+  let newer = Attempt.begin_execution_attempt () in
+  Alcotest.(check bool)
+    "the newer attempt publishes its answer"
+    true
+    (Attempt.publish_execution_attempt_success newer (`Assoc [ "marker", `String "newer" ]));
+  Alcotest.(check bool)
+    "the older attempt's answer is not published over it"
+    false
+    (Attempt.publish_execution_attempt_success older (`Assoc [ "marker", `String "older" ]));
+  Alcotest.(check (option string)) "the newer answer stands" (Some "newer") (published_marker ())
+;;
+
+(* The order is by when an attempt began, not by who finishes first: an older
+   attempt that finishes first publishes, and the newer attempt's outcome,
+   success or failure, is published over it. *)
+let test_a_newer_attempts_outcome_follows_an_older_attempts_answer () =
+  with_execution_surface
+  @@ fun () ->
+  let older = Attempt.begin_execution_attempt () in
+  let newer = Attempt.begin_execution_attempt () in
+  Alcotest.(check bool)
+    "the older attempt publishes while nothing newer has"
+    true
+    (Attempt.publish_execution_attempt_success older (`Assoc [ "marker", `String "older" ]));
+  Alcotest.(check bool)
+    "the newer attempt's failure is published over it"
+    true
+    (Attempt.publish_execution_attempt_failure newer (a_failure_that_ends_an_attempt ()));
+  Alcotest.(check bool)
+    "the failure is the surface's"
+    true
+    (Option.is_some (surface ()).last_error)
+;;
+
 let () =
   Alcotest.run
     "execution publication attempt"
@@ -79,6 +148,18 @@ let () =
             "an attempt that answered nothing publishes its failure"
             `Quick
             test_an_attempt_that_answered_nothing_publishes_its_failure
+        ; Alcotest.test_case
+            "an older attempt's failure does not replace a newer attempt's answer"
+            `Quick
+            test_an_older_attempts_failure_does_not_replace_a_newer_attempts_answer
+        ; Alcotest.test_case
+            "an older attempt's answer does not replace a newer attempt's answer"
+            `Quick
+            test_an_older_attempts_answer_does_not_replace_a_newer_attempts_answer
+        ; Alcotest.test_case
+            "a newer attempt's outcome follows an older attempt's answer"
+            `Quick
+            test_a_newer_attempts_outcome_follows_an_older_attempts_answer
         ] )
     ]
 ;;

@@ -290,12 +290,42 @@ let execution_surface_has_fresh_success_unlocked () =
   | None, _ -> false
 ;;
 
-let begin_execution_publication_attempt () =
+(* One attempt at publishing the execution surface: the generation it began
+   under, and its place in the order of attempts. Only invalidation advances
+   the generation, so attempts that run at once -- two forced refreshes, a
+   forced refresh and the periodic one -- share one. The ticket is what
+   orders them: it is taken when the attempt begins, and an attempt's outcome
+   never replaces the outcome of an attempt with a later ticket. *)
+type execution_attempt =
+  { generation : int
+  ; ticket : int
+  }
+
+(* The newest outcome published, by the ticket of the attempt that made it.
+   Accessed only while holding [execution_publication_mu]. *)
+type last_publication =
+  | No_publication
+  | Published_success of int
+  | Published_failure of int
+
+let execution_next_ticket = ref 0
+let execution_last_publication = ref No_publication
+
+(* An attempt at the current generation with the newest ticket and no other
+   effect on the surface: for an outcome with no attempt of its own to name. *)
+let execution_attempt_now () =
+  with_execution_publication_lock (fun () ->
+    incr execution_next_ticket;
+    { generation = !execution_publication_generation; ticket = !execution_next_ticket })
+;;
+
+let begin_execution_attempt () =
   with_execution_publication_lock (fun () ->
     let generation = !execution_publication_generation in
+    incr execution_next_ticket;
     clear_execution_default_light_http_body ();
     Server_dashboard_http_cache.mark_cached_surface_attempt execution_cache;
-    generation)
+    { generation; ticket = !execution_next_ticket })
 ;;
 
 let current_execution_publication_generation () =
@@ -324,75 +354,55 @@ let with_execution_publication_generation ~generation = function
       ]
 ;;
 
-let publish_execution_success_if_current ~generation json =
+(* Whether an attempt's outcome may be published now. Not while the surface
+   was invalidated since the attempt began. A success is published unless a
+   later attempt already published. A failure never replaces a success of its
+   own attempt -- what an attempt does after it answered, such as refreshing
+   the light body or running out of its window, must not unmake the answer --
+   nor any outcome of a later attempt. Must hold [execution_publication_mu]. *)
+let execution_publication_admits_unlocked attempt ~failure =
+  attempt.generation = !execution_publication_generation
+  &&
+  match !execution_last_publication with
+  | No_publication -> true
+  | Published_success last ->
+    if failure then attempt.ticket > last else attempt.ticket >= last
+  | Published_failure last -> attempt.ticket >= last
+;;
+
+let publish_execution_attempt_success attempt json =
   with_execution_publication_lock (fun () ->
-    if generation <> !execution_publication_generation
+    if not (execution_publication_admits_unlocked attempt ~failure:false)
     then false
     else (
       Server_dashboard_http_cache.mark_cached_surface_success
         execution_cache
-        (with_execution_publication_generation ~generation json);
+        (with_execution_publication_generation ~generation:attempt.generation json);
+      execution_last_publication := Published_success attempt.ticket;
       true))
 ;;
 
-let publish_execution_error_if_current ~generation exn =
+let publish_execution_attempt_failure attempt exn =
   with_execution_publication_lock (fun () ->
-    if generation <> !execution_publication_generation
+    if not (execution_publication_admits_unlocked attempt ~failure:true)
     then false
     else (
       clear_execution_default_light_http_body ();
       Server_dashboard_http_cache.mark_cached_surface_error execution_cache exn;
+      execution_last_publication := Published_failure attempt.ticket;
       true))
 ;;
 
-(* One attempt at publishing the execution surface: the generation it began
-   under, and whether it got its answer published. What an attempt does after
-   that -- refreshing the light body from what it published -- can fail on its
-   own or be cut by the window around the attempt, and neither unmakes the
-   answer this attempt already published. So an attempt publishes a failure
-   only while it has published nothing.
-
-   The guard is per attempt, not per generation. [begin_execution_publication_attempt]
-   reads the generation without advancing it -- only invalidation advances it --
-   so two forced refreshes running at once share one generation, each with its
-   own [answered]. The second one's failure still reaches
-   [publish_execution_error_if_current] and lands on the first one's answer.
-   Nothing on the route serialises forced refreshes, so that race is open; it
-   is open on the publication layer, which has no notion of which answer is
-   newer, and closing it means giving publications an order rather than giving
-   attempts a flag. *)
-type execution_attempt =
-  { generation : int
-  ; answered : bool Atomic.t
-  }
-
-let begin_execution_attempt () =
-  { generation = begin_execution_publication_attempt (); answered = Atomic.make false }
-;;
-
-let publish_execution_attempt_success attempt json =
-  if publish_execution_success_if_current ~generation:attempt.generation json
-  then (
-    Atomic.set attempt.answered true;
-    true)
-  else false
-;;
-
-let publish_execution_attempt_failure attempt exn =
-  if Atomic.get attempt.answered
-  then false
-  else publish_execution_error_if_current ~generation:attempt.generation exn
-;;
-
-let publish_execution_error_message_if_current ~generation message =
+let publish_execution_attempt_failure_message attempt message =
   with_execution_publication_lock (fun () ->
-    if generation <> !execution_publication_generation
+    if not (execution_publication_admits_unlocked attempt ~failure:true)
     then false
     else (
       clear_execution_default_light_http_body ();
       Server_dashboard_http_cache.mark_cached_surface_error_message
         execution_cache
         message;
+      execution_last_publication := Published_failure attempt.ticket;
       true))
 ;;
 
@@ -823,15 +833,15 @@ let cached_execution_or_first_success ~clock ~timeout_sec compute =
   | Some json -> json
   | None ->
     let compute_and_track () =
-      let generation = begin_execution_publication_attempt () in
+      let attempt = begin_execution_attempt () in
       try
         let json = compute () in
-        let (_ : bool) = publish_execution_success_if_current ~generation json in
+        let (_ : bool) = publish_execution_attempt_success attempt json in
         json
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
-        let (_ : bool) = publish_execution_error_if_current ~generation exn in
+        let (_ : bool) = publish_execution_attempt_failure attempt exn in
         raise exn
     in
     let json =
@@ -1310,10 +1320,10 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
       ~min_v:30.0
       ~max_v:300.0
   in
-  let attempt_generation = Atomic.make 0 in
+  let latest_attempt = Atomic.make None in
   let compute () =
-    let generation = begin_execution_publication_attempt () in
-    Atomic.set attempt_generation generation;
+    let attempt = begin_execution_attempt () in
+    Atomic.set latest_attempt (Some attempt);
     let started_at = Unix.gettimeofday () in
     try
       let json =
@@ -1337,11 +1347,11 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
                       , Workspace_utils.domain_local_pg_backend_diagnostics_json () )
                     ])
       in
-      generation, json
+      attempt, json
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      let (_ : bool) = publish_execution_error_if_current ~generation exn in
+      let (_ : bool) = publish_execution_attempt_failure attempt exn in
       raise exn
   in
   Proactive_refresh.start
@@ -1353,15 +1363,20 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
       ; on_failure =
           Some
             (fun failure ->
+              let attempt =
+                match Atomic.get latest_attempt with
+                | Some attempt -> attempt
+                | None -> execution_attempt_now ()
+              in
               ignore
-                (publish_execution_error_message_if_current
-                   ~generation:(Atomic.get attempt_generation)
+                (publish_execution_attempt_failure_message
+                   attempt
                    (Proactive_refresh.failure_message failure)))
       ; warm_delay_s = 0.0
       }
     ~compute
-    ~on_result:(fun (generation, json) ->
-      if publish_execution_success_if_current ~generation json
+    ~on_result:(fun (attempt, json) ->
+      if publish_execution_attempt_success attempt json
       then (
         broadcast_cached_surface
           ~encoding:Encode_inline
@@ -1435,7 +1450,9 @@ module For_testing = struct
     let parameters = execution_parameters ~config request in
     execution_cached_http_representation ~config ~parameters request
   let execution_publication_generation = current_execution_publication_generation
-  let publish_execution_success_if_current = publish_execution_success_if_current
+  (* An outcome at the given generation, taken as the newest attempt's. *)
+  let publish_execution_success_if_current ~generation json =
+    publish_execution_attempt_success { (execution_attempt_now ()) with generation } json
   let begin_execution_attempt = begin_execution_attempt
   let publish_execution_attempt_success = publish_execution_attempt_success
   let publish_execution_attempt_failure = publish_execution_attempt_failure

@@ -15,7 +15,7 @@ intact; an aggregate failure retains page rows and releases the initial-read gua
 for retry. Request ownership rejects obsolete results. The page does not change
 the user's older-page cursor. Exact-id aggregate rows enrich preview rows; canonical
 page observations absent from its different role-selected window are retained
-within the ordinary thread cap, until the next successful forced refresh. Tool output
+within the ordinary thread cap, until the next successful nonempty forced refresh. Tool output
 hydration starts when rows first become available and runs once per request.
 
 ## Validation
@@ -53,10 +53,20 @@ measurement. Physical display latency is not measured.
   A deferred-response test now checks that ordering explicitly.
 - Physical pages and role-selected aggregate tails have different membership.
   Their bounded union is intentional, does not pin rows into older-page state or
-  write the source, and is replaced by a successful forced refresh. An omitted ID
+  write the source, and is replaced by a successful nonempty forced refresh. An omitted ID
   alone is not proof of a newer append or deletion. Cross-generation purge
   consistency is not certified by these two APIs; no timestamp ordering fence is
   invented. The differing-window test checks the cap and replacement behavior.
+  Concretely, `mergeServerHistoryEntries` calls `replaceThread`: incoming history
+  replaces previous `delivery=history` rows, apart from separately owned older
+  pages; live local rows remain. The forced-refresh fixture checks omitted rows
+  actually disappear. `keeper_chat_appended` and SSE reconnect trigger forced
+  reads. Ordinary route refresh skips already hydrated history. There is no
+  wall-clock expiry: without a successful nonempty forced read, preview rows may
+  remain for the entire SPA lifetime. A full page reload clears them. Empty or
+  failed aggregate reads retain existing rows under the pre-existing contract;
+  they do not certify server deletion. This is an observation cache, not a
+  guarantee of immediate removal after a server purge.
 - All three conversation layouts now explicitly announce that recent dialogue is
   shown while remaining conversation loads. The full-screen loading card stays
   absent so the available content remains readable.

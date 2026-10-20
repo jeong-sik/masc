@@ -3095,6 +3095,77 @@ let test_absorbed_search_reads_events_only_for_a_stopped_chain () =
        found)
 ;;
 
+(* A chain that stops short of a current claim only matters in a row the query
+   answers, because only those rows reach the results. A stopped chain in a row
+   the query does not answer must not open the events sidecar (#38617). Where
+   the query does answer the stopped row, the sidecar is read again, and a
+   sidecar that cannot be read fails the search. *)
+let test_absorbed_search_reads_events_only_for_an_answered_stopped_chain () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "absorbed-events-answered" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let id = Masc.Keeper_memory_os_types.memory_id in
+  let current = fact "hotel holds the release notes" in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ current ];
+  let reaches_current = fact "india deploys on monday" in
+  let stops_short = fact "juliet moves the schedule" in
+  let gone = fact "juliet owned the old schedule" in
+  let row ~(from : Masc.Keeper_memory_os_types.fact) ~(into : Masc.Keeper_memory_os_types.fact) =
+    { Masc.Keeper_memory_absorbed.recorded_at = Time_compat.now ()
+    ; trace_id = "absorbing-pass"
+    ; memory_id = id from
+    ; into = id into
+    ; fact = from
+    }
+  in
+  (match
+     Masc.Keeper_memory_absorbed.append_all
+       ~keepers_dir
+       ~keeper_id:meta.name
+       [ row ~from:stops_short ~into:gone; row ~from:reaches_current ~into:current ]
+   with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Masc.Keeper_memory_absorbed.append_error_to_string error));
+  (* A directory where the sidecar file should be: reading it fails. *)
+  Unix.mkdir
+    (Masc.Keeper_memory_os_events.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name)
+    0o755;
+  let search query =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work:(empty_ctx ())
+      ~args:
+        (`Assoc [ "query", `String query; "source", `String "absorbed"; "limit", `Int 10 ])
+    |> Yojson.Safe.from_string
+  in
+  (match search "deploys" |> json_field "matches" with
+   | `List items ->
+     Alcotest.(check (list (pair string bool)))
+       "a stopped chain in a row the query does not answer does not need the sidecar"
+       [ "india deploys on monday", true ]
+       (List.map
+          (fun matched ->
+             string_field "text" matched, json_field "into_current" matched = `Bool true)
+          items)
+   | _ -> Alcotest.fail "matches is a list");
+  match search "schedule" with
+  | `Assoc fields ->
+    Alcotest.(check bool)
+      "a stopped chain in a row the query answers reads the sidecar, and the search fails"
+      false
+      (List.mem_assoc "matches" fields);
+    Alcotest.(check string)
+      "the search fails because the sidecar could not be read"
+      "events_read_failed"
+      (string_field "error_kind" (`Assoc fields))
+  | _ -> Alcotest.fail "the search result is an object"
+;;
+
 (* A keeper asks in several words, and a claim rarely holds them as one run of
    text. A claim answers when it holds the whole query, or any word of it
    (RFC-memory-search-beyond-substring section 3.1). The whole-query answers
@@ -4321,6 +4392,10 @@ let () =
             "absorbed search reads events only for a stopped chain"
             `Quick
             test_absorbed_search_reads_events_only_for_a_stopped_chain
+        ; Alcotest.test_case
+            "absorbed search reads events only for an answered stopped chain"
+            `Quick
+            test_absorbed_search_reads_events_only_for_an_answered_stopped_chain
         ; Alcotest.test_case
             "a query of several words is answered"
             `Quick

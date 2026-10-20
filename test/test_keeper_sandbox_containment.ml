@@ -163,6 +163,49 @@ let test_tmp_lookalike_sibling_still_blocked () =
        (Keeper_sandbox_containment.check_read_target
           ~config ~meta ~target:lookalike))
 
+(* ── Host root preparation ───────────────────────────────────────── *)
+
+let host_root_error ~needle = function
+  | Ok () -> Alcotest.failf "expected an error naming %s" needle
+  | Error detail ->
+    Alcotest.(check bool)
+      ("the error names " ^ needle)
+      true
+      (String_util.contains_substring detail needle)
+
+let test_host_root_is_created_with_its_parents () =
+  with_tmp_base @@ fun base ->
+  let root = Filename.concat base "playground/docker/alice" in
+  (match Keeper_sandbox_control.ensure_host_root root with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "host root was not created: %s" detail);
+  Alcotest.(check bool) "a directory now exists" true
+    (Sys.file_exists root && Sys.is_directory root);
+  match Keeper_sandbox_control.ensure_host_root root with
+  | Ok () -> ()
+  | Error detail -> Alcotest.failf "an existing host root was refused: %s" detail
+
+let test_host_root_refuses_a_regular_file () =
+  with_tmp_base @@ fun base ->
+  let root = Filename.concat base "alice" in
+  Out_channel.with_open_bin root (fun channel -> output_string channel "not a directory");
+  host_root_error ~needle:"a regular file" (Keeper_sandbox_control.ensure_host_root root)
+
+let test_host_root_refuses_a_symlink_to_a_directory () =
+  with_tmp_base @@ fun base ->
+  let target = Filename.concat base "elsewhere" in
+  Unix.mkdir target 0o755;
+  let root = Filename.concat base "alice" in
+  Unix.symlink target root;
+  host_root_error ~needle:"a symbolic link" (Keeper_sandbox_control.ensure_host_root root)
+
+let test_host_root_reports_a_parent_it_cannot_create_under () =
+  with_tmp_base @@ fun base ->
+  let parent = Filename.concat base "blocked" in
+  Out_channel.with_open_bin parent (fun channel -> output_string channel "file");
+  host_root_error ~needle:"cannot be created"
+    (Keeper_sandbox_control.ensure_host_root (Filename.concat parent "alice"))
+
 let () =
   Alcotest.run "Keeper_sandbox_containment"
     [
@@ -182,5 +225,16 @@ let () =
             test_tmp_scratch_allowed_for_read;
           Alcotest.test_case "tmp lookalike sibling still blocked" `Quick
             test_tmp_lookalike_sibling_still_blocked;
+        ] );
+      ( "host_root",
+        [
+          Alcotest.test_case "created with its parents" `Quick
+            test_host_root_is_created_with_its_parents;
+          Alcotest.test_case "refuses a regular file" `Quick
+            test_host_root_refuses_a_regular_file;
+          Alcotest.test_case "refuses a symlink to a directory" `Quick
+            test_host_root_refuses_a_symlink_to_a_directory;
+          Alcotest.test_case "reports a parent it cannot create under" `Quick
+            test_host_root_reports_a_parent_it_cannot_create_under;
         ] );
     ]

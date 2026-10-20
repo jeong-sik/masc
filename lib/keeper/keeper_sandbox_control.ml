@@ -29,15 +29,50 @@ let normalize_path path =
   Keeper_alerting_path.normalize_path_for_check path
   |> Keeper_alerting_path.strip_trailing_slashes
 
-let rec ensure_dir path =
-  if path = "" || path = "." || path = "/" then
-    ()
-  else if Sys.file_exists path then
-    ()
-  else (
-    let parent = Filename.dirname path in
-    if parent <> path then ensure_dir parent;
-    Unix.mkdir path 0o755)
+(* The source of the Docker bind mount. [Sys.file_exists] is also true for a
+   regular file and for a symlink, and a symlink as the last component would
+   point the mount somewhere else, so an existing entry must be a real
+   directory, inspected without following it. A failed creation is an [Error]
+   for the start request instead of an exception out of it. *)
+let ensure_host_root path =
+  let ( let* ) = Result.bind in
+  let kind () =
+    match Unix.lstat path with
+    | stats -> Ok (Some stats.Unix.st_kind)
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+    | exception Unix.Unix_error (error, _, _) ->
+      Error
+        (Printf.sprintf
+           "sandbox host root %s cannot be inspected: %s"
+           path
+           (Unix.error_message error))
+  in
+  let require_directory = function
+    | Some Unix.S_DIR -> Ok ()
+    | Some other ->
+      Error
+        (Printf.sprintf
+           "sandbox host root %s is %s, not a directory"
+           path
+           (Fs_compat.file_kind_to_string other))
+    | None -> Error (Printf.sprintf "sandbox host root %s was not created" path)
+  in
+  let* existing = kind () in
+  match existing with
+  | Some _ -> require_directory existing
+  | None ->
+    let* () =
+      match Fs_compat.mkdir_p path with
+      | () -> Ok ()
+      | exception ((Unix.Unix_error _ | Sys_error _ | Eio.Io _) as exn) ->
+        Error
+          (Printf.sprintf
+             "sandbox host root %s cannot be created: %s"
+             path
+             (Printexc.to_string exn))
+    in
+    let* created = kind () in
+    require_directory created
 
 (* Monotonically increasing counter to disambiguate managed containers
    created within the same millisecond by the same process, as the one-shot
@@ -154,7 +189,8 @@ let start_managed_container
                     Keeper_sandbox.host_root_abs_of_meta ~config meta
                     |> normalize_path
                   in
-                  ensure_dir host_root;
+                  let ( let* ) = Result.bind in
+                  let* () = ensure_host_root host_root in
                   let container_root =
                     Keeper_sandbox.container_root meta.name
                     |> Keeper_alerting_path.strip_trailing_slashes

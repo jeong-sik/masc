@@ -33,6 +33,8 @@ test('MIDI revoicing retains source clocks, release dynamics and expressions thr
   let editor = newEditor(source)
   assert.throws(() => editorCommand(editor, 'revoice Cmaj7 drop2'), /channel/)
   editor = editorCommand(editor, 'channel 1').editor
+  const voice = editor.performance.notes.find(note => note.channel === 0 && note.pitch === 64)
+  editor = editorCommand(editor, `select ${voice.id}`).editor
   const selected = selectedNote(editor).id
   editor = editorCommand(editor, 'revoice Cmaj7 drop2 4').editor
   assert.equal(selectedNote(editor).id, selected)
@@ -47,7 +49,12 @@ test('MIDI revoicing retains source clocks, release dynamics and expressions thr
   const noteEvents = new Set(original.notes.flatMap(note => [note.id, note.off]))
   assert.deepEqual(after.events.filter(e => !noteEvents.has(e.id)), original.events.filter(e => !noteEvents.has(e.id)))
   editor = editorAction(editor, { kind: 'undo' }); assert.deepEqual(editor.project, source)
+  assert.equal(selectedNote(editor).id, selected)
+  const dynamics = editorAction(editor, { kind: 'velocity', value: 101 })
+  assert.equal(dynamics.performance.notes.find(note => note.id === selected).velocity, 101)
+  assert.equal(dynamics.performance.notes.find(note => note.pitch === 60).velocity, 80)
   editor = editorAction(editor, { kind: 'redo' }); assert.deepEqual(editor.project, changed)
+  assert.equal(selectedNote(editor).id, selected)
   const directory = await mkdtemp(join(tmpdir(), 'masc-midi-revoice-'))
   try {
     const path = join(directory, 'experiment.json')

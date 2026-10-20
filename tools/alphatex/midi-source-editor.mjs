@@ -146,7 +146,13 @@ export function sourceAction(editor, action) {
     case 'undo': case 'redo': {
       const past=editor[action.kind];if(!past.length)return editor
       const other=action.kind==='undo'?'redo':'undo'
-      return sourceEditor(past.at(-1),{...editor,[action.kind]:past.slice(0,-1),[other]:[...editor[other],editor.project]})
+      const next = sourceEditor(past.at(-1),{...editor,[action.kind]:past.slice(0,-1),[other]:[...editor[other],editor.project]})
+      const restored = !editor.eventView && next.view.tracks[next.track].id === editor.view.tracks[editor.track].id
+        ? next.view.tracks[next.track].notes.find(value => value.id === note?.id) : undefined
+      if (!restored) return next
+      const inside = restored.duration === 0 ? next.tick === restored.start
+        : restored.start <= next.tick && next.tick < restored.start + restored.duration
+      return { ...next, selectedID: restored.id, pitch: restored.pitch, tick: inside ? next.tick : restored.start }
     }
     default: throw new Error('This source action needs the MIDI arrangement/event editor')
   }

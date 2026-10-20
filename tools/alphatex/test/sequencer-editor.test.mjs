@@ -34,7 +34,12 @@ test('revoicing compares existing voices with undo and retains rhythm, dynamics,
   }
   assert.deepEqual(changed.tracks[1], before.tracks[1])
   command('undo'); assert.deepEqual(editor.project, before)
+  assert.equal(selectedNote(editor).id, id)
+  const dynamics = editorAction(editor, { kind: 'velocity', value: 101 })
+  assert.equal(dynamics.project.tracks[0].notes.find(note => note.id === id).velocity, 101)
+  assert.equal(dynamics.project.tracks[0].notes.find(note => note.id !== id).velocity, 96)
   command('redo'); assert.deepEqual(editor.project, changed)
+  assert.equal(selectedNote(editor).id, id)
   command('revoice Cmaj7 rootless 3'); assert.equal(editor.project.tracks[0].notes.length, 8)
   command('undo'); assert.deepEqual(editor.project, changed)
   const dir = await mkdtemp(join(tmpdir(), 'masc-revoice-'))

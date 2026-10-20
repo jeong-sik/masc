@@ -61,8 +61,15 @@ export function editorAction(editor, action) {
       const source = editor[action.kind]
       if (!source.length) return editor
       const project = source.at(-1), other = action.kind === 'undo' ? 'redo' : 'undo'
+      const track = Math.min(editor.track, project.tracks.length - 1)
+      // Note IDs are scoped to a track. Follow the actual selected voice only
+      // when that same track survives; a deleted track must not select its peer.
+      const restored = project.tracks[track].id === editor.project.tracks[editor.track].id
+        ? project.tracks[track].notes.find(value => value.id === note?.id) : undefined
+      const inside = restored && restored.start <= editor.tick && editor.tick < restored.start + restored.duration
       return { ...editor, project, [action.kind]: source.slice(0, -1), [other]: [...editor[other], editor.project],
-        track: Math.min(editor.track, project.tracks.length - 1), tick: Math.min(editor.tick, project.length - 1) }
+        track, tick: restored && !inside ? restored.start : Math.min(editor.tick, project.length - 1),
+        pitch: restored?.pitch ?? editor.pitch }
     }
     case 'mute': case 'solo': {
       const track = editor.project.tracks[editor.track], field = action.kind === 'mute' ? 'muted' : 'solo'

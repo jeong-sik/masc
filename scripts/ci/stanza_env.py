@@ -365,8 +365,9 @@ def named_suites(forms: list) -> list[str]:
 def stanza_text(suite: str, suite_dir: str = DEFAULT_SUITE_DIR) -> tuple[str, bool]:
     """Find the named suite in its dune file or a literal shared include.
 
-    Per-suite files retain their rule-action handling. Shared files must select
-    the named stanza, since sibling tests may have different environments.
+    Named tests are selected by stanza, even in a per-suite include: that file
+    may also declare unrelated test or alias actions. Rule-only per-suite files
+    retain their existing action handling.
     """
     path = os.path.join(stanza_dir(suite_dir), f"{suite}.inc")
     if os.path.exists(path):
@@ -389,41 +390,26 @@ def suite_env(
     allow_dependency_values: bool = True,
 ) -> tuple[list[tuple[str, str]], list[str]]:
     forms = parse(tokenize(text))
-    if own_file:
+    named = [
+        form for form in forms
+        if isinstance(form, list) and form
+        and form[0] in ("test", "tests") and stanza_names(form)
+    ]
+    if not named and own_file:
         pairs = collect_setenv(forms)
         deps = collect_literal_deps(forms, suite_dir)
     else:
         pairs = []
         deps = []
-        unattributable = False
         matched = False
-        for form in forms:
-            named = (
-                isinstance(form, list)
-                and form
-                and form[0] in ("test", "tests")
-                and stanza_names(form)
-            )
-            if not named:
-                # A setenv that belongs to no named stanza belongs to no
-                # suite this can name -- a (rule (alias runtest) ...) carries
-                # no (name ...) to match on. Running any suite from this file
-                # would then risk a partial environment, which is the failure
-                # this whole script exists to stop.
-                if collect_setenv(form):
-                    unattributable = True
-                continue
+        # Top-level alias rules and sibling tests have independent actions.
+        # Neither their environment nor their deps belongs to this test's run.
+        for form in named:
             if suite not in stanza_names(form):
                 continue
             matched = True
             pairs.extend(collect_setenv(form))
             deps.extend(collect_literal_deps(form, suite_dir))
-        if unattributable:
-            raise StanzaError(
-                "declared inline in this directory's dune next to a setenv "
-                "this could not attribute; give the suite its own stanzas "
-                "file or extend this reader"
-            )
         if not matched:
             # A name this file does not declare used to answer "no
             # environment", exit 0 -- the same answer as a suite that truly

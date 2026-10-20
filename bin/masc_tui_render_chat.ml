@@ -4410,11 +4410,12 @@ let render_keeper_message (state : state) =
       box_empty buf cols
     done;
     box_bottom buf cols;
-    Buffer.add_string buf
-      (footer_line state ~max_cells:cols
-         ~hints:(Masc_tui_keys.footer_hints state.view));
     finish_frame_beside_acting_pane state ~surface_key:"keeper-message" ~cursor:Frame_presenter.Hidden
-      ~rows ~cols buf
+      ~rows ~cols
+      ~footer:
+        (Footer_hints
+           { hints = Masc_tui_keys.footer_hints state.view; position = None })
+      buf
   | Some keeper_name ->
     let chat_theme = Chat_theme.snapshot () in
     let display_keeper_name = Keeper_chat.terminal_safe_text keeper_name in
@@ -4623,7 +4624,7 @@ let render_keeper_message (state : state) =
       Buffer.add_string buf
         (Message_layout.fit_width notice (max 1 (cols - 1)));
       finish_frame_beside_acting_pane state ~surface_key:"keeper-message"
-        ~cursor:Frame_presenter.Hidden ~rows ~cols buf
+        ~cursor:Frame_presenter.Hidden ~rows ~cols ~footer:No_footer buf
     end else begin
     let chat_buf = if split then Buffer.create 4096 else buf in
     (* Header *)
@@ -5315,8 +5316,6 @@ let render_keeper_message (state : state) =
     (* History already reserves these two fixed rows. Append them once after
        composing the panes, with the same full width in split and plain chat. *)
     Buffer.add_string buf (" " ^ fit_width identity_row telemetry_cells ^ "\n");
-    Buffer.add_string buf
-      (footer_line state ~max_cells:cols ?position:scroll_position ~hints:footer_hints);
     finish_frame_beside_acting_pane state ~surface_key:"keeper-message"
       ~clamped:(Message_scroll scroll_feedback) ?roster
       ~cursor:
@@ -5325,7 +5324,9 @@ let render_keeper_message (state : state) =
          else
            Frame_presenter.Visible_at
              { row = input_row; column = cursor_column })
-      ~rows ~cols buf
+      ~rows ~cols
+      ~footer:(Footer_hints { hints = footer_hints; position = scroll_position })
+      buf
     end
 
 (* Regression access to the real draw cache: measuring a thought must not

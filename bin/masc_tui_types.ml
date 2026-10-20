@@ -16301,7 +16301,29 @@ let agenda (state : state) : Masc_tui_agenda.t =
               })
            state.keeper_tool_approvals)
   in
-  Masc_tui_agenda.project ~scheduled ~awaiting
+  (* The same open asks Approvals walks, read on every refresh whatever the
+     view. Kept rows stay on the list through a failed re-read, the way the
+     held calls above do: the asks were open when last seen, and dropping
+     them would say nothing is waiting. *)
+  let asking =
+    match state.asks_snapshot, state.asks_error with
+    | Some snapshot, _ ->
+      Masc_tui_agenda.Read
+        (List.map
+           (fun (row : Masc.Tui_decode_asks.ask_row) ->
+              { Masc_tui_agenda.ask_id = row.ar_id
+              ; keeper = row.ar_keeper
+              ; first_question =
+                  (match row.ar_questions with
+                   | question :: _ -> Some question.aq_prompt
+                   | [] -> None)
+              ; asked_at = row.ar_asked_at
+              })
+           (Masc_tui_ask_projection.open_rows snapshot))
+    | None, Some error -> Masc_tui_agenda.Read_failed error
+    | None, None -> Masc_tui_agenda.Not_read
+  in
+  Masc_tui_agenda.project ~scheduled ~awaiting ~asking
     ~confirming:state.goals_to_confirm ~stalled:state.operator_stalled
 ;;
 

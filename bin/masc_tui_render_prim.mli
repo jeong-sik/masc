@@ -178,11 +178,30 @@ val finish_surface :
   cols:int ->
   Buffer.t -> Frame_presenter.frame * Masc_tui_types.clamped_scroll option
 
+val questions_waiting_status :
+  Masc_tui_types.state -> Masc_tui_footer.status_item list
+(** [[Questions_waiting n]] while [n] asks wait on the operator, counted by
+    {!Masc_tui_agenda.questions_waiting} over the agenda the strip draws;
+    [[]] when none do. The status the frames without an agenda row add to
+    their footer. *)
+
+(** The footer a frame beside the Activity pane ends with. [No_footer] is for
+    a frame whose last row is a notice instead -- the chat in a terminal too
+    small to hold it. *)
+type acting_pane_footer =
+  | Footer_hints of { hints : string; position : string option }
+      (** Drawn by {!footer_line}; [position] as there. *)
+  | No_footer
+
 (** The end of a surface that draws its own composer and footer instead of
     taking the shared composer row. [cols] is the width it laid out against,
     the terminal less the Activity pane; the pane is drawn in those columns
     beside the rows the press test counts as the pane's, and the strip spans
-    the whole terminal. *)
+    the whole terminal.
+
+    These frames draw no agenda row, so the footer is drawn here, with
+    {!questions_waiting_status}: an ask waiting on the operator is on screen
+    in these frames too, not only in those that end in {!finish_surface}. *)
 val finish_frame_beside_acting_pane :
   Masc_tui_types.state ->
   ?clamped:Masc_tui_types.clamped_scroll ->
@@ -191,6 +210,7 @@ val finish_frame_beside_acting_pane :
   cursor:Frame_presenter.cursor ->
   rows:int ->
   cols:int ->
+  footer:acting_pane_footer ->
   Buffer.t -> Frame_presenter.frame * Masc_tui_types.clamped_scroll option
 
 type chrome_body = {

@@ -16,12 +16,14 @@ open Alcotest
 module Agenda = struct
   include Masc_tui_agenda
 
-  (* Every case written before the goal and stuck sections states the same
-     thing about them: the lists were read and they were empty. Shadowing
-     [project] here says that once rather than at fifty call sites, and a case
-     about those sections calls {!Masc_tui_agenda.project} directly. *)
+  (* Every case written before the question, goal and stuck sections states
+     the same thing about them: the lists were read and they were empty.
+     Shadowing [project] here says that once rather than at fifty call sites,
+     and a case about those sections calls {!Masc_tui_agenda.project}
+     directly. *)
   let project ~scheduled ~awaiting =
     Masc_tui_agenda.project ~scheduled ~awaiting
+      ~asking:(Masc_tui_agenda.Read [])
       ~confirming:(Masc_tui_agenda.Read [])
       ~stalled:(Masc_tui_agenda.Read [])
   ;;
@@ -159,7 +161,7 @@ let test_empty_sections_answer_in_words () =
   check bool "so does the goal section" true
     (contains ~needle:"no goal awaits confirmation" text);
   check bool "and the stuck section" true (contains ~needle:"no task is stuck on you" text);
-  check int "all four headings are still drawn" 4 (List.length (tones_of lines Agenda.Heading))
+  check int "all five headings are still drawn" 5 (List.length (tones_of lines Agenda.Heading))
 ;;
 
 let test_an_unread_agenda_keeps_the_strip_down () =
@@ -243,6 +245,7 @@ let with_stuck rows =
   Masc_tui_agenda.project
     ~scheduled:(Agenda.Read [])
     ~awaiting:(Agenda.Read [])
+    ~asking:(Agenda.Read [])
     ~confirming:(Agenda.Read [])
     ~stalled:(Agenda.Read rows)
 ;;
@@ -288,6 +291,7 @@ let with_goals goals =
   Masc_tui_agenda.project
     ~scheduled:(Agenda.Read [])
     ~awaiting:(Agenda.Read [])
+    ~asking:(Agenda.Read [])
     ~confirming:(Agenda.Read goals)
     ~stalled:(Agenda.Read [])
 ;;
@@ -515,6 +519,114 @@ let test_removed_goal_does_not_select_its_replacement () =
     (Agenda.step (lines_of_state state) ~selected:state.agenda_selected Agenda.Previous
      = Agenda.Nowhere)
 
+(* Questions a Keeper put to the operator with masc_ask. One ask can hold
+   several questions; the operator answers it with one draft and one submit,
+   so the ask is what waits. *)
+let ask_row ?(questions = 1) ?(resolution = Masc.Tui_decode_asks.Ask_open)
+    ask_id : Masc.Tui_decode_asks.ask_row =
+  { ar_keeper = "edgar.a.poe"
+  ; ar_id = ask_id
+  ; ar_asked_at = asked_at_1155
+  ; ar_source_turn_ref = None
+  ; ar_context = None
+  ; ar_questions =
+      List.init questions (fun index ->
+        { Masc.Tui_decode_asks.aq_id = Printf.sprintf "q%d" (index + 1)
+        ; aq_header = "Release"
+        ; aq_prompt = "Ship v0.38.0 tonight?"
+        ; aq_mode = Masc.Tui_decode_asks.Ask_single
+        ; aq_free_text = Masc.Tui_decode_asks.Ask_choices_only
+        ; aq_choices = []
+        })
+  ; ar_resolution = resolution
+  }
+
+let answered = Masc.Tui_decode_asks.Ask_answered { aa_answered_at = 1.0; aa_question_ids = [ "q1" ] }
+
+let withdrawn =
+  Masc.Tui_decode_asks.Ask_withdrawn { aw_reason = "superseded"; aw_withdrawn_at = 1.0 }
+
+let set_asks state rows =
+  state.Masc_tui_types.asks_snapshot <-
+    Some { asn_keeper = None; asn_open_count = List.length rows; asn_rows = rows }
+
+let ask_targets lines =
+  List.filter_map
+    (fun index ->
+      match List.nth_opt lines index with
+      | Some { Agenda.goes_to = Agenda.Ask_to_answer ask_id; _ } -> Some ask_id
+      | Some _ | None -> None)
+    (Agenda.target_indexes lines)
+
+(* One count per ask, not per question: three questions in one ask are one
+   thing to answer. Answered and withdrawn asks wait on nobody. *)
+let test_an_ask_waits_once_however_many_questions_it_holds () =
+  let state = agenda_state () in
+  set_asks state
+    [ ask_row ~questions:3 "ask-1"
+    ; ask_row "ask-2"
+    ; ask_row ~resolution:answered "ask-3"
+    ; ask_row ~resolution:withdrawn "ask-4"
+    ];
+  let agenda = Masc_tui_types.agenda state in
+  check int "two open asks wait" 2 (Agenda.questions_waiting agenda);
+  check int "and the strip's count includes them" 2 (Agenda.waiting agenda)
+
+(* The count is added to the held calls, Goals and stuck tasks rather than
+   standing beside them. *)
+let test_the_strip_count_adds_the_questions () =
+  let t =
+    Masc_tui_agenda.project
+      ~scheduled:(Agenda.Read [])
+      ~awaiting:(Agenda.Read [ ask "lane-smith" "Execute" ])
+      ~asking:
+        (Agenda.Read
+           [ { Agenda.ask_id = "ask-1"; keeper = "quill"
+             ; first_question = Some "Merge?"; asked_at = asked_at_1155 } ])
+      ~confirming:(Agenda.Read [ goal "v0.38.0 release" ])
+      ~stalled:(Agenda.Read [ stuck "work nobody holds" ])
+  in
+  check int "one of each is four" 4 (Agenda.waiting t)
+
+(* The strip is the reminder that follows the operator: it is up while any
+   ask is open and gives its row back once the last one is answered. *)
+let test_an_open_question_keeps_the_strip_up_until_answered () =
+  let state = agenda_state () in
+  set_asks state [ ask_row "ask-1" ];
+  check int "an open question takes the row" 1
+    (Masc_tui_types.agenda_chrome_rows state);
+  check bool "and the strip draws" true
+    (strip_of (Masc_tui_types.agenda state) <> None);
+  set_asks state [ ask_row ~resolution:answered "ask-1" ];
+  check int "the answered question gives the row back" 0
+    (Masc_tui_types.agenda_chrome_rows state)
+
+(* Every open ask is a row Enter can open, and only open asks are. *)
+let test_each_open_question_is_a_row_enter_opens () =
+  let state = agenda_state () in
+  set_asks state
+    [ ask_row "ask-1"; ask_row ~resolution:answered "ask-2"; ask_row "ask-3" ];
+  let lines = lines_of_state state in
+  check (list string) "the open asks, and only those, lead somewhere"
+    [ "ask-1"; "ask-3" ]
+    (List.sort String.compare (ask_targets lines));
+  let first = Agenda.step lines ~selected:Agenda.Nowhere Agenda.Next in
+  let second = Agenda.step lines ~selected:first Agenda.Next in
+  check bool "j reaches both" true
+    (List.sort compare [ first; second ]
+     = [ Agenda.Ask_to_answer "ask-1"; Agenda.Ask_to_answer "ask-3" ])
+
+(* A question list that never came back is not an empty one, and it is not
+   a reason to raise the strip either. *)
+let test_unread_questions_take_no_row_and_open_nothing () =
+  let state = agenda_state () in
+  state.asks_error <- Some "asks load failed: HTTP 503";
+  check int "a failed read takes no row" 0 (Masc_tui_types.agenda_chrome_rows state);
+  let lines = lines_of_state state in
+  check (list string) "and offers no question to open" [] (ask_targets lines);
+  check int "the failure has its row" 1
+    (List.length (tones_of lines Agenda.Failed))
+
 let () =
   run
     "tui agenda"
@@ -561,6 +673,18 @@ let () =
       , [ test_case "a goal to confirm is waiting on the operator" `Quick
             test_a_goal_to_confirm_is_waiting_on_the_operator
         ;] )
+    ; ( "questions waiting on the operator"
+      , [ test_case "an ask waits once however many questions it holds" `Quick
+            test_an_ask_waits_once_however_many_questions_it_holds
+        ; test_case "the strip count adds the questions" `Quick
+            test_the_strip_count_adds_the_questions
+        ; test_case "an open question keeps the strip up until answered" `Quick
+            test_an_open_question_keeps_the_strip_up_until_answered
+        ; test_case "each open question is a row Enter opens" `Quick
+            test_each_open_question_is_a_row_enter_opens
+        ; test_case "unread questions take no row and open nothing" `Quick
+            test_unread_questions_take_no_row_and_open_nothing
+        ] )
     ; ( "selection across refreshed agenda projections"
       , [ test_case "Task Goal references preserve registry reading truth" `Quick
             test_task_goal_reading_preserves_source_truth

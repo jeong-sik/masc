@@ -1,6 +1,6 @@
 import { toolObservationContinues } from './keeper-tool-observations'
 import { initialKeeperResponseState, reduceKeeperResponse } from './lib/keeper-response-state'
-import { keeperStreamContract } from './keeper-stream-contract'
+import { keeperStreamContract, normalizeStreamContract } from './keeper-stream-contract'
 import { normalizeKeeperStatusPayloadDeliveryProvenance } from './api/schemas/keeper-chat-delivery-provenance'
 import { keeperResponseIsFailed, keeperResponseIsTerminal } from './lib/keeper-response-state'
 import {
@@ -373,7 +373,11 @@ export async function hydrateKeeperStatus(name: string, force = false): Promise<
 const hydratedChatKeepers = new Set<string>()
 // Forced refreshes may overlap. Only the latest request may merge history
 // or settle this keeper's hydration state.
-const chatHistoryHydrationRequests = new Map<string, object>()
+type ChatHistoryHydrationRequest = {
+  previewEntries: readonly KeeperConversationEntry[]
+  toolOutputsStarted: boolean
+}
+const chatHistoryHydrationRequests = new Map<string, ChatHistoryHydrationRequest>()
 /** Test-only: reset the once-per-keeper hydration guard. */
 export function _resetChatHydrationForTests(): void {
   hydratedChatKeepers.clear()
@@ -384,11 +388,65 @@ export function _resetChatHydrationForTests(): void {
   chatHistoryPageRequests.clear()
 }
 
-async function fetchAndMergeKeeperChatHistory(keeperName: string, request: object): Promise<void> {
+function startHistoryToolOutputHydration(keeperName: string, request: ChatHistoryHydrationRequest): void {
+  if (request.toolOutputsStarted) return
+  request.toolOutputsStarted = true
+  void hydrateKeeperToolOutputs(keeperName)
+}
+
+/** Show canonical direct conversation while the aggregate also reads autonomous
+ *  turns and trace enrichment. This preview does not own the older-page cursor
+ *  or establish that an empty direct transcript means no conversation. */
+async function hydrateKeeperChatHistoryPreview(keeperName: string, request: ChatHistoryHydrationRequest): Promise<void> {
+  try {
+    const page = await fetchKeeperChatHistoryPage(keeperName)
+    if (chatHistoryHydrationRequests.get(keeperName) !== request
+      || keeperChatHistoryHydration.value[keeperName] === 'hydrated') return
+    const existing = keeperThreads.value[keeperName] ?? []
+    const existingById = new Map(existing.map(entry => [entry.id, entry]))
+    const entries = chatHistoryEntriesFromRest(keeperName, page.messages).map(entry => {
+      const observed = existingById.get(entry.id)
+      return observed?.streamContract ? { ...entry, streamContract: observed.streamContract } : entry
+    })
+    if (entries.length === 0) return
+    request.previewEntries = entries
+    startHistoryToolOutputHydration(keeperName, request)
+    const ids = new Set(entries.map(entry => entry.id))
+    mergeServerHistoryEntries(keeperName, [
+      ...entries,
+      ...existing.filter(entry => !ids.has(entry.id)
+        && (entry.delivery === 'history' || entry.delivery === 'request_failure')),
+    ])
+    setRecordValue(keeperChatHistoryHydration, keeperName, 'partial')
+  } catch {
+    // The aggregate remains authoritative and reports its own failure. A failed
+    // optional preview must neither settle hydration nor hide that result.
+  }
+}
+
+async function fetchAndMergeKeeperChatHistory(keeperName: string, request: ChatHistoryHydrationRequest): Promise<void> {
   const history = await fetchKeeperChatHistory(keeperName)
   if (chatHistoryHydrationRequests.get(keeperName) !== request) return
   if (history.length > 0) {
-    mergeServerHistoryEntries(keeperName, chatHistoryEntriesFromRest(keeperName, history))
+    const observedById = new Map((keeperThreads.value[keeperName] ?? []).map(entry => [entry.id, entry]))
+    const explicitContracts = new Set(history.filter(message => normalizeStreamContract(message.stream_contract) !== null)
+      .map(message => message.id))
+    const enriched = chatHistoryEntriesFromRest(keeperName, history).map(entry => {
+      const observed = observedById.get(entry.id)
+      return !explicitContracts.has(entry.id) && observed?.streamContract
+        ? { ...entry, streamContract: observed.streamContract }
+        : entry
+    })
+    const ids = new Set(enriched.map(entry => entry.id))
+    // These are independent canonical observations with different windows:
+    // physical page rows versus the aggregate's role-selected tail. Absence
+    // from the latter is not deletion evidence. Keep page observations within
+    // the ordinary thread cap, without pinning them in older-page state. The
+    // next successful forced refresh replaces this request-local union.
+    mergeServerHistoryEntries(keeperName, [
+      ...enriched,
+      ...request.previewEntries.filter(entry => !ids.has(entry.id)),
+    ])
   }
 }
 
@@ -417,17 +475,20 @@ export async function hydrateKeeperChatHistory(
   const keeperName = name.trim()
   if (!keeperName) return
   if (!options.force && hydratedChatKeepers.has(keeperName)) return
-  const request = {}
+  const request: ChatHistoryHydrationRequest = { previewEntries: [], toolOutputsStarted: false }
   chatHistoryHydrationRequests.set(keeperName, request)
   hydratedChatKeepers.add(keeperName)
   setRecordValue(keeperHydrating, keeperName, true)
+  if (keeperChatHistoryHydration.value[keeperName] !== 'hydrated') {
+    void hydrateKeeperChatHistoryPreview(keeperName, request)
+  }
   try {
     await fetchAndMergeKeeperChatHistory(keeperName, request)
     if (chatHistoryHydrationRequests.get(keeperName) !== request) return
     // Tool outputs are stored on a separate durable endpoint. Hydrate even
     // when chat history is empty so a keeper panel can still join recently
     // fetched tool rows from the rail/inspector.
-    void hydrateKeeperToolOutputs(keeperName)
+    startHistoryToolOutputHydration(keeperName, request)
     setRecordValue(keeperChatHistoryHydration, keeperName, 'hydrated')
     setRecordValue(keeperChatHistoryErrors, keeperName, null)
   } catch (err) {
@@ -521,7 +582,7 @@ async function reconcileOperationFromServerHistory(
   // Serialize with mount hydration through the same request registry: an
   // older in-flight history fetch must not merge after this newer canonical
   // response and evict the operation turns it just restored.
-  const request = {}
+  const request: ChatHistoryHydrationRequest = { previewEntries: [], toolOutputsStarted: false }
   const displacedHydration = chatHistoryHydrationRequests.has(keeperName)
   chatHistoryHydrationRequests.set(keeperName, request)
   try {

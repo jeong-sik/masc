@@ -55,10 +55,10 @@ export const keeperChatHistoryPages = signal<Record<string, {
 // First chat-history hydration outcome per keeper. Absent means the first
 // hydration has not settled yet (including the hard-refresh render before the
 // panel's mount effect starts it), so an empty thread is not yet authoritative.
-export type KeeperChatHistoryHydration = 'hydrated' | 'failed'
+export type KeeperChatHistoryHydration = 'partial' | 'hydrated' | 'failed'
 export const keeperChatHistoryHydration = signal<Record<string, KeeperChatHistoryHydration>>({})
 
-/** True while no first chat-history hydration has settled for `keeperName`. */
+/** True before either a nonempty direct page or the aggregate read settles. */
 export function isKeeperChatHistoryPending(keeperName: string): boolean {
   const name = keeperName.trim()
   // No keeper selected means no hydration will ever start for it.

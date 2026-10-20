@@ -31,6 +31,7 @@ import {
 import {
   keeperActionErrors,
   keeperChatHistoryErrors,
+  keeperChatHistoryHydration,
   keeperChatHistoryPages,
   keeperHydrating,
   keeperProbing,
@@ -710,6 +711,11 @@ export function KeeperConversationPanel({
   // Loading vs empty: until the first chat-history hydration settles, an empty
   // thread is a hard-refresh artifact, not an authoritative absence (#26276).
   const historyPending = isKeeperChatHistoryPending(keeperName)
+  const renderPartialHistoryStatus = () => keeperChatHistoryHydration.value[keeperName] === 'partial'
+    ? html`<div class="shrink-0 px-3 py-2 text-xs text-[var(--color-fg-muted)]" role="status" data-chat-history-partial>
+        최근 대화를 먼저 표시하고 있습니다. 나머지 대화를 불러오는 중…
+      </div>`
+    : null
   const errorState = keeperActionErrors.value[keeperName] != null
     ? keeperActionErrors
     : keeperChatHistoryErrors
@@ -879,6 +885,7 @@ export function KeeperConversationPanel({
 
         <div class="kw-thread v2-monitoring-panel">
           <div class="kw-thread-inner v2-monitoring-panel">
+            ${renderPartialHistoryStatus()}
             <${ChatTranscript}
               keeperName=${keeperName}
               entries=${transcriptEntries}
@@ -995,6 +1002,7 @@ export function KeeperConversationPanel({
             `
           : null}
 
+        ${renderPartialHistoryStatus()}
         <${ChatTranscript}
           keeperName=${keeperName}
           entries=${transcriptEntries}
@@ -1103,6 +1111,7 @@ export function KeeperConversationPanel({
                 </div>
               `
             : null}
+          ${renderPartialHistoryStatus()}
           <${ChatTranscript}
             keeperName=${keeperName}
             entries=${transcriptEntries}

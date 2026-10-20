@@ -174,7 +174,14 @@ let () =
   let attach () =
     Out_channel.with_open_bin declaration (fun channel -> output_string channel (Printf.sprintf
       "id=\"browser\"\nrun_id=\"stagehand-probe\"\nmanifest_path=%S\nexact_outputs=[\"stagehand\"]\ntool_hooks=[\"validate_input\",\"validate_output\"]\n[binding]\nsources=[]\n" manifest));
-    ignore (R.reconcile_configuration ~config ~directory |> require);
+    let report=R.reconcile_configuration ~config ~directory |> require in
+    let open Yojson.Safe.Util in
+    let declared=report |> member "declarations" |> to_list
+      |> List.filter (fun item -> member "id" item=`String "browser") in
+    let refused=report |> member "issues" |> to_list |> List.filter (fun issue ->
+      member "id" issue=`String "browser" || member "source_path" issue=`String declaration) in
+    if member "complete" report<>`Bool true || List.length declared<>1 || refused<>[] then
+      failwith ("browser declaration was not applied: " ^ Yojson.Safe.to_string report);
     await (fun () ->
       let snapshot=inventory () in
       List.iter (fun (item:R.inventory_instance) -> match item.phase with
@@ -231,7 +238,7 @@ let () =
     | Some _ | None -> None) in
   let observe_actor_feedback () = await (fun () -> match observation "pointer-feedback" with
     | Some value when string_at ["requestId"] value<> !feedback_before
-        && string_at ["actor"] value=Some "stagehand-probe"
+        && string_at ["actor"] value=Some (Lane_addon_call_context.actor_label principal)
         && string_at ["phase"] value=Some "finished" && string_at ["action"] value=Some "click" ->
       let flag name=Yojson.Safe.Util.member name value=`Bool true in
       Some (if List.for_all flag ["observedPointer";"inert";"hidden";"ignoresPointer"]

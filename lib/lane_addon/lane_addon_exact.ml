@@ -60,8 +60,9 @@ let request_to_json request =
 
 let digest request = Lane_addon_store.digest (Yojson.Safe.to_string (request_to_json request))
 
-(* Only [run]'s validate function and the retained record this module wrote
-   make one. *)
+(* Only [run]'s validate function makes one. [final_of_json] rebuilds a
+   retained answer from this module's own record, and [run] checks it again
+   against the schema declared now before delivering it. *)
 type checked = Yojson.Safe.t
 
 let checked_json checked = checked
@@ -74,10 +75,13 @@ type input_refusal =
 
 type usage = { input_tokens : int; output_tokens : int }
 
-type final =
+type call_final =
   | Answered of { output : checked; slot : string; usage : usage option }
   | Invalid_output of { detail : string }
   | Input_refused of input_refusal
+
+type final =
+  | Call_final of call_final
   | Outcome_unknown
   | Not_allowed of { reason : string }
   | Request_id_reused
@@ -87,10 +91,13 @@ type lane_unavailable =
   | Lane_off
   | No_admitted_slots
 
-type not_final =
-  | Lane_unavailable of lane_unavailable
+type provider_refusal =
   | Provider_unavailable of { detail : string }
   | Provider_auth_refused of { detail : string }
+
+type not_final =
+  | Lane_unavailable of lane_unavailable
+  | Provider_refused of provider_refusal
   | Attempt_in_progress
 
 type attempt =
@@ -114,12 +121,13 @@ let usage_to_json { input_tokens; output_tokens } =
   `Assoc [ "input_tokens", `Int input_tokens; "output_tokens", `Int output_tokens ]
 
 let final_to_json = function
-  | Answered { output; slot; usage } ->
+  | Call_final (Answered { output; slot; usage }) ->
     `Assoc
       ([ "status", `String "answered"; "output", output; "slot", `String slot ]
        @ match usage with None -> [] | Some usage -> [ "usage", usage_to_json usage ])
-  | Invalid_output { detail } -> `Assoc [ "status", `String "invalid_output"; "detail", `String detail ]
-  | Input_refused kind ->
+  | Call_final (Invalid_output { detail }) ->
+    `Assoc [ "status", `String "invalid_output"; "detail", `String detail ]
+  | Call_final (Input_refused kind) ->
     `Assoc [ "status", `String "input_refused"; "kind", `String (input_refusal_to_string kind) ]
   | Outcome_unknown -> `Assoc [ "status", `String "outcome_unknown" ]
   | Not_allowed { reason } -> `Assoc [ "status", `String "not_allowed"; "reason", `String reason ]
@@ -142,12 +150,12 @@ let final_of_json json =
         Ok (Some { input_tokens; output_tokens })
       | Some _ -> Error "final usage"
     in
-    Ok (Answered { output; slot; usage })
-  | "invalid_output" -> let* detail = text "detail" in Ok (Invalid_output { detail })
+    Ok (Call_final (Answered { output; slot; usage }))
+  | "invalid_output" -> let* detail = text "detail" in Ok (Call_final (Invalid_output { detail }))
   | "input_refused" ->
     let* kind = text "kind" in
     Option.to_result ~none:"final kind" (input_refusal_of_string kind)
-    |> Result.map (fun kind -> Input_refused kind)
+    |> Result.map (fun kind -> Call_final (Input_refused kind))
   | "outcome_unknown" -> Ok Outcome_unknown
   | "not_allowed" -> let* reason = text "reason" in Ok (Not_allowed { reason })
   | "request_id_reused" -> Ok Request_id_reused
@@ -157,13 +165,17 @@ let not_final_to_json = function
   | Lane_unavailable Lane_unconfigured -> `Assoc [ "reason", `String "lane_unconfigured" ]
   | Lane_unavailable Lane_off -> `Assoc [ "reason", `String "lane_off" ]
   | Lane_unavailable No_admitted_slots -> `Assoc [ "reason", `String "no_admitted_slots" ]
-  | Provider_unavailable { detail } ->
+  | Provider_refused (Provider_unavailable { detail }) ->
     `Assoc [ "reason", `String "provider_unavailable"; "detail", `String detail ]
-  | Provider_auth_refused { detail } ->
+  | Provider_refused (Provider_auth_refused { detail }) ->
     `Assoc [ "reason", `String "provider_auth_refused"; "detail", `String detail ]
   | Attempt_in_progress -> `Assoc [ "reason", `String "attempt_in_progress" ]
 
-type call = validate:(Yojson.Safe.t -> (checked, string) result) -> attempt
+type call_outcome =
+  | Call_ended of call_final
+  | Call_refused of provider_refusal
+
+type call = validate:(Yojson.Safe.t -> (checked, string) result) -> call_outcome
 type runner = lane_key:string -> schema:Yojson.Safe.t -> request -> (call, lane_unavailable) result
 
 (* One record per declaration and request: the request, its digest, every
@@ -227,7 +239,22 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner req
   | None ->
     Ok (Final (Not_allowed { reason = "the package manifest declares no exact output " ^ request.output }))
   | Some declared ->
+    let* lane = Runtime_schema.addon_lane ~declaration_id ~output:request.output in
+    let lane_key = Runtime_schema.exact_lane_key (Runtime_schema.Addon lane) in
     let request_id = request.request_id in
+    let validate answer = Lane_addon_action.validate_input ~schema:declared.schema ~name:request.output answer in
+    (* The package may have changed its schema since the answer was retained.
+       The record keeps the answer as it came. *)
+    let deliver = function
+      | Call_final (Answered { output; slot; usage }) ->
+        (match validate (checked_json output) with
+         | Ok output -> Call_final (Answered { output; slot; usage })
+         | Error detail ->
+           Call_final (Invalid_output
+             { detail = "the retained answer does not match the schema the package declares now: " ^ detail }))
+      | (Call_final (Invalid_output _ | Input_refused _) | Outcome_unknown | Not_allowed _ | Request_id_reused)
+        as final -> final
+    in
     let key = Lane_addon_store.root store, declaration_id, request_id in
     (* Claimed before the record is read, so no other run of this request can
        finish between the read and the claim. *)
@@ -252,18 +279,16 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner req
         in
         match retained with
         | Some record when not (String.equal record.digest digest) -> Ok (Final Request_id_reused)
-        | Some { final = Some final; _ } -> Ok (Final final)
-        | Some record when List.exists Option.is_none record.attempts ->
+        | Some { final = Some final; _ } -> Ok (Final (deliver final))
+        | Some ({ final = None; _ } as record) when List.exists Option.is_none record.attempts ->
           let* () = save { record with final = Some Outcome_unknown } in
           Ok (Final Outcome_unknown)
-        | None | Some _ ->
+        | None | Some { final = None; _ } ->
           let previous =
             match retained with
             | Some record -> record
             | None -> { digest; request = request_to_json request; attempts = []; final = None }
           in
-          let* lane = Runtime_schema.addon_lane ~declaration_id ~output:request.output in
-          let lane_key = Runtime_schema.exact_lane_key (Runtime_schema.Addon lane) in
           match runner ~lane_key ~schema:declared.schema request with
           | Error unavailable ->
             (* Nothing was sent, so no attempt is marked as started. *)
@@ -272,14 +297,12 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner req
             Ok (Not_final reason)
           | Ok call ->
             let* () = save { previous with attempts = previous.attempts @ [ None ] } in
-            let validate answer =
-              Lane_addon_action.validate_input ~schema:declared.schema ~name:request.output answer
-            in
             (* An exception may come after the request left, so it ends the
                request as Outcome_unknown; its text stays in the attempt. *)
             let attempt, raised =
               match call ~validate with
-              | attempt -> attempt, None
+              | Call_ended final -> Final (Call_final final), None
+              | Call_refused refusal -> Not_final (Provider_refused refusal), None
               | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
               | exception exn -> Final Outcome_unknown, Some (Printexc.to_string exn)
             in

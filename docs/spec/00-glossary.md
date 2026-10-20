@@ -395,11 +395,11 @@ status: reference
   [tools/alphatex/sequencer-tui.mjs](../../tools/alphatex/sequencer-tui.mjs)
 
 **Source audition (소스 오디션)**
-: 들여온 MIDI 소스의 wire 스트림을 처음부터 정해진 순서대로 내보내는 재생. 소스
-  편집기에서 Space로 시작하고 `:stop`으로 끝낸다. 원본 tempo map이나 SMPTE 시계로
+: 들여온 MIDI 소스의 wire 스트림을 정해진 순서대로 내보내는 재생. 기본은 처음부터 한 번
+  끝까지이고, 세션 구간(`:loop START END`)을 골라 두면 그 구간을 반복한다. 소스 편집기에서
+  Space로 시작하고 `:stop`으로 끝낸다. 원본 tempo map이나 SMPTE 시계로
   시간을 잡고, 메타 이벤트는 소스 데이터로만 쓰며 status `FF`로 전송하지 않는다
-  (MIDI-SOURCE.md: "they are not sent as wire status FF"). 소스 clip loop은 거절된다
-  (midi-source-playback.mjs: "Source audition plays once from the beginning").
+  (MIDI-SOURCE.md: "they are not sent as wire status FF").
   - 멈출 때의 소유: 이 오디션이 소유한 key-off와 이 소스가 켠 hold pedal(64/66/69)만
     해제하고 all-notes-off를 방송하지 않는다. vendor SysEx의 기기별 부작용과 공유
     채널의 외부 노트는 보증하지 않는다.
@@ -409,14 +409,24 @@ status: reference
     (sequencer-tui.mjs: "Source audition requires a VST instrument or MIDI output").
   - 재생 경계: pause/resume와 소스 시계 기준 seek는 채널 상태 재구성 경계를 거쳐
     지원한다(MIDI-SOURCE.md: "Audition starts at the beginning and supports pause/resume
-    and source-clock seek"). 소스 looping은 여전히 불가능하고, 원본 앞부분에 없는 초기
-    채널값을 되돌려야 하는 seek는 거절된다(MidiTransport.swift:297, "source seek cannot
-    restore an initial channel value absent from the source prefix"). 알 수 없는 초기
-    필드와 기기 고유 부작용도 조용히 넘어가지 않고 명시적으로 실패한다.
+    and source-clock seek"). 소스 오디션은 세션 국소 소스 구간 루프를 함께 지원한다 —
+    `:loop START END`가 소스 박 또는 SMPTE 프레임 단위로 구간을 잡고 `l`이 구간을 그대로
+    둔 채 반복을 켜고 끈다(sequencer-tui.mjs: "Source :loop START END chooses a session-local
+    source range; l toggles MIDI / rendered VST window looping"). 그 선택은 소스 문서도
+    MIDI/WAV 내보내기도 바꾸지 않으므로 저장되는 loop 상태가 아니고(MIDI-SOURCE.md: "The
+    loop selection does not change the source document or MIDI/WAV export"), seek는 그 구간
+    안이어야 한다(sequencer-tui.mjs: "Seek must be within the source loop range"). 원본
+    앞부분에 없는 초기 채널값을 되돌려야 하는 seek는 거절된다(MidiTransport.swift:297,
+    "source seek cannot restore an initial channel value absent from the source prefix").
+    알 수 없는 초기 필드와 기기 고유 부작용도 조용히 넘어가지 않고 명시적으로 실패한다.
   - 서술 이력: #43769(`2fa99025a2`)의 MIDI-SOURCE.md는 "Pause, resume, seek and looping
     are explicitly unavailable for source timelines"라고 적었고, #43792(`59d3653d3b`)가
-    같은 문장을 위 지원 문장으로 바꿨다. 옛 문장을 인용하면 현행 코드와 어긋나므로,
-    이 항목은 현행 main 문장만 근거로 쓴다.
+    같은 문장을 pause/resume·seek 지원 문장으로 바꿨다. #44513 이후 `:loop` 구간 루프가
+    더해져 "plays once from the beginning" 문장도 사라졌다. 옛 문장을 인용하면 현행 코드와
+    어긋나므로, 이 항목은 현행 main 문장만 근거로 쓴다. 다만 MUSIC-SEQUENCER.md의 낡은
+    개요 문장("Source looping, VST routing, overdubs, shared clock and practice workflows
+    remain separate unfinished units")은 아직 남아 있어, 소스 looping 의 현행 근거로 쓰지
+    않는다.
   → [tools/alphatex/MIDI-SOURCE.md](../../tools/alphatex/MIDI-SOURCE.md) ·
   [tools/alphatex/native/MidiTransport.swift](../../tools/alphatex/native/MidiTransport.swift)
 

@@ -326,3 +326,11 @@ test('selected PCM frames are forwarded exactly and every acknowledgement remain
   await assert.rejects(f.playback.completion,/PCM window/)
   for(const range of [{offsetFrames:-1,frameCount:1},{offsetFrames:0,frameCount:0},{offsetFrames:0,frameCount:1.5}])assert.throws(()=>fixture({frameRange:range}),/PCM/)
 })
+
+test('caller mutation cannot change a selected PCM acknowledgement after child admission',async()=>{
+ const selected={offsetFrames:22051,frameCount:11025},f=fixture({loop:true,frameRange:selected})
+ selected.offsetFrames=0
+ f.event('playing',{frameRange:{offsetFrames:0,frameCount:11025}});f.close(1)
+ await assert.rejects(f.playback.ready,/PCM window/);await assert.rejects(f.playback.completion,/PCM window/)
+ assert.equal(f.args.at(-3),'22051')
+})

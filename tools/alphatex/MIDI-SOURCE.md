@@ -106,8 +106,9 @@ range; edits/undo retain it while it still fits, otherwise it resets to the full
 current performance.
 
 External MIDI reuses the region transport: original ordered source history,
-explicit port bindings and exact tempo-map/SMPTE period are retained for each
-wrap. Known-state/opaque-effect refusal and owned-key/pedal cleanup remain the
+explicit port bindings and exact tempo-map/SMPTE interval remain in the plan.
+The standalone transport repeats its host-nanosecond-rounded cycle; it is not
+an external MIDI clock. Known-state/opaque-effect refusal and owned-key/pedal cleanup remain the
 same as arrangement regions. No reduced phrase notes or controller defaults are
 substituted. Pause/resume and `:seek` use positions within this source range.
 
@@ -119,5 +120,7 @@ rounded up to the first PCM frame at or after that edge. The sample-quantized
 period can differ by less than one frame from the source interval; this is an
 audio audition, not external clock synchronization. Windows containing no PCM
 frame fail explicitly. The full render and its MIDI/preset evidence stay intact.
-Playback acknowledgements pin the selected frame offset/count. Updating the
+Playback acknowledgements pin the selected frame offset/count.
+Retained WAV format/frame count and WAV/MIDI hashes are checked against the
+admitted preparation and native receipt before playback. Updating the
 `music-transport` companion is required.

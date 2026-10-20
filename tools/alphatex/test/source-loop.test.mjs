@@ -6,12 +6,21 @@ import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { promisify } from 'node:util'
+import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { midiSourceFromEvents, midiSourcePattern, exportMidiSource } from '../midi-source.mjs'
 import { sourceMidiTimeline, sourceLoopWindow } from '../midi-source-playback.mjs'
 import { projectVstMidi, renderVstPhrase } from '../sequencer-vst.mjs'
 import { newEditor, editorCommand, editorAction } from '../sequencer-editor.mjs'
 
+const hash = bytes => createHash('sha256').update(bytes).digest('hex')
+function wave(frames, rate = 44100) {
+  const data = Buffer.alloc(44 + frames * 8)
+  data.write('RIFF'); data.writeUInt32LE(data.length - 8, 4); data.write('WAVEfmt ', 8); data.writeUInt32LE(16, 16)
+  data.writeUInt16LE(3, 20); data.writeUInt16LE(2, 22); data.writeUInt32LE(rate, 24); data.writeUInt32LE(rate * 8, 28)
+  data.writeUInt16LE(8, 32); data.writeUInt16LE(32, 34); data.write('data', 36); data.writeUInt32LE(frames * 8, 40)
+  return data
+}
 const execute = promisify(execFile)
 const meta = (tick, type, data) => ({ tick, kind: 'meta', type, data })
 const channel = (tick, bytes) => ({ tick, kind: 'channel', bytes })
@@ -85,11 +94,12 @@ test('VST loops a selected PCM window of a retained full render and retains the 
   const project=source(),prepared=projectVstMidi(project,{loop:true,sourceLoop:{start:360,end:840}})
   const midi=join(root,'source.mid'),output=join(root,'source.wav');await writeFile(midi,prepared.bytes)
   const selection={plugin_path:'/fixture.vst3',plugin_name:null,preset_path:null,name:'Chosen'}
+  const wav = wave(20683)
   const job=renderVstPhrase({preparation:{promise:Promise.resolve({...prepared,path:midi}),cancel:new Int32Array(new SharedArrayBuffer(4))},
     selection,outputPath:output,stateDirectory:join(root,'state'),loop:true,run(request){
       assert.equal(request.tail_seconds,0)
-      return {cancel(){},promise:writeFile(output,'synthetic full render').then(()=>({output_path:output,duration_ms:469,
-        frames:20683,sample_rate:44100,midi_sha256:'a'.repeat(64),wav_sha256:'b'.repeat(64)}))}
+      return {cancel(){},promise:writeFile(output,wav).then(()=>({output_path:output,duration_ms:469,
+        frames:20683,sample_rate:44100,midi_sha256:hash(prepared.bytes),wav_sha256:hash(wav)}))}
     }})
   const result=await job.promise
   const ceil=(n,d)=>(n+d-1n)/d,begin=360n*437956n,finish=480n*437956n+360n*500001n,d=960000000n
@@ -97,7 +107,7 @@ test('VST loops a selected PCM window of a retained full render and retains the 
   assert.deepEqual(result.frameRange,{offsetFrames:offset,frameCount:end-offset})
   assert.equal(result.duration,(end-offset)/44100)
   assert.deepEqual(await readFile(result.vst.midi_path),Buffer.from(exportMidiSource(project)))
-  assert.equal(await readFile(result.path,'utf8'),'synthetic full render')
+  assert.deepEqual(await readFile(result.path),wav)
 }))
 
 test('native audio decoder reads only the requested frames and refuses out-of-file/empty windows without opening a device', () => temporary(async root => {
@@ -121,4 +131,17 @@ print("NATIVE_PCM_WINDOW_PASS")\n`
   const binary=join(root,'read-window')
   await execute('xcrun',['swiftc',join(root,'main.swift'),'-o',binary,'-framework','AVFoundation','-framework','CoreAudio'])
   assert.equal((await execute(binary,[path])).stdout.trim(),'NATIVE_PCM_WINDOW_PASS')
+}))
+
+for(const mismatch of ['sample-rate','frames','wav-hash','midi-hash'])test(`VST source loop refuses ${mismatch} receipt mismatch and discards its retained candidate`,()=>temporary(async root=>{
+ const prepared=projectVstMidi(source(),{loop:true,sourceLoop:{start:360,end:840}})
+ const midi=join(root,'source.mid'),output=join(root,'source.wav'),wav=wave(20683)
+ await writeFile(midi,prepared.bytes)
+ const job=renderVstPhrase({preparation:{promise:Promise.resolve({...prepared,path:midi}),cancel:new Int32Array(new SharedArrayBuffer(4))},
+  selection:{plugin_path:'/fixture.vst3',plugin_name:null,preset_path:null,name:'Chosen'},outputPath:output,stateDirectory:join(root,'state'),loop:true,
+  run(){return{cancel(){},promise:writeFile(output,wav).then(()=>({output_path:output,duration_ms:469,
+   sample_rate:mismatch==='sample-rate'?48000:44100,frames:mismatch==='frames'?20682:20683,
+   midi_sha256:mismatch==='midi-hash'?'0'.repeat(64):hash(prepared.bytes),wav_sha256:mismatch==='wav-hash'?'0'.repeat(64):hash(wav)}))}}})
+ await assert.rejects(job.promise,/metadata|hash|admitted/)
+ const {readdir}=await import('node:fs/promises');assert.deepEqual(await readdir(join(root,'state/renders')),[])
 }))

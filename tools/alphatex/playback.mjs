@@ -62,8 +62,9 @@ export function openPlayback({ path, output, midiOutput, midiBindings, frameRang
     midiBindings = midiBindings.map(({ port, destination, protocol }) => ({ port, destination, ...(hybrid ? { protocol } : {}) }))
   }
   if (typeof loop !== 'boolean') throw new Error('Invalid loop selection')
+  if (frameRange !== undefined && frameRange !== null) frameRange = { offsetFrames: frameRange.offsetFrames, frameCount: frameRange.frameCount }
   if (frameRange !== undefined && (format !== 'wave' || midiOutput !== undefined
-      || !Number.isSafeInteger(frameRange.offsetFrames) || frameRange.offsetFrames < 0
+      || !Number.isSafeInteger(frameRange?.offsetFrames) || frameRange.offsetFrames < 0
       || !Number.isSafeInteger(frameRange.frameCount) || frameRange.frameCount <= 0
       || !Number.isSafeInteger(frameRange.offsetFrames + frameRange.frameCount))) throw new Error('Invalid PCM playback window')
   const selectedID = mixed ? output : midiOutput ?? output

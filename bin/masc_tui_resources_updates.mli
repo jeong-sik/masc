@@ -1,5 +1,6 @@
-(** Apply Resources responses on the UI state owner fiber. Resource metadata and text
-    are made terminal-safe before entering the displayed state. Transport, scheduling,
+(** Apply Resources responses on the UI state owner fiber. Read results retain their original
+    immutable contents; terminal sanitization belongs to the renderer. Listed
+    resource metadata is made terminal-safe for navigation. Transport, scheduling,
     request clocks and terminal output remain caller-owned. *)
 
 val listed :
@@ -15,8 +16,8 @@ val listed :
 val read_done :
   Masc_tui_types.state -> uri:string ->
   (Masc_tui_mcp.resource_content list, string) result -> unit
-(** Only the pending URI consumes the response. Text keeps its line boundaries;
-    blob payloads remain unchanged. A refused read retains the previous content. *)
+(** Only the pending URI consumes the response. Text, metadata and blob payloads remain byte-for-byte
+    unchanged in the retained content list. A refused read retains the previous content. *)
 
 val open_selected :
   Masc_tui_types.state -> read:(uri:string -> unit) -> unit

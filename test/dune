@@ -6355,3 +6355,9 @@
  (name test_tui_resource_images)
  (modules test_tui_resource_images)
  (libraries alcotest yojson masc_tui_mcp masc_tui_resource_images masc_tui_image_preview))
+
+(test
+ (name test_tui_resource_image_admission)
+ (modules test_tui_resource_image_admission)
+ (libraries alcotest masc_tui_types masc_tui_mcp masc_tui_resource_images
+  masc_tui_image_preview masc_tui_resources_updates))

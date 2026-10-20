@@ -10741,7 +10741,7 @@ let open_message_image ?skill_reference state ~mailbox ~notice ~name source =
     let view = state.view in
     state.sent_image_read <- Some {sir_generation=generation; sir_view=view;
       sir_keeper=keeper_name; sir_name=name; sir_authority=state.workspace_read_authority;
-      sir_resource=state.resource_content};
+      sir_resource=(if view = Resources then state.resource_content else None)};
     let _, columns = Masc_tui_ansi.get_terminal_size () in
     (* When the terminal supplies no pixel geometry, use the half-em advance
        of Pele's 16px default font as a logical layout width. The existing

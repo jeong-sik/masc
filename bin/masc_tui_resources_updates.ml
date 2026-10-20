@@ -78,28 +78,8 @@ let read_done state ~uri result =
     state.resource_pending_uri <- None;
     (match result with
      | Ok contents ->
-       let sanitize_document text =
-         String.split_on_char '\n' text
-         |> List.map Masc.Tui_terminal_text.sanitize_terminal_text
-         |> String.concat "\n"
-       in
-       let contents =
-         List.map
-           (fun (content : Masc_tui_mcp.resource_content) ->
-              { Masc_tui_mcp.rc_uri =
-                  Option.map Masc.Tui_terminal_text.sanitize_terminal_text content.rc_uri
-              ; rc_mime_type =
-                  Option.map
-                    Masc.Tui_terminal_text.sanitize_terminal_text
-                    content.rc_mime_type
-              ; rc_kind =
-                  (match content.rc_kind with
-                   | Masc_tui_mcp.Resource_text text ->
-                     Masc_tui_mcp.Resource_text (sanitize_document text)
-                   | Masc_tui_mcp.Resource_blob _ as blob -> blob)
-              })
-           contents
-       in
+       (* These bytes are also image/diagram sources. Only the renderer may
+          sanitize a display copy; acquisition retains the original observation. *)
        state.resource_content <- Some (uri, contents);
        state.resource_image_cursor <- 0;
        state.resource_content_error <- None

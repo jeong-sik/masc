@@ -61,8 +61,23 @@ let test_decode_refusal () =
     (match Preview.decode_payload (payload image) with Error _ -> () | Ok _ -> fail "invalid payload decoded")
   | _ -> fail "decoding belongs to acquisition, not metadata selection"
 
+let test_malformed_parts_refused () =
+  let image = `Assoc ["mimeType",`String "image/png"; "blob",`String "QUJD"] in
+  let read parts =
+    Mcp.resource_contents_of_body ~request_id:"read"
+      (Yojson.Safe.to_string (`Assoc ["jsonrpc",`String "2.0"; "id",`String "read";
+        "result",`Assoc ["contents",`List parts]])) in
+  List.iter (fun malformed ->
+    match read [image;malformed;image] with
+    | Error _ -> ()
+    | Ok _ -> fail "malformed part must not disappear and renumber later images")
+    [`Null; `Assoc []; `Assoc ["text",`Int 7];
+     `Assoc ["text",`String "caption"; "blob",`String "QUJD"];
+     `Assoc ["blob",`String "QUJD"; "blob",`String "REVG"]]
+
 let () = run "resource image sources" ["source decisions", [
   test_case "wire conservation" `Quick test_wire_conservation;
+  test_case "malformed parts refused" `Quick test_malformed_parts_refused;
   test_case "multipart declared media" `Quick test_multipart_types;
   test_case "immutable source ownership" `Quick test_source_ownership;
   test_case "payload decode refusal" `Quick test_decode_refusal]]

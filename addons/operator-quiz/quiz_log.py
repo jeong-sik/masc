@@ -65,16 +65,175 @@ def _texts(value: Any, label: str) -> tuple[str, ...]:
     return tuple(_text(item, label) for item in value)
 
 
-# -- Sources a question cites (RFC §5). The first slice has three kinds. ----
+# -- Pins: where a cited record lives, one shape per source kind (RFC §5).
+#    The material writes each pin with pin_text and the log reads it back with
+#    parse_pin, so a pin has one spelling.
 
-SOURCE_KINDS = {"board_post", "board_comment", "repo_file"}
+_HEX = frozenset("0123456789abcdef")
+
+
+def _hex_id(text: str, prefix: str) -> bool:
+    """A Board id: the prefix, then lowercase hex."""
+    return text.startswith(prefix) and len(text) > len(prefix) and set(text[len(prefix):]) <= _HEX
+
+
+def _object_id(text: str) -> bool:
+    """A full commit id, SHA-1 or SHA-256, as the host accepts it."""
+    return len(text) in (40, 64) and set(text) <= _HEX
+
+
+def _positive(text: str) -> int | None:
+    return int(text) if text.isdigit() and text[0] != "0" else None
+
+
+def _page_name(text: str) -> bool:
+    """A wiki page name as the wiki writes it: lowercase a-z, digits and -,
+    with no - at either end."""
+    return (bool(text) and set(text) <= frozenset("abcdefghijklmnopqrstuvwxyz0123456789-")
+            and text[0] != "-" and text[-1] != "-")
+
+
+@dataclass(frozen=True, slots=True)
+class BoardPostPin:
+    post_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class BoardCommentPin:
+    post_id: str
+    comment_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class RepoFilePin:
+    commit: str
+    path: str
+
+
+@dataclass(frozen=True, slots=True)
+class CommitPin:
+    commit: str
+
+
+@dataclass(frozen=True, slots=True)
+class WikiPagePin:
+    name: str
+    revision: int
+
+
+@dataclass(frozen=True, slots=True)
+class PrPin:
+    number: int
+    merge_commit: str
+
+
+@dataclass(frozen=True, slots=True)
+class PrReviewPin:
+    number: int
+    review_id: int
+
+
+@dataclass(frozen=True, slots=True)
+class PrCommentPin:
+    number: int
+    comment_id: int
+
+
+Pin = Union[BoardPostPin, BoardCommentPin, RepoFilePin, CommitPin, WikiPagePin, PrPin, PrReviewPin, PrCommentPin]
+
+
+def pin_kind(pin: Pin) -> str:
+    match pin:
+        case BoardPostPin():
+            return "board_post"
+        case BoardCommentPin():
+            return "board_comment"
+        case RepoFilePin():
+            return "repo_file"
+        case CommitPin():
+            return "commit"
+        case WikiPagePin():
+            return "wiki_page"
+        case PrPin():
+            return "pr"
+        case PrReviewPin() | PrCommentPin():
+            return "pr_comment"
+
+
+def pin_text(pin: Pin) -> str:
+    match pin:
+        case BoardPostPin(post_id):
+            return post_id
+        case BoardCommentPin(post_id, comment_id):
+            return f"{post_id}/{comment_id}"
+        case RepoFilePin(commit, path):
+            return f"{commit}:{path}"
+        case CommitPin(commit):
+            return commit
+        case WikiPagePin(name, revision):
+            return f"{name}@{revision}"
+        case PrPin(number, merge_commit):
+            return f"{number}@{merge_commit}"
+        case PrReviewPin(number, review_id):
+            return f"{number}/r{review_id}"
+        case PrCommentPin(number, comment_id):
+            return f"{number}/c{comment_id}"
+
+
+def _parse_pin(kind: str, text: str) -> Pin | None:
+    match kind:
+        case "board_post" if _hex_id(text, "p-"):
+            return BoardPostPin(text)
+        case "board_comment":
+            post_id, _, comment_id = text.partition("/")
+            if _hex_id(post_id, "p-") and _hex_id(comment_id, "c-"):
+                return BoardCommentPin(post_id, comment_id)
+        case "repo_file":
+            commit, _, path = text.partition(":")
+            if _object_id(commit) and path and not path.startswith("/") and ".." not in path.split("/"):
+                return RepoFilePin(commit, path)
+        case "commit" if _object_id(text):
+            return CommitPin(text)
+        case "wiki_page":
+            name, _, revision = text.rpartition("@")
+            number = _positive(revision)
+            if _page_name(name) and number is not None:
+                return WikiPagePin(name, number)
+        case "pr":
+            number_text, _, merge_commit = text.partition("@")
+            number = _positive(number_text)
+            if number is not None and _object_id(merge_commit):
+                return PrPin(number, merge_commit)
+        case "pr_comment":
+            number_text, _, rest = text.partition("/")
+            number = _positive(number_text)
+            index = _positive(rest[1:]) if rest[:1] in ("r", "c") else None
+            if number is not None and index is not None:
+                return PrReviewPin(number, index) if rest[0] == "r" else PrCommentPin(number, index)
+    return None
+
+
+def parse_pin(kind: str, text: str) -> Pin:
+    """The pin [text] names for a source of [kind], read strictly: a text of
+    another shape is not a pin."""
+    if kind not in SOURCE_KINDS:
+        raise LogError(f"source.kind {kind} is not a kind this package cites")
+    pin = _parse_pin(kind, text)
+    if pin is None:
+        raise LogError(f"{text!r} is not a {kind} pin")
+    return pin
+
+
+# -- Sources a question cites (RFC §5). ------------------------------------
+
+SOURCE_KINDS = {"board_post", "board_comment", "repo_file", "commit", "wiki_page", "pr", "pr_comment"}
 
 
 @dataclass(frozen=True, slots=True)
 class Source:
     kind: str
     source_id: str  # the grant
-    pin: str  # post id, "post id/comment id", or "commit:path"
+    pin: str  # the pin_text of the record's pin; parse_pin reads it
     quote: str
     sha256: str  # the retained bytes the quote was checked against
 
@@ -86,20 +245,19 @@ class Source:
     def of_json(value: Any) -> "Source":
         fields = _exact(value, {"kind", "source_id", "pin", "quote", "sha256"}, "source")
         kind = _text(fields["kind"], "source.kind")
-        if kind not in SOURCE_KINDS:
-            raise LogError(f"source.kind {kind} is not a kind this package cites")
+        pin = _text(fields["pin"], "source.pin")
+        parse_pin(kind, pin)
         # Kept byte for byte, spacing included, but whitespace alone cites nothing.
         if not isinstance(fields["quote"], str) or not fields["quote"].strip():
             raise LogError("source.quote must hold more than whitespace")
-        return Source(kind, _text(fields["source_id"], "source.source_id"),
-                      _text(fields["pin"], "source.pin"), fields["quote"],
+        return Source(kind, _text(fields["source_id"], "source.source_id"), pin, fields["quote"],
                       _text(fields["sha256"], "source.sha256"))
 
 
 # -- The grants a session reads, fixed when it opens. The listing is then a
 #    function of the log alone, even before this worker's first observation.
 
-GRANT_KINDS = {"board", "repository"}
+GRANT_KINDS = {"board", "repository", "wiki", "github_pulls"}
 
 
 @dataclass(frozen=True, slots=True)

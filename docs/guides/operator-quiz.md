@@ -52,7 +52,25 @@ paths = ["changelog.d/"]
 - `visibilities` 에 적은 공개 범위의 글은 `author` 출력에 묶인 slot 의 provider 에게 간다. `internal` 을 넣거나 `direct` 를 적기 전에, 그 provider 가 그런 글을 받아도 되는지 확인한다.
 - Board 글은 공개 범위를 따로 정하지 않으면 `internal` 이다. `public`, `unlisted` 만 적으면 그렇게 정한 글만 읽으므로, 문제 재료가 거의 없을 수 있다.
 - `repository` 권한은 등록된 저장소 clone 의 기본 브랜치를 읽고, fetch 하지 않는다. 새 changelog 조각을 문제로 내려면 그 저장소의 `auto_sync` 를 켜 둔다.
+- `repository` 권한의 커밋 메시지도 문제 재료가 된다. `paths` 에는 `changelog.d/` 말고도 `CHANGELOG.md`, `docs/rfc/` 처럼 읽힐 파일이나 폴더를 더 적을 수 있다.
 - `sources` 는 늘 빈 배열이다. 이 패키지는 관측 source 를 읽지 않는다.
+
+wiki 와 merge 된 PR 도 읽게 하려면 권한을 더한다.
+
+```toml
+[[binding.records]]
+source_id = "wiki"
+kind = "wiki"
+
+[[binding.records]]
+source_id = "masc-prs"
+kind = "github_pulls"
+repository_id = "masc"
+```
+
+- `wiki` 는 page 마다 지금 본문을 읽는다. 인용 pin 은 `이름@revision` 이다.
+- `github_pulls` 는 기본 브랜치 커밋을 merge 한 PR 과 그 리뷰, 리뷰 댓글을 GitHub 에서 읽는다. `[repositories] pr_reader` 가 GitHub 을 읽을 수 없으면 그 읽기는 `source_unavailable` 로 기다리고, 세션도 함께 기다린다.
+- 인용 pin 은 기록 종류마다 모양이 정해져 있다: 커밋은 40자(또는 64자) SHA, PR 은 `번호@merge 커밋`, 리뷰는 `번호/r리뷰id`, 리뷰 댓글은 `번호/c댓글id`. 모양이 다른 pin 은 log 에 쓰지 않는다.
 
 ### 3. `author` 와 `grade` slot 묶기
 
@@ -179,5 +197,4 @@ Results 에 다섯 lane 이 나온다.
 
 ## 지금의 한계
 
-- 기록 종류는 Board 글·댓글과 `repository` 권한의 파일이다. wiki, PR, 커밋 인용은 다음 단계다.
 - 관측 출력은 쌓인 모든 행을 담는다. 문제가 아주 많이 쌓여 `max_reply_bytes` 를 넘으면 관측이 실패로 보인다.

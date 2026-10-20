@@ -21,3 +21,16 @@ source_id = "masc-repo"
 kind = "repository"
 repository_id = "masc"
 paths = ["changelog.d/"]
+
+# More records the quiz can cite (docs/guides/operator-quiz.md):
+#
+# [[binding.records]]
+# source_id = "wiki"
+# kind = "wiki"
+#
+# A github_pulls read waits until [repositories] pr_reader can read GitHub,
+# and the session waits with it.
+# [[binding.records]]
+# source_id = "masc-prs"
+# kind = "github_pulls"
+# repository_id = "masc"

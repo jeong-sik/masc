@@ -228,5 +228,35 @@ class Sessions(unittest.TestCase):
                     q.fold(events)
 
 
+
+class Pins(unittest.TestCase):
+    """Each source kind's pin is read strictly (RFC §5, §15 L11)."""
+    SHA = "a" * 40
+
+    def test_every_kind_reads_back_as_written(self):
+        for pin in [q.BoardPostPin("p-1f"), q.BoardCommentPin("p-1f", "c-2e"),
+                    q.RepoFilePin(self.SHA, "docs/rfc/RFC-x.md"), q.CommitPin(self.SHA), q.CommitPin("b" * 64),
+                    q.WikiPagePin("wiki-home", 6), q.PrPin(44484, self.SHA), q.PrReviewPin(44484, 12),
+                    q.PrCommentPin(44484, 9)]:
+            with self.subTest(pin):
+                self.assertEqual(q.parse_pin(q.pin_kind(pin), q.pin_text(pin)), pin)
+
+    def test_a_pin_of_another_shape_is_not_read(self):
+        for kind, text in [("board_post", "p-"), ("board_post", "p-1F"), ("board_comment", "p-1/x-2"),
+                           ("repo_file", f"{self.SHA}:../x"), ("repo_file", f"{self.SHA}:/etc/x"),
+                           ("repo_file", f"{'a' * 39}:x"), ("commit", "A" * 40), ("wiki_page", "Wiki@1"),
+                           ("wiki_page", "-x@1"), ("wiki_page", "x@0"), ("wiki_page", "x@01"),
+                           ("pr", f"01@{self.SHA}"), ("pr", "1"), ("pr_comment", "1/x2"), ("pr_comment", "1/r"),
+                           ("pr_comment", "1/r0"), ("pr_comment", "1/c2/3"), ("video", "x")]:
+            with self.subTest(kind=kind, text=text):
+                with self.assertRaises(q.LogError):
+                    q.parse_pin(kind, text)
+
+    def test_a_source_with_a_pin_of_another_shape_is_not_read(self):
+        line = SOURCE.to_json() | {"kind": "pr", "pin": "p-1"}
+        with self.assertRaisesRegex(q.LogError, "is not a pr pin"):
+            q.Source.of_json(line)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -622,12 +622,13 @@ New host state is limited to the first three rows. Each one holds a fact that wo
 | `pr` | number + merge commit | `github_pulls` grant | retained page |
 | `pr_comment` | PR number + comment id | `github_pulls` grant | retained page |
 | `commit` | 40-hex SHA | `repository` grant | retained page |
-| `repo_file` | commit + path + line range | `repository` grant, `read_file` | retained file |
+| `repo_file` | commit + path | `repository` grant, `read_file` | retained file |
 | `board_post` | `p-…` | `board` grant | retained page |
 | `board_comment` | `p-…` + `c-…` | `board` grant | retained page |
 | `wiki_page` | name + revision | `wiki` grant | retained page |
 
-- O6's seven kinds stay the target. The first slice (§15) uses `board_post`, `board_comment` and `repo_file` under `changelog.d/` only.
+- O6's seven kinds stay the target. The first slice (§15) used `board_post`, `board_comment` and `repo_file` under `changelog.d/` only; L11 adds the other four.
+- Each kind's pin has one spelling, written by the package and read back strictly: `p-<hex>`, `p-<hex>/c-<hex>`, `<sha>:<path>`, `<sha>`, `<name>@<revision>`, `<number>@<merge sha>`, and `<number>/r<review id>` or `<number>/c<comment id>`. A record whose id would give another spelling is refused as a result, before any pin is written. A `repo_file` pin names no line range: the quote is checked by containment in the whole file.
 - Each source carries a verbatim `quote` with no whitespace or case normalisation, plus the SHA-256 of the retained bytes. The key must follow from the quoted text. The `author` prompt asks for that, and the dispute path checks it.
 - `repo_file` covers changelog fragments (cited by a commit that still has them), `CHANGELOG.md` release sections, RFCs, the constitution and code. ocaml-refactor-woman's review pitfalls fit `pr_comment`.
 - A source is never shown before the answer, because a citation like "PR #44081" can give the answer away.

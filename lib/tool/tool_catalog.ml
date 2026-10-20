@@ -547,7 +547,13 @@ let explicit_metadata : (string * metadata) list =
     ("keeper_skill_validate", keeper_shard_read);
     ("keeper_skill_publish", keeper_shard_write);
     ("keeper_artifact_transfer", keeper_shard_write);
+    (* Both vision tools only read: [keeper_image_read] returns an owned
+       image's pixels and never writes one, so it shares the read authority
+       with the delegation beside it. It was registered as a schema without
+       an entry here, and strict auth denies unregistered names, so the tool
+       was callable in no configuration. *)
     ("keeper_analyze_image", keeper_shard_read);
+    ("keeper_image_read", keeper_shard_read);
     ("masc_browser_tabs", keeper_shard_read);
     ("masc_browser_read", keeper_shard_read);
     ("masc_browser_session", keeper_shard_write);

@@ -719,7 +719,13 @@ run_one() {
   # Optional build probe (case-relative). Empty when absent.
   build_rel="$(jq -r '.build // empty' "${case_dir}/case.json")"
 
-  local run_id run_dir workspace evidence_path mode_suffix=""
+  # workspace stays empty until this episode copies the case workspace in. An
+  # episode that failed before that (Keeper admission, memory seeding) has no
+  # workspace to grade, and an empty value keeps a directory left by an
+  # interrupted earlier run from being graded as this one's. Bash 5 aborts on
+  # `${workspace}` under `set -u` when a `local` was never assigned, which
+  # lost the row of such an episode.
+  local run_id run_dir workspace="" evidence_path mode_suffix=""
   if [[ -f "${case_dir}/memory.json" || -f "${case_dir}/source-memory.json" ]]; then
     mode_suffix="-${MEMORY_MODE}"
   fi
@@ -1045,4 +1051,7 @@ main() {
   fi
 }
 
-main
+# Run only when executed; a test sources this file to call run_one directly.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main
+fi

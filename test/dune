@@ -4317,6 +4317,24 @@
  (deps (alias runtest-test_run_local_executable_binding)))
 
 (rule
+ (alias runtest-test_harness_coding_eval_admission)
+ (deps
+  test_harness_coding_eval_admission.py
+  ../scripts/harness_coding_eval.sh
+  ../scripts/harness/jsonrpc_sse.sh
+  ../scripts/harness/lib/mcp_call.sh
+  ../scripts/harness/lib/mcp_jsonrpc.sh
+  ../scripts/harness/lib/server_bootstrap.sh
+  ../scripts/harness/lib/test_framework.sh
+  ../scripts/harness/prompts/coding_keeper.txt)
+ (action
+  (run python3 %{dep:test_harness_coding_eval_admission.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_harness_coding_eval_admission)))
+
+(rule
  (alias runtest-test_skill_activation_events)
  (deps
   test_skill_activation_events.py

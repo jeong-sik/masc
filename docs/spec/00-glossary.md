@@ -2645,6 +2645,22 @@ status: reference
   - 사용처 한정: Candle로 살 수 있는 것은 초상화 장신구(**Keeper Portrait**의 장비 아이템)뿐이다.
     도구, 스킬, 모델, 런타임 예산 등 다른 자원은 구매할 수 없다(헌법 불변식). 상점 구매는
     `Purchased`로 기록해 소유권을 부여하고, 소유한 아이템은 `keeper_candle_equip` 도구로 각 슬롯에 착용한다.
+  - 계정 읽기 표면(`Candle_shop.account`): `keeper_candle_balance`와 구매 영수증
+    (`Candle_shop.receipt.account`)이 돌려주는 계정은
+    `{keeper; balance_milli; decayed_milli; half_life; last_event_at; owned_items}` 여섯 칸이다.
+    지갑 파일도 소유 파일도 없고 돈과 소유권은 원장이 갖는다(Candle_shop: "The ledger owns money
+    and inventory; no wallet or inventory file is maintained"). `balance_milli`는 지금 쓸 수 있는
+    정수 milli-candle이고 `decayed_milli`는 감쇠 계산의 정밀값(`Z.t`)이라 같은 순간에도 두 값이
+    다를 수 있으며, 응답 JSON에서는 둘 다 문자열로 나간다. `owned_items`는 아이템 id 목록이고
+    착용 상태는 담기지 않는다(착용은 `Equipped` 사건과 `Candle_equipment` 투영이 답한다).
+    선물 영수증은 계정을 담지 않고 보낸 쪽·받는 쪽 이름과 각 잔액(`from_balance_milli`·
+    `to_balance_milli`)만 남긴다.
+  - 이름 경계: 이 계정 읽기는 순수 읽기가 아니다. `Candle_shop.account`는 설정된 half-life를 먼저
+    발행한 뒤 금액을 돌려주므로 `keeper_candle_balance` 호출이 `Half_life_set` 사건을 덧붙일 수
+    있다(Candle_status: "The desired half-life is published before the returned amounts are
+    accepted"). 발행하지 않는 관측은 `observed_view`를 읽는 대시보드·TUI 투영이다
+    (Candle_status: "Never appends, repairs, or truncates the ledger"). 그래서 "잔액 조회는
+    아무것도 바꾸지 않는다"고 쓰지 않는다.
   - 설정과 착용 투영: `<base-path>/.masc/config/candle.toml`에서 활성화 여부를 읽는다(`Candle_config.t`). 파일 부재는 `Off`(시작 장비 유지, 기록·지급·판매 없음),
     필수 최상위 `half_life`(`"off"` 또는 양의 정수 시간)와 `[payout]` 테이블(`weight_max`·`deduction_rate`·`deduction_floor`·`share_rounding`·`remainder_tie_break`·`deduction_rounding` 및 운영자가 정한 `grades_milli`·동일 id의 `grade_criteria` 전수)을 갖춘 설정 파일은 `Enabled of policy`(선택적 `[shop.prices_milli]`로 장신구 기준 가격 지정. 선택적 `[shop.pricing]`의
     `mode`가 `fixed`이거나 표가 없으면 기준 가격 그대로 받고, `supply_scaled`(`target_per_keeper_milli`·
@@ -2670,6 +2686,8 @@ status: reference
   [Candle_ledger](../../lib/candle_store/candle_ledger.mli) ·
   [Candle_payout_owed](../../lib/candle_runtime/candle_payout_owed.mli) ·
   [Candle_time](../../lib/candle/candle_time.mli) ·
+  [Candle_shop](../../lib/candle_runtime/candle_shop.mli) ·
+  [Candle_status](../../lib/candle_runtime/candle_status.mli) ·
   [keeper_candle_equip](../../config/tools/keeper_candle_equip.toml) ·
   [docs/constitution.xml](../constitution.xml) ·
   [docs/rfc/RFC-goal-candle-ledger.md](../rfc/RFC-goal-candle-ledger.md)

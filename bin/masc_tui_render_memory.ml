@@ -924,10 +924,10 @@ let memory_fact_detail_lines ~cols row =
   let parts = memory_fact_detail_parts ~cols row in
   fact_detail_prefix parts (fact_detail_line_count parts)
 
-(* The fleet header above the sort row: the Total, Ordinary and Librarian
-   readings, each wrapped to the frame. Its row count depends on the width, so
-   the list's height is worked out from these same rows ([memory_overview_scrolled])
-   rather than from a fixed count of header lines. *)
+(* The fleet header above the sort row: the Total, Ordinary, Source and
+   Librarian readings, each wrapped to the frame. Its row count depends on the
+   width, so the list's height is worked out from these same rows
+   ([memory_overview_scrolled]) rather than from a fixed count of header lines. *)
 let memory_fleet_header_rows ~cols (state : state) : string list =
   (* A failed first read has no counts. The error row below owns the cause;
      keep these two labelled values unavailable without repeating its verdict.
@@ -990,6 +990,25 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
          ; Masc_tui_message_layout.count_noun
              snapshot.mhs_total_support_invalidations "support invalidation"
          ]
+       (* The source-bound snapshot is stored and invalidated apart from the
+          ordinary facts above, and each Keeper's roster row and detail already
+          print their own count (#38446). The count here is the standing set of
+          source invalidations; the Ordinary count is the invalidations of the
+          latest write only, so the two are not one total split in two. A
+          Keeper whose source snapshot could not be read contributes 0 to the
+          count, so the row also says how many Keepers that is, as the roster
+          does with "read error". *)
+       @ labelled "Source:"
+         ([ Masc_tui_message_layout.count_noun
+              snapshot.mhs_total_source_invalidations "invalidation"
+          ]
+          @ (if snapshot.mhs_total_source_read_errors > 0
+             then
+               [ Masc_tui_message_layout.count_noun
+                   snapshot.mhs_total_source_read_errors "keeper"
+                 ^ " with a source read error"
+               ]
+             else []))
        @ labelled "Librarian:"
          [ (match snapshot.mhs_total_librarian_unread_turns with
             | None -> "? turns"

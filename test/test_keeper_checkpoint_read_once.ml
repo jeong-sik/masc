@@ -154,6 +154,51 @@ let test_a_linked_canonical_is_not_answered_from_its_target () = with_session (f
   | Error error -> failf "the link was refused as %s" (Store.checkpoint_load_error_to_string error)
   | Ok _ -> fail "the link was answered from its target's summary")
 
+let keeper = "read-once-keeper"
+
+let save_for_keeper ~session_dir checkpoint =
+  match
+    Store.save_agent_core_for_keeper ~keeper_name:keeper ~history_retained:(history_retained ())
+      ~session_dir checkpoint
+  with
+  | Ok _ -> ()
+  | Error error -> fail ("keeper save failed: " ^ error)
+
+let load_value ~session_dir label =
+  match Store.load_agent_core ~session_dir ~session_id:"session" with
+  | Ok checkpoint -> checkpoint
+  | Error error -> failf "%s: %s" label (Store.checkpoint_load_error_to_string error)
+
+(* The exact snapshot of a file a Keeper wrote hands out the value the Keeper's
+   lineage holds for it, the one [load_agent_core] answers with, and reads only
+   the bytes it carries. A decode would make new message records. *)
+let test_a_keeper_snapshot_uses_the_kept_decode () = with_session (fun session_dir ->
+  save_for_keeper ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:2 ~marker:several_reads_marker);
+  let kept = load_value ~session_dir "the kept value did not load" in
+  let snapshot = load_snapshot ~session_dir "the snapshot did not load" in
+  let on_disk = read_file (canonical_path session_dir) in
+  check bool "the snapshot's messages are the kept value's" true
+    (Store.exact_snapshot_messages snapshot == kept.messages);
+  check string "the snapshot holds the file's bytes" on_disk (Store.exact_snapshot_canonical_bytes snapshot);
+  check string "the reference is their digest" (one_shot_sha256 on_disk)
+    (Store.exact_snapshot_reference snapshot).sha256;
+  check int "the reference carries the kept turn" 2 (Store.exact_snapshot_reference snapshot).turn_count)
+
+(* A file replaced behind the Keeper's lineage is a new identity: the snapshot
+   decodes the bytes it read. *)
+let test_a_snapshot_behind_a_replaced_file_decodes_it () = with_session (fun session_dir ->
+  save_for_keeper ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:2 ~marker:"kept");
+  let kept = load_value ~session_dir "the kept value did not load" in
+  save_plain ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:3 ~marker:"replaced");
+  let snapshot = load_snapshot ~session_dir "the snapshot did not load" in
+  check bool "the snapshot did not hand out the kept messages" true
+    (Store.exact_snapshot_messages snapshot != kept.messages);
+  check int "the snapshot is the replacing file" 3 (Store.exact_snapshot_reference snapshot).turn_count;
+  match List.rev (Store.exact_snapshot_messages snapshot) with
+  | { Agent_core.Types.content = [ Agent_core.Types.Text text ]; _ } :: _ ->
+    check string "the last message is the replacing file's" "replaced" text
+  | _ -> fail "the replacing file's last message was not one text block")
+
 let () =
   run "keeper checkpoint read once"
     [ ( "locked read"
@@ -170,5 +215,11 @@ let () =
     ; ( "summary key"
       , [ test_case "a linked canonical is not answered from its target" `Quick
             test_a_linked_canonical_is_not_answered_from_its_target
+        ] )
+    ; ( "exact snapshot"
+      , [ test_case "a keeper snapshot uses the kept decode" `Quick
+            test_a_keeper_snapshot_uses_the_kept_decode
+        ; test_case "a snapshot behind a replaced file decodes it" `Quick
+            test_a_snapshot_behind_a_replaced_file_decodes_it
         ] )
     ]

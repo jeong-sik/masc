@@ -402,8 +402,11 @@ val decode_changed_bytes :
   changed_bytes -> (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
 
 (** Load one canonical checkpoint and its exact source identity from the same
-    locked byte snapshot. No size, mtime, timestamp, or process cache
-    participates in the identity. *)
+    locked byte snapshot. The digest is always taken over the bytes read. The
+    checkpoint, and the session and turn of the identity, are the decode of
+    those bytes, or the Keeper lineage's value for them when the file read has
+    the identity (device, inode, size, mtime) of the file that lineage wrote or
+    read, as for {!load_agent_core}. *)
 val load_agent_core_with_ref :
   session_dir:string ->
   session_id:string ->

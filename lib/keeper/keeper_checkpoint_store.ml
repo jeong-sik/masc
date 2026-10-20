@@ -1323,7 +1323,23 @@ let load_ref_locked ~session_dir ~expected_session_id =
   | Error error -> Error (Ref_read_failed error)
   | Ok None -> Error Ref_not_found
   | Ok (Some (identity_before, canonical_bytes)) ->
-    (match decode_exact_snapshot_off_scheduler ~expected_session_id canonical_bytes with
+    (* A Keeper's lineage holds what [of_string] gives for the bytes of the
+       file it wrote or read, under that file's identity, so bytes read from a
+       file of that identity are not decoded again. The read stays: the
+       snapshot carries the bytes, and the reference is their digest. A
+       Librarian pass reads the snapshot of its Keeper's current trace when it
+       prepares and again when it commits; this decode allocated 44 GB across
+       the server in 17 minutes on 2026-10-20. *)
+    let decoded =
+      match reusable_written_value ~canonical_path ~identity:identity_before with
+      | Some checkpoint ->
+        Ok
+          ( checkpoint
+          , offload_checkpoint_cpu (fun () ->
+              exact_snapshot_of_checkpoint ~expected_session_id ~canonical_bytes checkpoint) )
+      | None -> decode_exact_snapshot_off_scheduler ~expected_session_id canonical_bytes
+    in
+    (match decoded with
      | Error error -> Error (Ref_read_failed (classify_core_error error))
      | Ok (checkpoint, snapshot) ->
        publish_summary_after_parse

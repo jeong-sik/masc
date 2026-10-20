@@ -5,6 +5,12 @@ Pedalboard 0.9.26 for plug-in discovery/loading/audio rendering and Mido 1.3.3
 for SMF track merging and tempo changes. It does not open an audio device.
 The caller owns the child, cancellation, output directory and WAV playback.
 
+For continuous keyboard synthesis, `host.py --stream` keeps one project-bound
+instrument loaded across request-driven PCM blocks. It still opens no audio
+device. The consumer supplies the audio clock, MIDI sample offsets and output
+capacity; this is the synthesis layer for live audition, not a completed TUI
+monitoring feature. See [stream protocol](STREAM.md).
+
 This is the native rendering component of the MIDI phrase Lane. It is not a
 new MASC container runtime, and its direct local commands are not
 `masc_lane_act` receipts. A container cannot load a macOS VST binary. The TUI

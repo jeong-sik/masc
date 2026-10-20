@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""One native VST3 job per process. The caller owns cancellation and playback.
+"""Native VST3 rendering, or --stream request-driven continuous synthesis.
 
-Input and output are single JSON objects; native plug-in diagnostics go to
-stderr, including diagnostics printed by plug-in destructors. No audio device
-or plug-in editor is opened here.
+Default input/output are single JSON objects; --stream uses NDJSON. Native
+diagnostics go to stderr, including plug-in destructors. Only the explicit edit
+job opens a plug-in editor. No operation opens an audio device.
 """
 
 from __future__ import annotations
@@ -263,17 +263,117 @@ def run(request):
             raise ValueError("unknown VST job operation")
 
 
+def stream_synthesis(source, emit):
+    """One instrument, request-driven PCM blocks, no audio device or clock."""
+    import numpy as np
+    import mido
+
+    request = json.loads(source.readline())
+    if (not isinstance(request, dict) or request.get('kind') != 'open'
+            or type(request.get('schemaVersion')) is not int or request['schemaVersion'] != 1):
+        raise ValueError('expected VST stream open schemaVersion 1')
+    rate = request.get('sampleRate')
+    if type(rate) is not int or not 0 < rate <= 0xFFFFFFFF:
+        raise ValueError('invalid VST stream sample rate')
+    frame_seconds(1, rate)  # Pinned Float32 sample-rate ABI.
+    expected = request.get('instrument')
+    if not isinstance(expected, dict) or any(not isinstance(expected.get(k), str) or not expected[k]
+                                            for k in ('identifier', 'version')):
+        raise ValueError('missing project instrument identity/version')
+    preset = request.get('preset')
+    if not isinstance(preset, dict) or not isinstance(preset.get('data'), str):
+        raise ValueError('missing project preset bytes')
+    data = base64.b64decode(preset['data'], validate=True)
+    if not data or base64.b64encode(data).decode('ascii') != preset['data'] or digest(data) != preset.get('sha256'):
+        raise ValueError('project preset content changed')
+    plugin = load_instrument(request)
+    actual = description(plugin)
+    if any(actual[k] != expected[k] for k in ('identifier', 'version')):
+        raise ValueError('installed VST identity/version differs from the project sound')
+    # Load the exact owned bytes, never the mutable path saved as a label.
+    with tempfile.TemporaryDirectory(prefix='masc-vst-stream-') as folder:
+        frozen = Path(folder) / 'sound.vstpreset'
+        frozen.write_bytes(data)
+        plugin.load_preset(str(frozen))
+    emit({'kind': 'ready', 'schemaVersion': 1, 'sampleRate': rate, 'channels': 2,
+          'instrument': actual, 'preset_sha256': digest(data)})
+    sequence, total = 0, 0
+    try:
+        for line in source:
+            request = json.loads(line)
+            if not isinstance(request, dict):
+                raise ValueError('VST stream command must be an object')
+            if request.get('kind') == 'stop':
+                break
+            count, identifier = request.get('frames'), request.get('id')
+            # Float32 sample indices are contiguous only through 2**24. This
+            # is the native ABI boundary, not a session duration limit.
+            if (request.get('kind') != 'render' or type(identifier) is not int or identifier != sequence + 1
+                    or type(count) is not int or not 0 < count <= 2**24):
+                raise ValueError('invalid ordered VST block request')
+            messages = request.get('messages')
+            if not isinstance(messages, list):
+                raise ValueError('missing VST block MIDI messages')
+            block, previous = [], -1
+            for event in messages:
+                if not isinstance(event, dict):
+                    raise ValueError('invalid VST MIDI event')
+                offset, values = event.get('frame'), event.get('bytes')
+                if (type(offset) is not int or not previous <= offset < count or offset < 0
+                        or not isinstance(values, list) or not values
+                        or any(type(value) is not int or not 0 <= value <= 255 for value in values)):
+                    raise ValueError('invalid ordered VST MIDI sample offset/data')
+                message = mido.Message.from_bytes(values)
+                previous = offset
+                # The project preset owns timbre, as in offline rendering.
+                if message.type == 'program_change' or (message.type == 'control_change' and message.control in (0, 32)):
+                    continue
+                block.append((bytes(values), frame_seconds(offset, rate)))
+            audio = plugin(block, duration=frame_seconds(count, rate), sample_rate=rate,
+                           num_channels=2, reset=sequence == 0)
+            if audio.shape != (2, count) or not np.isfinite(audio).all():
+                raise ValueError('VST returned invalid streaming audio samples')
+            pcm = np.asarray(audio.T, dtype='<f4').tobytes(order='C')
+            if not np.isfinite(np.frombuffer(pcm, dtype='<f4')).all():
+                raise ValueError('VST returned samples outside Float32 PCM')
+            sequence = identifier
+            total += count
+            emit({'kind': 'block', 'id': identifier, 'frames': count,
+                  'pcm': base64.b64encode(pcm).decode('ascii')})
+        else:
+            raise ValueError('VST stream closed without stop')
+    finally:
+        # Process-local notes cannot survive a failed operation or successor.
+        plugin.reset()
+    emit({'kind': 'stopped', 'frames': str(total)})
+
+
 def main():
     # C++ plug-ins can print directly to fd 1; Python redirect_stdout alone
     # does not protect the JSON channel. Keep a private descriptor for replies.
     reply_fd = os.dup(sys.stdout.fileno())
     os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+    def emit(value):
+        payload = memoryview((json.dumps(value, allow_nan=False) + '\n').encode())
+        while payload:
+            payload = payload[os.write(reply_fd, payload):]
     try:
+        if sys.argv[1:] == ['--stream']:
+            try:
+                stream_synthesis(sys.stdin, emit)
+                return 0
+            except Exception as error:
+                emit({'kind': 'error', 'message': f'{type(error).__name__}: {error}'})
+                return 1
+            finally:
+                os.close(reply_fd)
+        if sys.argv[1:]:
+            raise ValueError('unknown VST host arguments')
         request = json.load(sys.stdin)
         result = {"ok": True, "result": run(request)}
     except Exception as error:
         result = {"ok": False, "error": f"{type(error).__name__}: {error}"}
-    os.write(reply_fd, (json.dumps(result, allow_nan=False) + "\n").encode())
+    emit(result)
     os.close(reply_fd)
     return 0 if result["ok"] else 1
 

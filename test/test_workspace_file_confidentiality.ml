@@ -510,9 +510,13 @@ let test_file_read_rejects_lost_scope lost () =
           ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
           (fun () -> with_temp_dir (fun base_path ->
             let valid = function Ok value -> value | Error detail -> fail detail in
-            let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+            let state = Masc.Mcp_server.create_state_eio ~sw
+              ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
+              ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
+              ~net:(Eio.Stdenv.net env) ~base_path in
             let config = Masc.Mcp_server.workspace_config state in
             ignore (Masc.Workspace.init config ~agent_name:None);
+          Masc.Mcp_server.For_testing.await_publication_recovery_initialization state;
             Server_auth.For_testing.restore_server_state (Some state);
             (match Masc.Server_startup_state.mark_state_ready () with
              | Ok () -> ()
@@ -608,7 +612,17 @@ let with_save_files f =
     | Some fs -> Fs_compat.set_fs fs | None -> Fs_compat.clear_fs ())
     (fun () -> Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      with_temp_dir f)
+      with_temp_dir (fun recovery_root ->
+        Eio.Switch.run @@ fun sw ->
+        let registry =
+          match Fs_compat.Publication_recovery.open_registry ~sw
+              ~fs:(Eio.Stdenv.fs env)
+              ~registry_root:Eio.Path.(Eio.Stdenv.fs env / recovery_root) with
+          | Ok registry -> registry
+          | Error error -> fail (Fs_compat.Publication_recovery.registry_error_to_string error)
+        in
+        let publication_recovery = Masc_test_deps.publication_recovery_provider registry in
+        with_temp_dir (f ~publication_recovery)))
 
 let observed_file ~base path =
   match W.For_testing.resolve_workspace_file base path with
@@ -621,7 +635,7 @@ let save_ok = function
   | Ok revision -> revision
   | Error _ -> fail "expected an admitted file save"
 
-let test_file_save_revision_and_exact_bytes () = with_save_files (fun base ->
+let test_file_save_revision_and_exact_bytes () = with_save_files (fun ~publication_recovery base ->
   let path = "src/program.ml" in
   let full = Filename.concat base path in
   let original = "\tlet text = \"e\204\129\"\r\n" in
@@ -630,50 +644,113 @@ let test_file_save_revision_and_exact_bytes () = with_save_files (fun base ->
   let content, revision = observed_file ~base path in
   check string "original bytes remain exact" original content;
   let edited = "\tlet text = \"한글🙂\"\r\n" in
-  let saved = save_ok (W.For_testing.save_workspace_file ~base ~path ~expected_revision:revision ~content:edited) in
+  let saved = save_ok (W.For_testing.save_workspace_file ~publication_recovery ~base ~path ~expected_revision:revision ~content:edited) in
   let actual, observed = observed_file ~base path in
   check string "committed bytes, not displayed rows" edited actual;
   check string "returned revision describes committed bytes" saved observed;
   check int "ordinary executable permissions survive" 0o755 (Unix.stat full).Unix.st_perm;
-  (match W.For_testing.save_workspace_file ~base ~path ~expected_revision:revision ~content:"stale" with
+  (match W.For_testing.save_workspace_file ~publication_recovery ~base ~path ~expected_revision:revision ~content:"stale" with
    | Error W.Save_conflict -> () | Ok _ | Error _ -> fail "stale revision must conflict");
   check string "conflict preserves current file" edited (fst (observed_file ~base path));
   check string "unchanged source is idempotent" saved
-    (save_ok (W.For_testing.save_workspace_file ~base ~path ~expected_revision:saved ~content:edited));
-  ignore (save_ok (W.For_testing.save_workspace_file ~base ~path ~expected_revision:saved ~content:""));
+    (save_ok (W.For_testing.save_workspace_file ~publication_recovery ~base ~path ~expected_revision:saved ~content:edited));
+  ignore (save_ok (W.For_testing.save_workspace_file ~publication_recovery ~base ~path ~expected_revision:saved ~content:""));
   check string "an intentionally empty file saves" "" (fst (observed_file ~base path)))
 
-let test_file_save_scope_and_path_guards () = with_save_files (fun base ->
+let test_file_save_scope_and_path_guards () = with_save_files (fun ~publication_recovery base ->
   with_temp_dir (fun other ->
     let path = "source.ml" in
     write_file (Filename.concat base path) "original";
     write_file (Filename.concat other path) "original";
     let _, revision = observed_file ~base path in
-    (match W.For_testing.save_workspace_file ~base:other ~path ~expected_revision:revision ~content:"wrong workspace" with
+    (match W.For_testing.save_workspace_file ~publication_recovery ~base:other ~path ~expected_revision:revision ~content:"wrong workspace" with
      | Error W.Save_conflict -> () | Ok _ | Error _ -> fail "revision cannot move between roots");
     Unix.symlink (Filename.concat other path) (Filename.concat base "escape.ml");
     write_file (Filename.concat base ".env") "secret";
     List.iter (fun path ->
-      match W.For_testing.save_workspace_file ~base ~path ~expected_revision:revision ~content:"forbidden" with
+      match W.For_testing.save_workspace_file ~publication_recovery ~base ~path ~expected_revision:revision ~content:"forbidden" with
       | Error W.Save_invalid_path -> () | Ok _ | Error _ -> fail "read path guards must also reject writes")
       ["escape.ml"; ".env"; "../source.ml"];
     check string "other workspace remains intact" "original" (fst (observed_file ~base:other path));
     Unix.symlink path (Filename.concat base "alias.ml");
-    ignore (save_ok (W.For_testing.save_workspace_file ~base ~path:"alias.ml" ~expected_revision:revision ~content:"through alias"));
+    ignore (save_ok (W.For_testing.save_workspace_file ~publication_recovery ~base ~path:"alias.ml" ~expected_revision:revision ~content:"through alias"));
     check string "internal alias retains link identity" path (Unix.readlink (Filename.concat base "alias.ml"));
     check string "internal alias updates its permitted target" "through alias" (fst (observed_file ~base path))))
 
-let test_file_save_competing_revisions () = with_save_files (fun base ->
+let test_file_save_competing_revisions () = with_save_files (fun ~publication_recovery base ->
   let path = "source.ml" in
   write_file (Filename.concat base path) "initial";
   let _, expected_revision = observed_file ~base path in
-  let save content = W.For_testing.save_workspace_file ~base ~path ~expected_revision ~content in
+  let save content = W.For_testing.save_workspace_file ~publication_recovery ~base ~path ~expected_revision ~content in
   let first, second = Eio.Fiber.pair (fun () -> save "first") (fun () -> save "second") in
   let winner = match first, second with
     | Ok _, Error W.Save_conflict -> "first"
     | Error W.Save_conflict, Ok _ -> "second"
     | (Ok _ | Error _), (Ok _ | Error _) -> fail "one revision can commit only once" in
   check string "the admitted writer owns the file" winner (fst (observed_file ~base path)))
+
+let read_test_file path =
+  let channel = open_in_bin path in
+  Fun.protect ~finally:(fun () -> close_in_noerr channel)
+    (fun () -> really_input_string channel (in_channel_length channel))
+
+let check_save_after_directory_swap ~publication_recovery ~base ~path
+    ~original_path ~replacement_path ~outside =
+  let content = "original permitted bytes" in
+  let sentinel = "outside sentinel must survive" in
+  let edited = "edited permitted bytes" in
+  write_file (Filename.concat base path) content;
+  let outside_target = Filename.concat outside (Filename.basename path) in
+  write_file outside_target sentinel;
+  let outside_names () = Array.to_list (Sys.readdir outside) |> List.sort String.compare in
+  let initial_outside_names = outside_names () in
+  let _, expected_revision = observed_file ~base path in
+  let displaced = original_path ^ ".held" in
+  let before_publication_called = ref false in
+  let original_moved = ref false in
+  let link_installed = ref false in
+  Fun.protect
+    ~finally:(fun () ->
+      if !link_installed then Unix.unlink original_path;
+      if !original_moved then Unix.rename displaced original_path)
+    (fun () ->
+      let result = W.For_testing.save_workspace_file_before_publication
+          ~before_publication:(fun () ->
+            check bool "publication boundary occurs once" false !before_publication_called;
+            before_publication_called := true;
+            Unix.rename original_path displaced;
+            original_moved := true;
+            Unix.symlink replacement_path original_path;
+            link_installed := true)
+          ~publication_recovery ~base ~path ~expected_revision ~content:edited in
+      check bool "swap occurs after the genuine revision comparison" true !before_publication_called;
+      check string "outside target is unchanged" sentinel (read_test_file outside_target);
+      check (list string) "no staging entry appears outside the permitted root"
+        initial_outside_names (outside_names ());
+      let original_target =
+        if String.equal original_path base then Filename.concat displaced path
+        else Filename.concat displaced (Filename.basename path) in
+      Result.fold
+        ~ok:(fun _ -> check string "success updates only the held original parent"
+          edited (read_test_file original_target))
+        ~error:(fun _ ->
+          let actual = read_test_file original_target in
+          check bool "refusal or uncertainty retains complete original or edited bytes"
+            true (String.equal actual content || String.equal actual edited))
+        result)
+
+let test_file_save_parent_swap_confined () =
+  with_save_files (fun ~publication_recovery base ->
+    with_temp_dir (fun outside ->
+      check_save_after_directory_swap ~publication_recovery ~base
+        ~path:"src/source.ml" ~original_path:(Filename.concat base "src")
+        ~replacement_path:outside ~outside))
+
+let test_file_save_root_swap_confined () =
+  with_save_files (fun ~publication_recovery base ->
+    with_temp_dir (fun outside ->
+      check_save_after_directory_swap ~publication_recovery ~base
+        ~path:"source.ml" ~original_path:base ~replacement_path:outside ~outside))
 
 let test_file_save_http_authority () =
   let old_state = Server_auth.For_testing.snapshot_server_state () in
@@ -689,9 +766,13 @@ let test_file_save_http_authority () =
       Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
         ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
         (fun () -> with_temp_dir (fun base_path ->
-          let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+          let state = Masc.Mcp_server.create_state_eio ~sw
+              ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
+              ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
+              ~net:(Eio.Stdenv.net env) ~base_path in
           let config = Masc.Mcp_server.workspace_config state in
           ignore (Masc.Workspace.init config ~agent_name:None);
+          Masc.Mcp_server.For_testing.await_publication_recovery_initialization state;
           Masc.Auth.save_auth_config base_path
             { Masc_domain.default_auth_config with enabled = true; require_token = true };
           let token agent_name role = match Masc.Auth.create_token base_path ~agent_name ~role with
@@ -802,7 +883,9 @@ let () =
     ; ( "revision-bound file writes"
       , [ test_case "exact bytes, executable mode, stale revision and empty save" `Quick test_file_save_revision_and_exact_bytes
         ; test_case "workspace roots, path guards and internal aliases" `Quick test_file_save_scope_and_path_guards
-        ; test_case "competing same-revision writers" `Quick test_file_save_competing_revisions ] )
+        ; test_case "competing same-revision writers" `Quick test_file_save_competing_revisions
+        ; test_case "parent replaced by outside symlink after comparison" `Quick test_file_save_parent_swap_confined
+        ; test_case "root replaced by outside symlink after comparison" `Quick test_file_save_root_swap_confined ] )
     ; ( "file write HTTP authority"
       , [test_case "Admin, canonical workspace and observed revision" `Quick test_file_save_http_authority] )
     ]

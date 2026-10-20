@@ -4,7 +4,11 @@
     request or a request id listed twice is refused whole: the host cannot
     tell which part the package meant. *)
 
-type t = Exact_output of Lane_addon_exact.request
+type t =
+  | Exact_output of Lane_addon_exact.request
+  | Read_records of { request_id : string; source_id : string; after : string option }
+      (** Records of a granted source after [after], a cursor the host gave in
+          an earlier result. [None] reads from the beginning. *)
 
 val request_id : t -> string
 

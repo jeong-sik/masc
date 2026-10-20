@@ -1,14 +1,38 @@
 let ( let* ) = Result.bind
 
-type t = Exact_output of Lane_addon_exact.request
+type t =
+  | Exact_output of Lane_addon_exact.request
+  | Read_records of { request_id : string; source_id : string; after : string option }
 
-let request_id = function Exact_output request -> request.Lane_addon_exact.request_id
+let request_id = function
+  | Exact_output request -> request.Lane_addon_exact.request_id
+  | Read_records { request_id; _ } -> request_id
+
+let text fields key =
+  match List.assoc_opt key fields with
+  | Some (`String value) when String.trim value <> "" -> Ok value
+  | Some _ | None -> Error (key ^ " requires a non-blank string")
+
+let read_records fields =
+  match List.find_opt (fun (key, _) -> not (List.mem key [ "kind"; "request_id"; "source_id"; "after" ])) fields with
+  | Some (key, _) -> Error ("a read_records request has no key " ^ key)
+  | None ->
+    let* request_id = text fields "request_id" in
+    let* source_id = text fields "source_id" in
+    let* after =
+      match List.assoc_opt "after" fields with
+      | None | Some `Null -> Ok None
+      | Some (`String cursor) -> Ok (Some cursor)
+      | Some _ -> Error "after must be a cursor string or null"
+    in
+    Ok (Read_records { request_id; source_id; after })
 
 let request_of_json = function
   | `Assoc fields as json ->
     (match List.assoc_opt "kind" fields with
      | Some (`String "exact_output") ->
        Lane_addon_exact.request_of_json json |> Result.map (fun request -> Exact_output request)
+     | Some (`String "read_records") -> read_records fields
      | Some (`String kind) -> Error ("this host has no request kind " ^ kind)
      | Some _ | None -> Error "a host request requires a string kind")
   | _ -> Error "a host request must be an object"

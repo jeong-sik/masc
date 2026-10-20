@@ -22,6 +22,16 @@ let test_a_listing_is_refused_whole () =
     ; "not an object", `List [] ];
   check bool "an empty listing is a listing" true (Host.listing_of_json (`Assoc [ "requests", `List [] ]) = Ok [])
 
+let test_a_read_request_is_strict () =
+  let read fields = `Assoc [ "requests", `List [ `Assoc (("kind", `String "read_records") :: fields) ] ] in
+  (match Host.listing_of_json (read [ "request_id", `String "r"; "source_id", `String "board"; "after", `Null ]) with
+   | Ok [ Host.Read_records { source_id; after = None; _ } ] -> check string "the source" "board" source_id
+   | Ok _ | Error _ -> fail "a read from the beginning must decode");
+  List.iter (fun (label, fields) -> check bool label true (Result.is_error (Host.listing_of_json (read fields))))
+    [ "an unknown key", [ "request_id", `String "r"; "source_id", `String "board"; "limit", `Int 5 ]
+    ; "a cursor that is not a string", [ "request_id", `String "r"; "source_id", `String "board"; "after", `Int 3 ]
+    ; "no source", [ "request_id", `String "r" ] ]
+
 let test_the_answer_is_strict () =
   check bool "accepted" true (Host.accepted_of_json (`Assoc [ "accepted", `Bool true ]) = Ok true);
   check bool "not accepted" true (Host.accepted_of_json (`Assoc [ "accepted", `Bool false ]) = Ok false);
@@ -38,5 +48,6 @@ let () =
     [ ( "protocol"
       , [ test_case "a listing keeps the package order" `Quick test_a_listing_keeps_the_package_order
         ; test_case "a listing is refused whole" `Quick test_a_listing_is_refused_whole
+        ; test_case "a read request is strict" `Quick test_a_read_request_is_strict
         ; test_case "the answer is strict" `Quick test_the_answer_is_strict
         ; test_case "a package cannot export the host tools" `Quick test_a_package_cannot_export_the_host_tools ] ) ]

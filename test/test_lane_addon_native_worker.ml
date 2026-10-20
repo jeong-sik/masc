@@ -219,7 +219,6 @@ let failed_retirement_still_reaps () = with_fixture (fun env sw root ->
       check int "pre-discovery exports stay unavailable" 0 (List.length (Native.exported_tools worker));
       Unix.chmod (Filename.concat root "slot") 0o755;
       Error "fixture refuses publication") () in
-  Unix.chmod (Filename.concat root "slot") 0o700;
   check bool "retirement failure remains unconfirmed" true
     (match result with Error (Native.Cleanup_unconfirmed _) -> true | Ok _ | Error _ -> false);
   let pid = Yojson.Safe.Util.(Yojson.Safe.from_string (read root "spawned") |> member "pid" |> to_int) in
@@ -228,10 +227,19 @@ let failed_retirement_still_reaps () = with_fixture (fun env sw root ->
   (match created with
    | {contents=Some worker} ->
        check int "failed owner exports remain revoked" 0 (List.length (Native.exported_tools worker));
-       check bool "failure never becomes a release receipt" true
-         (match Native.release worker with Some (Error (Native.Cleanup_unconfirmed _)) -> true | _ -> false)
+       check bool "failed durable write is not release evidence" true
+         (match Native.release worker with Some (Error (Native.Cleanup_unconfirmed _)) -> true | _ -> false);
+       Unix.chmod (Filename.concat root "slot") 0o700;
+       let receipt = require (Native.stop worker) in
+       check int "a later stop settles the same exited child" pid receipt.pid;
+       assert_released worker receipt;
+       check bool "fresh durable reread confirms settlement" true
+         (Eio_unix.run_in_systhread (fun () -> Native_addon_lease.status claim)=Ok Native_addon_lease.Settled);
+       check bool "cleanup recovery never dispatches a package call" false (marker root "calls" ());
+       check bool "a retained successful release needs no new retirement write" true
+         (match Native.release worker with Some (Ok retained) -> retained.pid=pid | _ -> false)
    | {contents=None} -> fail "missing exact created worker");
-  require (Eio_unix.run_in_systhread (fun () -> Native_addon_lease.retire claim)))
+  ())
 
 let blocked_validation_still_stops () = with_fixture (fun env sw root ->
   let clock = Eio.Stdenv.clock env in

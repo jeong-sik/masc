@@ -32,6 +32,10 @@ let confirm t result = match t.confirmed with
   | None -> match result with
     | Error error -> Error error
     | Ok receipt ->
+        (* Process completion is immutable; durable retirement can fail
+           transiently. Retry only this original claim, never its payload. *)
+        let* () = Eio_unix.run_in_systhread (fun () -> Native_addon_lease.retire t.admission)
+          |> Result.map_error (fun error -> Cleanup_unconfirmed (Native_addon_lease.error_to_string error)) in
         match admission_status t.admission with
         | Ok Native_addon_lease.Settled -> t.confirmed <- Some receipt;Ok receipt
         | Ok (Native_addon_lease.Awaiting_exec | Live _ | Cleanup_pending _) ->
@@ -100,9 +104,7 @@ let start ~sw ~clock ~grace_seconds ~admission ~launcher ~contract ~command ?cwd
     let finish () = Eio.Cancel.protect (fun () ->
       worker.phase <- Retired;
       Protocol.revoke protocol;
-      let terminal = match !retirement_failure with
-      | Some error -> Error (Cleanup_unconfirmed (Native_addon_lease.error_to_string error))
-      | None -> if not !cleanup_completed then
+      let terminal = if not !cleanup_completed then
           Error (Cleanup_unconfirmed "native worker owner cleanup did not complete")
         else match !client, !identity with
           | Some client, Some (pid, started) ->
@@ -112,10 +114,12 @@ let start ~sw ~clock ~grace_seconds ~admission ~launcher ~contract ~command ?cwd
           | None, None | Some _, None | None, Some _ ->
               Error (match !failure with Some error -> error | None -> Stopped) in
       ignore (Eio.Promise.try_resolve set_completion terminal);
-      let start_error = match terminal with
-        | Error (Cleanup_unconfirmed _ as error) -> error
-        | Ok _ | Error (Invalid_specification _ | Start_failed _ | Admission _ | Protocol _ | Stopped) ->
-            (match !failure with Some error -> error | None -> Stopped) in
+      let start_error = match !retirement_failure with
+        | Some error -> Cleanup_unconfirmed (Native_addon_lease.error_to_string error)
+        | None -> match terminal with
+          | Error (Cleanup_unconfirmed _ as error) -> error
+          | Ok _ | Error (Invalid_specification _ | Start_failed _ | Admission _ | Protocol _ | Stopped) ->
+              (match !failure with Some error -> error | None -> Stopped) in
       ignore (Eio.Promise.try_resolve set_ready (Error start_error))) in
     Fun.protect ~finally:finish (fun () ->
       try

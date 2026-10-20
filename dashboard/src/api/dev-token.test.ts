@@ -3,6 +3,7 @@ import {
   devTokenBootstrapStatus,
   devTokenBootstrapNeedsReadinessProbe,
   ensureDevToken,
+  recoverFromRejectedCredential,
   refreshDevTokenAfterAuthError,
   resetDevTokenBootstrap,
   type DevTokenBootstrapStatus,
@@ -300,6 +301,34 @@ describe('ensureDevToken', () => {
     expect(token).toBe('current-token')
     // Unchanged credential, so nothing may announce a token change.
     expect(setStoredToken).not.toHaveBeenCalled()
+    expect(clearStoredToken).not.toHaveBeenCalled()
+  })
+})
+
+describe('recoverFromRejectedCredential on a remote host', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetDevTokenBootstrap()
+    isRemoteAccess.mockReturnValue(true)
+    currentDashboardActor.mockReturnValue('dashboard')
+  })
+
+  it('drops a refused token because no dev token can replace it there', async () => {
+    getStoredToken.mockReturnValue('remote-token')
+    getStoredTokenMeta.mockReturnValue({ source: 'dev', actor: 'dashboard', role: 'admin' })
+
+    await recoverFromRejectedCredential({ token: 'remote-token', authErrorCode: 'token_expired' })
+
+    expect(fetchWithTimeout).not.toHaveBeenCalled()
+    expect(clearStoredToken).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves a token that is no longer the refused one', async () => {
+    getStoredToken.mockReturnValue('newer-token')
+    getStoredTokenMeta.mockReturnValue({ source: 'manual' })
+
+    await recoverFromRejectedCredential({ token: 'remote-token', authErrorCode: 'invalid_token' })
+
     expect(clearStoredToken).not.toHaveBeenCalled()
   })
 })

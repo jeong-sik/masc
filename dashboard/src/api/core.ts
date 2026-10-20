@@ -25,6 +25,7 @@ function getQueryParams(): URLSearchParams {
 
 const TOKEN_STORAGE_KEY = 'masc_bearer_token'
 const TOKEN_META_STORAGE_KEY = 'masc_bearer_token_meta'
+const BEARER_PREFIX = 'Bearer '
 
 export type StoredTokenMeta =
   | { source: 'dev'; actor: 'dashboard'; role: 'admin' }
@@ -200,7 +201,7 @@ export function authHeaders(options: HeaderOptions = {}): Record<string, string>
   const agent = options.actorName !== undefined
     ? sanitizeDashboardActorName(options.actorName)
     : resolvedImplicitActor
-  if (token) headers['Authorization'] = `Bearer ${token}`
+  if (token) headers['Authorization'] = `${BEARER_PREFIX}${token}`
   if (options.includeActor !== false && agent) {
     headers['X-MASC-Agent'] = agent
   }
@@ -310,6 +311,55 @@ export function extractApiError(err: unknown, fallbackMessage: string): ApiError
   return { message: fallbackMessage, status: null, path: null, timeout: false }
 }
 
+/** A 401 answered to a request that carried this Bearer token. */
+export interface RejectedCredential {
+  token: string
+  authErrorCode: string | undefined
+}
+
+type RejectedCredentialListener = (rejection: RejectedCredential) => void
+
+let rejectedCredentialListener: RejectedCredentialListener | null = null
+
+/* Every credentialed request leaves through `credentialedFetch`, so one
+   listener sees each 401 together with the token that request sent. The
+   recovery policy lives in `dev-token.ts`, which imports this module; the app
+   installs the listener at start so the import stays one-way. */
+export function setRejectedCredentialListener(
+  listener: RejectedCredentialListener | null,
+): void {
+  rejectedCredentialListener = listener
+}
+
+function sentBearerToken(headers: HeadersInit | undefined): string | null {
+  const value = new Headers(headers).get('Authorization')
+  if (value === null || !value.startsWith(BEARER_PREFIX)) return null
+  const token = value.slice(BEARER_PREFIX.length).trim()
+  return token === '' ? null : token
+}
+
+async function reportRejectedCredential(
+  init: RequestInit,
+  response: Response,
+): Promise<void> {
+  const listener = rejectedCredentialListener
+  if (response.status !== 401 || listener === null) return
+  const token = sentBearerToken(init.headers)
+  if (token === null) return
+  // Cloned before this function first awaits, so the caller still owns the
+  // original body.
+  const info = await errorResponseInfoFromResponse(response.clone())
+  listener({ token, authErrorCode: info.authErrorCode })
+}
+
+async function credentialedFetch(path: string, init: RequestInit): Promise<Response> {
+  const response = await fetch(path, init)
+  void reportRejectedCredential(init, response).catch(err => {
+    console.warn('[dashboard-auth] rejected credential listener failed', err)
+  })
+  return response
+}
+
 /** A consumer keeps the deadline and caller abort connected through body read. */
 export function fetchWithTimeout(path: string, init: RequestInit, timeoutMs: number): Promise<Response>
 export function fetchWithTimeout<T>(
@@ -338,7 +388,7 @@ export async function fetchWithTimeout<T>(
   }
 
   try {
-    const response = await fetch(path, {
+    const response = await credentialedFetch(path, {
       ...init,
       cache: init.cache ?? 'no-store',
       signal: controller.signal,
@@ -371,7 +421,7 @@ export async function fetchWithTimeout<T>(
  * explicit caller-provided AbortSignal.
  */
 export function fetchControlPlane(path: string, init: RequestInit): Promise<Response> {
-  return fetch(path, {
+  return credentialedFetch(path, {
     ...init,
     cache: init.cache ?? 'no-store',
   })
@@ -408,7 +458,7 @@ export async function fetchJsonWithTimeout(
 
   try {
     const request = (async () => {
-      const response = await fetch(path, {
+      const response = await credentialedFetch(path, {
         ...init,
         cache: init.cache ?? 'no-store',
         signal: controller.signal,

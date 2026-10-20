@@ -46,7 +46,8 @@ import { FetchScheduler } from './lib/fetch-scheduler'
 import { WARM_MAX_RETRIES, warmRetryDelayFor } from './lib/warm-retry'
 import { isRecord, asString, asNumber } from './components/common/normalize'
 import { setCanonicalDashboardActor } from './lib/dashboard-session-actor'
-import { refreshDevTokenAfterAuthError } from './api/dev-token'
+import { dashboardBearerToken } from './api/core'
+import { recoverFromRejectedCredential } from './api/dev-token'
 import { timeBoardRequest } from './board-metrics'
 import { namespaceTruth, namespaceTruthError, namespaceTruthInitializing } from './namespace-truth-signals'
 import { normalizeNamespaceTruth } from './namespace-truth-normalizers'
@@ -774,6 +775,7 @@ function hydrateDashboardBootstrap(
   data: DashboardBootstrapResponse,
   executionRequestGeneration: number,
   goalOwnerAtStart: symbol,
+  sentToken: string | null,
 ): void {
   if (!data.shell || bootstrapSliceError(data.shell)) {
     throw new Error('dashboard bootstrap shell slice unavailable')
@@ -782,7 +784,7 @@ function hydrateDashboardBootstrap(
     throw new Error('dashboard bootstrap execution slice unavailable')
   }
 
-  hydrateShellSnapshot(data.shell, { light: true })
+  hydrateShellSnapshot(data.shell, { light: true, sentToken })
   hydrateExecutionSnapshot(data.execution, { requestGeneration: executionRequestGeneration })
 
   if (data.namespace_truth && !bootstrapSliceError(data.namespace_truth)) {
@@ -853,10 +855,12 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
       executionLoading.value = true
       executionError.value = null
       try {
+        const sentToken = dashboardBearerToken()
         hydrateDashboardBootstrap(
           await fetchDashboardBootstrap(),
           executionRequestGeneration,
           goalOwnerAtStart,
+          sentToken,
         )
       } catch (bootstrapErr) {
         console.warn('[Dashboard] bootstrap refresh failed, falling back:', bootstrapErr)
@@ -945,25 +949,31 @@ function normalizeShellAuthSummary(raw: unknown): DashboardShellAuthSummary | nu
    `[silent:dashboard_actor_fallback] outcome=error err_kind=token_mismatch`
    — 7 in the 33 minutes sampled, with no terminating condition.
 
-   `refreshDevTokenAfterAuthError` owns the whole policy: it ignores codes
-   that a new token cannot fix, refuses to touch a manually pasted token,
-   deduplicates concurrent attempts, and reports failure when the refetched
-   token is identical, so a token that is rejected for some other reason
-   cannot drive a refresh loop. */
-function recoverFromRejectedShellAuth(auth: DashboardShellAuthSummary | null): void {
-  if (auth === null || auth.token_valid || !auth.token_present) return
-  void refreshDevTokenAfterAuthError(auth.auth_error_code)
+   `recoverFromRejectedCredential` owns the whole policy, the same one a 401
+   reply triggers: it re-mints a loopback dev token, drops any other token the
+   server called invalid or expired, and does nothing once the stored token is
+   no longer the one this shell request sent. `sentToken` is read before the
+   request leaves for that comparison. */
+function recoverFromRejectedShellAuth(
+  auth: DashboardShellAuthSummary | null,
+  sentToken: string | null,
+): void {
+  if (auth === null || auth.token_valid || !auth.token_present || sentToken === null) return
+  void recoverFromRejectedCredential({ token: sentToken, authErrorCode: auth.auth_error_code ?? undefined })
+    .catch(err => {
+      console.warn('[dashboard-auth] rejected shell credential recovery failed', err)
+    })
 }
 
 export function hydrateShellSnapshot(
   data: DashboardShellResponse,
-  opts?: { light?: boolean; preserveAuth?: boolean },
+  opts: { light?: boolean; preserveAuth?: boolean; sentToken: string | null },
 ): void {
-  const wantsLight = opts?.light === true
-  const preserveAuth = opts?.preserveAuth === true
+  const wantsLight = opts.light === true
+  const preserveAuth = opts.preserveAuth === true
   const normalizedAuth = normalizeShellAuthSummary(data.auth)
   if (!preserveAuth) {
-    recoverFromRejectedShellAuth(normalizedAuth)
+    recoverFromRejectedShellAuth(normalizedAuth, opts.sentToken)
     setCanonicalDashboardActor(
       normalizedAuth?.token_valid
         ? normalizedAuth.effective_agent ?? normalizedAuth.token_agent ?? null
@@ -1025,8 +1035,9 @@ export async function refreshShell(opts?: RefreshOptions): Promise<boolean> {
   inflightShellRefreshLight = wantsLight
   inflightShellRefresh = (async () => {
     try {
+      const sentToken = dashboardBearerToken()
       const data = await fetchDashboardShell({ light: wantsLight })
-      hydrateShellSnapshot(data, { light: wantsLight })
+      hydrateShellSnapshot(data, { light: wantsLight, sentToken })
       return true
     } catch (err) {
       setCanonicalDashboardActor(null)

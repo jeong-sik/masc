@@ -1,7 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { streamSetupLogin, sendLoginInput, fetchLoginReceipt, type LoginEvent } from './setup-login'
 import { get, postControlPlane } from './core'
-vi.mock('./core', () => ({ authHeaders: () => ({ Authorization: 'Bearer fixture' }), get: vi.fn(), postControlPlane: vi.fn() }))
+vi.mock('./core', () => ({ authHeaders: () => ({ Authorization: 'Bearer fixture' }), get: vi.fn(), postControlPlane: vi.fn(),
+  fetchControlPlane: (path: string, init: RequestInit) => fetch(path, init) }))
 vi.mock('./dev-token', () => ({ ensureDevToken: vi.fn(async () => {}) }))
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks() })
 const id = 'a'.repeat(64)

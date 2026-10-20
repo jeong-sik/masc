@@ -1,4 +1,4 @@
-import { authHeaders } from './core'
+import { authHeaders, fetchControlPlane } from './core'
 
 export interface ExecuteOutputLine {
   /** This line's number in the keeper's output log. */
@@ -75,7 +75,7 @@ export async function streamExecuteOutput(
 ): Promise<void> {
   const keeper = keeperName.trim()
   if (!keeper) throw new Error('keeper name is required')
-  const res = await fetch(`/api/dashboard/execute-output/${encodeURIComponent(keeper)}`, {
+  const res = await fetchControlPlane(`/api/dashboard/execute-output/${encodeURIComponent(keeper)}`, {
     headers: {
       ...authHeaders(),
       Accept: 'text/event-stream',

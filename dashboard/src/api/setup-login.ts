@@ -1,4 +1,4 @@
-import { authHeaders, get, postControlPlane } from './core'
+import { authHeaders, fetchControlPlane, get, postControlPlane } from './core'
 import { ensureDevToken } from './dev-token'
 import { isRecord } from '../lib/type-guards'
 import type { Source } from './runtime-setup'
@@ -25,7 +25,7 @@ const authentication = (value: unknown): value is Authentication => ['authentica
 
 export async function streamSetupLogin(source: Source, onEvent: (event: LoginEvent) => void, signal: AbortSignal): Promise<void> {
   await ensureDevToken()
-  const response = await fetch(path, { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+  const response = await fetchControlPlane(path, { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ integration_id: source.integration_id, ...(source.account_ref ? { account_ref: source.account_ref } : {}) }), signal })
   if (!response.ok || !response.body) throw new Error('Login stream unavailable')
   const reader = response.body.getReader()

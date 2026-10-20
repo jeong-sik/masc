@@ -5154,7 +5154,8 @@ streaming = false
         Yojson.Safe.Util.(projection |> member "resolved" |> member "id" |> to_string);
       let affected_meta = meta "affected" in
       assert_unavailable (Keeper_unified_turn_pre_dispatch.build_runtime_execution
-          ~meta:affected_meta ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta affected_meta));
+          ~meta:affected_meta ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta affected_meta)
+          ~deferred_runtime_lane:None);
       assert_unavailable (run "affected");
       check int "no provider request for unavailable assignment" 0 (Exact_output_fixture.post_count server);
       (match Runtime.edit_config_text ~runtime_config_path:path
@@ -5192,7 +5193,7 @@ streaming = false
          | Ok Runtime.Initialized -> fail "shadowed missing binding still needs a catalog report"
          | Error error -> fail (Runtime.strict_init_error_to_string error));
         (match Keeper_unified_turn_pre_dispatch.build_runtime_execution
-            ~meta:affected_meta ~runtime_id:"fixture.missing" with
+            ~meta:affected_meta ~runtime_id:"fixture.missing" ~deferred_runtime_lane:None with
          | Ok execution ->
              check string "pre-dispatch keeps the requested lane ID" "fixture.missing"
                execution.runtime_id;
@@ -6065,6 +6066,7 @@ let test_runtime_max_context_override_above_cap_is_clamped () =
              Keeper_unified_turn_pre_dispatch.build_runtime_execution
                ~meta
                ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
+               ~deferred_runtime_lane:None
            with
            | Error error ->
              failf
@@ -6148,6 +6150,7 @@ let test_lane_budget_is_bound_by_smallest_candidate_window () =
              Keeper_unified_turn_pre_dispatch.build_runtime_execution
                ~meta
                ~runtime_id:"ollama_cloud.bigwin"
+               ~deferred_runtime_lane:None
            with
            | Error error ->
              failf
@@ -6166,6 +6169,112 @@ let test_lane_budget_is_bound_by_smallest_candidate_window () =
                "execution keeps the entry-point runtime id"
                "ollama_cloud.bigwin"
                execution.runtime_id))
+
+(* #38503: a deferred walk resumes at [next_runtime_id] and then rotates
+   through [later_runtime_ids]. The prompt is shaped once, so the budget is the
+   smallest window among all of them, not the next candidate's alone. *)
+let test_deferred_budget_is_bound_by_a_later_candidate_window () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"deferred-big\"\n\
+     provider_name = \"ollama_cloud\"\n\
+     base = \"ollama_cloud\"\n\
+     max_context_tokens = 1048576\n\
+     \n\
+     [[models]]\n\
+     id_prefix = \"deferred-mid\"\n\
+     provider_name = \"ollama_cloud\"\n\
+     base = \"ollama_cloud\"\n\
+     max_context_tokens = 300000\n\
+     \n\
+     [[models]]\n\
+     id_prefix = \"deferred-small\"\n\
+     provider_name = \"ollama_cloud\"\n\
+     base = \"ollama_cloud\"\n\
+     max_context_tokens = 203000\n"
+  in
+  let runtime_toml =
+    "[providers.ollama_cloud]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"https://ollama.com/v1\"\n\
+     \n\
+     [models.bigwin]\n\
+     api-name = \"deferred-big\"\n\
+     max-context = 1048576\n\
+     \n\
+     [models.midwin]\n\
+     api-name = \"deferred-mid\"\n\
+     max-context = 300000\n\
+     \n\
+     [models.smallwin]\n\
+     api-name = \"deferred-small\"\n\
+     max-context = 203000\n\
+     \n\
+     [ollama_cloud.bigwin]\n\
+     [ollama_cloud.midwin]\n\
+     [ollama_cloud.smallwin]\n\
+     \n\
+     [runtime]\n\
+     default = \"ollama_cloud.bigwin\"\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_model_catalog_content catalog @@ fun () ->
+       with_temp_runtime_toml runtime_toml (fun path ->
+         match Runtime.init_default ~config_path:path with
+         | Error msg -> failf "deferred fixture should load: %s" msg
+         | Ok () ->
+           let meta =
+             match
+               Masc_test_deps.meta_of_json_fixture
+                 (`Assoc
+                    [ "name", `String "deferred-min-budget"
+                    ; "trace_id", `String "test-deferred-min-budget"
+                    ])
+             with
+             | Ok meta -> meta
+             | Error detail -> failf "deferred meta fixture failed: %s" detail
+           in
+           let hint =
+             Keeper_turn_driver.restore_deferred_runtime_lane
+               ~assignment_id:"ollama_cloud.bigwin"
+               ~failed_runtime_id:"ollama_cloud.bigwin"
+               ~next_runtime_id:"ollama_cloud.midwin"
+               ~later_runtime_ids:[ "ollama_cloud.smallwin" ]
+               ~failure:(Agent_core.Error.Internal "first candidate failed")
+           in
+           let max_context ~runtime_id ~deferred_runtime_lane =
+             match
+               Keeper_unified_turn_pre_dispatch.build_runtime_execution
+                 ~meta
+                 ~runtime_id
+                 ~deferred_runtime_lane
+             with
+             | Error error ->
+               failf
+                 "deferred execution should resolve: %s"
+                 (Agent_core.Error.to_string error)
+             | Ok execution -> execution.max_context
+           in
+           check bool
+             "the next candidate's own window with no hint is above the later one"
+             true
+             (max_context ~runtime_id:"ollama_cloud.midwin" ~deferred_runtime_lane:None > 203000);
+           check int
+             "the budget is the smallest window of the resumed suffix"
+             203000
+             (max_context
+                ~runtime_id:"ollama_cloud.midwin"
+                ~deferred_runtime_lane:(Some hint));
+           check bool
+             "a hint that does not start at this runtime adds no candidate"
+             true
+             (max_context
+                ~runtime_id:"ollama_cloud.bigwin"
+                ~deferred_runtime_lane:(Some hint)
+              > 203000)))
 
 let test_runtime_max_context_missing_both_sources_rejected_at_load () =
   let runtime_toml =
@@ -7397,6 +7506,9 @@ let () =
           test_case
             "max-context: lane budget is bound by the smallest candidate window"
             `Quick test_lane_budget_is_bound_by_smallest_candidate_window;
+          test_case
+            "max-context: deferred budget is bound by a later candidate window"
+            `Quick test_deferred_budget_is_bound_by_a_later_candidate_window;
           test_case
             "max-context: missing both sources is rejected at load"
             `Quick test_runtime_max_context_missing_both_sources_rejected_at_load;

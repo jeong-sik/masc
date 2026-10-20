@@ -19,6 +19,7 @@ characters) and `native-tui-scenario`:
 | `resource-reading` | TUI, server and the four test executables | `test_tui_published_reports`, `test_tui_resource_document_search`, `test_tui_resource_image_admission`, `test_tui_resource_images` |
 | `addon-lifecycle` | TUI, server and the two test executables | `test_tui_lane_addons`, `test_lane_addon_application` |
 | `source-readers` | TUI, server and the seven test executables | The four `original-tool-result` suites plus `test_tui_workspace_entries`, `test_tui_keys`, `test_tui_palette_matching` |
+| `code-drafts` | TUI, server and the five test executables | `test_tui_code_draft`, `test_tui_workspace_entries`, `test_workspace_file_confidentiality`, `test_tui_keys`, `test_tui_palette_matching` |
 
 The server target is `bin/main_eio.exe`; the TUI is `bin/masc_tui.exe`.
 Every scenario also builds `bin/masc_tui_keys_doc_cli.exe`, the canonical key
@@ -73,6 +74,25 @@ target fails instead of omitting that suite.
 gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
   -f native-tui-source-sha=SOURCE_COMMIT_40_HEX \
   -f native-tui-scenario=source-readers
+```
+
+Use `code-drafts` for a selected revision-bound Code editor/save candidate.
+The draft suite checks exact candidate bytes, submitted-save ownership,
+conflict and uncertain-write reconciliation, and the external editor's actual
+temporary file and terminal handoff. The workspace entries suite checks paired
+source/revision decoding, comparison-read ownership and deferred post-save
+refresh. The confidentiality suite checks the server's save authorization,
+workspace identity, revision conflicts and file confinement. The keys and
+palette suites compile and exercise direct consumers of the revised document
+payload. It packages the matching server/TUI for separate actual editor/save
+verification. These five suites do not establish visible terminal behavior,
+real editor usability, or successful deployment. All five targets must exist
+in the selected source; no missing suite is silently omitted.
+
+```sh
+gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
+  -f native-tui-source-sha=SOURCE_COMMIT_40_HEX \
+  -f native-tui-scenario=code-drafts
 ```
 
 Use `code-references` for a selected Code reference-readiness candidate. The

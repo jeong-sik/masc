@@ -23,6 +23,7 @@ on:
           - resource-reading
           - addon-lifecycle
           - source-readers
+          - code-drafts
 
 permissions:
   contents: read

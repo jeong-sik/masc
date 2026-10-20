@@ -28,7 +28,7 @@ jobs:
         run: |
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'source-sha must be 40 lowercase hex characters' >&2; exit 1; }
           case "$PROOF_SCENARIO" in
-            detail-ownership|workspace-files|rich-workspace|rich-chat-workspace|original-tool-result|code-references|resource-reading|addon-lifecycle|source-readers) ;;
+            detail-ownership|workspace-files|rich-workspace|rich-chat-workspace|original-tool-result|code-references|resource-reading|addon-lifecycle|source-readers|code-drafts) ;;
             *) echo 'unsupported native proof scenario' >&2; exit 1 ;;
           esac
       - uses: actions/checkout@v7
@@ -89,6 +89,9 @@ jobs:
               command -v python3 >/dev/null
               targets+=(bin/main_eio.exe test/test_lsp_workspace_pool.exe test/test_lsp_questions.exe test/test_lsp_message_router.exe test/test_lsp_process_manager.exe test/test_server_ide_lsp_proxy.exe)
               ;;
+            code-drafts)
+              targets+=(bin/main_eio.exe test/test_tui_code_draft.exe test/test_tui_workspace_entries.exe test/test_workspace_file_confidentiality.exe test/test_tui_keys.exe test/test_tui_palette_matching.exe)
+              ;;
             *) echo 'unsupported native proof scenario' >&2; exit 1 ;;
           esac
           if [ "$PROOF_SCENARIO" = source-readers ]; then
@@ -139,7 +142,7 @@ jobs:
           cp _build/default/bin/masc_tui.exe proof/masc-tui
           chmod +x proof/masc-tui
           otool -L proof/masc-tui > proof/native-dependencies.txt
-          if [ "$PROOF_SCENARIO" = workspace-files ] || [ "$PROOF_SCENARIO" = rich-workspace ] || [ "$PROOF_SCENARIO" = rich-chat-workspace ] || [ "$PROOF_SCENARIO" = original-tool-result ] || [ "$PROOF_SCENARIO" = code-references ] || [ "$PROOF_SCENARIO" = resource-reading ] || [ "$PROOF_SCENARIO" = addon-lifecycle ] || [ "$PROOF_SCENARIO" = source-readers ]; then
+          if [ "$PROOF_SCENARIO" = workspace-files ] || [ "$PROOF_SCENARIO" = rich-workspace ] || [ "$PROOF_SCENARIO" = rich-chat-workspace ] || [ "$PROOF_SCENARIO" = original-tool-result ] || [ "$PROOF_SCENARIO" = code-references ] || [ "$PROOF_SCENARIO" = resource-reading ] || [ "$PROOF_SCENARIO" = addon-lifecycle ] || [ "$PROOF_SCENARIO" = source-readers ] || [ "$PROOF_SCENARIO" = code-drafts ]; then
             test "$(_build/default/bin/main_eio.exe build-commit)" = "$SOURCE_SHA"
             cp _build/default/bin/main_eio.exe proof/masc
             chmod +x proof/masc
@@ -169,7 +172,7 @@ jobs:
                   'sha256': hashlib.sha256(Path('proof/key-reference.md').read_bytes()).hexdigest(),
                   'producer': 'bin/masc_tui_keys_doc_cli.exe',
               },
-              'server_sha256': hashlib.sha256(Path('proof/masc').read_bytes()).hexdigest() if os.environ['PROOF_SCENARIO'] in ('workspace-files', 'rich-workspace', 'rich-chat-workspace', 'original-tool-result', 'code-references', 'resource-reading', 'addon-lifecycle', 'source-readers') else None,
+              'server_sha256': hashlib.sha256(Path('proof/masc').read_bytes()).hexdigest() if os.environ['PROOF_SCENARIO'] in ('workspace-files', 'rich-workspace', 'rich-chat-workspace', 'original-tool-result', 'code-references', 'resource-reading', 'addon-lifecycle', 'source-readers', 'code-drafts') else None,
               'build_targets': targets,
               'expected_tests': expected_tests,
               'executed_tests': executed_tests,

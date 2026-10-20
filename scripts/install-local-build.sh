@@ -149,13 +149,21 @@ else
     resolve_args+=(--base-path "$base_path")
   fi
   # The helper's stderr is kept apart from its key=value answer and shown only
-  # when the lookup fails. An old helper's "unknown command" is expected noise,
-  # but a helper that dies at start is not a missing workspace: every main
-  # build exited at start on an undecodable tool TOML (#44049), and this branch
-  # reported only that the workspace was not resolved.
+  # when the lookup fails or its answer is refused. An old helper's "unknown
+  # command" is expected noise, but a helper that dies at start is not a
+  # missing workspace: every main build exited at start on an undecodable tool
+  # TOML (#44049), and this branch reported only that the workspace was not
+  # resolved. The file exists only while the helper runs: the trap removes it
+  # when a signal ends the script in that window, and the text moves into
+  # resolve_errors afterwards.
+  resolve_stderr=""
+  trap 'rm -f "$resolve_stderr"' EXIT
   resolve_stderr=$(mktemp "${TMPDIR:-/tmp}/masc-resolve-workspace.XXXXXX")
   resolve_status=0
   resolution=$("$preflight_helper" "${resolve_args[@]}" 2>"$resolve_stderr") || resolve_status=$?
+  resolve_errors=$(cat "$resolve_stderr")
+  rm -f "$resolve_stderr"
+  trap - EXIT
   if [ "$resolve_status" -eq 0 ]; then
     :
   elif "$preflight_helper" build-commit >/dev/null 2>&1 \
@@ -165,11 +173,9 @@ else
     resolution="workspace=old_helper"
   else
     echo "install-local-build: runtime.toml not checked: $preflight_helper resolve-workspace exited with status $resolve_status; nothing installed. Its error output:" >&2
-    cat "$resolve_stderr" >&2
-    rm -f "$resolve_stderr"
+    printf '%s\n' "${resolve_errors:-(none)}" >&2
     exit 1
   fi
-  rm -f "$resolve_stderr"
   workspace_state=""
   workspace_source=""
   while IFS='=' read -r key value; do
@@ -182,7 +188,8 @@ else
   case "$workspace_state" in
     resolved)
       if [ -z "$workspace_root" ]; then
-        echo "install-local-build: runtime.toml not checked: $preflight_helper resolved the workspace but returned no root; nothing installed" >&2
+        echo "install-local-build: runtime.toml not checked: $preflight_helper resolved the workspace but returned no root; nothing installed. Its error output:" >&2
+        printf '%s\n' "${resolve_errors:-(none)}" >&2
         exit 1
       fi
       if [ -d "$workspace_root" ]; then
@@ -214,7 +221,8 @@ else
       echo "install-local-build: WARN runtime.toml not checked: $preflight_helper predates the check (no resolve-workspace); build it or drop --skip-build ($required_from)" >&2
       ;;
     *)
-      echo "install-local-build: runtime.toml not checked: $preflight_helper returned an invalid workspace answer; nothing installed" >&2
+      echo "install-local-build: runtime.toml not checked: $preflight_helper returned an invalid workspace answer; nothing installed. Its error output:" >&2
+      printf '%s\n' "${resolve_errors:-(none)}" >&2
       exit 1
       ;;
   esac

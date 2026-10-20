@@ -457,14 +457,14 @@ status: reference
     (쓸 만한 retry-after가 있는 rate limit, 재개 시각이 관측된 quota 창)만 그 시각에
     walk가 그 경로를 다시 올린다. provider가 시각을 말하지 않은 rate limit은 바닥 시각을
     둔 `Rest_dated`가 되고, 시각 없는 quota 관측은 `Rest_until_answered`가 되어
-    해제 때 기다림만 끝나며 순서 강등은 성공 답까지 남는다(`runtime_path_rest`의
-    해제 갈래 주석). `Rest_until_answered` 의 대기 자체도 `now`에서 굴러가는 바닥
-    시각으로 풀린다.
+    해제 때 기다림만 끝나며 순서 강등은 성공 답까지 남는다
+    (`Keeper_turn_driver.runtime_path_rest`). `Rest_until_answered` 의 대기 자체도
+    `now`에서 굴러가는 바닥 시각으로 풀린다.
   - 실패한 시도는 휴식이 아니다. 그 경로를 후보가 답할 때까지 뒤로 미룰 뿐, 발송을
     기다리게 하지 않는다(`RFC-0458 §3.4`).
   - 완료 검증도 같은 저장소를 읽는다. 검증 루프는 한 후보의 실패를
     `Reviews_again`·`Model_absent`·`Producer_must_act` 중 하나로 분류하고
-    (`lib/task/anti_rationalization.ml`), provider가 말한 재개 시각이 아직 앞이면
+    (`Anti_rationalization.candidate_failure`), provider가 말한 재개 시각이 아직 앞이면
     다시 검토한다. 이 분류는 다시 검토를 요청할 뿐, 검토를 막는 관문이 아니다.
     한 번의 호출 안에서 재시도를 판단하는 `Agent_core.Error.is_retryable`은 이 질문에
     답하지 못하므로, 시각을 말한 `HardQuota`에서도 재검토를 멈추지 않는다(#44227).

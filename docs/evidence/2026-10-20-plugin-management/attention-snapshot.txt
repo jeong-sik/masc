@@ -1,0 +1,110 @@
+[p1 "Plugin management proof" | space "MASC plugin management proof 20261020"(4): 1 managed, 0 untracked — p1* "Plugin management proof"]
+root
+  container
+    paragraph
+      text "Isolated Dashboard component · HTTP fixture · no production configuration"
+    container "Lane Add-ons"
+      container
+        container
+          heading
+            text "Lane Add-ons"
+          paragraph
+            text "Optional observations and relationships. Keeper work continues independently."
+        container
+          button [ref=1]
+            text "New TOML"
+          button [ref=2]
+            text "Refresh"
+      container "TOML configuration"
+        heading
+          text "Installed packages"
+        paragraph
+          text "Directory:"
+          text "/fixture/.masc/config/lane-addons"
+        paragraph
+          text "Configuration read:"
+          text "complete"
+        container "Installed package manager"
+          paragraph
+            text "Find an installation, edit its settings, then check its applied revision and worker observation. Saving TOML and applying it are separate steps."
+          container "Installation summary"
+            button [ref=3]
+              text "All installations"
+              text ":"
+              text "5"
+            button [ref=4]
+              text "Needs attention"
+              text ":"
+              text "1"
+            button [ref=5]
+              text "Pending changes"
+              text ":"
+              text "2"
+            button [ref=6]
+              text "Configured off"
+              text ":"
+              text "1"
+            button [ref=7]
+              text "Worker available"
+              text ":"
+              text "1"
+          container
+            text "Search installations"
+            searchbox [ref=8, loc=css:input[placeholder="Installation, package, run or file"]]
+              text "Installation, package, run or file"
+          status
+            text "Showing"
+            text "1"
+            text "of"
+            text "5"
+            text "readable installations. Worker state is the last inventory reading, not a live health check."
+          table "TOML declarations"
+            table_row
+              table_cell
+                text "INSTALLATION / PACKAGE"
+              table_cell
+                text "REQUESTED ACTIVITY"
+              table_cell
+                text "APPLICATION / WORKER STATUS"
+              table_cell
+                text "SETTINGS AND OBSERVATION"
+            table_row "Installation cleanup-failure"
+              table_cell
+                text "cleanup-failure"
+                container [ref=25]
+                  text "File and revisions"
+              table_cell
+                text "Requested: Off"
+              table_cell
+                status
+                  text "Needs attention"
+                paragraph
+                  text "Worker cleanup failed; retained resource still needs recovery"
+              table_cell
+                button "Edit TOML /fixture/.masc/config/lane-addons/cleanup-failure.toml" [ref=26, loc=css:button[aria-label="Edit TOML /fixture/.masc/config/lane-addons/cleanup-failure.toml"]]
+                  text "Edit TOML"
+                button "Configure activity for cleanup-failure" [ref=27, loc=css:button[aria-label="Configure activity for cleanup-failure"]]
+                  text "On / off"
+                button "Observe installation cleanup-failure" [ref=28, loc=css:button[aria-label="Observe installation cleanup-failure"]]
+                  text "Check observation"
+      button [ref=29]
+        text "Install package"
+      container "Lane by time"
+        text "Lane × wall time · Select an event to inspect its evidence. Drag empty plot space to set a slice window."
+        paragraph
+          text "Each row is a declared or observed Lane. Dotted links are recorded relationships; spacing does not imply causation."
+        paragraph
+          text "No observations in this view"
+        group "browser/session · rker-ego ego browser companion · attached No observations in this view"
+          text "browser/session · rker-ego"
+          text "ego browser companion · attached"
+          text "No observations in this view"
+      container [ref=30]
+        text "Attach a package"
+      table
+        table_row
+          table_cell
+          table_cell
+          table_cell
+          table_cell
+          table_cell

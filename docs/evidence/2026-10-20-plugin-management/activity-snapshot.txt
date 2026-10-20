@@ -1,0 +1,289 @@
+[p1 "Plugin management proof" | space "MASC plugin management proof 20261020"(4): 1 managed, 0 untracked — p1* "Plugin management proof"]
+root
+  container
+    paragraph
+      text "Isolated Dashboard component · HTTP fixture · no production configuration"
+    container "Lane Add-ons"
+      container
+        container
+          heading
+            text "Lane Add-ons"
+          paragraph
+            text "Optional observations and relationships. Keeper work continues independently."
+        container
+          button [ref=1]
+            text "New TOML"
+          button [ref=2]
+            text "Refresh"
+      container "TOML configuration"
+        heading
+          text "Installed packages"
+        paragraph
+          text "Directory:"
+          text "/fixture/.masc/config/lane-addons"
+        paragraph
+          text "Configuration read:"
+          text "complete"
+        container "Installed package manager"
+          paragraph
+            text "Find an installation, edit its settings, then check its applied revision and worker observation. Saving TOML and applying it are separate steps."
+          container "Installation summary"
+            button [ref=3]
+              text "All installations"
+              text ":"
+              text "6"
+            button [ref=4]
+              text "Needs attention"
+              text ":"
+              text "1"
+            button [ref=5]
+              text "Pending changes"
+              text ":"
+              text "3"
+            button [ref=6]
+              text "Configured off"
+              text ":"
+              text "1"
+            button [ref=7]
+              text "Worker available"
+              text ":"
+              text "1"
+          container
+            text "Search installations"
+            searchbox [ref=8, loc=css:input[placeholder="Installation, package, run or file"]]
+              text "installed-proof"
+          status
+            text "Showing"
+            text "1"
+            text "of"
+            text "6"
+            text "readable installations. Worker state is the last inventory reading, not a live health check."
+          table "TOML declarations"
+            table_row
+              table_cell
+                text "INSTALLATION / PACKAGE"
+              table_cell
+                text "REQUESTED ACTIVITY"
+              table_cell
+                text "APPLICATION / WORKER STATUS"
+              table_cell
+                text "SETTINGS AND OBSERVATION"
+            table_row "Installation installed-proof"
+              table_cell
+                text "installed-proof"
+                container
+                  container [ref=89]
+                    text "File and revisions"
+                  container
+                    paragraph
+                      text "/fixture/.masc/config/lane-addons/installed-proof.toml"
+                    paragraph
+                      text "File revision:"
+                      text "f2834982d1081b5b03b9248b8b57b3a5bcd09476d837d72ea8e119cb31dabdae"
+                    paragraph
+                      text "Desired revision:"
+                      text "fixture-input"
+                    paragraph
+                      text "Applied revision:"
+                      text "None"
+                    paragraph
+                      text "Instance:"
+                      text "No instance"
+              table_cell
+                text "Requested: On"
+              table_cell
+                status
+                  text "Waiting for first application"
+              table_cell
+                button "Edit TOML /fixture/.masc/config/lane-addons/installed-proof.toml" [ref=90, loc=css:button[aria-label="Edit TOML /fixture/.masc/config/lane-addons/installed-proof.toml"]]
+                  text "Edit TOML"
+                button "Configure activity for installed-proof" [ref=91, loc=css:button[aria-label="Configure activity for installed-proof"]]
+                  text "On / off"
+                button "Observe installation installed-proof" [ref=92, loc=css:button[aria-label="Observe installation installed-proof"]]
+                  text "Check observation"
+      container "Package activity installed-proof"
+        container
+          heading [ref=93]
+            text "Package on/off ·"
+            text "installed-proof"
+          button [ref=94]
+            text "Close activity"
+        paragraph
+          text "Off keeps this declaration and retained observations, and asks the server to clean up its worker. On makes it eligible for reconciliation again. Existing TOML editor drafts are unchanged."
+        status
+          text "File activity (last read):"
+          text "On"
+        status
+          text "Observed configuration: On · not yet applied"
+        switch "Activity draft for installed-proof" [ref=95, loc=css:button[aria-label="Activity draft for installed-proof"]]
+          text "Draft:"
+          text "On"
+          text "·"
+          text "Turn off"
+        container
+          button [ref=96]
+            text "Save activity"
+          button [ref=97]
+            text "Read current activity"
+          button [ref=98]
+            text "Discard activity draft"
+          button [ref=99]
+            text "Edit original TOML"
+        container
+          container [ref=100]
+            text "File and save revisions"
+          container
+            paragraph
+              text "/fixture/.masc/config/lane-addons/installed-proof.toml"
+            paragraph
+              text "Draft base:"
+              text "f2834982d1081b5b03b9248b8b57b3a5bcd09476d837d72ea8e119cb31dabdae"
+            paragraph
+              text "Last read:"
+              text "f2834982d1081b5b03b9248b8b57b3a5bcd09476d837d72ea8e119cb31dabdae"
+      button [ref=83]
+        text "Install package"
+      container "Selected declaration settings" [ref=64]
+        container "Lane TOML editor"
+          container
+            heading
+              text "Edit TOML"
+            button [ref=84]
+              text "Close editor"
+          paragraph
+            text "Save a declaration file in the configured Lane directory. Installation and observation status are shown separately in the Lane tables."
+          paragraph
+            text "File:"
+            text "/fixture/.masc/config/lane-addons/installed-proof.toml"
+          container
+            text "File name"
+            textbox [ref=85, loc=css:input[placeholder="my-lane.toml"]]
+              text "installed-proof.toml"
+          paragraph
+            text "File source revision:"
+            text "f2834982d1081b5b03b9248b8b57b3a5bcd09476d837d72ea8e119cb31dabdae"
+          paragraph
+            text "Parsed declaration revision:"
+            text "fixture-input"
+          paragraph
+            text "Dashboard and Keeper saves check this source revision. Direct filesystem writes do not share the editor lock. Parsed and applied declaration revisions describe Lane configuration."
+          container
+            text "TOML source"
+            textbox [ref=86]
+              text "enabled = true"
+              text "id = "installed-proof""
+              text "run_id = "proof-run""
+              text "manifest_path = "/fixture/packages/observation/lane.toml""
+              text "binding = { "path" = "/fixture/captured-browser.json" }"
+          button [ref=87]
+            text "Save TOML"
+          button [ref=88]
+            text "Read current file"
+          status
+            text "File created. Lane application is pending reconciliation."
+      container "Lane by time"
+        text "Lane × wall time · Select an event to inspect its evidence. Drag empty plot space to set a slice window."
+        paragraph
+          text "Each row is a declared or observed Lane. Dotted links are recorded relationships; spacing does not imply causation."
+        paragraph
+          text "No observations in this view"
+        group "browser/session · rker-ego ego browser companion · attached No observations in this view"
+          text "browser/session · rker-ego"
+          text "ego browser companion · attached"
+          text "No observations in this view"
+      container [ref=30]
+        text "Attach a package"
+      form
+        container
+          text "Manifest path"
+          textbox [ref=65]
+        container
+          text "Run ID"
+          textbox [ref=66]
+        container
+          text "Binding JSON"
+          textbox [ref=67]
+            text "{}"
+        button [ref=68]
+          text "Attach"
+      table
+        table_row
+          table_cell
+            text "INSTANCE / PACKAGE"
+          table_cell
+            text "RUN / REVISION"
+          table_cell
+            text "STATUS"
+          table_cell
+            text "CURSOR / ROWS"
+          table_cell
+            text "ACTIONS"
+        table_row "Worker worker-ego · incarnation epoch-ego-browser"
+          table_cell
+            container
+              radio [ref=69, loc=css:input[name="addon-instance"]]
+              text "ego browser companion"
+            text "worker-ego"
+            text "·"
+            text "ego-browser"
+            paragraph
+              text "TOML:"
+              text "ego-browser"
+            paragraph
+              text "/fixture/.masc/config/lane-addons/ego-browser.toml"
+            paragraph
+              text "Installed configuration:"
+              text "input-ego-browser"
+            button "Edit TOML for worker-ego" [ref=70, loc=css:button[aria-label="Edit TOML for worker-ego"]]
+              text "Edit TOML"
+            paragraph
+              text "Captured native browser observations"
+            container [ref=71]
+              text "Package input and display contracts"
+            text "{ "binding_schema": null, "presentation": { "description": "Captured native browser observations", "readings": [] } }"
+            paragraph
+              text "Output"
+              text "browser"
+              text ":"
+              text "browser/session"
+          table_cell
+            text "browser-work"
+            text "0.1.0"
+          table_cell
+            text "attached"
+          table_cell
+            text "4"
+            text "/"
+            text "2"
+          table_cell
+            button [ref=72]
+              text "Observe"
+            button [ref=73]
+              text "Remove TOML + worker"
+            paragraph
+              text "Deletes the matching installation TOML from disk and cleans up its worker. Retained observations and evidence remain."
+      form
+        container
+          text "Run filter"
+          textbox [ref=74]
+        container
+          text "Lane filter"
+          textbox [ref=75]
+        container
+          text "Since (Unix seconds)"
+          textbox [ref=76]
+        container
+          text "Until (Unix seconds)"
+          textbox [ref=77]
+        button [ref=78]
+          text "Slice"
+        button [ref=79]
+          text "Clear slice"
+      container
+        text "Keeper (optional)"
+        textbox [ref=80]
+      button [ref=81]
+        text "Preserve selected evidence"
+      container [ref=82]
+        text "Last action receipt"
+      text "{ "instance_id": "worker-ego", "observation_seq": 4 }"

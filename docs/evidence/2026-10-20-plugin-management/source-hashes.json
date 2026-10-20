@@ -1,0 +1,8 @@
+{
+  "dashboard/src/api/lane-addons.ts": "d1a9d6786b86e5d3d84704792d40f9522192bbf047e1b47895bbf60a7f85965a",
+  "dashboard/src/components/lane-addons-panel.ts": "0c22078e537eadb9a994db5b9c96a5aed72500e0bd203b91debe18abd8e4c746",
+  "dashboard/src/components/lane-installation-manager.ts": "16d194d13b12d7155521397bd639db5421f9b4a8e0d823e27fcd4805473a2040",
+  "dashboard/src/lib/lane-installation-status.ts": "383ef335e0192c754d5ebe9cff852f95b5fe78b8e514b9e3274a44e84fbde76a",
+  "manager.png": "6ae22ed6290b4e70ea1d4ee49c85e3f728663b03d3f2ca704b17f5e5d25f3e55",
+  "installed.png": "31d91204c170617d8e93b1edb4c797fa334bf165d8d3bb33bf9b18bb74066b58"
+}

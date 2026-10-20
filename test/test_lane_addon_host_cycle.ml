@@ -109,7 +109,7 @@ let cycles config = match member "cycles" (host_requests config) with `Int n -> 
 let await clock predicate =
   let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.001; loop ()) in loop ()
 
-let with_installation ?(declaration = declaration) ?(listing = []) ?(mode = Answer (`Assoc [ "question", `String "Q?" ])) ?(consume = true) f =
+let with_installation ?(manifest = manifest) ?(declaration = declaration) ?(listing = []) ?(mode = Answer (`Assoc [ "question", `String "Q?" ])) ?(consume = true) f =
   let root = Filename.temp_dir "lane-host-cycle-" "" |> Unix.realpath in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
     let config_root = Filename.concat root ".masc/config" in
@@ -385,7 +385,7 @@ let capture_retained_result worker ~id ~source_id =
   let queue_chunk original sha256 offset =
     worker.listing := [Lane_addon_host_request.to_json
       (Read_result {request_id=Printf.sprintf "%s-part-%d" id offset;
-        original_request_id=original; source_id=Some source_id; sha256; offset})] in
+        original_request_id=original; source_id; sha256; offset})] in
   worker.on_deliver := (fun arguments ->
     check bool "every delivered frame is bounded" true
       (String.length (Yojson.Safe.to_string arguments) <= 4096);
@@ -408,7 +408,7 @@ let test_a_giant_first_record_is_delivered_without_losing_the_next_record () =
   with_installation ~declaration:board_granted (fun clock config worker _ _root ->
     ignore (post ~body:(String.make 12000 'g') "giant");
     ignore (post "after giant");
-    let complete, marker = capture_retained_result worker ~id:"giant-page" ~source_id:"board" in
+    let complete, marker = capture_retained_result worker ~id:"giant-page" ~source_id:(Some "board") in
     worker.listing := [read "giant-page" "board"];
     publish_lane_change ();
     await clock (fun () -> Option.is_some !complete);
@@ -434,7 +434,7 @@ let test_large_text_and_binary_files_reconstruct_the_original_bytes () =
       ignore (git directory ["add"; path]);
       ignore (git directory ["commit"; "-q"; "-m"; id]);
       let commit = git directory ["rev-parse"; "HEAD"] in
-      let complete, _marker = capture_retained_result worker ~id ~source_id:"masc-repo" in
+      let complete, _marker = capture_retained_result worker ~id ~source_id:(Some "masc-repo") in
       worker.listing := [read_file id ~commit ~path];
       publish_lane_change ();
       await clock (fun () -> Option.is_some !complete);
@@ -539,6 +539,108 @@ let test_an_unregistered_repository_waits () =
     | `List [ waiting ] -> check string "it waits" "source_unavailable" (text "reason" (member "reason" waiting))
     | _ -> fail "a read of an unregistered repository must wait")
 
+let asking_manifest = manifest ^ {|[world.asks]
+operator=true
+|}
+
+let question_json =
+  `Assoc [ "question_id", `String "pick"; "header", `String "Ledger"; "prompt", `String "What does the ledger record?"
+         ; "choices", `List [ `Assoc [ "choice_id", `String "facts"; "label", `String "Facts"; "description", `Null ]
+                            ; `Assoc [ "choice_id", `String "plans"; "label", `String "Plans"; "description", `Null ] ]
+         ; "mode", `String "single"; "free_text", `Assoc [ "kind", `String "choices_only" ] ]
+
+let ask id = `Assoc [ "kind", `String "ask"; "request_id", `String id; "questions", `List [ question_json ] ]
+let withdraw id ask_id = `Assoc [ "kind", `String "withdraw_ask"; "request_id", `String id; "ask_id", `String ask_id
+                                ; "reason", `String "superseded" ]
+
+let operator = { Keeper_ask.surface = Surface_ref.Dashboard { session_id = None }; actor_id = None; display_name = None }
+
+let answer config ask_id =
+  Runtime.answer_installation_question ~config ~declaration_id:"quiz" ~ask_id
+    ~submissions:[ "pick", Keeper_ask.Chose { choice_ids = [ "facts" ] } ] ~responder:operator
+
+let test_a_question_waits_for_the_operator_and_the_answer_starts_a_cycle () =
+  with_installation ~manifest:asking_manifest ~listing:[ ask "q1" ] (fun clock config worker _ root ->
+    await clock (fun () -> cycles config >= 1);
+    check int "nothing is delivered before the answer" 0 (List.length !(worker.delivered));
+    (match member "waiting" (host_requests config) with
+     | `List [ waiting ] -> check string "it waits for the operator" "awaiting_operator" (text "reason" (member "reason" waiting))
+     | _ -> fail "an open question must wait");
+    (match Runtime.installation_questions ~config with
+     | Ok [ ("quiz", [ ("q1", (asked, Keeper_ask.Open)) ]) ] ->
+       check string "asked by the installation" "Host request fixture" asked.Lane_addon_asks.title
+     | Ok _ | Error _ -> fail "the question must be listed open under its declaration");
+    check bool "the answer is recorded" true (Result.is_ok (answer config "q1"));
+    await clock (fun () -> delivered "q1" worker);
+    let result = result_of "q1" worker in
+    check string "answered" "answered" (text "status" result);
+    check bool "with the operator's choice" true
+      (member "answers" result = `List [ `Assoc [ "question_id", `String "pick"
+                                               ; "response", `Assoc [ "kind", `String "chose"; "choice_ids", `List [ `String "facts" ] ] ] ]);
+    check bool "the Keeper question log is untouched" false (Sys.file_exists (Filename.concat root ".masc/keeper_ask")))
+
+let test_an_answer_given_while_the_worker_is_down_reaches_the_next_worker () =
+  with_installation ~manifest:asking_manifest ~listing:[ ask "q2" ] (fun clock config worker _ root ->
+    await clock (fun () -> cycles config >= 1);
+    let directory = Filename.concat root ".masc/config/lane-addons" in
+    let path = Filename.concat directory "quiz.toml" in
+    Sys.rename path (path ^ ".off");
+    ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
+    await clock (fun () -> host_requests config = `Null);
+    check bool "answered while no worker runs" true (Result.is_ok (answer config "q2"));
+    Sys.rename (path ^ ".off") path;
+    ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
+    await clock (fun () -> delivered "q2" worker);
+    check string "the next worker receives it" "answered" (text "status" (result_of "q2" worker)))
+
+let test_only_the_package_withdraws_its_question () =
+  with_installation ~manifest:asking_manifest ~listing:[ ask "q3" ] (fun clock config worker _ _root ->
+    await clock (fun () -> cycles config >= 1);
+    worker.listing := [ withdraw "w1" "q3"; ask "q3" ];
+    publish_lane_change ();
+    await clock (fun () -> delivered "w1" worker && delivered "q3" worker);
+    check string "the withdrawal is answered" "withdrawn" (text "status" (result_of "w1" worker));
+    check string "and the question ends withdrawn" "withdrawn" (text "status" (result_of "q3" worker));
+    match answer config "q3" with
+    | Error (Lane_addon_asks.Already_withdrawn _) -> ()
+    | Ok _ | Error _ -> fail "an answer after the package withdrew must be refused")
+
+let test_an_oversized_operator_answer_uses_source_free_continuations () =
+  let question = `Assoc ["question_id", `String "detail"; "header", `String "Details";
+    "prompt", `String "Describe the evidence"; "choices", `List []; "mode", `String "single";
+    "free_text", `Assoc ["kind", `String "allowed"; "hint", `String "Full explanation"]] in
+  let request = `Assoc ["kind", `String "ask"; "request_id", `String "large-answer";
+    "questions", `List [question]; "context", `String "Keep the complete operator answer"] in
+  with_installation ~manifest:asking_manifest ~listing:[request] (fun clock config worker _ _root ->
+    await clock (fun () -> cycles config >= 1);
+    let complete, marker = capture_retained_result worker ~id:"large-answer" ~source_id:None in
+    let answer = String.make 12000 'a' ^ "\nFull answer" in
+    check bool "the large free-text answer was recorded" true
+      (Result.is_ok (Runtime.answer_installation_question ~config ~declaration_id:"quiz"
+        ~ask_id:"large-answer" ~submissions:["detail", Keeper_ask.Wrote answer] ~responder:operator));
+    await clock (fun () -> Option.is_some !complete);
+    check bool "Ask results have no record-source authority" true
+      (member "source_id" (Option.get !marker) = `Null);
+    let result = Option.get !complete in
+    check string "the original result remains answered" "answered" (text "status" result);
+    check bool "the operator's entire answer survives bounded delivery" true
+      (member "answers" result = `List [`Assoc ["question_id", `String "detail";
+        "response", `Assoc ["kind", `String "wrote"; "text", `String answer]]]);
+    let first = Option.get !marker in
+    worker.on_deliver := ignore;
+    worker.listing := [request];
+    publish_lane_change ();
+    await clock (fun () -> List.length (List.filter (fun arguments ->
+      text "request_id" arguments="large-answer") !(worker.delivered))=2);
+    check bool "relisting reuses exactly the retained first answer" true
+      (result_of "large-answer" worker = first))
+
+let test_a_package_without_world_asks_is_not_allowed_to_ask () =
+  with_installation ~listing:[ ask "q4" ] (fun clock config worker _ _root ->
+    await clock (fun () -> delivered "q4" worker);
+    check string "not allowed" "not_allowed" (text "status" (result_of "q4" worker));
+    check bool "and nothing is recorded" true (Runtime.installation_questions ~config = Ok []))
+
 let () =
   Mirage_crypto_rng_unix.use_default ();
   run "lane add-on host request cycle"
@@ -575,4 +677,14 @@ let () =
         ; test_case "retention failure advertises no oversized result" `Quick
             test_retention_failure_never_advertises_an_oversized_result
         ; test_case "retained recovery does not reopen its unavailable source" `Quick
-            test_retained_result_recovery_does_not_reopen_its_source ] ) ]
+            test_retained_result_recovery_does_not_reopen_its_source ] )
+    ; ( "asks"
+      , [ test_case "a question waits for the operator and the answer starts a cycle" `Quick
+            test_a_question_waits_for_the_operator_and_the_answer_starts_a_cycle
+        ; test_case "an answer given while the worker is down reaches the next worker" `Quick
+            test_an_answer_given_while_the_worker_is_down_reaches_the_next_worker
+        ; test_case "an oversized answer uses source-free continuations" `Quick
+            test_an_oversized_operator_answer_uses_source_free_continuations
+        ; test_case "only the package withdraws its question" `Quick test_only_the_package_withdraws_its_question
+        ; test_case "a package without world.asks is not allowed to ask" `Quick
+            test_a_package_without_world_asks_is_not_allowed_to_ask ] ) ]

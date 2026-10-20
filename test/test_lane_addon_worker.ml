@@ -337,7 +337,7 @@ let package directory mode : Types.package = {
   contributions = [ Types.Observe ]; runtime = Types.Docker; image = "fixture/image";
   command = [ "observer"; mode ]; directory; skills_directory = None; action_tool = None; state_storage=Types.Ephemeral;tool_invocation=Types.Direct; exported_tools = []; outputs = [];
   binding_schema=None;presentation=Masc.Lane_addon_presentation.empty;refresh_policy=Types.Every_hint;
-  model_access=Types.Model_disabled; exact_outputs = [];
+  model_access=Types.Model_disabled; exact_outputs = []; operator_asks = false;
   resources = { cpus = 0.5; memory_bytes = 67_108_864L;
                 pids = Some 16; max_reply_bytes = 4096 };
 }

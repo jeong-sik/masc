@@ -6,11 +6,14 @@ type t =
   | Read_file of { request_id : string; source_id : string; commit : string; path : string }
   | Read_result of { request_id : string; original_request_id : string; source_id : string option;
                      sha256 : string; offset : int }
+  | Ask of { request_id : string; questions : Keeper_ask.question list; context : string option }
+  | Withdraw_ask of { request_id : string; ask_id : string; reason : string }
 
 let request_id = function
   | Exact_output request -> request.Lane_addon_exact.request_id
   | Read_records { request_id; _ } | Read_file { request_id; _ }
-  | Read_result { request_id; _ } -> request_id
+  | Read_result { request_id; _ } | Ask { request_id; _ }
+  | Withdraw_ask { request_id; _ } -> request_id
 
 let to_json = function
   | Exact_output request -> Lane_addon_exact.request_to_json request
@@ -25,6 +28,13 @@ let to_json = function
         "original_request_id", `String original_request_id;
         "source_id", Option.fold ~none:`Null ~some:(fun s -> `String s) source_id;
         "sha256", `String sha256; "offset", `Int offset]
+  | Ask {request_id; questions; context} ->
+      `Assoc ["kind", `String "ask"; "request_id", `String request_id;
+        "questions", `List (List.map Keeper_ask.question_to_json questions);
+        "context", Option.fold ~none:`Null ~some:(fun value -> `String value) context]
+  | Withdraw_ask {request_id; ask_id; reason} ->
+      `Assoc ["kind", `String "withdraw_ask"; "request_id", `String request_id;
+        "ask_id", `String ask_id; "reason", `String reason]
 
 let text fields key =
   match List.assoc_opt key fields with
@@ -65,7 +75,7 @@ let read_result fields =
     let* source_id = match List.assoc_opt "source_id" fields with
       | Some `Null -> Ok None
       | Some (`String source) when String.trim source <> "" -> Ok (Some source)
-      | Some _ | None -> Error "source_id must name the original source or be null for exact output" in
+      | Some _ | None -> Error "source_id must name the original source or be null for source-free requests" in
     let* sha256 = text fields "sha256" in
     let* () = if String.length sha256 = 64 && String.for_all
         (function '0'..'9' | 'a'..'f' -> true | _ -> false) sha256 then Ok ()
@@ -75,6 +85,31 @@ let read_result fields =
       | Some _ | None -> Error "offset must be a nonnegative integer" in
     Ok (Read_result {request_id; original_request_id; source_id; sha256; offset})
 
+let ask fields =
+  match List.find_opt (fun (key, _) -> not (List.mem key [ "kind"; "request_id"; "questions"; "context" ])) fields with
+  | Some (key, _) -> Error ("an ask request has no key " ^ key)
+  | None ->
+    let* request_id = text fields "request_id" in
+    let* questions =
+      Lane_addon_asks.questions_of_json (Option.value (List.assoc_opt "questions" fields) ~default:`Null)
+    in
+    let* context =
+      match List.assoc_opt "context" fields with
+      | None | Some `Null -> Ok None
+      | Some (`String context) -> Ok (Some context)
+      | Some _ -> Error "context must be a string or null"
+    in
+    Ok (Ask { request_id; questions; context })
+
+let withdraw_ask fields =
+  match List.find_opt (fun (key, _) -> not (List.mem key [ "kind"; "request_id"; "ask_id"; "reason" ])) fields with
+  | Some (key, _) -> Error ("a withdraw_ask request has no key " ^ key)
+  | None ->
+    let* request_id = text fields "request_id" in
+    let* ask_id = text fields "ask_id" in
+    let* reason = text fields "reason" in
+    Ok (Withdraw_ask { request_id; ask_id; reason })
+
 let request_of_json = function
   | `Assoc fields as json ->
     (match List.assoc_opt "kind" fields with
@@ -83,6 +118,8 @@ let request_of_json = function
      | Some (`String "read_records") -> read_records fields
      | Some (`String "read_file") -> read_file fields
      | Some (`String "read_result") -> read_result fields
+     | Some (`String "ask") -> ask fields
+     | Some (`String "withdraw_ask") -> withdraw_ask fields
      | Some (`String kind) -> Error ("this host has no request kind " ^ kind)
      | Some _ | None -> Error "a host request requires a string kind")
   | _ -> Error "a host request must be an object"

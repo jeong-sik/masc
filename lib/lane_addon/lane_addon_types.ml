@@ -59,11 +59,11 @@ type package = {
   binding_schema : Yojson.Safe.t option;
   presentation : Lane_addon_presentation.t;
   skills_directory : Skill_resource_path.t option;
-  exact_outputs : exact_output list; resources : resources;
+  exact_outputs : exact_output list; operator_asks : bool; resources : resources;
 }
 let host_requests_tool = "lane_host_requests"
 let host_result_tool = "lane_host_result"
-let uses_host_requests package = package.exact_outputs <> []
+let uses_host_requests package = package.exact_outputs <> [] || package.operator_asks
 let validate_exported_tools ~action_tool names =
   if List.exists (fun name -> String.trim name = "" || String.trim name <> name) names then
     Error "exported tools require non-blank names without surrounding whitespace"
@@ -200,12 +200,14 @@ let output_selection_to_json = function
 let output_ports_to_json ports =
   `Assoc (List.map (fun (id, selection) -> id, output_selection_to_json selection) ports)
 let package_to_json (p : package) =
-  (* runtime and exact_outputs are written only when they differ from what a
-     package without the key means, so such a package keeps its revision. *)
+  (* runtime, exact_outputs and operator_asks are written only when they
+     differ from what a package without the key means, so such a package keeps
+     its revision. *)
   `Assoc ((match p.runtime with Docker -> []
       | Apple_container -> ["runtime", string (runtime_to_string p.runtime)])
     @ (match p.exact_outputs with [] -> []
       | outputs -> ["exact_outputs", `Assoc (List.map (fun output -> output.name, output.schema) outputs)])
+    @ (if p.operator_asks then ["operator_asks", `Bool true] else [])
     @ ["id", string p.id; "revision", string p.revision; "title", string p.title;
     "contributions", strings (List.map (function Observe -> "observe" | Derive -> "derive" | Act -> "act") p.contributions);
     "image", string p.image; "command", strings p.command; "directory", string p.directory;

@@ -1,4 +1,5 @@
 import { readKeeperBoardAddress } from './lib/board-address'
+import { readRuntimeLaneObservation } from './lib/keeper-runtime-walk'
 import { readKeeperPortrait } from './lib/keeper-portrait'
 import { readCandleAccountRevision, readCandleBalance } from './lib/candle-observation'
 import { parseKeeperActivationMode } from './lib/keeper-activation-mode'
@@ -404,6 +405,7 @@ export function normalizeKeeperTrust(raw: unknown): Keeper['trust'] {
       : null,
     execution_summary: isRecord(executionRaw)
       ? {
+          runtime_lane_observation: readRuntimeLaneObservation(executionRaw.runtime_lane_observation),
           provider_attempt_count:
             asNumber(executionRaw.provider_attempt_count) ?? null,
           provider_fallback_applied:

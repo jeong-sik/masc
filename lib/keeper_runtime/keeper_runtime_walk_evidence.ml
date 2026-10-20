@@ -69,12 +69,14 @@ let fault_to_json = function
   | Fault.Unattributed -> `Assoc ["kind",`String "unattributed"]
   | Fault.Unknown_after_dispatch -> `Assoc ["kind",`String "unknown_after_dispatch"]
 
-let failure_to_json (value : failure) =
-  `Assoc ["attempt",`Int value.attempt;"runtime_id",`String value.runtime_id;
+let failure_fields (value : failure) =
+  ["attempt",`Int value.attempt;"runtime_id",`String value.runtime_id;
     "dispatch",`String (Runtime_attempt_dispatch.to_string value.dispatch);
     "failure",Keeper_request_failure.to_yojson value.failure;
     "api_candidate_fault",(match value.api_candidate_fault with
       | Some fault -> fault_to_json fault | None -> `Null)]
+
+let failure_to_json value = `Assoc (failure_fields value)
 
 let terminal_to_json = function
   | Terminal_not_observed -> `Assoc ["kind",`String "not_observed"]
@@ -84,6 +86,18 @@ let terminal_to_json = function
 
 let to_yojson {failures;terminal} =
   `Assoc ["failures",`List (List.map failure_to_json failures);"terminal",terminal_to_json terminal]
+
+let to_observation_yojson {failures;terminal} =
+  let failure_json (value : failure) =
+    `Assoc (("summary",`String (Keeper_request_failure.summary value.failure))
+      ::failure_fields value) in
+  let terminal_json = match terminal with
+    | Terminal_not_observed -> terminal_to_json terminal
+    | Candidate_terminal {runtime_id;attempt;failure} ->
+      `Assoc ["kind",`String "candidate";"runtime_id",`String runtime_id;
+        "attempt",`Int attempt;"failure",Keeper_request_failure.to_yojson failure;
+        "summary",`String (Keeper_request_failure.summary failure)] in
+  `Assoc ["failures",`List (List.map failure_json failures);"terminal",terminal_json]
 
 let ( let* ) = Result.bind
 

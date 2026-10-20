@@ -108,6 +108,7 @@ describe("TurnFsmDetailPanel", () => {
       turn_phase: "executing",
       execution: {
         latest_receipt_present: true,
+        runtime_lane_observation: { state: 'unreadable', turn: null, evidence: null, error: 'trace_id' },
         recorded_at: "2026-05-01T16:00:00Z",
         outcome: "receipt_failed",
         terminal_reason_code: "tool_contract",

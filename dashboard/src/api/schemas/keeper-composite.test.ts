@@ -264,10 +264,22 @@ describe('parseKeeperCompositeSnapshot', () => {
   })
 
   it('parses optional execution receipt summary', () => {
+    const observation = {
+      state: 'observed',
+      turn: { trace_id: 'previous-trace', turn_count: 2, ended_at: '2026-04-25T05:07:00Z' },
+      error: null,
+      evidence: {
+        failures: [{ attempt: 0, runtime_id: 'earlier.runtime', dispatch: 'dispatched',
+          failure: { cause: { kind: 'core', core: { category: 'api', message: 'prompt too long' } } },
+          summary: 'prompt too long', api_candidate_fault: { kind: 'unattributed' } }],
+        terminal: { kind: 'not_observed' },
+      },
+    }
     const result = parseKeeperCompositeSnapshot({
       ...VALID_SNAPSHOT,
       execution: {
         latest_receipt_present: true,
+        runtime_lane_observation: observation,
         recorded_at: '2026-04-25T05:07:00Z',
         outcome: 'error',
         terminal_reason_code: 'config_error',
@@ -305,6 +317,7 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.execution?.terminal_reason_code).toBe('config_error')
     expect(result.execution?.claim_attempt.present).toBe(false)
     expect(result.execution?.error?.message_preview).toContain('fallback_runtime')
+    expect(result.execution?.runtime_lane_observation).toEqual(observation)
   })
 
   it('parses backend-recommended runtime actions', () => {

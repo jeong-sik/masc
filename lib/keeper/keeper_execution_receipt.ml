@@ -654,7 +654,7 @@ let runtime_lane_observation_of_receipt_json json =
 let runtime_lane_observation_to_yojson observation =
   let state, turn, evidence, error = match observation with
     | Runtime_lane_observed { turn; evidence } ->
-      "observed", Some turn, Keeper_runtime_walk_evidence.to_yojson evidence, `Null
+      "observed", Some turn, Keeper_runtime_walk_evidence.to_observation_yojson evidence, `Null
     | Runtime_lane_not_observed turn -> "not_observed", Some turn, `Null, `Null
     | Runtime_lane_unreadable { turn; field } -> "unreadable", turn, `Null, `String field
   in

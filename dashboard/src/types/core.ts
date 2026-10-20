@@ -528,6 +528,7 @@ export interface KeeperTrustApprovalState {
 }
 
 export interface KeeperTrustExecutionSummary {
+  runtime_lane_observation?: import('../lib/keeper-runtime-walk').RuntimeLaneObservation | null
   provider_attempt_count?: number | null
   provider_fallback_applied?: boolean | null
   provider_selected_model?: string | null

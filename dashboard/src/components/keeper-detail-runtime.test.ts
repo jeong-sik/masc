@@ -533,6 +533,7 @@ describe('RuntimeLensSection', () => {
       last_outcome: null,
       execution: {
         latest_receipt_present: true,
+        runtime_lane_observation: { state: 'unreadable', turn: null, evidence: null, error: 'trace_id' },
         recorded_at: '2026-05-13T16:10:14Z',
         outcome: 'receipt_done',
         terminal_reason_code: 'completed',

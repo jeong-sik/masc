@@ -33,6 +33,10 @@ val observe_failure :
   Agent_core.Error.t -> failure
 val observe_terminal : runtime_id:string -> attempt:int -> Agent_core.Error.t -> terminal
 val to_yojson : t -> Yojson.Safe.t
+val to_observation_yojson : t -> Yojson.Safe.t
+(** Read-only presentation of the same facts, with summaries computed by
+    {!Keeper_request_failure.summary} on each failure and candidate terminal.
+    The canonical storage codec above has no derived summary fields. *)
 val of_yojson : Yojson.Safe.t -> (t, string) result
 (** Strict wire decoder: unknown/extra/duplicate fields and enum values are
     errors. An absent receipt field is not an observed empty failure list. *)

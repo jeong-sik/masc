@@ -332,7 +332,8 @@ let test_historical_runtime_observation_projections () =
         else Alcotest.(check bool) (label ^ " does not invent turn identity") true (turn = `Null);
         if String.equal label "previous failure" then
           Alcotest.(check bool) "earlier unclassified refusal survives both projections"
-            true (member "evidence" observation = evidence)) cases)
+            true (member "evidence" observation = Evidence.to_observation_yojson
+              { Evidence.failures=[failure]; terminal=Evidence.Terminal_not_observed })) cases)
 ;;
 
 let test_active_model_missing_attempt_is_unknown () =

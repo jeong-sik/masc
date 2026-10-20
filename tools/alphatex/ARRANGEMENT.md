@@ -64,8 +64,27 @@ These exact cuts survive move, duplicate, undo and save/reopen. They reach both
 external original-UMP playback and the captured VST's source-audio clock;
 repeats and common loops retain the fractional period without accumulating a
 rounded copy length. Packet timestamps/words remain unchanged. Update the
-installed AlphaTex/native companion together. Automatic practice-pass selection
-and alignment are subsequent work on this source-window foundation.
+installed AlphaTex/native companion together. Select original practice passes
+using the retained output clock:
+
+```
+:practice-passes asset-1
+:cursor 8
+:practice-pass 3 asset-1
+:practice-pass 4 asset-1
+```
+
+The first command selects that source and reports its available original pass-number range. Selecting a
+pass places its MIDI at the cursor; if the selected region uses that source, it
+replaces that region's source cut while keeping its position and repeats. Undo
+restores the previous performance. Duplicate a region first to retain several
+passes for comparison. The status distinguishes a partial first/final pass.
+Each boundary comes from the frozen backing's absolute output-frame rounding,
+then the retained render frame/host anchor. Original cycle numbers survive a
+late anchor; a final incomplete cycle ends at the consumed frame horizon.
+This is nominal clock alignment, not physical latency or drift compensation.
+The source keeps its original speed and captured tempo; project tempo changes
+placement, so choose matching musical positions when combining its backing.
 `x`/Delete removes a region, `d` duplicates at the cursor, `m`/`o` toggles lane
 mute/solo, and `u`/`y` undoes/redoes document edits. `:lane-remove` retains sources.
 `:title`, `:tempo`, `:meter`, `:lane-name` and `:region-name` edit their named fields.

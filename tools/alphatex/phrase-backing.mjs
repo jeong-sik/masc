@@ -37,7 +37,7 @@ export function phraseBacking(project, trackID, loop = false) {
 
 // Device blocks consume this cursor. Round absolute musical positions once,
 // rather than adding a rounded cycle length (which would drift each repeat).
-export function backingClock(plan, sampleRate) {
+export function backingFrameClock(plan, sampleRate) {
   if (plan?.kind !== 'phrase-backing' || !Number.isSafeInteger(sampleRate) || sampleRate <= 0
       || !Number.isSafeInteger(plan.ticks) || plan.ticks <= 0
       || !Number.isSafeInteger(plan.ppq) || plan.ppq <= 0
@@ -46,6 +46,14 @@ export function backingClock(plan, sampleRate) {
   const at = tick => (tick * n * 2n + d) / (2n * d)
   if (BigInt(plan.ticks) * n < d) throw new Error('Practice cycle is shorter than one output frame')
   if (plan.minimumNoteTicks !== null && BigInt(plan.minimumNoteTicks) * n < d) throw new Error('Practice note is shorter than one output frame')
+  const period = BigInt(plan.ticks) * n
+  return { at, cycleAt: frame => {
+    if (frame < 0n) throw new Error('Practice frame precedes output zero')
+    return (d * (2n * frame + 1n) - 1n) / (2n * period)
+  } }
+}
+export function backingClock(plan, sampleRate) {
+  const { at } = backingFrameClock(plan, sampleRate)
   let cycle = 0n, index = 0, position = 0n, first = true
   return {
     block(start, count) {

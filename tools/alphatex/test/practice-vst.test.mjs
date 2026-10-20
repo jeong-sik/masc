@@ -6,7 +6,7 @@ import { join, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
 import { practiceSourceFixture } from './helpers/practice-source-fixture.mjs'
 import { importArrangementPractice, saveArrangement, loadArrangement } from '../arrangement-files.mjs'
-import { arrangementEditor, arrangementCommand } from '../arrangement-editor.mjs'
+import { arrangementEditor, arrangementCommand, arrangementPracticePass } from '../arrangement-editor.mjs'
 import { newArrangement, editArrangement } from '../arrangement.mjs'
 import { arrangementRoute, arrangementPlaybackRequest, selectArrangementRoute } from '../arrangement-playback.mjs'
 import { startVstArrangement } from '../arrangement-vst.mjs'
@@ -85,6 +85,19 @@ test('fractional host cuts reach both actual VST and raw worker plans, survive s
   const added = arrangementCommand(editor, 'practice-region asset-1 12 3 4800000 7 2000000').editor.project.clips.at(-1)
   assert.equal(added.sourceDivisor, '7'); assert.equal(added.repeat, 2000000)
   for (const command of ['trim-fraction 0 1 0', 'trim-fraction 0 1 01', 'trim-fraction 0 16800008 7', 'practice-region missing 0 1 2 3']) assert.throws(() => arrangementCommand(editor, command))
+}))
+
+test('an original partial practice pass reaches the actual VST worker source clock', () => fixture(async ({ root, path, project, request, start }) => {
+  let editor = arrangementCommand(arrangementEditor(project), 'select region-1').editor
+  const target = arrangementCommand(editor, 'practice-pass 1 asset-1').effect
+  const selected = await request({ ...target, project: editor.project, sourceRoot: dirname(path), directory: root })
+  assert.equal(selected.full, false)
+  assert.deepEqual(selected.cut, { offset: '1', extent: '2400000', sourceDivisor: '1' })
+  editor = arrangementPracticePass(editor, target, selected)
+  const prepared = await start(editor.project).promise, plan = await json(prepared.path)
+  const region = plan.regions.at(-1)
+  assert.deepEqual(region.sourceClock, { start: '125', end: '300000125', denominator: '3000000000' })
+  assert.equal(region.offsetFrames, 1); assert.equal(region.frameCount, 4800)
 }))
 
 test('captured track controls precede same-frame raw overrides in the actual worker render input', () => fixture(async ({ project, rows, calls, start, context }) => {

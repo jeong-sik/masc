@@ -332,11 +332,18 @@ status: reference
     직접 찍는 `Phrase`도 아니다. 파생한 피아노 롤이나 실수 시간표는 저장본이 아니다
     (MIDI-SOURCE.md: "Persist the source asset, not a derived piano roll or floating-point
     schedule").
-  - 아직 아닌 것: 일반 메타데이터 편집, 소스 loop 상태, 오버더브, MIDI 2.0 변환은 별도
-    작업으로 남아 있다. 시험 통과는 완전한 MIDI 지원이나 물리 장치 지원을 뜻하지 않는다
-    (MIDI-SOURCE.md: "Its tests do not establish full MIDI or physical-device support.
-    General metadata, source-loop state, overdub and MIDI 2.0 conversion remain separate
-    work.").
+  - 아직 아닌 것: 편집할 수 있는 소스 메타데이터는 Set Tempo(FF51)와 박자표(FF58) 두
+    종류뿐이고, 그 밖의 일반 메타데이터 편집과 오버더브, MIDI 2.0 편집은 별도 작업으로
+    남아 있다. 시험 통과는 완전한 MIDI 지원이나 물리 장치 지원을 뜻하지 않는다
+    (MIDI-SOURCE.md: "Only these two supported metadata types are editable — Set Tempo
+    (FF51) and time signature (FF58); port, end markers and opaque metadata remain
+    preserved source data", "Its tests do not establish full MIDI or physical-device
+    support. General metadata, overdub and MIDI 2.0 editing remain separate work.").
+  - 이름 경계: 소스 loop은 저장본 상태가 아니다. `:loop START END`가 정하는 구간은 재생
+    세션 안에서만 유효하고 소스 문서나 MIDI/WAV 내보내기를 바꾸지 않는다(MIDI-SOURCE.md
+    "Source-window audition": "The loop selection does not change the source document or
+    MIDI/WAV export"). 그래서 소스 loop을 저장되는 소스 속성이나 내보내기에 실리는
+    값처럼 적지 않는다.
   → [tools/alphatex/MIDI-SOURCE.md](../../tools/alphatex/MIDI-SOURCE.md) ·
   [tools/alphatex/README.md](../../tools/alphatex/README.md)
 

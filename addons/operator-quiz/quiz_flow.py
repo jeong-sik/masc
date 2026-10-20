@@ -38,7 +38,9 @@ AUTHOR = "author"
 GRADE = "grade"
 SCOPE_ALL = "all"
 SCOPE_OPEN_DEBT = "open_debt_only"
-FREE_TEXT = {"kind": "choices_only"}
+CHOICES_ONLY = {"kind": "choices_only"}
+WRITTEN = {"kind": "allowed", "hint": None}
+TEXT = "text"  # the author schema's mode for a question answered in words
 
 
 class InvalidResult(ValueError):
@@ -220,13 +222,27 @@ def check_draft(draft: dict, input_material: list[dict],
     if any(not text.strip() for text in [draft["topic"], draft["header"], draft["prompt"], *ids,
                                           *(choice["label"] for choice in choices)]):
         return "a blank topic, header, prompt, choice id or choice label"
-    key = draft["key"]
-    if not set(key) <= set(ids):
-        return "a key choice id is not one of its choices"
-    if len(set(key)) != len(key):
-        return "the key names a choice twice"
-    if draft["mode"] == "single" and len(key) != 1:
-        return "a single question has exactly one key"
+    key, rubric = draft["key"], draft["rubric"]
+    if draft["mode"] == TEXT:
+        # Answered in words: no choices to show, and the points a correct
+        # answer must state in place of a key (§6.2).
+        if choices or key:
+            return "a text question has no choices and no key"
+        if not rubric or any(not point.strip() for point in rubric):
+            return "a text question names the points its answer must state"
+    else:
+        if len(choices) < 2:
+            return "a choice question offers at least two choices"
+        if rubric:
+            return "a choice question has a key, not a rubric"
+        if not key:
+            return "a choice question names its key"
+        if not set(key) <= set(ids):
+            return "a key choice id is not one of its choices"
+        if len(set(key)) != len(key):
+            return "the key names a choice twice"
+        if draft["mode"] == "single" and len(key) != 1:
+            return "a single question has exactly one key"
     reask = draft["reask_of"][0] if draft["reask_of"] else None
     if reask is not None and reask not in known:
         return f"reask_of names {reask}, which is not an item"
@@ -484,11 +500,17 @@ class Flow:
         quotes, the answer, and the judgments it already has. A request that
         would not fit the frame could never be listed, so it ends at once."""
         labels = {choice["choice_id"]: choice["label"] for choice in posed.question["choices"]}
+        expected: dict
+        match posed.key:
+            case q.ChoiceKey(choice_ids):
+                expected = {"kind": "choices", "labels": [labels[choice_id] for choice_id in choice_ids]}
+            case q.Rubric(points):
+                expected = {"kind": "rubric", "points": list(points)}
         judgments = session.judgments_of(posed.question_id)
         payload = {"language": session.language,
                    "question": {"header": posed.question["header"], "prompt": posed.question["prompt"],
                                 "mode": posed.question["mode"], "choices": posed.question["choices"]},
-                   "expected": {"kind": "choices", "labels": [labels[key] for key in posed.key]},
+                   "expected": expected,
                    "sources": [source.to_json() for source in posed.sources],
                    "answer": q.response_to_json(response),
                    "judgments": [{"judgment": q.judgment_to_json(j.judgment), "rationale": j.rationale}
@@ -639,13 +661,22 @@ class Flow:
                                                 f"{reask} is already asked in this session"))
                 continue
             question_id = f"q{len(posed) + 1}"
-            question = {"question_id": question_id, "header": draft["header"], "prompt": draft["prompt"],
-                        "mode": draft["mode"], "free_text": FREE_TEXT,
-                        "choices": [{"choice_id": c["choice_id"], "label": c["label"], "description": None}
-                                    for c in draft["choices"]]}
+            key: q.Key
+            if draft["mode"] == TEXT:
+                # Ask has no text mode: a question with no choices that
+                # invites free text is answered in words.
+                question = {"question_id": question_id, "header": draft["header"], "prompt": draft["prompt"],
+                            "mode": "single", "free_text": WRITTEN, "choices": []}
+                key = q.Rubric(tuple(draft["rubric"]))
+            else:
+                question = {"question_id": question_id, "header": draft["header"], "prompt": draft["prompt"],
+                            "mode": draft["mode"], "free_text": CHOICES_ONLY,
+                            "choices": [{"choice_id": c["choice_id"], "label": c["label"], "description": None}
+                                        for c in draft["choices"]]}
+                key = q.ChoiceKey(tuple(draft["key"]))
             item_id = reask or "i-" + hashlib.sha256(f"{session.session_id}/{index}".encode()).hexdigest()[:16]
             event = q.Posed(session.session_id, ask_id, question_id, item_id, draft["topic"], question,
-                            tuple(draft["key"]), tuple(sources))
+                            key, tuple(sources))
             # The log's own decoder decides what it can keep; a draft it
             # would refuse is dropped alone, not the whole author result.
             unreadable = q.unreadable(event)
@@ -674,6 +705,9 @@ class Flow:
                 # posed question has exactly one response.
                 if sorted(answer.question_id for answer in answers) != sorted(p.question_id for p in session.posed):
                     raise InvalidResult("the answers do not name each posed question once")
+                rubric = {p.question_id for p in session.posed if isinstance(p.key, q.Rubric)}
+                if any(isinstance(answer.response, q.Chose) and answer.question_id in rubric for answer in answers):
+                    raise InvalidResult("an answer chooses on a question that has no choices")
                 received = q.AnswerReceived(ask_id, answers, responder, float(answered_at))
                 problem = q.unreadable(received)
                 if problem is not None:

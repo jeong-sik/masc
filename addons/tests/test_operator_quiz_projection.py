@@ -32,7 +32,7 @@ def at(day: int, hour: int, minute: int = 0) -> float:
 def asked(n: int, item: str, topic: str, when: float) -> list[q.Event]:
     session = f"s{n:02d}"
     return [q.SessionOpened(session, f"act-{n}", 1, GRANTS, "ko", when - 60),
-            q.Posed(session, f"{session}-ask", "q1", item, topic, QUESTION, ("a",), (SOURCE,))]
+            q.Posed(session, f"{session}-ask", "q1", item, topic, QUESTION, q.ChoiceKey(("a",)), (SOURCE,))]
 
 
 def answered(n: int, item: str, topic: str, when: float, response: str) -> list[q.Event]:

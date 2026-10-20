@@ -22,13 +22,16 @@ MISSES = {INCORRECT, SKIPPED}
 
 
 def by_key(posed: q.Posed, response: q.Response) -> str:
-    """The verdict before any judgment."""
-    match response:
-        case q.Chose(choice_ids):
-            return CORRECT if set(choice_ids) == set(posed.key) else INCORRECT
-        case q.Skipped():
+    """The verdict before any judgment. A question asked with a rubric has no
+    choices, so the log never holds a choice answer to it."""
+    match response, posed.key:
+        case q.Chose(choice_ids), q.ChoiceKey(key):
+            return CORRECT if set(choice_ids) == set(key) else INCORRECT
+        case q.Chose(), q.Rubric():
+            raise q.LogError(f"{posed.ask_id}/{posed.question_id} has no choices to choose")
+        case q.Skipped(), _:
             return SKIPPED
-        case q.Wrote():
+        case q.Wrote(), _:
             return AWAITING_JUDGMENT
 
 

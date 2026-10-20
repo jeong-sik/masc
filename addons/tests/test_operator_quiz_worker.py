@@ -167,7 +167,8 @@ class WorkerCase(unittest.TestCase):
         second.run_host(self.host)
         output = second.observe()
         (reveal,) = self.rows(output, "quiz/questions")
-        self.assertEqual((reveal["fields"]["verdict"], reveal["fields"]["key"]), ("correct", ["a"]))
+        self.assertEqual((reveal["fields"]["verdict"], reveal["fields"]["key"]),
+                         ("correct", {"kind": "choices", "choice_ids": ["a"]}))
         self.assertEqual(reveal["evidence"][0]["uri"], "lane-evidence:" + reveal["evidence"][0]["sha256"])
         (measures,) = self.rows(output, "quiz/measures")
         self.assertEqual(measures["fields"]["participation"], {"n": 1, "d": 1})

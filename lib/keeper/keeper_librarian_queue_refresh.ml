@@ -377,15 +377,17 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
           | P.Drained ->
             (* §4.3 releases the limit when the backlog is read to its end, and
                on no other outcome: one narrowed commit does not show that the
-               range which refused now fits. *)
+               range which refused now fits. A superseded checkpoint has no
+               backlog left, and the width was measured on atoms no pass
+               reads again. *)
             release_width ~config ~keeper_name;
             observe O.No_source
           | P.Source_unreadable | P.Empty_range ->
             (* Not evidence that the backlog was read. The checkpoint this
-               trace names is absent or superseded, or the prefix asked for
-               sits at the start. Releasing the width here would send the
-               next pass back at the whole backlog, which is the loop this
-               limit exists to stop. *)
+               trace names is absent, or the prefix asked for sits at the
+               start. Releasing the width here would send the next pass back
+               at the whole backlog, which is the loop this limit exists to
+               stop. *)
             observe O.No_source
         in
         (* A worker pool keeps the job closure until the job returns, so the

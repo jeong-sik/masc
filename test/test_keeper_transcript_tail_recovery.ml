@@ -142,7 +142,7 @@ let test_a_superseded_checkpoint_has_nothing_to_recover () =
     match report.Recovery.outcomes with
     | [ (_, Recovery.Already_dispatchable) ] -> ()
     | [ (_, Recovery.Checkpoint_unavailable error) ] ->
-      failf "%s: %s" label (Keeper_checkpoint_store.checkpoint_ref_load_error_to_string error)
+      failf "%s: %s" label (Keeper_checkpoint_store.saved_history_ref_error_to_string error)
     | outcomes -> failf "%s: unexpected outcomes: %d" label (List.length outcomes)
   in
   boot "first boot";

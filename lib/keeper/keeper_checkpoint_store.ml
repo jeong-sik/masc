@@ -1216,33 +1216,79 @@ let checkpoint_ref_load_error_to_string = function
    turns save no checkpoint (an official client) never replaces the file, so
    a reader that reported it as unreadable stopped on it at every pass for as
    long as the trace lasted (#44446). *)
-type 'a saved_history =
-  | History_read of 'a
-  | History_superseded of { expected : int; got : int }
+module Saved_history = struct
+  type 'a t =
+    | Read of 'a
+    | Superseded of { expected : int; got : int }
+
+  (* The load failures without the cut, so a reader cannot be handed it as
+     a failure. *)
+  type error =
+    | Not_found
+    | Store_error of string
+    | Parse_error of string
+    | Newer_version of { expected : int; got : int }
+    | Io_error of string
+    | Read_failed of { cause : checkpoint_read_failure; detail : string }
+    | Agent_core_error of string
+
+  type ref_error =
+    | Ref_not_found
+    | Ref_read_failed of error
+    | Ref_identity_invalid of checkpoint_identity_error
+    | Ref_session_mismatch of
+        { expected : Keeper_id.Trace_id.t
+        ; actual : Keeper_id.Trace_id.t
+        }
+    | Ref_lock_failed of string
+end
 
 let saved_history = function
-  | Ok value -> Ok (History_read value)
-  | Error (Superseded_version { expected; got }) -> Ok (History_superseded { expected; got })
-  | Error
-      (( Not_found
-       | Store_error _
-       | Parse_error _
-       | Newer_version _
-       | Io_error _
-       | Read_failed _
-       | Agent_core_error _ ) as error) -> Error error
+  | Ok value -> Ok (Saved_history.Read value)
+  | Error (Superseded_version { expected; got }) ->
+    Ok (Saved_history.Superseded { expected; got })
+  | Error Not_found -> Error Saved_history.Not_found
+  | Error (Store_error detail) -> Error (Saved_history.Store_error detail)
+  | Error (Parse_error detail) -> Error (Saved_history.Parse_error detail)
+  | Error (Newer_version { expected; got }) ->
+    Error (Saved_history.Newer_version { expected; got })
+  | Error (Io_error detail) -> Error (Saved_history.Io_error detail)
+  | Error (Read_failed { cause; detail }) -> Error (Saved_history.Read_failed { cause; detail })
+  | Error (Agent_core_error detail) -> Error (Saved_history.Agent_core_error detail)
 
 let saved_history_of_ref = function
-  | Ok value -> Ok (History_read value)
+  | Ok value -> Ok (Saved_history.Read value)
+  | Error Ref_not_found -> Error Saved_history.Ref_not_found
   | Error (Ref_read_failed error) ->
     (match saved_history (Error error) with
      | Ok history -> Ok history
-     | Error error -> Error (Ref_read_failed error))
-  | Error
-      (( Ref_not_found
-       | Ref_identity_invalid _
-       | Ref_session_mismatch _
-       | Ref_lock_failed _ ) as error) -> Error error
+     | Error error -> Error (Saved_history.Ref_read_failed error))
+  | Error (Ref_identity_invalid error) -> Error (Saved_history.Ref_identity_invalid error)
+  | Error (Ref_session_mismatch { expected; actual }) ->
+    Error (Saved_history.Ref_session_mismatch { expected; actual })
+  | Error (Ref_lock_failed detail) -> Error (Saved_history.Ref_lock_failed detail)
+
+let load_error_of_saved_history_error : Saved_history.error -> checkpoint_load_error = function
+  | Saved_history.Not_found -> Not_found
+  | Saved_history.Store_error detail -> Store_error detail
+  | Saved_history.Parse_error detail -> Parse_error detail
+  | Saved_history.Newer_version { expected; got } -> Newer_version { expected; got }
+  | Saved_history.Io_error detail -> Io_error detail
+  | Saved_history.Read_failed { cause; detail } -> Read_failed { cause; detail }
+  | Saved_history.Agent_core_error detail -> Agent_core_error detail
+
+let saved_history_error_to_string error =
+  checkpoint_load_error_to_string (load_error_of_saved_history_error error)
+
+let saved_history_ref_error_to_string = function
+  | Saved_history.Ref_not_found -> checkpoint_ref_load_error_to_string Ref_not_found
+  | Saved_history.Ref_read_failed error -> saved_history_error_to_string error
+  | Saved_history.Ref_identity_invalid error ->
+    checkpoint_ref_load_error_to_string (Ref_identity_invalid error)
+  | Saved_history.Ref_session_mismatch { expected; actual } ->
+    checkpoint_ref_load_error_to_string (Ref_session_mismatch { expected; actual })
+  | Saved_history.Ref_lock_failed detail ->
+    checkpoint_ref_load_error_to_string (Ref_lock_failed detail)
 
 type exact_checkpoint_snapshot =
   { checkpoint : Agent_core.Checkpoint.t

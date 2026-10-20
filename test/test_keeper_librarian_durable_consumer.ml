@@ -1545,7 +1545,7 @@ let test_corrupt_intervening_checkpoint_stops_the_pass () =
        ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
          fail "a damaged trace in between reached commit")
    with
-   | Error (Consumer.Checkpoint_unreadable { trace_id; error = Store.Parse_error _ }) ->
+   | Error (Consumer.Checkpoint_unreadable { trace_id; error = Store.Saved_history.Parse_error _ }) ->
      check string "the error names the trace it could not read" trace_b trace_id
    | Error error -> fail (Consumer.error_to_string error)
    | Ok _ -> fail "a damaged trace in between was walked past");
@@ -2196,7 +2196,7 @@ let test_new_completed_cut_still_reads_checkpoint () =
     (current @ [message "next completed"]);
   match Consumer.consume_one ~config ~keeper_name
       ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> fail "corrupt checkpoint called commit") with
-  | Error (Consumer.Checkpoint_unreadable { error = Store.Parse_error _; _ }) -> ()
+  | Error (Consumer.Checkpoint_unreadable { error = Store.Saved_history.Parse_error _; _ }) -> ()
   | Error error -> fail (Consumer.error_to_string error)
   | Ok _ -> fail "new completed cut skipped checkpoint validation"
 ;;
@@ -2210,7 +2210,7 @@ let test_unseen_restart_still_reads_checkpoint () =
    | Ok () -> () | Error error -> fail (Boundaries.append_error_to_string error));
   match Consumer.consume_one ~config ~keeper_name
       ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> fail "unreadable restart called commit") with
-  | Error (Consumer.Checkpoint_unreadable { error = Store.Parse_error _; _ }) -> ()
+  | Error (Consumer.Checkpoint_unreadable { error = Store.Saved_history.Parse_error _; _ }) -> ()
   | Error error -> fail (Consumer.error_to_string error)
   | Ok _ -> fail "unseen restart skipped checkpoint validation"
 ;;
@@ -2540,7 +2540,7 @@ let test_official_turns_skip_unchanged_atom_checkpoint ~with_atoms () =
     match Consumer.consume_one ~config ~keeper_name
         ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
           fail "corrupt atom checkpoint reached commit") with
-    | Error (Consumer.Checkpoint_unreadable { error = Store.Parse_error _; _ }) -> ()
+    | Error (Consumer.Checkpoint_unreadable { error = Store.Saved_history.Parse_error _; _ }) -> ()
     | Error error -> fail (Consumer.error_to_string error)
     | Ok _ -> fail "new atom boundary did not reopen checkpoint"
   in

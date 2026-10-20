@@ -44,7 +44,7 @@ type error =
   | Progress_unreadable of Keeper_librarian_progress.read_error
   | Checkpoint_unreadable of
       { trace_id : string
-      ; error : Keeper_checkpoint_store.checkpoint_load_error
+      ; error : Keeper_checkpoint_store.Saved_history.error
       }
   | Position_in_other_trace of Keeper_librarian_progress.position
   | Position_not_in_history of Keeper_librarian_progress.position

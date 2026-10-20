@@ -8,6 +8,7 @@ module Line_map = Map.Make (Int)
 module Historical = Keeper_librarian_task_context
 
 module O = Keeper_librarian_official_progress
+module History = Keeper_checkpoint_store.Saved_history
 
 type commit_result =
   | Memory_committed
@@ -30,7 +31,7 @@ type error =
   | Progress_unreadable of P.read_error
   | Checkpoint_unreadable of
       { trace_id : string
-      ; error : Keeper_checkpoint_store.checkpoint_load_error
+      ; error : History.error
       }
   | Position_in_other_trace of P.position
   | Position_not_in_history of P.position
@@ -92,7 +93,7 @@ let error_to_string = function
     Printf.sprintf
       "checkpoint of trace=%s is unreadable: %s"
       trace_id
-      (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+      (Keeper_checkpoint_store.saved_history_error_to_string error)
   | Position_in_other_trace position ->
     Printf.sprintf
       "librarian position belongs to trace=%s end_atom=%d"
@@ -956,7 +957,10 @@ let read_meta ~config ~keeper_name =
 (* A checkpoint of a version this build supersedes holds no history this
    build reads, on the current trace as on a retired one
    ({!Keeper_checkpoint_store.saved_history}): its atoms are nothing to read,
-   and the official lines of the same trace are still read. Every other error
+   and the official lines of the same trace are still read. An absent
+   checkpoint stops the pass only while the atom position names the trace
+   being read; with no position, or on the trace a position names but the
+   keeper has left, its atoms are nothing to read either. Every other error
    stops the pass. A later version's file reads once that version is
    deployed, a parse error can be damage an operator repairs, and a store or
    IO failure can be a disk that comes back, so the pass keeps saying what it
@@ -997,15 +1001,15 @@ let unread_turns ~config ~keeper_name =
         ~lines:positions.lines ~progress:positions.progress)
       then Ok (Some 0)
       else match load_current_checkpoint ~config ~trace_id:current_trace_id with
-      | Error Keeper_checkpoint_store.Not_found when Option.is_none positions.progress ->
+      | Error History.Not_found when Option.is_none positions.progress ->
         Ok (Some 0)
-      | Ok (Keeper_checkpoint_store.History_superseded _) -> Ok (Some 0)
+      | Ok (History.Superseded _) -> Ok (Some 0)
       | Error
-          (( Keeper_checkpoint_store.Not_found | Keeper_checkpoint_store.Store_error _ | Keeper_checkpoint_store.Parse_error _
-            | Keeper_checkpoint_store.Superseded_version _ | Keeper_checkpoint_store.Newer_version _ | Keeper_checkpoint_store.Io_error _
-            | Keeper_checkpoint_store.Read_failed _ | Keeper_checkpoint_store.Agent_core_error _ ) as error) ->
+          (( History.Not_found | History.Store_error _ | History.Parse_error _
+            | History.Newer_version _ | History.Io_error _
+            | History.Read_failed _ | History.Agent_core_error _ ) as error) ->
         Error (Checkpoint_unreadable { trace_id = current_trace_id; error })
-      | Ok (Keeper_checkpoint_store.History_read checkpoint) ->
+      | Ok (History.Read checkpoint) ->
         Ok
           (R.unread_turns
              ~trace_id:current_trace_id
@@ -1079,16 +1083,16 @@ let consume_one_with_extent
     if not (R.may_have_unread ~trace_id ~lines ~progress)
     then Ok (trace_id, progress, [], R.Nothing_to_read)
     else match load_checkpoint trace_id, progress with
-    | Error Keeper_checkpoint_store.Not_found, None ->
+    | Error History.Not_found, None ->
       Ok (trace_id, None, [], R.Nothing_to_read)
-    | Ok (Keeper_checkpoint_store.History_superseded _), progress ->
+    | Ok (History.Superseded _), progress ->
       Ok (trace_id, progress, [], R.Nothing_to_read)
     | Error
-        (( Keeper_checkpoint_store.Not_found | Keeper_checkpoint_store.Store_error _ | Keeper_checkpoint_store.Parse_error _
-          | Keeper_checkpoint_store.Superseded_version _ | Keeper_checkpoint_store.Newer_version _ | Keeper_checkpoint_store.Io_error _
-          | Keeper_checkpoint_store.Read_failed _ | Keeper_checkpoint_store.Agent_core_error _ ) as error), _ ->
+        (( History.Not_found | History.Store_error _ | History.Parse_error _
+          | History.Newer_version _ | History.Io_error _
+          | History.Read_failed _ | History.Agent_core_error _ ) as error), _ ->
       Error (Checkpoint_unreadable { trace_id; error })
-    | Ok (Keeper_checkpoint_store.History_read checkpoint), progress ->
+    | Ok (History.Read checkpoint), progress ->
       let messages = checkpoint.Agent_core.Checkpoint.messages in
       Ok (trace_id, progress, messages, R.select ~trace_id ~lines ~progress ~messages extent)
   in
@@ -1143,7 +1147,7 @@ let consume_one_with_extent
     | Some ({ P.position; _ } as previous)
       when not (String.equal position.trace_id current_trace_id) ->
       (match load_checkpoint position.trace_id with
-       | Ok (Keeper_checkpoint_store.History_read checkpoint) ->
+       | Ok (History.Read checkpoint) ->
          let messages = checkpoint.Agent_core.Checkpoint.messages in
          let selection =
            R.select
@@ -1161,15 +1165,15 @@ let consume_one_with_extent
           | R.Position_in_other_trace _
           | R.Stop _ ->
             Ok (position.trace_id, Some previous, Some previous, messages, selection))
-       | Error Keeper_checkpoint_store.Not_found
-       | Ok (Keeper_checkpoint_store.History_superseded _) ->
+       | Error History.Not_found
+       | Ok (History.Superseded _) ->
          (* A removed owner/session cannot finish its old trace, and nothing
             of a superseded one is read. *)
          Result.map (with_counterpart (Some previous)) (after_prior previous)
        | Error
-           (( Keeper_checkpoint_store.Store_error _ | Keeper_checkpoint_store.Parse_error _
-             | Keeper_checkpoint_store.Superseded_version _ | Keeper_checkpoint_store.Newer_version _ | Keeper_checkpoint_store.Io_error _
-             | Keeper_checkpoint_store.Read_failed _ | Keeper_checkpoint_store.Agent_core_error _ ) as error) ->
+           (( History.Store_error _ | History.Parse_error _
+             | History.Newer_version _ | History.Io_error _
+             | History.Read_failed _ | History.Agent_core_error _ ) as error) ->
          Error (Checkpoint_unreadable { trace_id = position.trace_id; error }))
     | None -> Result.map (with_counterpart None) (trace_selection current_trace_id)
     | Some current ->

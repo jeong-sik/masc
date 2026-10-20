@@ -726,9 +726,10 @@ let test_an_unreadable_snapshot_stays_an_error () = with_source @@ fun _env conf
 
 (* A checkpoint the build before the last [checkpoint_version] bump wrote
    holds no history this build reads, and no save of an official-client turn
-   replaces it. The pass has no source instead of an error, on every pass, and
-   also when it holds the unit the round before read from the current bytes. *)
-let test_a_superseded_checkpoint_is_no_source () = with_source @@ fun _env config save _append boundary ->
+   replaces it. Nothing is left to read, on every pass instead of an error,
+   and also when the pass holds the unit the round before read from the
+   current bytes. *)
+let test_a_superseded_checkpoint_leaves_nothing_to_read () = with_source @@ fun _env config save _append boundary ->
   let one = [message "first"] in
   save one; boundary ~fresh:true 1 one;
   let previous = match P.prepare_source ~config ~keeper_name ~trace_id () |> get with
@@ -747,8 +748,9 @@ let test_a_superseded_checkpoint_is_no_source () = with_source @@ fun _env confi
    | Error error -> fail (C.checkpoint_load_error_to_string error)
    | Ok _ -> fail "the superseded fixture still loads");
   let no_source label = function
-    | Ok (P.No_source P.Source_unreadable) -> ()
-    | Ok (P.No_source (P.Drained | P.Empty_range)) -> failf "%s: the backlog was called read" label
+    | Ok (P.No_source P.Drained) -> ()
+    | Ok (P.No_source (P.Source_unreadable | P.Empty_range)) ->
+      failf "%s: the backlog was called unknown" label
     | Ok (P.Ready _) -> failf "%s: the superseded history was read" label
     | Error detail -> failf "%s: %s" label detail in
   no_source "first pass" (P.prepare_source ~config ~keeper_name ~trace_id ());
@@ -2410,7 +2412,7 @@ let () = run "production continuity pair"
     test_case "the rewrite target is the Librarian's position" `Quick test_rewrite_target_is_the_librarian_position;
     test_case "an undecodable snapshot is rebuilt" `Quick test_an_undecodable_snapshot_is_rebuilt;
     test_case "an unreadable snapshot stays an error" `Quick test_an_unreadable_snapshot_stays_an_error;
-    test_case "a superseded checkpoint is no source" `Quick test_a_superseded_checkpoint_is_no_source;
+    test_case "a superseded checkpoint leaves nothing to read" `Quick test_a_superseded_checkpoint_leaves_nothing_to_read;
     test_case "a rebuild does not overwrite a valid snapshot" `Quick test_a_rebuild_does_not_overwrite_a_valid_snapshot;
     test_case "historical sources survive narrowing and recovery" `Quick test_historical_sources_survive_narrowing_and_recovery;
     test_case "historical gap is not the covering Task" `Quick test_historical_gap_is_not_covering_task;

@@ -14,6 +14,11 @@ not run, because its verdicts look real.
 
     stanza_env.py <suite>          KEY=VALUE per line, for `env`
     stanza_env.py --deps <suite>   dune targets to build first, from the root
+    stanza_env.py --action-alias <suite>   custom named-test action alias, if any
+
+The action-alias query does not evaluate an action's variables or arguments.
+Dune 3.20+ generates runtest-NAME for named tests; the repository requires 3.22.
+Running that alias preserves custom arguments, wrappers and dependency expansion.
 
 Build targets include literal files in the stanza's (deps ...), the files a
 (glob_files ...)/(glob_files_rec ...) dep matches, and %{dep:...} environment
@@ -441,12 +446,24 @@ def main(argv: list[str]) -> int:
         suite_dir = args[1]
         args = args[2:]
     want_deps = len(args) == 2 and args[0] == "--deps"
-    if not (len(args) == 1 or want_deps):
+    want_action_alias = len(args) == 2 and args[0] == "--action-alias"
+    if not (len(args) == 1 or want_deps or want_action_alias):
         print(__doc__, file=sys.stderr)
         return 2
-    suite = args[1] if want_deps else args[0]
+    suite = args[1] if want_deps or want_action_alias else args[0]
     try:
         text, own_file = stanza_text(suite, suite_dir)
+        if want_action_alias:
+            for form in parse(tokenize(text)):
+                if not (isinstance(form, list) and form
+                        and form[0] in ("test", "tests")
+                        and suite in stanza_names(form)):
+                    continue
+                if any(isinstance(field, list) and field and field[0] == "action"
+                       for field in form[1:]):
+                    print(f"@@{suite_dir}/runtest-{suite}")
+                    return 0
+            return 0
         env, deps = suite_env(suite, text, own_file=own_file, suite_dir=suite_dir)
     except StanzaError as exc:
         print(f"{suite}: {exc}", file=sys.stderr)

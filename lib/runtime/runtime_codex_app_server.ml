@@ -1057,6 +1057,44 @@ let parse_turn_start result =
   required_string stage "id" turn_fields
 ;;
 
+(* [MessagePhase] of an agentMessage item (codex-cli 0.163.0,
+   [codex app-server generate-json-schema], v2/ItemCompletedNotification.json):
+   [commentary] is mid-turn narration that tools or more output may follow,
+   [partial_answer] is answer text that more output may follow, and
+   [final_answer] is the turn's declared answer. The member is optional and
+   nullable; the schema says providers do not send it consistently, so an
+   absent or null phase reads as phase unknown and keeps the reading from
+   before the member existed. A value the schema does not name is kept whole. *)
+type message_phase =
+  | Commentary
+  | Partial_answer
+  | Final_answer
+  | Unrecognized_phase of string
+
+let message_phase_of_string = function
+  | "commentary" -> Commentary
+  | "partial_answer" -> Partial_answer
+  | "final_answer" -> Final_answer
+  | other -> Unrecognized_phase other
+;;
+
+(* What a completed message can be for the turn's reply. Only a final answer
+   is the reply. Commentary still streams but is never the reply, so a turn
+   whose only messages are commentary has none. A partial answer, an unknown
+   phase and an unrecognized one stay what every message was before the
+   member existed: the newest of them is the reply when no final answer
+   came. *)
+type reply_candidacy =
+  | Final_reply
+  | Fallback_reply
+  | Not_a_reply
+
+let reply_candidacy = function
+  | Some Final_answer -> Final_reply
+  | Some Commentary -> Not_a_reply
+  | Some (Partial_answer | Unrecognized_phase _) | None -> Fallback_reply
+;;
+
 let agent_message_content_of_item ~stage item =
   let* fields = assoc_at stage item in
   match List.assoc_opt "type" fields with
@@ -1067,7 +1105,7 @@ let agent_message_content_of_item ~stage item =
        item is valid protocol but is not a visible assistant-message candidate. *)
     let* text = required_string_any stage "text" fields in
     let* phase = optional_string stage "phase" fields in
-    Ok (Some (phase, text))
+    Ok (Some (Option.map message_phase_of_string phase, text))
   | Some (`String _) -> Ok None
   | Some _ -> protocol_error stage "item type must be a string"
   | None -> protocol_error stage "item is missing type"
@@ -1195,8 +1233,11 @@ let messages_of_items ~stage = function
         let* message = agent_message_content_of_item ~stage item in
         (match message with
          | Some (_, text) when String.trim text = "" -> loop final fallback true rest
-         | Some (Some "final_answer", text) -> loop (Some text) fallback true rest
-         | Some (_, text) -> loop final (Some text) true rest
+         | Some (phase, text) ->
+           (match reply_candidacy phase with
+            | Final_reply -> loop (Some text) fallback true rest
+            | Fallback_reply -> loop final (Some text) true rest
+            | Not_a_reply -> loop final fallback true rest)
          | None -> loop final fallback completed rest)
     in
     loop None None false items
@@ -1316,7 +1357,12 @@ let turn_error ~tool_effect_attempted fields =
       { detail = "turn failed without an error object"; codex_error_info = None }
 ;;
 
-let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
+(* [seen_final] and [seen_fallback] are the newest completed final answer and
+   the newest completed fallback message, read by {!reply_candidacy}.
+   [unfinished_text] is text streamed for a message that never completed: its
+   phase was never declared, so it is a fallback, and it is read only when no
+   completed message offers a reply. *)
+let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback ~unfinished_text
     ~assistant_message_completed
     ~tool_calls_observed ~tool_effect_attempted params =
   let stage = "turn/completed" in
@@ -1349,11 +1395,13 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
             visible_text terminal_final,
             visible_text seen_final,
             visible_text terminal_fallback,
-            visible_text seen_fallback
+            visible_text seen_fallback,
+            visible_text unfinished_text
           with
-          | Some text, _, _, _ | None, Some text, _, _
-          | None, None, Some text, _ | None, None, None, Some text -> Some text
-          | None, None, None, None -> None
+          | Some text, _, _, _, _ | None, Some text, _, _, _
+          | None, None, Some text, _, _ | None, None, None, Some text, _
+          | None, None, None, None, Some text -> Some text
+          | None, None, None, None, None -> None
         in
         (match text with
          | Some text -> Ok text
@@ -1588,6 +1636,17 @@ type streamed_texts =
   ; mutable assistant_message_completed : bool
   }
 
+(* The text streamed for the agent message the newest delta belonged to,
+   when that message has not completed. A completed message's text and phase
+   replace its deltas, so commentary that streamed and then completed is not
+   read here. *)
+let unfinished_text streamed_texts =
+  match streamed_texts.current_item with
+  | Some item_id when Hashtbl.mem streamed_texts.completed_texts item_id -> None
+  | (Some _ | None) as key ->
+    Option.map Buffer.contents (Hashtbl.find_opt streamed_texts.buffers key)
+;;
+
 let complete_reasoning_item ~stage ~on_stream_event streamed_texts item =
   let* fields = assoc_at stage item in
   let* item_id = required_string stage "id" fields in
@@ -1721,11 +1780,6 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
     streamed_texts.current_item <- key;
     Buffer.add_string buffer delta;
     emit_stream_event on_stream_event (Text_delta {item_id; delta});
-    let seen_fallback =
-      match seen_fallback with
-      | None -> Some delta
-      | Some text -> Some (text ^ delta)
-    in
     (* The model is speaking: its window applies again, whatever tool items
        are still open in the background. *)
     io.set_receive_phase Model_turn;
@@ -1918,8 +1972,11 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
       | _ -> message in
     let seen_final, seen_fallback =
       match message with
-      | Some (Some "final_answer", text) -> Some text, seen_fallback
-      | Some (_, text) -> seen_final, Some text
+      | Some (phase, text) ->
+        (match reply_candidacy phase with
+         | Final_reply -> Some text, seen_fallback
+         | Fallback_reply -> seen_final, Some text
+         | Not_a_reply -> seen_final, seen_fallback)
       | None -> seen_final, seen_fallback
     in
     await_turn_terminal
@@ -1975,6 +2032,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
         ~turn_id
         ~seen_final
         ~seen_fallback
+        ~unfinished_text:(unfinished_text streamed_texts)
         ~assistant_message_completed:streamed_texts.assistant_message_completed
         ~tool_calls_observed:(!tool_call_count > 0)
         ~tool_effect_attempted:!tool_effect_attempted

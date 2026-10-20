@@ -216,7 +216,9 @@ let worker_state_of_agent
         ];
   }
 
-let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
+let continuity_row_of_keeper ~(now_ts : float) keeper
+  : (continuity_context, string) result =
+  let ( let* ) = Result.bind in
   let name = string_field "name" keeper in
   let status = string_field "status" keeper in
   let context_ratio =
@@ -264,25 +266,20 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
      build cannot read is rejected either way. Validating it only on the
      unpaused path would grant producer drift a free pass on every paused
      keeper - the permissive fallback moved one field over. *)
-  let health =
+  let* health =
     let raw = string_field "health_state" (member_assoc "diagnostic" keeper) in
     match Keeper_status_runtime.keeper_health_of_string_opt raw with
-    | Some value -> value
-    | None ->
-      invalid_arg
-        (Printf.sprintf
-           "dashboard continuity: keeper %S has unknown health %S"
-           name
-           raw)
+    | Some value -> Ok value
+    | None -> Error (Printf.sprintf "unknown health %S" raw)
   in
-  let paused =
+  let* paused =
     match Json_util.assoc_member_opt "paused" keeper with
-    | None -> false
-    | Some (`Bool value) -> value
+    | None -> Ok false
+    | Some (`Bool value) -> Ok value
     | Some other ->
-      invalid_arg
+      Error
         (Printf.sprintf
-           "dashboard continuity: keeper paused is not a boolean: %s"
+           "paused is not a boolean: %s"
            (Yojson.Safe.to_string other))
   in
   let liveness =
@@ -361,7 +358,7 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
     String_util.trim_nonempty (string_field "latest_action_source" keeper)
   in
   let profile = get_agent_profile name in
-  {
+  Ok {
     tone_rank = Dashboard_utils.tone_rank tone;
     last_signal_ts;
     json =
@@ -398,6 +395,24 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
             ("emoji", `String profile.emoji);
             ("koreanName", `String profile.korean_name);
           ]);
+  }
+
+(* A runtime row this build cannot read still gets its place in the list:
+   the operator sees which Keeper and why, and the rows of the Keepers that
+   can be read are unaffected. Nothing in the row is a guess about the
+   Keeper's state, so it carries no lifecycle, context or tool fields. *)
+let unreadable_continuity_row ~name ~reason : continuity_context =
+  let tone = Tone_bad in
+  { tone_rank = Dashboard_utils.tone_rank tone
+  ; last_signal_ts = 0.0
+  ; json =
+      `Assoc
+        [ "name", `String name
+        ; "tone", `String (Dashboard_utils.string_of_tone tone)
+        ; "state", `String (keeper_execution_state_to_string Exec_critical)
+        ; "note", `String (Printf.sprintf "Keeper 행을 읽을 수 없음: %s" reason)
+        ; "focus", `String "읽을 수 없는 행"
+        ]
   }
 
 (* Issue #8645: removed dead [operation_severity ~status ~blocker_summary]
@@ -501,7 +516,8 @@ let build_worker_support_briefs ~(now_ts : float) ~(tasks : Masc_domain.task lis
 
 (* A declaration row is a Keeper that has never booted: it has no runtime
    health for [continuity_row_of_keeper] to read, so it has no continuity. The
-   health guard there stays strict for every runtime row. *)
+   health guard there stays strict for every runtime row: a row it cannot read
+   is listed as unreadable with the reason, never read as a default. *)
 let build_continuity_briefs ~(now_ts : float) keepers : continuity_context list =
   keepers
   |> List.filter_map (fun keeper ->
@@ -511,10 +527,11 @@ let build_continuity_briefs ~(now_ts : float) keepers : continuity_context list 
            match Keeper_declared_roster.row_kind_of_json keeper with
            | Ok Keeper_declared_roster.Declaration_row -> None
            | Ok Keeper_declared_roster.Runtime_row ->
-             Some (continuity_row_of_keeper ~now_ts keeper)
-           | Error detail ->
-             invalid_arg
-               (Printf.sprintf "dashboard continuity: keeper %S: %s" name detail))
+             Some
+               (match continuity_row_of_keeper ~now_ts keeper with
+                | Ok row -> row
+                | Error reason -> unreadable_continuity_row ~name ~reason)
+           | Error reason -> Some (unreadable_continuity_row ~name ~reason))
   |> List.sort (fun (left : continuity_context) (right : continuity_context) ->
          let by_tone = Int.compare right.tone_rank left.tone_rank in
          if by_tone <> 0 then by_tone

@@ -43,11 +43,13 @@ val build_worker_support_briefs :
 val continuity_row_of_keeper :
   now_ts:float ->
   Yojson.Safe.t ->
-  continuity_context
+  (continuity_context, string) result
 (** [continuity_row_of_keeper ~now_ts keeper] is the
     typed primitive shared by the full execution render and live keeper-row
     reconciliation. The primitive owns lifecycle, severity, and wire-field
-    derivation. *)
+    derivation. [Error reason] when the row carries a health this build does
+    not know or a [paused] that is not a boolean: neither is read as a
+    default. *)
 
 val build_continuity_briefs :
   now_ts:float ->
@@ -65,6 +67,9 @@ val build_continuity_briefs :
     SIGNAL_STALE_SEC and nothing happened" — restart required.
 
     A declaration row ({!Keeper_declared_roster.row_kind_of_json}) is a Keeper
-    that has never booted and has no continuity, so it gets no brief. Both the
-    full execution render and live keeper-row reconciliation build their
+    that has never booted and has no continuity, so it gets no brief. A
+    runtime row that {!continuity_row_of_keeper} cannot read, or whose row kind
+    cannot be told, gets a critical brief that names the Keeper and the reason,
+    so one unreadable row neither removes the others nor fails the list. Both
+    the full execution render and live keeper-row reconciliation build their
     briefs here. *)

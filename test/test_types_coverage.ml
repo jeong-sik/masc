@@ -387,6 +387,46 @@ let test_task_status_awaiting_rejects_missing_or_invalid_start () =
        | Ok _ -> fail "awaiting_verification must reject missing or invalid started_at")
     [ without_start; invalid_start ]
 
+(* Every lifecycle timestamp is a strict RFC 3339 instant at the decode
+   boundary. A missing or malformed value is a corrupt row; an offset is valid. *)
+let lifecycle_clock_rows =
+  [ "claimed", "claimed_at", [ "assignee", `String "claude" ]
+  ; "in_progress", "started_at", [ "assignee", `String "claude" ]
+  ; "done", "completed_at", [ "assignee", `String "codex" ]
+  ; "cancelled", "cancelled_at", [ "cancelled_by", `String "user" ]
+  ; ( "awaiting_verification"
+    , "submitted_at"
+    , [ "assignee", `String "codex"
+      ; "started_at", `String "2024-01-01T00:00:00Z"
+      ; "verification_id", `String "verification-1"
+      ] )
+  ]
+
+let test_task_status_lifecycle_clock_is_strict_rfc3339 () =
+  List.iter
+    (fun (status, key, fields) ->
+       let decode clock =
+         Masc_domain.task_status_of_yojson
+           (`Assoc
+              ((("status", `String status) :: fields)
+               @ (match clock with
+                  | Some value -> [ key, `String value ]
+                  | None -> [])))
+       in
+       (match decode (Some "2024-01-01T09:00:00+09:00") with
+        | Ok _ -> ()
+        | Error detail -> failf "%s rejected an RFC 3339 offset: %s" status detail);
+       List.iter
+         (fun clock ->
+            match decode clock with
+            | Error _ -> ()
+            | Ok _ ->
+              failf "%s accepted %s=%s" status key
+                (Option.value clock ~default:"<missing>"))
+         [ None; Some ""; Some "not-a-time"; Some "2024-01-01"
+         ; Some "2024-01-01 00:00:00Z" ])
+    lifecycle_clock_rows
+
 let test_task_status_to_yojson_done_with_notes () =
   let status = Masc_domain.Done { assignee = "codex"; completed_at = "2024-01-01"; notes = Some "All tests pass" } in
   let json = Masc_domain.task_status_to_yojson status in
@@ -453,7 +493,7 @@ let test_task_status_of_yojson_claimed () =
   let json = `Assoc [
     ("status", `String "claimed");
     ("assignee", `String "claude");
-    ("claimed_at", `String "2024-01-01")
+    ("claimed_at", `String "2024-01-01T00:00:00Z")
   ] in
   match Masc_domain.task_status_of_yojson json with
   | Ok (Masc_domain.Claimed { assignee; _ }) -> check string "assignee" "claude" assignee
@@ -464,7 +504,7 @@ let test_task_status_of_yojson_in_progress () =
   let json = `Assoc [
     ("status", `String "in_progress");
     ("assignee", `String "gemini");
-    ("started_at", `String "2024-01-01")
+    ("started_at", `String "2024-01-01T00:00:00Z")
   ] in
   match Masc_domain.task_status_of_yojson json with
   | Ok (Masc_domain.InProgress { assignee; _ }) -> check string "assignee" "gemini" assignee
@@ -475,7 +515,7 @@ let test_task_status_of_yojson_done () =
   let json = `Assoc [
     ("status", `String "done");
     ("assignee", `String "codex");
-    ("completed_at", `String "2024-01-01");
+    ("completed_at", `String "2024-01-01T00:00:00Z");
     ("notes", `String "Done!")
   ] in
   match Masc_domain.task_status_of_yojson json with
@@ -487,7 +527,7 @@ let test_task_status_of_yojson_cancelled () =
   let json = `Assoc [
     ("status", `String "cancelled");
     ("cancelled_by", `String "user");
-    ("cancelled_at", `String "2024-01-01");
+    ("cancelled_at", `String "2024-01-01T00:00:00Z");
     ("reason", `Null)
   ] in
   match Masc_domain.task_status_of_yojson json with
@@ -803,6 +843,46 @@ let test_legacy_intents_make_the_backlog_unreadable () =
   | Error error ->
     check bool "the refusal names the intent field" true
       (String_util.contains_substring error "does not accept intent")
+
+(* A lifecycle timestamp that is not RFC 3339 makes the whole backlog
+   unreadable, as any other corrupt required field does, so the deployment
+   preflight refuses before replacing the executable. The error names the row. *)
+let test_malformed_lifecycle_clock_makes_the_backlog_unreadable () =
+  let claimed id claimed_at =
+    match task_json_for id with
+    | `Assoc fields ->
+      `Assoc
+        (List.remove_assoc "status" fields
+         @ [ "status", `String "claimed"
+           ; "assignee", `String "claude"
+           ; "claimed_at", `String claimed_at
+           ])
+    | _ -> fail "task fixture is not an object"
+  in
+  let document tasks =
+    `Assoc
+      [ "tasks", `List tasks
+      ; "last_updated", `String "2026-10-20T00:00:00Z"
+      ; "version", `Int 1
+      ]
+  in
+  let valid = "2026-10-20T00:00:00Z" in
+  (match
+     Masc_domain.backlog_of_yojson
+       (document [ claimed "a" valid; claimed "b" valid; claimed "c" valid ])
+   with
+   | Ok backlog -> check int "valid rows load" 3 (List.length backlog.tasks)
+   | Error error -> fail ("valid claimed rows were refused: " ^ error));
+  match
+    Masc_domain.backlog_of_yojson
+      (document [ claimed "a" valid; claimed "b" "not-a-time"; claimed "c" valid ])
+  with
+  | Ok _ -> fail "a backlog with a malformed claimed_at was accepted"
+  | Error error ->
+    check bool "the refusal names the row" true
+      (String_util.contains_substring error "backlog.tasks[1] corrupt");
+    check bool "the refusal names the field" true
+      (String_util.contains_substring error "claimed_at must be RFC 3339")
 
 let test_task_of_yojson_with_diagnostics_absent () =
   match Masc_domain.task_of_yojson_with_diagnostics (task_json_for "task-590") with
@@ -1803,6 +1883,8 @@ let () =
       test_case "in_progress" `Quick test_task_status_of_yojson_in_progress;
       test_case "awaiting hard-cuts missing start" `Quick
         test_task_status_awaiting_rejects_missing_or_invalid_start;
+      test_case "every lifecycle clock is strict RFC 3339" `Quick
+        test_task_status_lifecycle_clock_is_strict_rfc3339;
       test_case "done" `Quick test_task_status_of_yojson_done;
       test_case "cancelled" `Quick test_task_status_of_yojson_cancelled;
       test_case "unknown" `Quick test_task_status_of_yojson_unknown;
@@ -1847,6 +1929,8 @@ let () =
     "backlog_of_yojson", [
       test_case "legacy intents make the backlog unreadable" `Quick
         test_legacy_intents_make_the_backlog_unreadable;
+      test_case "malformed lifecycle clock makes the backlog unreadable" `Quick
+        test_malformed_lifecycle_clock_makes_the_backlog_unreadable;
       test_case "ok" `Quick test_backlog_of_yojson_ok;
       test_case "with task" `Quick test_backlog_of_yojson_with_task;
       test_case "rejects string document" `Quick test_backlog_of_yojson_rejects_string;

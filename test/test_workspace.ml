@@ -2026,7 +2026,7 @@ let assert_prefixed_identity_does_not_claim_membership ~assignee ~active_name =
            then
              { task with
                task_status =
-                 Masc_domain.Claimed { assignee; claimed_at = "test" }
+                 Masc_domain.Claimed { assignee; claimed_at = "2026-01-01T00:00:00Z" }
              }
            else task)
         backlog.tasks

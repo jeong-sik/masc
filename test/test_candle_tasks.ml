@@ -305,7 +305,7 @@ let test_only_a_missing_task_sends_the_read_to_the_archive () =
 let test_a_completion_time_the_ledger_cannot_hold_is_an_error () =
   with_workspace
   @@ fun config ->
-  write_backlog config [ make_task ~id:"task-1" (done_by ~completed_at:"yesterday" ()) ];
+  write_backlog config [ make_task ~id:"task-1" (done_by ~completed_at:"2026-01-01T09:00:00+09:00" ()) ];
   error_names "completed_at" ~needle:"task-1" (lookups config [ "task-1" ])
 ;;
 

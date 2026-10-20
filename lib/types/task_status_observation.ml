@@ -6,18 +6,19 @@ let to_yojson status =
       `Assoc (List.filter (fun (key, _) -> key <> "notes" && key <> "reason") fields)
   | json -> json
 
+(* Lifecycle clocks are already RFC 3339 here: [task_status_of_yojson] rejects
+   any other value for every status. *)
 let validate status =
   let nonblank value = String.trim value <> "" in
-  let clock value = Option.is_some (parse_iso8601_opt value) in
   let valid = match status with
     | Todo -> true
-    | Claimed { assignee; claimed_at } -> nonblank assignee && clock claimed_at
-    | InProgress { assignee; started_at } -> nonblank assignee && clock started_at
-    | AwaitingVerification { assignee; started_at; submitted_at; verification_id } ->
-        nonblank assignee && clock started_at && clock submitted_at && nonblank verification_id
-    | Done { assignee; completed_at; notes = _ } -> nonblank assignee && clock completed_at
-    | Cancelled { cancelled_by; cancelled_at; reason = _ } -> nonblank cancelled_by && clock cancelled_at in
-  if valid then Ok () else Error "Task observation has invalid owner, verification identity or lifecycle clock"
+    | Claimed { assignee; claimed_at = _ } -> nonblank assignee
+    | InProgress { assignee; started_at = _ } -> nonblank assignee
+    | AwaitingVerification { assignee; started_at = _; submitted_at = _; verification_id } ->
+        nonblank assignee && nonblank verification_id
+    | Done { assignee; completed_at = _; notes = _ } -> nonblank assignee
+    | Cancelled { cancelled_by; cancelled_at = _; reason = _ } -> nonblank cancelled_by in
+  if valid then Ok () else Error "Task observation has invalid owner or verification identity"
 
 let of_yojson json =
   let ( let* ) = Result.bind in

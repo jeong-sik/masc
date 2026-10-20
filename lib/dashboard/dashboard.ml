@@ -108,7 +108,7 @@ let truncate_path (path : string) : string =
   let limit = max_path_length () in
   if String.length path > limit then
     let suffix_len = limit - 3 in
-    "..." ^ String.sub path (String.length path - suffix_len) suffix_len
+    "..." ^ String_util.utf8_suffix ~max_bytes:suffix_len path
   else path
 
 let truncate_message (msg : string) : string =

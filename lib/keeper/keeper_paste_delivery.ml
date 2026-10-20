@@ -87,6 +87,10 @@ let deliver_staged_pastes ~write ~staging_dir =
     (staged_file_names ~staging_dir)
 ;;
 
+(* The remote command's stdout is quoted in the error when it is not a byte
+   count; a long answer is cut to this many bytes. *)
+let remote_stdout_preview_max_bytes = 80
+
 (* A write that exits 0 proves the payload ran, not that the bytes are
    readable at the translated path -- 2026-09-04 (#33010): a delivery logged
    "delivered" on a guest serving a stale tree, and the keeper never saw the
@@ -96,10 +100,6 @@ let deliver_staged_pastes ~write ~staging_dir =
    on the endpoint. The observed failure class -- absent file, wrong tree,
    truncated to zero -- all fails this check. [$0] is the script name, [$1]
    the translated path. *)
-(* The remote command's stdout is quoted in the error when it is not a byte
-   count; a long answer is cut to this many bytes. *)
-let remote_stdout_preview_max_bytes = 80
-
 let readback_script = "wc -c < \"$1\""
 let readback_name = "masc-paste-readback"
 

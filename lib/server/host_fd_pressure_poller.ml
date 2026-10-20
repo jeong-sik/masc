@@ -118,6 +118,10 @@ let read_state_file path =
   | Sys_error detail -> Error detail
 ;;
 
+(* A state line that does not parse is quoted in the warning, cut to this many
+   bytes. *)
+let malformed_line_log_max_bytes = 80
+
 let last_warn_log_at = Atomic.make 0.0
 
 (* 1 hour throttle for poller WARN logs: parse failures should not flood.
@@ -149,7 +153,9 @@ let one_tick path =
      | None ->
        log_throttled_warn (fun () ->
          let truncated =
-           if String.length line > 80 then String.sub line 0 80 else line
+           if String.length line > malformed_line_log_max_bytes
+           then String_util.utf8_prefix ~max_bytes:malformed_line_log_max_bytes line
+           else line
          in
          Printf.sprintf
            "host_fd_pressure_poller: malformed state line (truncated): %s"

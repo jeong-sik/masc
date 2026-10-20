@@ -27,5 +27,5 @@ let to_message (err : Llm_provider.Http_client.http_error) : string =
       let body = Llm_provider.Http_client.refusal_body_text body in
       Printf.sprintf "HTTP %d: %s" code
         (if String.length body > max_body_length
-         then String.sub body 0 max_body_length ^ body_truncation_suffix
+         then String_util.utf8_prefix ~max_bytes:max_body_length body ^ body_truncation_suffix
          else body)

@@ -561,6 +561,8 @@ let provenance_arg args =
   | _ -> Ok (`Assoc [])
 ;;
 
+let type_error_value_max_bytes = 120
+
 (** {1 Yojson-error boundary}
 
     Convert a stray [Yojson.Safe.Util.Type_error] from a board-tool
@@ -570,8 +572,6 @@ let provenance_arg args =
     broadcast 2026-05-15T10:51:20Z). Diagnostic, not a workaround: the
     offending value field points the next triager at the failing
     field. *)
-let type_error_value_max_bytes = 120
-
 let with_yojson_boundary ~tool_name ~start_time handler : Tool_result.result =
   try handler () with
   | Yojson.Safe.Util.Type_error (msg, bad_value) ->

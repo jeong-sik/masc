@@ -110,14 +110,7 @@ let quoted_limit = 24
 let quoted text =
   let shown =
     if String.length text <= quoted_limit then text
-    else begin
-      (* Back off a UTF-8 continuation byte so the cut lands between characters. *)
-      let rec boundary index =
-        if index > 0 && Char.code text.[index] land 0xC0 = 0x80 then boundary (index - 1)
-        else index
-      in
-      String.sub text 0 (boundary quoted_limit) ^ "\xe2\x80\xa6"
-    end
+    else String_util.utf8_prefix ~max_bytes:quoted_limit text ^ "\xe2\x80\xa6"
   in
   (* The text is the author's, and the sentence is printed. The terminal
      sanitizer every other TUI row uses escapes C0, DEL, C1 (raw and UTF-8),

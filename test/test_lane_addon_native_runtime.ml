@@ -71,7 +71,8 @@ tool = "lane_act"
     "run_id",`String "native-world";"binding",`Assoc ["sources",`List []]] |> text "instance_id" in
   let inspect id = dispatch config R.Inspect ["instance_id",`String id]
     |> member "instances" |> Yojson.Safe.Util.to_list |> List.hd in
-  let phase id = inspect id |> member "phase" |> text "kind" in
+  let detached id = let item = inspect id in
+    text "kind" (member "phase" item)="detached" && text "runtime_presence" item="retained" in
   let ready id = (inspect id |> member "observation_seq" |> Yojson.Safe.Util.to_int)>0 in
   let id = attach () in wait clock (fun () -> ready id);
   let captured = inspect id in
@@ -91,7 +92,7 @@ tool = "lane_act"
   check string "duplicate request has one actual effect" "once\n"
     (In_channel.with_open_bin (Filename.concat root "effects") In_channel.input_all);
   ignore (dispatch config R.Detach ["instance_id",`String id]);
-  wait clock (fun () -> phase id="detached");
+  wait clock (fun () -> detached id);
   check bool "native foreground group is absent before release" false
     (Posix_spawn_detached.group_id_has_members pid);
   check string "release is native" "native_released"
@@ -102,13 +103,13 @@ tool = "lane_act"
   let store = Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
   require (Lane_addon_store.save_binding store ~instance_id:id captured);
   ignore (dispatch config R.Detach ["instance_id",`String id]);
-  wait clock (fun () -> phase id="detached");
+  wait clock (fun () -> detached id);
   check string "retained recovery confirms the exact old incarnation" id
     (inspect id |> member "lifecycle" |> member "release" |> text "instance_id");
   let replacement = attach () in wait clock (fun () -> ready replacement);
   check bool "reattach has a fresh incarnation" true (replacement<>id);
   ignore (dispatch config R.Detach ["instance_id",`String replacement]);
-  wait clock (fun () -> phase replacement="detached");
+  wait clock (fun () -> detached replacement);
   let directory = Filename.concat root "declarations" in Unix.mkdir directory 0o700;
   let declaration = Filename.concat directory "configured.toml" in
   let configure enabled = write declaration (Printf.sprintf {|id = "configured-native"
@@ -128,7 +129,7 @@ sources = []
   wait clock (fun () -> Option.exists (fun item -> ready (text "instance_id" item)) (configured ()));
   let first = require (Option.to_result ~none:"configured installation missing" (configured ())) |> text "instance_id" in
   let first_pid = inspect first |> member "resource" |> member "pid" |> Yojson.Safe.Util.to_int in
-  configure false; reconcile (); wait clock (fun () -> phase first="detached");
+  configure false; reconcile (); wait clock (fun () -> detached first);
   configure true; reconcile ();
   wait clock (fun () -> Option.exists (fun item -> ready (text "instance_id" item)) (configured ()));
   let second = require (Option.to_result ~none:"replacement installation missing" (configured ())) |> text "instance_id" in
@@ -140,7 +141,7 @@ sources = []
   let claim = Eio_unix.run_in_systhread (fun () -> Native_addon_lease.current ~directories:[slot])
     |> Result.map_error Native_addon_lease.error_to_string |> require in
   check string "same installation slot belongs to the replacement" second (Native_addon_lease.instance_id claim);
-  configure false; reconcile (); wait clock (fun () -> phase second="detached"))
+  configure false; reconcile (); wait clock (fun () -> detached second))
 let () =
   if Array.length Sys.argv<>2 then fail "expected native admission launcher path";
   launcher := Unix.realpath Sys.argv.(1);

@@ -24,7 +24,7 @@ func source(_ rows:[UmpPacket],id:String="take",numer:UInt32=1,denom:UInt32=1,ex
  UmpRegionSource(id:id,extent:extent,timeline:UmpTimeline(schemaVersion:4,duration:Double(extent)!*Double(numer)/Double(denom)/1e9,clock:UmpClock(origin:"0",numer:numer,denom:denom),bindings:rows.isEmpty ? []:[UmpBinding(source:"A",destination:"42")],packets:rows))
 }
 func region(_ id:String="clip",source:String="take",n:String="0",d:String="1",cut:String="0",extent:String="1000000000",repeats:UInt64=1)->UmpRegion {
- UmpRegion(id:id,source:source,startSeconds:Double(n)!/Double(d)!/1e9,offset:cut,extent:extent,repeatCount:repeats,startNanoseconds:CaptureStartNanoseconds(numerator:n,denominator:d))
+ UmpRegion(id:id,source:source,startSeconds:Double(n)!/Double(d)!/1e9,offset:cut,extent:extent,repeatCount:repeats,startNanoseconds:ExactNanoseconds(numerator:n,denominator:d))
 }
 func owner(_ sources:[UmpRegionSource],_ regions:[UmpRegion],cycle:MidiCycle)throws->UmpLoopTransport {
  try UmpLoopTransport(timeline:UmpArrangement(schemaVersion:1,duration:10,sources:sources,regions:regions),cycle:cycle)

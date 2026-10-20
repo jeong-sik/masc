@@ -1,6 +1,7 @@
 import { readFile, writeFile, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
+import { regionEdgeSeconds } from './exact-time.mjs'
 
 export function validatePractice(value) {
   if (!value || Object.keys(value).some(key => !['countInBars', 'metronome'].includes(key))
@@ -103,6 +104,12 @@ export async function preparePractice(project, prepared, { signal } = {}) {
       ? { schemaVersion: 2, kind: 'mixed-arrangement', assets: [], regions: [], midi: shift(original) }
       : { ...original, regions: original.regions.map(region => ({ ...region, startSeconds: region.startSeconds + countIn })),
         ...(original.midi ? { midi: shift(original.midi) } : {}), ...(original.umpRegions ? { umpRegions: shift(original.umpRegions) } : {}) }
+    if (plan.midi) {
+      // Native SMF admission reads each shifted region's exact last edge.
+      duration = plan.midi.regions.reduce((end, region) => Math.max(end,
+        regionEdgeSeconds(region.startNanoseconds, region.periodNanoseconds, region.repeatCount)), duration)
+      plan.midi.duration = duration
+    }
     if (plan.umpRegions) for (const region of plan.regions) {
       const paired = plan.umpRegions.regions.find(notes => notes.id === region.id && notes.component === undefined)
       if (paired?.startNanoseconds) region.startSeconds = paired.startSeconds

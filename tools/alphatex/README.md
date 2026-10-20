@@ -712,9 +712,9 @@ count, with an optional bounded cache for a short source period.
 Without practice clicks, SMF-only preparation clips regions to one cycle without rewriting source files or
 expanding repeated copies. A leading/trailing partial repeat and the compressed
 whole copies keep original source seconds, release messages and port bindings.
-All clips share projected loop boundaries; the native cycle may include a
-representable silent tail from floating-point rounding without widening source
-trims. A late callback skips unacquired attacks from an expired loop copy,
+Pieces are cut on the exact region grid, so adjacent pieces share one exact edge;
+the native cycle may include a silent tail under one nanosecond from rounding
+the last edge up, without widening source trims. A late callback skips unacquired attacks from an expired loop copy,
 preserves owned key releases and expression history, and resumes at the current
 cycle phase. Exactly due endpoint events retain their original order.
 Native admission checks controller/bend/program/pressure baselines across the

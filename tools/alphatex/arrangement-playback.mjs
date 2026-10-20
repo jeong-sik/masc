@@ -11,6 +11,7 @@ import { jsonLines, unpackMidi } from './session-data.mjs'
 
 import { practiceEnabled } from './arrangement-practice.mjs'
 import { arrangementLoop, loopMidiRegions } from './arrangement-loop.mjs'
+import { regionEdgeSeconds } from './exact-time.mjs'
 
 function requireRegionTransport(project) {
   const schedule = arrangementPlaybackSchedule(project)
@@ -60,8 +61,9 @@ export async function prepareArrangementWave(project, { sourceRoot, directory, s
   } catch (error) { await rm(temporary, { recursive: true, force: true }); throw error }
 }
 
-// Sources retain their complete wire timelines. Regions carry only native-time
-// trims and finite repeat counts; neither preparation nor playback expands copies.
+// Sources retain their complete wire timelines. Regions carry exact project
+// starts and source periods, binary64 source event keys and finite repeat counts;
+// neither preparation nor playback expands copies.
 export async function prepareArrangementMidi(project, { directory, signal, midiOutput, portBindings = [] } = {}) {
   signal?.throwIfAborted()
   const schedule = requireRegionTransport(project)
@@ -84,7 +86,8 @@ export async function prepareArrangementMidi(project, { directory, signal, midiO
     }
     if (clip.durationSeconds <= 0) throw new Error('MIDI region playback requires a positive source span')
     regions.push({ id: clip.id, source: identity, startSeconds: clip.startSeconds,
-      sourceStart: clip.sourceStartSeconds, sourceEnd: clip.sourceEndSeconds, repeatCount: clip.repeat })
+      sourceStart: clip.sourceStartSeconds, sourceEnd: clip.sourceEndSeconds, repeatCount: clip.repeat,
+      startNanoseconds: clip.startNanoseconds, periodNanoseconds: clip.periodNanoseconds })
   }
   const bindings = [...new Set(sources.flatMap(source => source.timeline.bindings.map(binding => binding.destination)))]
     .map((destination, port) => ({ port, destination }))
@@ -94,11 +97,11 @@ export async function prepareArrangementMidi(project, { directory, signal, midiO
   const loop = arrangementLoop(project), local = loop && !practiceEnabled(project) ? loop : null
   const selected = loopMidiRegions(regions, local)
   const selectedSources = sources.filter(source => selected.some(region => region.source === source.id))
-  // The cycle contains the native arithmetic endpoints of the selected spans.
-  // Outward projection may add a representable silent tail; it never broadens
-  // the source trims or admits events outside the requested loop window.
-  const duration = local ? selected.reduce((end, region) => Math.max(end, region.startSeconds
-    + (region.sourceEnd - region.sourceStart) * region.repeatCount), local.duration)
+  // The cycle contains every selected region's native last edge. Rounding an
+  // exact edge up to whole nanoseconds may add a silent tail below 1 ns; it never
+  // broadens the source trims or admits events outside the requested loop window.
+  const duration = local ? selected.reduce((end, region) => Math.max(end,
+    regionEdgeSeconds(region.startNanoseconds, region.periodNanoseconds, region.repeatCount)), local.duration)
     : schedule.reduce((end, clip) => Math.max(end, clip.endSeconds), 0)
   if (!Number.isFinite(duration) || duration <= 0) throw new Error('Arrangement has no representable MIDI duration')
   const temporary = await mkdtemp(join(directory, 'play-'))

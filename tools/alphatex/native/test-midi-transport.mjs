@@ -84,6 +84,16 @@ final class MidiTransport {`)
 `)
   source = source.replace('exit(failure == nil ? 0 : 1)', 'reviewExit = failure == nil ? 0 : 1')
   source += `\nextension MidiTransport {\n${pinnedCheck}}\n`
+  // Exact edges for a fractional project tempo and for denominators whose
+  // copy products need 256 bits. JS writes and checks the same edges natively.
+  const { fraction, projectNanoseconds, regionEdgeSeconds } = await import('../exact-time.mjs')
+  const fractionalStart = fraction(...projectNanoseconds({ tempo: 120.1, ppq: 960 }, 3 * 960 + 17))
+  const fractionalPeriod = { numerator: '4166675', denominator: '8' }, probeCopy = 1_234_567, copies = 2_000_000
+  const wideDivisor = (1n << 97n) - 1n, wideStart = { numerator: String(3n * wideDivisor + 12345n), denominator: String(wideDivisor) }
+  const widePeriod = fraction(520_834_375n * (1n << 90n) + 7n, 1000n * (1n << 90n))
+  assert.ok(BigInt(fractionalStart.denominator) > 1n << 50n && BigInt(widePeriod.numerator) * BigInt(copies) > 1n << 128n)
+  const edges = (start, period) => [0, probeCopy, copies].map(copy => regionEdgeSeconds(start, period, copy))
+  const fractionalEdges = edges(fractionalStart, fractionalPeriod), wideEdges = edges(wideStart, widePeriod)
   source += String.raw`
 func transport(_ events: [[String: Any]], loop: Bool = true) throws -> MidiTransport {
     let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
@@ -457,8 +467,19 @@ func arrangement(_ sources: [[String: Any]], _ regions: [[String: Any]], duratio
 func asset(_ id: String, _ events: [[String: Any]], destination: String = "1") -> [String: Any] {
     ["id":id,"timeline":["schemaVersion":2,"duration":1.0,"bindings":[["port":2,"destination":destination]],"events":events]]
 }
-func clip(_ id: String, _ source: String, start: Double = 0, from: Double = 0.1, to: Double = 0.6, repeatCount: Int = 2) -> [String: Any] {
-    ["id":id,"source":source,"startSeconds":start,"sourceStart":from,"sourceEnd":to,"repeatCount":repeatCount]
+// Plans carry exact region starts and periods. Unless a test names the exact
+// fraction, it is the whole nanosecond nearest its binary64 value, and
+// startSeconds is the native display of that exact start.
+func nanoseconds(_ seconds: Double) -> (String, String) { (String(UInt64((seconds * 1e9).rounded())), "1") }
+func display(_ value: (String, String)) -> Double {
+    let n = UInt128(value.0)!, d = UInt128(value.1)! * 1_000_000_000
+    return Double(n / d) + Double(n % d) / Double(d)
+}
+func clip(_ id: String, _ source: String, start: Double = 0, from: Double = 0.1, to: Double = 0.6, repeatCount: Int = 2,
+          startNanoseconds: (String, String)? = nil, periodNanoseconds: (String, String)? = nil) -> [String: Any] {
+    let exactStart = startNanoseconds ?? nanoseconds(start), period = periodNanoseconds ?? nanoseconds(to - from)
+    return ["id":id,"source":source,"startSeconds":display(exactStart),"sourceStart":from,"sourceEnd":to,"repeatCount":repeatCount,
+            "startNanoseconds":["numerator":exactStart.0,"denominator":exactStart.1],"periodNanoseconds":["numerator":period.0,"denominator":period.1]]
 }
 let regionSource = asset("a", [
     ["seconds":0,"port":2,"bytes":[0xc0,33,0xb0,64,0,0xb0,66,0,0xb0,1,0]],
@@ -565,6 +586,67 @@ var sharedFinished=0;shared.onCoordinatedFailure={_,_ in sharedFinished+=1}
 shared.finish(reason:"stop",publish:false);precondition(sharedFinished==1 && shared.state == .stopped && reviewExit==nil)
 shared.finish(reason:"stop",publish:false);precondition(sharedFinished==1)
 print("COORDINATED_MIDI_DECISIONS_PASS: staged silence, late-epoch refusal, common-epoch restoration, no early sends, shared pause position, logical end and owned shutdown callback")
+// Exact copy edges. JS writes A = 100 BPM source ticks 1920..3840, whose
+// binary64 keys are 2.3999999999999995..4.800000000000001, and its duplicate
+// B at beat 4. Both edges are exactly 2.4e9 ns: B owns the channel from A's end.
+let adjacentSource = ["id":"adjacent","timeline":["schemaVersion":2,"duration":5.0,"bindings":[["port":2,"destination":"1"]],"events":[
+    ["seconds":2.3999999999999995,"port":2,"bytes":[0x90,60,100]],["seconds":3.0,"port":2,"bytes":[0x80,60,0]],
+    ["seconds":4.5,"port":2,"bytes":[0x90,62,90]],["seconds":4.9,"port":2,"bytes":[0x80,62,0]]]]] as [String: Any]
+let adjacentOwners = try arrangement([adjacentSource],[
+    clip("A","adjacent",from:2.3999999999999995,to:4.800000000000001,repeatCount:1,periodNanoseconds:("2400000000","1")),
+    clip("B","adjacent",start:2.4,from:2.3999999999999995,to:4.800000000000001,repeatCount:1,periodNanoseconds:("2400000000","1"))],duration:4.8)
+precondition(adjacentOwners.timeline.regions[0].end == adjacentOwners.timeline.regions[1].start, "adjacent exact edges differ")
+reset(0);reviewWire=[];try adjacentOwners.reconcile(at:2.3);reviewWire=[];try adjacentOwners.reconcile(at:2.4)
+precondition(reviewWire.map(\.1) == [[0x80,62,0],[0x90,60,100]], "adjacent hand-over order")
+// The last copy ends on the validated edge: 6.4 + 2 * 3.2 s at 75 BPM. B's
+// attack at that edge survives A's cleanup.
+func longAsset(_ id: String, _ events: [[String: Any]]) -> [String: Any] {
+    ["id":id,"timeline":["schemaVersion":2,"duration":7.0,"bindings":[["port":2,"destination":"1"]],"events":events]]
+}
+let lastCopy = longAsset("lastCopy",[["seconds":0,"port":2,"bytes":[0x90,60,100]],["seconds":0.1,"port":2,"bytes":[0x80,60,0]],
+    ["seconds":3.0000000000000004,"port":2,"bytes":[0x90,64,90]],["seconds":3.3,"port":2,"bytes":[0x80,64,0]]])
+let handover = try arrangement([lastCopy],[
+    clip("A","lastCopy",start:6.4,from:0,to:3.2000000000000006,repeatCount:2,periodNanoseconds:("3200000000","1")),
+    clip("B","lastCopy",start:12.8,from:0,to:3.2000000000000006,repeatCount:1,periodNanoseconds:("3200000000","1"))],duration:16.1)
+precondition(handover.timeline.regions[0].end == 12.8)
+reset(0);reviewWire=[];try handover.reconcile(at:12.7);reviewWire=[];try handover.reconcile(at:12.8);try handover.reconcile(at:12.81)
+precondition(reviewWire.map(\.1) == [[0x80,64,0],[0x90,60,100]] && handover.sourceModel.channels[0]?.notes.map(\.pitch) == [60], "last copy cut the next owner")
+// An attack inside the last copy whose binary64 time lands on the closing edge
+// is sent and released before the next owner begins at that instant.
+let edgeEvents = longAsset("edgeAttack",[["seconds":0,"port":2,"bytes":[0x90,60,100]],["seconds":0.1,"port":2,"bytes":[0x80,60,0]],
+    ["seconds":3.2,"port":2,"bytes":[0x90,64,90]]])
+let edgeAttack = try arrangement([edgeEvents],[
+    clip("A","edgeAttack",start:6.4,from:0,to:3.2000000000000006,repeatCount:2,periodNanoseconds:("3200000000","1")),
+    clip("B","edgeAttack",start:12.8,from:0,to:3.2000000000000006,repeatCount:1,periodNanoseconds:("3200000000","1"))],duration:16.1)
+reset(0);reviewWire=[];try edgeAttack.reconcile(at:12.7);reviewWire=[];try edgeAttack.reconcile(at:12.8);try edgeAttack.reconcile(at:12.81)
+precondition(reviewWire.map(\.1) == [[0x90,64,90],[0x80,64,0],[0x90,60,100]] && edgeAttack.sourceModel.channels[0]?.notes.map(\.pitch) == [60], "edge attack ordered after the next owner")
+// Seeking exactly onto a copy edge starts that copy; the previous copy's end
+// (note 62 from source 0.3) is not re-attacked.
+let tailSource = asset("tail",[["seconds":0,"port":2,"bytes":[0x90,60,100]],["seconds":0.3,"port":2,"bytes":[0x90,62,90]],["seconds":0.9,"port":2,"bytes":[0x80,62,0,0x80,60,0]]])
+let seekEdge = try arrangement([tailSource],[clip("tail","tail",start:0.3,from:0,to:0.4,repeatCount:2)],duration:1.1)
+reset(0);reviewWire=[];try seekEdge.reconcile(at:0.7,reconstruct:true)
+precondition(seekEdge.regionCursors[0].copy == 1 && reviewWire.map(\.1) == [[0x90,60,100]], "seek onto a copy edge re-attacked the previous copy")
+// A fractional tempo start and 256-bit copy products keep exact edges for two
+// million copies; copy(at:) agrees with those edges.
+for (name, start, period, expected) in [("fractional", ("${fractionalStart.numerator}","${fractionalStart.denominator}"), ("${fractionalPeriod.numerator}","${fractionalPeriod.denominator}"), [${fractionalEdges.join(',')}]),
+                                        ("wide", ("${wideStart.numerator}","${wideStart.denominator}"), ("${widePeriod.numerator}","${widePeriod.denominator}"), [${wideEdges.join(',')}])] {
+    let edges = try arrangement([regionSource],[clip(name,"a",from:0.1,to:0.1005,repeatCount:${copies},startNanoseconds:start,periodNanoseconds:period)],duration:expected[2])
+    let region = edges.timeline.regions[0]
+    precondition(region.start == expected[0] && region.boundary(${probeCopy}) == expected[1] && region.end == expected[2], "\(name) exact edges")
+    precondition(region.copy(at:expected[1]) == ${probeCopy} && region.copy(at:expected[1].nextDown) == ${probeCopy - 1} && region.copy(at:expected[2]) == ${copies - 1})
+}
+// Edges past the 64-bit host clock, sub-nanosecond copies, a display that names
+// another start and plans without the exact fields are refused.
+func refusal(_ regions: [[String: Any]]) -> String {
+    do { _ = try arrangement([regionSource],regions,duration:1); preconditionFailure("invalid exact region admitted") }
+    catch { return String(describing: error) }
+}
+precondition(refusal([clip("overflow","a",repeatCount:3,periodNanoseconds:("9223372036854775807","1"))]) == "MIDI region exceeds the native nanosecond timeline")
+precondition(refusal([clip("short","a",periodNanoseconds:("1","2"))]) == "MIDI region copies must last at least one nanosecond")
+var misdisplayed = clip("display","a"); misdisplayed["startSeconds"] = 1e-10
+precondition(refusal([misdisplayed]) == "exact start disagrees with its display seconds")
+var missing = clip("missing","a"); missing.removeValue(forKey:"periodNanoseconds"); mustReject { _ = try arrangement([regionSource],[missing]) }
+print("MIDI_REGION_EDGE_PASS: exact adjacent hand-over, last-copy edge, closing-edge attack order, seek onto a copy edge, fractional and 256-bit edges, host-clock/sub-nanosecond/display/missing-field refusals")
 print("MIDI_ARRANGEMENT_DECISIONS_PASS: original boundary events, trims/full endpoints, finite repeats, overlapping physical ownership admission, distinct-channel cleanup, prior-state baselines, compressed seek, silent paused seek/resume")
 
 func loopArrangement(_ source: [String: Any]) throws -> MidiTransport {
@@ -864,7 +946,7 @@ let deadPrefix=asset("deadPrefix",[
     ["seconds":0.01,"port":2,"bytes":[0x91,62,90]], ["seconds":0.1,"port":2,"bytes":[0x81,62,45]],
     ["seconds":0.25,"port":2,"bytes":[0x90,60,100]], ["seconds":0.35,"port":2,"bytes":[0x80,60,77]]])
 let deadPath=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString+".json")
-var delayedClip=clip("deadPrefix","deadPrefix",from:0.2,to:1,repeatCount:1);delayedClip["startSeconds"]=0.3
+let delayedClip=clip("deadPrefix","deadPrefix",start:0.3,from:0.2,to:1,repeatCount:1)
 let otherPrefix=asset("otherPrefix",[["seconds":0.25,"port":2,"bytes":[0x91,64,90]],["seconds":0.5,"port":2,"bytes":[0x81,64,77]]])
 try JSONSerialization.data(withJSONObject:["schemaVersion":3,"duration":1.1,"sources":[deadPrefix,otherPrefix],"regions":[delayedClip,clip("otherPrefix","otherPrefix",from:0,to:1,repeatCount:1)]]).write(to:deadPath)
 let deadTimeline=try JSONDecoder().decode(Timeline.self,from:Data(contentsOf:deadPath));try FileManager.default.removeItem(at:deadPath)
@@ -890,7 +972,7 @@ precondition(partialWindow.scope==Set([0]),"unreachable repeated-copy middle res
 let boundarySource=asset("boundarySource",[
     ["seconds":0.02,"port":2,"bytes":[0x91,64,90,0x81,64,77]],
     ["seconds":0.04,"port":2,"bytes":[0x90,60,90,0x80,60,77]]])
-var boundaryClip=clip("boundarySource","boundarySource",from:0.01,to:0.2,repeatCount:1);boundaryClip["startSeconds"]=0.03
+let boundaryClip=clip("boundarySource","boundarySource",start:0.03,from:0.01,to:0.2,repeatCount:1)
 let boundaryBase=try arrangement([boundarySource],[boundaryClip],duration:1)
 let boundaryCycle=try MidiCycle(start:0.04,end:0.1,duration:0.06,period:60_000_000,divisor:1)
 let boundaryWindow=try boundaryCycle.window(boundaryBase.timeline.regions[0])

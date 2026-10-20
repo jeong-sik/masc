@@ -199,6 +199,19 @@ full-source endpoint retains its original final messages. Exact-boundary events
 keep their wire order, including zero-length notes and note-off release velocity.
 Positive source spans are required for this repeating transport.
 
+Each schema-3 region carries `startNanoseconds` (the project start from region
+ticks and the binary64 tempo) and `periodNanoseconds` (the source span from the
+SMF tempo map or SMPTE rate) as exact decimal fractions. Both are required.
+Copy `k` begins at `ceil(start + k * period)` whole nanoseconds; that one value
+is the previous copy's end, the validated region end, the ownership comparison
+and the run-time hand-over. `sourceStart`/`sourceEnd` remain the source's own
+binary64 event-selection keys, and `startSeconds` only displays the exact start.
+A copy's events stay between its edges: one whose binary64 offset rounds onto the
+closing edge is sent and released before another owner begins at that instant.
+Seeking onto an edge starts that copy. A region whose last edge passes the
+64-bit host nanosecond clock, or whose copies last under one nanosecond, is
+refused.
+
 Trim, repeat, resume and seek restore supported channel state using the
 [SOURCE-STATE contract](SOURCE-STATE.md). A new owner must establish previously
 changed fields before sounding keys: a program change after a note at the same

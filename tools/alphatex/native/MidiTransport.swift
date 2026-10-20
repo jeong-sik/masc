@@ -339,10 +339,34 @@ struct Binding: Decodable {
 }
 
 struct MidiRegionSource: Decodable { let id: String; let timeline: Timeline }
+// Exact nanoseconds written as canonical decimal numerator/denominator strings.
+struct ExactNanoseconds: Decodable {
+    let numerator: String
+    let denominator: String
+    func rational() throws -> (UInt128, UInt128) {
+        guard let n = UInt128(numerator), String(n) == numerator, let d = UInt128(denominator), String(d) == denominator, d > 0 else {
+            throw MidiFailure("invalid exact nanosecond fraction")
+        }
+        return (n, d)
+    }
+    // The plan's binary64 seconds only display this value and must name it.
+    func rational(displaySeconds: Double) throws -> (UInt128, UInt128) {
+        let (n, d) = try rational()
+        let secondsDenom = d.multipliedReportingOverflow(by: 1_000_000_000)
+        guard !secondsDenom.overflow else { throw MidiFailure("exact start exceeds the native rational clock range") }
+        let displayed = Double(n / secondsDenom.partialValue) + Double(n % secondsDenom.partialValue) / Double(secondsDenom.partialValue)
+        guard displayed == displaySeconds else { throw MidiFailure("exact start disagrees with its display seconds") }
+        return (n, d)
+    }
+}
+// Ownership and copy edges come only from the exact project start and source
+// period. sourceStart/sourceEnd are the source timeline's own binary64 keys that
+// select its events; startSeconds displays startNanoseconds.
 struct MidiRegionSpec: Decodable {
     let id: String, source: String
     let startSeconds: Double, sourceStart: Double, sourceEnd: Double
     let repeatCount: Int
+    let startNanoseconds: ExactNanoseconds, periodNanoseconds: ExactNanoseconds
 }
 struct MidiRegionEntry {
     let model: SourceChase, next: Int, safeKnown: Set<ChaseField>
@@ -375,26 +399,21 @@ struct MidiRegion {
     let startKnown: Set<ChaseField>, endTouched: Set<ChaseField>
     let obstacles: Set<ChaseObstacle>
     let sourceDuration: Double
-    // Region boundaries are compared and scheduled on an exact integer-nanosecond
-    // grid. A start taken from a project position and an end accumulated from a
-    // source span must not disagree by a rounding ulp, or two exactly abutting
-    // regions read as an overlap and the whole arrangement is refused.
-    var startNanoseconds: Int64 { Int64((spec.startSeconds * 1e9).rounded()) }
-    var durationNanoseconds: Int64 { Int64((spec.sourceEnd * 1e9).rounded()) - Int64((spec.sourceStart * 1e9).rounded()) }
-    var endNanoseconds: Int64 { startNanoseconds + durationNanoseconds * Int64(spec.repeatCount) }
-    var duration: Double { Double(durationNanoseconds) / 1e9 }
-    var end: Double { Double(endNanoseconds) / 1e9 }
-    func startSeconds(copy: Int) -> Double { Double(startNanoseconds + Int64(copy) * durationNanoseconds) / 1e9 }
+    // The start splits into whole + remainder / divisor nanoseconds, so every
+    // edge is computed with 256-bit products and no cross-multiplied overflow.
+    let startWhole: UInt128, startRemainder: UInt128, startDivisor: UInt128
+    let period: UInt128, periodDivisor: UInt128
+    var start: Double { boundary(0) }
+    var end: Double { boundary(spec.repeatCount) }
     init(spec: MidiRegionSpec, sourceDuration: Double, events: [WireEvent]) throws {
-        guard spec.startSeconds.isFinite, spec.startSeconds >= 0, spec.sourceStart.isFinite, spec.sourceStart >= 0,
+        guard spec.sourceStart.isFinite, spec.sourceStart >= 0,
               spec.sourceEnd.isFinite, spec.sourceEnd > spec.sourceStart, spec.sourceEnd <= sourceDuration,
-              spec.repeatCount > 0, spec.repeatCount <= 9_007_199_254_740_991,
-              spec.startSeconds + (spec.sourceEnd - spec.sourceStart) > spec.startSeconds,
-              (spec.startSeconds + (spec.sourceEnd - spec.sourceStart) * Double(spec.repeatCount)).isFinite else { throw MidiFailure("MIDI regions require representable positive source spans and finite repeat counts") }
-        guard spec.startSeconds * 1e9 < Double(Int64.max), spec.sourceEnd * 1e9 < Double(Int64.max) else { throw MidiFailure("MIDI region span exceeds the nanosecond grid") }
-        let gridStart = Int64((spec.startSeconds * 1e9).rounded())
-        let gridSpan = Int64((spec.sourceEnd * 1e9).rounded()) - Int64((spec.sourceStart * 1e9).rounded())
-        guard gridSpan > 0, Int64(spec.repeatCount) <= (Int64.max - gridStart) / gridSpan else { throw MidiFailure("MIDI region span exceeds the nanosecond grid") }
+              spec.repeatCount > 0, spec.repeatCount <= 9_007_199_254_740_991 else { throw MidiFailure("MIDI regions require positive source spans and finite repeat counts") }
+        let (startN, startD) = try spec.startNanoseconds.rational(displaySeconds: spec.startSeconds)
+        (period, periodDivisor) = try spec.periodNanoseconds.rational()
+        // One nanosecond per copy keeps successive rounded edges increasing.
+        guard period >= periodDivisor else { throw MidiFailure("MIDI region copies must last at least one nanosecond") }
+        startWhole = startN / startD; startRemainder = startN % startD; startDivisor = startD
         self.spec = spec; self.events = events; self.sourceDuration = sourceDuration
         var end = SourceChase(), addresses = Set<Int>()
         for event in events where event.seconds < spec.sourceEnd || event.seconds == spec.sourceEnd && spec.sourceEnd == sourceDuration {
@@ -403,14 +422,46 @@ struct MidiRegion {
         }
         obstacles = end.obstacles
         self.addresses = addresses; startKnown = midiRegionEntry(events, at: spec.sourceStart).safeKnown; endTouched = end.touched
+        guard edgeNanoseconds(spec.repeatCount) != nil else { throw MidiFailure("MIDI region exceeds the native nanosecond timeline") }
     }
     func includes(_ seconds: Double) -> Bool { seconds < spec.sourceEnd || seconds == spec.sourceEnd && spec.sourceEnd == sourceDuration }
+    // ceil(start + copy * period) in whole nanoseconds, or nil past the host clock.
+    func edgeNanoseconds(_ copy: Int) -> UInt64? {
+        let product = UInt128(copy).multipliedFullWidth(by: period)
+        guard product.high < periodDivisor else { return nil }
+        let (whole, rest) = periodDivisor.dividingFullWidth(product)
+        // ceil(startRemainder / startDivisor + rest / periodDivisor) is 0, 1 or 2.
+        let left = startRemainder.multipliedFullWidth(by: periodDivisor), right = (periodDivisor - rest).multipliedFullWidth(by: startDivisor)
+        let fraction: UInt128 = startRemainder == 0 && rest == 0 ? 0 : (left.high, left.low) <= (right.high, right.low) ? 1 : 2
+        let sum = startWhole.addingReportingOverflow(whole), total = sum.partialValue.addingReportingOverflow(fraction)
+        guard !sum.overflow, !total.overflow, total.partialValue < UInt128(UInt64.max) else { return nil }
+        return UInt64(total.partialValue)
+    }
+    // Every copy edge, the validated end, scheduling, seek and hand-over read
+    // this one function. init admitted the last edge; earlier edges are smaller.
+    func boundary(_ copy: Int) -> Double { Double(edgeNanoseconds(copy)!) / 1e9 }
+    // The copy whose edges hold seconds, clamped to the first and last copy.
+    // The binary64 estimate only seeds the exact edge comparisons.
+    func copy(at seconds: Double) -> Int {
+        let estimate = ((seconds - start) * 1e9 / (Double(period) / Double(periodDivisor))).rounded(.down)
+        var copy = estimate.isFinite ? Int(min(max(estimate, 0), Double(spec.repeatCount - 1))) : 0
+        while copy > 0 && boundary(copy) > seconds { copy -= 1 }
+        while copy + 1 < spec.repeatCount && boundary(copy + 1) <= seconds { copy += 1 }
+        return copy
+    }
+    // A copy's events stay between its own edges. The binary64 source span can
+    // round past the exact period; such an event lands on the closing edge.
+    func eventTime(_ seconds: Double, copy: Int) -> Double {
+        min(boundary(copy) + (seconds - spec.sourceStart), boundary(copy + 1))
+    }
 }
 struct MidiRegionCursor {
     var copy = 0, index = 0, active = false
 }
 struct MidiRegionAction {
-    enum Kind: Int { case endpointEvent, end, begin, event }
+    // At one instant a copy's events on its closing edge and its cleanup run
+    // before any owner that begins there.
+    enum Kind: Int { case endpointEvent, boundaryEvent, end, begin, event }
     let seconds: Double, region: Int, kind: Kind
 }
 extension SourceChase {
@@ -501,7 +552,7 @@ struct Timeline: Decodable {
                 guard obstacles.isEmpty else { throw MidiFailure("MIDI region reconstruction requires support for " + obstacles.map(\.rawValue).sorted().joined(separator: ", ")) }
                 var mutations = Set<ChaseField>()
                 if looping { for region in regions { mutations.formUnion(region.endTouched) } }
-                for region in regions.sorted(by: { $0.spec.startSeconds < $1.spec.startSeconds }) {
+                for region in regions.sorted(by: { $0.start < $1.start }) {
                     let previous = mutations.filter { region.addresses.contains($0.port << 8 | Int($0.channel)) }
                     guard previous.isSubset(of: region.startKnown), region.spec.repeatCount == 1 || region.endTouched.isSubset(of: region.startKnown) else {
                         throw MidiFailure("MIDI region needs an explicit source baseline for previously changed channel fields")
@@ -511,9 +562,8 @@ struct Timeline: Decodable {
             }
             let scopes = try regions.map { try cycle?.window($0).scope ?? $0.addresses }
             for (index, first) in regions.enumerated() {
-                let cycleStart = Int64(((cycle?.start ?? 0) * 1e9).rounded())
-                let cycleEnd = Int64(((cycle?.end ?? duration) * 1e9).rounded())
-                for (other, second) in regions.enumerated().dropFirst(index + 1) where max(first.startNanoseconds, second.startNanoseconds, cycleStart) < min(first.endNanoseconds, second.endNanoseconds, cycleEnd) {
+                for (other, second) in regions.enumerated().dropFirst(index + 1) where max(first.start, second.start, cycle?.start ?? 0)
+                    < min(first.end, second.end, cycle?.end ?? duration) {
                     guard scopes[index].isDisjoint(with: scopes[other]) else { throw MidiFailure("overlapping MIDI regions own the same destination/channel") }
                 }
             }
@@ -639,7 +689,7 @@ struct MidiCycle {
     }
     func validate(timeline: Timeline) throws {
         guard timeline.arrangement, !timeline.regions.isEmpty,
-              timeline.regions.allSatisfy({ $0.end > start && $0.spec.startSeconds < end }) else {
+              timeline.regions.allSatisfy({ $0.end > start && $0.start < end }) else {
             throw MidiFailure("common cycle requires intersecting original MIDI regions")
         }
         let windows = try timeline.regions.map { try window($0) }
@@ -653,10 +703,9 @@ struct MidiCycle {
     }
     func entry(_ region: MidiRegion, copy: Int, sourceSeconds: Double, index: UInt128,
                offset: Double, anchor: UInt64, host: UInt64) throws -> MidiRegionEntry {
-        let start = region.spec.startSeconds + Double(copy) * region.duration
         var before = 0, through = 0
         for event in region.events {
-            let position = start + (event.seconds - region.spec.sourceStart)
+            let position = region.eventTime(event.seconds, copy: copy)
             let endpoint = event.seconds == region.spec.sourceEnd && region.spec.sourceEnd == region.sourceDuration
             guard region.includes(event.seconds), position < end || endpoint && position == end else { break }
             // Original trim/window prefixes are history even when their
@@ -672,14 +721,10 @@ struct MidiCycle {
         return midiRegionEntry(region.events, at: sourceSeconds, boundary: (before, through))
     }
     func window(_ region: MidiRegion) throws -> MidiCycleRegion {
-        let from = max(start, region.spec.startSeconds), to = min(end, region.end)
-        var copy = min(region.spec.repeatCount - 1, max(0, Int(floor((from - region.spec.startSeconds) / region.duration))))
-        func position(_ value: Int) -> Double { region.spec.startSeconds + Double(value) * region.duration }
-        if position(copy) > from { copy -= 1 }
-        if copy + 1 < region.spec.repeatCount && position(copy + 1) <= from { copy += 1 }
-        guard copy >= 0, position(copy) <= from, position(copy + 1) > from else { throw MidiFailure("common MIDI source loses repeat precision") }
-        let source = min(region.spec.sourceEnd, region.spec.sourceStart + (from - position(copy)))
-        let repeated = to > position(copy + 1)
+        let from = max(start, region.start), to = min(end, region.end)
+        let copy = region.copy(at: from)
+        let source = min(region.spec.sourceEnd, region.spec.sourceStart + (from - region.boundary(copy)))
+        let repeated = to > region.boundary(copy + 1)
         let host = try deadline(position: from, index: 0, offset: 0, anchor: 0)
         let entry = try entry(region, copy: copy, sourceSeconds: source, index: 0, offset: 0, anchor: 0, host: host)
         // Use the same original-position and native-deadline classification as
@@ -691,13 +736,14 @@ struct MidiCycle {
             scope.formUnion(try restart.model.bootstrap(replacing: SourceChase()).map { $0.0 << 8 | Int($0.1[0] & 15) })
         }
         for (eventIndex, event) in region.events.enumerated() where event.seconds >= region.spec.sourceStart && region.includes(event.seconds) {
-            let absolute = position(copy) + (event.seconds - region.spec.sourceStart)
+            let absolute = region.eventTime(event.seconds, copy: copy)
             let nativeDeadline = try deadline(position: absolute, index: 0, offset: 0, anchor: 0)
             let endpoint = event.seconds == region.spec.sourceEnd && region.spec.sourceEnd == region.sourceDuration
             let first = absolute >= start && (absolute < to || endpoint && absolute == to)
                 && nativeDeadline >= host
-            let laterPosition = position(copy + 1) + (event.seconds - region.spec.sourceStart)
-            let later = repeated && (laterPosition < to || endpoint && laterPosition == to)
+            // A repeated window has a later copy before its end, so copy + 1 exists.
+            let later = repeated && { let position = region.eventTime(event.seconds, copy: copy + 1)
+                return position < to || endpoint && position == to }()
             if first || later {
                 through = max(through, eventIndex + 1)
                 if event.bytes[0] < 0xf0 { scope.insert(event.port << 8 | Int(event.bytes[0] & 15)) }
@@ -989,20 +1035,18 @@ final class MidiTransport {
         }
         for event in notes.values.sorted(by: { $0.key < $1.key }) where held[event.key] != event { try apply(event) }
     }
-    func regionStart(_ region: MidiRegion, copy: Int) -> Double { region.startSeconds(copy: copy) }
     func nextRegionAction() -> MidiRegionAction? {
         var selected: MidiRegionAction?
         for (index, region) in timeline.regions.enumerated() {
             let cursor = regionCursors[index]
             guard cursor.copy < region.spec.repeatCount else { continue }
-            let start = regionStart(region, copy: cursor.copy)
             let action: MidiRegionAction
-            if !cursor.active { action = MidiRegionAction(seconds: start, region: index, kind: .begin) }
+            if !cursor.active { action = MidiRegionAction(seconds: region.boundary(cursor.copy), region: index, kind: .begin) }
             else if cursor.index < region.events.count && region.includes(region.events[cursor.index].seconds) {
-                let event = region.events[cursor.index]
-                action = MidiRegionAction(seconds: start + (event.seconds - region.spec.sourceStart), region: index,
-                                          kind: event.seconds == region.spec.sourceEnd ? .endpointEvent : .event)
-            } else { action = MidiRegionAction(seconds: region.startSeconds(copy: cursor.copy + 1), region: index, kind: .end) }
+                let event = region.events[cursor.index], seconds = region.eventTime(event.seconds, copy: cursor.copy)
+                action = MidiRegionAction(seconds: seconds, region: index, kind: event.seconds == region.spec.sourceEnd ? .endpointEvent
+                    : seconds == region.boundary(cursor.copy + 1) ? .boundaryEvent : .event)
+            } else { action = MidiRegionAction(seconds: region.boundary(cursor.copy + 1), region: index, kind: .end) }
             if selected == nil || action.seconds < selected!.seconds
                 || action.seconds == selected!.seconds && (action.kind.rawValue < selected!.kind.rawValue
                     || action.kind == selected!.kind && action.region < selected!.region) { selected = action }
@@ -1068,17 +1112,16 @@ final class MidiTransport {
             for (index, region) in timeline.regions.enumerated() {
                 let old = regionCursors[index]
                 guard old.copy < region.spec.repeatCount,
-                      seconds >= regionStart(region, copy: old.copy) + region.duration else { continue }
+                      seconds >= region.boundary(old.copy + 1) else { continue }
                 if let cycle, let host = cycleHost,
-                   try cycle.deadline(position: regionStart(region, copy: old.copy) + region.duration,
+                   try cycle.deadline(position: region.boundary(old.copy + 1),
                                       index: cycleIndex, offset: offset - cycle.start, anchor: anchor) >= host {
                     // A copy that ends in this native batch is still an
                     // ordered stream, even when its virtual end is earlier
                     // than the observed fractional phase. Drain it below.
                     continue
                 }
-                var copy = seconds >= region.end ? region.spec.repeatCount
-                    : min(region.spec.repeatCount - 1, max(0, Int(floor((seconds - region.spec.startSeconds) / region.duration))))
+                var copy = seconds >= region.end ? region.spec.repeatCount : region.copy(at: seconds)
                 if let cycle, let host = cycleHost {
                     // The latest virtual copy is not necessarily the first
                     // copy in this integer host batch. Locate its earliest
@@ -1086,7 +1129,7 @@ final class MidiTransport {
                     var low = old.copy, high = copy
                     while low < high {
                         let middle = low + (high - low) / 2
-                        let end = regionStart(region, copy: middle) + region.duration
+                        let end = region.boundary(middle + 1)
                         if try cycle.deadline(position: end, index: cycleIndex,
                             offset: offset - cycle.start, anchor: anchor) < host { low = middle + 1 }
                         else { high = middle }
@@ -1106,7 +1149,7 @@ final class MidiTransport {
                         let attack = type == 0x90 && event.bytes[2] > 0
                         let release = type == 0x80 || type == 0x90 && event.bytes[2] == 0
                         let key = UInt16(event.bytes[0] & 15) << 8 | UInt16(event.bytes[1])
-                        let deadline = regionStart(region, copy: old.copy) + (event.seconds - region.spec.sourceStart)
+                        let deadline = region.eventTime(event.seconds, copy: old.copy)
                         let expired: Bool
                         if let cycle, let host = cycleHost {
                             expired = try cycle.deadline(position: deadline, index: cycleIndex,
@@ -1127,7 +1170,7 @@ final class MidiTransport {
                 }
                 regionCursors[index] = MidiRegionCursor(copy: copy)
                 if cut == nil && copy < region.spec.repeatCount && !(old.active && copy == old.copy + 1) {
-                    let source = region.spec.sourceStart + (seconds - regionStart(region, copy: copy))
+                    let source = region.spec.sourceStart + (seconds - region.boundary(copy))
                     phaseEntries.append((index, min(source, region.spec.sourceEnd)))
                 }
             }
@@ -1137,12 +1180,11 @@ final class MidiTransport {
         if reconstruct {
             regionCursors = timeline.regions.map { region in
                 if seconds >= region.end { return MidiRegionCursor(copy: region.spec.repeatCount) }
-                if seconds < region.spec.startSeconds { return MidiRegionCursor() }
-                let copy = min(region.spec.repeatCount - 1, max(0, Int(floor((seconds - region.spec.startSeconds) / region.duration))))
-                return MidiRegionCursor(copy: copy)
+                if seconds < region.start { return MidiRegionCursor() }
+                return MidiRegionCursor(copy: region.copy(at: seconds))
             }
-            for (index, region) in timeline.regions.enumerated() where seconds >= region.spec.startSeconds && seconds < region.end {
-                let source = region.spec.sourceStart + (seconds - regionStart(region, copy: regionCursors[index].copy))
+            for (index, region) in timeline.regions.enumerated() where seconds >= region.start && seconds < region.end {
+                let source = region.spec.sourceStart + (seconds - region.boundary(regionCursors[index].copy))
                 try beginRegion(index, at: min(source, region.spec.sourceEnd))
             }
         }
@@ -1156,7 +1198,7 @@ final class MidiTransport {
                 try sourceSilence(addresses: regionScopes[action.region])
                 for address in regionScopes[action.region] { sourceModel.channels[address]?.notes.removeAll() }
                 regionCursors[action.region].active = false; regionCursors[action.region].copy += 1
-            case .event, .endpointEvent:
+            case .event, .boundaryEvent, .endpointEvent:
                 let event = region.events[regionCursors[action.region].index]
                 if cut == nil || action.seconds < cut! || action.kind == .endpointEvent {
                     let type = event.bytes[0] & 0xf0
@@ -1190,16 +1232,15 @@ final class MidiTransport {
         guard timeline.arrangement else { try restore(at: offset); return }
         regionCursors = timeline.regions.map { region in
             if offset >= region.end { return MidiRegionCursor(copy: region.spec.repeatCount) }
-            if offset < region.spec.startSeconds { return MidiRegionCursor() }
-            let copy = min(region.spec.repeatCount - 1, max(0, Int(floor((offset - region.spec.startSeconds) / region.duration))))
-            return MidiRegionCursor(copy: copy)
+            if offset < region.start { return MidiRegionCursor() }
+            return MidiRegionCursor(copy: region.copy(at: offset))
         }
-        for (index, region) in timeline.regions.enumerated() where offset >= region.spec.startSeconds && offset < region.end {
-            let start = regionStart(region, copy: regionCursors[index].copy)
+        for (index, region) in timeline.regions.enumerated() where offset >= region.start && offset < region.end {
+            let start = region.boundary(regionCursors[index].copy)
             // A delayed common-epoch callback must not make an expired initial
             // copy audible. Reconciliation skips it to the current phase. Keep
             // the original boundary stream for copies that are still live.
-            guard seconds < start + region.duration else { continue }
+            guard seconds < region.boundary(regionCursors[index].copy + 1) else { continue }
             let source = region.spec.sourceStart + (offset - start)
             try beginRegion(index, at: min(source, region.spec.sourceEnd))
         }
@@ -1282,9 +1323,8 @@ final class MidiTransport {
         try checkDestination(); try silence(); cycleIndex = 0
         let seconds = seconds + (cycle?.start ?? 0)
         offset = seconds
-        for (index, region) in timeline.regions.enumerated() where seconds >= region.spec.startSeconds && seconds < region.end {
-            let copy = min(region.spec.repeatCount - 1, max(0, Int(floor((seconds - region.spec.startSeconds) / region.duration))))
-            let source = min(region.spec.sourceEnd, region.spec.sourceStart + seconds - regionStart(region, copy: copy))
+        for (index, region) in timeline.regions.enumerated() where seconds >= region.start && seconds < region.end {
+            let source = min(region.spec.sourceEnd, region.spec.sourceStart + seconds - region.boundary(region.copy(at: seconds)))
             let entry = midiRegionEntry(region.events, at: source), previous = sourceModel.scoped(to: regionScopes[index])
             guard previous.touched.isSubset(of: entry.safeKnown) else { throw MidiFailure("coordinated MIDI seek needs a known source baseline before sounding keys") }
             var permitted = previous; permitted.touched.formIntersection(entry.model.known)

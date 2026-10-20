@@ -1,12 +1,13 @@
 import { validateCapturedSource } from './captured-source.mjs'
 import { captureRegionTime } from './capture-time.mjs'
-import { validateMidiSource, midiSourcePattern } from './midi-source.mjs'
+import { validateMidiSource, midiSourcePattern, tempoEvent } from './midi-source.mjs'
 import { PPQ, validateProject } from './sequencer-project.mjs'
 import { validateCapturePlacement, validateClockOffset, capturePlacementStart, projectCapturedPlacement } from './capture-placement.mjs'
 import { validateCalibrationCapture } from './calibration-profile.mjs'
 import { validatePractice } from './arrangement-practice.mjs'
 import { validateRecordingCorrection } from './recording-correction.mjs'
 import { arrangementLoop } from './arrangement-loop.mjs'
+import { fraction, rational, projectNanoseconds, exactSeconds, regionEdgeSeconds } from './exact-time.mjs'
 
 const integer = (value, name, minimum = 0) => {
   if (!Number.isSafeInteger(value) || value < minimum) throw new Error(`Invalid ${name}`)
@@ -101,12 +102,30 @@ export function sourceSecondsAtTick(performance, tick) {
   if (!after || before.tick === tick) return before.seconds
   return before.seconds + (after.seconds - before.seconds) * (tick - before.tick) / (after.tick - before.tick)
 }
+// The exact time of a source tick from the tempo map midiSourcePattern reads:
+// PPQ sums ticks * microseconds per quarter; SMPTE uses its exact frame rate.
+export function sourceNanosecondsAtTick(performance, tick) {
+  integer(tick, 'source MIDI tick')
+  if (tick > performance.ticks) throw new Error('MIDI region exceeds its source pattern')
+  const timing = performance.timing
+  if (timing.kind !== 'ppq') {
+    return [BigInt(tick) * BigInt(timing.denominator) * 1_000_000_000n, BigInt(timing.numerator) * BigInt(timing.ticksPerFrame)]
+  }
+  let at = 0, micros = 500000n, total = 0n
+  for (const event of performance.events) {
+    if (event.tick > tick) break
+    total += BigInt(event.tick - at) * micros; at = event.tick
+    const tempo = tempoEvent(event)
+    if (tempo) micros = BigInt(tempo.micros)
+  }
+  return [(total + BigInt(tick - at) * micros) * 1000n, BigInt(timing.ppq)]
+}
 export function arrangementClipTime(project, clip) {
   const asset = project.assets.find(asset => asset.id === clip.asset)
   if (!asset) throw new Error('Region source is missing')
   integer(clip.position, 'region project position')
   integer(clip.repeat, 'region repeat count', 1)
-  let sourceStart, sourceEnd, duration, capture
+  let sourceStart, sourceEnd, duration, capture, exact
   switch (asset.kind) {
   case 'capture': {
     if (clip.pattern !== undefined) throw new Error('Captured regions do not have MIDI patterns')
@@ -141,17 +160,23 @@ export function arrangementClipTime(project, clip) {
     const performance = midiSourcePattern(asset.source, { pattern: clip.pattern })
     sourceStart = sourceSecondsAtTick(performance, clip.offset)
     sourceEnd = sourceSecondsAtTick(performance, integer(clip.offset + clip.extent, 'region MIDI source end'))
+    // Native copy edges and ownership read only these exact values. The
+    // binary64 source seconds above remain the keys that select source events.
+    const [an, ad] = sourceNanosecondsAtTick(performance, clip.offset), [bn, bd] = sourceNanosecondsAtTick(performance, clip.offset + clip.extent)
+    exact = { start: fraction(...projectNanoseconds(project, clip.position)), period: fraction(bn * ad - an * bd, ad * bd) }
     break
   }
   default: throw new Error('Unknown region source kind')
   }
   if (asset.kind !== 'capture' && (clip.component !== undefined || clip.placement !== undefined || clip.audioChannel !== undefined || clip.clockOffsetNanoseconds !== undefined)) throw new Error('Component correction requires a captured source')
-  const position = asset.kind === 'capture' && (clip.placement || clip.clockOffsetNanoseconds) ? capturePlacementStart(project, clip) : clip.position / project.ppq * 60 / project.tempo
+  const position = exact ? exactSeconds(...rational(exact.start))
+    : asset.kind === 'capture' && (clip.placement || clip.clockOffsetNanoseconds) ? capturePlacementStart(project, clip) : clip.position / project.ppq * 60 / project.tempo
   duration ??= sourceEnd - sourceStart
-  const end = position + duration * clip.repeat
+  const end = exact ? regionEdgeSeconds(exact.start, exact.period, clip.repeat) : position + duration * clip.repeat
   if (![position, sourceStart, sourceEnd, duration, end].every(Number.isFinite)) throw new Error('Region time is not representable')
   return { startSeconds: position, sourceStartSeconds: sourceStart, sourceEndSeconds: sourceEnd, durationSeconds: duration, endSeconds: end,
-    ...(capture ? { sourceClock: capture.sourceClock, audio: capture.audio } : {}) }
+    ...(capture ? { sourceClock: capture.sourceClock, audio: capture.audio } : {}),
+    ...(exact ? { startNanoseconds: exact.start, periodNanoseconds: exact.period } : {}) }
 }
 export function validateArrangement(project) {
   if (project?.practice !== undefined) validatePractice(project.practice)

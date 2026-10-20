@@ -40,7 +40,7 @@ struct Case:Decodable{let name:String;let rate:Double;let loop:WaveLoopClock;let
   let asset=Asset(id:"source",path:root+"/"+String(Int(c.rate))+".wav",sha256:"",sampleRate:c.rate,channels:2,frames:128)
   let plan=Plan(schemaVersion:4,kind:"capture-audio-arrangement",duration:c.loop.duration,assets:[asset],regions:[c.region],midi:nil,ump:nil,umpRegions:nil,loop:c.loop)
   try plan.validate()
-  var mismatched=c.region;mismatched.startNanoseconds=CaptureStartNanoseconds(numerator:"1",denominator:"1")
+  var mismatched=c.region;mismatched.startNanoseconds=ExactNanoseconds(numerator:"1",denominator:"1")
   do{_ = try mismatched.loopLayout(c.loop,rate:c.rate);preconditionFailure("inconsistent exact placement admitted")}catch{}
   let voice=try Voice(region:c.region,asset:asset,capacity:257,outputChannels:2,loop:c.loop)
   let target=AVAudioPCMBuffer(pcmFormat:voice.format,frameCapacity:257)!
@@ -56,13 +56,13 @@ struct Case:Decodable{let name:String;let rate:Double;let loop:WaveLoopClock;let
  // Accepted exact fractions may have an intermediate frame*divisor wider
  // than UInt128. This phase must still be representable and streamable.
  let capture=try CaptureAudioClock(origin:"0",offset:"0",extent:"1000000000000000",numer:1,denom:4294967291,firstAudioHostTime:"1000").layout(rate:48000,offsetFrames:0,frameCount:7,repetitions:3)
- let huge=try WaveLoopClock(start:0,end:960,ppq:960,tempo:120.1).layout(rate:48000,start:CaptureStartNanoseconds(numerator:"1",denominator:"7"),startSeconds:1/7e9,capture:capture)
+ let huge=try WaveLoopClock(start:0,end:960,ppq:960,tempo:120.1).layout(rate:48000,start:ExactNanoseconds(numerator:"1",denominator:"7"),startSeconds:1/7e9,capture:capture)
  let span=try huge.span(at:4_000_000_000,maximum:257);precondition(span.count>0)
  // Translating both exact origins must not overflow before cancellation.
  let n:UInt128=15393162788864004225643087868723,d:UInt128=29579501615081061
  let secondsD=d*1_000_000_000
  let translated=try WaveLoopClock(start:1_000_000_000,end:1_000_000_960,ppq:960,tempo:120.1).layout(rate:48000,
-  start:CaptureStartNanoseconds(numerator:String(n),denominator:String(d)),
+  start:ExactNanoseconds(numerator:String(n),denominator:String(d)),
   startSeconds:Double(n/secondsD)+Double(n%secondsD)/Double(secondsD),capture:capture)
  for frame:Int64 in [0,1,24,48,256,4_000_000_000]{
   let original=try huge.span(at:frame,maximum:257),shifted=try translated.span(at:frame,maximum:257)

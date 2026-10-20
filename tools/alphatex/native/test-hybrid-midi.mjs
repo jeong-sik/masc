@@ -38,7 +38,8 @@ let first=Edge("42",1),second=Edge("43",2),errorGroup=HybridMidiTransport(owners
 errorGroup.finish(reason:"stop",error:nil,publish:false);precondition(errorGroup.terminalFailure != nil && first.closes==1 && second.closes==1)
 // Derive actual channel state from parsed, decoder-complete SMF regions. UMP
 // in another group/channel can share a destination, a shared scope cannot.
-let wire:[String:Any]=["schemaVersion":3,"duration":1,"sources":[["id":"s","timeline":["schemaVersion":2,"duration":1,"bindings":[["port":0,"destination":"42"]],"events":[["seconds":0,"port":0,"bytes":[144,60,100]],["seconds":0.8,"port":0,"bytes":[128,60,77]]]]]],"regions":[["id":"r","source":"s","startSeconds":0,"sourceStart":0,"sourceEnd":1,"repeatCount":1]]]
+let wire:[String:Any]=["schemaVersion":3,"duration":1,"sources":[["id":"s","timeline":["schemaVersion":2,"duration":1,"bindings":[["port":0,"destination":"42"]],"events":[["seconds":0,"port":0,"bytes":[144,60,100]],["seconds":0.8,"port":0,"bytes":[128,60,77]]]]]],"regions":[["id":"r","source":"s","startSeconds":0,"sourceStart":0,"sourceEnd":1,"repeatCount":1,
+ "startNanoseconds":["numerator":"0","denominator":"1"],"periodNanoseconds":["numerator":"1000000000","denominator":"1"]]]]
 let midi=try JSONDecoder().decode(Timeline.self,from:JSONSerialization.data(withJSONObject:wire))
 func capture(_ group:UInt32,_ channel:UInt32,_ uid:String="42") -> UmpArrangement {
  let prefix=group<<24|channel<<16

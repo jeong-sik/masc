@@ -148,7 +148,7 @@ let overview_card_detail_min_rows = 3
 let overview_card_border_rows = 2
 
 let overview_cards ~inner ~rows ~selected ~decisions ~decision_title
-    ~empty_note ~continuation ~status =
+    ~continuation ~status =
   let columns =
     Masc_tui_card.columns_that_fit ~inner_width:inner ~gap:overview_card_gap
       ~min_card_width:overview_card_min_width ~max_columns:2
@@ -186,7 +186,9 @@ let overview_cards ~inner ~rows ~selected ~decisions ~decision_title
     ; body =
         (fun ~cells ->
            match decisions with
-           | [] -> [ Theme.recede () ^ empty_note ^ Ansi.reset ]
+           (* The cards are drawn only where the window holds a decision or
+              there is none to hold, so an empty list means none waits. *)
+           | [] -> [ Theme.recede () ^ "No decision is waiting on you." ^ Ansi.reset ]
            | _ :: _ -> List.map (row_of ~cells) decisions @ detail ~cells)
     }
   in
@@ -198,13 +200,7 @@ let overview_cards ~inner ~rows ~selected ~decisions ~decision_title
   let status_card =
     { Masc_tui_card.title = "Status"; body = (fun ~cells -> status ~cells) }
   in
-  let grid = [ [ decision_card; continue_card ]; [ status_card ] ] in
-  if
-    columns < 2
-    || Masc_tui_card.grid_height ~inner_width:inner ~gap:overview_card_gap
-         ~row_gap:overview_card_row_gap grid
-       > rows
-  then None
+  if columns < 2 then None
   else
     let style =
       { Masc_tui_card.edge = Theme.recede ()
@@ -212,9 +208,9 @@ let overview_cards ~inner ~rows ~selected ~decisions ~decision_title
       ; reset = Ansi.reset
       }
     in
-    Some
-      (Masc_tui_card.grid ~style ~inner_width:inner ~gap:overview_card_gap
-         ~row_gap:overview_card_row_gap grid)
+    Masc_tui_card.grid ~style ~inner_width:inner ~gap:overview_card_gap
+      ~row_gap:overview_card_row_gap ~max_rows:rows
+      [ [ decision_card; continue_card ]; [ status_card ] ]
 
 let render_overview (state : state) =
   let terminal_rows, full_cols = get_terminal_size () in
@@ -329,12 +325,9 @@ let render_overview (state : state) =
             ~decision_title:
               (if List.length decisions = List.length all_decisions
                then "Needs your decision"
-               else Printf.sprintf "Needs your decision · rows %d-%d/%d"
+               else Printf.sprintf "Needs your decision · rows %d-%d/%d · j/k for more"
                    (first + 1) (first + List.length decisions)
                    (List.length all_decisions))
-            ~empty_note:
-              (if all_decisions = [] then "No decision is waiting on you."
-               else "Decision rows above · j/k to choose")
             ~continuation ~status
         in
         match card_rows with

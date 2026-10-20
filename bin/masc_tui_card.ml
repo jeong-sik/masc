@@ -58,17 +58,23 @@ let window ~style ~rows body =
     List.filteri (fun index _ -> index < shown) body
     @ [ style.edge ^ Printf.sprintf "+%d more" hidden ^ style.reset ]
 
-let render ~style ~width ~height card =
+(* [body] is the rows already asked of the card at its content width, so a
+   body that wraps is asked once per card however many times the layout reads
+   its height. *)
+let render_body ~style ~width ~height ~title body =
   if width < min_width || height < min_height then
     List.init (max 0 height) (fun _ -> blank width)
   else begin
     let rows = height - 2 in
-    let body = window ~style ~rows (card.body ~cells:(content_cells ~width)) in
+    let body = window ~style ~rows body in
     let filler = List.init (rows - List.length body) (fun _ -> "") in
-    (top_edge ~style ~width card.title
-     :: List.map (body_row ~style ~width) (body @ filler))
+    (top_edge ~style ~width title :: List.map (body_row ~style ~width) (body @ filler))
     @ [ bottom_edge ~style ~width ]
   end
+
+let render ~style ~width ~height card =
+  render_body ~style ~width ~height ~title:card.title
+    (card.body ~cells:(content_cells ~width))
 
 let columns_that_fit ~inner_width ~gap ~min_card_width ~max_columns =
   let per_column = max 1 (min_card_width + gap) in
@@ -85,60 +91,65 @@ let column_widths ~inner_width ~gap ~columns =
     column_width ~inner_width ~gap ~columns ~index)
 
 (* A card's height with nothing to stretch it: its body and the two edges. *)
-let natural_height ~width card =
-  max min_height (List.length (card.body ~cells:(content_cells ~width)) + 2)
+let natural_height body = max min_height (List.length body + 2)
 
 let stack_height ~row_gap heights =
   List.fold_left ( + ) 0 heights + (row_gap * max 0 (List.length heights - 1))
 
-let natural_heights ~width stack = List.map (natural_height ~width) stack
+(* Each card of a column with its body, asked once at the column's width. *)
+let prepare_column ~width stack =
+  List.map (fun card -> (card.title, card.body ~cells:(content_cells ~width))) stack
 
-let grid_height ~inner_width ~gap ~row_gap columns =
-  let count = List.length columns in
-  List.mapi
-    (fun index stack ->
-       let width = column_width ~inner_width ~gap ~columns:count ~index in
-       stack_height ~row_gap (natural_heights ~width stack))
-    columns
-  |> List.fold_left max 0
+let prepared_height ~row_gap prepared =
+  stack_height ~row_gap (List.map (fun (_, body) -> natural_height body) prepared)
 
 (* The last card of a column takes whatever the column lacks against the
    tallest, so every column ends on the same row. *)
-let column_rows ~style ~row_gap ~width ~height stack =
-  let extra =
-    max 0 (height - stack_height ~row_gap (natural_heights ~width stack))
-  in
-  let last = List.length stack - 1 in
+let column_rows ~style ~row_gap ~width ~height prepared =
+  let extra = max 0 (height - prepared_height ~row_gap prepared) in
+  let last = List.length prepared - 1 in
   let drawn =
     List.mapi
-      (fun index card ->
-         let card_height =
-           natural_height ~width card + if index = last then extra else 0
-         in
-         render ~style ~width ~height:card_height card)
-      stack
+      (fun index (title, body) ->
+         let card_height = natural_height body + if index = last then extra else 0 in
+         render_body ~style ~width ~height:card_height ~title body)
+      prepared
   in
   let gap_rows = List.init row_gap (fun _ -> blank width) in
   List.concat
     (List.mapi (fun index rows -> if index = 0 then rows else gap_rows @ rows) drawn)
 
-let grid ~style ~inner_width ~gap ~row_gap columns =
+let grid ~style ~inner_width ~gap ~row_gap ~max_rows columns =
   let count = List.length columns in
-  let height = grid_height ~inner_width ~gap ~row_gap columns in
-  let drawn =
+  let prepared =
     List.mapi
       (fun index stack ->
          let width = column_width ~inner_width ~gap ~columns:count ~index in
-         let rows = column_rows ~style ~row_gap ~width ~height stack in
-         (* A column with no cards is blank rows of its width. *)
-         if rows = [] then List.init height (fun _ -> blank width) else rows)
+         (width, prepare_column ~width stack))
       columns
   in
-  let rec zip rows =
-    if List.for_all (function [] -> true | _ :: _ -> false) rows then []
-    else
-      let heads = List.map (function [] -> "" | head :: _ -> head) rows in
-      let tails = List.map (function [] -> [] | _ :: tail -> tail) rows in
-      String.concat (blank gap) heads :: zip tails
+  let height =
+    List.fold_left
+      (fun tallest (_, column) -> max tallest (prepared_height ~row_gap column))
+      0 prepared
   in
-  zip drawn
+  if height > max_rows then None
+  else begin
+    let drawn =
+      List.map
+        (fun (width, column) ->
+           match column with
+           (* A column with no cards is blank rows of its width. *)
+           | [] -> List.init height (fun _ -> blank width)
+           | _ :: _ -> column_rows ~style ~row_gap ~width ~height column)
+        prepared
+    in
+    let rec zip rows =
+      if List.for_all (function [] -> true | _ :: _ -> false) rows then []
+      else
+        let heads = List.map (function [] -> "" | head :: _ -> head) rows in
+        let tails = List.map (function [] -> [] | _ :: tail -> tail) rows in
+        String.concat (blank gap) heads :: zip tails
+    in
+    Some (zip drawn)
+  end

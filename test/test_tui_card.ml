@@ -134,8 +134,13 @@ let test_the_columns_that_fit_each_have_the_minimum_width () =
            (Card.column_widths ~inner_width ~gap ~columns))
     [ 1; 39; 40; 81; 82; 83; 123; 124; 125; 300 ]
 
-let grid ?(inner_width = 101) ?(row_gap = 1) columns =
-  Card.grid ~style:plain ~inner_width ~gap:2 ~row_gap columns
+(* The rows of a grid that has room for everything. *)
+let grid ?(inner_width = 101) ?(row_gap = 1) ?(style = plain) columns =
+  match
+    Card.grid ~style ~inner_width ~gap:2 ~row_gap ~max_rows:max_int columns
+  with
+  | Some rows -> rows
+  | None -> fail "a grid with no row limit drew nothing"
 
 let rows_of count = List.init count (fun index -> Printf.sprintf "r%d" index)
 
@@ -144,14 +149,12 @@ let test_the_grid_fills_the_width_and_ends_every_column_on_one_row () =
     [ [ card (rows_of 3); card (rows_of 2) ]; [ card (rows_of 1) ] ]
   in
   let rows = grid columns in
-  check int "as tall as the tallest column"
-    (Card.grid_height ~inner_width:101 ~gap:2 ~row_gap:1 columns)
-    (List.length rows);
+  (* The left column stacks cards of 5 and 4 rows with one row between them.
+     The right card is 3 rows on its own and is stretched to match. *)
+  check int "as tall as the tallest column" (5 + 1 + 4) (List.length rows);
   List.iter
     (fun row -> check int "row width" 101 (Layout.display_width row))
     rows;
-  (* The right column has one card; it takes the difference, so its bottom edge
-     is the last row of the grid like the left column's. *)
   match List.rev rows with
   | last :: _ ->
       check int "both columns close on the last row" 2
@@ -159,21 +162,30 @@ let test_the_grid_fills_the_width_and_ends_every_column_on_one_row () =
   | [] -> fail "the grid drew no rows"
 
 let test_a_card_is_as_tall_as_its_body_and_does_not_fill_the_screen () =
-  let single = [ [ card (rows_of 2) ] ] in
   check int "two body rows and two edges" 4
-    (Card.grid_height ~inner_width:60 ~gap:2 ~row_gap:1 single);
-  check int "and the grid draws that many rows" 4
-    (List.length (grid ~inner_width:60 single))
+    (List.length (grid ~inner_width:60 [ [ card (rows_of 2) ] ]))
 
 let test_stacked_cards_are_separated_by_the_row_gap () =
   let stack = [ [ card (rows_of 1); card (rows_of 1) ] ] in
   check int "two cards of three rows and the gap" (3 + 1 + 3)
-    (Card.grid_height ~inner_width:60 ~gap:2 ~row_gap:1 stack);
+    (List.length (grid ~inner_width:60 ~row_gap:1 stack));
   check int "no gap" (3 + 3)
-    (Card.grid_height ~inner_width:60 ~gap:2 ~row_gap:0 stack)
+    (List.length (grid ~inner_width:60 ~row_gap:0 stack))
 
-(* Each body is asked for the width the layout chose, not a width of its own. *)
-let test_each_body_is_asked_for_its_layout_width () =
+(* A grid that needs more rows than it has draws nothing, so the caller falls
+   back before any row is put on screen. *)
+let test_a_grid_that_does_not_fit_draws_nothing () =
+  let columns = [ [ card (rows_of 6) ] ] in
+  let drawn max_rows =
+    Card.grid ~style:plain ~inner_width:60 ~gap:2 ~row_gap:1 ~max_rows columns
+  in
+  check bool "one row short" true (Option.is_none (drawn 7));
+  match drawn 8 with
+  | Some rows -> check int "exactly its height" 8 (List.length rows)
+  | None -> fail "a grid with exactly enough rows drew nothing"
+
+(* Each body is asked for the width the layout chose, and only once. *)
+let test_each_body_is_asked_once_for_its_layout_width () =
   let inner_width = 101 and gap = 2 in
   let seen = ref [] in
   let probe =
@@ -181,14 +193,26 @@ let test_each_body_is_asked_for_its_layout_width () =
     ; body = (fun ~cells -> seen := cells :: !seen; [ String.make cells 'x' ])
     }
   in
-  ignore (Card.grid ~style:plain ~inner_width ~gap ~row_gap:0 [ [ probe ]; [ probe ] ]);
+  ignore
+    (Card.grid ~style:plain ~inner_width ~gap ~row_gap:0 ~max_rows:max_int
+       [ [ probe ]; [ probe ] ]);
   let expected =
     List.map
       (fun width -> Card.content_cells ~width)
       (Card.column_widths ~inner_width ~gap ~columns:2)
   in
-  check bool "every asked width is a column's content width" true
-    (List.for_all (fun cells -> List.mem cells expected) !seen)
+  check (list int) "one ask per card, at each column's content width" expected
+    (List.rev !seen)
+
+(* The "+N more" row carries style codes into the width fit; styled and cut
+   together it still fills exactly the card's width. *)
+let test_a_cut_body_with_styled_rows_keeps_the_width () =
+  let body = List.init 10 (fun index -> Printf.sprintf "\027[31mrow-%d\027[0m" index) in
+  let rows = Card.render ~style:styled ~width:30 ~height:5 (card body) in
+  check int "height" 5 (List.length rows);
+  List.iter
+    (fun row -> check int "row width" 30 (Layout.display_width row))
+    rows
 
 let () =
   run "tui card"
@@ -215,7 +239,11 @@ let () =
             test_a_card_is_as_tall_as_its_body_and_does_not_fill_the_screen
         ; test_case "stacked cards are separated by the row gap" `Quick
             test_stacked_cards_are_separated_by_the_row_gap
-        ; test_case "each body is asked for its layout width" `Quick
-            test_each_body_is_asked_for_its_layout_width
+        ; test_case "a grid that does not fit draws nothing" `Quick
+            test_a_grid_that_does_not_fit_draws_nothing
+        ; test_case "each body is asked once for its layout width" `Quick
+            test_each_body_is_asked_once_for_its_layout_width
+        ; test_case "a cut body with styled rows keeps the width" `Quick
+            test_a_cut_body_with_styled_rows_keeps_the_width
         ] )
     ]

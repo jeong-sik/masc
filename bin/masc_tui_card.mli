@@ -54,17 +54,17 @@ val column_widths : inner_width:int -> gap:int -> columns:int -> int list
     leftover cells going to the leftmost columns. The widths and the gaps add
     up to [inner_width]. *)
 
-val grid_height : inner_width:int -> gap:int -> row_gap:int -> t list list -> int
-(** The rows {!grid} draws: the tallest column's cards at their natural heights
-    plus [row_gap] blank rows between stacked cards. A caller compares it with
-    the rows it has before drawing. *)
-
 val grid :
   style:style ->
   inner_width:int ->
   gap:int ->
   row_gap:int ->
+  max_rows:int ->
   t list list ->
-  string list
-(** Lays out columns of stacked cards, [gap] cells between columns. Every row
-    is [inner_width] cells wide and there are {!grid_height} of them. *)
+  string list option
+(** Lays out columns of stacked cards, [gap] cells between columns and
+    [row_gap] blank rows between stacked cards. Every row is [inner_width]
+    cells wide, and the rows are those of the tallest column at its cards'
+    natural heights. [None] when that is more than [max_rows], so a caller
+    falls back to something shorter before anything is drawn. Each body is
+    asked once per card. *)

@@ -1031,6 +1031,12 @@ the musical document. It selects without starting playback. Space auditions;
 `:wave PATH` exports float32 stereo at 44100 Hz; `:save` retains the sound for
 reopen. The existing built-in SoundFont picker continues to use AlphaSynth.
 
+This route requires Python 3 and the FluidSynth shared library. On macOS,
+install it with `brew install fluid-synth` (the
+[Homebrew formula](https://formulae.brew.sh/formula/fluid-synth)). If the library
+cannot be loaded, selection reports `FluidSynth library unavailable` and the
+current sound remains selected. Choose another instrument to leave this route.
+
 Original SMF/RMID bytes, source edits, tempo maps, SMPTE/drop-frame clocks and
 explicit format-2 pattern choice remain the source authority. Independent MIDI
 ports own independent synth instances. Notes, CC, program/bank, pitch bend,

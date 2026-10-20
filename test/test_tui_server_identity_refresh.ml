@@ -64,11 +64,10 @@ let test_workspace_identity_matches_canonical_paths () =
    the directory after that changes no answer. A check that resolved the
    paths itself would now see two unresolvable strings that differ. *)
 let test_workspace_checks_compare_paths_resolved_at_decode () =
+  (* Both names come from [temp_file], so each is a fresh file this test owns
+     before it becomes the directory or the link. *)
   let dir = Filename.temp_file "tui-workspace-resolved-" "" in
-  Sys.remove dir;
-  Unix.mkdir dir 0o755;
-  Unix.mkdir (Filename.concat dir ".masc") 0o755;
-  let alias = dir ^ "-alias" in
+  let alias = Filename.temp_file "tui-workspace-resolved-alias-" "" in
   let decoded base_path =
     match
       Tui_decode.decode_server_identity
@@ -87,8 +86,13 @@ let test_workspace_checks_compare_paths_resolved_at_decode () =
     ~finally:(fun () ->
       (try Sys.remove alias with Sys_error _ -> ());
       (try Unix.rmdir (Filename.concat dir ".masc") with Unix.Unix_error _ -> ());
-      try Unix.rmdir dir with Unix.Unix_error _ -> ())
+      (try Unix.rmdir dir with Unix.Unix_error _ -> ());
+      try Sys.remove dir with Sys_error _ -> ())
     (fun () ->
+       Sys.remove dir;
+       Unix.mkdir dir 0o755;
+       Unix.mkdir (Filename.concat dir ".masc") 0o755;
+       Sys.remove alias;
        Unix.symlink dir alias;
        let through_alias = decoded alias in
        let direct = decoded dir in

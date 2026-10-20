@@ -612,21 +612,30 @@ type local_workspace_reading =
 
 module Canonical_path = Tui_decode.Canonical_path
 
-(* This TUI's own workspace, resolved once when the state is created; the
-   server's side is resolved when its reading is decoded. *)
+(* This TUI's own workspace: a configured base path and the MASC root under
+   it. The server's side is resolved when its reading is decoded. *)
 type local_workspace_paths =
   { lw_base_path : Canonical_path.t
   ; lw_masc_root : Canonical_path.t
   }
 
+(* [None] when no base path is configured: there is then no root to name.
+   Both paths are resolved here, once, when the state is created, and never
+   again in this session. If the base or its [.masc] is replaced by a symlink
+   to another directory while the TUI runs, the server's paths stop matching
+   these and the workspace reads as a mismatch until the TUI restarts. *)
 let local_workspace_paths_of_base_path base_path =
-  let lw_base_path = Canonical_path.of_path base_path in
-  { lw_base_path
-  ; lw_masc_root =
-      Canonical_path.of_path
-        (Common.masc_dir_from_base_path
-           ~base_path:(Canonical_path.to_string lw_base_path))
-  }
+  if String.equal base_path ""
+  then None
+  else
+    let lw_base_path = Canonical_path.of_path base_path in
+    Some
+      { lw_base_path
+      ; lw_masc_root =
+          Canonical_path.of_path
+            (Common.masc_dir_from_base_path
+               ~base_path:(Canonical_path.to_string lw_base_path))
+      }
 ;;
 
 (* A bundle or action belongs to one complete server workspace identity.
@@ -645,24 +654,24 @@ let server_workspace_matches ~expected reading =
 
 (* What the paths alone say, booting or not. *)
 let workspace_identity_of_paths ~local_paths (identity : Tui_decode.server_identity) =
-  let local_base_path = local_paths.lw_base_path in
-  let server_base_path = identity.sid_base_path in
-  let server_masc_root = identity.sid_masc_root in
-  if Canonical_path.is_empty local_base_path
-  then Workspace_identity_unread
-  else if
-    (not (Canonical_path.is_empty server_base_path)
-     && not (Canonical_path.equal local_base_path server_base_path))
-    || (not (Canonical_path.is_empty server_masc_root)
-        && not (Canonical_path.equal local_paths.lw_masc_root server_masc_root))
-  then
-    Workspace_identity_mismatch
-      { local_base_path = Canonical_path.to_string local_base_path
-      ; server_base_path = Canonical_path.to_string server_base_path
-      }
-  else if Canonical_path.is_empty server_base_path || Canonical_path.is_empty server_masc_root
-  then Workspace_identity_unread
-  else Workspace_identity_match
+  match local_paths with
+  | None -> Workspace_identity_unread
+  | Some local ->
+    let server_base_path = identity.sid_base_path in
+    let server_masc_root = identity.sid_masc_root in
+    if
+      (not (Canonical_path.is_empty server_base_path)
+       && not (Canonical_path.equal local.lw_base_path server_base_path))
+      || (not (Canonical_path.is_empty server_masc_root)
+          && not (Canonical_path.equal local.lw_masc_root server_masc_root))
+    then
+      Workspace_identity_mismatch
+        { local_base_path = Canonical_path.to_string local.lw_base_path
+        ; server_base_path = Canonical_path.to_string server_base_path
+        }
+    else if Canonical_path.is_empty server_base_path || Canonical_path.is_empty server_masc_root
+    then Workspace_identity_unread
+    else Workspace_identity_match
 ;;
 
 let workspace_identity_of_refresh ~local_paths reading =
@@ -713,19 +722,17 @@ let next_workspace_identity ~previous ~local_paths reading =
    TCP port that happened to serve it. Include the server's resolved MASC
    root because two stores under one base path cannot share a request ID. *)
 let broadcast_workspace_scope ~local_paths identity =
-  match identity with
-  | Some reading when reading.Tui_decode.sid_state_ready <> Some false ->
-    let local = local_paths.lw_base_path in
+  match local_paths, identity with
+  | Some local, Some reading when reading.Tui_decode.sid_state_ready <> Some false ->
     let server = reading.sid_base_path in
     let root = reading.sid_masc_root in
-    if not (Canonical_path.is_empty local) && Canonical_path.equal local server
-       && not (Canonical_path.is_empty root)
+    if Canonical_path.equal local.lw_base_path server && not (Canonical_path.is_empty root)
     then
       Some (Yojson.Safe.to_string
         (`List [`String (Canonical_path.to_string server);
                 `String (Canonical_path.to_string root)]))
     else None
-  | Some _ | None -> None
+  | None, (Some _ | None) | Some _, (Some _ | None) -> None
 ;;
 
 (* Retained input belongs to the complete observed server workspace. Local
@@ -8146,9 +8153,10 @@ type state = {
      a failed probe returns the display to unread rather than showing stale. *)
   mutable server_identity: Tui_decode.server_identity option;
   local_base_path: string;
-  (* [local_base_path] and its MASC root, resolved when this state is made.
-     Workspace checks compare these with [server_identity]. *)
-  local_workspace_paths: local_workspace_paths;
+  (* [local_base_path] and its MASC root, resolved when this state is made;
+     [None] when no base path is set. Workspace checks compare these with
+     [server_identity]. *)
+  local_workspace_paths: local_workspace_paths option;
   mutable workspace_identity: workspace_identity;
   mutable workspace_authority: workspace_authority;
   mutable workspace_read_authority: unit ref;

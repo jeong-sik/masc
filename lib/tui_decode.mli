@@ -1416,7 +1416,10 @@ type server_scheduler_health = {
 (** A workspace path resolved once, where it enters the TUI. [of_path] runs
     [Unix.realpath]; a path it cannot resolve is kept as given, and [""] stays
     [""] without a lookup. [equal] is a string equality and does not touch the
-    filesystem, so a workspace check made on every frame costs no syscall. *)
+    filesystem, so a workspace check made on every frame costs no syscall.
+    OCaml 5.4 and 5.5 [caml_unix_realpath] holds the runtime lock for the whole
+    lookup (it enters no blocking section; otherlibs/unix/realpath_unix.c), so
+    call [of_path] off the frame loop and only where a path enters. *)
 module Canonical_path : sig
   type t = private string
 

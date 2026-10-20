@@ -1582,8 +1582,9 @@ let test_cooperative_resume_preserves_thread_after_newer_steering () =
       turn_id = "old-turn"; tool_surface_sha256 = empty_surface; frame = seed.frame } in
   let latest : t = { client_kind = Codex; runtime_id = observed.runtime_id;
     phase = Settled { session_id = observed.session_id; turn_id = "steering-turn" };
-    turn_count = 2; tool_surface_sha256 = empty_surface; last_recovery_resolution = None;
-    last_transient_release = None; context_frontier = None; updated_at = 2. } in
+    turn_count = 2; host_turns = Not_reported; tool_surface_sha256 = empty_surface;
+    last_recovery_resolution = None; last_transient_release = None; context_frontier = None;
+    updated_at = 2. } in
   let resumed = match Cooperative.For_testing.prepare_official_resume ~observed ~expected:(Some latest) with
     | Ok resumed -> resumed | Error detail -> fail detail in
   check string "resume includes newer steering in the same thread" "steering-turn" resumed.turn_id;
@@ -2002,8 +2003,8 @@ let test_retryable_terminal_requires_acknowledged_identity () =
       (Result.is_error (release claimed));
     check bool "rejected release preserves exact claim" true
       (load ~base_path ~keeper_name = Ok (Some claimed));
-    let active = mark_active ~base_path ~keeper_name ~expected:claimed
-      ~session_id:"session-retryable" ~updated_at:2.0 |> Result.get_ok in
+    let active = mark_active_reported ~base_path ~keeper_name ~expected:claimed
+      ~session_id:"session-retryable" ~reported_turns:0 ~updated_at:2.0 |> Result.get_ok in
     let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
       ~session_id:"session-retryable" ~updated_at:3.0 |> Result.get_ok in
     check bool "missing turn ID cannot be fabricated" true (Result.is_error (release starting));
@@ -2017,6 +2018,227 @@ let test_retryable_terminal_requires_acknowledged_identity () =
       (match load ~base_path ~keeper_name with
        | Ok (Some {last_transient_release=Some {failure=Retryable_turn_failed; _}; _}) -> true
        | _ -> false))
+;;
+
+(* ── The host's own completed-turn count (Muse) ─────────────────────── *)
+
+let host_turns_testable =
+  testable
+    (fun ppf -> function
+       | Not_reported -> Format.pp_print_string ppf "Not_reported"
+       | Reported turns -> Format.fprintf ppf "Reported %d" turns
+       | Unobserved_after turns -> Format.fprintf ppf "Unobserved_after %d" turns)
+    ( = )
+;;
+
+let muse_runtime = "muse.fixture"
+let muse_session = "session-muse"
+
+let claim_muse ~base_path ~keeper_name ~expected ~at =
+  claim ~base_path ~keeper_name ~expected ~client_kind:Muse ~owner_epoch
+    ~runtime_id:muse_runtime ~tool_surface_sha256:empty_surface ~updated_at:at
+  |> Result.get_ok
+;;
+
+(* Open the claimed session with the host's reported count and dispatch one
+   turn, returning the in-flight binding. *)
+let dispatch_muse_turn ~base_path ~keeper_name ~claimed ~reported_turns ~turn_id ~at =
+  let active = mark_active_reported ~base_path ~keeper_name ~expected:claimed
+      ~session_id:muse_session ~reported_turns ~updated_at:at |> Result.get_ok in
+  check host_turns_testable "an opened session holds the reported count"
+    (Reported reported_turns) active.host_turns;
+  let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
+      ~session_id:muse_session ~updated_at:(at +. 0.1) |> Result.get_ok in
+  check host_turns_testable "a dispatched turn's ending is unobserved"
+    (Unobserved_after reported_turns) starting.host_turns;
+  mark_turn_started ~base_path ~keeper_name ~expected:starting ~session_id:muse_session
+    ~turn_id ~turn_count:starting.turn_count ~updated_at:(at +. 0.2) |> Result.get_ok
+;;
+
+let check_resume_expects ~base_path ~keeper_name label expected_turns =
+  let stored = load ~base_path ~keeper_name |> Result.get_ok in
+  let plan = plan_claim ~expected:stored ~client_kind:Muse ~runtime_id:muse_runtime
+    |> Result.get_ok in
+  check bool (label ^ ": the plan resumes") true (Option.is_some plan.previous_settlement);
+  check host_turns_testable label expected_turns (resume_host_turns plan ~expected:stored);
+  stored
+;;
+
+let test_muse_host_turns_follow_observed_turn_endings () =
+  with_workspace "masc-muse-host-turns-" (fun base_path ->
+    let keeper_name = "muse-host-turns" in
+    let claimed = claim_muse ~base_path ~keeper_name ~expected:None ~at:1. in
+    check host_turns_testable "a fresh claim knows no host count" Not_reported
+      claimed.host_turns;
+    check bool "a Muse session cannot open without the host's count" true
+      (Result.is_error
+         (mark_active ~base_path ~keeper_name ~expected:claimed ~session_id:muse_session
+            ~updated_at:1.5));
+    (* Completed: the host reported the terminal, so it counts the turn. *)
+    let inflight = dispatch_muse_turn ~base_path ~keeper_name ~claimed ~reported_turns:0
+        ~turn_id:"turn-1" ~at:2. in
+    let settled = settle_completed_holding ~held_context:[] ~base_path ~keeper_name
+        ~expected:inflight ~session_id:muse_session ~turn_id:"turn-1" ~updated_at:3.
+      |> Result.get_ok in
+    check host_turns_testable "a completed turn is counted" (Reported 1) settled.host_turns;
+    let stored = check_resume_expects ~base_path ~keeper_name
+        "the next resume expects the counted turn" (Reported 1) in
+    (* Retryable failure: the host reported a failed terminal, which it does
+       not count, while the claim ordinal keeps the failed turn. *)
+    let claimed = claim_muse ~base_path ~keeper_name ~expected:stored ~at:4. in
+    let inflight = dispatch_muse_turn ~base_path ~keeper_name ~claimed ~reported_turns:1
+        ~turn_id:"turn-2" ~at:5. in
+    let released = release_transient ~base_path ~keeper_name ~expected:inflight
+        ~failure:Retryable_turn_failed ~released_at:6. |> Result.get_ok in
+    check bool "the failed terminal is the settlement" true
+      (released.phase = Settled { session_id = muse_session; turn_id = "turn-2" });
+    check int "the ordinal keeps the failed turn" 2 released.turn_count;
+    check host_turns_testable "a failed turn is not counted" (Reported 1) released.host_turns;
+    let stored = check_resume_expects ~base_path ~keeper_name
+        "the resume after a failed turn expects the count before it" (Reported 1) in
+    (* Owner stop after dispatch: MASC never saw how the turn ended. *)
+    let claimed = claim_muse ~base_path ~keeper_name ~expected:stored ~at:7. in
+    let inflight = dispatch_muse_turn ~base_path ~keeper_name ~claimed ~reported_turns:1
+        ~turn_id:"turn-3" ~at:8. in
+    let released = release_transient ~base_path ~keeper_name ~expected:inflight
+        ~failure:Owner_stopped_turn ~released_at:9. |> Result.get_ok in
+    check bool "the earlier settlement is restored" true
+      (Option.map (fun (stored : t) -> stored.phase) stored = Some released.phase);
+    check host_turns_testable "an owner stop leaves the ending unobserved"
+      (Unobserved_after 1) released.host_turns;
+    let stored = check_resume_expects ~base_path ~keeper_name
+        "the resume after an owner stop admits either ending" (Unobserved_after 1) in
+    (* The host had counted it; the session opens with that count. An owner
+       stop before the next dispatch keeps the count exact. *)
+    let claimed = claim_muse ~base_path ~keeper_name ~expected:stored ~at:10. in
+    let active = mark_active_reported ~base_path ~keeper_name ~expected:claimed
+        ~session_id:muse_session ~reported_turns:2 ~updated_at:11. |> Result.get_ok in
+    let released = release_transient ~base_path ~keeper_name ~expected:active
+        ~failure:Owner_stopped_turn ~released_at:12. |> Result.get_ok in
+    check host_turns_testable "a stop before dispatch keeps the reported count"
+      (Reported 2) released.host_turns;
+    (* A failure before the turn reached the host restores the exact count. *)
+    let claimed = claim_muse ~base_path ~keeper_name ~expected:(Some released) ~at:13. in
+    let active = mark_active_reported ~base_path ~keeper_name ~expected:claimed
+        ~session_id:muse_session ~reported_turns:2 ~updated_at:14. |> Result.get_ok in
+    let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
+        ~session_id:muse_session ~updated_at:15. |> Result.get_ok in
+    let released = release_transient ~base_path ~keeper_name ~expected:starting
+        ~failure:Pre_dispatch_failed ~released_at:16. |> Result.get_ok in
+    check host_turns_testable "an undispatched turn is not counted" (Reported 2)
+      released.host_turns;
+    (* A host stop settles the turn before the host reports its terminal. *)
+    let claimed = claim_muse ~base_path ~keeper_name ~expected:(Some released) ~at:17. in
+    let inflight = dispatch_muse_turn ~base_path ~keeper_name ~claimed ~reported_turns:2
+        ~turn_id:"turn-6" ~at:18. in
+    let stopped = settle_holding ~held_context:[] ~base_path ~keeper_name ~expected:inflight
+        ~session_id:muse_session ~turn_id:"turn-6" ~updated_at:19. |> Result.get_ok in
+    check host_turns_testable "a host stop leaves the ending unobserved"
+      (Unobserved_after 2) stopped.host_turns;
+    check bool "the count survives a reload" true
+      (load ~base_path ~keeper_name = Ok (Some stopped));
+    (* A release to Ready names no session, so it keeps no count. *)
+    let fresh_keeper = "muse-host-turns-fresh" in
+    let claimed = claim_muse ~base_path ~keeper_name:fresh_keeper ~expected:None ~at:20. in
+    let inflight = dispatch_muse_turn ~base_path ~keeper_name:fresh_keeper ~claimed
+        ~reported_turns:0 ~turn_id:"fresh-turn" ~at:21. in
+    let released = release_transient ~base_path ~keeper_name:fresh_keeper ~expected:inflight
+        ~failure:Owner_stopped_turn ~released_at:22. |> Result.get_ok in
+    check bool "a fresh claim releases to Ready" true (released.phase = Ready);
+    check host_turns_testable "Ready records no count" Not_reported released.host_turns)
+;;
+
+(* Retry_previous re-sends the failed turn's work, so it expects the count the
+   host reported before that turn; a claim that opened no session leaves the
+   inherited count as it was. *)
+let test_retry_previous_expects_the_count_before_the_failed_turn () =
+  with_workspace "masc-muse-retry-host-turns-" (fun base_path ->
+    let keeper_name = "muse-retry-host-turns" in
+    let claimed = claim_muse ~base_path ~keeper_name ~expected:None ~at:1. in
+    let inflight = dispatch_muse_turn ~base_path ~keeper_name ~claimed ~reported_turns:0
+        ~turn_id:"turn-1" ~at:2. in
+    let settled = settle_completed_holding ~held_context:[] ~base_path ~keeper_name
+        ~expected:inflight ~session_id:muse_session ~turn_id:"turn-1" ~updated_at:3.
+      |> Result.get_ok in
+    let claimed = claim_muse ~base_path ~keeper_name ~expected:(Some settled) ~at:4. in
+    let inflight = dispatch_muse_turn ~base_path ~keeper_name ~claimed ~reported_turns:1
+        ~turn_id:"turn-2" ~at:5. in
+    let recovery = require_recovery ~base_path ~keeper_name ~expected:inflight
+        ~failure:Transport_interrupted ~detail:"fixture transport loss" ~required_at:6.
+      |> Result.get_ok in
+    check host_turns_testable "recovery keeps the unobserved ending" (Unobserved_after 1)
+      recovery.host_turns;
+    let recovery_id = match recovery.phase with
+      | Recovery_required required -> required.recovery_id
+      | _ -> fail "fixture recovery was not stored" in
+    let retried, _ = resolve_recovery ~base_path ~keeper_name ~expected:recovery ~recovery_id
+        ~resolution:Retry_previous ~resolved_by:"operator" ~resolved_at:7. |> Result.get_ok in
+    check bool "the earlier settlement is restored" true (retried.phase = settled.phase);
+    check host_turns_testable "the retry expects the count before the failed turn"
+      (Reported 1) retried.host_turns;
+    (* A host stop leaves the count unobserved; a claim that fails before it
+       opens the session ran nothing, so the retry keeps both endings open. *)
+    let claimed = claim_muse ~base_path ~keeper_name ~expected:(Some retried) ~at:8. in
+    let inflight = dispatch_muse_turn ~base_path ~keeper_name ~claimed ~reported_turns:1
+        ~turn_id:"turn-3" ~at:9. in
+    let stopped = settle_holding ~held_context:[] ~base_path ~keeper_name ~expected:inflight
+        ~session_id:muse_session ~turn_id:"turn-3" ~updated_at:10. |> Result.get_ok in
+    let claimed = claim_muse ~base_path ~keeper_name ~expected:(Some stopped) ~at:11. in
+    let recovery = require_recovery ~base_path ~keeper_name ~expected:claimed
+        ~failure:Protocol_failed ~detail:"fixture refusal before open" ~required_at:12.
+      |> Result.get_ok in
+    let recovery_id = match recovery.phase with
+      | Recovery_required required -> required.recovery_id
+      | _ -> fail "fixture recovery was not stored" in
+    let retried, _ = resolve_recovery ~base_path ~keeper_name ~expected:recovery ~recovery_id
+        ~resolution:Retry_previous ~resolved_by:"operator" ~resolved_at:13. |> Result.get_ok in
+    check host_turns_testable "an unopened claim keeps the inherited count"
+      (Unobserved_after 1) retried.host_turns)
+;;
+
+(* A Muse binding that names a session but carries no host count cannot say
+   what its host counts, so it does not load, and boot moves it aside like
+   any binding this build cannot decode; the next claim then opens a fresh
+   session. Another client's binding never records the count and loads
+   without it. *)
+let test_a_muse_binding_without_the_host_count_does_not_load () =
+  with_workspace "masc-muse-host-turns-wire-" (fun base_path ->
+    let keeper_name = "muse-host-turns-wire" in
+    let state_path = path ~base_path ~keeper_name |> Result.get_ok in
+    let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname state_path) in
+    let binding ~client_kind ~phase ~host_turns =
+      Printf.sprintf
+        {|{"client_kind":%S,"context_frontier":null,"last_recovery_resolution":null,"last_transient_release":null,"phase":%s,"runtime_id":"fixture.runtime","schema":"masc.keeper.official-client-session.v2","tool_surface_sha256":"%s","turn_count":%d,"updated_at":1.0%s}|}
+        client_kind phase empty_surface
+        (if String.equal phase {|{"kind":"ready"}|} then 0 else 1)
+        (match host_turns with None -> "" | Some json -> {|,"host_turns":|} ^ json) in
+    let settled = {|{"kind":"settled","session_id":"session-1","turn_id":"turn-1"}|} in
+    let loads label content =
+      write_file state_path content;
+      match load ~base_path ~keeper_name with
+      | Ok (Some binding) -> Some binding.host_turns
+      | Ok None -> fail (label ^ ": the binding vanished")
+      | Error _ -> None in
+    check (option host_turns_testable) "a settled Muse binding without the count is refused"
+      None (loads "muse" (binding ~client_kind:"muse" ~phase:settled ~host_turns:None));
+    check (option host_turns_testable) "a settled Muse binding with the count loads"
+      (Some (Unobserved_after 3))
+      (loads "muse" (binding ~client_kind:"muse" ~phase:settled
+        ~host_turns:(Some {|{"kind":"unobserved_after","turns":3}|})));
+    check (option host_turns_testable) "a ready Muse binding names no session"
+      (Some Not_reported)
+      (loads "muse" (binding ~client_kind:"muse" ~phase:{|{"kind":"ready"}|} ~host_turns:None));
+    check (option host_turns_testable) "another client's binding loads without the count"
+      (Some Not_reported)
+      (loads "codex" (binding ~client_kind:"codex" ~phase:settled ~host_turns:None));
+    check (option host_turns_testable) "another client never records the count" None
+      (loads "codex" (binding ~client_kind:"codex" ~phase:settled
+        ~host_turns:(Some {|{"kind":"reported","turns":1}|})));
+    List.iter (fun json ->
+      check (option host_turns_testable) ("malformed count " ^ json) None
+        (loads "muse" (binding ~client_kind:"muse" ~phase:settled ~host_turns:(Some json))))
+      [ {|null|}; {|{"kind":"reported","turns":-1}|}; {|{"kind":"reported"}|};
+        {|{"kind":"reported","turns":1,"extra":true}|}; {|{"kind":"other","turns":1}|} ])
 ;;
 
 let () =
@@ -2057,6 +2279,12 @@ let () =
             test_duplicate_claim_and_cas_are_fail_closed
         ; test_case "retryable terminal retains only acknowledged history" `Quick
             test_retryable_terminal_requires_acknowledged_identity
+        ; test_case "Muse host turns follow observed turn endings" `Quick
+            test_muse_host_turns_follow_observed_turn_endings
+        ; test_case "retry previous expects the count before the failed turn" `Quick
+            test_retry_previous_expects_the_count_before_the_failed_turn
+        ; test_case "a Muse binding without the host count does not load" `Quick
+            test_a_muse_binding_without_the_host_count_does_not_load
         ; test_case
             "owner stop releases without recovery"
             `Quick

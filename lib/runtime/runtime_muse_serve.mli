@@ -65,11 +65,20 @@ val login_environment : account_home:string -> string array
 val login_argv : cli_path:string -> string list
 (** The official client's sign-in command, run with {!login_environment}. *)
 
+(** The completed-turn counts a resumed session may report. *)
+type resume_turns =
+  | Exactly of int  (** The host must report this count. *)
+  | Reported_or_one_more of int
+      (** A turn was dispatched after the host reported this count and its
+          ending was not observed: the host counts it only if it completed,
+          so it reports this count or the next one. *)
+
 type session_mode =
   | Start
-  | Resume of { session_id : string; expected_turn_count : int }
-      (** Resume only when the host reports this completed-turn count, before
-          changing approval mode, persisting admission or dispatching a turn. *)
+  | Resume of { session_id : string; expected_turns : resume_turns }
+      (** Resume only when the host reports a count [expected_turns] admits,
+          before changing approval mode, persisting admission or dispatching
+          a turn. *)
 
 type mcp_server =
   { name : string
@@ -285,7 +294,7 @@ val run_turn
   -> ?session_mode:session_mode
   -> ?mcp_servers:mcp_server list
   -> ?reasoning_effort:Runtime_muse_msp.reasoning_effort
-  -> ?on_session_ready:(session_id:string -> (unit, string) result)
+  -> ?on_session_ready:(session_id:string -> reported_turns:int -> (unit, string) result)
   -> ?on_prompt_sent:(unit -> unit)
   -> ?on_context_submission:(context_submission -> unit)
   -> ?on_stream_event:(stream_event -> unit)
@@ -316,12 +325,14 @@ val run_turn
     and is admitted when the host accepts it; a refused or failed selection
     fails the turn. Mismatches refuse admission before
     callbacks. A started session must
-    hold no turns; resume requires the expected retained count. Start must
-    report the requested approval mode. Resume reapplies that mode after the
+    hold no turns; a resumed one must report a count its [expected_turns]
+    admits. Start must report the requested approval mode. Resume reapplies that mode after the
     model selection and verifies the returned effective mode before admitting
     the session.
     [on_session_ready] runs once the host has returned the session id, before
-    the turn is written, so the caller can persist the id first. Its failure
+    the turn is written, so the caller can persist the id first. It receives
+    the completed-turn count the host reported for the session, which the
+    caller stores to build the next resume's [expected_turns]. Its failure
     fails the turn. [on_prompt_sent] runs after the complete [turn/start]
     line is written. [on_context_submission] receives that line's receipt
     just before it; its non-reserved exceptions are logged as unavailable

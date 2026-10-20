@@ -155,11 +155,17 @@ type context_frontier =
   ; held_context : held_context list
   }
 
+type host_turns =
+  | Not_reported
+  | Reported of int
+  | Unobserved_after of int
+
 type t =
   { client_kind : client_kind
   ; runtime_id : string
   ; phase : phase
   ; turn_count : int
+  ; host_turns : host_turns
   ; tool_surface_sha256 : string
   ; context_frontier : context_frontier option
   ; last_recovery_resolution : recovery_resolution_record option
@@ -369,9 +375,63 @@ let validate_phase = function
   | Settled settlement -> validate_settlement settlement
 ;;
 
+(* Whether the client reports its own completed-turn count to this store. *)
+let reports_host_turns = function
+  | Muse -> true
+  | Codex | Claude_code | Antigravity -> false
+;;
+
+(* A Muse binding records the host's count exactly when its phase names a
+   session: a resume is admitted only against that count, and a count kept
+   for no session would describe one nobody resumes. An opened session holds
+   the count the host reported, and a dispatched turn's ending is unobserved
+   until a transition records it. *)
+let validate_host_turns binding =
+  let* () =
+    match binding.host_turns with
+    | Not_reported -> Ok ()
+    | Reported turns | Unobserved_after turns ->
+      if turns >= 0 then Ok ()
+      else Error "official-client host completed-turn count must be non-negative"
+  in
+  if not (reports_host_turns binding.client_kind)
+  then (
+    match binding.host_turns with
+    | Not_reported -> Ok ()
+    | Reported _ | Unobserved_after _ ->
+      Error "only a Muse binding records the host's completed-turn count")
+  else
+    match binding.phase, binding.host_turns with
+    | ( ( Ready
+        | Start { previous_settlement = None; _ }
+        | Recovery_required { previous_settlement = None; _ } )
+      , Not_reported ) -> Ok ()
+    | ( ( Ready
+        | Start { previous_settlement = None; _ }
+        | Recovery_required { previous_settlement = None; _ } )
+      , (Reported _ | Unobserved_after _) ) ->
+      Error "a Muse binding that names no session records no host turn count"
+    | Active _, Reported _ -> Ok ()
+    | Active _, (Not_reported | Unobserved_after _) ->
+      Error "an opened Muse session records the count its host reported"
+    | Turn_inflight _, Unobserved_after _ -> Ok ()
+    | Turn_inflight _, (Not_reported | Reported _) ->
+      Error "an in-flight Muse turn has an unobserved ending"
+    | ( ( Start { previous_settlement = Some _; _ }
+        | Recovery_required { previous_settlement = Some _; _ }
+        | Settled _ )
+      , (Reported _ | Unobserved_after _) ) -> Ok ()
+    | ( ( Start { previous_settlement = Some _; _ }
+        | Recovery_required { previous_settlement = Some _; _ }
+        | Settled _ )
+      , Not_reported ) ->
+      Error "a resumable Muse session must record its host's completed-turn count"
+;;
+
 let validate binding =
   let* () = non_empty "runtime_id" binding.runtime_id in
   let* () = validate_phase binding.phase in
+  let* () = validate_host_turns binding in
   let* () =
     match binding.last_recovery_resolution with
     | None -> Ok ()
@@ -740,24 +800,47 @@ let context_frontier_of_yojson = function
      | _ -> Error "invalid context frontier fields")
   | _ -> Error "invalid context frontier"
 
+let host_turns_to_yojson = function
+  | Not_reported -> None
+  | Reported turns -> Some (`Assoc [ "kind", `String "reported"; "turns", `Int turns ])
+  | Unobserved_after turns ->
+    Some (`Assoc [ "kind", `String "unobserved_after"; "turns", `Int turns ])
+;;
+
+let host_turns_of_yojson = function
+  | `Assoc fields ->
+    (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
+     | [ "kind", `String "reported"; "turns", `Int turns ] -> Ok (Reported turns)
+     | [ "kind", `String "unobserved_after"; "turns", `Int turns ] ->
+       Ok (Unobserved_after turns)
+     | _ -> Error "official-client host turn count fields are not exact")
+  | _ -> Error "official-client host turn count must be a JSON object"
+;;
+
 let to_yojson binding =
+  let host_turns =
+    match host_turns_to_yojson binding.host_turns with
+    | None -> []
+    | Some json -> [ "host_turns", json ]
+  in
   `Assoc
-    [ ( "client_kind"
-      , `String
-          (Keeper_semantic_execution.official_client_kind_to_string binding.client_kind) )
-    ; "context_frontier", context_frontier_to_yojson binding.context_frontier
-    ; ( "last_recovery_resolution"
-      , recovery_resolution_record_opt_to_yojson
-          binding.last_recovery_resolution )
-    ; ( "last_transient_release"
-      , transient_release_record_opt_to_yojson binding.last_transient_release )
-    ; "runtime_id", `String binding.runtime_id
-    ; "phase", phase_to_yojson binding.phase
-    ; "schema", `String schema
-    ; "tool_surface_sha256", `String binding.tool_surface_sha256
-    ; "turn_count", `Int binding.turn_count
-    ; "updated_at", `Float binding.updated_at
-    ]
+    ([ ( "client_kind"
+       , `String
+           (Keeper_semantic_execution.official_client_kind_to_string binding.client_kind) )
+     ; "context_frontier", context_frontier_to_yojson binding.context_frontier
+     ; ( "last_recovery_resolution"
+       , recovery_resolution_record_opt_to_yojson
+           binding.last_recovery_resolution )
+     ; ( "last_transient_release"
+       , transient_release_record_opt_to_yojson binding.last_transient_release )
+     ; "runtime_id", `String binding.runtime_id
+     ; "phase", phase_to_yojson binding.phase
+     ; "schema", `String schema
+     ; "tool_surface_sha256", `String binding.tool_surface_sha256
+     ; "turn_count", `Int binding.turn_count
+     ; "updated_at", `Float binding.updated_at
+     ]
+     @ host_turns)
 ;;
 
 let of_yojson = function
@@ -770,6 +853,15 @@ let of_yojson = function
       | [] -> Ok None
       | [(_, json)] -> context_frontier_of_yojson json
       | _ -> Error "duplicate context frontier proof" in
+    (* The host's count is written only when it was reported, so absence is
+       [Not_reported]. [validate] refuses a Muse binding that names a session
+       without it. *)
+    let host_turns_fields, fields = List.partition (fun (name, _) ->
+      String.equal name "host_turns") fields in
+    let* host_turns = match host_turns_fields with
+      | [] -> Ok Not_reported
+      | [(_, json)] -> host_turns_of_yojson json
+      | _ -> Error "duplicate host turn count" in
     (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
      | [ "client_kind", `String client_kind_json
        ; "last_recovery_resolution", last_resolution_json
@@ -800,6 +892,7 @@ let of_yojson = function
            ; runtime_id
            ; phase
            ; turn_count
+           ; host_turns
            ; tool_surface_sha256
            ; context_frontier
            ; last_recovery_resolution
@@ -818,6 +911,7 @@ let equal left right =
   && String.equal left.runtime_id right.runtime_id
   && left.phase = right.phase
   && Int.equal left.turn_count right.turn_count
+  && left.host_turns = right.host_turns
   && String.equal left.tool_surface_sha256 right.tool_surface_sha256
   && left.context_frontier = right.context_frontier
   && left.last_recovery_resolution = right.last_recovery_resolution
@@ -1298,6 +1392,13 @@ let held_context_for_resume plan ~expected =
       when resumed = settled && settled = receipt -> frontier.held_context
   | Some _, Some { phase = Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ | Settled _; _ } | Some _, None | None, _ -> []
 
+let resume_host_turns plan ~expected =
+  match plan.previous_settlement, expected with
+  | Some resumed, Some { phase = Settled settled; host_turns; _ } when resumed = settled ->
+    host_turns
+  | Some _, Some { phase = Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ | Settled _; _ }
+  | Some _, None | None, _ -> Not_reported
+
 let reconcile_context plan ~expected ~snapshot_sha256 =
   match plan.previous_settlement with
   | None -> plan
@@ -1341,6 +1442,7 @@ let claim_with_context_frontier ~context_frontier ~base_path ~keeper_name ~expec
       ; runtime_id
       ; phase = Start { owner_epoch; previous_settlement = plan.previous_settlement }
       ; turn_count = plan.turn_count
+      ; host_turns = resume_host_turns plan ~expected
       ; tool_surface_sha256
       ; context_frontier
       ; last_recovery_resolution
@@ -1367,7 +1469,7 @@ let claim ~base_path ~keeper_name ~expected ~client_kind ~owner_epoch ~runtime_i
     ~expected ~client_kind ~owner_epoch ~runtime_id ~tool_surface_sha256 ~updated_at
 ;;
 
-let mark_active ~base_path ~keeper_name ~expected ~session_id ~updated_at =
+let open_session ~host_turns ~base_path ~keeper_name ~expected ~session_id ~updated_at =
   match expected.phase with
   | Start { owner_epoch; previous_settlement } ->
     transition
@@ -1376,16 +1478,38 @@ let mark_active ~base_path ~keeper_name ~expected ~session_id ~updated_at =
       ~expected:(Some expected)
       { expected with
         phase = Active { owner_epoch; session_id; previous_settlement }
+      ; host_turns
       ; updated_at
       }
   | Ready | Active _ | Turn_inflight _ | Recovery_required _ | Settled _ ->
     Error "official-client session can become active only from start"
 ;;
 
+let mark_active ~base_path ~keeper_name ~expected ~session_id ~updated_at =
+  if reports_host_turns expected.client_kind
+  then Error "a Muse session becomes active only with the count its host reported"
+  else
+    open_session ~host_turns:expected.host_turns ~base_path ~keeper_name ~expected
+      ~session_id ~updated_at
+;;
+
+let mark_active_reported ~base_path ~keeper_name ~expected ~session_id ~reported_turns
+    ~updated_at =
+  open_session ~host_turns:(Reported reported_turns) ~base_path ~keeper_name ~expected
+    ~session_id ~updated_at
+;;
+
 let mark_turn_starting ~base_path ~keeper_name ~expected ~session_id ~updated_at =
   match expected.phase with
   | Active { owner_epoch; session_id = active_session_id; previous_settlement }
     when String.equal active_session_id session_id ->
+    let* host_turns =
+      match expected.host_turns with
+      | Not_reported -> Ok Not_reported
+      | Reported turns -> Ok (Unobserved_after turns)
+      | Unobserved_after _ ->
+        Error "official-client turn cannot start before its host reported a count"
+    in
     transition
       ~base_path
       ~keeper_name
@@ -1394,6 +1518,7 @@ let mark_turn_starting ~base_path ~keeper_name ~expected ~session_id ~updated_at
         phase =
           Turn_inflight
             { owner_epoch; session_id; turn_id = None; previous_settlement }
+      ; host_turns
       ; updated_at
       }
   | Active _ -> Error "official-client session identity changed before turn start"
@@ -1443,7 +1568,25 @@ type held_update =
   | Keep_held
   | Hold of held_context list
 
-let settle_turn ~held_update ~base_path ~keeper_name ~expected ~session_id ~turn_id ~updated_at =
+(* Whether the host reported the settled turn's terminal as [completed]. *)
+type host_ending =
+  | Completed_reported
+  | Ending_unobserved
+
+let host_turns_after_settlement ~host_ending host_turns =
+  match host_ending, host_turns with
+  | Ending_unobserved, host_turns -> Ok host_turns
+  | Completed_reported, Not_reported -> Ok Not_reported
+  | Completed_reported, Unobserved_after turns when turns < Int.max_int ->
+    Ok (Reported (turns + 1))
+  | Completed_reported, Unobserved_after _ ->
+    Error "official-client host completed-turn count cannot be incremented"
+  | Completed_reported, Reported _ ->
+    Error "official-client turn completed without being dispatched"
+;;
+
+let settle_turn ~held_update ~host_ending ~base_path ~keeper_name ~expected ~session_id
+    ~turn_id ~updated_at =
   match expected.phase with
   | Turn_inflight
       { session_id = inflight_session_id
@@ -1452,11 +1595,12 @@ let settle_turn ~held_update ~base_path ~keeper_name ~expected ~session_id ~turn
       }
     when String.equal inflight_session_id session_id
          && String.equal inflight_turn_id turn_id ->
+    let* host_turns = host_turns_after_settlement ~host_ending expected.host_turns in
     transition
       ~base_path
       ~keeper_name
       ~expected:(Some expected)
-      { expected with phase = Settled { session_id; turn_id }; updated_at;
+      { expected with phase = Settled { session_id; turn_id }; host_turns; updated_at;
         context_frontier = Option.map (fun frontier ->
           { frontier with
             acknowledged_turn = Some {session_id; turn_id}
@@ -1472,14 +1616,20 @@ let settle_turn ~held_update ~base_path ~keeper_name ~expected ~session_id ~turn
 ;;
 
 let settle ~base_path ~keeper_name ~expected ~session_id ~turn_id ~updated_at =
-  settle_turn ~held_update:Keep_held ~base_path ~keeper_name ~expected ~session_id ~turn_id
-    ~updated_at
+  settle_turn ~held_update:Keep_held ~host_ending:Ending_unobserved ~base_path ~keeper_name
+    ~expected ~session_id ~turn_id ~updated_at
 ;;
 
 let settle_holding ~held_context ~base_path ~keeper_name ~expected ~session_id ~turn_id
     ~updated_at =
-  settle_turn ~held_update:(Hold held_context) ~base_path ~keeper_name ~expected
-    ~session_id ~turn_id ~updated_at
+  settle_turn ~held_update:(Hold held_context) ~host_ending:Ending_unobserved ~base_path
+    ~keeper_name ~expected ~session_id ~turn_id ~updated_at
+;;
+
+let settle_completed_holding ~held_context ~base_path ~keeper_name ~expected ~session_id
+    ~turn_id ~updated_at =
+  settle_turn ~held_update:(Hold held_context) ~host_ending:Completed_reported ~base_path
+    ~keeper_name ~expected ~session_id ~turn_id ~updated_at
 ;;
 
 let require_recovery ~base_path ~keeper_name ~expected ~failure ~detail
@@ -1516,11 +1666,16 @@ let require_recovery ~base_path ~keeper_name ~expected ~failure ~detail
     }
   in
   let* () = validate_recovery recovery in
+  let host_turns =
+    match previous_settlement with
+    | None -> Not_reported
+    | Some _ -> expected.host_turns
+  in
   transition
     ~base_path
     ~keeper_name
     ~expected:(Some expected)
-    { expected with phase = Recovery_required recovery; updated_at = required_at }
+    { expected with phase = Recovery_required recovery; host_turns; updated_at = required_at }
 ;;
 
 let incomplete_claim = function
@@ -1555,6 +1710,31 @@ let frontier_restored_to previous_settlement frontier =
        certify those digests; the retry must be allowed to send them again. *)
     { frontier with acknowledged_turn = previous_settlement; held_context = [] }
   | Prepared_start_context | Held_by_vendor_session -> frontier
+;;
+
+(* The host's count once a claim ends unsettled with [failure]. Only a turn
+   this claim dispatched ([Turn_inflight]) changes it; before that the count
+   is the one the session opened with, or the one the claim inherited. A
+   retryable failed terminal is one the host reported, and Muse counts only
+   completed turns: [turnCount] is the completed-turn count of its session
+   view, and on 2026-10-19 and 2026-10-20 three resumes after a retryable
+   failure found the host one turn behind an ordinal that counted the failed
+   turn. A failure before dispatch reached no host turn. Any other release
+   keeps the ending unobserved: an owner stop can land after the host
+   finished the turn, as one did on 2026-10-20, whose resume reported one
+   turn more. *)
+let host_turns_after_release ~phase failure host_turns =
+  match phase with
+  | Ready | Start _ | Active _ | Recovery_required _ | Settled _ -> host_turns
+  | Turn_inflight _ ->
+    (match failure, host_turns with
+     | (Retryable_turn_failed | Pre_dispatch_failed | Transient_spawn_failed), Unobserved_after turns ->
+       Reported turns
+     | (Retryable_turn_failed | Pre_dispatch_failed | Transient_spawn_failed), (Not_reported | Reported _)
+     | ( ( Owner_stopped_turn | Transport_interrupted | Protocol_failed | Provider_rejected
+         | Input_rejected _ | Host_hook_failed | State_persistence_failed | Process_restarted
+         | Vendor_session_full _ )
+       , (Not_reported | Reported _ | Unobserved_after _) ) -> host_turns)
 ;;
 
 let release_transient ~base_path ~keeper_name ~expected ~failure ~released_at =
@@ -1594,6 +1774,11 @@ let release_transient ~base_path ~keeper_name ~expected ~failure ~released_at =
       ; context_frontier =
           Option.map (frontier_restored_to previous_settlement) expected.context_frontier
       ; turn_count
+      ; host_turns =
+          (match previous_settlement with
+           | None -> Not_reported
+           | Some _ ->
+             host_turns_after_release ~phase:expected.phase failure expected.host_turns)
       ; last_transient_release = Some { failure; owner_epoch; released_at }
       ; updated_at = released_at
       }
@@ -1675,6 +1860,21 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
            made the next turn fail [mark_turn_started]'s regression guard. *)
         Ok (None, 0)
     in
+    (* A retry re-sends the failed turn's work, so it expects the host not to
+       have counted that turn: the count it reported when the failed claim
+       opened the session. A host that counted it already ran the work, and
+       the resume is refused rather than running it twice. A claim that opened
+       no session ([observed_session_id = None]) ran no turn, so the count it
+       inherited stands. *)
+    let host_turns =
+      match restored_settlement, recovery.observed_session_id, current.host_turns with
+      | None, (Some _ | None), (Not_reported | Reported _ | Unobserved_after _) ->
+        Not_reported
+      | Some _, Some _, Unobserved_after turns -> Reported turns
+      | Some _, Some _, ((Not_reported | Reported _) as host_turns)
+      | Some _, None, ((Not_reported | Reported _ | Unobserved_after _) as host_turns) ->
+        host_turns
+    in
     let resolved =
       { current with
         phase = restored_phase restored_settlement
@@ -1683,6 +1883,7 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
       ; context_frontier =
           Option.map (frontier_restored_to restored_settlement) current.context_frontier
       ; turn_count
+      ; host_turns
       ; last_recovery_resolution =
           Some
             { recovery_id

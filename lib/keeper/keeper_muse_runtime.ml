@@ -993,11 +993,25 @@ let run_without_lifecycle ~argument_source ~official_task_reference ~composed_co
          session_id
      | Some _, Some _ | None, (Some _ | None) -> ());
     let claim_plan = reconciled_plan in
-    let session_mode =
+    (* The resume is checked against the count the host itself last
+       reported for the session, not against MASC's claim ordinal: the host
+       does not count a failed turn, and a turn MASC stopped watching may
+       have completed or not. *)
+    let* session_mode =
       match claim_plan.previous_settlement with
-      | None -> Serve.Start
+      | None -> Ok Serve.Start
       | Some { session_id; _ } ->
-        Serve.Resume { session_id; expected_turn_count = claim_plan.turn_count - 1 }
+        (match Session_store.resume_host_turns claim_plan ~expected:stored_session with
+         | Session_store.Reported turns ->
+           Ok (Serve.Resume { session_id; expected_turns = Serve.Exactly turns })
+         | Session_store.Unobserved_after turns ->
+           Ok (Serve.Resume { session_id; expected_turns = Serve.Reported_or_one_more turns })
+         | Session_store.Not_reported ->
+           Error
+             (internal_error
+                (Printf.sprintf
+                   "Muse Code session %s is resumable but records no host turn count"
+                   session_id)))
     in
     let is_resume = Option.is_some claim_plan.previous_settlement in
     let context_frontier : Session_store.context_frontier =
@@ -1386,6 +1400,9 @@ let run_without_lifecycle ~argument_source ~official_task_reference ~composed_co
             result.response
       in
       recovery_failure := Session_store.State_persistence_failed;
+      (* The stop ends the turn before the host reports its terminal, so the
+         host's count stays unobserved: live resumes after a host stop have
+         found the turn counted and found it not counted. *)
       let* settled =
         Session_store.settle_holding
           ~held_context:!settled_held_context
@@ -1468,14 +1485,15 @@ let run_without_lifecycle ~argument_source ~official_task_reference ~composed_co
                     ~session_mode
                     ~mcp_servers
                     ?reasoning_effort
-                    ~on_session_ready:(fun ~session_id ->
+                    ~on_session_ready:(fun ~session_id ~reported_turns ->
                       let* () =
                         update_session "active transition" (fun expected ->
-                          Session_store.mark_active
+                          Session_store.mark_active_reported
                             ~base_path
                             ~keeper_name
                             ~expected
                             ~session_id
+                            ~reported_turns
                             ~updated_at:(Time_compat.now ()))
                       in
                       update_session "turn-starting transition" (fun expected ->
@@ -1668,7 +1686,7 @@ let run_without_lifecycle ~argument_source ~official_task_reference ~composed_co
           in
           recovery_failure := Session_store.State_persistence_failed;
           let* () =
-            Session_store.settle_holding
+            Session_store.settle_completed_holding
               ~held_context:!settled_held_context
               ~base_path
               ~keeper_name

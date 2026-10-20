@@ -5607,6 +5607,13 @@
  (libraries masc_test_deps masc.browser_lane))
 
 (test
+ (name test_browser_addon_locate)
+ (modules test_browser_addon_locate)
+ (libraries masc_test_deps masc.browser_lane masc.lane_addon_tool_result mcp_protocol)
+ (deps (source_tree ../addons/browser))
+ (action (run %{test} %{dep:../addons/browser/lane.toml})))
+
+(test
  (name test_lane_addon_worker)
  (modules test_lane_addon_worker)
  (libraries masc.lane_addon_call_context masc masc.string_util masc_random_id mcp_protocol alcotest eio eio_main yojson unix digestif masc.fs_compat base64))

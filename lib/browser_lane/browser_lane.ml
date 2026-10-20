@@ -223,6 +223,11 @@ let verb_is_read = function
   | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_context _ | Page_downloads _
   | Session_status | Page_locate _ | Page_extract _ -> true
   | Session_open _ | Session_close | Page_goto _ | Page_act _ | Page_interact _ | Page_instruct _ -> false
+let verb_uses_model = function
+  | Page_instruct _ | Page_locate _ | Page_extract _ -> true
+  | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _
+  | Page_context _ | Page_downloads _ | Session_open _ | Session_close | Session_status
+  | Page_goto _ | Page_act _ | Page_interact _ -> false
 ;;
 
 (* What the live lane asks of the operator's browser, named by what the
@@ -304,11 +309,12 @@ let live_capability = function
 
 let verb_allowed_on_live verb = Option.is_some (live_capability verb)
 
-(* The WebDriver backend has no model to hand a sentence to. *)
+(* Model-assisted locate is admitted separately by the installed executor. *)
 let verb_allowed_on_automation = function
   | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_context _
-  | Page_downloads _ | Page_interact _ | Session_open _ | Session_close | Session_status | Page_goto _ | Page_act _ -> true
-  | Page_instruct _ | Page_locate _ | Page_extract _ -> false
+  | Page_downloads _ | Page_interact _ | Session_open _ | Session_close | Session_status | Page_goto _ | Page_act _
+  | Page_locate _ -> true
+  | Page_instruct _ | Page_extract _ -> false
 ;;
 
 (* What the Stagehand backend serves once its executor is installed
@@ -337,8 +343,8 @@ let verb_allowed (lane : Lane_name.t) verb =
   | Stagehand -> verb_allowed_on_stagehand verb
 ;;
 
-(* The refusal the other lanes give a sentence verb. *)
-let sentence_verbs_refused = "sentence verbs belong to the stagehand lane"
+(* Gecko's selected read-only locate consumer does not execute instructions. *)
+let sentence_verbs_refused = "act and extract require the stagehand lane"
 
 type issued = { id : string; verb_json : Yojson.Safe.t }
 
@@ -811,8 +817,12 @@ let serving_port_cell : serving_port Atomic.t = Atomic.make Serving_port_unknown
 let install_serving_port port = Atomic.set serving_port_cell (Serving_port port)
 let withdraw_serving_port () = Atomic.set serving_port_cell Serving_port_unknown
 let serving_port () = Atomic.get serving_port_cell
-let automation_executor : (verb -> answer) option Atomic.t = Atomic.make None
-let install_automation_executor executor = Atomic.set automation_executor executor
+type automation_backend = { execute : verb -> answer; locate : bool }
+let automation_executor : automation_backend option Atomic.t = Atomic.make None
+let install_automation_executor ?(locate=false) executor =
+  Atomic.set automation_executor (Option.map (fun execute -> {execute;locate}) executor)
+let automation_locate_available () = match Atomic.get automation_executor with
+  | None -> false | Some backend -> backend.locate
 let automation_document_observer : (tab_id:int -> answer) option Atomic.t = Atomic.make None
 let install_automation_document_observer observer = Atomic.set automation_document_observer observer
 let issue_automation_with ~activity_check ~verb ~timeout_sec =
@@ -822,8 +832,15 @@ let issue_automation_with ~activity_check ~verb ~timeout_sec =
   | Some refusal -> refusal
   | None -> match Atomic.get automation_executor with
   | None -> Lane_absent
-  | Some execute -> Watched_work.run (fun () -> execute verb)
-      ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)
+  | Some backend ->
+      (match verb with
+       | Page_locate _ when not backend.locate -> Rejected_before_effect "browser locate Exact Output is not selected"
+       | Page_locate _ -> backend.execute verb
+       | Tabs_list|Page_read _|Page_document _|Page_elements _|Page_capture _|Page_scene _|Page_context _
+       | Page_downloads _|Page_interact _|Session_open _|Session_close|Session_status|Page_goto _|Page_act _
+       | Page_instruct _|Page_extract _ ->
+           Watched_work.run (fun () -> backend.execute verb)
+             ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out))
 let issue_automation ~verb ~timeout_sec =
   issue_automation_with ~activity_check:(activity_refusal Lane_name.Automation) ~verb ~timeout_sec
 let stagehand_executor : (actor:string option -> verb -> answer) option Atomic.t = Atomic.make None

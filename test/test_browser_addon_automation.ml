@@ -43,7 +43,7 @@ let scenario ~cancel_receipt () = Eio_main.run (fun env ->
       check bool "ready driver is registered" true automation.registered;
       check bool "driver readiness does not invent an open browser" true (automation.session=B.Browser_closed);
       let snapshot={Browser_selection.live_activity=B.Enabled;live_clients=[];automation;
-        stagehand={activity=B.Disabled;registered=false;session=B.Browser_closed}} in
+        stagehand={activity=B.Disabled;registered=false;session=B.Browser_closed;locate=false}} in
       let selected=Browser_selection.choose ~verb:(B.Session_open {headless=Some true}) ~bound:false
         ~snapshot Browser_selection.Automatic |> Result.map_error Browser_selection.error_message |> ok in
       check bool "automatic work chooses the registered backend" true (selected.route=B.Automation_route);

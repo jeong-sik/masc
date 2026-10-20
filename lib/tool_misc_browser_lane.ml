@@ -747,7 +747,7 @@ let instruct_verb fields =
   let* tab_id =
     match List.assoc_opt "tabId" fields with
     | Some (`Int id) when id >= 0 -> Ok id
-    | Some _ | None -> Error "tabId must be an observed BrowserTabs id on lane stagehand"
+    | Some _ | None -> Error "tabId must be an observed BrowserTabs id on the selected owned browser"
   in
   let* schema =
     match List.assoc_opt "schema" fields with

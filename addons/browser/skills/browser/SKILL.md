@@ -38,7 +38,8 @@ is unavailable, inspect that configuration rather than moving the tab to another
 browser. Model-backed act/extract require the observed `lane = "stagehand"`
 and this installation's selected `stagehand` Exact Output. They do not move an
 existing Gecko or live tab to Chrome. Availability depends on the configured
-backend and host model route.
+backend and host model route. These model commands are separate from native
+`page.act` inputs.
 
 Read the entire result before deciding the next action. `isError`, private
 refusal disposition and backend partial-effect payloads have distinct meanings.
@@ -58,8 +59,10 @@ grant from another call.
 
 For owned Gecko downloads, read `page.downloads` with the observed automation
 lane and tab ID, or use BrowserRead with `mode = "downloads"`. Read completed
-files through the returned `keeper_artifact_read` reference. Pending or failed
-downloads are not completed artifacts; worker paths are not file-read grants.
+files only when their row contains a finalized artifact; invoke its returned
+`keeper_artifact_read` reader and arguments. Completion without that reference
+does not prove that bytes were retained. Pending or failed downloads are not
+completed artifacts; worker paths are not file-read grants.
 
 Input validation, successful-output validation and model outputs are selected
 independently by the installation. Turning these optional middleware off does

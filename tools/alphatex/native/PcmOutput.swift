@@ -68,7 +68,12 @@ private final class PcmOutput {
     var node: AVAudioSourceNode!
     var state = State.prepared
     var requested: UInt64 = 0
-    var pending: UInt64?
+    var pending: (id: UInt64, requestedAt: UInt64)?
+    var completedBlocks: UInt64 = 0
+    var maxResponseNanoseconds: UInt64 = 0
+    var lastResponseNanoseconds: UInt64 = 0
+    var playingBlocks: UInt64 = 0
+    var maxPlayingResponseNanoseconds: UInt64 = 0
     var listeners: [(AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
     var signals: [DispatchSourceSignal] = []
     var configuration: NSObjectProtocol?
@@ -98,7 +103,7 @@ private final class PcmOutput {
             let buffers = UnsafeMutableAudioBufferListPointer(output)
             guard buffers.count == 2, buffers.allSatisfy({ $0.mNumberChannels == 1 && $0.mDataByteSize >= count * 4 }),
                   let left = buffers[0].mData, let right = buffers[1].mData else {
-                queue.fault.store(2, ordering: .releasing); wake.add(data: 1)
+                queue.rejectFormat(frames: Int(count)); wake.add(data: 1)
                 return kAudio_ParamError
             }
             queue.render(frames: Int(count), left: left.assumingMemoryBound(to: Float.self), right: right.assumingMemoryBound(to: Float.self))
@@ -116,8 +121,29 @@ private final class PcmOutput {
               engine.outputNode.auAudioUnit.deviceID == device,
               engine.outputNode.outputFormat(forBus: 0).sampleRate == rate,
               engine.outputNode.outputFormat(forBus: 0).channelCount == channels else { throw PcmFailure("selected PCM output changed or disappeared") }
+        try checkRender()
+    }
+    // Property observers own hardware revalidation. Audio demand must not issue
+    // synchronous device-property queries while its next block is due.
+    func checkRender() throws {
         if state == .playing && !engine.isRunning { throw PcmFailure("PCM output engine stopped") }
-        if ring.fault.load(ordering: .acquiring) != 0 { throw PcmFailure("PCM output underrun or render format failure") }
+        if let failure = renderFailure() { throw failure }
+    }
+    var faultKind: String {
+        switch ring.fault.load(ordering: .acquiring) {
+        case 0: return "none"
+        case 1: return "underrun"
+        case 2: return "render-format"
+        default: return "unknown"
+        }
+    }
+    func renderFailure() -> PcmFailure? {
+        switch ring.fault.load(ordering: .acquiring) {
+        case 0: return nil
+        case 1: return PcmFailure("PCM output underrun: \(ring.missing.load(ordering: .acquiring)) missing frames")
+        case 2: return PcmFailure("PCM output render format failure")
+        default: return PcmFailure("PCM output has an invalid render fault")
+        }
     }
     func monitor(_ object: AudioObjectID, _ original: AudioObjectPropertyAddress) throws {
         var key = original
@@ -132,9 +158,10 @@ private final class PcmOutput {
         try check()
         notifications.setEventHandler { [weak self] in
             guard let self, self.state != .stopped else { return }
-            do { try self.check(); try self.request() } catch { self.finish(error) }
+            do { try self.checkRender(); try self.request() } catch { self.finish(error) }
         }
         try monitor(device, address(kAudioDevicePropertyDeviceIsAlive))
+        try monitor(device, address(kAudioDevicePropertyDeviceUID))
         try monitor(device, address(kAudioDevicePropertyBufferFrameSize))
         try monitor(device, address(kAudioDevicePropertyNominalSampleRate))
         try monitor(device, address(kAudioDevicePropertyStreamConfiguration, kAudioObjectPropertyScopeOutput))
@@ -149,31 +176,38 @@ private final class PcmOutput {
             s.setEventHandler { [weak self] in self?.finish(PcmFailure("PCM output interrupted")) }
             s.resume(); signals.append(s)
         }
-        try emit(["kind": "ready", "schemaVersion": 1, "device": ["id": uid, "name": name],
+        try emit(["kind": "ready", "schemaVersion": 2, "device": ["id": uid, "name": name],
                   "sampleRate": rate, "blockFrames": frames, "prefillFrames": frames * 2])
         try request()
     }
     func request() throws {
         guard state != .stopped, pending == nil, ring.available <= UInt64(frames) else { return }
         guard requested < UInt64.max else { throw PcmFailure("PCM request identity exhausted") }
-        requested += 1; pending = requested
+        requested += 1; pending = (requested, DispatchTime.now().uptimeNanoseconds)
         try emit(["kind": "need", "id": String(requested), "frames": frames,
                   "startFrame": String(ring.written.load(ordering: .acquiring))])
     }
     func receive(_ line: String) {
         guard state != .stopped else { return }
         do {
-            try check()
+            try checkRender()
             switch try JSONDecoder().decode(PcmCommand.self, from: Data(line.utf8)) {
             case .stop: finish(); return
             case .block(let id, let data):
-                guard pending == id, data.count == Int(frames) * 2 * 4 else { throw PcmFailure("unexpected PCM block identity/size") }
+                guard let demand = pending, demand.id == id, data.count == Int(frames) * 2 * 4 else { throw PcmFailure("unexpected PCM block identity/size") }
                 let samples = data.withUnsafeBytes { bytes in
                     stride(from: 0, to: data.count, by: 4).map { offset in
                         Float(bitPattern: UInt32(littleEndian: bytes.loadUnaligned(fromByteOffset: offset, as: UInt32.self)))
                     }
                 }
                 try ring.append(samples); pending = nil
+                lastResponseNanoseconds = DispatchTime.now().uptimeNanoseconds - demand.requestedAt
+                maxResponseNanoseconds = max(maxResponseNanoseconds, lastResponseNanoseconds)
+                completedBlocks += 1
+                if state == .playing {
+                    playingBlocks += 1
+                    maxPlayingResponseNanoseconds = max(maxPlayingResponseNanoseconds, lastResponseNanoseconds)
+                }
                 if state == .prepared && ring.available == UInt64(frames) * 2 {
                     state = .playing
                     engine.prepare(); try engine.start(); try check()
@@ -187,7 +221,12 @@ private final class PcmOutput {
         guard state != .stopped else { return }
         state = .stopped; ring.stopped.store(true, ordering: .releasing)
         engine.stop()
-        let error = failure ?? (ring.fault.load(ordering: .acquiring) == 0 ? nil : PcmFailure("PCM output underrun or render format failure"))
+        var error = failure ?? renderFailure()
+        // Retire audio before the final device queries. A slow control-plane
+        // read at explicit stop must not starve a still-running callback.
+        if error == nil {
+            do { try check() } catch let validationError { error = validationError }
+        }
         if let configuration { NotificationCenter.default.removeObserver(configuration) }
         for (object, original, listener) in listeners {
             var key = original; AudioObjectRemovePropertyListenerBlock(object, &key, .main, listener)
@@ -197,10 +236,17 @@ private final class PcmOutput {
         do {
             if let error { try emit(["kind": "error", "message": String(describing: error)]) }
             try emit(["kind": "stopped", "success": error == nil,
+                      "fault": faultKind, "faultFrames": String(ring.faultFrames.load(ordering: .acquiring)),
                       "admittedFrames": String(ring.written.load(ordering: .acquiring)),
                       "renderedFrames": String(ring.read.load(ordering: .acquiring)),
                       "discardedFrames": String(ring.available),
-                      "underrunFrames": String(ring.missing.load(ordering: .acquiring))])
+                      "underrunFrames": String(ring.missing.load(ordering: .acquiring)),
+                      "demand": ["completedBlocks": String(completedBlocks),
+                                 "playingBlocks": String(playingBlocks),
+                                 "maxPlayingResponseNanoseconds": String(maxPlayingResponseNanoseconds),
+                                 "lastResponseNanoseconds": String(lastResponseNanoseconds),
+                                 "maxResponseNanoseconds": String(maxResponseNanoseconds),
+                                 "pendingNanoseconds": pending.map { String(DispatchTime.now().uptimeNanoseconds - $0.requestedAt) as Any } ?? NSNull()]])
             exit(error == nil ? 0 : 1)
         } catch { exit(1) }
     }

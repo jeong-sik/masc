@@ -15,6 +15,7 @@ final class PcmRing {
     let written = Atomic<UInt64>(0)
     let read = Atomic<UInt64>(0)
     let fault = Atomic<Int32>(0) // 1: underrun, 2: callback format
+    let faultFrames = Atomic<UInt64>(0)
     let missing = Atomic<UInt64>(0)
     let stopped = Atomic<Bool>(false)
 
@@ -26,6 +27,13 @@ final class PcmRing {
     }
     deinit { samples.deallocate() }
     var available: UInt64 { written.load(ordering: .acquiring) - read.load(ordering: .acquiring) }
+    // Only the single audio callback writes these fields. Preserve its first
+    // fault; later invalid callbacks cannot relabel an existing underrun.
+    func rejectFormat(frames: Int) {
+        guard fault.load(ordering: .relaxed) == 0 else { return }
+        faultFrames.store(UInt64(frames), ordering: .relaxed)
+        fault.store(2, ordering: .releasing)
+    }
     func append(_ values: [Float]) throws {
         guard !stopped.load(ordering: .acquiring), fault.load(ordering: .acquiring) == 0 else { throw PcmFailure("PCM output is retired") }
         guard !values.isEmpty, values.count % 2 == 0, values.allSatisfy(\.isFinite) else { throw PcmFailure("invalid finite stereo PCM") }
@@ -53,6 +61,7 @@ final class PcmRing {
             left.advanced(by: count).update(repeating: 0, count: frames - count)
             right.advanced(by: count).update(repeating: 0, count: frames - count)
             missing.store(UInt64(frames - count), ordering: .releasing)
+            faultFrames.store(UInt64(frames), ordering: .relaxed)
             fault.store(1, ordering: .releasing)
         }
         read.store(start + UInt64(count), ordering: .releasing)

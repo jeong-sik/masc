@@ -93,3 +93,26 @@ test('cancellation after native close still owns an unsettled producer', async (
     await assert.rejects(owner.completion, error => error.cause === null)
   }
 })
+
+test('native error retains the final classified fault and immutable counters after child closure', async () => {
+  for (const [mode, fault, missing] of [['fault-final', 'underrun', '8'], ['format-final', 'render-format', '0']]) {
+    const events = []
+    let child, closed = false
+    const base = options(mode)
+    const owner = openPcmOutput({ ...base, spawnProcess(...args) {
+      child = base.spawnProcess(...args); child.once('close', () => { closed = true }); return child
+    }, onEvent: row => events.push(row), provideBlock: row => Buffer.alloc(row.frames * 8) })
+    await owner.ready
+    await assert.rejects(owner.completion)
+    assert.equal(closed, true)
+    const report = owner.diagnostics()
+    assert.equal(report.settled, true); assert.equal(report.nativeClosed, true)
+    assert.equal(report.nativeError.message, fault); assert.equal(report.receiptError, null)
+    assert.equal(report.final.success, false); assert.equal(report.final.fault, fault)
+    assert.equal(report.final.underrunFrames, missing); assert.equal(report.final.renderedFrames, '16')
+    assert.equal(report.final.demand.completedBlocks, '2')
+    assert.equal(events.at(-1).kind, 'stopped')
+    report.final.fault = 'caller mutation'; report.device.id = 'other'
+    assert.equal(owner.diagnostics().final.fault, fault); assert.equal(owner.diagnostics().device.id, 'owned')
+  }
+})

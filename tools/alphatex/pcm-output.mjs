@@ -16,6 +16,7 @@ export function openPcmOutput({ output, provideBlock, signal, onEvent = () => {}
   const child = spawnProcess(executable, output === undefined ? [] : ['--output', output], { stdio: ['pipe', 'pipe', 'pipe'] })
   const producer = new AbortController()
   let failure = null, info = null, playing = false, stopping = false, closed = false, final = null, job = null
+  let nativeError = null, receiptError = null, settled = false
   let nextID = 1n, sent = 0n, detail = ''
   let resolveReady, rejectReady, resolveClose, rejectClose
   const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject })
@@ -30,14 +31,20 @@ export function openPcmOutput({ output, provideBlock, signal, onEvent = () => {}
   signal?.addEventListener('abort', abort, { once: true })
   const lines = createInterface({ input: child.stdout, crlfDelay: Infinity })
   lines.on('line', line => {
-    if (failure || closed) return
+    if (closed) return
     try {
       const event = JSON.parse(line)
-      if (event?.kind === 'error' && typeof event.message === 'string') throw new Error(event.message)
       if (final) throw new Error('PCM output replied after finalization')
+      // Failure cancels production, but native closure and its final counters
+      // remain owned. In particular, error followed by stopped is not silence.
+      if (event?.kind === 'error' && typeof event.message === 'string') {
+        nativeError ??= { kind: 'error', message: event.message }
+        fail(new Error(event.message)); return
+      }
+      if (failure && event?.kind !== 'stopped') return
       switch (event?.kind) {
         case 'ready':
-          if (info || event.schemaVersion !== 1 || typeof event.device?.id !== 'string' || !event.device.id
+          if (info || event.schemaVersion !== 2 || typeof event.device?.id !== 'string' || !event.device.id
               || typeof event.device.name !== 'string' || (output !== undefined && event.device.id !== output)
               || !Number.isInteger(event.sampleRate) || event.sampleRate <= 0 || event.sampleRate > 0xffffffff
               || !Number.isInteger(event.blockFrames) || event.blockFrames <= 0 || event.blockFrames > 2 ** 24
@@ -66,15 +73,28 @@ export function openPcmOutput({ output, provideBlock, signal, onEvent = () => {}
           if (!info || playing || sent < BigInt(info.prefillFrames)) throw new Error('Unexpected PCM playback acknowledgement')
           playing = true; break
         case 'stopped': {
-          if (!info || !stopping || event.success !== true || counter(event.admittedFrames) !== sent
-              || counter(event.underrunFrames) !== 0n
-              || counter(event.renderedFrames) + counter(event.discardedFrames) !== sent) throw new Error('PCM output did not finalize admitted audio')
-          final = structuredClone(event); break
+          if (!info || typeof event.success !== 'boolean' || !['none', 'underrun', 'render-format'].includes(event.fault)) throw new Error('Invalid PCM output final receipt')
+          const admitted = counter(event.admittedFrames), rendered = counter(event.renderedFrames), discarded = counter(event.discardedFrames)
+          const missing = counter(event.underrunFrames), faultFrames = counter(event.faultFrames)
+          const completed = counter(event.demand?.completedBlocks), last = counter(event.demand?.lastResponseNanoseconds)
+          const max = counter(event.demand?.maxResponseNanoseconds)
+          const playingBlocks = counter(event.demand?.playingBlocks), playingMax = counter(event.demand?.maxPlayingResponseNanoseconds)
+          if (event.demand.pendingNanoseconds !== null) counter(event.demand.pendingNanoseconds)
+          if (admitted > sent || rendered + discarded !== admitted || completed * BigInt(info.blockFrames) !== admitted
+              || completed >= nextID || max < last || (completed === 0n && (last !== 0n || max !== 0n))
+              || playingBlocks > completed || playingMax > max || (playingBlocks === 0n && playingMax !== 0n)
+              || (event.fault === 'none' && (missing !== 0n || faultFrames !== 0n))
+              || (event.fault === 'underrun' && (missing === 0n || faultFrames < missing))
+              || (event.fault === 'render-format' && (missing !== 0n || faultFrames === 0n))
+              || (event.success && (!stopping || event.fault !== 'none' || admitted !== sent))) throw new Error('PCM output did not finalize admitted audio')
+          final = structuredClone(event)
+          if (!event.success) fail(new Error(nativeError?.message ?? 'PCM output failed'))
+          break
         }
         default: throw new Error('Invalid PCM output event')
       }
       onEvent(event)
-    } catch (error) { fail(error) }
+    } catch (error) { receiptError = error.message; fail(error) }
   })
   for (const stream of [lines, child.stdout, child.stderr]) stream.once('error', fail)
   child.once('error', fail)
@@ -93,11 +113,17 @@ export function openPcmOutput({ output, provideBlock, signal, onEvent = () => {}
       finally { await job }
       if (failure) throw failure
       return result
-    } finally { signal?.removeEventListener('abort', abort) }
+    } finally { settled = true; signal?.removeEventListener('abort', abort) }
   })()
   completion.catch(() => {})
   if (signal?.aborted) abort()
   return { ready, completion,
+    diagnostics() {
+      return structuredClone({ schemaVersion: 1, requestedOutput: output ?? null, device: info?.device ?? null,
+        format: info ? { sampleRate: info.sampleRate, blockFrames: info.blockFrames, prefillFrames: info.prefillFrames } : null,
+        playing, nativeClosed: closed, settled, requestedBlocks: String(nextID - 1n), sentFrames: String(sent),
+        nativeError, final, receiptError, failure: failure?.message ?? null })
+    },
     stop() {
       if (stopping || closed || failure) return
       stopping = true; producer.abort(new Error('PCM output stopped'))

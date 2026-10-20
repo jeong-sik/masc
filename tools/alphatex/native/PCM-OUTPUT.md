@@ -10,7 +10,7 @@ rate. The main mixer performs the selected device's channel conversion.
 Startup emits NDJSON:
 
 ```json
-{"kind":"ready","schemaVersion":1,"device":{"id":"UID","name":"Output"},"sampleRate":48000,"blockFrames":512,"prefillFrames":1024}
+{"kind":"ready","schemaVersion":2,"device":{"id":"UID","name":"Output"},"sampleRate":48000,"blockFrames":512,"prefillFrames":1024}
 {"kind":"need","id":"1","frames":512,"startFrame":"0"}
 ```
 
@@ -40,11 +40,27 @@ control lifecycle with an explicit error. It does not silently stretch late
 audio or accumulate an unbounded queue. Device UID, liveness, sample rate,
 channel count, hardware quantum and engine state remain pinned and checked.
 Configuration notifications and property listeners terminate a changed route.
+Full hardware validation runs at startup, after engine start, on those
+notifications (including UID changes) and after retiring audio at normal stop.
+The final stop acknowledgement retains that device validation. Per-block demand
+and receipt check engine state and atomic render faults without synchronous
+CoreAudio device-property queries.
 
 `{"kind":"stop"}` retires the queue and stops the engine immediately. This is
 live monitoring: queued future audio is discarded, rather than played after
-stop. A final `stopped` event reports `success`, `admittedFrames`,
+stop. A final `stopped` event reports boolean `success`, and `admittedFrames`,
 `renderedFrames`, `discardedFrames`, and `underrunFrames` as decimal strings.
+Its `fault` is `none`, `underrun` or `render-format`; `faultFrames` is the size of
+the first failed render callback (zero without a render fault). First-fault
+identity is retained even if a later callback has a different failure.
+`demand` retains decimal-string `completedBlocks`, `playingBlocks`,
+`lastResponseNanoseconds`, `maxResponseNanoseconds`,
+`maxPlayingResponseNanoseconds`, and nullable `pendingNanoseconds`.
+Response durations use the native monotonic clock, from demand emission through
+validated block admission; the playing maximum excludes startup prefill.
+Pending duration is the age of an unanswered request at teardown. These include
+IPC, producer and control scheduling delay; they are not isolated VST CPU time,
+hardware presentation latency or proof of a particular stall cause.
 Rendered means consumed by the source callback; it does not prove physical
 speaker output or measure presentation latency. At a clean stop, rendered plus
 discarded equals admitted, and underrun is zero. EOF without stop, signals,
@@ -59,11 +75,21 @@ normalizes any cancellation reason while retaining its cause. Completion joins
 both actual process closure and producer settlement, even when the producer
 finishes after native closure. A successful final reply alone is insufficient.
 Producers must observe their signal or otherwise settle their owned work.
+The JS owner still consumes and validates the final receipt after an `error`;
+failure remains failure. `diagnostics()` returns a detached snapshot of selected
+device/format, sent frames, first native error, validated final counters, protocol
+receipt errors and native/producer settlement. A failed native receipt can admit
+fewer frames than the JS sent before failure, but rendered plus discarded must
+equal native admitted. No valid receipt means `final: null`, never invented
+success. Protocol-v2 readiness must match the companion shipped in the same
+immutable runtime.
 
 The immutable alphaTex installer fingerprints both native sources and the JS
 owner and builds the companion separately from Dune. Live VST callers combine
-this layer with `openVstStream`, using the requested device sample rate. The TUI
-and MIDI input are not connected by this layer; that integration follows.
+this layer with `openVstStream`, using the requested device sample rate.
+`openStepInput` shares one source with step editing and monitoring; the piano roll
+exports the active/last monitor report with `:step-diagnostics PATH`, without
+overwriting a file or exporting captured vendor preset bytes.
 
 Checks: compile/run `PcmRing.swift` with `test-pcm-ring.swift` for wrap, overflow,
 finite transaction validation, underrun, concurrent stereo ordering and retirement.

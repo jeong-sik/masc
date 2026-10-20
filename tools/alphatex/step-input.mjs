@@ -124,7 +124,7 @@ export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState
   const { channel } = target(getEditor())
   const cancellation = new AbortController()
   const stopped = new Error('Step input stopped before arming')
-  let pending = null, stopping = false, controlsStopped = false, input = null
+  let pending = null, stopping = false, controlsStopped = false, input = null, failure = null
   const monitor = audio ? openMonitor({ ...audio, channel, signal: cancellation.signal }) : null
   monitor?.completion.catch(error => cancellation.abort(error))
   const ready = (async () => {
@@ -148,7 +148,6 @@ export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState
   })()
   ready.catch(() => {})
   const completion = (async () => {
-    let failure = null
     try { await ready }
     catch (error) { if (!(stopping && !input && !cancellation.signal.aborted)) failure = error }
     // A rejected ready acknowledgement does not prove native child closure.
@@ -159,7 +158,9 @@ export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState
     if (failure) throw failure
   })()
   completion.catch(() => {})
-  return { ready, completion, stop({ admittedControls = false } = {}) {
+  return { ready, completion,
+    diagnostics() { return monitor ? { source, ...monitor.diagnostics(), failure: failure?.message ?? null } : null },
+    stop({ admittedControls = false } = {}) {
       // View close ends native admission immediately, while controls already
       // queued before close must still decide before drained MIDI packets.
       stopping = true

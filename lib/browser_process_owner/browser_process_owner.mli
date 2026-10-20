@@ -1,7 +1,8 @@
 (** Foreground owner for a browser child whose inherited descriptors are not
     trusted to preserve a native Add-on lease. The owner keeps its own inherited
     lease descriptors while the child receives only its standard streams. *)
-type ready = { instance_id : string; owner_pid : int; child_pid : int }
+type ready = { instance_id : string; owner_pid : int; child_pid : int;
+  child_started : string }
 val ready_to_json : ready -> Yojson.Safe.t
 val ready_of_json : Yojson.Safe.t -> (ready, string) result
 (** Strict bootstrap receipt, not execution authority or browser readiness. The
@@ -9,7 +10,13 @@ val ready_of_json : Yojson.Safe.t -> (ready, string) result
 
 type error = Invalid_instance | Invalid_command | Invalid_grace
   | Not_group_leader | Group_unavailable of string
+  | Child_identity_unavailable | Child_identity_changed
 val error_to_string : error -> string
+val verify_child : ready -> (unit, error) result
+(** Blocking observation only: require the original child's kernel start token
+    and its membership in the original owner's foreground group. Never signals
+    a process. The caller must independently verify the original owner lease;
+    bootstrap metadata by itself is not authority. *)
 val run : env:Eio_unix.Stdenv.base -> instance_id:string -> command:string list ->
   grace_seconds:float -> on_ready:(ready -> unit) -> (unit, error) result
 (** Must run in a dedicated process group, normally through the native launcher.

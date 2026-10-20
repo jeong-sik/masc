@@ -1299,7 +1299,9 @@ let test_stream_callback_preserves_reserved_controls () =
 (* The owner is cancelled while the host is still exiting after its turn ended.
    The cleanup is cancel-protected, so a [run_turn] that does not return cannot
    be interrupted from inside the process: the alarm turns that hang into a
-   failed suite. *)
+   failed suite. It ends the whole test process with exit code 2 instead of an
+   alcotest report, which is why a hang here shows up as a suite that exits
+   quietly. *)
 let fail_if_blocked_for seconds f =
   Sys.set_signal
     Sys.sigalrm

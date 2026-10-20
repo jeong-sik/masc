@@ -679,7 +679,15 @@ let signal_spawned_process proc stdin_w =
 (* The CLI is asked to stop and given the shared grace to exit before it is
    killed. A cancelled owner calls [signal_spawned_process] instead: the
    switch's release hook kills and reaps the CLI, and [Eio.Process.await]
-   cannot finish once the switch that owns the CLI is cancelled. *)
+   cannot finish once the switch that owns the CLI is cancelled.
+
+   This function does not look at the owner's cancellation, unlike its
+   siblings in the other host runtimes, because no cancelled owner reaches it:
+   this module has no [Fun.protect ~finally] around the turn, and cancellation
+   is received only by the [Eio.Cancel.Cancelled] and operator-interrupt arms
+   of [run_spawned] and by the [Eio.Switch.on_release] handler, which only
+   signal. A finalizer that calls this function must check the cancellation
+   first. *)
 let terminate_spawned_process ~sw ~clock proc stdin_w =
   Eio.Cancel.protect (fun () ->
     (try Eio.Flow.close stdin_w with

@@ -304,8 +304,18 @@ val checkpoint_ref_create_error_to_string : Keeper_checkpoint_ref.create_error -
 val checkpoint_identity_error_to_string : checkpoint_identity_error -> string
 val checkpoint_ref_load_error_to_string : checkpoint_ref_load_error -> string
 
-(** Canonical checkpoint value, exact persisted bytes, and their reference
-    derived from one immutable byte snapshot. *)
+(** Exact persisted bytes from one read, their reference, and a checkpoint
+    value for them. The reference's digest is always taken over those bytes.
+    The value, and the trace and turn of the reference, are the decode of
+    those bytes, with one exception: when a canonical loader
+    ({!with_agent_core_exact_snapshot}, {!load_agent_core_exact_snapshot},
+    {!load_agent_core_with_ref}) reads a file whose (device, inode, size,
+    mtime) identity is the one a Keeper's lineage wrote or read, they are that
+    lineage's value, which is what decoding that file gave or gives, as
+    {!load_agent_core} answers. A file rewritten in place that keeps its size
+    and mtime defeats that rule (#43575). Snapshots built from bytes
+    ({!exact_snapshot_of_canonical_bytes}, retained artifacts) are always the
+    decode. *)
 type exact_checkpoint_snapshot
 
 val exact_snapshot_checkpoint : exact_checkpoint_snapshot -> Agent_core.Checkpoint.t
@@ -315,8 +325,9 @@ val exact_snapshot_reference :
 
 val exact_snapshot_canonical_bytes : exact_checkpoint_snapshot -> string
 
-(** Immutable message values decoded from these same canonical bytes. No second
-    file read or re-encoding participates in their source identity. *)
+(** The messages of {!exact_snapshot_checkpoint}, from the same read as the
+    bytes; {!exact_checkpoint_snapshot} says when they are the lineage's value
+    rather than a decode. No second file read or re-encoding participates. *)
 val exact_snapshot_messages : exact_checkpoint_snapshot -> Agent_core.Types.message list
 
 (** Strictly decode exact canonical bytes and derive their reference without
@@ -331,7 +342,8 @@ val exact_snapshot_of_canonical_bytes :
   string ->
   (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
 
-(** Read an exact canonical snapshot and run [f] while retaining the same
+(** Read an exact canonical snapshot (see {!exact_checkpoint_snapshot} for
+    where its value comes from) and run [f] while retaining the same
     stable session lock used by checkpoint writers and session removal.
     A source-read or lock-acquisition failure does not run [f]. Callback results
     are preserved; exceptions, including Eio cancellation, propagate after
@@ -349,7 +361,8 @@ val with_agent_core_exact_snapshot :
   (exact_checkpoint_snapshot -> 'a) ->
   ('a, checkpoint_ref_load_error) result
 
-(** Load an exact canonical checkpoint snapshot under the session lock. *)
+(** Load an exact canonical checkpoint snapshot under the session lock, as
+    {!with_agent_core_exact_snapshot} reads it. *)
 val load_agent_core_exact_snapshot :
   session_dir:string ->
   session_id:string ->
@@ -402,11 +415,9 @@ val decode_changed_bytes :
   changed_bytes -> (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
 
 (** Load one canonical checkpoint and its exact source identity from the same
-    locked byte snapshot. The digest is always taken over the bytes read. The
-    checkpoint, and the session and turn of the identity, are the decode of
-    those bytes, or the Keeper lineage's value for them when the file read has
-    the identity (device, inode, size, mtime) of the file that lineage wrote or
-    read, as for {!load_agent_core}. *)
+    locked byte snapshot, as {!load_agent_core_exact_snapshot}: the digest is
+    over the bytes read, and {!exact_checkpoint_snapshot} says where the
+    checkpoint and the reference's session and turn come from. *)
 val load_agent_core_with_ref :
   session_dir:string ->
   session_id:string ->
@@ -451,8 +462,12 @@ type checkpoint_installation =
 (** Conditionally publish [candidate] only when the canonical bytes still
     have exactly [expected_source_ref]. The stable session lock is reacquired,
     current bytes are re-read and hashed, and an equal-turn checkpoint with
-    different content is rejected as [Source_changed]. On success the returned
-    ref is derived from the exact compact bytes passed to the durable atomic
+    different content is rejected as [Source_changed]. A source reference
+    taken from an exact snapshot can carry a session and turn from a Keeper
+    lineage ({!exact_checkpoint_snapshot}), so for those two fields admission
+    is as strong as that (device, inode, size, mtime) identity rule (#43575);
+    the digest is always compared with the bytes read now. On success the
+    returned ref is derived from the exact compact bytes passed to the durable atomic
     JSON writer. A writer error after atomic rename is an [Installed] result
     carrying [Commit_durability_unknown], never a retryable not-installed
     failure. Releasing the stable lock cannot replace the already-computed body

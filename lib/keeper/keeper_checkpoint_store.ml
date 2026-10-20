@@ -1342,6 +1342,10 @@ let load_ref_locked ~session_dir ~expected_session_id =
     (match decoded with
      | Error error -> Error (Ref_read_failed (classify_core_error error))
      | Ok (checkpoint, snapshot) ->
+       (* Published from the lineage's value too. The save or load that kept
+          it published this identity's summary, but an unlocked reader that
+          parsed the file before it can have replaced that summary since, and
+          the next save's watermark reads it. *)
        publish_summary_after_parse
          ~canonical_path
          ~identity_before:(Some identity_before)

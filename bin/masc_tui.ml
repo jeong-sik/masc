@@ -12340,19 +12340,6 @@ let apply_planning_load state = function
         ~set_error:(fun value -> state.planning_error <- value)
         err
 
-let refresh_status results =
-  let successes =
-    List.fold_left
-      (fun count -> function
-        | Ok () -> count + 1
-        | Error () -> count)
-      0 results
-  in
-  match (successes, List.length results) with
-  | 0, _ -> Masc_tui_types.Disconnected
-  | n, total when n = total -> Masc_tui_types.Connected
-  | _ -> Masc_tui_types.Degraded
-
 (* The operator confirm-queue read, on the same terms the held-call listing
    reads: identity must match first, the request names the expected
    workspace, and the read skips itself when one is already on the wire or
@@ -13767,12 +13754,13 @@ let apply_http_surfaces state ~mailbox results =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
   in
   let reached_if_asked result = Option.map reached result |> Option.to_list in
-  (* Only the requests this refresh actually made say anything about the
-     connection. Overview runs on every surface, so the reading never rests on
-     an empty list. *)
+  (* Identity is server contact too: failed surface reads must not report
+     the process offline when the workspace probe just answered. Only the
+     surfaces actually requested contribute their outcomes. *)
   state.connection_status <-
-    refresh_status
-      ([ reached results.http_overview ]
+    Masc_tui_types.connection_status_of_refresh
+      ~identity:(reached results.http_server_identity)
+      ~surfaces:([ reached results.http_overview ]
        @ reached_if_asked (Option.map (fun receipt -> receipt.bpr_result) results.http_scoped.http_board)
        @ reached_if_asked results.http_scoped.http_planning
        @ (Option.map
@@ -14457,7 +14445,7 @@ let open_observer_if_due state ~retry_closed ~host ~port ~mailbox =
   | (Connected | Degraded),
     ( Observer_closed_before_answer _ | Observer_closed_after_live _
     | Observer_opening | Observer_live _ )
-  | (Disconnected | Connecting | Booting | Reconnecting), _ ->
+  | (Disconnected | Connecting | Booting), _ ->
       ()
 
 (* Resolve the saved opening only after an owned roster observation. An
@@ -14537,14 +14525,13 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     let was_booting =
       match state.connection_status with
       | Booting -> true
-      | Disconnected | Connecting | Reconnecting | Degraded | Connected -> false
+      | Disconnected | Connecting | Degraded | Connected -> false
     in
     state.connection_status <-
       (match state.connection_status with
        | Connected -> Masc_tui_types.Connected
        | Degraded -> Masc_tui_types.Degraded
        | Booting -> Masc_tui_types.Booting
-       | Reconnecting -> Masc_tui_types.Reconnecting
        | Disconnected | Connecting -> Masc_tui_types.Connecting);
     let needs =
       (* This newer bundle supersedes an inflight scoped read, so it must
@@ -17142,8 +17129,7 @@ let contact_of_connection_status :
   | Masc_tui_types.Disconnected -> Masc_tui_server_lifecycle.Nothing_answered
   | Masc_tui_types.Connected | Masc_tui_types.Degraded ->
       Masc_tui_server_lifecycle.Server_reached
-  | Masc_tui_types.Connecting | Masc_tui_types.Booting
-  | Masc_tui_types.Reconnecting ->
+  | Masc_tui_types.Connecting | Masc_tui_types.Booting ->
       Masc_tui_server_lifecycle.Undecided
 
 (* What a refresh completing owes the operator, decided from the status it
@@ -25050,7 +25036,7 @@ and is loaded on demand through keeper_skill.
            superseding them before their responses can arrive. *)
         (match state.connection_status with
          | Booting -> ()
-         | Disconnected | Connecting | Reconnecting | Degraded | Connected ->
+         | Disconnected | Connecting | Degraded | Connected ->
            launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh
              state ~mailbox:async_messages;
            launch_gate_snapshot_load ~intent:Snapshot_read.Refresh
@@ -32094,7 +32080,7 @@ and is loaded on demand through keeper_skill.
                            ~refresh_inflight:http_refresh_inflight
                            ~scoped_refresh_inflight:http_scoped_refresh_inflight
                            ~scoped_refresh_followup ~mailbox:async_messages)
-                 | Connecting | Booting | Reconnecting | Degraded | Connected ->
+                 | Connecting | Booting | Degraded | Connected ->
                      handle_keeper_action state ~base_path
                        ~mailbox:async_messages Keeper_control.Shutdown)
             | Board ->
@@ -32444,18 +32430,9 @@ and is loaded on demand through keeper_skill.
       if reconcile_task_documents state ~mailbox:async_messages then
         Render_schedule.request render_schedule Render_schedule.Background;
 
-      (* A prompt revalidation keeps the last observed connection. Only a
-         read still pending beyond the operator's refresh cadence needs a
-         visible warning. *)
+      (* Pending HTTP readers keep the last observed contact. Their own
+         progress carries elapsed time; a slow reader is not a reconnect. *)
       let now_ns = Mtime_clock.elapsed_ns () in
-      (match state.http_refresh_started_ns, state.connection_status with
-       | Some started_ns, (Connected | Degraded)
-         when !http_refresh_inflight
-              && Int64.compare (Int64.sub now_ns started_ns) refresh_interval_ns >= 0 ->
-           state.connection_status <- Reconnecting;
-           Render_schedule.request render_schedule Render_schedule.Background
-       | None, _
-       | Some _, (Disconnected | Connecting | Booting | Reconnecting | Degraded | Connected) -> ());
       (* Periodic refresh *)
       let _, terminal_cols = get_terminal_size () in
       let current_marquee_target =

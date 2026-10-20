@@ -234,9 +234,9 @@ let render_overview (state : state) =
           match state.connection_status, state.http_refresh_started_ns with
           | Connecting, _ -> "Connecting to workspace…"
           | Booting, _ -> "Workspace server is starting…"
-          | (Connected | Degraded | Reconnecting | Disconnected), Some _ ->
+          | (Connected | Degraded | Disconnected), Some _ ->
               "Loading Dashboard…"
-          | (Connected | Degraded | Reconnecting | Disconnected), None ->
+          | (Connected | Degraded | Disconnected), None ->
               "Health: not observed — press 'r' to refresh"
         in
         " " ^ status

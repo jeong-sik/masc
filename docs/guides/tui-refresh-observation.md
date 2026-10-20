@@ -1,5 +1,13 @@
 # TUI refresh observations and before/after comparisons
 
+HTTP contact keeps its last completed observation while a refresh is pending.
+A read outliving the configured refresh cadence does not imply a reconnect;
+its original reader progress and elapsed time remain visible. A successful
+workspace identity probe with failed surface reads reports partial availability,
+so a surface outage does not mark an answering server disconnected. The runtime
+observer SSE lifecycle remains a separate observation. This does not repair or
+prove absence of UI scheduler stalls, HTTP timeouts or stream disconnects.
+
 Automatic job-completion and Composition continuation pulses now reject a
 cancelled/finished switch before discovery and each original worker reservation.
 This prevents a silent declined fork from leaving an original job/run falsely

@@ -152,7 +152,7 @@ let empty_title ~(connection : Masc_tui_types.connection_status) source
     | Masc_tui_types.Connected | Masc_tui_types.Degraded ->
         Printf.sprintf " %s — waiting for live screen…" label
     | (Masc_tui_types.Disconnected | Masc_tui_types.Connecting
-      | Masc_tui_types.Booting | Masc_tui_types.Reconnecting) as status ->
+      | Masc_tui_types.Booting) as status ->
         Printf.sprintf " %s — no frame: the server is %s." label
           (Masc_tui_types.connection_status_label status))
   | Live.Not_loaded | Live.Showing _ -> (
@@ -161,7 +161,7 @@ let empty_title ~(connection : Masc_tui_types.connection_status) source
       Printf.sprintf " %s — no machine loaded. A keeper loads one with %s." label
         (load_tool source)
     | (Masc_tui_types.Disconnected | Masc_tui_types.Connecting
-      | Masc_tui_types.Booting | Masc_tui_types.Reconnecting) as status ->
+      | Masc_tui_types.Booting) as status ->
       Printf.sprintf
         " %s — no frame: the server is %s, so nothing could be asked for." label
         (Masc_tui_types.connection_status_label status))

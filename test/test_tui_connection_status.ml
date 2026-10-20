@@ -25,12 +25,29 @@ let test_booting_only_when_the_probe_says_not_ready () =
     (booting (Error "connection refused"))
 ;;
 
+let test_surface_failures_keep_observed_server_contact () =
+  let open Masc_tui_types in
+  let failed = [ Error (); Error () ] in
+  check bool "identity answered while all requested surfaces failed" true
+    (connection_status_of_refresh ~identity:(Ok ()) ~surfaces:failed = Degraded);
+  check bool "no request answered" true
+    (connection_status_of_refresh ~identity:(Error ()) ~surfaces:failed = Disconnected);
+  check bool "all requested data arrived" true
+    (connection_status_of_refresh ~identity:(Ok ())
+       ~surfaces:[ Ok (); Ok () ] = Connected);
+  check bool "a surface cannot confirm a missing workspace probe" true
+    (connection_status_of_refresh ~identity:(Error ())
+       ~surfaces:[ Ok () ] = Degraded)
+;;
+
 let () =
   run
     "tui_connection_status"
     [ ( "booting"
       , [ test_case "only when the probe says not ready" `Quick
             test_booting_only_when_the_probe_says_not_ready
-        ;] )
+        ; test_case "surface failure preserves server contact" `Quick
+            test_surface_failures_keep_observed_server_contact
+        ] )
     ]
 ;;

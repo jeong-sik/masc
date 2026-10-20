@@ -13,6 +13,14 @@ val call : t -> arguments:Yojson.Safe.t ->
 (** Uses the ordinary exported-tool path, including installation-selected
     middleware and host mediation. The original result and failure metadata
     are returned without rewriting or promoting a partial effect. *)
+val error_result : start_time:Tool_timing.started -> Lane_addon_runtime.tool_call_error -> Tool_result.result
 val snapshot : t -> (Yojson.Safe.t, Browser_addon_client.error) result
 (** Read-only observation on the same original service. This is not a tool
     invocation and does not select, start or replace a browser. *)
+type receipt = {binding:Browser_binding.t;data:Yojson.Safe.t}
+val issue : t -> preference:Browser_selection.preference -> Browser_lane.verb ->
+  (receipt, Tool_result.result) result
+(** Invoke the advertised tool once and decode its mandatory connection and
+    success receipt. The selected schema hooks remain optional; identity and
+    wire decoding remain mandatory. Failed/partial replies preserve raw data
+    and effect metadata. Malformed post-dispatch replies have unknown effect. *)

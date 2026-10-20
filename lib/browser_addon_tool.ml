@@ -15,14 +15,15 @@ let input_schema = object_schema ~required:["command"] [
       "page.scene";"page.interact";"session.open";"session.close";"session.status";
       "page.goto";"page.elements";"page.act";"page.context";"page.instruct";"page.locate";"page.extract"];
     "args",object_schema ~open_fields:true ~required:[] []]]
-let output_schema = object_schema ~required:["reply";"answer";"browserSelection"] [
+let output_schema = object_schema ~required:["reply";"answer";"browserSelection";"browserConnection"] [
   "reply",enum ["issue"];
   "answer",object_schema ~required:["status";"payload"] [
     "status",enum ["answered"];
     "payload",object_schema ~open_fields:true ~required:["ok"] [
       "ok",`Assoc ["type",`String "boolean";"const",`Bool true]]];
   "browserSelection",object_schema ~open_fields:true ~required:["lane";"reason"] [
-    "lane",enum ["live";"automation";"stagehand"];"reason",text_schema]]
+    "lane",enum ["live";"automation";"stagehand"];"reason",text_schema];
+  "browserConnection",object_schema ~open_fields:true ~required:[] []]
 let definition : S.tool = {name="browser_command";
   title=Some "Browser";description=Some
     "Use an installed browser Add-on. Send one closed browser command. With no tab/document binding, browser choice is automatic; retain the returned lane/clientId for later bound commands. No JavaScript or debug-protocol escape hatch. Uploads/downloads require a host artifact broker.";
@@ -77,15 +78,17 @@ let invoke ~owner ~principal arguments =
     let* selected=Browser_selection.resolve ~verb ~bound:(bound verb) preference
       |> Result.map_error Browser_selection.error_message in
     let* target=B.resolve_target ~verb selected.route |> Result.map_error B.selection_error_message in
-    Ok (actor,verb,Browser_selection.bind_target selected target) in
+    Ok (actor,verb,Browser_binding.of_target selected target) in
   match prepared with
   | Error detail -> refused ~start_time detail
-  | Ok (actor,verb,selected) ->
+  | Ok (actor,verb,binding) ->
+    let selected=Browser_binding.selected binding in
     let reply=Browser_addon_owner.dispatch owner {W.incarnation=Browser_addon_owner.incarnation owner;
       command=W.Issue {route=selected.route;verb;actor=Some actor;
         timeout_sec=B.default_timeout_sec;only_if_idle=false}} in
     let data=match W.reply_to_json reply with
-      | `Assoc fields -> `Assoc (fields @ ["browserSelection",Browser_selection.to_json selected])
+      | `Assoc fields -> `Assoc (fields @ ["browserSelection",Browser_selection.to_json selected;
+          "browserConnection",`Assoc (Browser_binding.connection_fields binding)])
       | value -> value in
     let failed,disposition=match reply with
       | W.Issue_result (Ok (B.Answered (`Assoc fields))) ->

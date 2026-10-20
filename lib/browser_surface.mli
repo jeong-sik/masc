@@ -34,6 +34,13 @@ val read : request -> (Yojson.Safe.t, failure) result
     IDs and errors of tabs whose metadata could not be read, including when
     that list is empty. Naming one of
     those tabs refuses the read without substituting another tab. *)
+type read_plan
+val prepare_read : tab_id:int option -> Yojson.Safe.t -> (read_plan, failure) result
+val selected_tab : read_plan -> tab option
+val project_read : read_plan -> binding:Browser_binding.t -> started:int64 ->
+  page:Yojson.Safe.t option -> (Yojson.Safe.t, failure) result
+(** Pure inventory/selection and page projection shared by transports. A partial
+    inventory never substitutes another tab. No browser source is selected here. *)
 
 (** [lane] names the lane the answer came from, so an absent backend is
     reported the way that lane is set up. *)
@@ -43,6 +50,8 @@ val parse_capture_request : Yojson.Safe.t -> (request, string) result
 (** Capture requires an explicit tab ID; it never falls back to an active tab. *)
 val capture : request -> (Yojson.Safe.t, failure) result
 (** Viewport PNG as bare base64, source/tab identity, URL/title and elapsed time. *)
+val capture_from : binding:Browser_binding.t -> tab_id:int -> started:int64 ->
+  Yojson.Safe.t -> (Yojson.Safe.t, failure) result
 
 val parse_client_id : Yojson.Safe.t -> (Browser_lane.client_id option, string) result
 val source_name : Browser_lane.route -> string

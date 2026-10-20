@@ -63,11 +63,6 @@ val model_identities_unique : Model_catalog.model_entry list -> bool
 (** [true] when no two entries share the provider/model identity — the
     precondition that makes exact binding in {!resolve_exact} unambiguous. *)
 
-val validate_overlay_model_identities
-  :  base:Model_catalog.model_entry list
-  -> overlay:Model_catalog.model_entry list
-  -> bool
-
 val resolve_exact
   :  catalog:Model_catalog.t
   -> model_entries:Model_catalog.model_entry list
@@ -83,11 +78,6 @@ val resolve_exact
     Callers holding a display or api_name (the label a gateway
     shows) must not pass it here; resolve that label to the catalog id
     first. Fails with {!Provider_missing} or {!Model_missing}. *)
-
-val merge_exact_model_entries
-  :  base:Model_catalog.model_entry list
-  -> overlay:Model_catalog.model_entry list
-  -> Model_catalog.model_entry list
 
 val compare_model_entries : Model_catalog.model_entry -> Model_catalog.model_entry -> int
 val bool_string : bool -> string

@@ -1,6 +1,5 @@
 module Caps = Capabilities
 module PC = Provider_config
-module String_map = Map.Make (String)
 module String_set = Set.Make (String)
 
 type exact_binding_error =
@@ -157,30 +156,6 @@ let model_identities_unique entries =
   loop String_set.empty entries
 ;;
 
-let validate_overlay_model_identities ~base ~overlay =
-  let base_models =
-    List.fold_left
-      (fun values (entry : Model_catalog.model_entry) ->
-         String_map.add
-           (model_identity_key entry)
-           ( entry.provider_name
-           , Model_identifiers.Id_prefix.to_string entry.id_prefix )
-           values)
-      String_map.empty
-      base
-  in
-  List.for_all
-    (fun (entry : Model_catalog.model_entry) ->
-       match String_map.find_opt (model_identity_key entry) base_models with
-       | None -> true
-       | Some (provider_name, id_prefix) ->
-         provider_name = entry.provider_name
-         && String.equal
-              id_prefix
-              (Model_identifiers.Id_prefix.to_string entry.id_prefix))
-    overlay
-;;
-
 let resolve_exact ~catalog ~model_entries ~provider_ref ~model_id =
   match
     Model_catalog.provider_entries catalog
@@ -207,133 +182,10 @@ let compare_model_entries a b =
   String.compare (model_identity_key a) (model_identity_key b)
 ;;
 
-let prefer_overlay overlay base =
-  match overlay with
-  | Some _ -> overlay
-  | None -> base
-;;
-
-(* Sparse row semantics belong only to the immutable exact resolver. The
-   process-global catalog keeps whole-row replacement. *)
-let merge_exact_model_entry
-      ~(base : Model_catalog.model_entry)
-      (overlay : Model_catalog.model_entry)
-  : Model_catalog.model_entry
-  =
-  { Model_catalog.id_prefix = overlay.id_prefix
-  ; base_label = prefer_overlay overlay.base_label base.base_label
-  ; provider_name = overlay.provider_name
-  ; max_context_tokens = prefer_overlay overlay.max_context_tokens base.max_context_tokens
-  ; serving_constraint = prefer_overlay overlay.serving_constraint base.serving_constraint
-  ; max_output_tokens = prefer_overlay overlay.max_output_tokens base.max_output_tokens
-  ; supports_tools = prefer_overlay overlay.supports_tools base.supports_tools
-  ; supports_tool_choice =
-      prefer_overlay overlay.supports_tool_choice base.supports_tool_choice
-  ; supports_required_tool_choice =
-      prefer_overlay
-        overlay.supports_required_tool_choice
-        base.supports_required_tool_choice
-  ; supports_named_tool_choice =
-      prefer_overlay overlay.supports_named_tool_choice base.supports_named_tool_choice
-  ; supports_parallel_tool_calls =
-      prefer_overlay
-        overlay.supports_parallel_tool_calls
-        base.supports_parallel_tool_calls
-  ; assistant_tool_content_format =
-      prefer_overlay
-        overlay.assistant_tool_content_format
-        base.assistant_tool_content_format
-  ; chat_output_budget_field =
-      prefer_overlay overlay.chat_output_budget_field base.chat_output_budget_field
-  ; tool_schema_conformance =
-      prefer_overlay overlay.tool_schema_conformance base.tool_schema_conformance
-  ; supports_reasoning = prefer_overlay overlay.supports_reasoning base.supports_reasoning
-  ; accepted_reasoning_efforts =
-      prefer_overlay overlay.accepted_reasoning_efforts base.accepted_reasoning_efforts
-  ; supports_response_format_json =
-      prefer_overlay
-        overlay.supports_response_format_json
-        base.supports_response_format_json
-  ; supports_structured_output =
-      prefer_overlay overlay.supports_structured_output base.supports_structured_output
-  ; supports_multimodal_inputs =
-      prefer_overlay overlay.supports_multimodal_inputs base.supports_multimodal_inputs
-  ; supports_image_input =
-      prefer_overlay overlay.supports_image_input base.supports_image_input
-  ; supports_audio_input =
-      prefer_overlay overlay.supports_audio_input base.supports_audio_input
-  ; supports_video_input =
-      prefer_overlay overlay.supports_video_input base.supports_video_input
-  ; supports_document_input =
-      prefer_overlay overlay.supports_document_input base.supports_document_input
-  ; modality_priority = prefer_overlay overlay.modality_priority base.modality_priority
-  ; task = prefer_overlay overlay.task base.task
-  ; supported_models = prefer_overlay overlay.supported_models base.supported_models
-  ; supports_native_streaming =
-      prefer_overlay overlay.supports_native_streaming base.supports_native_streaming
-  ; supports_system_prompt =
-      prefer_overlay overlay.supports_system_prompt base.supports_system_prompt
-  ; supports_assistant_prefill =
-      prefer_overlay overlay.supports_assistant_prefill base.supports_assistant_prefill
-  ; supports_prompt_caching =
-      prefer_overlay overlay.supports_prompt_caching base.supports_prompt_caching
-  ; supports_top_k = prefer_overlay overlay.supports_top_k base.supports_top_k
-  ; supports_min_p = prefer_overlay overlay.supports_min_p base.supports_min_p
-  ; supports_seed = prefer_overlay overlay.supports_seed base.supports_seed
-  ; ignored_sampling_parameters =
-      prefer_overlay overlay.ignored_sampling_parameters base.ignored_sampling_parameters
-  ; thinking_control_format =
-      prefer_overlay overlay.thinking_control_format base.thinking_control_format
-  ; anthropic_thinking_control =
-      prefer_overlay overlay.anthropic_thinking_control base.anthropic_thinking_control
-  ; preserve_thinking_control_format =
-      prefer_overlay
-        overlay.preserve_thinking_control_format
-        base.preserve_thinking_control_format
-  ; content_inline_reasoning =
-      prefer_overlay overlay.content_inline_reasoning base.content_inline_reasoning
-  ; reasoning_output_format =
-      prefer_overlay overlay.reasoning_output_format base.reasoning_output_format
-  ; reasoning_streaming_format =
-      prefer_overlay overlay.reasoning_streaming_format base.reasoning_streaming_format
-  ; reasoning_replay = prefer_overlay overlay.reasoning_replay base.reasoning_replay
-  ; input_per_million = prefer_overlay overlay.input_per_million base.input_per_million
-  ; output_per_million = prefer_overlay overlay.output_per_million base.output_per_million
-  ; cache_write_multiplier =
-      prefer_overlay overlay.cache_write_multiplier base.cache_write_multiplier
-  ; cache_read_multiplier =
-      prefer_overlay overlay.cache_read_multiplier base.cache_read_multiplier
-  }
-;;
-
-let model_row_key (entry : Model_catalog.model_entry) =
-  Option.map normalize_identity entry.provider_name,
-  Model_identifiers.Id_prefix.equality_key entry.id_prefix
-;;
-
-let merge_exact_model_entries
-      ~(base : Model_catalog.model_entry list)
-      ~(overlay : Model_catalog.model_entry list)
-  =
-  let overlay_keys = List.map model_row_key overlay in
-  let overlay =
-    List.map
-      (fun (entry : Model_catalog.model_entry) ->
-         match
-           List.find_opt
-             (fun (base_entry : Model_catalog.model_entry) ->
-                model_row_key base_entry = model_row_key entry)
-             base
-         with
-         | None -> entry
-         | Some base -> merge_exact_model_entry ~base entry)
-      overlay
-  in
-  overlay
-  @ List.filter
-      (fun (entry : Model_catalog.model_entry) ->
-         not (List.mem (model_row_key entry) overlay_keys))
-      base
+let first_some preferred fallback =
+  match preferred with
+  | Some _ -> preferred
+  | None -> fallback
 ;;
 
 let option_int = function
@@ -445,7 +297,7 @@ let capabilities_of_catalog_binding
     | None ->
       (match model.provider_name with
        | None -> model.base_label
-       | Some _ -> prefer_overlay model.base_label provider.capabilities_base)
+       | Some _ -> first_some model.base_label provider.capabilities_base)
   in
   let base =
     match Option.bind base_label Caps.capabilities_for_provider_label with
@@ -557,9 +409,9 @@ let capabilities_of_catalog_binding
     | None -> base.ignored_sampling_parameters
   in
   { base with
-    max_context_tokens = prefer_overlay model.max_context_tokens base.max_context_tokens
-  ; serving_constraint = prefer_overlay model.serving_constraint base.serving_constraint
-  ; max_output_tokens = prefer_overlay model.max_output_tokens base.max_output_tokens
+    max_context_tokens = first_some model.max_context_tokens base.max_context_tokens
+  ; serving_constraint = first_some model.serving_constraint base.serving_constraint
+  ; max_output_tokens = first_some model.max_output_tokens base.max_output_tokens
   ; supports_reasoning
   ; accepted_reasoning_efforts
   ; thinking_control_format
@@ -602,8 +454,8 @@ let capabilities_of_catalog_binding
   ; supports_min_p = bool_or base.supports_min_p model.supports_min_p
   ; supports_seed = bool_or base.supports_seed model.supports_seed
   ; ignored_sampling_parameters
-  ; task = prefer_overlay model.task base.task
-  ; supported_models = prefer_overlay model.supported_models base.supported_models
+  ; task = first_some model.task base.task
+  ; supported_models = first_some model.supported_models base.supported_models
   }
 ;;
 
@@ -688,63 +540,6 @@ let%test "exact catalog binding gates forced tool choice on supports_tool_choice
        && caps.supports_named_tool_choice = false
      | _ -> false)
   | Error _ -> false
-;;
-
-let%test "exact pricing-only overlay preserves functional fields" =
-  let base =
-    Model_catalog.of_toml_string
-      ~source:"exact pricing base"
-      "[[providers]]\n\
-       id = \"pricing-provider\"\n\
-       kind = \"openai_compat\"\n\
-       base_url = \"https://pricing.example\"\n\
-       request_path = \"/v1/chat/completions\"\n\
-       auth = \"none\"\n\
-       capabilities_base = \"openai_chat\"\n\
-       [[models]]\n\
-       id_prefix = \"pricing-model\"\n\
-       provider_name = \"pricing-provider\"\n\
-       max_context_tokens = 100\n\
-       supports_response_format_json = true\n\
-       supports_document_input = true\n\
-       supported_models = [\"pricing-model\"]\n\
-       input_per_million = 1.0\n"
-  in
-  let overlay =
-    Model_catalog.of_toml_string
-      ~source:"exact pricing overlay"
-      "[[models]]\n\
-       id_prefix = \"pricing-model\"\n\
-       provider_name = \"pricing-provider\"\n\
-       input_per_million = 99.0\n"
-  in
-  match base, overlay with
-  | Ok base, Ok overlay ->
-    (match
-       ( Model_catalog.provider_entries base
-       , Model_catalog.model_entries base
-       , merge_exact_model_entries
-           ~base:(Model_catalog.model_entries base)
-           ~overlay:(Model_catalog.model_entries overlay) )
-     with
-     | [ provider ], [ base_model ], [ merged_model ] ->
-       let base_capabilities = capabilities_of_catalog_binding provider base_model in
-       let merged_capabilities = capabilities_of_catalog_binding provider merged_model in
-       functional_capability_projection
-         base_capabilities
-         ~anthropic_thinking_control:
-           (catalog_anthropic_thinking_control base_model.anthropic_thinking_control)
-       = functional_capability_projection
-           merged_capabilities
-           ~anthropic_thinking_control:
-             (catalog_anthropic_thinking_control merged_model.anthropic_thinking_control)
-       && merged_model.max_context_tokens = Some 100
-       && merged_model.supports_response_format_json = Some true
-       && merged_model.supports_document_input = Some true
-       && merged_model.supported_models = Some [ "pricing-model" ]
-       && merged_model.input_per_million = Some 99.0
-     | _ -> false)
-  | Error _, _ | _, Error _ -> false
 ;;
 
 let%test "exact functional capability projection has a stable golden" =

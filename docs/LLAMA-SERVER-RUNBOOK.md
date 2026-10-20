@@ -84,15 +84,17 @@ return-progress = true
 ```
 
 `[models.<model-row-id>.capabilities]` 블록은 빼면 안 된다. AGENT_CORE 내장 카탈로그에
-없는 모델은 이 블록이 있어야만 능력이 정해지고, 없으면 서버가 부팅을 거부한다
-(`lib/runtime/runtime_adapter.ml`이 블록이 없을 때 `None`을 돌려주고, `lib/runtime/runtime.ml`이 그걸
-"카탈로그에 없는 모델"로 판정한다).
+없는 모델은 이 블록이 있어야만 능력이 정해진다. 블록이 없으면 그 런타임이 꺼진다
+(`lib/runtime/runtime_adapter.ml`이 블록이 없을 때 `None`을 돌려주고,
+`lib/runtime/runtime.ml`의 `degrade_loaded_for_missing_catalog`가 그 런타임을 비활성화한다).
+기본 런타임, 레인 후보, media failover가 그 런타임을 가리키거나 켤 수 있는 런타임이 하나도
+남지 않으면 서버가 부팅을 거부한다.
 
-**적지 않은 불리언은 꺼진 것으로 읽힌다.** 기준선이
-`Capabilities.default_capabilities`라서, 모델이 지원하는 것은 전부 적어야 한다
-(`lib/runtime/runtime_toml.ml`의 기본값이 `false`, `emits-usage-tokens`만 `true`).
-`max-context`·`tools-support`·`thinking-support`·`streaming`은 `[models.<model-row-id>]`
-쪽에서 읽어가므로 capabilities 블록에 다시 적지 않는다.
+**적지 않은 키는 그 런타임 wire의 기본 능력을 따른다.** 카탈로그에 없는 모델은
+`Capabilities.capabilities_of_kind wire`를 바탕으로 삼고 블록에 적은 키만 덮어쓴다
+(`lib/runtime/runtime_adapter.ml`). 이미지·오디오·비디오·멀티모달 입력은 예외라서, 적지 않으면
+꺼진 것이다. `max-context`·`tools-support`·`thinking-support`·`streaming`은
+`[models.<model-row-id>]` 쪽에서 읽어가므로 capabilities 블록에 다시 적지 않는다.
 
 `preserve-thinking = true`는 예외다. "이전 턴 reasoning을 다시 넣어라"까지만 말하고,
 **어떤 형식으로 넣을지는 runtime.toml에 적을 키가 없다.** 카탈로그 행이 없으면 그 형식이

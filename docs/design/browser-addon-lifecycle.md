@@ -439,11 +439,31 @@ within the existing startup window. Each attempt checks the original lease,
 browser child and profile identity, and closes a refused CDP connection. No
 extension, model callback or page input is admitted before these checks.
 
-The new preserved-profile scenario defines real native guardian startup, shared
+The preserved-profile scenario exercises real native guardian startup, shared
 admission refusal, Retire during CDP startup, old cleanup after shared-slot
 replacement, login-fixture preservation and refusal of a replaced gate inode.
-It uses an isolated fake Chromium endpoint. Source and limited type checks are
-not execution evidence, a real persistent Chrome run or personal-profile proof.
+It passed as the sole selected scenario in
+[run 39487042120](https://github.com/jeong-sik/masc/actions/runs/39487042120),
+composition `4854a935bba4e888e5ec84346a7df578333c5b5d`. It uses an isolated fake
+Chromium endpoint, so this is native resource-lifecycle evidence rather than
+actual Chrome cookie/login persistence or a whole-regression verdict.
+
+The real Chrome probe now selects both private and dedicated persistent profiles
+by default. `scripts/probe-stagehand.py --profile-mode private|persistent|both`
+can select the needed scope. Each mode has its own loopback fixture, browser
+workspace and reports under `private/` or `persistent/` in the output directory;
+`profile-results.json` records only the selected executions. Build/source
+manifests remain at the output root.
+
+The fixture installs an expiring HTTP-only cookie through ordinary navigation.
+Its uncached session page checks the cookie again after a browser close/open and
+after in-flight Add-on detach/fresh-worker attachment. It installs and positively
+observes a cookie before each retirement boundary, so reusing an already-empty
+private profile cannot pass the fresh-worker check. A persistent profile must
+retain the cookie; a private allocation must lose it. Both modes still exercise
+the same input, model, cancellation and cleanup path. These new real-cookie
+scenario definitions have not yet executed; they do not establish real login
+preservation or personal-site behavior.
 
 ## Completion evidence
 

@@ -65,9 +65,9 @@ let fixture ?(failure=(fun _ -> None)) f = Eio_main.run (fun env ->
   ignore (ok (Driver.execute driver (Lane.Session_open {headless=None})));
   ignore (ok (Driver.execute driver Lane.Tabs_list));
   calls := [];
-  f driver current calls matches)
+  f env driver current calls matches)
 let act driver tab_id interaction = Driver.execute driver (Lane.Page_act (Action.On_tab {tab_id;frame_path=[];interaction}))
-let test_targeted_goto () = fixture (fun driver current calls _ ->
+let test_targeted_goto () = fixture (fun _env driver current calls _ ->
   ignore (ok (Driver.execute driver (Lane.Page_goto {url="https://example.org/new";tab_id=Some 2})));
   check string "navigation selects observed tab" "b" !current;
   check bool "URL request occurs in target tab" true
@@ -76,12 +76,12 @@ let test_targeted_goto () = fixture (fun driver current calls _ ->
   (match Driver.execute driver (Lane.Page_goto {url="https://example.org/new";tab_id=Some 99}) with
    | Lane.Refused _ -> () | _ -> fail "unknown tab accepted");
   check int "unknown tab cannot navigate current tab" 0 (List.length !calls))
-let test_selector_contract () = fixture (fun driver _ calls matches ->
+let test_selector_contract () = fixture (fun _env driver _ calls matches ->
   List.iter (fun count -> matches := count; calls := [];
     (match act driver 1 (Action.Click "button") with Lane.Rejected_before_effect _ -> () | _ -> fail "non-unique selector accepted");
     check bool "no click after absent or ambiguous selector" false
       (List.exists (fun (_,_,path,_) -> String.ends_with ~suffix:"/click" path) !calls)) [0;2])
-let test_native_fill_and_key () = fixture (fun driver _ calls _ ->
+let test_native_fill_and_key () = fixture (fun _env driver _ calls _ ->
   ignore (ok (act driver 2 (Action.Fill {selector="#name";text="한글'\n🙂"})));
   let commands = List.rev !calls |> List.filter (fun (_,_,path,_) -> String.starts_with ~prefix:"/session/s/element/" path) in
   (match commands with
@@ -94,7 +94,7 @@ let test_native_fill_and_key () = fixture (fun driver _ calls _ ->
   | _,_,"/session/s/element/b_button/value",Some body ->
     check bool "Enter uses WebDriver key code" true (field "text" body = Some (`String "\xee\x80\x87"))
   | _ -> fail "native key command missing")
-let test_parallel_targeting () = fixture (fun driver _ calls _ ->
+let test_parallel_targeting () = fixture (fun _env driver _ calls _ ->
   Eio.Fiber.both
     (fun () -> ignore (ok (act driver 1 (Action.Click "button"))))
     (fun () -> ignore (ok (act driver 2 (Action.Click "button"))));
@@ -111,7 +111,7 @@ let test_parser () =
      ["action",`String "click";"tabId",`Int 1;"selector",`String ""];
      ["action",`String "reload";"tabId",`Int 1;"text",`String "ignored?"];
      ["action",`String "reload";"tabId",`Int 1;"tabId",`Int 2]]
-let test_stale_session_id () = fixture (fun driver _ calls _ ->
+let test_stale_session_id () = fixture (fun _env driver _ calls _ ->
   ignore (ok (Driver.execute driver Lane.Session_close));
   ignore (ok (Driver.execute driver (Lane.Session_open {headless=None})));
   ignore (ok (Driver.execute driver Lane.Tabs_list));
@@ -119,12 +119,13 @@ let test_stale_session_id () = fixture (fun driver _ calls _ ->
   (match act driver 1 (Action.Click "button") with
    | Lane.Rejected_before_effect _ -> () | _ -> fail "stale tab id targeted the new session");
   check int "stale target causes no browser request" 0 (List.length !calls))
-let test_pre_effect_tool_outcome () = with_upload_context (fun config meta -> fixture (fun driver _ calls matches ->
+let test_pre_effect_tool_outcome () = with_upload_context (fun config meta -> fixture (fun env driver _ calls matches ->
   Eio.Switch.run (fun sw ->
-    Lane.install_automation_executor (Some (Driver.execute driver));
+    Lane.install_automation_executor (Some (fun _ -> fail "public tool fell back to a builtin executor"));
     Eio.Switch.on_release sw (fun () -> Lane.install_automation_executor None);
+    Browser_addon_fixture.with_worker ~env ~config ~respond:(fun ~route:_ verb -> Driver.execute driver verb) (fun _browser ->
     let invoke fields = Masc.Keeper_tool_in_process_runtime.handle_browser_act_with_outcome
-      ~turn_sandbox_factory:None ~config ~meta ~args:(`Assoc fields) in
+      ~turn_sandbox_factory:None ~config ~meta ~args:(`Assoc (("lane",`String "automation")::fields)) in
     let missing = invoke ["action",`String "click";"selector",`String "button"] in
     check bool "missing target permits correction" true
       (missing.failure_effect_disposition = Tool_result.Proven_pre_effect);
@@ -141,8 +142,9 @@ let test_pre_effect_tool_outcome () = with_upload_context (fun config meta -> fi
     let _,phase = Masc.Tool_misc_browser_lane.handle_act_with_phase ~base_path:config.base_path
         ~tool_name:"masc_browser_act" ~start_time:(Tool_timing.start ()) (`Assoc upload) in
     check bool "generic upload requires owner" true (phase = Tool_result.Proven_pre_effect);
-    check int "generic upload sends no browser commands" 0 (List.length !calls))))
-let test_owned_upload_staging () = with_upload_context (fun config meta -> fixture (fun driver _ _ _ ->
+    check int "generic upload sends no browser commands" 0 (List.length !calls)))))
+
+let test_owned_upload_staging () = with_upload_context (fun config meta -> fixture (fun _env driver _ _ _ ->
   let root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let source = Filename.concat root "payload.bin" in
   let oc = open_out_bin source in close_out oc;
@@ -187,7 +189,7 @@ let test_upload_lease_failures () =
   let failure path = if !failing &&
     (String.ends_with ~suffix:"/value" path || path="/session/s")
     then Some (Driver.Transport "response timed out") else None in
-  fixture ~failure (fun driver _ _ matches ->
+  fixture ~failure (fun _env driver _ _ matches ->
     let captured = ref [] in
     let stage f = Lane.Upload_lease.with_staged_files
         ~files:["payload.bin",(fun () -> Ok "bytes")]
@@ -239,18 +241,18 @@ let test_context_arguments () =
 let test_download_result_reaches_provider () =
   with_upload_context (fun config meta -> Eio_main.run (fun env ->
     Time_compat.set_clock (Eio.Stdenv.clock env);
-    Eio.Switch.run (fun sw ->
+    Eio.Switch.run (fun _sw ->
       let path = Filename.concat config.base_path "download.bin" in
       let bytes = String.init 40000 (fun i -> Char.chr (i mod 256)) in
       Out_channel.with_open_bin path (fun oc -> output_string oc bytes);
       let artifact = match Masc.Browser_download_artifact.publish ~base_path:config.base_path path with
         | Ok value -> value | Error detail -> fail detail in
       let payload = `Assoc ["downloads", `List [`Assoc ["artifact", artifact]]] in
-      Lane.install_automation_executor (Some (function
+      let respond ~route:_ = function
         | Lane.Page_downloads {tab_id=1} ->
           Lane.Answered (`Assoc ["ok",`Bool true;"data",payload])
-        | _ -> fail "unexpected browser action during download read"));
-      Eio.Switch.on_release sw (fun () -> Lane.install_automation_executor None);
+        | _ -> fail "unexpected browser action during download read" in
+      Browser_addon_fixture.with_worker ~env ~config ~respond (fun _browser ->
       let execution = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
           ~config ~meta ~args:(`Assoc ["lane",`String "automation";"mode",`String "downloads";"tabId",`Int 1]) in
       check bool "browser read completes" true (execution.disposition = Tool_result.Completed ());
@@ -275,12 +277,12 @@ let test_download_result_reaches_provider () =
             | Ok None -> fail "download artifact missing"
             | Error error -> fail (Tool_blob_store.fetch_error_to_string error))
          | _ -> fail "expected exactly one downloadable file")
-      | Tool_output.Not_artifact_manifest | Tool_output.Invalid_artifact_manifest _ -> fail "invalid durable download manifest")))
+      | Tool_output.Not_artifact_manifest | Tool_output.Invalid_artifact_manifest _ -> fail "invalid durable download manifest"))))
 
 let test_interact_production_failure_phase () =
   with_upload_context (fun config meta -> Eio_main.run (fun env ->
     Time_compat.set_clock (Eio.Stdenv.clock env);
-    Eio.Switch.run (fun sw ->
+    Eio.Switch.run (fun _sw ->
     let invoke args = Masc.Keeper_tool_in_process_runtime.handle_browser_interact_with_outcome ~config ~meta ~args in
     let args = `Assoc ["lane",`String "automation";"tabId",`Int 1;
       "action",`String "click";"selector",`String "a";"expectedUrl",`String "https://example.org"] in
@@ -291,9 +293,8 @@ let test_interact_production_failure_phase () =
       (phase (invoke (`Assoc ["lane",`String "live";"tabId",`Int 1;
         "clientId",`String "00000000-0000-4000-8000-000000000001";
         "action",`String "click";"selector",`String "a"])) = Tool_result.Proven_pre_effect);
-    let reply = ref (Lane.Rejected_before_effect "observed document changed") in
-    Lane.install_automation_executor (Some (fun _ -> !reply));
-    Eio.Switch.on_release sw (fun () -> Lane.install_automation_executor None);
+    let reply=ref (Lane.Rejected_before_effect "observed document changed") in
+    Browser_addon_fixture.with_worker ~env ~config ~respond:(fun ~route:_ _ -> !reply) (fun _browser ->
     check bool "typed backend pre-effect rejection is recoverable" true
       (phase (invoke args) = Tool_result.Proven_pre_effect);
     reply := Lane.Answered (`Assoc ["ok",`Bool false;"error",`String "observed node detached";
@@ -305,7 +306,7 @@ let test_interact_production_failure_phase () =
       (phase (invoke args) = Tool_result.Effect_outcome_unknown);
     reply := Lane.Answered (`Assoc ["ok",`Bool false;"error",`String "observed node detached"]);
     check bool "error wording alone never establishes pre-effect" true
-      (phase (invoke args) = Tool_result.Effect_outcome_unknown))))
+      (phase (invoke args) = Tool_result.Effect_outcome_unknown)))))
 
 let test_stagehand_partial_open_tool_outcome () = Eio_main.run (fun env ->
   Time_compat.set_clock (Eio.Stdenv.clock env);

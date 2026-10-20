@@ -982,6 +982,7 @@ let run_turn
   let record_produced_checkpoint ~runtime_id ~attempt checkpoint =
     Option.iter (fun callback -> callback ~runtime_id ~attempt checkpoint) on_produced_checkpoint in
   let record_runtime_lane_terminal_error (error : Keeper_turn_driver.lane_terminal_error) =
+    runtime_walk_observed := true;
     runtime_terminal := Keeper_runtime_walk_evidence.observe_terminal
       ~runtime_id:error.origin_runtime_id ~attempt:error.origin_attempt error.lane_error;
     Option.iter (record_produced_checkpoint ~runtime_id:error.origin_runtime_id ~attempt:error.origin_attempt)
@@ -1923,7 +1924,6 @@ let run_turn
                    boundaries settle the lane, while usage remains observational. *)
                 dispatch_input
                   ~dispatch:(fun ~checkpoint initial_messages ->
-                    runtime_walk_observed := true;
                     Keeper_turn_driver.run_named
                       ~on_memory_capacity_refusal:s.Keeper_run_tools.on_memory_capacity_refusal
                       ~input_policy:meta.input_policy
@@ -1993,6 +1993,7 @@ let run_turn
                       ?trace_link
                       ~on_runtime_attempt:
                         (fun attempt ->
+                           runtime_walk_observed := true;
                            last_dispatched_checkpoint_owner :=
                              Some attempt.Keeper_turn_driver.checkpoint_owner;
                            Keeper_turn_preview.note_attempt ~writer:preview
@@ -2022,6 +2023,7 @@ let run_turn
                            s.Keeper_run_tools.on_runtime_attempt attempt)
                       ~on_runtime_attempt_error:
                         (fun ~runtime_id ~attempt ~dispatch error ->
+                           runtime_walk_observed := true;
                            runtime_failures_rev :=
                              Keeper_runtime_walk_evidence.observe_failure
                                ~runtime_id ~attempt ~dispatch error :: !runtime_failures_rev;

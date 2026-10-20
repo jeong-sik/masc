@@ -76,7 +76,7 @@ jobs:
               targets+=(bin/main_eio.exe test/test_repo_git.exe test/test_tui_workspace_entries.exe test/test_workspace_file_confidentiality.exe)
               ;;
             original-tool-result)
-              targets+=(bin/main_eio.exe test/test_keeper_tool_result_source.exe test/test_keeper_artifact_read_request.exe test/test_server_dashboard_http_keeper_tool_lookup.exe test/test_tui_chat_call_reader.exe)
+              targets+=(bin/main_eio.exe test/test_keeper_tool_result_source.exe test/test_tool_output_washing_e2e.exe test/test_server_dashboard_http_keeper_tool_lookup.exe test/test_tui_chat_call_reader.exe)
               ;;
             *) echo 'unsupported native proof scenario' >&2; exit 1 ;;
           esac

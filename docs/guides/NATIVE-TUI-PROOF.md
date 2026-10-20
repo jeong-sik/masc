@@ -14,7 +14,7 @@ characters) and `native-tui-scenario`:
 | `workspace-files` | TUI, server and the three test executables | `test_repo_git`, `test_tui_workspace_entries`, `test_workspace_file_confidentiality` |
 | `rich-workspace` | TUI, server and the six test executables | The `workspace-files` suites plus `test_lsp_position`, `test_tui_music_launcher`, `test_tui_alphatex` |
 | `rich-chat-workspace` | TUI, server and the seven test executables | The `rich-workspace` suites plus `test_tui_chat_call_reader` |
-| `original-tool-result` | TUI, server and the four test executables | `test_keeper_tool_result_source`, `test_keeper_artifact_read_request`, `test_server_dashboard_http_keeper_tool_lookup`, `test_tui_chat_call_reader` |
+| `original-tool-result` | TUI, server and the four test executables | `test_keeper_tool_result_source`, `test_tool_output_washing_e2e`, `test_server_dashboard_http_keeper_tool_lookup`, `test_tui_chat_call_reader` |
 
 The server target is `bin/main_eio.exe`; the TUI is `bin/masc_tui.exe`.
 Each test target is `test/<suite>.exe`. Unknown scenarios are refused before

@@ -16,6 +16,8 @@ type step =
   | Stderr of string
   | Exit_with of int
   | Mark_spawned of string
+  | Exit_slowly_on_term of float
+      (** Stay up until SIGTERM, then take this many seconds to exit. *)
   | Expect_launch of { home : string; native_read : bool }
 
 let init_frame ~granted =
@@ -124,6 +126,9 @@ let script_text ~capture steps =
       | Stderr text -> line (Printf.sprintf "printf '%%s\\n' %s >&2" (shell_quote text))
       | Exit_with code -> line (Printf.sprintf "exit %d" code)
       | Mark_spawned path -> line (Printf.sprintf "touch %s" (shell_quote path))
+      | Exit_slowly_on_term seconds ->
+        line (Printf.sprintf "trap 'sleep %g; exit 0' TERM" seconds);
+        line "while :; do sleep 0.05; done"
       | Expect_launch { home; native_read } ->
         let home = Unix.realpath home in
         List.iter
@@ -1288,6 +1293,57 @@ let test_stream_callback_preserves_reserved_controls () =
   Serve.emit_stream_event None event
 ;;
 
+(* The owner is cancelled while the host is still exiting after its turn ended.
+   The cleanup is cancel-protected, so a [run_turn] that does not return cannot
+   be interrupted from inside the process: the alarm turns that hang into a
+   failed suite. *)
+let fail_if_blocked_for seconds f =
+  Sys.set_signal
+    Sys.sigalrm
+    (Sys.Signal_handle
+       (fun _ ->
+         prerr_endline "run_turn did not return after the owner was cancelled";
+         exit 2));
+  ignore (Unix.alarm seconds);
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Unix.alarm 0);
+      Sys.set_signal Sys.sigalrm Sys.Signal_default)
+    f
+;;
+
+let host_exit_delay_s = 0.5
+let owner_cancel_after_s = 0.25
+let run_turn_return_deadline_s = 20
+
+let test_run_turn_returns_when_the_owner_is_cancelled_while_the_host_exits () =
+  with_script
+    (handshake_and_session ~granted:[]
+     @ [ Write agent_started
+       ; Write agent_completed
+       ; Write turn_completed
+       ; Exit_slowly_on_term host_exit_delay_s
+       ])
+    (fun ~dir ~requests:_ ->
+      fail_if_blocked_for run_turn_return_deadline_s (fun () ->
+        Eio_main.run (fun env ->
+          let clock = Eio.Stdenv.clock env in
+          Eio.Fiber.first
+            (fun () ->
+              let (_ : (Serve.turn_result, Serve.error) result) =
+                Serve.run_turn
+                  ~mgr:(Eio.Stdenv.process_mgr env)
+                  ~clock
+                  ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
+                  (config ())
+                  ~workspace_root:"/w"
+                  ~prompt:"say MASC_MUSE_OK"
+                  ~images:[]
+              in
+              ())
+            (fun () -> Eio.Time.sleep clock owner_cancel_after_s))))
+;;
+
 let () =
   run
     "runtime_muse_serve"
@@ -1328,6 +1384,8 @@ let () =
             test_resume_admits_only_the_counts_its_expectation_names
         ; test_case "start requires an empty session" `Quick
             test_start_requires_an_empty_session
+        ; test_case "run_turn returns when the owner is cancelled while the host exits" `Quick
+            test_run_turn_returns_when_the_owner_is_cancelled_while_the_host_exits
         ] )
     ]
 ;;

@@ -13,7 +13,6 @@ type config =
   }
 
 let default_timeout_s = 300.0
-let process_termination_grace_s = 2.0
 
 (* How long an exited [muse serve] is given to be reaped after its stdout
    closes, so the documented exit code can name why it stopped. *)
@@ -565,42 +564,30 @@ let drain_stderr flow tail =
     Log.Runtime_agent.debug "Muse Code stderr drain failed: %s" (Printexc.to_string exn)
 ;;
 
-let terminate_spawned_process ~clock proc stdin_w =
+(* The host is asked to stop and given the shared grace to exit before it is
+   killed. A cancelled owner only asks: the switch's release hook kills and
+   reaps the host, and [Eio.Process.await] cannot finish once the switch that
+   owns the host is cancelled. *)
+let terminate_spawned_process ~sw ~clock proc stdin_w =
   let owning_switch_cancelled = Eio.Fiber.is_cancelled () in
   Eio.Cancel.protect (fun () ->
     (try Eio.Flow.close stdin_w with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
        Log.Runtime_agent.debug "Muse Code stdin close failed: %s" (Printexc.to_string exn));
-    (try Eio.Process.signal proc Sys.sigterm with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Log.Runtime_agent.debug
-         "Muse Code termination signal failed: %s"
-         (Printexc.to_string exn));
-    if not owning_switch_cancelled
+    if owning_switch_cancelled
     then (
-      try
-        Eio.Time.with_timeout_exn clock process_termination_grace_s (fun () ->
-          let (_ : Eio.Process.exit_status) = Eio.Process.await proc in
-          ())
-      with
+      try Eio.Process.signal proc Sys.sigterm with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | Eio.Time.Timeout ->
-        (try
-           Eio.Process.signal proc Sys.sigkill;
-           let (_ : Eio.Process.exit_status) = Eio.Process.await proc in
-           ()
-         with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn ->
-           Log.Runtime_agent.warn
-             "Muse Code forced reap failed: %s"
-             (Printexc.to_string exn))
       | exn ->
         Log.Runtime_agent.debug
-          "Muse Code reap observed an already-closed process: %s"
-          (Printexc.to_string exn)))
+          "Muse Code termination signal failed: %s"
+          (Printexc.to_string exn))
+    else
+      Eio_process_capture.reap_proc_with_clock
+        ~sw
+        (clock :> float Eio.Time.clock_ty Eio.Resource.t)
+        proc)
 ;;
 
 (* Which window one [receive] waits under. Before the [turn/start] reply the
@@ -749,7 +736,7 @@ let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mg
           | exn -> protocol_error "stdout read" (Printexc.to_string exn)
       in
       Fun.protect
-        ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)
+        ~finally:(fun () -> terminate_spawned_process ~sw ~clock proc stdin_w)
         (fun () ->
            run
              { send

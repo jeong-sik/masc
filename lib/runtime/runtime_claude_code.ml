@@ -29,7 +29,6 @@ type config =
   }
 
 let default_timeout_s = 300.0
-let process_termination_grace_s = 2.0
 
 (* [None] installs no deadline. The vendor client owns when its own turn ends;
    a declared bound is the operator's optional liveness guard over a silent
@@ -2842,7 +2841,11 @@ let drain_stderr flow tail =
       (Printexc.to_string exn)
 ;;
 
-let terminate_spawned_process ~clock proc stdin_w =
+(* The host is asked to stop and given the shared grace to exit before it is
+   killed. A cancelled owner only asks: the switch's release hook kills and
+   reaps the host, and [Eio.Process.await] cannot finish once the switch that
+   owns the host is cancelled. *)
+let terminate_spawned_process ~sw ~clock proc stdin_w =
   let owning_switch_cancelled = Eio.Fiber.is_cancelled () in
   Eio.Cancel.protect (fun () ->
     (try Eio.Flow.close stdin_w with
@@ -2850,30 +2853,18 @@ let terminate_spawned_process ~clock proc stdin_w =
        Log.Runtime_agent.debug
          "Claude Code stdin close failed: %s"
          (Printexc.to_string exn));
-    (try Eio.Process.signal proc Sys.sigterm with
-     | exn -> (* cancel-guard-ok: the whole process-termination body runs under Eio.Cancel.protect, so the ambient cancellation cannot fire inside it even where Eio.Process.await suspends. *)
-       Log.Runtime_agent.debug
-         "Claude Code termination signal failed: %s"
-         (Printexc.to_string exn));
-    if not owning_switch_cancelled
-    then
-      try
-        Eio.Time.with_timeout_exn clock process_termination_grace_s (fun () ->
-          Eio.Process.await proc |> ignore)
-      with
-      | Eio.Time.Timeout ->
-        (try
-           Eio.Process.signal proc Sys.sigkill;
-           Eio.Process.await proc |> ignore
-         with
-         | exn -> (* cancel-guard-ok: the whole process-termination body runs under Eio.Cancel.protect, so the ambient cancellation cannot fire inside it even where Eio.Process.await suspends. *)
-           Log.Runtime_agent.warn
-             "Claude Code forced reap failed: %s"
-             (Printexc.to_string exn))
-      | exn -> (* cancel-guard-ok: the body is Eio.Cancel.protect *)
+    if owning_switch_cancelled
+    then (
+      try Eio.Process.signal proc Sys.sigterm with
+      | exn -> (* cancel-guard-ok: the whole process-termination body runs under Eio.Cancel.protect, so the ambient cancellation cannot fire inside it even where Eio.Process.await suspends. *)
         Log.Runtime_agent.debug
-          "Claude Code reap observed an already-closed process: %s"
+          "Claude Code termination signal failed: %s"
           (Printexc.to_string exn))
+    else
+      Eio_process_capture.reap_proc_with_clock
+        ~sw
+        (clock :> float Eio.Time.clock_ty Eio.Resource.t)
+        proc)
 ;;
 
 let run_protocol io ~native_posture ~dynamic_tools ~subscription ~session_mode ~session_id
@@ -3092,7 +3083,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
       | exn -> protocol_error "stdout read" (Printexc.to_string exn)
     in
     Fun.protect
-      ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)
+      ~finally:(fun () -> terminate_spawned_process ~sw ~clock proc stdin_w)
       (fun () ->
         let with_admission_timeout callback =
           with_idle_timeout clock config.admission_timeout_s callback

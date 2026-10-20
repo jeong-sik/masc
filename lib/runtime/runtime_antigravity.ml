@@ -29,7 +29,6 @@ type config =
   }
 
 let default_timeout_s = 300.0
-let process_termination_grace_s = 2.0
 
 (* How long a CLI that already delivered its result event may take to
    exit before we reap it. A healthy CLI exits well under a second after
@@ -677,20 +676,18 @@ let signal_spawned_process proc stdin_w =
      | _ -> ())) (* cancel-guard-ok: the whole process-termination body runs under Eio.Cancel.protect, so the ambient cancellation cannot fire inside it even where Eio.Process.await suspends. *)
 ;;
 
-let terminate_spawned_process ~clock proc stdin_w =
-  signal_spawned_process proc stdin_w;
+(* The CLI is asked to stop and given the shared grace to exit before it is
+   killed. A cancelled owner calls [signal_spawned_process] instead: the
+   switch's release hook kills and reaps the CLI, and [Eio.Process.await]
+   cannot finish once the switch that owns the CLI is cancelled. *)
+let terminate_spawned_process ~sw ~clock proc stdin_w =
   Eio.Cancel.protect (fun () ->
-    try
-      Eio.Time.with_timeout_exn clock process_termination_grace_s (fun () ->
-        Eio.Process.await proc |> ignore)
-    with
-    | Eio.Time.Timeout ->
-      (try
-         Eio.Process.signal proc Sys.sigkill;
-         Eio.Process.await proc |> ignore
-       with
-       | _ -> ()) (* cancel-guard-ok: the whole process-termination body runs under Eio.Cancel.protect, so the ambient cancellation cannot fire inside it even where Eio.Process.await suspends. *)
-    | _ -> ()) (* cancel-guard-ok: the body is Eio.Cancel.protect *)
+    (try Eio.Flow.close stdin_w with
+     | _ -> ()); (* cancel-guard-ok: the whole process-termination body runs under Eio.Cancel.protect, so the ambient cancellation cannot fire inside it even where Eio.Process.await suspends. *)
+    Eio_process_capture.reap_proc_with_clock
+      ~sw
+      (clock :> float Eio.Time.clock_ty Eio.Resource.t)
+      proc)
 ;;
 
 type protocol_state =
@@ -1019,7 +1016,7 @@ let run_spawned ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_
     let settle_failed_process () =
       if not !process_settled
       then (
-        Eio.Cancel.protect (fun () -> terminate_spawned_process ~clock proc stdin_w);
+        Eio.Cancel.protect (fun () -> terminate_spawned_process ~sw ~clock proc stdin_w);
         process_settled := true)
     in
     let abort_with_runtime_error error =
@@ -1157,7 +1154,7 @@ let run_spawned ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_
           Eio.Process.await proc)
       with
       | Eio.Time.Timeout ->
-        Eio.Cancel.protect (fun () -> terminate_spawned_process ~clock proc stdin_w);
+        Eio.Cancel.protect (fun () -> terminate_spawned_process ~sw ~clock proc stdin_w);
         Eio.Process.await proc
     in
     process_settled := true;

@@ -27,10 +27,9 @@ stay at the bottom. Each area answers one question.
   difference between a loaded page and the whole collection: `3 of 9` is not `3`.
 - Give headings, sections and the composer breathing room. A wider terminal
   gives the content more space. Every surface, Dashboard included, starts with
-  the narrow Activity pane when the terminal is wide enough for it, because on
-  2026-10-20 the operator asked to use the screen's space and padding as fully
-  as possible. The pane shows the typed reading Activity already owns; it is
-  not a place for new metrics.
+  the narrow Activity pane when the terminal is wide enough for it, so the right
+  side of a wide terminal is not left empty. The pane shows the typed reading
+  Activity already owns; it is not a place for new metrics.
 - On short viewports, reduce supplementary detail before losing selectable
   rows or actions. On narrow viewports, keep the screen's existing list/detail
   transition and the reader's place; do not invent another navigation model.

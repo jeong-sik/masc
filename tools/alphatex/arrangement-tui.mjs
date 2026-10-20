@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { Worker } from 'node:worker_threads'
 import { emitKeypressEvents } from 'node:readline'
 import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } from './arrangement-playback.mjs'
+import { startVstArrangement } from './arrangement-vst.mjs'
 import { arrangementEditor, arrangementAction, arrangementCommand, arrangementImported, arrangementCalibrated, arrangementRecordingCorrection, selectedRegion, arrangementTakes, arrangementTakeSelected } from './arrangement-editor.mjs'
 import { loadArrangement, verifyArrangementAssets, saveArrangement } from './arrangement-files.mjs'
 import { saveProject } from './sequencer-files.mjs'
@@ -54,6 +55,7 @@ const help = [
   ':midi-output MIDI_UID    :midi-port asset-1 PORT MIDI_UID',
   ':midi-source asset-2 SOURCE_ID MIDI_UID overrides one captured input.',
   ':mixed-output AUDIO_UID enables audio plus the selected MIDI routes.',
+  'Stored VST sounds play through the audio output; explicit MIDI routes send those sources externally.',
   ':play-audio explicitly auditions WAV, including captured regions, silent gaps and saved loops.',
   ':inputs lists audio/MIDI inputs; :input AUDIO_UID; :midi-input all|none|UID',
   ':record starts simultaneous WAV + raw MIDI against playing backing; :record-stop',
@@ -291,7 +293,8 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     recording?.controller.abort(); recording?.handle?.stop()
     recordStart = null
     generation++; transportPending = false
-    if (preparing !== null && !workerFailure) worker.postMessage({ kind: 'cancel', request: preparing })
+    if (preparing?.kind === 'vst') preparing.handle.cancel()
+    else if (preparing?.kind === 'worker' && !workerFailure) worker.postMessage({ kind: 'cancel', request: preparing.id })
     preparing = null
     transport.handle?.stop()
     transport = { kind: 'stopped' }
@@ -314,7 +317,10 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     started.catch(() => {})
     const expected = ++generation, project = editor.project, output = selection.output
     transport = { kind: 'preparing' }; status = 'Preparing arrangement sources…'
-    const prepared = request({ ...selection, project, sourceRoot, directory }, id => { preparing = id })
+    const vst = selection.kind === 'prepare-vst' ? startVstArrangement({ project, route, sourceRoot, directory, request,
+      cancelRequest: id => { if (!workerFailure) worker.postMessage({ kind: 'cancel', request: id }) } }) : null
+    if (vst) preparing = { kind: 'vst', handle: vst }
+    const prepared = vst ? vst.promise : request({ ...selection, project, sourceRoot, directory }, id => { preparing = { kind: 'worker', id } })
     const preparation = (async () => {
       let result, playbackCompletion, playbackHandle
       try {
@@ -379,8 +385,9 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         if (playbackCompletion) await playbackCompletion
         if (result) {
           await Promise.allSettled([...(planInspections.get(result) ?? [])])
-          await rm(dirname(result.path), { recursive: true, force: true })
+          if (!vst) await rm(dirname(result.path), { recursive: true, force: true })
         }
+        if (vst) await vst.dispose()
       }
     })()
     preparations.add(preparation)
@@ -393,7 +400,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     stop()
     const expected = ++generation
     transport = { kind: 'preparing' }; status = 'Preparing captured source…'
-    const prepared = request({ kind: 'prepare-take', project: editor.project, asset, sourceRoot, directory }, id => { preparing = id })
+    const prepared = request({ kind: 'prepare-take', project: editor.project, asset, sourceRoot, directory }, id => { preparing = { kind: 'worker', id } })
     const preparation = (async () => {
       let result, controller
       try {
@@ -432,7 +439,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     if (!accepting || takeTask || phrasePreparation) return
     stop()
     const expected = generation, project = editor.project, clip = selectedRegion(editor)
-    const prepared = request({ kind: 'prepare-phrase', project, asset }, id => { preparing = id })
+    const prepared = request({ kind: 'prepare-phrase', project, asset }, id => { preparing = { kind: 'worker', id } })
     transport = { kind: 'preparing' }; status = 'Opening MIDI experiment'
     const preparation = (async () => {
       let controller

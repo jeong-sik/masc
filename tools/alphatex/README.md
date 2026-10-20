@@ -199,8 +199,16 @@ or moving the original preset file does not change the saved sound. A different
 installed instrument/version is refused. Plug-in binaries, sample libraries and
 licenses still need to be installed separately. Project files containing user
 presets are local musical documents; consider the preset license before sharing.
-Backing MIDI assets retain this sound for reopening in the phrase editor; VST
-audio projection alongside backing still needs source-clock integration.
+Backing MIDI assets retain this sound for reopening in the phrase editor. In an
+arrangement, select `:output AUDIO_UID` to play stored VST sounds alongside WAV
+backing, or `:mixed-output AUDIO_UID` when other sources use external MIDI.
+Explicit `:midi-port ASSET PORT MIDI_UID` bindings override the stored sound for
+that asset; `:midi-output MIDI_UID` sends all MIDI assets externally. Each source
+and selected SMF2 pattern renders separately with its frozen preset. Original
+tempo/SMPTE timing, source trims and repeat periods remain authoritative, including
+loop practice and count-in. Stop or exit cancels rendering and waits for the
+native process before removing its private files. Independent ports in one source
+still require explicit MIDI outputs.
 Subsequent Space starts, pauses or resumes the preview; `:stop` ends playback. `l` toggles
 repetition of the loop region inside one native AVAudioEngine/PlayerNode. `:seek 4` moves to
 quarter-note beat 4. Select an audio output with `--output UID` or `:output UID`;

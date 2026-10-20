@@ -1022,10 +1022,11 @@ let test_purge_preview_reports_what_a_structural_break_drops () =
     { (make_inventory_checkpoint ~session_id:trace_id ~turn_count:3 ~created_at:3.0) with
       Agent_core.Checkpoint.messages }
   in
-  (match Store.save_agent_core_classified ~session_dir ~history_retained:2 checkpoint with
-   | Ok (Store.Saved _) -> ()
-   | Ok (Store.Stale_noop _) -> fail "fixture checkpoint was stale"
-   | Error detail -> fail detail);
+  (* Simulate an already-corrupt checkpoint on disk. The normal save boundary
+     rejects overlapping tool cycles before the recovery preview can read them. *)
+  let canonical = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
+  Fs_compat.mkdir_p (Filename.dirname canonical);
+  Fs_compat.save_file canonical (Agent_core.Checkpoint.to_string checkpoint);
   match Checkpoints.purge_current config ~keeper_name ~apply:false with
   | Error error -> fail (Checkpoints.purge_error_to_string error)
   | Ok preview ->

@@ -1,0 +1,10 @@
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
+PASS empty bytes and zero write syscalls
+PASS UTF-8 and binary bytes round trip
+PASS multi-megabyte bytes round trip
+PASS short writes and EINTR preserve every byte
+PASS zero write fails once with EIO
+PASS ENOSPC propagates once
+PASS scheduler runs while payload syscall is held
+PASS caller cancellation joins the active write
+TOTAL 8 PASS; source extraction, not full Backend linkage

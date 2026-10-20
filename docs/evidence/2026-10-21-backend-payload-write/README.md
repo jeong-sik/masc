@@ -38,7 +38,9 @@ striped writer mutex, compression, file mode, close, temporary-file rename,
 key-index update and error cleanup. Only payload writing moves to a Unix
 system thread. `Fd.use_exn` pins the already-open capability descriptor
 for that worker; no ambient path is reopened. Short writes and EINTR
-continue the same write, while zero progress and other failures propagate.
+continue the same write through the existing `write_all_substring` helper,
+which now retries EINTR for its existing atomic-update consumers too.
+Zero progress and other failures propagate.
 The worker finishes before the caller closes, renames or cleans up the file.
 Resources without a Unix descriptor retain the previous Eio flow writer.
 
@@ -48,7 +50,7 @@ Compression and reads remain outside this change.
 ## Verification
 
 `python3 docs/evidence/2026-10-21-backend-payload-write/probe.py`
-extracts the private writer verbatim and compiles only that fragment against
+extracts the private writer and its existing write-all helper verbatim and compiles only those fragments against
 installed OCaml 5.5.1 and real Eio/POSIX file capabilities. Eight scenarios
 passed: empty, UTF-8/binary, multi-megabyte contents, short writes plus EINTR,
 zero progress, ENOSPC, scheduler progress while a worker write is held, and

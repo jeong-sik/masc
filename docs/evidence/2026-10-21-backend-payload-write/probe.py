@@ -6,6 +6,7 @@ import tempfile
 
 root = Path(__file__).resolve().parents[3]
 source = (root / 'lib/backend/backend.ml').read_text()
+write_all = source.split('  let write_all_substring fd s ofs len =', 1)[1].split('\n  (** {2 Core Operations}', 1)[0]
 writer = source.split('  let save_payload path content =', 1)[1].split('\n  (** Get value', 1)[0]
 header = r'''
 let write_hook = Atomic.make (fun () -> ())
@@ -29,7 +30,6 @@ module Unix = struct
         Unix.write_substring fd bytes offset length
 end
 module Payload = struct
-  let save_payload path content =
 '''
 footer = r'''
 end
@@ -127,7 +127,8 @@ let () =
 with tempfile.TemporaryDirectory(prefix='masc-backend-payload-') as directory:
     scratch = Path(directory)
     unit = scratch / 'probe.ml'
-    unit.write_text(header + writer + footer)
+    unit.write_text(header + '  let write_all_substring fd s ofs len =' + write_all
+                    + '\n  let save_payload path content =' + writer + footer)
     command = ['opam', 'exec', '--switch=5.5.1', '--', 'ocamlfind', 'ocamlopt', '-thread',
                '-package', 'eio_main,eio.unix', '-linkpkg', '-o', str(scratch / 'probe'), str(unit)]
     subprocess.run(command, check=True)

@@ -234,16 +234,16 @@ module FileSystem = struct
             Unix.close fd)
         @@ fun () -> f fd)
 
-  (** Write all bytes to fd, retrying on partial writes.
+  (** Write all bytes to fd, retrying on partial writes and EINTR.
       Raises [Unix.Unix_error] if a zero-length write occurs (disk full). *)
   let write_all_substring fd s ofs len =
     let rec loop ofs remaining =
-      if remaining > 0 then begin
-        let written = Unix.write_substring fd s ofs remaining in
-        if written = 0 then
-          raise (Unix.Unix_error (Unix.EIO, "write_all_substring", "zero-length write"));
-        loop (ofs + written) (remaining - written)
-      end
+      if remaining > 0 then
+        match Unix.write_substring fd s ofs remaining with
+        | 0 ->
+            raise (Unix.Unix_error (Unix.EIO, "write_all_substring", "zero-length write"))
+        | written -> loop (ofs + written) (remaining - written)
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop ofs remaining
     in
     loop ofs len
 
@@ -288,15 +288,7 @@ module FileSystem = struct
       | Some fd ->
         Eio_unix.run_in_systhread ~label:"backend-save-payload" (fun () ->
           Eio_unix.Fd.use_exn "backend-save-payload" fd (fun unix_fd ->
-            let length = String.length content in
-            let rec write offset =
-              if offset < length then
-                match Unix.write_substring unix_fd content offset (length - offset) with
-                | 0 -> raise (Unix.Unix_error (Unix.EIO, "write", ""))
-                | written -> write (offset + written)
-                | exception Unix.Unix_error (Unix.EINTR, _, _) -> write offset
-            in
-            write 0)))
+            write_all_substring unix_fd content 0 (String.length content))))
 
   (** Get value by key (auto-decompresses ZSTD if detected).
 

@@ -30,11 +30,16 @@ async function controller(options = {}) {
   const slot = `sequencer-${randomUUID()}`
   globalThis[slot] = {
     process, sameStepContext, stepControl, ...editor, Worker, InstrumentPicker,
-    openStepInput() { observed.inputs++; throw new Error('Unexpected input arming') },
+    openStepInput(request) {
+      observed.inputs++
+      if (options.openStepInput) return options.openStepInput(request)
+      throw new Error('Unexpected input arming')
+    },
     MidiSourcePicker: class extends ActualMidiSourcePicker {
       constructor(callbacks) {
         super({ ...callbacks, discover: ({ signal }) => {
           observed.discoveries++
+          if (options.sources) return Promise.resolve(options.sources)
           return new Promise(resolve => {
             if (signal.aborted) resolve([])
             else signal.addEventListener('abort', () => resolve([]), { once: true })
@@ -75,6 +80,38 @@ test('queued picker command retains ownership of a following Enter before dispat
  view.key('escape');view.key('q');await view.done
  assert.deepEqual(view.observed.saved.at(-1),initial)
  } finally { view.signal.abort(); await view.done }
+})
+
+test('monitored picker selection retains captured sound/output and route changes retire the same input owner', async () => {
+  const requests = [], stops = []
+  let complete
+  const initial = { ...editor.newEditor().project, sound: { kind: 'soundfont' } }
+  const view = await controller({ initialDocument: initial, output: 'chosen-device', sources: [{id:'-17',name:'Keyboard'}],
+    openStepInput(request) {
+      requests.push(request)
+      return { ready: Promise.resolve({ source:{name:'Keyboard'}, monitoring:true }),
+        completion:new Promise(resolve=>{complete=resolve}), stop(options) { stops.push(options); complete() } }
+    } })
+  try {
+    view.command('step-input --monitor'); await flush(); await flush()
+    assert.equal(view.observed.inputs, 0)
+    view.key('return'); await flush(); await flush()
+    assert.equal(requests.length, 1); assert.equal(requests[0].source, '-17')
+    assert.deepEqual(requests[0].audio, {sound:initial.sound,output:'chosen-device'})
+    view.command('output other-device'); await flush()
+    assert.equal(stops.length, 1)
+    view.key('q'); await view.done
+    assert.deepEqual(view.observed.saved.at(-1), initial)
+  } finally { view.signal.abort(); await view.done }
+})
+
+test('monitored explicit UID refuses a MIDI output route without opening another input', async () => {
+  const view = await controller({ midiOutput:'external-midi' })
+  try {
+    view.command('step-input -17 --monitor'); await flush()
+    assert.equal(view.observed.inputs, 0)
+    view.key('q'); await view.done
+  } finally { view.signal.abort(); await view.done }
 })
 
 test('close before picker dispatch still retains its queued Enter ownership',async()=>{

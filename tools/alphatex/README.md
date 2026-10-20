@@ -126,7 +126,26 @@ MIDI2 attacks become the quietest supported note, while MIDI1 note-on-zero is a
 release. Source notes retain projected release velocities. Sustain/controllers,
 expression and SysEx do not alter step notes. MIDI2 note attributes and repeated
 voices that would overlap the same target key fail explicitly. This mode has no
-live audio/MIDI echo. Use the recorder for timed playing and raw MIDI2 capture.
+live audio/MIDI echo unless `--monitor` is requested. Use the recorder for timed
+playing and raw MIDI2 capture.
+
+Use `:step-input --monitor` (or `:step-input SOURCE_UID --monitor`) to hear
+the keyboard through the selected project-bound VST and audio output. Select the
+instrument with `i` first; `:output DEVICE_UID` chooses audio hardware and
+`:audio` returns from a MIDI destination to audio. The source picker opens the
+same single MIDI input for note editing and listening. Input arms after the
+selected output has started with the VST's captured preset. No fallback sound
+or output is substituted on failure.
+
+Monitoring maps supported MIDI1/MIDI2 channel notes, sustain/CC, pressure and
+pitch bend to the selected track/channel. MIDI2 values are reduced to MIDI1
+resolution for the VST; incoming bank/program changes are ignored so the saved
+preset remains authoritative. Unsupported SysEx/per-note data and colliding
+target keys fail explicitly. Unrelated releases do not cut another source key.
+Expression affects listening, not the inserted step notes. Events play in order
+at the next available device block; this mode does not preserve live performance
+timing. `:step-stop`, `:stop`, route changes and leaving the view retire audio;
+admitted step edits still drain before saving. Device underruns are errors.
 
 `:step-length VALUE` changes only the next input length, without editing an
 existing note or adding undo history. `:step-rest [VALUE]` advances the cursor

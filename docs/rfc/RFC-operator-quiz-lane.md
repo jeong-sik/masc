@@ -714,11 +714,13 @@ Day to day:
 - **O7. Targets.** Decided: as proposed (§14).
 - **O8. Skips.** Decided: a skip counts as a miss.
 
-### 13.2 Still open
+### 13.2 Recorded later the same day
 
-- **Q1. Where the operator answers.** Approvals through K4 (recommended), or the add-on detail screen with no K4 (A5). Choosing A5 removes one core layer and makes every answer a typed JSON command.
-- **Q2. GitHub credential.** K3 reads merged PRs and review comments with the `[repositories] pr_reader` Keeper's token, as the PR overview does today (`lib/server/server_repository_pulls.mli:3-7`). Is that acceptable for quiz material, or should `github_pulls` wait for a host-owned credential?
-- **Q3. Leftover history.** Recommendation: L9 leaves the released `CHANGELOG.md` lines (`CHANGELOG.md:5479`, `:5605-5606`) and the evidence manifests that only list file hashes. They record what shipped or what a past run read; they do not describe the current system. Delete them too?
+- **Q1. Where the operator answers.** Decided: Approvals, through K4. A5 (answering in the add-on detail screen) is not built.
+- **Q2. GitHub credential.** Decided: K3 reads merged PRs and review comments with the `[repositories] pr_reader` Keeper's token, read-only, as the PR overview does today (`lib/server/server_repository_pulls.mli:3-7`). No separate credential is introduced.
+- **Q3. Leftover history.** Decided: L9 keeps the released `CHANGELOG.md` lines (`CHANGELOG.md:5479`, `:5605-5606`) and the evidence manifests that only list file hashes. They record what shipped or what a past run read; they do not describe the current system.
+
+No operator decision is open.
 
 ## 14. Success criterion
 

@@ -13,9 +13,8 @@ let mode_name = function
   | Host -> "host"
   | Automation -> "automation"
 
-(* The modes that install the host and its launcher. The automation lane has
-   neither: geckodriver is started by the server and opens a profile of its
-   own. *)
+(* These modes install the native host and launcher assets. Automation uses
+   the attached browser Add-on's geckodriver and needs neither asset. *)
 let host_modes = [ Extension; Bidi; Host ]
 let installs_host modes = List.exists (fun mode -> List.mem mode modes) host_modes
 
@@ -146,16 +145,16 @@ let print_bidi_steps plan =
   let { Browser_configuration.port; _ } = Bidi_setup.table plan in
   print_endline "";
   print_endline "Next, for the Firefox MASC starts:";
-  (* The table is written whatever this says; the server reads it only while
-     the live lane is on. *)
+  (* Setup writes the table; an attached browser Add-on uses the loaded
+     configuration only while the live lane is enabled. *)
   if not (Bidi_setup.lane_enabled plan)
   then
     print_endline
       "  [browser.live] enabled = false in runtime.toml keeps the live lane off, so the \
        browser Add-on starts no Firefox. Turn it on first.";
   print_endline
-    "  1. Attach the browser Lane Add-on, or detach and reattach its existing installation \
-     after restarting MASC to load runtime.toml. The Add-on owns this Firefox and its \
+    "  1. Restart the MASC server to load runtime.toml, then attach the browser Lane Add-on \
+     or detach and reattach its existing installation. The Add-on owns this Firefox and its \
      BiDi connection; its observation reports readiness or the startup refusal.";
   print_endline
     "  2. In that Firefox, log in once to the sites the Keepers work on. The profile keeps \
@@ -209,22 +208,24 @@ let print_automation ~runtime_config_path plan =
   then
     print_endline
       "  [browser.automation] enabled = false in runtime.toml keeps the lane off, so the \
-       server starts no geckodriver. Turn it on first.";
+       browser Add-on starts no geckodriver. Turn it on first.";
   print_endline
-    "  Restart the MASC server. It starts this geckodriver when it starts and stops it when \
-     it stops. A Keeper opens a session on a fresh profile, so no login is kept: this lane \
-     reads pages that need none.";
+    "  Restart the MASC server to load the updated runtime.toml. Attach the browser Lane Add-on, \
+     or detach and reattach its existing installation, to use this configuration. The attached \
+     Add-on owns this geckodriver and stops it during detach. Each new automation session uses \
+     a fresh profile; logins do not carry over to a new session.";
   print_endline
     "  A browser that needs a login is another route: --mode bidi or --mode extension."
 
 let print_host_only =
-  "--mode host connects no browser: the host and its launcher are in place for one you \
-   attach yourself. --mode extension loads the MASC extension in Firefox, and --mode bidi \
-   has the MASC server start a Firefox of its own."
+  "--mode host connects no browser: it installs the native host and launcher for a browser \
+   you attach yourself. --mode extension installs the files to load the MASC extension \
+   in Firefox. --mode bidi configures the Firefox owned by an attached browser Lane Add-on."
 
 let print_both_routes =
-  "With both routes connected the live lane has two browsers, and a request that names no \
-   connection is refused as ambiguous_browser_clients."
+  "Each connected route has its own clientId and capabilities. Discover them before use, \
+   then keep the selected clientId for tab and document work; an explicit connection never \
+   switches to another browser."
 
 let install
       ~base_path
@@ -250,9 +251,9 @@ let install
   match planned with
   | Error message -> refuse message
   | Ok (extension, bidi, automation) ->
-    (* The host first: the server starts nothing for a lane that is not
-       installed, so a table whose host is installed is what a later failure
-       leaves, never a table with no lane. The automation lane has no host. *)
+    (* Install the requested host assets before writing configuration tables.
+       A later refusal retains those completed assets. Setup does not attach
+       the browser Add-on or start its browsers. *)
     let installed =
       if installs_host modes
       then

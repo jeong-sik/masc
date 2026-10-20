@@ -239,9 +239,16 @@ receipts remain distinct from successful contract validation.
    needs its own ownership; this component is not a sandbox or proof about such
    children. Abrupt loss of the owner with a surviving group remains unconfirmed.
 
+   Bootstrap output runs concurrently with child/keepalive/termination
+   observation. Stopping cancels a backpressured bootstrap write before group
+   teardown; no arbitrary timeout is added. A partial bootstrap reply does not
+   establish browser readiness or a completed operation.
+
    The `runtest-browser-process-owner` alias defines actual launcher/owner/lease
    scenarios for TERM, keepalive-writer crash, normal child exit, non-owner
    refusal, descriptor closure, descendant cleanup and fresh admission. They
+   also fill the actual stdout pipe to EAGAIN and separately exercise TERM,
+   EOF and child exit without reading the bootstrap reply. They
    use Python process trees, not an actual Chrome/CDP session. The browser Add-on
    worker's Chrome session/profile controller and host-selected child claim
    descriptor are not connected to this component yet; those remain the next

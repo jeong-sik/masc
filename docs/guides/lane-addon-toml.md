@@ -282,9 +282,16 @@ host가 호출하지 않는다.
 
 ```json
 {"kind": "exact_output", "request_id": "r-17", "output": "author",
- "system": "선택", "messages": ["사용자 메시지", "..."]}
+ "system": "선택", "messages": [{"role": "user", "text": "사용자 메시지"},
+                          {"role": "assistant", "text": "이전 모델 응답"}]}
 ```
 
+- 메시지는 `role`(`user` 또는 `assistant`)과 문자열 `text`만 받는다. HTTP는 원래
+  발화 역할과 순서를 보존하며, 역할도 요청 digest에 포함된다. System 지시는 선택적인
+  `system` 필드로 보낸다. 도구 발화·이미지·모르는 역할과 중복 키는 거절한다.
+- CLI one-shot 경로는 사용자 메시지만 순서대로 합쳐 보낸다. Assistant 이력이 있으면
+  CLI를 실행하기 전에 configuration refusal로 남긴다. 이력을 사용자 발화로 바꾸지 않으며,
+  HTTP 슬롯 설정이 바뀐 다음 사건에 원래 요청을 다시 시도할 수 있다.
 - 지금 host 가 아는 종류는 `exact_output`, `read_records`, `read_file`, `read_result`, `ask`, `withdraw_ask` 다. 모르는 종류가 하나라도 있거나, 같은 `request_id` 가 두 번 나오면 그 목록 전체를 읽지 않고 instance 에 `listing_refused` 를 보인다.
 - host 는 다섯 사건에만 묻고 시계로 묻지 않는다. 지금 걸린 사건은 넷이다: worker 초기화가 끝났을 때, 그 instance 의 action 이 끝난 receipt 를 남겼을 때, 그 설치의 add-on lane 표가 바뀌어 게시됐을 때, 설치 질문에 운영자가 답했을 때. 선언이 바뀌면 worker 가 다시 떠서 첫 사건이 된다.
 - 한 주기는 목록을 받아 순서대로 처리한다. host 가 이미 최종 결과를 가진 요청은 모델을 부르지 않고 그 결과를 준다. 없으면 한 번 시도하고, 결과가 최종이면 준다. 최종이 아니면 다음 사건까지 기다린다. 결과를 준 목록이 있으면 다시 목록을 받고, 아무것도 주지 않은 목록에서 끝난다. 끝나면 관측을 한 번 한다.

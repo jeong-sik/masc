@@ -237,9 +237,6 @@ let () =
          Error "navigation reached the fixture but was reported as pre-effect"
        | Completed _ | Deferred _ -> Error "interrupted tab creation reported completion or deferral"));
     ignore (record "the original profile lease confirms process settlement" (settled original));
-    ignore (record "stale host cannot reach a replacement"
-      (match Browser_addon_host.issue host ~preference:Browser_selection.Automatic Browser_lane.Tabs_list with
-       | Error _ -> Ok `Null | Ok _ -> Error "retired host remained callable"));
     let replacement=attach () in
     ignore (record "reattach creates a fresh worker incarnation"
       (bool "worker incarnation was reused" (replacement.instance_id<>first.instance_id)));
@@ -248,6 +245,9 @@ let () =
     let next_client=record "replacement publishes a fresh connection" (client host2) in
     witness "replacement" (`Assoc ["instance_id",`String replacement.instance_id;
       "client_id",`String next_client]);
+    ignore (record "stale host cannot reach the available replacement"
+      (match Browser_addon_host.issue host ~preference:Browser_selection.Automatic Browser_lane.Tabs_list with
+       | Error _ -> Ok `Null | Ok _ -> Error "retired host reached the replacement"));
     ignore (record "client identity is not reused" (bool "BiDi client ID reused" (next_client<>first_client)));
     ignore (record "old client is refused on the replacement worker"
       (match open_tab first_client (fixture_url ^ "must-not-open") with

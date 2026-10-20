@@ -1031,6 +1031,8 @@ let for_surface = function
                  name jumps at once; several open the palette as choices)"
       ; b Act "B" "back"
           ~help:"walk back through the definition jumps, newest first"
+      ; b Act "y" "copy source"
+          ~help:"send the whole readable file's original bytes to the terminal clipboard via OSC 52; terminal support is unconfirmed"
       ; b Act "b" "blame"
           ~help:"who last touched each run of lines, in the margin; b again \
                  drops it"
@@ -1430,7 +1432,7 @@ let code_history_bindings =
 
 let footer_hints_code ~pane =
   let file_keys =
-    [ "Shift-Left / Shift-Right"; "K"; "D"; "R"; "B"; "b"; "d"; "H"; "m" ]
+    [ "Shift-Left / Shift-Right"; "K"; "D"; "R"; "B"; "y"; "b"; "d"; "H"; "m" ]
   in
   (* One key belongs to one pane and was showing on all three: [Enter
      (history)] opens a commit's pull request and only the history view has

@@ -6737,7 +6737,7 @@ let row_list (state : state) : row_list option =
         && not state.code_diff_open && not state.code_notes_open
       then
         (match Masc_tui_fetched.current state.code_file with
-         | Some (_, Masc_tui_fetched.Ready rows) ->
+         | Some (_, Masc_tui_fetched.Ready { cfd_rows = rows; _ }) ->
              Some
                { rl_count = Array.length rows
                ; rl_cursor = state.code_file_cursor
@@ -29694,8 +29694,16 @@ and is loaded on demand through keeper_skill.
            (match state.view with
             | Approvals -> answer_presented_approval Confirm
             | Harness -> handle_harness_agree ()
+            | Code ->
+                (match Masc_tui_code_results.copy_file_source state with
+                 | Error detail -> report_action state "error" detail
+                 | Ok (path, source) ->
+                     copy_reference_to_terminal render_schedule source;
+                     report_action state "system"
+                       (Printf.sprintf "Sent %s source (%d bytes) via OSC 52 (terminal support unconfirmed)"
+                          path (String.length source)))
             | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Planning | Schedules
-            | Verification | Fusion | Repositories | Code | Changes | Connectors | Runtime | Config
+            | Verification | Fusion | Repositories | Changes | Connectors | Runtime | Config
             | Resources | Tools | System_logs | Keepers _ -> ())
        (* Stepping the last search is what [n] means on a surface that binds
           it to nothing else, so it is the tail of this arm rather than an
@@ -30685,7 +30693,7 @@ and is loaded on demand through keeper_skill.
                       Masc_tui_scroll.down ~count ~height:1 state.code_history_scroll)
                   else
                     match Masc_tui_fetched.current state.code_file with
-                    | Some (_, Masc_tui_fetched.Ready rows) ->
+                    | Some (_, Masc_tui_fetched.Ready { cfd_rows = rows; _ }) ->
                         let cursor =
                           Masc_tui_scroll.cursor_down
                             ~count:(Array.length rows)
@@ -31031,7 +31039,7 @@ and is loaded on demand through keeper_skill.
                       Masc_tui_scroll.up ~count ~height:1 state.code_history_scroll)
                   else
                     match Masc_tui_fetched.current state.code_file with
-                    | Some (_, Masc_tui_fetched.Ready rows) ->
+                    | Some (_, Masc_tui_fetched.Ready { cfd_rows = rows; _ }) ->
                         let cursor =
                           Masc_tui_scroll.cursor_up
                             ~count:(Array.length rows)
@@ -31361,7 +31369,7 @@ and is loaded on demand through keeper_skill.
                       | None -> ()
                       | Some (Hist_keeper_change change) -> (
                           match Masc_tui_fetched.current state.code_file with
-                          | Some (_, Masc_tui_fetched.Ready rows) ->
+                          | Some (_, Masc_tui_fetched.Ready { cfd_rows = rows; _ }) ->
                             Code_results.push_code_jump state;
                             state.code_history_open <- false;
                             let cursor =

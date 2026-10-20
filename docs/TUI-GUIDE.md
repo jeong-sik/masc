@@ -2045,6 +2045,14 @@ colour; an extension without a lexer draws plain, and a file past 500 KB
 draws plain rather than slowly. The pane then answers three more questions
 in place:
 
+With file content focused, `y` asks the terminal to copy the whole original
+file through OSC 52. Tabs, indentation and original line endings are retained;
+colours, line numbers and display sanitation are not copied. The status reports
+the file and bytes sent, with terminal support unconfirmed. An initial, failed
+or suspended reading cannot supply source bytes; a same-file refresh keeps
+the observed source until new bytes arrive. Close History, Diff or Notes
+first. Mouse selection continues to copy displayed rows. Code is read-only.
+
 - `h`/`l` pan sideways by one display cell — the gutter stays put, the
   title says `(col N)`, and a double-width glyph on the boundary pads
   rather than splits.

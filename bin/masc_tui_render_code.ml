@@ -573,7 +573,7 @@ let render_code (state : state) =
                   background, so the band survives the lexer's own resets. *)
                let lexed_rows =
                  match Masc_tui_fetched.current state.code_file with
-                 | Some (_, Masc_tui_fetched.Ready file_rows) ->
+                 | Some (_, Masc_tui_fetched.Ready { cfd_rows = file_rows; _ }) ->
                      Rows.of_array file_rows
                  | Some (_, Masc_tui_fetched.Absent) | None | Some (_, Masc_tui_fetched.Loading)
                  | Some (_, Masc_tui_fetched.Stale (_, _)) | Some (_, Masc_tui_fetched.Failed _) -> Rows.of_array [||]
@@ -666,7 +666,7 @@ let render_code (state : state) =
            for _ = 1 to content_height do
              box_empty pane_buf pane_cols
            done
-       | Some (open_path, Masc_tui_fetched.Ready file_rows) ->
+       | Some (open_path, Masc_tui_fetched.Ready { cfd_rows = file_rows; _ }) ->
            let total_lines = Array.length file_rows in
            let max_scroll = max 0 (total_lines - content_height) in
            let scroll = max 0 (min state.code_file_scroll max_scroll) in

@@ -67,7 +67,7 @@ type palette_action =
    rather than keeping a second keyword list that could drift. *)
 let code_cursor_line_symbols (state : state) =
   match Masc_tui_fetched.current state.code_file with
-  | Some (_, Masc_tui_fetched.Ready rows) -> (
+  | Some (_, Masc_tui_fetched.Ready { cfd_rows = rows; _ }) -> (
       match Rows.at (Rows.of_array rows) state.code_file_cursor with
       | None -> []
       | Some segments ->

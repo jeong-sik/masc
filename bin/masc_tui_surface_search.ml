@@ -154,7 +154,7 @@ let surface_row_texts (state : state) : surface -> string list option =
          changes overlay is answered above, before any surface. *)
       if code_file_search_focused state then
         (match Masc_tui_fetched.current state.code_file with
-         | Some (_, Masc_tui_fetched.Ready rows) ->
+         | Some (_, Masc_tui_fetched.Ready { cfd_rows = rows; _ }) ->
            Some
              (Array.to_list
                 (Array.map
@@ -309,7 +309,7 @@ let surface_search_count (state : state) surface ~query =
   match surface with
   | Code when code_file_search_focused state ->
       (match Masc_tui_fetched.current state.code_file with
-       | Some (_, Masc_tui_fetched.Ready rows) ->
+       | Some (_, Masc_tui_fetched.Ready { cfd_rows = rows; _ }) ->
            Some (if String.equal query "" then 0 else code_file_search_count ~query rows)
        | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))
        | None -> None)

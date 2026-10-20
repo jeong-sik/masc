@@ -11,6 +11,16 @@ left by definition jumps and successful finder selections. A location includes
 the workspace scope, directory, file, cursor, vertical and horizontal offsets,
 tree selection and focused pane. Shift-Left and Shift-Right pan file content.
 
+With file content focused, `y` sends the whole currently readable file to the
+terminal clipboard through OSC 52. It copies the original response bytes,
+including indentation, tabs and line endings, rather than rebuilding text from
+coloured or sanitized display rows. The status names the file and byte count;
+terminal clipboard support is unconfirmed. An initial read, a failed or suspended
+reading, or an unconfirmed workspace cannot supply copy bytes. A same-file
+refresh keeps the previously observed source until the new bytes arrive. Close History,
+Diff or Notes before copying the file. Mouse selection still copies displayed
+rows. Code remains read-only; copying does not save or edit a workspace file.
+
 Returning to another file keeps the current reading on screen until the
 destination read succeeds. A missing file or unavailable workspace leaves the
 return entry available; press B to retry. Repeating B during the read shares

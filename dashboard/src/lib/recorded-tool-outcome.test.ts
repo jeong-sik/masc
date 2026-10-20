@@ -32,15 +32,27 @@ describe('telemetryToolOutcome', () => {
     expect(telemetryToolOutcome({ source: 'tool_call_io', success: false, wire_outcome: 'ok' })).toBe('succeeded')
   })
 
-  it('keeps the boolean contract of every other producer', () => {
-    expect(telemetryToolOutcome({ source: 'tool_usage', success: true })).toBe('succeeded')
-    expect(telemetryToolOutcome({ source: 'tool_usage', success: false })).toBe('failed')
-    expect(telemetryToolOutcome({ source: 'agent_event', success: true })).toBe('succeeded')
+  it('reads a tool_usage row the same way: it carries a disposition, never a success', () => {
+    expect(telemetryToolOutcome({ source: 'tool_usage', disposition: 'completed' })).toBe('succeeded')
+    expect(telemetryToolOutcome({ source: 'tool_usage', disposition: 'failed' })).toBe('failed')
+    expect(telemetryToolOutcome({ source: 'tool_usage', disposition: 'deferred' })).toBe('deferred')
+    expect(telemetryToolOutcome({ source: 'tool_usage', disposition: 'invented' })).toBe('malformed')
+    expect(telemetryToolOutcome({ source: 'tool_usage', success: true })).toBe('unsettled')
   })
 
-  it('reports no outcome when a non-log source carries no boolean', () => {
-    expect(telemetryToolOutcome({ source: 'tool_usage' })).toBeNull()
-    expect(telemetryToolOutcome({ source: 'tool_usage', success: 'yes' })).toBeNull()
+  it('gives a lifecycle marker no outcome, whatever else it carries', () => {
+    expect(telemetryToolOutcome({ source: 'tool_call_io', record_kind: 'lifecycle_event', wire_outcome: 'error' })).toBeNull()
+    expect(telemetryToolOutcome({ source: 'tool_call_io', record_kind: 'lifecycle_event', disposition: 'failed' })).toBeNull()
+  })
+
+  it('keeps the boolean contract of every other producer', () => {
+    expect(telemetryToolOutcome({ source: 'agent_event', success: true })).toBe('succeeded')
+    expect(telemetryToolOutcome({ source: 'agent_event', success: false })).toBe('failed')
+  })
+
+  it('reports no outcome when another producer carries no boolean', () => {
+    expect(telemetryToolOutcome({ source: 'agent_event' })).toBeNull()
+    expect(telemetryToolOutcome({ source: 'agent_event', success: 'yes' })).toBeNull()
     expect(telemetryToolOutcome({ source: 'agent_event', disposition: 'failed' })).toBeNull()
   })
 })

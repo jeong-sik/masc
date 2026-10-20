@@ -10,13 +10,9 @@ import { html } from 'htm/preact'
 import { useRef } from 'preact/hooks'
 import type { TelemetryEntry } from '../../api/dashboard'
 import { selectEntity, detailSelection } from './detail-selection-store'
-import { entryTimestampMs, isToolCall, isToolCallFailure, useTrackBucketCount } from './observatory-utils'
-
-function toolName(entry: TelemetryEntry): string {
-  if (typeof entry.tool_name === 'string') return entry.tool_name
-  if (typeof entry.name === 'string') return entry.name
-  return '?'
-}
+import {
+  entryTimestampMs, isToolCall, isToolCallFailure, toolCallName, toolCallOutcomeWord, useTrackBucketCount,
+} from './observatory-utils'
 
 function durationMs(entry: TelemetryEntry): number {
   return typeof entry.duration_ms === 'number' && Number.isFinite(entry.duration_ms)
@@ -101,7 +97,7 @@ export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
           : markers.map(({ entry, ts, count, failureCount: bucketFailures, maxMs }) => {
               const pct = ((ts - windowStart) / span) * 100
               const failed = bucketFailures > 0 || isToolCallFailure(entry)
-              const name = toolName(entry)
+              const name = toolCallName(entry)
               const selected = detailSelection.value
               const isSelected = selected !== null
                 && selected.kind === 'tool_call'
@@ -110,7 +106,7 @@ export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
                 <span
                   class="ob-call ${failed ? 'bad' : ''} ${isSelected ? 'ring-1 ring-accent-fg' : ''}"
                   style="left: ${pct}%; height: ${barHeightPct(maxMs)}%;"
-                  title=${`${new Date(ts).toLocaleTimeString()} · ${name} · ${maxMs}ms · ${failed ? 'failed' : 'ok'}${count > 1 ? ` · ${count} calls` : ''}`}
+                  title=${`${new Date(ts).toLocaleTimeString()} · ${name} · ${maxMs}ms · ${failed ? 'failed' : toolCallOutcomeWord(entry)}${count > 1 ? ` · ${count} calls` : ''}`}
                   onClick=${(e: MouseEvent) => {
                     e.stopPropagation()
                     selectEntity({ kind: 'tool_call', entry, ts, bucketCount: count })

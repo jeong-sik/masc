@@ -9,17 +9,14 @@
 import { html } from 'htm/preact'
 import type { TelemetryEntry } from '../../api/dashboard'
 import { detailSelection, clearSelection, type DetailSelection } from './detail-selection-store'
-import { toolCallOutcome } from './observatory-utils'
+import { toolCallName, toolCallOutcome } from './observatory-utils'
 import type { RecordedToolOutcome } from '../../lib/recorded-tool-outcome'
 
 function selectionTitle(selection: DetailSelection): string {
   const source = typeof selection.entry.source === 'string' ? selection.entry.source : '?'
   const eventType = typeof selection.entry.event_type === 'string' ? selection.entry.event_type : ''
   if (selection.kind === 'tool_call') {
-    const name = typeof selection.entry.tool_name === 'string'
-      ? selection.entry.tool_name
-      : (typeof selection.entry.name === 'string' ? selection.entry.name : '?')
-    return `도구 · ${name}`
+    return `도구 · ${toolCallName(selection.entry)}`
   }
   return eventType ? `${source}:${eventType}` : source
 }

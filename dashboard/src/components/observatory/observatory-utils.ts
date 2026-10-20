@@ -25,26 +25,53 @@ export function hourToMs(hour: string): number | null {
   return Number.isNaN(parsed) ? null : parsed
 }
 
+/** A tool invocation row. The tool-call log also holds lifecycle markers, which
+ *  are not invocations; the server leaves them out of its quality denominator
+ *  (lib/dashboard/dashboard_http_tool_quality.ml), so this does too. */
 export function isToolCall(entry: TelemetryEntry): boolean {
   const src = typeof entry.source === 'string' ? entry.source : ''
+  if (entry.record_kind === 'lifecycle_event') return false
   return src === 'tool_call_io' || src === 'tool_usage'
 }
 
-/** The recorded outcome of a tool-call telemetry row, or null when its source
- *  reports none. */
+/** The tool a call row names: `tool` on tool-call log rows, `tool_name` on
+ *  tool-usage rows. */
+export function toolCallName(entry: TelemetryEntry): string {
+  if (typeof entry.tool === 'string') return entry.tool
+  if (typeof entry.tool_name === 'string') return entry.tool_name
+  if (typeof entry.name === 'string') return entry.name
+  return '?'
+}
+
+/** The recorded outcome of a tool-call telemetry row, or null when it has none. */
 export function toolCallOutcome(entry: TelemetryEntry): RecordedToolOutcome | null {
   return telemetryToolOutcome(entry)
 }
 
-/** Whether a tool-call row failed. Only a recorded failure counts: a row whose
- *  source reports no outcome falls back to its `error` field, and a deferred,
- *  unsettled or malformed log row is not guessed to be a failure. One rule for
- *  the call bars and the cursor readout, so the two cannot disagree. */
+// Every outcome is named, so a new one fails typecheck here instead of
+// silently counting as "not a failure".
+const OUTCOME_IS_FAILURE: Record<RecordedToolOutcome, boolean> = {
+  succeeded: false,
+  failed: true,
+  deferred: false,
+  unsettled: false,
+  malformed: false,
+}
+
+/** Whether a tool-call row failed. Only a recorded failure counts: a deferred,
+ *  unsettled or malformed row is not guessed to be one. One rule for the call
+ *  bars and the cursor readout, so the two cannot disagree. */
 export function isToolCallFailure(entry: TelemetryEntry): boolean {
   const outcome = toolCallOutcome(entry)
-  if (outcome !== null) return outcome === 'failed'
-  const errorField = entry.error
-  return errorField != null && errorField !== ''
+  return outcome !== null && OUTCOME_IS_FAILURE[outcome]
+}
+
+/** The word a call bar's tooltip uses: `ok` for a settled success, otherwise the
+ *  outcome's own name, so a deferred or unsettled call is not labelled ok. */
+export function toolCallOutcomeWord(entry: TelemetryEntry): string {
+  const outcome = toolCallOutcome(entry)
+  if (outcome === null) return '?'
+  return outcome === 'succeeded' ? 'ok' : outcome
 }
 
 interface TelemetryMarkerBucket {

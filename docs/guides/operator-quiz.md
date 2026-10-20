@@ -54,17 +54,22 @@ paths = ["changelog.d/"]
 - `repository` 권한은 등록된 저장소 clone 의 기본 브랜치를 읽고, fetch 하지 않는다. 새 changelog 조각을 문제로 내려면 그 저장소의 `auto_sync` 를 켜 둔다.
 - `sources` 는 늘 빈 배열이다. 이 패키지는 관측 source 를 읽지 않는다.
 
-### 3. `author` slot 묶기
+### 3. `author` 와 `grade` slot 묶기
 
-`runtime.toml` 에 설치 선언 id 로 표를 둔다. 표의 키와 규칙은 [Lane Add-on TOML](lane-addon-toml.md)의 "패키지가 선언하는 exact output" 과 같다.
+`runtime.toml` 에 설치 선언 id 로 출력마다 표를 둔다. 표의 키와 규칙은 [Lane Add-on TOML](lane-addon-toml.md)의 "패키지가 선언하는 exact output" 과 같다.
 
 ```toml
 [runtime.addon_exact_lanes.operator-quiz.author]
 slots = ["glm-coding.glm-5-3"]
 max_output_tokens = 8192
+
+[runtime.addon_exact_lanes.operator-quiz.grade]
+slots = ["glm-coding.glm-5-3"]
+max_output_tokens = 2048
 ```
 
-표가 없으면 `author` 요청은 `lane_unconfigured` 로 기다린다. 다음 `compose` 가 그 세션을 대체한다.
+- `author` 표가 없으면 `author` 요청은 `lane_unconfigured` 로 기다린다. 다음 `compose` 가 그 세션을 대체한다.
+- `grade` 표가 없으면 직접 쓴 답의 채점 요청이 같은 이유로 기다린다. 답은 그동안 `awaiting_judgment` 로 보인다. 선택지로 고른 답은 `grade` 없이 채점된다.
 
 ### 4. 시간 정하기
 
@@ -95,20 +100,24 @@ Results 에 다섯 lane 이 나온다.
 | lane | 한 행 | 보는 것 |
 |---|---|---|
 | `quiz/sessions` | `compose` 하나 | 상태, 맞음·틀림·건너뜀·채점 대기·열림 수, 실패 이유 |
-| `quiz/questions` | 답한 문제 하나 | 내 답, 정답, 판정, 출처의 인용문과 hash |
+| `quiz/questions` | 답한 문제 하나 | 내 답, 정답, 판정과 판정한 쪽(`key` 또는 `judgment`), 판정 기록, 채점 상태, 출처의 인용문과 hash |
 | `quiz/topics` | 주제 하나 | 문제 수, 풀이 수, 놓친 수, 아직 못 맞힌 문제와 그 출처 |
 | `quiz/items` | 복습 항목 하나 | 풀이 기록, 마지막 판정, 연속으로 맞힌 횟수 |
-| `quiz/measures` | 하나 | R, P, 점수, 버린 문제 수, 실패한 세션 수(이유별) |
+| `quiz/measures` | 하나 | R, P, G, 점수, 버린 문제 수, 실패한 세션 수(이유별) |
 
 - 답하기 전의 문제는 `quiz/questions` 에 행이 없다. 정답이 먼저 보이는 일은 없다.
-- 건너뛴 문제는 놓친 문제로 센다. 직접 쓴 답은 아직 채점하지 않고 `awaiting_judgment` 로 남는다. 서술형 채점은 다음 단계(`grade` 출력)에서 들어온다.
+- 건너뛴 문제는 놓친 문제로 센다.
+- 직접 쓴 답은 답이 들어올 때 `grade` 요청을 하나 만든다. 결과가 오기 전까지 `awaiting_judgment` 이고, `grading` 에 기다리는 요청이 보인다. 판정도 요청도 없는 직접 쓴 답(이 기능이 들어오기 전에 받은 답 등)은 다음 `compose` 때 요청한다.
+- `grade` 가 판정할 수 없는 결과(형식이 틀린 출력, 입력이 크다는 거절, 호출 결과를 모름 등)로 끝나면 `grading` 에 그 실패가 남는다. 패키지는 그 실패에 바로 다시 요청하지 않고, 다음 `compose` 때 한 번 다시 요청한다.
+- `void` 판정은 문제나 정답이 잘못됐다는 뜻이다. 그 문제는 풀이로 세지 않는다.
 - 출처의 `sha256` 은 host 가 Lane store 에 보관한 바이트의 이름이다. 글이 나중에 고쳐지거나 changelog 조각이 릴리스에서 지워져도, 인용한 바이트를 그대로 확인할 수 있다.
 
-### R 과 P
+### R, P, G
 
 - **R(다시 물었을 때 맞힌 비율)**: 놓친 뒤 다른 날 다시 푼 적이 있는 복습 항목 수가 d 다. 그중 처음 다시 푼 날 맞힌 항목 수가 n 이다. 같은 날 다시 맞힌 것은 세지 않는다.
 - **P(참여)**: 채점된 풀이 수를 낸 문제 수로 나눈 값이다.
-- 둘 다 n/d 로만 보인다. 통과·실패를 말하는 필드는 없고, 어떤 상태도 이 숫자로 바뀌지 않는다.
+- **G(판정이 바뀐 비율, `changed_grades`)**: 문제가 이미 가진 판정(정답 key 로 낸 것이나 앞선 판정)을 바꾼 판정 수를, 채점된 풀이 수로 나눈 값이다. 직접 쓴 답의 첫 판정은 바꾼 것이 아니어서 세지 않는다. RFC 의 목표는 1/20 이하이고, R 의 목표와 같은 지위다.
+- 모두 n/d 로만 보인다. 통과·실패를 말하는 필드는 없고, 어떤 상태도 이 숫자로 바뀌지 않는다.
 - RFC 의 목표는 30일 운영 뒤 d ≥ 20, n/d ≥ 2/3 이다. 비교할 기준 없이 정한 첫 제안이고, 첫 달을 본 뒤 다시 정한다. 판단은 운영자가 한다.
 
 ## 세션이 실패하는 이유
@@ -139,5 +148,5 @@ Results 에 다섯 lane 이 나온다.
 ## 지금의 한계
 
 - 기록 종류는 Board 글·댓글과 `repository` 권한의 파일이다. wiki, PR, 커밋 인용은 다음 단계다.
-- 서술형 문제와 채점, 이의 제기(`dispute`)는 다음 단계다.
+- rubric 이 있는 서술형 문제와 이의 제기(`dispute`)는 다음 단계다. 지금은 선택형 문제에 직접 쓴 답을 `grade` 출력으로 채점한다.
 - 관측 출력은 쌓인 모든 행을 담는다. 문제가 아주 많이 쌓여 `max_reply_bytes` 를 넘으면 관측이 실패로 보인다.

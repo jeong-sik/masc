@@ -39,6 +39,12 @@ EVERY_EVENT = [
     q.DraftRejected("s1", "author-1", 1, "quote not found in p-2"),
     posed(),
     answered(),
+    q.GradeRequested("ask-1", "q1", "ask-1-grade-q1-0", "3" * 64),
+    q.GradeFailed("ask-1", "q1", "ask-1-grade-q1-0", "input_refused", "context_overflow"),
+    q.GradeRequested("ask-1", "q1", "ask-1-grade-q1-1", "4" * 64),
+    q.Judged("ask-1", "q1", q.Void(), "the key names plans", "ask-1-grade-q1-1"),
+    q.GradeRequested("ask-1", "q1", "ask-1-grade-q1-2", "5" * 64),
+    q.Judged("ask-1", "q1", q.Incorrect(), "facts, not plans", "ask-1-grade-q1-2"),
     opened("s2", "act-2", 1),
     q.SessionFailed("s2", q.AuthorInputRefused("author-2", "context_overflow")),
     opened("s3", "act-3", 1),
@@ -120,6 +126,29 @@ class LogFile(unittest.TestCase):
 
 
 class Sessions(unittest.TestCase):
+    def test_grading_events_follow_their_request(self):
+        events = [opened("s1", "act-1", 1), posed(), answered(),
+                  q.GradeRequested("ask-1", "q1", "g-0", "3" * 64)]
+        (session,) = q.fold(events)
+        self.assertEqual(session.outstanding_grade("q1"), events[-1])
+        judged = q.Judged("ask-1", "q1", q.Correct(), "facts", "g-0")
+        (session,) = q.fold(events + [judged])
+        self.assertEqual((session.outstanding_grade("q1"), session.judgments_of("q1")), (None, (judged,)))
+
+    def test_an_unknown_grade_failure_or_judgment_kind_is_an_error(self):
+        line = q.event_to_json(q.GradeFailed("ask-1", "q1", "g-0", "outcome_unknown", None))
+        for kind in ("timeout", [], {"x": 1}, None):
+            with self.assertRaises(q.LogError):
+                q.event_of_json(line | {"kind": kind})
+        with self.assertRaises(q.LogError):
+            q.event_of_json(line | {"detail": " "})
+        self.assertIsNotNone(q.unreadable(q.Judged("ask-1", "q1", q.Correct(), "\ud800", "g-0")))
+        judged = q.event_to_json(q.Judged("ask-1", "q1", q.Void(), "r", "g-0"))
+        with self.assertRaises(q.LogError):
+            q.event_of_json(judged | {"judgment": {"kind": "void", "reason": "x"}})
+        with self.assertRaises(q.LogError):
+            q.event_of_json(judged | {"judgment": {"kind": "partial"}})
+
     def test_a_session_goes_from_writing_to_asked_to_answered(self):
         start = [opened("s1", "act-1", 1)]
         self.assertEqual([s.state for s in q.fold(start)], ["writing"])
@@ -155,6 +184,21 @@ class Sessions(unittest.TestCase):
             ("material for a session that was asked", start + [posed(), q.MaterialRead("s1", "read-1", "1" * 64)]),
             ("an event for a session never opened", [posed("s9")]),
             ("one question posed twice", start + [posed(), posed()]),
+            ("a grade request before the answer", start + [posed(), q.GradeRequested("ask-1", "q1", "g-0", "3" * 64)]),
+            ("a grade request for a question not posed",
+             start + [posed(), answered(), q.GradeRequested("ask-1", "q9", "g-0", "3" * 64)]),
+            ("a second grade request while one waits",
+             start + [posed(), answered(), q.GradeRequested("ask-1", "q1", "g-0", "3" * 64),
+                      q.GradeRequested("ask-1", "q1", "g-1", "4" * 64)]),
+            ("a judgment with no waiting request",
+             start + [posed(), answered(), q.Judged("ask-1", "q1", q.Correct(), "facts", "g-0")]),
+            ("a judgment for another request",
+             start + [posed(), answered(), q.GradeRequested("ask-1", "q1", "g-0", "3" * 64),
+                      q.GradeFailed("ask-1", "q1", "g-1", "outcome_unknown", None)]),
+            ("one grade request id written twice",
+             start + [posed(), answered(), q.GradeRequested("ask-1", "q1", "g-0", "3" * 64),
+                      q.GradeFailed("ask-1", "q1", "g-0", "outcome_unknown", None),
+                      q.GradeRequested("ask-1", "q1", "g-0", "4" * 64)]),
         ]:
             with self.subTest(label):
                 with self.assertRaises(q.LogError):

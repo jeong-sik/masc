@@ -1,9 +1,11 @@
-"""Verdicts and review items (RFC operator-quiz §6.1, §6.3, §7).
+"""Verdicts and review items (RFC operator-quiz §6, §7).
 
 A choice verdict is a pure function of the key and the answer, so it is
 recomputed whenever it is needed and never stored. A written answer waits
 for a judgment, which the grade output brings; until then it is
-awaiting_judgment. A skip is a miss.
+awaiting_judgment. The latest judgment of a question decides its verdict,
+over the key too, and a void one takes the question out of the attempts. A
+skip is a miss.
 """
 from __future__ import annotations
 
@@ -15,10 +17,12 @@ CORRECT = "correct"
 INCORRECT = "incorrect"
 SKIPPED = "skipped"
 AWAITING_JUDGMENT = "awaiting_judgment"
+VOID = "void"
 MISSES = {INCORRECT, SKIPPED}
 
 
-def verdict(posed: q.Posed, response: q.Response) -> str:
+def by_key(posed: q.Posed, response: q.Response) -> str:
+    """The verdict before any judgment."""
     match response:
         case q.Chose(choice_ids):
             return CORRECT if set(choice_ids) == set(posed.key) else INCORRECT
@@ -26,6 +30,34 @@ def verdict(posed: q.Posed, response: q.Response) -> str:
             return SKIPPED
         case q.Wrote():
             return AWAITING_JUDGMENT
+
+
+def judged(judgment: q.Judgment) -> str:
+    match judgment:
+        case q.Correct():
+            return CORRECT
+        case q.Incorrect():
+            return INCORRECT
+        case q.Void():
+            return VOID
+
+
+def verdict(posed: q.Posed, response: q.Response, judgments: tuple[q.Judged, ...] = ()) -> str:
+    return judged(judgments[-1].judgment) if judgments else by_key(posed, response)
+
+
+def changed_verdicts(posed: q.Posed, response: q.Response, judgments: tuple[q.Judged, ...]) -> int:
+    """How many judgments changed a verdict the question already had, from
+    its key or an earlier judgment (RFC §14 G). A first judgment of a written
+    answer replaces no verdict."""
+    current = by_key(posed, response)
+    changes = 0
+    for event in judgments:
+        new = judged(event.judgment)
+        if current != AWAITING_JUDGMENT and new != current:
+            changes += 1
+        current = new
+    return changes
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +96,7 @@ class Item:
 
 def items(sessions: list[q.Session]) -> list[Item]:
     """Every item ever posed, in the order first posed, with the attempts its
-    answered questions made."""
+    answered questions made. A question judged void is no attempt."""
     order: list[str] = []
     topics: dict[str, str] = {}
     sources: dict[str, list[q.Source]] = {}
@@ -82,9 +114,10 @@ def items(sessions: list[q.Session]) -> list[Item]:
                 if source not in sources[posed.item_id]:
                     sources[posed.item_id].append(source)
             if posed.question_id in responses and session.answer is not None:
-                attempts[posed.item_id].append(
-                    Attempt(session.session_id, posed.question_id, session.answer.answered_at,
-                            verdict(posed, responses[posed.question_id])))
+                state = verdict(posed, responses[posed.question_id], session.judgments_of(posed.question_id))
+                if state != VOID:
+                    attempts[posed.item_id].append(
+                        Attempt(session.session_id, posed.question_id, session.answer.answered_at, state))
     return [Item(item_id, topics[item_id], tuple(sources[item_id]),
                  tuple(sorted(attempts[item_id], key=lambda attempt: attempt.answered_at)))
             for item_id in order]

@@ -89,7 +89,7 @@ class Listing(unittest.TestCase):
         sys.path.insert(0, str(SERVER.parent))
         import server
         with tempfile.TemporaryDirectory() as directory:
-            worker = server.Worker(Path(directory), "prompt", 1024)
+            worker = server.Worker(Path(directory), server.f.Prompts("author", "grade"), 1024)
             large = {"kind": "ask", "request_id": "ask-1", "questions": [{"prompt": "x" * 2048}]}
             small = {"kind": "read_records", "request_id": "read-1", "source_id": "board", "after": None}
             worker.flow.listing = lambda: [large, small]
@@ -173,6 +173,25 @@ class WorkerCase(unittest.TestCase):
         self.assertEqual(measures["fields"]["participation"], {"n": 1, "d": 1})
         (session,) = self.rows(output, "quiz/sessions")
         self.assertEqual(session["fields"]["state"], "answered")
+
+    def test_a_written_answer_is_graded_through_the_worker(self):
+        worker = self.start()
+        worker.observe()
+        worker.act("act-1", {"kind": "compose", "questions": 1})
+        self.host.author = answering(first_quote)
+        worker.run_host(self.host)
+        (ask,) = worker.ok("lane_host_requests", {})["requests"]
+        (question,) = ask["questions"]
+        self.host.answers[ask["request_id"]] = {
+            "status": "answered", "responder": {"surface": "dashboard", "actor_id": None, "display_name": None},
+            "answered_at": 1_800_000_000.0,
+            "answers": [{"question_id": question["question_id"], "response": {"kind": "wrote", "text": "facts"}}]}
+        self.host.grade = lambda payload: {"status": "answered", "slot": "s", "output": {
+            "verdict": "correct", "rationale": "names facts"}}
+        worker.run_host(self.host)
+        (reveal,) = self.rows(worker.observe(), "quiz/questions")
+        self.assertEqual((reveal["fields"]["verdict"], reveal["fields"]["by"]), ("correct", "judgment"))
+        self.assertEqual(worker.ok("lane_host_requests", {}), {"requests": []})
 
     def test_a_result_for_no_listed_request_is_not_accepted_and_a_malformed_one_is_an_error(self):
         worker = self.start()

@@ -5,7 +5,8 @@ anything, and no field says pass or fail.
 A question has a row only once it is answered, so its key never shows
 early. R counts review items that had a miss followed by a graded attempt on
 a later local day, and whether that first later attempt was correct. P is
-graded attempts over posed questions. Both are reported as n/d.
+graded attempts over posed questions. G is the judgments that changed a
+verdict a question already had, over graded attempts. All are n/d.
 """
 from __future__ import annotations
 
@@ -63,7 +64,8 @@ def attempt_states(session: q.Session) -> list[tuple[q.Posed, str]]:
     if session.answer is None:
         return []
     responses = {answer.question_id: answer.response for answer in session.answer.answers}
-    return [(posed, g.verdict(posed, responses[posed.question_id])) for posed in session.posed]
+    return [(posed, g.verdict(posed, responses[posed.question_id], session.judgments_of(posed.question_id)))
+            for posed in session.posed]
 
 
 def recovered(item: g.Item, zone: ZoneInfo) -> bool | None:
@@ -83,7 +85,7 @@ def recovered(item: g.Item, zone: ZoneInfo) -> bool | None:
 def session_row(session: q.Session, scope: str | None) -> dict:
     states = [state for _, state in attempt_states(session)]
     counts = {state: states.count(state) for state in (g.CORRECT, g.INCORRECT, g.SKIPPED,
-                                                         g.AWAITING_JUDGMENT, OPEN)}
+                                                         g.AWAITING_JUDGMENT, g.VOID, OPEN)}
     graded = counts[g.CORRECT] + counts[g.INCORRECT] + counts[g.SKIPPED]
     fields = {"session_id": session.session_id, "action_request_id": session.action_request_id,
               "state": session.state, "opened_at": session.opened_at, "questions_requested": session.questions,
@@ -99,19 +101,37 @@ def session_row(session: q.Session, scope: str | None) -> dict:
     return row(SESSIONS, session.session_id, f"퀴즈 세션 — {title}", observed_at, fields)
 
 
+def grading_state(session: q.Session, question_id: str) -> dict | None:
+    """Where the question's grading stands: a request waiting for its
+    result, or the final failure of the last one. None when neither."""
+    events = session.grading_of(question_id)
+    match events[-1] if events else None:
+        case q.GradeRequested(request_id=request_id):
+            return {"state": "waiting", "request_id": request_id}
+        case q.GradeFailed(request_id=request_id, kind=kind, detail=detail):
+            return {"state": "failed", "request_id": request_id, "kind": kind, "detail": detail}
+        case q.Judged() | None:
+            return None
+
+
 def question_rows(session: q.Session) -> list[dict]:
     if session.answer is None:
         return []
     responses = {answer.question_id: answer.response for answer in session.answer.answers}
     out = []
     for posed, verdict in attempt_states(session):
+        judgments = session.judgments_of(posed.question_id)
+        by = "judgment" if judgments else "key" if verdict in GRADED else None
         fields = {"session_id": session.session_id, "ask_id": posed.ask_id, "question_id": posed.question_id,
                   "item_id": posed.item_id, "topic": posed.topic, "question": posed.question,
                   "response": q.response_to_json(responses[posed.question_id]), "key": list(posed.key),
-                  "verdict": verdict, "by": "key" if verdict in GRADED else None,
+                  "verdict": verdict, "by": by,
+                  "judgments": [{"judgment": q.judgment_to_json(j.judgment), "rationale": j.rationale,
+                                 "request_id": j.request_id} for j in judgments],
+                  "grading": grading_state(session, posed.question_id),
                   "sources": [source.to_json() for source in posed.sources]}
         title = {g.CORRECT: "맞음", g.INCORRECT: "틀림", g.SKIPPED: "건너뜀",
-                 g.AWAITING_JUDGMENT: "채점 대기"}[verdict]
+                 g.AWAITING_JUDGMENT: "채점 대기", g.VOID: "무효"}[verdict]
         out.append(row(QUESTIONS, f"{session.session_id}/{posed.question_id}",
                        f"{title} — {posed.question['header']}", session.answer.answered_at, fields,
                        kind="event", evidence=retained(posed.sources)))
@@ -153,6 +173,10 @@ def measures_row(sessions: list[q.Session], items: list[g.Item], zone: ZoneInfo,
     recoveries = [r for r in (recovered(item, zone) for item in items) if r is not None]
     states = [state for session in sessions for _, state in attempt_states(session)]
     graded = sum(state in GRADED for state in states)
+    changed = sum(g.changed_verdicts(posed, answer.response, session.judgments_of(posed.question_id))
+                  for session in sessions if session.answer is not None
+                  for posed in session.posed
+                  for answer in session.answer.answers if answer.question_id == posed.question_id)
     posed = sum(len(session.posed) for session in sessions)
     failures: dict[str, int] = {}
     for session in sessions:
@@ -161,6 +185,7 @@ def measures_row(sessions: list[q.Session], items: list[g.Item], zone: ZoneInfo,
             failures[kind] = failures.get(kind, 0) + 1
     fields = {"recovery": fraction(sum(recoveries), len(recoveries)), "participation": fraction(graded, posed),
               "score": fraction(states.count(g.CORRECT), graded),
+              "changed_grades": fraction(changed, graded),
               "rejected_drafts": sum(len(session.rejected) for session in sessions),
               "failed_sessions": failures,
               "author_refusals": sum(max(len(session.requests) - 1, 0) for session in sessions)

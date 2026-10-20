@@ -5673,7 +5673,8 @@
        ; The operator quiz case loads its declaration and runs its worker.
        ../docs/examples/lane-addons/operator-quiz.toml ../addons/protocol.py
        (glob_files ../addons/operator-quiz/*.py) ../addons/operator-quiz/lane.toml
-       ../addons/operator-quiz/schemas/author.json ../addons/operator-quiz/prompts/author.md)
+       (glob_files ../addons/operator-quiz/schemas/*.json)
+       (glob_files ../addons/operator-quiz/prompts/*.md))
  (libraries alcotest masc yojson unix))
 
 (test

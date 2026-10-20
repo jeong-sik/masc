@@ -2291,16 +2291,18 @@ status: reference
 : 이 워크스페이스의 기록(Board 글·댓글, `repository` 권한의 파일)으로 운영자에게 객관식 문제를
   내는 Lane Add-on 패키지(`operator-quiz`). Schedule 이 보내는 `compose` action 이 세션을 열고,
   패키지는 host 요청(`read_records`·`read_file`·`exact_output author`·`ask`)으로 기록을 읽고
-  문제를 받아 Approvals 에 질문한다. 정답과 풀이 기록은 패키지의 persistent volume 에 있는
+  문제를 받아 Approvals 에 질문한다. 선택지로 고른 답은 정답 key 로, 직접 쓴 답은
+  `exact_output grade` 의 판정(`Judged`)으로 채점한다. 정답과 풀이 기록은 패키지의 persistent volume 에 있는
   로그(`/state/operator-quiz/log.jsonl`)에만 있고, 행(`quiz/sessions`·`quiz/questions`·
   `quiz/topics`·`quiz/items`·`quiz/measures`)은 모두 그 로그에서 계산한 projection 이다.
   - **세션**: `writing → asked → answered`, 또는 닫힌 이유 하나로 `failed`, 질문 전에 다음
     `compose` 가 오면 `superseded`. 시간이나 횟수로 끝나는 상태는 없다.
   - **인용 확인**: 문제의 출처마다 인용문이 host 가 보관한 기록 바이트에 글자 그대로 있어야
     한다. 출처의 `sha256` 은 그 Lane store blob 의 이름이다.
-  - **R·P**: R 은 놓친 뒤 다른 날(운영자 `timezone` 기준) 다시 푼 항목 중 처음 다시 푼 날
-    맞힌 비율, P 는 채점된 풀이 수를 낸 문제 수로 나눈 값이다. 둘 다 n/d 로만 보고하고,
-    어떤 상태도 이 숫자로 바뀌지 않는다.
+  - **R·P·G**: R 은 놓친 뒤 다른 날(운영자 `timezone` 기준) 다시 푼 항목 중 처음 다시 푼 날
+    맞힌 비율, P 는 채점된 풀이 수를 낸 문제 수로 나눈 값, G 는 이미 있던 판정을 바꾼
+    `Judged` 수를 채점된 풀이 수로 나눈 값이다. 모두 n/d 로만 보고하고, 어떤 상태도 이
+    숫자로 바뀌지 않는다.
   → [operator-quiz](../../addons/operator-quiz/lane.toml) ·
   [운영자 퀴즈 안내](../guides/operator-quiz.md) ·
   [RFC](../rfc/RFC-operator-quiz-lane.md)

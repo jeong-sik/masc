@@ -172,3 +172,24 @@ explicit asset/port outputs and physical destination/channel ownership admission
 Finite repeat counts remain compressed; missed complete copies skip to the
 current phase. Mixed WAV/MIDI shared-clock playback and overdub remain unfinished.
 See [the core contract](../../../tools/alphatex/ARRANGEMENT.md).
+
+### Imported time-signature maps
+
+Imported SMF sources expose `:meters`, with Up/Down selection, Shift+Left/Right movement,
+Enter editing and Delete removal. `:meter NUM DEN [AT [CLOCKS NOTATED32NDS]]` inserts or
+changes a time signature at the cursor or an explicit source position. `:meter-event ID`,
+`:meter-value NUM DEN [CLOCKS NOTATED32NDS]`, `:meter-move AT` and `:meter-remove`
+address a selected event. A numerator/denominator edit preserves both auxiliary fields;
+a new event defaults to 24 MIDI clocks per click and eight notated 32nds per MIDI quarter.
+`+`/`-` change the numerator. Shared undo/redo includes the complete source document.
+
+The active signature follows the source cursor. Positions remain quarter-note beats for
+PPQ and frames for SMPTE, without changing note timestamps, tempo integration or playback
+seconds. This edits SMF metadata; it does not add bar-based navigation or a metronome.
+Format 0/1 insertion uses the conductor track; format 2 requires explicit pattern selection.
+Several signatures at one tick require explicit event selection. Original unknown or
+unrecognized metadata stays opaque, and untouched tracks/containers retain their bytes.
+The exported four-byte layout follows [JZZ's SMF time-signature contract](https://www.jazz-soft.net/doc/JZZ/jzzmidi.html).
+Arrangement handoff uses the same recognized, last-at-tick-zero signature as the editor.
+Its metadata admits every exact SMF denominator power; explicit practice/count-in still
+uses its existing native clock admission and may reject a meter outside that range.

@@ -10,7 +10,7 @@ import { Note } from 'tonal'
 import { newEditor, editorCommand, editorAction, selectedNote, selectedNotes, editorView, editorAxis, editorHarmony, editorSound, stepInputEffect } from './sequencer-editor.mjs'
 import { loadProject, saveProject, projectMidi } from './sequencer-files.mjs'
 import { sourceTickAtSeconds, sourceSecondsAtTick } from './midi-source-playback.mjs'
-import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo } from './midi-source-editor.mjs'
+import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo, sourceMeters, selectedMeter } from './midi-source-editor.mjs'
 import { safeText } from './terminal.mjs'
 import { openPlayback } from './playback.mjs'
 import { InstrumentPicker } from './instruments.mjs'
@@ -35,6 +35,7 @@ const help = [
   ':event ID; :event-value VALUE; :event-move AT; :event-set KIND VALUES; :event-channel CH; :event-remove',
   ':event-before first-note|EVENT_ID orders this expression at the same tick; :event-order-reset restores natural order',
   'Source :tempos lists tempo events; :tempo BPM [AT]; :tempo-event ID; :tempo-value BPM; :tempo-move AT; :tempo-remove',
+  'Source :meters lists time signatures; :meter NUM DEN [AT [CLOCKS NOTATED32NDS]]; :meter-event ID; :meter-value NUM DEN [CLOCKS NOTATED32NDS]; :meter-move AT; :meter-remove',
   ':arrange snapshots this phrase into backing; q returns to this draft',
   'Source seek/resume restores channel state; unknown initial or opaque device state is an error.',
   'Arrow keys: time/pitch; Shift+arrows: move note; Enter/x: insert/remove note',
@@ -232,6 +233,16 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         if (!harmony.result.rows.length) lines.push('No key intervals in this performance')
       }
     } else if (showHelp) lines.push(...help)
+    else if (editor.project.kind === 'midi-source' && editor.eventView === 'meter') {
+      const events = sourceMeters(editor), capacity = Math.max(1, rows - 9)
+      const selected = events.findIndex(event => event.id === editor.selectedMeterID)
+      const first = Math.max(0, selected - capacity + 1)
+      lines.push('Time signatures · Up/Down selects · Shift+Left/Right moves · Enter edits · :meters returns to notes')
+      for (const event of events.slice(first, first + capacity)) lines.push(
+        `${event.id === editor.selectedMeterID ? '>' : ' '} ${event.id} · track ${event.track + 1} · ${event.tick / per} ${axis.label} · ${event.numerator}/${event.denominator} · ${event.clocks} clocks/click · ${event.notated32nds} notated 32nds/quarter`)
+      if (!events.length) lines.push('No recognized time signatures. :meter NUM DEN AT inserts one; the default is 4/4.')
+      lines.push('Time signatures retain note/tempo timestamps; the source axis remains beats or SMPTE frames.')
+    }
     else if (editor.project.kind === 'midi-source' && editor.eventView === 'tempo') {
       const events = sourceTempos(editor), capacity = Math.max(1, rows - 9)
       const selected = events.findIndex(event => event.id === editor.selectedTempoID)
@@ -647,7 +658,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         else status = 'Note selection updated'
         return
       }
-      const tempoView = editor.eventView === 'tempo'
+      const eventKind = editor.eventView === 'tempo' ? 'tempo' : editor.eventView === 'meter' ? 'meter' : 'expression'
       switch (key.name) {
         case 'space': play(); break
         case 'i':
@@ -659,24 +670,25 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         case 'tab': editor = editorAction(editor, { kind: 'track' }); break
         case 'return':
           if (editor.eventView) {
-            const event = tempoView ? selectedTempo(editor) : selectedExpression(editor)
+            const event = eventKind === 'tempo' ? selectedTempo(editor) : eventKind === 'meter' ? selectedMeter(editor) : selectedExpression(editor)
             if (!event) throw new Error('Select an event first')
-            prompt = (tempoView ? 'tempo-value ' : 'event-value ') + event.value
+            prompt = eventKind === 'meter' ? `meter-value ${event.numerator} ${event.denominator} ${event.clocks} ${event.notated32nds}`
+              : (eventKind === 'tempo' ? 'tempo-value ' : 'event-value ') + event.value
           } else editor = editorAction(editor, { kind: 'toggle-note' })
           break
-        case 'x': editor = editorAction(editor, { kind: editor.eventView ? tempoView ? 'tempo-remove' : 'expression-remove' : selectedNotes(editor).length ? 'remove' : 'toggle-note' }); break
-        case 'delete': case 'backspace': editor = editorAction(editor, { kind: editor.eventView ? tempoView ? 'tempo-remove' : 'expression-remove' : 'remove' }); break
+        case 'x': editor = editorAction(editor, { kind: editor.eventView ? `${eventKind}-remove` : selectedNotes(editor).length ? 'remove' : 'toggle-note' }); break
+        case 'delete': case 'backspace': editor = editorAction(editor, { kind: editor.eventView ? `${eventKind}-remove` : 'remove' }); break
         case 'u': editor = editorAction(editor, { kind: 'undo' }); break
         case 'y': editor = editorAction(editor, { kind: 'redo' }); break
         case 'm': editor = editorAction(editor, { kind: 'mute' }); break
         case 'o': editor = editorAction(editor, { kind: 'solo' }); break
         case 'g': editor = editorAction(editor, { kind: 'grid' }); break
-        case 'left': case 'right': editor = editorAction(editor, { kind: key.shift ? editor.eventView ? tempoView ? 'tempo-move' : 'expression-move' : 'move-note' : 'move', ticks: editor.step * (key.name === 'left' ? -1 : 1) }); break
-        case 'up': case 'down': editor = editorAction(editor, editor.eventView ? { kind: tempoView ? 'tempo-next' : 'expression-next', direction: key.name === 'down' ? 1 : -1 }
+        case 'left': case 'right': editor = editorAction(editor, { kind: key.shift ? editor.eventView ? `${eventKind}-move` : 'move-note' : 'move', ticks: editor.step * (key.name === 'left' ? -1 : 1) }); break
+        case 'up': case 'down': editor = editorAction(editor, editor.eventView ? { kind: `${eventKind}-next`, direction: key.name === 'down' ? 1 : -1 }
           : { kind: key.shift ? 'move-note' : 'move', pitches: key.name === 'up' ? 1 : -1 }); break
         default:
           if (editor.eventView) {
-            if (['+', '=', '-'].includes(text)) editor = editorAction(editor, { kind: tempoView ? 'tempo-value' : 'expression-value', delta: text === '-' ? -1 : 1 })
+            if (['+', '=', '-'].includes(text)) editor = editorAction(editor, { kind: `${eventKind}-value`, delta: text === '-' ? -1 : 1 })
           } else if (text === '[' || text === ']') editor = editorAction(editor, { kind: 'duration', value: (selectedNote(editor)?.duration ?? editor.duration) * (text === '[' ? 0.5 : 2) })
           else if (['+', '=', '-'].includes(text)) editor = editorAction(editor, { kind: 'velocity', value: (selectedNote(editor)?.velocity ?? editor.velocity) + (text === '-' ? -1 : 1) })
       }

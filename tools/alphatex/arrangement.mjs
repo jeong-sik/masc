@@ -198,9 +198,11 @@ export function validateArrangement(project) {
   arrangementLoop(project)
   if (!Array.isArray(project.meter) || project.meter.length !== 2) throw new Error('Invalid arrangement meter')
   integer(project.meter[0], 'meter numerator', 1)
-  integer(project.meter[1], 'meter denominator', 1)
-  const denominator = BigInt(project.meter[1])
-  if ((denominator & (denominator - 1n)) !== 0n) throw new Error('Arrangement meter denominator must be a power of two')
+  // Every SMF denominator (2 to an unsigned-byte power) is exactly representable
+  // in binary64, including powers beyond the safe *consecutive* integer range.
+  const power = Math.log2(project.meter[1])
+  if (typeof project.meter[1] !== 'number' || !Number.isInteger(power) || power < 0 || power > 255
+      || 2 ** power !== project.meter[1]) throw new Error('Arrangement meter denominator must be an SMF power of two')
   unique(project.assets, 'asset'); unique(project.lanes, 'lane'); unique(project.clips, 'region')
   for (const asset of project.assets) validateArrangementAsset(asset)
   const assets = new Map(project.assets.map(asset => [asset.id, asset])), lanes = new Map(project.lanes.map(lane => [lane.id, lane]))

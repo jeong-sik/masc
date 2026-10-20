@@ -1,5 +1,5 @@
 import { newProject, validateProject, editProject, beats, pitch, PPQ, harmonyAt } from './sequencer-project.mjs'
-import { sourceEditor, sourceSelected, sourceAction, sourceCommand, sourceHarmony } from './midi-source-editor.mjs'
+import { sourceEditor, sourceSelected, sourceAction, sourceCommand, sourceHarmony, sourceMeterAt } from './midi-source-editor.mjs'
 import { validateSound } from './project-sound.mjs'
 import { noteSelectionCommand, retainNoteSelection, selectedNotes, moveSelectedNotes } from './note-selection.mjs'
 export { selectedNotes } from './note-selection.mjs'
@@ -188,6 +188,6 @@ function runCommand(editor, line) {
     ...(command === 'loop' ? { effect: { kind: 'loop' } } : {}) }
 }
 
-export const editorView = editor => editor.view ?? editor.project
+export const editorView = editor => editor.project.kind === 'midi-source' ? { ...editor.view, meter: sourceMeterAt(editor) } : editor.view ?? editor.project
 export const editorAxis = editor => editor.axis ?? { per: PPQ, label: 'beats' }
 export const editorHarmony = editor => editor.project.kind === 'midi-source' ? sourceHarmony(editor) : harmonyAt(editor.project, editor.tick)

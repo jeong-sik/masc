@@ -75,3 +75,21 @@ test('preabort spawns nothing and every falsy cancellation cause remains failure
     await assert.rejects(owner.completion, error => error.cause === reason)
   }
 })
+
+test('cancellation after native close still owns an unsettled producer', async () => {
+  for (const kind of ['cancel', 'signal']) {
+    let requested, childClosed, resolveBlock
+    const demand = new Promise(resolve => { requested = resolve })
+    const close = new Promise(resolve => { childClosed = resolve })
+    const cancellation = new AbortController(), base = options('valid')
+    const owner = openPcmOutput({ ...base, signal: cancellation.signal, spawnProcess(...args) {
+      const child = base.spawnProcess(...args); child.once('close', childClosed); return child
+    }, provideBlock() { requested(); return new Promise(resolve => { resolveBlock = resolve }) } })
+    await demand
+    owner.stop()
+    await close
+    if (kind === 'cancel') owner.cancel(null); else cancellation.abort(null)
+    resolveBlock(Buffer.alloc(64))
+    await assert.rejects(owner.completion, error => error.cause === null)
+  }
+})

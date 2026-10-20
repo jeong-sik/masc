@@ -81,14 +81,19 @@ export function openPcmOutput({ output, provideBlock, signal, onEvent = () => {}
   child.stdin.on('error', error => { if (error.code !== 'EPIPE' || !stopping) fail(error) })
   child.stderr.setEncoding('utf8').on('data', text => { detail = (detail + text).slice(-64 * 1024) })
   child.once('close', (code, exitSignal) => {
-    closed = true; signal?.removeEventListener('abort', abort); lines.close()
+    closed = true; lines.close()
     if (!failure && (code !== 0 || !final)) fail(new Error(detail || `PCM output closed without finalization: ${code ?? exitSignal}`))
     if (failure) rejectClose(failure)
     else resolveClose(final)
   })
   const completion = (async () => {
-    try { return await nativeClose }
-    finally { await job }
+    try {
+      let result
+      try { result = await nativeClose }
+      finally { await job }
+      if (failure) throw failure
+      return result
+    } finally { signal?.removeEventListener('abort', abort) }
   })()
   completion.catch(() => {})
   if (signal?.aborted) abort()

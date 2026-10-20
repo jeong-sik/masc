@@ -41,7 +41,7 @@ sources=[]
 |}
 
 let exact id = `Assoc [ "kind", `String "exact_output"; "request_id", `String id; "output", `String "author"
-                      ; "messages", `List [ `String "Write one question." ] ]
+                      ; "messages", `List [ `Assoc [ "role", `String "user"; "text", `String "Write one question." ] ] ]
 
 (* What the fake worker lists and what it received. *)
 type worker = {

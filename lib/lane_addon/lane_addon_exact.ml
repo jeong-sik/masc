@@ -1,13 +1,32 @@
 let ( let* ) = Result.bind
 
+type role = User | Assistant
+type message = { role : role; text : string }
+
 type request =
   { request_id : string
   ; output : string
   ; system : string option
-  ; messages : string list
+  ; messages : message list
   }
 
 let request_keys = [ "kind"; "request_id"; "output"; "system"; "messages" ]
+
+let message_of_json = function
+  | `Assoc fields when List.sort String.compare (List.map fst fields) = [ "role"; "text" ] ->
+    let* role = match List.assoc "role" fields with
+      | `String "user" -> Ok User
+      | `String "assistant" -> Ok Assistant
+      | _ -> Error "message role must be user or assistant"
+    in
+    (match List.assoc "text" fields with
+     | `String text -> Ok { role; text }
+     | _ -> Error "message text must be a string")
+  | _ -> Error "a message must be exactly {role, text}"
+
+let message_to_json message =
+  `Assoc [ "role", `String (match message.role with User -> "user" | Assistant -> "assistant")
+         ; "text", `String message.text ]
 
 let request_of_json = function
   | `Assoc fields ->
@@ -15,6 +34,11 @@ let request_of_json = function
       match List.assoc_opt key fields with
       | Some (`String value) when String.trim value <> "" -> Ok value
       | Some _ | None -> Error (key ^ " requires a non-blank string")
+    in
+    let* () =
+      let keys = List.map fst fields in
+      if List.length keys = List.length (List.sort_uniq String.compare keys) then Ok ()
+      else Error "an exact_output request has duplicate keys"
     in
     let* () =
       match List.find_opt (fun (key, _) -> not (List.mem key request_keys)) fields with
@@ -40,11 +64,10 @@ let request_of_json = function
         List.fold_right
           (fun value acc ->
              let* acc = acc in
-             match value with
-             | `String message -> Ok (message :: acc)
-             | _ -> Error "messages holds user message strings")
+             let* message = message_of_json value in
+             Ok (message :: acc))
           values (Ok [])
-      | Some _ | None -> Error "messages requires at least one user message"
+      | Some _ | None -> Error "messages requires at least one conversation message"
     in
     Ok { request_id; output; system; messages }
   | _ -> Error "an exact_output request must be an object"
@@ -56,7 +79,7 @@ let request_to_json request =
      ; "output", `String request.output
      ]
      @ (match request.system with None -> [] | Some system -> [ "system", `String system ])
-     @ [ "messages", `List (List.map (fun message -> `String message) request.messages) ])
+     @ [ "messages", `List (List.map message_to_json request.messages) ])
 
 let digest request = Lane_addon_store.digest (Yojson.Safe.to_string (request_to_json request))
 

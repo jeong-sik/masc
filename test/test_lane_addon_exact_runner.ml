@@ -30,13 +30,16 @@ let package : Types.package =
   ; binding_schema = None; presentation = Lane_addon_presentation.empty
   ; execution=Types.Host_process {max_reply_bytes=65536} }
 
-let request id =
+let user text = `Assoc [ "role", `String "user"; "text", `String text ]
+let assistant text = `Assoc [ "role", `String "assistant"; "text", `String text ]
+
+let request ?(messages = [user "Write one question about the ledger."]) id =
   match
     Exact.request_of_json
       (`Assoc
          [ "kind", `String "exact_output"; "request_id", `String id; "output", `String "author"
          ; "system", `String "You write quiz questions."
-         ; "messages", `List [ `String "Write one question about the ledger." ] ])
+         ; "messages", `List messages ])
   with
   | Ok request -> request
   | Error detail -> fail detail
@@ -74,9 +77,9 @@ let publish ?(cli_slots = []) ~base_path targets =
        (F.resolver_snapshot ~source:base_path targets)
      : Runtime_exact_output_registry.t)
 
-let run_request ?runner ~base_path ~store id =
+let run_request ?runner ?messages ~base_path ~store id =
   let runner = Option.value runner ~default:(Server_lane_addon_exact.runner ~base_path) in
-  match Exact.run ~store ~declaration_id ~package ~runner (request id) with
+  match Exact.run ~store ~declaration_id ~package ~runner (request ?messages id) with
   | Ok attempt -> attempt
   | Error detail -> fail detail
 
@@ -219,6 +222,49 @@ let test_the_cli_tail_answers_after_the_http_slots () =
         (String.starts_with ~prefix:"Write one question about the ledger." prompt)
     | prompts -> failf "expected one client call, got %d" (List.length prompts))
 
+let conversation = [user "Find the menu."; assistant "There are two menus."; user "Choose the account menu."]
+
+let test_http_preserves_conversation_roles () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let server = F.start_server ~sw ~net ~clock (F.Reply (F.openai_response question)) in
+    publish ~base_path [{F.id="http";base_url=server.base_url}];
+    check bool "the conversation answers" true
+      (answered_by (run_request ~messages:conversation ~base_path ~store "roles") <> None);
+    match F.request_bodies server with
+    | [body] ->
+        let open Yojson.Safe.Util in
+        let messages = Yojson.Safe.from_string body |> member "messages" |> to_list in
+        check (list string) "HTTP roles remain in their original order"
+          ["system";"user";"assistant";"user"]
+          (List.map (fun message -> message |> member "role" |> to_string) messages);
+        check string "the assistant's text belongs to the assistant turn" "There are two menus."
+          (List.nth messages 2 |> member "content" |> to_string)
+    | bodies -> failf "expected one HTTP request, got %d" (List.length bodies))
+
+let test_cli_refuses_assistant_without_dispatch () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let server = F.start_server ~sw ~net ~clock
+      (F.Reply (F.openai_response (`Assoc ["wrong",`String "shape"]))) in
+    publish ~base_path ~cli_slots:[F.cli_primary_runtime] [{F.id="http";base_url=server.base_url}];
+    let cli_calls = ref 0 in
+    let cli_runner : Keeper_lane_cli_oneshot.runner =
+      fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+        incr cli_calls; Ok (Yojson.Safe.to_string question)
+    in
+    let runner = Server_lane_addon_exact.For_testing.runner ~base_path ~cli_runner in
+    (match run_request ~runner ~messages:conversation ~base_path ~store "cli-history" with
+     | Exact.Not_final (Exact.Provider_refused (Exact.Provider_configuration_refused _)) -> ()
+     | _ -> fail "an incompatible CLI tail must preserve the unresolved conversation");
+    check int "the HTTP path was attempted" 1 (F.post_count server);
+    check int "the CLI process was never entered" 0 !cli_calls;
+    (* A configuration event can select a capable HTTP slot. The same request
+       then answers without rewriting its retained body or replaying input. *)
+    let capable = F.start_server ~sw ~net ~clock (F.Reply (F.openai_response question)) in
+    publish ~base_path [{F.id="capable";base_url=capable.base_url}];
+    check bool "the original request answers after configuration changes" true
+      (answered_by (run_request ~runner ~messages:conversation ~base_path ~store "cli-history") <> None);
+    check int "one capable call" 1 (F.post_count capable))
+
 let () =
   run "lane add-on exact runner"
     [ ( "runner"
@@ -232,4 +278,6 @@ let () =
         ; test_case "a slot that may pass keeps the request open" `Quick test_a_slot_that_may_pass_keeps_the_request_open
         ; test_case "an unconfigured lane sends nothing" `Quick test_an_unconfigured_lane_sends_nothing
         ; test_case "an off lane sends nothing" `Quick test_an_off_lane_sends_nothing
-        ; test_case "the cli tail answers after the http slots" `Quick test_the_cli_tail_answers_after_the_http_slots ] ) ]
+        ; test_case "the cli tail answers after the http slots" `Quick test_the_cli_tail_answers_after_the_http_slots
+        ; test_case "HTTP preserves conversation roles" `Quick test_http_preserves_conversation_roles
+        ; test_case "CLI refuses assistant history before dispatch" `Quick test_cli_refuses_assistant_without_dispatch ] ) ]

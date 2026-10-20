@@ -5,7 +5,7 @@ module Host = Masc.Lane_addon_host_request
 module Types = Masc.Lane_addon_types
 
 let exact id = `Assoc [ "kind", `String "exact_output"; "request_id", `String id; "output", `String "author"
-                      ; "messages", `List [ `String "Write one question." ] ]
+                      ; "messages", `List [ `Assoc [ "role", `String "user"; "text", `String "Write one question." ] ] ]
 
 let test_a_listing_keeps_the_package_order () =
   match Host.listing_of_json (`Assoc [ "requests", `List [ exact "b"; exact "a" ] ]) with

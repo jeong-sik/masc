@@ -18,16 +18,23 @@
     being run, and a started attempt this process is not running was cut off by
     a crash or a cancellation. *)
 
+type role = User | Assistant
+type message = { role : role; text : string }
+(** Text conversation turns. System text belongs to [request.system]; tool
+    messages and multimodal blocks are not accepted by this protocol. *)
+
 type request = private
   { request_id : string
   ; output : string  (** A [world.exact_outputs] name. *)
   ; system : string option
-  ; messages : string list  (** User messages, in order. Images are not part of v1. *)
+  ; messages : message list  (** Original roles and order are retained. *)
   }
 
 val request_of_json : Yojson.Safe.t -> (request, string) result
 (** Exactly [kind = "exact_output"], [request_id], [output], [messages] and an
-    optional [system]. Any other key, a blank id or no message is refused. *)
+    optional [system]. Each message is exactly [{"role": "user"|"assistant",
+    "text": string}]. Unknown roles, extra or duplicate keys, a blank id or no
+    message are refused. Roles participate in the retained request digest. *)
 
 val request_to_json : request -> Yojson.Safe.t
 

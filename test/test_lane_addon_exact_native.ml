@@ -11,7 +11,7 @@ let text key value=member key value |> Yojson.Safe.Util.to_string
 let write path bytes=Fs_compat.mkdir_p (Filename.dirname path);Out_channel.with_open_bin path (fun out -> output_string out bytes)
 let worker={|import json,os,sys
 root=sys.argv[1]
-pending={"kind":"exact_output","request_id":"native-plan-1","output":"plan","system":"Return one browser plan.","messages":["Inspect the current page."]}
+pending={"kind":"exact_output","request_id":"native-plan-1","output":"plan","system":"Return one browser plan.","messages":[{"role":"user","text":"Inspect the current page."}]}
 for line in sys.stdin:
     req=json.loads(line)
     if "id" not in req: continue

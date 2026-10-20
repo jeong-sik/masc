@@ -44,7 +44,7 @@ let request ?(output = "author") ?(message = "Write one question.") id =
     (Exact.request_of_json
        (`Assoc
           [ "kind", `String "exact_output"; "request_id", `String id; "output", `String output
-          ; "messages", `List [ `String message ] ]))
+          ; "messages", `List [ `Assoc [ "role", `String "user"; "text", `String message ] ] ]))
 
 let question = `Assoc [ "question", `String "Q?" ]
 
@@ -303,10 +303,47 @@ let test_an_outcome_that_cannot_be_written_stays_unknown () =
 let test_request_decoding_is_strict () =
   List.iter (fun (label, json) ->
       check bool label true (Result.is_error (Exact.request_of_json json)))
-    [ "another kind", `Assoc [ "kind", `String "ask"; "request_id", `String "a"; "output", `String "author"; "messages", `List [ `String "m" ] ]
+    [ "another kind", `Assoc [ "kind", `String "ask"; "request_id", `String "a"; "output", `String "author"; "messages", `List [ `Assoc [ "role", `String "user"; "text", `String "m" ] ] ]
     ; "no message", `Assoc [ "kind", `String "exact_output"; "request_id", `String "a"; "output", `String "author"; "messages", `List [] ]
-    ; "a blank id", `Assoc [ "kind", `String "exact_output"; "request_id", `String " "; "output", `String "author"; "messages", `List [ `String "m" ] ]
-    ; "an unknown key", `Assoc [ "kind", `String "exact_output"; "request_id", `String "a"; "output", `String "author"; "messages", `List [ `String "m" ]; "images", `List [] ] ]
+    ; "a blank id", `Assoc [ "kind", `String "exact_output"; "request_id", `String " "; "output", `String "author"; "messages", `List [ `Assoc [ "role", `String "user"; "text", `String "m" ] ] ]
+    ; "an unknown key", `Assoc [ "kind", `String "exact_output"; "request_id", `String "a"; "output", `String "author"; "messages", `List [ `Assoc [ "role", `String "user"; "text", `String "m" ] ]; "images", `List [] ] ]
+
+let test_conversation_is_retained_with_role_identity () =
+  with_root (fun root ->
+    let store = Store.create ~root in
+    let runner, sends, _ = counting_runner store (ref [Answer question]) in
+    let make role = require (Exact.request_of_json (`Assoc [
+      "kind",`String "exact_output";"request_id",`String "history";"output",`String "author";
+      "messages",`List [
+        `Assoc ["text",`String "Earlier question";"role",`String "user"];
+        `Assoc ["text",`String "Earlier response";"role",`String role]]])) in
+    let original = make "assistant" in
+    check bool "roles survive canonical encoding" true
+      (require (Exact.request_of_json (Exact.request_to_json original)) = original);
+    check bool "the conversation answers" true (answered_with question (run_request store runner original));
+    check bool "relisting reuses the original answer" true
+      (answered_with question (run_request store runner original));
+    let changed_role = make "user" in
+    check bool "a role change changes request identity" true (Exact.digest original <> Exact.digest changed_role);
+    check bool "the same id cannot change a prior speaker" true
+      (run_request store runner changed_role = Exact.Final Exact.Request_id_reused);
+    check int "no additional provider call" 1 !sends)
+
+let test_conversation_rejects_ambiguous_or_unsupported_wire () =
+  let fields = ["kind",`String "exact_output";"request_id",`String "wire";"output",`String "author"] in
+  let message = `Assoc ["role",`String "user";"text",`String "question"] in
+  List.iter (fun (label,value) -> check bool label true
+    (Result.is_error (Exact.request_of_json (`Assoc (fields @ ["messages",`List [value]])))))
+    ["untyped strings",`String "question";
+     "system turn",`Assoc ["role",`String "system";"text",`String "question"];
+     "tool turn",`Assoc ["role",`String "tool";"text",`String "question"];
+     "extra message field",`Assoc ["role",`String "user";"text",`String "question";"images",`List []];
+     "duplicate speaker",`Assoc ["role",`String "user";"role",`String "assistant";"text",`String "question"];
+     "duplicate text",`Assoc ["role",`String "user";"text",`String "a";"text",`String "b"];
+     "non-text content",`Assoc ["role",`String "user";"text",`List []]];
+  check bool "duplicate request fields are refused before identity is computed" true
+    (Result.is_error (Exact.request_of_json (`Assoc
+      (fields @ ["output",`String "another";"messages",`List [message]]))))
 
 let () =
   run "lane add-on exact requests"
@@ -329,4 +366,6 @@ let () =
             test_a_retained_answer_is_checked_against_the_schema_declared_now
         ; test_case "an outcome that cannot be written stays unknown" `Quick
             test_an_outcome_that_cannot_be_written_stays_unknown
-        ; test_case "request decoding is strict" `Quick test_request_decoding_is_strict ] ) ]
+        ; test_case "request decoding is strict" `Quick test_request_decoding_is_strict
+        ; test_case "conversation retention binds speaker roles" `Quick test_conversation_is_retained_with_role_identity
+        ; test_case "conversation wire refuses ambiguous roles" `Quick test_conversation_rejects_ambiguous_or_unsupported_wire ] ) ]

@@ -96,8 +96,9 @@ function act(editor, action) {
 export function stepInputEffect(line) {
   const [command, ...args] = line.trim().split(/\s+/)
   if (command === 'step-input') {
-    if (args.length > 1) throw new Error('Use :step-input [SOURCE_UID]')
-    return { kind: 'step-input', source: args[0] }
+    const sources = args.filter(arg => arg !== '--monitor')
+    if (sources.length > 1 || args.length - sources.length > 1) throw new Error('Use :step-input [SOURCE_UID] [--monitor]')
+    return { kind: 'step-input', source: sources[0], ...(args.includes('--monitor') ? { monitor: true } : {}) }
   }
   if (command === 'step-stop') {
     if (args.length) throw new Error('Use :step-stop')

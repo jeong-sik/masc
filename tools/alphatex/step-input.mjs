@@ -3,6 +3,7 @@ import { editProject } from './sequencer-project.mjs'
 import { editMidiSourceNotes } from './midi-source.mjs'
 import { sourceEditor } from './midi-source-editor.mjs'
 import { openMidiInput } from './midi-input.mjs'
+import { openStepMonitor } from './step-monitor.mjs'
 
 const sourceDocument = editor => editor.project.kind === 'midi-source'
 const trackAt = editor => (editor.view ?? editor.project).tracks[editor.track]
@@ -118,28 +119,56 @@ export function stepPacket(editor, pending, packet) {
 // The terminal supplies its existing serialized decision queue. Neither stop()
 // nor a context cancellation awaits completion inside that queue: an admitted
 // packet may itself be waiting to enter the queue.
-export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState = () => {}, openInput = openMidiInput }) {
-  target(getEditor())
+export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState = () => {},
+  audio, openMonitor = openStepMonitor, openInput = openMidiInput }) {
+  const { channel } = target(getEditor())
   const cancellation = new AbortController()
-  let pending = null, stopping = false
-  const input = openInput({ source, signal: cancellation.signal, onPacket: (packet, { signal }) => enqueue(() => {
-    signal.throwIfAborted()
-    const result = stepPacket(getEditor(), pending, packet)
-    pending = result.pending
-    if (result.inserted) adoptEditor(result.editor, result.inserted)
-    onState({ kind: 'input', held: pending ? [...pending.held.values()].reduce((n, ids) => n + ids.length, 0) : 0 })
-  }) })
-  const completion = input.completion.finally(() => { pending = null })
+  const stopped = new Error('Step input stopped before arming')
+  let pending = null, stopping = false, controlsStopped = false, input = null
+  const monitor = audio ? openMonitor({ ...audio, channel, signal: cancellation.signal }) : null
+  monitor?.completion.catch(error => cancellation.abort(error))
+  const ready = (async () => {
+    if (monitor) await monitor.ready
+    cancellation.signal.throwIfAborted()
+    if (stopping) throw stopped
+    input = openInput({ source, signal: cancellation.signal, async onPacket(packet, { signal }) {
+      const prepared = monitor?.prepare(packet)
+      await enqueue(() => {
+        signal.throwIfAborted()
+        const result = stepPacket(getEditor(), pending, packet)
+        pending = result.pending
+        if (result.inserted) adoptEditor(result.editor, result.inserted)
+        onState({ kind: 'input', held: pending ? [...pending.held.values()].reduce((n, ids) => n + ids.length, 0) : 0 })
+      })
+      signal.throwIfAborted()
+      if (monitor) await monitor.send(prepared)
+    } })
+    const info = await input.ready
+    return { ...info, ...(monitor ? { monitoring: true } : {}) }
+  })()
+  ready.catch(() => {})
+  const completion = (async () => {
+    let failure = null
+    try { await ready }
+    catch (error) { if (!(stopping && !input && !cancellation.signal.aborted)) failure = error }
+    // A rejected ready acknowledgement does not prove native child closure.
+    try { await input?.completion } catch (error) { failure ??= error }
+    monitor?.stop()
+    try { await monitor?.completion } catch (error) { failure ??= error }
+    pending = null
+    if (failure) throw failure
+  })()
   completion.catch(() => {})
-  return { ready: input.ready, completion, stop({ admittedControls = false } = {}) {
+  return { ready, completion, stop({ admittedControls = false } = {}) {
       // View close ends native admission immediately, while controls already
       // queued before close must still decide before drained MIDI packets.
-      if (!admittedControls) stopping = true
-      input.stop()
+      stopping = true
+      if (!admittedControls) controlsStopped = true
+      input?.stop(); monitor?.stop()
     },
     control(action) {
       cancellation.signal.throwIfAborted()
-      if (stopping || pending !== null) throw new Error('Release all keys and finish draining before changing step input')
+      if (controlsStopped || pending !== null) throw new Error('Release all keys and finish draining before changing step input')
       return stepControl(getEditor(), action)
     },
     cancel(reason = new Error('Step input context changed')) { cancellation.abort(reason) } }

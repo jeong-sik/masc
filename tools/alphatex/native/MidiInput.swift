@@ -77,13 +77,15 @@ final class MidiInput {
     func receive(_ list: UnsafePointer<MIDIEventList>, context: UnsafeMutableRawPointer?) {
         lock.lock()
         guard accepting else { lock.unlock(); return }
-        callbacks.enter(); lock.unlock()
-        defer { callbacks.leave() }
+        callbacks.enter()
+        // A complete callback is one admission sequence. Another CoreMIDI
+        // thread cannot interleave a second list between this list's packets.
+        defer { lock.unlock(); callbacks.leave() }
         let raw = UnsafeRawPointer(list)
         let protocolID = raw.loadUnaligned(fromByteOffset: MemoryLayout<MIDIEventList>.offset(of: \.protocol)!, as: UInt32.self)
         let count = raw.loadUnaligned(fromByteOffset: MemoryLayout<MIDIEventList>.offset(of: \.numPackets)!, as: UInt32.self)
         guard protocolID == MIDIProtocolID._2_0.rawValue, context.map({ MIDIEndpointRef(UInt(bitPattern: $0)) }) == endpoint else {
-            fail(InputFailure("unbound MIDI input callback or protocol")); return
+            failLocked(InputFailure("unbound MIDI input callback or protocol")); return
         }
         var packet = UnsafeRawPointer(list).advanced(by: MemoryLayout<MIDIEventList>.offset(of: \.packet)!)
         for _ in 0..<count {
@@ -91,18 +93,13 @@ final class MidiInput {
             let host = packet.loadUnaligned(fromByteOffset: MemoryLayout<MIDIEventPacket>.offset(of: \.timeStamp)!, as: MIDITimeStamp.self)
             let words = packet.advanced(by: MemoryLayout<MIDIEventPacket>.offset(of: \.words)!).assumingMemoryBound(to: UInt32.self)
             if count > 0 {
-                lock.lock()
-                guard accepting else { lock.unlock(); return }
                 guard count <= Self.maximumPendingWords - pendingWords, nextOrdinal < UInt64.max else {
-                    lock.unlock(); fail(InputFailure("MIDI input backlog exhausted; input stopped without hiding lost data")); return
+                    failLocked(InputFailure("MIDI input backlog exhausted; input stopped without hiding lost data")); return
                 }
                 let copied = Packet(ordinal: nextOrdinal, host: host == 0 ? mach_absolute_time() : host,
                                     origin: host == 0 ? "received" : "packet", words: Array(UnsafeBufferPointer(start: words, count: count)))
                 nextOrdinal += 1; pendingWords += count
-                // Enqueue while holding the admission lock: callback order and
-                // ordinal order stay identical even across CoreMIDI threads.
                 DispatchQueue.main.async { self.accept(copied) }
-                lock.unlock()
             }
             packet = UnsafeRawPointer(MIDIEventPacketNext(packet.assumingMemoryBound(to: MIDIEventPacket.self)))
         }
@@ -126,8 +123,8 @@ final class MidiInput {
         guard let packet = inFlight, ordinal == String(packet.ordinal), failure == nil else { throw InputFailure("unexpected MIDI input acknowledgement") }
         inFlight = nil; acknowledged += 1; release(packet); pump()
     }
-    func fail(_ error: Error) {
-        lock.lock(); if failureStorage == nil { failureStorage = error }; accepting = false; lock.unlock()
+    private func failLocked(_ error: Error) {
+        if failureStorage == nil { failureStorage = error }; accepting = false
         DispatchQueue.main.async { self.abort(error) }
     }
     func abort(_ error: Error) {

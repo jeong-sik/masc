@@ -45,7 +45,8 @@ The startup clock's timebase is authoritative for converting host ticks.
 No note/channel filter or lossy MIDI1 projection is applied here.
 
 The native callback copies words and reserves their payload while holding its
-admission lock; it does not serialize JSON or run the editor. Main-thread
+admission lock for the whole event list, so concurrent callbacks cannot
+interleave its packets; it does not serialize JSON or run the editor. Main-thread
 handoffs retain that reservation. The helper exposes one packet at a time and
 waits for `{kind:"ack",ordinal:"0"}` before exposing the next. JavaScript sends
 that acknowledgement only after the consumer's returned promise settles.

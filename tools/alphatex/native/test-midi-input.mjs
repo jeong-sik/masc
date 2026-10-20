@@ -18,9 +18,10 @@ func emit(_ value:[String:Any]) { let data=try! JSONSerialization.data(withJSONO
 @main enum Source {
  static func main() throws {
   var client=MIDIClientRef(),selected=MIDIEndpointRef(),other=MIDIEndpointRef(),destination=MIDIEndpointRef()
+  let protocolID:MIDIProtocolID = CommandLine.arguments.dropFirst().first == "1" ? ._1_0 : ._2_0
   try checked(MIDIClientCreateWithBlock("MASC input fixture" as CFString,&client,{_ in}))
-  try checked(MIDISourceCreateWithProtocol(client,UUID().uuidString as CFString,._2_0,&selected))
-  try checked(MIDISourceCreateWithProtocol(client,UUID().uuidString as CFString,._2_0,&other))
+  try checked(MIDISourceCreateWithProtocol(client,UUID().uuidString as CFString,protocolID,&selected))
+  try checked(MIDISourceCreateWithProtocol(client,UUID().uuidString as CFString,protocolID,&other))
   try checked(MIDIDestinationCreateWithProtocol(client,UUID().uuidString as CFString,._2_0,&destination,{_,_ in}))
   func uid(_ endpoint:MIDIEndpointRef)throws->String{var value:Int32=0;try checked(MIDIObjectGetIntegerProperty(endpoint,kMIDIPropertyUniqueID,&value));return String(value)}
   emit(["kind":"ready","source":try uid(selected),"other":try uid(other),"destination":try uid(destination)])
@@ -34,7 +35,7 @@ func emit(_ value:[String:Any]) { let data=try! JSONSerialization.data(withJSONO
       let packets=command["packets"] as! [[UInt32]],host=mach_absolute_time()
       let size=MemoryLayout<MIDIEventList>.size+packets.reduce(0){$0+$1.count*4+32}
       let raw=UnsafeMutableRawPointer.allocate(byteCount:size,alignment:MemoryLayout<MIDIEventList>.alignment);defer{raw.deallocate()}
-      let list=raw.assumingMemoryBound(to:MIDIEventList.self);var last=MIDIEventListInit(list,._2_0)
+      let list=raw.assumingMemoryBound(to:MIDIEventList.self);var last=MIDIEventListInit(list,protocolID)
       for(index,words)in packets.enumerated(){last=words.withUnsafeBufferPointer{buffer in MIDIEventListAdd(list,size,last,host+UInt64(index),buffer.count,buffer.baseAddress!)}}
       try checked(MIDIReceivedEventList(command["other"] as? Bool == true ? other:selected,UnsafePointer(list)))
       emit(["kind":"sent","id":id,"hostTimes":packets.indices.map{String(host+UInt64($0))}])
@@ -53,13 +54,14 @@ func emit(_ value:[String:Any]) { let data=try! JSONSerialization.data(withJSONO
 `
 const decisionCode = `import Foundation
 import CoreMIDI
-func input(_ owner:MidiInput,_ words:[UInt32],protocolID:MIDIProtocolID = ._2_0) {
- let size=MemoryLayout<MIDIEventList>.size+words.count*4
+func inputList(_ owner:MidiInput,_ packets:[[UInt32]],protocolID:MIDIProtocolID = ._2_0) {
+ let size=MemoryLayout<MIDIEventList>.size+packets.reduce(0){$0+$1.count*4+32}
  let raw=UnsafeMutableRawPointer.allocate(byteCount:size,alignment:MemoryLayout<MIDIEventList>.alignment);defer{raw.deallocate()}
- let list=raw.assumingMemoryBound(to:MIDIEventList.self),first=MIDIEventListInit(list,protocolID)
- words.withUnsafeBufferPointer{_ = MIDIEventListAdd(list,size,first,0,$0.count,$0.baseAddress!)}
+ let list=raw.assumingMemoryBound(to:MIDIEventList.self);var last=MIDIEventListInit(list,protocolID)
+ for(index,words)in packets.enumerated(){last=words.withUnsafeBufferPointer{MIDIEventListAdd(list,size,last,UInt64(index),$0.count,$0.baseAddress!)}}
  owner.receive(UnsafePointer(list),context:UnsafeMutableRawPointer(bitPattern:UInt(owner.endpoint)))
 }
+func input(_ owner:MidiInput,_ words:[UInt32],protocolID:MIDIProtocolID = ._2_0) {inputList(owner,[words],protocolID:protocolID)}
 // A test watchdog bounds a failed owned-lifecycle observation, not product life.
 func pump(_ done:()->Bool) {
  let end=Date().addingTimeInterval(5)
@@ -105,12 +107,23 @@ func pump(_ done:()->Bool) {
    owner.onEvent={_ in};owner.onClosed={error in precondition(error != nil);done=true};try owner.start()
    input(owner,[0x20903c7f],protocolID:._1_0);pump{done};precondition(owner.pendingWords==0)
   }
-  print("MIDI_INPUT_NATIVE_BOUNDS_PASS: callback+handoff backlog overflow is explicit, reusable capacity exceeds lifetime bound, queued-admission stop drains exactly, protocol failure settles")
+  do {
+   let owner=try MidiInput(source:String(uid));var done=false,received:[UInt32]=[]
+   owner.onEvent={event in if event["kind"] as? String == "midi" {let words=event["words"] as! [UInt32],ordinal=event["ordinal"] as! String;received.append(words[0]);DispatchQueue.main.async{try! owner.acknowledge(ordinal)}}}
+   owner.onClosed={error in precondition(error==nil);done=true};try owner.start()
+   let first:[UInt32]=[0x43953c00,0x44953d00],second:[UInt32]=[0x43853c00,0x44853d00]
+   DispatchQueue.concurrentPerform(iterations:2){index in
+    inputList(owner,[Array(repeating:[first[index],0x90000000],count:2048).flatMap{$0},Array(repeating:[second[index],0x10000000],count:2048).flatMap{$0}])
+   }
+   owner.stop();pump{done}
+   precondition(received==[first[0],second[0],first[1],second[1]] || received==[first[1],second[1],first[0],second[0]])
+  }
+  print("MIDI_INPUT_NATIVE_BOUNDS_PASS: explicit callback/handoff overflow, reusable capacity, queued-input drain, protocol failure, concurrent callback list ordering")
  }
 }
 `
-async function source() {
-  const child = spawn(fixture, [], { stdio: ['pipe', 'pipe', 'pipe'] }), ready = deferred(), pending = new Map()
+async function source(protocol = '2') {
+  const child = spawn(fixture, [protocol], { stdio: ['pipe', 'pipe', 'pipe'] }), ready = deferred(), pending = new Map()
   let id = 0, failure = '', resolveClosed
   const closed = new Promise(resolve => { resolveClosed = resolve })
   const lines = createInterface({ input: child.stdout })
@@ -136,7 +149,7 @@ try {
   let selected = await source()
   try {
     const wrong = open({ source: selected.destination }); await assert.rejects(wrong.ready, /not a source/); await assert.rejects(wrong.completion)
-    const received = [], all = deferred(), packets = [[0], [0x43953c03, 0x90012345], Array.from({ length: 160 }, () => [0x43853c00, 0x12340000, 0x43953c03, 0x90012345]).flat()]
+    const received = [], all = deferred(), packets = [[0], [0x43953c03, 0x90012345], [0x33020102, 0], Array.from({ length: 160 }, () => [0x43853c00, 0x12340000, 0x43953c03, 0x90012345]).flat()]
     const expectedWords = packets.flat().length
     let receivedWords = 0
     const input = open(selected, { onPacket(event) { received.push(event); receivedWords += event.words.length; if (receivedWords >= expectedWords) all.resolve() } })
@@ -152,6 +165,15 @@ try {
     assert.ok(received.every(event => event.source === selected.source && event.timestampOrigin === 'packet' && event.protocol === 2))
     assert.equal(final.admittedPackets, String(received.length)); assert.equal(final.acknowledgedPackets, String(received.length)); assert.equal(final.pendingWords, 0)
     console.log('MIDI_INPUT_NATIVE_FIDELITY_PASS: selected source pinning, wrong object refusal, variable-sized/multiple packets, exact host timestamps and UMP words, acknowledged drain')
+  } finally { await selected.close() }
+  selected = await source('1')
+  try {
+    const words = [], all = deferred(), packets = [[0x20953c7f], [0x20b5407f], [0x20e50040], [0x20853c00]]
+    const input = open(selected, { onPacket(event) { words.push(...event.words); if (words.length >= 8) all.resolve() } })
+    assert.equal((await input.ready).protocol, 2)
+    await selected.request({ kind: 'emit', packets }); await all.promise; input.stop(); await input.completion
+    assert.deepEqual(words, [0x40953c00, 0xffff0000, 0x40b54000, 0xffffffff, 0x40e50000, 0x80000000, 0x40853c00, 0])
+    console.log('MIDI_INPUT_NATIVE_MIDI1_PASS: actual MIDI1 source converts note/hold/bend/release into protocol2 delivery through the same consumer')
   } finally { await selected.close() }
   selected = await source()
   try {

@@ -28,11 +28,15 @@ type request = private
   ; output : string  (** A [world.exact_outputs] name. *)
   ; system : string option
   ; messages : message list  (** Original roles and order are retained. *)
+  ; schema : Yojson.Safe.t option
+      (** Canonical request schema. Only an explicitly granted package output
+          may use it; the package baseline remains mandatory. *)
   }
 
 val request_of_json : Yojson.Safe.t -> (request, string) result
 (** Exactly [kind = "exact_output"], [request_id], [output], [messages] and an
-    optional [system]. Each message is exactly [{"role": "user"|"assistant",
+    optional [system] and [schema]. A request schema must be a canonical JSON
+    object; its dialect belongs to the consumer. Each message is exactly [{"role": "user"|"assistant",
     "text": string}]. Unknown roles, extra or duplicate keys, a blank id or no
     message are refused. Roles participate in the retained request digest. *)
 
@@ -43,10 +47,20 @@ val digest : request -> string
     different digest is [Request_id_reused]. *)
 
 type checked
-(** An answer that matched the package's declared schema. Constructed by the
+(** An answer that matched the package's declared baseline schema. The [run]
+    and [validate_answer] paths additionally check a supplied request schema's
+    partial required shape. This does not prove full compliance with a
+    consumer's request-schema dialect. Constructed by the
     [validate] function [run] hands to a call, or strict [final_of_json] decoding. *)
 
 val checked_json : checked -> Yojson.Safe.t
+
+val schema_for_request : output:Lane_addon_types.exact_output -> request -> (Yojson.Safe.t, string) result
+(** Check the exact output name and its request-schema grant, then return the
+    provider requirement. Does not resolve a route or call a provider. *)
+val validate_answer : output:Lane_addon_types.exact_output -> request -> Yojson.Safe.t -> (checked, string) result
+(** Recheck authority and the package baseline, plus the same partial shape
+    check for new and retained results. The request cannot weaken the baseline. *)
 
 type input_refusal =
   | Input_capacity
@@ -130,8 +144,9 @@ type call = validate:(Yojson.Safe.t -> (checked, string) result) -> call_outcome
     [Outcome_unknown]. *)
 
 type runner = lane_key:string -> schema:Yojson.Safe.t -> request -> (call, lane_unavailable) result
-(** Resolves the add-on lane [lane_key] for a call against the package's
-    declared [schema]. It sends nothing; the returned [call] does. *)
+(** Resolves the add-on lane [lane_key] for the permitted provider [schema]
+    (package baseline or request schema). The supplied [validate] still checks
+    the package baseline independently. It sends nothing; the returned [call] does. *)
 
 val run :
   store:Lane_addon_store.t ->
@@ -140,8 +155,10 @@ val run :
   runner:runner ->
   request ->
   (attempt, string) result
-(** A retained [Answered] is checked against the schema the package declares
-    now before it is delivered. One that no longer matches is delivered as
+(** Request-schema permission is checked before dispatch and delivery without
+    replacing an already retained final. A retained [Answered] is checked against
+    the current package baseline and the original request's partial required
+    shape before delivery. One that no longer matches is delivered as
     [Invalid_output] and the provider is not called again.
 
     Request identity is checked before output selection. A refused output

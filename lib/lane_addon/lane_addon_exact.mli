@@ -134,7 +134,9 @@ val run :
     Request identity is checked before output selection. A refused output
     cannot reuse a retained id with another body. New refusals are retained;
     refusing delivery of an existing final records the refusal without
-    replacing the original final. Cancellation is checked after the started
+    replacing the original final. A started attempt without an outcome is
+    retained as [Outcome_unknown] before selection is checked, so disabling an
+    output cannot erase that uncertainty. Cancellation is checked after the started
     record is written and immediately before entering the provider call.
 
     [Error] when [declaration_id] cannot own an add-on lane, or when the

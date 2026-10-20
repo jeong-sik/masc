@@ -258,6 +258,11 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner req
       let previous = match retained with
         | Some record -> record
         | None -> {digest; request = request_to_json request; attempts = []; final = None} in
+      let* previous = match previous.final with
+        | None when List.exists Option.is_none previous.attempts ->
+            let unknown = {previous with final = Some Outcome_unknown} in
+            let* () = save unknown in Ok unknown
+        | None | Some (Call_final _ | Outcome_unknown | Not_allowed _ | Request_id_reused) -> Ok previous in
       match List.find_opt
         (fun (declared : Lane_addon_types.exact_output) -> String.equal declared.name request.output)
         package.exact_outputs with
@@ -285,9 +290,6 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner req
             as final -> final in
         match previous.final with
         | Some final -> Ok (Final (deliver final))
-        | None when List.exists Option.is_none previous.attempts ->
-            let* () = save {previous with final = Some Outcome_unknown} in
-            Ok (Final Outcome_unknown)
         | None ->
           Eio.Fiber.check ();
           match runner ~lane_key ~schema:declared.schema request with

@@ -253,6 +253,9 @@ let test_a_cancelled_call_leaves_its_attempt_started () =
      | exception Eio.Cancel.Cancelled _ -> ());
     check bool "the started attempt stays" true (attempts store "r10" = [ `Null ]);
     let runner, sends, _ = counting_runner store (ref []) in
+    check bool "disabled output refuses delivery of an unresolved attempt" true
+      (match require (Exact.run ~store ~declaration_id ~package:{package with exact_outputs=[]} ~runner (request "r10")) with
+       | Exact.Final (Exact.Not_allowed _) -> true | _ -> false);
     check bool "the next run reads it as unknown, so the claim was released" true
       (run_request store runner (request "r10") = Exact.Final Exact.Outcome_unknown);
     check int "without a send" 0 !sends)

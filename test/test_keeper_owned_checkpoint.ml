@@ -227,6 +227,26 @@ let test_owned_paths_and_history_deletion () = with_session (fun session_dir ->
   (match Store.retain_exact_snapshot ~session_dir snapshot with Store.Not_installed _ -> () | _ -> fail "symlink replaced");
   check bool "dangling symlink evidence retained" true ((Unix.lstat path).Unix.st_kind=Unix.S_LNK))
 
+let test_release_removes_only_the_released_artifact () = with_session (fun session_dir ->
+  let _a, released = accepted "A released" in
+  let _b, kept = accepted "B kept" in
+  let reference = Store.exact_snapshot_reference released in
+  (match Store.release_retained ~session_dir ~reference with
+   | Ok () -> () | Error detail -> fail ("absent retained directory: " ^ detail));
+  Store.retain_exact_snapshot ~session_dir released |> require_installed;
+  Store.retain_exact_snapshot ~session_dir kept |> require_installed;
+  (match Store.release_retained ~session_dir ~reference with
+   | Ok () -> () | Error detail -> fail ("release: " ^ detail));
+  check bool "the released artifact is gone" false (Sys.file_exists (artifact_path session_dir released));
+  assert_snapshot "the other artifact" kept (load session_dir (Store.exact_snapshot_reference kept));
+  (match Store.release_retained ~session_dir ~reference with
+   | Ok () -> () | Error detail -> fail ("a second release: " ^ detail));
+  let path = artifact_path session_dir released in
+  Unix.symlink (Filename.concat session_dir "outside-target") path;
+  (match Store.release_retained ~session_dir ~reference with
+   | Error _ -> () | Ok () -> fail "a symlink was released");
+  check bool "the symlink is left in place" true ((Unix.lstat path).Unix.st_kind = Unix.S_LNK))
+
 let () = run "keeper owned exact checkpoints" ["retention", [
   test_case "A survives B canonical and rolling history" `Quick test_survives_canonical_and_history;
   test_case "same reference retry keeps exact bytes" `Quick test_same_reference_retry;
@@ -237,4 +257,5 @@ let () = run "keeper owned exact checkpoints" ["retention", [
   test_case "uncertain publication requires exact reload and sync" `Quick test_uncertain_publication_reload_and_reconfirm;
   test_case "prepublication cancellation propagates" `Quick test_prepublication_cancellation_propagates;
   test_case "post-commit cancellation retains installation" `Quick test_post_commit_cancellation_keeps_installation;
-  test_case "owned path and history deletion boundaries" `Quick test_owned_paths_and_history_deletion ]]
+  test_case "owned path and history deletion boundaries" `Quick test_owned_paths_and_history_deletion;
+  test_case "release removes only the released artifact" `Quick test_release_removes_only_the_released_artifact ]]

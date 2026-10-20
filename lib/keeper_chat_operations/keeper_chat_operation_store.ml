@@ -882,6 +882,16 @@ let semantic_rows db ~active_only =
       in loop [])
 ;;
 
+(* Executions whose checkpoint references keep retained files alive: every
+   nonterminal execution, and a settled one that still holds a native-call
+   receipt. The startup sweep's inspection and a native-call commit's release
+   both select with this, so they treat the same files as live. *)
+let owns_checkpoint_references (execution : Semantic.t) =
+  not (Semantic.is_terminal execution) || match execution.native_call with
+  | Keeper_native_call.No_native_call -> false
+  | Keeper_native_call.Active _ | Keeper_native_call.Terminal_unacknowledged _ -> true
+;;
+
 type inspection_scope =
   | Outstanding_integrity_audit
   | Pending_inputs
@@ -955,10 +965,7 @@ let inspect_store_with ~scope ~path =
         if chat_only then Ok [] else semantic_rows db ~active_only:false
       | Outstanding_integrity_audit -> if chat_only then Ok [] else
         let* rows = semantic_rows db ~active_only:false in
-        Ok (List.filter (fun (row : Semantic.t) ->
-          not (Semantic.is_terminal row) || match row.native_call with
-          | Keeper_native_call.No_native_call -> false
-          | Keeper_native_call.Active _ | Keeper_native_call.Terminal_unacknowledged _ -> true) rows) in
+        Ok (List.filter owns_checkpoint_references rows) in
     let* () = exec db ~operation:"end read-only inspection" "COMMIT" in
     Ok (Some (chat_operations, batch_member_inputs, semantic_executions))
   in
@@ -2235,6 +2242,30 @@ let direct_native_call store ~operation_id =
   let* execution = direct_execution_with_db store.db operation in
   Ok (match execution with None -> Keeper_native_call.No_native_call | Some execution -> execution.native_call)
 
+(* The references [before] named whose sha256 no execution owning
+   checkpoint references names once [after] is written. Run inside the
+   transaction that wrote [after], so the live set is the one it commits. A
+   retained file is named by its sha256 and the sweep keys liveness the same
+   way, so a sha256 still named by any reference, of any execution, keeps it. *)
+let released_checkpoint_references db ~before ~(after : Semantic.t) =
+  let sha (reference : Keeper_checkpoint_ref.t) = reference.sha256 in
+  let still_named = List.map sha (Semantic.checkpoint_references after) in
+  let dropped = match before with
+    | None -> []
+    | Some before ->
+      List.filter (fun reference -> not (List.mem (sha reference) still_named))
+        (Semantic.checkpoint_references before) in
+  match dropped with
+  | [] -> Ok []
+  | _ :: _ ->
+    let* rows = semantic_rows db ~active_only:false in
+    let live = List.filter owns_checkpoint_references rows
+      |> List.concat_map Semantic.checkpoint_references |> List.map sha in
+    Ok (List.fold_left (fun released reference ->
+        if List.mem (sha reference) live
+           || List.exists (fun kept -> String.equal (sha kept) (sha reference)) released
+        then released else reference :: released) [] dropped |> List.rev)
+
 let update_direct_native_call store ~now ~operation_id ~execution_digest change =
   let* () = ensure_open store in
   let expected_commit = ref None in
@@ -2267,11 +2298,13 @@ let update_direct_native_call store ~now ~operation_id ~execution_digest change 
           | Semantic.Native_call_unsettled -> Native_call_unsettled
           | (Semantic.Invalid_record _ | Semantic.Revision_exhausted) as error ->
             Integrity_error (Semantic.error_to_string error)) in
-      expected_commit := Some (next, ());
-      match current with
-      | None -> insert_semantic store.db next
-      | Some expected when Semantic.to_json expected = Semantic.to_json next -> Ok ()
-      | Some expected -> update_semantic store.db ~expected next) in
+      let* () = match current with
+        | None -> insert_semantic store.db next
+        | Some expected when Semantic.to_json expected = Semantic.to_json next -> Ok ()
+        | Some expected -> update_semantic store.db ~expected next in
+      let* released = released_checkpoint_references store.db ~before:current ~after:next in
+      expected_commit := Some (next, released);
+      Ok released) in
   confirm_semantic_transition store expected_commit result
 
 let resolve_direct_gate store ~now ~operation_id ~resolution =

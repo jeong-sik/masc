@@ -169,9 +169,17 @@ val direct_checkpoint : t -> operation_id:Operation.Operation_id.t -> (Keeper_se
 val direct_native_call : t -> operation_id:Operation.Operation_id.t ->
   (Keeper_native_call.state, error) result
 val update_direct_native_call : t -> now:float -> operation_id:Operation.Operation_id.t ->
-  execution_digest:string -> Keeper_native_call.change -> (unit, error) result
+  execution_digest:string -> Keeper_native_call.change ->
+  (Keeper_checkpoint_ref.t list, error) result
 (** Owner-serialized native-call identity and checkpoint CAS. Every change
-    verifies the current direct-operation execution digest. *)
+    verifies the current direct-operation execution digest. [Ok released]
+    lists, once per sha256, the references this commit stopped naming that no
+    execution in this store still names, read in the committing transaction
+    with the same selection {!inspect_outstanding} gives the startup sweep.
+    Their retained files are garbage once the commit is confirmed. A
+    [Checkpoint] releases the call's previous checkpoint, a [Bind] that
+    replaces a retired call releases that call's references, and a
+    [Terminal] keeps both references of its call and releases none. *)
 val defer_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t -> execution_digest:string ->
   checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Operation.t, error) result
 val resume_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t ->

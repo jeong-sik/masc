@@ -1555,8 +1555,10 @@ let save_agent_core_if_absent ~session_dir candidate =
 ;;
 
 (* Accepted continuations are not observational rolling history: nothing
-   expires them while a semantic execution names them. Once none does,
-   [Keeper_retained_checkpoint_sweep] removes them at server startup. *)
+   expires them while a semantic execution names them. A native-call commit
+   that stops naming one removes it through [release_retained];
+   [Keeper_retained_checkpoint_sweep] removes, at server startup, what a crash
+   before that removal left and what other journal transitions stop naming. *)
 let retained_dirname = "accepted-checkpoints"
 
 let retained_checkpoint_path ~session_dir (reference : Keeper_checkpoint_ref.t) =
@@ -1657,6 +1659,30 @@ let retain_exact_snapshot_with ~write_checkpoint_bytes ~session_dir snapshot =
 
 let retain_exact_snapshot ~session_dir snapshot =
   retain_exact_snapshot_with ~write_checkpoint_bytes ~session_dir snapshot
+
+let release_retained ~session_dir ~reference =
+  let release session_dir =
+    let retained_dir = Filename.concat session_dir retained_dirname in
+    let path = retained_checkpoint_path ~session_dir reference in
+    let unlink () =
+      match Fs_compat.inspect_owned_directory_chain
+              ~ownership_root:(Filename.dirname session_dir) retained_dir with
+      | Error rejection -> Error (Fs_compat.owned_directory_chain_rejection_to_string rejection)
+      | Ok Fs_compat.Owned_directory_missing -> Ok ()
+      | Ok (Fs_compat.Owned_directory _) ->
+        (match Unix.lstat path with
+         | { Unix.st_kind = Unix.S_REG; _ } -> Unix.unlink path; Ok ()
+         | { Unix.st_kind = (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK
+                            | Unix.S_FIFO | Unix.S_SOCK) as kind; _ } ->
+           Error (Printf.sprintf "%s is a %s, not a retained checkpoint"
+                    path (Fs_compat.file_kind_to_string kind))
+         | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ())
+    in
+    match Eio_guard.run_in_systhread ~label:"keeper.checkpoint.retained.release" unlink with
+    | result -> result
+    | exception (Unix.Unix_error _ as exn) -> Error (Printexc.to_string exn)
+  in
+  with_session_lock ~session_dir release |> Result.join
 
 (* Who a save keeps a lineage for. Only a Keeper's own saves do; a save by a
    tool or a test writes the file and keeps nothing. *)

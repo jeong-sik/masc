@@ -103,9 +103,10 @@ let run_case ~how root =
         ~api:(Keeper_native_call.New_input {seed_message_count=0})
         ~seed_checkpoint:checkpoint ~locator:(Option.get !locator)
       |> require "native call" in
-    Registry.bind_direct_native_call ~base_path:root ~keeper_name ~operation_id
-      ~execution_digest:operation.execution_digest
-      ~observed:Keeper_native_call.No_native_call ~call |> require "bind native call";
+    check int "a first bind releases no checkpoint" 0
+      (List.length (Registry.bind_direct_native_call ~base_path:root ~keeper_name ~operation_id
+        ~execution_digest:operation.execution_digest
+        ~observed:Keeper_native_call.No_native_call ~call |> require "bind native call"));
     let read () = Registry.direct_native_call ~base_path:root ~keeper_name ~operation_id
       |> require "read native call" in
     let call_before = read () in

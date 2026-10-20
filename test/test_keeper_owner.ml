@@ -2366,9 +2366,10 @@ let test_operation_id_interrupt_leaves_an_autonomous_slot_holder_alone () =
         ~call_id:"019a0010-1000-7000-8000-000000000020" ~runtime_id:"native.primary"
         ~operation_digest:operation.execution_digest ~api:(Keeper_native_call.New_input {seed_message_count=0})
         ~seed_checkpoint:checkpoint ~locator |> Result.get_ok in
-      Owner.bind_direct_native_call owner ~operation_id:operation.operation_id
-        ~execution_digest:operation.execution_digest ~observed:Keeper_native_call.No_native_call ~call
-        |> owner_ok;
+      check int "a first bind releases no checkpoint" 0
+        (List.length (Owner.bind_direct_native_call owner ~operation_id:operation.operation_id
+          ~execution_digest:operation.execution_digest ~observed:Keeper_native_call.No_native_call ~call
+          |> owner_ok));
       (* Active native call and no terminal receipt: a [Turn_exception]
          failure leaves the call for restart recovery, so the row stays
          Running. *)
@@ -3196,9 +3197,10 @@ let test_startup_requeues_exact_native_call () =
       ~call_id:"019a0010-1000-7000-8000-000000000010" ~runtime_id:"native.primary"
       ~operation_digest:operation.execution_digest ~api:(Keeper_native_call.New_input {seed_message_count=0})
       ~seed_checkpoint:checkpoint ~locator |> Result.get_ok in
-    Keeper_chat_operation_store.update_direct_native_call seed ~now:12. ~operation_id
-      ~execution_digest:operation.execution_digest
-      (Keeper_native_call.Bind {observed=Keeper_native_call.No_native_call; call}) |> Result.get_ok;
+    check int "a first bind releases no checkpoint" 0
+      (List.length (Keeper_chat_operation_store.update_direct_native_call seed ~now:12. ~operation_id
+        ~execution_digest:operation.execution_digest
+        (Keeper_native_call.Bind {observed=Keeper_native_call.No_native_call; call}) |> Result.get_ok));
     Keeper_chat_operation_store.close seed |> Result.get_ok;
     Eio.Switch.run @@ fun sw ->
     let owner = Owner.start ~sw
@@ -3213,27 +3215,32 @@ let test_startup_requeues_exact_native_call () =
     let observed = Owner.direct_native_call owner ~operation_id |> owner_ok in
     check bool "Owner restores exact native witness" true
       (Keeper_native_call.equal_state observed (Keeper_native_call.Active call));
-    Owner.bind_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
-      ~observed ~call |> owner_ok;
+    check int "rebinding the restored call releases no checkpoint" 0
+      (List.length (Owner.bind_direct_native_call owner ~operation_id
+        ~execution_digest:operation.execution_digest ~observed ~call |> owner_ok));
     let advanced_checkpoint = Keeper_checkpoint_ref.create
       ~trace_id:checkpoint.trace_id ~turn_count:2
       ~canonical_checkpoint_bytes:"native progress after restart" |> Result.get_ok in
-    Owner.checkpoint_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
-      ~call_id:call.call_id ~observed:checkpoint ~checkpoint:advanced_checkpoint |> owner_ok;
+    check int "advancing off the seed keeps the seed" 0
+      (List.length (Owner.checkpoint_direct_native_call owner ~operation_id
+        ~execution_digest:operation.execution_digest ~call_id:call.call_id ~observed:checkpoint
+        ~checkpoint:advanced_checkpoint |> owner_ok));
     (match Owner.checkpoint_direct_native_call owner ~operation_id
        ~execution_digest:operation.execution_digest ~call_id:call.call_id
        ~observed:checkpoint ~checkpoint:advanced_checkpoint with
      | Error (Owner.Operation_rejected (Keeper_chat_operation_store.Invalid_input _)) -> ()
      | Error error -> fail ("stale callback fenced Owner: " ^ Owner.error_to_string error)
-     | Ok () -> fail "stale callback was accepted");
+     | Ok _ -> fail "stale callback was accepted");
     (match Owner.direct_native_call owner ~operation_id |> owner_ok with
      | Keeper_native_call.Active current ->
        check bool "stale callback keeps committed checkpoint" true
          (Keeper_checkpoint_ref.equal current.checkpoint advanced_checkpoint)
      | _ -> fail "stale callback changed active native state");
-    Owner.terminal_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
-      ~call_id:call.call_id ~disposition:{Agent_core.Agent.outcome=Agent_core.Agent.Terminal_succeeded;
-        recovery=Agent_core.Agent.Retire} |> owner_ok;
+    check int "a terminal receipt keeps both references" 0
+      (List.length (Owner.terminal_direct_native_call owner ~operation_id
+        ~execution_digest:operation.execution_digest ~call_id:call.call_id
+        ~disposition:{Agent_core.Agent.outcome=Agent_core.Agent.Terminal_succeeded;
+          recovery=Agent_core.Agent.Retire} |> owner_ok));
     ignore (Owner.succeed_running_operation owner ~operation_id ~outcome_ref:"native-owner-receipt" |> owner_ok);
     check bool "Owner receipt retires native witness" true
       (Keeper_native_call.equal_state Keeper_native_call.No_native_call (Owner.direct_native_call owner ~operation_id |> owner_ok)))

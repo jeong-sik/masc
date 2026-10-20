@@ -50,6 +50,22 @@ let state binding =
   Owner.direct_native_call ~base_path:binding.base_path
     ~keeper_name:binding.keeper_name ~operation_id:binding.operation_id |> owner
 
+(* [released] comes from a confirmed Owner commit: no execution of this
+   keeper names these references any more. No other keeper's store can name
+   them either, because [retain] binds the checkpoint bytes, and so their
+   sha256, to this keeper's trace id. The files are removed now rather than at
+   the next startup, because a long call supersedes one full transcript per
+   checkpoint. A removal that fails leaves the file for
+   [Keeper_retained_checkpoint_sweep] and does not fail the call. *)
+let release binding released =
+  List.iter (fun (reference : Keeper_checkpoint_ref.t) ->
+    match Checkpoint.release_retained ~session_dir:binding.session_dir ~reference with
+    | Ok () -> ()
+    | Error detail ->
+      Log.Keeper.warn ~keeper_name:binding.keeper_name
+        "released native checkpoint %s was not removed operation=%s: %s" reference.sha256
+        (Keeper_chat_operation.Operation_id.to_string binding.operation_id) detail) released
+
 let runtime_id resumed = resumed.call.runtime_id
 let system_prompt (resumed : resumed) = resumed.system_prompt
 let checkpoint (resumed : resumed) = resumed.checkpoint
@@ -157,10 +173,11 @@ let reconcile_terminal binding (call : Native.t) =
   match terminal with
   | None -> Ok None
   | Some terminal ->
-    let* () = Owner.terminal_direct_native_call ~base_path:binding.base_path
+    let* released = Owner.terminal_direct_native_call ~base_path:binding.base_path
         ~keeper_name:binding.keeper_name ~operation_id:binding.operation_id
         ~execution_digest:binding.execution_digest ~call_id:call.call_id
         ~disposition:terminal.disposition |> owner in
+    release binding released;
     Ok (Some terminal)
 
 (* Core records the terminal disposition under cancellation protection, but a
@@ -350,10 +367,11 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
     | None -> Error "native checkpoint was emitted before locator publication"
     | Some call ->
       let* reference = retain binding checkpoint in
-      let* () = Owner.checkpoint_direct_native_call ~base_path:binding.base_path
+      let* released = Owner.checkpoint_direct_native_call ~base_path:binding.base_path
           ~keeper_name:binding.keeper_name ~operation_id:binding.operation_id
           ~execution_digest:binding.execution_digest ~call_id
           ~observed:call.checkpoint ~checkpoint:reference |> owner in
+      release binding released;
       let* next = Native.advance call ~observed:call.checkpoint ~checkpoint:reference in
       current_call := Some next;
       Ok () in
@@ -386,13 +404,15 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
     current_call := Some call;
     Owner.bind_direct_native_call ~base_path:binding.base_path
       ~keeper_name:binding.keeper_name ~operation_id:binding.operation_id
-      ~execution_digest:binding.execution_digest ~observed ~call |> owner in
+      ~execution_digest:binding.execution_digest ~observed ~call |> owner
+    |> Result.map (release binding) in
   let on_terminal_disposition disposition =
     let* checkpoint = call_checkpoint binding config agent_ref in
     let* () = advance checkpoint in
     Owner.terminal_direct_native_call ~base_path:binding.base_path
       ~keeper_name:binding.keeper_name ~operation_id:binding.operation_id
-      ~execution_digest:binding.execution_digest ~call_id ~disposition |> owner in
+      ~execution_digest:binding.execution_digest ~call_id ~disposition |> owner
+    |> Result.map (release binding) in
   let checkpoint_sink (snapshot : Agent.checkpoint_snapshot) =
     let checkpoint = {snapshot.checkpoint with Agent_core.Checkpoint.session_id=binding.session_id;
       working_context=(match config.checkpoint_sidecar with

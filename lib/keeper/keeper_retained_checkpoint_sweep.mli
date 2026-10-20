@@ -10,7 +10,12 @@
     The file is written before the execution naming it commits. The pass is
     therefore run only by the server process that holds the BasePath writer
     lease, before its scheduler starts and before any keeper runs, when no
-    retention can be in flight. *)
+    retention can be in flight.
+
+    A native-call commit removes the files it stops naming at once
+    ({!Keeper_checkpoint_store.release_retained}). This pass removes what a
+    crash between such a commit and its removal left, and what the other
+    journal transitions stop naming. *)
 
 type report =
   { live_references : int  (** distinct checkpoints named by unsettled executions *)

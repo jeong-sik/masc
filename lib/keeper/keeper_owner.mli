@@ -378,11 +378,16 @@ val restart_interrupted_operations : t -> Chat_operation.t list
 val direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, error) result
 val direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_native_call.state, error) result
 val bind_direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
-  observed:Keeper_native_call.state -> call:Keeper_native_call.t -> (unit, error) result
+  observed:Keeper_native_call.state -> call:Keeper_native_call.t -> (Keeper_checkpoint_ref.t list, error) result
 val checkpoint_direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
-  call_id:string -> observed:Keeper_checkpoint_ref.t -> checkpoint:Keeper_checkpoint_ref.t -> (unit, error) result
+  call_id:string -> observed:Keeper_checkpoint_ref.t -> checkpoint:Keeper_checkpoint_ref.t ->
+  (Keeper_checkpoint_ref.t list, error) result
 val terminal_direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
-  call_id:string -> disposition:Agent_core.Agent.execution_terminal_disposition -> (unit, error) result
+  call_id:string -> disposition:Agent_core.Agent.execution_terminal_disposition ->
+  (Keeper_checkpoint_ref.t list, error) result
+(** The three native-call commits return the references the commit released,
+    as {!Keeper_chat_operation_store.update_direct_native_call} computes them.
+    The caller that owns the session directory removes their retained files. *)
 val defer_direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
   checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Chat_operation.t, error) result
 val resume_direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t ->

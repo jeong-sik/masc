@@ -192,7 +192,8 @@ type _ command =
       (Keeper_semantic_execution.gate_checkpoint option, error) result command
   | Direct_native_call : Operation_id.t -> (Keeper_native_call.state, error) result command
   | Update_direct_native_call :
-      {operation_id:Operation_id.t; execution_digest:string; change:Keeper_native_call.change} -> (unit, error) result command
+      {operation_id:Operation_id.t; execution_digest:string; change:Keeper_native_call.change} ->
+      (Keeper_checkpoint_ref.t list, error) result command
   | Defer_direct_checkpoint :
       { operation_id : Operation_id.t; execution_digest : string;
         checkpoint : Keeper_semantic_execution.gate_checkpoint } ->
@@ -1330,7 +1331,9 @@ let start
                | Some operation -> Ok operation
                | None -> Error (Chat_operation_store.Unknown_operation operation_id)
              in
-             let* () =
+             (* A terminal receipt keeps both references of its call, so
+                this commit releases no retained checkpoint. *)
+             let* (_ : Keeper_checkpoint_ref.t list) =
                Chat_operation_store.update_direct_native_call
                  t.operation_store
                  ~now:(t.now ())

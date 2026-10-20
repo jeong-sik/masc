@@ -93,13 +93,15 @@ let make_call (operation : Chat_operation.t) =
 (* Bind a native call to the claimed operation the way the native dispatch
    does, leaving it Active. *)
 let bind_active_call owner (operation : Chat_operation.t) =
-  owner_ok
-    (Owner.bind_direct_native_call
-       owner
-       ~operation_id:operation.operation_id
-       ~execution_digest:operation.execution_digest
-       ~observed:Native.No_native_call
-       ~call:(make_call operation))
+  check int "a first bind releases no checkpoint" 0
+    (List.length
+       (owner_ok
+          (Owner.bind_direct_native_call
+             owner
+             ~operation_id:operation.operation_id
+             ~execution_digest:operation.execution_digest
+             ~observed:Native.No_native_call
+             ~call:(make_call operation))))
 ;;
 
 let wait_until ~clock ~what condition =
@@ -372,13 +374,15 @@ let test_recorded_disposition_settles_as_before () =
       | None -> fail "the executor claimed nothing" in
     let owner = Option.get !owner_cell in
     bind_active_call owner operation;
-    owner_ok
-      (Owner.terminal_direct_native_call
-         owner
-         ~operation_id:operation.operation_id
-         ~execution_digest:operation.execution_digest
-         ~call_id
-         ~disposition:retired_disposition);
+    check int "a terminal receipt keeps both references" 0
+      (List.length
+         (owner_ok
+            (Owner.terminal_direct_native_call
+               owner
+               ~operation_id:operation.operation_id
+               ~execution_digest:operation.execution_digest
+               ~call_id
+               ~disposition:retired_disposition)));
     cancelled_by_turn
   in
   let owner =
@@ -436,13 +440,15 @@ let test_success_over_an_unknown_effect_receipt_is_not_recorded () =
       | None -> fail "the executor claimed nothing" in
     let owner = Option.get !owner_cell in
     bind_active_call owner operation;
-    owner_ok
-      (Owner.terminal_direct_native_call
-         owner
-         ~operation_id:operation.operation_id
-         ~execution_digest:operation.execution_digest
-         ~call_id
-         ~disposition:unknown_effect_disposition);
+    check int "a terminal receipt keeps both references" 0
+      (List.length
+         (owner_ok
+            (Owner.terminal_direct_native_call
+               owner
+               ~operation_id:operation.operation_id
+               ~execution_digest:operation.execution_digest
+               ~call_id
+               ~disposition:unknown_effect_disposition)));
     Owner.Operation_succeeded { outcome_ref = "claimed" }
   in
   let owner =

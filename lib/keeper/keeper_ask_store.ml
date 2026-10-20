@@ -164,7 +164,7 @@ let load_events_at_path_result ~base_path ~path =
 let validate_owner ~base_path ~path ~keeper_name events =
   List.find_map (fun (index, event) ->
     match event with
-    | Keeper_ask.Asked ask when not (String.equal ask.keeper_name keeper_name)
+    | Keeper_ask.Asked ask when not (String.equal ask.Keeper_ask.keeper_name keeper_name)
         || not (String.equal (log_path ~base_path ~keeper_name:ask.keeper_name) path) ->
         Some (Log_decode_failed { path; line = index + 1;
           detail = "Asked record belongs to a different canonical Keeper log" })
@@ -221,7 +221,7 @@ let discover_rows_result ~base_path =
           | Ok None -> Some (Unreadable_log (Log_read_failed
               { path; detail = "discovered ask log disappeared before its owned read" }))
           | Ok (Some events) ->
-              match List.find_map (function Keeper_ask.Asked ask -> Some ask.keeper_name
+              match List.find_map (function Keeper_ask.Asked ask -> Some ask.Keeper_ask.keeper_name
                   | Keeper_ask.Answered _ | Keeper_ask.Withdrawn _ -> None) events with
               | None ->
                   if events = [] then None else Some (Unreadable_log (Log_decode_failed

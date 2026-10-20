@@ -178,9 +178,9 @@ let validate_response (q : question) response =
       if is_blank text then [ Free_text_blank { question_id = q.question_id } ] else []
   | Chose { choice_ids } -> validate_chose q choice_ids
 
-let parse_answers ~ask ~submissions =
+let parse_question_answers ~questions ~submissions =
   let question_by_id question_id =
-    List.find_opt (fun (q : question) -> String.equal q.question_id question_id) ask.questions
+    List.find_opt (fun (q : question) -> String.equal q.question_id question_id) questions
   in
   let submitted_twice =
     List.map
@@ -200,7 +200,7 @@ let parse_answers ~ask ~submissions =
       (fun (q : question) ->
         if List.exists (fun (qid, _) -> String.equal qid q.question_id) submissions then None
         else Some (Unanswered { question_id = q.question_id }))
-      ask.questions
+      questions
   in
   match submitted_twice @ per_submission @ unanswered with
   | _ :: _ as errors -> Error errors
@@ -213,7 +213,9 @@ let parse_answers ~ask ~submissions =
              match List.assoc_opt q.question_id submissions with
              | Some response -> Some { question_id = q.question_id; response }
              | None -> None)
-           ask.questions)
+           questions)
+
+let parse_answers ~ask ~submissions = parse_question_answers ~questions:ask.questions ~submissions
 
 (* {1 Responders} *)
 
@@ -225,8 +227,8 @@ type responder = {
 
 (* {1 Events} *)
 
-type event =
-  | Asked of ask
+type 'ask lifecycle_event =
+  | Asked of 'ask
   | Answered of {
       ask_id : string;
       answers : answer list;
@@ -234,6 +236,8 @@ type event =
       answered_at : float;
     }
   | Withdrawn of { ask_id : string; reason : string; withdrawn_at : float }
+
+type event = ask lifecycle_event
 
 type resolution =
   | Open
@@ -258,14 +262,15 @@ let resolve rows ask_id f =
       else (id, (a, r)))
     rows
 
-let fold_events events =
+let fold_lifecycle ~ask_id:id_of events =
   let rows =
     List.fold_left
       (fun rows event ->
         match event with
         | Asked a ->
-            if List.exists (fun (id, _) -> String.equal id a.ask_id) rows then rows
-            else (a.ask_id, (a, Open)) :: rows
+            let asked_id = id_of a in
+            if List.exists (fun (id, _) -> String.equal id asked_id) rows then rows
+            else (asked_id, (a, Open)) :: rows
         | Answered { ask_id; answers; responder; answered_at } ->
             resolve rows ask_id (Answered_by { answers; responder; answered_at })
         | Withdrawn { ask_id; reason; withdrawn_at } ->
@@ -273,6 +278,8 @@ let fold_events events =
       [] events
   in
   List.rev rows
+
+let fold_events events = fold_lifecycle ~ask_id:(fun (a : ask) -> a.ask_id) events
 
 let open_asks events =
   List.filter_map

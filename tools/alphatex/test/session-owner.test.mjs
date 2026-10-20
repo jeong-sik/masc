@@ -1,3 +1,4 @@
+import { StatusReader } from '../status-reader.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
@@ -13,7 +14,7 @@ test('an attached snapshot exports to persistent project storage and drains the 
   const timeline={duration:1,channels:0,midi:new Map(),manifest:{state:'recorded',input:{name:'Interface'}}}
   let completeExport
   const slot=`session-owner-${randomUUID()}`
-  globalThis[slot]={process,join,resolve,randomUUID,safeText:String,emitKeypressEvents(){},
+  globalThis[slot]={ StatusReader,process,join,resolve,randomUUID,safeText:String,emitKeypressEvents(){},
     mkdir:async path=>observed.mkdir.push(path),devices:async()=>({audio:[],midi:[]}),midiDestinations:async()=>[],readCapture:async()=>timeline,
     exportMidiClips:async(value,target)=>{observed.exports.push({value,target});await new Promise(resolve=>{completeExport=resolve});return [join(target,'keys.midi2')]},
     record(){throw new Error('Unexpected input acquisition')},spawn(){throw new Error('Unexpected player')},

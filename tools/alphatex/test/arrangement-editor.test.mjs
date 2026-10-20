@@ -1,3 +1,4 @@
+import { StatusReader } from '../status-reader.mjs'
 import { newProject, editProject, PPQ } from '../sequencer-project.mjs'
 import { importPhraseDocument } from '../phrase-arrangement.mjs'
 import { newEditor, editorCommand } from '../sequencer-editor.mjs'
@@ -95,7 +96,7 @@ async function controller(options={}){
     async terminate(){observed.terminated=true}
   }
   const slot=`arrange-controller-${randomUUID()}`
-  globalThis[slot]={process,Worker:OwnedWorker,arrangementSchedule,arrangementRoute,selectArrangementRoute,arrangementPlaybackRequest,...editorAPI,join,dirname,resolve,tmpdir,randomUUID,
+  globalThis[slot]={ StatusReader,process,Worker:OwnedWorker,arrangementSchedule,arrangementRoute,selectArrangementRoute,arrangementPlaybackRequest,...editorAPI,join,dirname,resolve,tmpdir,randomUUID,
     practiceEnabled, emitKeypressEvents(){},safeText:String,recordingEpoch,recordingCorrectionContext,recordingCorrectionCapture,calibrationMilliseconds,calibrationResidual,validateCalibrationCapture,
     liveMidiPlan, calibrationSelection, midiDestinations:async()=>[],
     captureFluidSound(path){

@@ -1,3 +1,4 @@
+import { StatusReader } from '../status-reader.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -51,7 +52,7 @@ async function controller(options = {}) {
     }
   }
   const slot = `sequencer-${randomUUID()}`
-  globalThis[slot] = {
+  globalThis[slot] = { StatusReader,
     process, InstrumentPicker, MidiSourcePicker, pickerFooter, selectionLabel, defaultStateDirectory: () => '/synthetic-vst',
     snapshotWriter: () => async value => { observed.snapshots.push(value) },
     captureVstSound(selection) { observed.soundCaptures.push(selection); return options.capture?.(selection) ?? { promise: Promise.resolve(frozenSound(selection)), cancel() {} } },

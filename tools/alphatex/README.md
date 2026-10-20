@@ -301,6 +301,16 @@ with the locked dependencies. The Sonivox license is in alphaTab's
 JZZ and JZZ MIDI SMF are MIT-licensed; their notices ship with the pinned packages.
 ## Music library
 
+`Ctrl-L` opens the full current status and source paths in the library, phrase
+editor, arrangement editor and recording/take screen. Long errors and recovery
+paths wrap to the terminal width and can be scrolled with arrows, Page Up/Down
+and Home/End. Esc, q, Enter or Ctrl-L closes only the reading. `!` is the normal
+browsing shortcut and `:status` is an argument-free alias. Command drafts and
+instrument selection survive Ctrl-L; ordinary save/edit/play/record keys are
+consumed while reading. Existing work continues without pause or finalization.
+The body is fixed at open; reopen to observe a later status. This is not a
+history of overwritten statuses or recovery output printed only after exit.
+
 `masc-alphatex --music` opens a plain terminal library for new phrases,
 arrangements and audio/MIDI recordings. It also lists JSON projects under
 `--project-root` and take directories under `--session-root`. Choose with arrows

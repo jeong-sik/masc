@@ -16,6 +16,7 @@
     "cli-truncate": "^6.1.1",
     "jzz": "1.9.6",
     "jzz-midi-smf": "1.9.9",
+    "string-width": "8.3.0",
     "tonal": "6.5.1"
   }
 }

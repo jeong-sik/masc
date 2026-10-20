@@ -178,6 +178,40 @@ test('an admitted analysis export drains on close while retaining the original m
   assert.deepEqual(view.observed.saved.at(-1),initial)
 })
 
+for (const opening of ['shortcut', 'command']) {
+  test(`open phrase status owns edit, save, record and playback keys (${opening})`, async () => {
+    const view = await controller()
+    try {
+      view.command('title Retained before reading'); await flush()
+      const before = {
+        saved: view.observed.saved.length,
+        workers: view.observed.workers.map(worker => worker.requests.length),
+      }
+      if (opening === 'shortcut') view.key(undefined, '!')
+      else view.command('status')
+
+      for (const name of ['s', 'space', 'r', 'up', 'down', 'pageup', 'pagedown', 'home', 'end']) view.key(name)
+      view.key(undefined, ':')
+      view.key(undefined, 'title Must not be admitted')
+      await flush()
+      assert.equal(view.observed.saved.length, before.saved)
+      assert.equal(view.observed.players, 0)
+      assert.deepEqual(view.observed.workers.map(worker => worker.requests.length), before.workers)
+      assert.equal(view.observed.native.length, 0)
+      assert.equal(view.observed.soundCaptures.length, 0)
+      assert.equal(view.observed.sessions, 0)
+
+      view.key('return'); view.command('save'); await flush()
+      assert.equal(view.observed.saved.at(-1).title, 'Retained before reading')
+      view.command('title Edited after reading'); view.command('save'); await flush()
+      assert.equal(view.observed.saved.at(-1).title, 'Edited after reading')
+    } finally {
+      view.signal.abort()
+      await view.done
+    }
+  })
+}
+
 test('reopened document auditions its frozen sound without consulting the picker', async () => {
   const selection = { plugin_path: '/synth.vst3', plugin_name: null, preset_path: '/removed.vstpreset', name: 'Bass' }
   const document = editor.editorSound(editor.editorCommand(editor.newEditor(), 'note C4 0 1').editor, frozenSound(selection)).project

@@ -334,6 +334,38 @@ async function closeController(view) {
   for (const ump of view.observed.umpEditors) ump.finish({changed:false})
   await view.done
 }
+
+for (const opening of ['shortcut', 'command']) {
+  test(`open arrangement status owns edit, save, record and playback keys (${opening})`, async () => {
+    const view = await controller()
+    try {
+      await primeWave(view)
+      view.command('title Retained before reading'); await flush()
+      const before = {
+        requests: view.observed.requests.length,
+        captures: view.observed.captures.length,
+        players: view.observed.players.length,
+      }
+      if (opening === 'shortcut') view.key(undefined, '!')
+      else view.command('status')
+
+      for (const name of ['s', 'space', 'r', 'up', 'down', 'pageup', 'pagedown', 'home', 'end']) view.key(name)
+      view.key(undefined, ':')
+      view.key(undefined, 'title Must not be admitted')
+      await flush()
+      assert.equal(view.observed.requests.length, before.requests)
+      assert.equal(view.observed.captures.length, before.captures)
+      assert.equal(view.observed.players.length, before.players)
+
+      // Return closes the reader, without dispatching the swallowed command.
+      view.key('return'); view.command('save'); await flush()
+      assert.equal(view.observed.saved.at(-1).project.title, 'Retained before reading')
+      view.key('space'); await flush()
+      assert.equal(view.observed.requests.at(-1).kind, 'prepare-wave')
+    } finally { await closeController(view) }
+  })
+}
+
 test('explicit MIDI selection cannot route a WAV arrangement to default audio; choosing audio clears MIDI bindings',async()=>{
   const view=await controller()
   try {

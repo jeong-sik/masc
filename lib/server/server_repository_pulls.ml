@@ -961,3 +961,38 @@ let start ~sw ~clock ~config =
       loop ()
     in
     loop ())
+
+(* --- Lane Add-on GitHub reads --- *)
+
+let lane_addon_github ~now ~http_post ~(config : Workspace.config) : Lane_addon_records.github =
+  fun ~repository_id ->
+  match resolve_reader ~config with
+  | Error reader -> Error ("the PR reader is not ready: " ^ Yojson.Safe.to_string (reader_to_yojson reader))
+  | Ok { token; endpoint; keeper = _ } ->
+    (match Repo_store.find ~base_path:config.base_path repository_id with
+     | Error detail -> Error detail
+     | Ok repo ->
+       (match github_slug_of_remote ~host:endpoint.github_host repo.Repo_manager_types.url with
+        | None -> Error (Printf.sprintf "repository %s has no remote on %s" repository_id endpoint.github_host)
+        | Some slug ->
+          let owner, name =
+            match String.index_opt slug '/' with
+            | Some i -> String.sub slug 0 i, String.sub slug (i + 1) (String.length slug - i - 1)
+            | None -> slug, ""
+          in
+          let failed failure = Error (Yojson.Safe.to_string (failure_to_yojson failure)) in
+          let post body =
+            match http_post ~url:endpoint.graphql_url ~token ~body with
+            | Error message -> failed (Transport_failed message)
+            | Ok response ->
+              (match failure_of_status ~now_s:(now ()) response with
+               | Some failure -> failed failure
+               | None ->
+                 (match Yojson.Safe.from_string response.body with
+                  | exception Yojson.Json_error message -> failed (Response_unreadable message)
+                  | json ->
+                    (match field "errors" json with
+                     | Some (`List (_ :: _ as errors)) -> failed (failure_of_graphql_errors ~response errors)
+                     | Some _ | None -> Ok json)))
+          in
+          Ok { Lane_addon_records.owner; name; post }))

@@ -722,6 +722,191 @@ let test_a_wiki_refuses_a_cursor_it_did_not_give_and_read_file () =
     check string "another spelling of a cursor" "not_allowed" (text "status" (result_of "y3" worker));
     check string "read_file on a wiki" "not_allowed" (text "status" (result_of "y4" worker)))
 
+let github_granted = declaration ^ {|[[binding.records]]
+source_id="masc-prs"
+kind="github_pulls"
+repository_id="masc"
+|}
+
+let contains ~needle haystack =
+  let n = String.length needle in
+  let rec at i = i + n <= String.length haystack && (String.sub haystack i n = needle || at (i + 1)) in
+  at 0
+
+let connection ?next nodes =
+  `Assoc [ "pageInfo", `Assoc [ "hasNextPage", `Bool (Option.is_some next)
+                              ; "endCursor", (match next with Some cursor -> `String cursor | None -> `Null) ]
+         ; "nodes", `List nodes ]
+
+let in_data json = `Assoc [ "data", json ]
+
+let pull_node ?(author = `Assoc [ "login", `String "codex" ]) ~id ~number ~merged ~merge_commit () =
+  `Assoc [ "id", `String id; "number", `Int number; "title", `String (Printf.sprintf "PR %d" number)
+         ; "body", `String "why it changed"; "merged", `Bool merged
+         ; "mergedAt", (if merged then `String "2026-10-20T10:00:00Z" else `Null)
+         ; "mergeCommit", (match merge_commit with Some oid -> `Assoc [ "oid", `String oid ] | None -> `Null)
+         ; "author", author ]
+
+let review_comment id =
+  `Assoc [ "databaseId", `Int id; "author", `Assoc [ "login", `String "pangyo-preachers" ]
+         ; "createdAt", `String "2026-10-20T09:00:00Z"; "path", `String "lib/x.ml"; "line", `Int 3
+         ; "body", `String (Printf.sprintf "comment %d" id) ]
+
+let review ~id ~database_id ~comments =
+  `Assoc [ "id", `String id; "databaseId", `Int database_id; "author", `Assoc [ "login", `String "be-sleepers" ]
+         ; "submittedAt", `String "2026-10-20T09:30:00Z"; "state", `String "APPROVED"; "body", `String "looks right"
+         ; "comments", comments ]
+
+(* GitHub as the fixture answers it: the first commit is PR 11's merge commit
+   and PR 11 has two pages of reviews, the first review two pages of comments;
+   the second commit belongs to PR 12, which was not merged, and to PR 14,
+   which was merged as another commit; the third is PR 13's merge commit,
+   written by a deleted account. [merged] lists the commits a pull request
+   merged; a first commit outside it is one GitHub does not hold. Every
+   request is kept in [posts]. *)
+let github_fixture ?(posts = ref []) ~merged (first, second, third) : Lane_addon_records.github =
+  fun ~repository_id ->
+  if repository_id <> "masc" then Error ("no repository " ^ repository_id)
+  else
+    Ok { Lane_addon_records.owner = "jeong-sik"; name = "masc"; post = fun body ->
+        posts := body :: !posts;
+        let query = text "query" body and variables = member "variables" body in
+        let var key = match member key variables with `String value -> Some value | _ -> None in
+        if contains ~needle:"associatedPullRequests" query then
+          let answer nodes =
+            Ok (in_data (`Assoc [ "repository", `Assoc [ "object", `Assoc [ "associatedPullRequests", connection nodes ] ] ])) in
+          match var "oid" with
+          | Some oid when oid = first && List.mem first merged ->
+            answer [ pull_node ~id:"PR11" ~number:11 ~merged:true ~merge_commit:(Some first) () ]
+          | Some oid when oid = first -> Ok (in_data (`Assoc [ "repository", `Assoc [ "object", `Null ] ]))
+          | Some oid when oid = second ->
+            answer [ pull_node ~id:"PR12" ~number:12 ~merged:false ~merge_commit:None ()
+                   ; pull_node ~id:"PR14" ~number:14 ~merged:true ~merge_commit:(Some third) () ]
+          | Some oid when oid = third && List.mem third merged ->
+            answer [ pull_node ~author:`Null ~id:"PR13" ~number:13 ~merged:true ~merge_commit:(Some third) () ]
+          | Some _ | None -> answer []
+        else if contains ~needle:"on PullRequestReview" query then
+          (match var "id", var "after" with
+           | Some "R1", Some "comments-2" -> Ok (in_data (`Assoc [ "node", `Assoc [ "comments", connection [ review_comment 2 ] ] ]))
+           | _ -> Error "an unexpected page of review comments")
+        else if contains ~needle:"on PullRequest" query then
+          (match var "id", var "after" with
+           | Some "PR11", None ->
+             Ok (in_data (`Assoc [ "node", `Assoc [ "reviews", connection ~next:"reviews-2"
+               [ review ~id:"R1" ~database_id:101 ~comments:(connection ~next:"comments-2" [ review_comment 1 ]) ] ] ]))
+           | Some "PR11", Some "reviews-2" ->
+             Ok (in_data (`Assoc [ "node", `Assoc [ "reviews", connection
+               [ review ~id:"R2" ~database_id:102 ~comments:(connection []) ] ] ]))
+           | Some "PR13", None -> Ok (in_data (`Assoc [ "node", `Assoc [ "reviews", connection [] ] ]))
+           | _ -> Error "an unexpected page of reviews")
+        else Error "an unexpected query" }
+
+let read_prs clock worker ?after id =
+  worker.listing := [ read ?after id "masc-prs" ];
+  publish_lane_change ();
+  await clock (fun () -> delivered id worker);
+  result_of id worker
+
+let numbers result =
+  member "records" result |> Yojson.Safe.Util.to_list |> List.map (fun record -> Yojson.Safe.Util.to_int (member "number" record))
+
+let test_a_github_pulls_grant_names_its_repository () =
+  let binding grant = `Assoc [ "records", `List [ `Assoc grant ] ] in
+  let grant = [ "source_id", `String "prs"; "kind", `String "github_pulls"; "repository_id", `String "masc" ] in
+  (match Lane_addon_records.grants ~operator_owned:true (binding grant) with
+   | Ok [ Lane_addon_records.Github_pulls { source_id = "prs"; repository_id = "masc" } ] -> ()
+   | Ok _ | Error _ -> fail "a github_pulls grant names its source and repository");
+  check bool "one without a repository is refused" true
+    (Result.is_error (Lane_addon_records.grants ~operator_owned:true (binding (List.remove_assoc "repository_id" grant))));
+  check bool "one with paths is refused" true
+    (Result.is_error (Lane_addon_records.grants ~operator_owned:true
+                        (binding (grant @ [ "paths", `List [ `String "lib/" ] ]))))
+
+let test_merged_pulls_come_in_commit_order_with_every_review_page () =
+  with_installation ~declaration:github_granted (fun clock _config worker _ root ->
+    let ((first, _, third) as commits) = repository root in
+    Runtime.register_github_reader (github_fixture ~merged:[ first; third ] commits);
+    let result = read_prs clock worker "gp1" in
+    check (list int) "the merged pull requests, in the order of their commits" [ 11; 13 ] (numbers result);
+    (match member "records" result |> Yojson.Safe.Util.to_list with
+     | [ eleven; thirteen ] ->
+       check string "a record names its merge commit" first (text "merge_commit" eleven);
+       let reviews = member "reviews" eleven |> Yojson.Safe.Util.to_list in
+       check (list int) "every page of reviews" [ 101; 102 ]
+         (List.map (fun review -> Yojson.Safe.Util.to_int (member "id" review)) reviews);
+       check (list string) "and every page of a review's comments" [ "comment 1"; "comment 2" ]
+         (List.map (text "body") (member "comments" (List.hd reviews) |> Yojson.Safe.Util.to_list));
+       check bool "a deleted account is a null author" true (member "author" thirteen = `Null)
+     | _ -> fail "two records");
+    check string "the cursor is the last commit read" third (text "next_cursor" result);
+    check bool "and the history was read to its head" true (member "complete" result = `Bool true);
+    check string "the page is retained" (Lane_addon_store.digest (Yojson.Safe.to_string (member "records" result)))
+      (text "sha256" result))
+
+let test_a_commit_no_pull_request_merged_moves_the_cursor_without_a_record () =
+  with_installation ~declaration:github_granted (fun clock _config worker _ root ->
+    let ((first, _, third) as commits) = repository root in
+    Runtime.register_github_reader (github_fixture ~merged:[ first; third ] commits);
+    let after_first = read_prs clock worker ~after:first "gp2" in
+    check (list int) "only what came after the cursor" [ 13 ] (numbers after_first);
+    Runtime.register_github_reader (github_fixture ~merged:[] commits);
+    let all = read_prs clock worker "gp5" in
+    check (list int) "a commit GitHub does not hold gives no record" [] (numbers all);
+    let none = read_prs clock worker ~after:first "gp3" in
+    check (list int) "commits no pull request merged give no record" [] (numbers none);
+    check string "and the cursor still passes them" third (text "next_cursor" none);
+    let at_head = read_prs clock worker ~after:third "gp4" in
+    check (list int) "nothing after the head" [] (numbers at_head);
+    check string "the cursor stays at the head" third (text "next_cursor" at_head))
+
+(* A since read keeps the pull requests whose merge commit was made at or
+   after that time. *)
+let test_a_since_read_of_pull_requests_compares_merge_commit_times () =
+  with_installation ~declaration:github_granted (fun clock _config worker _ root ->
+    let ((first, _, third) as commits) = repository root in
+    Runtime.register_github_reader (github_fixture ~merged:[ first; third ] commits);
+    let commit_time sha = float_of_string (git (Filename.concat root "repos/masc") [ "log"; "-1"; "--format=%ct"; sha ]) in
+    let read_since id since =
+      worker.listing := [ read ~since id "masc-prs" ];
+      publish_lane_change ();
+      await clock (fun () -> delivered id worker);
+      result_of id worker in
+    check (list int) "a time before the history reads every merged pull request" [ 11; 13 ]
+      (numbers (read_since "gs1" 0.));
+    let later = read_since "gs2" (commit_time third +. 1.) in
+    check (list int) "nothing merged after the last commit" [] (numbers later);
+    check bool "and no cursor to give" true (member "next_cursor" later = `Null))
+
+let test_github_that_cannot_be_read_waits () =
+  with_installation ~declaration:github_granted (fun clock config worker _ root ->
+    let commits = repository root in
+    Runtime.register_github_reader (fun ~repository_id:_ -> Error "the PR reader is not ready");
+    worker.listing := [ read "gw1" "masc-prs" ];
+    let before = cycles config in
+    publish_lane_change ();
+    await clock (fun () -> cycles config > before);
+    check int "nothing was delivered without a reader" 0 (List.length !(worker.delivered));
+    (match member "waiting" (host_requests config) with
+     | `List [ waiting ] -> check string "it waits" "source_unavailable" (text "reason" (member "reason" waiting))
+     | _ -> fail "a read without a reader must wait");
+    Runtime.register_github_reader (fun ~repository_id ->
+      match github_fixture ~merged:[] commits ~repository_id with
+      | Ok session -> Ok { session with Lane_addon_records.post = (fun _ -> Error "rate limited") }
+      | Error detail -> Error detail);
+    let before = cycles config in
+    publish_lane_change ();
+    await clock (fun () -> cycles config > before);
+    check int "nor while GitHub refuses" 0 (List.length !(worker.delivered)))
+
+let test_read_file_refuses_github_pulls () =
+  with_installation ~declaration:github_granted (fun clock _config worker _ root ->
+    let first, _, _ = repository root in
+    worker.listing := [ `Assoc [ "kind", `String "read_file"; "request_id", `String "gf1"; "source_id", `String "masc-prs"
+                               ; "commit", `String first; "path", `String "changelog.d/1.md" ] ];
+    publish_lane_change ();
+    await clock (fun () -> delivered "gf1" worker);
+    check string "read_file reads a repository grant only" "not_allowed" (text "status" (result_of "gf1" worker)))
+
 let asking_manifest = manifest ^ {|[world.asks]
 operator=true
 |}
@@ -876,6 +1061,16 @@ let () =
             test_a_page_that_is_gone_or_does_not_read_gives_no_record
         ; test_case "a wiki refuses a cursor it did not give and read_file" `Quick
             test_a_wiki_refuses_a_cursor_it_did_not_give_and_read_file ] )
+    ; ( "github pull request reads"
+      , [ test_case "a github_pulls grant names its repository" `Quick test_a_github_pulls_grant_names_its_repository
+        ; test_case "merged pulls come in commit order with every review page" `Quick
+            test_merged_pulls_come_in_commit_order_with_every_review_page
+        ; test_case "a commit no pull request merged moves the cursor without a record" `Quick
+            test_a_commit_no_pull_request_merged_moves_the_cursor_without_a_record
+        ; test_case "a since read of pull requests compares merge commit times" `Quick
+            test_a_since_read_of_pull_requests_compares_merge_commit_times
+        ; test_case "GitHub that cannot be read waits" `Quick test_github_that_cannot_be_read_waits
+        ; test_case "read_file refuses github_pulls" `Quick test_read_file_refuses_github_pulls ] )
     ; ( "asks"
       , [ test_case "a question waits for the operator and the answer starts a cycle" `Quick
             test_a_question_waits_for_the_operator_and_the_answer_starts_a_cycle

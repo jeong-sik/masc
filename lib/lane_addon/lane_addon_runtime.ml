@@ -204,6 +204,8 @@ let sampling_factory = ref None
 let register_sampling_factory factory = sampling_factory := Some factory
 let exact_runner : Lane_addon_exact.runner option ref = ref None
 let register_exact_runner runner = exact_runner := Some runner
+let github_reader : Lane_addon_records.github ref = ref (fun ~repository_id:_ -> Error "this host has no GitHub reader")
+let register_github_reader reader = github_reader := reader
 let prepare_sampling_handler ~sw ~store ~instance_id ~(package : package) ~binding =
   match package.model_access with
   | Model_disabled -> Ok None
@@ -892,7 +894,8 @@ let run_host_cycle m e (port : host_port) =
          | Ok grants ->
              let measure result = String.length (Yojson.Safe.to_string
                (Lane_addon_host_request.result_arguments ~request_id ~result)) in
-             read_answer (Lane_addon_records.read_records ~base_path:m.base_path ~store:m.store ~grants ~measure
+             read_answer (Lane_addon_records.read_records ~base_path:m.base_path ~store:m.store ~grants
+               ~github:!github_reader ~measure
                ~max_bytes:e.package.resources.max_reply_bytes ~source_id ~start))
     | Lane_addon_host_request.Ask {request_id; questions; context} ->
         (match asker with

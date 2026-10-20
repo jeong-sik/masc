@@ -49,8 +49,19 @@ The HTTP response's `data` is the original MCP tool result. Check its `isError`,
 does not mean the browser operation succeeded. This endpoint accesses shared
 installations only and uses their selected input/output hooks. A workflow that
 holds a host handle retains its original service and exported-tool generation;
-it cannot follow a replacement. Existing individual Dashboard routes and the
-TUI browser screens still need to switch to this host path.
+it cannot follow a replacement.
+
+The existing Dashboard browser `clients`, `read`, `scene`, `screenshot`,
+`interact`, `session` and `goto` routes used by the TUI also use this host path.
+Read routes keep their read permission; input routes require the authorized admin
+actor. The inventory comes from the retained worker. A page read pins the
+connection chosen during tab discovery, and a tab-bound read requires its
+original lane/client ID before discovery. Scene, navigation and screenshot
+identity guards remain active. Returned connection identity comes from the
+worker's admitted target, independently of page-supplied fields. Partial or
+unknown outcomes preserve the original receipt and effect metadata without
+repeating the input. These source changes do not establish an installed TUI or
+an actual browser run.
 
 Install a declaration using the active configuration directory described in the
 [TOML guide](../../docs/guides/lane-addon-toml.md), pointing `manifest_path` at
@@ -68,9 +79,9 @@ sources = []
 
 The installed native host and browser extension/BiDi peer still need the same
 workspace token. This package does not yet start Firefox, Chrome or Safari,
-transfer profiles or publish browser artifacts. Built-in public tool routing,
-Dashboard browser inventory and built-in startup still need to move to the
-Add-on. This is not yet a complete operator-browser replacement.
+transfer profiles or publish browser artifacts. Built-in public tool routing
+and built-in startup still need to move to the Add-on. This is not yet a complete
+operator-browser replacement.
 
 Input/output middleware validates tool contracts without calling an LLM. The
 separately selectable LLM Exact Output broker still needs its scoped browser

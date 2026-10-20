@@ -35,9 +35,13 @@ class SourceUnavailable(Exception):
 
 
 class Rejected(Exception):
-    def __init__(self, reason):
-        super().__init__(reason.value)
+    def __init__(self, reason: Reason, *, details: tuple[str, ...] = ()):
+        message = reason.value
+        if details:
+            message += ": " + "; ".join(details)
+        super().__init__(message)
         self.reason = reason
+        self.details = details
 
 
 

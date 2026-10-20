@@ -6,10 +6,16 @@ type remote_error = Invalid_session_id | No_such_window | No_such_alert | Unexpe
 type error = Transport of string | Protocol of string | Remote of { code : remote_error; message : string }
 type request = method_:Masc_http_client.Pool.http_method -> path:string -> body:Yojson.Safe.t option -> (Yojson.Safe.t, error) result
 type t
+type located_node = { node_id : string; description : string }
+type locate = scene:Browser_scene.t -> instruction:string option ->
+  (located_node list, string) result
+(** Read-only selection over a supplied scene. Returns only node references;
+    the driver checks them against both original and current observations.
+    May suspend in the original command scope; must not re-enter the driver. *)
 val session_observation : t -> Browser_lane.session_observation
 (** Nonblocking local lifecycle observation. Registration or a driver process
     alone does not establish an open Firefox session. *)
-val create : ?binary:string -> start_downloads:Browser_downloads.start -> request:request -> unit -> t
+val create : ?binary:string -> ?locate:locate -> start_downloads:Browser_downloads.start -> request:request -> unit -> t
 (** [binary] is forwarded verbatim to moz:firefoxOptions.binary. Missing means
     geckodriver discovers its default Firefox; an invalid explicit path fails. *)
 val execute : t -> Browser_lane.verb -> Browser_lane.answer

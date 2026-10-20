@@ -38,6 +38,10 @@ type t = {incarnation:string; configuration:configuration; store:Store.t;
   used:(string,unit) Hashtbl.t; mutable revision:int64; changed:Eio.Condition.t;
   receipts:Eio.Mutex.t}
 let incarnation t = t.incarnation
+let output_schema t ~name = match t.phase with
+  | Closed -> None
+  | Serving -> List.find_opt (fun (output:Lane_addon_types.exact_output) -> output.name=name)
+      t.configuration.outputs |> Option.map (fun (output:Lane_addon_types.exact_output) -> output.schema)
 let create ~incarnation ~configuration =
   let* _ = Browser_lane.client_id_of_string incarnation in
   let* configuration = configuration_of_json (configuration_to_json configuration) in

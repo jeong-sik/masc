@@ -56,6 +56,8 @@ let run_with_commit ~commit_receipt ~env ~owner ~directory work =
     let* text=Option.to_result ~none:"missing automation configuration" text in
     try configuration_of_json (Yojson.Safe.from_string text) with Yojson.Json_error detail -> Error detail) in
   let configuration=match configuration with Ok value -> value | Error detail -> invalid_arg detail in
+  let locate=match Browser_addon_locate.for_owner owner with
+    | Ok locate -> locate | Error detail -> invalid_arg detail in
   let clean=ref true and uncertain=ref false in
   let ready_p,ready_u=Eio.Promise.create () in
   let stopping,stop=Eio.Promise.create () in
@@ -88,7 +90,7 @@ let run_with_commit ~commit_receipt ~env ~owner ~directory work =
           Ok value
         | Error ((Browser_webdriver.Remote {code=Invalid_session_id;_}) as error) -> uncertain:=true;Error error
         | Error ((Transport _|Protocol _|Remote {code=No_such_window|No_such_alert|Unexpected_alert_open|Other _;_}) as error) -> Error error in
-      let driver=Browser_webdriver.create ?binary:configuration.binary ~request:transport
+      let driver=Browser_webdriver.create ?binary:configuration.binary ?locate ~request:transport
         ~start_downloads:(Browser_bidi_downloads.start ~sw ~env ~root:(Filename.concat directory "downloads")
           ~publish:(fun _ -> Error "browser downloads require the host artifact broker")) () in
       Eio.Switch.on_release sw (fun () ->
@@ -103,7 +105,7 @@ let run_with_commit ~commit_receipt ~env ~owner ~directory work =
       let cleanup () =
         ignore (Eio.Promise.try_resolve stop ());
         Eio.Promise.await stopped in
-      (match Browser_addon_owner.attach_automation owner ~execute
+      (match Browser_addon_owner.attach_automation owner ~locate:(Option.is_some locate) ~execute
         ~session:(fun () -> if !uncertain then Browser_lane.Browser_unknown else Browser_webdriver.session_observation driver)
         ~document:(fun ~tab_id -> if !uncertain then Browser_lane.Rejected_before_effect "owned session authority is unknown"
           else Browser_webdriver.observe_document_if_idle driver ~tab_id) ~cleanup with

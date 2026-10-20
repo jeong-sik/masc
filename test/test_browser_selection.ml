@@ -1,7 +1,7 @@
 open Alcotest
 module Selection = Masc.Browser_selection
 module Lane = Browser_lane
-let work session : Selection.work_browser = {activity=Lane.Enabled;registered=true;session}
+let work session : Selection.work_browser = {activity=Lane.Enabled;registered=true;session;locate=false}
 let empty : Selection.snapshot = {live_activity=Lane.Enabled;live_clients=[];
   stagehand=work Lane.Browser_closed;automation=work Lane.Browser_closed}
 let client digit transport : Lane.client_info =
@@ -75,10 +75,18 @@ let test_eligibility () =
   selected {route=Lane.Automation_route;reason=Selection.Existing_work_session}
     (choose ~verb:timing {empty with stagehand=work Lane.Browser_open;automation=work Lane.Browser_open});
   check bool "bound timing request still requires its exact browser" true
-    (choose ~verb:timing ~bound:true {empty with automation=work Lane.Browser_open}=Error Selection.Binding_required)
+    (choose ~verb:timing ~bound:true {empty with automation=work Lane.Browser_open}=Error Selection.Binding_required);
+  let locate=Lane.Page_locate {tab_id=1;instruction=None} in
+  let automation=work Lane.Browser_open in
+  check bool "a driver without the selected locate consumer is not eligible" true
+    (choose ~verb:locate {empty with automation}=Error Selection.No_available_browser);
+  selected {route=Lane.Automation_route;reason=Selection.Existing_work_session}
+    (choose ~verb:locate {empty with automation={automation with locate=true}});
+  check bool "a bound locate cannot switch from its observed browser" true
+    (choose ~verb:locate ~bound:true {empty with automation={automation with locate=true}}=Error Selection.Binding_required)
 let test_inactive_session_cleanup () =
   List.iter (fun activity ->
-    let inactive : Selection.work_browser = {activity;registered=true;session=Lane.Browser_open} in
+    let inactive : Selection.work_browser = {activity;registered=true;session=Lane.Browser_open;locate=false} in
     let sole = {empty with stagehand=inactive} in
     List.iter (fun verb ->
       selected {route=Lane.Stagehand_route;reason=Selection.Existing_work_session}

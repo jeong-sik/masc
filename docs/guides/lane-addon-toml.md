@@ -126,8 +126,8 @@ tool_hooks = []
 sources = []
 ```
 
-이 예제의 패키지는 출력 선언을 갖춘 별도 패키지를 가정한다. 함께 제공하는
-`addons/browser`가 모델 계획이나 extraction을 이미 수행한다는 뜻은 아니다.
+이 예제는 `plan`을 선언한 별도 패키지를 가정한다. 함께 제공하는 `addons/browser`는
+읽기 전용 `locate` 출력을 선언하며, 모델 계획이나 extraction을 지원한다는 뜻은 아니다.
 선택 배열에는 패키지가 선언한 이름만 한 번씩 쓴다. 스키마나 모델·자격 증명을
 설치 배열에서 주입할 수 없다. 이름 순서는 패키지 순서로 정규화하며, 유효 선택이
 같으면 worker revision도 같다. 선택을 바꾸면 설치 revision에 반영돼 기존 worker와
@@ -141,9 +141,15 @@ host 요청 포트를 만들지 않고 모델 호출도 하지 않는다. 패키
 결과 전달, 요청 변경 대기를 처리한다. 브라우저 명령이 모델을 기다리는 동안에도 이 경로는
 열려 있다. 원래 명령을 취소하면 해당 요청을 철회하고, detach는 남은 모델 대기를 닫는다.
 결과 수신 영수증은 브라우저 임시 할당 밖의 Add-on 저장소에 보존하며, 브라우저 동작 완료와
-구분한다. 번들 패키지의 출력 선언과 실제 모델 소비자 연결, 모델·브라우저 실행 증명은
-[#44150](https://github.com/jeong-sik/masc/issues/44150)에 남아 있다. 선택 설정이나 큐 연결만으로
-브라우저 모델 호출 지원을 판정하지 않는다.
+구분한다. 번들 Gecko 소비자는 관측한 scene의 nodeId를 모델이 고르게 하고, 같은 탭을 다시
+읽어 문서·URL·관측 의미를 확인한 뒤 현재 target과 별도 inference를 반환한다.
+`BrowserInstruct action="observe" lane="automation" tabId=<관측한 ID>`로 호출한다.
+해당 설치의 `runtime.addon_exact_lanes.<설치 ID>.locate`에 운영자가 실제 모델 slot을
+선택해야 한다. `exact_outputs = []`이면 소비자를 설치하지 않으며, 다른 도구 검증 Hook은
+계속 따로 선택한다. 모델 route가 아직 준비되지 않으면 기존 Exact Output 정책에 따라
+요청을 남긴다. `locate` inventory는 선택된 소비자의 유무이고 provider 준비 완료가 아니다.
+실제 모델·브라우저 실행 증명과 Stagehand 통합은
+[#44150](https://github.com/jeong-sik/masc/issues/44150)에 남아 있다.
 
 ## 반영 시점과 화면 읽기
 

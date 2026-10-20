@@ -122,8 +122,9 @@ export async function preparePractice(project, prepared, { signal } = {}) {
         const source = plan.umpRegions.sources.find(source => source.id === region.source)
         const clock = source.timeline.clock
         const start = region.startNanoseconds ?? { numerator: String(Math.floor(region.startSeconds * 1e9)), denominator: '1' }
-        const d = BigInt(start.denominator) * BigInt(clock.denom)
-        const n = BigInt(start.numerator) * BigInt(clock.denom)
+        const sourceDenominator = BigInt(clock.denom) * BigInt(region.sourceDivisor ?? '1')
+        const d = BigInt(start.denominator) * sourceDenominator
+        const n = BigInt(start.numerator) * sourceDenominator
           + BigInt(region.extent) * BigInt(region.repeatCount) * BigInt(clock.numer) * BigInt(start.denominator)
         const end = n / d + (n % d ? 1n : 0n)
         if (end > after) after = end

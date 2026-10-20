@@ -7,7 +7,8 @@ import { Worker } from 'node:worker_threads'
 import { once } from 'node:events'
 import { newArrangement, editArrangement } from '../arrangement.mjs'
 import { arrangementEditor, arrangementCommand } from '../arrangement-editor.mjs'
-import { loadArrangement } from '../arrangement-files.mjs'
+import { loadArrangement, importArrangementPractice } from '../arrangement-files.mjs'
+import { practiceSourceFixture } from './helpers/practice-source-fixture.mjs'
 import { practiceClock } from '../arrangement-practice.mjs'
 import { arrangementPlaybackRequest, arrangementRoute } from '../arrangement-playback.mjs'
 
@@ -137,3 +138,27 @@ test('practice common horizon contains the outward exact UMP end at fractional t
   }
  }finally{await rm(directory,{recursive:true,force:true})}
 })
+
+test('actual worker keeps fractional practice source periods in the count-in and metronome horizon',()=>practiceSourceFixture(async({root,input})=>{
+ const path=join(root,'project/song.json'), imported=await importArrangementPractice(newArrangement({tempo:120}),input,{projectPath:path})
+ const worker=new Worker(new URL('../arrangement-worker.mjs',import.meta.url));let id=0
+ try{
+  for(const [beat,countInBars,metronome] of [[0,1,true],[3,1,true],[3,1,false],[3,0,true]]){
+   let editor=arrangementCommand(arrangementEditor(imported.project),`practice-region ${imported.asset} ${beat} 3 4800000 7 3`).editor
+   editor=arrangementCommand(editor,`practice ${countInBars} ${metronome?'on':'off'}`).editor
+   const original=structuredClone(editor.project),reply=once(worker,'message')
+   worker.postMessage({id:++id,kind:'prepare-capture',project:editor.project,sourceRoot:dirname(path),directory:root,midiOutput:'42'})
+   const [result]=await reply;assert.equal(result.ok,true,result.error)
+   const plan=JSON.parse(await readFile(result.result.path,'utf8')),region=plan.umpRegions.regions[0]
+   const start=BigInt((countInBars*2+beat/2)*1e9),n=start*21n+4800000n*3n*125n,d=21n
+   const after=n/d+(n%d?1n:0n),expected=Number(after)/1e9
+   assert.equal(plan.duration,expected);assert.equal(plan.umpRegions.duration,expected)
+   assert.equal(plan.practice.countInSeconds,countInBars*2)
+   assert.equal(plan.practice.duration,expected-countInBars*2)
+   assert.equal(plan.regions.find(region=>region.pulseClock).pulseClock.duration,metronome?expected:countInBars*2)
+   assert.equal(region.startSeconds,countInBars*2+beat/2)
+   assert.deepEqual([region.offset,region.extent,region.sourceDivisor,region.repeatCount],['3','4800000','7',3])
+   assert.deepEqual(editor.project,original)
+  }
+ }finally{await worker.terminate()}
+}))

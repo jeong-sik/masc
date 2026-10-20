@@ -49,8 +49,13 @@ jobs:
       - name: Install OCaml dependencies
         run: opam install . --deps-only --with-test -y
 
-      - name: Build the Stagehand lane probe
-        run: opam exec -- dune build --release test/stagehand_browser_probe.exe
+      - name: Build the native browser Add-on proof inputs
+        run: >-
+          opam exec -- dune build --release
+          test/stagehand_browser_probe.exe
+          bin/masc_native_addon_launcher.exe
+          bin/masc_browser_process_owner.exe
+          bin/masc_browser_addon_worker.exe
 
       # Chrome for Testing, not branded Chrome: branded builds refuse
       # --load-extension from 137, and 154 is the build the CDP extension load
@@ -64,10 +69,17 @@ jobs:
         run: |
           mkdir -p proof/stagehand
           git rev-parse HEAD > proof/stagehand/SOURCE_COMMIT
-          shasum -a 256 _build/default/test/stagehand_browser_probe.exe > proof/stagehand/SHA256SUMS
+          shasum -a 256 \
+            _build/default/test/stagehand_browser_probe.exe \
+            _build/default/bin/masc_native_addon_launcher.exe \
+            _build/default/bin/masc_browser_process_owner.exe \
+            _build/default/bin/masc_browser_addon_worker.exe > proof/stagehand/SHA256SUMS
           python3 scripts/probe-stagehand.py \
             --chrome "$CHROME_FOR_TESTING" \
             --probe _build/default/test/stagehand_browser_probe.exe \
+            --launcher _build/default/bin/masc_native_addon_launcher.exe \
+            --guardian _build/default/bin/masc_browser_process_owner.exe \
+            --worker _build/default/bin/masc_browser_addon_worker.exe \
             --base-path "$RUNNER_TEMP/stagehand-workspace" \
             --out proof/stagehand
 

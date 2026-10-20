@@ -217,7 +217,7 @@ let force_claim_task config ~agent_name ~task_id =
         if String.equal task.id task_id
         then
           { task with
-            task_status = Types.Claimed { assignee = agent_name; claimed_at = "test" }
+            task_status = Types.Claimed { assignee = agent_name; claimed_at = "2026-01-01T00:00:00Z" }
           }
         else task)
       backlog.tasks

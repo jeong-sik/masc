@@ -108,7 +108,39 @@ tool = "lane_act"
   let replacement = attach () in wait clock (fun () -> ready replacement);
   check bool "reattach has a fresh incarnation" true (replacement<>id);
   ignore (dispatch config R.Detach ["instance_id",`String replacement]);
-  wait clock (fun () -> phase replacement="detached"))
+  wait clock (fun () -> phase replacement="detached");
+  let directory = Filename.concat root "declarations" in Unix.mkdir directory 0o700;
+  let declaration = Filename.concat directory "configured.toml" in
+  let configure enabled = write declaration (Printf.sprintf {|id = "configured-native"
+enabled = %b
+run_id = "native-world"
+manifest_path = %S
+[binding]
+sources = []
+|} enabled manifest) in
+  let reconcile () = ignore (require (R.reconcile_configuration ~config ~directory)) in
+  let configured () = dispatch config R.Inspect [] |> member "instances" |> Yojson.Safe.Util.to_list
+    |> List.find_opt (fun item -> match member "configuration" item with
+      | `Assoc fields -> List.assoc_opt "id" fields=Some (`String "configured-native")
+          && text "kind" (member "phase" item)<>"detached"
+      | _ -> false) in
+  configure true; reconcile ();
+  wait clock (fun () -> Option.exists (fun item -> ready (text "instance_id" item)) (configured ()));
+  let first = require (Option.to_result ~none:"configured installation missing" (configured ())) |> text "instance_id" in
+  let first_pid = inspect first |> member "resource" |> member "pid" |> Yojson.Safe.Util.to_int in
+  configure false; reconcile (); wait clock (fun () -> phase first="detached");
+  configure true; reconcile ();
+  wait clock (fun () -> Option.exists (fun item -> ready (text "instance_id" item)) (configured ()));
+  let second = require (Option.to_result ~none:"replacement installation missing" (configured ())) |> text "instance_id" in
+  check bool "configured reattach replaces the incarnation" true (first<>second);
+  check bool "prior installation group is gone before slot reuse" false
+    (Posix_spawn_detached.group_id_has_members first_pid);
+  let slot = Filename.concat (Filename.concat (Lane_addon_store.root store) "native-claims")
+    (Lane_addon_store.digest "configured-native") in
+  let claim = Eio_unix.run_in_systhread (fun () -> Native_addon_lease.current ~directories:[slot])
+    |> Result.map_error Native_addon_lease.error_to_string |> require in
+  check string "same installation slot belongs to the replacement" second (Native_addon_lease.instance_id claim);
+  configure false; reconcile (); wait clock (fun () -> phase second="detached"))
 let () =
   if Array.length Sys.argv<>2 then fail "expected native admission launcher path";
   launcher := Unix.realpath Sys.argv.(1);

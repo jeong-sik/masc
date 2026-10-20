@@ -25,9 +25,10 @@ let scenario () = Eio_main.run (fun env ->
               let raw=Eio.Buf_read.line (Eio.Buf_read.of_flow flow ~max_size:4096) in
               let request=Yojson.Safe.from_string raw in
               if Yojson.Safe.Util.member "operation" request=`String "issue" then (
-                if Yojson.Safe.Util.(request |> member "command" |> member "verb")=`String "page.locate"
-                then ignore (Eio.Promise.try_resolve locate ())
-                else ignore (Eio.Promise.try_resolve enter ()));
+                match Yojson.Safe.Util.(request |> member "command" |> member "verb") with
+                | `String "page.locate" -> ignore (Eio.Promise.try_resolve locate ())
+                | `String "session.open" -> ignore (Eio.Promise.try_resolve start ())
+                | _ -> ignore (Eio.Promise.try_resolve enter ()));
               if Yojson.Safe.Util.member "operation" request=`String "model_wait" then
                 ignore (Eio.Promise.try_resolve model_wait ());
               Eio.Promise.await never)

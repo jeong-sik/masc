@@ -124,7 +124,7 @@ let with_temp_base f =
 
 let store_image meta bytes =
   let store_dir =
-    Vt.vision_store_dir ~keeper_name:meta.Masc.Keeper_meta_contract.name
+    Vt.vision_store_dir ~keeper_name:meta.Masc.Keeper_meta_contract.name ()
   in
   match Store.store ~auto_prune:false ~dir:store_dir bytes with
   | Ok handle -> Store.to_string handle
@@ -1379,7 +1379,7 @@ let test_delegate_eager_eviction_stores_image_and_removes_inline_block () =
       let handle = artifact_handle_of_placeholder placeholder in
       (match
          Store.load
-           ~dir:(Vt.vision_store_dir ~keeper_name)
+           ~dir:(Vt.vision_store_dir ~keeper_name ())
            (Store.of_string handle)
        with
        | Ok stored -> assert (String.equal stored bytes)
@@ -1418,7 +1418,7 @@ let test_fallback_projection_preserves_artifacts_and_caches_each_mode () =
     let assert_stored = function
       | Agent_core.Types.Text placeholder ->
         let handle = artifact_handle_of_placeholder placeholder |> Store.of_string in
-        (match Store.load ~dir:(Vt.vision_store_dir ~keeper_name) handle with
+        (match Store.load ~dir:(Vt.vision_store_dir ~keeper_name ()) handle with
          | Ok stored -> assert (stored = bytes)
          | Error error -> failwith (Store.load_error_to_string error))
       | _ -> failwith "fallback image must carry its durable artifact"
@@ -1496,7 +1496,7 @@ let test_fallback_semantic_read_is_cached_after_completion () =
        assert (repeated = Agent_core.Types.Text reading);
        assert (String_util.contains_substring reading "deployment failed, code 413");
        let handle = artifact_handle_of_placeholder reading |> Store.of_string in
-       (match Store.load ~dir:(Vt.vision_store_dir ~keeper_name) handle with
+       (match Store.load ~dir:(Vt.vision_store_dir ~keeper_name ()) handle with
         | Ok original -> assert (original = bytes)
         | Error detail -> failwith (Store.load_error_to_string detail))
      | _ -> failwith "semantic fallback lost its reading or artifact");
@@ -2194,7 +2194,10 @@ let test_truncated_structured_response_reads_as_truncation () =
   | _ -> failwith "valid structured JSON must classify as Vo_ok"
 
 let test_browser_screenshot_reaches_vision_reader () =
-  with_temp_base (fun base_path ->
+  with_env "MASC_CONFIG_DIR" "" (fun () ->
+  with_temp_base (fun ambient_base ->
+    let base_path = Filename.concat ambient_base "served-workspace" in
+    Unix.mkdir base_path 0o700;
     let config = Masc.Workspace.default_config base_path in
     with_temp_runtime_toml single_vision_runtime_toml (fun () ->
       let meta = make_meta "browser-screenshot" in
@@ -2258,17 +2261,60 @@ let test_browser_screenshot_reaches_vision_reader () =
           assert (Yojson.Safe.Util.member "clientId" data = `Null);
           assert (Yojson.Safe.Util.member "transport" data = `Null);
           let handle = assoc_string "artifact" data in
-          let root_dir = Vt.vision_store_dir ~keeper_name:meta.name in
-          let frames_dir = Vt.frames_dir ~keeper_name:meta.name in
+          let root_dir = Vt.vision_store_dir ~base_path ~keeper_name:meta.name () in
+          let frames_dir = Vt.frames_dir ~base_path ~keeper_name:meta.name () in
+          let ambient_dir = Vt.vision_store_dir ~keeper_name:meta.name () in
+          assert (root_dir <> ambient_dir);
           let frame_path = Filename.concat frames_dir handle in
           let kept_path = Filename.concat root_dir handle in
           assert (Sys.file_exists frame_path);
           assert (not (Sys.file_exists kept_path));
-          let reader = Vt.handle ~complete ~sw ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
+          assert (not (Sys.file_exists (Filename.concat (Store.frames_dir ~dir:ambient_dir) handle)));
+          let wrong_config = Masc.Workspace.default_config ambient_base in
+          let wrong = Masc.Keeper_image_read.handle ~config:wrong_config ~meta
+            ~args:(`Assoc ["artifact",`String handle]) () in
+          assert (wrong.disposition <> Tool_result.Completed ());
+          assert (assoc_string "error" (json_of_output wrong.raw_output) = "artifact_not_found");
+          let wrong_reader = Vt.handle ~base_path:ambient_base ~complete ~sw
+            ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
+            ~meta ~args:(artifact_args handle) () |> json_of_output in
+          assert (assoc_string "error" wrong_reader = "artifact_not_found");
+          assert (not !seen_image);
+          let reader = Vt.handle ~base_path ~complete ~sw ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
             ~meta ~args:(artifact_args handle) () |> json_of_output in
           assert (!seen_image);
           assert (assoc_string "text" reader = "stored browser pixels reached vision");
           assert (Sys.file_exists kept_path);
+          assert (not (Sys.file_exists (Filename.concat ambient_dir handle)));
+          let native = Masc.Keeper_image_read.handle ~config ~meta
+            ~args:(`Assoc ["artifact",`String handle]) () in
+          assert (native.disposition = Tool_result.Completed ());
+          (match native.content_blocks with
+           | Some [Agent_core.Types.Text _; Agent_core.Types.Image {data;_}] ->
+               assert (Base64.decode_exn data = image_bytes)
+           | _ -> failwith "workspace-bound screenshot did not reach native image reader");
+          let module Context = Masc.Keeper_context_core in
+          let checkpoint_keeper = "browser-checkpoint" in
+          let checkpoint_base = Filename.concat base_path "sessions" in
+          let checkpoint_trace = "browser-image-scope" in
+          let session = Context.create_session ~session_id:checkpoint_trace ~base_dir:checkpoint_base in
+          let context = Context.create ~eio:true ~system_prompt:"scoped image checkpoint"
+            |> fun ctx -> Context.append ctx (Agent_core.Types.make_message ~role:User
+                 [Agent_core.Types.Image {media_type="image/png";data=encoded;source_type=Base64}]) in
+          (match Context.save_agent_core_checkpoint ~base_path ~runtime_id:"unconfigured-text-only-fixture"
+             ~keeper_name:checkpoint_keeper ~session ~agent_name:checkpoint_keeper ~ctx:context with
+           | Ok _ -> ()
+           | Error error -> failwith (Context.checkpoint_write_error_to_string
+               ~persistence_error_to_string:Fun.id error));
+          let checkpoint = match Context.load_context_from_checkpoint ~trace_id:checkpoint_trace ~base_dir:checkpoint_base with
+            | _,Some ctx -> ctx | _,None -> failwith "scoped image checkpoint disappeared" in
+          let checkpoint_handle = match Context.messages_of_context checkpoint with
+            | [{content=[Agent_core.Types.Text placeholder];_}] -> artifact_handle_of_placeholder placeholder
+            | _ -> failwith "checkpoint did not evict inline pixels" in
+          assert (Store.load ~dir:(Vt.vision_store_dir ~base_path ~keeper_name:checkpoint_keeper ())
+            (Store.of_string checkpoint_handle) = Ok image_bytes);
+          assert (not (Sys.file_exists (Filename.concat
+            (Vt.vision_store_dir ~keeper_name:checkpoint_keeper ()) checkpoint_handle)));
           Unix.utimes frame_path 10.0 10.0;
           ignore (Result.get_ok (Store.store ~auto_prune:false ~dir:frames_dir "newer frame"));
           ignore (Result.get_ok (Store.prune ~max_entries:1 ~dir:frames_dir ()));
@@ -2287,7 +2333,7 @@ let test_browser_screenshot_reaches_vision_reader () =
             (* The stored screenshot is rebuilt from checked fields; the
                connection's transport is one of them. *)
             assert (assoc_string "transport" data = "web_extension");
-            if mode = "screenshot" then verify_pointer_receipt "live" data) ["elements";"screenshot"])))))
+            if mode = "screenshot" then verify_pointer_receipt "live" data) ["elements";"screenshot"]))))))
 
 let test_browser_screenshot_requires_keeper_owner () =
   let result = Masc.Tool_misc_browser_lane.handle_read
@@ -2300,7 +2346,7 @@ let test_browser_screenshot_requires_keeper_owner () =
 let test_browser_screenshot_rejects_bad_pixels () =
   with_temp_base (fun _ ->
     List.iter (fun encoded ->
-      let result = Masc.Browser_screenshot.persist ~keeper_name:"bad-browser-pixels"
+      let result = Masc.Browser_screenshot.persist ~base_path:(Config_dir_resolver.base_path_or_cwd ()) ~keeper_name:"bad-browser-pixels"
         (`Assoc ["tabId",`Int 73;"url",`String "https://example.org";
           "title",`String "Page";"data",`String encoded]) in
       assert (Result.is_error result)) ["not base64!";Base64.encode_string "not a PNG"])
@@ -2308,7 +2354,7 @@ let test_browser_screenshot_rejects_bad_pixels () =
 let test_browser_screenshot_rejects_invalid_client () =
   let live_id = `String "30000000-0000-4000-8000-000000000001" in
   List.iter (fun (connection, expected) ->
-    let result = Masc.Browser_screenshot.persist ~keeper_name:"invalid-browser-client"
+    let result = Masc.Browser_screenshot.persist ~base_path:(Config_dir_resolver.base_path_or_cwd ()) ~keeper_name:"invalid-browser-client"
       (`Assoc (["tabId",`Int 73;"url",`String "https://example.org";
         "title",`String "Page";"data",`String ""] @ connection)) in
     match result with
@@ -2324,7 +2370,7 @@ let test_browser_screenshot_rejects_invalid_observation () =
   with_temp_base (fun _ ->
     let pixels = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
     List.iter (fun metadata ->
-      let result = Masc.Browser_screenshot.persist ~keeper_name:"invalid-observation"
+      let result = Masc.Browser_screenshot.persist ~base_path:(Config_dir_resolver.base_path_or_cwd ()) ~keeper_name:"invalid-observation"
         (`Assoc (metadata @ ["tabId", `Int 73; "url", `String "https://example.org";
           "title", `String "Page"; "data", `String pixels])) in
       assert (Result.is_error result))
@@ -2336,7 +2382,7 @@ let test_browser_screenshot_rejects_invalid_observation () =
 let test_artifact_failures_are_classified () =
   with_temp_base (fun _ ->
     let meta = make_meta "vision-artifact-errors" in
-    let dir = Vt.vision_store_dir ~keeper_name:meta.name in
+    let dir = Vt.vision_store_dir ~keeper_name:meta.name () in
     let corrupt = store_image meta "original image" in
     Out_channel.with_open_bin (Filename.concat dir corrupt)
       (fun oc -> output_string oc "tampered image");
@@ -2418,7 +2464,7 @@ let test_generated_sandbox_image_reaches_vision () =
         let output = json_of_output result.raw_output in
         let handle = assoc_string "artifact" output in
         assert (assoc_string "text" output = "generated image read");
-        assert (Store.load ~dir:(Vt.vision_store_dir ~keeper_name:meta.name) (Store.of_string handle) = Ok bytes);
+        assert (Store.load ~dir:(Vt.vision_store_dir ~keeper_name:meta.name ()) (Store.of_string handle) = Ok bytes);
         let again = invoke (`Assoc ["artifact", `String handle; "query", `String "read generated image"]) in
         assert (again.disposition = Tool_result.Completed ());
         assert (!calls = 2);
@@ -2470,8 +2516,8 @@ let test_native_image_read_artifact_and_authority () =
     assert (Yojson.Safe.Util.member "width" output = `Int 1);
     assert (Yojson.Safe.Util.member "height" output = `Int 1);
     (* Successful reads pin rotating frames in the stable owned image store. *)
-    Unix.unlink (Filename.concat (Vt.frames_dir ~keeper_name:meta.name) handle);
-    assert (Store.load ~dir:(Vt.vision_store_dir ~keeper_name:meta.name)
+    Unix.unlink (Filename.concat (Vt.frames_dir ~keeper_name:meta.name ()) handle);
+    assert (Store.load ~dir:(Vt.vision_store_dir ~keeper_name:meta.name ())
       (Store.of_string handle) = Ok bytes);
     assert ((invoke meta args).content_blocks = result.content_blocks);
     let expect_error meta args code =
@@ -2504,7 +2550,7 @@ let test_native_image_read_artifact_and_authority () =
      | Some [Agent_core.Types.Text _; Agent_core.Types.Image {media_type="image/webp";data;_}] ->
        assert (Base64.decode_exn data = webp)
      | _ -> failwith "supported WebP bytes must remain readable");
-    write_file (Filename.concat (Vt.vision_store_dir ~keeper_name:meta.name) handle) "tampered pixels";
+    write_file (Filename.concat (Vt.vision_store_dir ~keeper_name:meta.name ()) handle) "tampered pixels";
     expect_error meta args "artifact_load_failed")
 
 let test_native_image_admission () =

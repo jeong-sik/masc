@@ -134,7 +134,7 @@ let test_browse_and_preview_without_equipping () =
              (field other shown = field other original_equipment))
          [ "face"; "neck"; "head"; "hand"; "base" ];
        let handle = string_field "artifact" preview in
-       (match Store.load ~dir:(Vision.vision_store_dir ~keeper_name:name) (Store.of_string handle) with
+       (match Store.load ~dir:(Vision.vision_store_dir ~base_path:(Sys.getenv "MASC_BASE_PATH") ~keeper_name:name ()) (Store.of_string handle) with
         | Error error -> Alcotest.fail (Store.load_error_to_string error)
         | Ok png ->
             Alcotest.(check bool) "the preview artifact is a PNG" true
@@ -165,7 +165,7 @@ let test_invalid_preview_is_refused_before_artifacts () =
     ; `String "bare_face"; `String "bare_neck"; `String "bare_head"
     ; `String "empty_hand"; `String "no_dish" ];
   Alcotest.(check bool) "a refused preview creates no artifact store" false
-    (Sys.file_exists (Vision.vision_store_dir ~keeper_name:name))
+    (Sys.file_exists (Vision.vision_store_dir ~base_path:(Sys.getenv "MASC_BASE_PATH") ~keeper_name:name ()))
 ;;
 
 (* The tool reports the equipment the name hash gives, through the same mapping
@@ -208,7 +208,7 @@ let test_artifact_is_a_readable_png () =
   let bytes =
     match field "bytes" data with `Int value -> value | _ -> Alcotest.fail "bytes is not an int"
   in
-  let dir = Vision.vision_store_dir ~keeper_name:name in
+  let dir = Vision.vision_store_dir ~base_path:(Sys.getenv "MASC_BASE_PATH") ~keeper_name:name () in
   match Store.load ~dir (Store.of_string handle) with
   | Error error ->
     Alcotest.failf "the artifact did not load: %s" (Store.load_error_to_string error)
@@ -239,14 +239,14 @@ let test_artifact_survives_frame_pressure () =
     | `String value -> Store.of_string value
     | _ -> Alcotest.fail "artifact is not a string"
   in
-  let dir = Vision.vision_store_dir ~keeper_name:name in
+  let dir = Vision.vision_store_dir ~base_path:(Sys.getenv "MASC_BASE_PATH") ~keeper_name:name () in
   let read_portrait () =
     match Store.load ~dir handle with
     | Ok bytes -> bytes
     | Error error -> Alcotest.fail (Store.load_error_to_string error)
   in
   let before = read_portrait () in
-  let frames = Vision.frames_dir ~keeper_name:name in
+  let frames = Vision.frames_dir ~base_path:(Sys.getenv "MASC_BASE_PATH") ~keeper_name:name () in
   let capture bytes =
     match Store.store ~auto_prune:true ~max_entries:1 ~dir:frames bytes with
     | Ok frame -> frame
@@ -289,7 +289,7 @@ let test_size_out_of_range_is_refused () =
     | Tool_result.Completed _ | Tool_result.Deferred _ ->
         Alcotest.failf "size %d is outside the declared range and succeeded" size)
     [ Keeper_portrait_draw.min_size; Read.minimum_size - 1; Read.maximum_size + 1 ];
-  let dir = Vision.vision_store_dir ~keeper_name:"invalid-portrait" in
+  let dir = Vision.vision_store_dir ~base_path:(Sys.getenv "MASC_BASE_PATH") ~keeper_name:"invalid-portrait" () in
   Alcotest.(check bool) "rejected inputs create no artifacts" false (Sys.file_exists dir)
 ;;
 

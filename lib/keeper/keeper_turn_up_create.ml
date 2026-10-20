@@ -283,6 +283,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
              let checkpoint_result =
                try
                  Keeper_context_runtime.save_agent_core_checkpoint
+                   ~base_path:ctx.config.base_path
                    ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
                    ~keeper_name:meta.name
                    ~session

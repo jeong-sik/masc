@@ -4215,6 +4215,24 @@ let test_window_stopped_empty_answer_advances_once_to_successor () =
     ()
 ;;
 
+(* An answer the provider cut at its output limit (finish_reason "length")
+   advances once to the declared successor with its own typed cause, whether
+   the cut answer carries JSON text or is empty. *)
+let test_output_limit_advances_once_to_successor ~content () =
+  assert_typed_capacity_refusal_advances_once
+    ~refused_kind:"openai_compat"
+    ~label:("output-limit-" ^ if String.equal content "" then "empty" else "text")
+    ~first_response:
+      ( Cohttp.Code.status_of_code 200
+      , Printf.sprintf
+          {|{"id":"resp-limit","model":"flow","choices":[{"index":0,"message":{"role":"assistant","content":"%s"},"finish_reason":"length"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
+          content )
+    ~assert_cause:(function
+      | EO.Output_limit_reached -> ()
+      | _ -> fail "an output-limited answer lost its output-limit cause")
+    ()
+;;
+
 (* Which of its own deadlines the first candidate misses: the header deadline
    ([connect_timeout_s]) or the total deadline ([body_timeout_s]), which ends
    a request with no headers when it is the earlier one. *)
@@ -5471,6 +5489,10 @@ let () =
             test_glm_rate_limit_code_stays_a_rate_limit
         ; test_case "an empty answer stopped at the window advances once" `Quick
             test_window_stopped_empty_answer_advances_once_to_successor
+        ; test_case "an output-limited text answer advances once" `Quick
+            (test_output_limit_advances_once_to_successor ~content:"{}")
+        ; test_case "an output-limited empty answer advances once" `Quick
+            (test_output_limit_advances_once_to_successor ~content:"")
         ; test_case "HTTP 500 advances once to the declared successor" `Quick
             (fun () -> test_server_refusal_advances_once_to_successor 500)
         ; test_case "HTTP 503 advances once to the declared successor" `Quick

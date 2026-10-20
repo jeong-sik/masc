@@ -645,7 +645,6 @@ let refusal_reason = function
    reads. [None] is said as such rather than left blank: a config with no
    provider id is a fact about that config, not a missing word. The whole
    detail is quoted where it lands in a reason line, so the id is not. *)
-
 let missing_deadline_provider_label = function
   | Some provider_id -> provider_id
   | None -> "(config names no provider)"
@@ -657,7 +656,6 @@ let missing_deadline_provider_label = function
    catalog's [[targets]] row [body_timeout_s]. Which one built this target
    is not known here, so both are named. The connect deadline is named
    because it is what an operator who set one expects to have been enough. *)
-
 let missing_deadline_detail provider_id =
   Printf.sprintf
     "provider %s declares no whole-request deadline: set exact-body-timeout-s \

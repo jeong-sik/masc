@@ -47,14 +47,9 @@ type t =
 type snapshot =
   { phase : effect_phase
   ; dispatch_count : int
-  ; http_status : int option
-  ; provider_trace : provider_trace option
   ; call_id : call_id
   ; plan_fingerprint : string
   ; request_body_sha256 : string
-  ; catalog_generation : Exact_output_resolver.catalog_generation
-  ; catalog_evidence : Exact_output_resolver.catalog_evidence
-  ; target_identity : Exact_output_resolver.target_identity
   }
 
 let create
@@ -368,26 +363,19 @@ let rec record_provider_trace receipt provider_trace =
 
 let snapshot receipt =
   let state = Atomic.get receipt.state in
-  let phase, dispatch_count, http_status, provider_trace =
+  let phase, dispatch_count =
     match state with
-    | Not_started_state -> Not_started, 0, None, None
-    | Before_dispatch_state -> Before_dispatch, 0, None, None
-    | Dispatch_started_state -> Dispatch_started, 1, None, None
-    | Response_received_state received ->
-      Response_received, 1, received.status, received.provider_trace
-    | Terminal_state terminal ->
-      Terminal, 1, Some terminal.status, terminal.provider_trace
+    | Not_started_state -> Not_started, 0
+    | Before_dispatch_state -> Before_dispatch, 0
+    | Dispatch_started_state -> Dispatch_started, 1
+    | Response_received_state _ -> Response_received, 1
+    | Terminal_state _ -> Terminal, 1
   in
   { phase
   ; dispatch_count
-  ; http_status
-  ; provider_trace
   ; call_id = receipt.call_id
   ; plan_fingerprint = receipt.plan_fingerprint
   ; request_body_sha256 = receipt.request_body_sha256
-  ; catalog_generation = receipt.catalog_generation
-  ; catalog_evidence = receipt.catalog_evidence
-  ; target_identity = receipt.target_identity
   }
 ;;
 

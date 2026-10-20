@@ -134,6 +134,7 @@ type keeper_runtime = {
       sentence (the fenced empty assistant turn), [None] on every other
       blocker and on no blocker. The detail pane draws it as a dimmed
       follow-on line, so the wire a log search keys on stays on screen. *)
+  kr_runtime_lane_observation : Keeper_execution_receipt.runtime_lane_observation option;
 }
 
 type keeper_lane_phase =
@@ -2972,6 +2973,18 @@ let decode_keeper_runtime ~candle_balance_milli ~account_revision json =
     Tui_decode_fields.optional_nullable_string_field json
       "runtime_blocker_signature"
   in
+  let kr_runtime_lane_observation =
+    match json with
+    | `Assoc fields ->
+      (match List.filter (fun (key, _) -> String.equal key "runtime_lane_observation") fields with
+       | [_, value] -> Keeper_execution_receipt.runtime_lane_observation_of_yojson value
+       | [] | _ :: _ ->
+         Some (Keeper_execution_receipt.Runtime_lane_unreadable
+           {turn=None;field="runtime_lane_observation missing or duplicated"}))
+    | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      Some (Keeper_execution_receipt.Runtime_lane_unreadable
+        {turn=None;field="runtime_lane_observation unavailable"})
+  in
   let* raw_phase = required_string_field json "phase" in
   let* kr_phase =
     match keeper_phase_of_string raw_phase with
@@ -2997,6 +3010,7 @@ let decode_keeper_runtime ~candle_balance_milli ~account_revision json =
     ; kr_sandbox_profile
     ; kr_runtime_blocker_summary
     ; kr_runtime_blocker_signature
+    ; kr_runtime_lane_observation
     }
 
 (* [truncated] is carried out rather than dropped: the route clamps its own

@@ -1025,6 +1025,76 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       in
       add_empty ();
 
+      (* Historical receipt evidence is a separate reading. A successful
+         fallback may retain earlier refusals while the live blocker is clear. *)
+      add_section "Recorded runtime walk";
+      let module Receipt = Masc.Keeper_execution_receipt in
+      let module Evidence = Keeper_runtime_walk_evidence in
+      let module Fault = Llm_provider.Candidate_fault in
+      let history_row label value = add_row label (Terminal_text.single_line value) in
+      let source (turn : Receipt.receipt_turn) =
+        history_row "Receipt trace:" turn.receipt_trace_id;
+        history_row "Receipt turn:"
+          (match turn.receipt_turn_count with
+           | Some count -> string_of_int count
+           | None -> "not recorded");
+        history_row "Receipt ended:" turn.receipt_ended_at
+      in
+      let fault = function
+        | None -> "API classification inapplicable"
+        | Some Fault.Unattributed -> "unattributed API refusal"
+        | Some Fault.Unknown_after_dispatch -> "outcome uncertain"
+        | Some (Fault.Binding binding) ->
+          match binding with
+          | Fault.Credential -> "credential"
+          | Fault.Account_access -> "account access"
+          | Fault.Account -> "account"
+          | Fault.Model_absent -> "model absent"
+          | Fault.Rate_limit -> "rate limit"
+          | Fault.Capacity -> "capacity"
+          | Fault.Server -> "server"
+          | Fault.Window -> "context window"
+          | Fault.Body_limit -> "body limit"
+          | Fault.Admission -> "admission"
+          | Fault.Deadline -> "deadline"
+          | Fault.Output_dialect -> "output dialect"
+          | Fault.Refusal_unread -> "refusal unread"
+      in
+      (match (keeper_reading state k).Keeper_control.liveness with
+       | Keeper_control.Present runtime ->
+         (match runtime.kr_runtime_lane_observation with
+          | None -> wrap ~tone:Ansi.dim "no receipt"
+          | Some (Receipt.Runtime_lane_not_observed turn) ->
+            source turn;
+            wrap ~tone:Ansi.dim "candidate walk was not captured"
+          | Some (Receipt.Runtime_lane_unreadable {turn;field}) ->
+            Option.iter source turn;
+            wrap ~tone:(Theme.warn ()) ("historical evidence unreadable: " ^ field)
+          | Some (Receipt.Runtime_lane_observed {turn;evidence}) ->
+            source turn;
+            (match evidence.failures with
+             | [] -> wrap ~tone:Ansi.dim "no candidate failure recorded"
+             | failures -> List.iter (fun (failure : Evidence.failure) ->
+                 history_row "Candidate:"
+                   (Printf.sprintf "%d · %s" failure.attempt failure.runtime_id);
+                 history_row "Invocation:"
+                   (match failure.dispatch with
+                    | Runtime_attempt_dispatch.Dispatched -> "candidate invoked"
+                    | Runtime_attempt_dispatch.Rejected_before_dispatch -> "rejected before invocation");
+                 history_row "API fact:" (fault failure.api_candidate_fault);
+                 wrap (Keeper_request_failure.summary failure.failure)) failures);
+            (match evidence.terminal with
+             | Evidence.Terminal_not_observed ->
+               history_row "Terminal origin:" "not observed"
+             | Evidence.Candidate_terminal {runtime_id;attempt;failure} ->
+               history_row "Terminal origin:" (Printf.sprintf "%d · %s" attempt runtime_id);
+               wrap (Keeper_request_failure.summary failure)))
+       | Keeper_control.Unobserved -> wrap ~tone:Ansi.dim "live roster unread"
+       | Keeper_control.Absent -> wrap ~tone:Ansi.dim "absent from live roster"
+       | Keeper_control.Invalid detail ->
+         wrap ~tone:(Theme.warn ()) ("roster unavailable: " ^ detail));
+      add_empty ();
+
       (* Blocked Board-attention partitions wait here for an
          operator's requeue, and nothing else on the screens said they existed.
          Beside the current failure because it is one: this Keeper's Board

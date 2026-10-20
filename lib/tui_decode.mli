@@ -686,6 +686,10 @@ type keeper_runtime = {
       sentence (the fenced empty assistant turn), [None] on every other
       blocker and on no blocker. The detail pane draws it as a dimmed
       follow-on line, so the wire a log search keys on stays on screen. *)
+  kr_runtime_lane_observation : Keeper_execution_receipt.runtime_lane_observation option;
+  (** Historical receipt evidence, independent of the live blocker and control
+      authority. [None] means explicit no receipt; malformed or missing evidence
+      is an unreadable observation without invalidating this roster row. *)
 }
 (** One row of [GET /api/v1/gate/keepers] — the live runtime reading of a
     keeper, as [masc_keeper_list] renders it.

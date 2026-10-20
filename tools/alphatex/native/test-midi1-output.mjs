@@ -37,6 +37,38 @@ import CoreMIDI
    [0x40e20000,0x80000001],[0x40120000,0],[0x10f88000],[0x20c20001],[0x30010101,0],[0x50000000,0,0,0]] {
    refuses {_ = try umpMidi1Words(words)}
   }
+  // MIDIEventList and words are flexible storage. Keep the original borrowed
+  // address; copying the declared first packet/64-word tuple loses later data.
+  func receivedPackets(_ list:UnsafePointer<MIDIEventList>)->[[UInt32]] {
+   let raw=UnsafeRawPointer(list)
+   let count=raw.loadUnaligned(fromByteOffset:MemoryLayout<MIDIEventList>.offset(of:\.numPackets)!,as:UInt32.self)
+   var packet=raw.advanced(by:MemoryLayout<MIDIEventList>.offset(of:\.packet)!)
+   var rows:[[UInt32]]=[]
+   for _ in 0..<count {
+    let wordCount=Int(packet.loadUnaligned(fromByteOffset:MemoryLayout<MIDIEventPacket>.offset(of:\.wordCount)!,as:UInt32.self))
+    let words=packet.advanced(by:MemoryLayout<MIDIEventPacket>.offset(of:\.words)!)
+    rows.append((0..<wordCount).map {words.loadUnaligned(fromByteOffset:$0*MemoryLayout<UInt32>.stride,as:UInt32.self)})
+    packet=UnsafeRawPointer(MIDIEventPacketNext(packet.assumingMemoryBound(to:MIDIEventPacket.self)))
+   }
+   return rows
+  }
+  // Exercise the actual observer with valid native lists before opening devices.
+  // Long lists cross the declared packet and words tuple's fixed-size storage.
+  for counts in [[],[1,1],[2,3,4],[32,32,4],[64,2],[80,2]] as [[Int]] {
+   let capacity=MemoryLayout<MIDIEventList>.size+counts.reduce(0) {
+    $0+MemoryLayout<MIDIEventPacket>.size+$1*MemoryLayout<UInt32>.stride
+   }
+   let storage=UnsafeMutableRawPointer.allocate(byteCount:capacity,alignment:MemoryLayout<MIDIEventList>.alignment)
+   defer {storage.deallocate()}
+   let list=storage.assumingMemoryBound(to:MIDIEventList.self)
+   var tail=MIDIEventListInit(list,._1_0),expected:[[UInt32]]=[]
+   for (index,count) in counts.enumerated() {
+    let words=(0..<count).map {UInt32(0x20903c00+index*0x100+$0)}
+    expected.append(words)
+    tail=words.withUnsafeBufferPointer {MIDIEventListAdd(list,capacity,tail,UInt64(index+1),$0.count,$0.baseAddress!)}
+   }
+   tracePrecondition(receivedPackets(UnsafePointer(list))==expected,"variable-length wire observer changed packets")
+  }
   var client=MIDIClientRef(),destinations:[MIDIEndpointRef]=[]
   try checked(MIDIClientCreate("MASC owned MIDI1 wire probe" as CFString,nil,nil,&client),"private client")
   defer {for endpoint in destinations {MIDIEndpointDispose(endpoint)};MIDIClientDispose(client)}
@@ -57,15 +89,9 @@ import CoreMIDI
   func endpoint(_ native:MIDIProtocolID,_ index:Int)throws->String {
    var result=MIDIEndpointRef()
    try checked(MIDIDestinationCreateWithProtocol(client,"MASC wire \(UUID().uuidString)" as CFString,native,&result,{list,_ in
-    var rows:[[UInt32]]=[]
-    withUnsafePointer(to:list.pointee.packet) { first in
-     var packet=first
-     for _ in 0..<list.pointee.numPackets {
-      let count=Int(packet.pointee.wordCount)
-      let words=withUnsafePointer(to:packet.pointee.words) {ptr in ptr.withMemoryRebound(to:UInt32.self,capacity:count){Array(UnsafeBufferPointer(start:$0,count:count))}}
-      rows.append(words);packet=UnsafePointer(MIDIEventPacketNext(packet))
-     }
-    }
+    let packetCount=UnsafeRawPointer(list).loadUnaligned(fromByteOffset:MemoryLayout<MIDIEventList>.offset(of:\.numPackets)!,as:UInt32.self)
+    wireTrace.record(.callbackEntry,UInt32(index),packetCount)
+    let rows=receivedPackets(list)
     wireTrace.record(.receive,UInt32(index),packets:rows)
     lock.lock();received[index,default:[]].append(contentsOf:rows);lock.broadcast();lock.unlock()
    }),"private destination")
@@ -150,7 +176,7 @@ import CoreMIDI
   tracedOutput=tracedOutput.replace(edge,edge+'\n        '+state)
  }
  await writeFile(join(directory,'Output.swift'),tracedOutput+String.raw`
-enum WireTraceKind:String,Codable {case source,send,sendResult,portDispose,portDisposed,clientDispose,clientDisposed,receive,owner}
+enum WireTraceKind:String,Codable {case source,send,sendResult,portDispose,portDisposed,clientDispose,clientDisposed,callbackEntry,receive,owner}
 struct WireOwnerState:Encodable {let held:Int,pedals:Int,exclusive:Int;let closed:Bool}
 struct WireTraceRow:Encodable {
  let serial:Int,host:UInt64,kind:WireTraceKind,first:UInt32,second:UInt32,status:Int32?,packets:[[UInt32]],owner:WireOwnerState?

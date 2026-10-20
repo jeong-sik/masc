@@ -9,7 +9,7 @@ import { importArrangementPractice, saveArrangement, loadArrangement } from '../
 import { arrangementEditor, arrangementCommand, arrangementPracticePass } from '../arrangement-editor.mjs'
 import { newArrangement, editArrangement } from '../arrangement.mjs'
 import { arrangementRoute, arrangementPlaybackRequest, selectArrangementRoute } from '../arrangement-playback.mjs'
-import { startVstArrangement } from '../arrangement-vst.mjs'
+import { startSoundArrangement } from '../arrangement-sound.mjs'
 import { phraseBacking } from '../phrase-backing.mjs'
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const json = async path => JSON.parse(await readFile(path, 'utf8'))
@@ -42,7 +42,7 @@ async function fixture(run, configure) {
         instrument: original.context.project.sound.instrument, sample_rate: timeline.sampleRate, frames: Number(timeline.frames), wav_sha256: hash(bytes) }
     })() })
     const start = (project = editor.project, route = arrangementRoute({ output: 'Audio' }), selectedRun = render) => {
-      const owner = startVstArrangement({ project, route, sourceRoot: dirname(path), directory: root, request, cancelRequest, run: selectedRun }); owners.push(owner); return owner
+      const owner = startSoundArrangement({ project, route, sourceRoot: dirname(path), directory: root, request, cancelRequest, run: selectedRun }); owners.push(owner); return owner
     }
     try { await run({ ...original, path, project: editor.project, calls, request, start, render }) }
     finally { await Promise.allSettled(owners.map(owner => owner.dispose())); await worker.terminate() }
@@ -133,7 +133,7 @@ test('explicit raw source override stays external and an unused override fails b
   assert.equal(arrangementPlaybackRequest(project, route).kind, 'prepare-capture')
   const invalid = { ...route, sourceBindings: [{ asset: 'asset-1', source: 'other', destination: '42' }] }
   assert.equal(arrangementPlaybackRequest(project, invalid).kind, 'prepare-capture')
-  await assert.rejects(start(project, invalid).promise, /No audible local VST/); assert.equal(calls.length, 0)
+  await assert.rejects(start(project, invalid).promise, /No audible local instrument/); assert.equal(calls.length, 0)
 }))
 
 test('unsupported attributed UMP fails projection before a child opens; failed preparation cleans its owned root', () => fixture(async ({ root, input, rows, publish, project, path, calls, start }) => {

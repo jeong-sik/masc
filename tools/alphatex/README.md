@@ -1065,6 +1065,22 @@ An existing output is preserved. No audio or MIDI device is opened for rendering
 A changed/unavailable engine version or control quantum requires an explicit new
 selection; the saved font is not replaced with a mutable external file.
 
-This layer connects phrase/imported-source audition and WAV export. Arrangement
-playback/export and raw practice/capture sound realization still need integration
-with this engine; their current routes are not replaced implicitly.
+This engine also realizes stored MIDI assets for arrangement playback. Choose
+`:output AUDIO_UID` or `:mixed-output AUDIO_UID` in the arrangement editor. Each
+audible asset and selected format-2 pattern is synthesized once from its complete
+source history, including independent source ports. Its original rational trim,
+project placement and compressed repeat count then drive the common audio master
+alongside WAVs, stored VST sounds and explicitly routed MIDI/UMP backing. An
+explicit external MIDI route takes precedence over a saved local instrument.
+The built-in AlphaSynth selection is not changed into FluidSynth automatically.
+
+The source plan's actual bytes are SHA-bound before native admission and checked
+again when assembling playback. Derived assets retain the font/engine identity
+and original/derived event-frame receipt. A positive source-clock region with no
+PCM sample remains silence with its original period; no sample or duration is
+invented. Stop/close joins the current child before disposing any earlier sealed
+render or private font, and late completion cannot start playback.
+
+Whole-arrangement WAV export and raw practice/capture SoundFont realization still
+need integration with this engine; their current routes are not replaced
+implicitly. Click/count-in and existing VST practice backing retain their owners.

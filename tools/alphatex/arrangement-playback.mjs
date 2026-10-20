@@ -13,6 +13,7 @@ import { jsonLines, unpackMidi } from './session-data.mjs'
 import { practiceEnabled } from './arrangement-practice.mjs'
 import { arrangementLoop, loopMidiRegions } from './arrangement-loop.mjs'
 import { regionEdgeSeconds } from './exact-time.mjs'
+import { isFluidSound } from './soundfont.mjs'
 
 function requireRegionTransport(project) {
   const schedule = arrangementPlaybackSchedule(project)
@@ -138,19 +139,19 @@ export function selectArrangementRoute(route, effect) {
 // Explicit external bindings take precedence over a stored local instrument.
 // A partially bound asset stays external and is validated as one complete wire
 // source by the ordinary preparation path, before any VST child is started.
-export function arrangementVstAssets(project, route) {
+export function arrangementSoundAssets(project, route) {
   const audible = new Set(arrangementPlaybackSchedule(project).map(clip => clip.asset))
   return project.assets.filter(asset => audible.has(asset.id) && route.kind !== 'midi' && route.midiOutput === undefined
-    && (asset.kind === 'midi' && asset.source.sound?.kind === 'vst' && !(route.portBindings ?? []).some(binding => binding.asset === asset.id)
+    && (asset.kind === 'midi' && (asset.source.sound?.kind === 'vst' || isFluidSound(asset.source.sound)) && !(route.portBindings ?? []).some(binding => binding.asset === asset.id)
       || asset.kind === 'practice' && !(route.sourceBindings ?? []).some(binding => binding.asset === asset.id)))
 }
 export function arrangementPlaybackRequest(project, route) {
   const schedule = arrangementPlaybackSchedule(project), audible = new Set(schedule.map(clip => clip.asset))
   const assets = project.assets.filter(asset => audible.has(asset.id)), kinds = new Set(assets.map(asset => asset.kind))
   if (!kinds.size) throw new Error('No audible arrangement regions')
-  if (arrangementVstAssets(project, route).length) {
-    if (!route.output) throw new Error('Choose :output AUDIO_UID or :mixed-output AUDIO_UID for the stored VST sounds')
-    return { kind: 'prepare-vst', output: route.output, route }
+  if (arrangementSoundAssets(project, route).length) {
+    if (!route.output) throw new Error('Choose :output AUDIO_UID or :mixed-output AUDIO_UID for the stored instrument sounds')
+    return { kind: 'prepare-sound', output: route.output, route }
   }
   if (practiceEnabled(project) && kinds.has('midi') && (route.kind !== 'mixed' || !route.output)) throw new Error('Choose :mixed-output AUDIO_UID for the practice click and MIDI backing')
   if (kinds.has('capture') || kinds.has('practice')) {

@@ -5,6 +5,7 @@ import { sourceMidiTimeline } from './midi-source-playback.mjs'
 import { projectMidiTimeline } from './sequencer-midi.mjs'
 import { newEditor, editorView, editorAxis } from './sequencer-editor.mjs'
 import { activeTracks, harmonyTimeline } from './sequencer-project.mjs'
+import { createHash } from 'node:crypto'
 parentPort.on('message', async job => {
   try {
     const cancelled = () => Atomics.load(new Int32Array(job.cancel), 0) !== 0
@@ -43,8 +44,9 @@ parentPort.on('message', async job => {
       const { fluidRenderPlan } = await import('./soundfont.mjs')
       const plan = fluidRenderPlan(job.project, job.options)
       if (cancelled()) throw new Error('SoundFont preparation cancelled')
-      writeFileSync(job.path, JSON.stringify(plan), { flag: 'wx', mode: 0o600 })
-      result = { path: job.path, format: 'fluid-plan' }
+      const bytes = Buffer.from(JSON.stringify(plan))
+      writeFileSync(job.path, bytes, { flag: 'wx', mode: 0o600 })
+      result = { path: job.path, sha256: createHash('sha256').update(bytes).digest('hex'), format: 'fluid-plan' }
     } else if (job.options.format === 'midi') {
       const timeline = job.project.kind === 'midi-source' ? sourceMidiTimeline(job.project, job.options) : projectMidiTimeline(job.project, job.options)
       if (cancelled()) throw new Error('MIDI preparation cancelled')

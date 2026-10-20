@@ -7,10 +7,14 @@ import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { newArrangement, editArrangement } from '../arrangement.mjs'
 import { importArrangementWave, importArrangementCapture, saveArrangement, loadArrangement } from '../arrangement-files.mjs'
-import { importMidiSource, midiSourcePattern } from '../midi-source.mjs'
+import { importMidiSource, midiSourcePattern, midiSourceFromEvents } from '../midi-source.mjs'
 import { sourceAudioClock, sourceAudioFrames } from '../source-audio-clock.mjs'
 import { arrangementPlaybackRequest, arrangementRoute } from '../arrangement-playback.mjs'
-import { startVstArrangement } from '../arrangement-vst.mjs'
+import { startSoundArrangement } from '../arrangement-sound.mjs'
+import { captureFluidSound } from '../soundfont.mjs'
+import { nativeJob } from '../vst.mjs'
+import { fileURLToPath } from 'node:url'
+import { readWaveMetadata } from '../wave-file.mjs'
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const state = Buffer.from('frozen instrument state')
@@ -63,9 +67,9 @@ async function fixture(action) {
   project = editArrangement(project, { kind: 'lane-add', sourceKind: 'midi', name: 'Instrument' })
   project = editArrangement(project, { kind: 'region-add', name: 'One', asset: 'v', lane: 'lane-2', position: 480, offset: 1, extent: 478, repeat: 3 })
   project = editArrangement(project, { kind: 'region-add', name: 'Two', asset: 'v', lane: 'lane-2', position: 4000, offset: 0, extent: 480, repeat: 1 })
-  const start = (project, route = arrangementRoute({ output: 'AudioUID' }), selectedRun = run, selectedRequest = request) => {
-    assert.equal(arrangementPlaybackRequest(project, route).kind, 'prepare-vst')
-    const owner = startVstArrangement({ project, route, sourceRoot: root, directory: root, request: selectedRequest, cancelRequest, run: selectedRun })
+  const start = (project, route = arrangementRoute({ output: 'AudioUID' }), selectedRun = run, selectedRequest = request, runSoundfont) => {
+    assert.equal(arrangementPlaybackRequest(project, route).kind, 'prepare-sound')
+    const owner = startSoundArrangement({ project, route, sourceRoot: root, directory: root, request: selectedRequest, cancelRequest, run: selectedRun, runSoundfont })
     owners.push(owner); return owner
   }
   try { await action({ root, worker, project, start, run, calls, requests, request, midi }) }
@@ -105,7 +109,7 @@ test('VST plus residual MIDI use one mixed clock and practice is applied once; l
   assert.equal(plan.practice.countInSeconds, 2); assert.equal(result.originSeconds, .125)
   assert.equal(plan.regions.find(region => region.sourceClock).projectTick, 480)
   assert.deepEqual(result.bindings, [{ port: 0, destination: '-42' }])
-  assert.deepEqual(requests.map(request => request.kind), ['prepare-vst-sources', 'prepare-vst-plan'])
+  assert.deepEqual(requests.map(request => request.kind), ['prepare-sound-sources', 'prepare-sound-plan'])
 }))
 
 test('external override is complete and partial mappings fail before any plugin; failed worker preparation releases the root', () => fixture(async ({ root, project, start, calls }) => {
@@ -140,7 +144,7 @@ test('immediate cancellation and assembly failure without a final result both re
   const before = await readdir(root), cancelled = start(project)
   cancelled.cancel(); await assert.rejects(cancelled.promise, { name: 'AbortError' })
   assert.deepEqual(await readdir(root), before)
-  const failed = start(project, undefined, undefined, (value, issued) => value.kind === 'prepare-vst-plan'
+  const failed = start(project, undefined, undefined, (value, issued) => value.kind === 'prepare-sound-plan'
     ? Promise.reject(new Error('Worker fatal before final result')) : request(value, issued))
   await assert.rejects(failed.promise, /Worker fatal/)
   assert.deepEqual(await readdir(root), before)
@@ -209,4 +213,105 @@ test('derived VST voices compose with captured paired WAV/UMP without changing c
   assert.deepEqual(plan.umpRegions.sources[0].timeline.packets, packets)
   assert.equal(plan.regions.filter(region => region.sourceClock).length, 2)
   assert.deepEqual(project, before)
+}))
+
+const channel = (tick, bytes) => ({ tick, kind: 'channel', bytes })
+const meta = (tick, type, data) => ({ tick, kind: 'meta', type, data })
+const fluidHost = fileURLToPath(new URL('../soundfont_host.py', import.meta.url))
+const actualFluid = request => nativeJob(request, { command: 'python3', args: [fluidHost], label: 'SoundFont' })
+const addFluid = (project, sound, id = 'fluid', source = midiSourceFromEvents([
+  meta(0, 33, [0]), channel(0, [0xc0, 0]), channel(0, [0x90, 60, 100]),
+  meta(0, 33, [1]), channel(0, [0xc0, 0]), channel(0, [0x90, 67, 90]),
+  meta(480, 33, [0]), channel(480, [0x80, 60, 0]), meta(960, 33, [1]),
+  channel(960, [0x80, 67, 0]), meta(3840, 47, []),
+], { ppq: 960, sound })) => {
+  project = editArrangement(project, { kind: 'asset-add', asset: { kind: 'midi', id, name: id, source } })
+  return editArrangement(project, { kind: 'region-add', name: id, asset: id, lane: 'lane-2', position: 0,
+    offset: 1, extent: 478, repeat: 3 })
+}
+
+test('actual frozen SoundFonts share the WAV/VST master, isolate ports and retain zero-sample rational regions and portable sources', () => fixture(async ({ root, project, start, calls }) => {
+  const sound = await captureFluidSound().promise, fluidCalls = []
+  project = addFluid(project, sound)
+  const tiny = midiSourceFromEvents([channel(0, [0x90, 64, 100]), channel(65534, [0x80, 64, 0]), meta(65534, 47, [])], { ppq: 32767, sound })
+  project = addFluid(project, sound, 'tiny', tiny)
+  project = editArrangement(project, { kind: 'region-change', id: project.clips.at(-1).id, offset: 3, extent: 1, repeat: 2000000 })
+  const before = structuredClone(project)
+  const owner = start(project, undefined, undefined, undefined, request => { fluidCalls.push(request); return actualFluid(request) })
+  const result = await owner.promise, plan = JSON.parse(await readFile(result.path))
+  assert.equal(calls.length, 1); assert.equal(fluidCalls.length, 2); assert.equal(plan.assets.length, 4)
+  const realized = plan.assets.filter(asset => asset.realization?.kind === 'soundfont')
+  assert.deepEqual(realized.map(asset => asset.frames), [88200, 44100])
+  assert.deepEqual([...new Set(realized[0].realization.timing.events.map(event => event[0]))], [0, 1])
+  for (const asset of realized) {
+    assert.equal(asset.realization.fontSha256, sound.font.sha256)
+    const bytes = await readFile(asset.path), metadata = await readWaveMetadata(asset.path)
+    assert.equal(hash(bytes), asset.sha256); assert.equal(metadata.encoding, 'float')
+    for (let i = metadata.dataOffset; i < metadata.dataOffset + metadata.dataBytes; i += 4) assert.ok(Number.isFinite(bytes.readFloatLE(i)))
+  }
+  const zero = plan.regions.find(region => region.repeat === 2000000)
+  assert.equal(zero.frameCount, 0); assert.equal(zero.offsetFrames, 3)
+  assert.deepEqual(zero.sourceClock, { start: '1500000', end: '2000000', denominator: '32767000000' })
+  assert.deepEqual(project, before)
+  const path = join(root, 'portable', 'soundfont-song.json')
+  await saveArrangement(path, project, null, { sourceRoot: root })
+  assert.deepEqual((await loadArrangement(path)).project, before)
+}))
+
+test('actual SoundFont plans keep explicit format-2 patterns and drop-frame SMPTE source clocks', () => fixture(async ({ project, start }) => {
+  const sound = await captureFluidSound().promise
+  project = { ...project, clips: project.clips.filter(clip => clip.asset !== 'v') }
+  const chunk = (name, bytes) => { const header = Buffer.alloc(8); header.write(name); header.writeUInt32BE(bytes.length, 4); return Buffer.concat([header, Buffer.from(bytes)]) }
+  const track = pitch => [0, 0x90, pitch, 100, 0x83, 0x60, 0x80, pitch, 0, 0, 0xff, 0x2f, 0]
+  for (const [id, tracks, format, division] of [['patterns', [track(60), track(67)], 2, 480], ['smpte', [track(64)], 0, (256 - 29) * 256 + 80]]) {
+    const header = Buffer.alloc(6); header.writeUInt16BE(format); header.writeUInt16BE(tracks.length, 2); header.writeUInt16BE(division, 4)
+    const source = importMidiSource(Buffer.concat([chunk('MThd', header), ...tracks.map(bytes => chunk('MTrk', bytes))]), { sound })
+    project = editArrangement(project, { kind: 'asset-add', asset: { id, kind: 'midi', name: id, source } })
+    for (const pattern of id === 'patterns' ? [0, 1] : [undefined]) project = editArrangement(project, { kind: 'region-add', name: id,
+      asset: id, lane: 'lane-2', position: 0, offset: 1, extent: 478, repeat: 3, ...(pattern === undefined ? {} : { pattern }) })
+  }
+  const result = await start(project).promise, plan = JSON.parse(await readFile(result.path))
+  const assets = plan.assets.filter(asset => asset.realization)
+  assert.deepEqual(assets.map(asset => asset.frames), [22050, 22050, 8829])
+  assert.equal(new Set(assets.map(asset => asset.id)).size, 3)
+  const smpte = plan.regions.filter(region => region.sourceClock).at(-1)
+  assert.deepEqual(smpte.sourceClock, { start: '1001', end: '479479', denominator: '2400000' })
+  assert.equal(smpte.repeat, 3)
+}))
+
+test('mutated SoundFont plan bytes are refused at use and at final admission, with no retained render lease', () => fixture(async ({ root, project, start, request }) => {
+  project = addFluid({ ...project, clips: project.clips.filter(clip => clip.asset !== 'v') }, await captureFluidSound().promise)
+  const before = await readdir(root)
+  const corrupt = async path => { await rm(path); await writeFile(path, '{}', { flag: 'wx' }) }
+  for (const boundary of ['prepare-sound-sources', 'prepare-sound-plan']) {
+    let nativeCalls = 0
+    const intercept = async (job, issued) => {
+      if (job.kind === 'prepare-sound-plan' && boundary === job.kind) await corrupt(job.preparation.renders[0].planPath)
+      const result = await request(job, issued)
+      if (job.kind === 'prepare-sound-sources' && boundary === job.kind) await corrupt(result.renders[0].planPath)
+      return result
+    }
+    const owner = start(project, undefined, undefined, intercept, value => { nativeCalls++; return actualFluid(value) })
+    await assert.rejects(owner.promise, /plan/)
+    assert.equal(nativeCalls, boundary === 'prepare-sound-sources' ? 0 : 1)
+    assert.deepEqual(await readdir(root), before)
+  }
+}))
+
+test('cancelling a second SoundFont joins its child before removing the first sealed render or frozen font', () => fixture(async ({ root, project, start, request }) => {
+  const sound = await captureFluidSound().promise
+  project = addFluid({ ...project, clips: project.clips.filter(clip => clip.asset !== 'v') }, sound)
+  project = addFluid(project, sound, 'second')
+  const before = await readdir(root), entered = gate(), terminal = gate()
+  let preparation, calls = 0, cancels = 0
+  const owner = start(project, undefined, undefined, async (job, issued) => {
+    const result = await request(job, issued); if (job.kind === 'prepare-sound-sources') preparation = result
+    return result
+  }, value => ++calls === 1 ? actualFluid(value) : (entered.resolve(value), { promise: terminal.promise, cancel() { cancels++ } }))
+  const second = await entered.promise, first = preparation.renders[0].outputPath
+  owner.cancel(); const disposed = owner.dispose(); let settled = false; disposed.then(() => { settled = true })
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(settled, false); assert.ok(cancels > 0)
+  await access(first); await access(second.plan.font.path)
+  terminal.resolve({}); await assert.rejects(owner.promise, { name: 'AbortError' }); await disposed
+  await assert.rejects(access(first), { code: 'ENOENT' }); assert.deepEqual(await readdir(root), before)
 }))

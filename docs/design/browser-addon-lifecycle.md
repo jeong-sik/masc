@@ -397,9 +397,12 @@ receipts remain distinct from successful contract validation.
    consumer fixture exercises accepted, changed-document, changed-meaning,
    invented-reference, cancelled and retired requests using a scripted
    WebDriver transport. These definitions are not executed browser/model proof.
-   Real Chrome/extension/model evidence, Gecko persistent-profile admission and
-   scoped transfer brokers remain. The selected Stagehand schema/role adapter
-   is now connected to the worker session controller described above.
+   Actual Gecko locate/model proof, Gecko persistent-profile admission and
+   scoped transfer brokers remain. Scoped Chrome/extension/shared-model
+   integration evidence is recorded under [Completion evidence](#completion-evidence);
+   it does not establish external-provider quality or personal-site behavior.
+   The selected Stagehand schema/role adapter is connected to the worker session
+   controller described above.
 
 ## Dedicated persistent Chrome profiles
 

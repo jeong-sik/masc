@@ -321,7 +321,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     stepInput = owner; stepOwners.add(owner)
     status = 'Opening MIDI step input'
     owner.ready.then(info => { if (stepInput === owner && accepting && !closed) { status = `Step input: ${info.source.name}`; draw() } }, () => {})
-    owner.completion.then(() => { status = 'Step input stopped; unfinished held chord discarded' },
+    owner.completion.then(() => { status = 'Step input stopped' },
       error => { status = `Step input stopped: ${error.message}` }).finally(() => {
       stepOwners.delete(owner)
       if (stepInput === owner) { stepInput = null; stepHeld = 0 }

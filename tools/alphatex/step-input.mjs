@@ -24,6 +24,20 @@ function insertChord(editor, notes) {
   const { track, channel } = target(editor)
   const end = editor.tick + editor.duration
   if (!Number.isSafeInteger(end)) throw new Error('Step input exceeds MIDI tick precision')
+  const pitches = new Set(notes.map(note => note.pitch))
+  if (pitches.size !== notes.length) throw new Error('Overlapping step notes of the same pitch on one target channel')
+  if (sourceDocument(editor)) {
+    const port = editor.performance.events.filter(event => event.track === track.sourceTrack && event.tick <= editor.tick
+      && event.kind === 'meta' && event.type === 0x21).at(-1)?.data[0] ?? 0
+    const overlaps = note => editor.duration === 0
+      ? note.duration === 0 ? note.start === editor.tick : note.start <= editor.tick && editor.tick < note.start + note.duration
+      : note.duration === 0 ? editor.tick <= note.start && note.start < end : note.start < end && editor.tick < note.start + note.duration
+    // SMF tracks can share one physical channel/port, so inspect the selected
+    // performance rather than only the target track's notes.
+    if (editor.performance.notes.some(note => note.channel === channel && note.port === port && pitches.has(note.pitch) && overlaps(note))) {
+      throw new Error('Overlapping step note on the existing source channel/port')
+    }
+  }
   const changes = notes.map(note => ({ kind: sourceDocument(editor) ? 'insert' : 'note',
     pitch: note.pitch, start: editor.tick, duration: editor.duration, velocity: note.velocity,
     ...(sourceDocument(editor) ? { track: track.sourceTrack, channel, release: note.release } : {}) }))

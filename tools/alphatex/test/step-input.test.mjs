@@ -64,6 +64,37 @@ function sourceFile(format=1, smpte=false) {
   file.push(new JZZ.MIDI.SMF.MTrk().add(0,JZZ.MIDI.noteOn(1,48,70)).add(1001,JZZ.MIDI.noteOff(1,48,12)).add(8008,JZZ.MIDI.smfEndOfTrack()))
   return importMidiSource(file.toUint8Array())
 }
+test('source chord entry rejects duplicate target keys and existing same-channel/port overlaps atomically', () => {
+  let editor=command(newEditor(sourceFile()),'channel 5')
+  const original=editor.project, duplicate=packet([...on(60),...on(60),...off(60),...off(60)])
+  assert.throws(()=>stepPacket(editor,null,duplicate),/Overlapping step/)
+  assert.deepEqual(editor.project,original)
+  editor=stepPacket(editor,null,packet([...on(60),...off(60)])).editor
+  editor={...editor,tick:0}
+  const before=editor.project
+  for(const candidate of [editor,{...editor,tick:500},{...editor,tick:500,duration:0}]){
+    assert.throws(()=>stepPacket(candidate,null,packet([...on(60),...off(60)])),/Overlapping step/)
+    assert.equal(candidate.project,before)
+  }
+  const adjacent=stepPacket({...editor,tick:1001},null,packet([...on(60),...off(60)]))
+  assert.equal(adjacent.editor.performance.notes.length,3)
+  const other=stepPacket({...editor,channel:3},null,packet([...on(60),...off(60)]))
+  assert.equal(other.editor.performance.notes.length,3)
+  const point=stepPacket({...command(newEditor(sourceFile()),'channel 5'),duration:0},null,packet([...on(60),...off(60)])).editor
+  assert.throws(()=>stepPacket({...point,tick:0},null,packet([...on(60),...off(60)])),/Overlapping step/)
+})
+test('source tracks sharing a physical channel/port cannot receive an overlapping key through step entry', () => {
+  for(const port of [3,7]){
+    const file=new JZZ.MIDI.SMF(1,1001)
+    file.push(new JZZ.MIDI.SMF.MTrk().add(0,JZZ.MIDI.smfMidiPort(3)).add(0,JZZ.MIDI.control(4,1,77)).add(4004,JZZ.MIDI.smfEndOfTrack()))
+    file.push(new JZZ.MIDI.SMF.MTrk().add(0,JZZ.MIDI.smfMidiPort(port)).add(0,JZZ.MIDI.noteOn(4,60,70)).add(1001,JZZ.MIDI.noteOff(4,60,12)))
+    let editor=command(newEditor(importMidiSource(file.toUint8Array())),'track 1')
+    editor=command(editor,'channel 5')
+    const chord=packet([...on(60),...off(60)])
+    if(port===3)assert.throws(()=>stepPacket(editor,null,chord),/Overlapping step/)
+    else assert.equal(stepPacket(editor,null,chord).editor.performance.notes.length,2)
+  }
+})
 for(const [format,smpte] of [[1,false],[2,false],[1,true]])test(`source step entry retains original clock, release, port and unrelated events (${format}, SMPTE ${smpte})`, async () => {
   const original=sourceFile(format,smpte)
   let editor=newEditor(original,{pattern:0});editor=command(editor,'track 1');editor=command(editor,'channel 5')

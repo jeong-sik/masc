@@ -37,8 +37,8 @@ was replayed under the same request identity.
 `hover.png` and `drag.png` are captured native page screenshots. Their digests
 match the corresponding result's screenshot hash; the native absolute paths in
 the receipts describe the capture location, not a portable link to that file.
-The images in this directory retain those bytes. The adapter directory, PNGs
-and source manifest were hashed; `source-hashes.json` binds the package scripts
+The images in this directory retain those bytes. The scripts, PNGs
+and package manifest were hashed; `source-hashes.json` binds the package scripts
 and manifest used by this run.
 
 ## First-open recovery
@@ -76,3 +76,7 @@ No OCaml build or full CI was run. No MASC server config/backend or Keeper
 native-tool/approval policy was changed. Full MASC configuration reconciliation,
 Dashboard display and official Keeper native Bash execution remain unverified.
 The observation lane does not export host actions as generic Keeper tools.
+
+After verification, a fresh observation confirmed the negative drag's final
+state; `finish` closed the owned task Space (`cleanup.json`). The owned HTTP
+fixture process was then stopped.

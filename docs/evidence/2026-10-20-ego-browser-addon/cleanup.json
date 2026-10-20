@@ -1,0 +1,54 @@
+[
+  {
+    "request": {
+      "request_id": "final-cleanup-observe-20261020",
+      "operation": "observe"
+    },
+    "result": {
+      "request_id": "final-cleanup-observe-20261020",
+      "operation": "observe",
+      "status": "observed",
+      "session": {
+        "name": "MASC ego add-on proof 20261020",
+        "epoch": "00794417-5f10-4fc4-8587-ef1c1b4ee73e",
+        "owner_identity": "0b5269c5-7af8-461b-831a-3171a4e5df26",
+        "native_name": "MASC ego add-on proof 20261020 [masc:0b5269c5-7af8-461b-831a-3171a4e5df26]",
+        "space_id": 3,
+        "page": "p1"
+      },
+      "completed_steps": 0,
+      "failed_step": null,
+      "url": "http://127.0.0.1:52390/?task=cross-drag&run=final-plugin-cross-drag-1-validated",
+      "title": "Browser interaction pilot",
+      "snapshot": "[p1 \"Browser interaction pilot\" | space \"MASC ego add-on proof 20261020 [masc:0b5269c5-7af8-461b-831a-3171a4e5df26]\"(3): 1 managed, 0 untracked \u2014 p1* \"Browser interaction pilot\"]\nroot\n  container \"Done\"\n    heading\n      text \"Done\"\n  output [ref=28]\n    text \"Not completed\"\n",
+      "error": null,
+      "screenshot": null
+    }
+  },
+  {
+    "request": {
+      "request_id": "final-cleanup-finish-20261020",
+      "operation": "finish"
+    },
+    "result": {
+      "request_id": "final-cleanup-finish-20261020",
+      "operation": "finish",
+      "status": "closed",
+      "session": {
+        "name": "MASC ego add-on proof 20261020",
+        "epoch": "00794417-5f10-4fc4-8587-ef1c1b4ee73e",
+        "owner_identity": "0b5269c5-7af8-461b-831a-3171a4e5df26",
+        "native_name": "MASC ego add-on proof 20261020 [masc:0b5269c5-7af8-461b-831a-3171a4e5df26]",
+        "space_id": 3,
+        "page": "p1"
+      },
+      "completed_steps": 0,
+      "failed_step": null,
+      "url": null,
+      "title": null,
+      "snapshot": null,
+      "error": null,
+      "screenshot": null
+    }
+  }
+]

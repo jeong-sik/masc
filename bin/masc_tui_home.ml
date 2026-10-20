@@ -41,7 +41,7 @@ let home_decision_rows (state : state) =
             | None, [] -> "open question"
           in
           Home_request (Home_question row.ar_id),
-          Printf.sprintf "Question · %s [%s] · %s" (clean row.ar_keeper)
+          Printf.sprintf "Question · %s [%s] · %s" (clean (Masc.Tui_decode_asks.ask_asker_label row.ar_asker))
             (Masc_tui_message_layout.truncate_middle 12 (clean row.ar_id)) (clean why))
     else []
   in

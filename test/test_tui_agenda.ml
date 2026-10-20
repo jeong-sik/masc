@@ -523,7 +523,7 @@ let test_removed_goal_does_not_select_its_replacement () =
    so the ask is what waits. *)
 let ask_row ?(questions = 1) ?(resolution = Masc.Tui_decode_asks.Ask_open)
     ask_id : Masc.Tui_decode_asks.ask_row =
-  { ar_keeper = "edgar.a.poe"
+  { ar_asker = Ask_keeper "edgar.a.poe"
   ; ar_id = ask_id
   ; ar_asked_at = asked_at_1155
   ; ar_source_turn_ref = None
@@ -553,7 +553,7 @@ let ask_targets lines =
   List.filter_map
     (fun index ->
       match List.nth_opt lines index with
-      | Some { Agenda.goes_to = Agenda.Ask_to_answer ask_id; _ } -> Some ask_id
+      | Some { Agenda.goes_to = Agenda.Ask_to_answer ask; _ } -> Some ask.ak_id
       | Some _ | None -> None)
     (Agenda.target_indexes lines)
 
@@ -571,7 +571,7 @@ let test_an_ask_waits_once_however_many_questions_it_holds () =
   check int "two open asks wait" 2 (Agenda.waiting agenda)
 
 let open_question ask_id : Agenda.open_question =
-  { ask_id; keeper = "quill"; first_question = Some "Merge?"
+  { ask = { ak_asker = Ask_keeper "quill"; ak_id = ask_id }; asked_by = "quill"; first_question = Some "Merge?"
   ; asked_at = asked_at_1155 }
 
 let with_questions rows =
@@ -659,7 +659,7 @@ let test_each_open_question_is_a_row_enter_opens () =
   let second = Agenda.step lines ~selected:first Agenda.Next in
   check bool "j reaches both" true
     (List.sort compare [ first; second ]
-     = [ Agenda.Ask_to_answer "ask-1"; Agenda.Ask_to_answer "ask-3" ])
+     = List.map (fun id -> Agenda.Ask_to_answer (Masc.Tui_decode_asks.ask_key (ask_row id))) [ "ask-1"; "ask-3" ])
 
 (* A question list that never came back is not an empty one, and it is not
    a reason to raise the strip either. *)

@@ -277,8 +277,9 @@ let test_ensure_help_item_appends_once () =
 let test_armed_ask_submit_notice_retires_when_answering_is_cleared () =
   let state = plain_surface_state Masc_tui_types.Approvals in
   let notice = Masc_tui_types.armed_ask_submit_notice "alpha" in
-  state.ask_answer_mode <- Masc_tui_types.Ask_answering { aam_ask_id = "ask-1" };
-  state.pending_ask_submit <- Some "ask-1";
+  let ask = { Masc.Tui_decode_asks.ak_asker = Ask_keeper "alpha"; ak_id = "ask-1" } in
+  state.ask_answer_mode <- Masc_tui_types.Ask_answering { aam_ask = ask };
+  state.pending_ask_submit <- Some ask;
   state.last_action <- Some (notice, Unix.gettimeofday ());
   check_bool "armed confirmation notice renders while ask submit is armed" true
     (contains ~needle:notice (render_action state 140));

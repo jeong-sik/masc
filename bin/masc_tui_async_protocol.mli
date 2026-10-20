@@ -298,7 +298,7 @@ type async_msg =
      workspace, Keeper, Ask and human label; none is recovered from prose. *)
   | Ask_answer_done of
       ask_submission
-      * (Masc.Tui_decode_asks.ask_answer_receipt, string) result
+      * (Masc.Tui_decode_asks.answer_receipt, string) result
       * (Masc.Tui_decode_asks.asks_snapshot, string) result
   | Keeper_chat_dispatch_started of
       Masc_tui_keeper_chat_projection.request * bool * bool Eio.Promise.u

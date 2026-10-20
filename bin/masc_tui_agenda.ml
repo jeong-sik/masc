@@ -51,8 +51,8 @@ type goal_to_confirm =
    ask, however many questions it holds: the operator answers an ask as one
    draft and one submit, so the ask is what is waiting. *)
 type open_question =
-  { ask_id : string
-  ; keeper : string
+  { ask : Masc.Tui_decode_asks.ask_key
+  ; asked_by : string
   ; first_question : string option
   ; asked_at : float
   }
@@ -218,7 +218,7 @@ type destination =
   | Nowhere
   | Keeper_holding of { keeper : string; tool_call_id : string }
       (** The exact held call; one Keeper can have several awaiting answers. *)
-  | Ask_to_answer of string  (** the ask, answered on Approvals *)
+  | Ask_to_answer of Masc.Tui_decode_asks.ask_key  (** the ask, answered on Approvals *)
   | Goal_to_confirm of string  (** the Goal, confirmed on its own detail *)
   | Stuck_task of string  (** the task, read on its own detail *)
 
@@ -368,12 +368,12 @@ let overlay ~now ~localtime ~cols t =
     | Read rows ->
       List.map
         (fun (row : open_question) ->
-           (* The Keeper wrote both, so both are made safe to draw before the
+           (* The asker wrote both, so both are made safe to draw before the
               row is measured; a question's line breaks are content and are
               kept as marks rather than dropped. *)
-           let keeper = Masc.Tui_terminal_text.sanitize_terminal_text row.keeper in
+           let keeper = Masc.Tui_terminal_text.sanitize_terminal_text row.asked_by in
            { tone = Question
-           ; goes_to = Ask_to_answer row.ask_id
+           ; goes_to = Ask_to_answer row.ask
            ; text =
                two_column
                  ~cols

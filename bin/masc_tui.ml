@@ -12009,21 +12009,17 @@ let apply_approvals_load state result =
    bell reaches every terminal; OSC 9 adds a desktop banner on the terminals
    that read it (iTerm2, WezTerm, kitty) and is ignored elsewhere. Neither
    moves the cursor, so this writes out of band rather than through the frame.
-   The banner names the Keeper so it says who is waiting. *)
-let notify_new_asks (snapshot : Masc.Tui_decode_asks.asks_snapshot) arrived_ids =
-  let keeper_of id =
-    List.find_opt
-      (fun (row : Masc.Tui_decode_asks.ask_row) -> String.equal row.Masc.Tui_decode_asks.ar_id id)
-      snapshot.Masc.Tui_decode_asks.asn_rows
-    |> Option.map (fun (row : Masc.Tui_decode_asks.ask_row) -> row.Masc.Tui_decode_asks.ar_keeper)
-  in
+   The banner names the Keeper or the installation so it says who is waiting. *)
+let notify_new_asks (arrived : Masc.Tui_decode_asks.ask_key list) =
   let message =
-    match List.filter_map keeper_of arrived_ids with
-    | [ one ] -> Printf.sprintf "%s is waiting on a decision" one
-    | _ ->
-        let count = List.length arrived_ids in
+    match List.map (fun (ask : Masc.Tui_decode_asks.ask_key) -> ask.ak_asker) arrived with
+    | [ asker ] -> (match asker with
+        | Masc.Tui_decode_asks.Ask_keeper name -> Printf.sprintf "%s is waiting on a decision" name
+        | Masc.Tui_decode_asks.Ask_installation { ai_title; _ } -> Printf.sprintf "%s is waiting on you" ai_title)
+    | [] | _ :: _ :: _ ->
+        let count = List.length arrived in
         Printf.sprintf "%s %s waiting on a decision"
-          (Masc_tui_message_layout.count_noun count "keeper") (if count = 1 then "is" else "are")
+          (Masc_tui_message_layout.count_noun count "question") (if count = 1 then "is" else "are")
   in
   write_to_terminal (Printf.sprintf "\x07\x1b]9;%s\x07" message)
 
@@ -12032,7 +12028,7 @@ let apply_asks_load state = function
       (* The delta against the last snapshot, so a poll that re-reads the same
          asks stays silent and only a question that just arrived rings. *)
       let arrived =
-        Ask.newly_opened_ask_ids ~previous:state.asks_snapshot ~current:snapshot
+        Ask.newly_opened_asks ~previous:state.asks_snapshot ~current:snapshot
       in
       let current_rows =
         Option.fold ~none:[] ~some:Ask.open_rows state.asks_snapshot
@@ -12042,9 +12038,9 @@ let apply_asks_load state = function
         ~cursor:state.ask_cursor ~next_rows;
       (match state.ask_answer_mode with
        | Ask_browsing -> ()
-       | Ask_answering { aam_ask_id } ->
+       | Ask_answering { aam_ask } ->
            (match List.find_index
-                    (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = aam_ask_id) next_rows with
+                    (fun row -> Masc.Tui_decode_asks.(equal_ask_key aam_ask (ask_key row))) next_rows with
             | Some index -> state.ask_cursor <- Ask.On index
             | None when state.workspace_identity = Workspace_identity_match ->
                 Masc_tui_home.clear_ask_answering state
@@ -12061,9 +12057,9 @@ let apply_asks_load state = function
         | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
         | Runtime | Config | Resources | Tools | System_logs -> false in
       if
-        Ask.should_ring_for_new_ask ~new_ids:arrived
+        Ask.should_ring_for_new_ask ~arrived
           ~operator_is_watching_asks:watching_asks
-      then notify_new_asks snapshot arrived
+      then notify_new_asks arrived
   | Error err ->
       remember_surface_error state ~surface:"asks" ~current_error:state.asks_error
         ~set_error:(fun value -> state.asks_error <- value)
@@ -12459,7 +12455,7 @@ let load_http_keeper_surfaces ~on_progress ~on_asks ~on_roster ~ask_request ~ros
            ~outcome:(fun observation -> Http_refresh_progress.of_result observation.asks_result) (fun () ->
          let asks_result = match expected_workspace with
            | None -> Error "Server workspace identity is unavailable"
-           | Some expected_workspace -> Masc_tui_http.fetch_keeper_asks ~expected_workspace ~host ~port () in
+           | Some expected_workspace -> Masc_tui_http.fetch_asks ~expected_workspace ~host ~port () in
          let observation = { asks_request; asks_result } in
          (match on_asks with
           | None -> ()
@@ -13990,7 +13986,7 @@ let current_surface_needs state =
 let log_ask_followup request submission ~sources ~phase ~source ~received_ns ~outcome =
   let facts = Option.map Masc_tui_ask_projection.followup_to_json sources in
   Log.Transport.info "tui_ask_followup=%s" (Yojson.Safe.to_string (`Assoc [
-    "keeper", `String submission.as_keeper_name;"ask_id", `String submission.as_ask_id;
+    "asker", Masc_tui_ask_projection.asker_to_json submission.as_asker;"ask_id", `String submission.as_ask_id;
     "request", `Int (Snapshot_read.request_id request);
     "question_source_turn_ref", (match submission.as_source_turn_ref with
       | None -> `Null | Some reference -> Ids.Turn_ref.to_yojson reference);
@@ -14007,7 +14003,7 @@ let log_ask_followup request submission ~sources ~phase ~source ~received_ns ~ou
 let launch_ask_followup_load state ~mailbox =
   if state.view = Approvals && server_authority_ready state then
     match state.server_identity, Masc_tui_types.begin_ask_followup_read state with
-    | Some expected_workspace, Some (request, submission) ->
+    | Some expected_workspace, Some (request, submission, keeper_name) ->
         let host = server_peer_host and port = state.port in
         let enqueue_async = workspace_enqueue state in
         let deliver result = enqueue_async mailbox (Ask_followup_finished (request, submission, result)) in
@@ -14025,7 +14021,7 @@ let launch_ask_followup_load state ~mailbox =
              (fun () ->
                let result = try Eio.Fiber.first
                  (fun () -> Masc_tui_http.observe_keeper_ask_followup ~clock ~expected_workspace
-                   ~keeper_name:submission.as_keeper_name ~ask_id:submission.as_ask_id ~host ~port
+                   ~keeper_name ~ask_id:submission.as_ask_id ~host ~port
                    ~on_event:(fun event ->
                      let received_ns = Mtime_clock.elapsed_ns () in
                      enqueue_async mailbox (Ask_followup_observed (request, submission, event, received_ns))))
@@ -15461,8 +15457,8 @@ let open_ask_rows state =
 let selected_ask_row state =
   match state.ask_answer_mode with
   | Ask_browsing -> Ask.selected_row (open_ask_rows state) state.ask_cursor
-  | Ask_answering { aam_ask_id } ->
-      List.find_opt (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = aam_ask_id)
+  | Ask_answering { aam_ask } ->
+      List.find_opt (fun row -> Masc.Tui_decode_asks.(equal_ask_key aam_ask (ask_key row)))
         (open_ask_rows state)
 
 let selected_ask_origin state =
@@ -15470,8 +15466,8 @@ let selected_ask_origin state =
   | Some origin -> Some origin
   | None ->
       (match selected_ask_row state with
-       | Some row -> Some (Ask.origin_of_row row)
-       | None -> Option.map Ask.origin_of_feedback (current_ask_answer_feedback state))
+       | Some row -> Ask.origin_of_row row
+       | None -> Option.bind (current_ask_answer_feedback state) Ask.origin_of_feedback)
 
 let toggle_selected_ask_origin state =
   match current_ask_origin state with
@@ -15479,7 +15475,7 @@ let toggle_selected_ask_origin state =
   | None ->
       let origin = selected_ask_origin state in
       (match origin with
-       | None -> report_action state "system" "No question source is available"
+       | None -> report_action state "system" "No Keeper turn asked this question"
        | Some origin ->
            Masc_tui_types.toggle_ask_origin state origin;
            state.ask_question_scroll <- 0;
@@ -15532,14 +15528,14 @@ let enter_ask_answering state =
          the questions stayed hidden. Close the detail, which is where the
          operator asked to go. *)
       state.approval_detail_open <- false;
-      state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Masc.Tui_decode_asks.ar_id };
+      state.ask_answer_mode <- Ask_answering { aam_ask = Masc.Tui_decode_asks.ask_key row };
       state.ask_question_cursor <- 0;
       state.ask_question_scroll <- 0;
       state.ask_draft <- Some (Ask.draft_for state.ask_draft ~row);
       Masc_tui_types.disarm_ask_submit state
 
 (* Walking to another ask starts a new draft rather than carrying the old one
-   across: [draft_for] keys on the ask id, so the answer cannot land under a
+   across: [draft_for] keys on the ask, so the answer cannot land under a
    question the operator never read. *)
 let move_ask_cursor state delta =
   let rows = open_ask_rows state in
@@ -15557,7 +15553,7 @@ let move_ask_cursor state delta =
     | Ask_browsing, _ -> ()
     | Ask_answering _, None -> ()
     | Ask_answering _, Some (row : Masc.Tui_decode_asks.ask_row) ->
-        state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Masc.Tui_decode_asks.ar_id };
+        state.ask_answer_mode <- Ask_answering { aam_ask = Masc.Tui_decode_asks.ask_key row };
         state.ask_draft <- Some (Ask.draft_for state.ask_draft ~row)
   end
 
@@ -15607,7 +15603,7 @@ let toggle_ask_choice state index =
 let begin_ask_text_entry state =
   match (selected_ask_row state, selected_ask_question state) with
   | Some row, Some question ->
-      let slot = Ask.free_text_slot ~ask_id:row.Masc.Tui_decode_asks.ar_id question in
+      let slot = Ask.free_text_slot ~ask:(Masc.Tui_decode_asks.ask_key row) question in
       let existing =
         match Ask.response_for (Ask.draft_for state.ask_draft ~row) ~question with
         | Some (Ask.Draft_wrote text) -> text
@@ -15632,14 +15628,14 @@ let commit_ask_text_entry state =
          arriving while the operator typed may have moved the cursor, even to
          another ask whose question carries the same id (masc_ask numbers
          every ask from q1), and the answer belongs to the question the editor
-         was opened on. So the ask is looked up by the slot's id, not taken
+         was opened on. So the ask is looked up by the slot's key, not taken
          from the cursor. Blank text clears the response rather than recording
          one -- an editor emptied by backspaces means unanswered, and the
          domain refuses a blank write. *)
-      let ask_id = Ask.free_text_ask_id entry.ate_slot in
+      let ask = Ask.free_text_ask entry.ate_slot in
       (match
          List.find_opt
-           (fun (row : Masc.Tui_decode_asks.ask_row) -> String.equal row.Masc.Tui_decode_asks.ar_id ask_id)
+           (fun row -> Masc.Tui_decode_asks.(equal_ask_key ask (ask_key row)))
            (open_ask_rows state)
        with
        | Some row ->
@@ -15730,17 +15726,27 @@ let apply_ask_answer_completion state submission result asks =
                answered_label detail)
   in
   (match result with
-   | Ok (Masc.Tui_decode_asks.Ask_answer_recorded delivery) ->
+   | Ok (Masc.Tui_decode_asks.Keeper_answer_receipt (Ask_answer_recorded delivery)) ->
        close_draft ();
        report_delivery ~already:false delivery
-   | Ok (Masc.Tui_decode_asks.Ask_answer_already_recorded { aar_delivery; _ }) ->
+   | Ok (Masc.Tui_decode_asks.Keeper_answer_receipt (Ask_answer_already_recorded { aar_delivery; _ })) ->
        close_draft ();
        report_delivery ~already:true aar_delivery
-   | Ok (Masc.Tui_decode_asks.Ask_answer_written_unconfirmed detail) ->
+   | Ok (Masc.Tui_decode_asks.Keeper_answer_receipt (Ask_answer_written_unconfirmed detail)) ->
        report_action state "error"
          (Printf.sprintf "Answer log write confirmed; winning answer unconfirmed: %s" detail)
-   | Ok (Masc.Tui_decode_asks.Ask_answer_refused detail) ->
+   | Ok (Masc.Tui_decode_asks.Keeper_answer_receipt (Ask_answer_refused detail))
+   | Ok (Masc.Tui_decode_asks.Installation_answer_receipt (Installation_answer_refused detail)) ->
        report_action state "error" (Printf.sprintf "Answer refused: %s" detail)
+   | Ok (Masc.Tui_decode_asks.Installation_answer_receipt Installation_answer_recorded) ->
+       close_draft ();
+       report_action state "system" (Printf.sprintf "Answer recorded: %s" answered_label)
+   | Ok (Masc.Tui_decode_asks.Installation_answer_receipt (Installation_answer_already_answered _)) ->
+       close_draft ();
+       report_action state "system" "Question already answered; the earlier answer stands"
+   | Ok (Masc.Tui_decode_asks.Installation_answer_receipt (Installation_answer_withdrawn _)) ->
+       close_draft ();
+       report_action state "system" "The installation withdrew this question"
    | Error err ->
        (* A lost or invalid response cannot establish that the write did not
           land. Keep the draft and read the canonical questions again. *)
@@ -15749,14 +15755,14 @@ let apply_ask_answer_completion state submission result asks =
 
 (* TEL-OK: the TUI-local submit gate emits user-visible events here; the
    ask-answer endpoint owns the durable answer telemetry. *)
-let start_ask_answer state ~keeper_name ~ask_id ~source_turn_ref ~answered_label ~answers ~mailbox =
+let start_ask_answer state ~asker ~ask_id ~source_turn_ref ~answered_label ~answers ~mailbox =
   let authority = state.workspace_authority in
   let reading = if server_authority_ready state then Some state.workspace_read_authority else None in
   let identity = state.server_identity in
   let submission = { as_request = ref (); as_started_ns = Mtime_clock.elapsed_ns ();
     as_receipt = Ask_answer_receipt.create ();
     as_completion = Ask_answer_completion.create ();
-    as_authority = authority; as_reading = reading; as_keeper_name = keeper_name;
+    as_authority = authority; as_reading = reading; as_asker = asker;
     as_ask_id = ask_id; as_source_turn_ref = source_turn_ref; as_answered_label = answered_label } in
   if state.workspace_identity <> Workspace_identity_match then
     report_action state "error" "Cannot answer: workspace identity is unverified; draft retained"
@@ -15775,8 +15781,15 @@ let start_ask_answer state ~keeper_name ~ask_id ~source_turn_ref ~answered_label
         let ( let* ) = Result.bind in
         let* () = observe_ask_answer_call submission Ask_answer_observation.Workspace_check check in
         observe_ask_answer_call submission Ask_answer_observation.Answer_post (fun () ->
-          let result = Masc_tui_http.post_keeper_ask_answer ~host ~port ~keeper_name ~ask_id
-            ~answers ~session_id:None in
+          (* The asker decides the route; each route's receipt keeps its kind. *)
+          let result = match asker with
+            | Masc.Tui_decode_asks.Ask_keeper keeper_name ->
+                Masc_tui_http.post_keeper_ask_answer ~host ~port ~keeper_name ~ask_id ~answers ~session_id:None
+                |> Result.map (fun receipt -> Masc.Tui_decode_asks.Keeper_answer_receipt receipt)
+            | Masc.Tui_decode_asks.Ask_installation { ai_declaration_id; _ } ->
+                Masc_tui_http.post_installation_ask_answer ~host ~port ~declaration_id:ai_declaration_id
+                  ~ask_id ~answers ~session_id:None
+                |> Result.map (fun receipt -> Masc.Tui_decode_asks.Installation_answer_receipt receipt) in
           (* Keep the actual POST result before even the observation logger can
              yield. The outer publication also covers pre-POST failures. *)
           ignore (Ask_answer_receipt.publish submission.as_receipt
@@ -15801,7 +15814,7 @@ let start_ask_answer state ~keeper_name ~ask_id ~source_turn_ref ~answered_label
           | Some identity -> Ok identity
           | None -> Error "Server workspace identity is unavailable" in
         observe_ask_answer_call submission Ask_answer_observation.Asks_reread (fun () ->
-          let asks = Masc_tui_http.fetch_keeper_asks ~expected_workspace ~host ~port () in
+          let asks = Masc_tui_http.fetch_asks ~expected_workspace ~host ~port () in
           publish_completion asks)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -15844,23 +15857,24 @@ let handle_ask_submit state ~mailbox =
              arming press says it too: the second press sends whatever is on
              this line, so it is the last place to see which question and
              which choice it is before the answer settles. *)
+          let asker_label = Masc.Tui_decode_asks.ask_asker_label row.Masc.Tui_decode_asks.ar_asker in
           let answered_label =
             match Ask.summarize_answer draft ~row with
-            | "" -> row.Masc.Tui_decode_asks.ar_keeper
-            | chosen -> Printf.sprintf "%s: %s" row.Masc.Tui_decode_asks.ar_keeper chosen
+            | "" -> asker_label
+            | chosen -> Printf.sprintf "%s: %s" asker_label chosen
           in
           match
             Ask.gate_transition ~inflight:state.ask_submit_inflight
-              ~pending:state.pending_ask_submit ~ask_id:row.Masc.Tui_decode_asks.ar_id
+              ~pending:state.pending_ask_submit ~ask:(Masc.Tui_decode_asks.ask_key row)
           with
           | Ask.Ask_gate_blocked_inflight ->
               Masc_tui_types.disarm_ask_submit state;
               report_action state "system" "An answer is already on its way"
-          | Ask.Ask_gate_arm ask_id ->
-              state.pending_ask_submit <- Some ask_id;
+          | Ask.Ask_gate_arm ask ->
+              state.pending_ask_submit <- Some ask;
               report_action state "system" (Masc_tui_types.armed_ask_submit_notice answered_label)
           | Ask.Ask_gate_submit ->
-              start_ask_answer state ~keeper_name:row.Masc.Tui_decode_asks.ar_keeper
+              start_ask_answer state ~asker:row.Masc.Tui_decode_asks.ar_asker
                 ~ask_id:row.Masc.Tui_decode_asks.ar_id
                 ~source_turn_ref:row.Masc.Tui_decode_asks.ar_source_turn_ref
                 ~answered_label ~answers ~mailbox))
@@ -26503,7 +26517,7 @@ and is loaded on demand through keeper_skill.
                      goto_surface state ~mailbox:async_messages Approvals
                  | Some
                      { Masc_tui_agenda.goes_to =
-                         Masc_tui_agenda.Ask_to_answer ask_id
+                         Masc_tui_agenda.Ask_to_answer ask
                      ; _
                      } ->
                      (* Opened the way Home's Question row opens it: on
@@ -26512,8 +26526,7 @@ and is loaded on demand through keeper_skill.
                      close ();
                      (match
                         List.find_index
-                          (fun (row : Masc.Tui_decode_asks.ask_row) ->
-                             String.equal row.ar_id ask_id)
+                          (fun row -> Masc.Tui_decode_asks.(equal_ask_key ask (ask_key row)))
                           (open_ask_rows state)
                       with
                       | None ->
@@ -26526,8 +26539,8 @@ and is loaded on demand through keeper_skill.
                              another ask would come back instead of this
                              one. *)
                           (match state.ask_answer_mode with
-                           | Ask_answering { aam_ask_id }
-                             when not (String.equal aam_ask_id ask_id) ->
+                           | Ask_answering { aam_ask }
+                             when not (Masc.Tui_decode_asks.equal_ask_key aam_ask ask) ->
                                leave_ask_answering state
                            | Ask_answering _ | Ask_browsing -> ());
                           state.ask_cursor <- Ask.On cursor;

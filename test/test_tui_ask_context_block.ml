@@ -10,7 +10,7 @@ open Alcotest
 module Prim = Masc_tui_render_prim
 
 let row context : Masc.Tui_decode_asks.ask_row =
-  { ar_keeper = "asker"
+  { ar_asker = Ask_keeper "asker"
   ; ar_id = "ask-1"
   ; ar_asked_at = 1.0
   ; ar_source_turn_ref = None; ar_context = Some context

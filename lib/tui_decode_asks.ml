@@ -37,8 +37,16 @@ type ask_resolution =
       aw_withdrawn_at : float;
     }
 
+type ask_asker =
+  | Ask_keeper of string
+  | Ask_installation of { ai_declaration_id : string; ai_title : string }
+
+let ask_asker_label = function
+  | Ask_keeper name -> name
+  | Ask_installation { ai_title; _ } -> ai_title
+
 type ask_row = {
-  ar_keeper : string;
+  ar_asker : ask_asker;
   ar_id : string;
   ar_asked_at : float;
   ar_source_turn_ref : Ids.Turn_ref.t option;
@@ -46,6 +54,19 @@ type ask_row = {
   ar_questions : ask_question list;
   ar_resolution : ask_resolution;
 }
+
+type ask_key = { ak_asker : ask_asker; ak_id : string }
+
+let ask_key (row : ask_row) = { ak_asker = row.ar_asker; ak_id = row.ar_id }
+
+let equal_ask_asker left right = match left, right with
+  | Ask_keeper left, Ask_keeper right -> String.equal left right
+  | Ask_installation left, Ask_installation right ->
+      String.equal left.ai_declaration_id right.ai_declaration_id
+  | Ask_keeper _, Ask_installation _ | Ask_installation _, Ask_keeper _ -> false
+
+let equal_ask_key left right =
+  String.equal left.ak_id right.ak_id && equal_ask_asker left.ak_asker right.ak_asker
 
 type asks_snapshot = {
   asn_keeper : string option;
@@ -143,7 +164,7 @@ let decode_ask_resolution json =
   | other -> Error (Printf.sprintf "asks: unknown resolution state '%s'" other)
 
 let decode_ask_row json =
-  let* ar_keeper = ask_string json "keeper" in
+  let* keeper = ask_string json "keeper" in
   let* ar_id = ask_string json "ask_id" in
   let* ar_asked_at = ask_float json "asked_at" in
   let* ar_source_turn_ref = match json with
@@ -158,7 +179,7 @@ let decode_ask_row json =
   let* ar_resolution = decode_ask_resolution (member "resolution" json) in
   Ok
     {
-      ar_keeper;
+      ar_asker = Ask_keeper keeper;
       ar_id;
       ar_asked_at;
       ar_source_turn_ref;
@@ -192,6 +213,84 @@ let decode_asks_snapshot ~expected_base_path ~expected_masc_root json =
   let* row_items = ask_list json "asks" in
   let* asn_rows = ask_map_results decode_ask_row row_items in
   Ok { asn_keeper; asn_open_count; asn_rows }
+
+let installation_row_fields =
+  [ "declaration_id"; "title"; "ask_id"; "asked_at"; "context"; "questions"; "resolution" ]
+
+let decode_installation_ask_row = function
+  | `Assoc fields as json ->
+      let names = List.map fst fields in
+      if List.sort String.compare names <> List.sort String.compare installation_row_fields then
+        Error "installation asks: a row has exactly declaration_id, title, ask_id, asked_at, \
+               context, questions and resolution"
+      else
+        let* ai_declaration_id = ask_string json "declaration_id" in
+        let* ai_title = ask_string json "title" in
+        let* ar_id = ask_string json "ask_id" in
+        let* ar_asked_at = ask_float json "asked_at" in
+        let* ar_context = match member "context" json with
+          | `Null -> Ok None
+          | `String text -> Ok (Some text)
+          | _ -> Error "installation asks: context must be a string or null" in
+        let* question_items = ask_list json "questions" in
+        let* ar_questions = ask_map_results decode_ask_question question_items in
+        let* ar_resolution = decode_ask_resolution (member "resolution" json) in
+        Ok { ar_asker = Ask_installation { ai_declaration_id; ai_title }; ar_id; ar_asked_at;
+             ar_source_turn_ref = None; ar_context; ar_questions; ar_resolution }
+  | _ -> Error "installation asks: a row must be an object"
+
+let decode_installation_asks = function
+  | `Assoc [ "asks", `List rows ] -> ask_map_results decode_installation_ask_row rows
+  | _ -> Error "installation asks: the response is exactly {\"asks\": [...]}"
+
+type installation_answer_receipt =
+  | Installation_answer_recorded
+  | Installation_answer_already_answered of { iaa_answered_at : float }
+  | Installation_answer_withdrawn of { iaw_withdrawn_at : float }
+  | Installation_answer_refused of string
+
+let decode_installation_answer_receipt ~expected_declaration_id ~expected_ask_id ~status_code json =
+  let named key expected =
+    match member key json with
+    | `String value when String.equal value expected -> Ok ()
+    | _ -> Error (Printf.sprintf "installation answer: the receipt does not name %s %s" key expected) in
+  let error_text () = match member "error" json with
+    | `String text -> Ok text
+    | _ -> Error "installation answer: a refusal carries its error" in
+  match status_code with
+  | 200 ->
+      let* () = named "declaration_id" expected_declaration_id in
+      let* () = named "ask_id" expected_ask_id in
+      (match member "recorded" json with
+       | `Bool true -> Ok Installation_answer_recorded
+       | _ -> Error "installation answer: a 200 receipt says recorded = true")
+  | 409 ->
+      let* () = named "ask_id" expected_ask_id in
+      (match member "state" json with
+       | `String "answered" ->
+           let* iaa_answered_at = ask_float json "answered_at" in
+           Ok (Installation_answer_already_answered { iaa_answered_at })
+       | `String "withdrawn" ->
+           let* iaw_withdrawn_at = ask_float json "withdrawn_at" in
+           Ok (Installation_answer_withdrawn { iaw_withdrawn_at })
+       | _ -> Error "installation answer: a conflict names answered or withdrawn")
+  | 400 ->
+      let* text = error_text () in
+      let* reasons = ask_list json "invalid_answers" in
+      let reasons = List.filter_map (function `String reason -> Some reason | _ -> None) reasons in
+      Ok (Installation_answer_refused (String.concat "; " (text :: reasons)))
+  | 404 ->
+      let* text = error_text () in
+      Ok (Installation_answer_refused text)
+  | status ->
+      (* A 500 or anything else leaves recording unconfirmed, not refused. *)
+      Error (Printf.sprintf "installation answer: HTTP %d leaves the answer unconfirmed" status)
+
+let with_installation_asks snapshot rows =
+  let open_rows = List.filter (fun row -> match row.ar_resolution with
+    | Ask_open -> true | Ask_answered _ | Ask_withdrawn _ -> false) rows in
+  { snapshot with asn_open_count = snapshot.asn_open_count + List.length open_rows;
+                  asn_rows = snapshot.asn_rows @ rows }
 
 type ask_tool_action = {
   ata_execution_id : string;
@@ -484,6 +583,10 @@ type ask_answer_receipt =
     }
   | Ask_answer_written_unconfirmed of string
   | Ask_answer_refused of string
+
+type answer_receipt =
+  | Keeper_answer_receipt of ask_answer_receipt
+  | Installation_answer_receipt of installation_answer_receipt
 
 let decode_ask_answer_receipt ~expected_ask_id ~status_code json =
   let error_detail () =

@@ -312,10 +312,10 @@ type async_msg =
   (* The answer that came back, and the list re-read behind it. The store
      settles on first write, so the response says what was actually recorded
      -- which may be someone else's answer. The submission carries the original
-     workspace, Keeper, Ask and human label; none is recovered from prose. *)
+     workspace, asker, Ask and human label; none is recovered from prose. *)
   | Ask_answer_done of
       ask_submission
-      * (Masc.Tui_decode_asks.ask_answer_receipt, string) result
+      * (Masc.Tui_decode_asks.answer_receipt, string) result
       * (Masc.Tui_decode_asks.asks_snapshot, string) result
   | Keeper_chat_dispatch_started of
       Masc_tui_keeper_chat_projection.request * bool * bool Eio.Promise.u

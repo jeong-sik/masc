@@ -508,6 +508,10 @@ let ask_answer_failure_response ~ask_id (failure : Lane_addon_asks.answer_failur
                              `String (Keeper_ask.invalid_answer_to_string reason)) invalid) ]
   | Store_failed _ -> `Internal_server_error, error_json detail
 
+let ask_answer_recorded_json ~declaration_id ~ask_id ~answer_count =
+  `Assoc [ "recorded", `Bool true; "declaration_id", `String declaration_id
+         ; "ask_id", `String ask_id; "answer_count", `Int answer_count ]
+
 let handle_ask_answer ~actor state request reqd =
   Http.Request.read_body_async reqd (fun body ->
     match decode_ask_answer body with
@@ -520,8 +524,7 @@ let handle_ask_answer ~actor state request reqd =
               ~declaration_id ~ask_id ~submissions ~responder with
       | Ok answers ->
         respond_json_value_with_cors request reqd
-          (`Assoc [ "recorded", `Bool true; "declaration_id", `String declaration_id
-                  ; "ask_id", `String ask_id; "answer_count", `Int (List.length answers) ])
+          (ask_answer_recorded_json ~declaration_id ~ask_id ~answer_count:(List.length answers))
       | Error failure ->
         let status, json = ask_answer_failure_response ~ask_id failure in
         respond_json_value_with_cors ~status request reqd json)

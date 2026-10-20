@@ -3732,6 +3732,52 @@ let fetch_keeper_asks ?keeper_name ~(expected_workspace : Masc.Tui_decode.server
           ~expected_masc_root:(Masc_tui_types.canonical_path expected_workspace.sid_masc_root) json
       | exception Yojson.Json_error detail -> Error ("asks were not JSON: " ^ detail))
 
+(** Open questions Lane Add-on installations put to the operator, from
+    [GET /api/v1/lane-addons/asks]. The server refuses a request whose
+    expected workspace is not its own. *)
+let fetch_installation_asks ~(expected_workspace : Masc.Tui_decode.server_identity)
+    ~(host : string) ~(port : int) () : (Masc.Tui_decode_asks.ask_row list, string) result =
+  let path = "/api/v1/lane-addons/asks?" ^ expected_workspace_query expected_workspace in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+      Error (refusal ~status_code:status ~body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | json -> Masc.Tui_decode_asks.decode_installation_asks json
+      | exception Yojson.Json_error detail -> Error ("installation questions were not JSON: " ^ detail))
+
+(** Every open question to the operator: the fleet's Keepers, then the
+    installations. Both come from the same server, so either failing is the
+    question source failing. *)
+let fetch_asks ~(expected_workspace : Masc.Tui_decode.server_identity)
+    ~(host : string) ~(port : int) () : (Masc.Tui_decode_asks.asks_snapshot, string) result =
+  match fetch_keeper_asks ~expected_workspace ~host ~port () with
+  | Error _ as error -> error
+  | Ok snapshot ->
+      (match fetch_installation_asks ~expected_workspace ~host ~port () with
+       | Error detail -> Error ("installation questions: " ^ detail)
+       | Ok rows -> Ok (Masc.Tui_decode_asks.with_installation_asks snapshot rows))
+
+(** POST /api/v1/lane-addons/ask-answer. The body is exactly the declaration,
+    the ask, the answers and the session: the route refuses any other field. *)
+let post_installation_ask_answer ~(host : string) ~(port : int)
+    ~(declaration_id : string) ~(ask_id : string) ~(answers : Yojson.Safe.t)
+    ~(session_id : string option) :
+    (Masc.Tui_decode_asks.installation_answer_receipt, string) result =
+  let payload = Masc_tui_ask_projection.installation_request_body ~declaration_id ~ask_id ~answers ~session_id in
+  match http_post ~headers:(auth_headers ()) ~host ~port
+      ~path:"/api/v1/lane-addons/ask-answer" ~body:(Yojson.Safe.to_string payload) with
+  | Error _ as error -> error
+  | Ok ((401 | 403) as status_code, body) ->
+      Ok (Masc.Tui_decode_asks.Installation_answer_refused (refusal ~status_code ~body))
+  | Ok (status_code, body) ->
+      (match Yojson.Safe.from_string body with
+       | exception Yojson.Json_error detail ->
+           Error ("installation answer: invalid recording receipt: " ^ detail)
+       | json -> Masc.Tui_decode_asks.decode_installation_answer_receipt
+           ~expected_declaration_id:declaration_id ~expected_ask_id:ask_id ~status_code json)
+
 exception Ask_followup_protocol_error of string
 
 let observe_keeper_ask_followup ~clock ~(expected_workspace : Masc.Tui_decode.server_identity)

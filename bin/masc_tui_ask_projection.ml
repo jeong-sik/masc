@@ -6,38 +6,52 @@ type draft_response =
   | Draft_skipped
 
 type draft = {
-  d_ask_id : string;
+  d_ask : Decode.ask_key;
   d_responses : (string * draft_response) list;
 }
 
 type answer_feedback = {
-  af_keeper_name : string;
+  af_asker : Decode.ask_asker;
   af_ask_id : string;
   af_source_turn_ref : Ids.Turn_ref.t option;
-  af_receipt : (Decode.ask_answer_receipt, string) result;
+  af_receipt : (Decode.answer_receipt, string) result;
   af_submitted_label : string option;
 }
 
-let answer_feedback ?source_turn_ref ~keeper_name ~ask_id ~submitted_label receipt =
+let answer_feedback ?source_turn_ref ~asker ~ask_id ~submitted_label receipt =
   let af_submitted_label = match receipt with
-    | Ok (Decode.Ask_answer_recorded _) -> Some submitted_label
-    | Ok (Decode.Ask_answer_already_recorded _ | Decode.Ask_answer_written_unconfirmed _
-         | Decode.Ask_answer_refused _) | Error _ -> None in
-  { af_keeper_name = keeper_name; af_ask_id = ask_id; af_source_turn_ref = source_turn_ref;
+    | Ok (Decode.Keeper_answer_receipt (Decode.Ask_answer_recorded _))
+    | Ok (Decode.Installation_answer_receipt Decode.Installation_answer_recorded) -> Some submitted_label
+    | Ok (Decode.Keeper_answer_receipt (Decode.Ask_answer_already_recorded _
+                                        | Decode.Ask_answer_written_unconfirmed _ | Decode.Ask_answer_refused _))
+    | Ok (Decode.Installation_answer_receipt (Decode.Installation_answer_already_answered _
+                                              | Decode.Installation_answer_withdrawn _
+                                              | Decode.Installation_answer_refused _))
+    | Error _ -> None in
+  { af_asker = asker; af_ask_id = ask_id; af_source_turn_ref = source_turn_ref;
     af_receipt = receipt; af_submitted_label }
+
+let asker_to_json = function
+  | Decode.Ask_keeper name -> `Assoc ["keeper", `String name]
+  | Decode.Ask_installation { ai_declaration_id; _ } -> `Assoc ["declaration_id", `String ai_declaration_id]
 
 let answer_feedback_to_json feedback =
   let delivery = function
     | Decode.Ask_wake_stored -> `String "stored"
     | Decode.Ask_wake_pending _ -> `String "pending" in
   let recording, delivery = match feedback.af_receipt with
-    | Ok (Decode.Ask_answer_recorded outcome) -> "recorded", delivery outcome
-    | Ok (Decode.Ask_answer_already_recorded { aar_delivery; _ }) ->
+    | Ok (Decode.Keeper_answer_receipt (Decode.Ask_answer_recorded outcome)) -> "recorded", delivery outcome
+    | Ok (Decode.Keeper_answer_receipt (Decode.Ask_answer_already_recorded { aar_delivery; _ })) ->
         "already_recorded", delivery aar_delivery
-    | Ok (Decode.Ask_answer_written_unconfirmed _) -> "winner_unconfirmed", `Null
-    | Ok (Decode.Ask_answer_refused _) -> "refused", `Null
+    | Ok (Decode.Keeper_answer_receipt (Decode.Ask_answer_written_unconfirmed _)) -> "winner_unconfirmed", `Null
+    | Ok (Decode.Keeper_answer_receipt (Decode.Ask_answer_refused _)) -> "refused", `Null
+    | Ok (Decode.Installation_answer_receipt Decode.Installation_answer_recorded) -> "recorded", `Null
+    | Ok (Decode.Installation_answer_receipt (Decode.Installation_answer_already_answered _)) ->
+        "already_recorded", `Null
+    | Ok (Decode.Installation_answer_receipt (Decode.Installation_answer_withdrawn _)) -> "withdrawn", `Null
+    | Ok (Decode.Installation_answer_receipt (Decode.Installation_answer_refused _)) -> "refused", `Null
     | Error _ -> "unconfirmed", `Null in
-  `Assoc ["keeper", `String feedback.af_keeper_name; "ask_id", `String feedback.af_ask_id;
+  `Assoc ["asker", asker_to_json feedback.af_asker; "ask_id", `String feedback.af_ask_id;
     "source_turn_ref", (match feedback.af_source_turn_ref with
       | None -> `Null | Some reference -> Ids.Turn_ref.to_yojson reference);
     "recording", `String recording; "delivery", delivery]
@@ -216,12 +230,15 @@ type origin = {
   ao_source_turn_ref : Ids.Turn_ref.t option;
 }
 
-let origin_of_row (row : Decode.ask_row) =
-  {ao_keeper_name=row.ar_keeper;ao_ask_id=row.ar_id;ao_source_turn_ref=row.ar_source_turn_ref}
+let origin_of_row (row : Decode.ask_row) = match row.ar_asker with
+  | Decode.Ask_keeper name ->
+      Some {ao_keeper_name=name;ao_ask_id=row.ar_id;ao_source_turn_ref=row.ar_source_turn_ref}
+  | Decode.Ask_installation _ -> None
 
-let origin_of_feedback feedback =
-  {ao_keeper_name=feedback.af_keeper_name;ao_ask_id=feedback.af_ask_id;
-   ao_source_turn_ref=feedback.af_source_turn_ref}
+let origin_of_feedback feedback = match feedback.af_asker with
+  | Decode.Ask_keeper name ->
+      Some {ao_keeper_name=name;ao_ask_id=feedback.af_ask_id;ao_source_turn_ref=feedback.af_source_turn_ref}
+  | Decode.Ask_installation _ -> None
 
 let same_origin left right =
   String.equal left.ao_keeper_name right.ao_keeper_name
@@ -233,13 +250,13 @@ let origin_to_json origin =
     "source_turn_ref",(match origin.ao_source_turn_ref with
       | None -> `Null | Some reference -> Ids.Turn_ref.to_yojson reference)]
 
-let empty_draft ~ask_id = { d_ask_id = ask_id; d_responses = [] }
-let draft_ask_id draft = draft.d_ask_id
+let empty_draft ~ask = { d_ask = ask; d_responses = [] }
+let draft_ask draft = draft.d_ask
 
 let draft_for existing ~(row : Decode.ask_row) =
   match existing with
-  | Some draft when String.equal draft.d_ask_id row.ar_id -> draft
-  | Some _ | None -> empty_draft ~ask_id:row.ar_id
+  | Some draft when Decode.equal_ask_key draft.d_ask (Decode.ask_key row) -> draft
+  | Some _ | None -> empty_draft ~ask:(Decode.ask_key row)
 
 let response_for draft ~(question : Decode.ask_question) =
   List.assoc_opt question.aq_id draft.d_responses
@@ -281,28 +298,27 @@ let open_rows (snapshot : Decode.asks_snapshot) =
       | Decode.Ask_answered _ | Decode.Ask_withdrawn _ -> false)
     snapshot.asn_rows
 
-let open_ask_ids (snapshot : Decode.asks_snapshot) =
-  List.map (fun (row : Decode.ask_row) -> row.ar_id) (open_rows snapshot)
+let open_asks (snapshot : Decode.asks_snapshot) = List.map Decode.ask_key (open_rows snapshot)
 
-(* Ask ids open in [current] that were not open in [previous] — the questions
+(* Asks open in [current] that were not open in [previous] — the questions
    that arrived since the last read. A poll that re-reads the same open asks
    returns none, and a first read (no previous) returns none rather than every
    open ask, so a caller rings once as each new question arrives and not for
    the state the session started in. *)
-let newly_opened_ask_ids ~previous ~current =
+let newly_opened_asks ~previous ~current =
   match previous with
   | None -> []
   | Some previous ->
-      let before = open_ask_ids previous in
-      List.filter (fun id -> not (List.mem id before)) (open_ask_ids current)
+      let before = open_asks previous in
+      List.filter (fun ask -> not (List.exists (Decode.equal_ask_key ask) before)) (open_asks current)
 
 (* Ring for a question that just arrived only when the operator is not already
    watching the asks surface -- the panel is in front of them there, so a bell
-   would say what they can see. [new_ids] empty means nothing arrived. The
+   would say what they can see. [arrived] empty means nothing arrived. The
    watching flag is passed in rather than read here: the surface an operator is
    on, and later whether the window has focus, are the caller's to know. *)
-let should_ring_for_new_ask ~new_ids ~operator_is_watching_asks =
-  (match new_ids with [] -> false | _ :: _ -> true)
+let should_ring_for_new_ask ~arrived ~operator_is_watching_asks =
+  (match arrived with [] -> false | _ :: _ -> true)
   && not operator_is_watching_asks
 
 let without question_id responses =
@@ -342,17 +358,17 @@ let toggle_choice draft ~(question : Decode.ask_question)
   | ids -> record draft ~question_id (Draft_chose ids)
 
 type free_text_slot = {
-  fts_ask_id : string;
+  fts_ask : Decode.ask_key;
   fts_question_id : string;
   fts_hint : string option;
 }
 
-let free_text_slot ~ask_id (question : Decode.ask_question) =
+let free_text_slot ~ask (question : Decode.ask_question) =
   match question.aq_free_text with
   | Decode.Ask_free_text_allowed { aft_hint } ->
-      { fts_ask_id = ask_id; fts_question_id = question.aq_id; fts_hint = aft_hint }
+      { fts_ask = ask; fts_question_id = question.aq_id; fts_hint = aft_hint }
   | Decode.Ask_choices_only ->
-      { fts_ask_id = ask_id; fts_question_id = question.aq_id; fts_hint = None }
+      { fts_ask = ask; fts_question_id = question.aq_id; fts_hint = None }
 
 (* Digits are single-key shortcuts. Above eight offered choices, [t] remains
    the unambiguous text key; a two-digit "10" would select "1" first. *)
@@ -361,7 +377,7 @@ let alternative_position (question : Decode.ask_question) =
   if count > 0 && count < 9 then Some (count + 1) else None
 
 let free_text_hint slot = slot.fts_hint
-let free_text_ask_id slot = slot.fts_ask_id
+let free_text_ask slot = slot.fts_ask
 let free_text_question_id slot = slot.fts_question_id
 
 (* Question ids are only unique inside one ask (masc_ask numbers every ask's
@@ -369,7 +385,7 @@ let free_text_question_id slot = slot.fts_question_id
    else. *)
 let set_text draft ~slot ~text =
   let question_id = slot.fts_question_id in
-  if not (String.equal draft.d_ask_id slot.fts_ask_id) then draft
+  if not (Decode.equal_ask_key draft.d_ask slot.fts_ask) then draft
   else if String.trim text = "" then forget draft ~question_id
   else record draft ~question_id (Draft_wrote text)
 
@@ -395,7 +411,7 @@ let readiness draft ~(row : Decode.ask_row) =
   match row.ar_resolution with
   | Decode.Ask_answered _ | Decode.Ask_withdrawn _ -> Not_open
   | Decode.Ask_open ->
-      let belongs = String.equal draft.d_ask_id row.ar_id in
+      let belongs = Decode.equal_ask_key draft.d_ask (Decode.ask_key row) in
       let paired =
         List.map
           (fun (question : Decode.ask_question) ->
@@ -427,17 +443,22 @@ let request_body ~answers ~session_id =
   in
   `Assoc (("answers", answers) :: session)
 
+let installation_request_body ~declaration_id ~ask_id ~answers ~session_id =
+  match request_body ~answers ~session_id with
+  | `Assoc fields -> `Assoc (("declaration_id", `String declaration_id) :: ("ask_id", `String ask_id) :: fields)
+  | other -> other
+
 type gate =
   | Ask_gate_blocked_inflight
-  | Ask_gate_arm of string
+  | Ask_gate_arm of Decode.ask_key
   | Ask_gate_submit
 
-let gate_transition ~inflight ~pending ~ask_id =
+let gate_transition ~inflight ~pending ~ask =
   if inflight then Ask_gate_blocked_inflight
   else
     match pending with
-    | Some armed when String.equal armed ask_id -> Ask_gate_submit
-    | Some _ | None -> Ask_gate_arm ask_id
+    | Some armed when Decode.equal_ask_key armed ask -> Ask_gate_submit
+    | Some _ | None -> Ask_gate_arm ask
 
 type cursor = On of int | Released of int
 
@@ -456,7 +477,7 @@ let reconcile_cursor ~current_rows ~cursor ~next_rows =
       | Some (selected : Decode.ask_row) -> (
           match
             List.find_index
-              (fun (row : Decode.ask_row) -> String.equal selected.ar_id row.ar_id)
+              (fun (row : Decode.ask_row) -> Decode.equal_ask_key (Decode.ask_key selected) (Decode.ask_key row))
               next_rows
           with
           | Some index -> On index

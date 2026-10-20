@@ -19,10 +19,10 @@ type draft_response =
 type draft
 
 type answer_feedback = private {
-  af_keeper_name : string;
+  af_asker : Masc.Tui_decode_asks.ask_asker;
   af_ask_id : string;
   af_source_turn_ref : Ids.Turn_ref.t option;
-  af_receipt : (Masc.Tui_decode_asks.ask_answer_receipt, string) result;
+  af_receipt : (Masc.Tui_decode_asks.answer_receipt, string) result;
   af_submitted_label : string option;
 }
 (** Last observed answer receipt, not current Keeper execution status. Only
@@ -31,8 +31,11 @@ type answer_feedback = private {
 
 val answer_feedback :
   ?source_turn_ref:Ids.Turn_ref.t ->
-  keeper_name:string -> ask_id:string -> submitted_label:string ->
-  (Masc.Tui_decode_asks.ask_answer_receipt, string) result -> answer_feedback
+  asker:Masc.Tui_decode_asks.ask_asker -> ask_id:string -> submitted_label:string ->
+  (Masc.Tui_decode_asks.answer_receipt, string) result -> answer_feedback
+
+val asker_to_json : Masc.Tui_decode_asks.ask_asker -> Yojson.Safe.t
+(** The Keeper's name or the installation's declaration id, for logs. *)
 
 val answer_feedback_to_json : answer_feedback -> Yojson.Safe.t
 (** Original request identities and typed recording/delivery facts only.
@@ -74,13 +77,14 @@ type origin = private {
 (** Recorded question origin, independent of current selection and live work.
     Opening it requires no read or action on the Keeper. *)
 
-val origin_of_row : Masc.Tui_decode_asks.ask_row -> origin
-val origin_of_feedback : answer_feedback -> origin
+val origin_of_row : Masc.Tui_decode_asks.ask_row -> origin option
+val origin_of_feedback : answer_feedback -> origin option
+(** [None] for an installation's question: it was asked by no Keeper turn. *)
 val same_origin : origin -> origin -> bool
 val origin_to_json : origin -> Yojson.Safe.t
 
-val empty_draft : ask_id:string -> draft
-val draft_ask_id : draft -> string
+val empty_draft : ask:Masc.Tui_decode_asks.ask_key -> draft
+val draft_ask : draft -> Masc.Tui_decode_asks.ask_key
 
 val draft_for : draft option -> row:Masc.Tui_decode_asks.ask_row -> draft
 (** The draft when it belongs to [row], a fresh one otherwise. Moving the
@@ -103,18 +107,18 @@ val open_rows :
     how the cursor and the drawn rows come to disagree about which ask is
     selected. *)
 
-val newly_opened_ask_ids :
+val newly_opened_asks :
   previous:Masc.Tui_decode_asks.asks_snapshot option ->
   current:Masc.Tui_decode_asks.asks_snapshot ->
-  string list
-(** Ask ids open in [current] but not in [previous] — the questions that
+  Masc.Tui_decode_asks.ask_key list
+(** Asks open in [current] but not in [previous] — the questions that
     arrived since the last read. A re-read of the same asks, and a first read
     (no previous), both return none, so a caller rings once per new question
     rather than once per poll or once at start-up. *)
 
 val should_ring_for_new_ask :
-  new_ids:string list -> operator_is_watching_asks:bool -> bool
-(** Whether an arrival should ring: something arrived ([new_ids] non-empty) and
+  arrived:Masc.Tui_decode_asks.ask_key list -> operator_is_watching_asks:bool -> bool
+(** Whether an arrival should ring: something arrived ([arrived] non-empty) and
     the operator is not already watching the asks surface. The watching flag is
     the caller's to compute from the surface (and later window focus). *)
 
@@ -131,7 +135,7 @@ val toggle_choice :
 
 type free_text_slot
 
-val free_text_slot : ask_id:string -> Masc.Tui_decode_asks.ask_question -> free_text_slot
+val free_text_slot : ask:Masc.Tui_decode_asks.ask_key -> Masc.Tui_decode_asks.ask_question -> free_text_slot
 (** Every question offers an operator-written alternative. The slot binds the
     editor to the ask and the question, including questions that only offered
     choices. Both, because a question id is unique only inside its ask:
@@ -142,7 +146,7 @@ val alternative_position : Masc.Tui_decode_asks.ask_question -> int option
 
 val free_text_hint : free_text_slot -> string option
 
-val free_text_ask_id : free_text_slot -> string
+val free_text_ask : free_text_slot -> Masc.Tui_decode_asks.ask_key
 (** Which ask the slot writes to. A snapshot can move the cursor to another ask
     while the operator types; the text still belongs to this one. *)
 
@@ -176,13 +180,20 @@ val request_body :
   session_id:string option ->
   Yojson.Safe.t
 
+val installation_request_body :
+  declaration_id:string -> ask_id:string -> answers:Yojson.Safe.t -> session_id:string option ->
+  Yojson.Safe.t
+(** The body of [POST /api/v1/lane-addons/ask-answer]: the declaration, the
+    ask, the answers and the session only, because the route refuses any
+    other field. *)
+
 type gate =
   | Ask_gate_blocked_inflight
-  | Ask_gate_arm of string  (** the ask id now armed *)
+  | Ask_gate_arm of Masc.Tui_decode_asks.ask_key  (** the ask now armed *)
   | Ask_gate_submit
 
 val gate_transition :
-  inflight:bool -> pending:string option -> ask_id:string -> gate
+  inflight:bool -> pending:Masc.Tui_decode_asks.ask_key option -> ask:Masc.Tui_decode_asks.ask_key -> gate
 (** Two presses to answer, matching the approval queue: an answer is a fold
     that settles on first write and cannot be taken back. *)
 

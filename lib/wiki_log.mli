@@ -4,17 +4,21 @@
 
     {[## [YYYY-MM-DD HH:MM] create r<N> | <page> | <author> | <note>]}
 
-    The reader trusts only its first three fields -- the action word, the
-    [r<N>] revision and the page -- and keeps [author] and [note] as one free
-    string nobody splits further. It never fails: a line it cannot read is
-    counted, not raised, so "nothing is wrong" and "nothing could be read"
-    stay different answers.
+    The reader trusts only the stamp and the first three fields -- the action
+    word, the [r<N>] revision and the page -- and keeps [author] and [note] as
+    one free string nobody splits further. It never fails: a line it cannot
+    read is counted, not raised, so "nothing is wrong" and "nothing could be
+    read" stay different answers.
 
-    Pure: no file is read or written here. {!Tool_wiki} reads the file and
-    hands the text to {!parse}. *)
+    No file is read or written here; the stamp is read in the host's local
+    time zone. {!Tool_wiki} reads the file and hands the text to {!parse}. *)
 
 type line =
-  { action : string  (** The action word as written. *)
+  { written_at : float
+      (** The Unix time at the start of the [YYYY-MM-DD HH:MM] minute between
+          the brackets, read in the host's local time zone as the writer
+          stamps it. A line whose stamp does not read is unreadable. *)
+  ; action : string  (** The action word as written. *)
   ; revision : int  (** The [N] of [r<N>]. *)
   ; page : string  (** The page name as written. *)
   }

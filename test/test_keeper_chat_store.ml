@@ -97,6 +97,13 @@ let failure_key value =
   | Ok id -> Keeper_chat_delivery_identity.Operation id
   | Error detail -> Alcotest.fail detail
 
+(* [Alcotest.(check bool)] prints only [false] when a substring assertion on a
+   strict-reader error text fails, so the actual detail is never shown (PR
+   #44148 review). Asserting through [Alcotest.failf] prints the detail itself. *)
+let check_contains ~name ~needle detail =
+  if not (String_util.contains_substring detail needle) then
+    Alcotest.failf "%s: %S is missing from %S" name needle detail
+
 let append_failed_request ~base_dir ~keeper_name ~user_content ~user_attachments
     ?surface ?turn_ref ~diagnostic () =
   let delivery_key = failure_key "failure-test-operation" in
@@ -1153,12 +1160,9 @@ let test_retired_kind_row_dropped () =
       match K.load_all_result ~base_dir ~keeper_name with
       | Ok _ -> Alcotest.fail "strict load accepted a retired kind row"
       | Error error ->
-        Alcotest.(check bool)
-          "strict reader names the retired field"
-          true
-          (String_util.contains_substring
-             (K.strict_decode_error_to_string error)
-             {|unknown chat row field "kind"|}))
+        check_contains ~name:"strict reader names the retired field"
+          ~needle:{|unknown chat row field "kind"|}
+          (K.strict_decode_error_to_string error))
 
 let test_window_keeps_tool_lines_of_retained_turns () =
   let base_dir = temp_base_path "keeper-chat-store-window" in

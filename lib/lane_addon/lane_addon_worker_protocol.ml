@@ -45,7 +45,7 @@ let contract ~action_tool ~tool_invocation ~exported_tools ~tool_hooks ~max_repl
 let contract_of_package (package : package) =
   contract ~action_tool:package.action_tool ~tool_invocation:package.tool_invocation
     ~exported_tools:package.exported_tools ~tool_hooks:package.tool_hooks
-    ~max_reply_bytes:package.resources.max_reply_bytes ~host_requests:(uses_host_requests package)
+    ~max_reply_bytes:(Lane_addon_types.max_reply_bytes package) ~host_requests:(uses_host_requests package)
 let create ~instance_id ~contract ?artifact_store ?sampling_broker () = {
   instance_id;contract;artifact_store;sampling_broker;
   input_history=Lane_addon_machine_history.create ();

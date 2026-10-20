@@ -40,6 +40,8 @@ let check_resources ?(runtime = Docker) r =
       else if Int64.rem r.memory_bytes 1_048_576L <> 0L then
         Error "Apple microVM memory_bytes must be an exact number of MiB"
       else Ok ()
+type container = { runtime : runtime; image : string; resources : resources }
+type execution = Container of container | Host_process of { max_reply_bytes : int }
 type refresh_policy = Every_hint | Source_changes
 type model_access = Model_disabled | Host_sampling
 type state_storage = Ephemeral | Persistent
@@ -48,8 +50,8 @@ type tool_hook = Validate_input | Validate_output
 type exact_output = { name : string; schema : Yojson.Safe.t }
 type package = {
   id : string; revision : string; title : string; contributions : contribution list;
-  runtime : runtime;
-  image : string; command : string list; directory : string;
+  execution : execution;
+  command : string list; directory : string;
   action_tool : string option;
   state_storage : state_storage;
   tool_invocation : tool_invocation;
@@ -61,11 +63,20 @@ type package = {
   binding_schema : Yojson.Safe.t option;
   presentation : Lane_addon_presentation.t;
   skills_directory : Skill_resource_path.t option;
-  exact_outputs : exact_output list; operator_asks : bool; resources : resources;
+  exact_outputs : exact_output list; operator_asks : bool;
 }
 let host_requests_tool = "lane_host_requests"
 let host_result_tool = "lane_host_result"
 let uses_host_requests package = package.exact_outputs <> [] || package.operator_asks
+let max_reply_bytes (package : package) = match package.execution with
+  | Container container -> container.resources.max_reply_bytes
+  | Host_process specification -> specification.max_reply_bytes
+let container (package : package) = match package.execution with
+  | Container container -> Ok container
+  | Host_process _ -> Error "host_process has no container execution specification"
+let container_runtime (package : package) = match package.execution with
+  | Container container -> Some container.runtime
+  | Host_process _ -> None
 let validate_exported_tools ~action_tool names =
   if List.exists (fun name -> String.trim name = "" || String.trim name <> name) names then
     Error "exported tools require non-blank names without surrounding whitespace"
@@ -202,11 +213,20 @@ let output_selection_to_json = function
 let output_ports_to_json ports =
   `Assoc (List.map (fun (id, selection) -> id, output_selection_to_json selection) ports)
 let package_to_json (p : package) =
-  (* runtime, exact_outputs and operator_asks are written only when they
-     differ from what a package without the key means, so such a package keeps
-     its revision. *)
-  `Assoc ((match p.runtime with Docker -> []
-      | Apple_container -> ["runtime", string (runtime_to_string p.runtime)])
+  (* runtime, exact_outputs and operator_asks are written only when they differ from what a
+     package without the key means, so such a package keeps its revision. *)
+  let runtime, image, resources = match p.execution with
+    | Container container ->
+        (match container.runtime with Docker -> []
+          | Apple_container -> ["runtime", string (runtime_to_string container.runtime)]),
+        ["image", string container.image],
+        `Assoc ["cpus", `Float container.resources.cpus;
+          "memory_bytes", `Intlit (Int64.to_string container.resources.memory_bytes);
+          "pids", optional (fun value -> `Int value) container.resources.pids;
+          "max_reply_bytes", `Int container.resources.max_reply_bytes]
+    | Host_process specification -> ["runtime", string "host_process"], [],
+        `Assoc ["max_reply_bytes", `Int specification.max_reply_bytes] in
+  `Assoc (runtime
     @ (match p.tool_hooks with [] -> [] | hooks ->
       ["tool_hooks", strings (List.map (function
         | Validate_input -> "validate_input" | Validate_output -> "validate_output") hooks)])
@@ -215,7 +235,7 @@ let package_to_json (p : package) =
     @ (if p.operator_asks then ["operator_asks", `Bool true] else [])
     @ ["id", string p.id; "revision", string p.revision; "title", string p.title;
     "contributions", strings (List.map (function Observe -> "observe" | Derive -> "derive" | Act -> "act") p.contributions);
-    "image", string p.image; "command", strings p.command; "directory", string p.directory;
+    ] @ image @ ["command", strings p.command; "directory", string p.directory;
     "action_tool", optional string p.action_tool;
     "state_storage", `String (match p.state_storage with Ephemeral -> "ephemeral" | Persistent -> "persistent");
     "tool_invocation", `String (match p.tool_invocation with Direct -> "direct" | Host_context -> "host_context");
@@ -227,7 +247,4 @@ let package_to_json (p : package) =
     "presentation", Lane_addon_presentation.to_json p.presentation;
     "skills_directory", (match p.skills_directory with None -> `Null
       | Some path -> string (Skill_resource_path.to_string path));
-    "resources", `Assoc ["cpus", `Float p.resources.cpus;
-      "memory_bytes", `Intlit (Int64.to_string p.resources.memory_bytes);
-      "pids", optional (fun value -> `Int value) p.resources.pids;
-      "max_reply_bytes", `Int p.resources.max_reply_bytes]])
+    "resources", resources])

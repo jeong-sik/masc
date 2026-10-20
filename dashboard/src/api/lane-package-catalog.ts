@@ -10,9 +10,14 @@ const entry = Schema.Union(
 )
 const catalog = Schema.Struct({ directory: text, parent: Schema.NullOr(text), entries: Schema.Array(entry) })
 const preview = Schema.Struct({ manifest_path: text,
-  package: Schema.Struct({ title: text, revision: text, image: text, binding_schema: Schema.Unknown }),
-  image: Schema.Union(Schema.Struct({ state: Schema.Literal('available'), digest: text }),
-    Schema.Struct({ state: Schema.Literal('unverified'), detail: text })),
+  package: Schema.Struct({ title: text, revision: text, binding_schema: Schema.Unknown }),
+  execution: Schema.Union(
+    Schema.Struct({ kind: Schema.Literal('host_process') }),
+    Schema.Struct({ kind: Schema.Literal('container'), image_name: text,
+      image: Schema.Union(Schema.Struct({ state: Schema.Literal('available'), digest: text }),
+        Schema.Struct({ state: Schema.Literal('unverified'), detail: text })),
+    }),
+  ),
 })
 export type LanePackageCatalog = Schema.Schema.Type<typeof catalog>
 export type LanePackagePreview = Schema.Schema.Type<typeof preview>

@@ -40,7 +40,7 @@ let mount_argument runtime ({ source; destination } : mount) =
     | Docker -> Printf.sprintf "type=bind,src=%s,dst=%s,readonly" source destination
     | Apple_container -> Printf.sprintf "type=bind,source=%s,target=%s,readonly" source destination)
 
-let create_arguments package ~name ~instance_id ~state_owner ~scope ~image ~package_mount ~mounts ~state_mounts =
+let create_arguments (container : container) ~command ~name ~instance_id ~state_owner ~scope ~image ~package_mount ~mounts ~state_mounts =
   let common = ["--name"; name; "--label"; instance_label ^ "=" ^ instance_id]
     @ (match state_owner with
        | None -> []
@@ -48,24 +48,24 @@ let create_arguments package ~name ~instance_id ~state_owner ~scope ~image ~pack
     @ (match scope with
        | None -> []
        | Some scope -> ["--label"; scope_label ^ "=" ^ scope]) in
-  let controls = match package.runtime with
+  let controls = match container.runtime with
     | Docker ->
-        let memory = Int64.to_string package.resources.memory_bytes in
+        let memory = Int64.to_string container.resources.memory_bytes in
         ["container"; "create"; "--pull"; "never"] @ common @
-        ["--cpus"; Printf.sprintf "%.9f" package.resources.cpus;
+        ["--cpus"; Printf.sprintf "%.9f" container.resources.cpus;
          "--memory"; memory; "--memory-swap"; memory] @
-        (match package.resources.pids with
+        (match container.resources.pids with
          | Some pids -> ["--pids-limit"; string_of_int pids]
          | None -> []) @
         ["--network"; "none"; "--read-only"; "--cap-drop"; "ALL";
          "--security-opt"; "no-new-privileges"; "--log-driver"; "none"]
     | Apple_container ->
         ["create"] @ common @
-        ["--cpus"; string_of_int (int_of_float package.resources.cpus);
-         "--memory"; Int64.to_string (Int64.div package.resources.memory_bytes 1_048_576L) ^ "M";
+        ["--cpus"; string_of_int (int_of_float container.resources.cpus);
+         "--memory"; Int64.to_string (Int64.div container.resources.memory_bytes 1_048_576L) ^ "M";
          "--network"; "none"; "--no-dns"; "--read-only"; "--cap-drop"; "ALL"] in
   controls @ ["--interactive"; "--workdir"; "/addon"; "--mount"; package_mount]
-  @ mounts @ state_mounts @ ["--"; image] @ package.command
+  @ mounts @ state_mounts @ ["--"; image] @ command
 
 let start_arguments runtime id = match runtime with
   | Docker -> ["container"; "start"; "--attach"; "--interactive"; id]

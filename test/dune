@@ -1044,6 +1044,8 @@
   )
  (libraries
  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
+  ;; The workspace file-save HTTP fixture creates real role-scoped tokens.
+  masc.auth
   ;; test_keeper_turn_driver_failover builds the operation id the chat lane's
   ;; failure continuation carries; the type is opaque without its own library.
   masc.keeper_operation_identity

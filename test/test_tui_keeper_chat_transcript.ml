@@ -2041,9 +2041,11 @@ let test_adjacent_reasoning_blocks_are_separate_stretches () =
              (String.concat "; " (List.map trail_item_to_string items)))
     [ "unbound", None; "owned", owner ]
 
-(* A block that comes back after another one is a third stretch, not a
-   continuation of the first: the stretch is open only while the node on top
-   of the trail is the same block. *)
+(* A block that comes back after another one is a new stretch, not a
+   continuation of the earlier one: the stretch is open only while the node on
+   top of the trail is the same block. A producer that alternated its index
+   inside one block would therefore split it at every change; the four-way
+   alternation here pins that one node is opened per change. *)
 let test_a_returning_block_index_does_not_rejoin_an_earlier_stretch () =
   let t = fresh () in
   feed t
@@ -2051,16 +2053,39 @@ let test_a_returning_block_index_does_not_rejoin_an_earlier_stretch () =
     ; Live.Thinking { text = "a"; index = 0; response = None }
     ; Live.Thinking { text = "b"; index = 1; response = None }
     ; Live.Thinking { text = "c"; index = 0; response = None }
+    ; Live.Thinking { text = "d"; index = 1; response = None }
     ];
   match Transcript.trail t with
   | [ Transcript.Trail_thinking first
     ; Transcript.Trail_thinking second
-    ; Transcript.Trail_thinking third ] ->
+    ; Transcript.Trail_thinking third
+    ; Transcript.Trail_thinking fourth ] ->
       check (list string) "first" [ "a" ] first;
       check (list string) "second" [ "b" ] second;
-      check (list string) "third" [ "c" ] third
+      check (list string) "third" [ "c" ] third;
+      check (list string) "fourth" [ "d" ] fourth
   | items ->
-      failf "expected three thinking stretches, got %d item(s): %s"
+      failf "expected four thinking stretches, got %d item(s): %s"
+        (List.length items)
+        (String.concat "; " (List.map trail_item_to_string items))
+
+(* The response is part of the block: a delta that names no response is not the
+   same block as an earlier one that did, even at the same index (the
+   dashboard keys its reasoning blocks on the same owner-and-index pair). *)
+let test_a_delta_without_a_response_is_not_the_block_that_named_one () =
+  let owner = Some { Masc.Keeper_chat_events.response_generation = 1; response_scope = 0 } in
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Thinking { text = "owned"; index = 0; response = owner }
+    ; Live.Thinking { text = "unbound"; index = 0; response = None }
+    ];
+  match Transcript.trail t with
+  | [ Transcript.Trail_thinking first; Transcript.Trail_thinking second ] ->
+      check (list string) "the owned block" [ "owned" ] first;
+      check (list string) "the unbound block" [ "unbound" ] second
+  | items ->
+      failf "expected two thinking stretches, got %d item(s): %s"
         (List.length items)
         (String.concat "; " (List.map trail_item_to_string items))
 
@@ -3081,6 +3106,8 @@ let () =
             test_adjacent_reasoning_blocks_are_separate_stretches
         ; test_case "a returning block index does not rejoin an earlier stretch" `Quick
             test_a_returning_block_index_does_not_rejoin_an_earlier_stretch
+        ; test_case "a delta without a response is not the block that named one" `Quick
+            test_a_delta_without_a_response_is_not_the_block_that_named_one
         ; test_case "runtime attempt restarts the per-attempt totals" `Quick
             test_runtime_attempt_restarts_the_per_attempt_totals
         ; test_case "partial response facts cannot erase admission owner" `Quick

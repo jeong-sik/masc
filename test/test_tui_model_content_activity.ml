@@ -545,9 +545,44 @@ let test_thinking_block_index_survives_journal_and_wire () =
   check bool "the live wire keeps the block index" true
     (decoded ["index",`Int 5] = Some expected);
   List.iter (fun fields ->
-    check bool "a missing, negative or non-integer index is undecodable" true
-      (match decoded fields with Some (L.Undecodable _) -> true | _ -> false))
-    [[]; ["index",`Int (-1)]; ["index",`String "5"]]
+    check bool "a missing or non-integer index is undecodable" true
+      (match decoded fields with Some (L.Undecodable _) -> true | _ -> false);
+    check bool "and the strict pass refuses it too" true
+      (Result.is_error
+         (Masc_tui_keeper_chat_projection.validate_custom_value ~name:"KEEPER_THINKING_DELTA"
+            (`Assoc (["delta",`String "x"]@fields)))))
+    [[]; ["index",`String "5"]; ["index",`Float 1.5]; ["index",`Null]]
+
+(* Two real thinking deltas out of the stream bridge, block 0 then block 1 of
+   one response with nothing between them, are two stretches on the live wire
+   and in a journal replay alike, in the trail and in what the pane draws
+   (#37717). *)
+let test_adjacent_thinking_blocks_split_on_wire_and_journal () =
+  let delta index text = Agent_core.Types.ContentBlockDelta {index; delta = ThinkingDelta text} in
+  let _, reversed =
+    List.fold_left (fun (bridge, events) (index, text) ->
+      let translated = B.translate ~redact_text:Fun.id ~base_dir:"/unused" ~stream_scope:0
+        bridge (delta index text) in
+      translated.bridge_state, List.rev_append translated.chat_events events)
+      (B.empty_state ~generation:7 (), []) [ 0, "first block"; 1, "second block" ] in
+  let events = List.rev reversed in
+  let from_journal = List.filter_map Log.delta_of_journaled events in
+  let _, wire = List.fold_left (fun (state, wire) event ->
+    let state, projected = Server_keeper_chat_agui_projection.project ~timestamp:0.
+      ~redact_text:Fun.id state event in
+    state, wire ^ Option.fold ~none:"" ~some:(Ag_ui.event_to_sse ~id:1) projected)
+    (Server_keeper_chat_agui_projection.initial, "") events in
+  let from_wire = L.feed (L.create ()) wire |> List.map (fun (item : L.observed_delta) -> item.delta) in
+  let stretches deltas =
+    let t = T.create ~keeper_name:"fixture" ~request_id:"r" ~started_at:0. in
+    T.apply ~now:0. t L.Run_started;
+    List.iter (T.apply ~now:1. t) deltas;
+    let in_trail = List.length (List.filter (function T.Trail_thinking _ -> true | _ -> false) (T.trail t)) in
+    let drawn = List.length (List.filter (fun (item : T.drawn_item) ->
+      match item.drawn with T.Drawn_thinking _ -> true | _ -> false) (T.drawn t)) in
+    in_trail, drawn in
+  check (pair int int) "the journal replay has two stretches, trail and drawn" (2, 2) (stretches from_journal);
+  check (pair int int) "the live wire has two stretches, trail and drawn" (2, 2) (stretches from_wire)
 
 let test_owned_text_lifecycle () =
   let t = create () in
@@ -631,6 +666,7 @@ let () = run "model content activity"
     test_case "owned text protocol" `Quick test_owned_text_protocol;
     test_case "owned thinking lifecycle" `Quick test_owned_thinking_lifecycle;
     test_case "thinking block index survives journal and wire" `Quick test_thinking_block_index_survives_journal_and_wire;
+    test_case "adjacent thinking blocks split on wire and journal" `Quick test_adjacent_thinking_blocks_split_on_wire_and_journal;
     test_case "owned thinking refines unbound text scope" `Quick test_owned_thinking_refines_unbound_text_scope;
     test_case "owned stop closes response without current activity" `Quick test_owned_stop_closes_response_without_current_activity;
     test_case "owned thinking protocol" `Quick test_owned_thinking_protocol;

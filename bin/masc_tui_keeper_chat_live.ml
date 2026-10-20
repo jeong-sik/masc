@@ -266,13 +266,14 @@ let custom_deltas_unvalidated fields =
           (match Masc.Keeper_chat_events.optional_response_identity_of_fields value with
            | Error detail -> [Undecodable detail]
            | Ok response ->
-               (* The provider's content block index is what tells two adjacent
-                  reasoning blocks of one response apart (#37717). *)
-               (match nonnegative_int_field value "index" with
-                | None -> [ Undecodable "KEEPER_THINKING_DELTA has no nonnegative index" ]
-                | Some index ->
+               (* The content block index is what tells two adjacent reasoning
+                  blocks of one response apart (#37717). It is only compared for
+                  equality, so any integer the journal accepts is accepted. *)
+               (match List.assoc_opt "index" value with
+                | Some (`Int index) ->
                     required ~event:"KEEPER_THINKING_DELTA" ~field:"delta" value
-                      (fun text -> Thinking {text;index;response}))))
+                      (fun text -> Thinking {text;index;response})
+                | Some _ | None -> [ Undecodable "KEEPER_THINKING_DELTA has no integer index" ])))
   | Some "KEEPER_CHAT_OPERATION_ACCEPTED" -> (
       let event = "KEEPER_CHAT_OPERATION_ACCEPTED" in
       match List.assoc_opt "value" fields with

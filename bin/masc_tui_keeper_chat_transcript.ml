@@ -191,16 +191,11 @@ type unreadable =
   ; last_detail : string
   }
 
-(* One stretch of the turn as it arrived. The three accumulators above answer
-   "what did the turn say / think / call" as totals; the trail answers "in what
-   order". A tool-call round interleaves them -- reasoning, then a call, then
-   more reasoning -- and flattening that into three blocks is what made a long
-   turn read as one wall of text with its calls listed elsewhere. Text and
-   thinking nodes own their bytes; a tool node only names the call, whose
-   record lives in [reversed_tool_calls] and keeps updating after later nodes
-   have opened (arguments stream in, the result lands). *)
-(* One provider reasoning block: its content block index and the response that
-   index belongs to. Deltas of one block share a stretch; a delta of another
+(* One reasoning block of the stream: its content block index and the response
+   that index belongs to. The index is whatever the producer numbers its
+   blocks with (the provider's own for HTTP streams, a per-run counter for the
+   Claude Code and Codex runtimes), so it only has to stay the same for the
+   deltas of one block. Deltas of one block share a stretch; a delta of another
    block starts a new one even when nothing sits between them, so two adjacent
    blocks do not read as one (#37717). The index alone is not an identity: the
    same index recurs in the next response, whose [response] differs. *)
@@ -212,6 +207,14 @@ type thinking_block =
 let same_thinking_block a b =
   a.block_index = b.block_index && a.block_response = b.block_response
 
+(* One stretch of the turn as it arrived. The three accumulators above answer
+   "what did the turn say / think / call" as totals; the trail answers "in what
+   order". A tool-call round interleaves them -- reasoning, then a call, then
+   more reasoning -- and flattening that into three blocks is what made a long
+   turn read as one wall of text with its calls listed elsewhere. Text and
+   thinking nodes own their bytes; a tool node only names the call, whose
+   record lives in [reversed_tool_calls] and keeps updating after later nodes
+   have opened (arguments stream in, the result lands). *)
 type trail_node =
   | Node_segment_boundary
   | Node_response_boundary
@@ -579,8 +582,10 @@ let stream_details_within ~keeper_name ~room transcript =
        ])
 
 (* Consecutive deltas of one kind are one stretch; a delta of another kind in
-   between closes it. Coalescing here rather than at draw time keeps the trail
-   bounded by the turn's shape (rounds), not by its chunking on the wire. *)
+   between closes it, and reasoning also closes on a delta of another block.
+   Coalescing here rather than at draw time keeps the trail bounded by the
+   turn's shape (rounds and blocks), not by its chunking on the wire -- which
+   holds while a producer keeps one index per block. *)
 let fresh_stretch t =
   let id = t.next_stretch_id in
   t.next_stretch_id <- id + 1;

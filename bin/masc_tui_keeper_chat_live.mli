@@ -114,7 +114,7 @@ type delta =
       ; index : int
       ; response : Masc.Keeper_chat_events.response_identity option
       }
-      (** Supplied reasoning bytes, the provider content block they belong to
+      (** Supplied reasoning bytes, the stream content block they belong to
           ([index], within one response) and their observed response identity.
           None preserves unbound bytes without granting response ownership.
           Deltas of one block continue one reasoning stretch; a different

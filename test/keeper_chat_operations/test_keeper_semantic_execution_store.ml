@@ -161,6 +161,38 @@ let test_terminal_record_is_immutable () =
     check bool "terminal record remains readable" true
       (Execution.to_json terminal = Execution.to_json (get store terminal.id)))
 
+(* The Gate wait and binding records no longer carry a session scope: the
+   encoder writes none, and a record that still names one is refused whole. *)
+let test_gate_record_with_a_session_scope_is_refused () =
+  with_store (fun _path store ->
+    submit store ~now:1. "gated" (`Assoc ["message", `String "direct work"]);
+    let gated = claim store ~now:2. in
+    let obligation = Execution.gate_obligation ~approval_id:"approval" ~tool_name:"tool_execute"
+      ~input_hash:(hash "tool input") |> string_ok in
+    let waiting = Execution.gate_wait ~checkpoint:(checkpoint ()) ~obligations:[obligation] |> string_ok in
+    ignore (Store.defer_direct_gate store ~now:3. ~operation_id:gated.operation_id
+      ~execution_digest:gated.execution_digest ~waiting |> store_ok);
+    let json = Execution.to_json (get store (direct_scope gated)) in
+    let names_scope json =
+      let text = Yojson.Safe.to_string json and needle = "session_scope" in
+      let rec at i = i + String.length needle <= String.length text
+        && (String.sub text i (String.length needle) = needle || at (i + 1)) in
+      at 0 in
+    check bool "the written record names no session scope" false (names_scope json);
+    (match Execution.of_json json with
+     | Ok _ -> ()
+     | Error error -> fail (Execution.error_to_string error));
+    let rec with_scope = function
+      | `Assoc fields when List.mem_assoc "obligations" fields ->
+        `Assoc (("session_scope", `List []) :: List.map (fun (key, value) -> key, with_scope value) fields)
+      | `Assoc fields -> `Assoc (List.map (fun (key, value) -> key, with_scope value) fields)
+      | `List items -> `List (List.map with_scope items)
+      | other -> other in
+    let old_shape = with_scope json in
+    check bool "the fixture really names a session scope" true (names_scope old_shape);
+    check bool "a record that names a session scope is refused" true
+      (Result.is_error (Execution.of_json old_shape)))
+
 let test_readonly_inventory_includes_every_unsettled_phase () =
   with_store (fun path store ->
     let input = `Assoc ["message", `String "direct work"] in
@@ -489,6 +521,7 @@ let () =
         test_case "startup marks an interrupted execution and releases the running slot" `Quick test_restart_interrupted_execution_releases_the_running_slot;
         test_case "readonly inventory includes every unsettled phase" `Quick test_readonly_inventory_includes_every_unsettled_phase;
         test_case "corrupt owned frame refuses unsafe inspection" `Quick test_corrupt_semantic_frame_refuses_unsafe_inspection;
+        test_case "a Gate record that names a session scope is refused" `Quick test_gate_record_with_a_session_scope_is_refused;
         test_case "terminal index cannot conceal pending evidence" `Quick test_corrupt_terminal_index_cannot_hide_outstanding_execution ];
       "schema", [
         test_case "readonly exact v1 requires no migration" `Quick test_readonly_v1_does_not_require_migration;

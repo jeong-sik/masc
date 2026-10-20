@@ -176,13 +176,19 @@ let with_script steps f =
     (fun () -> f ~dir ~requests)
 ;;
 
-let config ?account_home ?(native = Runtime_native_tools.Native_read) ?(admission_timeout_s = 10.) () =
+let config
+      ?account_home
+      ?(native = Runtime_native_tools.Native_read)
+      ?(admission_timeout_s = 10.)
+      ?(timeout_s = 10.)
+      ()
+  =
   { (Serve.default_config ()) with
     cli_path = "/bin/sh"
   ; account_home
   ; native
   ; admission_timeout_s
-  ; timeout_s = Some 10.
+  ; timeout_s = Some timeout_s
   }
 ;;
 
@@ -1378,6 +1384,72 @@ let test_a_session_start_write_that_times_out_reports_the_turn_as_not_accepted (
         | Error error -> fail (Serve.error_to_string error)))
 ;;
 
+(* A host that goes quiet or exits is judged by whether [turn/start] had left
+   this process when the read ended, the same boundary the write timeouts use.
+   Once it was written the host takes the command in durably, so the turn may
+   have run and a caller that retries on [turn_accepted = false] would run it
+   twice. *)
+let run_against_script steps ~config =
+  with_script steps (fun ~dir ~requests:_ ->
+    Eio_main.run (fun env ->
+      Serve.run_turn
+        ~mgr:(Eio.Stdenv.process_mgr env)
+        ~clock:(Eio.Stdenv.clock env)
+        ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
+        config
+        ~workspace_root:"/w"
+        ~prompt:"say MASC_MUSE_OK"
+        ~images:[]))
+;;
+
+let test_a_host_that_goes_quiet_in_the_model_turn_reports_the_turn_as_accepted () =
+  match
+    run_against_script
+      (handshake_and_session ~granted:[] @ [ Write agent_started; Sleep 1.0 ])
+      ~config:(config ~timeout_s:0.3 ())
+  with
+  | Error (Serve.Timeout { turn_accepted; _ }) ->
+    check bool "the turn was accepted before the read timed out" true turn_accepted
+  | Ok _ -> fail "a silent host cannot have finished the turn"
+  | Error error -> fail (Serve.error_to_string error)
+;;
+
+let test_a_host_that_exits_in_the_model_turn_reports_the_turn_as_accepted () =
+  match
+    run_against_script
+      (handshake_and_session ~granted:[] @ [ Write agent_started; Exit_with 3 ])
+      ~config:(config ())
+  with
+  | Error (Serve.Process_exited { turn_accepted; _ }) ->
+    check bool "the turn was accepted before the host exited" true turn_accepted
+  | Ok _ -> fail "an exited host cannot have finished the turn"
+  | Error error -> fail (Serve.error_to_string error)
+;;
+
+let test_a_host_that_goes_quiet_before_the_turn_reports_the_turn_as_not_accepted () =
+  match
+    run_against_script
+      [ Read; Write (init_frame ~granted:[]); Read (* initialized *); Read (* session/start *); Sleep 1.0 ]
+      ~config:(config ~admission_timeout_s:0.3 ())
+  with
+  | Error (Serve.Timeout { turn_accepted; _ }) ->
+    check bool "no turn had started when the read timed out" false turn_accepted
+  | Ok _ -> fail "a silent host cannot have started a session"
+  | Error error -> fail (Serve.error_to_string error)
+;;
+
+let test_a_host_that_exits_before_the_turn_reports_the_turn_as_not_accepted () =
+  match
+    run_against_script
+      [ Read; Write (init_frame ~granted:[]); Read (* initialized *); Exit_with 3 ]
+      ~config:(config ())
+  with
+  | Error (Serve.Process_exited { turn_accepted; _ }) ->
+    check bool "no turn had started when the host exited" false turn_accepted
+  | Ok _ -> fail "an exited host cannot have started a session"
+  | Error error -> fail (Serve.error_to_string error)
+;;
+
 let () =
   run
     "runtime_muse_serve"
@@ -1424,6 +1496,22 @@ let () =
             (an_approval_write_that_times_out_reports_the_turn_as_accepted ~tool_item_open:false)
         ; test_case "a session start write that times out reports the turn as not accepted" `Quick
             test_a_session_start_write_that_times_out_reports_the_turn_as_not_accepted
+        ; test_case
+            "a host that goes quiet in the model turn reports the turn as accepted"
+            `Quick
+            test_a_host_that_goes_quiet_in_the_model_turn_reports_the_turn_as_accepted
+        ; test_case
+            "a host that exits in the model turn reports the turn as accepted"
+            `Quick
+            test_a_host_that_exits_in_the_model_turn_reports_the_turn_as_accepted
+        ; test_case
+            "a host that goes quiet before the turn reports the turn as not accepted"
+            `Quick
+            test_a_host_that_goes_quiet_before_the_turn_reports_the_turn_as_not_accepted
+        ; test_case
+            "a host that exits before the turn reports the turn as not accepted"
+            `Quick
+            test_a_host_that_exits_before_the_turn_reports_the_turn_as_not_accepted
         ] )
     ]
 ;;

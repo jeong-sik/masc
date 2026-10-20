@@ -750,9 +750,10 @@ let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mg
                 (Process_exited
                    { status
                    ; detail = (if detail = "" then "stdout closed" else detail)
-                   ; turn_accepted = false
+                   ; turn_accepted = turn_written !receive_phase
                    }))
-          | Idle_timeout seconds -> Error (Timeout { seconds; turn_accepted = false })
+          | Idle_timeout seconds ->
+            Error (Timeout { seconds; turn_accepted = turn_written !receive_phase })
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | Eio.Time.Timeout as exn -> raise exn
           | exn -> protocol_error "stdout read" (Printexc.to_string exn)

@@ -640,13 +640,25 @@ let test_runtime_walk_store_to_tui () =
           check string "same typed evidence through store, tool envelope and TUI"
             (Yojson.Safe.to_string evidence)
             (Yojson.Safe.to_string (Evidence.to_yojson actual))
-        | None | Some (Receipt.Runtime_lane_unreadable _) ->
+        | Some (Receipt.Runtime_lane_unreadable {turn=Some turn;_}) ->
+          check string "corrupt stored evidence remains unreadable" "corrupt receipt" name;
+          check_source turn
+        | None | Some (Receipt.Runtime_lane_unreadable {turn=None;_}) ->
           fail ("wrong historical reading for " ^ name))
         ["no capture",`Null;"empty",Evidence.to_yojson Evidence.empty;
-         "earlier",Evidence.to_yojson earlier;"recovered",Evidence.to_yojson recovered];
+         "earlier",Evidence.to_yojson earlier;"corrupt receipt",`Assoc [];
+         "recovered",Evidence.to_yojson recovered];
       let json=refresh () in
       let view=Receipt.runtime_lane_observation_of_receipt_json (receipt (Evidence.to_yojson earlier))
         |> Receipt.runtime_lane_observation_to_yojson in
+      let nullable_turn=patch "turn_count" `Null (Yojson.Safe.Util.member "turn" view) in
+      let row=decode (map_row (patch "runtime_lane_observation" (patch "turn" nullable_turn view)) json) in
+      check_blocker row;
+      (match row.kr_runtime_lane_observation with
+       | Some (Receipt.Runtime_lane_observed {turn;_}) ->
+         check (option int) "explicit null turn is not missing" None turn.receipt_turn_count
+       | None | Some (Receipt.Runtime_lane_not_observed _ | Receipt.Runtime_lane_unreadable _) ->
+         fail "explicit null turn invalidated the observation");
       let failure_patch f = match Yojson.Safe.Util.member "evidence" view with
         | `Assoc fields ->
           (match List.assoc "failures" fields with

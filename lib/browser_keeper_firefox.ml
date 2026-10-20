@@ -12,6 +12,29 @@ let firefox_argv (config : Browser_configuration.live_bidi) =
   ; string_of_int config.port
   ]
 
+(* Firefox opens whatever page a Keeper is sent to, and its content processes
+   keep the environment it started with, so it gets the names it needs to
+   start and none of the server's own: a token the server was started with
+   (MASC_ADMIN_TOKEN, a dashboard URL carrying one, a provider key) does not
+   reach a page's process. Headless Firefox 158.0 on macOS opened its BiDi
+   port with only HOME, PATH, TMPDIR and USER (measured 2026-10-21); the
+   display and session names are the ones a Linux desktop session passes to
+   a window, and MOZ_ is Firefox's own switch namespace. *)
+let firefox_environment_names =
+  [ "HOME"; "PATH"; "TMPDIR"; "USER"; "LANG"
+  ; "DISPLAY"; "WAYLAND_DISPLAY"; "XDG_RUNTIME_DIR"; "DBUS_SESSION_BUS_ADDRESS" ]
+
+let firefox_environment_prefixes = [ "LC_"; "MOZ_" ]
+
+let firefox_environment inherited =
+  let name entry =
+    match String.index_opt entry '=' with Some i -> String.sub entry 0 i | None -> entry in
+  let passed entry =
+    let name = name entry in
+    List.mem name firefox_environment_names
+    || List.exists (fun prefix -> String.starts_with ~prefix name) firefox_environment_prefixes in
+  Array.of_list (List.filter passed (Array.to_list inherited))
+
 let host_argv ~launcher (config : Browser_configuration.live_bidi) =
   [ launcher
   ; Browser_bidi_host_status.bidi_url_flag

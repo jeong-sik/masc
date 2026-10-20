@@ -11,6 +11,14 @@ val bidi_url : port:int -> string
     running ([--no-remote]), with its BiDi address open. *)
 val firefox_argv : Browser_configuration.live_bidi -> string list
 
+(** The part of [inherited] (the server's environment, as
+    [Unix.environment ()] returns it) that Firefox is started with: a fixed
+    set of names (home, path, temporary directory, user, language, and the
+    display and session names a desktop passes to a window) and the [LC_] and
+    [MOZ_] families. Anything else the server holds, a token above all, stays
+    out of the browser and its content processes. *)
+val firefox_environment : string array -> string array
+
 (** This workspace's launcher, attaching to [config]'s port and keeping a
     session only with a Firefox on [config]'s profile. *)
 val host_argv : launcher:string -> Browser_configuration.live_bidi -> string list

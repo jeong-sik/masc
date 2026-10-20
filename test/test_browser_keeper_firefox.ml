@@ -529,6 +529,7 @@ type fake = Listens | Listens_apart | Exits | Fails | Relaunches | Relaunches_ap
 let fake_firefox base ~marker fake =
   let path = Filename.concat base "firefox" in
   let pidfile = Filename.quote (marker ^ ".listener") in
+  let env_file = Filename.quote (marker ^ ".env") in
   let tail = match fake with
     | Listens -> Printf.sprintf "exec %s \"$port\" %s\n" listener_command pidfile
     | Listens_apart ->
@@ -544,8 +545,8 @@ let fake_firefox base ~marker fake =
   write ~mode:0o700 path
     (Printf.sprintf
        "#!/bin/sh\nprev=\nfor arg in \"$@\"; do [ \"$prev\" = --remote-debugging-port ] && port=$arg; prev=$arg; done\n\
-        printf '%%s\\n' \"$$\" \"$@\" > %s\n%s"
-       (Filename.quote marker) tail);
+        printf '%%s\\n' \"$$\" \"$@\" > %s\nenv | sed 's/=.*//' > %s.part && mv %s.part %s\n%s"
+       (Filename.quote marker) env_file env_file env_file tail);
   path
 
 let lines path = String.split_on_char '\n' (String.trim (read path))
@@ -625,6 +626,36 @@ let a_free_port_starts_firefox_then_the_host () =
         ; "--firefox-profile"; Filename.concat base "profile" ]
         (List.tl (lines host_marker));
       check bool "both write under the lane" true (firefox_started base && host_started base)))
+
+(* The server's environment holds tokens; the page a Keeper opens runs in
+   processes that keep what Firefox was started with. *)
+let firefox_environment_keeps_only_what_firefox_needs () =
+  let inherited =
+    [| "HOME=/home/keeper"; "MASC_ADMIN_TOKEN=secret"; "PATH=/usr/bin"; "LC_ALL=C"
+     ; "MOZ_ENABLE_WAYLAND=1"; "ANTHROPIC_API_KEY=secret"; "HOMEBREW_GITHUB_API_TOKEN=secret"
+     ; "MASC_DASHBOARD_URL=http://127.0.0.1:1/?token=secret"; "DISPLAY=:0"; "LANGUAGE=ko"
+     ; "TMPDIR=/tmp"; "USER=keeper" |] in
+  check (array string) "the names Firefox needs, in the order they came"
+    [| "HOME=/home/keeper"; "PATH=/usr/bin"; "LC_ALL=C"; "MOZ_ENABLE_WAYLAND=1"; "DISPLAY=:0"
+     ; "TMPDIR=/tmp"; "USER=keeper" |]
+    (Keeper_firefox.firefox_environment inherited);
+  check (array string) "nothing inherited, nothing passed" [||] (Keeper_firefox.firefox_environment [||])
+
+let a_started_firefox_does_not_inherit_the_servers_token () =
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane base ~marker:host_marker;
+    let port = free_port () in
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    let token = "MASC_FIREFOX_TEST_TOKEN" in
+    Unix.putenv token "not-for-a-page";
+    Fun.protect ~finally:(fun () -> Unix.putenv token "") (fun () ->
+      with_children ~base [ firefox_marker; host_marker ] (fun () ->
+        started ~base ~configuration:(configured ~firefox ~port base) ();
+        await_file (firefox_marker ^ ".env");
+        let names = lines (firefox_marker ^ ".env") in
+        check bool "the token is not in Firefox's environment" false (List.mem token names);
+        check bool "what Firefox needs is" true (List.mem "PATH" names))))
 
 let an_answering_port_starts_only_the_host () =
   with_workspace (fun base ->
@@ -1675,6 +1706,10 @@ let () =
         ; test_case "a group is ours only when shown" `Quick a_recorded_group_is_ours_only_when_shown ] )
     ; ( "server start"
       , [ test_case "a free port: Firefox, then the host" `Quick a_free_port_starts_firefox_then_the_host
+        ; test_case "Firefox's environment is a fixed set of names" `Quick
+            firefox_environment_keeps_only_what_firefox_needs
+        ; test_case "a started Firefox does not inherit the server's token" `Quick
+            a_started_firefox_does_not_inherit_the_servers_token
         ; test_case "an answering port: the host only" `Quick an_answering_port_starts_only_the_host
         ; test_case "a running host and no Firefox" `Quick a_running_host_with_no_firefox_starts_nothing
         ; test_case "a host whose address cannot be read" `Quick a_host_whose_address_cannot_be_read_starts_nothing

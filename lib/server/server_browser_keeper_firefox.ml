@@ -235,7 +235,8 @@ let start_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path (config : Browser_
   let recorded =
     Eio.Cancel.protect (fun () ->
       match
-        spawn_logged ~sw ~argv:(Keeper_firefox.firefox_argv config) ~env:(Unix.environment ())
+        spawn_logged ~sw ~argv:(Keeper_firefox.firefox_argv config)
+          ~env:(Keeper_firefox.firefox_environment (Unix.environment ()))
           ~log_path:(Keeper_firefox.firefox_log_path ~base_path)
       with
       | Error detail -> Error (Keeper_firefox.Spawn_failed detail, None)

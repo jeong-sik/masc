@@ -62,4 +62,4 @@
  (name test_browser_addon_automation)
  (modules test_browser_addon_automation)
  (libraries masc masc.browser_lane masc.browser_configuration masc.native_addon_lease
-  masc.time_compat masc.fs_compat alcotest eio eio_main yojson uuidm unix))
+  masc.time_compat masc.fs_compat alcotest eio eio.unix eio_main yojson uuidm unix))

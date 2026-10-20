@@ -63,3 +63,9 @@
  (modules test_browser_addon_automation)
  (libraries masc masc.browser_lane masc.browser_configuration masc.native_addon_lease
   masc.time_compat masc.fs_compat alcotest eio eio.unix eio_main yojson uuidm unix))
+
+(test
+ (name test_browser_addon_uploads)
+ (modules test_browser_addon_uploads)
+ (libraries masc masc.browser_lane masc.fs_compat masc.time_compat
+  masc.lane_addon_call_context mcp_protocol alcotest eio eio.unix eio_main yojson unix))

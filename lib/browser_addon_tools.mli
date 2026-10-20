@@ -10,6 +10,6 @@ val handle :
 (** [keeper_name=None] cannot persist a screenshot for an arbitrary owner.
     Scene retention and result manifests remain the verified caller's existing
     responsibility. [upload_paths] comes only from the host's staged-file
-    authority, never the tool body. The installed adapter must support that
-    scoped transfer; the bundled browser worker still refuses it until its
-    broker is connected. *)
+    authority, never the tool body. The bundled owned-Gecko path copies them into
+    a one-use worker lease before invoking the ordinary exported tool/hooks.
+    Other backends must support their own scoped transfer before admission. *)

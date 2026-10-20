@@ -1651,7 +1651,7 @@ let call_browser_service ~config ~access ~(service:browser_service) ~command =
     let* ()=match command with
       | Browser_addon_wire.Retire | Model_requests | Model_result _ | Model_wait _ ->
           Error (Browser_addon_client.Unavailable "browser lifecycle and model ports belong to their host owner")
-      | Snapshot|Poll _|Deliver _|Disconnect _|Issue _ -> Ok () in
+      | Snapshot|Upload_stage _|Upload_discard _|Poll _|Deliver _|Disconnect _|Issue _ -> Ok () in
     let root=Filename.concat (Workspace.masc_dir config) "lane-addons" in
     let* m=match Hashtbl.find_opt managers root with
       | Some m -> Ok m | None -> Error (Browser_addon_client.Unavailable "browser Add-on owner is unavailable") in
@@ -1662,8 +1662,8 @@ let call_browser_service ~config ~access ~(service:browser_service) ~command =
           (match phase_of e,connection.worker.browser with
            | (Attached|Observing),Some client -> Ok (e,client)
            | Failed _,Some client when (match command with
-               | Browser_addon_wire.Deliver _|Disconnect _ -> true
-               | Snapshot|Retire|Model_requests|Model_result _|Model_wait _|Poll _|Issue _ -> false) -> Ok (e,client)
+               | Browser_addon_wire.Deliver _|Disconnect _|Upload_discard _ -> true
+               | Snapshot|Retire|Upload_stage _|Model_requests|Model_result _|Model_wait _|Poll _|Issue _ -> false) -> Ok (e,client)
            | (Attached|Observing|Failed _|Detaching|Detached),(None|Some _) ->
                Error (Browser_addon_client.Unavailable "original browser Add-on is unavailable"))
       | None|Some _ -> Error (Browser_addon_client.Unavailable "original browser Add-on was retired") in
@@ -1679,7 +1679,7 @@ let call_browser_service ~config ~access ~(service:browser_service) ~command =
         (match persist m e with Ok () -> () | Error detail ->
           Log.Misc.error "Cancelled browser Add-on state persistence: %s" detail);
         stop_entry ~sw ~backend:(backend ~store:m.store ()) m e
-      | Snapshot|Retire|Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Disconnect _ -> () in
+      | Snapshot|Retire|Upload_stage _|Upload_discard _|Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Disconnect _ -> () in
     e.active_tool_calls<-e.active_tool_calls+1;
     Fun.protect ~finally:(fun () -> e.active_tool_calls<-e.active_tool_calls-1) (fun () ->
       let result=Browser_addon_client.call client ~on_cancel_after_dispatch command in
@@ -1689,7 +1689,7 @@ let call_browser_service ~config ~access ~(service:browser_service) ~command =
              | Browser_addon_wire.Poll_result {state_id;_} -> Browser_addon_client.notice_poll_state client ~state_id
              | Issue_result _ -> true
              | Receipt -> (match command with Browser_addon_wire.Disconnect _ -> true
-                 | Snapshot|Retire|Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Issue _ -> false)
+                 | Snapshot|Retire|Upload_stage _|Upload_discard _|Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Issue _ -> false)
              | Snapshot_result _|Model_reply _|Service_refusal _ -> false in
            if changed && not e.stopping then wake e
        | Error (Browser_addon_client.Unavailable _) -> ()

@@ -24373,10 +24373,10 @@ and is loaded on demand through keeper_skill.
           if not (Masc_tui_msx.consume ~write:write_to_terminal state "esc")
           then invalidate_frame_for_resize frame_presenter render_schedule
       | Some (("+" | "=" | "-" | "_") as size_key) -> (
-          (* The spectator's own controls arrive here rather than in its
-             [consume], because every other key is a game key for the shared
-             machine (RFC-0439 3.3): + and - change only how big this
-             terminal draws the cached frame and never reach the machine. *)
+          (* Local size controls are handled before mapped game keys. The
+             observation/control and room-focus branches above have already
+             filtered input: + and - resize only this terminal's cached frame
+             and never reach the shared machine (RFC-0439 3.3). *)
           Masc_tui_msx.adjust_size
             (if String.equal size_key "-" || String.equal size_key "_" then -1.0 else 1.0);
           render_spectator state)

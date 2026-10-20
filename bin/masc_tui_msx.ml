@@ -8,9 +8,12 @@
 
    The keyboard belongs to this screen while it is open: a key never reaches
    the surface underneath. [esc] closes it and [+] / [-] resize the drawing.
-   Every other key is a game key. This module cannot reach [Masc_tui_http], so
-   the executable layer sends it to the shared server machine (RFC-0439 §3.3)
-   and re-fetches the frame. *)
+   The screen opens in [Observe_machine]: game keys only repaint there. The
+   executable forwards mapped game keys only in [Control_machine] (F5 toggles
+   interaction); it also handles F4 machine switching, F6/F7 checkpoints, F8
+   media selection and Tab/room focus before game-key dispatch. This module
+   cannot reach [Masc_tui_http]; eligible input is sent by the executable to
+   the shared server machine (RFC-0439 §3.3), then the frame is re-fetched. *)
 
 module Frame = Masc_tui_image_mosaic
 
@@ -456,9 +459,9 @@ let consume ~(write : string -> unit) (state : Masc_tui_types.state) key =
     false
   end
   else begin
-    (* Any other key just repaints the latest frame the poll cached. A game key
-       never gets here: the executable layer sends it to the server machine
-       first (see [server_key]). *)
+    (* Direct calls with any other key only repaint the poll's cached frame.
+       The production event loop currently calls [consume] only for [esc];
+       its own dispatch owns observation, control and game-key forwarding. *)
     render ~write ?notice:state.msx_notice ~connection:state.Masc_tui_types.connection_status
       ~live:state.msx_live ~interaction:state.machine_interaction state.msx_frame (last_surface ());
     true

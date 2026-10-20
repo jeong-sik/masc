@@ -6,7 +6,6 @@ import type { Keeper } from '../types'
 import { route } from '../router'
 import { keepers } from '../store'
 import { selectKeeper } from '../keeper-actions'
-import { loadKeeperConfig } from './keeper-config-state'
 import { findKeeper } from '../lib/keeper-utils'
 import { resolveKeeperForDetail } from '../lib/keeper-detail-resolution'
 import { mostRecentlyActiveKeeper } from '../lib/keeper-recency'
@@ -235,7 +234,6 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
   useEffect(() => {
     selectedKeeper.value = keeper
     selectKeeper(keeper.name)
-    void loadKeeperConfig(keeper.name)
     // Entering a keeper (mount or keeper change) always lands on the chat pane
     // on mobile. keeperMobilePane is a module-global signal; the back button
     // sets it to 'roster', but many entry points (command palette, overview

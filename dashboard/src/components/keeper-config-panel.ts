@@ -1837,7 +1837,6 @@ function runtimeTrustHealthRows(c: KeeperConfig): Array<[string, string, boolean
 // ── Main component ───────────────────────────────────────
 
 export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string; onClose?: () => void }) {
-  const state = configState.value
   const panelEpoch = useRef(Symbol('keeper-config-panel'))
   const panelOwner: KeeperConfigPanelOwner = {
     keeperName,
@@ -1848,9 +1847,11 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   useEffect(() => retainKeeperConfigPanelSubscriptions(), [])
 
   // Trigger load on first render or name change
-  if (configKeeperName.value !== keeperName || state.status === 'idle') {
+  if (configKeeperName.value !== keeperName || configState.value.status === 'idle') {
     void loadKeeperConfig(keeperName)
   }
+  // A different keeper's cached config is replaced synchronously by loading.
+  const state = configState.value
   if (runtimeCatalogState.value.status === 'idle') {
     loadRuntimeCatalog()
   }

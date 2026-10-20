@@ -73,14 +73,14 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
-| KeeperDecisionPipeline.tla | KeeperDecisionPipeline | manual | 2 | 1 | clean={inv:TypeOK, inv:Safety, prop:Liveness} buggy={inv:DecisionBoundaryRequiresMeasurement} | 4377e5b1be9c |
+| KeeperDecisionPipeline.tla | KeeperDecisionPipeline | manual | 2 | 1 | clean={inv:TypeOK, inv:Safety, prop:Liveness} buggy={inv:DecisionBoundaryRequiresMeasurement} | 619f821c8779 |
 | KeeperDwellMonotone.tla | KeeperDwellMonotone | manual | 2 | 1 | clean={inv:Safety} buggy={inv:DwellNonNegative} | af7ab0cf000b |
 | KeeperEventQueue.tla | KeeperEventQueue | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | cf9b1da37ed0 |
 | KeeperHeartbeat.tla | KeeperHeartbeat | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | 587e017926b7 |
 | KeeperHitlDeferred.tla | KeeperHitlDeferred | manual | 6 | 5 | clean={inv:Safety, prop:UnrelatedLaneKeepsProgressing, prop:ResolutionEventuallyConsumed} blocking-buggy={inv:DeferredImmediately} consume-buggy={inv:ResolutionConsumedAtMostOnce} early-signal-buggy={inv:WakeAfterDurableEnqueue} restart-buggy={prop:ResolutionEventuallyConsumed} wake-buggy={inv:ResolutionWakesOriginOnly} | bfceede02283 |
 | KeeperOutcomesConservation.tla | KeeperOutcomesConservation | manual | 2 | 1 | clean={inv:Safety} buggy={inv:ConservationLaw} | 25e5f4d6ce1a |
 | KeeperStateMachine.tla | KeeperStateMachine | manual | 2 | 1 | clean={inv:TypeOK, inv:PausedRequiresOperator, inv:StoppedRequiresOperatorStop, inv:RestartingRequiresTypedIntent, prop:StoppedIsForever} buggy={inv:TypeOK, inv:StoppedRequiresOperatorStop} | 73e938ddae8d |
-| KeeperTurnCycle.tla | KeeperTurnCycle | manual | 2 | 1 | clean={inv:TypeOK, inv:Safety, prop:Liveness} buggy={inv:SelectingRequiresToolPolicyMustHold} | 0aa903a7e690 |
+| KeeperTurnCycle.tla | KeeperTurnCycle | manual | 2 | 1 | clean={inv:TypeOK, inv:Safety, prop:Liveness} buggy={inv:ExecutingRequiresToolPolicyMustHold} | d08f4529fdd6 |
 
 ### specs/keeper-switch-hierarchy (3 specs)
 

@@ -5,11 +5,10 @@
 (* This spec models the live per-turn observation that the OCaml runtime   *)
 (* stores in [Keeper_registry.current_turn_observation]. It is not the old *)
 (* "tool_call/side_effect/done" linear storyboard; the current runtime is  *)
-(* a 3-axis machine:                                                        *)
+(* a 2-axis machine:                                                        *)
 (*   - turn_phase      : prompting | routing | executing |               *)
 (*                       finalizing | exhausted                            *)
 (*   - decision_stage  : undecided | guard_ok | tool_policy_selected       *)
-(*   - runtime_state   : idle | selecting | trying | done | exhausted      *)
 (*                                                                         *)
 (* Turn idle is represented by [turn_live = FALSE] plus cleared substate.  *)
 (* The authoritative write points live in:                                  *)
@@ -25,7 +24,6 @@
 (*   turn_live            | current_turn_observation = Some _        | record on keeper_runtime *)
 (*   turn_phase           | type turn_phase                          | lib/keeper/keeper_registry_types.ml — type turn_phase *)
 (*   decision_stage       | type decision_stage                      | lib/keeper/keeper_registry_types.ml — type decision_stage *)
-(*   runtime_state        | type runtime_state                       | lib/keeper/keeper_registry_types.ml — type runtime_state *)
 (*   measurement_bound    | observation.measurement_bound : bool     | record field *)
 (*   selected_model_bound | observation.selected_model = Some _      | record field *)
 (*                                                                         *)
@@ -41,6 +39,7 @@
 (*                               mark_turn_measurement                     *)
 (*                               set_turn_decision_stage                   *)
 (*     keeper_registry.ml        set_turn_selected_model                   *)
+(*                               mark_turn_provider_attempt_started        *)
 (*                               mark_turn_finished                        *)
 (*                                                                         *)
 (*  who writes them                                                        *)
@@ -55,28 +54,24 @@
 (*   keeper_run_tools.ml wrote two of these through a BeforeTurnParams     *)
 (*   disclosure hook. It writes none of them now.                          *)
 (*                                                                         *)
-(*   runtime_state has no OCaml counterpart. This spec declares it a       *)
-(*   VARIABLE over {idle, RuntimeTrying, RuntimeDone, RuntimeExhausted}    *)
-(*   and transitions it, but lib/ has no type runtime_state, no such       *)
-(*   constructors, and no set_turn_runtime_state -- the setter this        *)
-(*   block used to name.                                                   *)
-(*   Whether the spec or the code is behind is #34089.                     *)
+(*   mark_turn_provider_attempt_started writes two axes in this order:     *)
+(*   set_turn_decision_stage tool_policy_selected (SelectToolPolicy), then *)
+(*   set_turn_phase executing (EnterExecuting). A reader can see the state *)
+(*   between the two.                                                      *)
 (*                                                                         *)
-(* Composite contract (why this spec exists alongside the 1-axis specs):   *)
+(* Composite contract (why this spec exists alongside the decision spec):  *)
 (*                                                                         *)
-(*   - KeeperDecisionPipeline   covers decision_stage in isolation.        *)
-(*   - KeeperRuntimeLifecycle   covers runtime_state in isolation.         *)
+(*   - KeeperDecisionPipeline   covers decision_stage up to entering       *)
+(*     executing, without the attempt outcome.                             *)
+(*   - This spec adds the attempt outcome (RuntimeDone, RuntimeExhausted,  *)
+(*     finalizing) and selected_model_bound, and the cross-axis            *)
+(*     invariants ExecutingRequiresToolPolicy and                          *)
+(*     FinalizingRequiresToolPolicy.                                       *)
 (*   - handoff is an orthogonal lifecycle event outside this turn model.  *)
-(*                                                                         *)
-(*   This spec is the COMPOSITE -- the 3-axis invariants below             *)
-(*     (SelectingRequiresToolPolicy, ExecutingRequiresTrying,              *)
-(*   are CROSS-AXIS and cannot be expressed in any single-axis sibling.    *)
-(*   That is the load-bearing reason this spec is not redundant.           *)
 (*                                                                         *)
 (* Adding new constructors:                                                *)
 (*   - new turn_phase    -> update TurnPhaseSet + every action's phase guard *)
 (*   - new decision_stage-> update DecisionSet + per-axis sibling spec     *)
-(*   - new runtime_state -> update RuntimeSet + cross-axis invariants here *)
 (*                                                                         *)
 (* Out-of-scope (intentionally not modelled):                              *)
 (*   - selected_model identity (just a boolean here)                       *)
@@ -118,12 +113,11 @@ VARIABLES
     turn_live,            \* current_turn_observation = Some _
     turn_phase,           \* Keeper_registry.turn_phase
     decision_stage,       \* Keeper_registry.decision_stage
-    runtime_state,        \* Keeper_registry.runtime_state
     measurement_bound,    \* mark_turn_measurement already consumed
     selected_model_bound  \* selected_model = Some _
 
 vars ==
-    << turn_live, turn_phase, decision_stage, runtime_state,
+    << turn_live, turn_phase, decision_stage,
        measurement_bound, selected_model_bound >>
 
 \* TurnPhaseSet: phase membership type.
@@ -140,18 +134,17 @@ vars ==
 \* spec-typable) without altering the reachable state graph: Init pins
 \* `turn_phase = "idle"` and no existing action transitions into routing
 \* or exhausted, so TLC clean+buggy state counts are unchanged.  The
-\* cross-axis invariants (SelectingRequiresToolPolicy etc.) are
+\* cross-axis invariants (ExecutingRequiresToolPolicy etc.) are
 \* conditional on specific phase membership and are not affected.
 TurnPhaseSet == {"idle", "prompting", "routing", "executing",
                  "finalizing", "exhausted"}
 DecisionSet  == {"undecided", "guard_ok", "tool_policy_selected"}
-RuntimeSet   == {"idle", "selecting", "trying", "done", "exhausted"}
 ActionSet    == {
     "StartTurn",
     "BindMeasurement",
     "GuardOk",
     "SelectToolPolicy",
-    "RuntimeTrying",
+    "EnterExecuting",
     "RuntimeDone",
     "RuntimeExhausted",
     "FinishTurn"
@@ -159,16 +152,14 @@ ActionSet    == {
 InvariantSet == {
     "NoLiveTurnClearsState",
     "IdleRequiresNotLive",
-    "SelectingRequiresToolPolicy",
-    "ExecutingRequiresTrying",
-    "TerminalRuntimeRequiresFinalizing"
+    "ExecutingRequiresToolPolicy",
+    "FinalizingRequiresToolPolicy"
 }
 
 TypeOK ==
     /\ turn_live \in BOOLEAN
     /\ turn_phase \in TurnPhaseSet
     /\ decision_stage \in DecisionSet
-    /\ runtime_state \in RuntimeSet
     /\ measurement_bound \in BOOLEAN
     /\ selected_model_bound \in BOOLEAN
 
@@ -176,7 +167,6 @@ Init ==
     /\ turn_live = FALSE
     /\ turn_phase = "idle"
     /\ decision_stage = "undecided"
-    /\ runtime_state = "idle"
     /\ measurement_bound = FALSE
     /\ selected_model_bound = FALSE
 
@@ -189,7 +179,6 @@ StartTurn ==
     /\ turn_live' = TRUE
     /\ turn_phase' = "prompting"
     /\ decision_stage' = "undecided"
-    /\ runtime_state' = "idle"
     /\ measurement_bound' = FALSE
     /\ selected_model_bound' = FALSE
 
@@ -198,11 +187,10 @@ BindMeasurement ==
     /\ turn_live
     /\ turn_phase = "prompting"
     /\ decision_stage = "undecided"
-    /\ runtime_state = "idle"
     /\ ~measurement_bound
     /\ measurement_bound' = TRUE
     /\ UNCHANGED <<turn_live, turn_phase, decision_stage,
-                    runtime_state, selected_model_bound>>
+                    selected_model_bound>>
 
 \* keeper_unified_turn.ml elevates guard_ok when a measurement is present.
 GuardOk ==
@@ -211,31 +199,28 @@ GuardOk ==
     /\ measurement_bound
     /\ decision_stage = "undecided"
     /\ decision_stage' = "guard_ok"
-    /\ UNCHANGED <<turn_live, turn_phase, runtime_state,
+    /\ UNCHANGED <<turn_live, turn_phase,
                     measurement_bound, selected_model_bound>>
 
-\* keeper_agent_run.ml: tool disclosure completes, selected policy becomes active.
+\* mark_turn_provider_attempt_started, first write: set_turn_decision_stage.
 \* Runtime may surface the decision stage as undecided or guard_ok here, but
 \* the measurement must already be bound before policy selection commits.
 SelectToolPolicy ==
     /\ turn_live
     /\ turn_phase = "prompting"
-    /\ runtime_state = "idle"
     /\ measurement_bound
     /\ decision_stage \in {"undecided", "guard_ok"}
     /\ decision_stage' = "tool_policy_selected"
-    /\ runtime_state' = "selecting"
     /\ UNCHANGED <<turn_live, turn_phase, measurement_bound,
                     selected_model_bound>>
 
-\* keeper_unified_turn.ml: retry_loop sets Runtime_trying before an Agent Core run.
-RuntimeTrying ==
+\* mark_turn_provider_attempt_started, second write: set_turn_phase executing.
+\* Entering executing needs the policy already selected.
+EnterExecuting ==
     /\ turn_live
     /\ turn_phase = "prompting"
     /\ decision_stage = "tool_policy_selected"
-    /\ runtime_state = "selecting"
     /\ turn_phase' = "executing"
-    /\ runtime_state' = "trying"
     /\ UNCHANGED <<turn_live, decision_stage, measurement_bound,
                     selected_model_bound>>
 
@@ -243,9 +228,7 @@ RuntimeTrying ==
 RuntimeDone ==
     /\ turn_live
     /\ turn_phase = "executing"
-    /\ runtime_state = "trying"
     /\ turn_phase' = "finalizing"
-    /\ runtime_state' = "done"
     /\ selected_model_bound' = TRUE
     /\ UNCHANGED <<turn_live, decision_stage, measurement_bound>>
 
@@ -253,9 +236,7 @@ RuntimeDone ==
 RuntimeExhausted ==
     /\ turn_live
     /\ turn_phase = "executing"
-    /\ runtime_state = "trying"
     /\ turn_phase' = "finalizing"
-    /\ runtime_state' = "exhausted"
     /\ UNCHANGED <<turn_live, decision_stage, measurement_bound,
                     selected_model_bound>>
 
@@ -266,7 +247,6 @@ FinishTurn ==
     /\ turn_live' = FALSE
     /\ turn_phase' = "idle"
     /\ decision_stage' = "undecided"
-    /\ runtime_state' = "idle"
     /\ measurement_bound' = FALSE
     /\ selected_model_bound' = FALSE
 
@@ -275,27 +255,27 @@ Next ==
     \/ BindMeasurement
     \/ GuardOk
     \/ SelectToolPolicy
-    \/ RuntimeTrying
+    \/ EnterExecuting
     \/ RuntimeDone
     \/ RuntimeExhausted
     \/ FinishTurn
 
-\* ── Bug Model: Selecting Without Tool Policy ───────────────
-\* Models a regression where runtime_state jumps to "selecting"
-\* without decision_stage being "tool_policy_selected".
-\* SHOULD violate SelectingRequiresToolPolicy.
+\* ── Bug Model: Executing Without Tool Policy ───────────────
+\* Models a regression where turn_phase jumps to "executing" while
+\* decision_stage is still "guard_ok" (the phase write lands before the
+\* decision-stage write). SHOULD violate ExecutingRequiresToolPolicy.
 
-BugSelectingWithoutToolPolicy ==
+BugExecutingWithoutToolPolicy ==
     /\ turn_live
     /\ turn_phase = "prompting"
     /\ decision_stage = "guard_ok"  \* BUG: not tool_policy_selected
-    /\ runtime_state' = "selecting"
-    /\ UNCHANGED <<turn_live, turn_phase, decision_stage,
+    /\ turn_phase' = "executing"
+    /\ UNCHANGED <<turn_live, decision_stage,
                     measurement_bound, selected_model_bound>>
 
 NextBuggy ==
     \/ Next
-    \/ BugSelectingWithoutToolPolicy
+    \/ BugExecutingWithoutToolPolicy
 
 SpecBuggy == Init /\ [][NextBuggy]_vars /\ WF_vars(FinishTurn)
 
@@ -310,41 +290,31 @@ NoLiveTurnClearsState ==
     ~turn_live =>
         /\ turn_phase = "idle"
         /\ decision_stage = "undecided"
-        /\ runtime_state = "idle"
         /\ ~measurement_bound
         /\ ~selected_model_bound
 
 IdleRequiresNotLive ==
     turn_phase = "idle" => ~turn_live
 
-SelectingRequiresToolPolicy ==
-    runtime_state = "selecting" =>
-        /\ turn_live
-        /\ turn_phase = "prompting"
-        /\ decision_stage = "tool_policy_selected"
-
-ExecutingRequiresTrying ==
+ExecutingRequiresToolPolicy ==
     turn_phase = "executing" =>
         /\ turn_live
-        /\ runtime_state = "trying"
         /\ decision_stage = "tool_policy_selected"
 
-TerminalRuntimeRequiresFinalizing ==
-    runtime_state \in {"done", "exhausted"} =>
+FinalizingRequiresToolPolicy ==
+    turn_phase = "finalizing" =>
         /\ turn_live
-        /\ turn_phase = "finalizing"
         /\ decision_stage = "tool_policy_selected"
 
 Safety ==
     /\ TypeOK
     /\ NoLiveTurnClearsState
     /\ IdleRequiresNotLive
-    /\ SelectingRequiresToolPolicy
-    /\ ExecutingRequiresTrying
-    /\ TerminalRuntimeRequiresFinalizing
+    /\ ExecutingRequiresToolPolicy
+    /\ FinalizingRequiresToolPolicy
 
 (* Wrapper for buggy cfg — must be defined AFTER the invariant it references. *)
-SelectingRequiresToolPolicyMustHold == SelectingRequiresToolPolicy
+ExecutingRequiresToolPolicyMustHold == ExecutingRequiresToolPolicy
 
 LiveTurnEventuallyClears ==
     turn_live ~> ~turn_live

@@ -1272,22 +1272,14 @@ let assemble_hooks
                    ~base_path:config.base_path
                    meta.name
                    (Keeper_registry.Packed Keeper_registry.Turn_routing);
-                 (* Spec atomic group: SelectToolPolicy(idle->selecting)
-                   is immediately followed by RuntimeTrying(selecting->
-                   trying).  Both transitions are materialised inside
-                   the disclosure hook because the spec invariant
-                   [SelectingRequiresToolPolicy] requires
-                   [decision_stage = Decision_tool_policy_selected],
-                   which is only set at this site.  Pre-PR #14153 the
-                   Runtime_trying marking lived inside
-                   [Keeper_unified_turn.retry_loop] (line 1138 era),
-                   producing an [idle -> trying] jump that bypassed
-                   selecting; the move here closes that gap by keeping
-                   the two transitions adjacent.  On retry attempts
-                   the prior runtime state is [Runtime_trying]; the
-                   re-entry sequence becomes [trying -> selecting ->
-                   trying] which is admitted by
-                   [validate_runtime_transition]. *)
+                 (* KeeperTurnCycle spec: SelectToolPolicy, then
+                   EnterExecuting.  The spec invariant
+                   [ExecutingRequiresToolPolicy] needs
+                   [decision_stage = Decision_tool_policy_selected]
+                   before the phase becomes executing, so the stage is
+                   written here, in the disclosure hook, and
+                   [mark_turn_provider_attempt_started] writes it again
+                   together with the executing phase. *)
                  Keeper_registry.mark_turn_provider_attempt_started
                    ~observation_token
                    ~base_path:config.base_path

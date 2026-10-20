@@ -21,7 +21,6 @@
 (*   decision_stage     | type decision_stage = Decision_undecided | lib/keeper/keeper_registry.ml — type decision_stage *)
 (*                      |   | Decision_guard_ok                    | (mli mirror at keeper_registry.mli — type decision_stage_active) *)
 (*                      |   | Decision_tool_policy_selected        | *)
-(*   runtime_state      | type runtime_state = ...                 | lib/keeper/keeper_registry.ml — type runtime_state *)
 (*   measurement_bound  | observation.measurement_bound : bool     | record on observation *)
 (*                                                                         *)
 (* Authoritative write points (lib/keeper/keeper_registry.ml).             *)
@@ -45,8 +44,8 @@
 (*   enum from runtime drift.                                               *)
 (*                                                                         *)
 (* Scope projection: this spec is the per-turn DECISION lane only --       *)
-(*   - sibling KeeperRuntimeLifecycle covers runtime_state for the same    *)
-(*     turn (selecting / trying / done / exhausted),                       *)
+(*   - sibling KeeperTurnCycle adds the attempt outcome (finalizing) and   *)
+(*     the selected model,                                                 *)
 (*   - handoff remains an orthogonal lifecycle event outside this model.   *)
 (*   The full keeper lifecycle FSM (Offline / Running / Crashed / etc.)    *)
 (*   in lib/keeper_registry/keeper_state_machine.ml is OUT OF SCOPE here.     *)
@@ -64,20 +63,18 @@ VARIABLES
     turn_live,          \* current_turn_observation = Some _
     turn_phase,         \* Keeper_registry.turn_phase
     decision_stage,     \* Keeper_registry.decision_stage
-    runtime_state,      \* Keeper_registry.runtime_state
     measurement_bound   \* mark_turn_measurement already consumed
 
-vars == <<turn_live, turn_phase, decision_stage, runtime_state, measurement_bound>>
+vars == <<turn_live, turn_phase, decision_stage, measurement_bound>>
 
 TurnPhaseSet == {"idle", "prompting", "routing", "executing", "finalizing", "exhausted"}
 DecisionSet  == {"undecided", "guard_ok", "tool_policy_selected"}
-RuntimeSet   == {"idle", "selecting", "trying", "done", "exhausted"}
 ActionSet    == {
     "StartTurn",
     "BindMeasurement",
     "GuardOk",
     "SelectToolPolicy",
-    "RuntimeTrying",
+    "EnterExecuting",
     "FinishTurn"
 }
 InvariantSet == {
@@ -85,22 +82,19 @@ InvariantSet == {
     "IdleRequiresUndecided",
     "GuardOkRequiresMeasurement",
     "DecisionBoundaryRequiresMeasurement",
-    "NonIdleRuntimeRequiresDecisionBoundary",
-    "SelectingRequiresPrompting"
+    "ExecutingRequiresDecisionBoundary"
 }
 
 TypeOK ==
     /\ turn_live \in BOOLEAN
     /\ turn_phase \in TurnPhaseSet
     /\ decision_stage \in DecisionSet
-    /\ runtime_state \in RuntimeSet
     /\ measurement_bound \in BOOLEAN
 
 Init ==
     /\ turn_live = FALSE
     /\ turn_phase = "idle"
     /\ decision_stage = "undecided"
-    /\ runtime_state = "idle"
     /\ measurement_bound = FALSE
 
 StartTurn ==
@@ -108,17 +102,15 @@ StartTurn ==
     /\ turn_live' = TRUE
     /\ turn_phase' = "prompting"
     /\ decision_stage' = "undecided"
-    /\ runtime_state' = "idle"
     /\ measurement_bound' = FALSE
 
 BindMeasurement ==
     /\ turn_live
     /\ turn_phase = "prompting"
     /\ decision_stage = "undecided"
-    /\ runtime_state = "idle"
     /\ ~measurement_bound
     /\ measurement_bound' = TRUE
-    /\ UNCHANGED <<turn_live, turn_phase, decision_stage, runtime_state>>
+    /\ UNCHANGED <<turn_live, turn_phase, decision_stage>>
 
 GuardOk ==
     /\ turn_live
@@ -126,29 +118,27 @@ GuardOk ==
     /\ measurement_bound
     /\ decision_stage = "undecided"
     /\ decision_stage' = "guard_ok"
-    /\ UNCHANGED <<turn_live, turn_phase, runtime_state, measurement_bound>>
+    /\ UNCHANGED <<turn_live, turn_phase, measurement_bound>>
 
 \* Runtime may surface policy selection from undecided or from guard_ok, but
 \* the measurement is already bound by the time the policy is committed.
+\* First write of mark_turn_provider_attempt_started: set_turn_decision_stage.
 SelectToolPolicy ==
     /\ turn_live
     /\ turn_phase = "prompting"
-    /\ runtime_state = "idle"
     /\ measurement_bound
     /\ decision_stage \in {"undecided", "guard_ok"}
     /\ decision_stage' = "tool_policy_selected"
-    /\ runtime_state' = "selecting"
     /\ UNCHANGED <<turn_live, turn_phase, measurement_bound>>
 
-\* Entering the provider attempt preserves the decision stage but advances the
-\* runtime lane into the live trying state.
-RuntimeTrying ==
+\* Entering the provider attempt preserves the decision stage and moves the
+\* turn into executing. Second write of mark_turn_provider_attempt_started:
+\* set_turn_phase.
+EnterExecuting ==
     /\ turn_live
     /\ turn_phase = "prompting"
     /\ decision_stage = "tool_policy_selected"
-    /\ runtime_state = "selecting"
     /\ turn_phase' = "executing"
-    /\ runtime_state' = "trying"
     /\ UNCHANGED <<turn_live, decision_stage, measurement_bound>>
 
 FinishTurn ==
@@ -157,7 +147,6 @@ FinishTurn ==
     /\ turn_live' = FALSE
     /\ turn_phase' = "idle"
     /\ decision_stage' = "undecided"
-    /\ runtime_state' = "idle"
     /\ measurement_bound' = FALSE
 
 Next ==
@@ -165,7 +154,7 @@ Next ==
     \/ BindMeasurement
     \/ GuardOk
     \/ SelectToolPolicy
-    \/ RuntimeTrying
+    \/ EnterExecuting
     \/ FinishTurn
 
 Spec ==
@@ -175,7 +164,6 @@ NoLiveTurnClearsDecision ==
     ~turn_live =>
         /\ turn_phase = "idle"
         /\ decision_stage = "undecided"
-        /\ runtime_state = "idle"
         /\ ~measurement_bound
 
 IdleRequiresUndecided ==
@@ -186,22 +174,16 @@ GuardOkRequiresMeasurement ==
         /\ turn_live
         /\ turn_phase = "prompting"
         /\ measurement_bound
-        /\ runtime_state = "idle"
 
 DecisionBoundaryRequiresMeasurement ==
     decision_stage \in {"guard_ok", "tool_policy_selected"} =>
         /\ turn_live
         /\ measurement_bound
 
-NonIdleRuntimeRequiresDecisionBoundary ==
-    runtime_state \in {"selecting", "trying", "done", "exhausted"} =>
+ExecutingRequiresDecisionBoundary ==
+    turn_phase = "executing" =>
         /\ turn_live
         /\ decision_stage = "tool_policy_selected"
-
-SelectingRequiresPrompting ==
-    runtime_state = "selecting" =>
-        /\ turn_live
-        /\ turn_phase = "prompting"
 
 Safety ==
     /\ TypeOK
@@ -209,8 +191,7 @@ Safety ==
     /\ IdleRequiresUndecided
     /\ GuardOkRequiresMeasurement
     /\ DecisionBoundaryRequiresMeasurement
-    /\ NonIdleRuntimeRequiresDecisionBoundary
-    /\ SelectingRequiresPrompting
+    /\ ExecutingRequiresDecisionBoundary
 
 DecisionEventuallyClears ==
     decision_stage /= "undecided" ~> decision_stage = "undecided"
@@ -221,11 +202,9 @@ Liveness ==
 BugSelectWithoutMeasurement ==
     /\ turn_live
     /\ turn_phase = "prompting"
-    /\ runtime_state = "idle"
     /\ decision_stage = "undecided"
     /\ ~measurement_bound
     /\ decision_stage' = "tool_policy_selected"
-    /\ runtime_state' = "selecting"
     /\ UNCHANGED <<turn_live, turn_phase, measurement_bound>>
 
 SpecBuggy == Init /\ [][Next \/ BugSelectWithoutMeasurement]_vars /\ WF_vars(FinishTurn)

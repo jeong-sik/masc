@@ -244,8 +244,7 @@ val decision_stage_active_to_packed
   -> packed_decision_stage
 
 (** Diagnostic label using the constructor name (e.g.
-    ["Decision_guard_ok"]).  Used by [validate_runtime_transition] /
-    [validate_turn_phase_transition] for [Invalid_argument] messages. *)
+    ["Decision_guard_ok"]), for error messages. *)
 val packed_decision_stage_label : packed_decision_stage -> string
 
 (** Living-matrix documentation of the decision-stage transition relation.

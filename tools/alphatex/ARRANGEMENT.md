@@ -16,6 +16,15 @@ With `:output AUDIO_UID`, Space realizes that source through its captured VST
 preset. An explicit `:midi-source` override sends its original UMP externally
 instead. Derived audio keeps the original host-clock cuts and repeat periods;
 source files and saved project identity remain unchanged.
+`:practice-backing [ASSET]` restores the take's captured phrase as a new editable
+MIDI library asset. Its originally played track is muted; all notes, other track
+mute/solo decisions, controls, tempo, meter, loop range and frozen VST sound are
+retained. Enter places it at the cursor and `:edit-midi` opens it for chord or
+voicing experiments. Undo removes the imported variant without changing the take.
+The original full phrase is restored, including notes outside its retained loop;
+use `:region` with original MIDI ticks to place a loop excerpt explicitly.
+This is an editable musical backing, not recorded monitor PCM or automatic
+alignment to the take's host clock. Pass slicing and alignment remain separate.
 Paths retain internal spaces and are literal paths, without shell expansion.
 The imported asset is selected in the library. Enter places its complete source
 at the cursor, using the current compatible lane or adding a new one.

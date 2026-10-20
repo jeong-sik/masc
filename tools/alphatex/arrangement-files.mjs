@@ -1,4 +1,4 @@
-import { verifyPhraseSnapshot } from './phrase-arrangement.mjs'
+import { verifyPhraseSnapshot, importPhraseDocument } from './phrase-arrangement.mjs'
 import { capturePartNames, validateCaptureManifest } from './captured-source.mjs'
 import { readCaptureFiles, readCapture } from './session-data.mjs'
 import { capturePaths, captureMatches, inspectCaptureAsset } from './captured-source-files.mjs'
@@ -11,6 +11,7 @@ import { pipeline } from 'node:stream/promises'
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { basename, dirname, join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
 import { importMidiSource } from './midi-source.mjs'
 import { readWaveMetadata } from './wave-file.mjs'
 import { arrangementID, editArrangement, validateArrangement } from './arrangement.mjs'
@@ -165,6 +166,21 @@ export async function prepareArrangementPractice(project, assetID, { sourceRoot,
     signal?.throwIfAborted()
     return { directory: temporary }
   } catch (error) { await rm(temporary, { recursive: true, force: true }); throw error }
+}
+// Recover a draft from verified private bytes. The new MIDI variant can be
+// edited independently; raw take parts stay immutable. Cleanup precedes reply.
+export async function restorePracticeBacking(project, assetID, { sourceRoot, directory = tmpdir(), signal } = {}) {
+  const snapshot = await prepareArrangementPractice(project, assetID, { sourceRoot, directory, signal })
+  try {
+    const asset = project.assets.find(asset => asset.id === assetID)
+    const bytes = await readFile(join(snapshot.directory, 'context.json'), { signal })
+    if (createHash('sha256').update(bytes).digest('hex') !== asset.parts.context.sha256) throw new Error('Practice context changed during backing restoration')
+    const context = JSON.parse(bytes.toString('utf8')), phrase = context.project
+    phrase.title += ' backing'
+    phrase.tracks.find(track => track.id === context.track).muted = true
+    signal?.throwIfAborted()
+    return importPhraseDocument(project, phrase)
+  } finally { await rm(snapshot.directory, { recursive: true, force: true }) }
 }
 // The viewer owns these snapshots until it drains WAV playback/export and
 // restores the terminal. A project asset mutation cannot change an open take.

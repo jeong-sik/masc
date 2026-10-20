@@ -173,6 +173,11 @@ export function arrangementCommand(editor, line) {
       if (!['on', 'off'].includes(args[1])) throw new Error('Choose metronome on or off')
       value = { kind: 'practice', practice: { countInBars: Number(args[0]), metronome: args[1] === 'on' } }; break
     case 'phrase': count(0); return { editor, effect: { kind: command } }
+    case 'practice-backing': {
+      count(0, 1); const asset = args[0] ?? editor.asset
+      if (!editor.project.assets.some(item => item.id === asset && item.kind === 'practice')) throw new Error('Choose a raw practice take for its captured backing')
+      return { editor, effect: { kind: command, asset } }
+    }
     case 'edit-midi': {
       count(0, 2); const asset = args[0] ?? editor.asset
       if (!editor.project.assets.some(item => item.id === asset && item.kind === 'midi')) throw new Error('Choose a MIDI asset to edit')

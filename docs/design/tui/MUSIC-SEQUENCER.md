@@ -18,6 +18,13 @@ Undo/redo retains complete document revisions. Saving refuses an externally chan
 file; save-as retains edits without replacing it. Standard MIDI export and SoundFont
 preview consume the same schedule, including clipped notes spanning loop boundaries.
 
+In the phrase and source editors, `:loop START END` selects a range and enables
+repetition for the next playback. Selecting another range retires the old
+preparation/player before it can publish a replacement. `l` toggles repetition
+without erasing that range. Phrase ranges are saved in the document; source
+ranges belong to the editing session and leave the original performance/export
+unchanged. The arrangement editor retains its own saved playback-loop selection.
+
 Each save first writes and syncs a private local candidate and a separate publication
 inode in a sibling `.song.json.save-*` directory. Updating an existing project moves its current inode
 to that directory's `previous.json`, checks the claimed bytes against the loaded

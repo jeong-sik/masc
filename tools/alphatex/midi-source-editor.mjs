@@ -175,7 +175,7 @@ export function sourceCommand(editor,line) {
       count(2); const start = units(args[0]), end = units(args[1])
       if (!editor.performance || start >= end || end > editor.performance.ticks) throw new Error('Loop must be a positive range within the selected MIDI pattern')
       const sourceLoop = { start, end }
-      return { editor: { ...editor, sourceLoop, view: { ...editor.view, loop: sourceLoop } }, effect: { kind: 'source-loop' } }
+      return { editor: { ...editor, sourceLoop, view: { ...editor.view, loop: sourceLoop } }, effect: { kind: 'loop' } }
     }
     case 'tempos': {
       count(0); const next = { ...editor, eventView: editor.eventView === 'tempo' ? undefined : 'tempo' }

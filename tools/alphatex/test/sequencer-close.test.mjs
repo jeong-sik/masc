@@ -629,3 +629,27 @@ test('source loop owns current range, routes region playback, seeks locally and 
  view.key('q');await view.done
  assert.deepEqual(midiSourcePattern(view.observed.saved.at(-1)).notes.map(note=>note.pitch),[62])
 })
+
+test('phrase loop command enables its range, retires old preparation and retains the range after toggling off',async()=>{
+ let opened,finish;const calls=[]
+ const view=await controller({midiOutput:'42',playback(value){
+  opened=value
+  return{ready:Promise.resolve(),completion:new Promise(resolve=>{finish=resolve}),stop(){calls.push('stop');finish()}}
+ }})
+ try{
+  view.command('loop 1 3');view.command('play');await flush()
+  const worker=view.observed.workers[0],old=worker.requests.at(-1)
+  assert.equal(old.options.loop,true);assert.deepEqual(old.project.loop,{start:PPQ,end:3*PPQ})
+  view.command('loop 2 4');view.command('loop 8 1');await flush()
+  assert.equal(Atomics.load(new Int32Array(old.cancel),0),1)
+  worker.emit('message',{id:old.id,ok:true,result:{path:'/obsolete',format:'midi'}});await flush()
+  assert.equal(view.observed.players,0)
+  view.command('play');await flush();const next=worker.requests.at(-1)
+  assert.equal(next.options.loop,true);assert.deepEqual(next.project.loop,{start:2*PPQ,end:4*PPQ})
+  worker.emit('message',{id:next.id,ok:true,result:{path:'/owned',duration:1.2,format:'midi',midiOutput:'42'}});await flush()
+  assert.equal(opened.loop,true);opened.onEvent({kind:'playing',currentTime:0,duration:1.2})
+  view.key('l');await flush();assert.deepEqual(calls,['stop'])
+  view.command('play');await flush();assert.equal(worker.requests.at(-1).options.loop,false)
+ }finally{view.key('q');await view.done}
+ assert.deepEqual(view.observed.saved.at(-1).loop,{start:2*PPQ,end:4*PPQ})
+})

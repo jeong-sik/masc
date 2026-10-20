@@ -52,6 +52,7 @@ const help = [
   ':harmony-export PATH saves the complete ready analysis without replacing a file',
   ':progression 0 4 rootless Dm7 G7 Cmaj7',
   ':tempo 120    :length 32    :meter 3 4    :loop 4 12',
+  ':loop START END selects and enables repetition; l toggles it while retaining the range.',
   ':transpose -12    :quantize 0.25    :duplicate 8   (selected track)',
   ':track-add Bass    :track 2    :program 33    :rename Bass',
   ':level 100    :pan 64        track level and pan, each 0–127',
@@ -532,7 +533,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         break
       }
       case 'play': play(); break
-      case 'source-loop': stepInput?.stop(); stopPlayback(); loop = true; status = 'Source loop selected'; break
+      case 'loop': stepInput?.stop(); stopPlayback(); loop = true; status = 'Loop selected'; break
       case 'stop': stop(); break
       case 'output': stop(); portBindings = []; selectedOutput = value.path; selectedMidiOutput = undefined; status = `Audio output: ${selectedOutput}`; break
       case 'midi-output': stop(); portBindings = []; selectedMidiOutput = value.path; status = `MIDI output: ${selectedMidiOutput}`; break

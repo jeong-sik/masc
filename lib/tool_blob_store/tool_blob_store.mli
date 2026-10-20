@@ -124,6 +124,15 @@ val put_file_durable_blocking : t -> path:string -> mime:string -> Tool_output.a
     Only use inside an existing blocking job or CPU worker; it does not
     offload hashing and copying to another system thread. *)
 
+val put_file_descriptor_durable_blocking :
+  t -> source:Unix.file_descr -> expected_sha256:string -> mime:string -> Tool_output.artifact_ref
+(** Ingest an already opened and authority-checked regular descriptor. The caller
+    retains it and must grant exclusive use of its shared file offset during this
+    synchronous operation. No pathname is opened. A duplicate is closed on every
+    exit, and the original descriptor remains open. Both passes must match the
+    expected digest before a durable reference is returned. Call only inside a
+    blocking job; descriptor identity and parent ownership belong to the caller. *)
+
 val put_file_durable : t -> path:string -> mime:string -> Tool_output.artifact_ref
 (** Store an internal regular spool file without loading its complete contents
     into memory. The caller owns the source file; this operation never removes

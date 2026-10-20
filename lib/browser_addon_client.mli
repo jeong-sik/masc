@@ -18,6 +18,15 @@ val call : t -> on_cancel_after_dispatch:(unit -> unit) -> Browser_addon_wire.co
     the owner's callback under cancellation protection, then propagates. *)
 val revoke : t -> unit
 (** Admission only. Caller still owns worker termination and resource cleanup. *)
+val transfer_download : t -> id:string -> actor:string -> route:Browser_lane.route ->
+  verb:Browser_lane.verb ->
+  publish:(Browser_addon_downloads.descriptor -> (Yojson.Safe.t, string) result) ->
+  (Yojson.Safe.t, string) result
+(** Claim once, import once and acknowledge the durable artifact. Always settle
+    this original grant on failure or cancellation. Only Commit/Release may use
+    its captured private endpoint after revocation; new claims remain fenced.
+    Cancellation propagates. Neither transport failure nor import failure replays
+    a browser command. *)
 val notice_poll_state : t -> state_id:string -> bool
 (** Coalesce notifications for this original connection. Returns true on the
     first successfully received poll state, or a different worker snapshot.

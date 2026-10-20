@@ -42,6 +42,11 @@ val attach_uploads : t -> Browser_addon_uploads.t -> (unit, string) result
 val cleanup_uploads : t -> (unit, string) result
 (** After owned backend shutdown, join staging/claims and release pending
     snapshots. Claimed files require the original browser session's teardown. *)
+val attach_downloads : t -> Browser_addon_downloads.t -> (unit, string) result
+val publish_download : t -> string -> (Yojson.Safe.t, string) result
+(** Completed owned download producer. This is independent of LLM consumers. *)
+val cleanup_downloads : t -> (unit, string) result
+(** Invoke only after confirmed owned backend teardown. Retain unresolved bytes. *)
 val dispatch_upload : t -> id:string -> actor:string ->
   route:Browser_lane.route -> verb:Browser_lane.verb -> Browser_addon_wire.reply
 (** Mandatory one-use upload admission beneath the optional tool middleware.

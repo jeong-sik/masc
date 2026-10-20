@@ -125,6 +125,9 @@ let verb_of_json ~route value =
 type command = Snapshot | Retire
   | Upload_stage of {id:string;actor:string;route:B.route;verb:B.verb}
   | Upload_discard of string
+  | Download_claim of {id:string;actor:string;route:B.route;verb:B.verb}
+  | Download_commit of {id:string;actor:string;route:B.route;verb:B.verb;receipt:Yojson.Safe.t}
+  | Download_release of {id:string;actor:string;route:B.route;verb:B.verb}
   | Model_requests | Model_result of Yojson.Safe.t
   | Model_wait of {after:string option} | Poll of {client:B.client_info;window_sec:float}
   | Deliver of {client_id:B.client_id;id:string;payload:Yojson.Safe.t}
@@ -138,6 +141,12 @@ let to_json request =
     | Upload_stage {id;actor;route;verb} -> ["operation",string "upload_stage";"id",string id;
         "actor",string actor;"route",route_to_json route;"command",B.verb_json verb]
     | Upload_discard id -> ["operation",string "upload_discard";"id",string id]
+    | Download_claim {id;actor;route;verb} -> ["operation",string "download_claim";"id",string id;
+        "actor",string actor;"route",route_to_json route;"command",B.verb_json verb]
+    | Download_commit {id;actor;route;verb;receipt} -> ["operation",string "download_commit";"id",string id;
+        "actor",string actor;"route",route_to_json route;"command",B.verb_json verb;"receipt",receipt]
+    | Download_release {id;actor;route;verb} -> ["operation",string "download_release";"id",string id;
+        "actor",string actor;"route",route_to_json route;"command",B.verb_json verb]
     | Model_requests -> ["operation",string "model_requests"]
     | Model_result arguments -> ["operation",string "model_result";"arguments",arguments]
     | Model_wait {after} -> ["operation",string "model_wait";"after",nullable string after]
@@ -148,7 +157,7 @@ let to_json request =
         "command",B.verb_json verb;"actor",nullable string actor;"timeout_sec",`Float timeout_sec;"only_if_idle",`Bool only_if_idle] in
   `Assoc (("incarnation",string request.incarnation)::fields)
 let of_json value =
-  let* fields = object_fields ["incarnation";"operation";"arguments";"after";"client";"window_sec";"clientId";"id";"payload";"route";"command";"actor";"timeout_sec";"only_if_idle"] value in
+  let* fields = object_fields ["incarnation";"operation";"receipt";"arguments";"after";"client";"window_sec";"clientId";"id";"payload";"route";"command";"actor";"timeout_sec";"only_if_idle"] value in
   let* incarnation = text_field fields "incarnation" in let* name = text_field fields "operation" in
   let exact keys = exact ("incarnation"::"operation"::keys) value |> Result.map (fun _ -> ()) in
   let client_id () = let* text = text_field fields "clientId" in B.client_id_of_string text in
@@ -164,6 +173,18 @@ let of_json value =
         let* verb=verb_of_json ~route command in Ok (Upload_stage {id;actor;route;verb})
     | "upload_discard" -> let* ()=exact ["id"] in
         let* id=text_field fields "id" in let* _=B.client_id_of_string id in Ok (Upload_discard id)
+    | ("download_claim" | "download_commit" | "download_release") as operation ->
+        let* ()=exact (["id";"actor";"route";"command"] @
+          if operation="download_commit" then ["receipt"] else []) in
+        let* id=text_field fields "id" in let* _=B.client_id_of_string id in
+        let* actor=text_field fields "actor" in
+        let* raw_route=required fields "route" in let* route=route_of_json raw_route in
+        let* raw_command=required fields "command" in let* verb=verb_of_json ~route raw_command in
+        (match operation with
+         | "download_claim" -> Ok (Download_claim {id;actor;route;verb})
+         | "download_commit" -> let* receipt=required fields "receipt" in Ok (Download_commit {id;actor;route;verb;receipt})
+         | "download_release" -> Ok (Download_release {id;actor;route;verb})
+         | _ -> Error "unknown download transfer operation")
     | "model_requests" -> let* () = exact [] in Ok Model_requests
     | "model_result" -> let* () = exact ["arguments"] in
         let* arguments=required fields "arguments" in Ok (Model_result arguments)
@@ -244,12 +265,14 @@ let answer_of_json value =
 
 type disposition = Not_started | Outcome_unknown
 type reply = Snapshot_result of Yojson.Safe.t | Model_reply of Yojson.Safe.t
+  | Download_reply of Browser_addon_downloads.claim
   | Poll_result of {command:B.issued option;state_id:string} | Receipt
   | Issue_result of (B.answer, B.selection_error) result
   | Service_refusal of {message:string;disposition:disposition}
 let reply_to_json = function
   | Snapshot_result snapshot -> `Assoc ["reply",string "snapshot";"snapshot",snapshot]
   | Model_reply value -> `Assoc ["reply",string "model";"value",value]
+  | Download_reply value -> `Assoc ["reply",string "download";"value",Browser_addon_downloads.claim_to_json value]
   | Poll_result {command;state_id} -> `Assoc ["reply",string "poll";"command",nullable (fun (command:B.issued) ->
       `Assoc ["id",string command.id;"command",command.verb_json]) command;"state_id",string state_id]
   | Receipt -> `Assoc ["reply",string "receipt"]
@@ -263,6 +286,8 @@ let reply_of_json value =
   match name with
   | "snapshot" -> let* () = reply_keys ["snapshot"] in let* snapshot = required fields "snapshot" in Ok (Snapshot_result snapshot)
   | "model" -> let* ()=reply_keys ["value"] in let* value=required fields "value" in Ok (Model_reply value)
+  | "download" -> let* ()=reply_keys ["value"] in let* value=required fields "value" in
+      let* claim=Browser_addon_downloads.claim_of_json value in Ok (Download_reply claim)
   | "poll" -> let* () = reply_keys ["command";"state_id"] in let* raw = required fields "command" in
       let* command = optional (fun raw -> let* fields = exact ["id";"command"] raw in
         let* id = text_field fields "id" in let* verb_json = required fields "command" in

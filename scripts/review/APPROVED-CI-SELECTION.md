@@ -24,6 +24,10 @@ python3 scripts/review/prepare-approved-batch.py \
 
 The receipt freezes main, the chosen PR heads and their approval IDs, plus the
 combined commit and tree. A newly created local branch retains the candidate.
+The generated merge commit uses fixed machine author/committer names, email,
+timestamps and UTF-8 commit encoding. Caller identity remains in the receipt's
+`leader` field; inherited Git identity variables must not change the candidate
+SHA between preparation and runner reconstruction.
 It changes no checkout and publishes nothing. Conflicts, unapproved members,
 head changes, revoked approvals, change requests or a moving main prevent
 preparation. No Actions/check-run API reads, build or CI dispatch occur here.

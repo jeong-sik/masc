@@ -197,8 +197,8 @@ receipts remain distinct from successful contract validation.
    input/output hooks. Only browser replies are scripted. Existing retained-byte,
    manifest, target identity and partial-effect assertions remain. These fixtures
    exercise the public producer path when run; their source alone does not prove
-   execution or support for actual browsers and transfers. Built-in startup and
-   the remaining executor helpers still need to be removed in a following unit.
+   execution or support for actual browsers and transfers. The remaining live-browser
+   startup and standalone probe helpers still need to move to their Add-on owners.
 
    Screenshot publication now takes the served Workspace base path explicitly.
    PNG validation, frame storage, image reads, Vision analysis and promotion use
@@ -262,13 +262,15 @@ receipts remain distinct from successful contract validation.
    worker's `--stagehand` path creates the existing session backend under its own
    lifetime and attaches it to the Add-on owner. The selected `stagehand` Exact
    Output callback is installed on the real session. Without that selection,
-   native commands remain available and model requests are explicitly refused;
-   the worker resolves no provider credentials or alternate model route.
+   native commands remain available and model verbs, including task-required
+   sentence actions during discovery/open, are refused before dispatch. The
+   worker resolves no provider credentials or alternate model route.
 
    Each open reserves a fresh child instance before allocating its fresh private
    profile, runs the native launcher and guardian, and checks the bootstrap
    receipt against the original kernel lease before connecting CDP and loading
-   Stagehand. Startup failure stops and joins the original process group before
+   Stagehand. Startup and model work retain their original owner rather than
+   the quick browser response clock. Startup failure stops and joins the original process group before
    returning. Close and detach fence late launchers, close the keepalive and join
    the session switch; retirement additionally requires child-claim settlement.
    Host recovery uses the original descriptor and child lease even after worker

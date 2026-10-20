@@ -68,7 +68,10 @@ let send_request
    | exn -> (* cancel-guard-ok: retire a possibly partial frame, then re-raise *)
      Eio.Cancel.protect (fun () ->
        Eio.Mutex.use_rw ~protect:true router.mutex (fun () -> Hashtbl.remove router.pending server_id));
-     Eio.Cancel.protect (fun () -> Lsp_process_manager.shutdown proc);
+     Eio.Cancel.protect (fun () ->
+       match Atomic.get proc.transport_state with
+       | Closed -> Lsp_process_manager.shutdown proc
+       | Open -> ());
      raise exn);
   promise
 ;;
@@ -87,7 +90,10 @@ let send_notification
      router's pending table lock or another server's write lock. *)
   try Lsp_process_manager.write_message proc payload with
   | exn -> (* cancel-guard-ok: a partial frame cannot be reused; no retry *)
-    Eio.Cancel.protect (fun () -> Lsp_process_manager.shutdown proc);
+    Eio.Cancel.protect (fun () ->
+      match Atomic.get proc.transport_state with
+      | Closed -> Lsp_process_manager.shutdown proc
+      | Open -> ());
     raise exn
 ;;
 

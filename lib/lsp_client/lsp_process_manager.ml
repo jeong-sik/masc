@@ -429,9 +429,14 @@ let write_message (proc : lsp_process) (json : string) =
       | Invalid_argument _ as exn ->
         (* A concurrent owned shutdown can close the FD after the check.
            Preserve unrelated programming errors; never inspect error text. *)
-        match Atomic.get proc.transport_state with
+        let state=Atomic.get proc.transport_state in
+        Atomic.set proc.transport_state Closed;
+        (match state with
         | Closed -> raise Closed_transport
         | Open -> raise exn)
+      | exn -> (* cancel-guard-ok: close ownership before unlocking a partial frame *)
+        Atomic.set proc.transport_state Closed;
+        raise exn)
 ;;
 
 (** Read exactly [n] bytes from a flow into a string. *)

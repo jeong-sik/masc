@@ -1330,6 +1330,48 @@ status: reference
   합계·누적·범위 미상인 값으로 단일 요청의 컨텍스트 점유율이나 비용을 계산하지
   않는다. 클라이언트 턴 합계도 runtime 후보 순서를 포함한 Keeper turn 전체 합계는 아니다.
 
+**Cost Coverage (비용 근거 범위)**
+: Keeper가 실제로 쓴 비용의 보고 합계(`known_cost_usd`)와 그 합계를 뒷받침하는 가격
+  근거를 한 값에 담은 관측(`Keeper_cost_coverage.t`). 합계 하나로 근거를 대신하지
+  않는다 — 보고된 0, 가격이 없는 읽기, 확정되지 않은 사용량, 읽기 없이 시작된 시도는
+  각각 다른 사실이고, 토큰 수나 숫자 0으로 가격 근거를 세우지 않는다.
+  - 네 가지 관측: 가격이 있는 읽기(`Priced`), 제공자가 가격을 보고하지 않은 읽기
+    (`Price_not_reported`), 사용량을 확정하지 못한 읽기(`Usage_unresolved`), 읽기 없이
+    시작된 시도(`Attempt_unobserved`). 시작하지 않은 시도는 아무 관측도 더하지
+    않고, 읽기가 없는 승자를 위해 만든 합성 사용량 해석은 provider 읽기로 세지
+    않는다. 0으로 해석된 가격도 priced 읽기다.
+  - 지식(`Keeper_cost_coverage.knowledge`): `No_observations`(관측 없음) ·
+    `Fully_priced`(모든 읽기에 가격이 있음) · `No_reported_prices`(읽기는 있으나 가격
+    보고가 없음) · `Partly_priced`(가격 있는 읽기와 없는 읽기가 섞임) · `Unresolved`
+    (근거 미확립 — 미관측 이력, 미확정 사용량, 미관측 시도 중 하나 이상). 화면은 이
+    다섯 갈래로만 말한다(`Tui_decode.keeper_cost_summary`): `$0.1234`,
+    `$0.1234 known · 3 priced / 1 unpriced readings`,
+    `not priced by provider (2 readings)`,
+    `history unobserved · $1.2000 known · 3 priced / 0 unpriced / 1 unresolved readings · 1 unobserved attempts`,
+    `no cost observations`. 값 자체가 없는 Keeper는 `cost not observed`로 그린다
+    (`dashboard/src/lib/keeper-cost-coverage.ts`의 `keeperCostSummary`).
+  - 이력(`history`): `Complete`는 처음부터 근거를 세어 왔다는 뜻이고, `Unobserved`는
+    과거 구간의 가격 근거를 모른 채 보고 합계만 남았다는 뜻이다. `Unobserved`는 합계가
+    0이어도 "가격이 다 붙은 0"이 아니며, 새 읽기가 와도 그 불확실성을 지우지 않는다.
+  - 저장·전송 모양: Keeper meta의 `total_cost_usd`는 숫자이거나 위 여섯 칸
+    (`known_cost_usd`·`priced_readings`·`unpriced_readings`·`unresolved_readings`·
+    `unobserved_attempts`·`history`)을 갖는 객체다. 숫자는 "합계는 알지만 근거 이력은
+    모른다"는 뜻이고, 완전히 빈 상태와 가격이 다 붙은 0은 반드시 객체다. 모양이 어긋난
+    객체는 합계만 살려 읽지 않고 거절한다. 기존 숫자 기록을 객체로 자동 변환하거나
+    저장소를 초기화하지 않는다.
+  - 합치기: fleet·TUI 집계는 `add`로 더하고, 소유자 스냅숏 사이의 변화는 `difference`로
+    낸다. 줄어든 합계·개수, 지워진 미관측 이력, 넘친 수를 거절하며, 집계 중 `add`가
+    거절되면 부분 합계 대신 알 수 없음으로 남긴다(`bin/masc_tui_types.ml`의
+    `aggregate_keeper_stats`).
+  - 경계: 이것은 관측일 뿐 어떤 Keeper turn을 허가하거나 제한하지 않는다. **Candle**
+    (보상 화폐)이나 **Usage Scope**(토큰 수의 집계 범위)와 다른 축이다 — 비용은
+    provider가 보고한 USD, Candle은 Goal 완료 보상, Usage Scope는 토큰 수의 범위다.
+  → [Keeper_cost_coverage](../../lib/keeper_cost_coverage/keeper_cost_coverage.mli) ·
+  [Keeper_turn_spend.cost_coverage](../../lib/keeper/keeper_turn_spend.mli) ·
+  [keeper_cost_summary](../../lib/tui_decode.mli) ·
+  [keeper-cost-coverage.ts](../../dashboard/src/lib/keeper-cost-coverage.ts) ·
+  [Cumulative reported cost and pricing coverage](../design/keeper-cost-coverage.md)
+
 **Provider Usage Window (제공자 사용량 창)**
 : 제공자가 보고한 계정 사용량 한도 창의 관측값(`Runtime_provider_usage_window.t`).
   Claude Code의 `rate_limit_event`와 Codex app-server의 `account/rateLimits/updated`는

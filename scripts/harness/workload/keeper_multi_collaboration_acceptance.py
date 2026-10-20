@@ -44,8 +44,15 @@ from recorded_tool_outcome import RecordedCallOutcome, recorded_call_outcome  # 
 
 
 def row_succeeded(row: dict[str, Any]) -> bool:
-    """True only for a settled success of a tool-call log row."""
-    return recorded_call_outcome(row) is RecordedCallOutcome.SUCCEEDED
+    """True only for a settled success of a tool-call log row.
+
+    Only `tool_call` rows are calls; the log also holds `composition_run` and
+    `lifecycle_event` rows, which answer nothing about a call.
+    """
+    return (
+        row.get("record_kind") == "tool_call"
+        and recorded_call_outcome(row) is RecordedCallOutcome.SUCCEEDED
+    )
 
 
 def row_success_verdict(row: dict[str, Any]) -> bool | None:
@@ -53,8 +60,10 @@ def row_success_verdict(row: dict[str, Any]) -> bool | None:
 
     Deferred, unsettled and malformed rows are neither: the assertions below
     ask "did it succeed" and "did it fail" separately, and a row that settled
-    neither way must answer neither.
+    neither way, or is not a `tool_call` row, must answer neither.
     """
+    if row.get("record_kind") != "tool_call":
+        return None
     outcome = recorded_call_outcome(row)
     if outcome is RecordedCallOutcome.SUCCEEDED:
         return True

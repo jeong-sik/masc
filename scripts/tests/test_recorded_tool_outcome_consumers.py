@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -15,6 +16,7 @@ from unittest.mock import patch
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
 import keeper_store_layout  # noqa: E402
+from recorded_tool_outcome import recorded_call_outcome  # noqa: E402
 
 
 def load(name, filename):
@@ -163,6 +165,11 @@ class OutcomeConsumers(unittest.TestCase):
                              ("deferred", 1), ("unsettled", 2), ("malformed", 1)]:
             self.assertRegex(output, rf"(?m)^{label}\t{count}$")
         self.assertRegex(output, r"(?m)^failure_pct\t28\.57$")
+        # The failure sections list only the two recorded failures, by category.
+        categories = output.split("[failure categories]")[1].split("[top failed commands]")[0]
+        self.assertRegex(categories, r"(?m)^\s+1 edit_old_string_not_found$")
+        self.assertRegex(categories, r"(?m)^\s+1 timeout$")
+        self.assertEqual(len([line for line in categories.splitlines() if line.strip()]), 2)
         # The surface table keeps the two Execute names apart.
         self.assertRegex(output, r"(?m)^Execute\t1\t1\t4\t16\.67$")
         self.assertRegex(output, r"(?m)^tool_execute\t1\t0\t0\t100\.00$")
@@ -174,13 +181,20 @@ class OutcomeConsumers(unittest.TestCase):
                 call(tool="masc_board_post", ts=now, wire_outcome="ok"),
                 call(tool="masc_board_post", ts=now, disposition="deferred"),
                 call(tool="masc_board_post", ts=now, success=True),
+                call(tool="masc_board_post", ts=now, wire_outcome="unknown"),
+                call(tool="masc_board_post", ts=now, disposition="invented"),
+                # Rows that are not calls: neither the numerator nor the
+                # denominator of either percentage.
+                call(tool="Execute", ts=now, record_kind="composition_run", disposition="failed"),
+                call(tool="Execute", ts=now, record_kind="lifecycle_event", disposition="failed"),
                 call(tool="masc_board_post", ts=now, record_kind="composition_run",
                      disposition="completed")]
         output = self.run_script(
             "board-slo-extractor.sh", rows, extra_args=["--offline", "--json"], utc_path=True)
         metrics = json.loads(output)["metrics"]
-        # 2 of 5 tool_call rows succeeded; 1 of the 2 Execute rows failed.
-        self.assertEqual(metrics["tool_call_success_pct"], 40.0)
+        # 2 of 7 tool_call rows succeeded (the two settled successes) ...
+        self.assertEqual(metrics["tool_call_success_pct"], 28.57)
+        # ... and 1 of the 2 Execute tool_call rows failed.
         self.assertEqual(metrics["execute_failure_pct"], 50.0)
 
     def test_acceptance_harness_reads_the_recorded_outcome_of_a_log_row(self):
@@ -192,11 +206,30 @@ class OutcomeConsumers(unittest.TestCase):
                                 ({"wire_outcome": "unknown"}, None),
                                 ({"disposition": "invented"}, None),
                                 ({"success": True}, None),
-                                ({"success": False}, None)]:
+                                ({"success": False}, None),
+                                ({"record_kind": "composition_run", "disposition": "completed"}, None),
+                                ({"record_kind": "lifecycle_event", "disposition": "failed"}, None)]:
             with self.subTest(fields=fields):
                 row = call(**fields)
                 self.assertIs(ACCEPTANCE.row_success_verdict(row), verdict)
                 self.assertIs(ACCEPTANCE.row_succeeded(row), verdict is True)
+
+    @unittest.skipUnless(shutil.which("node"), "needs node")
+    def test_the_chat_edit_verifier_copy_of_the_rule_matches_the_python_rule(self):
+        # The .mjs verifier cannot import the python or TypeScript rule, so it
+        # carries a copy. This keeps the copy from drifting.
+        rows = [{}, {"disposition": "completed", "wire_outcome": "error"},
+                {"disposition": "failed"}, {"disposition": "deferred"},
+                {"disposition": None, "wire_outcome": "ok"}, {"disposition": "x"},
+                {"wire_outcome": "ok"}, {"wire_outcome": "error"}, {"wire_outcome": "unknown"},
+                {"wire_outcome": "nope"}, {"success": True},
+                {"disposition": "constructor"}, {"wire_outcome": "toString"}, [], None, 5]
+        source = (SCRIPTS / "verify-installed-chat-edit.mjs").read_text()
+        function = re.search(r"^function recordedOutcome\(row\) \{.*?^\}\n", source, re.S | re.M).group(0)
+        program = function + f"console.log(JSON.stringify({json.dumps(rows)}.map(recordedOutcome)))\n"
+        output = subprocess.run(["node", "--input-type=module", "-e", program],
+                                text=True, capture_output=True, check=True).stdout
+        self.assertEqual(json.loads(output), [recorded_call_outcome(row).value for row in rows])
 
     def test_quality_harness_marks_only_a_settled_success_as_success(self):
         rows = [call(keeper="fixture", tool="tool_execute", disposition="completed", wire_outcome="error"),
@@ -205,6 +238,8 @@ class OutcomeConsumers(unittest.TestCase):
                 call(keeper="fixture", tool="tool_execute", wire_outcome="unknown"),
                 call(keeper="fixture", tool="tool_execute", success=True),
                 call(keeper="fixture", tool="tool_execute", record_kind="composition_run",
+                     disposition="completed"),
+                call(keeper="fixture", tool="tool_execute", record_kind="lifecycle_event",
                      disposition="completed"),
                 call(keeper="other", tool="tool_execute", disposition="completed")]
         calls = self.run_harness_functions(rows)

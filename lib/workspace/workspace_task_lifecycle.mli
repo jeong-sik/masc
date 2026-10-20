@@ -88,6 +88,18 @@ val decide_verdict
   -> notes:string
   -> (verdict_decision, verdict_invalid) result
 
+(** The task the producer keeps as [current_task] once a rejection returns
+    [rejected_task] to them. The rejected task takes the focus unless
+    [current_task] names a different task for which [holds_active] is true: a
+    verdict never moves the producer off work they started while it was
+    pending. The rejected task is [InProgress] for the producer either way and
+    resumes from its rejection handoff. *)
+val focus_after_rejection
+  :  rejected_task:string
+  -> current_task:string option
+  -> holds_active:(string -> bool)
+  -> string
+
 val valid_next_actions
   :  same_agent:bool
   -> task_status:Masc_domain.task_status

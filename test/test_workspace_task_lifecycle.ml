@@ -372,6 +372,25 @@ let test_awaiting_is_claimable_by_nobody () =
     [ owner; "verifier"; "other" ]
 ;;
 
+(* A rejection returns its task to the producer. It takes the producer's focus
+   unless the producer is working a different task they started meanwhile. *)
+let test_rejection_keeps_the_focus_of_other_active_work () =
+  let focus ~current_task ~holds_active =
+    L.focus_after_rejection ~rejected_task:"task-1" ~current_task ~holds_active
+  in
+  let check label expected actual =
+    if not (String.equal expected actual)
+    then failwith (Printf.sprintf "%s: expected %s, got %s" label expected actual)
+  in
+  check "no focus" "task-1" (focus ~current_task:None ~holds_active:(fun _ -> true));
+  check "focus already on the rejected task" "task-1"
+    (focus ~current_task:(Some "task-1") ~holds_active:(fun _ -> true));
+  check "focus on active other work" "task-2"
+    (focus ~current_task:(Some "task-2") ~holds_active:(String.equal "task-2"));
+  check "focus left on work the producer no longer holds" "task-1"
+    (focus ~current_task:(Some "task-2") ~holds_active:(fun _ -> false))
+;;
+
 let () =
   test_done_requires_verification_submission ();
   test_claimed_done_requires_verification_submission ();
@@ -391,4 +410,5 @@ let () =
   test_cancel_of_someone_elses_task_is_refused ();
   test_cancel_cannot_undo_a_finished_task ();
   test_approval_ends_the_task_as_done ();
+  test_rejection_keeps_the_focus_of_other_active_work ();
   Printf.printf "workspace_task_lifecycle: all tests passed\n%!"

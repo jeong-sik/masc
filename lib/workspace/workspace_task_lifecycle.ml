@@ -267,6 +267,13 @@ let decide_verdict
   | Masc_domain.Cancelled _ -> Error Not_awaiting_verdict
 ;;
 
+let focus_after_rejection ~rejected_task ~current_task ~holds_active =
+  match current_task with
+  | Some other
+    when (not (String.equal other rejected_task)) && holds_active other -> other
+  | Some _ | None -> rejected_task
+;;
+
 let valid_next_actions ~same_agent ~task_status =
   let same_agent_pred _ = same_agent in
   let try_action action =

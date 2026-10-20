@@ -950,8 +950,29 @@ let commit_verdict_r
            in
            run_post_commit "producer_task_binding" (fun () ->
              match decided.Workspace_task_lifecycle.decision.set_current with
-             | Some current_task ->
+             | Some rejected_task ->
+               let holds_active held_task_id =
+                 List.exists
+                   (fun (t : task) ->
+                      String.equal t.id held_task_id
+                      &&
+                      match t.task_status with
+                      | Masc_domain.Claimed { assignee; _ }
+                      | Masc_domain.InProgress { assignee; _ } ->
+                        String.equal assignee producer
+                      | Masc_domain.Todo
+                      | Masc_domain.AwaitingVerification _
+                      | Masc_domain.Done _
+                      | Masc_domain.Cancelled _ -> false)
+                   new_backlog.tasks
+               in
                update_local_agent_state config ~agent_name:producer (fun agent ->
+                 let current_task =
+                   Workspace_task_lifecycle.focus_after_rejection
+                     ~rejected_task
+                     ~current_task:agent.current_task
+                     ~holds_active
+                 in
                  { agent with status = Busy; current_task = Some current_task })
              | None ->
                Task_cache_invariant.clear_stale_agent_task

@@ -15,7 +15,7 @@ let code_file_search_focused (state : state) =
    [goto_surface] closes the overlay on any move to another surface, which is
    what makes the flag alone enough to say it is on screen. Its diff replaces
    the list with text, and text has no row for a cursor to name. *)
-let surface_row_texts (state : state) : surface -> string list option =
+let surface_row_texts ~cols (state : state) : surface -> string list option =
  fun surface ->
   if state.context_inspector_open then
     if state.context_inspector_tab = Masc_tui_context_inspector.Exact_input
@@ -265,18 +265,17 @@ let surface_row_texts (state : state) : surface -> string list option =
                 (List.map
                    (fun change -> Tui_decode.file_change_address change)
                    changes)))
-  (* The list pane only. With the text focused j/k scrolls the reading and
-     there is no row cursor for a match to land on, so the same condition the
-     cursor arm reads answers here: a search offered on one focus and silent
-     on the other would be the drift this pairing exists to prevent. *)
+  (* The focused pane owns the search. Document rows come from the exact
+     shared rendering projection, so matches land on the visible reading. *)
   | Resources when state.resource_focus = Left_pane ->
       Option.map (List.map Masc_tui_resource_catalog.display_name) state.resources_list
+  | Resources -> Masc_tui_resource_document.search_rows ~cols state
   | Overview | Acting | Metrics
   | Keepers
       ( Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message
       | Keeper_runtime_pick )
   | Approvals | Schedules
-  | Resources | Config | Tools ->
+  | Config | Tools ->
       None
 
 (* The fetched file's rows are replaced when content changes, like the lists
@@ -304,7 +303,7 @@ let code_file_search_count ~query rows =
       code_search_count_memo := Some { csc_rows = rows; csc_query = query; csc_count = count };
       count
 
-let surface_search_count (state : state) surface ~query =
+let surface_search_count ~cols (state : state) surface ~query =
   let query = surface_search_query surface query in
   match surface with
   | Code when code_file_search_focused state ->
@@ -320,4 +319,4 @@ let surface_search_count (state : state) surface ~query =
           if String.equal query "" then 0
           else List.fold_left (fun count text ->
             if Masc_tui_pick_list.lowercase_contains ~needle:query text then count + 1 else count) 0 rows)
-        (surface_row_texts state surface)
+        (surface_row_texts ~cols state surface)

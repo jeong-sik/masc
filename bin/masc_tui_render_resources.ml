@@ -8,114 +8,6 @@ module Message_layout = Masc_tui_message_layout
 module Rows = Masc_tui_rows
 module Catalog = Masc_tui_resource_catalog
 
-let fenced_pretty_json text =
-  let pretty =
-    match Yojson.Safe.from_string text with
-    | json -> Yojson.Safe.pretty_to_string json
-    | exception Yojson.Json_error _ -> text
-  in
-  fenced_document_text ~language:"json" pretty
-
-(* The Resources surface: the MCP resource inventory on the left, the
-   selected read on the right. Wide terminals show both; narrow ones show
-   the list, and Enter swaps to the content until Esc. *)
-
-let resource_mime_essence mime =
-  match String.split_on_char ';' (String.lowercase_ascii (String.trim mime)) with
-  | essence :: _ -> String.trim essence
-  | [] -> ""
-
-let resource_language_of_mime mime =
-  let mime = resource_mime_essence mime in
-  if
-    String.equal mime "application/json"
-    || String.equal mime "text/json"
-    || String.ends_with ~suffix:"+json" mime
-  then Some "json"
-  else if List.mem mime [ "application/toml"; "text/toml"; "text/x-toml" ]
-  then Some "toml"
-  else if
-    List.mem mime
-      [ "application/yaml"; "application/x-yaml"; "text/yaml"; "text/x-yaml" ]
-  then Some "yaml"
-  else if String.equal mime "text/html" then Some "html"
-  else None
-
-let resource_mime_is_markdown mime =
-  List.mem (resource_mime_essence mime)
-    [ "text/markdown"; "text/x-markdown"; "application/markdown" ]
-
-let pretty_resource_text ~mime text =
-  match resource_language_of_mime mime with
-  | Some "json" -> fenced_pretty_json text
-  | Some language -> fenced_document_text ~language text
-  | None when resource_mime_is_markdown mime -> text
-  | None -> text
-
-let resource_document entry
-    (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor ~revisions =
-  let resource = Catalog.metadata entry in
-  let present = function
-    | Some text when String.trim text <> "" -> text
-    | Some _ | None -> "not supplied"
-  in
-  let size =
-    match resource.size with
-    | Some bytes -> Printf.sprintf "%d bytes" bytes
-    | None -> "size unknown"
-  in
-  let mime = present resource.mime_type in
-  let revision_note = match entry with
-    | Catalog.Mcp _ -> []
-    | Report report ->
-      let available direction = Option.is_some (Catalog.adjacent_revision direction
-        ~current:report revisions) in
-      [Printf.sprintf "**Revision:** %d · %d known · { older%s · } newer%s"
-         report.revision.revision (List.length revisions)
-         (if available Catalog.Older then "" else " unavailable")
-         (if available Catalog.Newer then "" else " unavailable")] in
-  let metadata =
-    String.concat "\n\n"
-      ([ Catalog.origin entry
-      ; "**About:** " ^ present resource.description
-      ; "**URI:** `" ^ resource.uri ^ "`"
-      ; "**Name:** " ^ resource.name
-      ; "**Type:** `" ^ mime ^ "` · **Size:** " ^ size
-      ] @ revision_note)
-  in
-  let part_document index (part : Masc_tui_mcp.resource_content) =
-    let part_mime = Option.value part.rc_mime_type ~default:mime in
-    let body =
-      match part.rc_kind with
-      | Masc_tui_mcp.Resource_text text ->
-          pretty_resource_text ~mime:part_mime text
-      | Masc_tui_mcp.Resource_blob { base64 } ->
-          Printf.sprintf
-            "%s · `%s` · %d base64 bytes"
-            (if Masc_tui_resource_images.is_image part_mime then "Image data" else "Binary data")
-            part_mime (String.length base64)
-    in
-    match contents with
-    | Some (_ :: _ :: _) ->
-        Printf.sprintf "### Part %d · %s\n\n%s" index part_mime body
-    | Some (_ :: []) | Some [] | None -> body
-  in
-  let body =
-    match (error, contents) with
-    | Some detail, _ -> detail
-    | None, None when requested -> "(reading resource…)"
-    | None, None -> "(Enter reads the selected resource.)"
-    | None, Some parts ->
-        let images = Masc_tui_resource_images.images ~mime_type:resource.mime_type parts in
-        let selection = match List.nth_opt images image_cursor with
-          | Some (part, _) -> Printf.sprintf "Image %d/%d · part %d · ,/.: select · Ctrl-O: preview\n\n"
-              (image_cursor + 1) (List.length images) part
-          | None -> "" in
-        selection ^ (parts |> List.mapi (fun index part -> part_document (index + 1) part)
-        |> String.concat "\n\n")
-  in
-  metadata ^ "\n\n---\n\n" ^ body
-
 let render_resources (state : state) =
   let drawn_resource_scroll = ref state.resource_scroll in
   let terminal_rows, cols = get_terminal_size () in
@@ -190,19 +82,8 @@ let render_resources (state : state) =
     framed_bottom pane_buf pane_cols
   in
   let content_pane ~split pane_buf pane_cols =
-    let selected_resource = List.nth_opt rows_list cursor in
-    let error_uri = Option.map fst state.resource_content_error in
-    let content_uri = Option.map fst state.resource_content in
-    let shown_uri =
-      match state.resource_pending_key, error_uri, content_uri with
-      | Some uri, _, _ -> Some uri
-      | None, Some uri, _ -> Some uri
-      | None, None, Some uri -> Some uri
-      | None, None, None -> Option.map Catalog.key selected_resource
-    in
-    let shown_resource =
-      Option.bind shown_uri (Catalog.entry_for_key rows_list)
-    in
+    let reading = Masc_tui_resource_document.current state in
+    let shown_resource = Option.map Masc_tui_resource_document.entry reading in
     let title =
       match shown_resource with
       | Some resource -> "Resource · " ^ Terminal_text.single_line (Catalog.display_name resource)
@@ -216,35 +97,13 @@ let render_resources (state : state) =
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
     let content_height = pane_rows in
-    (match shown_resource with
+    (match reading with
      | None ->
          for _ = 1 to content_height do
            box_empty pane_buf pane_cols
          done
-     | Some resource ->
-         let contents =
-           match state.resource_content, shown_uri with
-           | Some (content_uri, parts), Some uri
-             when Catalog.equal_key content_uri uri -> Some parts
-           | Some _, (Some _ | None) | None, _ -> None
-         in
-         let error =
-           match state.resource_content_error, shown_uri with
-           | Some (error_uri, detail), Some uri
-             when Catalog.equal_key error_uri uri -> Some detail
-           | Some _, (Some _ | None) | None, _ -> None
-         in
-         let requested =
-           match state.resource_pending_key, shown_uri with
-           | Some pending_uri, Some uri -> Catalog.equal_key pending_uri uri
-           | Some _, None | None, _ -> false
-         in
-         let rendered =
-           Message_layout.wrap_body ~markdown:document_markdown
-             ~max_cells:(max 1 (framed_inner_width pane_cols - 4))
-             ~sanitize:Terminal_text.single_line
-             (resource_document resource contents ~error ~requested ~image_cursor:state.resource_image_cursor ~revisions:state.resource_revision_history)
-         in
+     | Some reading ->
+         let rendered = Masc_tui_resource_document.rows ~cols reading in
          let total_lines = List.length rendered in
          let max_scroll = max 0 (total_lines - content_height) in
          let scroll = max 0 (min state.resource_scroll max_scroll) in

@@ -8539,6 +8539,8 @@ type state = {
   mutable resource_read_owner: unit ref option;
   mutable resource_revision_history: Masc_tui_resource_catalog.report list;
   mutable resource_scroll: int;
+  (* Logical search match is independent of last-page scroll clamping. *)
+  mutable resource_search_cursor: int;
   mutable resource_focus: pane_focus;
   mutable resource_image_cursor: int;
   (* The Config surface owns the files the server reads. runtime.toml is one;
@@ -10956,7 +10958,8 @@ let retain_resource_read state ~key =
   if not same_resource then begin
     state.resource_content <- None;
     state.resource_content_error <- None;
-    state.resource_scroll <- 0
+    state.resource_scroll <- 0;
+    state.resource_search_cursor <- 0
   end
 
 let retain_sandbox_log_read state ~keeper_name =
@@ -15265,6 +15268,7 @@ let create_state
   resource_read_owner = None;
   resource_revision_history = [];
   resource_scroll = 0;
+  resource_search_cursor = 0;
   resource_focus = Left_pane;
   resource_image_cursor = 0;
   config_pane = Config_runtime;

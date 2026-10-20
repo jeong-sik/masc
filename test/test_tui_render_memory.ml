@@ -47,7 +47,7 @@ let multi_line_claim =
 let claim_rows lines =
   let plain = List.map Masc_tui_theme.strip_sgr lines in
   let is_field line =
-    List.exists (fun label -> contains label line) [ "Category:"; "Bound Path:" ]
+    List.exists (fun label -> contains label line) [ "Keeper:"; "Category:"; "Bound Path:" ]
   in
   let rec take = function
     | [] -> []

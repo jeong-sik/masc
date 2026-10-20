@@ -284,6 +284,28 @@ let test_search_filtering () =
   check int "no match" 0 (List.length (Types.memory_fact_rows state))
 ;;
 
+(* The keeper is part of what the all-keepers list shows beside each row, so
+   a query for its name finds that keeper's rows there. A single keeper's view
+   does not show it, and its name matches nothing the view does not display. *)
+let test_search_matches_the_keeper_only_where_it_is_shown () =
+  let snapshot =
+    make_snapshot
+      ~ordinary_facts:[ make_fact ~claim:"Dune build" "1" ]
+      ~source_facts:[]
+      ~invalidations:[]
+  in
+  let single = make_state () in
+  answer_memory_facts single snapshot;
+  single.search_last <- "test_keeper";
+  check int "a single keeper's view does not match its own name" 0
+    (List.length (Types.memory_fact_rows single));
+  let fleet = make_state () in
+  answer_memory_facts fleet { snapshot with Masc.Tui_decode_memory_facts.mfs_keeper = "*" };
+  fleet.search_last <- "test_keeper";
+  check int "the all-keepers view matches the keeper its rows name" 1
+    (List.length (Types.memory_fact_rows fleet))
+;;
+
 let () =
   run "masc_tui_memory_facts_explorer"
     [ ( "navigation"
@@ -296,7 +318,10 @@ let () =
         ; test_case "use-based sorting reads the record" `Quick test_use_based_sorting
         ] )
     ; ( "search"
-      , [ test_case "search filtering" `Quick test_search_filtering ] )
+      , [ test_case "search filtering" `Quick test_search_filtering
+        ; test_case "search matches the keeper only where it is shown" `Quick
+            test_search_matches_the_keeper_only_where_it_is_shown
+        ] )
     ; ( "layout"
       , [] )
     ]

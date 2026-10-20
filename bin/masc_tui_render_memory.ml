@@ -1353,9 +1353,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
     ~(push_selected : string -> unit)
     ~(push_divider : unit -> unit)
     ~(push_empty : unit -> unit) : unit =
-  let is_fleet =
-    Option.equal String.equal state.memory_facts_keeper (Some "*")
-  in
+  let is_fleet = memory_facts_is_fleet state in
   let rows = memory_fact_rows state in
   let total = List.length rows in
   let cursor = max 0 (min state.memory_facts_cursor (total - 1)) in

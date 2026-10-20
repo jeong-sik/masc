@@ -5939,6 +5939,76 @@ let test_merge_keeper_memory_facts_all_read () =
   in
   Alcotest.(check (option string)) "nothing unread" None unread
 
+(* Source-bound facts and dropped facts take their keeper from the list too,
+   and the server's text stays as it is: a colon in a path or a space in an
+   origin is not a keeper name. *)
+let test_merge_keeper_memory_facts_names_every_row_kind_and_keeps_the_text () =
+  let ordinary =
+    Masc.Tui_decode_memory_facts.Memory_store_present
+      { Masc.Tui_decode_memory_facts.mos_facts =
+          [ { (merge_fixture_fact "a1") with Masc.Tui_decode_memory_facts.mf_origin = "x y" } ]
+      }
+  in
+  let source =
+    Masc.Tui_decode_memory_facts.Memory_store_present
+      { Masc.Tui_decode_memory_facts.mss_facts =
+          [ { Masc.Tui_decode_memory_facts.msf_keeper = "unset"
+            ; msf_claim = "bound"
+            ; msf_first_seen = 1.
+            ; msf_path = "a:b.md"
+            ; msf_sha256 = "cafe"
+            }
+          ]
+      ; mss_invalidations =
+          [ { Masc.Tui_decode_memory_facts.mi_keeper = "unset"
+            ; mi_source_path = "c d:e.md"
+            ; mi_invalidated_at = 2.
+            ; mi_reason = "gone"
+            }
+          ]
+      }
+  in
+  let snapshot, _ =
+    Masc.Tui_decode_memory_facts.merge_keeper_memory_facts
+      [ ( "alpha"
+        , Ok
+            { (merge_fixture_snapshot ~ordinary "alpha") with
+              Masc.Tui_decode_memory_facts.mfs_source = source
+            } )
+      ]
+  in
+  (match snapshot.Masc.Tui_decode_memory_facts.mfs_ordinary with
+   | Masc.Tui_decode_memory_facts.Memory_store_present store ->
+     Alcotest.(check (list (pair string string)))
+       "the ordinary fact names its keeper and keeps its origin"
+       [ "alpha", "x y" ]
+       (List.map
+          (fun (f : Masc.Tui_decode_memory_facts.memory_fact) ->
+             f.Masc.Tui_decode_memory_facts.mf_keeper, f.mf_origin)
+          store.Masc.Tui_decode_memory_facts.mos_facts)
+   | Masc.Tui_decode_memory_facts.Memory_store_absent
+   | Masc.Tui_decode_memory_facts.Memory_store_read_error _ ->
+     Alcotest.fail "the merged ordinary store is always present");
+  match snapshot.Masc.Tui_decode_memory_facts.mfs_source with
+  | Masc.Tui_decode_memory_facts.Memory_store_present store ->
+    Alcotest.(check (list (pair string string)))
+      "the source fact names its keeper and keeps its path"
+      [ "alpha", "a:b.md" ]
+      (List.map
+         (fun (f : Masc.Tui_decode_memory_facts.memory_source_fact) ->
+            f.Masc.Tui_decode_memory_facts.msf_keeper, f.msf_path)
+         store.Masc.Tui_decode_memory_facts.mss_facts);
+    Alcotest.(check (list (pair string string)))
+      "the dropped fact names its keeper and keeps its path"
+      [ "alpha", "c d:e.md" ]
+      (List.map
+         (fun (i : Masc.Tui_decode_memory_facts.memory_invalidation) ->
+            i.Masc.Tui_decode_memory_facts.mi_keeper, i.mi_source_path)
+         store.Masc.Tui_decode_memory_facts.mss_invalidations)
+  | Masc.Tui_decode_memory_facts.Memory_store_absent
+  | Masc.Tui_decode_memory_facts.Memory_store_read_error _ ->
+    Alcotest.fail "the merged source store is always present"
+
 let test_decode_memory_facts_keeps_both_stores () =
   let ordinary =
     `Assoc
@@ -13420,6 +13490,8 @@ let () =
           test_merge_keeper_memory_facts_names_unread_keepers;
         Alcotest.test_case "merge with every keeper read" `Quick
           test_merge_keeper_memory_facts_all_read;
+        Alcotest.test_case "merge names every row kind and keeps the text" `Quick
+          test_merge_keeper_memory_facts_names_every_row_kind_and_keeps_the_text;
         Alcotest.test_case "memory facts keep both stores" `Quick
           test_decode_memory_facts_keeps_both_stores;
         Alcotest.test_case "memory fact accepts dynamic categories" `Quick

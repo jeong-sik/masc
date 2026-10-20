@@ -660,6 +660,16 @@ let test_current_nonterminal_event_set () =
                                        ; retry_delay_ms = 250
                                        ; error_status = Some 529 }
           ]
+      else if String.equal name "KEEPER_TOOL_CALL_ADMITTED" then
+        (* Admits the TOOL_CALL_START above: same occurrence, and the provider
+           name is that start's toolCallName. *)
+        `Assoc
+          [ "toolStreamScope", `Int 0
+          ; "toolCallBlockIndex", `Int 0
+          ; "providerToolName", `String "read"
+          ; "toolCallName", `String "read"
+          ; "toolCallId", `String "tool-1"
+          ]
       else `Null
     in
     event "CUSTOM"

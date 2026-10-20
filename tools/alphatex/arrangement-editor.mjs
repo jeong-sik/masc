@@ -43,7 +43,7 @@ export function arrangementPracticePass(editor, target, selected) {
   const region = editor.project.clips.find(clip => clip.id === target.region && clip.asset === target.asset)
   if (!region) throw new Error('Selected practice region is no longer available')
   const next = edit(editor, { kind: 'region-change', id: region.id, ...selected.cut })
-  return { ...next, asset: target.asset, lane: region.lane, region: region.id, tick: region.position }
+  return { ...next, asset: target.asset, pattern: undefined, lane: region.lane, region: region.id, tick: region.position }
 }
 function edit(editor, value) { return commit(editor, editArrangement(editor.project, value)) }
 export function arrangementRecordingCorrection(editor, correction) { return edit(editor, { kind: 'recording-correction', correction }) }

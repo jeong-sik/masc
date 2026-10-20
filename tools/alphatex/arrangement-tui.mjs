@@ -705,6 +705,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         const result = await request({ ...value, project: editor.project, sourceRoot, directory })
         if (accepting) {
           if (value.kind === 'practice-pass') adopt(arrangementPracticePass(editor, value, result))
+          else adopt({ ...editor, asset: value.asset, pattern: undefined })
           status = value.kind === 'practice-pass' ? `Practice pass ${result.pass}${result.full ? '' : ' (partial)'} selected; Space auditions`
             : `${result.asset}: ${result.count} passes (${result.firstPass ?? 'none'}–${result.lastPass ?? 'none'}) · ${result.tempo} BPM · :practice-pass NUMBER`
         }

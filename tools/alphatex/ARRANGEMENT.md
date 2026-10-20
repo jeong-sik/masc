@@ -74,7 +74,7 @@ using the retained output clock:
 :practice-pass 4 asset-1
 ```
 
-The first command reports the available original pass-number range. Selecting a
+The first command selects that source and reports its available original pass-number range. Selecting a
 pass places its MIDI at the cursor; if the selected region uses that source, it
 replaces that region's source cut while keeping its position and repeats. Undo
 restores the previous performance. Duplicate a region first to retain several

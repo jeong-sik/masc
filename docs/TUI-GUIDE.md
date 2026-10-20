@@ -1730,7 +1730,11 @@ score fence or image-capable terminal. Choose a new phrase, arrangement or
 audio/MIDI recording, or continue a saved project or take. Work created through
 this entry lives under `<base-path>/.masc/music/projects` and `music/sessions`.
 The workbench also accepts `:open PATH`, `:midi PATH` and `:session PATH` for
-existing files. `q` returns from an editor to the library and from the library
+existing files. `/` searches library names and paths; arrows select and Enter
+opens a result. Esc cancels an in-progress search, restoring its previous query
+and selection; Ctrl-U clears the query. Refresh and editor return retain the
+query. In normal browsing, Esc clears an active query before leaving the library.
+`q` returns from an editor to the library and from the library
 to MASC. The phrase editor's first audio Space opens instrument/preset selection;
 `i` changes it. Install or update the helper with `scripts/install-alphatex.sh`.
 

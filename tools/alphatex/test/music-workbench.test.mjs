@@ -153,3 +153,110 @@ test('opening a project waits for inspection cleanup and forwards its selected p
   result.resolve({ kind: 'phrase', title: 'old observation' }); exited.resolve(); await opening
   assert.deepEqual(requests, [entry])
 })
+
+test('search uses normalized names and original paths without opening an empty result', async () => {
+  await temporary(async root => {
+    const projectRoot = join(root, 'projects'), sessionRoot = join(root, 'takes')
+    await mkdir(projectRoot); await mkdir(sessionRoot)
+    const path = join(projectRoot, 'Cafe\u0301 밤섬.json'), take = join(sessionRoot, 'Live Take')
+    await saveProject(path, newProject()); await mkdir(take)
+    const requests = [], model = new MusicWorkbench({ projectRoot, sessionRoot,
+      open: async entry => { requests.push(entry) } })
+    try {
+      await model.refresh()
+      model.setQuery('CAFÉ 밤섬')
+      assert.deepEqual(model.entries.map(entry => entry.path), [path])
+      await model.activate()
+      assert.equal(requests[0].path, path)
+      assert.equal(model.query, 'CAFÉ 밤섬')
+      assert.equal(model.entries[0].path, path)
+      model.setQuery('live take')
+      assert.deepEqual(model.entries.map(entry => entry.path), [take])
+      model.setQuery('nothing matches this source')
+      await model.activate()
+      assert.deepEqual(model.entries, [])
+      assert.equal(requests.length, 1)
+      await model.refresh()
+      assert.deepEqual(model.entries, [])
+      model.setQuery('')
+      assert.equal(model.entries.some(entry => entry.kind === 'phrase'), true)
+    } finally { await model.close() }
+  })
+})
+
+test('search cancellation restores prior query and exact selected identity after a refresh', async () => {
+  const entries = ['alpha', 'beta', 'gamma'].map(name => ({ kind: 'project', name, path: `/${name}.json` }))
+  let inventory = entries
+  const model = new MusicWorkbench({ read: async () => ({ entries: inventory, errors: [] }),
+    inspect: () => ({ promise: Promise.resolve({}), completion: Promise.resolve(), cancel() {} }) })
+  try {
+    await model.refresh(); model.setQuery('a'); model.move(1)
+    assert.equal(model.entries[model.cursor].path, '/beta.json')
+    model.beginSearch(); model.setQuery('gamma'); model.move(1)
+    inventory = [entries[2], entries[1], entries[0]]
+    await model.refresh()
+    assert.equal(model.entries[model.cursor].path, '/gamma.json')
+    model.finishSearch({ cancel: true })
+    assert.equal(model.query, 'a')
+    assert.equal(model.entries[model.cursor].path, '/beta.json')
+    assert.equal(model.search, null)
+  } finally { await model.close() }
+})
+
+test('a pending refresh uses the latest query and moved selection, including an empty previous result', async () => {
+  const entries = ['a', 'b', 'c'].map(name => ({ kind: 'project', name, path: `/${name}.json` }))
+  const pending = deferred(); let readCount = 0
+  const model = new MusicWorkbench({ read: () => ++readCount === 1
+    ? Promise.resolve({ entries, errors: [] }) : pending.promise,
+    inspect: () => ({ promise: Promise.resolve({}), completion: Promise.resolve(), cancel() {} }) })
+  try {
+    await model.refresh(); model.setQuery('no match')
+    const refresh = model.refresh(); await flush()
+    model.setQuery('.json'); model.move(2)
+    pending.resolve({ entries: [entries[2], entries[0], entries[1]], errors: [] })
+    await refresh
+    assert.equal(model.query, '.json')
+    assert.equal(model.entries[model.cursor].path, '/c.json')
+  } finally { await model.close() }
+})
+
+test('search retires inspection and a late hidden result cannot replace the selected source', async t => {
+  const jobs = [], entries = ['alpha', 'beta'].map(name => ({ kind: 'project', name, path: `/${name}.json` }))
+  const model = new MusicWorkbench({ read: async () => ({ entries, errors: [] }), inspect: entry => {
+    const result = deferred(), completion = deferred()
+    const job = { entry, result, exited: completion, cancelled: false, promise: result.promise,
+      completion: completion.promise, cancel() { this.cancelled = true } }
+    jobs.push(job); return job
+  } })
+  t.after(async () => { const closing = model.close(); for (const job of jobs) { job.result.resolve({}); job.exited.resolve() } await closing })
+  await model.refresh(); await flush()
+  model.beginSearch(); model.setQuery('beta'); await flush()
+  assert.equal(jobs[0].cancelled, true)
+  assert.equal(jobs.length, 1)
+  jobs[0].result.resolve({ title: 'old alpha' }); jobs[0].exited.resolve(); await flush()
+  assert.equal(jobs.length, 2)
+  assert.equal(jobs[1].entry.path, '/beta.json')
+  assert.equal(model.inspection.kind, 'loading')
+  jobs[1].result.resolve({ title: 'current beta' }); jobs[1].exited.resolve(); await flush()
+  assert.equal(model.inspection.info.title, 'current beta')
+  model.setQuery('no result')
+  assert.equal(model.inspection, null)
+})
+
+test('a child owns the library while open and return retains its committed search', async () => {
+  const exit = deferred(), entry = { kind: 'project', name: 'song', path: '/song.json' }, requests = []
+  const model = new MusicWorkbench({ read: async () => ({ entries: [entry], errors: [] }),
+    inspect: () => ({ promise: Promise.resolve({}), completion: Promise.resolve(), cancel() {} }),
+    open: async source => { requests.push(source); await exit.promise } })
+  try {
+    await model.refresh(); model.beginSearch(); model.setQuery('song'); model.finishSearch()
+    const opening = model.activate(); await flush()
+    model.setQuery('changed during child'); model.beginSearch(); model.move(1)
+    assert.equal(model.query, 'song')
+    assert.equal(model.search, null)
+    exit.resolve(); await opening
+    assert.deepEqual(requests, [entry])
+    assert.equal(model.query, 'song')
+    assert.equal(model.entries[model.cursor].path, '/song.json')
+  } finally { exit.resolve(); await model.close() }
+})

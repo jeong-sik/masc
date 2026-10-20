@@ -320,6 +320,12 @@ arrangements and audio/MIDI recordings. It also lists JSON projects under
 `--project-root` and take directories under `--session-root`. Choose with arrows
 and Enter; `q` returns from an editor to the library, then back to its caller.
 Returning refreshes the library so a newly saved phrase can be continued.
+Press `/` to search entry names and paths without changing their stored identity.
+Search matches Unicode-normalized names without case sensitivity. Arrows select;
+Enter opens the selected result, Esc restores the previous query and selection,
+and Ctrl-U clears the query. A query stays in place when returning from an editor
+or refreshing. In normal browsing, Esc clears an active query before leaving the
+library. An empty result never opens a different project or creates a phrase.
 Use `r` to refresh, `:open PATH` for a saved project, `:midi PATH` to import MIDI,
 or `:session PATH` for an existing recorded take. Paths may contain spaces.
 Missing library directories are empty; other source failures stay visible

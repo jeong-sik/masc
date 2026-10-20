@@ -1,7 +1,7 @@
 import { Chord, Note } from 'tonal'
 import { midiSourceInfo, midiSourcePattern, editMidiSourceNotes, editMidiSourceExpressions, orderMidiSourceExpression, tempoEvent, editMidiSourceTempos } from './midi-source.mjs'
 import { expressionEvent } from './midi-expression.mjs'
-import { pitch, chordVoicing } from './sequencer-project.mjs'
+import { pitch, chordVoicing, revoiceNotes } from './sequencer-project.mjs'
 
 export function sourceEditor(project, previous = {}, pattern = previous.pattern) {
   const info = midiSourceInfo(project)
@@ -253,6 +253,22 @@ export function sourceCommand(editor,line) {
       count(3,6)
       const values=chordVoicing(args[0],{mode:args[3]??'close',octave:args[4]===undefined?4:Number(args[4]),inversion:args[5]===undefined?0:Number(args[5])})
       return {editor:apply(editor,values.map(value=>insertion(editor,{pitch:value,start:units(args[1]),duration:units(args[2]),velocity:editor.velocity})))}
+    }
+    case 'revoice': {
+      count(2,4)
+      const anchor = editor.selectedID ? sourceSelected(editor) : undefined
+      const channel = anchor?.channel ?? editor.channel
+      const sounding = notes.filter(note => (channel === undefined || note.channel === channel)
+        && (anchor === undefined || note.port === anchor.port)
+        && (note.duration === 0 ? note.start === editor.tick : note.start <= editor.tick && editor.tick < note.start + note.duration))
+      if (new Set(sounding.map(note => note.channel)).size > 1) throw new Error('Choose :channel or :select event-ID before revoicing several MIDI channels')
+      if (new Set(sounding.map(note => note.port)).size > 1) throw new Error('Choose :select event-ID before revoicing several source ports')
+      const changes = revoiceNotes(sounding, editor.tick, args[0], { mode: args[1],
+        octave: args[2] === undefined ? 4 : Number(args[2]), inversion: args[3] === undefined ? 0 : Number(args[3]) })
+      const selected = sourceSelected(editor)
+      const next = apply(editor, changes)
+      const voice = changes.find(note => note.id === selected?.id)
+      return { editor: voice ? { ...next, pitch: voice.pitch } : next }
     }
     case 'progression':{
       count(4,Number.MAX_SAFE_INTEGER)

@@ -46,6 +46,16 @@ voicings use Tonal's chord intervals. Rootless voicings use its left-hand dictio
 and its top-note voice-leading selection for chord progressions. Unsupported chords
 and registers are explicit errors, not fallback substitutions.
 
+`:revoice SYMBOL MODE [OCTAVE [INVERSION]]` changes existing sounding voices in
+the chosen track at the cursor, low to high, with one undo revision. It preserves
+note identities, onset/length and velocity rather than replacing a rhythmic phrase
+with a block chord. The requested voicing must have the same voice count.
+Imported MIDI uses the same decision in source ticks and preserves paired
+note-off identity and release velocity; explicit channel or note selection resolves
+multiple channels/ports. Other expression events retain their original keys and
+bytes, so polyphonic pressure is not retargeted by this note edit. Analysis remains
+candidate-based and uses key durations, not inferred pedal-extended sound.
+
 Native WAV preview uses AVAudioEngine/PlayerNode buffers with pause, seek and
 looping, pinned to a CoreAudio output. External MIDI preview uses a separately
 owned CoreMIDI sender and pins a destination by unique ID. It projects the same

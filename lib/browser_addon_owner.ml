@@ -7,6 +7,8 @@ type t = {
   gate : Eio.Mutex.t;
   mutable phase : phase;
   mutable clients : B.client_id list;
+  mutable automation : bool;
+  mutable cleanup : (unit -> (unit, string) result) option;
   retired : unit Eio.Promise.t;
   retire : unit Eio.Promise.u;
 }
@@ -20,10 +22,11 @@ let create ~incarnation =
       Error "a browser owner already exists in this process"
     else
       let retired, retire = Eio.Promise.create () in
-      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];retired;retire} in
+      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=false;cleanup=None;retired;retire} in
       B.install_activity_observer (Some (fun lane -> match t.phase,lane with
         | Serving,B.Lane_name.Live -> B.Enabled
-        | (Serving,(B.Lane_name.Automation|B.Lane_name.Stagehand)) | Retired,_ -> B.Disabled));
+        | Serving,B.Lane_name.Automation -> if t.automation then B.Enabled else B.Disabled
+        | Serving,B.Lane_name.Stagehand | Retired,(B.Lane_name.Live|Automation|Stagehand) -> B.Disabled));
       Ok t
 let refusal ?(disposition=W.Not_started) message = W.Service_refusal {message;disposition}
 let admission t incarnation =
@@ -35,13 +38,26 @@ let with_admission t incarnation run =
 let snapshot t = `Assoc [
   "state",`String (match t.phase with Serving -> "serving" | Retired -> "retired");
   "clients",`List (List.map B.client_json (B.connected_clients ()));
-  "owned_backends",`String "unavailable"]
+  "owned_backends",Browser_addon_inventory.owned_to_json (Browser_selection.snapshot ())]
+let attach_automation t ~execute ~session ~document ~cleanup =
+  Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase,t.automation with
+    | Retired,_ -> Error "browser owner is retired"
+    | Serving,true -> Error "automation backend is already attached"
+    | Serving,false ->
+      B.install_automation_executor (Some execute);
+      B.install_server_session_observer B.Server_automation (Some session);
+      B.install_automation_document_observer (Some document);
+      t.automation <- true;t.cleanup <- Some cleanup;Ok ())
 let revoke t =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () ->
     match t.phase with
     | Retired -> ()
     | Serving ->
       t.phase <- Retired;
+      t.automation <- false;
+      B.install_automation_executor None;
+      B.install_server_session_observer B.Server_automation None;
+      B.install_automation_document_observer None;
       Eio.Promise.resolve t.retire ();
       List.iter (fun client_id -> ignore (B.disconnect_client ~client_id)) t.clients;
       t.clients <- [])
@@ -51,6 +67,12 @@ let waiting t ~disposition run =
     refusal ~disposition "browser worker retired during the request")
 let dispatch t (request : W.request) =
   match request.command with
+  | W.Retire ->
+    if request.incarnation<>t.incarnation then refusal "wrong browser worker incarnation"
+    else (revoke t;match t.cleanup with
+      | None -> W.Receipt
+      | Some cleanup -> match cleanup () with Ok () -> W.Receipt
+          | Error message -> refusal ~disposition:W.Outcome_unknown message)
   | W.Snapshot ->
     (match with_admission t request.incarnation (fun () -> Ok (snapshot t)) with
      | Error reply -> reply | Ok value -> W.Snapshot_result value)
@@ -80,10 +102,10 @@ let dispatch t (request : W.request) =
   | W.Issue {route;verb;actor;timeout_sec;only_if_idle} ->
     (match with_admission t request.incarnation (fun () ->
       match route with
-      | B.Automation_route | B.Stagehand_route ->
-        Error (refusal "owned browser backends are not attached to this worker")
+      | B.Stagehand_route -> Error (refusal "Stagehand is not attached to this worker")
+      | B.Automation_route when not t.automation -> Error (refusal "automation is not attached to this worker")
       | B.Live_route None -> Error (refusal "worker execution requires a selected clientId")
-      | B.Live_route (Some _) ->
+      | B.Live_route (Some _) | B.Automation_route ->
         B.resolve_target ~verb route |> Result.map_error (fun error -> W.Issue_result (Error error))) with
      | Error reply -> reply
      | Ok target -> waiting t ~disposition:W.Outcome_unknown (fun () ->

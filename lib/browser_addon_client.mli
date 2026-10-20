@@ -9,7 +9,9 @@ val call : t -> on_cancel_after_dispatch:(unit -> unit) -> Browser_addon_wire.co
 (** Uses a fresh socket per request, never the serialized MCP connection. Before
     writing, failure proves no request was sent; after writing begins, transport
     loss is unknown. Transport uses the existing host control timeout, plus the
-    command's own wait window for Issue/Poll. Cancellation after writing invokes
+    command's own wait window for Issue/Poll. Private Retire waits for the
+    backend's cleanup completion rather than the quick-control timeout; caller
+    cancellation still propagates. Cancellation after writing invokes
     the owner's callback under cancellation protection, then propagates. *)
 val revoke : t -> unit
 (** Admission only. Caller still owns worker termination and resource cleanup. *)

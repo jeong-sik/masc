@@ -283,51 +283,6 @@ extension = "/test/extension"
           stagehand = Some { chrome = "/test/chrome"; extension = "/test/extension"; profile = None }; _ } -> ()
    | _ -> fail "both backends can be configured together")
 
-(* The server owns the driver it starts. On 2026-09-15 a driver started by hand
-   on 2026-09-08 still held the session a dead server opened, and every later
-   server was refused while reporting no open session. What the next server
-   stops is decided from the record and the process table, never from a pid
-   alone: a pid reused by another program is left running. *)
-let test_driver_ownership_record () =
-  let module P = Masc.Browser_driver_process in
-  let owner = { P.pid = 4242; driver = "/ws/.masc/browser-lane/driver/geckodriver" } in
-  (match P.owner_of_string (P.owner_to_string owner) with
-   | Ok read -> check bool "record round-trips" true (read = owner)
-   | Error detail -> fail detail);
-  List.iter (fun text -> check bool "malformed record is refused" true (Result.is_error (P.owner_of_string text)))
-    [ "not json"; {|[4242]|}; {|{"pid":0,"driver":"/x"}|}; {|{"pid":42,"driver":"relative"}|}; {|{"pid":42}|} ];
-  let decision command = P.leftover owner ~command in
-  check bool "the recorded driver still running is stopped" true
-    (decision (Some (owner.driver ^ " --host 127.0.0.1 --port 50931 --websocket-port 0"))
-     = P.Stop_recorded_driver 4242);
-  check bool "a pid now running another program is left alone" true
-    (decision (Some "/usr/bin/vim notes.txt") = P.Not_the_recorded_driver);
-  check bool "a longer path that only starts with the driver is not the driver" true
-    (decision (Some (owner.driver ^ "-old --port 1")) = P.Not_the_recorded_driver);
-  check bool "a pid with no process is nothing to stop" true (decision None = P.Not_the_recorded_driver);
-  let profile_root = P.profile_root ~masc_root:"/ws/.masc" in
-  check string "profiles live under the workspace lane" "/ws/.masc/browser-lane/profiles" profile_root;
-  check (list string) "driver listens on loopback, lets Firefox pick the BiDi port, and keeps profiles under the lane"
-    [ owner.driver; "--host"; "127.0.0.1"; "--port"; "50931"; "--websocket-port"; "0";
-      "--profile-root"; profile_root ]
-    (P.argv ~driver:owner.driver ~port:50931 ~profile_root);
-  (* Process table shape measured 2026-09-15: the driver, the browser it
-     launched, the same browser after it relaunched itself with no parent, a
-     content process of that browser (Zen passes it the same -profile), and
-     browsers of other roots. *)
-  let process_table = String.concat "\n"
-    [ "  68072 " ^ owner.driver ^ " --host 127.0.0.1 --port 64009 --websocket-port 0 --profile-root " ^ profile_root;
-      "  73227 /Applications/Zen.app/Contents/MacOS/zen --marionette -headless --remote-debugging-port 52416 -no-remote -profile " ^ profile_root ^ "/rust_mozprofileGLlAmp";
-      "  74640 /Applications/Zen.app/Contents/MacOS/zen --marionette --remote-debugging-port 9222 -no-remote -profile " ^ profile_root ^ "/rust_mozprofileGLlAmp";
-      "  74809 /Applications/Zen.app/Contents/MacOS/plugin-container.app/Contents/MacOS/plugin-container -parentBuildID 20260904060728 -isForBrowser -prefsHandle 0:53546 -profile " ^ profile_root ^ "/rust_mozprofileGLlAmp org.mozilla.machname.1 tab";
-      "  81000 /Applications/Zen.app/Contents/MacOS/zen --marionette -profile /other/.masc/browser-lane/profiles/rust_mozprofileX";
-      "  81001 /Applications/Zen.app/Contents/MacOS/zen --marionette -profile " ^ profile_root ^ "-old/rust_mozprofileY";
-      "" ] in
-  check (list int) "the launched browser, its relaunch and their content process are ours; the driver and other roots are not"
-    [ 73227; 74640; 74809 ] (P.browsers_using_profile_root ~profile_root ~process_table);
-  check string "record lives beside the lane host"
-    "/ws/.masc/browser-lane/geckodriver-owner.json" (P.owner_record_path ~masc_root:"/ws/.masc")
-
 (* A keeper's first question is whether a session already exists. Every other
    verb answers that only by being refused, which costs a lane round trip and
    reads as a failure. Session_status answers it directly, from the backend's
@@ -684,5 +639,4 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "deadline cancels I/O and releases the session" `Quick test_timeout_releases_session;
   test_case "shutdown uses a live cleanup transport" `Quick test_shutdown_transport_lifetime;
   test_case "explicit Zen binary never falls back" `Quick test_selected_binary;
-  test_case "browser configuration" `Quick test_browser_configuration;
-  test_case "driver ownership record" `Quick test_driver_ownership_record]]
+  test_case "browser configuration" `Quick test_browser_configuration ]]

@@ -89,9 +89,8 @@ let request_to_json request =
 
 let digest request = Lane_addon_store.digest (Yojson.Safe.to_string (request_to_json request))
 
-(* Only [run]'s validate function makes one. [final_of_json] rebuilds a
-   retained answer from this module's own record, and [run] checks it again
-   against the schema declared now before delivering it. *)
+(* Baseline validation constructs one. [run] and the worker receipt path
+   additionally check the original request's partial shape before delivery. *)
 type checked = Yojson.Safe.t
 
 let checked_json checked = checked

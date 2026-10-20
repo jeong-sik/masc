@@ -32,7 +32,8 @@ Dashboard의 **New TOML / Edit TOML**과 Keeper의 선언 편집 도구도 같�
 4. 다른 설치와 겹치지 않는 `id`와 관측 묶음의 `run_id`를 정하고 저장한다. Dashboard를 새로 읽어
    설정 적용 상태와 인스턴스의 관측 상태를 각각 확인한다.
 
-설치 선언의 최상위 필드는 `id`, `run_id`, `manifest_path`, `[binding]` 네 가지다.
+설치 선언의 필수 최상위 필드는 `id`, `run_id`, `manifest_path`, `[binding]` 네 가지다.
+선택적인 `tool_hooks`와 `exact_outputs`는 아래에서 각각 설정한다.
 패키지의 `lane.toml`은 image·command·contributions·worker 자원 한도를 정의하는 별도 문서다.
 설치 선언의 `id`는 유지할 설치의 식별자이며, 패키지 ID나 실행 인스턴스 ID와 구분한다.
 
@@ -71,9 +72,11 @@ Apple에서는 정수 vCPU와 정확한 MiB 단위 메모리를 사용하고 `pi
 호스트는 설치 ID별 private 실행 슬롯을 준비하고, 정리 권한을 기록한 뒤 실행한다.
 해제 영수증은 원래 프로세스와 실행 그룹의 종료·슬롯 정리를 확인한 뒤 남긴다.
 서버 재시작 후에도 같은 실행 기록으로 복구하며, 정리를 확인하기 전에는 새 실행을
-겹치지 않는다. 현재 native 실행은 `ephemeral` 상태와 모델 호출 없는 패키지를 지원한다.
-`persistent` 상태와 observation sampling은 해당 호스트 계약을 연결하기 전까지 거절한다.
-브라우저 실행기의 Add-on 분리는 아직 구현 중이다.
+겹치지 않는다. Native 실행은 `ephemeral` 상태를 지원하며, 패키지가 선언하고 설치에서
+선택한 Exact Output은 비공개 host broker로 실행한다. `persistent` 패키지 상태와
+observation sampling은 해당 호스트 계약을 연결하기 전까지 거절한다. Chrome의 전용
+유지 프로필은 패키지 상태와 별도인 브라우저 설정이다. 브라우저 실행기 분리와 검증 범위는
+[설계](../design/browser-addon-lifecycle.md)를 따른다.
 
 ## 도구 Hook 선택
 
@@ -126,8 +129,12 @@ tool_hooks = []
 sources = []
 ```
 
-이 예제는 `plan`을 선언한 별도 패키지를 가정한다. 함께 제공하는 `addons/browser`는
-읽기 전용 `locate` 출력을 선언하며, 모델 계획이나 extraction을 지원한다는 뜻은 아니다.
+이 예제는 `plan`을 선언한 별도 패키지를 가정한다. 함께 제공하는
+[`addons/browser`](../../addons/browser/lane.toml)는 `locate`와 `stagehand`를 선언한다.
+`locate`는 Gecko에서 관측한 노드를 고르는 읽기 전용 소비자이고, `stagehand`는
+Chrome의 구조화된 observe/act/extract 모델 요청을 기존 Exact Output route로 보낸다.
+Stagehand의 act는 실제 브라우저 입력을 수행할 수 있다. Text/tool generation이나
+임의 모델 설정 전체를 지원하는 것은 아니다.
 선택 배열에는 패키지가 선언한 이름만 한 번씩 쓴다. 스키마나 모델·자격 증명을
 설치 배열에서 주입할 수 없다. 이름 순서는 패키지 순서로 정규화하며, 유효 선택이
 같으면 worker revision도 같다. 선택을 바꾸면 설치 revision에 반영돼 기존 worker와
@@ -148,8 +155,44 @@ host 요청 포트를 만들지 않고 모델 호출도 하지 않는다. 패키
 선택해야 한다. `exact_outputs = []`이면 소비자를 설치하지 않으며, 다른 도구 검증 Hook은
 계속 따로 선택한다. 모델 route가 아직 준비되지 않으면 기존 Exact Output 정책에 따라
 요청을 남긴다. `locate` inventory는 선택된 소비자의 유무이고 provider 준비 완료가 아니다.
-실제 모델·브라우저 실행 증명과 Stagehand 통합은
-[#44150](https://github.com/jeong-sik/masc/issues/44150)에 남아 있다.
+Chrome의 `stagehand` 소비자도 `runtime.addon_exact_lanes.<설치 ID>.stagehand` route를
+사용한다. 선택한 소비자가 보인다는 사실과 provider의 준비·실제 동작 완료는 구분한다.
+실제 검증과 남은 브라우저 범위는 [실행 증거](../design/browser-addon-lifecycle.md#completion-evidence)와
+[#44150](https://github.com/jeong-sik/masc/issues/44150)에서 확인한다.
+
+### Browser의 독립 선택
+
+Browser 설치의 `manifest_path`를 실제 `addons/browser/lane.toml`로 연결한 뒤 다음
+두 배열을 독립적으로 고른다. 경로는 설치 TOML 기준이며, 이 예제의 경로도 실제 설치
+위치에 맞춰 바꾼다.
+
+```toml
+id = "browser-work"
+run_id = "browser-work"
+manifest_path = "../packages/browser/lane.toml"
+tool_hooks = ["validate_input", "validate_output"]
+exact_outputs = ["locate", "stagehand"]
+
+[binding]
+sources = []
+```
+
+| 설정 | 선택 |
+| --- | --- |
+| `tool_hooks = ["validate_input"]` | dispatch 전 입력 스키마 검사 |
+| `tool_hooks = ["validate_output"]` | 성공 응답 스키마 검사 |
+| `tool_hooks = ["validate_input", "validate_output"]` | 두 도구 검사 |
+| `tool_hooks = []` | 선택적인 도구 검사 끄기 |
+| `exact_outputs = ["locate"]` | Gecko 노드 선택 모델 소비자 |
+| `exact_outputs = ["stagehand"]` | Chrome 구조화 모델 소비자 |
+| `exact_outputs = ["locate", "stagehand"]` | 두 모델 소비자 |
+| `exact_outputs = []` | 두 모델 소비자 끄기 |
+
+두 배열을 생략하면 패키지 기본 선택을 따른다. 모델 소비자를 모두 꺼도 브라우저가
+제공하는 비모델 기능은 사용할 수 있으며, 지원 기능은 연결된 backend의 inventory로
+확인한다. 두 배열을 비워도 caller 권한·worker incarnation·필수 wire decode·문서와
+viewport 결속·정리 검사는 계속 적용된다. Hook을 임의 코드로 삽입하는 설정은 없으며,
+현재 제공하는 middleware 이름과 패키지가 선언한 Exact Output만 선택할 수 있다.
 
 ## 반영 시점과 화면 읽기
 

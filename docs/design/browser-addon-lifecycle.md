@@ -316,9 +316,9 @@ receipts remain distinct from successful contract validation.
    events and pointer feedback are observed through the fixture's loopback HTTP
    reports rather than an alternate session/evaluation path. The separate server
    opener and its PID/command-based recovery have been removed. These are
-   executable scenario definitions, not a successful browser-proof run. Persistent
-   Chrome profiles have the admission below; scoped transfers and actual browser
-   evidence remain open.
+   executable scenarios passed in the scoped Chrome run recorded under
+   [Completion evidence](#completion-evidence). Persistent Chrome profiles have
+   the admission below; real-cookie scenarios and scoped transfers remain open.
 5. Scoped model-generation middleware using the existing exact-output authority,
    with retained request/terminal evidence and installation-selected routes. The
    new package `exact_outputs` declarations are reused; observation-only sampling
@@ -466,6 +466,27 @@ scenario definitions have not yet executed; they do not establish real login
 preservation or personal-site behavior.
 
 ## Completion evidence
+
+The private-profile public Add-on proof passed all 38 recorded steps in
+[actual Chrome run 39488906467](https://github.com/jeong-sik/masc/actions/runs/39488906467).
+The workflow commit is `d2806d092d5af57aa2d3a829c3719c0e43747033`; the explicit
+source composition is `f1a39244a7eaeea3d7e48811d634b930ced70a24`, consisting of
+feature head `02000a9f8a71f8b2c4e02a7fdbb2d8b6e9b988ce` plus nine separately
+reviewed CI paths. The four native proof inputs built, and the recorded page
+observations, trusted hover menu, click/fill/scroll, pointer and HTML5 drag,
+actor/pointer feedback, shared Exact Output extract/observe/act, screenshot,
+close/reopen, in-flight detach without replay, stale-handle refusal, fresh
+incarnation and cleanup all passed. The provider was scripted loopback HTTP;
+this establishes browser/model integration, not real-provider response quality.
+
+The separately selected linked model scenario passed in
+[run 39487998547](https://github.com/jeong-sik/masc/actions/runs/39487998547),
+source composition `4a5a851f6f968877572344dc24d0b56f9729750b`. It checks the
+original conversation and canonical schema turn, structured response and usage,
+pre-effect refusal, uncertain outcome, no hidden retry, cancellation and detach.
+It does not start a browser. Neither result includes the newer cookie scenarios,
+personal sites, other browser families, full regression or installed-runtime
+behavior. Lower frozen source failures and whole-stack readiness remain separate.
 
 Use isolated test pages and profiles, without operating on personal sites.
 Record attach, real browser startup, observation, input, in-flight detach,

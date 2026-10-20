@@ -54,12 +54,15 @@ let admitted_models t =
     | Serving,None -> Error (Browser_addon_models.Output_disabled "model broker")
     | Serving,Some models -> Ok models)
 let generate t request = Result.bind (admitted_models t) (fun models -> Browser_addon_models.request models request)
-let attach_automation t ~execute ~session ~document ~cleanup =
+let model_output_schema t ~name = match admitted_models t with
+  | Error _ -> None
+  | Ok models -> Browser_addon_models.output_schema models ~name
+let attach_automation t ~locate ~execute ~session ~document ~cleanup =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase,t.automation with
     | Retired,_ -> Error "browser owner is retired"
     | Serving,true -> Error "automation backend is already attached"
     | Serving,false ->
-      B.install_automation_executor (Some execute);
+      B.install_automation_executor ~locate (Some execute);
       B.install_server_session_observer B.Server_automation (Some session);
       B.install_automation_document_observer (Some document);
       t.automation <- true;t.cleanup <- Some cleanup;Ok ())

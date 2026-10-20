@@ -95,9 +95,15 @@ let prepare ~keeper_name ~upload_paths tool json =
         | (Open_tab _|On_tab _),(Automatic|Exact (Live_route _|Automation_route|Stagehand_route)) -> Ok () in
       prepared request Raw (B.Page_act action)
   | Instruct ->
-      let* fields=fields Legacy.instruct_arguments json in
+      let* fields=fields ("lane"::Legacy.instruct_arguments) json in
       let* verb=Legacy.instruct_verb fields in
-      Ok {preference=Browser_selection.Exact B.Stagehand_route;verb;required_actions=[];projection=Raw}
+      let* request=surface fields in
+      let* ()=match request.route with
+        | Browser_selection.Exact B.Stagehand_route -> Ok ()
+        | Exact B.Automation_route when B.verb_allowed_on_automation verb -> Ok ()
+        | Exact B.Automation_route -> Error "automation supports observe with selected locate Exact Output; act/extract require stagehand"
+        | Automatic|Exact (B.Live_route _) -> Error "BrowserInstruct requires the observed automation or stagehand lane and tabId" in
+      prepared request Raw verb
   | Tabs ->
       let* fields=fields ["lane";"clientId";"tabId";"requiredActions"] json in
       let* request=surface fields in

@@ -101,6 +101,9 @@ type attempt =
 val final_to_json : final -> Yojson.Safe.t
 (** The result body a package receives. *)
 
+val not_final_to_json : not_final -> Yojson.Safe.t
+(** The reason an attempt did not end the request, as the host shows it. *)
+
 (** What a sent call can end in. *)
 type call_outcome =
   | Call_ended of call_final

@@ -22,6 +22,12 @@ let tool_change_handler = ref (fun () -> ())
 let register_tool_change_handler handler = tool_change_handler := handler
 let notify_tool_change (package : package) =
   if package.exported_tools <> [] then !tool_change_handler ()
+(* The two private tools of a worker whose package waits on the host (RFC
+   operator-quiz §4.4). Their answers are decoded by the cycle. *)
+type host_port = {
+  list_requests : unit -> (Yojson.Safe.t, string) result;
+  deliver : arguments:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
+}
 type connection = {
   observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t -> (output, string) result;
   exported_tools : unit -> Mcp_protocol.Mcp_types.tool list;
@@ -31,6 +37,7 @@ type connection = {
   act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
   stop : unit -> (unit, Lifecycle.failure) result;
   container_id : string;
+  host : host_port option;
 }
 type backend = {
   start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> package:package -> binding:Yojson.Safe.t ->
@@ -110,6 +117,16 @@ let register_skill_export_handler handler = skill_export_handler := Some handler
    request, so a wake raised for an action never schedules a second capture
    of the same state. *)
 type observation_request = Idle | Run_actions | Refresh_sources | Observe_now
+(* Why the last host request cycle stopped before its listing settled. *)
+type host_issue =
+  | Listing_failed of string
+  | Listing_refused of string
+  | Relisted_delivered_request of string
+  | Result_delivery_failed of { request_id : string; detail : string }
+  | Exact_record_failed of { request_id : string; detail : string }
+  | No_exact_runner
+(* A projection of the last cycle; no decision reads it. *)
+type host_status = { cycles : int; waiting : (string * Yojson.Safe.t) list; issue : host_issue option }
 type entry = {
   instance_id : string; run_id : string; package : package; binding : Yojson.Safe.t;
   mutable state : Lifecycle.state; mutable engine : Lifecycle.engine option;
@@ -129,6 +146,8 @@ type entry = {
   input_installations : string list;
   action_queue : Lane_addon_action.receipt Queue.t;
   mutable current_action : Lane_addon_action.receipt option;
+  mutable host_due : bool;
+  mutable host_status : host_status;
 }
 type configuration_reading = {
   directory : string;
@@ -182,6 +201,8 @@ let delivery_handler = ref None
 let register_delivery_handler handler = delivery_handler := Some handler
 let sampling_factory = ref None
 let register_sampling_factory factory = sampling_factory := Some factory
+let exact_runner : Lane_addon_exact.runner option ref = ref None
+let register_exact_runner runner = exact_runner := Some runner
 let prepare_sampling_handler ~sw ~store ~instance_id ~(package : package) ~binding =
   match package.model_access with
   | Model_disabled -> Ok None
@@ -413,7 +434,10 @@ let persist m e = Eio.Mutex.use_ro e.persistence_mutex (fun () ->
   else
     let json = entry_json e in
     offload (fun () -> Lane_addon_store.save_binding m.store ~instance_id:e.instance_id json))
+(* [e.wake] is resolved exactly while [e.pending <> Idle || e.host_due]. *)
+let signalled e = e.pending<>Idle || e.host_due
 let wake ?(request=Observe_now) e =
+  let was_signalled = signalled e in
   let previous = e.pending in
   e.pending <- (match previous,request with
     | Observe_now,_ | _,Observe_now -> Observe_now
@@ -421,10 +445,18 @@ let wake ?(request=Observe_now) e =
     | Run_actions,_ | _,Run_actions -> Run_actions
     | Idle,Idle -> Idle);
   if previous<>Idle then e.coalesced_wakes <- e.coalesced_wakes + 1
-  else if e.pending<>Idle then Eio.Promise.resolve e.resolver ()
+  else if not was_signalled && e.pending<>Idle then Eio.Promise.resolve e.resolver ()
+(* One of the five host events (RFC operator-quiz §4.4). An event that arrives
+   during a cycle becomes one more cycle. *)
+let wake_host e =
+  if e.host_due then e.coalesced_wakes <- e.coalesced_wakes + 1
+  else (
+    let was_signalled = signalled e in
+    e.host_due <- true;
+    if not was_signalled then Eio.Promise.resolve e.resolver ())
 let clear_wake e =
   let promise, resolver = Eio.Promise.create () in
-  e.wake <- promise; e.resolver <- resolver; e.pending <- Idle
+  e.wake <- promise; e.resolver <- resolver; e.pending <- Idle; e.host_due <- false
 let entries m = Hashtbl.to_seq_values m.entries |> List.of_seq
   |> List.sort (fun a b -> String.compare a.instance_id b.instance_id)
 let status_coverage e = {
@@ -784,6 +816,88 @@ let perform_action m e (c : connection) (queued : Lane_addon_action.receipt) =
        | Ok () -> ()
        | Error message -> raise (Action_persistence_failed ("action result persistence: " ^ message)))
 
+let host_issue_to_json = function
+  | Listing_failed detail -> `Assoc ["kind", `String "listing_failed"; "detail", `String detail]
+  | Listing_refused detail -> `Assoc ["kind", `String "listing_refused"; "detail", `String detail]
+  | Relisted_delivered_request request_id ->
+      `Assoc ["kind", `String "relisted_delivered_request"; "request_id", `String request_id]
+  | Result_delivery_failed {request_id; detail} ->
+      `Assoc ["kind", `String "result_delivery_failed"; "request_id", `String request_id; "detail", `String detail]
+  | Exact_record_failed {request_id; detail} ->
+      `Assoc ["kind", `String "exact_record_failed"; "request_id", `String request_id; "detail", `String detail]
+  | No_exact_runner -> `Assoc ["kind", `String "no_exact_runner"]
+
+let host_status_json status =
+  `Assoc ["cycles", `Int status.cycles;
+    "waiting", `List (List.map (fun (request_id, reason) ->
+      `Assoc ["request_id", `String request_id; "reason", reason]) status.waiting);
+    "issue", Option.fold ~none:`Null ~some:host_issue_to_json status.issue]
+
+(* The frame the worker connection accepts is the package's [max_reply_bytes]
+   (RFC-0471 row 1). What is measured is the arguments object the host sends;
+   the JSON-RPC envelope around it is not counted. *)
+let delivery_arguments e ~request_id final =
+  let result = Lane_addon_exact.final_to_json final in
+  let arguments = Lane_addon_host_request.result_arguments ~request_id ~result in
+  if String.length (Yojson.Safe.to_string arguments) <= e.package.resources.max_reply_bytes then arguments
+  else
+    let bytes = Yojson.Safe.to_string result in
+    Lane_addon_host_request.result_arguments ~request_id
+      ~result:(`Assoc ["status", `String "result_exceeds_frame";
+                       "retained_sha256", `String (Lane_addon_store.digest bytes);
+                       "bytes", `Int (String.length bytes)])
+
+(* One cycle (RFC operator-quiz §4.4): list, deliver what is final or try each
+   request once, list again until a listing delivers nothing. The host keeps
+   no list of pending requests; [host_status] only shows the last cycle. *)
+let run_host_cycle m e (port : host_port) =
+  let delivered = Hashtbl.create 8 and tried = Hashtbl.create 8 in
+  let waiting = ref [] in
+  let try_request = function
+    | Lane_addon_host_request.Exact_output exact ->
+        (match e.configuration, !exact_runner with
+         | None, _ ->
+             (* A manual Attach has no declaration id, so it owns no add-on lane. *)
+             Ok (Lane_addon_exact.Not_final (Lane_addon_exact.Lane_unavailable Lane_addon_exact.Lane_unconfigured))
+         | Some _, None -> Error No_exact_runner
+         | Some owner, Some runner ->
+             Lane_addon_exact.run ~store:m.store ~declaration_id:owner.id ~package:e.package ~runner exact
+             |> Result.map_error (fun detail ->
+               Exact_record_failed {request_id = exact.Lane_addon_exact.request_id; detail})) in
+  let deliver request_id final =
+    let* answer = port.deliver ~arguments:(delivery_arguments e ~request_id final)
+      |> Result.map_error (fun detail -> Result_delivery_failed {request_id; detail}) in
+    Lane_addon_host_request.accepted_of_json answer
+    |> Result.map (fun (_accepted : bool) -> ())
+    |> Result.map_error (fun detail -> Result_delivery_failed {request_id; detail}) in
+  let rec pass () =
+    let* listing = port.list_requests () |> Result.map_error (fun detail -> Listing_failed detail) in
+    let* requests = Lane_addon_host_request.listing_of_json listing
+      |> Result.map_error (fun detail -> Listing_refused detail) in
+    let rec each delivered_any = function
+      | [] -> Ok delivered_any
+      | request :: rest ->
+          let request_id = Lane_addon_host_request.request_id request in
+          if Hashtbl.mem delivered request_id then Error (Relisted_delivered_request request_id)
+          else if Hashtbl.mem tried request_id then each delivered_any rest
+          else
+            let* attempt = try_request request in
+            match attempt with
+            | Lane_addon_exact.Final final ->
+                let* () = deliver request_id final in
+                Hashtbl.replace delivered request_id ();
+                each true rest
+            | Lane_addon_exact.Not_final reason ->
+                (* Tried at most once per cycle, so it cannot keep a cycle running. *)
+                Hashtbl.replace tried request_id ();
+                waiting := (request_id, Lane_addon_exact.not_final_to_json reason) :: !waiting;
+                each delivered_any rest in
+    let* delivered_any = each false requests in
+    if delivered_any then pass () else Ok () in
+  let outcome = pass () in
+  e.host_status <- { cycles = e.host_status.cycles + 1; waiting = List.rev !waiting;
+    issue = (match outcome with Ok () -> None | Error issue -> Some issue) }
+
 let observing e =
   let recovering = match e.state with Lifecycle.Failed _ -> true
     | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching _ | Lifecycle.Detached _ -> false in
@@ -827,6 +941,23 @@ let run ~sw backend m e =
         | Ok c ->
             e.connection <- Some {export_owner;worker=c}; e.started <- true;
             notify_tool_change e.package;
+            (match c.host, e.configuration with
+             | Some _, Some owner ->
+                 (* A publication that changes one of this installation's add-on
+                    lanes is a host event. The callback only signals. *)
+                 let unsubscribes = List.filter_map (fun (output : exact_output) ->
+                   match Runtime_schema.addon_lane ~declaration_id:owner.id ~output:output.name with
+                   | Ok lane ->
+                       Some (Runtime_exact_output_registry.subscribe_lane_changes
+                         ~lane_id:(Runtime_schema.exact_lane_key (Runtime_schema.Addon lane))
+                         (fun () -> Eio_context.run_on_owner_domain (fun () -> wake_host e)))
+                   | Error detail ->
+                       Log.Misc.error "Lane Add-on %s cannot own exact output %s: %s" owner.id output.name detail;
+                       None) e.package.exact_outputs in
+                 Eio.Switch.on_release worker_sw (fun () -> List.iter (fun unsubscribe -> unsubscribe ()) unsubscribes)
+             | Some _, None | None, (Some _ | None) -> ());
+            (* A worker that finished initializing is the first host event. *)
+            if Option.is_some c.host then wake_host e;
             let rec loop () =
               if e.stopping then (
                 match e.state with Lifecycle.Detached _ -> () | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching _ | Lifecycle.Failed _ -> let pending = e.wake in
@@ -835,6 +966,7 @@ let run ~sw backend m e =
                 let pending = e.wake in
                 Eio.Promise.await pending;
                 let request = e.pending in
+                let host_due = e.host_due in
                 clear_wake e;
                 if e.stopping then loop () else (
                   if not (Queue.is_empty e.action_queue) then (
@@ -848,8 +980,16 @@ let run ~sw backend m e =
                       | (Observe_now | Refresh_sources), _ -> Some request
                       | (Run_actions | Idle), false -> Some Run_actions
                       | (Run_actions | Idle), true -> None in
-                    Option.iter (fun request -> wake ~request e) follow_up)
-                  else if request = Run_actions then
+                    Option.iter (fun request -> wake ~request e) follow_up;
+                    (* A terminal action receipt is a host event, and a cycle
+                       owed before the action is still owed. *)
+                    if host_due || Option.is_some c.host then wake_host e)
+                  else if host_due then (
+                    Option.iter (run_host_cycle m e) c.host;
+                    (* The cycle ends with one ordinary observation, so the
+                       package's rows show what it received. *)
+                    wake e)
+                  else if request = Run_actions || request = Idle then
                     (* The queue was drained before this wake was served
                        (finalize on stop); nothing is owed. *)
                     ()
@@ -923,7 +1063,12 @@ let backend ~store () = match !override with
             |> Result.map_error Lane_addon_worker.error_to_string);
           observe = (fun ~binding ~sources -> Lane_addon_worker.observe worker ~binding ~sources
             |> Result.map_error Lane_addon_worker.error_to_string);
-          stop = (fun () -> Lane_addon_worker.stop worker |> Result.map_error Lane_addon_worker.cleanup_failure) } in
+          stop = (fun () -> Lane_addon_worker.stop worker |> Result.map_error Lane_addon_worker.cleanup_failure);
+          host = if not (uses_host_requests package) then None else Some {
+            list_requests = (fun () -> Lane_addon_worker.host_requests worker
+              |> Result.map_error Lane_addon_worker.error_to_string);
+            deliver = (fun ~arguments -> Lane_addon_worker.host_result worker ~arguments
+              |> Result.map_error Lane_addon_worker.error_to_string) } } in
         match clock with
         | None -> Error (Lifecycle.Worker_failed "Lane Add-on Docker control requires the server Eio clock")
         | Some clock ->
@@ -1502,7 +1647,8 @@ let snapshot m ~access ?instance_id () =
   let output = { rows = List.concat_map (fun (e : entry) -> e.output.rows) live;
     coverage = List.concat_map (fun e -> status_coverage e :: e.output.coverage) live } in
   let live_json entry = match entry_json entry with
-    | `Assoc fields -> `Assoc (("runtime_presence", `String "live") :: fields)
+    | `Assoc fields -> `Assoc (("runtime_presence", `String "live")
+        :: ("host_requests", host_status_json entry.host_status) :: fields)
     | _ -> assert false in
   match output_to_json output with
   | `Assoc fields -> Ok (`Assoc (("configuration", configuration_json m ~access)
@@ -1687,6 +1833,7 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
     refresh_interest; source_access; visibility; last_committed_sources=None; unchanged_source_refreshes=0;
     running = true; started = false; active_tool_calls = 0; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
     action_queue = Queue.create (); current_action = None;
+    host_due = false; host_status = { cycles = 0; waiting = []; issue = None };
     cancel_worker = None; configuration; input_installations } in
   let* () = validate_live_connections m e in
   (* Construction only validates the registered host boundary. Discard this
@@ -2795,6 +2942,10 @@ let start_configuration_service ~config ~sw ~clock =
 module For_testing = struct
   let with_cleanup_writer writer f = Eio.Fiber.with_binding cleanup_writer_key writer f
   let with_declaration_writer writer f = Eio.Fiber.with_binding declaration_writer_key writer f
+  type nonrec host_port = host_port = {
+    list_requests : unit -> (Yojson.Safe.t, string) result;
+    deliver : arguments:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
+  }
   type nonrec connection = connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t -> (output, string) result;
     exported_tools : unit -> Mcp_protocol.Mcp_types.tool list;
@@ -2804,6 +2955,7 @@ module For_testing = struct
     act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
     stop : unit -> (unit, Lifecycle.failure) result;
     container_id : string;
+    host : host_port option;
   }
   type nonrec backend = backend = {
     start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> package:package -> binding:Yojson.Safe.t ->

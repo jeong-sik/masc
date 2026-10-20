@@ -279,6 +279,28 @@ val needs_operator_broadcast : operator_disposition_kind -> bool
 val append : Workspace.config -> t -> unit
 val latest_json : Workspace.config -> string -> Yojson.Safe.t option
 
+(** Historical evidence is bound only to the receipt that supplied it, never
+    to the Keeper's current runtime or a newer decision. *)
+type receipt_turn =
+  { receipt_trace_id : string
+  ; receipt_turn_count : int option
+  ; receipt_ended_at : string
+  }
+
+type runtime_lane_observation =
+  | Runtime_lane_observed of
+      { turn : receipt_turn; evidence : Keeper_runtime_walk_evidence.t }
+  | Runtime_lane_not_observed of receipt_turn
+  | Runtime_lane_unreadable of { turn : receipt_turn option; field : string }
+
+val runtime_lane_observation_of_receipt_json :
+  Yojson.Safe.t -> runtime_lane_observation
+(** Read fields from the supplied receipt only. Explicit null means no capture;
+    missing, duplicate or malformed fields are unreadable. This does not read
+    the store or diagnose errors that the caller's store reader discarded. *)
+
+val runtime_lane_observation_to_yojson : runtime_lane_observation -> Yojson.Safe.t
+
 (** The newest receipt's terminal fields, read back from the store. Labels are
     prefixed so they do not collide with {!t}'s. *)
 type latest_receipt_summary =

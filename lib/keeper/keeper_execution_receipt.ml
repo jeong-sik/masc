@@ -594,6 +594,80 @@ let latest_json (config : Workspace.config) keeper_name =
   | _ -> None
 ;;
 
+type receipt_turn =
+  { receipt_trace_id : string
+  ; receipt_turn_count : int option
+  ; receipt_ended_at : string
+  }
+
+type runtime_lane_observation =
+  | Runtime_lane_observed of
+      { turn : receipt_turn; evidence : Keeper_runtime_walk_evidence.t }
+  | Runtime_lane_not_observed of receipt_turn
+  | Runtime_lane_unreadable of { turn : receipt_turn option; field : string }
+
+let runtime_lane_observation_of_receipt_json json =
+  let ( let* ) = Result.bind in
+  let member path key = function
+    | `Assoc fields ->
+      (match List.filter (fun (name, _) -> String.equal name key) fields with
+       | [_, value] -> Ok value
+       | [] | _ :: _ -> Error path)
+    | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      Error path
+  in
+  let string path key json =
+    let* value = member path key json in
+    match value with
+    | `String value -> Ok value
+    | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null -> Error path
+  in
+  let identity =
+    let* receipt_trace_id = string "trace_id" "trace_id" json in
+    let* turn_count = member "turn_count" "turn_count" json in
+    let* receipt_turn_count = match turn_count with
+      | `Int value -> Ok (Some value)
+      | `Null -> Ok None
+      | `Assoc _ | `Bool _ | `Float _ | `Intlit _ | `List _ | `String _ -> Error "turn_count" in
+    let* receipt_ended_at = string "ended_at" "ended_at" json in
+    Ok { receipt_trace_id; receipt_turn_count; receipt_ended_at }
+  in
+  match identity with
+  | Error field -> Runtime_lane_unreadable { turn = None; field }
+  | Ok turn ->
+    let evidence =
+      let* runtime = member "runtime" "runtime" json in
+      let* evidence = member "runtime.lane_evidence" "lane_evidence" runtime in
+      match evidence with
+      | `Null -> Ok None
+      | (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _) as evidence ->
+        Keeper_runtime_walk_evidence.of_yojson evidence
+        |> Result.map Option.some
+        |> Result.map_error (fun _ -> "runtime.lane_evidence")
+    in
+    (match evidence with
+     | Ok (Some evidence) -> Runtime_lane_observed { turn; evidence }
+     | Ok None -> Runtime_lane_not_observed turn
+     | Error field -> Runtime_lane_unreadable { turn = Some turn; field })
+;;
+
+let runtime_lane_observation_to_yojson observation =
+  let state, turn, evidence, error = match observation with
+    | Runtime_lane_observed { turn; evidence } ->
+      "observed", Some turn, Keeper_runtime_walk_evidence.to_yojson evidence, `Null
+    | Runtime_lane_not_observed turn -> "not_observed", Some turn, `Null, `Null
+    | Runtime_lane_unreadable { turn; field } -> "unreadable", turn, `Null, `String field
+  in
+  let turn = match turn with
+    | None -> `Null
+    | Some turn ->
+      `Assoc [ "trace_id", `String turn.receipt_trace_id
+             ; "turn_count", Json_util.int_opt_to_json turn.receipt_turn_count
+             ; "ended_at", `String turn.receipt_ended_at ]
+  in
+  `Assoc [ "state", `String state; "turn", turn; "evidence", evidence; "error", error ]
+;;
+
 type latest_receipt_summary =
   { latest_outcome : outcome_kind
   ; latest_terminal_reason_code : string

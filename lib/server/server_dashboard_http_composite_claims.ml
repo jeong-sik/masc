@@ -320,6 +320,7 @@ let composite_execution_receipt_json ~(config : Workspace.config) ~claim_window 
   | None ->
     `Assoc
       [ "latest_receipt_present", `Bool false
+      ; "runtime_lane_observation", `Null
       ; "recorded_at", `Null
       ; "outcome", `Null
       ; "terminal_reason_code", `Null
@@ -338,6 +339,9 @@ let composite_execution_receipt_json ~(config : Workspace.config) ~claim_window 
     let action_radius = json_member "action_radius" receipt in
     `Assoc
       [ "latest_receipt_present", `Bool true
+      ; ( "runtime_lane_observation"
+        , Keeper_execution_receipt.runtime_lane_observation_of_receipt_json receipt
+          |> Keeper_execution_receipt.runtime_lane_observation_to_yojson )
       ; "recorded_at", Json_util.string_opt_to_json (json_string "recorded_at" receipt)
       ; "outcome", Json_util.string_opt_to_json (json_string "outcome" receipt)
       ; ( "terminal_reason_code"

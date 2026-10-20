@@ -48,7 +48,7 @@ let ready ~clock ~pool ~endpoint ~process =
   Eio.Fiber.first poll (fun () ->
     let status=Eio.Process.await process in
     invalid_arg (Format.asprintf "owned geckodriver exited before readiness: %a" Eio.Process.pp_status status))
-let run ~env ~owner ~directory work =
+let run_with_commit ~commit_receipt ~env ~owner ~directory work =
   let configuration = Eio_unix.run_in_systhread (fun () ->
     let text=Fs_compat.load_owned_regular_file ~ownership_root:directory (Filename.concat directory "automation.json")
       |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
@@ -119,15 +119,20 @@ let run ~env ~owner ~directory work =
     ignore (Eio.Promise.try_resolve ready_u outcome);
     let outcome=if !clean && not !uncertain then Ok ()
       else Error "owned browser cleanup is unconfirmed" in
-    (* Persist the cleanup receipt before acknowledging private retirement. *)
-    (match outcome with
-     | Error _ -> ()
-     | Ok () ->
-       (match Eio_unix.run_in_systhread (fun () -> Fs_compat.save_file_atomic_strict
-          (Filename.concat directory "automation-closed.json")
-          (Yojson.Safe.to_string (`Assoc ["incarnation",`String (Browser_addon_owner.incarnation owner)]))) with
-        | Ok () -> () | Error detail -> clean:=false;Printf.eprintf "browser cleanup receipt: %s\n%!" detail));
-    Eio.Promise.resolve settle (if !clean then outcome else Error "browser cleanup receipt is unconfirmed"));
+    (* Once driver teardown finishes, cancellation must not strand the foreground
+       cleanup join. Commit its receipt and publish terminal completion together. *)
+    Eio.Cancel.protect (fun () ->
+      let finish () =
+        let result=match outcome with
+          | Error _ -> outcome
+          | Ok () -> commit_receipt ~path:(Filename.concat directory "automation-closed.json")
+              ~contents:(Yojson.Safe.to_string (`Assoc ["incarnation",`String (Browser_addon_owner.incarnation owner)])) in
+        ignore (Eio.Promise.try_resolve settle result) in
+      match finish () with
+      | () -> ()
+      | exception exn ->
+          ignore (Eio.Promise.try_resolve settle (Error "browser cleanup receipt is unconfirmed"));
+          raise exn));
     (match Eio.Promise.await ready_p with
      | Error detail -> invalid_arg detail
      | Ok () -> Eio.Switch.run (fun scope ->
@@ -136,3 +141,10 @@ let run ~env ~owner ~directory work =
            ignore (Eio.Promise.try_resolve stop ());
            ignore (Eio.Promise.await stopped));
          work ())))
+
+let run ~env ~owner ~directory work = run_with_commit ~env ~owner ~directory work
+  ~commit_receipt:(fun ~path ~contents -> Eio_unix.run_in_systhread (fun () ->
+    Fs_compat.save_file_atomic_strict path contents))
+module For_testing = struct
+  let run = run_with_commit
+end

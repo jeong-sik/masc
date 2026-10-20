@@ -187,10 +187,10 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     const selection = new Set(selectedNotes(editor).map(note => note.id))
     const at = editorHarmony(editor)
     const lines = [
-      `${project.title}${dirty() ? ' *' : ''} · ${project.timingLabel ?? `${project.tempo} BPM`} · ${project.meter.join('/')} · ${(project.displayLength ?? project.length) / per} ${axis.label} · ${transport.kind}${loop ? ' · LOOP' : ''}`,
+      `${project.title}${dirty() ? ' *' : ''} · ${project.timingLabel ?? `${project.tempo} BPM`} · ${project.meter.join('/')} · ${(project.displayLength ?? project.length) / per} ${axis.label} · ${stepInput?.kind === 'practice-input' ? 'practicing' : transport.kind}${loop ? ' · LOOP' : ''}`,
       `Track ${editor.track + 1}/${project.tracks.length}: ${track.name} · ${track.detail ?? `ch ${track.channel + 1} · program ${track.program} · level ${track.level} · pan ${track.pan}`}${track.muted ? ' · MUTED' : ''}${track.solo ? ' · SOLO' : ''} · ${track.notes.length} notes`,
       `Cursor ${editor.tick / per} · ${Note.fromMidi(editor.pitch)} · grid ${editor.step / per} · length ${(current?.duration ?? editor.duration) / per} · input length ${editor.duration / per} · velocity ${current?.velocity ?? editor.velocity}${selection.size ? ` · ${selection.size} selected` : ''}${editor.noteClipboard ? ` · ${editor.noteClipboard.notes.length} copied` : ''}`,
-      `Chord candidates: ${at.candidates.join(' / ') || '—'} · ${at.notes.join(' ')} · ${stepInput ? `MIDI step · ${stepHeld} held · ` : ''}${status}`,
+      `Chord candidates: ${at.candidates.join(' / ') || '—'} · ${at.notes.join(' ')} · ${stepInput ? `${stepInput.kind === 'practice-input' ? 'MIDI practice' : 'MIDI step'} · ${stepHeld} held · ` : ''}${status}`,
     ]
     if (sourcePicker.view) {
       lines.length = 0
@@ -354,7 +354,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       adoptEditor(next, count) { editor = next; clearHarmony(); status = `Inserted ${count} step notes` },
       onState(state) { stepHeld = state.held; draw() } })
     stepInput = owner; stepOwners.add(owner)
-    status = 'Opening MIDI step input'
+    status = practice ? 'Opening live practice input and backing' : 'Opening MIDI step input'
     owner.ready.then(info => { if (stepInput === owner && accepting && !closed) { status = `${info.practice ? 'Practice input' : 'Step input'}${info.monitoring ? ' · VST monitor' : ''}: ${info.source.name}`; draw() } }, () => {})
     owner.completion.then(() => { status = 'Step input stopped' },
       error => { status = `Step input stopped: ${error.message}` }).finally(() => {

@@ -160,7 +160,7 @@ export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState
     if (failure) throw failure
   })()
   completion.catch(() => {})
-  return { ready, completion,
+  return { kind: practice ? 'practice-input' : 'step-input', ready, completion,
     diagnostics() { return monitor ? { source, ...monitor.diagnostics(), failure: failure?.message ?? null } : null },
     async inspect() { return monitor ? { source, ...await monitor.inspect(), failure: failure?.message ?? null } : null },
     stop({ admittedControls = false } = {}) {

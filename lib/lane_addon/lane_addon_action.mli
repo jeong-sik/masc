@@ -24,6 +24,9 @@ val arguments : instance_id:string -> request_id:string -> action:Yojson.Safe.t 
 val context : string -> Yojson.Safe.t
 val validate_schema : Yojson.Safe.t -> (unit, string) result
 val validate_value_schema : Yojson.Safe.t -> (unit, string) result
+(** General tool/output contracts accept explicit open objects as well as
+    closed ones. Declared fields remain checked; open contents must still be
+    canonical JSON. Action-envelope schemas remain recursively closed. *)
 val validate_value : schema:Yojson.Safe.t -> name:string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
 
 (** Check an input against a schema that [validate_schema] already accepted. *)

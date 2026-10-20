@@ -336,8 +336,10 @@ let load ~path =
             | Persistent -> Error "browser service requires ephemeral execution" in
           let* () = match model_access with Model_disabled -> Ok ()
             | Host_sampling -> Error "browser service sampling is not attached" in
-          (match action_tool,exported_tools with None,[] -> Ok ()
-           | Some _,_ | None,(_::_) -> Error "browser service must omit MCP actions and exports") in
+          let* ()=match action_tool with None -> Ok ()
+            | Some _ -> Error "browser service must omit MCP actions" in
+          (match exported_tools,tool_invocation with [],(Direct|Host_context) | (_::_),Host_context -> Ok ()
+           | (_::_),Direct -> Error "browser service exports require host_context invocation") in
     if command = [] || List.exists (fun arg -> String.trim arg = "" || String.contains arg '\000') command
     then Error "command requires non-blank argv entries without NUL"
     else if contributions = [] then Error "at least one contribution is required"

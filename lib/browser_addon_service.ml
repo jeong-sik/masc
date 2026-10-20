@@ -63,12 +63,21 @@ let mcp owner =
     "binding",`Assoc ["type",`String "object"];
     "sources",`Assoc ["type",`String "array"]]] in
   Server.create ~name:"masc-browser-addon" ~version:"0.1.0" ()
+  |> Server.add_tool Browser_addon_tool.definition (fun _context _name arguments ->
+    Ok (Browser_addon_tool.invoke ~owner ~principal:Lane_addon_call_context.Anonymous
+      (Option.value ~default:(`Assoc []) arguments)))
+  |> Server.tool Lane_addon_call_context.tool_name
+    ~description:"Private host caller-context port; never export it to a model."
+    ~input_schema:Lane_addon_call_context.input_schema (fun _context _name arguments ->
+      let call=match arguments with None -> Error "host caller context is required"
+        | Some arguments -> Lane_addon_call_context.of_json arguments in
+      match call with
+      | Ok call when call.tool=Browser_addon_tool.definition.name && Option.is_none call.controller ->
+          Ok (Browser_addon_tool.invoke ~owner ~principal:call.principal call.arguments)
+      | Ok _|Error _ -> Ok (Browser_addon_tool.invoke ~owner ~principal:Lane_addon_call_context.Anonymous (`Assoc [])))
   |> Server.tool "lane_observe" ~description:"Read the browser worker's connection and input activity snapshot."
     ~input_schema:schema (fun _context _name _arguments ->
-      let snapshot = Owner.snapshot owner in
-      let data = `Assoc ["rows",`List [`Assoc [
-        "id",`String "browser";"lane_id",`String "browser/connections";"kind",`String "value";
-        "title",`String "Browser worker";"observed_at",`Float (Time_compat.now ());
-        "subject_id",`String "browser";"clock",`Null;"actor",`Null;
-        "fields",snapshot;"evidence",`List [];"related_ids",`List []]];"coverage",`List []] in
-      Ok {S.content=[];is_error=Some false;structured_content=Some data;_meta=None})
+      match Browser_addon_observation.of_snapshot ~observed_at:(Time_compat.now ()) (Owner.snapshot owner) with
+      | Error detail -> Error detail
+      | Ok output -> Ok {S.content=[];is_error=Some false;
+          structured_content=Some (Lane_addon_types.output_to_json output);_meta=None})

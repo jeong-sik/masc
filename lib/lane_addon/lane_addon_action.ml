@@ -85,7 +85,8 @@ let of_json json =
 let schema_keys = ["type"; "properties"; "required"; "additionalProperties"; "items";
   "enum"; "const"; "description"; "title"; "minimum"; "maximum";
   "exclusiveMinimum"; "exclusiveMaximum"; "minLength"; "maxLength"; "minItems"; "maxItems"; "oneOf"]
-let rec schema_node schema =
+type object_policy = Closed_objects | Declared_objects
+let rec schema_node ~object_policy schema =
   let* fields = object_ schema in let* () = unique fields in
   let* () = if List.for_all (fun (key, _) -> List.mem key schema_keys) fields then Ok ()
     else Error "action schema declares an unsupported JSON Schema keyword" in
@@ -94,7 +95,7 @@ let rec schema_node schema =
   let* () = match List.assoc_opt "oneOf" fields with
     | None -> Ok ()
     | Some (`List (_ :: _ as branches)) ->
-        let* _ = traverse schema_node branches in Ok ()
+        let* _ = traverse (schema_node ~object_policy) branches in Ok ()
     | Some _ -> Error "schema oneOf requires a nonempty array of supported schemas" in
   let* kind = text fields "type" in
   match kind with
@@ -107,7 +108,10 @@ let rec schema_node schema =
         | Some (`Assoc values) -> let* () = unique values in Ok values
         | _ -> Error "action object schema requires properties" in
       let* () = match List.assoc_opt "additionalProperties" fields with
-        | Some (`Bool false) -> Ok () | _ -> Error "action object schema requires additionalProperties=false" in
+        | Some (`Bool false) -> Ok ()
+        | Some (`Bool true) -> (match object_policy with Declared_objects -> Ok ()
+            | Closed_objects -> Error "action object schema requires additionalProperties=false")
+        | Some _ | None -> Error "object schema requires an explicit additionalProperties policy" in
       let* () = match List.assoc_opt "required" fields with
         | None -> Ok ()
         | Some (`List values) -> let* names = traverse (function
@@ -116,14 +120,14 @@ let rec schema_node schema =
             if List.length names = List.length (List.sort_uniq String.compare names) then Ok ()
             else Error "duplicate schema required member"
         | _ -> Error "schema required must be an array" in
-      let* _ = traverse (fun (_, schema) -> schema_node schema) properties in Ok ()
+      let* _ = traverse (fun (_, schema) -> schema_node ~object_policy schema) properties in Ok ()
   | "array" -> (match List.assoc_opt "items" fields with
-      | Some schema -> schema_node schema | None -> Error "action array schema requires items")
+      | Some schema -> schema_node ~object_policy schema | None -> Error "action array schema requires items")
   | "string" | "integer" | "number" | "boolean" -> Ok ()
   | _ -> Error "unsupported action schema type"
 let validate_schema schema =
   let* _ = canonical schema in
-  let* () = schema_node schema in
+  let* () = schema_node ~object_policy:Closed_objects schema in
   let shape = Tool_input_validation.schema_shape schema in
   if shape.errors <> [] then Error (String.concat "; " shape.errors)
   else if List.sort String.compare shape.properties <> ["action"; "context"; "request_id"]
@@ -163,13 +167,22 @@ let rec validate_node ~name schema value =
   match value with
   | `Assoc _ when List.mem_assoc "oneOf" fields && not (List.mem_assoc "properties" fields) -> Ok ()
   | `Assoc values ->
-      let* _ = Tool_input_validation.validate_args ~schema ~name ~args:value ()
-        |> Result.map_error Tool_result.message in
+      let* () = match List.assoc_opt "properties" fields,
+                      List.assoc_opt "additionalProperties" fields with
+        | Some (`Assoc []),Some (`Bool true) ->
+            (* This is an explicitly open JSON object, not a no-argument tool.
+               The wrapper above already checks its type/enum/const/ranges;
+               canonicalization checks every contained JSON value. *)
+            Ok ()
+        | _ -> Tool_input_validation.validate_args ~schema ~name ~args:value ()
+            |> Result.map (fun _ -> ()) |> Result.map_error Tool_result.message in
       (match List.assoc_opt "properties" fields with
        | Some (`Assoc properties) ->
            let* _ = traverse (fun (key, value) -> match List.assoc_opt key properties with
              | Some schema -> validate_node ~name schema value
-             | None -> Error ("unknown action field: " ^ key)) values in Ok ()
+             | None -> (match List.assoc_opt "additionalProperties" fields with
+                 | Some (`Bool true) -> Ok ()
+                 | None | Some _ -> Error ("unknown action field: " ^ key))) values in Ok ()
        | _ -> Error "object action requires declared properties")
   | `List values -> (match List.assoc_opt "items" fields with
       | Some schema -> let* _ = traverse (validate_node ~name schema) values in Ok ()
@@ -177,7 +190,7 @@ let rec validate_node ~name schema value =
   | _ -> Ok ()
 let validate_value_schema schema =
   let* _ = canonical schema in
-  schema_node schema
+  schema_node ~object_policy:Declared_objects schema
 let validate_input ~schema ~name input =
   let* input = canonical input in
   let* () = validate_node ~name schema input in Ok input

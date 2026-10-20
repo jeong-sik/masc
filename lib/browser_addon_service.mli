@@ -11,5 +11,6 @@ val serve :
     is held during request handling. The service owns a nested switch for its listener and every accepted flow;
     cancellation joins their cleanup. *)
 val mcp : Browser_addon_owner.t -> Mcp_protocol_eio.Server.t
-(** Snapshot observation only. No bootstrap credentials, browser execution,
-    sampling callbacks or exported tool proxy are exposed on stdio. *)
+(** Snapshot observation and the browser command tool. Execution requires the
+    host-owned caller-context control port; model arguments supply no identity.
+    Poll/results remain on the independent concurrent private transport. *)

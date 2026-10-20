@@ -1,6 +1,6 @@
 (** Selected, immutable middleware for one worker's exact advertised tool.
     Hooks validate without rewriting arguments or results and never retry calls.
-    Schemas use the closed subset accepted by [Lane_addon_action], not arbitrary
+    Schemas use the explicit subset accepted by [Lane_addon_action], not arbitrary
     JSON Schema. Unsupported declarations fail before the tool is published. *)
 type hook = Lane_addon_types.tool_hook = Validate_input | Validate_output
 val hook_name : hook -> string

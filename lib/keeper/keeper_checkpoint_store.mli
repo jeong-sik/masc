@@ -309,7 +309,8 @@ val checkpoint_ref_load_error_to_string : checkpoint_ref_load_error -> string
     The value, and the trace and turn of the reference, are the decode of
     those bytes, with one exception: when a canonical loader
     ({!with_agent_core_exact_snapshot}, {!load_agent_core_exact_snapshot},
-    {!load_agent_core_with_ref}) reads a file whose (device, inode, size,
+    {!load_agent_core_with_ref}, {!with_agent_core_exact_snapshot_since},
+    {!decode_changed_bytes}) reads a file whose (device, inode, size,
     mtime) identity is the one a Keeper's lineage wrote or read, they are that
     lineage's value, which is what decoding that file gave or gives, as
     {!load_agent_core} answers. A file rewritten in place that keeps its size
@@ -368,18 +369,20 @@ val load_agent_core_exact_snapshot :
   session_id:string ->
   (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
 
-(** The bytes one exact snapshot was decoded from, named by their digest. It
-    is made only from an exact snapshot, never from a stored record. *)
+(** The bytes one exact snapshot read, named by their digest. It is made only
+    from an exact snapshot, never from a stored record. *)
 type exact_source
 
 val exact_snapshot_source : exact_checkpoint_snapshot -> exact_source
 
 type exact_snapshot_since =
   | Unchanged_source
-      (** The file holds exactly the known bytes; their decoded value is the
-          one the caller already holds. Nothing was decoded. *)
+      (** The file holds exactly the known bytes, by digest, so the value the
+          caller already holds for them is still current. Nothing was
+          decoded. *)
   | Changed_source of exact_checkpoint_snapshot
-      (** The file holds other bytes, decoded once. *)
+      (** The file holds other bytes, decoded once or, under the rule on
+          {!exact_checkpoint_snapshot}, a Keeper lineage's value for them. *)
 
 (** {!with_agent_core_exact_snapshot} for a caller that already holds one
     exact snapshot of this session: under the same session lock the file is
@@ -410,7 +413,9 @@ val read_agent_core_exact_bytes_since :
   (exact_bytes_since, checkpoint_ref_load_error) result
 
 (** Decode bytes {!read_agent_core_exact_bytes_since} found changed, with the
-    digest it already took. *)
+    digest it already took. When they were read from a file whose identity a
+    Keeper's lineage holds, that lineage's value is handed out instead, as
+    {!exact_checkpoint_snapshot} describes. *)
 val decode_changed_bytes :
   changed_bytes -> (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
 

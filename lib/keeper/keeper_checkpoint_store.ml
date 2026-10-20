@@ -1463,10 +1463,12 @@ let with_agent_core_exact_snapshot ~session_dir ~session_id f =
 let load_agent_core_exact_snapshot ~session_dir ~session_id =
   with_agent_core_exact_snapshot ~session_dir ~session_id Fun.id
 
-(* Only an exact snapshot names its source, so the trace and turn in the
-   reference were read from the same bytes its digest covers: equal digests
-   mean the file still holds those bytes, and decoding them again would give
-   the value the caller already holds. *)
+(* Only an exact snapshot names its source. Its digest covers the bytes it
+   read; its value, trace and turn are the decode of those bytes, or a Keeper
+   lineage's value for them under the identity rule [load_ref_locked] uses.
+   Equal digests mean the file still holds those bytes, so the value the
+   caller already holds is still the one a snapshot of the file would hand
+   out. The comparison is the digest alone. *)
 type exact_source = Keeper_checkpoint_ref.t
 
 let exact_snapshot_source snapshot = snapshot.reference
@@ -1515,8 +1517,21 @@ let read_since_locked ~session_dir ~(known : exact_source) =
            ; changed_sha256 = sha256
            })
 
+(* As in [load_ref_locked]: bytes read from a file whose identity a Keeper's
+   lineage holds are not decoded again, and the lineage's value is handed out.
+   The identity is the one the bytes were read under, so the answer does not
+   depend on what the file holds when this runs, after the lock was released. *)
 let decode_changed_bytes changed =
-  match decode_checkpoint_off_scheduler changed.changed_canonical_bytes with
+  let decoded =
+    match
+      reusable_written_value
+        ~canonical_path:changed.changed_path
+        ~identity:changed.changed_identity_before
+    with
+    | Some checkpoint -> Ok checkpoint
+    | None -> decode_checkpoint_off_scheduler changed.changed_canonical_bytes
+  in
+  match decoded with
   | Error error -> Error (Ref_read_failed (classify_core_error error))
   | Ok (checkpoint : Agent_core.Checkpoint.t) ->
     publish_summary_after_parse

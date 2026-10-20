@@ -199,6 +199,42 @@ let test_a_snapshot_behind_a_replaced_file_decodes_it () = with_session (fun ses
     check string "the last message is the replacing file's" "replaced" text
   | _ -> fail "the replacing file's last message was not one text block")
 
+(* A snapshot taken since a known source: unchanged bytes are found by digest
+   alone, and changed bytes the Keeper's lineage holds are handed out as its
+   value rather than decoded again, both through the locked callback and
+   through the read-then-decode pair. *)
+let test_a_changed_source_since_a_snapshot_uses_the_kept_decode () = with_session (fun session_dir ->
+  save_for_keeper ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:1 ~marker:"known");
+  let known = Store.exact_snapshot_source (load_snapshot ~session_dir "the known snapshot did not load") in
+  (match Store.with_agent_core_exact_snapshot_since ~session_dir ~known Fun.id with
+   | Ok Store.Unchanged_source -> ()
+   | Ok (Store.Changed_source _) -> fail "the known bytes were reported as changed"
+   | Error error -> failf "the unchanged check failed: %s" (Store.checkpoint_ref_load_error_to_string error));
+  save_for_keeper ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:2 ~marker:several_reads_marker);
+  let kept = load_value ~session_dir "the kept value did not load" in
+  let on_disk = read_file (canonical_path session_dir) in
+  let check_changed label snapshot =
+    check bool (label ^ ": the messages are the kept value's") true
+      (Store.exact_snapshot_messages snapshot == kept.messages);
+    check string (label ^ ": the snapshot holds the file's bytes") on_disk
+      (Store.exact_snapshot_canonical_bytes snapshot);
+    check string (label ^ ": the reference is their digest") (one_shot_sha256 on_disk)
+      (Store.exact_snapshot_reference snapshot).sha256;
+    check int (label ^ ": the reference carries the kept turn") 2
+      (Store.exact_snapshot_reference snapshot).turn_count
+  in
+  (match Store.with_agent_core_exact_snapshot_since ~session_dir ~known Fun.id with
+   | Ok (Store.Changed_source snapshot) -> check_changed "locked" snapshot
+   | Ok Store.Unchanged_source -> fail "the changed bytes were reported as unchanged"
+   | Error error -> failf "the changed snapshot failed: %s" (Store.checkpoint_ref_load_error_to_string error));
+  match Store.read_agent_core_exact_bytes_since ~session_dir ~known with
+  | Ok (Store.Changed_bytes changed) ->
+    (match Store.decode_changed_bytes changed with
+     | Ok snapshot -> check_changed "read then decode" snapshot
+     | Error error -> failf "the changed decode failed: %s" (Store.checkpoint_ref_load_error_to_string error))
+  | Ok Store.Unchanged_bytes -> fail "the changed bytes were read as unchanged"
+  | Error error -> failf "the changed read failed: %s" (Store.checkpoint_ref_load_error_to_string error))
+
 (* The file is unreadable inside [f], so an answer proves the store did not
    read it. *)
 let while_unreadable path f =
@@ -263,5 +299,7 @@ let () =
             test_a_keeper_snapshot_uses_the_kept_decode
         ; test_case "a snapshot behind a replaced file decodes it" `Quick
             test_a_snapshot_behind_a_replaced_file_decodes_it
+        ; test_case "a changed source since a snapshot uses the kept decode" `Quick
+            test_a_changed_source_since_a_snapshot_uses_the_kept_decode
         ] )
     ]

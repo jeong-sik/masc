@@ -2727,7 +2727,8 @@ let test_attempt_loop_retries_transport_failure_before_checkpoint () =
 let native_settlement_fixture runtime_id : Masc.Keeper_official_client_session_store.t =
   {client_kind=Masc.Keeper_official_client_session_store.Codex;runtime_id;
    phase=Masc.Keeper_official_client_session_store.Settled {session_id="winning-session";turn_id="winning-turn"};
-   turn_count=1;tool_surface_sha256=String.make 64 'a';last_recovery_resolution=None;
+   turn_count=1;host_turns=Masc.Keeper_official_client_session_store.Not_reported;
+   tool_surface_sha256=String.make 64 'a';last_recovery_resolution=None;
    last_transient_release=None;context_frontier=None;updated_at=1.}
 
 let test_cross_owner_fallback_returns_winning_runtime_authority () =

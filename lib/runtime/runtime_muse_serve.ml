@@ -36,9 +36,24 @@ let default_config () =
   }
 ;;
 
+type resume_turns =
+  | Exactly of int
+  | Reported_or_one_more of int
+
 type session_mode =
   | Start
-  | Resume of { session_id : string; expected_turn_count : int }
+  | Resume of { session_id : string; expected_turns : resume_turns }
+
+let resume_turns_admit expected reported =
+  match expected with
+  | Exactly turns -> reported = turns
+  | Reported_or_one_more turns -> reported = turns || reported - 1 = turns
+;;
+
+let resume_turns_to_string = function
+  | Exactly turns -> string_of_int turns
+  | Reported_or_one_more turns -> Printf.sprintf "%d or %d" turns (turns + 1)
+;;
 
 type mcp_server =
   { name : string
@@ -396,9 +411,10 @@ let validate_turn ?(session_mode = Start) config ~workspace_root ~prompt ~images
   match session_mode with
   | Resume { session_id; _ } when String.trim session_id = "" ->
     Error (Invalid_config "resumed session id is empty")
-  | Resume { expected_turn_count; _ } when expected_turn_count < 0 ->
+  | Resume { expected_turns = Exactly turns | Reported_or_one_more turns; _ } when turns < 0 ->
     Error (Invalid_config "resumed completed-turn count is negative")
-  | Resume { session_id; expected_turn_count = _ } -> valid_utf8 "resumed session id" session_id
+  | Resume { session_id; expected_turns = Exactly _ | Reported_or_one_more _ } ->
+    valid_utf8 "resumed session id" session_id
   | Start -> Ok ()
 ;;
 
@@ -1242,7 +1258,7 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
     in
     let* () = validate_session_approval_mode ~requested:approval_mode session.approval_mode in
     Ok (session, false)
-  | Resume { session_id; expected_turn_count } ->
+  | Resume { session_id; expected_turns } ->
     let* result =
       request io ~method_:"session/resume" (fun ~id ->
         Msp.session_resume_request
@@ -1264,12 +1280,15 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
              session.Msp.session_id)
     in
     let* () = validate_session_workspace ~workspace_root session in
+    (* The host is the authority on its own completed turns. The expected
+       count is the one it last reported, moved only by turn endings MASC
+       observed; a count the host could not have reached is refused. *)
     let* () =
-      if session.Msp.turn_count = expected_turn_count
+      if resume_turns_admit expected_turns session.Msp.turn_count
       then Ok ()
       else protocol_error "session/resume"
-          (Printf.sprintf "retained session completed-turn count changed: expected %d, reported %d"
-             expected_turn_count session.Msp.turn_count)
+          (Printf.sprintf "retained session completed-turn count changed: expected %s, reported %d"
+             (resume_turns_to_string expected_turns) session.Msp.turn_count)
     in
     (* The model first: the approval mode set after it is the session state
        the host confirms last, so no other session command follows its check. *)
@@ -1322,7 +1341,7 @@ let run_protocol
   let* () =
     admission (fun () ->
       invoke_state_callback ~stage:"session ready callback" (fun () ->
-        on_session_ready ~session_id))
+        on_session_ready ~session_id ~reported_turns:session.Msp.turn_count))
   in
   let input =
     List.map
@@ -1481,7 +1500,7 @@ let run_turn
       ?(session_mode = Start)
       ?(mcp_servers = [])
       ?reasoning_effort
-      ?(on_session_ready = fun ~session_id:_ -> Ok ())
+      ?(on_session_ready = fun ~session_id:_ ~reported_turns:_ -> Ok ())
       ?(on_prompt_sent = fun () -> ())
       ?(on_context_submission = fun _ -> ())
       ?on_stream_event

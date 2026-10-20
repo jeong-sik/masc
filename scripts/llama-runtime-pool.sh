@@ -37,7 +37,7 @@ mkdir -p "$STATE_DIR"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/llama-runtime-pool.sh <start|status|stop|print-env|bench> [options]
+Usage: scripts/llama-runtime-pool.sh <start|status|stop|print-env> [options]
 
 Options:
   --target-shards N   Total runtime count including the seed port (default: 6)
@@ -363,23 +363,6 @@ stop_pool() {
   done
 }
 
-bench_pool() {
-  if [ -z "${MCP_URL:-}" ]; then
-    echo "MCP_URL is required for bench" >&2
-    exit 1
-  fi
-  local parallelism="${PARALLELISM:-32}"
-  local rounds="${ROUNDS:-1}"
-  curl -sS --http1.1 --max-time 120 -X POST "$MCP_URL" \
-    -H 'Content-Type: application/json' \
-    -H 'Accept: application/json, text/event-stream' \
-    -d "$(jq -cn \
-      --argjson parallelism "$parallelism" \
-      --argjson rounds "$rounds" \
-      '{jsonrpc:"2.0",id:9001,method:"tools/call",params:{name:"masc_llama_runtime_bench",arguments:{parallelism:$parallelism,rounds:$rounds,runtime_pool:"local64"}}}')" \
-    | jq .
-}
-
 COMMAND="${1:-}"
 shift || true
 
@@ -410,7 +393,6 @@ case "$COMMAND" in
   status) status_pool ;;
   stop) stop_pool ;;
   print-env) print_env_value ;;
-  bench) bench_pool ;;
   *)
     usage
     exit 1

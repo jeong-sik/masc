@@ -10,7 +10,7 @@ type error = Invalid_claim of string | Stale_claim | Consumed_claim
   | Busy of string | State_invalid of string | Io_failure of string
   | Identity_unavailable | Termination_refused of Owner_process_identity.error
 val error_to_string : error -> string
-val prepare : directories:string list -> instance_id:string -> (t, error) result
+val prepare : directories:string list -> instance_id:string -> cleanup_context:Yojson.Safe.t option -> (t, error) result
 (** Fence previous unstarted launchers under all claim gates. Refuse a holder,
     live predecessor or unconfirmed foreground group before granting admission.
     An instance is admitted only once in each slot. Its durable reservation is
@@ -31,6 +31,10 @@ val recover_preparation : directory:string -> (preparation, error) result
     treated as a fresh slot. Gate and lease inodes are never replaced. *)
 val instance_id : t -> string
 val directories : t -> string list
+val cleanup_context : t -> (Yojson.Safe.t option, error) result
+(** Immutable host-selected cleanup descriptor retained in every original
+    reservation history, including retirement and process consumption. Missing
+    or inconsistent required state is refused. It grants no process authority. *)
 val retire : t -> (unit, error) result
 (** Durably refuse late execution before attempting cleanup. Idempotent for this
     exact claim; cannot retire a replacement's claim. *)
@@ -52,5 +56,5 @@ val exec : instance_id:string -> directories:string list -> command:string ->
     Never call in the MASC server. No payload starts on partial acquisition. *)
 module For_testing : sig
   val prepare : sync_ancestry:(string -> unit) -> directories:string list ->
-    instance_id:string -> (t, error) result
+    instance_id:string -> cleanup_context:Yojson.Safe.t option -> (t, error) result
 end

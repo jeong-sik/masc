@@ -104,7 +104,7 @@ let make_backend () =
           record (Startup_failed instance_id);
           Error (Lifecycle.Worker_failed detail)
       | Ok engine ->
-      let connection : Runtime.For_testing.connection = {
+      let connection : Runtime.For_testing.connection = {browser=None;
         resolved_image = (match Lane_addon_engine.image_of_inspect container.runtime (match container.runtime with
           | Types.Docker -> "sha256:" ^ String.make 64 'a'
           | Types.Apple_container -> "[{\"configuration\":{\"descriptor\":{\"digest\":\"sha256:" ^ String.make 64 'a' ^ "\"}}}]") with

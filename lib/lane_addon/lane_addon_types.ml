@@ -47,10 +47,12 @@ type model_access = Model_disabled | Host_sampling
 type state_storage = Ephemeral | Persistent
 type tool_invocation = Direct | Host_context
 type tool_hook = Validate_input | Validate_output
+type worker_service = Mcp_tools | Browser_service
 type exact_output = { name : string; schema : Yojson.Safe.t }
 type package = {
   id : string; revision : string; title : string; contributions : contribution list;
   execution : execution;
+  worker_service : worker_service;
   command : string list; directory : string;
   action_tool : string option;
   state_storage : state_storage;
@@ -227,6 +229,7 @@ let package_to_json (p : package) =
     | Host_process specification -> ["runtime", string "host_process"], [],
         `Assoc ["max_reply_bytes", `Int specification.max_reply_bytes] in
   `Assoc (runtime
+    @ (match p.worker_service with Mcp_tools -> [] | Browser_service -> ["service", string "browser"])
     @ (match p.tool_hooks with [] -> [] | hooks ->
       ["tool_hooks", strings (List.map (function
         | Validate_input -> "validate_input" | Validate_output -> "validate_output") hooks)])

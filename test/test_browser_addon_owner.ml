@@ -15,8 +15,8 @@ let pre_effect = function
   | W.Service_refusal {disposition=W.Outcome_unknown;_}
   | W.Snapshot_result _|Poll_result _|Receipt|Issue_result _ -> false
 let command = function
-  | W.Poll_result (Some command) -> command
-  | W.Poll_result None|Snapshot_result _|Receipt|Issue_result _|Service_refusal _ -> fail "expected dispatched command"
+  | W.Poll_result {command=Some command;_} -> command
+  | W.Poll_result {command=None;_}|Snapshot_result _|Receipt|Issue_result _|Service_refusal _ -> fail "expected dispatched command"
 let scenario () = Eio_main.run (fun env ->
   Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5. (fun () -> Eio.Switch.run (fun sw ->

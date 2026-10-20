@@ -58,7 +58,7 @@ let output : Lane_addon_types.output = { rows = []; coverage = [] }
 
 let backend worker : Runtime.For_testing.backend = {
   start = (fun ~sw:_ ~state_owner:_ ~instance_id ~installation_id:_ ~package:_ ~binding:_ ~on_authority ~is_live_instance:_ ~on_created ->
-    let connection : Runtime.For_testing.connection = {
+    let connection : Runtime.For_testing.connection = {browser=None;
         resolved_image = (match Lane_addon_engine.image_of_inspect Lane_addon_types.Docker ("sha256:" ^ String.make 64 'a') with
           | Ok image -> Some image | Error detail -> Alcotest.fail detail);
       observe = (fun ~binding:_ ~sources:_ -> Ok output);

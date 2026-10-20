@@ -688,8 +688,9 @@ let remove_durable_range_receipts ~keepers_dir ~keeper_id =
    entries this binary cannot decode, and receipts the snapshot does not
    prove. Recovering by destroying the only copy of the rejected state is
    not recovery, so a sidecar write failure keeps the entries in place and
-   fails the pass: it retries instead of wedging, because the next pass
-   quarantines them again. Nothing reads a sidecar back. *)
+   fails the pass. Once the sidecar can be written again (a full disk has
+   space), the next pass quarantines them and proceeds. Nothing reads a
+   sidecar back. *)
 let quarantine_skipped_range_receipts ~keepers_dir ~keeper_id ~skipped =
   match skipped with
   | [] -> Ok ()

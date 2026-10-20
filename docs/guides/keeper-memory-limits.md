@@ -93,5 +93,7 @@ that has left the queue is committed history.
   against no snapshot, the remaining explicit writes start the new Memory, as
   durable and continuity input do. That read first copies every receipt it
   drops for lacking snapshot proof to `<keeper>.librarian-range-commit.json.rejected-<time>` with its
-  reason; nothing reads that file back. The operator accepted this transition on
-  2026-10-20 (#44144).
+  reason; nothing reads or removes that file, so it stays until the operator
+  deletes it. If the disk is full the copy cannot be written: the read fails,
+  the receipts stay where they are, and explicit admission stays stopped until
+  space is freed. The operator accepted this transition on 2026-10-20 (#44144).

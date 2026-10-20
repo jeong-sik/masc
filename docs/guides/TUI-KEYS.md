@@ -400,7 +400,7 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `Ctrl-S` | unfold the running turn's status rows, or fold them back to the progress line |
 | `Ctrl-N` | cycle Memory journal summary / full / hidden |
 | `Ctrl-F` | cycle no clock / inline clock / full timestamp and request id |
-| `Ctrl-O` | preview the newest image or Mermaid diagram with Pele; any key returns |
+| `Ctrl-O` | preview the newest image or Mermaid diagram; /images lists all; any key returns |
 | `/approve /deny` | type a command and Enter to answer a tool approval |
 | `/copy` | send the selected Keeper's latest completed reply to the terminal clipboard via OSC 52 |
 | `Q / Ctrl-Q` | Q on an active turn with an empty draft or hidden composer; Ctrl-Q always leaves without interrupting |
@@ -626,6 +626,12 @@ identity require their own evidence when comparing runs.
 | `R` | ask the language server where a name on the cursor line is used; needs the project's reference index, and says which command builds it when there is none |
 | `D` | jump to where a name on the cursor line is defined (one name jumps at once; several open the palette as choices) |
 | `B` | walk back through the definition jumps, newest first |
+| `e` | edit exact server source in $EDITOR; retain draft in this session |
+| `S` | explicitly save using the original revision; a conflict retains the draft |
+| `V` | compare original/current server source with the retained draft |
+| `X` | discard only the local draft, after any submitted save settles |
+| `A (draft)` | after rereading and comparing a conflict, explicitly adopt the server revision |
+| `y` | send the whole readable file's original bytes to the terminal clipboard via OSC 52; terminal support is unconfirmed |
 | `b` | who last touched each run of lines, in the margin; b again drops it |
 | `m` | the memos in the open file: comments on their own row reading masc(name): text, or masc(name) question: text; m again closes the list |
 | `d` | on the project tree, list every working-tree change; on an open file, show that file's diff against HEAD |
@@ -686,8 +692,11 @@ identity require their own evidence when comparing runs.
 | `PgUp/PgDn` | a page of the list, or of the text when it is focused |
 | `Home/End` | the first or last resource, or the ends of the text when it is focused |
 | `Enter` | read the selected resource |
+| `{ / }` | read the adjacent published report revision from its validated history |
+| `, / .` | select the previous or next image part in the loaded resource |
+| `Ctrl-O` | open the selected image from the retained resource bytes |
 | `Esc` | the text hands back to the list; the list leaves for System |
-| `/` | jump the cursor to a matching resource name; the list has to be focused for there to be a cursor to land |
+| `/` | find a resource name in the list, or text in the loaded detail |
 | `n / N` | next / previous match |
 | `r` | reload |
 

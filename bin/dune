@@ -2180,6 +2180,7 @@
  (modules masc_tui_overview_providers)
  (libraries
   masc
+  masc_tui_card
   masc_tui_types
   masc_tui_ansi
   masc_tui_theme

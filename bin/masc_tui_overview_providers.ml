@@ -676,11 +676,28 @@ let style tone text =
 let clip width line =
   if cells_of line <= width then line else Masc_tui_message_layout.fit_width line width
 
-let draw_groups ~show_unusable ~width groups =
-  let module Text = Masc_tui_message_layout in
+(* The column widths one drawing of entries settles on at a width. The name
+   column holds its longest name up to a cap, the label column what is left,
+   and the bar keeps its default width and shrinks, down to its minimum, until
+   the widest amount-and-countdown fits beside it. A row whose detail is still
+   too wide drops the reset clock; one that is wider still moves its detail to
+   a row of its own. *)
+type layout = {
+  width : int;
+  name_cells : int;
+  label_cells : int;
+  bar_cells : int;
+  blank_name : string;
+  continuation : string;
+  continuation_cells : int;
+}
+
+(* [show_names] is [false] where the entry's name is already drawn, as a
+   card's title: the name column is then empty and its width goes to the
+   rest of the row. *)
+let layout_for ~show_names ~width entries =
   let budget = max 1 (width - indent_cells) in
   let widest cells_of_item items = List.fold_left (fun w item -> max w (cells_of_item item)) 0 items in
-  let entries = List.concat_map snd groups in
   let window_lines =
     List.concat_map
       (fun entry ->
@@ -688,9 +705,11 @@ let draw_groups ~show_unusable ~width groups =
       entries
   in
   let name_cells =
-    min
-      (widest (fun entry -> cells_of entry.de_name) entries)
-      (min name_cells_cap (max name_cells_min (budget / name_width_divisor)))
+    if not show_names then 0
+    else
+      min
+        (widest (fun entry -> cells_of entry.de_name) entries)
+        (min name_cells_cap (max name_cells_min (budget / name_width_divisor)))
   in
   let barred_lines =
     List.filter
@@ -710,26 +729,32 @@ let draw_groups ~show_unusable ~width groups =
   let head_cells_without_bar =
     name_cells + 1 + label_cells + 1 + bar_frame_cells + 1 + percent_cells
   in
-  (* The bar keeps its default width and shrinks, down to its minimum, until
-     the widest amount-and-countdown fits beside it. A row whose detail is
-     still too wide drops the reset clock; one that is wider still moves its
-     detail to a row of its own. *)
   let detail_room = budget - head_cells_without_bar - cells_of detail_gap in
   let bar_cells = max bar_cells_min (min bar_cells_default (detail_room - widest_base)) in
   let blank_name = String.make name_cells ' ' in
-  let continuation = indent ^ blank_name ^ " " in
-  let continuation_cells = max 1 (budget - name_cells - 1) in
+  { width
+  ; name_cells
+  ; label_cells
+  ; bar_cells
+  ; blank_name
+  ; continuation = indent ^ blank_name ^ " "
+  ; continuation_cells = max 1 (budget - name_cells - 1)
+  }
+
+(* One entry's rows, at the columns [layout] settled on. *)
+let draw_entry layout tone entry =
+  let module Text = Masc_tui_message_layout in
   let name_cell tone name =
-    Ansi.bold ^ tone ^ Text.fit_middle name_cells name ^ Ansi.reset
+    Ansi.bold ^ tone ^ Text.fit_middle layout.name_cells name ^ Ansi.reset
   in
   let window_row tone ~first line =
-    let name = match first with Some name -> name_cell tone name | None -> blank_name in
-    let label = Text.fit_middle label_cells line.label in
-    let gauge_width = bar_cells + bar_frame_cells + 1 + percent_cells in
+    let name = match first with Some name -> name_cell tone name | None -> layout.blank_name in
+    let label = Text.fit_middle layout.label_cells line.label in
+    let gauge_width = layout.bar_cells + bar_frame_cells + 1 + percent_cells in
     let gauge =
       match line.share with
       | Some share ->
-          meter_open ^ meter ~cells:bar_cells share ^ meter_close ^ " "
+          meter_open ^ meter ~cells:layout.bar_cells share ^ meter_close ^ " "
           ^ pad_left line.percent percent_cells
       | None -> String.make gauge_width ' '
     in
@@ -748,70 +773,137 @@ let draw_groups ~show_unusable ~width groups =
         bodies
     in
     let fits (body, gap, detail) =
-      cells_of (head body) + cells_of gap + cells_of detail <= width
+      cells_of (head body) + cells_of gap + cells_of detail <= layout.width
     in
     match List.find_opt fits placements with
     | Some (body, gap, detail) -> [ head body ^ gap ^ style line.detail_tone detail ]
     | None ->
         head (rstrip_spaces (label ^ " " ^ gauge))
         :: List.map
-             (fun wrapped -> continuation ^ style line.detail_tone wrapped)
-             (Text.wrap_words ~max_cells:continuation_cells line.detail)
+             (fun wrapped -> layout.continuation ^ style line.detail_tone wrapped)
+             (Text.wrap_words ~max_cells:layout.continuation_cells line.detail)
   in
   let note_lines ?tone text =
     List.map
-      (fun wrapped -> continuation ^ style tone wrapped)
-      (Text.wrap_words ~max_cells:continuation_cells text)
+      (fun wrapped -> layout.continuation ^ style tone wrapped)
+      (Text.wrap_words ~max_cells:layout.continuation_cells text)
   in
-  let draw_entry tone entry =
-    let rows =
-      match entry.de_body with
-      | Window_lines lines ->
-          List.concat
-            (List.mapi
-               (fun index line ->
-                 window_row tone ~first:(if index = 0 then Some entry.de_name else None) line)
-               lines)
-      | State_text text ->
-          (match Text.wrap_words ~max_cells:continuation_cells text with
-           | [] -> [ indent ^ name_cell tone entry.de_name ]
-           | first :: rest ->
-               (indent ^ name_cell tone entry.de_name ^ " " ^ first)
-               :: List.map (fun wrapped -> continuation ^ wrapped) rest)
-    in
-    rows
-    @ (match entry.de_tag with
-       | None -> []
-       | Some tag -> note_lines ~tone:(Theme.bad ()) ("Catalogue \xc2\xb7 " ^ tag))
-    @ (match entry.de_email with
-       | None -> []
-       | Some email -> note_lines ~tone:(Theme.recede ()) email)
+  let rows =
+    match entry.de_body with
+    | Window_lines lines ->
+        List.concat
+          (List.mapi
+             (fun index line ->
+               window_row tone ~first:(if index = 0 then Some entry.de_name else None) line)
+             lines)
+    | State_text text ->
+        (match Text.wrap_words ~max_cells:layout.continuation_cells text with
+         | [] -> [ indent ^ name_cell tone entry.de_name ]
+         | first :: rest ->
+             (indent ^ name_cell tone entry.de_name ^ " " ^ first)
+             :: List.map (fun wrapped -> layout.continuation ^ wrapped) rest)
   in
-  (* One empty line between accounts so a multi-window account reads as a unit. *)
-  let rec separated_entries = function
-    | [] -> []
-    | [ entry ] -> entry
-    | entry :: rest -> entry @ ("" :: separated_entries rest)
-  in
+  rows
+  @ (match entry.de_tag with
+     | None -> []
+     | Some tag -> note_lines ~tone:(Theme.bad ()) ("Catalogue \xc2\xb7 " ^ tag))
+  @ (match entry.de_email with
+     | None -> []
+     | Some email -> note_lines ~tone:(Theme.recede ()) email)
+
+let group_heading section entries =
+  " " ^ Ansi.bold ^ section_tone section
+  ^ Printf.sprintf "%s (%d)" (section_title section) (List.length entries)
+  ^ Ansi.reset
+
+let hidden_unusable_heading section entries =
+  group_heading section entries
+  ^ Theme.recede () ^ " \xc2\xb7 hidden \xc2\xb7 x:show" ^ Ansi.reset
+
+(* One empty line between blocks so each reads as a unit. *)
+let rec separated = function
+  | [] -> []
+  | [ block ] -> block
+  | block :: rest -> block @ ("" :: separated rest)
+
+let draw_groups ~show_unusable ~width groups =
+  let entries = List.concat_map snd groups in
+  let layout = layout_for ~show_names:true ~width entries in
   let draw_group (section, entries) =
-    let tone = section_tone section in
-    let heading =
-      " " ^ Ansi.bold ^ tone
-      ^ Printf.sprintf "%s (%d)" (section_title section) (List.length entries)
-      ^ Ansi.reset
-    in
     match section with
-    | Unusable_now when not show_unusable ->
-        [ heading ^ Theme.recede () ^ " \xc2\xb7 hidden \xc2\xb7 x:show" ^ Ansi.reset ]
+    | Unusable_now when not show_unusable -> [ hidden_unusable_heading section entries ]
     | Unusable_now | Usable | No_report ->
-        heading :: separated_entries (List.map (draw_entry tone) entries)
+        group_heading section entries
+        :: separated (List.map (draw_entry layout (section_tone section)) entries)
   in
-  let rec separated = function
-    | [] -> []
-    | [ group ] -> draw_group group
-    | group :: rest -> draw_group group @ ("" :: separated rest)
+  List.map (clip width) (separated (List.map draw_group groups))
+
+(* ---- cards: one box per account ----------------------------------------- *)
+
+(* Two columns of cards, so a card is at least this wide. A window's label,
+   bar, percent and reset countdown take about this many cells at the default
+   bar width; a card a little narrower still reads, with the longest countdown
+   moved to a row of its own. *)
+let card_columns = 2
+let card_gap = 2
+let card_min_width = 52
+let card_row_gap = 1
+
+let cards_fit ~width =
+  Masc_tui_card.columns_that_fit ~inner_width:(max 0 (width - indent_cells))
+    ~gap:card_gap ~min_card_width:card_min_width ~max_columns:card_columns
+  >= card_columns
+
+let rec pairs = function
+  | [] -> []
+  | [ only ] -> [ [ only ] ]
+  | first :: second :: rest -> [ first; second ] :: pairs rest
+
+(* An account's windows as a card titled with its name. The name column is
+   empty inside the card: the title already says it. *)
+let account_card ~tone entry =
+  { Masc_tui_card.title = entry.de_name
+  ; body =
+      (fun ~cells ->
+        draw_entry (layout_for ~show_names:false ~width:cells [ entry ]) tone entry)
+  }
+
+(* Each pair of accounts is one row of cards that end on the same line; a lone
+   last account leaves its neighbour's place empty rather than stretching
+   across the screen. *)
+let draw_card_rows ~width ~tone entries =
+  let style =
+    { Masc_tui_card.edge = Theme.recede ()
+    ; title_style = Ansi.bold ^ tone
+    ; reset = Ansi.reset
+    }
   in
-  List.map (clip width) (separated groups)
+  let inner_width = max 0 (width - indent_cells) in
+  let row pair =
+    let cards = List.map (account_card ~tone) pair in
+    let columns =
+      match cards with
+      | [ only ] -> [ [ only ]; [] ]
+      | _ :: _ :: _ | [] -> List.map (fun card -> [ card ]) cards
+    in
+    match
+      Masc_tui_card.grid ~style ~inner_width ~gap:card_gap ~row_gap:card_row_gap
+        ~max_rows:max_int columns
+    with
+    | Some rows -> List.map (fun line -> indent ^ line) rows
+    | None -> []
+  in
+  separated (List.map row (pairs entries))
+
+let draw_cards ~show_unusable ~width groups =
+  let draw_group (section, entries) =
+    match section with
+    | Unusable_now when not show_unusable -> [ hidden_unusable_heading section entries ]
+    | Unusable_now | Usable | No_report ->
+        group_heading section entries
+        :: draw_card_rows ~width ~tone:(section_tone section) entries
+  in
+  List.map (clip width) (separated (List.map draw_group groups))
 
 type blocked_count =
   | Blocked_unknown
@@ -853,8 +945,8 @@ let counts ~runtimes (accounts : Masc.Tui_decode_usage.provider_usage_account li
 
 let title_text () = Printf.sprintf " %sPlan usage%s" Ansi.bold Ansi.reset
 
-let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_emails ~now
-    ~show_unusable ~width =
+let section_with ~draw ~(providers : Types.overview_providers_reading) ~runtimes
+    ~account_emails ~now ~width =
   match providers with
   | Types.Providers_unread -> None
   | Types.Providers_failed reason ->
@@ -867,8 +959,7 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_e
         }
   | Types.Providers_read { Masc.Tui_decode_usage.puws_since = _; puws_accounts } ->
       let rows =
-        draw_groups ~show_unusable ~width
-          (drawn_groups ~now ~account_emails (plan ~now ~runtimes puws_accounts))
+        draw (drawn_groups ~now ~account_emails (plan ~now ~runtimes puws_accounts))
       in
       (* Without the runtime rows the exhausted tag cannot be drawn; the
          section says so instead of drawing every account untagged. *)
@@ -917,3 +1008,14 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_e
             { title = title_text ()
             ; lines = summary @ ("" :: rows) @ notes
             }
+
+let section ~providers ~runtimes ~account_emails ~now ~show_unusable ~width =
+  section_with ~draw:(draw_groups ~show_unusable ~width) ~providers ~runtimes
+    ~account_emails ~now ~width
+
+let section_cards ~providers ~runtimes ~account_emails ~now ~show_unusable ~width =
+  let draw =
+    if cards_fit ~width then draw_cards ~show_unusable ~width
+    else draw_groups ~show_unusable ~width
+  in
+  section_with ~draw ~providers ~runtimes ~account_emails ~now ~width

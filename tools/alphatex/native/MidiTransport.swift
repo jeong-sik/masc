@@ -901,6 +901,10 @@ final class MidiTransport {
         else { cycleAcquired.removeAll() }
     }
     func apply(_ event: Event) throws {
+        // Record before sending on purpose: if send throws, the note may still
+        // have sounded, and finish()/silence() must release it. Every caller
+        // funnels throws to finish, so no phantom can survive to the next
+        // reconcile; reordering this drops the compensating release.
         if event.kind == .on { held[event.key] = event }
         try send(event.bytes())
         if event.kind == .off { held.removeValue(forKey: event.key) }

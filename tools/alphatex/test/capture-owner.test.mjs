@@ -44,7 +44,7 @@ async function scenario(paired) {
   assert.equal(observed.spawn.length,1,'actual wrapper admits the selected capture route')
   assert.ok(observed.spawn[0].args.includes('--output'))
   assert.equal(observed.spawn[0].args.at(-1),'selected-audio')
-  const event={kind:'playing',currentTime:0,duration:1,device:{id:'selected-audio',name:'Audio',outputs:2},loop:false,...(paired?{format:'capture-session',clock:{kind:'mach-host-time'},bindings:[{port:0,device:{kind:'midi',protocol:2,id:'123',name:'MIDI'}}]}:{})}
+  const event={kind:'playing',currentTime:0,duration:1,device:{id:'selected-audio',name:'Audio',outputs:2},loop:false,...(paired?{format:'capture-session',clock:{kind:'mach-host-time'},bindings:[{port:0,device:{kind:'midi',protocol:2,nativeProtocol:2,id:'123',name:'MIDI'}}]}:{})}
   observed.child.stdout.write(JSON.stringify(event)+'\n');await flush()
   process.stdin.emit('keypress','p',{name:'p'});await flush()
   assert.deepEqual(observed.commands.at(-1),{kind:'pause'})

@@ -11,7 +11,7 @@ try {
 import CoreMIDI
 @main enum Probe {
  static func main() throws {
-  func refuses(_ block:()throws->Void) { do {try block();tracePreconditionFailure("unsupported output admitted")} catch {} }
+  func refuses(_ block:()throws->Void,file:StaticString=#file,line:UInt=#line) { do {try block();tracePreconditionFailure("unsupported output admitted",file:file,line:line)} catch {} }
   func event(_ words:[UInt32])->UmpEvent {UmpEvent(seconds:0,source:"A",words:words)}
   // Use the specification's bit-repeat formula as a separate oracle.
   func canonical(_ x:UInt32,_ bits:Int,_ out:Int)->UInt32 {

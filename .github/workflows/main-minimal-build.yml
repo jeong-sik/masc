@@ -53,7 +53,7 @@ jobs:
           print(hashlib.sha256(b''.join(inputs)).hexdigest())
           PY
           )
-          echo "receipt=main-build-receipt-v1-${ImageOS}-${ImageVersion}-${digest}" >> "$GITHUB_OUTPUT"
+          echo "receipt=main-build-receipt-v2-${ImageOS}-${ImageVersion}-${digest}" >> "$GITHUB_OUTPUT"
           echo "dune=main-dune-v1-${ImageOS}-${ImageVersion}" >> "$GITHUB_OUTPUT"
           echo "DUNE_CACHE_ROOT=$RUNNER_TEMP/masc-dune-cache" >> "$GITHUB_ENV"
 
@@ -68,8 +68,12 @@ jobs:
         if: steps.receipt.outputs.cache-hit != 'true'
       - uses: ./.github/actions/pin-ocaml-deps
         if: steps.receipt.outputs.cache-hit != 'true'
+      # Test dependencies are needed so the type-check step below can
+      # resolve the test tree's libraries.
       - uses: ./.github/actions/install-ocaml-deps
         if: steps.receipt.outputs.cache-hit != 'true'
+        with:
+          install-flags: --with-test
 
       - name: Reuse Dune build artifacts
         if: steps.receipt.outputs.cache-hit != 'true'
@@ -81,13 +85,27 @@ jobs:
             ${{ steps.inputs.outputs.dune }}-
 
       - name: Build the operator executables
+        id: product
         if: steps.receipt.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           opam exec -- dune build --root . \
             bin/main_eio.exe bin/masc_tui.exe bin/masc_browser_host.exe \
             bin/deployment_preflight_helper.exe
-          printf '%s\n' "$GITHUB_SHA" > .ci-main-build-receipt
+
+      # Type-check the whole tree, tests included, so a broken test tree is
+      # caught on main instead of at release-candidate time. It also runs
+      # when the product build failed, so both results are reported.
+      - name: Type-check the tree (dune build @check)
+        id: check
+        if: (success() || failure()) && steps.receipt.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          opam exec -- dune build --root . @check
+
+      - name: Write the receipt
+        if: success() && steps.receipt.outputs.cache-hit != 'true'
+        run: printf '%s\n' "$GITHUB_SHA" > .ci-main-build-receipt
 
       # Only a completed successful build creates a receipt. Failures retry
       # at the next scheduled check; cache eviction also causes a rebuild.
@@ -103,15 +121,18 @@ jobs:
         env:
           RECEIPT_HIT: ${{ steps.receipt.outputs.cache-hit }}
           BUILD_STATUS: ${{ job.status }}
+          PRODUCT_OUTCOME: ${{ steps.product.outcome }}
+          CHECK_OUTCOME: ${{ steps.check.outcome }}
         run: |
           {
             echo "Checked main SHA: $GITHUB_SHA"
             if [ "$RECEIPT_HIT" = true ]; then
-              echo 'Build skipped: non-documentation inputs already built successfully.'
+              echo 'Build skipped: non-documentation inputs already built and type-checked successfully.'
               echo "Previously built SHA: $(cat .ci-main-build-receipt)"
               echo 'This skip is not compilation evidence for the checked SHA.'
             else
               echo "Build job status: $BUILD_STATUS"
-              echo 'Scope: server, TUI, browser host, deployment preflight; no tests.'
+              echo "Product build (server, TUI, browser host, deployment preflight): $PRODUCT_OUTCOME"
+              echo "Type-check of the whole tree (dune build @check; tests compiled, not run): $CHECK_OUTCOME"
             fi
           } >> "$GITHUB_STEP_SUMMARY"

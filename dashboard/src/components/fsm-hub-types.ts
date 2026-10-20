@@ -253,13 +253,13 @@ export function executionOutcomeLabel(value: string | null | undefined): string 
 
 /** Korean labels for `trust.disposition`. Kept separate from
  *  `STATE_DISPLAY_NAMES` to avoid collision on generic PascalCase
- *  tokens that other axes also emit. `Degraded` shows as the server
- *  sends it. */
+ *  tokens that other axes also emit. `Degraded` is the row the server
+ *  builds when it could not read the Keeper, so its verdict is unknown. */
 const TRUST_DISPOSITION_LABELS: Record<TrustDisposition, string> = {
   Pass: '통과',
   Alert: '경보',
   Blocked: '차단',
-  Degraded: 'Degraded',
+  Degraded: '확인 불가',
 }
 
 export function trustDispositionLabel(value: TrustDisposition | null | undefined): string | null {

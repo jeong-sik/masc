@@ -305,6 +305,64 @@ let test_failed_admission_is_recorded_without_grading () =
     [ "fresh"; "stale" ]
 ;;
 
+let test_status_response_must_identify_admitted_operation () =
+  let root = source_root () in
+  let fixture = Filename.concat root "test/fixtures/coding_eval_operation_response.sh" in
+  List.iter
+    (fun (response, expected_status, expected_passed, invalid_response) ->
+       let proof_dir = temp_dir "coding_eval_operation_" in
+       let command =
+         "bash " ^ String.concat " "
+           (List.map Filename.quote [ fixture; root; proof_dir; response ])
+       in
+       check int "actual episode driver finishes" 0 (Sys.command command);
+       let rows =
+         match Coding_eval_report.rows_of_jsonl_file (Filename.concat proof_dir "out/runs.jsonl") with
+         | Error message -> fail message
+         | Ok rows -> rows
+       in
+       (match rows with
+        | [ row ] ->
+          check bool "status reflects the response identity" true (row.status = expected_status);
+          check bool "only its own successful response passes" expected_passed row.passed;
+          check (option int) "prepared artifact is still graded" (Some 0) row.verify_exit;
+          check (option string) "admitted identity is preserved" (Some "kmsg-accepted")
+            (Option.map Keeper_operation_id.to_string row.operation_id);
+          if invalid_response then
+            check (option string) "identity failure is not overwritten as a timeout"
+              (Some "keeper_delegate_status returned no matching operation_id") row.error
+        | _ -> fail "expected exactly one operation episode row");
+       let lookup =
+         Yojson.Safe.from_file (Filename.concat proof_dir "status-request.json")
+         |> Yojson.Safe.Util.member "operation_id" |> Yojson.Safe.Util.to_string
+       in
+       check string "lookup uses the admitted identity" "kmsg-accepted" lookup;
+       let run_dir = Filename.concat proof_dir "out/runs/fixture-model-l1-calc-add-r1" in
+       if invalid_response then (
+         let channel = open_in_bin (Filename.concat run_dir "operation-invalid.json") in
+         let retained =
+           Fun.protect ~finally:(fun () -> close_in_noerr channel)
+             (fun () -> really_input_string channel (in_channel_length channel))
+         in
+         check string "contradictory response bytes are retained" response retained;
+         check bool "contradictory response is not a final outcome" false
+           (Sys.file_exists (Filename.concat run_dir "operation-final.json")))
+       else
+         check bool "matching terminal response is retained" true
+           (Sys.file_exists (Filename.concat run_dir "operation-final.json")))
+    [ {|{"operation_id":"kmsg-accepted","state":"Succeeded"}|}, Coding_eval_report.Run_ok, true, false
+    ; {|{"operation_id":"kmsg-accepted","state":"Failed"}|}, Coding_eval_report.Run_provider_error, false, false
+    ; {|{"operation_id":"kmsg-other","state":"Succeeded"}|}, Coding_eval_report.Run_transport_error, false, true
+    ; {|{"operation_id":"kmsg-other","state":"Running"}|}, Coding_eval_report.Run_transport_error, false, true
+    ; {|{"state":"Succeeded"}|}, Coding_eval_report.Run_transport_error, false, true
+    ; {|{"operation_id":null,"state":"Succeeded"}|}, Coding_eval_report.Run_transport_error, false, true
+    ; {|{"operation_id":42,"state":"Succeeded"}|}, Coding_eval_report.Run_transport_error, false, true
+    ; "", Coding_eval_report.Run_transport_error, false, true
+    ; "not json", Coding_eval_report.Run_transport_error, false, true
+    ; {|{"operation_id":"kmsg-accepted","state":"Succeeded"} {}|}, Coding_eval_report.Run_transport_error, false, true
+    ]
+;;
+
 let test_admission_without_operation_identity_is_refused () =
   let helper = Filename.concat (source_root ()) "scripts/harness/lib/coding_eval_evidence.sh" in
   List.iter
@@ -601,6 +659,8 @@ let () =
         ; test_case "real harness rows decode" `Quick test_report_decodes_real_harness_rows
         ; test_case "failed admission records its episode without grading" `Quick
             test_failed_admission_is_recorded_without_grading
+        ; test_case "status response identifies the admitted operation" `Quick
+            test_status_response_must_identify_admitted_operation
         ; test_case "operation identity is observed, never inferred" `Quick
             test_report_rejects_invalid_operation_identity
         ; test_case "admission must return an operation identity" `Quick

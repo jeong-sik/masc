@@ -47,6 +47,12 @@ remains available on other terminals. In the score view:
 Install `scripts/install-vst-host.sh` with Python 3.12+ to use installed VST3
 instruments. The host runs natively so vendor libraries and licensing stay on
 the user's machine. The picker remembers the exact instrument and preset.
+
+The continuous VST synthesis and [device-clocked PCM output](native/PCM-OUTPUT.md)
+layers support live-audition integration. The PCM companion requires macOS15+
+and Swift6. It uses the selected output's sample rate and hardware buffer size,
+pins that device, and reports underrun rather than silently queuing late audio.
+These layers do not yet enable live keyboard monitoring in the piano-roll UI.
 Loading, licensing, rendering and silent-output failures are reported without
 substituting another instrument. Cubase-bundled instruments such as Retrologue
 and HALion Sonic appear when installed; usable sounds still depend on the user's

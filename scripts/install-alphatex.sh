@@ -15,7 +15,7 @@ command -v pnpm >/dev/null 2>&1 || { printf '%s\n' 'pnpm is required to install 
 node -e 'if (Number(process.versions.node.split(".")[0]) < 22) process.exit(1)'
 mkdir -p "$prefix"
 prefix=$(CDPATH= cd -- "$prefix" && pwd)
-runtime_files='vst-stream.mjs midi-source-picker.mjs step-input.mjs midi-input.mjs native/MidiInput.swift arrangement-vst.mjs source-audio-clock.mjs native/SourceAudioClock.swift exact-time.mjs project-sound.mjs project-sound-files.mjs score-handoff.mjs native/WaveLoopClock.swift arrangement-loop.mjs midi-expression.mjs music-library-info.mjs music-library-worker.mjs music-workbench.mjs phrase-arrangement.mjs arrangement-practice.mjs native/PulseAudioClock.swift native/PulseLoopClock.swift recording-correction.mjs calibration-profile.mjs calibration-files.mjs capture-placement.mjs audio-calibration.mjs live-midi.mjs package.json pnpm-lock.yaml engine.mjs audio.mjs diagnostics.mjs worker.mjs terminal.mjs viewer.mjs capture.mjs session-data.mjs capture-time.mjs captured-source.mjs captured-source-files.mjs capture-playback.mjs music-session.mjs wave-file.mjs sequencer-project.mjs arrangement.mjs arrangement-files.mjs arrangement-editor.mjs arrangement-worker.mjs arrangement-tui.mjs arrangement-playback.mjs arrangement-recording.mjs sequencer-files.mjs sequencer-audio.mjs sequencer-midi.mjs midi-source.mjs midi-source-editor.mjs note-selection.mjs midi-source-playback.mjs sequencer-editor.mjs sequencer-vst.mjs sequencer-worker.mjs sequencer-tui.mjs playback.mjs native/MusicSession.swift native/MusicTransport.swift native/MidiTransport.swift native/WaveArrangement.swift native/CaptureAudioClock.swift native/UmpTransport.swift native/UmpOutput.swift native/UmpRegions.swift native/HybridMidiTransport.swift native/UmpLoopTransport.swift native/UmpState.swift native/Info.plist native/UmpLiveInput.swift native/LiveMidiMain.swift native/LiveMidiReservations.swift vst.mjs instruments.mjs'
+runtime_files='pcm-output.mjs native/PcmRing.swift native/PcmOutput.swift vst-stream.mjs midi-source-picker.mjs step-input.mjs midi-input.mjs native/MidiInput.swift arrangement-vst.mjs source-audio-clock.mjs native/SourceAudioClock.swift exact-time.mjs project-sound.mjs project-sound-files.mjs score-handoff.mjs native/WaveLoopClock.swift arrangement-loop.mjs midi-expression.mjs music-library-info.mjs music-library-worker.mjs music-workbench.mjs phrase-arrangement.mjs arrangement-practice.mjs native/PulseAudioClock.swift native/PulseLoopClock.swift recording-correction.mjs calibration-profile.mjs calibration-files.mjs capture-placement.mjs audio-calibration.mjs live-midi.mjs package.json pnpm-lock.yaml engine.mjs audio.mjs diagnostics.mjs worker.mjs terminal.mjs viewer.mjs capture.mjs session-data.mjs capture-time.mjs captured-source.mjs captured-source-files.mjs capture-playback.mjs music-session.mjs wave-file.mjs sequencer-project.mjs arrangement.mjs arrangement-files.mjs arrangement-editor.mjs arrangement-worker.mjs arrangement-tui.mjs arrangement-playback.mjs arrangement-recording.mjs sequencer-files.mjs sequencer-audio.mjs sequencer-midi.mjs midi-source.mjs midi-source-editor.mjs note-selection.mjs midi-source-playback.mjs sequencer-editor.mjs sequencer-vst.mjs sequencer-worker.mjs sequencer-tui.mjs playback.mjs native/MusicSession.swift native/MusicTransport.swift native/MidiTransport.swift native/WaveArrangement.swift native/CaptureAudioClock.swift native/UmpTransport.swift native/UmpOutput.swift native/UmpRegions.swift native/HybridMidiTransport.swift native/UmpLoopTransport.swift native/UmpState.swift native/Info.plist native/UmpLiveInput.swift native/LiveMidiMain.swift native/LiveMidiReservations.swift vst.mjs instruments.mjs'
 revision=$(node --input-type=module - "$repo_root/tools/alphatex" $runtime_files <<'FINGERPRINT'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -71,6 +71,17 @@ if [ "$(uname -s)" = Darwin ] && [ ! -x "$support_dir/music-transport" ]; then
     trap - EXIT HUP INT TERM
   else
     printf '%s\n' 'Native sequencer playback requires the Xcode command-line tools.' >&2
+  fi
+fi
+if [ "$(uname -s)" = Darwin ] && [ ! -x "$support_dir/music-pcm-output" ]; then
+  if xcrun --find swiftc >/dev/null 2>&1; then
+    pcm_output_binary=$(mktemp "$support_dir/.music-pcm-output.XXXXXX")
+    trap 'rm -f "$pcm_output_binary"' EXIT HUP INT TERM
+    xcrun swiftc -parse-as-library -O "$support_dir/native/PcmRing.swift" "$support_dir/native/PcmOutput.swift" -o "$pcm_output_binary" \
+      -framework AVFoundation -framework CoreAudio
+    chmod 755 "$pcm_output_binary"
+    mv -f "$pcm_output_binary" "$support_dir/music-pcm-output"
+    trap - EXIT HUP INT TERM
   fi
 fi
 if [ "$(uname -s)" = Darwin ] && [ ! -x "$support_dir/music-midi" ]; then

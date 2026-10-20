@@ -1,0 +1,77 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import { openPcmOutput } from '../pcm-output.mjs'
+
+function options(mode) {
+  return { output: 'owned', spawnProcess(exe, args, opts) {
+    return spawn(process.execPath, [fileURLToPath(new URL('./fixtures/pcm-output.mjs', import.meta.url)), mode, ...args], opts)
+  } }
+}
+test('device demand supplies PCM exactly once; stop joins an owned producer after actual child closure', async () => {
+  let requested, complete, childClosed, resolveBlock
+  const demand = new Promise(resolve => { requested = resolve })
+  const close = new Promise(resolve => { childClosed = resolve })
+  const base = options('valid')
+  const owner = openPcmOutput({ ...base, spawnProcess(...args) {
+    const child = base.spawnProcess(...args); child.once('close', childClosed); return child
+  }, provideBlock(request) {
+    assert.equal(request.sampleRate, 48000); assert.equal(request.frames, 8)
+    requested(request)
+    return new Promise(resolve => { resolveBlock = resolve })
+  } })
+  const info = await owner.ready; info.blockFrames = 999 // must not change owned validation
+  const request = await demand
+  owner.completion.finally(() => { complete = true }).catch(() => {})
+  owner.stop()
+  assert.equal(request.signal.aborted, true)
+  await close
+  assert.equal(complete, undefined)
+  resolveBlock(Buffer.alloc(64))
+  assert.equal((await owner.completion).admittedFrames, '0')
+})
+test('prefill and playing acknowledgements may already be queued when stop is requested', async () => {
+  const requests = []
+  let owner
+  owner = openPcmOutput({ ...options('valid'), provideBlock(row) {
+    requests.push([row.id, row.startFrame]); return Buffer.alloc(row.frames * 8)
+  }, onEvent(event) { if (event.kind === 'playing') owner.stop() } })
+  await owner.ready
+  const final = await owner.completion
+  assert.deepEqual(requests.slice(0, 2), [['1', '0'], ['2', '8']])
+  assert.equal(final.admittedFrames, '16')
+})
+test('identity, demand, PCM, underrun and finalization errors reject after closure', async () => {
+  for (const mode of ['identity', 'demand', 'underrun', 'total', 'unfinalized', 'exit', 'bad-pcm', 'nan']) {
+    let owner, closed = false
+    const base = options(mode)
+    owner = openPcmOutput({ ...base, spawnProcess(...args) {
+      const child = base.spawnProcess(...args); child.once('close', () => { closed = true }); return child
+    }, provideBlock(row) {
+      const pcm = Buffer.alloc(mode === 'bad-pcm' ? 1 : row.frames * 8)
+      if (mode === 'nan') pcm.writeFloatLE(NaN)
+      return pcm
+    }, onEvent(row) { if (row.kind === 'playing' && ['total', 'unfinalized', 'exit'].includes(mode)) owner.stop() } })
+    if (mode === 'identity') await assert.rejects(owner.ready)
+    else await owner.ready
+    await assert.rejects(owner.completion)
+    assert.equal(closed, true)
+  }
+})
+test('preabort spawns nothing and every falsy cancellation cause remains failure', async () => {
+  const pre = new AbortController(); pre.abort()
+  assert.throws(() => openPcmOutput({ signal: pre.signal, provideBlock() {}, spawnProcess() { assert.fail('spawned') } }))
+  for (const reason of [null, false, 0, '']) for (const kind of ['cancel', 'signal']) {
+    const cancellation = new AbortController()
+    let requested
+    const demand = new Promise(resolve => { requested = resolve })
+    const owner = openPcmOutput({ ...options('cancel-race'), signal: cancellation.signal, provideBlock(row) {
+      requested(); return new Promise((resolve, reject) => row.signal.addEventListener('abort', () => reject(row.signal.reason), { once: true }))
+    } })
+    await demand
+    owner.stop()
+    if (kind === 'cancel') owner.cancel(reason); else cancellation.abort(reason)
+    await assert.rejects(owner.completion, error => error.cause === reason)
+  }
+})

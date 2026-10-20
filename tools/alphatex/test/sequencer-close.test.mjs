@@ -101,6 +101,14 @@ test('admitted clipboard edits drain into close and Escape clears a selection wi
   assert.deepEqual(view.observed.saved.at(-1).tracks[0].notes.map(note=>[note.pitch,note.start]),[[60,0],[60,4*PPQ]])
 })
 
+test('the x key removes the selected note group in one undoable decision', async () => {
+  let initial=editor.newEditor()
+  for(const line of ['note C4 0 1','note E4 1 1'])initial=editor.editorCommand(initial,line).editor
+  const view=await controller({initialDocument:initial.project})
+  view.command('select-all');view.key('x');await flush();view.key('q');await view.done
+  assert.deepEqual(view.observed.saved.at(-1).tracks[0].notes,[])
+})
+
 test('analysis owns note keys, then selecting an interval returns to the intended voicing edit', async () => {
   let initial = editor.newEditor()
   for (const line of ['chord Cmaj7 0 4','chord Dm7 4 4']) initial = editor.editorCommand(initial,line).editor

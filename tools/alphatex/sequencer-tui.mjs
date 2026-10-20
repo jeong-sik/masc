@@ -532,7 +532,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
             prompt = (tempoView ? 'tempo-value ' : 'event-value ') + event.value
           } else editor = editorAction(editor, { kind: 'toggle-note' })
           break
-        case 'x': editor = editorAction(editor, { kind: editor.eventView ? tempoView ? 'tempo-remove' : 'expression-remove' : 'toggle-note' }); break
+        case 'x': editor = editorAction(editor, { kind: editor.eventView ? tempoView ? 'tempo-remove' : 'expression-remove' : selectedNotes(editor).length ? 'remove' : 'toggle-note' }); break
         case 'delete': case 'backspace': editor = editorAction(editor, { kind: editor.eventView ? tempoView ? 'tempo-remove' : 'expression-remove' : 'remove' }); break
         case 'u': editor = editorAction(editor, { kind: 'undo' }); break
         case 'y': editor = editorAction(editor, { kind: 'redo' }); break

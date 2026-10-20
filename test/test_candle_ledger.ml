@@ -147,7 +147,8 @@ let balance_of_view view =
 
 (* A receipt remains tied to the frozen contributing tasks, even when its
    historical arithmetic differs from the current append formula. *)
-let payment_prerequisites (row : E.t) =
+let payment_prerequisites ?completed_at (row : E.t) =
+  let completed_at = Option.value completed_at ~default:row.at in
   let payment = payment_of_event row in
   let { Candle_appraisal.goal_id; request_id; verification_run_id } = payment.identity in
   let task_keepers = List.map2
@@ -164,7 +165,7 @@ let payment_prerequisites (row : E.t) =
   ; { E.at = row.at; body = E.Candidates {
         goal_id; request_id; verification_run_id;
         tasks = List.map (fun (id, keeper) -> id, E.Found {
-          title = id; assignee = Some keeper; status = E.Done {completed_at = row.at} }) task_keepers;
+          title = id; assignee = Some keeper; status = E.Done {completed_at} }) task_keepers;
         candidate_task_ids = ids; candidate_keepers = List.map snd task_keepers;
         candidate_task_keepers = List.map (fun (id, keeper) -> id, Some keeper) task_keepers } }
   ]
@@ -172,6 +173,20 @@ let payment_prerequisites (row : E.t) =
 
 let event_lines rows =
   String.concat "" (List.map (fun row -> ok_or_fail (E.to_line row) ^ "\n") rows)
+;;
+
+(* The payment today's rules compute for [stored]'s evidence, under [goal_id]. *)
+let current_payment ~goal_id (stored : Candle_payment.t) =
+  Candle_payment.make ~distribution:{Candle_math.share_rounding=Candle_math.Largest_remainder;tie_break=Candle_math.Name_ascending;deduction_rounding=Candle_math.Floor}
+    ~identity:{ stored.identity with goal_id }
+    ~grade:stored.grade ~total_milli:stored.total_milli
+    ~grade_trace:stored.grade_trace ~relations:stored.relations
+    ~weights_trace:stored.weights_trace ~weight_max:stored.weight_max
+    ~deduction_rate:stored.deduction_rate ~deduction_floor:stored.deduction_floor
+    ~overdue_hours:stored.overdue_hours
+    ~weights:(List.map (fun (a : Candle_payment.allocation) -> a.keeper, a.weight)
+      stored.allocations)
+  |> ok_or_fail
 ;;
 
 let test_stored_payments_replay_but_new_appends_require_current_arithmetic () =
@@ -213,19 +228,7 @@ let test_stored_payments_replay_but_new_appends_require_current_arithmetic () =
       Alcotest.(check string) "read and refused append never rewrite history"
         bytes (file_text base_path))
     receipts;
-  let rounded = payment_of_event (List.hd receipts) in
-  let current =
-    Candle_payment.make ~distribution:{Candle_math.share_rounding=Candle_math.Largest_remainder;tie_break=Candle_math.Name_ascending;deduction_rounding=Candle_math.Floor}
-      ~identity:{ rounded.identity with goal_id = "new-current" }
-      ~grade:rounded.grade ~total_milli:rounded.total_milli
-      ~grade_trace:rounded.grade_trace ~relations:rounded.relations
-      ~weights_trace:rounded.weights_trace ~weight_max:rounded.weight_max
-      ~deduction_rate:rounded.deduction_rate ~deduction_floor:rounded.deduction_floor
-      ~overdue_hours:rounded.overdue_hours
-      ~weights:(List.map (fun (a : Candle_payment.allocation) -> a.keeper, a.weight)
-        rounded.allocations)
-    |> ok_or_fail
-  in
+  let current = current_payment ~goal_id:"new-current" (payment_of_event (List.hd receipts)) in
   Alcotest.(check (list int)) "new payment still uses today's floor rule"
     [1400] (List.map (fun (a : Candle_payment.allocation) -> a.amount_milli) current.allocations);
   let current_row : E.t = { at = at "2026-09-30T00:00:00Z"; body = E.Paid current } in
@@ -235,6 +238,42 @@ let test_stored_payments_replay_but_new_appends_require_current_arithmetic () =
   let after = balance_of_view (read_ok base_path) in
   Alcotest.(check int) "old recorded credit and new calculated credit coexist"
     3134 (Candle_balance.balance after ~keeper:"keeper-a")
+;;
+
+(* A stored settlement was decided under the eligibility rules of its time.
+   Its Candidates row lists a task that completed before the Goal was created,
+   which today's candidate window would not list. Reading it back must not
+   re-decide that, or one old row makes the whole ledger unreadable; a new
+   settlement for the same evidence is still admitted only under today's rule. *)
+let test_stored_settlement_replays_after_the_candidate_rule_changes () =
+  with_base_path @@ fun base_path ->
+  let stored = ok_or_fail (E.of_line stored_rounded_payment) in
+  let before_the_goal = at "2026-09-20T00:00:00Z" in
+  let policy : E.t = {at = at "2026-09-29T06:00:00Z"; body = E.Half_life_set Candle_decay.Off} in
+  append_raw base_path
+    (event_lines [policy]
+     ^ event_lines (payment_prerequisites ~completed_at:before_the_goal stored)
+     ^ stored_rounded_payment ^ "\n");
+  let history = file_text base_path in
+  (match Candle_ledger.read ~base_path with
+   | Ok view ->
+     Alcotest.(check bool) "the stored settlement is among the rows read" true
+       (List.exists (fun (row : E.t) -> row = stored) (Candle_ledger.events view))
+   | Error error ->
+     Alcotest.failf "a stored settlement made the ledger unreadable: %s"
+       (Candle_ledger.read_error_to_string error));
+  let current = current_payment ~goal_id:"new-current" (payment_of_event stored) in
+  let current_row : E.t = { at = at "2026-09-30T00:00:00Z"; body = E.Paid current } in
+  (match
+     Candle_ledger.update ~base_path (fun _ ->
+       Ok (payment_prerequisites ~completed_at:before_the_goal current_row @ [current_row], ()))
+   with
+   | Error (Candle_ledger.Event_unwritable detail) ->
+     Alcotest.(check string) "a new settlement is still held to today's candidate rule"
+       "durable candidate tasks must equal the complete eligible Snapshot subset" detail
+   | Error other -> Alcotest.fail (Candle_ledger.update_error_to_string Fun.id other)
+   | Ok () -> Alcotest.fail "a new settlement was admitted under the old candidate rule");
+  Alcotest.(check string) "the refused append leaves the history untouched" history (file_text base_path)
 ;;
 
 let test_malformed_paid_receipts_still_fail_the_whole_ledger_read () =
@@ -604,6 +643,8 @@ let () =
             test_a_missing_file_is_an_empty_ledger
         ; Alcotest.test_case "stored credits survive changed rounding; new appends validate" `Quick
             test_stored_payments_replay_but_new_appends_require_current_arithmetic
+        ; Alcotest.test_case "stored settlement replays after the candidate rule changes" `Quick
+            test_stored_settlement_replays_after_the_candidate_rule_changes
         ; Alcotest.test_case "malformed Paid receipts fail the whole ledger read" `Quick
             test_malformed_paid_receipts_still_fail_the_whole_ledger_read
         ; Alcotest.test_case "a row that does not read fails the read" `Quick

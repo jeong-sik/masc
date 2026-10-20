@@ -79,9 +79,19 @@ val validate_settlement : waiting -> Candle_event.t list -> Candle_event.body ->
     atomic append, or against the preceding ledger when validating a fold. *)
 
 val validate_record : Candle_event.t list -> Candle_event.body -> (unit, string) result
-(** Validate a settlement against preceding rows in file order. A settlement
-    requires an open obligation, its matching Snapshot, and durable Candidates.
-    Non-settlement records do not change this admission policy. *)
+(** Admit a new settlement against preceding rows in file order, under today's
+    rules. A settlement requires an open obligation, its matching Snapshot, and
+    durable Candidates. Non-settlement records do not change this admission
+    policy. Call it when a row is written, never when one is read back: a
+    stored row was decided under the rules of its time, and re-deciding it
+    under a later rule makes one old row unreadable for the whole ledger. *)
+
+val validate_replay : Candle_event.t list -> Candle_event.body -> (unit, string) result
+(** Read a stored settlement back against preceding rows in file order. It
+    checks only what the rows themselves state: an obligation is open (so a
+    Goal cannot settle twice) and the settlement names the run that obligation
+    was confirmed for. Candidate eligibility, relation coverage and weight
+    ranges are not re-derived; they were decided when the row was written. *)
 
 val decide_candidates :
   goal_created_at:Candle_time.t

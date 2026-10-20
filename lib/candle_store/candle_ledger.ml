@@ -125,21 +125,31 @@ let remember records event =
     Goal_records.add goal_id (event :: reversed) records
 ;;
 
+(* A row is judged against the rules of the moment it enters the ledger
+   ([Append]), and read back only for what the rows themselves state
+   ([Replay]). Re-deciding a stored settlement under a later rule would make
+   one old row unreadable for every Goal. *)
+type admission =
+  | Append
+  | Replay
+
 (* Payout admission depends only on the same Goal's preceding records. Keep
    their file order without rescanning unrelated payouts and purchases. *)
-let validate_record records (event : Candle_event.t) =
-  let admission = match event.body with
+let validate_record ~admission records (event : Candle_event.t) =
+  let verdict = match event.body with
     | Candle_event.Paid _ | Candle_event.Unattributed _ | Candle_event.Payout_failed _ ->
       let preceding = match record_goal event with
         | None -> []
         | Some goal_id ->
           match Goal_records.find_opt goal_id records with
           | None -> [] | Some reversed -> List.rev reversed in
-      Candle_payout.validate_record preceding event.body
+      (match admission with
+       | Append -> Candle_payout.validate_record preceding event.body
+       | Replay -> Candle_payout.validate_replay preceding event.body)
     | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
     | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _
     | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ -> Ok () in
-  Result.map (fun () -> remember records event) admission
+  Result.map (fun () -> remember records event) verdict
 ;;
 
 let parse_rows ~path bytes =
@@ -148,7 +158,7 @@ let parse_rows ~path bytes =
     | line :: rest ->
       (match Candle_event.of_line line with
        | Ok event ->
-         (match validate_record records event with
+         (match validate_record ~admission:Replay records event with
           | Ok records -> go (line_number + 1) records (event :: acc) rest
           | Error detail -> Error (Row_rejected { path; line_number; detail }))
        | Error detail -> Error (Row_rejected { path; line_number; detail }))
@@ -240,7 +250,7 @@ let encode ~preceding events =
         | Candle_event.Half_life_set _ | Candle_event.Purchased _ | Candle_event.Equipped _
         | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ -> Ok () in
       Result.bind arithmetic (fun () ->
-        Result.bind (validate_record records event) (fun records ->
+        Result.bind (validate_record ~admission:Append records event) (fun records ->
           Result.bind (Candle_event.to_line event) (fun line ->
             go records (line :: lines) rest)))
   in

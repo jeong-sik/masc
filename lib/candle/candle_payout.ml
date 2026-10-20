@@ -270,7 +270,8 @@ let validate_settlement (waiting : waiting) events body =
   | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ ->
     Error "settlement does not name the confirmed verifier run"
 
-let validate_record events body =
+(* The open obligation a settlement row closes, when the row is a settlement. *)
+let open_obligation events body =
   let goal_id = match body with
     | Candle_event.Paid p -> Some p.identity.goal_id
     | Candle_event.Unattributed u -> Some u.goal_id
@@ -278,11 +279,37 @@ let validate_record events body =
     | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
     | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ -> None in
   match goal_id with
-  | None -> Ok ()
+  | None -> Ok None
   | Some goal_id ->
     match state ~goal_id events with
     | No_obligation | Failed _ | Settled -> Error "settlement requires an open payout obligation"
-    | Waiting waiting -> validate_settlement waiting events body
+    | Waiting waiting -> Ok (Some waiting)
+
+(* Whether a settlement row names the run the open obligation was confirmed for. *)
+let names_confirmed_run (waiting : waiting) body =
+  let matches goal_id request_id verification_run_id =
+    goal_id = waiting.goal_id && request_id = waiting.request_id
+    && verification_run_id = waiting.verification_run_id in
+  match body with
+  | Candle_event.Paid p -> matches p.identity.goal_id p.identity.request_id p.identity.verification_run_id
+  | Candle_event.Unattributed u -> matches u.goal_id u.request_id u.verification_run_id
+  | Candle_event.Payout_failed f -> matches f.goal_id f.request_id f.verification_run_id
+  | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
+  | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ -> false
+
+let validate_replay events body =
+  match open_obligation events body with
+  | Error _ as refused -> refused
+  | Ok None -> Ok ()
+  | Ok (Some waiting) ->
+    if names_confirmed_run waiting body then Ok ()
+    else Error "settlement does not name the confirmed verifier run"
+
+let validate_record events body =
+  match open_obligation events body with
+  | Error _ as refused -> refused
+  | Ok None -> Ok ()
+  | Ok (Some waiting) -> validate_settlement waiting events body
 
 let keeper_name ~is_keeper = function
   | Candle_event.Found { assignee = Some name; _ } -> if is_keeper name then Some name else None

@@ -45,9 +45,10 @@ let () =
     ["--launcher","masc-native-addon-launcher";"--guardian","masc-browser-process-owner";
      "--worker","masc-browser-addon-worker"];
   Unix.putenv "PATH" (bin ^ ":" ^ Option.value ~default:"" (Sys.getenv_opt "PATH"));
+  Unix.mkdir (Filename.concat base_path "fixture-skills") 0o700;
   let runtime_path=Filename.concat config_root "runtime.toml" in
   write runtime_path (Exact_output_fixture.official_client_runtime_fixture ^ Printf.sprintf
-    "\n[browser.live]\nenabled=false\n[browser.stagehand]\nenabled=false\n[browser.automation]\nenabled=true\ngeckodriver=%S\nbinary=%S\n" driver firefox);
+    "\n[skills]\n[[skills.sources]]\nid=\"probe-local\"\nanchor=\"base-path\"\npath=\"fixture-skills\"\naccess=\"read-only\"\n[browser.live]\nenabled=false\n[browser.stagehand]\nenabled=false\n[browser.automation]\nenabled=true\ngeckodriver=%S\nbinary=%S\n" driver firefox);
   require (Runtime.init_default ~config_path:runtime_path);
   Mirage_crypto_rng_unix.use_default ();
   Eio_main.run @@ fun env ->
@@ -62,6 +63,14 @@ let () =
     let declaration=Filename.concat directory "browser.toml" in
     let rec await work=match work () with Some result -> result
       | None -> Eio.Time.sleep clock 0.01;await work in
+    ignore (record "publish the isolated workspace Skill configuration"
+      (let* observation=Runtime.load_config_observation ~runtime_config_path:runtime_path () in
+       let* publication=Server_skill_snapshot_runtime.refresh_from_observation ~base_path observation
+         |> Result.map_error Server_skill_snapshot_runtime.error_to_string in
+       match publication with
+       | Skill_catalog_snapshot_service.Published _|Unchanged _ -> Ok `Null
+       | Workspace_retired -> Error "fixture Skill workspace was retired"));
+    R.register_skill_export_handler Server_skill_snapshot_runtime.publish_lane_skills;
     R.start_configuration_service ~config ~sw ~clock;
     write declaration (Printf.sprintf
       "id=\"browser\"\nrun_id=\"gecko-transfer-probe\"\nmanifest_path=%S\nexact_outputs=[]\ntool_hooks=[\"validate_input\",\"validate_output\"]\n[binding]\nsources=[]\n" manifest);
@@ -76,6 +85,16 @@ let () =
       match R.browser_services ~config ~access with [service] -> Some service
       | [] -> None | _::_::_ -> failwith "ambiguous browser installations") in
     witness "instance_id" (`String service.instance_id);
+    ignore (record "the real catalog publishes the browser package Skill"
+      (let* catalog=Server_skill_snapshot_runtime.lookup ~base_path
+         |> Result.map_error Server_skill_snapshot_runtime.error_to_string in
+       match catalog with
+       | Server_skill_snapshot_runtime.Ready {snapshot;_} ->
+         (match Skill_catalog_snapshot.find_effective_by_name snapshot "browser" with
+          | Some entry -> check "catalog Skill came from another source"
+              (entry.directory=Filename.concat (Filename.dirname manifest) "skills/browser")
+          | None -> Error "browser package Skill is absent")
+       | Not_registered|Uninitialized -> Error "workspace Skill catalog is unavailable"));
     let invoke ?upload_paths tool fields =
       let tool_name=match tool with
         | Browser_capabilities.Tabs -> "BrowserTabs" | Read -> "BrowserRead"

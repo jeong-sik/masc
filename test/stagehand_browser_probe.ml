@@ -163,6 +163,7 @@ let () =
     ["--launcher","masc-native-addon-launcher";"--guardian","masc-browser-process-owner";
      "--worker","masc-browser-addon-worker"];
   Unix.putenv "PATH" (bin ^ ":" ^ Option.value ~default:"" (Sys.getenv_opt "PATH"));
+  Unix.mkdir (Filename.concat base_path "fixture-skills") 0o700;
   let runtime_path=Filename.concat config_root "runtime.toml" in
   let profile_path=match profile_lifetime with
     | Private -> None
@@ -171,7 +172,7 @@ let () =
       Unix.mkdir path 0o700;Some path in
   Out_channel.with_open_bin runtime_path (fun channel ->
     output_string channel (F.official_client_runtime_fixture ^ Printf.sprintf
-      "\n[browser.live]\nenabled=false\n[browser.automation]\nenabled=false\n[browser.stagehand]\nenabled=true\nchrome=%S\nextension=%S\n%s"
+      "\n[skills]\n[[skills.sources]]\nid=\"probe-local\"\nanchor=\"base-path\"\npath=\"fixture-skills\"\naccess=\"read-only\"\n[browser.live]\nenabled=false\n[browser.automation]\nenabled=false\n[browser.stagehand]\nenabled=true\nchrome=%S\nextension=%S\n%s"
       chrome extension (Option.fold ~none:"" ~some:(Printf.sprintf "profile=%S\n") profile_path)));
   (match Runtime.init_default ~config_path:runtime_path with Ok () -> () | Error detail -> failwith detail);
   Mirage_crypto_rng_unix.use_default ();
@@ -201,6 +202,13 @@ let () =
   let require = function Ok value -> value | Error detail -> failwith detail in
   let inventory ()=R.inventory ~config in
   let rec await f=match f () with Some value -> value | None -> Eio.Time.sleep clock 0.01;await f in
+  let observation=Runtime.load_config_observation ~runtime_config_path:runtime_path () |> require in
+  let publication=Server_skill_snapshot_runtime.refresh_from_observation ~base_path observation
+    |> Result.map_error Server_skill_snapshot_runtime.error_to_string |> require in
+  (match publication with
+   | Skill_catalog_snapshot_service.Published _|Unchanged _ -> ()
+   | Workspace_retired -> failwith "fixture Skill workspace was retired");
+  R.register_skill_export_handler Server_skill_snapshot_runtime.publish_lane_skills;
   R.start_configuration_service ~config ~sw ~clock;
   let attach () =
     Out_channel.with_open_bin declaration (fun channel -> output_string channel (Printf.sprintf
@@ -209,8 +217,7 @@ let () =
     let open Yojson.Safe.Util in
     let declared=report |> member "declarations" |> to_list
       |> List.filter (fun item -> member "id" item=`String "browser") in
-    let refused=report |> member "issues" |> to_list |> List.filter (fun issue ->
-      member "id" issue=`String "browser" || member "source_path" issue=`String declaration) in
+    let refused=report |> member "issues" |> to_list in
     if member "complete" report<>`Bool true || List.length declared<>1 || refused<>[] then
       failwith ("browser declaration was not applied: " ^ Yojson.Safe.to_string report);
     await (fun () ->
@@ -222,6 +229,16 @@ let () =
       | [service] -> Some service
       | [] -> None | _::_::_ -> failwith "ambiguous fixture browser Add-ons") in
   let first=attach () in
+  record "the real catalog publishes the browser package Skill"
+    (let* catalog=Server_skill_snapshot_runtime.lookup ~base_path
+       |> Result.map_error Server_skill_snapshot_runtime.error_to_string in
+     match catalog with
+     | Server_skill_snapshot_runtime.Ready {snapshot;_} ->
+       (match Skill_catalog_snapshot.find_effective_by_name snapshot "browser" with
+        | Some entry when entry.directory=Filename.concat (Filename.dirname manifest) "skills/browser" -> Ok `Null
+        | Some _ -> Error "catalog Skill came from another source"
+        | None -> Error "browser package Skill is absent")
+     | Not_registered|Uninitialized -> Error "workspace Skill catalog is unavailable");
   let host=Browser_addon_host.connect ~config ~access ~principal ~reserved:[]
     |> Result.map_error (function R.Unavailable s|Outcome_unknown s -> s
       | Host_refusal _ -> "host refused the fixture principal") |> require in

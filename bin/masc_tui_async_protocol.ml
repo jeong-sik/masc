@@ -333,10 +333,7 @@ type async_msg =
   | Keeper_chat_interrupt_done of
       Masc_tui_keeper_chat_projection.request * int * (Masc_tui_interrupt_signal.interrupt_signal, string) result
   | Keeper_chat_history_loaded of
-      int
-      * string
-      * (Masc_tui_keeper_chat_history.decoded, string) result
-      * (Masc_tui_keeper_chat_history.decoded, string) result
+      Keeper_history_read.t * Keeper_history_read.source * Keeper_history_read.result
   | Keeper_chat_copy_loaded of
       int * string * (Masc_tui_keeper_chat_history.decoded, string) result
   | Keeper_chat_operation_loaded of
@@ -777,6 +774,15 @@ let ask_answer_completion_message (submission : ask_submission)
    scan after each application. New publications belong to a later round.
    Reserve final Ask transport offers here; their raw facts stay in history. *)
 let collect_owned_results state =
+  let history = match state.msg_history_inflight with
+    | None -> []
+    | Some request ->
+        List.map (fun (source, (observation : Keeper_history_read.observation)) ->
+          {ready_at_ns=observation.ready_at_ns;
+           message=Workspace_scoped (Keeper_history_read.authority request,
+             Some (Keeper_history_read.reading request),
+             Keeper_chat_history_loaded (request, source, observation.result))})
+          (Keeper_history_read.take_ready request) in
   let receipts = List.map (fun (submission, (observation : Ask_answer_receipt.observation)) ->
     {ready_at_ns=observation.observed_ns; message=Ask_answer_receipt_ready submission})
       (pending_ask_answer_receipts state) in
@@ -796,7 +802,7 @@ let collect_owned_results state =
   let creations = List.map (fun (request,status,ready_at_ns) ->
     {ready_at_ns;message=Keeper_creation_changed (request,status)})
       (pending_keeper_creation_receipts state) in
-  List.concat [receipts;completions;runtime_forms;settings;assignments;creations]
+  List.concat [receipts;completions;runtime_forms;settings;assignments;creations;history]
 
 module Delivery_round : sig
   type 'a t
@@ -1096,7 +1102,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Keeper_chat_stream_unavailable (_, _) | Keeper_run_next_done (_, _)
     | Keeper_observed_interrupt_done (_, _, _, _)
     | Keeper_chat_interrupt_done (_, _, _)
-    | Keeper_chat_history_loaded (_, _, _, _)
+    | Keeper_chat_history_loaded (_, _, _)
     | Keeper_chat_copy_loaded (_, _, _) | Keeper_chat_operation_loaded _
     | Keeper_chat_journal_loaded _ | Keeper_native_tasks_loaded (_, _)
     | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | Context_inspector_loaded (_, _, _)
@@ -1233,7 +1239,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Keeper_chat_stream_deltas (_, _) | Keeper_chat_stream_unavailable (_, _)
   | Keeper_run_next_done (_, _) | Keeper_observed_interrupt_done (_, _, _, _)
   | Keeper_chat_interrupt_done (_, _, _)
-  | Keeper_chat_history_loaded (_, _, _, _) | Keeper_chat_copy_loaded (_, _, _)
+  | Keeper_chat_history_loaded (_, _, _) | Keeper_chat_copy_loaded (_, _, _)
   | Keeper_chat_operation_loaded _ | Keeper_chat_journal_loaded _
   | Keeper_native_tasks_loaded (_, _) | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _)
   | Context_inspector_loaded (_, _, _)

@@ -269,8 +269,8 @@ let test_unkeyed_output_is_not_replaced_by_a_role_match () =
 
 let test_keeper_revisit_restores_read_pages_and_paging_authority () =
   let state = fresh_state () in
-  state.msg_loaded <-
-    [entry_at ~request_id:"alpha-old" 1.; entry_at ~request_id:"alpha-tail" 2.];
+  Tui_types.set_keeper_chat_sources state
+    {kcs_history=Some [entry_at ~request_id:"alpha-old" 1.; entry_at ~request_id:"alpha-tail" 2.]; kcs_memory=[]};
   state.msg_older_cursor <- Some "alpha-position";
   state.msg_older_exist <- true;
   state.msg_loaded_dropped <- 2;
@@ -285,7 +285,7 @@ let test_keeper_revisit_restores_read_pages_and_paging_authority () =
   Alcotest.(check bool) "outgoing pagination request is not still loading" false
     state.msg_older_loading;
   state.msg_loaded_keeper <- Some "beta";
-  state.msg_loaded <- [entry_at ~keeper:"beta" 10.];
+  Tui_types.set_keeper_chat_sources state {kcs_history=Some [entry_at ~keeper:"beta" 10.]; kcs_memory=[]};
   state.msg_older_cursor <- Some "beta-position";
   state.msg_older_exist <- false;
   Tui_types.restore_keeper_chat_page state "alpha";
@@ -316,7 +316,8 @@ let test_keeper_revisit_restores_read_pages_and_paging_authority () =
   Alcotest.(check (option string)) "outage remains visible on that Keeper"
     (Some "server unavailable on revisit") state.msg_loaded_error;
   let fresh = [entry_at ~request_id:"alpha-tail" 2.; entry_at ~request_id:"alpha-new" 3.] in
-  state.msg_loaded <- Tui_types.merge_paged_history ~paged:state.msg_loaded ~fresh;
+  Tui_types.set_keeper_chat_sources state
+    {state.msg_loaded_sources with kcs_history=Some (Tui_types.merge_paged_history ~paged:state.msg_loaded ~fresh)};
   Alcotest.(check (list string)) "recovery merges new rows and retains older pages"
     ["row at 1"; "row at 2"; "row at 3"]
     (texts (Tui_types.chat_rows_for state "alpha"))
@@ -325,11 +326,13 @@ let test_keeper_revisit_restores_read_pages_and_paging_authority () =
 let test_stale_cursor_retires_retained_history_across_revisits () =
   let state = fresh_state () in
   let memory = {(entry_at 3.) with me_role = Tui_types.Message_memory} in
-  state.msg_loaded <- state.msg_loaded @ [memory];
+  let canonical_system = {(entry_at 2.) with me_role=Tui_types.Message_memory} in
+  Tui_types.set_keeper_chat_sources state
+    {kcs_history=Some (state.msg_loaded @ [canonical_system]); kcs_memory=[memory]};
   state.msg_older_cursor <- Some "retired-file-position";
   Tui_types.restore_keeper_chat_page state "beta";
   state.msg_loaded_keeper <- Some "beta";
-  state.msg_loaded <- [entry_at ~keeper:"beta" 10.];
+  Tui_types.set_keeper_chat_sources state {kcs_history=Some [entry_at ~keeper:"beta" 10.]; kcs_memory=[]};
   Tui_types.restore_keeper_chat_page state "alpha";
   Tui_types.retire_keeper_chat_history state "alpha";
   Alcotest.(check (list string)) "only the independent memory journal remains"

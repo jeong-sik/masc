@@ -837,7 +837,7 @@ let clear_keeper_history_projection state =
   state.msg_copy_generation <- state.msg_copy_generation + 1;
     (* These readings belong to one conversation. Clear them at the shared
        target boundary before its replacement request can finish. *)
-    state.msg_loaded <- [];
+    set_keeper_chat_sources state empty_keeper_chat_sources;
     state.msg_loaded_keeper <- None;
     state.msg_loaded_error <- None;
     state.msg_loaded_dropped <- 0;
@@ -7447,66 +7447,61 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
     state ~mailbox ~keeper_name;
   if server_authority_ready state then begin
   let identity = state.server_identity in
-  let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   if keeper_available_for_new_message state keeper_name then begin
   let already_inflight =
     match state.msg_history_inflight with
-    | Some (_, inflight_keeper) when String.equal inflight_keeper keeper_name -> true
-    | Some _ | None -> false
+    | Some request -> String.equal (Keeper_history_read.keeper request) keeper_name
+    | None -> false
   in
   if already_inflight && not force then ()
   else begin
     let host = server_peer_host in
     let port = state.port in
-    let check_request = workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port in
     state.msg_history_load_generation <- state.msg_history_load_generation + 1;
     state.msg_older_loading <- false;
-    let generation = state.msg_history_load_generation in
-    state.msg_history_inflight <- Some (generation, keeper_name);
-    let run () =
-      let history_result =
+    let request = Keeper_history_read.create
+      ~generation:state.msg_history_load_generation ~keeper:keeper_name
+      ~authority ~reading:state.workspace_read_authority in
+    state.msg_history_inflight <- Some request;
+    let publish source result =
+      Keeper_history_read.publish request source
+        ~ready_at_ns:(Mtime_clock.elapsed_ns ()) result in
+    let read source fetch =
+      (* Each source keeps its own identity-probe chain. Neither result waits
+         for its sibling or for capacity in the shared mailbox. *)
+      let check_request = workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port in
+      let result =
         try
           let ( let* ) = Result.bind in
           let* () = check_request () in
-          let* reading = Masc_tui_http.fetch_keeper_chat_history ~host ~port ~keeper_name in
+          let* reading = fetch ~host ~port ~keeper_name in
           let* () = check_request () in
           Ok reading
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
+        | exn ->
+            let detail = Printexc.to_string exn in
+            Error (match source with
+              | Keeper_history_read.History -> detail
+              | Keeper_history_read.Memory -> "memory journal: " ^ detail)
       in
-      let memory_result =
-        (* Keep the subject attached to exception details, as the other
-           failures of this read already do. *)
-        try
-          let ( let* ) = Result.bind in
-          let* () = check_request () in
-          let* reading = Masc_tui_http.fetch_keeper_memory_journal ~host ~port ~keeper_name in
-          let* () = check_request () in
-          Ok reading
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error ("memory journal: " ^ Printexc.to_string exn)
-      in
-      enqueue_async mailbox
-        (Keeper_chat_history_loaded
-           (generation, keeper_name, history_result, memory_result))
+      publish source result
     in
+    let not_run detail =
+      publish Keeper_history_read.History (Error detail);
+      publish Keeper_history_read.Memory (Error detail) in
     (match Eio_context.get_switch_opt () with
      | Some sw ->
-         fork_workspace_job state ~sw run
-     | None ->
-         (match state.msg_history_inflight with
-          | Some (g, k) when g = generation && String.equal k keeper_name ->
-              state.msg_history_inflight <- None
-          | _ -> ());
-         enqueue_async mailbox
-           (Keeper_chat_history_loaded
-              ( generation
-              , keeper_name
-              , Error "Eio switch is unavailable"
-              , Error "Eio switch is unavailable" )));
+         (try
+            fork_workspace_job state ~sw (fun () ->
+              Eio.Fiber.both
+                (fun () -> read Keeper_history_read.History Masc_tui_http.fetch_keeper_chat_history)
+                (fun () -> read Keeper_history_read.Memory Masc_tui_http.fetch_keeper_memory_journal))
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> not_run (Printexc.to_string exn))
+     | None -> not_run "Eio switch is unavailable");
     (* Full tool detail owns the only lazy read. Compact chat remains byte- and
        network-compatible; repeated history refreshes reuse this separate cache. *)
     if load_file_changes then
@@ -17259,7 +17254,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
         | Approval_decision_done (_, _, _, _, _) | Ask_answer_done (_, _, _)
         | Keeper_chat_stream_deltas (_, _) | Keeper_chat_stream_unavailable (_, _)
         | Keeper_run_next_done (_, _) | Keeper_observed_interrupt_done (_, _, _, _)
-        | Keeper_chat_interrupt_done (_, _, _) | Keeper_chat_history_loaded (_, _, _, _)
+        | Keeper_chat_interrupt_done (_, _, _) | Keeper_chat_history_loaded (_, _, _)
         | Keeper_chat_copy_loaded (_, _, _) | Keeper_chat_operation_loaded _
         | Keeper_chat_journal_loaded _ | Keeper_native_tasks_loaded (_, _)
         | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | Context_inspector_loaded (_, _, _)
@@ -18553,7 +18548,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
            state.goal_confirmation <- Goal_confirmation.Inspecting read
        | Runtime_form_save_changed _, _ | Keeper_settings_save_changed _, _ -> ()
        | (Goal_confirmation_submitted _, Goal_confirmation.Inspecting _)
-       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( Keeper_chat_history_loaded (_, _, _, _) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | Keeper_logs_loaded _ | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_changed (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( Board_vote_done _ | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( Verification_evidence_loaded (_, _) | ( Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Browser_activity_read (_, _) | ( Browser_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( Resources_listed _ | ( Code_catalog_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_read (_, _) | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | Identity_disconnected (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | ( Task_dispatched _ | Task_dispatch_failed _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
+       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( Keeper_chat_history_loaded (_, _, _) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | Keeper_logs_loaded _ | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_changed (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( Board_vote_done _ | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( Verification_evidence_loaded (_, _) | ( Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Browser_activity_read (_, _) | ( Browser_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( Resources_listed _ | ( Code_catalog_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_read (_, _) | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | Identity_disconnected (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | ( Task_dispatched _ | Task_dispatch_failed _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
       match result with
       | Ok message ->
           state.goal_action_pending <- None;
@@ -20482,94 +20477,90 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                      "Sent %s's %s (%d characters, %d bytes) via OSC 52 (terminal support unconfirmed)%s"
                      keeper_name assessment characters (String.length row.text)
                      unreadable)))
-  | Keeper_chat_history_loaded
-      (generation, keeper_name, history_result, memory_result) ->
-      (match state.msg_history_inflight with
-       | Some (g, k) when g = generation && String.equal k keeper_name ->
-           state.msg_history_inflight <- None
-       | _ -> ());
-      (* The operator can switch while a previous GET is still in flight. The
-         pane owns one loaded-history cache, so a late response for the old
-         target or an older request for a target revisited since must not
-         replace the transcript now being read. *)
-      if
-        generation = state.msg_history_load_generation
-        && Option.exists (String.equal keeper_name)
-             state.msg_target_keeper_name
-      then
-        let prior_loaded =
-          match state.msg_loaded_keeper with
-          | Some loaded_keeper when String.equal loaded_keeper keeper_name ->
-              state.msg_loaded
-          | Some _ | None -> []
-        in
-        let prior_history, prior_memory =
-          List.partition
-            (fun entry -> entry.me_role <> Message_memory)
-            prior_loaded
-        in
-        let journal_targets = ref [] in
-        let history_entries =
-          match history_result with
-          | Ok { Keeper_chat_history.rows; dropped } ->
-             state.msg_loaded_error <- None;
-             state.msg_loaded_dropped <- dropped;
-             (* The turns this page names that the session does not hold as
-                logs are rebuilt from their journals, reasoning included
-                (RFC-0412 §3.3): the v1 rows carry trace reasoning
-                content-withheld by design. *)
-             if not state.msg_journal_reads_refused then
-               journal_targets :=
-                 journal_source_fetch_targets ~keeper_name
-                   ~held:(journal_held_keys state keeper_name)
-                   ~unavailable:state.msg_journal_unavailable
-                   (List.filter_map
-                      (fun (row : Keeper_chat_history.row) ->
-                        Option.map
-                          (fun source -> (source, row.at))
-                          (journal_source_of_history row))
-                      rows)
-                 |> List.map (fun (source, at) ->
-                        ( source
-                        , at
-                        , journal_resume_position state ~keeper_name source ));
-             let fresh = msg_entries_of_history_rows state keeper_name rows in
-             (* The durable outcome and duration of a held turn's calls reach
-                its block through its log's transcript, not through the rows
-                the block replaces. *)
-             enrich_held_logs_from_rows state ~keeper_name fresh;
-             let kept = merge_paged_history ~paged:prior_history ~fresh in
-             (* The first explicit older read asks the server for an exact
-                newest page and its cursor. Display clocks do not locate a
-                file position; a refresh preserves already-issued authority. *)
-             if state.msg_loaded_keeper <> Some keeper_name then (
-               state.msg_older_cursor <- None;
-               state.msg_older_exist <- true);
-             state.msg_older_error <- None;
-             forget_session_rows_the_transcript_holds state keeper_name rows ~fresh;
-             kept
-          | Error detail ->
-             (* The transcript is left as it was and the session rows stay: a
-                failed load must not be the reason the pane goes blank. *)
-             state.msg_loaded_error <- Some detail;
-             prior_history
-        in
-        let memory_entries =
-          match memory_result with
-          | Ok { Keeper_chat_history.rows; dropped } ->
-              state.msg_memory_error <- None;
-              state.msg_memory_dropped <- dropped;
-              msg_entries_of_history_rows state keeper_name rows
-          | Error detail ->
-              state.msg_memory_error <- Some detail;
-              prior_memory
-        in
-        state.msg_loaded <- history_entries @ memory_entries;
-        state.msg_loaded_keeper <- Some keeper_name;
-        launch_keeper_chat_journal_loads state ~mailbox ~keeper_name
-          !journal_targets;
-        launch_current_autonomous_journals state ~mailbox ~keeper_name;
-        launch_unavailable_journal_operations state ~mailbox ~keeper_name
+  | Keeper_chat_history_loaded (request, source, result) ->
+      (* The current refresh owns both slots until each has been admitted.
+         A collected old result cannot settle a replacement request. *)
+      let owned = match state.msg_history_inflight with
+        | Some current when current == request -> Keeper_history_read.settle request source
+        | Some _ | None -> false in
+      if owned then begin
+        if not (Keeper_history_read.pending request) then
+          state.msg_history_inflight <- None;
+        let generation = Keeper_history_read.generation request in
+        let keeper_name = Keeper_history_read.keeper request in
+        if generation = state.msg_history_load_generation
+           && Option.exists (String.equal keeper_name) state.msg_target_keeper_name then begin
+          let prior_sources = match state.msg_loaded_keeper with
+            | Some loaded when String.equal loaded keeper_name -> state.msg_loaded_sources
+            | Some _ | None -> empty_keeper_chat_sources in
+          let prior_history = Option.value ~default:[] prior_sources.kcs_history in
+          state.msg_loaded_keeper <- Some keeper_name;
+          (match source with
+           | Keeper_history_read.History ->
+             let journal_targets = ref [] in
+             let history_entries = match result with
+              | Ok { Keeper_chat_history.rows; dropped } ->
+                 state.msg_loaded_error <- None;
+                 state.msg_loaded_dropped <- dropped;
+                 (* The turns this page names that the session does not hold as
+                    logs are rebuilt from their journals, reasoning included
+                    (RFC-0412 §3.3): the v1 rows carry trace reasoning
+                    content-withheld by design. *)
+                 if not state.msg_journal_reads_refused then
+                   journal_targets :=
+                     journal_source_fetch_targets ~keeper_name
+                       ~held:(journal_held_keys state keeper_name)
+                       ~unavailable:state.msg_journal_unavailable
+                       (List.filter_map
+                          (fun (row : Keeper_chat_history.row) ->
+                            Option.map
+                              (fun source -> (source, row.at))
+                              (journal_source_of_history row))
+                          rows)
+                     |> List.map (fun (source, at) ->
+                            ( source
+                            , at
+                            , journal_resume_position state ~keeper_name source ));
+                 let fresh = msg_entries_of_history_rows state keeper_name rows in
+                 (* The durable outcome and duration of a held turn's calls reach
+                    its block through its log's transcript, not through the rows
+                    the block replaces. *)
+                 enrich_held_logs_from_rows state ~keeper_name fresh;
+                 let kept = merge_paged_history ~paged:prior_history ~fresh in
+                 (* The first explicit older read asks the server for an exact
+                    newest page and its cursor. Display clocks do not locate a
+                    file position; a refresh preserves already-issued authority. *)
+                 if Option.is_none prior_sources.kcs_history then (
+                   state.msg_older_cursor <- None;
+                   state.msg_older_exist <- true);
+                 state.msg_older_error <- None;
+                 forget_session_rows_the_transcript_holds state keeper_name rows ~fresh;
+                 kept
+              | Error detail ->
+                 (* The transcript is left as it was and the session rows stay: a
+                    failed load must not be the reason the pane goes blank. *)
+                 state.msg_loaded_error <- Some detail;
+                 prior_history
+             in
+             let history = match result with
+               | Ok _ -> Some history_entries
+               | Error _ -> prior_sources.kcs_history in
+             set_keeper_chat_sources state {prior_sources with kcs_history=history};
+             launch_keeper_chat_journal_loads state ~mailbox ~keeper_name !journal_targets;
+             launch_current_autonomous_journals state ~mailbox ~keeper_name;
+             launch_unavailable_journal_operations state ~mailbox ~keeper_name
+           | Keeper_history_read.Memory ->
+             let memory_entries = match result with
+               | Ok { Keeper_chat_history.rows; dropped } ->
+                   state.msg_memory_error <- None;
+                   state.msg_memory_dropped <- dropped;
+                   msg_entries_of_history_rows state keeper_name rows
+               | Error detail ->
+                   state.msg_memory_error <- Some detail;
+                   prior_sources.kcs_memory in
+             set_keeper_chat_sources state {prior_sources with kcs_memory=memory_entries})
+        end
+      end
   | Keeper_chat_operation_loaded {keeper_name; operation_id; operation_state} ->
       journal_read_finished state (keeper_name, Keeper_chat_log.Operation operation_id);
       Option.iter (fun log ->
@@ -21449,7 +21440,9 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                is prepended here. [chat_timeline] then recomputes the one
                displayed-time projection across that complete window; scroll
                pins retain row identity rather than this cache position. *)
-            state.msg_loaded <- prepend_older_history_page ~older:rows ~held:state.msg_loaded;
+            let held = Option.value ~default:[] state.msg_loaded_sources.kcs_history in
+            let history = prepend_older_history_page ~older:rows ~held in
+            set_keeper_chat_sources state {state.msg_loaded_sources with kcs_history=Some history};
             (* Loaded rows arrive here too: a held turn whose rows only an
                older page carries gets its calls' outcome and duration the
                same way a refreshed page gives them. *)

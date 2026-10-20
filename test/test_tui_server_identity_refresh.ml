@@ -4195,6 +4195,52 @@ let test_detail_histories_follow_refresh_and_workspace_owners () =
   Alcotest.(check bool) "replacement completes only with its own observations" true
     (task_view () = Fetched.Ready repaired && goal_view () = Fetched.Ready replacement)
 
+let test_keeper_history_request_sources_are_owned_and_independent () =
+  let open Masc_tui_types in
+  let module Read = Keeper_history_read in
+  let module Protocol = Masc_tui_async_protocol in
+  let state = create_state ~workspace:"history" ~port:0 ~refresh_interval:0. () in
+  let make generation = Read.create ~generation ~keeper:"alpha"
+    ~authority:state.workspace_authority ~reading:state.workspace_read_authority in
+  let owner = make 1 in
+  state.msg_history_inflight <- Some owner;
+  Read.publish owner Read.History ~ready_at_ns:11L (Error "history refused");
+  Read.publish owner Read.History ~ready_at_ns:12L (Error "duplicate must not replace it");
+  let offered = Protocol.collect_owned_results state in
+  Alcotest.(check int) "completed source offered without its sibling" 1 (List.length offered);
+  (match offered with
+   | [{Protocol.ready_at_ns; message=Protocol.Workspace_scoped (authority, Some reading,
+        Protocol.Keeper_chat_history_loaded (request, Read.History, Error detail))}] ->
+       Alcotest.(check int64) "original result observation retained" 11L ready_at_ns;
+       Alcotest.(check string) "duplicate did not overwrite failure" "history refused" detail;
+       Alcotest.(check bool) "original request identity retained" true (request == owner);
+       Alcotest.(check bool) "workspace authority retained" true (authority=state.workspace_authority);
+       Alcotest.(check bool) "reading epoch retained" true (reading==state.workspace_read_authority)
+   | _ -> Alcotest.fail "history did not produce its scoped source receipt");
+  Alcotest.(check int) "offered result is not offered twice" 0
+    (List.length (Protocol.collect_owned_results state));
+  Alcotest.(check bool) "offering does not release the source" true (Read.pending owner);
+  Alcotest.(check bool) "UI settles only the offered source" true (Read.settle owner Read.History);
+  Alcotest.(check bool) "waiting memory remains pending" true (Read.pending owner);
+  Alcotest.(check bool) "settlement cannot be repeated" false (Read.settle owner Read.History);
+  Read.publish owner Read.Memory ~ready_at_ns:13L (Error "memory refused");
+  Alcotest.(check int) "sibling still publishes independently" 1
+    (List.length (Protocol.collect_owned_results state));
+  Alcotest.(check bool) "second UI admission settles sibling" true (Read.settle owner Read.Memory);
+  Alcotest.(check bool) "both settled releases request" false (Read.pending owner);
+  let retired = make 2 in
+  state.msg_history_inflight <- Some retired;
+  suspend_workspace_readings state;
+  Read.publish retired Read.Memory ~ready_at_ns:14L (Error "late retired response");
+  let successor = make 3 in
+  state.msg_history_inflight <- Some successor;
+  Alcotest.(check int) "retired inbox cannot supply successor" 0
+    (List.length (Protocol.collect_owned_results state));
+  Read.publish successor Read.History ~ready_at_ns:15L (Error "new history result");
+  Alcotest.(check int) "successor keeps its own receipt" 1
+    (List.length (Protocol.collect_owned_results state))
+;;
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
@@ -4368,6 +4414,8 @@ let () =
             test_overview_preview_rejects_superseded_reading
         ; Alcotest.test_case "overview preview preserves confirmed state and authority" `Quick
             test_overview_preview_preserves_confirmed_state_and_authority
+        ; Alcotest.test_case "history sources publish and settle independently" `Quick
+            test_keeper_history_request_sources_are_owned_and_independent
         ; Alcotest.test_case "overview completion retires previews and late delivery" `Quick
             test_overview_refresh_finish_retires_preview_and_late_delivery
         ; Alcotest.test_case "overview preview refuses foreign and retired authority" `Quick

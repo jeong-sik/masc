@@ -1068,10 +1068,20 @@ type msg_entry = {
   me_at: float;
 }
 
+(* The canonical transcript and memory journal are distinct sources, even
+   when a transcript system row uses the Memory display role. [None] means
+   no successful transcript read yet; [Some []] is a received empty source. *)
+type keeper_chat_sources = {
+  kcs_history : msg_entry list option;
+  kcs_memory : msg_entry list;
+}
+
+let empty_keeper_chat_sources = {kcs_history=None; kcs_memory=[]}
+
 (* Rows already read from one Keeper, with the paging authority supplied by
    those reads. This is a session cache, not another persistent transcript. *)
 type keeper_chat_page = {
-  kcp_rows : msg_entry list;
+  kcp_sources : keeper_chat_sources;
   kcp_history_error : string option;
   kcp_history_dropped : int;
   kcp_memory_error : string option;
@@ -1080,6 +1090,68 @@ type keeper_chat_page = {
   kcp_older_exist : bool;
   kcp_older_error : string option;
 }
+
+(* One refresh owns two independent results. Workers publish before returning;
+   the UI's owned-result drain offers each slot once without a mailbox wait.
+   Offering is not settlement: the request stays busy until UI admission. *)
+module Keeper_history_read : sig
+  type source = History | Memory
+  type result = (Masc_tui_keeper_chat_history.decoded, string) Result.t
+  type observation = { result : result; ready_at_ns : int64 }
+  type t
+
+  val create : generation:int -> keeper:string -> authority:workspace_authority ->
+    reading:unit ref -> t
+  val generation : t -> int
+  val keeper : t -> string
+  val authority : t -> workspace_authority
+  val reading : t -> unit ref
+  val publish : t -> source -> ready_at_ns:int64 -> result -> unit
+  val take_ready : t -> (source * observation) list
+  val settle : t -> source -> bool
+  val pending : t -> bool
+end = struct
+  type source = History | Memory
+  type result = (Masc_tui_keeper_chat_history.decoded, string) Result.t
+  type observation = { result : result; ready_at_ns : int64 }
+  type slot = Waiting | Ready of observation | Offered | Settled
+  type t = {
+    generation : int;
+    keeper : string;
+    authority : workspace_authority;
+    reading : unit ref;
+    history : slot Atomic.t;
+    memory : slot Atomic.t;
+  }
+
+  let create ~generation ~keeper ~authority ~reading =
+    { generation; keeper; authority; reading;
+      history = Atomic.make Waiting; memory = Atomic.make Waiting }
+  let generation request = request.generation
+  let keeper request = request.keeper
+  let authority request = request.authority
+  let reading request = request.reading
+  let slot request = function History -> request.history | Memory -> request.memory
+  let publish request source ~ready_at_ns result =
+    ignore (Atomic.compare_and_set (slot request source) Waiting
+      (Ready {result; ready_at_ns}))
+  let take_ready request =
+    List.filter_map (fun source ->
+      let cell = slot request source in
+      let before = Atomic.get cell in
+      match before with
+      | Ready observation when Atomic.compare_and_set cell before Offered ->
+          Some (source, observation)
+      | Waiting | Ready _ | Offered | Settled -> None)
+      [History; Memory]
+  let settle request source =
+    Atomic.compare_and_set (slot request source) Offered Settled
+  let pending request =
+    let unsettled source = match Atomic.get (slot request source) with
+      | Settled -> false
+      | Waiting | Ready _ | Offered -> true in
+    unsettled History || unsettled Memory
+end
 
 (* The Memory lane in summary mode says where the memory ended up.
 
@@ -9372,6 +9444,7 @@ type state = {
   (* The current Keeper's durable rows already read, including older pages.
      Refresh merges by structural row identity. Inactive conversations keep
      their reading and cursor in [msg_loaded_pages] until revisited. *)
+  mutable msg_loaded_sources: keeper_chat_sources;
   mutable msg_loaded: msg_entry list;
   mutable msg_loaded_pages: (string * keeper_chat_page) list;
   mutable msg_loaded_keeper: string option;
@@ -9395,7 +9468,7 @@ type state = {
      not enough after alpha -> beta -> alpha: the first alpha response can
      arrive after the second alpha request and still name the visible Keeper. *)
   mutable msg_history_load_generation: int;
-  mutable msg_history_inflight: (int * string) option;
+  mutable msg_history_inflight: Keeper_history_read.t option;
   mutable msg_copy_generation: int;
   mutable chat_command_reads: (unit ref * unit ref * string) list;
   mutable msg_copy_pending: (int * string * unit ref) option;
@@ -15088,6 +15161,7 @@ let create_state
   msg_recall_draft = ("", [], [], None);
   msg_recall_replaces = None;
   msg_live = None;
+  msg_loaded_sources = empty_keeper_chat_sources;
   msg_loaded = [];
   msg_loaded_pages = [];
   msg_loaded_keeper = None;
@@ -15432,12 +15506,22 @@ let transcript_replaces_session_output ~(fresh : msg_entry list)
     fresh
 ;;
 
+(* Source ownership is retained separately from the combined view read by
+   chat projection/search. All source updates rebuild that view here. *)
+let set_keeper_chat_sources (state : state) sources =
+  state.msg_loaded_sources <- sources;
+  state.msg_loaded <- match sources.kcs_history, sources.kcs_memory with
+    | None, memory -> memory
+    | Some history, [] -> history
+    | Some history, memory -> history @ memory
+;;
+
 let restore_keeper_chat_page (state : state) keeper_name =
   (match state.msg_loaded_keeper with
    | None -> ()
    | Some loaded_keeper ->
        let page =
-         { kcp_rows = state.msg_loaded
+         { kcp_sources = state.msg_loaded_sources
          ; kcp_history_error = state.msg_loaded_error
          ; kcp_history_dropped = state.msg_loaded_dropped
          ; kcp_memory_error = state.msg_memory_error
@@ -15457,7 +15541,7 @@ let restore_keeper_chat_page (state : state) keeper_name =
   state.msg_older_loading <- false;
   match List.assoc_opt keeper_name state.msg_loaded_pages with
   | Some page ->
-      state.msg_loaded <- page.kcp_rows;
+      set_keeper_chat_sources state page.kcp_sources;
       state.msg_loaded_keeper <- Some keeper_name;
       state.msg_loaded_error <- page.kcp_history_error;
       state.msg_loaded_dropped <- page.kcp_history_dropped;
@@ -15467,7 +15551,7 @@ let restore_keeper_chat_page (state : state) keeper_name =
       state.msg_older_exist <- page.kcp_older_exist;
       state.msg_older_error <- page.kcp_older_error
   | None ->
-      state.msg_loaded <- [];
+      set_keeper_chat_sources state empty_keeper_chat_sources;
       state.msg_loaded_keeper <- None;
       state.msg_loaded_error <- None;
       state.msg_loaded_dropped <- 0;
@@ -15484,8 +15568,7 @@ let retire_keeper_chat_history (state : state) keeper_name =
   state.msg_loaded_pages <- List.remove_assoc keeper_name state.msg_loaded_pages;
   if state.msg_loaded_keeper = Some keeper_name then (
     retire_keeper_message_search state;
-    state.msg_loaded <-
-      List.filter (fun entry -> entry.me_role = Message_memory) state.msg_loaded;
+    set_keeper_chat_sources state {state.msg_loaded_sources with kcs_history=None};
     state.msg_loaded_error <- None;
     state.msg_loaded_dropped <- 0;
     state.msg_older_cursor <- None;

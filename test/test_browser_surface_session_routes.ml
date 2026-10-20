@@ -1,8 +1,9 @@
 (* This standalone fixture explicitly enables new Browser work. *)
 let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled))
 
-(* The dashboard's session and navigation routes: the request names a lane
-   the server owns, and the verb reaches that lane's executor only. *)
+(* Dashboard workflows require their Add-on; installed builtin executors are
+   never an implicit replacement. The independent Stagehand attach wait remains
+   covered until owned backends move into the worker. *)
 open Alcotest
 module Lane = Browser_lane
 module Routes = Server_routes_http_browser_surface
@@ -25,26 +26,22 @@ let with_executors f =
 
 let body fields = `Assoc fields
 
-let test_the_named_lane_takes_the_verb () =
-  with_executors
-  @@ fun ~automation ~stagehand ->
-  check bool "stagehand open" true
-    (Result.is_ok (Routes.session (body [ "action", `String "open"; "lane", `String "stagehand" ])));
-  check bool "automation goto" true
-    (Result.is_ok (Routes.goto (body [ "url", `String "https://example.org/"; "lane", `String "automation" ])));
-  check (list string) "stagehand got the open" [ "session.open" ] (List.map Lane.verb_to_string !stagehand);
-  check (list string) "automation got the goto" [ "page.goto" ] (List.map Lane.verb_to_string !automation)
-;;
-
-let test_a_request_without_a_server_lane_is_refused () =
-  with_executors
-  @@ fun ~automation ~stagehand ->
-  List.iter
-    (fun (name, result) -> check bool name true (Result.is_error result))
-    [ "no lane", Routes.session (body [ "action", `String "open" ]);
-      "live", Routes.session (body [ "action", `String "close"; "lane", `String "live" ]);
-      "not a lane", Routes.goto (body [ "url", `String "https://example.org/"; "lane", `String "chromium" ]) ];
-  check int "no executor was reached" 0 (List.length !automation + List.length !stagehand)
+let test_missing_addon_does_not_use_builtin_executors () =
+  let root=Filename.temp_dir "browser-view-routes-" "" in
+  let rec remove path=match (Unix.lstat path).Unix.st_kind with
+    | Unix.S_DIR -> Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);Unix.rmdir path
+    | Unix.S_REG|Unix.S_LNK|Unix.S_CHR|Unix.S_BLK|Unix.S_FIFO|Unix.S_SOCK -> Unix.unlink path in
+  Fun.protect ~finally:(fun () -> remove root) (fun () ->
+    with_executors (fun ~automation ~stagehand ->
+      let config=Masc.Workspace.default_config root in
+      let execute operation fields=Routes.view ~config
+        ~principal:(Lane_addon_call_context.Host_actor "dashboard-tester") operation (body fields) in
+      let results=[
+        execute Masc.Browser_addon_view.session ["action",`String "open";"lane",`String "stagehand"];
+        execute Masc.Browser_addon_view.goto ["url",`String "https://example.org/";"lane",`String "automation"]] in
+      List.iter (fun result -> check bool "missing Add-on is unavailable" true
+        (Tool_result.failure_class result=Some Tool_result.Dependency_unavailable)) results;
+      check int "neither builtin executor receives input" 0 (List.length !automation+List.length !stagehand)))
 ;;
 
 let test_stagehand_open_waits_for_attach () =
@@ -64,21 +61,11 @@ let test_stagehand_open_waits_for_attach () =
            ~verb:(Lane.Session_open { headless = None }) ~timeout_sec:0.0 = answered))
 ;;
 
-let test_live_route_explains_ownership () =
-  match Routes.session (body [ "action", `String "open"; "lane", `String "live" ]) with
-  | Error detail ->
-    check bool "live rejection says why" true
-      (String.starts_with ~prefix:"the live browser belongs to the operator" detail)
-  | Ok _ -> fail "the live browser must not be opened by the server"
-;;
-
 let () =
   run "browser_surface_session_routes" [
     "lanes", [
-      test_case "the named server lane takes the verb" `Quick test_the_named_lane_takes_the_verb;
-      test_case "a request without a server lane is refused" `Quick test_a_request_without_a_server_lane_is_refused;
+      test_case "missing Add-on never borrows builtin executors" `Quick test_missing_addon_does_not_use_builtin_executors;
       test_case "Stagehand open keeps its attach wait" `Quick test_stagehand_open_waits_for_attach;
-      test_case "live rejection explains ownership" `Quick test_live_route_explains_ownership;
     ];
   ]
 ;;

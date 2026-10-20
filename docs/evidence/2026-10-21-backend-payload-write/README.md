@@ -53,7 +53,7 @@ installed OCaml 5.5.1 and real Eio/POSIX file capabilities. Eight scenarios
 passed: empty, UTF-8/binary, multi-megabyte contents, short writes plus EINTR,
 zero progress, ENOSPC, scheduler progress while a worker write is held, and
 caller cancellation while that worker is held. Faults and the blocking hold
-are injected around Unix writes in the probe only. See `probe.log`.
+are injected around Unix writes in the probe only. See `probe-output.txt`.
 
 This is a narrow source-extraction experiment, not a local Dune build or
 full Backend linkage. The descriptor-free fallback is source reviewed,

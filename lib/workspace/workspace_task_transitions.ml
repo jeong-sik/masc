@@ -950,8 +950,18 @@ let commit_verdict_r
            in
            run_post_commit "producer_task_binding" (fun () ->
              match decided.Workspace_task_lifecycle.decision.set_current with
-             | Some current_task ->
+             | Some rejected_task ->
+               (* [new_backlog] is the document this commit just wrote while
+                  holding the backlog lock, so the producer's other task cannot
+                  be released or finished between that write and this read. *)
                update_local_agent_state config ~agent_name:producer (fun agent ->
+                 let current_task =
+                   Workspace_task_lifecycle.focus_after_rejection
+                     ~producer
+                     ~rejected_task
+                     ~current_task:agent.current_task
+                     ~tasks:new_backlog.tasks
+                 in
                  { agent with status = Busy; current_task = Some current_task })
              | None ->
                Task_cache_invariant.clear_stale_agent_task

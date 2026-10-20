@@ -1558,6 +1558,45 @@ let test_operator_rejection_rebinds_producer () =
     | Some { status = Masc_domain.Busy; current_task = Some "task-001"; _ } -> ()
     | _ -> Alcotest.fail "rejection did not restore producer task binding")
 
+(* The producer claims a second task while the first waits on its verdict.
+   Rejecting the first returns it to the producer but leaves the second as the
+   producer's current task, with its backlog row untouched. *)
+let test_operator_rejection_keeps_other_active_task () =
+  with_test_env (fun config ->
+    let _ = Workspace.add_task config ~title:"Rejected Task" ~priority:1 ~description:"" in
+    let _ = Workspace.add_task config ~title:"Next Task" ~priority:1 ~description:"" in
+    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    let _ =
+      Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
+        ~action:Masc_domain.Submit_for_verification ~notes:"evidence" ()
+    in
+    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-002" in
+    let rejected =
+      Workspace.commit_verdict_r config
+        ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+        ~verdict:(Masc_domain.Verdict_rejected { reason = "missing focused test" })
+        ~task_id:"task-001"
+        ~verification_id:(verification_id_for_task config "task-001")
+        ()
+    in
+    Alcotest.(check bool) "reject committed" true (Result.is_ok rejected);
+    (match find_task config "task-001" with
+     | Some { task_status = Masc_domain.InProgress { assignee; _ }; _ }
+       when String.equal assignee test_agent_a -> ()
+     | _ -> Alcotest.fail "rejection did not return task to producer");
+    (match find_task config "task-002" with
+     | Some { task_status = Masc_domain.Claimed { assignee; _ }; _ }
+       when String.equal assignee test_agent_a -> ()
+     | _ -> Alcotest.fail "rejection changed the producer's other task");
+    match
+      Workspace.get_agents_raw config
+      |> List.find_opt (fun (agent : Masc_domain.agent) ->
+             String.equal agent.name test_agent_a)
+    with
+    | Some { status = Masc_domain.Busy; current_task = Some "task-002"; _ } -> ()
+    | _ -> Alcotest.fail "rejection moved the producer off its other active task")
+
 let cancelled_reason config task_id =
   match find_task config task_id with
   | Some { task_status = Masc_domain.Cancelled { reason; _ }; _ } -> reason
@@ -3402,6 +3441,8 @@ let () =
         test_approve_completion_credits_assignee;
       Alcotest.test_case "operator rejection rebinds producer" `Quick
         test_operator_rejection_rebinds_producer;
+      Alcotest.test_case "operator rejection keeps other active task" `Quick
+        test_operator_rejection_keeps_other_active_task;
       Alcotest.test_case "operator verdict boundary is reachable" `Quick
         test_operator_verdict_boundary_is_reachable;
       Alcotest.test_case "operator rejection parser requires reason" `Quick

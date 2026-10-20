@@ -267,6 +267,29 @@ let decide_verdict
   | Masc_domain.Cancelled _ -> Error Not_awaiting_verdict
 ;;
 
+let holds_active ~producer ~tasks task_id =
+  List.exists
+    (fun (task : Masc_domain.task) ->
+       String.equal task.id task_id
+       &&
+       match task.task_status with
+       | Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ } ->
+         String.equal assignee producer
+       | Masc_domain.Todo
+       | Masc_domain.AwaitingVerification _
+       | Masc_domain.Done _
+       | Masc_domain.Cancelled _ -> false)
+    tasks
+;;
+
+let focus_after_rejection ~producer ~rejected_task ~current_task ~tasks =
+  match current_task with
+  | Some other
+    when (not (String.equal other rejected_task)) && holds_active ~producer ~tasks other ->
+    other
+  | Some _ | None -> rejected_task
+;;
+
 let valid_next_actions ~same_agent ~task_status =
   let same_agent_pred _ = same_agent in
   let try_action action =

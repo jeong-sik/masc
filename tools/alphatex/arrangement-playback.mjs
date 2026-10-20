@@ -271,7 +271,7 @@ export async function prepareArrangementCaptureRegions(project, { sourceRoot, di
     ? projectCapturedPlacement(project, project.assets.find(asset => asset.id === clip.asset), clip) : [clip]), byID = new Map(project.assets.map(asset => [asset.id, asset]))
   if (!schedule.length) throw new Error('No audible arrangement regions')
   if (!schedule.some(clip => ['capture', 'practice'].includes(byID.get(clip.asset).kind))) {
-    throw new Error('Raw UMP preparation requires captured or practice lanes')
+    throw new Error('Raw UMP preparation requires captured lanes or practice lanes')
   }
   const destination = value => {
     const number = Number(value)

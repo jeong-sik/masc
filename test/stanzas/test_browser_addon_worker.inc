@@ -20,6 +20,11 @@
  (libraries masc masc.browser_lane masc.time_compat alcotest eio eio_main yojson uuidm))
 
 (test
+ (name test_browser_addon_owner_cleanup)
+ (modules test_browser_addon_owner_cleanup)
+ (libraries masc masc.browser_lane alcotest eio eio_main))
+
+(test
  (name test_browser_addon_wire)
  (modules test_browser_addon_wire)
  (libraries masc masc.browser_lane alcotest yojson))

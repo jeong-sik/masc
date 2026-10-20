@@ -11,6 +11,7 @@ import * as editor from '../sequencer-editor.mjs'
 import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo } from '../midi-source-editor.mjs'
 import { importMidiSource, midiSourcePattern } from '../midi-source.mjs'
 import { harmonyAt, PPQ } from '../sequencer-project.mjs'
+import { MidiSourcePicker as SourcePicker } from '../midi-source-picker.mjs'
 
 const frozenSound = selection => ({ kind: 'vst', selection, instrument: { identifier: 'Bass', version: '1' },
   preset: { data: Buffer.from('frozen state').toString('base64'), sha256: createHash('sha256').update('frozen state').digest('hex') } })
@@ -41,9 +42,14 @@ async function controller(options = {}) {
     async settled() {}
     async keypress(_text, key) { if (key.name === 'escape') this.close() }
   }
+  class MidiSourcePicker extends SourcePicker {
+    constructor(callbacks) {
+      super({ ...callbacks, discover: async () => { throw new Error('Unexpected MIDI source discovery') } })
+    }
+  }
   const slot = `sequencer-${randomUUID()}`
   globalThis[slot] = {
-    process, InstrumentPicker, defaultStateDirectory: () => '/synthetic-vst',
+    process, InstrumentPicker, MidiSourcePicker, defaultStateDirectory: () => '/synthetic-vst',
     snapshotWriter: () => async value => { observed.snapshots.push(value) },
     captureVstSound(selection) { observed.soundCaptures.push(selection); return options.capture?.(selection) ?? { promise: Promise.resolve(frozenSound(selection)), cancel() {} } },
     renderVstPhrase(value) { observed.native.push(value); return options.native(value) },

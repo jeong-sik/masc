@@ -153,6 +153,7 @@ test('step commands use the same explicit effect grammar for phrase and source d
   for(const editor of [newEditor(),newEditor(sourceFile())]){
     assert.deepEqual(editorCommand(editor,'step-input -123').effect,{kind:'step-input',source:'-123'})
     assert.deepEqual(editorCommand(editor,'step-stop').effect,{kind:'step-stop'})
-    assert.throws(()=>editorCommand(editor,'step-input'));assert.throws(()=>editorCommand(editor,'step-stop extra'))
+    assert.deepEqual(editorCommand(editor,'step-input').effect,{kind:'step-input',source:undefined})
+    assert.throws(()=>editorCommand(editor,'step-input 1 2'));assert.throws(()=>editorCommand(editor,'step-stop extra'))
   }
 })

@@ -13,6 +13,22 @@ func inputEmit(_ value: [String: Any]) throws {
     data.append(10); try FileHandle.standardOutput.write(contentsOf: data)
 }
 
+// Discovery enumerates sources only. It creates no client, port, callback,
+// capture stream or destination; arming revalidates the selected exact UID.
+func inputSources() throws -> [[String: Any]] {
+    var sources: [[String: Any]] = [], identities = Set<Int32>()
+    for index in 0..<MIDIGetNumberOfSources() {
+        let endpoint = MIDIGetSource(index)
+        guard endpoint != 0 else { throw InputFailure("MIDI source catalog changed; refresh it") }
+        var uid: Int32 = 0
+        try inputChecked(MIDIObjectGetIntegerProperty(endpoint, kMIDIPropertyUniqueID, &uid), "read MIDI source identity")
+        let source = try MidiInput(source: String(uid))
+        guard source.endpoint == endpoint, identities.insert(uid).inserted else { throw InputFailure("MIDI source catalog identity changed; refresh it") }
+        sources.append(["id": String(uid), "name": source.name])
+    }
+    return sources
+}
+
 // The callback only reserves/copies input. One packet is exposed at a time;
 // its words remain reserved until the consumer acknowledges its decision.
 // 256 KiB bounds the actual callback/handoff/consumer backlog, not session life.
@@ -181,7 +197,10 @@ final class MidiInput {
         _ = signal(SIGPIPE, SIG_IGN)
         do {
             let args = Array(CommandLine.arguments.dropFirst())
-            guard args.count == 2, args[0] == "--source" else { throw InputFailure("usage: music-midi-input --source MIDI_UID") }
+            if args == ["--sources"] {
+                try inputEmit(["kind": "midi-sources", "schemaVersion": 1, "sources": inputSources()]); return
+            }
+            guard args.count == 2, args[0] == "--source" else { throw InputFailure("usage: music-midi-input --sources | --source MIDI_UID") }
             let owner = try MidiInput(source: args[1])
             owner.onClosed = { error in exit(error == nil ? 0 : 1) }
             var signals: [DispatchSourceSignal] = []

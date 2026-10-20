@@ -20,6 +20,36 @@ function target(editor) {
   if (channel === undefined) throw new Error('Select :channel 1–16 before step input')
   return { track, channel }
 }
+export function stepControl(editor, action) {
+  const per = sourceDocument(editor) ? editor.axis.per : editor.project.ppq
+  const units = value => {
+    const parts = value.split('/')
+    let numerator, denominator
+    if (parts.length === 2 && parts.every(part => /^[0-9]+$/.test(part))) {
+      numerator = BigInt(parts[0]); denominator = BigInt(parts[1])
+    } else if (parts.length === 1 && /^[0-9]+(?:\.[0-9]+)?$/.test(value)) {
+      const [whole, decimal = ''] = value.split('.')
+      numerator = BigInt(whole + decimal); denominator = 10n ** BigInt(decimal.length)
+    } else throw new Error('Use a nonnegative decimal or integer fraction for step length/rest')
+    const ticks = numerator * BigInt(per)
+    if (denominator === 0n || ticks % denominator !== 0n || ticks / denominator > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('Step value must resolve to exact whole source ticks')
+    return Number(ticks / denominator)
+  }
+  switch (action.kind) {
+    case 'step-length': {
+      const duration = units(action.value)
+      if (duration === 0 && !sourceDocument(editor)) throw new Error('Phrase input length must be positive')
+      return { ...editor, duration }
+    }
+    case 'step-rest': {
+      const duration = action.value === undefined ? editor.duration || editor.step : units(action.value)
+      const tick = editor.tick + duration
+      if (duration <= 0 || !Number.isSafeInteger(tick) || (!sourceDocument(editor) && tick > editor.project.length)) throw new Error('Rest exceeds the document or MIDI tick range')
+      return { ...editor, tick, selectedID: undefined }
+    }
+    default: throw new Error('Unknown step input control')
+  }
+}
 function insertChord(editor, notes) {
   const { track, channel } = target(editor)
   const end = editor.tick + editor.duration
@@ -91,7 +121,7 @@ export function stepPacket(editor, pending, packet) {
 export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState = () => {}, openInput = openMidiInput }) {
   target(getEditor())
   const cancellation = new AbortController()
-  let pending = null
+  let pending = null, stopping = false
   const input = openInput({ source, signal: cancellation.signal, onPacket: (packet, { signal }) => enqueue(() => {
     signal.throwIfAborted()
     const result = stepPacket(getEditor(), pending, packet)
@@ -101,6 +131,16 @@ export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState
   }) })
   const completion = input.completion.finally(() => { pending = null })
   completion.catch(() => {})
-  return { ready: input.ready, completion, stop: input.stop,
+  return { ready: input.ready, completion, stop({ admittedControls = false } = {}) {
+      // View close ends native admission immediately, while controls already
+      // queued before close must still decide before drained MIDI packets.
+      if (!admittedControls) stopping = true
+      input.stop()
+    },
+    control(action) {
+      cancellation.signal.throwIfAborted()
+      if (stopping || pending !== null) throw new Error('Release all keys and finish draining before changing step input')
+      return stepControl(getEditor(), action)
+    },
     cancel(reason = new Error('Step input context changed')) { cancellation.abort(reason) } }
 }

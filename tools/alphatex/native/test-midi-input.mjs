@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { createInterface } from 'node:readline'
-import { openMidiInput } from '../midi-input.mjs'
+import { openMidiInput, listMidiSources } from '../midi-input.mjs'
 import { openStepInput } from '../step-input.mjs'
 import { newEditor, editorCommand } from '../sequencer-editor.mjs'
 import { saveProject, loadProject, projectMidi } from '../sequencer-files.mjs'
@@ -152,6 +152,11 @@ try {
   const decisions = spawnSync(decisionBinary, [], { encoding: 'utf8' }); assert.equal(decisions.status, 0, decisions.stderr + decisions.stdout); console.log(decisions.stdout.trim())
   let selected = await source()
   try {
+    const sources = await listMidiSources({ executable: helper })
+    assert.ok(sources.some(source => source.id === selected.source))
+    assert.ok(sources.some(source => source.id === selected.other))
+    assert.equal(sources.some(source => source.id === selected.destination), false)
+    console.log('MIDI_SOURCE_CATALOG_NATIVE_PASS: source-only discovery includes owned virtual sources and excludes destination identities')
     const wrong = open({ source: selected.destination }); await assert.rejects(wrong.ready, /not a source/); await assert.rejects(wrong.completion)
     const received = [], all = deferred(), packets = [[0], [0x43953c03, 0x90012345], [0x33020102, 0], Array.from({ length: 160 }, () => [0x43853c00, 0x12340000, 0x43953c03, 0x90012345]).flat()]
     const expectedWords = packets.flat().length

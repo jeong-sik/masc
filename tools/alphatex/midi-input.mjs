@@ -16,6 +16,38 @@ function counter(value) {
   if (parsed < 0n || parsed > 0xffffffffffffffffn || String(parsed) !== value) throw new Error('Invalid MIDI input counter')
   return parsed
 }
+
+export async function listMidiSources({ signal, executable = midiInputPath, spawnProcess = spawn } = {}) {
+  signal?.throwIfAborted()
+  const child = spawnProcess(executable, ['--sources'], { stdio: ['ignore', 'pipe', 'pipe'] })
+  let output = '', detail = '', failure
+  child.stdout.setEncoding('utf8').on('data', text => { output += text })
+  child.stderr.setEncoding('utf8').on('data', text => { detail += text })
+  for (const stream of [child.stdout, child.stderr]) stream.on('error', error => { failure ??= error; child.kill('SIGTERM') })
+  const abort = () => child.kill('SIGTERM')
+  signal?.addEventListener('abort', abort, { once: true })
+  if (signal?.aborted) abort()
+  try {
+    await new Promise((resolve, reject) => {
+      child.once('error', error => { failure ??= error })
+      child.once('close', (code, exitSignal) => {
+        if (signal?.aborted) reject(signal.reason)
+        else if (failure) reject(failure)
+        else if (code !== 0) reject(new Error(detail || `MIDI discovery ended: ${code ?? exitSignal}`))
+        else resolve()
+      })
+    })
+  } finally { signal?.removeEventListener('abort', abort) }
+  signal?.throwIfAborted()
+  const result = JSON.parse(output), identities = new Set()
+  if (result.kind !== 'midi-sources' || result.schemaVersion !== 1 || !Array.isArray(result.sources)) throw new Error('Invalid MIDI source catalog')
+  for (const source of result.sources) {
+    const uid = sourceUID(source?.id)
+    if (typeof source.name !== 'string' || identities.has(uid)) throw new Error('Invalid MIDI source catalog identity')
+    identities.add(uid)
+  }
+  return result.sources
+}
 // onPacket owns the admitted decision through its promise. The native owner
 // cannot expose another packet until that promise settles and we acknowledge it.
 // stop drains admitted input; abort/consumer failure rejects after child closure

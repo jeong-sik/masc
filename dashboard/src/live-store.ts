@@ -1,4 +1,4 @@
-// Live Monitor tab — derived signals and filter state
+// Live Monitor tab — derived signals
 
 import { signal, computed, type ReadonlySignal } from '@preact/signals'
 import type { JournalEntry } from './types'
@@ -7,8 +7,6 @@ import type { PipelineStage } from './types/core'
 import type { AuditEntry } from './api/dashboard'
 import { contextThresholds } from './config/context-thresholds'
 import type { StatusChipTone } from './components/common/status-chip'
-
-export const selectedAgent = signal<string | null>(null)
 
 export type PulseState = 'working' | 'idle'
 

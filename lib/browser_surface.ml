@@ -114,22 +114,14 @@ let exchange ~admission ~command =
   match Browser_lane.Read_admission.issue admission command ~timeout_sec:20. with
   | Error error -> Error (Unselected error)
   | Ok answer -> observe_answer ~lane:(Browser_lane.target_lane target) answer
-let read request =
-  let started = Mtime_clock.elapsed_ns () in
-  let* selected = choose_browser ~verb:Browser_lane.Tabs_list request in
-  let* admission = Browser_lane.Read_admission.acquire selected.route
-    |> Result.map_error (fun error -> Unselected error) in
-  let target = Browser_lane.Read_admission.target admission in
-  let selected = Browser_selection.bind_target selected target in
-  let lane_name = Browser_lane.Lane_name.to_wire (Browser_lane.target_lane target) in
-  let issue command = exchange ~admission ~command in
-  let* raw_tabs = issue Browser_lane.Read_admission.Tabs in
+type read_plan = {inventory:inventory;selection:selection}
+let prepare_read ~tab_id raw_tabs =
   let* inventory = decode_inventory raw_tabs |> unobserved in
   let tabs = inventory.tabs in
   let unavailable = match inventory.completeness with
     | Complete -> []
     | Partial unavailable -> unavailable in
-  let* () = match request.tab_id with
+  let* () = match tab_id with
     | None -> Ok ()
     | Some id ->
       (match List.find_opt (fun row -> field "id" row = Some (`Int id)) unavailable with
@@ -142,11 +134,17 @@ let read request =
   (* Without a requested tab and without an active tab no page is read: the
      answer says [selection = none_active] and [page = null] instead of the
      caller receiving whichever tab the browser listed first. *)
-  let* selection = select ~tab_id:request.tab_id tabs |> unobserved in
-  let* page = match selection with
-    | None_active -> Ok `Null
-    | Requested tab | Active tab ->
-      let* data = issue (Browser_lane.Read_admission.Page {tab_id=tab.id;max_chars=Some Browser_page_script.default_text_chars}) in
+  let* selection = select ~tab_id tabs |> unobserved in
+  Ok {inventory;selection}
+let selected_tab plan=match plan.selection with
+  | None_active -> None | Requested tab|Active tab -> Some tab
+let project_read plan ~binding ~started ~page =
+  let selected=Browser_binding.selected binding in
+  let lane_name=source_name selected.route in
+  let* page = match plan.selection,page with
+    | None_active,None -> Ok `Null
+    | None_active,Some _ | (Requested _|Active _),None -> Error (Unobserved "page does not match the selected tab")
+    | (Requested tab|Active tab),Some data ->
       (match field "url" data, field "title" data, field "text" data,
              field "chars" data, field "truncated" data with
        | Some (`String url), Some (`String title), Some (`String text),
@@ -155,12 +153,26 @@ let read request =
            "text",`String text;"chars",`Int chars;"truncated",`Bool truncated])
        | _ -> Error (Unobserved "browser page lacks URL/title/text/length metadata; update the browser connector")) in
   let elapsed_ms = Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1e6 in
-  Ok (`Assoc (["tabs",`List (List.map tab_json tabs);"selection",selection_json selection;"page",page;
+  Ok (`Assoc (["tabs",`List (List.map tab_json plan.inventory.tabs);"selection",selection_json plan.selection;"page",page;
     "source",`String lane_name; "browserSelection", Browser_selection.to_json selected]
-    @ Browser_lane.target_connection_fields target
-    @ (match inventory.completeness with Complete -> [] | Partial unavailable ->
+    @ Browser_binding.connection_fields binding
+    @ (match plan.inventory.completeness with Complete -> [] | Partial unavailable ->
         ["complete",`Bool false;"unavailableTabs",`List unavailable])
     @ ["elapsed_ms",`Float elapsed_ms]))
+
+let read request =
+  let started=Mtime_clock.elapsed_ns () in
+  let* selected=choose_browser ~verb:Browser_lane.Tabs_list request in
+  let* admission=Browser_lane.Read_admission.acquire selected.route
+    |> Result.map_error (fun error -> Unselected error) in
+  let binding=Browser_binding.of_target selected (Browser_lane.Read_admission.target admission) in
+  let* tabs=exchange ~admission ~command:Browser_lane.Read_admission.Tabs in
+  let* plan=prepare_read ~tab_id:request.tab_id tabs in
+  let* page=match selected_tab plan with
+    | None -> Ok None
+    | Some tab -> exchange ~admission ~command:(Browser_lane.Read_admission.Page
+        {tab_id=tab.id;max_chars=Some Browser_page_script.default_text_chars}) |> Result.map Option.some in
+  project_read plan ~binding ~started ~page
 
 (* Captures always name a tab. An absent/closed target must never capture the
    operator's newly active tab instead. The image is a viewport observation,
@@ -171,17 +183,9 @@ let parse_capture_request json =
   | Some _ -> Ok request
   | None -> Error "tabId is required for a screenshot"
 
-let capture request =
-  let* tab_id = match request.tab_id with
-    | Some id -> Ok id | None -> Error (Unobserved "tabId is required for a screenshot") in
-  let started = Mtime_clock.elapsed_ns () in
-  let* selected = choose_browser ~verb:(Browser_lane.Page_capture {tab_id}) request in
-  let* admission = Browser_lane.Read_admission.acquire selected.route
-    |> Result.map_error (fun error -> Unselected error) in
-  let target = Browser_lane.Read_admission.target admission in
-  let selected = Browser_selection.bind_target selected target in
-  let lane_name = Browser_lane.Lane_name.to_wire (Browser_lane.target_lane target) in
-  let* data = exchange ~admission ~command:(Browser_lane.Read_admission.Capture {tab_id}) in
+let capture_from ~binding ~tab_id ~started data =
+  let selected=Browser_binding.selected binding in
+  let lane_name=source_name selected.route in
   unobserved @@
   match field "tabId" data, field "url" data, field "title" data,
         field "mimeType" data, field "data" data with
@@ -201,9 +205,20 @@ let capture request =
     else
       let elapsed_ms = Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1e6 in
       Ok (`Assoc (["source", `String lane_name; "browserSelection", Browser_selection.to_json selected]
-        @ Browser_lane.target_connection_fields target
+        @ Browser_binding.connection_fields binding
         @ ["tabId", `Int tab_id;
            "title", `String title; "url", `String url; "mimeType", `String "image/png";
            "data", `String image; "viewport", Browser_lane.Pointer.viewport_to_json viewport;
            "elapsed_ms", `Float elapsed_ms]))
   | _ -> Error "screenshot response does not match the requested tab or PNG contract"
+
+let capture request =
+  let* tab_id=match request.tab_id with
+    | Some id -> Ok id | None -> Error (Unobserved "tabId is required for a screenshot") in
+  let started=Mtime_clock.elapsed_ns () in
+  let* selected=choose_browser ~verb:(Browser_lane.Page_capture {tab_id}) request in
+  let* admission=Browser_lane.Read_admission.acquire selected.route
+    |> Result.map_error (fun error -> Unselected error) in
+  let binding=Browser_binding.of_target selected (Browser_lane.Read_admission.target admission) in
+  let* data=exchange ~admission ~command:(Browser_lane.Read_admission.Capture {tab_id}) in
+  capture_from ~binding ~tab_id ~started data

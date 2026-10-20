@@ -57,3 +57,11 @@ val read : ?navigation_source:navigation_source -> ?expected_url:string -> ?view
 val scope_of_json : Yojson.Safe.t -> (Browser_lane.node_ref, string) result
 
 val read_request : Yojson.Safe.t -> (Yojson.Safe.t, string) result
+type request = {surface:Browser_surface.request;view:Browser_lane.scene_view;
+  scope:Browser_lane.node_ref option;expected_url:string option;
+  navigation_source:navigation_source option;max_chars:int}
+val parse_request : Yojson.Safe.t -> (request, string) result
+val project : request -> binding:Browser_binding.t -> started:int64 ->
+  Yojson.Safe.t -> (Yojson.Safe.t, string) result
+(** Validate the observed tab, destination, document transition and view/scope,
+    then attach the original transport receipt identity. No browser input. *)

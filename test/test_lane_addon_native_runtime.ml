@@ -192,21 +192,37 @@ for line in sys.stdin:
     if "id" not in req: continue
     method=req["method"]
     if method=="initialize": result={"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"browser-host-fixture","version":"1"}}
-    elif method=="tools/list": result={"tools":[{"name":name,"inputSchema":{"type":"object"}} for name in ["lane_observe","lane_call","browser_command"]]}
+    elif method=="tools/list":
+        with open(os.path.join(a.root,"browser-tool.json")) as source: tool=json.load(source)
+        result={"tools":[{"name":name,"inputSchema":{"type":"object"}} for name in ["lane_observe","lane_call"]]+[tool]}
     elif method=="tools/call":
         if req["params"]["name"]=="lane_call":
             if req["params"]["arguments"]["tool"]!="browser_command": raise RuntimeError("wrong export")
+            with open(os.path.join(a.root,"caller-"+a.incarnation),"w") as out: json.dump(req["params"]["arguments"]["caller"],out)
             event.clear();running=True
             with open(os.path.join(a.root,"issued-"+a.incarnation),"w") as out: out.write("issued")
             with open(os.path.join(a.root,"toolcalls-"+a.incarnation),"a") as out: out.write("once\n")
             event.wait();running=False
-            result={"content":[],"structuredContent":{"ok":True}}
+            failed=not payload["ok"]
+            value={"reply":"issue","answer":{"status":"answered","payload":payload},"browserSelection":{"lane":"live","clientId":"0c000000-0000-4000-8000-000000000001","reason":"explicit_browser"}}
+            if os.path.exists(os.path.join(a.root,"reject-tool-output-"+a.incarnation)): value={}
+            result={"content":[],"structuredContent":value,"isError":failed}
+            if failed:
+                with open(os.path.join(a.root,"browser-failure-meta.json")) as source: result["_meta"]=json.load(source)
         else: result={"content":[],"structuredContent":{"rows":[],"coverage":[]}}
     else: raise RuntimeError(method)
     print(json.dumps({"jsonrpc":"2.0","id":req["id"],"result":result}),flush=True)
 |}
 let browser_installation () = with_fixture (fun clock root config ->
   let script=Filename.concat root "browser.py" in write script browser_server;
+  let tool=Browser_addon_tool.definition in
+  write (Filename.concat root "browser-tool.json") (Yojson.Safe.to_string (`Assoc [
+    "name",`String tool.name;"inputSchema",tool.input_schema;
+    "outputSchema",Option.get tool.output_schema]));
+  let partial=Tool_result.make_err ~tool_name:tool.name ~start_time:(Tool_timing.start ())
+    ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_post_effect "partial fixture" in
+  write (Filename.concat root "browser-failure-meta.json")
+    (Yojson.Safe.to_string (Option.get (Lane_addon_tool_result.metadata partial)));
   let manifest=Filename.concat root "browser.toml" in
   let install mode = write manifest (Printf.sprintf {|id = "browser-host-fixture"
 revision = "fixture-1"
@@ -220,6 +236,7 @@ max_reply_bytes = 65536
 [world.tools]
 export = ["browser_command"]
 invocation = "host_context"
+hooks = ["validate_input", "validate_output"]
 |} script root mode) in
   let access=Lane_addon_sources.Operator_configuration in
   let inspect id=dispatch config R.Inspect ["instance_id",`String id]
@@ -237,6 +254,20 @@ invocation = "host_context"
     List.find (fun (service:R.browser_service) -> service.instance_id=id) (services ()) in
   let id=attach "normal" in
   let original=selected id in
+  let host=match Browser_addon_host.connect ~config ~access:Lane_addon_sources.Unauthenticated
+      ~principal:(Lane_addon_call_context.Host_actor "dashboard-tester") ~reserved:[] with
+    | Ok host -> host | Error _ -> fail "shared browser host must connect" in
+  check bool "anonymous caller cannot acquire host authority" true
+    (Result.is_error (Browser_addon_host.connect ~config ~access:Lane_addon_sources.Unauthenticated
+      ~principal:Lane_addon_call_context.Anonymous ~reserved:[]));
+  check bool "public command cannot hide a reserved host name" true
+    (Result.is_error (Browser_addon_host.connect ~config ~access:Lane_addon_sources.Unauthenticated
+      ~principal:Lane_addon_call_context.Operator ~reserved:[Browser_addon_tool.definition.name]));
+  check bool "public host uses selected input middleware" true
+    (match Browser_addon_host.call host ~arguments:(`Assoc ["actor",`String "forged"]) with
+     | Error (R.Host_refusal (Lane_addon_call_context.Rejected _)) -> true | _ -> false);
+  check bool "rejected input never reaches worker" false
+    (Sys.file_exists (Filename.concat root ("toolcalls-"^id)));
   let pid=inspect id |> member "resource" |> member "pid" |> Yojson.Safe.Util.to_int in
   let client_id=require (Browser_lane.client_id_of_string "0c000000-0000-4000-8000-000000000001") in
   let issue=Browser_addon_wire.Issue {route=Browser_lane.Live_route (Some client_id);verb=Browser_lane.Tabs_list;
@@ -258,13 +289,17 @@ invocation = "host_context"
   wait clock (fun () -> match R.browser_service_status ~config ~access ~instance_id:id with
     | R.Browser_ready _ -> true | Browser_refresh_needed _|Browser_unavailable|Browser_retired -> false);
   check bool "same native client recovers its original worker" true (poll client=Ok None);
-  let export ()=R.tool_exports ~config ~access ~reserved:[] |> require
-    |> List.find (fun (item:R.tool_export) -> item.instance_id=id && item.tool.name="browser_command") in
-  let export=export () in
+  let arguments=`Assoc ["lane",`String "live";"clientId",`String (Browser_lane.client_id_to_string client_id);
+    "command",Browser_lane.verb_json Browser_lane.Tabs_list] in
   Eio.Fiber.both (fun () ->
-    let result=R.call_exported_tool_with_principal ~principal:(Some Lane_addon_call_context.Operator)
-      ~config ~access ~reserved:[] ~export ~arguments:(`Assoc []) in
-    check bool "long MCP export returns after reverse-channel result" true (Result.is_ok result))
+    let result=match Browser_addon_host.call host ~arguments with
+      | Ok result -> Mcp_protocol.Mcp_types.tool_result_to_yojson result
+      | Error _ -> fail "public host must receive its original partial receipt" in
+    check bool "public host retains partial effect error" true (member "isError" result=`Bool true);
+    check bool "public host retains original payload" true
+      (member "structuredContent" result |> member "answer" |> member "payload" = payload);
+    check bool "public host retains effect metadata" true
+      (member "_meta" result=Option.get (Lane_addon_tool_result.metadata partial)))
     (fun () ->
       wait clock (fun () -> Sys.file_exists (issued id));
       check bool "native poll wakes running observation beside waiting MCP" true (poll client=Ok None);
@@ -284,12 +319,28 @@ invocation = "host_context"
     | R.Browser_ready _ -> true | Browser_refresh_needed _|Browser_unavailable|Browser_retired -> false);
   check string "long MCP export dispatched once" "once\n"
     (In_channel.with_open_bin (Filename.concat root ("toolcalls-"^id)) In_channel.input_all);
+  check bool "public command receives host-verified actor" true
+    (Yojson.Safe.from_file (Filename.concat root ("caller-"^id))=
+      `Assoc ["kind",`String "host_actor";"name",`String "dashboard-tester"]);
   Unix.unlink (issued id);
   Eio.Fiber.both (fun () -> check bool "browser result disposition retained" true
     (call original issue=Ok (Browser_addon_wire.Issue_result (Ok (Browser_lane.Answered payload)))))
     (fun () -> wait clock (fun () -> Sys.file_exists (issued id));
       check bool "reverse channel works beside waiting issue" true
         (call original (Browser_addon_wire.Deliver {client_id;id="fixture";payload})=Ok Browser_addon_wire.Receipt));
+  Unix.unlink (issued id);
+  write (Filename.concat root ("reject-tool-output-"^id)) "reject";
+  Eio.Fiber.both (fun () ->
+    check bool "selected output middleware preserves unknown effect" true
+      (match Browser_addon_host.call host ~arguments with
+       | Error (R.Outcome_unknown _) -> true | _ -> false))
+    (fun () ->
+      wait clock (fun () -> Sys.file_exists (issued id));
+      check bool "malformed output does not prevent original settlement" true
+        (Browser_addon_ingress.deliver ~config ~client ~id:"fixture"
+          ~payload:(`Assoc ["ok",`Bool true;"data",`Assoc []])=Ok ()));
+  check string "output refusal does not replay browser call" "once\nonce\n"
+    (In_channel.with_open_bin (Filename.concat root ("toolcalls-"^id)) In_channel.input_all);
   ignore (dispatch config R.Detach ["instance_id",`String id]);
   wait clock (fun () -> let item=inspect id in
     text "kind" (member "phase" item)="detached" && text "runtime_presence" item="retained");
@@ -297,6 +348,10 @@ invocation = "host_context"
   check bool "socket absent before release" false (Sys.file_exists (Filename.dirname (socket_path id)));
   check bool "detached handle refused" true (unavailable (call original Browser_addon_wire.Snapshot));
   let replacement=attach "normal" in let next=selected replacement in
+  check bool "public handle never follows replacement export" true
+    (match Browser_addon_host.call host ~arguments with Error (R.Unavailable _) -> true | _ -> false);
+  check bool "public observation never follows replacement service" true
+    (unavailable (Browser_addon_host.snapshot host));
   check bool "old handle never resolves replacement" true (unavailable (call original Browser_addon_wire.Snapshot));
   check bool "old native client never polls replacement" true
     (poll client=Error (Browser_addon_ingress.Registration_refused Browser_lane.Client_retired));

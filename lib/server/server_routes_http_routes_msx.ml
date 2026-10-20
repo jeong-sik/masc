@@ -279,12 +279,22 @@ let activity_json ~config:_ =
     "activity", `String (Machine_configuration.activity_to_wire activity)]
     @ match message with None -> [] | Some message -> ["message", `String message])
 
+(* A restore replaces the machine every watcher shows, so this route never
+   picks its slot. The tool reads a restore that names no slot as a request
+   to list the saved slots; a restore route has no listing to answer with, and
+   its receipt binds one slot. *)
+let restore_names_no_slot ~restore = function
+  | `Assoc [] -> restore
+  | `Assoc (_ :: _) | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
+
 let checkpoint_legacy_response ~(config : Workspace.config) ~restore ~body =
   match decode_write_body ~config ~body with
   | Error refusal -> refusal
   | Ok (`Assoc fields)
     when List.length fields <> List.length (List.sort_uniq String.compare (List.map fst fields)) ->
       `Bad_request, load_result_json ~ok:false ~message:"checkpoint has duplicate fields"
+  | Ok arguments when restore_names_no_slot ~restore arguments ->
+      `Bad_request, load_result_json ~ok:false ~message:"restore requires a slot"
   | Ok arguments ->
       let schema = Tool_schemas_misc_toml.msx_schema (if restore then Msx_tool.Restore else Msx_tool.Save) in
       let result = worker_response ~config ~principal:Lane_addon_call_context.Operator ~schema ~arguments in
@@ -300,9 +310,11 @@ let checkpoint_receipt_path (config : Workspace.config) =
     "checkpoint-operations.sqlite3"
 
 (* Slot validation the receipt binds on: pure, no machine. *)
-let checkpoint_slot args =
-  Result.map Machine_checkpoint.slot_to_string
-    (Machine_checkpoint.slot_of_arguments ~default:Msx_tool.default_checkpoint_slot args)
+let checkpoint_slot ~restore args =
+  if restore_names_no_slot ~restore args then Error "restore requires a slot"
+  else
+    Result.map Machine_checkpoint.slot_to_string
+      (Machine_checkpoint.slot_of_arguments ~default:Msx_tool.default_checkpoint_slot args)
 
 let checkpoint_binding ~restore args =
   match args with
@@ -310,7 +322,7 @@ let checkpoint_binding ~restore args =
       (match List.filter (fun (key,_) -> key="operation_id") fields with
        | [_, `String raw] ->
            (match Keeper_operation_id.of_string raw,
-                  checkpoint_slot (`Assoc (List.remove_assoc "operation_id" fields)) with
+                  checkpoint_slot ~restore (`Assoc (List.remove_assoc "operation_id" fields)) with
             | Ok operation_id, Ok slot -> Ok {Checkpoint_receipt.operation_id;
                 action=(if restore then Restore else Save);slot}
             | Error message, _ | _, Error message -> Error message)

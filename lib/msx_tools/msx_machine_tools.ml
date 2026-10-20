@@ -106,6 +106,11 @@ let msx_dir ~base_path = Filename.concat (Common.masc_dir_from_base_path ~base_p
 let carts_dir ~base_path = Filename.concat (msx_dir ~base_path) "carts"
 let bios_dir ~base_path = Filename.concat (msx_dir ~base_path) "bios"
 
+(* A named checkpoint slot is the file <slot>.json under saves/. *)
+let saves_dir ~base_path = Filename.concat (msx_dir ~base_path) "saves"
+let slot_file_suffix = ".json"
+let slot_path ~base_path slot = Filename.concat (saves_dir ~base_path) (slot ^ slot_file_suffix)
+
 (* The names of the regular files in carts/. A missing directory is an empty
    inventory (a fresh volume has none); a directory that exists and will not
    list is an error, so a caller never reads "unreadable" as "nothing there".
@@ -409,44 +414,58 @@ let checkpoint_slot args =
 
 let run_checkpoint ~restore ~base_path ~slot =
   let ledger_dir = msx_dir ~base_path in
-  let path = Filename.concat (Filename.concat ledger_dir "saves") (slot ^ ".json") in
+  let path = slot_path ~base_path slot in
   if restore then Msx_lane.restore ~path ~ledger_dir else Msx_lane.save ~path
 
-(* Whether the call names a slot at all. A save without one writes the scratch
+(* What a checkpoint call asks for. A save without a slot writes the scratch
    slot, which only ever replaces an earlier scratch save. A restore without
-   one must not pick a slot for the caller: it replaces the machine every
-   watcher shows. *)
-let names_a_slot = function
-  | `Assoc fields -> List.mem_assoc "slot" fields
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
+   one must not pick a slot for the caller, because it replaces the machine
+   every watcher shows; it lists the slots it could name and restores nothing.
+   The arguments are read once here, so the handler cannot list and restore
+   from two different readings of them. *)
+type checkpoint_call =
+  | List_slots
+  | Slot of string
 
-(* The slots a restore can name: the files under saves/ whose name is a valid
-   slot. Reads nothing from the files and touches no machine; a slot's
-   contents are masc_msx_checkpoint_info's. *)
-let handle_checkpoint_list ~tool_name ~start_time ~base_path =
-  let saves_dir = Filename.concat (msx_dir ~base_path) "saves" in
-  let names =
-    match Sys.readdir saves_dir with
-    | names -> Ok (Array.to_list names)
-    | exception Sys_error _ when not (Sys.file_exists saves_dir) -> Ok []
-    | exception Sys_error message -> Error message
+let checkpoint_call ~restore = function
+  | `Assoc [] when restore -> Ok List_slots
+  | (`Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as args ->
+    Result.map (fun slot -> Slot slot) (checkpoint_slot args)
+
+(* The slots a restore can name: the regular files under saves/ whose name is
+   a valid slot. Reads nothing from the files and touches no machine; a
+   slot's contents are masc_msx_checkpoint_info's. A missing directory is an
+   empty list (a fresh volume has none); a directory that exists and will not
+   list is an error, so "unreadable" is never read as "nothing saved". *)
+let saved_slots ~base_path =
+  let dir = saves_dir ~base_path in
+  let is_regular name =
+    match Unix.stat (Filename.concat dir name) with
+    | stats -> stats.Unix.st_kind = Unix.S_REG
+    | exception Unix.Unix_error _ -> false
   in
-  match names with
+  if not (Sys.file_exists dir) then Ok []
+  else
+    match Sys.readdir dir with
+    | exception Sys_error message -> Error message
+    | names ->
+      Ok
+        (Array.to_list names
+         |> List.filter_map (fun name ->
+              if Filename.check_suffix name slot_file_suffix && is_regular name then
+                Result.to_option
+                  (Result.map Machine_checkpoint.slot_to_string
+                     (Machine_checkpoint.slot_of_string
+                        (Filename.chop_suffix name slot_file_suffix)))
+              else None)
+         |> List.sort String.compare)
+
+let handle_checkpoint_list ~tool_name ~start_time ~base_path =
+  match saved_slots ~base_path with
   | Error message ->
     refuse ~class_:Tool_result.Runtime_failure ~tool_name ~start_time
       ("the saved checkpoints cannot be listed: " ^ message)
-  | Ok names ->
-    let slots =
-      List.filter_map
-        (fun name ->
-           if Filename.check_suffix name ".json" then
-             Result.to_option
-               (Result.map Machine_checkpoint.slot_to_string
-                  (Machine_checkpoint.slot_of_string (Filename.chop_suffix name ".json")))
-           else None)
-        names
-      |> List.sort String.compare
-    in
+  | Ok slots ->
     Tool_result.make_ok ~tool_name ~start_time
       ~data:
         (`Assoc
@@ -459,12 +478,10 @@ let handle_checkpoint_list ~tool_name ~start_time ~base_path =
    receipt settles from these fields, and only the worker that ran the
    checkpoint knows its change mark. *)
 let handle_checkpoint ~restore ~tool_name ~start_time ~base_path args =
-  if restore && not (names_a_slot args) then
-    handle_checkpoint_list ~tool_name ~start_time ~base_path
-  else
-  match checkpoint_slot args with
+  match checkpoint_call ~restore args with
   | Error message -> reject ~tool_name ~start_time message
-  | Ok slot ->
+  | Ok List_slots -> handle_checkpoint_list ~tool_name ~start_time ~base_path
+  | Ok (Slot slot) ->
     match run_checkpoint ~restore ~base_path ~slot with
     | Ok (completed : Msx_lane.checkpoint_effect) ->
       Tool_result.make_ok ~tool_name ~start_time
@@ -511,8 +528,7 @@ let handle_checkpoint_info ~tool_name ~start_time ~base_path args =
   match checkpoint_slot args with
   | Error message -> reject ~tool_name ~start_time message
   | Ok slot ->
-    let saves_dir = Filename.concat (msx_dir ~base_path) "saves" in
-    let path = Filename.concat saves_dir (slot ^ ".json") in
+    let path = slot_path ~base_path slot in
     match Msx_lane.checkpoint_info ~path with
     | Ok info ->
       Tool_result.make_ok ~tool_name ~start_time
@@ -560,7 +576,7 @@ let handle_change_disk ~tool_name ~start_time ~base_path args =
     | Ok path when not (is_dsk_path path) -> reject ~tool_name ~start_time "disk must be a .dsk image"
     | Ok path ->
       let backup_slot = "before-disk-change" in
-      let backup_path = Filename.concat (Filename.concat (msx_dir ~base_path) "saves") (backup_slot ^ ".json") in
+      let backup_path = slot_path ~base_path backup_slot in
       of_lane ~tool_name ~start_time ~extra:["backup_slot", `String backup_slot]
         (Msx_lane.change_disk ~path ~backup_path))
 ;;

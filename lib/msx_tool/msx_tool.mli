@@ -35,5 +35,5 @@ val reads_only : t -> bool
     catalog entry requires are both this value. *)
 
 val default_checkpoint_slot : string
-(** The slot a save, restore or checkpoint report names when the caller names
-    none. *)
+(** The slot a save or a checkpoint report names when the caller names none.
+    A restore has no default: one that names no slot lists the saved slots. *)

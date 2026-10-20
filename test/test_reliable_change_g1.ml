@@ -327,6 +327,86 @@ let test_checker_accepts_compliant_records () =
   check bool "overall passed" true summary.overall_passed
 ;;
 
+let test_checker_binds_verified_revisions () =
+  let manifest =
+    make_manifest
+      ~contract_sha256:"contract-sha"
+      ~source_commit:"commit-sha"
+      ~binary_sha256:"bin-sha"
+      ~runtime_config_sha256:"cfg-sha"
+      ~model_identity:"claude"
+      ~workload_revision:"rev-1"
+      ~execution_mode:"matrix"
+  in
+  let observations = generate_compliant_observations () in
+  List.iter
+    (fun mode ->
+       List.iter
+         (fun (requested_revision, target_revision, rule_id) ->
+            let corrupted =
+              List.map
+                (fun (o : run_observation) ->
+                   if o.scenario = (match mode with
+                     | Matrix -> Matrix_scenario Success
+                     | Live -> Live_scenario Live_success)
+                      && o.repeat_index = 1
+                   then { o with requested_revision; target_revision }
+                   else o)
+                observations
+            in
+            let summary = check_observations ~manifest ~observations:corrupted in
+            check bool "unbound revision fails" false summary.overall_passed;
+            check int "one false verification" 1 summary.false_verified_count;
+            check int "invalid run excluded from passed count"
+              (match mode with Matrix -> 17 | Live -> 2)
+              (match mode with Matrix -> summary.matrix_passed | Live -> summary.live_passed);
+            check bool "revision finding recorded" true
+              (List.exists (fun f -> String.equal f.rule_id rule_id) summary.findings))
+         [ Some "rev-1", Some "foreign", "foreign_revision"
+         ; Some "rev-1", Some " rev-1", "foreign_revision"
+         ; None, Some "rev-1", "missing_required_join"
+         ; Some "rev-1", None, "missing_required_join"
+         ; Some "", Some "rev-1", "missing_required_join"
+         ; Some "rev-1", Some " \t", "missing_required_join"
+         ])
+    [ Matrix; Live ];
+  (* A passing verdict in a failed earlier attempt is still a verification
+     claim. The later good attempt must not erase that foreign claim. *)
+  let earlier_foreign =
+    List.map
+      (fun (o : run_observation) ->
+         match o.scenario with
+         | Live_scenario Live_retry_success when o.attempt_sequence = 1 ->
+           { o with verdict_passed = true; target_revision = Some "foreign" }
+         | Matrix_scenario _ | Live_scenario _ -> o)
+      observations
+  in
+  let summary = check_observations ~manifest ~observations:earlier_foreign in
+  check bool "earlier false verdict fails" false summary.overall_passed;
+  check int "earlier false verdict counted" 1 summary.false_verified_count;
+  check int "later success cannot hide foreign verdict" 2 summary.live_passed
+;;
+
+let test_missing_requested_revision_stays_missing () =
+  let observation =
+    make_dummy_observation ~case_id:"success" ~repeat_index:1 ~run_id:"missing-requested"
+      ~mode:Matrix ~verified:true ~exit_code:(Some 0)
+      ~usage:(Usage_missing "not reported") ~attempt_seq:1
+  in
+  let json = run_observation_to_json observation in
+  let fields = match json with `Assoc fields -> fields | _ -> fail "expected object" in
+  List.iter
+    (fun json ->
+       match run_observation_of_json json with
+       | Error err -> fail err
+       | Ok decoded ->
+         check (option string) "target remains observed" (Some "rev-1") decoded.target_revision;
+         check (option string) "requested is never inferred" None decoded.requested_revision)
+    [ `Assoc (List.remove_assoc "requested_revision" fields)
+    ; run_observation_to_json { observation with requested_revision = None }
+    ]
+;;
+
 let test_checker_rejects_verification_failure_in_success () =
   let manifest =
     make_manifest
@@ -522,6 +602,17 @@ let test_manifest_and_observations_file_io () =
      | Error err -> fail ("load_observations_file failed: " ^ err)
      | Ok loaded_obs ->
        check int "observations count matches" 31 (List.length loaded_obs);
+       let foreign_obs =
+         List.map
+           (fun (o : run_observation) ->
+              if String.equal o.run_id "succ-1"
+              then { o with target_revision = Some "foreign" }
+              else o)
+           loaded_obs
+       in
+       let foreign_summary = check_observations ~manifest:loaded_manifest ~observations:foreign_obs in
+       check bool "loaded foreign revision fails" false foreign_summary.overall_passed;
+       check int "loaded foreign revision counted" 1 foreign_summary.false_verified_count;
        let summary = check_observations ~manifest:loaded_manifest ~observations:loaded_obs in
        check bool "overall passed from loaded files" true summary.overall_passed;
        (match write_checker_file checker_file summary with
@@ -784,6 +875,7 @@ let () =
       )
     ; ( "compliance_checker"
       , [ test_case "accepts compliant records" `Quick test_checker_accepts_compliant_records
+        ; test_case "binds all verified revisions" `Quick test_checker_binds_verified_revisions
         ; test_case "rejects verification failure in success" `Quick test_checker_rejects_verification_failure_in_success
         ; test_case "rejects duplicated usage" `Quick test_checker_rejects_duplicated_usage
         ; test_case "rejects missing matrix mode" `Quick test_checker_rejects_missing_matrix_mode
@@ -801,6 +893,7 @@ let () =
         ; test_case "roadmap fixture string cost decoding" `Quick test_roadmap_fixture_string_cost_decoding
         ; test_case "usage non-object guard" `Quick test_usage_non_object_guard
         ; test_case "observation roundtrip" `Quick test_roundtrip_observation
+        ; test_case "missing requested revision stays missing" `Quick test_missing_requested_revision_stays_missing
         ]
       )
     ]

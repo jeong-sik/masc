@@ -419,6 +419,38 @@ let check_observations
   let duplicated_usage = ref 0 in
   let totals_mismatch = ref 0 in
 
+  (* A later successful attempt cannot hide an earlier false verification.
+     Compare the recorded identities, never infer the requested revision from
+     the result. Unverified negative cases may deliberately be stale. *)
+  let check_verified_revision (o : run_observation) =
+    if not (o.external_verified || o.verdict_passed) then true
+    else
+      let fail rule_id detail =
+        incr false_verified;
+        add_finding rule_id
+          (Printf.sprintf "verified observation %s lacks a matching requested revision" o.run_id)
+          false
+          (Some detail);
+        false
+      in
+      match o.requested_revision, o.target_revision with
+      | Some requested, Some target
+        when String.trim requested <> "" && String.trim target <> "" ->
+        if String.equal requested target then true
+        else fail "foreign_revision"
+            (Printf.sprintf "run=%s requested_revision=%S target_revision=%S"
+               o.run_id requested target)
+      | requested, target ->
+        incr required_join_missing;
+        fail "missing_required_join"
+          (Yojson.Safe.to_string
+             (`Assoc
+                [ "run_id", `String o.run_id
+                ; "requested_revision", (match requested with Some r -> `String r | None -> `Null)
+                ; "target_revision", (match target with Some r -> `String r | None -> `Null)
+                ]))
+  in
+
   let matrix_expected = 18 in
   let live_expected = 3 in
 
@@ -511,6 +543,10 @@ let check_observations
        let final_attempt, final_scenario = List.hd (List.rev sorted_run) in
        let first_attempt = List.hd sorted_attempts in
        let run_valid = ref true in
+
+       List.iter
+         (fun o -> if not (check_verified_revision o) then run_valid := false)
+         run_obs;
 
        (* Check for duplicated usage within run *)
        let per_req_attempts =
@@ -856,6 +892,10 @@ let check_observations
        let first_attempt = List.hd sorted_attempts in
        let run_valid = ref true in
 
+       List.iter
+         (fun o -> if not (check_verified_revision o) then run_valid := false)
+         sorted_attempts;
+
        (match final_scenario with
         | Live_success ->
           if not final_attempt.external_verified then (
@@ -1121,9 +1161,7 @@ let run_observation_of_json (json0 : Yojson.Safe.t) : (run_observation, string) 
       json |> member "target_revision" |> to_string_option
     in
     let requested_revision =
-      match json |> member "requested_revision" |> to_string_option with
-      | Some rev -> Some rev
-      | None -> target_revision
+      json |> member "requested_revision" |> to_string_option
     in
     let artifact_references =
       match json |> member "artifact_references" |> to_option to_list with

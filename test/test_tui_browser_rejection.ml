@@ -75,8 +75,11 @@ let test_refusals_read_back () =
            ~prefix:{|{"error":"live_transport_unsupported","capability":"trusted_hover","transport":"web_extension",|});
       check bool "an unserved request: the next step precedes the lists" true (lists_come_last text);
       (match Rejection.of_result text with
-       | Some {case=Lane.Transport_unsupported_case;
-               detail=Rejection.Unserved {transport=Lane.Web_extension; capability=Lane.Trusted_hover; serving_clients=0}} -> ()
+       | Some ({case=Lane.Transport_unsupported_case;
+                detail=Rejection.Unserved {transport=Lane.Web_extension; capability=Lane.Trusted_hover; serving_clients=0}}
+               as rejection) ->
+         check string "a failed call's refusal shows as its decoded row"
+           (Rejection.line ~lacking rejection) (Rejection.preview ~failed:true ~lacking text)
        | Some _ | None -> fail "an unserved hover did not read back");
       check string "a call that returned is shown as recorded, whatever its text"
         text (Rejection.preview ~failed:false ~lacking text);

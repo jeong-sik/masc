@@ -245,10 +245,11 @@ let test_unserved_gesture () =
       { refused with load = Loading (5, Read_refresh) } in
   expect "a refresh that lands keeps the refusal"
     (refreshed.load = Idle && refreshed.unserved_gesture = Some unserved);
-  (* What is learned of the host afterwards does not rewrite the refusal. *)
+  (* The rows read the host recorded with the refusal, not the current one, so
+     what is learned of the host afterwards does not rewrite them. *)
   let later = { refreshed with bidi_host = host (Record.Running host_entry) } in
   expect "a later word of the host leaves the refusal as it was"
-    (later.unserved_gesture = Some unserved);
+    (unserved_rows later = unserved_rows refreshed);
   expect "a view with nothing refused draws no such rows" (unserved_rows ready = []);
   expect "the next input withdraws it"
     ((withdraw_unserved_gesture refreshed).unserved_gesture = None);

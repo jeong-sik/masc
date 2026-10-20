@@ -763,9 +763,11 @@ let test_autocomplete_unique_prefix () =
   check (option string) "/th -> /thinking " (Some "/thinking ") (Command.autocomplete "/th");
   check (option string) "/ta -> /task " (Some "/task ") (Command.autocomplete "/ta");
   check (option string) "/se -> /settings" (Some "/settings") (Command.autocomplete "/se");
-  (* Several matches: [play i] stops at the "invite" that invite and invites
-     share, and [c] has nothing shared past the letter itself, so it offers
-     the catalog's first c-word (cost, today). *)
+  (* Several matches: the [play] argument [i] stops at the "invite" that
+     invite and invites share, and [c] has nothing shared past the letter
+     itself, so it offers the catalog's first c-word (cost, today). No
+     command-word prefix in today's catalog reaches the shared-prefix case for
+     the command word itself. *)
   check (option string) "/play i -> /play invite" (Some "/play invite")
     (Command.autocomplete "/play i");
   check (option string) "/c -> /cost" (Some "/cost") (Command.autocomplete "/c");

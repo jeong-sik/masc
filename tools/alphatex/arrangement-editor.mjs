@@ -37,6 +37,14 @@ export function arrangementImported(editor, { project, asset, pattern }) {
   }
   return { ...commit(editor, project), asset, pattern }
 }
+export function arrangementPracticePass(editor, target, selected) {
+  if (target.asset !== selected.asset || target.pass !== selected.pass || !selected.cut) throw new Error('Practice pass response changed its selection')
+  if (target.region === null) return place(editor, target.asset, target.tick, selected.cut)
+  const region = editor.project.clips.find(clip => clip.id === target.region && clip.asset === target.asset)
+  if (!region) throw new Error('Selected practice region is no longer available')
+  const next = edit(editor, { kind: 'region-change', id: region.id, ...selected.cut })
+  return { ...next, asset: target.asset, lane: region.lane, region: region.id, tick: region.position }
+}
 function edit(editor, value) { return commit(editor, editArrangement(editor.project, value)) }
 export function arrangementRecordingCorrection(editor, correction) { return edit(editor, { kind: 'recording-correction', correction }) }
 export function arrangementCalibrated(editor, { profile, match, output }) {
@@ -179,6 +187,15 @@ export function arrangementCommand(editor, line) {
       count(0, 1); const asset = args[0] ?? editor.asset
       if (!editor.project.assets.some(item => item.id === asset && item.kind === 'practice')) throw new Error('Choose a raw practice take for its captured backing')
       return { editor, effect: { kind: command, asset } }
+    }
+    case 'practice-passes': case 'practice-pass': {
+      count(command === 'practice-pass' ? 1 : 0, command === 'practice-pass' ? 2 : 1)
+      const asset = args[command === 'practice-pass' ? 1 : 0] ?? editor.asset
+      if (!editor.project.assets.some(item => item.id === asset && item.kind === 'practice')) throw new Error('Choose a raw practice take for its original passes')
+      if (command === 'practice-passes') return { editor, effect: { kind: command, asset } }
+      if (!/^[1-9][0-9]*$/.test(args[0])) throw new Error('Choose a positive original practice pass number')
+      const region = selectedRegion(editor)
+      return { editor, effect: { kind: command, asset, pass: args[0], tick: editor.tick, region: region?.asset === asset ? region.id : null } }
     }
     case 'edit-midi': {
       count(0, 2); const asset = args[0] ?? editor.asset

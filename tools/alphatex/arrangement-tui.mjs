@@ -8,7 +8,7 @@ import { Worker } from 'node:worker_threads'
 import { emitKeypressEvents } from 'node:readline'
 import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } from './arrangement-playback.mjs'
 import { startVstArrangement } from './arrangement-vst.mjs'
-import { arrangementEditor, arrangementAction, arrangementCommand, arrangementImported, arrangementCalibrated, arrangementRecordingCorrection, selectedRegion, arrangementTakes, arrangementTakeSelected } from './arrangement-editor.mjs'
+import { arrangementEditor, arrangementAction, arrangementCommand, arrangementImported, arrangementPracticePass, arrangementCalibrated, arrangementRecordingCorrection, selectedRegion, arrangementTakes, arrangementTakeSelected } from './arrangement-editor.mjs'
 import { loadArrangement, verifyArrangementAssets, saveArrangement } from './arrangement-files.mjs'
 import { saveProject } from './sequencer-files.mjs'
 import { safeText } from './terminal.mjs'
@@ -34,6 +34,7 @@ const help = [
   ':import-take /path/session      :open-take [ASSET] (WAV + raw UMP)',
   ':import-practice /path/take     import original MIDI from a completed practice take',
   ':practice-backing [ASSET] restores its editable phrase backing; Enter places it, :edit-midi edits it',
+  ':practice-passes [ASSET] lists original passes; :practice-pass NUMBER [ASSET] places or replaces the selected source region',
   ':practice-region ASSET BEAT OFFSET EXTENT DIVISOR [REPEAT] places an exact fractional host cut',
   ':trim-fraction OFFSET EXTENT DIVISOR edits a practice cut; :trim returns to whole host ticks',
   ':place asset-1 0               full source at quarter-note beat 0',
@@ -698,6 +699,17 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         if (accepting) { adopt(arrangementImported(editor, result)); status = `Restored ${result.asset}; Enter places it, :edit-midi edits it` }
         break
       }
+      case 'practice-passes': case 'practice-pass': {
+        if (!accepting) return
+        status = 'Reading original practice passes…'; draw()
+        const result = await request({ ...value, project: editor.project, sourceRoot, directory })
+        if (accepting) {
+          if (value.kind === 'practice-pass') adopt(arrangementPracticePass(editor, value, result))
+          status = value.kind === 'practice-pass' ? `Practice pass ${result.pass}${result.full ? '' : ' (partial)'} selected; Space auditions`
+            : `${result.asset}: ${result.count} passes (${result.firstPass ?? 'none'}–${result.lastPass ?? 'none'}) · ${result.tempo} BPM · :practice-pass NUMBER`
+        }
+        break
+      }
       default: throw new Error('Unknown arrangement effect')
     }
   }
@@ -725,7 +737,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
             // the user chose before waiting; never reinterpret it on that asset.
             result = result.selection?.kind === 'take-selection'
               ? { editor: arrangementTakeSelected(editor, result.selection) }
-              : result.effect?.kind === 'practice-backing' ? { editor, effect: result.effect } : arrangementCommand(editor, line)
+              : ['practice-backing', 'practice-pass', 'practice-passes'].includes(result.effect?.kind) ? { editor, effect: result.effect } : arrangementCommand(editor, line)
           }
           adopt(result.editor); if (result.effect) await effect(result.effect); else status = 'Edited'
         })

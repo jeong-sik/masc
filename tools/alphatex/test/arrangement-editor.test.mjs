@@ -16,7 +16,7 @@ import { emitKeypressEvents } from 'node:readline'
 import { newArrangement, editArrangement, arrangementSchedule } from '../arrangement.mjs'
 import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } from '../arrangement-playback.mjs'
 import * as editorAPI from '../arrangement-editor.mjs'
-import { loadArrangement, importArrangementPractice, restorePracticeBacking } from '../arrangement-files.mjs'
+import { loadArrangement, importArrangementPractice, restorePracticeBacking, inspectPracticePasses } from '../arrangement-files.mjs'
 import { practiceSourceFixture } from './helpers/practice-source-fixture.mjs'
 import { importMidiSource, exportMidiSource, midiSourcePattern } from '../midi-source.mjs'
 import { recordingEpoch, attachRecordedTake } from '../arrangement-recording.mjs'
@@ -1192,6 +1192,45 @@ test('implicit practice backing retains its admitted source across recording att
  }finally{
   for(const capture of view.observed.captures)capture.finish()
   for(const job of view.observed.requests.filter(job=>['attach-recording','practice-backing','import-practice'].includes(job.kind)))view.worker.emit('message',{id:job.id,ok:false,error:'Fixture closed'})
+  await closeController(view)
+ }
+}))
+
+for(const command of ['practice-passes','practice-pass 1']) test(`admitted ${command} retains source and cursor through recording attachment`,()=>practiceSourceFixture(async({root,input})=>{
+ const view=await controller()
+ try{
+  await primeWave(view);const captured=await primeCapture(view)
+  view.command('import-practice /private/take');await flush()
+  const importedJob=view.observed.requests.find(job=>job.kind==='import-practice')
+  const imported=await importArrangementPractice(importedJob.project,input,{projectPath:join(root,'song.json')})
+  view.worker.emit('message',{id:importedJob.id,ok:true,result:imported});await flush()
+  view.command('cursor 6');view.command('input audio');view.command('play');await flush()
+  const prep=view.observed.requests.find(job=>job.kind==='prepare-wave')
+  view.worker.emit('message',{id:prep.id,ok:true,result:{path:'/owned/backing/plan.json',format:'wave-arrangement'}});await flush()
+  view.observed.players[0].handle.recordingEpoch=async()=>({kind:'playing',loop:false,duration:10,device:{id:'audio',outputs:2},
+   clock:{kind:'mach-host-time',anchor:'100',position:0,numer:1,denom:1}})
+  view.command('record');await flush();const capture=view.observed.captures[0];assert.ok(capture)
+  view.command(command);await flush();assert.ok(capture.stops>0)
+  capture.finish({manifest:captured.manifest});await flush()
+  const attach=view.observed.requests.find(job=>job.kind==='attach-recording')
+  const asset={...captured,id:'capture-2',name:'New recording'}
+  const attached=attachRecordedTake(attach.project,{project:editArrangement(attach.project,{kind:'asset-add',asset}),asset:asset.id},attach.epoch)
+  view.worker.emit('message',{id:attach.id,ok:true,result:attached});await flush()
+  const selected=view.observed.requests.find(job=>job.kind===command.split(' ')[0]);assert.ok(selected)
+  assert.equal(selected.asset,imported.asset);assert.deepEqual(selected.project,attached.project)
+  if(selected.kind==='practice-pass'){assert.equal(selected.tick,5760);assert.equal(selected.region,null)}
+  const result=await inspectPracticePasses(selected.project,selected.asset,selected.pass,{sourceRoot:root,directory:root})
+  view.worker.emit('message',{id:selected.id,ok:true,result});await flush()
+  view.command('save');await flush();const saved=view.observed.saved.at(-1).project
+  if(selected.kind==='practice-passes')assert.deepEqual(saved,attached.project)
+  else{
+   const clip=saved.clips.at(-1);assert.equal(clip.asset,imported.asset);assert.equal(clip.position,5760)
+   assert.deepEqual([clip.offset,clip.extent,clip.sourceDivisor],[result.cut.offset,result.cut.extent,result.cut.sourceDivisor])
+   view.command('undo');view.command('save');await flush();assert.deepEqual(view.observed.saved.at(-1).project,attached.project)
+  }
+ }finally{
+  for(const capture of view.observed.captures)capture.finish()
+  for(const job of view.observed.requests.filter(job=>['attach-recording','practice-passes','practice-pass','import-practice'].includes(job.kind)))view.worker.emit('message',{id:job.id,ok:false,error:'Fixture closed'})
   await closeController(view)
  }
 }))

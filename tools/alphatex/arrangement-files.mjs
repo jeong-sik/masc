@@ -3,6 +3,7 @@ import { capturePartNames, validateCaptureManifest } from './captured-source.mjs
 import { readCaptureFiles, readCapture } from './session-data.mjs'
 import { capturePaths, captureMatches, inspectCaptureAsset } from './captured-source-files.mjs'
 import { practicePartNames } from './practice-source.mjs'
+import { practicePasses } from './practice-passes.mjs'
 import { practicePaths, readPracticeFiles, inspectPracticeAsset } from './practice-source-files.mjs'
 import { readFile, open, mkdir, mkdtemp, lstat, link, rm, chmod } from 'node:fs/promises'
 import { createReadStream, createWriteStream } from 'node:fs'
@@ -180,6 +181,19 @@ export async function restorePracticeBacking(project, assetID, { sourceRoot, dir
     phrase.tracks.find(track => track.id === context.track).muted = true
     signal?.throwIfAborted()
     return importPhraseDocument(project, phrase)
+  } finally { await rm(snapshot.directory, { recursive: true, force: true }) }
+}
+// Read the verified frozen clock privately; return only its derived selection.
+export async function inspectPracticePasses(project, assetID, pass, { sourceRoot, directory = tmpdir(), signal } = {}) {
+  const snapshot = await prepareArrangementPractice(project, assetID, { sourceRoot, directory, signal })
+  try {
+    const asset = project.assets.find(asset => asset.id === assetID)
+    const bytes = await readFile(join(snapshot.directory, 'context.json'), { signal })
+    if (createHash('sha256').update(bytes).digest('hex') !== asset.parts.context.sha256) throw new Error('Practice context changed during pass inspection')
+    const context = JSON.parse(bytes.toString('utf8'))
+    const result = practicePasses(asset, context.backing, pass)
+    signal?.throwIfAborted()
+    return { asset: assetID, ...result }
   } finally { await rm(snapshot.directory, { recursive: true, force: true }) }
 }
 // The viewer owns these snapshots until it drains WAV playback/export and

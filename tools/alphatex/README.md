@@ -577,8 +577,13 @@ strings, and move/repeat/undo/redo work as for other regions.
 For a boundary between host ticks, `:trim-fraction OFFSET EXTENT DIVISOR`
 retains its rational cut for both raw external MIDI and VST playback.
 `:practice-region ASSET BEAT OFFSET EXTENT DIVISOR [REPEAT]` places one directly;
-normal `:trim` restores whole-tick units. These are explicit source cuts, not
-automatic practice-pass placement.
+normal `:trim` restores whole-tick units.
+`:practice-passes [ASSET]` reports original recorded passes from the retained
+output clock. `:practice-pass NUMBER [ASSET]` places one at the cursor or replaces
+the selected region of that source, retaining its position/repeats and undo.
+Partial first/final passes are identified; absolute sample boundaries prevent
+rounded cycle lengths from accumulating. This is nominal alignment, without
+physical latency/drift compensation or a change to original MIDI timestamps.
 `:practice-backing [ASSET]` recovers their frozen phrase as a new editable MIDI
 asset with the originally played track muted. Enter places the full phrase and
 `:edit-midi` opens it for chord/voicing experiments. Its original loop stays in

@@ -160,7 +160,7 @@ installation's live worker at each due time:
 
 ```json
 {"kind": "masc.lane_act",
- "body": {"installation_id": "operator-quiz", "action": {"kind": "compose"}}}
+ "body": {"installation_id": "operator-quiz", "action": {"kind": "compose", "questions": 5}}}
 ```
 
 Create one with `masc_schedule_create` (and change it with

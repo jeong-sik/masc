@@ -5644,7 +5644,11 @@
        ../docs/examples/lane-addons/dos-statistics.toml
        ../docs/examples/lane-addons/output-statistics.toml
        ../addons/fusion-compute/lane.toml ../addons/fusion-report/lane.toml
-       (glob_files ../docs/examples/lane-addons/fusion-compute/*.toml))
+       (glob_files ../docs/examples/lane-addons/fusion-compute/*.toml)
+       ; The operator quiz case loads its declaration and runs its worker.
+       ../docs/examples/lane-addons/operator-quiz.toml ../addons/protocol.py
+       (glob_files ../addons/operator-quiz/*.py) ../addons/operator-quiz/lane.toml
+       ../addons/operator-quiz/schemas/author.json ../addons/operator-quiz/prompts/author.md)
  (libraries alcotest masc yojson unix))
 
 (test

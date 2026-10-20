@@ -1,0 +1,22 @@
+# Adjust manifest_path when copying this declaration outside this directory.
+# Bind the author output in runtime.toml before the first compose
+# ([runtime.addon_exact_lanes.operator-quiz.author]).
+id = "operator-quiz"
+run_id = "operator-quiz"
+manifest_path = "../../../addons/operator-quiz/lane.toml"
+
+[binding]
+sources = []
+language = "ko"
+timezone = "Asia/Seoul"
+
+[[binding.records]]
+source_id = "board"
+kind = "board"
+visibilities = ["public", "unlisted"]
+
+[[binding.records]]
+source_id = "masc-repo"
+kind = "repository"
+repository_id = "masc"
+paths = ["changelog.d/"]

@@ -167,6 +167,19 @@ val save_declaration : ?access:Lane_addon_sources.access -> config:Workspace.con
 val start_configuration_service : config:Workspace.config -> sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock -> unit
 
+val answer_installation_question :
+  config:Workspace.config -> declaration_id:string -> ask_id:string ->
+  submissions:(string * Keeper_ask.response) list -> responder:Keeper_ask.responder ->
+  (Keeper_ask.answer list, Lane_addon_asks.answer_failure) result
+(** Records the operator's answer to an installation's question (RFC
+    operator-quiz §4.6) and, when it is recorded, starts a host request cycle
+    of the installation's live instance. A worker that is down receives the
+    answer when it lists the question again. *)
+
+val installation_questions :
+  config:Workspace.config -> ((string * Lane_addon_asks.row list) list, string) result
+(** Every declaration's questions, by declaration id, in the order asked. *)
+
 module For_testing : sig
   val with_cleanup_writer :
     (store:Lane_addon_store.t -> instance_id:string -> Yojson.Safe.t option ->

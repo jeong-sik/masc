@@ -124,6 +124,7 @@ type host_issue =
   | Relisted_delivered_request of string
   | Result_delivery_failed of { request_id : string; detail : string }
   | Exact_record_failed of { request_id : string; detail : string }
+  | Ask_record_failed of { request_id : string; detail : string }
   | No_exact_runner
 (* A projection of the last cycle; no decision reads it. *)
 type host_status = { cycles : int; waiting : (string * Yojson.Safe.t) list; issue : host_issue option }
@@ -830,6 +831,8 @@ let host_issue_to_json = function
       `Assoc ["kind", `String "result_delivery_failed"; "request_id", `String request_id; "detail", `String detail]
   | Exact_record_failed {request_id; detail} ->
       `Assoc ["kind", `String "exact_record_failed"; "request_id", `String request_id; "detail", `String detail]
+  | Ask_record_failed {request_id; detail} ->
+      `Assoc ["kind", `String "ask_record_failed"; "request_id", `String request_id; "detail", `String detail]
   | No_exact_runner -> `Assoc ["kind", `String "no_exact_runner"]
 
 let host_status_json status =
@@ -858,6 +861,11 @@ let run_host_cycle m e (port : host_port) =
   } in
   let owner = current_owner () in
   let not_allowed reason = Deliver (`Assoc ["status", `String "not_allowed"; "reason", `String reason]) in
+  (* The asker is the installation: a declaration that declares [world.asks]. *)
+  let asker = match e.package.operator_asks, e.configuration with
+    | false, _ -> Error "the package manifest does not declare [world.asks] operator = true"
+    | true, None -> Error "a manual Attach has no installation to ask from"
+    | true, Some owner -> Ok owner.id in
   let read_answer = function
     | Lane_addon_records.Page body -> Ok (Deliver body)
     | Lane_addon_records.Not_allowed reason -> Ok (not_allowed reason)
@@ -886,6 +894,46 @@ let run_host_cycle m e (port : host_port) =
                (Lane_addon_host_request.result_arguments ~request_id ~result)) in
              read_answer (Lane_addon_records.read_records ~base_path:m.base_path ~store:m.store ~grants ~measure
                ~max_bytes:e.package.resources.max_reply_bytes ~source_id ~after))
+    | Lane_addon_host_request.Ask {request_id; questions; context} ->
+        (match asker with
+         | Error reason -> Ok (not_allowed reason)
+         | Ok declaration_id ->
+             match Lane_addon_asks.ask ~ask_id:request_id ~declaration_id ~title:e.package.title ~questions
+                 ?context ~asked_at:(Time_compat.now ()) () with
+             | Error reason -> Ok (not_allowed reason)
+             | Ok asked ->
+                 let failed detail = Ask_record_failed {request_id; detail} in
+                 let* recorded = offload (fun () -> Lane_addon_asks.record m.store asked) |> Result.map_error failed in
+                 match recorded with
+                 | Lane_addon_asks.Id_reused -> Ok (Deliver (`Assoc ["status", `String "request_id_reused"]))
+                 | Lane_addon_asks.Recorded | Lane_addon_asks.Already_recorded ->
+                     let* rows = offload (fun () -> Lane_addon_asks.rows m.store ~declaration_id)
+                       |> Result.map_error failed in
+                     (* The answer is delivered only once the operator answered or
+                        the package withdrew (RFC operator-quiz §4.4). *)
+                     match List.assoc_opt request_id rows with
+                     | None -> Error (failed "the recorded question has no row")
+                     | Some (_, Keeper_ask.Open) -> Ok (Wait (`Assoc ["reason", `String "awaiting_operator"]))
+                     | Some (_, Keeper_ask.Answered_by {answers; responder; answered_at}) ->
+                         Ok (Deliver (`Assoc ["status", `String "answered";
+                           "answers", `List (List.map Keeper_ask.answer_to_json answers);
+                           "responder", Keeper_ask.responder_to_json responder;
+                           "answered_at", `Float answered_at]))
+                     | Some (_, Keeper_ask.Withdrawn_because {reason; withdrawn_at}) ->
+                         Ok (Deliver (`Assoc ["status", `String "withdrawn"; "reason", `String reason;
+                           "withdrawn_at", `Float withdrawn_at])))
+    | Lane_addon_host_request.Withdraw_ask {request_id; ask_id; reason} ->
+        (match asker with
+         | Error reason -> Ok (not_allowed reason)
+         | Ok declaration_id ->
+             let* outcome = offload (fun () ->
+                 Lane_addon_asks.withdraw m.store ~declaration_id ~ask_id ~reason ~now:(Time_compat.now ()))
+               |> Result.map_error (fun detail -> Ask_record_failed {request_id; detail}) in
+             match outcome with
+             | Lane_addon_asks.Withdrawn | Lane_addon_asks.Was_withdrawn ->
+                 Ok (Deliver (`Assoc ["status", `String "withdrawn"]))
+             | Lane_addon_asks.Was_answered -> Ok (Deliver (`Assoc ["status", `String "already_answered"]))
+             | Lane_addon_asks.Not_asked -> Ok (not_allowed ("the package asked no question " ^ ask_id)))
     | Lane_addon_host_request.Read_file {request_id = _; source_id; commit; path} ->
         (match Lane_addon_records.grants ~operator_owned:(operator_owned ~configuration:e.configuration
             ~source_access:e.source_access) e.binding with
@@ -2998,6 +3046,32 @@ let start_configuration_service ~config ~sw ~clock =
       stop (); Hashtbl.remove configuration_services key;
       m.configuration_nudge <- (fun () -> ()));
     Pulse.run ~sw pulse)
+
+(* RFC operator-quiz §4.6. An answer is a host event (§4.4, event 3); a worker
+   that is down lists the question again when it starts and receives the
+   answer then. *)
+let answer_installation_question ~config ~declaration_id ~ask_id ~submissions ~responder =
+  Eio_context.run_on_owner_domain (fun () ->
+    let m = manager config in
+    let result = offload (fun () ->
+      Lane_addon_asks.answer m.store ~declaration_id ~ask_id ~submissions ~responder ~now:(Time_compat.now ())) in
+    (match result with
+     | Ok _ ->
+         List.iter (fun e -> match e.configuration with
+           | Some owner when String.equal owner.id declaration_id && uses_host_requests e.package -> wake_host e
+           | Some _ | None -> ()) (entries m)
+     | Error _ -> ());
+    result)
+
+let installation_questions ~config =
+  Eio_context.run_on_owner_domain (fun () ->
+    let m = manager config in
+    offload (fun () ->
+      let* ids = Lane_addon_asks.declarations m.store in
+      List.fold_right (fun declaration_id acc ->
+        let* acc = acc in
+        let* rows = Lane_addon_asks.rows m.store ~declaration_id in
+        Ok ((declaration_id, rows) :: acc)) ids (Ok [])))
 
 module For_testing = struct
   let with_cleanup_writer writer f = Eio.Fiber.with_binding cleanup_writer_key writer f

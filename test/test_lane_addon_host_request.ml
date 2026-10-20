@@ -40,6 +40,48 @@ let test_a_file_request_is_strict () =
   check bool "no path is refused" true
     (Result.is_error (Host.listing_of_json (file [ "request_id", `String "f"; "source_id", `String "repo"; "commit", `String "abc" ])))
 
+let test_question_requests_are_strict () =
+  let listing items = `Assoc [ "requests", `List items ] in
+  let question = `Assoc [ "question_id", `String "q"; "header", `String "H"; "prompt", `String "P"; "choices", `List []
+                        ; "mode", `String "single"; "free_text", `Assoc [ "kind", `String "allowed"; "hint", `Null ] ] in
+  (match Host.listing_of_json (listing [ `Assoc [ "kind", `String "ask"; "request_id", `String "a"; "questions", `List [ question ] ]
+                                       ; `Assoc [ "kind", `String "withdraw_ask"; "request_id", `String "w"; "ask_id", `String "a"
+                                                ; "reason", `String "done" ] ]) with
+   | Ok [ Host.Ask { questions = [ _ ]; context = None; _ }; Host.Withdraw_ask { ask_id = "a"; _ } ] -> ()
+   | Ok _ | Error _ -> fail "an ask and a withdrawal must decode");
+  List.iter (fun (label, item) -> check bool label true (Result.is_error (Host.listing_of_json (listing [ item ]))))
+    [ "an ask without questions", `Assoc [ "kind", `String "ask"; "request_id", `String "a"; "questions", `List [] ]
+    ; "a question nobody can answer", `Assoc [ "kind", `String "ask"; "request_id", `String "a"
+                                             ; "questions", `List [ `Assoc [ "question_id", `String "q"; "header", `String "H"; "prompt", `String "P"
+                                                                          ; "choices", `List []; "mode", `String "single"
+                                                                          ; "free_text", `Assoc [ "kind", `String "choices_only" ] ] ] ]
+    ; "a withdrawal without a reason", `Assoc [ "kind", `String "withdraw_ask"; "request_id", `String "w"; "ask_id", `String "a" ] ]
+
+let test_question_request_identity_roundtrips () =
+  let question = `Assoc ["question_id", `String "rich"; "header", `String "Decision";
+    "prompt", `String "Pick and explain\nwhy";
+    "choices", `List [`Assoc ["choice_id", `String "a"; "label", `String "First";
+      "description", `String "Full description"]; `Assoc ["choice_id", `String "b";
+      "label", `String "Second"; "description", `Null]];
+    "mode", `String "multi"; "free_text", `Assoc ["kind", `String "allowed";
+      "hint", `String "Explain the choice"]] in
+  let second = `Assoc ["question_id", `String "plain"; "header", `String "Detail";
+    "prompt", `String "Add detail"; "choices", `List []; "mode", `String "single";
+    "free_text", `Assoc ["kind", `String "allowed"; "hint", `Null]] in
+  let ask = `Assoc ["kind", `String "ask"; "request_id", `String "ask-rich";
+    "questions", `List [question; second]; "context", `String "Operator context\nwith details"] in
+  let withdraw = `Assoc ["kind", `String "withdraw_ask"; "request_id", `String "withdraw-rich";
+    "ask_id", `String "ask-rich"; "reason", `String "Superseded\nby new evidence"] in
+  match Host.listing_of_json (`Assoc ["requests", `List [ask; withdraw]]) with
+  | Error detail -> fail detail
+  | Ok requests ->
+      check (list string) "every upper request keeps its exact id" ["ask-rich"; "withdraw-rich"]
+        (List.map Host.request_id requests);
+      check bool "canonical questions, context, target and reason survive retention" true
+        (List.map Host.to_json requests = [ask; withdraw]);
+      check bool "canonical requests decode back to the same values" true
+        (Host.listing_of_json (`Assoc ["requests", `List (List.map Host.to_json requests)]) = Ok requests)
+
 let test_the_answer_is_strict () =
   check bool "accepted" true (Host.accepted_of_json (`Assoc [ "accepted", `Bool true ]) = Ok true);
   check bool "not accepted" true (Host.accepted_of_json (`Assoc [ "accepted", `Bool false ]) = Ok false);
@@ -72,6 +114,8 @@ let () =
         ; test_case "a listing is refused whole" `Quick test_a_listing_is_refused_whole
         ; test_case "a read request is strict" `Quick test_a_read_request_is_strict
         ; test_case "a file request is strict" `Quick test_a_file_request_is_strict
+        ; test_case "question requests are strict" `Quick test_question_requests_are_strict
+        ; test_case "question identities roundtrip through retention" `Quick test_question_request_identity_roundtrips
         ; test_case "the answer is strict" `Quick test_the_answer_is_strict
         ; test_case "a result read is bound to the original request" `Quick test_a_result_read_is_request_bound
         ; test_case "a package cannot export the host tools" `Quick test_a_package_cannot_export_the_host_tools ] ) ]

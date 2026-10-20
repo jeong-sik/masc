@@ -359,6 +359,23 @@ let contains text needle =
     && (String.sub text index width = needle || at (index + 1)) in
   at 0
 
+let operator_asks_are_a_package_declaration () = with_directory (fun _root packages directory ->
+  let manifest = install_package packages in
+  let path = Filename.concat directory "quiz.toml" in
+  write path (declaration msx_binding);
+  let initial = unwrap (Config.load_file ~path) in
+  check bool "a package without the table does not ask" false initial.package.operator_asks;
+  check bool "and its package value carries no operator_asks key" true
+    (Yojson.Safe.Util.member "operator_asks" (Lane_addon_types.package_to_json initial.package) = `Null);
+  write manifest (package () ^ "\n[world.asks]\noperator = true\n");
+  let asking = unwrap (Config.load_file ~path) in
+  check bool "operator = true lets the package ask" true asking.package.operator_asks;
+  check bool "and changes the configuration identity" false (initial.revision = asking.revision);
+  List.iter (fun table ->
+    write manifest (package () ^ "\n[world.asks]\n" ^ table);
+    check bool ("world.asks refuses " ^ table) true (Result.is_error (Config.load_file ~path)))
+    [ "operator = \"yes\"\n"; "operator = true\nkeeper = true\n" ])
+
 let exact_outputs_are_package_schemas () = with_directory (fun root packages directory ->
   let manifest = install_package packages in
   let path = Filename.concat directory "quiz.toml" in
@@ -576,6 +593,7 @@ let () = run "Lane Add-on declarative composition"
      test_case "assembled Fusion declarations load with explicit model boundaries" `Quick assembled_fusion_declarations;
      test_case "model access is explicit and changes configuration identity" `Quick model_access_is_explicit_and_revisioned;
      test_case "exact outputs are package schemas in the configuration identity" `Quick exact_outputs_are_package_schemas;
+     test_case "operator asks are a package declaration" `Quick operator_asks_are_a_package_declaration;
      test_case "shipped DOS chain packages declare enforceable binding contracts" `Quick shipped_dos_chain_declares_binding_contracts;
      test_case "refresh suppression is an explicit package contract" `Quick refresh_policy_is_explicit;
      test_case "package interface validates bindings before installation" `Quick package_interface;

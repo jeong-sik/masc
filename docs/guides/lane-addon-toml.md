@@ -193,15 +193,15 @@ exact output 을 선언한 패키지의 worker 는 비공개 도구 둘을 한 �
  "system": "선택", "messages": ["사용자 메시지", "..."]}
 ```
 
-- 지금 host 가 아는 종류는 `exact_output`, `read_records`, `read_file`, `read_result` 다. 모르는 종류가 하나라도 있거나, 같은 `request_id` 가 두 번 나오면 그 목록 전체를 읽지 않고 instance 에 `listing_refused` 를 보인다.
-- host 는 다섯 사건에만 묻고 시계로 묻지 않는다. 지금 걸린 사건은 셋이다: worker 초기화가 끝났을 때, 그 instance 의 action 이 끝난 receipt 를 남겼을 때, 그 설치의 add-on lane 표가 바뀌어 게시됐을 때. 선언이 바뀌면 worker 가 다시 떠서 첫 사건이 된다. 설치 질문 답변 사건은 아직 없다.
+- 지금 host 가 아는 종류는 `exact_output`, `read_records`, `read_file`, `read_result`, `ask`, `withdraw_ask` 다. 모르는 종류가 하나라도 있거나, 같은 `request_id` 가 두 번 나오면 그 목록 전체를 읽지 않고 instance 에 `listing_refused` 를 보인다.
+- host 는 다섯 사건에만 묻고 시계로 묻지 않는다. 지금 걸린 사건은 넷이다: worker 초기화가 끝났을 때, 그 instance 의 action 이 끝난 receipt 를 남겼을 때, 그 설치의 add-on lane 표가 바뀌어 게시됐을 때, 설치 질문에 운영자가 답했을 때. 선언이 바뀌면 worker 가 다시 떠서 첫 사건이 된다.
 - 한 주기는 목록을 받아 순서대로 처리한다. host 가 이미 최종 결과를 가진 요청은 모델을 부르지 않고 그 결과를 준다. 없으면 한 번 시도하고, 결과가 최종이면 준다. 최종이 아니면 다음 사건까지 기다린다. 결과를 준 목록이 있으면 다시 목록을 받고, 아무것도 주지 않은 목록에서 끝난다. 끝나면 관측을 한 번 한다.
 - 같은 주기에 이미 준 요청이 다시 나오면 주기를 끝내고 `relisted_delivered_request` 를 보인다.
 - 결과를 담은 전체 인자가 `max_reply_bytes` 보다 크면 원래 결과 JSON 바이트와 요청·instance·현재 grant 권한을 먼저 디스크에 저장한다. 성공한 뒤에만 `{"status": "result_exceeds_frame", "original_request_id", "source_id", "retained_sha256", "bytes", "encoding": "json-utf8", "complete": false}` 를 준다. 기록 페이지의 `next_cursor` 도 이 응답에 남는다. 저장 실패는 instance 의 `result_delivery_failed` 이며 참조를 보내지 않는다.
 - 최종 결과의 `status` 는 `answered`(`output`, `slot`, 선택 `usage`), `invalid_output`, `input_refused`(`kind`), `outcome_unknown`, `not_allowed`, `request_id_reused` 다. 자세한 뜻은 [운영자 퀴즈 RFC](../rfc/RFC-operator-quiz-lane.md) §4.3–4.4 에 있다.
 - 마지막 주기는 Inspect 의 instance 마다 `host_requests` 로 보인다: 주기 수, 최종이 아니어서 기다리는 요청과 그 이유, 주기를 멈춘 이유.
 
-큰 결과는 다음 요청으로 이어 읽는다. `source_id` 는 원래 기록·파일 요청의 값이고 `exact_output` 이면 `null` 이다. SHA만 아는 것으로 다른 instance 나 요청의 결과를 읽을 수 없다.
+큰 결과는 다음 요청으로 이어 읽는다. `source_id` 는 원래 기록·파일 요청의 값이고 `exact_output`, `ask`, `withdraw_ask` 이면 `null` 이다. SHA만 아는 것으로 다른 instance 나 요청의 결과를 읽을 수 없다.
 
 ```json
 {"kind": "read_result", "request_id": "r-17-part-0", "original_request_id": "r-17",
@@ -209,6 +209,17 @@ exact output 을 선언한 패키지의 worker 는 비공개 도구 둘을 한 �
 ```
 
 `result_chunk` 는 `content`(base64), `offset`, `next_offset`, `eof`, 원본의 `bytes` 와 `sha256` 을 돌려준다. 각 결과 인자 전체가 프레임 안에 들어간다. 패키지는 base64를 풀어 `eof` 까지 바이트를 합치고 원본 SHA-256을 확인한 뒤 JSON을 읽어야 한다. 그 뒤에 원본의 페이지 완료 여부와 `next_cursor` 를 적용한다. 같은 원래 요청을 다시 올리면 처음 저장한 결과를 받는다. 선언이나 grant가 바뀌면 이전 결과의 이어읽기는 거절된다. 변경 없는 저장 파일은 범위만 읽으며, 같은 SHA의 파일이 다시 게시돼 식별 정보가 바뀌면 전체 SHA를 재검증한 뒤 식별 정보를 저장한다.
+
+### 운영자에게 묻기
+
+manifest 에 `[world.asks] operator = true` 가 있는 패키지는 운영자에게 질문할 수 있다. 질문하는 쪽은 설치(선언 id 와 패키지 제목)이고, Keeper 를 깨우지 않는다.
+
+- 요청: `{"kind": "ask", "request_id", "questions", "context"}`. `questions` 는 Keeper 질문과 같은 모양이다(`question_id`, `header`, `prompt`, `choices`, `mode`, `free_text`). `request_id` 가 질문 id 다.
+- host 는 같은 `request_id` 의 질문을 한 번만 기록한다. 같은 id 로 다른 질문을 내면 `request_id_reused` 다.
+- 운영자가 답할 때까지 결과는 주지 않고 `awaiting_operator` 로 기다린다. 답하면 그 설치의 주기가 돌아 `{"status": "answered", "answers", "responder", "answered_at"}` 를 준다. worker 가 내려가 있으면 답은 저장돼 있다가 다음 worker 가 질문을 다시 낼 때 전달된다.
+- 철회는 패키지만 한다: `{"kind": "withdraw_ask", "request_id", "ask_id", "reason"}`. 결과는 `withdrawn` 이고, 이미 답한 질문이면 `already_answered` 다. 그 뒤 질문 자체도 `{"status": "withdrawn"}` 로 끝난다.
+- `[world.asks]` 가 없는 패키지나 수동 Attach 의 질문은 `not_allowed` 다.
+- 기한은 없다. 열린 질문은 답하거나 철회할 때까지 열려 있다.
 
 ### 기록 읽기
 

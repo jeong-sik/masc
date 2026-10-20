@@ -17,6 +17,10 @@ type t =
     }
       (** A bounded slice of a result already retained for this same installation,
           original request and source. The advertised SHA alone grants no read. *)
+  | Ask of { request_id : string; questions : Keeper_ask.question list; context : string option }
+      (** Questions to the operator. The request id is the question's id. *)
+  | Withdraw_ask of { request_id : string; ask_id : string; reason : string }
+      (** The package no longer needs the answer to its question [ask_id]. *)
 
 val request_id : t -> string
 val to_json : t -> Yojson.Safe.t

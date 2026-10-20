@@ -12,7 +12,7 @@ type retained = {
 let source_id = function
   | Lane_addon_host_request.Read_records {source_id; _}
   | Read_file {source_id; _} -> Some source_id
-  | Exact_output _ | Read_result _ -> None
+  | Exact_output _ | Ask _ | Withdraw_ask _ | Read_result _ -> None
 let nullable value = Option.fold ~none:`Null ~some:(fun text -> `String text) value
 let storage result = Result.map_error (fun detail -> Storage_failed detail) result
 let wrap request_id result = Lane_addon_host_request.result_arguments ~request_id ~result
@@ -59,7 +59,7 @@ let load ~store ~(owner : owner) ~original_request_id =
         | Some request ->
             let* listing = Lane_addon_host_request.listing_of_json (`Assoc ["requests", `List [request]]) |> storage in
             (match listing with
-             | [((Lane_addon_host_request.Exact_output _ | Read_records _ | Read_file _) as request)]
+             | [((Lane_addon_host_request.Exact_output _ | Read_records _ | Read_file _ | Ask _ | Withdraw_ask _) as request)]
                  when Lane_addon_host_request.request_id request = original_request_id -> Ok request
              | [(Lane_addon_host_request.Exact_output _ | Read_records _ | Read_file _ | Read_result _)]
              | [] | _ :: _ :: _ -> Error (Storage_failed "retained result original request mismatch")) in
@@ -116,7 +116,7 @@ let marker ~max_bytes ~request_id retained =
 let restore ~store ~owner ~request ~max_bytes =
   match request with
   | Lane_addon_host_request.Read_result _ -> Ok None
-  | Exact_output _ | Read_records _ | Read_file _ ->
+  | Exact_output _ | Read_records _ | Read_file _ | Ask _ | Withdraw_ask _ ->
       let request_id = Lane_addon_host_request.request_id request in
       let* retained = load ~store ~owner ~original_request_id:request_id in
       match retained with
@@ -135,7 +135,7 @@ let arguments ~store ~owner ~request ~max_bytes ~result =
   | Lane_addon_host_request.Read_result _ ->
       if fits ~max_bytes inline then Ok inline
       else Error (Refused "result continuation does not fit the package frame")
-  | Exact_output _ | Read_records _ | Read_file _ ->
+  | Exact_output _ | Read_records _ | Read_file _ | Ask _ | Withdraw_ask _ ->
       let* existing = restore ~store ~owner ~request ~max_bytes in
       (match existing with
        | Some arguments -> Ok arguments

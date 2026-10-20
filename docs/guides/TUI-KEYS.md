@@ -39,7 +39,7 @@ The command palette is `:`.
 | `j/k` | move between decision links and conversations |
 | `Enter` | open the selected destination; never approve |
 | `p` | approvals and questions |
-| `;` | Goal confirmations and tasks waiting on you |
+| `;` | held calls, questions, Goal confirmations and tasks waiting on you |
 | `m` | account windows and Keeper usage |
 | `s` | phrases, arrangements and recorded takes; no Keeper or score required |
 

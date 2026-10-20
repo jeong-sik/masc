@@ -1532,7 +1532,7 @@ let fetch_keeper_chat_history ~(host : string) ~(port : int)
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
       Error (named_refusal "chat history" ~status ~body)
-  | Ok (_, body) -> (
+  | Ok (_, body) -> Masc_tui_response_decode.run ~name:"chat.history.decode_wait" (fun () ->
       match Yojson.Safe.from_string body with
       | json -> Masc_tui_keeper_chat_history.rows_of_json json
       | exception Yojson.Json_error detail ->
@@ -1550,7 +1550,8 @@ let fetch_keeper_memory_journal ~(host : string) ~(port : int)
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
       Error (named_refusal "memory journal" ~status ~body)
   | Ok (_, body) ->
-      (match Yojson.Safe.from_string body with
+      Masc_tui_response_decode.run ~name:"chat.memory_journal.decode_wait" (fun () ->
+       match Yojson.Safe.from_string body with
        | json -> Masc_tui_keeper_chat_history.memory_rows_of_json json
        | exception Yojson.Json_error detail ->
            Error ("memory journal was not JSON: " ^ detail))
@@ -1701,11 +1702,9 @@ let fetch_keeper_chat_events ~(host : string) ~(port : int)
             (Masc_tui_keeper_chat_log.Events_undecodable
                ("events body was not JSON: " ^ detail)))
 
-(* Rows per older page. A page is parsed, decoded and folded on the UI's own
-   domain in one run, and at the server's full window (400 rows, about 400 KB)
-   that was about 18 ms with a key held down; a quarter of it is about a
-   quarter of the stall. The opaque cursor preserves the exact append position
-   independently of the requested page size. *)
+(* Keep the canonical physical-page window. The opaque cursor preserves its
+   exact append position independently of the requested size; JSON parsing
+   and typed folding use the shared CPU worker after the HTTP read. *)
 let history_page_limit = 100
 
 let fetch_keeper_chat_history_page ~(host : string) ~(port : int)
@@ -1723,7 +1722,7 @@ let fetch_keeper_chat_history_page ~(host : string) ~(port : int)
   | Ok (409, _) -> Error Masc_tui_keeper_chat_history.Page_stale
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
       Error (Masc_tui_keeper_chat_history.Page_read_failed (named_refusal "chat history page" ~status ~body))
-  | Ok (_, body) -> (
+  | Ok (_, body) -> Masc_tui_response_decode.run ~name:"chat.history_page.decode_wait" (fun () ->
       match Yojson.Safe.from_string body with
       | json -> Masc_tui_keeper_chat_history.page_of_json json
           |> Result.map_error (fun detail -> Masc_tui_keeper_chat_history.Page_read_failed detail)

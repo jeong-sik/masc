@@ -108,11 +108,24 @@ receipts remain distinct from successful contract validation.
    cleanup after native settlement. Unknown contents or changed inodes remain
    unconfirmed; a successful historical release cannot delete a resurrected path.
 
-   The public core proxy is not enabled. Existing built-in startup is still
-   active. Owned backends are explicitly refused here until profile claims and
-   actual descendant cleanup are connected. Next, the native host must pin
-   existing HTTP host registrations to that original incarnation. Late host
-   poll/result retries must never be redirected to a replacement. The proxy must
+   Native-host HTTP polls, results and disconnects now use the Add-on. The same
+   served Workspace configuration selects both the authentication token and the
+   execution owner. Atomic private-directory reservation and an immutable synced
+   owner record bind each client ID and full identity to its original worker
+   before the first forwarded poll. An incomplete reservation is never fresh;
+   competing registrations cannot replace its owner. Successful reads confirm
+   durability before forwarding. Late host poll/result retries never follow a
+   replacement. Inventory absence alone is unavailable, not retirement. A live
+   worker's failed observation requests the existing Observe wake and returns
+   unavailable to new polls, preserving the connection until recovery. Results
+   and disconnects still settle on that exact original connection during an
+   observation failure; the host does not resend a result after a reached HTTP
+   refusal. Only typed stopping/detached authority retires it.
+
+   The public core tool proxy and Dashboard inventory are not yet enabled for
+   the Add-on. Existing built-in startup is still active. Owned backends are
+   explicitly refused until profile claims and actual descendant cleanup are
+   connected. The tool proxy must
    preserve the exported tool's installation-selected command/result hooks;
    mandatory wire decoding does not replace those optional hooks. Upload leases, artifacts and model
    generation still require their explicit host brokers.

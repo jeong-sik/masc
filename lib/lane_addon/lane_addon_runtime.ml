@@ -17,6 +17,8 @@ exception Action_persistence_failed of string
 type tool_export = Lane_addon_tool_export.t = private
   { owner : Lane_addon_tool_export.owner; instance_id : string; tool : Mcp_protocol.Mcp_types.tool }
 type browser_service = {instance_id:string;owner:Lane_addon_tool_export.owner}
+type browser_service_status = Browser_ready of browser_service
+  | Browser_refresh_needed of browser_service | Browser_unavailable | Browser_retired
 type tool_call_error = Unavailable of string | Outcome_unknown of string
   | Host_refusal of Lane_addon_call_context.host_refusal
 let tool_change_handler = ref (fun () -> ())
@@ -1536,6 +1538,9 @@ let call_browser_service ~config ~access ~(service:browser_service) ~command =
           && Lane_addon_tool_export.equal_owner connection.export_owner service.owner ->
           (match phase_of e,connection.worker.browser with
            | (Attached|Observing),Some client -> Ok (e,client)
+           | Failed _,Some client when (match command with
+               | Browser_addon_wire.Deliver _|Disconnect _ -> true
+               | Snapshot|Poll _|Issue _ -> false) -> Ok (e,client)
            | (Attached|Observing|Failed _|Detaching|Detached),(None|Some _) ->
                Error (Browser_addon_client.Unavailable "original browser Add-on is unavailable"))
       | None|Some _ -> Error (Browser_addon_client.Unavailable "original browser Add-on was retired") in
@@ -1667,6 +1672,40 @@ let read_retained_bindings m =
   let* stored = offload (fun () -> Lane_addon_store.read_bindings m.store) in
   let parsed = split_retained (recovery_bindings m stored.readable) in
   Ok { parsed with faults = parsed.faults @ List.map fault_of_unreadable stored.unreadable }
+let browser_service_status ~config ~access ~instance_id = Eio_context.run_on_owner_domain (fun () ->
+  let root=Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  match Hashtbl.find_opt managers root with
+  | None -> Browser_unavailable
+  | Some m -> match Hashtbl.find_opt m.entries instance_id with
+    | Some e when can_read access e.visibility ->
+        if e.stopping then Browser_retired else
+        (match phase_of e with
+         | Detaching|Detached -> Browser_retired
+         | Failed _ ->
+             (match e.connection with
+              | Some connection when e.started && Option.is_some connection.worker.browser ->
+                  Browser_refresh_needed {instance_id;owner=connection.export_owner}
+              | None|Some _ -> Browser_unavailable)
+         | Attached|Observing ->
+             if not e.started then Browser_unavailable else
+             match e.connection with
+             | Some connection when Option.is_some connection.worker.browser ->
+                 Browser_ready {instance_id;owner=connection.export_owner}
+             | None|Some _ -> Browser_unavailable)
+    | Some _ -> Browser_unavailable
+    | None ->
+        (match read_retained_bindings m with
+         | Error _ -> Browser_unavailable
+         | Ok reading ->
+             let named binding=text binding.binding_fields "instance_id"=Ok instance_id in
+             if List.exists (fun fault -> fault.fault_instance=Some instance_id) reading.faults
+             then Browser_unavailable else
+             match List.filter named reading.readable with
+             | [binding] when can_read access binding.read_visibility ->
+                 (match lifecycle_of_fields binding.binding_fields with
+                  | Ok (Lifecycle.Detached _|Detaching _) -> Browser_retired
+                  | Ok (Attached|Observing|Failed _) | Error _ -> Browser_unavailable)
+             | []|[_]|(_::_::_) -> Browser_unavailable))
 let is_live m (binding : retained_binding) =
   match List.assoc_opt "instance_id" binding.binding_fields with
   | Some (`String id) -> Hashtbl.mem m.entries id

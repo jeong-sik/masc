@@ -735,6 +735,12 @@
  (libraries masc masc.time_codec masc_tui_message_layout unix))
 
 (library
+ (name masc_tui_card)
+ (wrapped false)
+ (modules masc_tui_card)
+ (libraries masc_tui_message_layout masc_tui_theme))
+
+(library
  (name masc_tui_answering)
  (wrapped false)
  (modules masc_tui_answering)
@@ -2460,6 +2466,7 @@
   masc_tui_ansi
   masc_tui_answering
   masc_tui_ask_layout
+  masc_tui_card
   masc_tui_ask_projection
   masc_tui_frame
   masc_tui_frame_timing

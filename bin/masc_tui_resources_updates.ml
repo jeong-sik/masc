@@ -29,7 +29,8 @@ let listed state result =
          state.resource_content <- None;
          state.resource_content_error <- None;
          state.resource_scroll <- 0;
-         state.resource_search_cursor <- 0
+         state.resource_search_cursor <- 0;
+         state.resource_text_cursor <- 0
        end)
   | Error detail -> state.resources_error <- Some detail
 
@@ -45,6 +46,7 @@ let read_done state ~(request : Catalog.read_request) result =
        state.resource_content <- Some (key, reading.parts);
        state.resource_revision_history <- reading.revisions;
        state.resource_image_cursor <- 0;
+       state.resource_text_cursor <- 0;
        state.resource_search_cursor <- 0;
        state.resource_content_error <- None
      | Error detail -> state.resource_content_error <- Some (key, detail))
@@ -73,3 +75,10 @@ let place_search_match state ~count ~index =
     state.resource_search_cursor <- index;
     state.resource_scroll <- index
   end
+
+let step_text_part state ~delta =
+  if state.view = Resources && state.resource_focus = Right_pane then
+    let count = Masc_tui_resource_document.text_part_count state in
+    if count > 0 then
+      state.resource_text_cursor <-
+        max 0 (min (count - 1) (state.resource_text_cursor + delta))

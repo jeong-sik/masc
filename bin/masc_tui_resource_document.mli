@@ -4,6 +4,14 @@ type t
 val current : Masc_tui_types.state -> t option
 (** [None] when no inventory entry owns the pending/error/content key. *)
 val entry : t -> Masc_tui_resource_catalog.t
+val text_part_count : Masc_tui_types.state -> int
+(** Text parts of the current admitted reading, in original response order.
+    Pending reads, refusals and withdrawn inventory have no selectable parts. *)
+val copy_source : Masc_tui_types.state -> ((string * string), string) result
+(** Label and exact original bytes of the selected text part. Requires a ready
+    workspace and focused Resources detail; never concatenates parts, decodes
+    blobs, follows URIs or sanitizes payload bytes. The caller owns clipboard
+    delivery; success does not establish terminal acknowledgement. *)
 val rows : cols:int -> t -> string list
 (** [cols] is the surface width after the Activity reservation, before the
     Resources list/detail split. Both drawing and search use this projection. *)

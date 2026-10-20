@@ -8543,6 +8543,7 @@ type state = {
   mutable resource_search_cursor: int;
   mutable resource_focus: pane_focus;
   mutable resource_image_cursor: int;
+  mutable resource_text_cursor: int;
   (* The Config surface owns the files the server reads. runtime.toml is one;
      the prompt registry is the other, and a prompt is edited the same way —
      $EDITOR over the effective text, the server persists what comes back. *)
@@ -10959,7 +10960,8 @@ let retain_resource_read state ~key =
     state.resource_content <- None;
     state.resource_content_error <- None;
     state.resource_scroll <- 0;
-    state.resource_search_cursor <- 0
+    state.resource_search_cursor <- 0;
+    state.resource_text_cursor <- 0
   end
 
 let retain_sandbox_log_read state ~keeper_name =
@@ -15271,6 +15273,7 @@ let create_state
   resource_search_cursor = 0;
   resource_focus = Left_pane;
   resource_image_cursor = 0;
+  resource_text_cursor = 0;
   config_pane = Config_runtime;
   tools_pane = Tools_surface;
   theme_choice = None;

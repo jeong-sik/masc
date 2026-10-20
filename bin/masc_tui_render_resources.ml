@@ -6,6 +6,7 @@ open Masc_tui_render_prim
 
 module Message_layout = Masc_tui_message_layout
 module Rows = Masc_tui_rows
+module Catalog = Masc_tui_resource_catalog
 
 let fenced_pretty_json text =
   let pretty =
@@ -37,6 +38,7 @@ let resource_language_of_mime mime =
     List.mem mime
       [ "application/yaml"; "application/x-yaml"; "text/yaml"; "text/x-yaml" ]
   then Some "yaml"
+  else if String.equal mime "text/html" then Some "html"
   else None
 
 let resource_mime_is_markdown mime =
@@ -50,8 +52,9 @@ let pretty_resource_text ~mime text =
   | None when resource_mime_is_markdown mime -> text
   | None -> text
 
-let resource_document (resource : Masc_tui_mcp.resource)
+let resource_document entry
     (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor =
+  let resource = Catalog.metadata entry in
   let present = function
     | Some text when String.trim text <> "" -> text
     | Some _ | None -> "not supplied"
@@ -64,7 +67,7 @@ let resource_document (resource : Masc_tui_mcp.resource)
   let mime = present resource.mime_type in
   let metadata =
     String.concat "\n\n"
-      [ "MCP resource — read-only data exposed by this server."
+      [ Catalog.origin entry
       ; "**About:** " ^ present resource.description
       ; "**URI:** `" ^ resource.uri ^ "`"
       ; "**Name:** " ^ resource.name
@@ -161,7 +164,7 @@ let render_resources (state : state) =
       match Rows.at rows_list_window (first + i) with
       | Some resource ->
           let selected = first + i = cursor in
-          let name = Masc_tui_mcp.display_name resource in
+          let name = Terminal_text.single_line (Catalog.display_name resource) in
           let line =
             if selected then
               Theme.selection ^ " " ^ name
@@ -182,22 +185,21 @@ let render_resources (state : state) =
     let error_uri = Option.map fst state.resource_content_error in
     let content_uri = Option.map fst state.resource_content in
     let shown_uri =
-      match state.resource_pending_uri, error_uri, content_uri with
+      match state.resource_pending_key, error_uri, content_uri with
       | Some uri, _, _ -> Some uri
       | None, Some uri, _ -> Some uri
       | None, None, Some uri -> Some uri
-      | None, None, None -> Option.map (fun resource -> resource.Masc_tui_mcp.uri) selected_resource
+      | None, None, None -> Option.map Catalog.key selected_resource
     in
     let shown_resource =
       Option.bind shown_uri (fun uri ->
           List.find_opt
-            (fun (resource : Masc_tui_mcp.resource) ->
-               String.equal resource.uri uri)
+            (fun resource -> Catalog.equal_key (Catalog.key resource) uri)
             rows_list)
     in
     let title =
       match shown_resource with
-      | Some resource -> "Resource · " ^ Masc_tui_mcp.display_name resource
+      | Some resource -> "Resource · " ^ Terminal_text.single_line (Catalog.display_name resource)
       | None -> "Resource detail"
     in
     if split then box_top pane_buf pane_cols;
@@ -217,18 +219,18 @@ let render_resources (state : state) =
          let contents =
            match state.resource_content, shown_uri with
            | Some (content_uri, parts), Some uri
-             when String.equal content_uri uri -> Some parts
+             when Catalog.equal_key content_uri uri -> Some parts
            | Some _, (Some _ | None) | None, _ -> None
          in
          let error =
            match state.resource_content_error, shown_uri with
            | Some (error_uri, detail), Some uri
-             when String.equal error_uri uri -> Some detail
+             when Catalog.equal_key error_uri uri -> Some detail
            | Some _, (Some _ | None) | None, _ -> None
          in
          let requested =
-           match state.resource_pending_uri, shown_uri with
-           | Some pending_uri, Some uri -> String.equal pending_uri uri
+           match state.resource_pending_key, shown_uri with
+           | Some pending_uri, Some uri -> Catalog.equal_key pending_uri uri
            | Some _, None | None, _ -> false
          in
          let rendered =

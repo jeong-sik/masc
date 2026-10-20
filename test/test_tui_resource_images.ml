@@ -29,7 +29,7 @@ let test_wire_conservation () =
       (match Preview.decode_payload (payload image) with
        | Ok bytes -> check string "original bytes" "ABCD" bytes
        | Error error -> fail error)
-    | _ -> fail "every response image keeps its original part number"
+    | [] | _ :: _ -> fail "every response image keeps its original part number"
 
 let test_multipart_types () =
   let parts = [text (Some "text/markdown") "![label](/not-followed.png)";
@@ -44,22 +44,24 @@ let test_multipart_types () =
   check string "MIME inheritance" "R0hJ" (payload (snd (List.nth images 1)));
   (match snd (List.nth images 2) with
    | Preview.Output_image {source=Inline_svg source;_} -> check string "SVG source" "<svg/>" source
-   | _ -> fail "SVG text retains markup")
+   | Preview.Named_path _ | Staged _ | Stored_attachment _
+   | Output_image {source=(Inline_data _ | Inline_mermaid _ | Server_path _ | Remote_uri _);_}
+   | Unavailable_image _ | No_image -> fail "SVG text retains markup")
 
 let test_source_ownership () =
   let parts = [blob (Some "image/png") "QUJD"] in
   let uri = "masc://image" in
-  check bool "original retained observation" true (Images.same_reading (Some (uri,parts)) (Some (uri,parts)));
-  check bool "new response with equal bytes" false (Images.same_reading (Some (uri,parts)) (Some (uri,List.map Fun.id parts)));
-  check bool "different resource" false (Images.same_reading (Some (uri,parts)) (Some ("masc://other",parts)));
-  check bool "withdrawn source" false (Images.same_reading (Some (uri,parts)) None);
-  check bool "absence never owns" false (Images.same_reading None None)
+  check bool "original retained observation" true (Images.same_reading ~equal:String.equal (Some (uri,parts)) (Some (uri,parts)));
+  check bool "new response with equal bytes" false (Images.same_reading ~equal:String.equal (Some (uri,parts)) (Some (uri,List.map Fun.id parts)));
+  check bool "different resource" false (Images.same_reading ~equal:String.equal (Some (uri,parts)) (Some ("masc://other",parts)));
+  check bool "withdrawn source" false (Images.same_reading ~equal:String.equal (Some (uri,parts)) None);
+  check bool "absence never owns" false (Images.same_reading ~equal:String.equal None None)
 
 let test_decode_refusal () =
   match Images.images ~mime_type:None [blob (Some "image/png") "***"] with
   | [_,image] ->
     (match Preview.decode_payload (payload image) with Error _ -> () | Ok _ -> fail "invalid payload decoded")
-  | _ -> fail "decoding belongs to acquisition, not metadata selection"
+  | [] | _ :: _ -> fail "decoding belongs to acquisition, not metadata selection"
 
 let test_malformed_parts_refused () =
   let image = `Assoc ["mimeType",`String "image/png"; "blob",`String "QUJD"] in

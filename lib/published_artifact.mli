@@ -31,6 +31,7 @@ val request_of_json : Yojson.Safe.t -> (request, string) result
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
 val revision_to_json : revision -> Yojson.Safe.t
+val revision_of_json : Yojson.Safe.t -> (revision, string) result
 val summary_to_json : id:string -> revision -> Yojson.Safe.t
 val publication_to_json : id:string -> revision -> Yojson.Safe.t
 val url : ?revision:int -> string -> string

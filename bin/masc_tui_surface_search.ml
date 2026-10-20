@@ -270,7 +270,7 @@ let surface_row_texts (state : state) : surface -> string list option =
      cursor arm reads answers here: a search offered on one focus and silent
      on the other would be the drift this pairing exists to prevent. *)
   | Resources when state.resource_focus = Left_pane ->
-      Option.map (List.map Masc_tui_mcp.display_name) state.resources_list
+      Option.map (List.map Masc_tui_resource_catalog.display_name) state.resources_list
   | Overview | Acting | Metrics
   | Keepers
       ( Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message

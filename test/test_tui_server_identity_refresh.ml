@@ -648,11 +648,11 @@ let test_nested_read_owners_retire_without_losing_selection () =
   state.schedule_wake_history_inflight <- Some "schedule-a";
   state.patch_modal_open <- true;
   state.patch_modal_path <- Some "lib/example.ml";
-  state.resource_pending_uri <- Some "masc://selected/resource";
+  state.resource_pending_key <- Some (Masc_tui_resource_catalog.Mcp_uri "masc://selected/resource");
   state.prompts_librarian_input_requested <- Some "librarian-input";
   state.prompts_librarian_input_loading <- true;
   suspend_workspace_readings state;
-  Alcotest.(check (option string)) "resource URI survives retirement" (Some "masc://selected/resource") state.resource_pending_uri;
+  Alcotest.(check (option (of_pp (fun fmt _ -> Format.pp_print_string fmt "resource key")))) "resource URI survives retirement" (Some (Masc_tui_resource_catalog.Mcp_uri "masc://selected/resource")) state.resource_pending_key;
   Alcotest.(check (option string)) "Librarian target survives retirement" (Some "librarian-input") state.prompts_librarian_input_requested;
   Alcotest.(check bool) "catalog owner can be restarted" true
     (state.runtime_catalog_reading = Runtime_catalog_unread);
@@ -832,9 +832,9 @@ let test_unsent_resource_and_log_intents_survive_reconfirmation () =
       ~port:0 ~refresh_interval:0. () in
   state.server_identity <- Some (identity "/workspace/a");
   state.workspace_identity <- Workspace_identity_match_unconfirmed "health failed";
-  state.resource_content <- Some ("masc://old", []);
+  state.resource_content <- Some (Masc_tui_resource_catalog.Mcp_uri "masc://old", []);
   state.resource_scroll <- 12;
-  retain_resource_read state ~uri:"masc://new";
+  retain_resource_read state ~key:(Masc_tui_resource_catalog.Mcp_uri "masc://new");
   retain_sandbox_log_read state ~keeper_name:"selected-keeper";
   Alcotest.(check bool) "intent does not authorize network reads" false
     (server_authority_ready state);
@@ -842,8 +842,8 @@ let test_unsent_resource_and_log_intents_survive_reconfirmation () =
     (state.resource_content = None && state.resource_scroll = 0);
   suspend_workspace_readings state;
   state.workspace_identity <- Workspace_identity_match;
-  Alcotest.(check (option string)) "resource recovery selects the unsent URI"
-    (Some "masc://new") state.resource_pending_uri;
+  Alcotest.(check (option (of_pp (fun fmt _ -> Format.pp_print_string fmt "resource key")))) "resource recovery selects the unsent URI"
+    (Some (Masc_tui_resource_catalog.Mcp_uri "masc://new")) state.resource_pending_key;
   Alcotest.(check (option string)) "first log open survives without a previous result"
     (Some "selected-keeper") state.keeper_sandbox_logs_requested;
   Alcotest.(check bool) "unsent logs retain their originating workspace" true

@@ -21,8 +21,8 @@ let images ~mime_type contents =
     contents
   |> List.filter_map Fun.id
 
-let same_reading left right =
+let same_reading ~equal left right =
   match left, right with
   | Some (left_uri, left_parts), Some (right_uri, right_parts) ->
-    String.equal left_uri right_uri && left_parts == right_parts
+    equal left_uri right_uri && left_parts == right_parts
   | (Some _ | None), None | None, Some _ -> false

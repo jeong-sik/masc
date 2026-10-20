@@ -142,8 +142,77 @@ while True:
       check "profile cleanup never follows a symlink" true (Sys.file_exists outside);
       check "child admission ledger survives profile cleanup" true (Sys.file_exists (Filename.concat root "chrome-slot/lease"))))))
 
+let identity_scenario () =
+  let root=Filename.temp_dir "browser-addon-identity-" "" |> Unix.realpath in
+  let admission=ref None in
+  Fun.protect ~finally:(fun () ->
+    let safe=match !admission with
+      | None -> true
+      | Some claim -> Result.is_ok (Lease.retire claim) && child_stopped claim in
+    if safe then remove root else prerr_endline ("retained unconfirmed identity fixture: " ^ root)) (fun () ->
+  Eio_main.run (fun env ->
+    Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 30. (fun () -> Eio.Switch.run (fun sw ->
+      let claim=lease (Lease.prepare ~directories:[Filename.concat root "slot"]
+        ~instance_id:"browser-identity" ~cleanup_context:None) in
+      admission:=Some claim;
+      let input,keepalive=Eio_unix.pipe sw and ready,output=Eio_unix.pipe sw in
+      let log=Eio.Path.open_out ~sw ~create:(`Exclusive 0o600)
+        Eio.Path.(Eio.Stdenv.fs env / Filename.concat root "owner.log") in
+      let process=Eio.Process.spawn ~sw
+        (Posix_spawn_process_mgr.foreground_mgr ~clock:(Eio.Stdenv.clock env) ~grace_seconds:5.)
+        ~stdin:input ~stdout:output ~stderr:log
+        [!launcher;"--instance";"browser-identity";"--slot";Filename.concat root "slot";"--";
+         !guardian;"--instance";"browser-identity";"--";"/usr/bin/env";"python3";"-c";"import time;time.sleep(60)"] in
+      Eio.Flow.close input;Eio.Flow.close output;
+      Eio.Switch.on_release sw (fun () ->
+        ignore (Eio_unix.run_in_systhread (fun () -> Lease.retire claim));
+        Eio.Flow.close keepalive;Eio.Process.signal process Sys.sigterm);
+      let receipt=Eio.Buf_read.of_flow ready ~max_size:1024 |> Eio.Buf_read.line
+        |> Yojson.Safe.from_string |> Browser_process_owner.ready_of_json |> ok in
+      check "the receipt names the actual original guardian" true (receipt.owner_pid=Eio.Process.pid process);
+      let connection ~pid ~before_reply =
+        let writes=ref [] and closes=ref 0 in
+        let inbox=Eio.Stream.create 1 in
+        let cdp=Masc.Browser_cdp.create ~clock:(Eio.Stdenv.clock env) ~command_deadline_s:15.
+          ~send:(fun frame -> let value=Yojson.Safe.from_string frame in
+            writes:=value:: !writes;Eio.Stream.add inbox value)
+          ~close:(fun () -> incr closes) ~on_event:(fun _ -> ()) in
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+          let request=Eio.Stream.take inbox in
+          check "only the read-only identity query precedes admission" true
+            (Yojson.Safe.Util.member "method" request=`String "SystemInfo.getProcessInfo");
+          before_reply ();
+          Masc.Browser_cdp.receive cdp (Yojson.Safe.to_string (`Assoc [
+            "id",Yojson.Safe.Util.member "id" request;
+            "result",`Assoc ["processInfo",`List [`Assoc ["type",`String "browser";"id",`Int pid]]]]));
+          `Stop_daemon);
+        cdp,writes,closes in
+      let bad,writes,closes=connection ~pid:receipt.child_pid ~before_reply:(fun () -> ()) in
+      check "a changed child incarnation refuses before any CDP command" true
+        (Result.is_error (Chrome.verify_browser ~admission:claim
+          ~receipt:{receipt with child_started="different child"} bad));
+      Alcotest.check Alcotest.int "no command reaches a stale child" 0 (List.length !writes);
+      Alcotest.check Alcotest.int "only the refused connection closes" 1 !closes;
+      let foreign,writes,closes=connection ~pid:(Unix.getpid ()) ~before_reply:(fun () -> ()) in
+      check "another browser PID cannot inherit a debugging endpoint" true
+        (Result.is_error (Chrome.verify_browser ~admission:claim ~receipt foreign));
+      Alcotest.check Alcotest.int "no extension/page command follows a foreign reply" 1 (List.length !writes);
+      Alcotest.check Alcotest.int "the foreign connection is closed" 1 !closes;
+      let current,writes,closes=connection ~pid:receipt.child_pid ~before_reply:(fun () -> ()) in
+      ok (Chrome.verify_browser ~admission:claim ~receipt current);
+      Alcotest.check Alcotest.int "the owned connection stays open" 0 !closes;
+      Alcotest.check Alcotest.int "identity admission sends one read-only query" 1 (List.length !writes);
+      let late,_,closes=connection ~pid:receipt.child_pid ~before_reply:(fun () ->
+        lease (Eio_unix.run_in_systhread (fun () -> Lease.request_termination claim));
+        ignore (Eio.Process.await process)) in
+      check "a matching PID reply after owner loss still refuses" true
+        (Result.is_error (Chrome.verify_browser ~admission:claim ~receipt late));
+      Alcotest.check Alcotest.int "late identity response closes its connection" 1 !closes;
+      check "original group cleanup is confirmed separately" true (child_stopped claim)))))
+
 let () =
   if Array.length Sys.argv<>3 then (prerr_endline "expected native launcher and browser process owner";exit 1);
   launcher:=Unix.realpath Sys.argv.(1);guardian:=Unix.realpath Sys.argv.(2);
   Alcotest.run ~argv:[|Sys.argv.(0)|] "browser addon Chrome" ["lifecycle",[
-    Alcotest.test_case "host allocation, real process ownership, failed startup and concurrent detach" `Quick scenario]]
+    Alcotest.test_case "host allocation, real process ownership, failed startup and concurrent detach" `Quick scenario;
+    Alcotest.test_case "CDP identity requires the original live browser child" `Quick identity_scenario]]

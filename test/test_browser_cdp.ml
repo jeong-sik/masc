@@ -70,6 +70,20 @@ let test_events () =
   | _ -> fail "an event without a reader is unobserved"
 ;;
 
+let test_browser_process_identity () =
+  let browser id = `Assoc ["type",`String "browser";"id",`Int id;"cpuTime",`Float 0.] in
+  let response rows = `Assoc ["processInfo",`List rows] in
+  check (result int string) "browser PID is separate from renderer metadata" (Ok 42)
+    (Cdp.browser_process_id_of_json (response [
+      `Assoc ["type",`String "renderer";"id",`Int 81];browser 42]));
+  List.iter (fun value -> check bool "ambiguous or missing browser identity refuses" true
+      (Result.is_error (Cdp.browser_process_id_of_json value)))
+    [response [];response [browser 0];response [browser 42;browser 43];
+     response [`Assoc ["type",`String "browser";"id",`Int 42;"id",`Int 43]];
+     response [`Assoc ["type",`String "browser";"type",`String "renderer";"id",`Int 42]];
+     `Assoc ["processInfo",`List [browser 42];"processInfo",`List [browser 43]]]
+;;
+
 let test_replies_reach_their_commands () =
   with_connection @@ fun ~sw ~clock:_ ~t ~sent ~events:_ ~closes:_ ->
   let first = Eio.Fiber.fork_promise ~sw (fun () -> Cdp.command t "Browser.getVersion" (`Assoc [])) in
@@ -196,6 +210,7 @@ let () =
     "wire", [
       test_case "frames decode" `Quick test_decode;
       test_case "events decode" `Quick test_events;
+      test_case "browser process identity is unambiguous" `Quick test_browser_process_identity;
     ];
     "connection", [
       test_case "replies reach their commands" `Quick test_replies_reach_their_commands;

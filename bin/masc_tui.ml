@@ -11053,7 +11053,10 @@ let leave_acting_pane (state : state) =
   state.acting_pane_cursor <- None;
   (* The cycle closes where it opened: the left pane. *)
   (match state.view with
-   | Board -> state.board_focus <- Left_pane
+   | Board ->
+       let _, cols = get_terminal_size () in
+       state.board_focus <-
+         Masc_tui_types.board_focus_on_leaving_acting_pane state ~cols
    | Resources -> state.resource_focus <- Left_pane
    | Overview | Acting | Metrics | Memory | Lanes | Clients | Approvals | Planning | Schedules
    | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime | Config

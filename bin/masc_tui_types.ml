@@ -16491,6 +16491,16 @@ let board_read_focus (state : state) ~cols =
   | Board_read_wide | Board_read_one_pane -> Right_pane
 ;;
 
+(* What [board_focus] becomes when the Activity pane gives the keys back. The
+   cycle closes at the left pane, and only the split has one: elsewhere the
+   stored choice stands, so a pane the operator never chose cannot take over
+   when the terminal is wide again. *)
+let board_focus_on_leaving_acting_pane (state : state) ~cols =
+  match board_read_layout ~cols ~wide:state.board_detail_wide with
+  | Board_read_split -> Left_pane
+  | Board_read_wide | Board_read_one_pane -> state.board_focus
+;;
+
 (* Drafts belong to a workspace and exact config path, and survive view changes
    and temporary loss of workspace authority. Only a matching current reading
    can expose one. The colored rows are a rendering cache of that session text. *)

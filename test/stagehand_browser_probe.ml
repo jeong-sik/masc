@@ -142,11 +142,16 @@ let alive pid =
   | exception Unix.Unix_error (Unix.ESRCH, _, _) -> false
 ;;
 
+type profile_lifetime = Private | Persistent
+
 let () =
   let chrome = argument "--chrome"
   and extension = argument "--extension"
   and fixture_url = argument "--fixture-url"
   and out = argument "--out" in
+  let profile_lifetime=match argument "--profile-mode" with
+    | "private" -> Private | "persistent" -> Persistent
+    | _ -> failwith "profile mode must be private or persistent" in
   let manifest=Unix.realpath (argument "--manifest") in
   let base_path=Filename.temp_dir "masc-browser-addon-probe-" "" |> Unix.realpath in
   let config_root=Filename.concat base_path ".masc/config" in
@@ -159,9 +164,15 @@ let () =
      "--worker","masc-browser-addon-worker"];
   Unix.putenv "PATH" (bin ^ ":" ^ Option.value ~default:"" (Sys.getenv_opt "PATH"));
   let runtime_path=Filename.concat config_root "runtime.toml" in
+  let profile_path=match profile_lifetime with
+    | Private -> None
+    | Persistent ->
+      let path=Filename.concat base_path "chrome-profile" in
+      Unix.mkdir path 0o700;Some path in
   Out_channel.with_open_bin runtime_path (fun channel ->
     output_string channel (F.official_client_runtime_fixture ^ Printf.sprintf
-      "\n[browser.live]\nenabled=false\n[browser.automation]\nenabled=false\n[browser.stagehand]\nenabled=true\nchrome=%S\nextension=%S\n" chrome extension));
+      "\n[browser.live]\nenabled=false\n[browser.automation]\nenabled=false\n[browser.stagehand]\nenabled=true\nchrome=%S\nextension=%S\n%s"
+      chrome extension (Option.fold ~none:"" ~some:(Printf.sprintf "profile=%S\n") profile_path)));
   (match Runtime.init_default ~config_path:runtime_path with Ok () -> () | Error detail -> failwith detail);
   Mirage_crypto_rng_unix.use_default ();
   let failed = Eio_main.run
@@ -243,6 +254,21 @@ let () =
       (Browser_lane.Page_capture {tab_id}) |> Result.map (fun receipt -> receipt.Browser_addon_host.data)
       |> Result.map_error Tool_result.message in
   let goto_fixture ()=handle "BrowserGoto" Browser_capabilities.Goto ["url",`String fixture_url;lane] in
+  let session_state signed_in =
+    let url=fixture_url ^ "session" in
+    let* _=handle "BrowserGoto" Browser_capabilities.Goto ["url",`String url;lane] in
+    let* listed=tabs () in
+    let* _,observed=tab_for ~url listed in
+    let expected=if signed_in then "MASC fixture signed in" else "MASC fixture signed out" in
+    match string_at ["title"] observed with
+    | Some title when title=expected -> Ok observed
+    | Some title -> Error ("fixture cookie state has title " ^ title ^ ", expected " ^ expected)
+    | None -> Error "fixture cookie state has no title" in
+  let establish_session () =
+    let* _=handle "BrowserGoto" Browser_capabilities.Goto
+      ["url",`String (fixture_url ^ "session/login");lane] in
+    session_state true in
+  let retains_session=match profile_lifetime with Private -> false | Persistent -> true in
   let title_at tab_id expected =
     let* listed = tabs () in
     let* _, observed = tab_for ~url:fixture_url listed in
@@ -271,6 +297,7 @@ let () =
     | Error _ -> None
   in
   record "status names the browser" (Option.to_result ~none:"no pid in status" pid);
+  record "the isolated fixture installs and reads its HTTP-only session cookie" (establish_session ());
   record "goto" (goto_fixture ());
   let tab = Result.bind (tabs ()) (tab_for ~url:fixture_url) in
   record "the fixture is a tab" tab;
@@ -466,6 +493,11 @@ let () =
      | Some pid when alive pid -> Error (Printf.sprintf "Chromium pid %d still runs" pid)
      | Some _ | None -> Ok `Null);
   record "reopen on the original attached worker" (session "open");
+  record "browser reopen follows the selected profile's cookie lifetime" (session_state retains_session);
+  (* Both retirement boundaries must start with a positively observed cookie.
+     In private mode, close/reopen has already discarded the first cookie;
+     reusing that empty profile on fresh attach would otherwise go undetected. *)
+  record "the reopened browser holds a session before worker retirement" (establish_session ());
   record "navigate after reopen" (goto_fixture ());
   let current_tab=Result.bind (tabs ()) (tab_for ~url:fixture_url) in
   (match current_tab with
@@ -490,10 +522,13 @@ let () =
   record "reattach owns a fresh incarnation" (if replacement.instance_id<>first.instance_id then Ok `Null
     else Error "reattach reused the retired instance");
   record "open after fresh attach" (session "open");
+  record "fresh worker attach follows the selected profile's cookie lifetime" (session_state retains_session);
   record "navigate after fresh attach" (goto_fixture ());
   record "close replacement browser" (session "close");
   record "detach confirms replacement cleanup" (detach replacement.instance_id);
   let proof = `Assoc [
+    "profile_mode",`String (match profile_lifetime with Private -> "private" | Persistent -> "persistent");
+    "profile_path",(match profile_path with None -> `Null | Some path -> `String path);
     "steps",`List (List.rev_map (fun (name,ok) -> `Assoc ["step",`String name;"ok",`Bool ok]) !steps);
     "model_requests",`Int (F.post_count provider);"isolated_base_path",`String base_path;
     "provider_requests",`List (List.map (fun body -> `String body) (F.request_bodies provider));

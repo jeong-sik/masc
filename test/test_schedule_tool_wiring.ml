@@ -1006,7 +1006,9 @@ let test_payload_contracts_are_schema_only () =
     Schedule_payload_projection.supported_contracts_to_yojson ()
     |> Yojson.Safe.Util.to_list
   in
-  check int "one supported contract" 1 (List.length contracts);
+  check (list string) "a contract per supported kind"
+    [ Schedule_supported_kinds.keeper_wake; Schedule_supported_kinds.lane_act ]
+    (List.map (fun contract -> Yojson.Safe.Util.(contract |> member "kind" |> to_string)) contracts);
   List.iter
     (fun contract ->
        let open Yojson.Safe.Util in

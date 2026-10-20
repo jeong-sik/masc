@@ -176,6 +176,35 @@ val answer_installation_question :
     of the installation's live instance. A worker that is down receives the
     answer when it lists the question again. *)
 
+(** Why a scheduled action was not handed over (RFC operator-quiz §4.7). *)
+type scheduled_act_refusal =
+  | Declarations_unread
+      (** This process has not read the declarations yet. *)
+  | Declarations_incomplete
+      (** A declaration, or a retained record that may be this declaration's,
+          could not be read, so an earlier receipt may be unseen. *)
+  | Declaration_missing
+  | Declaration_disabled
+  | No_live_instance
+      (** Declared and enabled, and no worker is running. *)
+  | Request_id_reused
+      (** A receipt with this request id holds another requester or action. *)
+  | Action_refused of string
+      (** The worker's action port, its schema or the caller's access refused it. *)
+type scheduled_act_error =
+  | Scheduled_act_refused of scheduled_act_refusal
+  | Scheduled_act_failed of string  (** A store read or write failed. *)
+val scheduled_act_refusal_label : scheduled_act_refusal -> string
+
+val scheduled_act :
+  config:Workspace.config -> access:Lane_addon_sources.access -> requester:string ->
+  declaration_id:string -> request_id:string -> action:Yojson.Safe.t ->
+  (Lane_addon_action.receipt, scheduled_act_error) result
+(** Hands [action] to the declaration's live worker through the [Act]
+    operation, with [request_id] as the receipt's request id. A receipt with
+    the same request id under any instance the declaration owned is returned
+    instead, after the read writes its terminal when no live worker owns it. *)
+
 val installation_questions :
   config:Workspace.config -> ((string * Lane_addon_asks.row list) list, string) result
 (** Every declaration's questions, by declaration id, in the order asked. *)

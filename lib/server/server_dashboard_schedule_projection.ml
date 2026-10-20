@@ -174,7 +174,7 @@ let schedule_keeper_receipt_identity (wake : Schedule_domain.wake_record option)
      | None -> None
      | Some detail ->
        (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
-        | Error _ -> None
+        | Error _ | Ok (Server_schedule_consumers.Lane_act_handed_over _) -> None
         | Ok
             (Server_schedule_consumers.Keeper_wake_enqueued
               { keeper_name; stimulus_id; _ }) ->
@@ -361,6 +361,9 @@ let schedule_keeper_queue_evidence_dashboard_json
             [ "projection_status", `String "unrecognized_receipt"
             ; "reason", `String reason
             ]
+        (* A Lane action receipt has no Keeper queue or reaction ledger
+           evidence; the receipt itself is the record (RFC operator-quiz §4.7). *)
+        | Ok (Server_schedule_consumers.Lane_act_handed_over _) -> `Null
         | Ok
             (Server_schedule_consumers.Keeper_wake_enqueued
               { keeper_name
@@ -464,6 +467,9 @@ let schedule_keeper_reaction_evidence_dashboard_json
             [ "projection_status", `String "unrecognized_receipt"
             ; "reason", `String reason
             ]
+        (* A Lane action receipt has no Keeper queue or reaction ledger
+           evidence; the receipt itself is the record (RFC operator-quiz §4.7). *)
+        | Ok (Server_schedule_consumers.Lane_act_handed_over _) -> `Null
         | Ok
             (Server_schedule_consumers.Keeper_wake_enqueued
               { keeper_name

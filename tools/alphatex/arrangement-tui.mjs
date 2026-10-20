@@ -873,6 +873,10 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
           switch (progress.kind) {
             case 'midi-projection': status = 'Reconstructing MIDI region expression…'; break
             case 'midi-encode': status = 'Writing MIDI tracks and source provenance…'; break
+            case 'midi-track': status = `Preparing MIDI track ${progress.track}/${progress.total} · ${progress.events} events`; break
+            case 'midi-track-complete': status = `Prepared MIDI track ${progress.track}/${progress.total}`; break
+            case 'midi-serialize': status = 'Encoding MIDI file…'; break
+            case 'midi-serialized': status = 'Publishing MIDI file…'; break
             case 'wave-snapshot': status = 'Snapshotting WAV export sources…'; break
             case 'vst-projection': status = 'Projecting WAV export instruments…'; break
             case 'vst-render': status = `Exporting VST instances ${progress.completed}/${progress.total} complete`; break
@@ -884,7 +888,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         }).then(result => {
           if (!active()) return
           status = result.kind === 'midi-export'
-            ? `Exported ${result.path} · ${result.tracks} MIDI tracks · timing error ≤${(result.maxTimingErrorNanoseconds / 1000).toFixed(3)} µs · ${result.excludedAudioRegions.length} audio regions excluded; choose instruments in your sequencer`
+            ? `Exported ${result.path} · ${result.tracks} MIDI tracks · timing error ≤${(Math.ceil(result.maxTimingErrorNanoseconds) / 1000).toFixed(3)} µs · ${result.excludedAudioRegions.length} audio regions excluded; choose instruments in your sequencer`
             : `Exported ${result.path} · ${result.frames} frames / ${result.sampleRate} Hz / ${result.channels} channels${result.peak > 1 ? ' · peak above 0 dBFS; float samples retained' : ''}`
         }, error => { if (active()) status = error.message }).finally(() => {
           if (exporting === owned) exporting = null

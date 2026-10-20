@@ -24,7 +24,7 @@ try {
     join(native, 'MidiRenderProjection.swift'), '-o', executable, '-framework', 'CoreMIDI'])
   const channel = (tick, bytes) => ({ tick, kind: 'channel', bytes })
   const meta = (tick, type, data) => ({ tick, kind: 'meta', type, data })
-  const original = encodeMidiFile({ division: 1001, tracks: [[
+  const original = await encodeMidiFile({ division: 1001, tracks: [[
     meta(0, 0x51, [7, 0xa1, 0x20]), meta(0, 0x21, [3]),
     channel(0, [0xb0, 7, 90]), channel(0, [0xe0, 0, 65]), channel(0, [0xd0, 0]),
     channel(20, [0x90, 60, 90]), channel(30, [0xb0, 64, 127]),
@@ -95,7 +95,7 @@ try {
     return editArrangement(value, { kind: 'region-add', lane: 'lane-1', asset: 'original', name: 'Pattern', position: 0, offset: 0, extent, repeat: 1, ...(pattern === undefined ? {} : { pattern }) })
   }
   // Real native system messages must survive SMF's F7 escape encoding.
-  const systems = encodeMidiFile({ division: 1001, tracks: [[
+  const systems = await encodeMidiFile({ division: 1001, tracks: [[
     { tick: 0, kind: 'sysex', status: 0xf0, data: [1, 2, 0xf7] },
     channel(0, [0x90, 60, 90]), { tick: 100, kind: 'sysex', status: 0xf7, data: [0xf8] },
     meta(200, 0x51, [15, 0x42, 0x40]), channel(500, [0x80, 60, 47]), meta(1001, 0x2f, [])
@@ -108,7 +108,7 @@ try {
   assert.ok(Math.abs(release.seconds - (200 * .5 + 300) / 1001) < 1 / 32767)
   observations.push({ case: 'sysex-realtime-tempo-map', noteOffSeconds: release.seconds })
 
-  const patterns = encodeMidiFile({ division: 480, tracks: [[channel(0,[0x90,60,90]),channel(480,[0x80,60,0]),meta(480,0x2f,[])],
+  const patterns = await encodeMidiFile({ division: 480, tracks: [[channel(0,[0x90,60,90]),channel(480,[0x80,60,0]),meta(480,0x2f,[])],
     [channel(0,[0x91,67,90]),channel(480,[0x81,67,55]),meta(480,0x2f,[])]] })
   patterns.writeUInt16BE(2, 8); patterns.writeUInt16BE(0xe350, 12) // 29.97 drop-frame, 80 ticks/frame
   const independent = make(patterns, 480, 1)

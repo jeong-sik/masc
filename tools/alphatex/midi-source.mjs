@@ -280,23 +280,23 @@ function chunk(type, data, littleEndian = false, padded = false) {
   else header.writeUInt32BE(data.length, 4)
   return Buffer.concat([header, data, ...(padded && data.length % 2 ? [Buffer.from([0])] : [])])
 }
-function encodeTrack(events) {
+function* encodedEvents(events) {
   let previous = 0
-  const bytes = []
   for (const event of events) {
     let delta = integer(event.tick - previous, 'MIDI delta')
     // SMF deltas are 28-bit VLQs, not absolute tick limits. Empty sequencer
     // metadata preserves longer gaps without a wire message or tempo change.
     while (delta > MAX_DELTA) {
-      bytes.push(Buffer.from([...vlq(MAX_DELTA), 0xff, 0x7f, 0])); delta -= MAX_DELTA
+      yield Buffer.from([...vlq(MAX_DELTA), 0xff, 0x7f, 0]); delta -= MAX_DELTA
     }
-    bytes.push(Buffer.from(vlq(delta))); previous = event.tick
+    const bytes = [Buffer.from(vlq(delta))]; previous = event.tick
     if (event.kind === 'channel') bytes.push(Buffer.from(event.bytes))
     else if (event.kind === 'meta') bytes.push(Buffer.from([0xff, event.type, ...vlq(event.data.length)]), Buffer.from(event.data))
     else bytes.push(Buffer.from([event.status, ...vlq(event.data.length)]), Buffer.from(event.data))
+    yield Buffer.concat(bytes)
   }
-  return chunk('MTrk', Buffer.concat(bytes))
 }
+function encodeTrack(events) { return chunk('MTrk', Buffer.concat(Array.from(encodedEvents(events)))) }
 export function midiSourceFromEvents(events, { ppq, ...options } = {}) {
   return midiSourceFromTracks([events], { ppq, ...options })
 }
@@ -323,17 +323,21 @@ export function midiSourceFromTracks(tracks, { ppq, ...options } = {}) {
   return importMidiSource(Buffer.concat([chunk('MThd', header), ...tracks.map(encodeTrack)]), options)
 }
 
+
 // New SMF documents share the provenance editor's raw-event encoder. It emits
 // explicit statuses across metadata/SysEx and retains F7 escape packet bytes.
-export function encodeMidiFile({ division, tracks, extraChunks = [] }) {
+export async function encodeMidiFile({ division, tracks, extraChunks = [] }, { checkpoint } = {}) {
   integer(division, 'MIDI PPQ division', 1, 0x7fff)
   integer(tracks.length, 'MIDI track count', 1, 0xffff)
   const header = Buffer.alloc(6)
   header.writeUInt16BE(1); header.writeUInt16BE(tracks.length, 2); header.writeUInt16BE(division, 4)
-  const bytes = Buffer.concat([chunk('MThd', header), ...tracks.map(encodeTrack),
-    ...extraChunks.map(value => chunk(value.type, value.data))])
-  parse(bytes)
-  return bytes
+  const parts = [chunk('MThd', header)]
+  for (const events of tracks) {
+    const bytes = []
+    for (const event of encodedEvents(events)) { await checkpoint?.(); bytes.push(event) }
+    parts.push(chunk('MTrk', Buffer.concat(bytes)))
+  }
+  return Buffer.concat([...parts, ...extraChunks.map(value => chunk(value.type, value.data))])
 }
 export function exportMidiSource(source) {
   const parsed = materialize(source)

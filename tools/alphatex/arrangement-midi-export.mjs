@@ -1,5 +1,5 @@
 import JZZ from 'jzz'
-import SMF from 'jzz-midi-smf'
+import { scheduler } from 'node:timers/promises'
 import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, writeFile, open, link, rm } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
@@ -8,7 +8,6 @@ import { prepareArrangementMidiParts } from './arrangement-vst.mjs'
 import { midiSourcePattern, encodeMidiFile } from './midi-source.mjs'
 import { binary, rational } from './exact-time.mjs'
 
-SMF(JZZ)
 // SMF's PPQ field has 15 usable bits; use its finest quarter-note grid.
 const division = 0x7fff, maximumDelta = 0x0fffffff
 const bytesString = bytes => Buffer.from(bytes).toString('latin1')
@@ -34,7 +33,7 @@ export function arrangementMidiProject(project) {
 
 // Native projection owns prefix chase, expression, source order and finite-copy
 // cleanup. The SMF encoder owns only the common clock and independent port map.
-export async function arrangementMidiFile(project, selected, { signal } = {}) {
+export async function arrangementMidiFile(project, selected, { signal, onProgress } = {}) {
   signal?.throwIfAborted()
   if (selected.parts.length > 128) throw new Error('MIDI export needs more independent region ports than the supported SMF port range 0–127; export fewer regions together')
   const microseconds = Math.round(60e6 / project.tempo)
@@ -49,22 +48,10 @@ export async function arrangementMidiFile(project, selected, { signal } = {}) {
     endTick = Math.max(endTick, Number(tick))
     return Number(tick)
   }
-  // Long rests use legal no-op text events instead of overflowing a four-byte
-  // variable-length delta. Stable insertion keeps equal-tick source order.
-  const fillTrack = (track, rows) => {
-    let previous = 0
-    rows.sort((a, b) => a.tick - b.tick)
-    for (const row of rows) {
-      while (row.tick - previous > maximumDelta) {
-        previous += maximumDelta; track.add(previous, JZZ.MIDI.smfText(''))
-      }
-      track.add(row.tick, row.message); previous = row.tick
-    }
-  }
-  const file = [], conductor = new JZZ.MIDI.SMF.MTrk()
-  conductor.add(0, JZZ.MIDI.smfSeqName(project.title)).add(0, JZZ.MIDI.smfTempo(microseconds))
-    .add(0, JZZ.MIDI.smfTimeSignature(...project.meter))
-  file.push(conductor)
+  const checkpoint = async () => { await scheduler.yield(); signal?.throwIfAborted() }
+  const row = (tick, message) => ({ tick, message })
+  const file = [[row(0, JZZ.MIDI.smfSeqName(project.title)), row(0, JZZ.MIDI.smfTempo(microseconds)),
+    row(0, JZZ.MIDI.smfTimeSignature(...project.meter))]]
   const schedule = arrangementPlaybackSchedule(project)
   const assets = new Map(project.assets.map(asset => [asset.id, asset]))
   for (const clip of schedule) tickAt(time(clip.endSeconds))
@@ -73,39 +60,43 @@ export async function arrangementMidiFile(project, selected, { signal } = {}) {
     signal?.throwIfAborted()
     const bytes = await readFile(part.path, { signal })
     if (createHash('sha256').update(bytes).digest('hex') !== part.sha256) throw new Error('MIDI export projection changed after preparation')
-    const [header, ...wire] = bytes.toString('utf8').trimEnd().split('\n').map(JSON.parse)
+    const lines = bytes.toString('utf8').trimEnd().split('\n')
+    const header = JSON.parse(lines.shift()), wire = []
+    for (const line of lines) { await checkpoint(); wire.push(JSON.parse(line)) }
     if (header.schemaVersion !== 1 || header.kind !== 'vst-midi-part' || header.duration !== part.duration || wire.length !== part.eventCount) throw new Error('Invalid MIDI export projection stream')
     const region = selected.plan.regions.find(region => region.id === part.region)
     const clip = schedule.find(clip => clip.id === part.region), asset = assets.get(clip.asset)
     const lane = project.lanes.find(lane => lane.id === clip.lane)
-    const track = new JZZ.MIDI.SMF.MTrk(), rows = []
-    track.add(0, JZZ.MIDI.smfSeqName(`${lane.name} · ${clip.name} · source port ${part.port}`))
-      .add(0, JZZ.MIDI.smf(0x21, bytesString([port])))
+    const rows = [row(0, JZZ.MIDI.smfSeqName(`${lane.name} · ${clip.name} · source port ${part.port}`)),
+      row(0, JZZ.MIDI.smf(0x21, bytesString([port])))]
     const sound = asset.source.sound
-    if (sound?.kind === 'vst') track.add(0, JZZ.MIDI.smfInstrName(sound.selection.name))
+    if (sound?.kind === 'vst') rows.push(row(0, JZZ.MIDI.smfInstrName(sound.selection.name)))
     ports.push({ track: file.length, region: part.region, source: part.source, sourcePort: part.port, exportPort: port })
     let previous = 0
-    for (const event of wire) {
+    for (const [index, event] of wire.entries()) {
+      await checkpoint()
       if (!Number.isFinite(event.seconds) || event.seconds < previous || event.seconds > part.duration
           || !Array.isArray(event.bytes) || !event.bytes.length || event.bytes.some(byte => !Number.isInteger(byte) || byte < 0 || byte > 255)) throw new Error('Invalid MIDI export wire event')
       previous = event.seconds
       // System common/realtime messages travel as SMF F7 escape packets.
-      // Passing them directly to MTrk.add would silently discard them.
+      // They cannot be encoded as standalone SMF channel events.
       const data = event.bytes[0] > 0xf0 ? [0xf7, ...event.bytes] : event.bytes
       rows.push({ tick: tickAt(sum(time(part.startSeconds), time(event.seconds))), message: JZZ.MIDI(data) })
       events++
+      if (index === 0) onProgress?.({ kind: 'midi-track', track: port + 1, total: selected.parts.length, events: wire.length })
     }
     const performance = midiSourcePattern(asset.source, { pattern: clip.pattern })
     // Text/lyrics/cues keep their original bytes. Clock/global metadata and
     // every other original event remain losslessly in the MASC source chunk.
     const firstPort = selected.parts.find(value => value.region === part.region).port
     const availablePorts = new Set(selected.parts.filter(value => value.region === part.region).map(value => value.port))
-    for (let copy = 0; copy < region.repeatCount; copy++) {
-      for (const event of performance.events) {
-        if (event.kind !== 'meta' || event.type < 1 || event.type > 9
-            || (availablePorts.has(event.port) ? event.port : firstPort) !== part.port
-            || event.tick < clip.offset || event.tick > clip.offset + clip.extent
-            || event.tick === clip.offset + clip.extent && event.tick !== performance.ticks) continue
+    const text = performance.events.filter(event => event.kind === 'meta' && event.type >= 1 && event.type <= 9
+      && (availablePorts.has(event.port) ? event.port : firstPort) === part.port
+      && event.tick >= clip.offset && (event.tick < clip.offset + clip.extent
+        || event.tick === clip.offset + clip.extent && event.tick === performance.ticks))
+    for (let copy = 0; text.length && copy < region.repeatCount; copy++) {
+      for (const event of text) {
+        await checkpoint()
         const [sn, sd] = rational(region.startNanoseconds), [pn, pd] = rational(region.periodNanoseconds)
         const [an, ad] = sourceNanosecondsAtTick(performance, event.tick), [on, od] = sourceNanosecondsAtTick(performance, clip.offset)
         const en = an * od - on * ad, ed = ad * od
@@ -113,11 +104,9 @@ export async function arrangementMidiFile(project, selected, { signal } = {}) {
           message: JZZ.MIDI.smf(event.type, bytesString(event.data)) })
       }
     }
-    fillTrack(track, rows)
-    fillTrack(track, [{ tick: endTick, message: JZZ.MIDI.smfEndOfTrack() }])
-    file.push(track)
+    file.push(rows)
+    onProgress?.({ kind: 'midi-track-complete', track: port + 1, total: selected.parts.length })
   }
-  fillTrack(conductor, [{ tick: endTick, message: JZZ.MIDI.smfEndOfTrack() }])
   const excludedAudioRegions = schedule.filter(clip => assets.get(clip.asset).kind !== 'midi').map(clip => clip.id)
   const receipt = { kind: 'midi-export', tracks: selected.parts.length, events, division, microseconds,
     maxTimingErrorNanoseconds: maxError, ports, excludedAudioRegions, instrumentAudioIncluded: false }
@@ -126,11 +115,33 @@ export async function arrangementMidiFile(project, selected, { signal } = {}) {
   // other sequencers can ignore this chunk and play the normal SMF tracks.
   const provenance = Buffer.from(JSON.stringify({ schemaVersion: 1, kind: 'masc-arrangement-midi', project, receipt }))
   if (provenance.length > 0xffffffff) throw new Error('MIDI source provenance exceeds the SMF chunk size')
-  const tracks = file.map(track => Array.from(track, message => message.dd === undefined
-    ? { tick: message.tt, kind: message[0] >= 0xf0 ? 'sysex' : 'channel',
+  const tracks = []
+  const raw = ({ tick, message }) => message.dd === undefined
+    ? { tick, kind: message[0] >= 0xf0 ? 'sysex' : 'channel',
         ...(message[0] >= 0xf0 ? { status: message[0], data: Array.from(message).slice(1) } : { bytes: Array.from(message) }) }
-    : { tick: message.tt, kind: 'meta', type: message.ff, data: Array.from(Buffer.from(message.dd, 'latin1')) }))
-  return { bytes: encodeMidiFile({ division, tracks, extraChunks: [{ type: 'MASC', data: provenance }] }), receipt }
+    : { tick, kind: 'meta', type: message.ff, data: Array.from(Buffer.from(message.dd, 'latin1')) }
+  // Stable sorting retains equal-tick wire order. Encode directly rather than
+  // repeatedly inserting into a track (which would rescan its prefix).
+  for (const rows of file) {
+    await checkpoint()
+    rows.push(row(endTick, JZZ.MIDI.smfEndOfTrack()))
+    rows.sort((a, b) => a.tick - b.tick)
+    let previous = 0
+    const track = []
+    for (const event of rows) {
+      await checkpoint()
+      while (event.tick - previous > maximumDelta) {
+        await checkpoint()
+        previous += maximumDelta; track.push(raw(row(previous, JZZ.MIDI.smfText(''))))
+      }
+      track.push(raw(event)); previous = event.tick
+    }
+    tracks.push(track)
+  }
+  onProgress?.({ kind: 'midi-serialize' })
+  const bytes = await encodeMidiFile({ division, tracks, extraChunks: [{ type: 'MASC', data: provenance }] }, { checkpoint })
+  onProgress?.({ kind: 'midi-serialized' })
+  return { bytes, receipt }
 }
 
 export async function exportArrangementMidi(project, target, { directory, signal, executable,
@@ -143,7 +154,7 @@ export async function exportArrangementMidi(project, target, { directory, signal
     onProgress?.({ kind: 'midi-projection' })
     const selected = await prepare(linear, { directory: temporary, signal, executable })
     onProgress?.({ kind: 'midi-encode' })
-    const { bytes, receipt } = await arrangementMidiFile(linear, selected, { signal })
+    const { bytes, receipt } = await arrangementMidiFile(linear, selected, { signal, onProgress })
     signal?.throwIfAborted()
     publication = await mkdtemp(join(dirname(path), '.masc-midi-export-'))
     const staged = join(publication, 'arrangement.mid')

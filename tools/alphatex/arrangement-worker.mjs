@@ -1,7 +1,7 @@
 import { phraseDocument, importPhraseDocument } from './phrase-arrangement.mjs'
 import { parentPort } from 'node:worker_threads'
 import { dirname } from 'node:path'
-import { importArrangementWave, importArrangementMidi, importArrangementCapture, importArrangementPractice, prepareArrangementCapture, saveArrangement, materializeArrangementAssets } from './arrangement-files.mjs'
+import { importArrangementWave, importArrangementMidi, importArrangementCapture, importArrangementPractice, restorePracticeBacking, prepareArrangementCapture, saveArrangement, materializeArrangementAssets } from './arrangement-files.mjs'
 import { prepareArrangementWave, prepareArrangementMidi, prepareArrangementMixed, prepareArrangementAudio, prepareArrangementCaptureRegions } from './arrangement-playback.mjs'
 import { attachRecordedTake } from './arrangement-recording.mjs'
 import { analyzeCalibration } from './audio-calibration.mjs'
@@ -36,6 +36,7 @@ parentPort.on('message', async job => {
       case 'prepare-take': result = await prepareArrangementCapture(job.project, job.asset, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
       case 'import-take': result = await importArrangementCapture(job.project, job.path, { projectPath: job.projectPath, signal }); break
       case 'import-practice': result = await importArrangementPractice(job.project, job.path, { projectPath: job.projectPath, signal }); break
+      case 'practice-backing': result = await restorePracticeBacking(job.project, job.asset, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
       case 'prepare-mixed': result = await prepareArrangementMixed(job.project, { sourceRoot: job.sourceRoot, directory: job.directory, signal, midiOutput: job.midiOutput, portBindings: job.portBindings }); break
       case 'prepare-midi': result = await prepareArrangementMidi(job.project, { directory: job.directory, signal, midiOutput: job.midiOutput, portBindings: job.portBindings }); break
       case 'prepare-audio': result = await prepareArrangementAudio(job.project, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break

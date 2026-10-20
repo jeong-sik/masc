@@ -573,7 +573,12 @@ no MIDI. Ordinary Space playback uses [paired MIDI2/WAV regions](CAPTURE-UMP-REG
 with selected audio/MIDI outputs and per-input `:midi-source` overrides.
 Completed phrase practice takes use `:import-practice DIRECTORY`. Enter places
 their original MIDI-only source; `:trim OFFSET EXTENT` uses decimal host-tick
-strings, and move/repeat/undo/redo work as for other regions. Select
+strings, and move/repeat/undo/redo work as for other regions.
+`:practice-backing [ASSET]` recovers their frozen phrase as a new editable MIDI
+asset with the originally played track muted. Enter places the full phrase and
+`:edit-midi` opens it for chord/voicing experiments. Its original loop stays in
+the phrase; automatic pass alignment and recorded monitor PCM are separate.
+Select
 `:output AUDIO_UID` for playback through the captured VST identity/version and
 frozen preset. Install the matching `scripts/install-vst-host.sh` companion
 alongside `scripts/install-alphatex.sh`. To send the original raw MIDI externally,

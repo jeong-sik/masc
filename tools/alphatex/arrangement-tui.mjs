@@ -33,6 +33,7 @@ const help = [
   ':import-wave /path/take.wav     :import-midi /path/song.mid',
   ':import-take /path/session      :open-take [ASSET] (WAV + raw UMP)',
   ':import-practice /path/take     import original MIDI from a completed practice take',
+  ':practice-backing [ASSET] restores its editable phrase backing; Enter places it, :edit-midi edits it',
   ':place asset-1 0               full source at quarter-note beat 0',
   ':place asset-2 4 2             MIDI format-2 pattern 2 at beat 4',
   ':region asset-1 0 1200 4800 2   asset, beat, native offset/extent, repeats',
@@ -686,6 +687,13 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         status = 'Importing source…'; draw()
         const result = await request({ ...value, project: editor.project, projectPath: path })
         if (accepting) { adopt(arrangementImported(editor, result)); status = value.kind === 'import-take' ? `Imported ${result.asset}; Enter opens WAV and MIDI` : `Imported ${result.asset}; Enter places it at the cursor` }
+        break
+      }
+      case 'practice-backing': {
+        if (!accepting) return
+        status = 'Restoring captured phrase backing…'; draw()
+        const result = await request({ ...value, project: editor.project, sourceRoot })
+        if (accepting) { adopt(arrangementImported(editor, result)); status = `Restored ${result.asset}; Enter places it, :edit-midi edits it` }
         break
       }
       default: throw new Error('Unknown arrangement effect')

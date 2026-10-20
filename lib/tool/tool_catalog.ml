@@ -550,8 +550,10 @@ let explicit_metadata : (string * metadata) list =
     (* Both vision tools only read: [keeper_image_read] returns an owned
        image's pixels and never writes one, so it shares the read authority
        with the delegation beside it. It was registered as a schema without
-       an entry here, and strict auth denies unregistered names, so the tool
-       was callable in no configuration. *)
+       an entry here, so [metadata] fell back to the unclassified policy
+       below: [default_metadata] at CanAdmin. A Keeper's shard read authority
+       is CanReadState, so the tool stayed unreachable for the lane that
+       needed it while an operator could still call it. *)
     ("keeper_analyze_image", keeper_shard_read);
     ("keeper_image_read", keeper_shard_read);
     ("masc_browser_tabs", keeper_shard_read);

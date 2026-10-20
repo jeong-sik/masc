@@ -135,6 +135,21 @@ export function harmonyTimeline(notes, end, { cancelled = () => false } = {}) {
   }
   return rows
 }
+function chordShape(intervals, mode, inversion) {
+  if (!['close', 'drop2'].includes(mode)) throw new Error('Voicing must be close, drop2 or rootless')
+  const notes = [...intervals]
+  for (let i = 0; i < inversion; i++) {
+    let raised = notes.shift()
+    while (raised <= notes[notes.length - 1]) raised += 12
+    notes.push(raised)
+  }
+  if (mode === 'drop2') {
+    if (notes.length < 4) throw new Error('Drop 2 needs at least four voices')
+    notes[notes.length - 2] -= 12
+  }
+  return notes.sort((a, b) => a - b)
+}
+
 // Tonal supplies chord spelling/intervals and rootless dictionaries. The explicit
 // register and inversion remain the musician's choices; candidates are not verdicts.
 export function chordVoicing(symbol, { mode = 'close', octave = 4, inversion = 0, previous = [] } = {}) {
@@ -151,22 +166,73 @@ export function chordVoicing(symbol, { mode = 'close', octave = 4, inversion = 0
     if (!candidates.length) throw new Error(`No rootless voicing for ${symbol} in this register`)
     notes = (previous.length ? VoiceLeading.topNoteDiff(candidates, previous.map(Note.fromMidi)) : candidates[0]).map(pitch)
   } else {
-    if (!['close', 'drop2'].includes(mode)) throw new Error('Voicing must be close, drop2 or rootless')
     const root = pitch(`${chord.tonic}${octave}`)
-    notes = chord.intervals.map(interval => root + Interval.semitones(interval))
-    for (let i = 0; i < inversion; i++) {
-      let raised = notes.shift()
-      while (raised <= notes[notes.length - 1]) raised += 12
-      notes.push(raised)
-    }
-    if (mode === 'drop2') {
-      if (notes.length < 4) throw new Error('Drop 2 needs at least four voices')
-      notes[notes.length - 2] -= 12
-    }
-    notes.sort((a, b) => a - b)
+    notes = chordShape(chord.intervals.map(Interval.semitones), mode, inversion).map(interval => root + interval)
   }
   notes.forEach(pitch)
   return notes
+}
+
+// Each candidate is a complete close/drop2 inversion or a Tonal rootless
+// dictionary voicing in the musician's inclusive register. Dynamic programming
+// minimizes total low-to-high voice movement over the entire progression, not
+// just the next chord. Equal-cost paths use stable sorted candidate order.
+export function voiceLedProgression(symbols, { mode, low, high }) {
+  low = pitch(low); high = pitch(high)
+  if (low > high) throw new Error('Voicing register low must not exceed high')
+  if (!Array.isArray(symbols) || !symbols.length) throw new Error('A voice-led progression needs chords')
+  const candidates = symbols.map(symbol => {
+    const chord = Chord.get(symbol)
+    if (chord.empty || !chord.tonic) throw new Error(`Unknown chord: ${symbol}`)
+    let rows = []
+    if (mode === 'rootless') {
+      if (chord.bass) throw new Error('Rootless voicing does not support an explicit slash-chord bass')
+      rows = Voicing.search(symbol, [Note.fromMidi(low), Note.fromMidi(high)], VoicingDictionary.lefthand).map(notes => notes.map(pitch))
+    } else {
+      const tonic = Note.chroma(chord.tonic)
+      // The new range search uses one instance of each chord pitch class in
+      // close position, including compound extensions and non-chord slash bass.
+      // Existing octave/inversion commands retain their original interval shape.
+      const intervals = [...new Set(chord.notes.map(note => (Note.chroma(note) - tonic + 12) % 12))].sort((a, b) => a - b)
+      for (let inversion = 0; inversion < intervals.length; inversion++) {
+        const shape = chordShape(intervals, mode, inversion)
+        const first = Math.ceil((low - tonic - shape[0]) / 12), last = Math.floor((high - tonic - shape.at(-1)) / 12)
+        for (let octave = first; octave <= last; octave++) rows.push(shape.map(value => tonic + octave * 12 + value))
+      }
+    }
+    rows = rows.filter(row => row.length && row.every((value, i) => value >= low && value <= high && (!i || value > row[i - 1]))
+      && (!chord.bass || row[0] % 12 === Note.chroma(chord.bass)))
+    rows = [...new Map(rows.map(row => [row.join(','), row])).values()].sort((a, b) => {
+      for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return a[i] - b[i]
+      return a.length - b.length
+    })
+    if (!rows.length) throw new Error(`No ${mode} voicing for ${symbol} inside the selected register`)
+    return rows
+  })
+  let costs = candidates[0].map(() => 0)
+  const predecessors = []
+  for (let step = 1; step < candidates.length; step++) {
+    const previous = candidates[step - 1], links = []
+    const next = candidates[step].map(notes => {
+      let best = Infinity, link = -1
+      for (const [index, before] of previous.entries()) {
+        if (before.length !== notes.length) continue
+        const cost = costs[index] + notes.reduce((sum, key, voice) => sum + Math.abs(key - before[voice]), 0)
+        if (cost < best) { best = cost; link = index }
+      }
+      links.push(link)
+      return best
+    })
+    predecessors.push(links); costs = next
+  }
+  let selected = costs.indexOf(Math.min(...costs))
+  if (!Number.isFinite(costs[selected])) throw new Error('Voice-led chords need a constant number of voices')
+  const path = new Array(candidates.length)
+  for (let step = candidates.length - 1; step >= 0; step--) {
+    path[step] = candidates[step][selected]
+    if (step) selected = predecessors[step - 1][selected]
+  }
+  return path
 }
 
 // Reassign existing voices, low to high, without replacing their identities,
@@ -188,7 +254,7 @@ export function editProject(project, trackId, edit) {
   const next = structuredClone(project)
   const track = next.tracks.find(track => track.id === trackId)
   if (!track) throw new Error('Selected track no longer exists')
-  if (track.channel === GM_DRUM_CHANNEL && ['chord', 'revoice', 'progression'].includes(edit.kind)) {
+  if (track.channel === GM_DRUM_CHANNEL && ['chord', 'revoice', 'progression', 'progression-led'].includes(edit.kind)) {
     throw new Error('Chord voicings need a melodic track; drum notes select percussion sounds')
   }
   const add = note => track.notes.push({ id: uniqueId('note', track.notes), ...note })
@@ -228,6 +294,13 @@ export function editProject(project, trackId, edit) {
       for (const [index, symbol] of edit.symbols.entries()) {
         previous = chordVoicing(symbol, { ...edit, previous })
         for (const value of previous) add({ pitch: value, start: edit.start + index * edit.duration, duration: edit.duration, velocity: edit.velocity })
+      }
+      break
+    }
+    case 'progression-led': {
+      const voicings = voiceLedProgression(edit.symbols, edit)
+      for (const [index, notes] of voicings.entries()) {
+        for (const value of notes) add({ pitch: value, start: edit.start + index * edit.duration, duration: edit.duration, velocity: edit.velocity })
       }
       break
     }

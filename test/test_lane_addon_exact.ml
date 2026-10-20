@@ -49,14 +49,14 @@ let request ?(output = "author") ?(message = "Write one question.") id =
 let question = `Assoc [ "question", `String "Q?" ]
 
 let answered_with expected = function
-  | Exact.Final (Exact.Answered { output; _ }) -> Exact.checked_json output = expected
+  | Exact.Final (Exact.Call_final (Exact.Answered { output; _ })) -> Exact.checked_json output = expected
   | Exact.Final _ | Exact.Not_final _ -> false
 
 (* What the runner does on each resolution, in order. *)
 type step =
   | Answer of Yojson.Safe.t
   | Unavailable of Exact.lane_unavailable
-  | Refused of Exact.not_final
+  | Refused of Exact.provider_refusal
 
 (* A runner that counts the calls it sends and, on each send, reads what the
    host has retained so far for that request. *)
@@ -73,14 +73,14 @@ let counting_runner store steps =
       in
       (match step with
        | Unavailable reason -> Error reason
-       | Refused reason -> Ok (fun ~validate:_ -> sent (); Exact.Not_final reason)
+       | Refused reason -> Ok (fun ~validate:_ -> sent (); Exact.Call_refused reason)
        | Answer json ->
          Ok
            (fun ~validate ->
               sent ();
               match validate json with
-              | Ok output -> Exact.Final (Exact.Answered { output; slot = "s"; usage = None })
-              | Error detail -> Exact.Final (Exact.Invalid_output { detail })))
+              | Ok output -> Exact.Call_ended (Exact.Answered { output; slot = "s"; usage = None })
+              | Error detail -> Exact.Call_ended (Exact.Invalid_output { detail })))
   in
   runner, sends, seen
 
@@ -127,7 +127,8 @@ let test_a_provider_refusal_that_may_pass_is_tried_again () =
     let store = Store.create ~root in
     let busy = Exact.Provider_unavailable { detail = "429" } in
     let runner, sends, _ = counting_runner store (ref [ Refused busy; Answer question ]) in
-    check bool "a rate limit does not end the request" true (run_request store runner (request "r8") = Exact.Not_final busy);
+    check bool "a rate limit does not end the request" true
+      (run_request store runner (request "r8") = Exact.Not_final (Exact.Provider_refused busy));
     check bool "the next run sends again and ends it" true (answered_with question (run_request store runner (request "r8")));
     check int "two sends" 2 !sends;
     check int "two attempts" 2 (List.length (attempts store "r8")))
@@ -137,7 +138,7 @@ let test_an_answer_outside_the_schema_is_not_answered () =
     let store = Store.create ~root in
     let runner, _, _ = counting_runner store (ref [ Answer (`Assoc [ "question", `String "Q?"; "extra", `Int 1 ]) ]) in
     match run_request store runner (request "r9") with
-    | Exact.Final (Exact.Invalid_output _) -> ()
+    | Exact.Final (Exact.Call_final (Exact.Invalid_output _)) -> ()
     | _ -> fail "validate must refuse an answer the declared schema does not allow")
 
 let test_a_reused_request_id_is_refused () =
@@ -200,7 +201,7 @@ let test_a_request_in_flight_is_not_run_twice () =
            Eio.Promise.resolve enter ();
            Eio.Promise.await released;
            match validate question with
-           | Ok output -> Exact.Final (Exact.Answered { output; slot = "s"; usage = None })
+           | Ok output -> Exact.Call_ended (Exact.Answered { output; slot = "s"; usage = None })
            | Error detail -> fail detail)
     in
     let first = ref None and second = ref None and other_root = ref None and during = ref [] in
@@ -220,6 +221,59 @@ let test_a_request_in_flight_is_not_run_twice () =
     check bool "and leaves the started attempt alone" true (!during = [ `Null ]);
     check bool "the first run answers" true (Option.fold ~none:false ~some:(answered_with question) !first);
     check bool "the same ids under another root run" true (Option.fold ~none:false ~some:(answered_with question) !other_root))
+
+let test_a_cancelled_call_leaves_its_attempt_started () =
+  with_root (fun root ->
+    let store = Store.create ~root in
+    let cancelled ~lane_key:_ ~schema:_ _ = Ok (fun ~validate:_ -> raise (Eio.Cancel.Cancelled Exit)) in
+    (match Exact.run ~store ~declaration_id ~package ~runner:cancelled (request "r10") with
+     | _ -> fail "a cancellation must reach the caller"
+     | exception Eio.Cancel.Cancelled _ -> ());
+    check bool "the started attempt stays" true (attempts store "r10" = [ `Null ]);
+    let runner, sends, _ = counting_runner store (ref []) in
+    check bool "the next run reads it as unknown, so the claim was released" true
+      (run_request store runner (request "r10") = Exact.Final Exact.Outcome_unknown);
+    check int "without a send" 0 !sends)
+
+let test_a_retained_answer_is_checked_against_the_schema_declared_now () =
+  with_root (fun root ->
+    let store = Store.create ~root in
+    let runner, sends, _ = counting_runner store (ref [ Answer question ]) in
+    ignore (run_request store runner (request "r11"));
+    let changed =
+      { package with
+        exact_outputs =
+          [ { Types.name = "author"
+            ; schema =
+                `Assoc
+                  [ "type", `String "object"
+                  ; "properties", `Assoc [ "question", `Assoc [ "type", `String "integer" ] ]
+                  ; "additionalProperties", `Bool false ] } ] }
+    in
+    (match require (Exact.run ~store ~declaration_id ~package:changed ~runner (request "r11")) with
+     | Exact.Final (Exact.Call_final (Exact.Invalid_output _)) -> ()
+     | _ -> fail "an answer retained under the old schema must not be delivered as answered");
+    check int "and the provider is not called again" 1 !sends;
+    check bool "the record keeps the answer as it came" true (answered_with question (run_request store runner (request "r11"))))
+
+let test_an_outcome_that_cannot_be_written_stays_unknown () =
+  with_root (fun root ->
+    let store = Store.create ~root in
+    let directory = Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id) in
+    let locking ~lane_key:_ ~schema:_ _ =
+      Ok
+        (fun ~validate ->
+           Unix.chmod directory 0o500;
+           match validate question with
+           | Ok output -> Exact.Call_ended (Exact.Answered { output; slot = "s"; usage = None })
+           | Error detail -> fail detail)
+    in
+    let result = Exact.run ~store ~declaration_id ~package ~runner:locking (request "r12") in
+    Unix.chmod directory 0o700;
+    check bool "the run reports the failed write" true (Result.is_error result);
+    let runner, sends, _ = counting_runner store (ref []) in
+    check bool "the sent call is not repeated" true (run_request store runner (request "r12") = Exact.Final Exact.Outcome_unknown);
+    check int "without a send" 0 !sends)
 
 let test_request_decoding_is_strict () =
   List.iter (fun (label, json) ->
@@ -244,4 +298,9 @@ let () =
         ; test_case "an exception ends the request as unknown" `Quick test_an_exception_ends_the_request_as_unknown
         ; test_case "an undeclared output is not allowed" `Quick test_an_undeclared_output_is_not_allowed
         ; test_case "a request in flight is not run twice" `Quick test_a_request_in_flight_is_not_run_twice
+        ; test_case "a cancelled call leaves its attempt started" `Quick test_a_cancelled_call_leaves_its_attempt_started
+        ; test_case "a retained answer is checked against the schema declared now" `Quick
+            test_a_retained_answer_is_checked_against_the_schema_declared_now
+        ; test_case "an outcome that cannot be written stays unknown" `Quick
+            test_an_outcome_that_cannot_be_written_stays_unknown
         ; test_case "request decoding is strict" `Quick test_request_decoding_is_strict ] ) ]

@@ -49,13 +49,17 @@ type input_refusal =
 
 type usage = { input_tokens : int; output_tokens : int }
 
-(** What a package receives. Each one ends the request. *)
-type final =
+(** How a sent call ended the request. *)
+type call_final =
   | Answered of { output : checked; slot : string; usage : usage option }
   | Invalid_output of { detail : string }
       (** Every slot answered and no answer matched the schema. *)
   | Input_refused of input_refusal
       (** A provider refused this input itself; the same input cannot pass. *)
+
+(** What a package receives. Each one ends the request. *)
+type final =
+  | Call_final of call_final
   | Outcome_unknown
       (** A call may have been sent and no outcome was retained. *)
   | Not_allowed of { reason : string }
@@ -69,13 +73,18 @@ type lane_unavailable =
   | Lane_off
   | No_admitted_slots
 
+(** A provider refusal of a sent call that may pass without changing the
+    input. *)
+type provider_refusal =
+  | Provider_unavailable of { detail : string }
+      (** Rate limit, overload, network or timeout. *)
+  | Provider_auth_refused of { detail : string }
+
 (** Why an attempt did not end the request. It stays listed and is tried
     again on the next host event; each attempt is retained as evidence. *)
 type not_final =
   | Lane_unavailable of lane_unavailable
-  | Provider_unavailable of { detail : string }
-      (** Rate limit, overload, network or timeout. *)
-  | Provider_auth_refused of { detail : string }
+  | Provider_refused of provider_refusal
   | Attempt_in_progress
       (** This process is running the same request now. *)
 
@@ -86,7 +95,12 @@ type attempt =
 val final_to_json : final -> Yojson.Safe.t
 (** The result body a package receives. *)
 
-type call = validate:(Yojson.Safe.t -> (checked, string) result) -> attempt
+(** What a sent call can end in. *)
+type call_outcome =
+  | Call_ended of call_final
+  | Call_refused of provider_refusal
+
+type call = validate:(Yojson.Safe.t -> (checked, string) result) -> call_outcome
 (** Sends the call. [validate] checks one answer against the package's
     declared schema. Raising other than [Eio.Cancel.Cancelled] is recorded as
     [Outcome_unknown]. *)
@@ -102,6 +116,13 @@ val run :
   runner:runner ->
   request ->
   (attempt, string) result
-(** [Error] only when the record cannot be read or written; then nothing is
-    delivered and nothing is consumed. A cancelled call leaves its attempt
-    started, which a later [run] reads as [Outcome_unknown]. *)
+(** A retained [Answered] is checked against the schema the package declares
+    now before it is delivered. One that no longer matches is delivered as
+    [Invalid_output] and the provider is not called again.
+
+    [Error] when [declaration_id] cannot own an add-on lane, or when the
+    record cannot be read or written. Nothing is delivered then. If the
+    outcome of a sent call cannot be written, the started attempt stays, and
+    a later [run] reads it as [Outcome_unknown]. A cancelled call leaves its
+    attempt started too. An exception from the runner's resolution step
+    propagates; nothing was sent and no attempt was written for it. *)

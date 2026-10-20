@@ -3809,7 +3809,7 @@ describe('fetchKeeperConfig', () => {
         total_input_tokens: '1200',
         total_output_tokens: '800',
         total_tokens: '2000',
-        total_cost_usd: '0.12',
+        total_cost_usd: 0.12,
         last_model_used: 'llama:test-balanced',
         last_input_tokens: '120',
         last_output_tokens: '80',
@@ -3846,7 +3846,7 @@ describe('fetchKeeperConfig', () => {
     expect(result.hooks?.scope).toBe('keeper_runtime_composite')
     expect(result.hooks?.slots.pre_tool_use?.features).toEqual(['tool_start_timing'])
     expect(result.sources.precedence).toEqual(['live_meta'])
-    expect(result.metrics.total_cost_usd).toBe(0.12)
+    expect(result.metrics.total_cost_usd).toEqual({ known_cost_usd: 0.12, priced_readings: 0, unpriced_readings: 0, unresolved_readings: 0, unobserved_attempts: 0, history: 'unobserved' })
     expect(result.runtime.runtime_blocker_class).toBe('heartbeat_failures')
     expect(result.runtime.runtime_blocker_summary).toBe('Fleet batch paused after repeated heartbeat failures.')
     expect(result.runtime_trust?.disposition).toBe('Pass')

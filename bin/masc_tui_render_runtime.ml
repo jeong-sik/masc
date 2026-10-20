@@ -403,8 +403,8 @@ let runtime_detail_lines state target ~width =
             let activity_str = match aggregate_keeper_stats ks with
               | None -> "activity not observed"
               | Some (turns, tokens, cost) ->
-                Printf.sprintf "%d turns · %s tokens · $%.4f" turns
-                  (format_context_tokens tokens) cost
+                Printf.sprintf "%d turns · %s tokens · %s" turns
+                  (format_context_tokens tokens) (Tui_decode.keeper_cost_summary cost)
             in
             runtime_detail_field ~width ~style:Ansi.reset "Bound keepers" names
             @ runtime_detail_field ~width ~style:Ansi.reset "Keeper lifetime" (activity_str ^ " · across all runtimes")

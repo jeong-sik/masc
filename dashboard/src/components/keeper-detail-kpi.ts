@@ -1,3 +1,4 @@
+import { keeperCostSummary } from '../lib/keeper-cost-coverage'
 import { html } from 'htm/preact'
 import { formatTokens, formatTokPerSec, isFiniteMetricValue } from '../lib/format-number'
 import { StatTile } from './common/stat-tile'
@@ -82,6 +83,10 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
             label="턴"
             value=${String(keeper.turn_count ?? '-')}
           />
+          <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] p-3">
+            <span class="kpi-label">누적 비용 (USD)</span>
+            <p class="text-sm text-[var(--color-fg-primary)] whitespace-normal break-words mt-1">${keeperCostSummary(keeper.cost_coverage)}</p>
+          </div>
         </div>
       <//>
 

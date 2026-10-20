@@ -61,15 +61,14 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   (* Runtime usage is not necessarily a turn delta. The resolver combines the
      producer's fresh/resumed conversation authority with the durable cursor;
      every downstream aggregate consumes that same delta. *)
-  let aggregate_input_tokens, aggregate_output_tokens, aggregate_total_tokens, aggregate_cost =
+  let aggregate_input_tokens, aggregate_output_tokens, aggregate_total_tokens =
     match usage_resolution.delta with
     | Some delta ->
       let usage = Keeper_usage_resolution.api_usage_of_sample delta in
       ( delta.input_tokens
       , delta.output_tokens
-      , Inference_utils.total_tokens usage
-      , Keeper_usage_resolution.reported_cost_usd delta )
-    | None -> 0, 0, 0, 0.0
+      , Inference_utils.total_tokens usage )
+    | None -> 0, 0, 0
   in
   let has_substantive_tools = has_substantive_tool_calls tool_names in
   let has_text = String.trim result.response_text <> "" in
@@ -125,7 +124,6 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
             total_output_tokens =
               rt.usage.total_output_tokens + aggregate_output_tokens;
             total_tokens = rt.usage.total_tokens + aggregate_total_tokens;
-            total_cost_usd = rt.usage.total_cost_usd +. aggregate_cost;
             last_turn_ts = now_ts;
             last_latency_ms = latency_ms;
           }
@@ -210,7 +208,4 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
          dashboard into showing BLOCKED status. *)
     };
   } in
-  record_keeper_total_cost_usd
-    ~keeper_name:updated_meta.name
-    ~total_cost_usd:updated_meta.runtime.usage.total_cost_usd;
   updated_meta

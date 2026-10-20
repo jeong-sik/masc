@@ -18358,16 +18358,17 @@ let aggregate_keeper_stats (keepers : Tui_decode.keeper list) =
     (fun totals (keeper : Tui_decode.keeper) ->
       match totals, keeper.k_activity with
       | Some (turns, tokens, cost), Some activity ->
-        Some (turns + activity.k_total_turns, tokens + activity.k_total_tokens,
-              cost +. activity.k_total_cost_usd)
+        (match Keeper_cost_coverage.add cost activity.k_total_cost_usd with
+         | Ok cost -> Some (turns + activity.k_total_turns, tokens + activity.k_total_tokens, cost)
+         | Error _ -> None)
       | None, _ | _, None -> None)
-    (Some (0, 0, 0.)) keepers
+    (Some (0, 0, Keeper_cost_coverage.empty)) keepers
 
 let keeper_assignment_activity keepers =
   match aggregate_keeper_stats keepers with
   | None -> " (activity not observed)"
   | Some (turns, _, cost) when turns > 0 ->
-    Printf.sprintf " (%d turns, $%.2f)" turns cost
+    Printf.sprintf " (%d turns, %s)" turns (Tui_decode.keeper_cost_summary cost)
   | Some _ -> ""
 
 (* The authority line under the Runtime title: where every reading on this
@@ -18430,8 +18431,8 @@ let runtime_authority_rows ~cols (state : state) : string list =
               let summary = match aggregate_keeper_stats keepers with
                 | None -> "activity not observed"
                 | Some (turns, tokens, cost) ->
-                  Printf.sprintf "%d turns · %s tok · $%.2f"
-                    turns (format_context_tokens tokens) cost
+                  Printf.sprintf "%d turns · %s tok · %s"
+                    turns (format_context_tokens tokens) (Tui_decode.keeper_cost_summary cost)
               in
               [ Printf.sprintf "fleet: %d keepers · %s"
                   (List.length keepers) summary ]

@@ -418,7 +418,7 @@ let test_decode_keeper_projects_current_schema () =
       Alcotest.(check int) "total turns" 4 activity.k_total_turns;
       Alcotest.(check int) "total tokens" 120 activity.k_total_tokens;
       Alcotest.(check (float 0.0001)) "total cost" 0.42
-        activity.k_total_cost_usd;
+        activity.k_total_cost_usd.known_cost_usd;
       Alcotest.(check bool) "last outcome is the typed contract value" true
         (activity.k_last_proactive_outcome
          = Some Keeper_meta_contract.Proactive_tool_use);

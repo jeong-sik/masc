@@ -72,7 +72,7 @@ let usage_delta ?(turns = 1) () : Reducer.usage_delta =
   ; input_tokens = 2
   ; output_tokens = 3
   ; total_tokens = 5
-  ; cost_usd = 0.25
+  ; cost_usd = Result.get_ok (Keeper_cost_coverage.observe Keeper_cost_coverage.empty (Keeper_cost_coverage.Priced 0.25))
   ; last_turn_ts = 42.0
   ; last_input_tokens = 2
   ; last_output_tokens = 3
@@ -366,7 +366,7 @@ let test_pure_reducer_adds_deltas_and_preserves_pause () =
   check int "all input deltas retained" 2_000 meta.runtime.usage.total_input_tokens;
   check int "all output deltas retained" 3_000 meta.runtime.usage.total_output_tokens;
   check int "all total deltas retained" 5_000 meta.runtime.usage.total_tokens;
-  check (float 0.000_001) "all cost deltas retained" 250.0 meta.runtime.usage.total_cost_usd;
+  check (float 0.000_001) "all cost deltas retained" 250.0 meta.runtime.usage.total_cost_usd.known_cost_usd;
   check bool "pause bit retained" true meta.paused;
   check bool "pause latch retained" true (Option.is_some meta.latched_reason)
 ;;

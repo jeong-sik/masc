@@ -1,3 +1,4 @@
+import { readKeeperCostCoverage } from '../lib/keeper-cost-coverage'
 import { requireKeeperActivationMode, type KeeperActivationMode } from '../lib/keeper-activation-mode'
 // MASC Dashboard — Keeper config (structured read-only view + mutations).
 // Extracted from dashboard.ts (domain split). Public symbols re-exported
@@ -452,7 +453,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       total_input_tokens: asInt(metrics.total_input_tokens) ?? 0,
       total_output_tokens: asInt(metrics.total_output_tokens) ?? 0,
       total_tokens: asInt(metrics.total_tokens) ?? 0,
-      total_cost_usd: asLooseNumber(metrics.total_cost_usd) ?? 0,
+      total_cost_usd: readKeeperCostCoverage(metrics.total_cost_usd),
       last_model_used: '',
       last_input_tokens: asInt(metrics.last_input_tokens) ?? 0,
       last_output_tokens: asInt(metrics.last_output_tokens) ?? 0,

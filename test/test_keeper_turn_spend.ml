@@ -437,7 +437,11 @@ let test_a_failed_turns_spend_joins_the_totals () =
   in
   check int "input" (before.total_input_tokens + 105) after.usage.total_input_tokens;
   check int "output" (before.total_output_tokens + 11) after.usage.total_output_tokens;
-  check (float 1e-9) "cost" (before.total_cost_usd +. 0.25) after.usage.total_cost_usd;
+  let cost = Result.get_ok (Keeper_turn_spend.cost_coverage ~resolved (Keeper_turn_spend.attempts t)) in
+  let cumulative = Result.get_ok (Keeper_cost_coverage.add before.total_cost_usd cost) in
+  check (float 1e-9) "cost" (before.total_cost_usd.known_cost_usd +. 0.25) cumulative.known_cost_usd;
+  check int "losing unpriced reading retained" 1 cost.unpriced_readings;
+  check int "winner priced reading retained" 1 cost.priced_readings;
   check int "turns are the failure's to count" before.total_turns after.usage.total_turns;
   check (option (pair string int)) "the cursor" (Some ("thread-1", 100))
     (cursor_input after.usage_cursor)
@@ -589,6 +593,9 @@ let test_an_ended_turn_counts_itself_and_its_spend () =
            check int (label ^ ": input")
              (meta.runtime.usage.total_input_tokens + 100)
              after.runtime.usage.total_input_tokens;
+           check int (label ^ ": missing price is durable")
+             (meta.runtime.usage.total_cost_usd.unpriced_readings + 1)
+             after.runtime.usage.total_cost_usd.unpriced_readings;
            check (option (pair string int)) (label ^ ": the cursor")
              (Some ("thread-1", 100))
              (cursor_input after.runtime.usage_cursor))
@@ -620,6 +627,8 @@ let test_a_refused_commit_writes_no_rows () =
      with
      | Ok _ -> fail "a Keeper without an Owner committed"
      | Error (Keeper_turn_spend_commit.Commit_rejected _) -> ()
+     | Error (Keeper_turn_spend_commit.Cost_observation_rejected error) ->
+       fail (Keeper_cost_coverage.error_to_string error)
      | Error Keeper_turn_spend_commit.Keeper_removed ->
        fail "an unknown Keeper read as removed");
     check int "no rows" 0 (List.length (spend_rows config)))

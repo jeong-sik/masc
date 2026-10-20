@@ -43,3 +43,24 @@ baseline retain its history and use the object arm. A malformed object is
 rejected, never reduced to its numeric sum. Complete coverage cannot have a
 positive sum without a priced reading; inconsistent snapshot differences are
 refused as well. The codec does not itself read or rewrite Keeper metadata.
+
+The terminal success and non-success commit paths capture this evidence from
+all actual `Keeper_turn_spend` readings, after the existing resolver. Token
+metric updaters do not separately add costs. A resolved price is counted even
+when zero. A reading whose provider omitted a price is unpriced; a reported
+cumulative price without a usable price baseline is unresolved. Started empty
+attempts contribute uncertainty; a synthetic winner resolution contributes no
+provider reading. Cost and coverage enter the same Owner snapshot delta and
+checked additive commit, retaining concurrent observations and unknown history.
+The cumulative OpenTelemetry gauge is the provider-reported known subtotal.
+
+Keeper meta keeps the same root key set and schema version. `total_cost_usd`
+contains the canonical union above; it is a typed coverage value in the domain,
+not a separate numeric authority. Fresh Keeper state begins with complete empty
+coverage. Numeric persisted records remain readable as unobserved history, even
+through ordinary pause/profile saves. No store reset, purge or automatic cut is
+introduced. HTTP config and roster views emit that same value. TUI activity and
+fleet aggregates carry it rather than adding plain floats. Dashboard lifetime
+cost reads the same evidence and visibly qualifies missing, partial and unknown
+pricing. The evaluation harness reports an exact numeric total only for complete
+priced coverage; other readings remain unavailable in that scalar-only result.

@@ -86,7 +86,7 @@ let test_current_writer_rejects_non_finite_values () =
       runtime =
         { meta.runtime with
           usage =
-            { meta.runtime.usage with total_cost_usd = Float.nan }
+            { meta.runtime.usage with last_turn_ts = Float.nan }
         }
     }
   in

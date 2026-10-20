@@ -108,3 +108,11 @@ val resolve_turn
   -> observed_at:float
   -> attempt list
   -> turn_resolution
+
+val cost_coverage
+  :  resolved:resolved list
+  -> attempt list
+  -> (Keeper_cost_coverage.t, Keeper_cost_coverage.error) result
+(** Count actual resolved readings once, including losing attempts, and started
+    attempts with no reading. Pass the complete resolved list, never a synthetic
+    winner resolution. Missing price and unresolved usage are distinct facts. *)

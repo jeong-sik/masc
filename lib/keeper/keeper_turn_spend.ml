@@ -256,3 +256,27 @@ let resolve_turn ~cursor ~observed_at attempts =
     { turn_reading = None; other_readings = in_order earlier_attempts_rev; cursor }
   | [] -> { turn_reading = None; other_readings = []; cursor }
 ;;
+let cost_coverage ~(resolved : resolved list) attempts =
+  let module Cost = Keeper_cost_coverage in
+  let ( let* ) = Result.bind in
+  let* readings =
+    List.fold_left
+      (fun state (reading : resolved) ->
+        let* state = state in
+        let observation = match reading.resolution.delta, reading.resolution.observation with
+          | Some { cost_usd = Some amount; _ }, _ -> Cost.Priced amount
+          | Some { cost_usd = None; _ }, Some { cost_usd = None; _ } ->
+            Cost.Price_not_reported
+          | Some { cost_usd = None; _ }, (Some { cost_usd = Some _; _ } | None)
+          | None, _ -> Cost.Usage_unresolved
+        in
+        Cost.observe state observation)
+      (Ok Cost.empty) resolved
+  in
+  List.fold_left
+    (fun state (attempt : attempt) ->
+      let* state = state in
+      match attempt.readings with
+      | [] -> Cost.observe state Cost.Attempt_unobserved
+      | _ :: _ -> Ok state)
+    (Ok readings) attempts

@@ -342,7 +342,7 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
           ("total_input_tokens", `Int m.runtime.usage.total_input_tokens);
           ("total_output_tokens", `Int m.runtime.usage.total_output_tokens);
           ("total_tokens", `Int m.runtime.usage.total_tokens);
-          ("total_cost_usd", `Float m.runtime.usage.total_cost_usd);
+          ("total_cost_usd", Keeper_cost_coverage.to_json m.runtime.usage.total_cost_usd);
           ("last_model_used", `Null);
           ("last_input_tokens", delta_int (fun usage -> usage.Keeper_usage_resolution.input_tokens));
           ("last_output_tokens", delta_int (fun usage -> usage.Keeper_usage_resolution.output_tokens));

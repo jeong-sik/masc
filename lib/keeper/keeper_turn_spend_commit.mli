@@ -9,6 +9,7 @@
 type error =
   | Keeper_removed  (** The Owner removed the Keeper's metadata during the commit. *)
   | Commit_rejected of Keeper_owner_registry.command_error
+  | Cost_observation_rejected of Keeper_cost_coverage.error
 
 val error_to_string : error -> string
 

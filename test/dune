@@ -3429,7 +3429,7 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries eio eio_main masc.keeper_execution_scope masc.masc_core masc_tui_chat_media masc.keeper_chat_delivery_identity masc.runtime masc.keeper_chat_operations masc.server masc.ag_ui masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
+ (libraries masc.keeper_cost_coverage eio eio_main masc.keeper_execution_scope masc.masc_core masc_tui_chat_media masc.keeper_chat_delivery_identity masc.runtime masc.keeper_chat_operations masc.server masc.ag_ui masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
   masc_tui_answering
   masc_tui_keys
   masc_tui_fusion_model
@@ -3944,7 +3944,7 @@
 (test
  (name test_tui_context_state)
  (modules test_tui_context_state)
- (libraries alcotest masc_tui_context_state masc_tui_fetched masc))
+ (libraries masc.keeper_cost_coverage alcotest masc_tui_context_state masc_tui_fetched masc))
 
 (test
  (name test_tui_context_inspector)
@@ -4034,7 +4034,7 @@
 (test
  (name test_tui_composer_projection)
  (modules test_tui_composer_projection)
- (libraries masc_tui_message_input
+ (libraries masc.keeper_cost_coverage masc_tui_message_input
  alcotest
 
  masc
@@ -4535,6 +4535,7 @@
 (include stanzas/test_keeper_turn_fragments.inc)
 (include stanzas/test_keeper_turn_spend.inc)
 (include stanzas/test_keeper_cost_coverage.inc)
+(include stanzas/test_keeper_cost_observation.inc)
 (include stanzas/test_keeper_unsettled_spend.inc)
 
 (include stanzas/test_keeper_clear_admission.inc)
@@ -4967,7 +4968,7 @@
 (test
  (name test_tui_loading_notice)
  (modules test_tui_loading_notice)
- (libraries alcotest masc masc.masc_schedule masc_tui_types))
+ (libraries masc.keeper_cost_coverage alcotest masc masc.masc_schedule masc_tui_types))
 
 (test
  (name test_keeper_composition_async_broker)

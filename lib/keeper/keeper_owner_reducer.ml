@@ -3,7 +3,7 @@ type usage_delta =
   ; input_tokens : int
   ; output_tokens : int
   ; total_tokens : int
-  ; cost_usd : float
+  ; cost_usd : Keeper_cost_coverage.t
   ; last_turn_ts : float
   ; last_input_tokens : int
   ; last_output_tokens : int
@@ -147,8 +147,6 @@ let validate_delta delta =
   then Error (Invalid_delta "output_tokens must be non-negative")
   else if delta.total_tokens < 0
   then Error (Invalid_delta "total_tokens must be non-negative")
-  else if delta.cost_usd < 0.0 || not (Float.is_finite delta.cost_usd)
-  then Error (Invalid_delta "cost_usd must be finite and non-negative")
   else if not (Float.is_finite delta.last_turn_ts)
   then Error (Invalid_delta "last_turn_ts must be finite")
   else if delta.last_input_tokens < 0
@@ -221,7 +219,11 @@ let turn_runtime_delta_of_snapshots
         before_usage.total_tokens
         after_usage.total_tokens
     in
-    let cost_usd = after_usage.total_cost_usd -. before_usage.total_cost_usd in
+    let* cost_usd =
+      Keeper_cost_coverage.difference
+        ~before:before_usage.total_cost_usd ~after:after_usage.total_cost_usd
+      |> Result.map_error (fun error -> Invalid_delta (Keeper_cost_coverage.error_to_string error))
+    in
     let* proactive_count =
       nonnegative_difference
         "proactive_count_total"
@@ -276,10 +278,10 @@ let add_usage meta delta =
   | Error _ as error -> error
   | Ok () ->
     let usage = meta.Keeper_meta_contract.runtime.usage in
-    let total_cost_usd = usage.total_cost_usd +. delta.cost_usd in
-    if not (Float.is_finite total_cost_usd)
-    then Error (Invalid_delta "total_cost_usd overflow")
-    else
+    let* total_cost_usd =
+      Keeper_cost_coverage.add usage.total_cost_usd delta.cost_usd
+      |> Result.map_error (fun error -> Invalid_delta (Keeper_cost_coverage.error_to_string error))
+    in
       let* total_turns = checked_add "total_turns" usage.total_turns delta.turns in
       let* total_input_tokens =
         checked_add "total_input_tokens" usage.total_input_tokens delta.input_tokens

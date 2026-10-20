@@ -1,3 +1,4 @@
+import type { KeeperCostCoverage } from '../lib/keeper-cost-coverage'
 import type { KeeperResponseOwner, KeeperResponseState } from '../lib/keeper-response-state'
 import type { KeeperPortraitReading } from '../lib/keeper-portrait'
 import type { KeeperActivationMode } from '../lib/keeper-activation-mode'
@@ -1363,6 +1364,7 @@ export function sandboxContainerCli(raw: string | null | undefined): string | nu
 }
 
 export interface Keeper {
+  cost_coverage?: KeeperCostCoverage | null
   board_address?: KeeperBoardAddress
   /** Required by the live wire; absent local fixtures are explicitly unavailable. */
   portrait?: KeeperPortraitReading
@@ -1684,7 +1686,7 @@ interface KeeperConfigMetrics {
   total_input_tokens: number
   total_output_tokens: number
   total_tokens: number
-  total_cost_usd: number
+  total_cost_usd: KeeperCostCoverage | null
   last_model_used: string
   last_input_tokens: number
   last_output_tokens: number

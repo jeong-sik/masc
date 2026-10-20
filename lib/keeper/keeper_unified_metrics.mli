@@ -130,8 +130,9 @@ val update_metrics_from_failure :
   ?core_error:Agent_core.Error.t ->
   unit ->
   Keeper_meta_contract.keeper_meta
-(** Adds what a failed turn's attempts spent, resolved, to the running totals
-    and moves the usage cursor to where the attempts left it. *)
+(** Adds resolved attempt token deltas and advances the usage cursor. Cost
+    coverage is accumulated once from all actual readings by the terminal
+    commit path, including attempts without readings. *)
 val with_attempt_spend :
   Keeper_meta_contract.keeper_meta ->
   resolved:Keeper_turn_spend.resolved list ->

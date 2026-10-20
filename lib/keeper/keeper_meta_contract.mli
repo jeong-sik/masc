@@ -36,7 +36,7 @@ type usage_metrics = {
   total_input_tokens : int;
   total_output_tokens : int;
   total_tokens : int;
-  total_cost_usd : float;
+  total_cost_usd : Keeper_cost_coverage.t;
   last_turn_ts : float;
   last_input_tokens : int;
   last_output_tokens : int;

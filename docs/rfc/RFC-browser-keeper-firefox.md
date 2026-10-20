@@ -102,9 +102,13 @@ port = 9222
    듣는 것이 없으면 `firefox --no-remote --profile <profile> --remote-debugging-port <port>` 를 떨어진 프로세스로 띄운다(§2.2).
    포트가 열릴 때까지 기다린다. 열리지 않거나 Firefox 가 먼저 끝나면 띄우지 않은 까닭을 기록한다(§3.4).
    마감까지 포트가 열리지 않은 Firefox 는 멈춘다(아래 2 의 끝).
-   포트가 열리기를 기다리는 동안 서버가 취소되면, 이미 기록한 Firefox 는 host 없이 남는다. 다음 서버 시작은 그 포트가 답하는 것을 보고 Firefox 는 띄우지 않고 host 만 띄운다(위 1, 0).
-   Firefox 에는 서버의 환경 전체를 넘기지 않는다. `HOME`, `PATH`, `TMPDIR`, `USER`, `LANG`, 표시와 세션 이름(`DISPLAY`, `WAYLAND_DISPLAY`, `XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS`)과 `LC_`·`MOZ_` 로 시작하는 이름만 넘긴다.
+   포트가 열리기를 기다리는 동안 서버가 취소되면, 이미 기록한 Firefox 는 host 없이 남는다.
+   다음 서버 시작에서 그 포트가 답하면 Firefox 는 띄우지 않고 host 만 띄운다(위 1, 0).
+   포트가 아직 답하지 않으면 기록이 남은 Firefox 가 아직 돌고 있어서 아무것도 띄우지 않고 까닭을 남긴다. 운영자가 그 Firefox 를 닫으면 다음 시작이 새로 띄운다.
+   Firefox 에는 서버의 환경 전체를 넘기지 않는다. Keeper 의 하위 프로세스가 받는 환경(`Env_keeper_scrub`)과, 창이 어느 세션에 속하는지 알려 주는
+   이름(`DISPLAY`, `WAYLAND_DISPLAY`, `XAUTHORITY`, `XDG_RUNTIME_DIR`, `XDG_SESSION_TYPE`, `XDG_CURRENT_DESKTOP`, `XDG_DATA_DIRS`, `DBUS_SESSION_BUS_ADDRESS`)만 넘긴다.
    서버가 받은 토큰이 페이지를 여는 프로세스에 보이지 않게 하려는 것이다(2026-10-21 headless Firefox 158.0 이 `HOME`·`PATH`·`TMPDIR`·`USER` 만으로 포트를 여는 것을 확인했다).
+   이미 떠 있는 Firefox 는 시작할 때 받은 환경을 그대로 갖고 있다. 이 규칙은 서버가 새로 띄우는 Firefox 에만 걸린다.
    같은 프로필로 이미 떠 있는 Firefox(플래그 없이 운영자가 띄운 것)가 있으면 Firefox 는 그 프로필을 두 번 열지 않는다.
    2026-10-09 Firefox 157.0.1 을 임시 프로필로 재 보니(headless), 두 번째 Firefox 는 약 5초 뒤 **종료 코드 0** 으로 끝났고
    포트는 열리지 않았다. stderr 에는 시스템 언어로 된 "이미 실행 중" 안내만 나왔다.

@@ -632,14 +632,21 @@ let a_free_port_starts_firefox_then_the_host () =
 let firefox_environment_keeps_only_what_firefox_needs () =
   let inherited =
     [| "HOME=/home/keeper"; "MASC_ADMIN_TOKEN=secret"; "PATH=/usr/bin"; "LC_ALL=C"
-     ; "MOZ_ENABLE_WAYLAND=1"; "ANTHROPIC_API_KEY=secret"; "HOMEBREW_GITHUB_API_TOKEN=secret"
-     ; "MASC_DASHBOARD_URL=http://127.0.0.1:1/?token=secret"; "DISPLAY=:0"; "LANGUAGE=ko"
+     ; "MOZ_API_KEY=secret"; "LC_TOKEN=secret"; "ANTHROPIC_API_KEY=secret"
+     ; "HOMEBREW_GITHUB_API_TOKEN=secret"; "MASC_DASHBOARD_URL=http://127.0.0.1:1/?token=secret"
+     ; "DISPLAY=:0"; "XAUTHORITY=/run/user/1000/gdm/Xauthority"; "LANGUAGE=ko"
      ; "TMPDIR=/tmp"; "USER=keeper" |] in
-  check (array string) "the names Firefox needs, in the order they came"
-    [| "HOME=/home/keeper"; "PATH=/usr/bin"; "LC_ALL=C"; "MOZ_ENABLE_WAYLAND=1"; "DISPLAY=:0"
-     ; "TMPDIR=/tmp"; "USER=keeper" |]
-    (Keeper_firefox.firefox_environment inherited);
-  check (array string) "nothing inherited, nothing passed" [||] (Keeper_firefox.firefox_environment [||])
+  let names =
+    List.map
+      (fun entry -> match String.index_opt entry '=' with Some i -> String.sub entry 0 i | None -> entry)
+      (Array.to_list (Keeper_firefox.firefox_environment inherited)) in
+  List.iter
+    (fun name -> check bool (name ^ " is passed") true (List.mem name names))
+    [ "HOME"; "PATH"; "LC_ALL"; "TMPDIR"; "USER"; "DISPLAY"; "XAUTHORITY" ];
+  List.iter
+    (fun name -> check bool (name ^ " is not passed") false (List.mem name names))
+    [ "MASC_ADMIN_TOKEN"; "MASC_DASHBOARD_URL"; "ANTHROPIC_API_KEY"; "HOMEBREW_GITHUB_API_TOKEN"
+    ; "MOZ_API_KEY"; "LC_TOKEN"; "LANGUAGE" ]
 
 let a_started_firefox_does_not_inherit_the_servers_token () =
   with_workspace (fun base ->

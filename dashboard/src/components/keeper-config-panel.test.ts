@@ -2071,6 +2071,24 @@ describe('KeeperConfigPanel', () => {
     expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(2)
   })
 
+  it('does not expose cached keeper A controls while keeper B config is pending', async () => {
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(makeKeeperConfig({ name: 'keeper-a' }))
+    await loadKeeperConfig('keeper-a')
+    let resolveConfig!: (value: KeeperConfig) => void
+    mocks.fetchKeeperConfig.mockReturnValueOnce(new Promise<KeeperConfig>(resolve => { resolveConfig = resolve }))
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-b" />`, container)
+
+    expect(mocks.fetchKeeperConfig).toHaveBeenLastCalledWith('keeper-b')
+    expect(container.querySelector('[role="tab"]')).toBeNull()
+    expect(container.querySelector('select[aria-label="runtime_id"]')).toBeNull()
+
+    resolveConfig(makeKeeperConfig({ name: 'keeper-b' }))
+    await flush()
+    await flush()
+    expect(container.querySelector('[role="tab"]')).not.toBeNull()
+  })
+
   it('resets runtime draft when switching from keeper A to keeper B to prevent stale settings leakage', async () => {
     const configA = makeKeeperConfig({
       name: 'keeper-a',

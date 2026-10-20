@@ -189,7 +189,7 @@ describe('openKeeperDetail', () => {
     }
   })
 
-  it('selects the keeper, preloads config, and routes into keeper detail', () => {
+  it('selects and routes to chat without requesting the full configuration preview', () => {
     const keeper: Keeper = {
       name: 'sangsu',
       status: 'active',
@@ -199,7 +199,7 @@ describe('openKeeperDetail', () => {
 
     expect(selectedKeeper.value).toEqual(keeper)
     expect(mocks.selectKeeper).toHaveBeenCalledWith('sangsu')
-    expect(mocks.loadKeeperConfig).toHaveBeenCalledWith('sangsu')
+    expect(mocks.loadKeeperConfig).not.toHaveBeenCalled()
     expect(mocks.navigate).toHaveBeenCalledWith('monitoring', {
       section: 'agents',
       view: 'keepers',
@@ -360,6 +360,9 @@ describe('KeeperDetailPage', () => {
     // FSM Hub is detail-only, not in the default conversation view.
     expect(screen.queryByText('FSM Hub (6축 상태 머신)')).toBeNull()
     expect(mocks.selectKeeper).toHaveBeenCalledWith('analyst')
+    // Chat entry does not request prompt/world/repository previews.
+    // The mounted config and runtime editors own that demand.
+    expect(mocks.loadKeeperConfig).not.toHaveBeenCalled()
 
     // Secondary inspectors live in the standalone-style overflow. Opening the
     // menu and choosing "상세" flips to the reused full tabbed detail body.

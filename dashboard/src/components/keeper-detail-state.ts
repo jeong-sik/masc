@@ -4,7 +4,7 @@ import type { Keeper, TabId } from '../types'
 import { hydrateKeeperStatus, selectKeeper } from '../keeper-actions'
 import { activeKeeperName } from '../keeper-state'
 import { registerKeeperTurnRefresh } from '../sse-store'
-import { loadKeeperConfig, resetKeeperConfig } from './keeper-config-state'
+import { resetKeeperConfig } from './keeper-config-state'
 import { keeperMobilePane } from './keeper-mobile-pane-state'
 export { keeperMobilePane, type KeeperMobilePane } from './keeper-mobile-pane-state'
 
@@ -51,7 +51,6 @@ export function openKeeperDetail(k: Keeper) {
   selectedKeeper.value = k
   keeperMobilePane.value = 'chat'
   selectKeeper(k.name)
-  void loadKeeperConfig(k.name)
   const base = baseAgentDirectoryRoute()
   navigate(base.tab, { ...base.params, keeper: k.name })
 }

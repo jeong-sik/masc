@@ -79,6 +79,7 @@ presentation = '''{
     {"lane_id": "quiz/questions", "path": ["by"], "label": "Graded by", "unit": null, "format": "text"},
     {"lane_id": "quiz/questions", "path": ["judgments"], "label": "Judgments", "unit": null, "format": "json"},
     {"lane_id": "quiz/questions", "path": ["grading"], "label": "Grading", "unit": null, "format": "json"},
+    {"lane_id": "quiz/questions", "path": ["disputes"], "label": "Disputes", "unit": null, "format": "json"},
     {"lane_id": "quiz/questions", "path": ["response"], "label": "Your answer", "unit": null, "format": "json"},
     {"lane_id": "quiz/questions", "path": ["key"], "label": "Expected", "unit": null, "format": "json"},
     {"lane_id": "quiz/questions", "path": ["sources"], "label": "Sources", "unit": null, "format": "json"},

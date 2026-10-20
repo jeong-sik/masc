@@ -21,7 +21,9 @@ createInterface({ input: process.stdin }).on('close', () => clearTimeout(demandT
     if (admitted === 16n) reply({ kind: 'playing' })
     if (['fault-final','format-final'].includes(mode) && admitted === 16n) {
       const fault = mode === 'fault-final' ? 'underrun' : 'render-format'
-      reply({ kind: 'error', message: fault }); reply(final(false, fault))
+      // Both receipts are already available to the reader. A separate write
+      // could be killed after error but before final, a different valid case.
+      process.stdout.write([ { kind: 'error', message: fault }, final(false, fault) ].map(JSON.stringify).join('\n') + '\n')
       process.exitCode = 1; process.stdin.destroy(); return
     }
     if (mode === 'underrun' && admitted === 16n) { reply({ kind: 'error', message: 'PCM underrun' }); return }

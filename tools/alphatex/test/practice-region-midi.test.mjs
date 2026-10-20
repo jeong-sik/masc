@@ -132,7 +132,7 @@ test('sustain and sostenuto restore released sounding voices and preserve pedal 
   [500000n, [0xb5, 66, 0]], [700000n, [0xb5, 64, 0]]]))
 
 test('a historical key ending exactly at entry is omitted while genuine entry attacks and point notes remain', () => fixture(async data => {
-  const result = await derive(data, { offset: '1000000', extent: '2000000' })
+  const result = await derive(data, { offset: '1000000', extent: '1000001' })
   const source = result.project.assets.at(-1).source, pattern = midiSourcePattern(source)
   assert.deepEqual(pattern.diagnostics, [])
   assert.deepEqual(pattern.notes.map(({ pitch, start, duration }) => ({ pitch, start, duration })).sort((a, b) => a.pitch - b.pitch), [

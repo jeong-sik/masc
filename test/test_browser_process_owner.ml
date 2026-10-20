@@ -102,6 +102,12 @@ let spawn fixture claim script =
       | Lease.Live value -> value
       | Awaiting_exec|Cleanup_pending _|Settled -> Alcotest.fail "owner did not preserve its kernel lease" in
     check "kernel lease names original owner independently" true (process.pid=pid);
+  check "child birth and original group are independently observable" true
+    (Owner.verify_child receipt=Ok ());
+  check "another incarnation cannot borrow the bootstrap PID" true
+    (Result.is_error (Owner.verify_child {receipt with child_started="another incarnation"}));
+  check "another group cannot borrow the original child" true
+    (Result.is_error (Owner.verify_child {receipt with owner_pid=Unix.getpid ()}));
     close fixture output;
     pid,keepalive,receipt
 let prepare fixture instance =
@@ -149,7 +155,9 @@ let test_original_lease_termination () = with_fixture (fun fixture ->
   let pid,keepalive,receipt=spawn fixture claim tree_script in
   wait_tree fixture claim receipt;
   ok (Lease.request_termination claim);
-  check_retired fixture claim pid keepalive)
+  check_retired fixture claim pid keepalive;
+  check "an ended browser cannot reuse its old ready observation" true
+    (Result.is_error (Owner.verify_child receipt)))
 let test_keepalive_owner_crash () = with_fixture (fun fixture ->
   let claim=prepare fixture "writer-crash" in
   let pid,keepalive,receipt=spawn fixture claim tree_script in

@@ -22,7 +22,7 @@
 (test
  (name test_browser_addon_owner_cleanup)
  (modules test_browser_addon_owner_cleanup)
- (libraries masc masc.browser_lane masc.time_compat alcotest eio eio_main))
+ (libraries masc masc.browser_lane masc.time_compat masc.fs_compat alcotest eio eio_main eio.unix unix))
 
 (executable
  (name test_browser_process_owner)

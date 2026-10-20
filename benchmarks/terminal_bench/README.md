@@ -315,8 +315,10 @@ probe 는 marker 만 기다리지 않고 `masc_keeper_msg` 가 돌려준 `operat
 `masc_keeper_delegate_status` 를 함께 읽는다 (`image/keeper_turn_wait.sh`). turn 이
 `Failed` 나 `Cancelled` 로 끝나면 450초를 기다리지 않고 그 상태와 원문을 찍고 끝난다.
 `Succeeded` 인데 marker 가 없는 경우와 상태 조회가 계속 안 되는 경우도 각자 이름으로
-끝나며, 둘 다 `keeper-did-not-act` 로 뭉치지 않는다. 가짜 docker 와 가짜 mcp 로 이
-분기를 확인하려면
+끝나며, 둘 다 `keeper-did-not-act` 로 뭉치지 않는다. marker 없이 끝난 경우는 모두 keeper
+상태와 서버 로그 꼬리를 함께 찍는다. `Failed` 와 `Cancelled` 는 marker 가 있어도 실패로
+끝나고, 그 줄에 `marker-present` 나 `marker-absent` 를 적는다. 상태 조회에 호스트의
+`jq` 가 필요하다. 가짜 docker 와 가짜 mcp 로 이 분기를 확인하려면
 `python3 -m unittest discover -s benchmarks/terminal_bench/image -p test_keeper_turn_wait.py`
 를 실행한다. 컨테이너, 서버, provider 호출은 없다.
 

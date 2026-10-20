@@ -67,8 +67,14 @@ class WaitForKeeperTurn(unittest.TestCase):
                 (root / "marker_after").write_text(str(marker_after))
             if dead:
                 (root / "dead").write_text("")
+            # A stray exported tuning variable must not change what a test sees.
+            inherited = {
+                key: value
+                for key, value in os.environ.items()
+                if key not in ("WAIT_ROUNDS", "WAIT_SLEEP_SEC", "POLL_FAILURE_LIMIT")
+            }
             run_env = {
-                **os.environ,
+                **inherited,
                 "PATH": f"{root / 'bin'}:{os.environ['PATH']}",
                 "FAKE_DIR": str(root),
                 "WAIT_SH": str(WAIT_SH),
@@ -89,6 +95,33 @@ class WaitForKeeperTurn(unittest.TestCase):
         self.assertIn("STAGE_FAIL keeper-turn-Failed", err)
         self.assertIn("no effort contract", err)
         self.assertEqual(len(calls), 1)
+
+    def test_the_failure_text_survives_identity_fields_longer_than_the_cap(self):
+        # The identity and digest fields come first in the reply. They must not
+        # push the state and the failure text past the length the message keeps.
+        reply = json.dumps({
+            "schema": "masc.keeper_chat_operation.v1",
+            "operation_id": "kmsg-abc123",
+            "admission_digest": "d" * 900,
+            "execution_digest": "e" * 900,
+            "source": {"kind": "operator", "note": "s" * 900},
+            "input": None,
+            "state": "Failed",
+            "failure_kind": "attempt_rejected",
+            "failure_detail": "no declared reasoning effort contract " + "x" * 300,
+        })
+        _, err, _ = self.run_wait([reply])
+        self.assertIn("no declared reasoning effort contract", err)
+        self.assertIn("attempt_rejected", err)
+        self.assertNotIn("d" * 50, err)
+
+    def test_a_failed_turn_fails_with_or_without_the_marker_and_says_which(self):
+        code, err, _ = self.run_wait([state("Failed")], marker_after=2)
+        self.assertEqual(code, 1)
+        self.assertIn("keeper-turn-Failed (marker-present)", err)
+        code, err, _ = self.run_wait([state("Cancelled")])
+        self.assertEqual(code, 1)
+        self.assertIn("keeper-turn-Cancelled (marker-absent)", err)
 
     def test_the_status_call_names_the_keeper_and_the_operation(self):
         _, _, calls = self.run_wait([state("Failed")])

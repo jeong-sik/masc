@@ -250,14 +250,16 @@ let with_stuck rows =
     ~stalled:(Agenda.Read rows)
 ;;
 
-let test_a_stuck_task_alone_takes_the_row () =
+(* The row above the composer holds the next wake and nothing else: a task
+   stuck on the operator is counted and named by the badge on the surface
+   strip, so it must not also raise this row. *)
+let test_a_stuck_task_alone_is_counted_but_takes_no_row () =
   let t = with_stuck [ stuck "task-348: held by codex-mcp-client, which has no Keeper queue" ] in
-  check int "a stuck task is something to say" 1 (Agenda.rows_taken t);
-  match strip_of t with
-  | None -> fail "the strip must draw when a task is stuck on the operator"
-  | Some strip ->
-    check bool "and it says so in the badge" true
-      (contains ~needle:"Awaiting you" strip.Agenda.waiting)
+  check int "a stuck task waits on the operator" 1 (Agenda.waiting t);
+  check int "and takes no row above the composer" 0 (Agenda.rows_taken t);
+  check bool "so the row draws nothing" true (strip_of t = None);
+  check bool "while the badge has something to say" true
+    (Agenda.waiting_label ~cells:80 t <> "")
 ;;
 
 let test_the_stuck_section_draws_every_row () =
@@ -300,12 +302,9 @@ let with_goals goals =
    something to say on its own, it counts in the badge, and Enter leads to it. *)
 let test_a_goal_to_confirm_is_waiting_on_the_operator () =
   let t = with_goals [ goal ~goal_id:"goal-9" "v0.38.0 release" ] in
-  check int "a goal to confirm takes the row" 1 (Agenda.rows_taken t);
-  (match strip_of t with
-   | None -> fail "the strip must draw while a goal waits for confirmation"
-   | Some strip ->
-     check bool "and it is counted" true
-       (contains ~needle:"Awaiting you\xc2\xb71" strip.Agenda.waiting));
+  check int "a goal to confirm is counted" 1 (Agenda.waiting t);
+  check bool "and the badge has something to say" true
+    (Agenda.waiting_label ~cells:80 t <> "");
   let lines = overlay_of t in
   check bool "the row names the goal and says it was proved" true
     (contains ~needle:"v0.38.0 release" (joined lines)
@@ -569,37 +568,83 @@ let test_an_ask_waits_once_however_many_questions_it_holds () =
     ; ask_row ~resolution:withdrawn "ask-4"
     ];
   let agenda = Masc_tui_types.agenda state in
-  check int "two open asks wait" 2 (Agenda.questions_waiting agenda);
-  check int "and the strip's count includes them" 2 (Agenda.waiting agenda)
+  check int "two open asks wait" 2 (Agenda.waiting agenda)
 
-(* The count is added to the held calls, Goals and stuck tasks rather than
-   standing beside them. *)
+let open_question ask_id : Agenda.open_question =
+  { ask_id; keeper = "quill"; first_question = Some "Merge?"
+  ; asked_at = asked_at_1155 }
+
+let with_questions rows =
+  Masc_tui_agenda.project
+    ~scheduled:(Agenda.Read [])
+    ~awaiting:(Agenda.Read [])
+    ~asking:(Agenda.Read rows)
+    ~confirming:(Agenda.Read [])
+    ~stalled:(Agenda.Read [])
+
+let one_of_each =
+  Masc_tui_agenda.project
+    ~scheduled:(Agenda.Read [])
+    ~awaiting:(Agenda.Read [ ask "lane-smith" "Execute" ])
+    ~asking:(Agenda.Read [ open_question "ask-1" ])
+    ~confirming:(Agenda.Read [ goal "v0.38.0 release" ])
+    ~stalled:(Agenda.Read [ stuck "work nobody holds" ])
+
+(* The total is the sum of the four lists. *)
 let test_the_strip_count_adds_the_questions () =
-  let t =
-    Masc_tui_agenda.project
-      ~scheduled:(Agenda.Read [])
-      ~awaiting:(Agenda.Read [ ask "lane-smith" "Execute" ])
-      ~asking:
-        (Agenda.Read
-           [ { Agenda.ask_id = "ask-1"; keeper = "quill"
-             ; first_question = Some "Merge?"; asked_at = asked_at_1155 } ])
-      ~confirming:(Agenda.Read [ goal "v0.38.0 release" ])
-      ~stalled:(Agenda.Read [ stuck "work nobody holds" ])
-  in
-  check int "one of each is four" 4 (Agenda.waiting t)
+  check int "one of each is four" 4 (Agenda.waiting one_of_each)
 
-(* The strip is the reminder that follows the operator: it is up while any
-   ask is open and gives its row back once the last one is answered. *)
-let test_an_open_question_keeps_the_strip_up_until_answered () =
+(* What the badge says is the badge's to change, so this does not read its
+   words. It reads what the badge is for: nothing waiting says nothing, each
+   kind reads differently from the others, and the count comes from the rows. *)
+let test_the_badge_tells_the_kinds_apart () =
+  let label = Agenda.waiting_label ~cells:80 in
+  check string "nothing waiting says nothing" "" (label (with_stuck []));
+  let one_question = label (with_questions [ open_question "ask-1" ]) in
+  let one_stuck = label (with_stuck [ stuck "work nobody holds" ]) in
+  let one_goal = label (with_goals [ goal "v0.38.0 release" ]) in
+  check bool "a question and a stuck task read differently" true
+    (one_question <> one_stuck);
+  check bool "a question and a goal read differently" true
+    (one_question <> one_goal);
+  check bool "a goal and a stuck task read differently" true
+    (one_goal <> one_stuck);
+  check bool "two questions read differently from one" true
+    (label (with_questions [ open_question "ask-1"; open_question "ask-2" ])
+     <> one_question);
+  check bool "every kind is in the label when all four wait" true
+    (let all = label one_of_each in
+     all <> one_question && all <> one_stuck && all <> one_goal)
+
+(* The badge is returned even where it cannot fit, but wherever the total
+   fits, whatever it is drawn as fits too. *)
+let test_the_badge_fits_the_room_it_is_given () =
+  let total_cells = Masc_tui_message_layout.display_width
+      (Agenda.waiting_label ~cells:0 one_of_each) in
+  List.iter
+    (fun cells ->
+       check bool
+         (Printf.sprintf "four kinds fit in %d cells" cells)
+         true
+         (Masc_tui_message_layout.display_width
+            (Agenda.waiting_label ~cells one_of_each)
+          <= cells))
+    [ total_cells; 20; 30; 40; 60; 80; 120 ];
+  check bool "a narrow room does not make the badge disappear" true
+    (Agenda.waiting_label ~cells:1 one_of_each <> "")
+
+(* The badge is the reminder that follows the operator: it is up while any ask
+   is open and goes once the last one is answered. It is not the row above the
+   composer, which holds the next wake. *)
+let test_an_open_question_keeps_the_badge_up_until_answered () =
   let state = agenda_state () in
   set_asks state [ ask_row "ask-1" ];
-  check int "an open question takes the row" 1
+  let label () = Agenda.waiting_label ~cells:80 (Masc_tui_types.agenda state) in
+  check bool "an open question is on the badge" true (label () <> "");
+  check int "and takes no row above the composer" 0
     (Masc_tui_types.agenda_chrome_rows state);
-  check bool "and the strip draws" true
-    (strip_of (Masc_tui_types.agenda state) <> None);
   set_asks state [ ask_row ~resolution:answered "ask-1" ];
-  check int "the answered question gives the row back" 0
-    (Masc_tui_types.agenda_chrome_rows state)
+  check string "the answered question leaves the badge" "" (label ())
 
 (* Every open ask is a row Enter can open, and only open asks are. *)
 let test_each_open_question_is_a_row_enter_opens () =
@@ -660,8 +705,8 @@ let () =
             test_failed_schedule_snapshot_uses_the_same_display_boundary
         ;] )
     ; ( "tasks stuck on the operator"
-      , [ test_case "a stuck task alone takes the row" `Quick
-            test_a_stuck_task_alone_takes_the_row
+      , [ test_case "a stuck task alone is counted but takes no row" `Quick
+            test_a_stuck_task_alone_is_counted_but_takes_no_row
         ; test_case "the section draws every row" `Quick
             test_the_stuck_section_draws_every_row
         ; test_case "only rows that lead somewhere take the cursor" `Quick
@@ -676,10 +721,14 @@ let () =
     ; ( "questions waiting on the operator"
       , [ test_case "an ask waits once however many questions it holds" `Quick
             test_an_ask_waits_once_however_many_questions_it_holds
-        ; test_case "the strip count adds the questions" `Quick
+        ; test_case "the total adds the questions" `Quick
             test_the_strip_count_adds_the_questions
-        ; test_case "an open question keeps the strip up until answered" `Quick
-            test_an_open_question_keeps_the_strip_up_until_answered
+        ; test_case "the badge tells the kinds apart" `Quick
+            test_the_badge_tells_the_kinds_apart
+        ; test_case "the badge fits the room it is given" `Quick
+            test_the_badge_fits_the_room_it_is_given
+        ; test_case "an open question keeps the badge up until answered" `Quick
+            test_an_open_question_keeps_the_badge_up_until_answered
         ; test_case "each open question is a row Enter opens" `Quick
             test_each_open_question_is_a_row_enter_opens
         ; test_case "unread questions take no row and open nothing" `Quick

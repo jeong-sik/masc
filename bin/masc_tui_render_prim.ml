@@ -775,10 +775,19 @@ let overview_pulse_text (state : state) ~now =
         state.keeper_turn_finishes;
       Chart.sparkline (Array.to_list buckets)
 
+(* The gap between the last ring entry and the waiting badge. *)
+let waiting_badge_gap_cells = 3
+
 (* The strip above every surface: the Tab ring with the active family
-   highlighted. Wider terminals see the whole ring; narrower ones see a
-   window around the active entry with how many entries hide past each edge,
-   so position in the cycle stays readable at any width. *)
+   highlighted, then what waits on the operator. Wider terminals see the whole
+   ring; narrower ones see a window around the active entry with how many
+   entries hide past each edge, so position in the cycle stays readable at any
+   width.
+
+   The badge is drawn first and the ring windows into what is left: the ring
+   has the Tab key to reach what a window hides, and a count that waited on
+   the operator behind that window would never be seen. The badge may take at
+   most half the row. *)
 let surface_strip (state : state) ~cols =
   (* An array because the strip is drawn by index: the width probe, the
      label and the cell each read entry [i], and a list answers that by
@@ -819,7 +828,14 @@ let surface_strip (state : state) ~cols =
     in
     sum lo 0
   in
-  let budget = max 8 (cols - 1) in
+  let badge =
+    Agenda.waiting_label ~cells:(cols / 2) (Masc_tui_types.agenda state)
+  in
+  let badge_reserved =
+    if badge = "" then 0
+    else Message_layout.display_width badge + waiting_badge_gap_cells
+  in
+  let budget = max 8 (cols - 1 - badge_reserved) in
   let lo, hi =
     if window_width 0 (n - 1) <= budget then (0, n - 1)
     else begin
@@ -866,6 +882,9 @@ let surface_strip (state : state) ~cols =
       (Printf.sprintf " %s%s%s" Ansi.dim
          (pressable (Press_ring_edge Ring_after) (hidden_after_mark (n - 1 - hi)))
          Ansi.reset);
+  if badge <> "" then
+    Buffer.add_string parts
+      (String.make waiting_badge_gap_cells ' ' ^ Theme.bad () ^ badge ^ Ansi.reset);
   Buffer.contents parts
 
 
@@ -898,33 +917,25 @@ let finish_frame_with_strip (state : state) ?clamped ~surface_key ~cursor ~rows
   finish_frame ?clamped ~surface_key ~cursor ~rows:(rows + strip_rows) ~cols framed
 
 
-(* The agenda strip: one row above the composer, on every surface.
-
-   Colour splits it the way the layout does. The wake recedes -- a schedule
-   that fires in an hour is ambient, and painting it warn would make the
-   screen shout every hour. The badge does not: a keeper stopped on the
-   operator is the half that has to be read now. *)
+(* The agenda strip: one row above the composer, on surfaces that end in
+   [finish_surface]. It holds the next wake and recedes -- a schedule that
+   fires in an hour is ambient, and painting it warn would make the screen
+   shout every hour. What waits on the operator is not here: the surface strip
+   at the top carries it in red, on every surface. The row starts at the same
+   column as the rows around it: the surface strip above and the composer
+   below both leave the frame's margin. *)
 let agenda_line agenda ~cols =
+  let margin = Masc_tui_ansi.framed_content_column in
   match
     Agenda.strip
       ~now:(Unix.gettimeofday ())
       ~localtime:Unix.localtime
-      ~cols
+      ~cols:(cols - margin)
       agenda
   with
   | None -> None
-  | Some { Agenda.clock; waiting } ->
-    let used =
-      Message_layout.display_width clock + Message_layout.display_width waiting
-    in
-    let gap = String.make (max 0 (cols - used)) ' ' in
-    let painted = function "" -> "" | text -> text in
-    Some
-      ((Theme.recede ())
-      ^ painted clock
-      ^ Ansi.reset
-      ^ gap
-      ^ (if waiting = "" then "" else (Theme.bad ()) ^ waiting ^ Ansi.reset))
+  | Some clock ->
+    Some (String.make margin ' ' ^ (Theme.recede ()) ^ clock ^ Ansi.reset)
 
 ;;
 
@@ -1252,15 +1263,6 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
       ~cursor ~rows ~cols:full_cols framed)
 
 
-(* What the footer of a frame without the agenda row adds to its status: the
-   count of asks waiting on the operator, which on every other surface the
-   agenda row says. The same projection the agenda counts, so the two numbers
-   cannot differ. *)
-let questions_waiting_status (state : state) : Masc_tui_footer.status_item list =
-  match Agenda.questions_waiting (Masc_tui_types.agenda state) with
-  | 0 -> []
-  | count -> [ Masc_tui_footer.Questions_waiting count ]
-
 (* The footer a frame beside the Activity pane ends with. [No_footer] is for
    the chat's notice that the terminal cannot hold it, which is that frame's
    last row instead. *)
@@ -1285,8 +1287,7 @@ let finish_frame_beside_acting_pane (state : state) ?clamped ?roster
    | No_footer -> ()
    | Footer_hints { hints; position } ->
        Buffer.add_string buf
-         (footer_line ~status:(questions_waiting_status state) ?position state
-            ~max_cells:cols ~hints));
+         (footer_line ?position state ~max_cells:cols ~hints));
   let framed = Buffer.create (Buffer.length buf + 4096) in
   let lines = frame_lines buf in
   (* These frames draw neither the shared composer nor the agenda. Only

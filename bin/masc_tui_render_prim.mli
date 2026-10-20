@@ -178,13 +178,6 @@ val finish_surface :
   cols:int ->
   Buffer.t -> Frame_presenter.frame * Masc_tui_types.clamped_scroll option
 
-val questions_waiting_status :
-  Masc_tui_types.state -> Masc_tui_footer.status_item list
-(** [[Questions_waiting n]] while [n] asks wait on the operator, counted by
-    {!Masc_tui_agenda.questions_waiting} over the agenda the strip draws;
-    [[]] when none do. The status the frames without an agenda row add to
-    their footer. *)
-
 (** The footer a frame beside the Activity pane ends with. [No_footer] is for
     a frame whose last row is a notice instead -- the chat in a terminal too
     small to hold it. *)
@@ -199,9 +192,9 @@ type acting_pane_footer =
     beside the rows the press test counts as the pane's, and the strip spans
     the whole terminal.
 
-    These frames draw no agenda row, so the footer is drawn here, with
-    {!questions_waiting_status}: an ask waiting on the operator is on screen
-    in these frames too, not only in those that end in {!finish_surface}. *)
+    These frames draw no agenda row, so the footer is drawn here. What waits
+    on the operator is on the surface strip, which they draw like every
+    other frame. *)
 val finish_frame_beside_acting_pane :
   Masc_tui_types.state ->
   ?clamped:Masc_tui_types.clamped_scroll ->

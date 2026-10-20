@@ -298,88 +298,6 @@ let test_armed_ask_submit_notice_retires_when_answering_is_cleared () =
   check_bool "clearing ask answering preserves unrelated action notices" true
     (contains ~needle:unrelated (render_action state 140))
 
-(* The frames that draw no agenda row -- the chat, the Board composer, the
-   narrow Keeper navigation -- carry the count of open questions in their
-   footer, in front of the keys, since the tail goes before a single key. *)
-let test_open_questions_lead_the_footer_row () =
-  let item = Masc_tui_footer.Questions_waiting 2 in
-  check_bool "a question waits on the operator" true
-    (Masc_tui_footer.needs_operator item);
-  (match Masc_tui_footer.status_item_projection item with
-   | None -> Alcotest.fail "two open questions projected nothing"
-   | Some projected ->
-     check_bool "it leads the row" true (Masc_tui_footer.leads_the_row projected);
-     Alcotest.(check int) "and survives the conflict ordering" 1
-       (List.length (Masc_tui_footer.ordered_conflicts [ projected ])));
-  check_bool "no open question says nothing" true
-    (Option.is_none
-       (Masc_tui_footer.status_item_projection (Masc_tui_footer.Questions_waiting 0)))
-
-(* The wrong-workspace read decides whether anything on screen can be
-   answered, so it outranks the question; the question outranks the build
-   provenance, which describes the binary rather than work waiting. *)
-let test_open_questions_rank_between_workspace_and_build () =
-  let projected =
-    List.filter_map Masc_tui_footer.status_item_projection
-      [ Masc_tui_footer.Tui_build_mismatch
-          { tui = "aaaaaaa"; server = "bbbbbbb"; older = `Tui }
-      ; Masc_tui_footer.Questions_waiting 1
-      ; Masc_tui_footer.Workspace_mismatch "/elsewhere"
-      ]
-  in
-  check_bool "workspace, then the question, then the build" true
-    (List.map
-       (fun (item : Masc_tui_footer.projected_status) -> item.retention)
-       (Masc_tui_footer.ordered_conflicts projected)
-     = [ Masc_tui_footer.Workspace_conflict
-       ; Masc_tui_footer.Operator_question
-       ; Masc_tui_footer.Build_conflict
-       ])
-
-let ask_row ?(questions = 1) ?(resolution = Masc.Tui_decode_asks.Ask_open) ask_id
-    : Masc.Tui_decode_asks.ask_row =
-  { ar_keeper = "edgar.a.poe"
-  ; ar_id = ask_id
-  ; ar_asked_at = 0.
-  ; ar_source_turn_ref = None
-  ; ar_context = None
-  ; ar_questions =
-      List.init questions (fun index ->
-        { Masc.Tui_decode_asks.aq_id = Printf.sprintf "q%d" (index + 1)
-        ; aq_header = "Release"
-        ; aq_prompt = "Ship tonight?"
-        ; aq_mode = Masc.Tui_decode_asks.Ask_single
-        ; aq_free_text = Masc.Tui_decode_asks.Ask_choices_only
-        ; aq_choices = []
-        })
-  ; ar_resolution = resolution
-  }
-
-(* What those frames select: one count per open ask, from the same agenda the
-   strip counts, and nothing at all while no ask is open. *)
-let test_frames_without_the_agenda_select_the_question_count () =
-  let state = Masc_tui_types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
-  let set rows =
-    state.asks_snapshot <-
-      Some { asn_keeper = None; asn_open_count = List.length rows; asn_rows = rows }
-  in
-  check_bool "nothing read, nothing said" true
-    (Masc_tui_render_prim.questions_waiting_status state = []);
-  set
-    [ ask_row ~questions:2 "ask-1"
-    ; ask_row "ask-2"
-    ; ask_row
-        ~resolution:
-          (Masc.Tui_decode_asks.Ask_answered { aa_answered_at = 1.; aa_question_ids = [ "q1" ] })
-        "ask-3"
-    ];
-  check_bool "two open asks are two, however many questions they hold" true
-    (Masc_tui_render_prim.questions_waiting_status state
-     = [ Masc_tui_footer.Questions_waiting 2 ]);
-  set [];
-  check_bool "an empty list says nothing" true
-    (Masc_tui_render_prim.questions_waiting_status state = [])
-
 let tests =
   [ ( "tui-footer-status-items"
     , [ Alcotest.test_case "action text is not dropped as a key" `Quick
@@ -402,12 +320,6 @@ let tests =
           test_ensure_help_item_appends_once
       ; Alcotest.test_case "armed ask submit notice retires when answering is cleared" `Quick
           test_armed_ask_submit_notice_retires_when_answering_is_cleared
-      ; Alcotest.test_case "open questions lead the footer row" `Quick
-          test_open_questions_lead_the_footer_row
-      ; Alcotest.test_case "open questions rank between workspace and build" `Quick
-          test_open_questions_rank_between_workspace_and_build
-      ; Alcotest.test_case "frames without the agenda select the question count" `Quick
-          test_frames_without_the_agenda_select_the_question_count
       ;] )
   ; ( "voice meter"
     , [] )

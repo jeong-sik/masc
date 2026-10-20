@@ -54,7 +54,7 @@ let replaced_directory () = with_claim (fun admission directory root ->
   check "replacement preserved" true (Sys.file_exists root))
 let model_configuration_cleanup () =
   let models directory=Some {Masc.Browser_addon_models.store_root=Filename.concat directory "model-results";
-    outputs=[{Masc.Lane_addon_types.name="locate";schema=`Assoc ["type",`String "string"]}]} in
+    outputs=[{Masc.Lane_addon_types.name="locate";request_schema=Masc.Lane_addon_types.Package_schema_only;schema=`Assoc ["type",`String "string"]}]} in
   with_claim ~models (fun admission directory root ->
     let owned=ok (Socket.acquire ~admission ~directory) in
     check "worker receives the host model configuration flag" true

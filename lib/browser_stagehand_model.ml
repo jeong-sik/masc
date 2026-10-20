@@ -272,7 +272,7 @@ type cli_tail =
   | Cli_tail_unfit of cli_unfit
   | Cli_tail_exhausted of Keeper_lane_cli_oneshot.failure list
 
-type output_shape_issue =
+type output_shape_issue = Lane_addon_exact_shape.issue =
   | Missing_required_key of string
   | Incompatible_required_shape of string
 
@@ -281,63 +281,8 @@ type rejected_http_output =
   ; issue : output_shape_issue
   }
 
-let output_shape_issue_to_string = function
-  | Missing_required_key at -> "missing required key " ^ at
-  | Incompatible_required_shape at -> "incompatible required shape at " ^ at
-;;
-
-(* A deliberately narrow pre-Zod guard: check JSON Schema's required object
-   keys, the primitive type at each visited property, and anyOf alternatives.
-   This catches missing Stagehand act fields before the HTTP lane decides
-   failover. The extension still owns complete schema validation. *)
-let rec required_shape_issue ~at schema output =
-  match field "anyOf" schema with
-  | Some (`List (_ :: _ as alternatives)) ->
-    let issues = List.map (fun alternative -> required_shape_issue ~at alternative output) alternatives in
-    if List.exists Option.is_none issues then None else List.find_map Fun.id issues
-  | Some _ | None ->
-    let type_matches =
-      match field "type" schema, output with
-      | Some (`String "object"), `Assoc _
-      | Some (`String "array"), `List _
-      | Some (`String "string"), `String _
-      | Some (`String "boolean"), `Bool _
-      | Some (`String "integer"), (`Int _ | `Intlit _)
-      | Some (`String "number"), (`Int _ | `Intlit _ | `Float _)
-      | Some (`String "null"), `Null -> true
-      | Some (`String ("object" | "array" | "string" | "boolean" | "integer" | "number" | "null")), _ -> false
-      | (Some _ | None), _ -> true
-    in
-    if not type_matches
-    then Some (Incompatible_required_shape at)
-    else
-      match output with
-      | `Assoc fields ->
-        let required =
-          match field "required" schema with
-          | Some (`List keys) ->
-            List.filter_map (function `String key -> Some key | _ -> None) keys
-          | Some _ | None -> []
-        in
-        (match List.find_opt (fun key -> not (List.mem_assoc key fields)) required with
-         | Some key -> Some (Missing_required_key (at ^ "." ^ key))
-         | None ->
-           (match field "properties" schema with
-            | Some (`Assoc properties) ->
-              List.find_map
-                (fun (key, property_schema) ->
-                   match List.assoc_opt key fields with
-                   | None -> None
-                   | Some value ->
-                     required_shape_issue ~at:(at ^ "." ^ key) property_schema value)
-                properties
-            | Some _ | None -> None))
-      | _ ->
-        if Option.is_some (field "required" schema)
-           || Option.is_some (field "properties" schema)
-        then Some (Incompatible_required_shape at)
-        else None
-;;
+let output_shape_issue_to_string = Lane_addon_exact_shape.to_string
+let required_shape_issue = Lane_addon_exact_shape.issue
 
 type generation_failure =
   { http_failure : no_callback_error Exact.flow_execution_error option

@@ -921,17 +921,21 @@ let finish_frame_with_strip (state : state) ?clamped ~surface_key ~cursor ~rows
    [finish_surface]. It holds the next wake and recedes -- a schedule that
    fires in an hour is ambient, and painting it warn would make the screen
    shout every hour. What waits on the operator is not here: the surface strip
-   at the top carries it in red, on every surface. *)
+   at the top carries it in red, on every surface. The row starts at the same
+   column as the rows around it: the surface strip above and the composer
+   below both leave the frame's margin. *)
 let agenda_line agenda ~cols =
+  let margin = Masc_tui_ansi.framed_content_column in
   match
     Agenda.strip
       ~now:(Unix.gettimeofday ())
       ~localtime:Unix.localtime
-      ~cols
+      ~cols:(cols - margin)
       agenda
   with
   | None -> None
-  | Some clock -> Some ((Theme.recede ()) ^ clock ^ Ansi.reset)
+  | Some clock ->
+    Some (String.make margin ' ' ^ (Theme.recede ()) ^ clock ^ Ansi.reset)
 
 ;;
 

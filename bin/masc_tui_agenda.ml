@@ -47,6 +47,16 @@ type goal_to_confirm =
   ; since_iso : string
   }
 
+(* An ask a Keeper put to the operator and nobody has answered. One row per
+   ask, however many questions it holds: the operator answers an ask as one
+   draft and one submit, so the ask is what is waiting. *)
+type open_question =
+  { ask_id : string
+  ; keeper : string
+  ; first_question : string option
+  ; asked_at : float
+  }
+
 type 'row reading =
   | Not_read
   | Read_failed of string
@@ -55,6 +65,7 @@ type 'row reading =
 type t =
   { coming : scheduled reading  (** earliest first *)
   ; blocked : awaiting reading
+  ; asking : open_question reading  (** in the order the server sent them *)
   ; confirming : goal_to_confirm reading
   ; stuck : stalled reading  (** longest wait first *)
   }
@@ -75,18 +86,31 @@ let is_coming row = match row.standing with
    somebody else's sort is a strip that changes when their sort does. *)
 let by_time left right = String.compare left.at_iso right.at_iso
 
-let project ~scheduled ~awaiting ~confirming ~stalled =
+let project ~scheduled ~awaiting ~asking ~confirming ~stalled =
   { coming =
       (match scheduled with
        | Read rows -> Read (rows |> List.filter is_coming |> List.sort by_time)
        | (Not_read | Read_failed _) as unread -> unread)
   ; blocked = awaiting
+  ; asking
   ; confirming
   ; stuck = stalled
   }
 ;;
 
 let next t = match rows_of t.coming with row :: _ -> Some row | [] -> None
+
+let questions_waiting t = List.length (rows_of t.asking)
+
+(* One number for all four: a keeper holding a tool call, a question a keeper
+   asked, a Goal waiting for confirmation and a task only the operator can
+   move are the same answer to "is anything waiting on me", and badges beside
+   each other would make the operator add them up. *)
+let waiting t =
+  List.length (rows_of t.blocked)
+  + questions_waiting t
+  + List.length (rows_of t.confirming)
+  + List.length (rows_of t.stuck)
 
 (* One predicate, two readers: the row the frame draws and the row the
    keypress bound subtracts are the same row or neither exists. A section
@@ -95,6 +119,7 @@ let next t = match rows_of t.coming with row :: _ -> Some row | [] -> None
 let is_silent t =
   rows_of t.coming = []
   && rows_of t.blocked = []
+  && rows_of t.asking = []
   && rows_of t.confirming = []
   && rows_of t.stuck = []
 let rows_taken t = if is_silent t then 0 else 1
@@ -138,14 +163,14 @@ let clock_half ~now ~localtime ~cells row =
   if room <= 0 then "" else head ^ Masc_tui_message_layout.fit_middle room said
 ;;
 
-(* The same [label·count] shape the surface strip's Approvals badge uses, so
-   two counts of blocked work on one screen read as one vocabulary.
+(* The [label·count] shape the surface strip hangs a count on a ring entry
+   with ("Work·3"), so two counts on one screen read as one vocabulary.
 
-   Not a second copy of that badge. The strip windows its ring to fit, and
-   the window grows around the active entry: at eighty columns the entries
-   far from the active one drop out, Approvals among them and its count with
-   it. This row is not windowed, so the count is on screen from wherever the
-   operator is standing. *)
+   The count of work waiting on the operator is here rather than on a ring
+   entry. Approvals is not on the ring, and the strip windows the ring around
+   the active entry, so at eighty columns an entry far from it drops out with
+   its count. This row is not windowed, so the count is on screen from
+   wherever the operator is standing. *)
 let waiting_half waiting =
   if waiting <= 0 then ""
   else
@@ -160,16 +185,7 @@ let strip ~now ~localtime ~cols t =
   if is_silent t
   then None
   else begin
-    (* One number for all three: a keeper holding a tool call, a Goal waiting
-       for confirmation and a task only the operator can move are the same
-       answer to "is anything waiting on me", and badges beside each other
-       would make the operator add them up. *)
-    let waiting =
-      waiting_half
-        (List.length (rows_of t.blocked)
-         + List.length (rows_of t.confirming)
-         + List.length (rows_of t.stuck))
-    in
+    let waiting = waiting_half (waiting t) in
     let reserved =
       if waiting = "" then 0 else Masc_tui_message_layout.display_width waiting + 2
     in
@@ -200,6 +216,7 @@ type destination =
   | Nowhere
   | Keeper_holding of { keeper : string; tool_call_id : string }
       (** The exact held call; one Keeper can have several awaiting answers. *)
+  | Ask_to_answer of string  (** the ask, answered on Approvals *)
   | Goal_to_confirm of string  (** the Goal, confirmed on its own detail *)
   | Stuck_task of string  (** the task, read on its own detail *)
 
@@ -258,22 +275,25 @@ let time_left ~now (held : awaiting) =
 ;;
 
 (* How long the operator has not answered. Coarse on purpose: the row exists
-   because the wait is long, and minutes past the first day are noise. A stamp
-   this cannot read says nothing rather than saying zero. *)
+   because the wait is long, and minutes past the first day are noise. *)
+let waited_since ~now since =
+  let seconds = now -. since in
+  if Float.compare seconds 0.0 <= 0
+  then "just now"
+  else (
+    let whole = int_of_float seconds in
+    if whole >= 86_400
+    then Printf.sprintf "%dd waiting" (whole / 86_400)
+    else if whole >= 3_600
+    then Printf.sprintf "%dh waiting" (whole / 3_600)
+    else Printf.sprintf "%dm waiting" (whole / 60))
+;;
+
+(* A stamp this cannot read says nothing rather than saying zero. *)
 let waited ~now since_iso =
   match Time_codec.parse_rfc3339_opt since_iso with
   | None -> ""
-  | Some since ->
-    let seconds = now -. since in
-    if Float.compare seconds 0.0 <= 0
-    then "just now"
-    else (
-      let whole = int_of_float seconds in
-      if whole >= 86_400
-      then Printf.sprintf "%dd waiting" (whole / 86_400)
-      else if whole >= 3_600
-      then Printf.sprintf "%dh waiting" (whole / 3_600)
-      else Printf.sprintf "%dm waiting" (whole / 60))
+  | Some since -> waited_since ~now since
 ;;
 
 let overlay ~now ~localtime ~cols t =
@@ -338,6 +358,32 @@ let overlay ~now ~localtime ~cols t =
            })
         rows
   in
+  let asked =
+    match t.asking with
+    | Not_read -> [ quiet "not loaded yet" ]
+    | Read_failed reason -> [ failure ~cols reason ]
+    | Read [] -> [ quiet "no keeper has asked a question" ]
+    | Read rows ->
+      List.map
+        (fun (row : open_question) ->
+           (* The Keeper wrote both, so both are made safe to draw before the
+              row is measured; a question's line breaks are content and are
+              kept as marks rather than dropped. *)
+           let keeper = Masc.Tui_terminal_text.sanitize_terminal_text row.keeper in
+           { tone = Question
+           ; goes_to = Ask_to_answer row.ask_id
+           ; text =
+               two_column
+                 ~cols
+                 (match row.first_question with
+                  | Some question ->
+                    Printf.sprintf "%s asks: %s" keeper
+                      (Masc.Tui_terminal_text.preview_line question)
+                  | None -> Printf.sprintf "%s asked a question" keeper)
+                 (waited_since ~now row.asked_at)
+           })
+        rows
+  in
   let stuck =
     match t.stuck with
     | Not_read -> [ quiet "not loaded yet" ]
@@ -377,11 +423,13 @@ let overlay ~now ~localtime ~cols t =
   let heading text = { tone = Heading; text; goes_to = Nowhere } in
   let blank = { tone = Quiet; text = ""; goes_to = Nowhere } in
   (heading "Coming up" :: wakes)
-  (* "Awaiting you" is the badge's word for the three lists below together.
+  (* "Awaiting you" is the badge's word for the four lists below together.
      Each heading names its own rows, so the badge's number reads as the
      sections under it rather than as any one of them. *)
   @ [ blank; heading "Holding a call" ]
   @ questions
+  @ [ blank; heading "Answer a question" ]
+  @ asked
   @ [ blank; heading "Confirm a goal" ]
   @ goals
   @ [ blank; heading "Stuck on you" ]
@@ -400,7 +448,8 @@ let target_indexes lines =
         (index + 1)
         (match line.goes_to with
          | Nowhere -> acc
-         | Keeper_holding _ | Goal_to_confirm _ | Stuck_task _ -> index :: acc)
+         | Keeper_holding _ | Ask_to_answer _ | Goal_to_confirm _
+         | Stuck_task _ -> index :: acc)
         rest
   in
   loop 0 [] lines
@@ -409,7 +458,7 @@ let target_indexes lines =
 let selected_index lines ~selected =
   match selected with
   | Nowhere -> None
-  | Keeper_holding _ | Goal_to_confirm _ | Stuck_task _ ->
+  | Keeper_holding _ | Ask_to_answer _ | Goal_to_confirm _ | Stuck_task _ ->
       List.find_index (fun line -> line.goes_to = selected) lines
 ;;
 
@@ -424,7 +473,8 @@ let step lines ~selected direction =
     List.filter_map (fun line ->
       match line.goes_to with
       | Nowhere -> None
-      | (Keeper_holding _ | Goal_to_confirm _ | Stuck_task _) as target -> Some target)
+      | (Keeper_holding _ | Ask_to_answer _ | Goal_to_confirm _ | Stuck_task _)
+        as target -> Some target)
       lines
   in
   match targets with

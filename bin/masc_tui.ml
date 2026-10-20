@@ -14562,14 +14562,12 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     let system_log_level = Option.map Masc.Tui_decode.system_log_level_query
       state.system_logs_min_level in
     log_http_surface_read_started state ~full_refresh_running:true surface_context;
-    (* Held tool calls ride every tick, not just the Approvals surface: the
-       strip's Approvals badge is drawn from every surface, and a stale count
-       there would be worse than none. The payload is a handful of rows. The
-       durable Gate rides with them for the same badge — its rows are the
-       ones that keep when nobody is watching, which is exactly when the
-       badge is how an operator finds out. The server caches the snapshot. *)
-    (* Held approvals and Gate reads start after workspace admission, either
-       the cold initial-probe acknowledgement or the terminal refresh. *)
+    (* The side reads -- the keeper turns behind the footer's answering item,
+       the schedules behind the agenda strip's next wake, the open chat's
+       history -- start after workspace admission, either the cold
+       initial-probe acknowledgement or the terminal refresh. The open
+       questions the agenda strip counts are not among them: they ride this
+       bundle ([ask_request] above) whatever the surface. *)
     if not was_booting then launch_tick_side_reads state ~mailbox ~needs;
 
     (* This worker owns the binding. The UI's initial-probe acknowledgement is
@@ -26503,6 +26501,37 @@ and is loaded on demand through keeper_skill.
                         which is where every held call is answered. *)
                      close ();
                      goto_surface state ~mailbox:async_messages Approvals
+                 | Some
+                     { Masc_tui_agenda.goes_to =
+                         Masc_tui_agenda.Ask_to_answer ask_id
+                     ; _
+                     } ->
+                     (* Opened the way Home's Question row opens it: on
+                        Approvals, with this ask under the cursor and its
+                        questions in front of the operator. *)
+                     close ();
+                     (match
+                        List.find_index
+                          (fun (row : Masc.Tui_decode_asks.ask_row) ->
+                             String.equal row.ar_id ask_id)
+                          (open_ask_rows state)
+                      with
+                      | None ->
+                          report_action state "system"
+                            "Question changed; choose again"
+                      | Some cursor ->
+                          goto_surface state ~mailbox:async_messages Approvals;
+                          (* The reader follows the ask it was opened on,
+                             not the cursor, so a reader left open on
+                             another ask would come back instead of this
+                             one. *)
+                          (match state.ask_answer_mode with
+                           | Ask_answering { aam_ask_id }
+                             when not (String.equal aam_ask_id ask_id) ->
+                               leave_ask_answering state
+                           | Ask_answering _ | Ask_browsing -> ());
+                          state.ask_cursor <- Ask.On cursor;
+                          enter_ask_answering state)
                  | Some
                      { Masc_tui_agenda.goes_to =
                          Masc_tui_agenda.Goal_to_confirm goal_id

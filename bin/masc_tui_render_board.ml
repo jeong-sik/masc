@@ -205,7 +205,6 @@ let render_board_compose (state : state) =
           Masc_tui_keys.footer_hints_board_compose_writing
             ~reply:(Option.is_some state.board_compose_reply_to)
   in
-  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:prompt);
   let cursor =
     if state.board_compose_armed || Option.is_some state.board_compose_attach_input then
       Frame_presenter.Hidden
@@ -218,7 +217,7 @@ let render_board_compose (state : state) =
       Frame_presenter.Visible_at { row = min (rows - 2) row; column }
   in
   finish_frame_beside_acting_pane state ~surface_key:"board-compose" ~cursor
-    ~rows ~cols buf
+    ~rows ~cols ~footer:(Footer_hints { hints = prompt; position = None }) buf
 
 (* A tail this heading can do without. The two rows above the board each end
    in something atomic -- a key hint, the clause that finishes a sentence --

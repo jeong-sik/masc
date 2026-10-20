@@ -1252,15 +1252,41 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
       ~cursor ~rows ~cols:full_cols framed)
 
 
+(* What the footer of a frame without the agenda row adds to its status: the
+   count of asks waiting on the operator, which on every other surface the
+   agenda row says. The same projection the agenda counts, so the two numbers
+   cannot differ. *)
+let questions_waiting_status (state : state) : Masc_tui_footer.status_item list =
+  match Agenda.questions_waiting (Masc_tui_types.agenda state) with
+  | 0 -> []
+  | count -> [ Masc_tui_footer.Questions_waiting count ]
+
+(* The footer a frame beside the Activity pane ends with. [No_footer] is for
+   the chat's notice that the terminal cannot hold it, which is that frame's
+   last row instead. *)
+type acting_pane_footer =
+  | Footer_hints of { hints : string; position : string option }
+  | No_footer
+
 (* The end of a surface that draws its own composer and footer -- the Keeper
    chat, the Board composer -- instead of taking the shared composer row. It
    laid out against the same [cols] every surface does, the terminal less the
    Activity pane, so the pane is drawn in those columns here too, beside the
    rows above its own footer. The strip
    spans the whole terminal. [roster] is the Keeper roster the chat drew at
-   its left edge, a pane of its own for a drag. *)
+   its left edge, a pane of its own for a drag.
+
+   The footer is drawn here rather than by each frame, because these frames
+   draw no agenda row: an open question would otherwise be on screen nowhere
+   while the operator chats, which is where a Keeper's question goes unseen. *)
 let finish_frame_beside_acting_pane (state : state) ?clamped ?roster
-    ~surface_key ~cursor ~rows ~cols buf =
+    ~surface_key ~cursor ~rows ~cols ~footer buf =
+  (match footer with
+   | No_footer -> ()
+   | Footer_hints { hints; position } ->
+       Buffer.add_string buf
+         (footer_line ~status:(questions_waiting_status state) ?position state
+            ~max_cells:cols ~hints));
   let framed = Buffer.create (Buffer.length buf + 4096) in
   let lines = frame_lines buf in
   (* These frames draw neither the shared composer nor the agenda. Only

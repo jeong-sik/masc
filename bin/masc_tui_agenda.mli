@@ -9,8 +9,8 @@
     ["45 8-23 * * *"], "다음 일정과 해야 할 일을 알림으로 전달하시오").
 
     The strip is one row above the composer, and it is not drawn at all when
-    there is nothing to say -- the rule the surface strip's Approvals badge
-    already follows, where an always-on badge would be texture rather than
+    there is nothing to say -- the rule the surface strip's ring counts
+    already follow, where an always-on badge would be texture rather than
     information.
 
     {!rows_taken} is how that decision reaches both the frame and the keypress
@@ -80,6 +80,18 @@ type goal_to_confirm =
 (** A Goal the verifier proved. Its last step is the operator's confirmation
     (constitution, goal completion), so it waits on the operator. *)
 
+type open_question =
+  { ask_id : string  (** the ask the row is about, so a key can open it *)
+  ; keeper : string
+  ; first_question : string option
+        (** The first question's prompt, as the Keeper wrote it. [None] for an
+            ask that carries no question; the row then says only who asked. *)
+  ; asked_at : float
+  }
+(** An ask a Keeper put to the operator that nobody has answered or withdrawn.
+    One row per ask, however many questions it holds: the operator answers an
+    ask as one draft and one submit, so the ask is the unit of waiting. *)
+
 (** A list as the state holds it. An empty list is an answer only once it was
     read: before the first answer, and after a read that failed with nothing
     earlier to show, the overlay said "nothing is scheduled" about a list no
@@ -97,6 +109,7 @@ type t
 val project :
   scheduled:scheduled reading ->
   awaiting:awaiting reading ->
+  asking:open_question reading ->
   confirming:goal_to_confirm reading ->
   stalled:stalled reading ->
   t
@@ -106,8 +119,18 @@ val project :
 
 val rows_taken : t -> int
 (** [1] while the strip has something to say, [0] otherwise. The surface gets
-    the row back when it is [0]. A Goal to confirm and a stuck task each count
-    as something to say. *)
+    the row back when it is [0]. An open question, a Goal to confirm and a
+    stuck task each count as something to say, so the strip stays up while
+    any of them is left. *)
+
+val questions_waiting : t -> int
+(** How many asks wait on the operator's answer: one per ask, however many
+    questions it holds, and [0] for a list that was not read. The frames that
+    draw no strip say this in their footer. *)
+
+val waiting : t -> int
+(** The number the strip's badge shows: held calls, open questions, Goals to
+    confirm and stuck tasks together. A list that was not read adds nothing. *)
 
 (** The strip's two halves, as plain text. Styling belongs to the renderer;
     what goes in each half belongs here. *)
@@ -115,9 +138,9 @@ type strip =
   { clock : string  (** the next wake, or [""] when nothing is scheduled *)
   ; waiting : string
         (** the badge, or [""] when nothing waits on the operator. One count
-            over blocked keepers, Goals to confirm and stuck tasks together:
-            all answer "is anything waiting on me", and several badges would
-            be an addition the operator has to do. *)
+            over blocked keepers, open questions, Goals to confirm and stuck
+            tasks together: all answer "is anything waiting on me", and
+            several badges would be an addition the operator has to do. *)
   }
 
 val strip :
@@ -150,6 +173,8 @@ type destination =
   | Nowhere
   | Keeper_holding of { keeper : string; tool_call_id : string }
       (** The exact held call; one Keeper can have several awaiting answers. *)
+  | Ask_to_answer of string
+      (** The ask, answered on Approvals where every question is answered. *)
   | Goal_to_confirm of string  (** the Goal, confirmed on its own detail *)
   | Stuck_task of string  (** the task, read on its own detail *)
 
@@ -162,8 +187,9 @@ type line =
 val overlay :
   now:float -> localtime:(float -> Unix.tm) -> cols:int -> t -> line list
 (** Every wake still coming, earliest first, then everyone blocked on the
-    operator, then the Goals waiting for the operator's confirmation, then the
-    tasks stuck on them. Every row of every section, not just the one the strip
+    operator, then the questions Keepers asked and nobody answered, then the
+    Goals waiting for the operator's confirmation, then the tasks stuck on
+    them. Every row of every section, not just the one the strip
     names; the panel scrolls. A section whose list was not read says that
     instead of saying it is empty. *)
 

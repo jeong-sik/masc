@@ -446,7 +446,7 @@ let for_surface = function
       ; b Navigate "j/k" "choose" ~help:"move between decision links and conversations"
       ; b Navigate "Enter" "open" ~help:"open the selected destination; never approve"
       ; b Navigate "p" "requests" ~help:"approvals and questions"
-      ; b Navigate ";" "agenda" ~help:"Goal confirmations and tasks waiting on you"
+      ; b Navigate ";" "agenda" ~help:"held calls, questions, Goal confirmations and tasks waiting on you"
       ; b Navigate "m" "Usage" ~help:"account windows and Keeper usage"
       ; b Navigate "s" "music" ~help:"phrases, arrangements and recorded takes; no Keeper or score required"
       ]

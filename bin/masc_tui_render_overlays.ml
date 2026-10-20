@@ -60,10 +60,12 @@ let render_keeper_navigation (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 2048 in
   keeper_roster_pane ~focused:true state ~rows:terminal_rows ~cols buf;
-  Buffer.add_string buf (footer_line state ~max_cells:cols
-    ~hints:Masc_tui_keys.keeper_navigation_hints);
   finish_frame_beside_acting_pane state ~surface_key:"keeper-navigation"
-    ~cursor:Frame_presenter.Hidden ~rows:terminal_rows ~cols buf
+    ~cursor:Frame_presenter.Hidden ~rows:terminal_rows ~cols
+    ~footer:
+      (Footer_hints
+         { hints = Masc_tui_keys.keeper_navigation_hints; position = None })
+    buf
 
 let context_split_lines ~cols ~left_width ~left ~right =
   let inner = framed_inner_width cols in

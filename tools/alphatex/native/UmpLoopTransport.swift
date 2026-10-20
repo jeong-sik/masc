@@ -82,9 +82,14 @@ struct UmpLoopClip {
         let notes = try analysis(instance)
         let entryHost = try window.deadline(phase: instance.entry, index: instance.master, initial: initial, anchor: anchor)
         let exactEntryEnd = prefix(instance.localEntry, inclusive: true)
-        let expired = Set(notes.expiredNotes.filter { _, expiry in
+        var expired = Set(notes.expiredNotes.filter { _, expiry in
             expiry < through && (expiry < exactEntryEnd || entryHost != host)
         }.map(\.key))
+        // As for a late packet, a late entry acquires no voice when its
+        // instance also closes by this host: a voice held to that end expires.
+        if try entryHost != host && window.deadline(phase: instance.end, index: instance.master, initial: initial, anchor: anchor) <= host {
+            for ordinal in 0..<before { if case .on = UmpMessage(events[ordinal]).action { expired.insert(ordinal) } }
+        }
         return try umpRestoration(events, prefixCount: before, followingCount: through - before,
                                   preambleEndIndex: end, excludingNotes: expired, replacing: previous)
     }
@@ -147,7 +152,7 @@ struct UmpLoopPlan {
                         }
                         effects.append(event)
                     }
-                    let scope = Set(effects.map(UmpChannel.init))
+                    let scope = Set(effects.compactMap(UmpChannel.init(voice:)))
                     for event in effects { potential.observe(UmpMessage(event)) }
                     clip.shapes.append(UmpLoopShape(first: from, last: to, scope: scope))
                 }

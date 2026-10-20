@@ -748,6 +748,49 @@ for initial in [false,true] { for late in [false,true] {
 }
 
 print("COMMON_MIDI_COMPRESSED_BATCH_PASS: arithmetic missed-copy lookup retains earliest native batch copy; late first wrap ignores unreachable opaque suffix")
+// A late wrap begins a copy only for its due native batch. A key that copy
+// attacked before this callback is held across the cut, yet stays silent.
+let heldCutBase=try arrangement([asset("heldCut",[
+ ["seconds":0,"port":2,"bytes":[0xc0,0]],
+ ["seconds":0.1,"port":2,"bytes":[0x90,83,100]],
+ ["seconds":0.124,"port":2,"bytes":[0x80,83,70]]])],[clip("heldCut","heldCut",from:0,to:0.125,repeatCount:8)],duration:1)
+let heldCutCycle=try MidiCycle(start:0,end:0.6125,duration:0.6125,period:612_500_000,divisor:1)
+for (staged,active) in [(0.0,true),(0.0,false),(0.45,false)] { for late:UInt64 in [0,1,2_000_000] {
+ let owner=try MidiTransport(timeline:heldCutBase.timeline,uid:"1",loop:true,coordinated:true,cycle:heldCutCycle)
+ owner.prepared=true;owner.destination=heldCutBase.destination;owner.sourceDestinations=heldCutBase.sourceDestinations
+ reset(0);reviewWire=[];try owner.stageCoordinated(at:staged);try owner.runCoordinated(anchorNanoseconds:1_000_000_000)
+ if active { reviewClock=1_000_000_000;owner.tick();reviewClock=1_490_000_000;owner.tick();reviewWire=[] }
+ let wrap=try heldCutCycle.deadline(position:heldCutCycle.end,index:0,offset:staged,anchor:1_000_000_000)
+ reviewClock=wrap+late;owner.tick()
+ print("WRAP_EXPIRED_ATTACK_STAGED",staged,"ACTIVE",active,"LATE",late,"WIRE",reviewWire.map(\.1))
+ let notes=reviewWire.map(\.1).filter { $0[0]&0xe0==0x80 }
+ precondition(notes == (active ? [[0x80,83,70]]:[]),"late wrap re-attacked a key whose attack expired before the cut")
+ precondition(owner.state == .playing && owner.cycleIndex==1 && owner.sourceHeld[0]?[83] ?? 0==0)
+}}
+print("COMMON_MIDI_WRAP_EXPIRED_ATTACK_PASS: active, first and seeked callbacks at or after the wrap keep keys a cut copy attacked earlier silent; the drained copy's acquired release survives")
+// A cut entry acquires no key it did not send, so a same-batch original
+// release stays silent, and a key held across a later program change does
+// not make the notes-free entry refuse playback.
+let cutReleaseBase=try arrangement([asset("cutRelease",[
+ ["seconds":0,"port":2,"bytes":[0xc0,0]],
+ ["seconds":0.1,"port":2,"bytes":[0x90,83,100]],
+ ["seconds":0.1124999995,"port":2,"bytes":[0x80,83,70]]])],[clip("cutRelease","cutRelease",from:0,to:0.125,repeatCount:8)],duration:1)
+let cutProgramBase=try arrangement([asset("cutProgram",[
+ ["seconds":0,"port":2,"bytes":[0xc0,0]],
+ ["seconds":0.1,"port":2,"bytes":[0x90,83,100]],
+ ["seconds":0.11,"port":2,"bytes":[0xc0,1]],
+ ["seconds":0.124,"port":2,"bytes":[0x80,83,70]]])],[clip("cutProgram","cutProgram",from:0,to:0.125,repeatCount:8)],duration:1)
+for base in [cutReleaseBase,cutProgramBase] {
+ let owner=try MidiTransport(timeline:base.timeline,uid:"1",loop:true,coordinated:true,cycle:heldCutCycle)
+ owner.prepared=true;owner.destination=base.destination;owner.sourceDestinations=base.sourceDestinations
+ reset(0);reviewWire=[];try owner.stageCoordinated(at:0);try owner.runCoordinated(anchorNanoseconds:1_000_000_000)
+ reviewClock=try heldCutCycle.deadline(position:heldCutCycle.end,index:0,offset:0,anchor:1_000_000_000);owner.tick()
+ print("WRAP_CUT_ENTRY",owner.state,"FAILURE",String(describing:owner.terminalFailure),"WIRE",reviewWire.map(\.1))
+ precondition(owner.state == .playing && owner.terminalFailure==nil,"notes-free cut entry refused a key held across a program change")
+ let notes=reviewWire.map(\.1).filter { $0[0]&0xe0==0x80 }
+ precondition(notes.isEmpty,"cut entry sounded or released a key it never sent")
+}
+print("COMMON_MIDI_WRAP_CUT_ENTRY_OWNERSHIP_PASS: a notes-free cut entry acquires nothing, so its same-batch original release stays silent, and it does not refuse a key held across a program change")
 let zeroBase=try arrangement([asset("zero",[
     ["seconds":0,"port":2,"bytes":[0xc0,0]],
     ["seconds":0.3,"port":2,"bytes":[0x90,74,80,0x80,74,77]]])],[clip("zero","zero",from:0,to:1,repeatCount:1)],duration:1)

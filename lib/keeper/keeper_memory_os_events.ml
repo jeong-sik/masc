@@ -129,14 +129,35 @@ let append_error_to_string = function
     Printf.sprintf "memory event append failed path=%s: %s" path message
 ;;
 
+(* A row a crash cut short has no newline. The locked durable append cuts it
+   off before writing, so the next event starts its own line instead of
+   joining the torn one and making both unreadable. *)
 let append ~keepers_dir ~keeper_id (e : event) : (unit, append_error) result =
   match validate e with
   | Error error -> Error (Invalid_event error)
   | Ok e ->
     let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
-    (try Ok (Fs_compat.append_jsonl path (event_to_json e)) with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn -> Error (Write_failed { path; message = Printexc.to_string exn }))
+    let suffix = Yojson.Safe.to_string (event_to_json e) ^ "\n" in
+    let failed message = Error (Write_failed { path; message }) in
+    (match Fs_compat.append_private_jsonl_durable_locked_result path suffix with
+     | Fs_compat.Private_file_succeeded () -> Ok ()
+     | Fs_compat.Private_file_succeeded_with_cleanup_failure { value = (); cleanup_failure } ->
+       Log.Keeper.warn
+         ~keeper_name:keeper_id
+         "memory event append committed; descriptor settlement failed path=%s: %s"
+         path
+         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+       Ok ()
+     | Fs_compat.Private_file_failed error ->
+       failed (Fs_compat.private_jsonl_append_error_to_string error)
+     | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+       failed
+         (Printf.sprintf
+            "%s; descriptor settlement also failed: %s"
+            (Fs_compat.private_jsonl_append_error_to_string error)
+            (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+     | exception exn -> failed (Printexc.to_string exn))
 ;;
 
 (* Append in order and hand back only what failed. A producer on a path that

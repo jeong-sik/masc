@@ -63,9 +63,11 @@ type append_error =
 
 val append_error_to_string : append_error -> string
 
-(** Validate, then append one line. The caller decides what a failure means on
-    its path: a search that could not record its [Retrieved] still returns its
-    results, and says so in its log. *)
+(** Validate, then append one line. The append holds the sidecar's path lock
+    and fsyncs. A final row that a crash cut short, with no newline, is cut off
+    first so the new line starts on its own. The caller decides what a failure
+    means on its path: a search that could not record its [Retrieved] still
+    returns its results, and says so in its log. *)
 val append : keepers_dir:string -> keeper_id:string -> event -> (unit, append_error) result
 
 (** Append each event in order. Only the failures come back; a caller on a

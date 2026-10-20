@@ -92,6 +92,6 @@ that has left the queue is committed history.
   the facts it held. Once an ordinary Librarian read reconciles the receipts
   against no snapshot, the remaining explicit writes start the new Memory, as
   durable and continuity input do. That read first copies every receipt it
-  drops to `<keeper>.librarian-range-commit.json.rejected-<time>` with its
+  drops for lacking snapshot proof to `<keeper>.librarian-range-commit.json.rejected-<time>` with its
   reason; nothing reads that file back. The operator accepted this transition on
   2026-10-20 (#44144).

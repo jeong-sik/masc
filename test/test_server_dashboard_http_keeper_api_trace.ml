@@ -884,7 +884,15 @@ let test_purge_keeps_the_librarian_position_and_every_message () =
      check bool "applied" true result.applied;
      check bool "the reasoning was stripped" true
        (result.report.reasoning_blocks_stripped > 0);
-     check bool "the result was cleared" true (result.report.tool_results_cleared > 0)
+     check bool "the result was cleared" true (result.report.tool_results_cleared > 0);
+     (* Sound tool cycles drop nothing at a structural break, and the gap
+        between the counts is exactly that field. A transcript that does break
+        is the case below. *)
+     check int "no message is dropped at a structural break" 0
+       result.report.messages_dropped_at_structural_break;
+     check int "the message gap is the dropped count"
+       (result.report.messages_before - result.report.messages_after)
+       result.report.messages_dropped_at_structural_break
    | Error error -> fail (Checkpoints.purge_error_to_string error));
   (match Checkpoints.purge_current config ~keeper_name ~apply:true with
    | Ok again -> check bool "a second apply changes nothing" false again.applied
@@ -969,6 +977,63 @@ let test_clock_groups_accumulate_edges_per_turn () =
       (List.length (group |> member "events" |> to_list) >= 2)
   | _ -> fail "expected exactly one turn group"
 ;;
+
+(* A transcript whose tool cycles overlap is what the purge is reached for. The
+   preview has to say what recovering it costs, and through the real
+   [purge_current] the HTTP report's count has to be the core's, not a default
+   (#32462). The cost is exactly the gap between the message counts. *)
+let test_purge_preview_reports_what_a_structural_break_drops () =
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
+  with_temp_dir @@ fun dir ->
+  Eio_main.run @@ fun _env ->
+  let module Store = Keeper_checkpoint_store in
+  let state = Mcp_server.For_testing.create_state ~base_path:dir in
+  let config = Mcp_server.workspace_config state in
+  let keeper_name = "checkpoint-purge-broken" in
+  let trace_id = Keeper_identity.generate_trace_id ~now:1.0 () in
+  Keeper_meta_store.replace_snapshot config
+    (make_checkpoint_inventory_meta ~name:keeper_name ~trace_id)
+  |> Result.map_error (fun detail -> fail detail) |> Result.get_ok;
+  let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
+  let assistant content =
+    { Agent_core.Types.role = Agent_core.Types.Assistant
+    ; content
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  let tool_use id =
+    Agent_core.Types.ToolUse { id; name = "test_tool"; input = `Assoc [] }
+  in
+  (* Two tool cycles open before either is answered. *)
+  let messages =
+    [ Agent_core.Types.user_msg "(autonomous wake)"
+    ; assistant [ tool_use "c1" ]
+    ; assistant [ tool_use "c2" ]
+    ; Agent_core.Types.tool_result_msg ~tool_use_id:"c1" ~content:"one" ()
+    ; Agent_core.Types.tool_result_msg ~tool_use_id:"c2" ~content:"two" ()
+    ]
+    @ List.init Keeper_checkpoint_purge.default_config.keep_recent_messages (fun i ->
+        Agent_core.Types.user_msg (Printf.sprintf "recent %d" i))
+  in
+  let checkpoint =
+    { (make_inventory_checkpoint ~session_id:trace_id ~turn_count:3 ~created_at:3.0) with
+      Agent_core.Checkpoint.messages }
+  in
+  (match Store.save_agent_core_classified ~session_dir ~history_retained:2 checkpoint with
+   | Ok (Store.Saved _) -> ()
+   | Ok (Store.Stale_noop _) -> fail "fixture checkpoint was stale"
+   | Error detail -> fail detail);
+  match Checkpoints.purge_current config ~keeper_name ~apply:false with
+  | Error error -> fail (Checkpoints.purge_error_to_string error)
+  | Ok preview ->
+    check bool "the broken cycles cost messages" true
+      (preview.report.messages_dropped_at_structural_break > 0);
+    check int "the gap between the counts is that cost"
+      (preview.report.messages_before - preview.report.messages_after)
+      preview.report.messages_dropped_at_structural_break
 
 (* The purge drops everything from the first broken tool cycle on. Without this
    count in the response, [messages_before] - [messages_after] has a gap no
@@ -1087,6 +1152,10 @@ let () =
             "the report carries the count dropped at a structural break"
             `Quick
             test_purge_report_json_carries_the_dropped_count
+        ; test_case
+            "a preview reports what a structural break drops"
+            `Quick
+            test_purge_preview_reports_what_a_structural_break_drops
         ] )
     ]
 ;;

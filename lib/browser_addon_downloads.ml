@@ -68,6 +68,18 @@ let same_identity (a:Unix.stats) (b:Unix.stats) =
 let same_file a b = same_identity a b && a.Unix.st_size=b.Unix.st_size
   && a.st_mtime=b.st_mtime && a.st_ctime=b.st_ctime && a.st_nlink=b.st_nlink
   && a.st_uid=b.st_uid && a.st_perm=b.st_perm
+let file_observation (stat:Unix.stats) = `Assoc [
+  "device",`Int stat.st_dev;"inode",`Int stat.st_ino;
+  "kind",`String (match stat.st_kind with
+    | Unix.S_REG -> "regular" | S_DIR -> "directory" | S_CHR -> "character"
+    | S_BLK -> "block" | S_LNK -> "link" | S_FIFO -> "fifo" | S_SOCK -> "socket");
+  "bytes",`Int stat.st_size;"mtime",`Float stat.st_mtime;"ctime",`Float stat.st_ctime;
+  "links",`Int stat.st_nlink;"uid",`Int stat.st_uid;"permissions",`Int stat.st_perm]
+let changed_source_message snapshot observed =
+  "original completed download identity changed: " ^ Yojson.Safe.to_string (`Assoc [
+    "snapshotId",`String snapshot.descriptor.snapshot_id;
+    "expected",file_observation snapshot.source_stat;
+    "observed",file_observation observed])
 let private_directory path =
   let info=Unix.lstat path in
   if info.Unix.st_kind=Unix.S_DIR && info.st_uid=Unix.geteuid ()
@@ -239,7 +251,7 @@ let cleanup t =
       let* ()=check_parents snapshot.parents in
       let* ()=match Unix.lstat snapshot.source with
         | stat when same_file stat snapshot.source_stat -> Unix.unlink snapshot.source;Ok ()
-        | _ -> Error "original completed download identity changed"
+        | stat -> Error (changed_source_message snapshot stat)
         | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok () in
       let* path=snapshot_path ~directory:t.directory ~snapshot_id:snapshot.descriptor.snapshot_id in
       match Unix.lstat path with

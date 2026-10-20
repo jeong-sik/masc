@@ -22,6 +22,7 @@ on:
           - code-references
           - resource-reading
           - addon-lifecycle
+          - source-readers
 
 permissions:
   contents: read

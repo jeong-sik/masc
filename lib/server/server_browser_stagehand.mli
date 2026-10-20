@@ -31,28 +31,7 @@ val open_ :
 val session : t -> Browser_stagehand_session.t
 val pid : t -> int
 
-(** Startup cleanup for a Chromium left by a crashed server. Refuses to
-    erase the owner record when it cannot identify or stop that browser;
-    [open_] will then return [Error] before replacing its profile. *)
-val stop_left_behind : clock:_ Eio.Time.clock -> masc_root:string -> unit
-
 val attach_error_message : Browser_stagehand_session.attach_error -> string
 
 (** One server log line for each session event. *)
 val log_event : Browser_stagehand_session.event -> unit
-
-(** Stops a Chromium a previous server left, then, when [configuration] has
-    [\[browser.stagehand\]], installs the Stagehand lane's backend on [sw]
-    (RFC-browser-lane-stagehand §3.4). No browser starts until a
-    [Session_open]. [configuration] is the snapshot the server took before it
-    accepted any config save; later Runtime publication does not replace this
-    process's backend. *)
-val start :
-  sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> base_path:string ->
-  configuration:Browser_configuration.t option -> unit
-
-module For_testing : sig
-  val start_with_cleanup : cleanup:(unit -> unit) -> sw:Eio.Switch.t ->
-    env:Eio_unix.Stdenv.base -> base_path:string ->
-    configuration:Browser_configuration.t option -> (unit, exn) result Eio.Promise.t
-end

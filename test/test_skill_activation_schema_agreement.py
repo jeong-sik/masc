@@ -18,10 +18,12 @@ import skill_activation_event_log_fixture as log_fixture
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LEDGER_SOURCE = REPO_ROOT / "lib" / "keeper" / "keeper_skill_activation_ledger.ml"
 HARNESS = REPO_ROOT / "scripts" / "harness" / "workload" / "skill_activation_events.py"
+# A definition inside a comment is not the one the compiler reads.
+OCAML_COMMENT = re.compile(r"\(\*.*?\*\)", re.DOTALL)
 
 
 def ocaml_string_constant(name):
-    source = LEDGER_SOURCE.read_text(encoding="utf-8")
+    source = OCAML_COMMENT.sub("", LEDGER_SOURCE.read_text(encoding="utf-8"))
     found = re.findall(rf'^let {name} = "([^"]+)"$', source, re.MULTILINE)
     if len(found) != 1:
         raise AssertionError(

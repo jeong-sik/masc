@@ -32,7 +32,8 @@ val cleanup : configuration -> incarnation:string -> directory:string -> (unit, 
 val run : env:Eio_unix.Stdenv.base -> owner:Browser_addon_owner.t ->
   directory:string -> (unit -> unit) -> unit
 (** Read the pinned stagehand.json and register the real session backend. Each
-    session has a fresh child admission/profile and runs through the installed
+    session has a fresh child admission and uses either a private allocation or
+    the configured persistent profile. It runs through the installed
     native launcher and browser process owner. Native input remains available
     without a model selection; model requests require the selected stagehand
     output and its request-schema grant. On retirement, revoke admission before

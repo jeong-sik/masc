@@ -150,8 +150,10 @@ and supported RPN data, current notes, sustain/sostenuto membership and original
 release wire forms. Seek uses source tick/tempo-map or SMPTE timing. Unknown
 initial values and opaque device state fail explicitly; this is partial source
 reconstruction, with its boundaries documented in tools/alphatex/SOURCE-STATE.md.
-Source looping, VST routing, overdubs, shared clock and
-practice workflows remain separate unfinished units.
+Source-window looping is available but stays session-local: `:loop START END`
+chooses the range and `l` toggles repetition without changing the source
+document (tools/alphatex/MIDI-SOURCE.md §Source-window audition). VST routing,
+overdubs, shared clock and practice workflows remain separate unfinished units.
 
 ### Arrangement document boundary
 

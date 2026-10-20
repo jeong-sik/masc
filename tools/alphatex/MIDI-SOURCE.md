@@ -52,8 +52,12 @@ It does not extend key intervals through sustain/sostenuto or infer pedal voices
 events in the selected performance. Original event IDs and tracks remain stable;
 new events use track zero for SMF0/1 or the selected SMF2 pattern. The existing
 overlay, export and expression-order membership code carries these edits.
-Only this supported metadata type is editable; port, end markers and opaque
-metadata remain preserved source data. Positive BPM is rounded to SMF's positive
+Only these two supported metadata types are editable — Set Tempo (FF51) and time
+signature (FF58); port, end markers and opaque metadata remain preserved source
+data. Time-signature insertion, movement and removal (`editMidiSourceMeters`,
+`:meters`/`:meter`) are documented in
+[the sequencer design](../../docs/design/tui/MUSIC-SEQUENCER.md#imported-time-signature-maps).
+Positive BPM is rounded to SMF's positive
 24-bit microsecond representation. PPQ seconds follow the edited map, while
 SMPTE seconds derive directly from absolute frame ticks, independently of tempo
 event placement. Notes retain their ticks, pairing and release data.

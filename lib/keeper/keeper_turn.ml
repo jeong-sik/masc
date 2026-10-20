@@ -71,11 +71,10 @@ let direct_owner_conversation_context
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(direct_reply : bool)
-      ~(channel_session_key : string option)
       ~(channel : string)
   : string
   =
-  if (not direct_reply) || Option.is_some channel_session_key || String.trim channel <> ""
+  if (not direct_reply) || String.trim channel <> ""
   then ""
   else
     Keeper_world_observation_message_scope.collect_recent_direct_conversation
@@ -419,9 +418,6 @@ let run_keeper_invocation_turn_admitted_inner
   let direct_reply =
     Keeper_invocation_contract.direct_message_direct_reply direct_message
   in
-  let channel_session_key =
-    Keeper_invocation_contract.direct_message_channel_session_key direct_message
-  in
   let channel = Keeper_invocation_contract.direct_message_channel direct_message in
   let user_blocks =
     Keeper_invocation_contract.direct_message_user_agent_core_blocks direct_message
@@ -456,15 +452,7 @@ let run_keeper_invocation_turn_admitted_inner
          dispatch_failed ~class_:Tool_result.Runtime_failure cause
        | Ok (profile_defaults, meta) ->
             let dispatch_snapshot = Runtime.keeper_dispatch_snapshot ~keeper_name:meta.name in
-            let base_dir =
-              let root = session_base_dir ctx.config in
-              match channel_session_key with
-              | Some key when direct_reply ->
-                let d = Filename.concat (Filename.concat root "channels") key in
-                let (_ : string) = Keeper_fs.ensure_dir d in
-                d
-              | _ -> root
-            in
+            let base_dir = session_base_dir ctx.config in
       let session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
       let session_dir = Filename.concat base_dir session_id in
       let native_admission =
@@ -692,7 +680,7 @@ let run_keeper_invocation_turn_admitted_inner
                  (RFC keeper-memory-consolidation Stage 4). *)
               let recent_direct_conversation_text =
                 direct_owner_conversation_context
-                  ~config:ctx.config ~meta ~direct_reply ~channel_session_key
+                  ~config:ctx.config ~meta ~direct_reply
                   ~channel
               in
               (* 2. Worktree changes *)

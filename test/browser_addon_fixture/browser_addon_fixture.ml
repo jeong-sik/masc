@@ -23,7 +23,7 @@ def control(conn):
         if req["incarnation"]!=a.incarnation: raise RuntimeError("wrong incarnation")
         if req["operation"]!="snapshot": raise RuntimeError("fixture exposes snapshot only")
         with open(os.path.join(a.root,"clients.json")) as src: clients=json.load(src)
-        result={"reply":"snapshot","snapshot":{"state":"serving","clients":clients,"owned_backends":"unavailable"}}
+        result={"reply":"snapshot","snapshot":{"state":"serving","clients":clients,"owned_backends":{"automation":{"activity":"disabled","registered":False,"session":"closed"},"stagehand":{"activity":"disabled","registered":False,"session":"unknown"}}}}
         conn.sendall((json.dumps(result)+"\n").encode())
 def serve():
     while True:

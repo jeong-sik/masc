@@ -16,9 +16,9 @@ let notice_poll_state t ~state_id =
   t.poll_state<-Some state_id;changed
 let expected command reply = match command,reply with
   | _,W.Service_refusal _ | W.Snapshot,W.Snapshot_result _
-  | W.Poll _,W.Poll_result _ | (W.Deliver _|W.Disconnect _),W.Receipt
+  | W.Poll _,W.Poll_result _ | (W.Deliver _|W.Disconnect _|W.Retire),W.Receipt
   | W.Issue _,W.Issue_result _ -> true
-  | (W.Snapshot|Poll _|Deliver _|Disconnect _|Issue _),
+  | (W.Snapshot|Retire|Poll _|Deliver _|Disconnect _|Issue _),
     (W.Snapshot_result _|Poll_result _|Receipt|Issue_result _) -> false
 let call t ~on_cancel_after_dispatch command =
   if t.revoked || not (t.available ()) then Error (Unavailable "browser worker is unavailable")
@@ -31,8 +31,8 @@ let call t ~on_cancel_after_dispatch command =
       let writing = ref false in
       let allowance=t.control_timeout_sec +. (match command with
         | W.Issue {timeout_sec;_} -> timeout_sec | W.Poll {window_sec;_} -> window_sec
-        | W.Snapshot|Deliver _|Disconnect _ -> 0.) in
-      try Eio.Time.with_timeout_exn clock allowance (fun () -> Eio.Switch.run (fun sw ->
+        | W.Snapshot|Retire|Deliver _|Disconnect _ -> 0.) in
+      let exchange () = Eio.Switch.run (fun sw ->
         let flow = Eio.Net.connect ~sw net (`Unix t.socket_path) in
         if t.revoked || not (t.available ()) then Error (Unavailable "browser worker was retired before dispatch")
         else (
@@ -45,7 +45,10 @@ let call t ~on_cancel_after_dispatch command =
           else match W.reply_of_json (Yojson.Safe.from_string raw) with
           | Ok reply when expected command reply -> Ok reply
           | Ok _ -> Error (Outcome_unknown "unexpected browser service reply")
-          | Error detail -> Error (Outcome_unknown ("invalid browser service reply: " ^ detail)))))
+          | Error detail -> Error (Outcome_unknown ("invalid browser service reply: " ^ detail)))) in
+      try (match command with
+        | W.Retire -> exchange ()
+        | Snapshot|Poll _|Deliver _|Disconnect _|Issue _ -> Eio.Time.with_timeout_exn clock allowance exchange)
       with
       | Eio.Cancel.Cancelled _ as cancelled ->
         if !writing then Eio.Cancel.protect on_cancel_after_dispatch;

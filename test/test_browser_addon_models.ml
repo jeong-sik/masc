@@ -10,7 +10,7 @@ let incarnation="0b000000-0000-4000-8000-000000000007"
 let schema=`Assoc ["type",`String "object";"properties",`Assoc ["node_id",`Assoc ["type",`String "string"]];
   "required",`List [`String "node_id"];"additionalProperties",`Bool false]
 let request id=Lane_addon_exact.request_of_json (`Assoc ["kind",`String "exact_output";
-  "request_id",`String id;"output",`String "locate";"messages",`List [`String "Locate the menu."]]) |> ok
+  "request_id",`String id;"output",`String "locate";"messages",`List [`Assoc ["role",`String "user";"text",`String "Locate the menu."]]]) |> ok
 let answer node=`Assoc ["status",`String "answered";"output",`Assoc ["node_id",`String node];"slot",`String "fixture"]
 let scenario () =
   let root=Filename.temp_dir "browser-models-" "" |> Unix.realpath in

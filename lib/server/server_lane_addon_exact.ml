@@ -155,6 +155,14 @@ let cli_failure_slot = function
   | Keeper_lane_cli_oneshot.Invalid_json_output { runtime_id; _ }
   | Keeper_lane_cli_oneshot.Invalid_domain_output { runtime_id; _ } -> runtime_id
 
+let cli_prompt messages =
+  let rec texts acc = function
+    | [] -> Ok (String.concat "\n\n" (List.rev acc))
+    | { Addon.role = User; text } :: rest -> texts (text :: acc) rest
+    | { Addon.role = Assistant; text = _ } :: _ -> Error ()
+  in
+  texts [] messages
+
 let call ~cli_runner ~base_path ~(resolved : Registry.resolved_lane) ~schema (request : Addon.request) ~validate =
   let failures = ref [] in
   let note slot failure detail = failures := { slot; failure; detail } :: !failures in
@@ -165,7 +173,9 @@ let call ~cli_runner ~base_path ~(resolved : Registry.resolved_lane) ~schema (re
          (fun system -> Agent_core.Types.make_message ~role:System [ Agent_core.Types.text_block system ])
          request.system)
     @ List.map
-        (fun message -> Agent_core.Types.make_message ~role:User [ Agent_core.Types.text_block message ])
+        (fun (message : Addon.message) ->
+           let role = match message.role with User -> Agent_core.Types.User | Assistant -> Agent_core.Types.Assistant in
+           Agent_core.Types.make_message ~role [ Agent_core.Types.text_block message.text ])
         request.messages
   in
   let ended () = ending (List.rev !failures) in
@@ -177,12 +187,16 @@ let call ~cli_runner ~base_path ~(resolved : Registry.resolved_lane) ~schema (re
     match resolved.cli_slots with
     | [] -> ended ()
     | cli_slots ->
-      (* A one-shot client takes one prompt, so the user messages are joined in
-         order. *)
+      match cli_prompt request.messages with
+      | Error () ->
+        List.iter (fun slot -> note slot Failure.Configuration_refused
+          "a one-shot CLI cannot preserve assistant conversation turns") cli_slots;
+        ended ()
+      | Ok prompt ->
       match
         Keeper_lane_cli_oneshot.walk ?runner:cli_runner ~base_dir:base_path ~cli_slots
           ~system_prompt:(Option.value request.system ~default:"") ~requirement
-          ~prompt:(String.concat "\n\n" request.messages) ~validate ~on_failure:(fun _ -> ()) ()
+          ~prompt ~validate ~on_failure:(fun _ -> ()) ()
       with
       | Ok (slot, output) -> Addon.Call_ended (Addon.Answered { output; slot; usage = None })
       | Error cli_failures ->

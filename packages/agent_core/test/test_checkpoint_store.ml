@@ -34,7 +34,7 @@ let make_checkpoint ?(session_id = "test-session") ?(created_at = 1000.0) ()
   ; reasoning_effort = None
   ; cache_system_prompt = false
   ; context = Context.create_sync ()
-  ; mcp_sessions = []
+  ; pending_input = None; mcp_sessions = []
   ; working_context = None
   }
 ;;

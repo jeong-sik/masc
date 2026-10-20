@@ -737,3 +737,9 @@
  (modules test_response_phase_replay)
  (libraries llm_provider alcotest yojson))
 
+
+(test
+ (name test_agent_input_request)
+ (modules test_agent_input_request)
+ (libraries agent_core_base yojson alcotest)
+ (flags (:standard -open Agent_core_base)))

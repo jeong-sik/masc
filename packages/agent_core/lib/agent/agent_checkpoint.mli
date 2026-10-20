@@ -38,6 +38,7 @@ val build_resume
 val build_checkpoint
   :  ?session_id:string
   -> ?working_context:Yojson.Safe.t
+  -> pending_input:Agent_input_request.pending option
   -> state:Types.agent_state
   -> tools:Tool_set.t
   -> context:Context.t

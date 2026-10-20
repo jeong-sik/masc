@@ -2118,7 +2118,7 @@ let test_runtime_agent_context_preserves_provider_sampling_config () =
     ; response_format = (Agent_core.Types.default_config ~model:"qwen").response_format
     ; cache_system_prompt = false
     ; context = Agent_core.Context.create_sync ()
-    ; mcp_sessions = []
+    ; pending_input = None; mcp_sessions = []
     ; working_context = None
     }
   in
@@ -2173,7 +2173,7 @@ let test_runtime_agent_context_resume_patches_stale_response_format_to_base_cont
     ; response_format = Agent_core.Types.Off
     ; cache_system_prompt = false
     ; context = Agent_core.Context.create_sync ()
-    ; mcp_sessions = []
+    ; pending_input = None; mcp_sessions = []
     ; working_context = None
     }
   in
@@ -2603,7 +2603,7 @@ let context_fit_checkpoint () =
   ; response_format = Agent_core.Types.Off
   ; cache_system_prompt = false
   ; context = Agent_core.Context.create_sync ()
-  ; mcp_sessions = []
+  ; pending_input = None; mcp_sessions = []
   ; working_context = None
   }
 

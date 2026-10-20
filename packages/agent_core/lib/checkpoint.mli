@@ -39,6 +39,7 @@ type t =
   ; context : Context.t
   ; mcp_sessions : Mcp_session.info list
   ; working_context : Yojson.Safe.t option
+  ; pending_input : Agent_input_request.pending option
   }
 
 type message_splice =
@@ -83,6 +84,7 @@ type delta_op =
   | Patch_context of Context.diff
   | Replace_mcp_sessions of Mcp_session.info list
   | Replace_working_context of Yojson.Safe.t option
+  | Replace_pending_input of Agent_input_request.pending option
 
 type delta =
   { delta_version : int
@@ -96,11 +98,11 @@ type delta =
 (** {1 Serialization} *)
 
 (** Serialize an exact current checkpoint to JSON. Raises [Invalid_argument]
-    when a manually constructed value violates the v11 contract. *)
+    when a manually constructed value violates the v12 contract. *)
 val to_json : t -> Yojson.Safe.t
 
 (** Serialize an exact current checkpoint to JSON without raising when a
-    manually constructed value violates the v11 contract. *)
+    manually constructed value violates the v12 contract. *)
 val to_json_result : t -> (Yojson.Safe.t, Error.t) result
 
 (** [drop_unencodable_json cp] is the recovery copy for a checkpoint whose
@@ -108,10 +110,11 @@ val to_json_result : t -> (Yojson.Safe.t, Error.t) result
     encoded is removed (a required payload field becomes an empty object),
     the text around it stays. Returns [None] when the checkpoint already
     encodes or when nothing droppable explains the refusal. The codec still
-    rejects the original — see {!to_json_result}. *)
+    rejects the original — see {!to_json_result}. Pending request ownership,
+    including its schema, is preserved exactly rather than discarded. *)
 val drop_unencodable_json : t -> t option
 
-(** Deserialize only the exact current v11 checkpoint schema. Every other
+(** Deserialize only the exact current v12 checkpoint schema. Every other
     version is rejected. *)
 val of_json : Yojson.Safe.t -> (t, Error.t) result
 
@@ -156,7 +159,7 @@ val create_encoding_memo : unit -> encoding_memo
     encode, validation or decode. That is a record the previous successful call
     wrote, the decode that call returned for it, or a record
     {!of_string_with_encoding_memo} read. Every other message is encoded,
-    validated against the v11 contract, and decoded once from the bytes written
+    validated against the v12 contract, and decoded once from the bytes written
     for it. After a success, [memo] holds the messages of [cp] and their
     decodes.
 
@@ -198,7 +201,7 @@ val delta_of_json : Yojson.Safe.t -> (delta, Error.t) result
 val compute_delta : t -> t -> delta
 
 (** Apply a delta to a base checkpoint. Both the base and resulting checkpoint
-    must satisfy the exact current v11 contract. *)
+    must satisfy the exact current v12 contract. *)
 val apply_delta : t -> delta -> (t, Error.t) result
 
 (** {1 Queries} *)

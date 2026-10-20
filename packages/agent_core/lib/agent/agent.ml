@@ -140,8 +140,8 @@ let run_turn_core_detailed
 (* Original run_turn_core implementation removed — now in Pipeline.run_turn.
    See git history for the previous 240-line monolithic version. *)
 
-let provide_input agent request response =
-  if Agent_elicitation.apply_response ~metadata:[] agent request response then ()
+let provide_input agent pending response =
+  Agent_elicitation.apply_response ~metadata:[] agent pending response
 ;;
 
 (* ── Unified run loop ────────────────────────────────────────── *)
@@ -409,12 +409,23 @@ let lifecycle_outcome_of_error error =
 ;;
 
 let with_classified_run_lifecycle_events agent ~classify_success f =
+  let previous_pending = agent.pending_input in
+  let on_outcome ~run_id outcome =
+    match outcome with
+    | Agent_lifecycle_events.Failed _ -> ()
+    | Agent_lifecycle_events.Input_required request ->
+      Eio.Mutex.use_rw ~protect:true agent.mu (fun () ->
+        agent.pending_input <- Some {Agent_input_request.run_id;request})
+    | Agent_lifecycle_events.Completed _ | Agent_lifecycle_events.Yielded _ ->
+      clear_pending_input agent previous_pending
+  in
   Agent_lifecycle_events.with_run_lifecycle_events
     ~event_bus:agent.options.event_bus
     ~agent_name:agent.state.config.name
     ~raw_trace:agent.options.raw_trace
     ~current_run_id:(fun () ->
       Option.bind (lifecycle_snapshot agent) (fun s -> s.current_run_id))
+    ~on_outcome
     ~classify:(function
       | Ok success -> classify_success success
       | Error detailed -> lifecycle_outcome_of_error detailed.Provider_failure_attribution.error)
@@ -768,6 +779,7 @@ let resume
   { mu = Eio.Mutex.create ()
   ; state
   ; lifecycle = None
+  ; pending_input = checkpoint.pending_input
   ; tools = Tool_set.of_list tools
   ; net
   ; context = ctx
@@ -781,10 +793,13 @@ let resume
 ;;
 
 let checkpoint ?(session_id = "") ?working_context agent =
+  let state, pending_input = Eio.Mutex.use_ro agent.mu (fun () ->
+    agent.state, agent.pending_input) in
   Agent_checkpoint.build_checkpoint
     ~session_id
     ?working_context
-    ~state:agent.state
+    ~pending_input
+    ~state
     ~tools:agent.tools
     ~context:agent.context
     ~mcp_clients:agent.options.mcp_clients
@@ -1117,6 +1132,12 @@ module Advanced = struct
 end
 
 let run_turn_stream_detailed ~sw ?clock ~on_event ?on_telemetry ?execution_store agent =
+  with_classified_run_lifecycle_events agent
+    ~classify_success:(function
+      | `Complete response -> Agent_lifecycle_events.Completed response
+      | `TerminalToolCompleted receipt -> Agent_lifecycle_events.Completed receipt.Terminal_tool_receipt.response
+      | `ToolsExecuted -> Agent_lifecycle_events.Yielded {turn=agent.state.turn_count})
+  @@ fun () ->
   let run ~sw () =
     match Pipeline.resolve_turn_frontier agent with
     | Error error -> Error (detailed_error_of_core_error error)

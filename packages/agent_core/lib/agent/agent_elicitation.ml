@@ -1,30 +1,13 @@
 open Types
 open Agent_types
 
-let sanitize_request_id_component value =
-  let buf = Buffer.create (String.length value) in
-  String.iter
-    (fun ch ->
-       match ch with
-       | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> Buffer.add_char buf ch
-       | '-' | '_' -> Buffer.add_char buf ch
-       | _ -> Buffer.add_char buf '-')
-    value;
-  let raw = Buffer.contents buf |> String.lowercase_ascii in
-  let trimmed = String.trim raw in
-  if trimmed = "" then "agent" else trimmed
-;;
-
 let input_required_of_request
       ~agent_name
-      ~turn
       ?created_at
       (req : Hooks.elicitation_request)
   =
   let created_at = Option.value created_at ~default:(Unix.gettimeofday ()) in
-  let participant = sanitize_request_id_component agent_name in
-  let created_ms = int_of_float (created_at *. 1000.0) in
-  { Error.request_id = Printf.sprintf "%s-turn-%d-input-%d" participant turn created_ms
+  { Error.request_id = Event_bus.fresh_id ()
   ; participant_name = Some agent_name
   ; question = req.Hooks.question
   ; schema = req.schema
@@ -43,11 +26,16 @@ let message_of_response ?(metadata = []) ~question = function
   | Hooks.Declined | Hooks.Timeout -> None
 ;;
 
-let apply_response ?metadata agent (req : Error.input_required) response =
-  match message_of_response ?metadata ~question:req.question response with
-  | None -> false
-  | Some message ->
-    update_state agent (fun state ->
-      { state with messages = Util.snoc state.messages message });
-    true
+let apply_response ?metadata agent supplied response =
+  Eio.Mutex.use_rw ~protect:true agent.mu (fun () ->
+    match Agent_input_request.settle ~current:agent.pending_input supplied with
+    | Error error -> Error error
+    | Ok owned ->
+      let message = message_of_response ?metadata ~question:owned.request.question response in
+      (match message with
+       | None -> ()
+       | Some message ->
+         agent.state <- {agent.state with messages=Util.snoc agent.state.messages message});
+      agent.pending_input <- None;
+      Ok ())
 ;;

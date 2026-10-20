@@ -8,6 +8,7 @@ let persist_for_state agent stage state =
   | Some sink ->
     let checkpoint =
       Agent_checkpoint.build_checkpoint
+        ~pending_input:agent.pending_input
         ~state
         ~tools:agent.tools
         ~context:agent.context

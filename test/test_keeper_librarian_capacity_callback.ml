@@ -233,7 +233,7 @@ let test_prefit_real_continuity ~base_path () =
      tools=[];tool_choice=None;disable_parallel_tool_use=false;temperature=None;
      top_p=None;top_k=None;min_p=None;reasoning_effort=None;enable_thinking=None;
      preserve_thinking=None;response_format=Agent_core.Types.Off;cache_system_prompt=false;
-     context=Agent_core.Context.create_sync ();mcp_sessions=[];working_context=None} in
+     context=Agent_core.Context.create_sync ();pending_input = None; mcp_sessions = [];working_context=None} in
   let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
   (match C.save_agent_core_classified ~session_dir ~history_retained:0 checkpoint with
    | Ok (C.Saved _) -> () | Ok (C.Stale_noop _) -> Alcotest.fail "stale fixture"
@@ -642,7 +642,7 @@ let test_continuity_only_run_fails_when_the_snapshot_is_refused ~base_path ~regi
      tools=[];tool_choice=None;disable_parallel_tool_use=false;temperature=None;
      top_p=None;top_k=None;min_p=None;reasoning_effort=None;enable_thinking=None;
      preserve_thinking=None;response_format=Agent_core.Types.Off;cache_system_prompt=false;
-     context=Agent_core.Context.create_sync ();mcp_sessions=[];working_context=None} in
+     context=Agent_core.Context.create_sync ();pending_input = None; mcp_sessions = [];working_context=None} in
   let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
   (match C.save_agent_core_classified ~session_dir ~history_retained:0 checkpoint with
    | Ok (C.Saved _) -> () | Ok (C.Stale_noop _) -> Alcotest.fail "stale fixture"

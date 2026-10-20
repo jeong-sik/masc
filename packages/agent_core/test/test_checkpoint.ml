@@ -67,6 +67,7 @@ let make_checkpoint
   ; reasoning_effort
   ; cache_system_prompt = false
   ; context
+  ; pending_input = None
   ; mcp_sessions
   ; working_context = None
   }
@@ -707,7 +708,7 @@ let test_tool_image_survives_dispatch_and_checkpoint () =
     (image_data (request restored))
 ;;
 
-(* The v11 validator builds an element's scope string only for an element
+(* The v12 validator builds an element's scope string only for an element
    that fails, so these pin the error text for a failure deep inside nested
    lists: it must name the message, the block and the detail exactly as a
    validator that built every scope up front did. *)
@@ -729,7 +730,7 @@ let reasoning_message details =
 
 let detail index = `Assoc [ "type", `String "reasoning.text"; "text", `String (string_of_int index) ]
 
-let v11_detail json =
+let v12_detail json =
   match Checkpoint.of_json json with
   | Ok _ -> Alcotest.fail "the damaged checkpoint was accepted"
   | Error (Error.Serialization (Error.JsonParseError { detail })) -> detail
@@ -747,15 +748,15 @@ let test_a_failure_deep_in_nested_lists_names_its_element () =
    | Error error -> Alcotest.failf "a valid checkpoint was refused: %s" (Error.to_string error));
   Alcotest.(check string)
     "a duplicated detail field names message, block and detail"
-    "Checkpoint v11 message[1] content[0].details[2] duplicates fields [text]"
-    (v11_detail (checkpoint_json_with_raw_messages [ valid; damaged ]));
+    "Checkpoint v12 message[1] content[0].details[2] duplicates fields [text]"
+    (v12_detail (checkpoint_json_with_raw_messages [ valid; damaged ]));
   let unknown_field =
     `Assoc [ "role", `String "user"; "content", `List []; "extra", `Bool true ]
   in
   Alcotest.(check string)
     "an unknown message field names the message"
-    "Checkpoint v11 message[2] schema mismatch (missing=[], unknown=[extra], duplicate=[])"
-    (v11_detail (checkpoint_json_with_raw_messages [ valid; valid; unknown_field ]))
+    "Checkpoint v12 message[2] schema mismatch (missing=[], unknown=[extra], duplicate=[])"
+    (v12_detail (checkpoint_json_with_raw_messages [ valid; valid; unknown_field ]))
 ;;
 
 (* A tool result may hold tool results, to any depth. A validator that checked
@@ -786,8 +787,8 @@ let test_a_bad_leaf_under_nested_tool_results_fails_once_with_its_path () =
   in
   Alcotest.(check string)
     "the error names every level down to the leaf"
-    (Printf.sprintf "Checkpoint v11 message[0] content[0]%s.text must be a string" path)
-    (v11_detail (checkpoint_json_with_raw_messages [ message ]))
+    (Printf.sprintf "Checkpoint v12 message[0] content[0]%s.text must be a string" path)
+    (v12_detail (checkpoint_json_with_raw_messages [ message ]))
 ;;
 
 let () =
@@ -799,19 +800,19 @@ let () =
             test_image_carriers_remain_canonical
         ; test_case "tool PNG reaches provider after checkpoint" `Quick
             test_tool_image_survives_dispatch_and_checkpoint ] )
-    ; ( "v11 contract"
+    ; ( "v12 contract"
       , [ test_case "a failure deep in nested lists names its element" `Quick
             test_a_failure_deep_in_nested_lists_names_its_element
         ; test_case "a bad leaf under nested tool results fails once with its path" `Quick
             test_a_bad_leaf_under_nested_tool_results_fails_once_with_its_path ] )
     ; ( "version"
-      , [ test_case "checkpoint_version is 11" `Quick (fun () ->
-            check int "version" 11 Checkpoint.checkpoint_version)
+      , [ test_case "checkpoint_version is 12" `Quick (fun () ->
+            check int "version" 12 Checkpoint.checkpoint_version)
         ; test_case "version field in to_json" `Quick (fun () ->
             let cp = make_checkpoint () in
             let json = Checkpoint.to_json cp in
             let v = Yojson.Safe.Util.(json |> member "version" |> to_int) in
-            check int "version" 11 v)
+            check int "version" 12 v)
         ; test_case "wrong version returns Error" `Quick (fun () ->
             let cp = make_checkpoint () in
             let json = Checkpoint.to_json cp in
@@ -1694,7 +1695,7 @@ let () =
             let p1 = List.hd t.parameters in
             check string "param name" "city" p1.name;
             check bool "required" true p1.required)
-        ; test_case "authoritative schema is a v11 wire" `Quick (fun () ->
+        ; test_case "authoritative schema is a v12 wire" `Quick (fun () ->
             let input_schema : Yojson.Safe.t =
               `Assoc
                 [ "type", `String "object"
@@ -1714,7 +1715,7 @@ let () =
             in
             let json = Checkpoint.to_json (make_checkpoint ~tools:[ tool ] ()) in
             let open Yojson.Safe.Util in
-            check int "new wire version" 11 (json |> member "version" |> to_int);
+            check int "new wire version" 12 (json |> member "version" |> to_int);
             check
               string
               "authoritative schema persisted"
@@ -2320,7 +2321,7 @@ let () =
               | other -> other
             in
             check bool "error" true (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v11 rejects unknown nested message field" `Quick (fun () ->
+        ; test_case "current v12 rejects unknown nested message field" `Quick (fun () ->
             let message : Types.message =
               { role = Types.User
               ; content = [ Types.Text "hello" ]
@@ -2341,7 +2342,7 @@ let () =
               "unknown message field"
               true
               (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v11 rejects normalized empty metadata" `Quick (fun () ->
+        ; test_case "current v12 rejects normalized empty metadata" `Quick (fun () ->
             let message : Types.message =
               { role = Types.User
               ; content = [ Types.Text "hello" ]
@@ -2358,7 +2359,7 @@ let () =
                    (update_first_json (append_json_field "metadata" (`Assoc [])))
             in
             check bool "empty metadata" true (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v11 preserves blank reasoning content" `Quick (fun () ->
+        ; test_case "current v12 preserves blank reasoning content" `Quick (fun () ->
             let message : Types.message =
               { role = Types.Assistant
               ; content =
@@ -2405,7 +2406,7 @@ let () =
                |> index 0
                |> member "reasoning_content"
                |> to_string))
-        ; test_case "current v11 rejects duplicate nested content field" `Quick (fun () ->
+        ; test_case "current v12 rejects duplicate nested content field" `Quick (fun () ->
             let message : Types.message =
               { role = Types.User
               ; content = [ Types.Text "hello" ]
@@ -2431,7 +2432,7 @@ let () =
               "duplicate content field"
               true
               (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v11 rejects unknown nested tool field" `Quick (fun () ->
+        ; test_case "current v12 rejects unknown nested tool field" `Quick (fun () ->
             let bad =
               make_checkpoint ~tools:[ sample_tool_schema ] ()
               |> Checkpoint.to_json
@@ -2444,7 +2445,7 @@ let () =
               "unknown tool field"
               true
               (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v11 rejects noncanonical response format" `Quick (fun () ->
+        ; test_case "current v12 rejects noncanonical response format" `Quick (fun () ->
             let bad =
               make_checkpoint ()
               |> Checkpoint.to_json
@@ -2455,7 +2456,7 @@ let () =
               "legacy response format"
               true
               (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v11 rejects malformed nested MCP headers" `Quick (fun () ->
+        ; test_case "current v12 rejects malformed nested MCP headers" `Quick (fun () ->
             let session : Mcp_session.info =
               { server_name = "http-tools"
               ; command = "http"
@@ -2475,7 +2476,7 @@ let () =
                    (update_first_json (replace_json_field "http_headers" (`Assoc [])))
             in
             check bool "malformed headers" true (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v11 rejects duplicate context keys" `Quick (fun () ->
+        ; test_case "current v12 rejects duplicate context keys" `Quick (fun () ->
             let bad =
               make_checkpoint ()
               |> Checkpoint.to_json
@@ -2484,7 +2485,7 @@ let () =
                    (`Assoc [ "channel", `String "one"; "channel", `String "two" ])
             in
             check bool "duplicate context" true (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v11 rejects normalized reasoning effort" `Quick (fun () ->
+        ; test_case "current v12 rejects normalized reasoning effort" `Quick (fun () ->
             let bad =
               make_checkpoint ()
               |> Checkpoint.to_json

@@ -506,7 +506,7 @@ let message_to_json_result ~message_index (msg : Types.message) =
     checkpoint_content_block_to_json_result
       ~scope:
         (Printf.sprintf
-           "Checkpoint v11 message[%d].content[%d]"
+           "Checkpoint v12 message[%d].content[%d]"
            message_index
            block_index)
       block)
@@ -577,6 +577,7 @@ let checkpoint_fields_around_messages cp =
     ; "cache_system_prompt", `Bool cp.cache_system_prompt
     ; "context", Context.to_json cp.context
     ; "mcp_sessions", Mcp_session.info_list_to_json cp.mcp_sessions
+    ; "pending_input", (match cp.pending_input with None -> `Null | Some p -> Agent_input_request.pending_to_json p)
     ; ( "working_context"
       , match cp.working_context with
         | Some working_context -> working_context
@@ -599,7 +600,7 @@ let checkpoint_to_json_result (cp : Checkpoint_types.t) =
 let decode_current_json json =
   try
     let open Yojson.Safe.Util in
-    let* () = Checkpoint_v11_contract.validate_v11_json json in
+    let* () = Checkpoint_contract.validate_json json in
     let* tool_choice =
       match json |> member "tool_choice" with
       | `Null -> Ok None
@@ -640,6 +641,13 @@ let decode_current_json json =
         (json |> member "reasoning_effort")
     in
     let* usage = json |> member "usage" |> usage_of_json in
+    let* pending_input =
+      match json |> member "pending_input" with
+      | `Null -> Ok None
+      | value -> Agent_input_request.pending_of_json value
+          |> Result.map Option.some
+          |> Result.map_error (fun detail -> Error.Serialization (JsonParseError {detail}))
+    in
     let working_context =
       match json |> member "working_context" with
       | `Null -> None
@@ -670,6 +678,7 @@ let decode_current_json json =
       ; context
       ; mcp_sessions
       ; working_context
+      ; pending_input
       }
   with
   | Yojson.Safe.Util.Type_error (msg, _) ->
@@ -688,7 +697,7 @@ let decode_current_json json =
 
 let checkpoint_json_result cp =
   let* json = checkpoint_to_json_result cp in
-  let* () = validate_checkpoint_json ~context:"Checkpoint v11" json in
+  let* () = validate_checkpoint_json ~context:"Checkpoint v12" json in
   let+ _ = decode_current_json json in
   json
 ;;
@@ -709,7 +718,7 @@ let to_json_result = checkpoint_json_result
    refusal is not a payload problem, so the caller keeps the original
    error instead of retrying. *)
 let encodable_json json =
-  match Execution_json.validate ~context:"Checkpoint v11 drop" json with
+  match Execution_json.validate ~context:"Checkpoint v12 drop" json with
   | Ok () -> true
   | Error _ -> false
 ;;
@@ -907,6 +916,9 @@ let delta_to_json (delta : delta) =
         [ "kind", `String "replace_mcp_sessions"
         ; "mcp_sessions", Mcp_session.info_list_to_json sessions
         ]
+    | Replace_pending_input pending_input ->
+      `Assoc ["kind", `String "replace_pending_input"; "pending_input",
+        (match pending_input with None -> `Null | Some p -> Agent_input_request.pending_to_json p)]
     | Replace_working_context working_context ->
       `Assoc
         [ "kind", `String "replace_working_context"
@@ -1008,6 +1020,16 @@ let delta_of_json json =
     | "replace_mcp_sessions" ->
       let+ sessions = Mcp_session.info_list_of_json (op_json |> member "mcp_sessions") in
       Replace_mcp_sessions sessions
+    | "replace_pending_input" ->
+      let* () = validate_exact_object_fields ~scope:"Checkpoint.delta replace_pending_input"
+        ~expected:["kind";"pending_input"] op_json in
+      let* pending_input = match op_json |> member "pending_input" with
+        | `Null -> Ok None
+        | value -> Agent_input_request.pending_of_json value
+            |> Result.map Option.some
+            |> Result.map_error (fun detail -> Error.Serialization (JsonParseError {detail}))
+      in
+      Ok (Replace_pending_input pending_input)
     | "replace_working_context" ->
       Ok
         (Replace_working_context
@@ -1119,17 +1141,17 @@ let decode_written_bytes ~decode bytes =
 ;;
 
 (* The passes [checkpoint_json_result] runs over the whole checkpoint,
-   restricted to one message: encode, [Execution_json.validate], the v11
+   restricted to one message: encode, [Execution_json.validate], the v12
    message contract, and a decode. None of them reads past the message's own
-   subtree ([Checkpoint_v11_contract.validate_messages] maps
+   subtree ([Checkpoint_contract.validate_messages] maps
    [validate_message] over the array; [Execution_json.validate] checks keys and
    numbers inside each object), so a message that passes here passes inside any
    checkpoint. The decode reads the written bytes, with the handlers of
    [decode_current_json]. *)
 let validated_message_encoding ~message_index message =
   let* json = message_to_json_result ~message_index message in
-  let* () = validate_checkpoint_json ~context:"Checkpoint v11" json in
-  let* _ = Checkpoint_v11_contract.validate_message message_index json in
+  let* () = validate_checkpoint_json ~context:"Checkpoint v12" json in
+  let* _ = Checkpoint_contract.validate_message message_index json in
   let bytes = Yojson.Safe.to_string json in
   let+ decoded = decode_written_bytes ~decode:message_of_json bytes in
   { bytes; decoded }
@@ -1143,7 +1165,7 @@ let validated_fields_around_messages cp =
   let header =
     `Assoc (before_messages @ ((messages_field, `List []) :: after_messages))
   in
-  let* () = validate_checkpoint_json ~context:"Checkpoint v11" header in
+  let* () = validate_checkpoint_json ~context:"Checkpoint v12" header in
   let+ decoded_header =
     decode_written_bytes ~decode:decode_current_json (Yojson.Safe.to_string header)
   in
@@ -1254,8 +1276,8 @@ let rec same_printed_json (left : Yojson.Safe.t) (right : Yojson.Safe.t) =
 let held_read_message ~message_index message json =
   match
     let* encoded = message_to_json_result ~message_index message in
-    let* () = validate_checkpoint_json ~context:"Checkpoint v11" encoded in
-    let+ _ = Checkpoint_v11_contract.validate_message message_index encoded in
+    let* () = validate_checkpoint_json ~context:"Checkpoint v12" encoded in
+    let+ _ = Checkpoint_contract.validate_message message_index encoded in
     encoded
   with
   | Ok encoded when same_printed_json encoded json -> Some (Yojson.Safe.to_string encoded)

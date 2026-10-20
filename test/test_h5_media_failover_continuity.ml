@@ -262,7 +262,7 @@ let checkpoint_with_messages messages =
   ; response_format = Types.Off
   ; cache_system_prompt = false
   ; context = Context.create_sync ()
-  ; mcp_sessions = []
+  ; pending_input = None; mcp_sessions = []
   ; working_context = None
   }
 ;;

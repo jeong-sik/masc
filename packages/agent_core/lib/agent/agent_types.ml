@@ -154,6 +154,7 @@ type t =
   { mu : Eio.Mutex.t
   ; mutable state : agent_state
   ; mutable lifecycle : lifecycle_snapshot option
+  ; mutable pending_input : Agent_input_request.pending option
   ; mutable tools : Tool_set.t
       (** Widened during a turn by {!extend_tools} and never narrowed. A
           deferred tool surface hands the model an index and supplies the
@@ -172,6 +173,17 @@ type t =
 (* Public accessors — .mli exposes Agent.t as abstract *)
 let state t = t.state
 let lifecycle t = t.lifecycle
+let pending_input t = t.pending_input
+let clear_pending_input agent expected =
+  match expected with
+  | None -> ()
+  | Some expected ->
+    Eio.Mutex.use_rw ~protect:true agent.mu (fun () ->
+      match Agent_input_request.settle ~current:agent.pending_input expected with
+      | Ok _ -> agent.pending_input <- None
+      | Error (Agent_input_request.No_pending_request | Agent_input_request.Request_not_current) -> ())
+;;
+
 let tools t = t.tools
 let context t = t.context
 let options t = t.options
@@ -409,6 +421,7 @@ let create
   { mu = Eio.Mutex.create ()
   ; state
   ; lifecycle = None
+  ; pending_input = None
   ; tools = all_tools
   ; net
   ; context = ctx
@@ -433,6 +446,7 @@ let clone ?(copy_context = false) agent =
   { mu = Eio.Mutex.create ()
   ; state
   ; lifecycle = agent.lifecycle
+  ; pending_input = agent.pending_input
   ; tools = agent.tools
   ; net = agent.net
   ; context = ctx

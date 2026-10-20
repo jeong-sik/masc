@@ -35,6 +35,10 @@ type outcome =
     raw-trace run id active when the call returns. [classify] maps the concrete
     run API result to the shared lifecycle vocabulary.
 
+    [on_outcome], when supplied by an owner, applies its current state before
+    publishing the matching outcome. Invocation identity is allocated even
+    without an event bus. The callback must not raise or perform external I/O.
+
     If [f] raises, [AgentFailed] is still published with an [Error.Internal]
     projection of the exception; the original exception is then re-raised
     with its backtrace intact. *)
@@ -44,5 +48,6 @@ val with_run_lifecycle_events
   -> raw_trace:Raw_trace.t option
   -> current_run_id:(unit -> string option)
   -> classify:(('a, 'error) result -> outcome)
+  -> ?on_outcome:(run_id:string -> outcome -> unit)
   -> (unit -> ('a, 'error) result)
   -> ('a, 'error) result

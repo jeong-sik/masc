@@ -1,6 +1,6 @@
 open Types
 
-let checkpoint_version = 11
+let checkpoint_version = 12
 
 type t =
   { version : int
@@ -27,6 +27,7 @@ type t =
   ; context : Context.t
   ; mcp_sessions : Mcp_session.info list
   ; working_context : Yojson.Safe.t option
+  ; pending_input : Agent_input_request.pending option
   }
 
 type message_splice =
@@ -71,6 +72,7 @@ type delta_op =
   | Patch_context of Context.diff
   | Replace_mcp_sessions of Mcp_session.info list
   | Replace_working_context of Yojson.Safe.t option
+  | Replace_pending_input of Agent_input_request.pending option
 
 type delta =
   { delta_version : int

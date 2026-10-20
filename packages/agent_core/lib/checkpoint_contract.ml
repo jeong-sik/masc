@@ -1,8 +1,6 @@
-(** Exact validator for the current checkpoint-v11 persistence schema.
-
-    v11 drops [thinking_budget]. The key set is closed, so a v10 file carrying
-    that key is rejected rather than read with the field ignored: a checkpoint
-    is a fresh-state contract, not a format with converters. *)
+(** Exact validator for the current checkpoint persistence schema. All fields,
+    including pending input ownership, are explicit; no converter or inferred
+    empty pending state is admitted. *)
 
 open Result_syntax
 
@@ -302,6 +300,7 @@ let current_checkpoint_fields =
   ; "context"
   ; "mcp_sessions"
   ; "working_context"
+  ; "pending_input"
   ]
 ;;
 
@@ -772,7 +771,7 @@ let validate_common_checkpoint_fields ~scope fields =
   validate_unique_object ~scope:(Suffix (scope, ".context")) context
 ;;
 
-let validate_v11_json json =
+let validate_json json =
   let scope = checkpoint_scope in
   let* fields =
     validate_object_shape ~scope ~required:current_checkpoint_fields ~optional:[] json
@@ -792,6 +791,13 @@ let validate_v11_json json =
   let* _ = validate_messages messages in
   let* mcp_sessions = required_field ~scope "mcp_sessions" fields in
   let* _ = validate_mcp_sessions mcp_sessions in
+  let* pending_input = required_field ~scope "pending_input" fields in
+  let* () = match pending_input with
+    | `Null -> Ok ()
+    | json -> (match Agent_input_request.pending_of_json json with
+       | Ok _ -> Ok ()
+       | Error detail -> scope_errorf scope ".pending_input: %s" detail)
+  in
   let* reasoning_effort = required_field ~scope "reasoning_effort" fields in
   validate_optional
     ~scope:(Suffix (scope, ".reasoning_effort"))

@@ -216,7 +216,7 @@ max-concurrent = 1
     ; response_format = Agent_core.Types.Off
     ; cache_system_prompt = false
     ; context = Agent_core.Context.create_sync ()
-    ; mcp_sessions = []
+    ; pending_input = None; mcp_sessions = []
     ; working_context = None
     }
   in
@@ -366,7 +366,7 @@ max-concurrent = 1
     ; response_format = Agent_core.Types.Off
     ; cache_system_prompt = false
     ; context = Agent_core.Context.create_sync ()
-    ; mcp_sessions = []
+    ; pending_input = None; mcp_sessions = []
     ; working_context = None
     }
   in
@@ -1020,7 +1020,7 @@ let test_observed_boundary_forecast ~marks ~samples ~expected_step ~expected_fro
     ; temperature = None; top_p = None; top_k = None; min_p = None
     ; reasoning_effort = None; enable_thinking = None; preserve_thinking = None
     ; response_format = Agent_core.Types.Off; cache_system_prompt = false
-    ; context = Agent_core.Context.create_sync (); mcp_sessions = []; working_context = None }
+    ; context = Agent_core.Context.create_sync (); pending_input = None; mcp_sessions = []; working_context = None }
   in
   let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
   ignore (Keeper_checkpoint_store.save_agent_core_classified

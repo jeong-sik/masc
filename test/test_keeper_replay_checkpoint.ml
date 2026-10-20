@@ -45,7 +45,7 @@ let checkpoint ?(working_context = Some (`Assoc [])) messages =
     ; response_format = Agent_core.Types.Off
     ; cache_system_prompt = false
     ; context = Agent_core.Context.create_sync ()
-    ; mcp_sessions = []
+    ; pending_input = None; mcp_sessions = []
     ; working_context
   }
 

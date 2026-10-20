@@ -4,16 +4,7 @@
     orchestration in {!Runtime_agent}. *)
 
 let build_checkpoint ~session_id ?checkpoint_sidecar (agent : Agent_core.Agent.t) =
-  match checkpoint_sidecar with
-  | None -> Agent_core.Agent.checkpoint ~session_id agent
-  | Some json ->
-      Agent_core.Agent_checkpoint.build_checkpoint
-        ~session_id ~working_context:json
-        ~state:(Agent_core.Agent.state agent)
-        ~tools:(Agent_core.Agent.tools agent)
-        ~context:(Agent_core.Agent.context agent)
-        ~mcp_clients:(Agent_core.Agent.options agent).mcp_clients
-        ()
+  Agent_core.Agent.checkpoint ~session_id ?working_context:checkpoint_sidecar agent
 
 let partial_response_of_stop
     ~(session_id : string)

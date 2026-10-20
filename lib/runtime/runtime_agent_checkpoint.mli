@@ -15,15 +15,9 @@ val build_checkpoint :
   Agent_core.Checkpoint.t
 (** Build an [Agent_core.Checkpoint.t] for [agent].
 
-    When [checkpoint_sidecar] is omitted, delegates to
-    [Agent_core.Agent.checkpoint ~session_id agent] (agent core's own
-    checkpoint capture).
-
-    When [checkpoint_sidecar] is supplied, builds the checkpoint
-    via [Agent_core.Agent_checkpoint.build_checkpoint] threading the
-    sidecar JSON through as the [working_context]; this path is
-    used when masc wants to attach extra worker-side state
-    that agent core's default capture does not include. *)
+    Uses the Agent's own checkpoint capture, including its pending input
+    ownership. A supplied [checkpoint_sidecar] becomes [working_context]
+    without rebuilding or dropping the Agent's current request proof. *)
 
 val partial_response_of_stop :
   session_id:string ->

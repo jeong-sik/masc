@@ -93,6 +93,9 @@ type t
 
 val state : t -> Types.agent_state
 val lifecycle : t -> lifecycle_snapshot option
+val pending_input : t -> Agent_input_request.pending option
+(** Current owned input wait. [None] means no outstanding request on this Agent
+    continuation. Preserved by checkpoint/resume; not inferred from events. *)
 val tools : t -> Tool_set.t
 
 val extend_tools : ?order:string list -> t -> Tool.t list -> unit
@@ -571,11 +574,14 @@ val run_turn_stream_detailed
        , detailed_error )
        result
 
-(** Append an elicitation response to the agent conversation so callers that
-    received {!Error.InputRequired} can resume with {!run_turn_stream} or an
-    equivalent turn driver. [Declined] and [Timeout] preserve the legacy
-    callback behavior and do not append a synthetic user message. *)
-val provide_input : t -> Error.input_required -> Hooks.elicitation_response -> unit
+(** Apply a response to the exact current run/request, then consume the pending
+    wait at the same owned mutation boundary. A stale or repeated response is a
+    typed refusal without mutation. Uses the owner's canonical question.
+    [Declined] and [Timeout] settle explicitly without a synthetic User message.
+    Successful settlement permits {!run_turn_stream} or an equivalent driver. *)
+val provide_input
+  : t -> Agent_input_request.pending -> Hooks.elicitation_response
+  -> (unit, Agent_input_request.settlement_error) result
 
 (** {1 Handoff} *)
 

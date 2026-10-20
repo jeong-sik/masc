@@ -1,0 +1,13 @@
+
+ RUN  v5.0.2 /private/tmp/masc-plugin-management-20261020/dashboard
+
+
+ Test Files  7 passed (7)
+      Tests  111 passed (111)
+   Start at  21:38:37
+   Duration  17.29s (import 34%, tests 23%, transform 21%, environment 12%, setup 10%)
+
+     Import  191 modules were evaluated 895 times · 5.45s total, 34% of tracked time
+             ~4.28s faster with isolate: false — shared modules are evaluated once per worker instead of once per file
+             learn more: https://vitest.dev/guide/improving-performance#test-isolation
+

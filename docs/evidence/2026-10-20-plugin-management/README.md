@@ -32,7 +32,7 @@ the implementation and PNG bytes used in this run. Both screenshots were opened
 and visually inspected. After verification, ego `finish({keep:[]})` resolved once
 and the owned fixture server received SIGTERM (`cleanup.json`).
 
-`focused-tests.log` records **111 passing tests in seven files**, including nine
+`focused-tests.txt` records **111 passing tests in seven files**, including nine
 new DOM scenarios. Those scenarios exercise ownership mismatches, retained and
 ambiguous workers, missing application evidence, cleanup failures, incomplete
 inventory, stale refreshes, search/filter behavior and identity-bound callbacks.

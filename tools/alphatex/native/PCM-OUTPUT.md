@@ -59,6 +59,8 @@ can make it nonzero. `anchor.hostTime` comes from the callback's `AudioTimeStamp
 not engine startup or IPC arrival. A single audio-thread writer publishes an
 immutable atomic pair with release/acquire ordering; only the control lifecycle
 serializes it. Invalid/zero timestamps never become invented anchors.
+If stop overtakes the callback's control notification, retirement flushes the
+already-published pair after stopping the engine, provided playing was acknowledged.
 
 `openPcmOutput.clock` resolves that observation; it rejects on failure or closure
 without one. Clock availability is separate from playing and normal completion.

@@ -25,7 +25,7 @@ createInterface({ input: process.stdin }).on('close', () => clearTimeout(demandT
     admitted += 8n
     if (admitted === 16n) {
       reply({ kind: 'playing' })
-      if (mode !== 'clock-missing') process.stdout.write([clock, ...(mode === 'clock-duplicate' ? [clock] : [])].map(JSON.stringify).join('\n') + '\n')
+      if (!['clock-missing', 'clock-at-final'].includes(mode)) process.stdout.write([clock, ...(mode === 'clock-duplicate' ? [clock] : [])].map(JSON.stringify).join('\n') + '\n')
     }
     if (['fault-final','format-final'].includes(mode) && admitted === 16n) {
       const fault = mode === 'fault-final' ? 'underrun' : 'render-format'
@@ -40,6 +40,7 @@ createInterface({ input: process.stdin }).on('close', () => clearTimeout(demandT
     else need()
   } else if (row.kind === 'stop') {
     clearTimeout(demandTimer)
+    if (mode === 'clock-at-final') reply(clock)
     if (mode !== 'unfinalized') reply(final())
     if (mode === 'exit') process.exitCode = 1
   }

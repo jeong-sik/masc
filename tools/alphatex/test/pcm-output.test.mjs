@@ -67,6 +67,10 @@ test('unbound or duplicate render clocks fail after closure; absent clock is nev
     onEvent(event) { if (event.kind === 'playing') owner.stop() } })
   await owner.completion; await assert.rejects(owner.clock, /without a source-render clock/)
   assert.equal(owner.diagnostics().clock, null)
+  owner = openPcmOutput({ ...options('clock-at-final'), provideBlock: row => Buffer.alloc(row.frames * 8),
+    onEvent(event) { if (event.kind === 'playing') owner.stop() } })
+  await owner.completion
+  assert.equal((await owner.clock).anchor.hostTime, '9007199254740997')
 })
 test('identity, demand, PCM, underrun and finalization errors reject after closure', async () => {
   for (const mode of ['identity', 'demand', 'underrun', 'total', 'unfinalized', 'exit', 'bad-pcm', 'nan']) {

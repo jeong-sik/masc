@@ -76,6 +76,7 @@ private final class PcmOutput {
     var maxPlayingResponseNanoseconds: UInt64 = 0
     let timebase: mach_timebase_info_data_t
     var clockReported = false
+    var playingReported = false
     var listeners: [(AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
     var signals: [DispatchSourceSignal] = []
     var configuration: NSObjectProtocol?
@@ -193,7 +194,7 @@ private final class PcmOutput {
         try request()
     }
     func publishClock() throws {
-        guard state == .playing, !clockReported, let anchor = ring.anchor.snapshot else { return }
+        guard playingReported, !clockReported, let anchor = ring.anchor.snapshot else { return }
         try emit(["kind": "clock", "schemaVersion": 1, "device": ["id": uid, "name": name],
                   "sampleRate": rate, "clock": ["kind": "mach-host-time", "numer": timebase.numer, "denom": timebase.denom],
                   "anchor": ["frame": String(anchor.frame), "hostTime": String(anchor.hostTime)]])
@@ -231,6 +232,8 @@ private final class PcmOutput {
                     state = .playing
                     engine.prepare(); try engine.start(); try check()
                     try emit(["kind": "playing"])
+                    playingReported = true
+                    try publishClock()
                 }
                 try request()
             }
@@ -241,6 +244,9 @@ private final class PcmOutput {
         state = .stopped; ring.stopped.store(true, ordering: .releasing)
         engine.stop()
         var error = failure ?? renderFailure()
+        // Stop may be queued ahead of the callback wake. Retire the engine,
+        // then retain any actual anchor it published before cancelling wakes.
+        do { try publishClock() } catch let clockError { if error == nil { error = clockError } }
         // Retire audio before the final device queries. A slow control-plane
         // read at explicit stop must not starve a still-running callback.
         if error == nil {

@@ -24,6 +24,20 @@
  (modules test_browser_addon_owner_cleanup)
  (libraries masc masc.browser_lane alcotest eio eio_main))
 
+(executable
+ (name test_browser_process_owner)
+ (modules test_browser_process_owner)
+ (libraries masc.browser_process_owner masc.native_addon_lease masc_process alcotest yojson unix))
+
+(rule
+ (alias runtest-browser-process-owner)
+ (action (run %{exe:test_browser_process_owner.exe}
+   %{exe:../bin/masc_native_addon_launcher.exe} %{exe:../bin/masc_browser_process_owner.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-browser-process-owner)))
+
 (test
  (name test_browser_addon_wire)
  (modules test_browser_addon_wire)

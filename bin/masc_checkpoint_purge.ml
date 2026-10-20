@@ -288,6 +288,9 @@ let () =
        Printf.printf
          "tool results cleared: %d\n"
          report.Purge.tool_results_cleared;
+       Printf.printf
+         "messages dropped at structural break: %d\n"
+         report.Purge.messages_dropped_at_structural_break;
        (match rebase with
         | Ok Purge.No_progress -> print_endline "librarian position: none"
         | Ok (Purge.Rebased { before; after }) ->

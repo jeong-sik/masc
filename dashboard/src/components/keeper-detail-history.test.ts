@@ -187,6 +187,7 @@ describe("KeeperCheckpointPanel diagnostics", () => {
         bytes_removed: 1238193,
         reasoning_blocks_stripped: 46,
         tool_results_cleared: 437,
+        messages_dropped_at_structural_break: 0,
       },
       warnings: [],
       inventory,

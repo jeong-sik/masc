@@ -1179,6 +1179,7 @@ describe('keeper lifecycle', () => {
         bytes_removed: 1024,
         reasoning_blocks_stripped: 1,
         tool_results_cleared: 3,
+        messages_dropped_at_structural_break: 0,
       },
       warnings: [],
       inventory: {

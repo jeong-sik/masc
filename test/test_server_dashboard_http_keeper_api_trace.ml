@@ -970,6 +970,33 @@ let test_clock_groups_accumulate_edges_per_turn () =
   | _ -> fail "expected exactly one turn group"
 ;;
 
+(* The purge drops everything from the first broken tool cycle on. Without this
+   count in the response, [messages_before] - [messages_after] has a gap no
+   other field explains (#32462). *)
+let test_purge_report_json_carries_the_dropped_count () =
+  let result : Checkpoints.purge_result =
+    { keeper = "alder"
+    ; trace_id = "trace-alder"
+    ; apply_allowed = false
+    ; applied = false
+    ; backup_path = None
+    ; report =
+        { messages_before = 500
+        ; messages_after = 2
+        ; bytes_before = 4096
+        ; bytes_after = 512
+        ; reasoning_blocks_stripped = 0
+        ; tool_results_cleared = 0
+        ; messages_dropped_at_structural_break = 498
+        }
+    ; warnings = []
+    }
+  in
+  let json = Checkpoints.purge_result_json ~action:"preview_purge" result in
+  check int "the dropped count rides the report" 498
+    Yojson.Safe.Util.(
+      json |> member "report" |> member "messages_dropped_at_structural_break" |> to_int)
+
 let () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1056,6 +1083,10 @@ let () =
             "purge keeps the Librarian position and every message"
             `Quick
             test_purge_keeps_the_librarian_position_and_every_message
+        ; test_case
+            "the report carries the count dropped at a structural break"
+            `Quick
+            test_purge_report_json_carries_the_dropped_count
         ] )
     ]
 ;;

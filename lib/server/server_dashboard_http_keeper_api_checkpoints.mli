@@ -29,6 +29,12 @@ type purge_report =
   ; bytes_after : int
   ; reasoning_blocks_stripped : int
   ; tool_results_cleared : int
+  ; messages_dropped_at_structural_break : int
+        (** Messages from the first broken tool cycle to the end of the
+            history, which the purge drops whole. [messages_before] minus
+            [messages_after] is larger than the counters above by this
+            amount; the field is what lets an operator account for the gap
+            before applying. *)
   }
 
 type purge_result =

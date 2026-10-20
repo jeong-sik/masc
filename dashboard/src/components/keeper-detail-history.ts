@@ -401,6 +401,7 @@ export function KeeperCheckpointPanel({
                 <div><span class="text-[var(--color-fg-muted)]">크기</span><div class="mt-0.5 font-mono text-[var(--color-fg-primary)]">${formatBytes(purgePreview.report.bytes_before)} → ${formatBytes(purgePreview.report.bytes_after)}</div></div>
                 <div><span class="text-[var(--color-fg-muted)]">tool 결과</span><div class="mt-0.5 font-mono text-[var(--color-fg-primary)]">${purgePreview.report.tool_results_cleared}</div></div>
                 <div><span class="text-[var(--color-fg-muted)]">reasoning</span><div class="mt-0.5 font-mono text-[var(--color-fg-primary)]">${purgePreview.report.reasoning_blocks_stripped}</div></div>
+                <div><span class="text-[var(--color-fg-muted)]">구조 깨짐 뒤 버림</span><div class="mt-0.5 font-mono text-[var(--color-fg-primary)]" data-testid="keeper-checkpoint-purge-dropped">${purgePreview.report.messages_dropped_at_structural_break}</div></div>
               </div>
               ${!purgePreview.apply_allowed
                 ? html`<div class="mt-3 rounded-[var(--r-1)] border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs text-[var(--color-fg-muted)]" role="status">적용하려면 먼저 상단의 종료 버튼으로 Keeper를 완전히 종료하세요. 미리보기는 현재 상태에서도 안전합니다.</div>`

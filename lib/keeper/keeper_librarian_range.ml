@@ -488,18 +488,25 @@ let official_candidate (line, read) =
   | Error _ -> None
 ;;
 
+let rec readable_before_refusal acc = function
+  | [] -> List.rev acc, None
+  | (line, Error ((B.Not_json _ | B.Malformed _) as error)) :: _ ->
+    List.rev acc, Some (line, error)
+  | ((_, (Ok _ | Error B.Incomplete_line)) as row) :: rest ->
+    readable_before_refusal (row :: acc) rest
+;;
+
 let select_official ~lines ~cursor extent =
   let after = cursor_line cursor in
   let beyond = List.filter (fun (line, _) -> line > after) lines in
-  match List.find_opt (fun (_, read) -> match read with Error (B.Not_json _ | B.Malformed _) -> true | Error B.Incomplete_line | Ok _ -> false) beyond with
-  | Some (line, Error error) -> Official_stop { line; error }
-  | Some (_, Ok _) | None ->
-    (match List.filter_map official_candidate beyond with
-     | [] -> Nothing_official
-     | first :: rest ->
-       (match extent with
-        | To_first_cut_point -> Official_read [ first ]
-        | All_unread -> Official_read (first :: rest)))
+  let readable, refusal = readable_before_refusal [] beyond in
+  match List.filter_map official_candidate readable, refusal with
+  | [], Some (line, error) -> Official_stop { line; error }
+  | [], None -> Nothing_official
+  | first :: rest, (Some _ | None) ->
+    (match extent with
+     | To_first_cut_point -> Official_read [ first ]
+     | All_unread -> Official_read (first :: rest))
 ;;
 
 (* RFC §4.9: official-client turns beyond the cursor. A refused line does

@@ -178,13 +178,16 @@ type official_line =
 type official_selection =
   | Official_read of official_line list
       (** In line order, never empty. The last one is the cursor after the
-          round commits. *)
+          round commits. Only the lines before the first refused line beyond
+          the cursor are taken; once the cursor reaches them the refused line
+          is the next selection ({!Official_stop}). *)
   | Nothing_official
   | Official_stop of
       { line : int
       ; error : Keeper_turn_boundaries.read_error
       }
-      (** Row 2c for these lines. A refused line beyond the cursor may be an
+      (** Row 2c for these lines. The first refused line beyond the cursor,
+          with no readable official turn before it. That line may be an
           official turn's end line; passing it would skip that turn (I3). No
           restart lifts it: a restart says where atoms begin again and
           nothing about these lines. The remedy is a purge of the keeper.

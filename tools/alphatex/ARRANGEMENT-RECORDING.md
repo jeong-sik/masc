@@ -1,0 +1,101 @@
+# Record against an arrangement
+
+Open an arrangement with `masc-alphatex --arrange` or reopen with `--project FILE`.
+Select backing outputs as described in [arrangement playback](ARRANGEMENT.md).
+
+1. `:inputs` discovers audio and MIDI input UIDs without opening an input stream.
+2. `:input AUDIO_UID` selects an audio interface. `:midi-input all`,
+   `:midi-input none`, or `:midi-input MIDI_UID` selects MIDI inputs.
+3. Start backing playback with Space. `:record` opens simultaneous WAV and raw
+   UMP capture against that playing epoch. Input selection changes apply to the
+   next recording.
+4. `:record-stop` finalizes the source, verifies all four captured parts in the
+   arrangement IO worker, and adds a fresh captured lane and region. The backing
+   continues. Undo removes that import and region together; redo restores them.
+
+Pause, seek, output changes, source opening, saves and project edits first finish
+the recording and attachment. Playback continues while the recorder flushes its
+files. Closing the view also waits for that boundary before stopping backing and
+saving. Cursor and selection changes can continue during recording. Input loss
+or backing failure retains the take for recovery; it does not claim successful
+attachment. A cancelled opening never opens late inputs.
+
+The original take remains under the project directory's `recordings/UUID` even
+after a successful content-addressed import. Failed imports retain that directory
+and report it on stderr. `arrangement-recording.json` records the original project
+path and epoch; successful attachment adds `alignment.json`. A portable Save As
+owns the imported four parts independently. Original recording directories are
+retained in their original location and are never removed by view cleanup.
+
+The playback epoch and captured host timestamps share the system clock described
+by [Apple AVAudioTime](https://developer.apple.com/documentation/avfaudio/avaudiotime).
+Absolute timestamps remain integer strings. Playback positions and tempo use the
+exact binary64 values admitted by the scheduler, decoded to rational arithmetic.
+For one-shot backing, the source begins at the next representable quarter-note project tick; the source
+cut then rounds inward by less than one host tick. Thus at most one project tick
+of leading material is excluded from the region, while the full source remains
+retained. Startup pre-roll and material beyond the backing endpoint are retained
+in the original source and excluded from the placed interval. Placement provenance
+and the rational rounding error are stored on the captured asset.
+
+With `:loop START END`, recording continues across loop boundaries. Finalizing
+creates one take lane per pass and selects the last pass. `:takes` opens the
+selected asset's take list; repeat `:takes` to return. `:take 2` chooses original
+pass 2, and `:take next` / `:take previous` cycle the remaining takes. Add an asset
+ID after the selection to compare a different recording. `:takes ASSET` also
+selects that source for subsequent implicit `:take` commands. An admitted take
+choice retains both its asset and resolved cycle while an active recording
+finalizes, even if finalization adds a newly selected source. Space starts its new
+playback plan. Changing takes stops the current backing, finalizing an active
+recording first; switching is not a seamless live crossfade.
+
+Audio and MIDI switch together, independently of lane labels, region order,
+trims, moves or duplication. Each capture asset stores its selected original
+cycle; each recorded region retains its cycle identity. Selection and its undo
+or redo are one transaction and survive Save As/reopen. Lane mute/solo still
+apply independently and can silence part or all of a chosen take. Other assets
+and manually placed source regions stay independent. Splitting or duplicating a
+recorded region retains its take membership. Deleting all regions of the chosen
+pass leaves it silent; next/previous skip removed passes. Take numbers refer to
+original recording cycles, so a deleted pass does not renumber later takes. Every pass refers to the
+same complete imported WAV/UMP; undo/redo removes/restores the whole recording
+transaction. Partial first/last passes keep their original position inside the
+range. Count-in is excluded from placement, without deleting its captured source.
+
+Loop placement uses the native owner's acknowledged cycle and the original
+integer host ticks. Adjacent cuts share a boundary; fractional project placement
+is retained separately from the displayed tick. This avoids dropping a project
+tick at every wrap or accumulating a rounded period. Standalone MIDI backing
+publishes its actual binary64 cycle duration, including its existing outward
+silent tail. Common audio/MIDI backing publishes its authored project cycle.
+Audio correction is applied before choosing pass boundaries; MIDI keeps its
+original clock. Audio and MIDI select the same last pass. If correction moves
+only one component into a new partial pass, the absent component stays silent;
+an earlier performance is not substituted. The selected correction and all pass coordinates remain in the
+recording alignment record. New takes become available after finalization;
+this is not live overdub monitoring or a comping editor.
+
+[Audio input monitoring](INPUT-MONITORING.md) is explicit: select an input and
+`:monitor AUDIO_OUTPUT_UID`, or `:monitor off`. It also works before recording.
+Recording waits for the standalone monitor to close and opens the selected monitor
+inside the recorder's own input engine. After finalization, standalone monitoring
+resumes while the view remains open. These ownership transfers can have a gap;
+they are not gapless punch-in/out. Physical-device alignment and acoustic latency
+still require actual equipment measurements. No monitoring output is selected
+automatically. Native MIDI-only, WAV-only, mixed and hybrid arrangements publish their
+host-clock epoch for recording admission; a pending transport change cannot admit
+a new take before its acknowledgement.
+
+An epoch request uses its own UUID and is evaluated by the native owner after
+earlier transport commands. Older status responses cannot admit a recording.
+Cancellation rejects that request without opening late inputs. Backing errors
+continue to belong to the recording owner while the view is closing.
+
+Captured controller/program state still follows the explicit baseline rules in
+[source state](SOURCE-STATE.md). Complete original UMP is retained even when a
+region cannot restore its unknown initial state; that case reports a diagnostic.
+Recording does not invent controller defaults to bypass playback admission.
+A recorded silent preamble can establish its source-defined values before the
+first attack, at the original event timestamps. Repeats and seek retain that gap;
+they do not send future controllers early. A baseline arriving after a dependent
+attack or relative mutation remains insufficient.

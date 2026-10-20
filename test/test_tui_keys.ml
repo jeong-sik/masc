@@ -1403,6 +1403,63 @@ let test_the_identity_tab_advertises_disconnect () =
          && substring "revoke" help
        | None -> false)
 
+(* A help sentence is one table cell in the key reference and one row on the
+   sheet. A string continued across source lines as [\n] plus indentation,
+   or with the indentation kept inside the literal, put a line break or a
+   run of blanks in the middle of it: the reference's [D D] row split in
+   two, and two Resources rows carried eighteen blanks. *)
+let test_help_sentences_are_one_line () =
+  List.iter
+    (fun (title, rows) ->
+      List.iter
+        (fun (key, help) ->
+          let name = title ^ " / " ^ key in
+          Alcotest.(check bool) (name ^ ": no line break") false
+            (String.contains help '\n');
+          Alcotest.(check bool) (name ^ ": no run of blanks") false
+            (substring "  " help))
+        rows)
+    (Masc_tui_keys.help_sections ())
+
+(* docs/guides/TUI-KEYS.md is built from [reference_sections]; the sheet from
+   [help_sections]. Same titles, same order, same rows: the paragraphs are
+   the only thing the document adds. *)
+let test_reference_lists_the_sheet_keys () =
+  let reference =
+    List.map
+      (fun (section : Masc_tui_keys.reference_section) ->
+        (section.section_title, section.section_rows))
+      (Masc_tui_keys.reference_sections ())
+  in
+  Alcotest.(check (list (pair string (list (pair string string)))))
+    "reference sections are the sheet's sections"
+    (Masc_tui_keys.help_sections ()) reference
+
+(* Tools' async runs reader and Work's Task detail answer keys their
+   surface's footer cannot carry: one Tools footer covers five panes, and
+   the Goals footer never has a Task detail under it. The sheet is where
+   those keys are found, so each must be there and none in the footer's
+   table. *)
+let test_nested_reader_keys_are_on_the_sheet_only () =
+  let sheet_keys title = List.map fst (section title) in
+  let footer_keys surface =
+    List.map
+      (fun (binding : Masc_tui_keys.binding) -> binding.key)
+      (Masc_tui_keys.for_surface surface)
+  in
+  List.iter
+    (fun (title, surface, keys) ->
+      List.iter
+        (fun key ->
+          Alcotest.(check bool) (title ^ " sheet names " ^ key) true
+            (List.mem key (sheet_keys title));
+          Alcotest.(check bool) (title ^ " footer leaves out " ^ key) false
+            (List.mem key (footer_keys surface)))
+        keys)
+    [ ("System / Tools", Tools, [ "Enter"; "t / T"; "H"; "o / O" ])
+    ; ("Work", Planning, [ "H" ])
+    ]
+
 let () =
   Alcotest.run "masc_tui_keys"
     [ ( "table"
@@ -1526,4 +1583,12 @@ let () =
     ; ( "identity tab"
       , [ Alcotest.test_case "the Identity tab advertises disconnect" `Quick
             test_the_identity_tab_advertises_disconnect ] )
+    ; ( "key reference"
+      , [ Alcotest.test_case "help sentences are one line" `Quick
+            test_help_sentences_are_one_line
+        ; Alcotest.test_case "the reference lists the sheet's keys" `Quick
+            test_reference_lists_the_sheet_keys
+        ; Alcotest.test_case "nested reader keys are on the sheet only" `Quick
+            test_nested_reader_keys_are_on_the_sheet_only
+        ] )
     ]

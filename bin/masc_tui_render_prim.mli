@@ -73,6 +73,11 @@ val acting_pane_row_targets : Masc_tui_acting_pane.row_target array ref
 
 val acting_pane_scroll_max : int ref
 
+val frame_panes : Masc_tui_pane_selection.layout ref
+(** Where each pane of the frame being drawn sits, set by the surface ends
+    ([finish_surface], [finish_frame_beside_acting_pane]). Commit it only
+    once the terminal accepts the frame. *)
+
 val clamped_scroll_now :
   Masc_tui_types.state ->
   Masc_tui_types.clamped_scroll ->
@@ -181,6 +186,7 @@ val finish_surface :
 val finish_frame_beside_acting_pane :
   Masc_tui_types.state ->
   ?clamped:Masc_tui_types.clamped_scroll ->
+  ?roster:Masc_tui_pane_selection.roster_split ->
   surface_key:string ->
   cursor:Frame_presenter.cursor ->
   rows:int ->
@@ -387,6 +393,11 @@ val question_asks : Masc_tui_types.state -> Masc.Tui_decode_asks.ask_row list
 val ask_question_viewport : Masc_tui_types.state -> string list * int
 
 val board_score_style : int -> string
+
+val board_score_text : int -> string
+(** A net Board score as the reader draws it, on the post header and on each
+    comment: an up arrow and the signed score above zero, a down arrow below,
+    a bare zero otherwise. Style it with {!board_score_style}. *)
 
 val bracketed : max_cells:int -> string -> string
 (** [\[text\]], with [text] folded in the middle only when it runs past

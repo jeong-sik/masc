@@ -26,5 +26,8 @@ val new_post_done :
 
 val vote_done :
   Masc_tui_types.state -> report:(string -> string -> unit) ->
-  refresh:(unit -> unit) -> (string, string) result -> unit
-(** Disarm the vote on either outcome; success reports before refreshing. *)
+  refresh:(unit -> unit) -> refresh_detail:(string -> unit) ->
+  Masc_tui_types.board_vote_target -> (string, string) result -> unit
+(** Disarm the vote on either outcome. Success reports, refreshes the list,
+    and refreshes the reading of the post the target lands on or under when
+    that post is still the one open. *)

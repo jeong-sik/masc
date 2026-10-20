@@ -11091,6 +11091,13 @@ let focus_acting_pane_or_say_why (state : state) =
 let score_terminal_handoff :
   (sources:string list -> index:int -> (unit, string) result) option ref = ref None
 
+let music_terminal_handoff : (unit -> (unit, string) result) option ref = ref None
+
+let open_music () =
+  match !music_terminal_handoff with
+  | None -> Error "Music workbench requires an active terminal session"
+  | Some launch -> launch ()
+
 let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   let target =
     match keeper_name with
@@ -11119,7 +11126,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       | Attach_image_ref_missing_value | Preset_list | Preset_save _ | Preset_save_missing_name
       | Preset_restore _ | Preset_restore_missing_name | Preset_show _ | Preset_show_missing_name
       | Preset_delete _ | Preset_delete_missing_name | Listen
-      | Open_score _ | Score_invalid_index | Unknown _ -> true
+      | Open_music | Music_invalid_arguments | Open_score _ | Score_invalid_index | Unknown _ -> true
   then
     notice ~kind:Notice_failure
       "A queued edit is active; press Enter for its text or Ctrl-U to abandon it"
@@ -11438,6 +11445,13 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       listen_newest_media state
   | Masc_tui_command.Score_invalid_index ->
       notice ~kind:Notice_failure "/score [N]: N must be a positive score number, newest first"
+  | Masc_tui_command.Music_invalid_arguments ->
+      notice ~kind:Notice_failure "Use /music; choose a project or take in the workbench"
+  | Masc_tui_command.Open_music ->
+      Masc_tui_message_input.clear state.msg_input;
+      (match open_music () with
+       | Ok () -> ()
+       | Error detail -> notice ~kind:Notice_failure detail)
   | Masc_tui_command.Open_score index ->
       let sources = image_conversation_rows state
         |> List.concat_map (fun (entry : msg_entry) -> Masc_tui_markdown.alphatex_sources entry.me_text)
@@ -12031,7 +12045,7 @@ let apply_asks_load state = function
        | Ask_answering { aam_ask_id } ->
            (match List.find_index
                     (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = aam_ask_id) next_rows with
-            | Some index -> state.ask_cursor <- index
+            | Some index -> state.ask_cursor <- Ask.On index
             | None when state.workspace_identity = Workspace_identity_match ->
                 Masc_tui_home.clear_ask_answering state
             | None -> ()));
@@ -13093,7 +13107,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.asks_snapshot <- None;
   state.asks_error <- None;
   Masc_tui_home.clear_ask_answering state;
-  state.ask_cursor <- 0;
+  state.ask_cursor <- Ask.initial_cursor;
   state.ask_question_cursor <- 0;
   state.ask_question_scroll <- 0;
   state.ask_submit_inflight <- false;
@@ -15188,6 +15202,46 @@ let move_board_read_scroll state ~by =
   if state.board_comments_focused then state.board_comment_scroll <- next
   else state.board_scroll <- next
 
+(* The open post's comment ids in drawn order and the comment its read
+   landed on, while its thread is on screen. *)
+let board_read_thread state ~post_id =
+  match Board_detail.view_for state.board_detail ~post_id with
+  | Board_detail.Ready (_, comments, landing) ->
+      Some (Masc_tui_board_comment_cursor.ordered_ids comments, landing)
+  | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ -> None
+
+(* Settle the comment cursor on a drawn comment and ask the next frame to
+   bring it on screen: focusing the comments, and the first vote press on
+   one, should show the comment the keys act on. [None] while no thread is
+   drawn. *)
+let select_board_comment state ~post_id =
+  match board_read_thread state ~post_id with
+  | None -> None
+  | Some (ids, landing) ->
+      let selected =
+        Masc_tui_board_comment_cursor.select ids ~landing
+          state.board_comment_cursor
+      in
+      state.board_comment_cursor <- selected;
+      state.board_comment_follow <- true;
+      selected
+
+(* j/k on the reading. With the comments focused they step the cursor one
+   comment along the drawn thread; the frame then scrolls the least that
+   shows it. PgUp/PgDn keep scrolling by rows, and so does a wheel notch
+   that arrives as a key, so a comment longer than the column stays
+   readable. *)
+let step_board_reading state ~post_id ~by_wheel ~delta =
+  if state.board_comments_focused && not by_wheel then
+    match board_read_thread state ~post_id with
+    | None -> ()
+    | Some (ids, landing) ->
+        state.board_comment_cursor <-
+          Masc_tui_board_comment_cursor.move ids ~landing
+            state.board_comment_cursor ~delta;
+        state.board_comment_follow <- true
+  else move_board_read_scroll state ~by:delta
+
 let move_board_posts_pane state ~mailbox ~delta =
   let count = List.length (board_posts state) in
   let next = max 0 (min (count - 1) (state.board_cursor + delta)) in
@@ -15408,7 +15462,7 @@ let open_ask_rows state =
 
 let selected_ask_row state =
   match state.ask_answer_mode with
-  | Ask_browsing -> List.nth_opt (open_ask_rows state) state.ask_cursor
+  | Ask_browsing -> Ask.selected_row (open_ask_rows state) state.ask_cursor
   | Ask_answering { aam_ask_id } ->
       List.find_opt (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = aam_ask_id)
         (open_ask_rows state)
@@ -15467,7 +15521,12 @@ let leave_ask_answering state = Masc_tui_home.clear_ask_answering state
 
 let enter_ask_answering state =
   match selected_ask_row state with
-  | None -> report_action state "system" "No question is waiting on you"
+  | None -> (
+      (* Nothing is selected while asks are open: the cursor was released,
+         or it points past the list. Either way [ or ] selects one. *)
+      match open_ask_rows state with
+      | _ :: _ -> report_action state "system" "Choose a question with [ or ] first"
+      | [] -> report_action state "system" "No question is waiting on you")
   | Some (row : Masc.Tui_decode_asks.ask_row) ->
       (* The answer flow is drawn by the approvals list. With an approval's
          detail open that surface is not on screen, so [a] used to set the mode
@@ -15486,26 +15545,22 @@ let enter_ask_answering state =
    question the operator never read. *)
 let move_ask_cursor state delta =
   let rows = open_ask_rows state in
-  let count = List.length rows in
-  if count = 0 then ()
-  else begin
-    let next = max 0 (min (count - 1) (state.ask_cursor + delta)) in
-    if next <> state.ask_cursor then begin
-      state.ask_cursor <- next;
-      state.ask_origin <- None;
-      state.ask_question_cursor <- 0;
-      state.ask_question_scroll <- 0;
-      Masc_tui_types.disarm_ask_submit state;
-      match (state.ask_answer_mode, List.nth_opt rows next) with
-      (* Walking the list while browsing is not answering. Opening a draft
-         here would make [ and ] commit to a question the operator was only
-         looking at, and [a] is the key that says they mean it. *)
-      | Ask_browsing, _ -> ()
-      | Ask_answering _, None -> ()
-      | Ask_answering _, Some (row : Masc.Tui_decode_asks.ask_row) ->
-          state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Masc.Tui_decode_asks.ar_id };
-          state.ask_draft <- Some (Ask.draft_for state.ask_draft ~row)
-    end
+  let next = Ask.move_cursor rows state.ask_cursor ~delta in
+  if next <> state.ask_cursor then begin
+    state.ask_cursor <- next;
+    state.ask_origin <- None;
+    state.ask_question_cursor <- 0;
+    state.ask_question_scroll <- 0;
+    Masc_tui_types.disarm_ask_submit state;
+    match (state.ask_answer_mode, Ask.selected_row rows next) with
+    (* Walking the list while browsing is not answering. Opening a draft
+       here would make [ and ] commit to a question the operator was only
+       looking at, and [a] is the key that says they mean it. *)
+    | Ask_browsing, _ -> ()
+    | Ask_answering _, None -> ()
+    | Ask_answering _, Some (row : Masc.Tui_decode_asks.ask_row) ->
+        state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Masc.Tui_decode_asks.ar_id };
+        state.ask_draft <- Some (Ask.draft_for state.ask_draft ~row)
   end
 
 let move_ask_question_cursor state delta =
@@ -15787,6 +15842,15 @@ let handle_ask_submit state ~mailbox =
                      (fun (q : Masc.Tui_decode_asks.ask_question) -> q.Masc.Tui_decode_asks.aq_header)
                      questions)))
       | Ask.Ready answers -> (
+          (* Name the Keeper and what was chosen, not the ask's opaque id. The
+             arming press says it too: the second press sends whatever is on
+             this line, so it is the last place to see which question and
+             which choice it is before the answer settles. *)
+          let answered_label =
+            match Ask.summarize_answer draft ~row with
+            | "" -> row.Masc.Tui_decode_asks.ar_keeper
+            | chosen -> Printf.sprintf "%s: %s" row.Masc.Tui_decode_asks.ar_keeper chosen
+          in
           match
             Ask.gate_transition ~inflight:state.ask_submit_inflight
               ~pending:state.pending_ask_submit ~ask_id:row.Masc.Tui_decode_asks.ar_id
@@ -15796,17 +15860,8 @@ let handle_ask_submit state ~mailbox =
               report_action state "system" "An answer is already on its way"
           | Ask.Ask_gate_arm ask_id ->
               state.pending_ask_submit <- Some ask_id;
-              report_action state "system"
-                (Masc_tui_types.armed_ask_submit_notice
-                   row.Masc.Tui_decode_asks.ar_keeper)
+              report_action state "system" (Masc_tui_types.armed_ask_submit_notice answered_label)
           | Ask.Ask_gate_submit ->
-              (* Name the Keeper and what was chosen, not the ask's opaque id,
-                 so the confirmation says which decision landed and as what. *)
-              let answered_label =
-                match Ask.summarize_answer draft ~row with
-                | "" -> row.Masc.Tui_decode_asks.ar_keeper
-                | chosen -> Printf.sprintf "%s: %s" row.Masc.Tui_decode_asks.ar_keeper chosen
-              in
               start_ask_answer state ~keeper_name:row.Masc.Tui_decode_asks.ar_keeper
                 ~ask_id:row.Masc.Tui_decode_asks.ar_id
                 ~source_turn_ref:row.Masc.Tui_decode_asks.ar_source_turn_ref
@@ -16067,29 +16122,54 @@ let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
   | Planning_list -> ()
 
 
-(* The vote keys on the list row under the cursor. Two presses: the first
-   names the post and direction, the same press again sends it. The post id
-   is captured at arm time, so moving the cursor between presses re-arms
-   for the new row rather than voting on the one the operator left. *)
+(* The kind decides the route: a post vote and a comment vote are two
+   requests, and nothing here can send one as the other. *)
+let send_board_vote state ~mailbox ~(up : bool) target =
+  let launch = launch_workspace_request state ~mailbox ~boundary_error:Fun.id in
+  let report = report_action state in
+  match target with
+  | Vote_post post_id ->
+      Masc_tui_board_requests.start_board_vote state ~host:server_peer_host
+        ~report ~launch ~post_id ~up
+  | Vote_comment { post_id; comment_id } ->
+      Masc_tui_board_requests.start_board_comment_vote state
+        ~host:server_peer_host ~report ~launch ~post_id ~comment_id ~up
+
+(* The vote keys. On the list they vote on the row under the cursor; while
+   reading, on the selected comment when the comments have focus and on the
+   open post otherwise. Two presses: the first names the target and
+   direction, the same press again sends it. The target is captured at arm
+   time, kind included, so moving the cursor between presses re-arms for
+   the new target rather than voting on the one the operator left. *)
 let handle_board_vote_key state ~mailbox ~(up : bool) =
-  match state.board_mode with
-  | Board_list -> (
-      match List.nth_opt (board_posts state) state.board_cursor with
-      | None -> ()
-      | Some post -> (
-          match state.board_vote_armed with
-          | Some (armed_post, armed_up)
-            when String.equal armed_post post.bp_id && armed_up = up ->
-              state.board_vote_armed <- None;
-              Masc_tui_board_requests.start_board_vote state ~host:server_peer_host ~report:(report_action state) ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id) ~post_id:post.bp_id ~up
-          | Some _ | None ->
-              state.board_vote_armed <- Some (post.bp_id, up);
-              report_action state "system"
-                (Printf.sprintf "press %s again to vote %s on %s"
-                   (if up then "v" else "V")
-                   (if up then "up" else "down")
-                   post.bp_id)))
-  | Board_read _ | Board_compose -> ()
+  let target =
+    match state.board_mode with
+    | Board_list ->
+        Option.map
+          (fun (post : board_post) -> Vote_post post.bp_id)
+          (List.nth_opt (board_posts state) state.board_cursor)
+    | Board_read post_id
+      when state.board_focus = Right_pane && state.board_comments_focused ->
+        Option.map
+          (fun comment_id -> Vote_comment { post_id; comment_id })
+          (select_board_comment state ~post_id)
+    | Board_read post_id -> Some (Vote_post post_id)
+    | Board_compose -> None
+  in
+  match target with
+  | None -> ()
+  | Some target -> (
+      match Masc_tui_board_vote.press ~armed:state.board_vote_armed ~target ~up with
+      | Masc_tui_board_vote.Send (target, up) ->
+          state.board_vote_armed <- None;
+          send_board_vote state ~mailbox ~up target
+      | Masc_tui_board_vote.Arm (target, up) ->
+          state.board_vote_armed <- Some (target, up);
+          report_action state "system"
+            (Printf.sprintf "press %s again to vote %s on %s"
+               (if up then "v" else "V")
+               (if up then "up" else "down")
+               (Masc_tui_board_vote.describe target)))
 
 (* Cancel a schedule through the tools route. Same fiber-and-mailbox shape as
    the other writes; the server's store rules decide whether the row is still
@@ -16872,6 +16952,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Help | Masc_tui_command.Features
        | Masc_tui_command.Show_load_errors
        | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
+       | Masc_tui_command.Open_music | Masc_tui_command.Music_invalid_arguments
         | Masc_tui_command.Open_diff | Masc_tui_command.Open_patch_modal
         | Masc_tui_command.Open_usage | Masc_tui_command.Open_changes
         | Masc_tui_command.Toggle_acting_pane
@@ -18456,14 +18537,18 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
         ~refresh_detail:(fun post_id ->
           Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host
             ~port:state.port ~post_id ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)) result
-  | Board_vote_done result ->
+  | Board_vote_done (target, result) ->
       Masc_tui_board_updates.vote_done state ~report:(report_action state)
         ~refresh:(fun () ->
           start_http_refresh state ~host:server_peer_host
             ~port:state.port ~intent:Revalidate
             ~refresh_inflight:http_refresh_inflight
             ~scoped_refresh_inflight:http_scoped_refresh_inflight
-            ~scoped_refresh_followup ~mailbox) result
+            ~scoped_refresh_followup ~mailbox)
+        ~refresh_detail:(fun post_id ->
+          Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host
+            ~port:state.port ~post_id ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id))
+        target result
   | (Goal_transition_done result | Goal_confirmation_submitted result) as message -> (
       (match message, state.goal_confirmation with
        | Goal_confirmation_submitted _, Goal_confirmation.Submitting (_, read) ->
@@ -21484,14 +21569,21 @@ let copy_reference_to_terminal render_schedule reference =
    terminal keeps the wheel for its own scrollback -- which scrolls past the
    TUI's frame on a non-alternate screen -- or turns it into arrow keys only
    if configured to. With it, wheel reports arrive here and read_input maps
-   them to the same keys the arrows make. *)
-let mouse_tracking_enable = "\x1b[?1006;1000h"
-let mouse_tracking_disable = "\x1b[?1006;1000l"
+   them to the same keys the arrows make.
+
+   1002 is button-event tracking: motion reports while a button is held, the
+   drag a selection is read from. It follows 1000 so a terminal that knows
+   both ends on 1002, and one that knows only 1000 still reports the wheel
+   and the press. *)
+let mouse_tracking_enable = "\x1b[?1006;1000;1002h"
+let mouse_tracking_disable = "\x1b[?1006;1002;1000l"
 
 (* Tracking is what the wheel costs the terminal: with reports on, a drag is a
-   report and the terminal never highlights anything, so there is no way to
-   copy a line off the screen. Ctrl-T hands the mouse back and takes it again.
-   A letter would not do -- in the composer every letter is text. *)
+   report and the terminal never highlights anything. A drag is read here
+   instead: it selects inside the pane it started in and is copied on release
+   ([Masc_tui_pane_selection]). Ctrl-T hands the mouse back, for a selection
+   the terminal draws itself, and takes it again. A letter would not do -- in
+   the composer every letter is text. *)
 let mouse_tracking_on = Atomic.make true
 let toggle_mouse_tracking_key = "\020"
 
@@ -21802,6 +21894,12 @@ let main
      A press is read against this, never against a frame still being drawn:
      the same rule the approval row above follows. *)
   let presented_presses = ref Masc_tui_hit.no_zones in
+  (* Where each pane of that frame sits. A press is placed in one of these,
+     and a drag after it selects only inside it. *)
+  let presented_panes = ref Masc_tui_pane_selection.no_panes in
+  (* The left button's gesture from its press to its release. While it
+     selects, every frame is drawn with the selection over it. *)
+  let pointer_gesture = ref Masc_tui_pane_selection.Idle in
   (* Which reader that frame drew, as it reported it. A wheel notch not over
      the Activity pane moves this reader. *)
   let presented_reader = ref None in
@@ -22044,7 +22142,16 @@ let main
   let commit_presented_approval approval =
     presented_approval := approval
   in
-  let present_frame frame approval presses ~write ~flush reader =
+  let present_frame frame approval presses panes ~write ~flush reader =
+    let frame =
+      match !pointer_gesture with
+      | Masc_tui_pane_selection.Selecting selection ->
+          { frame with
+            Frame_presenter.lines =
+              Masc_tui_pane_selection.highlight selection frame.Frame_presenter.lines }
+      | Masc_tui_pane_selection.Idle | Masc_tui_pane_selection.Pressed _
+      | Masc_tui_pane_selection.Drag_without_pane -> frame
+    in
     let damaged = Terminal_write_repair.consume_damage () in
     let authority_changed =
       Approval_authority.authority_changed
@@ -22081,6 +22188,7 @@ let main
          | Some (Context_inspector_response_scroll _) -> ());
         commit_presented_approval approval;
         presented_presses := presses;
+        presented_panes := panes;
         presented_reader := reader;
         (* The frame's pictures go over it once it is on the terminal: sent
            again after a full redraw, whose clear took them, and put back
@@ -22198,25 +22306,31 @@ let main
      completion. Late replies update every existing terminal capability consumer. *)
   install_terminal_probe_publisher input_reader ~publish:apply_terminal_observation;
 
+  let restore_music_terminal () =
+    output_string stdout (mouse_tracking_disable ^ bracketed_paste_disable);
+    if Terminal_profile.kitty_keyboard terminal_profile then
+      output_string stdout Masc_tui_csi.disable_kitty_keyboard;
+    flush stdout;
+    restore_terminal () in
+  let reenter_music_terminal () =
+    reenter_terminal ();
+    Frame_presenter.setup frame_presenter ~write:(output_string stdout)
+      ~flush:(fun () -> flush stdout);
+    output_string stdout mouse_tracking_enable;
+    if Terminal_profile.kitty_keyboard terminal_profile then
+      output_string stdout Masc_tui_csi.enable_kitty_keyboard;
+    flush stdout in
+  music_terminal_handoff := Some (fun () ->
+    let root = Filename.concat
+      (Common.masc_dir_from_base_path ~base_path:state.local_base_path) "music" in
+    Masc_tui_score.launch_music ~restore:restore_music_terminal ~reenter:reenter_music_terminal
+      ~project_root:(Filename.concat root "projects") ~session_root:(Filename.concat root "sessions")
+      ~soundfont:!boot_midi_soundfont);
   score_terminal_handoff := Some (fun ~sources ~index ->
     match !active_graphics_protocol, !image_cell_pixels with
     | Masc_tui_graphics.Kitty_protocol, Some ((width, height) as cell_pixels)
       when width > 0 && height > 0 ->
-        let restore () =
-          output_string stdout (mouse_tracking_disable ^ bracketed_paste_disable);
-          if Terminal_profile.kitty_keyboard terminal_profile then
-            output_string stdout Masc_tui_csi.disable_kitty_keyboard;
-          flush stdout;
-          restore_terminal () in
-        let reenter () =
-          reenter_terminal ();
-          Frame_presenter.setup frame_presenter ~write:(output_string stdout)
-            ~flush:(fun () -> flush stdout);
-          output_string stdout mouse_tracking_enable;
-          if Terminal_profile.kitty_keyboard terminal_profile then
-            output_string stdout Masc_tui_csi.enable_kitty_keyboard;
-          flush stdout in
-        Masc_tui_score.launch ~restore ~reenter ~sources ~index ~cell_pixels
+        Masc_tui_score.launch ~restore:restore_music_terminal ~reenter:reenter_music_terminal ~sources ~index ~cell_pixels
           ~soundfont:!boot_midi_soundfont
     | (Masc_tui_graphics.Kitty_protocol, (Some _ | None))
     | (Masc_tui_graphics.ITerm2_protocol | Masc_tui_graphics.Unsupported_protocol), _ ->
@@ -23815,12 +23929,12 @@ and is loaded on demand through keeper_skill.
          its reading. Repeated B shares its pending request; protocol replies
          and idle cadence are observations rather than operator actions. *)
       (match input with
-       | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_release _ | Mouse_wheel _) ->
+       | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _) ->
            Code_results.retire_lsp_input state
        | Some (Graphics_reply _) | None -> ());
       (match input with
        | Some (Key "B") when state.view = Code -> ()
-       | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_release _ | Mouse_wheel _) ->
+       | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _) ->
            state.code_navigation <- None
        | Some (Graphics_reply _) | None -> ());
       let input =
@@ -23837,7 +23951,7 @@ and is loaded on demand through keeper_skill.
               Render_schedule.request render_schedule Render_schedule.Input;
               None
           | (Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _
-                  | Mouse_left_release _ | Mouse_wheel _)
+                  | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _)
             | None) as other -> other
         else input
       in
@@ -23850,7 +23964,7 @@ and is loaded on demand through keeper_skill.
       (* Further operator input owns focus. A pending creation may finish and
          refresh its metadata, but cannot jump over the next gesture/draft. *)
       (match input with
-       | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_release _ | Mouse_wheel _) ->
+       | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _) ->
            state.keeper_creation_focus <- None
        | Some (Graphics_reply _) | None -> ());
       Option.iter
@@ -23923,6 +24037,8 @@ and is loaded on demand through keeper_skill.
       (match refresh_terminal_size () with
        | Render_schedule.Terminal_size_cache.Changed _ ->
            discard_frame_for_new_size frame_presenter render_schedule;
+           (* The panes a held gesture was placed in are not where they were. *)
+           pointer_gesture := Masc_tui_pane_selection.Idle;
            (* Geometry changes redraw the cached snapshot immediately; an
               in-flight tick must not own resize presentation either. *)
            if state.msx_open then begin
@@ -24021,6 +24137,9 @@ and is loaded on demand through keeper_skill.
                                via=[];duration_ms=0})
                       | None -> ())
                  | _ -> ())
+            (* Its own press and release say click or drag; the motion
+               between them moves nothing on the page. *)
+            | Mouse_left_drag _ -> ()
             | Key ("esc" | "q") -> close ()
             | Key "r" -> launch_browser_lane state ~mailbox:async_messages (Viewport_refresh {tab_id=shot.tab_id; expected_url=shot.url})
             | Key ("j" | "down") -> scroll_at {x=0.5;y=0.5} 120
@@ -24049,6 +24168,11 @@ and is loaded on demand through keeper_skill.
           | Some (Key name) -> Some name
           | Some (Pasted _) | Some (Graphics_reply _) | Some (Mouse_left_press (_, _))
           | Some (Mouse_left_release (_, _)) | Some (Mouse_wheel (_, _, _)) -> Some ""  (* deliberate non-key input: step, own it *)
+          (* The motion between a press and its release is no input of its
+             own: the press already stepped, and a drag would repaint the
+             machine on every cell it crossed. Nothing under the screen
+             reads it either. *)
+          | Some (Mouse_left_drag (_, _)) -> None
           | None -> None
         else None
       in
@@ -24096,7 +24220,7 @@ and is loaded on demand through keeper_skill.
               if not room_visible && not (List.mem name ["esc"; "tab"; "\t"]) then room, Masc_tui_play_room.Repaint
               else match input with
                 | Some (Pasted paste) -> Masc_tui_play_room.paste room paste.Masc_tui_paste.text, Masc_tui_play_room.Repaint
-                | Some (Key _ | (Graphics_reply _ | (Mouse_left_press (_, _) | (Mouse_left_release (_, _) | Mouse_wheel (_, _, _)))))
+                | Some (Key _ | (Graphics_reply _ | (Mouse_left_press (_, _) | (Mouse_left_drag (_, _) | (Mouse_left_release (_, _) | Mouse_wheel (_, _, _))))))
                 | None -> Masc_tui_play_room.key room name in
             state.play_room <- Some room;
             (match intent with Repaint -> () | Send -> send_play_room state ~mailbox:async_messages)) state.play_room;
@@ -24284,6 +24408,76 @@ and is loaded on demand through keeper_skill.
       let compact_viewport =
         Frame_presenter.last_frame_is_compact frame_presenter
       in
+      (* The left button's press, the motion after it and its release are one
+         gesture ([Masc_tui_pane_selection]). A release on the cell the press
+         landed on is a click, and the press handlers below take it there; a
+         drag selects inside the pane the press landed in and is copied when
+         the button comes up. Only a frame this program drew can be clicked or
+         selected from: while a picture or the machine screen is up it owns
+         the pointer, and a gesture under way ends. *)
+      let pointer_on_frame =
+        (not dismissed_image) && (not compact_viewport)
+        && (not state.image_open) && (not state.msx_open)
+        && Option.is_none msx_key
+      in
+      let pointer_outcome =
+        match input with
+        | Some (Mouse_left_press (row, column)) when pointer_on_frame ->
+            pointer_gesture :=
+              Masc_tui_pane_selection.press !presented_panes ~row ~column;
+            Masc_tui_pane_selection.Nothing
+        | Some (Mouse_left_drag (row, column)) when pointer_on_frame ->
+            pointer_gesture :=
+              Masc_tui_pane_selection.drag !pointer_gesture ~row ~column;
+            Masc_tui_pane_selection.Nothing
+        | Some (Mouse_left_release (row, column)) when pointer_on_frame ->
+            let outcome =
+              Masc_tui_pane_selection.release !pointer_gesture ~row ~column
+            in
+            pointer_gesture := Masc_tui_pane_selection.Idle;
+            outcome
+        | Some (Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _) ->
+            pointer_gesture := Masc_tui_pane_selection.Idle;
+            Masc_tui_pane_selection.Nothing
+        | Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_wheel _) | None ->
+            Masc_tui_pane_selection.Nothing
+      in
+      (* Escape lets go of a gesture still held and does nothing else: the
+         operator meant the selection, not the surface under it. *)
+      let gesture_cancelled =
+        match input with
+        | Some (Key "esc")
+          when Masc_tui_pane_selection.in_progress !pointer_gesture ->
+            pointer_gesture := Masc_tui_pane_selection.Idle;
+            true
+        | Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _
+               | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _)
+        | None -> false
+      in
+      let click =
+        match pointer_outcome with
+        | Masc_tui_pane_selection.Click { row; column } -> Some (row, column)
+        | Masc_tui_pane_selection.Copy _ | Masc_tui_pane_selection.Nothing -> None
+      in
+      (match pointer_outcome with
+       | Masc_tui_pane_selection.Copy selection -> (
+           (* The text is read from the rows the terminal shows: what the
+              operator selected is what was on screen. *)
+           match
+             Option.bind
+               (Frame_presenter.presented_rows frame_presenter)
+               (Masc_tui_pane_selection.text selection)
+           with
+           | Some text ->
+               copy_reference_to_terminal render_schedule text;
+               report_action state "system"
+                 (Printf.sprintf
+                    "Asked the terminal to copy %s (OSC 52, unconfirmed)"
+                    (Masc_tui_message_layout.count_noun
+                       (List.length (Masc_tui_pane_selection.spans selection))
+                       "line"))
+           | None -> ())
+       | Masc_tui_pane_selection.Click _ | Masc_tui_pane_selection.Nothing -> ());
       (* Where a notch leaves the reader on screen, when it is the reader's:
          not over the Activity pane, which keeps the wheel it had. The frame
          names the reader; the notch moves it from where it is now. *)
@@ -24298,11 +24492,11 @@ and is loaded on demand through keeper_skill.
             Option.bind !presented_reader (fun reader ->
                 reader_after_wheel (clamped_scroll_now state reader) direction)
         | Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _
-               | Mouse_left_release _ | Mouse_wheel _)
+               | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _)
         | None -> None
       in
       let key =
-        if dismissed_image || Option.is_some msx_key then None
+        if dismissed_image || Option.is_some msx_key || gesture_cancelled then None
         else
           match input with
           | Some (Key name) -> Some name
@@ -24316,7 +24510,8 @@ and is loaded on demand through keeper_skill.
                   if Option.is_some wheel_reader then None
                   else Some (Masc.Tui_mouse_protocol.wheel_key direction))
           | Some (Pasted _) | Some (Graphics_reply _)
-          | Some (Mouse_left_press _) | Some (Mouse_left_release _) | None -> None
+          | Some (Mouse_left_press _) | Some (Mouse_left_drag _)
+          | Some (Mouse_left_release _) | None -> None
       in
       (* The field a typed character would land in, read once for the paste
          below. A paste is the characters the operator would have typed, so
@@ -24352,23 +24547,28 @@ and is loaded on demand through keeper_skill.
             | `Surface -> true
             | _ -> false)
       in
-      (* What a press lands on in the frame on screen. Only marks the
+      (* What a click lands on in the frame on screen. Only marks the
          terminal was shown can answer, and for a frame drawn over a surface
          [render] keeps only the presses that act inside the overlay, so a
          modal's press never changes the surface under it. A field taking keys holds the press too: moving away from
          it would leave the next keys typed into a field no longer drawn.
          While the picture or the machine screen is up nothing is drawn, so
-         the last frame's marks are not what the terminal shows. *)
+         the last frame's marks are not what the terminal shows; [click] is
+         only ever read off a frame this program drew. A click acts when the
+         button comes up, so a press that becomes a drag acts on nothing. *)
       let pressed =
-        match input with
-        | Some (Mouse_left_press (row, column))
-          when (not dismissed_image) && (not compact_viewport)
-               && (not state.image_open) && (not state.msx_open)
-               && Option.is_none msx_key
-               && Option.is_none text_target ->
+        match click with
+        | Some (row, column) when Option.is_none text_target ->
             Masc_tui_hit.target_at !presented_presses ~row ~column
-        | Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _
-               | Mouse_left_release _ | Mouse_wheel _)
+        | Some _ | None -> None
+      in
+      (* The Activity pane row a click landed on. *)
+      let acting_pane_click =
+        match click with
+        | Some (row, column) -> (
+            match acting_pane_hit state ~row ~column with
+            | Pane_row line -> Some line
+            | Pane_miss -> None)
         | None -> None
       in
       (match input with
@@ -24401,16 +24601,19 @@ and is loaded on demand through keeper_skill.
             | Some ({ draft = Some draft; _ } as view) ->
                 state.lane_addons <- Some { view with draft = Some (draft ^ Masc_tui_identity_model.identity_field_paste paste.Masc_tui_paste.text) }
             | Some _ | None -> ())
-       | Some (Mouse_wheel _) | Some (Mouse_left_press _) | Some (Mouse_left_release _)
+       | Some (Mouse_wheel _) | Some (Mouse_left_press _) | Some (Mouse_left_drag _)
+       | Some (Mouse_left_release _)
          when Option.is_some state.account_login -> ()
-       | Some (Mouse_wheel _) | Some (Mouse_left_press _) | Some (Mouse_left_release _)
+       | Some (Mouse_wheel _) | Some (Mouse_left_press _) | Some (Mouse_left_drag _)
+       | Some (Mouse_left_release _)
          when Option.is_some state.lane_addons -> ()
        (* A paste into a one-line field is the text, on one line: no dropped
           file to classify and no spill to disk, both of which are the
           composer's and mean nothing in a field a single row high. A copied
           secret carries the newline that ended it, and a field is not a
           place for one. *)
-       | Some (Mouse_wheel _) | Some (Mouse_left_press _) | Some (Mouse_left_release _)
+       | Some (Mouse_wheel _) | Some (Mouse_left_press _) | Some (Mouse_left_drag _)
+       | Some (Mouse_left_release _)
          when Option.is_some state.account_login -> ()
        | Some (Pasted _) when state.keeper_deletions_open -> ()
        | Some (Pasted _) when state.about_open -> ()
@@ -24580,7 +24783,7 @@ and is loaded on demand through keeper_skill.
             | Some _ | None ->
                 handle_paste ~protect_recovered:recovered_paste state
                   ~base_path ~mailbox:async_messages ~paste)
-       | Some (Mouse_left_press _) when Option.is_some pressed ->
+       | Some (Mouse_left_release _) when Option.is_some pressed ->
            Option.iter
              (press_marked_target state ~mailbox:async_messages)
              pressed
@@ -24597,33 +24800,34 @@ and is loaded on demand through keeper_skill.
                (match direction with
                 | Masc.Tui_mouse_protocol.Wheel_up -> -wheel_notch_rows
                 | Masc.Tui_mouse_protocol.Wheel_down -> wheel_notch_rows)
-       (* A left press on the Activity pane picks the keeper under it. Same
+       (* A left click on the Activity pane picks the keeper under it. Same
           modal guards as the Lanes press below, for the same reason. *)
-       | Some (Mouse_left_press (row, column))
-         when (not dismissed_image) && (not compact_viewport)
-              && (not (modal_owns_keys state))
+       | Some (Mouse_left_release _)
+         when (not (modal_owns_keys state))
               && (not state.palette_open)
               && Option.is_none state.search
-              && acting_pane_hit state ~row ~column <> Pane_miss -> (
-           match acting_pane_hit state ~row ~column with
-           | Pane_row line ->
+              && Option.is_some acting_pane_click ->
+           Option.iter
+             (fun line ->
                handle_acting_pane_click state ~base_path ~mailbox:async_messages
-                 ~line
-           | Pane_miss -> ())
+                 ~line)
+             acting_pane_click
        (* A press on a folded Gate row opens what the fold is holding. The
           fold lives on the tool-detail axis, so this selects its full state
           directly even when the keyboard cycle passes through results. Only
           folded rows carry the action, so a press on an open row is not a
           press that quietly did nothing -- there was nothing to open. *)
-       | Some (Mouse_left_press (row, column))
+       | Some (Mouse_left_release _)
          when state.view = Keepers Keeper_message
-              && (not dismissed_image) && (not compact_viewport)
               && (not (modal_owns_keys state))
               && (not state.palette_open)
               && Option.is_none state.search
-              && keeper_chat_click_in_body state ~column
-              && chat_row_action_at ~row
-                 = Masc_tui_message_layout.Action_unfold_argument ->
+              && (match click with
+                  | Some (row, column) ->
+                      keeper_chat_click_in_body state ~column
+                      && chat_row_action_at ~row
+                         = Masc_tui_message_layout.Action_unfold_argument
+                  | None -> false) ->
            state.msg_tool_visibility <- Tools_full;
            Option.iter
              (fun keeper_name ->
@@ -24634,7 +24838,8 @@ and is loaded on demand through keeper_skill.
           the capability probe, which does its own reading before the loop
           starts; what matters here is that it does not become keys. *)
        | Some (Pasted _) | Some (Graphics_reply _) | Some (Key _)
-       | Some (Mouse_left_press _) | Some (Mouse_left_release _) | Some (Mouse_wheel _) | None -> ());
+       | Some (Mouse_left_press _) | Some (Mouse_left_drag _)
+       | Some (Mouse_left_release _) | Some (Mouse_wheel _) | None -> ());
       if Option.is_some input then
         Render_schedule.request render_schedule Render_schedule.Input;
       (let now_ns = Mtime_clock.elapsed_ns () in
@@ -24674,7 +24879,7 @@ and is loaded on demand through keeper_skill.
                   ("Could not store the help hint as shown: " ^ reason))
        | Some (Key _ | Pasted _)
        | Some (Graphics_reply _)
-       | Some (Mouse_left_press _ | Mouse_left_release _)
+       | Some (Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _)
        | Some (Mouse_wheel _)
        | None -> ());
       let quit_key =
@@ -25640,6 +25845,8 @@ and is loaded on demand through keeper_skill.
           screens worth copying from. *)
        | Some k when String.equal k toggle_mouse_tracking_key ->
            toggle_mouse_tracking ();
+           (* Handed to the terminal, the button's release never comes here. *)
+           pointer_gesture := Masc_tui_pane_selection.Idle;
            Render_schedule.request render_schedule Render_schedule.Force
        (* Also above the modals: the roster is chrome around whatever is
           showing, and reclaiming its columns should not depend on which
@@ -28472,7 +28679,7 @@ and is loaded on demand through keeper_skill.
                       | None -> report_action state "system" "Question changed; choose again"
                       | Some cursor ->
                           navigate Approvals;
-                          state.ask_cursor <- cursor;
+                          state.ask_cursor <- Ask.On cursor;
                           enter_ask_answering state)
                  | Home_goal_confirmation goal_id ->
                      (match state.planning_filter with
@@ -28514,6 +28721,10 @@ and is loaded on demand through keeper_skill.
             | Home_choose_keeper ->
                 goto_surface state ~mailbox:async_messages (Keepers Keeper_list)
             | Home_create_keeper -> handle_keeper_create ~return_to:Keeper_chat_return_home ()))
+        | Some "s" when state.view = Overview ->
+            (match open_music () with
+             | Ok () -> ()
+             | Error detail -> report_action state "error" detail)
         | Some ("m" | "M") when state.view = Overview ->
             goto_surface state ~mailbox:async_messages Metrics
         | Some "f" when state.view = Metrics && not state.usage_telemetry_open ->
@@ -28830,7 +29041,10 @@ and is loaded on demand through keeper_skill.
                   (match Board_detail.view_for state.board_detail ~post_id with
                    | Board_detail.Ready (_, _ :: _, _) ->
                        state.board_comments_focused <-
-                         not state.board_comments_focused
+                         not state.board_comments_focused;
+                       if state.board_comments_focused then
+                         ignore
+                           (select_board_comment state ~post_id : string option)
                    | Board_detail.Absent | Board_detail.Loading
                    | Board_detail.Ready (_, [], _) | Board_detail.Failed _ -> ())
             | Board_list | Board_compose -> ())
@@ -30391,12 +30605,14 @@ and is loaded on demand through keeper_skill.
                  | Board_list ->
                      if state.board_cursor < List.length (board_posts state) - 1 then
                        state.board_cursor <- state.board_cursor + 1
-                 | Board_read _ ->
+                 | Board_read post_id ->
                      (match state.board_focus with
                       | Left_pane ->
                           move_board_posts_pane state ~mailbox:async_messages
                             ~delta:1
-                      | Right_pane -> move_board_read_scroll state ~by:1)
+                      | Right_pane ->
+                          step_board_reading state ~post_id
+                            ~by_wheel:(key = Some "wheel-down") ~delta:1)
                  | Board_compose -> ())
             | Planning ->
                 (match state.planning_mode with
@@ -30727,12 +30943,14 @@ and is loaded on demand through keeper_skill.
                  | Board_list ->
                      if state.board_cursor > 0 then
                        state.board_cursor <- state.board_cursor - 1
-                 | Board_read _ ->
+                 | Board_read post_id ->
                      (match state.board_focus with
                       | Left_pane ->
                           move_board_posts_pane state ~mailbox:async_messages
                             ~delta:(-1)
-                      | Right_pane -> move_board_read_scroll state ~by:(-1))
+                      | Right_pane ->
+                          step_board_reading state ~post_id
+                            ~by_wheel:(key = Some "wheel-up") ~delta:(-1))
                  | Board_compose -> ())
             | Planning ->
                 (match state.planning_mode with
@@ -32471,9 +32689,9 @@ and is loaded on demand through keeper_skill.
            (* Keys and async updates can change the pane reservation after
               the interaction snapshot. Store the focus the next frame shows. *)
            reconcile_chat_focus ();
-           let frame, clamped, approval, presses =
+           let frame, clamped, approval, presses, panes =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build
-               ~tag:(fun (frame, _, _, _) -> frame.Frame_presenter.surface_key)
+               ~tag:(fun (frame, _, _, _, _) -> frame.Frame_presenter.surface_key)
                (fun () ->
                  Masc_tui_message_layout.begin_frame ();
                  (* Event folding is frame preparation, so its cost belongs
@@ -32511,7 +32729,7 @@ and is loaded on demand through keeper_skill.
            Masc_tui_frame_timing.time_present
              ~tag:frame.Frame_presenter.surface_key
              ~write:(output_string stdout) ~flush:(fun () -> flush stdout)
-             (present_frame frame approval presses clamped)
+             (present_frame frame approval presses panes clamped)
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in

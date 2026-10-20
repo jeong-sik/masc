@@ -15,7 +15,7 @@ command -v pnpm >/dev/null 2>&1 || { printf '%s\n' 'pnpm is required to install 
 node -e 'if (Number(process.versions.node.split(".")[0]) < 22) process.exit(1)'
 mkdir -p "$prefix"
 prefix=$(CDPATH= cd -- "$prefix" && pwd)
-runtime_files='package.json pnpm-lock.yaml engine.mjs audio.mjs diagnostics.mjs worker.mjs terminal.mjs viewer.mjs capture.mjs session-data.mjs music-session.mjs wave-file.mjs native/MusicSession.swift native/Info.plist vst.mjs instruments.mjs'
+runtime_files='project-sound.mjs project-sound-files.mjs score-handoff.mjs native/WaveLoopClock.swift arrangement-loop.mjs midi-expression.mjs music-library-info.mjs music-library-worker.mjs music-workbench.mjs phrase-arrangement.mjs arrangement-practice.mjs native/PulseAudioClock.swift native/PulseLoopClock.swift recording-correction.mjs calibration-profile.mjs calibration-files.mjs capture-placement.mjs audio-calibration.mjs live-midi.mjs package.json pnpm-lock.yaml engine.mjs audio.mjs diagnostics.mjs worker.mjs terminal.mjs viewer.mjs capture.mjs session-data.mjs capture-time.mjs captured-source.mjs captured-source-files.mjs capture-playback.mjs music-session.mjs wave-file.mjs sequencer-project.mjs arrangement.mjs arrangement-files.mjs arrangement-editor.mjs arrangement-worker.mjs arrangement-tui.mjs arrangement-playback.mjs arrangement-recording.mjs sequencer-files.mjs sequencer-audio.mjs sequencer-midi.mjs midi-source.mjs midi-source-editor.mjs midi-source-playback.mjs sequencer-editor.mjs sequencer-vst.mjs sequencer-worker.mjs sequencer-tui.mjs playback.mjs native/MusicSession.swift native/MusicTransport.swift native/MidiTransport.swift native/WaveArrangement.swift native/CaptureAudioClock.swift native/UmpTransport.swift native/UmpOutput.swift native/UmpRegions.swift native/HybridMidiTransport.swift native/UmpLoopTransport.swift native/UmpState.swift native/Info.plist native/UmpLiveInput.swift native/LiveMidiMain.swift native/LiveMidiReservations.swift vst.mjs instruments.mjs'
 revision=$(node --input-type=module - "$repo_root/tools/alphatex" $runtime_files <<'FINGERPRINT'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -50,7 +50,7 @@ if [ "$(uname -s)" = Darwin ] && [ ! -x "$support_dir/music-native" ]; then
   if xcrun --find swiftc >/dev/null 2>&1; then
     native_binary=$(mktemp "$support_dir/.music-native.XXXXXX")
     trap 'rm -f "$native_binary"' EXIT HUP INT TERM
-    xcrun swiftc -O "$support_dir/native/MusicSession.swift" -o "$native_binary" \
+    xcrun swiftc -parse-as-library -O "$support_dir/native/MusicSession.swift" -o "$native_binary" \
       -framework AVFoundation -framework CoreAudio -framework CoreMIDI -framework AudioToolbox \
       -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$support_dir/native/Info.plist"
     chmod 755 "$native_binary"
@@ -58,6 +58,56 @@ if [ "$(uname -s)" = Darwin ] && [ ! -x "$support_dir/music-native" ]; then
     trap - EXIT HUP INT TERM
   else
     printf '%s\n' 'Audio/MIDI capture requires the Xcode command-line tools; score viewing remains available.' >&2
+  fi
+fi
+if [ "$(uname -s)" = Darwin ] && [ ! -x "$support_dir/music-transport" ]; then
+  if xcrun --find swiftc >/dev/null 2>&1; then
+    transport_binary=$(mktemp "$support_dir/.music-transport.XXXXXX")
+    trap 'rm -f "$transport_binary"' EXIT HUP INT TERM
+    xcrun swiftc -O "$support_dir/native/MusicTransport.swift" -o "$transport_binary" \
+      -framework AVFoundation -framework CoreAudio
+    chmod 755 "$transport_binary"
+    mv -f "$transport_binary" "$support_dir/music-transport"
+    trap - EXIT HUP INT TERM
+  else
+    printf '%s\n' 'Native sequencer playback requires the Xcode command-line tools.' >&2
+  fi
+fi
+if [ "$(uname -s)" = Darwin ] && [ ! -x "$support_dir/music-midi" ]; then
+  if xcrun --find swiftc >/dev/null 2>&1; then
+    midi_binary=$(mktemp "$support_dir/.music-midi.XXXXXX")
+    trap 'rm -f "$midi_binary"' EXIT HUP INT TERM
+    xcrun swiftc -parse-as-library -O "$support_dir/native/MidiTransport.swift" -o "$midi_binary" -framework CoreMIDI
+    chmod 755 "$midi_binary"
+    mv -f "$midi_binary" "$support_dir/music-midi"
+    trap - EXIT HUP INT TERM
+  else
+    printf '%s\n' 'MIDI output requires the Xcode command-line tools.' >&2
+  fi
+fi
+if [ "$(uname -s)" = Darwin ] && [ ! -x "$support_dir/music-arrangement" ]; then
+  if xcrun --find swiftc >/dev/null 2>&1; then
+    arrangement_binary=$(mktemp "$support_dir/.music-arrangement.XXXXXX")
+    trap 'rm -f "$arrangement_binary"' EXIT HUP INT TERM
+    xcrun swiftc -parse-as-library -D MIDI_LIBRARY -O "$support_dir/native/WaveArrangement.swift" "$support_dir/native/WaveLoopClock.swift" "$support_dir/native/CaptureAudioClock.swift" "$support_dir/native/PulseAudioClock.swift" "$support_dir/native/PulseLoopClock.swift" "$support_dir/native/MidiTransport.swift" "$support_dir/native/UmpTransport.swift" "$support_dir/native/UmpOutput.swift" "$support_dir/native/UmpRegions.swift" "$support_dir/native/HybridMidiTransport.swift" "$support_dir/native/UmpLoopTransport.swift" "$support_dir/native/UmpState.swift" -o "$arrangement_binary" \
+      -framework AVFoundation -framework CoreAudio -framework CoreMIDI
+    chmod 755 "$arrangement_binary"
+    mv -f "$arrangement_binary" "$support_dir/music-arrangement"
+    trap - EXIT HUP INT TERM
+  else
+    printf '%s\n' 'WAV arrangement playback requires the Xcode command-line tools.' >&2
+  fi
+fi
+if [ "$(uname -s)" = Darwin ] && [ ! -x "$support_dir/music-midi-live" ]; then
+  if xcrun --find swiftc >/dev/null 2>&1; then
+    live_binary=$(mktemp "$support_dir/.music-midi-live.XXXXXX")
+    trap 'rm -f "$live_binary"' EXIT HUP INT TERM
+    xcrun swiftc -parse-as-library -D MIDI_LIBRARY -O "$support_dir/native/MidiTransport.swift" "$support_dir/native/UmpTransport.swift" "$support_dir/native/UmpOutput.swift" "$support_dir/native/UmpState.swift" "$support_dir/native/UmpLiveInput.swift" "$support_dir/native/UmpRegions.swift" "$support_dir/native/HybridMidiTransport.swift" "$support_dir/native/UmpLoopTransport.swift" "$support_dir/native/CaptureAudioClock.swift" "$support_dir/native/WaveLoopClock.swift" "$support_dir/native/PulseAudioClock.swift" "$support_dir/native/PulseLoopClock.swift" "$support_dir/native/LiveMidiReservations.swift" "$support_dir/native/LiveMidiMain.swift" -o "$live_binary" -framework CoreMIDI
+    chmod 755 "$live_binary"
+    mv -f "$live_binary" "$support_dir/music-midi-live"
+    trap - EXIT HUP INT TERM
+  else
+    printf '%s\n' 'Live MIDI input requires the Xcode command-line tools.' >&2
   fi
 fi
 # The relative layout is shared by every prefix; no checkout or workspace path

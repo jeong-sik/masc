@@ -25,23 +25,31 @@ val sgr_wheel_report : string -> char -> (wheel_direction * int * int) option
     meant. *)
 val sgr_left_press : string -> char -> (int * int) option
 
+(** Decode one SGR mouse report into the [(row, column)] the pointer moved to
+    while the left button is held, unmodified (button [32], final [M]): the
+    report button-event tracking ([?1002]) sends between a press and its
+    release. Motion under another button or a modifier is [None]. *)
+val sgr_left_drag : string -> char -> (int * int) option
+
 (** A legacy X10 mouse report, read into the events an SGR report gives.
-    Positions are 1-based and row/column ordered. [X10_other_press] is a
-    middle, right or modified press, which no surface reads. [X10_release] is
-    X10's one release code, which does not say which button went up. *)
+    Positions are 1-based and row/column ordered. [X10_left_drag] is motion
+    with the left button held. [X10_other_press] is a middle, right or
+    modified press, which no surface reads. [X10_release] is X10's one release
+    code, which does not say which button went up. *)
 type x10_mouse =
   | X10_wheel of wheel_direction * int * int
   | X10_left_press of int * int
+  | X10_left_drag of int * int
   | X10_other_press
   | X10_release of int * int
 
 (** Decode the three raw bytes after [CSI M]: button, column, row, each offset
     by 32. Terminals without SGR ([?1006]) support answer the tracking request
-    in this shape; Apple Terminal, the macOS default, is one. Motion reports,
-    the horizontal wheel and a position below 1 are [None]; the caller consumes
-    the bytes either way. *)
+    in this shape; Apple Terminal, the macOS default, is one. Motion other
+    than a left-button drag, the horizontal wheel and a position below 1 are
+    [None]; the caller consumes the bytes either way. *)
 val x10_mouse_report :
   button:char -> column:char -> row:char -> x10_mouse option
 
 val sgr_left_release : string -> char -> (int * int) option
-(** Plain SGR left release position for screenshot click/drag gestures. *)
+(** Plain SGR left release position: the end of a click or a drag. *)

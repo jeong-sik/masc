@@ -4,12 +4,22 @@ import { createHash } from 'node:crypto'
 import JZZ from 'jzz'
 import midiFiles from 'jzz-midi-smf'
 import { validateProject, sequenceEvents, PPQ } from './sequencer-project.mjs'
+import { validateArrangement } from './arrangement.mjs'
+import { validateMidiSource, exportMidiSource } from './midi-source.mjs'
+import { restoreArrangementCaptureTimes } from './captured-source-files.mjs'
 midiFiles(JZZ)
 const hash = data => createHash('sha256').update(data).digest('hex')
+const validateDocument = document => {
+  if (document?.kind === 'arrangement') return validateArrangement(document)
+  if (document?.kind === 'midi-source') return validateMidiSource(document)
+  if (document?.kind !== undefined) throw new Error('Unsupported musical document')
+  return validateProject(document)
+}
 
-export async function loadProject(path) {
-  const data = await readFile(path)
-  return { project: validateProject(JSON.parse(data)), revision: hash(data), path: resolve(path) }
+export async function loadProject(path, { signal } = {}) {
+  const data = await readFile(path, { signal })
+  const project = await restoreArrangementCaptureTimes(JSON.parse(data), dirname(resolve(path)), { signal })
+  return { project: validateDocument(project), revision: hash(data), path: resolve(path) }
 }
 async function syncDirectory(path) {
   const directory = await open(path, 'r')
@@ -19,7 +29,7 @@ async function syncDirectory(path) {
 // into retained history before checking it, then publish only into an empty path.
 // Never unlink history: an external writer may still hold and change that inode.
 export async function saveProject(path, project, revision = null) {
-  validateProject(project)
+  validateDocument(project)
   path = resolve(path)
   const parent = dirname(path), lock = `${path}.lock`
   await mkdir(parent, { recursive: true, mode: 0o700 })
@@ -67,6 +77,11 @@ export async function saveProject(path, project, revision = null) {
   return hash(data)
 }
 export function projectMidi(project, options) {
+  if (project?.kind === 'arrangement') throw new Error('Arrangement MIDI export requires explicit clip-state reconstruction')
+  if (project?.kind === 'midi-source') {
+    if (options?.loop) throw new Error('MIDI source clip export requires explicit arrangement boundaries')
+    return exportMidiSource(project)
+  }
   const { events, ticks } = sequenceEvents(project, options)
   const file = new JZZ.MIDI.SMF(1, PPQ)
   const conductor = new JZZ.MIDI.SMF.MTrk()

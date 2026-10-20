@@ -21,3 +21,10 @@ val start_board_comment :
 val start_board_vote :
   Masc_tui_types.state -> host:string -> launch:string launch ->
   report:(string -> string -> unit) -> post_id:string -> up:bool -> unit
+
+val start_board_comment_vote :
+  Masc_tui_types.state -> host:string -> launch:string launch ->
+  report:(string -> string -> unit) -> post_id:string -> comment_id:string ->
+  up:bool -> unit
+(** Vote on one comment of [post_id]; the completion names the comment, and
+    [post_id] is the reading it refreshes. *)

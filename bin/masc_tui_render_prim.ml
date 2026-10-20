@@ -79,6 +79,11 @@ let acting_pane_row_targets : Masc_tui_acting_pane.row_target array ref = ref [|
 
 let acting_pane_scroll_max = ref 0
 
+(* Where each pane of the frame being drawn sits on the terminal. The surface
+   ends set it, the render hands it out beside the frame, and the loop reads
+   a drag against the copy the terminal accepted, never this one. *)
+let frame_panes = ref Masc_tui_pane_selection.no_panes
+
 
 
 (* The value [Masc_tui_types.apply_clamped_scroll] writes, read back from
@@ -1228,6 +1233,9 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
   let full_cols = cols + pane_cols in
   let framed = Buffer.create (Buffer.length buf + 256) in
   add_rows_beside_acting_pane state framed ~cols ~pane_rows:body_rows body;
+  frame_panes :=
+    Masc_tui_pane_selection.frame_layout ~first_row:(strip_rows + 1)
+      ~body_rows ~main_cols:cols ~activity_cols:pane_cols ~roster:None;
   Masc_tui_frame_timing.finish_stage ~name:"surface.panes" pane_started;
   let chrome_started = Masc_tui_frame_timing.start_stage () in
   (if agenda_rows > 0 then
@@ -1249,15 +1257,20 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
    laid out against the same [cols] every surface does, the terminal less the
    Activity pane, so the pane is drawn in those columns here too, beside the
    rows above its own footer. The strip
-   spans the whole terminal. *)
-let finish_frame_beside_acting_pane (state : state) ?clamped ~surface_key
-    ~cursor ~rows ~cols buf =
+   spans the whole terminal. [roster] is the Keeper roster the chat drew at
+   its left edge, a pane of its own for a drag. *)
+let finish_frame_beside_acting_pane (state : state) ?clamped ?roster
+    ~surface_key ~cursor ~rows ~cols buf =
   let framed = Buffer.create (Buffer.length buf + 4096) in
   let lines = frame_lines buf in
   (* These frames draw neither the shared composer nor the agenda. Only
      their final footer stays below the pane; use the actual drawn height. *)
   let pane_rows = max 0 (min (rows - 1) (List.length lines - 1)) in
   add_rows_beside_acting_pane state framed ~cols ~pane_rows lines;
+  frame_panes :=
+    Masc_tui_pane_selection.frame_layout ~first_row:(strip_rows + 1)
+      ~body_rows:pane_rows ~main_cols:cols
+      ~activity_cols:!acting_pane_reserved_cols ~roster;
   finish_frame_with_strip state ?clamped ~surface_key ~cursor ~rows
     ~cols:(cols + !acting_pane_reserved_cols) framed
 
@@ -1944,7 +1957,7 @@ let selected_ask_question (state : state) =
   match state.asks_snapshot with
   | None -> None
   | Some snapshot -> (
-      match List.nth_opt (Ask_projection.open_rows snapshot) state.ask_cursor with
+      match Ask_projection.selected_row (Ask_projection.open_rows snapshot) state.ask_cursor with
       | None -> None
       | Some (row : Masc.Tui_decode_asks.ask_row) ->
           List.nth_opt row.Masc.Tui_decode_asks.ar_questions state.ask_question_cursor)
@@ -2159,7 +2172,9 @@ let ask_question_viewport (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let text_entry = state.ask_text_entry in
   let lines =
-    match List.nth_opt (question_asks state) state.ask_cursor with
+    let asks = question_asks state in
+    match Ask_projection.selected_row asks state.ask_cursor with
+    | None when asks <> [] -> ["  Nothing selected -- [ or ] chooses a question"]
     | None -> ["  No questions waiting"]
     | Some row ->
         let draft = Ask_projection.draft_for state.ask_draft ~row in
@@ -2199,6 +2214,11 @@ let board_score_style votes =
   else if votes < 0 then (Theme.bad ())
   else (Theme.muted ())
 
+let board_score_text votes =
+  if votes > 0 then Printf.sprintf "▲%+d" votes
+  else if votes < 0 then Printf.sprintf "▼%d" votes
+  else " 0"
+
 (* A value in brackets: [text], folded in the middle only when it runs past
    [max_cells]. Four places fitted the value with [fit_width] first, which
    pads as well as cuts, so a short one closed its bracket after a run of
@@ -2219,14 +2239,9 @@ let board_read_title ~screen ~id ~hearth ~votes ~replies =
         Printf.sprintf "  %s#%s%s" (Theme.info ()) h Ansi.reset
     | _ -> ""
   in
-  let score =
-    if votes > 0 then Printf.sprintf "▲%+d" votes
-    else if votes < 0 then Printf.sprintf "▼%d" votes
-    else " 0"
-  in
   Printf.sprintf "%s  %s%s%s%s  %s%s%s  %s💬%d%s" screen
     (Masc_tui_theme.tone Masc_tui_theme.Accent) id Ansi.reset hearth_tag
-    (board_score_style votes) score Ansi.reset
+    (board_score_style votes) (board_score_text votes) Ansi.reset
     (if replies > 0 then Theme.ok () else Ansi.dim) replies Ansi.reset
 
 

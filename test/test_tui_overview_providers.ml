@@ -1241,6 +1241,135 @@ let test_an_account_email_is_drawn_once () =
   check int "split across two sections, the account names its email once" 1
     (List.length (List.filter (contains ~affix:"ag@example.com") (List.map plain lines)))
 
+(* #44071 review P3: hiding the Unusable block keeps its heading, count and
+   the way back, and nothing else of it. The header still counts every
+   account, and the shown sections are untouched. *)
+let test_hidden_unusable_collapses_to_its_heading () =
+  let accounts =
+    decode_accounts
+      [ account_json ~name:"full"
+          [ percent_window ~id:"week" ~resets:(now +. (5. *. 24. *. hour)) 100 ]
+      ; account_json ~name:"open"
+          [ percent_window ~id:"short" ~resets:(now +. hour) 70 ]
+      ]
+  in
+  let lines_of show_unusable =
+    match
+      Providers.section ~providers:(Types.Providers_read accounts)
+        ~runtimes:Types.Quota_unread
+        ~account_emails:Types.Account_emails_unread ~now ~width:100
+        ~show_unusable
+    with
+    | Some section -> List.map plain section.lines
+    | None -> fail "a read draws a section"
+  in
+  let hidden = lines_of false and shown = lines_of true in
+  let hidden_text = String.concat "\n" hidden in
+  check bool "the collapsed row keeps its heading, count and way back" true
+    (contains ~affix:"Unusable now (1) · hidden · x:show" hidden_text);
+  check bool "the hidden account's rows are gone" false
+    (contains ~affix:"full" hidden_text);
+  check bool "the hidden account's full value is gone" false
+    (contains ~affix:"100%" hidden_text);
+  check bool "the header still counts the hidden account" true
+    (contains ~affix:"At limit (reported) 1" hidden_text);
+  check bool "showing restores the account and its value" true
+    (let text = String.concat "\n" shown in
+     contains ~affix:"full" text && contains ~affix:"100%" text);
+  check bool "hidden draws fewer lines" true
+    (List.length hidden < List.length shown)
+
+(* #44071 review P3: the Trend line joins consecutive reported days and
+   never crosses a gap; an above-limit day keeps its mark in the top row. *)
+let test_trend_line_breaks_at_gaps_and_keeps_marks () =
+  let point ~observed_at unit
+      : Masc.Tui_decode_usage.provider_usage_history_point =
+    { puhp_scope_id = "s1"
+    ; puhp_kind = "five_hour"
+    ; puhp_limit_id = None
+    ; puhp_unit = unit
+    ; puhp_observed_at = observed_at
+    }
+  in
+  let generated_at = 1780000000.0 in
+  let day = 86400.0 in
+  let history : Masc.Tui_decode_usage.provider_usage_history =
+    { puh_days = 5
+    ; puh_generated_at = generated_at
+    ; puh_unreadable_reports = 0
+    ; puh_reported_no_windows = []
+    ; puh_points =
+        [ point ~observed_at:(generated_at -. (4. *. day))
+            (Masc.Tui_decode_usage.Utilization_fraction 0.2)
+        ; point ~observed_at:(generated_at -. (3. *. day))
+            (Masc.Tui_decode_usage.Utilization_fraction 0.8)
+        ; point ~observed_at:(generated_at -. day)
+            (Masc.Tui_decode_usage.Utilization_fraction 0.0)
+        ; point ~observed_at:generated_at
+            (Masc.Tui_decode_usage.Utilization_percent 140)
+        ]
+    }
+  in
+  let trend =
+    Masc_tui_usage_trend.of_history ~share:Providers.share_of_full history
+  in
+  let row = List.hd trend.rows in
+  let width = 60 in
+  let plot = Masc_tui_usage_trend.plot ~width trend row in
+  check int "five bands, a baseline and dates" 7 (List.length plot);
+  List.iter
+    (fun line ->
+      check bool "chart respects terminal cells" true
+        (Masc_tui_message_layout.display_width line <= width))
+    plot;
+  let text = String.concat "\n" plot in
+  check bool "the fixed full-limit axis is drawn" true
+    (contains ~affix:"100%" text);
+  check bool "the above-limit day keeps its mark" true
+    (contains ~affix:"↑" text);
+  (* A band row is an axis plus one 3-byte braille cell per day-slot column;
+     the gap day's columns must carry no ink in any band. *)
+  let blank = "\xe2\xa0\x80" in
+  let cells_of_band row =
+    match Astring.String.find_sub ~sub:"│ " row with
+    | None -> failf "band row without an axis: %S" row
+    | Some i ->
+        let start = i + String.length "│ " in
+        let cells = String.sub row start (String.length row - start) in
+        if String.length cells mod 3 <> 0 then
+          failf "band row is not whole cells: %S" row;
+        List.init (String.length cells / 3) (fun cell ->
+            String.sub cells (cell * 3) 3)
+  in
+  let bands = List.filter (contains ~affix:"│") plot in
+  check int "five band rows" 5 (List.length bands);
+  let days = List.length row.samples in
+  let step = min 4 ((width - 7) / days) in
+  let gap =
+    let rec nth index = function
+      | [] -> fail "fixture needs a gap day"
+      | None :: _ -> index
+      | Some _ :: rest -> nth (index + 1) rest
+    in
+    nth 0 row.samples
+  in
+  List.iter
+    (fun band ->
+      let cells = Array.of_list (cells_of_band band) in
+      for k = 0 to step - 1 do
+        check bool "a gap column carries no ink" true
+          (String.equal cells.(gap * step + k) blank)
+      done)
+    bands;
+  check bool "the line is drawn somewhere" true
+    (List.exists
+       (fun band ->
+         List.exists
+           (fun cell ->
+             (not (String.equal cell blank)) && not (String.equal cell "↑"))
+           (cells_of_band band))
+       bands)
+
 let () =
   run "tui_overview_providers"
     [ ( "providers"
@@ -1306,5 +1435,9 @@ let () =
             test_the_at_limit_tone_is_the_reports_not_the_sections
         ; test_case "at limit is the header decision" `Quick
             test_at_limit_is_the_header_decision
+        ; test_case "hidden unusable collapses to its heading" `Quick
+            test_hidden_unusable_collapses_to_its_heading
+        ; test_case "trend line breaks at gaps and keeps marks" `Quick
+            test_trend_line_breaks_at_gaps_and_keeps_marks
         ] )
     ]

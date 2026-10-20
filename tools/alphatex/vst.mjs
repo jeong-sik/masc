@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID, createHash } from 'node:crypto'
+import { validateVstSelection as selection } from './project-sound.mjs'
 
 // A protocol memory bound, not a phrase/job time limit. Native diagnostics
 // are on a separate stream and only their tail is retained for a failed job.
@@ -58,17 +59,6 @@ export async function atomicJson(path, value) {
   } finally {
     await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error })
   }
-}
-
-function selection(value) {
-  if (!value || typeof value !== 'object' || typeof value.plugin_path !== 'string' || !value.plugin_path
-      || typeof value.name !== 'string' || !value.name
-      || !(value.plugin_name === null || typeof value.plugin_name === 'string')
-      || !(value.preset_path === null || typeof value.preset_path === 'string')) {
-    throw new Error('Saved VST selection is invalid; select an instrument again to replace it')
-  }
-  return { plugin_path: value.plugin_path, plugin_name: value.plugin_name,
-    preset_path: value.preset_path, name: value.name }
 }
 
 export async function loadSelection(directory) {

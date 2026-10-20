@@ -2824,6 +2824,8 @@ let x10_mouse =
           Format.fprintf formatter "%s %d,%d" (Masc.Tui_mouse_protocol.wheel_key direction) row column
       | Masc.Tui_mouse_protocol.X10_left_press (row, column) ->
           Format.fprintf formatter "press %d,%d" row column
+      | Masc.Tui_mouse_protocol.X10_left_drag (row, column) ->
+          Format.fprintf formatter "drag %d,%d" row column
       | Masc.Tui_mouse_protocol.X10_other_press -> Format.fprintf formatter "other press"
       | Masc.Tui_mouse_protocol.X10_release (row, column) ->
           Format.fprintf formatter "release %d,%d" row column)
@@ -2857,13 +2859,20 @@ let test_x10_other_presses_are_named_so_their_release_is_not_left () =
         (Some Masc.Tui_mouse_protocol.X10_other_press) (x10 ~button ~column:4 ~row:3))
     [ 1; 2; 4; 8; 16 ]
 
-(* Motion reports and the horizontal wheel are gestures no surface reads. *)
+(* Motion with the left button held is the drag a selection is read from.
+   Motion under the middle or right button, with a modifier, or with no
+   button held, and the horizontal wheel, are gestures no surface reads. *)
+let test_x10_left_drag_carries_its_position () =
+  Alcotest.(check (option x10_mouse)) "left button held"
+    (Some (Masc.Tui_mouse_protocol.X10_left_drag (3, 4)))
+    (x10 ~button:32 ~column:4 ~row:3)
+
 let test_x10_motion_and_the_horizontal_wheel_stay_unclaimed () =
   List.iter
     (fun button ->
       Alcotest.(check (option x10_mouse)) (Printf.sprintf "button %d" button)
         None (x10 ~button ~column:4 ~row:3))
-    [ 32; 35; 66; 67 ]
+    [ 33; 34; 35; 36; 66; 67 ]
 
 (* A byte at the offset itself names column or row 0, which no cell is. *)
 let test_x10_position_below_one_is_unclaimed () =
@@ -2877,14 +2886,20 @@ let test_x10_and_sgr_agree () =
   List.iter
     (fun (button, params) ->
       let sgr =
-        match Masc.Tui_mouse_protocol.sgr_wheel_report params 'M', Masc.Tui_mouse_protocol.sgr_left_press params 'M' with
-        | Some (direction, row, column), _ -> Some (Masc.Tui_mouse_protocol.X10_wheel (direction, row, column))
-        | None, Some (row, column) -> Some (Masc.Tui_mouse_protocol.X10_left_press (row, column))
-        | None, None -> None
+        match
+          ( Masc.Tui_mouse_protocol.sgr_wheel_report params 'M',
+            Masc.Tui_mouse_protocol.sgr_left_press params 'M',
+            Masc.Tui_mouse_protocol.sgr_left_drag params 'M' )
+        with
+        | Some (direction, row, column), _, _ -> Some (Masc.Tui_mouse_protocol.X10_wheel (direction, row, column))
+        | None, Some (row, column), _ -> Some (Masc.Tui_mouse_protocol.X10_left_press (row, column))
+        | None, None, Some (row, column) -> Some (Masc.Tui_mouse_protocol.X10_left_drag (row, column))
+        | None, None, None -> None
       in
       Alcotest.(check (option x10_mouse)) (Printf.sprintf "button %d" button) sgr
         (x10 ~button ~column:10 ~row:5))
-    [ (64, "<64;10;5"); (65, "<65;10;5"); (0, "<0;10;5"); (66, "<66;10;5") ]
+    [ (64, "<64;10;5"); (65, "<65;10;5"); (0, "<0;10;5"); (32, "<32;10;5");
+      (34, "<34;10;5"); (66, "<66;10;5") ]
 
 (* The left press is the one report a surface can map to a row. Only the
    unmodified press answers -- a release would act twice per click, and a
@@ -2899,6 +2914,25 @@ let test_sgr_left_press_reports_the_row_and_column () =
   | Some (row, column) ->
       Alcotest.failf "expected row 5 column 10, got %d;%d" row column
   | None -> Alcotest.fail "a plain left press should report its position"
+
+(* Button-event tracking ([?1002]) reports motion while a button is held.
+   The left button's, unmodified, is the drag a selection is read from. *)
+let test_sgr_left_drag_reports_the_row_and_column () =
+  Alcotest.(check (option (pair int int))) "left drag at column 10, row 5"
+    (Some (5, 10))
+    (Masc.Tui_mouse_protocol.sgr_left_drag "<32;10;5" 'M');
+  List.iter
+    (fun (params, final) ->
+      Alcotest.(check (option (pair int int))) (Printf.sprintf "%S stays unclaimed" params)
+        None
+        (Masc.Tui_mouse_protocol.sgr_left_drag params final))
+    [ ("<0;10;5", 'M') (* press *)
+    ; ("<32;10;5", 'm') (* not a motion report's final *)
+    ; ("<34;10;5", 'M') (* right drag *)
+    ; ("<36;10;5", 'M') (* shift + left drag *)
+    ; ("<35;10;5", 'M') (* motion with no button, ?1003 *)
+    ; ("<32;0;5", 'M') (* column 0 *)
+    ]
 
 let test_sgr_left_press_ignores_releases_chords_and_wheel () =
   let cases =
@@ -13761,6 +13795,8 @@ let () =
         Alcotest.test_case "left press ignores releases, chords and wheel"
           `Quick
           test_sgr_left_press_ignores_releases_chords_and_wheel;
+        Alcotest.test_case "left drag reports the row and column" `Quick
+          test_sgr_left_drag_reports_the_row_and_column;
       ] );
     ( "x10_mouse",
       [
@@ -13770,6 +13806,8 @@ let () =
           test_x10_left_press_and_release_carry_their_position;
         Alcotest.test_case "other presses are named so their release is not left"
           `Quick test_x10_other_presses_are_named_so_their_release_is_not_left;
+        Alcotest.test_case "left drag carries its position" `Quick
+          test_x10_left_drag_carries_its_position;
         Alcotest.test_case "motion and the horizontal wheel stay unclaimed" `Quick
           test_x10_motion_and_the_horizontal_wheel_stay_unclaimed;
         Alcotest.test_case "a position below one is unclaimed" `Quick

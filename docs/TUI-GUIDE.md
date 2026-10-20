@@ -1656,6 +1656,15 @@ tablature box instead of plain code - what renders, what the fallback box
 means, and how to turn it off are in the
 [alphaTex tab guide](guides/alphatex-tab.md).
 
+Dashboard `s` or `/music` in Keeper chat opens the music workbench without a
+score fence or image-capable terminal. Choose a new phrase, arrangement or
+audio/MIDI recording, or continue a saved project or take. Work created through
+this entry lives under `<base-path>/.masc/music/projects` and `music/sessions`.
+The workbench also accepts `:open PATH`, `:midi PATH` and `:session PATH` for
+existing files. `q` returns from an editor to the library and from the library
+to MASC. The phrase editor's first audio Space opens instrument/preset selection;
+`i` changes it. Install or update the helper with `scripts/install-alphatex.sh`.
+
 In Keeper chat, `/score [N]` opens a frozen alphaTex block in the same terminal
 with the official alphaTab engine for full notation, track selection, zoom,
 scroll and local synthesized playback. N counts closed scores newest first.

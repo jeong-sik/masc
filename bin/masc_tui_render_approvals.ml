@@ -411,8 +411,25 @@ let draw_ask_questions buf cols (state : state) ~budget =
              budget -- an ask of four questions was enough to push the rest off
              the bottom, the cursor with it, so [/] and j/k moved a selection
              nothing on screen showed. *)
+          match Ask_projection.selected_index rows state.ask_cursor with
+          | None ->
+              (* The selected ask left the list. No ask is drawn open, because
+                 an open ask here is the one the next keys would answer. *)
+              box_line buf cols
+                (Printf.sprintf "  %snothing selected -- [ or ] chooses a question%s"
+                   Ansi.dim Ansi.reset);
+              let count = List.length rows in
+              let room = max 0 (budget - count_frame_lines buf) in
+              let shown = if count <= room then count else max 0 (room - 1) in
+              List.iteri
+                (fun index row -> if index < shown then box_line buf cols (ask_summary_line ~now ~row))
+                rows;
+              if shown < count then
+                box_line buf cols
+                  (Printf.sprintf "  %s+%d more ask%s -- [/] to reach%s" Ansi.dim (count - shown)
+                     (if count - shown = 1 then "" else "s") Ansi.reset)
+          | Some cursor ->
           let count = List.length rows in
-          let cursor = min (max 0 state.ask_cursor) (count - 1) in
           let selected = List.nth rows cursor in
           let draft = Ask_projection.draft_for state.ask_draft ~row:selected in
           let answering =
@@ -1107,7 +1124,8 @@ let render_question_reader (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
   let asks = question_asks state in
-  let selected = List.nth_opt asks state.ask_cursor in
+  let selected_index = Ask_projection.selected_index asks state.ask_cursor in
+  let selected = Option.bind selected_index (List.nth_opt asks) in
   box_top buf cols;
   box_line buf cols (screen_title
     (" MASC Approvals / Questions"
@@ -1116,6 +1134,8 @@ let render_question_reader (state : state) =
     (match selected with
      | None ->
          (match Masc_tui_approvals_model.approvals_questions_reading state with
+          | Masc_tui_approvals_model.List_read when asks <> [] ->
+              "  Nothing selected -- [ or ] chooses a question"
           | Masc_tui_approvals_model.List_read -> "  No questions waiting"
           | List_not_read Approval_unread -> "  Questions not loaded"
           | List_not_read (Approval_failed _ | Approval_stale _ | Approval_unavailable _) ->
@@ -1126,7 +1146,7 @@ let render_question_reader (state : state) =
              Option.is_some (Ask_projection.response_for draft ~question)) row.ar_questions |> List.length in
          Printf.sprintf "  %s%s · Ask %d/%d · Question %d/%d · %d drafted%s"
            (Theme.warn ()) (Terminal_text.single_line row.ar_keeper)
-           (state.ask_cursor + 1) (List.length asks) (state.ask_question_cursor + 1)
+           (Option.fold ~none:0 ~some:succ selected_index) (List.length asks) (state.ask_question_cursor + 1)
            (List.length row.ar_questions) drafted Ansi.reset);
   box_line buf cols
     (match state.asks_error with

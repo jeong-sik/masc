@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 import { readFileSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, basename } from 'node:path'
 import { parseArgs } from 'node:util'
 import { Worker } from 'node:worker_threads'
 import { spawn } from 'node:child_process'
 import { emitKeypressEvents } from 'node:readline'
 import { safeText, transmit, viewport, place, retire } from './terminal.mjs'
 import { errorDetail } from './diagnostics.mjs'
+import { scoreDocument } from './score-handoff.mjs'
 import { InstrumentPicker, selectionLabel, pickerFooter } from './instruments.mjs'
 import { nativeJob, defaultStateDirectory, snapshotWriter, retainRender } from './vst.mjs'
 
@@ -27,31 +28,69 @@ const { values, positionals } = parseArgs({
     session: { type: 'string' },
     'session-root': { type: 'string' },
     input: { type: 'string' },
+    output: { type: 'string' },
+    'midi-output': { type: 'string' },
     midi: { type: 'string' },
     'state-dir': { type: 'string' },
+    sequence: { type: 'boolean' },
+    arrange: { type: 'boolean' },
+    music: { type: 'boolean' },
+    'midi-file': { type: 'string' },
+    'midi-pattern': { type: 'string' },
+    project: { type: 'string' },
+    'project-root': { type: 'string' },
     help: { type: 'boolean' },
   },
 })
 
 if (values.help) {
   console.log('masc-alphatex [file.atex] [--bundle snapshot.json] [--index N]\n'
-    + '  TUI score viewer: arrows/j/k scroll, +/- zoom, t tracks, Space choose/play/pause, s stop, q exit.\n'
+    + '  TUI score viewer: arrows/j/k scroll, +/- zoom, t tracks, Space choose/play/pause, p sequencer, a arrangement, r recording, s stop, q exit.\n'
     + '  i chooses instrument/preset, e opens its native sound browser, l toggles repeat.\n'
     + '  --state-dir stores native selection, saved presets, renders and Lane snapshot.\n'
+    + '  --sequence opens a new phrase editor; --project song.json reopens one; --project-root sets its folder.\n'
+    + '  --music opens the terminal music library: phrases, arrangements and recorded takes.\n'
+    + '  --arrange opens MIDI/WAV region editing; --project also reopens saved arrangements.\n'
+    + '  --midi-file song.mid imports a source for editing/export/MIDI audition; --midi-pattern N selects an SMF2 pattern.\n'
+    + '  --output UID selects sequencer audio output; :output UID changes it in the editor.\n'
+    + '  --midi-output=ID selects MIDI output; Space pauses/resumes; :seek moves within a playing source; :stop ends it.\n'
+    + '  Arrangement: combine --output and --midi-output, or use :mixed-output AUDIO_UID with per-source MIDI ports.\n'
     + '  --record opens audio/MIDI input selection; r begins recording, s saves WAV and UMP.\n'
     + '  --session directory opens a saved waveform/MIDI timeline; --session-root sets the take folder.\n'
-    + '  --devices lists CoreAudio/CoreMIDI inputs on macOS.\n'
+    + '  --devices lists CoreAudio devices and CoreMIDI inputs/outputs on macOS.\n'
     + '  --check validates; --render output.png and --audio output.wav export using alphaTab 1.8.4.')
   process.exit(0)
 }
 
 try {
-  if (values.devices) {
+  if (values.music && (positionals.length || [values.bundle, values.sequence, values.arrange, values.project,
+    values['midi-file'], values.record, values.session, values.devices, values.check, values.render, values.audio].some(Boolean))) {
+    throw new Error('Choose --music or another entry mode')
+  }
+  if ([values.sequence, values.arrange, values.project, values['midi-file']].filter(Boolean).length > 1) throw new Error('Choose --sequence, --arrange, --project or --midi-file')
+  if (values.music) {
+    const { viewMusic } = await import('./music-workbench.mjs')
+    await viewMusic({ projectRoot: values['project-root'], sessionRoot: values['session-root'],
+      soundfontPath: values.soundfont, stateDirectory: values['state-dir'], input: values.input,
+      midi: values.midi, output: values.output, midiOutput: values['midi-output'] })
+  } else if (values.arrange) {
+    const { viewArrangement } = await import('./arrangement-tui.mjs')
+    await viewArrangement({ root: values['project-root'], output: values.output, midiOutput: values['midi-output'], stateDirectory: values['state-dir'] })
+  } else if (values.sequence || values.project || values['midi-file']) {
+    const { viewSequencer } = await import('./sequencer-tui.mjs')
+    const initialDocument = values['midi-file'] ? (await import('./midi-source.mjs')).importMidiSource(readFileSync(values['midi-file']), { name: basename(values['midi-file']) }) : undefined
+    await viewSequencer({ path: values.project, root: values['project-root'], soundfontPath: values.soundfont, stateDirectory: values['state-dir'],
+      sessionRoot: values['session-root'], input: values.input, midi: values.midi, output: values.output, midiOutput: values['midi-output'], initialDocument, pattern: values['midi-pattern'] === undefined ? undefined : Number(values['midi-pattern']) - 1 })
+  } else if (values.devices) {
     const { devices } = await import('./capture.mjs')
-    console.log(JSON.stringify(await devices()))
+    const { midiDestinations } = await import('./playback.mjs')
+    const [inputs, outputs] = await Promise.allSettled([devices(), midiDestinations()])
+    if (inputs.status === 'rejected') throw inputs.reason
+    console.log(JSON.stringify({ ...inputs.value, ...(outputs.status === 'fulfilled'
+      ? { midiOutputs: outputs.value } : { midiOutputError: outputs.reason.message }) }))
   } else if (values.record || values.session) {
     const { viewSession } = await import('./music-session.mjs')
-    await viewSession({ directory: values.session, root: values['session-root'], input: values.input, midi: values.midi })
+    await viewSession({ directory: values.session, root: values['session-root'], input: values.input, midi: values.midi, output: values.output, midiOutput: values['midi-output'] })
   } else {
   const sources = values.bundle
     ? JSON.parse(readFileSync(values.bundle, 'utf8')).sources
@@ -209,7 +248,7 @@ async function viewScores(sources, initialIndex) {
     }
     output += `\x1b[${rows};1H${fit(picker.view
       ? pickerFooter(picker.view)
-      : '↑↓/j k:scroll  [ ]:system  +/-:zoom  t:tracks  ←→:score  v:source  Space:choose/play/pause  i:instrument  l:repeat  r:recording  s:stop  q:back')}`
+      : '↑↓/j k:scroll  [ ]:system  +/-:zoom  t:tracks  ←→:score  v:source  Space:choose/play/pause  i:instrument  l:repeat  p:sequencer  a:arrange  r:recording  s:stop  q:back')}`
     write(output)
   }
   function render() {
@@ -398,20 +437,37 @@ async function viewScores(sources, initialIndex) {
       return
     }
     if (key.ctrl && key.name === 'c' || ['escape', 'q'].includes(key.name)) { finish(); return }
+    if (sessionTask) return
     switch (key.name) {
-      case 'r': {
-        if (sessionTask) return
+      case 'p': case 'a': case 'r': {
+        const snapshot = { source: sources[index], tracks: tracks() }
         stop()
         write(retire(tmux))
         suspended = true
-        process.stdin.off('keypress', keypress)
         sessionTask = (async () => {
           try {
-            const { viewSession } = await import('./music-session.mjs')
-            if (!closed) await viewSession({ root: values['session-root'], input: values.input, midi: values.midi, embedded: true, signal: sessionAbort.signal })
+            const converted = key.name === 'r' ? null : scoreDocument(snapshot, { signal: sessionAbort.signal })
+            const [initialDocument] = await Promise.all([converted, Promise.allSettled([...children.values(), ...nativeRenders])])
+            if (closed || sessionAbort.signal.aborted) return
+            process.stdin.off('keypress', keypress)
+            if (key.name === 'p') {
+              const { viewSequencer } = await import('./sequencer-tui.mjs')
+              if (!closed) await viewSequencer({ root: values['project-root'], sessionRoot: values['session-root'],
+                soundfontPath: values.soundfont, stateDirectory: values['state-dir'], input: values.input, midi: values.midi, output: values.output,
+                midiOutput: values['midi-output'], initialDocument, embedded: true, signal: sessionAbort.signal })
+            } else if (key.name === 'a') {
+              const { viewArrangement } = await import('./arrangement-tui.mjs')
+              const { arrangementFromMidiSource } = await import('./phrase-arrangement.mjs')
+              const arranged = arrangementFromMidiSource(initialDocument)
+              if (!closed) await viewArrangement({ initialDocument: arranged.project, root: values['project-root'], output: values.output, midiOutput: values['midi-output'], stateDirectory: values['state-dir'], embedded: true, signal: sessionAbort.signal })
+            } else {
+              const { viewSession } = await import('./music-session.mjs')
+              if (!closed) await viewSession({ root: values['session-root'], input: values.input, midi: values.midi, output: values.output, midiOutput: values['midi-output'], embedded: true, signal: sessionAbort.signal })
+            }
           } catch (error) { status = error.message }
           finally {
             sessionTask = null; suspended = false
+            process.stdin.off('keypress', keypress)
             if (!closed) { process.stdin.on('keypress', keypress); render() }
           }
         })()

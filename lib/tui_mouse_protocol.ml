@@ -42,6 +42,18 @@ let sgr_wheel_report (parameters : string) (final : char)
         | _, _, _ -> None)
     | _ -> None
 
+let sgr_left_button = "<0"
+
+(* The position of an SGR report whose button field is exactly [button]: a
+   modifier or another button changes the field, so it reads as none. *)
+let sgr_button_position ~button (parameters : string) : (int * int) option =
+  match String.split_on_char ';' parameters with
+  | [ reported; column; row ] when String.equal reported button -> (
+      match int_of_string_opt column, int_of_string_opt row with
+      | Some column, Some row when column > 0 && row > 0 -> Some (row, column)
+      | _, _ -> None)
+  | _ -> None
+
 (** Decode an SGR mouse report into the position of a plain left-button press.
 
     Only the unmodified press (button [0], final [M]) answers: a release
@@ -53,18 +65,23 @@ let sgr_wheel_report (parameters : string) (final : char)
     a claimed key. *)
 let sgr_left_press (parameters : string) (final : char) : (int * int) option =
   if final <> 'M' then None
-  else
-    match String.split_on_char ';' parameters with
-    | [ "<0"; column; row ] -> (
-        match int_of_string_opt column, int_of_string_opt row with
-        | Some column, Some row when column > 0 && row > 0 -> Some (row, column)
-        | _, _ -> None)
-    | _ -> None
+  else sgr_button_position ~button:sgr_left_button parameters
 
-(** Browser screenshots use release coordinates to distinguish a click from a drag.
-    Other surfaces continue to consume only presses. *)
+(** A release ends the gesture its press began: the browser screenshot reads
+    a click or a drag from it, and every other surface clicks on it, or copies
+    the selection the drag made. *)
 let sgr_left_release parameters final =
   if final = 'm' then sgr_left_press parameters 'M' else None
+
+(* Motion with the left button held, under button-event tracking ([?1002]):
+   the motion bit (32) on the left button's [0]. Motion with no button held
+   is [?1003]'s, which is never asked for; motion under another button or a
+   modifier changes the field and stays [None]. *)
+let sgr_left_drag_button = "<32"
+
+let sgr_left_drag (parameters : string) (final : char) : (int * int) option =
+  if final <> 'M' then None
+  else sgr_button_position ~button:sgr_left_drag_button parameters
 
 (** Decode a legacy X10 mouse report ([CSI M] followed by three raw bytes: the
     button, the column and the row) into the events an SGR report gives.
@@ -87,11 +104,14 @@ let sgr_left_release parameters final =
     button went up, so the reader claims a left release only while the left
     press is the only one held: once presses overlap, lifting either button
     first reads the same.
-    Motion reports, the horizontal wheel and a position byte below the offset
-    stay [None]. The caller consumes the three bytes whatever this returns. *)
+    Motion with the left button held, and nothing else, is [X10_left_drag]:
+    the motion bit (32) on the left button. Other motion, the horizontal wheel
+    and a position byte below the offset stay [None]. The caller consumes the
+    three bytes whatever this returns. *)
 type x10_mouse =
   | X10_wheel of wheel_direction * int * int
   | X10_left_press of int * int
+  | X10_left_drag of int * int
   | X10_other_press
   | X10_release of int * int
 
@@ -103,12 +123,15 @@ let x10_wheel_bit = 64
 let x10_left_press_button = 0
 let x10_wheel_up_button = 64
 let x10_wheel_down_button = 65
+let x10_left_drag_button = x10_motion_bit lor x10_left_press_button
 
 let x10_mouse_report ~(button : char) ~(column : char) ~(row : char)
     : x10_mouse option =
   let decoded byte = Char.code byte - x10_byte_offset in
   let row = decoded row and column = decoded column and code = decoded button in
-  if row <= 0 || column <= 0 || code land x10_motion_bit <> 0 then None
+  if row <= 0 || column <= 0 then None
+  else if code = x10_left_drag_button then Some (X10_left_drag (row, column))
+  else if code land x10_motion_bit <> 0 then None
   else if code land x10_wheel_bit <> 0 then
     if code = x10_wheel_up_button then Some (X10_wheel (Wheel_up, row, column))
     else if code = x10_wheel_down_button then

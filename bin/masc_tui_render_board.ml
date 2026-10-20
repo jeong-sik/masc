@@ -589,6 +589,53 @@ let render_board_list (state : state) =
 let board_read_layout = Board_read_layout.create ()
 ;;
 
+(* The comment v/V votes on while the comments have focus, so the one the
+   gutter marks. With the post body focused the keys vote on the post, and
+   no comment is marked. *)
+let selected_comment (state : state) =
+  if state.board_focus = Right_pane && state.board_comments_focused then
+    state.board_comment_cursor
+  else None
+
+let comment_gutter = String.make Board_read_layout.comment_gutter_cells ' '
+
+(* Same cell count as [comment_gutter]: a marker cell, then blanks. *)
+let selected_comment_gutter () =
+  Masc_tui_theme.tone Masc_tui_theme.Accent ^ Ansi.bold ^ ">" ^ Ansi.reset
+  ^ String.make (Board_read_layout.comment_gutter_cells - 1) ' '
+
+let comment_row_gutter (state : state) =
+  let selected = selected_comment state in
+  let marker = selected_comment_gutter () in
+  fun comment_id ->
+    match selected with
+    | Some id when String.equal id comment_id -> marker
+    | Some _ | None -> comment_gutter
+
+(* Where the comment column is asked to stand this frame. A first read's
+   landing comment comes first; then a cursor move's request to bring the
+   selected comment on screen; otherwise the reader's own scroll, which
+   PgUp/PgDn move by rows. *)
+let requested_comment_scroll (state : state) document ~viewport_rows =
+  match state.board_comment_landing with
+  | Some comment_id -> (
+      match Board_read_layout.initial_comment_offset document ~comment_id with
+      | Some offset -> offset
+      | None -> state.board_comment_scroll)
+  | None -> (
+      let followed =
+        if state.board_comment_follow then selected_comment state else None
+      in
+      match
+        Option.bind followed (fun comment_id ->
+            Board_read_layout.comment_span document ~comment_id)
+      with
+      | None -> state.board_comment_scroll
+      | Some (first_row, row_count) ->
+          Masc_tui_board_comment_cursor.reveal_scroll
+            ~scroll:state.board_comment_scroll ~viewport_rows ~first_row
+            ~row_count)
+
 (* The thread beside the post, one screen row at a time (p-7784d032). Owns
    its own allocation and scroll projection so [board_read_pane] only ever
    touches the shared [board_read_allocation] the stacked layout uses. *)
@@ -611,12 +658,9 @@ let draw_board_read_side buf (state : state) document ~rows ~body_cols
       ~comment_line_count:detail_line_count
       ~comment_rows:comment_content_rows
       ~body_scroll:state.board_scroll
-      ~comment_scroll:(match state.board_comment_landing with
-        | None -> state.board_comment_scroll
-        | Some comment_id ->
-            (match Board_read_layout.initial_comment_offset document ~comment_id with
-             | Some offset -> offset
-             | None -> state.board_comment_scroll))
+      ~comment_scroll:
+        (requested_comment_scroll state document
+           ~viewport_rows:comment_content_rows)
   in
   (* box_top/box_bottom draw no border in the borderless geometry this
      pane already uses (see their definitions) -- they would only add
@@ -627,6 +671,7 @@ let draw_board_read_side buf (state : state) document ~rows ~body_cols
   let rows_drawn = max side_budget.body_rows side_budget.comment_rows in
   let body_buf = Buffer.create (4 * 1024) in
   let comment_buf = Buffer.create (4 * 1024) in
+  let gutter = comment_row_gutter state in
   for i = 0 to rows_drawn - 1 do
     if i < side_budget.body_rows then
       let idx = i + scroll.body_offset in
@@ -649,7 +694,7 @@ let draw_board_read_side buf (state : state) document ~rows ~body_cols
       let idx = i - comment_header_rows + scroll.comment_offset in
       if idx >= 0 && idx < detail_line_count then
         box_line comment_buf comment_cols
-          (Board_read_layout.comment_line document idx)
+          (Board_read_layout.comment_line document ~gutter idx)
       else box_empty comment_buf comment_cols
     else box_empty comment_buf comment_cols
   done;
@@ -894,14 +939,17 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
       let detail_lines =
         match detail with
         | Board_detail.Absent ->
-            [Ansi.dim ^ "  Board detail unavailable" ^ Ansi.reset]
+            [ Board_read_layout.Thread_note
+                (Ansi.dim ^ "  Board detail unavailable" ^ Ansi.reset) ]
         | Board_detail.Loading ->
-            [Ansi.dim ^ "  Loading Board detail..." ^ Ansi.reset]
+            [ Board_read_layout.Thread_note
+                (Ansi.dim ^ "  Loading Board detail..." ^ Ansi.reset) ]
         | Board_detail.Failed error ->
-            [ (Theme.bad ()) ^ "  "
-              ^ fit_width (Terminal_text.single_line error)
-                  (max 1 (framed_inner_width comment_wrap_cols - 2))
-              ^ Ansi.reset
+            [ Board_read_layout.Thread_note
+                ((Theme.bad ()) ^ "  "
+                 ^ fit_width (Terminal_text.single_line error)
+                     (max 1 (framed_inner_width comment_wrap_cols - 2))
+                 ^ Ansi.reset)
             ]
         | Board_detail.Ready (_, comments, landing) ->
             (* A reply and the thing it answers used to sit at one indent in clock
@@ -935,8 +983,12 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                      " " ^ (Theme.warn ()) ^ "[Keeper]" ^ Ansi.reset
                    else ""
                  in
+                 let score = board_comment_score c.bc_votes in
+                 (* Every row below is drawn after the comment gutter, which
+                    marks the selected comment; it is not part of the text,
+                    so its cells are counted here and spent at draw time. *)
                  let heading =
-                   Printf.sprintf "  %s%s@%s%s%s  %s%s%s"
+                   Printf.sprintf "%s%s@%s%s%s  %s%s%s  %s%s%s"
                      rail
                      (Masc_tui_theme.tone Masc_tui_theme.Accent)
                      author
@@ -945,14 +997,20 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                      Ansi.dim
                      created_at
                      Ansi.reset
+                     (board_score_style score)
+                     (board_score_text score)
+                     Ansi.reset
                  in
                  (* Wrap for the rows that will draw the body. Only a whole
                     single-line reply that fits beside the metadata joins it;
                     paragraphs below the heading use the entire comment pane. *)
-                 let inner_width = framed_inner_width comment_wrap_cols in
+                 let inner_width =
+                   framed_inner_width comment_wrap_cols
+                   - Board_read_layout.comment_gutter_cells
+                 in
                  let heading_width = Message_layout.display_width heading in
                  let joined_budget = inner_width - heading_width - 2 in
-                 let content_prefix = "  " ^ rail ^ "  " in
+                 let content_prefix = rail ^ "  " in
                  let content_width =
                    max 1
                      (inner_width - Message_layout.display_width content_prefix)
@@ -971,12 +1029,15 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                        if heading_width <= inner_width then [ heading ]
                        else
                          let identity =
-                           Printf.sprintf "  %s%s@%s%s%s" rail
+                           Printf.sprintf "%s%s@%s%s%s  %s%s%s" rail
                              (Masc_tui_theme.tone Masc_tui_theme.Accent)
                              author Ansi.reset author_role
+                             (board_score_style score)
+                             (board_score_text score)
+                             Ansi.reset
                          in
                          let timestamp =
-                           Printf.sprintf "  %s%s%s%s" rail Ansi.dim created_at
+                           Printf.sprintf "%s%s%s%s" rail Ansi.dim created_at
                              Ansi.reset
                          in
                          [ identity; timestamp ]
@@ -986,7 +1047,10 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                  if landing = Some c.bc_id then
                    initial_comment_offset := Some (c.bc_id, !row_offset);
                  row_offset := !row_offset + List.length rendered;
-                 rendered))
+                 List.map
+                   (fun text ->
+                     Board_read_layout.Comment_text { comment_id = c.bc_id; text })
+                   rendered))
             in
             if List.length comments < post.bp_comment_count then begin
               (* The retained comment identity is only a scroll anchor here;
@@ -994,8 +1058,9 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
               initial_comment_offset :=
                 Option.map (fun (comment_id, row) -> comment_id, row + 1)
                   !initial_comment_offset;
-              Printf.sprintf "  Showing %d of %d comments (o: all comments)"
-                (List.length comments) post.bp_comment_count
+              Board_read_layout.Thread_note
+                (Printf.sprintf "  Showing %d of %d comments (o: all comments)"
+                   (List.length comments) post.bp_comment_count)
               :: comment_lines
             end else
               (* The post header already counts the complete thread. Keep
@@ -1032,12 +1097,9 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
             ~body_line_count:total_lines ~body_rows:content_height
             ~comment_line_count:detail_line_count ~comment_rows:comment_height
             ~body_scroll:state.board_scroll
-            ~comment_scroll:(match state.board_comment_landing with
-              | None -> state.board_comment_scroll
-              | Some comment_id ->
-                  (match Board_read_layout.initial_comment_offset document ~comment_id with
-                   | Some offset -> offset
-                   | None -> state.board_comment_scroll))
+            ~comment_scroll:
+              (requested_comment_scroll state document
+                 ~viewport_rows:comment_height)
         in
         for i = 0 to content_height - 1 do
           let idx = i + scroll.body_offset in
@@ -1053,9 +1115,11 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                    && state.board_comments_focused
                 then "> Comments" else "  Comments")
              ^ Ansi.reset);
+          let gutter = comment_row_gutter state in
           for i = 0 to comment_height - 1 do
             box_line buf cols
-              (Board_read_layout.comment_line document (i + scroll.comment_offset))
+              (Board_read_layout.comment_line document ~gutter
+                 (i + scroll.comment_offset))
           done
         end;
         (scroll, content_height, comment_height)

@@ -5,10 +5,10 @@ import { readCapture } from './session-data.mjs'
 
 export const nativePath = fileURLToPath(new URL('./music-native', import.meta.url))
 
-export async function devices({ executable = nativePath, signal } = {}) {
+export async function devices({ executable = nativePath, signal, audioOnly = false } = {}) {
   const aborted = () => new DOMException('Device discovery cancelled', 'AbortError')
   if (signal?.aborted) throw aborted()
-  const child = spawn(executable, ['devices'], { stdio: ['ignore', 'pipe', 'pipe'] })
+  const child = spawn(executable, [audioOnly ? 'audio-devices' : 'devices'], { stdio: ['ignore', 'pipe', 'pipe'] })
   let output = '', detail = '', failure = null, cancelled = false
   child.stdout.setEncoding('utf8').on('data', text => { output += text })
   child.stderr.setEncoding('utf8').on('data', text => { detail += text })
@@ -41,8 +41,17 @@ export async function devices({ executable = nativePath, signal } = {}) {
 
 // The returned completion owns the child through file finalization. Callers must
 // await it even when closing the view; stop is idempotent and does not kill WAV writes.
-export function record({ input, midi = 'all', directory, onEvent = () => {}, executable = nativePath }) {
-  const child = spawn(executable, ['record', '--input', input, '--midi', midi, '--directory', directory],
+export function record(options) { return inputSession({ ...options, command: 'record' }) }
+export function monitorInput(options) { return inputSession({ ...options, command: 'monitor' }) }
+
+function inputSession({ command, input, midi = 'all', directory, monitorOutput, onEvent = () => {}, executable = nativePath }) {
+  if (typeof input !== 'string' || !input) throw new Error('Choose an audio input UID')
+  if (command === 'record' && (typeof directory !== 'string' || !directory)) throw new Error('Choose a recording directory')
+  if (command === 'monitor' && (typeof monitorOutput !== 'string' || !monitorOutput)) throw new Error('Choose a monitoring output UID')
+  const args = [command, '--input', input]
+  if (command === 'record') args.push('--midi', midi, '--directory', directory)
+  if (monitorOutput != null) args.push('--monitor-output', monitorOutput)
+  const child = spawn(executable, args,
     { stdio: ['pipe', 'pipe', 'pipe'] })
   let failure = null, stopped = false, detail = '', final = null
   const stop = () => {
@@ -60,7 +69,13 @@ export function record({ input, midi = 'all', directory, onEvent = () => {}, exe
   lines.on('line', line => {
     try {
       const event = JSON.parse(line)
-      if (!['recording', 'audio', 'midi', 'stopped', 'error'].includes(event.kind)) throw new Error('Unknown capture event')
+      if (!['recording', 'monitoring', 'audio', 'midi', 'stopped', 'error'].includes(event.kind)) throw new Error('Unknown capture event')
+      if (event.kind === 'monitoring') {
+        const info = event.monitoring
+        if (!monitorOutput || info?.state !== 'active' || info.input?.id !== input || info.output?.id !== monitorOutput
+          || !Number.isFinite(info.sampleRate) || info.sampleRate <= 0 || !Number.isSafeInteger(info.channels) || info.channels <= 0
+          || info.latency?.kind !== 'device-reported' || ![info.latency.inputSeconds, info.latency.outputSeconds].every(value => Number.isFinite(value) && value >= 0)) throw new Error('Invalid selected input monitoring acknowledgement')
+      }
       if (event.kind === 'error') failure ??= new Error(event.message)
       if (event.kind === 'stopped') final = event.session
       onEvent(event)
@@ -72,7 +87,8 @@ export function record({ input, midi = 'all', directory, onEvent = () => {}, exe
       lines.close()
       try {
         if (failure) throw failure
-        if (code !== 0 || !final || final.state !== 'recorded') throw new Error(final?.failure || detail || `Recording ended: ${code ?? signal}`)
+        if (code !== 0 || !final || final.state !== (command === 'record' ? 'recorded' : 'monitored')) throw new Error(final?.failure || detail || `Input session ended: ${code ?? signal}`)
+        if (command === 'monitor') { resolve(final); return }
         const timeline = await readCapture(directory)
         if (timeline.manifest.state !== 'recorded') throw new Error(timeline.manifest.failure || 'Recording failed')
         resolve(timeline)

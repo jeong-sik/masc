@@ -3666,6 +3666,11 @@
  (libraries alcotest digestif masc masc_tui_types yojson))
 
 (test
+ (name test_tui_music_launcher)
+ (modules test_tui_music_launcher)
+ (libraries alcotest masc_tui_score masc_tui_command unix))
+
+(test
  (name test_tui_command)
  (modules test_tui_command)
  (libraries alcotest masc masc_tui_command masc_tui_mcp yojson))
@@ -4589,6 +4594,7 @@
 (include stanzas/test_tui_send_disposition.inc)
 (include stanzas/test_tui_scroll.inc)
 (include stanzas/test_tui_hit.inc)
+(include stanzas/test_tui_pane_selection.inc)
 (include stanzas/test_tui_wheel_reader.inc)
 (include stanzas/test_tui_repository_changes_listing.inc)
 (include stanzas/test_tui_tab_strip.inc)
@@ -4596,6 +4602,7 @@
 (include stanzas/test_tui_context_tokens.inc)
 (include stanzas/test_tui_next_request_band.inc)
 (include stanzas/test_tui_board_attachments.inc)
+(include stanzas/test_tui_board_comment_vote.inc)
 (include stanzas/test_tui_board_list_reading.inc)
 (include stanzas/test_tui_async_request_details.inc)
 (include stanzas/test_tui_listing_rows_under_the_list.inc)

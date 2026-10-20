@@ -17,6 +17,8 @@ type t =
   | Play_invalid of string
   | Open_score of int
   | Score_invalid_index
+  | Open_music
+  | Music_invalid_arguments
   | Listen
   | Open_metrics
   | Account_login of string
@@ -227,6 +229,11 @@ let catalog =
     ; args = ""
     ; summary = "inspect the last observed provider input"
     }
+  ; { word = "music"
+    ; aliases = []
+    ; args = ""
+    ; summary = "open phrases, arrangements and recorded takes in this terminal"
+    }
   ; { word = "score"
     ; aliases = []
     ; args = "[N]"
@@ -407,6 +414,8 @@ let parse text =
         | _ -> Play_invalid "use /play invites, /play invite <name> <hours>, /play link [name], or /play revoke <name>")
     | "metrics", _ | "telemetry", _ -> Open_metrics
     | "listen", _ -> Listen
+    | "music", "" when body = "" -> Open_music
+    | "music", _ -> Music_invalid_arguments
     | "score", "" -> Open_score 1
     | "score", index ->
         (match int_of_string_opt index with

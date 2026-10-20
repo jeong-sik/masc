@@ -7,6 +7,7 @@ let comment ?parent id =
   ; bc_author = "author-" ^ id
   ; bc_content = "content-" ^ id
   ; bc_created_at = "2026-08-31T00:00:00Z"
+  ; bc_votes = { bcv_up = 0; bcv_down = 0 }
   }
 
 let shape comments =

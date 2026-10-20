@@ -15,6 +15,7 @@ characters) and `native-tui-scenario`:
 | `rich-workspace` | TUI, server and the six test executables | The `workspace-files` suites plus `test_lsp_position`, `test_tui_music_launcher`, `test_tui_alphatex` |
 | `rich-chat-workspace` | TUI, server and the seven test executables | The `rich-workspace` suites plus `test_tui_chat_call_reader` |
 | `original-tool-result` | TUI, server and the four test executables | `test_keeper_tool_result_source`, `test_tool_output_washing_e2e`, `test_server_dashboard_http_keeper_tool_lookup`, `test_tui_chat_call_reader` |
+| `code-references` | TUI, server and the five test executables | `test_lsp_workspace_pool`, `test_lsp_questions`, `test_lsp_message_router`, `test_lsp_process_manager`, `test_server_ide_lsp_proxy` |
 
 The server target is `bin/main_eio.exe`; the TUI is `bin/masc_tui.exe`.
 Each test target is `test/<suite>.exe`. Unknown scenarios are refused before
@@ -50,6 +51,24 @@ retained state. It packages the matching server and TUI for a separate actual
 Keeper-result read. These four suites do not certify music/Code integration,
 complete producer stdout capture, or visible UI behavior. The selected source
 must contain all four targets; a missing target fails instead of reducing scope.
+
+Use `code-references` for a selected Code reference-readiness candidate. The
+workspace-pool suite drives the real question API and transport with a controlled
+Python LSP peer: exact URI/version analysis observations, cancellation and late
+notifications, serialized reference queries, peer EOF isolation, blocked frame
+writes and queued cancellation. Python 3 is required for that peer. The question
+and router suites check result decoding; the process-manager suite checks child
+lifecycle; the IDE proxy suite checks its workspace and protocol boundaries.
+Building the matching server and TUI also checks their direct consumers. These
+five suites do not run real Pyright, prove complete project indexing or verify
+the visible reference picker. Run the selected pair against the actual language
+server in an isolated workspace to establish those observations separately.
+
+```sh
+gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
+  -f native-tui-source-sha=SOURCE_COMMIT_40_HEX \
+  -f native-tui-scenario=code-references
+```
 
 For a workspace file-finder candidate:
 

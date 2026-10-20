@@ -19,6 +19,7 @@ on:
           - rich-workspace
           - rich-chat-workspace
           - original-tool-result
+          - code-references
 
 permissions:
   contents: read

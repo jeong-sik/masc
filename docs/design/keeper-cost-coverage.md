@@ -32,3 +32,14 @@ existing strict meta unreadable and risk declaration rematerialization; the
 durable transition must preserve existing records and explicit unknown coverage,
 without automatic reset or purge. No deployment or existing-meta conversion is
 performed by this library.
+
+The current cost wire value has two canonical semantic arms. A number means a
+known sum with unobserved history and no captured readings; reading and writing
+it preserve that meaning even when the number is zero. An exact object carries
+`known_cost_usd`, `priced_readings`, `unpriced_readings`, `unresolved_readings`,
+`unobserved_attempts` and `history` (`complete` or `unobserved`). Complete empty
+and fully priced zero always use the object arm. New readings on an unobserved
+baseline retain its history and use the object arm. A malformed object is
+rejected, never reduced to its numeric sum. Complete coverage cannot have a
+positive sum without a priced reading; inconsistent snapshot differences are
+refused as well. The codec does not itself read or rewrite Keeper metadata.

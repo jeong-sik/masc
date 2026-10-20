@@ -218,12 +218,12 @@ status: reference
   [alphaTex 악보 안내](../guides/alphatex-tab.md)
 
 **Arrangement (어레인지먼트)**
-: 보관된 WAV/MIDI 소스를 한 시간축 위에 구간으로 놓는 편집본. `masc-alphatex --arrange`,
+: 보관된 WAV/MIDI 소스를 한 시간축 위에 `Region`으로 놓는 편집본. `masc-alphatex --arrange`,
   `/score` 화면의 **a** 키, 저장된 프로젝트는 `--project song.json`으로 연다. WAV 구간은
   스트리밍 다중 음성 transport를, MIDI 구간은 source-state transport를 쓰고, 섞인 레인은
   하나의 native 소유자가 공유 시계로 재생한다. Phrase 편집기에서 `:arrange`를 부르면 그
   프레이즈를 0박에 놓은 backing 어레인지먼트가 열린다.
-  - 다루는 것과 넘기는 것: 구간 배치·자르기·반복·레인을 다루고, 음 자체를 고치려면
+  - 다루는 것과 넘기는 것: `Region` 배치·자르기·반복·레인을 다루고, 음 자체를 고치려면
     `:phrase`·`:edit-midi`로 Phrase 쪽 편집기로 넘어간다.
   - 이름 경계: 일상어 "arrangement"(배열·타협)와 다른 도메인 용어다. 코드 주석의
     "...which is the arrangement that kept the unavailable row from going missing..." 같은
@@ -239,13 +239,41 @@ status: reference
   `:take 2`·`:take next`·`:take previous`로 다른 통과를 고른다. 깨진 항목도 목록에서
   골라지며 그 읽기 실패가 그대로 보인다(README: "A damaged item stays selectable with its
   read failure visible").
-  - 이름 경계: Take는 어레인지먼트의 구간이 아니다. 원본은 테이크로 보존되고, 배치·자르기는
-    그 테이크를 가리키는 구간에서 한다. 그래서 어레인지먼트를 고쳐도 녹음 원본은 그대로다.
+  - 이름 경계: Take는 어레인지먼트의 `Region`이 아니다. 원본은 테이크로 보존되고, 배치·자르기는
+    그 테이크를 가리키는 `Region`에서 한다. 그래서 어레인지먼트를 고쳐도 녹음 원본은 그대로다.
     다만 재생은 한 transport를 공유한다 — 테이크를 바꾸면 현재 backing을 멈추고 새 재생
     계획을 시작하고(ARRANGEMENT-RECORDING: "Changing takes stops the current backing"),
     녹음된 테이크를 backing epoch을 유지한 채 붙일 수도 있다(README: "recorded takes can
     be attached while the backing epoch remains continuous").
   → [tools/alphatex/ARRANGEMENT-RECORDING.md](../../tools/alphatex/ARRANGEMENT-RECORDING.md) ·
+  [tools/alphatex/README.md](../../tools/alphatex/README.md)
+
+**Region (어레인지먼트 구간)**
+: 어레인지먼트 시간축 위에 놓인 자리. 시작·길이·레인·반복을 정하고, 가리키는 자산의
+  이름은 갖지 않는다. 음악 도구 문서는 이 낱말을 이 한 뜻으로만 쓴다 — WAV·MIDI 가릴 것
+  없이 "duplicate and remove regions without changing originals"(README), 캡처 쪽도
+  "paired WAV/UMP region transport"(CAPTURE-UMP-REGIONS). 코드도 같다: 재생 계획은
+  `plan.regions`이고, 원본 UMP 재생 묶음의 필드 이름은 `umpRegions`다.
+  - 이름 경계: Region은 자리이고, 자리가 가리키는 소리 데이터는 `Take`(녹음 통과)나
+    들여온 WAV/MIDI 자산이다. `:split-take`로 찢어도 원본은 그대로다. 흔한 일상어
+    "지역"과 이 도구의 "구간"은 다른 뜻이므로, 음악 도구 문서에서 region은 항상
+    이 자리로 읽는다. 반복은 자리의 속성이다: "repetition of the loop region"(README)은
+    하나의 자리가 여러 번 이어지는 것이고, 복제된 자리와는 다르다.
+  → [tools/alphatex/README.md](../../tools/alphatex/README.md) ·
+  [tools/alphatex/CAPTURE-UMP-REGIONS.md](../../tools/alphatex/CAPTURE-UMP-REGIONS.md) ·
+  [tools/alphatex/ARRANGEMENT.md](../../tools/alphatex/ARRANGEMENT.md)
+
+**Captured source (캡처 소스)**
+: `:import-take`로 프로젝트에 붙인 녹음 원본 자산. 네 파일을 바이트 그대로 복제하고
+  SHA-256으로 이름 붙인다 — `assets/<sha256>.wav`·`assets/<sha256>.capture` — 원본
+  파일은 읽기 전용이고 바꾸지 않는다. 프로젝트는 자산 하나에 네 SHA-256과 디코딩한
+  표를 함께 적는다. `:open-take`로 편집기에서 열고, `:split-take`로 오디오 레인과 MIDI
+  레인으로 찢어도 WAV·표·원본 UMP는 원본 그대로다.
+  - 이름 경계: `:open-take`·`:import-take`·`:split-take`의 낱말 "take"는 `Take`(녹음
+    통과)가 아니라 이 자산과 그 `Region`을 가리킨다. "paired captured regions"에서
+    captured는 WAV/UMP 짝을 뜻한다. 붙이기에 실패·취소한 캡처는 임시 파일을 지우고,
+    이미 실린 자산은 남는다(CAPTURED-SOURCES).
+  → [tools/alphatex/CAPTURED-SOURCES.md](../../tools/alphatex/CAPTURED-SOURCES.md) ·
   [tools/alphatex/README.md](../../tools/alphatex/README.md)
 
 **Dashboard Goals**

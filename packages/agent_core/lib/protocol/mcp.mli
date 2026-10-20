@@ -102,6 +102,9 @@ val connect
   -> (t, Error.t) result
 
 val initialize : t -> (unit, Error.t) result
+val request_stop : t -> unit
+(** Best-effort TERM through this connection's owned process handle. Does not
+    wait for transport shutdown or prove child/group exit. *)
 val close : t -> unit
 val process_id : t -> int
 (** The exact child started by [connect]. The number is for observation and

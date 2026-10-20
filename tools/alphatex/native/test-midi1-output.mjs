@@ -116,19 +116,28 @@ import CoreMIDI
   }
   let collision=try hybrid(2);refuses{try collision.prepare()};tracePrecondition(collision.state == .stopped)
   let disjoint=try hybrid(3);try disjoint.prepare();disjoint.finish(reason:"test",error:nil,publish:false)
-  // A reservation read before endpoint protocol drift is revalidated before
-  // future live admission/forwarding, instead of trusting the old group scope.
-  let live=try UmpLiveInput(plan:UmpLivePlan(schemaVersion:1,routes:[UmpLiveRoute(key:"a",source:"1",destination:midi2,scope:.endpoint)],reserved:[UmpLiveClaim(destination:midi1,scope:.endpoint,nativeProtocol:2)]))
-  refuses {try live.checkReservations()}
-  try checked(MIDIObjectSetIntegerProperty(destinations[0],kMIDIPropertyProtocolID,2),"private protocol drift")
+  // CoreMIDI documents protocol mutation for drivers after MIDI-CI negotiation,
+  // not a synchronous virtual-client setter contract. Keep real endpoint
+  // identity/admission/wire checks, then inject only its observed protocol read.
+  let live=try UmpLiveInput(plan:UmpLivePlan(schemaVersion:1,routes:[UmpLiveRoute(key:"a",source:"1",destination:midi2,scope:.endpoint)],reserved:[UmpLiveClaim(destination:midi1,scope:.endpoint,nativeProtocol:1)]))
+  tracePrecondition(output.nativeProtocols[midi1] == .midi1 && !output.selected.isEmpty)
+  try output.checkDestinations();try live.checkReservations()
+  wireProtocolReadOverride=(destinations[0],2)
+  let beforeOutput=wireProtocolReadOverrideCount
   refuses {try output.checkDestinations()}
-  print("MIDI1_OUTPUT_PASS: 16640 canonical inverses, precision/attributes/compound/mixed-group refusal, actual private MIDI1 bank/note/pressure/pitch/system/SysEx and cleanup, exact native2, live profile and reservation protocol pinning")
+  tracePrecondition(wireProtocolReadOverrideCount>beforeOutput)
+  let beforeReservation=wireProtocolReadOverrideCount
+  refuses {try live.checkReservations()}
+  tracePrecondition(wireProtocolReadOverrideCount>beforeReservation)
+  wireProtocolReadOverride=nil
+  try output.checkDestinations();try live.checkReservations()
+  print("MIDI1_OUTPUT_PASS: 16640 canonical inverses, precision/attributes/compound/mixed-group refusal, actual private MIDI1 bank/note/pressure/pitch/system/SysEx and cleanup, exact native2, deterministic observed-protocol drift rejection for output and live reservation")
  }
 }`
  await writeFile(join(directory,'Probe.swift'),main)
  const originalOutput=await readFile(new URL('UmpOutput.swift',import.meta.url),'utf8')
  let tracedOutput=originalOutput
- for(const [from,to] of [['MIDISendEventList(', 'traceSend('],['MIDIPortDispose(', 'tracePortDispose('],['MIDIClientDispose(', 'traceClientDispose(']]) {
+ for(const [from,to] of [['MIDISendEventList(', 'traceSend('],['MIDIPortDispose(', 'tracePortDispose('],['MIDIClientDispose(', 'traceClientDispose('],['MIDIObjectGetIntegerProperty(', 'traceIntegerProperty(']]) {
   assert.ok(tracedOutput.includes(from),`Missing diagnostic API edge ${from}`)
   tracedOutput=tracedOutput.replaceAll(from,to)
  }
@@ -159,6 +168,17 @@ final class WireTrace {
  }
 }
 let wireTrace=WireTrace()
+// Test-only boundary: all reads still call CoreMIDI first. Only a successful
+// protocol read of the exact owned destination can report the injected change.
+var wireProtocolReadOverride:(endpoint:MIDIEndpointRef,protocolID:Int32)?
+var wireProtocolReadOverrideCount=0
+func traceIntegerProperty(_ object:MIDIObjectRef,_ property:CFString,_ value:UnsafeMutablePointer<Int32>)->OSStatus {
+ let status=MIDIObjectGetIntegerProperty(object,property,value)
+ if status==0,CFEqual(property,kMIDIPropertyProtocolID),let changed=wireProtocolReadOverride,object==changed.endpoint {
+  value.pointee=changed.protocolID;wireProtocolReadOverrideCount+=1
+ }
+ return status
+}
 func tracePrecondition(_ condition:@autoclosure()->Bool,_ message:@autoclosure()->String="",file:StaticString=#file,line:UInt=#line) {
  if !condition(){wireTrace.dump();preconditionFailure(message(),file:file,line:line)}
 }

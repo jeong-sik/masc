@@ -414,7 +414,7 @@ let answer_json ~output ~usage =
      @ usage)
 ;;
 
-let answer_of_output ?usage output =
+let answer_of_output ?(usage : Agent_core.Types.api_usage option) output =
   let usage =
     match usage with
     | None -> []

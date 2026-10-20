@@ -1,0 +1,6 @@
+(include_subdirs no)
+(library
+ (name native_addon_lease)
+ (public_name masc.native_addon_lease)
+ (libraries unix yojson digestif masc_process masc.owner_process_identity)
+ (foreign_stubs (language c) (names native_addon_lease_stubs)))

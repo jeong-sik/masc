@@ -3103,3 +3103,9 @@
  (wrapped false)
  (modules masc_tui_system_logs)
  (libraries masc masc.masc_log yojson))
+(executable
+ (name masc_native_addon_launcher)
+ (modules masc_native_addon_launcher)
+ (public_name masc-native-addon-launcher)
+ (package masc)
+ (libraries masc.native_addon_lease))

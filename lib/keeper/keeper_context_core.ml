@@ -204,22 +204,20 @@ let classified_load
    | Error Not_found ->
        Log.Keeper.debug "keeper:%s AGENT_CORE checkpoint not found" trace_id
    | Ok _ -> ());
-  match agent_core_result with
-  | Ok checkpoint -> session, Checkpoint_loaded (context_of_agent_core_checkpoint checkpoint)
-  | Error Not_found -> session, Checkpoint_absent
-  | Error
-      ( Superseded_version _
-      | Newer_version _
-      | Parse_error _
-      | Store_error _
-      | Io_error _
-      | Read_failed _
-      | Agent_core_error _ as error ) ->
+  let unread error =
     (* Each was logged above with its own diagnostics. *)
     Log.Keeper.warn
       "keeper:%s AGENT_CORE checkpoint unavailable after explicit load diagnostics"
       trace_id;
     session, Checkpoint_unread error
+  in
+  match Keeper_checkpoint_store.turn_history_of_load agent_core_result with
+  | Ok (Saved_history checkpoint) ->
+    session, Checkpoint_loaded (context_of_agent_core_checkpoint checkpoint)
+  | Ok No_saved_history -> session, Checkpoint_absent
+  | Ok (Saved_history_superseded { expected; got }) ->
+    unread (Superseded_version { expected; got })
+  | Error error -> unread error
 
 (* A turn saves this lineage next, so its load keeps what it reads. *)
 let load_context_from_checkpoint_classified ~keeper_name ~trace_id ~base_dir =

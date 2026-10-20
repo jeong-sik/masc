@@ -18,6 +18,11 @@ let scenario () = Eio_main.run (fun env ->
     and chrome_started,start_chrome=Eio.Promise.create ()
     and automation_settled,settle_automation=Eio.Promise.create ()
     and chrome_settled,settle_chrome=Eio.Promise.create () in
+    Fun.protect ~finally:(fun () ->
+      (* These test barriers must not outlive a failed assertion or cancellation;
+         protected production cleanup is joined by the enclosing switch. *)
+      ignore (Eio.Promise.try_resolve settle_automation ());
+      ignore (Eio.Promise.try_resolve settle_chrome ())) (fun () ->
     let automation_calls=ref 0 and chrome_calls=ref 0 in
     ok (Owner.attach_automation owner ~locate:false
       ~execute:(fun _ -> fail "retirement must not dispatch browser input")
@@ -55,7 +60,7 @@ let scenario () = Eio_main.run (fun env ->
        | W.Snapshot_result _|Model_reply _|Poll_result _|Receipt|Issue_result _ -> false);
     check bool "repeated Retire retains the same failure" true (send ()=reply);
     check int "failed automation cleanup is not replayed" 1 !automation_calls;
-    check int "raised Chrome cleanup is not replayed" 1 !chrome_calls)))
+    check int "raised Chrome cleanup is not replayed" 1 !chrome_calls))))
 
 let () = run "browser addon cleanup" ["lifecycle",[
   test_case "all backends settle despite failure and caller cancellation" `Quick scenario]]

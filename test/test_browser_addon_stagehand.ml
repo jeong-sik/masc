@@ -19,11 +19,11 @@ let child_stopped claim = match lease (Lease.status claim) with
   | Awaiting_exec | Live _ | Cleanup_pending _ -> false
 let receipt = function
   | Wire.Receipt -> true
-  | Snapshot_result _ | Model_reply _ | Poll_result _ | Issue_result _ | Service_refusal _ -> false
+  | Snapshot_result _ | Model_reply _ | Download_reply _ | Poll_result _ | Issue_result _ | Service_refusal _ -> false
 let refused = function
   | Wire.Issue_result (Ok (B.Refused _)) -> true
   | Issue_result (Ok (Answered _ | Lane_absent | Timed_out | Rejected_before_effect _))
-  | Issue_result (Error _) | Snapshot_result _ | Model_reply _ | Poll_result _ | Receipt | Service_refusal _ -> false
+  | Issue_result (Error _) | Snapshot_result _ | Model_reply _ | Download_reply _ | Poll_result _ | Receipt | Service_refusal _ -> false
 
 let scenario () =
   let root=Filename.temp_dir "browser-addon-chrome-" "" |> Unix.realpath in

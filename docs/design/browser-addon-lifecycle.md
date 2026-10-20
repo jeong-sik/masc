@@ -466,7 +466,8 @@ observes a cookie before each retirement boundary, so reusing an already-empty
 private profile cannot pass the fresh-worker check. A persistent profile must
 retain the cookie; a private allocation must lose it. Both modes still exercise
 the same input, model, cancellation and cleanup path. These new real-cookie
-scenario definitions have not yet executed; they do not establish real login
+scenarios passed in both modes in run 39497965428, on source composition
+`9ed6288ef6ba9e74105f686d6fa2a67acfd1c095`. This does not establish real login
 preservation or personal-site behavior.
 
 ## Host-authorized uploads into the owned Gecko backend
@@ -504,10 +505,60 @@ local probe executed the original upload-lease and owned-tree cleanup code and
 C primitive: generic callback results, cleanup under a shared 1777 temp directory,
 browser-claimed lifetime and replacement-file preservation passed. That probe
 uses an exact cleanup-function re-export adapter and is not a whole Fs library,
-worker or browser build. Downloads, Chrome uploads and other backend transfer
-contracts remain open.
+worker or browser build. Chrome uploads and other backend transfer contracts
+remain open. Owned Gecko download transfer is described below.
+
+## Completed download artifacts
+
+The owned Gecko BiDi producer copies a completed, session-owned file into a
+private streaming snapshot. The cached producer marker names that immutable
+snapshot. Each download read binds a fresh opaque grant to its original actor,
+route and complete command; worker paths are removed from the response.
+
+Normal exported calls pass through mandatory host result finalization after
+invocation and before the selected output hook. This happens outside the MCP
+mutex. The raw `on_result` callback retains its original receipt contract. The
+finalizer uses the captured original private socket to Claim, import and Commit
+the artifact, then always Release the original grant. Neither selected schema
+hooks nor model/Exact Output selection can bypass this transfer boundary.
+
+The host derives a snapshot path only from its acquired allocation and canonical
+UUID. It checks the original allocation, snapshot root and opened file identity,
+then streams that same descriptor through the blob store with the expected
+SHA-256. No pathname is reopened during ingestion. Both copy passes and the
+durable payload/parent sync must succeed. Final text and structured replies name
+the existing `keeper_artifact_read` artifact; identity and metadata stay bound to
+the original command. Later reads reuse the acknowledged publication.
+
+Retire closes fresh admission but still accepts the original exact Commit and
+Release. It joins active preparations and claims, including a committed claim
+whose host has not released it. The worker's outer shutdown scope observes the
+same cleanup when caller cancellation bypassed an orderly host Retire. Open Gecko
+teardown closes the original session before joining its BiDi reader, and the
+release fallback observes the same once-only close. Cleanup removes only exact
+committed original files and their snapshots after confirmed backend teardown;
+unpublished, partial, replaced or unknown files remain explicitly unconfirmed.
+
+The added scenarios cover the actual owner/private socket/host finalizer/blob
+boundary, repeated publication, revoked admission with active settlement,
+descriptor/digest mismatch and source replacement. The Gecko shutdown fixture
+keeps a real scripted BiDi socket open across Retire. These new linked scenarios
+and real Firefox downloads have not yet executed. Source review and limited
+interface typing are separate from that execution evidence.
 
 ## Completion evidence
+
+[Real Chrome run 39497965428](https://github.com/jeong-sik/masc/actions/runs/39497965428)
+passed 42/42 recorded steps in each of private and persistent modes. Its source
+composition is `9ed6288ef6ba9e74105f686d6fa2a67acfd1c095`, product-equivalent to
+`a4d0bb79d48dcbbd60d6ec24780bcd21c700468a` with nine CI paths; workflow commit
+`d2806d092d5af57aa2d3a829c3719c0e43747033`. This includes the cookie boundaries
+above. The separately selected run 39497960619 on that composition failed two
+backend status cases because Closing hid the original ended reason. The frozen
+clean source verdict was withdrawn. The follow-up retains the original session's
+first reason through Closing and resets it only at the next successful open;
+its actual regression result remains pending. These runs do not include the new
+download artifact changes.
 
 The private-profile public Add-on proof passed all 38 recorded steps in
 [actual Chrome run 39488906467](https://github.com/jeong-sik/masc/actions/runs/39488906467).

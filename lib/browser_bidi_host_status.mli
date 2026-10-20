@@ -4,25 +4,22 @@
     connection list the TUI reads and the browser tools answer from this one
     observation. *)
 
-(** Who starts the Keeper Firefox and its host, from the workspace's
-    configuration (RFC-browser-keeper-firefox §3.7). *)
+(** The live Firefox configuration. This is configuration, not an Addon
+    readiness observation; the manual host record below is independent. *)
 type keeper =
-  | Masc_starts of
+  | Addon_managed of
       { port : int
       ; profile : string
-      ; last_start : Browser_keeper_firefox_start_record.read
-          (** What MASC's last start came to. *)
       }
       (** [runtime.toml] has [\[browser.live.bidi\]] and the live lane is on:
-          MASC starts them at a server start and for a Keeper's hover or
-          drag. *)
-  | Lane_off  (** The table is there and [\[browser.live\] enabled = false]. *)
+          the Browser Addon owns its Firefox and BiDi connection. Existing
+          external Firefox processes are not adopted or restarted. *)
+  | Lane_off  (** [\[browser.live\] enabled = false], configured or not. *)
   | Not_configured  (** No [\[browser.live.bidi\]]: the operator starts them. *)
   | Not_known  (** No configuration was given to read it from. *)
 
-(** [None]: no configuration was loaded or read. A start's record is read
-    only where MASC starts them. *)
-val keeper_of_configuration : base_path:string -> Browser_configuration.t option -> keeper
+(** [None]: no configuration was loaded or read. Performs no I/O. *)
+val keeper_of_configuration : Browser_configuration.t option -> keeper
 
 type observation =
   { lane : Browser_lane_launcher.t
@@ -33,16 +30,12 @@ type observation =
   ; keeper : keeper
   }
 
-(** Reads the record, the launcher and, where MASC starts them, its last
-    start, then asks this process's server. Reading can let other fibers
+(** Reads the manual host record and launcher, then asks this process's server.
+    Reading can let other fibers
     run, so the server is asked last: a host that attached during the reads
     is in the list the observation holds. [configuration] is the one this
     process loaded, or the workspace's [runtime.toml] read for it. *)
 val observe : base_path:string -> configuration:Browser_configuration.t option -> observation
-
-(** The observation with no last start, for an answer that already says
-    what the start it asked for came to. *)
-val without_last_start : observation -> observation
 
 (** The lane's connections an answer lists beside what it says of the host:
     the list the observation was made from, so the two say of one list. A
@@ -87,11 +80,10 @@ val verdict : observation -> verdict
     and when it lists a BiDi connection that is not the host the record
     names.
 
-    Where MASC starts them ({!Masc_starts}), the operator's steps give way
-    to what MASC's next start does, and a last start that showed no
-    connection, and did not come before the last host started, is said with
-    when and why. A lane turned off, and a workspace with no table, add a
-    sentence to the paragraph that says so.
+    {!Addon_managed} describes the Addon's configured port/profile and
+    directs the reader to Addon readiness observations. A manual host's
+    session and recovery remain the operator's responsibility. A lane turned
+    off and a workspace with no table add a sentence saying so.
 
     A path, an address and the reason for ending come from files and from
     the host. In a command the operator runs, a path and an address are
@@ -133,28 +125,6 @@ type report =
   ; message : string
   }
 
-(** What is said of MASC's last start beside a host's state. *)
-type last_start_note =
-  | No_note
-  | Failed_start of { at : float; not_attached : Browser_keeper_firefox_starter.not_attached }
-      (** It ended at [at] with no connection listed. *)
-  | Start_record_unreadable of string
-
-(** Where MASC starts the Keeper Firefox, its last start when it showed no
-    connection, was for the configured port and profile
-    ({!Browser_keeper_firefox_start_record.for_configuration}), and ended no
-    earlier than what the state says since: an ended host's end, a dead or
-    running host's attach (its start when it never attached). {!message}
-    says it, and the TUI shows it. *)
-val last_start_note : keeper -> Browser_bidi_host_record.state -> last_start_note
-
-(** Whether the host [entry] names was given an address on [port]. A
-    session held in a Firefox there is in the way of MASC's next start on
-    that port, which restarts the Keeper Firefox MASC is shown to have
-    started; one held on another port is not. An address that names no port
-    is not on it. *)
-val recorded_on_port : Browser_bidi_host_record.entry -> port:int -> bool
-
 val report : observation -> report
 
 (** An object with exactly these fields. [state] ([never_started],
@@ -166,15 +136,14 @@ val report : observation -> report
     and [detail] (why the record or the lock cannot be read, null otherwise). Then [attach], an
     object with exactly [launcher], [arguments] and [launcher_state]
     ([installed], [not_installed] or [needs_reinstall]); [keeper], an object
-    whose [kind] is [masc_starts] (with [port], [profile] and [last_start]:
-    [absent], [recorded] with its [entry], or [unreadable] with its
-    [detail]), [lane_off], [not_configured] or [not_known]; and [message]. *)
+    whose [kind] is [addon_managed] (with [port] and [profile]), [lane_off],
+    [not_configured] or [not_known]; and [message]. *)
 val report_to_json : report -> Yojson.Safe.t
 
 (** Reads what {!report_to_json} wrote. A field more, fewer or twice, in the
-    report, in [attach], in [keeper] or in its [last_start], is another
+    report, in [attach] or in [keeper], is another
     layout and is refused, as is a kind this reader does not know. The
-    profile, a last start's detail and the message hold no control
+    profile and the message hold no control
     character. The state is
     worked out again from [record] and [lock_held] by
     {!Browser_bidi_host_record.state_of} and has to be the one [state]

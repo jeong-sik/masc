@@ -75,7 +75,7 @@ while True:
       check "strict configuration rejects an extra control field" true
         (let fields=match Chrome.configuration_to_json c with `Assoc fields -> fields | _ -> Alcotest.fail "expected object" in
          Result.is_error (Chrome.configuration_of_json (`Assoc (("profile",`String root)::fields))));
-      let context=ok (Socket.context ~instance_id:incarnation ~automation:None ~models:None ~stagehand:(Some c)) in
+      let context=ok (Socket.context ~live_bidi:None ~instance_id:incarnation ~automation:None ~models:None ~stagehand:(Some c)) in
       let admission=lease (Lease.prepare ~directories:[Filename.concat root "worker-slot"]
         ~instance_id:incarnation ~cleanup_context:(Some context)) in
       claim:=Some admission;

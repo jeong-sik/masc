@@ -74,7 +74,7 @@ let scenario ?(open_session=false) ?(refuse_delete=false) ~cancel_receipt () = E
   let executable=Filename.temp_file "browser-owned-driver-" ".py" in
   Out_channel.with_open_bin executable (fun out -> output_string out driver);Unix.chmod executable 0o700;
   let instance_id=Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
-  let context=ok (Socket.context ~stagehand:None ~instance_id ~models:None ~automation:(Some {Browser_configuration.driver=executable;binary=None})) in
+  let context=ok (Socket.context ~live_bidi:None ~stagehand:None ~instance_id ~models:None ~automation:(Some {Browser_configuration.driver=executable;binary=None})) in
   let admission=lease (Native_addon_lease.prepare ~directories:[slot] ~instance_id ~cleanup_context:(Some context)) in
   let resource=ok (Socket.acquire ~admission ~directory:slot) in
   let directory=Filename.dirname (Socket.socket_path resource) in

@@ -223,7 +223,14 @@ let test_codec_fingerprint_is_the_corpus_stable_bundle () =
     string
     "codec fingerprint"
     (manifest |> member "fingerprint" |> to_string)
-    Msp.corpus_schema_fingerprint
+    Msp.corpus_schema_fingerprint;
+  let result = response_result (Msp.Int_id 1) (server_frames "handshake-liststream-granted") in
+  let init = ok_or_fail (Msp.parse_initialize_result result) in
+  check
+    string
+    "host fingerprint kept verbatim"
+    (result |> member "schema" |> member "fingerprint" |> to_string)
+    init.schema_fingerprint
 ;;
 
 let test_approval_round_trip () =

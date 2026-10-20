@@ -27,7 +27,8 @@ too. An explicit `lane = "live"` tab creation requires the observed `clientId`.
 path, retaining contextual/scene/screenshot projections, capability receipts,
 caller attribution and producer effect metadata. Public core/Keeper dispatchers
 use this adapter. Screenshot retention and Vision handles belong to the served
-Workspace; download and upload ownership still require a transfer broker.
+Workspace. Owned Gecko uploads and downloads use host-mediated transfer
+brokers independently of the optional validation hooks and model consumers.
 
 The worker publishes connection observations through MCP. Its separate private
 socket lets browser commands wait while client polls and results use other
@@ -83,26 +84,34 @@ id = "browser"
 run_id = "browser-work"
 manifest_path = "/absolute/path/to/masc/addons/browser/lane.toml"
 tool_hooks = ["validate_input", "validate_output"]
+exact_outputs = ["locate", "stagehand"]
 
 [binding]
 sources = []
 ```
 
-The installed native host and browser extension/BiDi peer still need the same
-workspace token. When automation is configured, the worker starts its owned
-Gecko driver with a private profile and download directory. Detach confirms
-driver and descendant settlement before releasing that allocation. Stagehand
-Chrome ownership and built-in live browser startup remain to be moved. This is
-not yet a complete operator-browser replacement.
+The installed external native host and browser extension/BiDi peer use the
+workspace token. The worker itself can own configured automation, Stagehand
+Chrome, and live Firefox BiDi backends independently. It starts its Gecko driver
+with a private profile/download directory; Chrome sessions use a private or
+explicit persistent profile. A configured live Firefox starts during worker
+attachment, on its dedicated existing owner-only profile. Its reported profile
+and process ID must match the original process owner. A busy port is refused;
+no external Firefox is adopted. See the [Firefox setup guide](../../docs/design/browser-bidi-live-host.md).
 
-The worker owner can register automation and Stagehand independently. Each
-registration includes its session observation and original resource cleanup;
-registration alone does not establish an open browser. Retirement fences both
-routes and removes both executors before starting their cleanups concurrently.
-It joins both cleanups even if one fails. Concurrent or repeated retire requests
-observe the same cleanup result; an error or exception prevents a successful
-retirement receipt. An interrupted issued command remains uncertain and is not
-replayed. This ownership interface does not yet start an owned Chrome session.
+Backend settings are captured at attachment from the loaded `runtime.toml`.
+Restart after changing runtime settings, then detach/reattach an existing
+installation. Declaration edits reconcile at startup and on the maintenance
+pulse. Check desired/applied revisions, phase and configuration issues; saving
+TOML does not establish readiness. Disable an installation with its top-level
+`enabled = false` and verify detachment before reusing its resources.
+
+Retirement fences input before joining the original live, automation and
+Stagehand cleanups. Concurrent or repeated retire requests observe the same
+cleanup result; an error prevents a successful retirement receipt. Confirmed
+settlement releases the private allocation while persistent profile contents
+and stable claims are preserved. External extension/manual browsers remain
+operator-owned. Interrupted issued input stays uncertain and is never replayed.
 
 Input/output middleware validates tool contracts without calling an LLM. LLM
 Exact Output is selected separately through a package's declared outputs and an
@@ -138,9 +147,10 @@ User/assistant roles and text-block order remain; blocks within one turn join
 with two newlines. Image/tool blocks, text/tool generations and supplied
 temperature/stop options are refused before model queue admission. Caller
 cancellation withdraws the waiter; retirement wakes it; uncertain results return
-an error without an automatic retry. Captured-protocol/loopback-provider scenarios
-are defined for this callback. Their execution and actual owned Chrome startup
-and session integration remain unverified follow-up work.
+an error without an automatic retry. Captured-protocol/loopback-provider
+scenarios and isolated owned Chrome scenarios cover this callback. See the exact source and execution scope in the
+[lifecycle evidence](../../docs/design/browser-addon-lifecycle.md#completion-evidence);
+these checks do not establish deployment or provider response quality.
 
 The bundled package declares the fixed `locate` output and connects it to owned
 Gecko `page.locate`. Configure an existing model slot for the installation's
@@ -165,7 +175,8 @@ scene never establishes that all matching elements were found. The original
 command or detach owns model waiting; the quick browser transport clock does
 not abandon its request.
 
-The owner/queue/consumer and public alias scenarios use scripted WebDriver or
-native adapter responses. Actual browser/model execution evidence, Stagehand
-model policy and owned Chrome still remain. Follow this work in
-[issue #44150](https://github.com/jeong-sik/masc/issues/44150).
+Scripted owner/queue/Gecko-consumer cases, actual isolated Chrome cases, and
+installed browser behavior are separate evidence scopes. Actual owned Firefox
+and remaining browser-family behavior still require verification. Follow the
+[lifecycle evidence](../../docs/design/browser-addon-lifecycle.md#completion-evidence)
+and [issue #44150](https://github.com/jeong-sik/masc/issues/44150).

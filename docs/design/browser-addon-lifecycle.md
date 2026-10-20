@@ -555,15 +555,31 @@ whose host has not released it. The worker's outer shutdown scope observes the
 same cleanup when caller cancellation bypassed an orderly host Retire. Open Gecko
 teardown closes the original session before joining its BiDi reader, and the
 release fallback observes the same once-only close. Cleanup removes only exact
-committed original files and their snapshots after confirmed backend teardown;
-unpublished, partial, replaced or unknown files remain explicitly unconfirmed.
+committed original files and their snapshots after confirmed backend teardown.
+The broker keeps the original read-only, close-on-exec descriptor from verified
+copy through retirement, preventing original-inode reuse. Deletion requires that
+pinned inode, original owner, single link, unchanged permissions and exact
+published byte count and SHA-256. Historical mtime/ctime may change after copying;
+current identity and metadata must remain stable across the bounded digest read
+and final pathname/parent/allocation checks. Reads may change atime, which is not
+part of that comparison. This relies on confirmed backend shutdown and the
+original private allocation, not atomic deletion against hostile same-UID code.
+Unpublished, partial, replaced or unknown files remain explicitly unconfirmed.
+Every retained descriptor closes on successful or failed retirement. Unconfirmed
+backend shutdown closes descriptors without deleting files, and its failure stays
+sticky. Process recovery cannot rebuild this original-inode authority from a path.
 
 The added scenarios cover the actual owner/private socket/host finalizer/blob
 boundary, repeated publication, revoked admission with active settlement,
 descriptor/digest mismatch and source replacement. The Gecko shutdown fixture
-keeps a real scripted BiDi socket open across Retire. These new linked scenarios
-and real Firefox downloads have not yet executed. Source review and limited
-interface typing are separate from that execution evidence.
+keeps a real scripted BiDi socket open across Retire. Additional download
+scenarios cover metadata finalization, changed bytes with restored mtime,
+identical-byte replacement, replaced parents, permission changes, duplicate
+snapshots and unconfirmed-backend disposal. These pinned-source scenarios have
+not yet executed. The earlier real Gecko run39514004029 failed at historical
+identity comparison; diagnostic run39515749114 passed 23/23 steps with that
+predicate unchanged. Neither proves this refinement or the old differing field.
+Source review and actual selected execution remain separate.
 
 ## Completion evidence
 

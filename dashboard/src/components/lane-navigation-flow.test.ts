@@ -82,7 +82,7 @@ it('retries the selected declaration file after its installation identity is res
   const document = { file_name: 'pkg.toml', source_path: path, source_text: 'id = "replacement"\n',
     source_revision: 'r1', desired_revision: 'semantic', validation: { valid: true, messages: [] } }
   addons.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ configuration: { directory, complete: true,
-    issues: [], declarations: [{ id: 'pkg', source_path: path, enabled: true, desired_revision: 'semantic',
+    issues: [], declarations: [{ id: 'pkg', source_path: path, enabled: true, source_revision: 'r1', application: { kind: 'starting' }, desired_revision: 'semantic',
       applied_revision: null, instance_id: null }] }, instances: [], rows: [], coverage: [] }))
   files.fetchLaneDeclaration.mockResolvedValue(document)
   replaceRoute('monitoring', laneTargetParams({ kind: 'declaration', workspace: '/fixture/navigation', path, installation: 'pkg' }))
@@ -103,7 +103,7 @@ it('retries the selected declaration file after its installation identity is res
 it('keeps a replacement file out of the retained editor after the target identity check rejects it', async () => {
   const directory = '/fixture/navigation/.masc/config/lane-addons', path = `${directory}/pkg.toml`
   addons.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ configuration: { directory, complete: true,
-    issues: [], declarations: [{ id: 'pkg', source_path: path, enabled: true, desired_revision: 'semantic',
+    issues: [], declarations: [{ id: 'pkg', source_path: path, enabled: true, source_revision: 'r1', application: { kind: 'starting' }, desired_revision: 'semantic',
       applied_revision: null, instance_id: null }] }, instances: [], rows: [], coverage: [] }))
   // The path was given to another installation after the inventory read.
   files.fetchLaneDeclaration.mockResolvedValue({ file_name: 'pkg.toml', source_path: path, source_text: 'id = "replacement"\n',
@@ -133,7 +133,7 @@ it('does not read a target from another workspace or a malformed direct link', a
 it('does not open a file when the fresh inventory assigns it to another installation', async () => {
   const directory = '/fixture/navigation/.masc/config/lane-addons', path = `${directory}/pkg.toml`
   addons.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ configuration: { directory, complete: true,
-    issues: [], declarations: [{ id: 'replacement', source_path: path, enabled: true, desired_revision: 'semantic',
+    issues: [], declarations: [{ id: 'replacement', source_path: path, enabled: true, source_revision: 'r1', application: { kind: 'starting' }, desired_revision: 'semantic',
       applied_revision: null, instance_id: null }] }, instances: [], rows: [], coverage: [] }))
   replaceRoute('monitoring', laneTargetParams({ kind: 'declaration', workspace: '/fixture/navigation', path, installation: 'pkg' }))
   render(html`<${LaneAddonsPanel} />`)
@@ -145,7 +145,7 @@ const directory = '/fixture/navigation/.masc/config/lane-addons', path = `${dire
 const declarationDocument = { file_name: 'pkg.toml', source_path: path, source_text: 'id = "pkg"\n',
   source_revision: 'same-bytes', desired_revision: 'semantic', validation: { valid: true, messages: [] as string[] } }
 const declarations = parseLaneAddonSnapshot({ configuration: { directory, complete: true, issues: [], declarations: [
-  { id: 'pkg', source_path: path, enabled: true, desired_revision: 'semantic', applied_revision: null, instance_id: null },
+  { id: 'pkg', source_path: path, enabled: true, source_revision: 'r1', application: { kind: 'starting' }, desired_revision: 'semantic', applied_revision: null, instance_id: null },
 ] }, instances: [], rows: [], coverage: [] })
 function declarationRoute() {
   replaceRoute('monitoring', laneTargetParams({ kind: 'declaration', workspace: '/fixture/navigation', path, installation: 'pkg' }))

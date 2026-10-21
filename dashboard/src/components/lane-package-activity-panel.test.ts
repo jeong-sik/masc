@@ -17,7 +17,7 @@ const original = '# retained comment\nid = "pkg"\nrun_id = "run"\nmanifest_path 
 const document: LaneDeclarationDocument = { file_name: 'pkg.toml', source_path: path, source_text: original,
   source_revision: 'r1', desired_revision: 'semantic', validation: { valid: true, messages: [] } }
 const snapshot = parseLaneAddonSnapshot({ configuration: { directory, complete: true, issues: [], declarations: [
-  { id: 'pkg', source_path: path, enabled: true, desired_revision: 'semantic', applied_revision: null, instance_id: null },
+  { id: 'pkg', source_path: path, enabled: true, source_revision: 'r1', application: { kind: 'starting' }, desired_revision: 'semantic', applied_revision: null, instance_id: null },
 ] }, instances: [], rows: [], coverage: [] })
 function receipt(text: string, durability: 'durable' | 'unconfirmed' = 'durable') {
   return { document: { ...document, source_text: text, source_revision: 'r2' },
@@ -70,12 +70,12 @@ describe('Web package on/off without deleting configuration', () => {
     await panel(screen).findByRole('button', { name: 'Saving activity…' })
     screen.unmount(); screen = render(html`<${LaneAddonsPanel} />`)
     await screen.findByRole('region', { name: 'Package activity pkg' })
-    expect(panel(screen).getByText('Observed configuration: On · not yet applied')).toBeTruthy()
+    expect(panel(screen).getByText('Waiting for worker startup')).toBeTruthy()
     lane.fetchLaneAddons.mockResolvedValue({ ...snapshot, configuration: { ...snapshot.configuration!, declarations: [
-      { ...snapshot.configuration!.declarations[0], enabled: false, instance_id: 'still-observed' },
+      { ...snapshot.configuration!.declarations[0], enabled: false, application: { kind: 'cleaning' }, source_revision: 'r2', instance_id: 'still-observed' },
     ] } })
     await act(() => finish(receipt(`enabled = false\n${original}`)))
-    await panel(screen).findByText('Observed configuration: Off requested · worker cleanup not yet confirmed')
+    await panel(screen).findByText('Different TOML revision observed · this file’s application is not confirmed')
     expect(files.saveLaneDeclaration).toHaveBeenCalledTimes(1)
   })
   it('changes only activity with explicit CAS save and leaves the raw draft independent', async () => {
@@ -149,10 +149,10 @@ describe('Web package on/off without deleting configuration', () => {
     expect((panel(screen).getByRole('button', { name: 'Save activity' }) as HTMLButtonElement).disabled).toBe(true)
     const inventoryReads = lane.fetchLaneAddons.mock.calls.length
     lane.fetchLaneAddons.mockResolvedValue({ ...snapshot, configuration: { ...snapshot.configuration!, declarations: [
-      { ...snapshot.configuration!.declarations[0], enabled: false, instance_id: 'still-observed' },
+      { ...snapshot.configuration!.declarations[0], enabled: false, application: { kind: 'cleaning' }, source_revision: 'r2', instance_id: 'still-observed' },
     ] } })
     await act(() => finish(receipt(`enabled = false\n${original}`)))
-    await panel(screen).findByText('Observed configuration: Off requested · worker cleanup not yet confirmed')
+    await panel(screen).findByText('Different TOML revision observed · this file’s application is not confirmed')
     expect(lane.fetchLaneAddons.mock.calls.length).toBeGreaterThan(inventoryReads)
     expect(panel(screen).queryByText(/Activity configuration saved/)).toBeNull()
     expect((panel(screen).getByRole('button', { name: 'Save activity' }) as HTMLButtonElement).disabled).toBe(true)
@@ -250,10 +250,10 @@ describe('Web package on/off without deleting configuration', () => {
     const screen = render(html`<${LaneAddonsPanel} />`); await open(screen)
     files.fetchLaneDeclaration.mockResolvedValueOnce({ ...document, source_text: `enabled = false\n${original}`, source_revision: 'external-off' })
     lane.fetchLaneAddons.mockResolvedValueOnce({ ...snapshot, configuration: { ...snapshot.configuration!, declarations: [
-      { ...snapshot.configuration!.declarations[0], enabled: false, instance_id: 'still-observed' },
+      { ...snapshot.configuration!.declarations[0], enabled: false, application: { kind: 'cleaning' }, source_revision: 'external-off', instance_id: 'still-observed' },
     ] } })
     fireEvent.click(panel(screen).getByRole('button', { name: 'Read current activity' }))
-    await panel(screen).findByText('Observed configuration: Off requested · worker cleanup not yet confirmed')
+    await panel(screen).findByText('Worker cleanup pending')
     expect(panel(screen).getByText('File activity (last read): Off')).toBeTruthy()
     expect(files.saveLaneDeclaration).not.toHaveBeenCalled()
   })

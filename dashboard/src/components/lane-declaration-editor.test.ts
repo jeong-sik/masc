@@ -35,7 +35,7 @@ const document: LaneDeclarationDocument = {
 }
 const snapshot = {
   configuration: { directory: '/workspace/.masc/config/lane-addons', complete: true, issues: [], declarations: [
-    { id: 'custom', source_path: path, enabled: true, desired_revision: 'semantic-revision-1', applied_revision: null, instance_id: null },
+    { id: 'custom', source_path: path, enabled: true, source_revision: 'r1', application: { kind: 'starting' }, desired_revision: 'semantic-revision-1', applied_revision: null, instance_id: null },
   ] }, instances: [], rows: [], coverage: [],
 }
 function receipt(source_text: string, source_revision = 'raw-revision-2') {
@@ -88,7 +88,7 @@ describe('Lane declaration editing through the status surface', () => {
     const row = { id: 'shared-row', lane_id: 'shared-worker/value', kind: 'value', title: 'Only A evidence',
       observed_at: 1, subject_id: 'fixture', actor: null, clock: null, fields: {}, evidence: [], related_ids: [] }
     const worker = { instance_id: 'shared-worker', run_id: 'run', addon_id: 'fixture', title: 'Shared worker',
-      revision: 'r1', phase: { kind: 'attached' }, configuration: null, incarnation: 'one', action_schema: null,
+      revision: 'r1', phase: { kind: 'attached' }, runtime_presence: 'live', configuration: null, incarnation: 'one', action_schema: null,
       package: { binding_schema: null, presentation: { description: null, readings: [] }, outputs: {} },
       observation_seq: 1, rows_count: 1, binding: {} }
     lane.fetchLaneAddons.mockResolvedValue({ ...snapshot, instances: [worker] })
@@ -383,7 +383,7 @@ describe('Lane declaration editing through the status surface', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save TOML' }))
     await waitFor(() => expect(files.saveLaneDeclaration).toHaveBeenCalledWith({ mode: 'create', file_name: 'custom.toml', source_text: original }))
     await screen.findByText(/File created. Lane application is pending reconciliation/)
-    expect(screen.getByText('Not yet applied')).toBeTruthy()
+    expect(screen.getByText('Waiting for worker startup')).toBeTruthy()
     expect(source(screen).value).toBe(original)
     expect(lane.attachLaneAddon).not.toHaveBeenCalled()
     expect(lane.observeLaneAddon).not.toHaveBeenCalled()
@@ -575,7 +575,7 @@ describe('Lane declaration editing through the status surface', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save TOML' }))
     await waitFor(() => expect(files.saveLaneDeclaration).toHaveBeenLastCalledWith({ mode: 'save', file_name: 'custom.toml', source_text: draft, expected_source_revision: 'raw-external' }))
     await screen.findByText(/File saved. Lane application is pending reconciliation/)
-    expect(screen.getByText('Not yet applied')).toBeTruthy()
+    expect(screen.getByText('Waiting for worker startup')).toBeTruthy()
   })
   it('preserves edits made while a save is pending and keeps them dirty afterward', async () => {
     let finish: ((value: unknown) => void) | undefined
@@ -630,7 +630,7 @@ describe('Lane declaration editing through the status surface', () => {
     fireEvent.input(source(screen), { target: { value: '# changed\n' + original } })
     fireEvent.click(screen.getByRole('button', { name: 'Save TOML' }))
     await screen.findByText(/Durability is unconfirmed.*Lane application is pending reconciliation.*Directory sync failed/)
-    expect(screen.getByText('Not yet applied')).toBeTruthy()
+    expect(screen.getByText('Waiting for worker startup')).toBeTruthy()
   })
   it('keeps saving unavailable after a failed original read and permits a successful retry', async () => {
     files.fetchLaneDeclaration.mockRejectedValueOnce(new Error('File cannot be read'))

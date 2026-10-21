@@ -9,7 +9,7 @@ import { LaneAddonsPanel } from './lane-addons-panel'
 
 function snapshot(id: string) {
   return parseLaneAddonSnapshot({ configuration: null, rows: [], coverage: [], instances: [{
-    instance_id: id, run_id: id, addon_id: 'test-package', title: id, revision: 'r1', incarnation: id,
+    instance_id: id, run_id: id, runtime_presence: 'live', addon_id: 'test-package', title: id, revision: 'r1', incarnation: id,
     phase: { kind: 'attached' }, configuration: null, action_schema: null, observation_seq: 0, rows_count: 0,
     package: { outputs: {}, binding_schema: null, presentation: { description: null, readings: [] } },
   }] })

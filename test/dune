@@ -5902,7 +5902,7 @@
  (deps ../addons/workspace-curator/lane.toml
        ../addons/workspace-curator/schemas/classification.json
        ../addons/workspace-curator/schemas/briefing.json)
- (libraries masc_test_deps masc.server))
+ (libraries masc_test_deps masc.server mcp_protocol))
 
 (test
  (name test_lane_addon_host_cycle)

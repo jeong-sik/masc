@@ -175,11 +175,13 @@ a=p.parse_args()
 environment_check='''import json,os
 print(json.dumps({"provider_absent":"OPENAI_API_KEY" not in os.environ,
  "unlisted_absent":"MASC_BROWSER_UNLISTED_SECRET" not in os.environ,
- "path_present":bool(os.getenv("PATH")),"locale_preserved":os.getenv("LANG")=="C"}))'''
+ "path_present":bool(os.getenv("PATH")),"locale_preserved":os.getenv("LANG")=="C",
+ "backend_preserved":os.getenv("EIO_BACKEND")=="posix"}))'''
 child_environment=json.loads(subprocess.check_output([sys.executable,"-c",environment_check]))
 worker_environment={"provider_absent":"OPENAI_API_KEY" not in os.environ,
  "unlisted_absent":"MASC_BROWSER_UNLISTED_SECRET" not in os.environ,
- "path_present":bool(os.getenv("PATH")),"locale_preserved":os.getenv("LANG")=="C"}
+ "path_present":bool(os.getenv("PATH")),"locale_preserved":os.getenv("LANG")=="C",
+ "backend_preserved":os.getenv("EIO_BACKEND")=="posix"}
 with open(os.path.join(a.root,"environment-"+a.incarnation),"w") as out:
     json.dump({"worker":worker_environment,"child":child_environment},out)
 s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);s.bind(a.socket);s.listen()
@@ -239,7 +241,7 @@ for line in sys.stdin:
 |}
 let with_browser_environment work =
   let entries=["OPENAI_API_KEY","fake-host-provider-sentinel";
-    "MASC_BROWSER_UNLISTED_SECRET","fake-unlisted-sentinel";"LANG","C"] in
+    "MASC_BROWSER_UNLISTED_SECRET","fake-unlisted-sentinel";"LANG","C";"EIO_BACKEND","posix"] in
   let previous=List.map (fun (key,_) -> key,Sys.getenv_opt key) entries in
   Fun.protect ~finally:(fun () -> List.iter (fun (key,value) ->
     match value with None -> Unix.unsetenv key | Some value -> Unix.putenv key value) previous)
@@ -290,7 +292,7 @@ hooks = ["validate_input", "validate_output"]
   List.iter (fun process -> List.iter (fun property ->
     check bool (process ^ " " ^ property) true
       (member property (member process environment) |> Yojson.Safe.Util.to_bool))
-    ["provider_absent";"unlisted_absent";"path_present";"locale_preserved"]) ["worker";"child"];
+    ["provider_absent";"unlisted_absent";"path_present";"locale_preserved";"backend_preserved"]) ["worker";"child"];
   check bool "host retains its own provider credential" true
     (Sys.getenv_opt "OPENAI_API_KEY"=Some "fake-host-provider-sentinel");
   let host=match Browser_addon_host.connect ~config ~access:Lane_addon_sources.Unauthenticated

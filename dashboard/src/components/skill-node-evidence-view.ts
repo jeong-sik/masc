@@ -45,10 +45,10 @@ function NodeSettlement({ node, peak }: { node: SkillExecutorSettlement; peak: n
           ${node.failure_effect_disposition === null ? null : html`<div>Effect evidence: ${node.failure_effect_disposition}</div>`}
           <div class="grid min-w-0 gap-2 lg:grid-cols-2">
             <div class="min-w-0"><strong>Observed input</strong>
-              <pre class="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-surface-raised)] p-2">${payload(node.input)}</pre>
+              <pre class="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-bg-elevated)] p-2">${payload(node.input)}</pre>
             </div>
             <div class="min-w-0"><strong>Observed result</strong>
-              <pre class="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-surface-raised)] p-2">${payload(node.result)}</pre>
+              <pre class="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-bg-elevated)] p-2">${payload(node.result)}</pre>
             </div>
           </div>
         </div>

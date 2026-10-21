@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { laneAddonApplicationText } from './lane-addon-connection'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { fetchLaneInventory, type LaneInventory, type LaneInventoryRow } from '../api/lane-inventory'
 import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
@@ -41,8 +42,7 @@ function stateLines(row: LaneInventoryRow, snapshot: LaneInventory): string[] {
     case 'package': {
       const declared = state.declaration
       const desired = declared === null ? 'Manual attachment'
-        : declared.kind === 'valid' ? declared.enabled ? 'Configured on'
-          : state.instances.length ? 'Off requested · cleanup unconfirmed' : 'Configured off · no worker observed'
+        : declared.kind === 'valid' ? `${declared.enabled ? 'Configured on' : 'Configured off'} · ${laneAddonApplicationText(declared.application)}`
           : declared.kind === 'invalid' ? `Invalid declaration: ${declared.messages.join('; ')}`
             : declared.kind === 'absent' ? 'Declaration absent · cleanup unconfirmed' : 'Declaration not observed'
       return [desired, ...state.instances.map(instance => `${instance.presence} ${instance.phase.kind} · ${instance.instance_id}`

@@ -4,7 +4,7 @@
 Dashboard·TUI 관측, 실제 사용·복구·설치 검증. 이전 대화의 무관한 기능 개발이나 저장소 전체 PR 정리는 포함하지 않는다.
 아래 54개는 남은 구현·설계·검증·통합 작업이다. 이미 구현된 기능은 다시 만드는 대신 남은 적용·검증 범위를 적었다.
 
-## 현재 확보한 기준점
+## 최초 기록의 기준점 (아래 재개 체크포인트에서 상태 갱신)
 
 - 공통 관측 구현 [#44707](https://github.com/jeong-sik/masc/pull/44707):
   `566b98b5d1645d6312d518bf2810f3e5e0626586`. 서버 application/source revision/runtime presence를
@@ -15,12 +15,12 @@ Dashboard·TUI 관측, 실제 사용·복구·설치 검증. 이전 대화의 �
   이전 관측 보존·새 incarnation·새 입력 결과를 확인했다. 입력은 synthetic phrase snapshot이다.
 - Dashboard 8개 suite 145건 및 TypeScript 검사 통과. OCaml은 parser 검사만 수행했다.
   두 PR의 독립 source/evidence 검토는 PASS이며, 정식 GitHub 승인·병합·설치와 구분한다.
-- 위 두 PR과 A03 수정 #44721, 경계·작업표 #44726은 Native Stack #44710의 4개 층이며, 2026-10-21 후속 조회에서 모두 Ready/open/unmerged였다. CI 개선 #44727·changelog #44731은 별도 Native Stack #44732다.
+- 위 두 PR과 A03 수정 #44721, 경계·작업표 #44726은 Native Stack #44710의 4개 층이며, 2026-10-21 06:45:33–37 UTC에 모두 main으로 병합됐다. CI 개선 #44727·changelog #44731은 별도 Native Stack #44732다.
 - Browser Addon의 기존 6개 요구사항은 구현 및 범위를 고정한 분리 실측을 마쳤다.
   Deferred Tools·Hook 선택·host Exact Output도 그 범위에 포함된다.
   기존 완료 영수증 이후 Native Stack #44168이 67층으로 늘었으며,
   현재 마지막 PR은 [#44702](https://github.com/jeong-sik/masc/pull/44702),
-  head `76b741f8816f074249baef3166ca152d9c9d2c13`이다.
+  head `d35d2559c56814b38615545a5f4f081304bccc05`이다 (2026-10-21 재개 조회).
   기존 완료 기록의 #44653은 현재 64번째 층이다. 최신 추가 3층과 전체 통합을 별도로 재판정해야 한다.
 - MSX/DOS는 이미 별도 worker Addon이다. Fusion 패키지도 존재한다.
   VST Phrase는 현재 관측 패키지이며 실제 VST/audio 실행 소유와 구분한다.
@@ -35,12 +35,12 @@ Dashboard·TUI 관측, 실제 사용·복구·설치 검증. 이전 대화의 �
 
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| A01 | 변경 TUI의 최소 검사와 정확한 소스의 실행 artifact 확보 | exact `7f9e34b` native run `39555509454` 실행 중; syntax job PASS, native artifact 미완료 | `test_tui_lane_addons`·직접 관련 application 검사 결과, 실행 artifact의 source/build identity 확보 |
+| A01 | 변경 TUI의 최소 검사와 정확한 소스의 실행 artifact 확보 | 기존 run `39555509454`는 native 컴파일 FAIL로 종료; 진단 artifact만 남음. 원인 타입 수리 `9f6db24a357`은 main에 포함; 수리 후 실행 artifact 미확보 | `test_tui_lane_addons`·직접 관련 application 검사 결과, 실행 artifact의 source/build identity 확보 |
 | A02 | 새 TUI로 On/Off/재연결 실제 화면 관측 | 미실행 | 같은 설치의 이전/새 incarnation, 정리 상태, 원래 결과·receipt를 실제 화면과 API로 확인 |
-| A03 | retained worker에 남는 Observe/Action 키 안내 정리 | #44721 `7f9e34b` 소스 수정·독립 검토 2건 PASS; parser PASS, 새 TUI 미실행 | 표시 가능한 행동과 실제 요청 허용 조건이 일치; 이력 조회·정리 조치는 보존 |
-| A04 | MASC 코드·맥락 리뷰 대응 및 현재 head 판정 확인 | #44707 현재 head 정식 승인 확인; #44721 재리뷰 접수, 맥락 queued | 실제 verdict를 읽고 P0–P2 해소, 바뀐 head/base/diff에 재결속 |
+| A03 | retained worker에 남는 Observe/Action 키 안내 정리 | #44721 main 병합 완료; retained 실행 키 안내와 can_observe를 맞춘 소스·독립 검토 확보. 새 TUI 화면 미실행 | 표시 가능한 행동과 실제 요청 허용 조건이 일치; 이력 조회·정리 조치는 보존 |
+| A04 | MASC 코드·맥락 리뷰 대응 및 현재 head 판정 확인 | 공통 Stack #44710 네 층 병합 완료. G01 후속 소스 독립 리뷰 P0–P2 없음; 최종 head의 MASC 재리뷰는 별도 필요 | 실제 verdict를 읽고 P0–P2 해소, 바뀐 head/base/diff에 재결속 |
 | A05 | Browser 스택의 후속 3개 층과 기존 증거 영향 검토 | 세 층의 전체 delta 직독; exact `76b741f` run `39555413943` 두 suite 14건 PASS, 독립 source delta 검토 PASS; 실제 앱·전체 스택 검증 별도 | #44695·#44698·#44702의 reply/download 정책 변경을 읽고 영향을 받는 경로만 검증 |
-| A06 | 두 스택의 전체 통합 준비 | open/unmerged | REST stack 구성·각 head·독립 승인·미해결 리뷰·충돌 재확인; 병합은 전체 스택의 맨 위 PR로만 진행 |
+| A06 | 두 스택의 전체 통합 준비 | 공통 Stack #44710은 main 병합. Browser Stack #44168은 67층 open, top #44702 `d35d2559`; 전체 현재 승인·충돌·통합 재확인 필요 | REST stack 구성·각 head·독립 승인·미해결 리뷰·충돌 재확인; 병합은 전체 스택의 맨 위 PR로만 진행 |
 
 빌더 요청: `kmsg-2ada1cdc54884c58aa6736a80b598868`는 기존 `566b98b` 대상이다. 후속 exact 후보 `7f9e34b`는 native run `39555509454`로 요청했다. 중복 시작을 피하도록 빌더에게 대체 안내 `kmsg-1974c332ed1abfed8b4bde992b686e8f`를 보냈으며 안내 접수는 원래 작업 취소·실행 여부의 증거가 아니다.
 코드 리뷰: `kmsg-f7fecd527b3870306df62a4079c30ad8` 완료 및 #44707 review `5595612747` APPROVED 직독. head `566b98b5d1645d6312d518bf2810f3e5e0626586`, reviewed base `b95d927e30c6718e0fe656d3019c6cf39766c02c`, diff `ff95fe2ecb2658cee6da5b251d2b119c825270116c978246de762b5374e336c2`. 한 층의 소스 승인이다. #44721 후속 요청 `kmsg-dc966b86727baccd78eaa31700ef384e`는 queued 접수다.
@@ -77,7 +77,7 @@ Dashboard·TUI 관측, 실제 사용·복구·설치 검증. 이전 대화의 �
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
 | D01 | Addon별 모델 route와 기능 활성화의 독립 선택 검증 확장 | Browser broker 있음 | LLM 없는 동작은 독립 실행되고, 설치/출력별 선택 모델이 실제 호출에 반영 |
-| D02 | 기존 요청별 schema grant를 Candle에 재사용하는 계약 확정 | 기존 grant 재사용·완전 domain decode·단계별 ID·불확실 결과 계약 source/response 검토 PASS; 적용 구현 필요 | `Consumer_request_schema`의 권한·package baseline·요청 digest를 재사용; Grade enum·keeper 집합·weight 상한은 Candle의 완전한 domain decode로 검증 |
+| D02 | 기존 요청별 schema grant를 Candle에 재사용하는 계약 확정 | Browser top `d35d2559`에서 consumer grant 재사용·원래 intent 보존·완전 Candle domain decode 소스 확인; main 통합·실제 실행 미확인 | `Consumer_request_schema`의 권한·package baseline·요청 digest를 재사용; Grade enum·keeper 집합·weight 상한은 Candle의 완전한 domain decode로 검증 |
 | D03 | 모델 호출 전 요청 보존 및 원래 identity 결속 | 기반 있음 | request·stage·input·schema·route·trace를 보존한 뒤 한 번 dispatch |
 | D04 | 오류·거절·불확실 결과의 typed 처리 일관화 | 도메인별 차이 있음 | transport 불가/잘못된 출력/실행 거절/효과 불확실의 재시도 의미를 유지 |
 | D05 | credential·provider admission·동시 실행 권한을 host에 유지 | Browser 검증 있음 | worker/child에 비밀 유출 없음; 실제 provider별 queue·취소·동시성 동작 확인 |
@@ -93,7 +93,7 @@ Browser Stagehand는 기존 Addon 모델 경로를 B01·D01/D06·F에서 재사�
 
 | ID | 대상과 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | 미구현, runner seam 확인 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
+| E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | Browser Stack #44168에 worker/host 연결 구현 존재 (`addons/candle-appraiser`, `Server_candle_appraiser`); main 미통합, 실제 provider·Off/재연결/정산·UI 검증 미완료 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
 | E02 | Workspace Curator의 모델 실행·작업 수명 추출 | 설계 필요 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
 | E03 | Librarian 실행의 Addon 경계 검토·추출 | 조사·설계 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
 | E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | 조사·설계, Required | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |
@@ -129,7 +129,7 @@ Safari 및 넓은 행동군 후속은 기존 #44023과 연결해 중복 구현�
 
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| G01 | 패키지·설치·worker·모델·도구·Skill의 연결을 한곳에서 보기 | 일부 구현; MASC 리뷰 P3: lane-inventory-panel의 instances.length 추측 표기를 host application으로 연결 필요 | 원하는 설정/실제 적용/연결 존재/실행/관측 준비/실패를 구분하고 원래 상세로 이동 |
+| G01 | 패키지·설치·worker·모델·도구·Skill의 연결을 한곳에서 보기 | [#44801](https://github.com/jeong-sik/masc/pull/44801) 후속 구현: host application을 원래 id/path/source·desired revision/enabled에 결속해 공통 inventory와 두 UI에 전달. Dashboard 62건·TypeScript PASS, OCaml parser PASS. direct run39592343953은 새 record label의 owner 타입 추론 오류로 컴파일 FAIL; 기존 typed owner 재사용 수리 후 재검증 필요. native 실행·실제 화면 미확인 | 원하는 설정/실제 적용/연결 존재/실행/관측 준비/실패를 구분하고 원래 상세로 이동 |
 | G02 | 입력→Hook→worker→모델→출력/소비자의 연결 관계 표시 | 일부 Flow 있음 | 실제 연결 reference에 근거해 표시; 관측 그래프를 실행 허가로 사용하지 않음 |
 | G03 | 요청부터 종료·정리까지 원래 timeline/trace 연결 | 부분 구현; Dashboard가 버리던 host_requests를 원래 worker/incarnation에 결속해 보존·표시하는 후속 구현. 모델 lane/provider/operator/source 대기와 전달·기록 실패를 닫힌 타입으로 읽고, 손상 진단은 worker·결과와 분리. 전체 요청 이력·실제 화면·설치 검증 필요 | request/run/instance/revision, 대기 이유·결과·실패·정리 증거를 같은 원래 작업으로 추적 |
 | G04 | 교체·경로/ID 변경·이전 소유자 이력 표시 | 후속 소스 구현: 같은 ID worker와 같은 TOML 경로의 다른 ID를 두 UI에서 분리. Dashboard 3파일62건·tsc PASS, TUI 관측 모델 parser PASS; 독립 리뷰·OCaml 실행·실제 UI 별도 | 새 worker와 과거 worker 구분, 다른 ID의 같은 파일 이전 owner 정리 기록도 별도 접근 |
@@ -179,7 +179,7 @@ Dashboard·TUI의 원래 근거 표시를 각각 확인한다. Optional은 Off �
 - A03: #44721, head `7f9e34bab08484124bb18a477ecb5e5ba0fb5769`, base `cc4529a905bb66db977785ee61894bea00d16ac1`. retained/unknown worker의 실행 키 안내에 handlers와 같은 `can_observe`를 사용한다. 이력·정리·원래 receipt 조회를 보존했다. OCaml parser와 diff 검사 PASS; 독립 source/response 리뷰 PASS. 새 실행 바이너리·화면 증거는 아직 없다.
 - B01/D02 경계 문서: [lane-addon-extraction-boundaries.md](../docs/design/lane-addon-extraction-boundaries.md). 현재 소스와 unmerged Browser 의존성, 옮길 실행/host authority, Candle의 단계별 요청 identity 및 typed 불확실 결과의 빈 경계를 명시했다. 문서가 실제 추출 완료를 뜻하지 않는다.
 - #44707 코드 리뷰의 추가 P3는 G01에 보존한다. 단일 PR 승인을 전체 Native Stack 승인으로 확대하지 않는다.
-- A01: [native run 39555509454](https://github.com/jeong-sik/masc/actions/runs/39555509454), source `7f9e34bab08484124bb18a477ecb5e5ba0fb5769`, workflow `cccb1fc4808435ed06ece3e586095f37d8dd449c`, scenario `addon-lifecycle`. 별도 CI PR #44727의 두 독립 source 검토는 최종 head PASS다. 두 기존 suite와 matching server/TUI/key generator를 선택했으며 실행 조회에서 source/config syntax job 성공, native job `119074243862` 실행 중을 확인했다. 완료 artifact는 아직 없다. 기존 TUI suite는 presentation assertion도 포함하는 mixed suite다. artifact 생성은 실제 화면 검증과 구분한다.
+- A01: [native run 39555509454](https://github.com/jeong-sik/masc/actions/runs/39555509454), source `7f9e34bab08484124bb18a477ecb5e5ba0fb5769`, workflow `cccb1fc4808435ed06ece3e586095f37d8dd449c`, scenario `addon-lifecycle`. 별도 CI PR #44727의 두 독립 source 검토는 최종 head PASS다. 두 기존 suite와 matching server/TUI/key generator를 선택했으며 초기 조회에서는 syntax job 성공·native job 실행 중이었다. 재개 시 완료 로그와 artifact를 직독한 결과 native job `119074243862`는 컴파일 FAIL이며 artifact `12325452640`에는 `build-targets.txt`·`build.log`만 있다. 실행 바이너리·성공 receipt는 없다. 기존 TUI suite는 presentation assertion도 포함하는 mixed suite다. artifact 생성은 실제 화면 검증과 구분한다.
 - A05: #44695 전체 delta는 built-in/Addon action reply 정책 공유, #44698은 session/navigation 정책까지 같은 `Browser_lane.reply_timeout_sec`로 연결한다. #44702는 download의 remote claim 보유자를 무한히 기다리지 않고 local preparation만 join하며, 남은 claim이 있으면 파일·grant 상태를 보존한 sticky cleanup 실패를 남긴다. 입력 행동군이나 Safari 지원을 추가한 변경은 아니다.
 - A05 실행 요청: [run 39555413943](https://github.com/jeong-sik/masc/actions/runs/39555413943), source `76b741f8816f074249baef3166ca152d9c9d2c13`, `minimal=true`, `eio_backend=posix`, suites `test_browser_addon_reply_policy,test_browser_addon_downloads`. 기존 28-case 영수증을 최신 변경의 성공으로 재사용하지 않고 두 영향 경로만 새로 선택했다. 완료된 job `119073936227` 로그를 직독해 exact source와 `MINIMAL_CHECK=true`, 두 selected suite, `TARGET_EIO_BACKEND=posix`를 확인했다. reply policy 1건·downloads 13건, 총 14건 PASS다. 실제 브라우저·provider·전체 회귀 실행은 이 두 suite의 범위가 아니다.
 
@@ -194,3 +194,22 @@ Dashboard·TUI의 원래 근거 표시를 각각 확인한다. Optional은 Off �
 - MSX/DOS의 소스·image 검증과 실사용 한계: `docs/guides/machine-addon-state.md`.
 
 PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값이다. 실행을 재개할 때 다시 읽는다.
+
+
+## 2026-10-21 재개 체크포인트 · G01 후속
+
+이 단락은 최초 기록을 대체하는 현재 상태다. 54개 항목과 각각의 완료 기준은 유지한다.
+
+- 공통 Stack #44710의 #44707·#44709·#44721·#44726은 main 병합 완료다. 이것은 설치본과 실제 TUI 동작의 증거가 아니다.
+- A01 원래 실패는 `bin/masc_tui_lane_addons.ml`의 `connection_worker_lines`가 instance list를 declaration list로 추론한 타입 오류다. C의 SecKeychain 경고 6개는 중단 원인이 아니다. main의 `9f6db24a35796a19f2b70ea2c0519309d2de7b86`은 snapshot/item 타입을 명시했지만, 이 수리를 포함한 실행 artifact 성공은 아직 확인하지 않았다.
+- G01의 구체 결함은 `instances.length`를 기준으로 Off 적용 상태를 추측한 것이다. 같은 빈 worker 목록에서도 host의 `Inactive`, `Cleaning_workers`, `Failed`, `Unknown`은 다른 상태다. 기존 Inspect의 `Lane_addon_application.observe` 계산을 공통 inventory에서도 공유하고, 서버는 현재 선언과 관측의 id·source_path·source_revision·desired_revision·enabled가 모두 일치할 때만 application을 연결한다. 누락·중복·불완전 읽기·새 revision은 Unknown이다. 조회는 manager를 생성하거나 worker를 시작/정리하지 않는다.
+- 직접 소비자: `Lane_addon_runtime.inventory` → `Server_lane_inventory.snapshot`/wire → `Tui_decode_lane_inventory`/TUI 및 Dashboard parser/panel. 변경한 record·엄격 디코더·fixture를 함께 맞췄다. 원래 상세 이동·worker 이력·Exact output 연결은 보존한다.
+- 로컬 실제 검증: Dashboard `lane-inventory`, `lane-inventory-panel`, `lane-addon-connection`, `lane-declarations`, `lane-navigation`, `lane-navigation-flow` 6개 파일 62건 PASS; `pnpm exec tsc --noEmit` PASS. 변경 OCaml 10개 ML/MLI parser PASS. 이는 OCaml 타입/실행·native build·실제 브라우저/TUI 완료 증거가 아니다. 독립 미커밋 소스 리뷰는 P0–P2 없음이며 최종 공개 head에 재결속해야 한다.
+- 다음 최소 실행 범위: 같은 공개 후보 SHA의 native `addon-lifecycle` artifact와 직접 변경한 `test_lane_addon_reconcile,test_server_lane_inventory,test_tui_lane_inventory`를 선택한다. 접수 뒤 CI watch/대기를 하지 않고 독립 작업을 계속한다. 성공 run·artifact·실제 TUI 관측은 각각 따로 확인한다.
+- Browser Stack #44168은 이번 REST 조회에서 67층 open, top #44702 `d35d2559c56814b38615545a5f4f081304bccc05`다. 그 tree의 `Server_candle_appraiser.run_with`는 host에 intent를 보존한 뒤 원래 요청을 read/submit하고 `Candle_appraisal.decode`를 거쳐 결과를 정산 호출자에게 돌린다. worker는 `addons/candle-appraiser`에 존재한다. 따라서 E01을 미구현으로 되풀이하지 않는다. 이 소스 확인은 전체 스택 재리뷰·provider 성공·원장 중복 방지의 실제 재연결·Dashboard/TUI·main 통합 증거를 대신하지 않는다.
+- 아직 필요한 실제 사용: A02의 TUI On/Off/재연결, Candle의 실제 LLM 판단과 host 정산, 같은 후보 H01 조합 및 H02–H06. G01 후속 하나로 전체 연결 그래프·모든 Lane 추출·54개 완료를 선언하지 않는다.
+
+
+### G01 컴파일 실행 피드백
+
+직접 소비자 run [39592343953](https://github.com/jeong-sik/masc/actions/runs/39592343953), product `5840bab469e8277194e405e6f2ec2cd712fc614e`는 `Lane_addon_runtime.attach_entry`에서 `configuration_application option`과 `configuration_owner option`이 맞지 않아 컴파일 FAIL로 종료했다. 새 관측 record의 id/source_path가 기존 record 추론을 가린 구현 결함이다. 관측 record가 기존 `configuration_owner`를 `owner` 필드로 보관하도록 고쳐 중복 owner 필드를 제거했다. 서버는 원래 owner의 ID·path·desired revision과 source revision·enabled를 여전히 모두 대조한다. 기존 성공 Dashboard/parser 결과는 이 실패를 대체하지 않는다. 수리 후 OCaml 실행·native artifact는 별도 확인해야 한다.

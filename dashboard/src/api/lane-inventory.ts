@@ -1,5 +1,6 @@
 import { Schema } from 'effect'
 import { get } from './core'
+import { laneAddonApplicationSchema } from './lane-addons'
 import { LANE_IDS, parseStandaloneLanesSnapshot } from './dashboard-standalone-lanes'
 
 const text = Schema.NonEmptyString
@@ -13,7 +14,14 @@ const configuration = Schema.Union(
 )
 const declaration = Schema.Union(
   Schema.Struct({ kind: Schema.Literal('valid'), enabled: Schema.Boolean, installation_id: text,
-    run_id: text, package_id: text, title: text, desired_revision: text }),
+    run_id: text, package_id: text, title: text, desired_revision: text,
+    source_revision: text, application: laneAddonApplicationSchema }).pipe(Schema.filter(value => {
+      switch (value.application.kind) {
+        case 'starting': case 'applied': return value.enabled
+        case 'inactive': return !value.enabled
+        case 'cleaning': case 'failed': case 'unknown': return true
+      }
+    }, { message: () => 'Declaration activity and application state disagree' })),
   Schema.Struct({ kind: Schema.Literal('invalid'), messages: Schema.NonEmptyArray(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal('absent', 'unobserved') }),
 )

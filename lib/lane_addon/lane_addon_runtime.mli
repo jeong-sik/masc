@@ -145,11 +145,21 @@ type inventory_issue = {
 (** One retained record the inventory could not list. [issue_owner] is the
     owner the record names. [issue_terminal] is true for a detached record that
     names its declaration: it holds no worker, so nothing waits on it. *)
+type configuration_application = {
+  owner : configuration_owner;
+  source_revision : string;
+  enabled : bool;
+  application : Lane_addon_application.t;
+}
+(** Application observed against the original reconciled declaration, including
+    its file bytes and desired package/binding revision. A newer file must not
+    borrow this observation merely because its installation ID is unchanged. *)
 type inventory = {
   owner_present : bool;
   instances : inventory_instance list;
   issues : inventory_issue list;
   complete : bool;
+  applications : configuration_application list;
 }
 val inventory : config:Workspace.config -> inventory
 (** Operator-only metadata source; the HTTP caller must enforce CanAdmin.

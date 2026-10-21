@@ -148,16 +148,35 @@ let repeated_instance () =
 let disabled_is_desired_not_cleanup_proof () =
   let declaration enabled = object_ ["kind",str "valid";"enabled",`Bool enabled;
     "installation_id",str "observer";"run_id",str "run";"package_id",str "custom-package";
-    "title",str "Observer";"desired_revision",str "same-payload";"exact_outputs",`List []] in
+    "title",str "Observer";"desired_revision",str "same-payload";"source_revision",str "source";
+    "application",`Assoc ["kind",str "cleaning"];"exact_outputs",`List []] in
   let payload = snapshot [declared ~instances:[instance ~phase:"failed" "worker"] (declaration false)] in
   let observed = ok (Decode.decode payload) in
   let row = find "declaration//config/broken.toml" observed in
-  Alcotest.(check string) "off does not claim cleanup finished"
-    "off requested · live failed: cleanup unconfirmed" (Display.row_summary row);
-  let off = declared (declaration false) in
-  let observed = ok (Decode.decode (snapshot [off])) in
-  Alcotest.(check string) "off with no observed worker is explicit"
-    "configured off · no worker observed" (Display.row_summary (find "declaration//config/broken.toml" observed));
+  (match row.state with
+   | Decode.Package_state {declaration=Some (Valid value);instances=[worker]} ->
+       Alcotest.(check bool) "host cleanup and retained failure survive decoding" true
+         (not value.enabled && value.application=Lane_addon_application.Cleaning_workers
+          && worker.phase=Lane_addon_types.Failed "cleanup unconfirmed")
+   | _ -> Alcotest.fail "declared worker disappeared");
+  let off application = declared (set "application" (Lane_addon_application.to_json application) (declaration false)) in
+  List.iter (fun application ->
+    let observed = ok (Decode.decode (snapshot [off application])) in
+    match (find "declaration//config/broken.toml" observed).state with
+    | Decode.Package_state {declaration=Some (Valid value);instances=[]} ->
+        Alcotest.(check bool) "empty worker inventory retains host application" true (value.application=application)
+    | _ -> Alcotest.fail "application reading disappeared")
+    [Lane_addon_application.Inactive;Cleaning_workers;Failed ["cleanup refused"];Unknown ["not read"]];
+  rejects "off cannot claim an applied worker"
+    (snapshot [off (Lane_addon_application.Applied "other")]);
+  rejects "on cannot claim inactive application"
+    (snapshot [declared (set "application" (Lane_addon_application.to_json Lane_addon_application.Inactive) (declaration true))]);
+  rejects "unknown requires diagnostic evidence"
+    (snapshot [off (Lane_addon_application.Unknown [])]);
+  rejects "application is required, not inferred from missing workers"
+    (snapshot [declared (match declaration false with
+      | `Assoc fields -> `Assoc (List.remove_assoc "application" fields)
+      | value -> value)]);
   let invalid = set "enabled" (str "false") (declaration false) in
   rejects "nonboolean desired activity is not coerced" (snapshot [declared invalid])
 
@@ -189,7 +208,8 @@ let disabled_exact_keeps_candidates_and_finishing_work () =
    carries, which one [ / ] chooses, and the runtime.toml table e opens. *)
 let quiz_declaration outputs = object_ ["kind",str "valid";"enabled",`Bool true;
   "installation_id",str "operator-quiz";"run_id",str "operator-quiz";"package_id",str "operator-quiz";
-  "title",str "Operator quiz";"desired_revision",str "r1";"exact_outputs",`List outputs]
+  "title",str "Operator quiz";"desired_revision",str "r1";"source_revision",str "source";
+  "application",`Assoc ["kind",str "starting"];"exact_outputs",`List outputs]
 let output name source configuration = object_ ["output",str name;"source",str source;"configuration",configuration]
 let quiz_outputs = [output "author" "declared" configuration;
   output "grade" "declared" (object_ ["kind",str "unconfigured";"detail",str "no table"]);

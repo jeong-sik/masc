@@ -11,7 +11,7 @@ type selection =
 type exact_output_source = Declared | Table_only
 type exact_output = { output : string; source : exact_output_source; configuration : Exact_projection.lane_configuration }
 type declaration =
-  | Valid of { declaration : Config.declaration; exact_outputs : exact_output list }
+  | Valid of { declaration : Config.declaration; exact_outputs : exact_output list; application : Lane_addon_application.t }
   | Invalid of string list | Absent | Unobserved
 type machine_publication = No_screen | Stable | Running | Publication_unavailable
 type state =
@@ -40,7 +40,7 @@ let exact_outputs ~configuration ~tables (d : Config.declaration) =
   @ List.map (entry Table_only)
       (List.filter (fun output -> not (List.mem output declared)) (tables ~declaration_id:d.id))
 
-let package_rows ~(declarations : Config.snapshot) ~(instances : Addon.inventory_instance list) ~exact_outputs =
+let package_rows ~(declarations : Config.snapshot) ~(instances : Addon.inventory_instance list) ~applications ~exact_outputs =
   let declaration_paths = declarations.paths
     @ List.map (fun (d : Config.declaration) -> d.source_path) declarations.declarations in
   let unresolved (i : Addon.inventory_instance) = match i.phase with
@@ -56,7 +56,17 @@ let package_rows ~(declarations : Config.snapshot) ~(instances : Addon.inventory
     let installed = List.filter (fun (i : Addon.inventory_instance) ->
       unresolved i && Option.exists (fun (owner : Addon.configuration_owner) -> owner.source_path=source_path) i.configuration) instances in
     let declaration = match List.find_opt (fun (d : Config.declaration) -> d.source_path=source_path) declarations.declarations with
-      | Some d -> Valid {declaration=d; exact_outputs=exact_outputs d}
+      | Some d ->
+          let application = if not declarations.complete then
+              Lane_addon_application.Unknown ["Declaration inventory is incomplete"]
+            else match List.filter (fun (observed : Addon.configuration_application) ->
+              observed.owner.id=d.id && observed.owner.source_path=d.source_path
+              && observed.source_revision=d.source_revision && observed.owner.revision=d.revision
+              && observed.enabled=d.enabled) applications with
+              | [observed] -> observed.application
+              | [] -> Lane_addon_application.Unknown ["No application observation matches this declaration revision"]
+              | _ :: _ -> Lane_addon_application.Unknown ["Application observation identity is ambiguous"] in
+          Valid {declaration=d; exact_outputs=exact_outputs d;application}
       | None ->
           (match List.filter_map (fun (issue : Config.issue) ->
              if issue.source_path=source_path then Some issue.message else None) declarations.issues with
@@ -125,7 +135,7 @@ let snapshot ~config =
   let packages = Addon.inventory ~config in
   let exact_outputs = exact_outputs ~configuration:(Exact_projection.addon_configuration exact)
       ~tables:(Exact_projection.addon_tables exact) in
-  {observed_at=Time_compat.now (); rows=builtin @ package_rows ~declarations ~instances:packages.instances ~exact_outputs;
+  {observed_at=Time_compat.now (); rows=builtin @ package_rows ~declarations ~instances:packages.instances ~applications:packages.applications ~exact_outputs;
    exact;directory;complete=declarations.complete && packages.complete;
    owner_present=packages.owner_present;
    issues=List.map (fun (issue : Config.issue) -> issue.source_path,issue.message) declarations.issues
@@ -155,8 +165,9 @@ let exact_output_json {output;source;configuration} = `Assoc ["output",str outpu
   "source",str (match source with Declared -> "declared" | Table_only -> "table_only");
   "configuration",configuration_json configuration]
 let declaration_json = function
-  | Valid {declaration=d;exact_outputs} -> `Assoc ["kind",str "valid";"enabled",`Bool d.enabled;"installation_id",str d.id;
+  | Valid {declaration=d;exact_outputs;application} -> `Assoc ["kind",str "valid";"enabled",`Bool d.enabled;"installation_id",str d.id;
       "run_id",str d.run_id;"package_id",str d.package.id;"title",str d.package.title;"desired_revision",str d.revision;
+      "source_revision",str d.source_revision;"application",Lane_addon_application.to_json application;
       "exact_outputs",`List (List.map exact_output_json exact_outputs)]
   | Invalid messages -> `Assoc ["kind",str "invalid";"messages",strings messages]
   | Absent -> `Assoc ["kind",str "absent"]

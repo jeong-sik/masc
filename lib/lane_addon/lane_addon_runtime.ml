@@ -101,9 +101,14 @@ type inventory_issue = {
   issue_terminal : bool;
   issue_reason : retained_fault_reason;
 }
+type configuration_application = {
+  owner : configuration_owner; source_revision : string;
+  enabled : bool; application : Lane_addon_application.t;
+}
 type inventory = {
   owner_present : bool; instances : inventory_instance list;
   issues : inventory_issue list; complete : bool;
+  applications : configuration_application list;
 }
 type visibility = Shared | Operator_only | Keeper_only of string
 type skill_export_owner = Declaration of string | Instance of string
@@ -1477,11 +1482,71 @@ let inventory_at_root ~root =
       @ List.map (fun json -> None,json) pending) in
   {owner_present=Option.is_some manager;
    instances=List.sort (fun (a : inventory_instance) b -> String.compare a.instance_id b.instance_id) (live @ retained);
-   issues=List.sort_uniq Stdlib.compare issues; complete=stored.complete && issues=[]}
+   issues=List.sort_uniq Stdlib.compare issues; complete=stored.complete && issues=[];applications=[]}
 let inventory_issue_message (issue : inventory_issue) =
   issue.issue_path ^ ": " ^ retained_fault_message issue.issue_reason
+(* The same owner-domain observation serves Inspect and the common inventory.
+   The supplied inventory was captured after retained filesystem reads; no work
+   is started, reconciled or cleaned by this projection. *)
+let configuration_application m ~(reading : configuration_reading)
+    ~(inventory : inventory option) (d : Lane_addon_config.declaration) =
+  match inventory with
+  | None -> Lane_addon_application.Unknown ["Application tracking requires operator access"]
+  | Some inventory ->
+      let workers = inventory.instances |> List.filter_map (fun (item : inventory_instance) ->
+        match item.configuration with
+        | None -> None
+        | Some owner when owner.id <> d.id && owner.source_path <> d.source_path -> None
+        | Some owner ->
+            let activity = match item.presence with
+              | Retained -> (match item.phase with
+                  | Detached -> Lane_addon_application.Stopped
+                  | Detaching -> Stopping
+                  | Failed detail -> Worker_failed detail
+                  | Attached | Observing -> Starting)
+              | Live -> (match Hashtbl.find_opt m.entries item.instance_id with
+                  | None -> Lane_addon_application.Stopping
+                  | Some e -> match phase_of e with
+                      | Failed detail -> Worker_failed detail
+                      | Detached when not e.running && not e.cleanup_running -> Stopped
+                      | Detached | Detaching -> Stopping
+                      | Attached | Observing when e.stopping -> Stopping
+                      | Attached | Observing ->
+                          if e.running && e.started then Running else Starting) in
+            Some {Lane_addon_application.instance_id=item.instance_id;
+              matches_desired=owner.id=d.id && owner.source_path=d.source_path && owner.revision=d.revision;
+              activity}) in
+      let issues = reading.issues |> List.filter_map (fun (issue : Lane_addon_config.issue) ->
+        if issue.source_path=reading.directory || issue.source_path=d.source_path || issue.id=Some d.id
+        then Some issue.message else None) in
+      (* A record that names another declaration says nothing about
+         this one. A record whose owner cannot be read could be any
+         declaration's worker, so it leaves every reading incomplete.
+         A detached record that names this one holds no worker; it is
+         listed for the operator and leaves the reading complete. *)
+      let concerns = List.filter (fun (issue : inventory_issue) ->
+        owner_concerns ~id:d.id ~source_path:d.source_path issue.issue_owner
+        && not issue.issue_terminal) inventory.issues in
+      let unattributed = List.exists (fun (issue : inventory_issue) ->
+        match issue.issue_owner with
+        | Owner_unreadable -> true
+        | Owned_by _ | Unowned -> false) inventory.issues in
+      Lane_addon_application.observe ~enabled:d.enabled
+        ~complete:(reading.snapshot.complete && not unattributed)
+        ~issues:(issues @ List.map inventory_issue_message concerns) ~workers
 let inventory ~config = Eio_context.run_on_owner_domain (fun () ->
-  inventory_at_root ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons"))
+  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  let inventory = inventory_at_root ~root in
+  let applications = match Hashtbl.find_opt managers root with
+    | None -> []
+    | Some m -> match m.configuration_status with
+      | None -> []
+      | Some reading -> List.map (fun (d : Lane_addon_config.declaration) ->
+          {owner={id=d.id;source_path=d.source_path;revision=d.revision};
+           source_revision=d.source_revision;enabled=d.enabled;
+           application=configuration_application m ~reading ~inventory:(Some inventory) d})
+          reading.snapshot.declarations in
+  {inventory with applications})
 let persisted_binding m id =
   let* reading = runtime_result (read_retained_bindings m) in
   let named (binding : retained_binding) = match text binding.binding_fields "instance_id" with
@@ -1654,50 +1719,7 @@ let configuration_json m ~access =
         let live = entries m |> List.filter (fun e -> match e.configuration with
           | Some owner -> owner.id = d.id | None -> false) in
         let active = match live with [e] -> Some e | [] | _ :: _ -> None in
-        let application = match inventory with
-          | None -> Lane_addon_application.Unknown ["Application tracking requires operator access"]
-          | Some inventory ->
-              let workers = inventory.instances |> List.filter_map (fun (item : inventory_instance) ->
-                match item.configuration with
-                | None -> None
-                | Some owner when owner.id <> d.id && owner.source_path <> d.source_path -> None
-                | Some owner ->
-                    let activity = match item.presence with
-                      | Retained -> (match item.phase with
-                          | Detached -> Lane_addon_application.Stopped
-                          | Detaching -> Stopping
-                          | Failed detail -> Worker_failed detail
-                          | Attached | Observing -> Starting)
-                      | Live -> (match Hashtbl.find_opt m.entries item.instance_id with
-                          | None -> Lane_addon_application.Stopping
-                          | Some e -> match phase_of e with
-                              | Failed detail -> Worker_failed detail
-                              | Detached when not e.running && not e.cleanup_running -> Stopped
-                              | Detached | Detaching -> Stopping
-                              | Attached | Observing when e.stopping -> Stopping
-                              | Attached | Observing ->
-                                  if e.running && e.started then Running else Starting) in
-                    Some {Lane_addon_application.instance_id=item.instance_id;
-                      matches_desired=owner.id=d.id && owner.source_path=d.source_path && owner.revision=d.revision;
-                      activity}) in
-              let issues = reading.issues |> List.filter_map (fun (issue : Lane_addon_config.issue) ->
-                if issue.source_path=reading.directory || issue.source_path=d.source_path || issue.id=Some d.id
-                then Some issue.message else None) in
-              (* A record that names another declaration says nothing about
-                 this one. A record whose owner cannot be read could be any
-                 declaration's worker, so it leaves every reading incomplete.
-                 A detached record that names this one holds no worker; it is
-                 listed for the operator and leaves the reading complete. *)
-              let concerns = List.filter (fun (issue : inventory_issue) ->
-                owner_concerns ~id:d.id ~source_path:d.source_path issue.issue_owner
-                && not issue.issue_terminal) inventory.issues in
-              let unattributed = List.exists (fun (issue : inventory_issue) ->
-                match issue.issue_owner with
-                | Owner_unreadable -> true
-                | Owned_by _ | Unowned -> false) inventory.issues in
-              Lane_addon_application.observe ~enabled:d.enabled
-                ~complete:(reading.snapshot.complete && not unattributed)
-                ~issues:(issues @ List.map inventory_issue_message concerns) ~workers in
+        let application = configuration_application m ~reading ~inventory d in
         `Assoc ["id", `String d.id; "source_path", `String d.source_path; "enabled", `Bool d.enabled;
           "source_revision", `String d.source_revision;
           "desired_revision", `String d.revision;

@@ -1975,7 +1975,27 @@ let test_unlistable_binding_store_stops_reconciliation () =
     check bool "Inspect refuses a store that cannot be listed" true
       (Result.is_error (Runtime.dispatch ~config ~operation:Runtime.Inspect (`Assoc []))))
 
+let test_inventory_keeps_the_original_application_observation () =
+  with_fixture (fun _env _sw config directory packages state ->
+    let manifest = package packages "ready" in
+    let path = Filename.concat directory "observer.toml" in
+    write path (declaration ~enabled:false ~id:"observer" ~manifest ());
+    let report = reconcile config directory in
+    let before = !(state.events) in
+    let observed = match (Runtime.inventory ~config).applications with
+      | [observed] -> observed | _ -> fail "one reconciled application" in
+    check bool "inventory and Inspect use the same host application" true
+      (observed.application = Lane_addon_application.Inactive);
+    check string "the typed observation keeps the reconciled source bytes"
+      (text "source_revision" (List.hd (values "declarations" report))) observed.source_revision;
+    write path (declaration ~enabled:true ~id:"observer" ~manifest ());
+    let again = match (Runtime.inventory ~config).applications with
+      | [observed] -> observed | _ -> fail "original reconciled application retained" in
+    check bool "reading new file bytes does not reconcile them" true (again=observed);
+    check bool "metadata reading starts and stops no worker" true (!(state.events)=before))
+
 let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension", [
+  test_case "inventory keeps original reconciled application" `Quick test_inventory_keeps_the_original_application_observation;
   test_case "persistent runtime switch preserves old state and requires new installation" `Quick
     test_persistent_runtime_switch_requires_new_installation;
   test_case "created container waits for accepted startup" `Quick test_created_container_waits_for_start_acceptance;

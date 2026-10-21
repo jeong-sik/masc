@@ -16,6 +16,26 @@ function workspace(root: string) {
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 beforeEach(() => { invalidateExecutionSnapshotGeneration(epoch, 0); generation = 0; workspace('/fixture/default') })
 describe('operator Lane inventory', () => {
+  it.each([
+    [{ kind: 'inactive' }, 'Off · worker cleanup confirmed'],
+    [{ kind: 'cleaning' }, 'Worker cleanup pending'],
+    [{ kind: 'failed', messages: ['cleanup refused'] }, 'Application failed · cleanup refused'],
+    [{ kind: 'unknown', messages: ['not observed'] }, 'Application unknown · not observed'],
+  ])('shows the host application even with no worker rows: %j', async (application, expected) => {
+    const row = {
+      id: 'declaration//fixture/off.toml', label: 'Off package', purpose: 'Observed application',
+      selection: { kind: 'declaration', source_path: '/fixture/off.toml' },
+      state: { kind: 'package', instances: [], declaration: { kind: 'valid', enabled: false,
+        installation_id: 'off', run_id: 'world', package_id: 'observer', title: 'Observer',
+        source_revision: 'file-bytes', desired_revision: 'desired', application } },
+    }
+    api.fetchLaneInventory.mockResolvedValue(parseLaneInventory({ ...fixture, rows: [...fixture.rows, row] }))
+    const screen = render(html`<${LaneInventoryPanel} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Inspect Off package' }))
+    const detail = within(screen.getByRole('region', { name: 'Details for Off package' }))
+    expect(detail.getByText(`Configured off · ${expected}`)).toBeTruthy()
+    expect(api.fetchLaneInventory).toHaveBeenCalledTimes(1)
+  })
   it('shows off and unknown machine activity alongside retained screen observations without offering an activity toggle', async () => {
     const raw = structuredClone(fixture)
     Object.assign(raw.rows.find(item => item.id === 'machine/msx')!.state, { activity: 'off', publication: 'stable' })

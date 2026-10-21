@@ -206,7 +206,7 @@ let encode entries =
 
 let load ~path =
   try
-    let content = In_channel.with_open_text path In_channel.input_all in
+    let content = Fs_compat.load_file path in
     try Yojson.Safe.from_string content |> decode
     with Yojson.Json_error message -> Error (Invalid_json message)
   with

@@ -136,7 +136,10 @@ let load_file_unix (path : string) : string =
     ~finally:(fun () -> Stdlib.close_in_noerr ic)
     (fun () ->
        let len = Stdlib.in_channel_length ic in
-       Stdlib.really_input_string ic len)
+       (* A file that shrinks between the length and the read is an I/O failure
+          like any other: [load_file_opt] documents [Sys_error] for them. *)
+       try Stdlib.really_input_string ic len with
+       | End_of_file -> raise (Sys_error (path ^ ": file shrank while it was being read")))
 ;;
 
 (* The Eio path below creates with 0o644. [Stdlib.open_out] creates with

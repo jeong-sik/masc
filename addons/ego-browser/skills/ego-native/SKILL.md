@@ -52,6 +52,16 @@ If a first `open` lost its reply and no space binding exists, use a fresh
 Space without creating, claiming or taking over one. If that cannot be found
 or is user-controlled, stop for operator recovery. Do not issue another open.
 
+If the bound Space was removed externally, SDK lookup failures remain uncertain;
+do not infer absence from an error code or message. After the operator explicitly
+decides to abandon this exact binding, use `operation:"retire"` with a fresh
+request ID and `expected_epoch` copied from the retained session or unresolved
+`open-intent.json`. This is host-only revocation: `retired` does not mean the
+browser closed or the goal succeeded. It invokes no native actions and keeps
+all old receipts. Inspect any surviving Space separately; never use retirement
+automatically after errors or to bypass user ownership. A subsequent explicit
+`open` gets a new epoch/native name rather than reusing the retired Space.
+
 Spaces share profile cookies. The companion does not import browser data or
 provide account isolation. Keep the state directory private. The Add-on's named
 `browser` output projects captured results; it is not a direct live Browser tool.

@@ -115,7 +115,7 @@ class EgoReplyContract(unittest.TestCase):
         self.assertTrue(self.invoke(native)["isError"])
 
     def test_recovery_rejection_and_finish_statuses(self):
-        for operation in ("open", "observe", "batch", "finish", "recover"):
+        for operation in ("open", "observe", "batch", "finish", "recover", "retire"):
             native = result()
             native.update(operation=operation, status="rejected_before_effect", session=None,
                           snapshot=None, error={"code": None, "message": "Native CLI unavailable"})
@@ -132,6 +132,24 @@ class EgoReplyContract(unittest.TestCase):
         native.update(operation="batch", status="postcondition_met", snapshot="Verified condition",
                       completed_steps=2)
         self.assertFalse(self.invoke(native)["isError"])
+
+    def test_local_retirement_is_distinct_from_browser_finish_or_observation(self):
+        native = result()
+        native.update(operation="retire", status="retired", url=None, title=None,
+                      snapshot=None, screenshot=None)
+        for session in (native["session"], None):
+            native["session"] = session
+            response = self.invoke(native)
+            self.assertFalse(response["isError"])
+            fields = response["structuredContent"]["rows"][0]["fields"]
+            self.assertEqual(fields["status"], "retired")
+            self.assertIs(fields["task_completion_verified"], False)
+        for key, value in (("operation", "finish"), ("status", "closed"),
+                           ("url", "https://fixture.test/"), ("snapshot", "Not a fresh observation")):
+            with self.subTest(field=key):
+                malformed = copy.deepcopy(native)
+                malformed[key] = value
+                self.assertTrue(self.invoke(malformed)["isError"])
 
 
 if __name__ == "__main__":

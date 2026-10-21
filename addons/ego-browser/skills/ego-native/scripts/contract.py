@@ -9,8 +9,8 @@ RESULT_FIELDS = frozenset((
     "failed_step", "url", "title", "snapshot", "error", "screenshot",
 ))
 SESSION_FIELDS = frozenset(("space_id", "name", "page", "epoch", "owner_identity", "native_name"))
-OPERATIONS = frozenset(("open", "observe", "batch", "finish", "recover"))
-SUCCESS_STATUSES = frozenset(("observed", "postcondition_met", "closed"))
+OPERATIONS = frozenset(("open", "observe", "batch", "finish", "recover", "retire"))
+SUCCESS_STATUSES = frozenset(("observed", "postcondition_met", "closed", "retired"))
 FAILURE_STATUSES = frozenset(("rejected_before_effect", "outcome_unknown"))
 
 
@@ -36,6 +36,16 @@ def _utf8(value, label):
         raise InvalidResult(f"{label} must be valid UTF-8") from error
 
 
+def validate_session(session) -> None:
+    _fields(session, SESSION_FIELDS)
+    if type(session["space_id"]) is not int or session["space_id"] <= 0:
+        raise InvalidResult("space_id must be a positive integer")
+    if session["page"] != "p1":
+        raise InvalidResult("The bound ego page must be p1")
+    for key in ("name", "epoch", "owner_identity", "native_name"):
+        _text(session[key], f"session {key}")
+
+
 def validate_result(result) -> None:
     """Reject malformed or internally inconsistent native result envelopes."""
     _fields(result, RESULT_FIELDS)
@@ -46,7 +56,9 @@ def validate_result(result) -> None:
     if not isinstance(status, str) or status not in SUCCESS_STATUSES | FAILURE_STATUSES:
         raise InvalidResult("Unknown ego status")
     if ((status == "closed" and operation != "finish")
+            or (status == "retired" and operation != "retire")
             or (status == "postcondition_met" and operation != "batch")
+            or (operation == "retire" and status in SUCCESS_STATUSES and status != "retired")
             or (status == "observed" and operation == "finish")):
         raise InvalidResult("Ego status does not belong to this operation")
     completed, failed = result["completed_steps"], result["failed_step"]
@@ -62,22 +74,18 @@ def validate_result(result) -> None:
         raise InvalidResult("A pre-effect rejection cannot report executed steps")
     session = result["session"]
     if session is not None:
-        _fields(session, SESSION_FIELDS)
-        if type(session["space_id"]) is not int or session["space_id"] <= 0:
-            raise InvalidResult("space_id must be a positive integer")
-        if session["page"] != "p1":
-            raise InvalidResult("The bound ego page must be p1")
-        for key in ("name", "epoch", "owner_identity", "native_name"):
-            _text(session[key], f"session {key}")
+        validate_session(session)
     for key in ("url", "title", "snapshot"):
         if result[key] is not None and not isinstance(result[key], str):
             raise InvalidResult(f"{key} must be text or null")
         if result[key] is not None:
             _utf8(result[key], key)
-    if status in SUCCESS_STATUSES and session is None:
+    if status in SUCCESS_STATUSES - {"retired"} and session is None:
         raise InvalidResult("Successful ego results require a bound session")
     if status in ("observed", "postcondition_met") and result["snapshot"] is None:
         raise InvalidResult("Observed ego state requires a snapshot")
+    if status == "retired" and any(result[key] is not None for key in ("url", "title", "snapshot", "screenshot")):
+        raise InvalidResult("Local retirement cannot claim a browser observation")
     error = result["error"]
     if status in SUCCESS_STATUSES:
         if error is not None:

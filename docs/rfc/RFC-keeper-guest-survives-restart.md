@@ -183,7 +183,7 @@ related: ["keeper-boot-runs-no-one-shot-container", "keeper-build-output-returns
 - U3. 옛 서버의 턴이 게스트 안에 띄운 프로세스가 옛 서버가 죽은 뒤에도 사는지 재지 않았다. shim 은 transport EOF 에서 payload 의 process group 을 끝낸다(`docs/guides/KEEPER-VM-BUILD-CLEANUP.md`). `setsid` 로 빠져나간 프로세스는 남을 수 있다.
 - U4. build volume 이 게스트 수명 동안 얼마나 커지는지(§3.7).
 - U5. 하루 98개의 사본이 재시작 때문이라는 것은 크기만 맞춰 본 추정이다. 재시작마다 로그인한 Keeper 의 게스트 수만큼(많아야 25개) 남는다면 여섯 번에 많아야 150개이고, 98개는 그 안에 든다(§3.6).
-- U6. inspect 가 timeout 으로 끝나도 `probe_microvm_container_state` 는 `Absent` 로 읽는다(§4.3). 지금도 이 때문에 `Boot` 분기가 떠 있는 게스트를 `delete --force` 하거나, 떠 있는 게스트가 붙인 사본을 지울 수 있다. 이 RFC 는 사본에 대해서만 "없다"의 뜻을 바꾼다. probe 자체는 따로 다룬다.
+- U6. inspect 가 timeout 으로 끝나도 `probe_microvm_container_state` 는 `Absent` 로 읽는다(§4.3). 지금도 이 때문에 `Boot` 분기가 떠 있는 게스트를 `delete --force` 하거나, 떠 있는 게스트가 붙인 사본을 지울 수 있다. 이 RFC 는 사본에 대해서만 "없다"의 뜻을 바꾼다. probe 자체는 #44676 에서 고친다.
 
 ## 4. 설계
 
@@ -474,6 +474,12 @@ RFC-keeper-boot-runs-no-one-shot-container 에서 이 커밋이 바꾼 곳(결�
 
 ## 10. 구현 범위
 
+구현은 세 단계로 나눈다. 단계마다 다음 재시작에서 V-plan(§8)으로 재고 다음 단계로 간다.
+
+1. adopt: boot plan label, 정해진 자리에 만드는 사본(§4.3 의 만들기와 읽기), 4.1 의 판정, 선언에서 나오지 않는 이름만 지우는 sweep(§4.4), endpoint 의 shim sidecar 대조와 서버 시작 때의 shim 설정 다시 쓰기(§4.5). adopt 된 게스트는 부팅을 지나지 않으므로 shim 대조가 이 단계에 있어야 한다. 이 단계만으로 재시작 때의 게스트 삭제, 새 부팅, helper 가 없어진다. 사본을 만드는 자리가 정해져야 새 프로세스가 옛 게스트의 사본을 알아볼 수 있으므로, 사본 자리는 이 단계에 들어간다.
+2. 사본 정리: 게스트가 없다는 것을 성공한 목록으로 확인한 뒤 사본을 지우는 것(§4.3 의 지우기), 주인 없는 사본 정리, 배포 정지 창에서 `$TMPDIR` 의 옛 사본 삭제(Q2).
+3. 나머지: #44426 의 D1, D2, D4 와 옮긴 D3(Q4), `masc.mcp.owner_pid` label 제거(Q6).
+
 - `Keeper_sandbox_microvm`: `guest_mount`, `guest_facts_reading`, Apple inspect 파서. sweep 후보 규칙(`sweep_candidates_of_json`, `nerdctl_sweep_candidates_of_json_lines`)을 선언에서 나오는 이름 기준으로 바꾸고 `is_pid_alive` 인자를 지운다. 사본 정리.
 - `Keeper_turn_sandbox_runtime`: `boot_plan` 과 digest, 부작용 없는 계획 계산, 4.1 의 판정(`microvm_adoption` 을 바꾼다), 4.2 의 부팅 뒤 확인(게스트를 남긴다), Apple 에서 `microvm_boots` 제거, `microvm_identity_snapshots` 와 claim/take/release 함수 제거, `stop_and_delete_microvm_container` 뒤의 사본 지우기(성공한 목록으로 없음 확인), 부팅 argv 에 `masc.mcp.boot_plan` label, endpoint 에서 shim sidecar 대조.
 - `Keeper_github_identity`: 사본을 정해진 자리에 만드는 함수, 읽는 함수, 다른 프로세스가 지우는 함수(§4.3 의 지우는 방법). Docker turn lane 이 쓰는 `docker_args_for_tool` 은 그대로 둔다.
@@ -485,9 +491,16 @@ RFC-keeper-boot-runs-no-one-shot-container 에서 이 커밋이 바꾼 곳(결�
 ## 11. 운영자에게 묻는 것
 
 - Q1. (사람 리뷰 필요) GitHub 자격 증명을 게스트에 어떻게 줄지. (a) 게스트에 묶인 사본(§4.3). 게스트가 사는 동안 토큰이 바뀌지 않고, 로그인이 바뀌면 게스트를 교체한다. 사본이 서버보다 오래 산다. (b) 고정 로그인 디렉토리를 읽기 전용으로 붙인다(A3, Docker persistent 와 같다). 사본이 없어지고 로그인 변경이 교체 없이 닿는다. 대신 턴 도중에도 닿고, 게스트가 그 디렉토리의 모든 파일을 본다.
+  - 결정(2026-10-21, 운영자): 게스트에 묶인 사본으로 한다(a, §4.3).
 - Q2. (사람 리뷰 필요) Q1 이 (a)일 때 사본 자리를 `<base>/.masc/microvm/identity/<backend>/` 로 할지. base path 는 백업에서 빠지지 않는다. 고정 로그인이 이미 같은 base path 에 있다. `$TMPDIR` 에 남은 옛 사본 2,393개(토큰이 든 것 424개)를 §7 의 명령으로 지울지, 언제 지울지도 함께 묻는다.
+  - 결정(2026-10-21, 운영자): 사본 자리는 `<base>/.masc/microvm/identity/<backend>/` 로 한다. `$TMPDIR` 의 옛 사본은 이 RFC 를 구현해 배포하는 정지 창에서 지운다(#44678).
 - Q3. adopt 판정에 부팅 계획 label 을 붙일지(§4.1), 런타임 사실만 볼지(A2). label 을 붙이면 "요구가 바뀌었다"(교체)와 "런타임이 다르게 보고한다"(거절)를 가를 수 있고, masc 가 넘긴 환경 변수까지 덮는다. 대신 label 하나가 게스트에 늘고, 계획을 만드는 방식이 바뀌는 릴리즈마다 모든 게스트가 한 번 교체된다. 사실만 보면 label 이 없지만, 런타임이 다르게 보고하는 게스트를 교체할지 거절할지 정할 수 없다.
+  - 결정(2026-10-21, 운영자): boot plan label 을 붙인다(§4.1).
 - Q4. #44426 을 어떻게 할지. (a) 그대로 구현한다. 진짜 `_build` 는 새 부팅에서만 지워져 오래 남는다. (b) D1, D2, D4 는 그대로 두고, D3 의 자리를 "이 프로세스가 처음 넘길 때"로 옮겨 구현한다. 재시작마다 지운다. 옛 서버가 게스트 안에 남긴 프로세스가 있으면 그 `_build` 를 잃는다(U3). (c) 버린다. 이미지가 바뀔 때마다 10-21 10:17 재시작과 비슷한 막힘(helper 22개, 67분)이 돌아온다. 어느 쪽이든 이 RFC 를 먼저 구현할지도 묻는다. 이 RFC 는 재시작 때의 helper 도 같이 없앤다.
+  - 결정(2026-10-21, 운영자): (b)로 한다. D1, D2, D4 는 그대로 두고 D3 의 자리를 "이 프로세스가 처음 넘길 때"로 옮긴다. 이 RFC 를 먼저 구현한다.
 - Q5. build volume 을 어떻게 할지(§5). (a) 새 부팅에서만 공간을 돌려받는 것을 받아들이고 V6 으로 잰다. (b) build volume 에도 `discard` 기본값을 준다. 새 부팅마다 helper 가 돈다. (c) build volume 을 다시 만들지 않고, 한 번 `discard` 기본값을 준 뒤 계속 쓴다. RFC-keeper-build-output-returns-to-a-disposable-volume 이 바뀐다.
+  - 결정(2026-10-21, 운영자): (a)로 한다. 새 부팅에서만 공간을 돌려받는 것을 받아들이고 V6 으로 잰다.
 - Q6. keeper-vm 게스트에서 `masc.mcp.owner_pid` label 을 뺄지. 빼면 sandbox 상태 화면에서 그 게스트의 owner pid 가 없어진다. 두면 adopt 된 게스트에서 죽은 pid 를 보인다.
+  - 결정(2026-10-21, 운영자): 뺀다.
 - Q7. nerdctl 을 지금처럼 둘지(재시작마다 교체, `microvm_boots` 가 nerdctl 에만 남는다). 아니면 nerdctl 이 있는 호스트에서 `ps -a` 의 label 과 `inspect --mode dockercompat` 을 재고, Apple 과 같은 판정을 붙여 표를 지울지.
+  - 결정(2026-10-21, 운영자): 지금처럼 둔다.

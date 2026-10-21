@@ -35,7 +35,7 @@ Apple backend 의 Keeper 가 새로 부팅할 때마다 masc 는 일회용 helpe
 
 - D1. `Boot` 분기에서 일회용 컨테이너를 띄우지 않는다. 볼륨이 이미 `discard` 기본값을 가지고 있으면 게스트 자신의 `container run` 말고 다른 `container run` 은 없다.
 - D2. `discard` 기본값은 부팅 때마다 호스트에서 읽어 확인한다. `container volume inspect` 가 주는 `source` 파일의 ext4 superblock 을 읽는다. 컨테이너를 띄우지 않는다. 값이 없으면 `tune2fs -o discard` 만 하는 helper 를 띄운다. helper 가 실패하거나 superblock 을 못 읽어도 부팅은 계속한다. 그 볼륨은 `discard` 기본값 없이 뜨고, sandbox 상태가 그 사실을 보인다(§4.1).
-- D3. 진짜 `_build` 제거는 새로 부팅한 게스트 안에서 한다. `ensure_microvm_build_links` 의 scan 보다 먼저, Keeper 의 uid:gid 로, exec-shim runner 를 거쳐 실행한다. 먼저 이름을 바꾸고 그다음 지운다. `Adopt` 분기에서는 지우지 않는다(§4.2).
+- D3. 진짜 `_build` 제거는 이 서버 프로세스가 게스트를 처음 넘길 때 게스트 안에서 한다. `ensure_microvm_build_links` 의 scan 보다 먼저, Keeper 의 uid:gid 로, exec-shim runner 를 거쳐 실행한다. 먼저 이름을 바꾸고 그다음 지운다(§4.2). 자리는 RFC-keeper-guest-survives-restart §11 Q4 의 결정(2026-10-21)으로 "새로 부팅한 게스트"에서 옮겼다. 재시작해도 게스트를 이어 쓰면 새 부팅이 드물어지기 때문이다. 이 RFC 는 그 RFC 뒤에 구현한다.
 - D4. `fstrim` 과 `remount,nodiscard` 를 지운다. `CAP_DAC_OVERRIDE` 도 필요 없어진다(§4.3).
 - D5. 하드 컷이다. 기존 work volume 34개는 모두 `discard` 기본값을 이미 가지고 있다(§6). 옮기는 코드나 운영자가 한 번 돌릴 명령은 없다.
 - D6. 앞선 RFC 의 설명 가운데 helper 의 단계와 플래그를 적은 곳은 이 RFC 로 옮기고 그 자리에서 지운다(§8). 운영 가이드와 코드 주석은 구현 PR 에서 함께 바꾼다.
@@ -134,7 +134,7 @@ helper 의 `-trim` 이름은 `Keeper_sandbox_container_name.Micro_vm_work_volume
 
 새로 부팅한 게스트 안에서 첫 턴을 받기 전에 지우면 두 조건이 거의 다 맞는다.
 
-- 이 프로세스가 방금 `container run` 으로 띄운 게스트는 아직 어떤 턴에도 넘기지 않았다. 그래서 이 Keeper 의 빌드가 돌 수 없다. `Adopt` 분기의 게스트는 무엇이 도는지 모르므로 거기서는 지우지 않는다. scan 이 진짜 디렉토리를 거절하는 것도 그대로 둔다.
+- 이 서버 프로세스가 아직 어떤 턴에도 넘기지 않은 게스트에서만 지운다. 그 게스트에서는 이 프로세스의 빌드가 돌 수 없다. 앞선 서버 프로세스의 턴이 남긴 빌드가 게스트 안에서 아직 돌고 있으면 그 `_build` 를 잃는다(RFC-keeper-guest-survives-restart U3). 운영자가 Q4 에서 받아들였다. 이 프로세스가 이미 넘긴 게스트를 다시 adopt 할 때는 지우지 않는다. scan 이 진짜 디렉토리를 거절하는 것도 그대로 둔다.
 - 트리 주인은 서버 uid 이고, 게스트 안 exec 는 그 uid:gid(`t.uid`/`t.gid`, 라이브 argv 에서는 `--user 502:20`)로 돈다. 주인이 지우므로 `CAP_DAC_OVERRIDE` 가 필요 없다. 같은 사용자로 도는 idle build cleanup(`Server_keeper_build_maintenance` → `cleanup_attached_builds`, #40751)이 이미 게스트 안에서 `_build` 를 지운다.
 
 "거의" 인 이유가 하나 있다. 한 Keeper 의 두 턴이 같은 이름으로 동시에 부팅하려 하면, 진 쪽은 `run` 이 실패한 뒤 이긴 쪽 게스트를 adopt 한다(`keeper_turn_sandbox_runtime.ml:1807-1845`). 진 쪽은 work volume 이 마운트됐는지만 보고 넘어가므로, 이긴 쪽이 아직 지우는 동안 진 쪽 턴이 빌드를 시작할 수 있다. 그래서 지우기를 두 단계로 나눈다.
@@ -183,7 +183,7 @@ helper 의 `-trim` 이름은 `Keeper_sandbox_container_name.Micro_vm_work_volume
 
 테스트는 화면 글자나 로그 문장을 고정하지 않는다. argv 와 타입으로 본다.
 
-- V1. 부팅 argv(가짜 container CLI 를 주입한 테스트). 기본값이 있는 work volume 으로 새로 부팅하면 `run` argv 는 게스트의 것 하나뿐이다. helper 이름이 들어간 argv 가 없다. `fstrim` 을 실행하는 script 도 없다. 게스트 대상 `exec` 하나가 Keeper 의 uid:gid 로 제거 script 를 나른다. `Adopt` 분기는 제거 `exec` 를 보내지 않는다.
+- V1. 부팅 argv(가짜 container CLI 를 주입한 테스트). 기본값이 있는 work volume 으로 새로 부팅하면 `run` argv 는 게스트의 것 하나뿐이다. helper 이름이 들어간 argv 가 없다. `fstrim` 을 실행하는 script 도 없다. 게스트 대상 `exec` 하나가 Keeper 의 uid:gid 로 제거 script 를 나른다. 앞선 서버 프로세스가 띄운 게스트를 이 프로세스가 처음 넘길 때도 제거 `exec` 를 하나 보낸다. 이 프로세스가 이미 넘긴 게스트를 다시 adopt 하면 보내지 않는다.
 - V2. superblock 읽기. 실제 ext4 레이아웃 바이트로 만든 작은 파일로 `Discard_default_set`, `Discard_default_absent`, `Superblock_unreadable`(짧은 파일, magic 이 다른 파일)을 본다. `Discard_default_absent` 일 때만 helper argv 가 나가는지 본다. helper 가 실패한 뒤에도, `Superblock_unreadable` 일 때도 게스트의 `run` argv 가 나가는지, `Superblock_unreadable` 이면 helper argv 가 없는지 본다. 같은 게스트를 adopt 하는 다음 시작은 helper argv 를 내지 않는지, sandbox 상태 JSON 의 `work_volume_discard_default` 가 그때 읽은 superblock 결과와 같은지도 본다.
 - V3. 제거 script. 지금 있는 실제 임시 트리 테스트를 새 뿌리(`/masc-work/<keeper>`)로 옮긴다. 지우는 것과 남기는 것의 경우는 지금과 같다. 더할 것: 1단계 뒤 `_build` 자리가 비고 옮긴 트리가 `<keeper root>/.masc-build-removing/<mktemp 이름>/` 에 있는지, 2단계 뒤 `.masc-build-removing` 이 없어지는지, 앞선 부팅이 남긴 `.masc-build-removing/<이름>` 도 지우는지, 1단계 뒤에 새로 생긴 `_build` 는 건드리지 않는지, 같은 checkout 이름이 두 번 나와도 `mktemp` 이름이 겹치지 않는지.
 - V4. 구현 전에 한 번 잰다. 살아 있는 게스트 하나에서 `discard` 를 켠 채 큰 `_build` 를 지우는 동안 다른 컨테이너의 exec/ls 가 막히는지 본다(U4). 같은 때 그 트리에 Keeper uid 가 아닌 주인의 파일이나 쓸 수 없는 디렉토리가 있는지도 센다. `find <root> -name _build -prune ...` 를 읽기만 한다. 둘 중 하나라도 나쁘면 §4.2 를 다시 정한다.

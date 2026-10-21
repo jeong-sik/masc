@@ -35,13 +35,17 @@ guest 안에서 아래를 모두 만족한 worktree 만 지운다. 하나라도 
 
 1. `git worktree list --porcelain` 에 등록되어 있고 메인 checkout 이 아니다.
 2. 안에 다른 worktree (`.worktrees/`) 가 없고 `locked` 가 아니다.
-3. 트리 파일의 가장 늦은 mtime (`.git` 제외, `_build` 포함) 이 `retention` 보다 오래됐다. 최근에 빌드했으면 쓰는 중으로 본다.
-4. 살아 있는 프로세스의 cwd, exe, fd 가 그 안을 가리키지 않는다. 기존 `process_paths()` 검사를 쓰고, `/proc` 을 못 읽으면 아무것도 지우지 않는다 (`config/scripts/keeper-build-cleanup.py:35`).
-5. `git worktree remove <path>` 로만 지운다. `--force` 는 쓰지 않는다. git 이 수정되었거나 untracked 파일이 있는 트리를 거절하고, 거절은 `skip` 으로 보고한다.
-6. HEAD 가 detached 이고 그 커밋이 어떤 ref 에도 없으면 지우지 않고 보고만 한다.
-7. 브랜치는 지우지 않는다. 지워지는 것은 worktree 디렉터리뿐이고 커밋은 그대로다.
+3. 트리 파일의 가장 늦은 mtime (`.git` 제외, `_build` 포함) 이 `retention` 보다 오래됐다. 최근에 빌드했으면 쓰는 중으로 본다. 읽기만 한 worktree 는 mtime 이 안 바뀌어 미사용으로 판정된다. 치르는 값이 `git worktree add` 한 번이라 받아들인다. `_build` 가 바깥 symlink 이면 그 파일 자체의 mtime 만 보므로 오래된 트리로 오판할 수 있다. `report` 첫 실행에서 symlink `_build` 가 있는 worktree 를 따로 센다.
+4. 살아 있는 프로세스의 cwd, exe, fd 가 그 안을 가리키지 않는다. 기존 `process_paths()` 검사를 쓰고, `/proc` 을 못 읽으면 아무것도 지우지 않는다 (`config/scripts/keeper-build-cleanup.py:35`). 제거 직전에 이 조건을 다시 읽는다.
+5. 그 Keeper 가 현재 쓰는 worktree 가 아니다. sweep 전에 서버가 그 Owner 의 실행 상태와 현재 Task 를 읽는다. 실행 중·대기 중인 operation 이 이 worktree 를 쓰거나, 현재 Task (`current_task_id`, Keeper meta) 의 작업 경로가 이 worktree 이면 `skipped (keeper-in-use)` 로 보고한다. Keeper 는 턴 사이에 프로세스가 없으므로 조건 4 만으로는 이 판정이 안 된다. Task→작업경로 기록 형식은 payload 구현 PR 에서 고정한다.
+6. ignore 된 파일이 알려진 산출물뿐이다. 제거 전에 `git -C <wt> status --ignored --porcelain` 으로 `!!` 항목을 모아, `_build/`, `_build_*/`, `node_modules/` allow-list 밖의 것이 하나라도 있으면 `skipped (ignored: <경로>)` 로 보고하고 지우지 않는다. git 은 ignore 된 파일을 거절 없이 함께 지우므로 (임시 저장소에서 직접 확인), `.masc/`, `*.db`, `config/keeper.env`, `.env` 같은 로컬 상태가 조용히 사라지지 않게 한다. `report` 모드에서는 그 목록을 그대로 출력한다.
+7. `git worktree remove <path>` 로만 지운다. `--force` 는 쓰지 않는다. git 이 수정되었거나 untracked (단 ignore 되지 않은) 파일이 있는 트리를 거절하고, 거절은 `skip` 으로 보고한다.
+8. HEAD 가 detached 이고 그 커밋이 어떤 ref 에도 없으면 지우지 않고 보고만 한다.
+9. 브랜치는 지우지 않는다. 지워지는 것은 worktree 디렉터리뿐이고 커밋은 그대로다.
 
-PR 상태는 보지 않는다. 서버에서 PR 상태를 읽는 코드는 찾지 못했고 (`keeper_github_app_broker` 는 installation token 발급용이다), 브랜치가 남고 git 이 더러운 트리를 거절하므로 필요하지 않다. 치르는 값은 이렇다: PR 이 열려 있어도 `retention` 동안 아무도 만지지 않은 worktree 는 지워지고, Keeper 가 그 경로를 다시 쓰려면 `git worktree add` 를 다시 해야 한다.
+검사-제거 사이 창이 있다. 조건 4 를 다시 읽어도 그 읽기와 `git worktree remove` 사이에 프로세스가 들어오면 깨끗한 트리는 제거된다. 같은 Owner 의 턴과 sweep 은 Owner mailbox 로 직렬화되므로 (`run_maintenance_if_idle` 은 exclusive 시도, `lib/keeper/keeper_owner_registry.mli:69`) 그 Owner 가 sweep 중에 깨어나 같은 트리에 들어가는 경우는 닫혀 있다. 남는 창은 Owner 밖의 프로세스 (다른 사용자·에이전트) 뿐이고, 그 경우에도 조건 7·8·9 가 커밋 손실을 막는다.
+
+PR 상태는 보지 않는다. 서버에 PR 판독은 있으나 (`lib/server/server_repository_pulls.ml`, RFC-0465) head 브랜치를 담지 않아 worktree 와 잇는 키가 없다 (`server_repository_pulls.mli:49-63` 에 `head_ref` 계열 필드가 없고, Keeper 판정은 마지막 커밋 author 로 잇는다, `:236-241`). 잇는 비용 (token·reader Keeper·GraphQL 실패 모드) 이 회수 이득보다 크므로 PR 상태 없이 간다. 브랜치가 남고 git 이 더러운 트리를 거절하므로 (조건 7·9) 판정 없이도 작업을 잃지 않는다. 치르는 값은 이렇다: PR 이 열려 있어도 `retention` 동안 아무도 만지지 않은 worktree 는 지워지고, Keeper 가 그 경로를 다시 쓰려면 `git worktree add` 를 다시 해야 한다.
 
 보고서는 worktree 마다 경로, 브랜치, 결과 (`removed | skipped | failed`), 건너뛴 이유, 할당 바이트를 담고, 끝에 guest 여유 공간 변화를 적는다.
 
@@ -59,9 +63,9 @@ PR 상태는 보지 않는다. 서버에서 PR 상태를 읽는 코드는 찾지
 
 화면 문구나 행 순서는 고정하지 않는다.
 
-guest payload (Python, `test/test_keeper_vm_build_cleanup.py` 방식의 fixture): 깨끗하고 오래된 worktree 는 지워지고 브랜치는 남는다. 수정된 파일, untracked 파일, 안의 worktree, `locked`, 최근 mtime, 안에 있는 프로세스 cwd, 읽을 수 없는 `/proc`, 어떤 ref 에도 없는 detached HEAD 는 각각 건너뛴다. 메인 checkout 은 지우지 않는다. 실행한 argv 에 `--force` 가 없다. 보호 조건 하나씩을 빼는 변이가 해당 시험을 실패시켜야 하고, 결과를 PR 에 적는다.
+guest payload (Python, `test/test_keeper_vm_build_cleanup.py` 방식의 fixture): 깨끗하고 오래된 worktree 는 지워지고 브랜치는 남는다. 수정된 파일, untracked 파일, allow-list 밖 ignored 파일 (`skipped (ignored: ...)`), 안의 worktree, `locked`, 최근 mtime, 안에 있는 프로세스 cwd, 현재 Task 의 작업 경로, 읽을 수 없는 `/proc`, 어떤 ref 에도 없는 detached HEAD 는 각각 건너뛴다. 메인 checkout 은 지우지 않는다. 실행한 argv 에 `--force` 가 없다. 보호 조건 하나씩을 빼는 변이가 해당 시험을 실패시켜야 하고, 결과를 PR 에 적는다.
 
-untracked 파일은 임시 저장소에서 확인했다. `git diff --quiet` 와 `git diff --cached --quiet` 는 둘 다 종료 코드 0 인데 `git worktree remove` 는 `contains modified or untracked files` (종료 코드 128) 로 거절한다. 거절은 git 이 한다.
+untracked 파일은 임시 저장소에서 확인했다. `git diff --quiet` 와 `git diff --cached --quiet` 는 둘 다 종료 코드 0 인데 `git worktree remove` 는 `contains modified or untracked files` (종료 코드 128) 로 거절한다. 거절은 git 이 한다. ignore 된 파일은 거꾸로 확인했다. `.gitignore` 에 든 `.env`·`state.db` 는 `status --porcelain` 에 뜨지 않고 `git worktree remove` 는 종료 코드 0 으로 디렉터리째 지운다. 그래서 조건 6 이 `status --ignored` 로 먼저 본다.
 
 OCaml (`test/test_server_keeper_build_maintenance.ml` 옆): `off` 면 부르지 않고, `report` 는 `apply=false`, `apply` 는 `apply=true` 로 부른다. Owner 가 바쁘면 건너뛴다.
 
@@ -78,4 +82,4 @@ OCaml (`test/test_server_keeper_build_maintenance.ml` 옆): `off` 면 부르지 
 1. `retention` 7일이 맞나. 오늘 손으로 한 정리는 24시간에 PR 병합·종료 기준이었다.
 2. Keeper 안의 clone 과 임시 복사본 (오늘 22.5, 36, 7.8, 11.3 GiB) 은 이번에 안 건드린다. 큰 것만 `report` 에 나열할까.
 
-모르는 것: guest 이미지의 git 버전 (오늘 `git worktree remove` 가 VM 안에서 동작했지만 기록하지 않았다), worktree 수백 개인 Keeper 에서 mtime 걷기와 `/proc` 검사가 sweep 한 번에 걸리는 시간 (`report` 로 처음 잰다), 오늘 센 192개 등의 숫자 (한 번의 손 측정이라 `report` 와 맞춰 본다). `cleanup_attached_builds` 본문과 `exec-shim` timeout 계약은 읽지 않았다.
+모르는 것: guest 이미지의 git 버전 (오늘 `git worktree remove` 가 VM 안에서 동작했지만 기록하지 않았다), worktree 수백 개인 Keeper 에서 mtime 걷기와 `/proc` 검사가 sweep 한 번에 걸리는 시간 (`report` 로 처음 잰다), 오늘 센 192개 등의 숫자 (한 번의 손 측정이라 `report` 와 맞춰 본다). `cleanup_attached_builds` 본문과 `exec-shim` timeout 계약은 읽지 않았다. 조건 5 의 Task→작업경로 기록 형식도 payload 구현 PR 에서 고정한다.

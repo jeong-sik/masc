@@ -1,0 +1,115 @@
+{
+  "source": "9c294b7d9d345a295c49c50995ccdd53de38d1cb",
+  "results": [
+    {
+      "file": "bin/masc_tui_lane_inventory.ml",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "bin/masc_tui_lane_inventory.ml"
+      ],
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/lane_addon/lane_addon_runtime.ml",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/lane_addon/lane_addon_runtime.ml"
+      ],
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/lane_addon/lane_addon_runtime.mli",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/lane_addon/lane_addon_runtime.mli"
+      ],
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/server/server_lane_inventory.ml",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/server/server_lane_inventory.ml"
+      ],
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/server/server_lane_inventory.mli",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/server/server_lane_inventory.mli"
+      ],
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/tui_decode_lane_inventory.ml",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/tui_decode_lane_inventory.ml"
+      ],
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/tui_decode_lane_inventory.mli",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/tui_decode_lane_inventory.mli"
+      ],
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_lane_addon_reconcile.ml",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "test/test_lane_addon_reconcile.ml"
+      ],
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_server_lane_inventory.ml",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "test/test_server_lane_inventory.ml"
+      ],
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_tui_lane_inventory.ml",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "test/test_tui_lane_inventory.ml"
+      ],
+      "exit_code": 0,
+      "diagnostics": ""
+    }
+  ]
+}

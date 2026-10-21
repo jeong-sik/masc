@@ -231,25 +231,25 @@ type 'a t =
   ; mutable discovery : discovery_drain option }
 
 
-let log_result candidate outcome =
+let log_result ~base_path candidate outcome =
   let source = Journal.continuation_source candidate in
   let run_id = Keeper_tool_plan.Composition_run_id.to_string source.composition_run_id in
   match outcome with
   | Error error -> Log.Keeper.warn ~keeper_name:source.keeper_name
-      "prepared continuation retained run=%s error=%s" run_id (error_to_string error)
+      "prepared continuation retained run=%s error=%s base_path=%S" run_id (error_to_string error) base_path
   | Ok result ->
     let state = match result with
       | Tool_result.Completed _ -> "accepted"
       | Deferred _ -> "waiting"
       | Failed _ -> "refused" in
-    Log.Keeper.info ~keeper_name:source.keeper_name "prepared continuation intake run=%s state=%s" run_id state
+    Log.Keeper.info ~keeper_name:source.keeper_name "prepared continuation intake run=%s state=%s base_path=%S" run_id state base_path
 
-let log_discovery ~base_path:_ = function
+let log_discovery ~base_path = function
   | Ok () -> ()
-  | Error error -> Log.Server.warn "prepared continuation discovery unavailable: %s"
-      (Journal.error_to_string error)
+  | Error error -> Log.Server.warn "prepared continuation discovery unavailable: %s base_path=%S"
+      (Journal.error_to_string error) base_path
 
-let create ~context ?(on_result=log_result) ?(on_discovery=log_discovery) () =
+let create ~(context : 'a Keeper_types_profile.context) ?(on_result=log_result ~base_path:context.config.base_path) ?(on_discovery=log_discovery) () =
   {context;on_result;on_discovery;active=Run_set.empty;held=Run_map.empty;discovery=None}
 
 let discover_and_schedule ~resume ~sw supervisor =
@@ -312,15 +312,15 @@ let discover_and_schedule ~resume ~sw supervisor =
         Option.iter (fun outcome ->
           try supervisor.on_result candidate outcome with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Log.Server.warn "prepared continuation observer failed: %s" (Printexc.to_string exn)) outcome)
+          | exn -> Log.Server.warn "prepared continuation observer failed: %s base_path=%S" (Printexc.to_string exn) supervisor.context.config.base_path) outcome)
       with exn ->
         supervisor.active <- Run_set.remove key supervisor.active;
         raise exn) in
   let* pending = Journal.discover_pending_continuations ~on_ready
       ~read_composition_result:Keeper_composition_dependency_result.readiness
       ~base_path:supervisor.context.config.base_path in
-  List.iter (fun (identity,error) -> Log.Server.warn "prepared continuation discovery retained request=%s error=%s"
-      identity (Journal.error_to_string error)) pending.failures;
+  List.iter (fun (identity,error) -> Log.Server.warn "prepared continuation discovery retained request=%s error=%s base_path=%S"
+      identity (Journal.error_to_string error) supervisor.context.config.base_path) pending.failures;
   Ok ()
 
 type discovery_phase =
@@ -329,14 +329,14 @@ type discovery_phase =
 let observe_discovery ~base_path ~reserved_ns request phase =
   let emit () = try Log.Server.routine_lazy (fun () ->
       let phase,detail = match phase with
-        | Reserved -> "reserved", Printf.sprintf " base_path=%S" base_path
+        | Reserved -> "reserved", ""
         | Started -> "started", ""
         | Settled result -> "settled",
             (match result with Ok () -> " outcome=returned" | Error _ -> " outcome=failed")
         | Interrupted -> "interrupted", ""
         | Raised -> "raised", "" in
-      Printf.sprintf "prepared_continuation_discovery reserved_ns=%Ld pass=%d phase=%s at_ns=%Ld%s"
-        reserved_ns request.discovery_started phase (Mtime_clock.elapsed_ns ()) detail)
+      Printf.sprintf "prepared_continuation_discovery reserved_ns=%Ld pass=%d phase=%s at_ns=%Ld%s base_path=%S"
+        reserved_ns request.discovery_started phase (Mtime_clock.elapsed_ns ()) detail base_path)
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | _ -> () in
@@ -371,9 +371,9 @@ let request_discovery ~trigger ~resume ~sw supervisor =
           | Discovery_unfinished -> "unfinished" | Discovery_drained -> "drained"
           | Discovery_cancelled -> "cancelled" | Discovery_raised -> "raised" in
         Log.Server.debug
-          "prepared_continuation_discovery_drain boundary=%s maintenance=%d notifications=%d discovery_started=%d discovery_settled=%d discovery_errors=%d discovery_raised=%d follow_up=%b"
+          "prepared_continuation_discovery_drain boundary=%s maintenance=%d notifications=%d discovery_started=%d discovery_settled=%d discovery_errors=%d discovery_raised=%d follow_up=%b base_path=%S"
           boundary request.maintenance_pulses request.notifications request.discovery_started
-          request.discovery_settled request.discovery_errors request.discovery_raised request.follow_up
+          request.discovery_settled request.discovery_errors request.discovery_raised request.follow_up base_path
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | _ -> () in
@@ -390,7 +390,7 @@ let request_discovery ~trigger ~resume ~sw supervisor =
         | exn ->
             request.discovery_raised <- request.discovery_raised + 1;
             observe Raised;
-            Log.Server.warn "prepared continuation discovery raised: %s" (Printexc.to_string exn);
+            Log.Server.warn "prepared continuation discovery raised: %s base_path=%S" (Printexc.to_string exn) base_path;
             None in
       Option.iter (fun result ->
         request.discovery_settled <- request.discovery_settled + 1;
@@ -399,8 +399,8 @@ let request_discovery ~trigger ~resume ~sw supervisor =
         observe (Settled result);
         try supervisor.on_discovery ~base_path result with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Log.Server.warn "prepared continuation discovery observer failed: %s"
-            (Printexc.to_string exn)) returned;
+        | exn -> Log.Server.warn "prepared continuation discovery observer failed: %s base_path=%S"
+            (Printexc.to_string exn) base_path) returned;
       if request.follow_up then drain () in
     (try
        observe Reserved;

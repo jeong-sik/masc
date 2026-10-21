@@ -427,7 +427,7 @@ let reconcile ~base_path =
 
 type recovery_phase = Reserved | Started | Settled of report | Interrupted | Raised
 
-let observe_recovery ~keeper_name ~started_ns phase =
+let observe_recovery ~base_path ~keeper_name ~started_ns phase =
   let emit () = try Log.Server.routine_lazy (fun () ->
       let phase, detail = match phase with
         | Reserved -> "reserved", ""
@@ -438,28 +438,28 @@ let observe_recovery ~keeper_name ~started_ns phase =
             " inspected=%d evidence_windows=%d enqueued=%d pending=%d already_delivered=%d failures=%d"
             report.inspected report.evidence_window_reads report.enqueued
             report.already_pending report.already_delivered (List.length report.failures) in
-      Printf.sprintf "ask_recovery_owner keeper=%s started_ns=%Ld phase=%s at_ns=%Ld%s"
-        keeper_name started_ns phase (Mtime_clock.elapsed_ns ()) detail)
+      Printf.sprintf "ask_recovery_owner keeper=%s started_ns=%Ld phase=%s at_ns=%Ld%s base_path=%S"
+        keeper_name started_ns phase (Mtime_clock.elapsed_ns ()) detail base_path)
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | _ -> () in
   Eio.Cancel.protect emit
 
-let log_report ~keeper_name report =
+let log_report ~base_path ~keeper_name report =
   List.iter (fun (failure : failure) ->
-    Log.Server.warn "ask answer recovery retained keeper=%s ask_id=%s error=%s"
+    Log.Server.warn "ask answer recovery retained keeper=%s ask_id=%s error=%s base_path=%S"
       keeper_name
       (match failure.ask_id with Some ask_id -> ask_id | None -> "<store>")
-      (error_to_string failure.error)) report.failures;
+      (error_to_string failure.error) base_path) report.failures;
   if report.enqueued > 0 then Log.Server.info
-    "ask answer recovery keeper=%s inspected=%d evidence_windows=%d enqueued=%d pending=%d already_delivered=%d failures=%d"
+    "ask answer recovery keeper=%s inspected=%d evidence_windows=%d enqueued=%d pending=%d already_delivered=%d failures=%d base_path=%S"
     keeper_name report.inspected report.evidence_window_reads report.enqueued
-    report.already_pending report.already_delivered (List.length report.failures)
+    report.already_pending report.already_delivered (List.length report.failures) base_path
 
-let log_discovery ~base_path:_ = function
+let log_discovery ~base_path = function
   | Ok () -> ()
-  | Error error -> Log.Server.warn "ask answer recovery discovery unavailable: %s"
-      (Keeper_ask_store.read_error_to_string error)
+  | Error error -> Log.Server.warn "ask answer recovery discovery unavailable: %s base_path=%S"
+      (Keeper_ask_store.read_error_to_string error) base_path
 
 type t =
   { base_path : string
@@ -468,7 +468,7 @@ type t =
   ; mutable active : Set_util.StringSet.t
   ; mutable discovery_active : bool }
 
-let create ~base_path ?(on_report=log_report) ?(on_discovery=log_discovery) () =
+let create ~base_path ?(on_report=log_report ~base_path) ?(on_discovery=log_discovery) () =
   {base_path;on_report;on_discovery;active=Set_util.StringSet.empty;discovery_active=false}
 
 let discover_and_schedule ~sw supervisor =
@@ -477,8 +477,8 @@ let discover_and_schedule ~sw supervisor =
   let* logs = Keeper_ask_store.discover_rows_result ~base_path:supervisor.base_path in
   List.iter (function
     | Keeper_ask_store.Unreadable_log error ->
-        Log.Server.warn "ask answer recovery discovery retained error=%s"
-          (Keeper_ask_store.read_error_to_string error)
+        Log.Server.warn "ask answer recovery discovery retained error=%s base_path=%S"
+          (Keeper_ask_store.read_error_to_string error) supervisor.base_path
     | Keeper_ask_store.Canonical_rows {keeper_name; rows} ->
         if not (Set_util.StringSet.mem keeper_name supervisor.active)
            && List.exists (fun (_, (_, resolution)) -> match resolution with
@@ -490,7 +490,7 @@ let discover_and_schedule ~sw supervisor =
           let release () =
             supervisor.active <- Set_util.StringSet.remove keeper_name supervisor.active in
           try
-            observe_recovery ~keeper_name ~started_ns Reserved;
+            observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns Reserved;
             Eio.Switch.check sw;
             Eio.Fiber.fork ~sw (fun () ->
               Fun.protect ~finally:release (fun () ->
@@ -498,23 +498,23 @@ let discover_and_schedule ~sw supervisor =
                   (* Reserve all independent owners without joining their queues,
                      even when the configured filesystem completes inline. *)
                   Eio.Fiber.yield ();
-                  observe_recovery ~keeper_name ~started_ns Started;
+                  observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns Started;
                   let report = reconcile_rows ~base_path:supervisor.base_path
                       ~keeper_name empty_report rows in
                   let report = {report with failures=List.rev report.failures} in
-                  observe_recovery ~keeper_name ~started_ns (Settled report);
+                  observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns (Settled report);
                   (try supervisor.on_report ~keeper_name report with
                    | Eio.Cancel.Cancelled _ as exn -> raise exn
-                   | exn -> Log.Server.warn "ask answer recovery observer failed keeper=%s: %s"
-                       keeper_name (Printexc.to_string exn))
+                   | exn -> Log.Server.warn "ask answer recovery observer failed keeper=%s: %s base_path=%S"
+                       keeper_name (Printexc.to_string exn) supervisor.base_path)
                 with
                 | Eio.Cancel.Cancelled _ as exn ->
-                    observe_recovery ~keeper_name ~started_ns Interrupted;
+                    observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns Interrupted;
                     raise exn
                 | exn ->
-                    observe_recovery ~keeper_name ~started_ns Raised;
-                    Log.Server.warn "ask answer recovery worker retained keeper=%s: %s"
-                      keeper_name (Printexc.to_string exn)))
+                    observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns Raised;
+                    Log.Server.warn "ask answer recovery worker retained keeper=%s: %s base_path=%S"
+                      keeper_name (Printexc.to_string exn) supervisor.base_path))
           with exn ->
             let bt = Printexc.get_raw_backtrace () in
             release ();
@@ -529,14 +529,14 @@ type discovery_phase =
 let observe_discovery ~base_path ~reserved_ns phase =
   let emit () = try Log.Server.routine_lazy (fun () ->
       let phase, detail = match phase with
-        | Discovery_reserved -> "reserved", Printf.sprintf " base_path=%S" base_path
+        | Discovery_reserved -> "reserved", ""
         | Discovery_started -> "started", ""
         | Discovery_settled result -> "settled",
             (match result with Ok () -> " outcome=returned" | Error _ -> " outcome=failed")
         | Discovery_interrupted -> "interrupted", ""
         | Discovery_raised -> "raised", "" in
-      Printf.sprintf "ask_recovery_discovery reserved_ns=%Ld phase=%s at_ns=%Ld%s"
-        reserved_ns phase (Mtime_clock.elapsed_ns ()) detail)
+      Printf.sprintf "ask_recovery_discovery reserved_ns=%Ld phase=%s at_ns=%Ld%s base_path=%S"
+        reserved_ns phase (Mtime_clock.elapsed_ns ()) detail base_path)
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | _ -> () in
@@ -561,13 +561,13 @@ let pulse ~sw supervisor =
             observe (Discovery_settled result);
             (try supervisor.on_discovery ~base_path:supervisor.base_path result with
              | Eio.Cancel.Cancelled _ as exn -> raise exn
-             | exn -> Log.Server.warn "ask discovery observer failed: %s"
-                 (Printexc.to_string exn))
+             | exn -> Log.Server.warn "ask discovery observer failed: %s base_path=%S"
+                 (Printexc.to_string exn) supervisor.base_path)
           with
           | Eio.Cancel.Cancelled _ as exn -> observe Discovery_interrupted; raise exn
           | exn ->
               observe Discovery_raised;
-              Log.Server.warn "ask discovery worker retained: %s" (Printexc.to_string exn)))
+              Log.Server.warn "ask discovery worker retained: %s base_path=%S" (Printexc.to_string exn) supervisor.base_path))
     with exn ->
       let bt = Printexc.get_raw_backtrace () in
       release ();

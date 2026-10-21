@@ -145,7 +145,13 @@ val create :
     returned, not that owner delivery finished. Partial unreadable logs retain
     their existing diagnostics while healthy owners can recover. The default
     observer logs a whole-discovery failure. No question/answer rows are exposed
-    to this observer. Observer failure cannot undo already reserved workers. *)
+    to this observer. Observer failure cannot undo already reserved workers.
+
+    Default supervisor discovery/recovery diagnostics include the original
+    workspace base path, including existing failure/interruption records.
+    Routine phase formatting remains lazy; existing other logging levels and
+    frequency remain. Added quoted-path bytes/formatting are observation cost,
+    not delivery authority or measured execution progress. *)
 
 val pulse : sw:Eio.Switch.t -> t -> unit
 (** Reserve a switch-owned discovery child, then return without joining its

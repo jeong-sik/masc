@@ -90,10 +90,10 @@ end
 module Job_set = Set.Make (Job_key)
 module Job_map = Map.Make (Job_key)
 
-let log_discovery ~base_path:_ = function
+let log_discovery ~base_path = function
   | Ok () -> ()
-  | Error error -> Log.Server.warn "owned job completion discovery unavailable: %s"
-      (Store.error_to_string error)
+  | Error error -> Log.Server.warn "owned job completion discovery unavailable: %s base_path=%S"
+      (Store.error_to_string error) base_path
 
 type t =
   { config : Workspace.config
@@ -126,13 +126,13 @@ let discover_and_schedule ~sw supervisor =
                recovery I/O; cancellation here still releases this reservation. *)
             Eio.Fiber.yield ();
             match recover ~presence_round ?held_absent ~on_result_ready:supervisor.on_result_ready ~base_path marker with
-            | Error error -> Log.Server.warn "owned job completion retained job=%s error=%s"
-                (Store.Job_id.to_string marker.job_id) (Store.error_to_string error)
+            | Error error -> Log.Server.warn "owned job completion retained job=%s error=%s base_path=%S"
+                (Store.Job_id.to_string marker.job_id) (Store.error_to_string error) base_path
             | Ok (Waiting None) -> ()
             | Ok (Waiting (Some held)) ->
                 supervisor.held_absent <- Job_map.add marker.job_id held supervisor.held_absent
-            | Ok Delivered | Ok Retired -> Log.Server.info "owned job completion recovered job=%s"
-                (Store.Job_id.to_string marker.job_id)))
+            | Ok Delivered | Ok Retired -> Log.Server.info "owned job completion recovered job=%s base_path=%S"
+                (Store.Job_id.to_string marker.job_id) base_path))
       with exn ->
         supervisor.active <- Job_set.remove marker.job_id supervisor.active;
         raise exn) in
@@ -142,8 +142,8 @@ let discover_and_schedule ~sw supervisor =
   supervisor.held_absent <- Job_map.filter (fun job_id _ -> Job_set.mem job_id pending_ids)
       supervisor.held_absent;
   List.iter (fun (identity,error) ->
-    Log.Server.warn "owned job completion discovery retained job=%s error=%s"
-      identity (Store.error_to_string error)) pending.failures;
+    Log.Server.warn "owned job completion discovery retained job=%s error=%s base_path=%S"
+      identity (Store.error_to_string error) base_path) pending.failures;
   Ok ()
 
 type discovery_phase =
@@ -154,14 +154,14 @@ type discovery_phase =
 let observe_discovery ~base_path ~reserved_ns phase =
   let emit () = try Log.Server.routine_lazy (fun () ->
       let phase, detail = match phase with
-        | Discovery_reserved -> "reserved", Printf.sprintf " base_path=%S" base_path
+        | Discovery_reserved -> "reserved", ""
         | Discovery_started -> "started", ""
         | Discovery_settled result -> "settled",
             (match result with Ok () -> " outcome=returned" | Error _ -> " outcome=failed")
         | Discovery_interrupted -> "interrupted", ""
         | Discovery_raised -> "raised", "" in
-      Printf.sprintf "owned_job_completion_discovery reserved_ns=%Ld phase=%s at_ns=%Ld%s"
-        reserved_ns phase (Mtime_clock.elapsed_ns ()) detail)
+      Printf.sprintf "owned_job_completion_discovery reserved_ns=%Ld phase=%s at_ns=%Ld%s base_path=%S"
+        reserved_ns phase (Mtime_clock.elapsed_ns ()) detail base_path)
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | _ -> () in
@@ -187,14 +187,14 @@ let pulse ~sw supervisor =
             observe (Discovery_settled result);
             (try supervisor.on_discovery ~base_path result with
              | Eio.Cancel.Cancelled _ as exn -> raise exn
-             | exn -> Log.Server.warn "owned job completion discovery observer failed: %s"
-                 (Printexc.to_string exn))
+             | exn -> Log.Server.warn "owned job completion discovery observer failed: %s base_path=%S"
+                 (Printexc.to_string exn) base_path)
           with
           | Eio.Cancel.Cancelled _ as exn -> observe Discovery_interrupted; raise exn
           | exn ->
               observe Discovery_raised;
-              Log.Server.warn "owned job completion discovery worker retained: %s"
-                (Printexc.to_string exn)))
+              Log.Server.warn "owned job completion discovery worker retained: %s base_path=%S"
+                (Printexc.to_string exn) base_path))
     with exn ->
       let bt = Printexc.get_raw_backtrace () in
       release ();

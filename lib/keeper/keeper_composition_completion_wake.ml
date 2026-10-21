@@ -229,7 +229,7 @@ module Completion_owners = Map.Make (String)
 
 type recovery_phase = Reserved | Started | Settled of Outbox.report | Interrupted | Raised
 
-let observe_recovery ~keeper_name ~started_ns phase =
+let observe_recovery ~base_path ~keeper_name ~started_ns phase =
   let emit () = try Log.Server.routine_lazy (fun () ->
       let phase, detail = match phase with
         | Reserved -> "reserved", ""
@@ -239,25 +239,25 @@ let observe_recovery ~keeper_name ~started_ns phase =
         | Settled report -> "settled", Printf.sprintf
             " inspected=%d delivered=%d waiting=%d failures=%d"
             report.inspected report.delivered report.waiting (List.length report.failures) in
-      Printf.sprintf "composition_completion_recovery keeper=%s started_ns=%Ld phase=%s at_ns=%Ld%s"
-        keeper_name started_ns phase (Mtime_clock.elapsed_ns ()) detail)
+      Printf.sprintf "composition_completion_recovery keeper=%s started_ns=%Ld phase=%s at_ns=%Ld%s base_path=%S"
+        keeper_name started_ns phase (Mtime_clock.elapsed_ns ()) detail base_path)
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | _ -> () in
   Eio.Cancel.protect emit
 
-let log_report ~keeper_name (report : Outbox.report) =
+let log_report ~base_path ~keeper_name (report : Outbox.report) =
   List.iter (fun (request_id,error) ->
-    Log.Server.warn "composition completion delivery retained keeper=%s request=%s error=%s"
-      keeper_name request_id (Outbox.error_to_string error)) report.failures;
+    Log.Server.warn "composition completion delivery retained keeper=%s request=%s error=%s base_path=%S"
+      keeper_name request_id (Outbox.error_to_string error) base_path) report.failures;
   if report.delivered > 0 then Log.Server.info
-    "composition completion recovery keeper=%s inspected=%d delivered=%d waiting=%d failures=%d"
-    keeper_name report.inspected report.delivered report.waiting (List.length report.failures)
+    "composition completion recovery keeper=%s inspected=%d delivered=%d waiting=%d failures=%d base_path=%S"
+    keeper_name report.inspected report.delivered report.waiting (List.length report.failures) base_path
 
-let log_discovery ~base_path:_ = function
+let log_discovery ~base_path = function
   | Ok () -> ()
-  | Error error -> Log.Server.warn "composition completion outbox unavailable: %s"
-      (Outbox.error_to_string error)
+  | Error error -> Log.Server.warn "composition completion outbox unavailable: %s base_path=%S"
+      (Outbox.error_to_string error) base_path
 
 type t =
   { base_path : string
@@ -266,7 +266,7 @@ type t =
   ; mutable active : Set_util.StringSet.t
   ; mutable discovery_active : bool }
 
-let create ~base_path ?(on_report=log_report) ?(on_discovery=log_discovery) () =
+let create ~base_path ?(on_report=log_report ~base_path) ?(on_discovery=log_discovery) () =
   {base_path;on_report;on_discovery;active=Set_util.StringSet.empty;discovery_active=false}
 
 let recover_owner pending =
@@ -285,8 +285,8 @@ let discover_and_schedule ~sw supervisor =
   let ( let* ) = Result.bind in
   let* discovery = Outbox.discover ~base_path:supervisor.base_path in
   List.iter (fun (identity,error) ->
-    Log.Server.warn "composition completion discovery retained pending_record=%s error=%s"
-      identity (Outbox.error_to_string error)) discovery.failures;
+    Log.Server.warn "composition completion discovery retained pending_record=%s error=%s base_path=%S"
+      identity (Outbox.error_to_string error) supervisor.base_path) discovery.failures;
   let owners = List.fold_left (fun owners (pending : Outbox.pending) ->
     if Set_util.StringSet.mem pending.keeper_name supervisor.active then owners
     else
@@ -302,27 +302,27 @@ let discover_and_schedule ~sw supervisor =
       supervisor.active <- Set_util.StringSet.add keeper_name supervisor.active;
       let release () = supervisor.active <- Set_util.StringSet.remove keeper_name supervisor.active in
       try
-        observe_recovery ~keeper_name ~started_ns Reserved;
+        observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns Reserved;
         Eio.Switch.check sw;
         Eio.Fiber.fork ~sw (fun () ->
           Fun.protect ~finally:release (fun () ->
             try
               Eio.Fiber.yield ();
-              observe_recovery ~keeper_name ~started_ns Started;
+              observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns Started;
               let report = recover_owner pending in
-              observe_recovery ~keeper_name ~started_ns (Settled report);
+              observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns (Settled report);
               (try supervisor.on_report ~keeper_name report with
                | Eio.Cancel.Cancelled _ as exn -> raise exn
-               | exn -> Log.Server.warn "composition completion observer failed keeper=%s: %s"
-                   keeper_name (Printexc.to_string exn))
+               | exn -> Log.Server.warn "composition completion observer failed keeper=%s: %s base_path=%S"
+                   keeper_name (Printexc.to_string exn) supervisor.base_path)
             with
             | Eio.Cancel.Cancelled _ as exn ->
-                observe_recovery ~keeper_name ~started_ns Interrupted;
+                observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns Interrupted;
                 raise exn
             | exn ->
-                observe_recovery ~keeper_name ~started_ns Raised;
-                Log.Server.warn "composition completion worker retained keeper=%s: %s"
-                  keeper_name (Printexc.to_string exn)))
+                observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns Raised;
+                Log.Server.warn "composition completion worker retained keeper=%s: %s base_path=%S"
+                  keeper_name (Printexc.to_string exn) supervisor.base_path))
       with exn ->
         let bt = Printexc.get_raw_backtrace () in
         release ();
@@ -337,14 +337,14 @@ type discovery_phase =
 let observe_discovery ~base_path ~reserved_ns phase =
   let emit () = try Log.Server.routine_lazy (fun () ->
       let phase, detail = match phase with
-        | Discovery_reserved -> "reserved", Printf.sprintf " base_path=%S" base_path
+        | Discovery_reserved -> "reserved", ""
         | Discovery_started -> "started", ""
         | Discovery_settled result -> "settled",
             (match result with Ok () -> " outcome=returned" | Error _ -> " outcome=failed")
         | Discovery_interrupted -> "interrupted", ""
         | Discovery_raised -> "raised", "" in
-      Printf.sprintf "composition_completion_discovery reserved_ns=%Ld phase=%s at_ns=%Ld%s"
-        reserved_ns phase (Mtime_clock.elapsed_ns ()) detail)
+      Printf.sprintf "composition_completion_discovery reserved_ns=%Ld phase=%s at_ns=%Ld%s base_path=%S"
+        reserved_ns phase (Mtime_clock.elapsed_ns ()) detail base_path)
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | _ -> () in
@@ -369,14 +369,14 @@ let pulse ~sw supervisor =
             observe (Discovery_settled result);
             (try supervisor.on_discovery ~base_path:supervisor.base_path result with
              | Eio.Cancel.Cancelled _ as exn -> raise exn
-             | exn -> Log.Server.warn "composition completion discovery observer failed: %s"
-                 (Printexc.to_string exn))
+             | exn -> Log.Server.warn "composition completion discovery observer failed: %s base_path=%S"
+                 (Printexc.to_string exn) supervisor.base_path)
           with
           | Eio.Cancel.Cancelled _ as exn -> observe Discovery_interrupted; raise exn
           | exn ->
               observe Discovery_raised;
-              Log.Server.warn "composition completion discovery worker retained: %s"
-                (Printexc.to_string exn)))
+              Log.Server.warn "composition completion discovery worker retained: %s base_path=%S"
+                (Printexc.to_string exn) supervisor.base_path))
     with exn ->
       let bt = Printexc.get_raw_backtrace () in
       release ();

@@ -116,16 +116,26 @@ let scenario manifest =
       check int "all locate scenarios issued zero browser input" 0 !inputs)))))
 let ()=Mirage_crypto_rng_unix.use_default ();
   (* The dune stanza passes the manifest it depends on, but the targeted-suite
-     runner executes the exe with no arguments. Resolve the bundled manifest in
-     that case instead of failing, so the suite can be run both ways. *)
+     runner executes the exe with no arguments and cds into
+     _build/default/<suite dir> first. The stanza's (source_tree ...) dep is only
+     materialised for the runtest action, so the copy is not there and a fixed
+     list of relative candidates cannot find the file. Walk up from the working
+     directory instead: the checkout root carries addons/browser/lane.toml. *)
   let bundled_manifest () =
-    let candidates=["addons/browser/lane.toml";"../addons/browser/lane.toml";
-      "../../addons/browser/lane.toml"] in
-    match List.find_opt Sys.file_exists candidates with
+    let relative=Filename.concat "addons" (Filename.concat "browser" "lane.toml") in
+    let rec walk dir depth =
+      if depth > 6 then None
+      else
+        let candidate=Filename.concat dir relative in
+        if Sys.file_exists candidate then Some candidate
+        else
+          let parent=Filename.dirname dir in
+          if String.equal parent dir then None else walk parent (depth+1) in
+    match walk (Sys.getcwd ()) 0 with
     | Some path -> path
     | None ->
-      fail ("expected bundled browser manifest path; looked for "
-        ^ String.concat ", " candidates) in
+      fail ("expected bundled browser manifest path; no " ^ relative
+        ^ " in any parent of " ^ Sys.getcwd ()) in
   let manifest=if Array.length Sys.argv=2 then Sys.argv.(1) else bundled_manifest () in
   run ~argv:[|Sys.argv.(0)|] "browser Add-on locate consumer" ["read-only",[
     test_case "selected model, current targets, withdrawal and retire" `Quick (fun () -> scenario manifest)]]

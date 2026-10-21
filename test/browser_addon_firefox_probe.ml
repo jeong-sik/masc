@@ -35,6 +35,9 @@ let () =
   let firefox=Unix.realpath (argument "--firefox")
   and manifest=Unix.realpath (argument "--manifest")
   and fixture_url=argument "--fixture-url" in
+  let expected_skill_revision=In_channel.with_open_bin
+      (Filename.concat (Filename.dirname manifest) "skills/browser/SKILL.md") In_channel.input_all
+    |> Skill_reference.content_revision_of_source_text in
   output:=Unix.realpath (argument "--out");flush ();
   let base_path=Filename.temp_dir ~perms:0o700 "browser-addon-firefox-proof-" "" |> Unix.realpath in
   write (Filename.concat !output "workspace.txt") base_path;
@@ -114,8 +117,14 @@ let () =
        match catalog with
        | Server_skill_snapshot_runtime.Ready {snapshot;_} ->
          (match Skill_catalog_snapshot.find_effective_by_name snapshot "browser" with
-          | Some entry -> bool "catalog Skill came from another source"
-              (entry.directory=Filename.concat (Filename.dirname manifest) "skills/browser")
+          | Some entry -> bool
+              ("catalog Skill has unexpected identity or content: " ^
+               Yojson.Safe.to_string (Skill_reference.to_yojson (Skill_catalog_snapshot.entry_reference entry)))
+              (Skill_reference.identity_source_id_to_string entry.identity=R.skill_source_id (R.Declaration "browser")
+               && Skill_reference.identity_package_id_to_string entry.identity="browser"
+               && entry.identity.name="browser"
+               && entry.directory="browser"
+               && Skill_reference.equal_content_revision entry.content_revision expected_skill_revision)
           | None -> Error "browser package Skill is absent")
        | Not_registered|Uninitialized -> Error "workspace Skill catalog is unavailable"));
     let host=require (Browser_addon_host.connect ~config ~access ~principal ~reserved:[]

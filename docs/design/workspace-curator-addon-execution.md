@@ -181,3 +181,9 @@ strict durable recovery, then the shared package request store, host semantic
 validation before original-flow acceptance, and consumer.
 Keep domain authority on the host throughout these units; do not switch production
 to an incomplete transport adapter.
+
+The first [batch and known-request storage foundation](workspace-curator-request-capture.md)
+now retains complete request data and validates original classification rows and
+briefing partitions. It does not yet implement the trusted host provenance
+envelope, restart enumeration, accepted-work/commit lifecycle, semantic port or
+production Addon consumer. Those remain the next implementation boundaries above.

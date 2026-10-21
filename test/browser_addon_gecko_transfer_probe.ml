@@ -3,6 +3,7 @@
 open Masc
 module R = Lane_addon_runtime
 module B = Browser_lane
+module F = Exact_output_fixture
 let ( let* ) = Result.bind
 let require = function Ok value -> value | Error message -> failwith message
 let argument flag =
@@ -18,12 +19,15 @@ let field key (value:Yojson.Safe.t) = match value with
 let string key value = match field key value with
   | Some (`String text) -> Some text | None|Some _ -> None
 let steps=ref [] and receipts=ref [] and witnesses=ref []
+let model_requests=ref [] and model_responses=ref []
 let output=ref ""
 let flush () = write (Filename.concat !output "gecko-transfer-proof.json")
   (Yojson.Safe.pretty_to_string (`Assoc ["steps",`List (List.rev !steps);
     "receipts",`List (List.rev !receipts);"witnesses",`Assoc (List.rev !witnesses);
     "tool_hooks",`List [`String "validate_input";`String "validate_output"];
-    "model_outputs",`List []]))
+    "model_outputs",`List [`String "locate"];
+    "model_requests",`List (List.rev !model_requests);
+    "model_responses",`List (List.rev !model_responses)]))
 let record name result =
   steps:=`Assoc ["step",`String name;"ok",`Bool (Result.is_ok result);
     "error",(match result with Ok _ -> `Null | Error detail -> `String detail)]::!steps;
@@ -31,6 +35,34 @@ let record name result =
   require result
 let witness key value = witnesses:=(key,value)::!witnesses;flush ()
 let check message value = if value then Ok `Null else Error message
+let locate_reply ~schema ~fixture_url body =
+  try
+    let request=Yojson.Safe.from_string body in
+    let open Yojson.Safe.Util in
+    let requirement=Agent_core.Exact_output.make_output_requirement ~schema
+      ~minimum_guarantee:Agent_core.Exact_output.Json_syntax in
+    let* ()=if (request |> member "response_format" |> member "type") = `String "json_object"
+      then Ok () else Error "locate request did not use the shared JSON mode" in
+    match request |> member "messages" |> to_list |> List.rev with
+    | instruction::context::_ when string "role" instruction=Some "user"
+        && string "content" instruction=Some (Agent_core.Exact_output.schema_instruction_text requirement)
+        && string "role" context=Some "user" ->
+      let scene=context |> member "content" |> to_string |> Yojson.Safe.from_string in
+      let* ()=if string "instruction" scene=Some "Find the Download binary link"
+          && string "url" scene=Some fixture_url && string "title" scene=Some "Gecko transfer fixture"
+        then Ok () else Error "the actual fixture observation did not reach locate" in
+      let nodes=scene |> member "nodes" |> to_list in
+      (match List.filter (fun node -> string "tag" node=Some "a"
+          && string "text" node=Some "Download binary"
+          && string "href" (member "kind" node)=Some (fixture_url ^ "download")) nodes with
+       | [node] ->
+         let* node_id=string "nodeId" node |> Option.to_result ~none:"observed download link has no nodeId" in
+         let output=`Assoc ["matches",`List [`Assoc ["nodeId",`String node_id;
+           "description",`String "The observed binary download link"]]] in
+         Ok (scene,node,output)
+       | []|_::_ -> Error "locate did not receive exactly one observed download link")
+    | []|_::_ -> Error "locate did not receive the canonical schema and observation turns"
+  with Yojson.Json_error _|Yojson.Safe.Util.Type_error _ -> Error "invalid locate provider request"
 let () =
   let firefox=Unix.realpath (argument "--firefox")
   and driver=Unix.realpath (argument "--driver")
@@ -64,6 +96,20 @@ let () =
   Eio.Switch.run @@ fun sw ->
   Eio_context.with_test_env ~sw ~clock ~net ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
     let config=Workspace.default_config base_path in
+    let locate_schema=Yojson.Safe.from_file (Filename.concat (Filename.dirname manifest) "schemas/locate.json") in
+    let selected=ref None in
+    let provider=F.start_server ~sw ~net ~clock (F.Reply_with (fun index body ->
+      model_requests:=`Assoc ["request_index",`Int index;"body",`String body]::!model_requests;
+      let status,response=match locate_reply ~schema:locate_schema ~fixture_url body with
+        | Ok (scene,node,answer) ->
+          selected:=Some (scene,node);witness "locate_model_output" answer;
+          `OK,F.openai_response answer
+        | Error message -> `Bad_request,Yojson.Safe.to_string (`Assoc ["error",`Assoc ["message",`String message]]) in
+      model_responses:=`Assoc ["request_index",`Int index;"status",`Int (Cohttp.Code.code_of_status status);
+        "body",`String response]::!model_responses;flush ();status,response)) in
+    ignore (F.publish_registry ~lane_id:"browser/locate" ~slot_ids:["probe"]
+      (F.resolver_snapshot ~source:base_path [{F.id="probe";base_url=provider.base_url}]) : Runtime_exact_output_registry.t);
+    R.register_exact_runner (Server_lane_addon_exact.runner ~base_path);
     let access=Lane_addon_sources.Operator_configuration in
     let principal=Lane_addon_call_context.Keeper "gecko-transfer-probe" in
     let directory=R.configuration_directory config in Fs_compat.mkdir_p directory;
@@ -80,7 +126,7 @@ let () =
     R.register_skill_export_handler Server_skill_snapshot_runtime.publish_lane_skills;
     R.start_configuration_service ~config ~sw ~clock;
     write declaration (Printf.sprintf
-      "id=\"browser\"\nrun_id=\"gecko-transfer-probe\"\nmanifest_path=%S\nexact_outputs=[]\ntool_hooks=[\"validate_input\",\"validate_output\"]\n[binding]\nsources=[]\n" manifest);
+      "id=\"browser\"\nrun_id=\"gecko-transfer-probe\"\nmanifest_path=%S\nexact_outputs=[\"locate\"]\ntool_hooks=[\"validate_input\",\"validate_output\"]\n[binding]\nsources=[]\n" manifest);
     let report=require (R.reconcile_configuration ~config ~directory) in
     if Yojson.Safe.Util.member "complete" report<>`Bool true
       || Yojson.Safe.Util.member "issues" report<>`List [] then
@@ -145,6 +191,31 @@ let () =
       | Ok value when string "title" value=Some expected -> Some (Ok value)
       | Ok _ -> None) in
     let act fields=call Browser_capabilities.Act (target @ fields) in
+    let located=record "real Gecko locate uses the selected host Exact Output route"
+      (call Browser_capabilities.Instruct (target @ ["action",`String "observe";
+        "instruction",`String "Find the Download binary link"])) in
+    witness "locate" located;
+    ignore (record "locate returns the model-selected observed identity and browser geometry"
+      (match !selected,field "matches" located with
+       | Some (scene,node),Some (`List [matched]) ->
+         let open Yojson.Safe.Util in
+         let reference=member "target" matched and observation=member "observation" matched in
+         check "locate result lost its observed document, node, text, geometry or inference"
+           (string "documentId" located=string "documentId" scene
+            && string "documentId" reference=string "documentId" scene
+            && string "nodeId" reference=string "nodeId" node
+            && string "nodeId" observation=string "nodeId" node
+            && string "text" observation=Some "Download binary"
+            && string "href" observation=Some (fixture_url ^ "download")
+            && (match field "rects" observation with Some (`List (_::_)) -> true | None|Some _ -> false)
+            && string "description" (member "inference" matched)=Some "The observed binary download link")
+       | (None|Some _),(None|Some _) -> Error "locate has no single model-selected observation"));
+    ignore (record "locate performs one model request and no upload or download"
+      (let* page=read "text" in
+       check "read-only locate changed the fixture or replayed a model request"
+         (F.post_count provider=1 && string "title" page=Some "Gecko transfer fixture"
+          && not (Sys.file_exists (Filename.concat !output "upload.json"))
+          && not (Sys.file_exists (Filename.concat !output "download.json")))));
     ignore (record "an arbitrary host path is refused before file selection"
       (match invoke ~upload_paths:[payload] Browser_capabilities.Act
         (target @ ["action",`String "upload";"selector",`String "#file";

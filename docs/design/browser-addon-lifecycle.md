@@ -417,8 +417,9 @@ receipts remain distinct from successful contract validation.
    consumer fixture exercises accepted, changed-document, changed-meaning,
    invented-reference, cancelled and retired requests using a scripted
    WebDriver transport. These definitions are not executed browser/model proof.
-   Actual Gecko locate/model proof, Gecko persistent-profile admission and
-   scoped transfer brokers remain. Scoped Chrome/extension/shared-model
+   The real Gecko consumer probe below still needs an actual execution result;
+   Gecko persistent-profile admission remains separate. Scoped transfer brokers
+   and Chrome/extension/shared-model
    integration evidence is recorded under [Completion evidence](#completion-evidence);
    it does not establish external-provider quality or personal-site behavior.
    The selected Stagehand schema/role adapter is connected to the worker session
@@ -599,6 +600,19 @@ Neither identifies the old differing field or makes the newer failure a success.
 Source review and actual selected execution remain separate.
 
 ## Completion evidence
+
+### Real Gecko locate and transfer probe
+
+`browser_addon_gecko_transfer_probe` selects the package's `locate` Exact Output
+independently of its input/output validation hooks. An isolated HTTP provider
+checks the shared runner's JSON mode and exact canonical schema instruction,
+then selects the download link from the actual observed scene it receives.
+`BrowserInstruct observe` must return that document/node identity, the browser's
+observed geometry and the separate model explanation. The probe checks exactly
+one model request and no upload/download before continuing its original transfer
+and cleanup scenario. Requests, responses and the selected output are retained.
+The provider is scripted; this does not measure a real model's response quality.
+This probe extension has not yet been compiled or executed.
 
 [Real Chrome run 39497965428](https://github.com/jeong-sik/masc/actions/runs/39497965428)
 passed 42/42 recorded steps in each of private and persistent modes. Its source

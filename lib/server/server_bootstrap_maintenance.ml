@@ -821,22 +821,12 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
           (Keeper_owned_job_store.error_to_string error)
       | Ok () -> ()
     in
+    let ask_answers = Keeper_ask_answer_wake.create ~base_path:config.base_path () in
     let reconcile_ask_answers () =
-      match Keeper_ask_answer_wake.reconcile ~base_path:config.base_path with
+      match Keeper_ask_answer_wake.pulse ~sw ask_answers with
       | Error error -> Log.Server.warn "ask answer recovery discovery unavailable: %s"
           (Keeper_ask_store.read_error_to_string error)
-      | Ok report ->
-          List.iter (fun (failure : Keeper_ask_answer_wake.failure) ->
-            Log.Server.warn "ask answer recovery retained keeper=%s ask_id=%s error=%s"
-              (match failure.keeper_name with Some keeper -> keeper | None -> "<unconfirmed owner>")
-              (match failure.ask_id with Some ask_id -> ask_id | None -> "<store>")
-              (Keeper_ask_answer_wake.error_to_string failure.error)) report.failures;
-          let summary () = Printf.sprintf
-              "ask answer recovery inspected=%d evidence_windows=%d enqueued=%d pending=%d already_delivered=%d failures=%d"
-              report.inspected report.evidence_window_reads report.enqueued report.already_pending report.already_delivered
-              (List.length report.failures) in
-          if report.enqueued > 0 then Log.Server.info "%s" (summary ())
-          else Log.Server.routine_lazy summary
+      | Ok () -> ()
     in
     reconcile_goal_events ();
     reconcile_composition_completions ();

@@ -130,3 +130,30 @@ val reconcile : base_path:string -> (report, Keeper_ask_store.read_error) result
     physical file reads or successful deliveries. Only unresolved sources reach
     enqueue; the queue owner's fresh evidence and lifecycle checks are retained.
     No timer, history cap, second answer store or outbox. *)
+
+type t
+val create :
+  base_path:string -> ?on_report:(keeper_name:string -> report -> unit) -> unit -> t
+(** One server-lifetime recovery supervisor. [on_report] observes a settled
+    original Keeper batch, not answer consumption, Task progress or effect
+    success. Observer failure cannot undo committed deliveries. *)
+
+val pulse : sw:Eio.Switch.t -> t -> (unit, Keeper_ask_store.read_error) result
+(** Discover canonical answer logs, then reserve an independent switch-owned
+    worker for each non-active Keeper with answered rows. Workers yield before
+    recovery; this entrypoint does not join queue-owner or delivery I/O. The
+    directory/log discovery itself still completes before any reservation.
+    Within one Keeper preserve original row order and pass-local evidence-window
+    reuse, including failures. Other Keepers do not wait for that owner's intake
+    mutex or file lock. The fresh queue-owner evidence and lifecycle fence
+    remain authoritative for every delivery.
+
+    Active owners are reserved once until the original worker settles or is
+    cancelled. New answers for an active owner wait for a later pulse; no
+    captured row/result is reused across workers. A changed/failed discovery
+    neither cancels an existing worker nor authorizes absence. Unreadable logs
+    are reported while healthy owners can recover. Check the supplied switch
+    before discovery and each reservation; cancellation is never a store error.
+    Root-switch cancellation still joins protected physical I/O. No timer,
+    retry cap, replacement question, Task inference or fresh authority is added.
+    Single-domain Eio caller; the active set is only a scheduling hint. *)

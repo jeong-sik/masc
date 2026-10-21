@@ -75,6 +75,14 @@ type page =
   ; content : string
   }
 
+val page_to_json : page -> Yojson.Safe.t
+val page :
+  ?envelope:(Yojson.Safe.t -> Yojson.Safe.t) -> request -> string ->
+  (page, string) result
+(** Page an already-read body under the existing wire budget, including the
+    caller's enclosing JSON metadata. A non-EOF page must consume at least
+    one source byte. Bounds are validated for direct callers too. *)
+
 val handle :
   base_path:string ->
   args:Yojson.Safe.t ->

@@ -241,7 +241,7 @@ let page_to_json page =
     ]
 ;;
 
-let page_of_slice_within_output_budget request ~total_bytes requested_bytes =
+let page_of_slice_within_output_budget ?(envelope = Fun.id) request ~total_bytes requested_bytes =
   let candidate length =
     page_of_slice
       request
@@ -249,7 +249,7 @@ let page_of_slice_within_output_budget request ~total_bytes requested_bytes =
       (String.sub requested_bytes 0 length)
   in
   let fits page =
-    page |> page_to_json |> Yojson.Safe.to_string |> String.length
+    page |> page_to_json |> envelope |> Yojson.Safe.to_string |> String.length
     <= Common.max_tool_result_wire_bytes
   in
   match candidate 0 with
@@ -259,7 +259,10 @@ let page_of_slice_within_output_budget request ~total_bytes requested_bytes =
   | Ok empty_page ->
     let rec search low high best =
       if low > high
-      then Ok best
+      then
+        if best.next_offset = best.offset && not best.eof
+        then Error "page envelope leaves no room for source bytes"
+        else Ok best
       else
         let midpoint = low + ((high - low) / 2) in
         match candidate midpoint with
@@ -272,7 +275,10 @@ let page_of_slice_within_output_budget request ~total_bytes requested_bytes =
     search 1 (String.length requested_bytes) empty_page
 ;;
 
-let page (request : request) bytes =
+let page ?envelope (request : request) bytes =
+  if request.offset < minimum_offset || request.max_bytes < minimum_max_bytes
+     || request.max_bytes > maximum_max_bytes then Error "invalid page bounds"
+  else
   let total_bytes = String.length bytes in
   let available = max 0 (total_bytes - request.offset) in
   let requested_length = min request.max_bytes available in
@@ -281,7 +287,7 @@ let page (request : request) bytes =
     then ""
     else String.sub bytes request.offset requested_length
   in
-  page_of_slice_within_output_budget request ~total_bytes requested_bytes
+  page_of_slice_within_output_budget ?envelope request ~total_bytes requested_bytes
 ;;
 
 let handle_with_page ~base_path ~args =
@@ -310,6 +316,6 @@ let handle ~base_path ~args = fst (handle_with_page ~base_path ~args)
 
 module For_testing = struct
   let request_of_json = request_of_json
-  let page = page
+  let page request bytes = page request bytes
   let page_to_json = page_to_json
 end

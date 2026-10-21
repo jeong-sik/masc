@@ -58,6 +58,35 @@ let select_execution execution_id t =
 let observation t = match selected t with
   | None -> Fetched.Absent
   | Some choice -> Fetched.view_for ~equal:String.equal t.fetched ~key:choice.execution_id
+let original_failure = function
+  | Masc.Tui_decode.Original_failed detail -> Some detail
+  | Original_pending -> Some "The enclosing turn's original trace is not published yet"
+  | Original_unavailable reason -> Some reason
+  | Original_not_read | Original_body _ -> None
+let output_sections (call:Masc.Tui_decode.keeper_call) =
+  let preview () = [section "Recorded output preview"
+    (match call.kc_output with Some output -> output | None -> "No output was recorded.")] in
+  let output = match call.kc_original with
+    | Original_body body ->
+      let printed = match Masc_tui_execute_result.of_result body.content with
+        | None -> []
+        | Some result -> [section "Command outcome" (Masc_tui_execute_result.status_text result)]
+            @ (match result.output with
+               | None -> []
+               | Some (Masc_tui_execute_result.Printed text) -> [section "Printed output" text]
+               | Some (Stored reference) ->
+                   [section "Stored output" (Masc_tui_execute_result.stored_text reference)]) in
+      printed @ [section "Retained original result" body.content;
+        section "Original source" (Printf.sprintf
+          "%d projected bytes · %d recorded bytes · sha256 %s"
+          (String.length body.content) body.recorded_bytes body.sha256)]
+    | Original_not_read -> preview ()
+    | (Original_pending | Original_unavailable _ | Original_failed _) as source ->
+        preview () @ (match original_failure source with
+          | None -> [] | Some reason -> [section "Original source not available" reason]) in
+  output @ (match call.kc_truncated_to with None -> [] | Some bytes ->
+    [section "Ledger preview limit" (Printf.sprintf
+      "The ledger preview declares truncation to %d bytes; the original source is read separately." bytes)])
 let result_document t =
   match selected t with
   | None -> Reading.create ~title:"Original calls" [section "Unavailable" "No original execution ID is recorded in this conversation."]
@@ -70,9 +99,7 @@ let result_document t =
       | Ready call | Stale (call, _) ->
           [section "Tool" call.Masc.Tui_decode.kc_tool;
            section "Input" call.kc_input;
-           section "Output" (match call.kc_output with Some output -> output | None -> "No output was recorded.")]
-          @ (match call.kc_truncated_to with None -> [] | Some bytes ->
-               [section "Recorded source limit" (Printf.sprintf "The original record declares truncation to %d bytes." bytes)])
+           ] @ output_sections call
           @ (match state with Stale (_,reason) -> [section "Refresh failed · retained reading" reason]
              | Absent | Loading | Failed _ | Ready _ -> []) in
     let pending = if Fetched.in_flight t.fetched then
@@ -94,6 +121,13 @@ let complete t request result =
     if Option.equal String.equal call.Masc.Tui_decode.kc_execution_id
          (Some (Fetched.request_key request)) then Ok call
     else Error "Original execution identity mismatch") in
+  let result = Result.bind result (fun call ->
+    match original_failure call.Masc.Tui_decode.kc_original, observation t with
+    | Some reason, (Fetched.Ready previous | Stale (previous,_)) ->
+        (match previous.Masc.Tui_decode.kc_original with
+         | Original_body _ -> Error reason
+         | Original_not_read | Original_pending | Original_unavailable _ | Original_failed _ -> Ok call)
+    | (None | Some _), (Fetched.Absent | Loading | Failed _ | Ready _ | Stale _) -> Ok call) in
   if not (Fetched.is_current ~equal:String.equal t.fetched request) then t
   else let t={t with fetched=Fetched.complete ~equal:String.equal t.fetched request result} in
     {t with document=result_document t}

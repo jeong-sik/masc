@@ -1318,6 +1318,12 @@ let handle_keeper_get_subroutes state req request reqd =
             ]))
       in
       Server_cached_read_http.respond ~request:req reqd payload
+  else if ends_with "/tool-result" then
+    let keeper = extract_name "/tool-result" in
+    let status,json = Domain_pool_ref.submit_io_or_inline (fun () ->
+      Server_keeper_tool_result.response ~config:(Mcp_server.workspace_config state) ~keeper req) in
+    Http.Response.json_value ~status:(status :> Httpun.Status.t)
+      ~compress:true ~request:req json reqd
   else if ends_with "/tool-calls" then
     let name = extract_name "/tool-calls" in
     if String.length name = 0 then

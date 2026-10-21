@@ -1024,18 +1024,27 @@ In a Keeper chat, `/calls` opens the original calls captured from that
 conversation. Use `j`/`k` or the arrow keys to choose by the original input,
 target and execution ID, then Enter to read the recorded input and output in
 full. The open action beside a folded long result opens that exact execution
-directly. This reads `GET /api/v1/keepers/<name>/tool-calls?execution_id=...`;
-it does not substitute another call from the recent page. If no original
-execution ID was recorded, the reader says so.
+directly. It first reads the exact ledger entry through
+`GET /api/v1/keepers/<name>/tool-calls?execution_id=...`, then pages the retained
+original result through `/api/v1/keepers/<name>/tool-result?execution_id=...`.
+The server binds that execution to its enclosing turn and original tool
+occurrence; it does not substitute another call from the recent page. Each
+page is bound to the same source, and the complete body is verified before
+display. Execute results also expose their printed output with its original
+line breaks. If no original execution ID was recorded, the reader says so.
 
 Inside a result, `j`/`k`, PageUp/PageDown and Home/End scroll the whole record.
 `r` rereads the same execution and keeps the last result, read position and any
 known read failure while the new read is pending. A missing, ambiguous or
 unavailable record remains a read failure. Esc returns to the original call
 selection; another Esc returns to the chat with its draft and conversation
-position intact. Ordinary `t` remains text in the chat composer. If the
-original stored record itself declares truncation, the reader preserves that
-source limit rather than claiming the missing bytes were recovered.
+position intact. Ordinary `t` remains text in the chat composer. A ledger preview
+limit stays separate from the retained original body. If the turn has not
+published its trace, the trace was not retained, or reading fails, the reader
+keeps the preview and explains the source state. A failed original-source
+refresh preserves a previously read full body and its position. The original
+body contains the secret-redacted bytes retained by the producer; reading all
+of them does not prove that the producer captured all process output.
 
 `t` from the roster or from detail. The keeper's durable tool-call log, the
 newest page of `GET /api/v1/keepers/<name>/tool-calls`: one row per call

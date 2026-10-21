@@ -1438,10 +1438,18 @@ let keeper_call_log_health_to_string = function
   | Call_log_coverage_gap -> "coverage_gap"
   | Call_log_unknown unknown -> unknown
 
+type keeper_call_original =
+  | Original_not_read
+  | Original_pending
+  | Original_unavailable of string
+  | Original_failed of string
+  | Original_body of { source_id : string; sha256 : string; recorded_bytes : int; content : string }
+
 type keeper_call = {
   kc_at : float;
   kc_tool : string;
   kc_input : string;
+  kc_original : keeper_call_original;
   kc_output : string option;
   kc_artifact_refs : Tool_output.artifact_ref list;
   kc_outcome : Tool_result.recorded_call_outcome;
@@ -2526,6 +2534,7 @@ let decode_keeper_call json =
       ; kc_tool
       ; kc_input
       ; kc_output
+      ; kc_original = Original_not_read
       ; kc_artifact_refs
       ; kc_outcome
       ; kc_duration_ms

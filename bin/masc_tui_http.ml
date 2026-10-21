@@ -1207,9 +1207,42 @@ let fetch_keeper_calls ~(host : string) ~(port : int) ~(keeper_name : string)
   Masc.Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:keeper_name json
 
 let fetch_keeper_call ~host ~port ~keeper_name ~execution_id =
-  Result.bind (get_json ~host ~port ~path:(Masc_tui_chat_call_reader.path ~keeper:keeper_name ~execution_id))
-    (fun json -> Masc_tui_response_decode.run ~name:"keeper.original_call.decode_wait"
-      (fun () -> Masc.Tui_decode.decode_keeper_call_exact ~requested_keeper:keeper_name ~execution_id json))
+  let ( let* ) = Result.bind in
+  let* json = get_json ~host ~port
+      ~path:(Masc_tui_chat_call_reader.path ~keeper:keeper_name ~execution_id) in
+  let* call = Masc_tui_response_decode.run ~name:"keeper.original_call.decode_wait"
+      (fun () -> Masc.Tui_decode.decode_keeper_call_exact
+        ~requested_keeper:keeper_name ~execution_id json) in
+  let module Page = Masc.Keeper_tool_result_page in
+  let bytes = Buffer.create 4096 in
+  let rec read previous offset =
+    let source = match previous with None -> "" | Some (identity,_) ->
+      "&source_id=" ^ percent_encode_query_value identity.Page.source_id in
+    let path = Printf.sprintf "/api/v1/keepers/%s/tool-result?execution_id=%s&offset=%d%s"
+        (percent_encode_path_segment keeper_name) (percent_encode_query_value execution_id)
+        offset source in
+    let* json = get_json ~host ~port ~path in
+    let* response = Masc_tui_response_decode.run ~name:"keeper.original_body.decode_wait"
+        (fun () -> Page.of_json ~keeper:keeper_name ~execution_id json) in
+    match response with
+    | Page.Pending when offset=0 -> Ok Masc.Tui_decode.Original_pending
+    | Page.Unavailable reason when offset=0 -> Ok (Masc.Tui_decode.Original_unavailable reason)
+    | Page.Pending | Page.Unavailable _ -> Error "Original source disappeared during continuation"
+    | Page.Page (identity,page) ->
+      let* () = Page.validate_continuation ~offset ~previous identity page in
+      let* content = Page.bytes page in
+      Buffer.add_string bytes content;
+      if not page.eof then read (Some (identity,page)) page.next_offset
+      else
+        Masc_tui_response_decode.run ~name:"keeper.original_body.verify_wait" (fun () ->
+          let content=Buffer.contents bytes in
+          let* () = Page.verify_body identity page content in
+          Ok (Masc.Tui_decode.Original_body {source_id=identity.source_id;
+            sha256=identity.sha256;recorded_bytes=identity.recorded_bytes;content})) in
+  let result = read None 0 in
+  let kc_original = match result with
+    | Ok original -> original | Error detail -> Masc.Tui_decode.Original_failed detail in
+  Ok {call with Masc.Tui_decode.kc_original}
 
 (** Fetch exact, previously retained bytes. This never talks to the browser. *)
 let fetch_browser_observation ~host ~port (reference : Tool_output.artifact_ref) =

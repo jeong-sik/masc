@@ -287,10 +287,18 @@ val keeper_call_disposition_of_string :
 val keeper_call_disposition_to_string : keeper_call_disposition -> string
 (** The inverse of {!keeper_call_disposition_of_string}. *)
 
+type keeper_call_original =
+  | Original_not_read
+  | Original_pending
+  | Original_unavailable of string
+  | Original_failed of string
+  | Original_body of { source_id : string; sha256 : string; recorded_bytes : int; content : string }
+
 type keeper_call = {
   kc_at : float;  (** [ts], unix seconds *)
   kc_tool : string;
   kc_input : string;  (** the call's argument text as served, may be truncated *)
+  kc_original : keeper_call_original;
   kc_output : string option;
       (** what the call answered, as served and already bounded by the server.
           [None] means the row carried no result, which is not the same as a

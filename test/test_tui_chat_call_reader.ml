@@ -72,6 +72,38 @@ let test_failure_retains_result_and_scroll () =
     (Option.bind (value reader) (fun call -> call.Decode.kc_output));
   check bool "refresh failure stays typed stale" true
     (match Reader.observation reader with Fetched.Stale (_,_) -> true | Absent | Loading | Ready _ | Failed _ -> false)
+let test_original_body_refresh () =
+  let content=String.concat "\n" (List.init 120 (fun i ->
+    Printf.sprintf "원문 %03d 🙂" (i+1))) in
+  let original=Decode.Original_body {source_id=String.make 64 'a';
+    sha256=String.make 64 'b';recorded_bytes=String.length content;content} in
+  List.iter (fun failure ->
+    let initial={ (decode "original" "canonical preview") with Decode.kc_original=original } in
+    let reader,request=start (Reader.create [choice "original"]) in
+    let reader=Reader.complete reader request (Ok initial) in
+    let reader=Reader.move ~count:500 ~height:20 (Reading.By 80) reader in
+    let reader,request=start reader in
+    check string "refresh stays bound to the original execution" "original"
+      (Fetched.request_key request);
+    let updated={ (decode "original" "new preview") with Decode.kc_original=failure } in
+    let reader=Reader.complete reader request (Ok updated) in
+    check int "source failure preserves reading offset" 80
+      (Reading.scroll ~count:500 ~height:20 (Reader.document reader));
+    (match Reader.observation reader with
+     | Fetched.Stale (retained,_) ->
+         check bool "complete source survives failed refresh" true (retained.kc_original=original);
+         check (option string) "canonical preview is not overwritten by failed source"
+           (Some "canonical preview") retained.kc_output
+     | Absent | Loading | Ready _ | Failed _ -> fail "source failure erased the retained observation");
+    let empty,request=start (Reader.create [choice "original"]) in
+    let empty=Reader.complete empty request (Ok updated) in
+    match Reader.observation empty with
+    | Fetched.Ready observed ->
+        check bool "initial source failure remains explicit" true (observed.kc_original=failure);
+        check (option string) "initial failure still retains ledger preview"
+          (Some "new preview") observed.kc_output
+    | Absent | Loading | Stale _ | Failed _ -> fail "initial preview was lost")
+    [Decode.Original_pending;Original_unavailable "trace not retained";Original_failed "HTTP 503"]
 let state () =
   let state=create_state ~workspace:"reader-test" ~port:0 ~refresh_interval:0. () in
   let workspace={Decode.sid_version="test";sid_binary_commit="test";
@@ -145,6 +177,7 @@ let () = run "original chat call reader"
               test_case "exact response identity and full payload" `Quick test_exact_decode];
   "ownership",[test_case "refresh loading and late close" `Quick test_superseding_and_close;
                test_case "retained result and offset" `Quick test_failure_retains_result_and_scroll;
+               test_case "original source refresh retains body and offset" `Quick test_original_body_refresh;
                test_case "failed retry has independent pending" `Quick test_failed_retry_pending;
                test_case "workspace and original conversation" `Quick test_workspace_and_draft;
                test_case "replacement authority" `Quick test_replacement_and_authority];

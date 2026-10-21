@@ -229,6 +229,7 @@ let keeper_get_permission ?(include_thinking = false) req_path =
     (* Both tail and exact execution lookup return raw tool arguments/results,
        so query parameters cannot select a weaker door onto the same bytes. *)
     || keeper_path_ends_with req_path "/tool-calls"
+    || keeper_path_ends_with req_path "/tool-result"
   then Some Masc_domain.CanAdmin
   else None
 

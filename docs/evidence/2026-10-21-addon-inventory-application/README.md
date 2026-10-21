@@ -25,6 +25,10 @@ Six files / 62 tests pass; TypeScript exits 0. `dashboard-vitest.txt` is the act
 
 The new host behavior tests cover unreconciled reads, the exact declaration identity join, conflicting/incomplete observations, no worker side effects and four different applications with the same empty worker inventory. The TUI test checks decoded state and refused contradictory protocol values rather than new screen wording/layout assertions. These OCaml test sources have not yet executed.
 
+## Independent source review
+
+`source-review.md` records an independent local source PASS for the bottom head and its captured base/full diff. It is not a formal GitHub APPROVE, an execution receipt or a verdict on later changes. MASC code/context review must inspect the final public identities.
+
 ## Remaining execution and UI evidence
 
 Request one exact-source `addon-lifecycle` native proof and the three changed direct consumer suites (`test_lane_addon_reconcile,test_server_lane_inventory,test_tui_lane_inventory`) on the final published candidate. Dispatch acceptance is not a passing result. The native artifact must contain matching TUI/server/key-generator identities and completed behavior results. Actual On/Off/reconnect in an isolated workspace, original/new incarnations, cleanup status and original receipts need separate API and visible TUI evidence. No live operator runtime has been replaced.

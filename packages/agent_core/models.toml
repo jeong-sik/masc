@@ -1758,7 +1758,11 @@ provider_name = "glm"
 # Z.AI chat completions carries the thinking toggle in a top-level [thinking]
 # object and only replays prior reasoning under clear_thinking = false. These
 # rows declare no capability [base], so the wire fact has to be stated here.
+# The thinking-mode doc names none of these legacy GLM-4 chat models, so
+# supports_reasoning is stated false: a declared glm provider would otherwise
+# lend its base's true.
 preserve_thinking_control_format = "thinking_object_clear_thinking"
+supports_reasoning = false
 max_context_tokens = 128000
 max_output_tokens = 4096
 supports_tools = true
@@ -1770,7 +1774,11 @@ provider_name = "glm"
 # Z.AI chat completions carries the thinking toggle in a top-level [thinking]
 # object and only replays prior reasoning under clear_thinking = false. These
 # rows declare no capability [base], so the wire fact has to be stated here.
+# The thinking-mode doc names none of these legacy GLM-4 chat models, so
+# supports_reasoning is stated false: a declared glm provider would otherwise
+# lend its base's true.
 preserve_thinking_control_format = "thinking_object_clear_thinking"
+supports_reasoning = false
 max_context_tokens = 128000
 max_output_tokens = 4096
 supports_tools = true
@@ -1784,7 +1792,11 @@ provider_name = "glm"
 # Z.AI chat completions carries the thinking toggle in a top-level [thinking]
 # object and only replays prior reasoning under clear_thinking = false. These
 # rows declare no capability [base], so the wire fact has to be stated here.
+# The thinking-mode doc names none of these legacy GLM-4 chat models, so
+# supports_reasoning is stated false: a declared glm provider would otherwise
+# lend its base's true.
 preserve_thinking_control_format = "thinking_object_clear_thinking"
+supports_reasoning = false
 max_context_tokens = 128000
 max_output_tokens = 4096
 supports_tools = true

@@ -115,6 +115,17 @@ let scenario manifest =
       check bool "retirement withdraws locate availability" false (Browser_selection.snapshot ()).automation.locate;
       check int "all locate scenarios issued zero browser input" 0 !inputs)))))
 let ()=Mirage_crypto_rng_unix.use_default ();
-  let manifest=if Array.length Sys.argv=2 then Sys.argv.(1) else fail "expected bundled browser manifest path" in
+  (* The dune stanza passes the manifest it depends on, but the targeted-suite
+     runner executes the exe with no arguments. Resolve the bundled manifest in
+     that case instead of failing, so the suite can be run both ways. *)
+  let bundled_manifest () =
+    let candidates=["addons/browser/lane.toml";"../addons/browser/lane.toml";
+      "../../addons/browser/lane.toml"] in
+    match List.find_opt Sys.file_exists candidates with
+    | Some path -> path
+    | None ->
+      fail ("expected bundled browser manifest path; looked for "
+        ^ String.concat ", " candidates) in
+  let manifest=if Array.length Sys.argv=2 then Sys.argv.(1) else bundled_manifest () in
   run ~argv:[|Sys.argv.(0)|] "browser Add-on locate consumer" ["read-only",[
     test_case "selected model, current targets, withdrawal and retire" `Quick (fun () -> scenario manifest)]]

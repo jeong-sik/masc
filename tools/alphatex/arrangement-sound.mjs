@@ -159,6 +159,40 @@ export async function finishSoundPlan(project, { preparation, rendered, director
     ...(loop ? { loop: true, originSeconds: loop.start } : {}) }, { signal })
 }
 
+function renderSoundSource(source, { run, runSoundfont }) {
+  if (!['soundfont', 'vst', 'practice'].includes(source.kind)) throw new Error('Unknown local instrument source')
+  return source.kind === 'soundfont' ? renderFluidSound(source.sound, {
+    preparation: { promise: Promise.resolve({ path: source.planPath, sha256: source.planHash }),
+      cancel: new Int32Array(new SharedArrayBuffer(4)) }, outputPath: source.outputPath, run: runSoundfont,
+  }) : renderBoundVst(source.sound, { ...(source.kind === 'practice'
+    ? { frames_path: source.timelinePath, expected_timeline_sha256: source.timelineHash } : { midi_path: source.midiPath }),
+  output_path: source.outputPath, sample_rate: source.sampleRate ?? 44100, tail_seconds: 0 }, { run })
+}
+
+// Offline callers already own the preparation directory. Like the playback
+// lease, they must await the cancelled child before releasing that directory.
+export async function prepareArrangementSound(project, { sourceRoot, directory, signal,
+  run = nativeJob, runSoundfont, onProgress } = {}) {
+  signal?.throwIfAborted()
+  let child
+  const abort = () => child?.cancel()
+  signal?.addEventListener('abort', abort)
+  try {
+    const preparation = await prepareSoundSources(project, { route: { kind: 'audio' }, sourceRoot, directory, signal })
+    const rendered = []
+    for (const source of preparation.renders) {
+      signal?.throwIfAborted()
+      onProgress?.({ kind: 'sound-render', completed: rendered.length, total: preparation.renders.length })
+      child = renderSoundSource(source, { run, runSoundfont })
+      if (signal?.aborted) abort()
+      try { rendered.push({ kind: source.kind, value: await child.promise }); signal?.throwIfAborted() }
+      finally { child = null }
+    }
+    onProgress?.({ kind: 'sound-render', completed: rendered.length, total: preparation.renders.length })
+    return await finishSoundPlan(project, { preparation, rendered, directory, signal })
+  } finally { signal?.removeEventListener('abort', abort) }
+}
+
 // One parent-owned lease covers mkdir, both worker jobs, every plugin child,
 // admission and playback. A successful plan retains this root until dispose;
 // failure also releases it when no worker result ever existed.
@@ -189,13 +223,7 @@ export function startSoundArrangement({ project, route, sourceRoot, directory, r
       const rendered = []
       for (const source of preparation.renders) {
         check()
-        if (!['soundfont', 'vst', 'practice'].includes(source.kind)) throw new Error('Unknown local instrument source')
-        const child = source.kind === 'soundfont' ? renderFluidSound(source.sound, {
-          preparation: { promise: Promise.resolve({ path: source.planPath, sha256: source.planHash }),
-            cancel: new Int32Array(new SharedArrayBuffer(4)) }, outputPath: source.outputPath, run: runSoundfont,
-        }) : renderBoundVst(source.sound, { ...(source.kind === 'practice'
-          ? { frames_path: source.timelinePath, expected_timeline_sha256: source.timelineHash } : { midi_path: source.midiPath }), output_path: source.outputPath,
-          sample_rate: source.sampleRate ?? 44100, tail_seconds: 0 }, { run })
+        const child = renderSoundSource(source, { run, runSoundfont })
         children.add(child)
         try { rendered.push({ kind: source.kind, value: await child.promise }); check() }
         finally { children.delete(child) }

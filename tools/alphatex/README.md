@@ -1251,6 +1251,13 @@ recording retirement does not guarantee every original packet can be synthesized
 later: unsupported MIDI2 data or positive host-clock intervals that collapse at
 one engine control boundary are still refused during replay.
 
-Whole-arrangement SoundFont WAV export and paired-capture SoundFont realization
-remain integration work. Click/count-in and existing VST practice backing retain
-their owners.
+In the arrangement, `:wave PATH` also exports MIDI regions through their saved
+FluidSynth sound. It renders the complete source once per asset/pattern and
+keeps the original rational trim, placement and repeat clock when mixing with
+WAVs and saved VST sounds. Live MIDI routing, playback loops and practice clicks
+do not change this document export. Stop cancels the current render and waits
+for its child before releasing private fonts and audio; existing output files
+are preserved. The same engine identity and control-quantum limits apply.
+
+Paired-capture SoundFont realization remains integration work. Click/count-in
+and existing VST practice backing retain their owners.

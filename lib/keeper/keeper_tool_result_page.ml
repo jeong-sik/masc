@@ -74,7 +74,7 @@ let validate_continuation ~offset ~previous identity (page:Keeper_artifact_read.
   else match previous with
     | None when offset=0 -> Ok ()
     | None -> Error "Original result continuation has no source identity"
-    | Some (first,initial) ->
+    | Some (first,(initial : Keeper_artifact_read.page)) ->
       if String.equal first.source_id identity.source_id
          && String.equal first.sha256 identity.sha256
          && first.recorded_bytes=identity.recorded_bytes && first.is_error=identity.is_error

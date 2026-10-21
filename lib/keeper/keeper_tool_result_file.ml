@@ -46,7 +46,8 @@ let read_with_range ~read_range ~config ~keeper target =
     let rec loop snapshot context offset scan =
       let* chunk = range offset in
       let* chunk = match chunk with
-        | Some chunk -> Ok chunk | None -> Error "Original trace is no longer retained" in
+        | Some (chunk : Fs_compat.owned_regular_file_range) -> Ok chunk
+        | None -> Error "Original trace is no longer retained" in
       let* snapshot = match snapshot with
         | None -> Ok chunk.snapshot
         | Some first when Fs_compat.equal_owned_regular_file_snapshot first chunk.snapshot -> Ok first

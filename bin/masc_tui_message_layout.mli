@@ -706,20 +706,19 @@ val align_role_label : ?column:int -> style:style -> string -> string
     what tells two of them apart. Remaining column cells follow the name. *)
 
 val chat_min_terminal_cols : int
-(** The narrowest terminal the keeper chat pane renders at, derived from a
-    row's fixed chrome -- frame border and padding (4), body indent (2),
-    {!turn_rail_cells}, and the {!chat_role_label_column} floor -- plus
-    {!chat_readable_body_cells}. Below it the pane draws the resize notice
-    instead of shredding prose. *)
+(** The narrowest terminal the Keeper chat pane renders at. The default
+    bare row reserves the frame margins, two-cell body indent, one speaker
+    mark and twenty body cells. Inline metadata and pending delivery labels
+    consume their actual row budgets separately. Below this width the pane
+    draws the resize notice. *)
 
 val message_viewport_supported :
   terminal_rows:int -> terminal_cols:int -> status_rows:int -> bool
-(** Whether the full chat frame plus its final newline fits without terminal
-    scrolling. Unsupported viewports render a compact resize gate and suppress
-    message editing. The width gate admits the pane only at
-    {!chat_min_terminal_cols} or wider, where the body column keeps
-    {!chat_readable_body_cells} beside the label column, rail, indent, and
-    frame. *)
+(** Whether the chat width and history height support reading and editing.
+    Unsupported viewports show a resize notice and suppress message editing,
+    including pasted text and dropped attachments. Width uses
+    {!chat_min_terminal_cols}; height reserves the current status rows and
+    at least three history rows. *)
 
 val wrap_words : max_cells:int -> string -> string list
 (** Wrap a plain single-line string at spaces using a terminal-cell budget.

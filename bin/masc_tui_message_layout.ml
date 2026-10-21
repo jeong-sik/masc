@@ -922,28 +922,17 @@ let align_role_label ?(column = chat_role_label_column) ~style label =
     fit_middle column label
   else mark ^ " " ^ fit_middle inner label
 
-(* #32984: the width gate below is derived from a chat row's fixed chrome,
-   not chosen. Before its body, a row pays the frame's margin either side
-   ([Masc_tui_frame.outer_width] adds it), the body indent (2, in
-   {!rows_of_entry}), the turn rail
-   ({!turn_rail_cells}), and the speaker/tool label column at its floor
-   ({!chat_role_label_column}). What remains is the body, and a body reads
-   when it keeps twenty cells: three or four English words per row, so a
-   tool summary wraps at word boundaries. Under the gate this replaced --
-   thirteen columns on a text-only contract -- a 22-column terminal left
-   four body cells and "returned" drew as "retu/rned".
-
-   The derivation assumes the default [Origin_bare] row. [Origin_inline]'s
-   clock spends six further body cells; it is a user toggle, so that spend
-   is visible and self-inflicted rather than gated. *)
-(** The body-column floor the chat pane's width gate guarantees: twenty
-    cells, enough for prose to wrap at word boundaries instead of mid-word. *)
+(* The default bare conversation pays only the frame margins, the body
+   indent (2, in [body_cells_after_gutter]) and its speaker mark. Reserve
+   twenty body cells for prose. Inline metadata and pending delivery labels
+   spend their actual row budgets; they do not reserve a role column and
+   turn rail for every bare conversation. *)
 let chat_readable_body_cells = 20
 
 let chat_min_terminal_cols =
   Masc_tui_frame.outer_width
     ~inner:
-      (2 + turn_rail_cells + chat_role_label_column + chat_readable_body_cells)
+      (2 + display_width (speaker_mark Keeper) + chat_readable_body_cells)
 
 let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
   (* The fixed chrome costs eight rows. The title and operational identity use

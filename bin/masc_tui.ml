@@ -25472,6 +25472,13 @@ and is loaded on demand through keeper_skill.
               editor, so text and dropped images cannot change the draft
               behind it. *)
            ()
+       | Some (Pasted _)
+         when state.view = Keepers Keeper_message
+              && not (keeper_message_input_supported state) ->
+           (* The chat resize notice hides its composer without marking the
+              entire frame compact. Match ordinary typing admission before
+              classifying a dropped file or changing the hidden draft. *)
+           ()
        | Some (Pasted paste)
          when not dismissed_image && not compact_viewport ->
            (* A dropped or Finder-copied file arrives shell-escaped. The

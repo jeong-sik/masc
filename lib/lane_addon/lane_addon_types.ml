@@ -44,6 +44,7 @@ type refresh_policy = Every_hint | Source_changes
 type model_access = Model_disabled | Host_sampling
 type state_storage = Ephemeral | Persistent
 type tool_invocation = Direct | Host_context
+type tool_hook = Validate_input | Validate_output
 type exact_output = { name : string; schema : Yojson.Safe.t }
 type package = {
   id : string; revision : string; title : string; contributions : contribution list;
@@ -53,6 +54,7 @@ type package = {
   state_storage : state_storage;
   tool_invocation : tool_invocation;
   exported_tools : string list;
+  tool_hooks : tool_hook list;
   outputs : output_ports;
   refresh_policy : refresh_policy;
   model_access : model_access;
@@ -205,6 +207,9 @@ let package_to_json (p : package) =
      its revision. *)
   `Assoc ((match p.runtime with Docker -> []
       | Apple_container -> ["runtime", string (runtime_to_string p.runtime)])
+    @ (match p.tool_hooks with [] -> [] | hooks ->
+      ["tool_hooks", strings (List.map (function
+        | Validate_input -> "validate_input" | Validate_output -> "validate_output") hooks)])
     @ (match p.exact_outputs with [] -> []
       | outputs -> ["exact_outputs", `Assoc (List.map (fun output -> output.name, output.schema) outputs)])
     @ (if p.operator_asks then ["operator_asks", `Bool true] else [])

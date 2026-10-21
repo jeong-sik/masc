@@ -183,6 +183,11 @@ elif action == "start":
                     "inputSchema":{"type":"object", "properties":{"frames":{"type":"integer"}}}}
                 result["tools"].append(exported)
                 if mode == "duplicate_exports": result["tools"].append(exported)
+            if mode == "contract_exports":
+                schema = {"type":"object", "properties":{"frames":{"type":"integer"}},
+                    "required":["frames"], "additionalProperties":False}
+                result["tools"].append({"name":"machine_step", "inputSchema":schema,
+                    "outputSchema":schema})
             if mode == "artifacts":
                 def object_schema(properties):
                     return {"type":"object", "properties":properties,
@@ -214,6 +219,14 @@ elif action == "start":
             else:
                 result = {"content": [{"type": "text", "text": "not JSON; structuredContent is authoritative"}],
                     "structuredContent": {"rows": [], "coverage": []}}
+            if mode == "contract_exports" and request["params"]["name"] == "machine_step":
+                count_path = root / (cid + ".calls")
+                count_path.write_text(str(int(count_path.read_text()) + 1 if count_path.exists() else 1))
+                frames = arguments["frames"]
+                result = {"content":[], "structuredContent":{"frames":frames if frames >= 0 else "bad"},
+                    "_meta":{"actual_reply":True}}
+                if frames == -2:
+                    result = {"isError":True, "content":[], "_meta":{"effect":"unknown"}}
             if mode == "artifacts":
                 (root / (cid + ".arguments")).write_text(json.dumps(arguments))
                 blob = bytes([0, 255, 10]) + b"frame-state"
@@ -344,7 +357,7 @@ let package directory mode : Types.package = {
   contributions = [ Types.Observe ]; runtime = Types.Docker; image = "fixture/image";
   command = [ "observer"; mode ]; directory; skills_directory = None; action_tool = None; state_storage=Types.Ephemeral;tool_invocation=Types.Direct; exported_tools = []; outputs = [];
   binding_schema=None;presentation=Masc.Lane_addon_presentation.empty;refresh_policy=Types.Every_hint;
-  model_access=Types.Model_disabled; exact_outputs = []; operator_asks = false;
+  model_access=Types.Model_disabled; exact_outputs = []; tool_hooks = []; operator_asks = false;
   resources = { cpus = 0.5; memory_bytes = 67_108_864L;
                 pids = Some 16; max_reply_bytes = 4096 };
 }
@@ -2508,6 +2521,33 @@ let test_exported_tools_follow_worker_lifetime () = with_fixture (fun env sw dir
   check bool "missing declared export fails startup" true (Result.is_error (start_export "good"));
   check bool "ambiguous advertised export fails startup" true (Result.is_error (start_export "duplicate_exports")))
 
+let test_selected_hooks_bound_actual_dispatch () = with_fixture (fun env sw dir docker ->
+  let start mode hooks = Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:(Random_id.uuid_v7 ())
+    ~package:{(package dir mode) with exported_tools=["machine_step"];tool_hooks=hooks}
+    ~docker_command:docker () in
+  let worker = unwrap (start "contract_exports" [Types.Validate_input;Types.Validate_output]) in
+  let calls = Filename.concat dir (Worker.container_id worker ^ ".calls") in
+  check bool "invalid input is refused before RPC" true
+    (match Worker.call_exported_tool worker ~name:"machine_step" ~arguments:(`Assoc ["frames",`String "bad"]) with
+     | Error (Worker.Host_refusal (Lane_addon_call_context.Rejected _)) -> true | _ -> false);
+  check bool "no worker command was sent" false (Sys.file_exists calls);
+  let result = unwrap (Worker.call_exported_tool worker ~name:"machine_step" ~arguments:(`Assoc ["frames",`Int 1])) in
+  check bool "valid reply preserves metadata" true (result._meta = Some (`Assoc ["actual_reply",`Bool true]));
+  let raw_replies = ref 0 in
+  check bool "invalid success after dispatch is a protocol failure" true
+    (match Worker.call_exported_tool ~on_result:(fun _ -> incr raw_replies) worker
+      ~name:"machine_step" ~arguments:(`Assoc ["frames",`Int (-1)]) with
+     | Error (Worker.Protocol_failed _) -> true | _ -> false);
+  check int "raw failed-contract reply remains observable" 1 !raw_replies;
+  check string "both commands ran exactly once" "2" (In_channel.with_open_bin calls In_channel.input_all);
+  let error = unwrap (Worker.call_exported_tool worker ~name:"machine_step" ~arguments:(`Assoc ["frames",`Int (-2)])) in
+  check bool "explicit error preserves effect metadata without inventing successful output" true
+    (error.is_error = Some true && error._meta = Some (`Assoc ["effect",`String "unknown"]));
+  unwrap (Worker.stop worker);
+  check bool "selected output contract must exist before publication" true
+    (Result.is_error (start "exports" [Types.Validate_output])))
+
 let test_persistent_state_requires_exact_owner () =
   let module State = Masc.Lane_addon_worker_state in
   let owner installation_id =
@@ -2561,6 +2601,7 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "Apple stale handle preserves replacement incarnation" `Quick test_apple_stale_handle_preserves_replacement;
   test_case "Apple create receipt and resources are verified" `Quick test_apple_create_receipt_and_verified_resources;
   test_case "exported tools follow worker lifetime" `Quick test_exported_tools_follow_worker_lifetime;
+  test_case "selected hooks bound actual dispatch and never replay" `Quick test_selected_hooks_bound_actual_dispatch;
   test_case "canonical missing under external parent refuses public read" `Quick
     (test_canonical_parent_is_not_followed ~directory:false);
   test_case "canonical directory under external parent refuses public read" `Quick

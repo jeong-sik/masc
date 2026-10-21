@@ -63,6 +63,35 @@ Apple에서는 정수 vCPU와 정확한 MiB 단위 메모리를 사용하고 `pi
 
 `world.state.mode = "persistent"`인 기존 설치의 runtime을 바꿀 때는 새 설치 ID를 사용한다. 서로 다른 실행기의 같은 이름 volume은 동일한 데이터가 아니다. 기존 설치의 runtime 전환을 거절하여 빈 상태로 교체되는 일을 막고, 과거 worker 정리는 저장된 원래 runtime으로 수행한다.
 
+## 도구 Hook 선택
+
+패키지의 `[world.tools]`에 `hooks = ["validate_input", "validate_output"]`을
+선언하면 도구 호출 전 입력과 호출 후 성공 응답을 각각 검증한다. 설치 TOML의
+최상위 `tool_hooks` 배열로 그 설치만 덮어쓸 수 있다.
+
+```toml
+id = "checked-browser"
+run_id = "browser-work"
+manifest_path = "../packages/browser/lane.toml"
+tool_hooks = ["validate_input", "validate_output"]
+
+[binding]
+sources = []
+```
+
+키를 생략하면 패키지 선택을 따르고, `tool_hooks = []`이면 두 선택 검사를 끈다.
+각 Hook은 따로 선택할 수 있다. 입력 검사는 dispatch 전에 거절한다. 출력 검사는
+성공 응답의 `structuredContent`를 해당 worker가 광고한 `outputSchema`와 비교한다.
+응답이 잘못됐으면 이미 수행된 조작의 결과는 불확실하며 재전송하지 않는다.
+실패 응답은 원래 실패·효과 metadata를 유지한다.
+
+선택한 Hook의 스키마는 기존 Add-on 행동 계약의 닫힌 subset을 사용한다.
+선택한 출력 검사가 있으면 **모든 export 도구**에 지원되는 `outputSchema`가 있어야
+장착할 수 있다. 임의 JSON Schema 전체 지원을 뜻하지 않는다. Hook 변경은 설치
+revision과 worker 교체에 반영된다. 이 선택은 LLM을 호출하거나 모델 route를 바꾸지
+않는다. 브라우저 실행기와 모델 Hook의 분리 진행은
+[설계](../design/browser-addon-lifecycle.md)와 [#44150](https://github.com/jeong-sik/masc/issues/44150)에서 추적한다.
+
 ## 반영 시점과 화면 읽기
 
 서버 시작 시 한 번 읽고, 기존 maintenance cadence를 쓰는 독립 Pulse에서 다시 읽는다.

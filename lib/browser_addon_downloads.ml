@@ -151,13 +151,16 @@ let copy t path id = io (fun () ->
       Unix.fsync output;
       let* ()=check t in let* ()=check_parents parents in
       let after=Unix.fstat source in
-      let current=Unix.lstat path in
-      let* ()=if same_file before after && same_file before current
+      let current=try Ok (Unix.lstat path) with Unix.Unix_error (code,_,_) -> Error code in
+      let* ()=if same_file before after
+        && (match current with Ok stat -> same_file before stat | Error _ -> false)
         && bytes=before.st_size then Ok () else Error
           ("download source changed while copying: " ^ Yojson.Safe.to_string (`Assoc [
             "snapshotId",`String id;"before",file_observation before;
             "opened",file_observation observed;"descriptorAfter",file_observation after;
-            "pathAfter",file_observation current;"copiedBytes",`Int bytes])) in
+            "pathAfter",(match current with Ok stat -> file_observation stat
+              | Error code -> `Assoc ["unavailable",`String (Unix.error_message code)]);
+            "copiedBytes",`Int bytes])) in
       let copied=Unix.fstat output in
       let descriptor={snapshot_id=id;root_device=t.root_stat.st_dev;root_inode=t.root_stat.st_ino;
         device=copied.st_dev;inode=copied.st_ino;bytes;sha256} in

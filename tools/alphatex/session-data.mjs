@@ -105,10 +105,10 @@ export class CaptureTimeline {
       }
       track.events.push({ time, message, timestampOrigin: row.timestampOrigin, ordinal: this.ordinal++ })
       if (message.isNoteOn()) {
-        const note = { pitch: message[2], start: time, end: null }
+        const note = { pitch: type === 4 && message[3] === 3 ? (message[6] * 256 + message[7]) / 512 : message[2], start: time, end: null }
         track.notes.push(note)
-        const held = track.held.get(note.pitch) ?? []
-        held.push(note); track.held.set(note.pitch, held)
+        const held = track.held.get(message[2]) ?? []
+        held.push(note); track.held.set(message[2], held)
       } else if (message.isNoteOff()) {
         const held = track.held.get(message[2])
         if (held?.length) held.shift().end = time

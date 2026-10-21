@@ -348,6 +348,11 @@ variant independently. Inputs/groups retain separate MIDI ports. See the
 [capture conversion workflow and expression boundaries](ARRANGEMENT.md#terminal-workflow).
 Use `:capture-midi-region` on a captured MIDI region to derive only that source
 span, restoring supported entry notes/pedals and clipping its ending explicitly.
+For native MIDI2 experiments, `:edit-ump [ASSET]` keeps original packets and
+integer clocks while editing absolute Pitch7.9, full attack velocity and
+exact-onset voicings. The original recording stays intact; the returned overlay
+variant supports native audition, portable save/reopen and raw export. See
+[native UMP editing](UMP-SOURCE.md) for commands and remaining expression limits.
 
 Move the cursor with arrows; Enter inserts or removes a note. Shift+arrows moves
 the selected note. `[`/`]` changes its length, `+`/`-` changes velocity, and `g`

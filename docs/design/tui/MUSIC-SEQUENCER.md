@@ -130,6 +130,18 @@ independent of original regions, repetitions, take selection and latency
 correction. Existing practice cuts retain their reconstruction policy through
 the same owned native extraction process. All original bytes remain available.
 
+`:edit-ump [ASSET]` opens native MIDI2 attacks without the MIDI1 projection.
+An immutable overlay addresses original packet/word identities under the raw
+MIDI hash. Explicit absolute Pitch7.9, full 16-bit attack velocity and exact-onset
+voicing preserve Note Index, original clocks, release data and per-note messages.
+The child supports undo/redo, labelled harmony candidates and native audition;
+return imports an independent capture variant. Standalone and arrangement
+preparation materialize the same overlay, portable save/reopen retains it, and
+native JSONL export retains integer clocks plus original MIDI and provenance.
+The original WAV stays unchanged. Time/structure and per-note-controller edits,
+raw practice editing and MIDI2 Clip import remain tracked in #44748. See the
+[native UMP workflow](../../../tools/alphatex/UMP-SOURCE.md) for semantics and limits.
+
 Native WAV preview uses AVAudioEngine/PlayerNode buffers with pause, seek and
 looping, pinned to a CoreAudio output. External MIDI preview uses a separately
 owned CoreMIDI sender and pins a destination by unique ID. It projects the same

@@ -1,4 +1,6 @@
-import { newArrangement, validateArrangement, editArrangement, arrangementSchedule, arrangementTakes } from './arrangement.mjs'
+import { newArrangement, validateArrangement, editArrangement, arrangementSchedule, arrangementTakes, arrangementID } from './arrangement.mjs'
+import { isDeepStrictEqual } from 'node:util'
+import { umpVariantAsset } from './ump-source.mjs'
 import { midiSourcePattern } from './midi-source.mjs'
 import { captureRange, captureRegionFromSeconds } from './capture-time.mjs'
 import { practiceRange } from './practice-source.mjs'
@@ -22,6 +24,14 @@ export function arrangementEditor(project = newArrangement()) {
   return reconcile({ tick: 0, step: PPQ, lane: null, region: null, asset: null, undo: [], redo: [] }, project)
 }
 export const selectedRegion = editor => editor.project.clips.find(clip => clip.id === editor.region)
+// A verified opening snapshot can preserve an edited draft after its IO owner
+// fails. Current file verification is still required before save or playback.
+export function arrangementUmpDraft(editor, source, ump) {
+  const original = editor.project.assets.find(asset => asset.id === source.asset.id)
+  if (original?.kind !== 'capture' || !isDeepStrictEqual(original, source.asset)) throw new Error('UMP draft source no longer matches the arrangement')
+  const asset = { ...umpVariantAsset(original, source.packets, ump), id: arrangementID(editor.project.assets, 'asset') }
+  return arrangementImported(editor, { project: editArrangement(editor.project, { kind: 'asset-add', asset }), asset: asset.id })
+}
 function commit(editor, project) {
   return reconcile({ ...editor, undo: [...editor.undo, editor.project], redo: [] }, project)
 }
@@ -209,6 +219,11 @@ export function arrangementCommand(editor, line) {
       count(0); const clip = selectedRegion(editor)
       if (!clip || clip.component === 'audio' || !editor.project.assets.some(asset => asset.id === clip.asset && asset.kind === 'capture')) throw new Error('Select an original captured MIDI region first')
       return { editor, effect: { kind: command, asset: clip.asset, tick: editor.tick, cut: { offset: clip.offset, extent: clip.extent } } }
+    }
+    case 'edit-ump': {
+      count(0, 1); const asset = args[0] ?? editor.asset
+      if (!editor.project.assets.some(item => item.id === asset && item.kind === 'capture')) throw new Error('Choose a captured UMP source')
+      return { editor, effect: { kind: command, asset } }
     }
     case 'practice-midi': case 'practice-backing': {
       count(0, 1); const asset = args[0] ?? editor.asset

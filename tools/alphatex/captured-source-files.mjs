@@ -4,7 +4,8 @@ import { createReadStream } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { validateCapturedSource, validateCapturedSourceParts } from './captured-source.mjs'
-import { readCaptureFiles } from './session-data.mjs'
+import { readCaptureFiles, jsonLines } from './session-data.mjs'
+import { materializeUmp } from './ump-source.mjs'
 
 export function capturePaths(root, asset) {
   return Object.fromEntries(Object.entries(asset.parts).map(([role, part]) => [role, join(root, part.file)]))
@@ -36,6 +37,11 @@ export async function inspectCaptureAsset(root, asset, options = {}) {
   validateCapturedSource(asset)
   const { files, timeline } = await readVerifiedCapture(root, asset, options)
   captureMatches(asset, timeline)
+  if (asset.ump) {
+    const packets = []
+    for await (const packet of jsonLines(files.midi, options)) packets.push(packet)
+    materializeUmp(packets, asset.ump, asset.parts.midi.sha256)
+  }
   return files
 }
 export async function restoreArrangementCaptureTimes(project, root, options = {}) {

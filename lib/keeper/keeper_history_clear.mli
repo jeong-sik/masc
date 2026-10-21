@@ -33,7 +33,10 @@ val prepare : authority:authority -> session_dir:string -> preserve_system:bool 
     recovers from its retained payload. Fresh absent/superseded canonical remains
     without a payload; fresh undecodable canonical is removed under its lock.
     Newer/unreadable bytes and unavailable retained input are refused. The plan
-    freezes its candidate bytes and exact canonical predecessor. *)
+    freezes its candidate bytes and exact canonical predecessor. Same-turn
+    comparison accepts only an absent or valid derived session message_count;
+    other context and working-context changes remain ambiguous and refused.
+    The cleared payload records its new message_count before publication. *)
 val execute : plan -> (receipt, error) result
 (** Run only after confirmed official-session clearing. Retention and exact
     canonical installation must both be confirmed. Actual cancellation propagates,

@@ -65,7 +65,21 @@ let boundary context = Keeper_repetition_judged.read_opt context
 (* A same-turn canonical may predate input consumption, or follow a partial
    clear. Ordinals alone establish neither relationship. Accept an exact
    nonhistory body or the existing, precisely validated repetition reset. *)
+let without_derived_count checkpoint =
+  let context = Agent_core.Context.copy checkpoint.Agent_core.Checkpoint.context in
+  let* () = match Agent_core.Context.get_scoped context Session "message_count" with
+    | None -> Ok ()
+    | Some value ->
+      if Yojson.Safe.equal value (`Int (List.length checkpoint.messages)) then Ok ()
+      else Error (Invalid_clear "checkpoint session message_count disagrees with its history; reconcile before clearing") in
+  Agent_core.Context.delete_scoped context Session "message_count";
+  Ok {checkpoint with context}
 let same_turn_body ~input ~current =
+  (* Loading a Keeper working context derives this field even when the exact
+     persisted canonical did not contain it. It is history metadata only when
+     its value agrees with that checkpoint's own messages. *)
+  let* input = without_derived_count input in
+  let* current = without_derived_count current in
   let* input_boundary = boundary input.Agent_core.Checkpoint.context in
   let* current_boundary = boundary current.Agent_core.Checkpoint.context in
   let context = Agent_core.Context.copy current.context in
@@ -122,6 +136,7 @@ let prepare ~(authority:authority) ~session_dir ~preserve_system =
     let messages = kept_messages ~preserve_system original.Agent_core.Checkpoint.messages in
     let* context = Keeper_repetition_judged.reset_history original.context
       |> Result.map_error (fun error -> Invalid_clear (Keeper_repetition_judged.error_to_string error)) in
+    Agent_core.Context.set_scoped context Session "message_count" (`Int (List.length messages));
     let candidate = {original with messages;context} in
     let* snapshot = Store.exact_snapshot_of_value ~expected_session_id:authority.trace_id candidate
       |> Result.map_error (fun error -> Canonical_unreadable error) in

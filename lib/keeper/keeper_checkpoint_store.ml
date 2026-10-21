@@ -978,9 +978,11 @@ let archive_agent_core_history_best_effort ~session_dir ~retained ckpt =
    place under the read, and the bytes are not one version of it. *)
 let load_canonical_bytes_strict path =
   let unix_error error operation argument =
-    Io_error
-      (Printf.sprintf "%s(%s): %s"
-         operation argument (Unix.error_message error))
+    Read_failed
+      { cause = Os_error error
+      ; detail = Printf.sprintf "%s(%s): %s"
+          operation argument (Unix.error_message error)
+      }
   in
   let changed_while_read () =
     Read_failed

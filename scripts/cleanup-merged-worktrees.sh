@@ -31,7 +31,10 @@ git fetch origin main --quiet
 #  (1) `git branch --merged origin/main` — catches fast-forward / non-squash merges
 #  (2) `gh pr list --state merged` — catches squash-merges (common case on this repo)
 # Union both so squash-merged worktrees are actually cleaned.
-FF_MERGED="$(git branch --merged origin/main | sed 's/^[* ]*//' | grep -v '^main$' || true)"
+# `git branch` marks the branch checked out here with `*` and one checked out
+# in another worktree with `+`. The `+` ones are the branches this script is
+# after, so the marker is stripped along with the `*`.
+FF_MERGED="$(git branch --merged origin/main | sed 's/^[*+ ]*//' | grep -v '^main$' || true)"
 
 if command -v gh >/dev/null 2>&1; then
   SQUASH_MERGED="$(gh pr list --state merged --limit 500 --json headRefName --jq '.[].headRefName' 2>/dev/null || true)"
@@ -78,7 +81,6 @@ while read -r branch; do
   fi
 
   if worktree_cleanup_is_locked "$wt_path"; then
-    local owner
     owner="$(cat "$wt_path/.masc-lock" 2>/dev/null || true)"
     echo "LOCKED $wt_path (branch $branch) — skipped (held by $owner)"
     locked=$((locked+1))
@@ -86,12 +88,25 @@ while read -r branch; do
   fi
 
   if [ "$APPLY" -eq 1 ]; then
-    if git worktree remove "$wt_path" 2>/dev/null; then
+    remove_err=""
+    if remove_err="$(git worktree remove "$wt_path" 2>&1)"; then
       echo "REMOVED $wt_path (branch $branch)"
       removed=$((removed+1))
       git branch -d "$branch" 2>/dev/null || true
+    elif [ -f "$wt_path/.masc-lock" ] && ! worktree_cleanup_is_locked "$wt_path"; then
+      # Stale lock: the holder is dead, but the untracked lock file makes
+      # `git worktree remove` refuse. Drop it and retry once.
+      rm -f "$wt_path/.masc-lock"
+      if remove_err="$(git worktree remove "$wt_path" 2>&1)"; then
+        echo "REMOVED $wt_path (branch $branch) (stale lock dropped)"
+        removed=$((removed+1))
+        git branch -d "$branch" 2>/dev/null || true
+      else
+        echo "SKIP    $wt_path (remove failed after dropping stale lock: $remove_err)"
+        skipped=$((skipped+1))
+      fi
     else
-      echo "SKIP    $wt_path (remove failed — likely locked or submodule state)"
+      echo "SKIP    $wt_path (remove failed: $remove_err)"
       skipped=$((skipped+1))
     fi
   else

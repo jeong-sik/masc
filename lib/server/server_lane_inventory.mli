@@ -15,9 +15,12 @@ type exact_output = {
   configuration : Server_standalone_lane_projection.lane_configuration;
 }
 type declaration =
-  | Valid of { declaration : Lane_addon_config.declaration; exact_outputs : exact_output list }
+  | Valid of { declaration : Lane_addon_config.declaration; exact_outputs : exact_output list;
+               application : Lane_addon_application.t }
       (** [exact_outputs]: the package's declared outputs in manifest order,
-          then the tables runtime.toml has for outputs it does not declare. *)
+          then the tables runtime.toml has for outputs it does not declare.
+          [application] comes from the host's exact reconciled declaration;
+          missing, incomplete or mismatched observations remain Unknown. *)
   | Invalid of string list
   | Absent
   | Unobserved
@@ -47,6 +50,7 @@ module For_testing : sig
   val machine_publication : (Lane_addon_runtime.export_observation option, string) result -> machine_publication
   val package_rows : declarations:Lane_addon_config.snapshot ->
     instances:Lane_addon_runtime.inventory_instance list ->
+    applications:Lane_addon_runtime.configuration_application list ->
     exact_outputs:(Lane_addon_config.declaration -> exact_output list) -> row list
   val exact_outputs :
     configuration:(Runtime_schema.addon_lane -> Server_standalone_lane_projection.lane_configuration) ->

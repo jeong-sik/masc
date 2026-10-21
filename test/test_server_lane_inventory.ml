@@ -67,6 +67,9 @@ let before_reconcile () = with_fixture (fun _env _sw config root directory ->
     check string "file is discoverable before reconcile" expected
       (text "kind" (member "declaration" (member "state" row))))
     [good,"valid";broken,"invalid";first,"invalid";second,"invalid"];
+  let good_row = List.find (fun row -> member "source_path" (member "selection" row)=`String good) rows in
+  check string "unreconciled file is not applied by reading it" "unknown"
+    (text "kind" (member "application" (member "declaration" (member "state" good_row))));
   check bool "reading did not create a runtime manager" false
     (member "owner_present" (member "package_read" json) |> Yojson.Safe.Util.to_bool);
   check bool "no file bytes changed" true (before=files root);
@@ -119,7 +122,7 @@ schema = "out.json"
        (match o.configuration with
         | Server_standalone_lane_projection.Configured _ -> "configured" | Disabled _ -> "off"
         | Unconfigured _ -> "unconfigured" | Registry_unavailable _ -> "unavailable")) outputs);
-  match Inventory.For_testing.package_rows ~declarations ~instances:[]
+  match Inventory.For_testing.package_rows ~applications:[] ~declarations ~instances:[]
           ~exact_outputs:(Inventory.For_testing.exact_outputs ~configuration ~tables) with
   | [row] ->
       let listed = values "exact_outputs" (member "declaration" (member "state" (Inventory.For_testing.row_to_json row))) in
@@ -128,6 +131,38 @@ schema = "out.json"
         (List.map (fun entry -> String.concat ":" [text "output" entry; text "source" entry;
            text "kind" (member "configuration" entry)]) listed)
   | _ -> fail "one declaration row")
+
+let application_is_bound_to_the_observed_declaration () = with_fixture (fun _env _sw _config root directory ->
+  let manifest = package root in
+  write (Filename.concat directory "off.toml") ("enabled = false\n" ^ declaration manifest "off");
+  let declarations = Config.load ~directory in
+  let d = match declarations.declarations with [d] -> d | _ -> fail "one valid declaration" in
+  let observed application : Addon.configuration_application =
+    {id=d.id;source_path=d.source_path;source_revision=d.source_revision;
+     desired_revision=d.revision;enabled=d.enabled;application} in
+  let read declarations applications =
+    match Inventory.For_testing.package_rows ~declarations ~applications ~instances:[] ~exact_outputs:(fun _ -> []) with
+    | [{state=Inventory.Package_state {declaration=Some (Valid value);instances=[]};_}] -> value.application
+    | _ -> fail "one declaration remains without any worker records" in
+  List.iter (fun application ->
+    check bool "empty worker rows do not replace the host application" true
+      (read declarations [observed application] = application))
+    [Lane_addon_application.Inactive;Cleaning_workers;Failed ["cleanup refused"];Unknown ["not read"]];
+  let unknown applications = match read declarations applications with
+    | Lane_addon_application.Unknown (_ :: _) -> ()
+    | Starting_worker | Cleaning_workers | Applied _ | Inactive | Failed _ | Unknown [] ->
+        fail "a missing or mismatched host observation must remain unknown" in
+  unknown [];
+  let current = observed Lane_addon_application.Inactive in
+  List.iter (fun stale -> unknown [stale])
+    [{current with id="other"};{current with source_path="/other.toml"};
+     {current with source_revision="old-file"};{current with desired_revision="old-binding"};
+     {current with enabled=true}];
+  unknown [current;current];
+  match read {declarations with complete=false} [current] with
+  | Lane_addon_application.Unknown (_ :: _) -> ()
+  | Starting_worker | Cleaning_workers | Applied _ | Inactive | Failed _ | Unknown [] ->
+      fail "an incomplete current directory cannot confirm application")
 
 let retained_metadata () = with_fixture (fun _env _sw config root directory ->
   let masc = Workspace.masc_dir config in Unix.mkdir masc 0o700;
@@ -150,7 +185,7 @@ let retained_metadata () = with_fixture (fun _env _sw config root directory ->
   check bool "retained files do not create a manager" false owner.owner_present;
   check bool "bad sibling is partial" false owner.complete;
   check int "readable sibling metadata remains" 2 (List.length owner.instances);
-  let rows = Inventory.For_testing.package_rows ~declarations:(Config.load ~directory) ~instances:owner.instances
+  let rows = Inventory.For_testing.package_rows ~applications:[] ~declarations:(Config.load ~directory) ~instances:owner.instances
     ~exact_outputs:(fun _ -> []) in
   check bool "manual selection keeps exact incarnation" true
     (List.exists (fun (row : Inventory.row) -> row.selection=Inventory.Manual_instance {instance_id="manual";incarnation="manual"}) rows);
@@ -160,7 +195,7 @@ let retained_metadata () = with_fixture (fun _env _sw config root directory ->
        check bool "cleanup failure is retained" true (i.phase=Lane_addon_types.Failed "cleanup incomplete: refused")
    | _ -> fail "retained declaration owner disappeared");
   let incomplete : Config.snapshot = {declarations=[];paths=[];issues=[];complete=false} in
-  let rows = Inventory.For_testing.package_rows ~declarations:incomplete ~instances:owner.instances
+  let rows = Inventory.For_testing.package_rows ~applications:[] ~declarations:incomplete ~instances:owner.instances
     ~exact_outputs:(fun _ -> []) in
   check bool "partial read cannot claim declaration deletion" true
     (List.exists (fun (r : Inventory.row) -> match r.state with
@@ -175,7 +210,7 @@ let detached_history () =
     presence=Retained;phase=Detached} in
   let manual = {detached with instance_id="manual-old";incarnation="manual-old";configuration=None} in
   let empty : Config.snapshot = {declarations=[];paths=[];issues=[];complete=true} in
-  let rows declarations = Inventory.For_testing.package_rows ~declarations ~instances:[detached;manual]
+  let rows declarations = Inventory.For_testing.package_rows ~applications:[] ~declarations ~instances:[detached;manual]
     ~exact_outputs:(fun _ -> []) in
   check int "completed manual and absent declaration leave the active inventory" 0 (List.length (rows empty));
   (match rows {empty with complete=false} with
@@ -411,6 +446,7 @@ let () = run "operator lane inventory" ["read boundaries",[
   test_case "retained mismatched incarnation is a per-record issue" `Quick mismatched_retained_incarnation;
   test_case "suffix-only declaration stays editable" `Quick suffix_only_declaration_is_editable;
   test_case "all builtin and invalid/duplicate declarations before reconcile" `Quick before_reconcile;
+  test_case "application is bound to exact declaration identity" `Quick application_is_bound_to_the_observed_declaration;
   test_case "retained manual/managed owners survive partial metadata" `Quick retained_metadata;
   test_case "confirmed cleanup leaves history without crowding active inventory" `Quick detached_history;
   test_case "exact outputs follow the manifest, then the tables" `Quick exact_outputs_follow_the_manifest_then_the_tables;

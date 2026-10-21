@@ -3,6 +3,31 @@ import { parseLaneInventory } from './lane-inventory'
 import fixture from './fixtures/lane-inventory.json'
 
 describe('common Lane inventory wire', () => {
+  it('retains host application independently of worker counts and rejects contradictory activity', () => {
+    const row = (enabled: boolean, application: unknown) => ({
+      id: 'declaration//fixture/off.toml', label: 'Off package', purpose: 'Observed application',
+      selection: { kind: 'declaration', source_path: '/fixture/off.toml' },
+      state: { kind: 'package', instances: [], declaration: { kind: 'valid', enabled,
+        installation_id: 'off', run_id: 'world', package_id: 'observer', title: 'Observer',
+        source_revision: 'file-bytes', desired_revision: 'desired', application } },
+    })
+    const parse = (enabled: boolean, application: unknown) =>
+      parseLaneInventory({ ...fixture, rows: [...fixture.rows, row(enabled, application)] })
+    for (const application of [
+      { kind: 'inactive' }, { kind: 'cleaning' },
+      { kind: 'failed', messages: ['cleanup refused'] },
+      { kind: 'unknown', messages: ['not observed'] },
+    ]) {
+      expect(parse(false, application).rows.at(-1)?.state).toMatchObject({
+        instances: [], declaration: { source_revision: 'file-bytes', application },
+      })
+    }
+    expect(() => parse(false, { kind: 'applied', instance_id: 'old' })).toThrow()
+    expect(() => parse(true, { kind: 'inactive' })).toThrow()
+    expect(() => parse(false, { kind: 'unknown', messages: [] })).toThrow()
+    expect(() => parse(false, undefined)).toThrow()
+    expect(() => parse(false, { kind: 'missing-worker-means-clean' })).toThrow()
+  })
   it('keeps every machine activity independent of publication and rejects missing or malformed activity', () => {
     for (const id of ['machine/msx', 'machine/dos']) {
       for (const activity of ['on', 'off', 'unobserved']) {
@@ -78,7 +103,7 @@ describe('common Lane inventory wire', () => {
     const packageRow = { id: 'declaration//fixture/lane-addons/demo.toml', label: 'demo.toml', purpose: 'Demo',
       selection: { kind: 'declaration', source_path: '/fixture/lane-addons/demo.toml' },
       state: { kind: 'package', declaration: { kind: 'valid', enabled: false, installation_id: 'demo',
-        run_id: 'world', package_id: 'demo-package', title: 'Demo', desired_revision: 'inputs' },
+        run_id: 'world', package_id: 'demo-package', title: 'Demo', desired_revision: 'inputs', source_revision: 'source', application: { kind: 'cleaning' } },
       instances: [{ instance_id: 'retained-1', incarnation: 'retained-1', run_id: 'world', package_id: 'demo-package',
         title: 'Demo', package_revision: 'package-rev', presence: 'retained', phase: { kind: 'failed', message: 'cleanup unconfirmed' },
         applied_revision: 'inputs' }] } }

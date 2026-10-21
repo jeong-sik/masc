@@ -21,7 +21,7 @@ const coverageSchema = Schema.Struct({
 const instanceConfigurationSchema = Schema.Struct({
   id: text, source_path: text, revision: text,
 })
-const applicationSchema = Schema.Union(
+export const laneAddonApplicationSchema = Schema.Union(
   Schema.Struct({ kind: Schema.Literal('starting') }),
   Schema.Struct({ kind: Schema.Literal('cleaning') }),
   Schema.Struct({ kind: Schema.Literal('applied'), instance_id: text }),
@@ -35,7 +35,7 @@ const configurationSchema = Schema.Struct({
   declarations: Schema.Array(Schema.Struct({
     id: text, source_path: text, enabled: Schema.Boolean, source_revision: text, desired_revision: text,
     applied_revision: nullableText, instance_id: nullableText,
-    application: applicationSchema,
+    application: laneAddonApplicationSchema,
   }).pipe(Schema.filter(declaration => {
     switch (declaration.application.kind) {
       case 'starting': case 'applied': return declaration.enabled
@@ -94,7 +94,7 @@ export type LaneAddonInstance = Omit<Schema.Schema.Type<typeof instanceSchema>, 
 export type LaneAddonSnapshot = Omit<Schema.Schema.Type<typeof snapshotSchema>, 'instances'> & {
   readonly instances: readonly LaneAddonInstance[]
 }
-export type LaneAddonApplication = Schema.Schema.Type<typeof applicationSchema>
+export type LaneAddonApplication = Schema.Schema.Type<typeof laneAddonApplicationSchema>
 export type LaneAddonSlice = Schema.Schema.Type<typeof sliceSchema>
 export type LaneAddonActionReceipt = Schema.Schema.Type<typeof actionReceiptSchema>
 export type LaneAddonActionRequest = {

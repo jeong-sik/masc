@@ -14,8 +14,15 @@ let phase = function
   | Detached -> "detached history"
 let instance_summary (item : instance) =
   (match item.presence with Live -> "live " | Retained -> "retained ") ^ phase item.phase
+let application_summary : Masc.Lane_addon_application.t -> string = function
+  | Starting_worker -> "worker startup pending"
+  | Cleaning_workers -> "worker cleanup pending"
+  | Applied id -> "worker running: " ^ id
+  | Inactive -> "worker cleanup confirmed"
+  | Failed messages -> "application failed: " ^ String.concat "; " messages
+  | Unknown messages -> "application unknown: " ^ String.concat "; " messages
 let declaration_summary = function
-  | Valid value -> if value.enabled then "enabled" else "configured off"
+  | Valid value -> (if value.enabled then "configured on" else "configured off") ^ "; " ^ application_summary value.application
   | Invalid _ -> "declaration invalid"
   | Absent -> "declaration absent"
   | Unobserved -> "declaration not observed"
@@ -45,10 +52,9 @@ let row_summary (row : row) = match row.state with
       ^ (if registered then "executor registered" else "executor not registered")
   | Machine_state (activity,publication) -> machine_activity_label activity ^ "; " ^ machine_publication_label publication
   | Package_state {declaration;instances} ->
-      let declared = match declaration, instances with
-        | None, _ -> "manual attachment"
-        | Some (Valid {enabled=false;_}), _::_ -> "off requested"
-        | Some ((Valid _ | Invalid _ | Absent | Unobserved) as value), _ -> declaration_summary value in
+      let declared = match declaration with
+        | None -> "manual attachment"
+        | Some value -> declaration_summary value in
       declared ^ " · " ^ (match instances with
         | [] -> "no worker observed"
         | values -> String.concat "; " (List.map instance_summary values))
@@ -123,7 +129,7 @@ let detail_lines (row : row) =
          (match declaration with
           | None -> []
           | Some (Valid value) -> ["Installation: " ^ value.installation_id; "Run: " ^ value.run_id;
-              "Package: " ^ value.package_id ^ " · " ^ value.title; "Desired revision: " ^ value.desired_revision]
+              "Package: " ^ value.package_id ^ " · " ^ value.title; "Desired revision: " ^ value.desired_revision; "Source revision: " ^ value.source_revision]
           | Some (Invalid messages) -> List.map (fun message -> "Declaration error: " ^ message) messages
           | Some Absent -> ["No declaration was observed in the complete directory reading; retained worker state is separate."]
           | Some Unobserved -> ["Directory reading is incomplete; declaration absence is not established."])

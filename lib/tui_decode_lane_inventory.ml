@@ -21,7 +21,8 @@ type exact_output = { output : string; source : exact_output_source; configurati
 type declaration =
   | Valid of {
       installation_id : string; enabled : bool; run_id : string; package_id : string;
-      title : string; desired_revision : string;
+      title : string; desired_revision : string; source_revision : string;
+      application : Lane_addon_application.t;
       exact_outputs : exact_output list;
     }
   | Invalid of string list
@@ -145,17 +146,44 @@ let exact_outputs json =
   if List.length (List.sort_uniq String.compare names) <> List.length names
   then error "an exact output is listed twice" else Ok outputs
 
+let application json =
+  let* tag = kind json in
+  let single value = let* _ = fields ["kind"] json in Ok value in
+  let messages make =
+    let* f = fields ["kind";"messages"] json in
+    let* messages = get (list nonblank) "messages" f in
+    match messages with
+    | [] -> error "application has no diagnostics"
+    | _ :: _ -> Ok (make messages) in
+  match tag with
+  | "starting" -> single Lane_addon_application.Starting_worker
+  | "cleaning" -> single Lane_addon_application.Cleaning_workers
+  | "inactive" -> single Lane_addon_application.Inactive
+  | "applied" ->
+      let* f = fields ["kind";"instance_id"] json in
+      Result.map (fun id -> Lane_addon_application.Applied id) (get nonblank "instance_id" f)
+  | "failed" -> messages (fun values -> Lane_addon_application.Failed values)
+  | "unknown" -> messages (fun values -> Lane_addon_application.Unknown values)
+  | other -> error ("unknown application state " ^ other)
+
 let declaration json =
   let* tag = kind json in
   match tag with
   | "valid" ->
-      let* f = fields ["kind";"enabled";"installation_id";"run_id";"package_id";"title";"desired_revision";"exact_outputs"] json in
+      let* f = fields ["kind";"enabled";"installation_id";"run_id";"package_id";"title";"desired_revision";"source_revision";"application";"exact_outputs"] json in
       let* enabled = get bool "enabled" f in
       let* installation_id = get nonblank "installation_id" f in let* run_id = get nonblank "run_id" f in
       let* package_id = get nonblank "package_id" f in let* title = get nonblank "title" f in
       let* desired_revision = get nonblank "desired_revision" f in
+      let* source_revision = get nonblank "source_revision" f in
+      let* application = get application "application" f in
+      let* () = match application with
+        | Lane_addon_application.Starting_worker | Applied _ ->
+            if enabled then Ok () else error "disabled declaration cannot have an active application"
+        | Inactive -> if enabled then error "enabled declaration cannot have an inactive application" else Ok ()
+        | Cleaning_workers | Failed _ | Unknown _ -> Ok () in
       let* exact_outputs = get exact_outputs "exact_outputs" f in
-      Ok (Valid {installation_id;enabled;run_id;package_id;title;desired_revision;exact_outputs})
+      Ok (Valid {installation_id;enabled;run_id;package_id;title;desired_revision;source_revision;application;exact_outputs})
   | "invalid" -> let* f = fields ["kind";"messages"] json in
       let* messages = get (list string) "messages" f in
       if messages = [] then error "invalid declaration has no diagnostics" else Ok (Invalid messages)

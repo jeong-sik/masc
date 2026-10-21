@@ -27,7 +27,8 @@ type exact_output = { output : string; source : exact_output_source; configurati
 type declaration =
   | Valid of {
       installation_id : string; enabled : bool; run_id : string; package_id : string;
-      title : string; desired_revision : string;
+      title : string; desired_revision : string; source_revision : string;
+      application : Lane_addon_application.t;
       exact_outputs : exact_output list;  (** Declared ones in manifest order, then table-only ones. *)
     }
   | Invalid of string list

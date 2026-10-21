@@ -10,20 +10,9 @@ import { html } from 'htm/preact'
 import { useRef } from 'preact/hooks'
 import type { TelemetryEntry } from '../../api/dashboard'
 import { selectEntity, detailSelection } from './detail-selection-store'
-import { entryTimestampMs, isToolCall, useTrackBucketCount } from './observatory-utils'
-
-function isFailure(entry: TelemetryEntry): boolean {
-  if (entry.success === false) return true
-  if (entry.success === true) return false
-  const errorField = entry.error
-  return errorField != null && errorField !== ''
-}
-
-function toolName(entry: TelemetryEntry): string {
-  if (typeof entry.tool_name === 'string') return entry.tool_name
-  if (typeof entry.name === 'string') return entry.name
-  return '?'
-}
+import {
+  entryTimestampMs, isToolCall, isToolCallFailure, toolCallName, toolCallOutcomeWord, useTrackBucketCount,
+} from './observatory-utils'
 
 function durationMs(entry: TelemetryEntry): number {
   return typeof entry.duration_ms === 'number' && Number.isFinite(entry.duration_ms)
@@ -67,7 +56,7 @@ export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
     for (const { entry, ts } of toolEvents) {
       const pct = (ts - windowStart) / span
       const index = Math.min(bucketCount - 1, Math.max(0, Math.floor(pct * bucketCount)))
-      const failure = isFailure(entry)
+      const failure = isToolCallFailure(entry)
       const ms = durationMs(entry)
       const existing = buckets.get(index)
       if (existing) {
@@ -107,8 +96,8 @@ export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
           ? html`<div class="absolute inset-0 flex items-center justify-center text-3xs text-text-dim">이 시간 범위에 도구 호출 없음</div>`
           : markers.map(({ entry, ts, count, failureCount: bucketFailures, maxMs }) => {
               const pct = ((ts - windowStart) / span) * 100
-              const failed = bucketFailures > 0 || isFailure(entry)
-              const name = toolName(entry)
+              const failed = bucketFailures > 0 || isToolCallFailure(entry)
+              const name = toolCallName(entry)
               const selected = detailSelection.value
               const isSelected = selected !== null
                 && selected.kind === 'tool_call'
@@ -117,7 +106,7 @@ export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
                 <span
                   class="ob-call ${failed ? 'bad' : ''} ${isSelected ? 'ring-1 ring-accent-fg' : ''}"
                   style="left: ${pct}%; height: ${barHeightPct(maxMs)}%;"
-                  title=${`${new Date(ts).toLocaleTimeString()} · ${name} · ${maxMs}ms · ${failed ? 'failed' : 'ok'}${count > 1 ? ` · ${count} calls` : ''}`}
+                  title=${`${new Date(ts).toLocaleTimeString()} · ${name} · ${maxMs}ms · ${failed ? 'failed' : toolCallOutcomeWord(entry)}${count > 1 ? ` · ${count} calls` : ''}`}
                   onClick=${(e: MouseEvent) => {
                     e.stopPropagation()
                     selectEntity({ kind: 'tool_call', entry, ts, bucketCount: count })

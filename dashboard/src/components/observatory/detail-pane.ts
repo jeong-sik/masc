@@ -9,22 +9,31 @@
 import { html } from 'htm/preact'
 import type { TelemetryEntry } from '../../api/dashboard'
 import { detailSelection, clearSelection, type DetailSelection } from './detail-selection-store'
+import { toolCallName, toolCallOutcome } from './observatory-utils'
+import type { RecordedToolOutcome } from '../../lib/recorded-tool-outcome'
 
 function selectionTitle(selection: DetailSelection): string {
   const source = typeof selection.entry.source === 'string' ? selection.entry.source : '?'
   const eventType = typeof selection.entry.event_type === 'string' ? selection.entry.event_type : ''
   if (selection.kind === 'tool_call') {
-    const name = typeof selection.entry.tool_name === 'string'
-      ? selection.entry.tool_name
-      : (typeof selection.entry.name === 'string' ? selection.entry.name : '?')
-    return `도구 · ${name}`
+    return `도구 · ${toolCallName(selection.entry)}`
   }
   return eventType ? `${source}:${eventType}` : source
 }
 
-function outcomeTag(entry: TelemetryEntry): { label: string; tone: 'ok' | 'bad' } | null {
-  if (entry.success === true) return { label: 'success', tone: 'ok' }
-  if (entry.success === false) return { label: 'failure', tone: 'bad' }
+// Every recorded outcome gets its own badge: a deferred, unsettled or malformed
+// row is not drawn as a success or a failure.
+const OUTCOME_TAGS: Record<RecordedToolOutcome, { label: string; tone: 'ok' | 'bad' | 'warn' }> = {
+  succeeded: { label: 'success', tone: 'ok' },
+  failed: { label: 'failure', tone: 'bad' },
+  deferred: { label: 'deferred', tone: 'warn' },
+  unsettled: { label: 'unsettled', tone: 'warn' },
+  malformed: { label: 'malformed', tone: 'bad' },
+}
+
+function outcomeTag(entry: TelemetryEntry): { label: string; tone: 'ok' | 'bad' | 'warn' } | null {
+  const outcome = toolCallOutcome(entry)
+  if (outcome !== null) return OUTCOME_TAGS[outcome]
   const err = entry.error
   if (err != null && err !== '') return { label: 'error', tone: 'bad' }
   return null

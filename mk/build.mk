@@ -19,7 +19,8 @@ dev-dashboard:
 # Build everything: main masc + Preact dashboard.
 build-all: build
 
-# Build and install local binaries into ~/.local/bin (or PREFIX) and refresh registered browser-lane native hosts
+# Build and install local binaries into ~/.local/bin (or PREFIX) and refresh registered browser-lane native hosts.
+# Needs a workspace to check first: MASC_BASE_PATH, or run the script with --base-path.
 install:
 	bash scripts/install-local-build.sh $(if $(PREFIX),--prefix "$(PREFIX)")
 

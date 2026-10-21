@@ -20,8 +20,8 @@
 # A lane set up with `masc browser-lane-setup --mode bidi` or `--mode host`
 # registers no manifest, so the manifests cannot lead to it. The workspace this
 # install works with (--base-path, or the one masc would use) is brought up as
-# well when masc's own lookup resolved it, its lane is installed (a launcher
-# and its declaration) and no manifest already covers it, through
+# well when its lane is installed (a launcher and its declaration) and no
+# manifest already covers it, through
 # `masc browser-lane-setup --mode host`, which writes the host and the launcher
 # and leaves runtime.toml alone. A lane that has an extension and no manifest
 # here is named on stderr and left as it is: a host replaced beside an old
@@ -31,9 +31,11 @@
 # Before anything is replaced, the new build judges the runtime.toml of the
 # workspace its server runs on (#39311) and reads every durable store there,
 # as the deploy preflight does (#43483). A refusal leaves every binary and
-# process as it was. Until #39431 makes the check required, an install that
-# cannot run it (no workspace found, no helper in --build-dir) says so on one
-# WARN line and installs as before.
+# process as it was. An install that cannot run the check stops the same way,
+# with exit status 2: no workspace found, no helper in --build-dir, or a helper
+# that predates the check. A workspace that does not exist yet has no
+# runtime.toml to judge (the server creates it on its first start), so the
+# install says so and goes on.
 #
 # The guest exec shim of a microVM workspace goes with the server too. The
 # release installer places it (RFC-0427 B-2); a workspace deployed from local
@@ -76,7 +78,6 @@ guest_shim=true
 custom_build_dir=false
 base_path=""
 workspace_root=""
-workspace_state=""
 install_args=("$@")
 case "$(uname -s)" in
   Darwin) manifest_dir="$HOME/Library/Application Support/Mozilla/NativeMessagingHosts" ;;
@@ -97,12 +98,6 @@ while [ $# -gt 0 ]; do
     *) echo "install-local-build: unknown option: $1" >&2; exit 2 ;;
   esac
 done
-
-# Keep an explicitly selected workspace protected even when the preflight
-# helper is unavailable or predates resolve-workspace. A successful install
-# still cleans the default build tree, and the selected path may live inside
-# that tree.
-workspace_root="$base_path"
 
 # Use the same lock as dune-local.sh for the complete installation transaction.
 # Releasing it after build permits another install's clean to remove our input
@@ -140,9 +135,14 @@ fi
 # still change a value this build refuses. The helper names the workspace the
 # way masc does; this script only reads its answer.
 preflight_helper="$build_dir/deployment_preflight_helper.exe"
-required_from="required from the next version: https://github.com/jeong-sik/masc/issues/39431"
+if [ "$skip_build" = true ]; then
+  build_hint="Build it, or drop --skip-build."
+else
+  build_hint="Build it into $build_dir."
+fi
 if [ ! -x "$preflight_helper" ]; then
-  echo "install-local-build: WARN runtime.toml not checked: $preflight_helper is missing; build it or drop --skip-build ($required_from)" >&2
+  echo "install-local-build: runtime.toml not checked: $preflight_helper is missing; nothing installed. $build_hint" >&2
+  exit 2
 else
   resolve_args=(resolve-workspace)
   if [ -n "$base_path" ]; then
@@ -216,10 +216,16 @@ else
       fi
       ;;
     none)
-      echo "install-local-build: WARN runtime.toml not checked: no workspace found; pass --base-path DIR or set MASC_BASE_PATH ($required_from)" >&2
+      if [ -n "$base_path" ]; then
+        echo "install-local-build: runtime.toml not checked: $preflight_helper could not resolve --base-path $base_path to a workspace; nothing installed." >&2
+      else
+        echo "install-local-build: runtime.toml not checked: no workspace found; nothing installed. Pass --base-path DIR or set MASC_BASE_PATH." >&2
+      fi
+      exit 2
       ;;
     old_helper)
-      echo "install-local-build: WARN runtime.toml not checked: $preflight_helper predates the check (no resolve-workspace); build it or drop --skip-build ($required_from)" >&2
+      echo "install-local-build: runtime.toml not checked: $preflight_helper predates the check (no resolve-workspace); nothing installed. $build_hint" >&2
+      exit 2
       ;;
     *)
       echo "install-local-build: runtime.toml not checked: $preflight_helper returned an invalid workspace answer; nothing installed. Its error output:" >&2
@@ -237,19 +243,8 @@ fi
 # fine (#39224). Release install.sh already ships both (L1083, L1415-L1416);
 # this keeps a local build install on the same footing. The pair is installed
 # together or not at all: a gate without its helper would fall back to whatever
-# it finds next, which is the mismatch this fixes.
-#
-# --skip-build without a helper is not just "no pair to add": if the prefix
-# already holds an older pair from a previous install, upgrading the server
-# alone would leave that old gate callable, still reporting the old build's
-# verdict against the new server -- the exact stale state #39224 describes.
-# Refuse the whole install rather than leave that half-upgraded, the same way
-# a refused runtime.toml above leaves nothing installed.
-if [ ! -x "$build_dir/deployment_preflight_helper.exe" ] \
-   && { [ -e "$prefix/masc-check-runtime-deployment-preflight" ] || [ -e "$prefix/masc-deployment-preflight-helper" ]; }; then
-  echo "install-local-build: $prefix already holds a deployment preflight pair, but $build_dir/deployment_preflight_helper.exe is missing to replace it; nothing installed. Build the helper (drop --skip-build) or remove the stale pair yourself first." >&2
-  exit 1
-fi
+# it finds next, which is the mismatch this fixes. The helper is required above,
+# so every install replaces the pair together with the server.
 
 # The guest shim is staged before any binary is replaced, so an asset that
 # fails its checksum leaves the prefix and the workspace as they were. The
@@ -281,7 +276,6 @@ guest_shim_asset_timeout_s=120
 # install under set -e.
 refresh_guest_shim() (
   [ "$guest_shim" = true ] || exit 0
-  [ -n "$workspace_root" ] || exit 0
   shim_dir="$workspace_root/.masc/microvm/shim"
   shim="$shim_dir/masc-exec-shim"
   sidecar="$shim.sha256"
@@ -369,15 +363,11 @@ mkdir -p "$prefix"
 install -m 755 "$build_dir/main_eio.exe" "$prefix/masc"
 install -m 755 "$build_dir/masc_tui.exe" "$prefix/masc-tui"
 install -m 755 "$build_dir/masc_browser_host.exe" "$prefix/masc-browser-host"
-if [ -x "$build_dir/deployment_preflight_helper.exe" ]; then
-  install -m 755 "$build_dir/deployment_preflight_helper.exe" "$prefix/masc-deployment-preflight-helper"
-  install -m 755 "$repo/scripts/check-runtime-deployment-preflight.sh" "$prefix/masc-check-runtime-deployment-preflight"
-  echo "installed masc, masc-tui, masc-browser-host, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight into $prefix"
-else
-  echo "installed masc, masc-tui, masc-browser-host into $prefix (no deployment preflight pair: $build_dir/deployment_preflight_helper.exe is missing)"
-fi
+install -m 755 "$build_dir/deployment_preflight_helper.exe" "$prefix/masc-deployment-preflight-helper"
+install -m 755 "$repo/scripts/check-runtime-deployment-preflight.sh" "$prefix/masc-check-runtime-deployment-preflight"
+echo "installed masc, masc-tui, masc-browser-host, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight into $prefix"
 
-python3 - "$prefix/masc" "$prefix/masc-browser-host" "$manifest_dir" "$workspace_root" "$workspace_state" <<'PY'
+python3 - "$prefix/masc" "$prefix/masc-browser-host" "$manifest_dir" "$workspace_root" <<'PY'
 import fcntl
 import filecmp
 import json
@@ -389,12 +379,10 @@ import subprocess
 import sys
 
 masc, binary, manifest_dir = sys.argv[1], sys.argv[2], Path(sys.argv[3])
-workspace = Path(sys.argv[4]) if sys.argv[4] else None
-# "resolved" only when the workspace is the answer of masc's own lookup (the
-# deployment preflight helper), which trims and normalizes the path as every
-# masc command does; a path this shell was merely given is not the one masc
-# would write to.
-workspace_resolved = sys.argv[5] == "resolved"
+# The answer of masc's own lookup (the deployment preflight helper), which trims
+# and normalizes the path as every masc command does; a path this shell was
+# merely given is not the one masc would write to.
+workspace = Path(sys.argv[4])
 launcher_suffix = Path(".masc/browser-lane/host/launch")
 
 registered = []
@@ -444,18 +432,7 @@ def lane_has_extension(base):
         return False
 
 unregistered = []
-if workspace is None:
-    pass
-elif not workspace_resolved:
-    # masc may write to another path than the one this shell was given, so the
-    # host is not replaced on a guess. Said only where a lane is there to skip:
-    # the runtime.toml check has already said once that nothing was resolved.
-    if lane_installed(workspace) and not any(same_directory(workspace, base) for _, base, _ in registered):
-        print(f"install-local-build: WARN the browser lane host of {workspace} is not refreshed: "
-              "masc's own lookup did not resolve that workspace (the runtime.toml check above says "
-              "why); run masc browser-lane-setup --mode host with --base-path for it",
-              file=sys.stderr)
-elif lane_installed(workspace) and not any(same_directory(workspace, base) for _, base, _ in registered):
+if lane_installed(workspace) and not any(same_directory(workspace, base) for _, base, _ in registered):
     if lane_has_extension(workspace):
         # Its manifest is in another directory than this one. A host replaced
         # beside an extension that is not would put the two on different

@@ -164,6 +164,10 @@ registered Firefox browser-lane host from the new build and stops the host
 processes those workspaces started; the extension reconnects to the new copy.
 A workspace that holds a release guest shim for microVM Keepers gets the shim
 of the release the build names (`docs/MICROVM-REMOTE-RUNBOOK.md`).
+Before it replaces anything, the script checks the workspace's `runtime.toml`
+and stored state with the new build, and installs nothing (exit status 2) when
+it cannot: pass `--base-path DIR` or set `MASC_BASE_PATH` when no workspace is
+found.
 
 `./quickstart.sh` seeds a workspace under `~/masc-quickstart`, starts the
 server, and writes an MCP bearer to `.masc/config/mcp-client.env`. It starts

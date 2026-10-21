@@ -157,6 +157,8 @@ ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 한 번에 빌드해 `~/.local/bin`에 복사합니다. `eval "$(opam env)"`를 적용한 셸에서 실행하세요. 이 스크립트는 등록된
 Firefox browser-lane host도 새 빌드로 다시 설치하고, 그 작업 공간에서 실행 중인 host 프로세스를
 종료합니다. 확장은 새 사본으로 다시 연결합니다.
+아무것도 바꾸기 전에 새 빌드로 작업 공간의 `runtime.toml`과 저장 상태를 검사하고, 검사할 수 없으면(작업 공간을
+찾지 못하면 `--base-path DIR`을 주거나 `MASC_BASE_PATH`를 설정하세요) 아무것도 설치하지 않고 종료 코드 2로 끝납니다.
 
 `./quickstart.sh`는 `~/masc-quickstart` 아래에 작업 공간을 만들고, 서버를
 띄우고, MCP bearer를 `.masc/config/mcp-client.env`에 씁니다. Keeper는 띄우지

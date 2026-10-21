@@ -663,10 +663,11 @@ let handle_act ~base_path ~tool_name ~start_time args =
 
 (* Work only a BiDi connection serves, refused because no listed connection
    serves it, has the server start the Keeper's BiDi connection
-   (RFC-browser-keeper-firefox §3.5): with none listed, with the chosen one
-   gone or of another transport, or with several to choose from when none of
-   them serves it. The request itself is not sent there: its tab and point
-   were observed on another connection, or on none. *)
+   (RFC-browser-keeper-firefox §3.5): with the chosen one gone or of another
+   transport. An interact request always names a tab, and a tab names the
+   connection it was observed on, so it never reaches this with no connection
+   or with several to choose from. The request itself is not sent there: its
+   tab and point were observed on another connection. *)
 let bidi_start_for verb (error : Browser_lane.selection_error) =
   match Browser_lane.live_capability verb with
   | None -> None
@@ -675,8 +676,8 @@ let bidi_start_for verb (error : Browser_lane.selection_error) =
       List.equal ( = ) (Browser_lane.live_transports_serving capability) [ Browser_lane.Webdriver_bidi ] in
     let wanting_a_connection =
       match error with
-      | Browser_lane.No_live_client | Browser_lane.Selected_client_disconnected _
-      | Browser_lane.Transport_unsupported _ | Browser_lane.Ambiguous_clients _ -> true
+      | Browser_lane.Selected_client_disconnected _ | Browser_lane.Transport_unsupported _ -> true
+      | Browser_lane.No_live_client | Browser_lane.Ambiguous_clients _
       | Browser_lane.Activity_rejected _ -> false in
     let served () =
       List.exists

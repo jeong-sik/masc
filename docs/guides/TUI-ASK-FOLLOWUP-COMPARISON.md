@@ -181,6 +181,8 @@ stay in the denominator; valid partial source intervals survive a later read
 failure. Markdown displays coverage and all three intervals separately per
 source. `comparison.source_metrics` uses the same complete declared conditions,
 disjoint cohorts and evidence-error refusal as overall descriptive deltas.
+Intervals include applied and rejected handling; inspect their coverage beside
+the means rather than treating the means as accepted-data latency.
 
 These are read-pipeline observations. Source snapshots remain opaque, and the
 report still cannot join them to verified original Task work or certify a real

@@ -29,6 +29,9 @@ let grant broker source marker =
 let claim broker id = ok (Broker.claim broker ~id ~actor ~route ~verb)
 let descriptor = function Broker.Snapshot descriptor -> descriptor
   | Published _ -> fail "first import must own a snapshot"
+let publication_is expected = function
+  | Broker.Published actual -> Yojson.Safe.equal actual expected
+  | Snapshot _ -> false
 let publish root descriptor =
   let path=ok (Broker.snapshot_path ~directory:root ~snapshot_id:descriptor.Broker.snapshot_id) in
   ok (Masc.Browser_download_artifact.publish ~base_path:root path)
@@ -50,10 +53,10 @@ let durable_roundtrip () = with_download (fun root source contents broker ->
   commit broker id receipt;commit broker id receipt;release broker id;
   let another=grant broker source marker in
   check bool "each call owns a distinct grant" true (id<>another);
-  check bool "cached snapshot reuses durable publication" true (claim broker another=Broker.Published receipt);
+  check bool "cached snapshot reuses durable publication" true (publication_is receipt (claim broker another));
   commit broker another receipt;
   Broker.revoke broker;
-  check bool "committed receipt remains readable after retirement" true (claim broker id=Broker.Published receipt);
+  check bool "committed receipt remains readable after retirement" true (publication_is receipt (claim broker id));
   check bool "wrong caller cannot settle after retirement" true
     (Result.is_error (Broker.release broker ~id ~actor:"keeper/other" ~route ~verb));
   release broker another;

@@ -521,6 +521,165 @@ let test_installation_identity_is_canonical_and_kind_bound () =
       (Result.is_error (Owner.installation_of_id encoded)))
     ["curator";"[\"other\",\"curator\"]";"[\"configuration\",\"\"]";
      "[\"configuration\", \"curator\"]";"[\"manual\",\"curator\",false]"]
+module Observation = Workspace_memory_observation_receipt
+module Receipt = Lane_addon_request_receipt
+let prepare_observation_result base_path store (record:Owner.retained) ~now =
+  Consumer.For_testing.prepare_observation ~store:(Store.create ~root:(Store.root store))
+    ~base_path ~request_id:record.request_id ~now
+let prepare_observation base_path store record ~now =
+  prepare_observation_result base_path store record ~now |> accepted
+let observed_completion (observation:Consumer.observation) = match observation.completion with
+  | Some completion -> completion | None -> fail "expected original domain completion receipt"
+let never_clock () = fail "original receipt retry must not obtain a new time"
+let owner_file store (record:Owner.retained) = Filename.concat
+  (Filename.concat (Filename.concat (Store.root store) "tool-request-owners") (Store.digest record.scope))
+  (Store.digest record.request_id ^ ".json")
+let test_typed_observer_intents_follow_original_commit_without_runtime ()=with_workspace (fun base_path store ->
+  let capture,output=classification base_path ["Original fact for observation"] in
+  let root=retain_capture store capture in
+  let first=prepare_observation base_path store root ~now:(fun () -> 10.) in
+  check bool "captured original has no invented completion" true (first.completion=None);
+  check bool "observer intent leaves original primary phase Captured" true
+    (Progress.phase first.original.progress=Progress.Captured);
+  check int "preparing an observation does not commit a domain judgment" 0
+    (List.length (Ledger.dispositions (get (Ledger.load ~base_path))));
+  let path=owner_file store first.original in
+  let bytes=Fs_compat.load_file path and identity=Unix.stat path in
+  let again=prepare_observation base_path store first.original ~now:never_clock in
+  let current=Unix.stat path in
+  check string "unchanged pending receipt preserves journal bytes" bytes (Fs_compat.load_file path);
+  check bool "unchanged pending receipt preserves journal identity" true
+    (identity.st_dev=current.st_dev && identity.st_ino=current.st_ino && identity.st_mtime=current.st_mtime);
+  let pending=advance store again.original Progress.Dispatch_intended in
+  let judgment=`Assoc ["status",`String "answered";"slot",`String "original-provider";"output",output;
+    "usage",`Assoc ["input_tokens",`Int 23;"output_tokens",`Int 7]] in
+  let judged=advance store pending (Progress.Judgment_retained judgment) in
+  let before_save=prepare_observation base_path store judged ~now:never_clock in
+  check bool "model judgment alone is not a committed completion" true (before_save.completion=None);
+  let finished=settle ~save:(save base_path) base_path store before_save.original |> accepted |> committed in
+  let observed=prepare_observation base_path store finished ~now:(fun () -> 8.) in
+  let completion=observed_completion observed in
+  check (float 0.) "first original observer time survives domain commit" 10. observed.registration.receipt.observed_at;
+  check (option string) "selected slot is the original answering slot" (Some "original-provider") completion.selected_slot;
+  check bool "only actually reported basic usage is retained" true
+    (completion.provider_usage=Some {Exact.input_tokens=23;output_tokens=7});
+  (match completion.disposition with Observation.Confirmed_commit commit -> check json "full original final remains bound" judgment commit.judgment
+   | Domain_conflict _ | Before_dispatch_refusal _ | Execution_refusal _ -> fail "confirmed original commit lost its kind");
+  let timing=Yojson.Safe.Util.member "timing" completion.receipt.payload in
+  List.iter (fun key -> check json "unmeasured provider statistics remain absent" `Null
+    (Yojson.Safe.Util.member key timing)) ["provider_started_at";"provider_elapsed_s";"cache_usage";"cost_usd"];
+  let reopened=prepare_observation base_path store observed.original ~now:never_clock in
+  check json "complete original receipt survives reopen without a new clock" (Receipt.to_json completion.receipt)
+    (Receipt.to_json (observed_completion reopened).receipt);
+  check json "complete original input survives receipt preparation" first.registration.input reopened.registration.input;
+  check bool "registration may remain pending after domain completion" true
+    (match (Progress.observer reopened.original.progress).registration with Receipt.Pending _ -> true
+     | Unobserved | Acknowledged _ -> false))
+
+let replace_field key value = function
+  | `Assoc fields -> `Assoc (List.map (fun (name,old) -> name,if name=key then value else old) fields)
+  | _ -> fail "expected an object"
+let test_typed_observer_rejects_semantically_forged_receipt terminal ()=with_workspace (fun base_path store ->
+  let capture,output=classification base_path ["Original observation cannot be relabelled"] in
+  let finished=settle ~save:(save base_path) base_path store (retain store capture output) |> accepted |> committed in
+  let prepared=prepare_observation base_path store finished ~now:(fun () -> 17.) in
+  let event_name,receipt=if terminal then "observer_completion_intended",(observed_completion prepared).receipt
+    else "observer_registration_intended",prepared.registration.receipt in
+  let payload=if terminal then replace_field "selected_slot" (`String "replacement-provider") receipt.payload
+    else replace_field "run_id" (`String "another-original-run") receipt.payload in
+  let forged=get (Receipt.make ~observed_at:receipt.observed_at ~payload) in
+  let wire=match get (Store.load_tool_request_owner store ~scope:Capture.scope ~request_id:finished.request_id) with
+    | Some wire -> wire | None -> fail "missing actual owner" in
+  let history=Progress.to_json prepared.original.progress in
+  let history=match history with `List events -> `List (List.map (fun event ->
+    if Yojson.Safe.Util.member "event" event=`String event_name
+    then replace_field "receipt" (Receipt.to_json forged) event else event) events)
+    | _ -> fail "expected actual ordered history" in
+  get (Store.save_tool_request_owner store ~scope:Capture.scope ~request_id:finished.request_id
+    (replace_field "progress" history wire));
+  let original=original store capture in
+  let path=owner_file store original in
+  let bytes=Fs_compat.load_file path in
+  check bool "generic valid hash does not establish original domain receipt authority" true
+    (match prepare_observation_result base_path store original ~now:never_clock with
+     | Error (Consumer.Rejected _) -> true | Ok _ | Error (Unavailable _ | Uncertain _) -> false);
+  check string "refusal preserves forged evidence without rewriting" bytes (Fs_compat.load_file path))
+
+let test_typed_observer_rechecks_full_judgment_and_commit invalid_judgment ()=with_workspace (fun base_path store ->
+  let capture,output=classification base_path ["Original semantic receipt binding"] in
+  let record=if invalid_judgment then (
+    let pending=advance store (retain_capture store capture) Progress.Dispatch_intended in
+    let invalid=`Assoc ["status",`String "answered";"slot",`String "original";
+      "output",`Assoc ["decisions",`List []]] in
+    advance store pending (Progress.Judgment_retained invalid)
+  ) else retain store capture output in
+  let change=if invalid_judgment then change capture output
+    else {Progress.before=`Assoc ["invented",`Bool true];after=`Assoc ["invented",`Bool false]} in
+  let intent=advance store record (Progress.Commit_intended change) in
+  let finished=advance store intent (Progress.Commit_observed change.after) in
+  check bool "generic terminal history cannot bypass full original semantic plan" true
+    (match prepare_observation_result base_path store finished ~now:(fun () -> 3.) with
+     | Error (Consumer.Rejected _) -> true | Ok _ | Error (Unavailable _ | Uncertain _) -> false);
+  let fresh=match owned (Owner.load ~store ~scope:Capture.scope ~request_id:finished.request_id) with
+    | Some record -> record | None -> fail "lost original malformed domain evidence" in
+  check bool "invalid terminal has no prepared completion receipt" true
+    ((Progress.observer fresh.progress).completion=Receipt.Unobserved);
+  check int "observation validation never saves the forged domain plan" 0
+    (List.length (Ledger.dispositions (get (Ledger.load ~base_path)))))
+
+let test_typed_observer_keeps_parent_refusal_separate_from_child ()=with_workspace (fun base_path store ->
+  let capture,_=classification base_path ["Whole row a";"Whole row b"] in
+  let parent=refuse store capture size_input in
+  let prepared=prepare_observation base_path store parent ~now:(fun () -> 2.) in
+  let before=(observed_completion prepared).receipt in
+  let parent,child=narrow base_path store prepared.original |> accepted |> successor in
+  let recovered=prepare_observation base_path store parent ~now:never_clock in
+  check json "same original refusal survives successor acknowledgement" (Receipt.to_json before)
+    (Receipt.to_json (observed_completion recovered).receipt);
+  (match (observed_completion recovered).disposition with Observation.Execution_refusal final ->
+     check json "original typed size refusal remains exact" (Exact.final_to_json size_input) (Exact.final_to_json final)
+   | Confirmed_commit _ | Domain_conflict _ | Before_dispatch_refusal _ -> fail "parent refusal became a child success");
+  let child=prepare_observation base_path store child ~now:(fun () -> 4.) in
+  check bool "child owns its own deterministic observation identity" true
+    (child.registration.run_id<>recovered.registration.run_id && child.completion=None);
+  check bool "observer preparation grants child no new admission" true
+    (Progress.phase child.original.progress=Progress.Captured))
+
+let test_typed_observer_distinguishes_conflict_and_before_dispatch_refusal ()=with_workspace (fun base_path store ->
+  let capture,output=classification base_path ["Original conflicting domain"] in
+  let judged=retain store capture output in
+  let intended=advance store judged (Progress.Commit_intended (change capture output)) in
+  let observed=`Assoc ["kind",`String "classification";"state",`Assoc ["other_owner",`Bool true]] in
+  let conflicted=advance store intended (Progress.Commit_conflicted observed) in
+  let receipt=prepare_observation base_path store conflicted ~now:(fun () -> 5.) |> observed_completion in
+  (match receipt.disposition with Observation.Domain_conflict (_,actual) -> check json "actual conflict remains evidence" observed actual
+   | Confirmed_commit _ | Before_dispatch_refusal _ | Execution_refusal _ -> fail "conflict was recoded as successful commit"));
+  with_workspace (fun base_path store ->
+    let capture,_=classification base_path ["Original pre-admission refusal"] in
+    let evidence=`Assoc ["reason",`String "host refused before admission"] in
+    let refused=advance store (retain_capture store capture) (Progress.Refused {stage=Progress.Before_dispatch;evidence}) in
+    let receipt=prepare_observation base_path store refused ~now:(fun () -> 6.) |> observed_completion in
+    check (option string) "unsent work has no invented provider slot" None receipt.selected_slot;
+    check bool "unsent work has no invented usage" true (receipt.provider_usage=None);
+    match receipt.disposition with Observation.Before_dispatch_refusal original -> check json "full host refusal retained" evidence original
+    | Confirmed_commit _ | Domain_conflict _ | Execution_refusal _ -> fail "pre-admission refusal became an executed model failure")
+
+let test_typed_briefing_observer_binds_the_original_prepared_commit ()=with_workspace (fun base_path store ->
+  let capture,output=classification base_path ["Original briefing source a";"Original briefing source b"] in
+  let ledger=match after capture output with Capture.Classification_commit ledger -> ledger
+    | Capture.Briefing_commit _ -> fail "expected ledger" in
+  get (Ledger.save ~base_path ledger);
+  let batch,capture,output=prepare_briefing base_path ledger Briefing.empty in
+  get (Briefing.save ~directory:(Ledger.directory ~base_path) (Briefing.prepared_state batch));
+  let record=retain store capture output in
+  let record=settle ~save:(save base_path) base_path store record |> accepted |> committed in
+  let prepared=prepare_observation base_path store record ~now:(fun () -> 7.) in
+  let receipt=observed_completion prepared in
+  (match receipt.disposition with Observation.Confirmed_commit commit ->
+     check json "receipt contains complete actual Briefing before state" (change capture output).before commit.change.before;
+     check json "receipt contains complete actual Briefing after state" (change capture output).after commit.change.after
+   | Domain_conflict _ | Before_dispatch_refusal _ | Execution_refusal _ -> fail "original Briefing commit lost");
+  prepare_observation base_path store prepared.original ~now:never_clock |> ignore)
 let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "classification applies once and survives journal reopen" `Quick test_classification_commit_and_reopen;
   test_case "real save with lost receipt confirms after without another write" `Quick test_lost_save_receipt_after_publication;
@@ -555,4 +714,12 @@ let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "original host terminal recovers and commits without live Runtime" `Quick test_original_host_terminal_recovers_without_a_live_runtime;
   test_case "invalid host original refuses without worker fallback" `Quick test_bad_original_host_record_cannot_fall_back_to_a_worker;
   test_case "observed original still requires complete domain validation" `Quick test_observed_host_answer_still_requires_full_domain_validation;
-  test_case "original installation kind and canonical identity" `Quick test_installation_identity_is_canonical_and_kind_bound]]
+  test_case "original installation kind and canonical identity" `Quick test_installation_identity_is_canonical_and_kind_bound;
+  test_case "typed observer follows actual original commit without Runtime" `Quick test_typed_observer_intents_follow_original_commit_without_runtime;
+  test_case "generic valid registration cannot relabel original observer" `Quick (test_typed_observer_rejects_semantically_forged_receipt false);
+  test_case "generic valid completion cannot replace original provider" `Quick (test_typed_observer_rejects_semantically_forged_receipt true);
+  test_case "observer rejects invented original commit plan" `Quick (test_typed_observer_rechecks_full_judgment_and_commit false);
+  test_case "observer rejects schema-shaped incomplete original judgment" `Quick (test_typed_observer_rechecks_full_judgment_and_commit true);
+  test_case "parent refusal and child have separate original observer identities" `Quick test_typed_observer_keeps_parent_refusal_separate_from_child;
+  test_case "observer conflict differs from unsent host refusal" `Quick test_typed_observer_distinguishes_conflict_and_before_dispatch_refusal;
+  test_case "observer Briefing receipt binds complete original prepared state" `Quick test_typed_briefing_observer_binds_the_original_prepared_commit]]

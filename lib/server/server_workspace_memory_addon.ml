@@ -237,21 +237,7 @@ type write_permission = Newly_stored | Recovering
 let domain_json kind state = `Assoc ["kind",`String kind;"state",state]
 let ledger_json ledger=domain_json "classification" (Ledger.to_json ledger)
 let briefing_json state=domain_json "briefing" (Briefing.to_json state)
-let commit_plan capture judgment =
-  let* final=rejected (Exact.final_of_json ~schema:(Capture.output_schema capture) judgment) in
-  let* expected=match final with
-    | Exact.Call_final (Exact.Answered {output;_}) -> rejected (Capture.validate_output capture (Exact.checked_json output))
-    | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
-    | Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused ->
-      Error (Rejected "Domain commit requires the original answered judgment") in
-  let* change=match Capture.work capture,expected with
-    | Capture.Classification {ledger;_},Capture.Classification_commit after ->
-      Ok {Progress.before=ledger_json ledger;after=ledger_json after}
-    | Capture.Briefing batch,Capture.Briefing_commit after ->
-      Ok {Progress.before=briefing_json (Briefing.prepared_state batch);after=briefing_json after}
-    | Capture.Classification _,Capture.Briefing_commit _
-    | Capture.Briefing _,Capture.Classification_commit _ -> Error (Rejected "Original commit domain differs") in
-  Ok (expected,change)
+let commit_plan capture judgment = rejected (Capture.commit_plan capture ~judgment)
 let load_domain ~base_path = function
   | Capture.Classification_commit _ -> Ledger.load ~base_path |> Result.map ledger_json
   | Capture.Briefing_commit _ -> Briefing.load ~directory:(Ledger.directory ~base_path) |> Result.map briefing_json
@@ -453,4 +439,44 @@ let narrow_with ~store ~base_path ~request_id =
 let narrow ~config ~request_id =
   let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
   narrow_with ~store ~base_path:config.Workspace.base_path ~request_id
-module For_testing = struct let resume=resume_with let settle=settle_with let narrow=narrow_with end
+module Observation = Workspace_memory_observation_receipt
+module Receipt = Lane_addon_request_receipt
+type observation = {original:Owner.retained;registration:Observation.registration;
+  completion:Observation.completion option}
+let prepare_observation_with ~store ~base_path ~request_id ~now =
+  let* original = Eio_unix.run_in_systhread (fun () -> Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
+  let* original = match original with Some original -> Ok original
+    | None -> Error (Unavailable "An observer cannot create a missing original Curator request") in
+  let* workspace = Eio_unix.run_in_systhread (fun () -> Capture.observe_workspace ~base_path)
+    |> Result.map_error (fun detail -> Unavailable detail) in
+  let* capture = restore ~store ~workspace original in
+  let publish original event = Eio_unix.run_in_systhread (fun () -> advance ~store original (Progress.Observer event))
+    |> Result.map record in
+  let* original,registration = match (Progress.observer original.progress).registration with
+    | Receipt.Unobserved ->
+      let* registration = rejected (Observation.registration ~capture ~original ~observed_at:(now ())) in
+      let* original = publish original (Receipt.Intended (Receipt.Registration,registration.receipt)) in
+      Ok (original,registration)
+    | Receipt.Pending receipt | Receipt.Acknowledged receipt ->
+      let* registration = rejected (Observation.restore_registration ~capture ~original receipt) in
+      Ok (original,registration) in
+  match (Progress.observer original.progress).completion with
+  | Receipt.Pending receipt | Receipt.Acknowledged receipt ->
+    let* completion = rejected (Observation.restore_completion ~capture ~original ~registration receipt) in
+    Ok {original;registration;completion=Some completion}
+  | Receipt.Unobserved ->
+    match Progress.phase original.progress with
+    | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _
+    | Progress.Committing _ | Progress.Commit_unknown _ -> Ok {original;registration;completion=None}
+    | Progress.Finished _ | Progress.Conflicted _ | Progress.Rejected _
+    | Progress.Subdividing _ | Progress.Subdivided _ ->
+      let* completion = rejected (Observation.completion ~capture ~original ~registration ~observed_at:(now ())) in
+      let* original = publish original (Receipt.Intended (Receipt.Completion,completion.receipt)) in
+      Ok {original;registration;completion=Some completion}
+let prepare_observation ~config ~request_id =
+  let store = Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  prepare_observation_with ~store ~base_path:config.Workspace.base_path ~request_id ~now:Time_compat.now
+module For_testing = struct
+  let resume=resume_with let settle=settle_with let narrow=narrow_with
+  let prepare_observation=prepare_observation_with
+end

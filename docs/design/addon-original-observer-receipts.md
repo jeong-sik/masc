@@ -27,9 +27,10 @@ The parent's refusal receipt remains the parent's; a child has its own request.
 
 The generic module depends on neither Curator nor Runs. Its opaque canonical
 payload does not certify domain meaning, a successful effect or registry
-durability. The Curator adapter must provide a separate typed receipt codec,
-bind all input/output/outcome/slot/usage fields to the strict original capture
-and actual phase/judgment, and revalidate stored receipts before delivery/ACK.
+durability. The [Curator typed codec and preparation port](workspace-curator-observer-receipts.md)
+bind original input/outcome/slot/basic usage to the strict capture and actual
+phase/judgment. Registry delivery/ACK still require their own fresh validation
+and comparison port; the generic payload is not authority for either.
 First observer wall time is not provider start time or measured execution
 latency. Wall-clock rollback is preserved rather than inventing a duration or
 making a time-based authority decision.

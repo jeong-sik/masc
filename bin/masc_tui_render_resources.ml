@@ -7,6 +7,17 @@ open Masc_tui_render_prim
 module Rows = Masc_tui_rows
 module Catalog = Masc_tui_resource_catalog
 
+let entry_rows = 3
+
+let list_viewport state ~rows =
+  let status = Option.is_some state.resources_error
+    || Option.is_some (resources_empty_note (visible_resources state)) in
+  let budget = max 0 (pane_surface_content_height ~rows - 1
+    - (if status then 1 else 0)) in
+  budget, max 1 (budget / entry_rows)
+
+let list_page_size state ~rows = snd (list_viewport state ~rows)
+
 let render_resources (state : state) =
   let drawn_resource_scroll = ref state.resource_scroll in
   let terminal_rows, cols = get_terminal_size () in
@@ -15,7 +26,6 @@ let render_resources (state : state) =
   let split = resource_split state ~cols in
   pane_surface_header buf cols state ~name:"Artifacts / Resources" ~split;
   let pane_rows = pane_surface_content_height ~rows in
-  let list_rows_budget = pane_rows in
   let rows_list =
     match visible_resources state with Some rows -> rows | None -> []
   in
@@ -42,27 +52,24 @@ let render_resources (state : state) =
     (* The status line spends one of the budgeted rows, not an extra one:
        an extra row pushed the pane past its height and the frame's last
        casualty was the footer. *)
-    let status_rows =
-      match state.resources_error with
+    (      match state.resources_error with
       | Some detail ->
           framed_line pane_buf pane_cols
             ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset);
-          1
+          ()
       | None ->
           (match resources_empty_note (visible_resources state) with
            | Some note ->
                framed_line pane_buf pane_cols (Ansi.dim ^ note ^ Ansi.reset);
-               1
-           | None -> 0)
-    in
+               ()
+           | None -> ()));
+
     let period = match state.resource_day with
       | None -> "all dates"
       | Some day -> Printf.sprintf "%04d-%02d-%02d local" day.year day.month day.day in
     framed_line pane_buf pane_cols (Ansi.dim ^ " " ^ period
       ^ " · f: format · t: today · w: layout" ^ Ansi.reset);
-    let list_rows_budget = max 0 (list_rows_budget - status_rows - 1) in
-    let entry_rows = 3 in
-    let visible = max 1 (list_rows_budget / entry_rows) in
+    let list_rows_budget, visible = list_viewport state ~rows in
     let first = max 0 (cursor - visible + 1) in
     let today = Catalog.local_day (Unix.gettimeofday ()) in
     for i = 0 to list_rows_budget - 1 do

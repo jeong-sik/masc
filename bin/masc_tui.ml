@@ -11689,6 +11689,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   | Masc_tui_command.Music_invalid_arguments ->
       notice ~kind:Notice_failure "Use /music; choose a project or take in the workbench"
   | Masc_tui_command.Open_artifacts ->
+      Masc_tui_message_input.clear state.msg_input;
       state.resource_day <- None;
       Masc_tui_resources_updates.select_scope state Masc_tui_resource_catalog.Published_reports;
       state.resource_focus <- Left_pane;
@@ -30631,7 +30632,9 @@ and is loaded on demand through keeper_skill.
                             ~by:page
                         else max 0 (state.resource_scroll + (direction * page)))
                   | Left_pane ->
-                      move_list_by_rows state ~delta:(direction * page))
+                      let entries = Masc_tui_render_resources.list_page_size state
+                          ~rows:(surface_rows state) in
+                      move_list_by_rows state ~delta:(direction * entries))
              | Tools ->
                  (match scrolled_surface state Tools with
                   | None -> ()

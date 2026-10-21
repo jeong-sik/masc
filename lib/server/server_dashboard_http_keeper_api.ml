@@ -71,6 +71,65 @@ let file_changes_max_window_hours = 72.0
 (* Maximum per-keeper entries for /tool-calls. *)
 let tool_calls_limit_max = 200
 
+let keeper_metrics_response ~config ~keeper_name req =
+  let error status code detail =
+    status, `Assoc [ "keeper", `String keeper_name
+                  ; "code", `String code; "error", `String detail ]
+  in
+  if not (Keeper_config.validate_name keeper_name) then
+    error `Bad_request "invalid_keeper_name" "invalid keeper name"
+  else
+    let limit_parameters =
+      Uri.query (Uri.of_string req.Httpun.Request.target)
+      |> List.filter (fun (name, _) -> String.equal name "limit")
+    in
+    (* Preserve the existing Dashboard's fixed read window. A query cannot
+       turn one selected chart into an unbounded ledger scan. *)
+    let limit = 120 in
+    if limit_parameters <> [] then
+      error `Bad_request "invalid_metrics_limit" "the metrics window is fixed at 120 rows"
+    else
+      let reading =
+        Eio_guard.with_named_switch "keeper-metrics-tail" (fun () ->
+          Domain_pool_ref.submit_io_or_inline (fun () ->
+            try
+              let store = Keeper_types_support.keeper_metrics_store config keeper_name in
+              Dated_jsonl.read_recent_result store limit
+              |> Result.map_error Dated_jsonl.read_error_to_string
+            with
+            | Sys_error detail -> Error detail
+            | Unix.Unix_error (cause, operation, path) ->
+              Error (Printf.sprintf "%s %s: %s" operation path (Unix.error_message cause))))
+      in
+      match reading with
+      | Error detail -> error `Service_unavailable "metrics_store_unavailable" detail
+      | Ok entries ->
+        let scanned_rows = List.length entries in
+        let parsed_metrics = List.filter_map (function
+          | Dated_jsonl.Parsed row -> Some row
+          | Dated_jsonl.Malformed_json _ -> None) entries in
+        let series, window_summary =
+          Dashboard_http_keeper_detail.compute_metrics_window
+            ~parsed_metrics ~compact:false ~series_points:limit
+        in
+        (* The projection counts accepted turns and heartbeats. Compare that
+           count with physical coverage, so malformed and retired rows remain
+           visible as skipped instead of looking like an empty history. *)
+        match Json_util.assoc_member_opt "sample_points" window_summary with
+        | Some (`Int accepted_rows) when accepted_rows >= 0 && accepted_rows <= scanned_rows ->
+          `OK, `Assoc
+            [ "keeper", `String keeper_name
+            ; "series", `List series
+            ; "window_summary", window_summary
+            ; "scanned_rows", `Int scanned_rows
+            ; "skipped_rows", `Int (scanned_rows - accepted_rows)
+            ; "limit", `Int limit
+            ]
+        | _ ->
+          error `Service_unavailable "metrics_projection_invalid"
+            "metrics projection row count disagrees with the read window"
+;;
+
 let keeper_tool_call_lookup_response ~config ~keeper_name req =
   let execution_parameters =
     Uri.query (Uri.of_string req.Httpun.Request.target)
@@ -879,7 +938,16 @@ let handle_keeper_get_subroutes state req request reqd =
     let slen = String.length suffix in
     String.trim (String.sub req_path plen (tlen - plen - slen))
   in
-  if ends_with keeper_suffix_github_identity then (
+  if ends_with "/metrics" then (
+    let name = extract_name "/metrics" in
+    let status, json =
+      keeper_metrics_response ~config:(Mcp_server.workspace_config state)
+        ~keeper_name:name req
+    in
+    Http.Response.json_value_on_cpu ~status ~request
+      ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin request))
+      json reqd)
+  else if ends_with keeper_suffix_github_identity then (
     let name = extract_name keeper_suffix_github_identity in
     if name = "" then
       Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd

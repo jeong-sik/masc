@@ -83,6 +83,7 @@ def digest(value, length=64):
 
 
 CONDITIONS = {"fixture_sha256", "workspace_snapshot_sha256", "action_sha256", "server_binary_sha256", "terminal_sha256"}
+ARM_FIELDS = {"instances", "attempts", "admissions", "conditions", "source_commit", "binary", "logs"}
 ENVELOPE = {"seq", "ts", "level", "source", "module", "keeper_name", "turn_id", "message", "details", "category"}
 DETAILS = {"event", "keeper", "ask_id", "request", "origin", "read_admission_started_ns", "submission_started_ns",
            "question_source_turn_ref", "phase", "source", "received_ns", "observed_ns", "ui_admitted", "source_applied",
@@ -94,17 +95,15 @@ METRICS = {"admission_to_start_log_ns": (None, "started"), "admission_to_worker_
            "producer_to_ui_ns": ("producer", "finished"), "admission_to_registration_release_ns": (None, "registration_released")}
 
 
-def artifact(root, declaration):
-    fields(declaration, {"path", "sha256"})
-    name = text(declaration["path"])
+def artifact_bytes(root, name):
+    name = text(name)
     require("\x00" not in name, "artifact path contains NUL")
     path = PurePosixPath(name)
     require(not path.is_absolute() and path.parts and all(p not in {".", ".."} for p in path.parts)
             and str(path) == name, "artifact path must be canonical and relative")
-    expected = digest(declaration["sha256"])
     try:
         directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    except OSError as error:
+    except (OSError, ValueError) as error:
         raise EvidenceError("artifact root inaccessible") from error
     try:
         for part in path.parts[:-1]:
@@ -123,6 +122,13 @@ def artifact(root, declaration):
         raise EvidenceError("artifact missing, inaccessible or symlinked") from error
     finally:
         os.close(directory)
+    return data
+
+
+def artifact(root, declaration):
+    fields(declaration, {"path", "sha256"})
+    expected = digest(declaration["sha256"])
+    data = artifact_bytes(root, declaration["path"])
     require(hashlib.sha256(data).hexdigest() == expected, "artifact digest mismatch")
     return data
 
@@ -244,7 +250,7 @@ def analyze_arm(value, root):
     admission_evidence = {}
     if type(value) is not dict:
         value = {}
-    if set(value) != {"instances", "attempts", "admissions", "conditions", "source_commit", "binary", "logs"}:
+    if set(value) != ARM_FIELDS:
         errors.append("unsupported cohort declaration fields")
     instances = []
     if type(value.get("instances")) is list:

@@ -674,25 +674,44 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
     read in
   let after_logs=copy_logs "after" after_dir in
   let after_admissions=copy_admissions "after" after_store in
+  let member=Yojson.Safe.Util.member in
   let conditions=`Assoc (List.map (fun key -> key,`Null)
-    ["fixture_sha256";"workspace_snapshot_sha256";"action_sha256";"server_binary_sha256";"terminal_sha256"]) in
+    ["fixture";"workspace_snapshot";"action";"server_binary";"terminal"]) in
   let arm reads logs admissions=`Assoc ["instances",`List [`String (instance_id (List.hd reads))];
-    "attempts",`List (List.map declaration reads);"conditions",conditions;
-    "source_commit",`Null;"binary",`Null;"logs",`List logs;"admissions",`List admissions] in
-  let packet=`Assoc ["schema_version",`Int 2;"cases",`List [`Assoc ["id",`String "actual-protocol-resources";
+    "attempts",`List (List.map declaration reads);"condition_files",conditions;
+    "source_commit",`Null;"binary",`Null;
+    "logs",`List (List.map (member "path") logs);
+    "admissions",`List (List.map (member "path") admissions)] in
+  let plan=`Assoc ["schema_version",`Int 1;"cases",`List [`Assoc ["id",`String "actual-protocol-resources";
     "before",arm [unstarted] before_logs before_admissions;"after",arm [completed] after_logs after_admissions]]] in
-  let packet_path=Filename.concat packet_dir "packet.json" in
-  Out_channel.with_open_bin packet_path (fun channel -> output_string channel (Yojson.Safe.to_string packet));
-  let json_path=Filename.concat packet_dir "report.json" and markdown_path=Filename.concat packet_dir "report.md" in
-  let script=Filename.concat (Filename.dirname Sys.executable_name) "../scripts/harness/perf/tui_ask_followup_report.py" in
+  let plan_bytes=Yojson.Safe.to_string plan in
+  let plan_path=Filename.concat packet_dir "plan.json" in
+  Out_channel.with_open_bin plan_path (fun channel -> output_string channel plan_bytes);
+  let script_dir=Filename.concat (Filename.dirname Sys.executable_name) "../scripts/harness/perf" in
+  let run args =
+    let argv=Array.of_list ("python3"::args) in
+    let pid=Unix.create_process "python3" argv Unix.stdin Unix.stdout Unix.stderr in
+    snd (Unix.waitpid [] pid) in
+  let materialize output=run [Filename.concat script_dir "tui_ask_followup_packet.py";plan_path;
+    "--source-root";packet_dir;"--output";output] in
+  let output=Filename.concat packet_dir "materialized" in
+  check bool "actual original artifacts materialize through public CLI" true (materialize output=Unix.WEXITED 0);
+  let receipt=Yojson.Safe.from_file (Filename.concat output "materialization.json") in
+  check bool "materialization never certifies execution or complete capture" true
+    (member "execution_verified" receipt=`Bool false && member "complete_capture_verified" receipt=`Bool false
+     && member "atomic_cohort_snapshot_verified" receipt=`Bool false);
+  check string "materializer preserves independent original plan bytes" plan_bytes
+    (In_channel.with_open_bin (Filename.concat output "source-plan.json") In_channel.input_all);
+  let packet_path=Filename.concat output "packet.json" in
+  let packet_bytes=In_channel.with_open_bin packet_path In_channel.input_all in
+  let packet=Yojson.Safe.from_string packet_bytes in
+  let json_path=Filename.concat output "report.json" and markdown_path=Filename.concat output "report.md" in
   let report () =
-    let pid=Unix.create_process "python3" [|"python3";script;packet_path;"--json";json_path;"--markdown";markdown_path|]
-      Unix.stdin Unix.stdout Unix.stderr in
-    let _,status=Unix.waitpid [] pid in
+    let status=run [Filename.concat script_dir "tui_ask_followup_report.py";packet_path;
+      "--json";json_path;"--markdown";markdown_path] in
     status,Yojson.Safe.from_file json_path in
   let status,reported=report () in
   check bool "actual artifacts yield a descriptive report" true (status=Unix.WEXITED 0);
-  let member=Yojson.Safe.Util.member in
   let case=match member "cases" reported with `List [case] -> case | _ -> fail "report lost its original case" in
   let outcomes arm=member "outcomes" (member "summary" (member arm case)) in
   check bool "actual unstarted and declared unobserved reads stay in denominator" true
@@ -708,10 +727,32 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
   check bool "unknown conditions never become matching or execution proof" true
     (member "declared_conditions_match" (member "comparison" case)=`Bool false
      && member "execution_verified" (member "comparison" case)=`Bool false);
-  let damaged=match before_logs with
-    | `Assoc fields::_ -> (match List.assoc_opt "path" fields with Some (`String path) -> path | _ -> fail "artifact declaration lost path")
-    | _ -> fail "actual before store had no artifact" in
-  Out_channel.with_open_bin (Filename.concat packet_dir damaged) (fun channel -> output_string channel "interrupted artifact");
+  let original_path=match before_logs with
+    | entry::_ -> (match member "path" entry with `String path -> path | _ -> fail "source artifact path missing")
+    | [] -> fail "actual before store had no artifact" in
+  let copied_path=match member "cases" packet with
+    | `List [case] -> (match member "logs" (member "before" case) with
+        | `List (entry::_) -> (match member "path" entry with `String path -> Filename.concat output path | _ -> fail "copied artifact path missing")
+        | _ -> fail "copied before artifacts missing")
+    | _ -> fail "materialized case missing" in
+  let frozen=In_channel.with_open_bin copied_path In_channel.input_all in
+  Out_channel.with_open_bin (Filename.concat packet_dir original_path) (fun channel -> output_string channel "interrupted source");
+  check string "source mutation cannot change frozen comparison bytes" frozen
+    (In_channel.with_open_bin copied_path In_channel.input_all);
+  check bool "existing output is refused" true (materialize output=Unix.WEXITED 2);
+  check string "refused publication cannot replace original packet" packet_bytes (In_channel.with_open_bin packet_path In_channel.input_all);
+  let failed=Filename.concat packet_dir "failed-materialization" in
+  check bool "actual damaged source cannot publish a packet" true (materialize failed=Unix.WEXITED 2);
+  check bool "failed preparation leaves no ready packet" false (Sys.file_exists (Filename.concat failed "packet.json"));
+  check string "failed preparation retains original denominator plan" plan_bytes
+    (In_channel.with_open_bin (Filename.concat failed "source-plan.json") In_channel.input_all);
+  let failed_validation=Yojson.Safe.from_file (Filename.concat failed "validation.json") in
+  check bool "failed materialization retains known journaled attempts" true
+    (match member "cases" failed_validation with
+     | `List [case] -> member "attempts" (member "summary" (member "before" case))=`Int 2
+       && member "descriptive_delta_available" (member "comparison" case)=`Bool false
+     | _ -> false);
+  Out_channel.with_open_bin copied_path (fun channel -> output_string channel "interrupted artifact");
   Sys.remove json_path;Sys.remove markdown_path;
   let status,damaged_report=report () in
   check bool "mutated real artifact is reported as invalid" true (status=Unix.WEXITED 2);

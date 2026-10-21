@@ -129,7 +129,7 @@ Safari 및 넓은 행동군 후속은 기존 #44023과 연결해 중복 구현�
 
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| G01 | 패키지·설치·worker·모델·도구·Skill의 연결을 한곳에서 보기 | 후속 구현: host application을 원래 id/path/source·desired revision/enabled에 결속해 공통 inventory와 두 UI에 전달. Dashboard 62건·TypeScript PASS, OCaml parser PASS; native 실행·실제 화면 미확인 | 원하는 설정/실제 적용/연결 존재/실행/관측 준비/실패를 구분하고 원래 상세로 이동 |
+| G01 | 패키지·설치·worker·모델·도구·Skill의 연결을 한곳에서 보기 | [#44801](https://github.com/jeong-sik/masc/pull/44801) 후속 구현: host application을 원래 id/path/source·desired revision/enabled에 결속해 공통 inventory와 두 UI에 전달. Dashboard 62건·TypeScript PASS, OCaml parser PASS; native 실행·실제 화면 미확인 | 원하는 설정/실제 적용/연결 존재/실행/관측 준비/실패를 구분하고 원래 상세로 이동 |
 | G02 | 입력→Hook→worker→모델→출력/소비자의 연결 관계 표시 | 일부 Flow 있음 | 실제 연결 reference에 근거해 표시; 관측 그래프를 실행 허가로 사용하지 않음 |
 | G03 | 요청부터 종료·정리까지 원래 timeline/trace 연결 | 부분 구현; Dashboard가 버리던 host_requests를 원래 worker/incarnation에 결속해 보존·표시하는 후속 구현. 모델 lane/provider/operator/source 대기와 전달·기록 실패를 닫힌 타입으로 읽고, 손상 진단은 worker·결과와 분리. 전체 요청 이력·실제 화면·설치 검증 필요 | request/run/instance/revision, 대기 이유·결과·실패·정리 증거를 같은 원래 작업으로 추적 |
 | G04 | 교체·경로/ID 변경·이전 소유자 이력 표시 | 후속 소스 구현: 같은 ID worker와 같은 TOML 경로의 다른 ID를 두 UI에서 분리. Dashboard 3파일62건·tsc PASS, TUI 관측 모델 parser PASS; 독립 리뷰·OCaml 실행·실제 UI 별도 | 새 worker와 과거 worker 구분, 다른 ID의 같은 파일 이전 owner 정리 기록도 별도 접근 |

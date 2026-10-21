@@ -392,3 +392,12 @@ PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값
 - classification selected source 읽기·원래 fact와 기존 ledger reconciliation을 확인하며, briefing은 `prepare`와 같은 fixed target/현재 contract 규칙을 쓴다. 추가 source는 다음 pass로 남기고 삭제·수정·contract 변경은 원래 judgment로 덮지 않는다. 일부 chunk는 기존 게시본을 유지한다. `capture_briefing`은 원래 prepared-state 선행 저장의 fresh 확인을 요구하며 모델 후에 준비 state를 발명하지 않는다.
 - 실제 Keeper source·원래 host journal 재열기·domain save/read를 사용하는 15시나리오를 작성했다. save-edge 실패/저장 후 응답 유실·예외는 명시적 경계 주입이며 실제 atomic rename 단계 장애나 취소 실측이 아니다. 원래 domain malformed 읽기를 uncertainty로 보존하며 같은 오류의 반복이 이력을 늘리지 않는지도 확인하도록 작성했다. 파싱·독립 소스 검토·새 compiled 실행 결과를 분리한다. production owner wiring·initial-save/capture 중단 복구·observer receipt·scoped wake·typed size successor·실제 provider/두 UI/운영 설치와 원래54개 전체 완료는 남아 있다. A01–H06의 이름·완료 기준을 유지한다.
 - PR44944의 현재 head6aba에 대한 정식 code-reviewer 변경 요청은 동일 pending/unknown 관측마다 전체 journal을 다시 쓰는 P2였다. 후속 consumer는 현재 phase의 마지막 typed 관측과 의미상 같은 증거이면 append/replace하지 않는다. 새 worker 계약 시나리오는 실제 journal 파일 identity/bytes를 비교하고 변경된 증거·상태 재등장은 남기도록 한다. capacity 접수·terminal unknown·fresh 권위 읽기와 전체 실제 I/O 비용은 기존 의미를 유지한다. 이 수리는 원래44944의 공식 승인 해소나 새 실행 성공을 대신하지 않는다.
+
+
+### E02 scoped owner wake와 실제 compile 실패 수리
+
+- 원래 #44944의 반복 관측 P2 수리와 실제 journal identity/bytes fixture를 그 PR 자체에 옮겨 전체 스택을 재배치했다. 중간 head `e3d28089451b475ae5c475ae017528ab9e84a591`는 정식 source Approved였으나, 그 뒤 타입 수리 head의 승인은 별도로 받아야 한다.
+- 실제 [선택 실행39671034185](https://github.com/jeong-sik/masc/actions/runs/39671034185)는 `ea9f86ff1f5b5b46cd5375f39885dbb71e5b212a`에서 테스트 실행 전 compile FAIL이다. `observe` 인자의 `Owner.retained` 타입 표기를 #44944에서 수리하고, #44948의 같은 형태 `uncertain` 인자도 명시했다. 이전 SOURCE PASS를 compiled 성공으로 이월하지 않는다.
+- Runtime은 served workspace Store root와 package에 결속된 export/configuration/accepted Exact-result hint 구독을 추가했다. 기존 MCP bridge를 유지하고 configuration metadata 게시 뒤 알린다. worker ready가 먼저 온 경우도 이후 metadata가 원래 owner를 깨운다. 원래 요청의 fresh/Restore 전달 모두 RPC 반환·accepted=true·현재 authority 확인 뒤 알리며, subscriber 실패와 publisher 취소를 구분한다.
+- 실제 host-cycle 7사례를 등록했다. scope 분리·MCP 공존·metadata 순서·원래 결과 재전달·subscriber 오류/별도 취소·거절/잘못된/유실 수신 확인·non-Exact 거절·새 memory commit 없이 실제 Curator owner 깨우기를 다룬다. controlled enabled predicate와 model 답변은 fixture다. parser와 독립 source 검토는 통과했지만 새 compiled 실행은 별도이며, production scheduler는 아직 기존 실행 경로다.
+- 다음은 같은 직렬 owner에서 원래 accepted-work 발견/Off 상태 recovery·typed size successor·initial prepared save/capture 복구·observer receipt를 실제 Addon consumer로 연결하는 것이다. 실제 provider/두 UI/운영 설치 및 원래 A01–H06 54개 작업과 완료 기준은 유지한다.

@@ -633,8 +633,9 @@ let run ~base_path ~enabled ~prepare =
     finish false
   | Ok pending -> finish pending
 
-let start_with ~sw ~base_path ~enabled ~prepare =
-  let base_path = Unix.realpath base_path in
+let start_with ~sw ~config ~enabled ~prepare =
+  Eio.Switch.check sw;
+  let base_path = Unix.realpath config.Workspace.base_path in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   (* A missing directory is an inventory failure, not an empty workspace.
      Creating it here could reconcile every durable ledger member away. *)
@@ -660,10 +661,16 @@ let start_with ~sw ~base_path ~enabled ~prepare =
     let unsubscribe = Keeper_memory_commit_notifications.subscribe (fun event ->
       (* fire-and-forget: wake reports admission only; notifications have no response consumer. *)
       if String.equal event.keepers_dir keepers_dir then ignore (wake_for_commit owner event)) in
+    let unsubscribe_addon=Lane_addon_runtime.subscribe_owner_events ~config
+      ~package_id:Server_workspace_memory_addon_validation.package_id (fun event ->
+        match event with
+        | Lane_addon_runtime.Export_inventory_changed | Configuration_observed | Exact_result_delivered _ ->
+          ignore (wake owner)) in
     Eio.Switch.on_release sw (fun () ->
       Stdlib.Mutex.protect owner.mutex (fun () -> owner.stopped <- true; owner.wake <- None);
       unsubscribe_configuration ();
       unsubscribe ();
+      unsubscribe_addon ();
       Stdlib.Mutex.protect owners_mutex (fun () -> Hashtbl.remove owners base_path));
     (* A daemon, because the switch is this owner's whole life and the loop
        parks on [owner.wake] whenever the backlog is empty. Nothing wakes it on
@@ -709,8 +716,8 @@ let configured () = match Runtime_exact_output_registry.current () with
        | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) -> false
        | Ok _ -> true)
 
-let start ~sw ~base_path =
-  start_with ~sw ~base_path ~enabled:configured ~prepare:(fun () -> prepare_execution ~base_path)
+let start ~sw ~config =
+  start_with ~sw ~config ~enabled:configured ~prepare:(fun () -> prepare_execution ~base_path:config.Workspace.base_path)
 
 module For_testing = struct
   let configured = configured
@@ -723,7 +730,7 @@ module For_testing = struct
     |> Result.map_error execution_failure_detail
 
   let start_with_enabled ~sw ~base_path ~enabled ~execute ~summarize =
-    start_with ~sw ~base_path ~enabled
+    start_with ~sw ~config:(Workspace.default_config base_path) ~enabled
       ~prepare:(fun () -> Ok { configuration = `Assoc ["injected_runner", `Bool true];
                               execute; summarize })
 

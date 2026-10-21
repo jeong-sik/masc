@@ -1591,9 +1591,30 @@ type preset_part = {
   pp_skipped : (string * string) list;  (** key, reason *)
 }
 
+type preset_registry_targets =
+  | Preset_registry_runtime_bindings
+  | Preset_registry_replacement_catalog
+
+type preset_registry_application =
+  | Preset_registry_applied of preset_registry_targets
+  | Preset_registry_unpublished
+  | Preset_registry_kept of string
+
+type preset_runtime_commit = {
+  prc_source_revision : string;
+  prc_order : string;
+  prc_durability : Runtime.config_durability;
+  prc_lock_warnings : Runtime.config_lock_warning list;
+  prc_registry : preset_registry_application;
+}
+(** Observed visible commit, with its independent durability and registry
+    application. A warning does not mean the restore had no effects. *)
+
+val preset_runtime_commit_needs_attention : preset_runtime_commit -> bool
+
 type preset_runtime_status =
   | Preset_runtime_unchanged
-  | Preset_runtime_committed
+  | Preset_runtime_committed of preset_runtime_commit
   | Preset_runtime_failed of string
 
 type preset_restore_report = {

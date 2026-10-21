@@ -16,8 +16,8 @@
    A restore writes the three surfaces through their existing paths, so they
    take effect at three different moments; the report names each:
    overrides at once, instructions at the keeper's next up, runtime through
-   the runtime.toml commit path (which re-publishes the exact-output lanes in
-   process). The current state is saved first as [_autosave], over the one
+   the runtime.toml commit path (whose receipt separately reports exact-output
+   registry application). The current state is saved first as [_autosave], over the one
    the previous restore left. *)
 
 let ( let* ) = Result.bind
@@ -72,7 +72,7 @@ type part_result =
 
 type runtime_result =
   | Runtime_unchanged
-  | Runtime_committed
+  | Runtime_committed of Runtime.config_commit_receipt
   | Runtime_failed of string
 
 type default_comparison =
@@ -468,8 +468,14 @@ let report_to_json (r : restore_report) : Yojson.Safe.t =
     match r.runtime_result with
     | Runtime_unchanged ->
       `Assoc [ "effect", `String "runtime_commit"; "status", `String "unchanged" ]
-    | Runtime_committed ->
-      `Assoc [ "effect", `String "runtime_commit"; "status", `String "committed" ]
+    | Runtime_committed receipt ->
+      `Assoc
+        [ "effect", `String "runtime_commit"
+        ; "status", `String "committed"
+        ; "commit", Runtime.config_commit_receipt_to_yojson receipt
+        ; "exact_output_registry",
+          Runtime.exact_output_registry_application_to_yojson receipt.exact_output_registry
+        ]
     | Runtime_failed message ->
       `Assoc
         [ "effect", `String "runtime_commit"
@@ -924,7 +930,7 @@ let routing_holds ~current_assignments ~current_lanes ~assignments ~lanes =
   && List.for_all (lane_holds ~current_lanes) lanes
 ;;
 
-let restore_runtime ~base_path ~assignments ~lanes =
+let restore_runtime ~commit ~base_path ~assignments ~lanes =
   let path = runtime_toml_path ~base_path in
   match guard (fun () -> Ok (Fs_compat.load_file_opt path)) with
   | Error message -> Runtime_failed message
@@ -939,12 +945,12 @@ let restore_runtime ~base_path ~assignments ~lanes =
          let text =
            runtime_text_with ~current_assignments ~current_lanes ~assignments ~lanes content
          in
-         match Runtime.save_config_text ~runtime_config_path:path text with
-         | Ok _receipt -> Runtime_committed
+         match commit ~runtime_config_path:path text with
+         | Ok receipt -> Runtime_committed receipt
          | Error message -> Runtime_failed message))
 ;;
 
-let restore ~base_path name =
+let restore_with_config_commit ~commit ~base_path name =
   (* The target is read before the autosave is written, so restoring the
      autosave itself applies what it held, not the state just captured. *)
   let* target = load ~base_path name in
@@ -957,10 +963,21 @@ let restore ~base_path name =
   let prompt_overrides_result = restore_prompt_overrides ~base_path target.prompt_overrides in
   let instructions_result = restore_instructions ~base_path target.instructions in
   let runtime_result =
-    restore_runtime ~base_path ~assignments:target.assignments ~lanes:target.lanes
+    restore_runtime ~commit ~base_path ~assignments:target.assignments ~lanes:target.lanes
   in
   Ok { restored = name; autosave; prompt_overrides_result; instructions_result; runtime_result; default_comparison }
 ;;
+
+let restore ~base_path name =
+  restore_with_config_commit
+    ~commit:(fun ~runtime_config_path text ->
+      Runtime.save_config_text ~runtime_config_path text)
+    ~base_path name
+;;
+
+module For_testing = struct
+  let restore_with_config_commit = restore_with_config_commit
+end
 
 (* ── Delete ────────────────────────────────────────────────────────── *)
 

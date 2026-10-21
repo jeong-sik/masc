@@ -119,6 +119,62 @@ let config_lock_warning_to_yojson = function
       ]
 ;;
 
+let config_commit_receipt_to_yojson (receipt : config_commit_receipt) =
+  `Assoc
+    [ ( "source_revision"
+      , `String
+          (config_source_revision_to_string
+             receipt.observation.source_revision) )
+    ; ( "order"
+      , `String (config_commit_order_to_string receipt.order) )
+    ; ( "durability"
+      , `String
+          (match receipt.durability with
+           | Durable -> "durable"
+           | Durability_unconfirmed _ -> "unconfirmed") )
+    ; ( "durability_detail"
+      , (match receipt.durability with
+         | Durable -> `Null
+         | Durability_unconfirmed { detail } -> `String detail) )
+    ; ( "warnings"
+      , `List
+          (List.map config_lock_warning_to_yojson receipt.lock_warnings) )
+    ]
+;;
+
+(* The exact-output registry is its own row, not part of [routing]: the
+   runtime cache and the registry are published by different code, and a
+   commit made while no registry is published leaves exact lanes unavailable
+   although routing applied (#38779). *)
+let exact_output_registry_application_to_yojson
+      (application : exact_output_registry_application)
+  =
+  match application with
+  | Exact_output_registry_replaced { origin } ->
+    `Assoc
+      [ "status", `String "applied"
+      ; "requires_restart", `Bool false
+      ; ( "targets"
+        , `String
+            (match origin with
+             | Runtime_binding_targets -> "runtime_bindings"
+             | Replacement_catalog_targets _ -> "replacement_catalog") )
+      ]
+  | Exact_output_registry_unpublished ->
+    `Assoc [ "status", `String "unpublished"; "requires_restart", `Bool true ]
+  | Exact_output_registry_kept { reason } ->
+    (* A restart would not help: boot rebuilds from the same file, which
+       publishes no registry, so exact output would be unavailable until the
+       file is fixed. [next_boot_publishes] says so. *)
+    `Assoc
+      [ "status", `String "kept"
+      ; "requires_restart", `Bool false
+      ; "next_boot_publishes", `Bool false
+      ; ( "reason"
+        , `String (Runtime_exact_output_registry.publication_error_to_string reason) )
+      ]
+;;
+
 let keeper_assignment_state_to_yojson = function
   | Assignment_missing -> `Assoc [ "state", `String "missing" ]
   | Assignment_present runtime_id ->

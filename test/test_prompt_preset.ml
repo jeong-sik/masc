@@ -285,7 +285,7 @@ let test_restore_puts_the_saved_state_back () =
       report.Preset.instructions_result.Preset.applied;
     (match report.Preset.runtime_result with
      | Preset.Runtime_unchanged -> ()
-     | Preset.Runtime_committed -> fail "runtime.toml did not drift, nothing to commit"
+     | Preset.Runtime_committed _ -> fail "runtime.toml did not drift, nothing to commit"
      | Preset.Runtime_failed message -> fail ("runtime part failed: " ^ message));
     check string "the restore names the autosave" Preset.autosave_name report.Preset.autosave;
     let autosave = or_fail (Preset.load ~base_path report.Preset.autosave) in
@@ -857,8 +857,7 @@ let test_saved_lane_activity_shape () =
     | Ok _ -> Alcotest.fail "mistyped activity was coerced")
 ;;
 
-let test_restore_preserves_lane_activity_and_autosave () =
-  let open Alcotest in
+let with_runtime_catalog f =
   let previous_catalog = Llm_provider.Model_catalog.global () in
   let previous_runtime = Runtime.For_testing.snapshot () in
   let catalog = or_fail (Llm_provider.Model_catalog.of_toml_string ~source:"preset activity fixture"
@@ -869,6 +868,12 @@ let test_restore_preserves_lane_activity_and_autosave () =
     | Some catalog -> Llm_provider.Model_catalog.set_global catalog
     | None -> Llm_provider.Model_catalog.clear_global ()) @@ fun () ->
   Llm_provider.Model_catalog.set_global catalog;
+  f ()
+;;
+
+let test_restore_preserves_lane_activity_and_autosave () =
+  let open Alcotest in
+  with_runtime_catalog @@ fun () ->
   List.iter (fun saved_enabled ->
     with_base (fun ~base_path ~keepers:_ ~config ->
       let path = Filename.concat config "runtime.toml" in
@@ -897,7 +902,7 @@ let test_restore_preserves_lane_activity_and_autosave () =
         (or_fail (Preset.matches_saved_settings ~base_path loaded));
       let report = or_fail (Preset.restore ~base_path "activity") in
       (match report.runtime_result with
-       | Preset.Runtime_committed -> ()
+       | Preset.Runtime_committed _ -> ()
        | Preset.Runtime_unchanged -> fail "activity drift must commit"
        | Preset.Runtime_failed error -> fail error);
       let restored = or_fail (Preset.capture ~base_path ~name:"restored" ~description:"") in
@@ -1087,11 +1092,158 @@ let test_default_baseline_missing_or_invalid () =
       (Result.is_error (Preset.load ~base_path "baseline")))
 ;;
 
+(* The real restore, runtime replacement and response decoder share one
+   observation. Directory fsync fails only after the new file is visible;
+   neither that warning nor a decoder error may replay the restore. *)
+let test_restore_retains_visible_commit_observation ~sync_fails () =
+  let open Alcotest in
+  with_runtime_catalog @@ fun () ->
+  with_base (fun ~base_path ~keepers:_ ~config ->
+    let path = Filename.concat config "runtime.toml" in
+    let baseline = runtime_fixture ^ "\n[runpod_mtp.qwen]\n\n[openai.gpt]\n" in
+    write_file path baseline;
+    let target = or_fail (Preset.capture ~base_path ~name:"commit-proof" ~description:"") in
+    or_fail (Preset.save ~base_path target);
+    let drifted = Preset.runtime_text_with
+      ~current_assignments:target.assignments ~current_lanes:target.lanes
+      ~assignments:["routingtest", "runpod_mtp.qwen"] ~lanes:target.lanes baseline in
+    ignore (or_fail (Runtime.save_config_text ~runtime_config_path:path drifted));
+    let before = or_fail (Preset.capture ~base_path ~name:"before" ~description:"") in
+    let calls = ref 0 and syncs = ref 0 and observed = ref None in
+    let commit ~runtime_config_path text =
+      incr calls;
+      let outcome =
+        if sync_fails then
+          Runtime.For_testing.save_config_text_with_sync_parent ~runtime_config_path
+            ~sync_parent:(fun _ -> incr syncs;
+              raise (Unix.Unix_error (Unix.EIO, "fsync", "preset commit fixture"))) text
+        else Runtime.save_config_text ~runtime_config_path text
+      in
+      (match outcome with Ok receipt -> observed := Some receipt | Error _ -> ());
+      outcome
+    in
+    let report = or_fail (Preset.For_testing.restore_with_config_commit ~commit ~base_path "commit-proof") in
+    check int "restore commits once, without replay after a visible warning" 1 !calls;
+    check int "fault reaches the real parent sync exactly once" (if sync_fails then 1 else 0) !syncs;
+    let receipt = match report.runtime_result, !observed with
+      | Preset.Runtime_committed receipt, Some original ->
+        check bool "the original writer receipt survives unchanged" true (receipt == original);
+        receipt
+      | Preset.Runtime_unchanged, _ -> fail "routing drift must commit"
+      | Preset.Runtime_failed detail, _ -> fail detail
+      | Preset.Runtime_committed _, None -> fail "commit has no actual writer observation"
+    in
+    let detail = match receipt.durability, sync_fails with
+      | Runtime.Durable, false -> None
+      | Runtime.Durability_unconfirmed {detail}, true -> Some detail
+      | Runtime.Durable, true | Runtime.Durability_unconfirmed _, false ->
+        fail "durability must match actual sync outcome"
+    in
+    check (option string) "visible replacement publishes saved routing" (Some "openai.gpt")
+      (Runtime.runtime_id_for_keeper "routingtest");
+    check (list (pair string string)) "new file has saved assignments" target.assignments
+      (or_fail (Preset.runtime_of_text (Fs_compat.load_file path)) |> fst);
+    let autosave = or_fail (Preset.load ~base_path report.autosave) in
+    check (list (pair string string)) "autosave still holds state before this restore"
+      before.assignments autosave.assignments;
+    let wire = Preset.report_to_json report in
+    let payload report = `Assoc ["ok", `Bool true; "report", report] in
+    let decoded = or_fail (Masc.Tui_decode.decode_preset_restore (payload wire)) in
+    let decoded_commit = match decoded.prr_runtime with
+      | Masc.Tui_decode.Preset_runtime_committed commit -> commit
+      | Masc.Tui_decode.Preset_runtime_unchanged | Masc.Tui_decode.Preset_runtime_failed _ ->
+        fail "visible commit must remain committed through the wire"
+    in
+    check string "wire retains source identity"
+      (Runtime.config_source_revision_to_string receipt.observation.source_revision)
+      decoded_commit.prc_source_revision;
+    check string "wire retains commit order" (Runtime.config_commit_order_to_string receipt.order)
+      decoded_commit.prc_order;
+    check bool "wire retains actual durability including its reason" true
+      (receipt.durability = decoded_commit.prc_durability);
+    check bool "wire retains lock warnings" true
+      (receipt.lock_warnings = decoded_commit.prc_lock_warnings);
+    let expected_attention = sync_fails || receipt.lock_warnings <> [] ||
+      match receipt.exact_output_registry with
+      | Runtime.Exact_output_registry_replaced _ -> false
+      | Runtime.Exact_output_registry_unpublished | Runtime.Exact_output_registry_kept _ -> true in
+    check bool "wire warning classification follows the actual application" expected_attention
+      (Masc.Tui_decode.preset_runtime_commit_needs_attention decoded_commit);
+    let replace key value = function
+      | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+      | _ -> fail "report part must be an object" in
+    let runtime = Yojson.Safe.Util.member "runtime" wire in
+    let commit_json = Yojson.Safe.Util.member "commit" runtime in
+    List.iter (fun (application, expected_registry) ->
+      let runtime = replace "exact_output_registry"
+        (Runtime.exact_output_registry_application_to_yojson application) runtime in
+      let decoded = or_fail (Masc.Tui_decode.decode_preset_restore
+        (payload (replace "runtime" runtime wire))) in
+      match decoded.prr_runtime with
+      | Masc.Tui_decode.Preset_runtime_committed commit ->
+        check bool "registry projection keeps its own application state" true
+          (commit.prc_registry = expected_registry)
+      | Masc.Tui_decode.Preset_runtime_unchanged | Masc.Tui_decode.Preset_runtime_failed _ ->
+        fail "registry projection cannot erase a visible commit")
+      [ Runtime.Exact_output_registry_replaced {origin=Runtime.Runtime_binding_targets},
+          Masc.Tui_decode.Preset_registry_applied Masc.Tui_decode.Preset_registry_runtime_bindings
+      ; Runtime.Exact_output_registry_replaced {origin=Runtime.Replacement_catalog_targets {path="/fixture/catalog"}},
+          Masc.Tui_decode.Preset_registry_applied Masc.Tui_decode.Preset_registry_replacement_catalog
+      ; Runtime.Exact_output_registry_unpublished, Masc.Tui_decode.Preset_registry_unpublished
+      ; Runtime.Exact_output_registry_kept {reason=Runtime_exact_output_registry.Publication_busy},
+          Masc.Tui_decode.Preset_registry_kept
+            (Runtime_exact_output_registry.publication_error_to_string Runtime_exact_output_registry.Publication_busy)
+      ];
+    let warnings = [Runtime.Config_lock_release_unconfirmed "fixture unlock observation"] in
+    let warned = Runtime.attach_lock_warnings warnings receipt in
+    let warned_runtime = replace "commit" (Runtime.config_commit_receipt_to_yojson warned) runtime in
+    (match (or_fail (Masc.Tui_decode.decode_preset_restore
+      (payload (replace "runtime" warned_runtime wire)))).prr_runtime with
+     | Masc.Tui_decode.Preset_runtime_committed commit ->
+       check bool "lock warning projection retains original detail" true
+         (commit.prc_lock_warnings = receipt.lock_warnings @ warnings);
+       check bool "lock warning requires attention" true
+         (Masc.Tui_decode.preset_runtime_commit_needs_attention commit)
+     | Masc.Tui_decode.Preset_runtime_unchanged | Masc.Tui_decode.Preset_runtime_failed _ ->
+       fail "lock warning must remain a committed observation");
+    List.iter (fun malformed_runtime ->
+      check bool "incomplete or unknown commit observation cannot become clean" true
+        (Result.is_error (Masc.Tui_decode.decode_preset_restore
+          (payload (replace "runtime" malformed_runtime wire)))))
+      [ `Assoc ["effect", `String "runtime_commit"; "status", `String "committed"]
+      ; replace "status" (`String "unchanged") runtime
+      ; replace "status" (`String "failed") runtime
+      ; (match runtime with `Assoc fields -> `Assoc (("status", `String "unchanged") :: fields)
+          | _ -> fail "runtime must be an object")
+      ; replace "commit" (replace "source_revision" (`String "invalid") commit_json) runtime
+      ; replace "commit" (replace "order" (`String "0") commit_json) runtime
+      ; replace "commit" (replace "durability" (`String "unknown") commit_json) runtime
+      ; replace "commit" (replace "warnings" `Null commit_json) runtime
+      ; replace "commit" (replace "durability" (`String "unconfirmed")
+          (replace "durability_detail" `Null commit_json)) runtime
+      ; replace "exact_output_registry" (`Assoc ["status", `String "future";
+          "requires_restart", `Bool false]) runtime
+      ];
+    (match detail with
+     | Some expected -> check (option string) "wire keeps exact original fsync error"
+         (Some expected) (match decoded_commit.prc_durability with
+            | Runtime.Durability_unconfirmed {detail} -> Some detail
+            | Runtime.Durable -> None)
+     | None -> ());
+    check int "reading and rejecting reports never repeats the commit" 1 !calls;
+    check (list (pair string string)) "decoder failures do not overwrite undo state"
+      before.assignments (or_fail (Preset.load ~base_path report.autosave)).assignments)
+;;
+
 let () =
   Alcotest.run
     "Prompt_preset"
     [ ( "presets"
-      , [ Alcotest.test_case "default baseline survives drift and restore" `Quick test_default_baseline_survives_drift_and_restore
+      , [ Alcotest.test_case "visible restore retains fsync uncertainty without replay" `Quick
+            (test_restore_retains_visible_commit_observation ~sync_fails:true)
+        ; Alcotest.test_case "durable restore retains its actual commit receipt" `Quick
+            (test_restore_retains_visible_commit_observation ~sync_fails:false)
+        ; Alcotest.test_case "default baseline survives drift and restore" `Quick test_default_baseline_survives_drift_and_restore
         ; Alcotest.test_case "unreadable baseline cannot block preset capture or restore" `Quick
             test_unreadable_default_does_not_block_preset_operations
         ; Alcotest.test_case "missing baseline is unknown; corrupt hashes are refused" `Quick test_default_baseline_missing_or_invalid

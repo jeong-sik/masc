@@ -86,7 +86,9 @@ export function committedRuntimeTomlConfigFixture(
     commit: {
       source_revision: sourceRevision,
       order: options.order ?? '7',
-      durability: options.durability ?? 'durable',
+      ...(options.durability === 'unconfirmed'
+        ? { durability: 'unconfirmed' as const, durability_detail: 'fixture directory sync uncertainty' }
+        : { durability: 'durable' as const, durability_detail: null }),
       warnings: [],
     },
     application: {

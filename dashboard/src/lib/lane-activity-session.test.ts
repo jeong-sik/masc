@@ -34,7 +34,9 @@ const config = (text: string): RuntimeTomlConfig => ({ ok: true, path, file_name
   source_revision: revision(text), provider_protocols: [], reserved_provider_ids: [] })
 function receipt(text: string, durability: 'durable' | 'unconfirmed' = 'durable') {
   const value = committedRuntimeTomlConfigFixture({ ...config(text), path })
-  value.source_revision = revision(text); value.commit.source_revision = revision(text); value.commit.durability = durability
+  value.source_revision = revision(text); value.commit.source_revision = revision(text); value.commit = { ...value.commit, ...(durability === 'unconfirmed'
+    ? { durability: 'unconfirmed' as const, durability_detail: 'fixture directory sync uncertainty' }
+    : { durability: 'durable' as const, durability_detail: null }) }
   return value
 }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }

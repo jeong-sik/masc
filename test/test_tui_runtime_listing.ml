@@ -316,7 +316,7 @@ let test_commit_application_survives_reread () =
       [Ok (); Error "HTTP 503: read unavailable"])
     [Receipt.Exact_output_registry_kept {reason = "catalog read failed; prior model order remains"},
        Receipt.Durable, "configuration lock observation changed";
-     Receipt.Exact_output_registry_unpublished, Receipt.Durability_unconfirmed,
+     Receipt.Exact_output_registry_unpublished, Receipt.Durability_unconfirmed "fixture fsync uncertainty",
        "file synchronization was not confirmed"]
 
 let test_dismissed_commit_stays_dismissed_after_reread () =

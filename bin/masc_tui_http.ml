@@ -3504,12 +3504,10 @@ let post_preset_save ~(host : string) ~(port : int) ~(name : string)
 
 (** POST /api/v1/presets/restore — body {name}: the server autosaves the live
     state, applies the preset surface by surface, and answers a report. *)
-(* A restore is a write, so a transport failure is not a refusal: the server
-   may have finished it. The two are separated here because only this layer
-   knows which one happened, and the operator's next move differs — a refusal
-   is retried, an unknown outcome is read off the preset list first. *)
+(* A restore is a write. A transport or unreadable response is not evidence
+   that no effects happened; do not turn either into a retryable refusal. *)
 let post_preset_restore ~(host : string) ~(port : int) ~(name : string)
-    : (Yojson.Safe.t, [ `Refused of string | `Unknown_outcome of string ]) result =
+    : (Yojson.Safe.t, [ `Unknown_outcome of string ]) result =
   match
     http_post_with_timeout ~timeout_sec:preset_restore_timeout_sec
       ~headers:(auth_headers ()) ~host ~port ~path:"/api/v1/presets/restore"
@@ -3519,7 +3517,7 @@ let post_preset_restore ~(host : string) ~(port : int) ~(name : string)
   | Ok (status_code, body) -> (
     match decode_json ~allow_empty:true ~status_code ~body with
     | Ok json -> Ok json
-    | Error message -> Error (`Refused message))
+    | Error message -> Error (`Unknown_outcome message))
 
 (** POST /api/v1/presets/delete — body {name}: the server removes that preset
     directory, whether or not it loads. *)

@@ -1,6 +1,6 @@
 type durability =
   | Durable
-  | Durability_unconfirmed
+  | Durability_unconfirmed of string
 
 type config_state =
   | Configured

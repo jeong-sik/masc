@@ -1602,13 +1602,18 @@ let save_preset ~(host : string) ~(port : int) ~(name : string) ~(description : 
     operator is told to read the preset list rather than to retry. *)
 let restore_preset ~(host : string) ~(port : int) ~(name : string)
     : (Tui_decode.preset_restore_report, string) result =
-  match Masc_tui_http.post_preset_restore ~host ~port ~name with
-  | Error (`Refused message) -> Error ("preset restore refused: " ^ message)
-  | Error (`Unknown_outcome message) ->
+  let unconfirmed message =
     Error
-      ("preset restore outcome unknown — the server may have finished it; \
-        check when the preset list says _autosave was saved before retrying: " ^ message)
-  | Ok json -> Tui_decode.decode_preset_restore json
+      ("preset restore result unconfirmed — changes may already be applied; \
+        inspect current settings and _autosave before restoring again, which \
+        replaces the undo snapshot: " ^ message)
+  in
+  match Masc_tui_http.post_preset_restore ~host ~port ~name with
+  | Error (`Unknown_outcome message) -> unconfirmed message
+  | Ok json ->
+    (match Tui_decode.decode_preset_restore json with
+     | Ok report -> Ok report
+     | Error detail -> unconfirmed detail)
 
 (** POST /api/v1/presets/delete — the name the server removed. An unanswered
     request may still have removed it, so the operator is told to read the

@@ -333,58 +333,6 @@ let skill_application_json = function
      | Unchanged snapshot -> ready "unchanged" snapshot)
 ;;
 
-let runtime_config_commit_json (receipt : Runtime.config_commit_receipt) =
-  `Assoc
-    [ ( "source_revision"
-      , `String
-          (Runtime.config_source_revision_to_string
-             receipt.observation.source_revision) )
-    ; ( "order"
-      , `String (Runtime.config_commit_order_to_string receipt.order) )
-    ; ( "durability"
-      , `String
-          (match receipt.durability with
-           | Runtime.Durable -> "durable"
-           | Durability_unconfirmed _ -> "unconfirmed") )
-    ; ( "warnings"
-      , `List
-          (List.map Runtime.config_lock_warning_to_yojson receipt.lock_warnings) )
-    ]
-;;
-
-(* The exact-output registry is its own row, not part of [routing]: the
-   runtime cache and the registry are published by different code, and a
-   commit made while no registry is published leaves exact lanes unavailable
-   although routing applied (#38779). *)
-let exact_output_registry_application_json
-      (application : Runtime.exact_output_registry_application)
-  =
-  match application with
-  | Runtime.Exact_output_registry_replaced { origin } ->
-    `Assoc
-      [ "status", `String "applied"
-      ; "requires_restart", `Bool false
-      ; ( "targets"
-        , `String
-            (match origin with
-             | Runtime.Runtime_binding_targets -> "runtime_bindings"
-             | Runtime.Replacement_catalog_targets _ -> "replacement_catalog") )
-      ]
-  | Runtime.Exact_output_registry_unpublished ->
-    `Assoc [ "status", `String "unpublished"; "requires_restart", `Bool true ]
-  | Runtime.Exact_output_registry_kept { reason } ->
-    (* A restart would not help: boot rebuilds from the same file, which
-       publishes no registry, so exact output would be unavailable until the
-       file is fixed. [next_boot_publishes] says so. *)
-    `Assoc
-      [ "status", `String "kept"
-      ; "requires_restart", `Bool false
-      ; "next_boot_publishes", `Bool false
-      ; ( "reason"
-        , `String (Runtime_exact_output_registry.publication_error_to_string reason) )
-      ]
-;;
-
 let runtime_config_application_json
       ?skill_application
       ?exact_output_registry
@@ -411,7 +359,7 @@ let runtime_config_application_json
      @ match exact_output_registry with
        | None -> []
        | Some outcome ->
-         [ "exact_output_registry", exact_output_registry_application_json outcome ])
+         [ "exact_output_registry", Runtime.exact_output_registry_application_to_yojson outcome ])
 ;;
 
 let runtime_config_raw_json
@@ -484,7 +432,7 @@ let runtime_config_raw_json
            | None -> []
            | Some receipt ->
              [ "state", `String "committed"
-             ; "commit", runtime_config_commit_json receipt
+             ; "commit", Runtime.config_commit_receipt_to_yojson receipt
              ])))
 
 let runtime_config_line_count = Server_skill_write_audit.line_count
@@ -825,9 +773,9 @@ let audit_runtime_config_write
             @ (match receipt with
                | None -> []
                | Some (commit : Runtime.config_commit_receipt) ->
-                 [ "commit", runtime_config_commit_json commit
+                 [ "commit", Runtime.config_commit_receipt_to_yojson commit
                  ; ( "exact_output_registry"
-                   , exact_output_registry_application_json commit.exact_output_registry )
+                   , Runtime.exact_output_registry_application_to_yojson commit.exact_output_registry )
                  ])
             @ (match skill_application with
                | None -> []

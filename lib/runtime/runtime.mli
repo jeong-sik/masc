@@ -132,6 +132,12 @@ val lane_set_error_to_string : lane_set_error -> string
 val config_commit_order_to_string : config_commit_order -> string
 val compare_config_commit_order : config_commit_order -> config_commit_order -> int
 val config_lock_warning_to_yojson : config_lock_warning -> Yojson.Safe.t
+val config_commit_receipt_to_yojson : config_commit_receipt -> Yojson.Safe.t
+(** Public commit identity, durability and lock warnings. Does not expose the
+    configuration text. Unconfirmed durability retains its original detail. *)
+val exact_output_registry_application_to_yojson :
+  exact_output_registry_application -> Yojson.Safe.t
+(** Registry application is independent of the file's commit/durability. *)
 val keeper_assignment_revision_to_yojson : keeper_assignment_revision -> Yojson.Safe.t
 val keeper_assignment_revision_of_yojson :
   Yojson.Safe.t -> (keeper_assignment_revision, string) result

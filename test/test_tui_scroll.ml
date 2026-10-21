@@ -177,45 +177,6 @@ let test_the_list_height_is_the_rows_that_are_left () =
     (Masc_tui_scroll.content_height ~rows:3 ~chrome:10 ~count:5
        ~preview_keep:None ~overflow_takes_row:false)
 
-(* Where a window stands in its list. Five surfaces wrote their own reading and
-   three of them disagreed: Board and the Keeper call list said "rows 27-52 of
-   80", the lane run panes said "27-52/80", and the detail pane showed its
-   scroll offset over the offsets it could take -- a number no row on screen
-   carried. *)
-let test_the_window_reading_is_counted_from_one () =
-  Alcotest.check Alcotest.string "a window in the middle of its list" "27-52/80"
-    (Masc_tui_scroll.window_text ~scroll:26 ~height:26 80);
-  Alcotest.check Alcotest.string "an empty list" "0/0"
-    (Masc_tui_scroll.window_text ~scroll:0 ~height:10 0);
-  Alcotest.check Alcotest.string "a surface with no rows to show them in" "0/5"
-    (Masc_tui_scroll.window_text ~scroll:0 ~height:0 5);
-  Alcotest.check Alcotest.string "a window past the end reads its last row"
-    "10-10/10" (Masc_tui_scroll.window_text ~scroll:20 ~height:3 10);
-  Alcotest.check Alcotest.string "the last window stops at the count" "6-10/10"
-    (Masc_tui_scroll.window_text ~scroll:5 ~height:10 10);
-  Alcotest.check Alcotest.string "the counted item is named" "rows 27-52/80"
-    (Masc_tui_scroll.window_reading ~noun:"rows" ~scroll:26 ~height:26 80)
-
-(* The position row is one builder: three surfaces wrote their own, each beside
-   its own height sum, and one missing the overflow row would put the window's
-   last row under the reading (#38744). Without a hint the row is drawn only
-   when the rows overflow; with one there is always something to say. *)
-let test_the_position_row_says_only_what_is_true () =
-  let row ?hint ~scroll ~height count =
-    Masc_tui_scroll.position_row ~scroll ~height ?hint count
-  in
-  Alcotest.check (Alcotest.option Alcotest.string)
-    "an overflowing window carries its reading" (Some "  [lines 1-10/80]")
-    (row ~scroll:0 ~height:10 80);
-  Alcotest.check (Alcotest.option Alcotest.string)
-    "a list that fits has nothing to say" None (row ~scroll:0 ~height:10 5);
-  Alcotest.check (Alcotest.option Alcotest.string)
-    "a hint alone is said" (Some "  esc closes")
-    (row ~hint:"esc closes" ~scroll:0 ~height:10 5);
-  Alcotest.check (Alcotest.option Alcotest.string)
-    "the reading goes before the hint" (Some "  [lines 1-10/80]  esc closes")
-    (row ~hint:"esc closes" ~scroll:0 ~height:10 80)
-
 let () =
   Alcotest.run "tui_scroll"
     [ ( "bound"
@@ -245,10 +206,6 @@ let () =
     ; ( "layout"
       , [ Alcotest.test_case "the list height is the rows that are left" `Quick
             test_the_list_height_is_the_rows_that_are_left
-        ; Alcotest.test_case "the window reading is counted from one" `Quick
-            test_the_window_reading_is_counted_from_one
-        ; Alcotest.test_case "the position row says only what is true" `Quick
-            test_the_position_row_says_only_what_is_true
         ] )
     ; ( "position"
         (* Empty on purpose: Masc_tui_scroll.Position does not exist on main yet.

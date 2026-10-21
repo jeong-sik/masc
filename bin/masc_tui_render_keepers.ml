@@ -516,6 +516,9 @@ let render_keeper_list (state : state) =
    | Some err -> box_line buf cols ((Theme.bad ()) ^ "  " ^ err ^ Ansi.reset)
    | None -> ());
 
+  Option.iter (fun note -> box_line buf cols (Theme.recede () ^ note ^ Ansi.reset))
+    (local_source_pending_note state Local_keepers);
+
   (* Counted rather than recomputed: the chrome above varies with the fleet
      reading, the roster's health and the metadata error, so a second
      arithmetic copy of its height would drift from what was just emitted and

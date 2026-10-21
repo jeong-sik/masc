@@ -27,6 +27,20 @@
   cold/empty 읽기도 CPU 비교가 필요 없다. Keeper 메타데이터는 이 작업을 기다리지 않고,
   원래 workspace/source/요청 owner가 I/O·비교·최종 반영을 소유한다. 이 identity는 process
   안의 불변 데이터 증거이며 조회 권한·freshness·재시작 내구성·실측 속도 증거가 아니다.
+- 로컬 Work·Keeper 메타데이터는 실제 시작한 원래 요청마다 독립 capture를 소유한다.
+  `tui_local_read`는 I/O 제출·worker 진입/본문 반환·제출 caller 관측, 실제 Task 비교 선택과
+  CPU worker, 전체 caller, UI admission과 상태 적용, 철회·취소 요청·registry 해제를 구분한다.
+  immediate는 실제 planner 판정이며 cold/empty를 이미 성공한 cache hit로 바꾸지 않는다.
+  누락은 null로 보존하고 실패·취소·시작 불가·늦은 응답도 원래 capture에 남긴다. 같은 숫자
+  요청 번호나 source 이름으로 다른 workspace/process의 관측을 합치지 않는다.
+- 상세 로컬 읽기 로그는 기존 routine level을 따른다. 기본 INFO에서 JSON을 직렬화하지
+  않아도 원자적 사실과 현재 읽기 표시는 남는다. 상세 기록을 켰을 때 v2의 requested
+  identity와 이후 변경 사건을 capture ID로 합친다. 누락된 시작/사건을 성공이나 0으로
+  만들지 않는다. 로그 크기의 정적 계산은 실제 디스크 사용량·지연 측정과 구분한다.
+- Work 목록·Keeper 목록의 읽기 단계는 현재 source의 실제 대기와 atomic 사실에서만 표시한다.
+  경과 시간·추정 timeout으로 단계를 만들지 않고 마지막 정상 관측·오류와 함께 읽는다.
+  상태 적용은 실제 apply 뒤 기록하며 worker 반환·등록 해제·상태 적용을 paint·입력 가능·
+  Task 진척으로 올리지 않는다. 진단 로그/할당 비용도 실제 Before/After 분모에 포함한다.
 - Task 표시 준비는 원래 consumer/요청/run/Task·workspace·폭·ticket에 귀속해 시작, worker
   진입/반환, caller 관측, UI 적용/거절, 소유권 철회, 취소 요청과 실제 등록 해제를 별도로 남긴다.
   같은 요청의 원자적 사실만 준비 단계 안내에 쓰며, 미관측 단계는 null로 남긴다. worker 반환을

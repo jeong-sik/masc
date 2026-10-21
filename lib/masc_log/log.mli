@@ -195,6 +195,14 @@ val client_tool_host_error :
     and the context prefix in log output. *)
 module type LOGGER = sig
   val emit : level -> ?details:Yojson.Safe.t -> ?keeper_name:string -> ?turn_id:int -> ?category:category -> string -> unit
+  val routine_lazy :
+    ?details:Yojson.Safe.t ->
+    ?keeper_name:string ->
+    ?turn_id:int ->
+    ?category:category ->
+    (unit -> string) -> unit
+  (** Build the message only when the existing routine level and module threshold
+      permit emission. Uses the same redaction, console and ring sinks as [routine]. *)
   val routine :
     ?details:Yojson.Safe.t ->
     ?keeper_name:string ->

@@ -22,6 +22,10 @@ module Retained_view = Masc_tui_retained_view
 module Span = Masc_tui_span
 module Status = Masc.Keeper_status_runtime
 
+val local_source_pending_note : state -> local_read_source -> string option
+(** The original local read's pending phase for the Work and Keeper surfaces.
+    [None] means that this source has no pending read. *)
+
 val runtime_assignment_label : runtime_assignment -> string
 (** The assignment shown in the runtime picker and Runtime Stats value. *)
 

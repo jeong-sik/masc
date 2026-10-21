@@ -1189,10 +1189,12 @@ let test_first_loss_retains_unproven_effects mode () =
       let read_work () =
         let request=Ui.begin_local_workspace_read ui ~intent:Ui.Snapshot_read.Refresh
           ~source:Ui.Local_work ~base_path ~started_ns:0L |> Option.get in
-        let reading=Masc_tui_loader.read_local_workspace base_path
-          |> Masc_tui_loader.prepare_local_workspace request in
+        let reading=Ui.Local_read_observation.run request.lwr_observation
+          ~read:(fun () -> Masc_tui_loader.read_local_workspace base_path)
+          ~prepare:(Masc_tui_loader.prepare_local_workspace request) in
         match Ui.take_local_workspace_read ui ~source:Ui.Local_work request (Ok reading) with
-        | Some (Ok reading) -> Masc_tui_loader.apply_local_workspace ui reading
+        | Some (Ok reading) -> Ui.Local_read_observation.apply request.lwr_observation
+            (Masc_tui_loader.apply_local_workspace ui) reading
         | Some (Error _) | None -> fail "actual Work observation lost its original read owner" in
       read_work ();
       let work=Ui.sync_task_documents ui ~cols:72 in
@@ -1248,7 +1250,47 @@ let test_first_loss_retains_unproven_effects mode () =
           && task.description=work_description) (Ui.task_domain_values ui));
       let changed_work=Ui.sync_task_documents ui ~cols:72 in
       let work_body=find Document.Body changed_work in
+      (* A real local Work result can arrive after its read epoch was withdrawn.
+         It must retain its own rejection facts and cannot settle the replacement
+         Work request or the independent required-metadata source. *)
+      let late_work=Ui.begin_local_workspace_read ui ~intent:Ui.Snapshot_read.Refresh
+        ~source:Ui.Local_work ~base_path ~started_ns:(Mtime_clock.elapsed_ns ()) |> Option.get in
+      let late_reading=Ui.Local_read_observation.run late_work.lwr_observation
+        ~read:(fun () -> Masc_tui_loader.read_local_workspace base_path)
+        ~prepare:(Masc_tui_loader.prepare_local_workspace late_work) in
       Ui.suspend_workspace_readings ui;
+      let replacement_work=Ui.begin_local_workspace_read ui ~intent:Ui.Snapshot_read.Refresh
+        ~source:Ui.Local_work ~base_path ~started_ns:(Mtime_clock.elapsed_ns ()) |> Option.get in
+      let metadata=Ui.begin_local_workspace_read ui ~intent:Ui.Snapshot_read.Refresh
+        ~source:Ui.Local_keepers ~base_path ~started_ns:(Mtime_clock.elapsed_ns ()) |> Option.get in
+      check bool "late actual Work result is rejected after source withdrawal" true
+        (Option.is_none (Ui.take_local_workspace_read ui ~source:Ui.Local_work late_work (Ok late_reading)));
+      check bool "late Work result leaves replacement and metadata independently pending" true
+        (Ui.Local_read_order.in_flight ui.local_workspace_read_order
+          && Ui.Local_read_order.in_flight ui.local_keeper_read_order);
+      check bool "rejected original retains its source disposition without claiming state application" true
+        (let facts=Ui.Local_read_observation.facts late_work.lwr_observation in
+         match facts.ui_admission,facts.ui_application with
+         | Some (_,Rejected Superseded),None -> true | _ -> false);
+      let keeper_reading=Ui.Local_read_observation.run metadata.lwr_observation
+        ~read:(fun () -> Masc_tui_loader.read_local_keepers base_path) ~prepare:Fun.id in
+      (match Ui.take_local_workspace_read ui ~source:Ui.Local_keepers metadata (Ok keeper_reading) with
+       | Some (Ok reading) -> Ui.Local_read_observation.apply metadata.lwr_observation
+           (Masc_tui_loader.apply_local_keepers ui) reading
+       | Some (Error _) | None -> fail "actual metadata result lost independent source ownership");
+      check bool "required metadata can apply while replacement Work stays pending" true
+        (Ui.Local_read_order.in_flight ui.local_workspace_read_order
+          && not (Ui.Local_read_order.in_flight ui.local_keeper_read_order));
+      let replacement_reading=Ui.Local_read_observation.run replacement_work.lwr_observation
+        ~read:(fun () -> Masc_tui_loader.read_local_workspace base_path)
+        ~prepare:(Masc_tui_loader.prepare_local_workspace replacement_work) in
+      (match Ui.take_local_workspace_read ui ~source:Ui.Local_work replacement_work (Ok replacement_reading) with
+       | Some (Ok reading) -> Ui.Local_read_observation.apply replacement_work.lwr_observation
+           (Masc_tui_loader.apply_local_workspace ui) reading
+       | Some (Error _) | None -> fail "replacement Work result lost its original source owner");
+      check bool "replacement application is observed only for its own admitted result" true
+        (match (Ui.Local_read_observation.facts replacement_work.lwr_observation).ui_application with
+         | Some (_,Applied) -> true | _ -> false);
       let replacement_documents=Ui.sync_task_documents ui ~cols:72 in
       Ui.complete_task_document ui ~cols:72 work_body (prepare work_body);
       check bool "retired preparation cannot settle a reentered same-ID document" true

@@ -517,6 +517,14 @@ let test_file_read_rejects_lost_scope lost () =
             let config = Masc.Mcp_server.workspace_config state in
             ignore (Masc.Workspace.init config ~agent_name:None);
           Masc.Mcp_server.For_testing.await_publication_recovery_initialization state;
+            Auth.save_auth_config base_path
+              { Masc_domain.default_auth_config with enabled = true; require_token = true };
+            let token =
+              match Auth.create_token base_path ~agent_name:"selected-file-editor"
+                      ~role:Masc_domain.Admin with
+              | Ok (raw, _) -> raw
+              | Error _ -> fail "could not create selected scope fixture token"
+            in
             Server_auth.For_testing.restore_server_state (Some state);
             (match Masc.Server_startup_state.mark_state_ready () with
              | Ok () -> ()
@@ -566,7 +574,7 @@ let test_file_read_rejects_lost_scope lost () =
             let binding = "expected_base_path=" ^ encode (Unix.realpath base_path)
               ^ "&expected_masc_root=" ^ encode (Unix.realpath (Masc.Workspace.masc_dir config)) in
             let router = W.add_routes (Masc.Http_server_eio.Router.create ()) in
-            let request route path = workspace_http_response ~router
+            let request route path = workspace_http_response ~token ~router
                 (route ^ "?path=" ^ encode path ^ "&" ^ scope ^ "&" ^ binding) in
             let status, catalog = request "/api/v1/workspace/files" "" in
             check_workspace_http_status "selected scope catalog succeeds" 200 status catalog;
@@ -582,7 +590,7 @@ let test_file_read_rejects_lost_scope lost () =
                 "expected_revision", `String expected_revision; "content", `String content;
                 "expected_workspace", `Assoc ["base_path", `String (Unix.realpath base_path);
                   "masc_root", `String (Unix.realpath (Masc.Workspace.masc_dir config))]]) in
-              workspace_http_response ~meth:"POST" ~body ~router ("/api/v1/workspace/file?" ^ scope) in
+              workspace_http_response ~meth:"POST" ~body ~token ~router ("/api/v1/workspace/file?" ^ scope) in
             let edited_content = "let selected_scope = \"edited\"\n" in
             let status, saved = save edited_content expected_revision in
             check_workspace_http_status "selected scope save succeeds" 200 status saved;
@@ -600,7 +608,7 @@ let test_file_read_rejects_lost_scope lost () =
               (Yojson.Safe.Util.member "content" body = `Null);
             let status, body = request "/api/v1/workspace/files" "" in
             check_workspace_http_status "catalog and selected file agree on unavailable scope" 404 status body;
-            let status, body = workspace_http_response ~router
+            let status, body = workspace_http_response ~token ~router
                 ("/api/v1/workspace/file?path=" ^ encode path ^ "&" ^ binding) in
             check_workspace_http_status "explicit project reading remains available" 200 status body;
             check string "the same-named project file really exists" project_content
@@ -773,9 +781,9 @@ let test_file_save_http_authority () =
           let config = Masc.Mcp_server.workspace_config state in
           ignore (Masc.Workspace.init config ~agent_name:None);
           Masc.Mcp_server.For_testing.await_publication_recovery_initialization state;
-          Masc.Auth.save_auth_config base_path
+          Auth.save_auth_config base_path
             { Masc_domain.default_auth_config with enabled = true; require_token = true };
-          let token agent_name role = match Masc.Auth.create_token base_path ~agent_name ~role with
+          let token agent_name role = match Auth.create_token base_path ~agent_name ~role with
             | Ok (raw, _) -> raw | Error _ -> fail "could not create fixture token" in
           let admin = token "file-editor" Masc_domain.Admin in
           let worker = token "file-worker" Masc_domain.Worker in

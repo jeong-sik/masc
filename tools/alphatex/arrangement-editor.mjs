@@ -130,10 +130,20 @@ export function arrangementTakeSelected(editor, { asset, cycle }) {
   const clip = project.clips.find(clip => clip.asset === asset && clip.takeCycle === cycle)
   return { ...(project === editor.project ? editor : commit(editor, project)), asset, pattern: clip.pattern, lane: clip.lane, region: clip.id, tick: clip.position }
 }
-export function arrangementCommand(editor, line) {
+function commandInput(line) {
   line = line.trim()
   const boundary = line.search(/\s/), command = boundary < 0 ? line : line.slice(0, boundary)
   const tail = boundary < 0 ? '' : line.slice(boundary).trim(), args = tail ? tail.split(/\s+/) : []
+  return { command, tail, args }
+}
+// Lexical admission has no document effects or selected-asset requirements.
+// Stop can retire earlier queued work before semantic command execution begins.
+export function arrangementCommandAdmission(line) {
+  const { command, args } = commandInput(line)
+  return { kind: command === 'stop' && !args.length ? 'stop' : 'queued' }
+}
+export function arrangementCommand(editor, line) {
+  const { command, tail, args } = commandInput(line)
   const count = (min, max = min) => { if (args.length < min || args.length > max) throw new Error(`Wrong arguments for ${command}; use :help`) }
   const ordinalLane = value => {
     const index = Number(value) - 1

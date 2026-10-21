@@ -8,7 +8,7 @@ import { Worker } from 'node:worker_threads'
 import { emitKeypressEvents } from 'node:readline'
 import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } from './arrangement-playback.mjs'
 import { startSoundArrangement } from './arrangement-sound.mjs'
-import { arrangementEditor, arrangementAction, arrangementCommand, arrangementImported, arrangementPracticePass, arrangementPracticeSound, arrangementCalibrated, arrangementRecordingCorrection, selectedRegion, arrangementTakes, arrangementTakeSelected } from './arrangement-editor.mjs'
+import { arrangementEditor, arrangementAction, arrangementCommand, arrangementCommandAdmission, arrangementImported, arrangementPracticePass, arrangementPracticeSound, arrangementCalibrated, arrangementRecordingCorrection, selectedRegion, arrangementTakes, arrangementTakeSelected } from './arrangement-editor.mjs'
 import { captureFluidSound } from './soundfont.mjs'
 import { loadArrangement, verifyArrangementAssets, saveArrangement } from './arrangement-files.mjs'
 import { saveProject } from './sequencer-files.mjs'
@@ -103,6 +103,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   const playerPlans = new Map(), planInspections = new Map()
   let recordStart = null, recording = null, input = null, midiInput = 'all', transportPending = false, inputDevices = null, discoveryTicket = 0
   let showTakes = null
+  let derivationAdmission = 0
   let calibration = null
   let calibrationInspection = null, recordingInspection = null
   const discovery = new AbortController()
@@ -775,18 +776,20 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       else if (key.name === 'backspace') prompt = [...prompt].slice(0, -1).join('')
       else if (key.name === 'return') {
         const line = prompt; prompt = null
-        if (preparing?.operation === 'derivation') {
-          // Stop must reach the worker before its eventual result, rather than
-          // waiting behind that result in the admitted document-edit queue.
-          try {
-            const decision = arrangementCommand(editor, line)
-            if (decision.effect?.kind === 'stop') { stop(); status = 'Cancelling MIDI derivation'; draw(); return }
-          } catch (error) { status = error.message; draw(); return }
+        if (arrangementCommandAdmission(line).kind === 'stop') {
+          derivationAdmission++
+          // Also invalidate derivations admitted in this same input batch,
+          // whose serialized command has not issued its worker request yet.
+          if (preparing?.operation === 'derivation') { stop(); status = 'Cancelling MIDI derivation'; draw(); return }
         }
+        const admission = derivationAdmission
         enqueue(async () => {
           let result = arrangementCommand(editor, line)
+          const derivation = ['capture-midi', 'practice-midi-region', 'practice-midi', 'practice-backing'].includes(result.effect?.kind)
+          if (derivation && admission !== derivationAdmission) return
           if (result.editor.project !== editor.project || result.effect && !['record', 'record-stop', 'inputs', 'input', 'midi-input', 'midi-monitor', 'help', 'takes'].includes(result.effect.kind)) {
             await settleRecording()
+            if (derivation && admission !== derivationAdmission) return
             // Finalization may select a newly imported asset. Retain the source
             // the user chose before waiting; never reinterpret it on that asset.
             result = result.selection?.kind === 'take-selection'

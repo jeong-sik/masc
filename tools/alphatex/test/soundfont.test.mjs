@@ -3,11 +3,13 @@ import assert from 'node:assert/strict'
 import { mkdtemp, writeFile, readFile, rm, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { captureFluidSound, fluidRenderPlan, renderFluidSound } from '../soundfont.mjs'
 import { importMidiSource, midiSourceFromEvents } from '../midi-source.mjs'
 import { validateSound } from '../project-sound.mjs'
 import { readWaveMetadata } from '../wave-file.mjs'
+import { nativeJob } from '../vst.mjs'
 import { newEditor, editorCommand } from '../sequencer-editor.mjs'
 import { saveProject, loadProject } from '../sequencer-files.mjs'
 
@@ -22,11 +24,11 @@ function source(sustain = 127) {
 async function fixture(action) {
   const root = await mkdtemp(join(tmpdir(), 'masc-fluid-test-'))
   const sound = await captureFluidSound().promise
-  const render = async (project, name, changed = {}) => {
+  const render = async (project, name, changed = {}, run) => {
     const plan = { ...fluidRenderPlan(project), ...changed }, path = join(root, name + '.json')
     const bytes = Buffer.from(JSON.stringify(plan))
     await writeFile(path, bytes)
-    return renderFluidSound(sound, { preparation: { promise: Promise.resolve({ path, sha256: digest(bytes) }), cancel: new Int32Array(new SharedArrayBuffer(4)) }, outputPath: join(root, name + '.wav') })
+    return renderFluidSound(sound, { preparation: { promise: Promise.resolve({ path, sha256: digest(bytes) }), cancel: new Int32Array(new SharedArrayBuffer(4)) }, outputPath: join(root, name + '.wav'), ...(run ? { run } : {}) })
   }
   try { await action({ root, sound, render }) } finally { await rm(root, { recursive: true, force: true }) }
 }
@@ -119,4 +121,38 @@ test('a positive source loop with no PCM sample is refused before publication', 
   const { sourceWindow } = fluidRenderPlan(input, { loop: true, sourceLoop: { start: 3, end: 4 } })
   await assert.rejects((await render(input, 'tiny-window', { sourceWindow })).promise, /PCM window/)
   await assert.rejects(readFile(join(root, 'tiny-window.wav')), { code: 'ENOENT' })
+}))
+
+test('final mixed float32 PCM reports real over-range samples without clamping dense ports', () => fixture(async ({ render }) => {
+  const keys = [48,52,55,59,60,64,67,71]
+  const events = [{ frame: 0, bytes: [0xc0, 0] }, { frame: 0, bytes: [0xb0, 7, 127] },
+    ...keys.map(key => ({ frame: 0, bytes: [0x90, key, 127] })),
+    ...keys.map(key => ({ frame: 2205, bytes: [0x80, key, 0] }))]
+  const dense = await (await render(source(), 'dense', { frames: 4410,
+    ports: Array.from({ length: 32 }, (_, port) => ({ port, events })) })).promise
+  const densePCM = (await samples(dense.path)).values
+  const clipped = densePCM.filter(value => Math.abs(value) > 1).length
+  assert.ok(clipped > 0); assert.ok(densePCM.some(value => Math.abs(value) > 1))
+  assert.equal(dense.clippedSamples, clipped); assert.equal(dense.soundfont.clippedSamples, clipped)
+  assert.equal(dense.soundfont.peak, Math.max(...densePCM.map(Math.abs)))
+  const quiet = await (await render(source(), 'quiet', { frames: 4410,
+    ports: [{ port: 0, events: [{ frame: 0, bytes: [0x90, 60, 32] }] }] })).promise
+  const quietPCM = (await samples(quiet.path)).values
+  assert.ok(quietPCM.some(value => value !== 0))
+  assert.ok(quietPCM.every(value => Math.abs(value) <= 1))
+  assert.equal(quiet.clippedSamples, 0); assert.equal(quiet.soundfont.clippedSamples, 0)
+  assert.equal(quiet.soundfont.peak, Math.max(...quietPCM.map(Math.abs)))
+}))
+
+test('missing or impossible native clipping receipts refuse publication and retire private files', () => fixture(async ({ root, render }) => {
+  for (const [index, count] of [undefined, -1, 0.5, 129, '0', 1].entries()) {
+    const run = request => {
+      const child = nativeJob(request, { command: 'python3', args: [fileURLToPath(new URL('../soundfont_host.py', import.meta.url))], label: 'SoundFont' })
+      return { ...child, promise: child.promise.then(result => ({ ...result, clippedSamples: count })) }
+    }
+    const name = `invalid-clipping-${index}`
+    await assert.rejects((await render(source(), name, { frames: 64, ports: [] }, run)).promise, /receipt/)
+    await assert.rejects(readFile(join(root, name + '.wav')), { code: 'ENOENT' })
+    assert.equal((await readdir(root)).filter(name => name.startsWith('soundfont-')).length, 0)
+  }
 }))

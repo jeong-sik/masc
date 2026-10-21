@@ -1,8 +1,8 @@
 (* alphaTex → ASCII tablature.
 
    [Masc_tui_alphatex_score] reads the text into measures of beats. Here the
-   measures are laid across the pane and drawn: [systems] decides which
-   measures share a row, and drawing writes them out. *)
+   measures are laid across the pane and drawn: [layout] decides which
+   original beat spans share a system, and drawing writes them out. *)
 
 module Score = Masc_tui_alphatex_score
 
@@ -27,12 +27,9 @@ let failure_text = function
 
 (* {1 Systems}
 
-   A sixteenth note is [cells_per_unit] character cells in its measure. That
-   is one until a fret would touch the slot after it: two-digit frets on
-   eighth notes drew [1210], which reads as four notes. A measure takes the
-   smallest count that leaves each of its frets a dash before the next slot.
-   It is the measure's own count: one crowded measure widens and the rest of
-   the score stays as it was. Simultaneous notes share one column: only the
+   A beat takes the wider of its duration in cells and its fret text plus
+   one separating dash, so neighboring frets never run together. Each beat
+   reserves its own width. Simultaneous notes share one column: only the
    widest fret on any string contributes to that column's width.
 
    Systems normally end at bar lines. An oversized bar continues between

@@ -569,7 +569,9 @@ let test_a_repeated_tab_stays_inside_the_pane () =
         (List.for_all (fun line -> String.length line <= 40) lines)
 
 let test_a_repeated_measure_the_pane_cannot_hold () =
-  match Alphatex.layout ~max_width:20
+  (* The opening beat with its repeat start fits in 21 cells; the closing
+     beat with its original repeat count needs 25, even on its own. *)
+  match Alphatex.layout ~max_width:21
     (read_score "\\ro :1 0.6 0.6 \\rc 12") with
   | Error (Too_wide _) -> ()
   | Error (Unreadable _ as other) -> Alcotest.failf "not Too_wide: %s" (Alphatex.failure_text other)

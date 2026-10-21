@@ -8058,6 +8058,7 @@ type state = {
   mutable home_decision_inflight : home_request option;
   mutable home_last_chat : home_chat_receipt;
   home_chat_writer : Masc_tui_chat_visit.t;
+  credential_preparation : Masc_tui_credential_preparation.t;
   mutable home_chat_visit : Masc_tui_chat_visit.request option;
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -14682,6 +14683,7 @@ let create_state
   home_decision_inflight = None;
   home_last_chat = No_chat_receipt;
   home_chat_writer = Masc_tui_chat_visit.create ();
+  credential_preparation = Masc_tui_credential_preparation.create ();
   home_chat_visit = None;
   metrics_scroll = 0;
   metrics_section = Section_fleet;

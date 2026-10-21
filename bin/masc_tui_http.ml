@@ -317,7 +317,15 @@ let refresh_operator_token ~sent =
 let operator_token () = !operator_token_cell
 let operator_token_present () = Option.is_some (operator_token ())
 
+(* Installed once by the session before it admits credential preparation.
+   Existing request builders wait for an already running installer before
+   snapshotting the bearer, including the post-server bootstrap retry. *)
+let credential_preparation = Atomic.make None
+let install_credential_preparation preparation =
+  Atomic.set credential_preparation (Some preparation)
+
 let auth_headers () =
+  Option.iter Masc_tui_credential_preparation.await_current (Atomic.get credential_preparation);
   let agent_header = [ ("X-MASC-Agent", default_agent_name) ] in
   match operator_token () with
   | Some token ->

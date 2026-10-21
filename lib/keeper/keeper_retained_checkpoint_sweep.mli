@@ -1,11 +1,8 @@
-(** Startup removal of retained continuations no semantic execution names.
+(** Startup removal of retained continuations no durable Owner relation names.
 
-    A retained continuation ([<session>/accepted-checkpoints/<sha256>.json],
-    written by {!Keeper_checkpoint_store.retain_exact_snapshot}) is read only
-    through an unsettled semantic execution that names it
-    ({!Keeper_semantic_execution.checkpoint_references}). A settled execution
-    names none, so a file that no unsettled execution names is never read
-    again.
+    Semantic executions and trace-scoped input checkpoint owners retain exact
+    payloads under [<session>/accepted-checkpoints/<sha256>.json]. An input
+    owner survives operation settlement even when pending_input is None.
 
     The file is written before the execution naming it commits. The pass is
     therefore run only by the server process that holds the BasePath writer
@@ -18,7 +15,7 @@
     uncertain commit, or a failed removal left. *)
 
 type report =
-  { live_references : int  (** distinct checkpoints named by unsettled executions *)
+  { live_references : int  (** distinct checkpoints named by semantic or input owners *)
   ; removed : int
   ; removed_bytes : int
   ; failures : string list  (** files that could not be removed, with the cause *)

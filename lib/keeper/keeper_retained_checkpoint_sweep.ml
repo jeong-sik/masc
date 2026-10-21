@@ -51,9 +51,10 @@ let live_references_of_store path =
   | Error error ->
     Error (Store_unreadable { path; detail = Store.error_to_string error })
   | Ok Store.Missing_store -> Ok []
-  | Ok (Store.Stored_operations { semantic_executions; chat_operations = _ }) ->
+  | Ok (Store.Stored_operations { semantic_executions; chat_operations = _; input_checkpoints }) ->
     Ok
-      (List.concat_map
+      (List.map (fun (reference : Keeper_checkpoint_ref.t) -> reference.sha256) input_checkpoints
+       @ List.concat_map
          (fun execution ->
             Keeper_semantic_execution.checkpoint_references execution
             |> List.map (fun (reference : Keeper_checkpoint_ref.t) -> reference.sha256))

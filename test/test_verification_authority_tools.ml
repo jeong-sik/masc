@@ -190,24 +190,27 @@ let with_surface ?(sandbox_profile = "remote_ssh") ?ssh_script f =
     | Error reason -> Alcotest.failf "surface creation failed: %s" reason
     | Ok surface -> f config surface
   in
-  if remote
-  then (
-    (* The SSH runner spawns through [Process_eio], which answers "initialized
-       Eio runtime required" until it holds this run's process manager. The
-       Docker route reaches its backend without it, which is why only this
-       branch pays for it. *)
-    let clock = Eio.Stdenv.clock env in
-    Eio_context.set_clock clock;
-    Eio_context.set_switch sw;
-    Process_eio.init
-      ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / Sys.getcwd ())
-      ~proc_mgr:(Eio.Stdenv.process_mgr env)
-      ~clock;
-    (* The bootstrap preflight ends in [gh auth status], which a fixture
-       endpoint cannot answer; the read path under test never needed it. *)
-    with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" (fun () ->
-      with_fake_ssh ?script:ssh_script run))
-  else run ()
+  (* The SSH runner spawns through [Process_eio], which answers "initialized
+     Eio runtime required" until it holds this run's process manager. The
+     checkout probes spawn git through it as well, so every profile holds this
+     run's manager, and none leaves it behind for the next test. *)
+  let clock = Eio.Stdenv.clock env in
+  Process_eio.init
+    ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / Sys.getcwd ())
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock;
+  Fun.protect
+    ~finally:Process_eio.reset_for_testing
+    (fun () ->
+      if remote
+      then (
+        Eio_context.set_clock clock;
+        Eio_context.set_switch sw;
+        (* The bootstrap preflight ends in [gh auth status], which a fixture
+           endpoint cannot answer; the read path under test never needed it. *)
+        with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" (fun () ->
+          with_fake_ssh ?script:ssh_script run))
+      else run ())
 ;;
 
 let require_root = function
@@ -715,6 +718,211 @@ let test_root_layout_reports_entries_and_discovered_checkouts () =
       "still names the root's own entries, which need no prefix"
       true
       (holds "artifacts"))
+;;
+
+let run_git_lines ~cwd args =
+  match Repo_git.run_git ~cwd args with
+  | Ok lines -> lines
+  | Error error ->
+    Alcotest.failf "git %s failed: %s" (String.concat " " args) error
+;;
+
+(* The commit hooks and signing a developer's global git config installs would
+   block or prompt inside a throwaway repository. *)
+let git_commit ~cwd message =
+  ignore
+    (run_git_lines ~cwd
+       [ "-c"; "core.hooksPath=/dev/null"
+       ; "-c"; "commit.gpgsign=false"
+       ; "commit"; "--allow-empty"; "-m"; message
+       ])
+;;
+
+let git_head ~cwd =
+  match run_git_lines ~cwd [ "rev-parse"; "HEAD" ] with
+  | [ sha ] -> sha
+  | lines -> Alcotest.failf "unexpected rev-parse output: %s" (String.concat "|" lines)
+;;
+
+let init_git_checkout checkout =
+  Fs_compat.mkdir_p checkout;
+  ignore (run_git_lines ~cwd:checkout [ "init"; "-b"; "main" ]);
+  ignore (run_git_lines ~cwd:checkout [ "config"; "user.email"; "test@example.com" ]);
+  ignore (run_git_lines ~cwd:checkout [ "config"; "user.name"; "Test" ])
+;;
+
+let layout_line layout ~affix =
+  match
+    List.find_opt (fun entry -> Astring.String.is_infix ~affix entry) layout
+  with
+  | Some line -> line
+  | None ->
+    Alcotest.failf "no layout line names %s: %s" affix (String.concat " / " layout)
+;;
+
+(* The judge reads this line to decide whether a file missing from a checkout
+   is missing from main. A tree the catalog cannot compare with main must say
+   so, and it must carry the commit it holds. *)
+let test_root_layout_names_head_and_refuses_to_call_an_uncompared_tree_current () =
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
+    let root = producer_playground config producer in
+    let checkout = Filename.concat root "repos/unregistered" in
+    init_git_checkout checkout;
+    git_commit ~cwd:checkout "first";
+    let head = git_head ~cwd:checkout in
+    let line =
+      layout_line (VAT.root_layout surface |> require_layout) ~affix:"repos/unregistered/"
+    in
+    let holds affix = Astring.String.is_infix ~affix line in
+    Alcotest.(check bool) "names the HEAD commit" true (holds ("head=" ^ head));
+    Alcotest.(check bool) "names the branch" true (holds "branch=main");
+    Alcotest.(check bool)
+      "says no comparison with main was made"
+      true
+      (holds "no comparison with main");
+    Alcotest.(check bool)
+      "does not describe the tree as equal to main"
+      false
+      (holds "HEAD equals"))
+;;
+
+(* The observed incident: a tree behind main, read as main, rejected merged work. *)
+let test_root_layout_reports_a_checkout_behind_its_tracking_ref () =
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
+    let root = producer_playground config producer in
+    let checkout = Filename.concat root "repos/masc" in
+    init_git_checkout checkout;
+    ignore
+      (run_git_lines ~cwd:checkout
+         [ "remote"; "add"; "origin"; "https://example.invalid/masc.git" ]);
+    git_commit ~cwd:checkout "first";
+    let behind_head = git_head ~cwd:checkout in
+    git_commit ~cwd:checkout "second";
+    let upstream_head = git_head ~cwd:checkout in
+    ignore
+      (run_git_lines ~cwd:checkout [ "update-ref"; "refs/remotes/origin/main"; "HEAD" ]);
+    ignore (run_git_lines ~cwd:checkout [ "reset"; "-q"; "--hard"; behind_head ]);
+    let repository : Repo_manager_types.repository =
+      { id = "masc"
+      ; name = "masc"
+      ; url = "https://example.invalid/masc.git"
+      ; local_path = checkout
+      ; aliases = []
+      ; default_branch = "main"
+      ; keepers = []
+      ; status = Repo_manager_types.Active
+      ; auto_sync = false
+      ; sync_interval = 0
+      ; created_at = Int64.zero
+      ; updated_at = Int64.zero
+      }
+    in
+    (match Repo_store.save_all ~base_path:config.base_path [ repository ] with
+     | Ok () -> ()
+     | Error error -> Alcotest.failf "failed to seed repository catalog: %s" error);
+    let line =
+      layout_line (VAT.root_layout surface |> require_layout) ~affix:"repos/masc/"
+    in
+    let holds affix = Astring.String.is_infix ~affix line in
+    Alcotest.(check bool) "names the HEAD it holds" true (holds ("head=" ^ behind_head));
+    Alcotest.(check bool)
+      "names the tracking ref commit it is behind"
+      true
+      (holds ("(" ^ upstream_head ^ ")"));
+    Alcotest.(check bool)
+      "states how far behind the tracking ref it is"
+      true
+      (holds "1 commit(s) behind local origin/main");
+    Alcotest.(check bool)
+      "does not describe the tree as equal to main"
+      false
+      (holds "HEAD equals"))
+;;
+
+(* A detached HEAD answers the literal [HEAD]; the line says so instead of
+   presenting it as a branch name. *)
+let test_root_layout_marks_a_detached_head () =
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
+    let root = producer_playground config producer in
+    let checkout = Filename.concat root "repos/detached" in
+    init_git_checkout checkout;
+    git_commit ~cwd:checkout "first";
+    let head = git_head ~cwd:checkout in
+    ignore (run_git_lines ~cwd:checkout [ "checkout"; "-q"; "--detach"; head ]);
+    let line =
+      layout_line (VAT.root_layout surface |> require_layout) ~affix:"repos/detached/"
+    in
+    Alcotest.(check bool)
+      "a detached HEAD is named as such"
+      true
+      (Astring.String.is_infix ~affix:"branch=HEAD (detached)" line))
+;;
+
+(* [git -C <path>] walks up to the enclosing repository when [<path>] holds a
+   [.git] entry that is not a valid repository. The line must not vouch for the
+   enclosing repository's commit as this checkout's. *)
+let test_root_layout_does_not_report_the_enclosing_repository_for_a_broken_checkout () =
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
+    let root = producer_playground config producer in
+    (* Above the producer root, so checkout discovery (which scans downward
+       from the root) does not take the enclosing repository for a checkout. *)
+    let enclosing = Filename.dirname root in
+    init_git_checkout enclosing;
+    git_commit ~cwd:enclosing "enclosing";
+    let enclosing_head = git_head ~cwd:enclosing in
+    make_checkout root "repos/broken";
+    let line =
+      layout_line (VAT.root_layout surface |> require_layout) ~affix:"repos/broken/"
+    in
+    let holds affix = Astring.String.is_infix ~affix line in
+    Alcotest.(check bool)
+      "says the path is not its own repository"
+      true
+      (holds "not the top of its own git repository");
+    Alcotest.(check bool)
+      "does not name the enclosing repository's commit"
+      false
+      (holds enclosing_head))
+;;
+
+(* The identity probe reads refs and objects. A producer controls the config of
+   its own checkout, so a configured fsmonitor must not run on the host. *)
+let test_root_layout_does_not_run_a_checkouts_configured_fsmonitor () =
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
+    let root = producer_playground config producer in
+    let checkout = Filename.concat root "repos/hooked" in
+    init_git_checkout checkout;
+    git_commit ~cwd:checkout "first";
+    let marker = Filename.concat root "fsmonitor-ran" in
+    let script = Filename.concat root "fsmonitor.sh" in
+    Out_channel.with_open_text script (fun channel ->
+      Printf.fprintf channel "#!/bin/sh\ntouch %s\n" (Filename.quote marker));
+    Unix.chmod script 0o755;
+    ignore (run_git_lines ~cwd:checkout [ "config"; "core.fsmonitor"; script ]);
+    ignore (VAT.root_layout surface |> require_layout);
+    Alcotest.(check bool)
+      "the configured fsmonitor command did not run"
+      false
+      (Sys.file_exists marker))
+;;
+
+(* A producer whose tree is on its endpoint has no checkout on this host to
+   describe: the line must not name a commit read from the host directory. *)
+let test_root_layout_does_not_probe_a_tree_on_the_producers_endpoint () =
+  let body = {|{"entries":["repos"],"checkouts":[{"relative_path":"repos/remote","name":"remote","git_link":"directory"}],"limit":null}|} in
+  with_surface ~ssh_script:(ssh_script_for ~layout_body:body) (fun config surface ->
+    let root = producer_playground config producer in
+    let checkout = Filename.concat root "repos/remote" in
+    init_git_checkout checkout;
+    git_commit ~cwd:checkout "first";
+    let head = git_head ~cwd:checkout in
+    let line =
+      layout_line (VAT.root_layout surface |> require_layout) ~affix:"repos/remote/"
+    in
+    let holds affix = Astring.String.is_infix ~affix line in
+    Alcotest.(check bool) "says the identity was not probed" true (holds "identity not probed");
+    Alcotest.(check bool) "does not name a host commit" false (holds head);
+    Alcotest.(check bool) "still marks the checkout" true (holds "git checkout"))
 ;;
 
 let test_prompt_states_the_root_and_not_a_repository () =
@@ -1297,6 +1505,30 @@ let () =
             "root_layout reports entries and discovered checkouts"
             `Quick
             test_root_layout_reports_entries_and_discovered_checkouts
+        ; Alcotest.test_case
+            "root layout names HEAD and refuses to call an uncompared tree current"
+            `Quick
+            test_root_layout_names_head_and_refuses_to_call_an_uncompared_tree_current
+        ; Alcotest.test_case
+            "root layout reports a checkout behind its tracking ref"
+            `Quick
+            test_root_layout_reports_a_checkout_behind_its_tracking_ref
+        ; Alcotest.test_case
+            "root layout marks a detached HEAD"
+            `Quick
+            test_root_layout_marks_a_detached_head
+        ; Alcotest.test_case
+            "root layout does not report the enclosing repository for a broken checkout"
+            `Quick
+            test_root_layout_does_not_report_the_enclosing_repository_for_a_broken_checkout
+        ; Alcotest.test_case
+            "root layout does not run a checkout's configured fsmonitor"
+            `Quick
+            test_root_layout_does_not_run_a_checkouts_configured_fsmonitor
+        ; Alcotest.test_case
+            "root layout does not probe a tree on the producer's endpoint"
+            `Quick
+            test_root_layout_does_not_probe_a_tree_on_the_producers_endpoint
         ; Alcotest.test_case
             "root_layout fails closed when discovery is unavailable"
             `Quick

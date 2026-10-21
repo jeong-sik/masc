@@ -412,10 +412,13 @@ let target_ref_stale_after_s = Keeper_sandbox_remote_checkouts.target_ref_stale_
 
 (* A tracking ref's reflog records when its local value last moved. A managed
    no-op fetch leaves it untouched, so read the fetch owner's per-ref receipt.
-   Neither probe fetches. *)
+   Neither probe fetches. [log.showSignature] is turned off because the
+   repository's own config would otherwise name the program that verifies a
+   signed tip commit, and a checkout's config is not the host's to run. *)
 let reflog_moved_at_unix ~budget ~cwd target_ref =
   match first_git_line ~budget ~cwd
-          [ "reflog"; "show"; "-1"; "--date=unix"; "--format=%gd"; target_ref ] with
+          [ "-c"; "log.showSignature=false"
+          ; "reflog"; "show"; "-1"; "--date=unix"; "--format=%gd"; target_ref ] with
   | Error _ -> None
   | Ok line ->
     (match String.rindex_opt line '{', String.rindex_opt line '}' with
@@ -563,7 +566,9 @@ type checkout_inspection = {
   freshness : checkout_freshness;
 }
 
-let inspect_checkout ~budget ~catalog (checkout : Keeper_playground_checkouts.checkout) =
+(* The origin lookup and catalog match every inspection of a checkout starts
+   from, and the repository value the git probes run against. *)
+let resolve_checkout ~budget ~catalog (checkout : Keeper_playground_checkouts.checkout) =
   (* The checkout's own path, as discovered. Previously this reassembled
      [sandbox_abs/repos/<name>], which meant any checkout found outside that
      one shape was inspected at a path that does not exist — every git call
@@ -597,6 +602,12 @@ let inspect_checkout ~budget ~catalog (checkout : Keeper_playground_checkouts.ch
       ; default_branch = ""; keepers = []; status = Active; auto_sync = false
       ; sync_interval = 0; created_at = 0L; updated_at = 0L }
   in
+  catalog_resolution, repository
+;;
+
+let inspect_checkout ~budget ~catalog (checkout : Keeper_playground_checkouts.checkout) =
+  let checkout_abs = checkout.absolute_path in
+  let catalog_resolution, repository = resolve_checkout ~budget ~catalog checkout in
   let branch =
     with_inspection_budget budget (fun timeout_sec ->
       Repo_git.current_branch ~timeout_sec ~repository ())
@@ -829,6 +840,74 @@ let repository_checkouts_json ~include_repository_checkouts ~config ~meta =
       ~meta
   else
     `Assoc [ "state", `String "not_inspected"; "entries", `List [] ]
+;;
+
+(* What a reader of a checkout's files needs to know about the commit it is
+   reading. It stops short of the working tree: [git status] runs the
+   repository's own configured fsmonitor and can reach a promisor remote, and
+   the checkouts a verifier reads belong to the producer under review. The
+   probes that remain read refs and objects only (the reflog probe turns
+   [log.showSignature] off). A probe that did not answer is no value, and
+   [identity_freshness] says whether the rest of the row can be trusted. *)
+type identity_row = {
+  identity_checkout_path : string;
+  identity_branch : string option;
+  identity_head : string option;
+  identity_freshness : checkout_freshness;
+}
+
+(* [git -C <path>] walks up to the enclosing repository when [<path>] holds a
+   [.git] entry that is not a valid repository, and would then report that
+   repository's commit as this checkout's. *)
+let own_toplevel ~budget checkout_abs =
+  match
+    with_inspection_budget budget (fun timeout_sec ->
+      Repo_git.checkout_identity ~timeout_sec ~local_path:checkout_abs ())
+  with
+  | Error _ as error -> error
+  | Ok { Repo_git.toplevel; _ } ->
+    (match Unix.realpath checkout_abs with
+     | exception Unix.Unix_error (code, _, _) -> Error (Unix.error_message code)
+     | resolved ->
+       if String.equal resolved toplevel
+       then Ok ()
+       else Error "this path is not the top of its own git repository")
+;;
+
+let inspect_checkout_identity ~budget ~catalog (checkout : Keeper_playground_checkouts.checkout) =
+  let checkout_abs = checkout.absolute_path in
+  match own_toplevel ~budget checkout_abs with
+  | Error reason ->
+    { identity_checkout_path = checkout.relative_path
+    ; identity_branch = None
+    ; identity_head = None
+    ; identity_freshness = Freshness_unavailable reason
+    }
+  | Ok () ->
+    let catalog_resolution, repository = resolve_checkout ~budget ~catalog checkout in
+    let branch =
+      with_inspection_budget budget (fun timeout_sec ->
+        Repo_git.current_branch ~timeout_sec ~repository ())
+    in
+    let head = first_git_line ~budget ~cwd:checkout_abs [ "rev-parse"; "HEAD" ] in
+    let freshness = freshness_of_catalog ~budget ~repository catalog_resolution in
+    { identity_checkout_path = checkout.relative_path
+    ; identity_branch = Result.to_option branch
+    ; identity_head = Result.to_option head
+    ; identity_freshness = freshness
+    }
+;;
+
+let checkout_identity_rows
+    ?(inspection_budget_sec = Repo_git.inspection_timeout_sec)
+    ~(config : Workspace.config)
+    checkouts
+  =
+  let catalog = Repo_store.load_all ~base_path:config.base_path in
+  let budget =
+    Repo_git.Inspection_budget.create ~timeout_sec:inspection_budget_sec ()
+  in
+  List.map (inspect_checkout_identity ~budget ~catalog) checkouts
 ;;
 
 let checkout_freshness_rows

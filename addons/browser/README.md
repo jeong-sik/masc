@@ -202,8 +202,9 @@ scene never establishes that all matching elements were found. The original
 command or detach owns model waiting; the quick browser transport clock does
 not abandon its request.
 
-Scripted owner/queue/Gecko-consumer cases, actual isolated Chrome cases, and
-installed browser behavior are separate evidence scopes. Actual owned Firefox
-and remaining browser-family behavior still require verification. Follow the
+Scripted protocol cases, actual isolated Chrome/BiDi/Gecko cases and installed
+browser behavior are separate evidence scopes. New production changes require
+their own recorded verification; a historical passing run does not prove the
+current installed runtime. Follow the
 [lifecycle evidence](../../docs/design/browser-addon-lifecycle.md#completion-evidence)
 and [issue #44150](https://github.com/jeong-sik/masc/issues/44150).

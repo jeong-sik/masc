@@ -178,6 +178,10 @@ let home_continue_rows (state : state) =
   let last =
     match state.home_last_chat, state.opening_mode with
     | Recorded_chat name, _ -> Some (Keeper_id.Keeper_name.to_string name, "")
+    | Saving_chat name, _ ->
+        Some (Keeper_id.Keeper_name.to_string name, " · save pending")
+    | Unobserved_chat { keeper; _ }, _ ->
+        Some (Keeper_id.Keeper_name.to_string keeper, " · save outcome unknown")
     | Session_chat { keeper; _ }, _ ->
         Some (Keeper_id.Keeper_name.to_string keeper, " · this session only")
     | Unconfirmed_chat { keeper; _ }, _ ->
@@ -210,10 +214,12 @@ let home_continue_rows (state : state) =
           (match state.home_last_chat, last with
            | Unreadable_chat_receipt _, _ ->
                "Create a Keeper · conversation history unavailable"
-           | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), Some (name, _) ->
+           | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _
+              | Saving_chat _ | Unobserved_chat _), Some (name, _) ->
                "Create a Keeper · last conversation "
                ^ Masc_tui_ansi.Terminal_text.single_line name ^ " unavailable"
-           | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), None ->
+           | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _
+              | Saving_chat _ | Unobserved_chat _), None ->
                "Create a Keeper  · choose who will take the work") ]
     | (Workspace_identity_match, Local_workspace_read, None, _::_)
     | (Workspace_identity_match, Local_workspace_read, Some _, _)
@@ -224,7 +230,8 @@ let home_continue_rows (state : state) =
                (match state.home_last_chat, last with
                 | Unreadable_chat_receipt _, _ ->
                     "Conversation history unavailable · choose a Keeper"
-                | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), Some (name, _) ->
+                | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _
+                   | Saving_chat _ | Unobserved_chat _), Some (name, _) ->
                     "Last conversation " ^ Masc_tui_ansi.Terminal_text.single_line name
                     ^ (match state.workspace_identity with
                        | Workspace_identity_unread ->
@@ -233,7 +240,8 @@ let home_continue_rows (state : state) =
                            " unavailable · workspace identity unconfirmed · choose a Keeper"
                        | Workspace_identity_match | Workspace_identity_mismatch _ ->
                            " unavailable · choose a Keeper")
-                | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), None ->
+                | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _
+                   | Saving_chat _ | Unobserved_chat _), None ->
                     "Choose a Keeper  · start a conversation")
            | _ :: _ -> "New work  · choose a Keeper") ]
   in

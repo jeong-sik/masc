@@ -441,7 +441,7 @@ let opening_cases =
         | Ok (Config.Keeper keeper) ->
             Alcotest.(check string) "target" "harbor-lamp" (name keeper)
         | _ -> Alcotest.fail "keeper target did not parse")
-  ; Alcotest.test_case "last target survives the config write" `Quick (fun () ->
+  ; Alcotest.test_case "last target survives ordered visits and shared settings edits" `Quick (fun () ->
         with_storable_base (fun ~base_path ->
           let path = Filename.concat base_path ".masc/config/runtime.toml" in
           write path (storable_runtime ^ "\n[tui]\nopening = \"last\"\n");
@@ -464,7 +464,89 @@ let opening_cases =
           check_opt "runtime default survives" (Some "local.sample")
             (Toml.toml_string_opt
                (doc_of (In_channel.with_open_bin path In_channel.input_all))
-               "runtime.default")))
+               "runtime.default");
+          let module Visits = Masc_tui_chat_visit in
+          let module State = Masc_tui_types in
+          let previous_pool = Domain_pool_ref.get () in
+          let previous_ready = Eio_guard.is_ready () in
+          Fun.protect ~finally:(fun () ->
+            (match previous_pool with
+             | Some pool -> Domain_pool_ref.set pool
+             | None -> Domain_pool_ref.clear_for_tests ());
+            if not previous_ready then Eio_guard.disable ()) (fun () ->
+            Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+              Eio_guard.enable ();
+              Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1
+                  (Eio.Stdenv.domain_mgr env));
+              let state = State.create_state ~workspace:"visits" ~local_base_path:base_path
+                  ~port:0 ~refresh_interval:0. () in
+              let beta = match Keeper_id.Keeper_name.of_string "beta" with
+                | Ok keeper -> keeper | Error reason -> Alcotest.fail reason in
+              let first = Visits.submit state.home_chat_writer ~sw:(Some sw) ~base_path target in
+              let middle = Visits.submit state.home_chat_writer ~sw:(Some sw) ~base_path beta in
+              (* Another editor changes startup mode and theme through the real
+                 shared lock between this session's visit admissions. *)
+              (match Runtime.edit_config_text ~runtime_config_path:path (fun content ->
+                  let content = Config.text_with_theme content ~theme:(Some "gruvbox-dark") in
+                  Toml_line_editor.edit_table_scalar content
+                    ~path:Runtime_toml_namespace.(key Tui) ~key:"opening"
+                    ~value:(Some "overview")) with
+               | Ok _ -> () | Error reason -> Alcotest.fail reason);
+              let latest = Visits.submit state.home_chat_writer ~sw:(Some sw) ~base_path target in
+              state.home_chat_visit <- Some latest;
+              state.home_last_chat <- State.Saving_chat target;
+              Visits.close state.home_chat_writer;
+              let expected = ref [first; middle; latest] in
+              Visits.drain_completed state.home_chat_writer ~can_take:(fun () -> true)
+                ~apply:(fun completion ->
+                  (match !expected with
+                   | request :: rest ->
+                       Alcotest.(check bool) "original FIFO request" true
+                         (Visits.same_request request completion.request);
+                       expected := rest
+                   | [] -> Alcotest.fail "an unowned completion was published");
+                  Alcotest.(check string) "captured workspace" base_path completion.request.base_path;
+                  (match completion.outcome with
+                   | Visits.Saved (Runtime.Durable | Runtime.Durability_unconfirmed _) -> ()
+                   | Refused reason | Unobserved reason | Not_started reason -> Alcotest.fail reason);
+                  let current = Visits.same_request latest completion.request in
+                  Alcotest.(check bool) "only the latest visit can settle Home" current
+                    (State.accept_chat_visit state completion);
+                  if not current then
+                    match state.home_last_chat with
+                    | State.Saving_chat keeper when Keeper_id.Keeper_name.equal keeper target -> ()
+                    | _ -> Alcotest.fail "an older receipt replaced the pending latest visit");
+              Alcotest.(check bool) "each admitted visit retains its outcome" true (!expected = []);
+              (match state.home_last_chat with
+               | State.Recorded_chat keeper | Unconfirmed_chat {keeper;_}
+                   when Keeper_id.Keeper_name.equal keeper target -> ()
+               | _ -> Alcotest.fail "latest visit did not settle with its durability");
+              let read = Config.load ~base_path in
+              (match read.opening with
+               | Ok Config.Overview -> ()
+               | _ -> Alcotest.fail "queued visit overwrote the other editor's startup mode");
+              check_opt "other editor's theme survives" (Some "gruvbox-dark") read.theme;
+              (match read.last_chat_keeper with
+               | Ok (Some keeper) when Keeper_id.Keeper_name.equal keeper target -> ()
+               | _ -> Alcotest.fail "disk did not retain the last FIFO visit");
+              (* Failure to launch must settle as session-only, without writing
+                 inline or allowing a previous successful receipt to claim it. *)
+              let unavailable = Visits.create () in
+              let request = Visits.submit unavailable ~sw:None ~base_path beta in
+              state.home_chat_visit <- Some request;
+              state.home_last_chat <- State.Saving_chat beta;
+              Visits.drain_completed unavailable ~can_take:(fun () -> true)
+                ~apply:(fun completion ->
+                  match completion.outcome with
+                  | Visits.Not_started _ -> ignore (State.accept_chat_visit state completion)
+                  | Saved _ | Refused _ | Unobserved _ -> Alcotest.fail "missing runtime started a write");
+              Visits.close unavailable;
+              (match state.home_last_chat, (Config.load ~base_path).last_chat_keeper with
+               | State.Session_chat {keeper;_}, Ok (Some stored)
+                   when Keeper_id.Keeper_name.equal keeper beta
+                        && Keeper_id.Keeper_name.equal stored target -> ()
+               | _ -> Alcotest.fail "launch refusal lost the distinction between session and disk")
+            )))))
   ; Alcotest.test_case "unknown opening is an error" `Quick (fun () ->
         match parsed "[tui]\nopening = \"something-else\"\n" with
         | Error _ -> ()

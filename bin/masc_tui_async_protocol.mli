@@ -267,7 +267,7 @@ type async_msg =
           asks the loop to observe it. *)
   | Ask_followup_observed of Snapshot_read.request * ask_submission *
       Masc.Tui_decode_asks.ask_followup_event * int64
-  | Ask_followup_finished of Snapshot_read.request * ask_submission * (unit, string) result
+  | Ask_followup_finished of Snapshot_read.request * ask_submission * Masc_tui_ask_projection.followup_result
   (** A workspace-bound roster can settle before unrelated readers. *)
   | Http_keeper_roster_loaded of early_keeper_roster_observation
   | Http_dataset_loaded of early_http_dataset

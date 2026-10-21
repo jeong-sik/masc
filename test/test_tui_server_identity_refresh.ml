@@ -2519,7 +2519,7 @@ let test_answer_followup_retains_current_source_observations () =
   source request owner (Decode.Ask_followup_tools Decode.Ask_tools_unavailable);
   let working = task (Masc_domain.InProgress {assignee="original-worker";started_at="2026-10-17T00:00:00Z"}) in
   source request owner (Decode.Ask_followup_task working);
-  ignore (finish_ask_followup_read state request owner (Error "connection interrupted"));
+  ignore (finish_ask_followup_read state request owner (Error (Masc_tui_ask_projection.Followup_read_failed "connection interrupted")));
   let partial = view () in
   Alcotest.(check bool) "transport failure preserves fresh Task and marks only unfinished wake unconfirmed" true
     (partial.fv_task.fo_value=Some working
@@ -2568,7 +2568,7 @@ let test_answer_followup_retains_current_source_observations () =
   let cancelled = Decode.Ask_reactions_observed {ar_turn_started_at=None;ar_turn_finished_at=None;
       ar_queue_settled_at=None;ar_queue_cancelled_at=Some 204.;ar_evidence_complete=true;ar_evidence_current=true} in
   source request owner (Decode.Ask_followup_reactions cancelled);
-  ignore (finish_ask_followup_read state request owner (Error "connection interrupted after reaction source"));
+  ignore (finish_ask_followup_read state request owner (Error (Masc_tui_ask_projection.Followup_read_failed "connection interrupted after reaction source")));
   let mixed = view () in
   Alcotest.(check bool) "partial transport retains a fresh cancellation beside unconfirmed old turn evidence" true
     (mixed.fv_reactions.fo_state=Projection.Followup_received
@@ -2624,7 +2624,7 @@ let test_answer_followup_withdraws_reader_without_borrowing_successor () =
   finish_ask_followup_worker state retired;
   Alcotest.(check bool) "old worker cleanup and late frames cannot consume successor ownership" true
     (Option.is_none (take_ask_followup_event state retired old_owner (Decode.Ask_followup_started original))
-      && Option.is_none (finish_ask_followup_read state retired old_owner (Error "old transport"))
+      && Option.is_none (finish_ask_followup_read state retired old_owner (Error (Masc_tui_ask_projection.Followup_read_failed "old transport")))
       && Snapshot_read.is_current state.ask_followup_read current
       && Option.exists (fun (request,_) -> Snapshot_read.request_id request=Snapshot_read.request_id current)
           state.ask_followup_cancel);

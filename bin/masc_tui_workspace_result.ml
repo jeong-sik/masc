@@ -76,7 +76,7 @@ let take_ready results =
 let close results = Atomic.set results Closed
 
 type 'message cancellation = Propagate | Publish_cancelled of 'message
-let launch_registered ~cancellation ~dispatch ~on_not_run ~results ~boundary_error ~deliver perform =
+let launch_registered ~cancellation ~dispatch ~on_not_run ~results ~boundary_error ~not_started_error ~deliver perform =
   match register results with
   | None -> on_not_run ()
   | Some token ->
@@ -92,11 +92,11 @@ let launch_registered ~cancellation ~dispatch ~on_not_run ~results ~boundary_err
         | Eio.Cancel.Cancelled _ as exn -> propagate_cancelled exn
         | exn -> Error (boundary_error (Printexc.to_string exn)) in
       deliver_result result) in
-    let not_run detail = Fun.protect ~finally:(fun () -> retire_pending results token) (fun () ->
+    let not_run ~error detail = Fun.protect ~finally:(fun () -> retire_pending results token) (fun () ->
       on_not_run ();
-      deliver_result (Error (boundary_error detail))) in
+      deliver_result (Error (error detail))) in
     match Eio_context.get_switch_opt () with
-    | None -> not_run "Eio switch is unavailable"
+    | None -> not_run ~error:not_started_error "Eio switch is unavailable"
     | Some sw ->
       (match Eio.Switch.check sw with
        | () ->
@@ -104,30 +104,30 @@ let launch_registered ~cancellation ~dispatch ~on_not_run ~results ~boundary_err
           | () -> ()
           | exception (Eio.Cancel.Cancelled _ as exn) ->
             Fun.protect ~finally:(fun () -> retire_pending results token) (fun () -> propagate_cancelled exn)
-          | exception exn -> not_run (Printexc.to_string exn))
+          | exception exn -> not_run ~error:boundary_error (Printexc.to_string exn))
        | exception (Eio.Cancel.Cancelled _ as exn) ->
          let backtrace=Printexc.get_raw_backtrace () in
          Fun.protect ~finally:(fun () -> retire_pending results token) (fun () ->
            (match cancellation with Propagate -> () | Publish_cancelled _ -> on_not_run ());
            publish_cancelled ();
            Printexc.raise_with_backtrace exn backtrace)
-       | exception exn -> not_run (Printexc.to_string exn))
+       | exception exn -> not_run ~error:boundary_error (Printexc.to_string exn))
 
 let launch ?key ?(observation = false) ?observe_job ?(on_not_run = fun () -> ())
     state ~results ~boundary_error ~deliver perform =
-  launch_registered ~cancellation:Propagate ~results ~on_not_run ~boundary_error ~deliver
+  launch_registered ~cancellation:Propagate ~results ~on_not_run ~boundary_error ~not_started_error:boundary_error ~deliver
     ~dispatch:(fun ~sw ~on_withdrawn run ->
       Masc_tui_workspace_job.fork ?key ~observation ?observe:observe_job
         ~on_withdrawn state ~sw run) (fun _publish -> perform ())
 
 let launch_session ~results ~boundary_error ~deliver perform =
-  launch_registered ~cancellation:Propagate ~results ~on_not_run:(fun () -> ()) ~boundary_error ~deliver
+  launch_registered ~cancellation:Propagate ~results ~on_not_run:(fun () -> ()) ~boundary_error ~not_started_error:boundary_error ~deliver
     ~dispatch:(fun ~sw ~on_withdrawn:_ run ->
       Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)) (fun _publish -> perform ())
 
 let launch_observation ?key ?observe_job ?(on_not_run=fun () -> ())
-    state ~results ~boundary_error ~cancelled ~progress ~deliver perform =
-  launch_registered ~cancellation:(Publish_cancelled cancelled) ~results ~on_not_run ~boundary_error ~deliver
+    state ~results ~boundary_error ~not_started ~cancelled ~progress ~deliver perform =
+  launch_registered ~cancellation:(Publish_cancelled cancelled) ~results ~on_not_run ~boundary_error ~not_started_error:not_started ~deliver
     ~dispatch:(fun ~sw ~on_withdrawn run ->
       Masc_tui_workspace_job.fork ?key ~observation:true ?observe:observe_job
         ~on_withdrawn:(fun () -> Fun.protect ~finally:on_withdrawn on_not_run)

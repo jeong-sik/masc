@@ -63,6 +63,7 @@ val launch_observation :
   ?on_not_run:(unit -> unit) ->
   Masc_tui_types.state -> results:'message t ->
   boundary_error:(string -> 'error) ->
+  not_started:(string -> 'error) ->
   cancelled:'message ->
   progress:('part -> 'message) ->
   deliver:(('a, 'error) result -> 'message) ->
@@ -74,6 +75,11 @@ val launch_observation :
     withdrawal or session close cannot reopen it. Already published parts remain
     claimable until session close and still need original UI admission.
 
+    [not_started] classifies a missing switch, which proves no producer entry.
+    [boundary_error] classifies producer or ordinary dispatch exceptions; a
+    dispatch error alone does not prove whether the producer entered. Neither
+    cause is inferred from explanation text. Cancelled dispatch is the explicit
+    cancellation observation, without assuming physical entry.
     [progress] only forms the original message/scope; no UI effects. Producer
     protocol validation, source ordering, received timestamps and source/error
     meaning remain with the caller. No coalescing, dropping or numeric cap.

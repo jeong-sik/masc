@@ -2347,7 +2347,7 @@
  (name masc_tui_async_protocol)
  (wrapped false)
  (modules masc_tui_async_protocol)
- (libraries masc_tui_original_task_read
+ (libraries masc_tui_ask_projection masc_tui_original_task_read
   masc
   masc.keeper_chat_operations
   masc.runtime

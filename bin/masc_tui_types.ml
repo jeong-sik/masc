@@ -8917,7 +8917,7 @@ type state = {
   mutable ask_followup_read: Snapshot_read.t;
   mutable ask_followup: (ask_submission * Masc_tui_ask_projection.followup) option;
   mutable ask_followup_cancel: (Snapshot_read.request * (string -> unit)) option;
-  mutable ask_followup_error: string option;
+  mutable ask_followup_error: Masc_tui_ask_projection.followup_failure option;
   (* The tool calls keepers are holding, drawn above the operator actions on
      the same surface. Live registry state on the server; refreshed with the
      surface. *)
@@ -9927,7 +9927,7 @@ let retire_ask_followup_read (state : state) =
   supersede_ask_followup_worker state None ~detail;
   state.ask_followup_read <- Snapshot_read.invalidate state.ask_followup_read;
   state.ask_followup <- Option.map (fun (owner, reading) ->
-    owner, fst (Masc_tui_ask_projection.finish_followup reading (Error detail))) state.ask_followup
+    owner, fst (Masc_tui_ask_projection.finish_followup reading (Error Masc_tui_ask_projection.Followup_withdrawn))) state.ask_followup
 
 let ask_followup_owner_current (state : state) submission =
   submission.as_authority = state.workspace_authority
@@ -9974,7 +9974,7 @@ let take_ask_followup_event (state : state) request submission event =
       (match result with
        | Ok reading -> state.ask_followup <- Some (owner, reading)
        | Error detail ->
-           state.ask_followup_error <- Some detail;
+           state.ask_followup_error <- Some (Masc_tui_ask_projection.Followup_read_failed detail);
            supersede_ask_followup_worker state None ~detail);
       Some result
   | Some _ | None -> None

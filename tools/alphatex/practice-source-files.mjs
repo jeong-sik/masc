@@ -5,6 +5,7 @@ import { StringDecoder } from 'node:string_decoder'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { practicePartNames, practiceUnsigned, validatePracticeMetadata, validatePracticeSource } from './practice-source.mjs'
+import { soundIdentity, soundIdentityMatches } from './project-sound.mjs'
 import { validateProject } from './sequencer-project.mjs'
 import { phraseBacking } from './phrase-backing.mjs'
 import { nominalMidiFrame } from './render-midi-clock.mjs'
@@ -18,8 +19,7 @@ function retirement(receipt, arm, context) {
   if (input?.kind !== 'stopped' || input.success !== true || input.source !== arm.input?.source?.id || input.error !== null
       || input.admittedPackets !== String(count) || input.acknowledgedPackets !== String(count) || input.discardedPackets !== '0' || input.pendingWords !== 0
       || monitor?.schemaVersion !== 1 || monitor.kind !== 'step-monitor' || monitor.channel !== context.backing.channel
-      || monitor.sound?.identifier !== context.project.sound.instrument.identifier || monitor.sound?.version !== context.project.sound.instrument.version
-      || monitor.sound?.presetSHA256 !== context.project.sound.preset.sha256
+      || !soundIdentityMatches(context.project.sound, monitor.sound)
       || pcm?.nativeClosed !== true || pcm.settled !== true || pcm.playing !== true || pcm.nativeError !== null || pcm.receiptError !== null || pcm.failure !== null
       || !isDeepStrictEqual(pcm.clock, arm.renderClock) || !isDeepStrictEqual(pcm.device, arm.renderClock?.device) || pcm.format?.sampleRate !== arm.renderClock?.sampleRate
       || final?.kind !== 'stopped' || final.success !== true || final.fault !== 'none' || final.faultFrames !== '0' || final.underrunFrames !== '0'
@@ -39,9 +39,10 @@ export async function readPracticeFiles(files, { signal } = {}) {
   }
   const { receipt, context, arm } = values
   if (receipt?.schemaVersion !== 1 || receipt.kind !== 'practice-take' || receipt.status !== 'complete' || receipt.error !== null
-      || context?.schemaVersion !== 1 || context.kind !== 'practice-take-context' || context.project?.sound?.kind !== 'vst'
+      || context?.schemaVersion !== 1 || context.kind !== 'practice-take-context'
       || arm?.schemaVersion !== 1 || arm.kind !== 'practice-take-arm') throw new Error('Choose a complete raw practice take')
   validateProject(context.project)
+  soundIdentity(context.project.sound)
   if (!isDeepStrictEqual(context.backing, phraseBacking(context.project, context.track, false))
       && !isDeepStrictEqual(context.backing, phraseBacking(context.project, context.track, true))) throw new Error('Practice backing context changed')
   const renderedFrames = retirement(receipt, arm, context)

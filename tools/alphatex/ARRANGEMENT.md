@@ -339,13 +339,14 @@ variants: copying an experiment does not change its MIDI channel ownership.
 After `:import-practice PATH`, use `:practice-soundfont asset-1 [SF2_PATH]` to
 capture a FluidSynth font for that original raw performance. Select an audio
 output, then place/trim/repeat the take as usual. `:practice-sound-original
-asset-1` restores its recorded VST. Undo/redo and save/reopen retain these choices;
+asset-1` restores its captured VST or SoundFont. Undo/redo and save/reopen retain these choices;
 the original context, packets and capture receipt are never rewritten.
 
 The declared monitor MIDI1 projection and original host clock remain in use,
 including the captured track's initial program, volume and pan. Raw bank/program
 messages are retained in the original take but not replayed by this projection.
-Explicit external MIDI routing overrides the local audition sound. This does
-not enable SoundFont live input monitoring or new SoundFont recordings. See
+Explicit external MIDI routing overrides the local audition sound. Newly
+recorded bound SoundFont practice takes use their captured font
+by default. Live input and practice recording are described in the engine guide. See
 [bound SoundFont audition](README.md#bound-fluidsynth-soundfont-audition) for
 library, engine, control-block timing and cancellation behavior.

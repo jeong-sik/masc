@@ -19,6 +19,10 @@ export function practiceMidi(asset, context, packets, { signal, region } = {}) {
     { tick: 0, kind: 'meta', type: 0x58, data: [context.project.meter[0], Math.log2(context.project.meter[1]), 24, 8] },
   ]
   const add = (tick, bytes) => events.push({ tick, kind: 'channel', bytes })
+  if (context.project.sound.kind === 'soundfont') {
+    const track = context.project.tracks.find(track => track.id === context.track)
+    add(0, [0xc0 | context.backing.channel, track.program])
+  }
   for (const bytes of context.backing.initial) add(0, [...bytes])
   const timed = region ? region.events.map(row => ({ offset: row.offset,
     packet: { kind: 'midi', protocol: 2, timestampOrigin: 'packet', source: row.source, words: row.words } }))

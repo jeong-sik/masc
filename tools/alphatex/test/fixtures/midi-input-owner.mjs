@@ -4,13 +4,16 @@ if (flag !== '--source') process.exit(3)
 const emit = value => process.stdout.write(JSON.stringify(value) + '\n')
 const ready = { kind: 'midi-input', schemaVersion: 1, protocol: 2, source: { id: source, name: 'Owned source' }, clock: { kind: 'mach-host-time', numer: 125, denom: 3 } }
 const stepPackets = [[0x43953c00, 0x90000000, 0x43954000, 0xffff0000], [0x43853c00, 0x10000000], [0x43854000, 0x20000000]]
+const practiceMode = ['practice-clocked', 'practice-attributed'].includes(mode)
+const practicePackets = [[0x43b54a00, 0xabcdef01], ...stepPackets.map(words => [...words])]
+if (mode === 'practice-attributed') practicePackets[1][0] |= 3
 const stepMode = ['step-chord', 'step-held'].includes(mode)
-const packet = ordinal => ({ kind: 'midi', source, protocol: 2, ordinal: String(ordinal), hostTime: String(9007199254740993n + BigInt(ordinal)), timestampOrigin: 'packet', words: stepMode ? stepPackets[ordinal] : [0x43953c03, 0x90012345] })
+const packet = ordinal => ({ kind: 'midi', source, protocol: 2, ordinal: String(ordinal), hostTime: String(9007199254740993n + BigInt(practiceMode ? [3,240000,480000,720000][ordinal] : ordinal)), timestampOrigin: 'packet', words: practiceMode ? practicePackets[ordinal] : stepMode ? stepPackets[ordinal] : [0x43953c03, 0x90012345] })
 let next = 0, acknowledged = 0, waiting = false, stopping = false
 const finish = () => { emit({ kind: 'stopped', source, success: true, admittedPackets: String(next), acknowledgedPackets: String(acknowledged), discardedPackets: '0', pendingWords: 0, error: null }); process.exit(0) }
 const pump = () => {
   if (waiting) return
-  const total = mode === 'step-held' ? 1 : mode === 'step-chord' ? stepPackets.length : 2
+  const total = practiceMode ? practicePackets.length : mode === 'step-held' ? 1 : mode === 'step-chord' ? stepPackets.length : 2
   if (mode === 'empty' || next === total) { if (stopping) finish(); return }
   waiting = true; emit(packet(next++))
 }

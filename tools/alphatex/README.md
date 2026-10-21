@@ -164,7 +164,7 @@ admitted step edits still drain before saving. Device underruns are errors.
 
 Use `:practice-record PATH [SOURCE_UID]` to record live MIDI over phrase backing.
 The source picker retains the requested new take path. Choose a project-bound
-VST first; the output starts and supplies an actual source-render clock before
+VST or bound FluidSynth sound first; the output starts and supplies an actual source-render clock before
 MIDI opens. Recording leaves phrase notes, cursor and undo history unchanged.
 `:step-stop`, a route change or leaving the view drains admitted input, closes
 the monitor and finalizes the take. The terminal reports the saved path; a
@@ -172,7 +172,7 @@ recording failure retains its path and error for recovery.
 
 Each take uses a fresh directory with owner-only permissions. `context.json`
 freezes the project, target track and repeating backing plan, including private
-captured preset bytes. `armed.json` records the selected MIDI input header and
+captured preset or SF2 bytes. `armed.json` records the selected MIDI input header and
 source-render clock. Each `events.jsonl` row contains the original `packet`
 (UMP words, source, ordinal, hostTime and timestampOrigin) plus a signed exact
 `nominalFrame` fraction. Packets are written and synced before audition
@@ -1131,7 +1131,7 @@ For a previously imported raw practice take, choose
 `:practice-soundfont asset-1 [SF2_PATH]` in the arrangement. Omit the path to
 capture the bundled SF2. This stores a separate bound audition choice on that
 asset; `:practice-sound-original asset-1` removes it and restores the originally
-recorded VST. Both decisions support undo/redo and portable save/reopen. The raw
+captured VST or SoundFont. Both decisions support undo/redo and portable save/reopen. The raw
 take's original context, receipt, packets, source hashes and clocks are unchanged.
 Restoring the take's phrase backing still uses its original captured context.
 
@@ -1158,8 +1158,23 @@ initial volume/pan. The font/engine identity and control timing appear in
 existing output owner supplies PCM demands and the source owner supplies packets.
 Stop/cancel joins children before private font deletion, including preparation.
 
-New SoundFont practice recordings are refused before opening a take, monitor
-or input; choose a VST for `:practice-record` or use unrecorded
-`:practice-input`. Whole-arrangement SoundFont WAV export and paired-capture
-SoundFont realization remain integration work. Click/count-in and existing VST practice backing retain
+Use `:practice-record PATH [SOURCE_UID]` with a bound FluidSynth selection to
+record original UMP, timestamps and signed nominal frame fractions into a private
+new take. The context freezes the actual SF2 and phrase/backing project. A
+complete receipt requires input/audio/worker retirement and the captured font,
+engine/version/control quantum and bank interpretation. A mismatching sound
+receipt fails both completion and later import. Failed projection retains its
+original raw packets in a recoverable failed take.
+
+After `:import-practice PATH`, that take defaults to its captured SoundFont;
+no new selection is needed. Override/reset/undo leaves the original files and
+clock unchanged. The MIDI1 editable variant also initializes the captured track
+program before volume/pan, and restoring backing retains its captured font.
+This stores raw MIDI and synthesis context rather than monitor PCM. Complete
+recording retirement does not guarantee every original packet can be synthesized
+later: unsupported MIDI2 data or positive host-clock intervals that collapse at
+one engine control boundary are still refused during replay.
+
+Whole-arrangement SoundFont WAV export and paired-capture SoundFont realization
+remain integration work. Click/count-in and existing VST practice backing retain
 their owners.

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 
 export function validateVstSelection(value) {
   if (!value || typeof value !== 'object' || typeof value.plugin_path !== 'string' || !value.plugin_path
@@ -37,4 +38,21 @@ export function validateSound(sound) {
   if (typeof sound.instrument?.identifier !== 'string' || !sound.instrument.identifier
       || typeof sound.instrument.version !== 'string' || !sound.instrument.version) throw new Error('Invalid project VST identity')
   return sound
+}
+
+// Receipt identity excludes private preset/font payloads. Display names do not
+// certify a sound; both capture retirement and source admission use this match.
+export function soundIdentity(sound) {
+  if (sound?.kind === 'vst') return { name: sound.selection.name, identifier: sound.instrument.identifier,
+    version: sound.instrument.version, presetSHA256: sound.preset.sha256 }
+  if (sound?.kind === 'soundfont' && sound.engine?.kind === 'fluidsynth') return {
+    kind: 'soundfont', name: sound.font.name, engine: { ...sound.engine },
+    bankStyle: sound.bankStyle, fontSHA256: sound.font.sha256, timing: 'control-block-ceil',
+  }
+  throw new Error('Choose a project-bound VST or FluidSynth sound')
+}
+export function soundIdentityMatches(sound, observed) {
+  if (sound?.kind === 'vst' && observed?.kind !== undefined) return false
+  const { name, ...expected } = soundIdentity(sound)
+  return Object.entries(expected).every(([key, value]) => isDeepStrictEqual(observed?.[key], value))
 }

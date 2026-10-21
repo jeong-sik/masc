@@ -98,11 +98,11 @@ type delta =
 (** {1 Serialization} *)
 
 (** Serialize an exact current checkpoint to JSON. Raises [Invalid_argument]
-    when a manually constructed value violates the v12 contract. *)
+    when a manually constructed value violates the v13 contract. *)
 val to_json : t -> Yojson.Safe.t
 
 (** Serialize an exact current checkpoint to JSON without raising when a
-    manually constructed value violates the v12 contract. *)
+    manually constructed value violates the v13 contract. *)
 val to_json_result : t -> (Yojson.Safe.t, Error.t) result
 
 (** [drop_unencodable_json cp] is the recovery copy for a checkpoint whose
@@ -114,7 +114,7 @@ val to_json_result : t -> (Yojson.Safe.t, Error.t) result
     including its schema, is preserved exactly rather than discarded. *)
 val drop_unencodable_json : t -> t option
 
-(** Deserialize only the exact current v12 checkpoint schema. Every other
+(** Deserialize only the exact current v13 checkpoint schema. Every other
     version is rejected. *)
 val of_json : Yojson.Safe.t -> (t, Error.t) result
 
@@ -161,7 +161,7 @@ val create_encoding_memo : unit -> encoding_memo
     encode, validation or decode. That is a record the previous successful call
     wrote, the decode that call returned for it, or a record
     {!of_string_with_encoding_memo} read. Every other message is encoded,
-    validated against the v12 contract, and decoded once from the bytes written
+    validated against the v13 contract, and decoded once from the bytes written
     for it. After a success, [memo] holds the messages of [cp] and their
     decodes.
 
@@ -203,7 +203,7 @@ val delta_of_json : Yojson.Safe.t -> (delta, Error.t) result
 val compute_delta : t -> t -> delta
 
 (** Apply a delta to a base checkpoint. Both the base and resulting checkpoint
-    must satisfy the exact current v12 contract. *)
+    must satisfy the exact current v13 contract. *)
 val apply_delta : t -> delta -> (t, Error.t) result
 
 (** {1 Queries} *)
@@ -216,10 +216,11 @@ val token_usage : t -> Types.usage_stats
 
 (** {1 Usage stats JSON helpers} *)
 
-(** Serialize usage_stats to JSON. Reusable by downstream modules
-    (e.g., checkpoint telemetry). *)
+(** Serialize processed-response subtotals and explicit missing-payload
+    coverage. Numeric zero alone is not complete usage evidence. *)
 val usage_to_json : Types.usage_stats -> Yojson.Safe.t
 
-(** Deserialize exact current usage stats from JSON. Legacy fields are
-    rejected explicitly. *)
+(** Deserialize exact current usage stats, requiring coverage metadata and
+    validating [0 <= missing_usage_responses <= api_calls]. Missing metadata
+    is rejected, never inferred as complete historical coverage. *)
 val usage_of_json : Yojson.Safe.t -> (Types.usage_stats, Error.t) result

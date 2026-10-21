@@ -310,6 +310,7 @@ let usage_number_fields =
   ; "total_cache_creation_input_tokens"
   ; "total_cache_read_input_tokens"
   ; "api_calls"
+  ; "missing_usage_responses"
   ; "estimated_cost_usd"
   ]
 ;;
@@ -356,6 +357,7 @@ let validate_pricing_gap ~scope = function
         fields
     in
     (match kinds with
+     | [ `String "usage_not_reported" ]
      | [ `String "model_identity_unavailable" ] ->
        validate_object_shape ~scope ~required:[ "kind" ] ~optional:[] json
        |> Result.map (fun _ -> ())
@@ -382,7 +384,17 @@ let validate_current_usage json =
   in
   let* () = validate_usage_numbers ~scope fields in
   let* pricing_gap = required_field ~scope "pricing_gap" fields in
-  validate_pricing_gap ~scope:(Suffix (scope, ".pricing_gap")) pricing_gap
+  let* () = validate_pricing_gap ~scope:(Suffix (scope, ".pricing_gap")) pricing_gap in
+  let* api_calls = required_field ~scope "api_calls" fields in
+  let* missing = required_field ~scope "missing_usage_responses" fields in
+  match api_calls, missing with
+  | `Int total, `Int missing when total >= 0 && missing >= 0 && missing <= total ->
+    if missing > 0 && pricing_gap = `Null then
+      scope_errorf scope " missing usage responses require a cost-gap diagnostic"
+    else Ok ()
+  | `Int _, `Int _ ->
+    scope_errorf scope " requires 0 <= missing_usage_responses <= api_calls"
+  | _, _ -> scope_errorf scope " response coverage counts must be integers"
 ;;
 
 let rec validate_tool_result ~scope json =

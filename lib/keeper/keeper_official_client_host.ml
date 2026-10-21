@@ -1701,7 +1701,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
                  { invocation
                  ; tool_name = tool.schema.name
                  ; input
-                 ; accumulated_cost_usd = 0.0
+                 ; usage = None
                  })
           in
           (* Settled by the same gate AGENT_CORE's own tool loop uses, so one

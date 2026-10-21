@@ -42,6 +42,7 @@ let usage_stats_gen =
   let* cache_creation = int_range 0 50 in
   let* cache_read = int_range 0 50 in
   let* api_calls = int_range 0 10 in
+  let* missing_usage_responses = int_range 0 api_calls in
   let* estimated_cost_cents = int_range 0 100 in
   return
     { total_input_tokens = input_tokens
@@ -49,8 +50,9 @@ let usage_stats_gen =
     ; total_cache_creation_input_tokens = cache_creation
     ; total_cache_read_input_tokens = cache_read
     ; api_calls
+    ; missing_usage_responses
     ; estimated_cost_usd = float_of_int estimated_cost_cents /. 100.0
-    ; pricing_gap = None
+    ; pricing_gap = (if missing_usage_responses = 0 then None else Some Types.Usage_not_reported)
     }
 ;;
 
@@ -317,6 +319,7 @@ let test_delta_json_all_replacement_ops () =
         ; total_cache_creation_input_tokens = 3
         ; total_cache_read_input_tokens = 2
         ; api_calls = 4
+        ; missing_usage_responses = 1
         ; estimated_cost_usd = 0.42
         ; pricing_gap = Some (Types.Pricing_unavailable "custom-unpriced")
         }

@@ -30,7 +30,7 @@ is installed before publishing its lifecycle outcome. Failed pre-resume calls
 leave the old pending wait intact. Low-level streaming turns publish their own
 Started and outcome rather than bypassing the invocation owner.
 
-Checkpoint v12 persists `pending_input` explicitly, including null when no wait
+Checkpoint v13 persists `pending_input` explicitly, including null when no wait
 is outstanding. Full encode/decode, message-encoding memo headers and checkpoint
 deltas carry the same proof. Agent resume and clone preserve it. The public
 checkpoint captures messages and pending ownership under the same Agent lock;
@@ -39,7 +39,8 @@ Agent owns its copy; cross-process intake/one-shot admission remains the host
 continuation owner's responsibility.
 
 This changes the exact current checkpoint schema: older versions are refused,
-and v12 requires the pending-input field. It adds no conversion, purge, reset or
+and v13 requires both pending-input ownership and explicit missing-usage
+response coverage. It adds no conversion, purge, reset or
 installation step. Existing checkpoint-version mismatch behavior must be
 considered before deployment; source review does not prove a live runtime has
 adopted this format.

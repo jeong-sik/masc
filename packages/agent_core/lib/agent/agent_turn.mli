@@ -90,7 +90,9 @@ val provider_turn_ordinal : Types.agent_state -> int
 (** Accumulate response usage into running totals, including observational cost
     estimation. The exact non-empty [response_model] takes precedence over the
     configured request model. Missing or incomplete pricing records a gap and
-    never blocks the turn. *)
+    never blocks the turn. A missing payload advances both the processed
+    response count and its independent missing-payload count, preserving known
+    subtotals. Payload coverage does not establish per-field reporting. *)
 val accumulate_usage
   :  current_usage:Types.usage_stats
   -> provider_config:Llm_provider.Provider_config.t option

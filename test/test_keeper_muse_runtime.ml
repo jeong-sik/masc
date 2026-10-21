@@ -220,7 +220,7 @@ let test_receipt_of_a_held_block_follows_the_block () =
     invoke hooks.pre_tool_use
       (Agent_core.Hooks.PreToolUse
          { invocation; tool_name = "masc_probe"; input = `Assoc []
-         ; accumulated_cost_usd = 0. });
+         ; usage = None });
     Keeper_execution_join.record ~invocation ~execution_id:("exec-" ^ call_id);
     invoke hooks.post_tool_use
       (Agent_core.Hooks.PostToolUse

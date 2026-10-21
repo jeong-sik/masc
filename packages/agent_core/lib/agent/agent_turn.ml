@@ -197,7 +197,7 @@ let accumulate_usage ~current_usage ~provider_config ~response_model ~response_u
               | Llm_provider.Pricing.Estimated turn_cost ->
                 { base with estimated_cost_usd = base.estimated_cost_usd +. turn_cost }
               | Llm_provider.Pricing.Incomplete _ -> with_pricing_gap base (Some model_id)))))
-  | None -> { current_usage with api_calls = current_usage.api_calls + 1 }
+  | None -> add_missing_usage current_usage
 ;;
 
 (* ── Turn params resolution ───────────────────────────────────── *)

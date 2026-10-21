@@ -64,7 +64,7 @@ let test_hook_receives_event () =
          { invocation = invocation ()
          ; tool_name = "test_tool"
          ; input = `Null
-         ; accumulated_cost_usd = 0.0
+         ; usage = Some Types.empty_usage
          })
   in
   check string "hook received tool_name" "test_tool" !received
@@ -125,7 +125,7 @@ let test_invoke_block () =
          { invocation = invocation ~tool_use_id:"tu-danger" ()
          ; tool_name = "dangerous"
          ; input = `Null
-         ; accumulated_cost_usd = 0.0
+         ; usage = Some Types.empty_usage
          })
   in
   check bool "hook returns Block" true (result = Hooks.Block "blocked")
@@ -138,7 +138,7 @@ let dummy_pre_tool_use =
     { invocation = invocation ~tool_use_id:"tu-1" ~turn:1 ()
     ; tool_name = "t"
     ; input = `Null
-    ; accumulated_cost_usd = 0.0
+    ; usage = Some Types.empty_usage
     }
 ;;
 

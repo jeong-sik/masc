@@ -81,8 +81,9 @@ let sample_usage : Types.usage_stats =
   ; total_cache_creation_input_tokens = 20
   ; total_cache_read_input_tokens = 10
   ; api_calls = 3
+  ; missing_usage_responses = 1
   ; estimated_cost_usd = 0.0
-  ; pricing_gap = None
+  ; pricing_gap = Some Types.Usage_not_reported
   }
 ;;
 
@@ -216,7 +217,9 @@ let test_resume_restores_usage () =
   let agent = Agent.resume ~net ~checkpoint:cp () in
   Alcotest.(check int) "input_tokens" 150 (Agent.state agent).usage.total_input_tokens;
   Alcotest.(check int) "output_tokens" 80 (Agent.state agent).usage.total_output_tokens;
-  Alcotest.(check int) "api_calls" 3 (Agent.state agent).usage.api_calls
+  Alcotest.(check int) "api_calls" 3 (Agent.state agent).usage.api_calls;
+  Alcotest.(check int) "missing usage survives resume" 1
+    (Agent.state agent).usage.missing_usage_responses
 ;;
 
 let test_resume_restores_turn_count () =
@@ -451,6 +454,7 @@ let test_resume_cache_tokens () =
     ; total_cache_creation_input_tokens = 30
     ; total_cache_read_input_tokens = 25
     ; api_calls = 2
+    ; missing_usage_responses = 0
     ; estimated_cost_usd = 0.0
     ; pricing_gap = None
     }

@@ -124,6 +124,51 @@ let test_single_turn_usage () =
     Alcotest.(check int) "output" 75 st.usage.total_output_tokens)
 ;;
 
+let test_missing_usage_reaches_hooks_and_checkpoint () =
+  let call_count = ref 0 in
+  let hook_usage = ref [] in
+  let handler _conn _req body =
+    let _ = Eio.Buf_read.(of_flow ~max_size:(1024 * 1024) body |> take_all) in
+    incr call_count;
+    let response_body = match !call_count with
+      | 1 -> tool_body_with_usage ~input_tokens:0 ~output_tokens:0 ~tool_name:"echo"
+      | 2 ->
+        (match Yojson.Safe.from_string
+            (tool_body_with_usage ~input_tokens:0 ~output_tokens:0 ~tool_name:"echo") with
+         | `Assoc fields ->
+           `Assoc (List.remove_assoc "usage" fields) |> Yojson.Safe.to_string
+         | _ -> Alcotest.fail "fixture must be an object")
+      | _ -> text_body_with_usage ~input_tokens:5 ~output_tokens:1 "done" in
+    Cohttp_eio.Server.respond_string ~status:`OK ~body:response_body () in
+  with_mock_server ~port:18303 handler (fun ~sw ~net ~base_url ->
+    let tool = Tool.create ~name:"echo" ~description:"echo" ~parameters:[]
+        (fun _ -> Ok {content="ok"; content_blocks=None; _meta=None}) in
+    let hooks = { Hooks.empty with pre_tool_use = Some (function
+      | Hooks.PreToolUse {usage; _} ->
+        hook_usage := !hook_usage @ [usage]; Hooks.Continue
+      | _ -> Alcotest.fail "expected pre-tool event") } in
+    let options = { Agent.default_options with
+      provider_config=Some (local_provider ~base_url); hooks } in
+    let agent = Agent.create ~net ~config:(default_config ~model:"mock-model")
+        ~options ~tools:[tool] () in
+    Agent.run ~sw agent "measure partial usage" |> require_run_success "partial usage run";
+    (match !hook_usage with
+     | [Some first; Some second] ->
+       Alcotest.(check int) "first hook sees measured zero payload" 0 first.missing_usage_responses;
+       Alcotest.(check int) "second hook sees absent payload" 1 second.missing_usage_responses;
+       Alcotest.(check int) "second hook has exact response denominator" 2 second.api_calls
+     | _ -> Alcotest.fail "both SDK tool calls must carry their real aggregate");
+    let state = Agent.state agent in
+    Alcotest.(check int) "all processed responses counted" 3 state.usage.api_calls;
+    Alcotest.(check int) "known input subtotal" 5 state.usage.total_input_tokens;
+    Alcotest.(check int) "known output subtotal" 1 state.usage.total_output_tokens;
+    Alcotest.(check int) "missing payload survives later known response" 1 state.usage.missing_usage_responses;
+    let checkpoint = Agent.checkpoint agent in
+    let decoded = Checkpoint.to_json checkpoint |> Checkpoint.of_json |> Result.get_ok in
+    Alcotest.(check bool) "actual checkpoint retains incomplete usage" true
+      (decoded.usage = state.usage))
+;;
+
 (* ── Anthropic exclusive → inclusive normalisation (#27912) ──────────
 
    The Messages wire reports input_tokens exclusive of the cache
@@ -218,6 +263,8 @@ let () =
     [ ( "accumulation"
       , [ test_case "tokens across turns" `Quick test_tokens_accumulate_across_turns
         ; test_case "single turn usage" `Quick test_single_turn_usage
+        ; test_case "missing usage reaches hooks and checkpoint" `Quick
+            test_missing_usage_reaches_hooks_and_checkpoint
         ] )
     ; ( "anthropic-inclusive-normalisation"
       , [ test_case

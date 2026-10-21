@@ -901,7 +901,7 @@ let test_turn_declarations_are_isolated () =
         batch_size = 1; execution_mode = Agent_core.Tool_contract.Serial }
       ~completion:Agent_core.Tool_contract.Continue_after_success in
     let event = Agent_core.Hooks.PreToolUse
-      { invocation; tool_name; input = `Assoc []; accumulated_cost_usd = 0.0 } in
+      { invocation; tool_name; input = `Assoc []; usage = None } in
     (match bound.pre_tool_use ~identity_tool_index:bound.identity_tool_index event with
      | Agent_core.Hooks.Continue -> ()
      | _ -> Alcotest.fail "the admitted turn should classify its attached read");

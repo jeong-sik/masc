@@ -342,7 +342,7 @@ let test_accumulate_usage_with_response () =
   let provider_config =
     Llm_provider.Provider_config.make
       ~kind:Anthropic
-      ~provider_id:"anthropic"
+      ~provider_id:"claude"
       ~model_id:"claude-sonnet-5"
       ~base_url:"https://api.anthropic.com"
       ()
@@ -356,6 +356,9 @@ let test_accumulate_usage_with_response () =
   in
   Alcotest.(check int) "input tokens" 100 result.total_input_tokens;
   Alcotest.(check int) "output tokens" 50 result.total_output_tokens;
+  Alcotest.(check int) "reported response counted" 1 result.api_calls;
+  Alcotest.(check int) "payload is present" 0 result.missing_usage_responses;
+  Alcotest.(check (option reject)) "declared provider has pricing" None result.pricing_gap;
   Alcotest.(check bool) "cost > 0" true (result.estimated_cost_usd > 0.0)
 ;;
 
@@ -368,10 +371,42 @@ let test_accumulate_usage_none_response () =
       ~response_model:None
       ~response_usage:None
   in
-  Alcotest.(check int) "api_calls incremented" 3 result.api_calls
+  Alcotest.(check int) "api_calls incremented" 3 result.api_calls;
+  Alcotest.(check int) "missing payload counted" 1 result.missing_usage_responses;
+  Alcotest.(check bool) "missing usage is not missing model pricing" true
+    (result.pricing_gap = Some Types.Usage_not_reported)
 ;;
 
-let test_accumulate_usage_local_pricing () =
+let test_usage_payload_gaps_preserve_known_subtotals () =
+  let observed count : Types.api_usage =
+    { input_tokens = count; output_tokens = 0;
+      cache_creation_input_tokens = 0; cache_read_input_tokens = 0;
+      cost_usd = Some 0.0 } in
+  let accumulate current response_usage =
+    Agent_turn.accumulate_usage ~current_usage:current ~provider_config:None
+      ~response_model:None ~response_usage in
+  let zero = accumulate Types.empty_usage (Some (observed 0)) in
+  Alcotest.(check int) "measured zero has a payload" 0 zero.missing_usage_responses;
+  Alcotest.(check bool) "reported zero is priced" true (zero.pricing_gap = None);
+  let missing = accumulate zero None in
+  let known = accumulate missing (Some (observed 5)) in
+  Alcotest.(check int) "processed responses" 3 known.api_calls;
+  Alcotest.(check int) "known subtotal survives" 5 known.total_input_tokens;
+  Alcotest.(check int) "missing response remains visible" 1 known.missing_usage_responses;
+  Alcotest.(check bool) "later zero-priced report does not erase gap" true
+    (known.pricing_gap = Some Types.Usage_not_reported);
+  let prior_gap = { known with pricing_gap = Some (Types.Pricing_unavailable "unpriced") } in
+  let missing_again = accumulate prior_gap None in
+  Alcotest.(check int) "another gap counted independently" 2 missing_again.missing_usage_responses;
+  Alcotest.(check bool) "first price diagnostic retained" true
+    (missing_again.pricing_gap = prior_gap.pricing_gap);
+  let restored = Checkpoint.usage_to_json missing_again
+    |> Checkpoint.usage_of_json |> Result.get_ok in
+  Alcotest.(check bool) "durable projection retains subtotal and independent gaps"
+    true (restored = missing_again)
+;;
+
+let test_accumulate_usage_unknown_provider () =
   let current = Types.empty_usage in
   let response_usage : Types.api_usage =
     { input_tokens = 1000
@@ -396,7 +431,10 @@ let test_accumulate_usage_local_pricing () =
       ~response_model:(Some "qwen3.5")
       ~response_usage:(Some response_usage)
   in
-  Alcotest.(check (float 0.001)) "local is free" 0.0 result.estimated_cost_usd
+  Alcotest.(check (float 0.001)) "unknown price adds no invented cost" 0.0 result.estimated_cost_usd;
+  Alcotest.(check bool) "a local URL does not establish a free price" true
+    (result.pricing_gap = Some (Types.Pricing_unavailable "qwen3.5"));
+  Alcotest.(check int) "unknown pricing is not missing usage" 0 result.missing_usage_responses
 ;;
 
 let test_accumulate_usage_prefers_response_cost () =
@@ -870,7 +908,9 @@ let () =
     ; ( "accumulate_usage"
       , [ Alcotest.test_case "with response" `Quick test_accumulate_usage_with_response
         ; Alcotest.test_case "none response" `Quick test_accumulate_usage_none_response
-        ; Alcotest.test_case "local pricing" `Quick test_accumulate_usage_local_pricing
+        ; Alcotest.test_case "payload gaps preserve known subtotals" `Quick
+            test_usage_payload_gaps_preserve_known_subtotals
+        ; Alcotest.test_case "unknown provider" `Quick test_accumulate_usage_unknown_provider
         ; Alcotest.test_case
             "prefers response cost"
             `Quick

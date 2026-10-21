@@ -1757,6 +1757,23 @@ let test_task_history_current_sources () = with_workspace (fun _env _sw base_pat
     (List.exists (fun (event:Masc.Tui_decode.task_history_event) ->
       event.th_actor=Some keeper && event.th_label="task.created"
       && Option.is_some event.th_origin) decoded.history_events);
+  let activity=Filename.concat (Workspace.masc_dir config) Activity_graph.store_dirname in
+  (* The fallback backend creates a flock leaf beside the real producer's
+     sequence counter. Both are bookkeeping, never history rows. *)
+  File_lock_eio.with_lock (Filename.concat activity "_stream") (fun () ->
+    ignore (History.read ~config ~task_id ~max_events:1 () |> page));
+  let refuse_metadata_at relative =
+    let path=Filename.concat (Workspace.masc_dir config) relative in
+    write path "not a dated event";
+    Fun.protect ~finally:(fun () -> Unix.unlink path) (fun () ->
+      match History.read ~config ~task_id ~max_events:1 () with
+      | Error (History.Invalid_layout {entry}) when entry=relative -> ()
+      | Ok _ | Error _ -> failf "unexpected root metadata admitted: %s" relative) in
+  List.iter (fun name -> refuse_metadata_at (Activity_graph.store_dirname ^ "/" ^ name))
+    ["_unexpected";"_stream"];
+  let original=List.find (fun row -> Json_util.get_string row "source"=Some "activity-events") first.events in
+  let original_file=Json_util.get_string original "file" |> Option.get in
+  refuse_metadata_at (Filename.dirname original_file ^ "/_seq");
   let emit kind = ignore (Activity_graph.emit config ~kind
     ~actor:(Activity_graph.entity ~kind:"agent" keeper)
     ~subject:(Activity_graph.entity ~kind:"task" task_id)
@@ -1769,6 +1786,7 @@ let test_task_history_current_sources () = with_workspace (fun _env _sw base_pat
   Workspace_utils_ops.log_event config (`Assoc ["task_id",`String task_id;"type",`String "task_transition";
     "ts",`String "2026-10-21T00:00:00Z";"actor",`String keeper;
     "handoff_context",`Assoc ["summary",`String "audit original handoff"]]);
+  refuse_metadata_at "events/_seq";
   if absent then (match History.read ~config ~task_id ~max_events:1 ~cursor () with
     | Error History.Source_changed -> () | _ -> fail "newly created source entered a captured absent source");
   let first=History.read ~config ~task_id ~max_events:1 () |> page in

@@ -53,6 +53,12 @@ end
     store name it from here instead of spelling the literal. *)
 val store_dirname : string
 
+val root_entry_is_metadata : string -> bool
+(** Exact root-level bookkeeping names owned by this producer: the sequence
+    counter and the physical lock file used by the local flock fallback.
+    They are not dated event data. This classification applies only directly
+    under this store root, not inside a month or another event store. *)
+
 (** {1 Event emission} *)
 
 val emit :

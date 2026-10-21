@@ -61,6 +61,11 @@ val release_flock_fd : Unix.file_descr -> unit
 
 (** {1 High-level scoped locking} *)
 
+val lock_file_path : string -> string
+(** Physical flock file used by {!with_lock} for the supplied logical key.
+    Store readers use this same path contract to distinguish bookkeeping
+    from event data. Does not create or inspect the file. *)
+
 (** [with_mutex path f] runs [f] while holding the cooperative
     per-[path] Eio.Mutex only. Use for in-memory backends that need
     single-process fiber serialisation but have no filesystem

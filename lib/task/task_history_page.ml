@@ -70,6 +70,9 @@ let cursor_of_string encoded =
 type file = { source : source; relative : string; path : string; snapshot : Fs_compat.owned_regular_file_snapshot }
 type inventory = { files : file list; observations : (source * availability) list; roots : Yojson.Safe.t list }
 let owned result = Result.map_error (fun _ -> Source_unavailable) result
+let root_entry_is_metadata source name = match source with
+  | Activity -> Activity_graph.root_entry_is_metadata name
+  | Audit -> false
 let inventory ~root ~held =
   let* observations,roots,files=List.fold_left (fun result source ->
     let* observations,roots,files=result in
@@ -85,7 +88,8 @@ let inventory ~root ~held =
         | Ok Owned_directory_missing | Error _ -> Error Source_changed in
       let* files=List.fold_left (fun result month ->
         let* collected=result in
-        if Layout.entry_is_foreign_to_layout month then Ok collected else
+        if Layout.entry_is_foreign_to_layout month || root_entry_is_metadata source month
+        then Ok collected else
         match Layout.year_and_month_of_directory_name month with
         | None -> Error (Invalid_layout {entry=name ^ "/" ^ month})
         | Some (year,month_number) ->

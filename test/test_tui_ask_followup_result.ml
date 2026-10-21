@@ -9,6 +9,7 @@ module Projection = Masc_tui_ask_projection
 module Decode = Masc.Tui_decode_asks
 module Wake = Masc.Keeper_ask_answer_wake
 module Server = Server_routes_http_keeper_stream
+module Observation = Masc_tui_ask_followup_observation
 
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Masc.Workspace_metric_hooks.install ()
@@ -95,16 +96,27 @@ let launch ?key state results request submission ~released perform =
   Ui.supersede_ask_followup_worker state
     (Some (request,fun detail -> ignore (Eio.Promise.try_resolve resolve detail))) ~detail:"original read superseded";
   let finish ()=Ui.finish_ask_followup_worker state request in
+  Observation.emit read ~sources:(Ui.current_ask_followup state) Observation.Followup_read_started;
   Results.launch_observation ?key state ~results ~boundary_error:(fun detail -> Projection.Followup_read_failed detail)
     ~not_started:(fun detail -> Projection.Followup_not_started detail) ~on_not_run:finish
-    ~observe_job:(function Masc_tui_workspace_job.Cancellation_requested -> () | Registration_released -> released ())
+    ~observe_job:(fun event ->
+      Observation.emit read ~sources:None (Observation.Followup_job_event event);
+      match event with Masc_tui_workspace_job.Cancellation_requested -> () | Registration_released -> released ())
     ~cancelled:(envelope (Protocol.Ask_followup_finished (read,
       Error Projection.Followup_cancelled)))
     ~progress:(fun (event,received_ns) -> envelope (Protocol.Ask_followup_observed (read,event,received_ns)))
     ~deliver:(fun result -> envelope (Protocol.Ask_followup_finished (read,result)))
     (fun publish -> Fun.protect ~finally:finish (fun () ->
-      Eio.Fiber.first (fun () -> perform publish |> Result.map_error (fun detail -> Projection.Followup_read_failed detail))
-        (fun () -> let _detail=Eio.Promise.await stop in Error Projection.Followup_withdrawn)))
+      Observation.emit read ~sources:None Observation.Followup_worker_entered;
+      let result=try Eio.Fiber.first
+        (fun () -> perform publish |> Result.map_error (fun detail -> Projection.Followup_read_failed detail))
+        (fun () -> let _detail=Eio.Promise.await stop in Error Projection.Followup_withdrawn)
+        with Eio.Cancel.Cancelled _ as exn ->
+          let backtrace=Printexc.get_raw_backtrace () in
+          Observation.emit read ~sources:None Observation.Followup_producer_cancelled;
+          Printexc.raise_with_backtrace exn backtrace in
+      Observation.emit read ~sources:None (Observation.Followup_producer_returned result);
+      result))
 type admission = Part of Decode.ask_followup_event * int64 | Terminal of Projection.followup_result | Refused
 let apply state message = match message with
   | Protocol.Workspace_scoped (authority,reading,inner) ->
@@ -112,10 +124,18 @@ let apply state message = match message with
       (match inner with
        | Ask_followup_observed (read,event,received_ns) ->
          (match Ui.take_ask_followup_event state read.afr_request read.afr_submission event with
-          | Some (Ok _) -> Part (event,received_ns) | Some (Error detail) -> fail detail | None -> Refused)
+          | Some result ->
+            Observation.emit read ~sources:(Ui.current_ask_followup state)
+              (Observation.Followup_source_applied (event,received_ns,Result.is_ok result));
+            (match result with Ok _ -> Part (event,received_ns) | Error detail -> fail detail)
+          | None -> Refused)
        | Ask_followup_finished (read,result) ->
          (match Ui.finish_ask_followup_read state read.afr_request read.afr_submission result with
-          | Some result -> Terminal result | None -> Refused)
+          | Some result ->
+            Observation.emit read ~sources:(Ui.current_ask_followup state)
+              (Observation.Followup_ui_settled result);
+            Terminal result
+          | None -> Refused)
        | _ -> fail "observation changed its original message kind")
   | _ -> fail "original follow-up lost its captured workspace envelope"
 let apply_batch state seen batch =
@@ -582,6 +602,90 @@ let test_answered_ask_inspection_reopen_and_withdraw () = with_answer @@ fun bas
   check bool "no canonical Task authority is borrowed after withdrawal" false (Ui.open_ask_task_inspection state);
   check bool "withdrawal preserves actual resources" true (before=Masc.Workspace.get_tasks_raw config)
 
+
+let test_actual_followup_structured_sink_and_export () = with_answer @@ fun base config ask resolution task_id state ->
+  (* Last case: the process-global production sink owns its channel until exit.
+     This private directory is removed only after all sink reads have finished. *)
+  let log_dir=Filename.temp_dir ~temp_dir:base "followup-logs-" "" in
+  Log.set_level Log.Info;
+  Log.Ring.init_file_sink log_dir;
+  let since_seq=(Log.Ring.bounds ()).total-1 in
+  let before=Masc.Workspace.get_tasks_raw config in
+  let run_read before_source = Eio.Switch.run @@ fun sw -> Eio_context.with_turn_switch sw @@ fun () ->
+    let results=Results.create () in
+    Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
+    let left,release=Eio.Promise.create () in
+    let request,submission=begin_read state in
+    launch state results request submission ~released:(fun () -> ignore (Eio.Promise.try_resolve release ()))
+      (actual_read base ask resolution ~parts:(ref []) ~before_source);
+    Eio.Promise.await left;
+    let batch=Results.take_ready results in
+    let read=first_read batch in
+    read,apply_batch state (ref []) batch in
+  let completed,result=run_read (fun _ -> ()) in
+  check bool "actual completed source retained" true (result=Some (Ok ()));
+  exact_task state task_id;
+  let failed,result=run_read (function
+    | Wake.Reaction_evidence _ -> raise (Sys_error "private disconnect explanation")
+    | Linked_task _ | Tool_results _ -> ()) in
+  (match result with
+   | Some (Error (Projection.Followup_read_failed _)) -> ()
+   | Some _ | None -> fail "actual failed source lost its terminal");
+  let results=Results.create () in
+  Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
+  check bool "missing switch is an actual dispatch boundary" true (Option.is_none (Eio_context.get_switch_opt ()));
+  let request,submission=begin_read state in
+  launch state results request submission ~released:(fun () -> ())
+    (actual_read base ask resolution ~parts:(ref []) ~before_source:(fun _ -> ()));
+  let batch=Results.take_ready results in
+  let unstarted=first_read batch in
+  (match apply_batch state (ref []) batch with
+   | Some (Error (Projection.Followup_not_started _)) -> ()
+   | Some _ | None -> fail "unstarted original source lost its terminal");
+  let entries=Log.Ring.recent ~limit:Log.Ring.capacity ~since_seq ~module_filter:"Transport" () in
+  let exported=Server_dashboard_logs_json.build ~config ~limit:Log.Ring.capacity
+    ~level_filter:"info" ~applied_level:Log.Info ~min_level:(Log.level_to_int Log.Info)
+    ~module_filter:"Transport" ~since_seq:(Some since_seq) ~before_seq:None
+    ~category_filter:(Some "lifecycle") ~exclude_category:None ~ring_bounds:(Log.Ring.bounds ()) entries in
+  let decoded=Masc.Tui_decode.decode_system_log_snapshot exported |> require in
+  let disk=Array.to_list (Sys.readdir log_dir) |> List.concat_map (fun name ->
+    let path=Filename.concat log_dir name in
+    let channel=open_in path in
+    Fun.protect ~finally:(fun () -> close_in channel) @@ fun () ->
+    In_channel.input_lines channel |> List.map (fun line -> Log.Ring.entry_of_json (Yojson.Safe.from_string line))) in
+  let member key json=Yojson.Safe.Util.member key json in
+  let originals=[completed;failed;unstarted] in
+  let selected (entry : Masc.Tui_decode.system_log_entry) =
+    member "event" entry.sl_details=`String "tui_ask_followup" in
+  let observed=List.filter selected decoded.sys_entries in
+  check bool "actual exported structured observations exist" true (observed<>[]);
+  List.iter (fun (entry : Masc.Tui_decode.system_log_entry) ->
+    let details=entry.sl_details in
+    check bool "structured row retains original Info lifecycle channel" true
+      (entry.sl_level=Masc.Tui_decode.System_info && entry.sl_category=Some "lifecycle" && entry.sl_keeper=Some "alpha");
+    let original=List.find (fun (read : Protocol.ask_followup_read) ->
+      member "request" details=`Int (Ui.Snapshot_read.request_id read.afr_request)) originals in
+    check string "export preserves original capsule provenance"
+      (Yojson.Safe.to_string (Masc_tui_observation_origin.to_json original.afr_origin))
+      (Yojson.Safe.to_string (member "origin" details));
+    let persisted=List.find (fun (row : Log.Ring.entry) -> row.seq=entry.sl_seq) disk in
+    check string "daily JSONL and actual dashboard decoder preserve the same details"
+      (Yojson.Safe.to_string persisted.details) (Yojson.Safe.to_string details)) observed;
+  let has read phase completion = List.exists (fun (row : Masc.Tui_decode.system_log_entry) ->
+    let details=row.sl_details in
+    member "request" details=`Int (Ui.Snapshot_read.request_id read.Protocol.afr_request)
+    && member "phase" details=`String phase && member "completion" details=completion) observed in
+  check bool "producer return remains distinct from UI settlement" true
+    (has completed "producer_returned" (Projection.followup_result_to_json (Ok ()))
+     && has completed "finished" (Projection.followup_result_to_json (Ok ()))
+     && has completed "registration_released" `Null);
+  check bool "actual failed and unstarted attempts stay in exported denominator" true
+    (has failed "finished" (Projection.followup_result_to_json (Error (Projection.Followup_read_failed "")))
+     && has unstarted "finished" (Projection.followup_result_to_json (Error (Projection.Followup_not_started "")))
+     && not (has unstarted "worker_entered" `Null));
+  check bool "observation and persistence do not mutate canonical Task resources" true
+    (before=Masc.Workspace.get_tasks_raw config)
+
 let () = Eio_main.run @@ fun env ->
   let original=Eio_context.snapshot_state () in
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -595,4 +699,5 @@ let () = Eio_main.run @@ fun env ->
       test_case "actual workspace reads preserve distinct original provenance across replacement" `Quick test_actual_workspaces_keep_distinct_original_provenance;
       test_case "actual original read retains admission identity after health metadata changes" `Quick test_actual_read_keeps_admission_identity_after_health_changes;
       test_case "canonical answered Ask opens actual Task history and submitted evidence" `Quick test_answered_ask_opens_actual_task_history_evidence;
-      test_case "answered Ask inspection preserves failed observations and rejects old visits" `Quick test_answered_ask_inspection_reopen_and_withdraw]])
+      test_case "answered Ask inspection preserves failed observations and rejects old visits" `Quick test_answered_ask_inspection_reopen_and_withdraw;
+      test_case "actual structured observations survive daily JSONL and dashboard decode" `Quick test_actual_followup_structured_sink_and_export]])

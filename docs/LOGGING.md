@@ -14,6 +14,7 @@ Log.<Module>.debug fmt …      (* verbose / development detail  *)
 Log.<Module>.routine fmt …    (* repeatable housekeeping; level via MASC_LOG_ROUTINE_LEVEL *)
 
 Log.<Module>.emit <level> ~details:<json> "msg"   (* structured payload with a fixed level *)
+Log.<Module>.emit_lazy <level> (fun () -> "msg", <json>) (* lazy message and details *)
 ```
 
 Each `<Module>` is built by `module X = Make(struct let name = "X" end)`. The
@@ -34,6 +35,25 @@ To add a component, add a `module X = Make(struct let name = "x" end)` line to
 **both** `lib/masc_log/log.ml` and the `module X : LOGGER` list in
 `lib/masc_log/log.mli`. The module identifier must be `Capitalized`; the `name`
 string carries the exact component.
+
+## Lazy structured observations
+
+`Log.<Module>.emit_lazy level (fun () -> message, details)` checks the existing
+module override or global threshold once before building either value. Admitted
+events use the same console mirror, redaction, ring and optional daily JSONL sink
+as `emit`. Capture identities and stage clocks at their actual observation
+boundary, before the builder; put only formatting of those immutable values in
+it. A disabled event still incurs its capture and closure costs. This API does
+not change the separate Routine level policy or make enabled sink I/O lazy.
+
+Original TUI Ask follow-up records use Info in Transport, category `lifecycle`,
+with keeper metadata and `details.event = "tui_ask_followup"`. Original capsule
+identity, source/receipt/admission clocks, typed terminal cause and producer/job/UI
+facts live in `details`. The message is a readable summary. Consumers select the
+structured event field and preserve missing/unfinished outcomes; they do not
+parse the console summary. Ring JSONL, dashboard export and TUI log decoding
+already preserve this field. This does not add an Ask cohort report or prove a
+runtime speedup. See [the source boundary audit](audits/tui-ask-followup-structured-20261021.md).
 
 ## Absent fields
 

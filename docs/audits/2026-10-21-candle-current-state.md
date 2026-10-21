@@ -64,6 +64,10 @@ RFC와 Dashboard 미사용 export 정리다. 아래 Candle 소스에 관한 판�
 이번 수집은 파일 간 원자적 snapshot이 아니며, 현재 서버 commit은 분석 소스 commit과
 같지 않다. 운영 전체 기능의 PASS로 일반화하지 않는다.
 
+설정 파일은 확인한 runtime root 아래에서 읽었다. 서버의 별도 `MASC_CONFIG_DIR`
+override 여부는 독립 확인하지 않았으므로, 위 파일의 값과 서버 실효 설정 API 검증을
+구분한다.
+
 ## 과거 지적의 현재 판정
 
 | 과거 항목 | 고정 소스에서 다시 확인한 결과 |

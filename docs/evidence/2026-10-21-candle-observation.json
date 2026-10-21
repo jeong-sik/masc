@@ -17,7 +17,8 @@
   },
   "workspace_identity": "effective_base_path and effective_masc_root checked via /health?full=1; host paths omitted",
   "config": {
-    "path": "<config-dir>/candle.toml",
+    "path": "<runtime-root>/config/candle.toml",
+    "effective_config_root_verified": false,
     "sha256": "7a3fce4b4677306b805bb825bd3293c9e52593a1eb6527141c5f3a5728eb40d7",
     "half_life_hours": 168,
     "weight_max": 1,

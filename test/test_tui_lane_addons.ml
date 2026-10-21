@@ -1496,7 +1496,41 @@ let connection_workers_preserve_other_installation_owners () =
   check (list string) "a replacement incarnation is not the original manual observation" []
     (ids removed.installation_workers)
 
+let detail_reads_keep_original_incarnation_and_receipts () =
+  let original = {UI.initial with screen=UI.Detail ("worker", "epoch-1")} in
+  let inspect_target = UI.request_read_target original UI.Inspect in
+  check bool "inventory refresh stays bound before the worker becomes retained" true
+    (inspect_target=UI.Read_detail ("worker", "epoch-1"));
+  let history_target = UI.request_read_target original
+      (UI.Slice ["run_id", "original-run"]) in
+  check bool "history refresh keeps the same original detail" true
+    (history_target=inspect_target);
+  check bool "the matching detail may receive its retained result" true
+    (UI.read_still_wanted original ~showing:true inspect_target);
+  let replacement = {original with screen=UI.Detail ("worker", "epoch-2")} in
+  check bool "same instance name with another incarnation rejects the old read" false
+    (UI.read_still_wanted replacement ~showing:true inspect_target);
+  let another = {original with screen=UI.Detail ("another-worker", "epoch-1")} in
+  check bool "another worker rejects the original history read" false
+    (UI.read_still_wanted another ~showing:true history_target);
+  check bool "returning to the inventory rejects a departed detail read" false
+    (UI.read_still_wanted UI.initial ~showing:true inspect_target);
+  check bool "inventory reads remain inventory reads" true
+    (UI.request_read_target UI.initial UI.Inspect=UI.Read_screen);
+  let action : UI.action_request = {instance_id="worker";incarnation="epoch-1";
+    request_id="original-action";action=`Assoc []} in
+  List.iter (fun request ->
+    let target = UI.request_read_target original request in
+    check bool "submitted effects and status receipts survive detail navigation" true
+      (target=UI.Read_screen
+       && UI.read_still_wanted UI.initial ~showing:false target))
+    [UI.Attach (`Assoc []); UI.Observe "worker"; UI.Detach "worker";
+     UI.Evidence (`Assoc []); UI.Act action; UI.Action_status action;
+     UI.Subscriptions (`Assoc [])]
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "detail reads keep original incarnation and independent receipts" `Quick
+    detail_reads_keep_original_incarnation_and_receipts;
   test_case "connection workers preserve separate installation owners" `Quick connection_workers_preserve_other_installation_owners;
   test_case "application reads preserve editor and save diagnostics" `Quick application_reads_preserve_editor;
   test_case "application lines follow decoded observations and complete refreshes" `Quick

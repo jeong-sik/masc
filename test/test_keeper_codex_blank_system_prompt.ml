@@ -263,15 +263,34 @@ let test_non_blank_system_prompt_reaches_thread_start_unchanged () =
        | None -> fail "the fixture received no thread/start request"
        | Some request ->
          (* The composition is the keeper prompt followed by the native
-            posture note the default posture appends, joined the way the
+            posture note the default posture appends and the frozen Librarian
+            unread observation every request carries (unavailable here: the
+            fixture has no snapshot or Memory reader), joined the way the
             runtime joins them. Computed from the same producers so the check
             is exact rather than a substring. *)
+         let unread_observation =
+           let unread =
+             Keeper_librarian_request_unread.of_results
+               ~snapshot:(Error "fixture has no snapshot reader")
+               ~memory:(Error "fixture has no Memory reader")
+           in
+           match
+             Keeper_librarian_request_unread.attach
+               ~include_empty:true
+               ~role:Agent_core.Types.System
+               unread
+               []
+           with
+           | [carrier] -> Keeper_official_client_host.encode_history_message carrier
+           | [] | _ :: _ :: _ -> fail "an unread observation must have one carrier"
+         in
          let expected =
            String.concat
              "\n\n"
-             (system_prompt
-              :: Keeper_codex_runtime.For_testing.native_posture_note
-                   Runtime_native_tools.codex_default)
+             ((system_prompt
+               :: Keeper_codex_runtime.For_testing.native_posture_note
+                    Runtime_native_tools.codex_default)
+              @ [ unread_observation ])
          in
          let received =
            Yojson.Safe.Util.(

@@ -15,7 +15,8 @@ val copy_source : Masc_tui_types.state -> ((string * string), string) result
 val rows : cols:int -> t -> string list
 (** [cols] is the surface width after the Activity reservation, before the
     Resources list/detail split. Both drawing and search use this projection.
-    CRLF is parsed as a line break before Markdown and terminal sanitization;
+    Each source part's CRLF is parsed before fencing, joining, Markdown and
+    terminal sanitization;
     original parts and copy bytes are unchanged. Standalone CR stays escaped. *)
 val search_rows : cols:int -> Masc_tui_types.state -> string list option
 (** Search only the currently displayed admitted content. Metadata-only,

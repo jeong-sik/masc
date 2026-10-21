@@ -111,6 +111,10 @@ let resource_mime_is_markdown mime =
     [ "text/markdown"; "text/x-markdown"; "application/markdown" ]
 
 let pretty_resource_text ~mime text =
+  (* Parse only the source fragment's own line breaks. Doing this after
+     fencing or joining parts would pair a final standalone CR with a
+     generated LF and erase its control marker. Retained bytes stay original. *)
+  let text = Masc_tui_text_block.lines text |> String.concat "\n" in
   match resource_language_of_mime mime with
   | Some "json" -> fenced_pretty_json text
   | Some language -> Masc_tui_markdown_theme.fenced ~language text
@@ -189,14 +193,10 @@ let resource_document entry
 let rows ~cols reading =
   let pane_cols = if cols >= Masc_tui_roster_pane.threshold_cols
     then cols - Masc_tui_roster_pane.pane_cols else cols in
-  (* A CR paired with LF belongs to the document's line terminator. Parse
-     those breaks before escaping controls, or the visible CR escape breaks
-     Markdown table delimiters. Retained parts and copy_source stay original. *)
   let document =
     resource_document reading.entry reading.contents ~error:reading.error
       ~requested:reading.requested ~image_cursor:reading.image_cursor
       ~text_cursor:reading.text_cursor ~revisions:reading.revisions
-    |> Masc_tui_text_block.lines |> String.concat "\n"
   in
   Message_layout.wrap_body ~markdown:Masc_tui_markdown_theme.document
     ~max_cells:(max 1 (framed_inner_width pane_cols - 4))

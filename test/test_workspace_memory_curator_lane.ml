@@ -223,7 +223,7 @@ let test_off_then_actual_metadata_on ()=with_fixture ~off:true (fun ~sw:_ ~clock
   ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> get);
   settle_all clock base_path store 1)
 let test_original_waits_for_actual_route_publication ()=with_fixture ~routes:false (fun ~sw:_ ~clock ~base_path ~config:_ ~store ~source:_ ~declaration:_ ~server ~urls ~mode:_ ~delivery:_ ->
-  await clock (fun () -> List.length (records store)=1 && Curator.For_testing.is_idle ~base_path);
+  await clock (fun () -> Curator.For_testing.is_idle ~base_path && List.length (records store)=1);
   let original=(List.hd (records store)).Owner.request_id in
   check int "unconfigured route does not call a provider" 0 (F.post_count server);
   publish_routes base_path urls;
@@ -335,7 +335,7 @@ let test_accepted_host_terminal_commits_off_without_worker ()=
     save_source config source (declaration false);
     ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> get);
     Curator.start ~sw ~config;
-    await clock (fun () -> is_finished (original_record store capture) && Curator.For_testing.is_idle ~base_path);
+    await clock (fun () -> Curator.For_testing.is_idle ~base_path && is_finished (original_record store capture));
     check int "accepted host result commits locally while Off" 1 (List.length (Ledger.dispositions (get (Ledger.load ~base_path))));
     check int "Off local commit never dispatches another provider" 1 (F.post_count server);
     delivery:=false;save_source config source (declaration true);

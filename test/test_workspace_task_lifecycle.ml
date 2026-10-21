@@ -108,6 +108,29 @@ let test_cancel_of_someone_elses_task_is_refused () =
   |> expect_error L.Invalid_transition
 ;;
 
+let test_operator_cancel_states () =
+  let operator_id = "operator" in
+  let cancel task_status reason =
+    L.decide_operator_cancel ~operator_id ~task_status ~now ~reason
+  in
+  List.iter (fun task_status ->
+    match cancel task_status (Some "  wrong scope  ") with
+    | Ok { L.new_status = D.Cancelled { cancelled_by; reason; _ }; set_current = None }
+      when cancelled_by = operator_id && reason = Some "wrong scope" -> ()
+    | Ok _ | Error _ -> failwith "operator cancellation must record the real actor")
+    [ D.Todo; D.Claimed { assignee = owner; claimed_at = now }; in_progress; awaiting ];
+  List.iter (fun reason ->
+    cancel in_progress reason |> expect_error L.Cancel_reason_required)
+    [ None; Some ""; Some "  " ];
+  cancel (D.Done { assignee = owner; completed_at = now; notes = None })
+    (Some producer_reason) |> expect_error L.Invalid_transition;
+  let prior = D.Cancelled { cancelled_by = owner; cancelled_at = now;
+                           reason = Some producer_reason } in
+  match cancel prior None with
+  | Ok { L.new_status; _ } when new_status = prior -> ()
+  | Ok _ | Error _ -> failwith "operator retry must preserve the original cancellation"
+;;
+
 let test_cancel_cannot_undo_a_finished_task () =
   let done_status = D.Done { assignee = owner; completed_at = now; notes = None } in
   decide ~same_agent:true ~task_status:done_status ~action:D.Cancel ()
@@ -423,6 +446,7 @@ let () =
   test_verdict_rejects_stale_verification_id ();
   test_claim_on_awaiting_is_refused ();
   test_awaiting_is_claimable_by_nobody ();
+  test_operator_cancel_states ();
   test_holder_cancel_ends_the_task_at_once ();
   test_cancel_of_a_pending_submission_ends_the_task ();
   test_holder_cancel_requires_a_reason ();

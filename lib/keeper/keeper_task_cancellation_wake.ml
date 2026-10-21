@@ -34,25 +34,10 @@ let outcome_label = function
   | Enqueue_failed _ -> "enqueue_failed"
 ;;
 
-(* Both actor fields are resolved to a canonical Keeper name before they are
-   compared, because they are recorded in different vocabularies:
-   [created_by] holds a canonical Keeper name ("keeper-a", "keeper-b") while
-   [cancelled_by] holds an agent name ("keeper-keeper-a-agent"). Comparing the raw
-   strings reads a self-cancellation as a cross-Keeper one and wakes a Keeper
-   about a decision it just made itself; resolving only by agent name finds no
-   author at all.
-
-   The two fields therefore get two resolvers rather than one that guesses.
-   Nothing forbids a Keeper's agent name from colliding with another Keeper's
-   lane name — [Keeper_meta_store] only requires it to be nonempty — so a
-   single order is wrong for one of the fields whenever such a pair exists.
-   Trying lane names first for [cancelled_by] would resolve lane [beta]'s
-   agent name "alpha" to lane [alpha], and if [alpha] authored the Task the
-   cross-Keeper wake would be dropped as a self-cancellation. Each resolver
-   below starts from the vocabulary its field is written in, and falls back to
-   the other only when the first finds nothing.
-
-   Every lookup is scoped to [config.base_path]. A Keeper of the same name in
+(* Only a typed agent actor is eligible for the Keeper self-cancellation check.
+   Its name and [created_by] use the canonical Keeper identity (RFC-0393).
+   An operator or system identity may have the same spelling without being that
+   Keeper. Every lookup is scoped to [config.base_path]. A Keeper of the same name in
    another workspace is not a lane here: enqueueing to it would write a
    stimulus under this workspace's path that its own Keeper never reads, and
    report delivery for a wake nobody receives. *)
@@ -73,15 +58,13 @@ let keeper_of_author ~config ~author =
   else keeper_of_agent_binding ~config ~actor:author
 ;;
 
-(* [cancelled_by] is written as an agent name — [workspace_task_lifecycle]
-   stores the acting [agent_name] verbatim — so the agent binding answers it
-   completely. There is deliberately no lane-name fallback: no caller writes a
-   lane name here, and accepting one resolved a non-Keeper actor whose id
-   happens to match a lane (an operator called "keeper-a" against Keeper lane
-   "keeper-a") to that Keeper, which then read as a self-cancellation and
-   swallowed a wake the author was owed. *)
-let keeper_of_canceller ~config ~agent_name =
-  keeper_of_agent_binding ~config ~actor:agent_name
+let keeper_of_canceller ~config ~(actor : Workspace_hooks.task_terminal_actor) =
+  match actor with
+  | Workspace_hooks.Task_terminal_agent agent_name ->
+    keeper_of_agent_binding ~config ~actor:agent_name
+    |> Result.map_error (fun detail -> agent_name, detail)
+  | Workspace_hooks.Task_terminal_operator _
+  | Workspace_hooks.Task_terminal_system _ -> Ok None
 ;;
 
 (* The wake resolves the same "why" the committed broadcast published. New
@@ -136,7 +119,7 @@ let enqueue ~config ~keeper_name ~(cancellation : Keeper_event_queue.task_cancel
     Enqueue_failed { keeper_name; detail }
 ;;
 
-let notify_author ~config ~cancelling_agent_name ~task_id =
+let notify_author ~config ~actor ~task_id =
   match Workspace_backlog.read_backlog_r config with
   | Error detail -> Backlog_read_failed { detail }
   | Ok backlog ->
@@ -159,21 +142,13 @@ let notify_author ~config ~cancelling_agent_name ~task_id =
               | Error detail -> Author_lookup_failed { author; detail }
               | Ok None -> Author_not_a_keeper { author }
               | Ok (Some author_keeper) ->
-                (* An unresolvable canceller is reported, never discarded.
-                   Two Keeper names that differ only by the [keeper-] prefix —
-                   [alpha] and [keeper-alpha] — both canonicalise to
-                   [keeper-alpha-agent], so the binding is [Ambiguous] and the
-                   author may be one of the candidates. Collapsing that into
-                   [None] fell through to comparing the raw agent name against
-                   the author lane, which misses the match and wakes a Keeper
-                   about its own cancellation. Since the self-check cannot be
-                   decided, nothing is enqueued and the ambiguity is surfaced
-                   for repair. *)
+                (* A failed agent lookup cannot decide self-cancellation.
+                   Operator/system actors deliberately do not use that lookup. *)
                 match
-                  keeper_of_canceller ~config ~agent_name:cancelling_agent_name
+                  keeper_of_canceller ~config ~actor
                 with
-                | Error detail ->
-                  Canceller_lookup_failed { agent_name = cancelling_agent_name; detail }
+                | Error (agent_name, detail) ->
+                  Canceller_lookup_failed { agent_name; detail }
                 | Ok canceller_keeper ->
                   (* A canceller that resolves to no lane is not the author,
                      who resolved to one. Comparing the raw actor string

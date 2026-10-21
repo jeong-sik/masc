@@ -70,10 +70,12 @@ val append_error_to_string : append_error -> string
     returns its results, and says so in its log. *)
 val append : keepers_dir:string -> keeper_id:string -> event -> (unit, append_error) result
 
-(** Append the events in order. The valid ones go in one locked append, which
-    is rolled back when it fails. Only the failures come back, the rejected
-    events first and then the write failure if there was one; a caller on a
-    path that must not fail logs them and goes on. *)
+(** Append the events in order. The valid ones go in one locked append, and
+    only that new suffix is rolled back when the write fails: a torn tail cut
+    off first stays cut, since restoring it would re-corrupt the file. Only
+    the failures come back, the rejected events first and then the write
+    failure if there was one; a caller on a path that must not fail logs them
+    and goes on. *)
 val append_all : keepers_dir:string -> keeper_id:string -> event list -> append_error list
 
 type read_error =

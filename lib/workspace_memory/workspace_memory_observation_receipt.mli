@@ -35,7 +35,11 @@ val restore_completion : capture:Workspace_memory_execution_capture.t ->
   Lane_addon_request_receipt.receipt -> (completion, string) result
 (** Derive only from Finished, Conflicted or an original refusal. Revalidate the
     complete original Answered judgment and before/after plan; conflicts/refusal
-    are never success. The same parent's refusal survives successor linking.
+    are never success. Conflict evidence is either a complete tagged domain state
+    or exactly [state] and an opaque string [reason] wrapping that same state.
+    Validate the full Ledger/Briefing state in either shape and retain the
+    diagnostic without interpreting it. The same parent's refusal survives
+    successor linking.
     Slot/basic usage come only from the actual Answered final. Missing cache,
     cost, provider start/duration remain absent, never inferred as zero.
     Observer wall time is not execution timing. All operations are pure and

@@ -154,7 +154,7 @@ let test_refused_write_and_recovered_intent retry_only ()=with_workspace (fun ba
       | Commit_uncertain _ | Commit_observed _ | Commit_conflicted _ | Refused _ | Successor_intended _ | Successor_observed _
       | Observer _ -> false) (Progress.events result.progress));
   settle ~save:no_save base_path store result |> accepted |> committed |> ignore)
-let test_changed_or_unreadable_sources unreadable ()=with_workspace (fun base_path store ->
+let test_changed_or_unreadable_sources ?(on_conflict=fun _ _ _ -> ()) unreadable ()=with_workspace (fun base_path store ->
   let capture,output=classification base_path ["Original selected source"] in
   let record=retain store capture output in
   if unreadable then (
@@ -165,7 +165,7 @@ let test_changed_or_unreadable_sources unreadable ()=with_workspace (fun base_pa
   let result=settle ~save:no_save base_path store record in
   if unreadable then check bool "unreadable source is not authoritative absence" true
     (match result with Error (Consumer.Unavailable _) -> true | Ok _ | Error (Consumer.Uncertain _ | Consumer.Rejected _) -> false)
-  else accepted result |> conflicted |> ignore;
+  else on_conflict base_path store (accepted result |> conflicted);
   check json "old judgment never overwrites the ledger" (Ledger.to_json Ledger.empty) (Ledger.to_json (get (Ledger.load ~base_path))))
 let test_other_domain_state_or_tampered_intent tampered ()=with_workspace (fun base_path store ->
   let capture,output=classification base_path ["Original selected source"] in
@@ -193,7 +193,7 @@ let prepare_briefing base_path ledger state =
     ~workspace:(get (Capture.observe_workspace ~base_path)) ~destination ~prompt ~batch) in
   batch,capture,`Assoc ["briefing",`String "Original partial semantic summary"]
 type briefing_change = Keep_sources | Add_source | Remove_source | Change_contract | Missing_preparation
-let test_briefing_pass modification ()=with_workspace (fun base_path store ->
+let test_briefing_pass ?(on_conflict=fun _ _ _ -> ()) modification ()=with_workspace (fun base_path store ->
   let first,answer=classification base_path ["Previously published fact"] in
   let old_ledger=match after first answer with Capture.Classification_commit ledger -> ledger
     | Capture.Briefing_commit _ -> fail "expected ledger" in
@@ -243,7 +243,7 @@ let test_briefing_pass modification ()=with_workspace (fun base_path store ->
       let fresh=get (Ledger.load ~base_path) in
       check bool "later additions still require a separate pass" true
         (Briefing.needs_refresh ~sources:(Ledger.briefing_sources fresh) ~contract complete))
-  else conflicted result |> ignore)
+  else on_conflict base_path store (conflicted result))
 module Exact = Lane_addon_exact
 let size_input=Exact.Call_final (Exact.Input_refused Exact.Input_capacity)
 let size_output=Exact.Call_final (Exact.Output_limit_reached {detail="Actual provider output limit"})
@@ -680,17 +680,53 @@ let test_typed_briefing_observer_binds_the_original_prepared_commit ()=with_work
      check json "receipt contains complete actual Briefing after state" (change capture output).after commit.change.after
    | Domain_conflict _ | Before_dispatch_refusal _ | Execution_refusal _ -> fail "original Briefing commit lost");
   prepare_observation base_path store prepared.original ~now:never_clock |> ignore)
-let test_typed_observer_rejects_incomplete_conflict_evidence ()=with_workspace (fun base_path store ->
+let check_eligibility_conflict_observation base_path store (record:Owner.retained) =
+  let evidence=match Progress.phase record.progress with
+    | Progress.Conflicted (_,evidence) -> evidence
+    | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+    | Commit_unknown _ | Finished _ | Rejected _ | Subdividing _ | Subdivided _ ->
+      fail "actual settle did not retain a terminal conflict" in
+  (match evidence with
+   | `Assoc fields -> check (list string) "actual eligibility conflict retains its diagnostic wrapper"
+       ["reason";"state"] (List.sort String.compare (List.map fst fields))
+   | _ -> fail "actual conflict has no complete evidence");
+  let prepared=prepare_observation base_path store record ~now:(fun () -> 11.) in
+  let completion=observed_completion prepared in
+  (match completion.disposition with
+   | Observation.Domain_conflict (_,actual) -> check json "actual original conflict survives terminal preparation" evidence actual
+   | Confirmed_commit _ | Before_dispatch_refusal _ | Execution_refusal _ ->
+     fail "eligibility conflict became success or refusal");
+  let reopened=prepare_observation base_path store prepared.original ~now:never_clock in
+  check json "reopened conflict reuses the complete original terminal receipt"
+    (Receipt.to_json completion.receipt) (Receipt.to_json (observed_completion reopened).receipt)
+let test_typed_observer_preserves_opaque_conflict_reason ()=with_workspace (fun base_path store ->
+  let capture,output=classification base_path ["Original opaque conflict diagnostic"] in
+  let intended=advance store (retain store capture output) (Progress.Commit_intended (change capture output)) in
+  let evidence=`Assoc ["state",`Assoc ["kind",`String "classification";
+      "state",Ledger.to_json (get (Ledger.load ~base_path))];
+    "reason",`String "A diagnostic unrelated to any control-flow keyword"] in
+  let record=advance store intended (Progress.Commit_conflicted evidence) in
+  check_eligibility_conflict_observation base_path store record)
+let test_typed_observer_rejects_incomplete_conflict_evidence ()=
+  let valid_state=`Assoc ["kind",`String "classification";"state",Ledger.to_json Ledger.empty] in
+  let wrap state reason=`Assoc ["state",state;"reason",reason] in
+  List.iter (fun malformed -> with_workspace (fun base_path store ->
   let capture,output=classification base_path ["Original conflict must be a complete domain observation"] in
   let judged=retain store capture output in
   let intended=advance store judged (Progress.Commit_intended (change capture output)) in
-  let malformed=`Assoc ["kind",`String "classification";"state",`Assoc ["other_owner",`Bool true]] in
   let conflicted=advance store intended (Progress.Commit_conflicted malformed) in
   check bool "generic conflict cannot turn malformed state into a typed domain receipt" true
     (match prepare_observation_result base_path store conflicted ~now:(fun () -> 3.) with
      | Error (Consumer.Rejected _) -> true | Ok _ | Error (Unavailable _ | Uncertain _) -> false);
   check bool "malformed conflict remains original evidence without terminal receipt" true
-    ((Progress.observer (original store capture).progress).completion=Receipt.Unobserved))
+    ((Progress.observer (original store capture).progress).completion=Receipt.Unobserved)))
+    [`Assoc ["kind",`String "classification";"state",`Assoc ["other_owner",`Bool true]];
+     `Assoc ["kind",`String "classification";"state",Ledger.to_json Ledger.empty;"unknown",`Bool true];
+     wrap (`Assoc ["kind",`String "classification";"state",`Assoc ["other_owner",`Bool true]]) (`String "opaque");
+     wrap (`Assoc ["kind",`String "briefing";"state",Briefing.to_json Briefing.empty]) (`String "opaque");
+     wrap valid_state (`Bool true);
+     `Assoc ["state",valid_state;"reason",`String "opaque";"unknown",`Bool true];
+     wrap (wrap valid_state (`String "nested")) (`String "opaque")]
 let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "classification applies once and survives journal reopen" `Quick test_classification_commit_and_reopen;
   test_case "real save with lost receipt confirms after without another write" `Quick test_lost_save_receipt_after_publication;
@@ -734,4 +770,9 @@ let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "parent refusal and child have separate original observer identities" `Quick test_typed_observer_keeps_parent_refusal_separate_from_child;
   test_case "observer conflict differs from unsent host refusal" `Quick test_typed_observer_distinguishes_conflict_and_before_dispatch_refusal;
   test_case "observer Briefing receipt binds complete original prepared state" `Quick test_typed_briefing_observer_binds_the_original_prepared_commit;
+  test_case "actual changed source conflict prepares its original terminal observation" `Quick
+    (test_changed_or_unreadable_sources ~on_conflict:check_eligibility_conflict_observation false);
+  test_case "actual changed Briefing contract prepares its original terminal observation" `Quick
+    (test_briefing_pass ~on_conflict:check_eligibility_conflict_observation Change_contract);
+  test_case "observer retains opaque eligibility conflict diagnostics" `Quick test_typed_observer_preserves_opaque_conflict_reason;
   test_case "observer rejects incomplete original conflict evidence" `Quick test_typed_observer_rejects_incomplete_conflict_evidence]]

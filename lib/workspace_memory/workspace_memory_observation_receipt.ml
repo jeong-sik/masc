@@ -50,7 +50,16 @@ let checked_commit capture (commit:Progress.commit) =
   if Yojson.Safe.equal change.before commit.change.before && Yojson.Safe.equal change.after commit.change.after
   then Ok () else Error "Curator observation commit differs from its original complete before/after plan"
 let checked_conflict capture observed =
-  let* fields = match observed with
+  let* state,wrap = match observed with
+    | `Assoc fields when List.sort String.compare (List.map fst fields)=["kind";"state"] ->
+      Ok (observed,fun state -> state)
+    | `Assoc fields when List.sort String.compare (List.map fst fields)=["reason";"state"] ->
+      (match List.assoc "reason" fields with
+       | `String reason -> Ok (List.assoc "state" fields,fun state ->
+           `Assoc ["state",state;"reason",`String reason])
+       | _ -> Error "Original Curator conflict reason must be a diagnostic string")
+    | _ -> Error "Original Curator conflict evidence requires its complete domain state" in
+  let* fields = match state with
     | `Assoc fields when List.sort String.compare (List.map fst fields)=["kind";"state"] -> Ok fields
     | _ -> Error "Original Curator conflict evidence requires its complete domain state" in
   let* expected = match Capture.work capture,List.assoc "kind" fields with
@@ -61,7 +70,7 @@ let checked_conflict capture observed =
       let* state = Workspace_memory_briefing.of_json (List.assoc "state" fields) in
       Ok (`Assoc ["kind",`String "briefing";"state",Workspace_memory_briefing.to_json state])
     | Capture.Classification _,_ | Capture.Briefing _,_ -> Error "Original Curator conflict has a different domain kind" in
-  let* expected = Lane_addon_action.canonical expected in
+  let* expected = Lane_addon_action.canonical (wrap expected) in
   if Yojson.Safe.equal observed expected then Ok ()
   else Error "Original Curator conflict evidence is not a complete canonical domain state"
 let disposition capture phase = match phase with

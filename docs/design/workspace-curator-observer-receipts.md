@@ -19,7 +19,12 @@ Answered final, full semantic validation and exactly the original expected
 before/after commit plan. Settlement and observation share this same pure
 Capture.commit_plan. A model answer in Judged or an uncertain commit is not
 success. Conflict validates the complete original domain state and retains that
-evidence with the original plan.
+evidence with the original plan. Settlement can retain either the tagged
+`{kind, state}` domain observation or exactly `{state, reason}` when the original
+sources or contract are no longer eligible. Both shapes require the same full
+Ledger/Briefing state, including its matching domain kind. The wrapper's string
+reason is retained as an opaque diagnostic; it never selects control flow.
+Unknown fields, malformed states and nested wrappers are refused.
 Before-dispatch refusal remains distinct from a strict original execution
 terminal, including unknown. A parent's same refusal survives successor linking
 and cannot become its child's result. Each child has its own original run ID.
@@ -57,10 +62,14 @@ consumers; a zero would invent latency. Basic usage stays in the original final
 while unavailable extended statistics remain absent. Production Curator still
 uses its old direct provider route and must be replaced after these dependencies.
 
-Nine new real-Store/domain scenario sources cover pending intent through actual
+The real-Store/domain scenario sources cover pending intent through actual
 commit, unchanged byte/identity on reopen, full slot/basic usage and honest absent
 timing, valid generic but false domain receipts, invented commit/incomplete
 judgment refusal, parent/child separation, conflict versus unsent refusal, and
-Briefing's original prepared-state plan. They do not exercise a run registry,
+Briefing's original prepared-state plan. Actual source-change and Briefing
+contract-change settlement also flow through terminal observation preparation
+and reopening; a separate diagnostic and malformed-evidence boundary check
+preserve the strict conflict contract. These new scenarios are source definitions
+until separately executed. They do not exercise a run registry,
 actual provider, installation On/Off, production scheduler or UI. Parser/source
 review and compiled fixture execution are separate evidence.

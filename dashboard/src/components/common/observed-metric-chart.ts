@@ -35,7 +35,7 @@ export function ObservedMetricChart({ label, series, formatValue }: {
     <figure class="m-0 min-w-0" aria-label=${label}>
       <div class="flex justify-between gap-2 text-3xs text-[var(--color-fg-secondary)] tabular-nums mb-1">
         <span>0 → ${observed > 0 ? formatValue(peak) : '미관측'}</span>
-        <span>시간축 · 현재 불러온 기록</span>
+        <span>로컬 시간축 · 현재 불러온 기록</span>
       </div>
       ${observed > 0 ? html`
         <svg viewBox=${`0 0 ${width} ${height}`} width="100%" height=${height}

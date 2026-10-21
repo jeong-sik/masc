@@ -176,6 +176,49 @@ let abandon_preserves_an_unreleased_commit () = with_download (fun root source c
   check bool "a later cleanup keeps the original failure" true (Broker.cleanup broker=first);
   check string "committed original survives unconfirmed teardown" contents (read source);
   check string "committed snapshot survives unconfirmed teardown" contents (read path))
+let cleanup_preserves_an_unreleased_claim () = with_download (fun root source contents broker ->
+  let marker=ok (Broker.publish broker source) in
+  let id=grant broker source marker in
+  let descriptor=descriptor (claim broker id) in
+  let path=ok (Broker.snapshot_path ~directory:root ~snapshot_id:descriptor.snapshot_id) in
+  (* The holder settles only after cleanup returns. A lost remote holder must
+     cause a safe refusal, not an indefinite wait or a fabricated release. *)
+  let first=Broker.cleanup broker in
+  check bool "a held claim refuses confirmed-backend cleanup" true (Result.is_error first);
+  check string "refused cleanup preserves original bytes" contents (read source);
+  check string "refused cleanup preserves snapshot bytes" contents (read path);
+  check bool "cleanup leaves the original claim held" true
+    (Result.is_error (Broker.claim broker ~id ~actor ~route ~verb));
+  check bool "repeated cleanup does not wait for the holder" true (Broker.cleanup broker=first);
+  let receipt=publish root descriptor in
+  commit broker id receipt;
+  release broker id;
+  check bool "the original claim can settle after refused cleanup" true
+    (publication_is receipt (claim broker id));
+  check bool "late settlement does not clear cleanup failure" true (Broker.cleanup broker=first);
+  check string "late settlement preserves original bytes" contents (read source);
+  check string "late settlement preserves snapshot bytes" contents (read path))
+let cleanup_preserves_an_unreleased_commit () = with_download (fun root source contents broker ->
+  let marker=ok (Broker.publish broker source) in
+  let id=grant broker source marker in
+  let descriptor=descriptor (claim broker id) in
+  let path=ok (Broker.snapshot_path ~directory:root ~snapshot_id:descriptor.snapshot_id) in
+  let receipt=publish root descriptor in
+  commit broker id receipt;
+  let first=Broker.cleanup broker in
+  check bool "a committed grant refuses confirmed-backend cleanup" true (Result.is_error first);
+  check string "committed original survives refused cleanup" contents (read source);
+  check string "committed snapshot survives refused cleanup" contents (read path);
+  check bool "cleanup leaves the committed grant held" true
+    (Result.is_error (Broker.claim broker ~id ~actor ~route ~verb));
+  check bool "repeated cleanup does not wait for committed release" true (Broker.cleanup broker=first);
+  commit broker id receipt;
+  release broker id;
+  check bool "the committed grant can settle after refused cleanup" true
+    (publication_is receipt (claim broker id));
+  check bool "committed settlement retains the original failure" true (Broker.cleanup broker=first);
+  check string "settlement keeps the committed original" contents (read source);
+  check string "settlement keeps the committed snapshot" contents (read path))
 let partial_is_preserved () = with_download (fun _root source _contents broker ->
   check bool "unobserved completed or partial files block cleanup" true (Result.is_error (Broker.cleanup broker));
   check bool "unobserved source is retained" true (Sys.file_exists source))
@@ -190,4 +233,6 @@ let () = run "browser Addon download ownership" ["transfer",[
   test_case "unconfirmed backend releases pins without deleting files" `Quick unconfirmed_backend_preserves_files;
   test_case "abandon returns before the original claim settles" `Quick abandon_preserves_an_unreleased_claim;
   test_case "abandon returns before the original commit is released" `Quick abandon_preserves_an_unreleased_commit;
+  test_case "cleanup refuses before the original claim settles" `Quick cleanup_preserves_an_unreleased_claim;
+  test_case "cleanup refuses before the original commit is released" `Quick cleanup_preserves_an_unreleased_commit;
   test_case "unknown downloads survive retirement" `Quick partial_is_preserved]]

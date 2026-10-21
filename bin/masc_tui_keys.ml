@@ -1062,8 +1062,12 @@ let for_surface = function
                  a published Skill"
       ; b Act "f" "Composition performance"
           ~help:"outside async requests, select the next Composition and load its exact-revision performance charts"
-      ; b Act "Enter" "Skill evidence" ~help:"load retained evidence for the selected exact Skill revision"
       ; b Act "Ctrl-O" "Skill graph" ~help:"outside async requests, preview the declared composition with Pele"
+      (* Enter's Skill-evidence role (outside async runs, masc_tui.ml: the
+         "\r" arm) is named on the sheet's Enter row only. The footer table
+         cannot carry Enter -- the fitter never drops it -- so advertising it
+         here squeezed the action diagnosis out of the 98-cell row and broke
+         the sheet-only contract (test_tui_keys, tools_async_bindings). *)
       ; b Navigate "[ / ]" "Keeper" ~help:"change the effective Keeper surface"
       ; b Act "c / C" "new Skill"
           ~help:"open $EDITOR on a template for a new Skill; c starts an \
@@ -2113,8 +2117,9 @@ let sheet_bindings surface =
    [for_surface] would advertise them where they do nothing. The sheet
    carries them, each sentence naming where the key answers. *)
 let tools_async_bindings =
-  [ b Act "Enter" "read request"
-      ~help:"in async runs, read the selected original request"
+  [ b Act "Enter" "read request / Skill evidence"
+      ~help:"in async runs, read the selected original request; \
+             otherwise load retained evidence for the selected Skill"
   ; b Navigate "t / T" "source Task"
       ~help:"from async request detail, read its original source Task and history"
   ; b Navigate "H" "earlier history"

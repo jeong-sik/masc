@@ -626,6 +626,7 @@ identity require their own evidence when comparing runs.
 | `R` | ask the language server where a name on the cursor line is used; needs the project's reference index, and says which command builds it when there is none |
 | `D` | jump to where a name on the cursor line is defined (one name jumps at once; several open the palette as choices) |
 | `B` | walk back through the definition jumps, newest first |
+| `y` | send the whole readable file's original bytes to the terminal clipboard via OSC 52; terminal support is unconfirmed |
 | `b` | who last touched each run of lines, in the margin; b again drops it |
 | `m` | the memos in the open file: comments on their own row reading masc(name): text, or masc(name) question: text; m again closes the list |
 | `d` | on the project tree, list every working-tree change; on an open file, show that file's diff against HEAD |
@@ -700,12 +701,14 @@ identity require their own evidence when comparing runs.
 | `Home/End` | top/bottom |
 | `p` | available / async runs / receipts / usage / all tools |
 | `J/K` | in async runs, select an original request; otherwise select a published Skill |
+| `f` | outside async requests, select the next Composition and load its exact-revision performance charts |
+| `Ctrl-O` | outside async requests, preview the declared composition with Pele |
 | `[ / ]` | change the effective Keeper surface |
 | `c / C` | open $EDITOR on a template for a new Skill; c starts an instruction Skill, C starts a composition Skill |
 | `e` | open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish |
 | `Esc` | return from original Task to request, then request to list; otherwise back to the System surface it hangs off |
 | `r` | refresh the open original Task body/history, original request detail, or Tools list |
-| `Enter` | in async runs, read the selected original request |
+| `Enter` | in async runs, read the selected original request; otherwise load retained evidence for the selected Skill |
 | `t / T` | from async request detail, read its original source Task and history |
 | `H` | from original Task detail, read earlier stored history; retains the observed prefix on failure |
 | `o / O` | in async runs, edit the original submitter, request ID and target Keeper for an exact lookup |
@@ -728,6 +731,7 @@ or completion.
 
 | Keys | What it does |
 |---|---|
+| `o` | switch between server logs and this TUI's own observations |
 | `e` | Events |
 | `j/k` | move / scroll |
 | `PgUp/PgDn` | detail page |

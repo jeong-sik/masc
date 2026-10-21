@@ -162,6 +162,10 @@ let every_cause =
       }
   ; Krf.Provider_network
       { provider = None; kind = Llm_provider.Http_client.Unknown; detail = "" }
+  ; Krf.Provider_rate_limited
+      { provider = Some "ollama_cloud"; retry_after = Some 12.5; detail = "concurrent requests" }
+  ; Krf.Provider_rate_limited
+      { provider = None; retry_after = None; detail = "no wait stated" }
   ; Krf.Context_overflow { limit = Some 128_000 }
   ; Krf.Context_overflow { limit = None }
   ; Krf.Input_capacity

@@ -89,8 +89,53 @@ let test_corrupt_evidence_is_not_an_empty_walk () =
   expect_error (rewrite (fun fields -> ("api_candidate_fault",`Assoc ["kind",`String "future_fault"])
     ::List.remove_assoc "api_candidate_fault" fields))
 
+let test_rate_limit_hint_survives_persisted_walk () =
+  List.iter (fun (error, provider, retry_after, detail) ->
+    let evidence = decode
+      { Evidence.failures = [observe 0 "limited.runtime" error]
+      ; terminal = Evidence.observe_terminal ~runtime_id:"limited.runtime" ~attempt:0 error
+      } in
+    let check_cause failure =
+      match failure.Keeper_request_failure.cause with
+      | Keeper_request_failure.Provider_rate_limited observed ->
+        check (option string) "provider identity survives" provider observed.provider;
+        check (option (float 0.)) "relative wait is retained, never inferred"
+          retry_after observed.retry_after;
+        check string "provider diagnostic survives separately" detail observed.detail
+      | _ -> fail "rate limit was flattened into a generic error" in
+    (match evidence.failures with
+     | [failure] -> check_cause failure.failure
+     | _ -> fail "rate-limited candidate disappeared");
+    match evidence.terminal with
+    | Evidence.Candidate_terminal {failure;_} -> check_cause failure
+    | Evidence.Terminal_not_observed -> fail "rate-limited terminal disappeared")
+    [ Agent_core.Error.Api (Agent_core.Retry.RateLimited
+        {message="concurrent requests";retry_after=Some 12.5}),
+      None, Some 12.5, "concurrent requests"
+    ; Agent_core.Error.Provider (Llm_provider.Error.RateLimit
+        {provider="ollama_cloud";retry_after=Some 18.;detail="provider throttle"}),
+      Some "ollama_cloud", Some 18., "provider throttle"
+    ; Agent_core.Error.Api (Agent_core.Retry.RateLimited
+        {message="wait 900 seconds is only prose";retry_after=None}),
+      None, None, "wait 900 seconds is only prose"
+    ]
+
+let test_malformed_rate_limit_hint_is_refused () =
+  let fields = ["kind",`String "provider_rate_limited";"provider",`Null;
+    "retry_after",`Float 12.5;"detail",`String "throttle"] in
+  let expect_error fields =
+    match Keeper_request_failure.of_yojson (`Assoc ["cause",`Assoc fields]) with
+    | Error _ -> ()
+    | Ok _ -> fail "malformed wait evidence was accepted" in
+  expect_error (List.remove_assoc "retry_after" fields);
+  expect_error (("retry_after",`String "12.5")::List.remove_assoc "retry_after" fields);
+  expect_error (("retry_after",`Float infinity)::List.remove_assoc "retry_after" fields);
+  expect_error (("retry_after",`Null)::fields)
+
 let () = run "runtime walk receipt evidence" ["candidate facts",[
   test_case "preflight, unclassified request refusal and quota stay distinct" `Quick test_mixed_candidate_failures;
   test_case "earlier terminal origin and repeated runtime identities survive" `Quick test_earlier_terminal_and_repeated_runtime;
   test_case "successful fallback and transformed terminal preserve separate facts" `Quick test_successful_fallback_and_unobserved_terminal;
-  test_case "malformed evidence cannot masquerade as an empty walk" `Quick test_corrupt_evidence_is_not_an_empty_walk]]
+  test_case "malformed evidence cannot masquerade as an empty walk" `Quick test_corrupt_evidence_is_not_an_empty_walk;
+  test_case "rate limit survives candidate and terminal persistence" `Quick test_rate_limit_hint_survives_persisted_walk;
+  test_case "malformed rate-limit hints are refused" `Quick test_malformed_rate_limit_hint_is_refused]]

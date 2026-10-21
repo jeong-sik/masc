@@ -1415,7 +1415,7 @@ status: reference
   `Runtime_exhausted`·`No_progress_empty`·`No_progress_thinking_only`·
   `No_progress_truncated`·`Refusal_body_not_received`·`Generation_repeated`·
   `Admission`·`Provider_reported_failure`·`Request_refused`·
-  `Provider_wire_defect`·`Context_window_exceeded`)은 `Keeper_turn_driver.ml`의
+  `Provider_wire_defect`·`Context_window_exceeded`)은 `keeper_turn_driver.ml`의
   Rotate_now 매치에서 `()`로 실패가 이 후보의 고장을 증명하지 않는다. 남기면
   자매 후보가 답하는 동안 head가 영영 뒤로 밀리므로(RFC-0458 §3.4, §6), 창
   초과(`Context_window_exceeded`)도 "작은 turn에 답 못 한 증거가 아니다"
@@ -2952,9 +2952,11 @@ status: reference
   `cancelled`·`persistence_failed`·`evidence_unavailable`·`evidence_unreadable`)이다.
   코드는 문장이 아니라 tag 이고, 그중 가장 넓은 `evidence_unavailable` 이 STATE 칸
   스무 칸을 정확히 채운다. 칸을 채우는 것은 이 값만이 아니다 — 같은 칸이 그리는 진행
-  단계 `recording(%d/%d)` 도 네 자리 수 둘이면 스무 칸이다. 세 어휘 전부와 칸 폭은
-  `test/test_tui_fusion_state_width.ml` 이 소스에서 읽어 대조하므로, 여유가 얼마인지는
-  그 테스트가 말한다. 전체 오류 문장은 고른 실행의 줄에 남는다.
+  단계 `recording(%d/%d)` 도 네 자리 수 둘이면 스무 칸이다. 칸 폭은
+  `bin/masc_tui_render_schedule.ml` 의 `fusion_state_width = 20` 이고, 셋 중 가장 긴
+  값이 이 수를 넘으면 `Table.cell` 이 말없이 줄인다. 그 폭을 소스에서 읽어 대조하던
+  `test/test_tui_fusion_state_width.ml` 은 소스 모양 검사를 걷어낸 #40987 에서 사라졌으므로,
+  지금 이 스무 칸을 자동으로 지키는 검사는 없다. 전체 오류 문장은 고른 실행의 줄에 남는다.
   → [Fusion_core.Fusion_types.judge_failure_tag](../../lib/fusion_core/fusion_types.mli),
   [Fusion_sink.delivery_failure_code](../../lib/fusion/fusion_sink.mli)
 

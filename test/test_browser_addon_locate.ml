@@ -82,6 +82,14 @@ let scenario manifest =
         check bool "read-only failure cannot claim browser input" true
           (snd (Lane_addon_tool_result.failure result)=Tool_result.Proven_pre_effect) in
       let pending,id=start () in
+      (* The locate command is now waiting on its model. That wait must not hold
+         the session lock or the active count: an idle document observation
+         still answers instead of reporting the owned browser as busy. *)
+      (match Driver.observe_document_if_idle driver ~tab_id:1 with
+       | B.Answered _ -> ()
+       | B.Refused reason -> fail ("idle observation was refused during the locate model wait: " ^ reason)
+       | B.Rejected_before_effect reason -> fail ("idle observation was rejected during the locate model wait: " ^ reason)
+       | B.Lane_absent | B.Timed_out -> fail "idle observation did not reach the owned session");
       x:=42.;check bool "original waiter accepts result" true (deliver id "menu");
       let result=Eio.Promise.await_exn pending in
       check bool "actual consumer returns success" true (result.is_error=Some false);
@@ -107,6 +115,17 @@ let scenario manifest =
       check bool "retirement withdraws locate availability" false (Browser_selection.snapshot ()).automation.locate;
       check int "all locate scenarios issued zero browser input" 0 !inputs)))))
 let ()=Mirage_crypto_rng_unix.use_default ();
-  let manifest=if Array.length Sys.argv=2 then Sys.argv.(1) else fail "expected bundled browser manifest path" in
+  (* The dune stanza passes the manifest it depends on, but the targeted-suite
+     runner executes the exe with no arguments. Resolve the bundled manifest in
+     that case instead of failing, so the suite can be run both ways. *)
+  let bundled_manifest () =
+    let candidates=["addons/browser/lane.toml";"../addons/browser/lane.toml";
+      "../../addons/browser/lane.toml"] in
+    match List.find_opt Sys.file_exists candidates with
+    | Some path -> path
+    | None ->
+      fail ("expected bundled browser manifest path; looked for "
+        ^ String.concat ", " candidates) in
+  let manifest=if Array.length Sys.argv=2 then Sys.argv.(1) else bundled_manifest () in
   run ~argv:[|Sys.argv.(0)|] "browser Add-on locate consumer" ["read-only",[
     test_case "selected model, current targets, withdrawal and retire" `Quick (fun () -> scenario manifest)]]

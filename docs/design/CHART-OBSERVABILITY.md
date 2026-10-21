@@ -10,6 +10,7 @@ supports the value. A colour or an unlabelled shape is not enough.
 | [Government Analysis Function: charts](https://analysisfunction.civilservice.gov.uk/policy-store/data-visualisation-charts/) | Start magnitude bars at zero, label axes and units, keep text horizontal, and remove decoration that competes with values. |
 | [W3C WAI: complex images](https://www.w3.org/WAI/tutorials/images/complex/) | Give charts a short description and make their essential values available as readable text or a table. |
 | [Grafana: time series](https://grafana.com/docs/grafana/latest/visualizations/panels-visualizations/visualizations/time-series/) | Place observations by their timestamps; make missing-value connections an explicit choice rather than inventing continuous observations. |
+| [W3C SVG: line caps](https://www.w3.org/TR/SVG2/painting.html#LineCaps) and [vector effects](https://www.w3.org/TR/SVG2/coords.html#VectorEffects) | Draw observation points with round-capped non-scaling strokes so responsive horizontal stretching preserves their circular shape and readable size. |
 
 These references guide presentation. MASC's producers and decoders determine
 what was actually measured; a chart must not broaden their authority.

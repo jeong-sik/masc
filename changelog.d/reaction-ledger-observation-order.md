@@ -1,0 +1,2 @@
+### Fixed
+- Keeper reaction summaries retain exact reaction evidence when recovery appends the matching stimulus later. A later observation no longer makes the already reacted occurrence appear pending; other pending occurrences and damaged rows remain visible.

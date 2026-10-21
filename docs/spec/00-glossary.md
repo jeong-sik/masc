@@ -305,7 +305,10 @@ status: reference
     다른 쪽을 놓친다. `UmpLoopPlan`(`UmpLoopTransport.swift`)이 "loop"를 넣어 부르는 것을
     `UmpRegionTransport.init(timeline:)`(`UmpRegions.swift`)은 "region"으로 부르거나, 여러
     조건을 한 문자열에 묶은 자리를 둘로 나눠 낸다. 그래서 실패 문자열을 보면 어느 계획기가
-    거절했는지도 함께 알 수 있다.
+    거절했는지도 함께 알 수 있다. 아래는 두 계획기가 갈리는 자리만 모은 것이지 두 파일의
+    거절 문자열 전체 목록이 아니다. 같은 축을 다루는 문자열이 더 있으니(`invalid captured
+    epoch phase`·`captured deadline exceeds the host clock range` 등) 목록에 없다고 없는
+    문자열로 읽지 않는다.
     - `invalid captured region arrangement` = 루프의 `invalid captured loop arrangement`
       (schemaVersion·duration·빈 `sources`·빈 `regions`·각각의 중복 `id`),
       `missing captured source identity` = 루프의 `missing captured loop source identity`.

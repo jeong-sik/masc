@@ -10,7 +10,7 @@ import { findKeeper } from '../lib/keeper-utils'
 import { resolveKeeperForDetail } from '../lib/keeper-detail-resolution'
 import { mostRecentlyActiveKeeper } from '../lib/keeper-recency'
 import { keeperDisplayStatus } from '../lib/keeper-runtime-display'
-import { clearKeeper, fetchKeeperTransitions } from '../api/keeper'
+import { clearKeeper, fetchKeeperTransitions, keeperClearOutcome } from '../api/keeper'
 import { purgeAgent } from '../api/actions'
 import { showToast } from './common/toast'
 import { requestConfirm } from './common/confirm-dialog'
@@ -293,7 +293,15 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
           setClearReason('')
           setPreserveSystemPrompt(true)
           setCheckpointRefreshToken(token => token + 1)
-          showToast(`${keeper.name} 컨텍스트를 비웠습니다`, 'success')
+          const outcome = keeperClearOutcome(res.detail)
+          switch (outcome.kind) {
+            case 'history_cleared':
+              showToast(`${keeper.name} 컨텍스트를 비웠습니다`, 'success')
+              break
+            case 'undecodable_checkpoint_removed':
+              showToast(`${keeper.name} 의 읽을 수 없는 checkpoint 를 삭제했습니다. 대화 기록은 복구되지 않습니다`, 'warning')
+              break
+          }
           await refreshAfterRuntimeAction()
         } else {
           showToast(res.error ?? '컨텍스트 비우기 실패', 'error')

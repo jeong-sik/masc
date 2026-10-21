@@ -419,6 +419,38 @@ let check_observations
   let duplicated_usage = ref 0 in
   let totals_mismatch = ref 0 in
 
+  (* A later successful attempt cannot hide an earlier false verification.
+     Compare the recorded identities, never infer the requested revision from
+     the result. Unverified negative cases may deliberately be stale. *)
+  let check_verified_revision (o : run_observation) =
+    if not (o.external_verified || o.verdict_passed) then true
+    else
+      let fail rule_id detail =
+        incr false_verified;
+        add_finding rule_id
+          (Printf.sprintf "verified observation %s lacks a matching requested revision" o.run_id)
+          false
+          (Some detail);
+        false
+      in
+      match o.requested_revision, o.target_revision with
+      | Some requested, Some target
+        when String.trim requested <> "" && String.trim target <> "" ->
+        if String.equal requested target then true
+        else fail "foreign_revision"
+            (Printf.sprintf "run=%s requested_revision=%S target_revision=%S"
+               o.run_id requested target)
+      | requested, target ->
+        incr required_join_missing;
+        fail "missing_required_join"
+          (Yojson.Safe.to_string
+             (`Assoc
+                [ "run_id", `String o.run_id
+                ; "requested_revision", (match requested with Some r -> `String r | None -> `Null)
+                ; "target_revision", (match target with Some r -> `String r | None -> `Null)
+                ]))
+  in
+
   let matrix_expected = 18 in
   let live_expected = 3 in
 
@@ -510,7 +542,9 @@ let check_observations
        let sorted_attempts = List.map fst sorted_run in
        let final_attempt, final_scenario = List.hd (List.rev sorted_run) in
        let first_attempt = List.hd sorted_attempts in
-       let run_valid = ref true in
+       let revision_checks = List.map check_verified_revision sorted_attempts in
+       let final_revision_valid = List.hd (List.rev revision_checks) in
+       let run_valid = ref (List.for_all Fun.id revision_checks) in
 
        (* Check for duplicated usage within run *)
        let per_req_attempts =
@@ -745,7 +779,7 @@ let check_observations
           )
         | Exit_nonzero ->
           if final_attempt.command_exit_code = Some 0 || final_attempt.external_verified then (
-            incr false_verified;
+            if final_revision_valid then incr false_verified;
             run_valid := false;
             add_finding (Printf.sprintf "exit_nonzero_false_verified_%d" repeat_index)
               (Printf.sprintf "matrix exit-nonzero run %d was falsely verified or exited 0" repeat_index)
@@ -756,7 +790,7 @@ let check_observations
           )
         | Stale_revision ->
           if final_attempt.external_verified then (
-            incr false_verified;
+            if final_revision_valid then incr false_verified;
             run_valid := false;
             add_finding (Printf.sprintf "stale_revision_false_verified_%d" repeat_index)
               (Printf.sprintf "matrix stale-revision run %d was falsely verified" repeat_index)
@@ -765,7 +799,7 @@ let check_observations
           )
         | Missing_artifact ->
           if final_attempt.external_verified then (
-            incr false_verified;
+            if final_revision_valid then incr false_verified;
             run_valid := false;
             add_finding (Printf.sprintf "missing_artifact_false_verified_%d" repeat_index)
               (Printf.sprintf "matrix missing-artifact run %d was falsely verified" repeat_index)
@@ -854,7 +888,9 @@ let check_observations
        let sorted_attempts = List.map fst sorted_run in
        let final_attempt, final_scenario = List.hd (List.rev sorted_run) in
        let first_attempt = List.hd sorted_attempts in
-       let run_valid = ref true in
+       let revision_checks = List.map check_verified_revision sorted_attempts in
+       let final_revision_valid = List.hd (List.rev revision_checks) in
+       let run_valid = ref (List.for_all Fun.id revision_checks) in
 
        (match final_scenario with
         | Live_success ->
@@ -867,7 +903,7 @@ let check_observations
           )
         | Live_negative ->
           if final_attempt.external_verified then (
-            incr false_verified;
+            if final_revision_valid then incr false_verified;
             run_valid := false;
             add_finding (Printf.sprintf "live_negative_false_verified_%d" repeat_index)
               "live negative run was falsely verified"
@@ -1121,9 +1157,7 @@ let run_observation_of_json (json0 : Yojson.Safe.t) : (run_observation, string) 
       json |> member "target_revision" |> to_string_option
     in
     let requested_revision =
-      match json |> member "requested_revision" |> to_string_option with
-      | Some rev -> Some rev
-      | None -> target_revision
+      json |> member "requested_revision" |> to_string_option
     in
     let artifact_references =
       match json |> member "artifact_references" |> to_option to_list with

@@ -171,6 +171,21 @@ readback으로 남긴다. 고치지 않고, 거기서 진행률을 가져오지 
 `criterion_revision`(16바이트 hex)은 그 snapshot에 기록하며 이 문서의 revision 번호 2와 다른 값이다.
 계약을 또 바꾸면 revision 3, 새 sha256, revision 2 snapshot의 보존, `not_run`부터 재측정이다.
 
+### 검증된 결과의 revision 비교
+
+`Reliable_change_g1.check_observations`는 외부 검증 성공이나 통과 판정을 주장하는
+모든 관측 행에서 `requested_revision`과 `target_revision`이 명시되어 있고,
+공백뿐인 값이 아니며, 정확히 일치하는지 검사한다. 다른 revision은
+`foreign_revision`으로 기록하고 해당 matrix/live 실행을 성공 집계에서 제외한다.
+최종 attempt뿐 아니라 이전 attempt의 잘못된 검증 주장도 남긴다.
+JSON reader는 요청 revision이 없을 때 결과 revision으로 대신 채우지 않는다.
+검증 성공을 주장하지 않는 stale-revision 음성 사례는 그대로 허용한다.
+
+이 비교는 관측 행에 적힌 두 값만 검사한다. 실제 산출물 해시, 독립 판정 원문,
+실행 중 runtime identity 및 경계 suite의 검증을 대신하지 않는다.
+특히 coding harness가 모델 이름으로 만드는 revision과 합성 request/verdict ID는
+실제 G1 연결의 증거가 아니다(#44317). 이 항목의 구현·CI 결과만으로 G1을 완료하지 않는다.
+
 ## G2 — 고정된 두 단계 변경이 중단 뒤 수습된다
 
 범위: 격리된 Git 원격에 branch를 게시하고, 그 revision의 검증 산출물을 별도 단계로 게시하는

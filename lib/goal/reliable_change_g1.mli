@@ -159,6 +159,11 @@ val check_observations :
      manifest:manifest
   -> observations:run_observation list
   -> checker_summary
+(** Every observation claiming external verification or a passing verdict
+    must name explicit, nonblank, exactly matching requested and target
+    revisions. A missing or foreign revision invalidates its run, including
+    earlier attempts and live observations. This compares recorded identities;
+    it does not authenticate the raw artifact or verdict. *)
 
 val manifest_to_json : manifest -> Yojson.Safe.t
 val manifest_of_json : Yojson.Safe.t -> (manifest, string) result

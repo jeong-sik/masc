@@ -577,13 +577,85 @@ let reduce_motion_cases =
           (Config.reduce_motion_of_doc (doc_of "[tui]\ntheme = \"dusk\"\n")))
   ]
 
+(* The input device captures open, [tui].audio_input_device. Same read shape
+   as theme: absent is "no stored pick", and the same line editor that edits
+   the theme writes this one, so the round trips are the same ones. *)
+let device_of s = Config.audio_input_device_of_doc (doc_of s)
+let check_device = Alcotest.(check (option string))
+
+let device_cases =
+  [ Alcotest.test_case "reads [tui] audio_input_device" `Quick (fun () ->
+        check_device "macbook mic" (Some "macbook mic")
+          (device_of "[tui]\naudio_input_device = \"macbook mic\"\n"))
+  ; Alcotest.test_case "no [tui] table -> None" `Quick (fun () ->
+        check_device "none" None (device_of "[turn]\nstream_idle_timeout_sec = 120\n"))
+  ; Alcotest.test_case "[tui] present but no key -> None" `Quick (fun () ->
+        check_device "none" None (device_of "[tui]\ntheme = \"nord\"\n"))
+  ; Alcotest.test_case "empty file -> None" `Quick (fun () ->
+        check_device "none" None (device_of ""))
+  ]
+
+let device_write_cases =
+  [ Alcotest.test_case "a first pick lands where the reader looks" `Quick (fun () ->
+        check_device "macbook mic" (Some "macbook mic")
+          (device_of (Config.text_with_audio_input_device unstored ~device:(Some "macbook mic"))))
+  ; Alcotest.test_case "a second pick replaces the first" `Quick (fun () ->
+        let twice =
+          Config.text_with_audio_input_device
+            (Config.text_with_audio_input_device unstored ~device:(Some "macbook mic"))
+            ~device:(Some "usb interface")
+        in
+        check_device "usb interface" (Some "usb interface") (device_of twice);
+        Alcotest.(check bool) "the earlier pick is gone" false
+          (contains twice "macbook mic"))
+  ; Alcotest.test_case "withdrawing removes the key" `Quick (fun () ->
+        check_device "none" None
+          (device_of
+             (Config.text_with_audio_input_device
+                (Config.text_with_audio_input_device unstored ~device:(Some "macbook mic"))
+                ~device:None)))
+  ; Alcotest.test_case "the rest of the file survives a write" `Quick (fun () ->
+        let text = Config.text_with_audio_input_device unstored ~device:(Some "macbook mic") in
+        Alcotest.(check bool) "the hand-written comment is still there" true
+          (contains text "operators edit this file by hand");
+        check_opt "another table still reads" (Some "local.sample")
+          (Toml.toml_string_opt (doc_of text) "runtime.default"))
+  ]
+
+let device_store_cases =
+  [ Alcotest.test_case "a stored pick is there on the next read" `Quick (fun () ->
+        with_storable_base (fun ~base_path ->
+            (match Config.set_audio_input_device ~base_path (Some "macbook mic") with
+             | Ok () -> () | Error message -> Alcotest.failf "storing the device failed: %s" message);
+            check_device "macbook mic" (Some "macbook mic")
+              (Config.load ~base_path).audio_input_device))
+  ; Alcotest.test_case "withdrawing is there on the next read too" `Quick (fun () ->
+        with_storable_base (fun ~base_path ->
+            (match Config.set_audio_input_device ~base_path (Some "macbook mic") with
+             | Ok () -> () | Error message -> Alcotest.failf "storing the device failed: %s" message);
+            (match Config.set_audio_input_device ~base_path None with
+             | Ok () -> () | Error message -> Alcotest.failf "withdrawing failed: %s" message);
+            check_device "none" None (Config.load ~base_path).audio_input_device))
+  ; Alcotest.test_case "the theme pick survives the device write" `Quick (fun () ->
+        with_storable_base (fun ~base_path ->
+            store_or_fail ~base_path (Some "gruvbox-dark");
+            (match Config.set_audio_input_device ~base_path (Some "macbook mic") with
+             | Ok () -> () | Error message -> Alcotest.failf "storing the device failed: %s" message);
+            let read = Config.load ~base_path in
+            check_device "device stored" (Some "macbook mic") read.audio_input_device;
+            check_opt "theme kept" (Some "gruvbox-dark") read.theme))
+  ]
+
 let () =
   Alcotest.run "tui_config"
     [ ("board_sort", board_sort_cases)
     ; ("opening", opening_cases)
     ; ("theme_of_doc", cases)
+    ; ("audio_input_device_of_doc", device_cases)
+    ; ("text_with_audio_input_device", device_write_cases)
+    ; ("set_audio_input_device", device_store_cases)
     ; ("table_frame_of_doc", frame_cases)
-    ; ( "lift_colours", lift_cases )
+    ; ("lift_colours", lift_cases)
     ; ("reduce_motion", reduce_motion_cases)
     ; ("hints_visible_of_doc", hints_cases)
     ; ("help_hint_shown_of_doc", help_hint_cases)

@@ -2920,11 +2920,15 @@ let launch_voice_config_load state ~mailbox =
       | Error message -> Error message
     in
     let device =
-      (* AUDIODEV wins when set, the way sox reads it; otherwise CoreAudio's
-         default, which is what an unset AUDIODEV means. *)
-      match Sys.getenv_opt "AUDIODEV" with
-      | Some device when String.trim device <> "" -> Some (String.trim device)
-      | Some _ | None ->
+      (* AUDIODEV wins when set, the way sox reads it. Then the operator's
+         stored pick from [tui].audio_input_device, so the panel names the
+         device a capture will actually open. Only with neither does the
+         CoreAudio default answer, which is what an unset AUDIODEV and no
+         stored pick mean. *)
+      match (Sys.getenv_opt "AUDIODEV", !boot_audio_input_device) with
+      | Some device, _ when String.trim device <> "" -> Some (String.trim device)
+      | Some _ | None, Some device -> Some device
+      | None, None ->
         (match Masc_tui_audio_device.default_input () with
          | Masc_tui_audio_device.Default_input name -> Some name
          (* The panel shows "unknown" for each of these; the log keeps them
@@ -10771,6 +10775,12 @@ let open_named_image state ~mailbox =
    per request. *)
 let boot_midi_soundfont : string option ref = ref None
 
+(* The input device captures open, read at boot from [tui].audio_input_device
+   (the same load as the soundfont). The wizard lists it and every capture
+   launches with it; an AUDIODEV in the operator's environment still wins, so
+   an explicit export keeps meaning what sox reads it to mean. *)
+let boot_audio_input_device : string option ref = ref None
+
 (* /listen: play the newest playable attachment in this conversation — the
    same newest-wins rule Ctrl-O uses for images, extended to audio and MIDI.
    Bytes come from the block itself, our own media store, or a local file;
@@ -16930,6 +16940,10 @@ let launch_voice_capture ?(calibrate = false) state ~mailbox ~keeper =
   let capture noise_floor =
     match Masc.Voice_bridge.record_and_transcribe
         ~agent_id:keeper ?noise_floor
+        (* The operator's stored pick travels to the recorder, so a capture
+           from the panel opens the device the config names, not whatever the
+           OS currently calls the default input. *)
+        ?audio_device:!boot_audio_input_device
         ~on_level:(fun level -> enqueue_async mailbox (Voice_level { keeper; level }))
         ~should_stop:(fun () -> state.voice_stop_requested) () with
     | Error error -> Voice_failed { keeper; error }
@@ -22058,6 +22072,7 @@ let apply_startup_settings state (tui_settings : Masc_tui_config.t) =
      Theme_choice.apply returns false for a name no scheme carries, and the
      [when] guard then leaves theme_choice unset. *)
   boot_midi_soundfont := tui_settings.midi_soundfont;
+  boot_audio_input_device := tui_settings.audio_input_device;
   (match tui_settings.last_chat_keeper with
    | Ok None -> ()
    | Ok (Some keeper) -> state.home_last_chat <- Recorded_chat keeper

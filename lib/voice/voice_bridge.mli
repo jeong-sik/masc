@@ -286,7 +286,7 @@ val amplitude_of_db : float -> float
 
 (** {1 Microphone record + transcribe} *)
 
-val recorder_refusal_message : Process_eio.spawn_refusal -> string
+val recorder_refusal_message : ?device:string -> Process_eio.spawn_refusal -> string
 (** What {!record_and_transcribe} answers when its recorder never started.
     A missing executable is named with the command that installs it -- a fresh
     mac has no sox, which carries [rec] -- and every other refusal keeps the
@@ -410,11 +410,18 @@ val record_and_transcribe :
   ?timeout_sec:float ->
   ?language_code:string ->
   ?noise_floor:float ->
+  ?audio_device:string ->
   ?on_level:(capture_level -> unit) ->
   ?should_stop:(unit -> stop_request option) ->
   unit ->
   (Yojson.Safe.t, string) result
 (** Record from the microphone (with beep tones) and transcribe via STT.
+
+    [audio_device] is passed to the recorder as AUDIODEV, the way sox reads a
+    device when its [rec] alias is used. [None] records whatever the
+    operating system calls the default input, exactly as before this option
+    existed. A device the system no longer has fails the capture, and that
+    failure carries sox's own sentence plus the device it was asked for.
 
     Where the recording ends is decided here rather than by sox: the level is
     re-read ten times a second while the file is being written, speech starts

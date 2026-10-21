@@ -2016,7 +2016,28 @@ let capture_outcome_of_json json =
    run; every other refusal keeps the runner's own sentence, because guessing a
    cause for a permission or cwd failure would send the operator to install
    something they already have. *)
-let recorder_refusal_message (refusal : Process_eio.spawn_refusal) =
+(* What a recorder that ran and failed says. The exit code alone is the number
+   this path used to answer with; sox names its cause on stderr, so when it
+   said something the failure says that. The code stays when the recorder left
+   no reason behind, so the message never invents one. *)
+let rec_exit_message ?device ~code ~stdout ~stderr () =
+  let device_note =
+    match device with
+    | Some device -> Printf.sprintf " (the device picked: %s)" device
+    | None -> ""
+  in
+  let blank text = String.trim text = "" in
+  match (blank stderr, blank stdout) with
+  | false, _ -> Printf.sprintf "rec exit %d: %s%s" code (String.trim stderr) device_note
+  | true, false ->
+    Printf.sprintf "rec exit %d: %s%s" code (String.trim stdout) device_note
+  | true, true -> Printf.sprintf "rec exit %d%s" code device_note
+;;
+(* One place says why a recorder is not starting: a missing program is named
+   with the install that carries it, and a device the operator picked is named
+   when there was one -- an operator whose pick no longer exists should be
+   told that and not that the recorder itself is broken. *)
+let recorder_refusal_message ?device (refusal : Process_eio.spawn_refusal) =
   match refusal with
   | Process_eio.Executable_not_found program ->
     Printf.sprintf
@@ -2025,12 +2046,40 @@ let recorder_refusal_message (refusal : Process_eio.spawn_refusal) =
       program
   (* The same sentence every other voice command gives for a refusal that is
      not a missing program -- one wording for "could not start", kept where the
-     transport keeps it. *)
+     transport keeps it. A device the operator picked is named when there was
+     one: an operator who no longer has the device they picked should be told
+     that and not that the recorder itself is broken. *)
   | (Process_eio.Empty_argv
     | Process_eio.Spawn_failed _
     | Process_eio.Child_setup_failed _
-    | Process_eio.Cwd_unavailable _) as refusal ->
-    Voice_bridge_transport.command_refusal_reason ~command:"the recorder" refusal
+    | Process_eio.Cwd_unavailable _ as refusal) ->
+    Voice_bridge_transport.command_refusal_reason
+      ~command:
+        (match device with
+         | Some device -> Printf.sprintf "recorder for %S" device
+         | None -> "the recorder")
+      refusal
+;;
+
+(* The recorder's argv. Pinned rather than left to sox, which chooses 32-bit
+   when it is not told. The reader that measures this file decodes 16-bit, and
+   a mismatch is not an error either side reports: it reads as noise. Measured
+   2026-09-04, a 32-bit capture read 0.41 where sox said 0.011. *)
+let rec_argv ~audio_file =
+  [ "rec"
+  ; "-q"
+  ; "-t"
+  ; "wav"
+  ; "-b"
+  ; "16"
+  ; "-e"
+  ; "signed-integer"
+  ; audio_file
+  ; "rate"
+  ; string_of_int Voice_pcm.sample_rate
+  ; "channels"
+  ; "1"
+  ]
 ;;
 
 let record_and_transcribe
@@ -2038,6 +2087,7 @@ let record_and_transcribe
       ?(timeout_sec = default_capture_timeout_seconds)
       ?language_code
       ?noise_floor
+      ?audio_device
       ?(on_level = fun (_ : capture_level) -> ())
       ?(should_stop = fun () -> None)
       ()
@@ -2052,21 +2102,19 @@ let record_and_transcribe
      The reader that measures this file decodes 16-bit, and a mismatch is not
      an error either side reports: it reads as noise. Measured 2026-09-04, a
      32-bit capture read 0.41 where sox said 0.011. *)
-  let rec_argv =
-    [ "rec"
-    ; "-q"
-    ; "-t"
-    ; "wav"
-    ; "-b"
-    ; "16"
-    ; "-e"
-    ; "signed-integer"
-    ; audio_file
-    ; "rate"
-    ; string_of_int Voice_pcm.sample_rate
-    ; "channels"
-    ; "1"
-    ]
+  let rec_argv = rec_argv ~audio_file in
+  (* The device the operator picked travels as AUDIODEV rather than as an
+     argument, because rec is sox's alias for [sox -d] and AUDIODEV is its
+     documented answer to "which device when -d is absent". Passing the child
+     only the current environment plus this one assignment keeps every other
+     knob the parent carries intact. *)
+  let recorder_env =
+    match audio_device with
+    | None -> None
+    | Some device ->
+      Some
+        (Array.append (Unix.environment ())
+           [| Printf.sprintf "AUDIODEV=%s" device |])
   in
   let cleanup () =
     try Sys.remove audio_file with
@@ -2105,19 +2153,24 @@ let record_and_transcribe
                 the cancel grace that keeps the WAV tail is unchanged. *)
              match
                Process_eio.run_argv_with_status_split_or_refusal
+                 ?env:recorder_env
                  ~timeout_sec:(timeout_sec +. recorder_arm_grace_seconds)
                  rec_argv
              with
              | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
              | exception exn ->
                Error (Printf.sprintf "rec exception: %s" (Printexc.to_string exn))
-             | Error refusal -> Error (recorder_refusal_message refusal)
+             | Error refusal ->
+               Error (recorder_refusal_message ?device:audio_device refusal)
              (* The recorder has no end of its own, so reaching one means it
                 stopped on its own arm without the watcher having decided
                 anything. No floor was settled. *)
              | Ok (Unix.WEXITED 0, _, _) -> Ok (Ended_without_speech None)
-             | Ok (Unix.WEXITED code, _, _) -> Error (Printf.sprintf "rec exit %d" code)
-             | Ok ((Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _) -> Error "rec process failed")
+             | Ok (Unix.WEXITED code, stdout, stderr) ->
+               Error
+                 (rec_exit_message ?device:audio_device ~code ~stdout ~stderr ())
+             | Ok ((Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _) ->
+               Error "rec process failed")
           (fun () ->
              Ok
                (watch_capture_level

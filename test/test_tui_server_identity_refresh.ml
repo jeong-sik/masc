@@ -2551,8 +2551,37 @@ let test_answer_followup_retains_current_source_observations () =
           at_latest=Some {ata_outcome=Tool_result.Recorded_succeeded;_};_}) -> true
       | Some (Ask_tools_observed _ | Ask_tools_unavailable) | None -> false)
     && (match retained.fv_reactions.fo_value with
-      | Some (Decode.Ask_reactions_observed {ar_turn_started_at=Some 201.;_}) -> true
+      | Some (Decode.Ask_reactions_observed {ar_turn_started_at=Some 201.;ar_evidence_current=false;_}) -> true
       | Some (Ask_reactions_observed _ | Ask_reactions_unavailable) | None -> false));
+  let empty_complete = Decode.Ask_reactions_observed {ar_turn_started_at=None;ar_turn_finished_at=None;
+      ar_queue_settled_at=None;ar_queue_cancelled_at=None;ar_evidence_complete=true;ar_evidence_current=true} in
+  round working tools empty_complete;
+  Alcotest.(check bool) "a complete empty read cannot recertify a retained original turn" true
+    (match (view ()).fv_reactions.fo_value with
+     | Some (Decode.Ask_reactions_observed {ar_turn_started_at=Some 201.;
+         ar_evidence_complete=true;ar_evidence_current=false;_}) -> true
+     | Some (Ask_reactions_observed _ | Ask_reactions_unavailable) | None -> false);
+  let request, owner = begin_read () in
+  admit request owner (Decode.Ask_followup_started original);
+  source request owner (Decode.Ask_followup_task working);
+  let cancelled = Decode.Ask_reactions_observed {ar_turn_started_at=None;ar_turn_finished_at=None;
+      ar_queue_settled_at=None;ar_queue_cancelled_at=Some 204.;ar_evidence_complete=true;ar_evidence_current=true} in
+  source request owner (Decode.Ask_followup_reactions cancelled);
+  ignore (finish_ask_followup_read state request owner (Error "connection interrupted after reaction source"));
+  let mixed = view () in
+  Alcotest.(check bool) "partial transport retains a fresh cancellation beside unconfirmed old turn evidence" true
+    (mixed.fv_reactions.fo_state=Projection.Followup_received
+      && mixed.fv_tools.fo_state=Projection.Followup_unconfirmed
+      && mixed.fv_task.fo_value=Some working
+      && (match mixed.fv_reactions.fo_value with
+       | Some (Decode.Ask_reactions_observed {ar_turn_started_at=Some 201.;
+           ar_queue_cancelled_at=Some 204.;ar_evidence_current=false;_}) -> true
+       | Some (Ask_reactions_observed _ | Ask_reactions_unavailable) | None -> false));
+  let restored = Decode.Ask_reactions_observed {ar_turn_started_at=Some 201.;ar_turn_finished_at=None;
+      ar_queue_settled_at=None;ar_queue_cancelled_at=Some 204.;ar_evidence_complete=true;ar_evidence_current=true} in
+  round working tools restored;
+  Alcotest.(check bool) "fresh original evidence can confirm every retained clock again" true
+    ((view ()).fv_reactions.fo_value=Some restored && Option.is_none state.ask_followup_error);
   List.iter (fun identity ->
     let request, owner = begin_read () in
     Alcotest.(check bool) "changed canonical answer is refused across refreshes" true

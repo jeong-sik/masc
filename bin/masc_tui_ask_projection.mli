@@ -64,7 +64,10 @@ val finish_followup : followup -> (unit, string) result -> followup * (unit, str
 (** One strict stream per read. Original answer and linked Task identities cannot
     change across refreshes. A failed/incomplete transport retains admitted
     sources; only unfinished sources become unconfirmed. Beginning a new read
-    retains prior facts as earlier evidence until that source arrives again. *)
+    retains prior facts as earlier evidence. A received reaction source may
+    still need prior positive clocks: its merged observation is current only
+    when the latest source confirms every retained clock. Source receipt and
+    complete transport do not recertify earlier facts. *)
 val followup_to_json : followup -> Yojson.Safe.t
 (** Observation states, canonical identities and execution facts, excluding
     question/answer bodies, Task descriptions and error details. *)

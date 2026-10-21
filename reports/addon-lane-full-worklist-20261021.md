@@ -93,7 +93,7 @@ Browser Stagehand는 기존 Addon 모델 경로를 B01·D01/D06·F에서 재사�
 
 | ID | 대상과 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | Browser Stack #44168 top d35d2559에 candle-appraiser package·기존 Exact grant·host adapter 적용 소스 존재(open/unmerged). 실제 provider 판단·Off obligation/재연결·중복 없는 정산·두 UI 검증 필요; 중복 wrapper를 만들지 않음 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
+| E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | Browser d35d2559의 기존 package/host 적용은 open. 기존 Python worker/MCP 13건 PASS, source/hash·원본 log 공개. 모델은 scripted이며 실제 host Off obligation→재연결→중복 없는 정산·provider·두 UI는 미검증 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
 | E02 | Workspace Curator의 모델 실행·작업 수명 추출 | 설계 필요 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
 | E03 | Librarian 실행의 Addon 경계 검토·추출 | 조사·설계 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
 | E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | 조사·설계, Required | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |
@@ -243,3 +243,9 @@ PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값
 - e6 native run 39620100070은 결과 미확인이 아니라 컴파일 FAIL이다. Keeper record 추론 오류 두 건은 이후 병합된 #44864가 수리했다. 기존 수리를 재사용하며, 수리 소스가 있다는 사실을 성공 바이너리로 바꾸어 세지 않는다.
 - 현재 main `4d25f9e175120740de2a0c254693c4bd73fbd534`의 addon-lifecycle [39623698078](https://github.com/jeong-sik/masc/actions/runs/39623698078)을 한 번 요청했다. 목적은 G06 수리와 기존 Keeper 수리가 함께 있는 matching server/TUI 확보다. 두 기존 suite 범위이며, 실행 결과·artifact 해시·실제 global Slice 성공과 화면은 아직 미확인이다. CI를 watch하거나 반복 조회하지 않는다.
 - Browser #44168(top #44702, d35d2559, 67층)과 repaired-native 증거 #44851은 이번 REST 조회에서도 open이다. 현재 main의 native 후보가 unmerged Browser/Candle Addon 경로나 전체 54개를 실행한다고 주장하지 않는다. 54개 ID·작업·완료 기준은 유지한다.
+
+### E01 worker 원본 실행 영수증 공개
+
+- [Candle worker 13건의 원본 로그·source receipt](../docs/evidence/2026-10-22-candle-worker/README.md)를 보존했다. 고정 d35d2559 source의 기존 Python suite를 실제 MCP subprocess와 durable state로 실행한 결과다. 이번 문서 후속에서 재실행하지 않았다.
+- incarnation 값 변경과 worker process 재시작은 실제 host-managed Addon Off/On과 다르다. 응답은 scripted이며 일부 persistence/nesting 검사는 direct import와 fault injection을 쓴다. OCaml host·실제 provider·원장 정산·실제 두 UI·운영 설치 성공을 뜻하지 않는다.
+- E01은 기존 package와 host adapter를 유지하며 host 소비자와 원래 obligation/정산을 연결하는 최소 실행 범위를 검토한다. worker-only 성공으로 E01을 완료 표시하거나 E02로 순서를 건너뛰지 않는다.

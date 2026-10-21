@@ -2318,6 +2318,26 @@ status: reference
   [Lane_addon_config](../../lib/lane_addon/lane_addon_config.mli) ·
   [Declaration application observations](lane-application-observation.md)
 
+**Installation owner (설치 소유자)**
+: Lane Add-on 의 영속 worker 상태가 매인 논리 설치 주체(`Lane_addon_worker_state.owner`).
+  일회성 worker incarnation 과 독립이며, 호스트가 `installation_id`·package id 로 만든다
+  (`create_owner`). volume 과 container 의 이름이 이 소유자에서 나오고, 그 이름의 identity
+  text 가 `masc.lane.state.owner` label 이다(`identity`). worker 를 지우거나 다시 띄워도
+  상태의 주인은 바뀌지 않는다 — 이 파일의 어떤 연산도 상태를 지우지 않는다.
+  - **같은 TOML 경로에 다른 소유자**: 선언의 `source_path` 가 같아도 `installation_id` 가
+    다르면 다른 소유자다. TUI Add-on 화면은 선택한 설치의 worker
+    (`connection_workers.installation_workers`) 와 같은 경로에 있는 다른 설치 ID
+    (`connection_workers.other_path_owners`) 를 "separate owners, not the selected
+    installation" 이라는 제목으로 나눠 그린다. `installation_id` 가 없는 수동 attach 는
+    원래 instance·incarnation 에만 맞는다.
+  - **읽기 전용 관계**: 이 나눔은 조치 권한을 주지 않고, 시간 순서를 추론하지 않으며,
+    제목·run·package 로 join 하지 않는다(`Masc_tui_lane_addons.connection_workers`).
+    worker 하나를 문제로 지워도 같은 설치 ID 의 다른 incarnation 이 남을 수 있다.
+  - **다른 owner 들**: Board 글의 작성자, Task 의 `Assignee`, 저장소 파일의 소유자는 각각
+    다른 층의 말이고 그 표제어들을 따른다. 이 표제어는 Lane Add-on 설치 하나의 주인만 가리킨다.
+  → [Lane_addon_worker_state](../../lib/lane_addon/lane_addon_worker_state.mli) ·
+  [Masc_tui_lane_addons](../../bin/masc_tui_lane_addons.mli)
+
 **Operator quiz (운영자 퀴즈)**
 : 이 워크스페이스의 기록(Board 글·댓글, `repository` 권한의 파일)으로 운영자에게 선택형·서술형 문제를
   내는 Lane Add-on 패키지(`operator-quiz`). Schedule 이 보내는 `compose` action 이 세션을 열고,

@@ -149,5 +149,7 @@ type keeper_toml_discovery =
       }
 
 val keeper_toml_discovery_name : keeper_toml_discovery -> string
+val keeper_toml_paths : string -> string list
+val discover_keeper_toml_path : string -> keeper_toml_discovery
 val discover_keepers_toml_with_paths : string -> (string * keeper_toml_discovery) list
 val discover_keepers_toml : string -> keeper_toml_discovery list

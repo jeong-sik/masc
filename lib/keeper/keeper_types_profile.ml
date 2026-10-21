@@ -305,20 +305,6 @@ let index_keeper_profile_declarations declarations =
   index [] claims
 ;;
 
-let read_keeper_profile_snapshot ~base_path =
-  let declarations =
-    Keeper_types_profile_toml.discover_keepers_toml_with_paths
-      (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
-  in
-  { base_path
-  ; configured_names =
-      declarations
-      |> List.map (fun (_, discovery) -> keeper_toml_discovery_name discovery)
-      |> List.sort_uniq String.compare
-  ; profiles_by_name = index_keeper_profile_declarations declarations
-  }
-;;
-
 let snapshot_configured_keeper_names snapshot = snapshot.configured_names
 let snapshot_profile_defaults snapshot name =
   match List.assoc_opt name snapshot.profiles_by_name with
@@ -598,6 +584,54 @@ let file_fingerprint path =
 let dependency_fingerprint paths =
   paths |> List.map file_fingerprint |> String.concat "|"
 
+(* Profile snapshot holder — one capture per (base path, keepers dir), keyed by
+   the same file fingerprint as the profile defaults cache. The fingerprint
+   covers every listed [*.toml] path, so a file that appears or disappears
+   changes it, and it is taken before the files are parsed, so an edit that
+   lands during a parse leaves a capture the next listing no longer matches.
+   Ok and Error declarations are held alike: the snapshot is a function of the
+   listed files' bytes, and a held error is the error a re-parse would give. *)
+type profile_snapshot_entry =
+  { snapshot_fingerprint : string
+  ; snapshot : keeper_profile_snapshot
+  }
+
+let profile_snapshot_cache : (string * string, profile_snapshot_entry) Hashtbl.t =
+  Hashtbl.create 4
+let profile_snapshot_mu = Stdlib.Mutex.create ()
+
+let read_keeper_profile_snapshot ~base_path =
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let key = (base_path, keepers_dir) in
+  let toml_paths = Keeper_types_profile_toml.keeper_toml_paths keepers_dir in
+  let snapshot_fingerprint = dependency_fingerprint toml_paths in
+  let cached =
+    Stdlib.Mutex.protect profile_snapshot_mu (fun () ->
+      Hashtbl.find_opt profile_snapshot_cache key)
+  in
+  match cached with
+  | Some entry when String.equal entry.snapshot_fingerprint snapshot_fingerprint ->
+    entry.snapshot
+  | Some _ | None ->
+    let declarations =
+      List.map
+        (fun path -> path, Keeper_types_profile_toml.discover_keeper_toml_path path)
+        toml_paths
+    in
+    let snapshot =
+      { base_path
+      ; configured_names =
+          declarations
+          |> List.map (fun (_, discovery) -> keeper_toml_discovery_name discovery)
+          |> List.sort_uniq String.compare
+      ; profiles_by_name = index_keeper_profile_declarations declarations
+      }
+    in
+    Stdlib.Mutex.protect profile_snapshot_mu (fun () ->
+      Hashtbl.replace profile_snapshot_cache key { snapshot_fingerprint; snapshot });
+    snapshot
+;;
+
 let profile_dependency_paths ~name:_ ~primary_toml_path
     (result : (keeper_profile_defaults, keeper_toml_load_error) result) =
   let paths =
@@ -645,7 +679,11 @@ let invalidate_keeper_profile_defaults_cache name =
   let key = profile_defaults_cache_key name in
   Stdlib.Mutex.lock profile_defaults_mu;
   Hashtbl.remove profile_defaults_cache key;
-  Stdlib.Mutex.unlock profile_defaults_mu
+  Stdlib.Mutex.unlock profile_defaults_mu;
+  (* A snapshot holds every declaration of its keepers dir, so an in-process
+     write of one declaration drops every held snapshot. *)
+  Stdlib.Mutex.protect profile_snapshot_mu (fun () ->
+    Hashtbl.reset profile_snapshot_cache)
 
 let keeper_profile_defaults_materializable_for_name ?base_path name =
   try

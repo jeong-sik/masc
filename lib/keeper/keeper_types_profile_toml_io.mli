@@ -146,5 +146,15 @@ type keeper_toml_discovery =
       }
 
 val keeper_toml_discovery_name : keeper_toml_discovery -> string
+
+(** The [*.toml] paths directly under a keepers directory, sorted by file
+    name. A missing directory, or a path that is not a directory, lists
+    nothing and warns once per process. *)
+val keeper_toml_paths : string -> string list
+
+(** Parse one listed declaration. A file that fails to read, parse, or
+    validate is [Invalid] under its file stem. *)
+val discover_keeper_toml_path : string -> keeper_toml_discovery
+
 val discover_keepers_toml_with_paths : string -> (string * keeper_toml_discovery) list
 val discover_keepers_toml : string -> keeper_toml_discovery list

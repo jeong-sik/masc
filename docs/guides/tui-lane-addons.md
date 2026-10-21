@@ -208,6 +208,19 @@ draft, save receipt and save errors intact and does not occupy the save request.
 A different reconciled source or worker-input revision is shown as unconfirmed;
 missing workers alone do not confirm Off.
 
+In a worker's **3 Installation** section, its pinned instance and incarnation
+remain visible alongside the declaration's authoritative application state.
+The worker records list groups the same installation ID across revisions and
+path renames, displaying each original path, identity, presence and completed
+observation counts. This is not a complete list of previous owners of a reused
+file path. A replacement does not inherit the selected worker's action menu.
+Retained or unknown-presence workers cannot receive a fresh Observe or action;
+original action receipt reads remain available.
+
+The [reconnection evidence](../evidence/2026-10-21-addon-reconnect/README.md)
+separates actual Dashboard/worker execution from the TUI candidate validation
+that remains pending.
+
 ## Reading multiline results
 
 Results, Records, raw details and receipts preserve written line breaks and JSON

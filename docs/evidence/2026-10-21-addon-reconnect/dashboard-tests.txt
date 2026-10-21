@@ -1,0 +1,13 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-addon-connection-observation/dashboard
+
+
+ Test Files  8 passed (8)
+      Tests  145 passed (145)
+   Start at  14:35:34
+   Duration  29.03s (import 36%, tests 28%, transform 13%, environment 12%, setup 10%)
+
+     Import  199 modules were evaluated 1049 times · 9.78s total, 36% of tracked time
+             ~7.93s faster with isolate: false — shared modules are evaluated once per worker instead of once per file
+             learn more: https://vitest.dev/guide/improving-performance#test-isolation
+

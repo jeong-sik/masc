@@ -1,7 +1,7 @@
 module Html = Markup_document
 
 type image_source =
-  | Embedded_base64 of Masc_tui_image_payload.t
+  | Embedded_data of Masc_tui_image_payload.t
   | Embedded_svg of string
   | Unavailable of string
 type image = { label : string; source : image_source }
@@ -77,7 +77,7 @@ let image attributes =
     | Some raw ->
       let uri = String.trim raw in
       (match Masc_tui_image_payload.of_data_uri uri with
-       | Ok payload -> Embedded_base64 payload
+       | Ok payload -> Embedded_data payload
        | Error detail -> Unavailable detail) in
   {label;source}
 

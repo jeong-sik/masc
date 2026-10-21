@@ -151,10 +151,13 @@ exactly the same terminal projection as drawing. HTML whitespace is interpreted
 only in document mode; copied bytes remain the original response.
 
 HTML image declarations retain their original content-part number, including
-multiple images inside one part and nested/table images. Base64 image data URIs
+multiple images inside one part and nested/table images. Image data URIs
 are passed unchanged to the existing off-thread image decoder/converter only
-when selected for preview. External URLs, file paths, non-image and non-base64
-data remain explicitly unavailable; selecting them does not authorize a fetch.
+when selected for preview. Their bodies are percent-decoded once before optional
+base64 decoding; literal plus signs remain plus signs, and URI fragments are not
+part of the decoded bytes. The complete original URI stays retained. External
+URLs, file paths and non-image data remain explicitly unavailable; selecting
+them does not authorize a fetch.
 Inline SVG roots are serialized from the parsed HTML tree with element and
 attribute namespaces preserved, then offered to the existing offline SVG
 renderer on selection. This serialization is separate from the unchanged
@@ -165,9 +168,7 @@ Base64 SVG resource parts and SVG image data URIs retain their declared
 format through off-thread decoding and use this same offline renderer.
 Retained attachments preserve the original image format separately from the
 encoded wire blob's MIME, and verify wire size and digest before rendering.
-Other declared image formats keep
-the existing image converter path. Percent-encoded SVG data URIs are not
-supported by the base64 image path.
+Other declared image formats keep the existing image converter path.
 
 Selected Resources images and generated/retained chat images use pixel graphics
 when the terminal supports them. A truecolour or 256-colour terminal without

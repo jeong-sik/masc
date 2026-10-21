@@ -16,11 +16,11 @@ let attribute namespace name = function
 
 let svg_source (image : Html.image) = match image.source with
   | Embedded_svg source -> source
-  | Embedded_base64 _ | Unavailable _ -> fail "expected inline SVG"
+  | Embedded_data _ | Unavailable _ -> fail "expected inline SVG"
 
 let unavailable (image : Html.image) = match image.source with
   | Unavailable _ -> ()
-  | Embedded_base64 _ | Embedded_svg _ -> fail "expected unavailable image"
+  | Embedded_data _ | Embedded_svg _ -> fail "expected unavailable image"
 
 let test_detached_namespaces () =
   let source = "<root xmlns='urn:outer' xmlns:x='http://www.w3.org/1999/xlink'>"
